@@ -114,7 +114,7 @@ private:
 			m_is_inline = isInline;
 		}
 
-		StringRef getKey() {
+		StringRef getKey() const {
 			if (m_is_inline) {
 				return StringRef(&key.inlineData[0], m_inline_length);
 			} else {
@@ -122,9 +122,9 @@ private:
 			}
 		}
 
-		inline int getKeySize() { return m_is_inline ? m_inline_length : key.data.size(); }
+		inline int getKeySize() const { return m_is_inline ? m_inline_length : key.data.size(); }
 
-		inline int16_t getFirstByte() {
+		inline int16_t getFirstByte() const {
 			if (m_is_inline) {
 				return m_inline_length == 0 ? LEAF_BYTE : key.inlineData[0];
 			} else {
@@ -132,7 +132,7 @@ private:
 			}
 		}
 
-		inline size_type getArenaSize() { return m_is_inline ? 0 : arena.getSize(); }
+		inline size_type getArenaSize() const { return m_is_inline ? 0 : arena.getSize(); }
 
 		uint32_t m_is_leaf : 1;
 		uint32_t m_is_fixed : 1; // if true, then we have fixed number of children (3)

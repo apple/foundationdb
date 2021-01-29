@@ -54,7 +54,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 		blockWritesFor = getOption(options, LiteralStringRef("blockWritesFor"),
 								   double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX)/double(1e6));
 	}
-	std::string description() const { return "LocalRatekeeperWorkload"; }
+	std::string description() const override { return "LocalRatekeeperWorkload"; }
 
 	ACTOR static Future<Void> testStorage(LocalRatekeeperWorkload* self, Database cx, StorageServerInterface ssi) {
 		state Transaction tr(cx);

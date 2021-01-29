@@ -43,6 +43,7 @@
 #include "flow/AsioReactor.h"
 #include "flow/Profiler.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/SendBufferIterator.h"
 #include "flow/TLSConfig.actor.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Util.h"
@@ -103,7 +104,8 @@ class Net2;
 class Peer;
 class Connection;
 
-Net2 *g_net2 = 0;
+// Outlives main
+Net2 *g_net2 = nullptr;
 
 class Task {
 public:
@@ -118,66 +120,77 @@ struct OrderedTask {
 	bool operator < (OrderedTask const& rhs) const { return priority < rhs.priority; }
 };
 
+template <class T>
+class ReadyQueue : public std::priority_queue<T, std::vector<T>>
+{
+public:
+	typedef typename std::priority_queue<T, std::vector<T>>::size_type size_type;
+	ReadyQueue(size_type capacity = 0) { reserve(capacity); };
+	void reserve(size_type capacity) { this->c.reserve(capacity); } 
+};
+
+
 thread_local INetwork* thread_network = 0;
 
-class Net2 sealed : public INetwork, public INetworkConnections {
+class Net2 final : public INetwork, public INetworkConnections {
 
 public:
 	Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics);
-	void initTLS(ETLSInitState targetState);
-	void run();
-	void initMetrics();
+	void initTLS(ETLSInitState targetState) override;
+	void run() override;
+	void initMetrics() override;
 
 	// INetworkConnections interface
-	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host );
-	virtual Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr);
-	virtual Future<Reference<IUDPSocket>> createUDPSocket(bool isV6);
-	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service);
-	virtual Reference<IListener> listen( NetworkAddress localAddr );
+	Future<Reference<IConnection>> connect( NetworkAddress toAddr, const std::string &host ) override;
+	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, const std::string &host) override;
+	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
+	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6) override;
+	Future<std::vector<NetworkAddress>> resolveTCPEndpoint( const std::string &host, const std::string &service) override;
+	Reference<IListener> listen( NetworkAddress localAddr ) override;
 
 	// INetwork interface
-	virtual double now() const override { return currentTime; };
-	virtual double timer() override { return ::timer(); };
+	double now() const override { return currentTime; };
+	double timer() override { return ::timer(); };
 	double timer_monotonic() override { return ::timer_monotonic(); };
-	virtual Future<Void> delay(double seconds, TaskPriority taskId) override;
-	virtual Future<class Void> yield(TaskPriority taskID) override;
-	virtual bool check_yield(TaskPriority taskId) override;
-	virtual TaskPriority getCurrentTask() const override { return currentTaskID; }
-	virtual void setCurrentTask(TaskPriority taskID ) { currentTaskID = taskID; priorityMetric = (int64_t)taskID; }
-	virtual void onMainThread( Promise<Void>&& signal, TaskPriority taskID );
+	Future<Void> delay(double seconds, TaskPriority taskId) override;
+	Future<class Void> yield(TaskPriority taskID) override;
+	bool check_yield(TaskPriority taskId) override;
+	TaskPriority getCurrentTask() const override { return currentTaskID; }
+	void setCurrentTask(TaskPriority taskID ) override { currentTaskID = taskID; priorityMetric = (int64_t)taskID; }
+	void onMainThread( Promise<Void>&& signal, TaskPriority taskID ) override;
 	bool isOnMainThread() const override {
 		return thread_network == this;
 	}
-	virtual void stop() {
+	void stop() override {
 		if ( thread_network == this )
 			stopImmediately();
 		else
 			onMainThreadVoid( [this] { this->stopImmediately(); }, nullptr );
 	}
-	virtual void addStopCallback( std::function<void()> fn ) {
+	void addStopCallback( std::function<void()> fn ) override {
 		if ( thread_network == this )
 			stopCallbacks.emplace_back(std::move(fn));
 		else
 			onMainThreadVoid( [this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); }, nullptr );
 	}
 
-	virtual bool isSimulated() const { return false; }
-	virtual THREAD_HANDLE startThread( THREAD_FUNC_RETURN (*func) (void*), void *arg);
+	bool isSimulated() const override { return false; }
+	THREAD_HANDLE startThread( THREAD_FUNC_RETURN (*func) (void*), void *arg) override;
 
-	virtual void getDiskBytes( std::string const& directory, int64_t& free, int64_t& total );
-	virtual bool isAddressOnThisHost(NetworkAddress const& addr) const override;
+	void getDiskBytes( std::string const& directory, int64_t& free, int64_t& total ) override;
+	bool isAddressOnThisHost(NetworkAddress const& addr) const override;
 	void updateNow(){ currentTime = timer_monotonic(); }
 
-	virtual flowGlobalType global(int id) const override { return (globals.size() > id) ? globals[id] : nullptr; }
-	virtual void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; }
+	flowGlobalType global(int id) const override { return (globals.size() > id) ? globals[id] : nullptr; }
+	void setGlobal(size_t id, flowGlobalType v) override { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; }
 
 	ProtocolVersion protocolVersion() override { return currentProtocolVersion; }
 
-	std::vector<flowGlobalType>		globals;
+	std::vector<flowGlobalType> globals;
 
-	virtual const TLSConfig& getTLSConfig() const override { return tlsConfig; }
+	const TLSConfig& getTLSConfig() const override { return tlsConfig; }
 
-	virtual bool checkRunnable() override;
+	bool checkRunnable() override;
 
 	bool useThreadPool;
 
@@ -211,7 +224,7 @@ public:
 
 	NetworkMetrics::PriorityStats* lastPriorityStats;
 
-	std::priority_queue<OrderedTask, std::vector<OrderedTask>> ready;
+	ReadyQueue<OrderedTask> ready;
 	ThreadSafeQueue<OrderedTask> threadReady;
 
 	struct DelayedTask : OrderedTask {
@@ -327,41 +340,13 @@ public:
 	}
 };
 
-struct SendBufferIterator {
-	typedef boost::asio::const_buffer value_type;
-	typedef std::forward_iterator_tag iterator_category;
-	typedef size_t difference_type;
-	typedef boost::asio::const_buffer* pointer;
-	typedef boost::asio::const_buffer& reference;
 
-	SendBuffer const* p;
-	int limit;
-
-	SendBufferIterator(SendBuffer const* p=0, int limit = std::numeric_limits<int>::max()) : p(p), limit(limit) {
-		ASSERT(limit > 0);
-	}
-
-	bool operator == (SendBufferIterator const& r) const { return p == r.p; }
-	bool operator != (SendBufferIterator const& r) const { return p != r.p; }
-	void operator++() {
-		limit -= p->bytes_written - p->bytes_sent;
-		if(limit > 0)
-			p = p->next;
-		else
-			p = nullptr;
-	}
-
-	boost::asio::const_buffer operator*() const {
-		return boost::asio::const_buffer(p->data() + p->bytes_sent, std::min(limit, p->bytes_written - p->bytes_sent));
-	}
-};
-
-class Connection : public IConnection, ReferenceCounted<Connection> {
+class Connection final : public IConnection, ReferenceCounted<Connection> {
 public:
-	virtual void addref() { ReferenceCounted<Connection>::addref(); }
-	virtual void delref() { ReferenceCounted<Connection>::delref(); }
+	void addref() override { ReferenceCounted<Connection>::addref(); }
+	void delref() override { ReferenceCounted<Connection>::delref(); }
 
-	virtual void close() {
+	void close() override {
 		closeSocket();
 	}
 
@@ -397,12 +382,12 @@ public:
 		init();
 	}
 
-	virtual Future<Void> acceptHandshake() { return Void(); }
+	Future<Void> acceptHandshake() override { return Void(); }
 
-	virtual Future<Void> connectHandshake() { return Void(); }
+	Future<Void> connectHandshake() override { return Void(); }
 
 	// returns when write() can write at least one byte
-	virtual Future<Void> onWritable() {
+	Future<Void> onWritable() override {
 		++g_net2->countWriteProbes;
 		BindPromise p("N2_WriteProbeError", id);
 		auto f = p.getFuture();
@@ -411,7 +396,7 @@ public:
 	}
 
 	// returns when read() can read at least one byte
-	virtual Future<Void> onReadable() {
+	Future<Void> onReadable() override {
 		++g_net2->countReadProbes;
 		BindPromise p("N2_ReadProbeError", id);
 		auto f = p.getFuture();
@@ -420,7 +405,7 @@ public:
 	}
 
 	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read (might be 0)
-	virtual int read( uint8_t* begin, uint8_t* end ) {
+	int read( uint8_t* begin, uint8_t* end ) override {
 		boost::system::error_code err;
 		++g_net2->countReads;
 		size_t toRead = end-begin;
@@ -441,7 +426,7 @@ public:
 	}
 
 	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of bytes written (might be 0)
-	virtual int write( SendBuffer const* data, int limit ) {
+	int write( SendBuffer const* data, int limit ) override {
 		boost::system::error_code err;
 		++g_net2->countWrites;
 
@@ -470,9 +455,9 @@ public:
 		return sent;
 	}
 
-	virtual NetworkAddress getPeerAddress() const override { return peer_address; }
+	NetworkAddress getPeerAddress() const override { return peer_address; }
 
-	virtual UID getDebugID() const override { return id; }
+	UID getDebugID() const override { return id; }
 
 	tcp::socket& getSocket() { return socket; }
 private:
@@ -648,9 +633,13 @@ public:
 	void addref() override { ReferenceCounted<UDPSocket>::addref(); }
 	void delref() override { ReferenceCounted<UDPSocket>::delref(); }
 
-	NetworkAddress localAddress() const {
+	NetworkAddress localAddress() const override {
 		auto endpoint = socket.local_endpoint();
 		return NetworkAddress(toIPAddress(endpoint.address()), endpoint.port(), isPublic, false);
+	}
+
+	boost::asio::ip::udp::socket::native_handle_type native_handle() override {
+		return socket.native_handle();
 	}
 
 private:
@@ -689,7 +678,7 @@ private:
 	}
 };
 
-class Listener : public IListener, ReferenceCounted<Listener> {
+class Listener final : public IListener, ReferenceCounted<Listener> {
 	boost::asio::io_context& io_service;
 	NetworkAddress listenAddress;
 	tcp::acceptor acceptor;
@@ -701,15 +690,15 @@ public:
 		platform::setCloseOnExec(acceptor.native_handle());
 	}
 
-	virtual void addref() { ReferenceCounted<Listener>::addref(); }
-	virtual void delref() { ReferenceCounted<Listener>::delref(); }
+	void addref() override { ReferenceCounted<Listener>::addref(); }
+	void delref() override { ReferenceCounted<Listener>::delref(); }
 
 	// Returns one incoming connection when it is available
-	virtual Future<Reference<IConnection>> accept() {
+	Future<Reference<IConnection>> accept() override {
 		return doAccept( this );
 	}
 
-	virtual NetworkAddress getListenAddress() const override { return listenAddress; }
+	NetworkAddress getListenAddress() const override { return listenAddress; }
 
 private:
 	ACTOR static Future<Reference<IConnection>> doAccept( Listener* self ) {
@@ -735,9 +724,9 @@ private:
 #ifndef TLS_DISABLED
 typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket&> ssl_socket;
 
-struct SSLHandshakerThread : IThreadPoolReceiver {
+struct SSLHandshakerThread final : IThreadPoolReceiver {
 	SSLHandshakerThread() {}
-	virtual void init() {}
+	void init() override {}
 
 	struct Handshake final : TypedAction<SSLHandshakerThread, Handshake> {
 		Handshake(ssl_socket &socket, ssl_socket::handshake_type type) : socket(socket), type(type) {
@@ -776,12 +765,12 @@ struct SSLHandshakerThread : IThreadPoolReceiver {
 	}
 };
 
-class SSLConnection : public IConnection, ReferenceCounted<SSLConnection> {
+class SSLConnection final : public IConnection, ReferenceCounted<SSLConnection> {
 public:
-	virtual void addref() { ReferenceCounted<SSLConnection>::addref(); }
-	virtual void delref() { ReferenceCounted<SSLConnection>::delref(); }
+	void addref() override { ReferenceCounted<SSLConnection>::addref(); }
+	void delref() override { ReferenceCounted<SSLConnection>::delref(); }
 
-	virtual void close() {
+	void close() override {
 		closeSocket();
 	}
 
@@ -905,7 +894,7 @@ public:
 		}
 	}
 
-	virtual Future<Void> acceptHandshake() { 
+	Future<Void> acceptHandshake() override {
 		return acceptHandshakeWrapper( Reference<SSLConnection>::addRef(this) );
 	}
 
@@ -967,12 +956,12 @@ public:
 		}
 	}
 
-	virtual Future<Void> connectHandshake() { 
+	Future<Void> connectHandshake() override { 
 		return connectHandshakeWrapper( Reference<SSLConnection>::addRef(this) );
 	}
 
 	// returns when write() can write at least one byte
-	virtual Future<Void> onWritable() {
+	Future<Void> onWritable() override {
 		++g_net2->countWriteProbes;
 		BindPromise p("N2_WriteProbeError", id);
 		auto f = p.getFuture();
@@ -981,7 +970,7 @@ public:
 	}
 
 	// returns when read() can read at least one byte
-	virtual Future<Void> onReadable() {
+	Future<Void> onReadable() override {
 		++g_net2->countReadProbes;
 		BindPromise p("N2_ReadProbeError", id);
 		auto f = p.getFuture();
@@ -990,7 +979,7 @@ public:
 	}
 
 	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read (might be 0)
-	virtual int read( uint8_t* begin, uint8_t* end ) {
+	int read( uint8_t* begin, uint8_t* end ) override {
 		boost::system::error_code err;
 		++g_net2->countReads;
 		size_t toRead = end-begin;
@@ -1011,7 +1000,7 @@ public:
 	}
 
 	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of bytes written (might be 0)
-	virtual int write( SendBuffer const* data, int limit ) {
+	int write( SendBuffer const* data, int limit ) override {
 #ifdef __APPLE__
 		// For some reason, writing ssl_sock with more than 2016 bytes when socket is writeable sometimes results in a broken pipe error.
 		limit = std::min(limit, 2016);
@@ -1044,9 +1033,9 @@ public:
 		return sent;
 	}
 
-	virtual NetworkAddress getPeerAddress() const override { return peer_address; }
+	NetworkAddress getPeerAddress() const override { return peer_address; }
 
-	virtual UID getDebugID() const override { return id; }
+	UID getDebugID() const override { return id; }
 
 	tcp::socket& getSocket() { return socket; }
 
@@ -1084,7 +1073,7 @@ private:
 	}
 };
 
-class SSLListener : public IListener, ReferenceCounted<SSLListener> {
+class SSLListener final : public IListener, ReferenceCounted<SSLListener> {
 	boost::asio::io_context& io_service;
 	NetworkAddress listenAddress;
 	tcp::acceptor acceptor;
@@ -1097,15 +1086,15 @@ public:
 		platform::setCloseOnExec(acceptor.native_handle());
 	}
 
-	virtual void addref() { ReferenceCounted<SSLListener>::addref(); }
-	virtual void delref() { ReferenceCounted<SSLListener>::delref(); }
+	void addref() override { ReferenceCounted<SSLListener>::addref(); }
+	void delref() override { ReferenceCounted<SSLListener>::delref(); }
 
 	// Returns one incoming connection when it is available
-	virtual Future<Reference<IConnection>> accept() {
+	Future<Reference<IConnection>> accept() override {
 		return doAccept( this );
 	}
 
-	virtual NetworkAddress getListenAddress() const override { return listenAddress; }
+	NetworkAddress getListenAddress() const override { return listenAddress; }
 
 private:
 	ACTOR static Future<Reference<IConnection>> doAccept( SSLListener* self ) {
@@ -1134,7 +1123,7 @@ struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 	PromiseTask() {}
 	explicit PromiseTask(Promise<Void>&& promise) noexcept : promise(std::move(promise)) {}
 
-	virtual void operator()() {
+	void operator()() override {
 		promise.send(Void());
 		delete this;
 	}
@@ -1148,6 +1137,7 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	  reactor(this),
 	  stopped(false),
 	  tasksIssued(0),
+	  ready(FLOW_KNOBS->READY_QUEUE_RESERVED_SIZE),
 	  // Until run() is called, yield() will always yield
 	  tscBegin(0), tscEnd(0), taskBegin(0), currentTaskID(TaskPriority::DefaultYield),
 	  numYields(0),
@@ -1709,7 +1699,7 @@ THREAD_HANDLE Net2::startThread( THREAD_FUNC_RETURN (*func) (void*), void *arg )
 	return ::startThread(func, arg);
 }
 
-Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr, std::string host ) {
+Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr, const std::string &host ) {
 #ifndef TLS_DISABLED
 	initTLS(ETLSInitState::CONNECT);
 	if ( toAddr.isTLS() ) {
@@ -1718,6 +1708,10 @@ Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr, std::stri
 #endif
 
 	return Connection::connect(&this->reactor.ios, toAddr);
+}
+
+Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr, const std::string &host) {
+	return connect(toAddr, host);
 }
 
 ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *self, std::string host, std::string service) {
@@ -1767,7 +1761,7 @@ Future<Reference<IUDPSocket>> Net2::createUDPSocket(bool isV6) {
 	return UDPSocket::connect(&reactor.ios, Optional<NetworkAddress>(), isV6);
 }
 
-Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint( std::string host, std::string service) {
+Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint( const std::string &host, const std::string &service) {
 	return resolveTCPEndpoint_impl(this, host, service);
 }
 
@@ -1899,7 +1893,23 @@ void ASIOReactor::wake() {
 	ios.post( nullCompletionHandler );
 }
 
-} // namespace net2
+} // namespace N2
+
+SendBufferIterator::SendBufferIterator(SendBuffer const* p, int limit) : p(p), limit(limit) {
+	ASSERT(limit > 0);
+}
+
+void SendBufferIterator::operator++() {
+	limit -= p->bytes_written - p->bytes_sent;
+	if (limit > 0)
+		p = p->next;
+	else
+		p = nullptr;
+}
+
+boost::asio::const_buffer SendBufferIterator::operator*() const {
+	return boost::asio::const_buffer(p->data() + p->bytes_sent, std::min(limit, p->bytes_written - p->bytes_sent));
+}
 
 INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics) {
 	try {

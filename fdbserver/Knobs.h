@@ -312,6 +312,7 @@ public:
 	double PROXY_COMPUTE_GROWTH_RATE;
 	int TXN_STATE_SEND_AMOUNT;
 	double REPORT_TRANSACTION_COST_ESTIMATION_DELAY;
+	bool PROXY_REJECT_BATCH_QUEUED_TOO_LONG;
 
 	int RESET_MASTER_BATCHES;
 	int RESET_RESOLVER_BATCHES;
@@ -632,6 +633,7 @@ public:
 	void initialize(bool randomize = false, ClientKnobs* clientKnobs = nullptr, bool isSimulated = false);
 };
 
+extern std::unique_ptr<ServerKnobs> globalServerKnobs;
 extern ServerKnobs const* SERVER_KNOBS;
 
 #endif

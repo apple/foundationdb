@@ -159,7 +159,7 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		workloadImpl->init(this);
 	}
 
-	~ExternalWorkload() {
+	~ExternalWorkload() override {
 		workloadImpl = nullptr;
 		if (library) {
 			closeLibrary(library);
@@ -262,13 +262,13 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 	long getOption(const std::string& name, long defaultValue) override {
 		return ::getOption(options, Value(name), int64_t(defaultValue));
 	}
-	unsigned long getOption(const std::string& name, unsigned long defaultValue) {
+	unsigned long getOption(const std::string& name, unsigned long defaultValue) override {
 		return ::getOption(options, Value(name), uint64_t(defaultValue));
 	}
-	double getOption(const std::string& name, double defaultValue) {
+	double getOption(const std::string& name, double defaultValue) override {
 		return ::getOption(options, Value(name), defaultValue);
 	}
-	std::string getOption(const std::string& name, std::string defaultValue) {
+	std::string getOption(const std::string& name, std::string defaultValue) override {
 		return ::getOption(options, Value(name), Value(defaultValue)).toString();
 	}
 

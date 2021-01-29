@@ -68,6 +68,22 @@ void ThreadSafeDatabase::setOption( FDBDatabaseOptions::Option option, Optional<
 	}, &db->deferredError );
 }
 
+ThreadFuture<int64_t> ThreadSafeDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
+	DatabaseContext *db = this->db;
+	Key addressKey = address;
+	return onMainThread( [db, addressKey, check, duration]() -> Future<int64_t> {
+		return db->rebootWorker(addressKey, check, duration);
+	} );
+}
+
+ThreadFuture<Void> ThreadSafeDatabase::forceRecoveryWithDataLoss(const StringRef &dcid) {
+	DatabaseContext *db = this->db;
+	Key dcidKey = dcid;
+	return onMainThread( [db, dcidKey]() -> Future<Void> {
+		return db->forceRecoveryWithDataLoss(dcidKey);
+	} );
+}
+
 ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
 	ClusterConnectionFile *connFile = new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFilename).first);
 

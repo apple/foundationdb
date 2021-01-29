@@ -62,7 +62,7 @@ ArenaReader* ILogSystem::ServerPeekCursor::reader() {
 	return &rd;
 }
 
-bool ILogSystem::ServerPeekCursor::hasMessage() {
+bool ILogSystem::ServerPeekCursor::hasMessage() const {
 	//TraceEvent("SPC_HasMessage", randomID).detail("HasMsg", hasMsg);
 	return hasMsg;
 }
@@ -116,7 +116,7 @@ StringRef ILogSystem::ServerPeekCursor::getMessageWithTags() {
 	return rawMessage;
 }
 
-VectorRef<Tag> ILogSystem::ServerPeekCursor::getTags() {
+VectorRef<Tag> ILogSystem::ServerPeekCursor::getTags() const {
 	return messageAndTags.tags;
 }
 
@@ -329,7 +329,7 @@ Future<Void> ILogSystem::ServerPeekCursor::onFailed() {
 	return serverPeekOnFailed(this);
 }
 
-bool ILogSystem::ServerPeekCursor::isActive() {
+bool ILogSystem::ServerPeekCursor::isActive() const {
 	if( !interf->get().present() )
 		return false;
 	if( messageVersion >= end )
@@ -337,22 +337,29 @@ bool ILogSystem::ServerPeekCursor::isActive() {
 	return IFailureMonitor::failureMonitor().getState( interf->get().interf().peekMessages.getEndpoint() ).isAvailable();
 }
 
-bool ILogSystem::ServerPeekCursor::isExhausted() {
+bool ILogSystem::ServerPeekCursor::isExhausted() const {
 	return messageVersion >= end;
 }
 
-const LogMessageVersion& ILogSystem::ServerPeekCursor::version() { return messageVersion; } // Call only after nextMessage().  The sequence of the current message, or results.end if nextMessage() has returned false.
+const LogMessageVersion& ILogSystem::ServerPeekCursor::version() const {
+	return messageVersion;
+} // Call only after nextMessage().  The sequence of the current message, or results.end if nextMessage() has returned
+  // false.
 
-Version ILogSystem::ServerPeekCursor::getMinKnownCommittedVersion() { return results.minKnownCommittedVersion; }
+Version ILogSystem::ServerPeekCursor::getMinKnownCommittedVersion() const {
+	return results.minKnownCommittedVersion;
+}
 
-Optional<UID> ILogSystem::ServerPeekCursor::getPrimaryPeekLocation() { 
+Optional<UID> ILogSystem::ServerPeekCursor::getPrimaryPeekLocation() const {
 	if(interf) {
 		return interf->get().id();
 	}
 	return Optional<UID>();
 }
 
-Version ILogSystem::ServerPeekCursor::popped() { return poppedVersion; }
+Version ILogSystem::ServerPeekCursor::popped() const {
+	return poppedVersion;
+}
 
 ILogSystem::MergedPeekCursor::MergedPeekCursor( vector< Reference<ILogSystem::IPeekCursor> > const& serverCursors, Version begin )
 	: serverCursors(serverCursors), bestServer(-1), readQuorum(serverCursors.size()), tag(invalidTag), currentCursor(0), hasNextMessage(false),
@@ -486,7 +493,7 @@ void ILogSystem::MergedPeekCursor::updateMessage(bool usePolicy) {
 	}
 }
 
-bool ILogSystem::MergedPeekCursor::hasMessage() {
+bool ILogSystem::MergedPeekCursor::hasMessage() const {
 	return hasNextMessage;
 }
 
@@ -504,7 +511,7 @@ StringRef ILogSystem::MergedPeekCursor::getMessageWithTags() {
 	return serverCursors[currentCursor]->getMessageWithTags();
 }
 
-VectorRef<Tag> ILogSystem::MergedPeekCursor::getTags() {
+VectorRef<Tag> ILogSystem::MergedPeekCursor::getTags() const {
 	return serverCursors[currentCursor]->getTags();
 }
 
@@ -569,29 +576,31 @@ Future<Void> ILogSystem::MergedPeekCursor::onFailed() {
 	return Never();
 }
 
-bool ILogSystem::MergedPeekCursor::isActive() {
+bool ILogSystem::MergedPeekCursor::isActive() const {
 	ASSERT(false);
 	return false;
 }
 
-bool ILogSystem::MergedPeekCursor::isExhausted() {
+bool ILogSystem::MergedPeekCursor::isExhausted() const {
 	return serverCursors[currentCursor]->isExhausted();
 }
 
-const LogMessageVersion& ILogSystem::MergedPeekCursor::version() { return messageVersion; }
+const LogMessageVersion& ILogSystem::MergedPeekCursor::version() const {
+	return messageVersion;
+}
 
-Version ILogSystem::MergedPeekCursor::getMinKnownCommittedVersion() {
+Version ILogSystem::MergedPeekCursor::getMinKnownCommittedVersion() const {
 	return serverCursors[currentCursor]->getMinKnownCommittedVersion();
 }
 
-Optional<UID> ILogSystem::MergedPeekCursor::getPrimaryPeekLocation() {
+Optional<UID> ILogSystem::MergedPeekCursor::getPrimaryPeekLocation() const {
 	if(bestServer >= 0) {
 		return serverCursors[bestServer]->getPrimaryPeekLocation();
 	}
 	return Optional<UID>();
 }
 
-Version ILogSystem::MergedPeekCursor::popped() {
+Version ILogSystem::MergedPeekCursor::popped() const {
 	Version poppedVersion = 0;
 	for (auto& c : serverCursors)
 		poppedVersion = std::max(poppedVersion, c->popped());
@@ -761,7 +770,7 @@ void ILogSystem::SetPeekCursor::updateMessage(int logIdx, bool usePolicy) {
 	}
 }
 
-bool ILogSystem::SetPeekCursor::hasMessage() {
+bool ILogSystem::SetPeekCursor::hasMessage() const {
 	return hasNextMessage;
 }
 
@@ -777,7 +786,7 @@ StringRef ILogSystem::SetPeekCursor::getMessage() { return serverCursors[current
 
 StringRef ILogSystem::SetPeekCursor::getMessageWithTags() { return serverCursors[currentSet][currentCursor]->getMessageWithTags(); }
 
-VectorRef<Tag> ILogSystem::SetPeekCursor::getTags() {
+VectorRef<Tag> ILogSystem::SetPeekCursor::getTags() const {
 	return serverCursors[currentSet][currentCursor]->getTags();
 }
 
@@ -881,29 +890,31 @@ Future<Void> ILogSystem::SetPeekCursor::onFailed() {
 	return Never();
 }
 
-bool ILogSystem::SetPeekCursor::isActive() {
+bool ILogSystem::SetPeekCursor::isActive() const {
 	ASSERT(false);
 	return false;
 }
 
-bool ILogSystem::SetPeekCursor::isExhausted() {
+bool ILogSystem::SetPeekCursor::isExhausted() const {
 	return serverCursors[currentSet][currentCursor]->isExhausted();
 }
 
-const LogMessageVersion& ILogSystem::SetPeekCursor::version() { return messageVersion; }
+const LogMessageVersion& ILogSystem::SetPeekCursor::version() const {
+	return messageVersion;
+}
 
-Version ILogSystem::SetPeekCursor::getMinKnownCommittedVersion() {
+Version ILogSystem::SetPeekCursor::getMinKnownCommittedVersion() const {
 	return serverCursors[currentSet][currentCursor]->getMinKnownCommittedVersion();
 }
 
-Optional<UID> ILogSystem::SetPeekCursor::getPrimaryPeekLocation() {
+Optional<UID> ILogSystem::SetPeekCursor::getPrimaryPeekLocation() const {
 	if(bestServer >= 0 && bestSet >= 0) {
 		return serverCursors[bestSet][bestServer]->getPrimaryPeekLocation();
 	}
 	return Optional<UID>();
 }
 
-Version ILogSystem::SetPeekCursor::popped() {
+Version ILogSystem::SetPeekCursor::popped() const {
 	Version poppedVersion = 0;
 	for (auto& cursors : serverCursors) {
 		for(auto& c : cursors) {
@@ -935,7 +946,7 @@ ArenaReader* ILogSystem::MultiCursor::reader() {
 	return cursors.back()->reader();
 }
 
-bool ILogSystem::MultiCursor::hasMessage() {
+bool ILogSystem::MultiCursor::hasMessage() const {
 	return cursors.back()->hasMessage();
 }
 
@@ -951,7 +962,7 @@ StringRef ILogSystem::MultiCursor::getMessageWithTags() {
 	return cursors.back()->getMessageWithTags();
 }
 
-VectorRef<Tag> ILogSystem::MultiCursor::getTags() {
+VectorRef<Tag> ILogSystem::MultiCursor::getTags() const {
 	return cursors.back()->getTags();
 }
 
@@ -981,27 +992,27 @@ Future<Void> ILogSystem::MultiCursor::onFailed() {
 	return cursors.back()->onFailed();
 }
 
-bool ILogSystem::MultiCursor::isActive() {
+bool ILogSystem::MultiCursor::isActive() const {
 	return cursors.back()->isActive();
 }
 
-bool ILogSystem::MultiCursor::isExhausted() {
+bool ILogSystem::MultiCursor::isExhausted() const {
 	return cursors.back()->isExhausted();
 }
 
-const LogMessageVersion& ILogSystem::MultiCursor::version() {
+const LogMessageVersion& ILogSystem::MultiCursor::version() const {
 	return cursors.back()->version();
 }
 
-Version ILogSystem::MultiCursor::getMinKnownCommittedVersion() {
+Version ILogSystem::MultiCursor::getMinKnownCommittedVersion() const {
 	return cursors.back()->getMinKnownCommittedVersion();
 }
 
-Optional<UID> ILogSystem::MultiCursor::getPrimaryPeekLocation() {
+Optional<UID> ILogSystem::MultiCursor::getPrimaryPeekLocation() const {
 	return cursors.back()->getPrimaryPeekLocation();
 }
 
-Version ILogSystem::MultiCursor::popped() {
+Version ILogSystem::MultiCursor::popped() const {
 	return std::max(poppedVersion, cursors.back()->popped());
 }
 
@@ -1069,7 +1080,7 @@ ArenaReader* ILogSystem::BufferedCursor::reader() {
 	return cursors[0]->reader();
 }
 
-bool ILogSystem::BufferedCursor::hasMessage() {
+bool ILogSystem::BufferedCursor::hasMessage() const {
 	return hasNextMessage;
 }
 
@@ -1093,7 +1104,7 @@ StringRef ILogSystem::BufferedCursor::getMessageWithTags() {
 	return messages[messageIndex].message;
 }
 
-VectorRef<Tag> ILogSystem::BufferedCursor::getTags() {
+VectorRef<Tag> ILogSystem::BufferedCursor::getTags() const {
 	ASSERT(withTags);
 	return messages[messageIndex].tags;
 }
@@ -1222,32 +1233,32 @@ Future<Void> ILogSystem::BufferedCursor::onFailed() {
 	return Never();
 }
 
-bool ILogSystem::BufferedCursor::isActive() {
+bool ILogSystem::BufferedCursor::isActive() const {
 	ASSERT(false);
 	return false;
 }
 
-bool ILogSystem::BufferedCursor::isExhausted() {
+bool ILogSystem::BufferedCursor::isExhausted() const {
 	ASSERT(false);
 	return false;
 }
 
-const LogMessageVersion& ILogSystem::BufferedCursor::version() {
+const LogMessageVersion& ILogSystem::BufferedCursor::version() const {
 	if(hasNextMessage) {
 		return messages[messageIndex].version;
 	}
 	return messageVersion;
 }
 
-Version ILogSystem::BufferedCursor::getMinKnownCommittedVersion() {
+Version ILogSystem::BufferedCursor::getMinKnownCommittedVersion() const {
 	return minKnownCommittedVersion;
 }
 
-Optional<UID> ILogSystem::BufferedCursor::getPrimaryPeekLocation() {
+Optional<UID> ILogSystem::BufferedCursor::getPrimaryPeekLocation() const {
 	return Optional<UID>();
 }
 
-Version ILogSystem::BufferedCursor::popped() {
+Version ILogSystem::BufferedCursor::popped() const {
 	if(initialPoppedVersion == poppedVersion) {
 		return 0;
 	}

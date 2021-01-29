@@ -27,15 +27,15 @@ void ExecCmdValueString::setCmdValueString(StringRef pCmdValueString) {
 	parseCmdValue();
 }
 
-StringRef ExecCmdValueString::getCmdValueString() {
+StringRef ExecCmdValueString::getCmdValueString() const {
 	return cmdValueString.toString();
 }
 
-StringRef ExecCmdValueString::getBinaryPath() {
+StringRef ExecCmdValueString::getBinaryPath() const {
 	return binaryPath;
 }
 
-VectorRef<StringRef> ExecCmdValueString::getBinaryArgs() {
+VectorRef<StringRef> ExecCmdValueString::getBinaryArgs() const {
 	return binaryArgs;
 }
 
@@ -57,7 +57,7 @@ void ExecCmdValueString::parseCmdValue() {
 	return;
 }
 
-void ExecCmdValueString::dbgPrint() {
+void ExecCmdValueString::dbgPrint() const {
 	auto te = TraceEvent("ExecCmdValueString");
 
 	te.detail("CmdValueString", cmdValueString.toString());

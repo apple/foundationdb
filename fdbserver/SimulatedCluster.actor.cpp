@@ -62,18 +62,18 @@ T simulate( const T& in ) {
 ACTOR Future<Void> runBackup( Reference<ClusterConnectionFile> connFile ) {
 	state std::vector<Future<Void>> agentFutures;
 
-	while (g_simulator.backupAgents == ISimulator::WaitForType) {
+	while (g_simulator.backupAgents == ISimulator::BackupAgentType::WaitForType) {
 		wait(delay(1.0));
 	}
 
-	if (g_simulator.backupAgents == ISimulator::BackupToFile) {
+	if (g_simulator.backupAgents == ISimulator::BackupAgentType::BackupToFile) {
 		Database cx = Database::createDatabase(connFile, -1);
 
 		state FileBackupAgent fileAgent;
 		state double backupPollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
 		agentFutures.push_back(fileAgent.run(cx, &backupPollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
 
-		while (g_simulator.backupAgents == ISimulator::BackupToFile) {
+		while (g_simulator.backupAgents == ISimulator::BackupAgentType::BackupToFile) {
 			wait(delay(1.0));
 		}
 
@@ -89,11 +89,11 @@ ACTOR Future<Void> runBackup( Reference<ClusterConnectionFile> connFile ) {
 ACTOR Future<Void> runDr( Reference<ClusterConnectionFile> connFile ) {
 	state std::vector<Future<Void>> agentFutures;
 
-	while (g_simulator.drAgents == ISimulator::WaitForType) {
+	while (g_simulator.drAgents == ISimulator::BackupAgentType::WaitForType) {
 		wait(delay(1.0));
 	}
 
-	if (g_simulator.drAgents == ISimulator::BackupToDB) {
+	if (g_simulator.drAgents == ISimulator::BackupAgentType::BackupToDB) {
 		Database cx = Database::createDatabase(connFile, -1);
 
 		auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
@@ -110,7 +110,7 @@ ACTOR Future<Void> runDr( Reference<ClusterConnectionFile> connFile ) {
 		agentFutures.push_back(extraAgent.run(cx, &dr1PollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
 		agentFutures.push_back(dbAgent.run(extraDB, &dr2PollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
 
-		while (g_simulator.drAgents == ISimulator::BackupToDB) {
+		while (g_simulator.drAgents == ISimulator::BackupAgentType::BackupToDB) {
 			wait(delay(1.0));
 		}
 

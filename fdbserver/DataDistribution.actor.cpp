@@ -108,15 +108,15 @@ struct TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
 		machineID = locality.zoneId().get();
 	}
 
-	std::string getServersIDStr() {
+	std::string getServersIDStr() const {
 		std::stringstream ss;
 		if (serversOnMachine.empty()) return "[unset]";
 
-		for (auto& server : serversOnMachine) {
+		for (const auto& server : serversOnMachine) {
 			ss << server->id.toString() << " ";
 		}
 
-		return ss.str();
+		return std::move(ss).str();
 	}
 };
 
@@ -139,21 +139,21 @@ public:
 		sort(machineIDs.begin(), machineIDs.end());
 	}
 
-	int size() {
+	int size() const {
 		ASSERT(machines.size() == machineIDs.size());
 		return machineIDs.size();
 	}
 
-	std::string getMachineIDsStr() {
+	std::string getMachineIDsStr() const {
 		std::stringstream ss;
 
 		if (machineIDs.empty()) return "[unset]";
 
-		for (auto& id : machineIDs) {
+		for (const auto& id : machineIDs) {
 			ss << id.contents().toString() << " ";
 		}
 
-		return ss.str();
+		return std::move(ss).str();
 	}
 
 	bool operator==(TCMachineTeamInfo& rhs) const { return this->machineIDs == rhs.machineIDs; }
@@ -199,18 +199,18 @@ public:
 		return servers.size();
 	}
 	vector<UID> const& getServerIDs() const override { return serverIDs; }
-	const vector<Reference<TCServerInfo>>& getServers() { return servers; }
+	const vector<Reference<TCServerInfo>>& getServers() const { return servers; }
 
 	std::string getServerIDsStr() const {
 		std::stringstream ss;
 
 		if (serverIDs.empty()) return "[unset]";
 
-		for (auto& id : serverIDs) {
+		for (const auto& id : serverIDs) {
 			ss << id.toString() << " ";
 		}
 
-		return ss.str();
+		return std::move(ss).str();
 	}
 
 	void addDataInFlightToTeam(int64_t delta) override {
@@ -701,15 +701,15 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// The following kills a reference cycle between the teamTracker actor and the TCTeamInfo that both holds and is
 		// held by the actor It also ensures that the trackers are done fiddling with healthyTeamCount before we free
 		// this
-		for(int i=0; i < teams.size(); i++) {
-			teams[i]->tracker.cancel();
+		for (auto& team : teams) {
+			team->tracker.cancel();
 		}
 		// The commented TraceEvent log is useful in detecting what is running during the destruction
 		// TraceEvent("DDTeamCollectionDestructed", distributorId)
 		//     .detail("Primary", primary)
 		//     .detail("TeamTrackerDestroyed", teams.size());
-		for(int i=0; i < badTeams.size(); i++) {
-			badTeams[i]->tracker.cancel();
+		for (auto& badTeam : badTeams) {
+			badTeam->tracker.cancel();
 		}
 		// TraceEvent("DDTeamCollectionDestructed", distributorId)
 		//     .detail("Primary", primary)
@@ -717,9 +717,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// The following makes sure that, even if a reference to a team is held in the DD Queue, the tracker will be
 		// stopped
 		//  before the server_status map to which it has a pointer, is destroyed.
-		for(auto it = server_info.begin(); it != server_info.end(); ++it) {
-			it->second->tracker.cancel();
-			it->second->collection = nullptr;
+		for (auto& [_, info] : server_info) {
+			info->tracker.cancel();
+			info->collection = nullptr;
 		}
 		// TraceEvent("DDTeamCollectionDestructed", distributorId)
 		//     .detail("Primary", primary)
@@ -799,9 +799,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				self->lastMedianAvailableSpaceUpdate = now();
 				std::vector<double> teamAvailableSpace;
 				teamAvailableSpace.reserve(self->teams.size());
-				for( int i = 0; i < self->teams.size(); i++ ) {
-					if (self->teams[i]->isHealthy()) {
-						teamAvailableSpace.push_back(self->teams[i]->getMinAvailableSpaceRatio());
+				for (const auto& team : self->teams) {
+					if (team->isHealthy()) {
+						teamAvailableSpace.push_back(team->getMinAvailableSpaceRatio());
 					}
 				}
 
@@ -1135,14 +1135,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		double varTeams = 0;
 
 		std::map<Optional<Standalone<StringRef>>, int> machineTeams;
-		for(auto s = server_info.begin(); s != server_info.end(); ++s) {
-			if(!server_status.get(s->first).isUnhealthy()) {
-				int stc = s->second->teams.size();
+		for (const auto& [id, info] : server_info) {
+			if (!server_status.get(id).isUnhealthy()) {
+				int stc = info->teams.size();
 				minTeams = std::min(minTeams, stc);
 				maxTeams = std::max(maxTeams, stc);
 				varTeams += (stc - teamsPerServer)*(stc - teamsPerServer);
 				// Use zoneId as server's machine id
-				machineTeams[s->second->lastKnownInterface.locality.zoneId()] += stc;
+				machineTeams[info->lastKnownInterface.locality.zoneId()] += stc;
 			}
 		}
 		varTeams /= teamsPerServer*teamsPerServer;
@@ -1167,14 +1167,17 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			.detail("MachineMaxTeams", maxMachineTeams);
 	}
 
-	int overlappingMembers( vector<UID> &team ) {
+	int overlappingMembers(const vector<UID>& team) const {
 		if (team.empty()) {
 			return 0;
 		}
 
 		int maxMatchingServers = 0;
-		UID& serverID = team[0];
-		for (auto& usedTeam : server_info[serverID]->teams) {
+		const UID& serverID = team[0];
+		const auto it = server_info.find(serverID);
+		ASSERT(it != server_info.end());
+		const auto& usedTeams = it->second->teams;
+		for (const auto& usedTeam : usedTeams) {
 			auto used = usedTeam->getServerIDs();
 			int teamIdx = 0;
 			int usedIdx = 0;
@@ -2758,178 +2761,189 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 	state int traceEventsPrinted = 0;
 	state std::vector<const UID*> serverIDs;
 	state double lastPrintTime = 0;
+	state ReadYourWritesTransaction tr(self->cx);
 	loop {
-		wait(self->printDetailedTeamsInfo.onTrigger());
-		if (now() - lastPrintTime < SERVER_KNOBS->DD_TEAMS_INFO_PRINT_INTERVAL) {
-			continue;
-		}
-		lastPrintTime = now();
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			state Future<Void> watchFuture = tr.watch(triggerDDTeamInfoPrintKey);
+			wait(tr.commit());
+			wait(self->printDetailedTeamsInfo.onTrigger() || watchFuture);
+			tr.reset();
+			if (now() - lastPrintTime < SERVER_KNOBS->DD_TEAMS_INFO_PRINT_INTERVAL) {
+				continue;
+			}
+			lastPrintTime = now();
 
-		traceEventsPrinted = 0;
+			traceEventsPrinted = 0;
 
-		double snapshotStart = now();
+			double snapshotStart = now();
 
-		configuration = self->configuration;
-		server_info = self->server_info;
-		teams = self->teams;
-		machine_info = self->machine_info;
-		machineTeams = self->machineTeams;
-		// internedLocalityRecordKeyNameStrings = self->machineLocalityMap._keymap->_lookuparray;
-		// machineLocalityMapEntryArraySize = self->machineLocalityMap.size();
-		// machineLocalityMapRecordArray = self->machineLocalityMap.getRecordArray();
-		std::vector<const UID*> _uids = self->machineLocalityMap.getObjects();
-		serverIDs = _uids;
+			configuration = self->configuration;
+			server_info = self->server_info;
+			teams = self->teams;
+			machine_info = self->machine_info;
+			machineTeams = self->machineTeams;
+			// internedLocalityRecordKeyNameStrings = self->machineLocalityMap._keymap->_lookuparray;
+			// machineLocalityMapEntryArraySize = self->machineLocalityMap.size();
+			// machineLocalityMapRecordArray = self->machineLocalityMap.getRecordArray();
+			std::vector<const UID*> _uids = self->machineLocalityMap.getObjects();
+			serverIDs = _uids;
 
-		auto const& keys = self->server_status.getKeys();
-		for (auto const& key : keys) {
-			server_status.emplace(key, self->server_status.get(key));
-		}
+			auto const& keys = self->server_status.getKeys();
+			for (auto const& key : keys) {
+				server_status.emplace(key, self->server_status.get(key));
+			}
 
-		TraceEvent("DDPrintSnapshotTeasmInfo", self->distributorId)
-		    .detail("SnapshotSpeed", now() - snapshotStart)
-		    .detail("Primary", self->primary);
+			TraceEvent("DDPrintSnapshotTeasmInfo", self->distributorId)
+			    .detail("SnapshotSpeed", now() - snapshotStart)
+			    .detail("Primary", self->primary);
 
-		// Print to TraceEvents
-		TraceEvent("DDConfig", self->distributorId)
-		    .detail("StorageTeamSize", configuration.storageTeamSize)
-		    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER)
-		    .detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER)
-		    .detail("Primary", self->primary);
+			// Print to TraceEvents
+			TraceEvent("DDConfig", self->distributorId)
+			    .detail("StorageTeamSize", configuration.storageTeamSize)
+			    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER)
+			    .detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER)
+			    .detail("Primary", self->primary);
 
-		TraceEvent("ServerInfo", self->distributorId)
-		    .detail("Size", server_info.size())
-		    .detail("Primary", self->primary);
-		state int i;
-		state std::map<UID, Reference<TCServerInfo>>::iterator server = server_info.begin();
-		for (i = 0; i < server_info.size(); i++) {
 			TraceEvent("ServerInfo", self->distributorId)
-			    .detail("ServerInfoIndex", i)
-			    .detail("ServerID", server->first.toString())
-			    .detail("ServerTeamOwned", server->second->teams.size())
-			    .detail("MachineID", server->second->machine->machineID.contents().toString())
+			    .detail("Size", server_info.size())
 			    .detail("Primary", self->primary);
-			server++;
-			if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
-				wait(yield());
-			}
-		}
-
-		server = server_info.begin();
-		for (i = 0; i < server_info.size(); i++) {
-			const UID& uid = server->first;
-			TraceEvent("ServerStatus", self->distributorId)
-			    .detail("ServerUID", uid)
-			    .detail("Healthy", !server_status.at(uid).isUnhealthy())
-			    .detail("MachineIsValid", server_info[uid]->machine.isValid())
-			    .detail("MachineTeamSize",
-			            server_info[uid]->machine.isValid() ? server_info[uid]->machine->machineTeams.size() : -1)
-			    .detail("Primary", self->primary);
-			server++;
-			if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
-				wait(yield());
-			}
-		}
-
-		TraceEvent("ServerTeamInfo", self->distributorId).detail("Size", teams.size()).detail("Primary", self->primary);
-		for (i = 0; i < teams.size(); i++) {
-			const auto& team = teams[i];
-			TraceEvent("ServerTeamInfo", self->distributorId)
-			    .detail("TeamIndex", i)
-			    .detail("Healthy", team->isHealthy())
-			    .detail("TeamSize", team->size())
-			    .detail("MemberIDs", team->getServerIDsStr())
-			    .detail("Primary", self->primary);
-			if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
-				wait(yield());
-			}
-		}
-
-		TraceEvent("MachineInfo", self->distributorId)
-		    .detail("Size", machine_info.size())
-		    .detail("Primary", self->primary);
-		state std::map<Standalone<StringRef>, Reference<TCMachineInfo>>::iterator machine = machine_info.begin();
-		state bool isMachineHealthy = false;
-		for (i = 0; i < machine_info.size(); i++) {
-			Reference<TCMachineInfo> _machine = machine->second;
-			if (!_machine.isValid() || machine_info.find(_machine->machineID) == machine_info.end() ||
-			    _machine->serversOnMachine.empty()) {
-				isMachineHealthy = false;
-			}
-
-			// Healthy machine has at least one healthy server
-			for (auto& server : _machine->serversOnMachine) {
-				if (!server_status.at(server->id).isUnhealthy()) {
-					isMachineHealthy = true;
+			state int i;
+			state std::map<UID, Reference<TCServerInfo>>::iterator server = server_info.begin();
+			for (i = 0; i < server_info.size(); i++) {
+				TraceEvent("ServerInfo", self->distributorId)
+				    .detail("ServerInfoIndex", i)
+				    .detail("ServerID", server->first.toString())
+				    .detail("ServerTeamOwned", server->second->teams.size())
+				    .detail("MachineID", server->second->machine->machineID.contents().toString())
+				    .detail("Primary", self->primary);
+				server++;
+				if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
+					wait(yield());
 				}
 			}
 
-			isMachineHealthy = false;
+			server = server_info.begin();
+			for (i = 0; i < server_info.size(); i++) {
+				const UID& uid = server->first;
+				TraceEvent("ServerStatus", self->distributorId)
+				    .detail("ServerUID", uid)
+				    .detail("Healthy", !server_status.at(uid).isUnhealthy())
+				    .detail("MachineIsValid", server_info[uid]->machine.isValid())
+				    .detail("MachineTeamSize",
+				            server_info[uid]->machine.isValid() ? server_info[uid]->machine->machineTeams.size() : -1)
+				    .detail("Primary", self->primary);
+				server++;
+				if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
+					wait(yield());
+				}
+			}
+
+			TraceEvent("ServerTeamInfo", self->distributorId)
+			    .detail("Size", teams.size())
+			    .detail("Primary", self->primary);
+			for (i = 0; i < teams.size(); i++) {
+				const auto& team = teams[i];
+				TraceEvent("ServerTeamInfo", self->distributorId)
+				    .detail("TeamIndex", i)
+				    .detail("Healthy", team->isHealthy())
+				    .detail("TeamSize", team->size())
+				    .detail("MemberIDs", team->getServerIDsStr())
+				    .detail("Primary", self->primary);
+				if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
+					wait(yield());
+				}
+			}
+
 			TraceEvent("MachineInfo", self->distributorId)
-			    .detail("MachineInfoIndex", i)
-			    .detail("Healthy", isMachineHealthy)
-			    .detail("MachineID", machine->first.contents().toString())
-			    .detail("MachineTeamOwned", machine->second->machineTeams.size())
-			    .detail("ServerNumOnMachine", machine->second->serversOnMachine.size())
-			    .detail("ServersID", machine->second->getServersIDStr())
+			    .detail("Size", machine_info.size())
 			    .detail("Primary", self->primary);
-			machine++;
-			if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
-				wait(yield());
-			}
-		}
+			state std::map<Standalone<StringRef>, Reference<TCMachineInfo>>::iterator machine = machine_info.begin();
+			state bool isMachineHealthy = false;
+			for (i = 0; i < machine_info.size(); i++) {
+				Reference<TCMachineInfo> _machine = machine->second;
+				if (!_machine.isValid() || machine_info.find(_machine->machineID) == machine_info.end() ||
+				    _machine->serversOnMachine.empty()) {
+					isMachineHealthy = false;
+				}
 
-		TraceEvent("MachineTeamInfo", self->distributorId)
-		    .detail("Size", machineTeams.size())
-		    .detail("Primary", self->primary);
-		for (i = 0; i < machineTeams.size(); i++) {
-			const auto& team = machineTeams[i];
+				// Healthy machine has at least one healthy server
+				for (auto& server : _machine->serversOnMachine) {
+					if (!server_status.at(server->id).isUnhealthy()) {
+						isMachineHealthy = true;
+					}
+				}
+
+				isMachineHealthy = false;
+				TraceEvent("MachineInfo", self->distributorId)
+				    .detail("MachineInfoIndex", i)
+				    .detail("Healthy", isMachineHealthy)
+				    .detail("MachineID", machine->first.contents().toString())
+				    .detail("MachineTeamOwned", machine->second->machineTeams.size())
+				    .detail("ServerNumOnMachine", machine->second->serversOnMachine.size())
+				    .detail("ServersID", machine->second->getServersIDStr())
+				    .detail("Primary", self->primary);
+				machine++;
+				if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
+					wait(yield());
+				}
+			}
+
 			TraceEvent("MachineTeamInfo", self->distributorId)
-			    .detail("TeamIndex", i)
-			    .detail("MachineIDs", team->getMachineIDsStr())
-			    .detail("ServerTeams", team->serverTeams.size())
+			    .detail("Size", machineTeams.size())
 			    .detail("Primary", self->primary);
-			if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
-				wait(yield());
+			for (i = 0; i < machineTeams.size(); i++) {
+				const auto& team = machineTeams[i];
+				TraceEvent("MachineTeamInfo", self->distributorId)
+				    .detail("TeamIndex", i)
+				    .detail("MachineIDs", team->getMachineIDsStr())
+				    .detail("ServerTeams", team->serverTeams.size())
+				    .detail("Primary", self->primary);
+				if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
+					wait(yield());
+				}
 			}
+
+			// TODO: re-enable the following logging or remove them.
+			// TraceEvent("LocalityRecordKeyName", self->distributorId)
+			//     .detail("Size", internedLocalityRecordKeyNameStrings.size())
+			//     .detail("Primary", self->primary);
+			// for (i = 0; i < internedLocalityRecordKeyNameStrings.size(); i++) {
+			// 	TraceEvent("LocalityRecordKeyIndexName", self->distributorId)
+			// 	    .detail("KeyIndex", i)
+			// 	    .detail("KeyName", internedLocalityRecordKeyNameStrings[i])
+			// 	    .detail("Primary", self->primary);
+			// 	if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
+			// 		wait(yield());
+			// 	}
+			// }
+
+			// TraceEvent("MachineLocalityMap", self->distributorId)
+			//     .detail("Size", machineLocalityMapEntryArraySize)
+			//     .detail("Primary", self->primary);
+			// for (i = 0; i < serverIDs.size(); i++) {
+			// 	const auto& serverID = serverIDs[i];
+			// 	Reference<LocalityRecord> record = machineLocalityMapRecordArray[i];
+			// 	if (record.isValid()) {
+			// 		TraceEvent("MachineLocalityMap", self->distributorId)
+			// 		    .detail("LocalityIndex", i)
+			// 		    .detail("UID", serverID->toString())
+			// 		    .detail("LocalityRecord", record->toString())
+			// 		    .detail("Primary", self->primary);
+			// 	} else {
+			// 		TraceEvent("MachineLocalityMap", self->distributorId)
+			// 		    .detail("LocalityIndex", i)
+			// 		    .detail("UID", serverID->toString())
+			// 		    .detail("LocalityRecord", "[NotFound]")
+			// 		    .detail("Primary", self->primary);
+			// 	}
+			// 	if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
+			// 		wait(yield());
+			// 	}
+			// }
+		} catch (Error& e) {
+			wait(tr.onError(e));
 		}
-
-		// TODO: re-enable the following logging or remove them.
-		// TraceEvent("LocalityRecordKeyName", self->distributorId)
-		//     .detail("Size", internedLocalityRecordKeyNameStrings.size())
-		//     .detail("Primary", self->primary);
-		// for (i = 0; i < internedLocalityRecordKeyNameStrings.size(); i++) {
-		// 	TraceEvent("LocalityRecordKeyIndexName", self->distributorId)
-		// 	    .detail("KeyIndex", i)
-		// 	    .detail("KeyName", internedLocalityRecordKeyNameStrings[i])
-		// 	    .detail("Primary", self->primary);
-		// 	if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
-		// 		wait(yield());
-		// 	}
-		// }
-
-		// TraceEvent("MachineLocalityMap", self->distributorId)
-		//     .detail("Size", machineLocalityMapEntryArraySize)
-		//     .detail("Primary", self->primary);
-		// for (i = 0; i < serverIDs.size(); i++) {
-		// 	const auto& serverID = serverIDs[i];
-		// 	Reference<LocalityRecord> record = machineLocalityMapRecordArray[i];
-		// 	if (record.isValid()) {
-		// 		TraceEvent("MachineLocalityMap", self->distributorId)
-		// 		    .detail("LocalityIndex", i)
-		// 		    .detail("UID", serverID->toString())
-		// 		    .detail("LocalityRecord", record->toString())
-		// 		    .detail("Primary", self->primary);
-		// 	} else {
-		// 		TraceEvent("MachineLocalityMap", self->distributorId)
-		// 		    .detail("LocalityIndex", i)
-		// 		    .detail("UID", serverID->toString())
-		// 		    .detail("LocalityRecord", "[NotFound]")
-		// 		    .detail("Primary", self->primary);
-		// 	}
-		// 	if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
-		// 		wait(yield());
-		// 	}
-		// }
 	}
 }
 
@@ -3417,7 +3431,9 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						TraceEvent(severity, "ServerTeamPriorityChange", self->distributorId)
 						    .detail("Priority", team->getPriority())
 						    .detail("Info", team->getDesc())
-						    .detail("ZeroHealthyServerTeams", self->zeroHealthyTeams->get());
+						    .detail("ZeroHealthyServerTeams", self->zeroHealthyTeams->get())
+						    .detail("Hint", severity == SevWarnAlways ? "No replicas remain of some data"
+						                                              : "The priority of this team changed");
 						if (team->getPriority() == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) {
 							// 0 servers left in this team, data might be lost.
 							zeroServerLeftLogger = zeroServerLeftLogger_impl(self, team);
@@ -4802,6 +4818,11 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 	state bool trackerCancelled;
 	loop {
 		trackerCancelled = false;
+
+		// Stored outside of data distribution tracker to avoid slow tasks
+		// when tracker is cancelled
+		state KeyRangeMap<ShardTrackedData> shards;
+
 		try {
 			loop {
 				TraceEvent("DDInitTakingMoveKeysLock", self->ddId);
@@ -4947,10 +4968,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			tcis.push_back(TeamCollectionInterface());
 			zeroHealthyTeams.push_back(makeReference<AsyncVar<bool>>(true));
 			int storageTeamSize = configuration.storageTeamSize;
-
-			// Stored outside of data distribution tracker to avoid slow tasks
-			// when tracker is cancelled
-			state KeyRangeMap<ShardTrackedData> shards;
 
 			vector<Future<Void>> actors;
 			if (configuration.usableRegions > 1) {
@@ -5401,7 +5418,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	return Void();
 }
 
-DDTeamCollection* testTeamCollection(int teamSize, Reference<IReplicationPolicy> policy, int processCount) {
+std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize, Reference<IReplicationPolicy> policy, int processCount) {
 	Database database =
 	    DatabaseContext::create(makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), false);
 
@@ -5409,11 +5426,11 @@ DDTeamCollection* testTeamCollection(int teamSize, Reference<IReplicationPolicy>
 	conf.storageTeamSize = teamSize;
 	conf.storagePolicy = policy;
 
-	DDTeamCollection* collection =
-	    new DDTeamCollection(database, UID(0, 0), MoveKeysLock(), PromiseStream<RelocateShard>(),
-	                         makeReference<ShardsAffectedByTeamFailure>(), conf, {}, {}, Future<Void>(Void()),
-	                         makeReference<AsyncVar<bool>>(true), true, makeReference<AsyncVar<bool>>(false),
-	                         PromiseStream<GetMetricsRequest>());
+	auto collection =
+	    std::unique_ptr<DDTeamCollection>(new DDTeamCollection(database, UID(0, 0), MoveKeysLock(), PromiseStream<RelocateShard>(),
+															   makeReference<ShardsAffectedByTeamFailure>(), conf, {}, {}, Future<Void>(Void()),
+															   makeReference<AsyncVar<bool>>(true), true, makeReference<AsyncVar<bool>>(false),
+															   PromiseStream<GetMetricsRequest>()));
 
 	for (int id = 1; id <= processCount; ++id) {
 		UID uid(id, 0);
@@ -5423,7 +5440,7 @@ DDTeamCollection* testTeamCollection(int teamSize, Reference<IReplicationPolicy>
 		interface.locality.set(LiteralStringRef("zoneid"), Standalone<StringRef>(std::to_string(id % 5)));
 		interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(id % 3)));
 		collection->server_info[uid] =
-		    makeReference<TCServerInfo>(interface, collection, ProcessClass(), true, collection->storageServerSet);
+		    makeReference<TCServerInfo>(interface, collection.get(), ProcessClass(), true, collection->storageServerSet);
 		collection->server_status.set(uid, ServerStatus(false, false, interface.locality));
 		collection->checkAndCreateMachine(collection->server_info[uid]);
 	}
@@ -5431,7 +5448,7 @@ DDTeamCollection* testTeamCollection(int teamSize, Reference<IReplicationPolicy>
 	return collection;
 }
 
-DDTeamCollection* testMachineTeamCollection(int teamSize, Reference<IReplicationPolicy> policy, int processCount) {
+std::unique_ptr<DDTeamCollection> testMachineTeamCollection(int teamSize, Reference<IReplicationPolicy> policy, int processCount) {
 	Database database =
 	    DatabaseContext::create(makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), false);
 
@@ -5439,11 +5456,11 @@ DDTeamCollection* testMachineTeamCollection(int teamSize, Reference<IReplication
 	conf.storageTeamSize = teamSize;
 	conf.storagePolicy = policy;
 
-	DDTeamCollection* collection =
-	    new DDTeamCollection(database, UID(0, 0), MoveKeysLock(), PromiseStream<RelocateShard>(),
-	                         makeReference<ShardsAffectedByTeamFailure>(), conf, {}, {}, Future<Void>(Void()),
-	                         makeReference<AsyncVar<bool>>(true), true, makeReference<AsyncVar<bool>>(false),
-	                         PromiseStream<GetMetricsRequest>());
+	auto collection =
+	    std::unique_ptr<DDTeamCollection>(new DDTeamCollection(database, UID(0, 0), MoveKeysLock(), PromiseStream<RelocateShard>(),
+															   makeReference<ShardsAffectedByTeamFailure>(), conf, {}, {}, Future<Void>(Void()),
+															   makeReference<AsyncVar<bool>>(true), true, makeReference<AsyncVar<bool>>(false),
+															   PromiseStream<GetMetricsRequest>()));
 
 	for (int id = 1; id <= processCount; id++) {
 		UID uid(id, 0);
@@ -5463,7 +5480,7 @@ DDTeamCollection* testMachineTeamCollection(int teamSize, Reference<IReplication
 		interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(data_hall_id)));
 		interface.locality.set(LiteralStringRef("dcid"), Standalone<StringRef>(std::to_string(dc_id)));
 		collection->server_info[uid] =
-		    makeReference<TCServerInfo>(interface, collection, ProcessClass(), true, collection->storageServerSet);
+		    makeReference<TCServerInfo>(interface, collection.get(), ProcessClass(), true, collection->storageServerSet);
 
 		collection->server_status.set(uid, ServerStatus(false, false, interface.locality));
 	}
@@ -5483,13 +5500,11 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/UseMachineID") {
 	int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 
 	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(new PolicyAcross(teamSize, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-	state DDTeamCollection* collection = testMachineTeamCollection(teamSize, policy, processSize);
+	state std::unique_ptr<DDTeamCollection> collection = testMachineTeamCollection(teamSize, policy, processSize);
 
 	collection->addTeamsBestOf(30, desiredTeams, maxTeams);
 
 	ASSERT(collection->sanityCheckTeams() == true);
-
-	delete (collection);
 
 	return Void();
 }
@@ -5503,7 +5518,7 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/NotUseMachineID") {
 	int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 
 	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(new PolicyAcross(teamSize, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-	state DDTeamCollection* collection = testMachineTeamCollection(teamSize, policy, processSize);
+	state std::unique_ptr<DDTeamCollection> collection = testMachineTeamCollection(teamSize, policy, processSize);
 
 	if (collection == nullptr) {
 		fprintf(stderr, "collection is null\n");
@@ -5514,8 +5529,6 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/NotUseMachineID") {
 	collection->addTeamsBestOf(30, desiredTeams, maxTeams);
 	collection->sanityCheckTeams(); // Server team may happen to be on the same machine team, although unlikely
 
-	if (collection) delete (collection);
-
 	return Void();
 }
 
@@ -5524,11 +5537,9 @@ TEST_CASE("DataDistribution/AddAllTeams/isExhaustive") {
 	state int processSize = 10;
 	state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
-	state DDTeamCollection* collection = testTeamCollection(3, policy, processSize);
+	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, processSize);
 
 	int result = collection->addTeamsBestOf(200, desiredTeams, maxTeams);
-
-	delete(collection);
 
 	// The maximum number of available server teams without considering machine locality is 120
 	// The maximum number of available server teams with machine locality constraint is 120 - 40, because
@@ -5544,11 +5555,9 @@ TEST_CASE("/DataDistribution/AddAllTeams/withLimit") {
 	state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 
-	state DDTeamCollection* collection = testTeamCollection(3, policy, processSize);
+	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, processSize);
 
 	int result = collection->addTeamsBestOf(10, desiredTeams, maxTeams);
-
-	delete(collection);
 
 	ASSERT(result >= 10);
 
@@ -5563,7 +5572,7 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/SkippingBusyServers") {
 	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 	state int teamSize = 3;
 	//state int targetTeamsPerServer = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (teamSize + 1) / 2;
-	state DDTeamCollection* collection = testTeamCollection(teamSize, policy, processSize);
+	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);
@@ -5577,8 +5586,6 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/SkippingBusyServers") {
 		ASSERT(teamCount >= 1);
 		//ASSERT(teamCount <= targetTeamsPerServer);
 	}
-
-	delete(collection);
 
 	return Void();
 }
@@ -5594,7 +5601,7 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/NotEnoughServers") {
 	state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 	state int teamSize = 3;
-	state DDTeamCollection* collection = testTeamCollection(teamSize, policy, processSize);
+	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);
@@ -5616,8 +5623,6 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/NotEnoughServers") {
 		auto teamCount = process->second->teams.size();
 		ASSERT(teamCount >= 1);
 	}
-
-	delete(collection);
 
 	// If we find all available teams, result will be 8 because we prebuild 2 teams
 	ASSERT(result == 8);

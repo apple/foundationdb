@@ -118,25 +118,22 @@ struct AddingShard : NonCopyable {
 	bool isTransferred() const { return phase == Waiting; }
 };
 
-struct ShardInfo : ReferenceCounted<ShardInfo>, NonCopyable {
-	AddingShard* adding;
+class ShardInfo : public ReferenceCounted<ShardInfo>, NonCopyable {
+	ShardInfo(KeyRange keys, std::unique_ptr<AddingShard> &&adding, StorageServer* readWrite)
+		: adding(std::move(adding)), readWrite(readWrite), keys(keys)
+	{
+	}
+
+public:
+	std::unique_ptr<AddingShard> adding;
 	struct StorageServer* readWrite;
 	KeyRange keys;
 	uint64_t changeCounter;
 
-	ShardInfo(KeyRange keys, AddingShard* adding, StorageServer* readWrite)
-		: adding(adding), readWrite(readWrite), keys(keys)
-	{
-	}
-
-	~ShardInfo() {
-		delete adding;
-	}
-
 	static ShardInfo* newNotAssigned(KeyRange keys) { return new ShardInfo(keys, nullptr, nullptr); }
 	static ShardInfo* newReadWrite(KeyRange keys, StorageServer* data) { return new ShardInfo(keys, nullptr, data); }
-	static ShardInfo* newAdding(StorageServer* data, KeyRange keys) { return new ShardInfo(keys, new AddingShard(data, keys), nullptr); }
-	static ShardInfo* addingSplitLeft( KeyRange keys, AddingShard* oldShard) { return new ShardInfo(keys, new AddingShard(oldShard, keys), nullptr); }
+	static ShardInfo* newAdding(StorageServer* data, KeyRange keys) { return new ShardInfo(keys, std::make_unique<AddingShard>(data, keys), nullptr); }
+	static ShardInfo* addingSplitLeft( KeyRange keys, AddingShard* oldShard) { return new ShardInfo(keys, std::make_unique<AddingShard>(oldShard, keys), nullptr); }
 
 	bool isReadable() const { return readWrite!=nullptr; }
 	bool notAssigned() const { return !readWrite && !adding; }
@@ -309,12 +306,12 @@ public:
 
 	class CurrentRunningFetchKeys {
 		std::unordered_map<UID, double> startTimeMap;
-		std::unordered_map<UID, KeyRangeRef> keyRangeMap;
+		std::unordered_map<UID, KeyRange> keyRangeMap;
 
 		static const StringRef emptyString;
 		static const KeyRangeRef emptyKeyRange;
 	public:
-		void recordStart(const UID id, const KeyRange keyRange) {
+		void recordStart(const UID id, const KeyRange& keyRange) {
 			startTimeMap[id] =  now();
 			keyRangeMap[id] = keyRange;
 		}
@@ -324,7 +321,7 @@ public:
 			keyRangeMap.erase(id);
 		}
 
-		std::pair<double, KeyRangeRef> longestTime() const {
+		std::pair<double, KeyRange> longestTime() const {
 			if (numRunning() == 0) {
 				return {-1, emptyKeyRange};
 			}
@@ -974,6 +971,7 @@ ACTOR Future<Version> waitForVersionNoTooOld( StorageServer* data, Version versi
 ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 	state int64_t resultSize = 0;
 	Span span("SS:getValue"_loc, { req.spanContext });
+	span.addTag("key"_sr, req.key);
 
 	try {
 		++data->counters.getValueQueries;
@@ -2358,9 +2356,9 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 						// The remaining unfetched keys [nfk,keys.end) will become a separate AddingShard with its own fetchKeys.
 						shard->server->addShard( ShardInfo::addingSplitLeft( KeyRangeRef(keys.begin, nfk), shard ) );
 						shard->server->addShard( ShardInfo::newAdding( data, KeyRangeRef(nfk, keys.end) ) );
-						shard = data->shards.rangeContaining( keys.begin ).value()->adding;
+						shard = data->shards.rangeContaining( keys.begin ).value()->adding.get();
 						warningLogger = logFetchKeysWarning(shard);
-						AddingShard* otherShard = data->shards.rangeContaining( nfk ).value()->adding;
+						AddingShard* otherShard = data->shards.rangeContaining( nfk ).value()->adding.get();
 						keys = shard->keys;
 
 						// Split our prior updates.  The ones that apply to our new, restricted key range will go back into shard->updates,
@@ -2396,7 +2394,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 					//FIXME: remove when we no longer support upgrades from 5.X
 					if (debug_getRangeRetries >= 100) {
 						data->cx->enableLocalityLoadBalance = false;
-						// TODO: Add SevWarnAlways to say it was disabled.
+						TraceEvent(SevWarnAlways, "FKDisableLB").detail("FKID", fetchKeysID);
 					}
 
 					debug_getRangeRetries++;
@@ -2415,6 +2413,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 
 		//FIXME: remove when we no longer support upgrades from 5.X
 		data->cx->enableLocalityLoadBalance = true;
+		TraceEvent(SevWarnAlways, "FKReenableLB").detail("FKID", fetchKeysID);
 
 		// We have completed the fetch and write of the data, now we wait for MVCC window to pass.
 		//  As we have finished this work, we will allow more work to start...
@@ -2879,7 +2878,6 @@ private:
 ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 {
 	state double start;
-	state Span span("SS:update"_loc);
 	try {
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of memory
 		// This is often referred to as the storage server e-brake (emergency brake)
@@ -3022,6 +3020,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 
 		state Version ver = invalidVersion;
 		cloneCursor2->setProtocolVersion(data->logProtocol);
+		state SpanID spanContext = SpanID();
 		for (;cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
 			if(mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
 				mutationBytes = 0;
@@ -3051,11 +3050,14 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
 				SpanContextMessage scm;
 				rd >> scm;
-				span.addParent(scm.spanContext);
+				spanContext = scm.spanContext;
 			}
 			else {
 				MutationRef msg;
 				rd >> msg;
+
+				Span span("SS:update"_loc, { spanContext });
+				span.addTag("key"_sr, msg.param1);
 
 				if (ver != invalidVersion) {  // This change belongs to a version < minVersion
 					DEBUG_MUTATION("SSPeek", ver, msg).detail("ServerID", data->thisServerID);

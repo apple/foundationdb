@@ -227,7 +227,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		ReferenceCounted<TagPartitionedLogSystem>::delref();
 	}
 
-	std::string describe() final {
+	std::string describe() const final {
 		std::string result;
 		for( int i = 0; i < tLogs.size(); i++ ) {
 			result += format("%d: ", i);
@@ -238,7 +238,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return result;
 	}
 
-	UID getDebugID() final { return dbgid; }
+	UID getDebugID() const final { return dbgid; }
 
 	void addPseudoLocality(int8_t locality) {
 		ASSERT(locality < 0);
@@ -248,7 +248,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	Tag getPseudoPopTag(Tag tag, ProcessClass::ClassType type) final {
+	Tag getPseudoPopTag(Tag tag, ProcessClass::ClassType type) const final {
 		switch (type) {
 		case ProcessClass::LogRouterClass:
 			if (tag.locality == tagLocalityLogRouter) {
@@ -270,7 +270,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return tag;
 	}
 
-	bool hasPseudoLocality(int8_t locality) final { return pseudoLocalities.count(locality) > 0; }
+	bool hasPseudoLocality(int8_t locality) const final { return pseudoLocalities.count(locality) > 0; }
 
 	// Return the min version of all pseudoLocalities, i.e., logRouter and backupTag
 	Version popPseudoLocalityTag(Tag tag, Version upTo) final {
@@ -1364,7 +1364,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return newEpoch( Reference<TagPartitionedLogSystem>::addRef(this), recr, fRemoteWorkers, config, recoveryCount, primaryLocality, remoteLocality, allTags, recruitmentStalled );
 	}
 
-	LogSystemConfig getLogSystemConfig() final {
+	LogSystemConfig getLogSystemConfig() const final {
 		LogSystemConfig logSystemConfig(epoch);
 		logSystemConfig.logSystemType = logSystemType;
 		logSystemConfig.expectedLogSets = expectedLogSets;
@@ -1389,7 +1389,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return logSystemConfig;
 	}
 
-	Standalone<StringRef> getLogsValue() final {
+	Standalone<StringRef> getLogsValue() const final {
 		vector<std::pair<UID, NetworkAddress>> logs;
 		vector<std::pair<UID, NetworkAddress>> oldLogs;
 		for(auto& t : tLogs) {
@@ -1434,19 +1434,19 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return waitForAny(changes);
 	}
 
-	Version getEnd() final {
+	Version getEnd() const final {
 		ASSERT( recoverAt.present() );
 		return recoverAt.get() + 1;
 	}
 
-	Version getPeekEnd() {
+	Version getPeekEnd() const {
 		if (recoverAt.present())
 			return getEnd();
 		else
 			return std::numeric_limits<Version>::max();
 	}
 
-	void getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, bool allLocations) final {
+	void getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, bool allLocations) const final {
 		int locationOffset = 0;
 		for(auto& log : tLogs) {
 			if(log->isLocal && log->logServers.size()) {

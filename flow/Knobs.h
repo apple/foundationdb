@@ -32,9 +32,10 @@
 class Knobs {
 public:
 	bool setKnob( std::string const& name, std::string const& value ); // Returns true if the knob name is known, false if it is unknown
-	void trace();
+	void trace() const;
 
 protected:
+	Knobs()=default;
 	void initKnob( double& knob, double value, std::string const& name );
 	void initKnob( int64_t& knob, int64_t value, std::string const& name );
 	void initKnob( int& knob, int value, std::string const& name );
@@ -70,6 +71,7 @@ public:
 	double HUGE_ARENA_LOGGING_INTERVAL;
 
 	bool WRITE_TRACING_ENABLED;
+	int TRACING_UDP_LISTENER_PORT;
 
 	//run loop profiling
 	double RUN_LOOP_PROFILING_INTERVAL;
@@ -164,6 +166,7 @@ public:
 	int64_t REACTOR_FLAGS;
 	double MIN_LOGGED_PRIORITY_BUSY_FRACTION;
 	int CERT_FILE_MAX_SIZE;
+	int READY_QUEUE_RESERVED_SIZE;
 
 	//Network
 	int64_t PACKET_LIMIT;
@@ -254,6 +257,7 @@ public:
 	void initialize(bool randomize = false, bool isSimulated = false);
 };
 
+extern std::unique_ptr<FlowKnobs> globalFlowKnobs;
 extern FlowKnobs const* FLOW_KNOBS;
 
 #endif

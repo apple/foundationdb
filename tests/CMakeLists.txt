@@ -106,7 +106,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/AtomicBackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/AtomicOps.toml)
   add_fdb_test(TEST_FILES fast/AtomicOpsApiCorrectness.toml)
-  add_fdb_test(TEST_FILES fast/BackupBlobCorrectness.toml IGNORE)
+  add_fdb_test(TEST_FILES fast/BackupAzureBlobCorrectness.toml IGNORE)
+  add_fdb_test(TEST_FILES fast/BackupS3BlobCorrectness.toml IGNORE)
   add_fdb_test(TEST_FILES fast/BackupCorrectness.toml)
   add_fdb_test(TEST_FILES fast/BackupCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectness.toml)
@@ -183,17 +184,17 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_5.0.0/StorefrontTestRestart-1.txt
                restarting/from_5.0.0/StorefrontTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.0/SnapTestAttrition-1.txt
-               restarting/from_6.2.0/SnapTestAttrition-2.txt)
+    TEST_FILES restarting/from_6.2.29/SnapTestAttrition-1.txt
+               restarting/from_6.2.29/SnapTestAttrition-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.0/SnapTestSimpleRestart-1.txt
-               restarting/from_6.2.0/SnapTestSimpleRestart-2.txt)
+    TEST_FILES restarting/from_6.2.29/SnapTestSimpleRestart-1.txt
+               restarting/from_6.2.29/SnapTestSimpleRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.0/SnapTestRestart-1.txt
-               restarting/from_6.2.0/SnapTestRestart-2.txt)
+    TEST_FILES restarting/from_6.2.29/SnapTestRestart-1.txt
+               restarting/from_6.2.29/SnapTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.0/SnapCycleRestart-1.txt
-               restarting/from_6.2.0/SnapCycleRestart-2.txt)
+    TEST_FILES restarting/from_6.2.29/SnapCycleRestart-1.txt
+               restarting/from_6.2.29/SnapCycleRestart-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_5.1.7/DrUpgradeRestart-1.txt
                restarting/from_5.1.7/DrUpgradeRestart-2.txt)
@@ -268,4 +269,6 @@ if(WITH_PYTHON)
       create_valgrind_correctness_package()
     endif()
   endif()
+else()
+  message(WARNING "Python not found, won't configure ctest")
 endif()

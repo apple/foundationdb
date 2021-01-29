@@ -29,9 +29,15 @@ Reference<TaskFuture> Task::getDoneFuture(Reference<FutureBucket> fb) {
 struct UnblockFutureTaskFunc : TaskFuncBase {
 	static StringRef name;
 
-	StringRef getName() const { return name; };
-	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
-	Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+	StringRef getName() const override { return name; };
+	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb,
+	                     Reference<Task> task) override {
+		return Void();
+	};
+	Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb,
+	                    Reference<Task> task) override {
+		return _finish(tr, tb, fb, task);
+	};
 
 	ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 		state Reference<TaskFuture> future = futureBucket->unpack(task->params[Task::reservedTaskParamKeyFuture]);
@@ -55,9 +61,13 @@ REGISTER_TASKFUNC(UnblockFutureTaskFunc);
 struct AddTaskFunc : TaskFuncBase {
 	static StringRef name;
 
-	StringRef getName() const { return name; };
-	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
-	Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { 
+	StringRef getName() const override { return name; };
+	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb,
+	                     Reference<Task> task) override {
+		return Void();
+	};
+	Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb,
+	                    Reference<Task> task) override {
 		task->params[Task::reservedTaskParamKeyType] = task->params[Task::reservedTaskParamKeyAddTask];
 		tb->addTask(tr, task);
 		return Void();
@@ -71,9 +81,15 @@ struct IdleTaskFunc : TaskFuncBase {
 	static StringRef name;
 	static constexpr uint32_t version = 1;
 
-	StringRef getName() const { return name; };
-	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
-	Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return tb->finish(tr, task); };
+	StringRef getName() const override { return name; };
+	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb,
+	                     Reference<Task> task) override {
+		return Void();
+	};
+	Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb,
+	                    Reference<Task> task) override {
+		return tb->finish(tr, task);
+	};
 };
 StringRef IdleTaskFunc::name = LiteralStringRef("idle");
 REGISTER_TASKFUNC(IdleTaskFunc);

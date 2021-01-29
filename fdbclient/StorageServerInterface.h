@@ -451,7 +451,7 @@ struct ReadHotRangeWithMetrics {
 	ReadHotRangeWithMetrics(Arena& arena, const ReadHotRangeWithMetrics& rhs)
 	  : keys(arena, rhs.keys), density(rhs.density), readBandwidth(rhs.readBandwidth) {}
 
-	int expectedSize() { return keys.expectedSize() + sizeof(density) + sizeof(readBandwidth); }
+	int expectedSize() const { return keys.expectedSize() + sizeof(density) + sizeof(readBandwidth); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

@@ -78,7 +78,7 @@ struct serializable_traits<OptionalInterface<Interface>> : std::true_type {
 	}
 };
 
-
+// Contains a generation of tLogs for an individual DC.
 struct TLogSet {
 	constexpr static FileIdentifier file_identifier = 6302317;
 	std::vector<OptionalInterface<TLogInterface>> tLogs;
@@ -203,7 +203,6 @@ enum class LogSystemType {
 	empty = 0, // Never used.
 	tagPartitioned = 2,
 };
-BINARY_SERIALIZABLE(LogSystemType);
 
 struct LogSystemConfig {
 	constexpr static FileIdentifier file_identifier = 16360847;

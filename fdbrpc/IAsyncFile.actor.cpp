@@ -108,7 +108,7 @@ ACTOR static Future<Void> incrementalDeleteHelper( std::string filename, bool mu
 	return Void();
 }
 
-Future<Void> IAsyncFileSystem::incrementalDeleteFile( std::string filename, bool mustBeDurable ) {
+Future<Void> IAsyncFileSystem::incrementalDeleteFile(const std::string& filename, bool mustBeDurable) {
 	return uncancellable(incrementalDeleteHelper(
 		filename,
 		mustBeDurable,

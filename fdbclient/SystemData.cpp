@@ -203,10 +203,6 @@ const KeyRangeRef writeConflictRangeKeysRange =
                 LiteralStringRef("\xff\xff/transaction/write_conflict_range/\xff\xff"));
 
 // "\xff/cacheServer/[[UID]] := StorageServerInterface"
-// This will be added by the cache server on initialization and removed by DD
-// TODO[mpilman]: We will need a way to map uint16_t ids to UIDs in a future
-//                versions. For now caches simply cache everything so the ids
-//                are not yet meaningful.
 const KeyRangeRef storageCacheServerKeys(LiteralStringRef("\xff/cacheServer/"),
                                          LiteralStringRef("\xff/cacheServer0"));
 const KeyRef storageCacheServersPrefix = storageCacheServerKeys.begin;
@@ -597,6 +593,8 @@ ProcessClass decodeProcessClassValue( ValueRef const& value ) {
 
 const KeyRangeRef configKeys( LiteralStringRef("\xff/conf/"), LiteralStringRef("\xff/conf0") );
 const KeyRef configKeysPrefix = configKeys.begin;
+
+const KeyRef triggerDDTeamInfoPrintKey(LiteralStringRef("\xff/triggerDDTeamInfoPrint"));
 
 const KeyRangeRef excludedServersKeys( LiteralStringRef("\xff/conf/excluded/"), LiteralStringRef("\xff/conf/excluded0") );
 const KeyRef excludedServersPrefix = excludedServersKeys.begin;

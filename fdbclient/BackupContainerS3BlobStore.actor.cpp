@@ -36,7 +36,7 @@ public:
 		state std::string basePath = INDEXFOLDER + '/';
 		S3BlobStoreEndpoint::ListResult contents = wait(bstore->listObjects(bucket, basePath));
 		std::vector<std::string> results;
-		for (auto& f : contents.objects) {
+		for (const auto& f : contents.objects) {
 			results.push_back(
 			    bstore->getResourceURL(f.name.substr(basePath.size()), format("bucket=%s", bucket.c_str())));
 		}
@@ -45,15 +45,16 @@ public:
 
 	class BackupFile : public IBackupFile, ReferenceCounted<BackupFile> {
 	public:
-		BackupFile(std::string fileName, Reference<IAsyncFile> file) : IBackupFile(fileName), m_file(file) {}
+		BackupFile(std::string fileName, Reference<IAsyncFile> file)
+		  : IBackupFile(fileName), m_file(file), m_offset(0) {}
 
-		Future<Void> append(const void* data, int len) {
+		Future<Void> append(const void* data, int len) override {
 			Future<Void> r = m_file->write(data, len, m_offset);
 			m_offset += len;
 			return r;
 		}
 
-		Future<Void> finish() {
+		Future<Void> finish() override {
 			Reference<BackupFile> self = Reference<BackupFile>::addRef(this);
 			return map(m_file->sync(), [=](Void _) {
 				self->m_file.clear();
@@ -61,11 +62,14 @@ public:
 			});
 		}
 
+		int64_t size() const override { return m_offset; }
+
 		void addref() final { return ReferenceCounted<BackupFile>::addref(); }
 		void delref() final { return ReferenceCounted<BackupFile>::delref(); }
 
 	private:
 		Reference<IAsyncFile> m_file;
+		int64_t m_offset;
 	};
 
 	ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles(
@@ -82,7 +86,7 @@ public:
 		state S3BlobStoreEndpoint::ListResult result = wait(bc->m_bstore->listObjects(
 		    bc->m_bucket, bc->dataPath(path), '/', std::numeric_limits<int>::max(), rawPathFilter));
 		BackupContainerFileSystem::FilesAndSizesT files;
-		for (auto& o : result.objects) {
+		for (const auto& o : result.objects) {
 			ASSERT(o.name.size() >= prefixTrim);
 			files.push_back({ o.name.substr(prefixTrim), o.size });
 		}
@@ -135,15 +139,13 @@ BackupContainerS3BlobStore::BackupContainerS3BlobStore(Reference<S3BlobStoreEndp
   : m_bstore(bstore), m_name(name), m_bucket("FDB_BACKUPS_V2") {
 
 	// Currently only one parameter is supported, "bucket"
-	for (auto& kv : params) {
-		if (kv.first == "bucket") {
-			m_bucket = kv.second;
+	for (const auto& [name, value] : params) {
+		if (name == "bucket") {
+			m_bucket = value;
 			continue;
 		}
-		TraceEvent(SevWarn, "BackupContainerS3BlobStoreInvalidParameter")
-		    .detail("Name", kv.first)
-		    .detail("Value", kv.second);
-		IBackupContainer::lastOpenError = format("Unknown URL parameter: '%s'", kv.first.c_str());
+		TraceEvent(SevWarn, "BackupContainerS3BlobStoreInvalidParameter").detail("Name", name).detail("Value", value);
+		IBackupContainer::lastOpenError = format("Unknown URL parameter: '%s'", name.c_str());
 		throw backup_invalid_url();
 	}
 }

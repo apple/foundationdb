@@ -93,14 +93,14 @@ public:
 
 	explicit SpecialKeyRangeRWImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 
-	virtual ~SpecialKeyRangeRWImpl() {}
+	~SpecialKeyRangeRWImpl() override {}
 };
 
 class SpecialKeyRangeAsyncImpl : public SpecialKeyRangeReadImpl {
 public:
 	explicit SpecialKeyRangeAsyncImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 
-	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const = 0;
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override = 0;
 
 	// calling with a cache object to have consistent results if we need to call rpc
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr,

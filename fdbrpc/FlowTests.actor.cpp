@@ -85,7 +85,7 @@ class LambdaCallback final : public CallbackType, public FastAllocated<LambdaCal
 		func(t);
 		delete this;
 	}
-	void fire(T&& t) {
+	void fire(T&& t) override {
 		CallbackType::remove();
 		func(std::move(t));
 		delete this;

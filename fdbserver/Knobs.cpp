@@ -22,7 +22,8 @@
 #include "fdbrpc/Locality.h"
 #include <cmath>
 
-ServerKnobs const* SERVER_KNOBS = new ServerKnobs();
+std::unique_ptr<ServerKnobs> globalServerKnobs = std::make_unique<ServerKnobs>();
+ServerKnobs const* SERVER_KNOBS = globalServerKnobs.get();
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 
@@ -381,6 +382,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( PROXY_COMPUTE_GROWTH_RATE,                             0.01 );
 	init( TXN_STATE_SEND_AMOUNT,                                    4 );
 	init( REPORT_TRANSACTION_COST_ESTIMATION_DELAY,               0.1 );
+	init( PROXY_REJECT_BATCH_QUEUED_TOO_LONG,                    true );
 
 	init( RESET_MASTER_BATCHES,                                   200 );
 	init( RESET_RESOLVER_BATCHES,                                 200 );

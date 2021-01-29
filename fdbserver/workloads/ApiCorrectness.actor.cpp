@@ -120,7 +120,7 @@ public:
 		}
 	}
 
-	virtual ~ApiCorrectnessWorkload(){ }
+	~ApiCorrectnessWorkload() override {}
 
 	std::string description() const override { return "ApiCorrectness"; }
 
@@ -141,9 +141,7 @@ public:
 		return Void();
 	}
 
-	Future<Void> performSetup(Database const& cx) {
-		return performSetup(cx, this);
-	}
+	Future<Void> performSetup(Database const& cx) override { return performSetup(cx, this); }
 
 	ACTOR Future<Void> performTest(Database cx, Standalone<VectorRef<KeyValueRef>> data, ApiCorrectnessWorkload *self) {
 		//Run the scripted test for a maximum of 10 minutes
@@ -172,7 +170,7 @@ public:
 		return Void();
 	}
 
-	Future<Void> performTest(Database const& cx, Standalone<VectorRef<KeyValueRef>> const& data) {
+	Future<Void> performTest(Database const& cx, Standalone<VectorRef<KeyValueRef>> const& data) override {
 		return performTest(cx, data, this);
 	}
 

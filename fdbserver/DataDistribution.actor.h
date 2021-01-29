@@ -85,8 +85,8 @@ struct GetTeamRequest {
 	GetTeamRequest() {}
 	GetTeamRequest( bool wantsNewServers, bool wantsTrueBest, bool preferLowerUtilization, bool teamMustHaveShards, double inflightPenalty = 1.0 ) 
 		: wantsNewServers( wantsNewServers ), wantsTrueBest( wantsTrueBest ), preferLowerUtilization( preferLowerUtilization ), teamMustHaveShards( teamMustHaveShards ), inflightPenalty( inflightPenalty ) {}
-	
-	std::string getDesc() {
+
+	std::string getDesc() const {
 		std::stringstream ss;
 
 		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest
@@ -94,11 +94,11 @@ struct GetTeamRequest {
 		   << " teamMustHaveShards:" << teamMustHaveShards
 		   << " inflightPenalty:" << inflightPenalty << ";";
 		ss << "CompleteSources:";
-		for (auto& cs : completeSources) {
+		for (const auto& cs : completeSources) {
 			ss << cs.toString() << ",";
 		}
 
-		return ss.str();
+		return std::move(ss).str();
 	}
 };
 
@@ -162,9 +162,9 @@ public:
 	//       no longer in the map), the servers will be set for all contained shards and added to all
 	//       intersecting shards.
 
-	int getNumberOfShards( UID ssID );
+	int getNumberOfShards(UID ssID) const;
 	vector<KeyRange> getShardsFor( Team team );
-	bool hasShards(Team team);
+	bool hasShards(Team team) const;
 
 	//The first element of the pair is either the source for non-moving shards or the destination team for in-flight shards
 	//The second element of the pair is all previous sources for in-flight shards

@@ -94,7 +94,7 @@ public:
 
 	Future<bool> check(Database const& cx) override { return !testFailed; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	// Test Atomic ops on non existing keys that results in a set
 	ACTOR Future<Void> testAtomicOpSetOnNonExistingKey(Database cx, AtomicOpsApiCorrectnessWorkload* self, uint32_t opType, Key key) {

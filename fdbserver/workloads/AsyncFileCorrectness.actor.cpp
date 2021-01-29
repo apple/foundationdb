@@ -96,7 +96,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 		}
 	}
 
-	virtual ~AsyncFileCorrectnessWorkload(){ }
+	~AsyncFileCorrectnessWorkload() override {}
 
 	std::string description() const override { return "AsyncFileCorrectness"; }
 
