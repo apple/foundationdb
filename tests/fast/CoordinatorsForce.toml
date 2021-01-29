@@ -2,27 +2,6 @@
 testTitle = 'ForceMixedCoordinators'
 
     [[test.workload]]
-    testName = 'Attrition'
-    machinesToKill = 10
-    machinesToLeave = 3
-    reboot = true
-    testDuration = 30.0
-
-    [[test.workload]]
-    testName = 'Attrition'
-    machinesToKill = 10
-    machinesToLeave = 3
-    reboot = true
-    testDuration = 30.0
-
-    [[test.workload]]
-    testName = 'Attrition'
-    machinesToKill = 10
-    machinesToLeave = 3
-    reboot = true
-    testDuration = 30.0
-
-    [[test.workload]]
     testName = 'CoordinatorsForce'
     testDelay = 30.0
     numExtra = 1

@@ -83,12 +83,17 @@ struct CoordinatorsForceWorkload : TestWorkload {
 		state Reference<IQuorumChange> change = specifiedQuorumChange(newCoordinators);
 
 		// Send reboot request right before attempting to change
-		for (auto rebootProc : rebootProcesses) {
-			g_simulator.rebootProcess(rebootProc, ISimulator::KillType::Reboot);
+		state int procNum;
+		for (procNum = 0; procNum < rebootProcesses.size(); ++procNum) {
+			g_simulator.rebootProcess(rebootProcesses[procNum], ISimulator::KillType::Reboot);
+			// Wait in order to allow the actor to actually perform the reboot
+			wait(delay(1.0));
+			ASSERT(!rebootProcesses[procNum]->isAvailable());
 		}
 
 		CoordinatorsResult result = wait(changeQuorum(cx, change, true));
 		TraceEvent("CoordinatorsForceResult").detail("Result", result);
+		ASSERT(result == CoordinatorsResult::SUCCESS);
 		return Void();
 	}
 
