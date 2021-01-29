@@ -535,6 +535,7 @@ public:
 
 	// Coordination
 	double COORDINATED_STATE_ONCONFLICT_POLL_INTERVAL;
+	double FORWARD_REQUEST_TOO_OLD;
 
 	// Buggification
 	double BUGGIFIED_EVENTUAL_CONSISTENCY;
