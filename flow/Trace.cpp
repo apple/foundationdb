@@ -1040,6 +1040,10 @@ TraceEvent& TraceEvent::setMaxFieldLength(int maxFieldLength) {
 	return *this;
 }
 
+int TraceEvent::getMaxFieldLength() const {
+	return maxFieldLength;
+}
+
 TraceEvent& TraceEvent::setMaxEventLength(int maxEventLength) {
 	ASSERT(!logged);
 	if(maxEventLength == 0) {
@@ -1050,6 +1054,10 @@ TraceEvent& TraceEvent::setMaxEventLength(int maxEventLength) {
 	}
 
 	return *this;
+}
+
+int TraceEvent::getMaxEventLength() const {
+	return maxEventLength;
 }
 
 TraceEvent& TraceEvent::GetLastError() {

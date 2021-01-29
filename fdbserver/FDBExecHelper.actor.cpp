@@ -78,18 +78,37 @@ ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> par
 }
 #else
 
-pid_t fork_child(const std::string& path,
-				 std::vector<char*>& paramList)
-{
+pid_t fork_child(const std::string& path, std::vector<char*>& paramList, int& readFD) {
+	int pipefd[2];
+	pipe(pipefd);
+	readFD = pipefd[0];
+	auto writeFD = pipefd[1];
 	pid_t pid = fork();
 	if (pid == -1) {
+		close(readFD);
+		close(writeFD);
 		return -1;
 	}
 	if (pid == 0) {
-		execv(const_cast<char*>(path.c_str()), &paramList[0]);
+		close(readFD);
+		dup2(writeFD, 1); // stdout
+		dup2(writeFD, 2); // stderr
+		close(writeFD);
+		execv(&path[0], &paramList[0]);
 		_exit(EXIT_FAILURE);
 	}
+	close(writeFD);
 	return pid;
+}
+
+static void setupTraceWithOutput(TraceEvent& event, size_t bytesRead, char* outputBuffer) {
+	if (bytesRead == 0) return;
+	ASSERT(bytesRead <= SERVER_KNOBS->MAX_FORKED_PROCESS_OUTPUT);
+	auto extraBytesNeeded = std::max<int>(bytesRead - event.getMaxFieldLength(), 0);
+	event.setMaxFieldLength(event.getMaxFieldLength() + extraBytesNeeded);
+	event.setMaxEventLength(event.getMaxEventLength() + extraBytesNeeded);
+	outputBuffer[bytesRead - 1] = '\0';
+	event.detail("Output", std::string(outputBuffer));
 }
 
 ACTOR Future<int> spawnProcess(std::string path, std::vector<std::string> args, double maxWaitTime, bool isSync, double maxSimDelayTime)
@@ -107,16 +126,18 @@ ACTOR Future<int> spawnProcess(std::string path, std::vector<std::string> args, 
 
 	std::vector<char*> paramList;
 	for (int i = 0; i < args.size(); i++) {
-		paramList.push_back(const_cast<char*>(args[i].c_str()));
+		paramList.push_back(&args[i][0]);
 	}
 	paramList.push_back(nullptr);
 
 	state std::string allArgs;
 	for (int i = 0; i < args.size(); i++) {
+		if (i > 0) allArgs += " ";
 		allArgs += args[i];
 	}
 
-	state pid_t pid = fork_child(path, paramList);
+	state int forkedProcessOutputFD;
+	state pid_t pid = fork_child(path, paramList, forkedProcessOutputFD);
 	if (pid == -1) {
 		TraceEvent(SevWarnAlways, "SpawnProcess: Command failed to spawn")
 			.detail("Cmd", path)
@@ -125,20 +146,32 @@ ACTOR Future<int> spawnProcess(std::string path, std::vector<std::string> args, 
 	} else if (pid > 0) {
 		state int status = -1;
 		state double runTime = 0;
+		state Arena arena;
+		state char* outputBuffer = new (arena) char[SERVER_KNOBS->MAX_FORKED_PROCESS_OUTPUT];
+		state size_t bytesRead = 0;
 		while (true) {
 			if (runTime > maxWaitTime) {
 				// timing out
+
 				TraceEvent(SevWarnAlways, "SpawnProcess : Command failed, timeout")
 					.detail("Cmd", path)
 					.detail("Args", allArgs);
 				return -1;
 			}
 			int err = waitpid(pid, &status, WNOHANG);
+			loop {
+				int bytes = read(forkedProcessOutputFD, &outputBuffer[bytesRead],
+				                 SERVER_KNOBS->MAX_FORKED_PROCESS_OUTPUT - bytesRead);
+				bytesRead += bytes;
+				if (bytes == 0) break;
+			}
+
 			if (err < 0) {
-				TraceEvent(SevWarnAlways, "SpawnProcess : Command failed")
-					.detail("Cmd", path)
-					.detail("Args", allArgs)
-					.detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+				TraceEvent event(SevWarnAlways, "SpawnProcess : Command failed");
+				setupTraceWithOutput(event, bytesRead, outputBuffer);
+				event.detail("Cmd", path)
+				    .detail("Args", allArgs)
+				    .detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
 				return -1;
 			} else if (err == 0) {
 				// child process has not completed yet
@@ -153,16 +186,18 @@ ACTOR Future<int> spawnProcess(std::string path, std::vector<std::string> args, 
 			} else {
 				// child process completed
 				if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-					TraceEvent(SevWarnAlways, "SpawnProcess : Command failed")
-						.detail("Cmd", path)
-						.detail("Args", allArgs)
-						.detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+					TraceEvent event(SevWarnAlways, "SpawnProcess : Command failed");
+					setupTraceWithOutput(event, bytesRead, outputBuffer);
+					event.detail("Cmd", path)
+					    .detail("Args", allArgs)
+					    .detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
 					return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 				}
-				TraceEvent("SpawnProcess : Command status")
-					.detail("Cmd", path)
-					.detail("Args", allArgs)
-					.detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : 0);
+				TraceEvent event("SpawnProcess : Command status");
+				setupTraceWithOutput(event, bytesRead, outputBuffer);
+				event.detail("Cmd", path)
+				    .detail("Args", allArgs)
+				    .detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : 0);
 				return 0;
 			}
 		}
