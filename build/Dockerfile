@@ -49,6 +49,16 @@ RUN cd /tmp/ &&\
     scl enable devtoolset-8 -- ./b2 link=static cxxflags=-std=c++14 --prefix=/opt/boost_1_72_0 install &&\
     rm -rf boost_1_72_0.tar.bz2 boost-sha-72.txt boost_1_72_0
 
+# jemalloc (needed for FDB after 6.3)
+RUN cd /tmp/ &&\
+    curl -L https://github.com/jemalloc/jemalloc/releases/download/5.2.1/jemalloc-5.2.1.tar.bz2 -o jemalloc-5.2.1.tar.bz2 &&\
+    echo "34330e5ce276099e2e8950d9335db5a875689a4c6a56751ef3b1d8c537f887f6  jemalloc-5.2.1.tar.bz2" > jemalloc-sha.txt &&\
+    sha256sum -c jemalloc-sha.txt &&\
+    tar --no-same-owner --no-same-permissions -xjf jemalloc-5.2.1.tar.bz2 &&\
+    cd jemalloc-5.2.1 &&\
+    scl enable devtoolset-8 -- ./configure --enable-static --disable-cxx &&\
+    scl enable devtoolset-8 -- make install
+
 # install cmake
 RUN curl -L https://github.com/Kitware/CMake/releases/download/v3.13.4/cmake-3.13.4-Linux-x86_64.tar.gz -o /tmp/cmake.tar.gz &&\
     echo "563a39e0a7c7368f81bfa1c3aff8b590a0617cdfe51177ddc808f66cc0866c76  /tmp/cmake.tar.gz" > /tmp/cmake-sha.txt &&\
