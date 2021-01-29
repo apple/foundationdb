@@ -120,7 +120,6 @@ set(FDBSERVER_SRCS
   workloads/AsyncFileRead.actor.cpp
   workloads/AsyncFileWrite.actor.cpp
   workloads/AtomicOps.actor.cpp
-  workloads/ReadHotDetection.actor.cpp
   workloads/AtomicOpsApiCorrectness.actor.cpp
   workloads/AtomicRestore.actor.cpp
   workloads/AtomicSwitchover.actor.cpp
@@ -132,6 +131,7 @@ set(FDBSERVER_SRCS
   workloads/BackupToDBAbort.actor.cpp
   workloads/BackupToDBCorrectness.actor.cpp
   workloads/BackupToDBUpgrade.actor.cpp
+  workloads/BlobStoreWorkload.h
   workloads/BulkLoad.actor.cpp
   workloads/BulkSetup.actor.h
   workloads/Cache.actor.cpp
@@ -187,6 +187,7 @@ set(FDBSERVER_SRCS
   workloads/RandomMoveKeys.actor.cpp
   workloads/RandomSelector.actor.cpp
   workloads/ReadAfterWrite.actor.cpp
+  workloads/ReadHotDetection.actor.cpp
   workloads/ReadWrite.actor.cpp
   workloads/RemoveServersSafely.actor.cpp
   workloads/ReportConflictingKeys.actor.cpp
