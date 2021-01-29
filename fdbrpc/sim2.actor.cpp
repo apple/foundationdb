@@ -1278,7 +1278,6 @@ public:
 			machine->fault_injection_p2 = deterministicRandom()->random01();
 		} else if (kt == FailDisk) {
 			TraceEvent(SevWarn, "FailDiskMachine").detail("Name", machine->name).detail("Address", machine->address).detail("ZoneId", machine->locality.zoneId()).detail("Process", machine->toString()).detail("Rebooting", machine->rebooting).detail("Protected", protectedAddresses.count(machine->address)).backtrace();
-			ASSERT(false);
 			machine->failedDisk = true;
 		} else {
 			ASSERT( false );
