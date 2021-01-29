@@ -1,4 +1,4 @@
-ARG IMAGE_TAG=0.1.21
+ARG IMAGE_TAG=0.1.23
 FROM foundationdb/foundationdb-build:${IMAGE_TAG}
 
 USER root
