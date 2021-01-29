@@ -45,12 +45,12 @@ struct CoordinatorsForceWorkload : TestWorkload {
 		state int protectedAdded = 0;
 		state int normalAdded = 0;
 
-		// Wait and let simulation run a little bit first
-		wait(delay(self->testDelay));
-
 		// Similar to the check in ConsistencyCheck::checkCoordinators,
 		// ensure that two coordinators do not have the same zoneID
 		state vector<ProcessData> workers = wait(getWorkers(cx));
+
+		// Wait and let simulation run a little bit first
+		wait(delay(self->testDelay));
 
 		state std::map<NetworkAddress, LocalityData> addr_locality;
 		for (auto w : workers) {
@@ -65,7 +65,7 @@ struct CoordinatorsForceWorkload : TestWorkload {
 			checkDuplicates.insert(findResult->second.zoneId());
 			++protectedAdded;
 		}
-
+		state vector<ISimulator::ProcessInfo*> rebootProcesses;
 		for (auto processInfo : g_simulator.getAllProcesses()) {
 			if (normalAdded == self->numExtra) break;
 			if (g_simulator.protectedAddresses.count(processInfo->address)) {
@@ -74,12 +74,18 @@ struct CoordinatorsForceWorkload : TestWorkload {
 			}
 			auto findResult = addr_locality.find(processInfo->address);
 			if (findResult == addr_locality.end() || checkDuplicates.count(findResult->second.zoneId())) continue;
+			rebootProcesses.push_back(processInfo);
 			newCoordinators.push_back(processInfo->address);
 			checkDuplicates.insert(findResult->second.zoneId());
 			++normalAdded;
 		}
 		TraceEvent("CoordinatorsForceSet").detail("NewCoordinators", describe(newCoordinators));
 		state Reference<IQuorumChange> change = specifiedQuorumChange(newCoordinators);
+
+		// Send reboot request right before attempting to change
+		for (auto rebootProc : rebootProcesses) {
+			g_simulator.rebootProcess(rebootProc, ISimulator::KillType::Reboot);
+		}
 
 		CoordinatorsResult result = wait(changeQuorum(cx, change, true));
 		TraceEvent("CoordinatorsForceResult").detail("Result", result);

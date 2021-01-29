@@ -24,4 +24,5 @@ testTitle = 'ForceMixedCoordinators'
 
     [[test.workload]]
     testName = 'CoordinatorsForce'
-    numExtra = 2
+    testDelay = 30.0
+    numExtra = 1
