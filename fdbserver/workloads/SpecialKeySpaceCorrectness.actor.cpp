@@ -434,9 +434,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		}
 		// test case when registered range is the same as the underlying module
 		try {
-			state Standalone<RangeResultRef> result = wait(tx->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
-			                         LiteralStringRef("\xff\xff/worker_interfaces0")),
-			             CLIENT_KNOBS->TOO_MANY));
+			state Standalone<RangeResultRef> result =
+			    wait(tx->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+			                                  LiteralStringRef("\xff\xff/worker_interfaces0")),
+			                      CLIENT_KNOBS->TOO_MANY));
 			// We should have at least 1 process in the cluster
 			ASSERT(result.size());
 			state KeyValueRef entry = deterministicRandom()->randomChoice(result);
@@ -871,6 +872,177 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					tx->reset();
 					break;
 				} catch (Error& e) {
+					wait(tx->onError(e));
+				}
+			}
+		}
+		// coordinators
+		// test read, makes sure it's the same as reading from coordinatorsKey
+		loop {
+			try {
+				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				Optional<Value> res = wait(tx->get(coordinatorsKey));
+				ASSERT(res.present()); // Otherwise, database is in a bad state
+				state ClusterConnectionString cs(res.get().toString());
+				state KeyRange coordinator_process_key_range =
+				    KeyRangeRef(LiteralStringRef("process/"), LiteralStringRef("process0"))
+				        .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"));
+				Standalone<RangeResultRef> coordinator_process_kvs =
+				    wait(tx->getRange(coordinator_process_key_range, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!coordinator_process_kvs.more);
+				ASSERT(self->getRangeResultInOrder(coordinator_process_kvs));
+				ASSERT(coordinator_process_kvs.size() == cs.coordinators().size());
+				// compare the coordinator process network addresses one by one
+				for (const auto& network_address : cs.coordinators()) {
+					Key addr = Key(network_address.toString())//formatIpPort(network_address.ip, network_address.port))
+					               .withPrefix(coordinator_process_key_range.begin);
+					KeyValueRef kv(addr, ValueRef());
+					ASSERT(std::find(coordinator_process_kvs.begin(), coordinator_process_kvs.end(), kv) !=
+					       coordinator_process_kvs.end());
+				}
+				tx->reset();
+				break;
+			} catch (Error& e) {
+				wait(tx->onError(e));
+			}
+		}
+		// test change coordinators and cluster description
+		// we randomly pick one process(not coordinator) and add it, in this case, it should always succeed
+		{
+			state std::string new_cluster_description = deterministicRandom()->randomAlphaNumeric(8);
+			state Key new_coordinator_process;
+			state Standalone<RangeResultRef> old_coordinators_kvs;
+			state bool possible_to_add_coordinator;
+			state KeyRange coordinators_key_range =
+			    KeyRangeRef(LiteralStringRef("process/"), LiteralStringRef("process0"))
+			        .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"));
+			loop {
+				try {
+					// get current coordinators
+					Standalone<RangeResultRef> _coordinators_kvs =
+					    wait(tx->getRange(coordinators_key_range, CLIENT_KNOBS->TOO_MANY));
+					old_coordinators_kvs = _coordinators_kvs;
+					// pick up one non-coordinator process if possible
+					vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
+					TraceEvent(SevDebug, "CoordinatorsManualChange")
+					    .detail("OldCoordinators", old_coordinators_kvs.size())
+					    .detail("WorkerSize", workers.size());
+					if (workers.size() > old_coordinators_kvs.size()) {
+						loop {
+							auto worker = deterministicRandom()->randomChoice(workers);
+							new_coordinator_process = Key(worker.address.toString())//formatIpPort(worker.address.ip, worker.address.port))
+							                              .withPrefix(coordinators_key_range.begin);
+							KeyValueRef kv(new_coordinator_process, ValueRef());
+							if (std::find(old_coordinators_kvs.begin(), old_coordinators_kvs.end(), kv) ==
+							    old_coordinators_kvs.end()) {
+								break;
+							}
+						}
+						possible_to_add_coordinator = true;
+					} else {
+						possible_to_add_coordinator = false;
+					}
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					wait(tx->onError(e));
+				}
+			}
+			TraceEvent(SevDebug, "CoordinatorsManualChange")
+			    .detail("NewCoordinator", possible_to_add_coordinator ? new_coordinator_process.toString() : "")
+			    .detail("NewClusterDescription", new_cluster_description);
+			if (possible_to_add_coordinator) {
+				loop {
+					try {
+						tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+						for (const auto& kv : old_coordinators_kvs) {
+							// TraceEvent(SevDebug, "CoordinatorsManualChange").detail("AddressKey", kv.key.toString());
+							tx->set(kv.key, kv.value);
+						}
+						// TraceEvent(SevDebug, "CoordinatorsManualChange")
+						//     .detail("AddressKey", new_coordinator_process.toString());
+						tx->set(new_coordinator_process, ValueRef());
+						// update cluster description
+						tx->set(LiteralStringRef("cluster_description")
+						            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")),
+						        Value(new_cluster_description));
+						wait(tx->commit());
+						tx->reset();
+						break;
+					} catch (Error& e) {
+						TraceEvent(SevDebug, "CoordinatorsManualChange").error(e);
+						// if we repeat doing the change, we will get this error:
+						// CoordinatorsResult::SAME_NETWORK_ADDRESSES
+						if (e.code() == error_code_special_keys_api_failure) {
+							Optional<Value> errorMsg =
+							    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
+							ASSERT(errorMsg.present());
+							std::string errorStr;
+							auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+							auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+							// special_key_space_management_api_error_msg schema validation
+							ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+							ASSERT(valueObj["command"].get_str() == "coordinators" &&
+							       !valueObj["retriable"].get_bool());
+							ASSERT(valueObj["message"].get_str() ==
+							       "No change (existing configuration satisfies request)");
+							tx->reset();
+							break;
+						} else {
+							wait(tx->onError(e));
+						}
+					}
+				}
+				// change successful, now check it is already changed
+				try {
+					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					Optional<Value> res = wait(tx->get(coordinatorsKey));
+					ASSERT(res.present()); // Otherwise, database is in a bad state
+					ClusterConnectionString cs(res.get().toString());
+					ASSERT(cs.coordinators().size() == old_coordinators_kvs.size() + 1);
+					// verify the coordinators' addresses
+					for (const auto& network_address : cs.coordinators()) {
+						Key addr = Key(network_address.toString())//formatIpPort(network_address.ip, network_address.port))
+						               .withPrefix(coordinators_key_range.begin);
+						KeyValueRef kv(addr, ValueRef());
+						ASSERT(std::find(old_coordinators_kvs.begin(), old_coordinators_kvs.end(), kv) !=
+						           old_coordinators_kvs.end() ||
+						       new_coordinator_process == addr);
+					}
+					// verify the cluster decription
+					TraceEvent(SevDebug, "CoordinatorsManualChange")
+					    .detail("NewClsuterDescription", cs.clusterKeyName());
+					ASSERT(new_cluster_description == cs.clusterKeyName().toString());
+					tx->reset();
+				} catch (Error& e) {
+					wait(tx->onError(e));
+				}
+			}
+		}
+		// test coordinators' "auto" option
+		loop {
+			try {
+				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				tx->set(SpecialKeySpace::getManagementApiCommandOptionSpecialKey("coordinators", "auto"), ValueRef());
+				wait(tx->commit()); // if an "auto" change happened, the commit may or may not succeed
+				tx->reset();
+			} catch (Error& e) {
+				TraceEvent(SevDebug, "CoordinatorsAutoChange").error(e);
+				// if we repeat doing "auto" change, we will get this error: CoordinatorsResult::SAME_NETWORK_ADDRESSES
+				if (e.code() == error_code_special_keys_api_failure) {
+					Optional<Value> errorMsg =
+					    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
+					ASSERT(errorMsg.present());
+					std::string errorStr;
+					auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+					auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+					// special_key_space_management_api_error_msg schema validation
+					ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+					ASSERT(valueObj["command"].get_str() == "coordinators" && !valueObj["retriable"].get_bool());
+					ASSERT(valueObj["message"].get_str() == "No change (existing configuration satisfies request)");
+					tx->reset();
+					break;
+				} else {
 					wait(tx->onError(e));
 				}
 			}
