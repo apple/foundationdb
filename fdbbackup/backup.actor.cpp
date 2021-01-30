@@ -77,22 +77,22 @@ using std::endl;
 enum class ProgramExe { AGENT, BACKUP, RESTORE, FASTRESTORE_TOOL, DR_AGENT, DB_BACKUP, UNDEFINED };
 
 enum class BackupType {
-	BACKUP_UNDEFINED = 0,
-	BACKUP_START,
-	BACKUP_MODIFY,
-	BACKUP_STATUS,
-	BACKUP_ABORT,
-	BACKUP_WAIT,
-	BACKUP_DISCONTINUE,
-	BACKUP_PAUSE,
-	BACKUP_RESUME,
-	BACKUP_EXPIRE,
-	BACKUP_DELETE,
-	BACKUP_DESCRIBE,
-	BACKUP_LIST,
-	BACKUP_QUERY,
-	BACKUP_DUMP,
-	BACKUP_CLEANUP
+	UNDEFINED = 0,
+	START,
+	MODIFY,
+	STATUS,
+	ABORT,
+	WAIT,
+	DISCONTINUE,
+	PAUSE,
+	RESUME,
+	EXPIRE,
+	DELETE_BACKUP,
+	DESCRIBE,
+	LIST,
+	QUERY,
+	DUMP,
+	CLEANUP
 };
 
 enum class DBType { UNDEFINED = 0, START, STATUS, SWITCH, ABORT, PAUSE, RESUME };
@@ -1354,28 +1354,28 @@ ProgramExe getProgramType(std::string programExe) {
 }
 
 BackupType getBackupType(std::string backupType) {
-	BackupType enBackupType = BackupType::BACKUP_UNDEFINED;
+	BackupType enBackupType = BackupType::UNDEFINED;
 
 	// lowercase the string
 	std::transform(backupType.begin(), backupType.end(), backupType.begin(), ::tolower);
 
 	static std::map<std::string, BackupType> values;
 	if(values.empty()) {
-		values["start"] = BackupType::BACKUP_START;
-		values["status"] = BackupType::BACKUP_STATUS;
-		values["abort"] = BackupType::BACKUP_ABORT;
-		values["cleanup"] = BackupType::BACKUP_CLEANUP;
-		values["wait"] = BackupType::BACKUP_WAIT;
-		values["discontinue"] = BackupType::BACKUP_DISCONTINUE;
-		values["pause"] = BackupType::BACKUP_PAUSE;
-		values["resume"] = BackupType::BACKUP_RESUME;
-		values["expire"] = BackupType::BACKUP_EXPIRE;
-		values["delete"] = BackupType::BACKUP_DELETE;
-		values["describe"] = BackupType::BACKUP_DESCRIBE;
-		values["list"] = BackupType::BACKUP_LIST;
-		values["query"] = BackupType::BACKUP_QUERY;
-		values["dump"] = BackupType::BACKUP_DUMP;
-		values["modify"] = BackupType::BACKUP_MODIFY;
+		values["start"] = BackupType::START;
+		values["status"] = BackupType::STATUS;
+		values["abort"] = BackupType::ABORT;
+		values["cleanup"] = BackupType::CLEANUP;
+		values["wait"] = BackupType::WAIT;
+		values["discontinue"] = BackupType::DISCONTINUE;
+		values["pause"] = BackupType::PAUSE;
+		values["resume"] = BackupType::RESUME;
+		values["expire"] = BackupType::EXPIRE;
+		values["delete"] = BackupType::DELETE_BACKUP;
+		values["describe"] = BackupType::DESCRIBE;
+		values["list"] = BackupType::LIST;
+		values["query"] = BackupType::QUERY;
+		values["dump"] = BackupType::DUMP;
+		values["modify"] = BackupType::MODIFY;
 	}
 
 	auto i = values.find(backupType);
@@ -2945,7 +2945,7 @@ int main(int argc, char* argv[]) {
 		setvbuf(stderr, NULL, _IONBF, 0);
 
 		ProgramExe programExe = getProgramType(argv[0]);
-		BackupType backupType = BackupType::BACKUP_UNDEFINED;
+		BackupType backupType = BackupType::UNDEFINED;
 		RestoreType restoreType = RestoreType::UNKNOWN;
 		DBType dbType = DBType::UNDEFINED;
 
@@ -2972,52 +2972,52 @@ int main(int argc, char* argv[]) {
 				// Create the appropriate simple opt
 				switch (backupType)
 				{
-				case BackupType::BACKUP_START:
+				case BackupType::START:
 					args = std::make_unique<CSimpleOpt>(argc-1, &argv[1], g_rgBackupStartOptions, SO_O_EXACT);
 					break;
-				case BackupType::BACKUP_STATUS:
+				case BackupType::STATUS:
 					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupStatusOptions, SO_O_EXACT);
 					break;
-				case BackupType::BACKUP_ABORT:
+				case BackupType::ABORT:
 					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupAbortOptions, SO_O_EXACT);
 					break;
-				case BackupType::BACKUP_CLEANUP:
+				case BackupType::CLEANUP:
 					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupCleanupOptions, SO_O_EXACT);
 					break;
-				case BackupType::BACKUP_WAIT:
+				case BackupType::WAIT:
 					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupWaitOptions, SO_O_EXACT);
 					break;
-				case BackupType::BACKUP_DISCONTINUE:
+				case BackupType::DISCONTINUE:
 					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupDiscontinueOptions, SO_O_EXACT);
 					break;
-				case BackupType::BACKUP_PAUSE:
+				case BackupType::PAUSE:
 					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupPauseOptions, SO_O_EXACT);
 					break;
-				case BackupType::BACKUP_RESUME:
+				case BackupType::RESUME:
 					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupPauseOptions, SO_O_EXACT);
 					break;
-				case BackupType::BACKUP_EXPIRE:
+				case BackupType::EXPIRE:
 					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupExpireOptions, SO_O_EXACT);
 					break;
-				case BackupType::BACKUP_DELETE:
+				case BackupType::DELETE_BACKUP:
 					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupDeleteOptions, SO_O_EXACT);
 					break;
-				case BackupType::BACKUP_DESCRIBE:
+				case BackupType::DESCRIBE:
 					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupDescribeOptions, SO_O_EXACT);
 					break;
-				case BackupType::BACKUP_DUMP:
+				case BackupType::DUMP:
 					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupDumpOptions, SO_O_EXACT);
 					break;
-				case BackupType::BACKUP_LIST:
+				case BackupType::LIST:
 					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupListOptions, SO_O_EXACT);
 					break;
-				case BackupType::BACKUP_QUERY:
+				case BackupType::QUERY:
 					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupQueryOptions, SO_O_EXACT);
 					break;
-				case BackupType::BACKUP_MODIFY:
+				case BackupType::MODIFY:
 					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupModifyOptions, SO_O_EXACT);
 					break;
-				case BackupType::BACKUP_UNDEFINED:
+				case BackupType::UNDEFINED:
 				default:
 					args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT);
 					break;
@@ -3779,7 +3779,7 @@ int main(int argc, char* argv[]) {
 		case ProgramExe::BACKUP:
 			switch (backupType)
 			{
-			case BackupType::BACKUP_START: {
+			case BackupType::START: {
 				if(!initCluster())
 					return FDB_EXIT_ERROR;
 				// Test out the backup url to make sure it parses.  Doesn't test to make sure it's actually writeable.
@@ -3790,7 +3790,7 @@ int main(int argc, char* argv[]) {
 				break;
 			}
 
-			case BackupType::BACKUP_MODIFY: {
+			case BackupType::MODIFY: {
 				if(!initCluster())
 					return FDB_EXIT_ERROR;
 
@@ -3798,49 +3798,49 @@ int main(int argc, char* argv[]) {
 				break;
 			}
 
-			case BackupType::BACKUP_STATUS:
+			case BackupType::STATUS:
 				if(!initCluster())
 					return FDB_EXIT_ERROR;
 				f = stopAfter( statusBackup(db, tagName, true, jsonOutput) );
 				break;
 
-			case BackupType::BACKUP_ABORT:
+			case BackupType::ABORT:
 				if(!initCluster())
 					return FDB_EXIT_ERROR;
 				f = stopAfter( abortBackup(db, tagName) );
 				break;
 
-			case BackupType::BACKUP_CLEANUP:
+			case BackupType::CLEANUP:
 				if(!initCluster())
 					return FDB_EXIT_ERROR;
 				f = stopAfter( cleanupMutations(db, deleteData) );
 				break;
 
-			case BackupType::BACKUP_WAIT:
+			case BackupType::WAIT:
 				if(!initCluster())
 					return FDB_EXIT_ERROR;
 				f = stopAfter( waitBackup(db, tagName, stopWhenDone) );
 				break;
 
-			case BackupType::BACKUP_DISCONTINUE:
+			case BackupType::DISCONTINUE:
 				if(!initCluster())
 					return FDB_EXIT_ERROR;
 				f = stopAfter( discontinueBackup(db, tagName, waitForDone) );
 				break;
 
-			case BackupType::BACKUP_PAUSE:
+			case BackupType::PAUSE:
 				if(!initCluster())
 					return FDB_EXIT_ERROR;
 				f = stopAfter( changeBackupResumed(db, true) );
 				break;
 
-			case BackupType::BACKUP_RESUME:
+			case BackupType::RESUME:
 				if(!initCluster())
 					return FDB_EXIT_ERROR;
 				f = stopAfter( changeBackupResumed(db, false) );
 				break;
 
-			case BackupType::BACKUP_EXPIRE:
+			case BackupType::EXPIRE:
 				initTraceFile();
 				// Must have a usable cluster if either expire DateTime options were used
 				if(!expireDatetime.empty() || !expireRestorableAfterDatetime.empty()) {
@@ -3850,12 +3850,12 @@ int main(int argc, char* argv[]) {
 				f = stopAfter( expireBackupData(argv[0], destinationContainer, expireVersion, expireDatetime, db, forceAction, expireRestorableAfterVersion, expireRestorableAfterDatetime) );
 				break;
 
-			case BackupType::BACKUP_DELETE:
+			case BackupType::DELETE_BACKUP:
 				initTraceFile();
 				f = stopAfter( deleteBackupContainer(argv[0], destinationContainer) );
 				break;
 
-			case BackupType::BACKUP_DESCRIBE:
+			case BackupType::DESCRIBE:
 				initTraceFile();
 				// If timestamp lookups are desired, require a cluster file
 				if(describeTimestamps && !initCluster())
@@ -3865,23 +3865,23 @@ int main(int argc, char* argv[]) {
 				f = stopAfter( describeBackup(argv[0], destinationContainer, describeDeep, describeTimestamps ? Optional<Database>(db) : Optional<Database>(), jsonOutput) );
 				break;
 
-			case BackupType::BACKUP_LIST:
+			case BackupType::LIST:
 				initTraceFile();
 				f = stopAfter( listBackup(baseUrl) );
 				break;
 
-			case BackupType::BACKUP_QUERY:
+			case BackupType::QUERY:
 				initTraceFile();
 				f = stopAfter(queryBackup(argv[0], destinationContainer, backupKeysFilter, restoreVersion,
 				                          restoreClusterFileOrig, restoreTimestamp, !quietDisplay));
 				break;
 
-			case BackupType::BACKUP_DUMP:
+			case BackupType::DUMP:
 				initTraceFile();
 				f = stopAfter( dumpBackupData(argv[0], destinationContainer, dumpBegin, dumpEnd) );
 				break;
 
-			case BackupType::BACKUP_UNDEFINED:
+			case BackupType::UNDEFINED:
 			default:
 				fprintf(stderr, "ERROR: Unsupported backup action %s\n", argv[1]);
 				printHelpTeaser(argv[0]);
