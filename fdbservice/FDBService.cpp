@@ -866,14 +866,14 @@ int main(int argc, LPCSTR *argv) {
 		}
 
 		// Check, if logging is enabled
-		else if ((!strnicmp("-l", argv[loop], 2)) ||
+		else if ((!_strnicmp("-l", argv[loop], 2)) ||
 			(!_strnicmp("--l", argv[loop], 3)))
 		{
 			logging = true;
 		}
 
 		// Check, if help is requested
-		else if ((!strnicmp("-h", argv[loop], 2)) ||
+		else if ((!_strnicmp("-h", argv[loop], 2)) ||
 			(!_strnicmp("--h", argv[loop], 3)))
 		{
 			print_usage(argv[0]);
