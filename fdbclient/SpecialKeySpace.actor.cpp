@@ -661,13 +661,6 @@ void ManagementCommandsOptionsImpl::set(ReadYourWritesTransaction* ryw, const Ke
 		TraceEvent(SevDebug, "ManagementApiOption").detail("Option", option).detail("Key", key);
 		ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(value)));
 	}
-	// a hack to make sure we execute CoordinatorsImpl::commit
-	// if (key == SpecialKeySpace::getManagementApiCommandOptionSpecialKey("coordinators", "auto")) {
-	// 	Key hack_key =
-	// 	    LiteralStringRef("option/auto").withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"));
-	// 	// since clear is forbidden in coordinators special key range, this is okay
-	// 	ryw->getSpecialKeySpaceWriteMap().insert(hack_key, std::make_pair(true, Optional<Value>()));
-	// }
 }
 
 void ManagementCommandsOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
@@ -1399,11 +1392,12 @@ Future<Standalone<RangeResultRef>> CoordinatorsImpl::getRange(ReadYourWritesTran
 	// include :tls in keys if the network addresss is TLS
 	std::sort(coordinator_processes.begin(), coordinator_processes.end(),
 	          [](const NetworkAddress& lhs, const NetworkAddress& rhs) {
-		        //   return formatIpPort(lhs.ip, lhs.port) < formatIpPort(rhs.ip, rhs.port);
-				return lhs.toString() < rhs.toString();
+		          //   return formatIpPort(lhs.ip, lhs.port) < formatIpPort(rhs.ip, rhs.port);
+		          return lhs.toString() < rhs.toString();
 	          });
 	for (auto& w : coordinator_processes) {
-		Key k(prefix.withSuffix(LiteralStringRef("process/")).withSuffix(w.toString()));//formatIpPort(w.ip, w.port)));
+		Key k(prefix.withSuffix(LiteralStringRef("process/")).withSuffix(w.toString())); // formatIpPort(w.ip,
+		                                                                                 // w.port)));
 		if (kr.contains(k)) {
 			result.push_back(result.arena(), KeyValueRef(k, ValueRef()));
 			result.arena().dependsOn(k.arena());
@@ -1446,12 +1440,6 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 	auto auto_option = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
 	    "coordinators", "auto")];
 	if (auto_option.first) {
-		// auto option is speicified, check the hack_key we use is set
-		// auto hack_entry =
-		//     ryw->getSpecialKeySpaceWriteMap()[LiteralStringRef("option/auto")
-		//                                           .withPrefix(
-		//                                               SpecialKeySpace::getManagementApiCommandPrefix("coordinators"))];
-		// ASSERT(hack_entry.first && !hack_entry.second.present());
 		change = autoQuorumChange();
 	} else {
 		if (addressesVec.size())
