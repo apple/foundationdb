@@ -309,7 +309,7 @@ struct SQLiteDB : NonCopyable {
 		int tables[] = {1, table, freetable};
 		TraceEvent("BTreeIntegrityCheckBegin").detail("Filename", filename);
 		char* e = sqlite3BtreeIntegrityCheck(btree, tables, 3, 1000, &errors, verbose);
-		if (!(g_network->isSimulated() && (g_simulator.getCurrentProcess()->fault_injection_p1 || g_simulator.getCurrentProcess()->rebooting))) {
+		if (!(g_network->isSimulated() && VFSAsyncFile::checkInjectedError())) {
 			TraceEvent((errors||e) ? SevError : SevInfo, "BTreeIntegrityCheckResults").detail("Filename", filename).detail("ErrorTotal", errors);
 			if(e != nullptr) {
 				// e is a string containing 1 or more lines.  Create a separate trace event for each line.
@@ -1657,7 +1657,7 @@ private:
 			if (checkIntegrityOnOpen || EXPENSIVE_VALIDATION) {
 				if(conn.check(false) != 0) {
 					// A corrupt btree structure must not be used.
-					if (g_network->isSimulated() && (g_simulator.getCurrentProcess()->fault_injection_p1 || g_simulator.getCurrentProcess()->machine->machineProcess->fault_injection_p1 || g_simulator.getCurrentProcess()->rebooting)) {
+					if (g_network->isSimulated() && VFSAsyncFile::checkInjectedError()) {
 						throw file_corrupt().asInjectedFault();
 					} else {
 						throw file_corrupt();
