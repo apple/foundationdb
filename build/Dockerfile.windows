@@ -1,0 +1,41 @@
+# escape=`
+
+# Use the latest Windows Server Core image with .NET Framework 4.8.
+FROM mcr.microsoft.com/dotnet/framework/sdk:4.8-windowsservercore-ltsc2019
+
+# Restore the default Windows shell for correct batch processing.
+SHELL ["cmd", "/S", "/C"]
+
+# Download the Build Tools bootstrapper.
+ADD https://aka.ms/vs/16/release/vs_buildtools.exe C:\TEMP\vs_buildtools.exe
+
+# Install Build Tools with the Microsoft.VisualStudio.Workload.AzureBuildTools workload, excluding workloads and components with known issues.
+RUN C:\TEMP\vs_buildtools.exe --quiet --wait --norestart --nocache `
+    --installPath C:\BuildTools `
+    --add  Microsoft.VisualStudio.Workload.VCTools `
+    --add Microsoft.VisualStudio.Component.TestTools.BuildTools `
+    --add Microsoft.VisualStudio.Component.VC.ASAN `
+    --add Microsoft.VisualStudio.Component.VC.CMake.Project `
+    --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+    --add Microsoft.VisualStudio.Component.Windows10SDK.18362 `
+ || IF "%ERRORLEVEL%"=="3010" EXIT 0
+#
+## Install Choco package manager
+RUN powershell -Command "iwr https://chocolatey.org/install.ps1 -UseBasicParsing | iex"
+RUN powershell -Command choco install cmake 7zip -y
+
+# add cmake to the path
+RUN setx path "%path%;C:\Program Files\CMake\bin"
+
+# Download boost
+RUN mkdir C:\Downloads
+RUN powershell -Command iwr -Uri https://dl.bintray.com/boostorg/release/1.72.0/source/boost_1_72_0.7z -OutFile C:\Downloads\boost_1_72_0.7z
+RUN powershell -Command (Get-FileHash C:\Downloads\boost_1_72_0.7z).Hash -eq \"247a91dd7e4d9dd3c4b954b532fbc167ba62dc15ab834e5ad893d7c3f9eb5f0f\"
+RUN cd \Downloads && powershell -Command "& 'C:\Program Files\7-Zip\7z.exe'" x boost_1_72_0.7z
+
+# Compile boost context
+RUN C:\BuildTools\Common7\Tools\VsDevCmd.bat && cd \Downloads\boost_1_72_0 && .\bootstrap.bat && .\b2 --with-context --build-type=complete --layout=system install
+
+# Define the entry point for the docker container.
+# This entry point starts the developer command prompt and launches the PowerShell shell.
+ENTRYPOINT ["C:\\BuildTools\\Common7\\Tools\\VsDevCmd.bat", "&&", "powershell.exe", "-NoLogo", "-ExecutionPolicy", "Bypass"]
