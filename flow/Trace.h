@@ -26,7 +26,6 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <string>
-#include <chrono>
 #include <map>
 #include <set>
 #include <type_traits>
@@ -498,7 +497,7 @@ public:
 	// Return the number of invocations of TraceEvent() at the specified logging level.
 	static unsigned long CountEventsLoggedAt(Severity);
 
-	DynamicEventMetric *tmpEventMetric;  // This just just a place to store fields
+	std::unique_ptr<DynamicEventMetric> tmpEventMetric; // This just just a place to store fields
 
 private:
 	bool initialized;

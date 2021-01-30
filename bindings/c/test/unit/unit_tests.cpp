@@ -1882,19 +1882,19 @@ TEST_CASE("special-key-space disable tracing") {
   }
 }
 
-TEST_CASE("FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE") {
-  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE, nullptr, 0));
+TEST_CASE("FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE") {
+  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE, nullptr, 0));
 
   auto value = get_value("\xff\xff/tracing/token", /* snapshot */ false, {});
   REQUIRE(value.has_value());
   uint64_t token = std::stoul(value.value());
   CHECK(token == 0);
 
-  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TRACE_ENABLE, nullptr, 0));
+  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_ENABLE, nullptr, 0));
 }
 
-TEST_CASE("FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE enable tracing for transaction") {
-  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE, nullptr, 0));
+TEST_CASE("FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE enable tracing for transaction") {
+  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE, nullptr, 0));
 
   fdb::Transaction tr(db);
   fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES,
@@ -1922,7 +1922,7 @@ TEST_CASE("FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE enable tracing for transactio
     break;
   }
 
-  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TRACE_ENABLE, nullptr, 0));
+  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_ENABLE, nullptr, 0));
 }
 
 TEST_CASE("special-key-space tracing get range") {
@@ -2025,6 +2025,25 @@ TEST_CASE("fdb_database_reboot_worker") {
   int new_generation = statusJson["cluster"]["generation"].GetInt();
   // The generation number should increase after the recovery
   CHECK(new_generation > old_generation);
+}
+
+TEST_CASE("fdb_database_force_recovery_with_data_loss") {
+	// This command cannot be tested completely in the current unit test configuration
+	// For now, we simply call the function to make sure it exist
+	// Background:
+	// It is also only usable when usable_regions=2, so it requires a fearless configuration
+	// In particular, you have two data centers, and the storage servers in one region are allowed to fall behind (async
+	// replication) Normally, you would not want to recover to that set of storage servers unless there are tlogs which
+	// can let those storage servers catch up However, if all the tlogs are dead and you still want to be able to
+	// recover your database even if that means losing recently committed mutation, that's the time this function works
+
+	std::string dcid = "test_id";
+	while (1) {
+		fdb::EmptyFuture f =
+		    fdb::Database::force_recovery_with_data_loss(db, (const uint8_t*)dcid.c_str(), dcid.size());
+		fdb_check(wait_future(f));
+		break;
+  }
 }
 
 TEST_CASE("fdb_error_predicate") {

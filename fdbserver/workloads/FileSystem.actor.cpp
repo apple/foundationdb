@@ -312,17 +312,17 @@ struct FileSystemWorkload : TestWorkload {
 	}
 
 	class RecentModificationQuery : public FileSystemOp {
-		virtual Future<Optional<Version>> run( FileSystemWorkload *self, Transaction* tr ) {
+		Future<Optional<Version>> run(FileSystemWorkload* self, Transaction* tr) override {
 			return self->modificationQuery( self, tr );
 		}
-		virtual const char* name() { return "RecentUserModifications"; }
+		const char* name() override { return "RecentUserModifications"; }
 	};
 
 	class ServerDeletionCountQuery : public FileSystemOp {
-		virtual Future<Optional<Version>> run( FileSystemWorkload *self, Transaction* tr ) {
+		Future<Optional<Version>> run(FileSystemWorkload* self, Transaction* tr) override {
 			return self->deletionQuery( self, tr );
 		}
-		virtual const char* name() { return "ServerDeletions"; }
+		const char* name() override { return "ServerDeletions"; }
 	};
 };
 

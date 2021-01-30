@@ -249,7 +249,7 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(std::string const
 	}
 }
 
-std::string S3BlobStoreEndpoint::getResourceURL(std::string resource, std::string params) {
+std::string S3BlobStoreEndpoint::getResourceURL(std::string resource, std::string params) const {
 	std::string hostPort = host;
 	if (!service.empty()) {
 		hostPort.append(":");
@@ -271,14 +271,14 @@ std::string S3BlobStoreEndpoint::getResourceURL(std::string resource, std::strin
 		params.append(knobParams);
 	}
 
-	for (auto& kv : extraHeaders) {
+	for (const auto& [k, v] : extraHeaders) {
 		if (!params.empty()) {
 			params.append("&");
 		}
 		params.append("header=");
-		params.append(HTTP::urlEncode(kv.first));
+		params.append(HTTP::urlEncode(k));
 		params.append(":");
-		params.append(HTTP::urlEncode(kv.second));
+		params.append(HTTP::urlEncode(v));
 	}
 
 	if (!params.empty()) r.append("?").append(params);
@@ -563,12 +563,12 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 	headers["Accept"] = "application/xml";
 
 	// Merge extraHeaders into headers
-	for (auto& kv : bstore->extraHeaders) {
-		std::string& fieldValue = headers[kv.first];
+	for (const auto& [k, v] : bstore->extraHeaders) {
+		std::string& fieldValue = headers[k];
 		if (!fieldValue.empty()) {
 			fieldValue.append(",");
 		}
-		fieldValue.append(kv.second);
+		fieldValue.append(v);
 	}
 
 	// For requests with content to upload, the request timeout should be at least twice the amount of time

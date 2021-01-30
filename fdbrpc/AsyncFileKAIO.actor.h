@@ -52,7 +52,7 @@ DESCR struct SlowAioSubmit {
 	int64_t largestTruncate;
 };
 
-class AsyncFileKAIO : public IAsyncFile, public ReferenceCounted<AsyncFileKAIO> {
+class AsyncFileKAIO final : public IAsyncFile, public ReferenceCounted<AsyncFileKAIO> {
 public:
 
 #if KAIO_LOGGING
@@ -179,8 +179,8 @@ public:
 	static int get_eventfd() { return ctx.evfd; }
 	static void setTimeout(double ioTimeout) { ctx.setIOTimeout(ioTimeout); }
 
-	virtual void addref() { ReferenceCounted<AsyncFileKAIO>::addref(); }
-	virtual void delref() { ReferenceCounted<AsyncFileKAIO>::delref(); }
+	void addref() override { ReferenceCounted<AsyncFileKAIO>::addref(); }
+	void delref() override { ReferenceCounted<AsyncFileKAIO>::delref(); }
 
 	Future<int> read(void* data, int length, int64_t offset) override {
 		++countFileLogicalReads;
@@ -343,7 +343,7 @@ public:
 	Future<int64_t> size() const override { return nextFileSize; }
 	int64_t debugFD() const override { return fd; }
 	std::string getFilename() const override { return filename; }
-	~AsyncFileKAIO() {
+	~AsyncFileKAIO() override {
 		close(fd);
 
 #if KAIO_LOGGING

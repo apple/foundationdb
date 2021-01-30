@@ -458,7 +458,8 @@ public:
 		enASIOTimedOut = 9,
 		enBlobCredentialFiles = 10,
 		enNetworkAddressesFunc = 11,
-		enClientFailureMonitor = 12
+		enClientFailureMonitor = 12,
+		enSQLiteInjectedError = 13
 	};
 
 	virtual void longTaskCheck( const char* name ) {}
@@ -574,6 +575,7 @@ public:
 
 	virtual UID getDebugID() const = 0;
 	virtual NetworkAddress localAddress() const = 0;
+	virtual boost::asio::ip::udp::socket::native_handle_type native_handle() = 0;
 };
 
 class INetworkConnections {
@@ -583,7 +585,9 @@ public:
 	// security to override only these operations without having to delegate everything in INetwork.
 
 	// Make an outgoing connection to the given address.  May return an error or block indefinitely in case of connection problems!
-	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host = "") = 0;
+	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, const std::string &host = "") = 0;
+
+	virtual Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, const std::string &host = "") = 0;
 
 	// Make an outgoing udp connection and connect to the passed address.
 	virtual Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) = 0;
@@ -591,11 +595,11 @@ public:
 	virtual Future<Reference<IUDPSocket>> createUDPSocket(bool isV6 = false) = 0;
 
 	// Resolve host name and service name (such as "http" or can be a plain number like "80") to a list of 1 or more NetworkAddresses
-	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service ) = 0;
+	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string &host, const std::string &service ) = 0;
 
 	// Convenience function to resolve host/service and connect to one of its NetworkAddresses randomly
 	// useTLS has to be a parameter here because it is passed to connect() as part of the toAddr object.
-	virtual Future<Reference<IConnection>> connect( std::string host, std::string service, bool useTLS = false);
+	virtual Future<Reference<IConnection>> connect( const std::string &host, const std::string &service, bool useTLS = false);
 
 	// Listen for connections on the given local address
 	virtual Reference<IListener> listen( NetworkAddress localAddr ) = 0;

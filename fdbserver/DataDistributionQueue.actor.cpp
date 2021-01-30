@@ -181,7 +181,7 @@ public:
 		return result;
 	}
 
-	bool hasHealthyAvailableSpace(double minRatio) const {
+	bool hasHealthyAvailableSpace(double minRatio) const override {
 		return all([minRatio](IDataDistributionTeam const& team) { return team.hasHealthyAvailableSpace(minRatio); });
 	}
 

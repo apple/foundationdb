@@ -47,6 +47,7 @@ set(FLOW_SRCS
   Platform.h
   Profiler.actor.cpp
   Profiler.h
+  SendBufferIterator.h
   SignalSafeUnwind.cpp
   SignalSafeUnwind.h
   SimpleOpt.h
@@ -64,7 +65,7 @@ set(FLOW_SRCS
   Trace.cpp
   Trace.h
   Tracing.h
-  Tracing.cpp
+  Tracing.actor.cpp
   TreeBenchmark.h
   UnitTest.cpp
   UnitTest.h

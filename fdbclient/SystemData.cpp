@@ -594,6 +594,8 @@ ProcessClass decodeProcessClassValue( ValueRef const& value ) {
 const KeyRangeRef configKeys( LiteralStringRef("\xff/conf/"), LiteralStringRef("\xff/conf0") );
 const KeyRef configKeysPrefix = configKeys.begin;
 
+const KeyRef triggerDDTeamInfoPrintKey(LiteralStringRef("\xff/triggerDDTeamInfoPrint"));
+
 const KeyRangeRef excludedServersKeys( LiteralStringRef("\xff/conf/excluded/"), LiteralStringRef("\xff/conf/excluded0") );
 const KeyRef excludedServersPrefix = excludedServersKeys.begin;
 const KeyRef excludedServersVersionKey = LiteralStringRef("\xff/conf/excluded");

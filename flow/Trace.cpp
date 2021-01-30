@@ -729,7 +729,7 @@ TraceEvent::TraceEvent(TraceEvent &&ev) {
 	maxEventLength = ev.maxEventLength;
 	maxFieldLength = ev.maxFieldLength;
 	severity = ev.severity;
-	tmpEventMetric = ev.tmpEventMetric;
+	tmpEventMetric = std::move(ev.tmpEventMetric);
 	trackingKey = ev.trackingKey;
 	type = ev.type;
 	timeIndex = ev.timeIndex;
@@ -743,7 +743,6 @@ TraceEvent::TraceEvent(TraceEvent &&ev) {
 	ev.initialized = true;
 	ev.enabled = false;
 	ev.logged = true;
-	ev.tmpEventMetric = nullptr;
 }
 
 TraceEvent& TraceEvent::operator=(TraceEvent &&ev) {
@@ -757,7 +756,7 @@ TraceEvent& TraceEvent::operator=(TraceEvent &&ev) {
 	maxEventLength = ev.maxEventLength;
 	maxFieldLength = ev.maxFieldLength;
 	severity = ev.severity;
-	tmpEventMetric = ev.tmpEventMetric;
+	tmpEventMetric = std::move(ev.tmpEventMetric);
 	trackingKey = ev.trackingKey;
 	type = ev.type;
 	timeIndex = ev.timeIndex;
@@ -771,7 +770,6 @@ TraceEvent& TraceEvent::operator=(TraceEvent &&ev) {
 	ev.initialized = true;
 	ev.enabled = false;
 	ev.logged = true;
-	ev.tmpEventMetric = nullptr;
 
 	return *this;
 }
@@ -852,7 +850,7 @@ bool TraceEvent::init() {
 	}
 
 	if(enabled) {
-		tmpEventMetric = new DynamicEventMetric(MetricNameRef());
+		tmpEventMetric = std::make_unique<DynamicEventMetric>(MetricNameRef());
 
 		if(err.isValid() && err.isInjectedFault() && severity == SevError) {
 			severity = SevWarnAlways;
@@ -1107,7 +1105,7 @@ void TraceEvent::log() {
 						// If the event IS logged, a timestamp will be returned, if not then 0.  Either way, pass it through to be used if possible
 						// in the Sev* event metrics.
 
-						uint64_t event_ts = DynamicEventMetric::getOrCreateInstance(format("TraceEvent.%s", type), StringRef(), true)->setFieldsAndLogFrom(tmpEventMetric);
+						uint64_t event_ts = DynamicEventMetric::getOrCreateInstance(format("TraceEvent.%s", type), StringRef(), true)->setFieldsAndLogFrom(tmpEventMetric.get());
 						g_traceLog.log(severity, type, id, event_ts);
 					}
 				}
@@ -1115,7 +1113,7 @@ void TraceEvent::log() {
 		} catch( Error &e ) {
 			TraceEvent(SevError, "TraceEventLoggingError").error(e,true);
 		}
-		delete tmpEventMetric;
+		tmpEventMetric.reset();
 		logged = true;
 		--g_allocation_tracing_disabled;
 	}

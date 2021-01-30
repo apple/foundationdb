@@ -35,7 +35,11 @@ inline Location operator"" _loc(const char* str, size_t size) {
 
 struct Span {
 	Span(SpanID context, Location location, std::initializer_list<SpanID> const& parents = {})
-	  : context(context), begin(g_network->now()), location(location), parents(arena, parents.begin(), parents.end()) {}
+	  : context(context), begin(g_network->now()), location(location), parents(arena, parents.begin(), parents.end()) {
+		if (parents.size() > 0) {
+			this->context = SpanID((*parents.begin()).first(), context.second());
+		}
+	}
 	Span(Location location, std::initializer_list<SpanID> const& parents = {})
 	  : Span(deterministicRandom()->randomUniqueID(), location, parents) {}
 	Span(Location location, SpanID context) : Span(location, { context }) {}
@@ -64,19 +68,36 @@ struct Span {
 		std::swap(parents, other.parents);
 	}
 
-	void addParent(SpanID span) { parents.push_back(arena, span); }
+	void addParent(SpanID span) {
+		if (parents.size() == 0) {
+			// Use first parent to set trace ID. This is non-ideal for spans
+			// with multiple parents, because the trace ID will associate the
+			// span with only one trace. A workaround is to look at the parent
+			// relationships instead of the trace ID. Another option in the
+			// future is to keep a list of trace IDs.
+			context = SpanID(span.first(), context.second());
+		}
+		parents.push_back(arena, span);
+	}
+
+	void addTag(const StringRef& key, const StringRef& value) {
+		tags[key] = value;
+	}
 
 	Arena arena;
 	UID context = UID();
 	double begin = 0.0, end = 0.0;
 	Location location;
 	SmallVectorRef<SpanID> parents;
+	std::unordered_map<StringRef, StringRef> tags;
 };
 
 enum class TracerType {
 	DISABLED = 0,
 	LOG_FILE = 1,
-	END = 2
+	NETWORK_ASYNC = 2,
+	NETWORK_LOSSY = 3,
+	END = 4
 };
 
 struct ITracer {

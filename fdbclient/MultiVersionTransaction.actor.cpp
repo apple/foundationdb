@@ -298,6 +298,17 @@ ThreadFuture<int64_t> DLDatabase::rebootWorker(const StringRef& address, bool ch
 		return res;
 	});
 }
+
+ThreadFuture<Void> DLDatabase::forceRecoveryWithDataLoss(const StringRef &dcid) {
+	if(!api->databaseForceRecoveryWithDataLoss) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture *f = api->databaseForceRecoveryWithDataLoss(db, dcid.begin(), dcid.size());
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
+		return Void();
+	});
+}
 	
 // DLApi
 template<class T>
@@ -334,6 +345,7 @@ void DLApi::init() {
 	loadClientFunction(&api->databaseSetOption, lib, fdbCPath, "fdb_database_set_option");
 	loadClientFunction(&api->databaseDestroy, lib, fdbCPath, "fdb_database_destroy");
 	loadClientFunction(&api->databaseRebootWorker, lib, fdbCPath, "fdb_database_reboot_worker", headerVersion >= 700);
+	loadClientFunction(&api->databaseForceRecoveryWithDataLoss, lib, fdbCPath, "fdb_database_force_recovery_with_data_loss", headerVersion >= 700);
 
 	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option");
 	loadClientFunction(&api->transactionDestroy, lib, fdbCPath, "fdb_transaction_destroy");
@@ -801,6 +813,11 @@ ThreadFuture<int64_t> MultiVersionDatabase::rebootWorker(const StringRef& addres
 		return dbState->db->rebootWorker(address, check, duration);
 	}
 	return false;
+}
+
+ThreadFuture<Void> MultiVersionDatabase::forceRecoveryWithDataLoss(const StringRef &dcid) {
+	auto f = dbState->db ? dbState->db->forceRecoveryWithDataLoss(dcid) : ThreadFuture<Void>(Never());
+	return abortableFuture(f, dbState->dbVar->get().onChange);
 }
 
 void MultiVersionDatabase::Connector::connect() {

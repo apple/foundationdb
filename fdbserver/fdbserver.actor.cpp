@@ -39,6 +39,7 @@
 #include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
+#include "fdbclient/BuildFlags.h"
 #include "fdbmonitor/SimpleIni.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
@@ -87,8 +88,8 @@
 enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_TRACER, OPT_NEWCONSOLE,
 	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
-	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK,
-	OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
+	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
+	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE
 };
@@ -149,6 +150,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_BUGGIFY,               "--buggify",                   SO_REQ_SEP },
 	{ OPT_VERSION,               "-v",                          SO_NONE },
 	{ OPT_VERSION,               "--version",                   SO_NONE },
+	{ OPT_BUILD_FLAGS,           "--build_flags",               SO_NONE },
 	{ OPT_CRASHONERROR,          "--crash",                     SO_NONE },
 	{ OPT_NETWORKIMPL,           "-N",                          SO_REQ_SEP },
 	{ OPT_NETWORKIMPL,           "--network",                   SO_REQ_SEP },
@@ -475,6 +477,10 @@ void* parentWatcher(void *arg) {
 }
 #endif
 
+static void printBuildInformation() {
+	printf("%s", jsonBuildInformation().c_str());
+}
+
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getSourceVersion());
@@ -604,6 +610,7 @@ static void printUsage( const char *name, bool devhelp ) {
 	printOptionUsage("-v, --version", "Print version information and exit.");
 	printOptionUsage("-h, -?, --help", "Display this help and exit.");
 	if( devhelp ) {
+		printf("  --build_flags  Print build information and exit.\n");
 		printOptionUsage("-r ROLE, --role ROLE",
 			   " Server role (valid options are fdbd, test, multitest,"
 			   " simulation, networktestclient, networktestserver, restore"
@@ -1040,6 +1047,9 @@ private:
 				printVersion();
 				flushAndExit(FDB_EXIT_SUCCESS);
 				break;
+			case OPT_BUILD_FLAGS:
+				printBuildInformation();
+				flushAndExit(FDB_EXIT_SUCCESS);
 			case OPT_NOBUFSTDOUT:
 				setvbuf(stdout, nullptr, _IONBF, 0);
 				setvbuf(stderr, nullptr, _IONBF, 0);
@@ -1241,6 +1251,10 @@ private:
 					openTracer(TracerType::DISABLED);
 				} else if (tracer == "logfile" || tracer == "file" || tracer == "log_file") {
 					openTracer(TracerType::LOG_FILE);
+				} else if (tracer == "network_async") {
+					openTracer(TracerType::NETWORK_ASYNC);
+				} else if (tracer == "network_lossy") {
+					openTracer(TracerType::NETWORK_LOSSY);
 				} else {
 					fprintf(stderr, "ERROR: Unknown or unsupported tracer: `%s'", args.OptionArg());
 					printHelpTeaser(argv[0]);
@@ -1570,27 +1584,16 @@ int main(int argc, char* argv[]) {
 
 		enableBuggify(opts.buggifyEnabled, BuggifyType::General);
 
-		delete FLOW_KNOBS;
-		delete SERVER_KNOBS;
-		delete CLIENT_KNOBS;
-		FlowKnobs* flowKnobs = new FlowKnobs;
-		ClientKnobs* clientKnobs = new ClientKnobs;
-		ServerKnobs* serverKnobs = new ServerKnobs;
-		FLOW_KNOBS = flowKnobs;
-		SERVER_KNOBS = serverKnobs;
-		CLIENT_KNOBS = clientKnobs;
-
-		if (!serverKnobs->setKnob("log_directory", opts.logFolder)) ASSERT(false);
+		if (!globalServerKnobs->setKnob("log_directory", opts.logFolder)) ASSERT(false);
 		if (role != ServerRole::Simulation) {
-			if (!serverKnobs->setKnob("commit_batches_mem_bytes_hard_limit", std::to_string(opts.memLimit)))
+			if (!globalServerKnobs->setKnob("commit_batches_mem_bytes_hard_limit", std::to_string(opts.memLimit)))
 				ASSERT(false);
 		}
 		for (auto k = opts.knobs.begin(); k != opts.knobs.end(); ++k) {
 			try {
-				if (!flowKnobs->setKnob( k->first, k->second ) &&
-					!clientKnobs->setKnob( k->first, k->second ) &&
-					!serverKnobs->setKnob( k->first, k->second ))
-				{
+				if (!globalFlowKnobs->setKnob(k->first, k->second) &&
+				    !globalClientKnobs->setKnob(k->first, k->second) &&
+				    !globalServerKnobs->setKnob(k->first, k->second)) {
 					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", k->first.c_str());
 					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(k->first));
 				}
@@ -1605,15 +1608,15 @@ int main(int argc, char* argv[]) {
 				}
 			}
 		}
-		if (!serverKnobs->setKnob("server_mem_limit", std::to_string(opts.memLimit))) ASSERT(false);
+		if (!globalServerKnobs->setKnob("server_mem_limit", std::to_string(opts.memLimit))) ASSERT(false);
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		flowKnobs->initialize(true, role == ServerRole::Simulation);
-		clientKnobs->initialize(true);
-		serverKnobs->initialize(true, clientKnobs, role == ServerRole::Simulation);
+		globalFlowKnobs->initialize(true, role == ServerRole::Simulation);
+		globalClientKnobs->initialize(true);
+		globalServerKnobs->initialize(true, globalClientKnobs.get(), role == ServerRole::Simulation);
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
-		EvictablePageCache::evictionPolicyStringToEnum(flowKnobs->CACHE_EVICTION_POLICY);
+		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
 
 		if (opts.memLimit <= FLOW_KNOBS->PAGE_CACHE_4K) {
 			fprintf(stderr, "ERROR: --memory has to be larger than --cache_memory\n");
@@ -1751,9 +1754,9 @@ int main(int argc, char* argv[]) {
 
 			auto histogramReportActor = histogramReport();
 
-			clientKnobs->trace();
-			flowKnobs->trace();
-			serverKnobs->trace();
+			CLIENT_KNOBS->trace();
+			FLOW_KNOBS->trace();
+			SERVER_KNOBS->trace();
 
 			auto dataFolder = opts.dataFolder.size() ? opts.dataFolder : "simfdb";
 			std::vector<std::string> directories = platform::listDirectories( dataFolder );

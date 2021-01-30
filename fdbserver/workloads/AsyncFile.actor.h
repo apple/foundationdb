@@ -78,12 +78,12 @@ struct AsyncFileWorkload : TestWorkload
 	std::string path;
 
 	AsyncFileWorkload(WorkloadContext const&);
-	virtual ~AsyncFileWorkload() { }
+	~AsyncFileWorkload() override {}
 
 	//Allocates a buffer of a given size.  If necessary, the buffer will be aligned to 4K
 	Reference<AsyncFileBuffer> allocateBuffer(size_t size);
 
-	virtual Future<bool> check(Database const& cx);
+	Future<bool> check(Database const& cx) override;
 
 	//Opens a file for AsyncFile operations.  If the path is empty, then creates a file and fills it with random data
 	ACTOR Future<Void> openFile(AsyncFileWorkload *self, int64_t flags, int64_t mode, uint64_t size, bool fillFile = false)

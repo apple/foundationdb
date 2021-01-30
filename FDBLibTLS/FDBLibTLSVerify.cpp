@@ -147,7 +147,7 @@ static NID abbrevToNID(std::string const& sn) {
 
 static X509Location locationForNID(NID nid) {
 	const char* name = OBJ_nid2ln(nid);
-	if (name == NULL) {
+	if (name == nullptr) {
 		throw std::runtime_error("locationForNID");
 	}
 	if (strncmp(name, "X509v3", 6) == 0) {

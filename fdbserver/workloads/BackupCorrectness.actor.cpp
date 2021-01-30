@@ -681,8 +681,9 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			}
 
 			// SOMEDAY: Remove after backup agents can exist quiescently
-			if ((g_simulator.backupAgents == ISimulator::BackupToFile) && (!BackupAndRestoreCorrectnessWorkload::backupAgentRequests)) {
-				g_simulator.backupAgents = ISimulator::NoBackupAgents;
+			if ((g_simulator.backupAgents == ISimulator::BackupAgentType::BackupToFile) &&
+			    (!BackupAndRestoreCorrectnessWorkload::backupAgentRequests)) {
+				g_simulator.backupAgents = ISimulator::BackupAgentType::NoBackupAgents;
 			}
 		}
 		catch (Error& e) {
