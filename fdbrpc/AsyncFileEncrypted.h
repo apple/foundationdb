@@ -42,46 +42,18 @@ class AsyncFileEncrypted : public IAsyncFile, public ReferenceCounted<AsyncFileE
 	static Optional<StreamCipher::Key> key;
 	static StreamCipher::Key getKey();
 
-	template <class K, class V>
+	// Reading:
 	class RandomCache {
 		size_t maxSize;
-		std::vector<K> vec;
-		std::unordered_map<K, V> hashMap;
-
-		size_t evict() {
-			ASSERT(vec.size() == maxSize);
-			auto index = deterministicRandom()->randomInt(0, maxSize);
-			hashMap.erase(vec[index]);
-			return index;
-		}
+		std::vector<uint16_t> vec;
+		std::unordered_map<uint16_t, Standalone<StringRef>> hashMap;
+		size_t evict();
 
 	public:
-		RandomCache(size_t maxSize) : maxSize(maxSize) { vec.reserve(maxSize); }
-
-		void insert(const K& key, const V& value) {
-			auto [it, found] = hashMap.insert({ key, value });
-			if (found) {
-				return;
-			} else if (vec.size() < maxSize) {
-				vec.push_back(key);
-			} else {
-				auto index = evict();
-				vec[index] = key;
-			}
-		}
-
-		Optional<V> get(const K& key) const {
-			auto it = hashMap.find(key);
-			if (it == hashMap.end()) {
-				return {};
-			} else {
-				return it->second;
-			}
-		}
-	};
-
-	// Reading:
-	RandomCache<uint16_t, Standalone<StringRef>> readBuffers;
+		RandomCache(size_t maxSize);
+		void insert(uint16_t block, const Standalone<StringRef>& value);
+		Optional<Standalone<StringRef>> get(uint16_t block) const;
+	} readBuffers;
 
 	// Writing (append only):
 	std::unique_ptr<EncryptionStreamCipher> encryptor;

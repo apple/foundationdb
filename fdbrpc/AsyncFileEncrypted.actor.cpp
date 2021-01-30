@@ -219,6 +219,38 @@ Future<Void> AsyncFileEncrypted::initializeKey(const Reference<IAsyncFile>& keyF
 	return AsyncFileEncryptedImpl::initializeKey(keyFile, offset);
 }
 
+size_t AsyncFileEncrypted::RandomCache::evict() {
+	ASSERT(vec.size() == maxSize);
+	auto index = deterministicRandom()->randomInt(0, maxSize);
+	hashMap.erase(vec[index]);
+	return index;
+}
+
+AsyncFileEncrypted::RandomCache::RandomCache(size_t maxSize) : maxSize(maxSize) {
+	vec.reserve(maxSize);
+}
+
+void AsyncFileEncrypted::RandomCache::insert(uint16_t block, const Standalone<StringRef>& value) {
+	auto [_, found] = hashMap.insert({ block, value });
+	if (found) {
+		return;
+	} else if (vec.size() < maxSize) {
+		vec.push_back(block);
+	} else {
+		auto index = evict();
+		vec[index] = block;
+	}
+}
+
+Optional<Standalone<StringRef>> AsyncFileEncrypted::RandomCache::get(uint16_t block) const {
+	auto it = hashMap.find(block);
+	if (it == hashMap.end()) {
+		return {};
+	} else {
+		return it->second;
+	}
+}
+
 TEST_CASE("fdbrpc/AsyncFileEncrypted") {
 	state const int bytes = FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE * deterministicRandom()->randomInt(0, 1000);
 	state std::vector<unsigned char> writeBuffer(bytes, 0);
