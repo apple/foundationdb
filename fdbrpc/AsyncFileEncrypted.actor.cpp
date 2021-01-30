@@ -55,17 +55,13 @@ public:
 		state int bytesRead = 0;
 		for (block = firstBlock; block <= lastBlock; ++block) {
 			state StringRef plaintext;
-			auto it = self->readBuffers.find(block);
-			if (it != self->readBuffers.end()) {
-				plaintext = it->second;
+
+			auto cachedBlock = self->readBuffers.get(block);
+			if (cachedBlock.present()) {
+				plaintext = cachedBlock.get();
 			} else {
 				Standalone<StringRef> _plaintext = wait(readBlock(self, block));
-				ASSERT(_plaintext.size() == FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE);
-				if (self->readBuffers.size() == FLOW_KNOBS->MAX_DECRYPTED_BLOCKS) {
-					// TODO: Improve eviction policy
-					self->readBuffers.erase(self->readBuffers.begin());
-				}
-				self->readBuffers[block] = _plaintext;
+				self->readBuffers.insert(block, _plaintext);
 				plaintext = _plaintext;
 			}
 			ASSERT(plaintext.size() == FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE);
@@ -140,7 +136,7 @@ public:
 };
 
 AsyncFileEncrypted::AsyncFileEncrypted(Reference<IAsyncFile> file, bool canWrite)
-  : file(file), canWrite(canWrite), currentBlock(0) {
+  : file(file), canWrite(canWrite), currentBlock(0), readBuffers(FLOW_KNOBS->MAX_DECRYPTED_BLOCKS) {
 	firstBlockIV = AsyncFileEncryptedImpl::getFirstBlockIV(file->getFilename());
 	if (canWrite) {
 		encryptor = std::make_unique<EncryptionStreamCipher>(AsyncFileEncrypted::getKey(), getIV(currentBlock));
