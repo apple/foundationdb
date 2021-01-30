@@ -78,16 +78,16 @@ ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> par
 }
 #else
 
-pid_t fork_child(const std::string& path, std::vector<char*>& paramList, int& readFD) {
+static auto fork_child(const std::string& path, std::vector<char*>& paramList) {
 	int pipefd[2];
 	pipe(pipefd);
-	readFD = pipefd[0];
+	auto readFD = pipefd[0];
 	auto writeFD = pipefd[1];
 	pid_t pid = fork();
 	if (pid == -1) {
 		close(readFD);
 		close(writeFD);
-		return -1;
+		return std::make_pair(-1, Optional<int>{});
 	}
 	if (pid == 0) {
 		close(readFD);
@@ -98,7 +98,7 @@ pid_t fork_child(const std::string& path, std::vector<char*>& paramList, int& re
 		_exit(EXIT_FAILURE);
 	}
 	close(writeFD);
-	return pid;
+	return std::make_pair(pid, Optional<int>{ readFD });
 }
 
 static void setupTraceWithOutput(TraceEvent& event, size_t bytesRead, char* outputBuffer) {
@@ -136,8 +136,9 @@ ACTOR Future<int> spawnProcess(std::string path, std::vector<std::string> args, 
 		allArgs += args[i];
 	}
 
-	state int forkedProcessOutputFD;
-	state pid_t pid = fork_child(path, paramList, forkedProcessOutputFD);
+	state std::pair<pid_t, Optional<int>> pidAndReadFD = fork_child(path, paramList);
+	state pid_t pid = pidAndReadFD.first;
+	state Optional<int> readFD = pidAndReadFD.second;
 	if (pid == -1) {
 		TraceEvent(SevWarnAlways, "SpawnProcess: Command failed to spawn")
 			.detail("Cmd", path)
@@ -160,8 +161,8 @@ ACTOR Future<int> spawnProcess(std::string path, std::vector<std::string> args, 
 			}
 			int err = waitpid(pid, &status, WNOHANG);
 			loop {
-				int bytes = read(forkedProcessOutputFD, &outputBuffer[bytesRead],
-				                 SERVER_KNOBS->MAX_FORKED_PROCESS_OUTPUT - bytesRead);
+				int bytes =
+				    read(readFD.get(), &outputBuffer[bytesRead], SERVER_KNOBS->MAX_FORKED_PROCESS_OUTPUT - bytesRead);
 				bytesRead += bytes;
 				if (bytes == 0) break;
 			}
