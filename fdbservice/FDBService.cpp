@@ -838,7 +838,7 @@ void print_usage(const char *name) {
 		"  -h, --help      Display this help and exit.\n", name);
 }
 
-int main(DWORD argc, LPCSTR *argv) {
+int main(int argc, LPCSTR *argv) {
 	_set_FMA3_enable(0); // Workaround for VS 2013 code generation bug. See https://connect.microsoft.com/VisualStudio/feedback/details/811093/visual-studio-2013-rtm-c-x64-code-generation-bug-for-avx2-instructions
 
 	int		status = 0;
