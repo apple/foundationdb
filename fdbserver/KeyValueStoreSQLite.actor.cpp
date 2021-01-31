@@ -1914,8 +1914,6 @@ private:
 				throw;
 
 			self->disableRateControl();
-			self->readThreads->stop(e);
-			self->writeThread->stop(e);
 		}
 
 		self->readThreads->stop();
