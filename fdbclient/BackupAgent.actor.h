@@ -377,6 +377,9 @@ public:
 	Reference<FutureBucket> futureBucket;
 };
 
+template<> inline Tuple Codec<FileBackupAgent::ERestoreState>::pack(FileBackupAgent::ERestoreState const &val) { return Tuple().append(val); }
+template<> inline FileBackupAgent::ERestoreState Codec<FileBackupAgent::ERestoreState>::unpack(Tuple const &val) { return (FileBackupAgent::ERestoreState)val.getInt(0); }
+
 class DatabaseBackupAgent : public BackupAgentBase {
 public:
 	DatabaseBackupAgent();
