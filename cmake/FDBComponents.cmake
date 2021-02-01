@@ -12,6 +12,8 @@ endif()
 # SSL
 ################################################################################
 
+include(CheckSymbolExists)
+
 set(DISABLE_TLS OFF CACHE BOOL "Don't try to find LibreSSL and always build without TLS support")
 if(DISABLE_TLS)
   set(WITH_TLS OFF)
@@ -24,6 +26,14 @@ else()
 		if (LIBRESSL_FOUND)
 			add_library(OpenSSL::SSL ALIAS LibreSSL)
 		endif()
+  else()
+    set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
+    check_symbol_exists(OPENSSL_INIT_NO_ATEXIT "openssl/crypto.h" OPENSSL_HAS_NO_ATEXIT)
+    if(OPENSSL_HAS_NO_ATEXIT)
+      add_compile_options(-DHAVE_OPENSSL_INIT_NO_ATEXIT)
+    else()
+      message(STATUS "Found OpenSSL without OPENSSL_INIT_NO_ATEXIT:  assuming BoringSSL")
+    endif()
   endif()
 	if(OPENSSL_FOUND OR LIBRESSL_FOUND)
     set(WITH_TLS ON)
