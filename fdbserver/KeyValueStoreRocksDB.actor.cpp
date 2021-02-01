@@ -77,9 +77,7 @@ rocksdb::Options getOptions() {
 		bbOpts.block_cache = rocksdb::NewLRUCache(SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE);
 	}
 
-	if (SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE > 0 || SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0) {
-		options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
-	}
+	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
 	return options;
 }
 
