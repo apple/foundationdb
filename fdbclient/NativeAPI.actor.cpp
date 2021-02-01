@@ -1372,6 +1372,25 @@ Database Database::createDatabase( std::string connFileName, int apiVersion, boo
 	return Database::createDatabase(rccf, apiVersion, internal, clientLocality);
 }
 
+WatchMetadata* Database::getWatchMetadata(Key key) const {
+	const auto it = watchMap.find(key);
+	if (it == watchMap.end()) return nullptr;
+	return it->second;
+}
+
+void Database::setWatchMetadata(Key key, WatchMetadata* metadata) {
+	watchMap[key] = metadata;
+}
+
+void Database::deleteWatchMetadata(Key key) {
+	watchMap.erase(key);
+}
+
+WatchMetadata::WatchMetadata(Optional<Value> value, Version version, Future<Version> watchFutureSS, TransactionInfo info, TagSet tags): value(value), version(version), watchFutureSS(watchFutureSS), info(info), tags(tags) {
+	// create dummy future
+	watchFuture = watchPromise.getFuture();
+}
+
 const UniqueOrderedOptionList<FDBTransactionOptions>& Database::getTransactionDefaults() const {
 	ASSERT(db);
 	return db->transactionDefaults;
@@ -2129,7 +2148,7 @@ ACTOR Future<Void> readVersionBatcher(
 	DatabaseContext* cx, FutureStream<std::pair<Promise<GetReadVersionReply>, Optional<UID>>> versionStream,
 	uint32_t flags);
 
-ACTOR Future<Void> watchValue(Future<Version> version, Key key, Optional<Value> value, Database cx,
+ACTOR Future<Version> watchValue(Future<Version> version, Key key, Optional<Value> value, Database cx,
                               TransactionInfo info, TagSet tags) {
 	state Version ver = wait( version );
 	state Span span("NAPI:watchValue"_loc, info.spanID);
@@ -2170,7 +2189,7 @@ ACTOR Future<Void> watchValue(Future<Version> version, Key key, Optional<Value> 
 
 			// False if there is a master failure between getting the response and getting the committed version,
 			// Dependent on SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT
-			if (v - resp.version < 50000000) return Void();
+			if (v - resp.version < 50000000) return resp.version;
 			ver = v;
 		} catch (Error& e) {
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
@@ -2190,6 +2209,112 @@ ACTOR Future<Void> watchValue(Future<Version> version, Key key, Optional<Value> 
 			}
 		}
 	}
+}
+
+ACTOR Future<Void> watchStorageServerResp(Key key, Database cx) {
+	state WatchMetadata* metadata = cx.getWatchMetadata(key);
+	if (metadata == nullptr) return Void();
+	
+	loop {
+
+		try {
+			Version watchVersion = wait(metadata->watchFutureSS);
+
+			if (watchVersion >= metadata->version) { // case 1: version_1 (SS) >= version_2 (map)
+				cx.deleteWatchMetadata(key);
+				metadata->watchPromise.send(watchVersion);
+				
+				delete metadata;
+			} else {
+				if (metadata->watchPromise.getFutureReferenceCount() == 1) { // case 2: version_1 < version_2 and future_count == 1
+					cx.deleteWatchMetadata(key);
+					delete metadata;
+				} else { // case 3: future_count > 1
+					metadata->watchFutureSS = watchValue(Future<Version>(metadata->version), key, metadata->value, cx, metadata->info, metadata->tags);
+				}
+			}
+
+			// if there is no key in the map then destroy actor
+			metadata = cx.getWatchMetadata(key);
+			if (metadata == nullptr) return Void();
+
+		} catch(Error &e) {
+			// no more watches for the key so shutdown actor
+			metadata = cx.getWatchMetadata(key);
+			if (metadata == nullptr) return Void();			
+		}
+	}
+}
+
+ACTOR Future<Void> watchValueMap(Future<Version> version, Key key, Optional<Value> value, Database cx,
+                              TransactionInfo info, TagSet tags) {
+	state Version ver = wait( version );
+	state WatchMetadata* metadata = cx.getWatchMetadata(key);
+
+	// case 1: key not in map
+	if (metadata == nullptr) {
+		Future<Version> watchFutureSS = watchValue(version, key, value, cx, info, tags);
+		metadata = new WatchMetadata(value, ver, watchFutureSS, info, tags);
+		cx.setWatchMetadata(key, metadata);
+
+		Future<Void> watchFuture = success(metadata->watchPromise.getFuture());
+		
+		Future<Void> SSResp = watchStorageServerResp(key, cx);
+		wait(watchFuture);
+	} else if (metadata->value == value) { // case 2: val_1 == val_2
+		metadata->version = std::max(metadata->version, ver);
+		
+		Future<Void> watchFuture = success(metadata->watchPromise.getFuture());
+		wait(watchFuture);
+	} else if(ver > metadata->version) { // case 3: val_1 != val_2 && version_2 > version_1
+
+		Future<Version> watchFutureSS = watchValue(version, key, value, cx, info, tags);
+		WatchMetadata* newMetadata = new WatchMetadata(value, ver, watchFutureSS, info, tags);
+		cx.setWatchMetadata(key, newMetadata);
+
+		metadata->watchPromise.send(ver);
+		metadata->watchFutureSS.cancel();
+		delete metadata;
+
+		Future<Void> watchFuture = success(newMetadata->watchPromise.getFuture());
+		wait(watchFuture);
+	} else if (metadata->value != value) { // case 5: val_1 != val_2 && version_1 == version_2
+		state ReadYourWritesTransaction tr(cx);
+
+		try {
+			state Optional<Value> valSS = wait(tr.get(key));
+
+			if (valSS == value) { // val_3 == val_2
+				Future<Version> watchFutureSS = watchValue(version, key, value, cx, info, tags);
+				WatchMetadata* newMetadata = new WatchMetadata(value, ver, watchFutureSS, info, tags);
+				cx.setWatchMetadata(key, newMetadata);
+			}
+
+			if (valSS != metadata->value) { // val_3 != val_1
+				if (valSS != value) cx.deleteWatchMetadata(key);
+				
+				metadata->watchPromise.send(ver);
+				metadata->watchFutureSS.cancel();
+				delete metadata;
+			}
+
+			wait(tr.commit());
+
+			if (valSS != value) return Void();
+
+			metadata = cx.getWatchMetadata(key);
+			if (metadata != nullptr) { // if val_3 == val_2 or val_3 == val_1
+				Future<Void> watchFuture = success(metadata->watchPromise.getFuture());
+				wait(watchFuture);
+			}
+		}
+		catch(Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	// Note: We will reach here for case 3: val_1 != val_2 && version_2 < version_1
+	return Void();
 }
 
 void transformRangeLimits(GetRangeLimits limits, bool reverse, GetKeyValuesRequest &req) {
@@ -2863,7 +2988,7 @@ ACTOR Future<Void> watch(Reference<Watch> watch, Database cx, TagSet tags, Trans
 						when(wait(cx->connectionFileChanged())) {
 							TEST(true); // Recreated a watch after switch
 							watch->watchFuture =
-							    watchValue(cx->minAcceptableReadVersion, watch->key, watch->value, cx, info, tags);
+							    watchValueMap(cx->minAcceptableReadVersion, watch->key, watch->value, cx, info, tags);
 						}
 					}
 				}
@@ -3397,7 +3522,7 @@ void Transaction::setupWatches() {
 		Future<Version> watchVersion = getCommittedVersion() > 0 ? getCommittedVersion() : getReadVersion();
 
 		for(int i = 0; i < watches.size(); ++i)
-			watches[i]->setWatch(watchValue(watchVersion, watches[i]->key, watches[i]->value, cx, info, options.readTags));
+			watches[i]->setWatch(watchValueMap(watchVersion, watches[i]->key, watches[i]->value, cx, info, options.readTags));
 
 		watches.clear();
 	}
