@@ -281,7 +281,7 @@ public:
 
 	std::string getFilename() const override { return m_object; }
 
-	virtual ~AsyncFileS3BlobStoreRead() {}
+	~AsyncFileS3BlobStoreRead() override {}
 
 	Reference<S3BlobStoreEndpoint> m_bstore;
 	std::string m_bucket;

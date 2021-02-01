@@ -43,6 +43,7 @@
 #include "flow/AsioReactor.h"
 #include "flow/Profiler.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/SendBufferIterator.h"
 #include "flow/TLSConfig.actor.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Util.h"
@@ -135,15 +136,16 @@ class Net2 final : public INetwork, public INetworkConnections {
 
 public:
 	Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics);
-	void initTLS(ETLSInitState targetState);
-	void run();
-	void initMetrics();
+	void initTLS(ETLSInitState targetState) override;
+	void run() override;
+	void initMetrics() override;
 
 	// INetworkConnections interface
-	Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host ) override;
+	Future<Reference<IConnection>> connect( NetworkAddress toAddr, const std::string &host ) override;
+	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, const std::string &host) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6) override;
-	Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service) override;
+	Future<std::vector<NetworkAddress>> resolveTCPEndpoint( const std::string &host, const std::string &service) override;
 	Reference<IListener> listen( NetworkAddress localAddr ) override;
 
 	// INetwork interface
@@ -338,34 +340,6 @@ public:
 	}
 };
 
-struct SendBufferIterator {
-	typedef boost::asio::const_buffer value_type;
-	typedef std::forward_iterator_tag iterator_category;
-	typedef size_t difference_type;
-	typedef boost::asio::const_buffer* pointer;
-	typedef boost::asio::const_buffer& reference;
-
-	SendBuffer const* p;
-	int limit;
-
-	SendBufferIterator(SendBuffer const* p=0, int limit = std::numeric_limits<int>::max()) : p(p), limit(limit) {
-		ASSERT(limit > 0);
-	}
-
-	bool operator == (SendBufferIterator const& r) const { return p == r.p; }
-	bool operator != (SendBufferIterator const& r) const { return p != r.p; }
-	void operator++() {
-		limit -= p->bytes_written - p->bytes_sent;
-		if(limit > 0)
-			p = p->next;
-		else
-			p = nullptr;
-	}
-
-	boost::asio::const_buffer operator*() const {
-		return boost::asio::const_buffer(p->data() + p->bytes_sent, std::min(limit, p->bytes_written - p->bytes_sent));
-	}
-};
 
 class Connection final : public IConnection, ReferenceCounted<Connection> {
 public:
@@ -1149,7 +1123,7 @@ struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 	PromiseTask() {}
 	explicit PromiseTask(Promise<Void>&& promise) noexcept : promise(std::move(promise)) {}
 
-	virtual void operator()() {
+	void operator()() override {
 		promise.send(Void());
 		delete this;
 	}
@@ -1725,7 +1699,7 @@ THREAD_HANDLE Net2::startThread( THREAD_FUNC_RETURN (*func) (void*), void *arg )
 	return ::startThread(func, arg);
 }
 
-Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr, std::string host ) {
+Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr, const std::string &host ) {
 #ifndef TLS_DISABLED
 	initTLS(ETLSInitState::CONNECT);
 	if ( toAddr.isTLS() ) {
@@ -1734,6 +1708,10 @@ Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr, std::stri
 #endif
 
 	return Connection::connect(&this->reactor.ios, toAddr);
+}
+
+Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr, const std::string &host) {
+	return connect(toAddr, host);
 }
 
 ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *self, std::string host, std::string service) {
@@ -1783,7 +1761,7 @@ Future<Reference<IUDPSocket>> Net2::createUDPSocket(bool isV6) {
 	return UDPSocket::connect(&reactor.ios, Optional<NetworkAddress>(), isV6);
 }
 
-Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint( std::string host, std::string service) {
+Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint( const std::string &host, const std::string &service) {
 	return resolveTCPEndpoint_impl(this, host, service);
 }
 
@@ -1915,7 +1893,23 @@ void ASIOReactor::wake() {
 	ios.post( nullCompletionHandler );
 }
 
-} // namespace net2
+} // namespace N2
+
+SendBufferIterator::SendBufferIterator(SendBuffer const* p, int limit) : p(p), limit(limit) {
+	ASSERT(limit > 0);
+}
+
+void SendBufferIterator::operator++() {
+	limit -= p->bytes_written - p->bytes_sent;
+	if (limit > 0)
+		p = p->next;
+	else
+		p = nullptr;
+}
+
+boost::asio::const_buffer SendBufferIterator::operator*() const {
+	return boost::asio::const_buffer(p->data() + p->bytes_sent, std::min(limit, p->bytes_written - p->bytes_sent));
+}
 
 INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics) {
 	try {

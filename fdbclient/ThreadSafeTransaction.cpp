@@ -76,6 +76,14 @@ ThreadFuture<int64_t> ThreadSafeDatabase::rebootWorker(const StringRef& address,
 	} );
 }
 
+ThreadFuture<Void> ThreadSafeDatabase::forceRecoveryWithDataLoss(const StringRef &dcid) {
+	DatabaseContext *db = this->db;
+	Key dcidKey = dcid;
+	return onMainThread( [db, dcidKey]() -> Future<Void> {
+		return db->forceRecoveryWithDataLoss(dcidKey);
+	} );
+}
+
 ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
 	ClusterConnectionFile *connFile = new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFilename).first);
 

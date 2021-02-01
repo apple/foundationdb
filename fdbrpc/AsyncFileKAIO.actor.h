@@ -343,7 +343,7 @@ public:
 	Future<int64_t> size() const override { return nextFileSize; }
 	int64_t debugFD() const override { return fd; }
 	std::string getFilename() const override { return filename; }
-	~AsyncFileKAIO() {
+	~AsyncFileKAIO() override {
 		close(fd);
 
 #if KAIO_LOGGING

@@ -28,6 +28,7 @@
 #include "fdbclient/MutationList.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
+#include "fdbclient/BuildFlags.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 #define SevDecodeInfo SevVerbose
@@ -41,8 +42,13 @@ void printDecodeUsage() {
 	             "  -r, --container   Container URL.\n"
 	             "  -i, --input FILE  Log file to be decoded.\n"
 	             "  --crash           Crash on serious error.\n"
+	             "  --build_flags     Print build information and exit.\n"
 	             "\n";
 	return;
+}
+
+void printBuildInformation() {
+	printf("%s", jsonBuildInformation().c_str());
 }
 
 struct DecodeParams {
@@ -120,6 +126,10 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 
 		case OPT_TRACE_LOG_GROUP:
 			param->trace_log_group = args->OptionArg();
+			break;
+		case OPT_BUILD_FLAGS:
+			printBuildInformation();
+			return FDB_EXIT_ERROR;
 			break;
 		}
 	}

@@ -802,8 +802,8 @@ namespace fileBackup {
 			return StringRef();
 	    }
 
-	    Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Future<Void>(Void()); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+	    Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return Future<Void>(Void()); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 	};
 	StringRef AbortFiveZeroBackupTask::name = LiteralStringRef("abort_legacy_backup");
 	REGISTER_TASKFUNC(AbortFiveZeroBackupTask);
@@ -872,8 +872,8 @@ namespace fileBackup {
 			return StringRef();
 	    }
 
-	    Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Future<Void>(Void()); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+	    Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return Future<Void>(Void()); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 	};
 	StringRef AbortFiveOneBackupTask::name = LiteralStringRef("abort_legacy_backup_5.2");
 	REGISTER_TASKFUNC(AbortFiveOneBackupTask);
@@ -995,10 +995,10 @@ namespace fileBackup {
 			);
 	    }
 
-	    StringRef getName() const { return name; };
+	    StringRef getName() const override { return name; };
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _execute(cx, tb, fb, task); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 
 		// Finish (which flushes/syncs) the file, and then in a single transaction, make some range backup progress durable.
 		// This means:
@@ -1289,10 +1289,10 @@ namespace fileBackup {
 			}
 		} Params;
 
-		StringRef getName() const { return name; };
+		StringRef getName() const override { return name; };
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _execute(cx, tb, fb, task); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, int priority, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>(), Version scheduledVersion = invalidVersion) {
 			Key key = wait(addBackupTask(name,
@@ -1809,10 +1809,10 @@ namespace fileBackup {
 			}
 		} Params;
 
-		StringRef getName() const { return name; };
+		StringRef getName() const override { return name; };
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _execute(cx, tb, fb, task); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 
 		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Reference<FlowLock> lock(new FlowLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES));
@@ -1995,7 +1995,7 @@ namespace fileBackup {
 	struct EraseLogRangeTaskFunc : BackupTaskFuncBase {
 		static StringRef name;
 	    static constexpr uint32_t version = 1;
-	    StringRef getName() const { return name; };
+	    StringRef getName() const override { return name; };
 
 		static struct {
 			static TaskParam<Version> beginVersion() {
@@ -2041,8 +2041,8 @@ namespace fileBackup {
 			return Void();
 		}
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return Void(); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 	};
 	StringRef EraseLogRangeTaskFunc::name = LiteralStringRef("file_backup_erase_logs_5.2");
 	REGISTER_TASKFUNC(EraseLogRangeTaskFunc);
@@ -2166,10 +2166,10 @@ namespace fileBackup {
 			return key;
 		}
 
-		StringRef getName() const { return name; };
+		StringRef getName() const override { return name; };
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return Void(); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 	};
 	StringRef BackupLogsDispatchTask::name = LiteralStringRef("file_backup_dispatch_logs_5.2");
 	REGISTER_TASKFUNC(BackupLogsDispatchTask);
@@ -2178,7 +2178,7 @@ namespace fileBackup {
 		static StringRef name;
 	    static constexpr uint32_t version = 1;
 
-	    StringRef getName() const { return name; };
+	    StringRef getName() const override { return name; };
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			wait(checkTaskVersion(tr->getDatabase(), task, FileBackupFinishedTask::name, FileBackupFinishedTask::version));
@@ -2208,8 +2208,8 @@ namespace fileBackup {
 			return key;
 		}
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return Void(); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 	};
 	StringRef FileBackupFinishedTask::name = LiteralStringRef("file_backup_finished_5.2");
 	REGISTER_TASKFUNC(FileBackupFinishedTask);
@@ -2366,10 +2366,10 @@ namespace fileBackup {
 			return key;
 		}
 
-		StringRef getName() const { return name; };
+		StringRef getName() const override { return name; };
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _execute(cx, tb, fb, task); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 	};
 	StringRef BackupSnapshotManifest::name = LiteralStringRef("file_backup_write_snapshot_manifest_5.2");
 	REGISTER_TASKFUNC(BackupSnapshotManifest);
@@ -2518,10 +2518,10 @@ namespace fileBackup {
 			return key;
 		}
 
-		StringRef getName() const { return name; };
+		StringRef getName() const override { return name; };
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _execute(cx, tb, fb, task); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 	};
 	StringRef StartFullBackupTaskFunc::name = LiteralStringRef("file_backup_start_5.2");
 	REGISTER_TASKFUNC(StartFullBackupTaskFunc);
@@ -2567,10 +2567,10 @@ namespace fileBackup {
 
 		static StringRef name;
 	    static constexpr uint32_t version = 1;
-	    StringRef getName() const { return name; };
+	    StringRef getName() const override { return name; };
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return Void(); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 
 	};
 	StringRef RestoreCompleteTaskFunc::name = LiteralStringRef("restore_complete");
@@ -2830,10 +2830,10 @@ namespace fileBackup {
 
 		static StringRef name;
 	    static constexpr uint32_t version = 1;
-	    StringRef getName() const { return name; };
+	    StringRef getName() const override { return name; };
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _execute(cx, tb, fb, task); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 	};
 	StringRef RestoreRangeTaskFunc::name = LiteralStringRef("restore_range_data");
 	REGISTER_TASKFUNC(RestoreRangeTaskFunc);
@@ -2841,7 +2841,7 @@ namespace fileBackup {
 	struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 		static StringRef name;
 	    static constexpr uint32_t version = 1;
-	    StringRef getName() const { return name; };
+	    StringRef getName() const override { return name; };
 
 		static struct : InputParams {
 		} Params;
@@ -2979,8 +2979,8 @@ namespace fileBackup {
 			return LiteralStringRef("OnSetAddTask");
 		}
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _execute(cx, tb, fb, task); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 	};
 	StringRef RestoreLogDataTaskFunc::name = LiteralStringRef("restore_log_data");
 	REGISTER_TASKFUNC(RestoreLogDataTaskFunc);
@@ -2988,7 +2988,7 @@ namespace fileBackup {
 	struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		static StringRef name;
 	    static constexpr uint32_t version = 1;
-	    StringRef getName() const { return name; };
+	    StringRef getName() const override { return name; };
 
 		static struct {
 			static TaskParam<Version> beginVersion() { return LiteralStringRef(__FUNCTION__); }
@@ -3291,8 +3291,8 @@ namespace fileBackup {
 			return LiteralStringRef("OnSetAddTask");
 		}
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return Void(); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 	};
 	StringRef RestoreDispatchTaskFunc::name = LiteralStringRef("restore_dispatch");
 	REGISTER_TASKFUNC(RestoreDispatchTaskFunc);
@@ -3577,10 +3577,10 @@ namespace fileBackup {
 			return LiteralStringRef("OnSetAddTask");
 		}
 
-		StringRef getName() const { return name; };
+		StringRef getName() const override { return name; };
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _execute(cx, tb, fb, task); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 	};
 	StringRef StartFullRestoreTaskFunc::name = LiteralStringRef("restore_start");
 	REGISTER_TASKFUNC(StartFullRestoreTaskFunc);

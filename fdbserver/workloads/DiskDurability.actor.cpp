@@ -94,7 +94,7 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload
 		syncInterval = (double)(getOption(options, LiteralStringRef("syncIntervalMs"), 2000)) / 1000;
 	}
 
-	virtual ~DiskDurabilityWorkload(){ }
+	~DiskDurabilityWorkload() override {}
 
 	std::string description() const override { return "DiskDurability"; }
 

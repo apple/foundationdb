@@ -74,7 +74,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		TraceEvent("DRU_Start");
 	}
 
-	virtual std::string description() const override { return "BackupToDBUpgrade"; }
+	std::string description() const override { return "BackupToDBUpgrade"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId != 0)

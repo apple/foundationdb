@@ -67,6 +67,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*databaseSetOption)(FDBDatabase *database, FDBDatabaseOptions::Option option, uint8_t const *value, int valueLength);
 	void (*databaseDestroy)(FDBDatabase *database);
 	FDBFuture* (*databaseRebootWorker)(FDBDatabase *database, uint8_t const *address, int addressLength, fdb_bool_t check, int duration);
+	FDBFuture* (*databaseForceRecoveryWithDataLoss)(FDBDatabase *database, uint8_t const *dcid, int dcidLength);
 
 	//Transaction
 	fdb_error_t (*transactionSetOption)(FDBTransaction *tr, FDBTransactionOptions::Option option, uint8_t const *value, int valueLength);
@@ -131,7 +132,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 class DLTransaction : public ITransaction, ThreadSafeReferenceCounted<DLTransaction> {
 public:
 	DLTransaction(Reference<FdbCApi> api, FdbCApi::FDBTransaction *tr) : api(api), tr(tr) {}
-	~DLTransaction() { api->transactionDestroy(tr); }
+	~DLTransaction() override { api->transactionDestroy(tr); }
 
 	void cancel() override;
 	void setVersion(Version v) override;
@@ -182,7 +183,7 @@ class DLDatabase : public IDatabase, ThreadSafeReferenceCounted<DLDatabase> {
 public:
 	DLDatabase(Reference<FdbCApi> api, FdbCApi::FDBDatabase *db) : api(api), db(db), ready(Void()) {}
 	DLDatabase(Reference<FdbCApi> api, ThreadFuture<FdbCApi::FDBDatabase*> dbFuture);
-	~DLDatabase() {
+	~DLDatabase() override {
 		if (db) {
 			api->databaseDestroy(db);
 		}
@@ -197,6 +198,7 @@ public:
 	void delref() override { ThreadSafeReferenceCounted<DLDatabase>::delref(); }
 
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
+	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 
 private:
 	const Reference<FdbCApi> api;
@@ -319,7 +321,7 @@ class MultiVersionApi;
 class MultiVersionDatabase final : public IDatabase, ThreadSafeReferenceCounted<MultiVersionDatabase> {
 public:
 	MultiVersionDatabase(MultiVersionApi *api, std::string clusterFilePath, Reference<IDatabase> db, bool openConnectors=true);
-	~MultiVersionDatabase();
+	~MultiVersionDatabase() override;
 
 	Reference<ITransaction> createTransaction() override;
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
@@ -329,7 +331,8 @@ public:
 
 	static Reference<IDatabase> debugCreateFromExistingDatabase(Reference<IDatabase> db);
 
-	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration);
+	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
+	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 
 private:
 	struct DatabaseState;

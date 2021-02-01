@@ -240,7 +240,7 @@ public:
 		}
 	}
 
-	~AsyncFileCached();
+	~AsyncFileCached() override;
 
 private:
 	static std::map< std::string, OpenFileInfo > openFiles;
@@ -570,7 +570,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 		pageCache->allocate(this);
 	}
 
-	virtual ~AFCPage() {
+	~AFCPage() override {
 		clearDirty();
 		ASSERT_ABORT( flushableIndex == -1 );
 	}

@@ -23,7 +23,8 @@
 #include <cmath>
 #include <cinttypes>
 
-FlowKnobs const* FLOW_KNOBS = new FlowKnobs();
+std::unique_ptr<FlowKnobs> globalFlowKnobs = std::make_unique<FlowKnobs>();
+FlowKnobs const* FLOW_KNOBS = globalFlowKnobs.get();
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 
@@ -336,7 +337,7 @@ void Knobs::initKnob( bool& knob, bool value, std::string const& name ) {
 	}
 }
 
-void Knobs::trace() {
+void Knobs::trace() const {
 	for(auto &k : double_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
 	for(auto &k : int_knobs)

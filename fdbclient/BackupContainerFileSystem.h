@@ -73,7 +73,7 @@ public:
 	void delref() override = 0;
 
 	BackupContainerFileSystem() {}
-	virtual ~BackupContainerFileSystem() {}
+	~BackupContainerFileSystem() override {}
 
 	// Create the container
 	Future<Void> create() override = 0;

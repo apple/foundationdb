@@ -132,7 +132,7 @@ public:
 		api->futureSetCallback(f, &futureCallback, this);
 	}
 
-	~DLThreadSingleAssignmentVar() {
+	~DLThreadSingleAssignmentVar() override {
 		lock.assertNotEntered();
 		if(f) {
 			ASSERT_ABORT(futureRefCount == 1);
