@@ -164,32 +164,23 @@ cpack -G productbuild
 
 ### Windows
 
-Under Windows, the build instructions are very similar, with the main difference
-that Visual Studio is used to compile.
-
-1. Install Visual Studio 2017 (Community Edition is tested)
-1. Install cmake Version 3.12 or higher [CMake](https://cmake.org/)
-1. Download version 1.72 of [Boost](https://dl.bintray.com/boostorg/release/1.72.0/source/boost_1_72_0.tar.bz2)
-1. Unpack boost (you don't need to compile it)
-1. Install [Mono](http://www.mono-project.com/download/stable/)
-1. (Optional) Install a [JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html). FoundationDB currently builds with Java 8
-1. Set `JAVA_HOME` to the unpacked location and JAVA_COMPILE to
-   `$JAVA_HOME/bin/javac`.
-1. Install [Python](https://www.python.org/downloads/) if it is not already installed by Visual Studio
-1. (Optional) Install [WIX](http://wixtoolset.org/). Without it Visual Studio
-   won't build the Windows installer
-1. Create a build directory (you can have the build directory anywhere you
-   like): `mkdir build`
-1. `cd build`
-1. `cmake -G "Visual Studio 15 2017 Win64" -DBOOST_ROOT=<PATH_TO_BOOST> <PATH_TO_FOUNDATIONDB_DIRECTORY>`
-1. This should succeed. In which case you can build using msbuild:
-   `msbuild /p:Configuration=Release foundationdb.sln`. You can also open the resulting
-   solution in Visual Studio and compile from there. However, be aware that
-   using Visual Studio for development is currently not supported as Visual
-   Studio will only know about the generated files. `msbuild` is located at
-   `c:\Program Files (x86)\MSBuild\14.0\Bin\MSBuild.exe` for Visual Studio 15.
-
-If you installed WIX before running `cmake` you should find the
-`FDBInstaller.msi` in your build directory under `packaging/msi`. 
+On Windows, the simplest way to build FoundationDB is by using Docker for Windows:
+1. Download and install [Docker Desktop](https://www.docker.com/products/docker-desktop)
+1. Make sure docker is configured to run [Windows containers](https://docs.docker.com/docker-for-windows/#switch-between-windows-and-linux-containers).
+1. Open Powershell as Administrator.
+1. Clone the FoundationDB repository
+1. Create a build directory that is not in your source tree (for example `C:\build\`)
+1. Run the build script and pass the above directory (for example `foundationdb\build\build.ps1 -Build C:\build`).
+   1. If you want to first check which commands this will run you can add the `-DryRun` flag. This will also create a 
+      file called `docker_command.ps1` in your build directory.
+   1. By default the docker image this will create is called `fdb`. You can change this name with the argument `-ImageName`.
+   1. If you want to build another source tree you can pass a source directory to `-SourceDir`.
+   1. By default docker will use at most number of CPUs minus 2 for the OS. It is not recommended to put this number higher
+      (though putting it lower makes sense if you see performance problems or run out of memory). You can control this with
+      the option `-Cpus`.
+   1. By default docker will leave 2GB of main memory for the OS. To change this you can change this with the `-Memory` option.
+      This option is in bytes but accepts suffixes (so you can run `-Memory 60G`).
+   1. This will call `docker build` each time the script runs. If you know you don't need to run `docker build` you can pass
+      the `-SkipDockerBuild` flag.
 
 TODO: Re-add instructions for TLS support [#3022](https://github.com/apple/foundationdb/issues/3022)
