@@ -475,7 +475,8 @@ struct LeaderRegisterCollection {
 			return Optional<LeaderInfo>();
 		if (t != forwardStartTime.end()) {
 			double forwardTime = t->value;
-			if (now() - forwardTime > SERVER_KNOBS->FORWARD_REQUEST_TOO_OLD) {
+			if (SERVER_KNOBS->FORWARD_REQUEST_TOO_OLD > 0 &&
+			    now() - forwardTime > SERVER_KNOBS->FORWARD_REQUEST_TOO_OLD) {
 				TraceEvent(SevWarnAlways, "AccessOldForward")
 				    .detail("ForwardSetSecondsAgo", now() - forwardTime)
 				    .detail("ForwardClusterKey", key);
