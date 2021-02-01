@@ -125,25 +125,25 @@ ACTOR template <class T> Future<Void> broadcast( Future<T> input, std::vector<Re
 	return Void();
 }
 
-ACTOR template <class T> Future<Void> incrementalBroadcast(Future<T> input, std::vector<Promise<T>> output, int batchSize) {
+ACTOR template <class T> Future<Void> incrementalBroadcast(Future<T> input, std::vector<Promise<T>> output, int batchSize, TaskPriority priority = TaskPriority::DefaultDelay) {
 	state T value = wait(input);
 	state int i = 0;
 	for (; i<output.size(); i++) {
 		output[i].send(value);
 		if((i+1)%batchSize==0) {
-			wait(delay(0));
+			wait(delay(0, priority));
 		}
 	}
 	return Void();
 }
 
-ACTOR template <class T> Future<Void> incrementalBroadcast( Future<T> input, std::vector<ReplyPromise<T>> output, int batchSize) {
+ACTOR template <class T> Future<Void> incrementalBroadcast( Future<T> input, std::vector<ReplyPromise<T>> output, int batchSize, TaskPriority priority = TaskPriority::DefaultDelay) {
 	state T value = wait( input );
 	state int i = 0;
 	for(; i<output.size(); i++) {
 		output[i].send(value);
 		if((i+1)%batchSize==0) {
-			wait(delay(0));
+			wait(delay(0, priority));
 		}
 	}
 	return Void();
