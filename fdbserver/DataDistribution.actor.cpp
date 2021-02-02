@@ -396,7 +396,7 @@ struct ServerStatus {
 	// If a process has reappeared without the storage server that was on it (isFailed == true), we don't need to
 	// exclude it We also don't need to exclude processes who are in the wrong configuration (since those servers will
 	// be removed)
-	bool excludeOnRecruit() { return !isFailed && !isWrongConfiguration; }
+	bool excludeOnRecruit() const { return !isFailed && !isWrongConfiguration; }
 };
 typedef AsyncMap<UID, ServerStatus> ServerStatusMap;
 
