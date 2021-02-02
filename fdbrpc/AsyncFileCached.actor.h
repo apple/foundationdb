@@ -21,7 +21,6 @@
 #pragma once
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
-#include "fdbserver/Knobs.h"
 #if defined(NO_INTELLISENSE) && !defined(FLOW_ASYNCFILECACHED_ACTOR_G_H)
 	#define FLOW_ASYNCFILECACHED_ACTOR_G_H
 	#include "fdbrpc/AsyncFileCached.actor.g.h"

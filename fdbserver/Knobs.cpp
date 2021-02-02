@@ -19,7 +19,6 @@
  */
 
 #include "fdbserver/Knobs.h"
-#include "IRandom.h"
 #include "fdbrpc/Locality.h"
 #include <cmath>
 
