@@ -65,8 +65,7 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	ErrorOr<GetStorageMetricsReply> serverMetrics;
 	Promise<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged;
 	Future<std::pair<StorageServerInterface, ProcessClass>> onInterfaceChanged;
-	Promise<Void> removed;
-	Future<Void> onRemoved;
+	AsyncTrigger removed;
 	Promise<Void> wakeUpTracker;
 	bool inDesiredDC;
 	LocalityEntry localityEntry;
@@ -79,8 +78,8 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 
 	TCServerInfo(StorageServerInterface ssi, DDTeamCollection* collection, ProcessClass processClass, bool inDesiredDC,
 	             Reference<LocalitySet> storageServerSet)
-	  : id(ssi.id()), collection(collection), lastKnownInterface(ssi), lastKnownClass(processClass), dataInFlightToServer(0),
-	    onInterfaceChanged(interfaceChanged.getFuture()), onRemoved(removed.getFuture()), inDesiredDC(inDesiredDC),
+	  : id(ssi.id()), collection(collection), lastKnownInterface(ssi), lastKnownClass(processClass),
+	    dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()), inDesiredDC(inDesiredDC),
 	    storeType(KeyValueStoreType::END) {
 		localityEntry = ((LocalityMap<UID>*) storageServerSet.getPtr())->add(ssi.locality, &id);
 	}
@@ -2663,7 +2662,7 @@ ACTOR Future<Void> updateServerMetrics( TCServerInfo *server ) {
 	state Future<ErrorOr<GetStorageMetricsReply>> metricsRequest = ssi.getStorageMetrics.tryGetReply( GetStorageMetricsRequest(), TaskPriority::DataDistributionLaunch );
 	state Future<Void> resetRequest = Never();
 	state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged( server->onInterfaceChanged );
-	state Future<Void> serverRemoved( server->onRemoved );
+	state Future<Void> serverRemoved(server->removed.onTrigger());
 
 	loop {
 		choose {
@@ -4057,7 +4056,7 @@ ACTOR Future<Void> storageServerTracker(
 
 					TraceEvent("StatusMapChange", self->distributorId).detail("ServerID", server->id).detail("Status", "Removed");
 					// Sets removeSignal (alerting dataDistributionTeamCollection to remove the storage server from its own data structures)
-					server->removed.send( Void() );
+					server->removed.trigger();
 					self->removedServers.send( server->id );
 					return Void();
 				}
