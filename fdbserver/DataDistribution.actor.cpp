@@ -85,7 +85,7 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 		localityEntry = ((LocalityMap<UID>*) storageServerSet.getPtr())->add(ssi.locality, &id);
 	}
 
-	bool isCorrectStoreType(KeyValueStoreType configStoreType) {
+	bool isCorrectStoreType(KeyValueStoreType configStoreType) const {
 		// A new storage server's store type may not be set immediately.
 		// If a storage server does not reply its storeType, it will be tracked by failure monitor and removed.
 		return (storeType == configStoreType || storeType == KeyValueStoreType::END);
