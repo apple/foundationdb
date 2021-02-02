@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <sys/errno.h>
 #ifdef _WIN32
 // This has to come as the first include on Win32 for rand_s() to be found
 #define _CRT_RAND_S
@@ -2269,7 +2270,12 @@ int64_t fileSize(std::string const& filename) {
 std::string readFileBytes( std::string const& filename, int maxSize ) {
 	std::string s;
 	FILE* f = fopen(filename.c_str(), "rb" FOPEN_CLOEXEC_MODE);
-	if (!f) throw file_not_readable();
+	if (!f) {
+		TraceEvent(SevError, "FileOpenError")
+			.detail("Filename", filename)
+			.detail("Errno", errno);
+		throw file_not_readable();
+	}
 	try {
 		fseek(f, 0, SEEK_END);
 		size_t size = ftell(f);
