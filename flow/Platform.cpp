@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include <sys/errno.h>
+#include <errno.h>
 #ifdef _WIN32
 // This has to come as the first include on Win32 for rand_s() to be found
 #define _CRT_RAND_S
