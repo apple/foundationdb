@@ -6,10 +6,14 @@ function(compile_boost)
                           "${multiValueArgs}" ${ARGN} )
   # Configure the boost toolset to use
   set(BOOTSTRAP_COMMAND "./bootstrap.sh --with-libraries=context")
+  set(B2_COMMAND "./b2")
   set(BOOST_COMPILER_FLAGS -fvisibility=hidden -fPIC -std=c++14 -w)
   set(BOOST_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
   if(APPLE)
     set(BOOST_TOOLSET "darwin")
+    # this is to fix a weird macOS issue -- by default
+    # cmake would otherwise pass a compiler that can't
+    # compile boost
     set(BOOST_CXX_COMPILER "/usr/bin/clang++")
   elseif(CLANG)
     set(BOOST_TOOLSET "clang")
@@ -30,8 +34,6 @@ function(compile_boost)
   configure_file(${CMAKE_SOURCE_DIR}/cmake/user-config.jam.cmake ${CMAKE_BINARY_DIR}/user-config.jam)
 
   set(USER_CONFIG_FLAG --user-config=${CMAKE_BINARY_DIR}/user-config.jam)
-  set(BOOTSTRAP_COMMAND bootstrap)
-  set(B2_COMMAND "b2")
 
   include(ExternalProject)
   set(BOOST_INSTALL_DIR "${CMAKE_BINARY_DIR}/boost_install")
