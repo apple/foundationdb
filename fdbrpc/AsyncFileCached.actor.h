@@ -21,6 +21,7 @@
 #pragma once
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
+#include "fdbserver/Knobs.h"
 #if defined(NO_INTELLISENSE) && !defined(FLOW_ASYNCFILECACHED_ACTOR_G_H)
 	#define FLOW_ASYNCFILECACHED_ACTOR_G_H
 	#include "fdbrpc/AsyncFileCached.actor.g.h"
@@ -519,8 +520,16 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 
 			if (dirty) {
 				// Wait for rate control if it is set
-				if (self->owner->getRateControl())
-					wait(self->owner->getRateControl()->getAllowance(1));
+				if (self->owner->getRateControl()) {
+					int allowance = 1;
+					// If I/O size is defined, wait for the calculated I/O quota
+					if (FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_IO_SIZE > 0) {
+						allowance = (self->pageCache->pageSize + FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_IO_SIZE - 1) /
+						            FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_IO_SIZE; // round up
+						ASSERT(allowance > 0);
+					}
+					wait(self->owner->getRateControl()->getAllowance(allowance));
+				}
 
 				if ( self->pageOffset + self->pageCache->pageSize > self->owner->length ) {
 					ASSERT(self->pageOffset < self->owner->length);
