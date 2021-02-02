@@ -561,7 +561,7 @@ public:
 		}
 	}
 	void clear( K const& k ) { set(k, V()); }
-	V const& get( K const& k ) {
+	V const& get(K const& k) const {
 		auto it = items.find(k);
 		if (it != items.end())
 			return it->second.value;

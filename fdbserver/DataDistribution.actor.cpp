@@ -979,7 +979,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 	}
 
-	int64_t getDebugTotalDataInFlight() {
+	int64_t getDebugTotalDataInFlight() const {
 		int64_t total = 0;
 		for(auto itr = server_info.begin(); itr != server_info.end(); ++itr)
 			total += itr->second->dataInFlightToServer;
@@ -1080,7 +1080,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// we preferentially mark the least used server as undesirable?
 		for (auto i = initTeams->allServers.begin(); i != initTeams->allServers.end(); ++i) {
 			if (self->shouldHandleServer(i->first)) {
-				if (!self->isValidLocality(self->configuration.storagePolicy, i->first.locality)) {
+				if (!self->isValidLocality(*self->configuration.storagePolicy, i->first.locality)) {
 					TraceEvent(SevWarnAlways, "MissingLocality")
 					    .detail("Server", i->first.uniqueID)
 					    .detail("Locality", i->first.locality.toString());
@@ -1106,7 +1106,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	// Check if server or machine has a valid locality based on configured replication policy
-	bool isValidLocality(Reference<IReplicationPolicy> storagePolicy, const LocalityData& locality) {
+	bool isValidLocality(const IReplicationPolicy& storagePolicy, const LocalityData& locality) const {
 		// Future: Once we add simulation test that misconfigure a cluster, such as not setting some locality entries,
 		// DD_VALIDATE_LOCALITY should always be true. Otherwise, simulation test may fail.
 		if (!SERVER_KNOBS->DD_VALIDATE_LOCALITY) {
@@ -1114,7 +1114,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			return true;
 		}
 
-		std::set<std::string> replicationPolicyKeys = storagePolicy->attributeKeys();
+		std::set<std::string> replicationPolicyKeys = storagePolicy.attributeKeys();
 		for (auto& policy : replicationPolicyKeys) {
 			if (!locality.isPresent(policy)) {
 				return false;
@@ -1203,14 +1203,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return maxMatchingServers;
 	}
 
-	int overlappingMachineMembers( vector<Standalone<StringRef>>& team ) {
+	int overlappingMachineMembers( vector<Standalone<StringRef>>& team ) const {
 		if (team.empty()) {
 			return 0;
 		}
 
 		int maxMatchingServers = 0;
 		Standalone<StringRef>& serverID = team[0];
-		for (auto& usedTeam : machine_info[serverID]->machineTeams) {
+		for (auto& usedTeam : machine_info.at(serverID)->machineTeams) {
 			auto used = usedTeam->machineIDs;
 			int teamIdx = 0;
 			int usedIdx = 0;
@@ -1242,7 +1242,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 
 		Standalone<StringRef> machineID = machineIDs[0];
-		for (auto& machineTeam : machine_info[machineID]->machineTeams) {
+		for (auto& machineTeam : machine_info.at(machineID)->machineTeams) {
 			if (machineTeam->machineIDs == machineIDs) {
 				return machineTeam;
 			}
@@ -1374,7 +1374,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return totalServerIndex;
 	}
 
-	void traceConfigInfo() {
+	void traceConfigInfo() const {
 		TraceEvent("DDConfig", distributorId)
 		    .detail("StorageTeamSize", configuration.storageTeamSize)
 		    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER)
@@ -1382,7 +1382,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("StoreType", configuration.storageServerStoreType);
 	}
 
-	void traceServerInfo() {
+	void traceServerInfo() const {
 		int i = 0;
 
 		TraceEvent("ServerInfo", distributorId).detail("Size", server_info.size());
@@ -1400,13 +1400,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			TraceEvent("ServerStatus", distributorId)
 			    .detail("ServerID", uid)
 			    .detail("Healthy", !server_status.get(uid).isUnhealthy())
-			    .detail("MachineIsValid", server_info[uid]->machine.isValid())
-			    .detail("MachineTeamSize",
-			            server_info[uid]->machine.isValid() ? server_info[uid]->machine->machineTeams.size() : -1);
+			    .detail("MachineIsValid", server_info.at(uid)->machine.isValid())
+			    .detail("MachineTeamSize", server_info.at(uid)->machine.isValid()
+			                                   ? server_info.at(uid)->machine->machineTeams.size()
+			                                   : -1);
 		}
 	}
 
-	void traceServerTeamInfo() {
+	void traceServerTeamInfo() const {
 		int i = 0;
 
 		TraceEvent("ServerTeamInfo", distributorId).detail("Size", teams.size());
@@ -1420,22 +1421,22 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 	}
 
-	void traceMachineInfo() {
+	void traceMachineInfo() const {
 		int i = 0;
 
 		TraceEvent("MachineInfo").detail("Size", machine_info.size());
-		for (auto& machine : machine_info) {
+		for (auto& [id, machine] : machine_info) {
 			TraceEvent("MachineInfo", distributorId)
 			    .detail("MachineInfoIndex", i++)
-			    .detail("Healthy", isMachineHealthy(machine.second))
-			    .detail("MachineID", machine.first.contents().toString())
-			    .detail("MachineTeamOwned", machine.second->machineTeams.size())
-			    .detail("ServerNumOnMachine", machine.second->serversOnMachine.size())
-			    .detail("ServersID", machine.second->getServersIDStr());
+			    .detail("Healthy", isMachineHealthy(machine.getPtr()))
+			    .detail("MachineID", id.contents().toString())
+			    .detail("MachineTeamOwned", machine->machineTeams.size())
+			    .detail("ServerNumOnMachine", machine->serversOnMachine.size())
+			    .detail("ServersID", machine->getServersIDStr());
 		}
 	}
 
-	void traceMachineTeamInfo() {
+	void traceMachineTeamInfo() const {
 		int i = 0;
 
 		TraceEvent("MachineTeamInfo", distributorId).detail("Size", machineTeams.size());
@@ -1449,7 +1450,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	// Locality string is hashed into integer, used as KeyIndex
 	// For better understand which KeyIndex is used for locality, we print this info in trace.
-	void traceLocalityArrayIndexName() {
+	void traceLocalityArrayIndexName() const {
 		TraceEvent("LocalityRecordKeyName").detail("Size", machineLocalityMap._keymap->_lookuparray.size());
 		for (int i = 0; i < machineLocalityMap._keymap->_lookuparray.size(); ++i) {
 			TraceEvent("LocalityRecordKeyIndexName")
@@ -1458,7 +1459,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 	}
 
-	void traceMachineLocalityMap() {
+	void traceMachineLocalityMap() const {
 		int i = 0;
 
 		TraceEvent("MachineLocalityMap", distributorId).detail("Size", machineLocalityMap.size());
@@ -1479,7 +1480,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	// To enable verbose debug info, set shouldPrint to true
-	void traceAllInfo(bool shouldPrint = false) {
+	void traceAllInfo(bool shouldPrint = false) const {
 
 		if (!shouldPrint) return;
 		// Record all team collections IDs
@@ -1512,12 +1513,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				    .detail("NumServersOnMachine", 0);
 				continue;
 			}
-			if (!isMachineHealthy(machine->second)) {
+			if (!isMachineHealthy(machine->second.getPtr())) {
 				continue;
 			}
 			Reference<TCServerInfo> representativeServer = machine->second->serversOnMachine[0];
 			auto& locality = representativeServer->lastKnownInterface.locality;
-			if (!isValidLocality(configuration.storagePolicy, locality)) {
+			if (!isValidLocality(*configuration.storagePolicy, locality)) {
 				TraceEvent(SevWarn, "RebuildMachineLocalityMapError")
 				    .detail("Machine", machine->second->machineID.toString())
 				    .detail("InvalidLocality", locality.toString());
@@ -1559,9 +1560,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				// Skip invalid machine whose representative server is not in server_info
 				ASSERT_WE_THINK(server_info.find(machine.second->serversOnMachine[0]->id) != server_info.end());
 				// Skip unhealthy machines
-				if (!isMachineHealthy(machine.second)) continue;
+				if (!isMachineHealthy(machine.second.getPtr())) continue;
 				// Skip machine with incomplete locality
-				if (!isValidLocality(configuration.storagePolicy,
+				if (!isValidLocality(*configuration.storagePolicy,
 				                     machine.second->serversOnMachine[0]->lastKnownInterface.locality)) {
 					continue;
 				}
@@ -1682,37 +1683,37 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return addedMachineTeams;
 	}
 
-	bool isMachineTeamHealthy(vector<Standalone<StringRef>> const& machineIDs) {
+	bool isMachineTeamHealthy(vector<Standalone<StringRef>> const& machineIDs) const {
 		int healthyNum = 0;
 
 		// A healthy machine team should have the desired number of machines
 		if (machineIDs.size() != configuration.storageTeamSize) return false;
 
 		for (auto& id : machineIDs) {
-			auto& machine = machine_info[id];
-			if (isMachineHealthy(machine)) {
+			auto& machine = machine_info.at(id);
+			if (isMachineHealthy(machine.getPtr())) {
 				healthyNum++;
 			}
 		}
 		return (healthyNum == machineIDs.size());
 	}
 
-	bool isMachineTeamHealthy(Reference<TCMachineTeamInfo> const& machineTeam) {
+	bool isMachineTeamHealthy(Reference<TCMachineTeamInfo> const& machineTeam) const {
 		int healthyNum = 0;
 
 		// A healthy machine team should have the desired number of machines
 		if (machineTeam->size() != configuration.storageTeamSize) return false;
 
 		for (auto& machine : machineTeam->machines) {
-			if (isMachineHealthy(machine)) {
+			if (isMachineHealthy(machine.getPtr())) {
 				healthyNum++;
 			}
 		}
 		return (healthyNum == machineTeam->machines.size());
 	}
 
-	bool isMachineHealthy(Reference<TCMachineInfo> const& machine) {
-		if (!machine.isValid() || machine_info.find(machine->machineID) == machine_info.end() ||
+	bool isMachineHealthy(TCMachineInfo const* machine) const {
+		if (machine == nullptr || machine_info.find(machine->machineID) == machine_info.end() ||
 		    machine->serversOnMachine.empty()) {
 			return false;
 		}
@@ -1728,13 +1729,13 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	// Return the healthy server with the least number of correct-size server teams
-	Reference<TCServerInfo> findOneLeastUsedServer() {
+	Reference<TCServerInfo> findOneLeastUsedServer() const {
 		vector<Reference<TCServerInfo>> leastUsedServers;
 		int minTeams = std::numeric_limits<int>::max();
 		for (auto& server : server_info) {
 			// Only pick healthy server, which is not failed or excluded.
 			if (server_status.get(server.first).isUnhealthy()) continue;
-			if (!isValidLocality(configuration.storagePolicy, server.second->lastKnownInterface.locality)) continue;
+			if (!isValidLocality(*configuration.storagePolicy, server.second->lastKnownInterface.locality)) continue;
 
 			int numTeams = server.second->teams.size();
 			if (numTeams < minTeams) {
@@ -1759,7 +1760,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	// Randomly choose one machine team that has chosenServer and has the correct size
 	// When configuration is changed, we may have machine teams with old storageTeamSize
-	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(Reference<TCServerInfo> chosenServer) {
+	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(Reference<TCServerInfo> chosenServer) const {
 		if (!chosenServer->machine->machineTeams.empty()) {
 			std::vector<Reference<TCMachineTeamInfo>> healthyMachineTeamsForChosenServer;
 			for (auto& mt : chosenServer->machine->machineTeams) {
@@ -1781,16 +1782,16 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	// A server team should always come from servers on a machine team
 	// Check if it is true
-	bool isOnSameMachineTeam(Reference<TCTeamInfo>& team) {
+	bool isOnSameMachineTeam(const TCTeamInfo& team) const {
 		std::vector<Standalone<StringRef>> machineIDs;
-		for (const auto& server : team->getServers()) {
+		for (const auto& server : team.getServers()) {
 			if (!server->machine.isValid()) return false;
 			machineIDs.push_back(server->machine->machineID);
 		}
 		std::sort(machineIDs.begin(), machineIDs.end());
 
 		int numExistance = 0;
-		for (const auto& server : team->getServers()) {
+		for (const auto& server : team.getServers()) {
 			for (const auto& candidateMachineTeam : server->machine->machineTeams) {
 				std::sort(candidateMachineTeam->machineIDs.begin(), candidateMachineTeam->machineIDs.end());
 				if (machineIDs == candidateMachineTeam->machineIDs) {
@@ -1799,14 +1800,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 			}
 		}
-		return (numExistance == team->size());
+		return (numExistance == team.size());
 	}
 
 	// Sanity check the property of teams in unit test
 	// Return true if all server teams belong to machine teams
-	bool sanityCheckTeams() {
+	bool sanityCheckTeams() const {
 		for (auto& team : teams) {
-			if (isOnSameMachineTeam(team) == false) {
+			if (isOnSameMachineTeam(*team) == false) {
 				return false;
 			}
 		}
@@ -1814,7 +1815,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return true;
 	}
 
-	int calculateHealthyServerCount() {
+	int calculateHealthyServerCount() const {
 		int serverCount = 0;
 		for (auto i = server_info.begin(); i != server_info.end(); ++i) {
 			if (!server_status.get(i->first).isUnhealthy()) {
@@ -1824,10 +1825,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return serverCount;
 	}
 
-	int calculateHealthyMachineCount() {
+	int calculateHealthyMachineCount() const {
 		int totalHealthyMachineCount = 0;
 		for (auto& m : machine_info) {
-			if (isMachineHealthy(m.second)) {
+			if (isMachineHealthy(m.second.getPtr())) {
 				++totalHealthyMachineCount;
 			}
 		}
@@ -1835,7 +1836,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return totalHealthyMachineCount;
 	}
 
-	std::pair<int64_t, int64_t> calculateMinMaxServerTeamsOnServer() {
+	std::pair<int64_t, int64_t> calculateMinMaxServerTeamsOnServer() const {
 		int64_t minTeams = std::numeric_limits<int64_t>::max();
 		int64_t maxTeams = 0;
 		for (auto& server : server_info) {
@@ -1848,11 +1849,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return std::make_pair(minTeams, maxTeams);
 	}
 
-	std::pair<int64_t, int64_t> calculateMinMaxMachineTeamsOnMachine() {
+	std::pair<int64_t, int64_t> calculateMinMaxMachineTeamsOnMachine() const {
 		int64_t minTeams = std::numeric_limits<int64_t>::max();
 		int64_t maxTeams = 0;
 		for (auto& machine : machine_info) {
-			if (!isMachineHealthy(machine.second)) {
+			if (!isMachineHealthy(machine.second.getPtr())) {
 				continue;
 			}
 			minTeams = std::min<int64_t>((int64_t) machine.second->machineTeams.size(), minTeams);
@@ -1862,32 +1863,32 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	// Sanity check
-	bool isServerTeamCountCorrect(Reference<TCMachineTeamInfo>& mt) {
+	bool isServerTeamCountCorrect(TCMachineTeamInfo const& mt) const {
 		int num = 0;
 		bool ret = true;
 		for (auto& team : teams) {
-			if (team->machineTeam->machineIDs == mt->machineIDs) {
+			if (team->machineTeam->machineIDs == mt.machineIDs) {
 				++num;
 			}
 		}
-		if (num != mt->serverTeams.size()) {
+		if (num != mt.serverTeams.size()) {
 			ret = false;
 			TraceEvent(SevError, "ServerTeamCountOnMachineIncorrect")
-			    .detail("MachineTeam", mt->getMachineIDsStr())
-			    .detail("ServerTeamsSize", mt->serverTeams.size())
+			    .detail("MachineTeam", mt.getMachineIDsStr())
+			    .detail("ServerTeamsSize", mt.serverTeams.size())
 			    .detail("CountedServerTeams", num);
 		}
 		return ret;
 	}
 
 	// Find the machine team with the least number of server teams
-	std::pair<Reference<TCMachineTeamInfo>, int> getMachineTeamWithLeastProcessTeams() {
+	std::pair<Reference<TCMachineTeamInfo>, int> getMachineTeamWithLeastProcessTeams() const {
 		Reference<TCMachineTeamInfo> retMT;
 		int minNumProcessTeams = std::numeric_limits<int>::max();
 
 		for (auto& mt : machineTeams) {
 			if (EXPENSIVE_VALIDATION) {
-				ASSERT(isServerTeamCountCorrect(mt));
+				ASSERT(isServerTeamCountCorrect(*mt));
 			}
 
 			if (mt->serverTeams.size() < minNumProcessTeams) {
@@ -1900,7 +1901,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	// Find the machine team whose members are on the most number of machine teams, same logic as serverTeamRemover
-	std::pair<Reference<TCMachineTeamInfo>, int> getMachineTeamWithMostMachineTeams() {
+	std::pair<Reference<TCMachineTeamInfo>, int> getMachineTeamWithMostMachineTeams() const {
 		Reference<TCMachineTeamInfo> retMT;
 		int maxNumMachineTeams = 0;
 		int targetMachineTeamNumPerMachine =
@@ -1924,7 +1925,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	// Find the server team whose members are on the most number of server teams
-	std::pair<Reference<TCTeamInfo>, int> getServerTeamWithMostProcessTeams() {
+	std::pair<Reference<TCTeamInfo>, int> getServerTeamWithMostProcessTeams() const {
 		Reference<TCTeamInfo> retST;
 		int maxNumProcessTeams = 0;
 		int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
@@ -1946,7 +1947,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return std::pair<Reference<TCTeamInfo>, int>(retST, maxNumProcessTeams);
 	}
 
-	int getHealthyMachineTeamCount() {
+	int getHealthyMachineTeamCount() const {
 		int healthyTeamCount = 0;
 		for (auto mt = machineTeams.begin(); mt != machineTeams.end(); ++mt) {
 			ASSERT((*mt)->machines.size() == configuration.storageTeamSize);
@@ -1961,7 +1962,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	// Each machine is expected to have targetMachineTeamNumPerMachine
 	// Return true if there exists a machine that does not have enough teams.
-	bool notEnoughMachineTeamsForAMachine() {
+	bool notEnoughMachineTeamsForAMachine() const {
 		// If we want to remove the machine team with most machine teams, we use the same logic as
 		// notEnoughTeamsForAServer
 		int targetMachineTeamNumPerMachine =
@@ -1973,7 +1974,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// The desired machine team number is not the same with the desired server team number
 			// in notEnoughTeamsForAServer() below, because the machineTeamRemover() does not
 			// remove a machine team with the most number of machine teams.
-			if (m.second->machineTeams.size() < targetMachineTeamNumPerMachine && isMachineHealthy(m.second)) {
+			if (m.second->machineTeams.size() < targetMachineTeamNumPerMachine && isMachineHealthy(m.second.getPtr())) {
 				return true;
 			}
 		}
@@ -1983,7 +1984,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	// Each server is expected to have targetTeamNumPerServer teams.
 	// Return true if there exists a server that does not have enough teams.
-	bool notEnoughTeamsForAServer() {
+	bool notEnoughTeamsForAServer() const {
 		// We build more teams than we finally want so that we can use serverTeamRemover() actor to remove the teams
 		// whose member belong to too many teams. This allows us to get a more balanced number of teams per server.
 		// We want to ensure every server has targetTeamNumPerServer teams.
@@ -2157,7 +2158,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	// Check if the number of server (and machine teams) is larger than the maximum allowed number
-	void traceTeamCollectionInfo() {
+	void traceTeamCollectionInfo() const {
 		int totalHealthyServerCount = calculateHealthyServerCount();
 		int desiredServerTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * totalHealthyServerCount;
 		int maxServerTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * totalHealthyServerCount;
@@ -2324,7 +2325,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return Void();
 	}
 
-	void noHealthyTeams() {
+	void noHealthyTeams() const {
 		std::set<UID> desiredServerSet;
 		std::string desc;
 		for (auto i = server_info.begin(); i != server_info.end(); ++i) {
@@ -3906,7 +3907,7 @@ ACTOR Future<Void> storageServerTracker(
 	state Future<Void> storeTypeTracker = keyValueStoreTypeTracker(self, server);
 	state bool hasWrongDC = !isCorrectDC(self, server);
 	state bool hasInvalidLocality =
-	    !self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality);
+	    !self->isValidLocality(*self->configuration.storagePolicy, server->lastKnownInterface.locality);
 	state int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
 
 	try {
@@ -3915,7 +3916,7 @@ ACTOR Future<Void> storageServerTracker(
 			status.isWrongConfiguration = false;
 			hasWrongDC = !isCorrectDC(self, server);
 			hasInvalidLocality =
-			    !self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality);
+			    !self->isValidLocality(*self->configuration.storagePolicy, server->lastKnownInterface.locality);
 
 			// If there is any other server on this exact NetworkAddress, this server is undesired and will eventually
 			// be eliminated. This samAddress checking must be redo whenever the server's state (e.g., storeType,
@@ -4168,7 +4169,7 @@ ACTOR Future<Void> storageServerTracker(
 					storeTypeTracker = keyValueStoreTypeTracker(self, server);
 					hasWrongDC = !isCorrectDC(self, server);
 					hasInvalidLocality =
-					    !self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality);
+					    !self->isValidLocality(*self->configuration.storagePolicy, server->lastKnownInterface.locality);
 					self->restartTeamBuilder.trigger();
 
 					if(restartRecruiting)
@@ -4258,7 +4259,7 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 				AddressExclusion addr(workerData.address.ip, workerData.address.port);
 				existingAddrs.insert(addr);
 				if (self->invalidLocalityAddr.count(addr) &&
-				    self->isValidLocality(self->configuration.storagePolicy, workerData.locality)) {
+				    self->isValidLocality(*self->configuration.storagePolicy, workerData.locality)) {
 					// The locality info on the addr has been corrected
 					self->invalidLocalityAddr.erase(addr);
 					hasCorrectedLocality = true;
