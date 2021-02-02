@@ -2273,7 +2273,8 @@ std::string readFileBytes( std::string const& filename, int maxSize ) {
 	if (!f) {
 		TraceEvent(SevError, "FileOpenError")
 			.detail("Filename", filename)
-			.detail("Errno", errno);
+			.detail("Errno", errno)
+			.detail("ErrorDescription", strerror(errno));
 		throw file_not_readable();
 	}
 	try {
