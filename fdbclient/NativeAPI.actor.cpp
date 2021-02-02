@@ -1372,13 +1372,13 @@ Database Database::createDatabase( std::string connFileName, int apiVersion, boo
 	return Database::createDatabase(rccf, apiVersion, internal, clientLocality);
 }
 
-WatchMetadata* Database::getWatchMetadata(Key key) const {
+Optional<WatchMetadata> Database::getWatchMetadata(Key key) const {
 	const auto it = watchMap.find(key);
-	if (it == watchMap.end()) return nullptr;
+	if (it == watchMap.end()) return Optional<WatchMetadata>();
 	return it->second;
 }
 
-void Database::setWatchMetadata(Key key, WatchMetadata* metadata) {
+void Database::setWatchMetadata(Key key, WatchMetadata metadata) {
 	watchMap[key] = metadata;
 }
 
@@ -1390,6 +1390,8 @@ WatchMetadata::WatchMetadata(Optional<Value> value, Version version, Future<Vers
 	// create dummy future
 	watchFuture = watchPromise.getFuture();
 }
+
+WatchMetadata::WatchMetadata(): info(TransactionInfo(TaskPriority::Zero, SpanID(0, 0))) {} // needed since TransactionInfo cannot be default constructed
 
 const UniqueOrderedOptionList<FDBTransactionOptions>& Database::getTransactionDefaults() const {
 	ASSERT(db);
@@ -2212,36 +2214,35 @@ ACTOR Future<Version> watchValue(Future<Version> version, Key key, Optional<Valu
 }
 
 ACTOR Future<Void> watchStorageServerResp(Key key, Database cx) {
-	state WatchMetadata* metadata = cx.getWatchMetadata(key);
-	if (metadata == nullptr) return Void();
-	
+	state Optional<WatchMetadata> metadata = cx.getWatchMetadata(key);
+	if (!metadata.present()) return Void();
+
 	loop {
 
 		try {
-			Version watchVersion = wait(metadata->watchFutureSS);
+			Version watchVersion = wait(metadata.get().watchFutureSS);
 
-			if (watchVersion >= metadata->version) { // case 1: version_1 (SS) >= version_2 (map)
+			if (watchVersion >= metadata.get().version) { // case 1: version_1 (SS) >= version_2 (map)
 				cx.deleteWatchMetadata(key);
-				metadata->watchPromise.send(watchVersion);
-				
-				delete metadata;
+				metadata.get().watchPromise.send(watchVersion);
 			} else {
-				if (metadata->watchPromise.getFutureReferenceCount() == 1) { // case 2: version_1 < version_2 and future_count == 1
+				// 2 because we have one future ref in map and one in the current function
+				if (metadata.get().watchPromise.getFutureReferenceCount() == 2) { // case 2: version_1 < version_2 and future_count == 2
 					cx.deleteWatchMetadata(key);
-					delete metadata;
-				} else { // case 3: future_count > 1
-					metadata->watchFutureSS = watchValue(Future<Version>(metadata->version), key, metadata->value, cx, metadata->info, metadata->tags);
+				} else { // case 3: future_count > 2
+					metadata.get().watchFutureSS = watchValue(Future<Version>(metadata.get().version), key, metadata.get().value, cx, metadata.get().info, metadata.get().tags);
+					cx.setWatchMetadata(key, metadata.get());
 				}
 			}
 
 			// if there is no key in the map then destroy actor
 			metadata = cx.getWatchMetadata(key);
-			if (metadata == nullptr) return Void();
+			if (!metadata.present()) return Void();
 
 		} catch(Error &e) {
 			// no more watches for the key so shutdown actor
 			metadata = cx.getWatchMetadata(key);
-			if (metadata == nullptr) return Void();			
+			if (!metadata.present()) return Void();			
 		}
 	}
 }
@@ -2249,39 +2250,39 @@ ACTOR Future<Void> watchStorageServerResp(Key key, Database cx) {
 ACTOR Future<Void> watchValueMap(Future<Version> version, Key key, Optional<Value> value, Database cx,
                               TransactionInfo info, TagSet tags) {
 	state Version ver = wait( version );
-	state WatchMetadata* metadata = cx.getWatchMetadata(key);
+	state Optional<WatchMetadata> metadata = cx.getWatchMetadata(key);
 
-	if (metadata == nullptr) { // case 1: key not in map
+	if (!metadata.present()) { // case 1: key not in map
 		Future<Version> watchFutureSS = watchValue(version, key, value, cx, info, tags);
-		metadata = new WatchMetadata(value, ver, watchFutureSS, info, tags);
-		cx.setWatchMetadata(key, metadata);
+		WatchMetadata newMetadata = WatchMetadata(value, ver, watchFutureSS, info, tags);
+		cx.setWatchMetadata(key, newMetadata);
 
-		Future<Void> watchFuture = success(metadata->watchPromise.getFuture());
+		Future<Void> watchFuture = success(newMetadata.watchPromise.getFuture());
 		
 		Future<Void> SSResp = watchStorageServerResp(key, cx);
 		wait(watchFuture);
-	} else if (metadata->value == value) { // case 2: val_1 == val_2
-		if (ver > metadata->version) {
-			metadata->version = ver;
-			metadata->info = info;
-			metadata->tags = tags;
+	} else if (metadata.get().value == value) { // case 2: val_1 == val_2
+		if (ver > metadata.get().version) {
+			metadata.get().version = ver;
+			metadata.get().info = info;
+			metadata.get().tags = tags;
+			cx.setWatchMetadata(key, metadata.get());
 		}
 		
-		Future<Void> watchFuture = success(metadata->watchPromise.getFuture());
+		Future<Void> watchFuture = success(metadata.get().watchPromise.getFuture());
 		wait(watchFuture);
-	} else if(ver > metadata->version) { // case 3: val_1 != val_2 && version_2 > version_1
+	} else if(ver > metadata.get().version) { // case 3: val_1 != val_2 && version_2 > version_1
 
 		Future<Version> watchFutureSS = watchValue(version, key, value, cx, info, tags);
-		WatchMetadata* newMetadata = new WatchMetadata(value, ver, watchFutureSS, info, tags);
+		WatchMetadata newMetadata = WatchMetadata(value, ver, watchFutureSS, info, tags);
 		cx.setWatchMetadata(key, newMetadata);
 
-		metadata->watchPromise.send(ver);
-		metadata->watchFutureSS.cancel();
-		delete metadata;
+		metadata.get().watchPromise.send(ver);
+		metadata.get().watchFutureSS.cancel();
 
-		Future<Void> watchFuture = success(newMetadata->watchPromise.getFuture());
+		Future<Void> watchFuture = success(newMetadata.watchPromise.getFuture());
 		wait(watchFuture);
-	} else if (metadata->value != value && metadata->version == ver) { // case 5: val_1 != val_2 && version_1 == version_2
+	} else if (metadata.get().value != value && metadata.get().version == ver) { // case 5: val_1 != val_2 && version_1 == version_2
 		state ReadYourWritesTransaction tr(cx);
 
 		try {
@@ -2289,16 +2290,15 @@ ACTOR Future<Void> watchValueMap(Future<Version> version, Key key, Optional<Valu
 
 			if (valSS == value) { // val_3 == val_2
 				Future<Version> watchFutureSS = watchValue(version, key, value, cx, info, tags);
-				WatchMetadata* newMetadata = new WatchMetadata(value, ver, watchFutureSS, info, tags);
+				WatchMetadata newMetadata = WatchMetadata(value, ver, watchFutureSS, info, tags);
 				cx.setWatchMetadata(key, newMetadata);
 			}
 
-			if (valSS != metadata->value) { // val_3 != val_1
+			if (valSS != metadata.get().value) { // val_3 != val_1
 				if (valSS != value) cx.deleteWatchMetadata(key);
 				
-				metadata->watchPromise.send(ver);
-				metadata->watchFutureSS.cancel();
-				delete metadata;
+				metadata.get().watchPromise.send(ver);
+				metadata.get().watchFutureSS.cancel();
 			}
 
 			wait(tr.commit());
@@ -2306,8 +2306,8 @@ ACTOR Future<Void> watchValueMap(Future<Version> version, Key key, Optional<Valu
 			if (valSS != value) return Void();
 
 			metadata = cx.getWatchMetadata(key);
-			if (metadata != nullptr) { // if val_3 == val_2 or val_3 == val_1
-				Future<Void> watchFuture = success(metadata->watchPromise.getFuture());
+			if (metadata.present()) { // if val_3 == val_2
+				Future<Void> watchFuture = success(metadata.get().watchPromise.getFuture());
 				wait(watchFuture);
 			}
 		}

@@ -94,13 +94,13 @@ public:
 
 	const UniqueOrderedOptionList<FDBTransactionOptions>& getTransactionDefaults() const;
 
-	WatchMetadata* getWatchMetadata(Key key) const;
-	void setWatchMetadata(Key key, WatchMetadata* metadata);
+	Optional<WatchMetadata> getWatchMetadata(Key key) const;
+	void setWatchMetadata(Key key, WatchMetadata metadata);
 	void deleteWatchMetadata(Key key);
 
 private:
 	Reference<DatabaseContext> db;
-	std::map<Key, WatchMetadata*> watchMap;
+	std::map<Key, WatchMetadata> watchMap;
 };
 
 void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );
@@ -184,6 +184,7 @@ struct WatchMetadata {
 	TransactionInfo info;
 	TagSet tags;
 
+	WatchMetadata();
 	WatchMetadata(Optional<Value> value, Version version, Future<Version> watchFutureSS, TransactionInfo info, TagSet tags);
 };
 
