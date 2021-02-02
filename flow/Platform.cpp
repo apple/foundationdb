@@ -2271,7 +2271,7 @@ std::string readFileBytes( std::string const& filename, int maxSize ) {
 	std::string s;
 	FILE* f = fopen(filename.c_str(), "rb" FOPEN_CLOEXEC_MODE);
 	if (!f) {
-		TraceEvent(SevError, "FileOpenError")
+		TraceEvent(SevWarn, "FileOpenError")
 			.detail("Filename", filename)
 			.detail("Errno", errno)
 			.detail("ErrorDescription", strerror(errno));
