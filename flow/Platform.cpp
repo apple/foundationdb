@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include <errno.h>
 #ifdef _WIN32
 // This has to come as the first include on Win32 for rand_s() to be found
 #define _CRT_RAND_S
@@ -26,6 +25,7 @@
 #include <math.h> // For _set_FMA3_enable workaround in platformInit
 #endif
 
+#include <errno.h>
 #include "flow/Platform.h"
 #include "flow/Arena.h"
 
