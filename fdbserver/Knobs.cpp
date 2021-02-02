@@ -256,7 +256,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	if( randomize && BUGGIFY ) {
 		// Choose an window between .01 and 1.01 seconds.
 		SQLITE_WRITE_WINDOW_SECONDS = 0.01 + deterministicRandom()->random01();
-		// Choose 10k to 50k operations per second
+		// Choose random operations per second
 		int opsPerSecond = deterministicRandom()->randomInt(1000, 5000);
 		// Set window limit to opsPerSecond scaled down to window size
 		SQLITE_WRITE_WINDOW_LIMIT = opsPerSecond * SQLITE_WRITE_WINDOW_SECONDS;
