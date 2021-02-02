@@ -2251,8 +2251,7 @@ ACTOR Future<Void> watchValueMap(Future<Version> version, Key key, Optional<Valu
 	state Version ver = wait( version );
 	state WatchMetadata* metadata = cx.getWatchMetadata(key);
 
-	// case 1: key not in map
-	if (metadata == nullptr) {
+	if (metadata == nullptr) { // case 1: key not in map
 		Future<Version> watchFutureSS = watchValue(version, key, value, cx, info, tags);
 		metadata = new WatchMetadata(value, ver, watchFutureSS, info, tags);
 		cx.setWatchMetadata(key, metadata);
@@ -2262,7 +2261,11 @@ ACTOR Future<Void> watchValueMap(Future<Version> version, Key key, Optional<Valu
 		Future<Void> SSResp = watchStorageServerResp(key, cx);
 		wait(watchFuture);
 	} else if (metadata->value == value) { // case 2: val_1 == val_2
-		metadata->version = std::max(metadata->version, ver);
+		if (ver > metadata->version) {
+			metadata->version = ver;
+			metadata->info = info;
+			metadata->tags = tags;
+		}
 		
 		Future<Void> watchFuture = success(metadata->watchPromise.getFuture());
 		wait(watchFuture);
@@ -2278,7 +2281,7 @@ ACTOR Future<Void> watchValueMap(Future<Version> version, Key key, Optional<Valu
 
 		Future<Void> watchFuture = success(newMetadata->watchPromise.getFuture());
 		wait(watchFuture);
-	} else if (metadata->value != value) { // case 5: val_1 != val_2 && version_1 == version_2
+	} else if (metadata->value != value && metadata->version == ver) { // case 5: val_1 != val_2 && version_1 == version_2
 		state ReadYourWritesTransaction tr(cx);
 
 		try {
