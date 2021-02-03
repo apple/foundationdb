@@ -510,9 +510,15 @@ public:
 	int expectedSize() const { return size(); }
 
 	int compare(StringRef const& other) const {
-		size_t minSize = std::min(size(), other.size());
-		if (minSize != 0) {
-			int c = memcmp(begin(), other.begin(), minSize);
+		return compareSuffix(other, 0);
+	}
+
+	int compareSuffix(StringRef const& other, int prefixLen) const {
+		//pre: prefixLen <= size() && prefixLen <= other.size()
+		size_t minSuffixSize = std::min(size(), other.size()) - prefixLen;
+		UNSTOPPABLE_ASSERT( minSuffixSize >= 0 );
+		if (minSuffixSize != 0) {
+			int c = memcmp(begin() + prefixLen, other.begin() + prefixLen, minSuffixSize);
 			if (c != 0) return c;
 		}
 		return ::compare(size(), other.size());

@@ -2392,7 +2392,7 @@ struct RedwoodRecordRef {
 	// This is the same order that delta compression uses for prefix borrowing
 	int compare(const RedwoodRecordRef& rhs, int skip = 0) const {
 		int keySkip = std::min(skip, key.size());
-		int cmp = key.substr(keySkip).compare(rhs.key.substr(keySkip));
+		int cmp = key.compareSuffix(rhs.key, keySkip);
 
 		if (cmp == 0) {
 			cmp = version - rhs.version;
@@ -5794,6 +5794,9 @@ public:
 		// Prefetch is disabled for now pending some decent logic for deciding how much to fetch
 		state int prefetchBytes = 0;
 
+		// if start and end key share a prefix, skip that prefix when comparing keys
+		state int rangeCommonPrefixLen = commonPrefixLength(keys.begin, keys.end, 0);
+
 		if (rowLimit > 0) {
 			wait(cur.seekGTE(keys.begin, prefetchBytes));
 			while (cur.isValid()) {
@@ -5802,7 +5805,7 @@ public:
 				BTreePage::BinaryTree::Cursor leafCursor = cur.popPath();
 				while (leafCursor.valid()) {
 					KeyValueRef kv = leafCursor.get().toKeyValueRef();
-					if (kv.key >= keys.end) {
+					if (kv.key.compareSuffix(keys.end, rangeCommonPrefixLen) >= 0) {
 						break;
 					}
 					accumulatedBytes += kv.expectedSize();
@@ -5827,7 +5830,7 @@ public:
 				BTreePage::BinaryTree::Cursor leafCursor = cur.popPath();
 				while (leafCursor.valid()) {
 					KeyValueRef kv = leafCursor.get().toKeyValueRef();
-					if (kv.key < keys.begin) {
+					if (kv.key.compareSuffix(keys.begin, rangeCommonPrefixLen) < 0) {
 						break;
 					}
 					accumulatedBytes += kv.expectedSize();
@@ -6710,6 +6713,22 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 		total += rec1.writeDelta(d, rec2);
 	}
 	printf("%" PRId64 " writeDelta() %g M/s\n", total, count / (timer() - start) / 1e6);
+
+	start = timer();
+	total = 0;
+	count = 10e6;
+	for (i = 0; i < count; ++i) {
+		total += rec1.compare(rec2, 0);
+	}
+	printf("%" PRId64 " compare(skip=0) %g M/s\n", total, count / (timer() - start) / 1e6);
+
+	start = timer();
+	total = 0;
+	count = 10e6;
+	for (i = 0; i < count; ++i) {
+		total += rec1.compare(rec2, 50);
+	}
+	printf("%" PRId64 " compare(skip=50) %g M/s\n", total, count / (timer() - start) / 1e6);
 
 	return Void();
 }
