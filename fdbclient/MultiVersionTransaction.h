@@ -189,7 +189,7 @@ private:
 
 class DLApi : public IClientApi {
 public:
-	DLApi(std::string fdbCPath);
+	DLApi(std::string fdbCPath, bool unlinkOnLoad = false);
 
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
@@ -207,6 +207,7 @@ public:
 private:
 	const std::string fdbCPath;
 	const Reference<FdbCApi> api;
+	const bool unlinkOnLoad;
 	int headerVersion;
 	bool networkSetup;
 

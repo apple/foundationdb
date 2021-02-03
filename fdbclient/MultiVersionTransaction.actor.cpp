@@ -278,7 +278,7 @@ void loadClientFunction(T *fp, void *lib, std::string libPath, const char *funct
 	}
 }
 
-DLApi::DLApi(std::string fdbCPath) : api(new FdbCApi()), fdbCPath(fdbCPath), networkSetup(false) {}
+DLApi::DLApi(std::string fdbCPath, bool unlinkOnLoad) : api(new FdbCApi()), fdbCPath(fdbCPath), unlinkOnLoad(unlinkOnLoad), networkSetup(false) {}
 
 void DLApi::init() {
 	if(isLibraryLoaded(fdbCPath.c_str())) {
@@ -289,6 +289,13 @@ void DLApi::init() {
 	if(lib == NULL) {
 		TraceEvent(SevError, "ErrorLoadingExternalClientLibrary").detail("LibraryPath", fdbCPath);
 		throw platform_error();
+	}
+	if (unlinkOnLoad) {
+		int err = unlink(fdbCPath.c_str());
+		if(err) {
+			TraceEvent(SevError, "ErrorUnlinkingTempClientLibraryFile").detail("errno", errno).detail("LibraryPath", fdbCPath);
+			throw platform_error();
+		}
 	}
 
 	loadClientFunction(&api->selectApiVersion, lib, fdbCPath, "fdb_select_api_version_impl");
@@ -1064,8 +1071,8 @@ std::vector<std::string> MultiVersionApi::copyExternalLibraryPerThread(std::stri
 	for (int ii = 1; ii < CLIENT_KNOBS->MULTI_VERSION_CLIENT_THREADS_PER_VERSION; ++ii) {
 		std::string filename = basename(path);
 
-		char tempName[PATH_MAX + 9];
-		sprintf(tempName, "/tmp/%s-XXX", filename.c_str());
+		char tempName[PATH_MAX + 12];
+		sprintf(tempName, "/tmp/%s-XXXXXX", filename.c_str());
 		int tempFd = mkstemp(tempName);
 
 		int fd;
@@ -1073,12 +1080,12 @@ std::vector<std::string> MultiVersionApi::copyExternalLibraryPerThread(std::stri
 		struct stat stat_buf;
 
 		if (fd = open(path.c_str(), O_RDONLY) == -1) {
-			TraceEvent("ExternalClientNotFound").detail("LibraryPath", filename);
+			TraceEvent("ExternalClientNotFound").detail("LibraryPath", path);
 			throw file_not_found();
 		}
 
-		if (fstat(tempFd, &stat_buf) == -1) {
-			TraceEvent(SevError, "FStatError").detail("LibraryPath", path);
+		if (fstat(fd, &stat_buf) == -1) {
+			TraceEvent(SevError, "FStatError").detail("LibraryPath", path).detail("errno", errno);
 			throw platform_error();
 		}
 
@@ -1194,6 +1201,20 @@ void MultiVersionApi::setupNetwork() {
 		MutexHolder holder(lock);
 		if(networkStartSetup) {
 			throw network_already_setup();
+		}
+
+		for (auto i : externalClientDescriptions) {
+			std::string path = i.second.libPath;
+			std::string filename = basename(path);
+
+			// Copy external lib for each thread			
+			if (externalClients.count(filename) == 0) {
+				externalClients[filename] = {};
+				for (const auto & tmp : copyExternalLibraryPerThread(path)) {
+					TraceEvent("AddingExternalClient").detail("FileName", filename).detail("LibraryPath", path).detail("TempPath", tmp);
+					externalClients[filename].push_back(Reference<ClientInfo>(new ClientInfo(new DLApi(tmp, true /*unlink on load*/), path)));
+				}
+			}
 		}
 
 		networkStartSetup = true;
