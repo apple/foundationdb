@@ -685,8 +685,8 @@ public:
 	}
 
 	Future<Void> getQueryDelay() {
-		if((version.get() - durableVersion.get() > SERVER_KNOBS->LOW_PRIORITY_DURABILITY_LAG) ||
-		       (queueSize() > SERVER_KNOBS->LOW_PRIORITY_STORAGE_QUEUE_BYTES)) {
+		if ((version.get() - durableVersion.get() > SERVER_KNOBS->LOW_PRIORITY_DURABILITY_LAG) ||
+		    (queueSize() > SERVER_KNOBS->LOW_PRIORITY_STORAGE_QUEUE_BYTES)) {
 			++counters.lowPriorityQueries;
 			return delay(0, TaskPriority::BehindReads);
 		}
