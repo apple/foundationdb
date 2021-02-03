@@ -251,6 +251,16 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( SQLITE_CHUNK_SIZE_PAGES,                             25600 );  // 100MB
 	init( SQLITE_CHUNK_SIZE_PAGES_SIM,                          1024 );  // 4MB
 	init( SQLITE_READER_THREADS,                                  64 );  // number of read threads
+	init( SQLITE_WRITE_WINDOW_SECONDS,                            -1 );
+	init( SQLITE_WRITE_WINDOW_LIMIT,                              -1 );
+	if( randomize && BUGGIFY ) {
+		// Choose an window between .01 and 1.01 seconds.
+		SQLITE_WRITE_WINDOW_SECONDS = 0.01 + deterministicRandom()->random01();
+		// Choose random operations per second
+		int opsPerSecond = deterministicRandom()->randomInt(1000, 5000);
+		// Set window limit to opsPerSecond scaled down to window size
+		SQLITE_WRITE_WINDOW_LIMIT = opsPerSecond * SQLITE_WRITE_WINDOW_SECONDS;
+	}
 
 	// Maximum and minimum cell payload bytes allowed on primary page as calculated in SQLite.
 	// These formulas are copied from SQLite, using its hardcoded constants, so if you are
