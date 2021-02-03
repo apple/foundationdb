@@ -1076,26 +1076,54 @@ std::vector<std::string> MultiVersionApi::copyExternalLibraryPerThread(std::stri
 		int tempFd = mkstemp(tempName);
 
 		int fd;
-		off_t offset = 0;
-		struct stat stat_buf;
 
-		if (fd = open(path.c_str(), O_RDONLY) == -1) {
+		if ((fd = open(path.c_str(), O_RDONLY)) == -1) {
 			TraceEvent("ExternalClientNotFound").detail("LibraryPath", path);
 			throw file_not_found();
 		}
 
-		if (fstat(fd, &stat_buf) == -1) {
-			TraceEvent(SevError, "FStatError").detail("LibraryPath", path).detail("errno", errno);
-			throw platform_error();
+		constexpr size_t buf_sz = 4096;
+		char buf[buf_sz];
+		std::cout << path << " -> " << tempName << std::endl;
+		while(1) {
+			ssize_t readCount = read(fd, buf, buf_sz);
+			// std::cout << "read " << readCount << " bytes " << std::endl;
+			if (readCount == 0) { 
+				// eof
+				break;
+			}
+			if (readCount == -1) {
+				// std::cout << "read failed; errno" << errno << std::endl;
+				throw platform_error;
+			}
+			ssize_t written = 0;
+			while(written != readCount) {
+				ssize_t writeCount = write(tempFd, buf + written, readCount - written);
+				// std::cout << "wrote " << writeCount << " bytes (" << readCount - written << " remain)" << std::endl;
+				if (writeCount == -1) { 
+					// std::cout << "write failed; errno" << errno << std::endl;
+					throw platform_error;
+				}
+				written += writeCount;
+			}
 		}
 
-		int result = sendfile(tempFd, fd, &offset, stat_buf.st_size);
+		// if (fstat(fd, &stat_buf) == -1) {
+		// 	TraceEvent(SevError, "FStatError").detail("LibraryPath", path).detail("errno", errno);
+		// 	throw platform_error();
+		// }
+
+		// std::cout << "copying " << stat_buf.st_size << "bytes from " << path << std::endl;
+		// // TraceEvent("TempCopyExternalClientLibrary").detail("Library", filename).detail("TempLibrary", tempName);
+		// // TraceEvent("Copying").detail("bytes", stat_buf.st_size);
+		// int result = sendfile(tempFd, fd, &offset, stat_buf.st_size);
+
+		// std::ccout << "copied " << result << " result offset = " << offset << std::end;
 		close(fd);
 		close(tempFd);
-		ASSERT(result == stat_buf.st_size);
+		// ASSERT(result == stat_buf.st_size);
 
 		paths.push_back(tempName);
-		TraceEvent("TempCopyExternalClientLibrary").detail("Library", filename).detail("TempLibrary", tempName);
 	}
 
 	return paths;
