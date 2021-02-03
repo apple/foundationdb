@@ -684,11 +684,14 @@ public:
 						(currentRate() < 1e-6 ? 1e6 : 1.0 / currentRate()));
 	}
 
+	// Normally the storage server prefers to serve read requests over making mutations
+	// durable to disk. However, when the storage server falls to far behind on
+	// making mutations durable, this function will change the priority to prefer writes.
 	Future<Void> getQueryDelay() {
 		if ((version.get() - durableVersion.get() > SERVER_KNOBS->LOW_PRIORITY_DURABILITY_LAG) ||
 		    (queueSize() > SERVER_KNOBS->LOW_PRIORITY_STORAGE_QUEUE_BYTES)) {
 			++counters.lowPriorityQueries;
-			return delay(0, TaskPriority::BehindReads);
+			return delay(0, TaskPriority::LowPriorityRead);
 		}
 		return delay(0, TaskPriority::DefaultEndpoint);
 	}
