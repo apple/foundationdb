@@ -278,17 +278,24 @@ private:
 	std::vector<std::pair<FDBTransactionOptions::Option, Optional<Standalone<StringRef>>>> persistentOptions;
 };
 
-struct ClientInfo : ThreadSafeReferenceCounted<ClientInfo> {
+struct ClientDesc {
+	std::string const libPath;
+	bool const external;
+
+	ClientDesc(std::string libPath, bool external) : libPath(libPath), external(external) { }
+};
+
+struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
 	ProtocolVersion protocolVersion;
 	IClientApi *api;
-	std::string libPath;
-	bool external;
+	// std::string libPath;
+	// bool external;
 	bool failed;
 	std::vector<std::pair<void (*)(void*), void*>> threadCompletionHooks;
 
-	ClientInfo() : protocolVersion(0), api(NULL), external(false), failed(true) {}
-	ClientInfo(IClientApi *api) : protocolVersion(0), api(api), libPath("internal"), external(false), failed(false) {}
-	ClientInfo(IClientApi *api, std::string libPath) : protocolVersion(0), api(api), libPath(libPath), external(true), failed(false) {}
+	ClientInfo() : ClientDesc(std::string(), false), protocolVersion(0), api(NULL), failed(true) {}
+	ClientInfo(IClientApi *api) : ClientDesc("internal", false), protocolVersion(0), api(api), failed(false) {}
+	ClientInfo(IClientApi *api, std::string libPath) : ClientDesc(libPath, true), protocolVersion(0), api(api), failed(false) {}
 
 	void loadProtocolVersion();
 	bool canReplace(Reference<ClientInfo> other) const;
@@ -298,7 +305,7 @@ class MultiVersionApi;
 
 class MultiVersionDatabase : public IDatabase, ThreadSafeReferenceCounted<MultiVersionDatabase> {
 public:
-	MultiVersionDatabase(MultiVersionApi *api, std::string clusterFilePath, Reference<IDatabase> db, bool openConnectors=true);
+	MultiVersionDatabase(MultiVersionApi *api, int threadIdx, std::string clusterFilePath, Reference<IDatabase> db, bool openConnectors=true);
 	~MultiVersionDatabase();
 
 	Reference<ITransaction> createTransaction() override;
@@ -361,6 +368,7 @@ private:
 	};
 
 	const Reference<DatabaseState> dbState;
+	const int threadIdx;
 	friend class MultiVersionTransaction;
 };
 
@@ -379,7 +387,8 @@ public:
 	static MultiVersionApi* api;
 
 	Reference<ClientInfo> getLocalClient();
-	void runOnExternalClients(std::function<void(Reference<ClientInfo>)>, bool runOnFailedClients=false);
+	void runOnExternalClients(int threadId, std::function<void(Reference<ClientInfo>)>, bool runOnFailedClients=false);
+	void runOnExternalClientsAllThreads(std::function<void(Reference<ClientInfo>)>, bool runOnFailedClients=false);
 
 	void updateSupportedVersions();
 
@@ -403,13 +412,18 @@ private:
 	void setNetworkOptionInternal(FDBNetworkOptions::Option option, Optional<StringRef> value);
 
 	Reference<ClientInfo> localClient;
-	std::map<std::string, Reference<ClientInfo>> externalClients;
+	std::map<std::string, ClientDesc> externalClientDescriptions;
+	std::map<std::string, std::vector<Reference<ClientInfo>>> externalClients;
 
 	bool networkStartSetup;
 	volatile bool networkSetup;
 	volatile bool bypassMultiClientApi;
 	volatile bool externalClient;
 	int apiVersion;
+
+	// XXX fixme
+	int nextTid = 0;
+	const int tidCount = 1;
 
 	Mutex lock;
 	std::vector<std::pair<FDBNetworkOptions::Option, Optional<Standalone<StringRef>>>> options;
