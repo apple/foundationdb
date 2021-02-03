@@ -96,16 +96,6 @@ private:
 	bool isClear;
 };
 
-ACTOR Future<Void> increasingPriorityDelay(Future<Void> change) {
-	choose {
-		when(wait(delay(0, TaskPriority::Low))){}
-		when(wait(change)) {
-			wait(delay(0, TaskPriority::DefaultEndpoint));
-		}
-	}
-	return Void();
-}
-
 struct AddingShard : NonCopyable {
 	KeyRange keys;
 	Future<Void> fetchClient;			// holds FetchKeys() actor
@@ -518,7 +508,6 @@ public:
 
 	bool behind;
 	bool versionBehind;
-	AsyncVar<bool> durabilityBehind;
 
 	bool debug_inApplyUpdate;
 	double debug_lastValidateTime;
@@ -614,7 +603,7 @@ public:
 	    counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
 	    readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")), behind(false), versionBehind(false),
 	    byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false), lastUpdate(now()),
-	    poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0), durabilityBehind(false) {
+	    poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0) {
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
 		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
@@ -695,27 +684,11 @@ public:
 						(currentRate() < 1e-6 ? 1e6 : 1.0 / currentRate()));
 	}
 
-	bool checkDurabilityBehind() {
-		return version.get() - durableVersion.get() > SERVER_KNOBS->LOW_PRIORITY_DURABILITY_LAG_END;
-		
-		/*
-		if(durabilityBehind.get()) {
-			durabilityBehind.set(
-				version.get() - durableVersion.get() > SERVER_KNOBS->LOW_PRIORITY_DURABILITY_LAG_END || 
-				queueSize() > SERVER_KNOBS->LOW_PRIORITY_STORAGE_QUEUE_BYTES_END);
-		} else {
-			durabilityBehind.set(
-				version.get() - durableVersion.get() > SERVER_KNOBS->LOW_PRIORITY_DURABILITY_LAG_START || 
-				queueSize() > SERVER_KNOBS->LOW_PRIORITY_STORAGE_QUEUE_BYTES_START );
-		}
-		return durabilityBehind.get();
-		*/
-	}
-
 	Future<Void> getQueryDelay() {
-		if(checkDurabilityBehind()) {
+		if((version.get() - durableVersion.get() > SERVER_KNOBS->LOW_PRIORITY_DURABILITY_LAG) ||
+		       (queueSize() > SERVER_KNOBS->LOW_PRIORITY_STORAGE_QUEUE_BYTES)) {
 			++counters.lowPriorityQueries;
-			return delay(0, TaskPriority::Low); //increasingPriorityDelay(durabilityBehind.onChange());
+			return delay(0, TaskPriority::BehindReads);
 		}
 		return delay(0, TaskPriority::DefaultEndpoint);
 	}

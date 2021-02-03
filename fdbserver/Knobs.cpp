@@ -444,10 +444,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( STORAGE_DURABILITY_LAG_SOFT_MAX,                     200e6 ); if( smallStorageTarget ) STORAGE_DURABILITY_LAG_SOFT_MAX = 10e6;
 
 	//FIXME: Low priority reads are disabled by assigning very high knob values, reduce knobs for 7.0
-	init( LOW_PRIORITY_STORAGE_QUEUE_BYTES_START,              775e8 ); if( smallStorageTarget ) LOW_PRIORITY_STORAGE_QUEUE_BYTES_START = 1750e3;
-	init( LOW_PRIORITY_STORAGE_QUEUE_BYTES_END,                760e6 ); if( smallStorageTarget ) LOW_PRIORITY_STORAGE_QUEUE_BYTES_END = 1500e3;
-	init( LOW_PRIORITY_DURABILITY_LAG_START,                   275e8 ); if( smallStorageTarget ) LOW_PRIORITY_DURABILITY_LAG_START = 15e6;
-	init( LOW_PRIORITY_DURABILITY_LAG_END,                     260e6 ); if( smallStorageTarget ) LOW_PRIORITY_DURABILITY_LAG_END = 10e6;
+	init( LOW_PRIORITY_STORAGE_QUEUE_BYTES,                    775e8 ); if( smallStorageTarget ) LOW_PRIORITY_STORAGE_QUEUE_BYTES = 1750e3;
+	init( LOW_PRIORITY_DURABILITY_LAG,                         275e8 ); if( smallStorageTarget ) LOW_PRIORITY_DURABILITY_LAG = 15e6;
 
 	bool smallTlogTarget = randomize && BUGGIFY;
 	init( TARGET_BYTES_PER_TLOG,                              2400e6 ); if( smallTlogTarget ) TARGET_BYTES_PER_TLOG = 2000e3;
