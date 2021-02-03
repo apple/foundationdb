@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#include <sys/sendfile.h>
+#include <limits.h>
+
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "fdbclient/ThreadSafeTransaction.h"
@@ -998,19 +1001,41 @@ void MultiVersionApi::setCallbacksOnExternalThreads() {
 	callbackOnMainThread = false;
 }
 
-void MultiVersionApi::addExternalLibrary(std::string path) {
-	std::string filename = basename(path);
-
-	if(filename.empty() || !fileExists(path)) {
-		TraceEvent("ExternalClientNotFound").detail("LibraryPath", filename);
-		throw file_not_found();
+/*void MultiVersionApi::addExternalLibraries(const std::vector<std::string>& paths) {
+	// All paths must be valid and must exist.
+	if (networkStartSetup) {
+		throw invalid_option(); // SOMEDAY: it might be good to allow clients to
+		                        // be added after the network is setup. For
+		                        // directories, we can monitor them for the
+		                        // addition of new files.
 	}
 
 	MutexHolder holder(lock);
-	if(networkStartSetup) {
-		throw invalid_option(); // SOMEDAY: it might be good to allow clients to be added after the network is setup
+	for (const auto& path : paths) {
+		std::string filename = basename(path);
+		if (externalClients.count(filename) == 0) {
+			TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
+			externalClients[filename] = Reference<ClientInfo>(new ClientInfo(new DLApi(path), path));
+		}
 	}
+	// // Cleanup temporary generated copies.
+	// for (const auto& lib : tempLibs) {
+	// 	unlink(lib.c_str());
 
+	addExternalLibraries({ path });
+
+	// Copy external lib for each thread
+	std::vector<std::string> tempLibs = copyExternalLibraryPerThread(path);
+	addExternalLibraries(tempLibs);
+}*/
+
+void MultiVersionApi::addExternalLibrary(std::string path) {
+	std::string filename = basename(path);
+
+	if (filename.empty() || !fileExists(path)) {
+		TraceEvent("ExternalClientNotFound").detail("LibraryPath", filename);
+		throw file_not_found();
+	}
 
 	// xxx external client init info
 	if(externalClientDescriptions.count(filename) == 0) {
@@ -1023,11 +1048,6 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 	TraceEvent("AddingExternalClientDirectory").detail("Directory", path);
 	std::vector<std::string> files = platform::listFiles(path, DYNAMIC_LIB_EXT);
 
-	MutexHolder holder(lock);
-	if(networkStartSetup) {
-		throw invalid_option(); // SOMEDAY: it might be good to allow clients to be added after the network is setup. For directories, we can monitor them for the addition of new files.
-	}
-
 	for(auto filename : files) {
 		std::string lib = abspath(joinPath(path, filename));
 		// xxx external client init info.
@@ -1036,6 +1056,43 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 			externalClientDescriptions.emplace(std::make_pair(filename, ClientDesc(lib, true))); //Reference<ClientInfo>(new ClientDesc(new DLApi(lib), lib));
 		}	
 	}
+}
+
+std::vector<std::string> MultiVersionApi::copyExternalLibraryPerThread(std::string path) {
+	// Copy library for each thread configured per version
+	std::vector<std::string> paths;
+	for (int ii = 1; ii < CLIENT_KNOBS->MULTI_VERSION_CLIENT_THREADS_PER_VERSION; ++ii) {
+		std::string filename = basename(path);
+
+		char tempName[PATH_MAX + 9];
+		sprintf(tempName, "/tmp/%s-XXX", filename.c_str());
+		int tempFd = mkstemp(tempName);
+
+		int fd;
+		off_t offset = 0;
+		struct stat stat_buf;
+
+		if (fd = open(path.c_str(), O_RDONLY) == -1) {
+			TraceEvent("ExternalClientNotFound").detail("LibraryPath", filename);
+			throw file_not_found();
+		}
+
+		if (fstat(tempFd, &stat_buf) == -1) {
+			TraceEvent(SevError, "FStatError").detail("LibraryPath", path);
+			throw platform_error();
+		}
+
+		int result = sendfile(tempFd, fd, &offset, stat_buf.st_size);
+		close(fd);
+		close(tempFd);
+		ASSERT(result == stat_buf.st_size);
+
+		paths.push_back(tempName);
+		TraceEvent("TempCopyExternalClientLibrary").detail("Library", filename).detail("TempLibrary", tempName);
+	}
+
+	return paths;
+
 }
 
 void MultiVersionApi::disableLocalClient() {

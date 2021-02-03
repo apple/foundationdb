@@ -165,6 +165,9 @@ public:
 	int32_t DEFAULT_AUTO_RESOLVERS;
 	int32_t DEFAULT_AUTO_LOGS;
 
+	// Multi-version Client
+	int MULTI_VERSION_CLIENT_THREADS_PER_VERSION;
+
 	// Client Status Info
 	double CSI_SAMPLING_PROBABILITY;
 	int64_t CSI_SIZE_LIMIT;

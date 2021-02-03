@@ -170,6 +170,9 @@ void ClientKnobs::initialize(bool randomize) {
 	init( DEFAULT_AUTO_RESOLVERS,                    1 );
 	init( DEFAULT_AUTO_LOGS,                         3 );
 
+	// Multi-version Client
+	init( MULTI_VERSION_CLIENT_THREADS_PER_VERSION,  3 );
+
 	init( IS_ACCEPTABLE_DELAY,                     1.5 );
 
 	init( HTTP_READ_SIZE,                     128*1024 );

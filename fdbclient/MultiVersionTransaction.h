@@ -406,6 +406,7 @@ private:
 	void setCallbacksOnExternalThreads();
 	void addExternalLibrary(std::string path);
 	void addExternalLibraryDirectory(std::string path);
+	std::vector<std::string> copyExternalLibraryPerThread(std::string path);
 	void disableLocalClient();
 	void setSupportedClientVersions(Standalone<StringRef> versions);
 
