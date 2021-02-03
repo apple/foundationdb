@@ -140,6 +140,20 @@ public:
 	}
 };
 
+class WatchMetadata: public ReferenceCounted<WatchMetadata> {
+	public:
+		Optional<Value> value;
+		Version version;
+		Promise<Version> watchPromise;
+		Future<Version> watchFuture;
+		Future<Version> watchFutureSS;
+
+		TransactionInfo info;
+		TagSet tags;
+
+		WatchMetadata(Optional<Value> value, Version version, Future<Version> watchFutureSS, TransactionInfo info, TagSet tags);
+};
+
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
 	static DatabaseContext* allocateOnForeignThread() {
@@ -175,7 +189,12 @@ public:
 	// Update the watch counter for the database
 	void addWatch();
 	void removeWatch();
-	
+
+	// watch map operations
+	Reference<WatchMetadata> getWatchMetadata(Key key) const;
+	void setWatchMetadata(Key key, Reference<WatchMetadata> metadata);
+	void deleteWatchMetadata(Key key);
+
 	void setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value );
 
 	Error deferredError;
@@ -364,7 +383,8 @@ public:
 	                                   std::unique_ptr<SpecialKeyRangeReadImpl> &&impl);
 
 	static bool debugUseTags;
-	static const std::vector<std::string> debugTransactionTagChoices; 
+	static const std::vector<std::string> debugTransactionTagChoices;
+	std::map<Key, Reference<WatchMetadata>> watchMap;
 };
 
 #endif

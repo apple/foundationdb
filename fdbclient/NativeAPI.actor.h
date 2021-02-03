@@ -94,13 +94,8 @@ public:
 
 	const UniqueOrderedOptionList<FDBTransactionOptions>& getTransactionDefaults() const;
 
-	Optional<WatchMetadata> getWatchMetadata(Key key) const;
-	void setWatchMetadata(Key key, WatchMetadata metadata);
-	void deleteWatchMetadata(Key key);
-
 private:
 	Reference<DatabaseContext> db;
-	std::map<Key, WatchMetadata> watchMap;
 };
 
 void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );
@@ -172,20 +167,6 @@ struct TransactionInfo {
 
 	explicit TransactionInfo(TaskPriority taskID, SpanID spanID)
 	  : taskID(taskID), spanID(spanID), useProvisionalProxies(false) {}
-};
-
-struct WatchMetadata {
-	Optional<Value> value;
-	Version version;
-	Promise<Version> watchPromise;
-	Future<Version> watchFuture;
-	Future<Version> watchFutureSS;
-
-	TransactionInfo info;
-	TagSet tags;
-
-	WatchMetadata();
-	WatchMetadata(Optional<Value> value, Version version, Future<Version> watchFutureSS, TransactionInfo info, TagSet tags);
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
