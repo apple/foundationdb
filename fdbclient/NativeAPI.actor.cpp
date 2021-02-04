@@ -2225,7 +2225,7 @@ ACTOR Future<Void> watchStorageServerResp(Key key, Database cx) {
 			state Future<Version> watchFutureSS = watchValue(Future<Version>(metadata->version), key, metadata->value, cx, metadata->info, metadata->tags);
 			Version watchVersion = wait(watchFutureSS);
 			
-			TraceEvent("Nim_Case SS done wait");
+			TraceEvent("Nim_Case SS done wait").detail("version", watchVersion);
 			if (watchVersion >= metadata->version) { // case 1: version_1 (SS) >= version_2 (map)
 				TraceEvent("Nim_Case SS 1").detail("Key", key).detail("Value", metadata->value).detail("numF", metadata->watchPromise.getFutureReferenceCount());
 				cx->deleteWatchMetadata(key);
@@ -2254,21 +2254,23 @@ ACTOR Future<Void> sameVersionDifKey(Version ver, Key key, Optional<Value> value
 	try {
 		state Optional<Value> valSS = wait(tr.get(key));
 
-		if (valSS == value) { // val_3 == val_2
-			Reference<WatchMetadata> newMetadata(new WatchMetadata(value, ver, info, tags));
-			cx->setWatchMetadata(key, newMetadata);
-
-			newMetadata->watchFutureSS = watchStorageServerResp(key, cx);
-		}
-
 		if (valSS != metadata->value) { // val_3 != val_1
-			if (valSS != value) cx->deleteWatchMetadata(key);
+			cx->deleteWatchMetadata(key);
 			
 			metadata->watchPromise.send(ver);
 			metadata->watchFutureSS.cancel();
 		}
 
+		if (valSS == value) { // val_3 == val_2
+			metadata = Reference<WatchMetadata>(new WatchMetadata(value, ver, info, tags));
+			cx->setWatchMetadata(key, metadata);
+
+			metadata->watchFutureSS = watchStorageServerResp(key, cx);
+		}
+
 		wait(tr.commit());
+
+		if (valSS != value) return Void(); // if val_3 != val_2
 
 		metadata = cx->getWatchMetadata(key);
 		if (metadata) { // if val_3 == val_2
@@ -2276,7 +2278,7 @@ ACTOR Future<Void> sameVersionDifKey(Version ver, Key key, Optional<Value> value
 			wait(watchFuture);
 		}
 
-		return Void(); // if val_3 != val_2
+		return Void();
 	}
 	catch(Error& e) {
 		state Error err = e;
@@ -2287,7 +2289,7 @@ ACTOR Future<Void> sameVersionDifKey(Version ver, Key key, Optional<Value> value
 
 Future<Void> getWatchFuture(Version ver, Key key, Optional<Value> value, Database cx,
                               TransactionInfo info, TagSet tags) {
-	TraceEvent("Nim_Case start").detail("Key", key).detail("Value", value);
+	TraceEvent("Nim_Case start").detail("Key", key).detail("Value", value).detail("Version", ver);
 	Reference<WatchMetadata> metadata = cx->getWatchMetadata(key);
 
 	if (!metadata) { // case 1: key not in map
@@ -2314,16 +2316,18 @@ Future<Void> getWatchFuture(Version ver, Key key, Optional<Value> value, Databas
 		return watchFuture;
 	} else if(ver > metadata->version) { // case 3: val_1 != val_2 && version_2 > version_1
 		TraceEvent("Nim_Case 3").detail("Key", key).detail("Value", value);
-		
-		Reference<WatchMetadata> newMetadata(new WatchMetadata(value, ver, info, tags));
-		cx->setWatchMetadata(key, newMetadata);
 
-		newMetadata->watchFutureSS = watchStorageServerResp(key, cx);
+		cx->deleteWatchMetadata(key);
 
 		metadata->watchPromise.send(ver);
 		metadata->watchFutureSS.cancel();
 
-		Future<Void> watchFuture = success(newMetadata->watchPromise.getFuture());
+		metadata = Reference<WatchMetadata>(new WatchMetadata(value, ver, info, tags));
+		cx->setWatchMetadata(key, metadata);
+
+		metadata->watchFutureSS = watchStorageServerResp(key, cx);
+
+		Future<Void> watchFuture = success(metadata->watchPromise.getFuture());
 		return watchFuture;
 	} else if (metadata->version == ver) { // case 5: val_1 != val_2 && version_1 == version_2
 		TraceEvent("Nim_Case 5").detail("Key", key).detail("Value", value);
