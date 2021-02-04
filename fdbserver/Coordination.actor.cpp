@@ -551,7 +551,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 				info.forward = forward.get().serializedInfo;
 				req.reply.send( CachedSerialization<ClientDBInfo>(info) );
 			} else {
-				if (SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT &&
+				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT &&
 				    (ccf->getConnectionString().clusterKey() != req.clusterKey ||
 				     ccf->getConnectionString().coordinators() != req.coordinators)) {
 					TraceEvent(SevWarnAlways, "CCFMismatch")
@@ -570,7 +570,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 			if( forward.present() ) {
 				req.reply.send( forward.get() );
 			} else {
-				if (SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT &&
+				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT &&
 				    (ccf->getConnectionString().clusterKey() != req.key ||
 				     ccf->getConnectionString().coordinators() != req.coordinators)) {
 					TraceEvent(SevWarnAlways, "CCFMismatch")
@@ -589,7 +589,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 			if( forward.present() )
 				req.reply.send( forward.get() );
 			else {
-				if (SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && ccf->getConnectionString().clusterKey() != req.key) {
+				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && ccf->getConnectionString().clusterKey() != req.key) {
 					TraceEvent(SevWarnAlways, "CCFMismatch")
 					    .detail("RequestType", "GetLeaderRequest")
 					    .detail("LocalCS", ccf->getConnectionString().toString())
@@ -605,7 +605,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 			if( forward.present() )
 				req.reply.send( forward.get() );
 			else {
-				if (SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && ccf->getConnectionString().clusterKey() != req.key) {
+				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && ccf->getConnectionString().clusterKey() != req.key) {
 					TraceEvent(SevWarnAlways, "CCFMismatch")
 					    .detail("RequestType", "CandidacyRequest")
 					    .detail("LocalCS", ccf->getConnectionString().toString())
@@ -621,7 +621,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 			if( forward.present() )
 				req.reply.send(LeaderHeartbeatReply{ false });
 			else {
-				if (SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && ccf->getConnectionString().clusterKey() != req.key) {
+				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && ccf->getConnectionString().clusterKey() != req.key) {
 					TraceEvent(SevWarnAlways, "CCFMismatch")
 					    .detail("RequestType", "LeaderHeartbeatRequest")
 					    .detail("LocalCS", ccf->getConnectionString().toString())
@@ -637,7 +637,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 			if( forward.present() )
 				req.reply.send( Void() );
 			else {
-				if (SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && ccf->getConnectionString().clusterKey() != req.key) {
+				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && ccf->getConnectionString().clusterKey() != req.key) {
 					TraceEvent(SevWarnAlways, "CCFMismatch")
 					    .detail("RequestType", "ForwardRequest")
 					    .detail("LocalCS", ccf->getConnectionString().toString())
