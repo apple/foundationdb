@@ -1,4 +1,5 @@
 # escape=`
+ARG IMAGE_TAG=0.1.0
 
 # Use the latest Windows Server Core image with .NET Framework 4.8.
 FROM mcr.microsoft.com/dotnet/framework/sdk:4.8-windowsservercore-ltsc2019
@@ -49,6 +50,9 @@ RUN C:\BuildTools\Common7\Tools\VsDevCmd.bat && `
 
 # CMake's find_package wouldn't be able to find this otherwise
 RUN setx CMAKE_PREFIX_PATH "C:\Downloads\boost_1_72_0\stage\"
+
+LABEL version=${IMAGE_TAG}
+ENV DOCKER_IMAGEVER=${IMAGE_TAG}
 
 # Enable Windows Update Service (which is required to get .Net Core which is a dependency for wix) and install .Net framework
 RUN powershell "Set-Service -Name wuauserv -StartupType Manual; Install-WindowsFeature -Name NET-Framework-Features -Verbose"
