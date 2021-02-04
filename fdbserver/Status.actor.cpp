@@ -1805,7 +1805,8 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		StatusCounter readBytes;
 		StatusCounter lowPriorityReads;
 
-		for(auto &ss : storageServers.get()) {
+		for(int i = 0; i < storageServers.get().size(); i++) {
+			auto& ss = storageServers.get()[i];
 			TraceEventFields const& storageMetrics = ss.second.at("StorageMetrics");
 
 			if (storageMetrics.size() > 0) {
