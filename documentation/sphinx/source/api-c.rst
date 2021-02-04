@@ -467,7 +467,7 @@ An |database-blurb1| Modifications to a database are performed via transactions.
    ``snapshot_command``
          A pointer to all the snapshot command arguments.
 
-         In particular, if the original ``fdbcli`` command is ``snapshot <arg1> <arg2> <argN>``, then the string ``snapshot_command`` points to is ``<arg1> <arg2> <argN>``, which including the spaces.
+         In particular, if the original ``fdbcli`` command is ``snapshot <arg1> <arg2> <argN>``, then the string ``snapshot_command`` points to is ``<arg1> <arg2> <argN>``.
    
    ``snapshot_command_length``
          |length-of| ``snapshot_command``
