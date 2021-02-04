@@ -38,7 +38,7 @@ public:
 	ISimulator() : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), drAgents(WaitForType), extraDB(NULL), allowLogSetKills(true), usableRegions(1) {}
 
 	// Order matters!
-	enum KillType { KillInstantly, InjectFaults, RebootAndDelete, RebootProcessAndDelete, Reboot, RebootProcess, None };
+	enum KillType { KillInstantly, InjectFaults, FailDisk, RebootAndDelete, RebootProcessAndDelete, Reboot, RebootProcess, None };
 
 	enum BackupAgentType { NoBackupAgents, WaitForType, BackupToFile, BackupToDB };
 
@@ -68,6 +68,7 @@ public:
 
 		uint64_t fault_injection_r;
 		double fault_injection_p1, fault_injection_p2;
+		bool failedDisk;
 
 		ProcessInfo(const char* name, LocalityData locality, ProcessClass startingClass, NetworkAddressList addresses,
 					INetworkConnections *net, const char* dataFolder, const char* coordinationFolder )
@@ -75,11 +76,11 @@ public:
 			  addresses(addresses), address(addresses.address), dataFolder(dataFolder),
 			  network(net), coordinationFolder(coordinationFolder), failed(false), excluded(false), cpuTicks(0),
 			  rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
-			  fault_injection_r(0), machine(0), cleared(false) {}
+			  fault_injection_r(0), machine(0), cleared(false), failedDisk(false) {}
 
 		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
 
-		bool isReliable() const { return !failed && fault_injection_p1 == 0 && fault_injection_p2 == 0; }
+		bool isReliable() const { return !failed && fault_injection_p1 == 0 && fault_injection_p2 == 0 && !failedDisk; }
 		bool isAvailable() const { return !isExcluded() && isReliable(); }
 		bool isExcluded() const { return excluded; }
 		bool isCleared() const { return cleared; }

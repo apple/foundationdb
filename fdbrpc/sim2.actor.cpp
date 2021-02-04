@@ -1122,7 +1122,7 @@ public:
 		int nQuorum = ((desiredCoordinators+1)/2)*2-1;
 
 		KillType newKt = kt;
-		if ((kt == KillInstantly) || (kt == InjectFaults) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete))
+		if ((kt == KillInstantly) || (kt == InjectFaults) || (kt == FailDisk) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete))
 		{
 			LocalityGroup primaryProcessesLeft, primaryProcessesDead;
 			LocalityGroup primarySatelliteProcessesLeft, primarySatelliteProcessesDead;
@@ -1263,6 +1263,7 @@ public:
 		TEST( true ); // Simulated machine was killed with any kill type
 		TEST( kt == KillInstantly ); // Simulated machine was killed instantly
 		TEST( kt == InjectFaults ); // Simulated machine was killed with faults
+		TEST( kt == FailDisk ); // Simulated machine was killed with a failed disk
 
 		if (kt == KillInstantly) {
 			TraceEvent(SevWarn, "FailMachine").detail("Name", machine->name).detail("Address", machine->address).detail("ZoneId", machine->locality.zoneId()).detail("Process", machine->toString()).detail("Rebooting", machine->rebooting).detail("Protected", protectedAddresses.count(machine->address)).backtrace();
@@ -1275,6 +1276,9 @@ public:
 			machine->fault_injection_r = deterministicRandom()->randomUniqueID().first();
 			machine->fault_injection_p1 = 0.1;
 			machine->fault_injection_p2 = deterministicRandom()->random01();
+		} else if (kt == FailDisk) {
+			TraceEvent(SevWarn, "FailDiskMachine").detail("Name", machine->name).detail("Address", machine->address).detail("ZoneId", machine->locality.zoneId()).detail("Process", machine->toString()).detail("Rebooting", machine->rebooting).detail("Protected", protectedAddresses.count(machine->address)).backtrace();
+			machine->failedDisk = true;
 		} else {
 			ASSERT( false );
 		}
@@ -1365,7 +1369,7 @@ public:
 		}
 
 		// Check if machine can be removed, if requested
-		if (!forceKill && ((kt == KillInstantly) || (kt == InjectFaults) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete)))
+		if (!forceKill && ((kt == KillInstantly) || (kt == InjectFaults) || (kt == FailDisk) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete)))
 		{
 			std::vector<ProcessInfo*> processesLeft, processesDead;
 			int	protectedWorker = 0, unavailable = 0, excluded = 0, cleared = 0;
@@ -1398,7 +1402,7 @@ public:
 			if (!canKillProcesses(processesLeft, processesDead, kt, &kt)) {
 				TraceEvent("ChangedKillMachine").detail("MachineId", machineId).detail("KillType", kt).detail("OrigKillType", ktOrig).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("TotalProcesses", machines.size()).detail("ProcessesPerMachine", processesPerMachine).detail("Protected", protectedWorker).detail("Unavailable", unavailable).detail("Excluded", excluded).detail("Cleared", cleared).detail("ProtectedTotal", protectedAddresses.size()).detail("TLogPolicy", tLogPolicy->info()).detail("StoragePolicy", storagePolicy->info());
 			}
-			else if ((kt == KillInstantly) || (kt == InjectFaults)) {
+			else if ((kt == KillInstantly) || (kt == InjectFaults) || (kt == FailDisk)) {
 				TraceEvent("DeadMachine").detail("MachineId", machineId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("TotalProcesses", machines.size()).detail("ProcessesPerMachine", processesPerMachine).detail("TLogPolicy", tLogPolicy->info()).detail("StoragePolicy", storagePolicy->info());
 				for (auto process : processesLeft) {
 					TraceEvent("DeadMachineSurvivors").detail("MachineId", machineId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("SurvivingProcess", process->toString());
@@ -1438,7 +1442,7 @@ public:
 
 		TraceEvent("KillMachine").detail("MachineId", machineId).detail("Kt", kt).detail("KtOrig", ktOrig).detail("KillableMachines", processesOnMachine).detail("ProcessPerMachine", processesPerMachine).detail("KillChanged", kt!=ktOrig);
 		if ( kt < RebootAndDelete ) {
-			if(kt == InjectFaults && machines[machineId].machineProcess != nullptr)
+			if((kt == InjectFaults || kt == FailDisk) && machines[machineId].machineProcess != nullptr)
 				killProcess_internal( machines[machineId].machineProcess, kt );
 			for (auto& process : machines[machineId].processes) {
 				TraceEvent("KillMachineProcess").detail("KillType", kt).detail("Process", process->toString()).detail("StartingClass", process->startingClass.toString()).detail("Failed", process->failed).detail("Excluded", process->excluded).detail("Cleared", process->cleared).detail("Rebooting", process->rebooting);
@@ -1486,7 +1490,7 @@ public:
 		}
 
 		// Check if machine can be removed, if requested
-		if (!forceKill && ((kt == KillInstantly) || (kt == InjectFaults) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete)))
+		if (!forceKill && ((kt == KillInstantly) || (kt == InjectFaults) || (kt == FailDisk) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete)))
 		{
 			std::vector<ProcessInfo*>	processesLeft, processesDead;
 			for (auto processInfo : getAllProcesses()) {
@@ -1760,6 +1764,9 @@ ACTOR void doReboot( ISimulator::ProcessInfo *p, ISimulator::KillType kt ) {
 
 //Simulates delays for performing operations on disk
 Future<Void> waitUntilDiskReady( Reference<DiskParameters> diskParameters, int64_t size, bool sync ) {
+	if(g_simulator.getCurrentProcess()->failedDisk) {
+		return Never();
+	}
 	if(g_simulator.connectionFailuresDisableDuration > 1e4)
 		return delay(0.0001);
 
