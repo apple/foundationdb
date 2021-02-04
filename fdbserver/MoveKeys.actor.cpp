@@ -237,7 +237,6 @@ ACTOR Future<vector<vector<UID>>> additionalSources(Standalone<RangeResultRef> s
 
 	std::map<UID, StorageServerInterface> ssiMap;
 	for(int s=0; s<serverListValues.size(); s++) {
-		auto si = decodeServerListValue(serverListValues[s].get());
 		StorageServerInterface ssi = decodeServerListValue(serverListValues[s].get());
 		ssiMap[ssi.id()] = ssi;
 	}
@@ -257,7 +256,7 @@ ACTOR Future<vector<vector<UID>>> additionalSources(Standalone<RangeResultRef> s
 		}
 
 		for(int s=0; s<dest.size(); s++) {
-			if( std::find(src.begin(), src.end(), dest[s]) == dest.end() ) {
+			if (std::find(src.begin(), src.end(), dest[s]) == src.end()) {
 				destInterfs.push_back( ssiMap[dest[s]] );
 			}
 		}
