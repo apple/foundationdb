@@ -146,12 +146,12 @@ class WatchMetadata: public ReferenceCounted<WatchMetadata> {
 		Version version;
 		Promise<Version> watchPromise;
 		Future<Version> watchFuture;
-		Future<Version> watchFutureSS;
+		Future<Void> watchFutureSS;
 
 		TransactionInfo info;
 		TagSet tags;
 
-		WatchMetadata(Optional<Value> value, Version version, Future<Version> watchFutureSS, TransactionInfo info, TagSet tags);
+		WatchMetadata(Optional<Value> value, Version version, TransactionInfo info, TagSet tags);
 };
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
