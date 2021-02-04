@@ -21,63 +21,28 @@
 #include "flow/StreamCipher.h"
 #include "flow/UnitTest.h"
 
-#include <unordered_set>
-
-EncryptionStreamCipher::EncryptionStreamCipher(const StreamCipher::Key& key, const StreamCipher::IV& iv)
-  : ctx(EVP_CIPHER_CTX_new()) {
-	EVP_EncryptInit_ex(ctx, EVP_aes_128_gcm(), nullptr, nullptr, nullptr);
-	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, iv.size(), nullptr);
-	EVP_EncryptInit_ex(ctx, nullptr, nullptr, key.data(), iv.data());
-}
-
-EncryptionStreamCipher::~EncryptionStreamCipher() {
-	EVP_CIPHER_CTX_free(ctx);
-}
-
-StringRef EncryptionStreamCipher::encrypt(unsigned char const* plaintext, int len, Arena& arena) {
-	auto ciphertext = new (arena) unsigned char[len + AES_BLOCK_SIZE];
-	int bytes{ 0 };
-	EVP_EncryptUpdate(ctx, ciphertext, &bytes, plaintext, len);
-	return StringRef(ciphertext, bytes);
-}
-
-StringRef EncryptionStreamCipher::finish(Arena& arena) {
-	auto ciphertext = new (arena) unsigned char[AES_BLOCK_SIZE];
-	int bytes{ 0 };
-	EVP_EncryptFinal_ex(ctx, ciphertext, &bytes);
-	return StringRef(ciphertext, bytes);
-}
-
-DecryptionStreamCipher::DecryptionStreamCipher(const StreamCipher::Key& key, const StreamCipher::IV& iv)
-  : ctx(EVP_CIPHER_CTX_new()) {
-
-	EVP_DecryptInit_ex(ctx, EVP_aes_128_gcm(), nullptr, nullptr, nullptr);
-	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, iv.size(), nullptr);
-	EVP_DecryptInit_ex(ctx, nullptr, nullptr, key.data(), iv.data());
-}
-
-DecryptionStreamCipher::~DecryptionStreamCipher() {
-	EVP_CIPHER_CTX_free(ctx);
-}
-
-StringRef DecryptionStreamCipher::decrypt(unsigned char const* ciphertext, int len, Arena& arena) {
-	auto plaintext = new (arena) unsigned char[len];
-	int bytesDecrypted{ 0 };
-	EVP_DecryptUpdate(ctx, plaintext, &bytesDecrypted, ciphertext, len);
-	int finalBlockBytes{ 0 };
-	EVP_DecryptFinal_ex(ctx, plaintext + bytesDecrypted, &finalBlockBytes);
-	return StringRef(plaintext, bytesDecrypted + finalBlockBytes);
-}
-
-StringRef DecryptionStreamCipher::finish(Arena& arena) {
-	auto plaintext = new (arena) unsigned char[AES_BLOCK_SIZE];
-	int finalBlockBytes{ 0 };
-	EVP_DecryptFinal_ex(ctx, plaintext, &finalBlockBytes);
-	return StringRef(plaintext, finalBlockBytes);
-}
-
+std::unordered_set<EVP_CIPHER_CTX*> StreamCipher::ctxs;
 std::unique_ptr<StreamCipher::Key> StreamCipher::Key::globalKey;
-static std::unordered_set<EVP_CIPHER_CTX*> ciphers;
+
+StreamCipher::StreamCipher() : ctx(EVP_CIPHER_CTX_new()) {
+	ctxs.insert(ctx);
+}
+
+StreamCipher::~StreamCipher() {
+	EVP_CIPHER_CTX_free(ctx);
+	ctxs.erase(ctx);
+}
+
+EVP_CIPHER_CTX* StreamCipher::getCtx() {
+	return ctx;
+}
+
+void StreamCipher::cleanup() noexcept {
+	Key::cleanup();
+	for (auto ctx : ctxs) {
+		EVP_CIPHER_CTX_free(ctx);
+	}
+}
 
 void StreamCipher::Key::initializeRandomKey() {
 	ASSERT(g_network->isSimulated());
@@ -95,8 +60,50 @@ StreamCipher::Key::~Key() {
 	memset(arr.data(), 0, arr.size());
 }
 
-void StreamCipher::Key::cleanup() {
+void StreamCipher::Key::cleanup() noexcept {
 	globalKey.reset();
+}
+
+EncryptionStreamCipher::EncryptionStreamCipher(const StreamCipher::Key& key, const StreamCipher::IV& iv) {
+	EVP_EncryptInit_ex(cipher.getCtx(), EVP_aes_128_gcm(), nullptr, nullptr, nullptr);
+	EVP_CIPHER_CTX_ctrl(cipher.getCtx(), EVP_CTRL_AEAD_SET_IVLEN, iv.size(), nullptr);
+	EVP_EncryptInit_ex(cipher.getCtx(), nullptr, nullptr, key.data(), iv.data());
+}
+
+StringRef EncryptionStreamCipher::encrypt(unsigned char const* plaintext, int len, Arena& arena) {
+	auto ciphertext = new (arena) unsigned char[len + AES_BLOCK_SIZE];
+	int bytes{ 0 };
+	EVP_EncryptUpdate(cipher.getCtx(), ciphertext, &bytes, plaintext, len);
+	return StringRef(ciphertext, bytes);
+}
+
+StringRef EncryptionStreamCipher::finish(Arena& arena) {
+	auto ciphertext = new (arena) unsigned char[AES_BLOCK_SIZE];
+	int bytes{ 0 };
+	EVP_EncryptFinal_ex(cipher.getCtx(), ciphertext, &bytes);
+	return StringRef(ciphertext, bytes);
+}
+
+DecryptionStreamCipher::DecryptionStreamCipher(const StreamCipher::Key& key, const StreamCipher::IV& iv) {
+	EVP_DecryptInit_ex(cipher.getCtx(), EVP_aes_128_gcm(), nullptr, nullptr, nullptr);
+	EVP_CIPHER_CTX_ctrl(cipher.getCtx(), EVP_CTRL_AEAD_SET_IVLEN, iv.size(), nullptr);
+	EVP_DecryptInit_ex(cipher.getCtx(), nullptr, nullptr, key.data(), iv.data());
+}
+
+StringRef DecryptionStreamCipher::decrypt(unsigned char const* ciphertext, int len, Arena& arena) {
+	auto plaintext = new (arena) unsigned char[len];
+	int bytesDecrypted{ 0 };
+	EVP_DecryptUpdate(cipher.getCtx(), plaintext, &bytesDecrypted, ciphertext, len);
+	int finalBlockBytes{ 0 };
+	EVP_DecryptFinal_ex(cipher.getCtx(), plaintext + bytesDecrypted, &finalBlockBytes);
+	return StringRef(plaintext, bytesDecrypted + finalBlockBytes);
+}
+
+StringRef DecryptionStreamCipher::finish(Arena& arena) {
+	auto plaintext = new (arena) unsigned char[AES_BLOCK_SIZE];
+	int finalBlockBytes{ 0 };
+	EVP_DecryptFinal_ex(cipher.getCtx(), plaintext, &finalBlockBytes);
+	return StringRef(plaintext, finalBlockBytes);
 }
 
 void forceLinkStreamCipherTests() {}

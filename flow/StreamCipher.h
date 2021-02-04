@@ -28,40 +28,48 @@
 #include <openssl/aes.h>
 #include <openssl/evp.h>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
-namespace StreamCipher {
-class Key : NonCopyable {
-	std::array<unsigned char, 16> arr;
-	static std::unique_ptr<Key> globalKey;
-	struct ConstructorTag {};
+class StreamCipher final : NonCopyable {
+	static std::unordered_set<EVP_CIPHER_CTX*> ctxs;
+	EVP_CIPHER_CTX* ctx;
+
 public:
-	Key(ConstructorTag) {}
-	~Key();
-	unsigned char const* data() const { return arr.data(); }
-	static void initializeRandomKey();
-	static const Key& getKey();
-	static void cleanup();
+	StreamCipher();
+	~StreamCipher();
+	EVP_CIPHER_CTX* getCtx();
+	class Key : NonCopyable {
+		std::array<unsigned char, 16> arr;
+		static std::unique_ptr<Key> globalKey;
+		struct ConstructorTag {};
+
+	public:
+		Key(ConstructorTag) {}
+		~Key();
+		unsigned char const* data() const { return arr.data(); }
+		static void initializeRandomKey();
+		static const Key& getKey();
+		static void cleanup() noexcept;
+	};
+	static void cleanup() noexcept;
+	using IV = std::array<unsigned char, 16>;
 };
-using IV = std::array<unsigned char, 16>;
-void registerCipherForCleanup(EVP_CIPHER_CTX*) noexcept;
-void deregisterCipherForCleanup(EVP_CIPHER_CTX*) noexcept;
-}; // namespace StreamCipher
 
 class EncryptionStreamCipher final : NonCopyable, public ReferenceCounted<EncryptionStreamCipher> {
-	EVP_CIPHER_CTX* ctx;
+	StreamCipher cipher;
+
 public:
 	EncryptionStreamCipher(const StreamCipher::Key& key, const StreamCipher::IV& iv);
-	~EncryptionStreamCipher();
 	StringRef encrypt(unsigned char const* plaintext, int len, Arena&);
 	StringRef finish(Arena&);
 };
 
 class DecryptionStreamCipher final : NonCopyable, public ReferenceCounted<DecryptionStreamCipher> {
-	EVP_CIPHER_CTX* ctx;
+	StreamCipher cipher;
+
 public:
 	DecryptionStreamCipher(const StreamCipher::Key& key, const StreamCipher::IV& iv);
-	~DecryptionStreamCipher();
 	StringRef decrypt(unsigned char const* ciphertext, int len, Arena&);
 	StringRef finish(Arena&);
 };

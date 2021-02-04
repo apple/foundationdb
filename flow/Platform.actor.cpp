@@ -3238,7 +3238,7 @@ void crashHandler(int sig) {
 
 	bool error = (sig != SIGUSR2);
 
-	StreamCipher::Key::cleanup();
+	StreamCipher::cleanup();
 
 	fflush(stdout);
 	TraceEvent(error ? SevError : SevInfo, error ? "Crash" : "ProcessTerminated")
