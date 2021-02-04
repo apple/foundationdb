@@ -76,25 +76,26 @@ StringRef DecryptionStreamCipher::finish(Arena& arena) {
 	return StringRef(plaintext, finalBlockBytes);
 }
 
+std::unique_ptr<StreamCipher::Key> StreamCipher::Key::globalKey;
 static std::unordered_set<EVP_CIPHER_CTX*> ciphers;
-static Optional<StreamCipher::Key> globalKey;
 
-void StreamCipher::initializeRandomKey() {
+void StreamCipher::Key::initializeRandomKey() {
 	ASSERT(g_network->isSimulated());
-	ASSERT(!globalKey.present());
-	globalKey = StreamCipher::Key{};
-	generateRandomData(globalKey.get().data(), globalKey.get().size());
+	if (globalKey) return;
+	globalKey = std::make_unique<Key>();
+	generateRandomData(globalKey.get()->arr.data(), globalKey.get()->arr.size());
 }
 
-StreamCipher::Key StreamCipher::getKey() {
-	return globalKey.get();
+const StreamCipher::Key& StreamCipher::Key::getKey() {
+	ASSERT(globalKey);
+	return *globalKey;
 }
 
 void forceLinkStreamCipherTests() {}
 
 TEST_CASE("flow/StreamCipher") {
-	StreamCipher::Key key;
-	generateRandomData(key.data(), key.size());
+	StreamCipher::Key::initializeRandomKey();
+	const auto& key = StreamCipher::Key::getKey();
 
 	StreamCipher::IV iv;
 	generateRandomData(iv.data(), iv.size());

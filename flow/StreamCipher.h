@@ -31,10 +31,17 @@
 #include <vector>
 
 namespace StreamCipher {
-using Key = std::array<unsigned char, 16>;
+class Key : NonCopyable {
+	std::array<unsigned char, 16> arr;
+	static std::unique_ptr<Key> globalKey;
+
+public:
+	Key() = default; // TODO: Make private
+	const unsigned char* data() const { return arr.data(); }
+	static void initializeRandomKey();
+	static const Key& getKey();
+};
 using IV = std::array<unsigned char, 16>;
-void initializeRandomKey();
-Key getKey();
 void registerCipherForCleanup(EVP_CIPHER_CTX*) noexcept;
 void deregisterCipherForCleanup(EVP_CIPHER_CTX*) noexcept;
 }; // namespace StreamCipher

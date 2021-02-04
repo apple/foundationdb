@@ -42,7 +42,7 @@ public:
 		state unsigned char* encrypted = new (arena) unsigned char[FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE];
 		int bytes = wait(
 		    self->file->read(encrypted, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE * block));
-		DecryptionStreamCipher decryptor(StreamCipher::getKey(), self->getIV(block));
+		DecryptionStreamCipher decryptor(StreamCipher::Key::getKey(), self->getIV(block));
 		auto decrypted = decryptor.decrypt(encrypted, bytes, arena);
 		return Standalone<StringRef>(decrypted, arena);
 	}
@@ -98,8 +98,8 @@ public:
 				self->offsetInBlock = 0;
 				ASSERT(self->currentBlock < std::numeric_limits<uint16_t>::max());
 				++self->currentBlock;
-				self->encryptor =
-				    std::make_unique<EncryptionStreamCipher>(StreamCipher::getKey(), self->getIV(self->currentBlock));
+				self->encryptor = std::make_unique<EncryptionStreamCipher>(StreamCipher::Key::getKey(),
+				                                                           self->getIV(self->currentBlock));
 			}
 		}
 		return Void();
@@ -126,7 +126,7 @@ AsyncFileEncrypted::AsyncFileEncrypted(Reference<IAsyncFile> file, bool canWrite
   : file(file), canWrite(canWrite), currentBlock(0), readBuffers(FLOW_KNOBS->MAX_DECRYPTED_BLOCKS) {
 	firstBlockIV = AsyncFileEncryptedImpl::getFirstBlockIV(file->getFilename());
 	if (canWrite) {
-		encryptor = std::make_unique<EncryptionStreamCipher>(StreamCipher::getKey(), getIV(currentBlock));
+		encryptor = std::make_unique<EncryptionStreamCipher>(StreamCipher::Key::getKey(), getIV(currentBlock));
 		writeBuffer = std::vector<unsigned char>(FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE, 0);
 	}
 }
@@ -234,7 +234,7 @@ TEST_CASE("fdbrpc/AsyncFileEncrypted") {
 	generateRandomData(&writeBuffer.front(), bytes);
 	state std::vector<unsigned char> readBuffer(bytes, 0);
 	ASSERT(g_network->isSimulated());
-	StreamCipher::initializeRandomKey();
+	StreamCipher::Key::initializeRandomKey();
 	int flags = IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
 	            IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_ENCRYPTED | IAsyncFile::OPEN_UNCACHED |
 	            IAsyncFile::OPEN_NO_AIO;
