@@ -35,12 +35,13 @@ class Key : NonCopyable {
 	std::array<unsigned char, 16> arr;
 	static std::unique_ptr<Key> globalKey;
 	struct ConstructorTag {};
-
 public:
 	Key(ConstructorTag) {}
-	const unsigned char* data() const { return arr.data(); }
+	~Key();
+	unsigned char const* data() const { return arr.data(); }
 	static void initializeRandomKey();
 	static const Key& getKey();
+	static void cleanup();
 };
 using IV = std::array<unsigned char, 16>;
 void registerCipherForCleanup(EVP_CIPHER_CTX*) noexcept;

@@ -91,6 +91,14 @@ const StreamCipher::Key& StreamCipher::Key::getKey() {
 	return *globalKey;
 }
 
+StreamCipher::Key::~Key() {
+	memset(arr.data(), 0, arr.size());
+}
+
+void StreamCipher::Key::cleanup() {
+	globalKey.reset();
+}
+
 void forceLinkStreamCipherTests() {}
 
 TEST_CASE("flow/StreamCipher") {

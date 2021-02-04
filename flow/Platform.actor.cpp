@@ -29,6 +29,7 @@
 #include "flow/Platform.actor.h"
 #include "flow/Arena.h"
 
+#include "flow/StreamCipher.h"
 #include "flow/Trace.h"
 #include "flow/Error.h"
 
@@ -3236,6 +3237,8 @@ void crashHandler(int sig) {
 	std::string backtrace = platform::get_backtrace();
 
 	bool error = (sig != SIGUSR2);
+
+	StreamCipher::Key::cleanup();
 
 	fflush(stdout);
 	TraceEvent(error ? SevError : SevInfo, error ? "Crash" : "ProcessTerminated")
