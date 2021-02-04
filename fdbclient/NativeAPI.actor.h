@@ -19,8 +19,6 @@
  */
 
 #pragma once
-#include <map>
-
 #include "flow/IRandom.h"
 #include "flow/Tracing.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_NATIVEAPI_ACTOR_G_H)
@@ -47,7 +45,6 @@
 
 // Incomplete types that are reference counted
 class DatabaseContext;
-struct WatchMetadata;
 template <> void addref( DatabaseContext* ptr );
 template <> void delref( DatabaseContext* ptr );
 
