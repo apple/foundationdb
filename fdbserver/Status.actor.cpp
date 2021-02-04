@@ -1816,6 +1816,11 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 			}
 		}
 
+		operationsObj["read_requests"] = readRequests.getStatus();
+		operationsObj["reads"] = reads.getStatus();
+		keysObj["read"] = readKeys.getStatus();
+		bytesObj["read"] = readBytes.getStatus();
+
 		try { 
 			for(auto &ss : storageServers.get()) {
 				TraceEventFields const& storageMetrics = ss.second.at("StorageMetrics");
@@ -1825,16 +1830,10 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 					lowPriorityReads.updateValues(StatusCounter(storageMetrics.getValue("LowPriorityQueries")));
 				}
 			}
+			operationsObj["low_priority_reads"] = lowPriorityReads.getStatus();
 		} catch(Error &e) {
 			if(e.code() != error_code_attribute_not_found) throw e;
 		}
-
-		operationsObj["read_requests"] = readRequests.getStatus();
-		operationsObj["reads"] = reads.getStatus();
-		operationsObj["low_priority_reads"] = lowPriorityReads.getStatus();
-		keysObj["read"] = readKeys.getStatus();
-		bytesObj["read"] = readBytes.getStatus();
-
 	}
 	catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
