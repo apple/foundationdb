@@ -523,7 +523,7 @@ public:
 
 	struct Counters {
 		CounterCollection cc;
-		Counter allQueries, getKeyQueries, getValueQueries, getRangeQueries, finishedQueries, rowsQueried, bytesQueried, watchQueries, emptyQueries;
+		Counter allQueries, getKeyQueries, getValueQueries, getRangeQueries, finishedQueries, lowPriorityQueries, rowsQueried, bytesQueried, watchQueries, emptyQueries;
 		Counter bytesInput, bytesDurable, bytesFetched,
 			mutationBytes;  // Like bytesInput but without MVCC accounting
 		Counter sampledBytesCleared;
@@ -543,6 +543,7 @@ public:
 			getRangeQueries("GetRangeQueries", cc),
 			allQueries("QueryQueue", cc),
 			finishedQueries("FinishedQueries", cc),
+			lowPriorityQueries("LowPriorityQueries", cc),
 			rowsQueried("RowsQueried", cc),
 			bytesQueried("BytesQueried", cc),
 			watchQueries("WatchQueries", cc),
@@ -681,6 +682,18 @@ public:
 													  2.0 * SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER)) /
 								 SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER),
 						(currentRate() < 1e-6 ? 1e6 : 1.0 / currentRate()));
+	}
+
+	// Normally the storage server prefers to serve read requests over making mutations
+	// durable to disk. However, when the storage server falls to far behind on
+	// making mutations durable, this function will change the priority to prefer writes.
+	Future<Void> getQueryDelay() {
+		if ((version.get() - durableVersion.get() > SERVER_KNOBS->LOW_PRIORITY_DURABILITY_LAG) ||
+		    (queueSize() > SERVER_KNOBS->LOW_PRIORITY_STORAGE_QUEUE_BYTES)) {
+			++counters.lowPriorityQueries;
+			return delay(0, TaskPriority::LowPriorityRead);
+		}
+		return delay(0, TaskPriority::DefaultEndpoint);
 	}
 
 	template<class Reply>
@@ -894,7 +907,7 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 
 		// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 		// so we need to downgrade here
-		wait( delay(0, TaskPriority::DefaultEndpoint) );
+		wait( data->getQueryDelay() );
 
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
@@ -1396,14 +1409,11 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	TaskPriority taskType = TaskPriority::DefaultEndpoint;
 	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.isFetchKeys) {
-		taskType = TaskPriority::FetchKeys;
-	// } else if (false) {
-	// 	// Placeholder for up-prioritizing fetches for important requests
-	// 	taskType = TaskPriority::DefaultDelay;
+		wait( delay(0, TaskPriority::FetchKeys) );
+	} else {
+		wait( data->getQueryDelay() );
 	}
-	wait( delay(0, taskType) );
 
 	try {
 		if( req.debugID.present() )
@@ -1523,7 +1533,7 @@ ACTOR Future<Void> getKey( StorageServer* data, GetKeyRequest req ) {
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	wait( delay(0, TaskPriority::DefaultEndpoint) );
+	wait( data->getQueryDelay() );
 
 	try {
 		state Version version = wait( waitForVersion( data, req.version ) );
