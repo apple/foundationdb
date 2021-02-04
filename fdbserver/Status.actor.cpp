@@ -1805,21 +1805,28 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		StatusCounter readBytes;
 		StatusCounter lowPriorityReads;
 
-		for(int i = 0; i < storageServers.get().size(); i++) {
-			auto& ss = storageServers.get()[i];
+		for(auto &ss : storageServers.get()) {
 			TraceEventFields const& storageMetrics = ss.second.at("StorageMetrics");
 
 			if (storageMetrics.size() > 0) {
 				readRequests.updateValues(StatusCounter(storageMetrics.getValue("QueryQueue")));
 				reads.updateValues(StatusCounter(storageMetrics.getValue("FinishedQueries")));
-				try { //FIXME: This field was added in a patch release, the try-catch can be removed for the 7.0 release
-					lowPriorityReads.updateValues(StatusCounter(storageMetrics.getValue("LowPriorityQueries")));
-				} catch(Error &e) {
-					if(e.code() != error_code_attribute_not_found) throw e;
-				}
 				readKeys.updateValues(StatusCounter(storageMetrics.getValue("RowsQueried")));
 				readBytes.updateValues(StatusCounter(storageMetrics.getValue("BytesQueried")));
 			}
+		}
+
+		try { 
+			for(auto &ss : storageServers.get()) {
+				TraceEventFields const& storageMetrics = ss.second.at("StorageMetrics");
+
+				if (storageMetrics.size() > 0) {
+					//FIXME: This field was added in a patch release, for the 7.0 release move this to above loop
+					lowPriorityReads.updateValues(StatusCounter(storageMetrics.getValue("LowPriorityQueries")));
+				}
+			}
+		} catch(Error &e) {
+			if(e.code() != error_code_attribute_not_found) throw e;
 		}
 
 		operationsObj["read_requests"] = readRequests.getStatus();
