@@ -104,6 +104,7 @@ const Key BackupAgentBase::keyConfigBackupRanges = LiteralStringRef("config_back
 const Key BackupAgentBase::keyConfigStopWhenDoneKey = LiteralStringRef("config_stop_when_done");
 const Key BackupAgentBase::keyStateStop = LiteralStringRef("state_stop");
 const Key BackupAgentBase::keyStateStatus = LiteralStringRef("state_status");
+const Key BackupAgentBase::keyStateLogBeginVersion = LiteralStringRef("last_begin_version");
 const Key BackupAgentBase::keyLastUid = LiteralStringRef("last_uid");
 const Key BackupAgentBase::keyBeginKey = LiteralStringRef("beginKey");
 const Key BackupAgentBase::keyEndKey = LiteralStringRef("endKey");
