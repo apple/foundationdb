@@ -1,4 +1,5 @@
 ARG IMAGE_TAG=0.1.24
+ARG IMAGE_VERSION=0.11.15
 FROM foundationdb/foundationdb-build:${IMAGE_TAG}
 
 USER root
@@ -51,8 +52,8 @@ RUN cp -iv /usr/local/bin/clang++ /usr/local/bin/clang++.deref &&\
 	ldconfig &&\
 	rm -rf /mnt/artifacts
 
-LABEL version=0.11.15
-ENV DOCKER_IMAGEVER=0.11.15
+LABEL version=${IMAGE_VERSION}
+ENV DOCKER_IMAGEVER=${IMAGE_VERSION}
 
 ENV CLANGCC=/usr/local/bin/clang.de8a65ef
 ENV CLANGCXX=/usr/local/bin/clang++.de8a65ef

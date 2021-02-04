@@ -1,3 +1,4 @@
+ARG IMAGE_TAG=0.1.24
 FROM centos:6
 
 # Clean yum cache, disable default Base repo and enable Vault
@@ -128,8 +129,8 @@ RUN cd /opt/boringssl/build &&\
 ARG TIMEZONEINFO=America/Los_Angeles
 RUN rm -f /etc/localtime && ln -s /usr/share/zoneinfo/${TIMEZONEINFO} /etc/localtime
 
-LABEL version=0.1.24
-ENV DOCKER_IMAGEVER=0.1.24
+LABEL version=${IMAGE_TAG}
+ENV DOCKER_IMAGEVER=${IMAGE_TAG}
 ENV JAVA_HOME=/usr/lib/jvm/java-1.8.0
 ENV CC=/opt/rh/devtoolset-8/root/usr/bin/gcc
 ENV CXX=/opt/rh/devtoolset-8/root/usr/bin/g++
