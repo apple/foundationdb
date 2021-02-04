@@ -21,6 +21,8 @@
 #include "flow/StreamCipher.h"
 #include "flow/UnitTest.h"
 
+#include <unordered_set>
+
 EncryptionStreamCipher::EncryptionStreamCipher(const StreamCipher::Key& key, const StreamCipher::IV& iv)
   : ctx(EVP_CIPHER_CTX_new()) {
 	EVP_EncryptInit_ex(ctx, EVP_aes_128_gcm(), nullptr, nullptr, nullptr);
@@ -72,6 +74,20 @@ StringRef DecryptionStreamCipher::finish(Arena& arena) {
 	int finalBlockBytes{ 0 };
 	EVP_DecryptFinal_ex(ctx, plaintext, &finalBlockBytes);
 	return StringRef(plaintext, finalBlockBytes);
+}
+
+static std::unordered_set<EVP_CIPHER_CTX*> ciphers;
+static Optional<StreamCipher::Key> globalKey;
+
+void StreamCipher::initializeRandomKey() {
+	ASSERT(g_network->isSimulated());
+	ASSERT(!globalKey.present());
+	globalKey = StreamCipher::Key{};
+	generateRandomData(globalKey.get().data(), globalKey.get().size());
+}
+
+StreamCipher::Key StreamCipher::getKey() {
+	return globalKey.get();
 }
 
 void forceLinkStreamCipherTests() {}

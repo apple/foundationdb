@@ -33,6 +33,10 @@
 namespace StreamCipher {
 using Key = std::array<unsigned char, 16>;
 using IV = std::array<unsigned char, 16>;
+void initializeRandomKey();
+Key getKey();
+void registerCipherForCleanup(EVP_CIPHER_CTX*) noexcept;
+void deregisterCipherForCleanup(EVP_CIPHER_CTX*) noexcept;
 }; // namespace StreamCipher
 
 class EncryptionStreamCipher final : NonCopyable, public ReferenceCounted<EncryptionStreamCipher> {

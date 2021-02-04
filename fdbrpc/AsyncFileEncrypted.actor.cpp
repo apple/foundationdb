@@ -42,7 +42,7 @@ public:
 		state unsigned char* encrypted = new (arena) unsigned char[FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE];
 		int bytes = wait(
 		    self->file->read(encrypted, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE * block));
-		DecryptionStreamCipher decryptor(AsyncFileEncrypted::getKey(), self->getIV(block));
+		DecryptionStreamCipher decryptor(StreamCipher::getKey(), self->getIV(block));
 		auto decrypted = decryptor.decrypt(encrypted, bytes, arena);
 		return Standalone<StringRef>(decrypted, arena);
 	}
@@ -98,7 +98,8 @@ public:
 				self->offsetInBlock = 0;
 				ASSERT(self->currentBlock < std::numeric_limits<uint16_t>::max());
 				++self->currentBlock;
-				self->encryptor = std::make_unique<EncryptionStreamCipher>(AsyncFileEncrypted::getKey(), self->getIV(self->currentBlock));
+				self->encryptor =
+				    std::make_unique<EncryptionStreamCipher>(StreamCipher::getKey(), self->getIV(self->currentBlock));
 			}
 		}
 		return Void();
@@ -109,20 +110,6 @@ public:
 		wait(self->writeLastBlockToFile());
 		wait(self->file->sync());
 		return Void();
-	}
-
-	ACTOR static Future<Void> initializeKey(Reference<IAsyncFile> keyFile, int64_t offset) {
-		ASSERT(!AsyncFileEncrypted::key.present());
-		AsyncFileEncrypted::key = StreamCipher::Key{};
-		state int keySize = AsyncFileEncrypted::key.get().size();
-		if (g_network->isSimulated()) {
-			generateRandomData(AsyncFileEncrypted::key.get().data(), keySize);
-			return Void();
-		} else {
-			int bytesRead = wait(keyFile->read(AsyncFileEncrypted::key.get().data(), keySize, offset));
-			ASSERT(bytesRead == keySize);
-			return Void();
-		}
 	}
 
 	ACTOR static Future<Void> zeroRange(AsyncFileEncrypted* self, int64_t offset, int64_t length) {
@@ -139,7 +126,7 @@ AsyncFileEncrypted::AsyncFileEncrypted(Reference<IAsyncFile> file, bool canWrite
   : file(file), canWrite(canWrite), currentBlock(0), readBuffers(FLOW_KNOBS->MAX_DECRYPTED_BLOCKS) {
 	firstBlockIV = AsyncFileEncryptedImpl::getFirstBlockIV(file->getFilename());
 	if (canWrite) {
-		encryptor = std::make_unique<EncryptionStreamCipher>(AsyncFileEncrypted::getKey(), getIV(currentBlock));
+		encryptor = std::make_unique<EncryptionStreamCipher>(StreamCipher::getKey(), getIV(currentBlock));
 		writeBuffer = std::vector<unsigned char>(FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE, 0);
 	}
 }
@@ -209,16 +196,6 @@ Future<Void> AsyncFileEncrypted::writeLastBlockToFile() {
 	return file->write(&writeBuffer[0], offsetInBlock, currentBlock * FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE);
 }
 
-Optional<StreamCipher::Key> AsyncFileEncrypted::key;
-
-StreamCipher::Key AsyncFileEncrypted::getKey() {
-	return key.get();
-}
-
-Future<Void> AsyncFileEncrypted::initializeKey(const Reference<IAsyncFile>& keyFile, int64_t offset) {
-	return AsyncFileEncryptedImpl::initializeKey(keyFile, offset);
-}
-
 size_t AsyncFileEncrypted::RandomCache::evict() {
 	ASSERT(vec.size() == maxSize);
 	auto index = deterministicRandom()->randomInt(0, maxSize);
@@ -257,7 +234,7 @@ TEST_CASE("fdbrpc/AsyncFileEncrypted") {
 	generateRandomData(&writeBuffer.front(), bytes);
 	state std::vector<unsigned char> readBuffer(bytes, 0);
 	ASSERT(g_network->isSimulated());
-	wait(AsyncFileEncrypted::initializeKey(Reference<IAsyncFile>{}));
+	StreamCipher::initializeRandomKey();
 	int flags = IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
 	            IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_ENCRYPTED | IAsyncFile::OPEN_UNCACHED |
 	            IAsyncFile::OPEN_NO_AIO;

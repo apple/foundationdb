@@ -39,8 +39,6 @@ class AsyncFileEncrypted : public IAsyncFile, public ReferenceCounted<AsyncFileE
 	bool canWrite;
 	Future<Void> writeLastBlockToFile();
 	friend class AsyncFileEncryptedImpl;
-	static Optional<StreamCipher::Key> key;
-	static StreamCipher::Key getKey();
 
 	// Reading:
 	class RandomCache {
@@ -76,7 +74,6 @@ public:
 	Future<Void> readZeroCopy(void** data, int* length, int64_t offset) override;
 	void releaseZeroCopy(void* data, int length, int64_t offset) override;
 	int64_t debugFD() const override;
-	static Future<Void> initializeKey(const Reference<IAsyncFile>& keyFile, int64_t offset = 0);
 };
 
 #endif
