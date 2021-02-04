@@ -547,7 +547,6 @@ Future<Void> teamTracker(struct DDTeamCollection* const& self, Reference<TCTeamI
 
 struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	// clang-format off
-	enum { REQUESTING_WORKER = 0, GETTING_WORKER = 1, GETTING_STORAGE = 2 };
 	enum class Status { NONE = 0, EXCLUDED = 1, FAILED = 2 };
 
 	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
