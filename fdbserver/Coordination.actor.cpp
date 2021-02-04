@@ -559,7 +559,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 					    .detail("LocalCS", ccf->getConnectionString().toString())
 					    .detail("IncomingClusterKey", req.clusterKey)
 					    .detail("IncomingCoordinators", describeList(req.coordinators, req.coordinators.size()));
-					req.reply.sendError(wrong_conection_file());
+					req.reply.sendError(wrong_connection_file());
 				} else {
 					regs.getInterface(req.clusterKey, id).openDatabase.send(req);
 				}
@@ -578,7 +578,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 					    .detail("LocalCS", ccf->getConnectionString().toString())
 					    .detail("IncomingClusterKey", req.key)
 					    .detail("IncomingCoordinators", describeList(req.coordinators, req.coordinators.size()));
-					req.reply.sendError(wrong_conection_file());
+					req.reply.sendError(wrong_connection_file());
 				} else {
 					regs.getInterface(req.key, id).electionResult.send(req);
 				}
@@ -594,7 +594,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 					    .detail("RequestType", "GetLeaderRequest")
 					    .detail("LocalCS", ccf->getConnectionString().toString())
 					    .detail("IncomingClusterKey", req.key);
-					req.reply.sendError(wrong_conection_file());
+					req.reply.sendError(wrong_connection_file());
 				} else {
 					regs.getInterface(req.key, id).getLeader.send(req);
 				}
@@ -610,7 +610,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 					    .detail("RequestType", "CandidacyRequest")
 					    .detail("LocalCS", ccf->getConnectionString().toString())
 					    .detail("IncomingClusterKey", req.key);
-					req.reply.sendError(wrong_conection_file());
+					req.reply.sendError(wrong_connection_file());
 				} else {
 					regs.getInterface(req.key, id).candidacy.send(req);
 				}
@@ -626,7 +626,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 					    .detail("RequestType", "LeaderHeartbeatRequest")
 					    .detail("LocalCS", ccf->getConnectionString().toString())
 					    .detail("IncomingClusterKey", req.key);
-					req.reply.sendError(wrong_conection_file());
+					req.reply.sendError(wrong_connection_file());
 				} else {
 					regs.getInterface(req.key, id).leaderHeartbeat.send(req);
 				}
@@ -642,7 +642,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 					    .detail("RequestType", "ForwardRequest")
 					    .detail("LocalCS", ccf->getConnectionString().toString())
 					    .detail("IncomingClusterKey", req.key);
-					req.reply.sendError(wrong_conection_file());
+					req.reply.sendError(wrong_connection_file());
 				} else {
 					forwarders.add(LeaderRegisterCollection::setForward(&regs, req.key,
 					                                                    ClusterConnectionString(req.conn.toString())));
