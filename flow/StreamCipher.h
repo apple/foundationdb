@@ -34,9 +34,10 @@ namespace StreamCipher {
 class Key : NonCopyable {
 	std::array<unsigned char, 16> arr;
 	static std::unique_ptr<Key> globalKey;
+	struct ConstructorTag {};
 
 public:
-	Key() = default; // TODO: Make private
+	Key(ConstructorTag) {}
 	const unsigned char* data() const { return arr.data(); }
 	static void initializeRandomKey();
 	static const Key& getKey();

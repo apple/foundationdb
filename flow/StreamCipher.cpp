@@ -82,7 +82,7 @@ static std::unordered_set<EVP_CIPHER_CTX*> ciphers;
 void StreamCipher::Key::initializeRandomKey() {
 	ASSERT(g_network->isSimulated());
 	if (globalKey) return;
-	globalKey = std::make_unique<Key>();
+	globalKey = std::make_unique<Key>(ConstructorTag{});
 	generateRandomData(globalKey.get()->arr.data(), globalKey.get()->arr.size());
 }
 
