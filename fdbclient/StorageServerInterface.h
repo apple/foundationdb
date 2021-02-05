@@ -441,7 +441,11 @@ struct SplitMetricsRequest {
 // Should always be used inside a `Standalone`.
 struct ReadHotRangeWithMetrics {
 	KeyRangeRef keys;
+	// density refers to the ratio of bytes sent(because of the read) and bytes on disk.
+	// For example if key range [A, C) has byte size 100 bytes on disk and was read 100 times,
+	// density in this case equals to 100.
 	double density;
+	// How many bytes of data was sent in a period of time because of read requests.
 	double readBandwidth;
 
 	ReadHotRangeWithMetrics() = default;
