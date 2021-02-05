@@ -87,7 +87,7 @@ enum class BackupType {
 	PAUSE,
 	RESUME,
 	EXPIRE,
-	DELETE,
+	DELETE_BACKUP,
 	DESCRIBE,
 	LIST,
 	QUERY,
@@ -1370,7 +1370,7 @@ BackupType getBackupType(std::string backupType) {
 		values["pause"] = BackupType::PAUSE;
 		values["resume"] = BackupType::RESUME;
 		values["expire"] = BackupType::EXPIRE;
-		values["delete"] = BackupType::DELETE;
+		values["delete"] = BackupType::DELETE_BACKUP;
 		values["describe"] = BackupType::DESCRIBE;
 		values["list"] = BackupType::LIST;
 		values["query"] = BackupType::QUERY;
@@ -2999,7 +2999,7 @@ int main(int argc, char* argv[]) {
 				case BackupType::EXPIRE:
 					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupExpireOptions, SO_O_EXACT);
 					break;
-				case BackupType::DELETE:
+				case BackupType::DELETE_BACKUP:
 					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupDeleteOptions, SO_O_EXACT);
 					break;
 				case BackupType::DESCRIBE:
@@ -3850,7 +3850,7 @@ int main(int argc, char* argv[]) {
 				f = stopAfter( expireBackupData(argv[0], destinationContainer, expireVersion, expireDatetime, db, forceAction, expireRestorableAfterVersion, expireRestorableAfterDatetime) );
 				break;
 
-			case BackupType::DELETE:
+			case BackupType::DELETE_BACKUP:
 				initTraceFile();
 				f = stopAfter( deleteBackupContainer(argv[0], destinationContainer) );
 				break;
