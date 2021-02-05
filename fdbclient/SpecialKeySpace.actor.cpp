@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <boost/algorithm/string.hpp>
+
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -1391,17 +1393,15 @@ Future<Standalone<RangeResultRef>> CoordinatorsImpl::getRange(ReadYourWritesTran
 	// Note : the sort by string is anti intuition, ex. 1.1.1.1:11 < 1.1.1.1:5
 	// include :tls in keys if the network addresss is TLS
 	std::sort(coordinator_processes.begin(), coordinator_processes.end(),
-	          [](const NetworkAddress& lhs, const NetworkAddress& rhs) {
-		          //   return formatIpPort(lhs.ip, lhs.port) < formatIpPort(rhs.ip, rhs.port);
-		          return lhs.toString() < rhs.toString();
-	          });
+	          [](const NetworkAddress& lhs, const NetworkAddress& rhs) { return lhs.toString() < rhs.toString(); });
+	std::string processes_str;
 	for (auto& w : coordinator_processes) {
-		Key k(prefix.withSuffix(LiteralStringRef("process/")).withSuffix(w.toString())); // formatIpPort(w.ip,
-		                                                                                 // w.port)));
-		if (kr.contains(k)) {
-			result.push_back(result.arena(), KeyValueRef(k, ValueRef()));
-			result.arena().dependsOn(k.arena());
-		}
+		if (processes_str.size()) processes_str += ",";
+		processes_str += w.toString();
+	}
+	Key processes_key = prefix.withSuffix(LiteralStringRef("processes"));
+	if (kr.contains(processes_key)) {
+		result.push_back_deep(result.arena(), KeyValueRef(processes_key, Value(processes_str)));
 	}
 	return rywGetRange(ryw, kr, result);
 }
@@ -1409,31 +1409,45 @@ Future<Standalone<RangeResultRef>> CoordinatorsImpl::getRange(ReadYourWritesTran
 ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	state Reference<IQuorumChange> change;
 	state std::vector<NetworkAddress> addressesVec;
+	state std::vector<std::string> process_address_strs;
 	state Optional<std::string> msg;
 	state int retry = 0;
+	state int index;
 	state int notEnoughMachineResults;
+	state bool parse_error = false;
 
-	KeyRange process_range =
-	    KeyRangeRef(LiteralStringRef("process/"), LiteralStringRef("process0")).withPrefix(kr.begin);
-	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(process_range);
-
-	auto iter = ranges.begin();
-	while (iter != ranges.end()) {
-		auto entry = iter->value();
-		if (entry.first) {
-			ASSERT(entry.second.present()); // no clear should be seen here
-			Key address = iter->begin().removePrefix(process_range.begin);
-			auto a = NetworkAddress::parse(address.toString());
-			if (!a.isValid()) {
-				std::string error = "ERROR: \'" + address.toString() + "\' is not a valid network endpoint address\n";
-				if (address.toString().find(":tls") != std::string::npos)
-					error += "        Do not include the `:tls' suffix when naming a process\n";
-				msg = ManagementAPIError::toJsonString(false, "coordinators", error);
-				return msg;
-			}
-			addressesVec.push_back(a);
+	// check update for cluster_description
+	Key processes_key = LiteralStringRef("processes").withPrefix(kr.begin);
+	auto processes_entry = ryw->getSpecialKeySpaceWriteMap()[processes_key];
+	if (processes_entry.first) {
+		ASSERT(processes_entry.second.present()); // no clear should be seen here
+		auto processesStr = processes_entry.second.get().toString();
+		boost::split(process_address_strs, processesStr, [](char c) { return c == ','; });
+		if (!process_address_strs.size()) {
+			return ManagementAPIError::toJsonString(
+			    false, "coordinators",
+			    "New coordinators\' processes are empty, please specify new processes\' network addresses with format "
+			    "\"IP:PORT,IP:PORT,...,IP:PORT\"");
 		}
-		++iter;
+		for (index = 0; index < process_address_strs.size(); index++) {
+			try {
+				auto a = NetworkAddress::parse(process_address_strs[index]);
+				if (!a.isValid())
+					parse_error = true;
+				else
+					addressesVec.push_back(a);
+			} catch (Error& e) {
+				TraceEvent(SevDebug, "SpeicalKeysNetworkParseError").error(e);
+				parse_error = true;
+			}
+
+			if (parse_error) {
+				std::string error = "ERROR: \'" + process_address_strs[index] + "\' is not a valid network endpoint address\n";
+				if (process_address_strs[index].find(":tls") != std::string::npos)
+					error += "        Do not include the `:tls' suffix when naming a process\n";
+				return ManagementAPIError::toJsonString(false, "coordinators", error);
+			}
+		}
 	}
 
 	// check auto option

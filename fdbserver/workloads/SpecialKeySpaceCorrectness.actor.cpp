@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <boost/algorithm/string.hpp>
+
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -884,21 +886,18 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				Optional<Value> res = wait(tx->get(coordinatorsKey));
 				ASSERT(res.present()); // Otherwise, database is in a bad state
 				state ClusterConnectionString cs(res.get().toString());
-				state KeyRange coordinator_process_key_range =
-				    KeyRangeRef(LiteralStringRef("process/"), LiteralStringRef("process0"))
-				        .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"));
-				Standalone<RangeResultRef> coordinator_process_kvs =
-				    wait(tx->getRange(coordinator_process_key_range, CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!coordinator_process_kvs.more);
-				ASSERT(self->getRangeResultInOrder(coordinator_process_kvs));
-				ASSERT(coordinator_process_kvs.size() == cs.coordinators().size());
+				Optional<Value> coordinator_processes_key =
+				    wait(tx->get(LiteralStringRef("processes")
+				                     .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"))));
+				ASSERT(coordinator_processes_key.present());
+				std::vector<std::string> process_addresses;
+				boost::split(process_addresses, coordinator_processes_key.get().toString(),
+				             [](char c) { return c == ','; });
+				ASSERT(process_addresses.size() == cs.coordinators().size());
 				// compare the coordinator process network addresses one by one
 				for (const auto& network_address : cs.coordinators()) {
-					Key addr = Key(network_address.toString())//formatIpPort(network_address.ip, network_address.port))
-					               .withPrefix(coordinator_process_key_range.begin);
-					KeyValueRef kv(addr, ValueRef());
-					ASSERT(std::find(coordinator_process_kvs.begin(), coordinator_process_kvs.end(), kv) !=
-					       coordinator_process_kvs.end());
+					ASSERT(std::find(process_addresses.begin(), process_addresses.end(), network_address.toString()) !=
+					       process_addresses.end());
 				}
 				tx->reset();
 				break;
@@ -910,8 +909,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// we randomly pick one process(not coordinator) and add it, in this case, it should always succeed
 		{
 			state std::string new_cluster_description = deterministicRandom()->randomAlphaNumeric(8);
-			state Key new_coordinator_process;
-			state Standalone<RangeResultRef> old_coordinators_kvs;
+			state std::string new_coordinator_process;
+			state std::vector<std::string> old_coordinators_processes;
 			state bool possible_to_add_coordinator;
 			state KeyRange coordinators_key_range =
 			    KeyRangeRef(LiteralStringRef("process/"), LiteralStringRef("process0"))
@@ -919,22 +918,24 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			loop {
 				try {
 					// get current coordinators
-					Standalone<RangeResultRef> _coordinators_kvs =
-					    wait(tx->getRange(coordinators_key_range, CLIENT_KNOBS->TOO_MANY));
-					old_coordinators_kvs = _coordinators_kvs;
+					Optional<Value> processes_key =
+					    wait(tx->get(LiteralStringRef("processes")
+					                     .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"))));
+					ASSERT(processes_key.present());
+					boost::split(old_coordinators_processes, processes_key.get().toString(),
+					             [](char c) { return c == ','; });
 					// pick up one non-coordinator process if possible
 					vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
 					TraceEvent(SevDebug, "CoordinatorsManualChange")
-					    .detail("OldCoordinators", old_coordinators_kvs.size())
+					    .detail("OldCoordinators", describe(old_coordinators_processes))
 					    .detail("WorkerSize", workers.size());
-					if (workers.size() > old_coordinators_kvs.size()) {
+					if (workers.size() > old_coordinators_processes.size()) {
 						loop {
 							auto worker = deterministicRandom()->randomChoice(workers);
-							new_coordinator_process = Key(worker.address.toString())//formatIpPort(worker.address.ip, worker.address.port))
-							                              .withPrefix(coordinators_key_range.begin);
-							KeyValueRef kv(new_coordinator_process, ValueRef());
-							if (std::find(old_coordinators_kvs.begin(), old_coordinators_kvs.end(), kv) ==
-							    old_coordinators_kvs.end()) {
+							new_coordinator_process =
+							    worker.address.toString();
+							if (std::find(old_coordinators_processes.begin(), old_coordinators_processes.end(),
+							              worker.address.toString()) == old_coordinators_processes.end()) {
 								break;
 							}
 						}
@@ -949,19 +950,19 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				}
 			}
 			TraceEvent(SevDebug, "CoordinatorsManualChange")
-			    .detail("NewCoordinator", possible_to_add_coordinator ? new_coordinator_process.toString() : "")
+			    .detail("NewCoordinator", possible_to_add_coordinator ? new_coordinator_process : "")
 			    .detail("NewClusterDescription", new_cluster_description);
 			if (possible_to_add_coordinator) {
 				loop {
 					try {
+						std::string new_processes_key(new_coordinator_process);
 						tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-						for (const auto& kv : old_coordinators_kvs) {
-							// TraceEvent(SevDebug, "CoordinatorsManualChange").detail("AddressKey", kv.key.toString());
-							tx->set(kv.key, kv.value);
+						for (const auto& address : old_coordinators_processes) {
+							new_processes_key += "," + address;
 						}
-						// TraceEvent(SevDebug, "CoordinatorsManualChange")
-						//     .detail("AddressKey", new_coordinator_process.toString());
-						tx->set(new_coordinator_process, ValueRef());
+						tx->set(LiteralStringRef("processes")
+						            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")),
+						        Value(new_processes_key));
 						// update cluster description
 						tx->set(LiteralStringRef("cluster_description")
 						            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")),
@@ -999,15 +1000,13 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					Optional<Value> res = wait(tx->get(coordinatorsKey));
 					ASSERT(res.present()); // Otherwise, database is in a bad state
 					ClusterConnectionString cs(res.get().toString());
-					ASSERT(cs.coordinators().size() == old_coordinators_kvs.size() + 1);
+					ASSERT(cs.coordinators().size() == old_coordinators_processes.size() + 1);
 					// verify the coordinators' addresses
 					for (const auto& network_address : cs.coordinators()) {
-						Key addr = Key(network_address.toString())//formatIpPort(network_address.ip, network_address.port))
-						               .withPrefix(coordinators_key_range.begin);
-						KeyValueRef kv(addr, ValueRef());
-						ASSERT(std::find(old_coordinators_kvs.begin(), old_coordinators_kvs.end(), kv) !=
-						           old_coordinators_kvs.end() ||
-						       new_coordinator_process == addr);
+						std::string address_str = network_address.toString();
+						ASSERT(std::find(old_coordinators_processes.begin(), old_coordinators_processes.end(),
+						                 address_str) != old_coordinators_processes.end() ||
+						       new_coordinator_process == address_str);
 					}
 					// verify the cluster decription
 					TraceEvent(SevDebug, "CoordinatorsManualChange")
