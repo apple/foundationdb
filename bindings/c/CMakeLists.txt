@@ -119,6 +119,14 @@ if(NOT WIN32)
     target_link_libraries(fdb_c90_test PRIVATE fdb_c)
   endif()
 
+  add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_c> ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
+    DEPENDS fdb_c
+    COMMENT "Copy libfdb_c to use as external client for test")
+  add_custom_target(external_client DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so)
+  add_dependencies(fdb_c_unit_tests external_client)
+
   add_fdbclient_test(
     NAME fdb_c_setup_tests
     COMMAND $<TARGET_FILE:fdb_c_setup_tests>)
@@ -127,6 +135,13 @@ if(NOT WIN32)
     COMMAND $<TARGET_FILE:fdb_c_unit_tests>
             @CLUSTER_FILE@
             fdb)
+  add_fdbclient_test(
+    NAME fdb_c_external_client_unit_tests
+    COMMAND $<TARGET_FILE:fdb_c_unit_tests>
+            @CLUSTER_FILE@
+            fdb
+            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
+            )
 endif()
 
 set(c_workloads_srcs
