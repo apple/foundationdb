@@ -65,6 +65,7 @@ RUN source /opt/rh/devtoolset-8/enable && \
     cd build && \
     cmake \
         -DCMAKE_BUILD_TYPE=Release \
+        -G Ninja \
         -DLLVM_INCLUDE_EXAMPLES=OFF \
         -DLLVM_INCLUDE_TESTS=OFF \
         ../llvm/llvm && \
