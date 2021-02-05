@@ -19,6 +19,8 @@ set(FDBSERVER_SRCS
   DataDistributionTracker.actor.cpp
   DataDistributorInterface.h
   DBCoreState.h
+  DDTeamCollection.actor.cpp
+  DDTeamCollection.h
   DiskQueue.actor.cpp
   fdbserver.actor.cpp
   FDBExecHelper.actor.cpp
@@ -99,6 +101,14 @@ set(FDBSERVER_SRCS
   StorageMetrics.h
   storageserver.actor.cpp
   TagPartitionedLogSystem.actor.cpp
+  TCMachineInfo.cpp
+  TCMachineInfo.h
+  TCMachineTeamInfo.cpp
+  TCMachineTeamInfo.h
+  TCServerInfo.actor.cpp
+  TCServerInfo.h
+  TCTeamInfo.cpp
+  TCTeamInfo.h
   template_fdb.h
   tester.actor.cpp
   TesterInterface.actor.h
