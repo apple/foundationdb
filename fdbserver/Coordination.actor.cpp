@@ -428,12 +428,18 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 // (they are always derived from a ClusterConnectionString key).
 // Forwarding values are stored in this range:
 const KeyRangeRef fwdKeys( LiteralStringRef( "\xff" "fwd" ), LiteralStringRef( "\xff" "fwe" ) );
+// Forwarding time are stored in this range:
+const KeyRangeRef fwdTimeKeys(LiteralStringRef("\xff"
+                                               "fwdTime"),
+                              LiteralStringRef("\xff"
+                                               "fwdTimf"));
 
 struct LeaderRegisterCollection {
 	// SOMEDAY: Factor this into a generic tool?  Extend ActorCollection to support removal actions?  What?
 	ActorCollection actors;
 	Map<Key, LeaderElectionRegInterface> registerInterfaces;
 	Map<Key, LeaderInfo> forward;
+	Map<Key, double> forwardStartTime;
 	OnDemandStore *pStore;
 
 	LeaderRegisterCollection( OnDemandStore *pStore ) : actors( false ), pStore( pStore ) {}
@@ -442,12 +448,20 @@ struct LeaderRegisterCollection {
 		if( !self->pStore->exists() )
 			return Void();
 		OnDemandStore &store = *self->pStore;
-		Standalone<RangeResultRef> forwardingInfo = wait( store->readRange( fwdKeys ) );
+		state Future<Standalone<RangeResultRef>> forwardingInfoF = store->readRange(fwdKeys);
+		state Future<Standalone<RangeResultRef>> forwardingTimeF = store->readRange(fwdTimeKeys);
+		wait(success(forwardingInfoF) && success(forwardingTimeF));
+		Standalone<RangeResultRef> forwardingInfo = forwardingInfoF.get();
+		Standalone<RangeResultRef> forwardingTime = forwardingTimeF.get();
 		for( int i = 0; i < forwardingInfo.size(); i++ ) {
 			LeaderInfo forwardInfo;
 			forwardInfo.forward = true;
 			forwardInfo.serializedInfo = forwardingInfo[i].value;
 			self->forward[ forwardingInfo[i].key.removePrefix( fwdKeys.begin ) ] = forwardInfo;
+		}
+		for (int i = 0; i < forwardingTime.size(); i++) {
+			double time = BinaryReader::fromStringRef<double>(forwardingInfo[i].value, IncludeVersion());
+			self->forwardStartTime[forwardingInfo[i].key.removePrefix(fwdTimeKeys.begin)] = time;
 		}
 		return Void();
 	}
@@ -456,18 +470,31 @@ struct LeaderRegisterCollection {
 
 	Optional<LeaderInfo> getForward(KeyRef key) {
 		auto i = forward.find( key );
+		auto t = forwardStartTime.find(key);
 		if (i == forward.end())
 			return Optional<LeaderInfo>();
+		if (t != forwardStartTime.end()) {
+			double forwardTime = t->value;
+			if (now() - forwardTime > SERVER_KNOBS->FORWARD_REQUEST_TOO_OLD) {
+				TraceEvent(SevWarnAlways, "AccessOldForward")
+				    .detail("ForwardSetSecondsAgo", now() - forwardTime)
+				    .detail("ForwardClusterKey", key);
+			}
+		}
 		return i->value;
 	}
 
 	ACTOR static Future<Void> setForward(LeaderRegisterCollection *self, KeyRef key, ClusterConnectionString conn) {
+		double forwardTime = now();
 		LeaderInfo forwardInfo;
 		forwardInfo.forward = true;
 		forwardInfo.serializedInfo = conn.toString();
 		self->forward[ key ] = forwardInfo;
+		self->forwardStartTime[key] = forwardTime;
 		OnDemandStore &store = *self->pStore;
 		store->set( KeyValueRef( key.withPrefix( fwdKeys.begin ), conn.toString() ) );
+		store->set(
+		    KeyValueRef(key.withPrefix(fwdTimeKeys.begin), BinaryWriter::toValue(forwardTime, IncludeVersion())));
 		wait(store->commit());
 		return Void();
 	}
@@ -508,7 +535,8 @@ struct LeaderRegisterCollection {
 
 // leaderServer multiplexes multiple leaderRegisters onto a single LeaderElectionRegInterface,
 // creating and destroying them on demand.
-ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore *pStore, UID id) {
+ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore* pStore, UID id,
+                                Reference<ClusterConnectionFile> ccf) {
 	state LeaderRegisterCollection regs( pStore );
 	state ActorCollection forwarders(false);
 
@@ -523,7 +551,18 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 				info.forward = forward.get().serializedInfo;
 				req.reply.send( CachedSerialization<ClientDBInfo>(info) );
 			} else {
-				regs.getInterface(req.clusterKey, id).openDatabase.send( req );
+				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT &&
+				    (ccf->getConnectionString().clusterKey() != req.clusterKey ||
+				     ccf->getConnectionString().coordinators() != req.coordinators)) {
+					TraceEvent(SevWarnAlways, "CCFMismatch")
+					    .detail("RequestType", "OpenDatabaseCoordRequest")
+					    .detail("LocalCS", ccf->getConnectionString().toString())
+					    .detail("IncomingClusterKey", req.clusterKey)
+					    .detail("IncomingCoordinators", describeList(req.coordinators, req.coordinators.size()));
+					req.reply.sendError(wrong_connection_file());
+				} else {
+					regs.getInterface(req.clusterKey, id).openDatabase.send(req);
+				}
 			}
 		}
 		when ( ElectionResultRequest req = waitNext( interf.electionResult.getFuture() ) ) {
@@ -531,44 +570,91 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 			if( forward.present() ) {
 				req.reply.send( forward.get() );
 			} else {
-				regs.getInterface(req.key, id).electionResult.send( req );
+				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT &&
+				    (ccf->getConnectionString().clusterKey() != req.key ||
+				     ccf->getConnectionString().coordinators() != req.coordinators)) {
+					TraceEvent(SevWarnAlways, "CCFMismatch")
+					    .detail("RequestType", "ElectionResultRequest")
+					    .detail("LocalCS", ccf->getConnectionString().toString())
+					    .detail("IncomingClusterKey", req.key)
+					    .detail("IncomingCoordinators", describeList(req.coordinators, req.coordinators.size()));
+					req.reply.sendError(wrong_connection_file());
+				} else {
+					regs.getInterface(req.key, id).electionResult.send(req);
+				}
 			}
 		}
 		when ( GetLeaderRequest req = waitNext( interf.getLeader.getFuture() ) ) {
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if( forward.present() )
 				req.reply.send( forward.get() );
-			else
-				regs.getInterface(req.key, id).getLeader.send( req );
+			else {
+				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && ccf->getConnectionString().clusterKey() != req.key) {
+					TraceEvent(SevWarnAlways, "CCFMismatch")
+					    .detail("RequestType", "GetLeaderRequest")
+					    .detail("LocalCS", ccf->getConnectionString().toString())
+					    .detail("IncomingClusterKey", req.key);
+					req.reply.sendError(wrong_connection_file());
+				} else {
+					regs.getInterface(req.key, id).getLeader.send(req);
+				}
+			}
 		}
 		when ( CandidacyRequest req = waitNext( interf.candidacy.getFuture() ) ) {
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if( forward.present() )
 				req.reply.send( forward.get() );
-			else
-				regs.getInterface(req.key, id).candidacy.send(req);
+			else {
+				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && ccf->getConnectionString().clusterKey() != req.key) {
+					TraceEvent(SevWarnAlways, "CCFMismatch")
+					    .detail("RequestType", "CandidacyRequest")
+					    .detail("LocalCS", ccf->getConnectionString().toString())
+					    .detail("IncomingClusterKey", req.key);
+					req.reply.sendError(wrong_connection_file());
+				} else {
+					regs.getInterface(req.key, id).candidacy.send(req);
+				}
+			}
 		}
 		when ( LeaderHeartbeatRequest req = waitNext( interf.leaderHeartbeat.getFuture() ) ) {
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if( forward.present() )
 				req.reply.send(LeaderHeartbeatReply{ false });
-			else
-				regs.getInterface(req.key, id).leaderHeartbeat.send(req);
+			else {
+				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && ccf->getConnectionString().clusterKey() != req.key) {
+					TraceEvent(SevWarnAlways, "CCFMismatch")
+					    .detail("RequestType", "LeaderHeartbeatRequest")
+					    .detail("LocalCS", ccf->getConnectionString().toString())
+					    .detail("IncomingClusterKey", req.key);
+					req.reply.sendError(wrong_connection_file());
+				} else {
+					regs.getInterface(req.key, id).leaderHeartbeat.send(req);
+				}
+			}
 		}
 		when ( ForwardRequest req = waitNext( interf.forward.getFuture() ) ) {
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if( forward.present() )
 				req.reply.send( Void() );
 			else {
-				forwarders.add( LeaderRegisterCollection::setForward( &regs, req.key, ClusterConnectionString(req.conn.toString()) ) );
-				regs.getInterface(req.key, id).forward.send(req);
+				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && ccf->getConnectionString().clusterKey() != req.key) {
+					TraceEvent(SevWarnAlways, "CCFMismatch")
+					    .detail("RequestType", "ForwardRequest")
+					    .detail("LocalCS", ccf->getConnectionString().toString())
+					    .detail("IncomingClusterKey", req.key);
+					req.reply.sendError(wrong_connection_file());
+				} else {
+					forwarders.add(LeaderRegisterCollection::setForward(&regs, req.key,
+					                                                    ClusterConnectionString(req.conn.toString())));
+					regs.getInterface(req.key, id).forward.send(req);
+				}
 			}
 		}
 		when( wait( forwarders.getResult() ) ) { ASSERT(false); throw internal_error(); }
 	}
 }
 
-ACTOR Future<Void> coordinationServer(std::string dataFolder) {
+ACTOR Future<Void> coordinationServer(std::string dataFolder, Reference<ClusterConnectionFile> ccf) {
 	state UID myID = deterministicRandom()->randomUniqueID();
 	state LeaderElectionRegInterface myLeaderInterface( g_network );
 	state GenerationRegInterface myInterface( g_network );
@@ -577,7 +663,8 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder) {
 	TraceEvent("CoordinationServer", myID).detail("MyInterfaceAddr", myInterface.read.getEndpoint().getPrimaryAddress()).detail("Folder", dataFolder);
 
 	try {
-		wait( localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store, myID) || store.getError() );
+		wait(localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store, myID, ccf) ||
+		     store.getError());
 		throw internal_error();
 	} catch (Error& e) {
 		TraceEvent("CoordinationServerError", myID).error(e, true);
