@@ -133,3 +133,7 @@ TCServerInfo::~TCServerInfo() {
 		collection->removeLaggingStorageServer(lastKnownInterface.locality.zoneId().get());
 	}
 }
+
+Future<Void> TCServerInfo::serverMetricsPolling() {
+	return TCServerInfoImpl::serverMetricsPolling(this);
+}

@@ -242,7 +242,7 @@ public:
 	Future<Void> machineTeamRemover();
 	Future<Void> serverTeamRemover();
 	Future<Void> zeroServerLeftLogger_impl(Reference<TCTeamInfo> team);
-	Future<Void> waitServerListChange(Future<Void> serverRemoved, const DDEnabledState* ddEnabledState);
+	Future<Void> waitServerListChange(FutureStream<Void> serverRemoved, const DDEnabledState* ddEnabledState);
 	Future<Void> waitHealthyZoneChange();
 	Future<Void> keyValueStoreTypeTracker(TCServerInfo* server);
 	Future<Void> storageServerFailureTracker(TCServerInfo* server, Database cx, ServerStatus* status,

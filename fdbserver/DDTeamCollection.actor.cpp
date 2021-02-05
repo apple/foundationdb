@@ -2098,15 +2098,6 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> remoteRecovered(Reference<AsyncVar<struct ServerDBInfo>> db) {
-		TraceEvent("DDTrackerStarting");
-		while (db->get().recoveryState < RecoveryState::ALL_LOGS_RECRUITED) {
-			TraceEvent("DDTrackerStarting").detail("RecoveryState", (int)db->get().recoveryState);
-			wait(db->onChange());
-		}
-		return Void();
-	}
-
 	ACTOR static Future<Void> interruptableBuildTeams(DDTeamCollection* self) {
 		if (!self->addSubsetComplete.isSet()) {
 			wait(self->addSubsetOfEmergencyTeams());
@@ -3991,4 +3982,35 @@ bool DDTeamCollection::isServerTeamCountCorrect(TCMachineTeamInfo const& mt) con
 		    .detail("CountedServerTeams", num);
 	}
 	return ret;
+}
+
+Future<Void> DDTeamCollection::updateReplicasKey(Optional<Key> dcId) {
+	return DDTeamCollectionImpl::updateReplicasKey(this, dcId);
+}
+
+Future<Void> DDTeamCollection::storageRecruiter(Reference<AsyncVar<struct ServerDBInfo>> db,
+                                                const DDEnabledState* ddEnabledState) {
+	return DDTeamCollectionImpl::storageRecruiter(this, db, ddEnabledState);
+}
+
+Future<Void> DDTeamCollection::monitorStorageServerRecruitment() {
+	return DDTeamCollectionImpl::monitorStorageServerRecruitment(this);
+}
+
+Future<Void> DDTeamCollection::waitServerListChange(FutureStream<Void> serverRemoved,
+                                                    const DDEnabledState* ddEnabledState) {
+	return DDTeamCollectionImpl::waitServerListChange(this, serverRemoved, ddEnabledState);
+}
+
+Future<Void> DDTeamCollection::waitHealthyZoneChange() {
+	return DDTeamCollectionImpl::waitHealthyZoneChange(this);
+}
+
+Future<Void> DDTeamCollection::keyValueStoreTypeTracker(TCServerInfo* server) {
+	return DDTeamCollectionImpl::keyValueStoreTypeTracker(this, server);
+}
+
+Future<Void> DDTeamCollection::storageServerFailureTracker(TCServerInfo* server, Database cx, ServerStatus* status,
+                                                           Version addedVersion) {
+	return DDTeamCollectionImpl::storageServerFailureTracker(this, server, cx, status, addedVersion);
 }
