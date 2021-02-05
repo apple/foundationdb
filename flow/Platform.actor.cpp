@@ -29,7 +29,9 @@
 #include "flow/Platform.actor.h"
 #include "flow/Arena.h"
 
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 #include "flow/StreamCipher.h"
+#endif
 #include "flow/Trace.h"
 #include "flow/Error.h"
 
@@ -3238,7 +3240,9 @@ void crashHandler(int sig) {
 
 	bool error = (sig != SIGUSR2);
 
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 	StreamCipher::cleanup();
+#endif
 
 	fflush(stdout);
 	TraceEvent(error ? SevError : SevInfo, error ? "Crash" : "ProcessTerminated")
