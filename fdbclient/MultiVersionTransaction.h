@@ -68,10 +68,12 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	void (*databaseDestroy)(FDBDatabase *database);
 	FDBFuture* (*databaseRebootWorker)(FDBDatabase *database, uint8_t const *address, int addressLength, fdb_bool_t check, int duration);
 	FDBFuture* (*databaseForceRecoveryWithDataLoss)(FDBDatabase *database, uint8_t const *dcid, int dcidLength);
-	FDBFuture* (*databaseCreateSnapshot)(FDBDatabase* database, uint8_t const* snapshotCommmand,
-	                                     int snapshotCommandLength);
+        FDBFuture *(*databaseCreateSnapshot)(FDBDatabase *database,
+                                             uint8_t const *uid, int uidLength,
+                                             uint8_t const *snapshotCommmand,
+                                             int snapshotCommandLength);
 
-	//Transaction
+        //Transaction
 	fdb_error_t (*transactionSetOption)(FDBTransaction *tr, FDBTransactionOptions::Option option, uint8_t const *value, int valueLength);
 	void (*transactionDestroy)(FDBTransaction *tr);
 
@@ -201,9 +203,11 @@ public:
 
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
-	ThreadFuture<Void> createSnapshot(const StringRef& snapshot_command) override;
+        ThreadFuture<Void>
+        createSnapshot(const StringRef &uid,
+                       const StringRef &snapshot_command) override;
 
-private:
+      private:
 	const Reference<FdbCApi> api;
 	FdbCApi::FDBDatabase* db; // Always set if API version >= 610, otherwise guaranteed to be set when onReady future is set
 	ThreadFuture<Void> ready;
@@ -341,9 +345,11 @@ public:
 
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
-	ThreadFuture<Void> createSnapshot(const StringRef& snapshot_command) override;
+        ThreadFuture<Void>
+        createSnapshot(const StringRef &uid,
+                       const StringRef &snapshot_command) override;
 
-private:
+      private:
 
 	struct Connector : ThreadCallback, ThreadSafeReferenceCounted<Connector> {
 		Connector(Reference<DatabaseState> dbState, Reference<ClientInfo> client, std::string clusterFilePath) : dbState(dbState), client(client), clusterFilePath(clusterFilePath), connected(false), cancelled(false) {}

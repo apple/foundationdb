@@ -212,9 +212,9 @@ public:
 	// Management API, force the database to recover into DCID, causing the database to lose the most recently committed mutations
 	Future<Void> forceRecoveryWithDataLoss(StringRef dcId);
 	// Management API, create snapshot
-	Future<Void> createSnapshot(StringRef snapshot_command);
+        Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
 
-//private: 
+        // private: 
 	explicit DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
 		Future<Void> clientInfoMonitor, TaskPriority taskID, LocalityData const& clientLocality, 
 		bool enableLocalityLoadBalance, bool lockAware, bool internal = true, int apiVersion = Database::API_VERSION_LATEST, bool switchable = false );

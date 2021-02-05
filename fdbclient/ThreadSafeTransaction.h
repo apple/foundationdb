@@ -43,9 +43,11 @@ public:
 
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
-	ThreadFuture<Void> createSnapshot(const StringRef& snapshot_command) override;
+        ThreadFuture<Void>
+        createSnapshot(const StringRef &uid,
+                       const StringRef &snapshot_command) override;
 
-private:
+      private:
 	friend class ThreadSafeTransaction;
 	DatabaseContext* db;
 public:  // Internal use only

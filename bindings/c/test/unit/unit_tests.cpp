@@ -2048,17 +2048,20 @@ TEST_CASE("fdb_database_force_recovery_with_data_loss") {
 
 TEST_CASE("fdb_database_create_snapshot") {
 	std::string snapshot_command = "test";
-	while (1) {
-		fdb::EmptyFuture f =
-		    fdb::Database::create_snapshot(db, (const uint8_t*)snapshot_command.c_str(), snapshot_command.length());
-		fdb_error_t err = wait_future(f);
-		if (err == 2505) { // expected error code
-			break;
-		} else {
-			// Otherwise, something went wrong.
-			CHECK(false);
-		}
-	}
+        std::string uid = "invalid_uid";
+        while (1) {
+          fdb::EmptyFuture f = fdb::Database::create_snapshot(
+              db, (const uint8_t *)uid.c_str(), uid.length(),
+              (const uint8_t *)snapshot_command.c_str(),
+              snapshot_command.length());
+          fdb_error_t err = wait_future(f);
+          if (err == 2509) { // expected error code
+            break;
+          } else {
+            // Otherwise, something went wrong.
+            CHECK(false);
+          }
+        }
 }
 
 TEST_CASE("fdb_error_predicate") {

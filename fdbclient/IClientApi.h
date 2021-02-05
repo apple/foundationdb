@@ -91,7 +91,9 @@ public:
 	// Management API, force the database to recover into DCID, causing the database to lose the most recently committed mutations
 	virtual ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) = 0;
 	// Management API, create snapshot
-	virtual ThreadFuture<Void> createSnapshot(const StringRef& snapshot_command) = 0;
+        virtual ThreadFuture<Void>
+        createSnapshot(const StringRef &uid,
+                       const StringRef &snapshot_command) = 0;
 };
 
 class IClientApi {

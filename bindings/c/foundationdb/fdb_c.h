@@ -185,8 +185,10 @@ extern "C" {
     DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
     fdb_database_force_recovery_with_data_loss( FDBDatabase* db, uint8_t const* dcid, int dcid_length);
 
-    DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
-    fdb_database_create_snapshot( FDBDatabase* db, uint8_t const* snap_command, int snap_command_length);
+    DLLEXPORT WARN_UNUSED_RESULT FDBFuture *
+    fdb_database_create_snapshot(FDBDatabase *db, uint8_t const *uid,
+                                 int uid_length, uint8_t const *snap_command,
+                                 int snap_command_length);
 
     DLLEXPORT void fdb_transaction_destroy( FDBTransaction* tr);
 

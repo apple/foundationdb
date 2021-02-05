@@ -311,13 +311,18 @@ ThreadFuture<Void> DLDatabase::forceRecoveryWithDataLoss(const StringRef &dcid) 
 	});
 }
 
-ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef& snapshot_command) {
-	if (!api->databaseCreateSnapshot) {
-		return unsupported_operation();
-	}
+ThreadFuture<Void>
+DLDatabase::createSnapshot(const StringRef &uid,
+                           const StringRef &snapshot_command) {
+  if (!api->databaseCreateSnapshot) {
+    return unsupported_operation();
+  }
 
-	FdbCApi::FDBFuture* f = api->databaseCreateSnapshot(db, snapshot_command.begin(), snapshot_command.size());
-	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
+  FdbCApi::FDBFuture *f = api->databaseCreateSnapshot(
+      db, uid.begin(), uid.size(), snapshot_command.begin(),
+      snapshot_command.size());
+  return toThreadFuture<Void>(
+      api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) { return Void(); });
 }
 
 // DLApi
@@ -832,9 +837,12 @@ ThreadFuture<Void> MultiVersionDatabase::forceRecoveryWithDataLoss(const StringR
 	return abortableFuture(f, dbState->dbVar->get().onChange);
 }
 
-ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef& snapshot_command) {
-	auto f = dbState->db ? dbState->db->createSnapshot(snapshot_command) : ThreadFuture<Void>(Never());
-	return abortableFuture(f, dbState->dbVar->get().onChange);
+ThreadFuture<Void>
+MultiVersionDatabase::createSnapshot(const StringRef &uid,
+                                     const StringRef &snapshot_command) {
+  auto f = dbState->db ? dbState->db->createSnapshot(uid, snapshot_command)
+                       : ThreadFuture<Void>(Never());
+  return abortableFuture(f, dbState->dbVar->get().onChange);
 }
 
 void MultiVersionDatabase::Connector::connect() {

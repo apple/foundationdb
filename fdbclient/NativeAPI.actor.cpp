@@ -4836,16 +4836,19 @@ Future<Void> DatabaseContext::forceRecoveryWithDataLoss(StringRef dcId) {
 	return forceRecovery(getConnectionFile(), dcId);
 }
 
-ACTOR static Future<Void> createSnapshotActor(DatabaseContext* cx, StringRef snapCmd) {
-	UID snapUID = deterministicRandom()->randomUniqueID();
-	try {
-		wait(mgmtSnapCreate(cx->clone(), snapCmd, snapUID));
-	} catch (Error& e) {
-		throw e;
-	}
-	return Void();
+ACTOR static Future<Void> createSnapshotActor(DatabaseContext *cx, UID snapUID,
+                                              StringRef snapCmd) {
+  wait(mgmtSnapCreate(cx->clone(), snapCmd, snapUID));
+  return Void();
 }
 
-Future<Void> DatabaseContext::createSnapshot(StringRef snapshot_command) {
-	return createSnapshotActor(this, snapshot_command);
+Future<Void> DatabaseContext::createSnapshot(StringRef uid,
+                                             StringRef snapshot_command) {
+  std::string uid_str = uid.toString();
+  if (!std::all_of(uid_str.begin(), uid_str.end(),
+                   [](unsigned char c) { return std::isxdigit(c); }) ||
+      uid_str.size() != 32) {
+    throw snap_invalid_uid_string();
+  }
+  return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
 }
