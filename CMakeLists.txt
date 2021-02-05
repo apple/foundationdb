@@ -72,7 +72,8 @@ add_custom_target(branch_file ALL DEPENDS ${CURR_BRANCH_FILE})
 execute_process(
   COMMAND git rev-parse HEAD
   WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-  OUTPUT_VARIABLE CURRENT_GIT_VERSION_WNL)
+  OUTPUT_VARIABLE CURRENT_GIT_VERSION_WNL
+  OUTPUT_STRIP_TRAILING_WHITESPACE)
 string(STRIP "${CURRENT_GIT_VERSION_WNL}" CURRENT_GIT_VERSION)
 message(STATUS "Current git version ${CURRENT_GIT_VERSION}")
 
@@ -181,6 +182,12 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
   add_link_options(-lexecinfo)
 endif()
+
+################################################################################
+# Build information
+################################################################################
+
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/BuildFlags.h.in ${CMAKE_CURRENT_BINARY_DIR}/fdbclient/BuildFlags.h)
 
 ################################################################################
 # process compile commands for IDE

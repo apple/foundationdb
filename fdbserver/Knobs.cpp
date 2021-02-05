@@ -22,7 +22,8 @@
 #include "fdbrpc/Locality.h"
 #include <cmath>
 
-ServerKnobs const* SERVER_KNOBS = new ServerKnobs();
+std::unique_ptr<ServerKnobs> globalServerKnobs = std::make_unique<ServerKnobs>();
+ServerKnobs const* SERVER_KNOBS = globalServerKnobs.get();
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 

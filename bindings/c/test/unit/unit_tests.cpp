@@ -1882,19 +1882,19 @@ TEST_CASE("special-key-space disable tracing") {
   }
 }
 
-TEST_CASE("FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE") {
-  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE, nullptr, 0));
+TEST_CASE("FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE") {
+  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE, nullptr, 0));
 
   auto value = get_value("\xff\xff/tracing/token", /* snapshot */ false, {});
   REQUIRE(value.has_value());
   uint64_t token = std::stoul(value.value());
   CHECK(token == 0);
 
-  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TRACE_ENABLE, nullptr, 0));
+  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_ENABLE, nullptr, 0));
 }
 
-TEST_CASE("FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE enable tracing for transaction") {
-  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE, nullptr, 0));
+TEST_CASE("FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE enable tracing for transaction") {
+  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE, nullptr, 0));
 
   fdb::Transaction tr(db);
   fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES,
@@ -1922,7 +1922,7 @@ TEST_CASE("FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE enable tracing for transactio
     break;
   }
 
-  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TRACE_ENABLE, nullptr, 0));
+  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_ENABLE, nullptr, 0));
 }
 
 TEST_CASE("special-key-space tracing get range") {
@@ -2130,16 +2130,23 @@ TEST_CASE("block_from_callback") {
 }
 
 int main(int argc, char **argv) {
-  if (argc != 3) {
+  if (argc != 3 && argc != 4) {
     std::cout << "Unit tests for the FoundationDB C API.\n"
-              << "Usage: fdb_c_unit_tests /path/to/cluster_file key_prefix"
-              << std::endl;
+              << "Usage: fdb_c_unit_tests /path/to/cluster_file key_prefix [externalClient]" << std::endl;
     return 1;
+  }
+  fdb_check(fdb_select_api_version(700));
+  if (argc == 4) {
+    std::string externalClientLibrary = argv[3];
+    fdb_check(fdb_network_set_option(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT,
+                                     reinterpret_cast<const uint8_t*>(""), 0));
+    fdb_check(fdb_network_set_option(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_LIBRARY,
+                                     reinterpret_cast<const uint8_t*>(externalClientLibrary.c_str()),
+                                     externalClientLibrary.size()));
   }
 
   doctest::Context context;
 
-  fdb_check(fdb_select_api_version(700));
   fdb_check(fdb_setup_network());
   std::thread network_thread{ &fdb_run_network };
 

@@ -1213,11 +1213,11 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 				validateOptionValue(value, false);
 				snapshotRywEnabled--;
 				break;
-			case FDBDatabaseOptions::TRANSACTION_TRACE_ENABLE:
+			case FDBDatabaseOptions::DISTRIBUTED_TRANSACTION_TRACE_ENABLE:
 				validateOptionValue(value, false);
 				transactionTracingEnabled++;
 				break;
-			case FDBDatabaseOptions::TRANSACTION_TRACE_DISABLE:
+			case FDBDatabaseOptions::DISTRIBUTED_TRANSACTION_TRACE_DISABLE:
 				validateOptionValue(value, false);
 				transactionTracingEnabled--;
 				break;
@@ -1444,22 +1444,17 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 
 			std::string knobName = optionValue.substr(0, eq);
 			std::string knobValue = optionValue.substr(eq+1);
-			if (const_cast<FlowKnobs*>(FLOW_KNOBS)->setKnob(knobName, knobValue))
-			{
-				// update dependent knobs
-				const_cast<FlowKnobs*>(FLOW_KNOBS)->initialize();
-			}
-			else if (const_cast<ClientKnobs*>(CLIENT_KNOBS)->setKnob(knobName, knobValue))
-			{
-				// update dependent knobs
-				const_cast<ClientKnobs*>(CLIENT_KNOBS)->initialize();
-			}
-			else
-			{
-				TraceEvent(SevWarnAlways, "UnrecognizedKnob").detail("Knob", knobName.c_str());
+		    if (globalFlowKnobs->setKnob(knobName, knobValue)) {
+			    // update dependent knobs
+			    globalFlowKnobs->initialize();
+		    } else if (globalClientKnobs->setKnob(knobName, knobValue)) {
+			    // update dependent knobs
+			    globalClientKnobs->initialize();
+		    } else {
+			    TraceEvent(SevWarnAlways, "UnrecognizedKnob").detail("Knob", knobName.c_str());
 				fprintf(stderr, "FoundationDB client ignoring unrecognized knob option '%s'\n", knobName.c_str());
-			}
-			break;
+		    }
+		    break;
 		}
 		case FDBNetworkOptions::TLS_PLUGIN:
 			validateOptionValue(value, true);
@@ -1541,6 +1536,23 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			validateOptionValue(value, false);
 			networkOptions.runLoopProfilingEnabled = true;
 			break;
+		case FDBNetworkOptions::DISTRIBUTED_CLIENT_TRACER: {
+			validateOptionValue(value, true);
+			std::string tracer = value.get().toString();
+			if (tracer == "none" || tracer == "disabled") {
+				openTracer(TracerType::DISABLED);
+			} else if (tracer == "logfile" || tracer == "file" || tracer == "log_file") {
+				openTracer(TracerType::LOG_FILE);
+			} else if (tracer == "network_async") {
+				openTracer(TracerType::NETWORK_ASYNC);
+			} else if (tracer == "network_lossy") {
+				openTracer(TracerType::NETWORK_LOSSY);
+			} else {
+				fprintf(stderr, "ERROR: Unknown or unsupported tracer: `%s'", tracer.c_str());
+				throw invalid_option_value();
+			}
+			break;
+		}
 		default:
 			break;
 	}
