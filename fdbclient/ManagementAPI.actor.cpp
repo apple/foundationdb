@@ -989,11 +989,12 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 
 			if(g_network->isSimulated()) {
 				for(int i = 0; i < (desiredCoordinators.size()/2)+1; i++) {
-					auto addresses = g_simulator.getProcessByAddress(desiredCoordinators[i])->addresses;
+					auto process = g_simulator.getProcessByAddress(desiredCoordinators[i]);
+					ASSERT(process->isReliable());
 
-					g_simulator.protectedAddresses.insert(addresses.address);
-					if(addresses.secondaryAddress.present()) {
-						g_simulator.protectedAddresses.insert(addresses.secondaryAddress.get());
+					g_simulator.protectedAddresses.insert(process->addresses.address);
+					if(process->addresses.secondaryAddress.present()) {
+						g_simulator.protectedAddresses.insert(process->addresses.secondaryAddress.get());
 					}
 					TraceEvent("ProtectCoordinator").detail("Address", desiredCoordinators[i]).backtrace();
 				}
@@ -1208,8 +1209,7 @@ struct AutoQuorumChange : IQuorumChange {
 					continue;
 				}
 				// Exclude faulty node due to machine assassination
-				if (g_network->isSimulated() && g_simulator.protectedAddresses.count(worker->address) &&
-				    !g_simulator.getProcessByAddress(worker->address)->isReliable()) {
+				if (g_network->isSimulated() && !g_simulator.getProcessByAddress(worker->address)->isReliable()) {
 					TraceEvent("AutoSelectCoordinators").detail("SkipUnreliableWorker", worker->address.toString());
 					continue;
 				}
