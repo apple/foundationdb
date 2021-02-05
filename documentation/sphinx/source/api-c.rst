@@ -464,6 +464,14 @@ An |database-blurb1| Modifications to a database are performed via transactions.
 
    Create a snapshot of the database.
 
+   ``uid``
+         A UID used to create snapshot. A 32-length hex string is needed here, otherwise, it will fail with error_code_snap_invalid_uid_string.
+
+         It is the user's responsibility to make sure the given ``uid`` is unique.
+   
+   ``uid_length``
+         |length-of| ``uid``
+
    ``snapshot_command``
          A pointer to all the snapshot command arguments.
 
