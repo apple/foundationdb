@@ -277,6 +277,7 @@ else()
 endif()
 
 target_link_libraries(fdbserver PRIVATE toml11_target)
+target_link_libraries(fdbserver PRIVATE jemalloc)
 
 if (GPERFTOOLS_FOUND)
   target_link_libraries(fdbserver PRIVATE gperftools)
