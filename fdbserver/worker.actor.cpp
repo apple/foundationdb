@@ -1756,7 +1756,7 @@ ACTOR Future<Void> fdbd(
 		if (coordFolder.size()) {
 			// SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up
 			// their files
-			actors.push_back(fileNotFoundToNever(coordinationServer(coordFolder, coordinators.ccf)));
+			actors.push_back(fileNotFoundToNever(coordinationServer(coordFolder)));
 		}
 
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
