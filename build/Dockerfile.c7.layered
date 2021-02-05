@@ -3,8 +3,7 @@ FROM centos:7
 WORKDIR /tmp
 
 RUN rpmkeys --import "http://pool.sks-keyservers.net/pks/lookup?op=get&search=0x3fa7e0328081bff6a14da29aa6a19b38d3d831ef" && \
-    curl -Ls https://download.mono-project.com/repo/centos7-stable.repo -o /etc/yum.repos.d/mono-centos7-stable.repo
-    rm mono-project.com.rpmkey.pgp && \
+    curl -Ls https://download.mono-project.com/repo/centos7-stable.repo -o /etc/yum.repos.d/mono-centos7-stable.repo && \
     yum repolist && \
     yum install -y \
         centos-release-scl \
@@ -106,11 +105,29 @@ RUN curl -Ls https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.
     rm -rf /tmp/*
 
 # install boost 1.72 to /opt
-RUN curl -Ls https://dl.bintray.com/boostorg/release/1.72.0/source/boost_1_72_0.tar.bz2 -o boost_1_72_0.tar.bz2 && \
+RUN source /opt/rh/devtoolset-8/enable && \
+    curl -Ls https://dl.bintray.com/boostorg/release/1.72.0/source/boost_1_72_0.tar.bz2 -o boost_1_72_0.tar.bz2 && \
     echo "59c9b274bc451cf91a9ba1dd2c7fdcaf5d60b1b3aa83f2c9fa143417cc660722  boost_1_72_0.tar.bz2" > boost-sha-72.txt && \
     sha256sum -c boost-sha-72.txt && \
     tar --no-same-owner --directory /opt -xjf boost_1_72_0.tar.bz2 && \
+    cd /opt/boost_1_72_0 &&\
+    ./bootstrap.sh --with-libraries=context &&\
+    ./b2 link=static cxxflags=-std=c++14 --prefix=/opt/boost_1_72_0 install &&\
     rm -rf /opt/boost_1_72_0/libs && \
+    rm -rf /tmp/*
+
+# jemalloc (needed for FDB after 6.3)
+RUN source /opt/rh/devtoolset-8/enable && \
+    curl -Ls https://github.com/jemalloc/jemalloc/releases/download/5.2.1/jemalloc-5.2.1.tar.bz2 -o jemalloc-5.2.1.tar.bz2 && \
+    echo "34330e5ce276099e2e8950d9335db5a875689a4c6a56751ef3b1d8c537f887f6  jemalloc-5.2.1.tar.bz2" > jemalloc-sha.txt && \
+    sha256sum -c jemalloc-sha.txt && \
+    mkdir jemalloc && \
+    tar --strip-components 1 --no-same-owner --no-same-permissions --directory jemalloc -xjf jemalloc-5.2.1.tar.bz2 && \
+    cd jemalloc && \
+    ./configure --enable-static --disable-cxx && \
+    make && \
+    make install && \
+    cd .. && \
     rm -rf /tmp/*
 
 # Install CCACHE
