@@ -72,7 +72,6 @@ ERROR( connection_idle, 1049, "Connection closed after idle timeout" )
 ERROR( disk_adapter_reset, 1050, "The disk queue adpater reset" )
 ERROR( batch_transaction_throttled, 1051, "Batch GRV request rate limit exceeded")
 ERROR( dd_cancelled, 1052, "Data distribution components cancelled")
-ERROR( wrong_connection_file, 1053, "Connection file mismatch")
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )

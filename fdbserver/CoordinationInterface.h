@@ -209,6 +209,6 @@ public:
 	vector<GenerationRegInterface> stateServers;
 };
 
-Future<Void> coordinationServer(std::string const& dataFolder, Reference<ClusterConnectionFile> const& ccf);
+Future<Void> coordinationServer( std::string const& dataFolder );
 
 #endif
