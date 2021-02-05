@@ -66,13 +66,20 @@ struct ServerStatus {
 using ServerStatusMap = AsyncMap<UID, ServerStatus>;
 
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
+	void traceConfigInfo() const;
+	void traceServerInfo() const;
+	void traceServerTeamInfo() const;
+	void traceMachineInfo() const;
+	void traceMachineTeamInfo() const;
+	void traceLocalityArrayIndexName() const;
+	void traceMachineLocalityMap() const;
 	friend class DDTeamCollectionImpl;
+	enum class Status { NONE, EXCLUDED, FAILED };
+	PromiseStream<Future<Void>> addActor;
 
 public: // TODO: Make a lot of this private
-	enum class Status { NONE, EXCLUDED, FAILED };
 	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
 	// addActor is used to create the actorCollection when the dataDistributionTeamCollection is created
-	PromiseStream<Future<Void>> addActor;
 	Database cx;
 	UID distributorId;
 	DatabaseConfiguration configuration;
@@ -193,13 +200,7 @@ public:
 	Reference<TCMachineTeamInfo> addMachineTeam(std::vector<Standalone<StringRef>>::iterator begin,
 	                                            std::vector<Standalone<StringRef>>::iterator end);
 	int constructMachinesFromServers();
-	void traceConfigInfo() const;
-	void traceServerInfo() const;
-	void traceServerTeamInfo() const;
-	void traceMachineInfo() const;
-	void traceMachineTeamInfo() const;
-	void traceLocalityArrayIndexName() const;
-	void traceMachineLocalityMap() const;
+
 	void traceAllInfo(bool shouldPrint = false) const;
 	void rebuildMachineLocalityMap();
 	int addBestMachineTeams(int machineTeamsToBuild);
@@ -244,9 +245,6 @@ public:
 	Future<Void> zeroServerLeftLogger_impl(Reference<TCTeamInfo> team);
 	Future<Void> waitServerListChange(FutureStream<Void> serverRemoved, const DDEnabledState* ddEnabledState);
 	Future<Void> waitHealthyZoneChange();
-	Future<Void> keyValueStoreTypeTracker(TCServerInfo* server);
-	Future<Void> storageServerFailureTracker(TCServerInfo* server, Database cx, ServerStatus* status,
-	                                         Version addedVersion);
 	Future<Void> storageServerTracker(Database cx, TCServerInfo* server, Promise<Void> errorOut, Version addedVersion,
 	                                  const DDEnabledState* ddEnabledState);
 	Future<Void> monitorStorageServerRecruitment();
@@ -261,4 +259,9 @@ public:
 	Future<Void> waitForAllDataRemoved(Database cx, UID serverID, Version addedVersion);
 	int numExistingSSOnAddr(const AddressExclusion& addr);
 	Future<Void> trackExcludedServers();
+	static Future<Void> dataDistributionTeamCollection(Reference<DDTeamCollection> teamCollection,
+	                                                   Reference<InitialDataDistribution> initData,
+	                                                   TeamCollectionInterface tci,
+	                                                   Reference<AsyncVar<struct ServerDBInfo>> db,
+	                                                   const DDEnabledState* ddEnabledState);
 };

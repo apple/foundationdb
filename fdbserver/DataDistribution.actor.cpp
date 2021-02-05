@@ -224,101 +224,6 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 	return result;
 }
 
-ACTOR Future<Void> waitUntilHealthy(DDTeamCollection* self, double extraDelay = 0) {
-	state int waitCount = 0;
-	loop {
-		while (self->zeroHealthyTeams->get() || self->processingUnhealthy->get()) {
-			// processingUnhealthy: true when there exists data movement
-			TraceEvent("WaitUntilHealthyStalled", self->distributorId)
-			    .detail("Primary", self->primary)
-			    .detail("ZeroHealthy", self->zeroHealthyTeams->get())
-			    .detail("ProcessingUnhealthy", self->processingUnhealthy->get());
-			wait(self->zeroHealthyTeams->onChange() || self->processingUnhealthy->onChange());
-			waitCount = 0;
-		}
-		wait(delay(SERVER_KNOBS->DD_STALL_CHECK_DELAY,
-		           TaskPriority::Low)); // After the team trackers wait on the initial failure reaction delay, they
-		                                // yield. We want to make sure every tracker has had the opportunity to send
-		                                // their relocations to the queue.
-		if (!self->zeroHealthyTeams->get() && !self->processingUnhealthy->get()) {
-			if (extraDelay <= 0.01 || waitCount >= 1) {
-				// Return healthy if we do not need extraDelay or when DD are healthy in at least two consecutive check
-				return Void();
-			} else {
-				wait(delay(extraDelay, TaskPriority::Low));
-				waitCount++;
-			}
-		}
-	}
-}
-
-ACTOR Future<Void> trackExcludedServers( DDTeamCollection* self ) {
-	// Fetch the list of excluded servers
-	state ReadYourWritesTransaction tr(self->cx);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			state Future<Standalone<RangeResultRef>> fresultsExclude =
-			    tr.getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY);
-			state Future<Standalone<RangeResultRef>> fresultsFailed =
-			    tr.getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY);
-			wait(success(fresultsExclude) && success(fresultsFailed));
-
-			Standalone<RangeResultRef> excludedResults = fresultsExclude.get();
-			ASSERT(!excludedResults.more && excludedResults.size() < CLIENT_KNOBS->TOO_MANY);
-
-			Standalone<RangeResultRef> failedResults = fresultsFailed.get();
-			ASSERT(!failedResults.more && failedResults.size() < CLIENT_KNOBS->TOO_MANY);
-
-			std::set<AddressExclusion> excluded;
-			std::set<AddressExclusion> failed;
-			for (const auto& r : excludedResults) {
-				AddressExclusion addr = decodeExcludedServersKey(r.key);
-				if (addr.isValid()) {
-					excluded.insert(addr);
-				}
-			}
-			for (const auto& r : failedResults) {
-				AddressExclusion addr = decodeFailedServersKey(r.key);
-				if (addr.isValid()) {
-					failed.insert(addr);
-				}
-			}
-
-			// Reset and reassign self->excludedServers based on excluded, but we only
-			// want to trigger entries that are different
-			// Do not retrigger and double-overwrite failed servers
-			auto old = self->excludedServers.getKeys();
-			for (const auto& o : old) {
-				if (!excluded.count(o) && !failed.count(o)) {
-					self->excludedServers.set(o, DDTeamCollection::Status::NONE);
-				}
-			}
-			for (const auto& n : excluded) {
-				if (!failed.count(n)) {
-					self->excludedServers.set(n, DDTeamCollection::Status::EXCLUDED);
-				}
-			}
-
-			for (const auto& f : failed) {
-				self->excludedServers.set(f, DDTeamCollection::Status::FAILED);
-			}
-
-			TraceEvent("DDExcludedServersChanged", self->distributorId)
-			    .detail("RowsExcluded", excludedResults.size())
-			    .detail("RowsFailed", failedResults.size());
-
-			self->restartRecruiting.trigger();
-			state Future<Void> watchFuture = tr.watch(excludedServersVersionKey) || tr.watch(failedServersVersionKey);
-			wait(tr.commit());
-			wait(watchFuture);
-			tr.reset();
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
 ACTOR Future<vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses( Transaction *tr ) {
 	state Future<vector<ProcessData>> workers = getWorkers(tr);
 	state Future<Standalone<RangeResultRef>> serverList = tr->getRange( serverListKeys, CLIENT_KNOBS->TOO_MANY );
@@ -375,101 +280,6 @@ ACTOR Future<Void> remoteRecovered( Reference<AsyncVar<struct ServerDBInfo>> db 
 		wait( db->onChange() );
 	}
 	return Void();
-}
-
-// Keep track of servers and teams -- serves requests for getRandomTeam
-ACTOR Future<Void> dataDistributionTeamCollection(Reference<DDTeamCollection> teamCollection,
-                                                  Reference<InitialDataDistribution> initData,
-                                                  TeamCollectionInterface tci,
-                                                  Reference<AsyncVar<struct ServerDBInfo>> db,
-                                                  const DDEnabledState* ddEnabledState) {
-	state DDTeamCollection* self = teamCollection.getPtr();
-	state Future<Void> loggingTrigger = Void();
-	state PromiseStream<Void> serverRemoved;
-	state Future<Void> error = actorCollection( self->addActor.getFuture() );
-
-	try {
-		wait(self->init(initData, ddEnabledState));
-		initData = Reference<InitialDataDistribution>();
-		self->addActor.send(self->serverGetTeamRequests(tci));
-
-		TraceEvent("DDTeamCollectionBegin", self->distributorId).detail("Primary", self->primary);
-		wait( self->readyToStart || error );
-		TraceEvent("DDTeamCollectionReadyToStart", self->distributorId).detail("Primary", self->primary);
-
-		// removeBadTeams() does not always run. We may need to restart the actor when needed.
-		// So we need the badTeamRemover variable to check if the actor is ready.
-		if(self->badTeamRemover.isReady()) {
-			self->badTeamRemover = self->removeBadTeams();
-			self->addActor.send(self->badTeamRemover);
-		}
-
-		self->addActor.send(self->machineTeamRemover());
-		self->addActor.send(self->serverTeamRemover());
-
-		if (self->wrongStoreTypeRemover.isReady()) {
-			self->wrongStoreTypeRemover = self->removeWrongStoreType();
-			self->addActor.send(self->wrongStoreTypeRemover);
-		}
-
-		self->traceTeamCollectionInfo();
-
-		if(self->includedDCs.size()) {
-			//start this actor before any potential recruitments can happen
-			self->addActor.send(self->updateReplicasKey(self->includedDCs[0]));
-		}
-
-		// The following actors (e.g. storageRecruiter) do not need to be assigned to a variable because
-		// they are always running.
-		self->addActor.send(self->storageRecruiter(db, ddEnabledState));
-		self->addActor.send(self->monitorStorageServerRecruitment());
-		self->addActor.send(self->waitServerListChange(serverRemoved.getFuture(), ddEnabledState));
-		self->addActor.send(self->trackExcludedServers());
-		self->addActor.send(self->monitorHealthyTeams());
-		self->addActor.send(self->waitHealthyZoneChange());
-
-		// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
-
-		loop choose {
-			when( UID removedServer = waitNext( self->removedServers.getFuture() ) ) {
-				TEST(true);  // Storage server removed from database
-				self->removeServer(removedServer);
-				serverRemoved.send( Void() );
-
-				self->restartRecruiting.trigger();
-			}
-			when( wait( self->zeroHealthyTeams->onChange() ) ) {
-				if(self->zeroHealthyTeams->get()) {
-					self->restartRecruiting.trigger();
-					self->noHealthyTeams();
-				}
-			}
-			when( wait( loggingTrigger ) ) {
-				int highestPriority = 0;
-				for(auto it : self->priority_teams) {
-					if(it.second > 0) {
-						highestPriority = std::max(highestPriority, it.first);
-					}
-				}
-
-				TraceEvent("TotalDataInFlight", self->distributorId)
-				    .detail("Primary", self->primary)
-				    .detail("TotalBytes", self->getDebugTotalDataInFlight())
-				    .detail("UnhealthyServers", self->unhealthyServers)
-				    .detail("ServerCount", self->server_info.size())
-				    .detail("StorageTeamSize", self->configuration.storageTeamSize)
-				    .detail("HighestPriority", highestPriority)
-				    .trackLatest(self->primary ? "TotalDataInFlight" : "TotalDataInFlightRemote");
-				loggingTrigger = delay( SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace );
-			}
-			when( wait( self->serverTrackerErrorOut.getFuture() ) ) {} // Propagate errors from storageServerTracker
-			when( wait( error ) ) {}
-		}
-	} catch (Error& e) {
-		if (e.code() != error_code_movekeys_conflict)
-			TraceEvent(SevError, "DataDistributionTeamCollectionError", self->distributorId).error(e);
-		throw e;
-	}
 }
 
 ACTOR Future<Void> waitForDataDistributionEnabled(Database cx, const DDEnabledState* ddEnabledState) {
@@ -835,17 +645,18 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back(
-				    reportErrorsExcept(dataDistributionTeamCollection(remoteTeamCollection, initData, tcis[1],
-				                                                      self->dbInfo, ddEnabledState),
+				    reportErrorsExcept(DDTeamCollection::dataDistributionTeamCollection(
+				                           remoteTeamCollection, initData, tcis[1], self->dbInfo, ddEnabledState),
 				                       "DDTeamCollectionSecondary", self->ddId, &normalDDQueueErrors()));
 				// actors.push_back(printSnapshotTeamsInfo(remoteTeamCollection));
 				actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(remoteTeamCollection));
 			}
 			primaryTeamCollection->teamCollections = teamCollectionsPtrs;
 			self->teamCollection = primaryTeamCollection.getPtr();
-			actors.push_back(reportErrorsExcept(
-			    dataDistributionTeamCollection(primaryTeamCollection, initData, tcis[0], self->dbInfo, ddEnabledState),
-			    "DDTeamCollectionPrimary", self->ddId, &normalDDQueueErrors()));
+			actors.push_back(
+			    reportErrorsExcept(DDTeamCollection::dataDistributionTeamCollection(
+			                           primaryTeamCollection, initData, tcis[0], self->dbInfo, ddEnabledState),
+			                       "DDTeamCollectionPrimary", self->ddId, &normalDDQueueErrors()));
 
 			// actors.push_back(printSnapshotTeamsInfo(primaryTeamCollection));
 			actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(primaryTeamCollection));
