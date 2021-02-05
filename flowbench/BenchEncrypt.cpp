@@ -23,12 +23,6 @@
 #include "flow/StreamCipher.h"
 #include "flowbench/GlobalData.h"
 
-static StreamCipher::Key getRandomKey() {
-	StreamCipher::Key key;
-	generateRandomData(key.data(), key.size());
-	return key;
-}
-
 static StreamCipher::IV getRandomIV() {
 	StreamCipher::IV iv;
 	generateRandomData(iv.data(), iv.size());
@@ -47,7 +41,8 @@ static void bench_encrypt(benchmark::State& state) {
 	auto bytes = state.range(0);
 	auto chunks = state.range(1);
 	auto chunkSize = bytes / chunks;
-	auto key = getRandomKey();
+	StreamCipher::Key::initializeRandomKey();
+	const auto& key = StreamCipher::Key::getKey();
 	auto iv = getRandomIV();
 	auto data = getKey(bytes);
 	while (state.KeepRunning()) {
@@ -62,7 +57,8 @@ static void bench_decrypt(benchmark::State& state) {
 	auto bytes = state.range(0);
 	auto chunks = state.range(1);
 	auto chunkSize = bytes / chunks;
-	auto key = getRandomKey();
+	StreamCipher::Key::initializeRandomKey();
+	const auto& key = StreamCipher::Key::getKey();
 	auto iv = getRandomIV();
 	auto data = getKey(bytes);
 	auto encrypted = encrypt(key, iv, data.begin(), data.size());
