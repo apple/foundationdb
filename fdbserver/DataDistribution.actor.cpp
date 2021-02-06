@@ -614,22 +614,19 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				    zeroHealthyTeams[1], false, processingUnhealthy, getShardMetrics);
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->setTeamCollections(teamCollectionsPtrs);
-				actors.push_back(
-				    reportErrorsExcept(DDTeamCollection::dataDistributionTeamCollection(
-				                           remoteTeamCollection, initData, tcis[1], self->dbInfo, ddEnabledState),
-				                       "DDTeamCollectionSecondary", self->ddId, &normalDDQueueErrors()));
-				// actors.push_back(printSnapshotTeamsInfo(remoteTeamCollection));
-				actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(remoteTeamCollection));
+				actors.push_back(reportErrorsExcept(
+				    holdWhile(remoteTeamCollection,
+				              remoteTeamCollection->run(initData, tcis[1], self->dbInfo, ddEnabledState)),
+				    "DDTeamCollectionSecondary", self->ddId, &normalDDQueueErrors()));
+				actors.push_back(holdWhile(remoteTeamCollection, remoteTeamCollection->printSnapshotTeamsInfo()));
 			}
 			primaryTeamCollection->setTeamCollections(teamCollectionsPtrs);
 			self->teamCollection = primaryTeamCollection.getPtr();
-			actors.push_back(
-			    reportErrorsExcept(DDTeamCollection::dataDistributionTeamCollection(
-			                           primaryTeamCollection, initData, tcis[0], self->dbInfo, ddEnabledState),
-			                       "DDTeamCollectionPrimary", self->ddId, &normalDDQueueErrors()));
-
-			// actors.push_back(printSnapshotTeamsInfo(primaryTeamCollection));
-			actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(primaryTeamCollection));
+			actors.push_back(reportErrorsExcept(
+			    holdWhile(primaryTeamCollection,
+			              primaryTeamCollection->run(initData, tcis[0], self->dbInfo, ddEnabledState)),
+			    "DDTeamCollectionPrimary", self->ddId, &normalDDQueueErrors()));
+			actors.push_back(holdWhile(primaryTeamCollection, primaryTeamCollection->printSnapshotTeamsInfo()));
 			actors.push_back(yieldPromiseStream(output.getFuture(), input));
 
 			wait( waitForAll( actors ) );

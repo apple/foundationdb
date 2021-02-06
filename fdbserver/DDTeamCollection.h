@@ -257,10 +257,7 @@ public:
 	int constructMachinesFromServers();
 	void addLaggingStorageServer(Key zoneId);
 	void removeLaggingStorageServer(Key zoneId);
-	static Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self);
-	static Future<Void> dataDistributionTeamCollection(Reference<DDTeamCollection> teamCollection,
-	                                                   Reference<InitialDataDistribution> initData,
-	                                                   TeamCollectionInterface tci,
-	                                                   Reference<AsyncVar<struct ServerDBInfo>> db,
-	                                                   const DDEnabledState* ddEnabledState);
+	Future<Void> printSnapshotTeamsInfo();
+	Future<Void> run(Reference<InitialDataDistribution> initData, TeamCollectionInterface tci,
+	                 Reference<AsyncVar<struct ServerDBInfo>> db, const DDEnabledState* ddEnabledState);
 };

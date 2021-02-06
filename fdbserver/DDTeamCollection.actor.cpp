@@ -120,7 +120,7 @@ public:
 
 	// Take a snapshot of necessary data structures from `DDTeamCollection` and print them out with yields to avoid slow
 	// task on the run loop.
-	ACTOR static Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
+	ACTOR static Future<Void> printSnapshotTeamsInfo(DDTeamCollection* self) {
 		state DatabaseConfiguration configuration;
 		state std::map<UID, Reference<TCServerInfo>> server_info;
 		state std::map<UID, ServerStatus> server_status;
@@ -2342,12 +2342,9 @@ public:
 	}
 
 	// Keep track of servers and teams -- serves requests for getRandomTeam
-	ACTOR static Future<Void> dataDistributionTeamCollection(Reference<DDTeamCollection> teamCollection,
-	                                                         Reference<InitialDataDistribution> initData,
-	                                                         TeamCollectionInterface tci,
-	                                                         Reference<AsyncVar<struct ServerDBInfo>> db,
-	                                                         const DDEnabledState* ddEnabledState) {
-		state DDTeamCollection* self = teamCollection.getPtr();
+	ACTOR static Future<Void> run(DDTeamCollection* self, Reference<InitialDataDistribution> initData,
+	                              TeamCollectionInterface tci, Reference<AsyncVar<struct ServerDBInfo>> db,
+	                              const DDEnabledState* ddEnabledState) {
 		state Future<Void> loggingTrigger = Void();
 		state PromiseStream<Void> serverRemoved;
 		state Future<Void> error = actorCollection(self->addActor.getFuture());
@@ -2861,8 +2858,8 @@ void DDTeamCollection::traceServerInfo() const {
 	}
 }
 
-Future<Void> DDTeamCollection::printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
-	return DDTeamCollectionImpl::printSnapshotTeamsInfo(self);
+Future<Void> DDTeamCollection::printSnapshotTeamsInfo() {
+	return DDTeamCollectionImpl::printSnapshotTeamsInfo(this);
 }
 
 Future<Void> DDTeamCollection::removeBadTeams() {
@@ -4106,12 +4103,9 @@ Future<Void> DDTeamCollection::waitUntilHealthy(double extraDelay) {
 	return DDTeamCollectionImpl::waitUntilHealthy(this, extraDelay);
 }
 
-Future<Void> DDTeamCollection::dataDistributionTeamCollection(Reference<DDTeamCollection> teamCollection,
-                                                              Reference<InitialDataDistribution> initData,
-                                                              TeamCollectionInterface tci,
-                                                              Reference<AsyncVar<struct ServerDBInfo>> db,
-                                                              const DDEnabledState* ddEnabledState) {
-	return DDTeamCollectionImpl::dataDistributionTeamCollection(teamCollection, initData, tci, db, ddEnabledState);
+Future<Void> DDTeamCollection::run(Reference<InitialDataDistribution> initData, TeamCollectionInterface tci,
+                                   Reference<AsyncVar<struct ServerDBInfo>> db, const DDEnabledState* ddEnabledState) {
+	return DDTeamCollectionImpl::run(this, initData, tci, db, ddEnabledState);
 }
 
 UID DDTeamCollection::getDistributorId() const {
