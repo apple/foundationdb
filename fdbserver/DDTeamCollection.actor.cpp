@@ -4117,3 +4117,7 @@ Future<Void> DDTeamCollection::dataDistributionTeamCollection(Reference<DDTeamCo
 UID DDTeamCollection::getDistributorId() const {
 	return distributorId;
 }
+
+void DDTeamCollection::setTeamCollections(const std::vector<DDTeamCollection*>& teamCollections) {
+	this->teamCollections = teamCollections;
+}

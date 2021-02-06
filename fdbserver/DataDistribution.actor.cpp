@@ -613,7 +613,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				    Optional<std::vector<Optional<Key>>>(), readyToStart.getFuture() && remoteRecovered(self->dbInfo),
 				    zeroHealthyTeams[1], false, processingUnhealthy, getShardMetrics);
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
-				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
+				remoteTeamCollection->setTeamCollections(teamCollectionsPtrs);
 				actors.push_back(
 				    reportErrorsExcept(DDTeamCollection::dataDistributionTeamCollection(
 				                           remoteTeamCollection, initData, tcis[1], self->dbInfo, ddEnabledState),
@@ -621,7 +621,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				// actors.push_back(printSnapshotTeamsInfo(remoteTeamCollection));
 				actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(remoteTeamCollection));
 			}
-			primaryTeamCollection->teamCollections = teamCollectionsPtrs;
+			primaryTeamCollection->setTeamCollections(teamCollectionsPtrs);
 			self->teamCollection = primaryTeamCollection.getPtr();
 			actors.push_back(
 			    reportErrorsExcept(DDTeamCollection::dataDistributionTeamCollection(

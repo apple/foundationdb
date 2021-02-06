@@ -156,7 +156,6 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	bool satisfiesPolicy(const std::vector<Reference<TCServerInfo>>& team, int amount = -1);
 
 	friend class DDTeamCollectionImpl;
-	enum class Status { NONE, EXCLUDED, FAILED };
 
 	Database cx;
 	DatabaseConfiguration configuration;
@@ -198,11 +197,10 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	// EXCLUDED if an address is in the excluded list in the database.
 	// FAILED if an address is permanently failed.
 	// NONE by default.  Updated asynchronously (eventually)
+	enum class Status { NONE, EXCLUDED, FAILED };
 	AsyncMap<AddressExclusion, Status> excludedServers;
-
 	std::set<AddressExclusion>
 	    invalidLocalityAddr; // These address have invalidLocality for the configured storagePolicy
-
 	std::vector<Optional<Key>> includedDCs;
 	Optional<std::vector<Optional<Key>>> otherTrackedDCs;
 	bool primary;
@@ -212,24 +210,18 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	Promise<Void> addSubsetComplete;
 	Future<Void> badTeamRemover;
 	Future<Void> checkInvalidLocalities;
-
 	Future<Void> wrongStoreTypeRemover;
-
 	std::vector<LocalityEntry> forcedEntries, resultEntries;
-
 	AsyncVar<Optional<Key>> healthyZone;
 	Future<bool> clearHealthyZoneFuture;
 	double medianAvailableSpace;
 	double lastMedianAvailableSpaceUpdate;
-	// clang-format on
-
 	int lowestUtilizationTeam;
 	int highestUtilizationTeam;
-
 	AsyncTrigger printDetailedTeamsInfo;
 	PromiseStream<GetMetricsRequest> getShardMetrics;
-
 	UID distributorId;
+	std::vector<DDTeamCollection*> teamCollections;
 
 	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
 	// addActor is used to create the actorCollection when the dataDistributionTeamCollection is created
@@ -249,7 +241,6 @@ public: // testing only
 	Reference<LocalitySet> storageServerSet;
 
 public:
-	std::vector<DDTeamCollection*> teamCollections;
 
 	DDTeamCollection(Database const& cx, UID distributorId, MoveKeysLock const& lock,
 	                 PromiseStream<RelocateShard> const& output,
@@ -260,6 +251,7 @@ public:
 	                 Reference<AsyncVar<bool>> processingUnhealthy, PromiseStream<GetMetricsRequest> getShardMetrics);
 	~DDTeamCollection();
 
+	void setTeamCollections(const std::vector<DDTeamCollection*>& teamCollections);
 	UID getDistributorId() const;
 	void traceAllInfo(bool shouldPrint = false) const;
 	int constructMachinesFromServers();
