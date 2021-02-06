@@ -243,36 +243,6 @@ ACTOR Future<vector<std::pair<StorageServerInterface, ProcessClass>>> getServerL
 	return results;
 }
 
-ACTOR Future<Void> waitForAllDataRemoved( Database cx, UID serverID, Version addedVersion, DDTeamCollection* teams ) {
-	state Transaction tr(cx);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Version ver = wait( tr.getReadVersion() );
-
-			//we cannot remove a server immediately after adding it, because a perfectly timed master recovery could cause us to not store the mutations sent to the short lived storage server.
-			if(ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
-				bool canRemove = wait( canRemoveStorageServer( &tr, serverID ) );
-				// TraceEvent("WaitForAllDataRemoved")
-				//     .detail("Server", serverID)
-				//     .detail("CanRemove", canRemove)
-				//     .detail("Shards", teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID));
-				ASSERT(teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID) >= 0);
-				if (canRemove && teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID) == 0) {
-					return Void();
-				}
-			}
-
-			// Wait for any change to the serverKeys for this server
-			wait( delay(SERVER_KNOBS->ALL_DATA_REMOVED_DELAY, TaskPriority::DataDistribution) );
-			tr.reset();
-		} catch (Error& e) {
-			wait( tr.onError(e) );
-		}
-	}
-}
-
-
 ACTOR Future<Void> remoteRecovered( Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	TraceEvent("DDTrackerStarting");
 	while ( db->get().recoveryState < RecoveryState::ALL_LOGS_RECRUITED ) {
