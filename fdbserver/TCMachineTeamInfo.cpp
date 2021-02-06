@@ -51,3 +51,22 @@ std::string TCMachineTeamInfo::getMachineIDsStr() const {
 bool TCMachineTeamInfo::operator==(const TCMachineTeamInfo& rhs) const {
 	return this->machineIDs == rhs.machineIDs;
 }
+
+std::vector<Reference<TCTeamInfo>> const& TCMachineTeamInfo::getServerTeams() const {
+	return serverTeams;
+}
+
+void TCMachineTeamInfo::addServerTeam(Reference<TCTeamInfo> const& team) {
+	serverTeams.push_back(team);
+}
+
+void TCMachineTeamInfo::removeServerTeam(Reference<TCTeamInfo> const& team) {
+	for (int t = 0; t < serverTeams.size(); ++t) {
+		if (serverTeams[t] == team) {
+			serverTeams[t--] = serverTeams.back();
+			serverTeams.pop_back();
+			return;
+		}
+	}
+	ASSERT_WE_THINK(false);
+}

@@ -270,7 +270,7 @@ public:
 					TraceEvent("MachineTeamInfo", self->distributorId)
 					    .detail("TeamIndex", i)
 					    .detail("MachineIDs", team->getMachineIDsStr())
-					    .detail("ServerTeams", team->serverTeams.size())
+					    .detail("ServerTeams", team->getServerTeams().size())
 					    .detail("Primary", self->primary);
 					if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 						wait(yield());
@@ -689,8 +689,8 @@ public:
 				// Remove the machine by removing its process team one by one
 				Reference<TCTeamInfo> team;
 				int teamIndex = 0;
-				for (teamIndex = 0; teamIndex < mt->serverTeams.size(); ++teamIndex) {
-					team = mt->serverTeams[teamIndex];
+				for (teamIndex = 0; teamIndex < mt->getServerTeams().size(); ++teamIndex) {
+					team = mt->getServerTeams()[teamIndex];
 					ASSERT(team->machineTeam->machineIDs == mt->machineIDs); // Sanity check
 
 					// Check if a server will have 0 team after the team is removed
@@ -2755,7 +2755,7 @@ void DDTeamCollection::addTeam(const vector<Reference<TCServerInfo>>& newTeamSer
 	}
 
 	teamInfo->machineTeam = machineTeamInfo;
-	machineTeamInfo->serverTeams.push_back(teamInfo);
+	machineTeamInfo->addServerTeam(teamInfo);
 	if (g_network->isSimulated()) {
 		// Update server team information for consistency check in simulation
 		traceTeamCollectionInfo();
@@ -3474,7 +3474,7 @@ Reference<TCMachineTeamInfo> DDTeamCollection::checkAndCreateMachineTeam(Referen
 		machineTeam = addMachineTeam(machineIDs.begin(), machineIDs.end());
 	}
 
-	machineTeam->serverTeams.push_back(serverTeam);
+	machineTeam->addServerTeam(serverTeam);
 
 	return machineTeam;
 }
@@ -3548,17 +3548,7 @@ bool DDTeamCollection::removeTeam(Reference<TCTeamInfo> team) {
 	}
 
 	// Remove the team from its machine team
-	bool foundInMachineTeam = false;
-	for (int t = 0; t < team->machineTeam->serverTeams.size(); ++t) {
-		if (team->machineTeam->serverTeams[t] == team) {
-			team->machineTeam->serverTeams[t--] = team->machineTeam->serverTeams.back();
-			team->machineTeam->serverTeams.pop_back();
-			foundInMachineTeam = true;
-			break; // The same team is added to the serverTeams only once
-		}
-	}
-
-	ASSERT_WE_THINK(foundInMachineTeam);
+	team->machineTeam->removeServerTeam(team);
 	team->cancelTracker();
 	if (g_network->isSimulated()) {
 		// Update server team information for consistency check in simulation
@@ -3767,7 +3757,7 @@ void DDTeamCollection::traceMachineTeamInfo() const {
 		TraceEvent("MachineTeamInfo", distributorId)
 		    .detail("TeamIndex", i++)
 		    .detail("MachineIDs", team->getMachineIDsStr())
-		    .detail("ServerTeams", team->serverTeams.size());
+		    .detail("ServerTeams", team->getServerTeams().size());
 	}
 }
 
@@ -4011,8 +4001,8 @@ std::pair<Reference<TCMachineTeamInfo>, int> DDTeamCollection::getMachineTeamWit
 			ASSERT(isServerTeamCountCorrect(*mt));
 		}
 
-		if (mt->serverTeams.size() < minNumProcessTeams) {
-			minNumProcessTeams = mt->serverTeams.size();
+		if (mt->getServerTeams().size() < minNumProcessTeams) {
+			minNumProcessTeams = mt->getServerTeams().size();
 			retMT = mt;
 		}
 	}
@@ -4053,11 +4043,11 @@ bool DDTeamCollection::isServerTeamCountCorrect(TCMachineTeamInfo const& mt) con
 			++num;
 		}
 	}
-	if (num != mt.serverTeams.size()) {
+	if (num != mt.getServerTeams().size()) {
 		ret = false;
 		TraceEvent(SevError, "ServerTeamCountOnMachineIncorrect")
 		    .detail("MachineTeam", mt.getMachineIDsStr())
-		    .detail("ServerTeamsSize", mt.serverTeams.size())
+		    .detail("ServerTeamsSize", mt.getServerTeams().size())
 		    .detail("CountedServerTeams", num);
 	}
 	return ret;

@@ -30,12 +30,18 @@ struct TCMachineInfo;
 struct TCTeamInfo;
 
 class TCMachineTeamInfo : public ReferenceCounted<TCMachineTeamInfo> {
+	std::vector<Reference<TCTeamInfo>> serverTeams;
+
 public:
 	std::vector<Reference<TCMachineInfo>> machines;
 	std::vector<Standalone<StringRef>> machineIDs;
-	std::vector<Reference<TCTeamInfo>> serverTeams;
 	UID id;
 
+public:
+	UID getID() const;
+	std::vector<Reference<TCTeamInfo>> const& getServerTeams() const;
+	void addServerTeam(Reference<TCTeamInfo> const& team);
+	void removeServerTeam(Reference<TCTeamInfo> const& team);
 	explicit TCMachineTeamInfo(vector<Reference<TCMachineInfo>> const& machines);
 	int size() const;
 	std::string getMachineIDsStr() const;
