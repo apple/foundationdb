@@ -30,23 +30,23 @@ struct TCTeamInfo;
 struct TCMachineInfo;
 
 class TCServerInfo : public ReferenceCounted<TCServerInfo> {
+	Future<Void> tracker;
+
 public:
 	UID id;
 	DDTeamCollection* collection;
 	StorageServerInterface lastKnownInterface;
 	ProcessClass lastKnownClass;
-	vector<Reference<TCTeamInfo>> teams;
+	std::vector<Reference<TCTeamInfo>> teams;
 	Reference<TCMachineInfo> machine;
-	Future<Void> tracker;
 	int64_t dataInFlightToServer;
 	ErrorOr<GetStorageMetricsReply> serverMetrics;
 	Promise<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged;
-	Future<std::pair<StorageServerInterface, ProcessClass>> onInterfaceChanged;
 	AsyncTrigger removed;
+	Promise<Void> updated;
 	Promise<Void> wakeUpTracker;
 	bool inDesiredDC;
 	LocalityEntry localityEntry;
-	Promise<Void> updated;
 	AsyncVar<bool> wrongStoreTypeToRemove;
 	AsyncVar<bool> ssVersionTooFarBehind;
 	// A storage server's StoreType does not change.
@@ -57,6 +57,9 @@ public:
 public:
 	TCServerInfo(StorageServerInterface ssi, DDTeamCollection* collection, ProcessClass processClass, bool inDesiredDC,
 	             Reference<LocalitySet> storageServerSet);
+	Future<std::pair<StorageServerInterface, ProcessClass>> onInterfaceChanged() const;
+	void setTracker(Future<Void>&& tracker);
+	void cancelTracker();
 	bool isCorrectStoreType(KeyValueStoreType configStoreType) const;
 	Future<Void> updateServerMetrics();
 	Future<Void> serverMetricsPolling();

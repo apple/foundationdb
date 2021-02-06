@@ -35,7 +35,7 @@ public:
 		state Future<ErrorOr<GetStorageMetricsReply>> metricsRequest =
 		    ssi.getStorageMetrics.tryGetReply(GetStorageMetricsRequest(), TaskPriority::DataDistributionLaunch);
 		state Future<Void> resetRequest = Never();
-		state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged(server->onInterfaceChanged);
+		state Future<std::pair<StorageServerInterface, ProcessClass>> onInterfaceChanged(server->onInterfaceChanged());
 		state Future<Void> serverRemoved(server->removed.onTrigger());
 
 		loop {
@@ -51,9 +51,9 @@ public:
 					metricsRequest = Never();
 					resetRequest = delay(SERVER_KNOBS->METRIC_DELAY, TaskPriority::DataDistributionLaunch);
 				}
-				when(std::pair<StorageServerInterface, ProcessClass> _ssi = wait(interfaceChanged)) {
+				when(std::pair<StorageServerInterface, ProcessClass> _ssi = wait(onInterfaceChanged)) {
 					ssi = _ssi.first;
-					interfaceChanged = server->onInterfaceChanged;
+					onInterfaceChanged = server->onInterfaceChanged();
 					resetRequest = Void();
 				}
 				when(wait(serverRemoved)) { return Void(); }
@@ -113,8 +113,7 @@ public:
 TCServerInfo::TCServerInfo(StorageServerInterface ssi, DDTeamCollection* collection, ProcessClass processClass,
                            bool inDesiredDC, Reference<LocalitySet> storageServerSet)
   : id(ssi.id()), collection(collection), lastKnownInterface(ssi), lastKnownClass(processClass),
-    dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()), inDesiredDC(inDesiredDC),
-    storeType(KeyValueStoreType::END) {
+    dataInFlightToServer(0), inDesiredDC(inDesiredDC), storeType(KeyValueStoreType::END) {
 	localityEntry = ((LocalityMap<UID>*)storageServerSet.getPtr())->add(ssi.locality, &id);
 }
 
@@ -136,4 +135,16 @@ TCServerInfo::~TCServerInfo() {
 
 Future<Void> TCServerInfo::serverMetricsPolling() {
 	return TCServerInfoImpl::serverMetricsPolling(this);
+}
+
+Future<std::pair<StorageServerInterface, ProcessClass>> TCServerInfo::onInterfaceChanged() const {
+	return interfaceChanged.getFuture();
+}
+
+void TCServerInfo::setTracker(Future<Void>&& tracker) {
+	tracker = std::move(tracker);
+}
+
+void TCServerInfo::cancelTracker() {
+	tracker.cancel();
 }

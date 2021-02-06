@@ -1282,9 +1282,6 @@ public:
 									    serverInfo->interfaceChanged;
 									serverInfo->interfaceChanged =
 									    Promise<std::pair<StorageServerInterface, ProcessClass>>();
-									serverInfo->onInterfaceChanged =
-									    Future<std::pair<StorageServerInterface, ProcessClass>>(
-									        serverInfo->interfaceChanged.getFuture());
 									currentInterfaceChanged.send(std::make_pair(ssi, processClass));
 								}
 							} else if (!self->recruitingIds.count(ssi.id())) {
@@ -1360,17 +1357,6 @@ public:
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
-		}
-	}
-
-	ACTOR static Future<Void> serverMetricsPolling(TCServerInfo* server) {
-		state double lastUpdate = now();
-		loop {
-			wait(server->updateServerMetrics());
-			wait(delayUntil(lastUpdate + SERVER_KNOBS->STORAGE_METRICS_POLLING_DELAY +
-			                    SERVER_KNOBS->STORAGE_METRICS_RANDOM_DELAY * deterministicRandom()->random01(),
-			                TaskPriority::DataDistributionLaunch));
-			lastUpdate = now();
 		}
 	}
 
@@ -1520,9 +1506,9 @@ public:
 		state Future<Void> failureTracker;
 		state ServerStatus status(false, false, server->lastKnownInterface.locality);
 		state bool lastIsUnhealthy = false;
-		state Future<Void> metricsTracker = serverMetricsPolling(server);
+		state Future<Void> metricsTracker = server->serverMetricsPolling();
 
-		state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged = server->onInterfaceChanged;
+		state Future<std::pair<StorageServerInterface, ProcessClass>> onInterfaceChanged = server->onInterfaceChanged();
 
 		state Future<Void> storeTypeTracker = keyValueStoreTypeTracker(self, server);
 		state bool hasWrongDC = !self->isCorrectDC(server);
@@ -1695,7 +1681,7 @@ public:
 						self->removedServers.send(server->id);
 						return Void();
 					}
-					when(std::pair<StorageServerInterface, ProcessClass> newInterface = wait(interfaceChanged)) {
+					when(std::pair<StorageServerInterface, ProcessClass> newInterface = wait(onInterfaceChanged)) {
 						bool restartRecruiting =
 						    newInterface.first.waitFailure.getEndpoint().getPrimaryAddress() !=
 						    server->lastKnownInterface.waitFailure.getEndpoint().getPrimaryAddress();
@@ -1795,7 +1781,7 @@ public:
 							self->doBuildTeams = true;
 						}
 
-						interfaceChanged = server->onInterfaceChanged;
+						onInterfaceChanged = server->onInterfaceChanged();
 						// Old failureTracker for the old interface will be actorCancelled since the handler of the old
 						// actor now points to the new failure monitor actor.
 						status = ServerStatus(status.isFailed, status.isUndesired, server->lastKnownInterface.locality);
@@ -2520,7 +2506,7 @@ DDTeamCollection::~DDTeamCollection() {
 	// stopped
 	//  before the server_status map to which it has a pointer, is destroyed.
 	for (auto& [_, info] : server_info) {
-		info->tracker.cancel();
+		info->cancelTracker();
 		info->collection = nullptr;
 	}
 	// TraceEvent("DDTeamCollectionDestructed", distributorId)
@@ -3468,7 +3454,7 @@ void DDTeamCollection::addServer(StorageServerInterface newServer, ProcessClass 
 	// Establish the relation between server and machine
 	checkAndCreateMachine(r);
 
-	r->tracker = storageServerTracker(cx, r.getPtr(), errorOut, addedVersion, ddEnabledState);
+	r->setTracker(storageServerTracker(cx, r.getPtr(), errorOut, addedVersion, ddEnabledState));
 	doBuildTeams = true; // Adding a new server triggers to build new teams
 	restartTeamBuilder.trigger();
 }
