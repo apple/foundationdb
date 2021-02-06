@@ -73,9 +73,9 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	void traceMachineTeamInfo() const;
 	void traceLocalityArrayIndexName() const;
 	void traceMachineLocalityMap() const;
-	int numExistingSSOnAddr(const AddressExclusion& addr);
+	int numExistingSSOnAddr(const AddressExclusion& addr) const;
 	Future<Void> trackExcludedServers();
-	bool teamContainsFailedServer(Reference<TCTeamInfo> team);
+	bool teamContainsFailedServer(Reference<TCTeamInfo> team) const;
 	Future<Void> waitForAllDataRemoved(Database cx, UID serverID, Version addedVersion);
 	bool isCorrectDC(TCServerInfo const* server) const;
 	Future<Void> updateReplicasKey(Optional<Key> dcId);

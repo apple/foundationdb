@@ -580,7 +580,7 @@ public:
 			return destroyOnCancel( this, k, item.change.getFuture() );
 		return item.change.getFuture();
 	}
-	std::vector<K> getKeys() {
+	std::vector<K> getKeys() const {
 		std::vector<K> keys;
 		keys.reserve(items.size());
 		for(auto i = items.begin(); i != items.end(); ++i)

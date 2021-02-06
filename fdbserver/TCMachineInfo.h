@@ -35,6 +35,5 @@ public:
 	LocalityEntry localityEntry;
 
 	explicit TCMachineInfo(Reference<TCServerInfo> server, const LocalityEntry& entry);
-	~TCMachineInfo();
 	std::string getServersIDStr() const;
 };

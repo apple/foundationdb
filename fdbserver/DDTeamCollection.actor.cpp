@@ -2883,7 +2883,7 @@ Future<Void> DDTeamCollection::zeroServerLeftLogger_impl(Reference<TCTeamInfo> t
 	return DDTeamCollectionImpl::zeroServerLeftLogger_impl(this, team);
 }
 
-bool DDTeamCollection::teamContainsFailedServer(Reference<TCTeamInfo> team) {
+bool DDTeamCollection::teamContainsFailedServer(Reference<TCTeamInfo> team) const {
 	auto ssis = team->getLastKnownServerInterfaces();
 	for (const auto& ssi : ssis) {
 		AddressExclusion addr(ssi.address().ip, ssi.address().port);
@@ -3065,7 +3065,7 @@ Future<Void> DDTeamCollection::buildTeams() {
 	return DDTeamCollectionImpl::buildTeams(this);
 }
 
-int DDTeamCollection::numExistingSSOnAddr(const AddressExclusion& addr) {
+int DDTeamCollection::numExistingSSOnAddr(const AddressExclusion& addr) const {
 	int numExistingSS = 0;
 	for (auto& server : server_info) {
 		const NetworkAddress& netAddr = server.second->lastKnownInterface.stableAddress();

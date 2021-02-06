@@ -43,5 +43,3 @@ std::string TCMachineInfo::getServersIDStr() const {
 
 	return std::move(ss).str();
 }
-
-TCMachineInfo::~TCMachineInfo() = default;
