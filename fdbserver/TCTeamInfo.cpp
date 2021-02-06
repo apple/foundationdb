@@ -210,3 +210,11 @@ int64_t TCTeamInfo::getLoadAverage() const {
 
 	return added == 0 ? 0 : bytesSum / added;
 }
+
+void TCTeamInfo::setTracker(Future<Void> &&tracker) {
+	this->tracker = std::move(tracker);
+}
+
+void TCTeamInfo::cancelTracker() {
+	tracker.cancel();
+}

@@ -38,11 +38,10 @@ class TCTeamInfo final : public ReferenceCounted<TCTeamInfo>, public IDataDistri
 	bool wrongConfiguration; // True if any of the servers in the team have the wrong configuration
 	int priority;
 	UID id;
-
-public:
-	Reference<TCMachineTeamInfo> machineTeam;
 	Future<Void> tracker;
 
+public:
+	Reference<TCMachineTeamInfo> machineTeam; // only needed for sanity check?
 	explicit TCTeamInfo(vector<Reference<TCServerInfo>> const& servers);
 	std::string getTeamID() const override;
 
@@ -53,6 +52,8 @@ public:
 
 	std::string getServerIDsStr() const;
 
+	void setTracker(Future<Void> &&tracker);
+	void cancelTracker();
 	void addDataInFlightToTeam(int64_t delta) override;
 	int64_t getDataInFlightToTeam() const override;
 	int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const override;

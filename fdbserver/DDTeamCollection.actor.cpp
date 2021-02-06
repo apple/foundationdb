@@ -627,8 +627,8 @@ public:
 		wait(waitUntilHealthy(self));
 		wait(self->addSubsetComplete.getFuture());
 		TraceEvent("DDRemovingBadServerTeams", self->distributorId).detail("Primary", self->primary);
-		for (auto it : self->badTeams) {
-			it->tracker.cancel();
+		for (auto &team : self->badTeams) {
+			team->cancelTracker();
 		}
 		self->badTeams.clear();
 		return Void();
@@ -2504,14 +2504,14 @@ DDTeamCollection::~DDTeamCollection() {
 	// held by the actor It also ensures that the trackers are done fiddling with healthyTeamCount before we free
 	// this
 	for (auto& team : teams) {
-		team->tracker.cancel();
+		team->cancelTracker();
 	}
 	// The commented TraceEvent log is useful in detecting what is running during the destruction
 	// TraceEvent("DDTeamCollectionDestructed", distributorId)
 	//     .detail("Primary", primary)
 	//     .detail("TeamTrackerDestroyed", teams.size());
 	for (auto& badTeam : badTeams) {
-		badTeam->tracker.cancel();
+		badTeam->cancelTracker();
 	}
 	// TraceEvent("DDTeamCollectionDestructed", distributorId)
 	//     .detail("Primary", primary)
@@ -2729,7 +2729,7 @@ void DDTeamCollection::addTeam(const vector<Reference<TCServerInfo>>& newTeamSer
 	bool badTeam =
 	    redundantTeam || teamInfo->size() != configuration.storageTeamSize || !satisfiesPolicy(teamInfo->getServers());
 
-	teamInfo->tracker = teamTracker(teamInfo, badTeam, redundantTeam);
+	teamInfo->setTracker(teamTracker(teamInfo, badTeam, redundantTeam));
 	// ASSERT( teamInfo->serverIDs.size() > 0 ); //team can be empty at DB initialization
 	if (badTeam) {
 		badTeams.push_back(teamInfo);
@@ -2988,7 +2988,7 @@ void DDTeamCollection::removeServer(UID removedServer) {
 
 	for (int t = 0; t < badTeams.size(); t++) {
 		if (std::count(badTeams[t]->getServerIDs().begin(), badTeams[t]->getServerIDs().end(), removedServer)) {
-			badTeams[t]->tracker.cancel();
+			badTeams[t]->cancelTracker();
 			badTeams[t--] = badTeams.back();
 			badTeams.pop_back();
 		}
@@ -3573,7 +3573,7 @@ bool DDTeamCollection::removeTeam(Reference<TCTeamInfo> team) {
 	}
 
 	ASSERT_WE_THINK(foundInMachineTeam);
-	team->tracker.cancel();
+	team->cancelTracker();
 	if (g_network->isSimulated()) {
 		// Update server team information for consistency check in simulation
 		traceTeamCollectionInfo();
