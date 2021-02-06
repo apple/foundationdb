@@ -2020,9 +2020,11 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 		data.locality.set(LiteralStringRef("machineid"), StringRef(machineId));
 		data.address.ip = IPAddress(i);
 
-		g_simulator.newProcess(format("TestProcess%d", i).c_str(), data.address.ip, data.address.port, false, 1,
-		                       data.locality, ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource),
-		                       "", "");
+		if(g_network->isSimulated()) {
+			g_simulator.newProcess(format("TestProcess%d", i).c_str(), data.address.ip, data.address.port, false, 1,
+			                       data.locality, ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource),
+			                       "", "");
+		}
 
 		workers.push_back(data);
 	}
