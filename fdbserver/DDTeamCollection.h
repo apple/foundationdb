@@ -66,8 +66,6 @@ struct ServerStatus {
 using ServerStatusMap = AsyncMap<UID, ServerStatus>;
 
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
-	PromiseStream<Future<Void>> addActor;
-
 	void traceConfigInfo() const;
 	void traceServerInfo() const;
 	void traceServerTeamInfo() const;
@@ -159,12 +157,10 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	friend class DDTeamCollectionImpl;
 	enum class Status { NONE, EXCLUDED, FAILED };
-
-public: // TODO: Make a lot of this private
+	//
 	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
 	// addActor is used to create the actorCollection when the dataDistributionTeamCollection is created
 	Database cx;
-	UID distributorId;
 	DatabaseConfiguration configuration;
 
 	bool doBuildTeams;
@@ -175,19 +171,15 @@ public: // TODO: Make a lot of this private
 	MoveKeysLock lock;
 	PromiseStream<RelocateShard> output;
 	std::vector<UID> allServers;
-	ServerStatusMap server_status;
 	int64_t unhealthyServers;
 	std::map<int, int> priority_teams;
-	std::map<UID, Reference<TCServerInfo>> server_info;
 	std::map<Key, int> lagging_zones; // zone to number of storage servers lagging
 	AsyncVar<bool> disableFailingLaggingServers;
 
 	// machine_info has all machines info; key must be unique across processes on the same machine
 	std::map<Standalone<StringRef>, Reference<TCMachineInfo>> machine_info;
-	std::vector<Reference<TCMachineTeamInfo>> machineTeams; // all machine teams
 	LocalityMap<UID> machineLocalityMap; // locality info of machines
 
-	std::vector<Reference<TCTeamInfo>> teams;
 	std::vector<Reference<TCTeamInfo>> badTeams;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	PromiseStream<UID> removedServers;
@@ -225,10 +217,8 @@ public: // TODO: Make a lot of this private
 
 	Future<Void> wrongStoreTypeRemover;
 
-	Reference<LocalitySet> storageServerSet;
 	std::vector<LocalityEntry> forcedEntries, resultEntries;
 
-	std::vector<DDTeamCollection*> teamCollections;
 	AsyncVar<Optional<Key>> healthyZone;
 	Future<bool> clearHealthyZoneFuture;
 	double medianAvailableSpace;
@@ -241,7 +231,25 @@ public: // TODO: Make a lot of this private
 	AsyncTrigger printDetailedTeamsInfo;
 	PromiseStream<GetMetricsRequest> getShardMetrics;
 
+	PromiseStream<Future<Void>> addActor;
+
+public: // testing only
+	std::map<UID, Reference<TCServerInfo>> server_info;
+	std::vector<Reference<TCMachineTeamInfo>> machineTeams; // all machine teams
+	ServerStatusMap server_status;
+	std::vector<Reference<TCTeamInfo>> teams;
+
+	int addTeamsBestOf(int teamsToBuild, int desiredTeams, int maxTeams);
+	bool sanityCheckTeams() const;
+	Reference<TCMachineInfo> checkAndCreateMachine(Reference<TCServerInfo> server);
+	int addBestMachineTeams(int machineTeamsToBuild);
+	void addTeam(std::set<UID> const& team, bool isInitialTeam);
+	Reference<LocalitySet> storageServerSet;
+
 public:
+	UID distributorId;
+	std::vector<DDTeamCollection*> teamCollections;
+
 	DDTeamCollection(Database const& cx, UID distributorId, MoveKeysLock const& lock,
 	                 PromiseStream<RelocateShard> const& output,
 	                 Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
@@ -250,13 +258,6 @@ public:
 	                 Reference<AsyncVar<bool>> zeroHealthyTeams, bool primary,
 	                 Reference<AsyncVar<bool>> processingUnhealthy, PromiseStream<GetMetricsRequest> getShardMetrics);
 	~DDTeamCollection();
-
-	// Only public for testing
-	int addTeamsBestOf(int teamsToBuild, int desiredTeams, int maxTeams);
-	bool sanityCheckTeams() const;
-	Reference<TCMachineInfo> checkAndCreateMachine(Reference<TCServerInfo> server);
-	int addBestMachineTeams(int machineTeamsToBuild);
-	void addTeam(std::set<UID> const& team, bool isInitialTeam);
 
 	void traceAllInfo(bool shouldPrint = false) const;
 	int constructMachinesFromServers();
