@@ -229,6 +229,8 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	AsyncTrigger printDetailedTeamsInfo;
 	PromiseStream<GetMetricsRequest> getShardMetrics;
 
+	UID distributorId;
+
 	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
 	// addActor is used to create the actorCollection when the dataDistributionTeamCollection is created
 	PromiseStream<Future<Void>> addActor;
@@ -247,7 +249,6 @@ public: // testing only
 	Reference<LocalitySet> storageServerSet;
 
 public:
-	UID distributorId;
 	std::vector<DDTeamCollection*> teamCollections;
 
 	DDTeamCollection(Database const& cx, UID distributorId, MoveKeysLock const& lock,
@@ -259,6 +260,7 @@ public:
 	                 Reference<AsyncVar<bool>> processingUnhealthy, PromiseStream<GetMetricsRequest> getShardMetrics);
 	~DDTeamCollection();
 
+	UID getDistributorId() const;
 	void traceAllInfo(bool shouldPrint = false) const;
 	int constructMachinesFromServers();
 	void addLaggingStorageServer(Key zoneId);

@@ -4113,3 +4113,7 @@ Future<Void> DDTeamCollection::dataDistributionTeamCollection(Reference<DDTeamCo
                                                               const DDEnabledState* ddEnabledState) {
 	return DDTeamCollectionImpl::dataDistributionTeamCollection(teamCollection, initData, tci, db, ddEnabledState);
 }
+
+UID DDTeamCollection::getDistributorId() const {
+	return distributorId;
+}
