@@ -157,9 +157,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	friend class DDTeamCollectionImpl;
 	enum class Status { NONE, EXCLUDED, FAILED };
-	//
-	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
-	// addActor is used to create the actorCollection when the dataDistributionTeamCollection is created
+
 	Database cx;
 	DatabaseConfiguration configuration;
 
@@ -231,6 +229,8 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	AsyncTrigger printDetailedTeamsInfo;
 	PromiseStream<GetMetricsRequest> getShardMetrics;
 
+	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
+	// addActor is used to create the actorCollection when the dataDistributionTeamCollection is created
 	PromiseStream<Future<Void>> addActor;
 
 public: // testing only
