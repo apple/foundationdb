@@ -990,7 +990,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 			if(g_network->isSimulated()) {
 				for(int i = 0; i < (desiredCoordinators.size()/2)+1; i++) {
 					auto process = g_simulator.getProcessByAddress(desiredCoordinators[i]);
-					ASSERT(process->isReliable());
+					ASSERT(process->isReliable() || process->rebooting);
 
 					g_simulator.protectedAddresses.insert(process->addresses.address);
 					if(process->addresses.secondaryAddress.present()) {
