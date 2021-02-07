@@ -32,16 +32,20 @@ struct TCMachineTeamInfo;
 class TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
 	Standalone<StringRef> machineID;
 	TCServerInfo::ServerSet serversOnMachine;
+	std::vector<Reference<TCMachineTeamInfo>> machineTeams; // SOMEDAY: split good and bad machine teams.
 
 public:
-	std::vector<Reference<TCMachineTeamInfo>> machineTeams; // SOMEDAY: split good and bad machine teams.
 	LocalityEntry localityEntry;
 
 	explicit TCMachineInfo(Reference<TCServerInfo> server, const LocalityEntry& entry);
 	Standalone<StringRef> getID() const;
 	std::string getServersIDStr() const;
 	TCServerInfo::ServerSet const& getServersOnMachine() const;
+	std::vector<Reference<TCMachineTeamInfo>> const& getMachineTeams() const;
+	bool removeMachineTeam(Reference<TCMachineTeamInfo> const& machineTeam);
 	Reference<TCServerInfo> getRepresentativeServer() const;
 	void addServer(Reference<TCServerInfo> const& server);
 	void removeServer(Reference<TCServerInfo> const& server);
+	void addMachineTeam(Reference<TCMachineTeamInfo> const& machineTeam);
+	void clearMachineTeams();
 };

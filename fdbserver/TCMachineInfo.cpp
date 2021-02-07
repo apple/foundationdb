@@ -62,3 +62,24 @@ void TCMachineInfo::addServer(Reference<TCServerInfo> const& server) {
 void TCMachineInfo::removeServer(Reference<TCServerInfo> const& server) {
 	serversOnMachine.erase(server);
 }
+
+std::vector<Reference<TCMachineTeamInfo>> const& TCMachineInfo::getMachineTeams() const {
+	return machineTeams;
+}
+
+bool TCMachineInfo::removeMachineTeam(Reference<TCMachineTeamInfo> const& machineTeam) {
+	auto it = std::remove(machineTeams.begin(), machineTeams.end(), machineTeam);
+	if (it == machineTeams.end()) {
+		return false;
+	}
+	machineTeams.erase(it, machineTeams.end());
+	return true;
+}
+
+void TCMachineInfo::addMachineTeam(Reference<TCMachineTeamInfo> const& machineTeam) {
+	machineTeams.push_back(machineTeam);
+}
+
+void TCMachineInfo::clearMachineTeams() {
+	machineTeams.clear();
+}
