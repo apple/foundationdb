@@ -28,9 +28,7 @@ TLSPolicy::~TLSPolicy() {}
 namespace TLS {
 
 void DisableOpenSSLAtExitHandler() {
-#ifdef TLS_DISABLED
-	return;
-#else
+#ifdef HAVE_OPENSSL_INIT_NO_ATEXIT
 	static bool once = false;
 	if (!once) {
 		once = true;
@@ -43,9 +41,7 @@ void DisableOpenSSLAtExitHandler() {
 }
 
 void DestroyOpenSSLGlobalState() {
-#ifdef TLS_DISABLED
-	return;
-#else
+#ifdef HAVE_OPENSSL_INIT_NO_ATEXIT
 	OPENSSL_cleanup();
 #endif
 }
