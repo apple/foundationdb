@@ -152,3 +152,20 @@ void TCServerInfo::cancelTracker() {
 UID const& TCServerInfo::getID() const {
 	return id;
 }
+
+std::vector<Reference<TCTeamInfo>> const& TCServerInfo::getTeams() const {
+	return teams;
+}
+
+void TCServerInfo::addTeam(Reference<TCTeamInfo> const& team) {
+	teams.push_back(team);
+}
+
+bool TCServerInfo::removeTeam(Reference<TCTeamInfo> const& team) {
+	auto it = std::remove(teams.begin(), teams.end(), team);
+	if (it == teams.end()) {
+		return false;
+	}
+	teams.erase(it, teams.end());
+	return true;
+}

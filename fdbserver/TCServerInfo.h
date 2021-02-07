@@ -32,12 +32,12 @@ struct TCMachineInfo;
 class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	Future<Void> tracker;
 	UID id;
+	std::vector<Reference<TCTeamInfo>> teams;
 
 public:
 	DDTeamCollection* collection;
 	StorageServerInterface lastKnownInterface;
 	ProcessClass lastKnownClass;
-	std::vector<Reference<TCTeamInfo>> teams;
 	Reference<TCMachineInfo> machine;
 	int64_t dataInFlightToServer;
 	ErrorOr<GetStorageMetricsReply> serverMetrics;
@@ -59,6 +59,9 @@ public:
 	             Reference<LocalitySet> storageServerSet);
 	UID const& getID() const;
 	Future<std::pair<StorageServerInterface, ProcessClass>> onInterfaceChanged() const;
+	std::vector<Reference<TCTeamInfo>> const& getTeams() const;
+	bool removeTeam(Reference<TCTeamInfo> const& team);
+	void addTeam(Reference<TCTeamInfo> const& team);
 	void setTracker(Future<Void>&& tracker);
 	void cancelTracker();
 	bool isCorrectStoreType(KeyValueStoreType configStoreType) const;
