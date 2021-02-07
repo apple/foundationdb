@@ -22,8 +22,6 @@
 #include "fdbserver/TCMachineTeamInfo.h"
 #include "fdbserver/TCServerInfo.h"
 
-#include <sstream>
-
 TCMachineInfo::TCMachineInfo(Reference<TCServerInfo> server, const LocalityEntry& entry) : localityEntry(entry) {
 	ASSERT(serversOnMachine.empty());
 	serversOnMachine.push_back(server);
@@ -34,14 +32,15 @@ TCMachineInfo::TCMachineInfo(Reference<TCServerInfo> server, const LocalityEntry
 }
 
 std::string TCMachineInfo::getServersIDStr() const {
-	std::stringstream ss;
 	if (serversOnMachine.empty()) return "[unset]";
 
+	std::string result;
+
 	for (const auto& server : serversOnMachine) {
-		ss << server->getID().toString() << " ";
+		result += server->getID().toString() + " ";
 	}
 
-	return std::move(ss).str();
+	return result;
 }
 
 Standalone<StringRef> TCMachineInfo::getID() const {

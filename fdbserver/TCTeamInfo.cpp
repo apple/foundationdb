@@ -27,8 +27,8 @@ TCTeamInfo::TCTeamInfo(vector<Reference<TCServerInfo>> const& servers)
 		TraceEvent(SevInfo, "ConstructTCTeamFromEmptyServers");
 	}
 	serverIDs.reserve(servers.size());
-	for (int i = 0; i < servers.size(); i++) {
-		serverIDs.push_back(servers[i]->getID());
+	for (const auto& server : servers) {
+		serverIDs.push_back(server->getID());
 	}
 }
 
@@ -58,15 +58,15 @@ const vector<Reference<TCServerInfo>>& TCTeamInfo::getServers() const {
 }
 
 std::string TCTeamInfo::getServerIDsStr() const {
-	std::stringstream ss;
+	std::string result;
 
 	if (serverIDs.empty()) return "[unset]";
 
 	for (const auto& id : serverIDs) {
-		ss << id.toString() << " ";
+		result += id.toString() + " ";
 	}
 
-	return std::move(ss).str();
+	return result;
 }
 
 void TCTeamInfo::addDataInFlightToTeam(int64_t delta) {
@@ -200,11 +200,12 @@ void TCTeamInfo::addServers(const vector<UID>& servers) {
 int64_t TCTeamInfo::getLoadAverage() const {
 	int64_t bytesSum = 0;
 	int added = 0;
-	for (int i = 0; i < servers.size(); i++)
-		if (servers[i]->serverMetrics.present()) {
+	for (const auto& server : servers) {
+		if (server->serverMetrics.present()) {
 			added++;
-			bytesSum += servers[i]->serverMetrics.get().load.bytes;
+			bytesSum += server->serverMetrics.get().load.bytes;
 		}
+	}
 
 	if (added < servers.size()) bytesSum *= 2;
 

@@ -692,7 +692,7 @@ public:
 					ASSERT(team->machineTeam->machineIDs == mt->machineIDs); // Sanity check
 
 					// Check if a server will have 0 team after the team is removed
-					for (auto& s : team->getServers()) {
+					for (const auto& s : team->getServers()) {
 						if (s->getTeams().size() == 0) {
 							TraceEvent(SevError, "MachineTeamRemoverTooAggressive", self->distributorId)
 							    .detail("Server", s->getID())
