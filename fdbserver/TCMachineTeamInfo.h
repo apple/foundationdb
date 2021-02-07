@@ -32,8 +32,6 @@ struct TCTeamInfo;
 class TCMachineTeamInfo : public ReferenceCounted<TCMachineTeamInfo> {
 	std::vector<Reference<TCTeamInfo>> serverTeams;
 	UID id;
-
-public:
 	std::vector<Reference<TCMachineInfo>> machines;
 	std::vector<Standalone<StringRef>> machineIDs;
 
@@ -46,4 +44,6 @@ public:
 	int size() const;
 	std::string getMachineIDsStr() const;
 	bool operator==(const TCMachineTeamInfo& rhs) const;
+	std::vector<Reference<TCMachineInfo>> const &getMachines() const;
+	std::vector<Standalone<StringRef>> const &getMachineIDs() const;
 };

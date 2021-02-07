@@ -689,7 +689,7 @@ public:
 				int teamIndex = 0;
 				for (teamIndex = 0; teamIndex < mt->getServerTeams().size(); ++teamIndex) {
 					team = mt->getServerTeams()[teamIndex];
-					ASSERT(team->machineTeam->machineIDs == mt->machineIDs); // Sanity check
+					ASSERT(team->machineTeam->getMachineIDs() == mt->getMachineIDs()); // Sanity check
 
 					// Check if a server will have 0 team after the team is removed
 					for (const auto& s : team->getServers()) {
@@ -2660,7 +2660,7 @@ int DDTeamCollection::overlappingMachineMembers(vector<Standalone<StringRef>>& t
 	int maxMatchingServers = 0;
 	Standalone<StringRef>& serverID = team[0];
 	for (auto& usedTeam : machine_info.at(serverID)->machineTeams) {
-		auto used = usedTeam->machineIDs;
+		auto used = usedTeam->getMachineIDs();
 		int teamIdx = 0;
 		int usedIdx = 0;
 		int matchingServers = 0;
@@ -2692,7 +2692,7 @@ Reference<TCMachineTeamInfo> DDTeamCollection::findMachineTeam(vector<Standalone
 
 	Standalone<StringRef> machineID = machineIDs[0];
 	for (auto& machineTeam : machine_info.at(machineID)->machineTeams) {
-		if (machineTeam->machineIDs == machineIDs) {
+		if (machineTeam->getMachineIDs() == machineIDs) {
 			return machineTeam;
 		}
 	}
@@ -3286,7 +3286,7 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 			// Step 3: Randomly pick 1 server from each machine in the chosen machine team to form a server team
 			vector<UID> serverTeam;
 			int chosenServerCount = 0;
-			for (auto& machine : chosenMachineTeam->machines) {
+			for (const auto& machine : chosenMachineTeam->getMachines()) {
 				UID serverID;
 				if (machine == chosenServer->machine) {
 					serverID = chosenServer->getID();
@@ -3541,7 +3541,7 @@ void DDTeamCollection::removeMachine(Reference<TCMachineInfo> removedMachineInfo
 	// Find machines that share teams with the removed machine
 	std::set<Standalone<StringRef>> machinesWithAjoiningTeams;
 	for (auto& machineTeam : removedMachineInfo->machineTeams) {
-		machinesWithAjoiningTeams.insert(machineTeam->machineIDs.begin(), machineTeam->machineIDs.end());
+		machinesWithAjoiningTeams.insert(machineTeam->getMachineIDs().begin(), machineTeam->getMachineIDs().end());
 	}
 	machinesWithAjoiningTeams.erase(removedMachineInfo->getID());
 	// For each machine in a machine team with the removed machine,
@@ -3550,7 +3550,7 @@ void DDTeamCollection::removeMachine(Reference<TCMachineInfo> removedMachineInfo
 		auto& machineTeams = machine_info[*it]->machineTeams;
 		for (int t = 0; t < machineTeams.size(); t++) {
 			auto& machineTeam = machineTeams[t];
-			if (std::count(machineTeam->machineIDs.begin(), machineTeam->machineIDs.end(),
+			if (std::count(machineTeam->getMachineIDs().begin(), machineTeam->getMachineIDs().end(),
 			               removedMachineInfo->getID())) {
 				machineTeams[t--] = machineTeams.back();
 				machineTeams.pop_back();
@@ -3562,7 +3562,7 @@ void DDTeamCollection::removeMachine(Reference<TCMachineInfo> removedMachineInfo
 	// Remove global machine team that includes removedMachineInfo
 	for (int t = 0; t < machineTeams.size(); t++) {
 		auto& machineTeam = machineTeams[t];
-		if (std::count(machineTeam->machineIDs.begin(), machineTeam->machineIDs.end(), removedMachineInfo->getID())) {
+		if (std::count(machineTeam->getMachineIDs().begin(), machineTeam->getMachineIDs().end(), removedMachineInfo->getID())) {
 			removeMachineTeam(machineTeam);
 			// removeMachineTeam will swap the last team in machineTeams vector into [t];
 			// t-- to avoid skipping the element
@@ -3592,8 +3592,7 @@ bool DDTeamCollection::isOnSameMachineTeam(const TCTeamInfo& team) const {
 	int numExistance = 0;
 	for (const auto& server : team.getServers()) {
 		for (const auto& candidateMachineTeam : server->machine->machineTeams) {
-			std::sort(candidateMachineTeam->machineIDs.begin(), candidateMachineTeam->machineIDs.end());
-			if (machineIDs == candidateMachineTeam->machineIDs) {
+			if (machineIDs == candidateMachineTeam->getMachineIDs()) {
 				numExistance++;
 				break;
 			}
@@ -3623,7 +3622,7 @@ bool DDTeamCollection::isMachineTeamHealthy(TCMachineTeamInfo const& machineTeam
 	// A healthy machine team should have the desired number of machines
 	if (machineTeam.size() != configuration.storageTeamSize) return false;
 
-	for (const auto& machine : machineTeam.machines) {
+	for (const auto& machine : machineTeam.getMachines()) {
 		if (isMachineHealthy(machine.getPtr())) {
 			healthyNum++;
 		}
@@ -3854,7 +3853,7 @@ bool DDTeamCollection::removeMachineTeam(Reference<TCMachineTeamInfo> targetMT) 
 	bool foundMachineTeam = false;
 	for (int i = 0; i < machineTeams.size(); i++) {
 		Reference<TCMachineTeamInfo> mt = machineTeams[i];
-		if (mt->machineIDs == targetMT->machineIDs) {
+		if (mt->getMachineIDs() == targetMT->getMachineIDs()) {
 			machineTeams[i--] = machineTeams.back();
 			machineTeams.pop_back();
 			foundMachineTeam = true;
@@ -3862,9 +3861,9 @@ bool DDTeamCollection::removeMachineTeam(Reference<TCMachineTeamInfo> targetMT) 
 		}
 	}
 	// Remove machine team on each machine
-	for (auto& machine : targetMT->machines) {
+	for (const auto& machine : targetMT->getMachines()) {
 		for (int i = 0; i < machine->machineTeams.size(); ++i) {
-			if (machine->machineTeams[i]->machineIDs == targetMT->machineIDs) {
+			if (machine->machineTeams[i]->getMachineIDs() == targetMT->getMachineIDs()) {
 				machine->machineTeams[i--] = machine->machineTeams.back();
 				machine->machineTeams.pop_back();
 				break; // The machineTeams on a machine should never duplicate
@@ -4000,7 +3999,7 @@ std::pair<Reference<TCMachineTeamInfo>, int> DDTeamCollection::getMachineTeamWit
 		// The representative team number for the machine team mt is
 		// the minimum number of machine teams of a machine in the team mt
 		int representNumMachineTeams = std::numeric_limits<int>::max();
-		for (auto& m : mt->machines) {
+		for (const auto& m : mt->getMachines()) {
 			representNumMachineTeams = std::min<int>(representNumMachineTeams, m->machineTeams.size());
 		}
 		if (representNumMachineTeams > targetMachineTeamNumPerMachine &&
@@ -4018,7 +4017,7 @@ bool DDTeamCollection::isServerTeamCountCorrect(TCMachineTeamInfo const& mt) con
 	int num = 0;
 	bool ret = true;
 	for (auto& team : teams) {
-		if (team->machineTeam->machineIDs == mt.machineIDs) {
+		if (team->machineTeam->getMachineIDs() == mt.getMachineIDs()) {
 			++num;
 		}
 	}

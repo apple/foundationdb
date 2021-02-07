@@ -74,3 +74,11 @@ void TCMachineTeamInfo::removeServerTeam(Reference<TCTeamInfo> const& team) {
 UID TCMachineTeamInfo::getID() const {
 	return id;
 }
+
+std::vector<Reference<TCMachineInfo>> const &TCMachineTeamInfo::getMachines() const {
+	return machines;
+}
+
+std::vector<Standalone<StringRef>> const &TCMachineTeamInfo::getMachineIDs() const {
+	return machineIDs;
+}
