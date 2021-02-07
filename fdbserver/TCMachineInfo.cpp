@@ -24,7 +24,7 @@
 
 TCMachineInfo::TCMachineInfo(Reference<TCServerInfo> server, const LocalityEntry& entry) : localityEntry(entry) {
 	ASSERT(serversOnMachine.empty());
-	serversOnMachine.push_back(server);
+	serversOnMachine.insert(server);
 
 	LocalityData& locality = server->lastKnownInterface.locality;
 	ASSERT(locality.zoneId().present());
@@ -45,4 +45,20 @@ std::string TCMachineInfo::getServersIDStr() const {
 
 Standalone<StringRef> TCMachineInfo::getID() const {
 	return machineID;
+}
+
+TCMachineInfo::ServerSet const& TCMachineInfo::getServersOnMachine() const {
+	return serversOnMachine;
+}
+
+Reference<TCServerInfo> TCMachineInfo::getRepresentativeServer() const {
+	return *serversOnMachine.begin();
+}
+
+void TCMachineInfo::addServer(Reference<TCServerInfo> const& server) {
+	serversOnMachine.insert(server);
+}
+
+void TCMachineInfo::removeServer(Reference<TCServerInfo> const& server) {
+	serversOnMachine.erase(server);
 }

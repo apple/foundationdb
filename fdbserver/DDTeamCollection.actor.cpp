@@ -236,12 +236,12 @@ public:
 				for (i = 0; i < machine_info.size(); i++) {
 					Reference<TCMachineInfo> _machine = machine->second;
 					if (!_machine.isValid() || machine_info.find(_machine->getID()) == machine_info.end() ||
-					    _machine->serversOnMachine.empty()) {
+					    _machine->getServersOnMachine().empty()) {
 						isMachineHealthy = false;
 					}
 
 					// Healthy machine has at least one healthy server
-					for (auto& server : _machine->serversOnMachine) {
+					for (auto& server : _machine->getServersOnMachine()) {
 						if (!server_status.at(server->getID()).isUnhealthy()) {
 							isMachineHealthy = true;
 						}
@@ -253,7 +253,7 @@ public:
 					    .detail("Healthy", isMachineHealthy)
 					    .detail("MachineID", machine->first.contents().toString())
 					    .detail("MachineTeamOwned", machine->second->machineTeams.size())
-					    .detail("ServerNumOnMachine", machine->second->serversOnMachine.size())
+					    .detail("ServerNumOnMachine", machine->second->getServersOnMachine().size())
 					    .detail("ServersID", machine->second->getServersIDStr())
 					    .detail("Primary", self->primary);
 					machine++;
@@ -1698,8 +1698,8 @@ public:
 							if (machineLocalityChanged) {
 								// First handle the impact on the machine of the server on the old locality
 								Reference<TCMachineInfo> machine = server->machine;
-								ASSERT(machine->serversOnMachine.size() >= 1);
-								if (machine->serversOnMachine.size() == 1) {
+								ASSERT(machine->getServersOnMachine().size() >= 1);
+								if (machine->getServersOnMachine().size() == 1) {
 									// When server is the last server on the machine,
 									// remove the machine and the related machine team
 									self->removeMachine(machine);
@@ -1707,18 +1707,16 @@ public:
 								} else {
 									// we remove the server from the machine, and
 									// update locality entry for the machine and the global machineLocalityMap
-									int serverIndex = -1;
-									for (int i = 0; i < machine->serversOnMachine.size(); ++i) {
-										if (machine->serversOnMachine[i].getPtr() == server) {
-											// NOTE: now the machine's locality is wrong. Need update it whenever uses
-											// it.
-											serverIndex = i;
-											machine->serversOnMachine[i] = machine->serversOnMachine.back();
-											machine->serversOnMachine.pop_back();
-											break; // Invariant: server only appear on the machine once
+									Reference<TCServerInfo> serverToRemove;
+									for (const auto& serverOnMachine : machine->getServersOnMachine()) {
+										if (serverOnMachine.getPtr() == server) {
+											serverToRemove = serverOnMachine;
 										}
 									}
-									ASSERT(serverIndex != -1);
+									ASSERT(serverToRemove.isValid());
+									// NOTE: now the machine's locality is wrong. Need update it whenever uses
+									// it.
+									machine->removeServer(serverToRemove);
 									// NOTE: we do not update the machine's locality map even when
 									// its representative server is changed.
 								}
@@ -2974,19 +2972,13 @@ void DDTeamCollection::removeServer(UID removedServer) {
 
 	// Step: Remove machine info related to removedServer
 	// Remove the server from its machine
-	Reference<TCMachineInfo> removedMachineInfo = removedServerInfo->machine;
-	for (int i = 0; i < removedMachineInfo->serversOnMachine.size(); ++i) {
-		if (removedMachineInfo->serversOnMachine[i] == removedServerInfo) {
-			// Safe even when removedServerInfo is the last one
-			removedMachineInfo->serversOnMachine[i--] = removedMachineInfo->serversOnMachine.back();
-			removedMachineInfo->serversOnMachine.pop_back();
-			break;
-		}
-	}
+	const auto& removedMachineInfo = removedServerInfo->machine;
+	removedMachineInfo->removeServer(removedServerInfo);
+
 	// Remove machine if no server on it
 	// Note: Remove machine (and machine team) after server teams have been removed, because
 	// we remove a machine team only when the server teams on it have been removed
-	if (removedMachineInfo->serversOnMachine.size() == 0) {
+	if (removedMachineInfo->getServersOnMachine().size() == 0) {
 		removeMachine(removedMachineInfo);
 	}
 
@@ -3094,12 +3086,12 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 		int minTeamCount = std::numeric_limits<int>::max();
 		for (auto& machine : machine_info) {
 			// Skip invalid machine whose representative server is not in server_info
-			ASSERT_WE_THINK(server_info.find(machine.second->serversOnMachine[0]->getID()) != server_info.end());
+			ASSERT_WE_THINK(server_info.find(machine.second->getRepresentativeServer()->getID()) != server_info.end());
 			// Skip unhealthy machines
 			if (!isMachineHealthy(machine.second.getPtr())) continue;
 			// Skip machine with incomplete locality
 			if (!isValidLocality(*configuration.storagePolicy,
-			                     machine.second->serversOnMachine[0]->lastKnownInterface.locality)) {
+			                     machine.second->getRepresentativeServer()->lastKnownInterface.locality)) {
 				continue;
 			}
 
@@ -3132,7 +3124,7 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 				forcedAttributes.clear();
 				// Randomly choose 1 least used machine
 				Reference<TCMachineInfo> tcMachineInfo = deterministicRandom()->randomChoice(leastUsedMachines);
-				ASSERT(!tcMachineInfo->serversOnMachine.empty());
+				ASSERT(!tcMachineInfo->getServersOnMachine().empty());
 				LocalityEntry process = tcMachineInfo->localityEntry;
 				forcedAttributes.push_back(process);
 				TraceEvent("ChosenMachine")
@@ -3293,9 +3285,9 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 					++chosenServerCount;
 				} else {
 					std::vector<Reference<TCServerInfo>> healthyProcesses;
-					for (auto it : machine->serversOnMachine) {
-						if (!server_status.get(it->getID()).isUnhealthy()) {
-							healthyProcesses.push_back(it);
+					for (auto server : machine->getServersOnMachine()) {
+						if (!server_status.get(server->getID()).isUnhealthy()) {
+							healthyProcesses.push_back(server);
 						}
 					}
 					serverID = deterministicRandom()->randomChoice(healthyProcesses)->getID();
@@ -3401,7 +3393,7 @@ Reference<TCMachineInfo> DDTeamCollection::checkAndCreateMachine(Reference<TCSer
 		machine_info.insert(std::make_pair(machine_id, machineInfo));
 	} else {
 		machineInfo = machine_info.find(machine_id)->second;
-		machineInfo->serversOnMachine.push_back(server);
+		machineInfo->addServer(server);
 	}
 	server->machine = machineInfo;
 
@@ -3722,7 +3714,7 @@ void DDTeamCollection::traceMachineInfo() const {
 		    .detail("Healthy", isMachineHealthy(machine.getPtr()))
 		    .detail("MachineID", id.contents().toString())
 		    .detail("MachineTeamOwned", machine->machineTeams.size())
-		    .detail("ServerNumOnMachine", machine->serversOnMachine.size())
+		    .detail("ServerNumOnMachine", machine->getServersOnMachine().size())
 		    .detail("ServersID", machine->getServersIDStr());
 	}
 }
@@ -3772,12 +3764,12 @@ void DDTeamCollection::traceMachineLocalityMap() const {
 
 bool DDTeamCollection::isMachineHealthy(TCMachineInfo const* machine) const {
 	if (machine == nullptr || machine_info.find(machine->getID()) == machine_info.end() ||
-	    machine->serversOnMachine.empty()) {
+	    machine->getServersOnMachine().empty()) {
 		return false;
 	}
 
 	// Healthy machine has at least one healthy server
-	for (auto& server : machine->serversOnMachine) {
+	for (auto& server : machine->getServersOnMachine()) {
 		if (!server_status.get(server->getID()).isUnhealthy()) {
 			return true;
 		}
@@ -3820,7 +3812,7 @@ void DDTeamCollection::rebuildMachineLocalityMap() {
 	machineLocalityMap.clear();
 	int numHealthyMachine = 0;
 	for (const auto& [_, machine] : machine_info) {
-		if (machine->serversOnMachine.empty()) {
+		if (machine->getServersOnMachine().empty()) {
 			TraceEvent(SevWarn, "RebuildMachineLocalityMapError")
 			    .detail("Machine", machine->getID().toString())
 			    .detail("NumServersOnMachine", 0);
@@ -3829,7 +3821,7 @@ void DDTeamCollection::rebuildMachineLocalityMap() {
 		if (!isMachineHealthy(machine.getPtr())) {
 			continue;
 		}
-		Reference<TCServerInfo> representativeServer = machine->serversOnMachine[0];
+		Reference<TCServerInfo> representativeServer = machine->getRepresentativeServer();
 		auto& locality = representativeServer->lastKnownInterface.locality;
 		if (!isValidLocality(*configuration.storagePolicy, locality)) {
 			TraceEvent(SevWarn, "RebuildMachineLocalityMapError")

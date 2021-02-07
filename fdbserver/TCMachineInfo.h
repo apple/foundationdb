@@ -21,21 +21,36 @@
 #pragma once
 
 #include "fdbrpc/ReplicationTypes.h"
+#include "fdbserver/TCServerInfo.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 
-struct TCServerInfo;
+#include <set>
+
 struct TCMachineTeamInfo;
 
 class TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
+public:
+	struct CompareServers {
+		bool operator()(Reference<TCServerInfo> const& fst, Reference<TCServerInfo> const& snd) const {
+			return fst->getID() < snd->getID();
+		}
+	};
+	using ServerSet = std::set<Reference<TCServerInfo>, CompareServers>;
+
+private:
 	Standalone<StringRef> machineID;
+	ServerSet serversOnMachine;
 
 public:
-	Standalone<StringRef> getID() const;
-	std::vector<Reference<TCServerInfo>> serversOnMachine; // SOMEDAY: change from vector to set
 	std::vector<Reference<TCMachineTeamInfo>> machineTeams; // SOMEDAY: split good and bad machine teams.
 	LocalityEntry localityEntry;
 
 	explicit TCMachineInfo(Reference<TCServerInfo> server, const LocalityEntry& entry);
+	Standalone<StringRef> getID() const;
 	std::string getServersIDStr() const;
+	ServerSet const& getServersOnMachine() const;
+	Reference<TCServerInfo> getRepresentativeServer() const;
+	void addServer(Reference<TCServerInfo> const& server);
+	void removeServer(Reference<TCServerInfo> const& server);
 };
