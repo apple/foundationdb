@@ -689,7 +689,7 @@ public:
 				int teamIndex = 0;
 				for (teamIndex = 0; teamIndex < mt->getServerTeams().size(); ++teamIndex) {
 					team = mt->getServerTeams()[teamIndex];
-					ASSERT(team->machineTeam->getMachineIDs() == mt->getMachineIDs()); // Sanity check
+					ASSERT(team->getMachineTeam()->getMachineIDs() == mt->getMachineIDs()); // Sanity check
 
 					// Check if a server will have 0 team after the team is removed
 					for (const auto& s : team->getServers()) {
@@ -1741,7 +1741,7 @@ public:
 									Reference<TCMachineTeamInfo> machineTeam =
 									    self->checkAndCreateMachineTeam(serverTeam);
 									ASSERT(machineTeam.isValid());
-									serverTeam->machineTeam = machineTeam;
+									serverTeam->setMachineTeam(machineTeam);
 								}
 							}
 
@@ -2745,7 +2745,7 @@ void DDTeamCollection::addTeam(const vector<Reference<TCServerInfo>>& newTeamSer
 		    .detail("TeamInfo", teamInfo->getDesc());
 	}
 
-	teamInfo->machineTeam = machineTeamInfo;
+	teamInfo->setMachineTeam(machineTeamInfo);
 	machineTeamInfo->addServerTeam(teamInfo);
 	if (g_network->isSimulated()) {
 		// Update server team information for consistency check in simulation
@@ -3522,7 +3522,7 @@ bool DDTeamCollection::removeTeam(Reference<TCTeamInfo> team) {
 	}
 
 	// Remove the team from its machine team
-	team->machineTeam->removeServerTeam(team);
+	team->getMachineTeam()->removeServerTeam(team);
 	team->cancelTracker();
 	if (g_network->isSimulated()) {
 		// Update server team information for consistency check in simulation
@@ -4012,7 +4012,7 @@ bool DDTeamCollection::isServerTeamCountCorrect(TCMachineTeamInfo const& mt) con
 	int num = 0;
 	bool ret = true;
 	for (auto& team : teams) {
-		if (team->machineTeam->getMachineIDs() == mt.getMachineIDs()) {
+		if (team->getMachineTeam()->getMachineIDs() == mt.getMachineIDs()) {
 			++num;
 		}
 	}

@@ -219,3 +219,11 @@ void TCTeamInfo::setTracker(Future<Void> &&tracker) {
 void TCTeamInfo::cancelTracker() {
 	tracker.cancel();
 }
+
+Reference<TCMachineTeamInfo> const& TCTeamInfo::getMachineTeam() const {
+	return machineTeam;
+}
+
+void TCTeamInfo::setMachineTeam(Reference<TCMachineTeamInfo> const& machineTeam) {
+	this->machineTeam = machineTeam;
+}

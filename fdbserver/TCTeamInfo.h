@@ -39,9 +39,9 @@ class TCTeamInfo final : public ReferenceCounted<TCTeamInfo>, public IDataDistri
 	int priority;
 	UID id;
 	Future<Void> tracker;
+	Reference<TCMachineTeamInfo> machineTeam;
 
 public:
-	Reference<TCMachineTeamInfo> machineTeam; // only needed for sanity check?
 	explicit TCTeamInfo(vector<Reference<TCServerInfo>> const& servers);
 	std::string getTeamID() const override;
 
@@ -71,6 +71,8 @@ public:
 	void addref() override;
 	void delref() override;
 	void addServers(const vector<UID>& servers) override;
+	Reference<TCMachineTeamInfo> const& getMachineTeam() const;
+	void setMachineTeam(Reference<TCMachineTeamInfo> const& machineTeam);
 
 private:
 	int64_t getLoadAverage() const;
