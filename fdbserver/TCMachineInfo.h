@@ -30,17 +30,8 @@
 struct TCMachineTeamInfo;
 
 class TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
-public:
-	struct CompareServers {
-		bool operator()(Reference<TCServerInfo> const& fst, Reference<TCServerInfo> const& snd) const {
-			return fst->getID() < snd->getID();
-		}
-	};
-	using ServerSet = std::set<Reference<TCServerInfo>, CompareServers>;
-
-private:
 	Standalone<StringRef> machineID;
-	ServerSet serversOnMachine;
+	TCServerInfo::ServerSet serversOnMachine;
 
 public:
 	std::vector<Reference<TCMachineTeamInfo>> machineTeams; // SOMEDAY: split good and bad machine teams.
@@ -49,7 +40,7 @@ public:
 	explicit TCMachineInfo(Reference<TCServerInfo> server, const LocalityEntry& entry);
 	Standalone<StringRef> getID() const;
 	std::string getServersIDStr() const;
-	ServerSet const& getServersOnMachine() const;
+	TCServerInfo::ServerSet const& getServersOnMachine() const;
 	Reference<TCServerInfo> getRepresentativeServer() const;
 	void addServer(Reference<TCServerInfo> const& server);
 	void removeServer(Reference<TCServerInfo> const& server);

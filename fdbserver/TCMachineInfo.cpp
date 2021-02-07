@@ -47,7 +47,7 @@ Standalone<StringRef> TCMachineInfo::getID() const {
 	return machineID;
 }
 
-TCMachineInfo::ServerSet const& TCMachineInfo::getServersOnMachine() const {
+TCServerInfo::ServerSet const& TCMachineInfo::getServersOnMachine() const {
 	return serversOnMachine;
 }
 

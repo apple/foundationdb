@@ -69,4 +69,11 @@ public:
 	Future<Void> serverMetricsPolling();
 	void clearCollection();
 	~TCServerInfo();
+
+	struct CompareServers {
+		bool operator()(Reference<TCServerInfo> const& fst, Reference<TCServerInfo> const& snd) const {
+			return fst->getID() < snd->getID();
+		}
+	};
+	using ServerSet = std::set<Reference<TCServerInfo>, CompareServers>;
 };
