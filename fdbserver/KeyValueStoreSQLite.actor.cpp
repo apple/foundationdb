@@ -1897,6 +1897,7 @@ private:
 			dbFile->setRateControl({});
 			rc->wakeWaiters();
 		}
+		dbFile.clear();
 
 		if(walFile && walFile->getRateControl()) {
 			TraceEvent(SevDebug, "KeyValueStoreSQLiteShutdownRateControl").detail("Filename", walFile->getFilename());
@@ -1904,6 +1905,7 @@ private:
 			walFile->setRateControl({});
 			rc->wakeWaiters();
 		}
+		walFile.clear();
 	}
 
 	ACTOR static Future<Void> stopOnError( KeyValueStoreSQLite* self ) {

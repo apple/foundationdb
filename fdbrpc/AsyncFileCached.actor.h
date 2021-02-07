@@ -230,8 +230,6 @@ public:
 		return filename;
 	}
 
-	std::vector<AFCPage*> const& getFlushable() { return flushable; }
-
 	void setRateControl(Reference<IRateControl> const& rc) override { rateControl = rc; }
 
 	Reference<IRateControl> const& getRateControl() override { return rateControl; }
@@ -252,8 +250,8 @@ public:
 			}
 
 			auto f = quiesce();
-			//TraceEvent("AsyncFileCachedDel").detail("Filename", filename)
-			//	.detail("Refcount", debugGetReferenceCount()).detail("CanDie", f.isReady()).backtrace();
+			TraceEvent("AsyncFileCachedDel").detail("Filename", filename)
+				.detail("Refcount", debugGetReferenceCount()).detail("CanDie", f.isReady()).backtrace();
 			if (f.isReady())
 				delete this;
 			else
@@ -303,7 +301,7 @@ private:
 	AsyncFileCached(Reference<IAsyncFile> uncached, const std::string& filename, int64_t length,
 	                Reference<EvictablePageCache> pageCache)
 	  : uncached(uncached), filename(filename), length(length), prevLength(length), pageCache(pageCache),
-	    currentTruncate(Void()), currentTruncateSize(0), rateControl(nullptr) {
+	    currentTruncate(Void()), currentTruncateSize(0) {
 		if( !g_network->isSimulated() ) {
 			countFileCacheWrites.init(LiteralStringRef("AsyncFile.CountFileCacheWrites"), filename);
 			countFileCacheReads.init(LiteralStringRef("AsyncFile.CountFileCacheReads"), filename);
