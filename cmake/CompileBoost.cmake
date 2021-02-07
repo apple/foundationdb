@@ -1,3 +1,9 @@
+if(NOT BOOSTROOT AND NOT BOOST_ROOT)
+  # the boost dir in the official docker file
+  # This is a hack because FindBoost.cmake is kind of limited
+  # We can fix this for boost versions > 1.70
+  set(BOOST_ROOT /opt/boost_1_67_0)
+endif()
 find_package(Boost 1.67)
 
 if(Boost_FOUND)
