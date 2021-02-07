@@ -118,7 +118,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	void addServer(StorageServerInterface newServer, ProcessClass processClass, Promise<Void> errorOut,
 	               Version addedVersion, const DDEnabledState* ddEnabledState);
 	bool isMachineTeamHealthy(std::vector<Standalone<StringRef>> const& machineIDs) const;
-	bool isMachineTeamHealthy(Reference<TCMachineTeamInfo> const& machineTeam) const;
+	bool isMachineTeamHealthy(TCMachineTeamInfo const& machineTeam) const;
 	bool isMachineHealthy(TCMachineInfo const* machine) const;
 	Reference<TCServerInfo> findOneLeastUsedServer() const;
 	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(Reference<TCServerInfo> chosenServer) const;

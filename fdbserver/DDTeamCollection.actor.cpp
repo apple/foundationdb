@@ -3422,8 +3422,8 @@ Future<Void> DDTeamCollection::addSubsetOfEmergencyTeams() {
 
 int DDTeamCollection::getHealthyMachineTeamCount() const {
 	int healthyTeamCount = 0;
-	for (auto mt = machineTeams.begin(); mt != machineTeams.end(); ++mt) {
-		ASSERT((*mt)->machines.size() == configuration.storageTeamSize);
+	for (const auto& mt : machineTeams) {
+		ASSERT(mt->size() == configuration.storageTeamSize);
 
 		if (isMachineTeamHealthy(*mt)) {
 			++healthyTeamCount;
@@ -3638,18 +3638,18 @@ bool DDTeamCollection::isMachineTeamHealthy(vector<Standalone<StringRef>> const&
 	return (healthyNum == machineIDs.size());
 }
 
-bool DDTeamCollection::isMachineTeamHealthy(Reference<TCMachineTeamInfo> const& machineTeam) const {
+bool DDTeamCollection::isMachineTeamHealthy(TCMachineTeamInfo const& machineTeam) const {
 	int healthyNum = 0;
 
 	// A healthy machine team should have the desired number of machines
-	if (machineTeam->size() != configuration.storageTeamSize) return false;
+	if (machineTeam.size() != configuration.storageTeamSize) return false;
 
-	for (auto& machine : machineTeam->machines) {
+	for (const auto& machine : machineTeam.machines) {
 		if (isMachineHealthy(machine.getPtr())) {
 			healthyNum++;
 		}
 	}
-	return (healthyNum == machineTeam->machines.size());
+	return (healthyNum == machineTeam.size());
 }
 
 int DDTeamCollection::calculateHealthyMachineCount() const {
@@ -3932,7 +3932,7 @@ Reference<TCMachineTeamInfo> DDTeamCollection::findOneRandomMachineTeam(Referenc
 	if (!chosenServer->machine->machineTeams.empty()) {
 		std::vector<Reference<TCMachineTeamInfo>> healthyMachineTeamsForChosenServer;
 		for (auto& mt : chosenServer->machine->machineTeams) {
-			if (isMachineTeamHealthy(mt)) {
+			if (isMachineTeamHealthy(*mt)) {
 				healthyMachineTeamsForChosenServer.push_back(mt);
 			}
 		}
