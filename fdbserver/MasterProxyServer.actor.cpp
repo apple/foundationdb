@@ -80,6 +80,7 @@ struct ProxyStats {
 	Counter txnDefaultPriorityStartIn, txnDefaultPriorityStartOut;
 	Counter txnCommitIn, txnCommitVersionAssigned, txnCommitResolving, txnCommitResolved, txnCommitOut, txnCommitOutSuccess, txnCommitErrors;
 	Counter txnConflicts;
+	Counter txnRejectedForQueuedTooLong;
 	Counter txnThrottled;
 	Counter commitBatchIn, commitBatchOut;
 	Counter mutationBytes;
@@ -162,6 +163,7 @@ struct ProxyStats {
 	    txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
 	    txnCommitOutSuccess("TxnCommitOutSuccess", cc), txnCommitErrors("TxnCommitErrors", cc),
 	    txnConflicts("TxnConflicts", cc), txnThrottled("TxnThrottled", cc), commitBatchIn("CommitBatchIn", cc),
+	    txnRejectedForQueuedTooLong("TxnRejectedForQueuedTooLong", cc),
 	    commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc), mutations("Mutations", cc),
 	    conflictRanges("ConflictRanges", cc), keyServerLocationIn("KeyServerLocationIn", cc),
 	    keyServerLocationOut("KeyServerLocationOut", cc), keyServerLocationErrors("KeyServerLocationErrors", cc),
@@ -954,7 +956,7 @@ ACTOR Future<Void> commitBatch(
 		}
 		++self->stats.commitBatchOut;
 		self->stats.txnCommitOut += trs.size();
-		self->stats.txnConflicts += trs.size();
+		self->stats.txnRejectedForQueuedTooLong += trs.size();
 		return Void();
 	}
 
