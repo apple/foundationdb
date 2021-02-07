@@ -242,7 +242,7 @@ public:
 
 					// Healthy machine has at least one healthy server
 					for (auto& server : _machine->serversOnMachine) {
-						if (!server_status.at(server->id).isUnhealthy()) {
+						if (!server_status.at(server->getID()).isUnhealthy()) {
 							isMachineHealthy = true;
 						}
 					}
@@ -697,7 +697,7 @@ public:
 					for (auto& s : team->getServers()) {
 						if (s->teams.size() == 0) {
 							TraceEvent(SevError, "MachineTeamRemoverTooAggressive", self->distributorId)
-							    .detail("Server", s->id)
+							    .detail("Server", s->getID())
 							    .detail("ServerTeam", team->getDesc());
 							self->traceAllInfo(true);
 						}
@@ -721,7 +721,7 @@ public:
 				}
 
 				TraceEvent("MachineTeamRemover", self->distributorId)
-				    .detail("MachineTeamIDToRemove", mt->id.shortString())
+				    .detail("MachineTeamIDToRemove", mt->getID().shortString())
 				    .detail("MachineTeamToRemove", mt->getMachineIDsStr())
 				    .detail("NumProcessTeamsOnTheMachineTeam", minNumProcessTeams)
 				    .detail("CurrentMachineTeams", self->machineTeams.size())
@@ -1537,26 +1537,26 @@ public:
 						TraceEvent("SameAddress", self->distributorId)
 						    .detail("Failed", statusInfo.isFailed)
 						    .detail("Undesired", statusInfo.isUndesired)
-						    .detail("Server", server->id)
-						    .detail("OtherServer", i.second->id)
+						    .detail("Server", server->getID())
+						    .detail("OtherServer", i.second->getID())
 						    .detail("Address", server->lastKnownInterface.address())
-						    .detail("NumShards", self->shardsAffectedByTeamFailure->getNumberOfShards(server->id))
+						    .detail("NumShards", self->shardsAffectedByTeamFailure->getNumberOfShards(server->getID()))
 						    .detail("OtherNumShards",
-						            self->shardsAffectedByTeamFailure->getNumberOfShards(i.second->id))
-						    .detail("OtherHealthy", !self->server_status.get(i.second->id).isUnhealthy());
+						            self->shardsAffectedByTeamFailure->getNumberOfShards(i.second->getID()))
+						    .detail("OtherHealthy", !self->server_status.get(i.second->getID()).isUnhealthy());
 						// wait for the server's ip to be changed
-						otherChanges.push_back(self->server_status.onChange(i.second->id));
-						if (!self->server_status.get(i.second->id).isUnhealthy()) {
-							if (self->shardsAffectedByTeamFailure->getNumberOfShards(i.second->id) >=
-							    self->shardsAffectedByTeamFailure->getNumberOfShards(server->id)) {
+						otherChanges.push_back(self->server_status.onChange(i.second->getID()));
+						if (!self->server_status.get(i.second->getID()).isUnhealthy()) {
+							if (self->shardsAffectedByTeamFailure->getNumberOfShards(i.second->getID()) >=
+							    self->shardsAffectedByTeamFailure->getNumberOfShards(server->getID())) {
 								TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
-								    .detail("Server", server->id)
+								    .detail("Server", server->getID())
 								    .detail("Address", server->lastKnownInterface.address())
-								    .detail("OtherServer", i.second->id)
+								    .detail("OtherServer", i.second->getID())
 								    .detail("NumShards",
-								            self->shardsAffectedByTeamFailure->getNumberOfShards(server->id))
+								            self->shardsAffectedByTeamFailure->getNumberOfShards(server->getID()))
 								    .detail("OtherNumShards",
-								            self->shardsAffectedByTeamFailure->getNumberOfShards(i.second->id));
+								            self->shardsAffectedByTeamFailure->getNumberOfShards(i.second->getID()));
 
 								status.isUndesired = true;
 							} else
@@ -1575,7 +1575,7 @@ public:
 
 					if (self->optimalTeamCount > 0) {
 						TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
-						    .detail("Server", server->id)
+						    .detail("Server", server->getID())
 						    .detail("OptimalTeamCount", self->optimalTeamCount)
 						    .detail("Fitness", server->lastKnownClass.machineClassFitness(ProcessClass::Storage));
 						status.isUndesired = true;
@@ -1587,7 +1587,7 @@ public:
 				// replaced with a server having the correct type
 				if (hasWrongDC || hasInvalidLocality) {
 					TraceEvent(SevWarn, "UndesiredDCOrLocality", self->distributorId)
-					    .detail("Server", server->id)
+					    .detail("Server", server->getID())
 					    .detail("WrongDC", hasWrongDC)
 					    .detail("InvalidLocality", hasInvalidLocality);
 					status.isUndesired = true;
@@ -1595,7 +1595,7 @@ public:
 				}
 				if (server->wrongStoreTypeToRemove.get()) {
 					TraceEvent(SevWarn, "WrongStoreTypeToRemove", self->distributorId)
-					    .detail("Server", server->id)
+					    .detail("Server", server->getID())
 					    .detail("StoreType", "?");
 					status.isUndesired = true;
 					status.isWrongConfiguration = true;
@@ -1629,17 +1629,17 @@ public:
 
 				if (worstStatus != DDTeamCollection::Status::NONE) {
 					TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
-					    .detail("Server", server->id)
+					    .detail("Server", server->getID())
 					    .detail("Excluded", worstAddr.toString());
 					status.isUndesired = true;
 					status.isWrongConfiguration = true;
 					if (worstStatus == DDTeamCollection::Status::FAILED) {
 						TraceEvent(SevWarn, "FailedServerRemoveKeys", self->distributorId)
-						    .detail("Server", server->id)
+						    .detail("Server", server->getID())
 						    .detail("Excluded", worstAddr.toString());
-						wait(removeKeysFromFailedServer(cx, server->id, self->lock, ddEnabledState));
+						wait(removeKeysFromFailedServer(cx, server->getID(), self->lock, ddEnabledState));
 						if (BUGGIFY) wait(delay(5.0));
-						self->shardsAffectedByTeamFailure->eraseServer(server->id);
+						self->shardsAffectedByTeamFailure->eraseServer(server->getID());
 					}
 				}
 
@@ -1662,7 +1662,7 @@ public:
 					when(wait(failureTracker)) {
 						// The server is failed AND all data has been removed from it, so permanently remove it.
 						TraceEvent("StatusMapChange", self->distributorId)
-						    .detail("ServerID", server->id)
+						    .detail("ServerID", server->getID())
 						    .detail("Status", "Removing");
 
 						if (server->updated.canBeSet()) {
@@ -1670,15 +1670,15 @@ public:
 						}
 
 						// Remove server from FF/serverList
-						wait(removeStorageServer(cx, server->id, self->lock, ddEnabledState));
+						wait(removeStorageServer(cx, server->getID(), self->lock, ddEnabledState));
 
 						TraceEvent("StatusMapChange", self->distributorId)
-						    .detail("ServerID", server->id)
+						    .detail("ServerID", server->getID())
 						    .detail("Status", "Removed");
 						// Sets removeSignal (alerting dataDistributionTeamCollection to remove the storage server from
 						// its own data structures)
 						server->removed.trigger();
-						self->removedServers.send(server->id);
+						self->removedServers.send(server->getID());
 						return Void();
 					}
 					when(std::pair<StorageServerInterface, ProcessClass> newInterface = wait(onInterfaceChanged)) {
@@ -1689,7 +1689,7 @@ public:
 						bool machineLocalityChanged = server->lastKnownInterface.locality.zoneId().get() !=
 						                              newInterface.first.locality.zoneId().get();
 						TraceEvent("StorageServerInterfaceChanged", self->distributorId)
-						    .detail("ServerID", server->id)
+						    .detail("ServerID", server->getID())
 						    .detail("NewWaitFailureToken", newInterface.first.waitFailure.getEndpoint().token)
 						    .detail("OldWaitFailureToken", server->lastKnownInterface.waitFailure.getEndpoint().token)
 						    .detail("LocalityChanged", localityChanged)
@@ -1734,7 +1734,7 @@ public:
 								// is; If the destination machine is new, create one; otherwise, add server to an
 								// existing one Update server's machine reference to the destination machine
 								Reference<TCMachineInfo> destMachine =
-								    self->checkAndCreateMachine(self->server_info[server->id]);
+								    self->checkAndCreateMachine(self->server_info[server->getID()]);
 								ASSERT(destMachine.isValid());
 							}
 
@@ -1799,11 +1799,11 @@ public:
 						if (restartRecruiting) self->restartRecruiting.trigger();
 					}
 					when(wait(otherChanges.empty() ? Never() : quorum(otherChanges, 1))) {
-						TraceEvent("SameAddressChangedStatus", self->distributorId).detail("ServerID", server->id);
+						TraceEvent("SameAddressChangedStatus", self->distributorId).detail("ServerID", server->getID());
 					}
 					when(wait(server->wrongStoreTypeToRemove.onChange())) {
 						TraceEvent("UndesiredStorageServerTriggered", self->distributorId)
-						    .detail("Server", server->id)
+						    .detail("Server", server->getID())
 						    .detail("StoreType", server->storeType)
 						    .detail("ConfigStoreType", self->configuration.storageServerStoreType)
 						    .detail("WrongStoreTypeRemoved", server->wrongStoreTypeToRemove.get());
@@ -1823,7 +1823,7 @@ public:
 			TraceEvent("StorageServerTrackerCancelled", self->distributorId)
 			    .suppressFor(1.0)
 			    .detail("Primary", self->primary)
-			    .detail("Server", server->id)
+			    .detail("Server", server->getID())
 			    .error(e, /*includeCancelled*/ true);
 			if (e.code() != error_code_actor_cancelled && errorOut.canBeSet()) {
 				errorOut.sendError(e);
@@ -2247,7 +2247,7 @@ public:
 		for (; idx < self->badTeams.size(); idx++) {
 			servers.clear();
 			for (const auto& server : self->badTeams[idx]->getServers()) {
-				if (server->inDesiredDC && !self->server_status.get(server->id).isUnhealthy()) {
+				if (server->inDesiredDC && !self->server_status.get(server->getID()).isUnhealthy()) {
 					servers.push_back(server);
 				}
 			}
@@ -2265,8 +2265,8 @@ public:
 						bool allInTeam = true; // All servers in testTeam belong to the healthy servers
 						for (int l = 0; l < testTeam.size(); l++) {
 							bool foundServer = false;
-							for (auto it : servers) {
-								if (it->id == testTeam[l]) {
+							for (const auto& server : servers) {
+								if (server->getID() == testTeam[l]) {
 									foundServer = true;
 									break;
 								}
@@ -2291,8 +2291,8 @@ public:
 							// self->traceTeamCollectionInfo(); // Trace at the end of the function
 						} else {
 							tempSet->clear();
-							for (auto it : servers) {
-								tempMap->add(it->lastKnownInterface.locality, &it->id);
+							for (const auto& server : servers) {
+								tempMap->add(server->lastKnownInterface.locality, &server->getID());
 							}
 
 							self->resultEntries.clear();
@@ -2310,8 +2310,8 @@ public:
 						}
 					} else {
 						serverIds.clear();
-						for (auto it : servers) {
-							serverIds.push_back(it->id);
+						for (const auto& server : servers) {
+							serverIds.push_back(server->getID());
 						}
 						TraceEvent(SevWarnAlways, "CannotAddSubset", self->distributorId)
 						    .detail("Servers", describe(serverIds));
@@ -2425,8 +2425,8 @@ void DDTeamCollection::resetLocalitySet() {
 	storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
 	LocalityMap<UID>* storageServerMap = (LocalityMap<UID>*)storageServerSet.getPtr();
 
-	for (auto& it : server_info) {
-		it.second->localityEntry = storageServerMap->add(it.second->lastKnownInterface.locality, &it.second->id);
+	for (auto& [id, server] : server_info) {
+		server->localityEntry = storageServerMap->add(server->lastKnownInterface.locality, &server->getID());
 	}
 }
 
@@ -2902,7 +2902,7 @@ void DDTeamCollection::noHealthyTeams() const {
 	std::set<UID> desiredServerSet;
 	std::string desc;
 	for (auto i = server_info.begin(); i != server_info.end(); ++i) {
-		ASSERT(i->first == i->second->id);
+		ASSERT(i->first == i->second->getID());
 		if (!server_status.get(i->first).isFailed) {
 			desiredServerSet.insert(i->first);
 			desc += i->first.shortString() + " (" + i->second->lastKnownInterface.toString() + "), ";
@@ -3102,7 +3102,7 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 		int minTeamCount = std::numeric_limits<int>::max();
 		for (auto& machine : machine_info) {
 			// Skip invalid machine whose representative server is not in server_info
-			ASSERT_WE_THINK(server_info.find(machine.second->serversOnMachine[0]->id) != server_info.end());
+			ASSERT_WE_THINK(server_info.find(machine.second->serversOnMachine[0]->getID()) != server_info.end());
 			// Skip unhealthy machines
 			if (!isMachineHealthy(machine.second.getPtr())) continue;
 			// Skip machine with incomplete locality
@@ -3297,16 +3297,16 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 			for (auto& machine : chosenMachineTeam->machines) {
 				UID serverID;
 				if (machine == chosenServer->machine) {
-					serverID = chosenServer->id;
+					serverID = chosenServer->getID();
 					++chosenServerCount;
 				} else {
 					std::vector<Reference<TCServerInfo>> healthyProcesses;
 					for (auto it : machine->serversOnMachine) {
-						if (!server_status.get(it->id).isUnhealthy()) {
+						if (!server_status.get(it->getID()).isUnhealthy()) {
 							healthyProcesses.push_back(it);
 						}
 					}
-					serverID = deterministicRandom()->randomChoice(healthyProcesses)->id;
+					serverID = deterministicRandom()->randomChoice(healthyProcesses)->getID();
 				}
 				serverTeam.push_back(serverID);
 			}
@@ -3395,7 +3395,7 @@ bool DDTeamCollection::sanityCheckTeams() const {
 // Check if the server belongs to a machine; if not, create the machine.
 // Establish the two-direction link between server and machine
 Reference<TCMachineInfo> DDTeamCollection::checkAndCreateMachine(Reference<TCServerInfo> server) {
-	ASSERT(server.isValid() && server_info.find(server->id) != server_info.end());
+	ASSERT(server.isValid() && server_info.find(server->getID()) != server_info.end());
 	auto& locality = server->lastKnownInterface.locality;
 	Standalone<StringRef> machine_id = locality.zoneId().get(); // locality to machine_id with std::string type
 
@@ -3404,7 +3404,7 @@ Reference<TCMachineInfo> DDTeamCollection::checkAndCreateMachine(Reference<TCSer
 		// uid is the first storage server process on the machine
 		TEST(true); // First storage server in process on the machine
 		// For each machine, store the first server's localityEntry into machineInfo for later use.
-		LocalityEntry localityEntry = machineLocalityMap.add(locality, &server->id);
+		LocalityEntry localityEntry = machineLocalityMap.add(locality, &server->getID());
 		machineInfo = makeReference<TCMachineInfo>(server, localityEntry);
 		machine_info.insert(std::make_pair(machine_id, machineInfo));
 	} else {
@@ -3800,7 +3800,7 @@ bool DDTeamCollection::isMachineHealthy(TCMachineInfo const* machine) const {
 
 	// Healthy machine has at least one healthy server
 	for (auto& server : machine->serversOnMachine) {
-		if (!server_status.get(server->id).isUnhealthy()) {
+		if (!server_status.get(server->getID()).isUnhealthy()) {
 			return true;
 		}
 	}
@@ -3859,7 +3859,7 @@ void DDTeamCollection::rebuildMachineLocalityMap() {
 			    .detail("InvalidLocality", locality.toString());
 			continue;
 		}
-		const LocalityEntry& localityEntry = machineLocalityMap.add(locality, &representativeServer->id);
+		const LocalityEntry& localityEntry = machineLocalityMap.add(locality, &representativeServer->getID());
 		machine->second->localityEntry = localityEntry;
 		++numHealthyMachine;
 	}
@@ -3943,7 +3943,7 @@ Reference<TCMachineTeamInfo> DDTeamCollection::findOneRandomMachineTeam(Referenc
 
 	// If we cannot find a healthy machine team
 	TraceEvent("NoHealthyMachineTeamForServer")
-	    .detail("ServerID", chosenServer->id)
+	    .detail("ServerID", chosenServer->getID())
 	    .detail("MachineTeams", chosenServer->machine->machineTeams.size());
 	return Reference<TCMachineTeamInfo>();
 }

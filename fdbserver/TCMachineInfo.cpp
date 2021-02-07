@@ -38,7 +38,7 @@ std::string TCMachineInfo::getServersIDStr() const {
 	if (serversOnMachine.empty()) return "[unset]";
 
 	for (const auto& server : serversOnMachine) {
-		ss << server->id.toString() << " ";
+		ss << server->getID().toString() << " ";
 	}
 
 	return std::move(ss).str();

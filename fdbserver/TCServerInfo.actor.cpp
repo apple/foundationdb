@@ -148,3 +148,7 @@ void TCServerInfo::setTracker(Future<Void>&& tracker) {
 void TCServerInfo::cancelTracker() {
 	tracker.cancel();
 }
+
+UID const& TCServerInfo::getID() const {
+	return id;
+}

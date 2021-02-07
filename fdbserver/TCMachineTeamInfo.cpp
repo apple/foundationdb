@@ -70,3 +70,7 @@ void TCMachineTeamInfo::removeServerTeam(Reference<TCTeamInfo> const& team) {
 	}
 	ASSERT_WE_THINK(false);
 }
+
+UID TCMachineTeamInfo::getID() const {
+	return id;
+}

@@ -31,11 +31,11 @@ struct TCTeamInfo;
 
 class TCMachineTeamInfo : public ReferenceCounted<TCMachineTeamInfo> {
 	std::vector<Reference<TCTeamInfo>> serverTeams;
+	UID id;
 
 public:
 	std::vector<Reference<TCMachineInfo>> machines;
 	std::vector<Standalone<StringRef>> machineIDs;
-	UID id;
 
 public:
 	UID getID() const;

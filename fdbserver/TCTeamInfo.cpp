@@ -28,7 +28,7 @@ TCTeamInfo::TCTeamInfo(vector<Reference<TCServerInfo>> const& servers)
 	}
 	serverIDs.reserve(servers.size());
 	for (int i = 0; i < servers.size(); i++) {
-		serverIDs.push_back(servers[i]->id);
+		serverIDs.push_back(servers[i]->getID());
 	}
 }
 

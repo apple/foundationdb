@@ -31,9 +31,9 @@ struct TCMachineInfo;
 
 class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	Future<Void> tracker;
+	UID id;
 
 public:
-	UID id;
 	DDTeamCollection* collection;
 	StorageServerInterface lastKnownInterface;
 	ProcessClass lastKnownClass;
@@ -57,6 +57,7 @@ public:
 public:
 	TCServerInfo(StorageServerInterface ssi, DDTeamCollection* collection, ProcessClass processClass, bool inDesiredDC,
 	             Reference<LocalitySet> storageServerSet);
+	UID const& getID() const;
 	Future<std::pair<StorageServerInterface, ProcessClass>> onInterfaceChanged() const;
 	void setTracker(Future<Void>&& tracker);
 	void cancelTracker();
