@@ -26,7 +26,7 @@ TCMachineTeamInfo::TCMachineTeamInfo(vector<Reference<TCMachineInfo>> const& mac
   : machines(machines), id(deterministicRandom()->randomUniqueID()) {
 	machineIDs.reserve(machines.size());
 	for (int i = 0; i < machines.size(); i++) {
-		machineIDs.push_back(machines[i]->machineID);
+		machineIDs.push_back(machines[i]->getID());
 	}
 	sort(machineIDs.begin(), machineIDs.end());
 }

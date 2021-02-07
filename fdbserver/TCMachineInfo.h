@@ -28,9 +28,11 @@ struct TCServerInfo;
 struct TCMachineTeamInfo;
 
 class TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
-public:
-	std::vector<Reference<TCServerInfo>> serversOnMachine; // SOMEDAY: change from vector to set
 	Standalone<StringRef> machineID;
+
+public:
+	Standalone<StringRef> getID() const;
+	std::vector<Reference<TCServerInfo>> serversOnMachine; // SOMEDAY: change from vector to set
 	std::vector<Reference<TCMachineTeamInfo>> machineTeams; // SOMEDAY: split good and bad machine teams.
 	LocalityEntry localityEntry;
 

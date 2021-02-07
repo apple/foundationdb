@@ -43,3 +43,7 @@ std::string TCMachineInfo::getServersIDStr() const {
 
 	return std::move(ss).str();
 }
+
+Standalone<StringRef> TCMachineInfo::getID() const {
+	return machineID;
+}

@@ -186,7 +186,7 @@ public:
 					    .detail("ServerInfoIndex", i)
 					    .detail("ServerID", server->first.toString())
 					    .detail("ServerTeamOwned", server->second->teams.size())
-					    .detail("MachineID", server->second->machine->machineID.contents().toString())
+					    .detail("MachineID", server->second->machine->getID().contents().toString())
 					    .detail("Primary", self->primary);
 					server++;
 					if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
@@ -235,7 +235,7 @@ public:
 				state bool isMachineHealthy = false;
 				for (i = 0; i < machine_info.size(); i++) {
 					Reference<TCMachineInfo> _machine = machine->second;
-					if (!_machine.isValid() || machine_info.find(_machine->machineID) == machine_info.end() ||
+					if (!_machine.isValid() || machine_info.find(_machine->getID()) == machine_info.end() ||
 					    _machine->serversOnMachine.empty()) {
 						isMachineHealthy = false;
 					}
@@ -335,16 +335,16 @@ public:
 
 			bool foundSSToRemove = false;
 
-			for (auto& server : self->server_info) {
-				if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType)) {
+			for (auto& [id, server] : self->server_info) {
+				if (!server->isCorrectStoreType(self->configuration.storageServerStoreType)) {
 					// Server may be removed due to failure while the wrongStoreTypeToRemove is sent to the
 					// storageServerTracker. This race may cause the server to be removed before react to
 					// wrongStoreTypeToRemove
-					server.second->wrongStoreTypeToRemove.set(true);
+					server->wrongStoreTypeToRemove.set(true);
 					foundSSToRemove = true;
 					TraceEvent("WrongStoreTypeRemover", self->distributorId)
-					    .detail("Server", server.first)
-					    .detail("StoreType", server.second->storeType)
+					    .detail("Server", id)
+					    .detail("StoreType", server->storeType)
 					    .detail("ConfiguredStoreType", self->configuration.storageServerStoreType);
 					break;
 				}
@@ -676,13 +676,11 @@ public:
 			int totalMTCount = self->machineTeams.size();
 			// Pick the machine team to remove. After release-6.2 version,
 			// we remove the machine team with most machine teams, the same logic as serverTeamRemover
-			std::pair<Reference<TCMachineTeamInfo>, int> foundMTInfo =
-			    SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS ? self->getMachineTeamWithMostMachineTeams()
-			                                                    : self->getMachineTeamWithLeastProcessTeams();
+			const auto [mt, minNumProcessTeams] = SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS
+			                                          ? self->getMachineTeamWithMostMachineTeams()
+			                                          : self->getMachineTeamWithLeastProcessTeams();
 
-			if (totalMTCount > desiredMachineTeams && foundMTInfo.first.isValid()) {
-				Reference<TCMachineTeamInfo> mt = foundMTInfo.first;
-				int minNumProcessTeams = foundMTInfo.second;
+			if (totalMTCount > desiredMachineTeams && mt.isValid()) {
 				ASSERT(mt.isValid());
 
 				// Pick one process team, and mark it as a bad team
@@ -779,12 +777,9 @@ public:
 			int desiredServerTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * self->server_info.size();
 			int totalSTCount = self->teams.size();
 			// Pick the server team whose members are on the most number of server teams, and mark it undesired
-			std::pair<Reference<TCTeamInfo>, int> foundSTInfo = self->getServerTeamWithMostProcessTeams();
+			const auto [st, maxNumProcessTeams] = self->getServerTeamWithMostProcessTeams();
 
-			if (totalSTCount > desiredServerTeams && foundSTInfo.first.isValid()) {
-				ASSERT(foundSTInfo.first.isValid());
-				Reference<TCTeamInfo> st = foundSTInfo.first;
-				int maxNumProcessTeams = foundSTInfo.second;
+			if (totalSTCount > desiredServerTeams && st.isValid()) {
 				ASSERT(st.isValid());
 				// The team will be marked as a bad team
 				bool foundTeam = self->removeTeam(st);
@@ -1067,13 +1062,11 @@ public:
 							// The shard split/merge and DD rebooting may make a shard mapped to multiple teams,
 							// so we need to recalculate the shard's priority
 							if (maxPriority < SERVER_KNOBS->PRIORITY_TEAM_FAILED) {
-								std::pair<vector<ShardsAffectedByTeamFailure::Team>,
-								          vector<ShardsAffectedByTeamFailure::Team>>
-								    teams = self->shardsAffectedByTeamFailure->getTeamsFor(shards[i]);
-								for (int j = 0; j < teams.first.size() + teams.second.size(); j++) {
+								const auto [teams, prevTeams] =
+								    self->shardsAffectedByTeamFailure->getTeamsFor(shards[i]);
+								for (int j = 0; j < teams.size() + prevTeams.size(); j++) {
 									// t is the team in primary DC or the remote DC
-									auto& t =
-									    j < teams.first.size() ? teams.first[j] : teams.second[j - teams.first.size()];
+									auto& t = j < teams.size() ? teams[j] : prevTeams[j - teams.size()];
 									if (!t.servers.size()) {
 										maxPriority = std::max(maxPriority, SERVER_KNOBS->PRIORITY_POPULATE_REGION);
 										break;
@@ -1319,21 +1312,21 @@ public:
 				Optional<Value> val = wait(tr.get(healthyZoneKey));
 				state Future<Void> healthyZoneTimeout = Never();
 				if (val.present()) {
-					auto p = decodeHealthyZoneValue(val.get());
-					if (p.first == ignoreSSFailuresZoneString) {
+					const auto [zoneId, version] = decodeHealthyZoneValue(val.get());
+					if (zoneId == ignoreSSFailuresZoneString) {
 						// healthyZone is now overloaded for DD diabling purpose, which does not timeout
 						TraceEvent("DataDistributionDisabledForStorageServerFailuresStart", self->distributorId);
 						healthyZoneTimeout = Never();
-					} else if (p.second > tr.getReadVersion().get()) {
+					} else if (version > tr.getReadVersion().get()) {
 						double timeoutSeconds =
-						    (p.second - tr.getReadVersion().get()) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+						    (version - tr.getReadVersion().get()) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
 						healthyZoneTimeout = delay(timeoutSeconds, TaskPriority::DataDistribution);
-						if (self->healthyZone.get() != p.first) {
+						if (self->healthyZone.get() != zoneId) {
 							TraceEvent("MaintenanceZoneStart", self->distributorId)
-							    .detail("ZoneID", printable(p.first))
-							    .detail("EndVersion", p.second)
+							    .detail("ZoneID", printable(zoneId))
+							    .detail("EndVersion", version)
 							    .detail("Duration", timeoutSeconds);
-							self->healthyZone.set(p.first);
+							self->healthyZone.set(zoneId);
 						}
 					} else if (self->healthyZone.get().present()) {
 						// maintenance hits timeout
@@ -2187,8 +2180,8 @@ public:
 				int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * totalHealthyMachineCount;
 				int healthyMachineTeamCount = self->getHealthyMachineTeamCount();
 
-				std::pair<uint64_t, uint64_t> minMaxTeamsOnServer = self->calculateMinMaxServerTeamsOnServer();
-				std::pair<uint64_t, uint64_t> minMaxMachineTeamsOnMachine =
+				const auto [minTeamsOnServer, maxTeamsOnServer] = self->calculateMinMaxServerTeamsOnServer();
+				const auto [minMachineTeamsOnMachine, maxMachineTeamsOnMachine] =
 				    self->calculateMinMaxMachineTeamsOnMachine();
 
 				TraceEvent("TeamCollectionInfo", self->distributorId)
@@ -2204,10 +2197,10 @@ public:
 				    .detail("DesiredMachineTeams", desiredMachineTeams)
 				    .detail("MaxMachineTeams", maxMachineTeams)
 				    .detail("TotalHealthyMachines", totalHealthyMachineCount)
-				    .detail("MinTeamsOnServer", minMaxTeamsOnServer.first)
-				    .detail("MaxTeamsOnServer", minMaxTeamsOnServer.second)
-				    .detail("MinMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.first)
-				    .detail("MaxMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.second)
+				    .detail("MinTeamsOnServer", minTeamsOnServer)
+				    .detail("MaxTeamsOnServer", maxTeamsOnServer)
+				    .detail("MinMachineTeamsOnMachine", minMachineTeamsOnMachine)
+				    .detail("MaxMachineTeamsOnMachine", maxMachineTeamsOnMachine)
 				    .detail("DoBuildTeams", self->doBuildTeams)
 				    .trackLatest("TeamCollectionInfo");
 			}
@@ -2724,16 +2717,16 @@ void DDTeamCollection::addTeam(const vector<Reference<TCServerInfo>>& newTeamSer
 
 	// For a good team, we add it to teams and create machine team for it when necessary
 	teams.push_back(teamInfo);
-	for (int i = 0; i < newTeamServers.size(); ++i) {
-		newTeamServers[i]->teams.push_back(teamInfo);
+	for (auto& newTeamServer : newTeamServers) {
+		newTeamServer->teams.push_back(teamInfo);
 	}
 
 	// Find or create machine team for the server team
 	// Add the reference of machineTeam (with machineIDs) into process team
 	vector<Standalone<StringRef>> machineIDs;
-	for (auto server = newTeamServers.begin(); server != newTeamServers.end(); ++server) {
-		ASSERT_WE_THINK((*server)->machine.isValid());
-		machineIDs.push_back((*server)->machine->machineID);
+	for (const auto& server : newTeamServers) {
+		ASSERT_WE_THINK(server->machine.isValid());
+		machineIDs.push_back(server->machine->getID());
 	}
 	sort(machineIDs.begin(), machineIDs.end());
 	Reference<TCMachineTeamInfo> machineTeamInfo = findMachineTeam(machineIDs);
@@ -2802,9 +2795,9 @@ Reference<TCMachineTeamInfo> DDTeamCollection::addMachineTeam(std::vector<Standa
 // Return The number of healthy servers we grouped into machines
 int DDTeamCollection::constructMachinesFromServers() {
 	int totalServerIndex = 0;
-	for (auto i = server_info.begin(); i != server_info.end(); ++i) {
-		if (!server_status.get(i->first).isUnhealthy()) {
-			checkAndCreateMachine(i->second);
+	for (const auto& [id, server] : server_info) {
+		if (!server_status.get(id).isUnhealthy()) {
+			checkAndCreateMachine(server);
 			totalServerIndex++;
 		}
 	}
@@ -2829,7 +2822,7 @@ void DDTeamCollection::traceServerInfo() const {
 		    .detail("ServerInfoIndex", i++)
 		    .detail("ServerID", server.first.toString())
 		    .detail("ServerTeamOwned", server.second->teams.size())
-		    .detail("MachineID", server.second->machine->machineID.contents().toString())
+		    .detail("MachineID", server.second->machine->getID().contents().toString())
 		    .detail("StoreType", server.second->storeType.toString())
 		    .detail("InDesiredDC", server.second->inDesiredDC);
 	}
@@ -3144,7 +3137,7 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 				LocalityEntry process = tcMachineInfo->localityEntry;
 				forcedAttributes.push_back(process);
 				TraceEvent("ChosenMachine")
-				    .detail("MachineInfo", tcMachineInfo->machineID)
+				    .detail("MachineInfo", tcMachineInfo->getID())
 				    .detail("LeaseUsedMachinesSize", leastUsedMachines.size())
 				    .detail("ForcedAttributesSize", forcedAttributes.size());
 			} else {
@@ -3355,8 +3348,8 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 
 	healthyMachineTeamCount = getHealthyMachineTeamCount();
 
-	std::pair<uint64_t, uint64_t> minMaxTeamsOnServer = calculateMinMaxServerTeamsOnServer();
-	std::pair<uint64_t, uint64_t> minMaxMachineTeamsOnMachine = calculateMinMaxMachineTeamsOnMachine();
+	const auto [minTeamsOnServer, maxTeamsOnServer] = calculateMinMaxServerTeamsOnServer();
+	const auto [minMachineTeamsOnMachine, maxMachineTeamsOnMachine] = calculateMinMaxMachineTeamsOnMachine();
 
 	TraceEvent("TeamCollectionInfo", distributorId)
 	    .detail("Primary", primary)
@@ -3371,10 +3364,10 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 	    .detail("DesiredMachineTeams", desiredMachineTeams)
 	    .detail("MaxMachineTeams", maxMachineTeams)
 	    .detail("TotalHealthyMachines", totalHealthyMachineCount)
-	    .detail("MinTeamsOnServer", minMaxTeamsOnServer.first)
-	    .detail("MaxTeamsOnServer", minMaxTeamsOnServer.second)
-	    .detail("MinMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.first)
-	    .detail("MaxMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.second)
+	    .detail("MinTeamsOnServer", minTeamsOnServer)
+	    .detail("MaxTeamsOnServer", maxTeamsOnServer)
+	    .detail("MinMachineTeamsOnMachine", minMachineTeamsOnMachine)
+	    .detail("MaxMachineTeamsOnMachine", maxMachineTeamsOnMachine)
 	    .detail("DoBuildTeams", doBuildTeams)
 	    .trackLatest("TeamCollectionInfo");
 
@@ -3463,9 +3456,9 @@ void DDTeamCollection::addServer(StorageServerInterface newServer, ProcessClass 
 // Note: This function may make the machine team number larger than the desired machine team number
 Reference<TCMachineTeamInfo> DDTeamCollection::checkAndCreateMachineTeam(Reference<TCTeamInfo> serverTeam) {
 	std::vector<Standalone<StringRef>> machineIDs;
-	for (auto& server : serverTeam->getServers()) {
+	for (const auto& server : serverTeam->getServers()) {
 		Reference<TCMachineInfo> machine = server->machine;
-		machineIDs.push_back(machine->machineID);
+		machineIDs.push_back(machine->getID());
 	}
 
 	std::sort(machineIDs.begin(), machineIDs.end());
@@ -3490,8 +3483,8 @@ void DDTeamCollection::traceTeamCollectionInfo() const {
 	int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * totalHealthyMachineCount;
 	int healthyMachineTeamCount = getHealthyMachineTeamCount();
 
-	std::pair<uint64_t, uint64_t> minMaxTeamsOnServer = calculateMinMaxServerTeamsOnServer();
-	std::pair<uint64_t, uint64_t> minMaxMachineTeamsOnMachine = calculateMinMaxMachineTeamsOnMachine();
+	const auto [minTeamsOnServer, maxTeamsOnServer] = calculateMinMaxServerTeamsOnServer();
+	const auto [minMachineTeamsOnMachine, maxMachineTeamsOnMachine] = calculateMinMaxMachineTeamsOnMachine();
 
 	TraceEvent("TeamCollectionInfo", distributorId)
 	    .detail("Primary", primary)
@@ -3506,10 +3499,10 @@ void DDTeamCollection::traceTeamCollectionInfo() const {
 	    .detail("DesiredMachineTeams", desiredMachineTeams)
 	    .detail("MaxMachineTeams", maxMachineTeams)
 	    .detail("TotalHealthyMachines", totalHealthyMachineCount)
-	    .detail("MinTeamsOnServer", minMaxTeamsOnServer.first)
-	    .detail("MaxTeamsOnServer", minMaxTeamsOnServer.second)
-	    .detail("MinMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.first)
-	    .detail("MaxMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.second)
+	    .detail("MinTeamsOnServer", minTeamsOnServer)
+	    .detail("MaxTeamsOnServer", maxTeamsOnServer)
+	    .detail("MinMachineTeamsOnMachine", minMachineTeamsOnMachine)
+	    .detail("MaxMachineTeamsOnMachine", maxMachineTeamsOnMachine)
 	    .detail("DoBuildTeams", doBuildTeams)
 	    .trackLatest("TeamCollectionInfo");
 
@@ -3526,25 +3519,13 @@ void DDTeamCollection::traceTeamCollectionInfo() const {
 
 bool DDTeamCollection::removeTeam(Reference<TCTeamInfo> team) {
 	TraceEvent("RemovedServerTeam", distributorId).detail("Team", team->getDesc());
-	bool found = false;
-	for (int t = 0; t < teams.size(); t++) {
-		if (teams[t] == team) {
-			teams[t--] = teams.back();
-			teams.pop_back();
-			found = true;
-			break;
-		}
-	}
+	auto originalSize = teams.size();
+	teams.erase(std::remove(teams.begin(), teams.end(), team), teams.end());
+	bool found = (originalSize == teams.size());
 
-	for (const auto& server : team->getServers()) {
-		for (int t = 0; t < server->teams.size(); t++) {
-			if (server->teams[t] == team) {
-				ASSERT(found);
-				server->teams[t--] = server->teams.back();
-				server->teams.pop_back();
-				break; // The teams on a server should never duplicate
-			}
-		}
+	for (auto& server : team->getServers()) {
+		// TODO: This should be a method of TCServerInfo
+		server->teams.erase(std::remove(server->teams.begin(), server->teams.end(), team), server->teams.end());
 	}
 
 	// Remove the team from its machine team
@@ -3564,7 +3545,7 @@ void DDTeamCollection::removeMachine(Reference<TCMachineInfo> removedMachineInfo
 	for (auto& machineTeam : removedMachineInfo->machineTeams) {
 		machinesWithAjoiningTeams.insert(machineTeam->machineIDs.begin(), machineTeam->machineIDs.end());
 	}
-	machinesWithAjoiningTeams.erase(removedMachineInfo->machineID);
+	machinesWithAjoiningTeams.erase(removedMachineInfo->getID());
 	// For each machine in a machine team with the removed machine,
 	// erase shared machine teams from the list of teams.
 	for (auto it = machinesWithAjoiningTeams.begin(); it != machinesWithAjoiningTeams.end(); ++it) {
@@ -3572,7 +3553,7 @@ void DDTeamCollection::removeMachine(Reference<TCMachineInfo> removedMachineInfo
 		for (int t = 0; t < machineTeams.size(); t++) {
 			auto& machineTeam = machineTeams[t];
 			if (std::count(machineTeam->machineIDs.begin(), machineTeam->machineIDs.end(),
-			               removedMachineInfo->machineID)) {
+			               removedMachineInfo->getID())) {
 				machineTeams[t--] = machineTeams.back();
 				machineTeams.pop_back();
 			}
@@ -3583,7 +3564,7 @@ void DDTeamCollection::removeMachine(Reference<TCMachineInfo> removedMachineInfo
 	// Remove global machine team that includes removedMachineInfo
 	for (int t = 0; t < machineTeams.size(); t++) {
 		auto& machineTeam = machineTeams[t];
-		if (std::count(machineTeam->machineIDs.begin(), machineTeam->machineIDs.end(), removedMachineInfo->machineID)) {
+		if (std::count(machineTeam->machineIDs.begin(), machineTeam->machineIDs.end(), removedMachineInfo->getID())) {
 			removeMachineTeam(machineTeam);
 			// removeMachineTeam will swap the last team in machineTeams vector into [t];
 			// t-- to avoid skipping the element
@@ -3592,8 +3573,8 @@ void DDTeamCollection::removeMachine(Reference<TCMachineInfo> removedMachineInfo
 	}
 
 	// Remove removedMachineInfo from machine's global info
-	machine_info.erase(removedMachineInfo->machineID);
-	TraceEvent("MachineLocalityMapUpdate").detail("MachineUIDRemoved", removedMachineInfo->machineID.toString());
+	machine_info.erase(removedMachineInfo->getID());
+	TraceEvent("MachineLocalityMapUpdate").detail("MachineUIDRemoved", removedMachineInfo->getID().toString());
 
 	// We do not update macineLocalityMap when a machine is removed because we will do so when we use it in
 	// addBestMachineTeams()
@@ -3606,7 +3587,7 @@ bool DDTeamCollection::isOnSameMachineTeam(const TCTeamInfo& team) const {
 	std::vector<Standalone<StringRef>> machineIDs;
 	for (const auto& server : team.getServers()) {
 		if (!server->machine.isValid()) return false;
-		machineIDs.push_back(server->machine->machineID);
+		machineIDs.push_back(server->machine->getID());
 	}
 	std::sort(machineIDs.begin(), machineIDs.end());
 
@@ -3654,8 +3635,8 @@ bool DDTeamCollection::isMachineTeamHealthy(TCMachineTeamInfo const& machineTeam
 
 int DDTeamCollection::calculateHealthyMachineCount() const {
 	int totalHealthyMachineCount = 0;
-	for (auto& m : machine_info) {
-		if (isMachineHealthy(m.second.getPtr())) {
+	for (auto& [_, machine] : machine_info) {
+		if (isMachineHealthy(machine.getPtr())) {
 			++totalHealthyMachineCount;
 		}
 	}
@@ -3688,12 +3669,12 @@ bool DDTeamCollection::notEnoughMachineTeamsForAMachine() const {
 std::pair<int64_t, int64_t> DDTeamCollection::calculateMinMaxServerTeamsOnServer() const {
 	int64_t minTeams = std::numeric_limits<int64_t>::max();
 	int64_t maxTeams = 0;
-	for (auto& server : server_info) {
-		if (server_status.get(server.first).isUnhealthy()) {
+	for (auto& [id, server] : server_info) {
+		if (server_status.get(id).isUnhealthy()) {
 			continue;
 		}
-		minTeams = std::min((int64_t)server.second->teams.size(), minTeams);
-		maxTeams = std::max((int64_t)server.second->teams.size(), maxTeams);
+		minTeams = std::min((int64_t)server->teams.size(), minTeams);
+		maxTeams = std::max((int64_t)server->teams.size(), maxTeams);
 	}
 	return std::make_pair(minTeams, maxTeams);
 }
@@ -3701,12 +3682,12 @@ std::pair<int64_t, int64_t> DDTeamCollection::calculateMinMaxServerTeamsOnServer
 std::pair<int64_t, int64_t> DDTeamCollection::calculateMinMaxMachineTeamsOnMachine() const {
 	int64_t minTeams = std::numeric_limits<int64_t>::max();
 	int64_t maxTeams = 0;
-	for (auto& machine : machine_info) {
-		if (!isMachineHealthy(machine.second.getPtr())) {
+	for (const auto& [id, machine] : machine_info) {
+		if (!isMachineHealthy(machine.getPtr())) {
 			continue;
 		}
-		minTeams = std::min<int64_t>((int64_t)machine.second->machineTeams.size(), minTeams);
-		maxTeams = std::max<int64_t>((int64_t)machine.second->machineTeams.size(), maxTeams);
+		minTeams = std::min<int64_t>((int64_t)machine->machineTeams.size(), minTeams);
+		maxTeams = std::max<int64_t>((int64_t)machine->machineTeams.size(), maxTeams);
 	}
 	return std::make_pair(minTeams, maxTeams);
 }
@@ -3793,7 +3774,7 @@ void DDTeamCollection::traceMachineLocalityMap() const {
 }
 
 bool DDTeamCollection::isMachineHealthy(TCMachineInfo const* machine) const {
-	if (machine == nullptr || machine_info.find(machine->machineID) == machine_info.end() ||
+	if (machine == nullptr || machine_info.find(machine->getID()) == machine_info.end() ||
 	    machine->serversOnMachine.empty()) {
 		return false;
 	}
@@ -3841,26 +3822,26 @@ Future<Void> DDTeamCollection::storageServerTracker(Database cx, TCServerInfo* s
 void DDTeamCollection::rebuildMachineLocalityMap() {
 	machineLocalityMap.clear();
 	int numHealthyMachine = 0;
-	for (auto machine = machine_info.begin(); machine != machine_info.end(); ++machine) {
-		if (machine->second->serversOnMachine.empty()) {
+	for (const auto& [_, machine] : machine_info) {
+		if (machine->serversOnMachine.empty()) {
 			TraceEvent(SevWarn, "RebuildMachineLocalityMapError")
-			    .detail("Machine", machine->second->machineID.toString())
+			    .detail("Machine", machine->getID().toString())
 			    .detail("NumServersOnMachine", 0);
 			continue;
 		}
-		if (!isMachineHealthy(machine->second.getPtr())) {
+		if (!isMachineHealthy(machine.getPtr())) {
 			continue;
 		}
-		Reference<TCServerInfo> representativeServer = machine->second->serversOnMachine[0];
+		Reference<TCServerInfo> representativeServer = machine->serversOnMachine[0];
 		auto& locality = representativeServer->lastKnownInterface.locality;
 		if (!isValidLocality(*configuration.storagePolicy, locality)) {
 			TraceEvent(SevWarn, "RebuildMachineLocalityMapError")
-			    .detail("Machine", machine->second->machineID.toString())
+			    .detail("Machine", machine->getID().toString())
 			    .detail("InvalidLocality", locality.toString());
 			continue;
 		}
 		const LocalityEntry& localityEntry = machineLocalityMap.add(locality, &representativeServer->getID());
-		machine->second->localityEntry = localityEntry;
+		machine->localityEntry = localityEntry;
 		++numHealthyMachine;
 	}
 }
@@ -3900,18 +3881,18 @@ bool DDTeamCollection::removeMachineTeam(Reference<TCMachineTeamInfo> targetMT) 
 Reference<TCServerInfo> DDTeamCollection::findOneLeastUsedServer() const {
 	std::vector<Reference<TCServerInfo>> leastUsedServers;
 	int minTeams = std::numeric_limits<int>::max();
-	for (auto& server : server_info) {
+	for (auto& [id, server] : server_info) {
 		// Only pick healthy server, which is not failed or excluded.
-		if (server_status.get(server.first).isUnhealthy()) continue;
-		if (!isValidLocality(*configuration.storagePolicy, server.second->lastKnownInterface.locality)) continue;
+		if (server_status.get(id).isUnhealthy()) continue;
+		if (!isValidLocality(*configuration.storagePolicy, server->lastKnownInterface.locality)) continue;
 
-		int numTeams = server.second->teams.size();
+		int numTeams = server->teams.size();
 		if (numTeams < minTeams) {
 			minTeams = numTeams;
 			leastUsedServers.clear();
 		}
 		if (minTeams == numTeams) {
-			leastUsedServers.push_back(server.second);
+			leastUsedServers.push_back(server);
 		}
 	}
 
@@ -3960,8 +3941,8 @@ bool DDTeamCollection::notEnoughTeamsForAServer() const {
 	// (#servers * DESIRED_TEAMS_PER_SERVER * storageTeamSize) / #servers.
 	int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
 	ASSERT(targetTeamNumPerServer > 0);
-	for (auto& s : server_info) {
-		if (s.second->teams.size() < targetTeamNumPerServer && !server_status.get(s.first).isUnhealthy()) {
+	for (auto& [id, server] : server_info) {
+		if (server->teams.size() < targetTeamNumPerServer && !server_status.get(id).isUnhealthy()) {
 			return true;
 		}
 	}
