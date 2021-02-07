@@ -169,3 +169,7 @@ bool TCServerInfo::removeTeam(Reference<TCTeamInfo> const& team) {
 	teams.erase(it, teams.end());
 	return true;
 }
+
+void TCServerInfo::clearCollection() {
+	collection = nullptr;
+}

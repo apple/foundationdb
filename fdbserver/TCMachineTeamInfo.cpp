@@ -20,8 +20,6 @@
 
 #include "TCMachineTeamInfo.h"
 
-#include <sstream>
-
 TCMachineTeamInfo::TCMachineTeamInfo(vector<Reference<TCMachineInfo>> const& machines)
   : machines(machines), id(deterministicRandom()->randomUniqueID()) {
 	machineIDs.reserve(machines.size());
@@ -37,15 +35,15 @@ int TCMachineTeamInfo::size() const {
 }
 
 std::string TCMachineTeamInfo::getMachineIDsStr() const {
-	std::stringstream ss;
-
 	if (machineIDs.empty()) return "[unset]";
 
+	std::string result;
+
 	for (const auto& id : machineIDs) {
-		ss << id.contents().toString() << " ";
+		result += id.contents().toString() + " ";
 	}
 
-	return std::move(ss).str();
+	return result;
 }
 
 bool TCMachineTeamInfo::operator==(const TCMachineTeamInfo& rhs) const {

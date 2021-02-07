@@ -33,9 +33,9 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	Future<Void> tracker;
 	UID id;
 	std::vector<Reference<TCTeamInfo>> teams;
+	DDTeamCollection* collection;
 
 public:
-	DDTeamCollection* collection;
 	StorageServerInterface lastKnownInterface;
 	ProcessClass lastKnownClass;
 	Reference<TCMachineInfo> machine;
@@ -67,5 +67,6 @@ public:
 	bool isCorrectStoreType(KeyValueStoreType configStoreType) const;
 	Future<Void> updateServerMetrics();
 	Future<Void> serverMetricsPolling();
+	void clearCollection();
 	~TCServerInfo();
 };

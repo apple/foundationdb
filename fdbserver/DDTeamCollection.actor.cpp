@@ -2500,7 +2500,7 @@ DDTeamCollection::~DDTeamCollection() {
 	//  before the server_status map to which it has a pointer, is destroyed.
 	for (auto& [_, info] : server_info) {
 		info->cancelTracker();
-		info->collection = nullptr;
+		info->clearCollection();
 	}
 	// TraceEvent("DDTeamCollectionDestructed", distributorId)
 	//     .detail("Primary", primary)
@@ -3574,7 +3574,7 @@ void DDTeamCollection::removeMachine(Reference<TCMachineInfo> removedMachineInfo
 	machine_info.erase(removedMachineInfo->getID());
 	TraceEvent("MachineLocalityMapUpdate").detail("MachineUIDRemoved", removedMachineInfo->getID().toString());
 
-	// We do not update macineLocalityMap when a machine is removed because we will do so when we use it in
+	// We do not update machineLocalityMap when a machine is removed because we will do so when we use it in
 	// addBestMachineTeams()
 	// rebuildMachineLocalityMap();
 }
