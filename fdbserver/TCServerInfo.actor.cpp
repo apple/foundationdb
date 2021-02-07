@@ -173,3 +173,11 @@ bool TCServerInfo::removeTeam(Reference<TCTeamInfo> const& team) {
 void TCServerInfo::clearCollection() {
 	collection = nullptr;
 }
+
+LocalityEntry const& TCServerInfo::getLocalityEntry() const {
+	return localityEntry;
+}
+
+void TCServerInfo::setLocalityEntry(LocalityEntry const& localityEntry) {
+	this->localityEntry = localityEntry;
+}

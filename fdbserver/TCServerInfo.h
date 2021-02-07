@@ -34,6 +34,7 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	UID id;
 	std::vector<Reference<TCTeamInfo>> teams;
 	DDTeamCollection* collection;
+	LocalityEntry localityEntry;
 
 public:
 	StorageServerInterface lastKnownInterface;
@@ -46,7 +47,6 @@ public:
 	Promise<Void> updated;
 	Promise<Void> wakeUpTracker;
 	bool inDesiredDC;
-	LocalityEntry localityEntry;
 	AsyncVar<bool> wrongStoreTypeToRemove;
 	AsyncVar<bool> ssVersionTooFarBehind;
 	// A storage server's StoreType does not change.
@@ -68,6 +68,8 @@ public:
 	Future<Void> updateServerMetrics();
 	Future<Void> serverMetricsPolling();
 	void clearCollection();
+	LocalityEntry const& getLocalityEntry() const;
+	void setLocalityEntry(LocalityEntry const& localityEntry);
 	~TCServerInfo();
 
 	struct CompareServers {

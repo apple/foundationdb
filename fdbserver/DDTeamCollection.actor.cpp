@@ -2417,7 +2417,7 @@ void DDTeamCollection::resetLocalitySet() {
 	LocalityMap<UID>* storageServerMap = (LocalityMap<UID>*)storageServerSet.getPtr();
 
 	for (auto& [id, server] : server_info) {
-		server->localityEntry = storageServerMap->add(server->lastKnownInterface.locality, &server->getID());
+		server->setLocalityEntry(storageServerMap->add(server->lastKnownInterface.locality, &server->getID()));
 	}
 }
 
@@ -2429,7 +2429,7 @@ bool DDTeamCollection::satisfiesPolicy(const std::vector<Reference<TCServerInfo>
 	}
 
 	for (int i = 0; i < amount; i++) {
-		forcedEntries.push_back(team[i]->localityEntry);
+		forcedEntries.push_back(team[i]->getLocalityEntry());
 	}
 
 	bool result = storageServerSet->selectReplicas(configuration.storagePolicy, forcedEntries, resultEntries);
@@ -3128,7 +3128,7 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 				// Randomly choose 1 least used machine
 				Reference<TCMachineInfo> tcMachineInfo = deterministicRandom()->randomChoice(leastUsedMachines);
 				ASSERT(!tcMachineInfo->getServersOnMachine().empty());
-				LocalityEntry process = tcMachineInfo->localityEntry;
+				LocalityEntry process = tcMachineInfo->getLocalityEntry();
 				forcedAttributes.push_back(process);
 				TraceEvent("ChosenMachine")
 				    .detail("MachineInfo", tcMachineInfo->getID())
@@ -3834,7 +3834,7 @@ void DDTeamCollection::rebuildMachineLocalityMap() {
 			continue;
 		}
 		const LocalityEntry& localityEntry = machineLocalityMap.add(locality, &representativeServer->getID());
-		machine->localityEntry = localityEntry;
+		machine->setLocalityEntry(localityEntry);
 		++numHealthyMachine;
 	}
 }

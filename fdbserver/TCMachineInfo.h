@@ -33,9 +33,9 @@ class TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
 	Standalone<StringRef> machineID;
 	TCServerInfo::ServerSet serversOnMachine;
 	std::vector<Reference<TCMachineTeamInfo>> machineTeams; // SOMEDAY: split good and bad machine teams.
+	LocalityEntry localityEntry;
 
 public:
-	LocalityEntry localityEntry;
 
 	explicit TCMachineInfo(Reference<TCServerInfo> server, const LocalityEntry& entry);
 	Standalone<StringRef> getID() const;
@@ -48,4 +48,6 @@ public:
 	void removeServer(Reference<TCServerInfo> const& server);
 	void addMachineTeam(Reference<TCMachineTeamInfo> const& machineTeam);
 	void clearMachineTeams();
+	LocalityEntry const& getLocalityEntry() const;
+	void setLocalityEntry(LocalityEntry const& localityEntry);
 };

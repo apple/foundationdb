@@ -83,3 +83,11 @@ void TCMachineInfo::addMachineTeam(Reference<TCMachineTeamInfo> const& machineTe
 void TCMachineInfo::clearMachineTeams() {
 	machineTeams.clear();
 }
+
+LocalityEntry const& TCMachineInfo::getLocalityEntry() const {
+	return localityEntry;
+}
+
+void TCMachineInfo::setLocalityEntry(const LocalityEntry& localityEntry) {
+	this->localityEntry = localityEntry;
+}
