@@ -221,7 +221,11 @@ public:
 
 	std::string getFilename() const override { return filename; }
 
-	void addref() override {
+	void setRateControl(Reference<IRateControl> const& rc) override { rateControl = rc; }
+
+	Reference<IRateControl> const& getRateControl() override { return rateControl; }
+
+	void addref() override { 
 		ReferenceCounted<AsyncFileCached>::addref(); 
 		//TraceEvent("AsyncFileCachedAddRef").detail("Filename", filename).detail("Refcount", debugGetReferenceCount()).backtrace();
 	}
@@ -230,9 +234,15 @@ public:
 			// If this is ever ThreadSafeReferenceCounted...
 			// setrefCountUnsafe(0);
 
+			if(rateControl) {
+				TraceEvent(SevDebug, "AsyncFileCachedKillWaiters")
+					.detail("Filename", filename);
+				rateControl->killWaiters(io_error());
+			}
+
 			auto f = quiesce();
-			//TraceEvent("AsyncFileCachedDel").detail("Filename", filename)
-			//	.detail("Refcount", debugGetReferenceCount()).detail("CanDie", f.isReady()).backtrace();
+			TraceEvent("AsyncFileCachedDel").detail("Filename", filename)
+				.detail("Refcount", debugGetReferenceCount()).detail("CanDie", f.isReady()).backtrace();
 			if (f.isReady())
 				delete this;
 			else
@@ -253,6 +263,7 @@ private:
 	Reference<EvictablePageCache> pageCache;
 	Future<Void> currentTruncate;
 	int64_t currentTruncateSize;
+	Reference<IRateControl> rateControl;
 
 	// Map of pointers which hold page buffers for pages which have been overwritten
 	// but at the time of write there were still readZeroCopy holders.
@@ -278,8 +289,10 @@ private:
 	Int64MetricHandle countCachePageReadsMerged;
 	Int64MetricHandle countCacheReadBytes;
 
-	AsyncFileCached( Reference<IAsyncFile> uncached, const std::string& filename, int64_t length, Reference<EvictablePageCache> pageCache )
-		: uncached(uncached), filename(filename), length(length), prevLength(length), pageCache(pageCache), currentTruncate(Void()), currentTruncateSize(0) {
+	AsyncFileCached(Reference<IAsyncFile> uncached, const std::string& filename, int64_t length,
+	                Reference<EvictablePageCache> pageCache)
+	  : uncached(uncached), filename(filename), length(length), prevLength(length), pageCache(pageCache),
+	    currentTruncate(Void()), currentTruncateSize(0), rateControl(nullptr) {
 		if( !g_network->isSimulated() ) {
 			countFileCacheWrites.init(LiteralStringRef("AsyncFile.CountFileCacheWrites"), filename);
 			countFileCacheReads.init(LiteralStringRef("AsyncFile.CountFileCacheReads"), filename);
@@ -497,6 +510,18 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 			wait( self->notReading && self->notFlushing );
 
 			if (dirty) {
+				// Wait for rate control if it is set
+				if (self->owner->getRateControl()) {
+					int allowance = 1;
+					// If I/O size is defined, wait for the calculated I/O quota
+					if (FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_IO_SIZE > 0) {
+						allowance = (self->pageCache->pageSize + FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_IO_SIZE - 1) /
+						            FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_IO_SIZE; // round up
+						ASSERT(allowance > 0);
+					}
+					wait(self->owner->getRateControl()->getAllowance(allowance));
+				}
+
 				if ( self->pageOffset + self->pageCache->pageSize > self->owner->length ) {
 					ASSERT(self->pageOffset < self->owner->length);
 					memset( static_cast<uint8_t *>(self->data) + self->owner->length - self->pageOffset, 0, self->pageCache->pageSize - (self->owner->length - self->pageOffset) );

@@ -63,6 +63,12 @@ const uint32_t RESERVED_COUNT = 1U<<29;
 VFSAsyncFile::VFSAsyncFile(std::string const& filename, int flags)
 : filename(filename), flags(flags), pLockCount(&filename_lockCount_openCount[filename].first), debug_zcrefs(0), debug_zcreads(0), debug_reads(0), chunkSize(0) {
 	filename_lockCount_openCount[filename].second++;
+
+	TraceEvent(SevDebug, "VFSAsyncFileConstruct")
+		.detail("Filename", filename)
+		.detail("OpenCount", filename_lockCount_openCount[filename].second)
+		.detail("LockCount", filename_lockCount_openCount[filename].first)
+		.backtrace();
 }
 
 std::map<std::string, std::pair<uint32_t,int>> VFSAsyncFile::filename_lockCount_openCount;
@@ -70,9 +76,10 @@ std::map<std::string, std::pair<uint32_t,int>> VFSAsyncFile::filename_lockCount_
 static int asyncClose(sqlite3_file *pFile){
 	VFSAsyncFile *p = (VFSAsyncFile*)pFile;
 
-	/*TraceEvent("VFSAsyncClose").detail("Fd", p->file->debugFD())
-		.detail("Filename", p->filename).detail("ZCRefs", p->debug_zcrefs)
-		.detail("ZCReads", p->debug_zcreads).detail("NormalReads", p->debug_reads).backtrace();*/
+	TraceEvent(SevDebug, "VFSAsyncFileDestroy")
+		.detail("Filename", p->filename)
+		.backtrace();
+
 	//printf("Closing %s: %d zcrefs, %d/%d reads zc\n", filename.c_str(), debug_zcrefs, debug_zcreads, debug_zcreads+debug_reads);
 	ASSERT( !p->debug_zcrefs );
 
@@ -205,7 +212,7 @@ static int asyncSync(sqlite3_file *pFile, int flags){
 			VFSAsyncFile::setInjectedError(SQLITE_IOERR_FSYNC);
 		}
 
-		TraceEvent("VFSSyncError")
+		TraceEvent("VFSAsyncFileSyncError")
 			.error(e)
 			.detail("Filename", p->filename)
 			.detail("Sqlite3File", (int64_t)pFile)
@@ -467,9 +474,19 @@ static int asyncDeviceCharacteristics(sqlite3_file *pFile){ return 0; }
 	}
 
 	VFSAsyncFile::~VFSAsyncFile() {
-		//TraceEvent("VFSAsyncFileDel").detail("Filename", filename);
+
+		TraceEvent(SevDebug, "VFSAsyncFileDestroyStart")
+			.detail("Filename", filename)
+			.detail("OpenCount", filename_lockCount_openCount[filename].second)
+			.detail("LockCount", filename_lockCount_openCount[filename].first)
+			.backtrace();
+
 		if (!--filename_lockCount_openCount[filename].second) {
 			filename_lockCount_openCount.erase(filename);
+
+			TraceEvent(SevDebug, "VFSAsyncFileDestroy")
+				.detail("Filename", filename)
+				.backtrace();
 
 			//Always delete the shared memory when the last copy of the file is deleted.  In simulation, this is helpful because "killing" a file without properly closing
 			//it can result in a shared memory state that causes corruption when reopening the killed file.  The only expected penalty from doing this
@@ -540,17 +557,15 @@ static int asyncOpen(
 		// Note that SQLiteDB::open also opens the db file, so its flags and modes are important, too
 		p->file = waitForAndGet( IAsyncFileSystem::filesystem()->open( p->filename, oflags, 0600 ) );
 
-		/*TraceEvent("VFSOpened")
+		TraceEvent(SevDebug, "VFSAsyncFileOpened")
 			.detail("Filename", p->filename)
-			.detail("Fd", DEBUG_DETERMINISM ? 0 : p->file->debugFD())
-			.detail("Flags", flags)
-			.detail("Sqlite3File", DEBUG_DETERMINISM ? 0 : (int64_t)pFile)
-			.detail("IAsyncFile", DEBUG_DETERMINISM ? 0 : (int64_t)p->file.getPtr());*/
+			.backtrace();
+
 	} catch (Error& e) {
 		if(e.isInjectedFault()) {
 			VFSAsyncFile::setInjectedError(SQLITE_CANTOPEN);
 		}
-		TraceEvent("SQLiteOpenFail").error(e).detail("Filename", p->filename);
+		TraceEvent("VFSAsyncFileOpenError").error(e).detail("Filename", p->filename);
 		p->~VFSAsyncFile();
 		return SQLITE_CANTOPEN;
 	}
@@ -728,7 +743,7 @@ static int asyncSleep(sqlite3_vfs *pVfs, int microseconds){
 		if(e.isInjectedFault()) {
 			VFSAsyncFile::setInjectedError(SQLITE_ERROR);
 		}
-		TraceEvent(SevError, "AsyncSleepError").error(e,true);
+		TraceEvent(SevError, "VFSAsyncSleepError").error(e,true);
 		return 0;
 	}
 }

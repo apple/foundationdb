@@ -27,8 +27,6 @@
 
 #include "flow/crc32c.h"
 
-#define NOMINMAX
-
 #ifndef __aarch64__
 #include <nmmintrin.h>
 #endif
