@@ -22,6 +22,11 @@ env_set(USE_LIBCXX "${_use_libcxx}" BOOL "Use libc++")
 static_link_libcxx(_static_link_libcxx)
 env_set(STATIC_LINK_LIBCXX "${_static_link_libcxx}" BOOL "Statically link libstdcpp/libc++")
 
+set(USE_SANITIZER OFF)
+if(USE_ASAN OR USE_VALGRIND OR USE_MSAN OR USE_TSAN OR USE_UBSAN)
+  set(USE_SANITIZER ON)
+endif()
+
 if(USE_LIBCXX AND STATIC_LINK_LIBCXX AND NOT USE_LD STREQUAL "LLD")
   message(FATAL_ERROR "Unsupported configuration: STATIC_LINK_LIBCXX with libc++ only works if USE_LD=LLD")
 endif()
