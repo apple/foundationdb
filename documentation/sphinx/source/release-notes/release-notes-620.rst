@@ -4,6 +4,16 @@
 Release Notes
 #############
 
+6.2.30
+======
+* A storage server which has fallen behind will deprioritize reads in order to catch up. This change causes some saturating workloads to experience high read latencies instead of high GRV latencies. `(PR #4218) <https://github.com/apple/foundationdb/pull/4218>`_
+* Added ``low_priority_queries`` to the ``processes.roles`` section of status to record the number of deprioritized reads on each storage server. `(PR #4218) <https://github.com/apple/foundationdb/pull/4218>`_
+* Added ``low_priority_reads`` to the ``workload.operations`` section of status to record the total number of deprioritized reads. `(PR #4218) <https://github.com/apple/foundationdb/pull/4218>`_
+* Backup to locally mounted filesystems now appends to files in large block writes, 1MB each by default. `(PR #4199) <https://github.com/apple/foundationdb/pull/4199>`_
+* Changed the default SSL implementation from OpenSSL to BoringSSL `(PR #4153) <https://github.com/apple/foundationdb/pull/4153>`_
+* SQLite now supports configurable disk write rate limiting. `(PR #4259) <https://github.com/apple/foundationdb/pull/4259>`_
+* If a disk operation takes more than two minutes, the system will treat the disk as failed. `(PR #4243) <https://github.com/apple/foundationdb/pull/4243>`_
+
 6.2.29
 ======
 * Fix invalid memory access on data distributor when snapshotting large clusters. `(PR #4076) <https://github.com/apple/foundationdb/pull/4076>`_
