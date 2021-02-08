@@ -32,6 +32,7 @@ set(JAVA_JUNIT_TESTS
   src/junit/com/apple/foundationdb/tuple/TuplePackingTest.java
   src/junit/com/apple/foundationdb/tuple/TupleSerializationTest.java
   src/junit/com/apple/foundationdb/RangeQueryTest.java
+  src/junit/com/apple/foundationdb/EventKeeperTest.java
   )
 
 # Resources that are used in unit testing, but are not explicitly test files (JUnit rules, utility

@@ -378,18 +378,64 @@ public class FDB {
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
 	 *  <a href="/foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
+	 * @param eventKeeper the EventKeeper to use for instrumentation calls, or {@code null} if no instrumentation is desired.
+	 *
+	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
+	 */
+	public Database open(String clusterFilePath, EventKeeper eventKeeper) throws FDBException {
+		return open(clusterFilePath, DEFAULT_EXECUTOR, eventKeeper);
+	}
+
+	/**
+	 * Initializes networking if required and connects to the cluster specified by {@code clusterFilePath}.<br>
+	 *  <br>
+	 *  A single client can use this function multiple times to connect to different
+	 *  clusters simultaneously, with each invocation requiring its own cluster file.
+	 *  To connect to multiple clusters running at different, incompatible versions,
+	 *  the <a href="/foundationdb/api-general.html#multi-version-client-api" target="_blank">multi-version client API</a>
+	 *  must be used.
+	 *
+	 * @param clusterFilePath the
+	 *  <a href="/foundationdb/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  defining the FoundationDB cluster. This can be {@code null} if the
+	 *  <a href="/foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  is to be used.
 	 * @param e the {@link Executor} to use to execute asynchronous callbacks
 	 *
 	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
 	 */
 	public Database open(String clusterFilePath, Executor e) throws FDBException {
+		return open(clusterFilePath, e, null);
+	}
+
+	/**
+	 * Initializes networking if required and connects to the cluster specified by {@code clusterFilePath}.<br>
+	 *  <br>
+	 *  A single client can use this function multiple times to connect to different
+	 *  clusters simultaneously, with each invocation requiring its own cluster file.
+	 *  To connect to multiple clusters running at different, incompatible versions,
+	 *  the <a href="/foundationdb/api-general.html#multi-version-client-api" target="_blank">multi-version client API</a>
+	 *  must be used.
+	 *
+	 * @param clusterFilePath the
+	 *  <a href="/foundationdb/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  defining the FoundationDB cluster. This can be {@code null} if the
+	 *  <a href="/foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  is to be used.
+	 * @param e the {@link Executor} to use to execute asynchronous callbacks
+	 * @param eventKeeper the {@link EventKeeper} to use to record instrumentation metrics, or {@code null} if no 
+	 *  instrumentation is desired.
+	 *
+	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
+	 */
+	public Database open(String clusterFilePath, Executor e,EventKeeper eventKeeper) throws FDBException {
 		synchronized(this) {
 			if(!isConnected()) {
 				startNetwork();
 			}
 		}
 
-		return new FDBDatabase(Database_create(clusterFilePath), e);
+		return new FDBDatabase(Database_create(clusterFilePath), e, eventKeeper);
 	}
 
 	/**
