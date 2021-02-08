@@ -107,9 +107,7 @@ set(JAVA_TESTS_SRCS
   src/test/com/apple/foundationdb/test/WatchTest.java
   src/test/com/apple/foundationdb/test/WhileTrueTest.java)
 
-set(JAVA_JUNIT_TESTS
-  src/junit/com/apple/foundationdb/tuple/AllTests.java
-  src/junit/com/apple/foundationdb/tuple/ArrayUtilTests.java)
+include(src/junit/tests.cmake)
 
 set(GENERATED_JAVA_DIR ${CMAKE_CURRENT_BINARY_DIR}/src/main/com/apple/foundationdb)
 file(MAKE_DIRECTORY ${GENERATED_JAVA_DIR})
@@ -275,10 +273,33 @@ if(NOT OPEN_FOR_IDE)
       EXPECTED_HASH SHA256=4877670629ab96f34f5f90ab283125fcd9acb7e683e66319a68be6eb2cca60de)
     add_jar(fdb-junit SOURCES ${JAVA_JUNIT_TESTS} INCLUDE_JARS fdb-java ${CMAKE_BINARY_DIR}/packages/junit-4.13.jar)
     get_property(junit_jar_path TARGET fdb-junit PROPERTY JAR_FILE)
-    add_test(NAME junit
-      COMMAND ${Java_JAVA_EXECUTABLE}
-              -cp "${target_jar}:${junit_jar_path}:${CMAKE_BINARY_DIR}/packages/junit-4.13.jar:${CMAKE_BINARY_DIR}/packages/hamcrest-all-1.3.jar"
-              -Djava.library.path=${CMAKE_BINARY_DIR}/lib
-              org.junit.runner.JUnitCore "com.apple.foundationdb.tuple.AllTests")
+
+#      Add a ctest test configuration for each Junit class in the JAVA_JUNIT_TESTS variable.
+#
+#      To add a new junit test, add the class to the JAVA_JUNIT_TESTS variable in `src/junit/tests.cmake`. Note that if you run a Suite, 
+#      ctest will NOT display underlying details of the suite itself, so it's best to avoid junit suites in general. Also,
+#      if you need a different runner other than JUnitCore, you'll have to modify this so be aware.
+#
+#      To run tests (once built): navigate to bindings/java and type
+#
+#      ctest .
+#
+#      To see details of what tests run and what failures, use
+#
+#      ctest . --output-on-failure
+#
+#      And so on (see ctest documentation for more details)
+    
+    foreach(JTEST IN LISTS JAVA_JUNIT_TESTS)
+            string(REPLACE "/" "." TEST_CLASS ${JTEST})
+            string(REGEX REPLACE ".java$" "" TEST_CLASS ${TEST_CLASS})
+            string(REGEX REPLACE "^src.junit." "" TEST_CLASS ${TEST_CLASS})
+            add_test(NAME ${TEST_CLASS}
+        COMMAND ${Java_JAVA_EXECUTABLE}
+                -cp "${target_jar}:${junit_jar_path}:${CMAKE_BINARY_DIR}/packages/junit-4.13.jar:${CMAKE_BINARY_DIR}/packages/hamcrest-all-1.3.jar"
+                -Djava.library.path=${CMAKE_BINARY_DIR}/lib
+                org.junit.runner.JUnitCore "${TEST_CLASS}"
+        )
+    endforeach()
   endif()
 endif()
