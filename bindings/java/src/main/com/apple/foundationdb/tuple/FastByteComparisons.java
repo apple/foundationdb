@@ -73,6 +73,13 @@ public abstract class FastByteComparisons {
     }
 
     /**
+     * @return a byte[] comparator for use in sorting, collections, and so on internally
+     * to the Java code.
+     */
+    public static Comparator<byte[]> comparator(){
+        return LexicographicalComparerHolder.getBestComparer();
+    }
+    /**
      * Pure Java Comparer
      *
      * @return

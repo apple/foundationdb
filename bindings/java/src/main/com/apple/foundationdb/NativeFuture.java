@@ -53,7 +53,7 @@ abstract class NativeFuture<T> extends CompletableFuture<T> implements AutoClose
 		}
 	}
 
-	private void marshalWhenDone() {
+	void marshalWhenDone() {
 		try {
 			T val = null;
 			boolean shouldComplete = false;

@@ -31,11 +31,17 @@ import com.apple.foundationdb.async.AsyncUtil;
 class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsumer {
 	private DatabaseOptions options;
 	private final Executor executor;
+	private final TransactionTimer timer;
 
 	protected FDBDatabase(long cPtr, Executor executor) {
+		this(cPtr, executor, null);
+	}
+
+	protected FDBDatabase(long cPtr, Executor executor,TransactionTimer timer) {
 		super(cPtr);
 		this.executor = executor;
 		this.options = new DatabaseOptions(this);
+		this.timer = timer;
 	}
 
 	@Override
@@ -115,7 +121,7 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 		pointerReadLock.lock();
 		Transaction tr = null;
 		try {
-			tr = new FDBTransaction(Database_createTransaction(getPtr()), this, e);
+			tr = new FDBTransaction(Database_createTransaction(getPtr()), this, e,timer);
 			tr.options().setUsedDuringCommitProtectionDisable();
 			return tr;
 		} catch(RuntimeException err) {

@@ -19,7 +19,22 @@
  */
 package com.apple.foundationdb;
 
+import java.util.AbstractMap;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.NavigableMap;
+import java.util.Random;
+import java.util.TreeMap;
+import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
+
 import com.apple.foundationdb.async.AsyncIterable;
+import com.apple.foundationdb.async.AsyncIterator;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.tuple.FastByteComparisons;
 
 import org.junit.Assert;
 import org.junit.ClassRule;
@@ -27,19 +42,73 @@ import org.junit.Test;
 import org.junit.rules.TestRule;
 
 /**
- * Integration tests around Range Queries. This requires a running FDB instance to work properly; 
- * all tests will be skipped if it can't connect to a running instance relatively quickly.
+ * Integration tests around Range Queries. This requires a running FDB instance
+ * to work properly; all tests will be skipped if it can't connect to a running
+ * instance relatively quickly.
  */
 public class RangeQueryIntegrationTest {
     @ClassRule
     public static final TestRule dbRule = RequiresDatabase.require();
     private static final FDB fdb = FDB.selectAPIVersion(700);
-    
+
+    private void writeReadTest(NavigableMap<byte[],byte[]> dataToLoad, Consumer<Database> test){
+        try(Database db = fdb.open()){
+            db.run(tr->{
+                for(Map.Entry<byte[],byte[]> entry : dataToLoad.entrySet()){
+                    tr.set(entry.getKey(),entry.getValue());
+                }
+                return null;
+            });
+            try{
+                test.accept(db);
+            }finally{
+                db.run(tr->{
+                    tr.clear(new Range(dataToLoad.firstKey(),ByteArrayUtil.strinc(dataToLoad.lastKey())));
+                    return null;
+                });
+            }
+        }
+    }
+
+    @Test
+    public void canGetRowWithKeySelector() throws Exception{
+        Random rand = new Random();
+        byte[] key= new byte[128];
+        byte[] value = new byte[128];
+        rand.nextBytes(key);
+        key[0] = (byte)0xEE;
+        rand.nextBytes(value);
+
+        NavigableMap<byte[],byte[]> data = new TreeMap<>(FastByteComparisons.comparator());
+        data.put(key,value);
+        writeReadTest(data, (db)->{
+            db.run(tr ->{
+                byte[] actualValue = tr.get(key).join();
+                Assert.assertNotNull("Missing key!",actualValue);
+                Assert.assertArrayEquals("incorrect value!",value, actualValue);
+
+
+                KeySelector start =  KeySelector.firstGreaterOrEqual(new byte[]{key[0]});
+                KeySelector end = KeySelector.firstGreaterOrEqual(ByteArrayUtil.strinc(start.getKey()));
+                AsyncIterable<KeyValue> kvIterable = tr.getRange(start,end);
+                AsyncIterator<KeyValue> kvs = kvIterable.iterator();
+
+                Assert.assertTrue("Did not return a record!", kvs.hasNext());
+                KeyValue n = kvs.next();
+                Assert.assertArrayEquals("Did not return a key correctly!", key, n.getKey());
+                Assert.assertArrayEquals("Did not return the corect value!", value, n.getValue());
+
+                return null;
+            });
+        });
+    }
+
+
     @Test
     public void rangeQueryReturnsResults() throws Exception {
         /*
-         * A quick test that if you insert a record, then do a range query which includes
-         * the record, it'll be returned
+         * A quick test that if you insert a record, then do a range query which
+         * includes the record, it'll be returned
          */
         try(Database db = fdb.open()){
             db.run(tr ->{

@@ -100,7 +100,7 @@ public class FakeFDBTransaction extends FDBTransaction {
 
         // holder variable so that we can pass the range to the results function safely
         final NavigableMap<byte[], byte[]> retMap = range;
-        FutureResults fr = new FutureResults(-1L, false, executor) {
+        FutureResults fr = new FutureResults(-1L, false, executor,null) {
 
             @Override
             protected void registerMarshalCallback(Executor executor) {
