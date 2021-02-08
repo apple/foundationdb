@@ -1385,13 +1385,13 @@ void SQLiteDB::open(bool writable) {
 	if (dbFile.isError()) throw dbFile.getError(); // If we've failed to open the file, throw an exception
 	if (walFile.isError()) throw walFile.getError(); // If we've failed to open the file, throw an exception
 
-	// Set Rate control if FLOW_KNOBS are positive
-	if (FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT > 0 && FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS > 0) {
+	// Set Rate control if SERVER_KNOBS are positive
+	if (SERVER_KNOBS->SQLITE_WRITE_WINDOW_LIMIT > 0 && SERVER_KNOBS->SQLITE_WRITE_WINDOW_SECONDS > 0) {
 		// The writer thread is created before the readers, so it should initialize the rate controls.
 		if(writable) {
 			// Create a new rate control and assign it to both files.
-			Reference<SpeedLimit> rc(new SpeedLimit(FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT,
-													FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS));
+			Reference<SpeedLimit> rc(
+			    new SpeedLimit(SERVER_KNOBS->SQLITE_WRITE_WINDOW_LIMIT, SERVER_KNOBS->SQLITE_WRITE_WINDOW_SECONDS));
 			dbFile.get()->setRateControl(rc);
 			walFile.get()->setRateControl(rc);
 		} else {
@@ -1922,6 +1922,7 @@ private:
 			dbFile->setRateControl({});
 			rc->wakeWaiters();
 		}
+		dbFile.clear();
 
 		if(walFile && walFile->getRateControl()) {
 			TraceEvent(SevDebug, "KeyValueStoreSQLiteShutdownRateControl").detail("Filename", walFile->getFilename());
@@ -1929,6 +1930,7 @@ private:
 			walFile->setRateControl({});
 			rc->wakeWaiters();
 		}
+		walFile.clear();
 	}
 
 	ACTOR static Future<Void> stopOnError( KeyValueStoreSQLite* self ) {

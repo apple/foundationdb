@@ -1,3 +1,4 @@
+ARG IMAGE_TAG=0.1.24
 FROM centos:6
 
 # Clean yum cache, disable default Base repo and enable Vault
@@ -29,17 +30,35 @@ USER root
 RUN adduser --comment '' fdb && chown fdb /opt
 
 # wget of bintray without forcing UTF-8 encoding results in 403 Forbidden
+# Old versions of FDB need boost 1.67
 RUN cd /opt/ &&\
     curl -L https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.tar.bz2 -o boost_1_67_0.tar.bz2 &&\
     echo "2684c972994ee57fc5632e03bf044746f6eb45d4920c343937a465fd67a5adba  boost_1_67_0.tar.bz2" > boost-sha-67.txt &&\
     sha256sum -c boost-sha-67.txt &&\
     tar -xjf boost_1_67_0.tar.bz2 &&\
-    rm -rf boost_1_67_0.tar.bz2 boost-sha-67.txt boost_1_67_0/libs &&\
+    rm -rf boost_1_67_0.tar.bz2 boost-sha-67.txt boost_1_67_0/libs
+
+# install Boost 1.72
+# wget of bintray without forcing UTF-8 encoding results in 403 Forbidden
+RUN cd /tmp/ &&\
     curl -L https://dl.bintray.com/boostorg/release/1.72.0/source/boost_1_72_0.tar.bz2 -o boost_1_72_0.tar.bz2 &&\
     echo "59c9b274bc451cf91a9ba1dd2c7fdcaf5d60b1b3aa83f2c9fa143417cc660722  boost_1_72_0.tar.bz2" > boost-sha-72.txt &&\
     sha256sum -c boost-sha-72.txt &&\
     tar -xjf boost_1_72_0.tar.bz2 &&\
-    rm -rf boost_1_72_0.tar.bz2 boost-sha-72.txt boost_1_72_0/libs
+    cd boost_1_72_0 &&\
+    scl enable devtoolset-8 -- ./bootstrap.sh --with-libraries=context &&\
+    scl enable devtoolset-8 -- ./b2 link=static cxxflags=-std=c++14 --prefix=/opt/boost_1_72_0 install &&\
+    rm -rf boost_1_72_0.tar.bz2 boost-sha-72.txt boost_1_72_0
+
+# jemalloc (needed for FDB after 6.3)
+RUN cd /tmp/ &&\
+    curl -L https://github.com/jemalloc/jemalloc/releases/download/5.2.1/jemalloc-5.2.1.tar.bz2 -o jemalloc-5.2.1.tar.bz2 &&\
+    echo "34330e5ce276099e2e8950d9335db5a875689a4c6a56751ef3b1d8c537f887f6  jemalloc-5.2.1.tar.bz2" > jemalloc-sha.txt &&\
+    sha256sum -c jemalloc-sha.txt &&\
+    tar --no-same-owner --no-same-permissions -xjf jemalloc-5.2.1.tar.bz2 &&\
+    cd jemalloc-5.2.1 &&\
+    scl enable devtoolset-8 -- ./configure --enable-static --disable-cxx &&\
+    scl enable devtoolset-8 -- make install
 
 # install cmake
 RUN curl -L https://github.com/Kitware/CMake/releases/download/v3.13.4/cmake-3.13.4-Linux-x86_64.tar.gz -o /tmp/cmake.tar.gz &&\
@@ -79,7 +98,7 @@ RUN cd /opt/ && curl -L https://github.com/facebook/rocksdb/archive/v6.10.1.tar.
 RUN cd /opt/ && curl -L https://github.com/manticoresoftware/manticoresearch/raw/master/misc/junit/ctest2junit.xsl -o ctest2junit.xsl
 
 # Setting this environment variable switches from OpenSSL to BoringSSL
-#ENV OPENSSL_ROOT_DIR=/opt/boringssl
+ENV OPENSSL_ROOT_DIR=/opt/boringssl
 
 # install BoringSSL:  TODO: They don't seem to have releases(?)  I picked today's master SHA.
 RUN cd /opt &&\
@@ -110,8 +129,8 @@ RUN cd /opt/boringssl/build &&\
 ARG TIMEZONEINFO=America/Los_Angeles
 RUN rm -f /etc/localtime && ln -s /usr/share/zoneinfo/${TIMEZONEINFO} /etc/localtime
 
-LABEL version=0.1.22
-ENV DOCKER_IMAGEVER=0.1.22
+LABEL version=${IMAGE_TAG}
+ENV DOCKER_IMAGEVER=${IMAGE_TAG}
 ENV JAVA_HOME=/usr/lib/jvm/java-1.8.0
 ENV CC=/opt/rh/devtoolset-8/root/usr/bin/gcc
 ENV CXX=/opt/rh/devtoolset-8/root/usr/bin/g++
