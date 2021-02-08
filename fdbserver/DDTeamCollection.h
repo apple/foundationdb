@@ -256,7 +256,7 @@ public:
 	int constructMachinesFromServers();
 	void addLaggingStorageServer(Key zoneId);
 	void removeLaggingStorageServer(Key zoneId);
-	Future<Void> printSnapshotTeamsInfo();
+	Future<Void> printSnapshotTeamsInfo() const;
 	Future<Void> run(Reference<InitialDataDistribution> initData, TeamCollectionInterface tci,
 	                 Reference<AsyncVar<struct ServerDBInfo>> db, const DDEnabledState* ddEnabledState);
 };

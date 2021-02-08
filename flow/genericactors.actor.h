@@ -712,9 +712,7 @@ public:
 	AsyncTrigger() {}
 	AsyncTrigger(AsyncTrigger&& at) : v(std::move(at.v)) {}
 	void operator=(AsyncTrigger&& at) { v = std::move(at.v); }
-	Future<Void> onTrigger() {
-		return v.onChange();
-	}
+	Future<Void> onTrigger() const { return v.onChange(); }
 	void trigger() {
 		v.trigger();
 	}

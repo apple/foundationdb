@@ -119,7 +119,7 @@ public:
 
 	// Take a snapshot of necessary data structures from `DDTeamCollection` and print them out with yields to avoid slow
 	// task on the run loop.
-	ACTOR static Future<Void> printSnapshotTeamsInfo(DDTeamCollection* self) {
+	ACTOR static Future<Void> printSnapshotTeamsInfo(DDTeamCollection const* self) {
 		state DatabaseConfiguration configuration;
 		state std::map<UID, Reference<TCServerInfo>> server_info;
 		state std::map<UID, ServerStatus> server_status;
@@ -2830,7 +2830,7 @@ void DDTeamCollection::traceServerInfo() const {
 	}
 }
 
-Future<Void> DDTeamCollection::printSnapshotTeamsInfo() {
+Future<Void> DDTeamCollection::printSnapshotTeamsInfo() const {
 	return DDTeamCollectionImpl::printSnapshotTeamsInfo(this);
 }
 
