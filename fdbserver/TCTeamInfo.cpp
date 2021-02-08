@@ -1,5 +1,5 @@
 /*
- * TCTeamInfo.actor.cpp
+ * TCTeamInfo.cpp
  *
  * This source file is part of the FoundationDB open source project
  *

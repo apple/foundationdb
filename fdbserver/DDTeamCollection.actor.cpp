@@ -1,5 +1,5 @@
 /*
- * DDTeamCollection.h
+ * DDTeamCollection.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -38,8 +38,7 @@ public:
 				// overhead.
 				state vector<ProcessData> workers = wait(getWorkers(self->cx));
 				state std::set<AddressExclusion> existingAddrs;
-				for (int i = 0; i < workers.size(); i++) {
-					const ProcessData& workerData = workers[i];
+				for (const auto& workerData : workers) {
 					AddressExclusion addr(workerData.address.ip, workerData.address.port);
 					existingAddrs.insert(addr);
 					if (self->invalidLocalityAddr.count(addr) &&
@@ -400,8 +399,8 @@ public:
 			}
 
 			bool foundSrc = false;
-			for (int i = 0; i < req.src.size(); i++) {
-				if (self->server_info.count(req.src[i])) {
+			for (const auto& serverID : req.src) {
+				if (self->server_info.count(serverID)) {
 					foundSrc = true;
 					break;
 				}
@@ -428,22 +427,21 @@ public:
 
 			// Note: this block does not apply any filters from the request
 			if (!req.wantsNewServers) {
-				for (int i = 0; i < req.completeSources.size(); i++) {
-					if (!self->server_info.count(req.completeSources[i])) {
+				for (const auto& completeSourceServerID : req.completeSources) {
+					if (!self->server_info.count(completeSourceServerID)) {
 						continue;
 					}
-					const auto& teamList = self->server_info[req.completeSources[i]]->getTeams();
-					for (int j = 0; j < teamList.size(); j++) {
+					for (const auto& team : self->server_info[completeSourceServerID]->getTeams()) {
 						bool found = true;
-						auto serverIDs = teamList[j]->getServerIDs();
-						for (int k = 0; k < teamList[j]->size(); k++) {
-							if (!completeSources.count(serverIDs[k])) {
+						auto serverIDs = team->getServerIDs();
+						for (const auto& serverID : team->getServerIDs()) {
+							if (!completeSources.count(serverID)) {
 								found = false;
 								break;
 							}
 						}
-						if (found && teamList[j]->isHealthy()) {
-							bestOption = teamList[j];
+						if (found && team->isHealthy()) {
+							bestOption = team;
 							req.reply.send(std::make_pair(bestOption, foundSrc));
 							return Void();
 						}
@@ -489,8 +487,8 @@ public:
 					bool ok = dest->isHealthy() && (!req.preferLowerUtilization ||
 					                                dest->hasHealthyAvailableSpace(self->medianAvailableSpace));
 
-					for (int i = 0; ok && i < randomTeams.size(); i++) {
-						if (randomTeams[i]->getServerIDs() == dest->getServerIDs()) {
+					for (const auto& team : randomTeams) {
+						if (team->getServerIDs() == dest->getServerIDs()) {
 							ok = false;
 							break;
 						}
@@ -511,12 +509,12 @@ public:
 					TraceEvent(SevWarn, "GetTeamReturnEmpty").detail("HealthyTeams", self->healthyTeamCount);
 				}
 
-				for (int i = 0; i < randomTeams.size(); i++) {
-					int64_t loadBytes = randomTeams[i]->getLoadBytes(true, req.inflightPenalty);
+				for (const auto& team : randomTeams) {
+					int64_t loadBytes = team->getLoadBytes(true, req.inflightPenalty);
 					if (!bestOption.present() || (req.preferLowerUtilization && loadBytes < bestLoadBytes) ||
 					    (!req.preferLowerUtilization && loadBytes > bestLoadBytes)) {
 						bestLoadBytes = loadBytes;
-						bestOption = randomTeams[i];
+						bestOption = team;
 					}
 				}
 			}
@@ -526,22 +524,20 @@ public:
 			// Note: this block does not apply any filters from the request
 			if (!bestOption.present() && self->zeroHealthyTeams->get()) {
 				// Attempt to find the unhealthy source server team and return it
-				for (int i = 0; i < req.completeSources.size(); i++) {
-					if (!self->server_info.count(req.completeSources[i])) {
+				for (const auto& completeSourceServerID : req.completeSources) {
+					if (!self->server_info.count(completeSourceServerID)) {
 						continue;
 					}
-					const auto& teamList = self->server_info[req.completeSources[i]]->getTeams();
-					for (int j = 0; j < teamList.size(); j++) {
+					for (const auto& team : self->server_info[completeSourceServerID]->getTeams()) {
 						bool found = true;
-						auto serverIDs = teamList[j]->getServerIDs();
-						for (int k = 0; k < teamList[j]->size(); k++) {
-							if (!completeSources.count(serverIDs[k])) {
+						for (const auto& serverID : team->getServerIDs()) {
+							if (!completeSources.count(serverID)) {
 								found = false;
 								break;
 							}
 						}
 						if (found) {
-							bestOption = teamList[j];
+							bestOption = team;
 							req.reply.send(std::make_pair(bestOption, foundSrc));
 							return Void();
 						}
@@ -593,20 +589,20 @@ public:
 		self->healthyZone.set(initTeams->initHealthyZoneValue);
 		// SOMEDAY: If some servers have teams and not others (or some servers have more data than others) and there is
 		// an address/locality collision, should we preferentially mark the least used server as undesirable?
-		for (auto i = initTeams->allServers.begin(); i != initTeams->allServers.end(); ++i) {
-			if (self->shouldHandleServer(i->first)) {
-				if (!self->isValidLocality(*self->configuration.storagePolicy, i->first.locality)) {
+		for (const auto& [ssi, processClass] : initTeams->allServers) {
+			if (self->shouldHandleServer(ssi)) {
+				if (!self->isValidLocality(*self->configuration.storagePolicy, ssi.locality)) {
 					TraceEvent(SevWarnAlways, "MissingLocality")
-					    .detail("Server", i->first.uniqueID)
-					    .detail("Locality", i->first.locality.toString());
-					auto addr = i->first.stableAddress();
+					    .detail("Server", ssi.uniqueID)
+					    .detail("Locality", ssi.locality.toString());
+					auto addr = ssi.stableAddress();
 					self->invalidLocalityAddr.insert(AddressExclusion(addr.ip, addr.port));
 					if (self->checkInvalidLocalities.isReady()) {
 						self->checkInvalidLocalities = self->checkAndRemoveInvalidLocalityAddr();
 						self->addActor.send(self->checkInvalidLocalities);
 					}
 				}
-				self->addServer(i->first, i->second, self->serverTrackerErrorOut, 0, ddEnabledState);
+				self->addServer(ssi, processClass, self->serverTrackerErrorOut, 0, ddEnabledState);
 			}
 		}
 
@@ -1055,15 +1051,14 @@ public:
 						vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
 						    ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
 
-						for (int i = 0; i < shards.size(); i++) {
+						for (const auto& shard : shards) {
 							// Make it high priority to move keys off failed server or else RelocateShards may never be
 							// addressed
 							int maxPriority = containsFailed ? SERVER_KNOBS->PRIORITY_TEAM_FAILED : team->getPriority();
 							// The shard split/merge and DD rebooting may make a shard mapped to multiple teams,
 							// so we need to recalculate the shard's priority
 							if (maxPriority < SERVER_KNOBS->PRIORITY_TEAM_FAILED) {
-								const auto [teams, prevTeams] =
-								    self->shardsAffectedByTeamFailure->getTeamsFor(shards[i]);
+								const auto [teams, prevTeams] = self->shardsAffectedByTeamFailure->getTeamsFor(shard);
 								for (int j = 0; j < teams.size() + prevTeams.size(); j++) {
 									// t is the team in primary DC or the remote DC
 									auto& t = j < teams.size() ? teams[j] : prevTeams[j - teams.size()];
@@ -1115,7 +1110,7 @@ public:
 							}
 
 							RelocateShard rs;
-							rs.keys = shards[i];
+							rs.keys = shard;
 							rs.priority = maxPriority;
 
 							self->output.send(rs);
@@ -1260,10 +1255,8 @@ public:
 						serverListAndProcessClasses = Never();
 						isFetchingResults = false;
 
-						for (int i = 0; i < results.size(); i++) {
-							UID serverId = results[i].first.id();
-							StorageServerInterface const& ssi = results[i].first;
-							ProcessClass const& processClass = results[i].second;
+						for (const auto& [ssi, processClass] : results) {
+							UID serverId = ssi.id();
 							if (!self->shouldHandleServer(ssi)) {
 								continue;
 							} else if (self->server_info.count(serverId)) {
@@ -1752,9 +1745,9 @@ public:
 							self->resetLocalitySet();
 
 							bool addedNewBadTeam = false;
-							for (auto it : newBadTeams) {
-								if (self->removeTeam(it)) {
-									self->addTeam(it->getServers(), true);
+							for (const auto& team : newBadTeams) {
+								if (self->removeTeam(team)) {
+									self->addTeam(team->getServers(), true);
 									addedNewBadTeam = true;
 								}
 							}
@@ -1940,13 +1933,13 @@ public:
 				hasHealthyTeam = (self->healthyTeamCount != 0);
 				RecruitStorageRequest rsr;
 				std::set<AddressExclusion> exclusions;
-				for (auto s = self->server_info.begin(); s != self->server_info.end(); ++s) {
-					auto serverStatus = self->server_status.get(s->second->lastKnownInterface.id());
+				for (const auto& [id, server] : self->server_info) {
+					auto serverStatus = self->server_status.get(server->lastKnownInterface.id());
 					if (serverStatus.excludeOnRecruit()) {
 						TraceEvent(SevDebug, "DDRecruitExcl1")
 						    .detail("Primary", self->primary)
-						    .detail("Excluding", s->second->lastKnownInterface.address());
-						auto addr = s->second->lastKnownInterface.stableAddress();
+						    .detail("Excluding", server->lastKnownInterface.address());
+						auto addr = server->lastKnownInterface.stableAddress();
 						AddressExclusion addrExcl(addr.ip, addr.port);
 						exclusions.insert(addrExcl);
 						numSSPerAddr[addrExcl]++; // increase from 0
@@ -2029,8 +2022,8 @@ public:
 	ACTOR static Future<Void> updateReplicasKey(DDTeamCollection* self, Optional<Key> dcId) {
 		std::vector<Future<Void>> serverUpdates;
 
-		for (auto& it : self->server_info) {
-			serverUpdates.push_back(it.second->updated.getFuture());
+		for (const auto& [id, server] : self->server_info) {
+			serverUpdates.push_back(server->updated.getFuture());
 		}
 
 		wait(self->initialFailureReactionDelay && waitForAll(serverUpdates));
@@ -2104,10 +2097,10 @@ public:
 		int uniqueMachines = 0;
 		std::set<Optional<Standalone<StringRef>>> machines;
 
-		for (auto i = self->server_info.begin(); i != self->server_info.end(); ++i) {
-			if (!self->server_status.get(i->first).isUnhealthy()) {
+		for (const auto& [id, server] : self->server_info) {
+			if (!self->server_status.get(id).isUnhealthy()) {
 				++serverCount;
-				LocalityData& serverLocation = i->second->lastKnownInterface.locality;
+				const LocalityData& serverLocation = server->lastKnownInterface.locality;
 				machines.insert(serverLocation.zoneId());
 			}
 		}
@@ -2127,9 +2120,9 @@ public:
 			// Exclude teams who have members in the wrong configuration, since we don't want these teams
 			int teamCount = 0;
 			int totalTeamCount = 0;
-			for (int i = 0; i < self->teams.size(); ++i) {
-				if (!self->teams[i]->isWrongConfiguration()) {
-					if (self->teams[i]->isHealthy()) {
+			for (const auto& team : self->teams) {
+				if (!team->isWrongConfiguration()) {
+					if (team->isHealthy()) {
 						teamCount++;
 					}
 					totalTeamCount++;
@@ -2467,11 +2460,11 @@ DDTeamCollection::~DDTeamCollection() {
 	TraceEvent("DDTeamCollectionDestructed", distributorId).detail("Primary", primary);
 	// Other teamCollections also hold pointer to this teamCollection;
 	// TeamTracker may access the destructed DDTeamCollection if we do not reset the pointer
-	for (int i = 0; i < teamCollections.size(); i++) {
-		if (teamCollections[i] != nullptr && teamCollections[i] != this) {
-			for (int j = 0; j < teamCollections[i]->teamCollections.size(); ++j) {
-				if (teamCollections[i]->teamCollections[j] == this) {
-					teamCollections[i]->teamCollections[j] = nullptr;
+	for (const auto& teamCollection : teamCollections) {
+		if (teamCollection != nullptr && teamCollection != this) {
+			for (auto& secondTeamCollection : teamCollection->teamCollections) {
+				if (secondTeamCollection == this) {
+					secondTeamCollection = nullptr;
 				}
 			}
 		}
@@ -2598,9 +2591,9 @@ void DDTeamCollection::evaluateTeamQuality() const {
 
 	int minMachineTeams = std::numeric_limits<int>::max();
 	int maxMachineTeams = std::numeric_limits<int>::min();
-	for (auto m = machineTeams.begin(); m != machineTeams.end(); ++m) {
-		minMachineTeams = std::min(minMachineTeams, m->second);
-		maxMachineTeams = std::max(maxMachineTeams, m->second);
+	for (const auto& [id, machineTeamsCount] : machineTeams) {
+		minMachineTeams = std::min(minMachineTeams, machineTeamsCount);
+		maxMachineTeams = std::max(maxMachineTeams, machineTeamsCount);
 	}
 
 	TraceEvent(minTeams > 0 ? SevInfo : SevWarn, "DataDistributionTeamQuality", distributorId)
@@ -2683,13 +2676,13 @@ int DDTeamCollection::overlappingMachineMembers(vector<Standalone<StringRef>>& t
 	return maxMatchingServers;
 }
 
-Reference<TCMachineTeamInfo> DDTeamCollection::findMachineTeam(vector<Standalone<StringRef>>& machineIDs) {
+Reference<TCMachineTeamInfo> DDTeamCollection::findMachineTeam(vector<Standalone<StringRef>>& machineIDs) const {
 	if (machineIDs.empty()) {
 		return Reference<TCMachineTeamInfo>();
 	}
 
 	Standalone<StringRef> machineID = machineIDs[0];
-	for (auto& machineTeam : machine_info.at(machineID)->getMachineTeams()) {
+	for (const auto& machineTeam : machine_info.at(machineID)->getMachineTeams()) {
 		if (machineTeam->getMachineIDs() == machineIDs) {
 			return machineTeam;
 		}

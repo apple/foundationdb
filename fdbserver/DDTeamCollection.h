@@ -38,7 +38,6 @@ struct TCMachineInfo;
 struct TCTeamInfo;
 struct TCMachineTeamInfo;
 
-// TODO: Move to impl
 struct ServerStatus {
 	bool isFailed;
 	bool isUndesired;
@@ -65,7 +64,7 @@ struct ServerStatus {
 };
 using ServerStatusMap = AsyncMap<UID, ServerStatus>;
 
-class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
+class DDTeamCollection : NonCopyable, public ReferenceCounted<DDTeamCollection> {
 	void traceConfigInfo() const;
 	void traceServerInfo() const;
 	void traceServerTeamInfo() const;
@@ -141,7 +140,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	void evaluateTeamQuality() const;
 	int overlappingMembers(const std::vector<UID>& team) const;
 	int overlappingMachineMembers(std::vector<Standalone<StringRef>>& team) const;
-	Reference<TCMachineTeamInfo> findMachineTeam(std::vector<Standalone<StringRef>>& machineIDs);
+	Reference<TCMachineTeamInfo> findMachineTeam(std::vector<Standalone<StringRef>>& machineIDs) const;
 	template <class InputIt>
 	void addTeam(InputIt begin, InputIt end, bool isInitialTeam) {
 		vector<Reference<TCServerInfo>> newTeamServers;
