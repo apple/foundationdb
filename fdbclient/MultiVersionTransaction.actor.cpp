@@ -1068,7 +1068,7 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 std::vector<std::string> MultiVersionApi::copyExternalLibraryPerThread(std::string path) {
 	// Copy library for each thread configured per version
 	std::vector<std::string> paths;
-	for (int ii = 1; ii < CLIENT_KNOBS->MULTI_VERSION_CLIENT_THREADS_PER_VERSION; ++ii) {
+	for (int ii = 0; ii < CLIENT_KNOBS->MULTI_VERSION_CLIENT_THREADS_PER_VERSION; ++ii) {
 		std::string filename = basename(path);
 
 		char tempName[PATH_MAX + 12];
