@@ -6,10 +6,13 @@
 #endif // FDB_RELEASE
 #cmakedefine OPEN_FOR_IDE
 #ifdef WIN32
+# define BOOST_USE_WINDOWS_H
+# define WIN32_LEAN_AND_MEAN
 # define _WIN32_WINNT ${WINDOWS_TARGET}
 # define WINVER ${WINDOWS_TARGET}
 # define NTDDI_VERSION 0x05020000
 # define BOOST_ALL_NO_LIB
+# define NOMINMAX
 #else
 # cmakedefine USE_ASAN
 # cmakedefine USE_MSAN
