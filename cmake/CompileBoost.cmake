@@ -5,7 +5,7 @@ function(compile_boost)
   cmake_parse_arguments(MY "${options}" "${oneValueArgs}"
                           "${multiValueArgs}" ${ARGN} )
   # Configure the boost toolset to use
-  set(BOOTSTRAP_COMMAND "./bootstrap.sh --with-libraries=context")
+  set(BOOTSTRAP_ARGS "--with-libraries=context")
   set(B2_COMMAND "./b2")
   set(BOOST_COMPILER_FLAGS -fvisibility=hidden -fPIC -std=c++14 -w)
   set(BOOST_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
@@ -17,7 +17,7 @@ function(compile_boost)
     set(BOOST_CXX_COMPILER "/usr/bin/clang++")
   elseif(CLANG)
     set(BOOST_TOOLSET "clang")
-    set(BOOTSTRAP_COMMAND "${BOOTSTRAP_COMMAND} --with-toolset=clang")
+    list(APPEND BOOTSTRAP_ARGS "${BOOTSTRAP_COMMAND} --with-toolset=clang")
   else()
     set(BOOST_TOOLSET "gcc")
   endif()
@@ -40,7 +40,7 @@ function(compile_boost)
   ExternalProject_add("${MY_TARGET}Project"
     URL "https://dl.bintray.com/boostorg/release/1.72.0/source/boost_1_72_0.tar.bz2"
     URL_HASH SHA256=59c9b274bc451cf91a9ba1dd2c7fdcaf5d60b1b3aa83f2c9fa143417cc660722
-    CONFIGURE_COMMAND ${BOOTSTRAP_COMMAND} --with-libraries=context
+    CONFIGURE_COMMAND ./bootstrap.sh ${BOOTSTRAP_ARGS}
     BUILD_COMMAND ${B2_COMMAND} link=static ${MY_BUILD_ARGS} --prefix=${BOOST_INSTALL_DIR} ${USER_CONFIG_FLAG} install
     BUILD_IN_SOURCE ON
     INSTALL_COMMAND ""
