@@ -453,11 +453,11 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( SPRING_BYTES_STORAGE_SERVER_BATCH,                   100e6 ); if( smallStorageTarget ) SPRING_BYTES_STORAGE_SERVER_BATCH = 150e3;
 	init( STORAGE_HARD_LIMIT_BYTES,                           1500e6 ); if( smallStorageTarget ) STORAGE_HARD_LIMIT_BYTES = 4500e3;
 	init( STORAGE_DURABILITY_LAG_HARD_MAX,                    2000e6 ); if( smallStorageTarget ) STORAGE_DURABILITY_LAG_HARD_MAX = 100e6;
-	init( STORAGE_DURABILITY_LAG_SOFT_MAX,                     200e6 ); if( smallStorageTarget ) STORAGE_DURABILITY_LAG_SOFT_MAX = 10e6;
+	init( STORAGE_DURABILITY_LAG_SOFT_MAX,                     250e6 ); if( smallStorageTarget ) STORAGE_DURABILITY_LAG_SOFT_MAX = 10e6;
 
 	//FIXME: Low priority reads are disabled by assigning very high knob values, reduce knobs for 7.0
 	init( LOW_PRIORITY_STORAGE_QUEUE_BYTES,                    775e8 ); if( smallStorageTarget ) LOW_PRIORITY_STORAGE_QUEUE_BYTES = 1750e3;
-	init( LOW_PRIORITY_DURABILITY_LAG,                         275e8 ); if( smallStorageTarget ) LOW_PRIORITY_DURABILITY_LAG = 15e6;
+	init( LOW_PRIORITY_DURABILITY_LAG,                         200e6 ); if( smallStorageTarget ) LOW_PRIORITY_DURABILITY_LAG = 15e6;
 
 	bool smallTlogTarget = randomize && BUGGIFY;
 	init( TARGET_BYTES_PER_TLOG,                              2400e6 ); if( smallTlogTarget ) TARGET_BYTES_PER_TLOG = 2000e3;
@@ -483,7 +483,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( MAX_TPS_HISTORY_SAMPLES,                               600 );
 	init( NEEDED_TPS_HISTORY_SAMPLES,                            200 );
 	init( TARGET_DURABILITY_LAG_VERSIONS,                      350e6 ); // Should be larger than STORAGE_DURABILITY_LAG_SOFT_MAX
-	init( TARGET_DURABILITY_LAG_VERSIONS_BATCH,                250e6 ); // Should be larger than STORAGE_DURABILITY_LAG_SOFT_MAX
+	init( TARGET_DURABILITY_LAG_VERSIONS_BATCH,                150e6 ); // Should be larger than STORAGE_DURABILITY_LAG_SOFT_MAX
 	init( DURABILITY_LAG_UNLIMITED_THRESHOLD,                   50e6 );
 	init( INITIAL_DURABILITY_LAG_MULTIPLIER,                    1.02 );
 	init( DURABILITY_LAG_REDUCTION_RATE,                      0.9999 );

@@ -10,38 +10,38 @@ macOS
 
 The macOS installation package is supported on macOS 10.7+. It includes the client and (optionally) the server.
 
-* `FoundationDB-6.2.29.pkg <https://www.foundationdb.org/downloads/6.2.29/macOS/installers/FoundationDB-6.2.29.pkg>`_
+* `FoundationDB-6.2.30.pkg <https://www.foundationdb.org/downloads/6.2.30/macOS/installers/FoundationDB-6.2.30.pkg>`_
 
 Ubuntu
 ------
 
 The Ubuntu packages are supported on 64-bit Ubuntu 12.04+, but beware of the Linux kernel bug in Ubuntu 12.x.
 
-* `foundationdb-clients-6.2.29-1_amd64.deb <https://www.foundationdb.org/downloads/6.2.29/ubuntu/installers/foundationdb-clients_6.2.29-1_amd64.deb>`_
-* `foundationdb-server-6.2.29-1_amd64.deb <https://www.foundationdb.org/downloads/6.2.29/ubuntu/installers/foundationdb-server_6.2.29-1_amd64.deb>`_ (depends on the clients package)
+* `foundationdb-clients-6.2.30-1_amd64.deb <https://www.foundationdb.org/downloads/6.2.30/ubuntu/installers/foundationdb-clients_6.2.30-1_amd64.deb>`_
+* `foundationdb-server-6.2.30-1_amd64.deb <https://www.foundationdb.org/downloads/6.2.30/ubuntu/installers/foundationdb-server_6.2.30-1_amd64.deb>`_ (depends on the clients package)
 
 RHEL/CentOS EL6
 ---------------
 
 The RHEL/CentOS EL6 packages are supported on 64-bit RHEL/CentOS 6.x.
 
-* `foundationdb-clients-6.2.29-1.el6.x86_64.rpm <https://www.foundationdb.org/downloads/6.2.29/rhel6/installers/foundationdb-clients-6.2.29-1.el6.x86_64.rpm>`_
-* `foundationdb-server-6.2.29-1.el6.x86_64.rpm <https://www.foundationdb.org/downloads/6.2.29/rhel6/installers/foundationdb-server-6.2.29-1.el6.x86_64.rpm>`_ (depends on the clients package)
+* `foundationdb-clients-6.2.30-1.el6.x86_64.rpm <https://www.foundationdb.org/downloads/6.2.30/rhel6/installers/foundationdb-clients-6.2.30-1.el6.x86_64.rpm>`_
+* `foundationdb-server-6.2.30-1.el6.x86_64.rpm <https://www.foundationdb.org/downloads/6.2.30/rhel6/installers/foundationdb-server-6.2.30-1.el6.x86_64.rpm>`_ (depends on the clients package)
 
 RHEL/CentOS EL7
 ---------------
 
 The RHEL/CentOS EL7 packages are supported on 64-bit RHEL/CentOS 7.x.
 
-* `foundationdb-clients-6.2.29-1.el7.x86_64.rpm <https://www.foundationdb.org/downloads/6.2.29/rhel7/installers/foundationdb-clients-6.2.29-1.el7.x86_64.rpm>`_
-* `foundationdb-server-6.2.29-1.el7.x86_64.rpm <https://www.foundationdb.org/downloads/6.2.29/rhel7/installers/foundationdb-server-6.2.29-1.el7.x86_64.rpm>`_ (depends on the clients package)
+* `foundationdb-clients-6.2.30-1.el7.x86_64.rpm <https://www.foundationdb.org/downloads/6.2.30/rhel7/installers/foundationdb-clients-6.2.30-1.el7.x86_64.rpm>`_
+* `foundationdb-server-6.2.30-1.el7.x86_64.rpm <https://www.foundationdb.org/downloads/6.2.30/rhel7/installers/foundationdb-server-6.2.30-1.el7.x86_64.rpm>`_ (depends on the clients package)
 
 Windows
 -------
 
 The Windows installer is supported on 64-bit Windows XP and later. It includes the client and (optionally) the server.
 
-* `foundationdb-6.2.29-x64.msi <https://www.foundationdb.org/downloads/6.2.29/windows/installers/foundationdb-6.2.29-x64.msi>`_
+* `foundationdb-6.2.30-x64.msi <https://www.foundationdb.org/downloads/6.2.30/windows/installers/foundationdb-6.2.30-x64.msi>`_
 
 API Language Bindings
 =====================
@@ -58,18 +58,18 @@ On macOS and Windows, the FoundationDB Python API bindings are installed as part
 
 If you need to use the FoundationDB Python API from other Python installations or paths, download the Python package:
 
-* `foundationdb-6.2.29.tar.gz <https://www.foundationdb.org/downloads/6.2.29/bindings/python/foundationdb-6.2.29.tar.gz>`_
+* `foundationdb-6.2.30.tar.gz <https://www.foundationdb.org/downloads/6.2.30/bindings/python/foundationdb-6.2.30.tar.gz>`_
 
 Ruby 1.9.3/2.0.0+
 -----------------
 
-* `fdb-6.2.29.gem <https://www.foundationdb.org/downloads/6.2.29/bindings/ruby/fdb-6.2.29.gem>`_
+* `fdb-6.2.30.gem <https://www.foundationdb.org/downloads/6.2.30/bindings/ruby/fdb-6.2.30.gem>`_
 
 Java 8+
 -------
 
-* `fdb-java-6.2.29.jar <https://www.foundationdb.org/downloads/6.2.29/bindings/java/fdb-java-6.2.29.jar>`_
-* `fdb-java-6.2.29-javadoc.jar <https://www.foundationdb.org/downloads/6.2.29/bindings/java/fdb-java-6.2.29-javadoc.jar>`_
+* `fdb-java-6.2.30.jar <https://www.foundationdb.org/downloads/6.2.30/bindings/java/fdb-java-6.2.30.jar>`_
+* `fdb-java-6.2.30-javadoc.jar <https://www.foundationdb.org/downloads/6.2.30/bindings/java/fdb-java-6.2.30-javadoc.jar>`_
 
 Go 1.11+
 --------
