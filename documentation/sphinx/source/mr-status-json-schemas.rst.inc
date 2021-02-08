@@ -93,6 +93,11 @@
                      "counter":0,
                      "roughness":0.0
                   },
+                  "low_priority_queries":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
                   "bytes_queried":{
                      "hz":0.0,
                      "counter":0,
@@ -476,6 +481,11 @@
                "roughness":0.0
             },
             "read_requests":{ // measures number of incoming read requests
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            }, 
+             "low_priority_reads":{ // measures number of incoming low priority read requests
                "hz":0.0,
                "counter":0,
                "roughness":0.0
