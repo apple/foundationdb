@@ -2758,7 +2758,6 @@ Reference<TCMachineTeamInfo> DDTeamCollection::addMachineTeam(vector<Reference<T
 	// Assign machine teams to machine
 	for (auto machine : machines) {
 		// A machine's machineTeams vector should not hold duplicate machineTeam members
-		// TODO: Should be a TCMachineInfo method
 		ASSERT_WE_THINK(
 		    std::count(machine->getMachineTeams().begin(), machine->getMachineTeams().end(), machineTeamInfo) == 0);
 		machine->addMachineTeam(machineTeamInfo);
@@ -3538,9 +3537,7 @@ void DDTeamCollection::removeMachine(Reference<TCMachineInfo> removedMachineInfo
 	for (const auto& machineID : machinesWithAjoiningTeams) {
 		auto& machine = machine_info[machineID];
 		for (const auto& machineTeam : machine->getMachineTeams()) {
-			// TODO: This should be a method of TCMachineTeamInfo
-			if (std::count(machineTeam->getMachineIDs().begin(), machineTeam->getMachineIDs().end(),
-			               removedMachineInfo->getID())) {
+			if (machineTeam->containsMachine(removedMachineInfo->getID())) {
 				machine->removeMachineTeam(machineTeam);
 			}
 		}

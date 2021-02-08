@@ -46,4 +46,5 @@ public:
 	bool operator==(const TCMachineTeamInfo& rhs) const;
 	std::vector<Reference<TCMachineInfo>> const &getMachines() const;
 	std::vector<Standalone<StringRef>> const &getMachineIDs() const;
+	bool containsMachine(Standalone<StringRef> const& machineID) const;
 };

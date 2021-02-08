@@ -80,3 +80,7 @@ std::vector<Reference<TCMachineInfo>> const &TCMachineTeamInfo::getMachines() co
 std::vector<Standalone<StringRef>> const &TCMachineTeamInfo::getMachineIDs() const {
 	return machineIDs;
 }
+
+bool TCMachineTeamInfo::containsMachine(Standalone<StringRef> const& machineID) const {
+	return std::find(machineIDs.begin(), machineIDs.end(), machineID) != machineIDs.end();
+}
