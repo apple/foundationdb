@@ -141,17 +141,17 @@ public:
 };
 
 class WatchMetadata: public ReferenceCounted<WatchMetadata> {
-	public:
-		Optional<Value> value;
-		Version version;
-		Promise<Version> watchPromise;
-		Future<Version> watchFuture;
-		Future<Void> watchFutureSS;
+public:
+	Optional<Value> value;
+	Version version;
+	Promise<Version> watchPromise;
+	Future<Version> watchFuture;
+	Future<Void> watchFutureSS;
 
-		TransactionInfo info;
-		TagSet tags;
+	TransactionInfo info;
+	TagSet tags;
 
-		WatchMetadata(Optional<Value> value, Version version, TransactionInfo info, TagSet tags);
+	WatchMetadata(Optional<Value> value, Version version, TransactionInfo info, TagSet tags);
 };
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
@@ -385,8 +385,7 @@ public:
 
 	static bool debugUseTags;
 	static const std::vector<std::string> debugTransactionTagChoices;
-	private:
-		std::map<Key, Reference<WatchMetadata>> watchMap;
+	std::map<Key, Reference<WatchMetadata>> watchMap;
 };
 
 #endif
