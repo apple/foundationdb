@@ -106,12 +106,12 @@ namespace FDB {
 		Future<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
         Future<Void> createSnapshot(const StringRef &uid, const StringRef &snap_command) override;
 
-private:
+	private:
 		FDBDatabase* db;
 		explicit DatabaseImpl(FDBDatabase* db) : db(db) {}
 
 		friend class API;
-};
+	};
 
 	class TransactionImpl : public Transaction, private NonCopyable, public FastAllocated<TransactionImpl> {
 		friend class DatabaseImpl;

@@ -23,7 +23,6 @@
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 
-#include "flow/FastRef.h"
 #include "flow/network.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"

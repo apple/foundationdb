@@ -4860,6 +4860,7 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid,
   if (!std::all_of(uid_str.begin(), uid_str.end(),
                    [](unsigned char c) { return std::isxdigit(c); }) ||
       uid_str.size() != 32) {
+	// only 32-length hex string is considered as a valid UID
     throw snap_invalid_uid_string();
   }
   return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
