@@ -40,11 +40,11 @@ struct WatchesSameKeyWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { 
 		if ( clientId == 0 ) {
-			cases.push_back( case1(cx, StringRef("foo1"), this) );
-			cases.push_back( case2(cx, StringRef("foo2"), this) );
-			cases.push_back( case3(cx, StringRef("foo3"), this) );
-			cases.push_back( case4(cx, StringRef("foo4"), this) );
-			cases.push_back( case5(cx, StringRef("foo5"), this) );
+			cases.push_back( case1(cx, LiteralStringRef("foo1"), this) );
+			cases.push_back( case2(cx, LiteralStringRef("foo2"), this) );
+			cases.push_back( case3(cx, LiteralStringRef("foo3"), this) );
+			cases.push_back( case4(cx, LiteralStringRef("foo4"), this) );
+			cases.push_back( case5(cx, LiteralStringRef("foo5"), this) );
 		}
 		return Void();
 	}
