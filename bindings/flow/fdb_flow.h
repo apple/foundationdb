@@ -126,8 +126,8 @@ namespace FDB {
 		virtual void setDatabaseOption(FDBDatabaseOption option, Optional<StringRef> value = Optional<StringRef>()) = 0;
 		virtual Future<int64_t> rebootWorker(const StringRef& address, bool check = false, int duration = 0) = 0;
 		virtual Future<Void> forceRecoveryWithDataLoss(const StringRef& dcid) = 0;
-		virtual Future<Void> createSnapshot(const StringRef &uid, const StringRef &snap_command) = 0;
-    };
+		virtual Future<Void> createSnapshot(const StringRef& uid, const StringRef& snap_command) = 0;
+	};
 
 	class API {
 	public:
