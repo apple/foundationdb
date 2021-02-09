@@ -424,8 +424,8 @@ private:
 	int apiVersion;
 
 	// XXX fixme
-	int nextTid = 0;
-	const int tidCount = 1;
+	int nextThread = 0;
+	int threadCount;
 
 	Mutex lock;
 	std::vector<std::pair<FDBNetworkOptions::Option, Optional<Standalone<StringRef>>>> options;

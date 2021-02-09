@@ -919,7 +919,7 @@ bool MultiVersionApi::apiVersionAtLeast(int minVersion) {
 }
 
 void MultiVersionApi::runOnExternalClientsAllThreads(std::function<void(Reference<ClientInfo>)> func, bool runOnFailedClients) {
-	for (int i = 0; i < tidCount; i++) {
+	for (int i = 0; i < threadCount; i++) {
 		runOnExternalClients(i, func, runOnFailedClients);
 	}
 }
@@ -1068,7 +1068,7 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 std::vector<std::string> MultiVersionApi::copyExternalLibraryPerThread(std::string path) {
 	// Copy library for each thread configured per version
 	std::vector<std::string> paths;
-	for (int ii = 0; ii < CLIENT_KNOBS->MULTI_VERSION_CLIENT_THREADS_PER_VERSION; ++ii) {
+	for (int ii = 0; ii < threadCount; ++ii) {
 		std::string filename = basename(path);
 
 		char tempName[PATH_MAX + 12];
@@ -1202,6 +1202,13 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		ASSERT(!value.present() && !networkStartSetup);
 		externalClient = true;
 		bypassMultiClientApi = true;
+	}
+	else if(option == FDBNetworkOptions::CLIENT_THREADS_PER_VERSION) {
+		validateOption(value, true, false, false);
+		disableLocalClient();
+		MutexHolder holder(lock);
+		ASSERT(value.present());
+		threadCount = extractIntOption(value, 1, 1024);
 	}
 	else {
 		MutexHolder holder(lock);
@@ -1365,8 +1372,8 @@ Reference<IDatabase> MultiVersionApi::createDatabase(const char *clusterFilePath
 		throw network_not_setup();
 	}
 
-	int threadIdx = nextTid;
-	nextTid = (nextTid + 1) % tidCount;
+	int threadIdx = nextThread;
+	nextThread = (nextThread + 1) % threadCount;
 
 	lock.leave();
 
@@ -1374,7 +1381,7 @@ Reference<IDatabase> MultiVersionApi::createDatabase(const char *clusterFilePath
 	if(localClientDisabled) {
 		return Reference<IDatabase>(new MultiVersionDatabase(this, threadIdx, clusterFile, Reference<IDatabase>()));
 	}
-	ASSERT(tidCount == 1); // threadCount must be one if local client is enabled.
+	ASSERT(threadCount == 1); // threadCount must be one if local client is enabled.
 
 	auto db = localClient->api->createDatabase(clusterFilePath);
 	if(bypassMultiClientApi) {
@@ -1489,7 +1496,7 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 	envOptionsLoaded = true;
 }
 
-MultiVersionApi::MultiVersionApi() : bypassMultiClientApi(false), networkStartSetup(false), networkSetup(false), callbackOnMainThread(true), externalClient(false), localClientDisabled(false), apiVersion(0), envOptionsLoaded(false) {}
+MultiVersionApi::MultiVersionApi() : bypassMultiClientApi(false), networkStartSetup(false), networkSetup(false), callbackOnMainThread(true), externalClient(false), localClientDisabled(false), apiVersion(0), envOptionsLoaded(false), threadCount(1) {}
 
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 
