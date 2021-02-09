@@ -4847,3 +4847,19 @@ Future<int64_t> DatabaseContext::rebootWorker(StringRef addr, bool check, int du
 Future<Void> DatabaseContext::forceRecoveryWithDataLoss(StringRef dcId) {
 	return forceRecovery(getConnectionFile(), dcId);
 }
+
+ACTOR static Future<Void> createSnapshotActor(DatabaseContext* cx, UID snapUID, StringRef snapCmd) {
+	wait(mgmtSnapCreate(cx->clone(), snapCmd, snapUID));
+	return Void();
+}
+
+Future<Void> DatabaseContext::createSnapshot(StringRef uid,
+                                             StringRef snapshot_command) {
+	std::string uid_str = uid.toString();
+	if (!std::all_of(uid_str.begin(), uid_str.end(), [](unsigned char c) { return std::isxdigit(c); }) ||
+	    uid_str.size() != 32) {
+		// only 32-length hex string is considered as a valid UID
+		throw snap_invalid_uid_string();
+	}
+	return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
+}

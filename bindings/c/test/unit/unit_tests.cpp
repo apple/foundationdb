@@ -2046,6 +2046,42 @@ TEST_CASE("fdb_database_force_recovery_with_data_loss") {
   }
 }
 
+std::string random_hex_string(size_t length) {
+	auto randchar = []() -> char {
+		const char charset[] = "0123456789"
+		                       "ABCDEF"
+		                       "abcdef";
+		const size_t max_index = (sizeof(charset) - 1);
+		return charset[rand() % max_index];
+	};
+	std::string str(length, 0);
+	std::generate_n(str.begin(), length, randchar);
+	return str;
+}
+
+TEST_CASE("fdb_database_create_snapshot") {
+	std::string snapshot_command = "test";
+	std::string uid = "invalid_uid";
+	bool retry = false;
+	while (1) {
+		fdb::EmptyFuture f =
+		    fdb::Database::create_snapshot(db, (const uint8_t*)uid.c_str(), uid.length(),
+		                                   (const uint8_t*)snapshot_command.c_str(), snapshot_command.length());
+		fdb_error_t err = wait_future(f);
+		if (err == 2509) { // expected error code
+			CHECK(!retry);
+			uid = random_hex_string(32);
+			retry = true;
+		} else if (err == 2505) {
+			CHECK(retry);
+			break;
+		} else {
+			// Otherwise, something went wrong.
+			CHECK(false);
+		}
+	}
+}
+
 TEST_CASE("fdb_error_predicate") {
   CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 1007)); // transaction_too_old
   CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 1020)); // not_committed

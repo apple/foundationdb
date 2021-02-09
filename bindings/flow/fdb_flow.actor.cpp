@@ -104,6 +104,7 @@ namespace FDB {
 		void setDatabaseOption(FDBDatabaseOption option, Optional<StringRef> value = Optional<StringRef>()) override;
 		Future<int64_t> rebootWorker(const StringRef& address, bool check = false, int duration = 0) override;
 		Future<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
+		Future<Void> createSnapshot(const StringRef& uid, const StringRef& snap_command) override;
 
 	private:
 		FDBDatabase* db;
@@ -304,7 +305,16 @@ namespace FDB {
 		});
 	}
 
-	TransactionImpl::TransactionImpl(FDBDatabase* db) {
+	Future<Void> DatabaseImpl::createSnapshot(const StringRef& uid, const StringRef& snap_command) {
+		return backToFuture<Void>(
+			fdb_database_create_snapshot(db, uid.begin(), uid.size(), snap_command.begin(), snap_command.size()),
+			[](Reference<CFuture> f) {
+				throw_on_error(fdb_future_get_error(f->f));
+				return Void();
+			});
+	}
+
+    TransactionImpl::TransactionImpl(FDBDatabase* db) {
 		throw_on_error(fdb_database_create_transaction(db, &tr));
 	}
 
