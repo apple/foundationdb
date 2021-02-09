@@ -2189,7 +2189,7 @@ ACTOR Future<Version> watchValue(Future<Version> version, Key key, Optional<Valu
 			//cannot do this until the storage server is notified on knownCommittedVersion changes from tlog (faster than the current update loop)
 			Version v = wait(waitForCommittedVersion(cx, resp.version, span.context));
 
-			// TraceEvent("atcherCommitted").detail("CommittedVersion", v).detail("WatchVersion", resp.version).detail("Key",  key ).detail("Value", value);
+			// TraceEvent("WatcherCommitted").detail("CommittedVersion", v).detail("WatchVersion", resp.version).detail("Key",  key ).detail("Value", value);
 
 			// False if there is a master failure between getting the response and getting the committed version,
 			// Dependent on SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT
