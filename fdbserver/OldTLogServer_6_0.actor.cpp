@@ -1315,19 +1315,6 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 	return Void();
 }
 
-ACTOR Future<Void> watchDegraded(TLogData* self) {
-	if(g_network->isSimulated() && g_simulator.speedUpSimulation) {
-		return Void();
-	}
-
-	wait(lowPriorityDelay(SERVER_KNOBS->TLOG_DEGRADED_DURATION));
-	
-	TraceEvent(SevWarnAlways, "TLogDegraded", self->dbgid);
-	TEST(true); //6.0 TLog degraded
-	self->degraded->set(true);
-	return Void();
-}
-
 ACTOR Future<Void> doQueueCommit( TLogData* self, Reference<LogData> logData, std::vector<Reference<LogData>> missingFinalCommit ) {
 	state Version ver = logData->version.get();
 	state Version commitNumber = self->queueCommitBegin+1;
@@ -1340,12 +1327,11 @@ ACTOR Future<Void> doQueueCommit( TLogData* self, Reference<LogData> logData, st
 	self->diskQueueCommitBytes = 0;
 	self->largeDiskQueueCommitBytes.set(false);
 
-	state Future<Void> degraded = watchDegraded(self);
-	wait(c);
+	wait(ioDegradedOrTimeoutError(c, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, self->degraded,
+	                              SERVER_KNOBS->TLOG_DEGRADED_DURATION));
 	if(g_network->isSimulated() && !g_simulator.speedUpSimulation && BUGGIFY_WITH_PROB(0.0001)) {
 		wait(delay(6.0));
 	}
-	degraded.cancel();
 	wait(self->queueCommitEnd.whenAtLeast(commitNumber-1));
 
 	//Calling check_yield instead of yield to avoid a destruction ordering problem in simulation
