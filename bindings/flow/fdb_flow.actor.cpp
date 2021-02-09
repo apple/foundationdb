@@ -25,7 +25,6 @@
 #include <cinttypes>
 
 #include "flow/DeterministicRandom.h"
-#include "flow/FastRef.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
