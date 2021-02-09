@@ -104,16 +104,14 @@ namespace FDB {
 		void setDatabaseOption(FDBDatabaseOption option, Optional<StringRef> value = Optional<StringRef>()) override;
 		Future<int64_t> rebootWorker(const StringRef& address, bool check = false, int duration = 0) override;
 		Future<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
-                Future<Void>
-                createSnapshot(const StringRef &uid,
-                               const StringRef &snap_command) override;
+        Future<Void> createSnapshot(const StringRef &uid, const StringRef &snap_command) override;
 
-              private:
+private:
 		FDBDatabase* db;
 		explicit DatabaseImpl(FDBDatabase* db) : db(db) {}
 
 		friend class API;
-	};
+};
 
 	class TransactionImpl : public Transaction, private NonCopyable, public FastAllocated<TransactionImpl> {
 		friend class DatabaseImpl;

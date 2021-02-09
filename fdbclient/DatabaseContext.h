@@ -212,7 +212,7 @@ public:
 	// Management API, force the database to recover into DCID, causing the database to lose the most recently committed mutations
 	Future<Void> forceRecoveryWithDataLoss(StringRef dcId);
 	// Management API, create snapshot
-        Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
+    Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
 
     // private: 
 	explicit DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
