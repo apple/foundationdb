@@ -1442,7 +1442,8 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 			}
 
 			if (parse_error) {
-				std::string error = "ERROR: \'" + process_address_strs[index] + "\' is not a valid network endpoint address\n";
+				std::string error =
+				    "ERROR: \'" + process_address_strs[index] + "\' is not a valid network endpoint address\n";
 				if (process_address_strs[index].find(":tls") != std::string::npos)
 					error += "        Do not include the `:tls' suffix when naming a process\n";
 				return ManagementAPIError::toJsonString(false, "coordinators", error);
