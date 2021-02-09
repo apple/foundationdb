@@ -21,7 +21,10 @@ if(JEMALLOC_INCLUDE_DIR AND JEMALLOC AND JEMALLOC_PIC)
   set_target_properties(im_jemalloc_pic PROPERTIES IMPORTED_LOCATION "${JEMALLOC_PIC}")
   set_target_properties(im_jemalloc PROPERTIES IMPORTED_LOCATION "${JEMALLOC}")
   target_include_directories(jemalloc INTERFACE "${JEMALLOC_INCLUDE_DIR}")
-  target_link_libraries(jemalloc INTERFACE im_jemalloc im_jemalloc_pic)
+  # the ordering here is important: for dynamic libraries we have to use all
+  # symbols that are in the library which was compiled with PIC (for executables
+  # we could omit the pic-library)
+  target_link_libraries(jemalloc INTERFACE im_jemalloc_pic im_jemalloc)
 else()
   include(ExternalProject)
   set(JEMALLOC_DIR "${CMAKE_BINARY_DIR}/jemalloc")
