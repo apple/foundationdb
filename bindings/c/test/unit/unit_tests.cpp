@@ -2062,18 +2062,18 @@ std::string random_hex_string(size_t length) {
 TEST_CASE("fdb_database_create_snapshot") {
 	std::string snapshot_command = "test";
 	std::string uid = "invalid_uid";
-	int retry = 0;
+	bool retry = false;
 	while (1) {
 		fdb::EmptyFuture f =
 		    fdb::Database::create_snapshot(db, (const uint8_t*)uid.c_str(), uid.length(),
 		                                   (const uint8_t*)snapshot_command.c_str(), snapshot_command.length());
 		fdb_error_t err = wait_future(f);
 		if (err == 2509) { // expected error code
-			CHECK(retry == 0);
+			CHECK(!retry);
 			uid = random_hex_string(32);
-			retry += 1;
+			retry = true;
 		} else if (err == 2505) {
-			CHECK(retry > 0);
+			CHECK(retry);
 			break;
 		} else {
 			// Otherwise, something went wrong.
