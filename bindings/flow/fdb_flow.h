@@ -21,7 +21,6 @@
 #ifndef FDB_FLOW_FDB_FLOW_H
 #define FDB_FLOW_FDB_FLOW_H
 
-#include "flow/Arena.h"
 #include <flow/flow.h>
 
 #define FDB_API_VERSION 700

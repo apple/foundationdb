@@ -85,14 +85,13 @@ ThreadFuture<Void> ThreadSafeDatabase::forceRecoveryWithDataLoss(const StringRef
 }
 
 ThreadFuture<Void>
-ThreadSafeDatabase::createSnapshot(const StringRef &uid,
-                                   const StringRef &snapshot_command) {
-  DatabaseContext *db = this->db;
-  Key snapUID = uid;
-  Key cmd = snapshot_command;
-  return onMainThread([db, snapUID, cmd]() -> Future<Void> {
-    return db->createSnapshot(snapUID, cmd);
-  });
+ThreadSafeDatabase::createSnapshot(const StringRef &uid, const StringRef &snapshot_command) {
+	DatabaseContext *db = this->db;
+	Key snapUID = uid;
+	Key cmd = snapshot_command;
+	return onMainThread([db, snapUID, cmd]() -> Future<Void> {
+		return db->createSnapshot(snapUID, cmd);
+	});
 }
 
 ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
