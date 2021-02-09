@@ -2234,7 +2234,7 @@ ACTOR Future<Void> watchStorageServerResp(Key key, Database cx) {
 			if (watchVersion >= metadata->version) { // case 1: version_1 (SS) >= version_2 (map)
 				cx->deleteWatchMetadata(key);
 				if(metadata->watchPromise.canBeSet()) metadata->watchPromise.send(watchVersion);
-			} else { // ABA happens
+			} else { //ABA happens
 				TEST(true); // ABA issue where the version returned from the server is less than the version in the map
 				if (metadata->watchPromise.getFutureReferenceCount() == 1) { // case 2: version_1 < version_2 and future_count == 1
 					cx->deleteWatchMetadata(key);
