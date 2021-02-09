@@ -81,6 +81,13 @@ rocksdb::Options getOptions() {
 	return options;
 }
 
+// Set some useful defaults desired for all reads.
+rocksdb::ReadOptions getReadOptions() {
+	rocksdb::ReadOptions options;
+	options.background_purge_on_iterator_cleanup = true;
+	return options;
+}
+
 struct RocksDBKeyValueStore : IKeyValueStore {
 	using DB = rocksdb::DB*;
 	using CF = rocksdb::ColumnFamilyHandle*;
@@ -222,7 +229,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.Before");
 			}
 			rocksdb::PinnableSlice value;
-			auto s = db->Get({}, db->DefaultColumnFamily(), toSlice(a.key), &value);
+			auto s = db->Get(getReadOptions(), db->DefaultColumnFamily(), toSlice(a.key), &value);
 			if (a.debugID.present()) {
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.After");
 				traceBatch.get().dump();
@@ -253,7 +260,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				traceBatch.get().addEvent("GetValuePrefixDebug", a.debugID.get().first(),
 				                          "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
-			auto s = db->Get({}, db->DefaultColumnFamily(), toSlice(a.key), &value);
+			auto s = db->Get(getReadOptions(), db->DefaultColumnFamily(), toSlice(a.key), &value);
 			if (a.debugID.present()) {
 				traceBatch.get().addEvent("GetValuePrefixDebug", a.debugID.get().first(),
 				                          "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
@@ -282,7 +289,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			int accumulatedBytes = 0;
 			rocksdb::Status s;
-			rocksdb::ReadOptions options;
+			auto options = getReadOptions();
 			// When using a prefix extractor, ensure that keys are returned in order even if they cross
 			// a prefix boundary.
 			options.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
