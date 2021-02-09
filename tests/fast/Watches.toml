@@ -3,3 +3,6 @@ testTitle = 'WatchesTest'
 
     [[test.workload]]
     testName = 'Watches'
+
+    [[test.workload]]
+    testName = 'WatchesSameKeyCorrectness'

@@ -1387,6 +1387,10 @@ void DatabaseContext::deleteWatchMetadata(Key key) {
 	watchMap.erase(key);
 }
 
+void DatabaseContext::clearWatchMetadata() {
+	watchMap.clear();
+}
+
 WatchMetadata::WatchMetadata(Optional<Value> value, Version version, TransactionInfo info, TagSet tags): value(value), version(version), info(info), tags(tags) {
 	// create dummy future
 	watchFuture = watchPromise.getFuture();
@@ -2228,31 +2232,35 @@ ACTOR Future<Void> watchStorageServerResp(Key key, Database cx) {
 
 			state Future<Version> watchFutureSS = watchValue(Future<Version>(metadata->version), key, metadata->value, cx, metadata->info, metadata->tags);
 			Version watchVersion = wait(watchFutureSS);
+
+			metadata = cx->getWatchMetadata(key);
+			if (!metadata.isValid()) return Void();
 			
 			// TraceEvent("Nim_Case SS done wait").detail("version", watchVersion);
 			if (watchVersion >= metadata->version) { // case 1: version_1 (SS) >= version_2 (map)
 				// TraceEvent("Nim_Case SS 1").detail("Key", key).detail("Value", metadata->value).detail("numF", metadata->watchPromise.getFutureReferenceCount());
 				cx->deleteWatchMetadata(key);
-				metadata->watchPromise.send(watchVersion);
+				if(metadata->watchPromise.canBeSet()) metadata->watchPromise.send(watchVersion);
 			} else {
 				if (metadata->watchPromise.getFutureReferenceCount() == 1) { // case 2: version_1 < version_2 and future_count == 1
 					// TraceEvent("Nim_Case SS 2").detail("Key", key).detail("Value", metadata->value).detail("numF", metadata->watchPromise.getFutureReferenceCount());
 					cx->deleteWatchMetadata(key);
-				} else {
-					// TraceEvent("Nim_Case SS 3").detail("Key", key).detail("Value", metadata->value).detail("numF", metadata->watchPromise.getFutureReferenceCount());
 				}
 			}
 		} catch(Error &e) { 
 			// TraceEvent("Nim_Case SS exit exception").detail("Code", e.code()).detail("key", key);
-			if (e.code() == error_code_actor_cancelled) {
+			if (e.code() == error_code_operation_cancelled) {
 				// TraceEvent("Nim_Case SS exit actor cancelled").detail("key", key);
 				throw e;
 			}
 			Reference<WatchMetadata> metadata = cx->getWatchMetadata(key);
-			if (!metadata.isValid() || metadata->watchPromise.getFutureReferenceCount() == 1) {
+			if (!metadata.isValid()) {
+				return Void();
+			} else if (metadata->watchPromise.getFutureReferenceCount() == 1) {
+				cx->deleteWatchMetadata(key);
 				return Void();
 			}
-		}	
+		}
 	}
 }
 
@@ -2292,8 +2300,7 @@ ACTOR Future<Void> sameVersionDifKey(Version ver, Key key, Optional<Value> value
 
 		metadata = cx->getWatchMetadata(key);
 		if (metadata.isValid()) { // if val_3 == val_2
-			Future<Void> watchFuture = success(metadata->watchPromise.getFuture());
-			wait(watchFuture);
+			wait(success(metadata->watchPromise.getFuture()));
 		}
 
 		return Void();
@@ -2318,9 +2325,7 @@ Future<Void> getWatchFuture(Version ver, Key key, Optional<Value> value, Databas
 		cx->setWatchMetadata(key, metadata);
 
 		metadata->watchFutureSS = watchStorageServerResp(key, cx);
-		Future<Void> watchFuture = success(metadata->watchPromise.getFuture());
-
-		return watchFuture;
+		return success(metadata->watchPromise.getFuture());
 	} 
 	else if (metadata->value == value) { // case 2: val_1 == val_2
 		// TraceEvent("Nim_Case 2").detail("Key", key).detail("Value", value);
@@ -2331,8 +2336,7 @@ Future<Void> getWatchFuture(Version ver, Key key, Optional<Value> value, Databas
 			metadata->tags = tags;
 		}
 		
-		Future<Void> watchFuture = success(metadata->watchPromise.getFuture());
-		return watchFuture;
+		return success(metadata->watchPromise.getFuture());
 	} else if(ver > metadata->version) { // case 3: val_1 != val_2 && version_2 > version_1
 		// TraceEvent("Nim_Case 3").detail("Key", key).detail("Value", value);
 
@@ -2346,15 +2350,14 @@ Future<Void> getWatchFuture(Version ver, Key key, Optional<Value> value, Databas
 
 		metadata->watchFutureSS = watchStorageServerResp(key, cx);
 
-		Future<Void> watchFuture = success(metadata->watchPromise.getFuture());
-		return watchFuture;
+		return success(metadata->watchPromise.getFuture());
 	} else if (metadata->version == ver) { // case 5: val_1 != val_2 && version_1 == version_2
 		// TraceEvent("Nim_Case 5").detail("Key", key).detail("Value", value);
 		return sameVersionDifKey(ver, key, value, cx, info, tags);
 	}
-	// TraceEvent("Nim_Case return").detail("Key", key).detail("Value", value);
-	// Note: We will reach here for case 3: val_1 != val_2 && version_2 < version_1
-	return Future<Void>();
+	// TraceEvent("Nim_Case 4").detail("Key", key).detail("Value", value);
+	// Note: We will reach here for case 4: val_1 != val_2 && version_2 < version_1
+	return Void();
 }
 
 ACTOR Future<Void> watchValueMap(Future<Version> version, Key key, Optional<Value> value, Database cx,
@@ -3041,7 +3044,7 @@ ACTOR Future<Void> watch(Reference<Watch> watch, Database cx, TagSet tags, Trans
 
 						when(wait(cx->connectionFileChanged())) {
 							TEST(true); // Recreated a watch after switch
-							cx->watchMap.clear();
+							cx->clearWatchMetadata();
 							watch->watchFuture =
 							    watchValueMap(cx->minAcceptableReadVersion, watch->key, watch->value, cx, info, tags);
 						}

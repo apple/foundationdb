@@ -194,6 +194,7 @@ public:
 	Reference<WatchMetadata> getWatchMetadata(Key key) const;
 	void setWatchMetadata(Key key, Reference<WatchMetadata> metadata);
 	void deleteWatchMetadata(Key key);
+	void clearWatchMetadata();
 
 	void setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value );
 
@@ -384,7 +385,8 @@ public:
 
 	static bool debugUseTags;
 	static const std::vector<std::string> debugTransactionTagChoices;
-	std::map<Key, Reference<WatchMetadata>> watchMap;
+	private:
+		std::map<Key, Reference<WatchMetadata>> watchMap;
 };
 
 #endif
