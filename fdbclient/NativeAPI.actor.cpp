@@ -2255,7 +2255,7 @@ ACTOR Future<Void> watchStorageServerResp(Key key, Database cx) {
 	}
 }
 
-ACTOR Future<Void> sameVersionDifKey(Version ver, Key key, Optional<Value> value, Database cx,
+ACTOR Future<Void> sameVersionDiffValue(Version ver, Key key, Optional<Value> value, Database cx,
                               TransactionInfo info, TagSet tags) {
 	state ReadYourWritesTransaction tr(cx);
 
@@ -2329,7 +2329,7 @@ Future<Void> getWatchFuture(Version ver, Key key, Optional<Value> value, Databas
 		return success(metadata->watchPromise.getFuture());
 	} else if (metadata->version == ver) { // case 5: val_1 != val_2 && version_1 == version_2 (recived watch with different value but same version)
 		TEST(true); // Setting a watch which has a different value than the one in the map but the same version
-		return sameVersionDifKey(ver, key, value, cx, info, tags);
+		return sameVersionDiffValue(ver, key, value, cx, info, tags);
 	}
 	TEST(true); // Setting a watch which has a different value than the one in the map but a lower version (older)
 	// case 4: val_1 != val_2 && version_2 < version_1
