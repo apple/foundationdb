@@ -2047,6 +2047,7 @@ TEST_CASE("fdb_database_force_recovery_with_data_loss") {
 }
 
 std::string random_hex_string(size_t length) {
+	srand(time(0)); // set random seed
 	auto randchar = []() -> char {
 		const char charset[] = "0123456789"
 		                       "ABCDEF"
