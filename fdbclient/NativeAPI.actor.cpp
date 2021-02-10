@@ -2225,8 +2225,7 @@ ACTOR Future<Void> watchStorageServerResp(Key key, Database cx) {
 				return Void();
 			}
 
-			state Future<Version> watchFutureSS = watchValue(Future<Version>(metadata->version), key, metadata->value, cx, metadata->info, metadata->tags);
-			Version watchVersion = wait(watchFutureSS);
+			Version watchVersion = wait(watchValue(Future<Version>(metadata->version), key, metadata->value, cx, metadata->info, metadata->tags));
 
 			metadata = cx->getWatchMetadata(key);
 			if (!metadata.isValid()) return Void();
