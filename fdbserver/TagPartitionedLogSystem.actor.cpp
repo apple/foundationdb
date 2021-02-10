@@ -1038,7 +1038,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					bestSet = bestSatelliteSet;
 				}
 
-				TraceEvent("TLogPeekLogRouterOldSets", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("OldEpoch", old.epochEnd).detail("RecoveredAt", recoveredAt.present() ? recoveredAt.get() : -1).detail("FirstOld", firstOld);
+				TraceEvent("TLogPeekLogRouterOldSets", dbgid)
+				    .detail("Tag", tag.toString())
+				    .detail("Begin", begin)
+				    .detail("OldEpoch", old.epochEnd)
+				    .detail("RecoveredAt", recoveredAt.present() ? recoveredAt.get() : -1)
+				    .detail("FirstOld", firstOld);
 				//FIXME: do this merge on one of the logs in the other data center to avoid sending multiple copies across the WAN
 				return Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( localSets, bestSet, localSets[bestSet]->bestLocationFor( tag ), tag, begin, firstOld && recoveredAt.present() ? recoveredAt.get() + 1 : old.epochEnd, true ) );
 			}
