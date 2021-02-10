@@ -2021,7 +2021,7 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 		data.address.ip = IPAddress(i);
 
 		if(g_network->isSimulated()) {
-			g_simulator.newProcess(format("TestProcess%d", i).c_str(), data.address.ip, data.address.port, false, 1,
+			g_simulator.newProcess("TestCoordinator", data.address.ip, data.address.port, false, 1,
 			                       data.locality, ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource),
 			                       "", "");
 		}
