@@ -609,6 +609,7 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything( Refere
 	}
 	self->backupWorkers.swap(recruits.backupWorkers);
 
+	// TODO: Add self->primaryDcId and self->remoteDcId and config.regions[0].dcId in trace
 	TraceEvent("MasterRecoveryState", self->dbgid)
 		.detail("StatusCode", RecoveryStatus::initializing_transaction_servers)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::initializing_transaction_servers])

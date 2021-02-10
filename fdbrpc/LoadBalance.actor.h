@@ -225,6 +225,8 @@ Future< REPLY_TYPE(Request) > loadBalance(
 					double thisTime = qd.latency;
 					if(FLOW_KNOBS->LOAD_BALANCE_PENALTY_IS_BAD && qd.penalty > 1.001) {
 						// penalty is sent from server.
+						// TODO: When server is SS, SS should account for its version lag into penalty. Otherwise,
+						// load balancer may fail to choose a SS with lower latency.
 						++badServers;
 					}
 

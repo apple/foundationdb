@@ -692,6 +692,7 @@ public:
 	}
 
 	// penalty used by loadBalance() to balance requests among SSes. We prefer SS with less write queue size.
+	// TODO: Account for tLog-to-SS version lag into penalty, because read from a SS lagging behind has higher latency.
 	double getPenalty() {
 		return std::max(std::max(1.0, (queueSize() - (SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER -
 													  2.0 * SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER)) /
