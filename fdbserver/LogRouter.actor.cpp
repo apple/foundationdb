@@ -610,7 +610,8 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t r
 	loop {
 		bool isDisplaced =
 		    ((db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED) ||
-		     (db->get().recoveryCount == recoveryCount && db->get().recoveryState == RecoveryState::FULLY_RECOVERED));
+		     (db->get().recoveryCount == recoveryCount &&
+		      db->get().recoveryState >= RecoveryState::ALL_LOGS_RECRUITED));
 		isDisplaced = isDisplaced && !db->get().logSystemConfig.hasLogRouter(myInterface.id());
 		if (isDisplaced) {
 			throw worker_removed();
