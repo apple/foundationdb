@@ -2221,9 +2221,7 @@ ACTOR Future<Void> watchStorageServerResp(Key key, Database cx) {
 	loop {
 		try {
 			state Reference<WatchMetadata> metadata = cx->getWatchMetadata(key);
-			if (!metadata.isValid()) {
-				return Void();
-			}
+			if (!metadata.isValid()) return Void();
 
 			Version watchVersion = wait(watchValue(Future<Version>(metadata->version), key, metadata->value, cx, metadata->info, metadata->tags));
 
@@ -2243,6 +2241,7 @@ ACTOR Future<Void> watchStorageServerResp(Key key, Database cx) {
 			if (e.code() == error_code_operation_cancelled) {
 				throw e;
 			}
+
 			Reference<WatchMetadata> metadata = cx->getWatchMetadata(key);
 			if (!metadata.isValid()) {
 				return Void();
@@ -2259,7 +2258,6 @@ ACTOR Future<Void> sameVersionDiffValue(Version ver, Key key, Optional<Value> va
 	state ReadYourWritesTransaction tr(cx);
 
 	try {
-
 		tr.setOption( FDBTransactionOptions::READ_SYSTEM_KEYS );
 		state Optional<Value> valSS = wait(tr.get(key));
 		Reference<WatchMetadata> metadata = cx->getWatchMetadata(key);
@@ -2280,10 +2278,7 @@ ACTOR Future<Void> sameVersionDiffValue(Version ver, Key key, Optional<Value> va
 
 		if (valSS != value) return Void(); // if val_3 != val_2
 
-		metadata = cx->getWatchMetadata(key);
-		if (metadata.isValid()) { // if val_3 == val_2
-			wait(success(metadata->watchPromise.getFuture()));
-		}
+		wait(success(metadata->watchPromise.getFuture())); // val_3 == val_2
 
 		return Void();
 	}
