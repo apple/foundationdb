@@ -513,7 +513,7 @@ struct JavaWorkload : FDBWorkload {
 	bool failed = false;
 	jobject workload = nullptr;
 	JavaWorkload(const std::shared_ptr<JVM>& jvm, FDBLogger& log, const std::string& name)
-		: jvm(jvm), log(log), name(name) {
+	  : jvm(jvm), log(log), name(name) {
 		boost::replace_all(this->name, ".", "/");
 	}
 	~JavaWorkload() {
@@ -586,9 +586,7 @@ struct JavaWorkload : FDBWorkload {
 			log.trace(error, "CheckFailedWithJNIError", { { "Error", e.toString() }, { "Location", e.location() } });
 		}
 	}
-	void getMetrics(std::vector<FDBPerfMetric>& out) const override {
-		jvm->getMetrics(workload, name, out);
-	}
+	void getMetrics(std::vector<FDBPerfMetric>& out) const override { jvm->getMetrics(workload, name, out); }
 };
 
 struct JavaWorkloadFactory : FDBWorkloadFactory {

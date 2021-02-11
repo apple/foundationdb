@@ -29,19 +29,17 @@
 
 struct RestoreInterface {
 	constexpr static FileIdentifier file_identifier = 13398189;
-	RequestStream< struct TestRequest > test;
+	RequestStream<struct TestRequest> test;
 
-	bool operator == (RestoreInterface const& r) const { return id() == r.id(); }
-	bool operator != (RestoreInterface const& r) const { return id() != r.id(); }
+	bool operator==(RestoreInterface const& r) const { return id() == r.id(); }
+	bool operator!=(RestoreInterface const& r) const { return id() != r.id(); }
 	UID id() const { return test.getEndpoint().token; }
 	NetworkAddress address() const { return test.getEndpoint().getPrimaryAddress(); }
 
-	void initEndpoints() {
-		test.getEndpoint( TaskPriority::ClusterController );
-	}
+	void initEndpoints() { test.getEndpoint(TaskPriority::ClusterController); }
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
+	void serialize(Ar& ar) {
 		serializer(ar, test);
 	}
 };
@@ -62,7 +60,7 @@ struct TestReply {
 struct TestRequest {
 	constexpr static FileIdentifier file_identifier = 14404487;
 	int testData;
-	ReplyPromise< struct TestReply > reply;
+	ReplyPromise<struct TestReply> reply;
 
 	TestRequest() : testData(0) {}
 	explicit TestRequest(int testData) : testData(testData) {}

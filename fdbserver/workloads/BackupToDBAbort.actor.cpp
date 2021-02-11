@@ -22,7 +22,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct BackupToDBAbort : TestWorkload {
 	double abortDelay;
@@ -30,8 +30,7 @@ struct BackupToDBAbort : TestWorkload {
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	UID lockid;
 
-	explicit BackupToDBAbort(const WorkloadContext& wcx)
-	    : TestWorkload(wcx) {
+	explicit BackupToDBAbort(const WorkloadContext& wcx) : TestWorkload(wcx) {
 		abortDelay = getOption(options, LiteralStringRef("abortDelay"), 50.0);
 
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
@@ -42,9 +41,7 @@ struct BackupToDBAbort : TestWorkload {
 		lockid = UID(0xbeeffeed, 0xdecaf00d);
 	}
 
-	virtual std::string description() override {
-		return "BackupToDBAbort";
-	}
+	virtual std::string description() override { return "BackupToDBAbort"; }
 
 	virtual Future<Void> setup(const Database& cx) override {
 		if (clientId != 0) return Void();
@@ -55,11 +52,11 @@ struct BackupToDBAbort : TestWorkload {
 		state DatabaseBackupAgent backupAgent(cx);
 		try {
 			TraceEvent("BDBA_Submit1");
-			wait( backupAgent.submitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, false, StringRef(), StringRef(), true) );
+			wait(backupAgent.submitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, false,
+			                              StringRef(), StringRef(), true));
 			TraceEvent("BDBA_Submit2");
-		} catch( Error &e ) {
-			if( e.code() != error_code_backup_duplicate )
-				throw;
+		} catch (Error& e) {
+			if (e.code() != error_code_backup_duplicate) throw;
 		}
 		return Void();
 	}
@@ -75,7 +72,7 @@ struct BackupToDBAbort : TestWorkload {
 		TraceEvent("BDBA_Start").detail("Delay", self->abortDelay);
 		wait(delay(self->abortDelay));
 		TraceEvent("BDBA_Wait");
-		wait(success( backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false) ));
+		wait(success(backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false)));
 		TraceEvent("BDBA_Lock");
 		wait(lockDatabase(cx, self->lockid));
 		TraceEvent("BDBA_Abort");
@@ -100,9 +97,7 @@ struct BackupToDBAbort : TestWorkload {
 		return true;
 	}
 
-	virtual Future<bool> check(const Database& cx) override {
-		return _check(this, cx);
-	}
+	virtual Future<bool> check(const Database& cx) override { return _check(this, cx); }
 
 	virtual void getMetrics(vector<PerfMetric>& m) {}
 };

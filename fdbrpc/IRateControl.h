@@ -30,21 +30,21 @@ public:
 	// If all of the allowance is not used the unused units can be given back.
 	// For convenience, n can safely be negative.
 	virtual void returnUnused(int n) = 0;
-	virtual void killWaiters(const Error &e) = 0;
+	virtual void killWaiters(const Error& e) = 0;
 	virtual void wakeWaiters() = 0;
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 };
 
-// An IRateControl implemenation that allows at most hands out at most windowLimit units of 'credit' in windowSeconds seconds
+// An IRateControl implemenation that allows at most hands out at most windowLimit units of 'credit' in windowSeconds
+// seconds
 class SpeedLimit : public IRateControl, ReferenceCounted<SpeedLimit> {
 public:
-	SpeedLimit(int windowLimit, double windowSeconds) : m_limit(windowLimit), m_seconds(windowSeconds), m_last_update(0), m_budget(0) {
+	SpeedLimit(int windowLimit, double windowSeconds)
+	  : m_limit(windowLimit), m_seconds(windowSeconds), m_last_update(0), m_budget(0) {
 		m_last_update = now();
 	}
-	virtual ~SpeedLimit() {
-		m_stop.send(Never());
-	}
+	virtual ~SpeedLimit() { m_stop.send(Never()); }
 
 	void addref() override { ReferenceCounted<SpeedLimit>::addref(); }
 	void delref() override { ReferenceCounted<SpeedLimit>::delref(); }
@@ -57,15 +57,13 @@ public:
 		m_last_update = ts;
 		m_budget -= n;
 		// If budget is still >= 0 then it's safe to use the allowance right now.
-		if(m_budget >= 0)
-			return Void();
+		if (m_budget >= 0) return Void();
 		// Otherise return the amount of time it will take for the budget to rise to 0.
 		return m_stop.getFuture() || delay(m_seconds * -m_budget / m_limit);
 	}
 
 	void returnUnused(int n) override {
-		if(n < 0)
-			return;
+		if (n < 0) return;
 		m_budget = std::min<int64_t>(m_budget + n, m_limit);
 	}
 
@@ -75,7 +73,7 @@ public:
 		p.send(Void());
 	}
 
-	void killWaiters(const Error &e) override {
+	void killWaiters(const Error& e) override {
 		Promise<Void> p;
 		p.swap(m_stop);
 		p.sendError(e);
@@ -100,5 +98,5 @@ public:
 	Future<Void> getAllowance(unsigned int n) override { return Void(); }
 	void returnUnused(int n) override {}
 	void wakeWaiters() override {}
-	void killWaiters(const Error &e) override {}
+	void killWaiters(const Error& e) override {}
 };

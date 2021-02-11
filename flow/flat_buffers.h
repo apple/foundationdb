@@ -1123,7 +1123,7 @@ uint8_t* save(Context& context, const Root& root, FileIdentifier file_identifier
 	save_with_vtables(root, vtableset, precompute_size, &vtable_start, file_identifier, context);
 	uint8_t* out = context.allocate(precompute_size.current_buffer_size);
 	WriteToBuffer writeToBuffer{ context, precompute_size.current_buffer_size, vtable_start, out,
-														precompute_size.writeToOffsets.begin() };
+		                         precompute_size.writeToOffsets.begin() };
 	save_with_vtables(root, vtableset, writeToBuffer, &vtable_start, file_identifier, context);
 	return out;
 }

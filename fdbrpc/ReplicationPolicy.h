@@ -124,7 +124,8 @@ struct PolicyAcross : IReplicationPolicy, public ReferenceCounted<PolicyAcross> 
 	virtual std::string info() const { return format("%s^%d x ", _attribKey.c_str(), _count) + _policy->info(); }
 	virtual int maxResults() const { return _count * _policy->maxResults(); }
 	virtual int depth() const { return 1 + _policy->depth(); }
-	virtual bool validate(std::vector<LocalityEntry> const& solutionSet, Reference<LocalitySet> const& fromServers) const;
+	virtual bool validate(std::vector<LocalityEntry> const& solutionSet,
+	                      Reference<LocalitySet> const& fromServers) const;
 	virtual bool selectReplicas(Reference<LocalitySet>& fromServers, std::vector<LocalityEntry> const& alsoServers,
 	                            std::vector<LocalityEntry>& results);
 

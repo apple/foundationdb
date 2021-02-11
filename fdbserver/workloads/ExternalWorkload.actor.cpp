@@ -95,7 +95,7 @@ struct FDBLoggerImpl : FDBLogger {
 			onMainThreadVoid(
 			    [traceFun]() -> Future<Void> {
 				    traceFun();
-					flushTraceFileVoid();
+				    flushTraceFileVoid();
 				    return Void();
 			    },
 			    nullptr);
