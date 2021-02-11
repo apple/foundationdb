@@ -25,6 +25,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/genericactors.actor.h"
 #include <vector>
+#include <unordered_map>
 #pragma once
 
 #include "fdbclient/NativeAPI.actor.h"
@@ -142,6 +143,7 @@ public:
 
 class WatchMetadata: public ReferenceCounted<WatchMetadata> {
 public:
+	Key key;
 	Optional<Value> value;
 	Version version;
 	Promise<Version> watchPromise;
@@ -151,7 +153,7 @@ public:
 	TransactionInfo info;
 	TagSet tags;
 
-	WatchMetadata(Optional<Value> value, Version version, TransactionInfo info, TagSet tags);
+	WatchMetadata(Key key, Optional<Value> value, Version version, TransactionInfo info, TagSet tags);
 };
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
@@ -191,9 +193,9 @@ public:
 	void removeWatch();
 
 	// watch map operations
-	Reference<WatchMetadata> getWatchMetadata(Key key) const;
-	void setWatchMetadata(Key key, Reference<WatchMetadata> metadata);
-	void deleteWatchMetadata(Key key);
+	Reference<WatchMetadata> getWatchMetadata(KeyRef key) const;
+	KeyRef setWatchMetadata(Reference<WatchMetadata> metadata);
+	void deleteWatchMetadata(KeyRef key);
 	void clearWatchMetadata();
 
 	void setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value );
@@ -385,7 +387,7 @@ public:
 
 	static bool debugUseTags;
 	static const std::vector<std::string> debugTransactionTagChoices;
-	std::map<Key, Reference<WatchMetadata>> watchMap;
+	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;
 };
 
 #endif

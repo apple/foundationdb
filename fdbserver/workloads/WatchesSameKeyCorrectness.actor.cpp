@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -65,35 +65,41 @@ struct WatchesSameKeyWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> setKeyRandomValue(Database cx, Key key, Optional<Value> val) {
-		try {
-			if ( !val.present() ) val = Value( deterministicRandom()->randomUniqueID().toString() );
-			state ReadYourWritesTransaction tr(cx);
-			tr.set(key, val.get());
-			wait( tr.commit() );
-			return Void();
-		} catch ( Error& e ) {
-			throw e;
+		state ReadYourWritesTransaction tr(cx);
+		loop {
+			try {
+				if (!val.present()) val = Value(deterministicRandom()->randomUniqueID().toString());
+				tr.set(key, val.get());
+				wait(tr.commit());
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
 		}
 	}
 
 	ACTOR static Future<Optional<Value>> getValue(Database cx, Key key) {
-		try {
-			state ReadYourWritesTransaction tr(cx);
-			Optional<Value> val = wait(tr.get(key));
-			return val;
-		} catch ( Error& e ) {
-			throw e;
+		state ReadYourWritesTransaction tr(cx);
+		loop {
+			try {
+				Optional<Value> val = wait(tr.get(key));
+				return val;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
 		}
 	}
 
 	ACTOR static Future<Future<Void>> watchKey(Database cx, Key key) {
-		try {
-			state ReadYourWritesTransaction tr(cx);
-			state Future<Void> watchFuture = tr.watch(key);
-			wait( tr.commit() );
-			return watchFuture;
-		} catch ( Error& e ) {
-			throw e;
+		state ReadYourWritesTransaction tr(cx);
+		loop {
+			try {
+				state Future<Void> watchFuture = tr.watch(key);
+				wait(tr.commit());
+				return watchFuture;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
 		}
 	}
 
@@ -102,22 +108,25 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		 * Tests case 2 in the design doc:
 		 *  - we get a watch that has the same value as a key in the watch map 
 		 * */
+		state ReadYourWritesTransaction tr(cx);
 		loop {
 			try {
 				state std::vector<Future<Void>> watchFutures;
 				state int i;
 
 				for ( i = 0; i < self->numWatches; i++ ) {
-					Future<Void> watchFuture = wait(watchKey(cx, key));
-					watchFutures.push_back(watchFuture);
+					watchFutures.push_back(tr.watch(key));
 				}
+				wait(tr.commit());
 
 				wait( setKeyRandomValue(cx, key, Optional<Value>()) );
 				for ( i = 0; i < watchFutures.size(); i++) {
 					wait( watchFutures[i] );
 				}
 				return Void();
-			} catch( Error& e ) {}
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
 		}
 	}
 
@@ -126,6 +135,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		 * Tests case 3 in the design doc:
 		 * 	- we get a watch that has a different value than the key in the map but the version is larger
 		 * */
+		state ReadYourWritesTransaction tr(cx);
 		loop {
 			try {
 				state std::vector<Future<Void>> watchFutures;
@@ -133,7 +143,6 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				state int i;
 				
 				state Value val = Value( deterministicRandom()->randomUniqueID().toString() );
-				state ReadYourWritesTransaction tr(cx);
 				tr.set(key, val);
 				for ( i = 0; i < self->numWatches; i++ ) {
 					watchFutures.push_back(tr.watch(key));
@@ -145,7 +154,9 @@ struct WatchesSameKeyWorkload : TestWorkload {
 					wait( watchFutures[i] );
 				}
 				return Void();
-			} catch ( Error& e ) {}
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
 		}
 	}
 
@@ -154,6 +165,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		 * Tests case 2 for the storage server response:
 		 * 	- i.e ABA but when the storage server responds the future count == 1 so we do nothing (no refire)
 		 * */
+		state ReadYourWritesTransaction tr(cx);
 		loop {
 			try {
 				wait ( setKeyRandomValue(cx, key, Optional<Value>()) );
@@ -161,7 +173,6 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				state Future<Void> watch1 = wait(watchKey(cx, key));
 				wait ( setKeyRandomValue(cx, key, Optional<Value>()) );
 				
-				state ReadYourWritesTransaction tr(cx);
 				tr.set(key, val.get());
 				state Future<Void> watch2 = tr.watch(key);
 				wait( tr.commit() );
@@ -169,7 +180,9 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				watch1.cancel();
 				watch2.cancel();
 				return Void();
-			} catch ( Error& e ) {}
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
 		}
 	}
 
@@ -178,6 +191,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		 * Tests case 3 for the storage server response:
 		 * 	- i.e ABA but when the storage server responds the future count > 1 so we refire request to SS
 		 * */
+		state ReadYourWritesTransaction tr(cx);
 		loop {
 			try {
 				wait ( setKeyRandomValue(cx, key, Optional<Value>()) );
@@ -185,7 +199,6 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				state Future<Void> watch1 = wait(watchKey(cx, key));
 				wait ( setKeyRandomValue(cx, key, Optional<Value>()) );
 				
-				state ReadYourWritesTransaction tr(cx);
 				tr.set(key, val.get());
 				state Future<Void> watch2 = tr.watch(key);
 				wait( tr.commit() );
@@ -194,7 +207,9 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				wait( watch1 );
 				wait( watch2 );
 				return Void();
-			} catch ( Error& e ) {}
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
 		}
 	}
 
@@ -203,13 +218,13 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		 * Tests case 5 in the design doc:
 		 * 	- i.e values of watches are different but versions are the same
 		 * */
+		state ReadYourWritesTransaction tr1(cx);
+		state ReadYourWritesTransaction tr2(cx);
 		loop {
 			try {
 				state Value val1 = Value( deterministicRandom()->randomUniqueID().toString() );
 				state Value val2 = Value( deterministicRandom()->randomUniqueID().toString() );
-				state ReadYourWritesTransaction tr1(cx);
 				tr1.setOption( FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE );
-				state ReadYourWritesTransaction tr2(cx);
 				tr2.setOption( FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE );
 				tr1.set(key, val1);
 				tr2.set(key, val2);
@@ -222,7 +237,9 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				wait( watch1 && watch2 );
 
 				return Void();
-			} catch ( Error& e ) {}
+			} catch (Error& e) {
+				wait(tr1.onError(e) && tr2.onError(e));
+			}
 		}
 	}
 
