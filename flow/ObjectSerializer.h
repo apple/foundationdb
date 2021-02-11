@@ -230,7 +230,7 @@ public:
 
 private:
 	Arena arena;
-	ObjectWriterAlloc* customAllocator;
+	ObjectWriterAlloc* customAllocator = nullptr;
 	uint8_t* data = nullptr;
 	int size = 0;
 };
