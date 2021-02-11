@@ -1461,6 +1461,9 @@ int main(int argc, char* argv[]) {
 		delete FLOW_KNOBS;
 		delete SERVER_KNOBS;
 		delete CLIENT_KNOBS;
+		FLOW_KNOBS = nullptr;
+		SERVER_KNOBS = nullptr;
+		CLIENT_KNOBS = nullptr;
 		FlowKnobs* flowKnobs = new FlowKnobs(true, role == Simulation);
 		ClientKnobs* clientKnobs = new ClientKnobs(true);
 		ServerKnobs* serverKnobs = new ServerKnobs(true, clientKnobs, role == Simulation);

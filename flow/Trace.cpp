@@ -805,7 +805,7 @@ bool TraceEvent::init() {
 		detail("Severity", int(severity));
 		detail("Time", "0.000000");
 		timeIndex = fields.size() - 1;
-		if (FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
+		if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
 			detail("DateTime", "");
 		}
 
@@ -1028,7 +1028,7 @@ void TraceEvent::log() {
 			if (enabled) {
 				double time = TraceEvent::getCurrentTime();
 				fields.mutate(timeIndex).second = format("%.6f", time);
-				if (FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
+				if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
 					fields.mutate(timeIndex + 1).second = TraceEvent::printRealTime(time);
 				}
 
@@ -1193,7 +1193,7 @@ void TraceBatch::dump() {
 TraceBatch::EventInfo::EventInfo(double time, const char *name, uint64_t id, const char *location) {
 	fields.addField("Severity", format("%d", (int)SevInfo));
 	fields.addField("Time", format("%.6f", time));
-	if (FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
+	if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
 		fields.addField("DateTime", TraceEvent::printRealTime(time));
 	}
 	fields.addField("Type", name);
@@ -1204,7 +1204,7 @@ TraceBatch::EventInfo::EventInfo(double time, const char *name, uint64_t id, con
 TraceBatch::AttachInfo::AttachInfo(double time, const char *name, uint64_t id, uint64_t to) {
 	fields.addField("Severity", format("%d", (int)SevInfo));
 	fields.addField("Time", format("%.6f", time));
-	if (FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
+	if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
 		fields.addField("DateTime", TraceEvent::printRealTime(time));
 	}
 	fields.addField("Type", name);
@@ -1215,7 +1215,7 @@ TraceBatch::AttachInfo::AttachInfo(double time, const char *name, uint64_t id, u
 TraceBatch::BuggifyInfo::BuggifyInfo(double time, int activated, int line, std::string file) {
 	fields.addField("Severity", format("%d", (int)SevInfo));
 	fields.addField("Time", format("%.6f", time));
-	if (FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
+	if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
 		fields.addField("DateTime", TraceEvent::printRealTime(time));
 	}
 	fields.addField("Type", "BuggifySection");

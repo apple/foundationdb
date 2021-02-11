@@ -4625,7 +4625,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 		}
 		catch( Error &e ) {
 			state Error err = e;
-			trackerCancelled = true;
 			wait(shards.clearAsync());
 			if (err.code() != error_code_movekeys_conflict) throw err;
 			bool ddEnabled = wait( isDataDistributionEnabled(cx) );
