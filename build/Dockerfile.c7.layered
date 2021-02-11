@@ -68,6 +68,8 @@ RUN source /opt/rh/devtoolset-8/enable && \
         -G Ninja \
         -DLLVM_INCLUDE_EXAMPLES=OFF \
         -DLLVM_INCLUDE_TESTS=OFF \
+        -DLLVM_ENABLE_PROJECTS="clang;clang-tools-extra;compiler-rt;libcxx;libcxxabi;libunwind;lld;lldb" \
+        -DLLVM_STATIC_LINK_CXX_STDLIB=ON \
         ../llvm/llvm && \
     cmake --build . && \
     cmake --build . --target install && \
