@@ -32,7 +32,7 @@ RUN powershell -Command choco install 7zip -y
 RUN mkdir C:\Downloads && `
     powershell -Command iwr -Uri https://dl.bintray.com/boostorg/release/1.72.0/source/boost_1_72_0.7z -OutFile C:\Downloads\boost_1_72_0.7z && `
     powershell -Command (Get-FileHash C:\Downloads\boost_1_72_0.7z).Hash -eq \"247a91dd7e4d9dd3c4b954b532fbc167ba62dc15ab834e5ad893d7c3f9eb5f0f\" && `
-    cd \Downloads && "C:\Program Files\7-Zip\7z" x boost_1_72_0.7z
+    cd \Downloads && "C:\Program Files\7-Zip\7z" x boost_1_72_0.7z && del boost_1_72_0.7z
 
 # install other dependencies
 RUN powershell -Command choco install cmake openjdk12 python -y

@@ -1,6 +1,6 @@
 param (
     [string]$SourceDir = (Resolve-Path "$PSScriptRoot\.."),
-    [string]$ImageName = "fdb",
+    [string]$ImageName = "fdb-windows",
     # By default we want to leave one CPU core for the OS so the user has some minimal control over the system
     [string]$Cpus = (Get-WmiObject -Class Win32_Processor).NumberOfLogicalProcessors - 2,
     # We want to leave at least 1GB of memory for the OS
@@ -32,7 +32,7 @@ if ($exponent -gt 0) {
     $Memory = $Memory.Substring(0, $Memory.Length - 1) * [Math]::Pow(2, $exponent)
 }
 
-$buildCommand = [string]::Format("Get-Content {0}\build\Dockerfile.windows | docker build -t {1} -m {2} -", 
+$buildCommand = [string]::Format("Get-Content {0}\build\Dockerfile.windows.devel | docker build -t {1} -m {2} -", 
                                  $SourceDir, $ImageName, [Math]::Min(16 * [Math]::Pow(2, 30), $Memory))
 if ($DryRun -and !$SkipDockerBuild) {
     Write-Output $buildCommand
