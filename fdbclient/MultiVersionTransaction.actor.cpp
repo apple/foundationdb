@@ -1007,35 +1007,6 @@ void MultiVersionApi::setCallbacksOnExternalThreads() {
 
 	callbackOnMainThread = false;
 }
-
-/*void MultiVersionApi::addExternalLibraries(const std::vector<std::string>& paths) {
-	// All paths must be valid and must exist.
-	if (networkStartSetup) {
-		throw invalid_option(); // SOMEDAY: it might be good to allow clients to
-		                        // be added after the network is setup. For
-		                        // directories, we can monitor them for the
-		                        // addition of new files.
-	}
-
-	MutexHolder holder(lock);
-	for (const auto& path : paths) {
-		std::string filename = basename(path);
-		if (externalClients.count(filename) == 0) {
-			TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
-			externalClients[filename] = Reference<ClientInfo>(new ClientInfo(new DLApi(path), path));
-		}
-	}
-	// // Cleanup temporary generated copies.
-	// for (const auto& lib : tempLibs) {
-	// 	unlink(lib.c_str());
-
-	addExternalLibraries({ path });
-
-	// Copy external lib for each thread
-	std::vector<std::string> tempLibs = copyExternalLibraryPerThread(path);
-	addExternalLibraries(tempLibs);
-}*/
-
 void MultiVersionApi::addExternalLibrary(std::string path) {
 	std::string filename = basename(path);
 
@@ -1044,10 +1015,9 @@ void MultiVersionApi::addExternalLibrary(std::string path) {
 		throw file_not_found();
 	}
 
-	// xxx external client init info
 	if(externalClientDescriptions.count(filename) == 0) {
 		TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
-		externalClientDescriptions.emplace(std::make_pair(filename, ClientDesc(path, true))); //[filename] = { path, true };
+		externalClientDescriptions.emplace(std::make_pair(filename, ClientDesc(path, true)));
 	}
 }
 
@@ -1057,10 +1027,9 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 
 	for(auto filename : files) {
 		std::string lib = abspath(joinPath(path, filename));
-		// xxx external client init info.
 		if(externalClientDescriptions.count(filename) == 0) {
 			TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
-			externalClientDescriptions.emplace(std::make_pair(filename, ClientDesc(lib, true))); //Reference<ClientInfo>(new ClientDesc(new DLApi(lib), lib));
+			externalClientDescriptions.emplace(std::make_pair(filename, ClientDesc(lib, true)));
 		}	
 	}
 }
@@ -1074,7 +1043,6 @@ std::vector<std::string> MultiVersionApi::copyExternalLibraryPerThread(std::stri
 		char tempName[PATH_MAX + 12];
 		sprintf(tempName, "/tmp/%s-XXXXXX", filename.c_str());
 		int tempFd = mkstemp(tempName);
-
 		int fd;
 
 		if ((fd = open(path.c_str(), O_RDONLY)) == -1) {
@@ -1087,41 +1055,25 @@ std::vector<std::string> MultiVersionApi::copyExternalLibraryPerThread(std::stri
 		std::cout << path << " -> " << tempName << std::endl;
 		while(1) {
 			ssize_t readCount = read(fd, buf, buf_sz);
-			// std::cout << "read " << readCount << " bytes " << std::endl;
 			if (readCount == 0) { 
 				// eof
 				break;
 			}
 			if (readCount == -1) {
-				// std::cout << "read failed; errno" << errno << std::endl;
 				throw platform_error;
 			}
 			ssize_t written = 0;
 			while(written != readCount) {
 				ssize_t writeCount = write(tempFd, buf + written, readCount - written);
-				// std::cout << "wrote " << writeCount << " bytes (" << readCount - written << " remain)" << std::endl;
 				if (writeCount == -1) { 
-					// std::cout << "write failed; errno" << errno << std::endl;
 					throw platform_error;
 				}
 				written += writeCount;
 			}
 		}
 
-		// if (fstat(fd, &stat_buf) == -1) {
-		// 	TraceEvent(SevError, "FStatError").detail("LibraryPath", path).detail("errno", errno);
-		// 	throw platform_error();
-		// }
-
-		// std::cout << "copying " << stat_buf.st_size << "bytes from " << path << std::endl;
-		// // TraceEvent("TempCopyExternalClientLibrary").detail("Library", filename).detail("TempLibrary", tempName);
-		// // TraceEvent("Copying").detail("bytes", stat_buf.st_size);
-		// int result = sendfile(tempFd, fd, &offset, stat_buf.st_size);
-
-		// std::ccout << "copied " << result << " result offset = " << offset << std::end;
 		close(fd);
 		close(tempFd);
-		// ASSERT(result == stat_buf.st_size);
 
 		paths.push_back(tempName);
 	}
@@ -1204,10 +1156,10 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		bypassMultiClientApi = true;
 	}
 	else if(option == FDBNetworkOptions::CLIENT_THREADS_PER_VERSION) {
-		validateOption(value, true, false, false);
-		disableLocalClient();
 		MutexHolder holder(lock);
-		ASSERT(value.present());
+		validateOption(value, true, false, false);
+		ASSERT(!networkStartSetup);
+		disableLocalClient();
 		threadCount = extractIntOption(value, 1, 1024);
 	}
 	else {

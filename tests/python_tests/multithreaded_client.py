@@ -30,8 +30,6 @@ if not os.path.exists("client-logs"):
 fdb.options.set_trace_enable("client-logs/")
 fdb.options.set_external_client_directory(builddir + '/lib')
 fdb.options.set_knob("min_trace_severity=5")
-
-
 fdb.options.set_client_threads_per_version(len(clusters))
 
 dbs = []

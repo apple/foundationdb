@@ -289,8 +289,6 @@ struct ClientDesc {
 struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
 	ProtocolVersion protocolVersion;
 	IClientApi *api;
-	// std::string libPath;
-	// bool external;
 	bool failed;
 	std::vector<std::pair<void (*)(void*), void*>> threadCompletionHooks;
 
@@ -423,7 +421,6 @@ private:
 	volatile bool externalClient;
 	int apiVersion;
 
-	// XXX fixme
 	int nextThread = 0;
 	int threadCount;
 
