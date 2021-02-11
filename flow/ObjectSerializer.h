@@ -156,6 +156,10 @@ private:
 	Arena _arena;
 };
 
+struct ObjectWriterAlloc {
+	virtual uint8_t* operator()(size_t size) = 0;
+};
+
 class ObjectWriter {
 	friend struct _IncludeVersion;
 	bool writeProtocolVersion = false;
@@ -170,8 +174,7 @@ public:
 		vo.write(*this);
 	}
 	template <class VersionOptions>
-	explicit ObjectWriter(std::function<uint8_t*(size_t)> customAllocator, VersionOptions vo)
-	  : customAllocator(customAllocator) {
+	explicit ObjectWriter(ObjectWriterAlloc* customAllocator, VersionOptions vo) : customAllocator(customAllocator) {
 		vo.write(*this);
 	}
 	template <class... Items>
@@ -181,7 +184,7 @@ public:
 			++allocations;
 			this->size = writeProtocolVersion ? size_ + sizeof(uint64_t) : size_;
 			if (customAllocator) {
-				data = customAllocator(this->size);
+				data = (*customAllocator)(this->size);
 			} else {
 				data = new (arena) uint8_t[this->size];
 			}
@@ -227,7 +230,7 @@ public:
 
 private:
 	Arena arena;
-	std::function<uint8_t*(size_t)> customAllocator;
+	ObjectWriterAlloc* customAllocator;
 	uint8_t* data = nullptr;
 	int size = 0;
 };
