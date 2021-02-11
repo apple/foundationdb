@@ -974,46 +974,67 @@ public:
 			.detail("ExpireEndVersion", expireEndVersion)
 			.detail("RestorableBeginVersion", restorableBeginVersion);
 
-		// Get the backup description.
-		state BackupDescription desc = wait(bc->describeBackup(false, expireEndVersion));
+		// Initially do a normal backup describe which uses metadata in the backup to avoid listing all log files.
+		// If the result is that there isn't enough restorability to safely perform the expiration, then it is
+		// possible the metadata is wrong.  So, try the backup describe again but with the deepScan option set
+		// true so it will scan all log files in the backup to determine restorability and re-initialize the 
+		// log version metadata in the backup.
+		state bool useDeepScan = false;
+		state Version scanBegin = 0;
 
-		// Resolve relative versions using max log version
-		expireEndVersion =
-		    resolveRelativeVersion(desc.maxLogEnd, expireEndVersion, "ExpireEndVersion", invalid_option_value());
-		restorableBeginVersion = resolveRelativeVersion(desc.maxLogEnd, restorableBeginVersion,
-		                                                "RestorableBeginVersion", invalid_option_value());
+		loop {
+			// Get the backup description.
+			state BackupDescription desc = wait(bc->describeBackup(useDeepScan, expireEndVersion));
 
-		// It would be impossible to have restorability to any version < expireEndVersion after expiring to that version
-		if(restorableBeginVersion < expireEndVersion)
-			throw backup_cannot_expire();
+			// Resolve relative versions using max log version
+			expireEndVersion =
+				resolveRelativeVersion(desc.maxLogEnd, expireEndVersion, "ExpireEndVersion", invalid_option_value());
+			restorableBeginVersion = resolveRelativeVersion(desc.maxLogEnd, restorableBeginVersion,
+															"RestorableBeginVersion", invalid_option_value());
 
-		// If the expire request is to a version at or before the previous version to which data was already deleted
-		// then do nothing and just return
-		if(expireEndVersion <= desc.expiredEndVersion.orDefault(invalidVersion)) {
-			return Void();
-		}
+			// It would be impossible to have restorability to any version < expireEndVersion after expiring to that version
+			if(restorableBeginVersion < expireEndVersion)
+				throw backup_cannot_expire();
 
-		// Assume force is needed, then try to prove otherwise.
-		// Force is required if there is not a restorable snapshot which both
-		//   - begins at or after expireEndVersion
-		//   - ends at or before restorableBeginVersion
-		state bool forceNeeded = true;
-		for(KeyspaceSnapshotFile &s : desc.snapshots) {
-			if(s.restorable.orDefault(false) && s.beginVersion >= expireEndVersion && s.endVersion <= restorableBeginVersion) {
-				forceNeeded = false;
-				break;
+			// If the expire request is to a version at or before the previous version to which data was already deleted
+			// then do nothing and just return
+			if(expireEndVersion <= desc.expiredEndVersion.orDefault(invalidVersion)) {
+				return Void();
 			}
+
+			// Assume force is needed, then try to prove otherwise.
+			// Force is required if there is not a restorable snapshot which both
+			//   - begins at or after expireEndVersion
+			//   - ends at or before restorableBeginVersion
+			state bool forceNeeded = true;
+			for(KeyspaceSnapshotFile &s : desc.snapshots) {
+				if(s.restorable.orDefault(false) && s.beginVersion >= expireEndVersion && s.endVersion <= restorableBeginVersion) {
+					forceNeeded = false;
+					break;
+				}
+			}
+
+			// If force is needed but not passed then refuse to expire anything.
+			// Note that it is possible for there to be no actual files in the backup prior to expireEndVersion,
+			// if they were externally deleted or an expire operation deleted them but was terminated before
+			// updating expireEndVersion
+			if(forceNeeded && !force) {
+				// If we already did a deep scan, throw error
+				if(useDeepScan) {
+					throw backup_cannot_expire();
+				}
+				else {
+					// If we didn't yet do a deep scan, doing so might find better log continuity
+					// if the backup metadata was wrong, so try again with a deep scan.
+					useDeepScan = true;
+					continue;
+				}
+			}
+
+			// Start scan for files to delete at the last completed expire operation's end or 0.
+			scanBegin = desc.expiredEndVersion.orDefault(0);
+			break;
 		}
-
-		// If force is needed but not passed then refuse to expire anything.
-		// Note that it is possible for there to be no actual files in the backup prior to expireEndVersion,
-		// if they were externally deleted or an expire operation deleted them but was terminated before
-		// updating expireEndVersion
-		if(forceNeeded && !force)
-			throw backup_cannot_expire();
-
-		// Start scan for files to delete at the last completed expire operation's end or 0.
-		state Version scanBegin = desc.expiredEndVersion.orDefault(0);
 
 		TraceEvent("BackupContainerFileSystemExpire2")
 			.detail("URL", bc->getURL())
