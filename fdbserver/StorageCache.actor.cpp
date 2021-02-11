@@ -76,6 +76,11 @@ struct AddingCacheRange : NonCopyable {
 
 	AddingCacheRange( StorageCacheData* server, KeyRangeRef const& keys );
 
+	// When fetchKeys "partially completes" (splits an adding cacheRange in two), this is used to construct the left half
+	AddingCacheRange( AddingCacheRange* prev, KeyRange const& keys )
+		: keys(keys), fetchClient(prev->fetchClient), server(prev->server), transferredVersion(prev->transferredVersion), phase(prev->phase)
+	{
+	}
 	~AddingCacheRange() {
 		if( !fetchComplete.isSet() )
 			fetchComplete.send(Void());
@@ -106,6 +111,11 @@ struct CacheRangeInfo : ReferenceCounted<CacheRangeInfo>, NonCopyable {
 	static CacheRangeInfo* newNotAssigned(KeyRange keys) { return new CacheRangeInfo(keys, NULL, NULL); }
 	static CacheRangeInfo* newReadWrite(KeyRange keys, StorageCacheData* data) { return new CacheRangeInfo(keys, NULL, data); }
 	static CacheRangeInfo* newAdding(StorageCacheData* data, KeyRange keys) { return new CacheRangeInfo(keys, new AddingCacheRange(data, keys), NULL); }
+	static CacheRangeInfo*
+	addingSplitLeft( KeyRange keys, AddingCacheRange* oldCacheRange)
+	{
+		return new CacheRangeInfo(keys, new AddingCacheRange(oldCacheRange, keys), NULL);
+	}
 
 	bool isReadable() const { return readWrite!=NULL; }
 	bool isAdding() const { return adding!=NULL; }
@@ -188,7 +198,6 @@ public:
 	FlowLock fetchKeysParallelismLock;
 	vector< Promise<FetchInjectionInfo*> > readyFetchKeys;
 
-// TODO do we need otherError here?
 	Promise<Void> otherError;
 	Promise<Void> coreStarted;
 
@@ -465,6 +474,8 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req )
 		//TODO what's this?
 		wait( delay(0, TaskPriority::DefaultEndpoint) );
 
+		TraceEvent(SevDebug, "SCGetValueQ", data->thisServerID).detail("Key", req.key).detail("ReqVersion", req.version).
+			detail("DataVersion", data->version.get()).detail("In", "getValueQ");
 		if( req.debugID.present() ) {
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
 			//FIXME
@@ -478,7 +489,8 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req )
 		state uint64_t changeCounter = data->cacheRangeChangeCounter;
 
 		if (data->cachedRangeMap[req.key]->notAssigned()) {
-			//TraceEvent(SevWarn, "WrongCacheServer", data->thisServerID).detail("Key", req.key).detail("ReqVersion", req.version).detail("DataVersion", data->version.get()).detail("In", "getValueQ");
+			//TraceEvent(SevWarn, "WrongCacheServer", data->thisServerID).detail("Key", req.key).
+			//detail("ReqVersion", req.version).detail("DataVersion", data->version.get()).detail("In", "getValueQ");
 			throw wrong_shard_server();
 		} else if (!data->cachedRangeMap[req.key]->isReadable()) {
 			//TraceEvent(SevWarn, "ColdCacheServer", data->thisServerID).detail("Key", req.key).detail("IsAdding", data->cachedRangeMap[req.key]->isAdding())
@@ -593,8 +605,6 @@ GetKeyValuesReply readRange(StorageCacheData* data, Version version, KeyRangeRef
 	*pLimitBytes -= accumulatedBytes;
 	ASSERT(result.data.size() == 0 || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
 	result.more = limit == 0 || *pLimitBytes <= 0; // FIXME: Does this have to be exact?
-        if (result.more)
-		TraceEvent(SevDebug, "SCReadRangeMoreSet").detail("Limit",limit).detail("PLimitBytes", *pLimitBytes);
 	result.version = version;
 	result.cached = true;
 	return result;
@@ -703,6 +713,9 @@ ACTOR Future<Void> getKeyValues( StorageCacheData* data, GetKeyValuesRequest req
 	// 	// Placeholder for up-prioritizing fetches for important requests
 	// 	taskType = TaskPriority::DefaultDelay;
 	}
+	TraceEvent(SevDebug, "SCGetKeyValues", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).
+		detail("CacheRangeBegin", cachedKeyRange.begin).detail("CacheRangeEnd", cachedKeyRange.end).
+				detail("BeginKey", begin).detail("EndKey", end).detail("BeginOffset", offset1).detail("EndOffset", offset2);
 	wait( delay(0, taskType) );
 
 	try {
@@ -771,7 +784,7 @@ ACTOR Future<Void> getKeyValues( StorageCacheData* data, GetKeyValuesRequest req
 				ASSERT(r.data.size() <= std::abs(req.limit));
 			}
 
-			TraceEvent(SevDebug, "SCGetKeyValues", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).
+			TraceEvent(SevDebug, "SCGetKeyValuesPresent", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).
 				detail("CacheRangeBegin", cachedKeyRange.begin).detail("CacheRangeEnd", cachedKeyRange.end).detail("In", "getKeyValues>checkOffsets").
 				detail("BeginKey", begin).detail("EndKey", end).detail("BeginOffset", offset1).detail("EndOffset", offset2);
 
@@ -986,6 +999,13 @@ void addMutation( T& target, Version version, MutationRef const& mutation ) {
 template <class T>
 void addMutation( Reference<T>& target, Version version, MutationRef const& mutation ) {
 	addMutation(*target, version, mutation);
+}
+
+template <class T>
+void splitMutations(StorageCacheData* data, KeyRangeMap<T>& map, VerUpdateRef const& update) {
+	for(int i = 0; i < update.mutations.size(); i++) {
+		splitMutation(data, map, update.mutations[i], update.version);
+	}
 }
 
 template <class T>
@@ -1216,6 +1236,7 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 
 		cacheRange->phase = AddingCacheRange::Fetching;
 		state Version fetchVersion = data->version.get();
+		state Version updateVersion;
 
 		data->updateVersionLock.release();
 
@@ -1259,16 +1280,40 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 				//Write this_block to mutationLog and versionedMap
 				state KeyValueRef *kvItr = this_block.begin();
 				for(; kvItr != this_block.end(); ++kvItr) {
-					applyMutation(data->updater, data, MutationRef(MutationRef::SetValue, kvItr->key, kvItr->value), fetchVersion);
+					updateVersion = data->mutableData().latestVersion;
+					//TraceEvent(SevDebug, "SCFetchKeysApplyData", data->thisServerID).detail("UpdateVer", updateVersion).detail("FetchVer", fetchVersion);
+					applyMutation(data->updater, data, MutationRef(MutationRef::SetValue, kvItr->key, kvItr->value), updateVersion/*fetchVersion*/);
+					//applyMutation(data->updater, data, MutationRef(MutationRef::SetValue, kvItr->key, kvItr->value), fetchVersion);
 					data->counters.bytesFetched += expectedSize;
 					wait(yield());
 				}
 
-				// TODO: If there was more to be fetched and we hit the limit before - possibly a case where data doesn't fit on this cache. For now, we can just fail this cache role.
-				// In future, we should think about evicting some data to make room for the remaining keys
 				if (this_block.more) {
-					TraceEvent(SevDebug, "CacheWarmupMoreDataThanLimit", data->thisServerID);
-					throw please_reboot();
+					Key nfk = this_block.readThrough.present() ? this_block.readThrough.get() : keyAfter( this_block.end()[-1].key );
+					if (nfk != keys.end) {
+						std::deque< Standalone<VerUpdateRef> > updatesToSplit = std::move( cacheRange->updates );
+
+						// This actor finishes committing the keys [keys.begin,nfk) that we already fetched.
+						// The remaining unfetched keys [nfk,keys.end) will become a separate AddingCacheRange with its own fetchKeys.
+						cacheRange->server->addCacheRange( CacheRangeInfo::addingSplitLeft( KeyRangeRef(keys.begin, nfk), cacheRange ) );
+						cacheRange->server->addCacheRange( CacheRangeInfo::newAdding( data, KeyRangeRef(nfk, keys.end) ) );
+						cacheRange = data->cachedRangeMap.rangeContaining( keys.begin ).value()->adding;
+						//warningLogger = logFetchKeysWarning(cacheRange);
+						AddingCacheRange* otherCacheRange = data->cachedRangeMap.rangeContaining( nfk ).value()->adding;
+						keys = cacheRange->keys;
+
+						// Split our prior updates.  The ones that apply to our new, restricted key range will go back into cacheRange->updates,
+						// and the ones delivered to the new cacheRange will be discarded because it is in WaitPrevious phase (hasn't chosen a fetchVersion yet).
+						// What we are doing here is expensive and could get more expensive if we started having many more blocks per cacheRange. May need optimization in the future.
+						std::deque< Standalone<VerUpdateRef> >::iterator u = updatesToSplit.begin();
+						for(; u != updatesToSplit.end(); ++u) {
+							splitMutations(data, data->cachedRangeMap, *u);
+						}
+
+						TEST( true );
+						TEST( cacheRange->updates.size() );
+						ASSERT( otherCacheRange->updates.empty() );
+					}
 				}
 
 				this_block = Standalone<RangeResultRef>();
@@ -1280,8 +1325,11 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 				TraceEvent("SCFKBlockFail", data->thisServerID).error(e,true).suppressFor(1.0).detail("FKID", interval.pairID);
 				if (e.code() == error_code_transaction_too_old){
 					TEST(true); // A storage server has forgotten the history data we are fetching
-					Version lastFV = fetchVersion;
+					state Version lastFV = fetchVersion;
+
+					wait( data->updateVersionLock.take() );
 					fetchVersion = data->version.get();
+					data->updateVersionLock.release();
 					isTooOld = false;
 
 					// Throw away deferred updates from before fetchVersion, since we don't need them to use blocks fetched at that version
@@ -1296,7 +1344,8 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 					debug_getRangeRetries++;
 					if (debug_nextRetryToLog==debug_getRangeRetries){
 						debug_nextRetryToLog += std::min(debug_nextRetryToLog, 1024);
-						TraceEvent(SevWarn, "SCFetchPast", data->thisServerID).detail("TotalAttempts", debug_getRangeRetries).detail("FKID", interval.pairID).detail("V", lastFV).detail("N", fetchVersion).detail("E", data->version.get());
+						TraceEvent(SevWarn, "SCFetchPast", data->thisServerID).detail("TotalAttempts", debug_getRangeRetries).
+							detail("FKID", interval.pairID).detail("V", lastFV).detail("N", fetchVersion).detail("E", data->version.get());
 					}
 				} else if (e.code() == error_code_future_version || e.code() == error_code_process_behind) {
 					TEST(true); // fetchKeys got future_version or process_behind, so there must be a huge storage lag somewhere.  Keep trying.
@@ -1320,8 +1369,6 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 		//wait( data->durableVersion.whenAtLeast( data->storageVersion()+1 ) );
 		holdingFKPL.release();
 
-		//TraceEvent(SevDebug, "SCFKAfterFinalCommit", data->thisServerID).detail("FKID", interval.pairID).detail("SV", data->storageVersion()).detail("DV", data->durableVersion.get());
-
 		// Wait to run during pullAsyncData, after a new batch of versions is received from the tlog
 		Promise<FetchInjectionInfo*> p;
 		data->readyFetchKeys.push_back( p );
@@ -1337,6 +1384,7 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 		//   * The transferredVersion is <= the version of any of the updates in batch, and if there is an equal version
 		//     its mutations haven't been processed yet
 		cacheRange->transferredVersion = data->version.get() + 1;
+		//cacheRange->transferredVersion = updateVersion + 1;
 		data->mutableData().createNewVersion( cacheRange->transferredVersion );
 		ASSERT( cacheRange->transferredVersion > data->oldestVersion.get() );
 		ASSERT( cacheRange->transferredVersion == data->data().getLatestVersion() );
@@ -1353,6 +1401,7 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 			batch->arena.dependsOn(i->arena());
 		}
 
+		TraceEvent(SevDebug, "SCFKBatchUpdated", data->thisServerID).detail("FKID", interval.pairID);
 		int startSize = batch->changes.size();
 		TEST(startSize); //Adding fetch data to a batch which already has changes
 		batch->changes.resize( batch->changes.size()+cacheRange->updates.size() );
@@ -1367,6 +1416,7 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 			for(auto& m : b->mutations)
 				DEBUG_MUTATION("SCFetchKeysFinalCommitInject", batch->changes[0].version, m);
 		}
+		TraceEvent(SevDebug, "SCFetchKeysFinalCommitInject", data->thisServerID).detail("FKID", interval.pairID);
 
 		cacheRange->updates.clear();
 
@@ -1376,6 +1426,7 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 		// Wait for the transferredVersion (and therefore the cacheRange data) to be committed and compacted.
 		// TODO: double check.
 		wait( data->oldestVersion.whenAtLeast( cacheRange->transferredVersion ) );
+		TraceEvent(SevDebug, "SCFetchKeysOldestVersionTransferred", data->thisServerID).detail("FKID", interval.pairID);
 
 		ASSERT( data->cachedRangeMap[cacheRange->keys.begin]->assigned() && data->cachedRangeMap[cacheRange->keys.begin]->keys == cacheRange->keys );  // We aren't changing whether the cacheRange is assigned
 		data->newestAvailableVersion.insert(cacheRange->keys, latestVersion);
@@ -1384,6 +1435,7 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 		coalesceCacheRanges(data, keys);
 
 		validate(data);
+		TraceEvent(SevDebug, "SCFetchKeysFinalValidate", data->thisServerID).detail("FKID", interval.pairID);
 
 		//++data->counters.fetchExecutingCount;
 		//data->counters.fetchExecutingMS += 1000*(now() - executeStart);
@@ -1413,7 +1465,7 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 			.detail("Elapsed", now()-startt)
 			.detail("KeyBegin", keys.begin)
 			.detail("KeyEnd",keys.end);
-		if (e.code() != error_code_actor_cancelled)
+		if ((e.code() != error_code_actor_cancelled) && data->otherError.canBeSet())
 			data->otherError.sendError(e);  // Kill the cache server.  Are there any recoverable errors?
 		throw; // goes nowhere
 	}
@@ -1582,9 +1634,10 @@ public:
 	StorageCacheUpdater(Version currentVersion) : fromVersion(currentVersion), currentVersion(currentVersion), processedCacheStartKey(false) {}
 
 	void applyMutation(StorageCacheData* data, MutationRef const& m , Version ver) {
-		//TraceEvent("SCNewVersion", data->thisServerID).detail("VerWas", data->mutableData().latestVersion).detail("ChVer", ver);
-
 		if(currentVersion != ver) {
+			//TraceEvent("SCNewVersion", data->thisServerID).detail("VerWas", data->mutableData().latestVersion).
+			//	detail("CurrentVersion", currentVersion).detail("ChVer", ver);
+
 			fromVersion = currentVersion;
 			currentVersion = ver;
 			data->mutableData().createNewVersion(ver);
@@ -1598,7 +1651,6 @@ public:
 			splitMutation(data, data->cachedRangeMap, m, ver);
 		}
 
-		//TODO
 		if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
 	}
 
@@ -1689,7 +1741,11 @@ ACTOR Future<Void> compactCache(StorageCacheData* data) {
 		data->mutableData().compact(desiredVersion);
 		Future<Void> finishedForgetting = data->mutableData().forgetVersionsBeforeAsync( desiredVersion,
 																						 TaskPriority::CompactCache );
+
+		Future<Void> checkFatalError = data->otherError.getFuture();
 		data->oldestVersion.set( desiredVersion );
+		if (checkFatalError.isReady()) checkFatalError.get();
+
 		wait( finishedForgetting );
 		//data->updateVersionLock.release();
 		// TODO how do we yield here? This may not be enough, because compact() does the heavy lifting
@@ -1708,7 +1764,6 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data )
 {
 	state Future<Void> dbInfoChange = Void();
 	state Reference<ILogSystem::IPeekCursor> cursor;
-	//state Version tagAt = 0;
 	state double start = now();
 	state Version ver = invalidVersion;
 	++data->counters.updateBatches;
@@ -1737,7 +1792,13 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data )
 		try {
 			// If the popped version is greater than our last version, we need to clear the cache
 			if (cursor->version().version <= cursor->popped())
+			{
+				TraceEvent(SevDebug, "SCPullAsyncCursorPopped", data->thisServerID).
+					detail("CursorVersion", cursor->version().version).detail("PoppedVersion", cursor->popped());
+				if (data->otherError.canBeSet())
+					data->otherError.sendError(please_reboot());
 				throw please_reboot();
+			}
 
 			data->lastTLogVersion = cursor->getMaxKnownVersion();
 			data->versionLag = std::max<int64_t>(0, data->lastTLogVersion - data->version.get());
@@ -1889,8 +1950,6 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data )
 							detail("Mutation", msg.toString()).detail("CursorVersion", cloneCursor2->version().version).
 							detail("DataVersion", data->version.get());
 					}
-
-					//tagAt = cursor->version().version + 1;
 				}
 			}
 
@@ -1914,6 +1973,8 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data )
 				// TODO may enable these later
 				//data->noRecentUpdates.set(false);
 				//data->lastUpdate = now();
+				TraceEvent("SCPullAsynData", data->thisServerID).detail("DataVersion", data->version.get()).
+					detail("UpdVer", ver).detail("PTreeVer", data->mutableData().latestVersion);
 				data->version.set( ver );		// Triggers replies to waiting gets for new version(s)
 				data->peekVersion = ver + 1;
 				// TODO double check
@@ -1945,16 +2006,24 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data )
 		} catch (Error& err) {
 			state Error e = err;
 			TraceEvent(SevDebug, "SCUpdateError", data->thisServerID).error(e).backtrace();
+			//while(!data->readyFetchKeys.empty()) {
+			//	auto fk = data->readyFetchKeys.back();
+			//	data->readyFetchKeys.pop_back();
+			//	TraceEvent(SevDebug, "SCUpdateSendError", data->thisServerID).error(e);
+			//	fk.sendError(e);
+			//}
+
 			if (e.code() == error_code_worker_removed) {
 				throw please_reboot();
-			} else {
+			}
+			/*else if (e.code() == error_code_please_reboot) {
+				if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
+			}*/
+			else {
 				throw e;
 			}
 		}
 
-		//tagAt = std::max( tagAt, cursor->version().version);
-		//data->updateVersionLock.release();
-		//TODO: NEELAM: Not sure why the following release doesn't seem to work
 		holdingUVL->release();
 		TraceEvent(SevDebug, "SCPullAsyncUnblocked", data->thisServerID).detail("Remaining", holdingUVL->remaining);
 	}
@@ -2052,6 +2121,7 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi, uint16_t id, R
 	self.ck = cacheKeysPrefixFor( id ).withPrefix(systemKeys.begin);  // FFFF/02cacheKeys/[this server]/
 
 	actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
+	actors.add(self.otherError.getFuture());
 	actors.add(traceCounters("CacheMetrics", self.thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &self.counters.cc, self.thisServerID.toString() + "/CacheMetrics"));
 
 	// fetch already cached ranges from the database and apply them before proceeding
