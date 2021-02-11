@@ -34,6 +34,7 @@
 #include <thread>
 #include <tuple>
 #include <vector>
+#include <random>
 
 #define DOCTEST_CONFIG_IMPLEMENT
 #include "doctest.h"
@@ -2047,13 +2048,13 @@ TEST_CASE("fdb_database_force_recovery_with_data_loss") {
 }
 
 std::string random_hex_string(size_t length) {
-	auto randchar = []() -> char {
-		const char charset[] = "0123456789"
-		                       "ABCDEF"
-		                       "abcdef";
-		const size_t max_index = (sizeof(charset) - 1);
-		return charset[rand() % max_index];
-	};
+	const char charset[] = "0123456789"
+	                       "ABCDEF"
+	                       "abcdef";
+	// construct a random generator engine from a time-based seed:
+	std::default_random_engine generator(time(nullptr));
+	std::uniform_int_distribution<int> distribution(0, strlen(charset) - 1);
+	auto randchar = [&charset, &generator, &distribution]() -> char { return charset[distribution(generator)]; };
 	std::string str(length, 0);
 	std::generate_n(str.begin(), length, randchar);
 	return str;
