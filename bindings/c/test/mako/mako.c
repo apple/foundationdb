@@ -1222,6 +1222,7 @@ int init_args(mako_args_t* args) {
 	args->tpsmin = -1;
 	args->tpsinterval = 10;
 	args->tpschange = TPS_SIN;
+	args->stats_samplerate = 1000;
 	args->sampling = 1000;
 	args->key_length = 32;
 	args->value_length = 16;
@@ -1386,6 +1387,7 @@ void usage() {
 	printf("%-24s %s\n", "    --tpsmin=TPS", "Specify the target min TPS");
 	printf("%-24s %s\n", "    --tpsinterval=SEC", "Specify the TPS change interval (Default: 10 seconds)");
 	printf("%-24s %s\n", "    --tpschange=<sin|square|pulse>", "Specify the TPS change type (Default: sin)");
+	printf("%-24s %s\n", "    --stats-samplerate=RATE", "Specify the sampling rate for tps stats (Default: sample once per 1000 ms)");
 	printf("%-24s %s\n", "    --sampling=RATE", "Specify the sampling rate for latency stats");
 	printf("%-24s %s\n", "-m, --mode=MODE", "Specify the mode (build, run, clean)");
 	printf("%-24s %s\n", "-z, --zipf", "Use zipfian distribution instead of uniform distribution");
@@ -1424,6 +1426,7 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			                                    { "tpsmin", required_argument, NULL, ARG_TPSMIN },
 			                                    { "tpsinterval", required_argument, NULL, ARG_TPSINTERVAL },
 			                                    { "tpschange", required_argument, NULL, ARG_TPSCHANGE },
+			                                    { "stats_samplerate", required_argument, NULL, ARG_STATSSAMPLERATE },
 			                                    { "sampling", required_argument, NULL, ARG_SAMPLING },
 			                                    { "verbose", required_argument, NULL, 'v' },
 			                                    { "mode", required_argument, NULL, 'm' },
@@ -1519,6 +1522,9 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 				fprintf(stderr, "--tpschange must be sin, square or pulse\n");
 				return -1;
 			}
+			break;
+		case ARG_STATSSAMPLERATE:
+			args->stats_samplerate = atoi(optarg);
 			break;
 		case ARG_SAMPLING:
 			args->sampling = atoi(optarg);
@@ -1653,6 +1659,10 @@ int validate_args(mako_args_t* args) {
             fprintf(stderr, "ERROR: --txntagging must be a non-negative integer\n");
             return -1;
 		}
+	}
+	if (args->stats_samplerate < 100) {
+		fprintf(stderr, "ERROR: --stats-samplerate must be set to sample every 100 ms or more\n");
+		return -1;
 	}
 	return 0;
 }
@@ -2093,8 +2103,8 @@ int stats_process_main(mako_args_t* args, mako_stats_t* stats, volatile double* 
 		usleep(100000); /* sleep for 100ms */
 		clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_now);
 
-		/* print stats every (roughly) 1 sec */
-		if (timer_now.tv_sec > timer_prev.tv_sec) {
+		/* print stats every stats_samplerate milliseconds */
+		if (timer_now.tv_nsec > timer_prev.tv_nsec + args->stats_samplerate * 1000000) {
 
 			/* adjust throttle rate if needed */
 			if (args->tpsmax != args->tpsmin) {

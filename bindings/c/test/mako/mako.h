@@ -64,6 +64,7 @@ enum Arguments {
 	ARG_VALLEN,
 	ARG_TPS,
 	ARG_COMMITGET,
+	ARG_STATSSAMPLERATE,
 	ARG_SAMPLING,
 	ARG_VERSION,
 	ARG_KNOBS,
@@ -114,6 +115,7 @@ typedef struct {
 	int tpsmin;
 	int tpsinterval;
 	int tpschange;
+	int stats_samplerate;
 	int sampling;
 	int key_length;
 	int value_length;
