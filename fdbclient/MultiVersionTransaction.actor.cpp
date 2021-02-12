@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include <sys/sendfile.h>
 #include <limits.h>
 
 #include "fdbclient/MultiVersionTransaction.h"
