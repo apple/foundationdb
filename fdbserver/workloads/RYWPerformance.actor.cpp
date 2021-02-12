@@ -36,7 +36,8 @@ struct RYWPerformanceWorkload : TestWorkload {
 	virtual std::string description() { return "RYWPerformance"; }
 
 	virtual Future<Void> setup(Database const& cx) {
-		if (clientId == 0) return _setup(cx, this);
+		if (clientId == 0)
+			return _setup(cx, this);
 		return Void();
 	}
 
@@ -45,7 +46,8 @@ struct RYWPerformanceWorkload : TestWorkload {
 
 		loop {
 			try {
-				for (int i = 0; i < self->nodes; i++) tr.set(self->keyForIndex(i), LiteralStringRef("bar"));
+				for (int i = 0; i < self->nodes; i++)
+					tr.set(self->keyForIndex(i), LiteralStringRef("bar"));
 
 				wait(tr.commit());
 				break;
@@ -58,7 +60,8 @@ struct RYWPerformanceWorkload : TestWorkload {
 	}
 
 	virtual Future<Void> start(Database const& cx) {
-		if (clientId == 0) return _start(cx, this);
+		if (clientId == 0)
+			return _start(cx, this);
 		return Void();
 	}
 

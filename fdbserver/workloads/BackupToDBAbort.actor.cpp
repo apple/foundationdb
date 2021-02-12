@@ -44,7 +44,8 @@ struct BackupToDBAbort : TestWorkload {
 	virtual std::string description() override { return "BackupToDBAbort"; }
 
 	virtual Future<Void> setup(const Database& cx) override {
-		if (clientId != 0) return Void();
+		if (clientId != 0)
+			return Void();
 		return _setup(this, cx);
 	}
 
@@ -52,17 +53,24 @@ struct BackupToDBAbort : TestWorkload {
 		state DatabaseBackupAgent backupAgent(cx);
 		try {
 			TraceEvent("BDBA_Submit1");
-			wait(backupAgent.submitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, false,
-			                              StringRef(), StringRef(), true));
+			wait(backupAgent.submitBackup(self->extraDB,
+			                              BackupAgentBase::getDefaultTag(),
+			                              self->backupRanges,
+			                              false,
+			                              StringRef(),
+			                              StringRef(),
+			                              true));
 			TraceEvent("BDBA_Submit2");
 		} catch (Error& e) {
-			if (e.code() != error_code_backup_duplicate) throw;
+			if (e.code() != error_code_backup_duplicate)
+				throw;
 		}
 		return Void();
 	}
 
 	virtual Future<Void> start(Database const& cx) override {
-		if (clientId != 0) return Void();
+		if (clientId != 0)
+			return Void();
 		return _start(this, cx);
 	}
 

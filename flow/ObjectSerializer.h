@@ -36,7 +36,8 @@ struct LoadContext {
 		if constexpr (Ar::ownsUnderlyingMemory) {
 			return ptr;
 		} else {
-			if (len == 0) return nullptr;
+			if (len == 0)
+				return nullptr;
 			uint8_t* dat = new (arena()) uint8_t[len];
 			std::copy(ptr, ptr + len, dat);
 			return dat;

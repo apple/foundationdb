@@ -45,7 +45,8 @@ struct LowLatencyWorkload : TestWorkload {
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
 
 	virtual Future<Void> start(Database const& cx) {
-		if (clientId == 0) return _start(cx, this);
+		if (clientId == 0)
+			return _start(cx, this);
 		return Void();
 	}
 
@@ -74,7 +75,8 @@ struct LowLatencyWorkload : TestWorkload {
 					    .detail("ObservedLatency", now() - operationStart);
 					self->ok = false;
 				}
-				if (now() - testStart > self->testDuration) break;
+				if (now() - testStart > self->testDuration)
+					break;
 			}
 			return Void();
 		} catch (Error& e) {

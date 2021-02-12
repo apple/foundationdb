@@ -90,8 +90,12 @@ public:
 		}
 	};
 
-	BlobStoreEndpoint(std::string const& host, std::string service, std::string const& key, std::string const& secret,
-	                  BlobKnobs const& knobs = BlobKnobs(), HTTP::Headers extraHeaders = HTTP::Headers())
+	BlobStoreEndpoint(std::string const& host,
+	                  std::string service,
+	                  std::string const& key,
+	                  std::string const& secret,
+	                  BlobKnobs const& knobs = BlobKnobs(),
+	                  HTTP::Headers extraHeaders = HTTP::Headers())
 	  : host(host), service(service), key(key), secret(secret), lookupSecret(secret.empty()), knobs(knobs),
 	    extraHeaders(extraHeaders), requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
 	    requestRateList(new SpeedLimit(knobs.list_requests_per_second, 1)),
@@ -102,12 +106,14 @@ public:
 	    recvRate(new SpeedLimit(knobs.max_recv_bytes_per_second, 1)), concurrentRequests(knobs.concurrent_requests),
 	    concurrentUploads(knobs.concurrent_uploads), concurrentLists(knobs.concurrent_lists) {
 
-		if (host.empty()) throw connection_string_invalid();
+		if (host.empty())
+			throw connection_string_invalid();
 	}
 
 	static std::string getURLFormat(bool withResource = false) {
 		const char* resource = "";
-		if (withResource) resource = "<name>";
+		if (withResource)
+			resource = "<name>";
 		return format("blobstore://<api_key>:<secret>@<host>[:<port>]/%s[?<param>=<value>[&<param>=<value>]...]",
 		              resource);
 	}
@@ -117,7 +123,8 @@ public:
 	// Parse url and return a BlobStoreEndpoint
 	// If the url has parameters that BlobStoreEndpoint can't consume then an error will be thrown unless
 	// ignored_parameters is given in which case the unconsumed parameters will be added to it.
-	static Reference<BlobStoreEndpoint> fromString(std::string const& url, std::string* resourceFromURL = nullptr,
+	static Reference<BlobStoreEndpoint> fromString(std::string const& url,
+	                                               std::string* resourceFromURL = nullptr,
 	                                               std::string* error = nullptr,
 	                                               ParametersT* ignored_parameters = nullptr);
 
@@ -162,15 +169,19 @@ public:
 	void setAuthHeaders(std::string const& verb, std::string const& resource, HTTP::Headers& headers);
 
 	// Prepend the HTTP request header to the given PacketBuffer, returning the new head of the buffer chain
-	static PacketBuffer* writeRequestHeader(std::string const& request, HTTP::Headers const& headers,
+	static PacketBuffer* writeRequestHeader(std::string const& request,
+	                                        HTTP::Headers const& headers,
 	                                        PacketBuffer* dest);
 
 	// Do an HTTP request to the Blob Store, read the response.  Handles authentication.
 	// Every blob store interaction should ultimately go through this function
 
-	Future<Reference<HTTP::Response>> doRequest(std::string const& verb, std::string const& resource,
-	                                            const HTTP::Headers& headers, UnsentPacketQueue* pContent,
-	                                            int contentLen, std::set<unsigned int> successCodes);
+	Future<Reference<HTTP::Response>> doRequest(std::string const& verb,
+	                                            std::string const& resource,
+	                                            const HTTP::Headers& headers,
+	                                            UnsentPacketQueue* pContent,
+	                                            int contentLen,
+	                                            std::set<unsigned int> successCodes);
 
 	struct ObjectInfo {
 		std::string name;
@@ -186,13 +197,18 @@ public:
 	// If a delimiter is passed then common prefixes will be read in parallel, recursively, depending on recurseFilter.
 	// Recursefilter is a must be a function that takes a string and returns true if it passes.  The default behavior is
 	// to assume true.
-	Future<Void> listBucketStream(std::string const& bucket, PromiseStream<ListResult> results,
-	                              Optional<std::string> prefix = {}, Optional<char> delimiter = {}, int maxDepth = 0,
+	Future<Void> listBucketStream(std::string const& bucket,
+	                              PromiseStream<ListResult> results,
+	                              Optional<std::string> prefix = {},
+	                              Optional<char> delimiter = {},
+	                              int maxDepth = 0,
 	                              std::function<bool(std::string const&)> recurseFilter = nullptr);
 
 	// Get a list of the files in a bucket, see listBucketStream for more argument detail.
-	Future<ListResult> listBucket(std::string const& bucket, Optional<std::string> prefix = {},
-	                              Optional<char> delimiter = {}, int maxDepth = 0,
+	Future<ListResult> listBucket(std::string const& bucket,
+	                              Optional<std::string> prefix = {},
+	                              Optional<char> delimiter = {},
+	                              int maxDepth = 0,
 	                              std::function<bool(std::string const&)> recurseFilter = nullptr);
 
 	// Check if a bucket exists
@@ -205,7 +221,10 @@ public:
 	Future<int64_t> objectSize(std::string const& bucket, std::string const& object);
 
 	// Read an arbitrary segment of an object
-	Future<int> readObject(std::string const& bucket, std::string const& object, void* data, int length,
+	Future<int> readObject(std::string const& bucket,
+	                       std::string const& object,
+	                       void* data,
+	                       int length,
 	                       int64_t offset);
 
 	// Delete an object in a bucket
@@ -224,17 +243,26 @@ public:
 	// Useful methods for working with tiny files
 	Future<std::string> readEntireFile(std::string const& bucket, std::string const& object);
 	Future<Void> writeEntireFile(std::string const& bucket, std::string const& object, std::string const& content);
-	Future<Void> writeEntireFileFromBuffer(std::string const& bucket, std::string const& object,
-	                                       UnsentPacketQueue* pContent, int contentLen, std::string const& contentMD5);
+	Future<Void> writeEntireFileFromBuffer(std::string const& bucket,
+	                                       std::string const& object,
+	                                       UnsentPacketQueue* pContent,
+	                                       int contentLen,
+	                                       std::string const& contentMD5);
 
 	// MultiPart upload methods
 	// Returns UploadID
 	Future<std::string> beginMultiPartUpload(std::string const& bucket, std::string const& object);
 	// Returns eTag
-	Future<std::string> uploadPart(std::string const& bucket, std::string const& object, std::string const& uploadID,
-	                               unsigned int partNumber, UnsentPacketQueue* pContent, int contentLen,
+	Future<std::string> uploadPart(std::string const& bucket,
+	                               std::string const& object,
+	                               std::string const& uploadID,
+	                               unsigned int partNumber,
+	                               UnsentPacketQueue* pContent,
+	                               int contentLen,
 	                               std::string const& contentMD5);
 	typedef std::map<int, std::string> MultiPartSetT;
-	Future<Void> finishMultiPartUpload(std::string const& bucket, std::string const& object,
-	                                   std::string const& uploadID, MultiPartSetT const& parts);
+	Future<Void> finishMultiPartUpload(std::string const& bucket,
+	                                   std::string const& object,
+	                                   std::string const& uploadID,
+	                                   MultiPartSetT const& parts);
 };

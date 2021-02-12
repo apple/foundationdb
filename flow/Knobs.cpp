@@ -36,9 +36,11 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init(DELAY_JITTER_RANGE, 0.2);
 	init(BUSY_WAIT_THRESHOLD, 0); // 1e100 == never sleep
 	init(CLIENT_REQUEST_INTERVAL, 0.1);
-	if (randomize && BUGGIFY) CLIENT_REQUEST_INTERVAL = 1.0;
+	if (randomize && BUGGIFY)
+		CLIENT_REQUEST_INTERVAL = 1.0;
 	init(SERVER_REQUEST_INTERVAL, 0.1);
-	if (randomize && BUGGIFY) SERVER_REQUEST_INTERVAL = 1.0;
+	if (randomize && BUGGIFY)
+		SERVER_REQUEST_INTERVAL = 1.0;
 
 	init(REACTOR_FLAGS, 0);
 
@@ -56,18 +58,22 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 
 	// connectionMonitor
 	init(CONNECTION_MONITOR_LOOP_TIME, isSimulated ? 0.75 : 1.0);
-	if (randomize && BUGGIFY) CONNECTION_MONITOR_LOOP_TIME = 6.0;
+	if (randomize && BUGGIFY)
+		CONNECTION_MONITOR_LOOP_TIME = 6.0;
 	init(CONNECTION_MONITOR_TIMEOUT, isSimulated ? 1.50 : 2.0);
-	if (randomize && BUGGIFY) CONNECTION_MONITOR_TIMEOUT = 6.0;
+	if (randomize && BUGGIFY)
+		CONNECTION_MONITOR_TIMEOUT = 6.0;
 	init(CONNECTION_MONITOR_IDLE_TIMEOUT, 180.0);
-	if (randomize && BUGGIFY) CONNECTION_MONITOR_IDLE_TIMEOUT = 5.0;
+	if (randomize && BUGGIFY)
+		CONNECTION_MONITOR_IDLE_TIMEOUT = 5.0;
 	init(CONNECTION_MONITOR_INCOMING_IDLE_MULTIPLIER, 1.2);
 	init(CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY, 2.0);
 
 	// FlowTransport
 	init(CONNECTION_REJECTED_MESSAGE_DELAY, 1.0);
 	init(CONNECTION_ID_TIMEOUT, 600.0);
-	if (randomize && BUGGIFY) CONNECTION_ID_TIMEOUT = 60.0;
+	if (randomize && BUGGIFY)
+		CONNECTION_ID_TIMEOUT = 60.0;
 	init(CONNECTION_CLEANUP_DELAY, 100.0);
 	init(INITIAL_RECONNECTION_TIME, 0.05);
 	init(MAX_RECONNECTION_TIME, 0.5);
@@ -96,7 +102,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init(BUGGIFY_SIM_PAGE_CACHE_4K, 1e6);
 	init(BUGGIFY_SIM_PAGE_CACHE_64K, 1e6);
 	init(MAX_EVICT_ATTEMPTS, 100);
-	if (randomize && BUGGIFY) MAX_EVICT_ATTEMPTS = 2;
+	if (randomize && BUGGIFY)
+		MAX_EVICT_ATTEMPTS = 2;
 	init(CACHE_EVICTION_POLICY, "random");
 	init(PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION, 0.1);
 	if (randomize && BUGGIFY)
@@ -118,12 +125,14 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init(MIN_SUBMIT, 10);
 
 	init(PAGE_WRITE_CHECKSUM_HISTORY, 0);
-	if (randomize && BUGGIFY) PAGE_WRITE_CHECKSUM_HISTORY = 10000000;
+	if (randomize && BUGGIFY)
+		PAGE_WRITE_CHECKSUM_HISTORY = 10000000;
 	init(DISABLE_POSIX_KERNEL_AIO, 0);
 
 	// AsyncFileNonDurable
 	init(MAX_PRIOR_MODIFICATION_DELAY, 1.0);
-	if (randomize && BUGGIFY) MAX_PRIOR_MODIFICATION_DELAY = 10.0;
+	if (randomize && BUGGIFY)
+		MAX_PRIOR_MODIFICATION_DELAY = 10.0;
 
 	// GenericActors
 	init(BUGGIFY_FLOW_LOCK_RELEASE_DELAY, 1.0);
@@ -136,9 +145,11 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 
 	// Net2 and FlowTransport
 	init(MIN_COALESCE_DELAY, 10e-6);
-	if (randomize && BUGGIFY) MIN_COALESCE_DELAY = 0;
+	if (randomize && BUGGIFY)
+		MIN_COALESCE_DELAY = 0;
 	init(MAX_COALESCE_DELAY, 20e-6);
-	if (randomize && BUGGIFY) MAX_COALESCE_DELAY = 0;
+	if (randomize && BUGGIFY)
+		MAX_COALESCE_DELAY = 0;
 	init(SLOW_LOOP_CUTOFF, 15.0 / 1000.0);
 	init(SLOW_LOOP_SAMPLING_RATE, 0.1);
 	init(TSC_YIELD_TIME, 1000000);
@@ -164,9 +175,11 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init(FAST_NETWORK_LATENCY, 800e-6);
 	init(SLOW_NETWORK_LATENCY, 100e-3);
 	init(MAX_CLOGGING_LATENCY, 0);
-	if (randomize && BUGGIFY) MAX_CLOGGING_LATENCY = 0.1 * deterministicRandom()->random01();
+	if (randomize && BUGGIFY)
+		MAX_CLOGGING_LATENCY = 0.1 * deterministicRandom()->random01();
 	init(MAX_BUGGIFIED_DELAY, 0);
-	if (randomize && BUGGIFY) MAX_BUGGIFIED_DELAY = 0.2 * deterministicRandom()->random01();
+	if (randomize && BUGGIFY)
+		MAX_BUGGIFIED_DELAY = 0.2 * deterministicRandom()->random01();
 	init(SIM_CONNECT_ERROR_MODE, deterministicRandom()->randomInt(0, 3));
 
 	// Tracefiles
@@ -236,7 +249,8 @@ bool Knobs::setKnob(std::string const& knob, std::string const& value) {
 	if (double_knobs.count(knob)) {
 		double v;
 		int n = 0;
-		if (sscanf(value.c_str(), "%lf%n", &v, &n) != 1 || n != value.size()) throw invalid_option_value();
+		if (sscanf(value.c_str(), "%lf%n", &v, &n) != 1 || n != value.size())
+			throw invalid_option_value();
 		*double_knobs[knob] = v;
 		return true;
 	}
@@ -266,7 +280,8 @@ bool Knobs::setKnob(std::string const& knob, std::string const& value) {
 			if (sscanf(value.c_str(), "0x%" SCNx64 "%n", &v, &n) != 1 || n != value.size())
 				throw invalid_option_value();
 		} else {
-			if (sscanf(value.c_str(), "%" SCNd64 "%n", &v, &n) != 1 || n != value.size()) throw invalid_option_value();
+			if (sscanf(value.c_str(), "%" SCNd64 "%n", &v, &n) != 1 || n != value.size())
+				throw invalid_option_value();
 		}
 		if (int64_knobs.count(knob))
 			*int64_knobs[knob] = v;
@@ -310,9 +325,14 @@ void Knobs::initKnob(bool& knob, bool value, std::string const& name) {
 }
 
 void Knobs::trace() {
-	for (auto& k : double_knobs) TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
-	for (auto& k : int_knobs) TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
-	for (auto& k : int64_knobs) TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
-	for (auto& k : string_knobs) TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
-	for (auto& k : bool_knobs) TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
+	for (auto& k : double_knobs)
+		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
+	for (auto& k : int_knobs)
+		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
+	for (auto& k : int64_knobs)
+		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
+	for (auto& k : string_knobs)
+		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
+	for (auto& k : bool_knobs)
+		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
 }

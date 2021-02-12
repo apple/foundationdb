@@ -27,7 +27,8 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 std::pair<std::string, bool> ClusterConnectionFile::lookupClusterFileName(std::string const& filename) {
-	if (filename.length()) return std::make_pair(filename, false);
+	if (filename.length())
+		return std::make_pair(filename, false);
 
 	std::string f;
 	bool isDefaultFile = true;
@@ -51,13 +52,16 @@ std::string ClusterConnectionFile::getErrorString(std::pair<std::string, bool> c
 	} else if (e.code() == error_code_no_cluster_file_found) {
 		if (isDefault)
 			return format("Unable to read cluster file `./fdb.cluster' or `%s' and %s unset: %d %s",
-			              platform::getDefaultClusterFilePath().c_str(), CLUSTER_FILE_ENV_VAR_NAME, e.code(), e.what());
-		else
-			return format("Unable to read cluster file `%s': %d %s", resolvedClusterFile.first.c_str(), e.code(),
+			              platform::getDefaultClusterFilePath().c_str(),
+			              CLUSTER_FILE_ENV_VAR_NAME,
+			              e.code(),
 			              e.what());
+		else
+			return format(
+			    "Unable to read cluster file `%s': %d %s", resolvedClusterFile.first.c_str(), e.code(), e.what());
 	} else {
-		return format("Unexpected error loading cluster file `%s': %d %s", resolvedClusterFile.first.c_str(), e.code(),
-		              e.what());
+		return format(
+		    "Unexpected error loading cluster file `%s': %d %s", resolvedClusterFile.first.c_str(), e.code(), e.what());
 	}
 }
 
@@ -95,7 +99,8 @@ bool ClusterConnectionFile::fileContentsUpToDate() const {
 bool ClusterConnectionFile::fileContentsUpToDate(ClusterConnectionString& fileConnectionString) const {
 	try {
 		// the cluster file hasn't been created yet so there's nothing to check
-		if (setConn) return true;
+		if (setConn)
+			return true;
 
 		ClusterConnectionFile temp(filename);
 		fileConnectionString = temp.getConnectionString();
@@ -110,8 +115,9 @@ bool ClusterConnectionFile::writeFile() {
 	setConn = false;
 	if (filename.size()) {
 		try {
-			atomicReplace(filename, "# DO NOT EDIT!\n# This file is auto-generated, it is not to be edited by hand\n" +
-			                            cs.toString().append("\n"));
+			atomicReplace(filename,
+			              "# DO NOT EDIT!\n# This file is auto-generated, it is not to be edited by hand\n" +
+			                  cs.toString().append("\n"));
 			if (!fileContentsUpToDate()) {
 				// This should only happen in rare scenarios where multiple processes are updating the same file to
 				// different values simultaneously In that case, we don't have any guarantees about which file will
@@ -156,8 +162,10 @@ std::string trim(std::string const& connectionString) {
 	for (auto c = connectionString.begin(); c != end; ++c) {
 		if (*c == '#') {
 			++c;
-			while (c != end && *c != '\n' && *c != '\r') ++c;
-			if (c == end) break;
+			while (c != end && *c != '\n' && *c != '\r')
+				++c;
+			if (c == end)
+				break;
 		} else if (*c != ' ' && *c != '\n' && *c != '\r' && *c != '\t')
 			trimmed += *c;
 	}
@@ -169,7 +177,8 @@ ClusterConnectionString::ClusterConnectionString(std::string const& connectionSt
 
 	// Split on '@' into key@addrs
 	int pAt = trimmed.find_first_of('@');
-	if (pAt == trimmed.npos) throw connection_string_invalid();
+	if (pAt == trimmed.npos)
+		throw connection_string_invalid();
 	std::string key = trimmed.substr(0, pAt);
 	std::string addrs = trimmed.substr(pAt + 1);
 
@@ -180,7 +189,8 @@ ClusterConnectionString::ClusterConnectionString(std::string const& connectionSt
 
 	std::sort(coord.begin(), coord.end());
 	// Check that there are no duplicate addresses
-	if (std::unique(coord.begin(), coord.end()) != coord.end()) throw connection_string_invalid();
+	if (std::unique(coord.begin(), coord.end()) != coord.end())
+		throw connection_string_invalid();
 }
 
 TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/basic") {
@@ -323,17 +333,20 @@ void ClusterConnectionString::parseKey(std::string const& key) {
 
 	// The key must contain one (and only one) : character
 	int colon = key.find_first_of(':');
-	if (colon == key.npos) throw connection_string_invalid();
+	if (colon == key.npos)
+		throw connection_string_invalid();
 	std::string desc = key.substr(0, colon);
 	std::string id = key.substr(colon + 1);
 
 	// Check that description contains only allowed characters (a-z, A-Z, 0-9, _)
 	for (auto c = desc.begin(); c != desc.end(); ++c)
-		if (!(isalnum(*c) || *c == '_')) throw connection_string_invalid();
+		if (!(isalnum(*c) || *c == '_'))
+			throw connection_string_invalid();
 
 	// Check that ID contains only allowed characters (a-z, A-Z, 0-9)
 	for (auto c = id.begin(); c != id.end(); ++c)
-		if (!isalnum(*c)) throw connection_string_invalid();
+		if (!isalnum(*c))
+			throw connection_string_invalid();
 
 	this->key = StringRef(key);
 	this->keyDesc = StringRef(desc);
@@ -343,7 +356,8 @@ std::string ClusterConnectionString::toString() const {
 	std::string s = key.toString();
 	s += '@';
 	for (int i = 0; i < coord.size(); i++) {
-		if (i) s += ',';
+		if (i)
+			s += ',';
 		s += coord[i].toString();
 	}
 	return s;
@@ -371,12 +385,15 @@ ClientLeaderRegInterface::ClientLeaderRegInterface(INetwork* local) {
 // Nominee is the worker among all workers that are considered as leader by a coordinator
 // This function contacts a coordinator coord to ask if the worker is considered as a leader (i.e., if the worker
 // is a nominee)
-ACTOR Future<Void> monitorNominee(Key key, ClientLeaderRegInterface coord, AsyncTrigger* nomineeChange,
+ACTOR Future<Void> monitorNominee(Key key,
+                                  ClientLeaderRegInterface coord,
+                                  AsyncTrigger* nomineeChange,
                                   Optional<LeaderInfo>* info) {
 	loop {
-		state Optional<LeaderInfo> li = wait(
-		    retryBrokenPromise(coord.getLeader, GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
-		                       TaskPriority::CoordinationReply));
+		state Optional<LeaderInfo> li =
+		    wait(retryBrokenPromise(coord.getLeader,
+		                            GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
+		                            TaskPriority::CoordinationReply));
 		wait(Future<Void>(Void())); // Make sure we weren't cancelled
 
 		TraceEvent("GetLeaderReply")
@@ -389,7 +406,8 @@ ACTOR Future<Void> monitorNominee(Key key, ClientLeaderRegInterface coord, Async
 			*info = li;
 			nomineeChange->trigger();
 
-			if (li.present() && li.get().forward) wait(Future<Void>(Never()));
+			if (li.present() && li.get().forward)
+				wait(Future<Void>(Never()));
 			wait(Future<Void>(Void()));
 		}
 	}
@@ -411,12 +429,15 @@ Optional<std::pair<LeaderInfo, bool>> getLeader(const vector<Optional<LeaderInfo
 
 	// If any coordinator says that the quorum is forwarded, then it is
 	for (int i = 0; i < maskedNominees.size(); i++)
-		if (maskedNominees[i].forward) return std::pair<LeaderInfo, bool>(maskedNominees[i], true);
+		if (maskedNominees[i].forward)
+			return std::pair<LeaderInfo, bool>(maskedNominees[i], true);
 
-	if (!maskedNominees.size()) return Optional<std::pair<LeaderInfo, bool>>();
+	if (!maskedNominees.size())
+		return Optional<std::pair<LeaderInfo, bool>>();
 
-	std::sort(maskedNominees.begin(), maskedNominees.end(),
-	          [](const LeaderInfo& l, const LeaderInfo& r) { return l.changeID < r.changeID; });
+	std::sort(maskedNominees.begin(), maskedNominees.end(), [](const LeaderInfo& l, const LeaderInfo& r) {
+		return l.changeID < r.changeID;
+	});
 
 	int bestCount = 0;
 	LeaderInfo bestNominee;
@@ -628,7 +649,8 @@ ACTOR Future<Void> getClientInfoFromLeader(Reference<AsyncVar<Optional<ClusterCo
 	}
 }
 
-ACTOR Future<Void> monitorLeaderForProxies(Key clusterKey, vector<NetworkAddress> coordinators,
+ACTOR Future<Void> monitorLeaderForProxies(Key clusterKey,
+                                           vector<NetworkAddress> coordinators,
                                            ClientData* clientData) {
 	state vector<ClientLeaderRegInterface> clientLeaderServers;
 	state AsyncTrigger nomineeChange;
@@ -685,7 +707,8 @@ ACTOR Future<Void> monitorLeaderForProxies(Key clusterKey, vector<NetworkAddress
 	}
 }
 
-void shrinkProxyList(ClientDBInfo& ni, std::vector<UID>& lastProxyUIDs,
+void shrinkProxyList(ClientDBInfo& ni,
+                     std::vector<UID>& lastProxyUIDs,
                      std::vector<MasterProxyInterface>& lastProxies) {
 	if (ni.proxies.size() > CLIENT_KNOBS->MAX_PROXY_CONNECTIONS) {
 		std::vector<UID> proxyUIDs;
@@ -708,8 +731,11 @@ void shrinkProxyList(ClientDBInfo& ni, std::vector<UID>& lastProxyUIDs,
 
 // Leader is the process that will be elected by coordinators as the cluster controller
 ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
-    Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, MonitorLeaderInfo info,
-    Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions, Key traceLogGroup) {
+    Reference<ClusterConnectionFile> connFile,
+    Reference<AsyncVar<ClientDBInfo>> clientInfo,
+    MonitorLeaderInfo info,
+    Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
+    Key traceLogGroup) {
 	state ClusterConnectionString cs = info.intermediateConnFile->getConnectionString();
 	state vector<NetworkAddress> addrs = cs.coordinators();
 	state int idx = 0;
@@ -784,13 +810,15 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 }
 
 ACTOR Future<Void> monitorProxies(
-    Reference<AsyncVar<Reference<ClusterConnectionFile>>> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo,
-    Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions, Key traceLogGroup) {
+    Reference<AsyncVar<Reference<ClusterConnectionFile>>> connFile,
+    Reference<AsyncVar<ClientDBInfo>> clientInfo,
+    Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
+    Key traceLogGroup) {
 	state MonitorLeaderInfo info(connFile->get());
 	loop {
 		choose {
-			when(MonitorLeaderInfo _info = wait(monitorProxiesOneGeneration(connFile->get(), clientInfo, info,
-			                                                                supportedVersions, traceLogGroup))) {
+			when(MonitorLeaderInfo _info = wait(monitorProxiesOneGeneration(
+			         connFile->get(), clientInfo, info, supportedVersions, traceLogGroup))) {
 				info = _info;
 			}
 			when(wait(connFile->onChange())) {

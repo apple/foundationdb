@@ -227,7 +227,9 @@ struct context;
 } // namespace asio
 } // namespace boost
 void ConfigureSSLContext(
-    const LoadedTLSConfig& loaded, boost::asio::ssl::context* context, std::function<void()> onPolicyFailure = []() {});
+    const LoadedTLSConfig& loaded,
+    boost::asio::ssl::context* context,
+    std::function<void()> onPolicyFailure = []() {});
 #endif
 
 class TLSPolicy : ReferenceCounted<TLSPolicy> {

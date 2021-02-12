@@ -186,15 +186,15 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 
 			if (self->resolverCount > 1) {
 				for (auto it : req.transactions[t].write_conflict_ranges)
-					self->iopsSample.addAndExpire(it.begin, SERVER_KNOBS->SAMPLE_OFFSET_PER_KEY + it.begin.size(),
-					                              expire);
+					self->iopsSample.addAndExpire(
+					    it.begin, SERVER_KNOBS->SAMPLE_OFFSET_PER_KEY + it.begin.size(), expire);
 				for (auto it : req.transactions[t].read_conflict_ranges)
-					self->iopsSample.addAndExpire(it.begin, SERVER_KNOBS->SAMPLE_OFFSET_PER_KEY + it.begin.size(),
-					                              expire);
+					self->iopsSample.addAndExpire(
+					    it.begin, SERVER_KNOBS->SAMPLE_OFFSET_PER_KEY + it.begin.size(), expire);
 			}
 		}
-		conflictBatch.detectConflicts(req.version, req.version - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS,
-		                              commitList, &tooOldList);
+		conflictBatch.detectConflicts(
+		    req.version, req.version - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS, commitList, &tooOldList);
 
 		ResolveTransactionBatchReply& reply = proxyInfo.outstandingBatches[req.version];
 		reply.debugID = req.debugID;
@@ -230,7 +230,8 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		self->resolvedStateMutations += stateMutations;
 		self->resolvedStateBytes += stateBytes;
 
-		if (stateBytes > 0) self->recentStateTransactionSizes.push_back(std::make_pair(req.version, stateBytes));
+		if (stateBytes > 0)
+			self->recentStateTransactionSizes.push_back(std::make_pair(req.version, stateBytes));
 
 		ASSERT(req.version >= firstUnseenVersion);
 		ASSERT(firstUnseenVersion >= self->debugMinRecentStateVersion);
@@ -349,7 +350,8 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver, InitializeResolverRe
 	}
 }
 
-ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t recoveryCount,
+ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db,
+                                uint64_t recoveryCount,
                                 ResolverInterface myInterface) {
 	loop {
 		if (db->get().recoveryCount >= recoveryCount &&
@@ -359,7 +361,8 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t r
 	}
 }
 
-ACTOR Future<Void> resolver(ResolverInterface resolver, InitializeResolverRequest initReq,
+ACTOR Future<Void> resolver(ResolverInterface resolver,
+                            InitializeResolverRequest initReq,
                             Reference<AsyncVar<ServerDBInfo>> db) {
 	try {
 		state Future<Void> core = resolverCore(resolver, initReq);

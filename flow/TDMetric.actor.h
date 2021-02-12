@@ -59,7 +59,8 @@ inline bool operator<(const MetricNameRef& l, const MetricNameRef& r) {
 	int cmp = l.type.compare(r.type);
 	if (cmp == 0) {
 		cmp = l.name.compare(r.name);
-		if (cmp == 0) cmp = l.id.compare(r.id);
+		if (cmp == 0)
+			cmp = l.id.compare(r.id);
 	}
 	return cmp < 0;
 }
@@ -175,7 +176,9 @@ public:
 	TDMetricCollection() : currentTimeBytes(0) {}
 
 	// Metric Name to reference to its instance
-	Map<Standalone<MetricNameRef>, Reference<BaseMetric>, MapPair<Standalone<MetricNameRef>, Reference<BaseMetric>>,
+	Map<Standalone<MetricNameRef>,
+	    Reference<BaseMetric>,
+	    MapPair<Standalone<MetricNameRef>, Reference<BaseMetric>>,
 	    int>
 	    metricMap;
 
@@ -189,14 +192,16 @@ public:
 		// Get and store the local address in the metric collection, but only if it is not 0.0.0.0:0
 		if (address.size() == 0) {
 			NetworkAddress addr = g_network->getLocalAddress();
-			if (addr.ip.isValid() && addr.port != 0) address = StringRef(addr.toString());
+			if (addr.ip.isValid() && addr.port != 0)
+				address = StringRef(addr.toString());
 		}
 		return address.size() != 0;
 	}
 
 	// Returns the TDMetrics that the calling process should use
 	static TDMetricCollection* getTDMetrics() {
-		if (g_network == nullptr) return nullptr;
+		if (g_network == nullptr)
+			return nullptr;
 		return static_cast<TDMetricCollection*>((void*)g_network->global(INetwork::enTDMetrics));
 	}
 
@@ -243,8 +248,10 @@ struct MetricUtil {
 	// Empty names will not be looked up.
 	// If create is true then a metric will be created with the given initial value if one could not be found to return.
 	// If a metric is created and name is not empty then the metric will be placed in the collection.
-	static Reference<T> getOrCreateInstance(StringRef const& name, StringRef const& id = StringRef(),
-	                                        bool create = false, ValueType initial = ValueType()) {
+	static Reference<T> getOrCreateInstance(StringRef const& name,
+	                                        StringRef const& id = StringRef(),
+	                                        bool create = false,
+	                                        ValueType initial = ValueType()) {
 		Reference<T> m;
 		TDMetricCollection* collection = TDMetricCollection::getTDMetrics();
 
@@ -274,7 +281,8 @@ struct MetricUtil {
 		return m;
 	}
 
-	static ValueType getValueOrDefault(StringRef const& name, StringRef const& id = StringRef(),
+	static ValueType getValueOrDefault(StringRef const& name,
+	                                   StringRef const& id = StringRef(),
 	                                   ValueType defaultValue = ValueType()) {
 		Reference<T> r = getOrCreateInstance(name, id);
 		if (r) {
@@ -286,7 +294,8 @@ struct MetricUtil {
 	// Lookup the T metric by name and return its value (or nullptr if it doesn't exist)
 	static T* lookupMetric(MetricNameRef const& name) {
 		auto it = T::metricMap().find(name);
-		if (it != T::metricMap().end()) return it->value;
+		if (it != T::metricMap().end())
+			return it->value;
 		return nullptr;
 	}
 };
@@ -325,8 +334,11 @@ auto tuple_map_impl(F f, index_sequence<Is...>, const Tuples&... ts)
 
 // tuple_map( f(a,b), (a1,a2,a3), (b1,b2,b3) ) = (f(a1,b1), f(a2,b2), f(a3,b3))
 template <typename F, typename Tuple, typename... Tuples>
-auto tuple_map(F f, const Tuple& t, const Tuples&... ts) -> decltype(tuple_map_impl(
-    f, typename make_index_sequence_impl<0, index_sequence<>, std::tuple_size<Tuple>::value>::type(), t, ts...)) {
+auto tuple_map(F f, const Tuple& t, const Tuples&... ts) -> decltype(
+    tuple_map_impl(f,
+                   typename make_index_sequence_impl<0, index_sequence<>, std::tuple_size<Tuple>::value>::type(),
+                   t,
+                   ts...)) {
 	return tuple_map_impl(
 	    f, typename make_index_sequence_impl<0, index_sequence<>, std::tuple_size<Tuple>::value>::type(), t, ts...);
 }
@@ -426,9 +438,11 @@ struct FieldValueBlockEncoding<Standalone<StringRef>> {
 	inline void write(BinaryWriter& w, Standalone<StringRef> const& v) {
 		int reuse = 0;
 		int stop = std::min(v.size(), prev.size());
-		while (reuse < stop && v[reuse] == prev[reuse]) ++reuse;
+		while (reuse < stop && v[reuse] == prev[reuse])
+			++reuse;
 		w << CompressedInt<int>(reuse) << CompressedInt<int>(v.size() - reuse);
-		if (v.size() > reuse) w.serializeBytes(v.substr(reuse));
+		if (v.size() > reuse)
+			w.serializeBytes(v.substr(reuse));
 		prev = v;
 	}
 	Standalone<StringRef> read(BinaryReader& r) {
@@ -473,20 +487,23 @@ struct FieldLevel {
 	// update Header, use Encoder to write T v
 	void log(T v, uint64_t t, bool& overflow, int64_t& bytes) {
 		int lastLength = metrics.back().writer.getLength();
-		if (metrics.back().start == 0) metrics.back().start = t;
+		if (metrics.back().start == 0)
+			metrics.back().start = t;
 
 		header.update(v);
 		enc.write(metrics.back().writer, v);
 
 		bytes += metrics.back().writer.getLength() - lastLength;
-		if (lastLength + appendUsed > FLOW_KNOBS->MAX_METRIC_SIZE) overflow = true;
+		if (lastLength + appendUsed > FLOW_KNOBS->MAX_METRIC_SIZE)
+			overflow = true;
 	}
 
 	void nextKey(uint64_t t) {
 		// If nothing has actually been written to the current block, don't add a new block,
 		// just modify this one if needed so that the next log call will set the ts for this block.
 		auto& m = metrics.back();
-		if (m.start == 0 && m.appendStart == 0) return;
+		if (m.start == 0 && m.appendStart == 0)
+			return;
 
 		// This block would have appended but had no data so just reset it to a non-append block instead of adding a new
 		// one
@@ -571,8 +588,11 @@ struct FieldLevel {
 		}
 	}
 
-	ACTOR static Future<Void> updatePreviousHeader(FieldLevel* self, IMetricDB* db, Standalone<MetricKeyRef> mk,
-	                                               uint64_t rollTime, MetricUpdateBatch* batch) {
+	ACTOR static Future<Void> updatePreviousHeader(FieldLevel* self,
+	                                               IMetricDB* db,
+	                                               Standalone<MetricKeyRef> mk,
+	                                               uint64_t rollTime,
+	                                               MetricUpdateBatch* batch) {
 
 		Optional<Standalone<StringRef>> block = wait(db->getLastBlock(mk.packDataKey(-1)));
 
@@ -610,10 +630,12 @@ struct FieldLevel {
 	// This function must NOT be called again until any callbacks added to batch have been completed.
 	void flush(const MetricKeyRef& mk, uint64_t rollTime, MetricUpdateBatch& batch) {
 		// Don't do anything if there is no data in the queue to flush.
-		if (metrics.empty() || metrics.front().start == 0) return;
+		if (metrics.empty() || metrics.front().start == 0)
+			return;
 
 		// If the previous header is present then just call flushUpdates now.
-		if (previousHeader.present()) return flushUpdates(mk, rollTime, batch);
+		if (previousHeader.present())
+			return flushUpdates(mk, rollTime, batch);
 
 		Standalone<MetricKeyRef> mkCopy = mk;
 
@@ -659,7 +681,8 @@ struct EventField : public Descriptor {
 	void nextKey(uint64_t t, int level) { levels[level].nextKey(t); }
 
 	void nextKeyAllLevels(uint64_t t) {
-		for (int64_t i = 0; i < FLOW_KNOBS->MAX_METRIC_LEVEL; i++) nextKey(t, i);
+		for (int64_t i = 0; i < FLOW_KNOBS->MAX_METRIC_LEVEL; i++)
+			nextKey(t, i);
 	}
 
 	void rollMetric(uint64_t t) {
@@ -795,7 +818,8 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 	// there to be metric data blocks such that the last timestamp of one block is equal to the first timestamp of the
 	// next, which means if a search is done for the exact timestamp then the first event will not be found.
 	uint64_t log(uint64_t explicitTime = 0) {
-		if (!enabled) return 0;
+		if (!enabled)
+			return 0;
 
 		uint64_t t = explicitTime ? explicitTime : timer_int();
 		double x = deterministicRandom()->random01();
@@ -807,7 +831,8 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 			l = std::min(FLOW_KNOBS->MAX_METRIC_LEVEL - 1,
 			             (int64_t)(::log(1.0 / x) / FLOW_KNOBS->METRIC_LEVEL_DIVISOR));
 
-		if (!canLog(l)) return 0;
+		if (!canLog(l))
+			return 0;
 
 		bool overflow = false;
 		int64_t bytes = 0;
@@ -825,8 +850,11 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 	void logFields(index_sequence<Is...>, uint64_t t, int64_t l, bool& overflow, int64_t& bytes) {
 #ifdef NO_INTELLISENSE
 		auto _ = { (std::get<Is>(values).log(
-			            std::tuple_element<Is, typename Descriptor<E>::fields>::type::get(static_cast<E&>(*this)), t, l,
-			            overflow, bytes),
+			            std::tuple_element<Is, typename Descriptor<E>::fields>::type::get(static_cast<E&>(*this)),
+			            t,
+			            l,
+			            overflow,
+			            bytes),
 			        Void())... };
 		(void)_;
 #endif
@@ -931,7 +959,8 @@ struct DynamicFieldBase {
 	// of the const char * type string is the same as getDerivedTypeName for this object.
 	template <typename T>
 	DynamicField<T>* safe_downcast(StringRef eventType) {
-		if (getDerivedTypeName() == metricTypeName<T>()) return (DynamicField<T>*)this;
+		if (getDerivedTypeName() == metricTypeName<T>())
+			return (DynamicField<T>*)this;
 
 		TraceEvent(SevWarnAlways, "ScopeEventFieldTypeMismatch")
 		    .detail("EventType", eventType.toString())
@@ -1019,7 +1048,8 @@ private:
 
 		// Registration has now changed so set registered to false and trigger a reg change event if possible
 		registered = false;
-		if (pCollection != nullptr) pCollection->metricRegistrationChanged.trigger();
+		if (pCollection != nullptr)
+			pCollection->metricRegistrationChanged.trigger();
 	}
 
 public:
@@ -1033,7 +1063,8 @@ public:
 		// Must initialize fields, previously knobs may not have been set.
 		// Note that future fields will be okay because the field constructor will init and the knobs will be set.
 		time.init();
-		for (auto f : fields) f.second->init();
+		for (auto f : fields)
+			f.second->init();
 	}
 
 	// Set (or create) a new field in the event
@@ -1048,10 +1079,12 @@ public:
 			// possible solution is to have a flag in DynamicEventMetric which enables this check so that
 			// TraceEvent can preserve this behavior.
 			TraceEvent(SevError, "DuplicateTraceProperty").detail("Property", fieldName).backtrace();
-			if (g_network->isSimulated()) ASSERT(false);
+			if (g_network->isSimulated())
+				ASSERT(false);
 		}
 		p = new DynamicField<ValueType>(fieldName);
-		if (pCollection != nullptr) p->init();
+		if (pCollection != nullptr)
+			p->init();
 		newFieldAdded(fname);
 
 		// This will return NULL if the datatype is wrong.
@@ -1074,7 +1107,8 @@ public:
 			DynamicFieldBase*& p = fields[f.first];
 			if (p == NULL) {
 				p = f.second->createNewWithValue(f.first.toString().c_str());
-				if (pCollection != nullptr) p->init();
+				if (pCollection != nullptr)
+					p->init();
 				newFieldAdded(f.first);
 			} else
 				p->setValueFrom(f.second, getTypeName());
@@ -1086,7 +1120,8 @@ public:
 
 	// Set all of the fields to their default values.
 	void clearFields() {
-		for (auto f : fields) f.second->clear();
+		for (auto f : fields)
+			f.second->clear();
 	}
 
 	uint64_t log(uint64_t explicitTime = 0);
@@ -1124,7 +1159,8 @@ struct FieldHeader<TimeAndValue<T>> {
 	}
 	void update(TimeAndValue<T> const& v) {
 		++count;
-		if (previous_time > 0) area += v.value * (v.time - previous_time);
+		if (previous_time > 0)
+			area += v.value * (v.time - previous_time);
 		previous_time = v.time;
 	}
 	template <class Ar>
@@ -1238,7 +1274,8 @@ public:
 
 	void set(const T& v) {
 		if (v != tv.value) {
-			if (enabled) change();
+			if (enabled)
+				change();
 			tv.value = v;
 		}
 	}
@@ -1246,14 +1283,16 @@ public:
 	// requires += on T
 	void add(const T& delta) {
 		if (delta != T()) {
-			if (enabled) change();
+			if (enabled)
+				change();
 			tv.value += delta;
 		}
 	}
 
 	// requires ! on T
 	void toggle() {
-		if (enabled) change();
+		if (enabled)
+			change();
 		tv.value = !tv.value;
 	}
 
@@ -1271,11 +1310,13 @@ public:
 				l = std::min(FLOW_KNOBS->MAX_METRIC_LEVEL - 1,
 				             (int64_t)(log((toggleTime - tv.time) / x) / FLOW_KNOBS->METRIC_LEVEL_DIVISOR));
 
-			if (!canLog(l)) return;
+			if (!canLog(l))
+				return;
 
 			bool overflow = false;
 			field.log(tv, tv.time, l, overflow, bytes);
-			if (overflow) field.nextKey(toggleTime, l);
+			if (overflow)
+				field.nextKey(toggleTime, l);
 		}
 		tv.time = toggleTime;
 		recorded = false;
@@ -1309,7 +1350,8 @@ typedef ContinuousMetric<Standalone<StringRef>> StringMetric;
 template <typename T>
 struct MetricHandle {
 	template <typename ValueType = typename T::ValueType>
-	MetricHandle(StringRef const& name = StringRef(), StringRef const& id = StringRef(),
+	MetricHandle(StringRef const& name = StringRef(),
+	             StringRef const& id = StringRef(),
 	             ValueType const& initial = ValueType())
 	  : ref(T::getOrCreateInstance(name, id, true, initial)) {}
 

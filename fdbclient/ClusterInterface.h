@@ -196,8 +196,13 @@ struct FailureMonitoringReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, changes, failureInformationVersion, allOthersFailed, clientRequestIntervalMS,
-		           considerServerFailedTimeoutMS, arena);
+		serializer(ar,
+		           changes,
+		           failureInformationVersion,
+		           allOthersFailed,
+		           clientRequestIntervalMS,
+		           considerServerFailedTimeoutMS,
+		           arena);
 	}
 };
 

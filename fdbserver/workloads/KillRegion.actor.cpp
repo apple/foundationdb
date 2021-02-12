@@ -77,15 +77,18 @@ struct KillRegionWorkload : TestWorkload {
 		TraceEvent("ForceRecovery_Wait");
 		wait(delay(deterministicRandom()->random01() * self->testDuration));
 
-		g_simulator.killDataCenter(
-		    LiteralStringRef("0"),
-		    deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly : ISimulator::RebootAndDelete, true);
-		g_simulator.killDataCenter(
-		    LiteralStringRef("2"),
-		    deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly : ISimulator::RebootAndDelete, true);
-		g_simulator.killDataCenter(
-		    LiteralStringRef("4"),
-		    deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly : ISimulator::RebootAndDelete, true);
+		g_simulator.killDataCenter(LiteralStringRef("0"),
+		                           deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly
+		                                                                   : ISimulator::RebootAndDelete,
+		                           true);
+		g_simulator.killDataCenter(LiteralStringRef("2"),
+		                           deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly
+		                                                                   : ISimulator::RebootAndDelete,
+		                           true);
+		g_simulator.killDataCenter(LiteralStringRef("4"),
+		                           deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly
+		                                                                   : ISimulator::RebootAndDelete,
+		                           true);
 
 		TraceEvent("ForceRecovery_Begin");
 

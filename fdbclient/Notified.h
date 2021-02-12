@@ -38,7 +38,8 @@ struct NotifiedVersion {
 	}
 
 	Future<Void> whenAtLeast(Version limit) {
-		if (val >= limit) return Void();
+		if (val >= limit)
+			return Void();
 		Promise<Void> p;
 		waiting.push(std::make_pair(limit, p));
 		return p.getFuture();
@@ -84,7 +85,8 @@ struct NotifiedDouble {
 	explicit NotifiedDouble(double val = 0) : val(val) {}
 
 	Future<Void> whenAtLeast(double limit) {
-		if (val >= limit) return Void();
+		if (val >= limit)
+			return Void();
 		Promise<Void> p;
 		waiting.push(std::make_pair(limit, p));
 		return p.getFuture();

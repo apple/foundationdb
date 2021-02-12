@@ -199,11 +199,13 @@ public:
 			MutexHolder h(mutex);
 			unsafeTrigger(0);
 			barriers.pop_front();
-			if (ntriggered) ntriggered--;
+			if (ntriggered)
+				ntriggered--;
 		}
 		void triggerAll() {
 			MutexHolder h(mutex);
-			for (uint32_t i = ntriggered; i < barriers.size(); i++) unsafeTrigger(i);
+			for (uint32_t i = ntriggered; i < barriers.size(); i++)
+				unsafeTrigger(i);
 			ntriggered = barriers.size();
 		}
 
@@ -213,14 +215,16 @@ public:
 		int ntriggered;
 		void unsafeTrigger(int i) {
 			auto b = ((ThreadSingleAssignmentVar<Void>*)barriers[i].getPtr());
-			if (!b->isReady()) b->send(Void());
+			if (!b->isReady())
+				b->send(Void());
 		}
 	};
 
 	Reference<BarrierList> barriers;
 
 	struct WriterThread : IThreadPoolReceiver {
-		WriterThread(Reference<BarrierList> barriers, Reference<ITraceLogWriter> logWriter,
+		WriterThread(Reference<BarrierList> barriers,
+		             Reference<ITraceLogWriter> logWriter,
 		             Reference<ITraceLogFormatter> formatter)
 		  : barriers(barriers), logWriter(logWriter), formatter(formatter) {}
 
@@ -284,8 +288,13 @@ public:
 
 	bool isOpen() const { return opened; }
 
-	void open(std::string const& directory, std::string const& processName, std::string logGroup,
-	          std::string const& timestamp, uint64_t rs, uint64_t maxLogsSize, Optional<NetworkAddress> na) {
+	void open(std::string const& directory,
+	          std::string const& processName,
+	          std::string logGroup,
+	          std::string const& timestamp,
+	          uint64_t rs,
+	          uint64_t maxLogsSize,
+	          Optional<NetworkAddress> na) {
 		ASSERT(!writer && !opened);
 
 		this->directory = directory;
@@ -293,11 +302,15 @@ public:
 		this->logGroup = logGroup;
 		this->localAddress = na;
 
-		basename = format("%s/%s.%s.%s", directory.c_str(), processName.c_str(), timestamp.c_str(),
+		basename = format("%s/%s.%s.%s",
+		                  directory.c_str(),
+		                  processName.c_str(),
+		                  timestamp.c_str(),
 		                  deterministicRandom()->randomAlphaNumeric(6).c_str());
-		logWriter = Reference<ITraceLogWriter>(new FileTraceLogWriter(directory, processName, basename,
-		                                                              formatter->getExtension(), maxLogsSize,
-		                                                              [this]() { barriers->triggerAll(); }));
+		logWriter = Reference<ITraceLogWriter>(
+		    new FileTraceLogWriter(directory, processName, basename, formatter->getExtension(), maxLogsSize, [this]() {
+			    barriers->triggerAll();
+		    }));
 
 		if (g_network->isSimulated())
 			writer = Reference<IThreadPool>(new DummyThreadPool());
@@ -380,7 +393,8 @@ public:
 	}
 
 	void log(int severity, const char* name, UID id, uint64_t event_ts) {
-		if (!logTraceEventMetrics) return;
+		if (!logTraceEventMetrics)
+			return;
 
 		EventMetricHandle<TraceEventNameID>* m = NULL;
 		switch (severity) {
@@ -414,7 +428,8 @@ public:
 
 		MutexHolder hold(mutex);
 		bool roll = false;
-		if (!eventBuffer.size()) return Void(); // SOMEDAY: maybe we still roll the tracefile here?
+		if (!eventBuffer.size())
+			return Void(); // SOMEDAY: maybe we still roll the tracefile here?
 
 		if (rollsize && bufferLength + loggedLength > rollsize) // SOMEDAY: more conditions to roll
 			roll = true;
@@ -621,7 +636,8 @@ bool validateTraceFormat(std::string format) {
 }
 
 ThreadFuture<Void> flushTraceFile() {
-	if (!g_traceLog.isOpen()) return Void();
+	if (!g_traceLog.isOpen())
+		return Void();
 	return g_traceLog.flush();
 }
 
@@ -633,18 +649,30 @@ void flushTraceFileVoid() {
 	}
 }
 
-void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogsSize, std::string directory,
-                   std::string baseOfBase, std::string logGroup) {
-	if (g_traceLog.isOpen()) return;
+void openTraceFile(const NetworkAddress& na,
+                   uint64_t rollsize,
+                   uint64_t maxLogsSize,
+                   std::string directory,
+                   std::string baseOfBase,
+                   std::string logGroup) {
+	if (g_traceLog.isOpen())
+		return;
 
-	if (directory.empty()) directory = ".";
+	if (directory.empty())
+		directory = ".";
 
-	if (baseOfBase.empty()) baseOfBase = "trace";
+	if (baseOfBase.empty())
+		baseOfBase = "trace";
 
 	std::string ip = na.ip.toString();
 	std::replace(ip.begin(), ip.end(), ':', '_'); // For IPv6, Windows doesn't accept ':' in filenames.
 	std::string baseName = format("%s.%s.%d", baseOfBase.c_str(), ip.c_str(), na.port);
-	g_traceLog.open(directory, baseName, logGroup, format("%lld", time(NULL)), rollsize, maxLogsSize,
+	g_traceLog.open(directory,
+	                baseName,
+	                logGroup,
+	                format("%lld", time(NULL)),
+	                rollsize,
+	                maxLogsSize,
 	                !g_network->isSimulated() ? na : Optional<NetworkAddress>());
 
 	uncancellable(recurring(&flushTraceFile, FLOW_KNOBS->TRACE_FLUSH_INTERVAL, TaskPriority::FlushTrace));
@@ -797,8 +825,8 @@ bool TraceEvent::init() {
 			TraceEvent(SevWarnAlways, std::string(TRACE_EVENT_THROTTLE_STARTING_TYPE).append(type).c_str())
 			    .suppressFor(5);
 		} else {
-			traceEventThrottlerCache->addAndExpire(StringRef((uint8_t*)type, strlen(type)), 1,
-			                                       now() + FLOW_KNOBS->TRACE_EVENT_THROTTLER_SAMPLE_EXPIRY);
+			traceEventThrottlerCache->addAndExpire(
+			    StringRef((uint8_t*)type, strlen(type)), 1, now() + FLOW_KNOBS->TRACE_EVENT_THROTTLER_SAMPLE_EXPIRY);
 		}
 	}
 
@@ -845,7 +873,8 @@ TraceEvent& TraceEvent::errorImpl(class Error const& error, bool includeCancelle
 		if (initialized) {
 			if (error.isInjectedFault()) {
 				detail("ErrorIsInjectedFault", true);
-				if (severity == SevError) severity = SevWarnAlways;
+				if (severity == SevError)
+					severity = SevWarnAlways;
 			}
 			detail("Error", error.name());
 			detail("ErrorDescription", error.what());
@@ -928,7 +957,8 @@ TraceEvent& TraceEvent::detailfNoMetric(std::string&& key, const char* valueForm
 		va_end(args);
 
 		ASSERT(result >= 0);
-		detailImpl(std::move(key), std::move(value),
+		detailImpl(std::move(key),
+		           std::move(value),
 		           false); // Do NOT write this detail to the event metric, caller of detailfNoMetric should do that
 		                   // itself with the appropriate value type
 	}
@@ -1032,7 +1062,8 @@ unsigned long TraceEvent::CountEventsLoggedAt(Severity sev) {
 
 TraceEvent& TraceEvent::backtrace(const std::string& prefix) {
 	ASSERT(!logged);
-	if (this->severity == SevError || !enabled) return *this; // We'll backtrace this later in ~TraceEvent
+	if (this->severity == SevError || !enabled)
+		return *this; // We'll backtrace this later in ~TraceEvent
 	return detail(prefix + "Backtrace", platform::get_backtrace());
 }
 
@@ -1152,25 +1183,29 @@ TraceInterval& TraceInterval::begin() {
 
 void TraceBatch::addEvent(const char* name, uint64_t id, const char* location) {
 	eventBatch.push_back(EventInfo(TraceEvent::getCurrentTime(), name, id, location));
-	if (g_network->isSimulated() || FLOW_KNOBS->AUTOMATIC_TRACE_DUMP) dump();
+	if (g_network->isSimulated() || FLOW_KNOBS->AUTOMATIC_TRACE_DUMP)
+		dump();
 }
 
 void TraceBatch::addAttach(const char* name, uint64_t id, uint64_t to) {
 	attachBatch.push_back(AttachInfo(TraceEvent::getCurrentTime(), name, id, to));
-	if (g_network->isSimulated() || FLOW_KNOBS->AUTOMATIC_TRACE_DUMP) dump();
+	if (g_network->isSimulated() || FLOW_KNOBS->AUTOMATIC_TRACE_DUMP)
+		dump();
 }
 
 void TraceBatch::addBuggify(int activated, int line, std::string file) {
 	if (g_network) {
 		buggifyBatch.push_back(BuggifyInfo(TraceEvent::getCurrentTime(), activated, line, file));
-		if (g_network->isSimulated() || FLOW_KNOBS->AUTOMATIC_TRACE_DUMP) dump();
+		if (g_network->isSimulated() || FLOW_KNOBS->AUTOMATIC_TRACE_DUMP)
+			dump();
 	} else {
 		buggifyBatch.push_back(BuggifyInfo(0, activated, line, file));
 	}
 }
 
 void TraceBatch::dump() {
-	if (!g_traceLog.isOpen()) return;
+	if (!g_traceLog.isOpen())
+		return;
 	std::string machine;
 	if (g_network->isSimulated()) {
 		NetworkAddress local = g_network->getLocalAddress();
@@ -1415,7 +1450,9 @@ void TraceEventFields::validateFormat() const {
 	if (g_network && g_network->isSimulated()) {
 		for (Field field : fields) {
 			if (!validateField(field.first.c_str(), false)) {
-				fprintf(stderr, "Trace event detail name `%s' is invalid in:\n\t%s\n", field.first.c_str(),
+				fprintf(stderr,
+				        "Trace event detail name `%s' is invalid in:\n\t%s\n",
+				        field.first.c_str(),
 				        toString().c_str());
 			}
 			if (field.first == "Type" && !validateField(field.second.c_str(), true)) {

@@ -47,7 +47,10 @@ private: // data
 // if the process spawned takes more than `maxWaitTime` then it will be killed
 // if isSync is set to true then the process will be synchronously executed
 // if async and in simulator then delay spawning the process to max of maxSimDelayTime
-ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync,
+ACTOR Future<int> spawnProcess(std::string binPath,
+                               std::vector<std::string> paramList,
+                               double maxWaitTime,
+                               bool isSync,
                                double maxSimDelayTime);
 
 // helper to run all the work related to running the exec command

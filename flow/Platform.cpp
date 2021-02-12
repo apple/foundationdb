@@ -172,7 +172,8 @@ bool handlePdhStatus(const PDH_STATUS& status, std::string message) {
 bool setPdhString(int id, std::string& out) {
 	char buf[512];
 	DWORD sz = 512;
-	if (!handlePdhStatus(PdhLookupPerfNameByIndex(NULL, id, buf, &sz), "PdhLookupPerfByNameIndex")) return false;
+	if (!handlePdhStatus(PdhLookupPerfNameByIndex(NULL, id, buf, &sz), "PdhLookupPerfByNameIndex"))
+		return false;
 	out = buf;
 	return true;
 }
@@ -315,7 +316,8 @@ uint64_t getMemoryUsage() {
 #if defined(__linux__)
 void getMemoryInfo(std::map<StringRef, int64_t>& request, std::stringstream& memInfoStream) {
 	size_t count = request.size();
-	if (count == 0) return;
+	if (count == 0)
+		return;
 
 	while (count > 0 && !memInfoStream.eof()) {
 		std::string key;
@@ -390,8 +392,9 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 		memInfo.available = 1024 * (request[LiteralStringRef("MemAvailable:")] - usedSwap);
 	} else {
 		memInfo.available =
-		    1024 * (std::max<int64_t>(0, (memFree - lowWatermark) + std::max(pageCache - lowWatermark, pageCache / 2) +
-		                                     std::max(slabReclaimable - lowWatermark, slabReclaimable / 2)) -
+		    1024 * (std::max<int64_t>(0,
+		                              (memFree - lowWatermark) + std::max(pageCache - lowWatermark, pageCache / 2) +
+		                                  std::max(slabReclaimable - lowWatermark, slabReclaimable / 2)) -
 		            usedSwap);
 	}
 
@@ -511,7 +514,8 @@ const char* getInterfaceName(const IPAddress& _ip) {
 	}
 
 	for (struct ifaddrs* iter = interfaces; iter; iter = iter->ifa_next) {
-		if (!iter->ifa_addr) continue;
+		if (!iter->ifa_addr)
+			continue;
 		if (iter->ifa_addr->sa_family == AF_INET && _ip.isV4()) {
 			uint32_t ip = ntohl((reinterpret_cast<struct sockaddr_in*>(iter->ifa_addr))->sin_addr.s_addr);
 			if (ip == _ip.toV4()) {
@@ -542,7 +546,10 @@ const char* getInterfaceName(const IPAddress& _ip) {
 #endif
 
 #if defined(__linux__)
-void getNetworkTraffic(const IPAddress& ip, uint64_t& bytesSent, uint64_t& bytesReceived, uint64_t& outSegs,
+void getNetworkTraffic(const IPAddress& ip,
+                       uint64_t& bytesSent,
+                       uint64_t& bytesReceived,
+                       uint64_t& outSegs,
                        uint64_t& retransSegs) {
 	INJECT_FAULT(platform_error,
 	             "getNetworkTraffic"); // Even though this function doesn't throw errors, the equivalents for other
@@ -556,7 +563,8 @@ void getNetworkTraffic(const IPAddress& ip, uint64_t& bytesSent, uint64_t& bytes
 		}
 	}
 
-	if (!ifa_name) return;
+	if (!ifa_name)
+		return;
 
 	std::ifstream dev_stream("/proc/net/dev", std::ifstream::in);
 	dev_stream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
@@ -570,12 +578,14 @@ void getNetworkTraffic(const IPAddress& ip, uint64_t& bytesSent, uint64_t& bytes
 
 	while (dev_stream.good()) {
 		dev_stream >> iface;
-		if (dev_stream.eof()) break;
+		if (dev_stream.eof())
+			break;
 		if (!strncmp(iface.c_str(), ifa_name, strlen(ifa_name))) {
 			uint64_t sent = 0, received = 0;
 
 			dev_stream >> received;
-			for (int i = 0; i < 7; i++) dev_stream >> ignore;
+			for (int i = 0; i < 7; i++)
+				dev_stream >> ignore;
 			dev_stream >> sent;
 
 			bytesSentSum += sent;
@@ -599,11 +609,13 @@ void getNetworkTraffic(const IPAddress& ip, uint64_t& bytesSent, uint64_t& bytes
 	while (snmp_stream.good()) {
 		snmp_stream >> label;
 		snmp_stream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-		if (label == "Tcp:") break;
+		if (label == "Tcp:")
+			break;
 	}
 
 	/* Ignore the first 11 columns of the Tcp line */
-	for (int i = 0; i < 11; i++) snmp_stream >> ignore;
+	for (int i = 0; i < 11; i++)
+		snmp_stream >> ignore;
 
 	snmp_stream >> outSegs;
 	snmp_stream >> retransSegs;
@@ -637,8 +649,13 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 		    .detail("Guest", t_guest);
 }
 
-void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint64_t& busyTicks, uint64_t& reads,
-                       uint64_t& writes, uint64_t& writeSectors, uint64_t& readSectors) {
+void getDiskStatistics(std::string const& directory,
+                       uint64_t& currentIOs,
+                       uint64_t& busyTicks,
+                       uint64_t& reads,
+                       uint64_t& writes,
+                       uint64_t& writeSectors,
+                       uint64_t& readSectors) {
 	INJECT_FAULT(platform_error, "getDiskStatistics");
 	currentIOs = 0;
 
@@ -728,10 +745,10 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 
 			//TraceEvent("DiskMetricsRaw").detail("Input", line).detail("Ignore", ignore).detail("RdIos", rd_ios)
 			//	.detail("RdMerges", rd_merges).detail("RdSectors", rd_sectors).detail("RdTicks",
-			//rd_ticks).detail("WrIos", wr_ios).detail("WrMerges", wr_merges) 	.detail("WrSectors",
-			//wr_sectors).detail("WrTicks", wr_ticks).detail("CurIos", cur_ios).detail("Ticks", ticks).detail("Aveq",
-			//aveq) 	.detail("CurrentIOs", currentIOs).detail("BusyTicks", busyTicks).detail("Reads",
-			//reads).detail("Writes", writes).detail("WriteSectors", writeSectors)
+			// rd_ticks).detail("WrIos", wr_ios).detail("WrMerges", wr_merges) 	.detail("WrSectors",
+			// wr_sectors).detail("WrTicks", wr_ticks).detail("CurIos", cur_ios).detail("Ticks", ticks).detail("Aveq",
+			// aveq) 	.detail("CurrentIOs", currentIOs).detail("BusyTicks", busyTicks).detail("Reads",
+			// reads).detail("Writes", writes).detail("WriteSectors", writeSectors)
 			//  .detail("ReadSectors", readSectors);
 			return;
 		} else
@@ -747,7 +764,8 @@ dev_t getDeviceId(std::string path) {
 
 	while (true) {
 		int returnValue = stat(path.c_str(), &statInfo);
-		if (!returnValue) break;
+		if (!returnValue)
+			break;
 
 		if (errno == ENOENT) {
 			path = parentDirectory(path);
@@ -763,7 +781,10 @@ dev_t getDeviceId(std::string path) {
 #endif
 
 #ifdef __APPLE__
-void getNetworkTraffic(const IPAddress& ip, uint64_t& bytesSent, uint64_t& bytesReceived, uint64_t& outSegs,
+void getNetworkTraffic(const IPAddress& ip,
+                       uint64_t& bytesSent,
+                       uint64_t& bytesReceived,
+                       uint64_t& outSegs,
                        uint64_t& retransSegs) {
 	INJECT_FAULT(platform_error, "getNetworkTraffic");
 
@@ -776,7 +797,8 @@ void getNetworkTraffic(const IPAddress& ip, uint64_t& bytesSent, uint64_t& bytes
 		}
 	}
 
-	if (!ifa_name) return;
+	if (!ifa_name)
+		return;
 
 	int mib[] = {
 		CTL_NET, PF_ROUTE,       0,
@@ -836,8 +858,13 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 	            r_load.cpu_ticks[CPU_STATE_SYSTEM];
 }
 
-void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint64_t& busyTicks, uint64_t& reads,
-                       uint64_t& writes, uint64_t& writeSectors, uint64_t& readSectors) {
+void getDiskStatistics(std::string const& directory,
+                       uint64_t& currentIOs,
+                       uint64_t& busyTicks,
+                       uint64_t& reads,
+                       uint64_t& writes,
+                       uint64_t& writeSectors,
+                       uint64_t& readSectors) {
 	INJECT_FAULT(platform_error, "getDiskStatistics");
 	currentIOs = 0;
 	busyTicks = 0;
@@ -890,8 +917,8 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 	}
 
 	CFDictionaryRef disk_dict = NULL;
-	if (IORegistryEntryCreateCFProperties(disk, (CFMutableDictionaryRef*)&disk_dict, kCFAllocatorDefault,
-	                                      kNilOptions) != kIOReturnSuccess) {
+	if (IORegistryEntryCreateCFProperties(
+	        disk, (CFMutableDictionaryRef*)&disk_dict, kCFAllocatorDefault, kNilOptions) != kIOReturnSuccess) {
 		IOObjectRelease(disk);
 		IOObjectRelease(disk_list);
 		TraceEvent(SevError, "IORegistryEntryCreateCFProperties");
@@ -1071,7 +1098,8 @@ void initPdhStrings(SystemStatisticsState* state, std::string dataFolder) {
 				return;
 			}
 
-			if (buf2[strlen(buf2) - 1] == '\\') buf2[strlen(buf2) - 1] = 0;
+			if (buf2[strlen(buf2) - 1] == '\\')
+				buf2[strlen(buf2) - 1] = 0;
 
 			HANDLE hDevice = CreateFile(buf2, 0, 0, NULL, OPEN_EXISTING, 0, NULL);
 			if (hDevice == INVALID_HANDLE_VALUE) {
@@ -1080,16 +1108,29 @@ void initPdhStrings(SystemStatisticsState* state, std::string dataFolder) {
 			}
 
 			STORAGE_DEVICE_NUMBER storage_device;
-			if (!DeviceIoControl(hDevice, IOCTL_STORAGE_GET_DEVICE_NUMBER, NULL, 0, &storage_device,
-			                     sizeof(storage_device), &sz, NULL)) {
+			if (!DeviceIoControl(hDevice,
+			                     IOCTL_STORAGE_GET_DEVICE_NUMBER,
+			                     NULL,
+			                     0,
+			                     &storage_device,
+			                     sizeof(storage_device),
+			                     &sz,
+			                     NULL)) {
 				TraceEvent(SevWarn, "DeviceIoControl").GetLastError().detail("Path", dataFolder);
 				return;
 			}
 
 			// Find the drive letter involved!
 			sz = 512;
-			if (handlePdhStatus(PdhEnumObjectItems(NULL, NULL, state->pdhStrings.physicalDisk.c_str(), buf2, &sz2, buf,
-			                                       &sz, PERF_DETAIL_NOVICE, 0),
+			if (handlePdhStatus(PdhEnumObjectItems(NULL,
+			                                       NULL,
+			                                       state->pdhStrings.physicalDisk.c_str(),
+			                                       buf2,
+			                                       &sz2,
+			                                       buf,
+			                                       &sz,
+			                                       PERF_DETAIL_NOVICE,
+			                                       0),
 			                    "PdhEnumObjectItems")) {
 				char* ptr = buf;
 				while (*ptr) {
@@ -1110,9 +1151,12 @@ void initPdhStrings(SystemStatisticsState* state, std::string dataFolder) {
 }
 #endif
 
-SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip, SystemStatisticsState** statState,
+SystemStatistics getSystemStatistics(std::string dataFolder,
+                                     const IPAddress* ip,
+                                     SystemStatisticsState** statState,
                                      bool logDetails) {
-	if ((*statState) == NULL) (*statState) = new SystemStatisticsState();
+	if ((*statState) == NULL)
+		(*statState) = new SystemStatisticsState();
 	SystemStatistics returnStats;
 
 	double nowTime = timer();
@@ -1155,61 +1199,69 @@ SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip
 			                  ("\\" + (*statState)->pdhStrings.physicalDisk + "(" +
 			                   (*statState)->pdhStrings.diskDevice + ")\\" + (*statState)->pdhStrings.pctIdle)
 			                      .c_str(),
-			                  0, &(*statState)->DiskTimeCounter),
+			                  0,
+			                  &(*statState)->DiskTimeCounter),
 			    "PdhAddCounter");
 			handlePdhStatus(
 			    PdhAddCounter((*statState)->Query,
 			                  ("\\" + (*statState)->pdhStrings.physicalDisk + "(" +
 			                   (*statState)->pdhStrings.diskDevice + ")\\" + (*statState)->pdhStrings.diskQueueLength)
 			                      .c_str(),
-			                  0, &(*statState)->QueueLengthCounter),
+			                  0,
+			                  &(*statState)->QueueLengthCounter),
 			    "PdhAddCounter");
 			handlePdhStatus(
 			    PdhAddCounter((*statState)->Query,
 			                  ("\\" + (*statState)->pdhStrings.physicalDisk + "(" +
 			                   (*statState)->pdhStrings.diskDevice + ")\\" + (*statState)->pdhStrings.diskReadsPerSec)
 			                      .c_str(),
-			                  0, &(*statState)->ReadsCounter),
+			                  0,
+			                  &(*statState)->ReadsCounter),
 			    "PdhAddCounter");
 			handlePdhStatus(
 			    PdhAddCounter((*statState)->Query,
 			                  ("\\" + (*statState)->pdhStrings.physicalDisk + "(" +
 			                   (*statState)->pdhStrings.diskDevice + ")\\" + (*statState)->pdhStrings.diskWritesPerSec)
 			                      .c_str(),
-			                  0, &(*statState)->WritesCounter),
+			                  0,
+			                  &(*statState)->WritesCounter),
 			    "PdhAddCounter");
 			handlePdhStatus(PdhAddCounter((*statState)->Query,
 			                              ("\\" + (*statState)->pdhStrings.physicalDisk + "(" +
 			                               (*statState)->pdhStrings.diskDevice + ")\\" +
 			                               (*statState)->pdhStrings.diskWriteBytesPerSec)
 			                                  .c_str(),
-			                              0, &(*statState)->WriteBytesCounter),
+			                              0,
+			                              &(*statState)->WriteBytesCounter),
 			                "PdhAddCounter");
 		}
-		(*statState)->SendCounters =
-		    addCounters((*statState)->Query, ("\\" + (*statState)->pdhStrings.networkDevice + "(*)\\" +
-		                                      (*statState)->pdhStrings.bytesSentPerSec)
-		                                         .c_str());
-		(*statState)->ReceiveCounters =
-		    addCounters((*statState)->Query, ("\\" + (*statState)->pdhStrings.networkDevice + "(*)\\" +
-		                                      (*statState)->pdhStrings.bytesRecvPerSec)
-		                                         .c_str());
+		(*statState)->SendCounters = addCounters(
+		    (*statState)->Query,
+		    ("\\" + (*statState)->pdhStrings.networkDevice + "(*)\\" + (*statState)->pdhStrings.bytesSentPerSec)
+		        .c_str());
+		(*statState)->ReceiveCounters = addCounters(
+		    (*statState)->Query,
+		    ("\\" + (*statState)->pdhStrings.networkDevice + "(*)\\" + (*statState)->pdhStrings.bytesRecvPerSec)
+		        .c_str());
 		handlePdhStatus(
 		    PdhAddCounter(
 		        (*statState)->Query,
-		        ("\\" + (*statState)->pdhStrings.tcpv4 + "\\" + (*statState)->pdhStrings.segmentsOutPerSec).c_str(), 0,
+		        ("\\" + (*statState)->pdhStrings.tcpv4 + "\\" + (*statState)->pdhStrings.segmentsOutPerSec).c_str(),
+		        0,
 		        &(*statState)->SegmentsOutCounter),
 		    "PdhAddCounter");
 		handlePdhStatus(
 		    PdhAddCounter(
 		        (*statState)->Query,
 		        ("\\" + (*statState)->pdhStrings.tcpv4 + "\\" + (*statState)->pdhStrings.segmentsRetransPerSec).c_str(),
-		        0, &(*statState)->SegmentsRetransCounter),
+		        0,
+		        &(*statState)->SegmentsRetransCounter),
 		    "PdhAddCounter");
 		handlePdhStatus(
 		    PdhAddCounter(
 		        (*statState)->Query,
-		        ("\\" + (*statState)->pdhStrings.processor + "(*)\\" + (*statState)->pdhStrings.pctIdle).c_str(), 0,
+		        ("\\" + (*statState)->pdhStrings.processor + "(*)\\" + (*statState)->pdhStrings.pctIdle).c_str(),
+		        0,
 		        &(*statState)->ProcessorIdleCounter),
 		    "PdhAddCounter");
 	}
@@ -1301,8 +1353,9 @@ SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip
 		returnStats.processDiskWriteCount = nowWrites;
 		if (returnStats.initialized) {
 			returnStats.processDiskIdleSeconds = std::max<double>(
-			    0, returnStats.elapsed -
-			           std::min<double>(returnStats.elapsed, (nowBusyTicks - (*statState)->lastBusyTicks) / 1000.0));
+			    0,
+			    returnStats.elapsed -
+			        std::min<double>(returnStats.elapsed, (nowBusyTicks - (*statState)->lastBusyTicks) / 1000.0));
 			returnStats.processDiskRead = (nowReads - (*statState)->lastReads);
 			returnStats.processDiskWrite = (nowWrites - (*statState)->lastWrites);
 			returnStats.processDiskWriteSectors = (nowWriteSectors - (*statState)->lastWriteSectors);
@@ -1343,7 +1396,8 @@ struct OffsetTimer {
 
 	OffsetTimer() {
 		long long countsPerSecond;
-		if (!QueryPerformanceFrequency((LARGE_INTEGER*)&countsPerSecond)) throw performance_counter_error();
+		if (!QueryPerformanceFrequency((LARGE_INTEGER*)&countsPerSecond))
+			throw performance_counter_error();
 		secondsPerCount = 1.0 / countsPerSecond;
 
 		FILETIME fileTime;
@@ -1357,7 +1411,8 @@ struct OffsetTimer {
 
 	double now() {
 		long long count;
-		if (!QueryPerformanceCounter((LARGE_INTEGER*)&count)) throw performance_counter_error();
+		if (!QueryPerformanceCounter((LARGE_INTEGER*)&count))
+			throw performance_counter_error();
 		return offset + count * secondsPerCount;
 	}
 };
@@ -1562,7 +1617,8 @@ static int ModifyPrivilege(const char* szPrivilege, bool fEnable) {
 static bool largePagesPrivilegeEnabled = false;
 
 static void enableLargePages() {
-	if (largePagesPrivilegeEnabled) return;
+	if (largePagesPrivilegeEnabled)
+		return;
 #ifdef _WIN32
 	ModifyPrivilege(SE_LOCK_MEMORY_NAME, true);
 	largePagesPrivilegeEnabled = true;
@@ -1578,13 +1634,15 @@ static void* allocateInternal(size_t length, bool largePages) {
 #ifdef _WIN32
 	DWORD allocType = MEM_COMMIT | MEM_RESERVE;
 
-	if (largePages) allocType |= MEM_LARGE_PAGES;
+	if (largePages)
+		allocType |= MEM_LARGE_PAGES;
 
 	return VirtualAlloc(NULL, length, allocType, PAGE_READWRITE);
 #elif defined(__linux__)
 	int flags = MAP_PRIVATE | MAP_ANONYMOUS;
 
-	if (largePages) flags |= MAP_HUGETLB;
+	if (largePages)
+		flags |= MAP_HUGETLB;
 
 	return mmap(NULL, length, PROT_READ | PROT_WRITE, flags, -1, 0);
 #elif defined(__APPLE__)
@@ -1598,20 +1656,24 @@ static void* allocateInternal(size_t length, bool largePages) {
 
 static bool largeBlockFail = false;
 void* allocate(size_t length, bool allowLargePages) {
-	if (allowLargePages) enableLargePages();
+	if (allowLargePages)
+		enableLargePages();
 
 	void* block = ALLOC_FAIL;
 
 	if (allowLargePages && !largeBlockFail) {
 		block = allocateInternal(length, true);
-		if (block == ALLOC_FAIL) largeBlockFail = true;
+		if (block == ALLOC_FAIL)
+			largeBlockFail = true;
 	}
 
-	if (block == ALLOC_FAIL) block = allocateInternal(length, false);
+	if (block == ALLOC_FAIL)
+		block = allocateInternal(length, false);
 
 	// FIXME: SevWarnAlways trace if "close" to out of memory
 
-	if (block == ALLOC_FAIL) platform::outOfMemory();
+	if (block == ALLOC_FAIL)
+		platform::outOfMemory();
 
 	return block;
 }
@@ -1702,8 +1764,10 @@ int getRandomSeed() {
 std::string joinPath(std::string const& directory, std::string const& filename) {
 	auto d = directory;
 	auto f = filename;
-	while (f.size() && (f[0] == '/' || f[0] == CANONICAL_PATH_SEPARATOR)) f = f.substr(1);
-	while (d.size() && (d.back() == '/' || d.back() == CANONICAL_PATH_SEPARATOR)) d.resize(d.size() - 1);
+	while (f.size() && (f[0] == '/' || f[0] == CANONICAL_PATH_SEPARATOR))
+		f = f.substr(1);
+	while (d.size() && (d.back() == '/' || d.back() == CANONICAL_PATH_SEPARATOR))
+		d.resize(d.size() - 1);
 	return d + CANONICAL_PATH_SEPARATOR + f;
 }
 
@@ -1747,7 +1811,8 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
 		std::string tempfilename =
 		    joinPath(parentDirectory(path), deterministicRandom()->randomUniqueID().toString() + ".tmp");
 		f = textmode ? fopen(tempfilename.c_str(), "wt" FOPEN_CLOEXEC_MODE) : fopen(tempfilename.c_str(), "wb");
-		if (!f) throw io_error();
+		if (!f)
+			throw io_error();
 #ifdef _WIN32
 			// In Windows case, ReplaceFile API is used which preserves the ownership,
 			// ACLs and other attributes of the original file
@@ -1784,17 +1849,20 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
 #error Port me!
 #endif
 
-		if (textmode && fprintf(f, "%s", content.c_str()) < 0) throw io_error();
+		if (textmode && fprintf(f, "%s", content.c_str()) < 0)
+			throw io_error();
 
 		if (!textmode && fwrite(content.c_str(), sizeof(uint8_t), content.size(), f) != content.size())
 			throw io_error();
 
-		if (fflush(f) != 0) throw io_error();
+		if (fflush(f) != 0)
+			throw io_error();
 
 #ifdef _WIN32
 		HANDLE h = (HANDLE)_get_osfhandle(_fileno(f));
 		if (!g_network->isSimulated()) {
-			if (!FlushFileBuffers(h)) throw io_error();
+			if (!FlushFileBuffers(h))
+				throw io_error();
 		}
 
 		if (fclose(f) != 0) {
@@ -1803,10 +1871,12 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
 		}
 		f = 0;
 
-		if (!ReplaceFile(path.c_str(), tempfilename.c_str(), NULL, NULL, NULL, NULL)) throw io_error();
+		if (!ReplaceFile(path.c_str(), tempfilename.c_str(), NULL, NULL, NULL, NULL))
+			throw io_error();
 #elif defined(__unixish__)
 		if (!g_network->isSimulated()) {
-			if (fsync(fileno(f)) != 0) throw io_error();
+			if (fsync(fileno(f)) != 0)
+				throw io_error();
 		}
 
 		if (fclose(f) != 0) {
@@ -1815,7 +1885,8 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
 		}
 		f = 0;
 
-		if (rename(tempfilename.c_str(), path.c_str()) != 0) throw io_error();
+		if (rename(tempfilename.c_str(), path.c_str()) != 0)
+			throw io_error();
 #else
 #error Port me!
 #endif
@@ -1823,7 +1894,8 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
 		INJECT_FAULT(io_error, "atomicReplace");
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "AtomicReplace").error(e).detail("Path", path).GetLastError();
-		if (f) fclose(f);
+		if (f)
+			fclose(f);
 		throw;
 	}
 }
@@ -1836,11 +1908,15 @@ static bool deletedFile() {
 bool deleteFile(std::string const& filename) {
 	INJECT_FAULT(platform_error, "deleteFile");
 #ifdef _WIN32
-	if (DeleteFile(filename.c_str())) return deletedFile();
-	if (GetLastError() == ERROR_FILE_NOT_FOUND) return false;
+	if (DeleteFile(filename.c_str()))
+		return deletedFile();
+	if (GetLastError() == ERROR_FILE_NOT_FOUND)
+		return false;
 #elif defined(__unixish__)
-	if (!unlink(filename.c_str())) return deletedFile();
-	if (errno == ENOENT) return false;
+	if (!unlink(filename.c_str()))
+		return deletedFile();
+	if (errno == ENOENT)
+		return false;
 #else
 #error Port me!
 #endif
@@ -1863,7 +1939,8 @@ bool createDirectory(std::string const& directory) {
 		createdDirectory();
 		return true;
 	}
-	if (GetLastError() == ERROR_ALREADY_EXISTS) return false;
+	if (GetLastError() == ERROR_ALREADY_EXISTS)
+		return false;
 	if (GetLastError() == ERROR_PATH_NOT_FOUND) {
 		size_t delim = directory.find_last_of("/\\");
 		if (delim != std::string::npos) {
@@ -1879,7 +1956,8 @@ bool createDirectory(std::string const& directory) {
 	do {
 		sep = directory.find_first_of('/', sep + 1);
 		if (mkdir(directory.substr(0, sep).c_str(), 0755) != 0) {
-			if (errno == EEXIST) continue;
+			if (errno == EEXIST)
+				continue;
 			auto mkdirErrno = errno;
 
 			// check if directory already exists
@@ -1927,7 +2005,8 @@ std::string cleanPath(std::string const& path) {
 
 	while (p.size() != 0) {
 		StringRef part = p.eat(separator);
-		if (part.size() == 0 || (part.size() == 1 && part[0] == '.')) continue;
+		if (part.size() == 0 || (part.size() == 1 && part[0] == '.'))
+			continue;
 		if (part == dotdot) {
 			if (!finalParts.empty() && finalParts.back() != dotdot) {
 				finalParts.pop_back();
@@ -2022,7 +2101,8 @@ std::string abspath(std::string const& path, bool resolveLinks, bool mustExist) 
 	}
 	// Not totally obvious from the help whether GetFullPathName canonicalizes slashes, so let's do it...
 	for (char* x = nameBuffer; *x; x++)
-		if (*x == '/') *x = CANONICAL_PATH_SEPARATOR;
+		if (*x == '/')
+			*x = CANONICAL_PATH_SEPARATOR;
 	return nameBuffer;
 #elif (defined(__linux__) || defined(__APPLE__))
 
@@ -2060,7 +2140,8 @@ std::string parentDirectory(std::string const& path, bool resolveLinks, bool mus
 std::string basename(std::string const& filename) {
 	auto abs = abspath(filename);
 	size_t sep = abs.find_last_of(CANONICAL_PATH_SEPARATOR);
-	if (sep == std::string::npos) return filename;
+	if (sep == std::string::npos)
+		return filename;
 	return abs.substr(sep + 1);
 }
 
@@ -2114,7 +2195,8 @@ bool acceptDirectory(FILE_ATTRIBUTE_DATA fileAttributes, std::string name, std::
 #endif
 }
 
-std::vector<std::string> findFiles(std::string const& directory, std::string const& extension,
+std::vector<std::string> findFiles(std::string const& directory,
+                                   std::string const& extension,
                                    bool (*accept_file)(FILE_ATTRIBUTE_DATA, std::string, std::string)) {
 	INJECT_FAULT(platform_error, "findFiles");
 	std::vector<std::string> result;
@@ -2136,7 +2218,8 @@ std::vector<std::string> findFiles(std::string const& directory, std::string con
 			if ((*accept_file)(fd.dwFileAttributes, name, extension)) {
 				result.push_back(name);
 			}
-			if (!FindNextFile(h, &fd)) break;
+			if (!FindNextFile(h, &fd))
+				break;
 		}
 		if (GetLastError() != ERROR_NO_MORE_FILES) {
 			TraceEvent(SevError, "FindNextFile")
@@ -2168,7 +2251,8 @@ std::vector<std::string> findFiles(std::string const& directory, std::string con
 				else
 					continue;
 			}
-			if ((*accept_file)(buf.st_mode, name, extension)) result.push_back(name);
+			if ((*accept_file)(buf.st_mode, name, extension))
+				result.push_back(name);
 		}
 
 		closedir(dip);
@@ -2193,12 +2277,14 @@ std::vector<std::string> listDirectories(std::string const& directory) {
 void findFilesRecursively(std::string path, std::vector<std::string>& out) {
 	// Add files to output, prefixing path
 	std::vector<std::string> files = platform::listFiles(path);
-	for (auto const& f : files) out.push_back(joinPath(path, f));
+	for (auto const& f : files)
+		out.push_back(joinPath(path, f));
 
 	// Recurse for directories
 	std::vector<std::string> directories = platform::listDirectories(path);
 	for (auto const& dir : directories) {
-		if (dir != "." && dir != "..") findFilesRecursively(joinPath(path, dir), out);
+		if (dir != "." && dir != "..")
+			findFilesRecursively(joinPath(path, dir), out);
 	}
 }
 
@@ -2288,7 +2374,8 @@ void deprioritizeThread() {
 
 bool fileExists(std::string const& filename) {
 	FILE* f = fopen(filename.c_str(), "rb" FOPEN_CLOEXEC_MODE);
-	if (!f) return false;
+	if (!f)
+		return false;
 	fclose(f);
 	return true;
 }
@@ -2299,7 +2386,8 @@ bool directoryExists(std::string const& path) {
 	return bits != INVALID_FILE_ATTRIBUTES && (bits & FILE_ATTRIBUTE_DIRECTORY);
 #else
 	DIR* d = opendir(path.c_str());
-	if (d == nullptr) return false;
+	if (d == nullptr)
+		return false;
 	closedir(d);
 	return true;
 #endif
@@ -2336,10 +2424,12 @@ std::string readFileBytes(std::string const& filename, int maxSize) {
 	try {
 		fseek(f, 0, SEEK_END);
 		size_t size = ftell(f);
-		if (size > maxSize) throw file_too_large();
+		if (size > maxSize)
+			throw file_too_large();
 		s.resize(size);
 		fseek(f, 0, SEEK_SET);
-		if (!fread(&s[0], size, 1, f)) throw file_not_readable();
+		if (!fread(&s[0], size, 1, f))
+			throw file_not_readable();
 	} catch (...) {
 		fclose(f);
 		throw;
@@ -2413,7 +2503,8 @@ int setEnvironmentVar(const char* name, const char* value, int overwrite) {
 	if (!overwrite) {
 		size_t envsize = 0;
 		errcode = getenv_s(&envsize, NULL, 0, name);
-		if (errcode || envsize) return errcode;
+		if (errcode || envsize)
+			return errcode;
 	}
 	return _putenv_s(name, value);
 #else
@@ -2834,7 +2925,8 @@ void platformInit() {
 #ifdef __linux__
 	struct timespec ts;
 	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
-		criticalError(FDB_EXIT_ERROR, "MonotonicTimeUnavailable",
+		criticalError(FDB_EXIT_ERROR,
+		              "MonotonicTimeUnavailable",
 		              "clock_gettime(CLOCK_MONOTONIC, ...) returned an error. Check your kernel and glibc versions.");
 	}
 #endif
@@ -3141,7 +3233,9 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 }
 #endif
 
-int testPathFunction(const char* name, std::function<std::string(std::string)> fun, std::string a,
+int testPathFunction(const char* name,
+                     std::function<std::string(std::string)> fun,
+                     std::string a,
                      ErrorOr<std::string> b) {
 	ErrorOr<std::string> result;
 	try {
@@ -3152,7 +3246,10 @@ int testPathFunction(const char* name, std::function<std::string(std::string)> f
 	bool r = result.isError() == b.isError() && (b.isError() || b.get() == result.get()) &&
 	         (!b.isError() || b.getError().code() == result.getError().code());
 
-	printf("%s: %s('%s') -> %s", r ? "PASS" : "FAIL", name, a.c_str(),
+	printf("%s: %s('%s') -> %s",
+	       r ? "PASS" : "FAIL",
+	       name,
+	       a.c_str(),
 	       result.isError() ? result.getError().what() : format("'%s'", result.get().c_str()).c_str());
 	if (!r) {
 		printf("  *ERROR* expected %s", b.isError() ? b.getError().what() : format("'%s'", b.get().c_str()).c_str());
@@ -3161,8 +3258,12 @@ int testPathFunction(const char* name, std::function<std::string(std::string)> f
 	return r ? 0 : 1;
 }
 
-int testPathFunction2(const char* name, std::function<std::string(std::string, bool, bool)> fun, std::string a,
-                      bool resolveLinks, bool mustExist, ErrorOr<std::string> b) {
+int testPathFunction2(const char* name,
+                      std::function<std::string(std::string, bool, bool)> fun,
+                      std::string a,
+                      bool resolveLinks,
+                      bool mustExist,
+                      ErrorOr<std::string> b) {
 	// Skip tests with resolveLinks set to false as the implementation is not complete
 	if (resolveLinks == false) {
 		printf("SKIPPED: %s('%s', %d, %d)\n", name, a.c_str(), resolveLinks, mustExist);
@@ -3178,7 +3279,12 @@ int testPathFunction2(const char* name, std::function<std::string(std::string, b
 	bool r = result.isError() == b.isError() && (b.isError() || b.get() == result.get()) &&
 	         (!b.isError() || b.getError().code() == result.getError().code());
 
-	printf("%s: %s('%s', %d, %d) -> %s", r ? "PASS" : "FAIL", name, a.c_str(), resolveLinks, mustExist,
+	printf("%s: %s('%s', %d, %d) -> %s",
+	       r ? "PASS" : "FAIL",
+	       name,
+	       a.c_str(),
+	       resolveLinks,
+	       mustExist,
 	       result.isError() ? result.getError().what() : format("'%s'", result.get().c_str()).c_str());
 	if (!r) {
 		printf("  *ERROR* expected %s", b.isError() ? b.getError().what() : format("'%s'", b.get().c_str()).c_str());
@@ -3225,29 +3331,53 @@ TEST_CASE("/flow/Platform/directoryOps") {
 	ASSERT(symlink("one/two", "simfdb/backups/four") == 0);
 	ASSERT(symlink("../backups/four", "simfdb/backups/five") == 0);
 
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/four/../two", true, true,
-	                            joinPath(cwd, "simfdb/backups/one/two"));
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../two", true, true,
-	                            joinPath(cwd, "simfdb/backups/one/two"));
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../two", true, false,
-	                            joinPath(cwd, "simfdb/backups/one/two"));
+	errors += testPathFunction2(
+	    "abspath", abspath, "simfdb/backups/four/../two", true, true, joinPath(cwd, "simfdb/backups/one/two"));
+	errors += testPathFunction2(
+	    "abspath", abspath, "simfdb/backups/five/../two", true, true, joinPath(cwd, "simfdb/backups/one/two"));
+	errors += testPathFunction2(
+	    "abspath", abspath, "simfdb/backups/five/../two", true, false, joinPath(cwd, "simfdb/backups/one/two"));
 	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../three", true, true, platform_error());
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../three", true, false,
-	                            joinPath(cwd, "simfdb/backups/one/three"));
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../three/../four", true, false,
+	errors += testPathFunction2(
+	    "abspath", abspath, "simfdb/backups/five/../three", true, false, joinPath(cwd, "simfdb/backups/one/three"));
+	errors += testPathFunction2("abspath",
+	                            abspath,
+	                            "simfdb/backups/five/../three/../four",
+	                            true,
+	                            false,
 	                            joinPath(cwd, "simfdb/backups/one/four"));
 
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/four/../two", true, true,
+	errors += testPathFunction2("parentDirectory",
+	                            parentDirectory,
+	                            "simfdb/backups/four/../two",
+	                            true,
+	                            true,
 	                            joinPath(cwd, "simfdb/backups/one/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../two", true, true,
+	errors += testPathFunction2("parentDirectory",
+	                            parentDirectory,
+	                            "simfdb/backups/five/../two",
+	                            true,
+	                            true,
 	                            joinPath(cwd, "simfdb/backups/one/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../two", true, false,
+	errors += testPathFunction2("parentDirectory",
+	                            parentDirectory,
+	                            "simfdb/backups/five/../two",
+	                            true,
+	                            false,
 	                            joinPath(cwd, "simfdb/backups/one/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../three", true, true,
-	                            platform_error());
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../three", true, false,
+	errors += testPathFunction2(
+	    "parentDirectory", parentDirectory, "simfdb/backups/five/../three", true, true, platform_error());
+	errors += testPathFunction2("parentDirectory",
+	                            parentDirectory,
+	                            "simfdb/backups/five/../three",
+	                            true,
+	                            false,
 	                            joinPath(cwd, "simfdb/backups/one/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../three/../four", true, false,
+	errors += testPathFunction2("parentDirectory",
+	                            parentDirectory,
+	                            "simfdb/backups/five/../three/../four",
+	                            true,
+	                            false,
 	                            joinPath(cwd, "simfdb/backups/one/"));
 #endif
 
@@ -3260,25 +3390,25 @@ TEST_CASE("/flow/Platform/directoryOps") {
 	errors += testPathFunction2("abspath", abspath, "one/two/three/four", false, true, platform_error());
 	errors +=
 	    testPathFunction2("abspath", abspath, "one/two/three/four", false, false, joinPath(cwd, "one/two/three/four"));
-	errors += testPathFunction2("abspath", abspath, "one/two/three/./four", false, false,
-	                            joinPath(cwd, "one/two/three/four"));
-	errors += testPathFunction2("abspath", abspath, "one/two/three/./four", false, false,
-	                            joinPath(cwd, "one/two/three/four"));
+	errors += testPathFunction2(
+	    "abspath", abspath, "one/two/three/./four", false, false, joinPath(cwd, "one/two/three/four"));
+	errors += testPathFunction2(
+	    "abspath", abspath, "one/two/three/./four", false, false, joinPath(cwd, "one/two/three/four"));
 	errors +=
 	    testPathFunction2("abspath", abspath, "one/two/three/./four/..", false, false, joinPath(cwd, "one/two/three"));
-	errors += testPathFunction2("abspath", abspath, "one/./two/../three/./four", false, false,
-	                            joinPath(cwd, "one/three/four"));
+	errors += testPathFunction2(
+	    "abspath", abspath, "one/./two/../three/./four", false, false, joinPath(cwd, "one/three/four"));
 	errors += testPathFunction2("abspath", abspath, "one/./two/../three/./four", false, true, platform_error());
 	errors += testPathFunction2("abspath", abspath, "one/two/three/./four", false, true, platform_error());
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/one/two/three", false, true,
-	                            joinPath(cwd, "simfdb/backups/one/two/three"));
+	errors += testPathFunction2(
+	    "abspath", abspath, "simfdb/backups/one/two/three", false, true, joinPath(cwd, "simfdb/backups/one/two/three"));
 	errors += testPathFunction2("abspath", abspath, "simfdb/backups/one/two/threefoo", false, true, platform_error());
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/four/../two", false, false,
-	                            joinPath(cwd, "simfdb/backups/two"));
+	errors += testPathFunction2(
+	    "abspath", abspath, "simfdb/backups/four/../two", false, false, joinPath(cwd, "simfdb/backups/two"));
 	errors += testPathFunction2("abspath", abspath, "simfdb/backups/four/../two", false, true, platform_error());
 	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../two", false, true, platform_error());
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../two", false, false,
-	                            joinPath(cwd, "simfdb/backups/two"));
+	errors += testPathFunction2(
+	    "abspath", abspath, "simfdb/backups/five/../two", false, false, joinPath(cwd, "simfdb/backups/two"));
 	errors += testPathFunction2("abspath", abspath, "foo/./../foo2/./bar//", false, false, joinPath(cwd, "foo2/bar"));
 	errors += testPathFunction2("abspath", abspath, "foo/./../foo2/./bar//", false, true, platform_error());
 	errors += testPathFunction2("abspath", abspath, "foo/./../foo2/./bar//", true, false, joinPath(cwd, "foo2/bar"));
@@ -3292,36 +3422,48 @@ TEST_CASE("/flow/Platform/directoryOps") {
 	errors += testPathFunction2("parentDirectory", parentDirectory, "./foo", false, false, cleanPath(cwd) + "/");
 	errors +=
 	    testPathFunction2("parentDirectory", parentDirectory, "one/two/three/four", false, true, platform_error());
-	errors += testPathFunction2("parentDirectory", parentDirectory, "one/two/three/four", false, false,
-	                            joinPath(cwd, "one/two/three/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "one/two/three/./four", false, false,
-	                            joinPath(cwd, "one/two/three/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "one/two/three/./four/..", false, false,
-	                            joinPath(cwd, "one/two/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "one/./two/../three/./four", false, false,
-	                            joinPath(cwd, "one/three/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "one/./two/../three/./four", false, true,
-	                            platform_error());
+	errors += testPathFunction2(
+	    "parentDirectory", parentDirectory, "one/two/three/four", false, false, joinPath(cwd, "one/two/three/"));
+	errors += testPathFunction2(
+	    "parentDirectory", parentDirectory, "one/two/three/./four", false, false, joinPath(cwd, "one/two/three/"));
+	errors += testPathFunction2(
+	    "parentDirectory", parentDirectory, "one/two/three/./four/..", false, false, joinPath(cwd, "one/two/"));
+	errors += testPathFunction2(
+	    "parentDirectory", parentDirectory, "one/./two/../three/./four", false, false, joinPath(cwd, "one/three/"));
+	errors += testPathFunction2(
+	    "parentDirectory", parentDirectory, "one/./two/../three/./four", false, true, platform_error());
 	errors +=
 	    testPathFunction2("parentDirectory", parentDirectory, "one/two/three/./four", false, true, platform_error());
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/one/two/three", false, true,
+	errors += testPathFunction2("parentDirectory",
+	                            parentDirectory,
+	                            "simfdb/backups/one/two/three",
+	                            false,
+	                            true,
 	                            joinPath(cwd, "simfdb/backups/one/two/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/one/two/threefoo", false, true,
-	                            platform_error());
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/four/../two", false, false,
+	errors += testPathFunction2(
+	    "parentDirectory", parentDirectory, "simfdb/backups/one/two/threefoo", false, true, platform_error());
+	errors += testPathFunction2("parentDirectory",
+	                            parentDirectory,
+	                            "simfdb/backups/four/../two",
+	                            false,
+	                            false,
 	                            joinPath(cwd, "simfdb/backups/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/four/../two", false, true,
-	                            platform_error());
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../two", false, true,
-	                            platform_error());
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../two", false, false,
+	errors += testPathFunction2(
+	    "parentDirectory", parentDirectory, "simfdb/backups/four/../two", false, true, platform_error());
+	errors += testPathFunction2(
+	    "parentDirectory", parentDirectory, "simfdb/backups/five/../two", false, true, platform_error());
+	errors += testPathFunction2("parentDirectory",
+	                            parentDirectory,
+	                            "simfdb/backups/five/../two",
+	                            false,
+	                            false,
 	                            joinPath(cwd, "simfdb/backups/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "foo/./../foo2/./bar//", false, false,
-	                            joinPath(cwd, "foo2/"));
+	errors += testPathFunction2(
+	    "parentDirectory", parentDirectory, "foo/./../foo2/./bar//", false, false, joinPath(cwd, "foo2/"));
 	errors +=
 	    testPathFunction2("parentDirectory", parentDirectory, "foo/./../foo2/./bar//", false, true, platform_error());
-	errors += testPathFunction2("parentDirectory", parentDirectory, "foo/./../foo2/./bar//", true, false,
-	                            joinPath(cwd, "foo2/"));
+	errors += testPathFunction2(
+	    "parentDirectory", parentDirectory, "foo/./../foo2/./bar//", true, false, joinPath(cwd, "foo2/"));
 	errors +=
 	    testPathFunction2("parentDirectory", parentDirectory, "foo/./../foo2/./bar//", true, true, platform_error());
 

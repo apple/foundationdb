@@ -237,7 +237,8 @@ struct RandomSelectorWorkload : TestWorkload {
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
 									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
-									if (thing.present()) break;
+									if (thing.present())
+										break;
 								}
 							}
 						}
@@ -259,7 +260,8 @@ struct RandomSelectorWorkload : TestWorkload {
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
 									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
-									if (thing.present()) break;
+									if (thing.present())
+										break;
 								}
 							}
 						}
@@ -281,7 +283,8 @@ struct RandomSelectorWorkload : TestWorkload {
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
 									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
-									if (thing.present()) break;
+									if (thing.present())
+										break;
 								}
 							}
 						}
@@ -303,7 +306,8 @@ struct RandomSelectorWorkload : TestWorkload {
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
 									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
-									if (thing.present()) break;
+									if (thing.present())
+										break;
 								}
 							}
 						}
@@ -325,7 +329,8 @@ struct RandomSelectorWorkload : TestWorkload {
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
 									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
-									if (thing.present()) break;
+									if (thing.present())
+										break;
 								}
 							}
 						}
@@ -347,7 +352,8 @@ struct RandomSelectorWorkload : TestWorkload {
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
 									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
-									if (thing.present()) break;
+									if (thing.present())
+										break;
 								}
 							}
 						}
@@ -369,7 +375,8 @@ struct RandomSelectorWorkload : TestWorkload {
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
 									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
-									if (thing.present()) break;
+									if (thing.present())
+										break;
 								}
 							}
 						}
@@ -391,7 +398,8 @@ struct RandomSelectorWorkload : TestWorkload {
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
 									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
-									if (thing.present()) break;
+									if (thing.present())
+										break;
 								}
 							}
 						}
@@ -413,7 +421,8 @@ struct RandomSelectorWorkload : TestWorkload {
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
 									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
-									if (thing.present()) break;
+									if (thing.present())
+										break;
 								}
 							}
 						}
@@ -437,7 +446,9 @@ struct RandomSelectorWorkload : TestWorkload {
 						Standalone<RangeResultRef> getRangeTest =
 						    wait(trRYOW.getRange(KeySelectorRef(StringRef(clientID + "b/" + myKeyA), onEqualA, offsetA),
 						                         KeySelectorRef(StringRef(clientID + "b/" + myKeyB), onEqualB, offsetB),
-						                         randomLimit, false, reverse));
+						                         randomLimit,
+						                         false,
+						                         reverse));
 						getRangeTest1 = getRangeTest;
 
 						loop {
@@ -445,7 +456,9 @@ struct RandomSelectorWorkload : TestWorkload {
 								Standalone<RangeResultRef> getRangeTest2 = wait(
 								    tr.getRange(KeySelectorRef(StringRef(clientID + "d/" + myKeyA), onEqualA, offsetA),
 								                KeySelectorRef(StringRef(clientID + "d/" + myKeyB), onEqualB, offsetB),
-								                randomLimit, false, reverse));
+								                randomLimit,
+								                false,
+								                reverse));
 
 								bool fail = false;
 								if (getRangeTest1.size() != getRangeTest2.size()) {

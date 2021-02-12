@@ -30,7 +30,8 @@ template <typename Ch>
 inline SizeType StrLen(const Ch* s) {
 	RAPIDJSON_ASSERT(s != 0);
 	const Ch* p = s;
-	while (*p) ++p;
+	while (*p)
+		++p;
 	return SizeType(p - s);
 }
 
@@ -44,7 +45,8 @@ bool CountStringCodePoint(const typename Encoding::Ch* s, SizeType length, SizeT
 	SizeType count = 0;
 	while (is.src_ < end) {
 		unsigned codepoint;
-		if (!Encoding::Decode(is, &codepoint)) return false;
+		if (!Encoding::Decode(is, &codepoint))
+			return false;
 		count++;
 	}
 	*outCount = count;

@@ -49,7 +49,9 @@ struct TransactionWrapper : public ReferenceCounted<TransactionWrapper> {
 	virtual Future<Standalone<RangeResultRef>> getRange(KeyRangeRef& keys, int limit, bool reverse) = 0;
 
 	// Gets a range of key-value pairs from the database specified by a pair of key selectors
-	virtual Future<Standalone<RangeResultRef>> getRange(KeySelectorRef& begin, KeySelectorRef& end, int limit,
+	virtual Future<Standalone<RangeResultRef>> getRange(KeySelectorRef& begin,
+	                                                    KeySelectorRef& end,
+	                                                    int limit,
 	                                                    bool reverse) = 0;
 
 	// Gets the key from the database specified by a given key selector
@@ -256,8 +258,12 @@ struct ApiWorkload : TestWorkload {
 	bool compareResults(VectorRef<KeyValueRef> dbResults, VectorRef<KeyValueRef> storeResults, Version readVersion);
 
 	// Generates a set of random key-value pairs with an optional prefix
-	Standalone<VectorRef<KeyValueRef>> generateData(int numKeys, int minKeyLength, int maxKeyLength, int minValueLength,
-	                                                int maxValueLength, std::string prefix = "",
+	Standalone<VectorRef<KeyValueRef>> generateData(int numKeys,
+	                                                int minKeyLength,
+	                                                int maxKeyLength,
+	                                                int minValueLength,
+	                                                int maxValueLength,
+	                                                std::string prefix = "",
 	                                                bool allowDuplicates = true);
 
 	// Generates a random key

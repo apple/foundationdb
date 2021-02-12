@@ -142,7 +142,8 @@ void LoadedTLSConfig::print(FILE* fp) {
 	X509_STORE_CTX_free(store_ctx);
 }
 
-void ConfigureSSLContext(const LoadedTLSConfig& loaded, boost::asio::ssl::context* context,
+void ConfigureSSLContext(const LoadedTLSConfig& loaded,
+                         boost::asio::ssl::context* context,
                          std::function<void()> onPolicyFailure) {
 	try {
 		context->set_options(boost::asio::ssl::context::default_workarounds);
@@ -365,7 +366,8 @@ std::string TLSPolicy::Rule::toString() const {
 static int hexValue(char c) {
 	static char const digits[] = "0123456789ABCDEF";
 
-	if (c >= 'a' && c <= 'f') c -= ('a' - 'A');
+	if (c >= 'a' && c <= 'f')
+		c -= ('a' - 'A');
 
 	int value = std::find(digits, digits + 16, c) - digits;
 	if (value >= 16) {
@@ -475,7 +477,8 @@ static NID abbrevToNID(std::string const& sn) {
 	if (sn == "C" || sn == "CN" || sn == "L" || sn == "ST" || sn == "O" || sn == "OU" || sn == "UID" || sn == "DC" ||
 	    sn == "subjectAltName")
 		nid = OBJ_sn2nid(sn.c_str());
-	if (nid == NID_undef) throw std::runtime_error("abbrevToNID");
+	if (nid == NID_undef)
+		throw std::runtime_error("abbrevToNID");
 
 	return nid;
 }
@@ -524,17 +527,23 @@ TLSPolicy::Rule::Rule(std::string input) {
 	while (s < input.size()) {
 		int eq = input.find('=', s);
 
-		if (eq == input.npos) throw std::runtime_error("parse_verify");
+		if (eq == input.npos)
+			throw std::runtime_error("parse_verify");
 
 		MatchType mt = MatchType::EXACT;
-		if (input[eq - 1] == '>') mt = MatchType::PREFIX;
-		if (input[eq - 1] == '<') mt = MatchType::SUFFIX;
+		if (input[eq - 1] == '>')
+			mt = MatchType::PREFIX;
+		if (input[eq - 1] == '<')
+			mt = MatchType::SUFFIX;
 		std::string term = input.substr(s, eq - s - (mt == MatchType::EXACT ? 0 : 1));
 
 		if (term.find("Check.") == 0) {
-			if (eq + 2 > input.size()) throw std::runtime_error("parse_verify");
-			if (eq + 2 != input.size() && input[eq + 2] != ',') throw std::runtime_error("parse_verify");
-			if (mt != MatchType::EXACT) throw std::runtime_error("parse_verify: cannot prefix match Check");
+			if (eq + 2 > input.size())
+				throw std::runtime_error("parse_verify");
+			if (eq + 2 != input.size() && input[eq + 2] != ',')
+				throw std::runtime_error("parse_verify");
+			if (mt != MatchType::EXACT)
+				throw std::runtime_error("parse_verify: cannot prefix match Check");
 
 			bool* flag;
 
@@ -574,13 +583,15 @@ TLSPolicy::Rule::Rule(std::string input) {
 			int remain;
 			auto unesc = de4514(input, eq + 1, remain);
 
-			if (remain == eq + 1) throw std::runtime_error("parse_verify");
+			if (remain == eq + 1)
+				throw std::runtime_error("parse_verify");
 
 			NID termNID = abbrevToNID(term);
 			const X509Location loc = locationForNID(termNID);
 			criteria->insert(std::make_pair(termNID, Criteria(unesc, mt, loc)));
 
-			if (remain != input.size() && input[remain] != ',') throw std::runtime_error("parse_verify");
+			if (remain != input.size() && input[remain] != ',')
+				throw std::runtime_error("parse_verify");
 
 			s = remain + 1;
 		}
@@ -595,14 +606,20 @@ bool match_criteria_entry(const std::string& criteria, ASN1_STRING* entry, Match
 	unsigned char* entry_utf8 = NULL;
 	int entry_utf8_len = 0;
 
-	if ((asn_criteria = ASN1_IA5STRING_new()) == NULL) goto err;
-	if (ASN1_STRING_set(asn_criteria, criteria.c_str(), criteria.size()) != 1) goto err;
-	if ((criteria_utf8_len = ASN1_STRING_to_UTF8(&criteria_utf8, asn_criteria)) < 1) goto err;
-	if ((entry_utf8_len = ASN1_STRING_to_UTF8(&entry_utf8, entry)) < 1) goto err;
+	if ((asn_criteria = ASN1_IA5STRING_new()) == NULL)
+		goto err;
+	if (ASN1_STRING_set(asn_criteria, criteria.c_str(), criteria.size()) != 1)
+		goto err;
+	if ((criteria_utf8_len = ASN1_STRING_to_UTF8(&criteria_utf8, asn_criteria)) < 1)
+		goto err;
+	if ((entry_utf8_len = ASN1_STRING_to_UTF8(&entry_utf8, entry)) < 1)
+		goto err;
 	if (mt == MatchType::EXACT) {
-		if (criteria_utf8_len == entry_utf8_len && memcmp(criteria_utf8, entry_utf8, criteria_utf8_len) == 0) rc = true;
+		if (criteria_utf8_len == entry_utf8_len && memcmp(criteria_utf8, entry_utf8, criteria_utf8_len) == 0)
+			rc = true;
 	} else if (mt == MatchType::PREFIX) {
-		if (criteria_utf8_len <= entry_utf8_len && memcmp(criteria_utf8, entry_utf8, criteria_utf8_len) == 0) rc = true;
+		if (criteria_utf8_len <= entry_utf8_len && memcmp(criteria_utf8, entry_utf8, criteria_utf8_len) == 0)
+			rc = true;
 	} else if (mt == MatchType::SUFFIX) {
 		if (criteria_utf8_len <= entry_utf8_len &&
 		    memcmp(criteria_utf8, entry_utf8 + (entry_utf8_len - criteria_utf8_len), criteria_utf8_len) == 0)
@@ -621,9 +638,12 @@ bool match_name_criteria(X509_NAME* name, NID nid, const std::string& criteria, 
 	int idx;
 
 	// If name does not exist, or has multiple of this RDN, refuse to proceed.
-	if ((idx = X509_NAME_get_index_by_NID(name, nid, -1)) < 0) return false;
-	if (X509_NAME_get_index_by_NID(name, nid, idx) != -1) return false;
-	if ((name_entry = X509_NAME_get_entry(name, idx)) == NULL) return false;
+	if ((idx = X509_NAME_get_index_by_NID(name, nid, -1)) < 0)
+		return false;
+	if (X509_NAME_get_index_by_NID(name, nid, idx) != -1)
+		return false;
+	if ((name_entry = X509_NAME_get_entry(name, idx)) == NULL)
+		return false;
 
 	return match_criteria_entry(criteria, X509_NAME_ENTRY_get_data(name_entry), mt);
 }
@@ -683,7 +703,11 @@ bool match_extension_criteria(X509* cert, NID nid, const std::string& value, Mat
 	return rc;
 }
 
-bool match_criteria(X509* cert, X509_NAME* subject, NID nid, const std::string& criteria, MatchType mt,
+bool match_criteria(X509* cert,
+                    X509_NAME* subject,
+                    NID nid,
+                    const std::string& criteria,
+                    MatchType mt,
                     X509Location loc) {
 	switch (loc) {
 	case X509Location::NAME: {
@@ -711,8 +735,8 @@ std::tuple<bool, std::string> check_verify(const TLSPolicy::Rule* verify, X509_S
 		goto err;
 	}
 	for (auto& pair : verify->subject_criteria) {
-		if (!match_criteria(cert, subject, pair.first, pair.second.criteria, pair.second.match_type,
-		                    pair.second.location)) {
+		if (!match_criteria(
+		        cert, subject, pair.first, pair.second.criteria, pair.second.match_type, pair.second.location)) {
 			reason = "Cert subject match failure";
 			goto err;
 		}
@@ -724,8 +748,8 @@ std::tuple<bool, std::string> check_verify(const TLSPolicy::Rule* verify, X509_S
 		goto err;
 	}
 	for (auto& pair : verify->issuer_criteria) {
-		if (!match_criteria(cert, issuer, pair.first, pair.second.criteria, pair.second.match_type,
-		                    pair.second.location)) {
+		if (!match_criteria(
+		        cert, issuer, pair.first, pair.second.criteria, pair.second.match_type, pair.second.location)) {
 			reason = "Cert issuer match failure";
 			goto err;
 		}
@@ -738,8 +762,8 @@ std::tuple<bool, std::string> check_verify(const TLSPolicy::Rule* verify, X509_S
 		goto err;
 	}
 	for (auto& pair : verify->root_criteria) {
-		if (!match_criteria(cert, subject, pair.first, pair.second.criteria, pair.second.match_type,
-		                    pair.second.location)) {
+		if (!match_criteria(
+		        cert, subject, pair.first, pair.second.criteria, pair.second.match_type, pair.second.location)) {
 			reason = "Root subject match failure";
 			goto err;
 		}
@@ -782,7 +806,8 @@ bool TLSPolicy::verify_peer(bool preverified, X509_STORE_CTX* store_ctx) {
 			rc = true;
 			break;
 		} else {
-			if (verify_failure_reason.length() > 0) verify_failure_reasons.insert(verify_failure_reason);
+			if (verify_failure_reason.length() > 0)
+				verify_failure_reasons.insert(verify_failure_reason);
 		}
 	}
 

@@ -36,7 +36,8 @@ template <class X>
 void logOnReceive(X x) {}
 
 void logOnReceive(CommitTransactionRequest x) {
-	if (x.debugID.present()) g_traceBatch.addEvent("CommitDebug", x.debugID.get().first(), "MasterProxyServer.batcher");
+	if (x.debugID.present())
+		g_traceBatch.addEvent("CommitDebug", x.debugID.get().first(), "MasterProxyServer.batcher");
 }
 
 template <class X>
@@ -49,10 +50,18 @@ bool firstInBatch(CommitTransactionRequest x) {
 }
 
 ACTOR template <class X>
-Future<Void> batcher(PromiseStream<std::pair<std::vector<X>, int>> out, FutureStream<X> in, double avgMinDelay,
-                     double* avgMaxDelay, double emptyBatchTimeout, int maxCount, int desiredBytes, int maxBytes,
-                     Optional<PromiseStream<Void>> batchStartedStream, int64_t* commitBatchesMemBytesCount,
-                     int64_t commitBatchesMemBytesLimit, TaskPriority taskID = TaskPriority::DefaultDelay,
+Future<Void> batcher(PromiseStream<std::pair<std::vector<X>, int>> out,
+                     FutureStream<X> in,
+                     double avgMinDelay,
+                     double* avgMaxDelay,
+                     double emptyBatchTimeout,
+                     int maxCount,
+                     int desiredBytes,
+                     int maxBytes,
+                     Optional<PromiseStream<Void>> batchStartedStream,
+                     int64_t* commitBatchesMemBytesCount,
+                     int64_t commitBatchesMemBytesLimit,
+                     TaskPriority taskID = TaskPriority::DefaultDelay,
                      Counter* counter = 0) {
 	wait(delayJittered(*avgMaxDelay, taskID)); // smooth out
 	// This is set up to deliver even zero-size batches if emptyBatchTimeout elapses, because that's what master proxy
@@ -85,10 +94,12 @@ Future<Void> batcher(PromiseStream<std::pair<std::vector<X>, int>> out, FutureSt
 					}
 
 					// Process requests in the normal case
-					if (counter) ++*counter;
+					if (counter)
+						++*counter;
 					logOnReceive(x);
 					if (!batch.size()) {
-						if (batchStartedStream.present()) batchStartedStream.get().send(Void());
+						if (batchStartedStream.present())
+							batchStartedStream.get().send(Void());
 						if (now() - lastBatch > *avgMaxDelay)
 							timeout = delayJittered(avgMinDelay, taskID);
 						else
@@ -99,7 +110,8 @@ Future<Void> batcher(PromiseStream<std::pair<std::vector<X>, int>> out, FutureSt
 					if ((batchBytes + bytes > maxBytes || first) && batch.size()) {
 						out.send({ batch, batchBytes });
 						lastBatch = now();
-						if (batchStartedStream.present()) batchStartedStream.get().send(Void());
+						if (batchStartedStream.present())
+							batchStartedStream.get().send(Void());
 						timeout = delayJittered(*avgMaxDelay, taskID);
 						batch = std::vector<X>();
 						batchBytes = 0;

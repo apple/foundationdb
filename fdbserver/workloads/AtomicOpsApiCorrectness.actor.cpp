@@ -48,7 +48,8 @@ public:
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
 
 	virtual Future<Void> start(Database const& cx) {
-		if (opType == -1) opType = sharedRandomNumber % 9;
+		if (opType == -1)
+			opType = sharedRandomNumber % 9;
 
 		switch (opType) {
 		case 0:
@@ -90,8 +91,10 @@ public:
 	virtual void getMetrics(vector<PerfMetric>& m) {}
 
 	// Test Atomic ops on non existing keys that results in a set
-	ACTOR Future<Void> testAtomicOpSetOnNonExistingKey(Database cx, AtomicOpsApiCorrectnessWorkload* self,
-	                                                   uint32_t opType, Key key) {
+	ACTOR Future<Void> testAtomicOpSetOnNonExistingKey(Database cx,
+	                                                   AtomicOpsApiCorrectnessWorkload* self,
+	                                                   uint32_t opType,
+	                                                   Key key) {
 		state uint64_t intValue = deterministicRandom()->randomInt(0, 10000000);
 		state Value val = StringRef((const uint8_t*)&intValue, sizeof(intValue));
 
@@ -152,8 +155,10 @@ public:
 	}
 
 	// Test Atomic ops on non existing keys that results in a unset
-	ACTOR Future<Void> testAtomicOpUnsetOnNonExistingKey(Database cx, AtomicOpsApiCorrectnessWorkload* self,
-	                                                     uint32_t opType, Key key) {
+	ACTOR Future<Void> testAtomicOpUnsetOnNonExistingKey(Database cx,
+	                                                     AtomicOpsApiCorrectnessWorkload* self,
+	                                                     uint32_t opType,
+	                                                     Key key) {
 		state uint64_t intValue = deterministicRandom()->randomInt(0, 10000000);
 		state Value val = StringRef((const uint8_t*)&intValue, sizeof(intValue));
 
@@ -216,8 +221,11 @@ public:
 	typedef std::function<Value(Value, Value)> DoAtomicOpOnEmptyValueFunction;
 
 	// Test Atomic Ops when one of the value is empty
-	ACTOR Future<Void> testAtomicOpOnEmptyValue(Database cx, AtomicOpsApiCorrectnessWorkload* self, uint32_t opType,
-	                                            Key key, DoAtomicOpOnEmptyValueFunction opFunc) {
+	ACTOR Future<Void> testAtomicOpOnEmptyValue(Database cx,
+	                                            AtomicOpsApiCorrectnessWorkload* self,
+	                                            uint32_t opType,
+	                                            Key key,
+	                                            DoAtomicOpOnEmptyValueFunction opFunc) {
 		state Value existingVal;
 		state Value otherVal;
 		state uint64_t val = deterministicRandom()->randomInt(0, 10000000);
@@ -285,7 +293,10 @@ public:
 	typedef std::function<uint64_t(uint64_t, uint64_t)> DoAtomicOpFunction;
 
 	// Test atomic ops in the normal case when the existing value is present
-	ACTOR Future<Void> testAtomicOpApi(Database cx, AtomicOpsApiCorrectnessWorkload* self, uint32_t opType, Key key,
+	ACTOR Future<Void> testAtomicOpApi(Database cx,
+	                                   AtomicOpsApiCorrectnessWorkload* self,
+	                                   uint32_t opType,
+	                                   Key key,
 	                                   DoAtomicOpFunction opFunc) {
 		state uint64_t intValue1 = deterministicRandom()->randomInt(0, 10000000);
 		state uint64_t intValue2 = deterministicRandom()->randomInt(0, 10000000);
@@ -357,7 +368,9 @@ public:
 		return Void();
 	}
 
-	ACTOR Future<Void> testCompareAndClearAtomicOpApi(Database cx, AtomicOpsApiCorrectnessWorkload* self, Key key,
+	ACTOR Future<Void> testCompareAndClearAtomicOpApi(Database cx,
+	                                                  AtomicOpsApiCorrectnessWorkload* self,
+	                                                  Key key,
 	                                                  bool keySet) {
 		state uint64_t opType = MutationRef::CompareAndClear;
 		state uint64_t intValue1 = deterministicRandom()->randomInt(0, 10000000);
@@ -469,8 +482,8 @@ public:
 		setApiVersion(&cx, 500);
 		TraceEvent(SevInfo, "Running Atomic Op Min Correctness Test Api Version 500");
 		wait(self->testAtomicOpUnsetOnNonExistingKey(cx, self, MutationRef::Min, key));
-		wait(self->testAtomicOpApi(cx, self, MutationRef::Min, key,
-		                           [](uint64_t val1, uint64_t val2) { return val1 < val2 ? val1 : val2; }));
+		wait(self->testAtomicOpApi(
+		    cx, self, MutationRef::Min, key, [](uint64_t val1, uint64_t val2) { return val1 < val2 ? val1 : val2; }));
 		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Min, key, [](Value v1, Value v2) -> Value {
 			uint64_t zeroVal = 0;
 			if (v2.size() == 0)
@@ -484,8 +497,8 @@ public:
 		TraceEvent(SevInfo, "Running Atomic Op Min Correctness Current Api Version")
 		    .detail("Version", currentApiVersion);
 		wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Min, key));
-		wait(self->testAtomicOpApi(cx, self, MutationRef::Min, key,
-		                           [](uint64_t val1, uint64_t val2) { return val1 < val2 ? val1 : val2; }));
+		wait(self->testAtomicOpApi(
+		    cx, self, MutationRef::Min, key, [](uint64_t val1, uint64_t val2) { return val1 < val2 ? val1 : val2; }));
 		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Min, key, [](Value v1, Value v2) -> Value {
 			uint64_t zeroVal = 0;
 			if (v2.size() == 0)
@@ -502,10 +515,10 @@ public:
 
 		TraceEvent(SevInfo, "Running Atomic Op MAX Correctness Current Api Version");
 		wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Max, key));
-		wait(self->testAtomicOpApi(cx, self, MutationRef::Max, key,
-		                           [](uint64_t val1, uint64_t val2) { return val1 > val2 ? val1 : val2; }));
-		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Max, key,
-		                                    [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); }));
+		wait(self->testAtomicOpApi(
+		    cx, self, MutationRef::Max, key, [](uint64_t val1, uint64_t val2) { return val1 > val2 ? val1 : val2; }));
+		wait(self->testAtomicOpOnEmptyValue(
+		    cx, self, MutationRef::Max, key, [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); }));
 
 		return Void();
 	}
@@ -519,8 +532,8 @@ public:
 		setApiVersion(&cx, 500);
 		TraceEvent(SevInfo, "Running Atomic Op AND Correctness Test Api Version 500");
 		wait(self->testAtomicOpUnsetOnNonExistingKey(cx, self, MutationRef::And, key));
-		wait(self->testAtomicOpApi(cx, self, MutationRef::And, key,
-		                           [](uint64_t val1, uint64_t val2) { return val1 & val2; }));
+		wait(self->testAtomicOpApi(
+		    cx, self, MutationRef::And, key, [](uint64_t val1, uint64_t val2) { return val1 & val2; }));
 		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::And, key, [](Value v1, Value v2) -> Value {
 			uint64_t zeroVal = 0;
 			if (v2.size() == 0)
@@ -534,8 +547,8 @@ public:
 		TraceEvent(SevInfo, "Running Atomic Op AND Correctness Current Api Version")
 		    .detail("Version", currentApiVersion);
 		wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::And, key));
-		wait(self->testAtomicOpApi(cx, self, MutationRef::And, key,
-		                           [](uint64_t val1, uint64_t val2) { return val1 & val2; }));
+		wait(self->testAtomicOpApi(
+		    cx, self, MutationRef::And, key, [](uint64_t val1, uint64_t val2) { return val1 & val2; }));
 		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::And, key, [](Value v1, Value v2) -> Value {
 			uint64_t zeroVal = 0;
 			if (v2.size() == 0)
@@ -552,10 +565,10 @@ public:
 
 		TraceEvent(SevInfo, "Running Atomic Op OR Correctness Current Api Version");
 		wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Or, key));
-		wait(self->testAtomicOpApi(cx, self, MutationRef::Or, key,
-		                           [](uint64_t val1, uint64_t val2) { return val1 | val2; }));
-		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Or, key,
-		                                    [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); }));
+		wait(self->testAtomicOpApi(
+		    cx, self, MutationRef::Or, key, [](uint64_t val1, uint64_t val2) { return val1 | val2; }));
+		wait(self->testAtomicOpOnEmptyValue(
+		    cx, self, MutationRef::Or, key, [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); }));
 
 		return Void();
 	}
@@ -565,10 +578,10 @@ public:
 
 		TraceEvent(SevInfo, "Running Atomic Op XOR Correctness Current Api Version");
 		wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Xor, key));
-		wait(self->testAtomicOpApi(cx, self, MutationRef::Xor, key,
-		                           [](uint64_t val1, uint64_t val2) { return val1 ^ val2; }));
-		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Xor, key,
-		                                    [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); }));
+		wait(self->testAtomicOpApi(
+		    cx, self, MutationRef::Xor, key, [](uint64_t val1, uint64_t val2) { return val1 ^ val2; }));
+		wait(self->testAtomicOpOnEmptyValue(
+		    cx, self, MutationRef::Xor, key, [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); }));
 
 		return Void();
 	}
@@ -577,10 +590,11 @@ public:
 		state Key key = self->getTestKey("test_key_add_");
 		TraceEvent(SevInfo, "Running Atomic Op ADD Correctness Current Api Version");
 		wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::AddValue, key));
-		wait(self->testAtomicOpApi(cx, self, MutationRef::AddValue, key,
-		                           [](uint64_t val1, uint64_t val2) { return val1 + val2; }));
-		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::AddValue, key,
-		                                    [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); }));
+		wait(self->testAtomicOpApi(
+		    cx, self, MutationRef::AddValue, key, [](uint64_t val1, uint64_t val2) { return val1 + val2; }));
+		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::AddValue, key, [](Value v1, Value v2) -> Value {
+			return v2.size() ? v2 : StringRef();
+		}));
 
 		return Void();
 	}
@@ -603,8 +617,8 @@ public:
 			           ? val1
 			           : val2;
 		}));
-		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::ByteMin, key,
-		                                    [](Value v1, Value v2) -> Value { return StringRef(); }));
+		wait(self->testAtomicOpOnEmptyValue(
+		    cx, self, MutationRef::ByteMin, key, [](Value v1, Value v2) -> Value { return StringRef(); }));
 
 		return Void();
 	}
@@ -619,8 +633,8 @@ public:
 			           ? val1
 			           : val2;
 		}));
-		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::ByteMax, key,
-		                                    [](Value v1, Value v2) -> Value { return v1.size() ? v1 : v2; }));
+		wait(self->testAtomicOpOnEmptyValue(
+		    cx, self, MutationRef::ByteMax, key, [](Value v1, Value v2) -> Value { return v1.size() ? v1 : v2; }));
 
 		return Void();
 	}

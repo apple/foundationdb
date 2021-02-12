@@ -30,22 +30,27 @@
 namespace FDB {
 class DirectoryLayer : public IDirectory {
 public:
-	DirectoryLayer(Subspace nodeSubspace = DEFAULT_NODE_SUBSPACE, Subspace contentSubspace = DEFAULT_CONTENT_SUBSPACE,
+	DirectoryLayer(Subspace nodeSubspace = DEFAULT_NODE_SUBSPACE,
+	               Subspace contentSubspace = DEFAULT_CONTENT_SUBSPACE,
 	               bool allowManualPrefixes = false);
 
 	Future<Reference<DirectorySubspace>> create(
-	    Reference<Transaction> const& tr, Path const& path,
+	    Reference<Transaction> const& tr,
+	    Path const& path,
 	    Standalone<StringRef> const& layer = Standalone<StringRef>(),
 	    Optional<Standalone<StringRef>> const& prefix = Optional<Standalone<StringRef>>());
-	Future<Reference<DirectorySubspace>> open(Reference<Transaction> const& tr, Path const& path,
+	Future<Reference<DirectorySubspace>> open(Reference<Transaction> const& tr,
+	                                          Path const& path,
 	                                          Standalone<StringRef> const& layer = Standalone<StringRef>());
-	Future<Reference<DirectorySubspace>> createOrOpen(Reference<Transaction> const& tr, Path const& path,
+	Future<Reference<DirectorySubspace>> createOrOpen(Reference<Transaction> const& tr,
+	                                                  Path const& path,
 	                                                  Standalone<StringRef> const& layer = Standalone<StringRef>());
 
 	Future<bool> exists(Reference<Transaction> const& tr, Path const& path = Path());
 	Future<Standalone<VectorRef<StringRef>>> list(Reference<Transaction> const& tr, Path const& path = Path());
 
-	Future<Reference<DirectorySubspace>> move(Reference<Transaction> const& tr, Path const& oldPath,
+	Future<Reference<DirectorySubspace>> move(Reference<Transaction> const& tr,
+	                                          Path const& oldPath,
 	                                          Path const& newPath);
 	Future<Reference<DirectorySubspace>> moveTo(Reference<Transaction> const& tr, Path const& newAbsolutePath);
 
@@ -71,7 +76,9 @@ public:
 
 	struct Node {
 		Node() {}
-		Node(Reference<DirectoryLayer> const& directoryLayer, Optional<Subspace> const& subspace, Path const& path,
+		Node(Reference<DirectoryLayer> const& directoryLayer,
+		     Optional<Subspace> const& subspace,
+		     Path const& path,
 		     Path const& targetPath);
 
 		bool exists() const;
@@ -92,12 +99,15 @@ public:
 		bool loadedMetadata;
 	};
 
-	Reference<DirectorySubspace> openInternal(Standalone<StringRef> const& layer, Node const& existingNode,
+	Reference<DirectorySubspace> openInternal(Standalone<StringRef> const& layer,
+	                                          Node const& existingNode,
 	                                          bool allowOpen);
-	Future<Reference<DirectorySubspace>> createOrOpenInternal(Reference<Transaction> const& tr, Path const& path,
+	Future<Reference<DirectorySubspace>> createOrOpenInternal(Reference<Transaction> const& tr,
+	                                                          Path const& path,
 	                                                          Standalone<StringRef> const& layer,
 	                                                          Optional<Standalone<StringRef>> const& prefix,
-	                                                          bool allowCreate, bool allowOpen);
+	                                                          bool allowCreate,
+	                                                          bool allowOpen);
 
 	void initializeDirectory(Reference<Transaction> const& tr) const;
 	Future<Void> checkVersion(Reference<Transaction> const& tr, bool writeAccess) const;
@@ -106,7 +116,8 @@ public:
 	Optional<Subspace> nodeWithPrefix(Optional<T> const& prefix) const;
 	Subspace nodeWithPrefix(StringRef const& prefix) const;
 
-	Reference<DirectorySubspace> contentsOfNode(Subspace const& node, Path const& path,
+	Reference<DirectorySubspace> contentsOfNode(Subspace const& node,
+	                                            Path const& path,
 	                                            Standalone<StringRef> const& layer);
 
 	Path toAbsolutePath(Path const& subpath) const;

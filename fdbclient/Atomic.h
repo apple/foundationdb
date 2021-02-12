@@ -24,11 +24,14 @@
 
 #include "fdbclient/CommitTransaction.h"
 
-static ValueRef doLittleEndianAdd(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand,
+static ValueRef doLittleEndianAdd(const Optional<ValueRef>& existingValueOptional,
+                                  const ValueRef& otherOperand,
                                   Arena& ar) {
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
-	if (!existingValue.size()) return otherOperand;
-	if (!otherOperand.size()) return otherOperand;
+	if (!existingValue.size())
+		return otherOperand;
+	if (!otherOperand.size())
+		return otherOperand;
 
 	uint8_t* buf = new (ar) uint8_t[otherOperand.size()];
 	int i = 0;
@@ -50,43 +53,51 @@ static ValueRef doLittleEndianAdd(const Optional<ValueRef>& existingValueOptiona
 
 static ValueRef doAnd(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
-	if (!otherOperand.size()) return otherOperand;
+	if (!otherOperand.size())
+		return otherOperand;
 
 	uint8_t* buf = new (ar) uint8_t[otherOperand.size()];
 	int i = 0;
 
 	for (i = 0; i < std::min(existingValue.size(), otherOperand.size()); i++)
 		buf[i] = existingValue[i] & otherOperand[i];
-	for (; i < otherOperand.size(); i++) buf[i] = 0x0;
+	for (; i < otherOperand.size(); i++)
+		buf[i] = 0x0;
 
 	return StringRef(buf, i);
 }
 
 static ValueRef doAndV2(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
-	if (!existingValueOptional.present()) return otherOperand;
+	if (!existingValueOptional.present())
+		return otherOperand;
 
 	return doAnd(existingValueOptional, otherOperand, ar);
 }
 
 static ValueRef doOr(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
-	if (!existingValue.size()) return otherOperand;
-	if (!otherOperand.size()) return otherOperand;
+	if (!existingValue.size())
+		return otherOperand;
+	if (!otherOperand.size())
+		return otherOperand;
 
 	uint8_t* buf = new (ar) uint8_t[otherOperand.size()];
 	int i = 0;
 
 	for (i = 0; i < std::min(existingValue.size(), otherOperand.size()); i++)
 		buf[i] = existingValue[i] | otherOperand[i];
-	for (; i < otherOperand.size(); i++) buf[i] = otherOperand[i];
+	for (; i < otherOperand.size(); i++)
+		buf[i] = otherOperand[i];
 
 	return StringRef(buf, i);
 }
 
 static ValueRef doXor(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
-	if (!existingValue.size()) return otherOperand;
-	if (!otherOperand.size()) return otherOperand;
+	if (!existingValue.size())
+		return otherOperand;
+	if (!otherOperand.size())
+		return otherOperand;
 
 	uint8_t* buf = new (ar) uint8_t[otherOperand.size()];
 	int i = 0;
@@ -94,16 +105,20 @@ static ValueRef doXor(const Optional<ValueRef>& existingValueOptional, const Val
 	for (i = 0; i < std::min(existingValue.size(), otherOperand.size()); i++)
 		buf[i] = existingValue[i] ^ otherOperand[i];
 
-	for (; i < otherOperand.size(); i++) buf[i] = otherOperand[i];
+	for (; i < otherOperand.size(); i++)
+		buf[i] = otherOperand[i];
 
 	return StringRef(buf, i);
 }
 
-static ValueRef doAppendIfFits(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand,
+static ValueRef doAppendIfFits(const Optional<ValueRef>& existingValueOptional,
+                               const ValueRef& otherOperand,
                                Arena& ar) {
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
-	if (!existingValue.size()) return otherOperand;
-	if (!otherOperand.size()) return existingValue;
+	if (!existingValue.size())
+		return otherOperand;
+	if (!otherOperand.size())
+		return existingValue;
 	if (existingValue.size() + otherOperand.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT) {
 		TEST(true) // AppendIfFIts resulted in truncation
 		return existingValue;
@@ -112,17 +127,21 @@ static ValueRef doAppendIfFits(const Optional<ValueRef>& existingValueOptional, 
 	uint8_t* buf = new (ar) uint8_t[existingValue.size() + otherOperand.size()];
 	int i, j;
 
-	for (i = 0; i < existingValue.size(); i++) buf[i] = existingValue[i];
+	for (i = 0; i < existingValue.size(); i++)
+		buf[i] = existingValue[i];
 
-	for (j = 0; j < otherOperand.size(); j++) buf[i + j] = otherOperand[j];
+	for (j = 0; j < otherOperand.size(); j++)
+		buf[i + j] = otherOperand[j];
 
 	return StringRef(buf, i + j);
 }
 
 static ValueRef doMax(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
-	if (!existingValue.size()) return otherOperand;
-	if (!otherOperand.size()) return otherOperand;
+	if (!existingValue.size())
+		return otherOperand;
+	if (!otherOperand.size())
+		return otherOperand;
 
 	int i, j;
 
@@ -151,16 +170,19 @@ static ValueRef doMax(const Optional<ValueRef>& existingValueOptional, const Val
 }
 
 static ValueRef doByteMax(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
-	if (!existingValueOptional.present()) return otherOperand;
+	if (!existingValueOptional.present())
+		return otherOperand;
 
 	const ValueRef& existingValue = existingValueOptional.get();
-	if (existingValue > otherOperand) return existingValue;
+	if (existingValue > otherOperand)
+		return existingValue;
 
 	return otherOperand;
 }
 
 static ValueRef doMin(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
-	if (!otherOperand.size()) return otherOperand;
+	if (!otherOperand.size())
+		return otherOperand;
 
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	int i, j;
@@ -197,22 +219,26 @@ static ValueRef doMin(const Optional<ValueRef>& existingValueOptional, const Val
 }
 
 static ValueRef doMinV2(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
-	if (!existingValueOptional.present()) return otherOperand;
+	if (!existingValueOptional.present())
+		return otherOperand;
 
 	return doMin(existingValueOptional, otherOperand, ar);
 }
 
 static ValueRef doByteMin(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
-	if (!existingValueOptional.present()) return otherOperand;
+	if (!existingValueOptional.present())
+		return otherOperand;
 
 	const ValueRef& existingValue = existingValueOptional.get();
-	if (existingValue < otherOperand) return existingValue;
+	if (existingValue < otherOperand)
+		return existingValue;
 
 	return otherOperand;
 }
 
 static Optional<ValueRef> doCompareAndClear(const Optional<ValueRef>& existingValueOptional,
-                                            const ValueRef& otherOperand, Arena& ar) {
+                                            const ValueRef& otherOperand,
+                                            Arena& ar) {
 	if (!existingValueOptional.present() || existingValueOptional.get() == otherOperand) {
 		// Clear the value.
 		return Optional<ValueRef>();
@@ -227,7 +253,8 @@ static KeyRangeRef getVersionstampKeyRange(Arena& arena, const KeyRef& key, cons
 	KeyRef begin(arena, key);
 	KeyRef end(arena, key);
 
-	if (begin.size() < 4) throw client_invalid_operation();
+	if (begin.size() < 4)
+		throw client_invalid_operation();
 
 	int32_t pos;
 	memcpy(&pos, begin.end() - sizeof(int32_t), sizeof(int32_t));
@@ -236,7 +263,8 @@ static KeyRangeRef getVersionstampKeyRange(Arena& arena, const KeyRef& key, cons
 	end = end.substr(0, end.size() - 3);
 	mutateString(end)[end.size() - 1] = 0;
 
-	if (pos < 0 || pos + 10 > begin.size()) throw client_invalid_operation();
+	if (pos < 0 || pos + 10 > begin.size())
+		throw client_invalid_operation();
 
 	memset(mutateString(begin) + pos, 0, 10);
 	memset(mutateString(end) + pos, '\xff', 10);
@@ -253,7 +281,9 @@ static void placeVersionstamp(uint8_t* destination, Version version, uint16_t tr
 	memcpy(destination + sizeof(version), &transactionNumber, sizeof(transactionNumber));
 }
 
-static void transformVersionstampMutation(MutationRef& mutation, StringRef MutationRef::*param, Version version,
+static void transformVersionstampMutation(MutationRef& mutation,
+                                          StringRef MutationRef::*param,
+                                          Version version,
                                           uint16_t transactionNumber) {
 	if ((mutation.*param).size() >= 4) {
 		int32_t pos;

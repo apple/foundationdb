@@ -92,26 +92,30 @@ struct SaveAndKillWorkload : TestWorkload {
 					machines.insert(std::pair<std::string, int>(machineId, 1));
 					ini.SetValue("META", format("%d", j).c_str(), machineIdString);
 					ini.SetValue(
-					    machineIdString, "dcUID",
+					    machineIdString,
+					    "dcUID",
 					    (process->locality.dcId().present()) ? process->locality.dcId().get().printable().c_str() : "");
-					ini.SetValue(machineIdString, "zoneId",
+					ini.SetValue(machineIdString,
+					             "zoneId",
 					             (process->locality.zoneId().present())
 					                 ? process->locality.zoneId().get().printable().c_str()
 					                 : "");
 					ini.SetValue(machineIdString, "mClass", format("%d", process->startingClass.classType()).c_str());
-					ini.SetValue(machineIdString, format("ipAddr%d", process->address.port - 1).c_str(),
+					ini.SetValue(machineIdString,
+					             format("ipAddr%d", process->address.port - 1).c_str(),
 					             process->address.ip.toString().c_str());
 					ini.SetValue(machineIdString, format("%d", process->address.port - 1).c_str(), process->dataFolder);
-					ini.SetValue(machineIdString, format("c%d", process->address.port - 1).c_str(),
-					             process->coordinationFolder);
+					ini.SetValue(
+					    machineIdString, format("c%d", process->address.port - 1).c_str(), process->coordinationFolder);
 					j++;
 				} else {
-					ini.SetValue(machineIdString, format("ipAddr%d", process->address.port - 1).c_str(),
+					ini.SetValue(machineIdString,
+					             format("ipAddr%d", process->address.port - 1).c_str(),
 					             process->address.ip.toString().c_str());
 					int oldValue = machines.find(machineId)->second;
 					ini.SetValue(machineIdString, format("%d", process->address.port - 1).c_str(), process->dataFolder);
-					ini.SetValue(machineIdString, format("c%d", process->address.port - 1).c_str(),
-					             process->coordinationFolder);
+					ini.SetValue(
+					    machineIdString, format("c%d", process->address.port - 1).c_str(), process->coordinationFolder);
 					machines.erase(machines.find(machineId));
 					machines.insert(std::pair<std::string, int>(machineId, oldValue + 1));
 				}

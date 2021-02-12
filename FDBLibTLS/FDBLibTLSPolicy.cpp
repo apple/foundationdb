@@ -55,8 +55,13 @@ FDBLibTLSPolicy::~FDBLibTLSPolicy() {
 	tls_config_free(tls_cfg);
 }
 
-ITLSSession* FDBLibTLSPolicy::create_session(bool is_client, const char* servername, TLSSendCallbackFunc send_func,
-                                             void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uid) {
+ITLSSession* FDBLibTLSPolicy::create_session(bool is_client,
+                                             const char* servername,
+                                             TLSSendCallbackFunc send_func,
+                                             void* send_ctx,
+                                             TLSRecvCallbackFunc recv_func,
+                                             void* recv_ctx,
+                                             void* uid) {
 	if (is_client) {
 		// If verify peers has been set then there is no point specifying a
 		// servername, since this will be ignored - the servername should be
@@ -76,8 +81,14 @@ ITLSSession* FDBLibTLSPolicy::create_session(bool is_client, const char* servern
 
 	session_created = true;
 	try {
-		return new FDBLibTLSSession(Reference<FDBLibTLSPolicy>::addRef(this), is_client, servername, send_func,
-		                            send_ctx, recv_func, recv_ctx, uid);
+		return new FDBLibTLSSession(Reference<FDBLibTLSPolicy>::addRef(this),
+		                            is_client,
+		                            servername,
+		                            send_func,
+		                            send_ctx,
+		                            recv_func,
+		                            recv_ctx,
+		                            uid);
 	} catch (...) {
 		return NULL;
 	}
@@ -87,11 +98,14 @@ static int password_cb(char* buf, int size, int rwflag, void* u) {
 	const char* password = (const char*)u;
 	int plen;
 
-	if (size < 0) return 0;
-	if (u == NULL) return 0;
+	if (size < 0)
+		return 0;
+	if (u == NULL)
+		return 0;
 
 	plen = strlen(password);
-	if (plen > size) return 0;
+	if (plen > size)
+		return 0;
 
 	// Note: buf does not need to be NUL-terminated since
 	// we return an explicit length.
@@ -106,7 +120,8 @@ struct stack_st_X509* FDBLibTLSPolicy::parse_cert_pem(const uint8_t* cert_pem, s
 	BIO* bio = NULL;
 	int errnum;
 
-	if (cert_pem_len > INT_MAX) goto err;
+	if (cert_pem_len > INT_MAX)
+		goto err;
 	if ((bio = BIO_new_mem_buf((void*)cert_pem, cert_pem_len)) == NULL) {
 		TraceEvent(SevError, "FDBLibTLSOutOfMemory");
 		goto err;
@@ -161,9 +176,11 @@ bool FDBLibTLSPolicy::set_ca_data(const uint8_t* ca_data, int ca_len) {
 		return false;
 	}
 
-	if (ca_len < 0) return false;
+	if (ca_len < 0)
+		return false;
 	sk_X509_pop_free(roots, X509_free);
-	if ((roots = parse_cert_pem(ca_data, ca_len)) == NULL) return false;
+	if ((roots = parse_cert_pem(ca_data, ca_len)) == NULL)
+		return false;
 
 	if (tls_config_set_ca_mem(tls_cfg, ca_data, ca_len) == -1) {
 		TraceEvent(SevError, "FDBLibTLSCAError").detail("LibTLSErrorMessage", tls_config_error(tls_cfg));

@@ -41,7 +41,8 @@ struct WatchesWorkload : TestWorkload {
 		extraPerNode = getOption(options, LiteralStringRef("extraPerNode"), 1000);
 		keyBytes = std::max(getOption(options, LiteralStringRef("keyBytes"), 16), 16);
 
-		for (int i = 0; i < nodes + 1; i++) nodeOrder.push_back(i);
+		for (int i = 0; i < nodes + 1; i++)
+			nodeOrder.push_back(i);
 		DeterministicRandom tempRand(1);
 		tempRand.randomShuffle(nodeOrder);
 	}
@@ -51,14 +52,16 @@ struct WatchesWorkload : TestWorkload {
 	virtual Future<Void> setup(Database const& cx) { return _setup(cx, this); }
 
 	virtual Future<Void> start(Database const& cx) {
-		if (clientId == 0) return watchesWorker(cx, this);
+		if (clientId == 0)
+			return watchesWorker(cx, this);
 		return Void();
 	}
 
 	virtual Future<bool> check(Database const& cx) {
 		bool ok = true;
 		for (int i = 0; i < clients.size(); i++)
-			if (clients[i].isError()) ok = false;
+			if (clients[i].isError())
+				ok = false;
 		clients.clear();
 		return ok;
 	}
@@ -85,15 +88,19 @@ struct WatchesWorkload : TestWorkload {
 		vector<Future<Void>> setupActors;
 		for (int i = 0; i < self->nodes; i++)
 			if (i % self->clientCount == self->clientId)
-				setupActors.push_back(self->watcherInit(cx, self->keyForIndex(self->nodeOrder[i]),
-				                                        self->keyForIndex(self->nodeOrder[i + 1]), self->extraPerNode));
+				setupActors.push_back(self->watcherInit(cx,
+				                                        self->keyForIndex(self->nodeOrder[i]),
+				                                        self->keyForIndex(self->nodeOrder[i + 1]),
+				                                        self->extraPerNode));
 
 		wait(waitForAll(setupActors));
 
 		for (int i = 0; i < self->nodes; i++)
 			if (i % self->clientCount == self->clientId)
-				self->clients.push_back(self->watcher(cx, self->keyForIndex(self->nodeOrder[i]),
-				                                      self->keyForIndex(self->nodeOrder[i + 1]), self->extraPerNode));
+				self->clients.push_back(self->watcher(cx,
+				                                      self->keyForIndex(self->nodeOrder[i]),
+				                                      self->keyForIndex(self->nodeOrder[i + 1]),
+				                                      self->extraPerNode));
 
 		return Void();
 	}
@@ -155,7 +162,8 @@ struct WatchesWorkload : TestWorkload {
 						state Future<Void> watchFuture = tr.watch(Reference<Watch>(new Watch(watchKey, watchValue)));
 						wait(tr.commit());
 						wait(watchFuture);
-						if (watchValue.present()) lastValue = watchValue;
+						if (watchValue.present())
+							lastValue = watchValue;
 					}
 					break;
 				} catch (Error& e) {
@@ -187,7 +195,8 @@ struct WatchesWorkload : TestWorkload {
 					}
 					expectedValue = Optional<Value>();
 					if (startValue.present()) {
-						if (isValue) expectedValue = assignedValue;
+						if (isValue)
+							expectedValue = assignedValue;
 					} else
 						expectedValue = assignedValue;
 
@@ -232,7 +241,8 @@ struct WatchesWorkload : TestWorkload {
 						wait(tr2.onError(e));
 					}
 				}
-				if (finished) break;
+				if (finished)
+					break;
 			}
 			self->cycleLatencies.addSample(now() - chainStartTime);
 			++self->cycles;
@@ -240,7 +250,8 @@ struct WatchesWorkload : TestWorkload {
 			if (g_network->isSimulated())
 				wait(delay(deterministicRandom()->random01() < 0.5 ? 0 : deterministicRandom()->random01() * 60));
 
-			if (now() - startTime > self->testDuration) break;
+			if (now() - startTime > self->testDuration)
+				break;
 		}
 		return Void();
 	}

@@ -42,7 +42,8 @@ fdb_error_t waitError(FDBFuture* f) {
 	}
 }
 
-struct RunResult run(struct ResultSet* rs, FDBDatabase* db,
+struct RunResult run(struct ResultSet* rs,
+                     FDBDatabase* db,
                      struct RunResult (*func)(struct ResultSet*, FDBTransaction*)) {
 	FDBTransaction* tr = NULL;
 	fdb_error_t e = fdb_database_create_transaction(db, &tr);
@@ -74,7 +75,9 @@ struct RunResult run(struct ResultSet* rs, FDBDatabase* db,
 	return RES(0, 4100); // internal_error ; we should never get here
 }
 
-int runTest(struct RunResult (*testFxn)(struct ResultSet*, FDBTransaction*), FDBDatabase* db, struct ResultSet* rs,
+int runTest(struct RunResult (*testFxn)(struct ResultSet*, FDBTransaction*),
+            FDBDatabase* db,
+            struct ResultSet* rs,
             const char* kpiName) {
 	int numRuns = 25;
 	int* results = malloc(sizeof(int) * numRuns);
@@ -101,7 +104,9 @@ int runTest(struct RunResult (*testFxn)(struct ResultSet*, FDBTransaction*), FDB
 	return result;
 }
 
-int runTestDb(struct RunResult (*testFxn)(struct ResultSet*, FDBDatabase*), FDBDatabase* db, struct ResultSet* rs,
+int runTestDb(struct RunResult (*testFxn)(struct ResultSet*, FDBDatabase*),
+              FDBDatabase* db,
+              struct ResultSet* rs,
               const char* kpiName) {
 	int numRuns = 25;
 	int* results = malloc(sizeof(int) * numRuns);
@@ -150,7 +155,8 @@ void insertData(struct ResultSet* rs, FDBDatabase* db) {
 	start = 0;
 	while (start < numKeys) {
 		stop = start + 1000;
-		if (stop > numKeys) stop = numKeys;
+		if (stop > numKeys)
+			stop = numKeys;
 		checkError(run(rs, db, &insertRange).e, "inserting data range", rs);
 		start = stop;
 	}
@@ -164,13 +170,15 @@ uint32_t FUTURE_LATENCY_COUNT = 100000;
 const char* FUTURE_LATENCY_KPI = "C future throughput (local client)";
 struct RunResult futureLatency(struct ResultSet* rs, FDBTransaction* tr) {
 	fdb_error_t e = maybeLogError(setRetryLimit(rs, tr, 5), "setting retry limit", rs);
-	if (e) return RES(0, e);
+	if (e)
+		return RES(0, e);
 
 	FDBFuture* f = fdb_transaction_get_read_version(tr);
 	e = waitError(f);
 	fdb_future_destroy(f);
 	maybeLogError(e, "getting initial read version", rs);
-	if (e) return RES(0, e);
+	if (e)
+		return RES(0, e);
 
 	double start = getTime();
 	int i;
@@ -179,7 +187,8 @@ struct RunResult futureLatency(struct ResultSet* rs, FDBTransaction* tr) {
 		e = waitError(f);
 		fdb_future_destroy(f);
 		maybeLogError(e, "getting read version", rs);
-		if (e) return RES(0, e);
+		if (e)
+			return RES(0, e);
 	}
 	double end = getTime();
 
@@ -235,7 +244,8 @@ uint32_t PARALLEL_GET_COUNT = 10000;
 const char* PARALLEL_GET_KPI = "C parallel get throughput (local client)";
 struct RunResult parallelGet(struct ResultSet* rs, FDBTransaction* tr) {
 	fdb_error_t e = maybeLogError(setRetryLimit(rs, tr, 5), "setting retry limit", rs);
-	if (e) return RES(0, e);
+	if (e)
+		return RES(0, e);
 
 	FDBFuture** futures = (FDBFuture**)malloc((sizeof(FDBFuture*)) * PARALLEL_GET_COUNT);
 
@@ -258,8 +268,8 @@ struct RunResult parallelGet(struct ResultSet* rs, FDBTransaction* tr) {
 			return RES(0, e);
 		}
 
-		e = maybeLogError(fdb_future_get_value(futures[i], &present, &outValue, &outValueLength),
-		                  "getting future value", rs);
+		e = maybeLogError(
+		    fdb_future_get_value(futures[i], &present, &outValue, &outValueLength), "getting future value", rs);
 		if (e) {
 			fdb_future_destroy(futures[i]);
 			return RES(0, e);
@@ -278,7 +288,8 @@ uint32_t ALTERNATING_GET_SET_COUNT = 2000;
 const char* ALTERNATING_GET_SET_KPI = "C alternating get set throughput (local client)";
 struct RunResult alternatingGetSet(struct ResultSet* rs, FDBTransaction* tr) {
 	fdb_error_t e = maybeLogError(setRetryLimit(rs, tr, 5), "setting retry limit", rs);
-	if (e) return RES(0, e);
+	if (e)
+		return RES(0, e);
 
 	FDBFuture** futures = (FDBFuture**)malloc((sizeof(FDBFuture*)) * ALTERNATING_GET_SET_COUNT);
 
@@ -302,8 +313,8 @@ struct RunResult alternatingGetSet(struct ResultSet* rs, FDBTransaction* tr) {
 			return RES(0, e);
 		}
 
-		e = maybeLogError(fdb_future_get_value(futures[i], &present, &outValue, &outValueLength),
-		                  "getting future value", rs);
+		e = maybeLogError(
+		    fdb_future_get_value(futures[i], &present, &outValue, &outValueLength), "getting future value", rs);
 		if (e) {
 			fdb_future_destroy(futures[i]);
 			return RES(0, e);
@@ -322,7 +333,8 @@ uint32_t SERIAL_GET_COUNT = 2000;
 const char* SERIAL_GET_KPI = "C serial get throughput (local client)";
 struct RunResult serialGet(struct ResultSet* rs, FDBTransaction* tr) {
 	fdb_error_t e = maybeLogError(setRetryLimit(rs, tr, 5), "setting retry limit", rs);
-	if (e) return RES(0, e);
+	if (e)
+		return RES(0, e);
 
 	int i;
 	uint32_t* keyIndices = (uint32_t*)malloc((sizeof(uint32_t)) * SERIAL_GET_COUNT);
@@ -387,7 +399,8 @@ uint32_t GET_RANGE_COUNT = 100000;
 const char* GET_RANGE_KPI = "C get range throughput (local client)";
 struct RunResult getRange(struct ResultSet* rs, FDBTransaction* tr) {
 	fdb_error_t e = maybeLogError(setRetryLimit(rs, tr, 5), "setting retry limit", rs);
-	if (e) return RES(0, e);
+	if (e)
+		return RES(0, e);
 
 	uint32_t startKey = ((uint64_t)rand()) % (numKeys - GET_RANGE_COUNT - 1);
 
@@ -399,8 +412,21 @@ struct RunResult getRange(struct ResultSet* rs, FDBTransaction* tr) {
 	int totalOut = 0;
 	int iteration = 0;
 
-	FDBFuture* f = fdb_transaction_get_range(tr, keys[startKey], keySize, 1, 0, keys[startKey + GET_RANGE_COUNT],
-	                                         keySize, 1, 0, 0, 0, FDB_STREAMING_MODE_WANT_ALL, ++iteration, 0, 0);
+	FDBFuture* f = fdb_transaction_get_range(tr,
+	                                         keys[startKey],
+	                                         keySize,
+	                                         1,
+	                                         0,
+	                                         keys[startKey + GET_RANGE_COUNT],
+	                                         keySize,
+	                                         1,
+	                                         0,
+	                                         0,
+	                                         0,
+	                                         FDB_STREAMING_MODE_WANT_ALL,
+	                                         ++iteration,
+	                                         0,
+	                                         0);
 
 	while (outMore) {
 		e = maybeLogError(fdb_future_block_until_ready(f), "getting range", rs);
@@ -418,9 +444,21 @@ struct RunResult getRange(struct ResultSet* rs, FDBTransaction* tr) {
 		totalOut += outCount;
 
 		if (outMore) {
-			FDBFuture* f2 = fdb_transaction_get_range(tr, outKv[outCount - 1].key, outKv[outCount - 1].key_length, 1, 1,
-			                                          keys[startKey + GET_RANGE_COUNT], keySize, 1, 0, 0, 0,
-			                                          FDB_STREAMING_MODE_WANT_ALL, ++iteration, 0, 0);
+			FDBFuture* f2 = fdb_transaction_get_range(tr,
+			                                          outKv[outCount - 1].key,
+			                                          outKv[outCount - 1].key_length,
+			                                          1,
+			                                          1,
+			                                          keys[startKey + GET_RANGE_COUNT],
+			                                          keySize,
+			                                          1,
+			                                          0,
+			                                          0,
+			                                          0,
+			                                          FDB_STREAMING_MODE_WANT_ALL,
+			                                          ++iteration,
+			                                          0,
+			                                          0);
 			fdb_future_destroy(f);
 			f = f2;
 		}
@@ -450,7 +488,8 @@ uint32_t GET_KEY_COUNT = 2000;
 const char* GET_KEY_KPI = "C get key throughput (local client)";
 struct RunResult getKey(struct ResultSet* rs, FDBTransaction* tr) {
 	fdb_error_t e = maybeLogError(setRetryLimit(rs, tr, 5), "setting retry limit", rs);
-	if (e) return RES(0, e);
+	if (e)
+		return RES(0, e);
 
 	double start = getTime();
 
@@ -486,7 +525,8 @@ uint32_t GET_SINGLE_KEY_RANGE_COUNT = 2000;
 const char* GET_SINGLE_KEY_RANGE_KPI = "C get_single_key_range throughput (local client)";
 struct RunResult getSingleKeyRange(struct ResultSet* rs, FDBTransaction* tr) {
 	fdb_error_t e = maybeLogError(setRetryLimit(rs, tr, 5), "setting retry limit", rs);
-	if (e) return RES(0, e);
+	if (e)
+		return RES(0, e);
 
 	double start = getTime();
 
@@ -497,8 +537,8 @@ struct RunResult getSingleKeyRange(struct ResultSet* rs, FDBTransaction* tr) {
 	int i;
 	for (i = 0; i < GET_SINGLE_KEY_RANGE_COUNT; i++) {
 		int key = ((uint64_t)rand()) % (numKeys - 1);
-		FDBFuture* f = fdb_transaction_get_range(tr, keys[key], keySize, 1, 0, keys[key + 1], keySize, 1, 0, 2, 0,
-		                                         FDB_STREAMING_MODE_EXACT, 1, 0, 0);
+		FDBFuture* f = fdb_transaction_get_range(
+		    tr, keys[key], keySize, 1, 0, keys[key + 1], keySize, 1, 0, 2, 0, FDB_STREAMING_MODE_EXACT, 1, 0, 0);
 
 		e = maybeLogError(fdb_future_block_until_ready(f), "waiting for single key range", rs);
 		if (e) {
@@ -506,8 +546,8 @@ struct RunResult getSingleKeyRange(struct ResultSet* rs, FDBTransaction* tr) {
 			return RES(0, e);
 		}
 
-		e = maybeLogError(fdb_future_get_keyvalue_array(f, &outKv, &outCount, &outMore),
-		                  "reading single key range array", rs);
+		e = maybeLogError(
+		    fdb_future_get_keyvalue_array(f, &outKv, &outCount, &outMore), "reading single key range array", rs);
 		if (e) {
 			fdb_future_destroy(f);
 			return RES(0, e);
@@ -546,7 +586,8 @@ struct RunResult writeTransaction(struct ResultSet* rs, FDBDatabase* db) {
 	int i;
 	for (i = 0; i < WRITE_TRANSACTION_COUNT; i++) {
 		struct RunResult res = run(rs, db, &singleKey);
-		if (res.e) return res;
+		if (res.e)
+			return res;
 	}
 
 	double end = getTime();

@@ -50,7 +50,8 @@ VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAlig
 			indexed.emplace_back(i, sizesAlignments[i]);
 		}
 	}
-	std::stable_sort(indexed.begin(), indexed.end(),
+	std::stable_sort(indexed.begin(),
+	                 indexed.end(),
 	                 [](const std::pair<unsigned, unsigned>& lhs, const std::pair<unsigned, unsigned>& rhs) {
 		                 return lhs.second > rhs.second;
 	                 });

@@ -35,7 +35,8 @@ public:
 	  : sampleSize(sampleSize), populationSize(0), sorted(true), _min(T()), _max(T()) {}
 
 	ContinuousSample<T>& addSample(T sample) {
-		if (!populationSize) _min = _max = sample;
+		if (!populationSize)
+			_min = _max = sample;
 		populationSize++;
 		sorted = false;
 
@@ -51,16 +52,19 @@ public:
 	}
 
 	double mean() const {
-		if (!samples.size()) return 0;
+		if (!samples.size())
+			return 0;
 		T sum = 0;
-		for (int c = 0; c < samples.size(); c++) sum += samples[c];
+		for (int c = 0; c < samples.size(); c++)
+			sum += samples[c];
 		return (double)sum / samples.size();
 	}
 
 	T median() { return percentile(0.5); }
 
 	T percentile(double percentile) {
-		if (!samples.size() || percentile < 0.0 || percentile > 1.0) return T();
+		if (!samples.size() || percentile < 0.0 || percentile > 1.0)
+			return T();
 		sort();
 		int idx = std::floor((samples.size() - 1) * percentile);
 		return samples[idx];
@@ -86,7 +90,8 @@ private:
 	T _min, _max;
 
 	void sort() {
-		if (!sorted && samples.size() > 1) std::sort(samples.begin(), samples.end());
+		if (!sorted && samples.size() > 1)
+			std::sort(samples.begin(), samples.end());
 		sorted = true;
 	}
 };

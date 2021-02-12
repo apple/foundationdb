@@ -73,7 +73,8 @@ struct SyncFileForSim : ReferenceCounted<SyncFileForSim> {
 	virtual Future<Void> write(void const* data, int length, int64_t offset) {
 		ASSERT(isOpen());
 		fseek(f, offset, SEEK_SET);
-		if (fwrite(data, 1, length, f) != length) throw io_error();
+		if (fwrite(data, 1, length, f) != length)
+			throw io_error();
 		return Void();
 	}
 
@@ -106,7 +107,8 @@ struct Profiler {
 		OutputBuffer() { output.reserve(100000); }
 		void clear() { output.clear(); }
 		void push(void* ptr) { // async signal safe!
-			if (output.size() < output.capacity()) output.push_back(ptr);
+			if (output.size() < output.capacity())
+				output.push_back(ptr);
 		}
 		Future<Void> writeTo(Reference<SyncFileForSim> file, int64_t& offset) {
 			int64_t offs = offset;
@@ -147,7 +149,8 @@ struct Profiler {
 			double t = timer();
 			output_buffer->push(*(void**)&t);
 			size_t n = platform::raw_backtrace(addresses, 256);
-			for (int i = 0; i < n; i++) output_buffer->push(addresses[i]);
+			for (int i = 0; i < n; i++)
+				output_buffer->push(addresses[i]);
 			output_buffer->push((void*)-1LL);
 		}
 	}
@@ -193,7 +196,8 @@ struct Profiler {
 		self->environmentInfoWriter << int64_t(0x101) << int64_t(period * 1000);
 		dl_iterate_phdr(phdr_callback, self);
 		self->environmentInfoWriter << int64_t(0);
-		while (self->environmentInfoWriter.getLength() % sizeof(void*)) self->environmentInfoWriter << uint8_t(0);
+		while (self->environmentInfoWriter.getLength() % sizeof(void*))
+			self->environmentInfoWriter << uint8_t(0);
 
 		self->output_buffer = new OutputBuffer;
 		state OutputBuffer* otherBuffer = new OutputBuffer;
@@ -256,11 +260,13 @@ Profiler* Profiler::active_profiler = 0;
 
 std::string findAndReplace(std::string const& fn, std::string const& symbol, std::string const& value) {
 	auto i = fn.find(symbol);
-	if (i == std::string::npos) return fn;
+	if (i == std::string::npos)
+		return fn;
 	return fn.substr(0, i) + value + fn.substr(i + symbol.size());
 }
 
-void startProfiling(INetwork* network, Optional<int> maybePeriod /*= {}*/,
+void startProfiling(INetwork* network,
+                    Optional<int> maybePeriod /*= {}*/,
                     Optional<StringRef> maybeOutputFile /*= {}*/) {
 	int period;
 	if (maybePeriod.present()) {
@@ -276,13 +282,16 @@ void startProfiling(INetwork* network, Optional<int> maybePeriod /*= {}*/,
 		const char* outfn = getenv("FLOW_PROFILER_OUTPUT");
 		outputFile = (outfn ? outfn : "profile.bin");
 	}
-	outputFile =
-	    findAndReplace(findAndReplace(findAndReplace(outputFile, "%ADDRESS%",
-	                                                 findAndReplace(network->getLocalAddress().toString(), ":", ".")),
-	                                  "%PID%", format("%d", getpid())),
-	                   "%TID%", format("%llx", (long long)gettid()));
+	outputFile = findAndReplace(
+	    findAndReplace(
+	        findAndReplace(outputFile, "%ADDRESS%", findAndReplace(network->getLocalAddress().toString(), ":", ".")),
+	        "%PID%",
+	        format("%d", getpid())),
+	    "%TID%",
+	    format("%llx", (long long)gettid()));
 
-	if (!Profiler::active_profiler) Profiler::active_profiler = new Profiler(period, outputFile, network);
+	if (!Profiler::active_profiler)
+		Profiler::active_profiler = new Profiler(period, outputFile, network);
 }
 
 void stopProfiling() {

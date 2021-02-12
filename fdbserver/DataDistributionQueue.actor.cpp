@@ -263,15 +263,18 @@ struct Busyness {
 	}
 	void addWork(int prio, int work) {
 		ASSERT(prio > 0 && prio < 1000);
-		for (int i = 0; i <= (prio / 100); i++) ledger[i] += work;
+		for (int i = 0; i <= (prio / 100); i++)
+			ledger[i] += work;
 	}
 	void removeWork(int prio, int work) { addWork(prio, -work); }
 	std::string toString() {
 		std::string result;
 		for (int i = 1; i < ledger.size();) {
 			int j = i + 1;
-			while (j < ledger.size() && ledger[i] == ledger[j]) j++;
-			if (i != 1) result += ", ";
+			while (j < ledger.size() && ledger[i] == ledger[j])
+				j++;
+			if (i != 1)
+				result += ", ";
 			result += i + 1 == j ? format("%03d", i * 100) : format("%03d/%03d", i * 100, (j - 1) * 100);
 			result += format("=%1.02f", (float)ledger[i] / WORK_FULL_UTILIZATION);
 			i = j;
@@ -293,7 +296,10 @@ int getWorkFactor(RelocateData const& relocation, int singleRegionTeamSize) {
 
 // Data movement's resource control: Do not overload source servers used for the RelocateData
 // return true if servers are not too busy to launch the relocation
-bool canLaunch(RelocateData& relocation, int teamSize, int singleRegionTeamSize, std::map<UID, Busyness>& busymap,
+bool canLaunch(RelocateData& relocation,
+               int teamSize,
+               int singleRegionTeamSize,
+               std::map<UID, Busyness>& busymap,
                std::vector<RelocateData> cancellableRelocations) {
 	// assert this has not already been launched
 	ASSERT(relocation.workFactor == 0);
@@ -319,7 +325,8 @@ bool canLaunch(RelocateData& relocation, int teamSize, int singleRegionTeamSize,
 		// Use this modified busyness to check if this relocation could be launched
 		if (busyCopy.canLaunch(relocation.priority, workFactor)) {
 			--neededServers;
-			if (neededServers == 0) return true;
+			if (neededServers == 0)
+				return true;
 		}
 	}
 	return false;
@@ -423,10 +430,17 @@ struct DDQueueData {
 		priority_relocations[priority]--;
 	}
 
-	DDQueueData(UID mid, MoveKeysLock lock, Database cx, std::vector<TeamCollectionInterface> teamCollections,
-	            Reference<ShardsAffectedByTeamFailure> sABTF, PromiseStream<Promise<int64_t>> getAverageShardBytes,
-	            int teamSize, int singleRegionTeamSize, PromiseStream<RelocateShard> output,
-	            FutureStream<RelocateShard> input, PromiseStream<GetMetricsRequest> getShardMetrics,
+	DDQueueData(UID mid,
+	            MoveKeysLock lock,
+	            Database cx,
+	            std::vector<TeamCollectionInterface> teamCollections,
+	            Reference<ShardsAffectedByTeamFailure> sABTF,
+	            PromiseStream<Promise<int64_t>> getAverageShardBytes,
+	            int teamSize,
+	            int singleRegionTeamSize,
+	            PromiseStream<RelocateShard> output,
+	            FutureStream<RelocateShard> input,
+	            PromiseStream<GetMetricsRequest> getShardMetrics,
 	            double* lastLimited)
 	  : activeRelocations(0), queuedRelocations(0), bytesWritten(0), teamCollections(teamCollections),
 	    shardsAffectedByTeamFailure(sABTF), getAverageShardBytes(getAverageShardBytes), distributorId(mid), lock(lock),
@@ -554,7 +568,9 @@ struct DDQueueData {
 		}
 	}
 
-	ACTOR Future<Void> getSourceServersForRange(Database cx, RelocateData input, PromiseStream<RelocateData> output,
+	ACTOR Future<Void> getSourceServersForRange(Database cx,
+	                                            RelocateData input,
+	                                            PromiseStream<RelocateData> output,
 	                                            Reference<FlowLock> fetchLock) {
 		state std::set<UID> servers;
 		state Transaction tr(cx);
@@ -573,9 +589,10 @@ struct DDQueueData {
 			servers.clear();
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			try {
-				Standalone<RangeResultRef> keyServersEntries = wait(tr.getRange(
-				    lastLessOrEqual(keyServersKey(input.keys.begin)),
-				    firstGreaterOrEqual(keyServersKey(input.keys.end)), SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS));
+				Standalone<RangeResultRef> keyServersEntries =
+				    wait(tr.getRange(lastLessOrEqual(keyServersKey(input.keys.begin)),
+				                     firstGreaterOrEqual(keyServersKey(input.keys.end)),
+				                     SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS));
 
 				if (keyServersEntries.size() < SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS) {
 					for (int shard = 0; shard < keyServersEntries.size(); shard++) {
@@ -668,7 +685,8 @@ struct DDQueueData {
 					fetchingSourcesQueue.erase(fetchingSourcesItr);
 				else if (foundActiveRelocation) {
 					firstQueue->erase(firstRelocationItr);
-					for (int i = 1; i < rrs.src.size(); i++) queue[rrs.src[i]].erase(rrs);
+					for (int i = 1; i < rrs.src.size(); i++)
+						queue[rrs.src[i]].erase(rrs);
 				}
 			}
 
@@ -781,7 +799,8 @@ struct DDQueueData {
 		std::set<RelocateData, std::greater<RelocateData>> combined;
 		auto f = queueMap.intersectingRanges(keys);
 		for (auto it = f.begin(); it != f.end(); ++it) {
-			if (it->value().src.size() && queue[it->value().src[0]].count(it->value())) combined.insert(it->value());
+			if (it->value().src.size() && queue[it->value().src[0]].count(it->value()))
+				combined.insert(it->value());
 		}
 		launchQueuedWork(combined);
 	}
@@ -972,8 +991,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd)
 						inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
 					auto req = GetTeamRequest(rd.wantsNewServers,
-					                          rd.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, true,
-					                          false, inflightPenalty);
+					                          rd.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,
+					                          true,
+					                          false,
+					                          inflightPenalty);
 					req.src = rd.src;
 					req.completeSources = rd.completeSources;
 					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> bestTeam =
@@ -1084,10 +1105,16 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd)
 			state Error error = success();
 			state Promise<Void> dataMovementComplete;
 			// Move keys from source to destination by chaning the serverKeyList and keyServerList system keys
-			state Future<Void> doMoveKeys =
-			    moveKeys(self->cx, rd.keys, destIds, healthyIds, self->lock, dataMovementComplete,
-			             &self->startMoveKeysParallelismLock, &self->finishMoveKeysParallelismLock,
-			             self->teamCollections.size() > 1, relocateShardInterval.pairID);
+			state Future<Void> doMoveKeys = moveKeys(self->cx,
+			                                         rd.keys,
+			                                         destIds,
+			                                         healthyIds,
+			                                         self->lock,
+			                                         dataMovementComplete,
+			                                         &self->startMoveKeysParallelismLock,
+			                                         &self->finishMoveKeysParallelismLock,
+			                                         self->teamCollections.size() > 1,
+			                                         relocateShardInterval.pairID);
 			state Future<Void> pollHealth =
 			    signalledTransferComplete ? Never()
 			                              : delay(SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch);
@@ -1100,10 +1127,16 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd)
 								healthyIds.insert(healthyIds.end(), extraIds.begin(), extraIds.end());
 								extraIds.clear();
 								ASSERT(totalIds == destIds.size()); // Sanity check the destIDs before we move keys
-								doMoveKeys =
-								    moveKeys(self->cx, rd.keys, destIds, healthyIds, self->lock, Promise<Void>(),
-								             &self->startMoveKeysParallelismLock, &self->finishMoveKeysParallelismLock,
-								             self->teamCollections.size() > 1, relocateShardInterval.pairID);
+								doMoveKeys = moveKeys(self->cx,
+								                      rd.keys,
+								                      destIds,
+								                      healthyIds,
+								                      self->lock,
+								                      Promise<Void>(),
+								                      &self->startMoveKeysParallelismLock,
+								                      &self->finishMoveKeysParallelismLock,
+								                      self->teamCollections.size() > 1,
+								                      relocateShardInterval.pairID);
 							} else {
 								self->fetchKeysComplete.insert(rd);
 								break;
@@ -1192,7 +1225,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd)
 			    .detail("Dest", describe(destIds))
 			    .detail("Src", describe(rd.src));
 		}
-		if (!signalledTransferComplete) dataTransferComplete.send(rd);
+		if (!signalledTransferComplete)
+			dataTransferComplete.send(rd);
 
 		relocationComplete.send(rd);
 
@@ -1206,8 +1240,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd)
 }
 
 // Move a random shard of sourceTeam's to destTeam if sourceTeam has much more data than destTeam
-ACTOR Future<bool> rebalanceTeams(DDQueueData* self, int priority, Reference<IDataDistributionTeam> sourceTeam,
-                                  Reference<IDataDistributionTeam> destTeam, bool primary, TraceEvent* traceEvent) {
+ACTOR Future<bool> rebalanceTeams(DDQueueData* self,
+                                  int priority,
+                                  Reference<IDataDistributionTeam> sourceTeam,
+                                  Reference<IDataDistributionTeam> destTeam,
+                                  bool primary,
+                                  TraceEvent* traceEvent) {
 	if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
 		traceEvent->detail("CancelingDueToSimulationSpeedup", true);
 		return false;
@@ -1222,7 +1260,8 @@ ACTOR Future<bool> rebalanceTeams(DDQueueData* self, int priority, Reference<IDa
 
 	traceEvent->detail("AverageShardBytes", averageShardBytes).detail("ShardsInSource", shards.size());
 
-	if (!shards.size()) return false;
+	if (!shards.size())
+		return false;
 
 	state KeyRange moveShard;
 	state StorageMetrics metrics;
@@ -1325,15 +1364,18 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 					    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
 					        GetTeamRequest(true, true, false, true))));
 
-					traceEvent.detail("SourceTeam", printable(loadedTeam.first.map<std::string>(
-					                                    [](const Reference<IDataDistributionTeam>& team) {
-						                                    return team->getDesc();
-					                                    })));
+					traceEvent.detail(
+					    "SourceTeam",
+					    printable(loadedTeam.first.map<std::string>(
+					        [](const Reference<IDataDistributionTeam>& team) { return team->getDesc(); })));
 
 					if (loadedTeam.first.present()) {
-						bool _moved = wait(rebalanceTeams(self, SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM,
-						                                  loadedTeam.first.get(), randomTeam.first.get(),
-						                                  teamCollectionIndex == 0, &traceEvent));
+						bool _moved = wait(rebalanceTeams(self,
+						                                  SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM,
+						                                  loadedTeam.first.get(),
+						                                  randomTeam.first.get(),
+						                                  teamCollectionIndex == 0,
+						                                  &traceEvent));
 						moved = _moved;
 						if (moved) {
 							resetCount = 0;
@@ -1427,13 +1469,17 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 					        GetTeamRequest(true, true, true, false))));
 
 					traceEvent.detail(
-					    "DestTeam", printable(unloadedTeam.first.map<std::string>(
-					                    [](const Reference<IDataDistributionTeam>& team) { return team->getDesc(); })));
+					    "DestTeam",
+					    printable(unloadedTeam.first.map<std::string>(
+					        [](const Reference<IDataDistributionTeam>& team) { return team->getDesc(); })));
 
 					if (unloadedTeam.first.present()) {
-						bool _moved = wait(rebalanceTeams(self, SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,
-						                                  randomTeam.first.get(), unloadedTeam.first.get(),
-						                                  teamCollectionIndex == 0, &traceEvent));
+						bool _moved = wait(rebalanceTeams(self,
+						                                  SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,
+						                                  randomTeam.first.get(),
+						                                  unloadedTeam.first.get(),
+						                                  teamCollectionIndex == 0,
+						                                  &traceEvent));
 						moved = _moved;
 						if (moved) {
 							resetCount = 0;
@@ -1471,17 +1517,31 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 	}
 }
 
-ACTOR Future<Void> dataDistributionQueue(Database cx, PromiseStream<RelocateShard> output,
+ACTOR Future<Void> dataDistributionQueue(Database cx,
+                                         PromiseStream<RelocateShard> output,
                                          FutureStream<RelocateShard> input,
                                          PromiseStream<GetMetricsRequest> getShardMetrics,
                                          Reference<AsyncVar<bool>> processingUnhealthy,
                                          std::vector<TeamCollectionInterface> teamCollections,
                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-                                         MoveKeysLock lock, PromiseStream<Promise<int64_t>> getAverageShardBytes,
-                                         UID distributorId, int teamSize, int singleRegionTeamSize,
+                                         MoveKeysLock lock,
+                                         PromiseStream<Promise<int64_t>> getAverageShardBytes,
+                                         UID distributorId,
+                                         int teamSize,
+                                         int singleRegionTeamSize,
                                          double* lastLimited) {
-	state DDQueueData self(distributorId, lock, cx, teamCollections, shardsAffectedByTeamFailure, getAverageShardBytes,
-	                       teamSize, singleRegionTeamSize, output, input, getShardMetrics, lastLimited);
+	state DDQueueData self(distributorId,
+	                       lock,
+	                       cx,
+	                       teamCollections,
+	                       shardsAffectedByTeamFailure,
+	                       getAverageShardBytes,
+	                       teamSize,
+	                       singleRegionTeamSize,
+	                       output,
+	                       input,
+	                       getShardMetrics,
+	                       lastLimited);
 	state std::set<UID> serversToLaunchFrom;
 	state KeyRange keysToLaunchFrom;
 	state RelocateData launchData;

@@ -36,8 +36,10 @@ struct SystemMonitorMachineState {
 
 	SystemMonitorMachineState() : monitorStartTime(0) {}
 	explicit SystemMonitorMachineState(const IPAddress& ip) : ip(ip), monitorStartTime(0) {}
-	SystemMonitorMachineState(std::string folder, Optional<Standalone<StringRef>> dcId,
-	                          Optional<Standalone<StringRef>> zoneId, Optional<Standalone<StringRef>> machineId,
+	SystemMonitorMachineState(std::string folder,
+	                          Optional<Standalone<StringRef>> dcId,
+	                          Optional<Standalone<StringRef>> zoneId,
+	                          Optional<Standalone<StringRef>> machineId,
 	                          const IPAddress& ip)
 	  : folder(folder), dcId(dcId), zoneId(zoneId), machineId(machineId), ip(ip), monitorStartTime(0) {}
 };

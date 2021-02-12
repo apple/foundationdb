@@ -47,7 +47,8 @@ local uLong adler32_combine_ OF((uLong adler1, uLong adler2, z_off64_t len2));
 #define MOD28(a)                                                                                                       \
 	do {                                                                                                               \
 		CHOP(a);                                                                                                       \
-		if (a >= BASE) a -= BASE;                                                                                      \
+		if (a >= BASE)                                                                                                 \
+			a -= BASE;                                                                                                 \
 	} while (0)
 #define MOD(a)                                                                                                         \
 	do {                                                                                                               \
@@ -65,7 +66,8 @@ local uLong adler32_combine_ OF((uLong adler1, uLong adler2, z_off64_t len2));
 		tmp = a >> 16;                                                                                                 \
 		a &= 0xffffL;                                                                                                  \
 		a += (tmp << 4) - tmp;                                                                                         \
-		if (a >= BASE) a -= BASE;                                                                                      \
+		if (a >= BASE)                                                                                                 \
+			a -= BASE;                                                                                                 \
 	} while (0)
 #else
 #define MOD(a) a %= BASE
@@ -88,14 +90,17 @@ uInt len;
 	/* in case user likes doing a byte at a time, keep it fast */
 	if (len == 1) {
 		adler += buf[0];
-		if (adler >= BASE) adler -= BASE;
+		if (adler >= BASE)
+			adler -= BASE;
 		sum2 += adler;
-		if (sum2 >= BASE) sum2 -= BASE;
+		if (sum2 >= BASE)
+			sum2 -= BASE;
 		return adler | (sum2 << 16);
 	}
 
 	/* initial Adler-32 value (deferred check for len == 1 speed) */
-	if (buf == Z_NULL) return 1L;
+	if (buf == Z_NULL)
+		return 1L;
 
 	/* in case short lengths are provided, keep it somewhat fast */
 	if (len < 16) {
@@ -103,7 +108,8 @@ uInt len;
 			adler += *buf++;
 			sum2 += adler;
 		}
-		if (adler >= BASE) adler -= BASE;
+		if (adler >= BASE)
+			adler -= BASE;
 		MOD28(sum2); /* only added so many BASE's */
 		return adler | (sum2 << 16);
 	}
@@ -149,7 +155,8 @@ z_off64_t len2;
 	unsigned rem;
 
 	/* for negative len, return invalid adler32 as a clue for debugging */
-	if (len2 < 0) return 0xffffffffUL;
+	if (len2 < 0)
+		return 0xffffffffUL;
 
 	/* the derivation of this formula is left as an exercise for the reader */
 	MOD63(len2); /* assumes len2 >= 0 */
@@ -159,10 +166,14 @@ z_off64_t len2;
 	MOD(sum2);
 	sum1 += (adler2 & 0xffff) + BASE - 1;
 	sum2 += ((adler1 >> 16) & 0xffff) + ((adler2 >> 16) & 0xffff) + BASE - rem;
-	if (sum1 >= BASE) sum1 -= BASE;
-	if (sum1 >= BASE) sum1 -= BASE;
-	if (sum2 >= (BASE << 1)) sum2 -= (BASE << 1);
-	if (sum2 >= BASE) sum2 -= BASE;
+	if (sum1 >= BASE)
+		sum1 -= BASE;
+	if (sum1 >= BASE)
+		sum1 -= BASE;
+	if (sum2 >= (BASE << 1))
+		sum2 -= (BASE << 1);
+	if (sum2 >= BASE)
+		sum2 -= BASE;
 	return sum1 | (sum2 << 16);
 }
 

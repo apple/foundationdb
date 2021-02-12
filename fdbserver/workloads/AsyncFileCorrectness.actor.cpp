@@ -77,13 +77,16 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 		numSimultaneousOperations = getOption(options, LiteralStringRef("numSimultaneousOperations"), 10);
 		targetFileSize = getOption(options, LiteralStringRef("targetFileSize"), (uint64_t)163840);
 
-		if (unbufferedIO) maxOperationSize = std::max(_PAGE_SIZE, maxOperationSize);
+		if (unbufferedIO)
+			maxOperationSize = std::max(_PAGE_SIZE, maxOperationSize);
 
 		if (maxOperationSize * numSimultaneousOperations > targetFileSize * 0.25) {
 			targetFileSize *= (int)ceil((maxOperationSize * numSimultaneousOperations * 4.0) / targetFileSize);
 			printf("Target file size is insufficient to support %d simultaneous operations of size %d; changing to "
 			       "%" PRId64 "\n",
-			       numSimultaneousOperations, maxOperationSize, targetFileSize);
+			       numSimultaneousOperations,
+			       maxOperationSize,
+			       targetFileSize);
 		}
 	}
 
@@ -92,7 +95,8 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 	virtual std::string description() { return "AsyncFileCorrectness"; }
 
 	Future<Void> setup(Database const& cx) {
-		if (enabled) return _setup(this);
+		if (enabled)
+			return _setup(this);
 
 		return Void();
 	}
@@ -132,7 +136,8 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 	}
 
 	Future<Void> start(Database const& cx) {
-		if (enabled) return _start(this);
+		if (enabled)
+			return _start(this);
 
 		return Void();
 	}
@@ -183,18 +188,20 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 					else if (isValid != currentValid || i == length - 1) {
 						// If we know what data should be in a particular range, then compare the result with what we
 						// know
-						if (isValid && memcmp(&self->fileValidityMask[info.offset + start], &info.data->buffer[start],
+						if (isValid && memcmp(&self->fileValidityMask[info.offset + start],
+						                      &info.data->buffer[start],
 						                      i - start)) {
 							printf("Read returned incorrect results at %" PRIu64 " of length %" PRIu64 "\n",
-							       info.offset, info.length);
+							       info.offset,
+							       info.length);
 
 							self->success = false;
 							return Void();
 						}
 						// Otherwise, skip the comparison and just update what we know
 						else if (!isValid) {
-							memcpy(&self->memoryFile->buffer[info.offset + start], &info.data->buffer[start],
-							       i - start);
+							memcpy(
+							    &self->memoryFile->buffer[info.offset + start], &info.data->buffer[start], i - start);
 							memset(&self->fileValidityMask[info.offset + start], 0xFF, i - start);
 						}
 
@@ -206,9 +213,11 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 
 				// Decrement the read count for each byte that was read
 				int lockEnd = std::min(info.offset + info.length, (uint64_t)self->fileLock.size());
-				if (lockEnd > self->fileSize) lockEnd = self->fileLock.size();
+				if (lockEnd > self->fileSize)
+					lockEnd = self->fileLock.size();
 
-				for (int i = info.offset; i < lockEnd; i++) self->fileLock[i]--;
+				for (int i = info.offset; i < lockEnd; i++)
+					self->fileLock[i]--;
 			}
 
 			// If it is a write, clear the write locks
@@ -221,7 +230,8 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 				OperationInfo newOperation = self->generateOperation(info.index);
 
 				// If we need to flush existing operations, postpone this operation
-				if (newOperation.flushOperations) postponedOperations.push_back(newOperation);
+				if (newOperation.flushOperations)
+					postponedOperations.push_back(newOperation);
 				// Otherwise, add it to our operations queue
 				else
 					self->operations[info.index] = self->processOperation(self, newOperation);
@@ -270,14 +280,17 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 				// Reads should not exceed the extent of written data
 				if (info.operation == READ) {
 					maxOffset = fileSize - 1;
-					if (maxOffset < 0) info.operation = WRITE;
+					if (maxOffset < 0)
+						info.operation = WRITE;
 					// Only allow reads once the file has gotten large enough (to prevent blocking on locks)
-					if (maxOffset < targetFileSize / 2) info.operation = WRITE;
+					if (maxOffset < targetFileSize / 2)
+						info.operation = WRITE;
 				}
 
 				// Writes can be up to the target file size or the current file size (the current file size could be
 				// larger than the target as a result of a truncate)
-				if (info.operation == WRITE) maxOffset = std::max(fileSize, targetFileSize) - 1;
+				if (info.operation == WRITE)
+					maxOffset = std::max(fileSize, targetFileSize) - 1;
 
 				// Choose a random offset and length, retrying if that section is already locked
 				do {
@@ -299,9 +312,11 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 					// If the read extends past the end of the file, then we have to lock all bytes beyond the end of
 					// the file This is so that we can accurately determine if the read count is correct
 					int lockEnd = std::min(info.offset + info.length, (uint64_t)fileLock.size());
-					if (lockEnd > fileSize) lockEnd = fileLock.size();
+					if (lockEnd > fileSize)
+						lockEnd = fileLock.size();
 
-					for (int i = info.offset; i < lockEnd; i++) fileLock[i]++;
+					for (int i = info.offset; i < lockEnd; i++)
+						fileLock[i]++;
 				}
 
 				// If the operation is a write, set the write lock for each byte
@@ -330,10 +345,12 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 	}
 
 	// Checks if a file is already locked for a given set of bytes.  The file is locked if it is being written
-	// (fileLock[i] = 0xFFFFFFFF) or if we are trying to perform a write and the read count is nonzero (fileLock[i] != 0)
+	// (fileLock[i] = 0xFFFFFFFF) or if we are trying to perform a write and the read count is nonzero (fileLock[i] !=
+	// 0)
 	bool checkFileLocked(int operation, int offset, int length) {
 		for (int i = offset; i < offset + length && i < fileLock.size(); i++)
-			if (fileLock[i] == 0xFFFFFFFF || (fileLock[i] != 0 && operation == WRITE)) return true;
+			if (fileLock[i] == 0xFFFFFFFF || (fileLock[i] != 0 && operation == WRITE))
+				return true;
 
 		return false;
 	}
@@ -358,7 +375,8 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 			              holdWhile(info, self->fileHandle->file->read(info.data->buffer, info.length, info.offset)))));
 
 			if (numRead != std::min(info.length, self->fileSize - info.offset)) {
-				printf("Read reported incorrect number of bytes at %" PRIu64 " of length %" PRIu64 "\n", info.offset,
+				printf("Read reported incorrect number of bytes at %" PRIu64 " of length %" PRIu64 "\n",
+				       info.offset,
 				       info.length);
 				self->success = false;
 			}
@@ -385,7 +403,8 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 			int64_t fileSize = wait(self->fileHandle->file->size());
 			int64_t fileSizeChange = fileSize - self->fileSize;
 			if (fileSizeChange >= _PAGE_SIZE) {
-				printf("Reopened file increased in size by %" PRId64 " bytes (at most %d allowed)\n", fileSizeChange,
+				printf("Reopened file increased in size by %" PRId64 " bytes (at most %d allowed)\n",
+				       fileSizeChange,
 				       _PAGE_SIZE - 1);
 				self->success = false;
 			} else if (fileSizeChange < 0) {

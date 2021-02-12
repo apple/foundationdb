@@ -319,7 +319,9 @@ unsigned int eio_nthreads(void); /* number of worker threads in use currently */
 eio_req* eio_wd_open(const char* path, int pri, eio_cb cb, void* data); /* result=wd */
 eio_req* eio_wd_close(eio_wd wd, int pri, eio_cb cb, void* data);
 eio_req* eio_nop(int pri, eio_cb cb, void* data); /* does nothing except go through the whole process */
-eio_req* eio_busy(eio_tstamp delay, int pri, eio_cb cb,
+eio_req* eio_busy(eio_tstamp delay,
+                  int pri,
+                  eio_cb cb,
                   void* data); /* ties a thread for this long, simulating busyness */
 eio_req* eio_sync(int pri, eio_cb cb, void* data);
 eio_req* eio_fsync(int fd, int pri, eio_cb cb, void* data);
@@ -349,7 +351,10 @@ eio_req* eio_truncate(const char* path, off_t offset, int pri, eio_cb cb, void* 
 eio_req* eio_chown(const char* path, eio_uid_t uid, eio_gid_t gid, int pri, eio_cb cb, void* data);
 eio_req* eio_chmod(const char* path, mode_t mode, int pri, eio_cb cb, void* data);
 eio_req* eio_mkdir(const char* path, mode_t mode, int pri, eio_cb cb, void* data);
-eio_req* eio_readdir(const char* path, int flags, int pri, eio_cb cb,
+eio_req* eio_readdir(const char* path,
+                     int flags,
+                     int pri,
+                     eio_cb cb,
                      void* data); /* result=ptr2 allocated dynamically */
 eio_req* eio_rmdir(const char* path, int pri, eio_cb cb, void* data);
 eio_req* eio_unlink(const char* path, int pri, eio_cb cb, void* data);

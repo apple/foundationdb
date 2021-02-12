@@ -870,7 +870,8 @@ void parentWatcher(void* parentHandle) {
 	HANDLE parent = (HANDLE)parentHandle;
 	int signal = WaitForSingleObject(parent, INFINITE);
 	CloseHandle(parentHandle);
-	if (signal == WAIT_OBJECT_0) criticalError(FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited");
+	if (signal == WAIT_OBJECT_0)
+		criticalError(FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited");
 	TraceEvent(SevError, "ParentProcessWaitFailed").detail("RetCode", signal).GetLastError();
 }
 
@@ -946,7 +947,8 @@ static void printAgentUsage(bool devhelp) {
 void printBackupContainerInfo() {
 	printf("                 Backup URL forms:\n\n");
 	std::vector<std::string> formats = IBackupContainer::getURLFormats();
-	for (auto& f : formats) printf("                     %s\n", f.c_str());
+	for (auto& f : formats)
+		printf("                     %s\n", f.c_str());
 	printf("\n");
 }
 
@@ -1253,28 +1255,30 @@ enumProgramExe getProgramType(std::string programExe) {
 
 	// Check if backup
 	else if ((programExe.length() >= exeBackup.size()) &&
-	         (programExe.compare(programExe.length() - exeBackup.size(), exeBackup.size(),
-	                             (const char*)exeBackup.begin()) == 0)) {
+	         (programExe.compare(
+	              programExe.length() - exeBackup.size(), exeBackup.size(), (const char*)exeBackup.begin()) == 0)) {
 		enProgramExe = EXE_BACKUP;
 	}
 
 	// Check if restore
 	else if ((programExe.length() >= exeRestore.size()) &&
-	         (programExe.compare(programExe.length() - exeRestore.size(), exeRestore.size(),
-	                             (const char*)exeRestore.begin()) == 0)) {
+	         (programExe.compare(
+	              programExe.length() - exeRestore.size(), exeRestore.size(), (const char*)exeRestore.begin()) == 0)) {
 		enProgramExe = EXE_RESTORE;
 	}
 
 	// Check if db agent
 	else if ((programExe.length() >= exeDatabaseAgent.size()) &&
-	         (programExe.compare(programExe.length() - exeDatabaseAgent.size(), exeDatabaseAgent.size(),
+	         (programExe.compare(programExe.length() - exeDatabaseAgent.size(),
+	                             exeDatabaseAgent.size(),
 	                             (const char*)exeDatabaseAgent.begin()) == 0)) {
 		enProgramExe = EXE_DR_AGENT;
 	}
 
 	// Check if db backup
 	else if ((programExe.length() >= exeDatabaseBackup.size()) &&
-	         (programExe.compare(programExe.length() - exeDatabaseBackup.size(), exeDatabaseBackup.size(),
+	         (programExe.compare(programExe.length() - exeDatabaseBackup.size(),
+	                             exeDatabaseBackup.size(),
 	                             (const char*)exeDatabaseBackup.begin()) == 0)) {
 		enProgramExe = EXE_DB_BACKUP;
 	}
@@ -1307,16 +1311,21 @@ enumBackupType getBackupType(std::string backupType) {
 	}
 
 	auto i = values.find(backupType);
-	if (i != values.end()) enBackupType = i->second;
+	if (i != values.end())
+		enBackupType = i->second;
 
 	return enBackupType;
 }
 
 enumRestoreType getRestoreType(std::string name) {
-	if (name == "start") return RESTORE_START;
-	if (name == "abort") return RESTORE_ABORT;
-	if (name == "status") return RESTORE_STATUS;
-	if (name == "wait") return RESTORE_WAIT;
+	if (name == "start")
+		return RESTORE_START;
+	if (name == "abort")
+		return RESTORE_ABORT;
+	if (name == "status")
+		return RESTORE_STATUS;
+	if (name == "wait")
+		return RESTORE_WAIT;
 	return RESTORE_UNKNOWN;
 }
 
@@ -1337,13 +1346,18 @@ enumDBType getDBType(std::string dbType) {
 	}
 
 	auto i = values.find(dbType);
-	if (i != values.end()) enBackupType = i->second;
+	if (i != values.end())
+		enBackupType = i->second;
 
 	return enBackupType;
 }
 
-ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr, std::string name, std::string id,
-                                         enumProgramExe exe, Database dest, bool snapshot = false) {
+ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
+                                         std::string name,
+                                         std::string id,
+                                         enumProgramExe exe,
+                                         Database dest,
+                                         bool snapshot = false) {
 	// This process will write a document that looks like this:
 	// { backup : { $expires : {<subdoc>}, version: <version from approximately 30 seconds from now> }
 	// so that the value under 'backup' will eventually expire to null and thus be ignored by
@@ -1390,7 +1404,8 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		last_ts = now();
 
 		JSONDoc totalBlobStats = layerRoot.subDoc("blob_recent_io");
-		for (auto& p : diffObj) totalBlobStats.create(p.first + ".$sum") = p.second;
+		for (auto& p : diffObj)
+			totalBlobStats.create(p.first + ".$sum") = p.second;
 
 		state FileBackupAgent fba;
 		state std::vector<KeyBackedTag> backupTags = wait(getAllBackupTags(tr, snapshot));
@@ -1511,8 +1526,11 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 // Check for unparseable or expired statuses and delete them.
 // First checks the first doc in the key range, and if it is valid, alive and not "me" then
 // returns.  Otherwise, checks the rest of the range as well.
-ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr, std::string rootKey, std::string name,
-                                 std::string id, int limit = 1) {
+ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr,
+                                 std::string rootKey,
+                                 std::string name,
+                                 std::string id,
+                                 int limit = 1) {
 	state Standalone<RangeResultRef> docs = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, true));
 	state bool readMore = false;
 	state int i;
@@ -1525,17 +1543,20 @@ ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr, std::s
 			JSONDoc::expires_reference_version = tr->getReadVersion().get();
 			// Evaluate the operators in the document, which will reduce to nothing if it is expired.
 			doc.cleanOps();
-			if (!doc.has(name + ".last_updated")) throw Error();
+			if (!doc.has(name + ".last_updated"))
+				throw Error();
 
 			// Alive and valid.
 			// If limit == 1 and id is present then read more
-			if (limit == 1 && doc.has(name + ".instances." + id)) readMore = true;
+			if (limit == 1 && doc.has(name + ".instances." + id))
+				readMore = true;
 		} catch (Error& e) {
 			// If doc can't be parsed or isn't alive, delete it.
 			TraceEvent(SevWarn, "RemovedDeadBackupLayerStatus").detail("Key", docs[i].key);
 			tr->clear(docs[i].key);
 			// If limit is 1 then read more.
-			if (limit == 1) readMore = true;
+			if (limit == 1)
+				readMore = true;
 		}
 		if (readMore) {
 			limit = 10000;
@@ -1595,7 +1616,10 @@ ACTOR Future<Void> updateAgentPollRate(Database src, std::string rootKey, std::s
 	}
 }
 
-ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name, enumProgramExe exe, double* pollDelay,
+ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest,
+                                     std::string name,
+                                     enumProgramExe exe,
+                                     double* pollDelay,
                                      Database taskDest = Database(),
                                      std::string id = nondeterministicRandom()->randomUniqueID().toString()) {
 	state std::string metaKey = layerStatusMetaPrefixRange.begin.toString() + "json/" + name;
@@ -1664,7 +1688,8 @@ ACTOR Future<Void> runDBAgent(Database src, Database dest) {
 			wait(backupAgent.run(dest, &pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
 			break;
 		} catch (Error& e) {
-			if (e.code() == error_code_operation_cancelled) throw;
+			if (e.code() == error_code_operation_cancelled)
+				throw;
 
 			TraceEvent(SevError, "DA_runAgent").error(e);
 			fprintf(stderr, "ERROR: DR agent encountered fatal error `%s'\n", e.what());
@@ -1687,7 +1712,8 @@ ACTOR Future<Void> runAgent(Database db) {
 			wait(backupAgent.run(db, &pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
 			break;
 		} catch (Error& e) {
-			if (e.code() == error_code_operation_cancelled) throw;
+			if (e.code() == error_code_operation_cancelled)
+				throw;
 
 			TraceEvent(SevError, "BA_runAgent").error(e);
 			fprintf(stderr, "ERROR: backup agent encountered fatal error `%s'\n", e.what());
@@ -1699,7 +1725,9 @@ ACTOR Future<Void> runAgent(Database db) {
 	return Void();
 }
 
-ACTOR Future<Void> submitDBBackup(Database src, Database dest, Standalone<VectorRef<KeyRangeRef>> backupRanges,
+ACTOR Future<Void> submitDBBackup(Database src,
+                                  Database dest,
+                                  Standalone<VectorRef<KeyRangeRef>> backupRanges,
                                   std::string tagName) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
@@ -1726,7 +1754,8 @@ ACTOR Future<Void> submitDBBackup(Database src, Database dest, Standalone<Vector
 	}
 
 	catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) throw;
+		if (e.code() == error_code_actor_cancelled)
+			throw;
 		switch (e.code()) {
 		case error_code_backup_error:
 			fprintf(stderr, "ERROR: An error was encountered during submission\n");
@@ -1745,9 +1774,14 @@ ACTOR Future<Void> submitDBBackup(Database src, Database dest, Standalone<Vector
 	return Void();
 }
 
-ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotIntervalSeconds,
-                                Standalone<VectorRef<KeyRangeRef>> backupRanges, std::string tagName, bool dryRun,
-                                bool waitForCompletion, bool stopWhenDone) {
+ACTOR Future<Void> submitBackup(Database db,
+                                std::string url,
+                                int snapshotIntervalSeconds,
+                                Standalone<VectorRef<KeyRangeRef>> backupRanges,
+                                std::string tagName,
+                                bool dryRun,
+                                bool waitForCompletion,
+                                bool stopWhenDone) {
 	try {
 		state FileBackupAgent backupAgent;
 
@@ -1794,8 +1828,8 @@ ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotInterv
 		}
 
 		else {
-			wait(backupAgent.submitBackup(db, KeyRef(url), snapshotIntervalSeconds, tagName, backupRanges,
-			                              stopWhenDone));
+			wait(backupAgent.submitBackup(
+			    db, KeyRef(url), snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone));
 
 			// Wait for the backup to complete, if requested
 			if (waitForCompletion) {
@@ -1819,7 +1853,8 @@ ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotInterv
 			}
 		}
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) throw;
+		if (e.code() == error_code_actor_cancelled)
+			throw;
 		switch (e.code()) {
 		case error_code_backup_error:
 			fprintf(stderr, "ERROR: An error was encountered during submission\n");
@@ -1838,8 +1873,11 @@ ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotInterv
 	return Void();
 }
 
-ACTOR Future<Void> switchDBBackup(Database src, Database dest, Standalone<VectorRef<KeyRangeRef>> backupRanges,
-                                  std::string tagName, bool forceAction) {
+ACTOR Future<Void> switchDBBackup(Database src,
+                                  Database dest,
+                                  Standalone<VectorRef<KeyRangeRef>> backupRanges,
+                                  std::string tagName,
+                                  bool forceAction) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
 
@@ -1853,7 +1891,8 @@ ACTOR Future<Void> switchDBBackup(Database src, Database dest, Standalone<Vector
 	}
 
 	catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) throw;
+		if (e.code() == error_code_actor_cancelled)
+			throw;
 		switch (e.code()) {
 		case error_code_backup_error:
 			fprintf(stderr, "ERROR: An error was encountered during submission\n");
@@ -1879,7 +1918,8 @@ ACTOR Future<Void> statusDBBackup(Database src, Database dest, std::string tagNa
 		std::string statusText = wait(backupAgent.getStatus(dest, errorLimit, StringRef(tagName)));
 		printf("%s\n", statusText.c_str());
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) throw;
+		if (e.code() == error_code_actor_cancelled)
+			throw;
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -1895,7 +1935,8 @@ ACTOR Future<Void> statusBackup(Database db, std::string tagName, bool showError
 		    wait(json ? backupAgent.getStatusJSON(db, tagName) : backupAgent.getStatus(db, showErrors, tagName));
 		printf("%s\n", statusText.c_str());
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) throw;
+		if (e.code() == error_code_actor_cancelled)
+			throw;
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -1912,7 +1953,8 @@ ACTOR Future<Void> abortDBBackup(Database src, Database dest, std::string tagNam
 
 		printf("The DR on tag `%s' was successfully aborted.\n", printable(StringRef(tagName)).c_str());
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) throw;
+		if (e.code() == error_code_actor_cancelled)
+			throw;
 		switch (e.code()) {
 		case error_code_backup_error:
 			fprintf(stderr, "ERROR: An error was encountered during submission\n");
@@ -1938,7 +1980,8 @@ ACTOR Future<Void> abortBackup(Database db, std::string tagName) {
 
 		printf("The backup on tag `%s' was successfully aborted.\n", printable(StringRef(tagName)).c_str());
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) throw;
+		if (e.code() == error_code_actor_cancelled)
+			throw;
 		switch (e.code()) {
 		case error_code_backup_error:
 			fprintf(stderr, "ERROR: An error was encountered during submission\n");
@@ -1960,7 +2003,8 @@ ACTOR Future<Void> cleanupMutations(Database db, bool deleteData) {
 	try {
 		wait(cleanupBackup(db, deleteData));
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) throw;
+		if (e.code() == error_code_actor_cancelled)
+			throw;
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -1974,10 +2018,12 @@ ACTOR Future<Void> waitBackup(Database db, std::string tagName, bool stopWhenDon
 
 		int status = wait(backupAgent.waitBackup(db, tagName, stopWhenDone));
 
-		printf("The backup on tag `%s' %s.\n", printable(StringRef(tagName)).c_str(),
+		printf("The backup on tag `%s' %s.\n",
+		       printable(StringRef(tagName)).c_str(),
 		       BackupAgentBase::getStateText((BackupAgentBase::enumState)status));
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) throw;
+		if (e.code() == error_code_actor_cancelled)
+			throw;
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -2001,7 +2047,8 @@ ACTOR Future<Void> discontinueBackup(Database db, std::string tagName, bool wait
 		}
 
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) throw;
+		if (e.code() == error_code_actor_cancelled)
+			throw;
 		switch (e.code()) {
 		case error_code_backup_error:
 			fprintf(stderr, "ERROR: An encounter was error during submission\n");
@@ -2010,7 +2057,8 @@ ACTOR Future<Void> discontinueBackup(Database db, std::string tagName, bool wait
 			fprintf(stderr, "ERROR: A backup in not running on tag `%s'\n", printable(StringRef(tagName)).c_str());
 			break;
 		case error_code_backup_duplicate:
-			fprintf(stderr, "ERROR: The backup on tag `%s' is already discontinued\n",
+			fprintf(stderr,
+			        "ERROR: The backup on tag `%s' is already discontinued\n",
 			        printable(StringRef(tagName)).c_str());
 			break;
 		default:
@@ -2029,7 +2077,8 @@ ACTOR Future<Void> changeBackupResumed(Database db, bool pause) {
 		wait(backupAgent.taskBucket->changePause(db, pause));
 		printf("All backup agents have been %s.\n", pause ? "paused" : "resumed");
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) throw;
+		if (e.code() == error_code_actor_cancelled)
+			throw;
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -2043,7 +2092,8 @@ ACTOR Future<Void> changeDBBackupResumed(Database src, Database dest, bool pause
 		wait(backupAgent.taskBucket->changePause(dest, pause));
 		printf("All DR agents have been %s.\n", pause ? "paused" : "resumed");
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) throw;
+		if (e.code() == error_code_actor_cancelled)
+			throw;
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -2075,10 +2125,18 @@ Reference<IBackupContainer> openBackupContainer(const char* name, std::string de
 	return c;
 }
 
-ACTOR Future<Void> runRestore(Database db, std::string originalClusterFile, std::string tagName, std::string container,
-                              Standalone<VectorRef<KeyRangeRef>> ranges, Version targetVersion,
-                              std::string targetTimestamp, bool performRestore, bool verbose, bool waitForDone,
-                              std::string addPrefix, std::string removePrefix) {
+ACTOR Future<Void> runRestore(Database db,
+                              std::string originalClusterFile,
+                              std::string tagName,
+                              std::string container,
+                              Standalone<VectorRef<KeyRangeRef>> ranges,
+                              Version targetVersion,
+                              std::string targetTimestamp,
+                              bool performRestore,
+                              bool verbose,
+                              bool waitForDone,
+                              std::string addPrefix,
+                              std::string removePrefix) {
 	if (ranges.empty()) {
 		ranges.push_back_deep(ranges.arena(), normalKeys);
 	}
@@ -2100,8 +2158,8 @@ ACTOR Future<Void> runRestore(Database db, std::string originalClusterFile, std:
 		}
 
 		if (!fileExists(originalClusterFile)) {
-			fprintf(stderr, "Original source database cluster file '%s' does not exist.\n",
-			        originalClusterFile.c_str());
+			fprintf(
+			    stderr, "Original source database cluster file '%s' does not exist.\n", originalClusterFile.c_str());
 			throw restore_error();
 		}
 
@@ -2131,13 +2189,21 @@ ACTOR Future<Void> runRestore(Database db, std::string originalClusterFile, std:
 
 			targetVersion = desc.maxRestorableVersion.get();
 
-			if (verbose) printf("Using target restore version %" PRId64 "\n", targetVersion);
+			if (verbose)
+				printf("Using target restore version %" PRId64 "\n", targetVersion);
 		}
 
 		if (performRestore) {
-			Version restoredVersion =
-			    wait(backupAgent.restore(db, origDb, KeyRef(tagName), KeyRef(container), ranges, waitForDone,
-			                             targetVersion, verbose, KeyRef(addPrefix), KeyRef(removePrefix)));
+			Version restoredVersion = wait(backupAgent.restore(db,
+			                                                   origDb,
+			                                                   KeyRef(tagName),
+			                                                   KeyRef(container),
+			                                                   ranges,
+			                                                   waitForDone,
+			                                                   targetVersion,
+			                                                   verbose,
+			                                                   KeyRef(addPrefix),
+			                                                   KeyRef(removePrefix)));
 
 			if (waitForDone && verbose) {
 				// If restore is now complete then report version restored
@@ -2157,7 +2223,8 @@ ACTOR Future<Void> runRestore(Database db, std::string originalClusterFile, std:
 		}
 
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) throw;
+		if (e.code() == error_code_actor_cancelled)
+			throw;
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -2165,7 +2232,9 @@ ACTOR Future<Void> runRestore(Database db, std::string originalClusterFile, std:
 	return Void();
 }
 
-ACTOR Future<Void> dumpBackupData(const char* name, std::string destinationContainer, Version beginVersion,
+ACTOR Future<Void> dumpBackupData(const char* name,
+                                  std::string destinationContainer,
+                                  Version beginVersion,
                                   Version endVersion) {
 	state Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer);
 
@@ -2193,8 +2262,13 @@ ACTOR Future<Void> dumpBackupData(const char* name, std::string destinationConta
 	return Void();
 }
 
-ACTOR Future<Void> expireBackupData(const char* name, std::string destinationContainer, Version endVersion,
-                                    std::string endDatetime, Database db, bool force, Version restorableAfterVersion,
+ACTOR Future<Void> expireBackupData(const char* name,
+                                    std::string destinationContainer,
+                                    Version endVersion,
+                                    std::string endDatetime,
+                                    Database db,
+                                    bool force,
+                                    Version restorableAfterVersion,
                                     std::string restorableAfterDatetime) {
 	if (!endDatetime.empty()) {
 		Version v = wait(timeKeeperVersionFromDatetime(endDatetime, db));
@@ -2241,14 +2315,17 @@ ACTOR Future<Void> expireBackupData(const char* name, std::string destinationCon
 		if (endVersion < 0)
 			printf("All data before %" PRId64 " versions (%" PRId64
 			       " days) prior to latest backup log has been deleted.\n",
-			       -endVersion, -endVersion / ((int64_t)24 * 3600 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+			       -endVersion,
+			       -endVersion / ((int64_t)24 * 3600 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 		else
 			printf("All data before version %" PRId64 " has been deleted.\n", endVersion);
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) throw;
+		if (e.code() == error_code_actor_cancelled)
+			throw;
 		if (e.code() == error_code_backup_cannot_expire)
-			fprintf(stderr, "ERROR: Requested expiration would be unsafe.  Backup would not meet minimum "
-			                "restorability.  Use --force to delete data anyway.\n");
+			fprintf(stderr,
+			        "ERROR: Requested expiration would be unsafe.  Backup would not meet minimum "
+			        "restorability.  Use --force to delete data anyway.\n");
 		else
 			fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
@@ -2280,7 +2357,8 @@ ACTOR Future<Void> deleteBackupContainer(const char* name, std::string destinati
 		printf("\r%d objects deleted\n", numDeleted);
 		printf("The entire container has been deleted.\n");
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) throw;
+		if (e.code() == error_code_actor_cancelled)
+			throw;
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -2288,15 +2366,20 @@ ACTOR Future<Void> deleteBackupContainer(const char* name, std::string destinati
 	return Void();
 }
 
-ACTOR Future<Void> describeBackup(const char* name, std::string destinationContainer, bool deep, Optional<Database> cx,
+ACTOR Future<Void> describeBackup(const char* name,
+                                  std::string destinationContainer,
+                                  bool deep,
+                                  Optional<Database> cx,
                                   bool json) {
 	try {
 		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer);
 		state BackupDescription desc = wait(c->describeBackup(deep));
-		if (cx.present()) wait(desc.resolveVersionTimes(cx.get()));
+		if (cx.present())
+			wait(desc.resolveVersionTimes(cx.get()));
 		printf("%s\n", (json ? desc.toJSON() : desc.toString()).c_str());
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) throw;
+		if (e.code() == error_code_actor_cancelled)
+			throw;
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -2346,8 +2429,11 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 		try {
 			wait(timeoutError(bc->create(), 30));
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
-			fprintf(stderr, "ERROR: Could not create backup container at '%s': %s\n", options.destURL.get().c_str(),
+			if (e.code() == error_code_actor_cancelled)
+				throw;
+			fprintf(stderr,
+			        "ERROR: Could not create backup container at '%s': %s\n",
+			        options.destURL.get().c_str(),
 			        e.what());
 			throw backup_error();
 		}
@@ -2379,8 +2465,11 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 			}
 
 			if (options.verifyUID.present() && options.verifyUID.get() != uidFlag.get().first.toString()) {
-				fprintf(stderr, "UID verification failed, backup on tag '%s' is '%s' but '%s' was specified.\n",
-				        tagName.c_str(), uidFlag.get().first.toString().c_str(), options.verifyUID.get().c_str());
+				fprintf(stderr,
+				        "UID verification failed, backup on tag '%s' is '%s' but '%s' was specified.\n",
+				        tagName.c_str(),
+				        uidFlag.get().first.toString().c_str(),
+				        options.verifyUID.get().c_str());
 				throw backup_error();
 			}
 
@@ -2426,7 +2515,8 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 		switch (line[i]) {
 		case ';':
 			if (!quoted) {
-				if (i > offset) buf.push_back(StringRef((uint8_t*)(line.data() + offset), i - offset));
+				if (i > offset)
+					buf.push_back(StringRef((uint8_t*)(line.data() + offset), i - offset));
 				ret.push_back(std::move(buf));
 				offset = i = line.find_first_not_of(' ', i + 1);
 			} else
@@ -2435,7 +2525,8 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 		case '"':
 			quoted = !quoted;
 			line.erase(i, 1);
-			if (quoted) forcetoken = true;
+			if (quoted)
+				forcetoken = true;
 			break;
 		case ' ':
 			if (!quoted) {
@@ -2488,11 +2579,13 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 	}
 
 	i -= 1;
-	if (i > offset || forcetoken) buf.push_back(StringRef((uint8_t*)(line.data() + offset), i - offset));
+	if (i > offset || forcetoken)
+		buf.push_back(StringRef((uint8_t*)(line.data() + offset), i - offset));
 
 	ret.push_back(std::move(buf));
 
-	if (quoted) partial = true;
+	if (quoted)
+		partial = true;
 
 	return ret;
 }
@@ -2533,8 +2626,11 @@ static void addKeyRange(std::string optionValue, Standalone<VectorRef<KeyRangeRe
 			try {
 				keyRanges.push_back_deep(keyRanges.arena(), KeyRangeRef(tokens.at(0), tokens.at(1)));
 			} catch (Error& e) {
-				fprintf(stderr, "ERROR: Invalid key range `%s %s' reported error %s\n", tokens.at(0).toString().c_str(),
-				        tokens.at(1).toString().c_str(), e.what());
+				fprintf(stderr,
+				        "ERROR: Invalid key range `%s %s' reported error %s\n",
+				        tokens.at(0).toString().c_str(),
+				        tokens.at(1).toString().c_str(),
+				        e.what());
 				throw invalid_option_value();
 			}
 			break;
@@ -2582,7 +2678,8 @@ int main(int argc, char* argv[]) {
 
 	std::string commandLine;
 	for (int a = 0; a < argc; a++) {
-		if (a) commandLine += ' ';
+		if (a)
+			commandLine += ' ';
 		commandLine += argv[a];
 	}
 
@@ -3202,7 +3299,9 @@ int main(int argc, char* argv[]) {
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr, "WARNING: Invalid value '%s' for knob option '%s'\n", k->second.c_str(),
+					fprintf(stderr,
+					        "WARNING: Invalid value '%s' for knob option '%s'\n",
+					        k->second.c_str(),
 					        k->first.c_str());
 					TraceEvent(SevWarnAlways, "InvalidKnobValue")
 					    .detail("Knob", printable(k->first))
@@ -3219,7 +3318,8 @@ int main(int argc, char* argv[]) {
 		}
 
 		if (trace) {
-			if (!traceLogGroup.empty()) setNetworkOption(FDBNetworkOptions::TRACE_LOG_GROUP, StringRef(traceLogGroup));
+			if (!traceLogGroup.empty())
+				setNetworkOption(FDBNetworkOptions::TRACE_LOG_GROUP, StringRef(traceLogGroup));
 
 			if (traceDir.empty())
 				setNetworkOption(FDBNetworkOptions::TRACE_ENABLE);
@@ -3253,7 +3353,8 @@ int main(int argc, char* argv[]) {
 		}
 		if (tlsKeyPath.size()) {
 			try {
-				if (tlsPassword.size()) setNetworkOption(FDBNetworkOptions::TLS_PASSWORD, tlsPassword);
+				if (tlsPassword.size())
+					setNetworkOption(FDBNetworkOptions::TLS_PASSWORD, tlsPassword);
 
 				setNetworkOption(FDBNetworkOptions::TLS_KEY_PATH, tlsKeyPath);
 			} catch (Error& e) {
@@ -3265,8 +3366,8 @@ int main(int argc, char* argv[]) {
 			try {
 				setNetworkOption(FDBNetworkOptions::TLS_VERIFY_PEERS, tlsVerifyPeers);
 			} catch (Error& e) {
-				fprintf(stderr, "ERROR: cannot set TLS peer verification to `%s' (%s)\n", tlsVerifyPeers.c_str(),
-				        e.what());
+				fprintf(
+				    stderr, "ERROR: cannot set TLS peer verification to `%s' (%s)\n", tlsVerifyPeers.c_str(), e.what());
 				return 1;
 			}
 		}
@@ -3276,10 +3377,13 @@ int main(int argc, char* argv[]) {
 		setMemoryQuota(memLimit);
 
 		int total = 0;
-		for (auto i = Error::errorCounts().begin(); i != Error::errorCounts().end(); ++i) total += i->second;
-		if (total) printf("%d errors:\n", total);
 		for (auto i = Error::errorCounts().begin(); i != Error::errorCounts().end(); ++i)
-			if (i->second > 0) printf("  %d: %d %s\n", i->second, i->first, Error::fromCode(i->first).what());
+			total += i->second;
+		if (total)
+			printf("%d errors:\n", total);
+		for (auto i = Error::errorCounts().begin(); i != Error::errorCounts().end(); ++i)
+			if (i->second > 0)
+				printf("  %d: %d %s\n", i->second, i->first, Error::fromCode(i->first).what());
 
 		Reference<ClusterConnectionFile> ccf;
 		Database db;
@@ -3320,7 +3424,8 @@ int main(int argc, char* argv[]) {
 			StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
 			do {
 				StringRef file = t.eat(":");
-				if (file.size() != 0) blobCredentials.push_back(file.toString());
+				if (file.size() != 0)
+					blobCredentials.push_back(file.toString());
 			} while (t.size() != 0);
 		}
 
@@ -3383,59 +3488,75 @@ int main(int argc, char* argv[]) {
 
 		switch (programExe) {
 		case EXE_AGENT:
-			if (!initCluster()) return FDB_EXIT_ERROR;
+			if (!initCluster())
+				return FDB_EXIT_ERROR;
 			f = stopAfter(runAgent(db));
 			break;
 		case EXE_BACKUP:
 			switch (backupType) {
 			case BACKUP_START: {
-				if (!initCluster()) return FDB_EXIT_ERROR;
+				if (!initCluster())
+					return FDB_EXIT_ERROR;
 				// Test out the backup url to make sure it parses.  Doesn't test to make sure it's actually writeable.
 				openBackupContainer(argv[0], destinationContainer);
-				f = stopAfter(submitBackup(db, destinationContainer, snapshotIntervalSeconds, backupKeys, tagName,
-				                           dryRun, waitForDone, stopWhenDone));
+				f = stopAfter(submitBackup(db,
+				                           destinationContainer,
+				                           snapshotIntervalSeconds,
+				                           backupKeys,
+				                           tagName,
+				                           dryRun,
+				                           waitForDone,
+				                           stopWhenDone));
 				break;
 			}
 
 			case BACKUP_MODIFY: {
-				if (!initCluster()) return FDB_EXIT_ERROR;
+				if (!initCluster())
+					return FDB_EXIT_ERROR;
 
 				f = stopAfter(modifyBackup(db, tagName, modifyOptions));
 				break;
 			}
 
 			case BACKUP_STATUS:
-				if (!initCluster()) return FDB_EXIT_ERROR;
+				if (!initCluster())
+					return FDB_EXIT_ERROR;
 				f = stopAfter(statusBackup(db, tagName, true, jsonOutput));
 				break;
 
 			case BACKUP_ABORT:
-				if (!initCluster()) return FDB_EXIT_ERROR;
+				if (!initCluster())
+					return FDB_EXIT_ERROR;
 				f = stopAfter(abortBackup(db, tagName));
 				break;
 
 			case BACKUP_CLEANUP:
-				if (!initCluster()) return FDB_EXIT_ERROR;
+				if (!initCluster())
+					return FDB_EXIT_ERROR;
 				f = stopAfter(cleanupMutations(db, deleteData));
 				break;
 
 			case BACKUP_WAIT:
-				if (!initCluster()) return FDB_EXIT_ERROR;
+				if (!initCluster())
+					return FDB_EXIT_ERROR;
 				f = stopAfter(waitBackup(db, tagName, stopWhenDone));
 				break;
 
 			case BACKUP_DISCONTINUE:
-				if (!initCluster()) return FDB_EXIT_ERROR;
+				if (!initCluster())
+					return FDB_EXIT_ERROR;
 				f = stopAfter(discontinueBackup(db, tagName, waitForDone));
 				break;
 
 			case BACKUP_PAUSE:
-				if (!initCluster()) return FDB_EXIT_ERROR;
+				if (!initCluster())
+					return FDB_EXIT_ERROR;
 				f = stopAfter(changeBackupResumed(db, true));
 				break;
 
 			case BACKUP_RESUME:
-				if (!initCluster()) return FDB_EXIT_ERROR;
+				if (!initCluster())
+					return FDB_EXIT_ERROR;
 				f = stopAfter(changeBackupResumed(db, false));
 				break;
 
@@ -3443,10 +3564,16 @@ int main(int argc, char* argv[]) {
 				initTraceFile();
 				// Must have a usable cluster if either expire DateTime options were used
 				if (!expireDatetime.empty() || !expireRestorableAfterDatetime.empty()) {
-					if (!initCluster()) return FDB_EXIT_ERROR;
+					if (!initCluster())
+						return FDB_EXIT_ERROR;
 				}
-				f = stopAfter(expireBackupData(argv[0], destinationContainer, expireVersion, expireDatetime, db,
-				                               forceAction, expireRestorableAfterVersion,
+				f = stopAfter(expireBackupData(argv[0],
+				                               destinationContainer,
+				                               expireVersion,
+				                               expireDatetime,
+				                               db,
+				                               forceAction,
+				                               expireRestorableAfterVersion,
 				                               expireRestorableAfterDatetime));
 				break;
 
@@ -3458,11 +3585,14 @@ int main(int argc, char* argv[]) {
 			case BACKUP_DESCRIBE:
 				initTraceFile();
 				// If timestamp lookups are desired, require a cluster file
-				if (describeTimestamps && !initCluster()) return FDB_EXIT_ERROR;
+				if (describeTimestamps && !initCluster())
+					return FDB_EXIT_ERROR;
 
 				// Only pass database optionDatabase Describe will lookup version timestamps if a cluster file was
 				// given, but quietly skip them if not.
-				f = stopAfter(describeBackup(argv[0], destinationContainer, describeDeep,
+				f = stopAfter(describeBackup(argv[0],
+				                             destinationContainer,
+				                             describeDeep,
 				                             describeTimestamps ? Optional<Database>(db) : Optional<Database>(),
 				                             jsonOutput));
 				break;
@@ -3502,7 +3632,8 @@ int main(int argc, char* argv[]) {
 				}
 
 				if (!fileExists(restoreClusterFileDest)) {
-					fprintf(stderr, "Restore destination cluster file '%s' does not exist.\n",
+					fprintf(stderr,
+					        "Restore destination cluster file '%s' does not exist.\n",
 					        restoreClusterFileDest.c_str());
 					return FDB_EXIT_ERROR;
 				}
@@ -3510,17 +3641,28 @@ int main(int argc, char* argv[]) {
 				try {
 					db = Database::createDatabase(restoreClusterFileDest, Database::API_VERSION_LATEST);
 				} catch (Error& e) {
-					fprintf(stderr, "Restore destination cluster file '%s' invalid: %s\n",
-					        restoreClusterFileDest.c_str(), e.what());
+					fprintf(stderr,
+					        "Restore destination cluster file '%s' invalid: %s\n",
+					        restoreClusterFileDest.c_str(),
+					        e.what());
 					return FDB_EXIT_ERROR;
 				}
 			}
 
 			switch (restoreType) {
 			case RESTORE_START:
-				f = stopAfter(runRestore(db, restoreClusterFileOrig, tagName, restoreContainer, backupKeys,
-				                         restoreVersion, restoreTimestamp, !dryRun, !quietDisplay, waitForDone,
-				                         addPrefix, removePrefix));
+				f = stopAfter(runRestore(db,
+				                         restoreClusterFileOrig,
+				                         tagName,
+				                         restoreContainer,
+				                         backupKeys,
+				                         restoreVersion,
+				                         restoreTimestamp,
+				                         !dryRun,
+				                         !quietDisplay,
+				                         waitForDone,
+				                         addPrefix,
+				                         removePrefix));
 				break;
 			case RESTORE_WAIT:
 				f = stopAfter(success(ba.waitRestore(db, KeyRef(tagName), true)));
@@ -3528,14 +3670,16 @@ int main(int argc, char* argv[]) {
 			case RESTORE_ABORT:
 				f = stopAfter(
 				    map(ba.abortRestore(db, KeyRef(tagName)), [tagName](FileBackupAgent::ERestoreState s) -> Void {
-					    printf("Tag: %s  State: %s\n", tagName.c_str(),
+					    printf("Tag: %s  State: %s\n",
+					           tagName.c_str(),
 					           FileBackupAgent::restoreStateText(s).toString().c_str());
 					    return Void();
 				    }));
 				break;
 			case RESTORE_STATUS:
 				// If no tag is specifically provided then print all tag status, don't just use "default"
-				if (tagProvided) tag = tagName;
+				if (tagProvided)
+					tag = tagName;
 				f = stopAfter(map(ba.restoreStatus(db, KeyRef(tag)), [](std::string s) -> Void {
 					printf("%s\n", s.c_str());
 					return Void();
@@ -3546,11 +3690,13 @@ int main(int argc, char* argv[]) {
 			}
 			break;
 		case EXE_DR_AGENT:
-			if (!initCluster()) return FDB_EXIT_ERROR;
+			if (!initCluster())
+				return FDB_EXIT_ERROR;
 			f = stopAfter(runDBAgent(sourceDb, db));
 			break;
 		case EXE_DB_BACKUP:
-			if (!initCluster()) return FDB_EXIT_ERROR;
+			if (!initCluster())
+				return FDB_EXIT_ERROR;
 			switch (dbType) {
 			case DB_START:
 				f = stopAfter(submitDBBackup(sourceDb, db, backupKeys, tagName));
@@ -3630,8 +3776,12 @@ int main(int argc, char* argv[]) {
 			for (int i = 0; i < typeNames.size(); i++) {
 				const char* n = typeNames[i].second;
 				auto& f = allocInstr[n];
-				printf("%+d\t%+d\t%d\t%d\t%s\n", f.allocCount, -f.deallocCount, f.allocCount - f.deallocCount,
-				       f.maxAllocated, typeNames[i].first.c_str());
+				printf("%+d\t%+d\t%d\t%d\t%s\n",
+				       f.allocCount,
+				       -f.deallocCount,
+				       f.allocCount - f.deallocCount,
+				       f.maxAllocated,
+				       typeNames[i].first.c_str());
 			}
 
 			// We're about to exit and clean up data structures, this will wreak havoc on allocation recording

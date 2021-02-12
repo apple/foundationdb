@@ -103,7 +103,8 @@ extern "C" DLLEXPORT fdb_bool_t fdb_error_predicate(int predicate_test, fdb_erro
 		abort();                                                                                                       \
 	}
 
-extern "C" DLLEXPORT fdb_error_t fdb_network_set_option(FDBNetworkOption option, uint8_t const* value,
+extern "C" DLLEXPORT fdb_error_t fdb_network_set_option(FDBNetworkOption option,
+                                                        uint8_t const* value,
                                                         int value_length) {
 	CATCH_AND_RETURN(API->setNetworkOption((FDBNetworkOptions::Option)option,
 	                                       value ? StringRef(value, value_length) : Optional<StringRef>()););
@@ -116,7 +117,8 @@ fdb_error_t fdb_setup_network_impl() {
 fdb_error_t fdb_setup_network_v13(const char* localAddress) {
 	fdb_error_t errorCode =
 	    fdb_network_set_option(FDB_NET_OPTION_LOCAL_ADDRESS, (uint8_t const*)localAddress, strlen(localAddress));
-	if (errorCode != 0) return errorCode;
+	if (errorCode != 0)
+		return errorCode;
 
 	return fdb_setup_network_impl();
 }
@@ -178,7 +180,8 @@ private:
 	void* userdata;
 };
 
-extern "C" DLLEXPORT fdb_error_t fdb_future_set_callback(FDBFuture* f, void (*callbackf)(FDBFuture*, void*),
+extern "C" DLLEXPORT fdb_error_t fdb_future_set_callback(FDBFuture* f,
+                                                         void (*callbackf)(FDBFuture*, void*),
                                                          void* userdata) {
 	CAPICallback* cb = new CAPICallback(callbackf, f, userdata);
 	int ignore;
@@ -190,8 +193,10 @@ fdb_error_t fdb_future_get_error_impl(FDBFuture* f) {
 }
 
 fdb_error_t fdb_future_get_error_v22(FDBFuture* f, const char** description) {
-	if (!(TSAVB(f)->isError())) return error_code_future_not_error;
-	if (description) *description = TSAVB(f)->error.what();
+	if (!(TSAVB(f)->isError()))
+		return error_code_future_not_error;
+	if (description)
+		*description = TSAVB(f)->error.what();
 	return TSAVB(f)->error.code();
 }
 
@@ -215,7 +220,9 @@ fdb_error_t fdb_future_get_database_v609(FDBFuture* f, FDBDatabase** out_databas
 	CATCH_AND_RETURN(*out_database = (FDBDatabase*)((TSAV(Reference<IDatabase>, f)->get()).extractPtr()););
 }
 
-extern "C" DLLEXPORT fdb_error_t fdb_future_get_value(FDBFuture* f, fdb_bool_t* out_present, uint8_t const** out_value,
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_value(FDBFuture* f,
+                                                      fdb_bool_t* out_present,
+                                                      uint8_t const** out_value,
                                                       int* out_value_length) {
 	CATCH_AND_RETURN(Optional<Value> v = TSAV(Optional<Value>, f)->get(); *out_present = v.present();
 	                 if (*out_present) {
@@ -224,20 +231,26 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_value(FDBFuture* f, fdb_bool_t* 
 	                 });
 }
 
-fdb_error_t fdb_future_get_keyvalue_array_impl(FDBFuture* f, FDBKeyValue const** out_kv, int* out_count,
+fdb_error_t fdb_future_get_keyvalue_array_impl(FDBFuture* f,
+                                               FDBKeyValue const** out_kv,
+                                               int* out_count,
                                                fdb_bool_t* out_more) {
 	CATCH_AND_RETURN(Standalone<RangeResultRef> rrr = TSAV(Standalone<RangeResultRef>, f)->get();
-	                 *out_kv = (FDBKeyValue*)rrr.begin(); *out_count = rrr.size(); *out_more = rrr.more;);
+	                 *out_kv = (FDBKeyValue*)rrr.begin();
+	                 *out_count = rrr.size();
+	                 *out_more = rrr.more;);
 }
 
 fdb_error_t fdb_future_get_keyvalue_array_v13(FDBFuture* f, FDBKeyValue const** out_kv, int* out_count) {
 	CATCH_AND_RETURN(Standalone<RangeResultRef> rrr = TSAV(Standalone<RangeResultRef>, f)->get();
-	                 *out_kv = (FDBKeyValue*)rrr.begin(); *out_count = rrr.size(););
+	                 *out_kv = (FDBKeyValue*)rrr.begin();
+	                 *out_count = rrr.size(););
 }
 
 extern "C" DLLEXPORT fdb_error_t fdb_future_get_string_array(FDBFuture* f, const char*** out_strings, int* out_count) {
 	CATCH_AND_RETURN(Standalone<VectorRef<const char*>> na = TSAV(Standalone<VectorRef<const char*>>, f)->get();
-	                 *out_strings = (const char**)na.begin(); *out_count = na.size(););
+	                 *out_strings = (const char**)na.begin();
+	                 *out_count = na.size(););
 }
 
 FDBFuture* fdb_create_cluster_v609(const char* cluster_file_path) {
@@ -252,7 +265,9 @@ FDBFuture* fdb_create_cluster_v609(const char* cluster_file_path) {
 	return (FDBFuture*)ThreadFuture<char*>(path).extractPtr();
 }
 
-fdb_error_t fdb_cluster_set_option_v609(FDBCluster* c, FDBClusterOption option, uint8_t const* value,
+fdb_error_t fdb_cluster_set_option_v609(FDBCluster* c,
+                                        FDBClusterOption option,
+                                        uint8_t const* value,
                                         int value_length) {
 	// There are no cluster options
 	return error_code_success;
@@ -288,7 +303,9 @@ extern "C" DLLEXPORT fdb_error_t fdb_create_database(const char* cluster_file_pa
 	return fdb_create_database_impl(cluster_file_path, out_database);
 }
 
-extern "C" DLLEXPORT fdb_error_t fdb_database_set_option(FDBDatabase* d, FDBDatabaseOption option, uint8_t const* value,
+extern "C" DLLEXPORT fdb_error_t fdb_database_set_option(FDBDatabase* d,
+                                                         FDBDatabaseOption option,
+                                                         uint8_t const* value,
                                                          int value_length) {
 	CATCH_AND_RETURN(DB(d)->setOption((FDBDatabaseOptions::Option)option,
 	                                  value ? StringRef(value, value_length) : Optional<StringRef>()););
@@ -323,7 +340,9 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_read_version(FDBTransaction*
 	return (FDBFuture*)(TXN(tr)->getReadVersion().extractPtr());
 }
 
-FDBFuture* fdb_transaction_get_impl(FDBTransaction* tr, uint8_t const* key_name, int key_name_length,
+FDBFuture* fdb_transaction_get_impl(FDBTransaction* tr,
+                                    uint8_t const* key_name,
+                                    int key_name_length,
                                     fdb_bool_t snapshot) {
 	return (FDBFuture*)(TXN(tr)->get(KeyRef(key_name, key_name_length), snapshot).extractPtr());
 }
@@ -332,27 +351,45 @@ FDBFuture* fdb_transaction_get_v13(FDBTransaction* tr, uint8_t const* key_name, 
 	return fdb_transaction_get_impl(tr, key_name, key_name_length, 0);
 }
 
-FDBFuture* fdb_transaction_get_key_impl(FDBTransaction* tr, uint8_t const* key_name, int key_name_length,
-                                        fdb_bool_t or_equal, int offset, fdb_bool_t snapshot) {
+FDBFuture* fdb_transaction_get_key_impl(FDBTransaction* tr,
+                                        uint8_t const* key_name,
+                                        int key_name_length,
+                                        fdb_bool_t or_equal,
+                                        int offset,
+                                        fdb_bool_t snapshot) {
 	return (FDBFuture*)(TXN(tr)
 	                        ->getKey(KeySelectorRef(KeyRef(key_name, key_name_length), or_equal, offset), snapshot)
 	                        .extractPtr());
 }
 
-FDBFuture* fdb_transaction_get_key_v13(FDBTransaction* tr, uint8_t const* key_name, int key_name_length,
-                                       fdb_bool_t or_equal, int offset) {
+FDBFuture* fdb_transaction_get_key_v13(FDBTransaction* tr,
+                                       uint8_t const* key_name,
+                                       int key_name_length,
+                                       fdb_bool_t or_equal,
+                                       int offset) {
 	return fdb_transaction_get_key_impl(tr, key_name, key_name_length, or_equal, offset, false);
 }
 
-extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_addresses_for_key(FDBTransaction* tr, uint8_t const* key_name,
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_addresses_for_key(FDBTransaction* tr,
+                                                                      uint8_t const* key_name,
                                                                       int key_name_length) {
 	return (FDBFuture*)(TXN(tr)->getAddressesForKey(KeyRef(key_name, key_name_length)).extractPtr());
 }
 
-FDBFuture* fdb_transaction_get_range_impl(FDBTransaction* tr, uint8_t const* begin_key_name, int begin_key_name_length,
-                                          fdb_bool_t begin_or_equal, int begin_offset, uint8_t const* end_key_name,
-                                          int end_key_name_length, fdb_bool_t end_or_equal, int end_offset, int limit,
-                                          int target_bytes, FDBStreamingMode mode, int iteration, fdb_bool_t snapshot,
+FDBFuture* fdb_transaction_get_range_impl(FDBTransaction* tr,
+                                          uint8_t const* begin_key_name,
+                                          int begin_key_name_length,
+                                          fdb_bool_t begin_or_equal,
+                                          int begin_offset,
+                                          uint8_t const* end_key_name,
+                                          int end_key_name_length,
+                                          fdb_bool_t end_or_equal,
+                                          int end_offset,
+                                          int limit,
+                                          int target_bytes,
+                                          FDBStreamingMode mode,
+                                          int iteration,
+                                          fdb_bool_t snapshot,
                                           fdb_bool_t reverse) {
 	/* This method may be called with a runtime API version of 13, in
 	   which negative row limits are a reverse range read */
@@ -362,8 +399,10 @@ FDBFuture* fdb_transaction_get_range_impl(FDBTransaction* tr, uint8_t const* beg
 	}
 
 	/* Zero at the C API maps to "infinity" at lower levels */
-	if (!limit) limit = CLIENT_KNOBS->ROW_LIMIT_UNLIMITED;
-	if (!target_bytes) target_bytes = CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED;
+	if (!limit)
+		limit = CLIENT_KNOBS->ROW_LIMIT_UNLIMITED;
+	if (!target_bytes)
+		target_bytes = CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED;
 
 	/* Unlimited/unlimited with mode _EXACT isn't permitted */
 	if (limit == CLIENT_KNOBS->ROW_LIMIT_UNLIMITED && target_bytes == CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED &&
@@ -383,11 +422,13 @@ FDBFuture* fdb_transaction_get_range_impl(FDBTransaction* tr, uint8_t const* beg
 	/* length(iteration_progression) */
 	static const int max_iteration = sizeof(iteration_progression) / sizeof(int);
 
-	if (mode == FDB_STREAMING_MODE_WANT_ALL) mode = FDB_STREAMING_MODE_SERIAL;
+	if (mode == FDB_STREAMING_MODE_WANT_ALL)
+		mode = FDB_STREAMING_MODE_SERIAL;
 
 	int mode_bytes;
 	if (mode == FDB_STREAMING_MODE_ITERATOR) {
-		if (iteration <= 0) return TSAV_ERROR(Standalone<RangeResultRef>, client_invalid_operation);
+		if (iteration <= 0)
+			return TSAV_ERROR(Standalone<RangeResultRef>, client_invalid_operation);
 
 		iteration = std::min(iteration, max_iteration);
 		mode_bytes = iteration_progression[iteration - 1];
@@ -406,51 +447,85 @@ FDBFuture* fdb_transaction_get_range_impl(FDBTransaction* tr, uint8_t const* beg
 	                    ->getRange(
 	                        KeySelectorRef(KeyRef(begin_key_name, begin_key_name_length), begin_or_equal, begin_offset),
 	                        KeySelectorRef(KeyRef(end_key_name, end_key_name_length), end_or_equal, end_offset),
-	                        GetRangeLimits(limit, target_bytes), snapshot, reverse)
+	                        GetRangeLimits(limit, target_bytes),
+	                        snapshot,
+	                        reverse)
 	                    .extractPtr());
 }
 
-FDBFuture* fdb_transaction_get_range_selector_v13(FDBTransaction* tr, uint8_t const* begin_key_name,
-                                                  int begin_key_name_length, fdb_bool_t begin_or_equal,
-                                                  int begin_offset, uint8_t const* end_key_name,
-                                                  int end_key_name_length, fdb_bool_t end_or_equal, int end_offset,
+FDBFuture* fdb_transaction_get_range_selector_v13(FDBTransaction* tr,
+                                                  uint8_t const* begin_key_name,
+                                                  int begin_key_name_length,
+                                                  fdb_bool_t begin_or_equal,
+                                                  int begin_offset,
+                                                  uint8_t const* end_key_name,
+                                                  int end_key_name_length,
+                                                  fdb_bool_t end_or_equal,
+                                                  int end_offset,
                                                   int limit) {
-	return fdb_transaction_get_range_impl(tr, begin_key_name, begin_key_name_length, begin_or_equal, begin_offset,
-	                                      end_key_name, end_key_name_length, end_or_equal, end_offset, limit, 0,
-	                                      FDB_STREAMING_MODE_EXACT, 0, false, false);
+	return fdb_transaction_get_range_impl(tr,
+	                                      begin_key_name,
+	                                      begin_key_name_length,
+	                                      begin_or_equal,
+	                                      begin_offset,
+	                                      end_key_name,
+	                                      end_key_name_length,
+	                                      end_or_equal,
+	                                      end_offset,
+	                                      limit,
+	                                      0,
+	                                      FDB_STREAMING_MODE_EXACT,
+	                                      0,
+	                                      false,
+	                                      false);
 }
 
-FDBFuture* fdb_transaction_get_range_v13(FDBTransaction* tr, uint8_t const* begin_key_name, int begin_key_name_length,
-                                         uint8_t const* end_key_name, int end_key_name_length, int limit) {
+FDBFuture* fdb_transaction_get_range_v13(FDBTransaction* tr,
+                                         uint8_t const* begin_key_name,
+                                         int begin_key_name_length,
+                                         uint8_t const* end_key_name,
+                                         int end_key_name_length,
+                                         int limit) {
 	return fdb_transaction_get_range_selector_v13(
-	    tr, FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(begin_key_name, begin_key_name_length),
-	    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(end_key_name, end_key_name_length), limit);
+	    tr,
+	    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(begin_key_name, begin_key_name_length),
+	    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(end_key_name, end_key_name_length),
+	    limit);
 }
 
-extern "C" DLLEXPORT void fdb_transaction_set(FDBTransaction* tr, uint8_t const* key_name, int key_name_length,
-                                              uint8_t const* value, int value_length) {
+extern "C" DLLEXPORT void fdb_transaction_set(FDBTransaction* tr,
+                                              uint8_t const* key_name,
+                                              int key_name_length,
+                                              uint8_t const* value,
+                                              int value_length) {
 	CATCH_AND_DIE(TXN(tr)->set(KeyRef(key_name, key_name_length), ValueRef(value, value_length)););
 }
 
-extern "C" DLLEXPORT void fdb_transaction_atomic_op(FDBTransaction* tr, uint8_t const* key_name, int key_name_length,
-                                                    uint8_t const* param, int param_length,
+extern "C" DLLEXPORT void fdb_transaction_atomic_op(FDBTransaction* tr,
+                                                    uint8_t const* key_name,
+                                                    int key_name_length,
+                                                    uint8_t const* param,
+                                                    int param_length,
                                                     FDBMutationType operation_type) {
-	CATCH_AND_DIE(TXN(tr)->atomicOp(KeyRef(key_name, key_name_length), ValueRef(param, param_length),
-	                                (FDBMutationTypes::Option)operation_type););
+	CATCH_AND_DIE(TXN(tr)->atomicOp(
+	    KeyRef(key_name, key_name_length), ValueRef(param, param_length), (FDBMutationTypes::Option)operation_type););
 }
 
 extern "C" DLLEXPORT void fdb_transaction_clear(FDBTransaction* tr, uint8_t const* key_name, int key_name_length) {
 	CATCH_AND_DIE(TXN(tr)->clear(KeyRef(key_name, key_name_length)););
 }
 
-extern "C" DLLEXPORT void fdb_transaction_clear_range(FDBTransaction* tr, uint8_t const* begin_key_name,
-                                                      int begin_key_name_length, uint8_t const* end_key_name,
+extern "C" DLLEXPORT void fdb_transaction_clear_range(FDBTransaction* tr,
+                                                      uint8_t const* begin_key_name,
+                                                      int begin_key_name_length,
+                                                      uint8_t const* end_key_name,
                                                       int end_key_name_length) {
 	CATCH_AND_DIE(
 	    TXN(tr)->clear(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length)););
 }
 
-extern "C" DLLEXPORT FDBFuture* fdb_transaction_watch(FDBTransaction* tr, uint8_t const* key_name,
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_watch(FDBTransaction* tr,
+                                                      uint8_t const* key_name,
                                                       int key_name_length) {
 	return (FDBFuture*)(TXN(tr)->watch(KeyRef(key_name, key_name_length)).extractPtr());
 }
@@ -471,7 +546,9 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_versionstamp(FDBTransaction*
 	return (FDBFuture*)(TXN(tr)->getVersionstamp().extractPtr());
 }
 
-fdb_error_t fdb_transaction_set_option_impl(FDBTransaction* tr, FDBTransactionOption option, uint8_t const* value,
+fdb_error_t fdb_transaction_set_option_impl(FDBTransaction* tr,
+                                            FDBTransactionOption option,
+                                            uint8_t const* value,
                                             int value_length) {
 	CATCH_AND_RETURN(TXN(tr)->setOption((FDBTransactionOptions::Option)option,
 	                                    value ? StringRef(value, value_length) : Optional<StringRef>()););
@@ -489,7 +566,8 @@ extern "C" DLLEXPORT void fdb_transaction_reset(FDBTransaction* tr) {
 	CATCH_AND_DIE(TXN(tr)->reset(););
 }
 
-extern "C" DLLEXPORT fdb_error_t fdb_transaction_add_conflict_range(FDBTransaction* tr, uint8_t const* begin_key_name,
+extern "C" DLLEXPORT fdb_error_t fdb_transaction_add_conflict_range(FDBTransaction* tr,
+                                                                    uint8_t const* begin_key_name,
                                                                     int begin_key_name_length,
                                                                     uint8_t const* end_key_name,
                                                                     int end_key_name_length,
@@ -517,16 +595,20 @@ extern "C" DLLEXPORT fdb_error_t fdb_transaction_add_conflict_range(FDBTransacti
 
 extern "C" DLLEXPORT fdb_error_t fdb_select_api_version_impl(int runtime_version, int header_version) {
 	/* Can only call this once */
-	if (g_api_version != 0) return error_code_api_version_already_set;
+	if (g_api_version != 0)
+		return error_code_api_version_already_set;
 
 	/* Caller screwed up, this makes no sense */
-	if (runtime_version > header_version) return error_code_api_version_invalid;
+	if (runtime_version > header_version)
+		return error_code_api_version_invalid;
 
 	/* Caller requested a version we don't speak */
-	if (header_version > FDB_API_VERSION) return error_code_api_version_not_supported;
+	if (header_version > FDB_API_VERSION)
+		return error_code_api_version_not_supported;
 
 	/* No backwards compatibility for earlier versions */
-	if (runtime_version < 13) return error_code_api_version_not_supported;
+	if (runtime_version < 13)
+		return error_code_api_version_not_supported;
 
 	RETURN_ON_ERROR(API->selectApiVersion(runtime_version););
 

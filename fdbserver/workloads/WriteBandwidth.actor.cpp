@@ -76,8 +76,8 @@ struct WriteBandwidthWorkload : KVWorkload {
 		m.emplace_back("98% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile(0.98), true);
 
 		m.emplace_back("Write rows/sec", writes / duration, false);
-		m.emplace_back("Bytes written/sec", (writes * (keyBytes + (minValueBytes + maxValueBytes) * 0.5)) / duration,
-		               false);
+		m.emplace_back(
+		    "Bytes written/sec", (writes * (keyBytes + (minValueBytes + maxValueBytes) * 0.5)) / duration, false);
 	}
 
 	Value randomValue() {

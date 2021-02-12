@@ -35,7 +35,10 @@ void getTagAndDurableVersion(TraceEventFields md, Version version, Tag& tag, Ver
 	durableVersion = boost::lexical_cast<int64_t>(md.getValue("DurableVersion"));
 }
 
-void getMinAndMaxTLogVersions(TraceEventFields md, Version version, Tag tag, Version& minTLogVersion,
+void getMinAndMaxTLogVersions(TraceEventFields md,
+                              Version version,
+                              Tag tag,
+                              Version& minTLogVersion,
                               Version& maxTLogVersion) {
 	Version verifyVersion;
 	Tag verifyTag;
@@ -56,7 +59,8 @@ void getMinAndMaxTLogVersions(TraceEventFields md, Version version, Tag tag, Ver
 }
 
 void filterEmptyMessages(std::vector<Future<TraceEventFields>>& messages) {
-	messages.erase(std::remove_if(messages.begin(), messages.end(),
+	messages.erase(std::remove_if(messages.begin(),
+	                              messages.end(),
 	                              [](Future<TraceEventFields> const& msgFuture) {
 		                              return !msgFuture.isReady() || msgFuture.get().size() == 0;
 	                              }),

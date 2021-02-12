@@ -82,7 +82,8 @@ public:
 	void set(Reference<Task> task, T const& val) const { task->params[key] = Codec<T>::pack(val).pack(); }
 	bool exists(Reference<Task> task) const { return task->params.find(key) != task->params.end(); }
 	T getOrDefault(Reference<Task> task, const T defaultValue = T()) const {
-		if (!exists(task)) return defaultValue;
+		if (!exists(task))
+			return defaultValue;
 		return get(task);
 	}
 	StringRef key;
@@ -100,8 +101,10 @@ public:
 	virtual ~TaskBucket();
 
 	void setOptions(Reference<ReadYourWritesTransaction> tr) {
-		if (system_access) tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		if (lock_aware) tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		if (system_access)
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		if (lock_aware)
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	}
 
 	Future<Void> changePause(Reference<ReadYourWritesTransaction> tr, bool pause);
@@ -133,10 +136,13 @@ public:
 
 	Standalone<StringRef> addTask(Reference<ReadYourWritesTransaction> tr, Reference<Task> task);
 
-	Future<Standalone<StringRef>> addTask(Reference<ReadYourWritesTransaction> tr, Reference<Task> task,
+	Future<Standalone<StringRef>> addTask(Reference<ReadYourWritesTransaction> tr,
+	                                      Reference<Task> task,
 	                                      KeyRef validationKey);
 
-	Standalone<StringRef> addTask(Reference<ReadYourWritesTransaction> tr, Reference<Task> task, KeyRef validationKey,
+	Standalone<StringRef> addTask(Reference<ReadYourWritesTransaction> tr,
+	                              Reference<Task> task,
+	                              KeyRef validationKey,
 	                              KeyRef validationValue);
 
 	Future<Reference<Task>> getOne(Reference<ReadYourWritesTransaction> tr);
@@ -162,9 +168,13 @@ public:
 	}
 
 	// Extend the task's timeout as if it just started and also save any parameter changes made to the task
-	Future<Version> extendTimeout(Reference<ReadYourWritesTransaction> tr, Reference<Task> task, bool updateParams,
+	Future<Version> extendTimeout(Reference<ReadYourWritesTransaction> tr,
+	                              Reference<Task> task,
+	                              bool updateParams,
 	                              Version newTimeoutVersion = invalidVersion);
-	Future<Void> extendTimeout(Database cx, Reference<Task> task, bool updateParams,
+	Future<Void> extendTimeout(Database cx,
+	                           Reference<Task> task,
+	                           bool updateParams,
 	                           Version newTimeoutVersion = invalidVersion) {
 		return map(runRYWTransaction(cx,
 		                             [=](Reference<ReadYourWritesTransaction> tr) {
@@ -208,7 +218,8 @@ public:
 	Key getPauseKey() const { return pauseKey; }
 
 	Subspace getAvailableSpace(int priority = 0) {
-		if (priority == 0) return available;
+		if (priority == 0)
+			return available;
 		return available_prioritized.get(priority);
 	}
 
@@ -256,8 +267,10 @@ public:
 	virtual ~FutureBucket();
 
 	void setOptions(Reference<ReadYourWritesTransaction> tr) {
-		if (system_access) tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		if (lock_aware) tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		if (system_access)
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		if (lock_aware)
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	}
 
 	Future<Void> clear(Reference<ReadYourWritesTransaction> tr);
@@ -297,25 +310,36 @@ public:
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) { return isSet(tr); });
 	}
 
-	Future<Void> onSetAddTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
+	Future<Void> onSetAddTask(Reference<ReadYourWritesTransaction> tr,
+	                          Reference<TaskBucket> taskBucket,
 	                          Reference<Task> task);
 	Future<Void> onSetAddTask(Database cx, Reference<TaskBucket> taskBucket, Reference<Task> task) {
 		return runRYWTransaction(
 		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return onSetAddTask(tr, taskBucket, task); });
 	}
 
-	Future<Void> onSetAddTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
-	                          Reference<Task> task, KeyRef validationKey);
-	Future<Void> onSetAddTask(Database cx, Reference<TaskBucket> taskBucket, Reference<Task> task,
+	Future<Void> onSetAddTask(Reference<ReadYourWritesTransaction> tr,
+	                          Reference<TaskBucket> taskBucket,
+	                          Reference<Task> task,
+	                          KeyRef validationKey);
+	Future<Void> onSetAddTask(Database cx,
+	                          Reference<TaskBucket> taskBucket,
+	                          Reference<Task> task,
 	                          KeyRef validationKey) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return onSetAddTask(tr, taskBucket, task, validationKey);
 		});
 	}
 
-	Future<Void> onSetAddTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
-	                          Reference<Task> task, KeyRef validationKey, KeyRef validationValue);
-	Future<Void> onSetAddTask(Database cx, Reference<TaskBucket> taskBucket, Reference<Task> task, KeyRef validationKey,
+	Future<Void> onSetAddTask(Reference<ReadYourWritesTransaction> tr,
+	                          Reference<TaskBucket> taskBucket,
+	                          Reference<Task> task,
+	                          KeyRef validationKey,
+	                          KeyRef validationValue);
+	Future<Void> onSetAddTask(Database cx,
+	                          Reference<TaskBucket> taskBucket,
+	                          Reference<Task> task,
+	                          KeyRef validationKey,
 	                          KeyRef validationValue) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return onSetAddTask(tr, taskBucket, task, validationKey, validationValue);
@@ -333,7 +357,8 @@ public:
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) { return set(tr, taskBucket); });
 	}
 
-	Future<Void> join(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
+	Future<Void> join(Reference<ReadYourWritesTransaction> tr,
+	                  Reference<TaskBucket> taskBucket,
 	                  std::vector<Reference<TaskFuture>> vectorFuture);
 	Future<Void> join(Database cx, Reference<TaskBucket> taskBucket, std::vector<Reference<TaskFuture>> vectorFuture) {
 		return runRYWTransaction(
@@ -377,7 +402,8 @@ struct TaskFuncBase : IDispatched<TaskFuncBase, Standalone<StringRef>, std::func
 
 	static bool isValidTask(Reference<Task> task) {
 		auto itor = task->params.find(Task::reservedTaskParamKeyType);
-		if (itor == task->params.end()) return false;
+		if (itor == task->params.end())
+			return false;
 
 		return isValidTaskType(itor->value);
 	}
@@ -385,13 +411,17 @@ struct TaskFuncBase : IDispatched<TaskFuncBase, Standalone<StringRef>, std::func
 	virtual StringRef getName() const = 0;
 
 	// At least once semantics; can take as long as it wants subject to the taskbucket timeout
-	virtual Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb,
+	virtual Future<Void> execute(Database cx,
+	                             Reference<TaskBucket> tb,
+	                             Reference<FutureBucket> fb,
 	                             Reference<Task> task) = 0;
 
 	// *Database* operations here are exactly once; side effects are at least once; excessive time here may prevent task
 	// from finishing!
-	virtual Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb,
-	                            Reference<FutureBucket> fb, Reference<Task> task) = 0;
+	virtual Future<Void> finish(Reference<ReadYourWritesTransaction> tr,
+	                            Reference<TaskBucket> tb,
+	                            Reference<FutureBucket> fb,
+	                            Reference<Task> task) = 0;
 
 	virtual Future<Void> handleError(Database cx, Reference<Task> task, Error const& error) { return Void(); }
 

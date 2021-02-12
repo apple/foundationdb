@@ -31,25 +31,31 @@ namespace FDB {
 class DirectorySubspace : public IDirectory, public Subspace {
 
 public:
-	DirectorySubspace(Path const& path, StringRef const& prefix, Reference<DirectoryLayer> directorLayer,
+	DirectorySubspace(Path const& path,
+	                  StringRef const& prefix,
+	                  Reference<DirectoryLayer> directorLayer,
 	                  Standalone<StringRef> const& layer = Standalone<StringRef>());
 	virtual ~DirectorySubspace() {}
 
 	virtual Future<Reference<DirectorySubspace>> create(
-	    Reference<Transaction> const& tr, Path const& path,
+	    Reference<Transaction> const& tr,
+	    Path const& path,
 	    Standalone<StringRef> const& layer = Standalone<StringRef>(),
 	    Optional<Standalone<StringRef>> const& prefix = Optional<Standalone<StringRef>>());
 
-	virtual Future<Reference<DirectorySubspace>> open(Reference<Transaction> const& tr, Path const& path,
+	virtual Future<Reference<DirectorySubspace>> open(Reference<Transaction> const& tr,
+	                                                  Path const& path,
 	                                                  Standalone<StringRef> const& layer = Standalone<StringRef>());
 	virtual Future<Reference<DirectorySubspace>> createOrOpen(
-	    Reference<Transaction> const& tr, Path const& path,
+	    Reference<Transaction> const& tr,
+	    Path const& path,
 	    Standalone<StringRef> const& layer = Standalone<StringRef>());
 
 	virtual Future<bool> exists(Reference<Transaction> const& tr, Path const& path = Path());
 	virtual Future<Standalone<VectorRef<StringRef>>> list(Reference<Transaction> const& tr, Path const& path = Path());
 
-	virtual Future<Reference<DirectorySubspace>> move(Reference<Transaction> const& tr, Path const& oldPath,
+	virtual Future<Reference<DirectorySubspace>> move(Reference<Transaction> const& tr,
+	                                                  Path const& oldPath,
 	                                                  Path const& newPath);
 	virtual Future<Reference<DirectorySubspace>> moveTo(Reference<Transaction> const& tr, Path const& newAbsolutePath);
 

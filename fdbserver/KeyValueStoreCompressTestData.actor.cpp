@@ -60,7 +60,8 @@ struct KeyValueStoreCompressTestData : IKeyValueStore {
 	}
 	ACTOR static Future<Optional<Value>> doReadValue(IKeyValueStore* store, Key key, Optional<UID> debugID) {
 		Optional<Value> v = wait(store->readValue(key, debugID));
-		if (!v.present()) return v;
+		if (!v.present())
+			return v;
 		return unpack(v.get());
 	}
 
@@ -68,14 +69,18 @@ struct KeyValueStoreCompressTestData : IKeyValueStore {
 	// problem is still present if you are using this storage interface, but this storage interface is not used by
 	// customers ever. However, if you want to try to test malicious atomic op workloads with compressed values for some
 	// reason, you will need to fix this.
-	virtual Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength,
+	virtual Future<Optional<Value>> readValuePrefix(KeyRef key,
+	                                                int maxLength,
 	                                                Optional<UID> debugID = Optional<UID>()) {
 		return doReadValuePrefix(store, key, maxLength, debugID);
 	}
-	ACTOR static Future<Optional<Value>> doReadValuePrefix(IKeyValueStore* store, Key key, int maxLength,
+	ACTOR static Future<Optional<Value>> doReadValuePrefix(IKeyValueStore* store,
+	                                                       Key key,
+	                                                       int maxLength,
 	                                                       Optional<UID> debugID) {
 		Optional<Value> v = wait(doReadValue(store, key, debugID));
-		if (!v.present()) return v;
+		if (!v.present())
+			return v;
 		if (maxLength < v.get().size()) {
 			return v.get().substr(0, maxLength);
 		} else {
@@ -85,27 +90,33 @@ struct KeyValueStoreCompressTestData : IKeyValueStore {
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
-	virtual Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit = 1 << 30,
+	virtual Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys,
+	                                                     int rowLimit = 1 << 30,
 	                                                     int byteLimit = 1 << 30) {
 		return doReadRange(store, keys, rowLimit, byteLimit);
 	}
-	ACTOR Future<Standalone<RangeResultRef>> doReadRange(IKeyValueStore* store, KeyRangeRef keys, int rowLimit,
+	ACTOR Future<Standalone<RangeResultRef>> doReadRange(IKeyValueStore* store,
+	                                                     KeyRangeRef keys,
+	                                                     int rowLimit,
 	                                                     int byteLimit) {
 		Standalone<RangeResultRef> _vs = wait(store->readRange(keys, rowLimit, byteLimit));
 		Standalone<RangeResultRef> vs = _vs; // Get rid of implicit const& from wait statement
 		Arena& a = vs.arena();
-		for (int i = 0; i < vs.size(); i++) vs[i].value = ValueRef(a, (ValueRef const&)unpack(vs[i].value));
+		for (int i = 0; i < vs.size(); i++)
+			vs[i].value = ValueRef(a, (ValueRef const&)unpack(vs[i].value));
 		return vs;
 	}
 
 private:
 	// These implement the actual "compression" scheme
 	static Value pack(Value val) {
-		if (!val.size()) return val;
+		if (!val.size())
+			return val;
 		uint8_t c = val[0];
 
 		// If the value starts with a 0-byte, then we don't compress it
-		if (c == 0) return val.withPrefix(LiteralStringRef("\x00"));
+		if (c == 0)
+			return val.withPrefix(LiteralStringRef("\x00"));
 
 		for (int i = 1; i < val.size(); i++) {
 			if (val[i] != c) {
@@ -122,8 +133,10 @@ private:
 		return val;
 	}
 	static Value unpack(Value val) {
-		if (!val.size()) return val;
-		if (val[0] == 0) return val.substr(1); // Uncompressed value
+		if (!val.size())
+			return val;
+		if (val[0] == 0)
+			return val.substr(1); // Uncompressed value
 		ASSERT(val.size() == 5);
 		uint8_t c = val[0];
 		int n = *(int*)(val.begin() + 1);

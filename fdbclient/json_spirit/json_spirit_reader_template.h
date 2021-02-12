@@ -42,9 +42,11 @@ const spirit_namespace::uint_parser<uint64_t> uint64_p = spirit_namespace::uint_
 template <class Iter_type>
 bool is_eq(Iter_type first, Iter_type last, const char* c_str) {
 	for (Iter_type i = first; i != last; ++i, ++c_str) {
-		if (*c_str == 0) return false;
+		if (*c_str == 0)
+			return false;
 
-		if (*i != *c_str) return false;
+		if (*i != *c_str)
+			return false;
 	}
 
 	return true;
@@ -52,9 +54,12 @@ bool is_eq(Iter_type first, Iter_type last, const char* c_str) {
 
 template <class Char_type>
 Char_type hex_to_num(const Char_type c) {
-	if ((c >= '0') && (c <= '9')) return c - '0';
-	if ((c >= 'a') && (c <= 'f')) return c - 'a' + 10;
-	if ((c >= 'A') && (c <= 'F')) return c - 'A' + 10;
+	if ((c >= '0') && (c <= '9'))
+		return c - '0';
+	if ((c >= 'a') && (c <= 'f'))
+		return c - 'a' + 10;
+	if ((c >= 'A') && (c <= 'F'))
+		return c - 'A' + 10;
 	return 0;
 }
 
@@ -77,7 +82,8 @@ Char_type unicode_str_to_char(Iter_type& begin) {
 }
 
 template <class String_type>
-void append_esc_char_and_incr_iter(String_type& s, typename String_type::const_iterator& begin,
+void append_esc_char_and_incr_iter(String_type& s,
+                                   typename String_type::const_iterator& begin,
                                    typename String_type::const_iterator end) {
 	typedef typename String_type::value_type Char_type;
 
@@ -129,7 +135,8 @@ template <class String_type>
 String_type substitute_esc_chars(typename String_type::const_iterator begin, typename String_type::const_iterator end) {
 	typedef typename String_type::const_iterator Iter_type;
 
-	if (end - begin < 2) return String_type(begin, end);
+	if (end - begin < 2)
+		return String_type(begin, end);
 
 	String_type result;
 
@@ -447,7 +454,9 @@ Iter_type read_range_or_throw(Iter_type begin, Iter_type end, Value_type& value)
 	Semantic_actions<Value_type, Iter_type> semantic_actions(value);
 
 	const spirit_namespace::parse_info<Iter_type> info = spirit_namespace::parse(
-	    begin, end, Json_grammer<Value_type, Iter_type>(semantic_actions),
+	    begin,
+	    end,
+	    Json_grammer<Value_type, Iter_type>(semantic_actions),
 	    spirit_namespace::space_p | spirit_namespace::comment_p("//") | spirit_namespace::comment_p("/*", "*/"));
 
 	if (!info.hit) {

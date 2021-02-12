@@ -322,17 +322,20 @@ struct lookup_tables {
 template <class Ch>
 inline std::size_t measure(const Ch* p) {
 	const Ch* tmp = p;
-	while (*tmp) ++tmp;
+	while (*tmp)
+		++tmp;
 	return tmp - p;
 }
 
 // Compare strings for equality
 template <class Ch>
 inline bool compare(const Ch* p1, std::size_t size1, const Ch* p2, std::size_t size2, bool case_sensitive) {
-	if (size1 != size2) return false;
+	if (size1 != size2)
+		return false;
 	if (case_sensitive) {
 		for (const Ch* end = p1 + size1; p1 < end; ++p1, ++p2)
-			if (*p1 != *p2) return false;
+			if (*p1 != *p2)
+				return false;
 	} else {
 		for (const Ch* end = p1 + size1; p1 < end; ++p1, ++p2)
 			if (lookup_tables<0>::lookup_upcase[static_cast<unsigned char>(*p1)] !=
@@ -404,7 +407,10 @@ public:
 	//! \param name_size Size of name to assign, or 0 to automatically calculate size from name string.
 	//! \param value_size Size of value to assign, or 0 to automatically calculate size from value string.
 	//! \return Pointer to allocated node. This pointer will never be NULL.
-	xml_node<Ch>* allocate_node(node_type type, const Ch* name = 0, const Ch* value = 0, std::size_t name_size = 0,
+	xml_node<Ch>* allocate_node(node_type type,
+	                            const Ch* name = 0,
+	                            const Ch* value = 0,
+	                            std::size_t name_size = 0,
 	                            std::size_t value_size = 0) {
 		void* memory = allocate_aligned(sizeof(xml_node<Ch>));
 		xml_node<Ch>* node = new (memory) xml_node<Ch>(type);
@@ -436,7 +442,9 @@ public:
 	//! \param name_size Size of name to assign, or 0 to automatically calculate size from name string.
 	//! \param value_size Size of value to assign, or 0 to automatically calculate size from value string.
 	//! \return Pointer to allocated attribute. This pointer will never be NULL.
-	xml_attribute<Ch>* allocate_attribute(const Ch* name = 0, const Ch* value = 0, std::size_t name_size = 0,
+	xml_attribute<Ch>* allocate_attribute(const Ch* name = 0,
+	                                      const Ch* value = 0,
+	                                      std::size_t name_size = 0,
 	                                      std::size_t value_size = 0) {
 		void* memory = allocate_aligned(sizeof(xml_attribute<Ch>));
 		xml_attribute<Ch>* attribute = new (memory) xml_attribute<Ch>;
@@ -466,24 +474,29 @@ public:
 	template <typename Sch>
 	Ch* allocate_string(const Sch* source = 0, std::size_t size = 0) {
 		assert(source || size); // Either source or size (or both) must be specified
-		if (size == 0) size = internal::measure(source) + 1;
+		if (size == 0)
+			size = internal::measure(source) + 1;
 		Ch* result = static_cast<Ch*>(allocate_aligned(size * sizeof(Ch)));
 		if (source)
-			for (std::size_t i = 0; i < size; ++i) result[i] = source[i];
+			for (std::size_t i = 0; i < size; ++i)
+				result[i] = source[i];
 		return result;
 	}
 
 	Ch* nullstr() {
-		if (!m_nullstr) m_nullstr = allocate_string("");
+		if (!m_nullstr)
+			m_nullstr = allocate_string("");
 		return m_nullstr;
 	}
 	Ch* xmlns_xml(std::size_t& xmlns_size) {
-		if (!m_xmlns_xml) m_xmlns_xml = allocate_string("http://www.w3.org/XML/1998/namespace");
+		if (!m_xmlns_xml)
+			m_xmlns_xml = allocate_string("http://www.w3.org/XML/1998/namespace");
 		xmlns_size = internal::measure(m_xmlns_xml);
 		return m_xmlns_xml;
 	}
 	Ch* xmlns_xmlns(std::size_t& xmlns_size) {
-		if (!m_xmlns_xmlns) m_xmlns_xmlns = allocate_string("http://www.w3.org/2000/xmlns/");
+		if (!m_xmlns_xmlns)
+			m_xmlns_xmlns = allocate_string("http://www.w3.org/2000/xmlns/");
 		xmlns_size = internal::measure(m_xmlns_xmlns);
 		return m_xmlns_xmlns;
 	}
@@ -601,7 +614,8 @@ private:
 		if (result + size > m_end) {
 			// Calculate required pool size (may be bigger than RAPIDXML_DYNAMIC_POOL_SIZE)
 			std::size_t pool_size = RAPIDXML_DYNAMIC_POOL_SIZE;
-			if (pool_size < size) pool_size = size;
+			if (pool_size < size)
+				pool_size = size;
 
 			// Allocate
 			std::size_t alloc_size =
@@ -769,25 +783,29 @@ public:
 	//! \return Pointer to document that contains this attribute, or 0 if there is no parent document.
 	xml_document<Ch>* document() const {
 		if (xml_node<Ch>* node = this->parent()) {
-			while (node->parent()) node = node->parent();
+			while (node->parent())
+				node = node->parent();
 			return node->type() == node_document ? static_cast<xml_document<Ch>*>(node) : 0;
 		} else
 			return 0;
 	}
 
 	Ch* xmlns() const {
-		if (m_xmlns) return m_xmlns;
+		if (m_xmlns)
+			return m_xmlns;
 		Ch* p;
 		Ch* name = this->name();
 		for (p = name; *p && *p != ':'; ++p)
-			if ((p - name) >= this->name_size()) break;
+			if ((p - name) >= this->name_size())
+				break;
 		if (!*p || ((p - name) >= this->name_size())) {
 			m_xmlns = document()->nullstr();
 			m_xmlns_size = 0;
 			return m_xmlns;
 		}
 		xml_node<Ch>* element = this->parent();
-		if (element) element->xmlns_lookup(m_xmlns, m_xmlns_size, name, p - name);
+		if (element)
+			element->xmlns_lookup(m_xmlns, m_xmlns_size, name, p - name);
 		return m_xmlns;
 	}
 	std::size_t xmlns_size() const { return this->xmlns() ? m_xmlns_size : 0; }
@@ -797,10 +815,12 @@ public:
 	//! to have size calculated automatically from string \param case_sensitive Should name comparison be
 	//! case-sensitive; non case-sensitive comparison works properly only for ASCII characters \return Pointer to found
 	//! attribute, or 0 if not found.
-	xml_attribute<Ch>* previous_attribute(const Ch* name = 0, std::size_t name_size = 0,
+	xml_attribute<Ch>* previous_attribute(const Ch* name = 0,
+	                                      std::size_t name_size = 0,
 	                                      bool case_sensitive = true) const {
 		if (name) {
-			if (name_size == 0) name_size = internal::measure(name);
+			if (name_size == 0)
+				name_size = internal::measure(name);
 			for (xml_attribute<Ch>* attribute = m_prev_attribute; attribute; attribute = attribute->m_prev_attribute)
 				if (internal::compare(attribute->name(), attribute->name_size(), name, name_size, case_sensitive))
 					return attribute;
@@ -817,7 +837,8 @@ public:
 	//! not found.
 	xml_attribute<Ch>* next_attribute(const Ch* name = 0, std::size_t name_size = 0, bool case_sensitive = true) const {
 		if (name) {
-			if (name_size == 0) name_size = internal::measure(name);
+			if (name_size == 0)
+				name_size = internal::measure(name);
 			for (xml_attribute<Ch>* attribute = m_next_attribute; attribute; attribute = attribute->m_next_attribute)
 				if (internal::compare(attribute->name(), attribute->name_size(), name, name_size, case_sensitive))
 					return attribute;
@@ -827,7 +848,8 @@ public:
 	}
 
 	Ch* local_name() const {
-		if (m_local_name) return m_local_name;
+		if (m_local_name)
+			return m_local_name;
 		Ch* p = this->name();
 		for (; *p && *p != Ch(':'); ++p)
 			;
@@ -891,7 +913,8 @@ public:
 	std::size_t prefix_size() const { return m_prefix ? m_prefix_size : 0; }
 
 	Ch* xmlns() const {
-		if (m_xmlns) return m_xmlns;
+		if (m_xmlns)
+			return m_xmlns;
 		xmlns_lookup(m_xmlns, m_xmlns_size, m_prefix, m_prefix_size);
 		return m_xmlns;
 	}
@@ -912,7 +935,8 @@ public:
 			}
 			freeme = attrname = new Ch[prefix_size + 7];
 			const char* p1 = "xmlns";
-			while (*p1) *attrname++ = *p1++;
+			while (*p1)
+				*attrname++ = *p1++;
 			Ch* p = prefix;
 			*attrname++ = Ch(':');
 			while (*p) {
@@ -924,7 +948,8 @@ public:
 		} else {
 			freeme = attrname = new Ch[6];
 			const char* p1 = "xmlns";
-			while (*p1) *attrname++ = *p1++;
+			while (*p1)
+				*attrname++ = *p1++;
 			*attrname = Ch(0);
 			attrname = freeme;
 		}
@@ -944,11 +969,13 @@ public:
 				xmlns_size = 0;
 			}
 		}
-		if (freeme) delete[] freeme;
+		if (freeme)
+			delete[] freeme;
 	}
 
 	std::size_t xmlns_size() const {
-		if (m_xmlns) return m_xmlns_size;
+		if (m_xmlns)
+			return m_xmlns_size;
 		this->xmlns();
 		return m_xmlns_size;
 	}
@@ -960,7 +987,8 @@ public:
 	//! \return Pointer to document that contains this node, or 0 if there is no parent document.
 	xml_document<Ch>* document() const {
 		xml_node<Ch>* node = const_cast<xml_node<Ch>*>(this);
-		while (node->parent()) node = node->parent();
+		while (node->parent())
+			node = node->parent();
 		return node->type() == node_document ? static_cast<xml_document<Ch>*>(node) : 0;
 	}
 
@@ -970,10 +998,15 @@ public:
 	//! calculated automatically from string \param case_sensitive Should name comparison be case-sensitive; non
 	//! case-sensitive comparison works properly only for ASCII characters \return Pointer to found child, or 0 if not
 	//! found.
-	xml_node<Ch>* first_node(const Ch* name = 0, const Ch* xmlns = 0, std::size_t name_size = 0,
-	                         std::size_t xmlns_size = 0, bool case_sensitive = true) const {
-		if (name && !name_size) name_size = internal::measure(name);
-		if (xmlns && !xmlns_size) xmlns_size = internal::measure(xmlns);
+	xml_node<Ch>* first_node(const Ch* name = 0,
+	                         const Ch* xmlns = 0,
+	                         std::size_t name_size = 0,
+	                         std::size_t xmlns_size = 0,
+	                         bool case_sensitive = true) const {
+		if (name && !name_size)
+			name_size = internal::measure(name);
+		if (xmlns && !xmlns_size)
+			xmlns_size = internal::measure(xmlns);
 		if (!xmlns && name) {
 			// No XMLNS asked for, but a name is present.
 			// Assume "same XMLNS".
@@ -995,11 +1028,16 @@ public:
 	//! calculated automatically from string \param case_sensitive Should name comparison be case-sensitive; non
 	//! case-sensitive comparison works properly only for ASCII characters \return Pointer to found child, or 0 if not
 	//! found.
-	xml_node<Ch>* last_node(const Ch* name = 0, const Ch* xmlns = 0, std::size_t name_size = 0,
-	                        std::size_t xmlns_size = 0, bool case_sensitive = true) const {
+	xml_node<Ch>* last_node(const Ch* name = 0,
+	                        const Ch* xmlns = 0,
+	                        std::size_t name_size = 0,
+	                        std::size_t xmlns_size = 0,
+	                        bool case_sensitive = true) const {
 		assert(m_first_node); // Cannot query for last child if node has no children
-		if (name && !name_size) name_size = internal::measure(name);
-		if (xmlns && !xmlns_size) xmlns_size = internal::measure(xmlns);
+		if (name && !name_size)
+			name_size = internal::measure(name);
+		if (xmlns && !xmlns_size)
+			xmlns_size = internal::measure(xmlns);
 		if (!xmlns && name) {
 			// No XMLNS asked for, but a name is present.
 			// Assume "same XMLNS".
@@ -1024,7 +1062,8 @@ public:
 	xml_node<Ch>* previous_sibling(const Ch* name = 0, std::size_t name_size = 0, bool case_sensitive = true) const {
 		assert(this->m_parent); // Cannot query for siblings if node has no parent
 		if (name) {
-			if (name_size == 0) name_size = internal::measure(name);
+			if (name_size == 0)
+				name_size = internal::measure(name);
 			for (xml_node<Ch>* sibling = m_prev_sibling; sibling; sibling = sibling->m_prev_sibling)
 				if (internal::compare(sibling->name(), sibling->name_size(), name, name_size, case_sensitive))
 					return sibling;
@@ -1044,7 +1083,8 @@ public:
 	xml_node<Ch>* next_sibling(const Ch* name = 0, std::size_t name_size = 0, bool case_sensitive = true) const {
 		assert(this->m_parent); // Cannot query for siblings if node has no parent
 		if (name) {
-			if (name_size == 0) name_size = internal::measure(name);
+			if (name_size == 0)
+				name_size = internal::measure(name);
 			for (xml_node<Ch>* sibling = m_next_sibling; sibling; sibling = sibling->m_next_sibling)
 				if (internal::compare(sibling->name(), sibling->name_size(), name, name_size, case_sensitive))
 					return sibling;
@@ -1059,10 +1099,12 @@ public:
 	//! to have size calculated automatically from string \param case_sensitive Should name comparison be
 	//! case-sensitive; non case-sensitive comparison works properly only for ASCII characters \return Pointer to found
 	//! attribute, or 0 if not found.
-	xml_attribute<Ch>* first_attribute(const Ch* name = 0, std::size_t name_size = 0,
+	xml_attribute<Ch>* first_attribute(const Ch* name = 0,
+	                                   std::size_t name_size = 0,
 	                                   bool case_sensitive = true) const {
 		if (name) {
-			if (name_size == 0) name_size = internal::measure(name);
+			if (name_size == 0)
+				name_size = internal::measure(name);
 			for (xml_attribute<Ch>* attribute = m_first_attribute; attribute; attribute = attribute->m_next_attribute)
 				if (internal::compare(attribute->name(), attribute->name_size(), name, name_size, case_sensitive))
 					return attribute;
@@ -1079,7 +1121,8 @@ public:
 	//! not found.
 	xml_attribute<Ch>* last_attribute(const Ch* name = 0, std::size_t name_size = 0, bool case_sensitive = true) const {
 		if (name) {
-			if (name_size == 0) name_size = internal::measure(name);
+			if (name_size == 0)
+				name_size = internal::measure(name);
 			for (xml_attribute<Ch>* attribute = m_last_attribute; attribute; attribute = attribute->m_prev_attribute)
 				if (internal::compare(attribute->name(), attribute->name_size(), name, name_size, case_sensitive))
 					return attribute;
@@ -1198,7 +1241,8 @@ public:
 
 	//! Removes all child nodes (but not attributes).
 	void remove_all_nodes() {
-		for (xml_node<Ch>* node = first_node(); node; node = node->m_next_sibling) node->m_parent = 0;
+		for (xml_node<Ch>* node = first_node(); node; node = node->m_next_sibling)
+			node->m_parent = 0;
 		m_first_node = 0;
 	}
 
@@ -1305,22 +1349,27 @@ public:
 	}
 
 	void validate() const {
-		if (this->xmlns() == 0) throw validation_error("Element XMLNS unbound");
+		if (this->xmlns() == 0)
+			throw validation_error("Element XMLNS unbound");
 		for (xml_node<Ch>* child = this->first_node(); child; child = child->next_sibling()) {
 			child->validate();
 		}
 		for (xml_attribute<Ch>* attribute = first_attribute(); attribute; attribute = attribute->m_next_attribute) {
-			if (attribute->xmlns() == 0) throw validation_error("Attribute XMLNS unbound");
+			if (attribute->xmlns() == 0)
+				throw validation_error("Attribute XMLNS unbound");
 			for (xml_attribute<Ch>* otherattr = first_attribute(); otherattr != attribute;
 			     otherattr = otherattr->m_next_attribute) {
-				if (internal::compare(attribute->name(), attribute->name_size(), otherattr->name(),
-				                      otherattr->name_size(), true)) {
+				if (internal::compare(
+				        attribute->name(), attribute->name_size(), otherattr->name(), otherattr->name_size(), true)) {
 					throw validation_error("Attribute doubled");
 				}
-				if (internal::compare(attribute->local_name(), attribute->local_name_size(), otherattr->local_name(),
-				                      otherattr->local_name_size(), true) &&
-				    internal::compare(attribute->xmlns(), attribute->xmlns_size(), otherattr->xmlns(),
-				                      otherattr->xmlns_size(), true))
+				if (internal::compare(attribute->local_name(),
+				                      attribute->local_name_size(),
+				                      otherattr->local_name(),
+				                      otherattr->local_name_size(),
+				                      true) &&
+				    internal::compare(
+				        attribute->xmlns(), attribute->xmlns_size(), otherattr->xmlns(), otherattr->xmlns_size(), true))
 					throw validation_error("Attribute XMLNS doubled");
 			}
 		}
@@ -1406,7 +1455,8 @@ public:
 		while (1) {
 			// Skip whitespace before node
 			skip<whitespace_pred, Flags>(text);
-			if (*text == 0) break;
+			if (*text == 0)
+				break;
 
 			// Parse and append new child
 			if (*text == Ch('<')) {
@@ -1414,7 +1464,8 @@ public:
 				if (xml_node<Ch>* node = parse_node<Flags>(text)) {
 					this->append_node(node);
 					if (Flags & (parse_open_only | parse_parse_one)) {
-						if (node->type() == node_element) break;
+						if (node->type() == node_element)
+							break;
 					}
 				}
 			} else
@@ -1442,9 +1493,11 @@ public:
 		// Check the type.
 		if (element->type() == node_element) {
 			// Terminate name and attributes
-			if (!(Flags & parse_no_string_terminators)) element->name()[element->name_size()] = 0;
+			if (!(Flags & parse_no_string_terminators))
+				element->name()[element->name_size()] = 0;
 			for (xml_attribute<Ch>* attr = element->first_attribute(); attr; attr = attr->next_attribute()) {
-				if (!(Flags & parse_no_string_terminators)) attr->name()[attr->name_size()] = 0;
+				if (!(Flags & parse_no_string_terminators))
+					attr->name()[attr->name_size()] = 0;
 				Ch* value = attr->value();
 				Ch* p = value;
 				Ch* end;
@@ -1452,12 +1505,15 @@ public:
 				Ch quote = value[-1];
 				if (quote == Ch('\''))
 					end = skip_and_expand_character_refs<attribute_value_pred<Ch('\'')>,
-					                                     attribute_value_pure_pred<Ch('\'')>, AttFlags>(p);
+					                                     attribute_value_pure_pred<Ch('\'')>,
+					                                     AttFlags>(p);
 				else
 					end = skip_and_expand_character_refs<attribute_value_pred<Ch('"')>,
-					                                     attribute_value_pure_pred<Ch('"')>, AttFlags>(p);
+					                                     attribute_value_pure_pred<Ch('"')>,
+					                                     AttFlags>(p);
 				attr->value(value, end - value);
-				if (!(Flags & parse_no_string_terminators)) attr->value()[attr->value_size()] = 0;
+				if (!(Flags & parse_no_string_terminators))
+					attr->value()[attr->value_size()] = 0;
 			}
 			if (recurse) {
 				for (xml_node<Ch>* child = element->first_node(); child; child = child->next_sibling()) {
@@ -1601,7 +1657,8 @@ private:
 	template <class StopPred, int Flags>
 	static void skip(Ch*& text) {
 		Ch* tmp = text;
-		while (StopPred::test(*tmp)) ++tmp;
+		while (StopPred::test(*tmp))
+			++tmp;
 		text = tmp;
 	}
 
@@ -1684,7 +1741,8 @@ private:
 							while (1) {
 								unsigned char digit =
 								    internal::lookup_tables<0>::lookup_digits[static_cast<unsigned char>(*src)];
-								if (digit == 0xFF) break;
+								if (digit == 0xFF)
+									break;
 								code = code * 16 + digit;
 								++src;
 							}
@@ -1695,7 +1753,8 @@ private:
 							while (1) {
 								unsigned char digit =
 								    internal::lookup_tables<0>::lookup_digits[static_cast<unsigned char>(*src)];
-								if (digit == 0xFF) break;
+								if (digit == 0xFF)
+									break;
 								code = code * 10 + digit;
 								++src;
 							}
@@ -1723,7 +1782,8 @@ private:
 					++dest; // Put single space in dest
 					++src; // Skip first whitespace char
 					// Skip remaining whitespace chars
-					while (whitespace_pred::test(*src)) ++src;
+					while (whitespace_pred::test(*src))
+						++src;
 					continue;
 				}
 			}
@@ -1757,7 +1817,8 @@ private:
 		if (!(Flags & parse_declaration_node)) {
 			// Skip until end of declaration
 			while (text[0] != Ch('?') || text[1] != Ch('>')) {
-				if (!text[0]) RAPIDXML_PARSE_ERROR("unexpected end of data", text);
+				if (!text[0])
+					RAPIDXML_PARSE_ERROR("unexpected end of data", text);
 				++text;
 			}
 			text += 2; // Skip '?>'
@@ -1774,7 +1835,8 @@ private:
 		parse_node_attributes<Flags>(text, declaration);
 
 		// Skip ?>
-		if (text[0] != Ch('?') || text[1] != Ch('>')) RAPIDXML_PARSE_ERROR("expected ?>", text);
+		if (text[0] != Ch('?') || text[1] != Ch('>'))
+			RAPIDXML_PARSE_ERROR("expected ?>", text);
 		text += 2;
 
 		return declaration;
@@ -1787,7 +1849,8 @@ private:
 		if (!(Flags & parse_comment_nodes)) {
 			// Skip until end of comment
 			while (text[0] != Ch('-') || text[1] != Ch('-') || text[2] != Ch('>')) {
-				if (!text[0]) RAPIDXML_PARSE_ERROR("unexpected end of data", text);
+				if (!text[0])
+					RAPIDXML_PARSE_ERROR("unexpected end of data", text);
 				++text;
 			}
 			text += 3; // Skip '-->'
@@ -1799,7 +1862,8 @@ private:
 
 		// Skip until end of comment
 		while (text[0] != Ch('-') || text[1] != Ch('-') || text[2] != Ch('>')) {
-			if (!text[0]) RAPIDXML_PARSE_ERROR("unexpected end of data", text);
+			if (!text[0])
+				RAPIDXML_PARSE_ERROR("unexpected end of data", text);
 			++text;
 		}
 
@@ -1808,7 +1872,8 @@ private:
 		comment->value(value, text - value);
 
 		// Place zero terminator after comment value
-		if (!(Flags & parse_no_string_terminators)) *text = Ch('\0');
+		if (!(Flags & parse_no_string_terminators))
+			*text = Ch('\0');
 
 		text += 3; // Skip '-->'
 		return comment;
@@ -1863,7 +1928,8 @@ private:
 			doctype->value(value, text - value);
 
 			// Place zero terminator after value
-			if (!(Flags & parse_no_string_terminators)) *text = Ch('\0');
+			if (!(Flags & parse_no_string_terminators))
+				*text = Ch('\0');
 
 			text += 1; // skip '>'
 			return doctype;
@@ -1884,7 +1950,8 @@ private:
 			// Extract PI target name
 			Ch* name = text;
 			skip<node_name_pred, Flags>(text);
-			if (text == name) RAPIDXML_PARSE_ERROR("expected PI target", text);
+			if (text == name)
+				RAPIDXML_PARSE_ERROR("expected PI target", text);
 			pi->name(name, text - name);
 
 			// Skip whitespace between pi target and pi
@@ -1895,7 +1962,8 @@ private:
 
 			// Skip to '?>'
 			while (text[0] != Ch('?') || text[1] != Ch('>')) {
-				if (*text == Ch('\0')) RAPIDXML_PARSE_ERROR("unexpected end of data", text);
+				if (*text == Ch('\0'))
+					RAPIDXML_PARSE_ERROR("unexpected end of data", text);
 				++text;
 			}
 
@@ -1913,7 +1981,8 @@ private:
 		} else {
 			// Skip to '?>'
 			while (text[0] != Ch('?') || text[1] != Ch('>')) {
-				if (*text == Ch('\0')) RAPIDXML_PARSE_ERROR("unexpected end of data", text);
+				if (*text == Ch('\0'))
+					RAPIDXML_PARSE_ERROR("unexpected end of data", text);
 				++text;
 			}
 			text += 2; // Skip '?>'
@@ -1927,7 +1996,8 @@ private:
 	template <int Flags>
 	Ch parse_and_append_data(xml_node<Ch>* node, Ch*& text, Ch* contents_start) {
 		// Backup to contents start if whitespace trimming is disabled
-		if (!(Flags & parse_trim_whitespace)) text = contents_start;
+		if (!(Flags & parse_trim_whitespace))
+			text = contents_start;
 
 		// Skip until end of data
 		Ch *value = text, *end;
@@ -1941,10 +2011,12 @@ private:
 			if (Flags & parse_normalize_whitespace) {
 				// Whitespace is already condensed to single space characters by skipping function, so just trim 1 char
 				// off the end
-				if (*(end - 1) == Ch(' ')) --end;
+				if (*(end - 1) == Ch(' '))
+					--end;
 			} else {
 				// Backup until non-whitespace character is found
-				while (whitespace_pred::test(*(end - 1))) --end;
+				while (whitespace_pred::test(*(end - 1)))
+					--end;
 			}
 		}
 
@@ -1958,7 +2030,8 @@ private:
 
 		// Add data to parent node if no data exists yet
 		if (!(Flags & parse_no_element_values))
-			if (*node->value() == Ch('\0')) node->value(value, end - value);
+			if (*node->value() == Ch('\0'))
+				node->value(value, end - value);
 
 		// Place zero terminator after value
 		if (!(Flags & parse_no_string_terminators)) {
@@ -1978,7 +2051,8 @@ private:
 		if (Flags & parse_no_data_nodes) {
 			// Skip until end of cdata
 			while (text[0] != Ch(']') || text[1] != Ch(']') || text[2] != Ch('>')) {
-				if (!text[0]) RAPIDXML_PARSE_ERROR("unexpected end of data", text);
+				if (!text[0])
+					RAPIDXML_PARSE_ERROR("unexpected end of data", text);
 				++text;
 			}
 			text += 3; // Skip ]]>
@@ -1988,7 +2062,8 @@ private:
 		// Skip until end of cdata
 		Ch* value = text;
 		while (text[0] != Ch(']') || text[1] != Ch(']') || text[2] != Ch('>')) {
-			if (!text[0]) RAPIDXML_PARSE_ERROR("unexpected end of data", text);
+			if (!text[0])
+				RAPIDXML_PARSE_ERROR("unexpected end of data", text);
 			++text;
 		}
 
@@ -1997,7 +2072,8 @@ private:
 		cdata->value(value, text - value);
 
 		// Place zero terminator after value
-		if (!(Flags & parse_no_string_terminators)) *text = Ch('\0');
+		if (!(Flags & parse_no_string_terminators))
+			*text = Ch('\0');
 
 		text += 3; // Skip ]]>
 		return cdata;
@@ -2012,13 +2088,15 @@ private:
 		// Extract element name
 		Ch* prefix = text;
 		skip<element_name_pred, Flags>(text);
-		if (text == prefix) RAPIDXML_PARSE_ERROR("expected element name or prefix", text);
+		if (text == prefix)
+			RAPIDXML_PARSE_ERROR("expected element name or prefix", text);
 		if (*text == Ch(':')) {
 			element->prefix(prefix, text - prefix);
 			++text;
 			Ch* name = text;
 			skip<node_name_pred, Flags>(text);
-			if (text == name) RAPIDXML_PARSE_ERROR("expected element local name", text);
+			if (text == name)
+				RAPIDXML_PARSE_ERROR("expected element local name", text);
 			element->name(name, text - name);
 		} else {
 			element->name(prefix, text - prefix);
@@ -2033,19 +2111,23 @@ private:
 		// Determine ending type
 		if (*text == Ch('>')) {
 			++text;
-			if (!(Flags & parse_open_only)) parse_node_contents<Flags>(text, element);
+			if (!(Flags & parse_open_only))
+				parse_node_contents<Flags>(text, element);
 		} else if (*text == Ch('/')) {
 			++text;
-			if (*text != Ch('>')) RAPIDXML_PARSE_ERROR("expected >", text);
+			if (*text != Ch('>'))
+				RAPIDXML_PARSE_ERROR("expected >", text);
 			++text;
-			if (Flags & parse_open_only) RAPIDXML_PARSE_ERROR("only_only, but closed", text);
+			if (Flags & parse_open_only)
+				RAPIDXML_PARSE_ERROR("only_only, but closed", text);
 		} else
 			RAPIDXML_PARSE_ERROR("expected >", text);
 
 		// Place zero terminator after name
 		if (!(Flags & parse_no_string_terminators)) {
 			element->name()[element->name_size()] = Ch('\0');
-			if (element->prefix()) element->prefix()[element->prefix_size()] = Ch('\0');
+			if (element->prefix())
+				element->prefix()[element->prefix_size()] = Ch('\0');
 		}
 
 		// Return parsed element
@@ -2115,7 +2197,8 @@ private:
 			// Attempt to skip other, unrecognized node types starting with <!
 			++text; // Skip !
 			while (*text != Ch('>')) {
-				if (*text == 0) RAPIDXML_PARSE_ERROR("unexpected end of data", text);
+				if (*text == 0)
+					RAPIDXML_PARSE_ERROR("unexpected end of data", text);
 				++text;
 			}
 			++text; // Skip '>'
@@ -2151,8 +2234,8 @@ private:
 						// Skip and validate closing tag name
 						Ch* closing_name = text;
 						skip<node_name_pred, Flags>(text);
-						if (!internal::compare(node->name(), node->name_size(), closing_name, text - closing_name,
-						                       true))
+						if (!internal::compare(
+						        node->name(), node->name_size(), closing_name, text - closing_name, true))
 							RAPIDXML_PARSE_ERROR("invalid closing tag name", text);
 					} else {
 						// No validation, just skip name
@@ -2160,14 +2243,17 @@ private:
 					}
 					// Skip remaining whitespace after node name
 					skip<whitespace_pred, Flags>(text);
-					if (*text != Ch('>')) RAPIDXML_PARSE_ERROR("expected >", text);
+					if (*text != Ch('>'))
+						RAPIDXML_PARSE_ERROR("expected >", text);
 					++text; // Skip '>'
-					if (Flags & parse_open_only) RAPIDXML_PARSE_ERROR("Unclosed element actually closed.", text);
+					if (Flags & parse_open_only)
+						RAPIDXML_PARSE_ERROR("Unclosed element actually closed.", text);
 					return; // Node closed, finished parsing contents
 				} else {
 					// Child node
 					++text; // Skip '<'
-					if (xml_node<Ch>* child = parse_node<Flags & ~parse_open_only>(text)) node->append_node(child);
+					if (xml_node<Ch>* child = parse_node<Flags & ~parse_open_only>(text))
+						node->append_node(child);
 				}
 				break;
 
@@ -2196,7 +2282,8 @@ private:
 			Ch* name = text;
 			++text; // Skip first character of attribute name
 			skip<attribute_name_pred, Flags>(text);
-			if (text == name) RAPIDXML_PARSE_ERROR("expected attribute name", name);
+			if (text == name)
+				RAPIDXML_PARSE_ERROR("expected attribute name", name);
 
 			// Create new attribute
 			xml_attribute<Ch>* attribute = this->allocate_attribute();
@@ -2207,18 +2294,21 @@ private:
 			skip<whitespace_pred, Flags>(text);
 
 			// Skip =
-			if (*text != Ch('=')) RAPIDXML_PARSE_ERROR("expected =", text);
+			if (*text != Ch('='))
+				RAPIDXML_PARSE_ERROR("expected =", text);
 			++text;
 
 			// Add terminating zero after name
-			if (!(Flags & parse_no_string_terminators)) attribute->name()[attribute->name_size()] = 0;
+			if (!(Flags & parse_no_string_terminators))
+				attribute->name()[attribute->name_size()] = 0;
 
 			// Skip whitespace after =
 			skip<whitespace_pred, Flags>(text);
 
 			// Skip quote and remember if it was ' or "
 			Ch quote = *text;
-			if (quote != Ch('\'') && quote != Ch('"')) RAPIDXML_PARSE_ERROR("expected ' or \"", text);
+			if (quote != Ch('\'') && quote != Ch('"'))
+				RAPIDXML_PARSE_ERROR("expected ' or \"", text);
 			++text;
 
 			// Extract attribute value and expand char refs in it
@@ -2226,20 +2316,24 @@ private:
 			const int AttFlags = Flags & ~parse_normalize_whitespace; // No whitespace normalization in attributes
 			if (quote == Ch('\''))
 				end = skip_and_expand_character_refs<attribute_value_pred<Ch('\'')>,
-				                                     attribute_value_pure_pred<Ch('\'')>, AttFlags>(text);
+				                                     attribute_value_pure_pred<Ch('\'')>,
+				                                     AttFlags>(text);
 			else
-				end = skip_and_expand_character_refs<attribute_value_pred<Ch('"')>, attribute_value_pure_pred<Ch('"')>,
+				end = skip_and_expand_character_refs<attribute_value_pred<Ch('"')>,
+				                                     attribute_value_pure_pred<Ch('"')>,
 				                                     AttFlags>(text);
 
 			// Set attribute value
 			attribute->value(value, end - value);
 
 			// Make sure that end quote is present
-			if (*text != quote) RAPIDXML_PARSE_ERROR("expected ' or \"", text);
+			if (*text != quote)
+				RAPIDXML_PARSE_ERROR("expected ' or \"", text);
 			++text; // Skip quote
 
 			// Add terminating zero after value
-			if (!(Flags & parse_no_string_terminators)) attribute->value()[attribute->value_size()] = 0;
+			if (!(Flags & parse_no_string_terminators))
+				attribute->value()[attribute->value_size()] = 0;
 
 			// Skip whitespace after attribute value
 			skip<whitespace_pred, Flags>(text);

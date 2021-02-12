@@ -91,7 +91,8 @@ Tuple::Tuple(StringRef const& str) {
 	size_t i = 0;
 	int depth = 0;
 	while (i < data.size()) {
-		if (depth == 0) offsets.push_back(i);
+		if (depth == 0)
+			offsets.push_back(i);
 
 		if (depth > 0 && data[i] == NULL_CODE) {
 			if (i + 1 < data.size() && data[i + 1] == 0xff) {
@@ -461,7 +462,8 @@ Tuple Tuple::getNested(size_t index) const {
 	size_t i = offset + 1;
 	int depth = 0;
 	while (i < next_offset - 1) {
-		if (depth == 0) dest_offsets.push_back(dest.size());
+		if (depth == 0)
+			dest_offsets.push_back(dest.size());
 		uint8_t code = data[i];
 		dest.push_back(dest.arena(), code); // Copy over the type code.
 		if (code == NULL_CODE) {

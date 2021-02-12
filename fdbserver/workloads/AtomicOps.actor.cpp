@@ -46,7 +46,8 @@ struct AtomicOpsWorkload : TestWorkload {
 		TraceEvent("AtomicOpsApiVersion500").detail("ApiVersion500", apiVersion500);
 
 		int64_t randNum = sharedRandomNumber / 10;
-		if (opType == -1) opType = randNum % 8;
+		if (opType == -1)
+			opType = randNum % 8;
 
 		switch (opType) {
 		case 0:
@@ -90,9 +91,11 @@ struct AtomicOpsWorkload : TestWorkload {
 	virtual std::string description() { return "AtomicOps"; }
 
 	virtual Future<Void> setup(Database const& cx) {
-		if (apiVersion500) cx->apiVersion = 500;
+		if (apiVersion500)
+			cx->apiVersion = 500;
 
-		if (clientId != 0) return Void();
+		if (clientId != 0)
+			return Void();
 		return _setup(cx, this);
 	}
 
@@ -104,7 +107,8 @@ struct AtomicOpsWorkload : TestWorkload {
 	}
 
 	virtual Future<bool> check(Database const& cx) {
-		if (clientId != 0) return true;
+		if (clientId != 0)
+			return true;
 		return _check(cx, this);
 	}
 
@@ -144,9 +148,10 @@ struct AtomicOpsWorkload : TestWorkload {
 					uint64_t intValue = deterministicRandom()->randomInt(0, 10000000);
 					Key val = StringRef((const uint8_t*)&intValue, sizeof(intValue));
 					tr.set(self->logKey(group), val);
-					tr.atomicOp(StringRef(format("ops%08x%08x", group,
-					                             deterministicRandom()->randomInt(0, self->nodeCount / 100))),
-					            val, self->opType);
+					tr.atomicOp(StringRef(format(
+					                "ops%08x%08x", group, deterministicRandom()->randomInt(0, self->nodeCount / 100))),
+					            val,
+					            self->opType);
 					wait(tr.commit());
 					break;
 				} catch (Error& e) {

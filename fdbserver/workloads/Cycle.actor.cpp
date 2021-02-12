@@ -50,7 +50,8 @@ struct CycleWorkload : TestWorkload {
 	virtual std::string description() { return "CycleWorkload"; }
 	virtual Future<Void> setup(Database const& cx) { return bulkSetup(cx, this, nodeCount, Promise<double>()); }
 	virtual Future<Void> start(Database const& cx) {
-		if (checkOnly) return Void();
+		if (checkOnly)
+			return Void();
 		for (int c = 0; c < actorCount; c++)
 			clients.push_back(
 			    timeout(cycleClient(cx->clone(), this, actorCount / transactionsPerSecond), testDuration, Void()));
@@ -58,8 +59,10 @@ struct CycleWorkload : TestWorkload {
 	}
 	virtual Future<bool> check(Database const& cx) {
 		int errors = 0;
-		for (int c = 0; c < clients.size(); c++) errors += clients[c].isError();
-		if (errors) TraceEvent(SevError, "TestFailure").detail("Reason", "There were client errors.");
+		for (int c = 0; c < clients.size(); c++)
+			errors += clients[c].isError();
+		if (errors)
+			TraceEvent(SevError, "TestFailure").detail("Reason", "There were client errors.");
 		clients.clear();
 		return cycleCheck(cx->clone(), this, !errors);
 	}
@@ -101,13 +104,16 @@ struct CycleWorkload : TestWorkload {
 					try {
 						// Reverse next and next^2 node
 						Optional<Value> v = wait(tr.get(self->key(r)));
-						if (!v.present()) self->badRead("KeyR", r, tr);
+						if (!v.present())
+							self->badRead("KeyR", r, tr);
 						state int r2 = self->fromValue(v.get());
 						Optional<Value> v2 = wait(tr.get(self->key(r2)));
-						if (!v2.present()) self->badRead("KeyR2", r2, tr);
+						if (!v2.present())
+							self->badRead("KeyR2", r2, tr);
 						state int r3 = self->fromValue(v2.get());
 						Optional<Value> v3 = wait(tr.get(self->key(r3)));
-						if (!v3.present()) self->badRead("KeyR3", r3, tr);
+						if (!v3.present())
+							self->badRead("KeyR3", r3, tr);
 						int r4 = self->fromValue(v3.get());
 
 						tr.clear(self->key(r)); //< Shouldn't have an effect, but will break with wrong ordering
@@ -182,8 +188,10 @@ struct CycleWorkload : TestWorkload {
 		if (self->transactions.getMetric().value() < self->testDuration * self->minExpectedTransactionsPerSecond) {
 			TraceEvent(SevWarnAlways, "TestFailure")
 			    .detail("Reason", "Rate below desired rate")
-			    .detail("Details", format("%.2f", self->transactions.getMetric().value() /
-			                                          (self->transactionsPerSecond * self->testDuration)))
+			    .detail(
+			        "Details",
+			        format("%.2f",
+			               self->transactions.getMetric().value() / (self->transactionsPerSecond * self->testDuration)))
 			    .detail("TransactionsAchieved", self->transactions.getMetric().value())
 			    .detail("MinTransactionsExpected", self->testDuration * self->minExpectedTransactionsPerSecond)
 			    .detail("TransactionGoal", self->transactionsPerSecond * self->testDuration);
@@ -196,9 +204,10 @@ struct CycleWorkload : TestWorkload {
 			loop {
 				try {
 					state Version v = wait(tr.getReadVersion());
-					Standalone<RangeResultRef> data = wait(
-					    tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
-					                firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)), self->nodeCount + 1));
+					Standalone<RangeResultRef> data =
+					    wait(tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
+					                     firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)),
+					                     self->nodeCount + 1));
 					ok = self->cycleCheckData(data, v) && ok;
 					break;
 				} catch (Error& e) {

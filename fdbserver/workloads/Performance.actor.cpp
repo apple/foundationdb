@@ -41,7 +41,9 @@ struct PerformanceWorkload : TestWorkload {
 		for (int i = 0; i < options.size(); i++) {
 			if (options[i].value.size()) {
 				savedOptions.push_back_deep(savedOptions.arena(), KeyValueRef(options[i].key, options[i].value));
-				printf("saved option (%d): '%s'='%s'\n", i, printable(options[i].key).c_str(),
+				printf("saved option (%d): '%s'='%s'\n",
+				       i,
+				       printable(options[i].key).c_str(),
 				       printable(options[i].value).c_str());
 				options[i].value = LiteralStringRef("");
 			}
@@ -51,19 +53,22 @@ struct PerformanceWorkload : TestWorkload {
 
 	virtual std::string description() { return "PerformanceTestWorkload"; }
 	virtual Future<Void> setup(Database const& cx) {
-		if (!clientId) return _setup(cx, this);
+		if (!clientId)
+			return _setup(cx, this);
 		return Void();
 	}
 
 	virtual Future<Void> start(Database const& cx) {
-		if (!clientId) return _start(cx, this);
+		if (!clientId)
+			return _start(cx, this);
 		return Void();
 	}
 
 	virtual Future<bool> check(Database const& cx) { return true; }
 
 	virtual void getMetrics(vector<PerfMetric>& m) {
-		for (int i = 0; i < metrics.size(); i++) m.push_back(metrics[i]);
+		for (int i = 0; i < metrics.size(); i++)
+			m.push_back(metrics[i]);
 		if (!clientId) {
 			m.push_back(PerfMetric("Baseline Latency (average, ms)", latencyBaseline.value(), false));
 			m.push_back(PerfMetric("Saturation Transactions/sec", maxAchievedTPS.value(), false));
@@ -75,11 +80,14 @@ struct PerformanceWorkload : TestWorkload {
 		Standalone<VectorRef<KeyValueRef>> options;
 		Standalone<VectorRef<VectorRef<KeyValueRef>>> opts;
 		options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("testName"), probeWorkload));
-		options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("transactionsPerSecond"),
-		                                                    format("%f", transactionsPerSecond)));
+		options.push_back_deep(
+		    options.arena(),
+		    KeyValueRef(LiteralStringRef("transactionsPerSecond"), format("%f", transactionsPerSecond)));
 		for (int i = 0; i < savedOptions.size(); i++) {
 			options.push_back_deep(options.arena(), savedOptions[i]);
-			printf("option [%d]: '%s'='%s'\n", i, printable(savedOptions[i].key).c_str(),
+			printf("option [%d]: '%s'='%s'\n",
+			       i,
+			       printable(savedOptions[i].key).c_str(),
 			       printable(savedOptions[i].value).c_str());
 		}
 		opts.push_back_deep(opts.arena(), options);
@@ -114,7 +122,8 @@ struct PerformanceWorkload : TestWorkload {
 		}
 
 		vector<TesterInterface> ts;
-		for (int i = 0; i < workers.size(); i++) ts.push_back(workers[i].interf.testerInterface);
+		for (int i = 0; i < workers.size(); i++)
+			ts.push_back(workers[i].interf.testerInterface);
 		return ts;
 	}
 

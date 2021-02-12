@@ -24,7 +24,8 @@ inline char to_hex_char(unsigned int c) {
 
 	const char ch = static_cast<char>(c);
 
-	if (ch < 10) return '0' + ch;
+	if (ch < 10)
+		return '0' + ch;
 
 	return 'A' - 10 + ch;
 }
@@ -89,7 +90,8 @@ String_type add_esc_chars(const String_type& s, bool raw_utf8, bool esc_nonascii
 	for (Iter_type i = s.begin(); i != end; ++i) {
 		const Char_type c(*i);
 
-		if (add_esc_char(c, result)) continue;
+		if (add_esc_char(c, result))
+			continue;
 
 		if (raw_utf8) {
 			result += c;
@@ -246,7 +248,8 @@ private:
 	}
 
 	void indent() {
-		if (!pretty_) return;
+		if (!pretty_)
+			return;
 
 		for (int i = 0; i < indentation_level_; ++i) {
 			os_ << "    ";
@@ -254,11 +257,13 @@ private:
 	}
 
 	void space() {
-		if (pretty_) os_ << ' ';
+		if (pretty_)
+			os_ << ' ';
 	}
 
 	void new_line() {
-		if (pretty_) os_ << '\n';
+		if (pretty_)
+			os_ << '\n';
 	}
 
 	Generator& operator=(const Generator&); // to prevent "assignment operator could not be generated" warning
@@ -279,7 +284,9 @@ private:
 // write_stream( value, os, pretty_print );
 //
 template <class Value_type, class Ostream_type>
-void write_stream(const Value_type& value, Ostream_type& os, int options = none,
+void write_stream(const Value_type& value,
+                  Ostream_type& os,
+                  int options = none,
                   unsigned int precision_of_doubles = 0) {
 	os << std::dec;
 	Generator<Value_type, Ostream_type>(value, os, options, precision_of_doubles);
@@ -290,7 +297,8 @@ void write_stream(const Value_type& value, Ostream_type& os, int options = none,
 // const string json_str = write( value, pretty_print );
 //
 template <class Value_type>
-typename Value_type::String_type write_string(const Value_type& value, int options = none,
+typename Value_type::String_type write_string(const Value_type& value,
+                                              int options = none,
                                               unsigned int precision_of_doubles = 0) {
 	typedef typename Value_type::String_type::value_type Char_type;
 

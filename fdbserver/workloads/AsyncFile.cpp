@@ -28,7 +28,8 @@
 RandomByteGenerator::RandomByteGenerator() {
 	BUF_SIZE = 16 * (1 << 20);
 	b1 = new char[BUF_SIZE];
-	for (int i = 0; i < BUF_SIZE / sizeof(uint32_t); i++) ((uint32_t*)b1)[i] = deterministicRandom()->randomUInt32();
+	for (int i = 0; i < BUF_SIZE / sizeof(uint32_t); i++)
+		((uint32_t*)b1)[i] = deterministicRandom()->randomUInt32();
 }
 
 RandomByteGenerator::~RandomByteGenerator() {
@@ -47,7 +48,8 @@ void RandomByteGenerator::writeRandomBytesToBuffer(void* buf, int bytes) {
 	int64_t* out64 = (int64_t*)buf;
 	int64_t* in64 = (int64_t*)b1;
 	int n = bytes / 8;
-	for (int b = 0; b < n; b++) out64[b] = in64[o1 + b] ^ in64[o2 + b];
+	for (int b = 0; b < n; b++)
+		out64[b] = in64[o1 + b] ^ in64[o2 + b];
 
 	// for (int b=0;b<bytes;b++){
 	//((char*)buf)[b] = b1[o1+b] ^ b1[o2+b];
@@ -82,7 +84,8 @@ AsyncFileBuffer::AsyncFileBuffer(size_t size, bool aligned) {
 #ifdef WIN32
 		buffer = (unsigned char*)_aligned_malloc(size, AsyncFileWorkload::_PAGE_SIZE);
 #else
-		if (posix_memalign((void**)&buffer, AsyncFileWorkload::_PAGE_SIZE, size) != 0) buffer = NULL;
+		if (posix_memalign((void**)&buffer, AsyncFileWorkload::_PAGE_SIZE, size) != 0)
+			buffer = NULL;
 #endif
 	} else
 		buffer = (unsigned char*)malloc(size);
@@ -115,5 +118,6 @@ AsyncFileHandle::AsyncFileHandle(Reference<IAsyncFile> file, std::string path, b
 }
 
 AsyncFileHandle::~AsyncFileHandle() {
-	if (temporary) deleteFile(path);
+	if (temporary)
+		deleteFile(path);
 }

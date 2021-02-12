@@ -121,9 +121,12 @@ CServiceBase::CServiceBase(char* serviceName, bool fCanStop, bool fCanShutdown, 
 
 	// The accepted commands of the service.
 	DWORD dwControlsAccepted = 0;
-	if (fCanStop) dwControlsAccepted |= SERVICE_ACCEPT_STOP;
-	if (fCanShutdown) dwControlsAccepted |= SERVICE_ACCEPT_SHUTDOWN;
-	if (fCanPauseContinue) dwControlsAccepted |= SERVICE_ACCEPT_PAUSE_CONTINUE;
+	if (fCanStop)
+		dwControlsAccepted |= SERVICE_ACCEPT_STOP;
+	if (fCanShutdown)
+		dwControlsAccepted |= SERVICE_ACCEPT_SHUTDOWN;
+	if (fCanPauseContinue)
+		dwControlsAccepted |= SERVICE_ACCEPT_PAUSE_CONTINUE;
 	m_status.dwControlsAccepted = dwControlsAccepted;
 
 	m_status.dwWin32ExitCode = NO_ERROR;

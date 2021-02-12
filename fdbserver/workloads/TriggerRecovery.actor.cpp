@@ -59,7 +59,8 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> changeResolverConfig(Database cx, TriggerRecoveryLoopWorkload* self,
+	ACTOR Future<Void> changeResolverConfig(Database cx,
+	                                        TriggerRecoveryLoopWorkload* self,
 	                                        bool setToOriginal = false) {
 		state int32_t numResolversToSet;
 		if (setToOriginal) {
@@ -137,7 +138,8 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 	}
 
 	virtual Future<Void> start(Database const& cx) {
-		if (clientId != 0) return Void();
+		if (clientId != 0)
+			return Void();
 		return _start(cx, this);
 	}
 

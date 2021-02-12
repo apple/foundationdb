@@ -135,7 +135,8 @@ ACTOR static Future<int> sumActor(FutureStream<int> in) {
 			total += i;
 		}
 	} catch (Error& e) {
-		if (e.code() != error_code_end_of_stream) throw;
+		if (e.code() != error_code_end_of_stream)
+			throw;
 	}
 	return total;
 }
@@ -186,12 +187,14 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 	virtual Future<class Void> delay(double seconds, TaskPriority taskID) { return nextTick.getFuture(); }
 
 	virtual Future<class Void> yield(TaskPriority taskID) {
-		if (check_yield(taskID)) return delay(0, taskID);
+		if (check_yield(taskID))
+			return delay(0, taskID);
 		return Void();
 	}
 
 	virtual bool check_yield(TaskPriority taskID) {
-		if (nextYield > 0) --nextYield;
+		if (nextYield > 0)
+			--nextYield;
 		return nextYield == 0;
 	}
 
@@ -379,9 +382,11 @@ TEST_CASE("/flow/flow/quorum") {
 	vector<Promise<int>> ps(5);
 	vector<Future<int>> fs;
 	vector<Future<Void>> qs;
-	for (auto& p : ps) fs.push_back(p.getFuture());
+	for (auto& p : ps)
+		fs.push_back(p.getFuture());
 
-	for (int i = 0; i <= ps.size(); i++) qs.push_back(quorum(fs, i));
+	for (int i = 0; i <= ps.size(); i++)
+		qs.push_back(quorum(fs, i));
 
 	for (int i = 0; i < ps.size(); i++) {
 		ASSERT(qs[i].isReady());
@@ -634,7 +639,8 @@ TEST_CASE("/flow/flow/yieldedFuture/progress") {
 	Future<Void> i = success(u);
 
 	std::vector<Future<Void>> v;
-	for (int i = 0; i < 5; i++) v.push_back(yieldedFuture(u));
+	for (int i = 0; i < 5; i++)
+		v.push_back(yieldedFuture(u));
 	auto numReady = [&v]() { return std::count_if(v.begin(), v.end(), [](Future<Void> v) { return v.isReady(); }); };
 
 	ASSERT(numReady() == 0);
@@ -664,7 +670,8 @@ TEST_CASE("/flow/flow/yieldedFuture/random") {
 		Future<Void> i = success(u);
 
 		std::vector<Future<Void>> v;
-		for (int i = 0; i < 25; i++) v.push_back(yieldedFuture(u));
+		for (int i = 0; i < 25; i++)
+			v.push_back(yieldedFuture(u));
 		auto numReady = [&v]() {
 			return std::count_if(v.begin(), v.end(), [](Future<Void> v) { return v.isReady(); });
 		};
@@ -711,18 +718,21 @@ TEST_CASE("/flow/perf/yieldedFuture") {
 	vector<Future<Void>> ys;
 
 	start = timer();
-	for (int i = 0; i < N; i++) ys.push_back(yieldedFuture(f));
+	for (int i = 0; i < N; i++)
+		ys.push_back(yieldedFuture(f));
 	printf("yieldedFuture(f) create: %0.1f M/sec\n", N / 1e6 / (timer() - start));
 	p.send(Void());
 	printf("yieldedFuture(f) total: %0.1f M/sec\n", N / 1e6 / (timer() - start));
 
-	for (auto& y : ys) ASSERT(y.isReady());
+	for (auto& y : ys)
+		ASSERT(y.isReady());
 
 	p = Promise<Void>();
 	f = p.getFuture();
 
 	start = timer();
-	for (int i = 0; i < N; i++) yieldedFuture(f);
+	for (int i = 0; i < N; i++)
+		yieldedFuture(f);
 	printf("yieldedFuture(f) cancel: %0.1f M/sec\n", N / 1e6 / (timer() - start));
 
 	return Void();
@@ -749,7 +759,8 @@ TEST_CASE("/flow/flow/perf/actor patterns") {
 	ASSERT(expectActorCount(0));
 
 	start = timer();
-	for (int i = 0; i < N; i++) emptyVoidActor();
+	for (int i = 0; i < N; i++)
+		emptyVoidActor();
 	printf("emptyVoidActor(): %0.1f M/sec\n", N / 1e6 / (timer() - start));
 
 	ASSERT(expectActorCount(0));
@@ -767,7 +778,8 @@ TEST_CASE("/flow/flow/perf/actor patterns") {
 	Future<Void> already = Void();
 
 	start = timer();
-	for (int i = 0; i < N; i++) oneWaitVoidActor(already);
+	for (int i = 0; i < N; i++)
+		oneWaitVoidActor(already);
 	printf("oneWaitVoidActor(already): %0.1f M/sec\n", N / 1e6 / (timer() - start));
 
 	ASSERT(expectActorCount(0));
@@ -1021,7 +1033,8 @@ TEST_CASE("/flow/flow/perf/actor patterns") {
 		PromiseStream<int> data;
 		start = timer();
 		Future<int> sum = sumActor(data.getFuture());
-		for (int i = 0; i < N; i++) data.send(1);
+		for (int i = 0; i < N; i++)
+			data.send(1);
 		data.sendError(end_of_stream());
 		ASSERT(sum.get() == N);
 		printf("sumActor: %0.2f M/sec\n", N / 1e6 / (timer() - start));
@@ -1035,10 +1048,12 @@ TEST_CASE("/flow/flow/perf/actor patterns") {
 		for (int i = 0; i < N; i++) {
 			ps.clear();
 			ps.resize(3);
-			for (int j = 0; j < ps.size(); j++) fs[j] = ps[j].getFuture();
+			for (int j = 0; j < ps.size(); j++)
+				fs[j] = ps[j].getFuture();
 
 			Future<Void> q = quorum(fs, 2);
-			for (auto& p : ps) p.send(Void());
+			for (auto& p : ps)
+				p.send(Void());
 		}
 		printf("quorum(2/3): %0.2f M/sec\n", N / 1e6 / (timer() - start));
 	}

@@ -37,7 +37,8 @@ struct ClientStatusInfo {
 	Standalone<VectorRef<StringRef>> issues;
 
 	ClientStatusInfo() {}
-	ClientStatusInfo(Key const& traceLogGroup, Standalone<VectorRef<ClientVersionRef>> versions,
+	ClientStatusInfo(Key const& traceLogGroup,
+	                 Standalone<VectorRef<ClientVersionRef>> versions,
 	                 Standalone<VectorRef<StringRef>> issues)
 	  : traceLogGroup(traceLogGroup), versions(versions), issues(issues) {}
 };
@@ -58,7 +59,8 @@ Future<Void> monitorLeader(Reference<ClusterConnectionFile> const& connFile,
 // of the current leader.  If a leader is elected for long enough and communication with a quorum of
 // coordinators is possible, eventually outKnownLeader will be that leader's interface.
 
-Future<Void> monitorLeaderForProxies(Value const& key, vector<NetworkAddress> const& coordinators,
+Future<Void> monitorLeaderForProxies(Value const& key,
+                                     vector<NetworkAddress> const& coordinators,
                                      ClientData* const& clientData);
 
 Future<Void> monitorProxies(

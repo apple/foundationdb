@@ -147,7 +147,8 @@ EXTERNC void breakpoint_me();
 #define ENABLED(...)                                                                                                   \
 	BOOST_PP_IIF(BOOST_PP_IS_EMPTY(FDB_EXPAND(__VA_ARGS__)), 1, BOOST_PP_ASSERT_MSG(0, FDB_STRINGIZE(__VA_ARGS__)))
 #define DISABLED(...)                                                                                                  \
-	BOOST_PP_IIF(BOOST_PP_NOT(BOOST_PP_IS_EMPTY(FDB_EXPAND(__VA_ARGS__))), 1,                                          \
+	BOOST_PP_IIF(BOOST_PP_NOT(BOOST_PP_IS_EMPTY(FDB_EXPAND(__VA_ARGS__))),                                             \
+	             1,                                                                                                    \
 	             BOOST_PP_ASSERT_MSG(0, FDB_STRINGIZE(__VA_ARGS__)))
 
 /* Windows compilers won't allow the syntax of:

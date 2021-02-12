@@ -78,11 +78,13 @@ ERROR(recruitment_failed, 1200, "Recruitment of a server failed") // Be careful,
                                                                   // storage server or tlog permanently
 ERROR(move_to_removed_server, 1201, "Attempt to move keys to a storage server that was removed")
 ERROR(
-    worker_removed, 1202,
+    worker_removed,
+    1202,
     "Normal worker shut down") // Be careful, catching this will delete the data of a storage server or tlog permanently
 ERROR(master_recovery_failed, 1203, "Master recovery failed")
 ERROR(master_max_versions_in_flight, 1204, "Master hit maximum number of versions in flight")
-ERROR(master_tlog_failed, 1205,
+ERROR(master_tlog_failed,
+      1205,
       "Master terminating because a TLog failed") // similar to tlog_stopped, but the tlog has actually died
 ERROR(worker_recovery_failed, 1206, "Recovery of a worker process failed")
 ERROR(please_reboot, 1207, "Reboot of server process requested")
@@ -173,7 +175,8 @@ ERROR(invalid_directory_layer_metadata, 2260, "Invalid directory layer metadata"
 ERROR(cannot_move_directory_between_partitions, 2261, "Directory cannot be moved between partitions")
 ERROR(cannot_use_partition_as_subspace, 2262, "Directory partition cannot be used as subspace")
 ERROR(incompatible_directory_version, 2263, "Directory layer was created with an incompatible version")
-ERROR(directory_prefix_not_empty, 2264,
+ERROR(directory_prefix_not_empty,
+      2264,
       "Database has keys stored at the prefix chosen by the automatic prefix allocator")
 ERROR(directory_prefix_in_use, 2265, "Directory layer already has a conflicting prefix")
 ERROR(invalid_destination_directory, 2266, "Target directory is invalid")
@@ -189,9 +192,11 @@ ERROR(backup_bad_block_size, 2313, "Backup file block size too small")
 ERROR(backup_invalid_url, 2314, "Backup Container URL invalid")
 ERROR(backup_invalid_info, 2315, "Backup Container URL invalid")
 ERROR(backup_cannot_expire, 2316, "Cannot expire requested data from backup without violating minimum restorability")
-ERROR(backup_auth_missing, 2317,
+ERROR(backup_auth_missing,
+      2317,
       "Cannot find authentication details (such as a password or secret key) for the specified Backup Container URL")
-ERROR(backup_auth_unreadable, 2318,
+ERROR(backup_auth_unreadable,
+      2318,
       "Cannot read or parse one or more sources of authentication information for Backup Container URLs")
 ERROR(backup_does_not_exist, 2319, "Backup does not exist")
 ERROR(restore_invalid_version, 2361, "Invalid restore version")

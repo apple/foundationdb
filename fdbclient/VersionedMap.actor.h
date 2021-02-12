@@ -39,10 +39,12 @@ Future<Void> deferredCleanupActor(std::vector<Tree> toFree, TaskPriority taskID 
 		toFree.pop_back();
 
 		for (int c = 0; c < 3; c++) {
-			if (a->pointer[c] && a->pointer[c]->isSoleOwner()) toFree.push_back(std::move(a->pointer[c]));
+			if (a->pointer[c] && a->pointer[c]->isSoleOwner())
+				toFree.push_back(std::move(a->pointer[c]));
 		}
 
-		if (++freeCount % 100 == 0) wait(yield(taskID));
+		if (++freeCount % 100 == 0)
+			wait(yield(taskID));
 	}
 
 	return Void();

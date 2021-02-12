@@ -220,7 +220,8 @@ private:
 			oldNode->parent->child[oldNode->parent->child[1] == oldNode] = newNode;
 		else
 			root = newNode;
-		if (newNode) newNode->parent = oldNode->parent;
+		if (newNode)
+			newNode->parent = oldNode->parent;
 	}
 
 	// direction 0 = left, 1 = right
@@ -228,9 +229,11 @@ private:
 	static void moveIterator(Node*& i) {
 		if (i->child[0 ^ direction]) {
 			i = i->child[0 ^ direction];
-			while (i->child[1 ^ direction]) i = i->child[1 ^ direction];
+			while (i->child[1 ^ direction])
+				i = i->child[1 ^ direction];
 		} else {
-			while (i->parent && i->parent->child[0 ^ direction] == i) i = i->parent;
+			while (i->parent && i->parent->child[0 ^ direction] == i)
+				i = i->parent;
 			i = i->parent;
 		}
 	}
@@ -397,13 +400,15 @@ void ISRotate(Node*& oldRootRef, int d) {
 
 	// metrics
 	auto orTotal = oldRoot->total - newRoot->total;
-	if (newRoot->child[d]) orTotal = orTotal + newRoot->child[d]->total;
+	if (newRoot->child[d])
+		orTotal = orTotal + newRoot->child[d]->total;
 	newRoot->total = oldRoot->total;
 	oldRoot->total = orTotal;
 
 	// pointers
 	oldRoot->child[1 - d] = newRoot->child[d];
-	if (oldRoot->child[1 - d]) oldRoot->child[1 - d]->parent = oldRoot;
+	if (oldRoot->child[1 - d])
+		oldRoot->child[1 - d]->parent = oldRoot;
 	newRoot->child[d] = oldRoot;
 	newRoot->parent = oldRoot->parent;
 	oldRoot->parent = newRoot;
@@ -449,7 +454,8 @@ int ISRebalance(Node*& root) {
 	//       / \
 	//      C   E
 
-	if (!root || (root->balance >= -1 && root->balance <= +1)) return 0;
+	if (!root || (root->balance >= -1 && root->balance <= +1))
+		return 0;
 
 	int rebalanceDir = root->balance < 0; // 1 if rotating right, 0 if rotating left
 	auto* n = root->child[1 - rebalanceDir]; // Node B
@@ -594,13 +600,17 @@ Node* ISCommonSubtreeRoot(Node* first, Node* last) {
 
 	// Find the depth of first and last
 	int firstDepth = 0, lastDepth = 0;
-	for (auto f = first; f; f = f->parent) firstDepth++;
-	for (auto f = last; f; f = f->parent) lastDepth++;
+	for (auto f = first; f; f = f->parent)
+		firstDepth++;
+	for (auto f = last; f; f = f->parent)
+		lastDepth++;
 
 	// Traverse up the tree from the deeper of first and last until f and l are at the same depth
 	auto f = first, l = last;
-	for (int i = firstDepth; i > lastDepth; i--) f = f->parent;
-	for (int i = lastDepth; i > firstDepth; i--) l = l->parent;
+	for (int i = firstDepth; i > lastDepth; i--)
+		f = f->parent;
+	for (int i = lastDepth; i > firstDepth; i--)
+		l = l->parent;
 
 	// Traverse up from f and l simultaneously until we reach a common node
 	while (f != l) {
@@ -614,14 +624,16 @@ Node* ISCommonSubtreeRoot(Node* first, Node* last) {
 template <class T, class Metric>
 typename IndexedSet<T, Metric>::iterator IndexedSet<T, Metric>::begin() const {
 	Node* x = root;
-	while (x && x->child[0]) x = x->child[0];
+	while (x && x->child[0])
+		x = x->child[0];
 	return x;
 }
 
 template <class T, class Metric>
 typename IndexedSet<T, Metric>::iterator IndexedSet<T, Metric>::previous(
     typename IndexedSet<T, Metric>::iterator i) const {
-	if (i == end()) return lastItem();
+	if (i == end())
+		return lastItem();
 
 	moveIterator<0>(i.i);
 	return i;
@@ -630,7 +642,8 @@ typename IndexedSet<T, Metric>::iterator IndexedSet<T, Metric>::previous(
 template <class T, class Metric>
 typename IndexedSet<T, Metric>::iterator IndexedSet<T, Metric>::lastItem() const {
 	Node* x = root;
-	while (x && x->child[1]) x = x->child[1];
+	while (x && x->child[1])
+		x = x->child[1];
 	return x;
 }
 
@@ -650,7 +663,8 @@ Metric IndexedSet<T, Metric>::addMetric(T_&& data, Metric_&& metric) {
 
 template <class T, class Metric>
 template <class T_, class Metric_>
-typename IndexedSet<T, Metric>::iterator IndexedSet<T, Metric>::insert(T_&& data, Metric_&& metric,
+typename IndexedSet<T, Metric>::iterator IndexedSet<T, Metric>::insert(T_&& data,
+                                                                       Metric_&& metric,
                                                                        bool replaceExisting) {
 	if (root == NULL) {
 		root = new Node(std::forward<T_>(data), std::forward<Metric_>(metric));
@@ -667,12 +681,15 @@ typename IndexedSet<T, Metric>::iterator IndexedSet<T, Metric>::insert(T_&& data
 				t->data = std::forward<T_>(data);
 				Metric delta = t->total;
 				t->total = std::forward<Metric_>(metric);
-				if (t->child[0]) t->total = t->total + t->child[0]->total;
-				if (t->child[1]) t->total = t->total + t->child[1]->total;
+				if (t->child[0])
+					t->total = t->total + t->child[0]->total;
+				if (t->child[1])
+					t->total = t->total + t->child[1]->total;
 				delta = t->total - delta;
 				while (true) {
 					t = t->parent;
-					if (!t) break;
+					if (!t)
+						break;
 					t->total = t->total + delta;
 				}
 			}
@@ -680,7 +697,8 @@ typename IndexedSet<T, Metric>::iterator IndexedSet<T, Metric>::insert(T_&& data
 			return returnNode;
 		}
 		Node* nextT = t->child[d];
-		if (!nextT) break;
+		if (!nextT)
+			break;
 		t = nextT;
 	}
 
@@ -690,7 +708,8 @@ typename IndexedSet<T, Metric>::iterator IndexedSet<T, Metric>::insert(T_&& data
 	while (true) {
 		t->balance += d ? 1 : -1;
 		t->total = t->total + metric;
-		if (t->balance == 0) break;
+		if (t->balance == 0)
+			break;
 		if (t->balance != 1 && t->balance != -1) {
 			Node** parent = t->parent ? &t->parent->child[t->parent->child[1] == t] : &root;
 			// assert( *parent == t );
@@ -707,14 +726,16 @@ typename IndexedSet<T, Metric>::iterator IndexedSet<T, Metric>::insert(T_&& data
 			t = *parent;
 			break;
 		}
-		if (!t->parent) break;
+		if (!t->parent)
+			break;
 
 		d = t->parent->child[1] == t;
 		t = t->parent;
 	}
 	while (true) {
 		t = t->parent;
-		if (!t) break;
+		if (!t)
+			break;
 		t->total = t->total + metric;
 	}
 
@@ -746,7 +767,8 @@ int IndexedSet<T, Metric>::insert(const std::vector<std::pair<T, Metric>>& dataV
 			bool foundNode = false;
 			while (true) {
 				d = t->data < data;
-				if (!d) blockEnd = t;
+				if (!d)
+					blockEnd = t;
 				if (!d && !(data < t->data)) { // t->data == data
 					Node* returnNode = t;
 					if (replaceExisting) {
@@ -754,12 +776,15 @@ int IndexedSet<T, Metric>::insert(const std::vector<std::pair<T, Metric>>& dataV
 						t->data = std::move(data);
 						Metric delta = t->total;
 						t->total = metric;
-						if (t->child[0]) t->total = t->total + t->child[0]->total;
-						if (t->child[1]) t->total = t->total + t->child[1]->total;
+						if (t->child[0])
+							t->total = t->total + t->child[0]->total;
+						if (t->child[1])
+							t->total = t->total + t->child[1]->total;
 						delta = t->total - delta;
 						while (true) {
 							t = t->parent;
-							if (!t) break;
+							if (!t)
+								break;
 							t->total = t->total + delta;
 						}
 					}
@@ -776,7 +801,8 @@ int IndexedSet<T, Metric>::insert(const std::vector<std::pair<T, Metric>>& dataV
 				t = nextT;
 			}
 
-			if (foundNode) continue;
+			if (foundNode)
+				continue;
 		}
 
 		Node* t = blockStart;
@@ -794,7 +820,8 @@ int IndexedSet<T, Metric>::insert(const std::vector<std::pair<T, Metric>>& dataV
 		while (true) {
 			t->balance += d ? 1 : -1;
 			t->total = t->total + metric;
-			if (t->balance == 0) break;
+			if (t->balance == 0)
+				break;
 			if (t->balance != 1 && t->balance != -1) {
 				Node** parent = t->parent ? &t->parent->child[t->parent->child[1] == t] : &root;
 				// assert( *parent == t );
@@ -811,14 +838,16 @@ int IndexedSet<T, Metric>::insert(const std::vector<std::pair<T, Metric>>& dataV
 				t = *parent;
 				break;
 			}
-			if (!t->parent) break;
+			if (!t->parent)
+				break;
 
 			d = t->parent->child[1] == t;
 			t = t->parent;
 		}
 		while (true) {
 			t = t->parent;
-			if (!t) break;
+			if (!t)
+				break;
 			t->total = t->total + metric;
 		}
 	}
@@ -826,7 +855,10 @@ int IndexedSet<T, Metric>::insert(const std::vector<std::pair<T, Metric>>& dataV
 }
 
 template <class T, class Metric>
-Metric IndexedSet<T, Metric>::eraseHalf(Node* start, Node* end, int eraseDir, int& heightDelta,
+Metric IndexedSet<T, Metric>::eraseHalf(Node* start,
+                                        Node* end,
+                                        int eraseDir,
+                                        int& heightDelta,
                                         std::vector<Node*>& toFree) {
 	// Removes all nodes between start (inclusive) and end (exclusive) from the set, where start is equal to end or one
 	// of its descendants eraseDir 1 means erase the right half (nodes > at) of the left subtree of end.  eraseDir 0
@@ -903,13 +935,15 @@ Metric IndexedSet<T, Metric>::eraseHalf(Node* start, Node* end, int eraseDir, in
 
 template <class T, class Metric>
 void IndexedSet<T, Metric>::erase(typename IndexedSet<T, Metric>::iterator begin,
-                                  typename IndexedSet<T, Metric>::iterator end, std::vector<Node*>& toFree) {
+                                  typename IndexedSet<T, Metric>::iterator end,
+                                  std::vector<Node*>& toFree) {
 	// Removes all nodes in the set between first and last, inclusive.
 	// toFree is extended with the roots of completely removed subtrees.
 
 	ASSERT(!end.i || (begin.i && *begin <= *end));
 
-	if (begin == end) return;
+	if (begin == end)
+		return;
 
 	IndexedSet<T, Metric>::Node* first = begin.i;
 	IndexedSet<T, Metric>::Node* last = previous(end).i;
@@ -959,30 +993,41 @@ void IndexedSet<T, Metric>::erase(iterator toErase) {
 	{
 		// Find the node to erase
 		Node* t = toErase.i;
-		if (!t) return;
+		if (!t)
+			return;
 
 		if (!t->child[0] || !t->child[1]) {
 			Metric tMetric = t->total;
-			if (t->child[0]) tMetric = tMetric - t->child[0]->total;
-			if (t->child[1]) tMetric = tMetric - t->child[1]->total;
-			for (Node* p = t->parent; p; p = p->parent) p->total = p->total - tMetric;
+			if (t->child[0])
+				tMetric = tMetric - t->child[0]->total;
+			if (t->child[1])
+				tMetric = tMetric - t->child[1]->total;
+			for (Node* p = t->parent; p; p = p->parent)
+				p->total = p->total - tMetric;
 			rebalanceNode = t->parent;
-			if (rebalanceNode) rebalanceDir = rebalanceNode->child[1] == t;
+			if (rebalanceNode)
+				rebalanceDir = rebalanceNode->child[1] == t;
 			int d = !t->child[0]; // Only one child, on this side (or no children!)
 			replacePointer(t, t->child[d]);
 			t->child[d] = 0;
 			delete t;
 		} else { // Remove node with two children
 			Node* predecessor = t->child[0];
-			while (predecessor->child[1]) predecessor = predecessor->child[1];
+			while (predecessor->child[1])
+				predecessor = predecessor->child[1];
 			rebalanceNode = predecessor->parent;
-			if (rebalanceNode == t) rebalanceNode = predecessor;
-			if (rebalanceNode) rebalanceDir = rebalanceNode->child[1] == predecessor;
+			if (rebalanceNode == t)
+				rebalanceNode = predecessor;
+			if (rebalanceNode)
+				rebalanceDir = rebalanceNode->child[1] == predecessor;
 
 			Metric tMetric = t->total - t->child[0]->total - t->child[1]->total;
-			if (predecessor->child[0]) predecessor->total = predecessor->total - predecessor->child[0]->total;
-			for (Node* p = predecessor->parent; p != t; p = p->parent) p->total = p->total - predecessor->total;
-			for (Node* p = t->parent; p; p = p->parent) p->total = p->total - tMetric;
+			if (predecessor->child[0])
+				predecessor->total = predecessor->total - predecessor->child[0]->total;
+			for (Node* p = predecessor->parent; p != t; p = p->parent)
+				p->total = p->total - predecessor->total;
+			for (Node* p = t->parent; p; p = p->parent)
+				p->total = p->total - tMetric;
 
 			// Replace t with predecessor
 			replacePointer(predecessor, predecessor->child[0]);
@@ -1000,7 +1045,8 @@ void IndexedSet<T, Metric>::erase(iterator toErase) {
 		}
 	}
 
-	if (!rebalanceNode) return;
+	if (!rebalanceNode)
+		return;
 
 	while (true) {
 		rebalanceNode->balance += rebalanceDir ? -1 : +1;
@@ -1028,7 +1074,8 @@ void IndexedSet<T, Metric>::erase(iterator toErase) {
 		} else if (rebalanceNode->balance) // +/- 1, we are done
 			break;
 
-		if (!rebalanceNode->parent) break;
+		if (!rebalanceNode->parent)
+			break;
 		rebalanceDir = rebalanceNode->parent->child[1] == rebalanceNode;
 		rebalanceNode = rebalanceNode->parent;
 	}
@@ -1053,14 +1100,17 @@ template <class T, class Metric>
 template <class Key>
 typename IndexedSet<T, Metric>::iterator IndexedSet<T, Metric>::lower_bound(const Key& key) const {
 	Node* t = root;
-	if (!t) return iterator();
+	if (!t)
+		return iterator();
 	while (true) {
 		Node* n = t->child[t->data < key];
-		if (!n) break;
+		if (!n)
+			break;
 		t = n;
 	}
 
-	if (t->data < key) moveIterator<1>(t);
+	if (t->data < key)
+		moveIterator<1>(t);
 
 	return iterator(t);
 }
@@ -1070,14 +1120,17 @@ template <class T, class Metric>
 template <class Key>
 typename IndexedSet<T, Metric>::iterator IndexedSet<T, Metric>::upper_bound(const Key& key) const {
 	Node* t = root;
-	if (!t) return iterator();
+	if (!t)
+		return iterator();
 	while (true) {
 		Node* n = t->child[!(key < t->data)];
-		if (!n) break;
+		if (!n)
+			break;
 		t = n;
 	}
 
-	if (!(key < t->data)) moveIterator<1>(t);
+	if (!(key < t->data))
+		moveIterator<1>(t);
 
 	return iterator(t);
 }
@@ -1086,7 +1139,8 @@ template <class T, class Metric>
 template <class Key>
 typename IndexedSet<T, Metric>::iterator IndexedSet<T, Metric>::lastLessOrEqual(const Key& key) const {
 	iterator i = upper_bound(key);
-	if (i == begin()) return end();
+	if (i == begin())
+		return end();
 	return previous(i);
 }
 
@@ -1101,8 +1155,10 @@ typename IndexedSet<T, Metric>::iterator IndexedSet<T, Metric>::index(M const& m
 			t = t->child[0];
 		else {
 			m = m - t->total;
-			if (t->child[1]) m = m + t->child[1]->total;
-			if (m < M()) return iterator(t);
+			if (t->child[1])
+				m = m + t->child[1]->total;
+			if (m < M())
+				return iterator(t);
 			t = t->child[1];
 		}
 	}
@@ -1113,13 +1169,15 @@ template <class T, class Metric>
 Metric IndexedSet<T, Metric>::getMetric(typename IndexedSet<T, Metric>::iterator x) const {
 	Metric m = x.i->total;
 	for (int i = 0; i < 2; i++)
-		if (x.i->child[i]) m = m - x.i->child[i]->total;
+		if (x.i->child[i])
+			m = m - x.i->child[i]->total;
 	return m;
 }
 
 template <class T, class Metric>
 Metric IndexedSet<T, Metric>::sumTo(typename IndexedSet<T, Metric>::iterator end) const {
-	if (!end.i) return root ? root->total : Metric();
+	if (!end.i)
+		return root ? root->total : Metric();
 
 	Metric m = end.i->child[0] ? end.i->child[0]->total : Metric();
 	for (Node* p = end.i; p->parent; p = p->parent) {

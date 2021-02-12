@@ -44,7 +44,8 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 	virtual std::string description() { return "Watches"; }
 
 	virtual Future<Void> setup(Database const& cx) {
-		if (clientId == 0) return _setup(cx, this);
+		if (clientId == 0)
+			return _setup(cx, this);
 		return Void();
 	}
 
@@ -53,7 +54,8 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 
 		loop {
 			try {
-				for (int i = 0; i < self->nodes; i += 2) tr.set(self->keyForIndex(i), self->defaultValue);
+				for (int i = 0; i < self->nodes; i += 2)
+					tr.set(self->keyForIndex(i), self->defaultValue);
 
 				wait(tr.commit());
 				break;
@@ -66,7 +68,8 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 	}
 
 	virtual Future<Void> start(Database const& cx) {
-		if (clientId == 0) return _start(cx, this);
+		if (clientId == 0)
+			return _start(cx, this);
 		return Void();
 	}
 
@@ -115,7 +118,8 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 						}
 						lastReadVersion = tr.getReadVersion().get();
 						//TraceEvent("FTWGet").detail("Key", printable(setKey)).detail("Value", printable(val)).detail("Ver", tr.getReadVersion().get());
-						if (val == setValue) break;
+						if (val == setValue)
+							break;
 						ASSERT(first);
 						state Future<Void> watchFuture = tr.watch(setKey);
 						wait(tr.commit());
@@ -133,7 +137,8 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 				ASSERT(lastReadVersion - ver >= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT ||
 				       lastReadVersion - ver < SERVER_KNOBS->VERSIONS_PER_SECOND * (12 + getDuration));
 
-				if (now() - testStart > self->testDuration) break;
+				if (now() - testStart > self->testDuration)
+					break;
 			}
 			return Void();
 		} catch (Error& e) {
@@ -145,7 +150,8 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 	virtual Future<bool> check(Database const& cx) {
 		bool ok = true;
 		for (int i = 0; i < clients.size(); i++)
-			if (clients[i].isError()) ok = false;
+			if (clients[i].isError())
+				ok = false;
 		clients.clear();
 		return ok;
 	}

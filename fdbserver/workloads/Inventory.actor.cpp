@@ -49,11 +49,14 @@ struct InventoryTestWorkload : TestWorkload {
 	virtual std::string description() { return "InventoryTest"; }
 
 	virtual Future<Void> start(Database const& cx) {
-		if (clientId) return Void();
+		if (clientId)
+			return Void();
 		for (int c = 0; c < actorCount; c++)
-			clients.push_back(timeout(inventoryTestClient(cx->clone(), this, actorCount / transactionsPerSecond,
-			                                              fractionWriteTransactions, productsPerWrite),
-			                          testDuration, Void()));
+			clients.push_back(timeout(
+			    inventoryTestClient(
+			        cx->clone(), this, actorCount / transactionsPerSecond, fractionWriteTransactions, productsPerWrite),
+			    testDuration,
+			    Void()));
 		return waitForAll(clients);
 	}
 
@@ -67,7 +70,8 @@ struct InventoryTestWorkload : TestWorkload {
 	}
 
 	virtual Future<bool> check(Database const& cx) {
-		if (clientId) return true;
+		if (clientId)
+			return true;
 		return inventoryTestCheck(cx->clone(), this);
 	}
 
@@ -82,7 +86,8 @@ struct InventoryTestWorkload : TestWorkload {
 		                           testDuration,
 		                       true));
 		m.push_back(PerfMetric("Write rows/simsec (approx)",
-		                       transactions.getValue() * 2 * fractionWriteTransactions / testDuration, true));
+		                       transactions.getValue() * 2 * fractionWriteTransactions / testDuration,
+		                       true));
 	}
 
 	Key chooseProduct() {
@@ -123,11 +128,13 @@ struct InventoryTestWorkload : TestWorkload {
 				for (auto i = actualResults.begin(); i != actualResults.end(); ++i)
 					if (i->second < self->minExpectedResults[i->first] ||
 					    i->second > self->maxExpectedResults[i->first]) {
-						if (!error) TraceEvent(SevError, "TestFailure").detail("Reason", "Incorrect results.");
+						if (!error)
+							TraceEvent(SevError, "TestFailure").detail("Reason", "Incorrect results.");
 						error = true;
 						std::string str;
 						for (int d = 0; d < data.size(); d++)
-							if (data[d].key == i->first) str = data[d].value.toString();
+							if (data[d].key == i->first)
+								str = data[d].value.toString();
 						TraceEvent(SevError, "IncorrectTestResult")
 						    .detail("Key", printable(i->first))
 						    .detail("ActualValue", i->second)
@@ -135,7 +142,8 @@ struct InventoryTestWorkload : TestWorkload {
 						    .detail("MinExpected", self->minExpectedResults[i->first])
 						    .detail("MaxExpected", self->maxExpectedResults[i->first]);
 					}
-				if (error) return false;
+				if (error)
+					return false;
 				return true;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -151,8 +159,11 @@ struct InventoryTestWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> inventoryTestClient(Database cx, InventoryTestWorkload* self, double transactionDelay,
-	                                       double fractionWriteTransactions, int productsPerWrite) {
+	ACTOR Future<Void> inventoryTestClient(Database cx,
+	                                       InventoryTestWorkload* self,
+	                                       double transactionDelay,
+	                                       double fractionWriteTransactions,
+	                                       int productsPerWrite) {
 		state double lastTime = now();
 		loop {
 			wait(poisson(&lastTime, transactionDelay));
@@ -160,8 +171,10 @@ struct InventoryTestWorkload : TestWorkload {
 			state Transaction tr(cx);
 			if (deterministicRandom()->random01() < fractionWriteTransactions) {
 				state std::set<Key> products;
-				for (int i = 0; i < productsPerWrite; i++) products.insert(self->chooseProduct());
-				for (auto p = products.begin(); p != products.end(); ++p) self->maxExpectedResults[*p]++;
+				for (int i = 0; i < productsPerWrite; i++)
+					products.insert(self->chooseProduct());
+				for (auto p = products.begin(); p != products.end(); ++p)
+					self->maxExpectedResults[*p]++;
 				while (1) {
 					vector<Future<Void>> todo;
 					for (auto p = products.begin(); p != products.end(); ++p)
@@ -181,9 +194,11 @@ struct InventoryTestWorkload : TestWorkload {
 						wait(tr.onError(e));
 					}
 					++self->retries;
-					for (auto p = products.begin(); p != products.end(); ++p) self->maxExpectedResults[*p]++;
+					for (auto p = products.begin(); p != products.end(); ++p)
+						self->maxExpectedResults[*p]++;
 				}
-				for (auto p = products.begin(); p != products.end(); ++p) self->minExpectedResults[*p]++;
+				for (auto p = products.begin(); p != products.end(); ++p)
+					self->minExpectedResults[*p]++;
 			} else {
 				loop {
 					try {

@@ -224,8 +224,10 @@ struct LocalityData {
 public:
 	LocalityData() {}
 
-	LocalityData(Optional<Standalone<StringRef>> processID, Optional<Standalone<StringRef>> zoneID,
-	             Optional<Standalone<StringRef>> MachineID, Optional<Standalone<StringRef>> dcID) {
+	LocalityData(Optional<Standalone<StringRef>> processID,
+	             Optional<Standalone<StringRef>> zoneID,
+	             Optional<Standalone<StringRef>> MachineID,
+	             Optional<Standalone<StringRef>> dcID) {
 		_data[keyProcessId] = processID;
 		_data[keyZoneId] = zoneID;
 		_data[keyMachineId] = MachineID;
@@ -324,12 +326,15 @@ public:
 };
 
 static std::string describe(std::vector<LocalityData> const& items, StringRef const key, int max_items = -1) {
-	if (!items.size()) return "[no items]";
+	if (!items.size())
+		return "[no items]";
 	std::string s;
 	int count = 0;
 	for (auto const& item : items) {
-		if (++count > max_items && max_items >= 0) break;
-		if (count > 1) s += ",";
+		if (++count > max_items && max_items >= 0)
+			break;
+		if (count > 1)
+			s += ",";
 		s += item.describeValue(key);
 	}
 	return s;
@@ -382,7 +387,8 @@ struct LBDistance {
 	enum Type { SAME_MACHINE = 0, SAME_DC = 1, DISTANT = 2 };
 };
 
-LBDistance::Type loadBalanceDistance(LocalityData const& localLoc, LocalityData const& otherLoc,
+LBDistance::Type loadBalanceDistance(LocalityData const& localLoc,
+                                     LocalityData const& otherLoc,
                                      NetworkAddress const& otherAddr);
 
 #endif

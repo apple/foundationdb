@@ -56,19 +56,26 @@ ACTOR Future<Void> setup(Database cx, ApiWorkload* self) {
 }
 
 Future<Void> ApiWorkload::setup(Database const& cx) {
-	if (clientId < maxClients || maxClients < 0) return ::setup(cx, this);
+	if (clientId < maxClients || maxClients < 0)
+		return ::setup(cx, this);
 
 	return Void();
 }
 
 ACTOR Future<Void> start(Database cx, ApiWorkload* self) {
 	// Generate the data to store in this client's key-space
-	state Standalone<VectorRef<KeyValueRef>> data =
-	    self->generateData(self->numKeys * self->shortKeysRatio, self->minShortKeyLength, self->maxShortKeyLength,
-	                       self->minValueLength, self->maxValueLength, self->clientPrefix);
-	Standalone<VectorRef<KeyValueRef>> bigKeyData =
-	    self->generateData(self->numKeys * (1 - self->shortKeysRatio), self->minLongKeyLength, self->maxLongKeyLength,
-	                       self->minValueLength, self->maxValueLength, self->clientPrefix);
+	state Standalone<VectorRef<KeyValueRef>> data = self->generateData(self->numKeys * self->shortKeysRatio,
+	                                                                   self->minShortKeyLength,
+	                                                                   self->maxShortKeyLength,
+	                                                                   self->minValueLength,
+	                                                                   self->maxValueLength,
+	                                                                   self->clientPrefix);
+	Standalone<VectorRef<KeyValueRef>> bigKeyData = self->generateData(self->numKeys * (1 - self->shortKeysRatio),
+	                                                                   self->minLongKeyLength,
+	                                                                   self->maxLongKeyLength,
+	                                                                   self->minValueLength,
+	                                                                   self->maxValueLength,
+	                                                                   self->clientPrefix);
 
 	data.append_deep(data.arena(), bigKeyData.begin(), bigKeyData.size());
 
@@ -83,7 +90,8 @@ ACTOR Future<Void> start(Database cx, ApiWorkload* self) {
 }
 
 Future<Void> ApiWorkload::start(Database const& cx) {
-	if (clientId < maxClients || maxClients < 0) return ::start(cx, this);
+	if (clientId < maxClients || maxClients < 0)
+		return ::start(cx, this);
 
 	return Void();
 }
@@ -100,7 +108,8 @@ Future<bool> ApiWorkload::check(Database const& cx) {
 }
 
 // Verifies that the results of a getRange are the same in the database and in memory
-bool ApiWorkload::compareResults(VectorRef<KeyValueRef> dbResults, VectorRef<KeyValueRef> storeResults,
+bool ApiWorkload::compareResults(VectorRef<KeyValueRef> dbResults,
+                                 VectorRef<KeyValueRef> storeResults,
                                  Version readVersion) {
 	if (dbResults.size() != storeResults.size()) {
 		printf("%d. Size mismatch: %d - %d\n", clientPrefixInt, dbResults.size(), storeResults.size());
@@ -174,7 +183,8 @@ ACTOR Future<bool> compareDatabaseToMemory(ApiWorkload* self) {
 				}
 
 				// If there are no more results, then return success
-				if (storeResults.size() < resultsPerRange) return true;
+				if (storeResults.size() < resultsPerRange)
+					return true;
 
 				startKey = dbResults[dbResults.size() - 1].key;
 
@@ -191,8 +201,12 @@ Future<bool> ApiWorkload::compareDatabaseToMemory() {
 }
 
 // Generates a set of random key-value pairs with an optional prefix
-Standalone<VectorRef<KeyValueRef>> ApiWorkload::generateData(int numKeys, int minKeyLength, int maxKeyLength,
-                                                             int minValueLength, int maxValueLength, std::string prefix,
+Standalone<VectorRef<KeyValueRef>> ApiWorkload::generateData(int numKeys,
+                                                             int minKeyLength,
+                                                             int maxKeyLength,
+                                                             int minValueLength,
+                                                             int maxValueLength,
+                                                             std::string prefix,
                                                              bool allowDuplicates) {
 	Standalone<VectorRef<KeyValueRef>> data;
 	std::set<KeyRef> keys;
@@ -200,7 +214,8 @@ Standalone<VectorRef<KeyValueRef>> ApiWorkload::generateData(int numKeys, int mi
 	while (data.size() < numKeys) {
 		Key key = generateKey(data, minKeyLength, maxKeyLength, prefix);
 
-		if (!allowDuplicates && !keys.insert(key).second) continue;
+		if (!allowDuplicates && !keys.insert(key).second)
+			continue;
 
 		ValueRef value(data.arena(), generateValue(minValueLength, maxValueLength + 1));
 		data.push_back_deep(data.arena(), KeyValueRef(key, value));
@@ -210,13 +225,16 @@ Standalone<VectorRef<KeyValueRef>> ApiWorkload::generateData(int numKeys, int mi
 }
 
 // Generates a random key
-Key ApiWorkload::generateKey(VectorRef<KeyValueRef> const& data, int minKeyLength, int maxKeyLength,
+Key ApiWorkload::generateKey(VectorRef<KeyValueRef> const& data,
+                             int minKeyLength,
+                             int maxKeyLength,
                              std::string prefix) {
 	int keyLength = deterministicRandom()->randomInt(minKeyLength, maxKeyLength + 1);
 	char* keyBuffer = new char[keyLength + 1];
 
 	if (onlyLowerCase) {
-		for (int i = 0; i < keyLength; i++) keyBuffer[i] = deterministicRandom()->randomInt('a', 'z' + 1);
+		for (int i = 0; i < keyLength; i++)
+			keyBuffer[i] = deterministicRandom()->randomInt('a', 'z' + 1);
 	} else {
 		for (int i = 0; i < keyLength; i += sizeof(uint32_t)) {
 			uint32_t val = deterministicRandom()->randomUInt32();
@@ -224,7 +242,8 @@ Key ApiWorkload::generateKey(VectorRef<KeyValueRef> const& data, int minKeyLengt
 		}
 
 		// Don't allow the first character of the key to be 0xff
-		if (keyBuffer[0] == '\xff') keyBuffer[0] = deterministicRandom()->randomInt(0, 255);
+		if (keyBuffer[0] == '\xff')
+			keyBuffer[0] = deterministicRandom()->randomInt(0, 255);
 	}
 
 	keyBuffer[keyLength] = '\0';
@@ -238,8 +257,8 @@ Key ApiWorkload::generateKey(VectorRef<KeyValueRef> const& data, int minKeyLengt
 // Generates a random key selector with a specified maximum offset
 KeySelector ApiWorkload::generateKeySelector(VectorRef<KeyValueRef> const& data, int maxOffset) {
 	Key key = selectRandomKey(data, 0.5);
-	return KeySelector(KeySelectorRef(key, deterministicRandom()->randomInt(0, 2) == 1,
-	                                  deterministicRandom()->randomInt(-maxOffset, maxOffset + 1)));
+	return KeySelector(KeySelectorRef(
+	    key, deterministicRandom()->randomInt(0, 2) == 1, deterministicRandom()->randomInt(-maxOffset, maxOffset + 1)));
 }
 
 // Selects a random key.  There is a <probabilityKeyExists> probability that the key will be chosen from the keyset in
@@ -269,8 +288,8 @@ ACTOR Future<Void> chooseTransactionFactory(Database cx, std::vector<Transaction
 	if (transactionType == NATIVE) {
 		printf("client %d: Running NativeAPI Transactions\n", self->clientPrefixInt);
 		self->transactionFactory = Reference<TransactionFactoryInterface>(
-		    new TransactionFactory<FlowTransactionWrapper<Transaction>, const Database>(cx, self->extraDB,
-		                                                                                self->useExtraDB));
+		    new TransactionFactory<FlowTransactionWrapper<Transaction>, const Database>(
+		        cx, self->extraDB, self->useExtraDB));
 	} else if (transactionType == READ_YOUR_WRITES) {
 		printf("client %d: Running ReadYourWrites Transactions\n", self->clientPrefixInt);
 		self->transactionFactory = Reference<TransactionFactoryInterface>(

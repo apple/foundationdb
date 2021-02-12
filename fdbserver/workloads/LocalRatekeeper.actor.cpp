@@ -51,7 +51,8 @@ struct LocalRatekeeperWorkload : TestWorkload {
 
 	LocalRatekeeperWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		startAfter = getOption(options, LiteralStringRef("startAfter"), startAfter);
-		blockWritesFor = getOption(options, LiteralStringRef("blockWritesFor"),
+		blockWritesFor = getOption(options,
+		                           LiteralStringRef("blockWritesFor"),
 		                           double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) / double(1e6));
 	}
 	virtual std::string description() { return "LocalRatekeeperWorkload"; }

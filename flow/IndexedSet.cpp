@@ -35,18 +35,21 @@
 
 template <class Node>
 int ISGetHeight(Node* n) {
-	if (!n) return 0;
+	if (!n)
+		return 0;
 	int lh = ISGetHeight(n->child[0]);
 	int rh = ISGetHeight(n->child[1]);
 	return std::max(lh, rh) + 1;
 }
 
 void indent(int depth) {
-	for (int i = 0; i < depth; i++) printf(" ");
+	for (int i = 0; i < depth; i++)
+		printf(" ");
 }
 
 template <class T, class Metric>
-std::pair<int, int> IndexedSet<T, Metric>::testonly_assertBalanced(typename IndexedSet<T, Metric>::Node* n, int depth,
+std::pair<int, int> IndexedSet<T, Metric>::testonly_assertBalanced(typename IndexedSet<T, Metric>::Node* n,
+                                                                   int depth,
                                                                    bool checkAVL) {
 	/* An IndexedSet (sub)tree n has the following invariants:
 	    (1) BST invariant: Every descendant x of n->child[0] has x->data < n->data, and every descendant x of
@@ -60,7 +63,8 @@ std::pair<int, int> IndexedSet<T, Metric>::testonly_assertBalanced(typename Inde
 	often temporarily broken and then restored during operations, this permits checking invariants e.g. before a
 	rebalancing operation)
 	    */
-	if (!n && depth == 0) n = root;
+	if (!n && depth == 0)
+		n = root;
 
 	if (!n) {
 		return std::make_pair(0, 0);
@@ -130,14 +134,16 @@ bool operator<(const char* l, std::string const& r) {
 
 TEST_CASE("/flow/IndexedSet/erase 400k of 1M") {
 	IndexedSet<int, int> is;
-	for (int n = 0; n < 1000000; n++) is.insert(n, 3);
+	for (int n = 0; n < 1000000; n++)
+		is.insert(n, 3);
 
 	is.erase(is.lower_bound(300000), is.lower_bound(700001));
 
 	is.testonly_assertBalanced();
 
 	int count = 0;
-	for (auto iter = is.begin(); iter != is.end(); ++iter) ++count;
+	for (auto iter = is.begin(); iter != is.end(); ++iter)
+		++count;
 
 	ASSERT(count * 3 == is.sumTo(is.end()));
 
@@ -229,7 +235,8 @@ TEST_CASE("/flow/IndexedSet/random ops") {
 		int b = deterministicRandom()->randomInt(0, 10000000);
 		// int e = b + deterministicRandom()->randomInt(0, 10);
 		int e = deterministicRandom()->randomInt(0, 10000000);
-		if (e < b) std::swap(b, e);
+		if (e < b)
+			std::swap(b, e);
 		auto ib = is.lower_bound(b);
 		auto ie = is.lower_bound(e);
 
@@ -265,7 +272,8 @@ TEST_CASE("/flow/IndexedSet/strings") {
 	std::map<std::string, int> aMap;
 	myMap["Hello"] = 1;
 	myMap["Planet"] = 5;
-	for (auto i = myMap.begin(); i != myMap.end(); ++i) aMap[i->key] = i->value;
+	for (auto i = myMap.begin(); i != myMap.end(); ++i)
+		aMap[i->key] = i->value;
 
 	ASSERT(myMap.find("Hello")->value == 1);
 	ASSERT(myMap.find("World") == myMap.end());
@@ -314,8 +322,10 @@ TEST_CASE("/flow/IndexedSets/ints") {
 		ASSERT(is.find(i) != is.end());
 	}
 
-	for (int i = 10; i < 200; i += 10) ASSERT(is.find(i) != is.end());
-	for (int i = 1; i < 200; i += 10) ASSERT(is.find(i) == is.end());
+	for (int i = 10; i < 200; i += 10)
+		ASSERT(is.find(i) != is.end());
+	for (int i = 1; i < 200; i += 10)
+		ASSERT(is.find(i) == is.end());
 
 	for (int i = 20; i < 200; i += 10) {
 		is.erase(i);
@@ -352,7 +362,8 @@ TEST_CASE("/flow/IndexedSet/data constructor and destructor calls match") {
 		mySet.erase(Counter(deterministicRandom()->randomInt(0, 1000000)));
 	}
 	int count2 = 0;
-	for (int i = 0; i < 1000000; i++) count2 += mySet.count(Counter(i));
+	for (int i = 0; i < 1000000; i++)
+		count2 += mySet.count(Counter(i));
 	ASSERT(count == count2);
 	mySet.clear();
 	ASSERT(count == 0);
@@ -388,10 +399,12 @@ TEST_CASE("/flow/IndexedSet/all numbers") {
 	std::mt19937_64 urng(deterministicRandom()->randomUInt32());
 
 	std::vector<int> allNumbers;
-	for (int i = 0; i < 1000000; i++) allNumbers.push_back(i);
+	for (int i = 0; i < 1000000; i++)
+		allNumbers.push_back(i);
 	std::shuffle(allNumbers.begin(), allNumbers.end(), urng);
 
-	for (int i = 0; i < allNumbers.size(); i++) is.insert(allNumbers[i], allNumbers[i]);
+	for (int i = 0; i < allNumbers.size(); i++)
+		is.insert(allNumbers[i], allNumbers[i]);
 
 	ASSERT(is.sumTo(is.end()) == allNumbers.size() * (allNumbers.size() - 1) / 2);
 
@@ -402,19 +415,22 @@ TEST_CASE("/flow/IndexedSet/all numbers") {
 		auto ii = is.index(n);
 		int ib = ii != is.end() ? *ii : 1000000;
 		ASSERT(ib == b);
-		if (ib != b) printf("%s %" PRId64 " %d %d %" PRId64 "\n", ib == b ? "OK" : "ERROR", n, b, ib, is.sumTo(ii));
+		if (ib != b)
+			printf("%s %" PRId64 " %d %d %" PRId64 "\n", ib == b ? "OK" : "ERROR", n, b, ib, is.sumTo(ii));
 	}
 
 	for (int i = 0; i < 100000; i++) {
 		int a = deterministicRandom()->randomInt(0, (int)allNumbers.size());
 		int b = deterministicRandom()->randomInt(0, (int)allNumbers.size());
-		if (a > b) std::swap(a, b);
+		if (a > b)
+			std::swap(a, b);
 
 		int64_t itotal = is.sumRange(a, b);
 		// int ntotal = int64_t(b)*(b-1)/2 - int64_t(a)*(a-1)/2;
 		int64_t ntotal = int64_t(b - a) * (a + b - 1) / 2;
 		ASSERT(itotal == ntotal);
-		if (itotal != ntotal) printf("%s %" PRId64 " %" PRId64 "\n", itotal == ntotal ? "OK" : "ERROR", ntotal, itotal);
+		if (itotal != ntotal)
+			printf("%s %" PRId64 " %" PRId64 "\n", itotal == ntotal ? "OK" : "ERROR", ntotal, itotal);
 	}
 
 	// double a = timer();

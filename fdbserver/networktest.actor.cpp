@@ -145,7 +145,8 @@ ACTOR Future<Void> networkTestClient(std::string testServers) {
 	}
 
 	state std::vector<Future<Void>> clients;
-	for (int i = 0; i < 30; i++) clients.push_back(testClient(interfs, &sent));
+	for (int i = 0; i < 30; i++)
+		clients.push_back(testClient(interfs, &sent));
 	clients.push_back(logger(&sent));
 
 	wait(waitForAll(clients));

@@ -125,7 +125,8 @@ ThreadFuture<T> abortableFuture(ThreadFuture<T> f, ThreadFuture<Void> abortSigna
 template <class T>
 class DLThreadSingleAssignmentVar : public ThreadSingleAssignmentVar<T> {
 public:
-	DLThreadSingleAssignmentVar(Reference<FdbCApi> api, FdbCApi::FDBFuture* f,
+	DLThreadSingleAssignmentVar(Reference<FdbCApi> api,
+	                            FdbCApi::FDBFuture* f,
 	                            std::function<T(FdbCApi::FDBFuture*, FdbCApi*)> extractValue)
 	  : api(api), f(f), extractValue(extractValue), futureRefCount(1) {
 		ThreadSingleAssignmentVar<T>::addref();
@@ -217,7 +218,8 @@ private:
 };
 
 template <class T>
-ThreadFuture<T> toThreadFuture(Reference<FdbCApi> api, FdbCApi::FDBFuture* f,
+ThreadFuture<T> toThreadFuture(Reference<FdbCApi> api,
+                               FdbCApi::FDBFuture* f,
                                std::function<T(FdbCApi::FDBFuture* f, FdbCApi* api)> extractValue) {
 	return ThreadFuture<T>(new DLThreadSingleAssignmentVar<T>(api, f, extractValue));
 }

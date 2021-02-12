@@ -57,7 +57,9 @@ struct LogRouterData {
 		}
 
 		// Erase messages not needed to update *from* versions >= before (thus, messages with toversion <= before)
-		ACTOR Future<Void> eraseMessagesBefore(TagData* self, Version before, LogRouterData* tlogData,
+		ACTOR Future<Void> eraseMessagesBefore(TagData* self,
+		                                       Version before,
+		                                       LogRouterData* tlogData,
 		                                       TaskPriority taskID) {
 			while (!self->version_messages.empty() && self->version_messages.front().first < before) {
 				Version version = self->version_messages.front().first;
@@ -140,7 +142,8 @@ struct LogRouterData {
 	    allowPops(false), minKnownCommittedVersion(0), poppedVersion(0), foundEpochEnd(false),
 	    cc("LogRouter", dbgid.toString()), getMoreCount("GetMoreCount", cc),
 	    getMoreBlockedCount("GetMoreBlockedCount", cc),
-	    peekLatencyDist(Histogram::getHistogram(LiteralStringRef("LogRouter"), LiteralStringRef("PeekTLogLatency"),
+	    peekLatencyDist(Histogram::getHistogram(LiteralStringRef("LogRouter"),
+	                                            LiteralStringRef("PeekTLogLatency"),
 	                                            Histogram::Unit::microseconds)) {
 		// setup just enough of a logSet to be able to call getPushLocations
 		logSet.logServers.resize(req.tLogLocalities.size());
@@ -163,8 +166,9 @@ struct LogRouterData {
 		specialCounter(cc, "MinPopped", [this]() { return this->minPopped.get(); });
 		// TODO: Add minPopped locality and minPoppedId, similar as tLog Metrics
 		specialCounter(cc, "FetchedVersions", [this]() {
-			return std::max<Version>(0, std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS,
-			                                              this->version.get() - this->minPopped.get()));
+			return std::max<Version>(0,
+			                         std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS,
+			                                           this->version.get() - this->minPopped.get()));
 		});
 		specialCounter(cc, "MinKnownCommittedVersion", [this]() { return this->minKnownCommittedVersion; });
 		specialCounter(cc, "PoppedVersion", [this]() { return this->poppedVersion; });
@@ -190,8 +194,12 @@ struct LogRouterData {
 			return 1000 * val;
 		});
 		specialCounter(cc, "Generation", [this]() { return this->generation; });
-		logger = traceCounters("LogRouterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc,
-		                       "LogRouterMetrics", [this](TraceEvent& te) {
+		logger = traceCounters("LogRouterMetrics",
+		                       dbgid,
+		                       SERVER_KNOBS->WORKER_LOGGING_INTERVAL,
+		                       &cc,
+		                       "LogRouterMetrics",
+		                       [this](TraceEvent& te) {
 			                       te.detail("PrimaryPeekLocation", this->primaryPeekLocation);
 			                       te.detail("RouterTag", this->routerTag.toString());
 		                       });
@@ -323,7 +331,8 @@ ACTOR Future<Void> pullAsyncData(LogRouterData* self) {
 					break;
 				}
 				when(wait(dbInfoChange)) { // FIXME: does this actually happen?
-					if (r) tagPopped = std::max(tagPopped, r->popped());
+					if (r)
+						tagPopped = std::max(tagPopped, r->popped());
 					if (self->logSystem->get()) {
 						r = self->logSystem->get()->peekLogRouter(self->dbgid, tagAt, self->routerTag);
 						self->primaryPeekLocation = r->getPrimaryPeekLocation();
@@ -398,14 +407,18 @@ std::deque<std::pair<Version, LengthPrefixedStringRef>>& get_version_messages(Lo
 	return tagData->version_messages;
 };
 
-void peekMessagesFromMemory(LogRouterData* self, TLogPeekRequest const& req, BinaryWriter& messages,
+void peekMessagesFromMemory(LogRouterData* self,
+                            TLogPeekRequest const& req,
+                            BinaryWriter& messages,
                             Version& endVersion) {
 	ASSERT(!messages.getLength());
 
 	auto& deque = get_version_messages(self, req.tag);
 	//TraceEvent("TLogPeekMem", self->dbgid).detail("Tag", req.tag1).detail("PDS", self->persistentDataSequence).detail("PDDS", self->persistentDataDurableSequence).detail("Oldest", map1.empty() ? 0 : map1.begin()->key ).detail("OldestMsgCount", map1.empty() ? 0 : map1.begin()->value.size());
 
-	auto it = std::lower_bound(deque.begin(), deque.end(), std::make_pair(req.begin, LengthPrefixedStringRef()),
+	auto it = std::lower_bound(deque.begin(),
+	                           deque.end(),
+	                           std::make_pair(req.begin, LengthPrefixedStringRef()),
 	                           CompareFirst<std::pair<Version, LengthPrefixedStringRef>>());
 
 	Version currentVersion = -1;
@@ -427,7 +440,8 @@ void peekMessagesFromMemory(LogRouterData* self, TLogPeekRequest const& req, Bin
 
 Version poppedVersion(LogRouterData* self, Tag tag) {
 	auto tagData = self->getTagData(tag);
-	if (!tagData) return Version(0);
+	if (!tagData)
+		return Version(0);
 	return tagData->popped;
 }
 
@@ -534,7 +548,8 @@ ACTOR Future<Void> logRouterPeekMessages(LogRouterData* self, TLogPeekRequest re
 		auto& sequenceData = trackerData.sequence_version[sequence + 1];
 		if (trackerData.sequence_version.size() && sequence + 1 < trackerData.sequence_version.begin()->first) {
 			req.reply.sendError(timed_out());
-			if (!sequenceData.isSet()) sequenceData.sendError(timed_out());
+			if (!sequenceData.isSet())
+				sequenceData.sendError(timed_out());
 			return Void();
 		}
 		if (sequenceData.isSet()) {
@@ -611,7 +626,8 @@ ACTOR Future<Void> logRouterPop(LogRouterData* self, TLogPopRequest req) {
 	return Void();
 }
 
-ACTOR Future<Void> logRouterCore(TLogInterface interf, InitializeLogRouterRequest req,
+ACTOR Future<Void> logRouterCore(TLogInterface interf,
+                                 InitializeLogRouterRequest req,
                                  Reference<AsyncVar<ServerDBInfo>> db) {
 	state LogRouterData logRouterData(interf.id(), req);
 	state PromiseStream<Future<Void>> addActor;
@@ -638,7 +654,8 @@ ACTOR Future<Void> logRouterCore(TLogInterface interf, InitializeLogRouterReques
 	}
 }
 
-ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t recoveryCount,
+ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db,
+                                uint64_t recoveryCount,
                                 TLogInterface myInterface) {
 	loop {
 		bool isDisplaced =
@@ -669,7 +686,8 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t r
 	}
 }
 
-ACTOR Future<Void> logRouter(TLogInterface interf, InitializeLogRouterRequest req,
+ACTOR Future<Void> logRouter(TLogInterface interf,
+                             InitializeLogRouterRequest req,
                              Reference<AsyncVar<ServerDBInfo>> db) {
 	try {
 		TraceEvent("LogRouterStart", interf.id())

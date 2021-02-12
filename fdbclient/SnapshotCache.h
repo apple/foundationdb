@@ -75,29 +75,37 @@ struct ExtStringRef {
 		int cbl = std::min(base.size(), rhs.base.size());
 		if (cbl > 0) {
 			int c = memcmp(base.begin(), rhs.base.begin(), cbl);
-			if (c != 0) return c;
+			if (c != 0)
+				return c;
 		}
 
 		for (int i = cbl; i < base.size(); i++)
-			if (base[i]) return 1;
+			if (base[i])
+				return 1;
 		for (int i = cbl; i < rhs.base.size(); i++)
-			if (rhs.base[i]) return -1;
+			if (rhs.base[i])
+				return -1;
 		return size() - rhs.size();
 	}
 
 	bool startsWith(const ExtStringRef& s) const {
-		if (size() < s.size()) return false;
+		if (size() < s.size())
+			return false;
 		int cbl = std::min(base.size(), s.base.size());
 		for (int i = cbl; i < std::min(s.size(), base.size()); i++)
-			if (base[i]) return false;
+			if (base[i])
+				return false;
 		for (int i = cbl; i < s.base.size(); i++)
-			if (s.base[i]) return false;
+			if (s.base[i])
+				return false;
 		return !memcmp(base.begin(), s.base.begin(), cbl);
 	}
 
 	bool isKeyAfter(ExtStringRef const& s) const {
-		if (size() != s.size() + 1) return false;
-		if (extra_zero_bytes == 0 && base[base.size() - 1] != 0) return false;
+		if (size() != s.size() + 1)
+			return false;
+		if (extra_zero_bytes == 0 && base[base.size() - 1] != 0)
+			return false;
 		return startsWith(s);
 	}
 
@@ -188,8 +196,10 @@ public:
 		enum SEGMENT_TYPE { UNKNOWN_RANGE, EMPTY_RANGE, KV };
 
 		SEGMENT_TYPE type() {
-			if (!offset) return UNKNOWN_RANGE;
-			if (offset & 1) return EMPTY_RANGE;
+			if (!offset)
+				return UNKNOWN_RANGE;
+			if (offset & 1)
+				return EMPTY_RANGE;
 			return KV;
 		}
 
@@ -268,14 +278,15 @@ public:
 		}
 		void skipContiguous(ExtStringRef key) { // Changes *this to be the last iterator i | the elements e of array
 			                                    // [&*this, &*i] all have e->key < key
-			offset = 2 * (std::lower_bound(it->values.begin() + offset / 2, it->values.end(), key,
-			                               KeyValueRef::OrderByKey()) -
-			              it->values.begin());
+			offset =
+			    2 *
+			    (std::lower_bound(it->values.begin() + offset / 2, it->values.end(), key, KeyValueRef::OrderByKey()) -
+			     it->values.begin());
 		}
 		void skipContiguousBack(ExtStringRef key) { // Changes *this to be the first iterator i | the elements e of
 			                                        // array [&*i, &*this] all have e->key >= key
-			offset = 2 * (std::lower_bound(it->values.begin(), it->values.begin() + offset / 2 - 1, key,
-			                               KeyValueRef::OrderByKey()) -
+			offset = 2 * (std::lower_bound(
+			                  it->values.begin(), it->values.begin() + offset / 2 - 1, key, KeyValueRef::OrderByKey()) -
 			              it->values.begin()) +
 			         2;
 		}
@@ -313,7 +324,8 @@ public:
 	bool empty() const {
 		// Returns true iff anything is known about the contents of the snapshot
 		for (auto i = entries.begin(); i != entries.end(); ++i)
-			if (i->beginKey != i->endKey && i->beginKey < allKeys.end) return false;
+			if (i->beginKey != i->endKey && i->beginKey < allKeys.end)
+				return false;
 		return true;
 	}
 
@@ -336,7 +348,8 @@ public:
 	bool insert(KeyRangeRef keys, VectorRef<KeyValueRef> values) {
 		// Asserts that, in the snapshot, the given ranges of keys contains (only) the given key/value pairs
 		// The returned iterator points to the first key in the range, or after the range if !values.size()
-		if (keys.empty()) return false;
+		if (keys.empty())
+			return false;
 
 		iterator itb(this);
 		itb.skip(keys.begin);
@@ -355,8 +368,9 @@ public:
 		if (!ite.is_unknown_range()) {
 			ite._prevUnknown();
 			end = ite.endKey();
-			values.resize(*arena, std::lower_bound(values.begin(), values.end(), end, KeyValueRef::OrderByKey()) -
-			                          values.begin());
+			values.resize(*arena,
+			              std::lower_bound(values.begin(), values.end(), end, KeyValueRef::OrderByKey()) -
+			                  values.begin());
 		}
 
 		if (begin < end) {

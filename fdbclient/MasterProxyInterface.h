@@ -64,8 +64,18 @@ struct MasterProxyInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, locality, provisional, commit, getConsistentReadVersion, getKeyServersLocations, waitFailure,
-		           getStorageServerRejoinInfo, getRawCommittedVersion, txnState, getHealthMetrics, proxySnapReq);
+		serializer(ar,
+		           locality,
+		           provisional,
+		           commit,
+		           getConsistentReadVersion,
+		           getKeyServersLocations,
+		           waitFailure,
+		           getStorageServerRejoinInfo,
+		           getRawCommittedVersion,
+		           txnState,
+		           getHealthMetrics,
+		           proxySnapReq);
 	}
 
 	void initEndpoints() {
@@ -220,7 +230,10 @@ struct GetKeyServerLocationsRequest {
 	ReplyPromise<GetKeyServerLocationsReply> reply;
 
 	GetKeyServerLocationsRequest() : limit(0), reverse(false) {}
-	GetKeyServerLocationsRequest(KeyRef const& begin, Optional<KeyRef> const& end, int limit, bool reverse,
+	GetKeyServerLocationsRequest(KeyRef const& begin,
+	                             Optional<KeyRef> const& end,
+	                             int limit,
+	                             bool reverse,
 	                             Arena const& arena)
 	  : begin(begin), end(end), limit(limit), reverse(reverse), arena(arena) {}
 

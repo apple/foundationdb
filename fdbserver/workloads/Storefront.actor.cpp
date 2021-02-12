@@ -149,7 +149,8 @@ struct StorefrontWorkload : TestWorkload {
 						std::map<int, int>::iterator it;
 						state vector<Future<Void>> updaters;
 						for (it = items.begin(); it != items.end(); it++) {
-							for (int i = 0; i < it->second; i++) itemList.push_back(it->first);
+							for (int i = 0; i < it->second; i++)
+								itemList.push_back(it->first);
 							updaters.push_back(self->itemUpdater(&tr, self, it->first, it->second));
 						}
 						wait(waitForAll(updaters));
@@ -190,7 +191,8 @@ struct StorefrontWorkload : TestWorkload {
 				vector<int> saved;
 				BinaryReader br(values[orderIdx].value, AssumeVersion(currentProtocolVersion));
 				br >> saved;
-				for (int c = 0; c < saved.size(); c++) result[saved[c]]++;
+				for (int c = 0; c < saved.size(); c++)
+					result[saved[c]]++;
 			}
 			fetched = values.size();
 			begin = begin + fetched;
@@ -214,7 +216,8 @@ struct StorefrontWorkload : TestWorkload {
 		state vector<int> totals(self->itemCount);
 		for (int c = 0; c < accumulators.size(); c++) {
 			vector<int> subTotals = accumulators[c].get();
-			for (int i = 0; i < subTotals.size(); i++) totals[i] += subTotals[i];
+			for (int i = 0; i < subTotals.size(); i++)
+				totals[i] += subTotals[i];
 		}
 
 		Standalone<RangeResultRef> inventory = wait(values);
@@ -246,7 +249,8 @@ struct StorefrontWorkload : TestWorkload {
 					vector<int> itemList;
 					std::map<int, int>::iterator it;
 					for (it = self->orders[id].begin(); it != self->orders[id].end(); it++) {
-						for (int i = 0; i < it->second; i++) itemList.push_back(it->first);
+						for (int i = 0; i < it->second; i++)
+							itemList.push_back(it->first);
 					}
 					BinaryWriter wr(AssumeVersion(currentProtocolVersion));
 					wr << itemList;

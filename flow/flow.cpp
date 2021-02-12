@@ -166,7 +166,8 @@ std::string format(const char* form, ...) {
 Standalone<StringRef> strinc(StringRef const& str) {
 	int index;
 	for (index = str.size() - 1; index >= 0; index--)
-		if (str[index] != 255) break;
+		if (str[index] != 255)
+			break;
 
 	// Must not be called with a string that consists only of zero or more '\xff' bytes.
 	ASSERT(index >= 0);
@@ -180,7 +181,8 @@ Standalone<StringRef> strinc(StringRef const& str) {
 StringRef strinc(StringRef const& str, Arena& arena) {
 	int index;
 	for (index = str.size() - 1; index >= 0; index--)
-		if (str[index] != 255) break;
+		if (str[index] != 255)
+			break;
 
 	// Must not be called with a string that consists only of zero or more '\xff' bytes.
 	ASSERT(index >= 0);
@@ -219,14 +221,16 @@ std::vector<double> P_BUGGIFIED_SECTION_FIRES{ .25, .25 };
 double P_EXPENSIVE_VALIDATION = .05;
 
 int getSBVar(std::string file, int line, BuggifyType type) {
-	if (!buggifyActivated[int(type)]) return 0;
+	if (!buggifyActivated[int(type)])
+		return 0;
 
 	const auto& flPair = std::make_pair(file, line);
 	auto& SBVars = typedSBVars[type];
 	if (!SBVars.count(flPair)) {
 		SBVars[flPair] = deterministicRandom()->random01() < P_BUGGIFIED_SECTION_ACTIVATED[int(type)];
 		g_traceBatch.addBuggify(SBVars[flPair], line, file);
-		if (g_network) g_traceBatch.dump();
+		if (g_network)
+			g_traceBatch.dump();
 	}
 
 	return SBVars[flPair];

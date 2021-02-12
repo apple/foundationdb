@@ -99,7 +99,8 @@ struct NetSAV : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 		}
 	}
 	virtual void receive(ArenaObjectReader& reader) {
-		if (!SAV<T>::canBeSet()) return;
+		if (!SAV<T>::canBeSet())
+			return;
 		this->addPromiseRef();
 		ErrorOr<EnsureTable<T>> message;
 		reader.deserialize(message);
@@ -133,7 +134,8 @@ public:
 	ReplyPromise(const ReplyPromise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
 	ReplyPromise(ReplyPromise&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) { rhs.sav = 0; }
 	~ReplyPromise() {
-		if (sav) sav->delPromiseRef();
+		if (sav)
+			sav->delPromiseRef();
 	}
 
 	ReplyPromise(const Endpoint& endpoint) : sav(new NetSAV<T>(0, 1, endpoint)) {}
@@ -142,13 +144,16 @@ public:
 	}
 
 	void operator=(const ReplyPromise& rhs) {
-		if (rhs.sav) rhs.sav->addPromiseRef();
-		if (sav) sav->delPromiseRef();
+		if (rhs.sav)
+			rhs.sav->addPromiseRef();
+		if (sav)
+			sav->delPromiseRef();
 		sav = rhs.sav;
 	}
 	void operator=(ReplyPromise&& rhs) BOOST_NOEXCEPT {
 		if (sav != rhs.sav) {
-			if (sav) sav->delPromiseRef();
+			if (sav)
+				sav->delPromiseRef();
 			sav = rhs.sav;
 			rhs.sav = 0;
 		}
@@ -374,8 +379,10 @@ public:
 	//   If it returns failure, the failure detector considers the endpoint failed permanently or for the given amount
 	//   of time See IFailureMonitor::onFailedFor() for an explanation of the duration and slope parameters.
 	template <class X>
-	Future<ErrorOr<REPLY_TYPE(X)>> getReplyUnlessFailedFor(const X& value, double sustainedFailureDuration,
-	                                                       double sustainedFailureSlope, TaskPriority taskID) const {
+	Future<ErrorOr<REPLY_TYPE(X)>> getReplyUnlessFailedFor(const X& value,
+	                                                       double sustainedFailureDuration,
+	                                                       double sustainedFailureSlope,
+	                                                       TaskPriority taskID) const {
 		// If it is local endpoint, no need for failure monitoring
 		return waitValueOrSignal(getReply(value, taskID),
 		                         makeDependent<T>(IFailureMonitor::failureMonitor())
@@ -384,7 +391,8 @@ public:
 	}
 
 	template <class X>
-	Future<ErrorOr<REPLY_TYPE(X)>> getReplyUnlessFailedFor(const X& value, double sustainedFailureDuration,
+	Future<ErrorOr<REPLY_TYPE(X)>> getReplyUnlessFailedFor(const X& value,
+	                                                       double sustainedFailureDuration,
 	                                                       double sustainedFailureSlope) const {
 		// If it is local endpoint, no need for failure monitoring
 		return waitValueOrSignal(getReply(value),
@@ -409,18 +417,21 @@ public:
 	RequestStream(RequestStream&& rhs) BOOST_NOEXCEPT : queue(rhs.queue) { rhs.queue = 0; }
 	void operator=(const RequestStream& rhs) {
 		rhs.queue->addPromiseRef();
-		if (queue) queue->delPromiseRef();
+		if (queue)
+			queue->delPromiseRef();
 		queue = rhs.queue;
 	}
 	void operator=(RequestStream&& rhs) BOOST_NOEXCEPT {
 		if (queue != rhs.queue) {
-			if (queue) queue->delPromiseRef();
+			if (queue)
+				queue->delPromiseRef();
 			queue = rhs.queue;
 			rhs.queue = 0;
 		}
 	}
 	~RequestStream() {
-		if (queue) queue->delPromiseRef();
+		if (queue)
+			queue->delPromiseRef();
 		// queue = (NetNotifiedQueue<T>*)0xdeadbeef;
 	}
 

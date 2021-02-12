@@ -41,13 +41,15 @@ protected:
 
 template <class T>
 inline T waitForAndGet(Future<T> f) {
-	if (!f.isReady()) CoroThreadPool::waitFor(success(f));
+	if (!f.isReady())
+		CoroThreadPool::waitFor(success(f));
 	return f.get();
 }
 
 inline void waitFor(Future<Void> f) {
 	CoroThreadPool::waitFor(f);
-	if (f.isError()) throw f.getError();
+	if (f.isError())
+		throw f.getError();
 }
 
 #endif

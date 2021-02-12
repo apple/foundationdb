@@ -103,8 +103,12 @@ Future<uint64_t> setupRange(Database cx, T* workload, uint64_t begin, uint64_t e
 }
 
 ACTOR template <class T>
-Future<uint64_t> setupRangeWorker(Database cx, T* workload, std::vector<std::pair<uint64_t, uint64_t>>* jobs,
-                                  double maxKeyInsertRate, int keySaveIncrement, int actorId) {
+Future<uint64_t> setupRangeWorker(Database cx,
+                                  T* workload,
+                                  std::vector<std::pair<uint64_t, uint64_t>>* jobs,
+                                  double maxKeyInsertRate,
+                                  int keySaveIncrement,
+                                  int actorId) {
 	state double nextStart;
 	state uint64_t loadedRanges = 0;
 	state int lastStoredKeysLoaded = 0;
@@ -115,7 +119,8 @@ Future<uint64_t> setupRangeWorker(Database cx, T* workload, std::vector<std::pai
 		jobs->pop_back();
 		nextStart = now() + (job.second - job.first) / maxKeyInsertRate;
 		uint64_t numBytes = wait(setupRange(cx, workload, job.first, job.second));
-		if (numBytes > 0) loadedRanges++;
+		if (numBytes > 0)
+			loadedRanges++;
 
 		if (keySaveIncrement > 0) {
 			keysLoaded += job.second - job.first;
@@ -138,18 +143,19 @@ Future<uint64_t> setupRangeWorker(Database cx, T* workload, std::vector<std::pai
 			}
 		}
 
-		if (now() < nextStart) wait(delayUntil(nextStart));
+		if (now() < nextStart)
+			wait(delayUntil(nextStart));
 	}
 	return loadedRanges;
 }
 
 // Periodically determines how many keys have been inserted.  If the count has just exceeded a count of interest,
-// computes the time taken to reach that mark.  Returns a vector of times (in seconds) corresponding to the counts in the
-// countsOfInterest vector.
+// computes the time taken to reach that mark.  Returns a vector of times (in seconds) corresponding to the counts in
+// the countsOfInterest vector.
 
 // Expects countsOfInterest to be sorted in ascending order
-ACTOR static Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCount(
-    Database cx, std::vector<uint64_t> countsOfInterest, double checkInterval) {
+ACTOR static Future<std::vector<std::pair<uint64_t, double>>>
+trackInsertionCount(Database cx, std::vector<uint64_t> countsOfInterest, double checkInterval) {
 	state KeyRange keyPrefix = KeyRangeRef(std::string("keycount"), std::string("keycount") + char(255));
 	state KeyRange bytesPrefix = KeyRangeRef(std::string("bytesstored"), std::string("bytesstored") + char(255));
 	state Transaction tr(cx);
@@ -170,10 +176,12 @@ ACTOR static Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCoun
 			Standalone<RangeResultRef> bytes = bytesFuture.get();
 
 			uint64_t numInserted = 0;
-			for (int i = 0; i < counts.size(); i++) numInserted += *(uint64_t*)counts[i].value.begin();
+			for (int i = 0; i < counts.size(); i++)
+				numInserted += *(uint64_t*)counts[i].value.begin();
 
 			uint64_t bytesInserted = 0;
-			for (int i = 0; i < bytes.size(); i++) bytesInserted += *(uint64_t*)bytes[i].value.begin();
+			for (int i = 0; i < bytes.size(); i++)
+				bytesInserted += *(uint64_t*)bytes[i].value.begin();
 
 			while (currentCountIndex < countsOfInterest.size() &&
 			       countsOfInterest[currentCountIndex] > lastInsertionCount &&
@@ -192,13 +200,18 @@ ACTOR static Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCoun
 }
 
 ACTOR template <class T>
-Future<Void> bulkSetup(Database cx, T* workload, uint64_t nodeCount, Promise<double> setupTime,
-                       bool valuesInconsequential = false, double postSetupWarming = 0.0,
+Future<Void> bulkSetup(Database cx,
+                       T* workload,
+                       uint64_t nodeCount,
+                       Promise<double> setupTime,
+                       bool valuesInconsequential = false,
+                       double postSetupWarming = 0.0,
                        double maxKeyInsertRate = 1e12,
                        std::vector<uint64_t> insertionCountsToMeasure = std::vector<uint64_t>(),
                        Promise<std::vector<std::pair<uint64_t, double>>> ratesAtKeyCounts =
                            Promise<std::vector<std::pair<uint64_t, double>>>(),
-                       int keySaveIncrement = 0, double keyCheckInterval = 0.1) {
+                       int keySaveIncrement = 0,
+                       double keyCheckInterval = 0.1) {
 
 	state std::vector<std::pair<uint64_t, uint64_t>> jobs;
 	state uint64_t startNode = (nodeCount * workload->clientId) / workload->clientCount;
@@ -272,7 +285,8 @@ Future<Void> bulkSetup(Database cx, T* workload, uint64_t nodeCount, Promise<dou
 		if (workload->clientId == 0)
 			insertionTimes = trackInsertionCount(cx, insertionCountsToMeasure, keyCheckInterval);
 
-		if (keySaveIncrement <= 0) keySaveIncrement = BULK_SETUP_RANGE_SIZE;
+		if (keySaveIncrement <= 0)
+			keySaveIncrement = BULK_SETUP_RANGE_SIZE;
 	} else
 		keySaveIncrement = 0;
 
@@ -290,7 +304,8 @@ Future<Void> bulkSetup(Database cx, T* workload, uint64_t nodeCount, Promise<dou
 	ratesAtKeyCounts.send(insertionTimes.get());
 
 	uint64_t rangesInserted = 0;
-	for (int i = 0; i < fs.size(); i++) rangesInserted += fs[i].get();
+	for (int i = 0; i < fs.size(); i++)
+		rangesInserted += fs[i].get();
 
 	state double elapsed = now() - start;
 	setupTime.send(elapsed);
@@ -315,9 +330,11 @@ Future<Void> bulkSetup(Database cx, T* workload, uint64_t nodeCount, Promise<dou
 				}
 			}
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			TraceEvent("DynamicWarmingError").error(e);
-			if (postSetupWarming > 0) wait(timeout(databaseWarmer(cx), postSetupWarming, Void()));
+			if (postSetupWarming > 0)
+				wait(timeout(databaseWarmer(cx), postSetupWarming, Void()));
 		}
 	}
 

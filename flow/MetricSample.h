@@ -54,7 +54,8 @@ struct TransientMetricSample : MetricSample<T> {
 	// Returns the sampled metric value (possibly 0, possibly increased by the sampling factor)
 	int64_t addAndExpire(const T& key, int64_t metric, double expiration) {
 		int64_t x = add(key, metric);
-		if (x) queue.push_back(std::make_tuple(expiration, *this->sample.find(key), -x));
+		if (x)
+			queue.push_back(std::make_tuple(expiration, *this->sample.find(key), -x));
 		return x;
 	}
 
@@ -65,7 +66,8 @@ struct TransientMetricSample : MetricSample<T> {
 			int64_t delta = std::get<2>(queue.front());
 			ASSERT(delta != 0);
 
-			if (this->sample.addMetric(T(key), delta) == 0) this->sample.erase(key);
+			if (this->sample.addMetric(T(key), delta) == 0)
+				this->sample.erase(key);
 
 			queue.pop_front();
 		}
@@ -73,16 +75,19 @@ struct TransientMetricSample : MetricSample<T> {
 
 private:
 	int64_t add(const T& key, int64_t metric) {
-		if (!metric) return 0;
+		if (!metric)
+			return 0;
 		int64_t mag = std::abs(metric);
 
 		if (mag < this->metricUnitsPerSample) {
-			if (!roll(mag)) return 0;
+			if (!roll(mag))
+				return 0;
 
 			metric = metric < 0 ? -this->metricUnitsPerSample : this->metricUnitsPerSample;
 		}
 
-		if (this->sample.addMetric(T(key), metric) == 0) this->sample.erase(key);
+		if (this->sample.addMetric(T(key), metric) == 0)
+			this->sample.erase(key);
 
 		return metric;
 	}
@@ -115,7 +120,8 @@ struct TransientThresholdMetricSample : MetricSample<T> {
 	template <class T_>
 	int64_t addAndExpire(T_&& key, int64_t metric, double expiration) {
 		int64_t x = add(std::forward<T_>(key), metric);
-		if (x) queue.push_back(std::make_tuple(expiration, *this->sample.find(key), -x));
+		if (x)
+			queue.push_back(std::make_tuple(expiration, *this->sample.find(key), -x));
 		return x;
 	}
 
@@ -132,7 +138,8 @@ struct TransientThresholdMetricSample : MetricSample<T> {
 				ASSERT(iter != thresholdCrossedSet.end())
 				thresholdCrossedSet.erase(iter);
 			}
-			if (val == 0) this->sample.erase(key);
+			if (val == 0)
+				this->sample.erase(key);
 
 			queue.pop_front();
 		}
@@ -141,11 +148,13 @@ struct TransientThresholdMetricSample : MetricSample<T> {
 private:
 	template <class T_>
 	int64_t add(T_&& key, int64_t metric) {
-		if (!metric) return 0;
+		if (!metric)
+			return 0;
 		int64_t mag = std::abs(metric);
 
 		if (mag < this->metricUnitsPerSample) {
-			if (!roll(mag)) return 0;
+			if (!roll(mag))
+				return 0;
 
 			metric = metric < 0 ? -this->metricUnitsPerSample : this->metricUnitsPerSample;
 		}
@@ -157,7 +166,8 @@ private:
 			thresholdCrossedSet.insert(key, val);
 		}
 
-		if (val == 0) this->sample.erase(key);
+		if (val == 0)
+			this->sample.erase(key);
 
 		return metric;
 	}

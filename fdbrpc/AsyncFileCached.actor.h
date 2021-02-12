@@ -59,9 +59,11 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 	static CacheEvictionType evictionPolicyStringToEnum(const std::string& policy) {
 		std::string cep = policy;
 		std::transform(cep.begin(), cep.end(), cep.begin(), ::tolower);
-		if (cep != "random" && cep != "lru") throw invalid_cache_eviction_policy();
+		if (cep != "random" && cep != "lru")
+			throw invalid_cache_eviction_policy();
 
-		if (cep == "random") return RANDOM;
+		if (cep == "random")
+			return RANDOM;
 		return LRU;
 	}
 
@@ -154,7 +156,8 @@ public:
 		//TraceEvent("AsyncFileCachedOpen").detail("Filename", filename);
 		if (openFiles.find(filename) == openFiles.end()) {
 			auto f = open_impl(filename, flags, mode);
-			if (f.isReady() && f.isError()) return f;
+			if (f.isReady() && f.isError())
+				return f;
 			if (!f.isReady())
 				openFiles[filename].opened = f;
 			else
@@ -171,7 +174,8 @@ public:
 			ASSERT(length >= 0);
 		}
 		auto f = read_write_impl(this, data, length, offset, false);
-		if (f.isReady() && !f.isError()) return length;
+		if (f.isReady() && !f.isError())
+			return length;
 		++countFileCacheReadsBlocked;
 		++countCacheReadsBlocked;
 		return tag(f, length);
@@ -180,7 +184,8 @@ public:
 	ACTOR static Future<Void> write_impl(AsyncFileCached* self, void const* data, int length, int64_t offset) {
 		// If there is a truncate in progress before the the write position then we must
 		// wait for it to complete.
-		if (length + offset > self->currentTruncateSize) wait(self->currentTruncate);
+		if (length + offset > self->currentTruncateSize)
+			wait(self->currentTruncate);
 		++self->countFileCacheWrites;
 		++self->countCacheWrites;
 		Future<Void> f = read_write_impl(self, const_cast<void*>(data), length, offset, true);
@@ -293,7 +298,9 @@ private:
 	Int64MetricHandle countCachePageReadsMerged;
 	Int64MetricHandle countCacheReadBytes;
 
-	AsyncFileCached(Reference<IAsyncFile> uncached, const std::string& filename, int64_t length,
+	AsyncFileCached(Reference<IAsyncFile> uncached,
+	                const std::string& filename,
+	                int64_t length,
 	                Reference<EvictablePageCache> pageCache)
 	  : uncached(uncached), filename(filename), length(length), prevLength(length), pageCache(pageCache),
 	    currentTruncate(Void()), currentTruncateSize(0) {
@@ -322,7 +329,9 @@ private:
 
 	static Future<Reference<IAsyncFile>> open_impl(std::string filename, int flags, int mode);
 
-	ACTOR static Future<Reference<IAsyncFile>> open_impl(std::string filename, int flags, int mode,
+	ACTOR static Future<Reference<IAsyncFile>> open_impl(std::string filename,
+	                                                     int flags,
+	                                                     int mode,
 	                                                     Reference<EvictablePageCache> pageCache) {
 		try {
 			TraceEvent("AFCUnderlyingOpenBegin").detail("Filename", filename);
@@ -340,7 +349,8 @@ private:
 			of.opened = Future<Reference<IAsyncFile>>();
 			return Reference<IAsyncFile>(of.f);
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled) openFiles.erase(filename);
+			if (e.code() != error_code_actor_cancelled)
+				openFiles.erase(filename);
 			throw e;
 		}
 	}
@@ -368,7 +378,8 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 			return true;
 		}
 
-		if (dirty) flush();
+		if (dirty)
+			flush();
 
 		return false;
 	}
@@ -498,7 +509,8 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 			}
 		}
 		// If the memory we read into wasn't orphaned while we were waiting on the read then set valid to true
-		if (dst == self->data) self->valid = true;
+		if (dst == self->data)
+			self->valid = true;
 		return Void();
 	}
 
@@ -527,7 +539,8 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 
 				if (self->pageOffset + self->pageCache->pageSize > self->owner->length) {
 					ASSERT(self->pageOffset < self->owner->length);
-					memset(static_cast<uint8_t*>(self->data) + self->owner->length - self->pageOffset, 0,
+					memset(static_cast<uint8_t*>(self->data) + self->owner->length - self->pageOffset,
+					       0,
 					       self->pageCache->pageSize - (self->owner->length - self->pageOffset));
 				}
 
@@ -553,7 +566,8 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 	}
 
 	Future<Void> flush() {
-		if (!dirty && notFlushing.isReady()) return Void();
+		if (!dirty && notFlushing.isReady())
+			return Void();
 
 		ASSERT(valid || !notReading.isReady() || notReading.isError());
 
@@ -567,7 +581,8 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 	}
 
 	Future<Void> quiesce() {
-		if (dirty) flush();
+		if (dirty)
+			flush();
 
 		// If we are flushing, we will be quiescent when all flushes are finished
 		// Returning flush() isn't right, because flush can return before notFlushing.isReady()
@@ -576,14 +591,16 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 		}
 
 		// else if we are reading, we will be quiescent when the read is finished
-		if (!notReading.isReady()) return notReading;
+		if (!notReading.isReady())
+			return notReading;
 
 		return Void();
 	}
 
 	Future<Void> truncate() {
 		// Allow truncatation during zero copy reads but orphan the previous buffer
-		if (zeroCopyRefCount != 0) orphan();
+		if (zeroCopyRefCount != 0)
+			orphan();
 		truncated = true;
 		return truncate_impl(this);
 	}
@@ -617,7 +634,8 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 
 	void updateFlushableIndex() {
 		bool flushable = dirty || writeThroughCount;
-		if (flushable == (flushableIndex != -1)) return;
+		if (flushable == (flushableIndex != -1))
+			return;
 
 		if (flushable) {
 			flushableIndex = owner->flushable.size();

@@ -79,8 +79,10 @@ private:
 		}
 
 		void log(FILE* file) {
-			if (ftell(file) > (int64_t)50 * 1e9) fseek(file, 0, SEEK_SET);
-			if (!fwrite(this, sizeof(OpLogEntry), 1, file)) throw io_error();
+			if (ftell(file) > (int64_t)50 * 1e9)
+				fseek(file, 0, SEEK_SET);
+			if (!fwrite(this, sizeof(OpLogEntry), 1, file))
+				throw io_error();
 		}
 	};
 #pragma pop
@@ -89,8 +91,12 @@ private:
 	struct IOBlock;
 	static void KAIOLogBlockEvent(IOBlock* ioblock, OpLogEntry::EStage stage, uint32_t result = 0);
 	static void KAIOLogBlockEvent(FILE* logFile, IOBlock* ioblock, OpLogEntry::EStage stage, uint32_t result = 0);
-	static void KAIOLogEvent(FILE* logFile, uint32_t id, OpLogEntry::EOperation op, OpLogEntry::EStage stage,
-	                         uint32_t pageOffset = 0, uint32_t result = 0);
+	static void KAIOLogEvent(FILE* logFile,
+	                         uint32_t id,
+	                         OpLogEntry::EOperation op,
+	                         OpLogEntry::EStage stage,
+	                         uint32_t pageOffset = 0,
+	                         uint32_t result = 0);
 
 public:
 #else
@@ -289,7 +295,8 @@ public:
 				completed = true;
 			}
 		}
-		if (!completed) result = ftruncate(fd, size);
+		if (!completed)
+			result = ftruncate(fd, size);
 
 		double end = timer_monotonic();
 		if (nondeterministicRandom()->random01() < end - begin) {
@@ -361,7 +368,8 @@ public:
 		close(fd);
 
 #if KAIO_LOGGING
-		if (logFile != nullptr) fclose(logFile);
+		if (logFile != nullptr)
+			fclose(logFile);
 #endif
 	}
 
@@ -370,7 +378,8 @@ public:
 			ctx.submitMetric = true;
 
 			double begin = timer_monotonic();
-			if (!ctx.outstanding) ctx.ioStallBegin = begin;
+			if (!ctx.outstanding)
+				ctx.ioStallBegin = begin;
 
 			IOBlock* toStart[FLOW_KNOBS->MAX_OUTSTANDING];
 			int n = std::min<size_t>(FLOW_KNOBS->MAX_OUTSTANDING - ctx.outstanding, ctx.queue.size());
@@ -529,7 +538,8 @@ private:
 			    .detail("Filename", owner->filename);
 			g_network->setGlobal(INetwork::enASIOTimedOut, (flowGlobalType) true);
 
-			if (!warnOnly) owner->failed = true;
+			if (!warnOnly)
+				owner->failed = true;
 		}
 	};
 
@@ -631,7 +641,8 @@ private:
 					platform::createDirectory(logPath);
 					logFileName = logPath + format("%s.iolog", logFileName.c_str());
 					logFile = fopen(logFileName.c_str(), "r+");
-					if (logFile == nullptr) logFile = fopen(logFileName.c_str(), "w");
+					if (logFile == nullptr)
+						logFile = fopen(logFileName.c_str(), "w");
 					if (logFile != nullptr)
 						TraceEvent("KAIOLogOpened").detail("File", filename).detail("LogFile", logFileName);
 					else {
@@ -666,11 +677,16 @@ private:
 	static int openFlags(int flags) {
 		int oflags = O_DIRECT | O_CLOEXEC;
 		ASSERT(bool(flags & OPEN_READONLY) != bool(flags & OPEN_READWRITE)); // readonly xor readwrite
-		if (flags & OPEN_EXCLUSIVE) oflags |= O_EXCL;
-		if (flags & OPEN_CREATE) oflags |= O_CREAT;
-		if (flags & OPEN_READONLY) oflags |= O_RDONLY;
-		if (flags & OPEN_READWRITE) oflags |= O_RDWR;
-		if (flags & OPEN_ATOMIC_WRITE_AND_CREATE) oflags |= O_TRUNC;
+		if (flags & OPEN_EXCLUSIVE)
+			oflags |= O_EXCL;
+		if (flags & OPEN_CREATE)
+			oflags |= O_CREAT;
+		if (flags & OPEN_READONLY)
+			oflags |= O_RDONLY;
+		if (flags & OPEN_READWRITE)
+			oflags |= O_RDWR;
+		if (flags & OPEN_ATOMIC_WRITE_AND_CREATE)
+			oflags |= O_TRUNC;
 		return oflags;
 	}
 
@@ -689,7 +705,8 @@ private:
 
 			loop {
 				n = io_getevents(ctx.iocx, 0, FLOW_KNOBS->MAX_OUTSTANDING, ev, &tm);
-				if (n >= 0 || errno != EINTR) break;
+				if (n >= 0 || errno != EINTR)
+					break;
 			}
 
 			++ctx.countAIOCollect;
@@ -735,7 +752,8 @@ private:
 #if KAIO_LOGGING
 // Call from contexts where only an ioblock is available, log if its owner is set
 void AsyncFileKAIO::KAIOLogBlockEvent(IOBlock* ioblock, OpLogEntry::EStage stage, uint32_t result) {
-	if (ioblock->owner) return KAIOLogBlockEvent(ioblock->owner->logFile, ioblock, stage, result);
+	if (ioblock->owner)
+		return KAIOLogBlockEvent(ioblock->owner->logFile, ioblock, stage, result);
 }
 
 void AsyncFileKAIO::KAIOLogBlockEvent(FILE* logFile, IOBlock* ioblock, OpLogEntry::EStage stage, uint32_t result) {
@@ -750,7 +768,8 @@ void AsyncFileKAIO::KAIOLogBlockEvent(FILE* logFile, IOBlock* ioblock, OpLogEntr
 			return;
 
 		// Assign this IO operation an io log id number if it doesn't already have one
-		if (ioblock->iolog_id == 0) ioblock->iolog_id = OpLogEntry::nextID();
+		if (ioblock->iolog_id == 0)
+			ioblock->iolog_id = OpLogEntry::nextID();
 
 		OpLogEntry e;
 		e.timestamp = timer_int();
@@ -772,8 +791,12 @@ void AsyncFileKAIO::KAIOLogBlockEvent(FILE* logFile, IOBlock* ioblock, OpLogEntr
 	}
 }
 
-void AsyncFileKAIO::KAIOLogEvent(FILE* logFile, uint32_t id, OpLogEntry::EOperation op, OpLogEntry::EStage stage,
-                                 uint32_t pageOffset, uint32_t result) {
+void AsyncFileKAIO::KAIOLogEvent(FILE* logFile,
+                                 uint32_t id,
+                                 OpLogEntry::EOperation op,
+                                 OpLogEntry::EStage stage,
+                                 uint32_t pageOffset,
+                                 uint32_t result) {
 	if (logFile != nullptr) {
 		OpLogEntry e;
 		e.timestamp = timer_int();
@@ -837,9 +860,11 @@ TEST_CASE("/fdbrpc/AsyncFileKAIO/RequestList") {
 	if (!g_network->isSimulated()) {
 		state Reference<IAsyncFile> f;
 		try {
-			Reference<IAsyncFile> f_ = wait(AsyncFileKAIO::open(
-			    "/tmp/__KAIO_TEST_FILE__",
-			    IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE, 0666, nullptr));
+			Reference<IAsyncFile> f_ = wait(
+			    AsyncFileKAIO::open("/tmp/__KAIO_TEST_FILE__",
+			                        IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE,
+			                        0666,
+			                        nullptr));
 			f = f_;
 			state int fileSize = 2 << 27; // ~100MB
 			wait(f->truncate(fileSize));

@@ -136,8 +136,12 @@ struct RatekeeperLimits {
 
 	std::string context;
 
-	RatekeeperLimits(std::string context, int64_t storageTargetBytes, int64_t storageSpringBytes,
-	                 int64_t logTargetBytes, int64_t logSpringBytes, double maxVersionDifference,
+	RatekeeperLimits(std::string context,
+	                 int64_t storageTargetBytes,
+	                 int64_t storageSpringBytes,
+	                 int64_t logTargetBytes,
+	                 int64_t logSpringBytes,
+	                 double maxVersionDifference,
 	                 int64_t durabilityLagTargetVersions)
 	  : tpsLimit(std::numeric_limits<double>::infinity()), tpsLimitMetric(StringRef("Ratekeeper.TPSLimit" + context)),
 	    reasonMetric(StringRef("Ratekeeper.Reason" + context)), storageTargetBytes(storageTargetBytes),
@@ -185,12 +189,19 @@ struct RatekeeperData {
 	    smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
 	    actualTpsMetric(LiteralStringRef("Ratekeeper.ActualTPS")), lastWarning(0), lastSSListFetchedTimestamp(now()),
-	    normalLimits("", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER, SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER,
-	                 SERVER_KNOBS->TARGET_BYTES_PER_TLOG, SERVER_KNOBS->SPRING_BYTES_TLOG,
-	                 SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE, SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS),
-	    batchLimits("Batch", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER_BATCH,
-	                SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER_BATCH, SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH,
-	                SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
+	    normalLimits("",
+	                 SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
+	                 SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER,
+	                 SERVER_KNOBS->TARGET_BYTES_PER_TLOG,
+	                 SERVER_KNOBS->SPRING_BYTES_TLOG,
+	                 SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE,
+	                 SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS),
+	    batchLimits("Batch",
+	                SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER_BATCH,
+	                SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER_BATCH,
+	                SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH,
+	                SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH,
+	                SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
 	                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH) {}
 };
 
@@ -294,13 +305,15 @@ ACTOR Future<Void> splitError(Future<Void> in, Promise<Void> errOut) {
 		wait(in);
 		return Void();
 	} catch (Error& e) {
-		if (e.code() != error_code_actor_cancelled && !errOut.isSet()) errOut.sendError(e);
+		if (e.code() != error_code_actor_cancelled && !errOut.isSet())
+			errOut.sendError(e);
 		throw;
 	}
 }
 
 ACTOR Future<Void> trackEachStorageServer(
-    RatekeeperData* self, FutureStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges) {
+    RatekeeperData* self,
+    FutureStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges) {
 	state Map<UID, Future<Void>> actors;
 	state Promise<Void> err;
 	loop choose {
@@ -318,7 +331,8 @@ ACTOR Future<Void> trackEachStorageServer(
 }
 
 ACTOR Future<Void> monitorServerListChange(
-    RatekeeperData* self, Reference<AsyncVar<ServerDBInfo>> dbInfo,
+    RatekeeperData* self,
+    Reference<AsyncVar<ServerDBInfo>> dbInfo,
     PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges) {
 	state Database db = openDBOnServer(dbInfo, TaskPriority::Ratekeeper, true, true);
 	state std::map<UID, StorageServerInterface> oldServers;
@@ -393,7 +407,8 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	// Look at each storage server's write queue and local rate, compute and store the desired rate ratio
 	for (auto i = self->storageQueueInfo.begin(); i != self->storageQueueInfo.end(); ++i) {
 		auto& ss = i->value;
-		if (!ss.valid || (self->remoteDC.present() && ss.locality.dcId() == self->remoteDC)) continue;
+		if (!ss.valid || (self->remoteDC.present() && ss.locality.dcId() == self->remoteDC))
+			continue;
 		++sscount;
 
 		limitReason_t ssLimitReason = limitReason_t::unlimited;
@@ -492,7 +507,8 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 
 	std::set<Optional<Standalone<StringRef>>> ignoredMachines;
 	for (auto ss = storageTpsLimitReverseIndex.begin();
-	     ss != storageTpsLimitReverseIndex.end() && ss->first < limits->tpsLimit; ++ss) {
+	     ss != storageTpsLimitReverseIndex.end() && ss->first < limits->tpsLimit;
+	     ++ss) {
 		if (ignoredMachines.size() <
 		    std::min(self->configuration.storageTeamSize - 1, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND)) {
 			ignoredMachines.insert(ss->second->locality.zoneId());
@@ -565,7 +581,8 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		Version minLimitingSSVer = std::numeric_limits<Version>::max();
 		for (const auto& it : self->storageQueueInfo) {
 			auto& ss = it.value;
-			if (!ss.valid || (self->remoteDC.present() && ss.locality.dcId() == self->remoteDC)) continue;
+			if (!ss.valid || (self->remoteDC.present() && ss.locality.dcId() == self->remoteDC))
+				continue;
 
 			minSSVer = std::min(minSSVer, ss.lastReply.version);
 
@@ -578,7 +595,8 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		Version maxTLVer = std::numeric_limits<Version>::min();
 		for (const auto& it : self->tlogQueueInfo) {
 			auto& tl = it.value;
-			if (!tl.valid) continue;
+			if (!tl.valid)
+				continue;
 			maxTLVer = std::max(maxTLVer, tl.lastReply.v);
 		}
 
@@ -596,7 +614,8 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	int tlcount = 0;
 	for (auto& it : self->tlogQueueInfo) {
 		auto& tl = it.value;
-		if (!tl.valid) continue;
+		if (!tl.valid)
+			continue;
 		++tlcount;
 
 		limitReason_t tlogLimitReason = limitReason_t::log_server_write_queue;
@@ -682,9 +701,11 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 
 	int64_t totalDiskUsageBytes = 0;
 	for (auto& t : self->tlogQueueInfo)
-		if (t.value.valid) totalDiskUsageBytes += t.value.lastReply.storageBytes.used;
+		if (t.value.valid)
+			totalDiskUsageBytes += t.value.lastReply.storageBytes.used;
 	for (auto& s : self->storageQueueInfo)
-		if (s.value.valid) totalDiskUsageBytes += s.value.lastReply.storageBytes.used;
+		if (s.value.valid)
+			totalDiskUsageBytes += s.value.lastReply.storageBytes.used;
 
 	if (now() - self->lastSSListFetchedTimestamp > SERVER_KNOBS->STORAGE_SERVER_LIST_FETCH_TIMEOUT) {
 		limits->tpsLimit = 0.0;

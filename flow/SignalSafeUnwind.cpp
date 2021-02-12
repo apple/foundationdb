@@ -66,7 +66,8 @@ extern "C" int dl_iterate_phdr(int (*callback)(struct dl_phdr_info* info, size_t
 		// This path should be async signal safe
 		for (int i = 0; i < phdr_cache.size(); i++) {
 			int r = callback((struct dl_phdr_info*)&phdr_cache[i][0], phdr_cache[i].size(), data);
-			if (r != 0) return r;
+			if (r != 0)
+				return r;
 		}
 		return 0;
 	} else {

@@ -40,7 +40,8 @@ public:
 	virtual void addref() { ReferenceCounted<LocalitySet>::addref(); }
 	virtual void delref() { ReferenceCounted<LocalitySet>::delref(); }
 
-	bool selectReplicas(Reference<IReplicationPolicy> const& policy, std::vector<LocalityEntry> const& alsoServers,
+	bool selectReplicas(Reference<IReplicationPolicy> const& policy,
+	                    std::vector<LocalityEntry> const& alsoServers,
 	                    std::vector<LocalityEntry>& results) {
 		Reference<LocalitySet> fromServers = Reference<LocalitySet>::addRef(this);
 		return policy->selectReplicas(fromServers, alsoServers, results);
@@ -147,7 +148,8 @@ public:
 		return format("(%3d) %-10s", entry._id, value.present() ? valueText(value.get()).c_str() : "(unset)");
 	}
 
-	static void staticDisplayEntries(LocalitySet const& localitySet, std::vector<LocalityEntry> const& entryArray,
+	static void staticDisplayEntries(LocalitySet const& localitySet,
+	                                 std::vector<LocalityEntry> const& entryArray,
 	                                 const char* name = "zone") {
 		for (auto& entry : entryArray) {
 			printf("   %s: %s\n", name, localitySet.getEntryInfo(entry).c_str());
@@ -155,7 +157,8 @@ public:
 	}
 
 	static void staticDisplayEntries(Reference<LocalitySet> const& fromServers,
-	                                 std::vector<LocalityEntry> const& entryArray, const char* name = "zone") {
+	                                 std::vector<LocalityEntry> const& entryArray,
+	                                 const char* name = "zone") {
 		staticDisplayEntries(*fromServers, entryArray, name);
 	}
 
@@ -168,14 +171,18 @@ public:
 	Reference<LocalitySet> restrict(AttribKey indexKey, AttribValue indexValue) {
 		Reference<LocalitySet> localitySet;
 		LocalityCacheRecord searchRecord(AttribRecord(indexKey, indexValue), localitySet);
-		auto itKeyValue = std::lower_bound(_cacheArray.begin(), _cacheArray.end(), searchRecord,
-		                                   LocalityCacheRecord::compareKeyValue);
+		auto itKeyValue = std::lower_bound(
+		    _cacheArray.begin(), _cacheArray.end(), searchRecord, LocalityCacheRecord::compareKeyValue);
 
 		if ((itKeyValue != _cacheArray.end()) && (itKeyValue->_attribute == searchRecord._attribute)) {
 			if (g_replicationdebug > 2)
-				printf("Cache Hit:  (%2d) %-5s => (%4d) %-10s %3d from %3lu items\n", indexKey._id,
-				       keyText(indexKey).c_str(), indexValue._id, valueText(indexValue).c_str(),
-				       itKeyValue->_resultset->size(), _entryArray.size());
+				printf("Cache Hit:  (%2d) %-5s => (%4d) %-10s %3d from %3lu items\n",
+				       indexKey._id,
+				       keyText(indexKey).c_str(),
+				       indexValue._id,
+				       valueText(indexValue).c_str(),
+				       itKeyValue->_resultset->size(),
+				       _entryArray.size());
 			_cachehits++;
 			localitySet = itKeyValue->_resultset;
 		} else {
@@ -185,8 +192,11 @@ public:
 			// the current entry array has the key
 			if (indexKey._id >= _keyIndexArray.size()) {
 				if (g_replicationdebug > 2) {
-					printf("invalid key index:%3d  array:%3lu  value: (%3d) %-10s\n", indexKey._id,
-					       _keyIndexArray.size(), indexValue._id, valueText(indexValue).c_str());
+					printf("invalid key index:%3d  array:%3lu  value: (%3d) %-10s\n",
+					       indexKey._id,
+					       _keyIndexArray.size(),
+					       indexValue._id,
+					       valueText(indexValue).c_str());
 				}
 			}
 			// Get the equivalent key index from the locality group
@@ -203,8 +213,12 @@ public:
 			searchRecord._resultset = localitySet;
 			_cacheArray.insert(itKeyValue, searchRecord);
 			if (g_replicationdebug > 2)
-				printf("Cache Miss: (%2d) %-5s => (%4d) %-10s %3d for %3lu items\n", indexKey._id,
-				       keyText(indexKey).c_str(), indexValue._id, valueText(indexValue).c_str(), localitySet->size(),
+				printf("Cache Miss: (%2d) %-5s => (%4d) %-10s %3d for %3lu items\n",
+				       indexKey._id,
+				       keyText(indexKey).c_str(),
+				       indexValue._id,
+				       valueText(indexValue).c_str(),
+				       localitySet->size(),
 				       _entryArray.size());
 		}
 		return localitySet;
@@ -221,7 +235,8 @@ public:
 
 	// This function will append all of the entries matching
 	// the specified value for the given key
-	std::vector<LocalityEntry>& getMatches(std::vector<LocalityEntry>& entryArray, AttribKey const& indexKey,
+	std::vector<LocalityEntry>& getMatches(std::vector<LocalityEntry>& entryArray,
+	                                       AttribKey const& indexKey,
 	                                       AttribValue const& indexValue) {
 		for (auto& entry : _entryArray) {
 			auto& record = getRecordViaEntry(entry);
@@ -237,7 +252,8 @@ public:
 
 	// Return a given number of random entries that are not within the
 	// specified exception array
-	bool random(std::vector<LocalityEntry>& randomEntries, std::vector<LocalityEntry> const& exceptionArray,
+	bool random(std::vector<LocalityEntry>& randomEntries,
+	            std::vector<LocalityEntry> const& exceptionArray,
 	            unsigned int nRandomItems) {
 		bool bComplete = true;
 		int nItemsLeft = _mutableEntryArray.size();
@@ -316,8 +332,12 @@ public:
 	}
 
 	void cacheReport() const {
-		printf("Cache: size:%5lu  mem:%7ldKb  hits:%9llu  misses:%9llu  records:%5lu\n", _cacheArray.size(),
-		       getMemoryUsed() / 1024L, _cachehits, _cachemisses, _entryArray.size());
+		printf("Cache: size:%5lu  mem:%7ldKb  hits:%9llu  misses:%9llu  records:%5lu\n",
+		       _cacheArray.size(),
+		       getMemoryUsed() / 1024L,
+		       _cachehits,
+		       _cachemisses,
+		       _entryArray.size());
 	}
 
 	void clearCache() { _cacheArray.clear(); }
@@ -544,8 +564,8 @@ struct LocalityGroup : public LocalitySet {
 			attribHashMap->_keyvaluearray.push_back(AttribRecord(indexKey, indexValue));
 		}
 		// Sort the attribute array
-		std::sort(attribHashMap->_keyvaluearray.begin(), attribHashMap->_keyvaluearray.end(),
-		          KeyValueMap::compareKeyValue);
+		std::sort(
+		    attribHashMap->_keyvaluearray.begin(), attribHashMap->_keyvaluearray.end(), KeyValueMap::compareKeyValue);
 		return attribHashMap;
 	}
 
@@ -569,8 +589,10 @@ struct LocalityMap : public LocalityGroup {
 	LocalityMap(LocalityMap const& source) : LocalityGroup(source), _objectArray(source._objectArray) {}
 	virtual ~LocalityMap() {}
 
-	bool selectReplicas(Reference<IReplicationPolicy> const& policy, std::vector<LocalityEntry> const& alsoServers,
-	                    std::vector<LocalityEntry>& entryResults, std::vector<V*>& results) {
+	bool selectReplicas(Reference<IReplicationPolicy> const& policy,
+	                    std::vector<LocalityEntry> const& alsoServers,
+	                    std::vector<LocalityEntry>& entryResults,
+	                    std::vector<V*>& results) {
 		bool result;
 		int entrySize = entryResults.size();
 		int extraSpace = results.capacity() - results.size();
@@ -582,7 +604,8 @@ struct LocalityMap : public LocalityGroup {
 		return result;
 	}
 
-	bool selectReplicas(Reference<IReplicationPolicy> const& policy, std::vector<LocalityEntry> const& alsoServers,
+	bool selectReplicas(Reference<IReplicationPolicy> const& policy,
+	                    std::vector<LocalityEntry> const& alsoServers,
 	                    std::vector<V*>& results) {
 		std::vector<LocalityEntry> entryResults;
 		return selectReplicas(policy, alsoServers, entryResults, results);
@@ -594,7 +617,8 @@ struct LocalityMap : public LocalityGroup {
 
 	void append(std::vector<V*>& objects, std::vector<LocalityEntry> const& entries, int firstItem = 0) const {
 		int newItems = entries.size() - firstItem;
-		if (newItems > 0) objects.reserve(objects.size() + newItems + objects.size());
+		if (newItems > 0)
+			objects.reserve(objects.size() + newItems + objects.size());
 		for (auto i = firstItem; i < entries.size(); i++) {
 			objects.push_back((V*)getObject(entries[i]));
 		}

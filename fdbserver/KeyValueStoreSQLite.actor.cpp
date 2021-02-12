@@ -107,14 +107,16 @@ struct PageChecksumCodec {
 			// hashlittle2
 			sum.part1 = 0;
 			sum.part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
-			if (sum == *pSumInPage) return true;
+			if (sum == *pSumInPage)
+				return true;
 		}
 
 		SumType hashLittle2Sum;
 		hashLittle2Sum.part1 = pageNumber; // DO NOT CHANGE
 		hashLittle2Sum.part2 = 0x5ca1ab1e;
 		hashlittle2(pData, dataLen, &hashLittle2Sum.part1, &hashLittle2Sum.part2);
-		if (hashLittle2Sum == *pSumInPage) return true;
+		if (hashLittle2Sum == *pSumInPage)
+			return true;
 
 		if (!silent) {
 			TraceEvent trEvent(SevError, "SQLitePageChecksumFailure");
@@ -126,7 +128,8 @@ struct PageChecksumCodec {
 			    .detail("PageSize", pageLen)
 			    .detail("ChecksumInPage", pSumInPage->toString())
 			    .detail("ChecksumCalculatedHL2", hashLittle2Sum.toString());
-			if (pSumInPage->part1 == 0) trEvent.detail("ChecksumCalculatedCRC", sum.toString());
+			if (pSumInPage->part1 == 0)
+				trEvent.detail("ChecksumCalculatedCRC", sum.toString());
 		}
 		return false;
 	}
@@ -167,7 +170,8 @@ struct PageChecksumCodec {
 			}
 		}
 
-		if (!self->checksum(pageNumber, data, self->pageSize, write)) return NULL;
+		if (!self->checksum(pageNumber, data, self->pageSize, write))
+			return NULL;
 
 		return data;
 	}
@@ -230,8 +234,8 @@ struct SQLiteDB : NonCopyable {
 			}
 			// Always start with a new pager codec with default options.
 			pPagerCodec = new PageChecksumCodec(filename);
-			sqlite3BtreePagerSetCodec(btree, PageChecksumCodec::codec, PageChecksumCodec::sizeChange,
-			                          PageChecksumCodec::free, pPagerCodec);
+			sqlite3BtreePagerSetCodec(
+			    btree, PageChecksumCodec::codec, PageChecksumCodec::sizeChange, PageChecksumCodec::free, pPagerCodec);
 		}
 	}
 
@@ -246,7 +250,8 @@ struct SQLiteDB : NonCopyable {
 				err = err.asInjectedFault();
 			}
 
-			if (db) db->errCode = rc;
+			if (db)
+				db->errCode = rc;
 			if (rc == SQLITE_NOMEM)
 				platform::outOfMemory(); // SOMEDAY: Trap out of memory errors at allocation time; check out different
 				                         // allocation options in sqlite
@@ -266,9 +271,10 @@ struct SQLiteDB : NonCopyable {
 		int logSize = 0, checkpointCount = 0;
 		// double t = timer();
 		while (true) {
-			int rc = sqlite3_wal_checkpoint_v2(db, 0, restart ? SQLITE_CHECKPOINT_RESTART : SQLITE_CHECKPOINT_FULL,
-			                                   &logSize, &checkpointCount);
-			if (!rc) break;
+			int rc = sqlite3_wal_checkpoint_v2(
+			    db, 0, restart ? SQLITE_CHECKPOINT_RESTART : SQLITE_CHECKPOINT_FULL, &logSize, &checkpointCount);
+			if (!rc)
+				break;
 			if ((sqlite3_errcode(db) & 0xff) == SQLITE_BUSY) {
 				// printf("#");
 				// threadSleep(.010);
@@ -286,7 +292,8 @@ struct SQLiteDB : NonCopyable {
 	}
 	bool vacuum() { // Returns true if vacuum is complete or stalled by a lazy free root
 		int rc = sqlite3BtreeIncrVacuum(btree);
-		if (rc && rc != SQLITE_DONE) checkError("vacuum", rc);
+		if (rc && rc != SQLITE_DONE)
+			checkError("vacuum", rc);
 		return rc == SQLITE_DONE;
 	}
 	int check(bool verbose) {
@@ -318,7 +325,8 @@ struct SQLiteDB : NonCopyable {
 			}
 			TEST(true); // BTree integrity checked
 		}
-		if (e) sqlite3_free(e);
+		if (e)
+			sqlite3_free(e);
 
 		return errors;
 	}
@@ -353,14 +361,18 @@ public:
 	}
 	Statement& execute() {
 		int r = sqlite3_step(stmt);
-		if (r == SQLITE_ROW) db.checkError("execute called on statement that returns rows", r);
-		if (r != SQLITE_DONE) db.checkError("execute", r);
+		if (r == SQLITE_ROW)
+			db.checkError("execute called on statement that returns rows", r);
+		if (r != SQLITE_DONE)
+			db.checkError("execute", r);
 		return *this;
 	}
 	bool nextRow() {
 		int r = sqlite3_step(stmt);
-		if (r == SQLITE_ROW) return true;
-		if (r == SQLITE_DONE) return false;
+		if (r == SQLITE_ROW)
+			return true;
+		if (r == SQLITE_DONE)
+			return false;
 		db.checkError("nextRow", r);
 		__assume(false); // NOT REACHED
 	}
@@ -376,7 +388,8 @@ void hexdump(FILE* fout, StringRef val) {
 	for (i = 0; i < buflen; i += 32) {
 		fprintf(fout, "%06x: ", i);
 		for (j = 0; j < 32; j++) {
-			if (j == 16) fprintf(fout, "  ");
+			if (j == 16)
+				fprintf(fout, "  ");
 			if (i + j < buflen)
 				fprintf(fout, "%02x ", buf[i + j]);
 			else
@@ -384,8 +397,10 @@ void hexdump(FILE* fout, StringRef val) {
 		}
 		fprintf(fout, " ");
 		for (j = 0; j < 32; j++) {
-			if (j == 16) fprintf(fout, "  ");
-			if (i + j < buflen) fprintf(fout, "%c", isprint(buf[i + j]) ? buf[i + j] : '.');
+			if (j == 16)
+				fprintf(fout, "  ");
+			if (i + j < buflen)
+				fprintf(fout, "%c", isprint(buf[i + j]) ? buf[i + j] : '.');
 		}
 		fprintf(fout, "\n");
 	}
@@ -397,7 +412,8 @@ Value encode(KeyValueRef kv) {
 	int header_size = sqlite3VarintLen(keyCode) + sqlite3VarintLen(valCode);
 	int hh = sqlite3VarintLen(header_size);
 	header_size += hh;
-	if (hh < sqlite3VarintLen(header_size)) header_size++;
+	if (hh < sqlite3VarintLen(header_size))
+		header_size++;
 	int size = header_size + kv.key.size() + kv.value.size();
 
 	Value v;
@@ -444,13 +460,15 @@ Value encodeKVFragment(KeyValueRef kv, uint32_t index) {
 		}
 		// An increment is required if the high bit of the N-byte index value is set, since it is
 		// positive number but SQLite only stores signed values and would interpret it as negative.
-		if (index >> (8 * indexCode - 1)) ++indexCode;
+		if (index >> (8 * indexCode - 1))
+			++indexCode;
 	}
 
 	int header_size = sqlite3VarintLen(keyCode) + sizeof(indexCode) + sqlite3VarintLen(valCode);
 	int hh = sqlite3VarintLen(header_size);
 	header_size += hh;
-	if (hh < sqlite3VarintLen(header_size)) header_size++;
+	if (hh < sqlite3VarintLen(header_size))
+		header_size++;
 	int size = header_size + kv.key.size() + indexCode + kv.value.size();
 
 	Value v;
@@ -486,7 +504,8 @@ int getEncodedSize(int keySize, int valuePrefixSize) {
 	                                   // header size (for values larger than allowable database values)
 	int hh = sqlite3VarintLen(header_size);
 	header_size += hh;
-	if (hh < sqlite3VarintLen(header_size)) header_size++;
+	if (hh < sqlite3VarintLen(header_size))
+		header_size++;
 	return header_size + keySize + valuePrefixSize;
 }
 
@@ -513,7 +532,8 @@ int getEncodedKVFragmentSize(int keySize, int valuePrefixSize) {
 	                  + 8; // worst case for value size (larger than fdb api allows)
 	int hh = sqlite3VarintLen(header_size);
 	header_size += hh;
-	if (hh < sqlite3VarintLen(header_size)) header_size++;
+	if (hh < sqlite3VarintLen(header_size))
+		header_size++;
 	return header_size + keySize + 4 // Max width allowed of index value
 	       + valuePrefixSize;
 }
@@ -530,7 +550,8 @@ Optional<KeyValueRef> decodeKVFragment(StringRef encoded, uint32_t* index = NULL
 	d += sqlite3GetVarint(d, (u64*)&h);
 
 	// Make sure entire header is present, else return nothing
-	if (partial && encoded.size() < h) return Optional<KeyValueRef>();
+	if (partial && encoded.size() < h)
+		return Optional<KeyValueRef>();
 
 	d += sqlite3GetVarint(d, (u64*)&len1);
 	const uint8_t indexLen = *d++;
@@ -544,7 +565,8 @@ Optional<KeyValueRef> decodeKVFragment(StringRef encoded, uint32_t* index = NULL
 
 	if (partial) {
 		// If the key and index aren't complete, return nothing.
-		if (d + len1 + indexLen > encoded.end()) return Optional<KeyValueRef>();
+		if (d + len1 + indexLen > encoded.end())
+			return Optional<KeyValueRef>();
 		// Encoded size shouldn't be *larger* than the record described by the header no matter what.
 		ASSERT(d + len1 + indexLen + len2 >= encoded.end());
 		// Shorten value length to be whatever bytes remain after the header/key/index
@@ -594,14 +616,16 @@ Value encodeKey(KeyRef key, bool using_fragments) {
 		++header_size;
 	int hh = sqlite3VarintLen(header_size);
 	header_size += hh;
-	if (hh < sqlite3VarintLen(header_size)) header_size++;
+	if (hh < sqlite3VarintLen(header_size))
+		header_size++;
 	int size = header_size + key.size();
 	Value v;
 	uint8_t* d = new (v.arena()) uint8_t[size];
 	((ValueRef&)v) = KeyRef(d, size);
 	d += sqlite3PutVarint(d, header_size);
 	d += sqlite3PutVarint(d, keyCode);
-	if (using_fragments) *d++ = 0;
+	if (using_fragments)
+		*d++ = 0;
 	memcpy(d, key.begin(), key.size());
 	d += key.size();
 	ASSERT(d == v.begin() + size);
@@ -804,19 +828,22 @@ struct RawCursor {
 				int fragSize = (fragments == 0) ? bytesLeft : std::min<int>(bytesLeft, valuePerFragment);
 
 				// The last fragment must have an index of finalIndex or higher.
-				if (fragSize == bytesLeft && nextIndex < finalIndex) nextIndex = finalIndex;
+				if (fragSize == bytesLeft && nextIndex < finalIndex)
+					nextIndex = finalIndex;
 				// printf("insert ks %d vs %d  fragment %d, %dbytes\n", kv.key.size(), kv.value.size(), nextIndex,
 				// fragSize);
 				insertFragment(KeyValueRef(kv.key, kv.value.substr(readPos, fragSize)), nextIndex, seekResult);
 				// seekResult can only be used for the first insertion.
-				if (seekResult != 0) seekResult = 0;
+				if (seekResult != 0)
+					seekResult = 0;
 				readPos += fragSize;
 				bytesLeft -= fragSize;
 				++nextIndex;
 			}
 		} else {
 			int r = moveTo(kv.key);
-			if (!r) remove();
+			if (!r)
+				remove();
 			Value v = encode(kv);
 			db.checkError("BTreeInsert", sqlite3BtreeInsert(cursor, v.begin(), v.size(), NULL, 0, 0, 0, r));
 		}
@@ -824,7 +851,8 @@ struct RawCursor {
 	void clearOne(KeyRangeRef keys) {
 		ASSERT(!db.fragment_values);
 		int r = moveTo(keys.begin);
-		if (r < 0) moveNext();
+		if (r < 0)
+			moveNext();
 		ASSERT(valid && decodeKV(getEncodedRow()).key < keys.end);
 		remove();
 	}
@@ -832,7 +860,8 @@ struct RawCursor {
 		// TODO: This is really slow!
 		while (true) {
 			int r = moveTo(keys.begin);
-			if (r < 0) moveNext();
+			if (r < 0)
+				moveNext();
 			if (!valid || (db.fragment_values ? decodeKVFragment(getEncodedRow()).get().key
 			                                  : decodeKV(getEncodedRow()).key) >= keys.end)
 				break;
@@ -844,9 +873,11 @@ struct RawCursor {
 		clearBuffer[0] = 0;
 
 		while (true) {
-			if (moveTo(keys.begin) < 0) moveNext();
+			if (moveTo(keys.begin) < 0)
+				moveNext();
 			RawCursor endCursor(db, db.table, false);
-			if (endCursor.moveTo(keys.end) >= 0) endCursor.movePrevious();
+			if (endCursor.moveTo(keys.end) >= 0)
+				endCursor.movePrevious();
 
 			if (!valid || !endCursor ||
 			    (db.fragment_values ? (decodeKVFragment(getEncodedRow()).get().key >=
@@ -854,10 +885,12 @@ struct RawCursor {
 			                        : (decodeKV(getEncodedRow()).key > decodeKV(endCursor.getEncodedRow()).key)))
 				break; // If empty stop!
 
-			int rc = sqlite3BtreeDeleteRange(cursor, endCursor.cursor, &clearBuffer[0],
-			                                 &clearBuffer[0] + clearBuffer.size());
-			if (rc == 201) continue;
-			if (!rc) break;
+			int rc = sqlite3BtreeDeleteRange(
+			    cursor, endCursor.cursor, &clearBuffer[0], &clearBuffer[0] + clearBuffer.size());
+			if (rc == 201)
+				continue;
+			if (!rc)
+				break;
 			db.checkError("BtreeDeleteRange", rc);
 		}
 
@@ -867,8 +900,8 @@ struct RawCursor {
 			IntKeyCursor fc(db, db.freetable, true);
 			int pagesDeleted = 0;
 			db.checkError("BtreeLazyDelete",
-			              sqlite3BtreeLazyDelete(fc.cursor, &clearBuffer[0], &clearBuffer[0] + clearBuffer.size(), 0,
-			                                     &pagesDeleted));
+			              sqlite3BtreeLazyDelete(
+			                  fc.cursor, &clearBuffer[0], &clearBuffer[0] + clearBuffer.size(), 0, &pagesDeleted));
 			ASSERT(pagesDeleted == 0);
 			freeTableEmpty = false;
 		}
@@ -879,9 +912,10 @@ struct RawCursor {
 
 		IntKeyCursor fc(db, db.freetable, true);
 		int pagesDeleted = 0;
-		db.checkError("BtreeLazyDelete",
-		              sqlite3BtreeLazyDelete(fc.cursor, &clearBuffer[0], &clearBuffer[0] + clearBuffer.size(),
-		                                     desiredPages, &pagesDeleted));
+		db.checkError(
+		    "BtreeLazyDelete",
+		    sqlite3BtreeLazyDelete(
+		        fc.cursor, &clearBuffer[0], &clearBuffer[0] + clearBuffer.size(), desiredPages, &pagesDeleted));
 		return pagesDeleted;
 	}
 
@@ -957,12 +991,14 @@ struct RawCursor {
 		// Get the next key that would be returned by getNext(), if there is one
 		// This is more efficient than getNext() if the caller is not sure if it wants the next KV pair
 		Optional<KeyRef> peek() {
-			if (kv.present()) return kv.get().key;
+			if (kv.present())
+				return kv.get().key;
 			return advance();
 		}
 
 		Optional<KeyValueRef> getNext() {
-			if (!peek().present()) return Optional<KeyValueRef>();
+			if (!peek().present())
+				return Optional<KeyValueRef>();
 
 			bool partial = fragmentReadLimit >= 0;
 
@@ -1021,7 +1057,8 @@ struct RawCursor {
 
 			// In partial value mode, we could end up here if there was only 1 fragments or maxValueLen
 			// was greater than the total unfragmented value size.
-			if (partial) resultKV.value = resultKV.value.substr(0, std::min(resultKV.value.size(), maxValueLen));
+			if (partial)
+				resultKV.value = resultKV.value.substr(0, std::min(resultKV.value.size(), maxValueLen));
 			return resultKV;
 		}
 	};
@@ -1038,7 +1075,8 @@ struct RawCursor {
 			}
 
 			// Otherwise see if the fragments immediately after (key, 0) are for the key we want.
-			if (r < 0) moveNext();
+			if (r < 0)
+				moveNext();
 			Arena m;
 			DefragmentingReader i(*this, m, true);
 			if (i.peek() == key) {
@@ -1057,7 +1095,8 @@ struct RawCursor {
 	Optional<Value> getPrefix(KeyRef key, int maxLength) {
 		if (db.fragment_values) {
 			int r = moveTo(key);
-			if (r < 0) moveNext();
+			if (r < 0)
+				moveNext();
 			Arena m;
 			DefragmentingReader i(*this, m, getEncodedKVFragmentSize(key.size(), maxLength));
 			if (i.peek() == key) {
@@ -1087,7 +1126,8 @@ struct RawCursor {
 		if (db.fragment_values) {
 			if (rowLimit > 0) {
 				int r = moveTo(keys.begin);
-				if (r < 0) moveNext();
+				if (r < 0)
+					moveNext();
 
 				DefragmentingReader i(*this, result.arena(), true);
 				Optional<KeyRef> nextKey = i.peek();
@@ -1100,7 +1140,8 @@ struct RawCursor {
 				}
 			} else {
 				int r = moveTo(keys.end);
-				if (r >= 0) movePrevious();
+				if (r >= 0)
+					movePrevious();
 				DefragmentingReader i(*this, result.arena(), false);
 				Optional<KeyRef> nextKey = i.peek();
 				while (nextKey.present() && nextKey.get() >= keys.begin && rowLimit != 0 &&
@@ -1115,10 +1156,12 @@ struct RawCursor {
 		} else {
 			if (rowLimit > 0) {
 				int r = moveTo(keys.begin);
-				if (r < 0) moveNext();
+				if (r < 0)
+					moveNext();
 				while (this->valid && rowLimit != 0 && accumulatedBytes < byteLimit) {
 					KeyValueRef kv = decodeKV(getEncodedRow(result.arena()));
-					if (kv.key >= keys.end) break;
+					if (kv.key >= keys.end)
+						break;
 					--rowLimit;
 					accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 					result.push_back(result.arena(), kv);
@@ -1126,10 +1169,12 @@ struct RawCursor {
 				}
 			} else {
 				int r = moveTo(keys.end);
-				if (r >= 0) movePrevious();
+				if (r >= 0)
+					movePrevious();
 				while (this->valid && rowLimit != 0 && accumulatedBytes < byteLimit) {
 					KeyValueRef kv = decodeKV(getEncodedRow(result.arena()));
-					if (kv.key < keys.begin) break;
+					if (kv.key < keys.begin)
+						break;
 					++rowLimit;
 					accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 					result.push_back(result.arena(), kv);
@@ -1196,7 +1241,8 @@ struct ReadCursor : ReferenceCounted<ReadCursor>, FastAllocated<ReadCursor> {
 		valid = true;
 	}
 	~ReadCursor() {
-		if (valid) get().~Cursor();
+		if (valid)
+			get().~Cursor();
 	}
 
 	Cursor& get() { return *((Cursor*)&cursor); }
@@ -1229,8 +1275,10 @@ int SQLiteDB::checkAllPageChecksums() {
 	ErrorOr<Reference<IAsyncFile>> walFile = waitForAndGet(
 	    errorOr(IAsyncFileSystem::filesystem()->open(walpath, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_LOCK, 0)));
 
-	if (dbFile.isError()) throw dbFile.getError(); // If we've failed to open the file, throw an exception
-	if (walFile.isError()) throw walFile.getError(); // If we've failed to open the file, throw an exception
+	if (dbFile.isError())
+		throw dbFile.getError(); // If we've failed to open the file, throw an exception
+	if (walFile.isError())
+		throw walFile.getError(); // If we've failed to open the file, throw an exception
 
 	// Now that the file itself is open and locked, let sqlite open the database
 	// Note that VFSAsync will also call g_network->open (including for the WAL), so its flags are important, too
@@ -1266,7 +1314,8 @@ int SQLiteDB::checkAllPageChecksums() {
 		int type;
 		int zero;
 		int rc = tryReadEveryDbPage(db, p, &p, &type, &zero);
-		if (rc == SQLITE_OK) break;
+		if (rc == SQLITE_OK)
+			break;
 		if (rc == SQLITE_CORRUPT) {
 			TraceEvent(SevWarnAlways, "SQLitePageChecksumScanCorruptPage")
 			    .detail("File", filename)
@@ -1283,7 +1332,8 @@ int SQLiteDB::checkAllPageChecksums() {
 			++readErrors;
 		}
 		++p;
-		if (++totalErrors >= SERVER_KNOBS->SQLITE_PAGE_SCAN_ERROR_LIMIT) break;
+		if (++totalErrors >= SERVER_KNOBS->SQLITE_PAGE_SCAN_ERROR_LIMIT)
+			break;
 	}
 	pPagerCodec->silent = false;
 
@@ -1330,7 +1380,7 @@ void SQLiteDB::open(bool writable) {
 			walFile = file_not_found();
 			renameFile(walpath, walpath + "-old-" + deterministicRandom()->randomUniqueID().toString());
 			ASSERT_WE_THINK(false); //< This code should not be hit in FoundationDB at the moment, because worker looks
-			                        //for databases to open by listing .fdb files, not .fdb-wal files
+			                        // for databases to open by listing .fdb files, not .fdb-wal files
 			// TEST(true);  // Replace a partially constructed or destructed DB
 		}
 
@@ -1354,14 +1404,16 @@ void SQLiteDB::open(bool writable) {
 				waitFor(
 				    dbFile.get()->write(template_fdb_with_page_checksums, sizeof(template_fdb_with_page_checksums), 0));
 			else
-				waitFor(dbFile.get()->write(template_fdb_without_page_checksums,
-				                            sizeof(template_fdb_without_page_checksums), 0));
+				waitFor(dbFile.get()->write(
+				    template_fdb_without_page_checksums, sizeof(template_fdb_without_page_checksums), 0));
 			waitFor(dbFile.get()->sync()); // renames filename.part to filename, fsyncs data and directory
 			TraceEvent("CreatedDBFile").detail("Filename", apath);
 		}
 	}
-	if (dbFile.isError()) throw dbFile.getError(); // If we've failed to open the file, throw an exception
-	if (walFile.isError()) throw walFile.getError(); // If we've failed to open the file, throw an exception
+	if (dbFile.isError())
+		throw dbFile.getError(); // If we've failed to open the file, throw an exception
+	if (walFile.isError())
+		throw walFile.getError(); // If we've failed to open the file, throw an exception
 
 	// Set Rate control if FLOW_KNOBS are positive
 	if (SERVER_KNOBS->SQLITE_WRITE_WINDOW_LIMIT > 0 && SERVER_KNOBS->SQLITE_WRITE_WINDOW_SECONDS > 0) {
@@ -1496,10 +1548,14 @@ public:
 
 	virtual Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID);
 	virtual Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID);
-	virtual Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit = 1 << 30,
+	virtual Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys,
+	                                                     int rowLimit = 1 << 30,
 	                                                     int byteLimit = 1 << 30);
 
-	KeyValueStoreSQLite(std::string const& filename, UID logID, KeyValueStoreType type, bool checkChecksums,
+	KeyValueStoreSQLite(std::string const& filename,
+	                    UID logID,
+	                    KeyValueStoreType type,
+	                    bool checkChecksums,
 	                    bool checkIntegrity);
 	~KeyValueStoreSQLite();
 
@@ -1535,7 +1591,10 @@ private:
 		UID dbgid;
 		Reference<ReadCursor>* ppReadCursor;
 
-		explicit Reader(std::string const& filename, bool is_btree_v2, ThreadSafeCounter& counter, UID dbgid,
+		explicit Reader(std::string const& filename,
+		                bool is_btree_v2,
+		                ThreadSafeCounter& counter,
+		                UID dbgid,
 		                Reference<ReadCursor>* ppReadCursor)
 		  : conn(filename, is_btree_v2, is_btree_v2), counter(counter), dbgid(dbgid), ppReadCursor(ppReadCursor) {}
 		~Reader() { ppReadCursor->clear(); }
@@ -1561,14 +1620,16 @@ private:
 		void action(ReadValueAction& rv) {
 			// double t = timer();
 			if (rv.debugID.present())
-				g_traceBatch.addEvent("GetValueDebug", rv.debugID.get().first(),
+				g_traceBatch.addEvent("GetValueDebug",
+				                      rv.debugID.get().first(),
 				                      "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
 
 			rv.result.send(getCursor()->get().get(rv.key));
 			++counter;
 
 			if (rv.debugID.present())
-				g_traceBatch.addEvent("GetValueDebug", rv.debugID.get().first(),
+				g_traceBatch.addEvent("GetValueDebug",
+				                      rv.debugID.get().first(),
 				                      "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
 			// t = timer()-t;
 			// if (t >= 1.0) TraceEvent("ReadValueActionSlow",dbgid).detail("Elapsed", t);
@@ -1587,14 +1648,16 @@ private:
 		void action(ReadValuePrefixAction& rv) {
 			// double t = timer();
 			if (rv.debugID.present())
-				g_traceBatch.addEvent("GetValuePrefixDebug", rv.debugID.get().first(),
+				g_traceBatch.addEvent("GetValuePrefixDebug",
+				                      rv.debugID.get().first(),
 				                      "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
 
 			rv.result.send(getCursor()->get().getPrefix(rv.key, rv.maxLength));
 			++counter;
 
 			if (rv.debugID.present())
-				g_traceBatch.addEvent("GetValuePrefixDebug", rv.debugID.get().first(),
+				g_traceBatch.addEvent("GetValuePrefixDebug",
+				                      rv.debugID.get().first(),
 				                      "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
 			// t = timer()-t;
 			// if (t >= 1.0) TraceEvent("ReadValuePrefixActionSlow",dbgid).detail("Elapsed", t);
@@ -1630,10 +1693,16 @@ private:
 		bool checkAllChecksumsOnOpen;
 		bool checkIntegrityOnOpen;
 
-		explicit Writer(KeyValueStoreSQLite* kvs, bool isBtreeV2, bool checkAllChecksumsOnOpen,
-		                bool checkIntegrityOnOpen, volatile int64_t& writesComplete,
-		                volatile SpringCleaningStats& springCleaningStats, volatile int64_t& diskBytesUsed,
-		                volatile int64_t& freeListPages, UID dbgid, vector<Reference<ReadCursor>>* pReadThreads)
+		explicit Writer(KeyValueStoreSQLite* kvs,
+		                bool isBtreeV2,
+		                bool checkAllChecksumsOnOpen,
+		                bool checkIntegrityOnOpen,
+		                volatile int64_t& writesComplete,
+		                volatile SpringCleaningStats& springCleaningStats,
+		                volatile int64_t& diskBytesUsed,
+		                volatile int64_t& freeListPages,
+		                UID dbgid,
+		                vector<Reference<ReadCursor>>* pReadThreads)
 		  : kvs(kvs), conn(kvs->filename, isBtreeV2, isBtreeV2), commits(), setsThisCommit(), freeTableEmpty(false),
 		    writesComplete(writesComplete), springCleaningStats(springCleaningStats), diskBytesUsed(diskBytesUsed),
 		    freeListPages(freeListPages), cursor(NULL), dbgid(dbgid), readThreads(*pReadThreads),
@@ -1658,8 +1727,8 @@ private:
 			kvs->walFile = conn.walFile;
 
 			// If a wal file fails during the commit process before finishing a checkpoint, then it is possible that our
-			// wal file will be non-empty when we reload it.  We execute a checkpoint here to remedy that situation. This
-			// call must come before before creating a cursor because it will fail if there are any outstanding
+			// wal file will be non-empty when we reload it.  We execute a checkpoint here to remedy that situation.
+			// This call must come before before creating a cursor because it will fail if there are any outstanding
 			// transactions.
 			fullCheckpoint();
 
@@ -1768,7 +1837,8 @@ private:
 		}
 
 		void resetReaders() {
-			for (int i = 0; i < readThreads.size(); i++) readThreads[i].clear();
+			for (int i = 0; i < readThreads.size(); i++)
+				readThreads[i].clear();
 		}
 		void checkFreePages() {
 			int iterations = 0;
@@ -1830,9 +1900,10 @@ private:
 					TEST(canVacuum); // SQLite lazy deletion when vacuuming is active
 					TEST(!canVacuum); // SQLite lazy deletion when vacuuming is inactive
 
-					int pagesToDelete = std::max(1, std::min(SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_BATCH_SIZE,
-					                                         SERVER_KNOBS->SPRING_CLEANING_MAX_LAZY_DELETE_PAGES -
-					                                             workPerformed.lazyDeletePages));
+					int pagesToDelete = std::max(
+					    1,
+					    std::min(SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_BATCH_SIZE,
+					             SERVER_KNOBS->SPRING_CLEANING_MAX_LAZY_DELETE_PAGES - workPerformed.lazyDeletePages));
 					int pagesDeleted = cursor->lazyDelete(pagesToDelete);
 					freeTableEmpty = (pagesDeleted != pagesToDelete);
 					workPerformed.lazyDeletePages += pagesDeleted;
@@ -1925,7 +1996,8 @@ private:
 		try {
 			wait(self->readThreads->getError() || self->writeThread->getError());
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 
 			self->disableRateControl();
 		}
@@ -1965,8 +2037,11 @@ private:
 		}
 	}
 };
-IKeyValueStore* keyValueStoreSQLite(std::string const& filename, UID logID, KeyValueStoreType storeType,
-                                    bool checkChecksums, bool checkIntegrity) {
+IKeyValueStore* keyValueStoreSQLite(std::string const& filename,
+                                    UID logID,
+                                    KeyValueStoreType storeType,
+                                    bool checkChecksums,
+                                    bool checkIntegrity) {
 	return new KeyValueStoreSQLite(filename, logID, storeType, checkChecksums, checkIntegrity);
 }
 
@@ -1999,8 +2074,11 @@ ACTOR static Future<Void> startReadThreadsWhen(KeyValueStoreSQLite* kv, Future<V
 sqlite3_vfs* vfsAsync();
 static int vfs_registered = 0;
 
-KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename, UID id, KeyValueStoreType storeType,
-                                         bool checkChecksums, bool checkIntegrity)
+KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename,
+                                         UID id,
+                                         KeyValueStoreType storeType,
+                                         bool checkChecksums,
+                                         bool checkIntegrity)
   : type(storeType), filename(filename), logID(id), readThreads(CoroThreadPool::createThreadPool()),
     writeThread(CoroThreadPool::createThreadPool()), readsRequested(0), writesRequested(0), writesComplete(0),
     diskBytesUsed(0), freeListPages(0) {
@@ -2013,7 +2091,8 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename, UID id, Ke
 #endif
 
 	if (!vfs_registered && writeThread->isCoro())
-		if (sqlite3_vfs_register(vfsAsync(), true) != SQLITE_OK) ASSERT(false);
+		if (sqlite3_vfs_register(vfsAsync(), true) != SQLITE_OK)
+			ASSERT(false);
 
 	// The DB file should not already be open
 	ASSERT(!vfsAsyncIsOpen(filename));
@@ -2025,8 +2104,15 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename, UID id, Ke
 	                                                          // the cache sizes for individual threads?
 	TaskPriority taskId = g_network->getCurrentTask();
 	g_network->setCurrentTask(TaskPriority::DiskWrite);
-	writeThread->addThread(new Writer(this, type == KeyValueStoreType::SSD_BTREE_V2, checkChecksums, checkIntegrity,
-	                                  writesComplete, springCleaningStats, diskBytesUsed, freeListPages, id,
+	writeThread->addThread(new Writer(this,
+	                                  type == KeyValueStoreType::SSD_BTREE_V2,
+	                                  checkChecksums,
+	                                  checkIntegrity,
+	                                  writesComplete,
+	                                  springCleaningStats,
+	                                  diskBytesUsed,
+	                                  freeListPages,
+	                                  id,
 	                                  &readCursors));
 	g_network->setCurrentTask(taskId);
 	auto p = new Writer::InitAction();
@@ -2121,7 +2207,8 @@ void GenerateIOLogChecksumFile(std::string filename) {
 	FILE* fout = fopen((filename + ".checksums").c_str(), "w");
 	uint8_t buf[4096];
 	unsigned int c = 0;
-	while (fread(buf, 1, 4096, f) > 0) fprintf(fout, "%u %u\n", c++, hashlittle(buf, 4096, 0xab12fd93));
+	while (fread(buf, 1, 4096, f) > 0)
+		fprintf(fout, "%u %u\n", c++, hashlittle(buf, 4096, 0xab12fd93));
 	fclose(f);
 	fclose(fout);
 }
@@ -2129,7 +2216,8 @@ void GenerateIOLogChecksumFile(std::string filename) {
 // If integrity is true, a full btree integrity check is done.
 // If integrity is false, only a scan of all pages to validate their checksums is done.
 ACTOR Future<Void> KVFileCheck(std::string filename, bool integrity) {
-	if (!fileExists(filename)) throw file_not_found();
+	if (!fileExists(filename))
+		throw file_not_found();
 
 	StringRef kvFile(filename);
 	KeyValueStoreType type = KeyValueStoreType::END;
@@ -2145,7 +2233,8 @@ ACTOR Future<Void> KVFileCheck(std::string filename, bool integrity) {
 	// Wait for integry check to finish
 	wait(success(store->readValue(StringRef())));
 
-	if (store->getError().isError()) wait(store->getError());
+	if (store->getError().isError())
+		wait(store->getError());
 	Future<Void> c = store->onClosed();
 	store->close();
 	wait(c);

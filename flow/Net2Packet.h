@@ -44,8 +44,9 @@ class UnsentPacketQueue : NonCopyable {
 public:
 	UnsentPacketQueue()
 	  : unsent_first(0), unsent_last(0),
-	    sendQueueLatencyHistogram(Histogram::getHistogram(
-	        LiteralStringRef("UnsentPacketQueue"), LiteralStringRef("QueueWait"), Histogram::Unit::microseconds)) {}
+	    sendQueueLatencyHistogram(Histogram::getHistogram(LiteralStringRef("UnsentPacketQueue"),
+	                                                      LiteralStringRef("QueueWait"),
+	                                                      Histogram::Unit::microseconds)) {}
 
 	~UnsentPacketQueue() {
 		discardAll();
@@ -69,7 +70,8 @@ public:
 	void prependWriteBuffer(PacketBuffer* first, PacketBuffer* last) {
 		last->next = unsent_first;
 		unsent_first = first;
-		if (!unsent_last) unsent_last = last;
+		if (!unsent_last)
+			unsent_last = last;
 	}
 
 	// false if there is anything unsent

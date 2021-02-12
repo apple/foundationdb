@@ -50,7 +50,8 @@ ACTOR static Future<Version> getNextRV(Database db) {
 }
 static Future<Version> getInconsistentReadVersion(Database const& db) {
 	if (!nextRV.isValid() || nextRV.isReady()) { // if no getNextRV() running
-		if (nextRV.isValid()) lastRV = nextRV.get();
+		if (nextRV.isValid())
+			lastRV = nextRV.get();
 		nextRV = getNextRV(db);
 	}
 	if (lastRV == invalidVersion)
@@ -182,7 +183,8 @@ struct ReadWriteWorkload : KVWorkload {
 		batchPriority = getOption(options, LiteralStringRef("batchPriority"), false);
 		descriptionString = getOption(options, LiteralStringRef("description"), LiteralStringRef("ReadWrite"));
 
-		if (rampUpConcurrency) ASSERT(rampSweepCount == 2); // Implementation is hard coded to ramp up and down
+		if (rampUpConcurrency)
+			ASSERT(rampSweepCount == 2); // Implementation is hard coded to ramp up and down
 
 		// Validate that keyForIndex() is monotonic
 		for (int i = 0; i < 30; i++) {
@@ -247,7 +249,8 @@ struct ReadWriteWorkload : KVWorkload {
 	virtual Future<bool> check(Database const& cx) {
 		clients.clear();
 
-		if (!cancelWorkersAtDuration && now() < metricsStart + metricsDuration) metricsDuration = now() - metricsStart;
+		if (!cancelWorkersAtDuration && now() < metricsStart + metricsDuration)
+			metricsDuration = now() - metricsStart;
 
 		g_traceBatch.dump();
 		if (clientId == 0)
@@ -298,10 +301,10 @@ struct ReadWriteWorkload : KVWorkload {
 
 		m.emplace_back("Read rows/sec", reads / duration, false);
 		m.emplace_back("Write rows/sec", writes / duration, false);
-		m.emplace_back("Bytes read/sec", (reads * (keyBytes + (minValueBytes + maxValueBytes) * 0.5)) / duration,
-		               false);
-		m.emplace_back("Bytes written/sec", (writes * (keyBytes + (minValueBytes + maxValueBytes) * 0.5)) / duration,
-		               false);
+		m.emplace_back(
+		    "Bytes read/sec", (reads * (keyBytes + (minValueBytes + maxValueBytes) * 0.5)) / duration, false);
+		m.emplace_back(
+		    "Bytes written/sec", (writes * (keyBytes + (minValueBytes + maxValueBytes) * 0.5)) / duration, false);
 		m.insert(m.end(), periodicMetrics.begin(), periodicMetrics.end());
 
 		std::vector<std::pair<uint64_t, double>>::iterator ratesItr = ratesAtKeyCounts.begin();
@@ -362,65 +365,65 @@ struct ReadWriteWorkload : KVWorkload {
 			bool recordEnd = self->shouldRecord(now());
 			if (recordBegin && recordEnd) {
 				std::string ts = format("T=%04.0fs:", elapsed);
-				self->periodicMetrics.emplace_back(ts + "Operations/sec",
-				                                   (ops - last_ops) / self->periodicLoggingInterval, false);
+				self->periodicMetrics.emplace_back(
+				    ts + "Operations/sec", (ops - last_ops) / self->periodicLoggingInterval, false);
 
 				// if(self->rampUpLoad) {
 				self->periodicMetrics.emplace_back(ts + "Mean Latency (ms)", 1000 * self->latencies.mean(), true);
-				self->periodicMetrics.emplace_back(ts + "Median Latency (ms, averaged)",
-				                                   1000 * self->latencies.median(), true);
-				self->periodicMetrics.emplace_back(ts + "5% Latency (ms, averaged)",
-				                                   1000 * self->latencies.percentile(.05), true);
-				self->periodicMetrics.emplace_back(ts + "95% Latency (ms, averaged)",
-				                                   1000 * self->latencies.percentile(.95), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "Median Latency (ms, averaged)", 1000 * self->latencies.median(), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "5% Latency (ms, averaged)", 1000 * self->latencies.percentile(.05), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "95% Latency (ms, averaged)", 1000 * self->latencies.percentile(.95), true);
 
-				self->periodicMetrics.emplace_back(ts + "Mean Row Read Latency (ms)", 1000 * self->readLatencies.mean(),
-				                                   true);
-				self->periodicMetrics.emplace_back(ts + "Median Row Read Latency (ms, averaged)",
-				                                   1000 * self->readLatencies.median(), true);
-				self->periodicMetrics.emplace_back(ts + "5% Row Read Latency (ms, averaged)",
-				                                   1000 * self->readLatencies.percentile(.05), true);
-				self->periodicMetrics.emplace_back(ts + "95% Row Read Latency (ms, averaged)",
-				                                   1000 * self->readLatencies.percentile(.95), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "Mean Row Read Latency (ms)", 1000 * self->readLatencies.mean(), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "Median Row Read Latency (ms, averaged)", 1000 * self->readLatencies.median(), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "5% Row Read Latency (ms, averaged)", 1000 * self->readLatencies.percentile(.05), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "95% Row Read Latency (ms, averaged)", 1000 * self->readLatencies.percentile(.95), true);
 
-				self->periodicMetrics.emplace_back(ts + "Mean Total Read Latency (ms)",
-				                                   1000 * self->fullReadLatencies.mean(), true);
-				self->periodicMetrics.emplace_back(ts + "Median Total Read Latency (ms, averaged)",
-				                                   1000 * self->fullReadLatencies.median(), true);
-				self->periodicMetrics.emplace_back(ts + "5% Total Read Latency (ms, averaged)",
-				                                   1000 * self->fullReadLatencies.percentile(.05), true);
-				self->periodicMetrics.emplace_back(ts + "95% Total Read Latency (ms, averaged)",
-				                                   1000 * self->fullReadLatencies.percentile(.95), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "Mean Total Read Latency (ms)", 1000 * self->fullReadLatencies.mean(), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "Median Total Read Latency (ms, averaged)", 1000 * self->fullReadLatencies.median(), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "5% Total Read Latency (ms, averaged)", 1000 * self->fullReadLatencies.percentile(.05), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "95% Total Read Latency (ms, averaged)", 1000 * self->fullReadLatencies.percentile(.95), true);
 
-				self->periodicMetrics.emplace_back(ts + "Mean GRV Latency (ms)", 1000 * self->GRVLatencies.mean(),
-				                                   true);
-				self->periodicMetrics.emplace_back(ts + "Median GRV Latency (ms, averaged)",
-				                                   1000 * self->GRVLatencies.median(), true);
-				self->periodicMetrics.emplace_back(ts + "5% GRV Latency (ms, averaged)",
-				                                   1000 * self->GRVLatencies.percentile(.05), true);
-				self->periodicMetrics.emplace_back(ts + "95% GRV Latency (ms, averaged)",
-				                                   1000 * self->GRVLatencies.percentile(.95), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "Mean GRV Latency (ms)", 1000 * self->GRVLatencies.mean(), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "Median GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.median(), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "5% GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.percentile(.05), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "95% GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.percentile(.95), true);
 
-				self->periodicMetrics.emplace_back(ts + "Mean Commit Latency (ms)", 1000 * self->commitLatencies.mean(),
-				                                   true);
-				self->periodicMetrics.emplace_back(ts + "Median Commit Latency (ms, averaged)",
-				                                   1000 * self->commitLatencies.median(), true);
-				self->periodicMetrics.emplace_back(ts + "5% Commit Latency (ms, averaged)",
-				                                   1000 * self->commitLatencies.percentile(.05), true);
-				self->periodicMetrics.emplace_back(ts + "95% Commit Latency (ms, averaged)",
-				                                   1000 * self->commitLatencies.percentile(.95), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "Mean Commit Latency (ms)", 1000 * self->commitLatencies.mean(), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "Median Commit Latency (ms, averaged)", 1000 * self->commitLatencies.median(), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "5% Commit Latency (ms, averaged)", 1000 * self->commitLatencies.percentile(.05), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "95% Commit Latency (ms, averaged)", 1000 * self->commitLatencies.percentile(.95), true);
 				//}
 
-				self->periodicMetrics.emplace_back(ts + "Max Latency (ms, averaged)", 1000 * self->latencies.max(),
-				                                   true);
-				self->periodicMetrics.emplace_back(ts + "Max Row Read Latency (ms, averaged)",
-				                                   1000 * self->readLatencies.max(), true);
-				self->periodicMetrics.emplace_back(ts + "Max Total Read Latency (ms, averaged)",
-				                                   1000 * self->fullReadLatencies.max(), true);
-				self->periodicMetrics.emplace_back(ts + "Max GRV Latency (ms, averaged)",
-				                                   1000 * self->GRVLatencies.max(), true);
-				self->periodicMetrics.emplace_back(ts + "Max Commit Latency (ms, averaged)",
-				                                   1000 * self->commitLatencies.max(), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "Max Latency (ms, averaged)", 1000 * self->latencies.max(), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "Max Row Read Latency (ms, averaged)", 1000 * self->readLatencies.max(), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "Max Total Read Latency (ms, averaged)", 1000 * self->fullReadLatencies.max(), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "Max GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.max(), true);
+				self->periodicMetrics.emplace_back(
+				    ts + "Max Commit Latency (ms, averaged)", 1000 * self->commitLatencies.max(), true);
 			}
 			last_ops = ops;
 
@@ -437,9 +440,12 @@ struct ReadWriteWorkload : KVWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> logLatency(Future<Optional<Value>> f, ContinuousSample<double>* latencies,
-	                                     double* totalLatency, int* latencyCount,
-	                                     EventMetricHandle<ReadMetric> readMetric, bool shouldRecord) {
+	ACTOR static Future<Void> logLatency(Future<Optional<Value>> f,
+	                                     ContinuousSample<double>* latencies,
+	                                     double* totalLatency,
+	                                     int* latencyCount,
+	                                     EventMetricHandle<ReadMetric> readMetric,
+	                                     bool shouldRecord) {
 		state double readBegin = now();
 		Optional<Value> value = wait(f);
 
@@ -455,9 +461,12 @@ struct ReadWriteWorkload : KVWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> logLatency(Future<Standalone<RangeResultRef>> f, ContinuousSample<double>* latencies,
-	                                     double* totalLatency, int* latencyCount,
-	                                     EventMetricHandle<ReadMetric> readMetric, bool shouldRecord) {
+	ACTOR static Future<Void> logLatency(Future<Standalone<RangeResultRef>> f,
+	                                     ContinuousSample<double>* latencies,
+	                                     double* totalLatency,
+	                                     int* latencyCount,
+	                                     EventMetricHandle<ReadMetric> readMetric,
+	                                     bool shouldRecord) {
 		state double readBegin = now();
 		Standalone<RangeResultRef> value = wait(f);
 
@@ -475,7 +484,8 @@ struct ReadWriteWorkload : KVWorkload {
 
 	ACTOR template <class Trans>
 	Future<Void> readOp(Trans* tr, std::vector<int64_t> keys, ReadWriteWorkload* self, bool shouldRecord) {
-		if (!keys.size()) return Void();
+		if (!keys.size())
+			return Void();
 		if (!self->dependentReads) {
 			std::vector<Future<Void>> readers;
 			if (self->rangeReads) {
@@ -484,14 +494,20 @@ struct ReadWriteWorkload : KVWorkload {
 					readers.push_back(logLatency(
 					    tr->getRange(KeyRangeRef(self->keyForIndex(keys[op]), Key(strinc(self->keyForIndex(keys[op])))),
 					                 GetRangeLimits(-1, 80000)),
-					    &self->readLatencies, &self->readLatencyTotal, &self->readLatencyCount, self->readMetric,
+					    &self->readLatencies,
+					    &self->readLatencyTotal,
+					    &self->readLatencyCount,
+					    self->readMetric,
 					    shouldRecord));
 				}
 			} else {
 				for (int op = 0; op < keys.size(); op++) {
 					++self->totalReadsMetric;
-					readers.push_back(logLatency(tr->get(self->keyForIndex(keys[op])), &self->readLatencies,
-					                             &self->readLatencyTotal, &self->readLatencyCount, self->readMetric,
+					readers.push_back(logLatency(tr->get(self->keyForIndex(keys[op])),
+					                             &self->readLatencies,
+					                             &self->readLatencyTotal,
+					                             &self->readLatencyCount,
+					                             self->readMetric,
 					                             shouldRecord));
 				}
 			}
@@ -500,21 +516,33 @@ struct ReadWriteWorkload : KVWorkload {
 			state int op;
 			for (op = 0; op < keys.size(); op++) {
 				++self->totalReadsMetric;
-				wait(logLatency(tr->get(self->keyForIndex(keys[op])), &self->readLatencies, &self->readLatencyTotal,
-				                &self->readLatencyCount, self->readMetric, shouldRecord));
+				wait(logLatency(tr->get(self->keyForIndex(keys[op])),
+				                &self->readLatencies,
+				                &self->readLatencyTotal,
+				                &self->readLatencyCount,
+				                self->readMetric,
+				                shouldRecord));
 			}
 		}
 		return Void();
 	}
 
 	ACTOR Future<Void> _setup(Database cx, ReadWriteWorkload* self) {
-		if (!self->doSetup) return Void();
+		if (!self->doSetup)
+			return Void();
 
 		state Promise<double> loadTime;
 		state Promise<std::vector<std::pair<uint64_t, double>>> ratesAtKeyCounts;
 
-		wait(bulkSetup(cx, self, self->nodeCount, loadTime, self->insertionCountsToMeasure.empty(), self->warmingDelay,
-		               self->maxInsertRate, self->insertionCountsToMeasure, ratesAtKeyCounts));
+		wait(bulkSetup(cx,
+		               self,
+		               self->nodeCount,
+		               loadTime,
+		               self->insertionCountsToMeasure.empty(),
+		               self->warmingDelay,
+		               self->maxInsertRate,
+		               self->insertionCountsToMeasure,
+		               ratesAtKeyCounts));
 
 		self->loadTime = loadTime.getFuture().get();
 		self->ratesAtKeyCounts = ratesAtKeyCounts.getFuture().get();
@@ -543,7 +571,8 @@ struct ReadWriteWorkload : KVWorkload {
 		wait(delay(std::max(0.1, 1.0 - (now() - startTime))));
 
 		std::vector<Future<Void>> clients;
-		if (self->enableReadLatencyLogging) clients.push_back(tracePeriodically(self));
+		if (self->enableReadLatencyLogging)
+			clients.push_back(tracePeriodically(self));
 
 		self->clientBegin = now();
 		for (int c = 0; c < self->actorCount; c++) {
@@ -552,12 +581,13 @@ struct ReadWriteWorkload : KVWorkload {
 				worker = self->randomReadWriteClient<ReadYourWritesTransaction>(
 				    cx, self, self->actorCount / self->transactionsPerSecond, c);
 			else
-				worker = self->randomReadWriteClient<Transaction>(cx, self,
-				                                                  self->actorCount / self->transactionsPerSecond, c);
+				worker = self->randomReadWriteClient<Transaction>(
+				    cx, self, self->actorCount / self->transactionsPerSecond, c);
 			clients.push_back(worker);
 		}
 
-		if (!self->cancelWorkersAtDuration) self->clients = clients; // Don't cancel them until check()
+		if (!self->cancelWorkersAtDuration)
+			self->clients = clients; // Don't cancel them until check()
 
 		wait(self->cancelWorkersAtDuration ? timeout(waitForAll(clients), self->testDuration, Void())
 		                                   : delay(self->testDuration));
@@ -584,7 +614,8 @@ struct ReadWriteWorkload : KVWorkload {
 		double numSweeps = (now() - startTime) / sweepDuration;
 		int currentSweep = (int)numSweeps;
 		double alpha = numSweeps - currentSweep;
-		if (currentSweep % 2) alpha = 1 - alpha;
+		if (currentSweep % 2)
+			alpha = 1 - alpha;
 		return alpha;
 	}
 
@@ -633,13 +664,16 @@ struct ReadWriteWorkload : KVWorkload {
 				state int extra_read_conflict_ranges = writes ? self->extraReadConflictRangesPerTransaction : 0;
 				state int extra_write_conflict_ranges = writes ? self->extraWriteConflictRangesPerTransaction : 0;
 				if (!self->adjacentReads) {
-					for (int op = 0; op < reads; op++) keys.push_back(self->getRandomKey(self->nodeCount));
+					for (int op = 0; op < reads; op++)
+						keys.push_back(self->getRandomKey(self->nodeCount));
 				} else {
 					int startKey = self->getRandomKey(self->nodeCount - reads);
-					for (int op = 0; op < reads; op++) keys.push_back(startKey + op);
+					for (int op = 0; op < reads; op++)
+						keys.push_back(startKey + op);
 				}
 
-				for (int op = 0; op < writes; op++) values.push_back(self->randomValue());
+				for (int op = 0; op < writes; op++)
+					values.push_back(self->randomValue());
 
 				for (int op = 0; op < extra_read_conflict_ranges + extra_write_conflict_ranges; op++)
 					extra_ranges.push_back(singleKeyRange(deterministicRandom()->randomUniqueID().toString()));
@@ -650,8 +684,8 @@ struct ReadWriteWorkload : KVWorkload {
 				    tstart - self->clientBegin <= self->debugTime + self->debugInterval) {
 					debugID = deterministicRandom()->randomUniqueID();
 					tr.debugTransaction(debugID);
-					g_traceBatch.addEvent("TransactionDebug", debugID.first(),
-					                      "ReadWrite.randomReadWriteClient.Before");
+					g_traceBatch.addEvent(
+					    "TransactionDebug", debugID.first(), "ReadWrite.randomReadWriteClient.Before");
 				} else {
 					debugID = UID();
 				}
@@ -668,20 +702,24 @@ struct ReadWriteWorkload : KVWorkload {
 
 						Version v =
 						    wait(self->inconsistentReads ? getInconsistentReadVersion(cx) : tr.getReadVersion());
-						if (self->inconsistentReads) tr.setVersion(v);
+						if (self->inconsistentReads)
+							tr.setVersion(v);
 
 						double grvLatency = now() - GRVStartTime;
 						self->transactionSuccessMetric->startLatency = grvLatency * 1e9;
 						self->transactionFailureMetric->startLatency = grvLatency * 1e9;
-						if (self->shouldRecord()) self->GRVLatencies.addSample(grvLatency);
+						if (self->shouldRecord())
+							self->GRVLatencies.addSample(grvLatency);
 
 						state double readStart = now();
 						wait(self->readOp(&tr, keys, self, self->shouldRecord()));
 
 						double readLatency = now() - readStart;
-						if (self->shouldRecord()) self->fullReadLatencies.addSample(readLatency);
+						if (self->shouldRecord())
+							self->fullReadLatencies.addSample(readLatency);
 
-						if (!writes) break;
+						if (!writes)
+							break;
 
 						if (self->adjacentWrites) {
 							int64_t startKey = self->getRandomKey(self->nodeCount - writes);
@@ -701,7 +739,8 @@ struct ReadWriteWorkload : KVWorkload {
 
 						double commitLatency = now() - commitStart;
 						self->transactionSuccessMetric->commitLatency = commitLatency * 1e9;
-						if (self->shouldRecord()) self->commitLatencies.addSample(commitLatency);
+						if (self->shouldRecord())
+							self->commitLatencies.addSample(commitLatency);
 
 						break;
 					} catch (Error& e) {
@@ -713,7 +752,8 @@ struct ReadWriteWorkload : KVWorkload {
 						++self->transactionSuccessMetric->retries;
 						++self->totalRetriesMetric;
 
-						if (self->shouldRecord()) ++self->retries;
+						if (self->shouldRecord())
+							++self->retries;
 					}
 				}
 

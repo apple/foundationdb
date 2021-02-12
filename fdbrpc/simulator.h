@@ -83,8 +83,13 @@ public:
 		double fault_injection_p1, fault_injection_p2;
 		bool failedDisk;
 
-		ProcessInfo(const char* name, LocalityData locality, ProcessClass startingClass, NetworkAddressList addresses,
-		            INetworkConnections* net, const char* dataFolder, const char* coordinationFolder)
+		ProcessInfo(const char* name,
+		            LocalityData locality,
+		            ProcessClass startingClass,
+		            NetworkAddressList addresses,
+		            INetworkConnections* net,
+		            const char* dataFolder,
+		            const char* coordinationFolder)
 		  : name(name), locality(locality), startingClass(startingClass), addresses(addresses),
 		    address(addresses.address), dataFolder(dataFolder), network(net), coordinationFolder(coordinationFolder),
 		    failed(false), excluded(false), cpuTicks(0), rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
@@ -145,11 +150,14 @@ public:
 
 		std::string toString() const {
 			return format(
-			    "name: %s address: %s zone: %s datahall: %s class: %s excluded: %d cleared: %d", name,
+			    "name: %s address: %s zone: %s datahall: %s class: %s excluded: %d cleared: %d",
+			    name,
 			    formatIpPort(addresses.address.ip, addresses.address.port).c_str(),
 			    (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"),
 			    (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"),
-			    startingClass.toString().c_str(), excluded, cleared);
+			    startingClass.toString().c_str(),
+			    excluded,
+			    cleared);
 		}
 
 		// Members not for external use
@@ -172,22 +180,35 @@ public:
 	virtual Future<Void> onProcess(ISimulator::ProcessInfo* process, TaskPriority taskID = TaskPriority::Zero) = 0;
 	virtual Future<Void> onMachine(ISimulator::ProcessInfo* process, TaskPriority taskID = TaskPriority::Zero) = 0;
 
-	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, bool sslEnabled,
-	                                uint16_t listenPerProcess, LocalityData locality, ProcessClass startingClass,
-	                                const char* dataFolder, const char* coordinationFolder) = 0;
+	virtual ProcessInfo* newProcess(const char* name,
+	                                IPAddress ip,
+	                                uint16_t port,
+	                                bool sslEnabled,
+	                                uint16_t listenPerProcess,
+	                                LocalityData locality,
+	                                ProcessClass startingClass,
+	                                const char* dataFolder,
+	                                const char* coordinationFolder) = 0;
 	virtual void killProcess(ProcessInfo* machine, KillType) = 0;
 	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses) = 0;
 	virtual void rebootProcess(ProcessInfo* process, KillType kt) = 0;
 	virtual void killInterface(NetworkAddress address, KillType) = 0;
-	virtual bool killMachine(Optional<Standalone<StringRef>> machineId, KillType kt, bool forceKill = false,
+	virtual bool killMachine(Optional<Standalone<StringRef>> machineId,
+	                         KillType kt,
+	                         bool forceKill = false,
 	                         KillType* ktFinal = NULL) = 0;
-	virtual bool killZone(Optional<Standalone<StringRef>> zoneId, KillType kt, bool forceKill = false,
+	virtual bool killZone(Optional<Standalone<StringRef>> zoneId,
+	                      KillType kt,
+	                      bool forceKill = false,
 	                      KillType* ktFinal = NULL) = 0;
-	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, bool forceKill = false,
+	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId,
+	                            KillType kt,
+	                            bool forceKill = false,
 	                            KillType* ktFinal = NULL) = 0;
 	// virtual KillType getMachineKillState( UID zoneID ) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses,
-	                              std::vector<ProcessInfo*> const& deadProcesses, KillType kt,
+	                              std::vector<ProcessInfo*> const& deadProcesses,
+	                              KillType kt,
 	                              KillType* newKillType) const = 0;
 	virtual bool isAvailable() const = 0;
 	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const = 0;
@@ -257,7 +278,8 @@ public:
 					roleText += roleIt.first + ((roleIt.second > 1) ? format("-%d ", roleIt.second) : " ");
 			}
 		}
-		if (roleText.empty()) roleText = "[unset]";
+		if (roleText.empty())
+			roleText = "[unset]";
 		return roleText;
 	}
 

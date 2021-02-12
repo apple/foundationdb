@@ -257,7 +257,8 @@ unsigned start; /* inflate()'s starting value for strm->avail_out */
 					}
 					if (len) {
 						PUP(out) = PUP(from);
-						if (len > 1) PUP(out) = PUP(from);
+						if (len > 1)
+							PUP(out) = PUP(from);
 					}
 				} else {
 					from = out - dist; /* copy direct from output */
@@ -269,7 +270,8 @@ unsigned start; /* inflate()'s starting value for strm->avail_out */
 					} while (len > 2);
 					if (len) {
 						PUP(out) = PUP(from);
-						if (len > 1) PUP(out) = PUP(from);
+						if (len > 1)
+							PUP(out) = PUP(from);
 					}
 				}
 			} else if ((op & 64) == 0) { /* 2nd level distance code */

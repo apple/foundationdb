@@ -49,14 +49,17 @@ struct SlowTaskWorkload : TestWorkload {
 				do_slow_exception_thing(&exc);
 			}
 		}
-		fprintf(stderr, "Slow task complete: %" PRId64 " exceptions; %" PRId64 " calls to dl_iterate_phdr\n", exc,
+		fprintf(stderr,
+		        "Slow task complete: %" PRId64 " exceptions; %" PRId64 " calls to dl_iterate_phdr\n",
+		        exc,
 		        dl_iterate_phdr_calls - phc);
 		return Void();
 	}
 
 	static void do_slow_exception_thing(int64_t* exc_count) {
 		// Has to be a non-actor function so that actual exception unwinding occurs
-		for (int j = 0; j < 1000; j++) try {
+		for (int j = 0; j < 1000; j++)
+			try {
 				throw success();
 			} catch (Error&) {
 				++*exc_count;

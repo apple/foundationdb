@@ -60,8 +60,9 @@ struct CpuProfilerWorkload : TestWorkload {
 				vector<WorkerDetails> _workers = wait(getWorkers(self->dbInfo));
 				vector<WorkerInterface> workers;
 				for (int i = 0; i < _workers.size(); i++) {
-					if (self->roles.empty() || std::find(self->roles.cbegin(), self->roles.cend(),
-					                                     _workers[i].processClass.toString()) != self->roles.cend()) {
+					if (self->roles.empty() ||
+					    std::find(self->roles.cbegin(), self->roles.cend(), _workers[i].processClass.toString()) !=
+					        self->roles.cend()) {
 						workers.push_back(_workers[i].interf);
 					}
 				}
@@ -89,7 +90,8 @@ struct CpuProfilerWorkload : TestWorkload {
 			// Check that all workers succeeded if turning the profiler on
 			if (enabled)
 				for (i = 0; i < replies.size(); i++)
-					if (!replies[i].get().present()) self->success = false;
+					if (!replies[i].get().present())
+						self->success = false;
 
 			TraceEvent("DoneSignalingProfiler");
 		}
@@ -101,13 +103,15 @@ struct CpuProfilerWorkload : TestWorkload {
 
 	ACTOR Future<Void> _start(Database cx, CpuProfilerWorkload* self) {
 		wait(delay(self->initialDelay));
-		if (self->clientId == 0) TraceEvent("SignalProfilerOn");
+		if (self->clientId == 0)
+			TraceEvent("SignalProfilerOn");
 		wait(timeoutError(self->updateProfiler(true, cx, self), 60.0));
 
 		// If a duration was given, let the duration elapse and then shut the profiler off
 		if (self->duration > 0) {
 			wait(delay(self->duration));
-			if (self->clientId == 0) TraceEvent("SignalProfilerOff");
+			if (self->clientId == 0)
+				TraceEvent("SignalProfilerOff");
 			wait(timeoutError(self->updateProfiler(false, cx, self), 60.0));
 		}
 
@@ -119,7 +123,8 @@ struct CpuProfilerWorkload : TestWorkload {
 	ACTOR Future<bool> _check(Database cx, CpuProfilerWorkload* self) {
 		// If no duration was given, then shut the profiler off now
 		if (self->duration <= 0) {
-			if (self->clientId == 0) TraceEvent("SignalProfilerOff");
+			if (self->clientId == 0)
+				TraceEvent("SignalProfilerOff");
 			wait(timeoutError(self->updateProfiler(false, cx, self), 60.0));
 		}
 

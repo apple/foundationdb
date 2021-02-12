@@ -47,8 +47,12 @@
 #include <fcntl.h>
 #include <cmath>
 
-FileTraceLogWriter::FileTraceLogWriter(std::string directory, std::string processName, std::string basename,
-                                       std::string extension, uint64_t maxLogsSize, std::function<void()> onError)
+FileTraceLogWriter::FileTraceLogWriter(std::string directory,
+                                       std::string processName,
+                                       std::string basename,
+                                       std::string extension,
+                                       uint64_t maxLogsSize,
+                                       std::function<void()> onError)
   : directory(directory), processName(processName), basename(basename), extension(extension), maxLogsSize(maxLogsSize),
     traceFileFD(-1), index(0), onError(onError) {}
 
@@ -110,7 +114,10 @@ void FileTraceLogWriter::open() {
 			UNSTOPPABLE_ASSERT(indexWidth < 10);
 			finalname = format("%s.%d.%d.%s", basename.c_str(), indexWidth, index, extension.c_str());
 		} else {
-			fprintf(stderr, "ERROR: could not create trace log file `%s' (%d: %s)\n", finalname.c_str(), errno,
+			fprintf(stderr,
+			        "ERROR: could not create trace log file `%s' (%d: %s)\n",
+			        finalname.c_str(),
+			        errno,
 			        strerror(errno));
 
 			int errorNum = errno;
@@ -132,7 +139,8 @@ void FileTraceLogWriter::open() {
 
 void FileTraceLogWriter::close() {
 	if (traceFileFD >= 0) {
-		while (__close(traceFileFD)) threadSleep(0.1);
+		while (__close(traceFileFD))
+			threadSleep(0.1);
 	}
 }
 

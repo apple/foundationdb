@@ -83,12 +83,37 @@ struct StorageServerInterface {
 		// to be versioned carefully!
 
 		if constexpr (!is_fb_function<Ar>) {
-			serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
-			           splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
-			if (ar.protocolVersion().hasWatches()) serializer(ar, watchValue);
+			serializer(ar,
+			           uniqueID,
+			           locality,
+			           getVersion,
+			           getValue,
+			           getKey,
+			           getKeyValues,
+			           getShardState,
+			           waitMetrics,
+			           splitMetrics,
+			           getStorageMetrics,
+			           waitFailure,
+			           getQueuingMetrics,
+			           getKeyValueStoreType);
+			if (ar.protocolVersion().hasWatches())
+				serializer(ar, watchValue);
 		} else {
-			serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
-			           splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType,
+			serializer(ar,
+			           uniqueID,
+			           locality,
+			           getVersion,
+			           getValue,
+			           getKey,
+			           getKeyValues,
+			           getShardState,
+			           waitMetrics,
+			           splitMetrics,
+			           getStorageMetrics,
+			           waitFailure,
+			           getQueuingMetrics,
+			           getKeyValueStoreType,
 			           watchValue);
 		}
 	}
@@ -113,7 +138,8 @@ struct ServerCacheInfo {
 	std::vector<Reference<StorageInfo>> dest_info;
 
 	void populateTags() {
-		if (tags.size()) return;
+		if (tags.size())
+			return;
 
 		for (const auto& info : src_info) {
 			tags.push_back(info->tag);
@@ -212,8 +238,8 @@ struct GetKeyValuesRequest : TimedRequest {
 
 	GetKeyValuesRequest() : isFetchKeys(false) {}
 	//	GetKeyValuesRequest(const KeySelectorRef& begin, const KeySelectorRef& end, Version version, int limit, int
-	//limitBytes, Optional<UID> debugID) : begin(begin), end(end), version(version), limit(limit),
-	//limitBytes(limitBytes) {}
+	// limitBytes, Optional<UID> debugID) : begin(begin), end(end), version(version), limit(limit),
+	// limitBytes(limitBytes) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, debugID, reply, arena);
@@ -387,8 +413,11 @@ struct SplitMetricsRequest {
 	ReplyPromise<SplitMetricsReply> reply;
 
 	SplitMetricsRequest() {}
-	SplitMetricsRequest(KeyRangeRef const& keys, StorageMetrics const& limits, StorageMetrics const& used,
-	                    StorageMetrics const& estimated, bool isLastShard)
+	SplitMetricsRequest(KeyRangeRef const& keys,
+	                    StorageMetrics const& limits,
+	                    StorageMetrics const& used,
+	                    StorageMetrics const& estimated,
+	                    bool isLastShard)
 	  : keys(arena, keys), limits(limits), used(used), estimated(estimated), isLastShard(isLastShard) {}
 
 	template <class Ar>
@@ -436,8 +465,17 @@ struct StorageQueuingMetricsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, version, storageBytes, durableVersion, cpuUsage,
-		           diskUsage, localRateLimit);
+		serializer(ar,
+		           localTime,
+		           instanceID,
+		           bytesDurable,
+		           bytesInput,
+		           version,
+		           storageBytes,
+		           durableVersion,
+		           cpuUsage,
+		           diskUsage,
+		           localRateLimit);
 	}
 };
 

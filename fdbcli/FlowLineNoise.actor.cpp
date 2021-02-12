@@ -83,7 +83,9 @@ private:
 };
 
 LineNoise::LineNoise(std::function<void(std::string const&, std::vector<std::string>&)> _completion_callback,
-                     std::function<Hint(std::string const&)> _hint_callback, int maxHistoryLines, bool multiline)
+                     std::function<Hint(std::string const&)> _hint_callback,
+                     int maxHistoryLines,
+                     bool multiline)
   : threadPool(createGenericThreadPool()) {
 	reader = new LineNoiseReader();
 
@@ -107,7 +109,8 @@ LineNoise::LineNoise(std::function<void(std::string const&, std::vector<std::str
 			completion_callback(line, completions);
 			return Void();
 		}).getBlocking();
-		for (auto const& c : completions) linenoiseAddCompletion(lc, c.c_str());
+		for (auto const& c : completions)
+			linenoiseAddCompletion(lc, c.c_str());
 	});
 	/*linenoiseSetHintsCallback( [](const char* line, int* color, int*bold) -> const char* {
 	    Hint h = onMainThread( [line]() -> Future<Hint> {
@@ -152,7 +155,8 @@ ACTOR Future<Void> waitKeyboardInterrupt(boost::asio::io_service* ios) {
 
 Future<Void> LineNoise::onKeyboardInterrupt() {
 	boost::asio::io_service* ios = (boost::asio::io_service*)g_network->global(INetwork::enASIOService);
-	if (!ios) return Never();
+	if (!ios)
+		return Never();
 	return waitKeyboardInterrupt(ios);
 }
 

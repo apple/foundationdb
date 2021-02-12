@@ -77,7 +77,8 @@ public:
 
 	virtual void clearCallback(ThreadCallback* callback) {
 		auto it = callbackMap.find(callback);
-		if (it == callbackMap.end()) return;
+		if (it == callbackMap.end())
+			return;
 
 		UNSTOPPABLE_ASSERT(it->second < callbacks.size() && it->second >= 0);
 
@@ -163,8 +164,10 @@ public:
 
 	int getErrorCode() {
 		ThreadSpinLockHolder holder(mutex);
-		if (!isReadyUnsafe()) return error_code_future_not_set;
-		if (!isErrorUnsafe()) return error_code_success;
+		if (!isReadyUnsafe())
+			return error_code_future_not_set;
+		if (!isErrorUnsafe())
+			return error_code_success;
 		return error.code();
 	}
 
@@ -207,21 +210,25 @@ public:
 	~ThreadSingleAssignmentVarBase() {
 		this->mutex.assertNotEntered();
 
-		if (callback) callback->destroy();
+		if (callback)
+			callback->destroy();
 	}
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 
 	void send(Never) {
-		if (TRACE_SAMPLE()) TraceEvent(SevSample, "Promise_sendNever");
+		if (TRACE_SAMPLE())
+			TraceEvent(SevSample, "Promise_sendNever");
 		ThreadSpinLockHolder holder(mutex);
-		if (!canBeSetUnsafe()) ASSERT(false); // Promise fulfilled twice
+		if (!canBeSetUnsafe())
+			ASSERT(false); // Promise fulfilled twice
 		this->status = NeverSet;
 	}
 
 	void sendError(const Error& err) {
-		if (TRACE_SAMPLE()) TraceEvent(SevSample, "Promise_sendError").detail("ErrorCode", err.code());
+		if (TRACE_SAMPLE())
+			TraceEvent(SevSample, "Promise_sendError").detail("ErrorCode", err.code());
 		this->mutex.enter();
 		if (!canBeSetUnsafe()) {
 			this->mutex.leave();
@@ -234,7 +241,8 @@ public:
 			return;
 		}
 		auto func = callback;
-		if (!callback->isMultiCallback()) callback = NULL;
+		if (!callback->isMultiCallback())
+			callback = NULL;
 
 		if (!func->canFire(0)) {
 			this->mutex.leave();
@@ -314,7 +322,8 @@ public:
 
 	void releaseMemory() {
 		ThreadSpinLockHolder holder(mutex);
-		if (--valueReferenceCount == 0) cleanupUnsafe();
+		if (--valueReferenceCount == 0)
+			cleanupUnsafe();
 	}
 
 private:
@@ -353,8 +362,10 @@ public:
 
 	T get() {
 		ThreadSpinLockHolder holder(mutex);
-		if (!isReadyUnsafe()) throw future_not_set();
-		if (isErrorUnsafe()) throw error;
+		if (!isReadyUnsafe())
+			throw future_not_set();
+		if (isErrorUnsafe())
+			throw error;
 
 		addValueReferenceUnsafe();
 		return value;
@@ -365,7 +376,8 @@ public:
 	virtual void delref() { ThreadSafeReferenceCounted<ThreadSingleAssignmentVar<T>>::delref(); }
 
 	void send(const T& value) {
-		if (TRACE_SAMPLE()) TraceEvent(SevSample, "Promise_send");
+		if (TRACE_SAMPLE())
+			TraceEvent(SevSample, "Promise_send");
 		this->mutex.enter();
 		if (!canBeSetUnsafe()) {
 			this->mutex.leave();
@@ -379,7 +391,8 @@ public:
 		}
 
 		auto func = callback;
-		if (!callback->isMultiCallback()) callback = NULL;
+		if (!callback->isMultiCallback())
+			callback = NULL;
 
 		if (!func->canFire(0)) {
 			this->mutex.leave();
@@ -415,7 +428,8 @@ public:
 	bool isReady() { return sav->isReady(); }
 	bool isError() { return sav->isError(); }
 	Error& getError() {
-		if (!isError()) throw future_not_error();
+		if (!isError())
+			throw future_not_error();
 
 		return sav->error;
 	}
@@ -432,23 +446,28 @@ public:
 		// sav->addref();
 	}
 	ThreadFuture(const ThreadFuture<T>& rhs) : sav(rhs.sav) {
-		if (sav) sav->addref();
+		if (sav)
+			sav->addref();
 	}
 	ThreadFuture(ThreadFuture<T>&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) { rhs.sav = 0; }
 	ThreadFuture(const T& presentValue) : sav(new ThreadSingleAssignmentVar<T>()) { sav->send(presentValue); }
 	ThreadFuture(Never) : sav(new ThreadSingleAssignmentVar<T>()) {}
 	ThreadFuture(const Error& error) : sav(new ThreadSingleAssignmentVar<T>()) { sav->sendError(error); }
 	~ThreadFuture() {
-		if (sav) sav->delref();
+		if (sav)
+			sav->delref();
 	}
 	void operator=(const ThreadFuture<T>& rhs) {
-		if (rhs.sav) rhs.sav->addref();
-		if (sav) sav->delref();
+		if (rhs.sav)
+			rhs.sav->addref();
+		if (sav)
+			sav->delref();
 		sav = rhs.sav;
 	}
 	void operator=(ThreadFuture<T>&& rhs) BOOST_NOEXCEPT {
 		if (sav != rhs.sav) {
-			if (sav) sav->delref();
+			if (sav)
+				sav->delref();
 			sav = rhs.sav;
 			rhs.sav = 0;
 		}
@@ -533,11 +552,13 @@ Future<Void> doOnMainThread(Future<Void> signal, F f, ThreadSingleAssignmentVar<
 ACTOR template <class F>
 void doOnMainThreadVoid(Future<Void> signal, F f, Error* err) {
 	wait(signal);
-	if (err && err->code() != invalid_error_code) return;
+	if (err && err->code() != invalid_error_code)
+		return;
 	try {
 		f();
 	} catch (Error& e) {
-		if (err) *err = e;
+		if (err)
+			*err = e;
 	}
 }
 

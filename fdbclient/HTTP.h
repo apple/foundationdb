@@ -46,14 +46,20 @@ struct Response : ReferenceCounted<Response> {
 };
 
 // Prepend the HTTP request header to the given PacketBuffer, returning the new head of the buffer chain
-PacketBuffer* writeRequestHeader(std::string const& verb, std::string const& resource, HTTP::Headers const& headers,
+PacketBuffer* writeRequestHeader(std::string const& verb,
+                                 std::string const& resource,
+                                 HTTP::Headers const& headers,
                                  PacketBuffer* dest);
 
 // Do an HTTP request to the blob store, parse the response.
-Future<Reference<Response>> doRequest(Reference<IConnection> const& conn, std::string const& verb,
-                                      std::string const& resource, HTTP::Headers const& headers,
-                                      UnsentPacketQueue* const& pContent, int const& contentLen,
-                                      Reference<IRateControl> const& sendRate, int64_t* const& pSent,
+Future<Reference<Response>> doRequest(Reference<IConnection> const& conn,
+                                      std::string const& verb,
+                                      std::string const& resource,
+                                      HTTP::Headers const& headers,
+                                      UnsentPacketQueue* const& pContent,
+                                      int const& contentLen,
+                                      Reference<IRateControl> const& sendRate,
+                                      int64_t* const& pSent,
                                       Reference<IRateControl> const& recvRate,
                                       const std::string& requestHeader = std::string());
 } // namespace HTTP

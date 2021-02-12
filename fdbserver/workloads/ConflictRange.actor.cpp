@@ -65,7 +65,8 @@ struct ConflictRangeWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _start(Database cx, ConflictRangeWorkload* self) {
-		if (self->clientId == 0) wait(timeout(self->conflictRangeClient(cx, self), self->testDuration, Void()));
+		if (self->clientId == 0)
+			wait(timeout(self->conflictRangeClient(cx, self), self->testDuration, Void()));
 		return Void();
 	}
 
@@ -155,7 +156,8 @@ struct ConflictRangeWorkload : TestWorkload {
 
 					Standalone<RangeResultRef> res =
 					    wait(tr1.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-					                      KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB), randomLimit));
+					                      KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+					                      randomLimit));
 					if (res.size()) {
 						originalResults = res;
 						break;
@@ -219,17 +221,20 @@ struct ConflictRangeWorkload : TestWorkload {
 						                         StringRef(format("%010d", clearedEnd))));
 						Standalone<RangeResultRef> res =
 						    wait(trRYOW.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-						                         KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB), randomLimit));
+						                         KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+						                         randomLimit));
 						wait(trRYOW.commit());
 					} else {
 						tr3.clear(StringRef(format("%010d", self->maxKeySpace + 1)));
 						Standalone<RangeResultRef> res =
 						    wait(tr3.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-						                      KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB), randomLimit));
+						                      KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+						                      randomLimit));
 						wait(tr3.commit());
 					}
 				} catch (Error& e) {
-					if (e.code() != error_code_not_committed) throw e;
+					if (e.code() != error_code_not_committed)
+						throw e;
 					foundConflict = true;
 				}
 
@@ -245,12 +250,14 @@ struct ConflictRangeWorkload : TestWorkload {
 
 					Standalone<RangeResultRef> res =
 					    wait(tr4.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-					                      KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB), randomLimit));
+					                      KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+					                      randomLimit));
 					++self->withConflicts;
 
 					if (res.size() == originalResults.size()) {
 						for (int i = 0; i < res.size(); i++)
-							if (res[i] != originalResults[i]) throw not_committed();
+							if (res[i] != originalResults[i])
+								throw not_committed();
 
 						// Discard known cases where conflicts do not change the results
 						if (originalResults.size() == randomLimit && offsetB <= 0) {
@@ -320,7 +327,8 @@ struct ConflictRangeWorkload : TestWorkload {
 					// If the commit is successful, check that the result matches the first execution.
 					Standalone<RangeResultRef> res =
 					    wait(tr4.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-					                      KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB), randomLimit));
+					                      KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+					                      randomLimit));
 					++self->withoutConflicts;
 
 					if (res.size() == originalResults.size()) {
@@ -328,8 +336,9 @@ struct ConflictRangeWorkload : TestWorkload {
 							if (res[i] != originalResults[i]) {
 								TraceEvent(SevError, "ConflictRangeError")
 								    .detail("Info", "No conflict returned, however results do not match")
-								    .detail("Original", printable(originalResults[i].key) + " " +
-								                            printable(originalResults[i].value))
+								    .detail("Original",
+								            printable(originalResults[i].key) + " " +
+								                printable(originalResults[i].value))
 								    .detail("New", printable(res[i].key) + " " + printable(res[i].value));
 							}
 						}
@@ -363,7 +372,8 @@ struct ConflictRangeWorkload : TestWorkload {
 				}
 			} catch (Error& e) {
 				state Error e2 = e;
-				if (e2.code() != error_code_not_committed) ++self->retries;
+				if (e2.code() != error_code_not_committed)
+					++self->retries;
 
 				wait(tr1.onError(e2));
 				wait(tr2.onError(e2));

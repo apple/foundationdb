@@ -72,7 +72,9 @@ private:
 };
 
 template <class T>
-static Reference<PTree<T>> update(Reference<PTree<T>> const& node, bool which, Reference<PTree<T>> const& ptr,
+static Reference<PTree<T>> update(Reference<PTree<T>> const& node,
+                                  bool which,
+                                  Reference<PTree<T>> const& ptr,
                                   Version at) {
 	if (ptr.getPtr() == node->child(which, at).getPtr() /* && node->replacedVersion <= at*/) {
 		return node;
@@ -113,28 +115,33 @@ static Reference<PTree<T>> update(Reference<PTree<T>> const& node, bool which, R
 
 template <class T, class X>
 bool contains(const Reference<PTree<T>>& p, Version at, const X& x) {
-	if (!p) return false;
+	if (!p)
+		return false;
 	bool less = x < p->data;
-	if (!less && !(p->data < x)) return true; // x == p->data
+	if (!less && !(p->data < x))
+		return true; // x == p->data
 	return contains(p->child(!less, at), at, x);
 }
 
 template <class T, class X>
 void lower_bound(const Reference<PTree<T>>& p, Version at, const X& x, std::vector<const PTree<T>*>& f) {
 	if (!p) {
-		while (f.size() && !(x < f.back()->data)) f.pop_back();
+		while (f.size() && !(x < f.back()->data))
+			f.pop_back();
 		return;
 	}
 	f.push_back(p.getPtr());
 	bool less = x < p->data;
-	if (!less && !(p->data < x)) return; // x == p->data
+	if (!less && !(p->data < x))
+		return; // x == p->data
 	lower_bound(p->child(!less, at), at, x, f);
 }
 
 template <class T, class X>
 void upper_bound(const Reference<PTree<T>>& p, Version at, const X& x, std::vector<const PTree<T>*>& f) {
 	if (!p) {
-		while (f.size() && !(x < f.back()->data)) f.pop_back();
+		while (f.size() && !(x < f.back()->data))
+			f.pop_back();
 		return;
 	}
 	f.push_back(p.getPtr());
@@ -220,27 +227,33 @@ void insert(Reference<PTree<T>>& p, Version at, const T& x) {
 		Reference<PTree<T>> child = p->child(direction, at);
 		insert(child, at, x);
 		p = update(p, direction, child, at);
-		if (p->child(direction, at)->priority > p->priority) rotate(p, at, !direction);
+		if (p->child(direction, at)->priority > p->priority)
+			rotate(p, at, !direction);
 	}
 }
 
 template <class T>
 Reference<PTree<T>> firstNode(const Reference<PTree<T>>& p, Version at) {
-	if (!p) ASSERT(false);
-	if (!p->left(at)) return p;
+	if (!p)
+		ASSERT(false);
+	if (!p->left(at))
+		return p;
 	return firstNode(p->left(at), at);
 }
 
 template <class T>
 Reference<PTree<T>> lastNode(const Reference<PTree<T>>& p, Version at) {
-	if (!p) ASSERT(false);
-	if (!p->right(at)) return p;
+	if (!p)
+		ASSERT(false);
+	if (!p->right(at))
+		return p;
 	return lastNode(p->right(at), at);
 }
 
 template <class T, bool last>
 void firstOrLastFinger(const Reference<PTree<T>>& p, Version at, std::vector<const PTree<T>*>& f) {
-	if (!p) return;
+	if (!p)
+		return;
 	f.push_back(p.getPtr());
 	firstOrLastFinger<T, last>(p->child(last, at), at, f);
 }
@@ -274,7 +287,8 @@ void removeRoot(Reference<PTree<T>>& p, Version at) {
 // changes p to point to a PTree with x removed
 template <class T, class X>
 void remove(Reference<PTree<T>>& p, Version at, const X& x) {
-	if (!p) ASSERT(false); // attempt to remove item not present in PTree
+	if (!p)
+		ASSERT(false); // attempt to remove item not present in PTree
 	if (x < p->data) {
 		Reference<PTree<T>> child = p->child(0, at);
 		remove(child, at, x);
@@ -289,7 +303,8 @@ void remove(Reference<PTree<T>>& p, Version at, const X& x) {
 
 template <class T, class X>
 void remove(Reference<PTree<T>>& p, Version at, const X& begin, const X& end) {
-	if (!p) return;
+	if (!p)
+		return;
 	int beginDir, endDir;
 	if (begin < p->data)
 		beginDir = -1;
@@ -317,13 +332,15 @@ void remove(Reference<PTree<T>>& p, Version at, const X& begin, const X& end) {
 			removeBeyond(right, at, end, 0);
 			p = update(p, 1, right, at);
 		}
-		if (beginDir < endDir) removeRoot(p, at);
+		if (beginDir < endDir)
+			removeRoot(p, at);
 	}
 }
 
 template <class T, class X>
 void removeBeyond(Reference<PTree<T>>& p, Version at, const X& pivot, bool dir) {
-	if (!p) return;
+	if (!p)
+		return;
 
 	if ((p->data < pivot) ^ dir) {
 		p = p->child(!dir, at);
@@ -347,7 +364,8 @@ void remove(Reference<PTree<T>>& p, Version at, const X& begin, const X& end) {
 // modifies p to point to a valid PTree
 template <class T>
 void demoteRoot(Reference<PTree<T>>& p, Version at) {
-	if (!p) ASSERT(false);
+	if (!p)
+		ASSERT(false);
 
 	uint32_t priority[2];
 	for (int i = 0; i < 2; i++)
@@ -358,7 +376,8 @@ void demoteRoot(Reference<PTree<T>>& p, Version at) {
 
 	bool higherDirection = priority[1] > priority[0];
 
-	if (priority[higherDirection] < p->priority) return;
+	if (priority[higherDirection] < p->priority)
+		return;
 
 	// else, child(higherDirection) is a greater priority than us and the other child...
 	rotate(p, at, !higherDirection);
@@ -369,8 +388,10 @@ void demoteRoot(Reference<PTree<T>>& p, Version at) {
 
 template <class T>
 Reference<PTree<T>> append(const Reference<PTree<T>>& left, const Reference<PTree<T>>& right, Version at) {
-	if (!left) return right;
-	if (!right) return left;
+	if (!left)
+		return right;
+	if (!right)
+		return left;
 
 	Reference<PTree<T>> r = Reference<PTree<T>>(new PTree<T>(lastNode(left, at)->data, at));
 	ASSERT(r->data < firstNode(right, at)->data);
@@ -420,10 +441,13 @@ void rotate(Reference<PTree<T>>& p, Version at, bool right) {
 
 template <class T>
 void printTree(const Reference<PTree<T>>& p, Version at, int depth = 0) {
-	if (p->left(at)) printTree(p->left(at), at, depth + 1);
-	for (int i = 0; i < depth; i++) printf("  ");
+	if (p->left(at))
+		printTree(p->left(at), at, depth + 1);
+	for (int i = 0; i < depth; i++)
+		printf("  ");
 	printf(":%s\n", describe(p->data).c_str());
-	if (p->right(at)) printTree(p->right(at), at, depth + 1);
+	if (p->right(at))
+		printTree(p->right(at), at, depth + 1);
 }
 
 template <class T>
@@ -432,10 +456,13 @@ void printTreeDetails(const Reference<PTree<T>>& p, int depth = 0) {
 	printf("  Left: %p\n", p->pointer[0].getPtr());
 	printf("  Right: %p\n", p->pointer[1].getPtr());
 	if (p->pointer[2])
-		printf("  Version %lld %s: %p\n", p->lastUpdateVersion, p->replacedPointer ? "Right" : "Left",
+		printf("  Version %lld %s: %p\n",
+		       p->lastUpdateVersion,
+		       p->replacedPointer ? "Right" : "Left",
 		       p->pointer[2].getPtr());
 	for (int i = 0; i < 3; i++)
-		if (p->pointer[i]) printTreeDetails(p->pointer[i], depth + 1);
+		if (p->pointer[i])
+			printTreeDetails(p->pointer[i], depth + 1);
 }
 
 /*static int depth(const Reference<PTree<int>>& p, Version at) {
@@ -453,7 +480,8 @@ void validate(const Reference<PTree<T>>& p, Version at, T* min, T* max, int& cou
 	}
 	ASSERT((!min || *min <= p->data) && (!max || p->data <= *max));
 	for (int i = 0; i < 2; i++) {
-		if (p->child(i, at)) ASSERT(p->child(i, at)->priority <= p->priority);
+		if (p->child(i, at))
+			ASSERT(p->child(i, at)->priority <= p->priority);
 	}
 
 	++count;
@@ -564,10 +592,11 @@ public:
 	void insert(const K& k, const T& t) { insert(k, t, latestVersion); }
 	void insert(const K& k, const T& t, Version insertAt) {
 		if (PTreeImpl::contains(*latestRoot, latestVersion, k))
-			PTreeImpl::remove(*latestRoot, latestVersion,
+			PTreeImpl::remove(*latestRoot,
+			                  latestVersion,
 			                  k); // FIXME: Make PTreeImpl::insert do this automatically  (see also WriteMap.h FIXME)
-		PTreeImpl::insert(*latestRoot, latestVersion,
-		                  MapPair<K, std::pair<T, Version>>(k, std::make_pair(t, insertAt)));
+		PTreeImpl::insert(
+		    *latestRoot, latestVersion, MapPair<K, std::pair<T, Version>>(k, std::make_pair(t, insertAt)));
 	}
 	void erase(const K& begin, const K& end) { PTreeImpl::remove(*latestRoot, latestVersion, begin, end); }
 	void erase(const K& key) { // key must be present

@@ -71,7 +71,8 @@ bool SlowConflictSet::is_conflict(const VectorRef<KeyRangeRef>& readRanges, Vers
 	for (auto range = readRanges.begin(); range != readRanges.end(); ++range) {
 		auto intersecting = age.intersectingRanges(*range);
 		for (auto it = intersecting.begin(); it != intersecting.end(); ++it)
-			if (it.value() > read_snapshot) return true;
+			if (it.value() > read_snapshot)
+				return true;
 	}
 	return false;
 }
@@ -80,10 +81,13 @@ void SlowConflictSet::clear(Version now) {
 	age.insert(allKeys, now);
 }
 
-void SlowConflictSet::add(const VectorRef<KeyRangeRef>& clearRanges, const VectorRef<KeyValueRef>& setValues,
+void SlowConflictSet::add(const VectorRef<KeyRangeRef>& clearRanges,
+                          const VectorRef<KeyValueRef>& setValues,
                           Version now) {
-	for (auto c = clearRanges.begin(); c != clearRanges.end(); ++c) age.insert(*c, now);
-	for (auto s = setValues.begin(); s != setValues.end(); ++s) age.insert(s->key, now);
+	for (auto c = clearRanges.begin(); c != clearRanges.end(); ++c)
+		age.insert(*c, now);
+	for (auto s = setValues.begin(); s != setValues.end(); ++s)
+		age.insert(s->key, now);
 }
 
 PerfDoubleCounter g_buildTest("Build", skc), g_add("Add", skc), g_add_sort("A.Sort", skc),
@@ -97,10 +101,14 @@ PerfDoubleCounter g_buildTest("Build", skc), g_add("Add", skc), g_add_sort("A.So
 
 static force_inline int compare(const StringRef& a, const StringRef& b) {
 	int c = memcmp(a.begin(), b.begin(), min(a.size(), b.size()));
-	if (c < 0) return -1;
-	if (c > 0) return +1;
-	if (a.size() < b.size()) return -1;
-	if (a.size() == b.size()) return 0;
+	if (c < 0)
+		return -1;
+	if (c > 0)
+		return +1;
+	if (a.size() < b.size())
+		return -1;
+	if (a.size() == b.size())
+		return 0;
 	return +1;
 }
 
@@ -162,7 +170,8 @@ force_inline bool getCharacter(const KeyInfo& ki, int character, int& outputChar
 bool operator<(const KeyInfo& lhs, const KeyInfo& rhs) {
 	int i = min(lhs.key.size(), rhs.key.size());
 	int c = memcmp(lhs.key.begin(), rhs.key.begin(), i);
-	if (c != 0) return c < 0;
+	if (c != 0)
+		return c < 0;
 
 	// SOMEDAY: This is probably not very fast.  Slows D.Sort by ~20% relative to previous (incorrect) version.
 
@@ -171,9 +180,12 @@ bool operator<(const KeyInfo& lhs, const KeyInfo& rhs) {
 	while (true) {
 		lDone = getCharacter(lhs, i, lc);
 		rDone = getCharacter(rhs, i, rc);
-		if (lDone && rDone) return false; // equality
-		if (lc < rc) return true;
-		if (lc > rc) return false;
+		if (lDone && rDone)
+			return false; // equality
+		if (lc < rc)
+			return true;
+		if (lc > rc)
+			return false;
 		i++;
 	}
 }
@@ -193,9 +205,11 @@ void swapSort(std::vector<KeyInfo>& points, int a, int b) {
 
 void smallSort(std::vector<KeyInfo>& points, int start, int N) {
 	for (int i = 1; i < N; i++)
-		for (int j = i; j > 0; j -= 2) swapSort(points, start + j - 1, start + j);
+		for (int j = i; j > 0; j -= 2)
+			swapSort(points, start + j - 1, start + j);
 	for (int i = N - 2; i > 0; i--)
-		for (int j = i; j > 0; j -= 2) swapSort(points, start + j - 1, start + j);
+		for (int j = i; j > 0; j -= 2)
+			swapSort(points, start + j - 1, start + j);
 }
 
 struct SortTask {
@@ -232,13 +246,15 @@ void sortPoints(std::vector<KeyInfo>& points) {
 			allDone &= getCharacter(points[i], st.character, c);
 			counts[c]++;
 		}
-		if (allDone) continue;
+		if (allDone)
+			continue;
 
 		// calculate offsets from counts and build next level of tasks
 		int total = 0;
 		for (int i = 0; i < counts.size(); i++) {
 			int temp = counts[i];
-			if (temp > 1) tasks.emplace_back(st.begin + total, temp, st.character + 1);
+			if (temp > 1)
+				tasks.emplace_back(st.begin + total, temp, st.character + 1);
 			counts[i] = total;
 			total += temp;
 		}
@@ -250,7 +266,8 @@ void sortPoints(std::vector<KeyInfo>& points) {
 		}
 
 		// copy back into original points array
-		for (int i = 0; i < st.size; i++) points[st.begin + i] = newPoints[i];
+		for (int i = 0; i < st.size; i++)
+			points[st.begin + i] = newPoints[i];
 	}
 
 	// cout << endl << "Radix sort done" << endl;
@@ -357,8 +374,10 @@ private:
 
 	static force_inline bool less(const uint8_t* a, int aLen, const uint8_t* b, int bLen) {
 		int c = memcmp(a, b, min(aLen, bLen));
-		if (c < 0) return true;
-		if (c > 0) return false;
+		if (c < 0)
+			return true;
+		if (c > 0)
+			return false;
 		return aLen < bLen;
 	}
 
@@ -473,7 +492,8 @@ public:
 			const Finger& startF = fingers[r * 2];
 			const Finger& endF = fingers[r * 2 + 1];
 
-			if (endF.found() == NULL) insert(endF, endF.finger[0]->getMaxVersion(0));
+			if (endF.found() == NULL)
+				insert(endF, endF.finger[0]->getMaxVersion(0));
 
 			remove(startF, endF);
 			insert(startF, version);
@@ -484,7 +504,8 @@ public:
 		const int M = 16;
 		int nextJob[M];
 		CheckMax inProgress[M];
-		if (!count) return;
+		if (!count)
+			return;
 
 		int started = min(M, count);
 		for (int i = 0; i < started; i++) {
@@ -499,7 +520,8 @@ public:
 		while (true) {
 			if (inProgress[job].advance()) {
 				if (started == count) {
-					if (prevJob == job) break;
+					if (prevJob == job)
+						break;
 					nextJob[prevJob] = nextJob[job];
 					job = prevJob;
 				} else
@@ -519,7 +541,8 @@ public:
 	void partition(StringRef* begin, int splitCount, SkipList* output) {
 		for (int i = splitCount - 1; i >= 0; i--) {
 			Finger f(header, begin[i]);
-			while (!f.finished()) f.nextLevel();
+			while (!f.finished())
+				f.nextLevel();
 			split(f, output[i + 1]);
 		}
 		swap(output[0]);
@@ -527,12 +550,14 @@ public:
 
 	void concatenate(SkipList* input, int count) {
 		std::vector<Finger> ends(count - 1);
-		for (int i = 0; i < ends.size(); i++) input[i].getEnd(ends[i]);
+		for (int i = 0; i < ends.size(); i++)
+			input[i].getEnd(ends[i]);
 
 		for (int l = 0; l < MaxLevels; l++) {
 			for (int i = ends.size() - 1; i >= 0; i--) {
 				ends[i].finger[l]->setNext(l, input[i + 1].header->getNext(l));
-				if (l && (!i || ends[i].finger[l] != input[i].header)) ends[i].finger[l]->calcVersionForLevel(l);
+				if (l && (!i || ends[i].finger[l] != input[i].header))
+					ends[i].finger[l]->calcVersionForLevel(l);
 				input[i + 1].header->setNext(l, NULL);
 			}
 		}
@@ -549,7 +574,8 @@ public:
 		while (results[0].level > 1) {
 			results[0].nextLevel();
 			Node* ac = results[0].alreadyChecked;
-			if (ac && less(ac->value(), ac->length(), endValue.begin(), endValue.size())) break;
+			if (ac && less(ac->value(), ac->length(), endValue.begin(), endValue.size()))
+				break;
 		}
 
 		// Init all the other fingers to start descending where we stopped
@@ -564,11 +590,13 @@ public:
 			results[i].x = x;
 			results[i].alreadyChecked = NULL;
 			results[i].value = values[i];
-			for (int j = startLevel; j < MaxLevels; j++) results[i].finger[j] = results[0].finger[j];
+			for (int j = startLevel; j < MaxLevels; j++)
+				results[i].finger[j] = results[0].finger[j];
 		}
 
 		int* nextJob = temp;
-		for (int i = 0; i < count - 1; i++) nextJob[i] = i + 1;
+		for (int i = 0; i < count - 1; i++)
+			nextJob[i] = i + 1;
 		nextJob[count - 1] = 0;
 
 		int prevJob = count - 1;
@@ -579,7 +607,8 @@ public:
 			Finger* f = &results[job];
 			f->advance();
 			if (f->finished()) {
-				if (prevJob == job) break;
+				if (prevJob == job)
+					break;
 				nextJob[prevJob] = nextJob[job];
 			} else {
 				f->prefetch();
@@ -624,7 +653,8 @@ public:
 		bool wasAbove = true;
 		while (nodeCount--) {
 			Node* x = f.finger[0]->getNext(0);
-			if (!x) break;
+			if (!x)
+				break;
 
 			// double prefetch gives +25% speed (single threaded)
 			Node* next = x->getNext(0);
@@ -636,10 +666,12 @@ public:
 
 			bool isAbove = x->getMaxVersion(0) >= v;
 			if (isAbove || wasAbove) { // f.nextItem
-				for (int l = 0; l <= x->level(); l++) f.finger[l] = x;
+				for (int l = 0; l <= x->level(); l++)
+					f.finger[l] = x;
 			} else { // f.eraseItem
 				removedCount++;
-				for (int l = 0; l <= x->level(); l++) f.finger[l]->setNext(l, x->getNext(l));
+				for (int l = 0; l <= x->level(); l++)
+					f.finger[l]->setNext(l, x->getNext(l));
 				for (int i = 1; i <= x->level(); i++)
 					f.finger[i]->setMaxVersion(i, max(f.finger[i]->getMaxVersion(i), x->getMaxVersion(i)));
 				x->destroy();
@@ -652,18 +684,21 @@ public:
 
 private:
 	void remove(const Finger& start, const Finger& end) {
-		if (start.finger[0] == end.finger[0]) return;
+		if (start.finger[0] == end.finger[0])
+			return;
 
 		Node* x = start.finger[0]->getNext(0);
 
 		// vtune says: this loop is the expensive parts (6 parts)
 		for (int i = 0; i < MaxLevels; i++)
-			if (start.finger[i] != end.finger[i]) start.finger[i]->setNext(i, end.finger[i]->getNext(i));
+			if (start.finger[i] != end.finger[i])
+				start.finger[i]->setNext(i, end.finger[i]->getNext(i));
 
 		while (true) {
 			Node* next = x->getNext(0);
 			x->destroy();
-			if (x == end.finger[0]) break;
+			if (x == end.finger[0])
+				break;
 			x = next;
 		}
 	}
@@ -686,14 +721,16 @@ private:
 		}
 		for (int i = level + 1; i < MaxLevels; i++) {
 			Version v = f.finger[i]->getMaxVersion(i);
-			if (v >= version) break;
+			if (v >= version)
+				break;
 			f.finger[i]->setMaxVersion(i, version);
 		}
 	}
 
 	void insert(const StringRef& value, Version version) {
 		Finger f(header, value);
-		while (!f.finished()) f.nextLevel();
+		while (!f.finished())
+			f.nextLevel();
 		// SOMEDAY: equality?
 		insert(f, version);
 	}
@@ -733,21 +770,26 @@ private:
 						;
 
 					int l = start.level;
-					if (start.finger[l] != end.finger[l]) break;
+					if (start.finger[l] != end.finger[l])
+						break;
 					// accept if the range spans the check range, but does not have a greater version
-					if (start.finger[l]->getMaxVersion(l) <= version) return noConflict();
-					if (l == 0) return conflict();
+					if (start.finger[l]->getMaxVersion(l) <= version)
+						return noConflict();
+					if (l == 0)
+						return conflict();
 				}
 				state = 1;
 			case 1: {
 				// check the end side of the pyramid
 				Node* e = end.finger[end.level];
 				while (e->getMaxVersion(end.level) > version) {
-					if (end.finished()) return conflict();
+					if (end.finished())
+						return conflict();
 					end.nextLevel();
 					Node* f = end.finger[end.level];
 					while (e != f) {
-						if (e->getMaxVersion(end.level) > version) return conflict();
+						if (e->getMaxVersion(end.level) > version)
+							return conflict();
 						e = e->getNext(end.level);
 					}
 				}
@@ -758,10 +800,12 @@ private:
 					Node* nextS = start.finger[start.level]->getNext(start.level);
 					Node* p = nextS;
 					while (p != s) {
-						if (p->getMaxVersion(start.level) > version) return conflict();
+						if (p->getMaxVersion(start.level) > version)
+							return conflict();
 						p = p->getNext(start.level);
 					}
-					if (start.finger[start.level]->getMaxVersion(start.level) <= version) return noConflict();
+					if (start.finger[start.level]->getMaxVersion(start.level) <= version)
+						return noConflict();
 					s = nextS;
 					if (start.finished()) {
 						if (nextS->length() == start.value.size() &&
@@ -797,7 +841,8 @@ private:
 		Node* node = header;
 		for (int l = MaxLevels - 1; l >= 0; l--) {
 			Node* next;
-			while ((next = node->getNext(l)) != NULL) node = next;
+			while ((next = node->getNext(l)) != NULL)
+				node = next;
 			end.finger[l] = node;
 		}
 		end.level = 0;
@@ -858,8 +903,10 @@ StringRef setK(Arena& arena, int i) {
 	const int keySize = 16;
 
 	char* ss = new (arena) char[keySize];
-	for (int c = 0; c < keySize - sizeof(i); c++) ss[c] = '.';
-	for (int c = 0; c < sizeof(i); c++) ss[c + keySize - sizeof(i)] = t[sizeof(i) - 1 - c];
+	for (int c = 0; c < keySize - sizeof(i); c++)
+		ss[c] = '.';
+	for (int c = 0; c < sizeof(i); c++)
+		ss[c + keySize - sizeof(i)] = t[sizeof(i) - 1 - c];
 
 	return StringRef((const uint8_t*)ss, keySize);
 }
@@ -885,7 +932,8 @@ struct ConflictSet {
 			worker_ready[i]->set();
 		}
 		// Wait for workers to terminate; otherwise can get crashes at shutdown time
-		for (int i = 0; i < worker_finished.size(); i++) worker_finished[i]->block();
+		for (int i = 0; i < worker_finished.size(); i++)
+			worker_finished[i]->block();
 	}
 
 	SkipList versionHistory;
@@ -953,11 +1001,13 @@ class MiniConflictSet2 : NonCopyable {
 public:
 	explicit MiniConflictSet2(int size) { values.assign(size, false); }
 	void set(int begin, int end) {
-		for (int i = begin; i < end; i++) values[i] = true;
+		for (int i = begin; i < end; i++)
+			values[i] = true;
 	}
 	bool any(int begin, int end) {
 		for (int i = begin; i < end; i++)
-			if (values[i]) return true;
+			if (values[i])
+				return true;
 		return false;
 	}
 };
@@ -990,7 +1040,8 @@ class MiniConflictSet : NonCopyable {
 	wordType lowBits2(int b) { return (b & bucketMask) ? lowBits(b) : -1; }
 
 	void setBits(std::vector<wordType>& v, int bitBegin, int bitEnd, bool fillMiddle) {
-		if (bitBegin >= bitEnd) return;
+		if (bitBegin >= bitEnd)
+			return;
 		int beginWord = bitBegin >> bucketShift;
 		int lastWord = ((bitEnd + bucketMask) >> bucketShift) - 1;
 		if (beginWord == lastWord) {
@@ -998,13 +1049,15 @@ class MiniConflictSet : NonCopyable {
 		} else {
 			v[beginWord] |= highBits(bitBegin);
 			if (fillMiddle)
-				for (int w = beginWord + 1; w < lastWord; w++) v[w] = wordType(-1);
+				for (int w = beginWord + 1; w < lastWord; w++)
+					v[w] = wordType(-1);
 			v[lastWord] |= lowBits2(bitEnd);
 		}
 	}
 
 	bool orBits(std::vector<wordType>& v, int bitBegin, int bitEnd, bool getMiddle) {
-		if (bitBegin >= bitEnd) return false;
+		if (bitBegin >= bitEnd)
+			return false;
 		int beginWord = bitBegin >> bucketShift;
 		int lastWord = ((bitEnd + bucketMask) >> bucketShift) - 1;
 		if (beginWord == lastWord)
@@ -1012,13 +1065,15 @@ class MiniConflictSet : NonCopyable {
 		else {
 			if (getMiddle)
 				for (int w = beginWord + 1; w < lastWord; w++)
-					if (v[w]) return true;
+					if (v[w])
+						return true;
 			return ((v[beginWord] & highBits(bitBegin)) | (v[lastWord] & lowBits2(bitEnd))) != 0;
 		}
 	}
 
 	bool orImpl(int begin, int end) {
-		if (begin == end) return false;
+		if (begin == end)
+			return false;
 		int beginWord = begin >> bucketShift;
 		int lastWord = ((end + bucketMask) >> bucketShift) - 1;
 
@@ -1037,7 +1092,8 @@ public:
 
 	void set(int begin, int end) {
 		debug.set(begin, end);
-		if (begin == end) return;
+		if (begin == end)
+			return;
 
 		int beginWord = begin >> bucketShift;
 		int lastWord = ((end + bucketMask) >> bucketShift) - 1;
@@ -1057,12 +1113,14 @@ public:
 
 void ConflictBatch::checkIntraBatchConflicts() {
 	int index = 0;
-	for (int p = 0; p < points.size(); p++) *points[p].pIndex = index++;
+	for (int p = 0; p < points.size(); p++)
+		*points[p].pIndex = index++;
 
 	MiniConflictSet mcs(index);
 	for (int t = 0; t < transactionInfo.size(); t++) {
 		const TransactionInfo& tr = *transactionInfo[t];
-		if (transactionConflictStatus[t]) continue;
+		if (transactionConflictStatus[t])
+			continue;
 		bool conflict = tr.tooOld;
 		for (int i = 0; i < tr.readRanges.size(); i++)
 			if (mcs.any(tr.readRanges[i].first, tr.readRanges[i].second)) {
@@ -1071,7 +1129,8 @@ void ConflictBatch::checkIntraBatchConflicts() {
 			}
 		transactionConflictStatus[t] = conflict;
 		if (!conflict)
-			for (int i = 0; i < tr.writeRanges.size(); i++) mcs.set(tr.writeRanges[i].first, tr.writeRanges[i].second);
+			for (int i = 0; i < tr.writeRanges.size(); i++)
+				mcs.set(tr.writeRanges[i].first, tr.writeRanges[i].second);
 	}
 }
 
@@ -1083,7 +1142,9 @@ void ConflictBatch::GetTooOldTransactions(std::vector<int>& tooOldTransactions) 
 	}
 }
 
-void ConflictBatch::detectConflicts(Version now, Version newOldestVersion, std::vector<int>& nonConflicting,
+void ConflictBatch::detectConflicts(Version now,
+                                    Version newOldestVersion,
+                                    std::vector<int>& nonConflicting,
                                     std::vector<int>* tooOldTransactions) {
 	double t = timer();
 	sortPoints(points);
@@ -1132,7 +1193,8 @@ void ConflictBatch::detectConflicts(Version now, Version newOldestVersion, std::
 }
 
 void ConflictBatch::checkReadConflictRanges() {
-	if (!combinedReadConflictRanges.size()) return;
+	if (!combinedReadConflictRanges.size())
+		return;
 
 	if (PARALLEL_THREAD_COUNT) {
 		Event done[PARALLEL_THREAD_COUNT ? PARALLEL_THREAD_COUNT : 1];
@@ -1150,15 +1212,18 @@ void ConflictBatch::checkReadConflictRanges() {
 			});
 			cs->worker_ready[t]->set();
 		}
-		for (int i = 0; i < PARALLEL_THREAD_COUNT; i++) done[i].block();
+		for (int i = 0; i < PARALLEL_THREAD_COUNT; i++)
+			done[i].block();
 	} else {
-		cs->versionHistory.detectConflicts(&combinedReadConflictRanges[0], combinedReadConflictRanges.size(),
-		                                   transactionConflictStatus);
+		cs->versionHistory.detectConflicts(
+		    &combinedReadConflictRanges[0], combinedReadConflictRanges.size(), transactionConflictStatus);
 	}
 }
 
-void ConflictBatch::addConflictRanges(Version now, std::vector<std::pair<StringRef, StringRef>>::iterator begin,
-                                      std::vector<std::pair<StringRef, StringRef>>::iterator end, SkipList* part) {
+void ConflictBatch::addConflictRanges(Version now,
+                                      std::vector<std::pair<StringRef, StringRef>>::iterator begin,
+                                      std::vector<std::pair<StringRef, StringRef>>::iterator end,
+                                      SkipList* part) {
 	int count = end - begin;
 #if 0
 	//for(auto w = begin; w != end; ++w)
@@ -1185,11 +1250,13 @@ void ConflictBatch::addConflictRanges(Version now, std::vector<std::pair<StringR
 }
 
 void ConflictBatch::mergeWriteConflictRanges(Version now) {
-	if (!combinedWriteConflictRanges.size()) return;
+	if (!combinedWriteConflictRanges.size())
+		return;
 
 	if (PARALLEL_THREAD_COUNT) {
 		std::vector<SkipList> parts;
-		for (int i = 0; i < PARALLEL_THREAD_COUNT; i++) parts.emplace_back();
+		for (int i = 0; i < PARALLEL_THREAD_COUNT; i++)
+			parts.emplace_back();
 
 		std::vector<StringRef> splits(parts.size() - 1);
 		for (int s = 0; s < splits.size(); s++)
@@ -1215,7 +1282,8 @@ void ConflictBatch::mergeWriteConflictRanges(Version now) {
 			cs->worker_ready[t]->set();
 		}
 		double launch = timer();
-		for (int i = 0; i < PARALLEL_THREAD_COUNT; i++) done[i].block();
+		for (int i = 0; i < PARALLEL_THREAD_COUNT; i++)
+			done[i].block();
 		double after = timer();
 
 		g_merge_launch += launch - before;
@@ -1238,8 +1306,8 @@ void ConflictBatch::mergeWriteConflictRanges(Version now) {
 
 		cs->versionHistory.concatenate(&parts[0], parts.size());
 	} else {
-		addConflictRanges(now, combinedWriteConflictRanges.begin(), combinedWriteConflictRanges.end(),
-		                  &cs->versionHistory);
+		addConflictRanges(
+		    now, combinedWriteConflictRanges.begin(), combinedWriteConflictRanges.end(), &cs->versionHistory);
 	}
 
 	// for(auto w = combinedWriteConflictRanges.begin(); w != combinedWriteConflictRanges.end(); ++w)
@@ -1253,10 +1321,12 @@ void ConflictBatch::combineWriteConflictRanges() {
 		if (point.write && !transactionConflictStatus[point.transaction]) {
 			if (point.begin) {
 				activeWriteCount++;
-				if (activeWriteCount == 1) combinedWriteConflictRanges.emplace_back(point.key, KeyRef());
+				if (activeWriteCount == 1)
+					combinedWriteConflictRanges.emplace_back(point.key, KeyRef());
 			} else /*if (point.end)*/ {
 				activeWriteCount--;
-				if (activeWriteCount == 0) combinedWriteConflictRanges.back().second = point.key;
+				if (activeWriteCount == 0)
+					combinedWriteConflictRanges.back().second = point.key;
 			}
 		}
 	}
@@ -1400,7 +1470,8 @@ void skipListTest() {
 
 		t = timer();
 		ConflictBatch batch(cs);
-		for (int j = 0; j < trs.size(); j++) batch.addTransaction(trs[j]);
+		for (int j = 0; j < trs.size(); j++)
+			batch.addTransaction(trs[j]);
 		g_add += timer() - t;
 
 		t = timer();

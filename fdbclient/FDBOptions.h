@@ -42,8 +42,13 @@ struct FDBOptionInfo {
 	// be no cumulative effects from calling multiple times).
 	int defaultFor;
 
-	FDBOptionInfo(std::string name, std::string comment, std::string parameterComment, bool hasParameter, bool hidden,
-	              bool persistent, int defaultFor)
+	FDBOptionInfo(std::string name,
+	              std::string comment,
+	              std::string parameterComment,
+	              bool hasParameter,
+	              bool hidden,
+	              bool persistent,
+	              int defaultFor)
 	  : name(name), comment(comment), parameterComment(parameterComment), hasParameter(hasParameter), hidden(hidden),
 	    persistent(persistent), defaultFor(defaultFor) {}
 

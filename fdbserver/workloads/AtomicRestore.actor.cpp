@@ -41,7 +41,8 @@ struct AtomicRestoreWorkload : TestWorkload {
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
 
 	virtual Future<Void> start(Database const& cx) {
-		if (clientId != 0) return Void();
+		if (clientId != 0)
+			return Void();
 		return _start(cx, this);
 	}
 
@@ -57,10 +58,15 @@ struct AtomicRestoreWorkload : TestWorkload {
 
 		state std::string backupContainer = "file://simfdb/backups/";
 		try {
-			wait(backupAgent.submitBackup(cx, StringRef(backupContainer), deterministicRandom()->randomInt(0, 100),
-			                              BackupAgentBase::getDefaultTagName(), self->backupRanges, false));
+			wait(backupAgent.submitBackup(cx,
+			                              StringRef(backupContainer),
+			                              deterministicRandom()->randomInt(0, 100),
+			                              BackupAgentBase::getDefaultTagName(),
+			                              self->backupRanges,
+			                              false));
 		} catch (Error& e) {
-			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate) throw;
+			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
+				throw;
 		}
 
 		TraceEvent("AtomicRestore_Wait");
@@ -73,17 +79,18 @@ struct AtomicRestoreWorkload : TestWorkload {
 			std::vector<Future<Version>> restores;
 			if (deterministicRandom()->random01() < 0.5) {
 				for (auto& range : self->backupRanges)
-					restores.push_back(backupAgent.atomicRestore(cx, BackupAgentBase::getDefaultTag(), range,
-					                                             StringRef(), StringRef()));
+					restores.push_back(backupAgent.atomicRestore(
+					    cx, BackupAgentBase::getDefaultTag(), range, StringRef(), StringRef()));
 			} else {
-				restores.push_back(backupAgent.atomicRestore(cx, BackupAgentBase::getDefaultTag(), self->backupRanges,
-				                                             StringRef(), StringRef()));
+				restores.push_back(backupAgent.atomicRestore(
+				    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()));
 			}
 			try {
 				wait(waitForAll(restores));
 				break;
 			} catch (Error& e) {
-				if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate) throw;
+				if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
+					throw;
 			}
 			wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 		}

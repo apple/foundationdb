@@ -52,8 +52,10 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(std::string filename, i
 	}
 #endif
 
-	if ((flags & IAsyncFile::OPEN_EXCLUSIVE)) ASSERT(flags & IAsyncFile::OPEN_CREATE);
-	if (!(flags & IAsyncFile::OPEN_UNCACHED)) return AsyncFileCached::open(filename, flags, mode);
+	if ((flags & IAsyncFile::OPEN_EXCLUSIVE))
+		ASSERT(flags & IAsyncFile::OPEN_CREATE);
+	if (!(flags & IAsyncFile::OPEN_UNCACHED))
+		return AsyncFileCached::open(filename, flags, mode);
 
 	Future<Reference<IAsyncFile>> f;
 #ifdef __linux__
@@ -68,7 +70,9 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(std::string filename, i
 	else
 #endif
 		f = Net2AsyncFile::open(
-		    filename, flags, mode,
+		    filename,
+		    flags,
+		    mode,
 		    static_cast<boost::asio::io_service*>((void*)g_network->global(INetwork::enASIOService)));
 	if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
 		f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
@@ -104,12 +108,14 @@ Net2FileSystem::Net2FileSystem(double ioTimeout, std::string fileSystemPath) {
 			if (fileSystemPath != "/") {
 				dev_t fileSystemParentDeviceId = getDeviceId(parentDirectory(fileSystemPath));
 				if (this->fileSystemDeviceId == fileSystemParentDeviceId) {
-					criticalError(FDB_EXIT_ERROR, "FileSystemError",
+					criticalError(FDB_EXIT_ERROR,
+					              "FileSystemError",
 					              format("`%s' is not a mount point", fileSystemPath.c_str()).c_str());
 				}
 			}
 		} catch (Error& e) {
-			criticalError(FDB_EXIT_ERROR, "FileSystemError",
+			criticalError(FDB_EXIT_ERROR,
+			              "FileSystemError",
 			              format("Could not get device id from `%s'", fileSystemPath.c_str()).c_str());
 		}
 	}

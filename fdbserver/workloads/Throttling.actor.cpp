@@ -176,7 +176,8 @@ struct ThrottlingWorkload : KVWorkload {
 					tr.set(self->getRandomKey(), getRandomValue());
 				}
 				wait(tr.commit());
-				if (deterministicRandom()->randomInt(0, 1000) == 0) TraceEvent("TransactionCommittedx1000");
+				if (deterministicRandom()->randomInt(0, 1000) == 0)
+					TraceEvent("TransactionCommittedx1000");
 				++self->transactionsCommitted;
 			} catch (Error& e) {
 				// ignore failing transactions

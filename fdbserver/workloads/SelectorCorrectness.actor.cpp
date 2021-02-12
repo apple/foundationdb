@@ -69,7 +69,8 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 		if (!self->testReadYourWrites) {
 			loop {
 				try {
-					for (int i = 0; i < self->maxKeySpace; i += 2) tr.set(StringRef(format("%010d", i)), myValue);
+					for (int i = 0; i < self->maxKeySpace; i += 2)
+						tr.set(StringRef(format("%010d", i)), myValue);
 
 					wait(tr.commit());
 					break;
@@ -80,9 +81,11 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 		} else {
 			loop {
 				try {
-					for (int i = 0; i < self->maxKeySpace; i += 4) tr.set(StringRef(format("%010d", i)), myValue);
+					for (int i = 0; i < self->maxKeySpace; i += 4)
+						tr.set(StringRef(format("%010d", i)), myValue);
 					for (int i = 2; i < self->maxKeySpace; i += 4)
-						if (deterministicRandom()->random01() > 0.5) tr.set(StringRef(format("%010d", i)), myValue);
+						if (deterministicRandom()->random01() > 0.5)
+							tr.set(StringRef(format("%010d", i)), myValue);
 
 					wait(tr.commit());
 					break;
@@ -119,9 +122,11 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 
 			if (self->testReadYourWrites) {
 				myValue = StringRef(format("%010d", deterministicRandom()->randomInt(0, 10000000)));
-				for (int i = 2; i < self->maxKeySpace; i += 4) trRYOW.set(StringRef(format("%010d", i)), myValue);
+				for (int i = 2; i < self->maxKeySpace; i += 4)
+					trRYOW.set(StringRef(format("%010d", i)), myValue);
 				for (int i = 0; i < self->maxKeySpace; i += 4)
-					if (deterministicRandom()->random01() > 0.5) trRYOW.set(StringRef(format("%010d", i)), myValue);
+					if (deterministicRandom()->random01() > 0.5)
+						trRYOW.set(StringRef(format("%010d", i)), myValue);
 			}
 
 			try {
@@ -174,7 +179,9 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 							Standalone<RangeResultRef> getRangeTest =
 							    wait(trRYOW.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
 							                         KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
-							                         2 * (self->maxKeySpace + self->maxOffset), false, reverse));
+							                         2 * (self->maxKeySpace + self->maxOffset),
+							                         false,
+							                         reverse));
 
 							int trueSize = 0;
 							while (trueSize < getRangeTest.size() &&
@@ -200,7 +207,9 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 							Standalone<RangeResultRef> getRangeTest =
 							    wait(tr.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
 							                     KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
-							                     2 * (self->maxKeySpace + self->maxOffset), false, reverse));
+							                     2 * (self->maxKeySpace + self->maxOffset),
+							                     false,
+							                     reverse));
 
 							int trueSize = 0;
 							while (trueSize < getRangeTest.size() &&

@@ -40,7 +40,9 @@
 #undef min
 
 ACTOR Future<Void> sendOnProcess(ISimulator::ProcessInfo* process, Promise<Void> promise, TaskPriority taskID);
-ACTOR Future<Void> sendErrorOnProcess(ISimulator::ProcessInfo* process, Promise<Void> promise, Error e,
+ACTOR Future<Void> sendErrorOnProcess(ISimulator::ProcessInfo* process,
+                                      Promise<Void> promise,
+                                      Error e,
                                       TaskPriority taskID);
 
 ACTOR template <class T>
@@ -112,11 +114,13 @@ public:
 	}
 
 	int64_t debugFD() {
-		if (!file.getPtr()) throw io_error().asInjectedFault();
+		if (!file.getPtr())
+			throw io_error().asInjectedFault();
 		return file->debugFD();
 	}
 	std::string getFilename() {
-		if (!file.getPtr()) throw io_error().asInjectedFault();
+		if (!file.getPtr())
+			throw io_error().asInjectedFault();
 		return file->getFilename();
 	}
 };
@@ -168,8 +172,10 @@ private:
 	ActorCollection
 	    reponses; // cannot call getResult on this actor collection, since the actors will be on different processes
 
-	AsyncFileNonDurable(const std::string& filename, Reference<IAsyncFile> file,
-	                    Reference<DiskParameters> diskParameters, NetworkAddress openedAddress)
+	AsyncFileNonDurable(const std::string& filename,
+	                    Reference<IAsyncFile> file,
+	                    Reference<DiskParameters> diskParameters,
+	                    NetworkAddress openedAddress)
 	  : openedAddress(openedAddress), pendingModifications(uint64_t(-1)), approximateSize(0), reponses(false) {
 
 		// This is only designed to work in simulation
@@ -191,7 +197,8 @@ public:
 	static std::map<std::string, Future<Void>> filesBeingDeleted;
 
 	// Creates a new AsyncFileNonDurable which wraps the provided IAsyncFile
-	ACTOR static Future<Reference<IAsyncFile>> open(std::string filename, std::string actualFilename,
+	ACTOR static Future<Reference<IAsyncFile>> open(std::string filename,
+	                                                std::string actualFilename,
 	                                                Future<Reference<IAsyncFile>> wrappedFile,
 	                                                Reference<DiskParameters> diskParameters) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
@@ -203,7 +210,8 @@ public:
 		try {
 			wait(success(wrappedFile) || shutdown);
 
-			if (shutdown.isReady()) throw io_error().asInjectedFault();
+			if (shutdown.isReady())
+				throw io_error().asInjectedFault();
 
 			state Reference<IAsyncFile> file = wrappedFile.get();
 
@@ -214,7 +222,8 @@ public:
 				//TraceEvent("AsyncFileNonDurableOpenWaitOnDelete1").detail("Filename", filename);
 				wait(deletedFile->second || shutdown);
 				//TraceEvent("AsyncFileNonDurableOpenWaitOnDelete2").detail("Filename", filename);
-				if (shutdown.isReady()) throw io_error().asInjectedFault();
+				if (shutdown.isReady())
+					throw io_error().asInjectedFault();
 			}
 
 			state Reference<AsyncFileNonDurable> nonDurableFile(
@@ -224,7 +233,8 @@ public:
 			state Future<int64_t> sizeFuture = nonDurableFile->size();
 			wait(success(sizeFuture) || shutdown);
 
-			if (shutdown.isReady()) throw io_error().asInjectedFault();
+			if (shutdown.isReady())
+				throw io_error().asInjectedFault();
 
 			//TraceEvent("AsyncFileNonDurableOpenComplete").detail("Filename", filename);
 
@@ -252,7 +262,8 @@ public:
 			ASSERT(filesBeingDeleted.count(filename) == 0);
 			//TraceEvent("AsyncFileNonDurable_StartDelete", id).detail("Filename", filename);
 			Future<Void> deleteFuture = deleteFile(this);
-			if (!deleteFuture.isReady()) filesBeingDeleted[filename] = deleteFuture;
+			if (!deleteFuture.isReady())
+				filesBeingDeleted[filename] = deleteFuture;
 		}
 	}
 
@@ -324,7 +335,9 @@ private:
 	}
 
 	// Gets existing modifications that overlap the specified range.  Optionally inserts a new modification into the map
-	std::vector<Future<Void>> getModificationsAndInsert(int64_t offset, int64_t length, bool insertModification = false,
+	std::vector<Future<Void>> getModificationsAndInsert(int64_t offset,
+	                                                    int64_t length,
+	                                                    bool insertModification = false,
 	                                                    Future<Void> value = Void()) {
 		auto modification = RangeMapRange<uint64_t>(offset, length >= 0 ? offset + length : uint64_t(-1));
 		auto priorModifications = pendingModifications.intersectingRanges(modification);
@@ -338,7 +351,8 @@ private:
 		}
 
 		// Add the modification if we are doing a write or truncate
-		if (insertModification) pendingModifications.insert(modification, value);
+		if (insertModification)
+			pendingModifications.insert(modification, value);
 
 		return modificationFutures;
 	}
@@ -398,8 +412,12 @@ private:
 	// Delays writes a random amount of time before passing them through to the underlying file.
 	// If a kill interrupts the delay, then the output could be the correct write, part of the write,
 	// or none of the write.  It may also corrupt parts of sectors which have not been written correctly
-	ACTOR Future<Void> write(AsyncFileNonDurable* self, Promise<Void> writeStarted, Future<Future<Void>> ownFuture,
-	                         void const* data, int length, int64_t offset) {
+	ACTOR Future<Void> write(AsyncFileNonDurable* self,
+	                         Promise<Void> writeStarted,
+	                         Future<Future<Void>> ownFuture,
+	                         void const* data,
+	                         int length,
+	                         int64_t offset) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 		wait(g_simulator.onMachine(currentProcess));
@@ -467,8 +485,8 @@ private:
 				    (pageKillMode == FULL_CORRUPTION && deterministicRandom()->random01() < 0.25)) {
 					// if (!saveDurable) TraceEvent(SevInfo, "AsyncFileNonDurableWrite", self->id).detail("Filename",
 					// self->filename).detail("Offset", offset+writeOffset+pageOffset).detail("Length", sectorLength);
-					writeFutures.push_back(self->file->write(dataCopy.begin() + writeOffset + pageOffset, sectorLength,
-					                                         offset + writeOffset + pageOffset));
+					writeFutures.push_back(self->file->write(
+					    dataCopy.begin() + writeOffset + pageOffset, sectorLength, offset + writeOffset + pageOffset));
 				}
 
 				// If the write is not durable, then the write will either be corrupted or not written at all.  If
@@ -505,14 +523,18 @@ private:
 						}
 
 						writeFutures.push_back(self->file->write(dataCopy.begin() + writeOffset + pageOffset,
-						                                         sectorLength, offset + writeOffset + pageOffset));
-						debugFileSet("AsyncFileNonDurableBadWrite", self->filename,
-						             dataCopy.begin() + writeOffset + pageOffset, offset + writeOffset + pageOffset,
+						                                         sectorLength,
+						                                         offset + writeOffset + pageOffset));
+						debugFileSet("AsyncFileNonDurableBadWrite",
+						             self->filename,
+						             dataCopy.begin() + writeOffset + pageOffset,
+						             offset + writeOffset + pageOffset,
 						             sectorLength);
 					} else if (goodStart != goodEnd)
 						writeFutures.push_back(
 						    self->file->write(dataCopy.begin() + goodStart + writeOffset + pageOffset,
-						                      goodEnd - goodStart, goodStart + offset + writeOffset + pageOffset));
+						                      goodEnd - goodStart,
+						                      goodStart + offset + writeOffset + pageOffset));
 
 					TraceEvent("AsyncFileNonDurable_BadWrite", self->id)
 					    .detail("Offset", offset + writeOffset + pageOffset)
@@ -540,8 +562,10 @@ private:
 
 	// Delays truncates a random amount of time before passing them through to the underlying file.
 	// If a kill interrupts the delay, then the truncate may or may not be performed
-	ACTOR Future<Void> truncate(AsyncFileNonDurable* self, Promise<Void> truncateStarted,
-	                            Future<Future<Void>> ownFuture, int64_t size) {
+	ACTOR Future<Void> truncate(AsyncFileNonDurable* self,
+	                            Promise<Void> truncateStarted,
+	                            Future<Future<Void>> ownFuture,
+	                            int64_t size) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 		wait(g_simulator.onMachine(currentProcess));
@@ -611,7 +635,8 @@ private:
 
 		wait(self->checkKilled(self, durable ? "Sync" : "Kill"));
 
-		if (!durable) self->killed.send(Void());
+		if (!durable)
+			self->killed.send(Void());
 
 		// Get all outstanding modifications
 		std::vector<Future<Void>> outstandingModifications;
@@ -622,7 +647,8 @@ private:
 			if (itr.value().isValid() && (!itr->value().isReady() || itr->value().isError())) {
 				outstandingModifications.push_back(itr->value());
 
-				if (!itr.value().isReady()) stillPendingModifications.push_back(itr->range());
+				if (!itr.value().isReady())
+					stillPendingModifications.push_back(itr->range());
 			}
 		}
 
@@ -738,14 +764,17 @@ private:
 			std::vector<Future<Void>> outstandingModifications;
 
 			for (auto itr = self->pendingModifications.ranges().begin();
-			     itr != self->pendingModifications.ranges().end(); ++itr)
-				if (itr->value().isValid() && !itr->value().isReady()) outstandingModifications.push_back(itr->value());
+			     itr != self->pendingModifications.ranges().end();
+			     ++itr)
+				if (itr->value().isValid() && !itr->value().isReady())
+					outstandingModifications.push_back(itr->value());
 
 			// Ignore errors here so that all modifications can finish
 			wait(waitForAllReady(outstandingModifications));
 
 			// Make sure we aren't in the process of killing the file
-			if (self->killed.isSet()) wait(self->killComplete.getFuture());
+			if (self->killed.isSet())
+				wait(self->killComplete.getFuture());
 
 			// Remove this file from the filesBeingDeleted map so that new files can be created with this filename
 			g_simulator.getMachineByNetworkAddress(self->openedAddress)->closingFiles.erase(self->getFilename());

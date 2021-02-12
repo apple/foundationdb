@@ -29,7 +29,9 @@ ACTOR Future<Void> sendOnProcess(ISimulator::ProcessInfo* process, Promise<Void>
 	return Void();
 }
 
-ACTOR Future<Void> sendErrorOnProcess(ISimulator::ProcessInfo* process, Promise<Void> promise, Error e,
+ACTOR Future<Void> sendErrorOnProcess(ISimulator::ProcessInfo* process,
+                                      Promise<Void> promise,
+                                      Error e,
                                       TaskPriority taskID) {
 	wait(g_simulator.onProcess(process, taskID));
 	promise.sendError(e);

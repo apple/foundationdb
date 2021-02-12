@@ -69,7 +69,8 @@ struct DDBalanceWorkload : TestWorkload {
 	virtual Future<bool> check(Database const& cx) {
 		bool ok = true;
 		for (int i = 0; i < clients.size(); i++)
-			if (clients[i].isError()) ok = false;
+			if (clients[i].isError())
+				ok = false;
 		clients.clear();
 		return ok;
 	}
@@ -94,7 +95,8 @@ struct DDBalanceWorkload : TestWorkload {
 
 	ACTOR Future<Void> setKeyIfNotPresent(Transaction* tr, Key key, Value val) {
 		Optional<Value> f = wait(tr->get(key));
-		if (!f.present()) tr->set(key, val);
+		if (!f.present())
+			tr->set(key, val);
 		return Void();
 	}
 
@@ -123,7 +125,8 @@ struct DDBalanceWorkload : TestWorkload {
 		state int i;
 		state vector<int> order;
 
-		for (int o = 0; o <= self->nodesPerActor * self->actorsPerClient / 10; o++) order.push_back(o * 10);
+		for (int o = 0; o <= self->nodesPerActor * self->actorsPerClient / 10; o++)
+			order.push_back(o * 10);
 
 		deterministicRandom()->randomShuffle(order);
 		for (i = 0; i < order.size();) {
@@ -148,8 +151,15 @@ struct DDBalanceWorkload : TestWorkload {
 		       (n > (clientBegin + testDuration * 0.125) && n < (clientBegin + testDuration * 0.875));
 	}
 
-	ACTOR Future<Void> ddBalanceWorker(Database cx, DDBalanceWorkload* self, int moverId, int sourceBin,
-	                                   int destinationBin, int begin, int end, double clientBegin, double* lastTime,
+	ACTOR Future<Void> ddBalanceWorker(Database cx,
+	                                   DDBalanceWorkload* self,
+	                                   int moverId,
+	                                   int sourceBin,
+	                                   int destinationBin,
+	                                   int begin,
+	                                   int end,
+	                                   double clientBegin,
+	                                   double* lastTime,
 	                                   double delay) {
 		state int i;
 		state int j;
@@ -186,7 +196,8 @@ struct DDBalanceWorkload : TestWorkload {
 					break;
 				} catch (Error& e) {
 					wait(tr.onError(e));
-					if (self->shouldRecord(clientBegin)) ++self->retries;
+					if (self->shouldRecord(clientBegin))
+						++self->retries;
 					i = startvalue;
 				}
 			}
@@ -228,8 +239,15 @@ struct DDBalanceWorkload : TestWorkload {
 
 			vector<Future<Void>> fs;
 			for (int i = 0; i < self->actorsPerClient / self->moversPerClient; i++)
-				fs.push_back(self->ddBalanceWorker(cx, self, moverId, currentBin, nextBin, i * self->nodesPerActor,
-				                                   (i + 1) * self->nodesPerActor, clientBegin, &lastTime,
+				fs.push_back(self->ddBalanceWorker(cx,
+				                                   self,
+				                                   moverId,
+				                                   currentBin,
+				                                   nextBin,
+				                                   i * self->nodesPerActor,
+				                                   (i + 1) * self->nodesPerActor,
+				                                   clientBegin,
+				                                   &lastTime,
 				                                   1.0 / self->transactionsPerSecond));
 			wait(waitForAll(fs));
 

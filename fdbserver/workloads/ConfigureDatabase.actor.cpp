@@ -236,7 +236,8 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		return StringRef(format("DestroyDB%d", dbIndex));
 	}
 
-	static Future<ConfigurationResult::Type> IssueConfigurationChange(Database cx, const std::string& config,
+	static Future<ConfigurationResult::Type> IssueConfigurationChange(Database cx,
+	                                                                  const std::string& config,
 	                                                                  bool force) {
 		printf("Issuing configuration change: %s\n", config.c_str());
 		return changeConfig(cx, config, force);
@@ -295,7 +296,8 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				state int amtLoaded = 0;
 
 				loop {
-					if (now() - startTime > loadDuration) break;
+					if (now() - startTime > loadDuration)
+						break;
 					loop {
 						tr = Transaction(cx);
 						try {
@@ -334,9 +336,12 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 
 				config += generateRegions();
 
-				if (deterministicRandom()->random01() < 0.5) config += " logs=" + format("%d", randomRoleNumber());
-				if (deterministicRandom()->random01() < 0.5) config += " proxies=" + format("%d", randomRoleNumber());
-				if (deterministicRandom()->random01() < 0.5) config += " resolvers=" + format("%d", randomRoleNumber());
+				if (deterministicRandom()->random01() < 0.5)
+					config += " logs=" + format("%d", randomRoleNumber());
+				if (deterministicRandom()->random01() < 0.5)
+					config += " proxies=" + format("%d", randomRoleNumber());
+				if (deterministicRandom()->random01() < 0.5)
+					config += " resolvers=" + format("%d", randomRoleNumber());
 
 				wait(success(IssueConfigurationChange(cx, config, false)));
 
@@ -350,7 +355,8 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				//TraceEvent("ConfigureTestConfigureEnd").detail("NewQuorum", s);
 			} else if (randomChoice == 5) {
 				wait(success(IssueConfigurationChange(
-				    cx, storeTypes[deterministicRandom()->randomInt(0, sizeof(storeTypes) / sizeof(storeTypes[0]))],
+				    cx,
+				    storeTypes[deterministicRandom()->randomInt(0, sizeof(storeTypes) / sizeof(storeTypes[0]))],
 				    true)));
 			} else if (randomChoice == 6) {
 				// Some configurations will be invalid, and that's fine.

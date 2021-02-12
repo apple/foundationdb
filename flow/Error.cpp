@@ -57,7 +57,8 @@ Error internal_error_impl(const char* file, int line) {
 }
 
 Error::Error(int error_code) : error_code(error_code), flags(0) {
-	if (TRACE_SAMPLE()) TraceEvent(SevSample, "ErrorCreated").detail("ErrorCode", error_code);
+	if (TRACE_SAMPLE())
+		TraceEvent(SevSample, "ErrorCreated").detail("ErrorCode", error_code);
 	// std::cout << "Error: " << error_code << std::endl;
 	if (error_code >= 3000 && error_code < 6000) {
 		TraceEvent(SevError, "SystemError").error(*this).backtrace();
@@ -79,14 +80,16 @@ ErrorCodeTable& Error::errorCodeTable() {
 const char* Error::name() const {
 	auto table = errorCodeTable();
 	auto it = table.find(error_code);
-	if (it == table.end()) return "UNKNOWN_ERROR";
+	if (it == table.end())
+		return "UNKNOWN_ERROR";
 	return it->second.first;
 }
 
 const char* Error::what() const {
 	auto table = errorCodeTable();
 	auto it = table.find(error_code);
-	if (it == table.end()) return "UNKNOWN_ERROR";
+	if (it == table.end())
+		return "UNKNOWN_ERROR";
 	return it->second.second;
 }
 

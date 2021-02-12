@@ -44,7 +44,8 @@ public:
 			i += kMaxDigitPerIteration;
 		}
 
-		if (length > 0) AppendDecimal64(decimals + i, decimals + i + length);
+		if (length > 0)
+			AppendDecimal64(decimals + i, decimals + i + length);
 	}
 
 	BigInteger& operator=(const BigInteger& rhs) {
@@ -65,21 +66,26 @@ public:
 		Type backup = digits_[0];
 		digits_[0] += u;
 		for (size_t i = 0; i < count_ - 1; i++) {
-			if (digits_[i] >= backup) return *this; // no carry
+			if (digits_[i] >= backup)
+				return *this; // no carry
 			backup = digits_[i + 1];
 			digits_[i + 1] += 1;
 		}
 
 		// Last carry
-		if (digits_[count_ - 1] < backup) PushBack(1);
+		if (digits_[count_ - 1] < backup)
+			PushBack(1);
 
 		return *this;
 	}
 
 	BigInteger& operator*=(uint64_t u) {
-		if (u == 0) return *this = 0;
-		if (u == 1) return *this;
-		if (*this == 1) return *this = u;
+		if (u == 0)
+			return *this = 0;
+		if (u == 1)
+			return *this;
+		if (*this == 1)
+			return *this = u;
 
 		uint64_t k = 0;
 		for (size_t i = 0; i < count_; i++) {
@@ -88,15 +94,19 @@ public:
 			k = hi;
 		}
 
-		if (k > 0) PushBack(k);
+		if (k > 0)
+			PushBack(k);
 
 		return *this;
 	}
 
 	BigInteger& operator*=(uint32_t u) {
-		if (u == 0) return *this = 0;
-		if (u == 1) return *this;
-		if (*this == 1) return *this = u;
+		if (u == 0)
+			return *this = 0;
+		if (u == 1)
+			return *this;
+		if (*this == 1)
+			return *this = u;
 
 		uint64_t k = 0;
 		for (size_t i = 0; i < count_; i++) {
@@ -110,13 +120,15 @@ public:
 			k = p1 >> 32;
 		}
 
-		if (k > 0) PushBack(k);
+		if (k > 0)
+			PushBack(k);
 
 		return *this;
 	}
 
 	BigInteger& operator<<=(size_t shift) {
-		if (IsZero() || shift == 0) return *this;
+		if (IsZero() || shift == 0)
+			return *this;
 
 		size_t offset = shift / kTypeBit;
 		size_t interShift = shift % kTypeBit;
@@ -131,7 +143,8 @@ public:
 				digits_[i + offset] = (digits_[i] << interShift) | (digits_[i - 1] >> (kTypeBit - interShift));
 			digits_[offset] = digits_[0] << interShift;
 			count_ += offset;
-			if (digits_[count_]) count_++;
+			if (digits_[count_])
+				count_++;
 		}
 
 		std::memset(digits_, 0, offset * sizeof(Type));
@@ -158,10 +171,14 @@ public:
 			                                5 * 5 * 5 * 5 * 5 * 5 * 5 * 5 * 5 * 5,
 			                                5 * 5 * 5 * 5 * 5 * 5 * 5 * 5 * 5 * 5 * 5,
 			                                5 * 5 * 5 * 5 * 5 * 5 * 5 * 5 * 5 * 5 * 5 * 5 };
-		if (exp == 0) return *this;
-		for (; exp >= 27; exp -= 27) *this *= RAPIDJSON_UINT64_C2(0X6765C793, 0XFA10079D); // 5^27
-		for (; exp >= 13; exp -= 13) *this *= static_cast<uint32_t>(1220703125u); // 5^13
-		if (exp > 0) *this *= kPow5[exp - 1];
+		if (exp == 0)
+			return *this;
+		for (; exp >= 27; exp -= 27)
+			*this *= RAPIDJSON_UINT64_C2(0X6765C793, 0XFA10079D); // 5^27
+		for (; exp >= 13; exp -= 13)
+			*this *= static_cast<uint32_t>(1220703125u); // 5^13
+		if (exp > 0)
+			*this *= kPow5[exp - 1];
 		return *this;
 	}
 
@@ -185,20 +202,24 @@ public:
 		Type borrow = 0;
 		for (size_t i = 0; i < a->count_; i++) {
 			Type d = a->digits_[i] - borrow;
-			if (i < b->count_) d -= b->digits_[i];
+			if (i < b->count_)
+				d -= b->digits_[i];
 			borrow = (d > a->digits_[i]) ? 1 : 0;
 			out->digits_[i] = d;
-			if (d != 0) out->count_ = i + 1;
+			if (d != 0)
+				out->count_ = i + 1;
 		}
 
 		return ret;
 	}
 
 	int Compare(const BigInteger& rhs) const {
-		if (count_ != rhs.count_) return count_ < rhs.count_ ? -1 : 1;
+		if (count_ != rhs.count_)
+			return count_ < rhs.count_ ? -1 : 1;
 
 		for (size_t i = count_; i-- > 0;)
-			if (digits_[i] != rhs.digits_[i]) return digits_[i] < rhs.digits_[i] ? -1 : 1;
+			if (digits_[i] != rhs.digits_[i])
+				return digits_[i] < rhs.digits_[i] ? -1 : 1;
 
 		return 0;
 	}
@@ -239,7 +260,8 @@ private:
 	static uint64_t MulAdd64(uint64_t a, uint64_t b, uint64_t k, uint64_t* outHigh) {
 #if defined(_MSC_VER) && defined(_M_AMD64)
 		uint64_t low = _umul128(a, b, outHigh) + k;
-		if (low < k) (*outHigh)++;
+		if (low < k)
+			(*outHigh)++;
 		return low;
 #elif (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)) && defined(__x86_64__)
 		__extension__ typedef unsigned __int128 uint128;
@@ -252,12 +274,14 @@ private:
 		uint64_t x0 = a0 * b0, x1 = a0 * b1, x2 = a1 * b0, x3 = a1 * b1;
 		x1 += (x0 >> 32); // can't give carry
 		x1 += x2;
-		if (x1 < x2) x3 += (static_cast<uint64_t>(1) << 32);
+		if (x1 < x2)
+			x3 += (static_cast<uint64_t>(1) << 32);
 		uint64_t lo = (x1 << 32) + (x0 & 0xFFFFFFFF);
 		uint64_t hi = x3 + (x1 >> 32);
 
 		lo += k;
-		if (lo < k) hi++;
+		if (lo < k)
+			hi++;
 		*outHigh = hi;
 		return lo;
 #endif

@@ -78,14 +78,16 @@ std::string format(const char* form, ...) {
 	va_end(args);
 #endif
 
-	if (size < 0) throw std::exception("Error in format");
+	if (size < 0)
+		throw std::exception("Error in format");
 
 	std::string s;
 	s.resize(size + 1);
 	va_start(args, form);
 	size = vsnprintf(&s[0], s.size(), form, args);
 	va_end(args);
-	if (size < 0 || size >= s.size()) throw std::exception("Error in format");
+	if (size < 0 || size >= s.size())
+		throw std::exception("Error in format");
 
 	s.resize(size);
 	return s;
@@ -227,7 +229,9 @@ protected:
 
 				if (!command.quiet)
 					svc->LogEvent(EVENTLOG_INFORMATION_TYPE,
-					              format("Child process %d exited with %d, restarting in %d seconds", id, exitCode,
+					              format("Child process %d exited with %d, restarting in %d seconds",
+					                     id,
+					                     exitCode,
 					                     command.restartDelay));
 
 				CloseHandle(process_or_timer);
@@ -284,7 +288,8 @@ protected:
 			                   &pi) // Pointer to PROCESS_INFORMATION structure
 			) {
 				svc->logLastError(format("Failed to create process, restarting in %d seconds (%s)",
-				                         command.restartDelay, command.args.c_str())
+				                         command.restartDelay,
+				                         command.args.c_str())
 				                      .c_str());
 
 				// If there was an error, we set a timer right away for the restart.
@@ -491,7 +496,8 @@ protected:
 				}
 			}
 
-			for (auto s = subprocesses.begin(); s != subprocesses.end(); ++s) delete *s;
+			for (auto s = subprocesses.begin(); s != subprocesses.end(); ++s)
+				delete *s;
 			subprocesses.clear();
 			id_subprocess.clear();
 		} catch (...) {
@@ -527,7 +533,8 @@ public:
 	}
 
 private:
-	void findRemovedOrChangedSubprocesses(const CSimpleIni& ini, std::vector<Subprocess*> const& subprocesses,
+	void findRemovedOrChangedSubprocesses(const CSimpleIni& ini,
+	                                      std::vector<Subprocess*> const& subprocesses,
 	                                      std::vector<Subprocess*>& stop_processes,
 	                                      std::vector<std::pair<uint16_t, Command>>& start_ids) {
 		for (auto it = subprocesses.begin(); it != subprocesses.end(); ++it) {
@@ -562,7 +569,8 @@ private:
 		}
 	}
 
-	void findAddedSubprocesses(const CSimpleIni& ini, std::unordered_map<uint16_t, Subprocess*> const& id_subprocess,
+	void findAddedSubprocesses(const CSimpleIni& ini,
+	                           std::unordered_map<uint16_t, Subprocess*> const& id_subprocess,
 	                           std::vector<std::pair<uint16_t, Command>>& start_ids) {
 		CSimpleIniA::TNamesDepend sections;
 		ini.GetAllSections(sections);
@@ -682,7 +690,8 @@ private:
 
 		const char* q =
 		    getValueMulti(ini, "disable_lifecycle_logging", ssection.c_str(), section.c_str(), "general", NULL);
-		if (q && !strcmp(q, "true")) result.quiet = true;
+		if (q && !strcmp(q, "true"))
+			result.quiet = true;
 
 		const char* binary = getValueMulti(ini, "command", ssection.c_str(), section.c_str(), "general", NULL);
 		if (!binary) {
@@ -703,11 +712,13 @@ private:
 			std::string opt = getValueMulti(ini, i.pItem, ssection.c_str(), section.c_str(), "general", NULL);
 
 			std::size_t pos = 0;
-			while ((pos = opt.find("$ID", pos)) != opt.npos) opt.replace(pos, 3, id_s, strlen(id_s));
+			while ((pos = opt.find("$ID", pos)) != opt.npos)
+				opt.replace(pos, 3, id_s, strlen(id_s));
 
 			pos = 0;
 			std::string pid_s = format("%d", GetCurrentProcessId());
-			while ((pos = opt.find("$PID", pos)) != opt.npos) opt.replace(pos, 4, pid_s.c_str(), pid_s.size());
+			while ((pos = opt.find("$PID", pos)) != opt.npos)
+				opt.replace(pos, 4, pid_s.c_str(), pid_s.size());
 
 			result.args += std::string(" --") + i.pItem + "=" + quote(opt);
 		}
@@ -734,13 +745,15 @@ private:
 						break;
 					}
 				}
-				if (add) q.append(1, '\\');
+				if (add)
+					q.append(1, '\\');
 			}
 		}
 
 		/* Replace every double-quote in the string by backslash double-quote */
 		std::size_t pos = 0;
-		while ((pos = q.find("\"", pos)) != q.npos) q.replace(pos, 1, "\\\"");
+		while ((pos = q.find("\"", pos)) != q.npos)
+			q.replace(pos, 1, "\\\"");
 		return "\"" + q + "\"";
 	}
 
@@ -843,7 +856,8 @@ int main(DWORD argc, LPCSTR* argv) {
 	}
 
 	// Only run, if run is still enabled
-	if (bRun) try {
+	if (bRun)
+		try {
 			// the "start arguments" to the service are passed to the OnStart call, not to here
 
 			if (logging) {
@@ -853,7 +867,8 @@ int main(DWORD argc, LPCSTR* argv) {
 					throw GetLastError();
 				}
 				if (!CreateDirectory(format("%s\\foundationdb", programData).c_str(), NULL)) {
-					if (GetLastError() != ERROR_ALREADY_EXISTS) throw GetLastError();
+					if (GetLastError() != ERROR_ALREADY_EXISTS)
+						throw GetLastError();
 				}
 				logFile.open(programData + std::string("\\foundationdb\\servicelog.txt"));
 			}

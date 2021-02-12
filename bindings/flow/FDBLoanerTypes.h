@@ -31,7 +31,8 @@ typedef Standalone<KeyRef> Key;
 typedef Standalone<ValueRef> Value;
 
 inline Key keyAfter(const KeyRef& key) {
-	if (key == LiteralStringRef("\xff\xff")) return key;
+	if (key == LiteralStringRef("\xff\xff"))
+		return key;
 
 	Standalone<StringRef> r;
 	uint8_t* s = new (r.arena()) uint8_t[key.size() + 1];
@@ -42,7 +43,8 @@ inline Key keyAfter(const KeyRef& key) {
 }
 
 inline KeyRef keyAfter(const KeyRef& key, Arena& arena) {
-	if (key == LiteralStringRef("\xff\xff")) return key;
+	if (key == LiteralStringRef("\xff\xff"))
+		return key;
 	uint8_t* t = new (arena) uint8_t[key.size() + 1];
 	memcpy(t, key.begin(), key.size());
 	t[key.size()] = 0;
@@ -248,8 +250,10 @@ struct KeyRangeRef {
 
 	struct ArbitraryOrder {
 		bool operator()(KeyRangeRef const& a, KeyRangeRef const& b) const {
-			if (a.begin < b.begin) return true;
-			if (a.begin > b.begin) return false;
+			if (a.begin < b.begin)
+				return true;
+			if (a.begin > b.begin)
+				return false;
 			return a.end < b.end;
 		}
 	};
@@ -257,7 +261,8 @@ struct KeyRangeRef {
 
 inline KeyRangeRef operator&(const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
 	KeyRef b = std::max(lhs.begin, rhs.begin), e = std::min(lhs.end, rhs.end);
-	if (e < b) return KeyRangeRef();
+	if (e < b)
+		return KeyRangeRef();
 	return KeyRangeRef(b, e);
 }
 
@@ -269,13 +274,16 @@ static std::string describe(T const& item) {
 }
 template <class K, class V>
 static std::string describe(std::map<K, V> const& items, int max_items = -1) {
-	if (!items.size()) return "[no items]";
+	if (!items.size())
+		return "[no items]";
 
 	std::string s;
 	int count = 0;
 	for (auto it = items.begin(); it != items.end(); it++) {
-		if (++count > max_items && max_items >= 0) break;
-		if (count > 1) s += ",";
+		if (++count > max_items && max_items >= 0)
+			break;
+		if (count > 1)
+			s += ",";
 		s += describe(it->first) + "=>" + describe(it->second);
 	}
 	return s;
@@ -283,13 +291,16 @@ static std::string describe(std::map<K, V> const& items, int max_items = -1) {
 
 template <class T>
 static std::string describeList(T const& items, int max_items) {
-	if (!items.size()) return "[no items]";
+	if (!items.size())
+		return "[no items]";
 
 	std::string s;
 	int count = 0;
 	for (auto const& item : items) {
-		if (++count > max_items && max_items >= 0) break;
-		if (count > 1) s += ",";
+		if (++count > max_items && max_items >= 0)
+			break;
+		if (count > 1)
+			s += ",";
 		s += describe(item);
 	}
 	return s;

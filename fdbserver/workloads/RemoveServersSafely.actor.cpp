@@ -59,7 +59,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 	virtual std::string description() { return "RemoveServersSafelyWorkload"; }
 	virtual Future<Void> setup(Database const& cx) {
-		if (!enabled) return Void();
+		if (!enabled)
+			return Void();
 
 		std::map<Optional<Standalone<StringRef>>, AddressExclusion> machinesMap; // Locality Zone Id -> ip address
 		std::vector<AddressExclusion>
@@ -75,11 +76,13 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("Address", pAddr.toString())
 			    .detail("Process", describe(*it));
 
-			if (g_simulator.protectedAddresses.count(it->address) == 0) processAddrs.push_back(pAddr);
+			if (g_simulator.protectedAddresses.count(it->address) == 0)
+				processAddrs.push_back(pAddr);
 			machineProcesses[machineIp].insert(pAddr);
 
 			// add only one entry for each machine
-			if (!machinesMap.count(it->locality.zoneId())) machinesMap[it->locality.zoneId()] = machineIp;
+			if (!machinesMap.count(it->locality.zoneId()))
+				machinesMap[it->locality.zoneId()] = machineIp;
 
 			machine_ids[machineIp] = it->locality.zoneId();
 			ip_dcid[it->address.ip] = it->locality.dcId();
@@ -100,7 +103,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				AddressExclusion machineIp(k1.ip);
 				ASSERT(machineProcesses.count(machineIp));
 				// kill all processes on this machine even if it has a different ip address
-				std::copy(machineProcesses[machineIp].begin(), machineProcesses[machineIp].end(),
+				std::copy(machineProcesses[machineIp].begin(),
+				          machineProcesses[machineIp].end(),
 				          std::inserter(processSet, processSet.end()));
 			}
 			toKill1.insert(processSet.begin(), processSet.end());
@@ -109,7 +113,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			for (auto k2 : toKill2) {
 				AddressExclusion machineIp(k2.ip);
 				ASSERT(machineProcesses.count(machineIp));
-				std::copy(machineProcesses[machineIp].begin(), machineProcesses[machineIp].end(),
+				std::copy(machineProcesses[machineIp].begin(),
+				          machineProcesses[machineIp].end(),
 				          std::inserter(processSet, processSet.end()));
 			}
 			toKill2.insert(processSet.begin(), processSet.end());
@@ -133,7 +138,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 	}
 
 	virtual Future<Void> start(Database const& cx) {
-		if (!enabled) return Void();
+		if (!enabled)
+			return Void();
 		double delay = deterministicRandom()->random01() * (maxDelay - minDelay) + minDelay;
 		return workloadMain(this, cx, delay, toKill1, toKill2);
 	}
@@ -161,7 +167,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			auto machineIpPorts = machineProcesses.find(netAddr);
 			if (machineIpPorts != machineProcesses.end()) {
 				ASSERT(machineIpPorts->second.size());
-				for (auto& processAdd : machineIpPorts->second) processAddrs.insert(processAdd);
+				for (auto& processAdd : machineIpPorts->second)
+					processAddrs.insert(processAdd);
 			} else {
 				processAddrs.insert(netAddr);
 			}
@@ -245,7 +252,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		}
 		for (auto& procRecord : procArray) {
 			// Only change the exclusion member, if not failed since it will require a reboot to revive it
-			if (!procRecord->failed) procRecord->excluded = false;
+			if (!procRecord->failed)
+				procRecord->excluded = false;
 			TraceEvent("RemoveAndKill")
 			    .detail("Step", "IncludeAddress")
 			    .detail("ProcessAddress", procRecord->address)
@@ -267,7 +275,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		for (auto processInfo : getServers()) {
 			auto processNet = AddressExclusion(processInfo->address.ip, processInfo->address.port);
 			// Mark all of the unavailable as dead
-			if (!processInfo->isAvailable() || processInfo->isCleared()) processesDead.push_back(processInfo);
+			if (!processInfo->isAvailable() || processInfo->isCleared())
+				processesDead.push_back(processInfo);
 			// Save all processes not specified within set
 			else if (killAddrs.find(processNet) == killAddrs.end())
 				processesLeft.push_back(processInfo);
@@ -316,8 +325,11 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return killableProcesses;
 	}
 
-	ACTOR static Future<Void> workloadMain(RemoveServersSafelyWorkload* self, Database cx, double waitSeconds,
-	                                       std::set<AddressExclusion> toKill1, std::set<AddressExclusion> toKill2) {
+	ACTOR static Future<Void> workloadMain(RemoveServersSafelyWorkload* self,
+	                                       Database cx,
+	                                       double waitSeconds,
+	                                       std::set<AddressExclusion> toKill1,
+	                                       std::set<AddressExclusion> toKill2) {
 		wait(delay(waitSeconds));
 
 		// Removing the first set of machines might legitimately bring the database down, so a timeout is not an error
@@ -385,7 +397,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		    .detail("ClusterAvailable", g_simulator.isAvailable());
 		wait(reportErrors(
 		    timeoutError(removeAndKill(self, cx, toKill2, bClearedFirst ? &toKill1 : NULL), self->kill2Timeout),
-		    "RemoveServersSafelyError", UID()));
+		    "RemoveServersSafelyError",
+		    UID()));
 
 		TraceEvent("RemoveAndKill")
 		    .detail("Step", "excluded second list")
@@ -469,8 +482,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("Zones", zoneIds.size())
 			    .detail("ClusterAvailable", g_simulator.isAvailable());
 			for (auto& zoneId : zoneIds) {
-				killedMachine = g_simulator.killZone(zoneId, removeViaClear ? ISimulator::RebootAndDelete
-				                                                            : ISimulator::KillInstantly);
+				killedMachine = g_simulator.killZone(
+				    zoneId, removeViaClear ? ISimulator::RebootAndDelete : ISimulator::KillInstantly);
 				TraceEvent(killedMachine ? SevInfo : SevWarn, "RemoveAndKill")
 				    .detail("Step", removeViaClear ? "Clear Machine" : "Kill Machine")
 				    .detail("ZoneId", zoneId)
@@ -482,8 +495,10 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return killProcArray;
 	}
 
-	ACTOR static Future<Void> removeAndKill(RemoveServersSafelyWorkload* self, Database cx,
-	                                        std::set<AddressExclusion> toKill, std::set<AddressExclusion>* pIncAddrs) {
+	ACTOR static Future<Void> removeAndKill(RemoveServersSafelyWorkload* self,
+	                                        Database cx,
+	                                        std::set<AddressExclusion> toKill,
+	                                        std::set<AddressExclusion>* pIncAddrs) {
 		state UID functionId = nondeterministicRandom()->randomUniqueID();
 
 		// First clear the exclusion list and exclude the given list
@@ -569,7 +584,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		vector<ISimulator::ProcessInfo*> machines;
 		vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();
 		for (int i = 0; i < all.size(); i++)
-			if (all[i]->name == std::string("Server") && all[i]->isAvailableClass()) machines.push_back(all[i]);
+			if (all[i]->name == std::string("Server") && all[i]->isAvailableClass())
+				machines.push_back(all[i]);
 		return machines;
 	}
 

@@ -45,7 +45,8 @@ struct RollbackWorkload : TestWorkload {
 	virtual Future<Void> start(Database const& cx) {
 		if (&g_simulator == g_network && enabled)
 			return timeout(reportErrors(rollbackFailureWorker(cx, this, meanDelay), "RollbackFailureWorkerError"),
-			               testDuration, Void());
+			               testDuration,
+			               Void());
 		return Void();
 	}
 	virtual Future<bool> check(Database const& cx) { return true; }
@@ -77,7 +78,8 @@ struct RollbackWorkload : TestWorkload {
 		    .detail("UncloggedTLog", uncloggedTLog);
 
 		for (int t = 0; t < tlogs.size(); t++)
-			if (t != utIndex) g_simulator.clogPair(proxy.address().ip, tlogs[t].address().ip, self->clogDuration);
+			if (t != utIndex)
+				g_simulator.clogPair(proxy.address().ip, tlogs[t].address().ip, self->clogDuration);
 		// g_simulator.clogInterface( g_simulator.getProcess( system.tlogs[t].commit.getEndpoint() ),
 		// self->clogDuration, ClogAll );
 

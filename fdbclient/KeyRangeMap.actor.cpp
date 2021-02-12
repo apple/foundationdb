@@ -41,8 +41,10 @@ Standalone<RangeResultRef> krmDecodeRanges(KeyRef mapPrefix, KeyRange keys, Stan
 	    KeyRangeRef(mapPrefix.toString() + keys.begin.toString(), mapPrefix.toString() + keys.end.toString());
 
 	ValueRef beginValue, endValue;
-	if (kv.size() && kv[0].key.startsWith(mapPrefix)) beginValue = kv[0].value;
-	if (kv.size() && kv.end()[-1].key.startsWith(mapPrefix)) endValue = kv.end()[-1].value;
+	if (kv.size() && kv[0].key.startsWith(mapPrefix))
+		beginValue = kv[0].value;
+	if (kv.size() && kv.end()[-1].key.startsWith(mapPrefix))
+		endValue = kv.end()[-1].value;
 
 	Standalone<RangeResultRef> result;
 	result.arena().dependsOn(kv.arena());
@@ -57,14 +59,18 @@ Standalone<RangeResultRef> krmDecodeRanges(KeyRef mapPrefix, KeyRange keys, Stan
 			kv.more = false;
 	}
 
-	if (!kv.more) result.push_back(result.arena(), KeyValueRef(keys.end, endValue));
+	if (!kv.more)
+		result.push_back(result.arena(), KeyValueRef(keys.end, endValue));
 	result.more = kv.more;
 
 	return result;
 }
 
 // Returns keys.begin, all transitional points in keys, and keys.end, and their values
-ACTOR Future<Standalone<RangeResultRef>> krmGetRanges(Transaction* tr, Key mapPrefix, KeyRange keys, int limit,
+ACTOR Future<Standalone<RangeResultRef>> krmGetRanges(Transaction* tr,
+                                                      Key mapPrefix,
+                                                      KeyRange keys,
+                                                      int limit,
                                                       int limitBytes) {
 	KeyRange withPrefix =
 	    KeyRangeRef(mapPrefix.toString() + keys.begin.toString(), mapPrefix.toString() + keys.end.toString());
@@ -77,8 +83,11 @@ ACTOR Future<Standalone<RangeResultRef>> krmGetRanges(Transaction* tr, Key mapPr
 	return krmDecodeRanges(mapPrefix, keys, kv);
 }
 
-ACTOR Future<Standalone<RangeResultRef>> krmGetRanges(Reference<ReadYourWritesTransaction> tr, Key mapPrefix,
-                                                      KeyRange keys, int limit, int limitBytes) {
+ACTOR Future<Standalone<RangeResultRef>> krmGetRanges(Reference<ReadYourWritesTransaction> tr,
+                                                      Key mapPrefix,
+                                                      KeyRange keys,
+                                                      int limit,
+                                                      int limitBytes) {
 	KeyRange withPrefix =
 	    KeyRangeRef(mapPrefix.toString() + keys.begin.toString(), mapPrefix.toString() + keys.end.toString());
 
@@ -90,16 +99,23 @@ ACTOR Future<Standalone<RangeResultRef>> krmGetRanges(Reference<ReadYourWritesTr
 	return krmDecodeRanges(mapPrefix, keys, kv);
 }
 
-void krmSetPreviouslyEmptyRange(Transaction* tr, const KeyRef& mapPrefix, const KeyRangeRef& keys,
-                                const ValueRef& newValue, const ValueRef& oldEndValue) {
+void krmSetPreviouslyEmptyRange(Transaction* tr,
+                                const KeyRef& mapPrefix,
+                                const KeyRangeRef& keys,
+                                const ValueRef& newValue,
+                                const ValueRef& oldEndValue) {
 	KeyRange withPrefix =
 	    KeyRangeRef(mapPrefix.toString() + keys.begin.toString(), mapPrefix.toString() + keys.end.toString());
 	tr->set(withPrefix.begin, newValue);
 	tr->set(withPrefix.end, oldEndValue);
 }
 
-void krmSetPreviouslyEmptyRange(CommitTransactionRef& tr, Arena& trArena, const KeyRef& mapPrefix,
-                                const KeyRangeRef& keys, const ValueRef& newValue, const ValueRef& oldEndValue) {
+void krmSetPreviouslyEmptyRange(CommitTransactionRef& tr,
+                                Arena& trArena,
+                                const KeyRef& mapPrefix,
+                                const KeyRangeRef& keys,
+                                const ValueRef& newValue,
+                                const ValueRef& oldEndValue) {
 	KeyRange withPrefix =
 	    KeyRangeRef(mapPrefix.toString() + keys.begin.toString(), mapPrefix.toString() + keys.end.toString());
 	tr.set(trArena, withPrefix.begin, newValue);
@@ -114,10 +130,12 @@ ACTOR Future<Void> krmSetRange(Transaction* tr, Key mapPrefix, KeyRange range, V
 
 	Value oldValue;
 	bool hasResult = old.size() > 0 && old[0].key.startsWith(mapPrefix);
-	if (hasResult) oldValue = old[0].value;
+	if (hasResult)
+		oldValue = old[0].value;
 
 	KeyRange conflictRange = KeyRangeRef(hasResult ? old[0].key : mapPrefix.toString(), keyAfter(withPrefix.end));
-	if (!conflictRange.empty()) tr->addReadConflictRange(conflictRange);
+	if (!conflictRange.empty())
+		tr->addReadConflictRange(conflictRange);
 
 	tr->clear(withPrefix);
 	tr->set(withPrefix.begin, value);
@@ -134,10 +152,12 @@ ACTOR Future<Void> krmSetRange(Reference<ReadYourWritesTransaction> tr, Key mapP
 
 	Value oldValue;
 	bool hasResult = old.size() > 0 && old[0].key.startsWith(mapPrefix);
-	if (hasResult) oldValue = old[0].value;
+	if (hasResult)
+		oldValue = old[0].value;
 
 	KeyRange conflictRange = KeyRangeRef(hasResult ? old[0].key : mapPrefix.toString(), keyAfter(withPrefix.end));
-	if (!conflictRange.empty()) tr->addReadConflictRange(conflictRange);
+	if (!conflictRange.empty())
+		tr->addReadConflictRange(conflictRange);
 
 	tr->clear(withPrefix);
 	tr->set(withPrefix.begin, value);
@@ -149,7 +169,10 @@ ACTOR Future<Void> krmSetRange(Reference<ReadYourWritesTransaction> tr, Key mapP
 // Sets a range of keys in a key range map, coalescing with adjacent regions if the values match
 // Ranges outside of maxRange will not be coalesced
 // CAUTION: use care when attempting to coalesce multiple ranges in the same prefix in a single transaction
-ACTOR Future<Void> krmSetRangeCoalescing(Transaction* tr, Key mapPrefix, KeyRange range, KeyRange maxRange,
+ACTOR Future<Void> krmSetRangeCoalescing(Transaction* tr,
+                                         Key mapPrefix,
+                                         KeyRange range,
+                                         KeyRange maxRange,
                                          Value value) {
 	ASSERT(maxRange.contains(range));
 
@@ -183,11 +206,13 @@ ACTOR Future<Void> krmSetRangeCoalescing(Transaction* tr, Key mapPrefix, KeyRang
 	bool valueMatches = value == existingValue;
 
 	KeyRange conflictRange = KeyRangeRef(hasBegin ? beginRange[0].key : mapPrefix, withPrefix.begin);
-	if (!conflictRange.empty()) tr->addReadConflictRange(conflictRange);
+	if (!conflictRange.empty())
+		tr->addReadConflictRange(conflictRange);
 
 	conflictRange = KeyRangeRef(hasEnd ? endRange[0].key : mapPrefix,
 	                            hasNext ? keyAfter(endRange.end()[-1].key) : strinc(mapPrefix));
-	if (!conflictRange.empty()) tr->addReadConflictRange(conflictRange);
+	if (!conflictRange.empty())
+		tr->addReadConflictRange(conflictRange);
 
 	state Key endKey;
 	state Value endValue;

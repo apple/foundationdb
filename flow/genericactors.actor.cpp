@@ -25,7 +25,8 @@ ACTOR Future<bool> allTrue(std::vector<Future<bool>> all) {
 	state int i = 0;
 	while (i != all.size()) {
 		bool r = wait(all[i]);
-		if (!r) return false;
+		if (!r)
+			return false;
 		i++;
 	}
 	return true;
@@ -36,7 +37,8 @@ ACTOR Future<Void> anyTrue(std::vector<Reference<AsyncVar<bool>>> input, Referen
 		bool oneTrue = false;
 		std::vector<Future<Void>> changes;
 		for (auto it : input) {
-			if (it->get()) oneTrue = true;
+			if (it->get())
+				oneTrue = true;
 			changes.push_back(it->onChange());
 		}
 		output->set(oneTrue);

@@ -41,7 +41,8 @@ Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req> to, Req request) {
 			REPLY_TYPE(Req) reply = wait(to.getReply(request));
 			return reply;
 		} catch (Error& e) {
-			if (e.code() != error_code_broken_promise) throw;
+			if (e.code() != error_code_broken_promise)
+				throw;
 			resetReply(request);
 			wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 			TEST(true); // retryBrokenPromise
@@ -60,7 +61,8 @@ Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req> to, Req request, T
 			REPLY_TYPE(Req) reply = wait(to.getReply(request, taskID));
 			return reply;
 		} catch (Error& e) {
-			if (e.code() != error_code_broken_promise) throw;
+			if (e.code() != error_code_broken_promise)
+				throw;
 			resetReply(request);
 			wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, taskID));
 			TEST(true); // retryBrokenPromise
@@ -113,14 +115,16 @@ void forwardPromise(PromiseStream<T> output, Future<T> input) {
 ACTOR template <class T>
 Future<Void> broadcast(Future<T> input, std::vector<Promise<T>> output) {
 	T value = wait(input);
-	for (int i = 0; i < output.size(); i++) output[i].send(value);
+	for (int i = 0; i < output.size(); i++)
+		output[i].send(value);
 	return Void();
 }
 
 ACTOR template <class T>
 Future<Void> broadcast(Future<T> input, std::vector<ReplyPromise<T>> output) {
 	T value = wait(input);
-	for (int i = 0; i < output.size(); i++) output[i].send(value);
+	for (int i = 0; i < output.size(); i++)
+		output[i].send(value);
 	return Void();
 }
 
@@ -169,7 +173,9 @@ struct PeerHolder {
 
 // Implements tryGetReply, getReplyUnlessFailedFor
 ACTOR template <class X>
-Future<ErrorOr<X>> waitValueOrSignal(Future<X> value, Future<Void> signal, Endpoint endpoint,
+Future<ErrorOr<X>> waitValueOrSignal(Future<X> value,
+                                     Future<Void> signal,
+                                     Endpoint endpoint,
                                      ReplyPromise<X> holdme = ReplyPromise<X>(),
                                      Reference<Peer> peer = Reference<Peer>()) {
 	state PeerHolder holder = PeerHolder(peer);
@@ -185,11 +191,13 @@ Future<ErrorOr<X>> waitValueOrSignal(Future<X> value, Future<Void> signal, Endpo
 				return ErrorOr<X>(internal_error());
 			}
 
-			if (e.code() == error_code_actor_cancelled) throw e;
+			if (e.code() == error_code_actor_cancelled)
+				throw e;
 
 			// broken_promise error normally means an endpoint failure, which in tryGetReply has the same semantics as
 			// receiving the failure signal
-			if (e.code() != error_code_broken_promise || signal.isError()) return ErrorOr<X>(e);
+			if (e.code() != error_code_broken_promise || signal.isError())
+				return ErrorOr<X>(e);
 
 			IFailureMonitor::failureMonitor().endpointNotFound(endpoint);
 			value = Never();

@@ -59,9 +59,12 @@ private:
 		boost::asio::posix::stream_descriptor sd;
 		int64_t fdVal;
 
-		static void handle_read(Promise<int64_t> p, int64_t* pVal, const boost::system::error_code& ec,
+		static void handle_read(Promise<int64_t> p,
+		                        int64_t* pVal,
+		                        const boost::system::error_code& ec,
 		                        std::size_t bytes_transferred) {
-			if (ec) return; // Presumably, the EventFD was destroyed?
+			if (ec)
+				return; // Presumably, the EventFD was destroyed?
 			ASSERT(bytes_transferred == sizeof(*pVal));
 			p.send(*pVal);
 		}
@@ -75,7 +78,10 @@ private:
 		virtual Future<int64_t> read() {
 			Promise<int64_t> p;
 			sd.async_read_some(boost::asio::mutable_buffers_1(&fdVal, sizeof(fdVal)),
-			                   boost::bind(&EventFD::handle_read, p, &fdVal, boost::asio::placeholders::error,
+			                   boost::bind(&EventFD::handle_read,
+			                               p,
+			                               &fdVal,
+			                               boost::asio::placeholders::error,
 			                               boost::asio::placeholders::bytes_transferred));
 			return p.getFuture();
 		}

@@ -32,9 +32,12 @@
 //   to count 0 futures
 //   - Uses memory proportional to the number of unready futures added (i.e. memory
 //     is freed promptly when an actor in the collection returns)
-Future<Void> actorCollection(FutureStream<Future<Void>> const& addActor, int* const& optionalCountPtr = NULL,
-                             double* const& lastChangeTime = NULL, double* const& idleTime = NULL,
-                             double* const& allTime = NULL, bool const& returnWhenEmptied = false);
+Future<Void> actorCollection(FutureStream<Future<Void>> const& addActor,
+                             int* const& optionalCountPtr = NULL,
+                             double* const& lastChangeTime = NULL,
+                             double* const& idleTime = NULL,
+                             double* const& allTime = NULL,
+                             bool const& returnWhenEmptied = false);
 
 // ActorCollectionNoErrors is an easy-to-use wrapper for actorCollection() when you know that no errors will
 // be thrown by the actors (e.g. because they are wrapped with individual error reporters).

@@ -35,7 +35,8 @@ struct IDispatched {
 	}
 	static F const& dispatch(K k) {
 		auto it = dispatches().find(k);
-		if (it == dispatches().end()) throw internal_error();
+		if (it == dispatches().end())
+			throw internal_error();
 		return it->second;
 	}
 };

@@ -91,10 +91,12 @@ int eraseDirectoryRecursive(std::string const& dir) {
 	    dir.c_str(),
 	    [](const char* fpath, const struct stat* sb, int typeflag, struct FTW* ftwbuf) -> int {
 		    int r = remove(fpath);
-		    if (r == 0) ++__eraseDirectoryRecurseiveCount;
+		    if (r == 0)
+			    ++__eraseDirectoryRecurseiveCount;
 		    return r;
 	    },
-	    64, FTW_DEPTH | FTW_PHYS);
+	    64,
+	    FTW_DEPTH | FTW_PHYS);
 	/* Looks like calling code expects this to continue silently if
 	   the directory we're deleting doesn't exist in the first
 	   place */

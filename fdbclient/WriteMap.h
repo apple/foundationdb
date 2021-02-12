@@ -74,7 +74,8 @@ public:
 		}
 	}
 	bool isDependent() const {
-		if (!size()) return false;
+		if (!size())
+			return false;
 		return singletonOperation.type != MutationRef::SetValue && singletonOperation.type != MutationRef::ClearRange &&
 		       singletonOperation.type != MutationRef::SetVersionstampedValue &&
 		       singletonOperation.type != MutationRef::SetVersionstampedKey;
@@ -87,16 +88,21 @@ public:
 	int size() const { return defaultConstructed ? 0 : hasVector() ? optionalOperations.get().size() + 1 : 1; }
 
 	bool operator==(const OperationStack& r) const {
-		if (size() != r.size()) return false;
+		if (size() != r.size())
+			return false;
 
-		if (size() == 0) return true;
+		if (size() == 0)
+			return true;
 
-		if (singletonOperation != r.singletonOperation) return false;
+		if (singletonOperation != r.singletonOperation)
+			return false;
 
-		if (size() == 1) return true;
+		if (size() == 1)
+			return true;
 
 		for (int i = 0; i < optionalOperations.get().size(); i++) {
-			if (optionalOperations.get()[i] != r.optionalOperations.get()[i]) return false;
+			if (optionalOperations.get()[i] != r.optionalOperations.get()[i])
+				return false;
 		}
 
 		return true;
@@ -112,8 +118,13 @@ struct WriteMapEntry {
 	bool following_keys_unreadable;
 	bool is_unreadable;
 
-	WriteMapEntry(KeyRef const& key, OperationStack&& stack, bool following_keys_cleared, bool following_keys_conflict,
-	              bool is_conflict, bool following_keys_unreadable, bool is_unreadable)
+	WriteMapEntry(KeyRef const& key,
+	              OperationStack&& stack,
+	              bool following_keys_cleared,
+	              bool following_keys_conflict,
+	              bool is_conflict,
+	              bool following_keys_unreadable,
+	              bool is_unreadable)
 	  : key(key), stack(std::move(stack)), following_keys_cleared(following_keys_cleared),
 	    following_keys_conflict(following_keys_conflict), is_conflict(is_conflict),
 	    following_keys_unreadable(following_keys_unreadable), is_unreadable(is_unreadable) {}
@@ -144,11 +155,11 @@ private:
 
 public:
 	explicit WriteMap(Arena* arena) : arena(arena), ver(-1), scratch_iterator(this), writeMapEmpty(true) {
-		PTreeImpl::insert(writes, ver,
-		                  WriteMapEntry(allKeys.begin, OperationStack(), false, false, false, false, false));
+		PTreeImpl::insert(
+		    writes, ver, WriteMapEntry(allKeys.begin, OperationStack(), false, false, false, false, false));
 		PTreeImpl::insert(writes, ver, WriteMapEntry(allKeys.end, OperationStack(), false, false, false, false, false));
-		PTreeImpl::insert(writes, ver,
-		                  WriteMapEntry(afterAllKeys, OperationStack(), false, false, false, false, false));
+		PTreeImpl::insert(
+		    writes, ver, WriteMapEntry(afterAllKeys, OperationStack(), false, false, false, false, false));
 	}
 
 	WriteMap(WriteMap&& r) BOOST_NOEXCEPT : writeMapEmpty(r.writeMapEmpty),
@@ -186,22 +197,40 @@ public:
 				it.tree.clear();
 				OperationStack op(RYWMutation(Optional<StringRef>(), MutationRef::SetValue));
 				coalesceOver(op, RYWMutation(param, operation), *arena);
-				PTreeImpl::insert(writes, ver,
-				                  WriteMapEntry(key, std::move(op), true, following_conflict, is_conflict,
-				                                following_unreadable, is_unreadable));
+				PTreeImpl::insert(writes,
+				                  ver,
+				                  WriteMapEntry(key,
+				                                std::move(op),
+				                                true,
+				                                following_conflict,
+				                                is_conflict,
+				                                following_unreadable,
+				                                is_unreadable));
 			} else {
 				it.tree.clear();
-				PTreeImpl::insert(writes, ver,
-				                  WriteMapEntry(key, OperationStack(RYWMutation(param, operation)), is_cleared,
-				                                following_conflict, is_conflict, following_unreadable, is_unreadable));
+				PTreeImpl::insert(writes,
+				                  ver,
+				                  WriteMapEntry(key,
+				                                OperationStack(RYWMutation(param, operation)),
+				                                is_cleared,
+				                                following_conflict,
+				                                is_conflict,
+				                                following_unreadable,
+				                                is_unreadable));
 			}
 		} else {
 			if (!it.is_unreadable() && operation == MutationRef::SetValue) {
 				it.tree.clear();
 				PTreeImpl::remove(writes, ver, key);
-				PTreeImpl::insert(writes, ver,
-				                  WriteMapEntry(key, OperationStack(RYWMutation(param, operation)), is_cleared,
-				                                following_conflict, is_conflict, following_unreadable, is_unreadable));
+				PTreeImpl::insert(writes,
+				                  ver,
+				                  WriteMapEntry(key,
+				                                OperationStack(RYWMutation(param, operation)),
+				                                is_cleared,
+				                                following_conflict,
+				                                is_conflict,
+				                                following_unreadable,
+				                                is_unreadable));
 			} else {
 				WriteMapEntry e(it.entry());
 				e.is_conflict = is_conflict;
@@ -216,7 +245,8 @@ public:
 
 				it.tree.clear();
 				PTreeImpl::remove(
-				    writes, ver,
+				    writes,
+				    ver,
 				    e.key); // FIXME: Make PTreeImpl::insert do this automatically (see also VersionedMap.h FIXME)
 				PTreeImpl::insert(writes, ver, std::move(e));
 			}
@@ -252,16 +282,24 @@ public:
 
 		it.tree.clear();
 
-		PTreeImpl::remove(writes, ver, ExtStringRef(keys.begin, !insert_begin ? 1 : 0),
+		PTreeImpl::remove(writes,
+		                  ver,
+		                  ExtStringRef(keys.begin, !insert_begin ? 1 : 0),
 		                  ExtStringRef(keys.end, end_coalesce_clear ? 1 : 0));
 
 		if (insert_begin)
 			PTreeImpl::insert(writes, ver, WriteMapEntry(keys.begin, OperationStack(), true, true, true, false, false));
 
 		if (insert_end)
-			PTreeImpl::insert(writes, ver,
-			                  WriteMapEntry(keys.end, OperationStack(), end_cleared, end_conflict, end_conflict,
-			                                end_unreadable, end_unreadable));
+			PTreeImpl::insert(writes,
+			                  ver,
+			                  WriteMapEntry(keys.end,
+			                                OperationStack(),
+			                                end_cleared,
+			                                end_conflict,
+			                                end_conflict,
+			                                end_unreadable,
+			                                end_unreadable));
 	}
 
 	void addUnmodifiedAndUnreadableRange(KeyRangeRef keys) {
@@ -287,17 +325,25 @@ public:
 
 		it.tree.clear();
 
-		PTreeImpl::remove(writes, ver, ExtStringRef(keys.begin, !insert_begin ? 1 : 0),
+		PTreeImpl::remove(writes,
+		                  ver,
+		                  ExtStringRef(keys.begin, !insert_begin ? 1 : 0),
 		                  ExtStringRef(keys.end, end_coalesce_unmodified ? 1 : 0));
 
 		if (insert_begin)
-			PTreeImpl::insert(writes, ver,
-			                  WriteMapEntry(keys.begin, OperationStack(), false, false, false, true, true));
+			PTreeImpl::insert(
+			    writes, ver, WriteMapEntry(keys.begin, OperationStack(), false, false, false, true, true));
 
 		if (insert_end)
-			PTreeImpl::insert(writes, ver,
-			                  WriteMapEntry(keys.end, OperationStack(), end_cleared, end_conflict, end_conflict,
-			                                end_unreadable, end_unreadable));
+			PTreeImpl::insert(writes,
+			                  ver,
+			                  WriteMapEntry(keys.end,
+			                                OperationStack(),
+			                                end_cleared,
+			                                end_conflict,
+			                                end_conflict,
+			                                end_unreadable,
+			                                end_unreadable));
 	}
 
 	void addConflictRange(KeyRangeRef keys) {
@@ -315,8 +361,11 @@ public:
 			}
 			insertions.push_back(WriteMapEntry(keys.begin,
 			                                   it.is_operation() ? OperationStack(it.op()) : OperationStack(),
-			                                   it.entry().following_keys_cleared, true, true,
-			                                   it.entry().following_keys_unreadable, it.entry().is_unreadable));
+			                                   it.entry().following_keys_cleared,
+			                                   true,
+			                                   true,
+			                                   it.entry().following_keys_unreadable,
+			                                   it.entry().is_unreadable));
 		}
 
 		while (it.endKey() < keys.end) {
@@ -338,8 +387,8 @@ public:
 			++it;
 
 			if (!it.keyAtBegin() || it.beginKey() != keys.end) {
-				insertions.push_back(WriteMapEntry(keys.end, OperationStack(), isCleared, false, false,
-				                                   followingUnreadable, isUnreadable));
+				insertions.push_back(WriteMapEntry(
+				    keys.end, OperationStack(), isCleared, false, false, followingUnreadable, isUnreadable));
 			}
 		}
 
@@ -348,7 +397,8 @@ public:
 		// SOMEDAY: optimize this code by having a PTree removal/insertion that takes and returns an iterator
 		for (int i = 0; i < removals.size(); i++) {
 			PTreeImpl::remove(
-			    writes, ver,
+			    writes,
+			    ver,
 			    removals[i]); // FIXME: Make PTreeImpl::insert do this automatically (see also VersionedMap.h FIXME)
 		}
 
@@ -596,7 +646,8 @@ public:
 	}
 
 	static RYWMutation coalesceUnder(OperationStack const& stack, Optional<ValueRef> const& value, Arena& arena) {
-		if (!stack.isDependent() && stack.size() == 1) return stack.at(0);
+		if (!stack.isDependent() && stack.size() == 1)
+			return stack.at(0);
 
 		RYWMutation currentEntry = RYWMutation(value, MutationRef::SetValue);
 		for (int i = 0; i < stack.size(); ++i) {
@@ -662,7 +713,8 @@ private:
 			}
 		}
 
-		if (it.endKey() == keys.end) ++it;
+		if (it.endKey() == keys.end)
+			++it;
 
 		ASSERT(it.beginKey() <= keys.end && keys.end < it.endKey());
 
@@ -680,22 +732,36 @@ private:
 
 		it.tree.clear();
 
-		PTreeImpl::remove(writes, ver, ExtStringRef(keys.begin, !insert_begin ? 1 : 0),
+		PTreeImpl::remove(writes,
+		                  ver,
+		                  ExtStringRef(keys.begin, !insert_begin ? 1 : 0),
 		                  ExtStringRef(keys.end, end_coalesce_clear ? 1 : 0));
 
 		for (int i = 0; i < conflict_ranges.size(); i++) {
-			PTreeImpl::insert(writes, ver,
-			                  WriteMapEntry(conflict_ranges[i].toArenaOrRef(*arena), OperationStack(), true, conflicted,
-			                                conflicted, false, false));
+			PTreeImpl::insert(writes,
+			                  ver,
+			                  WriteMapEntry(conflict_ranges[i].toArenaOrRef(*arena),
+			                                OperationStack(),
+			                                true,
+			                                conflicted,
+			                                conflicted,
+			                                false,
+			                                false));
 			conflicted = !conflicted;
 		}
 
 		ASSERT(conflicted != lastConflicted);
 
 		if (insert_end)
-			PTreeImpl::insert(writes, ver,
-			                  WriteMapEntry(keys.end, OperationStack(), end_cleared, end_conflict, end_conflict,
-			                                end_unreadable, end_unreadable));
+			PTreeImpl::insert(writes,
+			                  ver,
+			                  WriteMapEntry(keys.end,
+			                                OperationStack(),
+			                                end_cleared,
+			                                end_conflict,
+			                                end_conflict,
+			                                end_unreadable,
+			                                end_unreadable));
 	}
 };
 

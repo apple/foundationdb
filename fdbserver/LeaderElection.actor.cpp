@@ -27,20 +27,26 @@
 
 Optional<std::pair<LeaderInfo, bool>> getLeader(const vector<Optional<LeaderInfo>>& nominees);
 
-ACTOR Future<Void> submitCandidacy(Key key, LeaderElectionRegInterface coord, LeaderInfo myInfo, UID prevChangeID,
-                                   Reference<AsyncVar<vector<Optional<LeaderInfo>>>> nominees, int index) {
+ACTOR Future<Void> submitCandidacy(Key key,
+                                   LeaderElectionRegInterface coord,
+                                   LeaderInfo myInfo,
+                                   UID prevChangeID,
+                                   Reference<AsyncVar<vector<Optional<LeaderInfo>>>> nominees,
+                                   int index) {
 	loop {
 		auto const& nom = nominees->get()[index];
-		Optional<LeaderInfo> li = wait(retryBrokenPromise(
-		    coord.candidacy, CandidacyRequest(key, myInfo, nom.present() ? nom.get().changeID : UID(), prevChangeID),
-		    TaskPriority::CoordinationReply));
+		Optional<LeaderInfo> li = wait(
+		    retryBrokenPromise(coord.candidacy,
+		                       CandidacyRequest(key, myInfo, nom.present() ? nom.get().changeID : UID(), prevChangeID),
+		                       TaskPriority::CoordinationReply));
 
 		if (li != nominees->get()[index]) {
 			vector<Optional<LeaderInfo>> v = nominees->get();
 			v[index] = li;
 			nominees->set(v);
 
-			if (li.present() && li.get().forward) wait(Future<Void>(Never()));
+			if (li.present() && li.get().forward)
+				wait(Future<Void>(Never()));
 
 			wait(Future<Void>(Void())); // Make sure we weren't cancelled
 		}
@@ -79,8 +85,10 @@ ACTOR Future<Void> changeLeaderCoordinators(ServerCoordinators coordinators, Val
 	return Void();
 }
 
-ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators, Value proposedSerializedInterface,
-                                           Reference<AsyncVar<Value>> outSerializedLeader, bool hasConnected,
+ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
+                                           Value proposedSerializedInterface,
+                                           Reference<AsyncVar<Value>> outSerializedLeader,
+                                           bool hasConnected,
                                            Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo) {
 	state Reference<AsyncVar<vector<Optional<LeaderInfo>>>> nominees(new AsyncVar<vector<Optional<LeaderInfo>>>());
 	state LeaderInfo myInfo;
@@ -113,8 +121,8 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators, Valu
 
 		vector<Future<Void>> cand;
 		for (int i = 0; i < coordinators.leaderElectionServers.size(); i++)
-			cand.push_back(submitCandidacy(coordinators.clusterKey, coordinators.leaderElectionServers[i], myInfo,
-			                               prevChangeID, nominees, i));
+			cand.push_back(submitCandidacy(
+			    coordinators.clusterKey, coordinators.leaderElectionServers[i], myInfo, prevChangeID, nominees, i));
 		candidacies = waitForAll(cand);
 
 		loop {
@@ -196,9 +204,10 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators, Valu
 		state vector<Future<Void>> true_heartbeats;
 		state vector<Future<Void>> false_heartbeats;
 		for (int i = 0; i < coordinators.leaderElectionServers.size(); i++) {
-			Future<LeaderHeartbeatReply> hb = retryBrokenPromise(
-			    coordinators.leaderElectionServers[i].leaderHeartbeat,
-			    LeaderHeartbeatRequest(coordinators.clusterKey, myInfo, prevChangeID), TaskPriority::CoordinationReply);
+			Future<LeaderHeartbeatReply> hb =
+			    retryBrokenPromise(coordinators.leaderElectionServers[i].leaderHeartbeat,
+			                       LeaderHeartbeatRequest(coordinators.clusterKey, myInfo, prevChangeID),
+			                       TaskPriority::CoordinationReply);
 			true_heartbeats.push_back(onEqual(hb, LeaderHeartbeatReply{ true }));
 			false_heartbeats.push_back(onEqual(hb, LeaderHeartbeatReply{ false }));
 		}

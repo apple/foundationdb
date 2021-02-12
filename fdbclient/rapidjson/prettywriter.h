@@ -39,8 +39,11 @@ enum PrettyFormatOptions {
     \tparam TargetEncoding Encoding of output stream.
     \tparam StackAllocator Type of allocator for allocating memory of stack.
 */
-template <typename OutputStream, typename SourceEncoding = UTF8<>, typename TargetEncoding = UTF8<>,
-          typename StackAllocator = CrtAllocator, unsigned writeFlags = kWriteDefaultFlags>
+template <typename OutputStream,
+          typename SourceEncoding = UTF8<>,
+          typename TargetEncoding = UTF8<>,
+          typename StackAllocator = CrtAllocator,
+          unsigned writeFlags = kWriteDefaultFlags>
 class PrettyWriter : public Writer<OutputStream, SourceEncoding, TargetEncoding, StackAllocator, writeFlags> {
 public:
 	typedef Writer<OutputStream, SourceEncoding, TargetEncoding, StackAllocator> Base;
@@ -218,7 +221,8 @@ protected:
 			if (level->inArray) {
 				if (level->valueCount > 0) {
 					Base::os_->Put(','); // add comma if it is not the first element in array
-					if (formatOptions_ & kFormatSingleLineArray) Base::os_->Put(' ');
+					if (formatOptions_ & kFormatSingleLineArray)
+						Base::os_->Put(' ');
 				}
 
 				if (!(formatOptions_ & kFormatSingleLineArray)) {
@@ -237,7 +241,8 @@ protected:
 				} else
 					Base::os_->Put('\n');
 
-				if (level->valueCount % 2 == 0) WriteIndent();
+				if (level->valueCount % 2 == 0)
+					WriteIndent();
 			}
 			if (!level->inArray && level->valueCount % 2 == 0)
 				RAPIDJSON_ASSERT(type == kStringType); // if it's in object, then even number should be a name

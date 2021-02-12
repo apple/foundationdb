@@ -56,14 +56,16 @@ struct Barrier {
 
 	void decrementNumRequired() {
 		mutex.enter();
-		if (--numRequired == numReached) fire();
+		if (--numRequired == numReached)
+			fire();
 		mutex.leave();
 	}
 
 	void setNumRequired(int numRequired) {
 		mutex.enter();
 		this->numRequired = numRequired;
-		if (numRequired > 0 && numRequired <= numReached) fire();
+		if (numRequired > 0 && numRequired <= numReached)
+			fire();
 		mutex.leave();
 	}
 
@@ -91,7 +93,8 @@ struct Barrier {
 private:
 	void fire() {
 		numReached = 0;
-		for (int i = 0; i < events.size(); ++i) events[i]->set();
+		for (int i = 0; i < events.size(); ++i)
+			events[i]->set();
 
 		events.clear();
 	}
@@ -234,15 +237,18 @@ struct ThreadSafetyWorkload : TestWorkload {
 					else if (operation == 1)
 						tr->get(getRandomKey(info->random)).getBlocking();
 					else if (operation == 2)
-						tr->getKey(KeySelectorRef(getRandomKey(info->random), info->random.randomInt(0, 2) == 1,
+						tr->getKey(KeySelectorRef(getRandomKey(info->random),
+						                          info->random.randomInt(0, 2) == 1,
 						                          info->random.randomInt(-10, 11)))
 						    .getBlocking();
 					else if (operation == 3) {
 						Key key1 = getRandomKey(info->random);
 						Key key2 = getRandomKey(info->random);
 						GetRangeLimits limits(info->random.randomInt(1, 1000), info->random.randomInt(1, 1e6));
-						tr->getRange(KeyRangeRef(std::min(key1, key2), std::max(key1, key2)), limits,
-						             info->random.randomInt(0, 2) != 0, info->random.randomInt(0, 2) != 0)
+						tr->getRange(KeyRangeRef(std::min(key1, key2), std::max(key1, key2)),
+						             limits,
+						             info->random.randomInt(0, 2) != 0,
+						             info->random.randomInt(0, 2) != 0)
 						    .getBlocking();
 					} else if (operation == 4)
 						tr->clear(getRandomKey(info->random));
@@ -260,7 +266,8 @@ struct ThreadSafetyWorkload : TestWorkload {
 
 			// One thread starts a commit, and all threads wait on that commit
 			mutex.enter();
-			if (!commitFuture.isValid()) commitFuture = tr->commit();
+			if (!commitFuture.isValid())
+				commitFuture = tr->commit();
 			ThreadFuture<Void> commit = commitFuture;
 			mutex.leave();
 
@@ -272,7 +279,8 @@ struct ThreadSafetyWorkload : TestWorkload {
 			commitBarrier.reached();
 
 			mutex.enter();
-			if (commitFuture.isValid()) commitFuture = ThreadFuture<Void>();
+			if (commitFuture.isValid())
+				commitFuture = ThreadFuture<Void>();
 
 			if (stopped) {
 				mutex.leave();

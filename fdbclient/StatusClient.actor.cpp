@@ -44,8 +44,8 @@ json_spirit::mValue readJSONStrictly(const std::string& s) {
 	while (i != s.end()) {
 		if (!isspace(*i)) {
 			if (g_network->isSimulated()) {
-				printf("EXPECTED EOF: %s\n^^^\n%s\n", std::string(s.begin(), i).c_str(),
-				       std::string(i, s.end()).c_str());
+				printf(
+				    "EXPECTED EOF: %s\n^^^\n%s\n", std::string(s.begin(), i).c_str(), std::string(i, s.end()).c_str());
 			}
 			throw json_eof_expected();
 		}
@@ -59,10 +59,15 @@ uint64_t JSONDoc::expires_reference_version = std::numeric_limits<uint64_t>::max
 
 // Template specializations for mergeOperator
 template <>
-json_spirit::mObject JSONDoc::mergeOperator<bool>(const std::string& op, const json_spirit::mObject& op_a,
-                                                  const json_spirit::mObject& op_b, bool const& a, bool const& b) {
-	if (op == "$and") return { { op, a && b } };
-	if (op == "$or") return { { op, a || b } };
+json_spirit::mObject JSONDoc::mergeOperator<bool>(const std::string& op,
+                                                  const json_spirit::mObject& op_a,
+                                                  const json_spirit::mObject& op_b,
+                                                  bool const& a,
+                                                  bool const& b) {
+	if (op == "$and")
+		return { { op, a && b } };
+	if (op == "$or")
+		return { { op, a || b } };
 	throw std::exception();
 }
 
@@ -83,8 +88,10 @@ json_spirit::mObject JSONDoc::mergeOperator<json_spirit::mObject>(const std::str
                                                                   json_spirit::mObject const& b) {
 	if (op == "$count_keys") {
 		json_spirit::mObject combined;
-		for (auto& e : a) combined[e.first] = json_spirit::mValue();
-		for (auto& e : b) combined[e.first] = json_spirit::mValue();
+		for (auto& e : a)
+			combined[e.first] = json_spirit::mValue();
+		for (auto& e : b)
+			combined[e.first] = json_spirit::mValue();
 		return { { op, combined } };
 	}
 	throw std::exception();
@@ -103,13 +110,15 @@ json_spirit::mObject JSONDoc::mergeOperator<json_spirit::mValue>(const std::stri
 		double ts_a = 0, ts_b = 0;
 		JSONDoc(op_a).tryGet("timestamp", ts_a);
 		JSONDoc(op_b).tryGet("timestamp", ts_b);
-		if (ts_a > ts_b) return { { op, a }, { "timestamp", ts_a } };
+		if (ts_a > ts_b)
+			return { { op, a }, { "timestamp", ts_a } };
 		return { { op, b }, { "timestamp", ts_b } };
 	}
 
 	// Simply selects the last thing to be merged.
 	// Returns { $last : b }
-	if (op == "$last") return { { op, b } };
+	if (op == "$last")
+		return { { op, b } };
 
 	// $expires will reduce its value to null if the "version" operator argument is present, nonzero, and has a value
 	// that is less than JSONDoc::expires_reference_version.  This DOES mean that if the "version" argument
@@ -125,8 +134,10 @@ json_spirit::mObject JSONDoc::mergeOperator<json_spirit::mValue>(const std::stri
 
 		json_spirit::mValue r;
 		// If version is 0 or greater than the current reference version then use the value
-		if (ver_a == 0 || ver_a > JSONDoc::expires_reference_version) r = a;
-		if (ver_b == 0 || ver_b > JSONDoc::expires_reference_version) mergeValueInto(r, b);
+		if (ver_a == 0 || ver_a > JSONDoc::expires_reference_version)
+			r = a;
+		if (ver_b == 0 || ver_b > JSONDoc::expires_reference_version)
+			mergeValueInto(r, b);
 
 		return { { op, r } };
 	}
@@ -145,7 +156,8 @@ void JSONDoc::cleanOps(json_spirit::mObject& obj) {
 				// The "count_keys" operator needs special handling
 				if (op == "$count_keys") {
 					int count = 1;
-					if (o.at(op).type() == json_spirit::obj_type) count = o.at(op).get_obj().size();
+					if (o.at(op).type() == json_spirit::obj_type)
+						count = o.at(op).get_obj().size();
 					kv->second = count;
 				} else if (op == "$expires") {
 					uint64_t version = 0;
@@ -179,7 +191,8 @@ void JSONDoc::mergeInto(json_spirit::mObject& dst, const json_spirit::mObject& s
 }
 
 void JSONDoc::mergeValueInto(json_spirit::mValue& dst, const json_spirit::mValue& src) {
-	if (src.is_null()) return;
+	if (src.is_null())
+		return;
 
 	if (dst.is_null()) {
 		dst = src;
@@ -187,7 +200,8 @@ void JSONDoc::mergeValueInto(json_spirit::mValue& dst, const json_spirit::mValue
 	}
 
 	// Do nothing if d is already an error
-	if (dst.type() == json_spirit::obj_type && dst.get_obj().count("ERROR")) return;
+	if (dst.type() == json_spirit::obj_type && dst.get_obj().count("ERROR"))
+		return;
 
 	if (dst.type() != src.type()) {
 		dst = json_spirit::mObject({ { "ERROR", "Incompatible types." }, { "a", dst }, { "b", src } });
@@ -276,11 +290,13 @@ void JSONDoc::mergeValueInto(json_spirit::mValue& dst, const json_spirit::mValue
 	}
 
 	case json_spirit::array_type:
-		for (auto& ai : src.get_array()) dst.get_array().push_back(ai);
+		for (auto& ai : src.get_array())
+			dst.get_array().push_back(ai);
 		break;
 
 	default:
-		if (dst != src) dst = json_spirit::mObject({ { "ERROR", "Values do not match." }, { "a", dst }, { "b", src } });
+		if (dst != src)
+			dst = json_spirit::mObject({ { "ERROR", "Values do not match." }, { "a", dst }, { "b", src } });
 	}
 }
 
@@ -332,8 +348,10 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<C
 
 // Client section of the json output
 // Will NOT throw, errors will be put into messages array
-ACTOR Future<StatusObject> clientStatusFetcher(Reference<ClusterConnectionFile> f, StatusArray* messages,
-                                               bool* quorum_reachable, int* coordinatorsFaultTolerance) {
+ACTOR Future<StatusObject> clientStatusFetcher(Reference<ClusterConnectionFile> f,
+                                               StatusArray* messages,
+                                               bool* quorum_reachable,
+                                               int* coordinatorsFaultTolerance) {
 	state StatusObject statusObj;
 
 	Optional<StatusObject> coordsStatusObj =
@@ -387,9 +405,9 @@ ACTOR Future<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI, S
 						                                 cI.address().toString() + " to get status.")
 						                                    .c_str()));
 					else if (result.getError().code() == error_code_server_overloaded)
-						messages->push_back(
-						    makeMessage("server_overloaded", "The cluster controller is currently processing too many "
-						                                     "status requests and is unable to respond"));
+						messages->push_back(makeMessage("server_overloaded",
+						                                "The cluster controller is currently processing too many "
+						                                "status requests and is unable to respond"));
 					else
 						messages->push_back(
 						    makeMessage("status_incomplete_error", "Cluster encountered an error fetching status."));
@@ -458,7 +476,8 @@ StatusObject getClientDatabaseStatus(StatusObjectReader client, StatusObjectRead
 
 ACTOR Future<StatusObject> statusFetcherImpl(Reference<ClusterConnectionFile> f,
                                              Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface) {
-	if (!g_network) throw network_not_setup();
+	if (!g_network)
+		throw network_not_setup();
 
 	state StatusObject statusObj;
 	state StatusObject statusObjClient;
@@ -475,9 +494,11 @@ ACTOR Future<StatusObject> statusFetcherImpl(Reference<ClusterConnectionFile> f,
 		    wait(clientStatusFetcher(f, &clientMessages, &quorum_reachable, &coordinatorsFaultTolerance));
 		statusObjClient = _statusObjClient;
 
-		if (clientTime != -1) statusObjClient["timestamp"] = clientTime;
+		if (clientTime != -1)
+			statusObjClient["timestamp"] = clientTime;
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) throw;
+		if (e.code() == error_code_actor_cancelled)
+			throw;
 		TraceEvent(SevError, "ClientStatusFetchError").error(e);
 		clientMessages.push_back(
 		    makeMessage("status_incomplete_client", "Could not retrieve client status information."));
@@ -553,7 +574,8 @@ ACTOR Future<StatusObject> statusFetcherImpl(Reference<ClusterConnectionFile> f,
 	// Make sure that if a document is being returned at all it has a cluster.layers._valid path.
 	JSONDoc doc(statusObj); // doc will modify statusObj with a convenient interface
 	auto& layers_valid = doc.create("cluster.layers._valid");
-	if (layers_valid.is_null()) layers_valid = false;
+	if (layers_valid.is_null())
+		layers_valid = false;
 
 	return statusObj;
 }

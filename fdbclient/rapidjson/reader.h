@@ -272,11 +272,13 @@ void SkipWhitespace(InputStream& is) {
 	InputStream& s(copy.s);
 
 	typename InputStream::Ch c;
-	while ((c = s.Peek()) == ' ' || c == '\n' || c == '\r' || c == '\t') s.Take();
+	while ((c = s.Peek()) == ' ' || c == '\n' || c == '\r' || c == '\t')
+		s.Take();
 }
 
 inline const char* SkipWhitespace(const char* p, const char* end) {
-	while (p != end && (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t')) ++p;
+	while (p != end && (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t'))
+		++p;
 	return p;
 }
 
@@ -498,7 +500,8 @@ public:
 	*/
 	template <unsigned parseFlags, typename InputStream, typename Handler>
 	ParseResult Parse(InputStream& is, Handler& handler) {
-		if (parseFlags & kParseIterativeFlag) return IterativeParse<parseFlags>(is, handler);
+		if (parseFlags & kParseIterativeFlag)
+			return IterativeParse<parseFlags>(is, handler);
 
 		parseResult_.Clear();
 
@@ -581,7 +584,8 @@ private:
 						if (RAPIDJSON_UNLIKELY(is.Peek() == '\0'))
 							RAPIDJSON_PARSE_ERROR(kParseErrorUnspecificSyntaxError, is.Tell());
 						else if (Consume(is, '*')) {
-							if (Consume(is, '/')) break;
+							if (Consume(is, '/'))
+								break;
 						} else
 							is.Take();
 					}
@@ -602,7 +606,8 @@ private:
 		RAPIDJSON_ASSERT(is.Peek() == '{');
 		is.Take(); // Skip '{'
 
-		if (RAPIDJSON_UNLIKELY(!handler.StartObject())) RAPIDJSON_PARSE_ERROR(kParseErrorTermination, is.Tell());
+		if (RAPIDJSON_UNLIKELY(!handler.StartObject()))
+			RAPIDJSON_PARSE_ERROR(kParseErrorTermination, is.Tell());
 
 		SkipWhitespaceAndComments<parseFlags>(is);
 		RAPIDJSON_PARSE_ERROR_EARLY_RETURN_VOID;
@@ -614,7 +619,8 @@ private:
 		}
 
 		for (SizeType memberCount = 0;;) {
-			if (RAPIDJSON_UNLIKELY(is.Peek() != '"')) RAPIDJSON_PARSE_ERROR(kParseErrorObjectMissName, is.Tell());
+			if (RAPIDJSON_UNLIKELY(is.Peek() != '"'))
+				RAPIDJSON_PARSE_ERROR(kParseErrorObjectMissName, is.Tell());
 
 			ParseString<parseFlags>(is, handler, true);
 			RAPIDJSON_PARSE_ERROR_EARLY_RETURN_VOID;
@@ -622,7 +628,8 @@ private:
 			SkipWhitespaceAndComments<parseFlags>(is);
 			RAPIDJSON_PARSE_ERROR_EARLY_RETURN_VOID;
 
-			if (RAPIDJSON_UNLIKELY(!Consume(is, ':'))) RAPIDJSON_PARSE_ERROR(kParseErrorObjectMissColon, is.Tell());
+			if (RAPIDJSON_UNLIKELY(!Consume(is, ':')))
+				RAPIDJSON_PARSE_ERROR(kParseErrorObjectMissColon, is.Tell());
 
 			SkipWhitespaceAndComments<parseFlags>(is);
 			RAPIDJSON_PARSE_ERROR_EARLY_RETURN_VOID;
@@ -668,7 +675,8 @@ private:
 		RAPIDJSON_ASSERT(is.Peek() == '[');
 		is.Take(); // Skip '['
 
-		if (RAPIDJSON_UNLIKELY(!handler.StartArray())) RAPIDJSON_PARSE_ERROR(kParseErrorTermination, is.Tell());
+		if (RAPIDJSON_UNLIKELY(!handler.StartArray()))
+			RAPIDJSON_PARSE_ERROR(kParseErrorTermination, is.Tell());
 
 		SkipWhitespaceAndComments<parseFlags>(is);
 		RAPIDJSON_PARSE_ERROR_EARLY_RETURN_VOID;
@@ -714,7 +722,8 @@ private:
 		is.Take();
 
 		if (RAPIDJSON_LIKELY(Consume(is, 'u') && Consume(is, 'l') && Consume(is, 'l'))) {
-			if (RAPIDJSON_UNLIKELY(!handler.Null())) RAPIDJSON_PARSE_ERROR(kParseErrorTermination, is.Tell());
+			if (RAPIDJSON_UNLIKELY(!handler.Null()))
+				RAPIDJSON_PARSE_ERROR(kParseErrorTermination, is.Tell());
 		} else
 			RAPIDJSON_PARSE_ERROR(kParseErrorValueInvalid, is.Tell());
 	}
@@ -725,7 +734,8 @@ private:
 		is.Take();
 
 		if (RAPIDJSON_LIKELY(Consume(is, 'r') && Consume(is, 'u') && Consume(is, 'e'))) {
-			if (RAPIDJSON_UNLIKELY(!handler.Bool(true))) RAPIDJSON_PARSE_ERROR(kParseErrorTermination, is.Tell());
+			if (RAPIDJSON_UNLIKELY(!handler.Bool(true)))
+				RAPIDJSON_PARSE_ERROR(kParseErrorTermination, is.Tell());
 		} else
 			RAPIDJSON_PARSE_ERROR(kParseErrorValueInvalid, is.Tell());
 	}
@@ -736,7 +746,8 @@ private:
 		is.Take();
 
 		if (RAPIDJSON_LIKELY(Consume(is, 'a') && Consume(is, 'l') && Consume(is, 's') && Consume(is, 'e'))) {
-			if (RAPIDJSON_UNLIKELY(!handler.Bool(false))) RAPIDJSON_PARSE_ERROR(kParseErrorTermination, is.Tell());
+			if (RAPIDJSON_UNLIKELY(!handler.Bool(false)))
+				RAPIDJSON_PARSE_ERROR(kParseErrorTermination, is.Tell());
 		} else
 			RAPIDJSON_PARSE_ERROR(kParseErrorValueInvalid, is.Tell());
 	}
@@ -828,7 +839,8 @@ private:
 			const typename TargetEncoding::Ch* const str = stackStream.Pop();
 			success = (isKey ? handler.Key(str, length, true) : handler.String(str, length, true));
 		}
-		if (RAPIDJSON_UNLIKELY(!success)) RAPIDJSON_PARSE_ERROR(kParseErrorTermination, s.Tell());
+		if (RAPIDJSON_UNLIKELY(!success))
+			RAPIDJSON_PARSE_ERROR(kParseErrorTermination, s.Tell());
 	}
 
 	// Parse string to an output is
@@ -847,7 +859,8 @@ private:
 
 		for (;;) {
 			// Scan and copy string before "\\\"" or < 0x20. This is an optional optimzation.
-			if (!(parseFlags & kParseValidateEncodingFlag)) ScanCopyUnescapedString(is, os);
+			if (!(parseFlags & kParseValidateEncodingFlag))
+				ScanCopyUnescapedString(is, os);
 
 			Ch c = is.Peek();
 			if (RAPIDJSON_UNLIKELY(c == '\\')) { // Escape
@@ -943,7 +956,8 @@ private:
 				length = static_cast<SizeType>(__builtin_ffs(r) - 1);
 #endif
 				char* q = reinterpret_cast<char*>(os.Push(length));
-				for (size_t i = 0; i < length; i++) q[i] = p[i];
+				for (size_t i = 0; i < length; i++)
+					q[i] = p[i];
 
 				p += length;
 				break;
@@ -1006,7 +1020,8 @@ private:
 #else
 				length = static_cast<size_t>(__builtin_ffs(r) - 1);
 #endif
-				for (const char* pend = p + length; p != pend;) *q++ = *p++;
+				for (const char* pend = p + length; p != pend;)
+					*q++ = *p++;
 				break;
 			}
 			_mm_storeu_si128(reinterpret_cast<__m128i*>(q), s);
@@ -1247,7 +1262,8 @@ private:
 			if (!useDouble) {
 #if RAPIDJSON_64BIT
 				// Use i64 to store significand in 64-bit architecture
-				if (!use64bit) i64 = i;
+				if (!use64bit)
+					i64 = i;
 
 				while (RAPIDJSON_LIKELY(s.Peek() >= '0' && s.Peek() <= '9')) {
 					if (i64 > RAPIDJSON_UINT64_C2(0x1FFFFF, 0xFFFFFFFF)) // 2^53 - 1 for fast path
@@ -1255,7 +1271,8 @@ private:
 					else {
 						i64 = i64 * 10 + static_cast<unsigned>(s.TakePush() - '0');
 						--expFrac;
-						if (i64 != 0) significandDigit++;
+						if (i64 != 0)
+							significandDigit++;
 					}
 				}
 
@@ -1271,7 +1288,8 @@ private:
 				if (significandDigit < 17) {
 					d = d * 10.0 + (s.TakePush() - '0');
 					--expFrac;
-					if (RAPIDJSON_LIKELY(d > 0.0)) significandDigit++;
+					if (RAPIDJSON_LIKELY(d > 0.0))
+						significandDigit++;
 				} else
 					s.TakePush();
 			}
@@ -1314,7 +1332,8 @@ private:
 			} else
 				RAPIDJSON_PARSE_ERROR(kParseErrorNumberMissExponent, s.Tell());
 
-			if (expMinus) exp = -exp;
+			if (expMinus)
+				exp = -exp;
 		}
 
 		// Finish parsing, call event according to the type of number.
@@ -1369,7 +1388,8 @@ private:
 				}
 			}
 		}
-		if (RAPIDJSON_UNLIKELY(!cont)) RAPIDJSON_PARSE_ERROR(kParseErrorTermination, startOffset);
+		if (RAPIDJSON_UNLIKELY(!cont))
+			RAPIDJSON_PARSE_ERROR(kParseErrorTermination, startOffset);
 	}
 
 	// Parse any JSON value
@@ -1531,15 +1551,29 @@ private:
 			    IterativeParsingValueState // Number
 			},
 			// Finish(sink state)
-			{ IterativeParsingErrorState, IterativeParsingErrorState, IterativeParsingErrorState,
-			  IterativeParsingErrorState, IterativeParsingErrorState, IterativeParsingErrorState,
-			  IterativeParsingErrorState, IterativeParsingErrorState, IterativeParsingErrorState,
-			  IterativeParsingErrorState, IterativeParsingErrorState },
+			{ IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState },
 			// Error(sink state)
-			{ IterativeParsingErrorState, IterativeParsingErrorState, IterativeParsingErrorState,
-			  IterativeParsingErrorState, IterativeParsingErrorState, IterativeParsingErrorState,
-			  IterativeParsingErrorState, IterativeParsingErrorState, IterativeParsingErrorState,
-			  IterativeParsingErrorState, IterativeParsingErrorState },
+			{ IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState },
 			// ObjectInitial
 			{
 			    IterativeParsingErrorState, // Left bracket
@@ -1611,10 +1645,17 @@ private:
 			    IterativeParsingErrorState // Number
 			},
 			// ObjectFinish(sink state)
-			{ IterativeParsingErrorState, IterativeParsingErrorState, IterativeParsingErrorState,
-			  IterativeParsingErrorState, IterativeParsingErrorState, IterativeParsingErrorState,
-			  IterativeParsingErrorState, IterativeParsingErrorState, IterativeParsingErrorState,
-			  IterativeParsingErrorState, IterativeParsingErrorState },
+			{ IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState },
 			// ArrayInitial
 			{
 			    IterativeParsingArrayInitialState, // Left bracket(push Element state)
@@ -1658,15 +1699,29 @@ private:
 			    IterativeParsingElementState // Number
 			},
 			// ArrayFinish(sink state)
-			{ IterativeParsingErrorState, IterativeParsingErrorState, IterativeParsingErrorState,
-			  IterativeParsingErrorState, IterativeParsingErrorState, IterativeParsingErrorState,
-			  IterativeParsingErrorState, IterativeParsingErrorState, IterativeParsingErrorState,
-			  IterativeParsingErrorState, IterativeParsingErrorState },
+			{ IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState },
 			// Single Value (sink state)
-			{ IterativeParsingErrorState, IterativeParsingErrorState, IterativeParsingErrorState,
-			  IterativeParsingErrorState, IterativeParsingErrorState, IterativeParsingErrorState,
-			  IterativeParsingErrorState, IterativeParsingErrorState, IterativeParsingErrorState,
-			  IterativeParsingErrorState, IterativeParsingErrorState }
+			{ IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState,
+			  IterativeParsingErrorState }
 		}; // End of G
 
 		return static_cast<IterativeParsingState>(G[state][token]);
@@ -1675,8 +1730,8 @@ private:
 	// Make an advance in the token stream and state based on the candidate destination state which was returned by
 	// Transit(). May return a new state on state pop.
 	template <unsigned parseFlags, typename InputStream, typename Handler>
-	RAPIDJSON_FORCEINLINE IterativeParsingState Transit(IterativeParsingState src, Token token,
-	                                                    IterativeParsingState dst, InputStream& is, Handler& handler) {
+	RAPIDJSON_FORCEINLINE IterativeParsingState
+	Transit(IterativeParsingState src, Token token, IterativeParsingState dst, InputStream& is, Handler& handler) {
 		(void)token;
 
 		switch (dst) {
@@ -1752,11 +1807,13 @@ private:
 			// Get member count.
 			SizeType c = *stack_.template Pop<SizeType>(1);
 			// If the object is not empty, count the last member.
-			if (src == IterativeParsingMemberValueState) ++c;
+			if (src == IterativeParsingMemberValueState)
+				++c;
 			// Restore the state.
 			IterativeParsingState n = static_cast<IterativeParsingState>(*stack_.template Pop<SizeType>(1));
 			// Transit to Finish state if this is the topmost scope.
-			if (n == IterativeParsingStartState) n = IterativeParsingFinishState;
+			if (n == IterativeParsingStartState)
+				n = IterativeParsingFinishState;
 			// Call handler
 			bool hr = handler.EndObject(c);
 			// On handler short circuits the parsing.
@@ -1778,11 +1835,13 @@ private:
 			// Get element count.
 			SizeType c = *stack_.template Pop<SizeType>(1);
 			// If the array is not empty, count the last element.
-			if (src == IterativeParsingElementState) ++c;
+			if (src == IterativeParsingElementState)
+				++c;
 			// Restore the state.
 			IterativeParsingState n = static_cast<IterativeParsingState>(*stack_.template Pop<SizeType>(1));
 			// Transit to Finish state if this is the topmost scope.
-			if (n == IterativeParsingStartState) n = IterativeParsingFinishState;
+			if (n == IterativeParsingStartState)
+				n = IterativeParsingFinishState;
 			// Call handler
 			bool hr = handler.EndArray(c);
 			// On handler short circuits the parsing.
@@ -1874,14 +1933,16 @@ private:
 			state = d;
 
 			// Do not further consume streams if a root JSON has been parsed.
-			if ((parseFlags & kParseStopWhenDoneFlag) && state == IterativeParsingFinishState) break;
+			if ((parseFlags & kParseStopWhenDoneFlag) && state == IterativeParsingFinishState)
+				break;
 
 			SkipWhitespaceAndComments<parseFlags>(is);
 			RAPIDJSON_PARSE_ERROR_EARLY_RETURN(parseResult_);
 		}
 
 		// Handle the end of file.
-		if (state != IterativeParsingFinishState) HandleError(state, is);
+		if (state != IterativeParsingFinishState)
+			HandleError(state, is);
 
 		return parseResult_;
 	}

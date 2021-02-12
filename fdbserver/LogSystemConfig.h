@@ -99,8 +99,13 @@ struct TLogSet {
 	explicit TLogSet(const LogSet& rhs);
 
 	std::string toString() const {
-		return format("anti: %d replication: %d local: %d routers: %d tLogs: %s locality: %d", tLogWriteAntiQuorum,
-		              tLogReplicationFactor, isLocal, logRouters.size(), describe(tLogs).c_str(), locality);
+		return format("anti: %d replication: %d local: %d routers: %d tLogs: %s locality: %d",
+		              tLogWriteAntiQuorum,
+		              tLogReplicationFactor,
+		              isLocal,
+		              logRouters.size(),
+		              describe(tLogs).c_str(),
+		              locality);
 	}
 
 	bool operator==(const TLogSet& rhs) const {
@@ -153,11 +158,30 @@ struct TLogSet {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (is_fb_function<Ar>) {
-			serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities,
-			           isLocal, locality, startVersion, satelliteTagLocations, tLogVersion);
+			serializer(ar,
+			           tLogs,
+			           logRouters,
+			           tLogWriteAntiQuorum,
+			           tLogReplicationFactor,
+			           tLogPolicy,
+			           tLogLocalities,
+			           isLocal,
+			           locality,
+			           startVersion,
+			           satelliteTagLocations,
+			           tLogVersion);
 		} else {
-			serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities,
-			           isLocal, locality, startVersion, satelliteTagLocations);
+			serializer(ar,
+			           tLogs,
+			           logRouters,
+			           tLogWriteAntiQuorum,
+			           tLogReplicationFactor,
+			           tLogPolicy,
+			           tLogLocalities,
+			           isLocal,
+			           locality,
+			           startVersion,
+			           satelliteTagLocations);
 			if (ar.isDeserializing && !ar.protocolVersion().hasTLogVersion()) {
 				tLogVersion = TLogVersion::V2;
 			} else {
@@ -229,7 +253,10 @@ struct LogSystemConfig {
 	  : logSystemType(LogSystemType::empty), logRouterTags(0), txsTags(0), expectedLogSets(0), stopped(false) {}
 
 	std::string toString() const {
-		return format("type: %d oldGenerations: %d tags: %d %s", logSystemType, oldTLogs.size(), logRouterTags,
+		return format("type: %d oldGenerations: %d tags: %d %s",
+		              logSystemType,
+		              oldTLogs.size(),
+		              logRouterTags,
 		              describe(tLogs).c_str());
 	}
 
@@ -358,8 +385,9 @@ struct LogSystemConfig {
 		}
 		uniquify(results);
 		// This assert depends on the fact that uniquify will sort the elements based on <UID, NetworkAddr> order
-		ASSERT_WE_THINK(std::unique(results.begin(), results.end(),
-		                            [](IdAddrPair& x, IdAddrPair& y) { return x.first == y.first; }) == results.end());
+		ASSERT_WE_THINK(std::unique(results.begin(), results.end(), [](IdAddrPair& x, IdAddrPair& y) {
+			                return x.first == y.first;
+		                }) == results.end());
 		return results;
 	}
 
@@ -400,8 +428,17 @@ struct LogSystemConfig {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, logSystemType, tLogs, logRouterTags, oldTLogs, expectedLogSets, recruitmentID, stopped,
-		           recoveredAt, pseudoLocalities, txsTags);
+		serializer(ar,
+		           logSystemType,
+		           tLogs,
+		           logRouterTags,
+		           oldTLogs,
+		           expectedLogSets,
+		           recruitmentID,
+		           stopped,
+		           recoveredAt,
+		           pseudoLocalities,
+		           txsTags);
 	}
 };
 

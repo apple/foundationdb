@@ -336,11 +336,14 @@ private:
 	// The 'cache' parameter may be used by some versions of the kernel,
 	// and should be nullptr or point to a static buffer containing at
 	// least two 'long's.
-	static long InitAndGetCPU(unsigned* cpu, void* cache, // NOLINT 'long'.
+	static long InitAndGetCPU(unsigned* cpu,
+	                          void* cache, // NOLINT 'long'.
 	                          void* unused);
-	static long GetCPUViaSyscall(unsigned* cpu, void* cache, // NOLINT 'long'.
+	static long GetCPUViaSyscall(unsigned* cpu,
+	                             void* cache, // NOLINT 'long'.
 	                             void* unused);
-	typedef long (*GetCpuFn)(unsigned* cpu, void* cache, // NOLINT 'long'.
+	typedef long (*GetCpuFn)(unsigned* cpu,
+	                         void* cache, // NOLINT 'long'.
 	                         void* unused);
 
 	// This function pointer may point to InitAndGetCPU,
@@ -1860,7 +1863,10 @@ void AnnotateRWLockDestroy(const char* file, int line, const volatile void* lock
 void AnnotateRWLockAcquired(const char* file, int line, const volatile void* lock, long is_w); /* NOLINT */
 void AnnotateRWLockReleased(const char* file, int line, const volatile void* lock, long is_w); /* NOLINT */
 void AnnotateBenignRace(const char* file, int line, const volatile void* address, const char* description);
-void AnnotateBenignRaceSized(const char* file, int line, const volatile void* address, size_t size,
+void AnnotateBenignRaceSized(const char* file,
+                             int line,
+                             const volatile void* address,
+                             size_t size,
                              const char* description);
 void AnnotateThreadName(const char* file, int line, const char* name);
 void AnnotateEnableRaceDetection(const char* file, int line, int enable);
@@ -2063,11 +2069,16 @@ typedef int (*Unwinder)(void**, int*, int, int, const void*, int*);
 std::atomic<Unwinder> custom;
 
 template <bool IS_STACK_FRAMES, bool IS_WITH_CONTEXT>
-ABSL_ATTRIBUTE_ALWAYS_INLINE inline int Unwind(void** result, int* sizes, int max_depth, int skip_count, const void* uc,
+ABSL_ATTRIBUTE_ALWAYS_INLINE inline int Unwind(void** result,
+                                               int* sizes,
+                                               int max_depth,
+                                               int skip_count,
+                                               const void* uc,
                                                int* min_dropped_frames) {
 	Unwinder f = &UnwindImpl<IS_STACK_FRAMES, IS_WITH_CONTEXT>;
 	Unwinder g = custom.load(std::memory_order_acquire);
-	if (g != nullptr) f = g;
+	if (g != nullptr)
+		f = g;
 
 	// Add 1 to skip count for the unwinder function itself
 	int size = (*f)(result, sizes, max_depth, skip_count + 1, uc, min_dropped_frames);
@@ -2082,7 +2093,11 @@ int GetStackFrames(void** result, int* sizes, int max_depth, int skip_count) {
 	return Unwind<true, false>(result, sizes, max_depth, skip_count, nullptr, nullptr);
 }
 
-int GetStackFramesWithContext(void** result, int* sizes, int max_depth, int skip_count, const void* uc,
+int GetStackFramesWithContext(void** result,
+                              int* sizes,
+                              int max_depth,
+                              int skip_count,
+                              const void* uc,
                               int* min_dropped_frames) {
 	return Unwind<true, true>(result, sizes, max_depth, skip_count, uc, min_dropped_frames);
 }
@@ -2214,8 +2229,8 @@ bool AddressIsReadable(const void* addr) {
 			fcntl(p[0], F_SETFD, FD_CLOEXEC);
 			fcntl(p[1], F_SETFD, FD_CLOEXEC);
 			uint64_t new_pid_and_fds = Pack(current_pid, p[0], p[1]);
-			if (pid_and_fds.compare_exchange_strong(local_pid_and_fds, new_pid_and_fds, std::memory_order_relaxed,
-			                                        std::memory_order_relaxed)) {
+			if (pid_and_fds.compare_exchange_strong(
+			        local_pid_and_fds, new_pid_and_fds, std::memory_order_relaxed, std::memory_order_relaxed)) {
 				local_pid_and_fds = new_pid_and_fds; // fds exposed to other threads
 			} else { // fds not exposed to other threads; we can close them.
 				close(p[0]);
@@ -2239,8 +2254,8 @@ bool AddressIsReadable(const void* addr) {
 		if (errno == EBADF) { // Descriptors invalid.
 			// If pid_and_fds contains the problematic file descriptors we just used,
 			// this call will forget them, and the loop will try again.
-			pid_and_fds.compare_exchange_strong(local_pid_and_fds, 0, std::memory_order_relaxed,
-			                                    std::memory_order_relaxed);
+			pid_and_fds.compare_exchange_strong(
+			    local_pid_and_fds, 0, std::memory_order_relaxed, std::memory_order_relaxed);
 		}
 	} while (errno == EBADF);
 	errno = save_errno;
@@ -2744,7 +2759,8 @@ bool VDSOSupport::LookupSymbolByAddress(const void* address, SymbolInfo* info_ou
 
 // NOLINT on 'long' because this routine mimics kernel api.
 long VDSOSupport::GetCPUViaSyscall(unsigned* cpu, // NOLINT(runtime/int)
-                                   void*, void*) {
+                                   void*,
+                                   void*) {
 #ifdef SYS_getcpu
 	return syscall(SYS_getcpu, cpu, nullptr, nullptr);
 #else
@@ -2756,7 +2772,8 @@ long VDSOSupport::GetCPUViaSyscall(unsigned* cpu, // NOLINT(runtime/int)
 
 // Use fast __vdso_getcpu if available.
 long VDSOSupport::InitAndGetCPU(unsigned* cpu, // NOLINT(runtime/int)
-                                void* x, void* y) {
+                                void* x,
+                                void* y) {
 	Init();
 	GetCpuFn fn = getcpu_fn_.load(std::memory_order_relaxed);
 	ABSL_RAW_CHECK(fn != &InitAndGetCPU, "Init() did not set getcpu_fn_");
@@ -2863,7 +2880,8 @@ void AnnotateMemoryIsUninitialized(const char*, int, const volatile void* mem, s
 
 static int GetRunningOnValgrind(void) {
 #ifdef RUNNING_ON_VALGRIND
-	if (RUNNING_ON_VALGRIND) return 1;
+	if (RUNNING_ON_VALGRIND)
+		return 1;
 #endif
 	char* running_on_valgrind_str = getenv("RUNNING_ON_VALGRIND");
 	if (running_on_valgrind_str) {
@@ -2879,7 +2897,8 @@ int RunningOnValgrind(void) {
 	/* C doesn't have thread-safe initialization of statics, and we
 	   don't want to depend on pthread_once here, so hack it. */
 	ANNOTATE_BENIGN_RACE(&running_on_valgrind, "safe hack");
-	if (local_running_on_valgrind == -1) running_on_valgrind = local_running_on_valgrind = GetRunningOnValgrind();
+	if (local_running_on_valgrind == -1)
+		running_on_valgrind = local_running_on_valgrind = GetRunningOnValgrind();
 	return local_running_on_valgrind;
 }
 

@@ -53,7 +53,8 @@ struct MoveKeysWorkload : TestWorkload {
 				try {
 					Standalone<RangeResultRef> res = wait(tr.getRange(configKeys, 1000));
 					ASSERT(res.size() < 1000);
-					for (int i = 0; i < res.size(); i++) self->configuration.set(res[i].key, res[i].value);
+					for (int i = 0; i < res.size(); i++)
+						self->configuration.set(res[i].key, res[i].value);
 					break;
 				} catch (Error& e) {
 					wait(tr.onError(e));
@@ -62,8 +63,8 @@ struct MoveKeysWorkload : TestWorkload {
 
 			state int oldMode = wait(setDDMode(cx, 0));
 			TraceEvent("RMKStartModeSetting");
-			wait(timeout(reportErrors(self->worker(cx, self), "MoveKeysWorkloadWorkerError"), self->testDuration,
-			             Void()));
+			wait(timeout(
+			    reportErrors(self->worker(cx, self), "MoveKeysWorkloadWorkerError"), self->testDuration, Void()));
 			// Always set the DD mode back, even if we die with an error
 			TraceEvent("RMKDoneMoving");
 			wait(success(setDDMode(cx, oldMode)));
@@ -111,8 +112,11 @@ struct MoveKeysWorkload : TestWorkload {
 		return vector<StorageServerInterface>(t.begin(), t.end());
 	}
 
-	ACTOR Future<Void> doMoveKeys(Database cx, MoveKeysWorkload* self, KeyRange keys,
-	                              vector<StorageServerInterface> destinationTeam, MoveKeysLock lock) {
+	ACTOR Future<Void> doMoveKeys(Database cx,
+	                              MoveKeysWorkload* self,
+	                              KeyRange keys,
+	                              vector<StorageServerInterface> destinationTeam,
+	                              MoveKeysLock lock) {
 		state TraceInterval relocateShardInterval("RelocateShard");
 		state FlowLock fl1(1);
 		state FlowLock fl2(1);
@@ -121,7 +125,8 @@ struct MoveKeysWorkload : TestWorkload {
 			desc +=
 			    format("%s (%llx),", destinationTeam[s].address().toString().c_str(), destinationTeam[s].id().first());
 		vector<UID> destinationTeamIDs;
-		for (int s = 0; s < destinationTeam.size(); s++) destinationTeamIDs.push_back(destinationTeam[s].id());
+		for (int s = 0; s < destinationTeam.size(); s++)
+			destinationTeamIDs.push_back(destinationTeam[s].id());
 
 		TraceEvent(relocateShardInterval.begin())
 		    .detail("KeyBegin", printable(keys.begin))
@@ -132,7 +137,15 @@ struct MoveKeysWorkload : TestWorkload {
 
 		try {
 			state Promise<Void> signal;
-			wait(moveKeys(cx, keys, destinationTeamIDs, destinationTeamIDs, lock, signal, &fl1, &fl2, false,
+			wait(moveKeys(cx,
+			              keys,
+			              destinationTeamIDs,
+			              destinationTeamIDs,
+			              lock,
+			              signal,
+			              &fl1,
+			              &fl2,
+			              false,
 			              relocateShardInterval.pairID));
 			TraceEvent(relocateShardInterval.end()).detail("Result", "Success");
 			return Void();
@@ -147,10 +160,12 @@ struct MoveKeysWorkload : TestWorkload {
 		// with the same address having keys.  So if there are two servers with the same address,
 		// don't use either one (so we don't have to find out which of them, if any, already has keys).
 		std::map<NetworkAddress, int> count;
-		for (int s = 0; s < servers.size(); s++) count[servers[s].address()]++;
+		for (int s = 0; s < servers.size(); s++)
+			count[servers[s].address()]++;
 		int o = 0;
 		for (int s = 0; s < servers.size(); s++)
-			if (count[servers[s].address()] == 1) servers[o++] = servers[s];
+			if (count[servers[s].address()] == 1)
+				servers[o++] = servers[s];
 		servers.resize(o);
 	}
 
@@ -198,7 +213,8 @@ struct MoveKeysWorkload : TestWorkload {
 					}
 				}
 			} catch (Error& e) {
-				if (e.code() != error_code_movekeys_conflict && e.code() != error_code_operation_failed) throw;
+				if (e.code() != error_code_movekeys_conflict && e.code() != error_code_operation_failed)
+					throw;
 				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 				// Keep trying to get the moveKeysLock
 			}

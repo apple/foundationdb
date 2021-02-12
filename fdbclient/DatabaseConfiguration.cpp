@@ -76,7 +76,8 @@ void parse(std::vector<RegionInfo>* regions, ValueRef const& v) {
 					s.tryGet("satellite_logs", satInfo.satelliteDesiredTLogCount);
 					info.satellites.push_back(satInfo);
 				} else {
-					if (foundNonSatelliteDatacenter) throw invalid_option();
+					if (foundNonSatelliteDatacenter)
+						throw invalid_option();
 					foundNonSatelliteDatacenter = true;
 					s.get("id", idStr);
 					info.dcId = idStr;
@@ -84,7 +85,8 @@ void parse(std::vector<RegionInfo>* regions, ValueRef const& v) {
 				}
 			}
 			std::sort(info.satellites.begin(), info.satellites.end(), SatelliteInfo::sort_by_priority());
-			if (!foundNonSatelliteDatacenter) throw invalid_option();
+			if (!foundNonSatelliteDatacenter)
+				throw invalid_option();
 			dc.tryGet("satellite_logs", info.satelliteDesiredTLogCount);
 			std::string satelliteReplication;
 			if (dc.tryGet("satellite_redundancy_mode", satelliteReplication)) {
@@ -110,7 +112,8 @@ void parse(std::vector<RegionInfo>* regions, ValueRef const& v) {
 					info.satelliteTLogUsableDcs = 2;
 					info.satelliteTLogWriteAntiQuorum = 0;
 					info.satelliteTLogPolicy = Reference<IReplicationPolicy>(
-					    new PolicyAcross(2, "dcid",
+					    new PolicyAcross(2,
+					                     "dcid",
 					                     Reference<IReplicationPolicy>(new PolicyAcross(
 					                         2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
 					info.satelliteTLogReplicationFactorFallback = 2;
@@ -123,7 +126,8 @@ void parse(std::vector<RegionInfo>* regions, ValueRef const& v) {
 					info.satelliteTLogUsableDcs = 2;
 					info.satelliteTLogWriteAntiQuorum = 2;
 					info.satelliteTLogPolicy = Reference<IReplicationPolicy>(
-					    new PolicyAcross(2, "dcid",
+					    new PolicyAcross(2,
+					                     "dcid",
 					                     Reference<IReplicationPolicy>(new PolicyAcross(
 					                         2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
 					info.satelliteTLogReplicationFactorFallback = 2;
@@ -255,8 +259,10 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 			result["storage_replicas"] = storageTeamSize;
 			result["log_replicas"] = tLogReplicationFactor;
 			result["log_anti_quorum"] = tLogWriteAntiQuorum;
-			if (!noPolicies) result["storage_replication_policy"] = storagePolicy->info();
-			if (!noPolicies) result["log_replication_policy"] = tLogPolicy->info();
+			if (!noPolicies)
+				result["storage_replication_policy"] = storagePolicy->info();
+			if (!noPolicies)
+				result["log_replication_policy"] = tLogPolicy->info();
 		}
 
 		if (tLogVersion > TLogVersion::DEFAULT) {
@@ -292,7 +298,8 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 			result["remote_redundancy_mode"] = "remote_triple";
 		} else if (remoteTLogReplicationFactor > 3) {
 			result["remote_log_replicas"] = remoteTLogReplicationFactor;
-			if (noPolicies && remoteTLogPolicy) result["remote_log_policy"] = remoteTLogPolicy->info();
+			if (noPolicies && remoteTLogPolicy)
+				result["remote_log_policy"] = remoteTLogPolicy->info();
 		}
 		result["usable_regions"] = usableRegions;
 
@@ -363,7 +370,8 @@ StatusArray DatabaseConfiguration::getRegionJSON() const {
 			regionObj["satellite_log_replicas"] = r.satelliteTLogReplicationFactor;
 			regionObj["satellite_usable_dcs"] = r.satelliteTLogUsableDcs;
 			regionObj["satellite_anti_quorum"] = r.satelliteTLogWriteAntiQuorum;
-			if (r.satelliteTLogPolicy) regionObj["satellite_log_policy"] = r.satelliteTLogPolicy->info();
+			if (r.satelliteTLogPolicy)
+				regionObj["satellite_log_policy"] = r.satelliteTLogPolicy->info();
 			regionObj["satellite_log_replicas_fallback"] = r.satelliteTLogReplicationFactorFallback;
 			regionObj["satellite_usable_dcs_fallback"] = r.satelliteTLogUsableDcsFallback;
 			regionObj["satellite_anti_quorum_fallback"] = r.satelliteTLogWriteAntiQuorumFallback;
@@ -430,7 +438,8 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		parse((&type), value);
 		tLogDataStoreType = (KeyValueStoreType::StoreType)type;
 		// TODO:  Remove this once Redwood works as a log engine
-		if (tLogDataStoreType == KeyValueStoreType::SSD_REDWOOD_V1) tLogDataStoreType = KeyValueStoreType::SSD_BTREE_V2;
+		if (tLogDataStoreType == KeyValueStoreType::SSD_REDWOOD_V1)
+			tLogDataStoreType = KeyValueStoreType::SSD_BTREE_V2;
 	} else if (ck == LiteralStringRef("log_spill")) {
 		parse((&type), value);
 		tLogSpillType = (TLogSpillType::SpillType)type;
@@ -498,18 +507,21 @@ bool DatabaseConfiguration::clear(KeyRangeRef keys) {
 	// FIXME: More efficient
 	bool wasValid = isValid();
 	resetInternal();
-	for (auto c = mc.begin(); c != mc.end(); ++c) setInternal(c->first, c->second);
+	for (auto c = mc.begin(); c != mc.end(); ++c)
+		setInternal(c->first, c->second);
 	return wasValid && !isValid();
 }
 
 Optional<ValueRef> DatabaseConfiguration::get(KeyRef key) const {
 	if (mutableConfiguration.present()) {
 		auto i = mutableConfiguration.get().find(key.toString());
-		if (i == mutableConfiguration.get().end()) return Optional<ValueRef>();
+		if (i == mutableConfiguration.get().end())
+			return Optional<ValueRef>();
 		return ValueRef(i->second);
 	} else {
 		auto i = lower_bound(rawConfiguration, key);
-		if (i == rawConfiguration.end() || i->key != key) return Optional<ValueRef>();
+		if (i == rawConfiguration.end() || i->key != key)
+			return Optional<ValueRef>();
 		return i->value;
 	}
 }
@@ -522,15 +534,18 @@ std::set<AddressExclusion> DatabaseConfiguration::getExcludedServers() const {
 	const_cast<DatabaseConfiguration*>(this)->makeConfigurationImmutable();
 	std::set<AddressExclusion> addrs;
 	for (auto i = lower_bound(rawConfiguration, excludedServersKeys.begin);
-	     i != rawConfiguration.end() && i->key < excludedServersKeys.end; ++i) {
+	     i != rawConfiguration.end() && i->key < excludedServersKeys.end;
+	     ++i) {
 		AddressExclusion a = decodeExcludedServersKey(i->key);
-		if (a.isValid()) addrs.insert(a);
+		if (a.isValid())
+			addrs.insert(a);
 	}
 	return addrs;
 }
 
 void DatabaseConfiguration::makeConfigurationMutable() {
-	if (mutableConfiguration.present()) return;
+	if (mutableConfiguration.present())
+		return;
 	mutableConfiguration = std::map<std::string, std::string>();
 	auto& mc = mutableConfiguration.get();
 	for (auto r = rawConfiguration.begin(); r != rawConfiguration.end(); ++r)
@@ -539,7 +554,8 @@ void DatabaseConfiguration::makeConfigurationMutable() {
 }
 
 void DatabaseConfiguration::makeConfigurationImmutable() {
-	if (!mutableConfiguration.present()) return;
+	if (!mutableConfiguration.present())
+		return;
 	auto& mc = mutableConfiguration.get();
 	rawConfiguration = Standalone<VectorRef<KeyValueRef>>();
 	rawConfiguration.resize(rawConfiguration.arena(), mc.size());

@@ -95,7 +95,8 @@ struct IOLog {
 		durationW.logLatency = true;
 
 		lastRoll = now();
-		for (int i = 0; i < logs.size(); i++) logs[i].second->reset();
+		for (int i = 0; i < logs.size(); i++)
+			logs[i].second->reset();
 	}
 
 	~IOLog() { roll(); }
@@ -188,7 +189,8 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 	virtual std::string description() { return "AsyncFileRead"; }
 
 	virtual Future<Void> setup(Database const& cx) {
-		if (enabled) return _setup(this);
+		if (enabled)
+			return _setup(this);
 
 		return Void();
 	}
@@ -203,8 +205,8 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 		for (int i = 0; i < self->numParallelReads; i++)
 			self->readBuffers.push_back(self->allocateBuffer(self->readSize));
 
-		wait(self->openFile(self, IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0666, self->fileSize,
-		                    self->fileSize != 0));
+		wait(self->openFile(
+		    self, IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0666, self->fileSize, self->fileSize != 0));
 
 		int64_t fileSize = wait(self->fileHandle->file->size());
 		self->fileSize = fileSize;
@@ -213,7 +215,8 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 	}
 
 	virtual Future<Void> start(Database const& cx) {
-		if (enabled) return _start(this);
+		if (enabled)
+			return _start(this);
 
 		return Void();
 	}
@@ -238,7 +241,8 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 		state double begin = 0.0;
 		state double lastTime = now();
 		loop {
-			if (fixedRate) wait(poisson(&lastTime, 1.0 / fixedRate));
+			if (fixedRate)
+				wait(poisson(&lastTime, 1.0 / fixedRate));
 
 			// state Future<Void> d = delay( 1/25. * (.75 + 0.5*deterministicRandom()->random01()) );
 			int64_t offset;
@@ -259,9 +263,11 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 			              self->readSize)
 			        : self->fileHandle->file->read(self->readBuffers[bufferIndex]->buffer, self->readSize, offset);
 			begin = now();
-			if (self->ioLog) self->ioLog->logIOIssue(writeFlag, begin);
+			if (self->ioLog)
+				self->ioLog->logIOIssue(writeFlag, begin);
 			wait(success(uncancellable(holdWhile(self->fileHandle, holdWhile(self->readBuffers[bufferIndex], r)))));
-			if (self->ioLog) self->ioLog->logIOCompletion(writeFlag, begin, now());
+			if (self->ioLog)
+				self->ioLog->logIOCompletion(writeFlag, begin, now());
 			self->bytesRead += self->readSize;
 			// wait(d);
 		}
@@ -289,7 +295,8 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 					offset += self->readSize;
 
 					// If the file is exhausted, start over at the beginning
-					if (offset >= self->fileSize) offset = 0;
+					if (offset >= self->fileSize)
+						offset = 0;
 				} else if (self->unbufferedIO)
 					offset = (int64_t)(deterministicRandom()->random01() * (self->fileSize - 1) /
 					                   AsyncFileWorkload::_PAGE_SIZE) *
@@ -299,10 +306,10 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 
 				// Perform the read.  Don't allow it to be cancelled (because the underlying IO may not be cancellable)
 				// and don't allow objects that the read uses to be deleted
-				self->readFutures.push_back(uncancellable(
-				    holdWhile(self->fileHandle,
-				              holdWhile(self->readBuffers[i], self->fileHandle->file->read(self->readBuffers[i]->buffer,
-				                                                                           self->readSize, offset)))));
+				self->readFutures.push_back(uncancellable(holdWhile(
+				    self->fileHandle,
+				    holdWhile(self->readBuffers[i],
+				              self->fileHandle->file->read(self->readBuffers[i]->buffer, self->readSize, offset)))));
 			}
 
 			wait(waitForAll(self->readFutures));

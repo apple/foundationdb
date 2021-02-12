@@ -51,29 +51,41 @@ struct MetricsRule {
 	static inline MetricsRule unpack(Tuple const& t) {
 		MetricsRule r;
 		int i = 0;
-		if (i < t.size()) r.namePattern = t.getString(i++);
-		if (i < t.size()) r.typePattern = t.getString(i++);
-		if (i < t.size()) r.addressPattern = t.getString(i++);
-		if (i < t.size()) r.idPattern = t.getString(i++);
-		if (i < t.size()) r.enabled = t.getInt(i++) != 0;
-		if (i < t.size()) r.minLevel = (int)t.getInt(i++);
+		if (i < t.size())
+			r.namePattern = t.getString(i++);
+		if (i < t.size())
+			r.typePattern = t.getString(i++);
+		if (i < t.size())
+			r.addressPattern = t.getString(i++);
+		if (i < t.size())
+			r.idPattern = t.getString(i++);
+		if (i < t.size())
+			r.enabled = t.getInt(i++) != 0;
+		if (i < t.size())
+			r.minLevel = (int)t.getInt(i++);
 		return r;
 	}
 
 	// For now this just returns true if pat is in subject.  Returns true if pat is empty.
 	// TODO:  Support more complex patterns?
 	static inline bool patternMatch(StringRef const& pat, StringRef const& subject) {
-		if (pat.size() == 0) return true;
+		if (pat.size() == 0)
+			return true;
 		for (int i = 0, iend = subject.size() - pat.size() + 1; i < iend; ++i)
-			if (subject.substr(i, pat.size()) == pat) return true;
+			if (subject.substr(i, pat.size()) == pat)
+				return true;
 		return false;
 	}
 
 	bool applyTo(BaseMetric* m, StringRef const& address) const {
-		if (!patternMatch(addressPattern, address)) return false;
-		if (!patternMatch(namePattern, m->metricName.name)) return false;
-		if (!patternMatch(typePattern, m->metricName.type)) return false;
-		if (!patternMatch(idPattern, m->metricName.id)) return false;
+		if (!patternMatch(addressPattern, address))
+			return false;
+		if (!patternMatch(namePattern, m->metricName.name))
+			return false;
+		if (!patternMatch(typePattern, m->metricName.type))
+			return false;
+		if (!patternMatch(idPattern, m->metricName.id))
+			return false;
 
 		m->setConfig(enabled, minLevel);
 		return true;
@@ -144,7 +156,8 @@ ACTOR Future<Void> metricRuleUpdater(Database cx, MetricsConfig* config, TDMetri
 			for (auto& it : collection->metricMap) {
 				it.value->setConfig(false);
 				for (auto i = rules.rbegin(); !(i == rules.rend()); ++i)
-					if (i->second.applyTo(it.value.getPtr(), collection->address)) break;
+					if (i->second.applyTo(it.value.getPtr(), collection->address))
+						break;
 			}
 			config->rules = std::move(rules);
 
@@ -169,7 +182,8 @@ public:
 	ACTOR static Future<Optional<Standalone<StringRef>>> getLastBlock_impl(ReadYourWritesTransaction* tr,
 	                                                                       Standalone<StringRef> levelKey) {
 		Standalone<RangeResultRef> results = wait(tr->getRange(normalKeys.withPrefix(levelKey), 1, true, true));
-		if (results.size() == 1) return results[0].value;
+		if (results.size() == 1)
+			return results[0].value;
 		return Optional<Standalone<StringRef>>();
 	}
 
@@ -217,7 +231,8 @@ ACTOR Future<Void> dumpMetrics(Database cx, MetricsConfig* config, TDMetricColle
 
 		state std::map<int, Future<Void>> results;
 		// Call all of the callbacks, map each index to its resulting future
-		for (int i = 0, iend = batch.callbacks.size(); i < iend; ++i) results[i] = batch.callbacks[i](&mdb, &batch);
+		for (int i = 0, iend = batch.callbacks.size(); i < iend; ++i)
+			results[i] = batch.callbacks[i](&mdb, &batch);
 
 		loop {
 			state std::map<int, Future<Void>>::iterator cb = results.begin();
@@ -234,11 +249,13 @@ ACTOR Future<Void> dumpMetrics(Database cx, MetricsConfig* config, TDMetricColle
 			}
 
 			// If all the callbacks completed then we're done.
-			if (results.empty()) break;
+			if (results.empty())
+				break;
 
 			// Otherwise, wait to retry
 			wait(cbtr.onError(lastError));
-			for (auto& cb : results) cb.second = batch.callbacks[cb.first](&mdb, &batch);
+			for (auto& cb : results)
+				cb.second = batch.callbacks[cb.first](&mdb, &batch);
 		}
 
 		// If there are more rolltimes then next dump is now, otherwise if no metrics are enabled then it is
@@ -248,7 +265,8 @@ ACTOR Future<Void> dumpMetrics(Database cx, MetricsConfig* config, TDMetricColle
 			nextDump = Void();
 		else {
 			nextDump = collection->metricEnabled.onTrigger();
-			if (enabled) nextDump = nextDump || delay(1.0);
+			if (enabled)
+				nextDump = nextDump || delay(1.0);
 		}
 
 		state Transaction tr(cx);
@@ -322,8 +340,10 @@ ACTOR Future<Void> updateMetricRegistration(Database cx, MetricsConfig* config, 
 			enumsChanged = true;
 		}
 
-		if (enumsChanged) keys.push_back(config->enumsChangeKey);
-		if (fieldsChanged) keys.push_back(config->fieldChangeKey);
+		if (enumsChanged)
+			keys.push_back(config->enumsChangeKey);
+		if (fieldsChanged)
+			keys.push_back(config->fieldChangeKey);
 
 		// Write keys collected to database
 		state Transaction tr(cx);
@@ -362,7 +382,8 @@ ACTOR Future<Void> runMetrics(Future<Database> fcx, Key prefix) {
 	loop {
 		metrics = TDMetricCollection::getTDMetrics();
 		if (metrics != nullptr)
-			if (metrics->init()) break;
+			if (metrics->init())
+				break;
 		wait(delay(1.0));
 	}
 
@@ -378,7 +399,8 @@ ACTOR Future<Void> runMetrics(Future<Database> fcx, Key prefix) {
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled) {
 			// Disable all metrics
-			for (auto& it : metrics->metricMap) it.value->setConfig(false);
+			for (auto& it : metrics->metricMap)
+				it.value->setConfig(false);
 		}
 
 		TraceEvent(SevWarnAlways, "TDMetricsStopped").error(e);
@@ -484,7 +506,8 @@ TEST_CASE("/fdbserver/metrics/TraceEvents") {
 			}
 			wait(delay(w));
 
-			if (x >= total) return Void();
+			if (x >= total)
+				return Void();
 		}
 	}
 }

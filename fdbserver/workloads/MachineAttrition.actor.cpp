@@ -119,11 +119,14 @@ struct MachineAttritionWorkload : TestWorkload {
 			    .detail("MachinesToKill", machinesToKill)
 			    .detail("MeanDelay", meanDelay);
 
-			return timeout(reportErrorsExcept(machineKillWorker(this, meanDelay, cx), "machineKillWorkerError", UID(),
-			                                  &normalAttritionErrors()),
-			               testDuration, Void());
+			return timeout(
+			    reportErrorsExcept(
+			        machineKillWorker(this, meanDelay, cx), "machineKillWorkerError", UID(), &normalAttritionErrors()),
+			    testDuration,
+			    Void());
 		}
-		if (killSelf) throw please_reboot();
+		if (killSelf)
+			throw please_reboot();
 		return Void();
 	}
 	virtual Future<bool> check(Database const& cx) { return ignoreSSFailures; }
@@ -251,7 +254,8 @@ struct MachineAttritionWorkload : TestWorkload {
 				}
 
 				killedMachines++;
-				if (!self->replacement) self->machines.pop_back();
+				if (!self->replacement)
+					self->machines.pop_back();
 
 				wait(delay(meanDelay - delayBeforeKill) && success(self->ignoreSSFailures));
 
@@ -260,7 +264,8 @@ struct MachineAttritionWorkload : TestWorkload {
 			}
 		}
 
-		if (self->killSelf) throw please_reboot();
+		if (self->killSelf)
+			throw please_reboot();
 		return Void();
 	}
 };

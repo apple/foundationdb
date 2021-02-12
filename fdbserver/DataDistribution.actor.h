@@ -66,7 +66,8 @@ struct IDataDistributionTeam {
 		std::string s = format("TeamID:%s", getTeamID().c_str());
 		s += format("Size %d; ", servers.size());
 		for (int i = 0; i < servers.size(); i++) {
-			if (i) s += ", ";
+			if (i)
+				s += ", ";
 			s += servers[i].address().toString() + " " + servers[i].id().shortString();
 		}
 		return s;
@@ -84,7 +85,10 @@ struct GetTeamRequest {
 	Promise<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> reply;
 
 	GetTeamRequest() {}
-	GetTeamRequest(bool wantsNewServers, bool wantsTrueBest, bool preferLowerUtilization, bool teamMustHaveShards,
+	GetTeamRequest(bool wantsNewServers,
+	               bool wantsTrueBest,
+	               bool preferLowerUtilization,
+	               bool teamMustHaveShards,
 	               double inflightPenalty = 1.0)
 	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerUtilization(preferLowerUtilization),
 	    teamMustHaveShards(teamMustHaveShards), inflightPenalty(inflightPenalty) {}
@@ -114,7 +118,8 @@ public:
 		Team(vector<UID> const& servers, bool primary) : servers(servers), primary(primary) {}
 
 		bool operator<(const Team& r) const {
-			if (servers == r.servers) return primary < r.primary;
+			if (servers == r.servers)
+				return primary < r.primary;
 			return servers < r.servers;
 		}
 		bool operator==(const Team& r) const { return servers == r.servers && primary == r.primary; }
@@ -151,8 +156,10 @@ public:
 private:
 	struct OrderByTeamKey {
 		bool operator()(const std::pair<Team, KeyRange>& lhs, const std::pair<Team, KeyRange>& rhs) const {
-			if (lhs.first < rhs.first) return true;
-			if (lhs.first > rhs.first) return false;
+			if (lhs.first < rhs.first)
+				return true;
+			if (lhs.first > rhs.first)
+				return false;
 			return lhs.second.begin < rhs.second.begin;
 		}
 	};
@@ -208,21 +215,31 @@ struct ShardTrackedData {
 	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
 };
 
-ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData, Database cx,
+ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData,
+                                           Database cx,
                                            PromiseStream<RelocateShard> output,
                                            Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                            PromiseStream<GetMetricsRequest> getShardMetrics,
                                            FutureStream<Promise<int64_t>> getAverageShardBytes,
-                                           Promise<Void> readyToStart, Reference<AsyncVar<bool>> zeroHealthyTeams,
-                                           UID distributorId, KeyRangeMap<ShardTrackedData>* shards,
+                                           Promise<Void> readyToStart,
+                                           Reference<AsyncVar<bool>> zeroHealthyTeams,
+                                           UID distributorId,
+                                           KeyRangeMap<ShardTrackedData>* shards,
                                            bool const* trackerCancelled);
 
-ACTOR Future<Void> dataDistributionQueue(
-    Database cx, PromiseStream<RelocateShard> output, FutureStream<RelocateShard> input,
-    PromiseStream<GetMetricsRequest> getShardMetrics, Reference<AsyncVar<bool>> processingUnhealthy,
-    vector<TeamCollectionInterface> teamCollection, Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-    MoveKeysLock lock, PromiseStream<Promise<int64_t>> getAverageShardBytes, UID distributorId, int teamSize,
-    int singleRegionTeamSize, double* lastLimited);
+ACTOR Future<Void> dataDistributionQueue(Database cx,
+                                         PromiseStream<RelocateShard> output,
+                                         FutureStream<RelocateShard> input,
+                                         PromiseStream<GetMetricsRequest> getShardMetrics,
+                                         Reference<AsyncVar<bool>> processingUnhealthy,
+                                         vector<TeamCollectionInterface> teamCollection,
+                                         Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
+                                         MoveKeysLock lock,
+                                         PromiseStream<Promise<int64_t>> getAverageShardBytes,
+                                         UID distributorId,
+                                         int teamSize,
+                                         int singleRegionTeamSize,
+                                         double* lastLimited);
 
 // Holds the permitted size and IO Bounds for a shard
 struct ShardSizeBounds {

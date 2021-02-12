@@ -83,8 +83,8 @@ ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion)
 	onMainThreadVoid(
 	    [db, connFile, apiVersion]() {
 		    try {
-			    Database::createDatabase(Reference<ClusterConnectionFile>(connFile), apiVersion, false, LocalityData(),
-			                             db)
+			    Database::createDatabase(
+			        Reference<ClusterConnectionFile>(connFile), apiVersion, false, LocalityData(), db)
 			        .extractPtr();
 		    } catch (Error& e) {
 			    new (db) DatabaseContext(e);
@@ -120,7 +120,8 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx) {
 
 ThreadSafeTransaction::~ThreadSafeTransaction() {
 	ReadYourWritesTransaction* tr = this->tr;
-	if (tr) onMainThreadVoid([tr]() { tr->delref(); }, NULL);
+	if (tr)
+		onMainThreadVoid([tr]() { tr->delref(); }, NULL);
 }
 
 void ThreadSafeTransaction::cancel() {
@@ -162,8 +163,10 @@ ThreadFuture<Key> ThreadSafeTransaction::getKey(const KeySelectorRef& key, bool 
 }
 
 ThreadFuture<Standalone<RangeResultRef>> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
-                                                                         const KeySelectorRef& end, int limit,
-                                                                         bool snapshot, bool reverse) {
+                                                                         const KeySelectorRef& end,
+                                                                         int limit,
+                                                                         bool snapshot,
+                                                                         bool reverse) {
 	KeySelector b = begin;
 	KeySelector e = end;
 
@@ -176,7 +179,8 @@ ThreadFuture<Standalone<RangeResultRef>> ThreadSafeTransaction::getRange(const K
 
 ThreadFuture<Standalone<RangeResultRef>> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
                                                                          const KeySelectorRef& end,
-                                                                         GetRangeLimits limits, bool snapshot,
+                                                                         GetRangeLimits limits,
+                                                                         bool snapshot,
                                                                          bool reverse) {
 	KeySelector b = begin;
 	KeySelector e = end;
@@ -240,7 +244,8 @@ void ThreadSafeTransaction::clear(const KeyRef& begin, const KeyRef& end) {
 	ReadYourWritesTransaction* tr = this->tr;
 	onMainThreadVoid(
 	    [tr, b, e]() {
-		    if (b > e) throw inverted_range();
+		    if (b > e)
+			    throw inverted_range();
 
 		    tr->clear(KeyRangeRef(b, e));
 	    },

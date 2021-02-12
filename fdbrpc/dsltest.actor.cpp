@@ -36,7 +36,8 @@ using std::vector;
 void* allocateLargePages(int total);
 
 bool testFuzzActor(Future<int> (*actor)(FutureStream<int> const&, PromiseStream<int> const&, Future<Void> const&),
-                   const char* desc, vector<int> const& expectedOutput) {
+                   const char* desc,
+                   vector<int> const& expectedOutput) {
 	// Run the test 5 times with different "timing"
 	int i, outCount;
 	bool ok = true;
@@ -46,14 +47,16 @@ bool testFuzzActor(Future<int> (*actor)(FutureStream<int> const&, PromiseStream<
 		int before = deterministicRandom()->randomInt(0, 4);
 		int errorBefore = before + deterministicRandom()->randomInt(0, 4);
 		// printf("\t\tTrial #%d: %d, %d\n", trial, before, errorBefore);
-		if (errorBefore <= before) err.sendError(operation_failed());
+		if (errorBefore <= before)
+			err.sendError(operation_failed());
 		for (i = 0; i < before; i++) {
 			in.send((i + 1) * 1000);
 		}
 		Future<int> ret = (*actor)(in.getFuture(), out, err.getFuture());
 		while (i < 1000000 && !ret.isReady()) {
 			i++;
-			if (errorBefore == i) err.sendError(operation_failed());
+			if (errorBefore == i)
+				err.sendError(operation_failed());
 			in.send(i * 1000);
 		}
 		if (ret.isReady()) {
@@ -63,7 +66,8 @@ bool testFuzzActor(Future<int> (*actor)(FutureStream<int> const&, PromiseStream<
 				out.send(ret.get());
 		} else {
 			printf("\tERROR: %s did not return after consuming %d input values\n", desc, i);
-			if (trial) printf("\t\tResult was inconsistent between runs!  (Trial %d)\n", trial);
+			if (trial)
+				printf("\t\tResult was inconsistent between runs!  (Trial %d)\n", trial);
 			ok = false;
 			// return false;
 		}
@@ -73,17 +77,22 @@ bool testFuzzActor(Future<int> (*actor)(FutureStream<int> const&, PromiseStream<
 			int o = out.getFuture().pop();
 			outCount++;
 			if (outCount < expectedOutput.size() && expectedOutput[outCount] != o) {
-				printf("\tERROR: %s output #%d incorrect: %d != expected %d\n", desc, outCount, o,
+				printf("\tERROR: %s output #%d incorrect: %d != expected %d\n",
+				       desc,
+				       outCount,
+				       o,
 				       expectedOutput[outCount]);
-				if (trial) printf("\t\tResult was inconsistent between runs!\n");
+				if (trial)
+					printf("\t\tResult was inconsistent between runs!\n");
 				ok = false;
 				// return false;
 			}
 		}
 		if (outCount + 1 != expectedOutput.size()) {
-			printf("\tERROR: %s output length incorrect: %d != expected %zu\n", desc, outCount + 1,
-			       expectedOutput.size());
-			if (trial) printf("\t\tResult was inconsistent between runs!\n");
+			printf(
+			    "\tERROR: %s output length incorrect: %d != expected %zu\n", desc, outCount + 1, expectedOutput.size());
+			if (trial)
+				printf("\t\tResult was inconsistent between runs!\n");
 			ok = false;
 			// return false;
 		}
@@ -328,7 +337,8 @@ void fastAllocTest() {
 		}
 	}
 	std::sort(d.begin(), d.end());
-	if (std::unique(d.begin(), d.end()) != d.end()) cout << "Pointer returned twice!?" << endl;
+	if (std::unique(d.begin(), d.end()) != d.end())
+		cout << "Pointer returned twice!?" << endl;
 
 	for (int i = 0; i < 2; i++) {
 		void* p = FastAllocator<64>::allocate();
@@ -339,26 +349,31 @@ void fastAllocTest() {
 	}
 
 	t = timer();
-	for (int i = 0; i < 1000000; i++) FastAllocator<64>::allocate();
+	for (int i = 0; i < 1000000; i++)
+		FastAllocator<64>::allocate();
 	t = timer() - t;
 	cout << "Allocations: " << (1 / t) << "M/sec" << endl;
 
 	t = timer();
-	for (int i = 0; i < 1000000; i++) FastAllocator<64>::release(FastAllocator<64>::allocate());
+	for (int i = 0; i < 1000000; i++)
+		FastAllocator<64>::release(FastAllocator<64>::allocate());
 	t = timer() - t;
 	cout << "Allocate/Release pairs: " << (1 / t) << "M/sec" << endl;
 
 	t = timer();
 	void* pp[100];
 	for (int i = 0; i < 10000; i++) {
-		for (int j = 0; j < 100; j++) pp[j] = FastAllocator<64>::allocate();
-		for (int j = 0; j < 100; j++) FastAllocator<64>::release(pp[j]);
+		for (int j = 0; j < 100; j++)
+			pp[j] = FastAllocator<64>::allocate();
+		for (int j = 0; j < 100; j++)
+			FastAllocator<64>::release(pp[j]);
 	}
 	t = timer() - t;
 	cout << "Allocate/Release interleaved(100): " << (1 / t) << "M/sec" << endl;
 
 	t = timer();
-	for (int i = 0; i < 1000000; i++) delete new TestB;
+	for (int i = 0; i < 1000000; i++)
+		delete new TestB;
 	t = timer() - t;
 	cout << "Allocate/Release TestB pairs: " << (1 / t) << "M/sec" << endl;
 
@@ -369,8 +384,10 @@ void fastAllocTest() {
 		results.push_back(inThread<bool>([]() -> bool {
 			TestB* pp[100];
 			for (int i = 0; i < 10000; i++) {
-				for (int j = 0; j < 100; j++) pp[j] = new TestB;
-				for (int j = 0; j < 100; j++) delete pp[j];
+				for (int j = 0; j < 100; j++)
+					pp[j] = new TestB;
+				for (int j = 0; j < 100; j++)
+					delete pp[j];
 			}
 			return true;
 		}));
@@ -383,7 +400,8 @@ void fastAllocTest() {
 	volatile int32_t v = 0;
 
 	t = timer();
-	for (int i = 0; i < 10000000; i++) interlockedIncrement(&v);
+	for (int i = 0; i < 10000000; i++)
+		interlockedIncrement(&v);
 	t = timer() - t;
 	cout << "interlocked increment: " << 10.0 / t << "M/sec " << v << endl;
 
@@ -397,7 +415,8 @@ void fastAllocTest() {
 
 	v = 0;
 	t = timer();
-	for (int i = 0; i < 10000000; i++) v++;
+	for (int i = 0; i < 10000000; i++)
+		v++;
 	t = timer() - t;
 	cout << "volatile increment: " << 10.0 / t << "M/sec " << v << endl;
 
@@ -449,8 +468,10 @@ template <class PromiseT>
 Future<Void> threadSafetySender(vector<PromiseT>& v, Event& start, Event& ready, int iterations) {
 	for (int i = 0; i < iterations; i++) {
 		start.block();
-		if (v.size() == 0) return Void();
-		for (int i = 0; i < v.size(); i++) v[i].send(Void());
+		if (v.size() == 0)
+			return Void();
+		for (int i = 0; i < v.size(); i++)
+			v[i].send(Void());
 		ready.set();
 	}
 	return Void();
@@ -619,7 +640,8 @@ void arenaTest() {
 		test.push_back(arena, StringRef(arena, LiteralStringRef("World!")));
 
 		for (auto i = test.begin(); i != test.end(); ++i)
-			for (auto j = i->begin(); j != i->end(); ++j) cout << *j;
+			for (auto j = i->begin(); j != i->end(); ++j)
+				cout << *j;
 		cout << endl;
 
 		wr << test;
@@ -631,14 +653,16 @@ void arenaTest() {
 		reader >> test2 >> arena2;
 
 		for (auto i = test2.begin(); i != test2.end(); ++i)
-			for (auto j = i->begin(); j != i->end(); ++j) cout << *j;
+			for (auto j = i->begin(); j != i->end(); ++j)
+				cout << *j;
 		cout << endl;
 	}
 
 	double t = timer();
 	for (int i = 0; i < 100; i++) {
 		Arena ar;
-		for (int i = 0; i < 10000000; i++) new (ar) char[10];
+		for (int i = 0; i < 10000000; i++)
+			new (ar) char[10];
 	}
 	printf("100 x 10M x 10B allocated+freed from Arenas: %f sec\n", timer() - t);
 
@@ -655,18 +679,21 @@ ACTOR void testStream(FutureStream<int> xs) {
 
 ACTOR Future<Void> actorTest1(bool b) {
 	printf("1");
-	if (b) throw future_version();
+	if (b)
+		throw future_version();
 	return Void();
 }
 
 ACTOR void actorTest2(bool b) {
 	printf("2");
-	if (b) throw future_version();
+	if (b)
+		throw future_version();
 }
 
 ACTOR Future<Void> actorTest3(bool b) {
 	try {
-		if (b) throw future_version();
+		if (b)
+			throw future_version();
 	} catch (Error&) {
 		printf("3");
 		return Void();
@@ -678,7 +705,8 @@ ACTOR Future<Void> actorTest3(bool b) {
 ACTOR Future<Void> actorTest4(bool b) {
 	state double tstart = now();
 	try {
-		if (b) throw operation_failed();
+		if (b)
+			throw operation_failed();
 	} catch (...) {
 		wait(delay(1));
 	}
@@ -706,7 +734,8 @@ ACTOR Future<bool> actorTest5() {
 						return false;
 					}
 					inloop = true;
-					if (1) throw operation_failed();
+					if (1)
+						throw operation_failed();
 				}
 			} catch (Error&) {
 				caught = true;
@@ -723,7 +752,8 @@ ACTOR Future<bool> actorTest6() {
 			return true;
 		}
 		try {
-			if (1) throw operation_failed();
+			if (1)
+				throw operation_failed();
 		} catch (Error&) {
 			caught = true;
 		}
@@ -734,12 +764,14 @@ ACTOR Future<bool> actorTest7() {
 	try {
 		loop {
 			loop {
-				if (1) throw operation_failed();
+				if (1)
+					throw operation_failed();
 				if (1) {
 					printf("actorTest7 failed (1)\n");
 					return false;
 				}
-				if (0) break;
+				if (0)
+					break;
 			}
 			if (1) {
 				printf("actorTest7 failed (2)\n");
@@ -770,7 +802,8 @@ ACTOR Future<bool> actorTest8() {
 				}
 				bool b = wait(set);
 				inloop = true;
-				if (1) throw operation_failed();
+				if (1)
+					throw operation_failed();
 			}
 		} catch (Error&) {
 			caught = true;
@@ -830,10 +863,12 @@ ACTOR Future<Void> actorTest10A(FutureStream<int> inputStream, Future<Void> go) 
 void actorTest10() {
 	PromiseStream<int> ins;
 	Promise<Void> go;
-	for (int x = 0; x < 2; x++) ins.send(x);
+	for (int x = 0; x < 2; x++)
+		ins.send(x);
 	Future<Void> a = actorTest10A(ins.getFuture(), go.getFuture());
 	go.send(Void());
-	for (int x = 0; x < 3; x++) ins.send(x);
+	for (int x = 0; x < 3; x++)
+		ins.send(x);
 	if (!a.isReady())
 		printf("\nactorTest10 failed\n");
 	else
@@ -1031,13 +1066,15 @@ ACTOR Future<Void> cycleTime(int nodes, int times) {
 	state int total = 0;
 
 	// 1->2, 2->3, ..., n-1->0
-	for (int i = 1; i < nodes; i++) cycle(n[i].getFuture(), n[(i + 1) % nodes], &total);
+	for (int i = 1; i < nodes; i++)
+		cycle(n[i].getFuture(), n[(i + 1) % nodes], &total);
 
 	state double startT = timer();
 	n[1].send(Void());
 	loop {
 		waitNext(n[0].getFuture());
-		if (!--times) break;
+		if (!--times)
+			break;
 		n[1].send(Void());
 	}
 
@@ -1112,10 +1149,12 @@ void asyncMapTest() {
 
 	m2.set(5, 5);
 	startt = timer();
-	for (int i = 0; i < 1000000; i++) m2.onChange(5);
+	for (int i = 0; i < 1000000; i++)
+		m2.onChange(5);
 	printf("  onChange(present, cancelled): %0.1fM/sec\n", 1.0 / (timer() - startt));
 	startt = timer();
-	for (int i = 0; i < 1000000; i++) m2.onChange(10);
+	for (int i = 0; i < 1000000; i++)
+		m2.onChange(10);
 	printf("  onChange(not present, cancelled): %0.1fM/sec\n", 1.0 / (timer() - startt));
 	startt = timer();
 	for (int i = 0; i < 1000000; i++) {
@@ -1175,17 +1214,20 @@ void dsltest() {
 #endif
 	printf("Actor fuzz tests: %d/%d passed\n", afResults.first, afResults.second);
 	startt = timer();
-	for (int i = 0; i < 1000000; i++) deterministicRandom()->random01();
+	for (int i = 0; i < 1000000; i++)
+		deterministicRandom()->random01();
 	endt = timer();
 	printf("Random01: %0.2f M/sec\n", 1.0 / (endt - startt));
 
 	startt = timer();
-	for (int i = 0; i < 1000000; i++) Promise<Void>();
+	for (int i = 0; i < 1000000; i++)
+		Promise<Void>();
 	endt = timer();
 	printf("Promises: %0.2f M/sec\n", 1.0 / (endt - startt));
 
 	startt = timer();
-	for (int i = 0; i < 1000000; i++) Promise<Void>().send(Void());
+	for (int i = 0; i < 1000000; i++)
+		Promise<Void>().send(Void());
 	endt = timer();
 	printf("Promises (with send): %0.2f M/sec\n", 1.0 / (endt - startt));
 
@@ -1202,17 +1244,20 @@ void dsltest() {
 	Promise<Void> p;
 
 	startt = timer();
-	for (int i = 0; i < 1000000; i++) p.getFuture();
+	for (int i = 0; i < 1000000; i++)
+		p.getFuture();
 	endt = timer();
 	printf("Futures: %0.2f M/sec\n", 1.0 / (endt - startt));
 
 	startt = timer();
-	for (int i = 0; i < 1000000; i++) PromiseStream<Void>();
+	for (int i = 0; i < 1000000; i++)
+		PromiseStream<Void>();
 	endt = timer();
 	printf("PromiseStreams: %0.2f M/sec\n", 1.0 / (endt - startt));
 
 	startt = timer();
-	for (int i = 0; i < 1000000; i++) PromiseStream<Void>().send(Void());
+	for (int i = 0; i < 1000000; i++)
+		PromiseStream<Void>().send(Void());
 	endt = timer();
 	printf("PromiseStreams (with send): %0.2f M/sec\n", 1.0 / (endt - startt));
 
@@ -1237,22 +1282,26 @@ void dsltest() {
 	printf("PromiseStream queued send: %0.2f M/sec\n", 1.0 / (endt - startt));
 
 	startt = timer();
-	for (int i = 0; i < 1000000; i++) cancellable();
+	for (int i = 0; i < 1000000; i++)
+		cancellable();
 	endt = timer();
 	printf("Cancellations: %0.2f M/sec\n", 1.0 / (endt - startt));
 
 	startt = timer();
-	for (int i = 0; i < 1000000; i++) cancellable2();
+	for (int i = 0; i < 1000000; i++)
+		cancellable2();
 	endt = timer();
 	printf("Cancellations with catch: %0.2f M/sec\n", 1.0 / (endt - startt));
 
 	startt = timer();
-	for (int i = 0; i < 1000000; i++) simple();
+	for (int i = 0; i < 1000000; i++)
+		simple();
 	endt = timer();
 	printf("Actor creation: %0.2f M/sec\n", 1.0 / (endt - startt));
 
 	startt = timer();
-	for (int i = 0; i < 1000000; i++) simpleWait();
+	for (int i = 0; i < 1000000; i++)
+		simpleWait();
 	endt = timer();
 	printf("With trivial wait: %0.2f M/sec\n", 1.0 / (endt - startt));
 
@@ -1399,7 +1448,8 @@ void copyTest() {
 
 	{
 		start = timer();
-		for (int i = 0; i < 100; i++) Standalone<StringRef> a = s;
+		for (int i = 0; i < 100; i++)
+			Standalone<StringRef> a = s;
 		elapsed = timer() - start;
 
 		printf("StringRef->Standalone: %fs/GB\n", elapsed);
@@ -1408,7 +1458,8 @@ void copyTest() {
 	{
 		Standalone<StringRef> sa = s;
 		start = timer();
-		for (int i = 0; i < 100; i++) Standalone<StringRef> a = sa;
+		for (int i = 0; i < 100; i++)
+			Standalone<StringRef> a = sa;
 		elapsed = timer() - start;
 
 		printf("Standalone->Standalone: %fs/GB\n", elapsed);

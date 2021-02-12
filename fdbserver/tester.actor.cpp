@@ -204,8 +204,10 @@ double getOption(VectorRef<KeyValueRef> options, Key key, double defaultValue) {
 
 bool getOption(VectorRef<KeyValueRef> options, Key key, bool defaultValue) {
 	Value p = getOption(options, key, defaultValue ? LiteralStringRef("true") : LiteralStringRef("false"));
-	if (p == LiteralStringRef("true")) return true;
-	if (p == LiteralStringRef("false")) return false;
+	if (p == LiteralStringRef("true"))
+		return true;
+	if (p == LiteralStringRef("false"))
+		return false;
 	ASSERT(false);
 	return false; // Assure that compiler is fine with the function
 }
@@ -251,7 +253,8 @@ struct CompoundWorkload : TestWorkload {
 	}
 
 	virtual ~CompoundWorkload() {
-		for (int w = 0; w < workloads.size(); w++) delete workloads[w];
+		for (int w = 0; w < workloads.size(); w++)
+			delete workloads[w];
 	}
 	virtual std::string description() {
 		std::string d;
@@ -261,34 +264,40 @@ struct CompoundWorkload : TestWorkload {
 	}
 	virtual Future<Void> setup(Database const& cx) {
 		vector<Future<Void>> all;
-		for (int w = 0; w < workloads.size(); w++) all.push_back(workloads[w]->setup(cx));
+		for (int w = 0; w < workloads.size(); w++)
+			all.push_back(workloads[w]->setup(cx));
 		return waitForAll(all);
 	}
 	virtual Future<Void> start(Database const& cx) {
 		vector<Future<Void>> all;
-		for (int w = 0; w < workloads.size(); w++) all.push_back(workloads[w]->start(cx));
+		for (int w = 0; w < workloads.size(); w++)
+			all.push_back(workloads[w]->start(cx));
 		return waitForAll(all);
 	}
 	virtual Future<bool> check(Database const& cx) {
 		vector<Future<bool>> all;
-		for (int w = 0; w < workloads.size(); w++) all.push_back(workloads[w]->check(cx));
+		for (int w = 0; w < workloads.size(); w++)
+			all.push_back(workloads[w]->check(cx));
 		return allTrue(all);
 	}
 	virtual void getMetrics(vector<PerfMetric>& m) {
 		for (int w = 0; w < workloads.size(); w++) {
 			vector<PerfMetric> p;
 			workloads[w]->getMetrics(p);
-			for (int i = 0; i < p.size(); i++) m.push_back(p[i].withPrefix(workloads[w]->description() + "."));
+			for (int i = 0; i < p.size(); i++)
+				m.push_back(p[i].withPrefix(workloads[w]->description() + "."));
 		}
 	}
 	virtual double getCheckTimeout() {
 		double m = 0;
-		for (int w = 0; w < workloads.size(); w++) m = std::max(workloads[w]->getCheckTimeout(), m);
+		for (int w = 0; w < workloads.size(); w++)
+			m = std::max(workloads[w]->getCheckTimeout(), m);
 		return m;
 	}
 };
 
-TestWorkload* getWorkloadIface(WorkloadRequest work, VectorRef<KeyValueRef> options,
+TestWorkload* getWorkloadIface(WorkloadRequest work,
+                               VectorRef<KeyValueRef> options,
                                Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	Value testName = getOption(options, LiteralStringRef("testName"), LiteralStringRef("no-test-specified"));
 	WorkloadContext wcx;
@@ -306,13 +315,16 @@ TestWorkload* getWorkloadIface(WorkloadRequest work, VectorRef<KeyValueRef> opti
 		evt.detail("TestName", testName);
 		if (!workload) {
 			evt.detail("Reason", "Null workload");
-			fprintf(stderr, "ERROR: Workload could not be created, perhaps testName (%s) is not a valid workload\n",
+			fprintf(stderr,
+			        "ERROR: Workload could not be created, perhaps testName (%s) is not a valid workload\n",
 			        printable(testName).c_str());
 		} else {
 			evt.detail("Reason", "Not all options consumed");
 			fprintf(stderr, "ERROR: Workload had invalid options. The following were unrecognized:\n");
 			for (int i = 0; i < unconsumedOptions.size(); i++)
-				fprintf(stderr, " '%s' = '%s'\n", unconsumedOptions[i].key.toString().c_str(),
+				fprintf(stderr,
+				        " '%s' = '%s'\n",
+				        unconsumedOptions[i].key.toString().c_str(),
 				        unconsumedOptions[i].value.toString().c_str());
 			delete workload;
 		}
@@ -327,7 +339,8 @@ TestWorkload* getWorkloadIface(WorkloadRequest work, Reference<AsyncVar<ServerDB
 		fprintf(stderr, "ERROR: No options were provided for workload.\n");
 		throw test_specification_invalid();
 	}
-	if (work.options.size() == 1) return getWorkloadIface(work, work.options[0], dbInfo);
+	if (work.options.size() == 1)
+		return getWorkloadIface(work, work.options[0], dbInfo);
 
 	WorkloadContext wcx;
 	wcx.clientId = work.clientId;
@@ -369,7 +382,9 @@ ACTOR Future<Void> pingDatabase(Database cx) {
 	}
 }
 
-ACTOR Future<Void> testDatabaseLiveness(Database cx, double databasePingDelay, string context,
+ACTOR Future<Void> testDatabaseLiveness(Database cx,
+                                        double databasePingDelay,
+                                        string context,
                                         double startDelay = 0.0) {
 	wait(delay(startDelay));
 	loop {
@@ -400,7 +415,9 @@ void sendResult(ReplyPromise<T>& reply, Optional<ErrorOr<T>> const& result) {
 		reply.send(res.get());
 }
 
-ACTOR Future<Void> runWorkloadAsync(Database cx, WorkloadInterface workIface, TestWorkload* workload,
+ACTOR Future<Void> runWorkloadAsync(Database cx,
+                                    WorkloadInterface workIface,
+                                    TestWorkload* workload,
                                     double databasePingDelay) {
 	state unique_ptr<TestWorkload> delw(workload);
 	state Optional<ErrorOr<Void>> setupResult;
@@ -432,7 +449,8 @@ ACTOR Future<Void> runWorkloadAsync(Database cx, WorkloadInterface workIface, Te
 					TraceEvent(SevError, "TestSetupError", workIface.id())
 					    .error(e)
 					    .detail("Workload", workload->description());
-					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete) throw;
+					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
+						throw;
 				}
 			}
 			sendResult(setupReq, setupResult);
@@ -446,7 +464,8 @@ ACTOR Future<Void> runWorkloadAsync(Database cx, WorkloadInterface workIface, Te
 					startResult = Void();
 				} catch (Error& e) {
 					startResult = operation_failed();
-					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete) throw;
+					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
+						throw;
 					TraceEvent(SevError, "TestFailure", workIface.id())
 					    .error(e, true)
 					    .detail("Reason", "Error starting workload")
@@ -468,7 +487,8 @@ ACTOR Future<Void> runWorkloadAsync(Database cx, WorkloadInterface workIface, Te
 					checkResult = CheckReply{ (!startResult.present() || !startResult.get().isError()) && check };
 				} catch (Error& e) {
 					checkResult = operation_failed(); // was: checkResult = false;
-					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete) throw;
+					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
+						throw;
 					TraceEvent(SevError, "TestFailure", workIface.id())
 					    .error(e)
 					    .detail("Reason", "Error checking workload")
@@ -487,7 +507,8 @@ ACTOR Future<Void> runWorkloadAsync(Database cx, WorkloadInterface workIface, Te
 				TraceEvent("WorkloadSendMetrics", workIface.id()).detail("Count", m.size());
 				req.send(m);
 			} catch (Error& e) {
-				if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete) throw;
+				if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
+					throw;
 				TraceEvent(SevError, "WorkloadSendMetrics", workIface.id()).error(e);
 				s_req.sendError(operation_failed());
 			}
@@ -500,8 +521,10 @@ ACTOR Future<Void> runWorkloadAsync(Database cx, WorkloadInterface workIface, Te
 	return Void();
 }
 
-ACTOR Future<Void> testerServerWorkload(WorkloadRequest work, Reference<ClusterConnectionFile> ccf,
-                                        Reference<AsyncVar<struct ServerDBInfo>> dbInfo, LocalityData locality) {
+ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
+                                        Reference<ClusterConnectionFile> ccf,
+                                        Reference<AsyncVar<struct ServerDBInfo>> dbInfo,
+                                        LocalityData locality) {
 	state WorkloadInterface workIface;
 	state bool replied = false;
 	state Database cx;
@@ -556,8 +579,10 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work, Reference<ClusterC
 	return Void();
 }
 
-ACTOR Future<Void> testerServerCore(TesterInterface interf, Reference<ClusterConnectionFile> ccf,
-                                    Reference<AsyncVar<struct ServerDBInfo>> dbInfo, LocalityData locality) {
+ACTOR Future<Void> testerServerCore(TesterInterface interf,
+                                    Reference<ClusterConnectionFile> ccf,
+                                    Reference<AsyncVar<struct ServerDBInfo>> dbInfo,
+                                    LocalityData locality) {
 	state PromiseStream<Future<Void>> addWorkload;
 	state Future<Void> workerFatalError = actorCollection(addWorkload.getFuture());
 
@@ -601,7 +626,11 @@ vector<PerfMetric> aggregateMetrics(vector<vector<PerfMetric>> metrics) {
 		vector<PerfMetric> workloadMetrics = metrics[i];
 		TraceEvent("MetricsReturned").detail("Count", workloadMetrics.size());
 		for (int m = 0; m < workloadMetrics.size(); m++) {
-			printf("Metric (%d, %d): %s, %f, %s\n", i, m, workloadMetrics[m].name().c_str(), workloadMetrics[m].value(),
+			printf("Metric (%d, %d): %s, %f, %s\n",
+			       i,
+			       m,
+			       workloadMetrics[m].name().c_str(),
+			       workloadMetrics[m].value(),
 			       workloadMetrics[m].formatted().c_str());
 			metricMap[workloadMetrics[m].name()].push_back(workloadMetrics[m]);
 		}
@@ -615,10 +644,13 @@ vector<PerfMetric> aggregateMetrics(vector<vector<PerfMetric>> metrics) {
 	std::map<std::string, vector<PerfMetric>>::iterator it;
 	for (it = metricMap.begin(); it != metricMap.end(); it++) {
 		auto& vec = it->second;
-		if (!vec.size()) continue;
+		if (!vec.size())
+			continue;
 		double sum = 0;
-		for (int i = 0; i < vec.size(); i++) sum += vec[i].value();
-		if (vec[0].averaged() && vec.size()) sum /= vec.size();
+		for (int i = 0; i < vec.size(); i++)
+			sum += vec[i].value();
+		if (vec[0].averaged() && vec.size())
+			sum /= vec.size();
 		result.push_back(PerfMetric(vec[0].name(), sum, false, vec[0].format_code()));
 	}
 	return result;
@@ -671,7 +703,8 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<Tester
 
 	state vector<WorkloadInterface> workloads = wait(getAll(workRequests));
 	state double waitForFailureTime = g_network->isSimulated() ? 24 * 60 * 60 : 60;
-	if (g_network->isSimulated() && spec.simCheckRelocationDuration) debug_setCheckRelocationDuration(true);
+	if (g_network->isSimulated() && spec.simCheckRelocationDuration)
+		debug_setCheckRelocationDuration(true);
 
 	if (spec.phases & TestWorkload::SETUP) {
 		state std::vector<Future<ErrorOr<Void>>> setups;
@@ -733,7 +766,8 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<Tester
 
 	// Stopping the workloads is unreliable, but they have a timeout
 	// FIXME: stop if one of the above phases throws an exception
-	for (int i = 0; i < workloads.size(); i++) workloads[i].stop.send(ReplyPromise<Void>());
+	for (int i = 0; i < workloads.size(); i++)
+		workloads[i].stop.send(ReplyPromise<Void>());
 
 	return DistributedTestResults(aggregateMetrics(metricsResults), success, failure);
 }
@@ -754,8 +788,12 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface>
 }
 
 // Runs the consistency check workload, which verifies that the database is in a consistent state
-ACTOR Future<Void> checkConsistency(Database cx, std::vector<TesterInterface> testers, bool doQuiescentCheck,
-                                    double quiescentWaitTimeout, double softTimeLimit, double databasePingDelay,
+ACTOR Future<Void> checkConsistency(Database cx,
+                                    std::vector<TesterInterface> testers,
+                                    bool doQuiescentCheck,
+                                    double quiescentWaitTimeout,
+                                    double softTimeLimit,
+                                    double databasePingDelay,
                                     Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	state TestSpec spec;
 
@@ -777,8 +815,9 @@ ACTOR Future<Void> checkConsistency(Database cx, std::vector<TesterInterface> te
 	options.push_back_deep(options.arena(),
 	                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ConsistencyCheck")));
 	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("performQuiescentChecks"), performQuiescent));
-	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("quiescentWaitTimeout"),
-	                                                    ValueRef(options.arena(), format("%f", quiescentWaitTimeout))));
+	options.push_back_deep(options.arena(),
+	                       KeyValueRef(LiteralStringRef("quiescentWaitTimeout"),
+	                                   ValueRef(options.arena(), format("%f", quiescentWaitTimeout))));
 	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("distributed"), LiteralStringRef("false")));
 	spec.options.push_back_deep(spec.options.arena(), options);
 
@@ -802,7 +841,9 @@ ACTOR Future<Void> checkConsistency(Database cx, std::vector<TesterInterface> te
 	}
 }
 
-ACTOR Future<bool> runTest(Database cx, std::vector<TesterInterface> testers, TestSpec spec,
+ACTOR Future<bool> runTest(Database cx,
+                           std::vector<TesterInterface> testers,
+                           TestSpec spec,
                            Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	state DistributedTestResults testResults;
 
@@ -889,7 +930,8 @@ vector<TestSpec> readTests(ifstream& ifs) {
 	while (ifs.good()) {
 		getline(ifs, cline);
 		string line = removeWhitespace(string(cline));
-		if (!line.size() || line.find(';') == 0) continue;
+		if (!line.size() || line.find(';') == 0)
+			continue;
 
 		size_t found = line.find('=');
 		if (found == string::npos)
@@ -929,7 +971,8 @@ vector<TestSpec> readTests(ifstream& ifs) {
 			TraceEvent("TestParserTest").detail("ParsedPingDelay", spec.databasePingDelay);
 		} else if (attrib == "runSetup") {
 			spec.phases = TestWorkload::EXECUTION | TestWorkload::CHECK | TestWorkload::METRICS;
-			if (value == "true") spec.phases |= TestWorkload::SETUP;
+			if (value == "true")
+				spec.phases |= TestWorkload::SETUP;
 			TraceEvent("TestParserTest").detail("ParsedSetupFlag", (spec.phases & TestWorkload::SETUP) != 0);
 		} else if (attrib == "dumpAfterTest") {
 			spec.dumpAfterTest = (value == "true");
@@ -940,7 +983,8 @@ vector<TestSpec> readTests(ifstream& ifs) {
 		} else if (attrib == "useDB") {
 			spec.useDB = (value == "true");
 			TraceEvent("TestParserTest").detail("ParsedUseDB", spec.useDB);
-			if (!spec.useDB) spec.databasePingDelay = 0.0;
+			if (!spec.useDB)
+				spec.databasePingDelay = 0.0;
 		} else if (attrib == "startDelay") {
 			sscanf(value.c_str(), "%lf", &spec.startDelay);
 			TraceEvent("TestParserTest").detail("ParsedStartDelay", spec.startDelay);
@@ -995,7 +1039,8 @@ vector<TestSpec> readTests(ifstream& ifs) {
 		} else if (attrib == "buggify") {
 			TraceEvent("TestParserTest").detail("ParsedBuggify", "");
 		} else if (attrib == "checkOnly") {
-			if (value == "true") spec.phases = TestWorkload::CHECK;
+			if (value == "true")
+				spec.phases = TestWorkload::CHECK;
 		} else if (attrib == "StderrSeverity") {
 			TraceEvent("StderrSeverity").detail("NewSeverity", value);
 		} else if (attrib == "ClientInfoLogging") {
@@ -1017,7 +1062,8 @@ vector<TestSpec> readTests(ifstream& ifs) {
 			TraceEvent("TestParserOption").detail("ParsedKey", attrib).detail("ParsedValue", value);
 		}
 	}
-	if (workloadOptions.size()) spec.options.push_back_deep(spec.options.arena(), workloadOptions);
+	if (workloadOptions.size())
+		spec.options.push_back_deep(spec.options.arena(), workloadOptions);
 	if (spec.options.size() && spec.title.size()) {
 		result.push_back(spec);
 	}
@@ -1026,8 +1072,11 @@ vector<TestSpec> readTests(ifstream& ifs) {
 }
 
 ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> cc,
-                            Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, vector<TesterInterface> testers,
-                            vector<TestSpec> tests, StringRef startingConfiguration, LocalityData locality) {
+                            Reference<AsyncVar<Optional<struct ClusterInterface>>> ci,
+                            vector<TesterInterface> testers,
+                            vector<TestSpec> tests,
+                            StringRef startingConfiguration,
+                            LocalityData locality) {
 	state Database cx;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>);
 	state Future<Void> ccMonitor =
@@ -1041,14 +1090,19 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	state ISimulator::BackupAgentType simBackupAgents = ISimulator::NoBackupAgents;
 	state ISimulator::BackupAgentType simDrAgents = ISimulator::NoBackupAgents;
 	state bool enableDD = false;
-	if (tests.empty()) useDB = true;
+	if (tests.empty())
+		useDB = true;
 	for (auto iter = tests.begin(); iter != tests.end(); ++iter) {
-		if (iter->useDB) useDB = true;
-		if (iter->waitForQuiescenceBegin) waitForQuiescenceBegin = true;
-		if (iter->waitForQuiescenceEnd) waitForQuiescenceEnd = true;
+		if (iter->useDB)
+			useDB = true;
+		if (iter->waitForQuiescenceBegin)
+			waitForQuiescenceBegin = true;
+		if (iter->waitForQuiescenceEnd)
+			waitForQuiescenceEnd = true;
 		startDelay = std::max(startDelay, iter->startDelay);
 		databasePingDelay = std::min(databasePingDelay, iter->databasePingDelay);
-		if (iter->simBackupAgents != ISimulator::NoBackupAgents) simBackupAgents = iter->simBackupAgents;
+		if (iter->simBackupAgents != ISimulator::NoBackupAgents)
+			simBackupAgents = iter->simBackupAgents;
 
 		if (iter->simDrAgents != ISimulator::NoBackupAgents) {
 			simDrAgents = iter->simDrAgents;
@@ -1062,7 +1116,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	}
 
 	// turn off the database ping functionality if the suite of tests are not going to be using the database
-	if (!useDB) databasePingDelay = 0.0;
+	if (!useDB)
+		databasePingDelay = 0.0;
 
 	if (useDB) {
 		cx = openDBOnServer(dbInfo);
@@ -1125,8 +1180,11 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 }
 
 ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> cc,
-                            Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, vector<TestSpec> tests,
-                            test_location_t at, int minTestersExpected, StringRef startingConfiguration,
+                            Reference<AsyncVar<Optional<struct ClusterInterface>>> ci,
+                            vector<TestSpec> tests,
+                            test_location_t at,
+                            int minTestersExpected,
+                            StringRef startingConfiguration,
                             LocalityData locality) {
 	state int flags = (at == TEST_ON_SERVERS ? 0 : GetWorkersRequest::TESTER_CLASS_ONLY) |
 	                  GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY;
@@ -1154,14 +1212,19 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	}
 
 	vector<TesterInterface> ts;
-	for (int i = 0; i < workers.size(); i++) ts.push_back(workers[i].interf.testerInterface);
+	for (int i = 0; i < workers.size(); i++)
+		ts.push_back(workers[i].interf.testerInterface);
 
 	wait(runTests(cc, ci, ts, tests, startingConfiguration, locality));
 	return Void();
 }
 
-ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile, test_type_t whatToRun, test_location_t at,
-                            int minTestersExpected, std::string fileName, StringRef startingConfiguration,
+ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
+                            test_type_t whatToRun,
+                            test_location_t at,
+                            int minTestersExpected,
+                            std::string fileName,
+                            StringRef startingConfiguration,
                             LocalityData locality) {
 	state vector<TestSpec> testSpecs;
 	Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc(

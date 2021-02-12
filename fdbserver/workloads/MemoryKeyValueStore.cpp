@@ -38,12 +38,14 @@ Key MemoryKeyValueStore::getKey(KeySelectorRef selector) const {
 	int count = 0;
 	if (selector.offset <= 0) {
 		if (mapItr == store.end() || selector.getKey() != mapItr->first || !selector.orEqual) {
-			if (mapItr == store.begin()) return startKey();
+			if (mapItr == store.begin())
+				return startKey();
 
 			mapItr--;
 		}
 	} else {
-		if (mapItr == store.end()) return endKey();
+		if (mapItr == store.end())
+			return endKey();
 
 		if (selector.getKey() == mapItr->first && selector.orEqual) {
 			mapItr++;
@@ -55,11 +57,13 @@ Key MemoryKeyValueStore::getKey(KeySelectorRef selector) const {
 	// Increment the map iterator until the desired offset is reached
 	for (; count < abs(selector.offset); count++) {
 		if (selector.offset < 0) {
-			if (mapItr == store.begin()) break;
+			if (mapItr == store.begin())
+				break;
 
 			mapItr--;
 		} else {
-			if (mapItr == store.end()) break;
+			if (mapItr == store.end())
+				break;
 
 			mapItr++;
 		}
@@ -87,11 +91,13 @@ Standalone<RangeResultRef> MemoryKeyValueStore::getRange(KeyRangeRef range, int 
 	// queries have been disallowed by the database at the API level
 	else {
 		std::map<Key, Value>::const_iterator mapItr = store.lower_bound(range.end);
-		if (mapItr == store.begin()) return results;
+		if (mapItr == store.begin())
+			return results;
 
 		for (--mapItr; mapItr->first >= range.begin && results.size() < abs(limit); mapItr--) {
 			results.push_back_deep(results.arena(), KeyValueRef(mapItr->first, mapItr->second));
-			if (mapItr == store.begin()) break;
+			if (mapItr == store.begin())
+				break;
 		}
 	}
 
@@ -132,5 +138,6 @@ Key MemoryKeyValueStore::endKey() const {
 void MemoryKeyValueStore::printContents() const {
 	printf("Contents:\n");
 	std::map<Key, Value>::const_iterator mapItr;
-	for (mapItr = store.begin(); mapItr != store.end(); mapItr++) printf("%s\n", mapItr->first.toString().c_str());
+	for (mapItr = store.begin(); mapItr != store.end(); mapItr++)
+		printf("%s\n", mapItr->first.toString().c_str());
 }

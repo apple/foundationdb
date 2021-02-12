@@ -41,7 +41,8 @@ struct RYWDisableWorkload : TestWorkload {
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
 
 	virtual Future<Void> start(Database const& cx) {
-		if (clientId == 0) return _start(cx, this);
+		if (clientId == 0)
+			return _start(cx, this);
 		return Void();
 	}
 
@@ -74,17 +75,21 @@ struct RYWDisableWorkload : TestWorkload {
 					// set ryw disable, check that it fails
 					try {
 						tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
-						if (shouldError) ASSERT(false);
+						if (shouldError)
+							ASSERT(false);
 					} catch (Error& e) {
-						if (!shouldError) ASSERT(false);
+						if (!shouldError)
+							ASSERT(false);
 						ASSERT(e.code() == error_code_client_invalid_operation);
 					}
 
 					wait(delay(0.1));
 
-					if (now() - testStart > self->testDuration) return Void();
+					if (now() - testStart > self->testDuration)
+						return Void();
 
-					if (deterministicRandom()->random01() < 0.5) break;
+					if (deterministicRandom()->random01() < 0.5)
+						break;
 
 					tr.reset();
 				} catch (Error& e) {
@@ -97,7 +102,8 @@ struct RYWDisableWorkload : TestWorkload {
 	virtual Future<bool> check(Database const& cx) {
 		bool ok = true;
 		for (int i = 0; i < clients.size(); i++)
-			if (clients[i].isError()) ok = false;
+			if (clients[i].isError())
+				ok = false;
 		clients.clear();
 		return ok;
 	}

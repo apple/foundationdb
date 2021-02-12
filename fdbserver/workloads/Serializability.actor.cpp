@@ -88,7 +88,8 @@ struct SerializabilityWorkload : TestWorkload {
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
 
 	virtual Future<Void> start(Database const& cx) {
-		if (clientId == 0) return _start(cx, this);
+		if (clientId == 0)
+			return _start(cx, this);
 		return Void();
 	}
 
@@ -113,14 +114,14 @@ struct SerializabilityWorkload : TestWorkload {
 
 	KeySelector getRandomKeySelector() {
 		int scale = 1 << deterministicRandom()->randomInt(0, 14);
-		return KeySelectorRef(getRandomKey(), deterministicRandom()->random01() < 0.5,
-		                      deterministicRandom()->randomInt(-scale, scale));
+		return KeySelectorRef(
+		    getRandomKey(), deterministicRandom()->random01() < 0.5, deterministicRandom()->randomInt(-scale, scale));
 	}
 
 	KeyRange getRandomRange(int sizeLimit) {
 		int startLocation = deterministicRandom()->randomInt(0, nodes);
-		int scale = deterministicRandom()->randomInt(0, deterministicRandom()->randomInt(2, 5) *
-		                                                    deterministicRandom()->randomInt(2, 5));
+		int scale = deterministicRandom()->randomInt(
+		    0, deterministicRandom()->randomInt(2, 5) * deterministicRandom()->randomInt(2, 5));
 		int endLocation = startLocation + deterministicRandom()->randomInt(
 		                                      0, 1 + std::min(sizeLimit, std::min(nodes - startLocation, 1 << scale)));
 
@@ -155,7 +156,8 @@ struct SerializabilityWorkload : TestWorkload {
 			} else if (operationType == 3) {
 				KeyRange range = getRandomRange(maxClearSize);
 				op.mutationOp = MutationRef(MutationRef::ClearRange, range.begin, range.end);
-				if (!range.empty()) hasMutation = true;
+				if (!range.empty())
+					hasMutation = true;
 			} else if (operationType == 4) {
 				KeyRange range = singleKeyRange(getRandomKey());
 				op.mutationOp = MutationRef(MutationRef::ClearRange, range.begin, range.end);
@@ -226,28 +228,33 @@ struct SerializabilityWorkload : TestWorkload {
 		futures.back() = tag(::success(futures.back()), T());
 	}
 
-	ACTOR static Future<Void> runTransaction(ReadYourWritesTransaction* tr, std::vector<TransactionOperation> ops,
+	ACTOR static Future<Void> runTransaction(ReadYourWritesTransaction* tr,
+	                                         std::vector<TransactionOperation> ops,
 	                                         std::vector<Future<Optional<Value>>>* getFutures,
 	                                         std::vector<Future<Key>>* getKeyFutures,
 	                                         std::vector<Future<Standalone<RangeResultRef>>>* getRangeFutures,
-	                                         std::vector<Future<Void>>* watchFutures, bool checkSnapshotReads) {
+	                                         std::vector<Future<Void>>* watchFutures,
+	                                         bool checkSnapshotReads) {
 		state int opNum = 0;
 		for (; opNum < ops.size(); opNum++) {
 			if (ops[opNum].getKeyOp.present()) {
 				auto& op = ops[opNum].getKeyOp.get();
 				//TraceEvent("SRL_GetKey").detail("Key", op.key.toString()).detail("Snapshot", op.snapshot);
 				getKeyFutures->push_back(tr->getKey(op.key, op.snapshot));
-				if (op.snapshot && !checkSnapshotReads) dontCheck(*getKeyFutures);
+				if (op.snapshot && !checkSnapshotReads)
+					dontCheck(*getKeyFutures);
 			} else if (ops[opNum].getOp.present()) {
 				auto& op = ops[opNum].getOp.get();
 				//TraceEvent("SRL_Get").detail("Key", printable(op.key)).detail("Snapshot", op.snapshot);
 				getFutures->push_back(tr->get(op.key, op.snapshot));
-				if (op.snapshot && !checkSnapshotReads) dontCheck(*getFutures);
+				if (op.snapshot && !checkSnapshotReads)
+					dontCheck(*getFutures);
 			} else if (ops[opNum].getRangeOp.present()) {
 				auto& op = ops[opNum].getRangeOp.get();
 				//TraceEvent("SRL_GetRange").detail("Begin", op.begin.toString()).detail("End", op.end.toString()).detail("Limit", op.limit).detail("Snapshot", op.snapshot).detail("Reverse", op.reverse);
 				getRangeFutures->push_back(tr->getRange(op.begin, op.end, op.limit, op.snapshot, op.reverse));
-				if (op.snapshot && !checkSnapshotReads) dontCheck(*getRangeFutures);
+				if (op.snapshot && !checkSnapshotReads)
+					dontCheck(*getRangeFutures);
 			} else if (ops[opNum].mutationOp.present()) {
 				auto& op = ops[opNum].mutationOp.get();
 				if (op.type == MutationRef::SetValue) {
@@ -311,7 +318,8 @@ struct SerializabilityWorkload : TestWorkload {
 		state ReadYourWritesTransaction tr(cx);
 
 		tr.clear(normalKeys);
-		for (auto kv : data) tr.set(kv.key, kv.value);
+		for (auto kv : data)
+			tr.set(kv.key, kv.value);
 		wait(tr.commit());
 		//TraceEvent("SRL_Reset");
 		return Void();
@@ -336,7 +344,8 @@ struct SerializabilityWorkload : TestWorkload {
 			}
 
 			try {
-				if (now() - startTime > self->testDuration) return Void();
+				if (now() - startTime > self->testDuration)
+					return Void();
 
 				// Generate initial data
 				state Standalone<VectorRef<KeyValueRef>> initialData;
@@ -356,20 +365,20 @@ struct SerializabilityWorkload : TestWorkload {
 				// reset database to known state
 				wait(resetDatabase(cx, initialData));
 
-				wait(runTransaction(&tr[0], a, &getFutures[0], &getKeyFutures[0], &getRangeFutures[0], &watchFutures[0],
-				                    true));
+				wait(runTransaction(
+				    &tr[0], a, &getFutures[0], &getKeyFutures[0], &getRangeFutures[0], &watchFutures[0], true));
 				wait(tr[0].commit());
 
 				//TraceEvent("SRL_FinishedA");
 
-				wait(runTransaction(&tr[1], b, &getFutures[0], &getKeyFutures[0], &getRangeFutures[0], &watchFutures[0],
-				                    true));
+				wait(runTransaction(
+				    &tr[1], b, &getFutures[0], &getKeyFutures[0], &getRangeFutures[0], &watchFutures[0], true));
 				wait(tr[1].commit());
 
 				//TraceEvent("SRL_FinishedB");
 
-				wait(runTransaction(&tr[2], c, &getFutures[2], &getKeyFutures[2], &getRangeFutures[2], &watchFutures[2],
-				                    false));
+				wait(runTransaction(
+				    &tr[2], c, &getFutures[2], &getKeyFutures[2], &getRangeFutures[2], &watchFutures[2], false));
 				wait(tr[2].commit());
 
 				// get contents of database
@@ -378,12 +387,12 @@ struct SerializabilityWorkload : TestWorkload {
 				// reset database to known state
 				wait(resetDatabase(cx, initialData));
 
-				wait(runTransaction(&tr[3], a, &getFutures[3], &getKeyFutures[3], &getRangeFutures[3], &watchFutures[3],
-				                    true));
-				wait(runTransaction(&tr[3], b, &getFutures[3], &getKeyFutures[3], &getRangeFutures[3], &watchFutures[3],
-				                    true));
-				wait(runTransaction(&tr[4], c, &getFutures[4], &getKeyFutures[4], &getRangeFutures[4], &watchFutures[4],
-				                    false));
+				wait(runTransaction(
+				    &tr[3], a, &getFutures[3], &getKeyFutures[3], &getRangeFutures[3], &watchFutures[3], true));
+				wait(runTransaction(
+				    &tr[3], b, &getFutures[3], &getKeyFutures[3], &getRangeFutures[3], &watchFutures[3], true));
+				wait(runTransaction(
+				    &tr[4], c, &getFutures[4], &getKeyFutures[4], &getRangeFutures[4], &watchFutures[4], false));
 				wait(tr[3].commit());
 				wait(tr[4].commit());
 
@@ -395,8 +404,10 @@ struct SerializabilityWorkload : TestWorkload {
 					    .detail("Size1", result1.size())
 					    .detail("Size2", result2.size());
 
-					for (auto kv : result1) TraceEvent("SRL_Result1").detail("Kv", printable(kv));
-					for (auto kv : result2) TraceEvent("SRL_Result2").detail("Kv", printable(kv));
+					for (auto kv : result1)
+						TraceEvent("SRL_Result1").detail("Kv", printable(kv));
+					for (auto kv : result2)
+						TraceEvent("SRL_Result2").detail("Kv", printable(kv));
 
 					ASSERT(false);
 				}
@@ -410,8 +421,10 @@ struct SerializabilityWorkload : TestWorkload {
 						    .detail("Result1Value", printable(result1[i].value))
 						    .detail("Result2Value", printable(result2[i].value));
 
-						for (auto kv : result1) TraceEvent("SRL_Result1").detail("Kv", printable(kv));
-						for (auto kv : result2) TraceEvent("SRL_Result2").detail("Kv", printable(kv));
+						for (auto kv : result1)
+							TraceEvent("SRL_Result1").detail("Kv", printable(kv));
+						for (auto kv : result2)
+							TraceEvent("SRL_Result2").detail("Kv", printable(kv));
 
 						ASSERT(false);
 					}

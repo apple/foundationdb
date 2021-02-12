@@ -76,8 +76,21 @@ struct TLogInterface {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.isDeserializing || uniqueID != UID());
 		}
-		serializer(ar, uniqueID, sharedTLogID, locality, peekMessages, popMessages, commit, lock, getQueuingMetrics,
-		           confirmRunning, waitFailure, recoveryFinished, disablePopRequest, enablePopRequest, snapRequest);
+		serializer(ar,
+		           uniqueID,
+		           sharedTLogID,
+		           locality,
+		           peekMessages,
+		           popMessages,
+		           commit,
+		           lock,
+		           getQueuingMetrics,
+		           confirmRunning,
+		           waitFailure,
+		           recoveryFinished,
+		           disablePopRequest,
+		           enablePopRequest,
+		           snapRequest);
 	}
 };
 
@@ -178,7 +191,10 @@ struct TLogPeekRequest {
 	Optional<std::pair<UID, int>> sequence;
 	ReplyPromise<TLogPeekReply> reply;
 
-	TLogPeekRequest(Version begin, Tag tag, bool returnIfBlocked, bool onlySpilled,
+	TLogPeekRequest(Version begin,
+	                Tag tag,
+	                bool returnIfBlocked,
+	                bool onlySpilled,
 	                Optional<std::pair<UID, int>> sequence = Optional<std::pair<UID, int>>())
 	  : begin(begin), tag(tag), returnIfBlocked(returnIfBlocked), sequence(sequence), onlySpilled(onlySpilled) {}
 	TLogPeekRequest() {}
@@ -246,14 +262,19 @@ struct TLogCommitRequest {
 	Optional<UID> debugID;
 
 	TLogCommitRequest() {}
-	TLogCommitRequest(const Arena& a, Version prevVersion, Version version, Version knownCommittedVersion,
-	                  Version minKnownCommittedVersion, StringRef messages, Optional<UID> debugID)
+	TLogCommitRequest(const Arena& a,
+	                  Version prevVersion,
+	                  Version version,
+	                  Version knownCommittedVersion,
+	                  Version minKnownCommittedVersion,
+	                  StringRef messages,
+	                  Optional<UID> debugID)
 	  : arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion),
 	    minKnownCommittedVersion(minKnownCommittedVersion), messages(messages), debugID(debugID) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, messages, reply, arena,
-		           debugID);
+		serializer(
+		    ar, prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, messages, reply, arena, debugID);
 	}
 };
 

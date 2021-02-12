@@ -194,7 +194,8 @@ public:
 	GenericPointer& operator=(const GenericPointer& rhs) {
 		if (this != &rhs) {
 			// Do not delete ownAllcator
-			if (nameBuffer_) Allocator::Free(tokens_);
+			if (nameBuffer_)
+				Allocator::Free(tokens_);
 
 			tokenCount_ = rhs.tokenCount_;
 			parseErrorOffset_ = rhs.parseErrorOffset_;
@@ -286,7 +287,8 @@ public:
 			return Append(token, allocator);
 		} else {
 			Ch name[21];
-			for (size_t i = 0; i <= length; i++) name[i] = buffer[i];
+			for (size_t i = 0; i <= length; i++)
+				name[i] = buffer[i];
 			Token token = { name, length, index };
 			return Append(token, allocator);
 		}
@@ -344,7 +346,8 @@ public:
 	    \note When any pointers are invalid, always returns false.
 	*/
 	bool operator==(const GenericPointer& rhs) const {
-		if (!IsValid() || !rhs.IsValid() || tokenCount_ != rhs.tokenCount_) return false;
+		if (!IsValid() || !rhs.IsValid() || tokenCount_ != rhs.tokenCount_)
+			return false;
 
 		for (size_t i = 0; i < tokenCount_; i++) {
 			if (tokens_[i].index != rhs.tokens_[i].index || tokens_[i].length != rhs.tokens_[i].length ||
@@ -419,15 +422,18 @@ public:
 				exist = false;
 			} else {
 				if (t->index == kPointerInvalidIndex) { // must be object name
-					if (!v->IsObject()) v->SetObject(); // Change to Object
+					if (!v->IsObject())
+						v->SetObject(); // Change to Object
 				} else { // object name or array index
-					if (!v->IsArray() && !v->IsObject()) v->SetArray(); // Change to Array
+					if (!v->IsArray() && !v->IsObject())
+						v->SetArray(); // Change to Array
 				}
 
 				if (v->IsArray()) {
 					if (t->index >= v->Size()) {
 						v->Reserve(t->index + 1, allocator);
-						while (t->index >= v->Size()) v->PushBack(ValueType().Move(), allocator);
+						while (t->index >= v->Size())
+							v->PushBack(ValueType().Move(), allocator);
 						exist = false;
 					}
 					v = &((*v)[t->index]);
@@ -443,7 +449,8 @@ public:
 			}
 		}
 
-		if (alreadyExist) *alreadyExist = exist;
+		if (alreadyExist)
+			*alreadyExist = exist;
 
 		return *v;
 	}
@@ -486,12 +493,14 @@ public:
 			switch (v->GetType()) {
 			case kObjectType: {
 				typename ValueType::MemberIterator m = v->FindMember(GenericStringRef<Ch>(t->name, t->length));
-				if (m == v->MemberEnd()) break;
+				if (m == v->MemberEnd())
+					break;
 				v = &m->value;
 			}
 				continue;
 			case kArrayType:
-				if (t->index == kPointerInvalidIndex || t->index >= v->Size()) break;
+				if (t->index == kPointerInvalidIndex || t->index >= v->Size())
+					break;
 				v = &((*v)[t->index]);
 				continue;
 			default:
@@ -499,7 +508,8 @@ public:
 			}
 
 			// Error: unresolved token
-			if (unresolvedTokenIndex) *unresolvedTokenIndex = static_cast<size_t>(t - tokens_);
+			if (unresolvedTokenIndex)
+				*unresolvedTokenIndex = static_cast<size_t>(t - tokens_);
 			return 0;
 		}
 		return v;
@@ -529,7 +539,8 @@ public:
 	    \param allocator Allocator for creating the values if the specified value or its parents are not exist.
 	    \see Create()
 	*/
-	ValueType& GetWithDefault(ValueType& root, const ValueType& defaultValue,
+	ValueType& GetWithDefault(ValueType& root,
+	                          const ValueType& defaultValue,
 	                          typename ValueType::AllocatorType& allocator) const {
 		bool alreadyExist;
 		Value& v = Create(root, allocator, &alreadyExist);
@@ -537,7 +548,8 @@ public:
 	}
 
 	//! Query a value in a subtree with default null-terminated string.
-	ValueType& GetWithDefault(ValueType& root, const Ch* defaultValue,
+	ValueType& GetWithDefault(ValueType& root,
+	                          const Ch* defaultValue,
 	                          typename ValueType::AllocatorType& allocator) const {
 		bool alreadyExist;
 		Value& v = Create(root, allocator, &alreadyExist);
@@ -546,7 +558,8 @@ public:
 
 #if RAPIDJSON_HAS_STDSTRING
 	//! Query a value in a subtree with default std::basic_string.
-	ValueType& GetWithDefault(ValueType& root, const std::basic_string<Ch>& defaultValue,
+	ValueType& GetWithDefault(ValueType& root,
+	                          const std::basic_string<Ch>& defaultValue,
 	                          typename ValueType::AllocatorType& allocator) const {
 		bool alreadyExist;
 		Value& v = Create(root, allocator, &alreadyExist);
@@ -632,7 +645,8 @@ public:
 
 #if RAPIDJSON_HAS_STDSTRING
 	//! Set a std::basic_string in a subtree.
-	ValueType& Set(ValueType& root, const std::basic_string<Ch>& value,
+	ValueType& Set(ValueType& root,
+	               const std::basic_string<Ch>& value,
 	               typename ValueType::AllocatorType& allocator) const {
 		return Create(root, allocator) = ValueType(value, allocator).Move();
 	}
@@ -734,11 +748,13 @@ public:
 			switch (v->GetType()) {
 			case kObjectType: {
 				typename ValueType::MemberIterator m = v->FindMember(GenericStringRef<Ch>(t->name, t->length));
-				if (m == v->MemberEnd()) return false;
+				if (m == v->MemberEnd())
+					return false;
 				v = &m->value;
 			} break;
 			case kArrayType:
-				if (t->index == kPointerInvalidIndex || t->index >= v->Size()) return false;
+				if (t->index == kPointerInvalidIndex || t->index >= v->Size())
+					return false;
 				v = &((*v)[t->index]);
 				break;
 			default:
@@ -750,7 +766,8 @@ public:
 		case kObjectType:
 			return v->EraseMember(GenericStringRef<Ch>(last->name, last->length));
 		case kArrayType:
-			if (last->index == kPointerInvalidIndex || last->index >= v->Size()) return false;
+			if (last->index == kPointerInvalidIndex || last->index >= v->Size())
+				return false;
 			v->Erase(v->Begin() + last->index);
 			return true;
 		default:
@@ -771,7 +788,8 @@ private:
 			ownAllocator_ = allocator_ = RAPIDJSON_NEW(Allocator());
 
 		size_t nameBufferSize = rhs.tokenCount_; // null terminators for tokens
-		for (Token* t = rhs.tokens_; t != rhs.tokens_ + rhs.tokenCount_; ++t) nameBufferSize += t->length;
+		for (Token* t = rhs.tokens_; t != rhs.tokens_ + rhs.tokenCount_; ++t)
+			nameBufferSize += t->length;
 
 		tokenCount_ = rhs.tokenCount_ + extraToken;
 		tokens_ = static_cast<Token*>(
@@ -786,7 +804,8 @@ private:
 
 		// Adjust pointers to name buffer
 		std::ptrdiff_t diff = nameBuffer_ - rhs.nameBuffer_;
-		for (Token* t = tokens_; t != tokens_ + rhs.tokenCount_; ++t) t->name += diff;
+		for (Token* t = tokens_; t != tokens_ + rhs.tokenCount_; ++t)
+			t->name += diff;
 
 		return nameBuffer_ + nameBufferSize;
 	}
@@ -816,12 +835,14 @@ private:
 		RAPIDJSON_ASSERT(tokens_ == 0);
 
 		// Create own allocator if user did not supply.
-		if (!allocator_) ownAllocator_ = allocator_ = RAPIDJSON_NEW(Allocator());
+		if (!allocator_)
+			ownAllocator_ = allocator_ = RAPIDJSON_NEW(Allocator());
 
 		// Count number of '/' as tokenCount
 		tokenCount_ = 0;
 		for (const Ch* s = source; s != source + length; s++)
-			if (*s == '/') tokenCount_++;
+			if (*s == '/')
+				tokenCount_++;
 
 		Token* token = tokens_ =
 		    static_cast<Token*>(allocator_->Malloc(tokenCount_ * sizeof(Token) + length * sizeof(Ch)));
@@ -897,16 +918,19 @@ private:
 				}
 
 				// First check for index: all of characters are digit
-				if (c < '0' || c > '9') isNumber = false;
+				if (c < '0' || c > '9')
+					isNumber = false;
 
 				*name++ = c;
 			}
 			token->length = static_cast<SizeType>(name - token->name);
-			if (token->length == 0) isNumber = false;
+			if (token->length == 0)
+				isNumber = false;
 			*name++ = '\0'; // Null terminator
 
 			// Second check for index: more than one digit cannot have leading zero
-			if (isNumber && token->length > 1 && token->name[0] == '0') isNumber = false;
+			if (isNumber && token->length > 1 && token->name[0] == '0')
+				isNumber = false;
 
 			// String to SizeType conversion
 			SizeType n = 0;
@@ -948,7 +972,8 @@ private:
 	bool Stringify(OutputStream& os) const {
 		RAPIDJSON_ASSERT(IsValid());
 
-		if (uriFragment) os.Put('#');
+		if (uriFragment)
+			os.Put('#');
 
 		for (Token* t = tokens_; t != tokens_ + tokenCount_; ++t) {
 			os.Put('/');
@@ -964,7 +989,8 @@ private:
 					// Transcode to UTF8 sequence
 					GenericStringStream<typename ValueType::EncodingType> source(&t->name[j]);
 					PercentEncodeStream<OutputStream> target(os);
-					if (!Transcoder<EncodingType, UTF8<>>().Validate(source, target)) return false;
+					if (!Transcoder<EncodingType, UTF8<>>().Validate(source, target))
+						return false;
 					j += source.Tell() - 1;
 				} else
 					os.Put(c);
@@ -1061,7 +1087,8 @@ typedef GenericPointer<Value> Pointer;
 //////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
-typename T::ValueType& CreateValueByPointer(T& root, const GenericPointer<typename T::ValueType>& pointer,
+typename T::ValueType& CreateValueByPointer(T& root,
+                                            const GenericPointer<typename T::ValueType>& pointer,
                                             typename T::AllocatorType& a) {
 	return pointer.Create(root, a);
 }
@@ -1075,7 +1102,8 @@ typename T::ValueType& CreateValueByPointer(T& root, const CharType (&source)[N]
 
 template <typename DocumentType>
 typename DocumentType::ValueType& CreateValueByPointer(
-    DocumentType& document, const GenericPointer<typename DocumentType::ValueType>& pointer) {
+    DocumentType& document,
+    const GenericPointer<typename DocumentType::ValueType>& pointer) {
 	return pointer.Create(document);
 }
 
@@ -1087,13 +1115,15 @@ typename DocumentType::ValueType& CreateValueByPointer(DocumentType& document, c
 //////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
-typename T::ValueType* GetValueByPointer(T& root, const GenericPointer<typename T::ValueType>& pointer,
+typename T::ValueType* GetValueByPointer(T& root,
+                                         const GenericPointer<typename T::ValueType>& pointer,
                                          size_t* unresolvedTokenIndex = 0) {
 	return pointer.Get(root, unresolvedTokenIndex);
 }
 
 template <typename T>
-const typename T::ValueType* GetValueByPointer(const T& root, const GenericPointer<typename T::ValueType>& pointer,
+const typename T::ValueType* GetValueByPointer(const T& root,
+                                               const GenericPointer<typename T::ValueType>& pointer,
                                                size_t* unresolvedTokenIndex = 0) {
 	return pointer.Get(root, unresolvedTokenIndex);
 }
@@ -1104,7 +1134,8 @@ typename T::ValueType* GetValueByPointer(T& root, const CharType (&source)[N], s
 }
 
 template <typename T, typename CharType, size_t N>
-const typename T::ValueType* GetValueByPointer(const T& root, const CharType (&source)[N],
+const typename T::ValueType* GetValueByPointer(const T& root,
+                                               const CharType (&source)[N],
                                                size_t* unresolvedTokenIndex = 0) {
 	return GenericPointer<typename T::ValueType>(source, N - 1).Get(root, unresolvedTokenIndex);
 }
@@ -1112,21 +1143,25 @@ const typename T::ValueType* GetValueByPointer(const T& root, const CharType (&s
 //////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
-typename T::ValueType& GetValueByPointerWithDefault(T& root, const GenericPointer<typename T::ValueType>& pointer,
+typename T::ValueType& GetValueByPointerWithDefault(T& root,
+                                                    const GenericPointer<typename T::ValueType>& pointer,
                                                     const typename T::ValueType& defaultValue,
                                                     typename T::AllocatorType& a) {
 	return pointer.GetWithDefault(root, defaultValue, a);
 }
 
 template <typename T>
-typename T::ValueType& GetValueByPointerWithDefault(T& root, const GenericPointer<typename T::ValueType>& pointer,
-                                                    const typename T::Ch* defaultValue, typename T::AllocatorType& a) {
+typename T::ValueType& GetValueByPointerWithDefault(T& root,
+                                                    const GenericPointer<typename T::ValueType>& pointer,
+                                                    const typename T::Ch* defaultValue,
+                                                    typename T::AllocatorType& a) {
 	return pointer.GetWithDefault(root, defaultValue, a);
 }
 
 #if RAPIDJSON_HAS_STDSTRING
 template <typename T>
-typename T::ValueType& GetValueByPointerWithDefault(T& root, const GenericPointer<typename T::ValueType>& pointer,
+typename T::ValueType& GetValueByPointerWithDefault(T& root,
+                                                    const GenericPointer<typename T::ValueType>& pointer,
                                                     const std::basic_string<typename T::Ch>& defaultValue,
                                                     typename T::AllocatorType& a) {
 	return pointer.GetWithDefault(root, defaultValue, a);
@@ -1136,27 +1171,33 @@ typename T::ValueType& GetValueByPointerWithDefault(T& root, const GenericPointe
 template <typename T, typename T2>
 RAPIDJSON_DISABLEIF_RETURN((internal::OrExpr<internal::IsPointer<T2>, internal::IsGenericValue<T2>>),
                            (typename T::ValueType&))
-GetValueByPointerWithDefault(T& root, const GenericPointer<typename T::ValueType>& pointer, T2 defaultValue,
+GetValueByPointerWithDefault(T& root,
+                             const GenericPointer<typename T::ValueType>& pointer,
+                             T2 defaultValue,
                              typename T::AllocatorType& a) {
 	return pointer.GetWithDefault(root, defaultValue, a);
 }
 
 template <typename T, typename CharType, size_t N>
-typename T::ValueType& GetValueByPointerWithDefault(T& root, const CharType (&source)[N],
+typename T::ValueType& GetValueByPointerWithDefault(T& root,
+                                                    const CharType (&source)[N],
                                                     const typename T::ValueType& defaultValue,
                                                     typename T::AllocatorType& a) {
 	return GenericPointer<typename T::ValueType>(source, N - 1).GetWithDefault(root, defaultValue, a);
 }
 
 template <typename T, typename CharType, size_t N>
-typename T::ValueType& GetValueByPointerWithDefault(T& root, const CharType (&source)[N],
-                                                    const typename T::Ch* defaultValue, typename T::AllocatorType& a) {
+typename T::ValueType& GetValueByPointerWithDefault(T& root,
+                                                    const CharType (&source)[N],
+                                                    const typename T::Ch* defaultValue,
+                                                    typename T::AllocatorType& a) {
 	return GenericPointer<typename T::ValueType>(source, N - 1).GetWithDefault(root, defaultValue, a);
 }
 
 #if RAPIDJSON_HAS_STDSTRING
 template <typename T, typename CharType, size_t N>
-typename T::ValueType& GetValueByPointerWithDefault(T& root, const CharType (&source)[N],
+typename T::ValueType& GetValueByPointerWithDefault(T& root,
+                                                    const CharType (&source)[N],
                                                     const std::basic_string<typename T::Ch>& defaultValue,
                                                     typename T::AllocatorType& a) {
 	return GenericPointer<typename T::ValueType>(source, N - 1).GetWithDefault(root, defaultValue, a);
@@ -1174,14 +1215,16 @@ GetValueByPointerWithDefault(T& root, const CharType (&source)[N], T2 defaultVal
 
 template <typename DocumentType>
 typename DocumentType::ValueType& GetValueByPointerWithDefault(
-    DocumentType& document, const GenericPointer<typename DocumentType::ValueType>& pointer,
+    DocumentType& document,
+    const GenericPointer<typename DocumentType::ValueType>& pointer,
     const typename DocumentType::ValueType& defaultValue) {
 	return pointer.GetWithDefault(document, defaultValue);
 }
 
 template <typename DocumentType>
 typename DocumentType::ValueType& GetValueByPointerWithDefault(
-    DocumentType& document, const GenericPointer<typename DocumentType::ValueType>& pointer,
+    DocumentType& document,
+    const GenericPointer<typename DocumentType::ValueType>& pointer,
     const typename DocumentType::Ch* defaultValue) {
 	return pointer.GetWithDefault(document, defaultValue);
 }
@@ -1189,7 +1232,8 @@ typename DocumentType::ValueType& GetValueByPointerWithDefault(
 #if RAPIDJSON_HAS_STDSTRING
 template <typename DocumentType>
 typename DocumentType::ValueType& GetValueByPointerWithDefault(
-    DocumentType& document, const GenericPointer<typename DocumentType::ValueType>& pointer,
+    DocumentType& document,
+    const GenericPointer<typename DocumentType::ValueType>& pointer,
     const std::basic_string<typename DocumentType::Ch>& defaultValue) {
 	return pointer.GetWithDefault(document, defaultValue);
 }
@@ -1198,19 +1242,22 @@ typename DocumentType::ValueType& GetValueByPointerWithDefault(
 template <typename DocumentType, typename T2>
 RAPIDJSON_DISABLEIF_RETURN((internal::OrExpr<internal::IsPointer<T2>, internal::IsGenericValue<T2>>),
                            (typename DocumentType::ValueType&))
-GetValueByPointerWithDefault(DocumentType& document, const GenericPointer<typename DocumentType::ValueType>& pointer,
+GetValueByPointerWithDefault(DocumentType& document,
+                             const GenericPointer<typename DocumentType::ValueType>& pointer,
                              T2 defaultValue) {
 	return pointer.GetWithDefault(document, defaultValue);
 }
 
 template <typename DocumentType, typename CharType, size_t N>
-typename DocumentType::ValueType& GetValueByPointerWithDefault(DocumentType& document, const CharType (&source)[N],
+typename DocumentType::ValueType& GetValueByPointerWithDefault(DocumentType& document,
+                                                               const CharType (&source)[N],
                                                                const typename DocumentType::ValueType& defaultValue) {
 	return GenericPointer<typename DocumentType::ValueType>(source, N - 1).GetWithDefault(document, defaultValue);
 }
 
 template <typename DocumentType, typename CharType, size_t N>
-typename DocumentType::ValueType& GetValueByPointerWithDefault(DocumentType& document, const CharType (&source)[N],
+typename DocumentType::ValueType& GetValueByPointerWithDefault(DocumentType& document,
+                                                               const CharType (&source)[N],
                                                                const typename DocumentType::Ch* defaultValue) {
 	return GenericPointer<typename DocumentType::ValueType>(source, N - 1).GetWithDefault(document, defaultValue);
 }
@@ -1218,7 +1265,8 @@ typename DocumentType::ValueType& GetValueByPointerWithDefault(DocumentType& doc
 #if RAPIDJSON_HAS_STDSTRING
 template <typename DocumentType, typename CharType, size_t N>
 typename DocumentType::ValueType& GetValueByPointerWithDefault(
-    DocumentType& document, const CharType (&source)[N],
+    DocumentType& document,
+    const CharType (&source)[N],
     const std::basic_string<typename DocumentType::Ch>& defaultValue) {
 	return GenericPointer<typename DocumentType::ValueType>(source, N - 1).GetWithDefault(document, defaultValue);
 }
@@ -1234,27 +1282,35 @@ GetValueByPointerWithDefault(DocumentType& document, const CharType (&source)[N]
 //////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
-typename T::ValueType& SetValueByPointer(T& root, const GenericPointer<typename T::ValueType>& pointer,
-                                         typename T::ValueType& value, typename T::AllocatorType& a) {
+typename T::ValueType& SetValueByPointer(T& root,
+                                         const GenericPointer<typename T::ValueType>& pointer,
+                                         typename T::ValueType& value,
+                                         typename T::AllocatorType& a) {
 	return pointer.Set(root, value, a);
 }
 
 template <typename T>
-typename T::ValueType& SetValueByPointer(T& root, const GenericPointer<typename T::ValueType>& pointer,
-                                         const typename T::ValueType& value, typename T::AllocatorType& a) {
+typename T::ValueType& SetValueByPointer(T& root,
+                                         const GenericPointer<typename T::ValueType>& pointer,
+                                         const typename T::ValueType& value,
+                                         typename T::AllocatorType& a) {
 	return pointer.Set(root, value, a);
 }
 
 template <typename T>
-typename T::ValueType& SetValueByPointer(T& root, const GenericPointer<typename T::ValueType>& pointer,
-                                         const typename T::Ch* value, typename T::AllocatorType& a) {
+typename T::ValueType& SetValueByPointer(T& root,
+                                         const GenericPointer<typename T::ValueType>& pointer,
+                                         const typename T::Ch* value,
+                                         typename T::AllocatorType& a) {
 	return pointer.Set(root, value, a);
 }
 
 #if RAPIDJSON_HAS_STDSTRING
 template <typename T>
-typename T::ValueType& SetValueByPointer(T& root, const GenericPointer<typename T::ValueType>& pointer,
-                                         const std::basic_string<typename T::Ch>& value, typename T::AllocatorType& a) {
+typename T::ValueType& SetValueByPointer(T& root,
+                                         const GenericPointer<typename T::ValueType>& pointer,
+                                         const std::basic_string<typename T::Ch>& value,
+                                         typename T::AllocatorType& a) {
 	return pointer.Set(root, value, a);
 }
 #endif
@@ -1262,33 +1318,43 @@ typename T::ValueType& SetValueByPointer(T& root, const GenericPointer<typename 
 template <typename T, typename T2>
 RAPIDJSON_DISABLEIF_RETURN((internal::OrExpr<internal::IsPointer<T2>, internal::IsGenericValue<T2>>),
                            (typename T::ValueType&))
-SetValueByPointer(T& root, const GenericPointer<typename T::ValueType>& pointer, T2 value,
+SetValueByPointer(T& root,
+                  const GenericPointer<typename T::ValueType>& pointer,
+                  T2 value,
                   typename T::AllocatorType& a) {
 	return pointer.Set(root, value, a);
 }
 
 template <typename T, typename CharType, size_t N>
-typename T::ValueType& SetValueByPointer(T& root, const CharType (&source)[N], typename T::ValueType& value,
+typename T::ValueType& SetValueByPointer(T& root,
+                                         const CharType (&source)[N],
+                                         typename T::ValueType& value,
                                          typename T::AllocatorType& a) {
 	return GenericPointer<typename T::ValueType>(source, N - 1).Set(root, value, a);
 }
 
 template <typename T, typename CharType, size_t N>
-typename T::ValueType& SetValueByPointer(T& root, const CharType (&source)[N], const typename T::ValueType& value,
+typename T::ValueType& SetValueByPointer(T& root,
+                                         const CharType (&source)[N],
+                                         const typename T::ValueType& value,
                                          typename T::AllocatorType& a) {
 	return GenericPointer<typename T::ValueType>(source, N - 1).Set(root, value, a);
 }
 
 template <typename T, typename CharType, size_t N>
-typename T::ValueType& SetValueByPointer(T& root, const CharType (&source)[N], const typename T::Ch* value,
+typename T::ValueType& SetValueByPointer(T& root,
+                                         const CharType (&source)[N],
+                                         const typename T::Ch* value,
                                          typename T::AllocatorType& a) {
 	return GenericPointer<typename T::ValueType>(source, N - 1).Set(root, value, a);
 }
 
 #if RAPIDJSON_HAS_STDSTRING
 template <typename T, typename CharType, size_t N>
-typename T::ValueType& SetValueByPointer(T& root, const CharType (&source)[N],
-                                         const std::basic_string<typename T::Ch>& value, typename T::AllocatorType& a) {
+typename T::ValueType& SetValueByPointer(T& root,
+                                         const CharType (&source)[N],
+                                         const std::basic_string<typename T::Ch>& value,
+                                         typename T::AllocatorType& a) {
 	return GenericPointer<typename T::ValueType>(source, N - 1).Set(root, value, a);
 }
 #endif
@@ -1340,26 +1406,30 @@ SetValueByPointer(DocumentType& document, const GenericPointer<typename Document
 }
 
 template <typename DocumentType, typename CharType, size_t N>
-typename DocumentType::ValueType& SetValueByPointer(DocumentType& document, const CharType (&source)[N],
+typename DocumentType::ValueType& SetValueByPointer(DocumentType& document,
+                                                    const CharType (&source)[N],
                                                     typename DocumentType::ValueType& value) {
 	return GenericPointer<typename DocumentType::ValueType>(source, N - 1).Set(document, value);
 }
 
 template <typename DocumentType, typename CharType, size_t N>
-typename DocumentType::ValueType& SetValueByPointer(DocumentType& document, const CharType (&source)[N],
+typename DocumentType::ValueType& SetValueByPointer(DocumentType& document,
+                                                    const CharType (&source)[N],
                                                     const typename DocumentType::ValueType& value) {
 	return GenericPointer<typename DocumentType::ValueType>(source, N - 1).Set(document, value);
 }
 
 template <typename DocumentType, typename CharType, size_t N>
-typename DocumentType::ValueType& SetValueByPointer(DocumentType& document, const CharType (&source)[N],
+typename DocumentType::ValueType& SetValueByPointer(DocumentType& document,
+                                                    const CharType (&source)[N],
                                                     const typename DocumentType::Ch* value) {
 	return GenericPointer<typename DocumentType::ValueType>(source, N - 1).Set(document, value);
 }
 
 #if RAPIDJSON_HAS_STDSTRING
 template <typename DocumentType, typename CharType, size_t N>
-typename DocumentType::ValueType& SetValueByPointer(DocumentType& document, const CharType (&source)[N],
+typename DocumentType::ValueType& SetValueByPointer(DocumentType& document,
+                                                    const CharType (&source)[N],
                                                     const std::basic_string<typename DocumentType::Ch>& value) {
 	return GenericPointer<typename DocumentType::ValueType>(source, N - 1).Set(document, value);
 }
@@ -1375,13 +1445,17 @@ SetValueByPointer(DocumentType& document, const CharType (&source)[N], T2 value)
 //////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
-typename T::ValueType& SwapValueByPointer(T& root, const GenericPointer<typename T::ValueType>& pointer,
-                                          typename T::ValueType& value, typename T::AllocatorType& a) {
+typename T::ValueType& SwapValueByPointer(T& root,
+                                          const GenericPointer<typename T::ValueType>& pointer,
+                                          typename T::ValueType& value,
+                                          typename T::AllocatorType& a) {
 	return pointer.Swap(root, value, a);
 }
 
 template <typename T, typename CharType, size_t N>
-typename T::ValueType& SwapValueByPointer(T& root, const CharType (&source)[N], typename T::ValueType& value,
+typename T::ValueType& SwapValueByPointer(T& root,
+                                          const CharType (&source)[N],
+                                          typename T::ValueType& value,
                                           typename T::AllocatorType& a) {
 	return GenericPointer<typename T::ValueType>(source, N - 1).Swap(root, value, a);
 }
@@ -1394,7 +1468,8 @@ typename DocumentType::ValueType& SwapValueByPointer(DocumentType& document,
 }
 
 template <typename DocumentType, typename CharType, size_t N>
-typename DocumentType::ValueType& SwapValueByPointer(DocumentType& document, const CharType (&source)[N],
+typename DocumentType::ValueType& SwapValueByPointer(DocumentType& document,
+                                                     const CharType (&source)[N],
                                                      typename DocumentType::ValueType& value) {
 	return GenericPointer<typename DocumentType::ValueType>(source, N - 1).Swap(document, value);
 }

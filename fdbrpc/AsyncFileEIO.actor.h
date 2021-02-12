@@ -173,7 +173,8 @@ public:
 		std::string folder = parentDirectory(filename);
 		TraceEvent("FSyncParentDir").detail("Folder", folder).detail("File", filename);
 		state int folderFD = ::open(folder.c_str(), O_DIRECTORY | O_CLOEXEC, 0);
-		if (folderFD < 0) throw io_error();
+		if (folderFD < 0)
+			throw io_error();
 		try {
 			wait(async_fsync(folderFD)); // not sure if fdatasync on the folder has the same effect
 		} catch (...) {
@@ -192,7 +193,8 @@ public:
 		// Used by AsyncFileKAIO, since kernel AIO doesn't really implement fsync yet
 		return sync_impl(fd, Reference<ErrorInfo>(new ErrorInfo), true);
 	}
-	ACTOR static Future<Void> waitAndAtomicRename(Future<Void> fsync, std::string part_filename,
+	ACTOR static Future<Void> waitAndAtomicRename(Future<Void> fsync,
+	                                              std::string part_filename,
 	                                              std::string final_filename) {
 		// First wait for the data in the part file to be durable
 		wait(fsync);
@@ -221,10 +223,12 @@ private:
 	struct ErrorInfo : ReferenceCounted<ErrorInfo>, FastAllocated<ErrorInfo> {
 		Error err;
 		void set(const Error& e) {
-			if (err.code() == invalid_error_code) err = e;
+			if (err.code() == invalid_error_code)
+				err = e;
 		}
 		void report() {
-			if (err.code() != invalid_error_code) throw err;
+			if (err.code() != invalid_error_code)
+				throw err;
 		}
 	};
 
@@ -259,18 +263,26 @@ private:
 	static int openFlags(int flags) {
 		int oflags = O_CLOEXEC;
 		ASSERT(bool(flags & OPEN_READONLY) != bool(flags & OPEN_READWRITE)); // readonly xor readwrite
-		if (flags & OPEN_EXCLUSIVE) oflags |= O_EXCL;
-		if (flags & OPEN_CREATE) oflags |= O_CREAT;
-		if (flags & OPEN_READONLY) oflags |= O_RDONLY;
-		if (flags & OPEN_READWRITE) oflags |= O_RDWR;
-		if (flags & OPEN_ATOMIC_WRITE_AND_CREATE) oflags |= O_TRUNC;
+		if (flags & OPEN_EXCLUSIVE)
+			oflags |= O_EXCL;
+		if (flags & OPEN_CREATE)
+			oflags |= O_CREAT;
+		if (flags & OPEN_READONLY)
+			oflags |= O_RDONLY;
+		if (flags & OPEN_READWRITE)
+			oflags |= O_RDWR;
+		if (flags & OPEN_ATOMIC_WRITE_AND_CREATE)
+			oflags |= O_TRUNC;
 #if defined(__linux__)
-		if (flags & OPEN_UNBUFFERED && FLOW_KNOBS->EIO_USE_ODIRECT) oflags |= O_DIRECT;
+		if (flags & OPEN_UNBUFFERED && FLOW_KNOBS->EIO_USE_ODIRECT)
+			oflags |= O_DIRECT;
 #endif
 		return oflags;
 	}
 
-	static void error(const char* context, int fd, eio_req* r,
+	static void error(const char* context,
+	                  int fd,
+	                  eio_req* r,
 	                  Reference<ErrorInfo> const& err = Reference<ErrorInfo>()) {
 		Error e = io_error();
 		errno = r->errorno;
@@ -285,7 +297,8 @@ private:
 		state Promise<Void> p;
 		state eio_req* r = eio_close(fd, 0, eio_callback, &p);
 		wait(p.getFuture());
-		if (r->result) error("CloseError", fd, r);
+		if (r->result)
+			error("CloseError", fd, r);
 		TraceEvent("AsyncFileClosed").suppressFor(1.0).detail("Fd", fd);
 	}
 
@@ -329,7 +342,8 @@ private:
 			eio_cancel(r);
 			throw;
 		}
-		if (r->result != data.size()) error("WriteError", fd, r, err);
+		if (r->result != data.size())
+			error("WriteError", fd, r, err);
 		wait(delay(0, taskID));
 		return Void();
 	}
@@ -345,7 +359,8 @@ private:
 			eio_cancel(r);
 			throw;
 		}
-		if (r->result) error("TruncateError", fd, r, err);
+		if (r->result)
+			error("TruncateError", fd, r, err);
 		wait(delay(0, taskID));
 		return Void();
 	}
@@ -387,7 +402,8 @@ private:
 			// Report any errors from prior write() or truncate() calls
 			err->report();
 
-			if (r->result) error("SyncError", fd, r);
+			if (r->result)
+				error("SyncError", fd, r);
 			wait(delay(0, taskID));
 			return Void();
 		} catch (Error& _e) {
@@ -408,9 +424,11 @@ private:
 			eio_cancel(r);
 			throw;
 		}
-		if (r->result) error("FStatError", fd, r);
+		if (r->result)
+			error("FStatError", fd, r);
 		EIO_STRUCT_STAT* statdata = (EIO_STRUCT_STAT*)r->ptr2;
-		if (!statdata) error("FStatBufferError", fd, r);
+		if (!statdata)
+			error("FStatBufferError", fd, r);
 		state int64_t size = statdata->st_size;
 		wait(delay(0, taskID));
 		return size;
@@ -428,8 +446,10 @@ private:
 			eio_cancel(r);
 			throw;
 		}
-		if (r->result) error("StatError", 0, r);
-		if (!r->ptr2) error("StatBufferError", 0, r);
+		if (r->result)
+			error("StatError", 0, r);
+		if (!r->ptr2)
+			error("StatBufferError", 0, r);
 		statdata = *EIO_STAT_BUF(r);
 		wait(delay(0, taskID));
 		return statdata;
@@ -458,7 +478,8 @@ private:
 		    0,
 		    [](eio_req* req) {
 			    // Runs on the main thread, in eio_poll()
-			    if (EIO_CANCELLED(req)) return 0;
+			    if (EIO_CANCELLED(req))
+				    return 0;
 			    auto data = reinterpret_cast<Dispatch<R>*>(req->data);
 			    Promise<Void> p = std::move(data->done);
 			    p.send(Void());
@@ -474,14 +495,16 @@ private:
 		}
 
 		wait(delay(0, taskID));
-		if (data.result.isError()) throw data.result.getError();
+		if (data.result.isError())
+			throw data.result.getError();
 		return data.result.get();
 	}
 
 	static volatile int32_t want_poll;
 
 	ACTOR static void poll_eio() {
-		while (eio_poll() == -1) wait(yield());
+		while (eio_poll() == -1)
+			wait(yield());
 		want_poll = 0;
 	}
 
@@ -492,7 +515,8 @@ private:
 	}
 
 	static int eio_callback(eio_req* req) {
-		if (EIO_CANCELLED(req)) return 0;
+		if (EIO_CANCELLED(req))
+			return 0;
 		Promise<Void> p = std::move(*(Promise<Void>*)req->data);
 		p.send(Void());
 		return 0;

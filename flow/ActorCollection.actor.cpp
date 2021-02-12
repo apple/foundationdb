@@ -23,14 +23,19 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<Void> actorCollection(FutureStream<Future<Void>> addActor, int* pCount, double* lastChangeTime,
-                                   double* idleTime, double* allTime, bool returnWhenEmptied) {
+ACTOR Future<Void> actorCollection(FutureStream<Future<Void>> addActor,
+                                   int* pCount,
+                                   double* lastChangeTime,
+                                   double* idleTime,
+                                   double* allTime,
+                                   bool returnWhenEmptied) {
 	state int64_t nextTag = 0;
 	state Map<int64_t, Future<Void>> tag_streamHelper;
 	state PromiseStream<int64_t> complete;
 	state PromiseStream<Error> errors;
 	state int count = 0;
-	if (!pCount) pCount = &count;
+	if (!pCount)
+		pCount = &count;
 
 	loop choose {
 		when(Future<Void> f = waitNext(addActor)) {
@@ -51,7 +56,8 @@ ACTOR Future<Void> actorCollection(FutureStream<Future<Void>> addActor, int* pCo
 					*allTime += currentTime - *lastChangeTime;
 					*lastChangeTime = currentTime;
 				}
-				if (returnWhenEmptied) return Void();
+				if (returnWhenEmptied)
+					return Void();
 			}
 			tag_streamHelper.erase(t);
 		}

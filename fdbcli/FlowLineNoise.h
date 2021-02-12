@@ -42,7 +42,9 @@ struct LineNoise : NonCopyable {
 	};
 
 	LineNoise(std::function<void(std::string const&, std::vector<std::string>&)> completion_callback,
-	          std::function<Hint(std::string const&)> hint_callback, int maxHistoryLines, bool multiline);
+	          std::function<Hint(std::string const&)> hint_callback,
+	          int maxHistoryLines,
+	          bool multiline);
 	~LineNoise();
 
 	Future<Optional<std::string>> read(std::string const& prompt); // Returns "nothing" on EOF

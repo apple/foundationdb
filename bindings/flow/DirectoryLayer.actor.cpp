@@ -52,7 +52,8 @@ Optional<Subspace> DirectoryLayer::nodeWithPrefix(Optional<T> const& prefix) con
 	return nodeWithPrefix(prefix.get());
 }
 
-ACTOR Future<DirectoryLayer::Node> find(Reference<DirectoryLayer> dirLayer, Reference<Transaction> tr,
+ACTOR Future<DirectoryLayer::Node> find(Reference<DirectoryLayer> dirLayer,
+                                        Reference<Transaction> tr,
                                         IDirectory::Path path) {
 	state int pathIndex = 0;
 	state DirectoryLayer::Node node = DirectoryLayer::Node(dirLayer, dirLayer->rootNode, IDirectory::Path(), path);
@@ -91,7 +92,8 @@ IDirectory::Path DirectoryLayer::toAbsolutePath(IDirectory::Path const& subpath)
 	return path;
 }
 
-Reference<DirectorySubspace> DirectoryLayer::contentsOfNode(Subspace const& node, Path const& path,
+Reference<DirectorySubspace> DirectoryLayer::contentsOfNode(Subspace const& node,
+                                                            Path const& path,
                                                             Standalone<StringRef> const& layer) {
 	Standalone<StringRef> prefix = nodeSubspace.unpack(node.key()).getString(0);
 
@@ -104,7 +106,8 @@ Reference<DirectorySubspace> DirectoryLayer::contentsOfNode(Subspace const& node
 	}
 }
 
-Reference<DirectorySubspace> DirectoryLayer::openInternal(Standalone<StringRef> const& layer, Node const& existingNode,
+Reference<DirectorySubspace> DirectoryLayer::openInternal(Standalone<StringRef> const& layer,
+                                                          Node const& existingNode,
                                                           bool allowOpen) {
 	if (!allowOpen) {
 		throw directory_already_exists();
@@ -116,7 +119,8 @@ Reference<DirectorySubspace> DirectoryLayer::openInternal(Standalone<StringRef> 
 	return existingNode.getContents();
 }
 
-Future<Reference<DirectorySubspace>> DirectoryLayer::open(Reference<Transaction> const& tr, Path const& path,
+Future<Reference<DirectorySubspace>> DirectoryLayer::open(Reference<Transaction> const& tr,
+                                                          Path const& path,
                                                           Standalone<StringRef> const& layer) {
 	return createOrOpenInternal(tr, path, layer, Optional<Standalone<StringRef>>(), false, true);
 }
@@ -152,7 +156,8 @@ Future<Void> DirectoryLayer::checkVersion(Reference<Transaction> const& tr, bool
 	return checkVersionInternal(this, tr, writeAccess);
 }
 
-ACTOR Future<Standalone<StringRef>> getPrefix(Reference<DirectoryLayer> dirLayer, Reference<Transaction> tr,
+ACTOR Future<Standalone<StringRef>> getPrefix(Reference<DirectoryLayer> dirLayer,
+                                              Reference<Transaction> tr,
                                               Optional<Standalone<StringRef>> prefix) {
 	if (!prefix.present()) {
 		Standalone<StringRef> allocated = wait(dirLayer->allocator.allocate(tr));
@@ -170,8 +175,10 @@ ACTOR Future<Standalone<StringRef>> getPrefix(Reference<DirectoryLayer> dirLayer
 	return prefix.get();
 }
 
-ACTOR Future<Optional<Subspace>> nodeContainingKey(Reference<DirectoryLayer> dirLayer, Reference<Transaction> tr,
-                                                   Standalone<StringRef> key, bool snapshot) {
+ACTOR Future<Optional<Subspace>> nodeContainingKey(Reference<DirectoryLayer> dirLayer,
+                                                   Reference<Transaction> tr,
+                                                   Standalone<StringRef> key,
+                                                   bool snapshot) {
 	if (key.startsWith(dirLayer->nodeSubspace.key())) {
 		return dirLayer->rootNode;
 	}
@@ -189,8 +196,10 @@ ACTOR Future<Optional<Subspace>> nodeContainingKey(Reference<DirectoryLayer> dir
 	return Optional<Subspace>();
 }
 
-ACTOR Future<bool> isPrefixFree(Reference<DirectoryLayer> dirLayer, Reference<Transaction> tr,
-                                Standalone<StringRef> prefix, bool snapshot) {
+ACTOR Future<bool> isPrefixFree(Reference<DirectoryLayer> dirLayer,
+                                Reference<Transaction> tr,
+                                Standalone<StringRef> prefix,
+                                bool snapshot) {
 	if (!prefix.size()) {
 		return false;
 	}
@@ -205,21 +214,29 @@ ACTOR Future<bool> isPrefixFree(Reference<DirectoryLayer> dirLayer, Reference<Tr
 	return !result.size();
 }
 
-ACTOR Future<Subspace> getParentNode(Reference<DirectoryLayer> dirLayer, Reference<Transaction> tr,
+ACTOR Future<Subspace> getParentNode(Reference<DirectoryLayer> dirLayer,
+                                     Reference<Transaction> tr,
                                      IDirectory::Path path) {
 	if (path.size() > 1) {
 		Reference<DirectorySubspace> parent =
-		    wait(dirLayer->createOrOpenInternal(tr, IDirectory::Path(path.begin(), path.end() - 1), StringRef(),
-		                                        Optional<Standalone<StringRef>>(), true, true));
+		    wait(dirLayer->createOrOpenInternal(tr,
+		                                        IDirectory::Path(path.begin(), path.end() - 1),
+		                                        StringRef(),
+		                                        Optional<Standalone<StringRef>>(),
+		                                        true,
+		                                        true));
 		return dirLayer->nodeWithPrefix(parent->key());
 	} else {
 		return dirLayer->rootNode;
 	}
 }
 
-ACTOR Future<Reference<DirectorySubspace>> createInternal(Reference<DirectoryLayer> dirLayer, Reference<Transaction> tr,
-                                                          IDirectory::Path path, Standalone<StringRef> layer,
-                                                          Optional<Standalone<StringRef>> prefix, bool allowCreate) {
+ACTOR Future<Reference<DirectorySubspace>> createInternal(Reference<DirectoryLayer> dirLayer,
+                                                          Reference<Transaction> tr,
+                                                          IDirectory::Path path,
+                                                          Standalone<StringRef> layer,
+                                                          Optional<Standalone<StringRef>> prefix,
+                                                          bool allowCreate) {
 	if (!allowCreate) {
 		throw directory_does_not_exist();
 	}
@@ -242,10 +259,12 @@ ACTOR Future<Reference<DirectorySubspace>> createInternal(Reference<DirectoryLay
 }
 
 ACTOR Future<Reference<DirectorySubspace>> _createOrOpenInternal(Reference<DirectoryLayer> dirLayer,
-                                                                 Reference<Transaction> tr, IDirectory::Path path,
+                                                                 Reference<Transaction> tr,
+                                                                 IDirectory::Path path,
                                                                  Standalone<StringRef> layer,
                                                                  Optional<Standalone<StringRef>> prefix,
-                                                                 bool allowCreate, bool allowOpen) {
+                                                                 bool allowCreate,
+                                                                 bool allowOpen) {
 	ASSERT(!prefix.present() || allowCreate);
 	wait(dirLayer->checkVersion(tr, false));
 
@@ -266,8 +285,8 @@ ACTOR Future<Reference<DirectorySubspace>> _createOrOpenInternal(Reference<Direc
 		if (existingNode.isInPartition()) {
 			IDirectory::Path subpath = existingNode.getPartitionSubpath();
 			Reference<DirectorySubspace> dirSpace =
-			    wait(existingNode.getContents()->getDirectoryLayer()->createOrOpenInternal(tr, subpath, layer, prefix,
-			                                                                               allowCreate, allowOpen));
+			    wait(existingNode.getContents()->getDirectoryLayer()->createOrOpenInternal(
+			        tr, subpath, layer, prefix, allowCreate, allowOpen));
 			return dirSpace;
 		}
 		return dirLayer->openInternal(layer, existingNode, allowOpen);
@@ -281,24 +300,28 @@ Future<Reference<DirectorySubspace>> DirectoryLayer::createOrOpenInternal(Refere
                                                                           Path const& path,
                                                                           Standalone<StringRef> const& layer,
                                                                           Optional<Standalone<StringRef>> const& prefix,
-                                                                          bool allowCreate, bool allowOpen) {
-	return _createOrOpenInternal(Reference<DirectoryLayer>::addRef(this), tr, path, layer, prefix, allowCreate,
-	                             allowOpen);
+                                                                          bool allowCreate,
+                                                                          bool allowOpen) {
+	return _createOrOpenInternal(
+	    Reference<DirectoryLayer>::addRef(this), tr, path, layer, prefix, allowCreate, allowOpen);
 }
 
-Future<Reference<DirectorySubspace>> DirectoryLayer::create(Reference<Transaction> const& tr, Path const& path,
+Future<Reference<DirectorySubspace>> DirectoryLayer::create(Reference<Transaction> const& tr,
+                                                            Path const& path,
                                                             Standalone<StringRef> const& layer,
                                                             Optional<Standalone<StringRef>> const& prefix) {
 	return createOrOpenInternal(tr, path, layer, prefix, true, false);
 }
 
-Future<Reference<DirectorySubspace>> DirectoryLayer::createOrOpen(Reference<Transaction> const& tr, Path const& path,
+Future<Reference<DirectorySubspace>> DirectoryLayer::createOrOpen(Reference<Transaction> const& tr,
+                                                                  Path const& path,
                                                                   Standalone<StringRef> const& layer) {
 	return createOrOpenInternal(tr, path, layer, Optional<Standalone<StringRef>>(), true, true);
 }
 
 ACTOR Future<Standalone<VectorRef<StringRef>>> listInternal(Reference<DirectoryLayer> dirLayer,
-                                                            Reference<Transaction> tr, IDirectory::Path path) {
+                                                            Reference<Transaction> tr,
+                                                            IDirectory::Path path) {
 	wait(dirLayer->checkVersion(tr, false));
 
 	state DirectoryLayer::Node node = wait(find(dirLayer, tr, path));
@@ -335,7 +358,8 @@ Future<Standalone<VectorRef<StringRef>>> DirectoryLayer::list(Reference<Transact
 	return listInternal(Reference<DirectoryLayer>::addRef(this), tr, path);
 }
 
-bool pathsEqual(IDirectory::Path const& path1, IDirectory::Path const& path2,
+bool pathsEqual(IDirectory::Path const& path1,
+                IDirectory::Path const& path2,
                 size_t maxElementsToCheck = std::numeric_limits<size_t>::max()) {
 	if (std::min(path1.size(), maxElementsToCheck) != std::min(path2.size(), maxElementsToCheck)) {
 		return false;
@@ -349,7 +373,8 @@ bool pathsEqual(IDirectory::Path const& path1, IDirectory::Path const& path2,
 	return true;
 }
 
-ACTOR Future<Void> removeFromParent(Reference<DirectoryLayer> dirLayer, Reference<Transaction> tr,
+ACTOR Future<Void> removeFromParent(Reference<DirectoryLayer> dirLayer,
+                                    Reference<Transaction> tr,
                                     IDirectory::Path path) {
 	ASSERT(path.size() >= 1);
 	DirectoryLayer::Node parentNode = wait(find(dirLayer, tr, IDirectory::Path(path.begin(), path.end() - 1)));
@@ -360,8 +385,10 @@ ACTOR Future<Void> removeFromParent(Reference<DirectoryLayer> dirLayer, Referenc
 	return Void();
 }
 
-ACTOR Future<Reference<DirectorySubspace>> moveInternal(Reference<DirectoryLayer> dirLayer, Reference<Transaction> tr,
-                                                        IDirectory::Path oldPath, IDirectory::Path newPath) {
+ACTOR Future<Reference<DirectorySubspace>> moveInternal(Reference<DirectoryLayer> dirLayer,
+                                                        Reference<Transaction> tr,
+                                                        IDirectory::Path oldPath,
+                                                        IDirectory::Path newPath) {
 	wait(dirLayer->checkVersion(tr, true));
 
 	if (oldPath.size() <= newPath.size()) {
@@ -409,7 +436,8 @@ ACTOR Future<Reference<DirectorySubspace>> moveInternal(Reference<DirectoryLayer
 	return dirLayer->contentsOfNode(oldNode.subspace.get(), newPath, oldNode.layer);
 }
 
-Future<Reference<DirectorySubspace>> DirectoryLayer::move(Reference<Transaction> const& tr, Path const& oldPath,
+Future<Reference<DirectorySubspace>> DirectoryLayer::move(Reference<Transaction> const& tr,
+                                                          Path const& oldPath,
                                                           Path const& newPath) {
 	return moveInternal(Reference<DirectoryLayer>::addRef(this), tr, oldPath, newPath);
 }
@@ -450,9 +478,13 @@ ACTOR Future<Void> removeRecursive(Reference<DirectoryLayer> dirLayer, Reference
 	return Void();
 }
 
-Future<bool> removeInternal(Reference<DirectoryLayer> const&, Reference<Transaction> const&, IDirectory::Path const&,
+Future<bool> removeInternal(Reference<DirectoryLayer> const&,
+                            Reference<Transaction> const&,
+                            IDirectory::Path const&,
                             bool const&);
-ACTOR Future<bool> removeInternal(Reference<DirectoryLayer> dirLayer, Reference<Transaction> tr, IDirectory::Path path,
+ACTOR Future<bool> removeInternal(Reference<DirectoryLayer> dirLayer,
+                                  Reference<Transaction> tr,
+                                  IDirectory::Path path,
                                   bool failOnNonexistent) {
 	wait(dirLayer->checkVersion(tr, true));
 
@@ -493,7 +525,8 @@ Future<bool> DirectoryLayer::removeIfExists(Reference<Transaction> const& tr, Pa
 	return removeInternal(Reference<DirectoryLayer>::addRef(this), tr, path, false);
 }
 
-ACTOR Future<bool> existsInternal(Reference<DirectoryLayer> dirLayer, Reference<Transaction> tr,
+ACTOR Future<bool> existsInternal(Reference<DirectoryLayer> dirLayer,
+                                  Reference<Transaction> tr,
                                   IDirectory::Path path) {
 	wait(dirLayer->checkVersion(tr, false));
 

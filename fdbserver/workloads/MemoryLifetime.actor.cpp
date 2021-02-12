@@ -46,7 +46,8 @@ struct MemoryLifetime : KVWorkload {
 	}
 
 	KeySelector getRandomKeySelector() {
-		return KeySelectorRef(getRandomKey(), deterministicRandom()->random01() < 0.5,
+		return KeySelectorRef(getRandomKey(),
+		                      deterministicRandom()->random01() < 0.5,
 		                      deterministicRandom()->randomInt(-nodeCount, nodeCount));
 	}
 
@@ -83,12 +84,14 @@ struct MemoryLifetime : KVWorkload {
 					state bool getRange_isSnapshot = deterministicRandom()->random01() < 0.5;
 
 					//TraceEvent("MemoryLifetimeCheck").detail("IsReverse", getRange_isReverse).detail("StartKey", printable(getRange_startKey)).detail("RandomStart", getRange_randomStart).detail("NewValue", getRange_newValue.size()).detail("IsSnapshot", getRange_isSnapshot);
-					if (getRange_randomStart) tr.set(getRange_startKey, getRange_newValue);
+					if (getRange_randomStart)
+						tr.set(getRange_startKey, getRange_newValue);
 					state Standalone<RangeResultRef> getRange_res1 = wait(tr.getRange(
 					    getRange_queryRange, GetRangeLimits(4000), getRange_isSnapshot, getRange_isReverse));
 					tr = ReadYourWritesTransaction(cx);
 					wait(delay(0.01));
-					if (getRange_randomStart) tr.set(getRange_startKey, getRange_newValue);
+					if (getRange_randomStart)
+						tr.set(getRange_startKey, getRange_newValue);
 					Standalone<RangeResultRef> getRange_res2 = wait(tr.getRange(
 					    getRange_queryRange, GetRangeLimits(4000), getRange_isSnapshot, getRange_isReverse));
 					ASSERT(getRange_res1.size() == getRange_res2.size());
@@ -120,11 +123,13 @@ struct MemoryLifetime : KVWorkload {
 					state Value get_newValue = self->randomValue();
 					state bool get_isSnapshot = deterministicRandom()->random01() < 0.5;
 
-					if (get_randomStart) tr.set(get_startKey, get_newValue);
+					if (get_randomStart)
+						tr.set(get_startKey, get_newValue);
 					state Optional<Value> get_res1 = wait(tr.get(get_startKey, get_isSnapshot));
 					tr = ReadYourWritesTransaction(cx);
 					wait(delay(0.01));
-					if (get_randomStart) tr.set(get_startKey, get_newValue);
+					if (get_randomStart)
+						tr.set(get_startKey, get_newValue);
 					Optional<Value> get_res2 = wait(tr.get(get_startKey, get_isSnapshot));
 					ASSERT(get_res1 == get_res2);
 				} else if (op == 2) {
@@ -133,11 +138,13 @@ struct MemoryLifetime : KVWorkload {
 					state Value getKey_newValue = self->randomValue();
 					state bool getKey_isSnapshot = deterministicRandom()->random01() < 0.5;
 
-					if (getKey_randomStart) tr.set(getKey_selector.getKey(), getKey_newValue);
+					if (getKey_randomStart)
+						tr.set(getKey_selector.getKey(), getKey_newValue);
 					state Key getKey_res1 = wait(tr.getKey(getKey_selector, getKey_isSnapshot));
 					tr = ReadYourWritesTransaction(cx);
 					wait(delay(0.01));
-					if (getKey_randomStart) tr.set(getKey_selector.getKey(), getKey_newValue);
+					if (getKey_randomStart)
+						tr.set(getKey_selector.getKey(), getKey_newValue);
 					Key getKey_res2 = wait(tr.getKey(getKey_selector, getKey_isSnapshot));
 					ASSERT(getKey_res1 == getKey_res2);
 				} else if (op == 3) {
@@ -152,7 +159,8 @@ struct MemoryLifetime : KVWorkload {
 						ASSERT(IPAddress::parse(getAddress_res1[i]).present());
 					}
 				}
-				if (now() - startTime > self->testDuration) return Void();
+				if (now() - startTime > self->testDuration)
+					return Void();
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}

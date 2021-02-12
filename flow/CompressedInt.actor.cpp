@@ -96,7 +96,8 @@ TEST_CASE("/flow/compressed_ints") {
 	int64_t n = 0;
 	for (int i = 0; i < 10000000; ++i) {
 		n <<= 1;
-		if (deterministicRandom()->coinflip()) n |= 1;
+		if (deterministicRandom()->coinflip())
+			n |= 1;
 		testCompressedInt<int64_t>(n);
 		testCompressedInt<int32_t>(n);
 		testCompressedInt<int16_t>(n);

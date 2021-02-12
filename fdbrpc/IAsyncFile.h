@@ -59,7 +59,8 @@ public:
 	virtual void delref() = 0;
 
 	// For read() and write(), the data buffer must remain valid until the future is ready
-	virtual Future<int> read(void* data, int length,
+	virtual Future<int> read(void* data,
+	                         int length,
 	                         int64_t offset) = 0; // Returns number of bytes actually read (from [0,length])
 	virtual Future<Void> write(void const* data, int length, int64_t offset) = 0;
 	// The zeroed data is not guaranteed to be durable after `zeroRange` returns.  A call to sync() would be required.

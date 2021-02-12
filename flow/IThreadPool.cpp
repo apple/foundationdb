@@ -88,7 +88,8 @@ public:
 	ThreadPool() : dontstop(ios), mode(Run) {}
 	~ThreadPool() {}
 	Future<Void> stop() {
-		if (mode == Shutdown) return Void();
+		if (mode == Shutdown)
+			return Void();
 		ReferenceCounted<ThreadPool>::addref();
 		ios.stop(); // doesn't work?
 		mode = Shutdown;
@@ -102,7 +103,8 @@ public:
 	virtual Future<Void> getError() { return Never(); } // FIXME
 	virtual void addref() { ReferenceCounted<ThreadPool>::addref(); }
 	virtual void delref() {
-		if (ReferenceCounted<ThreadPool>::delref_no_destroy()) stop();
+		if (ReferenceCounted<ThreadPool>::delref_no_destroy())
+			stop();
 	}
 	void addThread(IThreadPoolReceiver* userData) {
 		threads.push_back(new Thread(this, userData));

@@ -66,14 +66,16 @@ public:
 	ACTOR static Future<int> read_impl(Reference<AsyncFileReadAheadCache> f, void* data, int length, int64_t offset) {
 		// Make sure range is valid for the file
 		int64_t fileSize = wait(f->size());
-		if (offset >= fileSize) return 0; // TODO:  Should this throw since the input isn't really valid?
+		if (offset >= fileSize)
+			return 0; // TODO:  Should this throw since the input isn't really valid?
 
 		if (length == 0) {
 			return 0;
 		}
 
 		// If reading past the end then clip length to just read to the end
-		if (offset + length > fileSize) length = fileSize - offset; // Length is at least 1 since offset < fileSize
+		if (offset + length > fileSize)
+			length = fileSize - offset; // Length is at least 1 since offset < fileSize
 
 		// Calculate block range for the blocks that contain this data
 		state int firstBlockNum = offset / f->m_block_size;
@@ -106,7 +108,8 @@ public:
 				fblock = i->second;
 
 			// Only put blocks we actually need into our local cache
-			if (blockNum <= lastBlockNum) localCache[blockNum] = fblock;
+			if (blockNum <= lastBlockNum)
+				localCache[blockNum] = fblock;
 		}
 
 		// Read block(s) and copy data
@@ -143,7 +146,8 @@ public:
 				if (i->second.getFutureReferenceCount() == 1) {
 					// printf("evicting block %d\n", i->first);
 					i = f->m_blocks.erase(i);
-					if (f->m_blocks.size() <= f->m_cache_block_limit) break;
+					if (f->m_blocks.size() <= f->m_cache_block_limit)
+						break;
 				} else
 					++i;
 			}
@@ -189,7 +193,10 @@ public:
 	// Map block numbers to future
 	std::map<int, Future<Reference<CacheBlock>>> m_blocks;
 
-	AsyncFileReadAheadCache(Reference<IAsyncFile> f, int blockSize, int readAheadBlocks, int maxConcurrentReads,
+	AsyncFileReadAheadCache(Reference<IAsyncFile> f,
+	                        int blockSize,
+	                        int readAheadBlocks,
+	                        int maxConcurrentReads,
 	                        int cacheSizeBlocks)
 	  : m_f(f), m_block_size(blockSize), m_read_ahead_blocks(readAheadBlocks),
 	    m_max_concurrent_reads(maxConcurrentReads), m_cache_block_limit(std::max<int>(1, cacheSizeBlocks)) {}

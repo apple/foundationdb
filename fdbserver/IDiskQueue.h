@@ -48,8 +48,10 @@ public:
 		}
 
 		bool operator<(location const& r) const {
-			if (hi < r.hi) return true;
-			if (hi > r.hi) return false;
+			if (hi < r.hi)
+				return true;
+			if (hi > r.hi)
+				return false;
 			return lo < r.lo;
 		}
 
@@ -121,7 +123,10 @@ enum class DiskQueueVersion : uint16_t {
 	V1 = 1,
 };
 
-IDiskQueue* openDiskQueue(std::string basename, std::string ext, UID dbgid, DiskQueueVersion diskQueueVersion,
+IDiskQueue* openDiskQueue(std::string basename,
+                          std::string ext,
+                          UID dbgid,
+                          DiskQueueVersion diskQueueVersion,
                           int64_t fileSizeWarningLimit = -1); // opens basename+"0."+ext and basename+"1."+ext
 
 #endif

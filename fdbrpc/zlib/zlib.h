@@ -1592,11 +1592,17 @@ ZEXTERN uLong ZEXPORT crc32_combine OF((uLong crc1, uLong crc2, z_off_t len2));
  */
 ZEXTERN int ZEXPORT deflateInit_ OF((z_streamp strm, int level, const char* version, int stream_size));
 ZEXTERN int ZEXPORT inflateInit_ OF((z_streamp strm, const char* version, int stream_size));
-ZEXTERN int ZEXPORT deflateInit2_ OF((z_streamp strm, int level, int method, int windowBits, int memLevel, int strategy,
-                                      const char* version, int stream_size));
+ZEXTERN int ZEXPORT deflateInit2_ OF((z_streamp strm,
+                                      int level,
+                                      int method,
+                                      int windowBits,
+                                      int memLevel,
+                                      int strategy,
+                                      const char* version,
+                                      int stream_size));
 ZEXTERN int ZEXPORT inflateInit2_ OF((z_streamp strm, int windowBits, const char* version, int stream_size));
-ZEXTERN int ZEXPORT inflateBackInit_ OF((z_streamp strm, int windowBits, unsigned char FAR* window, const char* version,
-                                         int stream_size));
+ZEXTERN int ZEXPORT inflateBackInit_
+    OF((z_streamp strm, int windowBits, unsigned char FAR* window, const char* version, int stream_size));
 #define deflateInit(strm, level) deflateInit_((strm), (level), ZLIB_VERSION, (int)sizeof(z_stream))
 #define inflateInit(strm) inflateInit_((strm), ZLIB_VERSION, (int)sizeof(z_stream))
 #define deflateInit2(strm, level, method, windowBits, memLevel, strategy)                                              \

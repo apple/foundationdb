@@ -212,7 +212,8 @@ public:
 	void resetConnection(NetworkAddress address);
 	// Forces the connection with this address to be reset
 
-	Reference<Peer> sendUnreliable(ISerializeSource const& what, const Endpoint& destination,
+	Reference<Peer> sendUnreliable(ISerializeSource const& what,
+	                               const Endpoint& destination,
 	                               bool openConnection); // { cancelReliable(sendReliable(what,destination)); }
 
 	int getEndpointCount();

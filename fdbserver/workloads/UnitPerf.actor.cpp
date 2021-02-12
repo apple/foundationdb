@@ -35,7 +35,8 @@ ACTOR Future<Void> unitPerfTest() {
 
 	state int counter = 0;
 	state vector<Future<Void>> sleepy;
-	for (int i = 0; i < 100000; i++) sleepy.push_back(sleepyActor(.1, &counter));
+	for (int i = 0; i < 100000; i++)
+		sleepy.push_back(sleepyActor(.1, &counter));
 
 	wait(delay(10));
 	sleepy.clear();
@@ -56,7 +57,8 @@ struct UnitPerfWorkload : TestWorkload {
 	virtual std::string description() { return "UnitPerfWorkload"; }
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
 	virtual Future<Void> start(Database const& cx) {
-		if (enabled) return unitPerfTest();
+		if (enabled)
+			return unitPerfTest();
 		return Void();
 	}
 	virtual Future<bool> check(Database const& cx) { return true; }

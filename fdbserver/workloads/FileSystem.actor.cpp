@@ -111,7 +111,8 @@ struct FileSystemWorkload : TestWorkload {
 		tr->set(keyStr + "/lastupdated", doubleToTestKey(time));
 		tr->set(keyStr + "/userid", format("%016llx", userID));
 
-		if (deleted) tr->set(format("/files/server/%08x/deleted/%016llx", serverID, id), doubleToTestKey(time));
+		if (deleted)
+			tr->set(format("/files/server/%08x/deleted/%016llx", serverID, id), doubleToTestKey(time));
 		tr->set(format("/files/user/%016llx/updated/%016llx/%016llx", userID, *(uint64_t*)&time, id), path);
 		tr->set(format("/files/user/%016llx/path/", userID) + path, format("%016llx", id));
 		// This index was not specified in the original test: it removes duplicated paths
@@ -123,9 +124,11 @@ struct FileSystemWorkload : TestWorkload {
 		while (true) {
 			try {
 				Optional<Value> f = wait(tr.get(self->keyForFileID(begin)));
-				if (f.present()) break; // The transaction already completed!
+				if (f.present())
+					break; // The transaction already completed!
 
-				for (int n = begin; n < end; n++) self->initializeFile(&tr, self, n);
+				for (int n = begin; n < end; n++)
+					self->initializeFile(&tr, self, n);
 				wait(tr.commit());
 				break;
 			} catch (Error& e) {
@@ -141,13 +144,16 @@ struct FileSystemWorkload : TestWorkload {
 		state int nodesToSetUp = self->fileCount / self->clientCount + 1;
 		state int startingNode = nodesToSetUp * self->clientId;
 		state int batchCount = 5;
-		for (int o = 0; o <= nodesToSetUp / batchCount; o++) order.push_back(o * batchCount);
+		for (int o = 0; o <= nodesToSetUp / batchCount; o++)
+			order.push_back(o * batchCount);
 		deterministicRandom()->randomShuffle(order);
 		for (i = 0; i < order.size();) {
 			vector<Future<Void>> fs;
 			for (int j = 0; j < 100 && i < order.size(); j++) {
 				fs.push_back(self->setupRange(
-				    cx, self, startingNode + order[i],
+				    cx,
+				    self,
+				    startingNode + order[i],
 				    std::min(startingNode + order[i] + batchCount, nodesToSetUp * (self->clientId + 1))));
 				i++;
 			}
@@ -179,7 +185,8 @@ struct FileSystemWorkload : TestWorkload {
 		for (int c = 0; c < self->actorCount; c++) {
 			self->clients.push_back(
 			    timeout(self->operationClient(cx, self, operation, self->actorCount / self->transactionsPerSecond),
-			            self->testDuration, Void()));
+			            self->testDuration,
+			            Void()));
 		}
 		wait(waitForAll(self->clients));
 
@@ -204,7 +211,8 @@ struct FileSystemWorkload : TestWorkload {
 			loop {
 				try {
 					Optional<Version> ver = wait(operation->run(self, &tr));
-					if (ver.present()) break;
+					if (ver.present())
+						break;
 				} catch (Error& e) {
 					wait(tr.onError(e));
 				}
@@ -269,7 +277,8 @@ struct FileSystemWorkload : TestWorkload {
 	ACTOR Future<Optional<Version>> modificationQuery(FileSystemWorkload* self, Transaction* tr) {
 		state uint64_t userID = deterministicRandom()->randomInt(0, self->userIDCount);
 		state std::string base = format("/files/user/%016llx", userID);
-		if (self->loggingQueries) TraceEvent("UserQuery").detail("UserID", userID).detail("PathBase", base);
+		if (self->loggingQueries)
+			TraceEvent("UserQuery").detail("UserID", userID).detail("PathBase", base);
 		Key keyEnd(base + "/updated0");
 		Standalone<RangeResultRef> val =
 		    wait(tr->getRange(firstGreaterOrEqual(keyEnd) - 10, firstGreaterOrEqual(keyEnd), 10));
@@ -289,7 +298,8 @@ struct FileSystemWorkload : TestWorkload {
 	ACTOR Future<Optional<Version>> deletionQuery(FileSystemWorkload* self, Transaction* tr) {
 		state uint64_t serverID = deterministicRandom()->randomInt(0, self->serverCount);
 		state std::string base = format("/files/server/%08x/deleted", serverID);
-		if (self->loggingQueries) TraceEvent("DeletionQuery").detail("ServerID", serverID).detail("PathBase", base);
+		if (self->loggingQueries)
+			TraceEvent("DeletionQuery").detail("ServerID", serverID).detail("PathBase", base);
 		state Key keyBegin(base + "/");
 		state Key keyEnd(base + "0");
 		state KeySelectorRef begin = firstGreaterThan(keyBegin);

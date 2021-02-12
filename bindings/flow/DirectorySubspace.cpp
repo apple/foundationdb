@@ -21,22 +21,27 @@
 #include "DirectorySubspace.h"
 
 namespace FDB {
-DirectorySubspace::DirectorySubspace(Path const& path, StringRef const& prefix,
-                                     Reference<DirectoryLayer> directoryLayer, Standalone<StringRef> const& layer)
+DirectorySubspace::DirectorySubspace(Path const& path,
+                                     StringRef const& prefix,
+                                     Reference<DirectoryLayer> directoryLayer,
+                                     Standalone<StringRef> const& layer)
   : Subspace(prefix), directoryLayer(directoryLayer), path(path), layer(layer) {}
 
-Future<Reference<DirectorySubspace>> DirectorySubspace::create(Reference<Transaction> const& tr, Path const& path,
+Future<Reference<DirectorySubspace>> DirectorySubspace::create(Reference<Transaction> const& tr,
+                                                               Path const& path,
                                                                Standalone<StringRef> const& layer,
                                                                Optional<Standalone<StringRef>> const& prefix) {
 	return directoryLayer->create(tr, getPartitionSubpath(path), layer, prefix);
 }
 
-Future<Reference<DirectorySubspace>> DirectorySubspace::open(Reference<Transaction> const& tr, Path const& path,
+Future<Reference<DirectorySubspace>> DirectorySubspace::open(Reference<Transaction> const& tr,
+                                                             Path const& path,
                                                              Standalone<StringRef> const& layer) {
 	return directoryLayer->open(tr, getPartitionSubpath(path), layer);
 }
 
-Future<Reference<DirectorySubspace>> DirectorySubspace::createOrOpen(Reference<Transaction> const& tr, Path const& path,
+Future<Reference<DirectorySubspace>> DirectorySubspace::createOrOpen(Reference<Transaction> const& tr,
+                                                                     Path const& path,
                                                                      Standalone<StringRef> const& layer) {
 	return directoryLayer->createOrOpen(tr, getPartitionSubpath(path), layer);
 }
@@ -50,7 +55,8 @@ Future<Standalone<VectorRef<StringRef>>> DirectorySubspace::list(Reference<Trans
 	return directoryLayer->list(tr, getPartitionSubpath(path));
 }
 
-Future<Reference<DirectorySubspace>> DirectorySubspace::move(Reference<Transaction> const& tr, Path const& oldPath,
+Future<Reference<DirectorySubspace>> DirectorySubspace::move(Reference<Transaction> const& tr,
+                                                             Path const& oldPath,
                                                              Path const& newPath) {
 	return directoryLayer->move(tr, getPartitionSubpath(oldPath), getPartitionSubpath(newPath));
 }

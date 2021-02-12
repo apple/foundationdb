@@ -94,7 +94,8 @@ public:
 			}
 			peekBuffer_[i] = static_cast<Ch>(c);
 		}
-		for (--i; i >= 0; --i) stream_.putback(peekBuffer_[i]);
+		for (--i; i >= 0; --i)
+			stream_.putback(peekBuffer_[i]);
 		return !hasError ? peekBuffer_ : 0;
 	}
 

@@ -24,17 +24,26 @@
 
 const RYWIterator::SEGMENT_TYPE RYWIterator::typeMap[12] = {
 	// UNMODIFIED_RANGE
-	RYWIterator::UNKNOWN_RANGE, RYWIterator::EMPTY_RANGE, RYWIterator::KV,
+	RYWIterator::UNKNOWN_RANGE,
+	RYWIterator::EMPTY_RANGE,
+	RYWIterator::KV,
 	// CLEARED_RANGE
-	RYWIterator::EMPTY_RANGE, RYWIterator::EMPTY_RANGE, RYWIterator::EMPTY_RANGE,
+	RYWIterator::EMPTY_RANGE,
+	RYWIterator::EMPTY_RANGE,
+	RYWIterator::EMPTY_RANGE,
 	// INDEPENDENT_WRITE
-	RYWIterator::KV, RYWIterator::KV, RYWIterator::KV,
+	RYWIterator::KV,
+	RYWIterator::KV,
+	RYWIterator::KV,
 	// DEPENDENT_WRITE
-	RYWIterator::UNKNOWN_RANGE, RYWIterator::KV, RYWIterator::KV
+	RYWIterator::UNKNOWN_RANGE,
+	RYWIterator::KV,
+	RYWIterator::KV
 };
 
 RYWIterator::SEGMENT_TYPE RYWIterator::type() {
-	if (is_unreadable()) throw accessed_unreadable();
+	if (is_unreadable())
+		throw accessed_unreadable();
 
 	return typeMap[writes.type() * 3 + cache.type()];
 }
@@ -63,7 +72,8 @@ ExtStringRef RYWIterator::endKey() {
 }
 
 const KeyValueRef* RYWIterator::kv(Arena& arena) {
-	if (is_unreadable()) throw accessed_unreadable();
+	if (is_unreadable())
+		throw accessed_unreadable();
 
 	if (writes.is_unmodified_range()) {
 		return cache.kv(arena);
@@ -82,16 +92,20 @@ const KeyValueRef* RYWIterator::kv(Arena& arena) {
 }
 
 RYWIterator& RYWIterator::operator++() {
-	if (end_key_cmp <= 0) ++cache;
-	if (end_key_cmp >= 0) ++writes;
+	if (end_key_cmp <= 0)
+		++cache;
+	if (end_key_cmp >= 0)
+		++writes;
 	begin_key_cmp = -end_key_cmp;
 	end_key_cmp = cache.endKey().cmp(writes.endKey());
 	return *this;
 }
 
 RYWIterator& RYWIterator::operator--() {
-	if (begin_key_cmp >= 0) --cache;
-	if (begin_key_cmp <= 0) --writes;
+	if (begin_key_cmp >= 0)
+		--cache;
+	if (begin_key_cmp <= 0)
+		--writes;
 	end_key_cmp = -begin_key_cmp;
 	begin_key_cmp = cache.beginKey().cmp(writes.beginKey());
 	return *this;
@@ -127,10 +141,14 @@ WriteMap::iterator& RYWIterator::extractWriteMapIterator() {
 }
 
 void RYWIterator::dbg() {
-	fprintf(stderr, "cache: %d begin: '%s' end: '%s'\n", cache.type(),
+	fprintf(stderr,
+	        "cache: %d begin: '%s' end: '%s'\n",
+	        cache.type(),
 	        printable(cache.beginKey().toStandaloneStringRef()).c_str(),
 	        printable(cache.endKey().toStandaloneStringRef()).c_str());
-	fprintf(stderr, "writes: %d begin: '%s' end: '%s'\n", writes.type(),
+	fprintf(stderr,
+	        "writes: %d begin: '%s' end: '%s'\n",
+	        writes.type(),
 	        printable(writes.beginKey().toStandaloneStringRef()).c_str(),
 	        printable(writes.endKey().toStandaloneStringRef()).c_str());
 	// fprintf(stderr, "summary - offset: %d cleared: %d size: %d\n", writes.offset,
@@ -236,24 +254,28 @@ void testSnapshotCache() {
 	RYWIterator it(&cache, &writes);
 	it.skip(searchKeys.begin);
 	while (true) {
-		fprintf(stderr, "b: '%s' e: '%s' type: %s value: '%s'\n",
+		fprintf(stderr,
+		        "b: '%s' e: '%s' type: %s value: '%s'\n",
 		        printable(it.beginKey().toStandaloneStringRef()).c_str(),
 		        printable(it.endKey().toStandaloneStringRef()).c_str(),
 		        it.is_empty_range() ? "empty" : (it.is_kv() ? "keyvalue" : "unknown"),
 		        it.is_kv() ? printable(it.kv(arena)->value).c_str() : "");
-		if (it.endKey() >= searchKeys.end) break;
+		if (it.endKey() >= searchKeys.end)
+			break;
 		++it;
 	}
 	fprintf(stderr, "end\n");
 
 	it.skip(searchKeys.end);
 	while (true) {
-		fprintf(stderr, "b: '%s' e: '%s' type: %s value: '%s'\n",
+		fprintf(stderr,
+		        "b: '%s' e: '%s' type: %s value: '%s'\n",
 		        printable(it.beginKey().toStandaloneStringRef()).c_str(),
 		        printable(it.endKey().toStandaloneStringRef()).c_str(),
 		        it.is_empty_range() ? "empty" : (it.is_kv() ? "keyvalue" : "unknown"),
 		        it.is_kv() ? printable(it.kv(arena)->value).c_str() : "");
-		if (it.beginKey() <= searchKeys.begin) break;
+		if (it.beginKey() <= searchKeys.begin)
+			break;
 		--it;
 	}
 	fprintf(stderr, "end\n");
@@ -379,7 +401,8 @@ static void printWriteMap(WriteMap* p) {
 		if (it.is_unreadable()) {
 			printf("UNREADABLE ");
 		}
-		printf(": \"%s\" -> \"%s\"\n", printable(it.beginKey().toStandaloneStringRef()).c_str(),
+		printf(": \"%s\" -> \"%s\"\n",
+		       printable(it.beginKey().toStandaloneStringRef()).c_str(),
 		       printable(it.endKey().toStandaloneStringRef()).c_str());
 	}
 	printf("\n");
@@ -427,8 +450,10 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedKey") {
 	ASSERT(writes.empty());
 	ASSERT(getWriteMapCount(&writes) == 1);
 
-	writes.mutate(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00"), MutationRef::SetVersionstampedKey,
-	              LiteralStringRef("1"), true);
+	writes.mutate(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00"),
+	              MutationRef::SetVersionstampedKey,
+	              LiteralStringRef("1"),
+	              true);
 	ASSERT(!writes.empty());
 	ASSERT(getWriteMapCount(&writes) == 3);
 
@@ -501,8 +526,10 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedValue") {
 	ASSERT(writes.empty());
 	ASSERT(getWriteMapCount(&writes) == 1);
 
-	writes.mutate(LiteralStringRef("stamp"), MutationRef::SetVersionstampedValue,
-	              LiteralStringRef("XXXXXXXX\x00\x00\x00\x00\x00\x00"), true);
+	writes.mutate(LiteralStringRef("stamp"),
+	              MutationRef::SetVersionstampedValue,
+	              LiteralStringRef("XXXXXXXX\x00\x00\x00\x00\x00\x00"),
+	              true);
 	ASSERT(!writes.empty());
 	ASSERT(getWriteMapCount(&writes) == 3);
 
@@ -615,7 +642,8 @@ TEST_CASE("/fdbclient/WriteMap/random") {
 			KeyRangeRef range = RandomTestImpl::getRandomRange(arena);
 			writes.clear(range, addConflict);
 			setMap.erase(setMap.lower_bound(range.begin), setMap.lower_bound(range.end));
-			if (addConflict) conflictMap.insert(range, true);
+			if (addConflict)
+				conflictMap.insert(range, true);
 			clearMap.insert(range, true);
 			unreadableMap.insert(range, false);
 			TraceEvent("RWMT_Clear").detail("Range", range).detail("AddConflict", addConflict);
@@ -625,7 +653,8 @@ TEST_CASE("/fdbclient/WriteMap/random") {
 			ValueRef value = RandomTestImpl::getRandomValue(arena);
 			writes.mutate(key, MutationRef::SetVersionstampedValue, value, addConflict);
 			setMap[key].push(RYWMutation(value, MutationRef::SetVersionstampedValue));
-			if (addConflict) conflictMap.insert(key, true);
+			if (addConflict)
+				conflictMap.insert(key, true);
 			clearMap.insert(key, false);
 			unreadableMap.insert(key, true);
 			TraceEvent("RWMT_SetVersionstampedValue")
@@ -638,7 +667,8 @@ TEST_CASE("/fdbclient/WriteMap/random") {
 			ValueRef value = RandomTestImpl::getRandomValue(arena);
 			writes.mutate(key, MutationRef::SetVersionstampedKey, value, addConflict);
 			setMap[key].push(RYWMutation(value, MutationRef::SetVersionstampedKey));
-			if (addConflict) conflictMap.insert(key, true);
+			if (addConflict)
+				conflictMap.insert(key, true);
 			clearMap.insert(key, false);
 			unreadableMap.insert(key, true);
 			TraceEvent("RWMT_SetVersionstampedKey")
@@ -660,7 +690,8 @@ TEST_CASE("/fdbclient/WriteMap/random") {
 			else
 				stack.push(RYWMutation(value, MutationRef::And));
 
-			if (addConflict) conflictMap.insert(key, true);
+			if (addConflict)
+				conflictMap.insert(key, true);
 			clearMap.insert(key, false);
 			TraceEvent("RWMT_And").detail("Key", key).detail("Value", value.size()).detail("AddConflict", addConflict);
 		} else {
@@ -672,7 +703,8 @@ TEST_CASE("/fdbclient/WriteMap/random") {
 				setMap[key].push(RYWMutation(value, MutationRef::SetValue));
 			else
 				setMap[key] = OperationStack(RYWMutation(value, MutationRef::SetValue));
-			if (addConflict) conflictMap.insert(key, true);
+			if (addConflict)
+				conflictMap.insert(key, true);
 			clearMap.insert(key, false);
 			TraceEvent("RWMT_Set").detail("Key", key).detail("Value", value.size()).detail("AddConflict", addConflict);
 		}
@@ -694,9 +726,9 @@ TEST_CASE("/fdbclient/WriteMap/random") {
 			    .detail("WmType", (int)it.op().top().type)
 			    .detail("SmKey", setIter->first)
 			    .detail("SmSize", setIter->second.size())
-			    .detail("SmValue", setIter->second.top().value.present()
-			                           ? std::to_string(setIter->second.top().value.get().size())
-			                           : "Not Found")
+			    .detail("SmValue",
+			            setIter->second.top().value.present() ? std::to_string(setIter->second.top().value.get().size())
+			                                                  : "Not Found")
 			    .detail("SmType", (int)setIter->second.top().type);
 			ASSERT(it.beginKey() == setIter->first && it.op() == setIter->second);
 			++setIter;

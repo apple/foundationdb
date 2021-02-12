@@ -85,8 +85,17 @@ struct WorkloadRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, title, timeout, databasePingDelay, sharedRandomNumber, useDatabase, options, clientId,
-		           clientCount, reply, arena);
+		serializer(ar,
+		           title,
+		           timeout,
+		           databasePingDelay,
+		           sharedRandomNumber,
+		           useDatabase,
+		           options,
+		           clientId,
+		           clientCount,
+		           reply,
+		           arena);
 	}
 };
 
@@ -102,15 +111,21 @@ struct TesterInterface {
 	}
 };
 
-ACTOR Future<Void> testerServerCore(TesterInterface interf, Reference<ClusterConnectionFile> ccf,
-                                    Reference<AsyncVar<struct ServerDBInfo>> serverDBInfo, LocalityData locality);
+ACTOR Future<Void> testerServerCore(TesterInterface interf,
+                                    Reference<ClusterConnectionFile> ccf,
+                                    Reference<AsyncVar<struct ServerDBInfo>> serverDBInfo,
+                                    LocalityData locality);
 
 enum test_location_t { TEST_HERE, TEST_ON_SERVERS, TEST_ON_TESTERS };
 enum test_type_t { TEST_TYPE_FROM_FILE, TEST_TYPE_CONSISTENCY_CHECK };
 
-ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile, test_type_t whatToRun,
-                            test_location_t whereToRun, int minTestersExpected, std::string fileName = std::string(),
-                            StringRef startingConfiguration = StringRef(), LocalityData locality = LocalityData());
+ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
+                            test_type_t whatToRun,
+                            test_location_t whereToRun,
+                            int minTestersExpected,
+                            std::string fileName = std::string(),
+                            StringRef startingConfiguration = StringRef(),
+                            LocalityData locality = LocalityData());
 
 #include "flow/unactorcompiler.h"
 #endif

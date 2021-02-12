@@ -28,7 +28,8 @@ Counter::Counter(std::string const& name, CounterCollection& collection)
 }
 
 void Counter::operator+=(Value delta) {
-	if (!delta) return; //< Otherwise last_event will be reset
+	if (!delta)
+		return; //< Otherwise last_event will be reset
 	interval_delta += delta;
 	auto t = now();
 	auto elapsed = t - last_event;
@@ -75,12 +76,16 @@ void CounterCollection::logToTraceEvent(TraceEvent& te) const {
 	}
 }
 
-ACTOR Future<Void> traceCounters(std::string traceEventName, UID traceEventID, double interval,
-                                 CounterCollection* counters, std::string trackLatestName,
+ACTOR Future<Void> traceCounters(std::string traceEventName,
+                                 UID traceEventID,
+                                 double interval,
+                                 CounterCollection* counters,
+                                 std::string trackLatestName,
                                  std::function<void(TraceEvent&)> decorator) {
 	wait(delay(0)); // Give an opportunity for all members used in special counters to be initialized
 
-	for (ICounter* c : counters->counters) c->resetInterval();
+	for (ICounter* c : counters->counters)
+		c->resetInterval();
 
 	state double last_interval = now();
 

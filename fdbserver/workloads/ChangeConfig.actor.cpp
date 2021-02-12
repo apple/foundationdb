@@ -42,7 +42,8 @@ struct ChangeConfigWorkload : TestWorkload {
 	virtual std::string description() { return "ChangeConfig"; }
 
 	virtual Future<Void> start(Database const& cx) {
-		if (this->clientId != 0) return Void();
+		if (this->clientId != 0)
+			return Void();
 		return ChangeConfigClient(cx->clone(), this);
 	}
 

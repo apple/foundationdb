@@ -31,8 +31,10 @@ struct FailureMonitorClientState : ReferenceCounted<FailureMonitorClientState> {
 	FailureMonitorClientState() { serverFailedTimeout = CLIENT_KNOBS->FAILURE_TIMEOUT_DELAY; }
 };
 
-ACTOR Future<Void> failureMonitorClientLoop(SimpleFailureMonitor* monitor, ClusterInterface controller,
-                                            Reference<FailureMonitorClientState> fmState, bool trackMyStatus) {
+ACTOR Future<Void> failureMonitorClientLoop(SimpleFailureMonitor* monitor,
+                                            ClusterInterface controller,
+                                            Reference<FailureMonitorClientState> fmState,
+                                            bool trackMyStatus) {
 	state Version version = 0;
 	state Future<FailureMonitoringReply> request = Never();
 	state Future<Void> nextRequest = delay(0, TaskPriority::FailureMonitor);
@@ -75,7 +77,8 @@ ACTOR Future<Void> failureMonitorClientLoop(SimpleFailureMonitor* monitor, Clust
 							}
 						}
 						for (auto& it : fmState->knownAddrs)
-							if (!changedAddresses.count(it)) monitor->setStatus(it, FailureStatus());
+							if (!changedAddresses.count(it))
+								monitor->setStatus(it, FailureStatus());
 						fmState->knownAddrs.clear();
 					} else {
 						ASSERT(version != 0);
@@ -93,8 +96,8 @@ ACTOR Future<Void> failureMonitorClientLoop(SimpleFailureMonitor* monitor, Clust
 
 					// if (version != reply.failureInformationVersion)
 					//	printf("Client '%s': update from %lld to %lld (%d changes, aof=%d)\n",
-					//g_network->getLocalAddress().toString().c_str(), version, reply.failureInformationVersion,
-					//reply.changes.size(), reply.allOthersFailed);
+					// g_network->getLocalAddress().toString().c_str(), version, reply.failureInformationVersion,
+					// reply.changes.size(), reply.allOthersFailed);
 
 					version = reply.failureInformationVersion;
 					fmState->serverFailedTimeout = reply.considerServerFailedTimeoutMS * .001;
@@ -151,7 +154,8 @@ ACTOR Future<Void> failureMonitorClientLoop(SimpleFailureMonitor* monitor, Clust
 					FailureMonitoringRequest req;
 					req.failureInformationVersion = version;
 					req.addresses = g_network->getLocalAddresses();
-					if (trackMyStatus) req.senderStatus = FailureStatus(false);
+					if (trackMyStatus)
+						req.senderStatus = FailureStatus(false);
 					request = controller.failureMonitoring.getReply(req, TaskPriority::FailureMonitor);
 					if (!controller.failureMonitoring.getEndpoint().isLocal())
 						requestTimeout = delay(fmState->serverFailedTimeout, TaskPriority::FailureMonitor);

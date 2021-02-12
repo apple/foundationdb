@@ -39,7 +39,8 @@ public:
 	}
 
 	void Put(char c) {
-		if (current_ >= bufferEnd_) Flush();
+		if (current_ >= bufferEnd_)
+			Flush();
 
 		*current_++ = c;
 	}

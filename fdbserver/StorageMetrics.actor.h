@@ -43,9 +43,11 @@ struct StorageMetricSample {
 		auto fwd_split = sample.index(front ? sample.sumTo(sample.lower_bound(range.begin)) + offset
 		                                    : sample.sumTo(sample.lower_bound(range.end)) - offset);
 
-		if (fwd_split == sample.end() || *fwd_split >= range.end) return range.end;
+		if (fwd_split == sample.end() || *fwd_split >= range.end)
+			return range.end;
 
-		if (!front && *fwd_split <= range.begin) return range.begin;
+		if (!front && *fwd_split <= range.begin)
+			return range.begin;
 
 		auto bck_split = fwd_split;
 
@@ -114,7 +116,8 @@ struct TransientStorageMetricSample : StorageMetricSample {
 	// Returns the sampled metric value (possibly 0, possibly increased by the sampling factor)
 	int64_t addAndExpire(KeyRef key, int64_t metric, double expiration) {
 		int64_t x = add(key, metric);
-		if (x) queue.push_back(std::make_pair(expiration, std::make_pair(*sample.find(key), -x)));
+		if (x)
+			queue.push_back(std::make_pair(expiration, std::make_pair(*sample.find(key), -x)));
 		return x;
 	}
 
@@ -122,7 +125,8 @@ struct TransientStorageMetricSample : StorageMetricSample {
 	// metric from the value sometime in the future
 	int64_t erase(KeyRef key) {
 		auto it = sample.find(key);
-		if (it == sample.end()) return 0;
+		if (it == sample.end())
+			return 0;
 		int64_t x = sample.getMetric(it);
 		sample.erase(it);
 		return x;
@@ -136,7 +140,8 @@ struct TransientStorageMetricSample : StorageMetricSample {
 			int64_t delta = queue.front().second.second;
 			ASSERT(delta != 0);
 
-			if (sample.addMetric(key, delta) == 0) sample.erase(key);
+			if (sample.addMetric(key, delta) == 0)
+				sample.erase(key);
 
 			StorageMetrics deltaM = m * delta;
 			auto v = waitMap[key];
@@ -156,7 +161,8 @@ struct TransientStorageMetricSample : StorageMetricSample {
 			int64_t delta = queue.front().second.second;
 			ASSERT(delta != 0);
 
-			if (sample.addMetric(key, delta) == 0) sample.erase(key);
+			if (sample.addMetric(key, delta) == 0)
+				sample.erase(key);
 
 			queue.pop_front();
 		}
@@ -164,15 +170,18 @@ struct TransientStorageMetricSample : StorageMetricSample {
 
 private:
 	int64_t add(KeyRef key, int64_t metric) {
-		if (!metric) return 0;
+		if (!metric)
+			return 0;
 		int64_t mag = metric < 0 ? -metric : metric;
 
 		if (mag < metricUnitsPerSample) {
-			if (!roll(key, mag)) return 0;
+			if (!roll(key, mag))
+				return 0;
 			metric = metric < 0 ? -metricUnitsPerSample : metricUnitsPerSample;
 		}
 
-		if (sample.addMetric(key, metric) == 0) sample.erase(key);
+		if (sample.addMetric(key, metric) == 0)
+			sample.erase(key);
 
 		return metric;
 	}
@@ -256,7 +265,8 @@ struct StorageServerMetrics {
 		for (auto r = rs.begin(); r != rs.end(); ++r) {
 			auto& v = r->value();
 			TEST(v.size()); // notifyNotReadable() sending errors to intersecting ranges
-			for (int n = 0; n < v.size(); n++) v[n].sendError(wrong_shard_server());
+			for (int n = 0; n < v.size(); n++)
+				v[n].sendError(wrong_shard_server());
 		}
 	}
 
@@ -280,9 +290,17 @@ struct StorageServerMetrics {
 	// static void waitMetrics( StorageServerMetrics* const& self, WaitMetricsRequest const& req );
 
 	// This function can run on untrusted user data.  We must validate all divisions carefully.
-	KeyRef getSplitKey(int64_t remaining, int64_t estimated, int64_t limits, int64_t used, int64_t infinity,
-	                   bool isLastShard, StorageMetricSample& sample, double divisor, KeyRef const& lastKey,
-	                   KeyRef const& key, bool hasUsed) {
+	KeyRef getSplitKey(int64_t remaining,
+	                   int64_t estimated,
+	                   int64_t limits,
+	                   int64_t used,
+	                   int64_t infinity,
+	                   bool isLastShard,
+	                   StorageMetricSample& sample,
+	                   double divisor,
+	                   KeyRef const& lastKey,
+	                   KeyRef const& key,
+	                   bool hasUsed) {
 		ASSERT(remaining >= 0);
 		ASSERT(limits > 0);
 		ASSERT(divisor > 0);
@@ -301,7 +319,8 @@ struct StorageServerMetrics {
 			if (remaining > expectedSize) {
 				// This does the conversion from native units to bytes using the divisor.
 				double offset = (expectedSize - used) / divisor;
-				if (offset <= 0) return hasUsed ? lastKey : key;
+				if (offset <= 0)
+					return hasUsed ? lastKey : key;
 				return sample.splitEstimate(
 				    KeyRangeRef(lastKey, key),
 				    offset * ((1.0 - SERVER_KNOBS->SPLIT_JITTER_AMOUNT) +
@@ -323,22 +342,50 @@ struct StorageServerMetrics {
 			//TraceEvent("SplitMetrics").detail("Begin", req.keys.begin).detail("End", req.keys.end).detail("Remaining", remaining.bytes).detail("Used", used.bytes);
 
 			while (true) {
-				if (remaining.bytes < 2 * SERVER_KNOBS->MIN_SHARD_BYTES) break;
+				if (remaining.bytes < 2 * SERVER_KNOBS->MIN_SHARD_BYTES)
+					break;
 				KeyRef key = req.keys.end;
 				bool hasUsed = used.bytes != 0 || used.bytesPerKSecond != 0 || used.iosPerKSecond != 0;
-				key = getSplitKey(remaining.bytes, estimated.bytes, req.limits.bytes, used.bytes, req.limits.infinity,
-				                  req.isLastShard, byteSample, 1, lastKey, key, hasUsed);
+				key = getSplitKey(remaining.bytes,
+				                  estimated.bytes,
+				                  req.limits.bytes,
+				                  used.bytes,
+				                  req.limits.infinity,
+				                  req.isLastShard,
+				                  byteSample,
+				                  1,
+				                  lastKey,
+				                  key,
+				                  hasUsed);
 				if (used.bytes < SERVER_KNOBS->MIN_SHARD_BYTES)
-					key = std::max(key, byteSample.splitEstimate(KeyRangeRef(lastKey, req.keys.end),
-					                                             SERVER_KNOBS->MIN_SHARD_BYTES - used.bytes));
-				key = getSplitKey(remaining.iosPerKSecond, estimated.iosPerKSecond, req.limits.iosPerKSecond,
-				                  used.iosPerKSecond, req.limits.infinity, req.isLastShard, iopsSample,
-				                  SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS, lastKey, key, hasUsed);
-				key = getSplitKey(remaining.bytesPerKSecond, estimated.bytesPerKSecond, req.limits.bytesPerKSecond,
-				                  used.bytesPerKSecond, req.limits.infinity, req.isLastShard, bandwidthSample,
-				                  SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS, lastKey, key, hasUsed);
+					key = std::max(key,
+					               byteSample.splitEstimate(KeyRangeRef(lastKey, req.keys.end),
+					                                        SERVER_KNOBS->MIN_SHARD_BYTES - used.bytes));
+				key = getSplitKey(remaining.iosPerKSecond,
+				                  estimated.iosPerKSecond,
+				                  req.limits.iosPerKSecond,
+				                  used.iosPerKSecond,
+				                  req.limits.infinity,
+				                  req.isLastShard,
+				                  iopsSample,
+				                  SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS,
+				                  lastKey,
+				                  key,
+				                  hasUsed);
+				key = getSplitKey(remaining.bytesPerKSecond,
+				                  estimated.bytesPerKSecond,
+				                  req.limits.bytesPerKSecond,
+				                  used.bytesPerKSecond,
+				                  req.limits.infinity,
+				                  req.isLastShard,
+				                  bandwidthSample,
+				                  SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS,
+				                  lastKey,
+				                  key,
+				                  hasUsed);
 				ASSERT(key != lastKey || hasUsed);
-				if (key == req.keys.end) break;
+				if (key == req.keys.end)
+					break;
 				reply.splits.push_back_deep(reply.splits.arena(), key);
 
 				StorageMetrics diff = (getMetrics(KeyRangeRef(lastKey, key)) + used);
@@ -388,18 +435,21 @@ struct StorageServerMetrics {
 private:
 	static void collapse(KeyRangeMap<int>& map, KeyRef const& key) {
 		auto range = map.rangeContaining(key);
-		if (range == map.ranges().begin() || range == map.ranges().end()) return;
+		if (range == map.ranges().begin() || range == map.ranges().end())
+			return;
 		int value = range->value();
 		auto prev = range;
 		--prev;
-		if (prev->value() != value) return;
+		if (prev->value() != value)
+			return;
 		KeyRange keys = KeyRangeRef(prev->begin(), range->end());
 		map.insert(keys, value);
 	}
 
 	static void add(KeyRangeMap<int>& map, KeyRangeRef const& keys, int delta) {
 		auto rs = map.modify(keys);
-		for (auto r = rs.begin(); r != rs.end(); ++r) r->value() += delta;
+		for (auto r = rs.begin(); r != rs.end(); ++r)
+			r->value() += delta;
 		collapse(map, keys.begin);
 		collapse(map, keys.end);
 	}

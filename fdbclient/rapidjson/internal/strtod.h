@@ -45,8 +45,10 @@ inline double StrtodNormalPrecision(double d, int p) {
 template <typename T>
 inline T Min3(T a, T b, T c) {
 	T m = a;
-	if (m > b) m = b;
-	if (m > c) m = c;
+	if (m > b)
+		m = b;
+	if (m > c)
+		m = c;
 	return m;
 }
 
@@ -218,13 +220,18 @@ inline double StrtodBigInteger(double approx, const char* decimals, size_t lengt
 		return a.NextPositiveDouble();
 }
 
-inline double StrtodFullPrecision(double d, int p, const char* decimals, size_t length, size_t decimalPosition,
+inline double StrtodFullPrecision(double d,
+                                  int p,
+                                  const char* decimals,
+                                  size_t length,
+                                  size_t decimalPosition,
                                   int exp) {
 	RAPIDJSON_ASSERT(d >= 0.0);
 	RAPIDJSON_ASSERT(length >= 1);
 
 	double result;
-	if (StrtodFast(d, p, &result)) return result;
+	if (StrtodFast(d, p, &result))
+		return result;
 
 	// Trim leading zeros
 	while (*decimals == '0' && length > 1) {
@@ -250,9 +257,11 @@ inline double StrtodFullPrecision(double d, int p, const char* decimals, size_t 
 	}
 
 	// If too small, underflow to zero
-	if (int(length) + exp < -324) return 0.0;
+	if (int(length) + exp < -324)
+		return 0.0;
 
-	if (StrtodDiyFp(decimals, length, decimalPosition, exp, &result)) return result;
+	if (StrtodDiyFp(decimals, length, decimalPosition, exp, &result))
+		return result;
 
 	// Use approximation from StrtodDiyFp and make adjustment with BigInteger comparison
 	return StrtodBigInteger(result, decimals, length, decimalPosition, exp);

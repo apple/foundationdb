@@ -47,7 +47,8 @@ void PacketWriter::serializeBytesAcrossBoundary(const void* data, int bytes) {
 		memcpy(buffer->data() + buffer->bytes_written, data, b);
 		buffer->bytes_written += b;
 		bytes -= b;
-		if (!bytes) break;
+		if (!bytes)
+			break;
 
 		data = (uint8_t*)data + b;
 		nextBuffer();
@@ -154,7 +155,8 @@ void UnsentPacketQueue::sent(int bytes) {
 		double queue_time = now() - b->enqueue_time;
 		sendQueueLatencyHistogram->sampleSeconds(queue_time);
 		unsent_first = b->nextPacketBuffer();
-		if (!unsent_first) unsent_last = NULL;
+		if (!unsent_first)
+			unsent_last = NULL;
 		b->delref();
 	}
 }
@@ -209,5 +211,6 @@ PacketBuffer* ReliablePacketList::compact(PacketBuffer* into, PacketBuffer* end)
 }
 
 void ReliablePacketList::discardAll() {
-	while (reliable.next != &reliable) reliable.next->remove();
+	while (reliable.next != &reliable)
+		reliable.next->remove();
 }

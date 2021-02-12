@@ -55,16 +55,20 @@ public:
 
 	// It does, however, peek the specified tag directly at recovery time.
 
-	LogSystemDiskQueueAdapter(Reference<ILogSystem> logSystem, Reference<AsyncVar<PeekTxsInfo>> peekLocality,
-	                          Version txsPoppedVersion, bool recover)
+	LogSystemDiskQueueAdapter(Reference<ILogSystem> logSystem,
+	                          Reference<AsyncVar<PeekTxsInfo>> peekLocality,
+	                          Version txsPoppedVersion,
+	                          bool recover)
 	  : logSystem(logSystem), peekLocality(peekLocality), enableRecovery(recover), recoveryLoc(txsPoppedVersion),
 	    recoveryQueueLoc(txsPoppedVersion), poppedUpTo(0), nextCommit(1), recoveryQueueDataSize(0), peekTypeSwitches(0),
 	    hasDiscardedData(false), totalRecoveredBytes(0) {
 		if (enableRecovery) {
 			localityChanged = peekLocality ? peekLocality->onChange() : Never();
-			cursor = logSystem->peekTxs(
-			    UID(), txsPoppedVersion, peekLocality ? peekLocality->get().primaryLocality : tagLocalityInvalid,
-			    peekLocality ? peekLocality->get().knownCommittedVersion : invalidVersion, true);
+			cursor = logSystem->peekTxs(UID(),
+			                            txsPoppedVersion,
+			                            peekLocality ? peekLocality->get().primaryLocality : tagLocalityInvalid,
+			                            peekLocality ? peekLocality->get().knownCommittedVersion : invalidVersion,
+			                            true);
 		}
 	}
 

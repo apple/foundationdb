@@ -29,7 +29,8 @@
 static int hexValue(char c) {
 	static char const digits[] = "0123456789ABCDEF";
 
-	if (c >= 'a' && c <= 'f') c -= ('a' - 'A');
+	if (c >= 'a' && c <= 'f')
+		c -= ('a' - 'A');
 
 	int value = std::find(digits, digits + 16, c) - digits;
 	if (value >= 16) {
@@ -139,7 +140,8 @@ static NID abbrevToNID(std::string const& sn) {
 	if (sn == "C" || sn == "CN" || sn == "L" || sn == "ST" || sn == "O" || sn == "OU" || sn == "UID" || sn == "DC" ||
 	    sn == "subjectAltName")
 		nid = OBJ_sn2nid(sn.c_str());
-	if (nid == NID_undef) throw std::runtime_error("abbrevToNID");
+	if (nid == NID_undef)
+		throw std::runtime_error("abbrevToNID");
 
 	return nid;
 }
@@ -169,17 +171,23 @@ void FDBLibTLSVerify::parse_verify(std::string input) {
 	while (s < input.size()) {
 		int eq = input.find('=', s);
 
-		if (eq == input.npos) throw std::runtime_error("parse_verify");
+		if (eq == input.npos)
+			throw std::runtime_error("parse_verify");
 
 		MatchType mt = MatchType::EXACT;
-		if (input[eq - 1] == '>') mt = MatchType::PREFIX;
-		if (input[eq - 1] == '<') mt = MatchType::SUFFIX;
+		if (input[eq - 1] == '>')
+			mt = MatchType::PREFIX;
+		if (input[eq - 1] == '<')
+			mt = MatchType::SUFFIX;
 		std::string term = input.substr(s, eq - s - (mt == MatchType::EXACT ? 0 : 1));
 
 		if (term.find("Check.") == 0) {
-			if (eq + 2 > input.size()) throw std::runtime_error("parse_verify");
-			if (eq + 2 != input.size() && input[eq + 2] != ',') throw std::runtime_error("parse_verify");
-			if (mt != MatchType::EXACT) throw std::runtime_error("parse_verify: cannot prefix match Check");
+			if (eq + 2 > input.size())
+				throw std::runtime_error("parse_verify");
+			if (eq + 2 != input.size() && input[eq + 2] != ',')
+				throw std::runtime_error("parse_verify");
+			if (mt != MatchType::EXACT)
+				throw std::runtime_error("parse_verify: cannot prefix match Check");
 
 			bool* flag;
 
@@ -219,13 +227,15 @@ void FDBLibTLSVerify::parse_verify(std::string input) {
 			int remain;
 			auto unesc = de4514(input, eq + 1, remain);
 
-			if (remain == eq + 1) throw std::runtime_error("parse_verify");
+			if (remain == eq + 1)
+				throw std::runtime_error("parse_verify");
 
 			NID termNID = abbrevToNID(term);
 			const X509Location loc = locationForNID(termNID);
 			criteria->insert(std::make_pair(termNID, Criteria(unesc, mt, loc)));
 
-			if (remain != input.size() && input[remain] != ',') throw std::runtime_error("parse_verify");
+			if (remain != input.size() && input[remain] != ',')
+				throw std::runtime_error("parse_verify");
 
 			s = remain + 1;
 		}

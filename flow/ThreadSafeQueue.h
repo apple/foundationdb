@@ -169,9 +169,12 @@ public:
 			sleepy = false;
 			b = popNode();
 		}
-		if (b == &sleeping) ASSERT(false);
-		if (b == &stub) ASSERT(false);
-		if (!b) return Optional<T>();
+		if (b == &sleeping)
+			ASSERT(false);
+		if (b == &stub)
+			ASSERT(false);
+		if (!b)
+			return Optional<T>();
 
 		Node* n = (Node*)b;
 		T data = std::move(n->data);

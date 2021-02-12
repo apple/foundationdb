@@ -70,7 +70,9 @@ struct GetRateInfoRequest {
 	ReplyPromise<struct GetRateInfoReply> reply;
 
 	GetRateInfoRequest() {}
-	GetRateInfoRequest(UID const& requesterID, int64_t totalReleasedTransactions, int64_t batchReleasedTransactions,
+	GetRateInfoRequest(UID const& requesterID,
+	                   int64_t totalReleasedTransactions,
+	                   int64_t batchReleasedTransactions,
 	                   bool detailed)
 	  : requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions),
 	    batchReleasedTransactions(batchReleasedTransactions), detailed(detailed) {}

@@ -36,7 +36,8 @@
 ACTOR static Future<vector<AddressExclusion>> getExcludedServers(Transaction* tr);
 
 bool isInteger(const std::string& s) {
-	if (s.empty()) return false;
+	if (s.empty())
+		return false;
 	char* p;
 	strtol(s.c_str(), &p, 10);
 	return (*p == 0);
@@ -143,18 +144,21 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 		redundancy = "6";
 		log_replicas = "4";
 		storagePolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "dcid",
+		    new PolicyAcross(3,
+		                     "dcid",
 		                     Reference<IReplicationPolicy>(
 		                         new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
 		tLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2, "dcid",
+		    new PolicyAcross(2,
+		                     "dcid",
 		                     Reference<IReplicationPolicy>(
 		                         new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
 	} else if (mode == "three_datacenter_fallback") {
 		redundancy = "4";
 		log_replicas = "4";
 		storagePolicy = tLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2, "dcid",
+		    new PolicyAcross(2,
+		                     "dcid",
 		                     Reference<IReplicationPolicy>(
 		                         new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
 	} else if (mode == "three_data_hall") {
@@ -163,7 +167,8 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 		storagePolicy = Reference<IReplicationPolicy>(
 		    new PolicyAcross(3, "data_hall", Reference<IReplicationPolicy>(new PolicyOne())));
 		tLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2, "data_hall",
+		    new PolicyAcross(2,
+		                     "data_hall",
 		                     Reference<IReplicationPolicy>(
 		                         new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
 	} else if (mode == "three_data_hall_fallback") {
@@ -172,7 +177,8 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 		storagePolicy = Reference<IReplicationPolicy>(
 		    new PolicyAcross(2, "data_hall", Reference<IReplicationPolicy>(new PolicyOne())));
 		tLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2, "data_hall",
+		    new PolicyAcross(2,
+		                     "data_hall",
 		                     Reference<IReplicationPolicy>(
 		                         new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
 	} else
@@ -217,7 +223,8 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 		remote_redundancy = "3";
 		remote_log_replicas = "4";
 		remoteTLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2, "data_hall",
+		    new PolicyAcross(2,
+		                     "data_hall",
 		                     Reference<IReplicationPolicy>(
 		                         new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
 	} else
@@ -280,7 +287,8 @@ ConfigurationResult::Type buildConfiguration(std::string const& configMode,
 	int p = 0;
 	while (p < configMode.size()) {
 		int end = configMode.find_first_of(' ', p);
-		if (end == configMode.npos) end = configMode.size();
+		if (end == configMode.npos)
+			end = configMode.size();
 		modes.push_back(StringRef(configMode).substr(p, end - p));
 		p = end + 1;
 	}
@@ -536,7 +544,8 @@ ACTOR Future<ConfigurationResult::Type> changeConfig(Database cx, std::map<std::
 				            MutationRef::SetVersionstampedValue);
 			}
 
-			for (auto i = m.begin(); i != m.end(); ++i) tr.set(StringRef(i->first), StringRef(i->second));
+			for (auto i = m.begin(); i != m.end(); ++i)
+				tr.set(StringRef(i->first), StringRef(i->second));
 
 			tr.addReadConflictRange(singleKeyRange(moveKeysLockOwnerKey));
 			tr.set(moveKeysLockOwnerKey, versionKey);
@@ -576,12 +585,15 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 	StatusObjectReader statusObj(status);
 
 	StatusObjectReader statusObjCluster;
-	if (!statusObj.get("cluster", statusObjCluster)) return ConfigureAutoResult();
+	if (!statusObj.get("cluster", statusObjCluster))
+		return ConfigureAutoResult();
 
 	StatusObjectReader statusObjConfig;
-	if (!statusObjCluster.get("configuration", statusObjConfig)) return ConfigureAutoResult();
+	if (!statusObjCluster.get("configuration", statusObjConfig))
+		return ConfigureAutoResult();
 
-	if (!statusObjConfig.get("redundancy.factor", result.old_replication)) return ConfigureAutoResult();
+	if (!statusObjConfig.get("redundancy.factor", result.old_replication))
+		return ConfigureAutoResult();
 
 	result.auto_replication = result.old_replication;
 
@@ -613,7 +625,8 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 		return ConfigureAutoResult();
 
 	StatusObjectReader machinesMap;
-	if (!statusObjCluster.get("machines", machinesMap)) return ConfigureAutoResult();
+	if (!statusObjCluster.get("machines", machinesMap))
+		return ConfigureAutoResult();
 
 	std::map<std::string, std::string> machineid_dcid;
 	std::set<std::string> datacenters;
@@ -630,10 +643,12 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 
 	result.machines = machineCount;
 
-	if (datacenters.size() > 1) return ConfigureAutoResult();
+	if (datacenters.size() > 1)
+		return ConfigureAutoResult();
 
 	StatusObjectReader processesMap;
-	if (!statusObjCluster.get("processes", processesMap)) return ConfigureAutoResult();
+	if (!statusObjCluster.get("processes", processesMap))
+		return ConfigureAutoResult();
 
 	std::set<std::string> oldMachinesWithTransaction;
 	int oldTransactionProcesses = 0;
@@ -643,13 +658,17 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 		StatusObjectReader process(proc.second);
 		if (!process.has("excluded") || !process.last().get_bool()) {
 			std::string addrStr;
-			if (!process.get("address", addrStr)) return ConfigureAutoResult();
+			if (!process.get("address", addrStr))
+				return ConfigureAutoResult();
 			std::string class_source;
-			if (!process.get("class_source", class_source)) return ConfigureAutoResult();
+			if (!process.get("class_source", class_source))
+				return ConfigureAutoResult();
 			std::string class_type;
-			if (!process.get("class_type", class_type)) return ConfigureAutoResult();
+			if (!process.get("class_type", class_type))
+				return ConfigureAutoResult();
 			std::string machineId;
-			if (!process.get("machine_id", machineId)) return ConfigureAutoResult();
+			if (!process.get("machine_id", machineId))
+				return ConfigureAutoResult();
 
 			NetworkAddress addr = NetworkAddress::parse(addrStr);
 			ProcessClass processClass(class_type, class_source);
@@ -718,7 +737,8 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 		}
 	}
 
-	if (processCount < 10) return ConfigureAutoResult();
+	if (processCount < 10)
+		return ConfigureAutoResult();
 
 	result.desired_resolvers = 1;
 	int resolverCount;
@@ -805,7 +825,8 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 	result.auto_processes_with_transaction = totalTransactionProcesses;
 	result.auto_machines_with_transaction = machinesWithTransaction.size();
 
-	if (3 * totalTransactionProcesses > processCount) return ConfigureAutoResult();
+	if (3 * totalTransactionProcesses > processCount)
+		return ConfigureAutoResult();
 
 	return result;
 }
@@ -814,7 +835,8 @@ ACTOR Future<ConfigurationResult::Type> autoConfig(Database cx, ConfigureAutoRes
 	state Transaction tr(cx);
 	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
 
-	if (!conf.address_class.size()) return ConfigurationResult::INCOMPLETE_CONFIGURATION; // FIXME: correct return type
+	if (!conf.address_class.size())
+		return ConfigurationResult::INCOMPLETE_CONFIGURATION; // FIXME: correct return type
 
 	loop {
 		try {
@@ -854,9 +876,11 @@ ACTOR Future<ConfigurationResult::Type> autoConfig(Database cx, ConfigureAutoRes
 				modes.push_back(conf.auto_replication);
 				std::map<std::string, std::string> m;
 				auto r = buildConfiguration(modes, m);
-				if (r != ConfigurationResult::SUCCESS) return r;
+				if (r != ConfigurationResult::SUCCESS)
+					return r;
 
-				for (auto& kv : m) tr.set(kv.first, kv.second);
+				for (auto& kv : m)
+					tr.set(kv.first, kv.second);
 			}
 
 			tr.addReadConflictRange(singleKeyRange(moveKeysLockOwnerKey));
@@ -870,15 +894,18 @@ ACTOR Future<ConfigurationResult::Type> autoConfig(Database cx, ConfigureAutoRes
 	}
 }
 
-Future<ConfigurationResult::Type> changeConfig(Database const& cx, std::vector<StringRef> const& modes,
-                                               Optional<ConfigureAutoResult> const& conf, bool force) {
+Future<ConfigurationResult::Type> changeConfig(Database const& cx,
+                                               std::vector<StringRef> const& modes,
+                                               Optional<ConfigureAutoResult> const& conf,
+                                               bool force) {
 	if (modes.size() && modes[0] == LiteralStringRef("auto") && conf.present()) {
 		return autoConfig(cx, conf.get());
 	}
 
 	std::map<std::string, std::string> m;
 	auto r = buildConfiguration(modes, m);
-	if (r != ConfigurationResult::SUCCESS) return r;
+	if (r != ConfigurationResult::SUCCESS)
+		return r;
 	return changeConfig(cx, m, force);
 }
 
@@ -886,7 +913,8 @@ Future<ConfigurationResult::Type> changeConfig(Database const& cx, std::string c
 	TraceEvent("ChangeConfig").detail("Mode", modes);
 	std::map<std::string, std::string> m;
 	auto r = buildConfiguration(modes, m);
-	if (r != ConfigurationResult::SUCCESS) return r;
+	if (r != ConfigurationResult::SUCCESS)
+		return r;
 	return changeConfig(cx, m, force);
 }
 
@@ -914,7 +942,8 @@ ACTOR Future<vector<ProcessData>> getWorkers(Transaction* tr) {
 		    data.processClass.classType() == ProcessClass::UnsetClass)
 			data.processClass = processClass;
 
-		if (data.processClass.classType() != ProcessClass::TesterClass) results.push_back(data);
+		if (data.processClass.classType() != ProcessClass::TesterClass)
+			results.push_back(data);
 	}
 
 	return results;
@@ -941,7 +970,8 @@ ACTOR Future<std::vector<NetworkAddress>> getCoordinators(Database cx) {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> currentKey = wait(tr.get(coordinatorsKey));
-			if (!currentKey.present()) return std::vector<NetworkAddress>();
+			if (!currentKey.present())
+				return std::vector<NetworkAddress>();
 
 			return ClusterConnectionString(currentKey.get().toString()).coordinators();
 		} catch (Error& e) {
@@ -986,12 +1016,15 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum(Database cx, Reference<IQuor
 				tr.reset();
 				continue;
 			}
-			if (result != CoordinatorsResult::SUCCESS) return result;
-			if (!desiredCoordinators.size()) return CoordinatorsResult::INVALID_NETWORK_ADDRESSES;
+			if (result != CoordinatorsResult::SUCCESS)
+				return result;
+			if (!desiredCoordinators.size())
+				return CoordinatorsResult::INVALID_NETWORK_ADDRESSES;
 			std::sort(desiredCoordinators.begin(), desiredCoordinators.end());
 
 			std::string newName = change->getDesiredClusterKeyName();
-			if (newName.empty()) newName = old.clusterKeyName().toString();
+			if (newName.empty())
+				newName = old.clusterKeyName().toString();
 
 			if (old.coordinators() == desiredCoordinators && old.clusterKeyName() == newName)
 				return retries ? CoordinatorsResult::SUCCESS : CoordinatorsResult::SAME_NETWORK_ADDRESSES;
@@ -1105,12 +1138,17 @@ struct AutoQuorumChange : IQuorumChange {
 		return redundancy;
 	}
 
-	ACTOR static Future<bool> isAcceptable(AutoQuorumChange* self, Transaction* tr,
-	                                       vector<NetworkAddress> oldCoordinators, Reference<ClusterConnectionFile> ccf,
-	                                       int desiredCount, std::set<AddressExclusion>* excluded) {
+	ACTOR static Future<bool> isAcceptable(AutoQuorumChange* self,
+	                                       Transaction* tr,
+	                                       vector<NetworkAddress> oldCoordinators,
+	                                       Reference<ClusterConnectionFile> ccf,
+	                                       int desiredCount,
+	                                       std::set<AddressExclusion>* excluded) {
 		// Are there enough coordinators for the redundancy level?
-		if (oldCoordinators.size() < desiredCount) return false;
-		if (oldCoordinators.size() % 2 != 1) return false;
+		if (oldCoordinators.size() < desiredCount)
+			return false;
+		if (oldCoordinators.size() % 2 != 1)
+			return false;
 
 		// Check availability
 		ClientCoordinators coord(ccf);
@@ -1121,25 +1159,30 @@ struct AutoQuorumChange : IQuorumChange {
 			                                           TaskPriority::CoordinationReply));
 		Optional<vector<Optional<LeaderInfo>>> results =
 		    wait(timeout(getAll(leaderServers), CLIENT_KNOBS->IS_ACCEPTABLE_DELAY));
-		if (!results.present()) return false; // Not all responded
+		if (!results.present())
+			return false; // Not all responded
 		for (auto& r : results.get())
-			if (!r.present()) return false; // Coordinator doesn't know about this database?
+			if (!r.present())
+				return false; // Coordinator doesn't know about this database?
 
 		// Check exclusions
 		for (auto& c : oldCoordinators) {
-			if (addressExcluded(*excluded, c)) return false;
+			if (addressExcluded(*excluded, c))
+				return false;
 		}
 
 		// Check locality
 		// FIXME: Actual locality!
 		std::sort(oldCoordinators.begin(), oldCoordinators.end());
 		for (int i = 1; i < oldCoordinators.size(); i++)
-			if (oldCoordinators[i - 1].ip == oldCoordinators[i].ip) return false; // Multiple coordinators share an IP
+			if (oldCoordinators[i - 1].ip == oldCoordinators[i].ip)
+				return false; // Multiple coordinators share an IP
 
 		return true; // The status quo seems fine
 	}
 
-	ACTOR static Future<vector<NetworkAddress>> getDesired(AutoQuorumChange* self, Transaction* tr,
+	ACTOR static Future<vector<NetworkAddress>> getDesired(AutoQuorumChange* self,
+	                                                       Transaction* tr,
 	                                                       vector<NetworkAddress> oldCoordinators,
 	                                                       Reference<ClusterConnectionFile> ccf,
 	                                                       CoordinatorsResult::Type* err) {
@@ -1157,7 +1200,8 @@ struct AutoQuorumChange : IQuorumChange {
 		state vector<ProcessData> workers = _workers;
 
 		std::map<NetworkAddress, LocalityData> addr_locality;
-		for (auto w : workers) addr_locality[w.address] = w.locality;
+		for (auto w : workers)
+			addr_locality[w.address] = w.locality;
 
 		// since we don't have the locality data for oldCoordinators:
 		//     check if every old coordinator is in the workers vector and
@@ -1175,7 +1219,8 @@ struct AutoQuorumChange : IQuorumChange {
 
 		if (checkAcceptable) {
 			bool ok = wait(isAcceptable(self, tr, oldCoordinators, ccf, desiredCount, &excluded));
-			if (ok) return oldCoordinators;
+			if (ok)
+				return oldCoordinators;
 		}
 
 		std::vector<NetworkAddress> chosen;
@@ -1196,19 +1241,24 @@ struct AutoQuorumChange : IQuorumChange {
 		return chosen;
 	}
 
-	void addDesiredWorkers(vector<NetworkAddress>& chosen, const vector<ProcessData>& workers, int desiredCount,
+	void addDesiredWorkers(vector<NetworkAddress>& chosen,
+	                       const vector<ProcessData>& workers,
+	                       int desiredCount,
 	                       const std::set<AddressExclusion>& excluded) {
 		vector<ProcessData> remainingWorkers(workers);
 		deterministicRandom()->randomShuffle(remainingWorkers);
 
-		std::partition(remainingWorkers.begin(), remainingWorkers.end(),
-		               [](const ProcessData& data) { return (data.processClass == ProcessClass::CoordinatorClass); });
+		std::partition(remainingWorkers.begin(), remainingWorkers.end(), [](const ProcessData& data) {
+			return (data.processClass == ProcessClass::CoordinatorClass);
+		});
 
 		std::map<StringRef, int> maxCounts;
 		std::map<StringRef, std::map<StringRef, int>> currentCounts;
 		std::map<StringRef, int> hardLimits;
 
-		vector<StringRef> fields({ LiteralStringRef("dcid"), LiteralStringRef("data_hall"), LiteralStringRef("zoneid"),
+		vector<StringRef> fields({ LiteralStringRef("dcid"),
+		                           LiteralStringRef("data_hall"),
+		                           LiteralStringRef("zoneid"),
 		                           LiteralStringRef("machineid") });
 
 		for (auto field = fields.begin(); field != fields.end(); field++) {
@@ -1283,7 +1333,8 @@ ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers)
 			tr.addReadConflictRange(
 			    singleKeyRange(excludedServersVersionKey)); // To conflict with parallel includeServers
 			tr.set(excludedServersVersionKey, excludeVersionKey);
-			for (auto& s : servers) tr.set(encodeExcludedServersKey(s), StringRef());
+			for (auto& s : servers)
+				tr.set(encodeExcludedServersKey(s), StringRef());
 
 			TraceEvent("ExcludeServersCommit").detail("Servers", describe(servers));
 
@@ -1370,7 +1421,8 @@ ACTOR Future<Void> setClass(Database cx, AddressExclusion server, ProcessClass p
 				}
 			}
 
-			if (foundChange) tr.set(processClassChangeKey, deterministicRandom()->randomUniqueID().toString());
+			if (foundChange)
+				tr.set(processClassChangeKey, deterministicRandom()->randomUniqueID().toString());
 
 			wait(tr.commit());
 			return Void();
@@ -1387,7 +1439,8 @@ ACTOR static Future<vector<AddressExclusion>> getExcludedServers(Transaction* tr
 	vector<AddressExclusion> exclusions;
 	for (auto i = r.begin(); i != r.end(); ++i) {
 		auto a = decodeExcludedServersKey(i->key);
-		if (a.isValid()) exclusions.push_back(a);
+		if (a.isValid())
+			exclusions.push_back(a);
 	}
 	return exclusions;
 }
@@ -1542,12 +1595,14 @@ ACTOR Future<int> setDDMode(Database cx, int mode) {
 	}
 }
 
-ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vector<AddressExclusion> excl,
+ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx,
+                                                                vector<AddressExclusion> excl,
                                                                 bool waitForAllExcluded) {
 	state std::set<AddressExclusion> exclusions(excl.begin(), excl.end());
 	state std::set<NetworkAddress> inProgressExclusion;
 
-	if (!excl.size()) return inProgressExclusion;
+	if (!excl.size())
+		return inProgressExclusion;
 
 	loop {
 		state Transaction tr(cx);
@@ -1597,8 +1652,10 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vec
 				}
 			}
 
-			if (ok) return inProgressExclusion;
-			if (!waitForAllExcluded) break;
+			if (ok)
+				return inProgressExclusion;
+			if (!waitForAllExcluded)
+				break;
 
 			wait(delayJittered(1.0)); // SOMEDAY: watches!
 		} catch (Error& e) {
@@ -1729,7 +1786,8 @@ ACTOR Future<Void> lockDatabase(Database cx, UID id) {
 			wait(tr.commit());
 			return Void();
 		} catch (Error& e) {
-			if (e.code() == error_code_database_locked) throw e;
+			if (e.code() == error_code_database_locked)
+				throw e;
 			wait(tr.onError(e));
 		}
 	}
@@ -1740,7 +1798,8 @@ ACTOR Future<Void> unlockDatabase(Transaction* tr, UID id) {
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = wait(tr->get(databaseLockedKey));
 
-	if (!val.present()) return Void();
+	if (!val.present())
+		return Void();
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
 		//TraceEvent("DBA_UnlockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
@@ -1756,7 +1815,8 @@ ACTOR Future<Void> unlockDatabase(Reference<ReadYourWritesTransaction> tr, UID i
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = wait(tr->get(databaseLockedKey));
 
-	if (!val.present()) return Void();
+	if (!val.present())
+		return Void();
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
 		//TraceEvent("DBA_UnlockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
@@ -1775,7 +1835,8 @@ ACTOR Future<Void> unlockDatabase(Database cx, UID id) {
 			wait(tr.commit());
 			return Void();
 		} catch (Error& e) {
-			if (e.code() == error_code_database_locked) throw e;
+			if (e.code() == error_code_database_locked)
+				throw e;
 			wait(tr.onError(e));
 		}
 	}
@@ -1866,7 +1927,8 @@ ACTOR Future<Void> waitForPrimaryDC(Database cx, StringRef dcId) {
 }
 
 json_spirit::Value_type normJSONType(json_spirit::Value_type type) {
-	if (type == json_spirit::int_type) return json_spirit::real_type;
+	if (type == json_spirit::int_type)
+		return json_spirit::real_type;
 	return type;
 }
 
@@ -1876,12 +1938,18 @@ void schemaCoverage(std::string const& spath, bool covered) {
 	if (coveredSchemaPaths[covered].insert(spath).second) {
 		TraceEvent ev(SevInfo, "CodeCoverage");
 		ev.detail("File", "documentation/StatusSchema.json/" + spath).detail("Line", 0);
-		if (!covered) ev.detail("Covered", 0);
+		if (!covered)
+			ev.detail("Covered", 0);
 	}
 }
 
-bool schemaMatch(json_spirit::mValue const& schemaValue, json_spirit::mValue const& resultValue, std::string& errorStr,
-                 Severity sev, bool checkCoverage, std::string path, std::string schemaPath) {
+bool schemaMatch(json_spirit::mValue const& schemaValue,
+                 json_spirit::mValue const& resultValue,
+                 std::string& errorStr,
+                 Severity sev,
+                 bool checkCoverage,
+                 std::string path,
+                 std::string schemaPath) {
 	// Returns true if everything in `result` is permitted by `schema`
 	bool ok = true;
 
@@ -1931,7 +1999,8 @@ bool schemaMatch(json_spirit::mValue const& schemaValue, json_spirit::mValue con
 						}
 					if (!any_match) {
 						errorStr += format("ERROR: Unknown value `%s' for key `%s'\n",
-						                   json_spirit::write_string(rv).c_str(), kpath.c_str());
+						                   json_spirit::write_string(rv).c_str(),
+						                   kpath.c_str());
 						TraceEvent(sev, "SchemaMismatch")
 						    .detail("Path", kpath)
 						    .detail("SchemaEnumItems", enum_values.size())
@@ -1999,8 +2068,13 @@ bool schemaMatch(json_spirit::mValue const& schemaValue, json_spirit::mValue con
 				// A one item schema array means that all items in the value must match the first item in the schema
 				int index = 0;
 				for (auto& valueItem : valueArray) {
-					if (!schemaMatch(schemaArray[0], valueItem, errorStr, sev, checkCoverage,
-					                 path + format("[%d]", index), schemaPath + "[0]")) {
+					if (!schemaMatch(schemaArray[0],
+					                 valueItem,
+					                 errorStr,
+					                 sev,
+					                 checkCoverage,
+					                 path + format("[%d]", index),
+					                 schemaPath + "[0]")) {
 						ok = false;
 					}
 					index++;
@@ -2050,7 +2124,9 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 	std::map<StringRef, std::set<StringRef>> chosenValues;
 
 	ASSERT(chosen.size() == 5);
-	std::vector<StringRef> fields({ LiteralStringRef("dcid"), LiteralStringRef("data_hall"), LiteralStringRef("zoneid"),
+	std::vector<StringRef> fields({ LiteralStringRef("dcid"),
+	                                LiteralStringRef("data_hall"),
+	                                LiteralStringRef("zoneid"),
 	                                LiteralStringRef("machineid") });
 	for (auto worker = chosen.begin(); worker != chosen.end(); worker++) {
 		ASSERT(worker->ip.toV4() < workers.size());

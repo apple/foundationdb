@@ -94,8 +94,10 @@ struct RWTransactor : ITransactor {
 		state vector<Value> values;
 		state Transaction tr(db);
 
-		for (int op = 0; op < self->reads || op < self->writes; op++) keys.push_back(self->randomKey());
-		for (int op = 0; op < self->writes; op++) values.push_back(self->randomValue());
+		for (int op = 0; op < self->reads || op < self->writes; op++)
+			keys.push_back(self->randomKey());
+		for (int op = 0; op < self->writes; op++)
+			values.push_back(self->randomValue());
 
 		loop {
 			try {
@@ -105,9 +107,11 @@ struct RWTransactor : ITransactor {
 				state double rrLatency = -t_rv * self->reads;
 
 				state vector<Future<Optional<Value>>> reads;
-				for (int i = 0; i < self->reads; i++) reads.push_back(getLatency(tr.get(keys[i]), &rrLatency));
+				for (int i = 0; i < self->reads; i++)
+					reads.push_back(getLatency(tr.get(keys[i]), &rrLatency));
 				wait(waitForAll(reads));
-				for (int i = 0; i < self->writes; i++) tr.set(keys[i], values[i]);
+				for (int i = 0; i < self->writes; i++)
+					tr.set(keys[i], values[i]);
 				state double t_beforeCommit = now();
 				wait(tr.commit());
 
@@ -151,7 +155,8 @@ struct SweepTransactor : ITransactor {
 	  : a(a), b(b), duration(duration), startTime(-1), startDelay(startDelay) {}
 
 	virtual Future<Void> doTransaction(Database const& db, Stats* stats) {
-		if (startTime == -1) startTime = now() + startDelay;
+		if (startTime == -1)
+			startTime = now() + startDelay;
 
 		double alpha;
 		double n = now();
@@ -194,7 +199,8 @@ struct MeasureSinglePeriod : IMeasurer {
 		return Void();
 	}
 	virtual void addTransaction(ITransactor::Stats* st, double now) {
-		if (!(now >= startT + delay && now < startT + delay + duration)) return;
+		if (!(now >= startT + delay && now < startT + delay + duration))
+			return;
 
 		totalLatency.addSample(st->totalLatency);
 		grvLatency.addSample(st->grvLatency);
@@ -275,14 +281,17 @@ struct MeasureMulti : IMeasurer {
 	vector<Reference<IMeasurer>> ms;
 	virtual Future<Void> start() {
 		vector<Future<Void>> s;
-		for (auto m = ms.begin(); m != ms.end(); ++m) s.push_back((*m)->start());
+		for (auto m = ms.begin(); m != ms.end(); ++m)
+			s.push_back((*m)->start());
 		return waitForAll(s);
 	}
 	virtual void addTransaction(ITransactor::Stats* stats, double now) {
-		for (auto m = ms.begin(); m != ms.end(); ++m) (*m)->addTransaction(stats, now);
+		for (auto m = ms.begin(); m != ms.end(); ++m)
+			(*m)->addTransaction(stats, now);
 	}
 	virtual void getMetrics(vector<PerfMetric>& metrics) {
-		for (auto m = ms.begin(); m != ms.end(); ++m) (*m)->getMetrics(metrics);
+		for (auto m = ms.begin(); m != ms.end(); ++m)
+			(*m)->getMetrics(metrics);
 	}
 };
 
@@ -311,11 +320,17 @@ struct ThroughputWorkload : TestWorkload {
 		auto AType =
 		    Reference<ITransactor>(new RWTransactor(getOption(options, LiteralStringRef("readsPerTransactionA"), 10),
 		                                            getOption(options, LiteralStringRef("writesPerTransactionA"), 0),
-		                                            keyCount, keyBytes, minValueBytes, maxValueBytes));
+		                                            keyCount,
+		                                            keyBytes,
+		                                            minValueBytes,
+		                                            maxValueBytes));
 		auto BType =
 		    Reference<ITransactor>(new RWTransactor(getOption(options, LiteralStringRef("readsPerTransactionB"), 5),
 		                                            getOption(options, LiteralStringRef("writesPerTransactionB"), 5),
-		                                            keyCount, keyBytes, minValueBytes, maxValueBytes));
+		                                            keyCount,
+		                                            keyBytes,
+		                                            minValueBytes,
+		                                            maxValueBytes));
 
 		if (sweepDuration > 0) {
 			op = Reference<ITransactor>(new SweepTransactor(sweepDuration, sweepDelay, AType, BType));
@@ -392,9 +407,12 @@ struct ThroughputWorkload : TestWorkload {
 		// SOMEDAY: How can we prevent the number of actors on different clients from diverging?
 
 		int successors = deterministicRandom()->random01() + desiredSuccessors;
-		if (successors < 1 && self->activeActors <= 1) successors = 1;
-		if (successors > 1 && self->activeActors >= 200000) successors = 1;
-		for (int s = 0; s < successors; s++) add.send(throughputActor(db, self, add));
+		if (successors < 1 && self->activeActors <= 1)
+			successors = 1;
+		if (successors > 1 && self->activeActors >= 200000)
+			successors = 1;
+		for (int s = 0; s < successors; s++)
+			add.send(throughputActor(db, self, add));
 		return Void();
 	}
 

@@ -44,7 +44,8 @@ struct LogMetricsWorkload : TestWorkload {
 	virtual std::string description() { return "LogMetricsWorkload"; }
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
 	virtual Future<Void> start(Database const& cx) {
-		if (clientId) return Void();
+		if (clientId)
+			return Void();
 		return _start(cx, this);
 	}
 

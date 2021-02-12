@@ -33,7 +33,9 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 		int64_t lastData;
 		Reference<FlowLock> lock;
 
-		ACTOR static Future<Void> test_impl(FileBlock* self, Reference<AsyncFileHandle> file, int pages,
+		ACTOR static Future<Void> test_impl(FileBlock* self,
+		                                    Reference<AsyncFileHandle> file,
+		                                    int pages,
 		                                    Reference<AsyncFileBuffer> buffer) {
 			wait(self->lock->take());
 
@@ -50,7 +52,8 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 				ASSERT(readBytes == size);
 			}
 
-			if (newData == 0) newData = 1;
+			if (newData == 0)
+				newData = 1;
 			int64_t* arr = (int64_t*)buffer->buffer;
 			for (int i = 0, imax = size / sizeof(int64_t); i < imax; ++i) {
 				if (self->lastData != 0 && arr[i] != self->lastData) {
@@ -99,7 +102,8 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 	virtual std::string description() { return "DiskDurability"; }
 
 	virtual Future<Void> setup(Database const& cx) {
-		if (enabled) return _setup(this);
+		if (enabled)
+			return _setup(this);
 
 		return Void();
 	}
@@ -109,8 +113,10 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 
 		int flags = IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE;
 
-		if (self->unbufferedIO) flags |= IAsyncFile::OPEN_UNBUFFERED;
-		if (self->uncachedIO) flags |= IAsyncFile::OPEN_UNCACHED;
+		if (self->unbufferedIO)
+			flags |= IAsyncFile::OPEN_UNBUFFERED;
+		if (self->uncachedIO)
+			flags |= IAsyncFile::OPEN_UNCACHED;
 
 		try {
 			state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(self->path, flags, 0666));
@@ -127,7 +133,8 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 	}
 
 	virtual Future<Void> start(Database const& cx) {
-		if (enabled) return _start(this);
+		if (enabled)
+			return _start(this);
 
 		return Void();
 	}
@@ -160,12 +167,14 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 
 	ACTOR Future<Void> _start(DiskDurabilityWorkload* self) {
 		self->blocks.reserve(self->filePages);
-		for (int i = 0; i < self->filePages; ++i) self->blocks.push_back(FileBlock(i));
+		for (int i = 0; i < self->filePages; ++i)
+			self->blocks.push_back(FileBlock(i));
 
 		state std::vector<Future<Void>> tasks;
 		tasks.push_back(syncLoop(self));
 
-		for (int i = 0; i < self->writers; ++i) tasks.push_back(worker(self));
+		for (int i = 0; i < self->writers; ++i)
+			tasks.push_back(worker(self));
 
 		wait(timeout(waitForAll(tasks), self->testDuration, Void()));
 

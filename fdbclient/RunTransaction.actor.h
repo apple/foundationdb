@@ -49,7 +49,8 @@ Future<decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValu
 
 ACTOR template <class Function>
 Future<decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValue())> runRYWTransactionFailIfLocked(
-    Database cx, Function func) {
+    Database cx,
+    Function func) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	loop {
 		try {
@@ -57,7 +58,8 @@ Future<decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValu
 			wait(tr->commit());
 			return result;
 		} catch (Error& e) {
-			if (e.code() == error_code_database_locked) throw;
+			if (e.code() == error_code_database_locked)
+				throw;
 			wait(tr->onError(e));
 		}
 	}
@@ -65,7 +67,8 @@ Future<decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValu
 
 ACTOR template <class Function>
 Future<decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValue())> runRYWTransactionNoRetry(
-    Database cx, Function func) {
+    Database cx,
+    Function func) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValue()) result = wait(func(tr));
 	wait(tr->commit());

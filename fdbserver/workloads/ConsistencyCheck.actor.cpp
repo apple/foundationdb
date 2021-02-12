@@ -176,7 +176,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			TraceEvent("ConsistencyCheck_StartingOrResuming");
 			choose {
 				when(wait(self->runCheck(cx, self))) {
-					if (!self->indefinite) break;
+					if (!self->indefinite)
+						break;
 					self->repetitions++;
 					wait(delay(5.0));
 				}
@@ -203,7 +204,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 							TraceEvent("ConsistencyCheck_TooManyConfigOptions");
 							self->testFailure("Read too many configuration options");
 						}
-						for (int i = 0; i < res.size(); i++) configuration.set(res[i].key, res[i].value);
+						for (int i = 0; i < res.size(); i++)
+							configuration.set(res[i].key, res[i].value);
 						break;
 					} catch (Error& e) {
 						wait(tr.onError(e));
@@ -263,7 +265,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 							// This error occurs if we have undesirable servers; in that case just report the
 							// undesirable servers error
-							if (!hasUndesirableServers) self->testFailure("Could not read storage queue size");
+							if (!hasUndesirableServers)
+								self->testFailure("Could not read storage queue size");
 						} else
 							throw;
 					}
@@ -273,13 +276,16 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 					// Check that each machine is operating as its desired class
 					bool usingDesiredClasses = wait(self->checkUsingDesiredClasses(cx, self));
-					if (!usingDesiredClasses) self->testFailure("Cluster has machine(s) not using requested classes");
+					if (!usingDesiredClasses)
+						self->testFailure("Cluster has machine(s) not using requested classes");
 
 					bool workerListCorrect = wait(self->checkWorkerList(cx, self));
-					if (!workerListCorrect) self->testFailure("Worker list incorrect");
+					if (!workerListCorrect)
+						self->testFailure("Worker list incorrect");
 
 					bool coordinatorsCorrect = wait(self->checkCoordinators(cx));
-					if (!coordinatorsCorrect) self->testFailure("Coordinators incorrect");
+					if (!coordinatorsCorrect)
+						self->testFailure("Coordinators incorrect");
 				}
 
 				// Get a list of key servers; verify that the TLogs and master all agree about who the key servers are
@@ -333,7 +339,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	// If this is a quiescent check, then each master proxy needs to respond, otherwise only one needs to respond.
 	// Returns false if there is a failure (in this case, keyServersPromise will never be set)
 	ACTOR Future<bool> getKeyServers(
-	    Database cx, ConsistencyCheckWorkload* self,
+	    Database cx,
+	    ConsistencyCheckWorkload* self,
 	    Promise<std::vector<std::pair<KeyRange, vector<StorageServerInterface>>>> keyServersPromise) {
 		state std::vector<std::pair<KeyRange, vector<StorageServerInterface>>> keyServers;
 
@@ -371,12 +378,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						// Get the list of shards if one was returned.  If not doing a quiescent check, we can break if
 						// it is. If we are doing a quiescent check, then we only need to do this for the first shard.
 						if (shards.present() && !keyServersInsertedForThisIteration) {
-							keyServers.insert(keyServers.end(), shards.get().results.begin(),
-							                  shards.get().results.end());
+							keyServers.insert(
+							    keyServers.end(), shards.get().results.begin(), shards.get().results.end());
 							keyServersInsertedForThisIteration = true;
 							begin = shards.get().results.back().first.end;
 
-							if (!self->performQuiescentChecks) break;
+							if (!self->performQuiescentChecks)
+								break;
 						}
 					} // End of For
 				}
@@ -475,8 +483,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					}
 
 					if (currentLocations.size() > 2) {
-						keyLocations.append_deep(keyLocations.arena(), &currentLocations[1],
-						                         currentLocations.size() - 2);
+						keyLocations.append_deep(
+						    keyLocations.arena(), &currentLocations[1], currentLocations.size() - 2);
 					}
 
 					// Next iteration should pick up where we left off
@@ -591,8 +599,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 	// Checks that the data in each shard is the same on each storage server that it resides on.  Also performs some
 	// sanity checks on the sizes of shards and storage servers. Returns false if there is a failure
-	ACTOR Future<bool> checkDataConsistency(Database cx, VectorRef<KeyValueRef> keyLocations,
-	                                        DatabaseConfiguration configuration, ConsistencyCheckWorkload* self) {
+	ACTOR Future<bool> checkDataConsistency(Database cx,
+	                                        VectorRef<KeyValueRef> keyLocations,
+	                                        DatabaseConfiguration configuration,
+	                                        ConsistencyCheckWorkload* self) {
 		// Stores the total number of bytes on each storage server
 		// In a distributed test, this will be an estimated size
 		state std::map<UID, int64_t> storageServerSizes;
@@ -633,7 +643,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		state vector<int> shardOrder;
-		for (int k = 0; k < ranges.size(); k++) shardOrder.push_back(k);
+		for (int k = 0; k < ranges.size(); k++)
+			shardOrder.push_back(k);
 		if (self->shuffleShards) {
 			uint32_t seed = self->sharedRandomNumber + self->repetitions;
 			DeterministicRandom sharedRandom(seed == 0 ? 1 : seed);
@@ -781,7 +792,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								totalReadAmount += current.data.expectedSize();
 								// If we haven't encountered a valid storage server yet, then mark this as the baseline
 								// to compare against
-								if (firstValidServer == -1) firstValidServer = j;
+								if (firstValidServer == -1)
+									firstValidServer = j;
 
 								// Compare this shard against the first
 								else {
@@ -791,12 +803,15 @@ struct ConsistencyCheckWorkload : TestWorkload {
 										// Be especially verbose if in simulation
 										if (g_network->isSimulated()) {
 											int invalidIndex = -1;
-											printf("\nSERVER %d (%s); shard = %s - %s:\n", j,
+											printf("\nSERVER %d (%s); shard = %s - %s:\n",
+											       j,
 											       storageServerInterfaces[j].address().toString().c_str(),
 											       printable(req.begin.getKey()).c_str(),
 											       printable(req.end.getKey()).c_str());
 											for (int k = 0; k < current.data.size(); k++) {
-												printf("%d. %s => %s\n", k, printable(current.data[k].key).c_str(),
+												printf("%d. %s => %s\n",
+												       k,
+												       printable(current.data[k].key).c_str(),
 												       printable(current.data[k].value).c_str());
 												if (invalidIndex < 0 &&
 												    (k >= reference.data.size() ||
@@ -806,12 +821,15 @@ struct ConsistencyCheckWorkload : TestWorkload {
 											}
 
 											printf(
-											    "\nSERVER %d (%s); shard = %s - %s:\n", firstValidServer,
+											    "\nSERVER %d (%s); shard = %s - %s:\n",
+											    firstValidServer,
 											    storageServerInterfaces[firstValidServer].address().toString().c_str(),
 											    printable(req.begin.getKey()).c_str(),
 											    printable(req.end.getKey()).c_str());
 											for (int k = 0; k < reference.data.size(); k++) {
-												printf("%d. %s => %s\n", k, printable(reference.data[k].key).c_str(),
+												printf("%d. %s => %s\n",
+												       k,
+												       printable(reference.data[k].key).c_str(),
 												       printable(reference.data[k].value).c_str());
 												if (invalidIndex < 0 &&
 												    (k >= current.data.size() ||
@@ -949,7 +967,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 									// In data distribution, the splitting process ignores the first key in a shard.
 									// Thus, we shouldn't consider it when validating the upper bound of estimated shard
 									// sizes
-									if (k == 0) firstKeySampledBytes += sampleInfo.sampledSize;
+									if (k == 0)
+										firstKeySampledBytes += sampleInfo.sampledSize;
 
 									sampledKeys++;
 									if (itemProbability < 1) {
@@ -1000,7 +1019,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				// This is only done in a non-distributed consistency check; the distributed check uses shard size
 				// estimates
 				if (!self->distributed)
-					for (int j = 0; j < storageServers.size(); j++) storageServerSizes[storageServers[j]] += shardBytes;
+					for (int j = 0; j < storageServers.size(); j++)
+						storageServerSizes[storageServers[j]] += shardBytes;
 
 				bool hasValidEstimate = estimatedBytes.size() > 0;
 
@@ -1113,7 +1133,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 	// Returns true if any storage servers have the exact same network address or are not using the correct key value
 	// store type
-	ACTOR Future<bool> checkForUndesirableServers(Database cx, DatabaseConfiguration configuration,
+	ACTOR Future<bool> checkForUndesirableServers(Database cx,
+	                                              DatabaseConfiguration configuration,
 	                                              ConsistencyCheckWorkload* self) {
 		state int i;
 		state int j;
@@ -1154,7 +1175,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	// Returns false if any worker that should have a storage server does not have one
-	ACTOR Future<bool> checkForStorage(Database cx, DatabaseConfiguration configuration,
+	ACTOR Future<bool> checkForStorage(Database cx,
+	                                   DatabaseConfiguration configuration,
 	                                   ConsistencyCheckWorkload* self) {
 		state vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 		state vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
@@ -1259,7 +1281,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	ACTOR Future<bool> checkWorkerList(Database cx, ConsistencyCheckWorkload* self) {
-		if (g_simulator.extraDB) return true;
+		if (g_simulator.extraDB)
+			return true;
 
 		vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 		std::set<NetworkAddress> workerAddresses;
@@ -1289,7 +1312,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	static ProcessClass::Fitness getBestAvailableFitness(
-	    const std::vector<ProcessClass::ClassType>& availableClassTypes, ProcessClass::ClusterRole role) {
+	    const std::vector<ProcessClass::ClassType>& availableClassTypes,
+	    ProcessClass::ClusterRole role) {
 		ProcessClass::Fitness bestAvailableFitness = ProcessClass::NeverAssign;
 		for (auto classType : availableClassTypes) {
 			bestAvailableFitness = std::min(
@@ -1301,7 +1325,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 	template <class T>
 	static std::string getOptionalString(Optional<T> opt) {
-		if (opt.present()) return opt.get().toString();
+		if (opt.present())
+			return opt.get().toString();
 		return "NotSet";
 	}
 
@@ -1362,7 +1387,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		for (const auto& worker : allWorkers) {
 			allWorkerProcessMap[worker.interf.address()] = worker;
 			Optional<Key> dc = worker.interf.locality.dcId();
-			if (!dcToAllClassTypes.count(dc)) dcToAllClassTypes.insert({});
+			if (!dcToAllClassTypes.count(dc))
+				dcToAllClassTypes.insert({});
 			dcToAllClassTypes[dc].push_back(worker.processClass.classType());
 		}
 
@@ -1371,7 +1397,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		for (const auto& worker : nonExcludedWorkers) {
 			nonExcludedWorkerProcessMap[worker.interf.address()] = worker;
 			Optional<Key> dc = worker.interf.locality.dcId();
-			if (!dcToNonExcludedClassTypes.count(dc)) dcToNonExcludedClassTypes.insert({});
+			if (!dcToNonExcludedClassTypes.count(dc))
+				dcToNonExcludedClassTypes.insert({});
 			dcToNonExcludedClassTypes[dc].push_back(worker.processClass.classType());
 		}
 

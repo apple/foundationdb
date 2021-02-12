@@ -73,7 +73,8 @@ int flush;
 	z_streamp strm = &(state->strm);
 
 	/* allocate memory if this is the first time through */
-	if (state->size == 0 && gz_init(state) == -1) return -1;
+	if (state->size == 0 && gz_init(state) == -1)
+		return -1;
 
 	/* write directly if requested */
 	if (state->direct) {
@@ -115,7 +116,8 @@ int flush;
 	} while (have);
 
 	/* if that completed a deflate stream, allow another to start */
-	if (flush == Z_FINISH) deflateReset(strm);
+	if (flush == Z_FINISH)
+		deflateReset(strm);
 
 	/* all done, no errors */
 	return 0;
@@ -130,7 +132,8 @@ z_off64_t len;
 	z_streamp strm = &(state->strm);
 
 	/* consume whatever's left in the input buffer */
-	if (strm->avail_in && gz_comp(state, Z_NO_FLUSH) == -1) return -1;
+	if (strm->avail_in && gz_comp(state, Z_NO_FLUSH) == -1)
+		return -1;
 
 	/* compress len zeros (len guaranteed > 0) */
 	first = 1;
@@ -143,7 +146,8 @@ z_off64_t len;
 		strm->avail_in = n;
 		strm->next_in = state->in;
 		state->x.pos += n;
-		if (gz_comp(state, Z_NO_FLUSH) == -1) return -1;
+		if (gz_comp(state, Z_NO_FLUSH) == -1)
+			return -1;
 		len -= n;
 	}
 	return 0;
@@ -159,12 +163,14 @@ unsigned len;
 	z_streamp strm;
 
 	/* get internal structure */
-	if (file == NULL) return 0;
+	if (file == NULL)
+		return 0;
 	state = (gz_statep)file;
 	strm = &(state->strm);
 
 	/* check that we're writing and that there's no error */
-	if (state->mode != GZ_WRITE || state->err != Z_OK) return 0;
+	if (state->mode != GZ_WRITE || state->err != Z_OK)
+		return 0;
 
 	/* since an int is returned, make sure len fits in one, otherwise return
 	   with an error (this avoids the flaw in the interface) */
@@ -174,15 +180,18 @@ unsigned len;
 	}
 
 	/* if len is zero, avoid unnecessary operations */
-	if (len == 0) return 0;
+	if (len == 0)
+		return 0;
 
 	/* allocate memory if this is the first time through */
-	if (state->size == 0 && gz_init(state) == -1) return 0;
+	if (state->size == 0 && gz_init(state) == -1)
+		return 0;
 
 	/* check for seek request */
 	if (state->seek) {
 		state->seek = 0;
-		if (gz_zero(state, state->skip) == -1) return 0;
+		if (gz_zero(state, state->skip) == -1)
+			return 0;
 	}
 
 	/* for small len, copy to input buffer, otherwise compress directly */
@@ -191,26 +200,31 @@ unsigned len;
 		do {
 			unsigned have, copy;
 
-			if (strm->avail_in == 0) strm->next_in = state->in;
+			if (strm->avail_in == 0)
+				strm->next_in = state->in;
 			have = (unsigned)((strm->next_in + strm->avail_in) - state->in);
 			copy = state->size - have;
-			if (copy > len) copy = len;
+			if (copy > len)
+				copy = len;
 			memcpy(state->in + have, buf, copy);
 			strm->avail_in += copy;
 			state->x.pos += copy;
 			buf = (const char*)buf + copy;
 			len -= copy;
-			if (len && gz_comp(state, Z_NO_FLUSH) == -1) return 0;
+			if (len && gz_comp(state, Z_NO_FLUSH) == -1)
+				return 0;
 		} while (len);
 	} else {
 		/* consume whatever's left in the input buffer */
-		if (strm->avail_in && gz_comp(state, Z_NO_FLUSH) == -1) return 0;
+		if (strm->avail_in && gz_comp(state, Z_NO_FLUSH) == -1)
+			return 0;
 
 		/* directly compress user buffer to file */
 		strm->avail_in = len;
 		strm->next_in = (z_const Bytef*)buf;
 		state->x.pos += len;
-		if (gz_comp(state, Z_NO_FLUSH) == -1) return 0;
+		if (gz_comp(state, Z_NO_FLUSH) == -1)
+			return 0;
 	}
 
 	/* input was all buffered or compressed (put will fit in int) */
@@ -227,23 +241,27 @@ int c;
 	z_streamp strm;
 
 	/* get internal structure */
-	if (file == NULL) return -1;
+	if (file == NULL)
+		return -1;
 	state = (gz_statep)file;
 	strm = &(state->strm);
 
 	/* check that we're writing and that there's no error */
-	if (state->mode != GZ_WRITE || state->err != Z_OK) return -1;
+	if (state->mode != GZ_WRITE || state->err != Z_OK)
+		return -1;
 
 	/* check for seek request */
 	if (state->seek) {
 		state->seek = 0;
-		if (gz_zero(state, state->skip) == -1) return -1;
+		if (gz_zero(state, state->skip) == -1)
+			return -1;
 	}
 
 	/* try writing to input buffer for speed (state->size == 0 if buffer not
 	   initialized) */
 	if (state->size) {
-		if (strm->avail_in == 0) strm->next_in = state->in;
+		if (strm->avail_in == 0)
+			strm->next_in = state->in;
 		have = (unsigned)((strm->next_in + strm->avail_in) - state->in);
 		if (have < state->size) {
 			state->in[have] = c;
@@ -255,7 +273,8 @@ int c;
 
 	/* no room in buffer or not initialized, use gz_write() */
 	buf[0] = c;
-	if (gzwrite(file, buf, 1) != 1) return -1;
+	if (gzwrite(file, buf, 1) != 1)
+		return -1;
 	return c & 0xff;
 }
 
@@ -282,24 +301,29 @@ int ZEXPORTVA gzvprintf(gzFile file, const char* format, va_list va) {
 	z_streamp strm;
 
 	/* get internal structure */
-	if (file == NULL) return -1;
+	if (file == NULL)
+		return -1;
 	state = (gz_statep)file;
 	strm = &(state->strm);
 
 	/* check that we're writing and that there's no error */
-	if (state->mode != GZ_WRITE || state->err != Z_OK) return 0;
+	if (state->mode != GZ_WRITE || state->err != Z_OK)
+		return 0;
 
 	/* make sure we have some buffer space */
-	if (state->size == 0 && gz_init(state) == -1) return 0;
+	if (state->size == 0 && gz_init(state) == -1)
+		return 0;
 
 	/* check for seek request */
 	if (state->seek) {
 		state->seek = 0;
-		if (gz_zero(state, state->skip) == -1) return 0;
+		if (gz_zero(state, state->skip) == -1)
+			return 0;
 	}
 
 	/* consume whatever's left in the input buffer */
-	if (strm->avail_in && gz_comp(state, Z_NO_FLUSH) == -1) return 0;
+	if (strm->avail_in && gz_comp(state, Z_NO_FLUSH) == -1)
+		return 0;
 
 	/* do the printf() into the input buffer, put length in len */
 	size = (int)(state->size);
@@ -308,7 +332,8 @@ int ZEXPORTVA gzvprintf(gzFile file, const char* format, va_list va) {
 #ifdef HAS_vsprintf_void
 	(void)vsprintf((char*)(state->in), format, va);
 	for (len = 0; len < size; len++)
-		if (state->in[len] == 0) break;
+		if (state->in[len] == 0)
+			break;
 #else
 	len = vsprintf((char*)(state->in), format, va);
 #endif
@@ -322,7 +347,8 @@ int ZEXPORTVA gzvprintf(gzFile file, const char* format, va_list va) {
 #endif
 
 	/* check that printf() results fit in buffer */
-	if (len <= 0 || len >= (int)size || state->in[size - 1] != 0) return 0;
+	if (len <= 0 || len >= (int)size || state->in[size - 1] != 0)
+		return 0;
 
 	/* update buffer and position, defer compression until needed */
 	strm->avail_in = (unsigned)len;
@@ -344,8 +370,9 @@ int ZEXPORTVA gzprintf(gzFile file, const char* format, ...) {
 #else /* !STDC && !Z_HAVE_STDARG_H */
 
 /* -- see zlib.h -- */
-int ZEXPORTVA gzprintf(file, format, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18,
-                       a19, a20) gzFile file;
+int ZEXPORTVA
+    gzprintf(file, format, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20)
+        gzFile file;
 const char* format;
 int a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20;
 {
@@ -354,54 +381,144 @@ int a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, 
 	z_streamp strm;
 
 	/* get internal structure */
-	if (file == NULL) return -1;
+	if (file == NULL)
+		return -1;
 	state = (gz_statep)file;
 	strm = &(state->strm);
 
 	/* check that can really pass pointer in ints */
-	if (sizeof(int) != sizeof(void*)) return 0;
+	if (sizeof(int) != sizeof(void*))
+		return 0;
 
 	/* check that we're writing and that there's no error */
-	if (state->mode != GZ_WRITE || state->err != Z_OK) return 0;
+	if (state->mode != GZ_WRITE || state->err != Z_OK)
+		return 0;
 
 	/* make sure we have some buffer space */
-	if (state->size == 0 && gz_init(state) == -1) return 0;
+	if (state->size == 0 && gz_init(state) == -1)
+		return 0;
 
 	/* check for seek request */
 	if (state->seek) {
 		state->seek = 0;
-		if (gz_zero(state, state->skip) == -1) return 0;
+		if (gz_zero(state, state->skip) == -1)
+			return 0;
 	}
 
 	/* consume whatever's left in the input buffer */
-	if (strm->avail_in && gz_comp(state, Z_NO_FLUSH) == -1) return 0;
+	if (strm->avail_in && gz_comp(state, Z_NO_FLUSH) == -1)
+		return 0;
 
 	/* do the printf() into the input buffer, put length in len */
 	size = (int)(state->size);
 	state->in[size - 1] = 0;
 #ifdef NO_snprintf
 #ifdef HAS_sprintf_void
-	sprintf((char*)(state->in), format, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18,
-	        a19, a20);
+	sprintf((char*)(state->in),
+	        format,
+	        a1,
+	        a2,
+	        a3,
+	        a4,
+	        a5,
+	        a6,
+	        a7,
+	        a8,
+	        a9,
+	        a10,
+	        a11,
+	        a12,
+	        a13,
+	        a14,
+	        a15,
+	        a16,
+	        a17,
+	        a18,
+	        a19,
+	        a20);
 	for (len = 0; len < size; len++)
-		if (state->in[len] == 0) break;
+		if (state->in[len] == 0)
+			break;
 #else
-	len = sprintf((char*)(state->in), format, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16,
-	              a17, a18, a19, a20);
+	len = sprintf((char*)(state->in),
+	              format,
+	              a1,
+	              a2,
+	              a3,
+	              a4,
+	              a5,
+	              a6,
+	              a7,
+	              a8,
+	              a9,
+	              a10,
+	              a11,
+	              a12,
+	              a13,
+	              a14,
+	              a15,
+	              a16,
+	              a17,
+	              a18,
+	              a19,
+	              a20);
 #endif
 #else
 #ifdef HAS_snprintf_void
-	snprintf((char*)(state->in), size, format, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16,
-	         a17, a18, a19, a20);
+	snprintf((char*)(state->in),
+	         size,
+	         format,
+	         a1,
+	         a2,
+	         a3,
+	         a4,
+	         a5,
+	         a6,
+	         a7,
+	         a8,
+	         a9,
+	         a10,
+	         a11,
+	         a12,
+	         a13,
+	         a14,
+	         a15,
+	         a16,
+	         a17,
+	         a18,
+	         a19,
+	         a20);
 	len = strlen((char*)(state->in));
 #else
-	len = snprintf((char*)(state->in), size, format, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15,
-	               a16, a17, a18, a19, a20);
+	len = snprintf((char*)(state->in),
+	               size,
+	               format,
+	               a1,
+	               a2,
+	               a3,
+	               a4,
+	               a5,
+	               a6,
+	               a7,
+	               a8,
+	               a9,
+	               a10,
+	               a11,
+	               a12,
+	               a13,
+	               a14,
+	               a15,
+	               a16,
+	               a17,
+	               a18,
+	               a19,
+	               a20);
 #endif
 #endif
 
 	/* check that printf() results fit in buffer */
-	if (len <= 0 || len >= (int)size || state->in[size - 1] != 0) return 0;
+	if (len <= 0 || len >= (int)size || state->in[size - 1] != 0)
+		return 0;
 
 	/* update buffer and position, defer compression until needed */
 	strm->avail_in = (unsigned)len;
@@ -419,19 +536,23 @@ int flush;
 	gz_statep state;
 
 	/* get internal structure */
-	if (file == NULL) return -1;
+	if (file == NULL)
+		return -1;
 	state = (gz_statep)file;
 
 	/* check that we're writing and that there's no error */
-	if (state->mode != GZ_WRITE || state->err != Z_OK) return Z_STREAM_ERROR;
+	if (state->mode != GZ_WRITE || state->err != Z_OK)
+		return Z_STREAM_ERROR;
 
 	/* check flush parameter */
-	if (flush < 0 || flush > Z_FINISH) return Z_STREAM_ERROR;
+	if (flush < 0 || flush > Z_FINISH)
+		return Z_STREAM_ERROR;
 
 	/* check for seek request */
 	if (state->seek) {
 		state->seek = 0;
-		if (gz_zero(state, state->skip) == -1) return -1;
+		if (gz_zero(state, state->skip) == -1)
+			return -1;
 	}
 
 	/* compress remaining data with requested flush */
@@ -448,26 +569,31 @@ int strategy;
 	z_streamp strm;
 
 	/* get internal structure */
-	if (file == NULL) return Z_STREAM_ERROR;
+	if (file == NULL)
+		return Z_STREAM_ERROR;
 	state = (gz_statep)file;
 	strm = &(state->strm);
 
 	/* check that we're writing and that there's no error */
-	if (state->mode != GZ_WRITE || state->err != Z_OK) return Z_STREAM_ERROR;
+	if (state->mode != GZ_WRITE || state->err != Z_OK)
+		return Z_STREAM_ERROR;
 
 	/* if no change is requested, then do nothing */
-	if (level == state->level && strategy == state->strategy) return Z_OK;
+	if (level == state->level && strategy == state->strategy)
+		return Z_OK;
 
 	/* check for seek request */
 	if (state->seek) {
 		state->seek = 0;
-		if (gz_zero(state, state->skip) == -1) return -1;
+		if (gz_zero(state, state->skip) == -1)
+			return -1;
 	}
 
 	/* change compression parameters for subsequent input */
 	if (state->size) {
 		/* flush previous input with previous parameters before changing */
-		if (strm->avail_in && gz_comp(state, Z_PARTIAL_FLUSH) == -1) return state->err;
+		if (strm->avail_in && gz_comp(state, Z_PARTIAL_FLUSH) == -1)
+			return state->err;
 		deflateParams(strm, level, strategy);
 	}
 	state->level = level;
@@ -482,20 +608,24 @@ int ZEXPORT gzclose_w(file) gzFile file;
 	gz_statep state;
 
 	/* get internal structure */
-	if (file == NULL) return Z_STREAM_ERROR;
+	if (file == NULL)
+		return Z_STREAM_ERROR;
 	state = (gz_statep)file;
 
 	/* check that we're writing */
-	if (state->mode != GZ_WRITE) return Z_STREAM_ERROR;
+	if (state->mode != GZ_WRITE)
+		return Z_STREAM_ERROR;
 
 	/* check for seek request */
 	if (state->seek) {
 		state->seek = 0;
-		if (gz_zero(state, state->skip) == -1) ret = state->err;
+		if (gz_zero(state, state->skip) == -1)
+			ret = state->err;
 	}
 
 	/* flush, free memory, and close file */
-	if (gz_comp(state, Z_FINISH) == -1) ret = state->err;
+	if (gz_comp(state, Z_FINISH) == -1)
+		ret = state->err;
 	if (state->size) {
 		if (!state->direct) {
 			(void)deflateEnd(&(state->strm));
@@ -505,7 +635,8 @@ int ZEXPORT gzclose_w(file) gzFile file;
 	}
 	gz_error(state, Z_OK, NULL);
 	free(state->path);
-	if (close(state->fd) == -1) ret = Z_ERRNO;
+	if (close(state->fd) == -1)
+		ret = Z_ERRNO;
 	free(state);
 	return ret;
 }

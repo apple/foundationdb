@@ -50,7 +50,8 @@ public:
 		return true;
 	}
 	void delref() const {
-		if (delref_no_destroy()) delete (Subclass*)this;
+		if (delref_no_destroy())
+			delete (Subclass*)this;
 	}
 	void setrefCountUnsafe(int32_t count) const { referenceCount = count; }
 	int32_t debugGetReferenceCount() const { return referenceCount; } // Never use in production code, only for tracing
@@ -69,7 +70,8 @@ public:
 	// NO virtual destructor!  Subclass should have a virtual destructor if it is not sealed.
 	void addref() const { ++referenceCount; }
 	void delref() const {
-		if (delref_no_destroy()) delete (Subclass*)this;
+		if (delref_no_destroy())
+			delete (Subclass*)this;
 	}
 	bool delref_no_destroy() const { return !--referenceCount; }
 	int32_t debugGetReferenceCount() const { return referenceCount; } // Never use in production code, only for tracing
@@ -108,13 +110,15 @@ public:
 	}
 
 	Reference(const Reference& r) : ptr(r.getPtr()) {
-		if (ptr) addref(ptr);
+		if (ptr)
+			addref(ptr);
 	}
 	Reference(Reference&& r) BOOST_NOEXCEPT : ptr(r.getPtr()) { r.ptr = NULL; }
 
 	template <class Q>
 	Reference(const Reference<Q>& r) : ptr(r.getPtr()) {
-		if (ptr) addref(ptr);
+		if (ptr)
+			addref(ptr);
 	}
 	template <class Q>
 	Reference(Reference<Q>&& r) : ptr(r.getPtr()) {
@@ -122,15 +126,18 @@ public:
 	}
 
 	~Reference() {
-		if (ptr) delref(ptr);
+		if (ptr)
+			delref(ptr);
 	}
 	Reference& operator=(const Reference& r) {
 		P* oldPtr = ptr;
 		P* newPtr = r.ptr;
 		if (oldPtr != newPtr) {
-			if (newPtr) addref(newPtr);
+			if (newPtr)
+				addref(newPtr);
 			ptr = newPtr;
-			if (oldPtr) delref(oldPtr);
+			if (oldPtr)
+				delref(oldPtr);
 		}
 		return *this;
 	}
@@ -140,7 +147,8 @@ public:
 		if (oldPtr != newPtr) {
 			r.ptr = NULL;
 			ptr = newPtr;
-			if (oldPtr) delref(oldPtr);
+			if (oldPtr)
+				delref(oldPtr);
 		}
 		return *this;
 	}

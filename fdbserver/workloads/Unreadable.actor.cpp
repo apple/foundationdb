@@ -41,7 +41,8 @@ struct UnreadableWorkload : TestWorkload {
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
 
 	virtual Future<Void> start(Database const& cx) {
-		if (clientId == 0) return _start(cx, this);
+		if (clientId == 0)
+			return _start(cx, this);
 		return Void();
 	}
 
@@ -49,7 +50,8 @@ struct UnreadableWorkload : TestWorkload {
 
 	virtual void getMetrics(vector<PerfMetric>& m) {}
 
-	static Optional<KeyRef> containsUnreadable(KeyRangeMap<bool>& unreadableMap, KeyRangeRef const& range,
+	static Optional<KeyRef> containsUnreadable(KeyRangeMap<bool>& unreadableMap,
+	                                           KeyRangeRef const& range,
 	                                           bool forward) {
 		auto unreadableRanges = unreadableMap.intersectingRanges(range);
 
@@ -76,10 +78,12 @@ struct UnreadableWorkload : TestWorkload {
 		return Optional<KeyRef>();
 	}
 
-	static void resolveKeySelector(std::map<KeyRef, ValueRef> const& setMap, KeyRangeMap<bool>& unreadableMap,
+	static void resolveKeySelector(std::map<KeyRef, ValueRef> const& setMap,
+	                               KeyRangeMap<bool>& unreadableMap,
 	                               KeySelector& key) {
 		ASSERT(!key.orEqual);
-		if (key.offset == 1) return;
+		if (key.offset == 1)
+			return;
 
 		auto it = setMap.lower_bound(key.getKey());
 
@@ -109,7 +113,8 @@ struct UnreadableWorkload : TestWorkload {
 
 			auto unreadable = containsUnreadable(unreadableMap, KeyRangeRef(key.getKey(), it->first), true);
 			if (unreadable.present()) {
-				if (unreadable.get() > key.getKey()) --key.offset;
+				if (unreadable.get() > key.getKey())
+					--key.offset;
 				key.setKey(unreadable.get());
 				return;
 			}
@@ -121,9 +126,14 @@ struct UnreadableWorkload : TestWorkload {
 		key.setKey(it->first);
 	}
 
-	static void checkUnreadablity(Arena arena, std::map<KeyRef, ValueRef> const& setMap,
-	                              KeyRangeMap<bool>& unreadableMap, KeySelectorRef const& _begin,
-	                              KeySelectorRef const& _end, bool isUnreadable, int limit, bool reverse) {
+	static void checkUnreadablity(Arena arena,
+	                              std::map<KeyRef, ValueRef> const& setMap,
+	                              KeyRangeMap<bool>& unreadableMap,
+	                              KeySelectorRef const& _begin,
+	                              KeySelectorRef const& _end,
+	                              bool isUnreadable,
+	                              int limit,
+	                              bool reverse) {
 
 		/*
 		for (auto it : setMap) {
@@ -348,12 +358,14 @@ struct UnreadableWorkload : TestWorkload {
 					snapshot = deterministicRandom()->random01() < 0.05;
 					reverse = deterministicRandom()->random01() < 0.5;
 
-					if (snapshot) tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
+					if (snapshot)
+						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
 
 					ErrorOr<Standalone<RangeResultRef>> value =
 					    wait(errorOr(tr.getRange(range, CLIENT_KNOBS->TOO_MANY, snapshot, reverse)));
 
-					if (snapshot) tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_ENABLE);
+					if (snapshot)
+						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_ENABLE);
 					if (!value.isError() || value.getError().code() == error_code_accessed_unreadable) {
 						//TraceEvent("RYWT_GetRange").detail("Range", printable(range)).detail("IsUnreadable", value.isError());
 						if (snapshot) {
@@ -378,13 +390,15 @@ struct UnreadableWorkload : TestWorkload {
 					snapshot = deterministicRandom()->random01() < 0.05;
 					reverse = deterministicRandom()->random01() < 0.5;
 
-					if (snapshot) tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
+					if (snapshot)
+						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
 
 					//TraceEvent("RYWT_GetRangeBefore").detail("Reverse", reverse).detail("Begin", begin.toString()).detail("End", end.toString()).detail("Limit", limit);
 					ErrorOr<Standalone<RangeResultRef>> value =
 					    wait(errorOr(tr.getRange(begin, end, limit, snapshot, reverse)));
 
-					if (snapshot) tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_ENABLE);
+					if (snapshot)
+						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_ENABLE);
 					bool isUnreadable = value.isError() && value.getError().code() == error_code_accessed_unreadable;
 					if (!value.isError() || value.getError().code() == error_code_accessed_unreadable) {
 						/*
@@ -418,11 +432,13 @@ struct UnreadableWorkload : TestWorkload {
 					key = RandomTestImpl::getRandomKey(arena);
 					snapshot = deterministicRandom()->random01() < 0.05;
 
-					if (snapshot) tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
+					if (snapshot)
+						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
 
 					ErrorOr<Optional<Value>> value = wait(errorOr(tr.get(key, snapshot)));
 
-					if (snapshot) tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_ENABLE);
+					if (snapshot)
+						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_ENABLE);
 
 					if (!value.isError() || value.getError().code() == error_code_accessed_unreadable) {
 						//TraceEvent("RYWT_Get").detail("Key", printable(key)).detail("IsUnreadable", value.isError());

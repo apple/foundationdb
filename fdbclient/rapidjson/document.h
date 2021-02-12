@@ -417,7 +417,8 @@ struct IsGenericValueImpl : FalseType {};
 
 // select candidates according to nested encoding and allocator types
 template <typename T>
-struct IsGenericValueImpl<T, typename Void<typename T::EncodingType>::Type,
+struct IsGenericValueImpl<T,
+                          typename Void<typename T::EncodingType>::Type,
                           typename Void<typename T::AllocatorType>::Type>
   : IsBaseOf<GenericValue<typename T::EncodingType, typename T::AllocatorType>, T>::Type {};
 
@@ -630,7 +631,8 @@ public:
 		data_.f.flags = defaultFlags[type];
 
 		// Use ShortString to store empty string.
-		if (type == kStringType) data_.ss.SetLength(0);
+		if (type == kStringType)
+			data_.ss.SetLength(0);
 	}
 
 	//! Explicit copy constructor (with allocator)
@@ -679,8 +681,10 @@ public:
 		data_.f.flags = kNumberInt64Flag;
 		if (i64 >= 0) {
 			data_.f.flags |= kNumberUint64Flag;
-			if (!(static_cast<uint64_t>(i64) & RAPIDJSON_UINT64_C2(0xFFFFFFFF, 0x00000000))) data_.f.flags |= kUintFlag;
-			if (!(static_cast<uint64_t>(i64) & RAPIDJSON_UINT64_C2(0xFFFFFFFF, 0x80000000))) data_.f.flags |= kIntFlag;
+			if (!(static_cast<uint64_t>(i64) & RAPIDJSON_UINT64_C2(0xFFFFFFFF, 0x00000000)))
+				data_.f.flags |= kUintFlag;
+			if (!(static_cast<uint64_t>(i64) & RAPIDJSON_UINT64_C2(0xFFFFFFFF, 0x80000000)))
+				data_.f.flags |= kIntFlag;
 		} else if (i64 >= static_cast<int64_t>(RAPIDJSON_UINT64_C2(0xFFFFFFFF, 0x80000000)))
 			data_.f.flags |= kIntFlag;
 	}
@@ -689,9 +693,12 @@ public:
 	explicit GenericValue(uint64_t u64) RAPIDJSON_NOEXCEPT : data_() {
 		data_.n.u64 = u64;
 		data_.f.flags = kNumberUint64Flag;
-		if (!(u64 & RAPIDJSON_UINT64_C2(0x80000000, 0x00000000))) data_.f.flags |= kInt64Flag;
-		if (!(u64 & RAPIDJSON_UINT64_C2(0xFFFFFFFF, 0x00000000))) data_.f.flags |= kUintFlag;
-		if (!(u64 & RAPIDJSON_UINT64_C2(0xFFFFFFFF, 0x80000000))) data_.f.flags |= kIntFlag;
+		if (!(u64 & RAPIDJSON_UINT64_C2(0x80000000, 0x00000000)))
+			data_.f.flags |= kInt64Flag;
+		if (!(u64 & RAPIDJSON_UINT64_C2(0xFFFFFFFF, 0x00000000)))
+			data_.f.flags |= kUintFlag;
+		if (!(u64 & RAPIDJSON_UINT64_C2(0xFFFFFFFF, 0x80000000)))
+			data_.f.flags |= kIntFlag;
 	}
 
 	//! Constructor for double value.
@@ -753,12 +760,14 @@ public:
 			switch (data_.f.flags) {
 			case kArrayFlag: {
 				GenericValue* e = GetElementsPointer();
-				for (GenericValue* v = e; v != e + data_.a.size; ++v) v->~GenericValue();
+				for (GenericValue* v = e; v != e + data_.a.size; ++v)
+					v->~GenericValue();
 				Allocator::Free(e);
 			} break;
 
 			case kObjectFlag:
-				for (MemberIterator m = MemberBegin(); m != MemberEnd(); ++m) m->~Member();
+				for (MemberIterator m = MemberBegin(); m != MemberEnd(); ++m)
+					m->~Member();
 				Allocator::Free(GetMembersPointer());
 				break;
 
@@ -877,21 +886,26 @@ public:
 	template <typename SourceAllocator>
 	bool operator==(const GenericValue<Encoding, SourceAllocator>& rhs) const {
 		typedef GenericValue<Encoding, SourceAllocator> RhsType;
-		if (GetType() != rhs.GetType()) return false;
+		if (GetType() != rhs.GetType())
+			return false;
 
 		switch (GetType()) {
 		case kObjectType: // Warning: O(n^2) inner-loop
-			if (data_.o.size != rhs.data_.o.size) return false;
+			if (data_.o.size != rhs.data_.o.size)
+				return false;
 			for (ConstMemberIterator lhsMemberItr = MemberBegin(); lhsMemberItr != MemberEnd(); ++lhsMemberItr) {
 				typename RhsType::ConstMemberIterator rhsMemberItr = rhs.FindMember(lhsMemberItr->name);
-				if (rhsMemberItr == rhs.MemberEnd() || lhsMemberItr->value != rhsMemberItr->value) return false;
+				if (rhsMemberItr == rhs.MemberEnd() || lhsMemberItr->value != rhsMemberItr->value)
+					return false;
 			}
 			return true;
 
 		case kArrayType:
-			if (data_.a.size != rhs.data_.a.size) return false;
+			if (data_.a.size != rhs.data_.a.size)
+				return false;
 			for (SizeType i = 0; i < data_.a.size; i++)
-				if ((*this)[i] != rhs[i]) return false;
+				if ((*this)[i] != rhs[i])
+					return false;
 			return true;
 
 		case kStringType:
@@ -988,7 +1002,8 @@ public:
 
 	// Checks whether a number can be losslessly converted to a double.
 	bool IsLosslessDouble() const {
-		if (!IsNumber()) return false;
+		if (!IsNumber())
+			return false;
 		if (IsUint64()) {
 			uint64_t u = GetUint64();
 			volatile double d = static_cast<double>(u);
@@ -1006,13 +1021,15 @@ public:
 
 	// Checks whether a number is a float (possible lossy).
 	bool IsFloat() const {
-		if ((data_.f.flags & kDoubleFlag) == 0) return false;
+		if ((data_.f.flags & kDoubleFlag) == 0)
+			return false;
 		double d = GetDouble();
 		return d >= -3.4028234e38 && d <= 3.4028234e38;
 	}
 	// Checks whether a number can be losslessly converted to a float.
 	bool IsLosslessFloat() const {
-		if (!IsNumber()) return false;
+		if (!IsNumber())
+			return false;
 		double a = GetDouble();
 		if (a < static_cast<double>(-std::numeric_limits<float>::max()) ||
 		    a > static_cast<double>(std::numeric_limits<float>::max()))
@@ -1235,7 +1252,8 @@ public:
 		RAPIDJSON_ASSERT(name.IsString());
 		MemberIterator member = MemberBegin();
 		for (; member != MemberEnd(); ++member)
-			if (name.StringEqual(member->name)) break;
+			if (name.StringEqual(member->name))
+				break;
 		return member;
 	}
 	template <typename SourceAllocator>
@@ -1412,7 +1430,8 @@ public:
 	*/
 	void RemoveAllMembers() {
 		RAPIDJSON_ASSERT(IsObject());
-		for (MemberIterator m = MemberBegin(); m != MemberEnd(); ++m) m->~Member();
+		for (MemberIterator m = MemberBegin(); m != MemberEnd(); ++m)
+			m->~Member();
 		data_.o.size = 0;
 	}
 
@@ -1495,7 +1514,8 @@ public:
 		RAPIDJSON_ASSERT(last <= MemberEnd());
 
 		MemberIterator pos = MemberBegin() + (first - MemberBegin());
-		for (MemberIterator itr = pos; itr != last; ++itr) itr->~Member();
+		for (MemberIterator itr = pos; itr != last; ++itr)
+			itr->~Member();
 		std::memmove(&*pos, &*last, static_cast<size_t>(MemberEnd() - last) * sizeof(Member));
 		data_.o.size -= static_cast<SizeType>(last - first);
 		return pos;
@@ -1572,7 +1592,8 @@ public:
 	void Clear() {
 		RAPIDJSON_ASSERT(IsArray());
 		GenericValue* e = GetElementsPointer();
-		for (GenericValue* v = e; v != e + data_.a.size; ++v) v->~GenericValue();
+		for (GenericValue* v = e; v != e + data_.a.size; ++v)
+			v->~GenericValue();
 		data_.a.size = 0;
 	}
 
@@ -1713,7 +1734,8 @@ public:
 		RAPIDJSON_ASSERT(first <= last);
 		RAPIDJSON_ASSERT(last <= End());
 		ValueIterator pos = Begin() + (first - Begin());
-		for (ValueIterator itr = pos; itr != last; ++itr) itr->~GenericValue();
+		for (ValueIterator itr = pos; itr != last; ++itr)
+			itr->~GenericValue();
 		std::memmove(pos, last, static_cast<size_t>(End() - last) * sizeof(GenericValue));
 		data_.a.size -= static_cast<SizeType>(last - first);
 		return pos;
@@ -1756,9 +1778,12 @@ public:
 	 */
 	double GetDouble() const {
 		RAPIDJSON_ASSERT(IsNumber());
-		if ((data_.f.flags & kDoubleFlag) != 0) return data_.n.d; // exact type, no conversion.
-		if ((data_.f.flags & kIntFlag) != 0) return data_.n.i.i; // int -> double
-		if ((data_.f.flags & kUintFlag) != 0) return data_.n.u.u; // unsigned -> double
+		if ((data_.f.flags & kDoubleFlag) != 0)
+			return data_.n.d; // exact type, no conversion.
+		if ((data_.f.flags & kIntFlag) != 0)
+			return data_.n.i.i; // int -> double
+		if ((data_.f.flags & kUintFlag) != 0)
+			return data_.n.u.u; // unsigned -> double
 		if ((data_.f.flags & kInt64Flag) != 0)
 			return static_cast<double>(data_.n.i64); // int64_t -> double (may lose precision)
 		RAPIDJSON_ASSERT((data_.f.flags & kUint64Flag) != 0);
@@ -1932,20 +1957,24 @@ public:
 			return handler.Bool(true);
 
 		case kObjectType:
-			if (RAPIDJSON_UNLIKELY(!handler.StartObject())) return false;
+			if (RAPIDJSON_UNLIKELY(!handler.StartObject()))
+				return false;
 			for (ConstMemberIterator m = MemberBegin(); m != MemberEnd(); ++m) {
 				RAPIDJSON_ASSERT(m->name.IsString()); // User may change the type of name by MemberIterator.
-				if (RAPIDJSON_UNLIKELY(!handler.Key(m->name.GetString(), m->name.GetStringLength(),
-				                                    (m->name.data_.f.flags & kCopyFlag) != 0)))
+				if (RAPIDJSON_UNLIKELY(!handler.Key(
+				        m->name.GetString(), m->name.GetStringLength(), (m->name.data_.f.flags & kCopyFlag) != 0)))
 					return false;
-				if (RAPIDJSON_UNLIKELY(!m->value.Accept(handler))) return false;
+				if (RAPIDJSON_UNLIKELY(!m->value.Accept(handler)))
+					return false;
 			}
 			return handler.EndObject(data_.o.size);
 
 		case kArrayType:
-			if (RAPIDJSON_UNLIKELY(!handler.StartArray())) return false;
+			if (RAPIDJSON_UNLIKELY(!handler.StartArray()))
+				return false;
 			for (const GenericValue* v = Begin(); v != End(); ++v)
-				if (RAPIDJSON_UNLIKELY(!v->Accept(handler))) return false;
+				if (RAPIDJSON_UNLIKELY(!v->Accept(handler)))
+					return false;
 			return handler.EndArray(data_.a.size);
 
 		case kStringType:
@@ -2012,7 +2041,7 @@ private:
 #elif RAPIDJSON_64BIT
 		char payload[sizeof(SizeType) * 2 + sizeof(void*) + 6]; // 6 padding bytes
 #else
-		    char payload[sizeof(SizeType) * 2 + sizeof(void*) + 2]; // 2 padding bytes
+		  char payload[sizeof(SizeType) * 2 + sizeof(void*) + 2]; // 2 padding bytes
 #endif
 		uint16_t flags;
 	};
@@ -2214,11 +2243,14 @@ public:
 	    \param stackCapacity    Optional initial capacity of stack in bytes.
 	    \param stackAllocator   Optional allocator for allocating memory for stack.
 	*/
-	explicit GenericDocument(Type type, Allocator* allocator = 0, size_t stackCapacity = kDefaultStackCapacity,
+	explicit GenericDocument(Type type,
+	                         Allocator* allocator = 0,
+	                         size_t stackCapacity = kDefaultStackCapacity,
 	                         StackAllocator* stackAllocator = 0)
 	  : GenericValue<Encoding, Allocator>(type), allocator_(allocator), ownAllocator_(0),
 	    stack_(stackAllocator, stackCapacity), parseResult_() {
-		if (!allocator_) ownAllocator_ = allocator_ = RAPIDJSON_NEW(Allocator());
+		if (!allocator_)
+			ownAllocator_ = allocator_ = RAPIDJSON_NEW(Allocator());
 	}
 
 	//! Constructor
@@ -2227,10 +2259,12 @@ public:
 	    \param stackCapacity    Optional initial capacity of stack in bytes.
 	    \param stackAllocator   Optional allocator for allocating memory for stack.
 	*/
-	GenericDocument(Allocator* allocator = 0, size_t stackCapacity = kDefaultStackCapacity,
+	GenericDocument(Allocator* allocator = 0,
+	                size_t stackCapacity = kDefaultStackCapacity,
 	                StackAllocator* stackAllocator = 0)
 	  : allocator_(allocator), ownAllocator_(0), stack_(stackAllocator, stackCapacity), parseResult_() {
-		if (!allocator_) ownAllocator_ = allocator_ = RAPIDJSON_NEW(Allocator());
+		if (!allocator_)
+			ownAllocator_ = allocator_ = RAPIDJSON_NEW(Allocator());
 	}
 
 #if RAPIDJSON_HAS_CXX11_RVALUE_REFS

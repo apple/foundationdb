@@ -122,14 +122,16 @@ thread_local bool inRecordAllocation = false;
 
 void recordAllocation(void* ptr, size_t size) {
 #ifdef ALLOC_INSTRUMENTATION_STDOUT
-	if (inRecordAllocation) return;
+	if (inRecordAllocation)
+		return;
 	inRecordAllocation = true;
 	std::string trace = platform::get_backtrace();
 	printf("Alloc\t%p\t%d\t%s\n", ptr, size, trace.c_str());
 	inRecordAllocation = false;
 #endif
 #ifdef ALLOC_INSTRUMENTATION
-	if (memSample_entered) return;
+	if (memSample_entered)
+		return;
 	memSample_entered = true;
 
 	if (((double)rand()) / RAND_MAX < ((double)size) / SAMPLE_BYTES) {
@@ -175,7 +177,8 @@ void recordAllocation(void* ptr, size_t size) {
 
 void recordDeallocation(void* ptr) {
 #ifdef ALLOC_INSTRUMENTATION_STDOUT
-	if (inRecordAllocation) return;
+	if (inRecordAllocation)
+		return;
 	printf("Dealloc\t%p\n", ptr);
 	inRecordAllocation = false;
 #endif
@@ -295,7 +298,8 @@ void* FastAllocator<Size>::allocate() {
 	// check( p, true );
 #else
 	void* p = freelist;
-	if (!p) getMagazine();
+	if (!p)
+		getMagazine();
 #if VALGRIND
 	VALGRIND_MAKE_MEM_DEFINED(p, sizeof(void*));
 #endif
@@ -376,7 +380,8 @@ void FastAllocator<Size>::check(void* ptr, bool alloc) {
 	int i = (int)((int64_t)ptr - ((getSizeCode(Size) << 11) + 0) * magazine_size * Size) / Size;
 	static std::vector<bool> isFreed;
 	if (!alloc) {
-		if (i + 1 > isFreed.size()) isFreed.resize(i + 1, false);
+		if (i + 1 > isFreed.size())
+			isFreed.resize(i + 1, false);
 		if (isFreed[i]) {
 			printf("Double free: %p\n", ptr);
 			abort();
@@ -447,9 +452,11 @@ void FastAllocator<Size>::getMagazine() {
 #ifdef WIN32
 	static int alt = 0;
 	alt++;
-	block =
-	    (void**)VirtualAllocEx(GetCurrentProcess(), (void*)(((getSizeCode(Size) << 11) + alt) * magazine_size * Size),
-	                           magazine_size * Size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	block = (void**)VirtualAllocEx(GetCurrentProcess(),
+	                               (void*)(((getSizeCode(Size) << 11) + alt) * magazine_size * Size),
+	                               magazine_size * Size,
+	                               MEM_COMMIT | MEM_RESERVE,
+	                               PAGE_READWRITE);
 #else
 	static int alt = 0;
 	alt++;

@@ -40,8 +40,10 @@ static ssize_t tls_read_func(struct tls* ctx, void* buf, size_t buflen, void* cb
 	FDBLibTLSSession* session = (FDBLibTLSSession*)cb_arg;
 
 	int rv = session->recv_func(session->recv_ctx, (uint8_t*)buf, buflen);
-	if (rv < 0) return 0;
-	if (rv == 0) return TLS_WANT_POLLIN;
+	if (rv < 0)
+		return 0;
+	if (rv == 0)
+		return TLS_WANT_POLLIN;
 	return (ssize_t)rv;
 }
 
@@ -49,17 +51,25 @@ static ssize_t tls_write_func(struct tls* ctx, const void* buf, size_t buflen, v
 	FDBLibTLSSession* session = (FDBLibTLSSession*)cb_arg;
 
 	int rv = session->send_func(session->send_ctx, (const uint8_t*)buf, buflen);
-	if (rv < 0) return 0;
-	if (rv == 0) return TLS_WANT_POLLOUT;
+	if (rv < 0)
+		return 0;
+	if (rv == 0)
+		return TLS_WANT_POLLOUT;
 	return (ssize_t)rv;
 }
 
-FDBLibTLSSession::FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy, bool is_client, const char* servername,
-                                   TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func,
-                                   void* recv_ctx, void* uidptr)
+FDBLibTLSSession::FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy,
+                                   bool is_client,
+                                   const char* servername,
+                                   TLSSendCallbackFunc send_func,
+                                   void* send_ctx,
+                                   TLSRecvCallbackFunc recv_func,
+                                   void* recv_ctx,
+                                   void* uidptr)
   : tls_ctx(NULL), tls_sctx(NULL), is_client(is_client), policy(policy), send_func(send_func), send_ctx(send_ctx),
     recv_func(recv_func), recv_ctx(recv_ctx), handshake_completed(false), lastVerifyFailureLogged(0.0) {
-	if (uidptr) uid = *(UID*)uidptr;
+	if (uidptr)
+		uid = *(UID*)uidptr;
 
 	if (is_client) {
 		if ((tls_ctx = tls_client()) == NULL) {
@@ -109,14 +119,20 @@ bool match_criteria_entry(const std::string& criteria, ASN1_STRING* entry, Match
 	unsigned char* entry_utf8 = NULL;
 	int entry_utf8_len = 0;
 
-	if ((asn_criteria = ASN1_IA5STRING_new()) == NULL) goto err;
-	if (ASN1_STRING_set(asn_criteria, criteria.c_str(), criteria.size()) != 1) goto err;
-	if ((criteria_utf8_len = ASN1_STRING_to_UTF8(&criteria_utf8, asn_criteria)) < 1) goto err;
-	if ((entry_utf8_len = ASN1_STRING_to_UTF8(&entry_utf8, entry)) < 1) goto err;
+	if ((asn_criteria = ASN1_IA5STRING_new()) == NULL)
+		goto err;
+	if (ASN1_STRING_set(asn_criteria, criteria.c_str(), criteria.size()) != 1)
+		goto err;
+	if ((criteria_utf8_len = ASN1_STRING_to_UTF8(&criteria_utf8, asn_criteria)) < 1)
+		goto err;
+	if ((entry_utf8_len = ASN1_STRING_to_UTF8(&entry_utf8, entry)) < 1)
+		goto err;
 	if (mt == MatchType::EXACT) {
-		if (criteria_utf8_len == entry_utf8_len && memcmp(criteria_utf8, entry_utf8, criteria_utf8_len) == 0) rc = true;
+		if (criteria_utf8_len == entry_utf8_len && memcmp(criteria_utf8, entry_utf8, criteria_utf8_len) == 0)
+			rc = true;
 	} else if (mt == MatchType::PREFIX) {
-		if (criteria_utf8_len <= entry_utf8_len && memcmp(criteria_utf8, entry_utf8, criteria_utf8_len) == 0) rc = true;
+		if (criteria_utf8_len <= entry_utf8_len && memcmp(criteria_utf8, entry_utf8, criteria_utf8_len) == 0)
+			rc = true;
 	} else if (mt == MatchType::SUFFIX) {
 		if (criteria_utf8_len <= entry_utf8_len &&
 		    memcmp(criteria_utf8, entry_utf8 + (entry_utf8_len - criteria_utf8_len), criteria_utf8_len) == 0)
@@ -135,9 +151,12 @@ bool match_name_criteria(X509_NAME* name, NID nid, const std::string& criteria, 
 	int idx;
 
 	// If name does not exist, or has multiple of this RDN, refuse to proceed.
-	if ((idx = X509_NAME_get_index_by_NID(name, nid, -1)) < 0) return false;
-	if (X509_NAME_get_index_by_NID(name, nid, idx) != -1) return false;
-	if ((name_entry = X509_NAME_get_entry(name, idx)) == NULL) return false;
+	if ((idx = X509_NAME_get_index_by_NID(name, nid, -1)) < 0)
+		return false;
+	if (X509_NAME_get_index_by_NID(name, nid, idx) != -1)
+		return false;
+	if ((name_entry = X509_NAME_get_entry(name, idx)) == NULL)
+		return false;
 
 	return match_criteria_entry(criteria, name_entry->value, mt);
 }
@@ -197,7 +216,11 @@ bool match_extension_criteria(X509* cert, NID nid, const std::string& value, Mat
 	return rc;
 }
 
-bool match_criteria(X509* cert, X509_NAME* subject, NID nid, const std::string& criteria, MatchType mt,
+bool match_criteria(X509* cert,
+                    X509_NAME* subject,
+                    NID nid,
+                    const std::string& criteria,
+                    MatchType mt,
                     X509Location loc) {
 	switch (loc) {
 	case X509Location::NAME: {
@@ -221,7 +244,8 @@ std::tuple<bool, std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLS
 	std::string reason = "";
 
 	// If certificate verification is disabled, there's nothing more to do.
-	if (!verify->verify_cert) return std::make_tuple(true, reason);
+	if (!verify->verify_cert)
+		return std::make_tuple(true, reason);
 
 	// Verify the certificate.
 	if ((store_ctx = X509_STORE_CTX_new()) == NULL) {
@@ -250,8 +274,8 @@ std::tuple<bool, std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLS
 		goto err;
 	}
 	for (auto& pair : verify->subject_criteria) {
-		if (!match_criteria(cert, subject, pair.first, pair.second.criteria, pair.second.match_type,
-		                    pair.second.location)) {
+		if (!match_criteria(
+		        cert, subject, pair.first, pair.second.criteria, pair.second.match_type, pair.second.location)) {
 			reason = "Cert subject match failure";
 			goto err;
 		}
@@ -263,8 +287,8 @@ std::tuple<bool, std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLS
 		goto err;
 	}
 	for (auto& pair : verify->issuer_criteria) {
-		if (!match_criteria(cert, issuer, pair.first, pair.second.criteria, pair.second.match_type,
-		                    pair.second.location)) {
+		if (!match_criteria(
+		        cert, issuer, pair.first, pair.second.criteria, pair.second.match_type, pair.second.location)) {
 			reason = "Cert issuer match failure";
 			goto err;
 		}
@@ -277,8 +301,8 @@ std::tuple<bool, std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLS
 		goto err;
 	}
 	for (auto& pair : verify->root_criteria) {
-		if (!match_criteria(cert, subject, pair.first, pair.second.criteria, pair.second.match_type,
-		                    pair.second.location)) {
+		if (!match_criteria(
+		        cert, subject, pair.first, pair.second.criteria, pair.second.match_type, pair.second.location)) {
 			reason = "Root subject match failure";
 			goto err;
 		}
@@ -304,13 +328,15 @@ bool FDBLibTLSSession::verify_peer() {
 
 	// If no verify peer rules have been set, we are relying on standard
 	// libtls verification.
-	if (policy->verify_rules.empty()) return true;
+	if (policy->verify_rules.empty())
+		return true;
 
 	if ((cert_pem = tls_peer_cert_chain_pem(tls_ctx, &cert_pem_len)) == NULL) {
 		TraceEvent(SevError, "FDBLibTLSNoCertError", uid);
 		goto err;
 	}
-	if ((certs = policy->parse_cert_pem(cert_pem, cert_pem_len)) == NULL) goto err;
+	if ((certs = policy->parse_cert_pem(cert_pem, cert_pem_len)) == NULL)
+		goto err;
 
 	// Any matching rule is sufficient.
 	for (auto& verify_rule : policy->verify_rules) {
@@ -319,7 +345,8 @@ bool FDBLibTLSSession::verify_peer() {
 			rc = true;
 			break;
 		} else {
-			if (verify_failure_reason.length() > 0) verify_failure_reasons.insert(verify_failure_reason);
+			if (verify_failure_reason.length() > 0)
+				verify_failure_reasons.insert(verify_failure_reason);
 		}
 	}
 
@@ -344,7 +371,8 @@ int FDBLibTLSSession::handshake() {
 
 	switch (rv) {
 	case 0:
-		if (!verify_peer()) return FAILED;
+		if (!verify_peer())
+			return FAILED;
 		handshake_completed = true;
 		return SUCCESS;
 	case TLS_WANT_POLLIN:
@@ -375,8 +403,10 @@ int FDBLibTLSSession::read(uint8_t* data, int length) {
 		TraceEvent("FDBLibTLSReadEOF").suppressFor(1.0);
 		return FAILED;
 	}
-	if (n == TLS_WANT_POLLIN) return WANT_READ;
-	if (n == TLS_WANT_POLLOUT) return WANT_WRITE;
+	if (n == TLS_WANT_POLLIN)
+		return WANT_READ;
+	if (n == TLS_WANT_POLLOUT)
+		return WANT_WRITE;
 
 	TraceEvent("FDBLibTLSReadError", uid).suppressFor(1.0).detail("LibTLSErrorMessage", tls_error(tls_ctx));
 	return FAILED;
@@ -400,8 +430,10 @@ int FDBLibTLSSession::write(const uint8_t* data, int length) {
 		TraceEvent("FDBLibTLSWriteEOF", uid).suppressFor(1.0);
 		return FAILED;
 	}
-	if (n == TLS_WANT_POLLIN) return WANT_READ;
-	if (n == TLS_WANT_POLLOUT) return WANT_WRITE;
+	if (n == TLS_WANT_POLLIN)
+		return WANT_READ;
+	if (n == TLS_WANT_POLLOUT)
+		return WANT_WRITE;
 
 	TraceEvent("FDBLibTLSWriteError", uid).suppressFor(1.0).detail("LibTLSErrorMessage", tls_error(tls_ctx));
 	return FAILED;

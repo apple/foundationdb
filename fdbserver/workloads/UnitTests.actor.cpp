@@ -49,7 +49,8 @@ struct UnitTestWorkload : TestWorkload {
 	virtual std::string description() { return "UnitTests"; }
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
 	virtual Future<Void> start(Database const& cx) {
-		if (enabled) return runUnitTests(this);
+		if (enabled)
+			return runUnitTests(this);
 		return Void();
 	}
 	virtual Future<bool> check(Database const& cx) { return testsFailed.getValue() == 0; }
@@ -72,7 +73,8 @@ struct UnitTestWorkload : TestWorkload {
 		}
 		fprintf(stdout, "Found %zu tests\n", tests.size());
 		deterministicRandom()->randomShuffle(tests);
-		if (self->testRunLimit > 0 && tests.size() > self->testRunLimit) tests.resize(self->testRunLimit);
+		if (self->testRunLimit > 0 && tests.size() > self->testRunLimit)
+			tests.resize(self->testRunLimit);
 
 		state std::vector<UnitTest*>::iterator t;
 		for (t = tests.begin(); t != tests.end(); ++t) {

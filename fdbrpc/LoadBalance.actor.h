@@ -98,8 +98,8 @@ bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, boo
 	receivedResponse = receivedResponse || (!maybeDelivered && errCode != error_code_process_behind);
 	bool futureVersion = errCode == error_code_future_version || errCode == error_code_process_behind;
 
-	holder->release(receivedResponse, futureVersion,
-	                loadBalancedReply.present() ? loadBalancedReply.get().penalty : -1.0);
+	holder->release(
+	    receivedResponse, futureVersion, loadBalancedReply.present() ? loadBalancedReply.get().penalty : -1.0);
 
 	if (errCode == error_code_server_overloaded) {
 		return false;
@@ -129,9 +129,14 @@ bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, boo
 }
 
 ACTOR template <class Request>
-Future<Optional<REPLY_TYPE(Request)>> makeRequest(RequestStream<Request> const* stream, Request request, double backoff,
-                                                  Future<Void> requestUnneeded, QueueModel* model, bool isFirstRequest,
-                                                  bool atMostOnce, bool triedAllOptions) {
+Future<Optional<REPLY_TYPE(Request)>> makeRequest(RequestStream<Request> const* stream,
+                                                  Request request,
+                                                  double backoff,
+                                                  Future<Void> requestUnneeded,
+                                                  QueueModel* model,
+                                                  bool isFirstRequest,
+                                                  bool atMostOnce,
+                                                  bool triedAllOptions) {
 	if (backoff > 0.0) {
 		wait(delay(backoff) || requestUnneeded);
 	}
@@ -174,8 +179,10 @@ void addLaggingRequest(Future<Optional<Reply>> reply, Promise<Void> requestFinis
 // list of servers
 ACTOR template <class Interface, class Request, class Multi>
 Future<REPLY_TYPE(Request)> loadBalance(
-    Reference<MultiInterface<Multi>> alternatives, RequestStream<Request> Interface::*channel,
-    Request request = Request(), TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
+    Reference<MultiInterface<Multi>> alternatives,
+    RequestStream<Request> Interface::*channel,
+    Request request = Request(),
+    TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
     bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
     QueueModel* model = NULL) {
 	state Future<Optional<REPLY_TYPE(Request)>> firstRequest;
@@ -187,13 +194,15 @@ Future<REPLY_TYPE(Request)> loadBalance(
 	state double startTime = now();
 
 	setReplyPriority(request, taskID);
-	if (!alternatives) return Never();
+	if (!alternatives)
+		return Never();
 
 	ASSERT(alternatives->size());
 
 	state int bestAlt = deterministicRandom()->randomInt(0, alternatives->countBest());
 	state int nextAlt = deterministicRandom()->randomInt(0, std::max(alternatives->size() - 1, 1));
-	if (nextAlt >= bestAlt) nextAlt++;
+	if (nextAlt >= bestAlt)
+		nextAlt++;
 
 	if (model) {
 		double bestMetric = 1e9;
@@ -310,7 +319,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			    (!firstRequestEndpoint.present() || stream->getEndpoint().token.first() != firstRequestEndpoint.get()))
 				break;
 			nextAlt = (nextAlt + 1) % alternatives->size();
-			if (nextAlt == startAlt) triedAllOptions = true;
+			if (nextAlt == startAlt)
+				triedAllOptions = true;
 			stream = NULL;
 		}
 
@@ -335,10 +345,12 @@ Future<REPLY_TYPE(Request)> loadBalance(
 					g_network->networkInfo.lastAlternativesFailureSkipDelay = now();
 				} else {
 					double elapsed = now() - g_network->networkInfo.oldestAlternativesFailure;
-					delay = std::max(delay, std::min(elapsed * FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO,
-					                                 FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY));
-					delay = std::max(delay, std::min(elapsed * FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_DELAY_RATIO,
-					                                 FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_MAX_DELAY));
+					delay = std::max(delay,
+					                 std::min(elapsed * FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO,
+					                          FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY));
+					delay = std::max(delay,
+					                 std::min(elapsed * FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_DELAY_RATIO,
+					                          FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_MAX_DELAY));
 				}
 
 				// Making this SevWarn means a lot of clutter
@@ -372,8 +384,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			firstRequestEndpoint = Optional<uint64_t>();
 		} else if (firstRequest.isValid()) {
 			// Issue a second request, the first one is taking a long time.
-			secondRequest = makeRequest(stream, request, backoff, requestFinished.getFuture(), model, false, atMostOnce,
-			                            triedAllOptions);
+			secondRequest = makeRequest(
+			    stream, request, backoff, requestFinished.getFuture(), model, false, atMostOnce, triedAllOptions);
 			state bool firstFinished = false;
 
 			loop {
@@ -417,8 +429,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			}
 		} else {
 			// Issue a request, if it takes too long to get a reply, go around the loop
-			firstRequest = makeRequest(stream, request, backoff, requestFinished.getFuture(), model, true, atMostOnce,
-			                           triedAllOptions);
+			firstRequest = makeRequest(
+			    stream, request, backoff, requestFinished.getFuture(), model, true, atMostOnce, triedAllOptions);
 			firstRequestEndpoint = stream->getEndpoint().token.first();
 
 			loop {
@@ -463,7 +475,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
 		}
 
 		nextAlt = (nextAlt + 1) % alternatives->size();
-		if (nextAlt == startAlt) triedAllOptions = true;
+		if (nextAlt == startAlt)
+			triedAllOptions = true;
 		resetReply(request, taskID);
 		secondDelay = Never();
 	}

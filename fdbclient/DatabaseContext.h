@@ -33,7 +33,8 @@
 
 class StorageServerInfo : public ReferencedInterface<StorageServerInterface> {
 public:
-	static Reference<StorageServerInfo> getInterface(DatabaseContext* cx, StorageServerInterface const& interf,
+	static Reference<StorageServerInfo> getInterface(DatabaseContext* cx,
+	                                                 StorageServerInterface const& interf,
 	                                                 LocalityData const& locality);
 	void notifyContextDestroyed();
 
@@ -55,20 +56,34 @@ public:
 	}
 
 	// For internal (fdbserver) use only
-	static Database create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor,
-	                       LocalityData clientLocality, bool enableLocalityLoadBalance,
-	                       TaskPriority taskID = TaskPriority::DefaultEndpoint, bool lockAware = false,
-	                       int apiVersion = Database::API_VERSION_LATEST, bool switchable = false);
+	static Database create(Reference<AsyncVar<ClientDBInfo>> clientInfo,
+	                       Future<Void> clientInfoMonitor,
+	                       LocalityData clientLocality,
+	                       bool enableLocalityLoadBalance,
+	                       TaskPriority taskID = TaskPriority::DefaultEndpoint,
+	                       bool lockAware = false,
+	                       int apiVersion = Database::API_VERSION_LATEST,
+	                       bool switchable = false);
 
 	~DatabaseContext();
 
 	Database clone() const {
-		return Database(new DatabaseContext(connectionFile, clientInfo, clientInfoMonitor, taskID, clientLocality,
-		                                    enableLocalityLoadBalance, lockAware, internal, apiVersion, switchable));
+		return Database(new DatabaseContext(connectionFile,
+		                                    clientInfo,
+		                                    clientInfoMonitor,
+		                                    taskID,
+		                                    clientLocality,
+		                                    enableLocalityLoadBalance,
+		                                    lockAware,
+		                                    internal,
+		                                    apiVersion,
+		                                    switchable));
 	}
 
 	std::pair<KeyRange, Reference<LocationInfo>> getCachedLocation(const KeyRef&, bool isBackward = false);
-	bool getCachedLocations(const KeyRangeRef&, vector<std::pair<KeyRange, Reference<LocationInfo>>>&, int limit,
+	bool getCachedLocations(const KeyRangeRef&,
+	                        vector<std::pair<KeyRange, Reference<LocationInfo>>>&,
+	                        int limit,
 	                        bool reverse);
 	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const vector<struct StorageServerInterface>&);
 	void invalidateCache(const KeyRef&, bool isBackward = false);
@@ -115,9 +130,14 @@ public:
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
-	                         Reference<AsyncVar<ClientDBInfo>> clientDBInfo, Future<Void> clientInfoMonitor,
-	                         TaskPriority taskID, LocalityData const& clientLocality, bool enableLocalityLoadBalance,
-	                         bool lockAware, bool internal = true, int apiVersion = Database::API_VERSION_LATEST,
+	                         Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
+	                         Future<Void> clientInfoMonitor,
+	                         TaskPriority taskID,
+	                         LocalityData const& clientLocality,
+	                         bool enableLocalityLoadBalance,
+	                         bool lockAware,
+	                         bool internal = true,
+	                         int apiVersion = Database::API_VERSION_LATEST,
 	                         bool switchable = false);
 
 	explicit DatabaseContext(const Error& err);

@@ -55,7 +55,8 @@ struct CompressedInt {
 			serializer(ar, b);
 			int bytesToRead = 0; // Additional bytes to read after the required first byte
 			bool positive = (b & 0x80) != 0; // Sign bit
-			if (!positive) b = ~b; // Negative, so invert bytes read
+			if (!positive)
+				b = ~b; // Negative, so invert bytes read
 			b &= 0x7f; // Clear sign bit
 
 			uint8_t hb = 0x40; // Next header bit to test
@@ -63,7 +64,8 @@ struct CompressedInt {
 			while (1) {
 				if (hb == 0) { // Go to next byte if needed
 					serializer(ar, b); // Read byte
-					if (!positive) b = ~b; // Negative, so invert bytes read
+					if (!positive)
+						b = ~b; // Negative, so invert bytes read
 
 					hb = 0x80; // Reset header test bit position
 					--bytesToRead; // Decrement bytes to read since a byte was just read
@@ -78,7 +80,8 @@ struct CompressedInt {
 			value = b; // b contains the highest byte of value
 			while (bytesToRead-- != 0) {
 				serializer(ar, b); // Read byte
-				if (!positive) b = ~b; // Negative, so invert bytes read
+				if (!positive)
+					b = ~b; // Negative, so invert bytes read
 				value <<= 8; // Shift value up to make room for new byte
 				value |= b; // OR the byte into place
 			}
@@ -121,7 +124,8 @@ struct CompressedInt {
 				b >>= 1;
 			}
 			if (neg) // If negative, bit flip the entire encoded thing
-				for (int i = iStart; i < sizeof(buf); ++i) buf[i] = ~buf[i];
+				for (int i = iStart; i < sizeof(buf); ++i)
+					buf[i] = ~buf[i];
 
 			ar.serializeBytes(buf + iStart, encodedLen);
 		}

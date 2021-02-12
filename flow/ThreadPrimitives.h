@@ -56,7 +56,8 @@ public:
 #endif
 	}
 	void enter() {
-		while (interlockedCompareExchange(&isLocked, 1, 0) == 1) _mm_pause();
+		while (interlockedCompareExchange(&isLocked, 1, 0) == 1)
+			_mm_pause();
 #if VALGRIND
 		ANNOTATE_RWLOCK_ACQUIRED(this, true);
 #endif

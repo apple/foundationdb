@@ -25,7 +25,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 KeySelector randomizedSelector(const KeyRef& key, bool orEqual, int offset) {
-	if (orEqual && deterministicRandom()->random01() > 0.5) return KeySelectorRef(keyAfter(key), false, offset);
+	if (orEqual && deterministicRandom()->random01() > 0.5)
+		return KeySelectorRef(keyAfter(key), false, offset);
 	return KeySelectorRef(key, orEqual, offset);
 }
 
@@ -64,7 +65,8 @@ struct BackgroundSelectorWorkload : TestWorkload {
 	virtual Future<bool> check(Database const& cx) {
 		bool ok = true;
 		for (int i = 0; i < clients.size(); i++)
-			if (clients[i].isError()) ok = false;
+			if (clients[i].isError())
+				ok = false;
 		clients.clear();
 		return ok;
 	}
@@ -146,9 +148,10 @@ struct BackgroundSelectorWorkload : TestWorkload {
 				loop {
 					try {
 						if (diff < 0) {
-							Standalone<RangeResultRef> rangeResult_ = wait(
-							    tr.getRange(randomizedSelector(endKey, true, endDrift),
-							                randomizedSelector(startKey, true, startDrift + 1), self->resultLimit));
+							Standalone<RangeResultRef> rangeResult_ =
+							    wait(tr.getRange(randomizedSelector(endKey, true, endDrift),
+							                     randomizedSelector(startKey, true, startDrift + 1),
+							                     self->resultLimit));
 							rangeResult = rangeResult_;
 							Standalone<StringRef> endResult_ =
 							    wait(tr.getKey(randomizedSelector(startKey, true, startDrift)));
@@ -159,7 +162,8 @@ struct BackgroundSelectorWorkload : TestWorkload {
 						} else {
 							Standalone<RangeResultRef> rangeResult_ =
 							    wait(tr.getRange(randomizedSelector(startKey, true, startDrift),
-							                     randomizedSelector(endKey, true, endDrift + 1), self->resultLimit));
+							                     randomizedSelector(endKey, true, endDrift + 1),
+							                     self->resultLimit));
 							rangeResult = rangeResult_;
 							Standalone<StringRef> startResult_ =
 							    wait(tr.getKey(randomizedSelector(startKey, true, startDrift)));
@@ -208,7 +212,8 @@ struct BackgroundSelectorWorkload : TestWorkload {
 					}
 				}
 				++self->operations;
-				if (restartProcess) break;
+				if (restartProcess)
+					break;
 				++self->checks;
 			}
 		}

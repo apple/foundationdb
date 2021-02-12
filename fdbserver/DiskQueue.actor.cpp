@@ -104,11 +104,13 @@ struct StringBuffer {
 
 struct SyncQueue : ReferenceCounted<SyncQueue> {
 	SyncQueue(int outstandingLimit, Reference<IAsyncFile> file) : outstandingLimit(outstandingLimit), file(file) {
-		for (int i = 0; i < outstandingLimit; i++) outstanding.push_back(Void());
+		for (int i = 0; i < outstandingLimit; i++)
+			outstanding.push_back(Void());
 	}
 
 	Future<Void> onSync() { // Future is set when all writes completed before the call to onSync are complete
-		if (outstanding.size() <= outstandingLimit) outstanding.push_back(waitAndSync(this));
+		if (outstanding.size() <= outstandingLimit)
+			outstanding.push_back(waitAndSync(this));
 		return outstanding.back();
 	}
 
@@ -133,11 +135,13 @@ protected:
 		T* self;
 		explicit TrackMe(T* self) : self(self) {
 			self->actorCount++;
-			if (self->actorCount == 1) self->actorCountIsZero.set(false);
+			if (self->actorCount == 1)
+				self->actorCountIsZero.set(false);
 		}
 		~TrackMe() {
 			self->actorCount--;
-			if (self->actorCount == 0) self->actorCountIsZero.set(true);
+			if (self->actorCount == 0)
+				self->actorCountIsZero.set(true);
 		}
 	};
 
@@ -162,8 +166,10 @@ public:
 	    dbg_file0BeginSeq(0), fileExtensionBytes(SERVER_KNOBS->DISK_QUEUE_FILE_EXTENSION_BYTES),
 	    fileShrinkBytes(SERVER_KNOBS->DISK_QUEUE_FILE_SHRINK_BYTES), readingBuffer(dbgid), readyToPush(Void()),
 	    fileSizeWarningLimit(fileSizeWarningLimit), lastCommit(Void()), isFirstCommit(true) {
-		if (BUGGIFY) fileExtensionBytes = _PAGE_SIZE * deterministicRandom()->randomSkewedUInt32(1, 10 << 10);
-		if (BUGGIFY) fileShrinkBytes = _PAGE_SIZE * deterministicRandom()->randomSkewedUInt32(1, 10 << 10);
+		if (BUGGIFY)
+			fileExtensionBytes = _PAGE_SIZE * deterministicRandom()->randomSkewedUInt32(1, 10 << 10);
+		if (BUGGIFY)
+			fileShrinkBytes = _PAGE_SIZE * deterministicRandom()->randomSkewedUInt32(1, 10 << 10);
 		files[0].dbgFilename = filename(0);
 		files[1].dbgFilename = filename(1);
 		// We issue reads into firstPages, so it needs to be 4k aligned.
@@ -223,7 +229,9 @@ public:
 
 		g_network->getDiskBytes(parentDirectory(basename), free, total);
 
-		return StorageBytes(free, total, files[0].size + files[1].size,
+		return StorageBytes(free,
+		                    total,
+		                    files[0].size + files[1].size,
 		                    free); // TODO: we could potentially do better in the available field by accounting for the
 		                           // unused pages at the end of the file
 	}
@@ -318,7 +326,8 @@ public:
 		return push(this, pageData, toSync);
 	}
 
-	ACTOR static Future<Future<Void>> push(RawDiskQueue_TwoFiles* self, StringRef pageData,
+	ACTOR static Future<Future<Void>> push(RawDiskQueue_TwoFiles* self,
+	                                       StringRef pageData,
 	                                       vector<Reference<SyncQueue>>* toSync) {
 		// Write the given data to the queue files, swapping or extending them if necessary.
 		// Don't do any syncs, but push the modified file(s) onto toSync.
@@ -412,8 +421,10 @@ public:
 		return waitForAll(waitfor);
 	}
 
-	ACTOR static UNCANCELLABLE Future<Void> pushAndCommit(RawDiskQueue_TwoFiles* self, StringRef pageData,
-	                                                      StringBuffer* pageMem, uint64_t poppedPages) {
+	ACTOR static UNCANCELLABLE Future<Void> pushAndCommit(RawDiskQueue_TwoFiles* self,
+	                                                      StringRef pageData,
+	                                                      StringBuffer* pageMem,
+	                                                      uint64_t poppedPages) {
 		state Promise<Void> pushing, committed;
 		state Promise<Void> errorPromise = self->error;
 		state std::string filename = self->files[0].dbgFilename;
@@ -448,7 +459,8 @@ public:
 			pageMem = 0;
 
 			Future<Void> sync = syncFiles[0]->onSync();
-			for (int i = 1; i < syncFiles.size(); i++) sync = sync && syncFiles[i]->onSync();
+			for (int i = 1; i < syncFiles.size(); i++)
+				sync = sync && syncFiles[i]->onSync();
 			wait(sync);
 			wait(lastCommit);
 
@@ -470,9 +482,12 @@ public:
 			TEST(2 == syncFiles.size()); // push spanning both files error
 			TraceEvent(SevError, "RDQPushAndCommitError", dbgid).error(e, true).detail("InitialFilename0", filename);
 
-			if (errorPromise.canBeSet()) errorPromise.sendError(e);
-			if (pushing.canBeSet()) pushing.sendError(e);
-			if (committed.canBeSet()) committed.sendError(e);
+			if (errorPromise.canBeSet())
+				errorPromise.sendError(e);
+			if (pushing.canBeSet())
+				pushing.sendError(e);
+			if (committed.canBeSet())
+				committed.sendError(e);
 
 			throw e;
 		}
@@ -497,7 +512,8 @@ public:
 		//  In particular, we are trying to avoid a dropped or corrupted write to the first page of file 0 causing it to
 		//  be sequenced before file 1, when in fact it contains many pages that follow file 1.  These ok pages may be
 		//  incorrectly read if the machine dies after overwritting the first page of file 0 and is then recovered
-		if (file == 1) wait(self->truncateFile(self, 0, 0));
+		if (file == 1)
+			wait(self->truncateFile(self, 0, 0));
 
 		return Void();
 	}
@@ -546,11 +562,13 @@ public:
 		// process could have written (but not synchronized) data to the file which we will read but which
 		// might not survive a reboot.  The recovery code assumes otherwise and could corrupt the disk.
 		vector<Future<Void>> syncs;
-		for (int i = 0; i < fs.size(); i++) syncs.push_back(fs[i].get()->sync());
+		for (int i = 0; i < fs.size(); i++)
+			syncs.push_back(fs[i].get()->sync());
 		wait(waitForAll(syncs));
 
 		// Successfully opened or created; fill in self->files[]
-		for (int i = 0; i < 2; i++) self->files[i].setFile(fs[i].get());
+		for (int i = 0; i < 2; i++)
+			self->files[i].setFile(fs[i].get());
 
 		return Void();
 	}
@@ -562,7 +580,8 @@ public:
 			wait(success(errorOr(self->lastCommit)));
 			wait(self->onSafeToDestruct());
 
-			for (int i = 0; i < 2; i++) self->files[i].f.clear();
+			for (int i = 0; i < 2; i++)
+				self->files[i].f.clear();
 
 			if (deleteFiles) {
 				TraceEvent("DiskQueueShutdownDeleting", self->dbgid)
@@ -582,8 +601,10 @@ public:
 		}
 
 		if (error.code() != error_code_actor_cancelled) {
-			if (self->stopped.canBeSet()) self->stopped.send(Void());
-			if (self->error.canBeSet()) self->error.send(Never());
+			if (self->stopped.canBeSet())
+				self->stopped.send(Void());
+			if (self->error.canBeSet())
+				self->error.send(Never());
 			delete self;
 		}
 	}
@@ -598,7 +619,8 @@ public:
 
 			// Get the file sizes
 			vector<Future<int64_t>> fsize;
-			for (int i = 0; i < 2; i++) fsize.push_back(self->files[i].f->size());
+			for (int i = 0; i < 2; i++)
+				fsize.push_back(self->files[i].f->size());
 			vector<int64_t> file_sizes = wait(getAll(fsize));
 			for (int i = 0; i < 2; i++) {
 				// SOMEDAY: If the file size is not a multiple of page size, it may never be shortened.  Change this?
@@ -631,7 +653,8 @@ public:
 				// overwritting the first page and then terminating makes subsequent pages valid upon recovery.
 				vector<Future<Void>> truncates;
 				for (int i = 0; i < 2; ++i)
-					if (self->files[i].size > 0) truncates.push_back(self->truncateFile(self, i, 0));
+					if (self->files[i].size > 0)
+						truncates.push_back(self->truncateFile(self, i, 0));
 
 				wait(waitForAll(truncates));
 
@@ -691,7 +714,8 @@ public:
 			TraceEvent(ok ? SevInfo : SevError, "RDQReadFirstAndLastPagesError", self->dbgid)
 			    .error(e, true)
 			    .detail("File0Name", self->files[0].dbgFilename);
-			if (!self->error.isSet()) self->error.sendError(e);
+			if (!self->error.isSet())
+				self->error.sendError(e);
 			throw;
 		}
 	}
@@ -700,7 +724,8 @@ public:
 		state TrackMe trackMe(self);
 		state const size_t bytesRequested = nPages * sizeof(Page);
 		state Standalone<StringRef> result = makeAlignedString(sizeof(Page), bytesRequested);
-		if (file == 1) ASSERT_WE_THINK(pageOffset * sizeof(Page) + bytesRequested <= self->writingPos);
+		if (file == 1)
+			ASSERT_WE_THINK(pageOffset * sizeof(Page) + bytesRequested <= self->writingPos);
 		int bytesRead =
 		    wait(self->files[file].f->read(mutateString(result), bytesRequested, pageOffset * sizeof(Page)));
 		ASSERT_WE_THINK(bytesRead == bytesRequested);
@@ -750,7 +775,8 @@ public:
 
 				wait(f);
 			}
-			if (!self->readingBuffer.size()) return Standalone<StringRef>();
+			if (!self->readingBuffer.size())
+				return Standalone<StringRef>();
 
 			ASSERT(self->readingBuffer.size() >= sizeof(Page));
 			Standalone<StringRef> result = self->readingBuffer.pop_front(sizeof(Page));
@@ -760,7 +786,8 @@ public:
 			TraceEvent(SevError, "RDQReadNextPageError", self->dbgid)
 			    .error(e, true)
 			    .detail("File0Name", self->files[0].dbgFilename);
-			if (!self->error.isSet()) self->error.sendError(e);
+			if (!self->error.isSet())
+				self->error.sendError(e);
 			throw;
 		}
 	}
@@ -815,7 +842,8 @@ public:
 			TraceEvent(SevError, "RDQTruncateBeforeLastReadPageError", self->dbgid)
 			    .error(e)
 			    .detail("File0Name", self->files[0].dbgFilename);
-			if (!self->error.isSet()) self->error.sendError(e);
+			if (!self->error.isSet())
+				self->error.sendError(e);
 			throw;
 		}
 	}
@@ -824,7 +852,10 @@ public:
 class DiskQueue : public IDiskQueue, public Tracked<DiskQueue> {
 public:
 	// FIXME: Is setting lastCommittedSeq to -1 instead of 0 necessary?
-	DiskQueue(std::string basename, std::string fileExtension, UID dbgid, DiskQueueVersion diskQueueVersion,
+	DiskQueue(std::string basename,
+	          std::string fileExtension,
+	          UID dbgid,
+	          DiskQueueVersion diskQueueVersion,
 	          int64_t fileSizeWarningLimit)
 	  : rawQueue(new RawDiskQueue_TwoFiles(basename, fileExtension, dbgid, fileSizeWarningLimit)), dbgid(dbgid),
 	    diskQueueVersion(diskQueueVersion), anyPopped(false), nextPageSeq(0), poppedSeq(0), lastPoppedSeq(0),
@@ -839,7 +870,8 @@ public:
 		TEST(contents.size() >= 4 && pushedPageCount() &&
 		     backPage().remainingCapacity() < 4); // Push right at the end of a page, possibly splitting size
 		while (begin != end) {
-			if (!pushedPageCount() || !backPage().remainingCapacity()) addEmptyPage();
+			if (!pushedPageCount() || !backPage().remainingCapacity())
+				addEmptyPage();
 
 			auto& p = backPage();
 			int s = std::min<int>(p.remainingCapacity(), end - begin);
@@ -878,7 +910,8 @@ public:
 
 	virtual int getCommitOverhead() {
 		if (!pushedPageCount()) {
-			if (!anyPopped) return 0;
+			if (!anyPopped)
+				return 0;
 
 			return Page::maxPayload;
 		} else
@@ -888,7 +921,8 @@ public:
 	virtual Future<Void> commit() {
 		ASSERT(recovered);
 		if (!pushedPageCount()) {
-			if (!anyPopped) return Void();
+			if (!anyPopped)
+				return Void();
 			addEmptyPage();
 		}
 		anyPopped = false;
@@ -903,7 +937,8 @@ public:
 			    .detail("NextPageSeq", nextPageSeq)
 			    .detail("Details", format("%d pages", pushedPageCount()))
 			    .detail("File0Name", rawQueue->files[0].dbgFilename);
-			if (g_network->isSimulated()) warnAlwaysForMemory = false;
+			if (g_network->isSimulated())
+				warnAlwaysForMemory = false;
 		}
 
 		/*TraceEvent("DQCommit", dbgid).detail("Pages", pushedPageCount()).detail("LastPoppedSeq", lastPoppedSeq).detail("PoppedSeq", poppedSeq).detail("NextPageSeq", nextPageSeq)
@@ -912,8 +947,8 @@ public:
 		   rawQueue->files[0].dbgFilename);*/
 
 		lastCommittedSeq = backPage().endSeq();
-		auto f = rawQueue->pushAndCommit(pushed_page_buffer->ref(), pushed_page_buffer,
-		                                 poppedSeq / sizeof(Page) - lastPoppedSeq / sizeof(Page));
+		auto f = rawQueue->pushAndCommit(
+		    pushed_page_buffer->ref(), pushed_page_buffer, poppedSeq / sizeof(Page) - lastPoppedSeq / sizeof(Page));
 		lastPoppedSeq = poppedSeq;
 		pushed_page_buffer = 0;
 		return f;
@@ -1047,7 +1082,8 @@ private:
 		}
 
 		// pushed_pages.resize( pushed_pages.arena(), pushed_pages.size()+1 );
-		if (!pushed_page_buffer) pushed_page_buffer = new StringBuffer(dbgid);
+		if (!pushed_page_buffer)
+			pushed_page_buffer = new StringBuffer(dbgid);
 		pushed_page_buffer->alignReserve(sizeof(Page), pushed_page_buffer->size() + sizeof(Page));
 		pushed_page_buffer->append(sizeof(Page));
 
@@ -1077,7 +1113,10 @@ private:
 		}
 	}
 
-	ACTOR static void verifyCommit(DiskQueue* self, Future<Void> commitSynced, StringBuffer* buffer, loc_t start,
+	ACTOR static void verifyCommit(DiskQueue* self,
+	                               Future<Void> commitSynced,
+	                               StringBuffer* buffer,
+	                               loc_t start,
 	                               loc_t end) {
 		state TrackMe trackme(self);
 		try {
@@ -1160,18 +1199,23 @@ private:
 		state Standalone<StringRef> pagedData = wait(readPages(self, start, end));
 		ASSERT(start.lo % sizeof(Page) == 0 || start.lo % sizeof(Page) >= sizeof(PageHeader));
 		int startingOffset = start.lo % sizeof(Page);
-		if (startingOffset > 0) startingOffset -= sizeof(PageHeader);
+		if (startingOffset > 0)
+			startingOffset -= sizeof(PageHeader);
 		ASSERT(end.lo % sizeof(Page) == 0 || end.lo % sizeof(Page) > sizeof(PageHeader));
 		int endingOffset = end.lo % sizeof(Page);
-		if (endingOffset == 0) endingOffset = sizeof(Page);
-		if (endingOffset > 0) endingOffset -= sizeof(PageHeader);
+		if (endingOffset == 0)
+			endingOffset = sizeof(Page);
+		if (endingOffset > 0)
+			endingOffset -= sizeof(PageHeader);
 
 		if (pageFloor(end.lo - 1) == pageFloor(start.lo)) {
 			// start and end are on the same page
 			ASSERT(pagedData.size() == sizeof(Page));
 			Page* data = reinterpret_cast<Page*>(const_cast<uint8_t*>(pagedData.begin()));
-			if (ch == CheckHashes::YES && !data->checkHash()) throw io_error();
-			if (ch == CheckHashes::NO && data->payloadSize > Page::maxPayload) throw io_error();
+			if (ch == CheckHashes::YES && !data->checkHash())
+				throw io_error();
+			if (ch == CheckHashes::NO && data->payloadSize > Page::maxPayload)
+				throw io_error();
 			pagedData.contents() = pagedData.substr(sizeof(PageHeader) + startingOffset, endingOffset - startingOffset);
 			return pagedData;
 		} else {
@@ -1179,8 +1223,10 @@ private:
 			// we don't have to double allocate in a hot, memory hungry call.
 			uint8_t* buf = mutateString(pagedData);
 			Page* data = reinterpret_cast<Page*>(const_cast<uint8_t*>(pagedData.begin()));
-			if (ch == CheckHashes::YES && !data->checkHash()) throw io_error();
-			if (ch == CheckHashes::NO && data->payloadSize > Page::maxPayload) throw io_error();
+			if (ch == CheckHashes::YES && !data->checkHash())
+				throw io_error();
+			if (ch == CheckHashes::NO && data->payloadSize > Page::maxPayload)
+				throw io_error();
 
 			// Only start copying from `start` in the first page.
 			if (data->payloadSize > startingOffset) {
@@ -1189,8 +1235,10 @@ private:
 				buf += length;
 			}
 			data++;
-			if (ch == CheckHashes::YES && !data->checkHash()) throw io_error();
-			if (ch == CheckHashes::NO && data->payloadSize > Page::maxPayload) throw io_error();
+			if (ch == CheckHashes::YES && !data->checkHash())
+				throw io_error();
+			if (ch == CheckHashes::NO && data->payloadSize > Page::maxPayload)
+				throw io_error();
 
 			// Copy all the middle pages
 			while (data->seq != pageFloor(end.lo - 1)) {
@@ -1200,8 +1248,10 @@ private:
 				memmove(buf, data->payload, length);
 				buf += length;
 				data++;
-				if (ch == CheckHashes::YES && !data->checkHash()) throw io_error();
-				if (ch == CheckHashes::NO && data->payloadSize > Page::maxPayload) throw io_error();
+				if (ch == CheckHashes::YES && !data->checkHash())
+					throw io_error();
+				if (ch == CheckHashes::NO && data->payloadSize > Page::maxPayload)
+					throw io_error();
 			}
 
 			// Copy only until `end` in the last page.
@@ -1218,7 +1268,8 @@ private:
 	void readFromBuffer(StringBuffer* result, int* bytes) {
 		// extract up to bytes from readBufPage into result
 		int len = std::min(readBufPage->payloadSize - readBufPos, *bytes);
-		if (len <= 0) return;
+		if (len <= 0)
+			return;
 
 		result->append(StringRef(readBufPage->payload + readBufPos, len));
 
@@ -1248,7 +1299,8 @@ private:
 			if (self->readBufPage) {
 				self->readFromBuffer(&result, &bytes);
 				// if done, return
-				if (!bytes) return result.str;
+				if (!bytes)
+					return result.str;
 				ASSERT(self->readBufPos == self->readBufPage->payloadSize);
 				self->readBufPage = 0;
 				self->nextReadLocation += sizeof(Page) - self->readBufPos;
@@ -1292,7 +1344,8 @@ private:
 
 		// Writes go at the end of our reads (but on the next page)
 		self->nextPageSeq = pageFloor(self->nextReadLocation);
-		if (self->nextReadLocation % sizeof(Page) > sizeof(PageHeader)) self->nextPageSeq += sizeof(Page);
+		if (self->nextReadLocation % sizeof(Page) > sizeof(PageHeader))
+			self->nextPageSeq += sizeof(Page);
 
 		TraceEvent("DQRecovered", self->dbgid)
 		    .detail("LastPoppedSeq", self->lastPoppedSeq)
@@ -1459,8 +1512,11 @@ private:
 class DiskQueue_PopUncommitted : public IDiskQueue {
 
 public:
-	DiskQueue_PopUncommitted(std::string basename, std::string fileExtension, UID dbgid,
-	                         DiskQueueVersion diskQueueVersion, int64_t fileSizeWarningLimit)
+	DiskQueue_PopUncommitted(std::string basename,
+	                         std::string fileExtension,
+	                         UID dbgid,
+	                         DiskQueueVersion diskQueueVersion,
+	                         int64_t fileSizeWarningLimit)
 	  : queue(new DiskQueue(basename, fileExtension, dbgid, diskQueueVersion, fileSizeWarningLimit)), pushed(0),
 	    popped(0), committed(0){};
 
@@ -1536,13 +1592,17 @@ private:
 
 	ACTOR static Future<Standalone<StringRef>> readNext(DiskQueue_PopUncommitted* self, int bytes) {
 		Standalone<StringRef> str = wait(self->queue->readNext(bytes));
-		if (str.size() < bytes) self->pushed = self->getNextReadLocation();
+		if (str.size() < bytes)
+			self->pushed = self->getNextReadLocation();
 
 		return str;
 	}
 };
 
-IDiskQueue* openDiskQueue(std::string basename, std::string ext, UID dbgid, DiskQueueVersion dqv,
+IDiskQueue* openDiskQueue(std::string basename,
+                          std::string ext,
+                          UID dbgid,
+                          DiskQueueVersion dqv,
                           int64_t fileSizeWarningLimit) {
 	return new DiskQueue_PopUncommitted(basename, ext, dbgid, dqv, fileSizeWarningLimit);
 }

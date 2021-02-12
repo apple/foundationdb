@@ -89,7 +89,8 @@ struct FlowTesterStack {
 	Future<FDB::Tuple> waitAndPop();
 
 	void dup() {
-		if (data.empty()) return;
+		if (data.empty())
+			return;
 		data.push_back(data.back());
 	}
 
@@ -109,7 +110,8 @@ struct InstructionData : public ReferenceCounted<InstructionData> {
 struct FlowTesterData;
 
 struct InstructionFunc
-  : IDispatched<InstructionFunc, std::string,
+  : IDispatched<InstructionFunc,
+                std::string,
                 std::function<Future<Void>(Reference<FlowTesterData> data, Reference<InstructionData> instruction)>> {
 	static Future<Void> call(std::string op, Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		ASSERT(data);
@@ -196,8 +198,8 @@ struct FlowTesterData : public ReferenceCounted<FlowTesterData> {
 	std::vector<Future<Void>> subThreads;
 
 	Future<Void> processInstruction(Reference<InstructionData> instruction) {
-		return InstructionFunc::call(instruction->instruction.toString(), Reference<FlowTesterData>::addRef(this),
-		                             instruction);
+		return InstructionFunc::call(
+		    instruction->instruction.toString(), Reference<FlowTesterData>::addRef(this), instruction);
 	}
 
 	FlowTesterData(FDB::API* api) { this->api = api; }

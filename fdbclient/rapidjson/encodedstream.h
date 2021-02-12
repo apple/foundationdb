@@ -79,9 +79,12 @@ public:
 	typedef UTF8<>::Ch Ch;
 
 	EncodedInputStream(MemoryStream& is) : is_(is) {
-		if (static_cast<unsigned char>(is_.Peek()) == 0xEFu) is_.Take();
-		if (static_cast<unsigned char>(is_.Peek()) == 0xBBu) is_.Take();
-		if (static_cast<unsigned char>(is_.Peek()) == 0xBFu) is_.Take();
+		if (static_cast<unsigned char>(is_.Peek()) == 0xEFu)
+			is_.Take();
+		if (static_cast<unsigned char>(is_.Peek()) == 0xBBu)
+			is_.Take();
+		if (static_cast<unsigned char>(is_.Peek()) == 0xBFu)
+			is_.Take();
 	}
 	Ch Peek() const { return is_.Peek(); }
 	Ch Take() { return is_.Take(); }
@@ -113,7 +116,8 @@ public:
 	typedef typename Encoding::Ch Ch;
 
 	EncodedOutputStream(OutputByteStream& os, bool putBOM = true) : os_(os) {
-		if (putBOM) Encoding::PutBOM(os_);
+		if (putBOM)
+			Encoding::PutBOM(os_);
 	}
 
 	void Put(Ch c) { Encoding::Put(os_, c); }
@@ -212,7 +216,8 @@ private:
 		// EF BB BF     UTF-8
 
 		const unsigned char* c = reinterpret_cast<const unsigned char*>(is_->Peek4());
-		if (!c) return;
+		if (!c)
+			return;
 
 		unsigned bom = static_cast<unsigned>(c[0] | (c[1] << 8) | (c[2] << 16) | (c[3] << 24));
 		hasBOM_ = false;
@@ -283,8 +288,10 @@ private:
 		}
 
 		// Runtime check whether the size of character type is sufficient. It only perform checks with assertion.
-		if (type_ == kUTF16LE || type_ == kUTF16BE) RAPIDJSON_ASSERT(sizeof(Ch) >= 2);
-		if (type_ == kUTF32LE || type_ == kUTF32BE) RAPIDJSON_ASSERT(sizeof(Ch) >= 4);
+		if (type_ == kUTF16LE || type_ == kUTF16BE)
+			RAPIDJSON_ASSERT(sizeof(Ch) >= 2);
+		if (type_ == kUTF32LE || type_ == kUTF32BE)
+			RAPIDJSON_ASSERT(sizeof(Ch) >= 4);
 	}
 
 	typedef Ch (*TakeFunc)(InputByteStream& is);
@@ -317,13 +324,16 @@ public:
 		RAPIDJSON_ASSERT(type >= kUTF8 && type <= kUTF32BE);
 
 		// Runtime check whether the size of character type is sufficient. It only perform checks with assertion.
-		if (type_ == kUTF16LE || type_ == kUTF16BE) RAPIDJSON_ASSERT(sizeof(Ch) >= 2);
-		if (type_ == kUTF32LE || type_ == kUTF32BE) RAPIDJSON_ASSERT(sizeof(Ch) >= 4);
+		if (type_ == kUTF16LE || type_ == kUTF16BE)
+			RAPIDJSON_ASSERT(sizeof(Ch) >= 2);
+		if (type_ == kUTF32LE || type_ == kUTF32BE)
+			RAPIDJSON_ASSERT(sizeof(Ch) >= 4);
 
 		static const PutFunc f[] = { RAPIDJSON_ENCODINGS_FUNC(Put) };
 		putFunc_ = f[type_];
 
-		if (putBOM) PutBOM();
+		if (putBOM)
+			PutBOM();
 	}
 
 	UTFType GetType() const { return type_; }

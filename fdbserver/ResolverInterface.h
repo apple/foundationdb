@@ -99,8 +99,8 @@ struct ResolveTransactionBatchRequest {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, prevVersion, version, lastReceivedVersion, transactions, txnStateTransactions, reply, arena,
-		           debugID);
+		serializer(
+		    ar, prevVersion, version, lastReceivedVersion, transactions, txnStateTransactions, reply, arena, debugID);
 	}
 };
 

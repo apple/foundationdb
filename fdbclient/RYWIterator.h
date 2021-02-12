@@ -96,8 +96,10 @@ public:
 	static ValueRef getRandomVersionstampKey(Arena& arena) {
 		int idx = deterministicRandom()->randomInt(0, 100);
 		std::string key = format("%010d", idx / 3);
-		if (idx % 3 >= 1) key += '\x00';
-		if (idx % 3 >= 2) key += '\x00';
+		if (idx % 3 >= 1)
+			key += '\x00';
+		if (idx % 3 >= 2)
+			key += '\x00';
 		int32_t pos = key.size() - deterministicRandom()->randomInt(0, 3);
 		if (deterministicRandom()->random01() < 0.01) {
 			pos = 0;
@@ -114,8 +116,10 @@ public:
 
 	static KeyRef getKeyForIndex(Arena& arena, int idx) {
 		std::string key = format("%010d", idx / 3);
-		if (idx % 3 >= 1) key += '\x00';
-		if (idx % 3 >= 2) key += '\x00';
+		if (idx % 3 >= 1)
+			key += '\x00';
+		if (idx % 3 >= 2)
+			key += '\x00';
 		return KeyRef(arena, key);
 	}
 
@@ -127,8 +131,8 @@ public:
 	}
 
 	static KeySelectorRef getRandomKeySelector(Arena& arena) {
-		return KeySelectorRef(getRandomKey(arena), deterministicRandom()->random01() < 0.5,
-		                      deterministicRandom()->randomInt(-10, 10));
+		return KeySelectorRef(
+		    getRandomKey(arena), deterministicRandom()->random01() < 0.5, deterministicRandom()->randomInt(-10, 10));
 	}
 };
 

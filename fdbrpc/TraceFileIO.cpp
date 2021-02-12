@@ -57,14 +57,16 @@ std::string debugFileTrim(std::string filename) {
 // Checks if a block of memory has been written
 bool debugFileIsSet(uint8_t* storeMask, int64_t offset, int64_t length) {
 	for (int64_t i = 0; i < length; i += 4096)
-		if (memcmp(&storeMask[offset + i], debugFileSetPage, std::min((int64_t)4096, length - i))) return false;
+		if (memcmp(&storeMask[offset + i], debugFileSetPage, std::min((int64_t)4096, length - i)))
+			return false;
 
 	return true;
 }
 
 // Checks that a given block of data is the same as what has been written by a call to debugFileSet
 void debugFileCheck(std::string context, std::string file, const void* data, int64_t offset, int length) {
-	if (debugFileRegions.empty()) debugFileSetup();
+	if (debugFileRegions.empty())
+		debugFileSetup();
 	if (debugFileTrim(file) == debugFileName) {
 		bool found = false;
 		for (auto itr = debugFileRegions.begin(); itr != debugFileRegions.end(); ++itr) {
@@ -87,7 +89,8 @@ void debugFileCheck(std::string context, std::string file, const void* data, int
 				bool success = true;
 				if (debugFileIsSet(storeMask, dbgOffset, cmpLength)) {
 					//TraceEvent("DebugFileCheckMemCmp").detail("Context", context).detail("Filename", file).detail("Offset", offset).detail("Length", length).detail("DataOffset", dataOffset).detail("DbgOffset", dbgOffset).detail("OverlapLength", cmpLength);
-					if (memcmp(&((uint8_t*)data)[dataOffset], &storeData[dbgOffset], cmpLength)) success = false;
+					if (memcmp(&((uint8_t*)data)[dataOffset], &storeData[dbgOffset], cmpLength))
+						success = false;
 				} else {
 					TraceEvent("DebugFileUnsetCheck")
 					    .detail("Context", context)
@@ -121,7 +124,8 @@ void debugFileCheck(std::string context, std::string file, const void* data, int
 
 // Updates the in-memory copy of tracked data at a given offset
 void debugFileSet(std::string context, std::string file, const void* data, int64_t offset, int length) {
-	if (debugFileRegions.empty()) debugFileSetup();
+	if (debugFileRegions.empty())
+		debugFileSetup();
 	if (debugFileTrim(file) == debugFileName) {
 		bool found = false;
 		for (auto itr = debugFileRegions.begin(); itr != debugFileRegions.end(); ++itr) {
@@ -158,7 +162,8 @@ void debugFileSet(std::string context, std::string file, const void* data, int64
 // Updates the in-memory copy of tracked data to account for truncates (this simply invalidates any data after truncate
 // point)
 void debugFileTruncate(std::string context, std::string file, int64_t offset) {
-	if (debugFileRegions.empty()) debugFileSetup();
+	if (debugFileRegions.empty())
+		debugFileSetup();
 	if (debugFileTrim(file) == debugFileName) {
 		bool found = false;
 		for (auto itr = debugFileRegions.begin(); itr != debugFileRegions.end(); ++itr) {

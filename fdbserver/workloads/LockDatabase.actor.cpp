@@ -41,7 +41,8 @@ struct LockDatabaseWorkload : TestWorkload {
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
 
 	virtual Future<Void> start(Database const& cx) {
-		if (clientId == 0) return onlyCheckLocked ? timeout(checkLocked(cx, this), 60, Void()) : lockWorker(cx, this);
+		if (clientId == 0)
+			return onlyCheckLocked ? timeout(checkLocked(cx, this), 60, Void()) : lockWorker(cx, this);
 		return Void();
 	}
 
@@ -64,14 +65,17 @@ struct LockDatabaseWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> unlockAndCheck(Database cx, LockDatabaseWorkload* self, UID lockID,
+	ACTOR static Future<Void> unlockAndCheck(Database cx,
+	                                         LockDatabaseWorkload* self,
+	                                         UID lockID,
 	                                         Standalone<RangeResultRef> data) {
 		state Transaction tr(cx);
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> val = wait(tr.get(databaseLockedKey));
-				if (!val.present()) return Void();
+				if (!val.present())
+					return Void();
 
 				wait(unlockDatabase(&tr, lockID));
 				state Standalone<RangeResultRef> data2 = wait(tr.getRange(normalKeys, 50000));

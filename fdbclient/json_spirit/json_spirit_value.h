@@ -93,8 +93,14 @@ public:
 private:
 	void check_type(const Value_type vtype) const;
 
-	typedef boost::variant<boost::recursive_wrapper<Object>, boost::recursive_wrapper<Array>, String_type, bool,
-	                       int64_t, double, Null, uint64_t>
+	typedef boost::variant<boost::recursive_wrapper<Object>,
+	                       boost::recursive_wrapper<Array>,
+	                       String_type,
+	                       bool,
+	                       int64_t,
+	                       double,
+	                       Null,
+	                       uint64_t>
 	    Variant;
 
 	Variant v_;
@@ -280,9 +286,11 @@ Value_impl<Config>& Value_impl<Config>::operator=(const Value_impl& lhs) {
 
 template <class Config>
 bool Value_impl<Config>::operator==(const Value_impl& lhs) const {
-	if (this == &lhs) return true;
+	if (this == &lhs)
+		return true;
 
-	if (type() != lhs.type()) return false;
+	if (type() != lhs.type())
+		return false;
 
 	return v_ == lhs.v_;
 }
@@ -405,7 +413,8 @@ Pair_impl<Config>::Pair_impl(const String_type& name, const Value_type& value) :
 
 template <class Config>
 bool Pair_impl<Config>::operator==(const Pair_impl<Config>& lhs) const {
-	if (this == &lhs) return true;
+	if (this == &lhs)
+		return true;
 
 	return (name_ == lhs.name_) && (value_ == lhs.value_);
 }

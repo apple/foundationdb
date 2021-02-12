@@ -160,9 +160,11 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 	int64_t trInfoSizeLimit;
 
 	ClientTransactionProfileCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		samplingProbability = getOption(options, LiteralStringRef("samplingProbability"),
+		samplingProbability = getOption(options,
+		                                LiteralStringRef("samplingProbability"),
 		                                deterministicRandom()->random01() / 10); // rand range 0 - 0.1
-		trInfoSizeLimit = getOption(options, LiteralStringRef("trInfoSizeLimit"),
+		trInfoSizeLimit = getOption(options,
+		                            LiteralStringRef("trInfoSizeLimit"),
 		                            deterministicRandom()->randomInt(100 * 1024, 10 * 1024 * 1024)); // 100 KB - 10 MB
 		TraceEvent(SevInfo, "ClientTransactionProfilingSetup")
 		    .detail("ClientId", clientId)
@@ -205,7 +207,8 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 			if (numChunks == 1) {
 				ASSERT(chunkNum == 1);
 				BinaryReader reader(kv.value, Unversioned());
-				if (!checkTxInfoEntryFormat(reader)) return false;
+				if (!checkTxInfoEntryFormat(reader))
+					return false;
 			} else {
 				if (chunkNum == 1) { // First chunk
 					// Remove any entry if already present. There are scenarios (eg., commit_unknown_result) where a
@@ -231,9 +234,11 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 				if (chunkNum == numChunks && trInfoChunks.find(trId) != trInfoChunks.end()) {
 					auto iter = trInfoChunks.find(trId);
 					BinaryWriter bw(Unversioned());
-					for (auto val : iter->second) bw.serializeBytes(val.begin(), val.size());
+					for (auto val : iter->second)
+						bw.serializeBytes(val.begin(), val.size());
 					BinaryReader reader(bw.getData(), bw.getLength(), Unversioned());
-					if (!checkTxInfoEntryFormat(reader)) return false;
+					if (!checkTxInfoEntryFormat(reader))
+						return false;
 					trInfoChunks.erase(iter);
 				}
 			}
@@ -280,13 +285,15 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				state Standalone<RangeResultRef> kvRange = wait(tr.getRange(begin, end, keysLimit));
-				if (kvRange.empty()) break;
+				if (kvRange.empty())
+					break;
 				txInfoEntries.arena().dependsOn(kvRange.arena());
 				txInfoEntries.append(txInfoEntries.arena(), kvRange.begin(), kvRange.size());
 				begin = firstGreaterThan(kvRange.back().key);
 				tr.reset();
 			} catch (Error& e) {
-				if (e.code() == error_code_transaction_too_old) keysLimit = std::max(1, keysLimit / 2);
+				if (e.code() == error_code_transaction_too_old)
+					keysLimit = std::max(1, keysLimit / 2);
 				wait(tr.onError(e));
 			}
 		}
@@ -299,7 +306,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 		// FIXME: Find a way to check that contentsSize is not greater than a certain limit.
 		// if (counter != contentsSize) {
 		//	TraceEvent(SevError, "ClientTransactionProfilingIncorrectCtrVal").detail("Counter",
-		//counter).detail("ContentsSize", contentsSize); 	return false;
+		// counter).detail("ContentsSize", contentsSize); 	return false;
 		//}
 		TraceEvent(SevInfo, "ClientTransactionProfilingCtrval").detail("Counter", counter);
 		TraceEvent(SevInfo, "ClientTransactionProfilingContentsSize").detail("ContentsSize", contentsSize);
@@ -309,7 +316,8 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 	}
 
 	virtual Future<bool> check(Database const& cx) {
-		if (clientId != 0) return true;
+		if (clientId != 0)
+			return true;
 		return _check(cx, this);
 	}
 

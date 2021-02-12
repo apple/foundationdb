@@ -104,20 +104,24 @@ static MemoryBlock* _baseblock = NULL;
 
 // inline
 MemoryBlock* baseblock(void) {
-	if (!_baseblock) _baseblock = calloc(1, sizeof(MemoryBlock));
+	if (!_baseblock)
+		_baseblock = calloc(1, sizeof(MemoryBlock));
 	return _baseblock;
 }
 
 void MemoryBlock_remove(MemoryBlock* self) {
-	if (self->next) self->next->prev = self->prev;
-	if (self->prev) self->prev->next = self->next;
+	if (self->next)
+		self->next->prev = self->prev;
+	if (self->prev)
+		self->prev->next = self->next;
 }
 
 void MemoryBlock_insertAfter_(MemoryBlock* self, MemoryBlock* other) {
 	self->next = other->next;
 	self->prev = other;
 	other->next = self;
-	if (self->next) self->next->prev = self;
+	if (self->next)
+		self->next->prev = self;
 }
 
 MemoryBlock* MemoryBlock_newWithSize_file_line_(size_t size, char* file, int line) {
@@ -130,7 +134,8 @@ MemoryBlock* MemoryBlock_newWithSize_file_line_(size_t size, char* file, int lin
 
 	allocs++;
 	allocatedBytes += size;
-	if (allocatedBytes > maxAllocatedBytes) maxAllocatedBytes = allocatedBytes;
+	if (allocatedBytes > maxAllocatedBytes)
+		maxAllocatedBytes = allocatedBytes;
 	return self;
 }
 
@@ -244,7 +249,8 @@ void io_showUnfreed(void) {
 
 void* cpalloc(const void* p, size_t size) {
 	void* n = io_malloc(size);
-	if (p) memcpy(n, p, size);
+	if (p)
+		memcpy(n, p, size);
 	return n;
 }
 
@@ -273,7 +279,8 @@ uint32_t io_uint32InBigEndian(uint32_t i) {
 	uint32_t o;
 	uint8_t* os = (uint8_t*)&o;
 	uint8_t* is = (uint8_t*)&i;
-	if (io_isBigEndian()) return i;
+	if (io_isBigEndian())
+		return i;
 	os[0] = is[3];
 	os[1] = is[2];
 	os[2] = is[1];

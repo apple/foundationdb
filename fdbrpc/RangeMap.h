@@ -72,7 +72,10 @@ struct KeyValueBytesMetric {
 	}
 };
 
-template <class Key, class Val, class Range = RangeMapRange<Key>, class Metric = int,
+template <class Key,
+          class Val,
+          class Range = RangeMapRange<Key>,
+          class Metric = int,
           class MetricFunc = ConstantMetric<Metric>>
 class RangeMap {
 private:
@@ -137,7 +140,8 @@ public:
 	// contains itself)
 	Ranges containedRanges(const Range& r) {
 		auto s = Iterator(map.lower_bound(r.begin));
-		if (s.begin() >= r.end) return Ranges(s, s);
+		if (s.begin() >= r.end)
+			return Ranges(s, s);
 		return Ranges(s, rangeContaining(r.end));
 	}
 	template <class ComparableToKey>
@@ -148,7 +152,8 @@ public:
 	template <class ComparableToKey>
 	Iterator rangeContainingKeyBefore(const ComparableToKey& k) {
 		Iterator i = map.lower_bound(k);
-		if (!i->begin().size()) return i;
+		if (!i->begin().size())
+			return i;
 		--i;
 		return i;
 	}
@@ -187,11 +192,14 @@ void RangeMap<Key, Val, Range, Metric, MetricFunc>::coalesce(const ComparableToK
 	auto end = begin;
 	const Val& compareVal = begin->value;
 	ASSERT(begin != map.end());
-	while (begin != map.begin() && begin->value == compareVal) begin.decrementNonEnd();
-	while (end != map.lastItem() && end->value == compareVal) ++end;
+	while (begin != map.begin() && begin->value == compareVal)
+		begin.decrementNonEnd();
+	while (end != map.lastItem() && end->value == compareVal)
+		++end;
 	if (begin->value != compareVal) {
 		++begin;
-		if (begin == end) return;
+		if (begin == end)
+			return;
 	}
 	++begin;
 	map.erase(begin, end);
@@ -203,7 +211,8 @@ void RangeMap<Key, Val, Range, Metric, MetricFunc>::coalesce(const Range& k) {
 	auto it = map.lastLessOrEqual(k.begin);
 	Val* lastVal = &it->value;
 	++it;
-	if (it == map.end()) return;
+	if (it == map.end())
+		return;
 	bool doCheck = true;
 	while (it != map.lastItem() && doCheck) {
 		doCheck = it->key < k.end;
@@ -217,7 +226,8 @@ void RangeMap<Key, Val, Range, Metric, MetricFunc>::coalesce(const Range& k) {
 			++it;
 		}
 	}
-	if (EXPENSIVE_VALIDATION) validateCoalesced();
+	if (EXPENSIVE_VALIDATION)
+		validateCoalesced();
 }
 
 template <class Key, class Val, class Range, class Metric, class MetricFunc>
@@ -236,13 +246,15 @@ template <class Key, class Val, class Range, class Metric, class MetricFunc>
 bool RangeMap<Key, Val, Range, Metric, MetricFunc>::allEqual(const Range& keys, const Val& val) {
 	auto r = intersectingRanges(keys);
 	for (auto i = r.begin(); i != r.end(); ++i)
-		if (i.value() != val) return false;
+		if (i.value() != val)
+			return false;
 	return true;
 }
 
 template <class Key, class Val, class Range, class Metric, class MetricFunc>
 void RangeMap<Key, Val, Range, Metric, MetricFunc>::insert(const Range& keys, const Val& value) {
-	if (keys.begin == keys.end) return;
+	if (keys.begin == keys.end)
+		return;
 
 	auto end = map.lower_bound(keys.end);
 	if (end->key != keys.end) {

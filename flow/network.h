@@ -278,7 +278,8 @@ struct NetworkAddressList {
 		return address != r.address || secondaryAddress != r.secondaryAddress;
 	}
 	bool operator<(NetworkAddressList const& r) const {
-		if (address != r.address) return address < r.address;
+		if (address != r.address)
+			return address < r.address;
 		return secondaryAddress < r.secondaryAddress;
 	}
 

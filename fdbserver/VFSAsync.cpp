@@ -126,7 +126,8 @@ static int asyncReadZeroCopy(sqlite3_file* pFile, void** data, int iAmt, sqlite_
 	try {
 		int readBytes = iAmt;
 		Future<Void> readFuture = p->file->readZeroCopy(data, &readBytes, iOfst);
-		if (pDataWasCached) *pDataWasCached = readFuture.isReady() ? 1 : 0;
+		if (pDataWasCached)
+			*pDataWasCached = readFuture.isReady() ? 1 : 0;
 		waitFor(readFuture);
 		++p->debug_zcrefs;
 		if (readBytes < iAmt) {
@@ -297,7 +298,8 @@ struct SharedMemoryInfo { // for a file
 		memset(exclusiveLocks, 0, sizeof(exclusiveLocks));
 	}
 	void cleanup() {
-		for (int i = 0; i < regions.size(); i++) delete[](uint8_t*) regions[i];
+		for (int i = 0; i < regions.size(); i++)
+			delete[](uint8_t*) regions[i];
 		table.erase(filename);
 	}
 
@@ -454,7 +456,8 @@ static int asyncShmUnmap(sqlite3_file* fd, /* The underlying database file */
 
 	VFSAsyncFile* pDbFd = (VFSAsyncFile*)fd;
 	SharedMemoryInfo* memInfo = pDbFd->sharedMemory;
-	if (!memInfo) return SQLITE_OK;
+	if (!memInfo)
+		return SQLITE_OK;
 	pDbFd->sharedMemory = 0;
 
 	// printf("Connection %p closed shared memory\n", fd);
@@ -536,7 +539,8 @@ static int asyncOpen(sqlite3_vfs* pVfs, /* VFS */
 
 	VFSAsyncFile* p = (VFSAsyncFile*)pFile; /* Populate this structure */
 
-	if (zName == 0) return SQLITE_IOERR;
+	if (zName == 0)
+		return SQLITE_IOERR;
 
 	static_assert(
 	    SQLITE_OPEN_EXCLUSIVE == IAsyncFile::OPEN_EXCLUSIVE && SQLITE_OPEN_CREATE == IAsyncFile::OPEN_CREATE &&
@@ -547,7 +551,8 @@ static int asyncOpen(sqlite3_vfs* pVfs, /* VFS */
 	// creation
 	int oflags =
 	    flags & (/*SQLITE_OPEN_EXCLUSIVE | SQLITE_OPEN_CREATE |*/ SQLITE_OPEN_READONLY | SQLITE_OPEN_READWRITE);
-	if (flags & SQLITE_OPEN_WAL) oflags |= IAsyncFile::OPEN_LARGE_PAGES;
+	if (flags & SQLITE_OPEN_WAL)
+		oflags |= IAsyncFile::OPEN_LARGE_PAGES;
 	oflags |= IAsyncFile::OPEN_LOCK;
 
 	memset(p, 0, sizeof(VFSAsyncFile));
@@ -612,8 +617,10 @@ static int asyncAccess(sqlite3_vfs* pVfs, const char* zPath, int flags, int* pRe
 	       || flags == SQLITE_ACCESS_READWRITE /* access(zPath, R_OK|W_OK) */
 	);
 
-	if (flags == SQLITE_ACCESS_READWRITE) eAccess = R_OK | W_OK;
-	if (flags == SQLITE_ACCESS_READ) eAccess = R_OK;
+	if (flags == SQLITE_ACCESS_READWRITE)
+		eAccess = R_OK | W_OK;
+	if (flags == SQLITE_ACCESS_READ)
+		eAccess = R_OK;
 
 	rc = access(zPath, eAccess);
 	*pResOut = (rc == 0);
@@ -656,7 +663,8 @@ static int asyncFullPathname(sqlite3_vfs* pVfs, /* VFS */
 ) {
 	try {
 		auto s = abspath(zPath);
-		if (s.size() >= nPathOut) return SQLITE_IOERR;
+		if (s.size() >= nPathOut)
+			return SQLITE_IOERR;
 		memcpy(zPathOut, s.c_str(), s.size() + 1);
 		return SQLITE_OK;
 	} catch (Error& e) {
@@ -710,7 +718,8 @@ static void asyncDlClose(sqlite3_vfs* pVfs, void* pHandle) {
 ** buffer with pseudo-random data.
 */
 static int asyncRandomness(sqlite3_vfs* pVfs, int nByte, char* zByte) {
-	for (int i = 0; i < nByte; i++) zByte[i] = deterministicRandom()->randomInt(0, 256);
+	for (int i = 0; i < nByte; i++)
+		zByte[i] = deterministicRandom()->randomInt(0, 256);
 	return SQLITE_OK;
 }
 
@@ -721,7 +730,8 @@ static int asyncRandomness(sqlite3_vfs* pVfs, int nByte, char* zByte) {
 static int asyncSleep(sqlite3_vfs* pVfs, int microseconds) {
 	try {
 		Future<Void> simCancel = Never();
-		if (g_network->isSimulated()) simCancel = success(g_simulator.getCurrentProcess()->shutdownSignal.getFuture());
+		if (g_network->isSimulated())
+			simCancel = success(g_simulator.getCurrentProcess()->shutdownSignal.getFuture());
 		if (simCancel.isReady()) {
 			waitFor(delay(FLOW_KNOBS->MAX_BUGGIFIED_DELAY));
 			return 0;
@@ -772,7 +782,8 @@ static int asyncCurrentTimeInt64(sqlite3_vfs* NotUsed, sqlite3_int64* piNow) {
 static int asyncCurrentTime(sqlite3_vfs* pVfs, double* pTime) {
 	sqlite3_int64 t = 0;
 	int rc = asyncCurrentTimeInt64(pVfs, &t);
-	if (rc) return rc;
+	if (rc)
+		return rc;
 	*pTime = t / 86400000.0;
 	return SQLITE_OK;
 }

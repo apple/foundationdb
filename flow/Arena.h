@@ -190,7 +190,8 @@ class Optional : public ComposedIdentifier<T, 0x10> {
 public:
 	Optional() : valid(false) {}
 	Optional(const Optional<T>& o) : valid(o.valid) {
-		if (valid) new (&value) T(o.get());
+		if (valid)
+			new (&value) T(o.get());
 	}
 
 	template <class U>
@@ -204,7 +205,8 @@ public:
 	valid(o.present()) { if (valid) new (&value) T(o.get()); } */
 
 	Optional(Arena& a, const Optional<T>& o) : valid(o.valid) {
-		if (valid) new (&value) T(a, o.get());
+		if (valid)
+			new (&value) T(a, o.get());
 	}
 	int expectedSize() const { return valid ? get().expectedSize() : 0; }
 
@@ -223,7 +225,8 @@ public:
 	}
 
 	~Optional() {
-		if (valid) ((T*)&value)->~T();
+		if (valid)
+			((T*)&value)->~T();
 	}
 
 	Optional& operator=(Optional const& o) {
@@ -257,10 +260,12 @@ public:
 	template <class Ar>
 	void serialize(Ar& ar) {
 		// SOMEDAY: specialize for space efficiency?
-		if (valid && Ar::isDeserializing) (*(T*)&value).~T();
+		if (valid && Ar::isDeserializing)
+			(*(T*)&value).~T();
 		serializer(ar, valid);
 		if (valid) {
-			if (Ar::isDeserializing) new (&value) T();
+			if (Ar::isDeserializing)
+				new (&value) T();
 			serializer(ar, *(T*)&value);
 		}
 	}
@@ -269,8 +274,10 @@ public:
 	bool operator!=(Optional const& o) const { return !(*this == o); }
 	// Ordering: If T is ordered, then Optional() < Optional(t) and (Optional(u)<Optional(v))==(u<v)
 	bool operator<(Optional const& o) const {
-		if (present() != o.present()) return o.present();
-		if (!present()) return false;
+		if (present() != o.present())
+			return o.present();
+		if (!present())
+			return false;
 		return get() < o.get();
 	}
 
@@ -408,7 +415,8 @@ public:
 	StringRef(Arena& p, const std::string& toCopy) : length((int)toCopy.size()) {
 		UNSTOPPABLE_ASSERT(toCopy.size() <= std::numeric_limits<int>::max());
 		data = new (p) uint8_t[toCopy.size()];
-		if (length) memcpy((void*)data, &toCopy[0], length);
+		if (length)
+			memcpy((void*)data, &toCopy[0], length);
 	}
 	StringRef(Arena& p, const uint8_t* toCopy, int length) : data(new (p) uint8_t[length]), length(length) {
 		if (length > 0) {
@@ -417,7 +425,8 @@ public:
 	}
 	StringRef(const uint8_t* data, int length) : data(data), length(length) {}
 	StringRef(const std::string& s) : data((const uint8_t*)s.c_str()), length((int)s.size()) {
-		if (s.size() > std::numeric_limits<int>::max()) abort();
+		if (s.size() > std::numeric_limits<int>::max())
+			abort();
 	}
 	// StringRef( const StringRef& p );
 
@@ -486,7 +495,8 @@ public:
 	inline std::string printable() const;
 
 	std::string toHexString(int limit = -1) const {
-		if (limit < 0) limit = length;
+		if (limit < 0)
+			limit = length;
 		if (length > limit) {
 			// If limit is high enough split it so that 2/3 of limit is used to show prefix bytes and the rest is used
 			// for suffix bytes
@@ -507,7 +517,8 @@ public:
 			else
 				s.append(format("%02x ", b));
 		}
-		if (s.size() > 0) s.resize(s.size() - 1);
+		if (s.size() > 0)
+			s.resize(s.size() - 1);
 		return s;
 	}
 
@@ -516,7 +527,8 @@ public:
 	int compare(StringRef const& other) const {
 		if (std::min(size(), other.size()) > 0) {
 			int c = memcmp(begin(), other.begin(), std::min(size(), other.size()));
-			if (c != 0) return c;
+			if (c != 0)
+				return c;
 		}
 		return size() - other.size();
 	}
@@ -669,14 +681,16 @@ inline bool operator==(const StringRef& lhs, const StringRef& rhs) {
 inline bool operator<(const StringRef& lhs, const StringRef& rhs) {
 	if (std::min(lhs.size(), rhs.size()) > 0) {
 		int c = memcmp(lhs.begin(), rhs.begin(), std::min(lhs.size(), rhs.size()));
-		if (c != 0) return c < 0;
+		if (c != 0)
+			return c < 0;
 	}
 	return lhs.size() < rhs.size();
 }
 inline bool operator>(const StringRef& lhs, const StringRef& rhs) {
 	if (std::min(lhs.size(), rhs.size()) > 0) {
 		int c = memcmp(lhs.begin(), rhs.begin(), std::min(lhs.size(), rhs.size()));
-		if (c != 0) return c > 0;
+		if (c != 0)
+			return c > 0;
 	}
 	return lhs.size() > rhs.size();
 }
@@ -761,8 +775,9 @@ struct VectorRefPreserializer<T, VecSerStrategy::String> {
 template <class T, VecSerStrategy SerStrategy = VecSerStrategy::FlatBuffers>
 class VectorRef : public ComposedIdentifier<T, 0x8>, public VectorRefPreserializer<T, SerStrategy> {
 	using VPS = VectorRefPreserializer<T, SerStrategy>;
-	friend class VectorRef<T, SerStrategy == VecSerStrategy::FlatBuffers ? VecSerStrategy::String
-	                                                                     : VecSerStrategy::FlatBuffers>;
+	friend class VectorRef<T,
+	                       SerStrategy == VecSerStrategy::FlatBuffers ? VecSerStrategy::String
+	                                                                  : VecSerStrategy::FlatBuffers>;
 
 public:
 	using value_type = T;
@@ -840,9 +855,11 @@ public:
 
 	template <VecSerStrategy S>
 	bool operator==(VectorRef<T, S> const& rhs) const {
-		if (size() != rhs.size()) return false;
+		if (size() != rhs.size())
+			return false;
 		for (int i = 0; i < m_size; i++)
-			if ((*this)[i] != rhs[i]) return false;
+			if ((*this)[i] != rhs[i])
+				return false;
 		return true;
 	}
 
@@ -869,20 +886,23 @@ public:
 		return data[i];
 	}
 	void push_back(Arena& p, const T& value) {
-		if (m_size + 1 > m_capacity) reallocate(p, m_size + 1);
+		if (m_size + 1 > m_capacity)
+			reallocate(p, m_size + 1);
 		auto ptr = new (&data[m_size]) T(value);
 		VPS::add(*ptr);
 		m_size++;
 	}
 	// invokes the "Deep copy constructor" T(Arena&, const T&) moving T entirely into arena
 	void push_back_deep(Arena& p, const T& value) {
-		if (m_size + 1 > m_capacity) reallocate(p, m_size + 1);
+		if (m_size + 1 > m_capacity)
+			reallocate(p, m_size + 1);
 		auto ptr = new (&data[m_size]) T(p, value);
 		VPS::add(*ptr);
 		m_size++;
 	}
 	void append(Arena& p, const T* begin, int count) {
-		if (m_size + count > m_capacity) reallocate(p, m_size + count);
+		if (m_size + count > m_capacity)
+			reallocate(p, m_size + count);
 		VPS::invalidate();
 		if (count > 0) {
 			memcpy(data + m_size, begin, sizeof(T) * count);
@@ -891,7 +911,8 @@ public:
 	}
 	template <class It>
 	void append_deep(Arena& p, It begin, int count) {
-		if (m_size + count > m_capacity) reallocate(p, m_size + count);
+		if (m_size + count > m_capacity)
+			reallocate(p, m_size + count);
 		for (int i = 0; i < count; i++) {
 			auto ptr = new (&data[m_size + i]) T(p, *begin++);
 			VPS::add(*ptr);
@@ -913,7 +934,8 @@ public:
 	}
 
 	void resize(Arena& p, int size) {
-		if (size > m_capacity) reallocate(p, size);
+		if (size > m_capacity)
+			reallocate(p, size);
 		for (int i = m_size; i < size; i++) {
 			auto ptr = new (&data[i]) T();
 			VPS::add(*ptr);
@@ -922,7 +944,8 @@ public:
 	}
 
 	void reserve(Arena& p, int size) {
-		if (size > m_capacity) reallocate(p, size);
+		if (size > m_capacity)
+			reallocate(p, size);
 	}
 
 	// expectedSize() for non-Ref types, identified by memcpy_able
@@ -935,7 +958,8 @@ public:
 	template <class T2 = T>
 	typename std::enable_if<!memcpy_able<T2>::value, size_t>::type expectedSize() const {
 		size_t t = sizeof(T) * m_size;
-		for (int i = 0; i < m_size; i++) t += data[i].expectedSize();
+		for (int i = 0; i < m_size; i++)
+			t += data[i].expectedSize();
 		return t;
 	}
 
@@ -986,13 +1010,15 @@ inline void load(Archive& ar, VectorRef<T, S>& value) {
 	UNSTOPPABLE_ASSERT(length * sizeof(T) < (100 << 20));
 	// SOMEDAY: Can we avoid running constructors for all the values?
 	value.resize(ar.arena(), length);
-	for (uint32_t i = 0; i < length; i++) ar >> value[i];
+	for (uint32_t i = 0; i < length; i++)
+		ar >> value[i];
 }
 template <class Archive, class T, VecSerStrategy S>
 inline void save(Archive& ar, const VectorRef<T, S>& value) {
 	uint32_t length = value.size();
 	ar << length;
-	for (uint32_t i = 0; i < length; i++) ar << value[i];
+	for (uint32_t i = 0; i < length; i++)
+		ar << value[i];
 }
 
 template <class T>

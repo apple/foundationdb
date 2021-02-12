@@ -85,7 +85,10 @@ struct AsyncFileWorkload : TestWorkload {
 	virtual Future<bool> check(Database const& cx);
 
 	// Opens a file for AsyncFile operations.  If the path is empty, then creates a file and fills it with random data
-	ACTOR Future<Void> openFile(AsyncFileWorkload* self, int64_t flags, int64_t mode, uint64_t size,
+	ACTOR Future<Void> openFile(AsyncFileWorkload* self,
+	                            int64_t flags,
+	                            int64_t mode,
+	                            uint64_t size,
 	                            bool fillFile = false) {
 		state RandomByteGenerator rbg;
 
@@ -104,8 +107,10 @@ struct AsyncFileWorkload : TestWorkload {
 			flags |= IAsyncFile::OPEN_READWRITE;
 		}
 
-		if (self->unbufferedIO) flags |= IAsyncFile::OPEN_UNBUFFERED;
-		if (self->uncachedIO) flags |= IAsyncFile::OPEN_UNCACHED;
+		if (self->unbufferedIO)
+			flags |= IAsyncFile::OPEN_UNBUFFERED;
+		if (self->uncachedIO)
+			flags |= IAsyncFile::OPEN_UNCACHED;
 
 		try {
 			state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(self->path, flags, 0666));
@@ -118,7 +123,8 @@ struct AsyncFileWorkload : TestWorkload {
 				state int64_t oldSize = wait(file->size());
 				state int64_t newSize = (size + _PAGE_SIZE - 1) & ~(int64_t(_PAGE_SIZE - 1)); // align size up
 
-				if (!fileCreated) wait(file->truncate(newSize));
+				if (!fileCreated)
+					wait(file->truncate(newSize));
 
 				state int chunkSize = 4 << 16;
 				state Reference<AsyncFileBuffer> data = self->allocateBuffer(chunkSize);
@@ -127,7 +133,8 @@ struct AsyncFileWorkload : TestWorkload {
 				for (i = oldSize & ~(chunkSize - 1); i < newSize; i += chunkSize) {
 					if (i >> 30 != (i + (chunkSize)) >> 30) // each GB
 						printf("Building test file: %d GB\n", int((i + (chunkSize)) >> 30));
-					if (self->fillRandom) rbg.writeRandomBytesToBuffer(data->buffer, chunkSize);
+					if (self->fillRandom)
+						rbg.writeRandomBytesToBuffer(data->buffer, chunkSize);
 					auto w = lastWrite;
 					lastWrite = file->write(data->buffer, chunkSize, i);
 					wait(w);

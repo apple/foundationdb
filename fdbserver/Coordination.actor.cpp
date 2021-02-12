@@ -80,16 +80,19 @@ struct OnDemandStore {
 public:
 	OnDemandStore(std::string folder, UID myID) : folder(folder), store(NULL), myID(myID) {}
 	~OnDemandStore() {
-		if (store) store->close();
+		if (store)
+			store->close();
 	}
 
 	IKeyValueStore* get() {
-		if (!store) open();
+		if (!store)
+			open();
 		return store;
 	}
 
 	bool exists() {
-		if (store) return true;
+		if (store)
+			return true;
 		return fileExists(joinPath(folder, "coordination-0.fdq")) ||
 		       fileExists(joinPath(folder, "coordination-1.fdq")) || fileExists(joinPath(folder, "coordination.fdb"));
 	}
@@ -213,7 +216,9 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 	return Void();
 }
 
-ACTOR Future<Void> openDatabase(ClientData* db, int* clientCount, Reference<AsyncVar<bool>> hasConnectedClients,
+ACTOR Future<Void> openDatabase(ClientData* db,
+                                int* clientCount,
+                                Reference<AsyncVar<bool>> hasConnectedClients,
                                 OpenDatabaseCoordRequest req) {
 	if (db->clientInfo->get().read().id != req.knownClientInfoID && !db->clientInfo->get().read().forward.present()) {
 		req.reply.send(db->clientInfo->get());
@@ -283,7 +288,8 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				notify.push_back(req.reply);
 				if (notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
 					TraceEvent(SevWarnAlways, "TooManyNotifications").detail("Amount", notify.size());
-					for (uint32_t i = 0; i < notify.size(); i++) notify[i].send(currentNominee.get());
+					for (uint32_t i = 0; i < notify.size(); i++)
+						notify[i].send(currentNominee.get());
 					notify.clear();
 				} else if (!nextInterval.isValid()) {
 					nextInterval = delay(0);
@@ -303,7 +309,8 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				notify.push_back(req.reply);
 				if (notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
 					TraceEvent(SevWarnAlways, "TooManyNotifications").detail("Amount", notify.size());
-					for (uint32_t i = 0; i < notify.size(); i++) notify[i].send(currentNominee.get());
+					for (uint32_t i = 0; i < notify.size(); i++)
+						notify[i].send(currentNominee.get());
 					notify.clear();
 				}
 			}
@@ -322,7 +329,8 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			LeaderInfo newInfo;
 			newInfo.forward = true;
 			newInfo.serializedInfo = req.conn.toString();
-			for (unsigned int i = 0; i < notify.size(); i++) notify[i].send(newInfo);
+			for (unsigned int i = 0; i < notify.size(); i++)
+				notify[i].send(newInfo);
 			notify.clear();
 			ClientDBInfo outInfo;
 			outInfo.id = deterministicRandom()->randomUniqueID();
@@ -363,7 +371,8 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 					    .detail("NextNominee", nextNominee.present() ? nextNominee.get().changeID : UID())
 					    .detail("CurrentNominee", currentNominee.present() ? currentNominee.get().changeID : UID())
 					    .detail("Key", printable(key));
-					for (unsigned int i = 0; i < notify.size(); i++) notify[i].send(nextNominee);
+					for (unsigned int i = 0; i < notify.size(); i++)
+						notify[i].send(nextNominee);
 					notify.clear();
 				}
 
@@ -421,7 +430,8 @@ struct LeaderRegisterCollection {
 	LeaderRegisterCollection(OnDemandStore* pStore) : actors(false), pStore(pStore) {}
 
 	ACTOR static Future<Void> init(LeaderRegisterCollection* self) {
-		if (!self->pStore->exists()) return Void();
+		if (!self->pStore->exists())
+			return Void();
 		OnDemandStore& store = *self->pStore;
 		Standalone<RangeResultRef> forwardingInfo = wait(store->readRange(fwdKeys));
 		for (int i = 0; i < forwardingInfo.size(); i++) {
@@ -437,7 +447,8 @@ struct LeaderRegisterCollection {
 
 	Optional<LeaderInfo> getForward(KeyRef key) {
 		auto i = forward.find(key);
-		if (i == forward.end()) return Optional<LeaderInfo>();
+		if (i == forward.end())
+			return Optional<LeaderInfo>();
 		return i->value;
 	}
 
@@ -457,7 +468,8 @@ struct LeaderRegisterCollection {
 		if (i == registerInterfaces.end()) {
 			Key k = key;
 			Future<Void> a = wrap(this, k, leaderRegister(registerInterfaces[k], k), id);
-			if (a.isError()) throw a.getError();
+			if (a.isError())
+				throw a.getError();
 			ASSERT(!a.isReady());
 			actors.add(a);
 			i = registerInterfaces.find(key);
@@ -475,11 +487,13 @@ struct LeaderRegisterCollection {
 			endRole(Role::COORDINATOR, id, "Coordinator changed");
 		} catch (Error& err) {
 			endRole(Role::COORDINATOR, id, err.what(), err.code() == error_code_actor_cancelled, err);
-			if (err.code() == error_code_actor_cancelled) throw;
+			if (err.code() == error_code_actor_cancelled)
+				throw;
 			e = err;
 		}
 		self->registerInterfaces.erase(key);
-		if (e.code() != invalid_error_code) throw e;
+		if (e.code() != invalid_error_code)
+			throw e;
 		return Void();
 	}
 };

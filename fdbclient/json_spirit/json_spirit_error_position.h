@@ -32,7 +32,8 @@ inline Error_position::Error_position(unsigned int line, unsigned int column, co
   : line_(line), column_(column), reason_(reason) {}
 
 inline bool Error_position::operator==(const Error_position& lhs) const {
-	if (this == &lhs) return true;
+	if (this == &lhs)
+		return true;
 
 	return (reason_ == lhs.reason_) && (line_ == lhs.line_) && (column_ == lhs.column_);
 }

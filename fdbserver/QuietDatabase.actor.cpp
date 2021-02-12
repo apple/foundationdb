@@ -79,7 +79,8 @@ ACTOR Future<WorkerInterface> getDataDistributorWorker(Database cx, Reference<As
 
 	loop {
 		state vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
-		if (!dbInfo->get().distributor.present()) continue;
+		if (!dbInfo->get().distributor.present())
+			continue;
 
 		for (int i = 0; i < workers.size(); i++) {
 			if (workers[i].interf.address() == dbInfo->get().distributor.get().address()) {
@@ -223,14 +224,16 @@ ACTOR Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx, Referenc
 ACTOR Future<vector<StorageServerInterface>> getStorageServers(Database cx, bool use_system_priority = false) {
 	state Transaction tr(cx);
 	loop {
-		if (use_system_priority) tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		if (use_system_priority)
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			Standalone<RangeResultRef> serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 			vector<StorageServerInterface> servers;
-			for (int i = 0; i < serverList.size(); i++) servers.push_back(decodeServerListValue(serverList[i].value));
+			for (int i = 0; i < serverList.size(); i++)
+				servers.push_back(decodeServerListValue(serverList[i].value));
 			return servers;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -238,7 +241,8 @@ ACTOR Future<vector<StorageServerInterface>> getStorageServers(Database cx, bool
 	}
 }
 
-ACTOR Future<vector<WorkerInterface>> getStorageWorkers(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo,
+ACTOR Future<vector<WorkerInterface>> getStorageWorkers(Database cx,
+                                                        Reference<AsyncVar<ServerDBInfo>> dbInfo,
                                                         bool localOnly) {
 	state std::vector<StorageServerInterface> servers = wait(getStorageServers(cx));
 	state std::map<NetworkAddress, WorkerInterface> workersMap;
@@ -329,7 +333,8 @@ ACTOR Future<int64_t> getMaxStorageServerQueueSize(Database cx, Reference<AsyncV
 
 // Gets the size of the data distribution queue.  If reportInFlight is true, then data in flight is considered part of
 // the queue
-ACTOR Future<int64_t> getDataDistributionQueueSize(Database cx, WorkerInterface distributorWorker,
+ACTOR Future<int64_t> getDataDistributionQueueSize(Database cx,
+                                                   WorkerInterface distributorWorker,
                                                    bool reportInFlight) {
 	try {
 		TraceEvent("DataDistributionQueueSize").detail("Stage", "ContactingDataDistributor");
@@ -356,7 +361,8 @@ ACTOR Future<int64_t> getDataDistributionQueueSize(Database cx, WorkerInterface 
 
 // Gets the size of the data distribution queue.  If reportInFlight is true, then data in flight is considered part of
 // the queue Convenience method that first finds the master worker from a zookeeper interface
-ACTOR Future<int64_t> getDataDistributionQueueSize(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo,
+ACTOR Future<int64_t> getDataDistributionQueueSize(Database cx,
+                                                   Reference<AsyncVar<ServerDBInfo>> dbInfo,
                                                    bool reportInFlight) {
 	WorkerInterface distributorInterf = wait(getDataDistributorWorker(cx, dbInfo));
 	int64_t inQueue = wait(getDataDistributionQueueSize(cx, distributorInterf, reportInFlight));
@@ -551,24 +557,31 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDB
 	return Void();
 }
 
-ACTOR Future<Void> reconfigureAfter(Database cx, double time, Reference<AsyncVar<ServerDBInfo>> dbInfo,
+ACTOR Future<Void> reconfigureAfter(Database cx,
+                                    double time,
+                                    Reference<AsyncVar<ServerDBInfo>> dbInfo,
                                     std::string context) {
 	wait(delay(time));
 	wait(repairDeadDatacenter(cx, dbInfo, context));
 	return Void();
 }
 
-ACTOR Future<Void> waitForQuietDatabase(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, std::string phase,
-                                        int64_t dataInFlightGate = 2e6, int64_t maxTLogQueueGate = 5e6,
+ACTOR Future<Void> waitForQuietDatabase(Database cx,
+                                        Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                        std::string phase,
+                                        int64_t dataInFlightGate = 2e6,
+                                        int64_t maxTLogQueueGate = 5e6,
                                         int64_t maxStorageServerQueueGate = 5e6,
-                                        int64_t maxDataDistributionQueueSize = 0, int64_t maxPoppedVersionLag = 30e6) {
+                                        int64_t maxDataDistributionQueueSize = 0,
+                                        int64_t maxPoppedVersionLag = 30e6) {
 	state Future<Void> reconfig =
 	    reconfigureAfter(cx, 100 + (deterministicRandom()->random01() * 100), dbInfo, "QuietDatabase");
 
 	TraceEvent(("QuietDatabase" + phase + "Begin").c_str());
 
 	// In a simulated environment, wait 5 seconds so that workers can move to their optimal locations
-	if (g_network->isSimulated()) wait(delay(5.0));
+	if (g_network->isSimulated())
+		wait(delay(5.0));
 
 	// Require 3 consecutive successful quiet database checks spaced 2 second apart
 	state int numSuccesses = 0;
@@ -627,7 +640,8 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx, Reference<AsyncVar<ServerDB
 
 			// Client invalid operation occurs if we don't get back a message from one of the servers, often corrected
 			// by retrying
-			if (e.code() != error_code_attribute_not_found && e.code() != error_code_timed_out) throw;
+			if (e.code() != error_code_attribute_not_found && e.code() != error_code_timed_out)
+				throw;
 
 			TraceEvent(("QuietDatabase" + phase + "Retry").c_str()).error(e);
 			wait(delay(1.0));
@@ -638,9 +652,20 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx, Reference<AsyncVar<ServerDB
 	return Void();
 }
 
-Future<Void> quietDatabase(Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo, std::string phase,
-                           int64_t dataInFlightGate, int64_t maxTLogQueueGate, int64_t maxStorageServerQueueGate,
-                           int64_t maxDataDistributionQueueSize, int64_t maxPoppedVersionLag) {
-	return waitForQuietDatabase(cx, dbInfo, phase, dataInFlightGate, maxTLogQueueGate, maxStorageServerQueueGate,
-	                            maxDataDistributionQueueSize, maxPoppedVersionLag);
+Future<Void> quietDatabase(Database const& cx,
+                           Reference<AsyncVar<ServerDBInfo>> const& dbInfo,
+                           std::string phase,
+                           int64_t dataInFlightGate,
+                           int64_t maxTLogQueueGate,
+                           int64_t maxStorageServerQueueGate,
+                           int64_t maxDataDistributionQueueSize,
+                           int64_t maxPoppedVersionLag) {
+	return waitForQuietDatabase(cx,
+	                            dbInfo,
+	                            phase,
+	                            dataInFlightGate,
+	                            maxTLogQueueGate,
+	                            maxStorageServerQueueGate,
+	                            maxDataDistributionQueueSize,
+	                            maxPoppedVersionLag);
 }

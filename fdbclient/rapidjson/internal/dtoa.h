@@ -44,14 +44,22 @@ inline void GrisuRound(char* buffer, int len, uint64_t delta, uint64_t rest, uin
 
 inline unsigned CountDecimalDigit32(uint32_t n) {
 	// Simple pure C++ implementation was faster than __builtin_clz version in this situation.
-	if (n < 10) return 1;
-	if (n < 100) return 2;
-	if (n < 1000) return 3;
-	if (n < 10000) return 4;
-	if (n < 100000) return 5;
-	if (n < 1000000) return 6;
-	if (n < 10000000) return 7;
-	if (n < 100000000) return 8;
+	if (n < 10)
+		return 1;
+	if (n < 100)
+		return 2;
+	if (n < 1000)
+		return 3;
+	if (n < 10000)
+		return 4;
+	if (n < 100000)
+		return 5;
+	if (n < 1000000)
+		return 6;
+	if (n < 10000000)
+		return 7;
+	if (n < 100000000)
+		return 8;
 	// Will not reach 10 digits in DigitGen()
 	// if (n < 1000000000) return 9;
 	// return 10;
@@ -108,7 +116,8 @@ inline void DigitGen(const DiyFp& W, const DiyFp& Mp, uint64_t delta, char* buff
 			break;
 		default:;
 		}
-		if (d || *len) buffer[(*len)++] = static_cast<char>('0' + static_cast<char>(d));
+		if (d || *len)
+			buffer[(*len)++] = static_cast<char>('0' + static_cast<char>(d));
 		kappa--;
 		uint64_t tmp = (static_cast<uint64_t>(p1) << -one.e) + p2;
 		if (tmp <= delta) {
@@ -123,7 +132,8 @@ inline void DigitGen(const DiyFp& W, const DiyFp& Mp, uint64_t delta, char* buff
 		p2 *= 10;
 		delta *= 10;
 		char d = static_cast<char>(p2 >> -one.e);
-		if (d || *len) buffer[(*len)++] = static_cast<char>('0' + d);
+		if (d || *len)
+			buffer[(*len)++] = static_cast<char>('0' + d);
 		p2 &= one.f - 1;
 		kappa--;
 		if (p2 < delta) {
@@ -176,7 +186,8 @@ inline char* Prettify(char* buffer, int length, int k, int maxDecimalPlaces) {
 
 	if (0 <= k && kk <= 21) {
 		// 1234e7 -> 12340000000
-		for (int i = length; i < kk; i++) buffer[i] = '0';
+		for (int i = length; i < kk; i++)
+			buffer[i] = '0';
 		buffer[kk] = '.';
 		buffer[kk + 1] = '0';
 		return &buffer[kk + 2];
@@ -188,7 +199,8 @@ inline char* Prettify(char* buffer, int length, int k, int maxDecimalPlaces) {
 			// When maxDecimalPlaces = 2, 1.2345 -> 1.23, 1.102 -> 1.1
 			// Remove extra trailing zeros (at least one) after truncation.
 			for (int i = kk + maxDecimalPlaces; i > kk + 1; i--)
-				if (buffer[i] != '0') return &buffer[i + 1];
+				if (buffer[i] != '0')
+					return &buffer[i + 1];
 			return &buffer[kk + 2]; // Reserve one zero
 		} else
 			return &buffer[length + 1];
@@ -198,12 +210,14 @@ inline char* Prettify(char* buffer, int length, int k, int maxDecimalPlaces) {
 		std::memmove(&buffer[offset], &buffer[0], static_cast<size_t>(length));
 		buffer[0] = '0';
 		buffer[1] = '.';
-		for (int i = 2; i < offset; i++) buffer[i] = '0';
+		for (int i = 2; i < offset; i++)
+			buffer[i] = '0';
 		if (length - kk > maxDecimalPlaces) {
 			// When maxDecimalPlaces = 2, 0.123 -> 0.12, 0.102 -> 0.1
 			// Remove extra trailing zeros (at least one) after truncation.
 			for (int i = maxDecimalPlaces + 1; i > 2; i--)
-				if (buffer[i] != '0') return &buffer[i + 1];
+				if (buffer[i] != '0')
+					return &buffer[i + 1];
 			return &buffer[3]; // Reserve one zero
 		} else
 			return &buffer[length + offset];
@@ -230,7 +244,8 @@ inline char* dtoa(double value, char* buffer, int maxDecimalPlaces = 324) {
 	RAPIDJSON_ASSERT(maxDecimalPlaces >= 1);
 	Double d(value);
 	if (d.IsZero()) {
-		if (d.Sign()) *buffer++ = '-'; // -0.0, Issue #289
+		if (d.Sign())
+			*buffer++ = '-'; // -0.0, Issue #289
 		buffer[0] = '0';
 		buffer[1] = '.';
 		buffer[2] = '0';

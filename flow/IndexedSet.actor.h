@@ -55,13 +55,16 @@ Future<Void> ISFreeNodes(std::vector<Node*> toFree, bool synchronous) {
 		auto n = prefetchQueue.front();
 		prefetchQueue.pop_front();
 
-		if (n->child[0]) toFree.push_back(n->child[0]);
-		if (n->child[1]) toFree.push_back(n->child[1]);
+		if (n->child[0])
+			toFree.push_back(n->child[0]);
+		if (n->child[1])
+			toFree.push_back(n->child[1]);
 		n->child[0] = n->child[1] = 0;
 		delete n;
 		++eraseCount;
 
-		if (!synchronous && eraseCount % 1000 == 0) wait(yield());
+		if (!synchronous && eraseCount % 1000 == 0)
+			wait(yield());
 	}
 
 	return Void();

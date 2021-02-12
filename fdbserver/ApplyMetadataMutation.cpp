@@ -27,7 +27,8 @@
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogProtocolMessage.h"
 
-Reference<StorageInfo> getStorageInfo(UID id, std::map<UID, Reference<StorageInfo>>* storageCache,
+Reference<StorageInfo> getStorageInfo(UID id,
+                                      std::map<UID, Reference<StorageInfo>>* storageCache,
                                       IKeyValueStore* txnStateStore) {
 	Reference<StorageInfo> storageInfo;
 	auto cacheItr = storageCache->find(id);
@@ -45,13 +46,22 @@ Reference<StorageInfo> getStorageInfo(UID id, std::map<UID, Reference<StorageInf
 // It is incredibly important that any modifications to txnStateStore are done in such a way that
 // the same operations will be done on all proxies at the same time. Otherwise, the data stored in
 // txnStateStore will become corrupted.
-void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRef> const& mutations,
-                            IKeyValueStore* txnStateStore, LogPushData* toCommit, bool* confChange,
-                            Reference<ILogSystem> logSystem, Version popVersion,
-                            KeyRangeMap<std::set<Key>>* vecBackupKeys, KeyRangeMap<ServerCacheInfo>* keyInfo,
+void applyMetadataMutations(UID const& dbgid,
+                            Arena& arena,
+                            VectorRef<MutationRef> const& mutations,
+                            IKeyValueStore* txnStateStore,
+                            LogPushData* toCommit,
+                            bool* confChange,
+                            Reference<ILogSystem> logSystem,
+                            Version popVersion,
+                            KeyRangeMap<std::set<Key>>* vecBackupKeys,
+                            KeyRangeMap<ServerCacheInfo>* keyInfo,
                             std::map<Key, applyMutationsData>* uid_applyMutationsData,
-                            RequestStream<CommitTransactionRequest> commit, Database cx, NotifiedVersion* commitVersion,
-                            std::map<UID, Reference<StorageInfo>>* storageCache, std::map<Tag, Version>* tag_popped,
+                            RequestStream<CommitTransactionRequest> commit,
+                            Database cx,
+                            NotifiedVersion* commitVersion,
+                            std::map<UID, Reference<StorageInfo>>* storageCache,
+                            std::map<Tag, Version>* tag_popped,
                             bool initialCommit) {
 	for (auto const& m : mutations) {
 		//TraceEvent("MetadataMutation", dbgid).detail("M", m.toString());
@@ -88,7 +98,8 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 						keyInfo->insert(insertRange, info);
 					}
 				}
-				if (!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
+				if (!initialCommit)
+					txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			} else if (m.param1.startsWith(serverKeysPrefix)) {
 				if (toCommit) {
 					MutationRef privatized = m;
@@ -155,10 +166,12 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 						    .detail("M", m.toString())
 						    .detail("PrevValue", t.present() ? t.get() : LiteralStringRef("(none)"))
 						    .detail("ToCommit", toCommit != NULL);
-						if (confChange) *confChange = true;
+						if (confChange)
+							*confChange = true;
 					}
 				}
-				if (!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
+				if (!initialCommit)
+					txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			} else if (m.param1.startsWith(serverListPrefix)) {
 				if (!initialCommit) {
 					txnStateStore->set(KeyValueRef(m.param1, m.param2));
@@ -187,9 +200,11 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 			           m.param1.startsWith(applyMutationsRemovePrefixRange.begin) ||
 			           m.param1.startsWith(tagLocalityListPrefix) || m.param1.startsWith(serverTagHistoryPrefix) ||
 			           m.param1.startsWith(testOnlyTxnStateStorePrefixRange.begin)) {
-				if (!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
+				if (!initialCommit)
+					txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			} else if (m.param1.startsWith(applyMutationsEndRange.begin)) {
-				if (!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
+				if (!initialCommit)
+					txnStateStore->set(KeyValueRef(m.param1, m.param2));
 				if (uid_applyMutationsData != NULL) {
 					Key uid = m.param1.removePrefix(applyMutationsEndRange.begin);
 					auto& p = (*uid_applyMutationsData)[uid];
@@ -204,15 +219,21 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 						auto beginValue =
 						    txnStateStore->readValue(uid.withPrefix(applyMutationsBeginRange.begin)).get();
 						p.worker = applyMutations(
-						    cx, uid, addPrefixValue.present() ? addPrefixValue.get() : Key(),
+						    cx,
+						    uid,
+						    addPrefixValue.present() ? addPrefixValue.get() : Key(),
 						    removePrefixValue.present() ? removePrefixValue.get() : Key(),
 						    beginValue.present() ? BinaryReader::fromStringRef<Version>(beginValue.get(), Unversioned())
 						                         : 0,
-						    &p.endVersion, commit, commitVersion, p.keyVersion);
+						    &p.endVersion,
+						    commit,
+						    commitVersion,
+						    p.keyVersion);
 					}
 				}
 			} else if (m.param1.startsWith(applyMutationsKeyVersionMapRange.begin)) {
-				if (!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
+				if (!initialCommit)
+					txnStateStore->set(KeyValueRef(m.param1, m.param2));
 				if (uid_applyMutationsData != NULL) {
 					if (m.param1.size() >= applyMutationsKeyVersionMapRange.begin.size() + sizeof(UID)) {
 						Key uid = m.param1.substr(applyMutationsKeyVersionMapRange.begin.size(), sizeof(UID));
@@ -224,7 +245,8 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 					}
 				}
 			} else if (m.param1.startsWith(logRangesRange.begin)) {
-				if (!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
+				if (!initialCommit)
+					txnStateStore->set(KeyValueRef(m.param1, m.param2));
 				if (vecBackupKeys) {
 					Key logDestination;
 					KeyRef logRangeBegin = logRangesDecodeKey(m.param1, NULL);
@@ -281,8 +303,10 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 				    .detail("Min", requested)
 				    .detail("Current", popVersion)
 				    .detail("HasConf", !!confChange);
-				if (!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
-				if (confChange) *confChange = true;
+				if (!initialCommit)
+					txnStateStore->set(KeyValueRef(m.param1, m.param2));
+				if (confChange)
+					*confChange = true;
 				TEST(true); // Recovering at a higher version.
 			}
 		} else if (m.param2.size() && m.param2[0] == systemKeys.begin[0] && m.type == MutationRef::ClearRange) {
@@ -293,25 +317,31 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 				if (keyInfo) {
 					KeyRangeRef clearRange(r.begin.removePrefix(keyServersPrefix),
 					                       r.end.removePrefix(keyServersPrefix));
-					keyInfo->insert(clearRange, clearRange.begin == StringRef()
-					                                ? ServerCacheInfo()
-					                                : keyInfo->rangeContainingKeyBefore(clearRange.begin).value());
+					keyInfo->insert(clearRange,
+					                clearRange.begin == StringRef()
+					                    ? ServerCacheInfo()
+					                    : keyInfo->rangeContainingKeyBefore(clearRange.begin).value());
 				}
 
-				if (!initialCommit) txnStateStore->clear(r);
+				if (!initialCommit)
+					txnStateStore->clear(r);
 			}
 			if (configKeys.intersects(range)) {
-				if (!initialCommit) txnStateStore->clear(range & configKeys);
+				if (!initialCommit)
+					txnStateStore->clear(range & configKeys);
 				if (!excludedServersKeys.contains(range)) {
 					TraceEvent("MutationRequiresRestart", dbgid).detail("M", m.toString());
-					if (confChange) *confChange = true;
+					if (confChange)
+						*confChange = true;
 				}
 			}
 			if (serverListKeys.intersects(range)) {
-				if (!initialCommit) txnStateStore->clear(range & serverListKeys);
+				if (!initialCommit)
+					txnStateStore->clear(range & serverListKeys);
 			}
 			if (tagLocalityListKeys.intersects(range)) {
-				if (!initialCommit) txnStateStore->clear(range & tagLocalityListKeys);
+				if (!initialCommit)
+					txnStateStore->clear(range & tagLocalityListKeys);
 			}
 			if (serverTagKeys.intersects(range)) {
 				// Storage server removal always happens in a separate version from any prior writes (or any subsequent
@@ -363,26 +393,33 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 						(*tag_popped)[tag] = popVersion;
 					}
 				}
-				if (!initialCommit) txnStateStore->clear(range & serverTagHistoryKeys);
+				if (!initialCommit)
+					txnStateStore->clear(range & serverTagHistoryKeys);
 			}
 			if (range.contains(coordinatorsKey)) {
-				if (!initialCommit) txnStateStore->clear(singleKeyRange(coordinatorsKey));
+				if (!initialCommit)
+					txnStateStore->clear(singleKeyRange(coordinatorsKey));
 			}
 			if (range.contains(databaseLockedKey)) {
-				if (!initialCommit) txnStateStore->clear(singleKeyRange(databaseLockedKey));
+				if (!initialCommit)
+					txnStateStore->clear(singleKeyRange(databaseLockedKey));
 			}
 			if (range.contains(metadataVersionKey)) {
-				if (!initialCommit) txnStateStore->clear(singleKeyRange(metadataVersionKey));
+				if (!initialCommit)
+					txnStateStore->clear(singleKeyRange(metadataVersionKey));
 			}
 			if (range.contains(mustContainSystemMutationsKey)) {
-				if (!initialCommit) txnStateStore->clear(singleKeyRange(mustContainSystemMutationsKey));
+				if (!initialCommit)
+					txnStateStore->clear(singleKeyRange(mustContainSystemMutationsKey));
 			}
 			if (range.intersects(testOnlyTxnStateStorePrefixRange)) {
-				if (!initialCommit) txnStateStore->clear(range & testOnlyTxnStateStorePrefixRange);
+				if (!initialCommit)
+					txnStateStore->clear(range & testOnlyTxnStateStorePrefixRange);
 			}
 			if (range.intersects(applyMutationsEndRange)) {
 				KeyRangeRef commonEndRange(range & applyMutationsEndRange);
-				if (!initialCommit) txnStateStore->clear(commonEndRange);
+				if (!initialCommit)
+					txnStateStore->clear(commonEndRange);
 				if (uid_applyMutationsData != NULL) {
 					uid_applyMutationsData->erase(
 					    uid_applyMutationsData->lower_bound(m.param1.substr(applyMutationsEndRange.begin.size())),
@@ -393,7 +430,8 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 			}
 			if (range.intersects(applyMutationsKeyVersionMapRange)) {
 				KeyRangeRef commonApplyRange(range & applyMutationsKeyVersionMapRange);
-				if (!initialCommit) txnStateStore->clear(commonApplyRange);
+				if (!initialCommit)
+					txnStateStore->clear(commonApplyRange);
 				if (uid_applyMutationsData != NULL) {
 					if (m.param1.size() >= applyMutationsKeyVersionMapRange.begin.size() + sizeof(UID) &&
 					    m.param2.size() >= applyMutationsKeyVersionMapRange.begin.size() + sizeof(UID)) {
@@ -477,7 +515,8 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 					vecBackupKeys->coalesce(allKeys);
 				}
 
-				if (!initialCommit) txnStateStore->clear(commonLogRange);
+				if (!initialCommit)
+					txnStateStore->clear(commonLogRange);
 			}
 		}
 	}

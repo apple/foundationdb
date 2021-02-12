@@ -24,17 +24,21 @@
 ACTOR Future<Void> waitForStateEqual(IFailureMonitor* monitor, Endpoint endpoint, FailureStatus status) {
 	loop {
 		Future<Void> change = monitor->onStateChanged(endpoint);
-		if (monitor->getState(endpoint) == status) return Void();
+		if (monitor->getState(endpoint) == status)
+			return Void();
 		wait(change);
 	}
 }
 
-ACTOR Future<Void> waitForContinuousFailure(IFailureMonitor* monitor, Endpoint endpoint,
-                                            double sustainedFailureDuration, double slope) {
+ACTOR Future<Void> waitForContinuousFailure(IFailureMonitor* monitor,
+                                            Endpoint endpoint,
+                                            double sustainedFailureDuration,
+                                            double slope) {
 	state double startT = now();
 	loop {
 		wait(monitor->onFailed(endpoint));
-		if (monitor->permanentlyFailed(endpoint)) return Void();
+		if (monitor->permanentlyFailed(endpoint))
+			return Void();
 
 		// X == sustainedFailureDuration + slope * (now()-startT+X)
 		double waitDelay = (sustainedFailureDuration + slope * (now() - startT)) / (1 - slope);
@@ -54,7 +58,8 @@ ACTOR Future<Void> waitForContinuousFailure(IFailureMonitor* monitor, Endpoint e
 }
 
 Future<Void> IFailureMonitor::onStateEqual(Endpoint const& endpoint, FailureStatus status) {
-	if (status == getState(endpoint)) return Void();
+	if (status == getState(endpoint))
+		return Void();
 	return waitForStateEqual(this, endpoint, status);
 }
 
@@ -67,7 +72,7 @@ void SimpleFailureMonitor::setStatus(NetworkAddress const& address, FailureStatu
 
 	// if (status.failed)
 	//	printf("On machine '%s': Machine '%s' is failed\n", g_network->getLocalAddress().toString().c_str(),
-	//address.toString().c_str()); printf("%s.setState(%s, %s) %p\n", g_network->getLocalAddress().toString(),
+	// address.toString().c_str()); printf("%s.setState(%s, %s) %p\n", g_network->getLocalAddress().toString(),
 	// address.toString(), status.failed ? "FAILED" : "OK", this); addressStatus.set( address, status );
 
 	// onStateChanged() will be waiting on endpointKnownFailed only where it is false, so if the address status
@@ -168,7 +173,8 @@ FailureStatus SimpleFailureMonitor::getState(NetworkAddress const& address) {
 }
 
 bool SimpleFailureMonitor::onlyEndpointFailed(Endpoint const& endpoint) {
-	if (!endpointKnownFailed.get(endpoint)) return false;
+	if (!endpointKnownFailed.get(endpoint))
+		return false;
 	auto a = addressStatus.find(endpoint.getPrimaryAddress());
 	if (a == addressStatus.end())
 		return true;

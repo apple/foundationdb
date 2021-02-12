@@ -47,14 +47,16 @@ destroyed.
 struct Coroutine /*: IThreadlike*/ {
 	Coroutine() {
 		coro = Coro_new();
-		if (coro == NULL) platform::outOfMemory();
+		if (coro == NULL)
+			platform::outOfMemory();
 	}
 
 	~Coroutine() { Coro_free(coro); }
 
 	void start() {
 		int result = Coro_startCoro_(swapCoro(coro), coro, this, &entry);
-		if (result == ENOMEM) platform::outOfMemory();
+		if (result == ENOMEM)
+			platform::outOfMemory();
 	}
 
 	void unblock() {
@@ -102,7 +104,8 @@ class WorkPool : public IThreadPool, public ReferenceCounted<WorkPool<Threadlike
 		Pool() : anyError(false), allStopped(true) { m_holdRefUntilStopped = holdRefUntilStopped(this); }
 
 		~Pool() {
-			for (int c = 0; c < workers.size(); c++) delete workers[c];
+			for (int c = 0; c < workers.size(); c++)
+				delete workers[c];
 		}
 
 		ACTOR Future<Void> holdRefUntilStopped(Pool* p) {
@@ -124,7 +127,8 @@ class WorkPool : public IThreadPool, public ReferenceCounted<WorkPool<Threadlike
 
 		virtual void run() {
 			try {
-				if (!stop) userData->init();
+				if (!stop)
+					userData->init();
 
 				while (!stop) {
 					pool->queueLock.enter();
@@ -137,7 +141,8 @@ class WorkPool : public IThreadPool, public ReferenceCounted<WorkPool<Threadlike
 						pool->work.pop_front();
 						pool->queueLock.leave();
 						(*a)(userData);
-						if (IS_CORO) CoroThreadPool::waitFor(yield());
+						if (IS_CORO)
+							CoroThreadPool::waitFor(yield());
 					}
 				}
 
@@ -218,7 +223,8 @@ public:
 			pool->queueLock.leave();
 	}
 	virtual Future<Void> stop() {
-		if (error.code() == invalid_error_code) error = success();
+		if (error.code() == invalid_error_code)
+			error = success();
 
 		pool->queueLock.enter();
 		TraceEvent("WorkPool_Stop")
@@ -229,13 +235,15 @@ public:
 		for (uint32_t i = 0; i < pool->work.size(); i++)
 			pool->work[i]->cancel(); // What if cancel() does something to this?
 		pool->work.clear();
-		for (int i = 0; i < pool->workers.size(); i++) pool->workers[i]->stop = true;
+		for (int i = 0; i < pool->workers.size(); i++)
+			pool->workers[i]->stop = true;
 
 		std::vector<Worker*> idle;
 		std::swap(idle, pool->idle);
 		pool->queueLock.leave();
 
-		for (int i = 0; i < idle.size(); i++) idle[i]->unblock();
+		for (int i = 0; i < idle.size(); i++)
+			idle[i]->unblock();
 
 		pool->allStopped.add(Void());
 
@@ -262,13 +270,14 @@ ACTOR void coroSwitcher(Future<Void> what, TaskPriority taskID, Coro* coro) {
 
 void CoroThreadPool::waitFor(Future<Void> what) {
 	ASSERT(current_coro != main_coro);
-	if (what.isReady()) return;
+	if (what.isReady())
+		return;
 	// double t = now();
 	coroSwitcher(what, g_network->getCurrentTask(), current_coro);
 	Coro_switchTo_(swapCoro(main_coro), main_coro);
 	// if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting && now()!=t)
 	//	TraceEvent("NonzeroWaitDuringReboot").detail("TaskID", currentTaskID).detail("Elapsed",
-	//now()-t).backtrace("Coro");
+	// now()-t).backtrace("Coro");
 	ASSERT(what.isReady());
 }
 
@@ -276,7 +285,8 @@ void CoroThreadPool::waitFor(Future<Void> what) {
 void CoroThreadPool::init() {
 	if (!current_coro) {
 		current_coro = main_coro = Coro_new();
-		if (main_coro == NULL) platform::outOfMemory();
+		if (main_coro == NULL)
+			platform::outOfMemory();
 
 		Coro_initializeMainCoro(main_coro);
 		// printf("Main thread: %d bytes stack presumed available\n", Coro_bytesLeftOnStack(current_coro));

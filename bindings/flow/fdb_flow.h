@@ -66,26 +66,42 @@ public:
 	virtual Future<Void> watch(const Key& key) = 0;
 
 	virtual Future<FDBStandalone<RangeResultRef>> getRange(
-	    const KeySelector& begin, const KeySelector& end, GetRangeLimits limits = GetRangeLimits(),
-	    bool snapshot = false, bool reverse = false, FDBStreamingMode streamingMode = FDB_STREAMING_MODE_SERIAL) = 0;
-	virtual Future<FDBStandalone<RangeResultRef>> getRange(const KeySelector& begin, const KeySelector& end, int limit,
-	                                                       bool snapshot = false, bool reverse = false,
+	    const KeySelector& begin,
+	    const KeySelector& end,
+	    GetRangeLimits limits = GetRangeLimits(),
+	    bool snapshot = false,
+	    bool reverse = false,
+	    FDBStreamingMode streamingMode = FDB_STREAMING_MODE_SERIAL) = 0;
+	virtual Future<FDBStandalone<RangeResultRef>> getRange(const KeySelector& begin,
+	                                                       const KeySelector& end,
+	                                                       int limit,
+	                                                       bool snapshot = false,
+	                                                       bool reverse = false,
 	                                                       FDBStreamingMode streamingMode = FDB_STREAMING_MODE_SERIAL) {
 		return getRange(begin, end, GetRangeLimits(limit), snapshot, reverse, streamingMode);
 	}
-	virtual Future<FDBStandalone<RangeResultRef>> getRange(const KeyRange& keys, int limit, bool snapshot = false,
+	virtual Future<FDBStandalone<RangeResultRef>> getRange(const KeyRange& keys,
+	                                                       int limit,
+	                                                       bool snapshot = false,
 	                                                       bool reverse = false,
 	                                                       FDBStreamingMode streamingMode = FDB_STREAMING_MODE_SERIAL) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
-		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()), limit, snapshot, reverse,
+		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
+		                limit,
+		                snapshot,
+		                reverse,
 		                streamingMode);
 	}
 	virtual Future<FDBStandalone<RangeResultRef>> getRange(const KeyRange& keys,
 	                                                       GetRangeLimits limits = GetRangeLimits(),
-	                                                       bool snapshot = false, bool reverse = false,
+	                                                       bool snapshot = false,
+	                                                       bool reverse = false,
 	                                                       FDBStreamingMode streamingMode = FDB_STREAMING_MODE_SERIAL) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
-		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()), limits, snapshot, reverse,
+		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
+		                limits,
+		                snapshot,
+		                reverse,
 		                streamingMode);
 	}
 

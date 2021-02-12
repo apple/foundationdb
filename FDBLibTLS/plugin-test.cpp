@@ -99,7 +99,8 @@ int FDBLibTLSPluginTest::circular_read(boost::circular_buffer<uint8_t>* cb, uint
 	int n = 0;
 
 	for (n = 0; n < len; n++) {
-		if (cb->empty()) break;
+		if (cb->empty())
+			break;
 		buf[n] = (*cb)[0];
 		cb->pop_front();
 	}
@@ -111,7 +112,8 @@ int FDBLibTLSPluginTest::circular_write(boost::circular_buffer<uint8_t>* cb, con
 	int n = 0;
 
 	for (n = 0; n < len; n++) {
-		if (cb->full()) break;
+		if (cb->full())
+			break;
 		cb->push_back(buf[n]);
 	}
 
@@ -236,9 +238,11 @@ Reference<ITLSSession> FDBLibTLSPluginTest::create_server_session(Reference<ITLS
 
 #define MAX_VERIFY_RULES 5
 
-static void convert_verify_peers(const std::vector<std::string>* verify_rules, const uint8_t* verify_peers[],
+static void convert_verify_peers(const std::vector<std::string>* verify_rules,
+                                 const uint8_t* verify_peers[],
                                  int verify_peers_len[]) {
-	if (verify_rules->size() > MAX_VERIFY_RULES) throw std::runtime_error("verify");
+	if (verify_rules->size() > MAX_VERIFY_RULES)
+		throw std::runtime_error("verify");
 	int i = 0;
 	for (auto& verify_rule : *verify_rules) {
 		verify_peers[i] = (const uint8_t*)&verify_rule[0];
@@ -300,7 +304,8 @@ int FDBLibTLSPluginTest::client_server_test(const struct client_server_test* cst
 	Reference<ITLSSession> client_session = create_client_session(client_policy, cst->servername);
 	Reference<ITLSSession> server_session = create_server_session(server_policy);
 
-	if (client_session.getPtr() == NULL || server_session.getPtr() == NULL) return 1;
+	if (client_session.getPtr() == NULL || server_session.getPtr() == NULL)
+		return 1;
 
 	std::cerr << "INFO: starting TLS handshake...\n";
 
@@ -359,7 +364,8 @@ int FDBLibTLSPluginTest::client_server_test(const struct client_server_test* cst
 		std::cerr << "FAIL: server handshake succeeded when it should have failed\n";
 		return 1;
 	}
-	if (!cst->client_success || !cst->server_success) return 0;
+	if (!cst->client_success || !cst->server_success)
+		return 0;
 
 	std::cerr << "INFO: handshake completed successfully\n";
 
@@ -380,7 +386,8 @@ int FDBLibTLSPluginTest::client_server_test(const struct client_server_test* cst
 			rc = client_session->write((const uint8_t*)&client_msg[cn], client_msg.size() - cn);
 			if (rc > 0) {
 				cn += rc;
-				if (cn >= client_msg.size()) client_done = true;
+				if (cn >= client_msg.size())
+					client_done = true;
 			} else if (rc == ITLSSession::FAILED) {
 				std::cerr << "FAIL: failed to complete client write\n";
 				return 1;
@@ -393,8 +400,10 @@ int FDBLibTLSPluginTest::client_server_test(const struct client_server_test* cst
 			rc = server_session->read(buf, sizeof(buf));
 			if (rc > 0) {
 				sn += rc;
-				for (int j = 0; j < rc; j++) server_msg += buf[j];
-				if (sn >= client_msg.size()) server_done = true;
+				for (int j = 0; j < rc; j++)
+					server_msg += buf[j];
+				if (sn >= client_msg.size())
+					server_done = true;
 			} else if (rc == ITLSSession::FAILED) {
 				std::cerr << "FAIL: failed to complete server read\n";
 				return 1;
@@ -428,7 +437,8 @@ int FDBLibTLSPluginTest::client_server_test(const struct client_server_test* cst
 			rc = server_session->write((const uint8_t*)&server_msg[cn], server_msg.size() - cn);
 			if (rc > 0) {
 				cn += rc;
-				if (cn >= server_msg.size()) server_done = true;
+				if (cn >= server_msg.size())
+					server_done = true;
 			} else if (rc == ITLSSession::FAILED) {
 				std::cerr << "FAIL: failed to complete server write\n";
 				return 1;
@@ -441,8 +451,10 @@ int FDBLibTLSPluginTest::client_server_test(const struct client_server_test* cst
 			rc = client_session->read(buf, sizeof(buf));
 			if (rc > 0) {
 				sn += rc;
-				for (int j = 0; j < rc; j++) client_msg += buf[j];
-				if (sn >= server_msg.size()) client_done = true;
+				for (int j = 0; j < rc; j++)
+					client_msg += buf[j];
+				if (sn >= server_msg.size())
+					client_done = true;
 			} else if (rc == ITLSSession::FAILED) {
 				std::cerr << "FAIL: failed to complete client read\n";
 				return 1;
@@ -467,7 +479,8 @@ static void logf(const char* event, void* uid, bool is_error, ...) {
 	va_list args;
 
 	std::string log_type("INFO");
-	if (is_error) log_type = "ERROR";
+	if (is_error)
+		log_type = "ERROR";
 
 	std::cerr << log_type << ": " << event;
 

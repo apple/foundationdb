@@ -32,16 +32,19 @@ Future<int64_t> getDataInFlight(Database const& cx, Reference<AsyncVar<struct Se
 Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database const& cx,
                                                      Reference<AsyncVar<struct ServerDBInfo>> const&);
 Future<int64_t> getMaxStorageServerQueueSize(Database const& cx, Reference<AsyncVar<struct ServerDBInfo>> const&);
-Future<int64_t> getDataDistributionQueueSize(Database const& cx, Reference<AsyncVar<struct ServerDBInfo>> const&,
+Future<int64_t> getDataDistributionQueueSize(Database const& cx,
+                                             Reference<AsyncVar<struct ServerDBInfo>> const&,
                                              bool const& reportInFlight);
 Future<bool> getTeamCollectionValid(Database const& cx, WorkerInterface const&);
 Future<bool> getTeamCollectionValid(Database const& cx, Reference<AsyncVar<struct ServerDBInfo>> const&);
 Future<vector<StorageServerInterface>> getStorageServers(Database const& cx, bool const& use_system_priority = false);
 Future<vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo>> const& dbInfo, int const& flags = 0);
 Future<WorkerInterface> getMasterWorker(Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo);
-Future<Void> repairDeadDatacenter(Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo,
+Future<Void> repairDeadDatacenter(Database const& cx,
+                                  Reference<AsyncVar<ServerDBInfo>> const& dbInfo,
                                   std::string const& context);
-Future<vector<WorkerInterface>> getStorageWorkers(Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo,
+Future<vector<WorkerInterface>> getStorageWorkers(Database const& cx,
+                                                  Reference<AsyncVar<ServerDBInfo>> const& dbInfo,
                                                   bool const& localOnly);
 Future<vector<WorkerInterface>> getCoordWorkers(Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo);
 

@@ -74,7 +74,8 @@ struct VersionStampWorkload : TestWorkload {
 		}
 		TraceEvent("VersionStampApiVersion").detail("ApiVersion", apiVersion);
 		cx->apiVersion = apiVersion;
-		if (clientId == 0) return _start(cx, this, 1 / transactionsPerSecond);
+		if (clientId == 0)
+			return _start(cx, this, 1 / transactionsPerSecond);
 		return Void();
 	}
 
@@ -125,7 +126,8 @@ struct VersionStampWorkload : TestWorkload {
 	}
 
 	virtual Future<bool> check(Database const& cx) {
-		if (clientId == 0) return _check(cx, this);
+		if (clientId == 0)
+			return _check(cx, this);
 		return true;
 	}
 
@@ -218,7 +220,8 @@ struct VersionStampWorkload : TestWorkload {
 						}
 					} else {
 						const auto& value_pair_iter =
-						    std::find_if(all_values.cbegin(), all_values.cend(),
+						    std::find_if(all_values.cbegin(),
+						                 all_values.cend(),
 						                 [parsedVersion](const std::pair<Version, Standalone<StringRef>>& pair) {
 							                 return pair.first == parsedVersion;
 						                 });
@@ -262,7 +265,8 @@ struct VersionStampWorkload : TestWorkload {
 					const auto& all_values = all_values_iter->second;
 
 					const auto& value_pair_iter =
-					    std::find_if(all_values.cbegin(), all_values.cend(),
+					    std::find_if(all_values.cbegin(),
+					                 all_values.cend(),
 					                 [parsedVersion](const std::pair<Version, Standalone<StringRef>>& pair) {
 						                 return pair.first == parsedVersion;
 					                 });
@@ -370,7 +374,8 @@ struct VersionStampWorkload : TestWorkload {
 								    self->key_commit[key == metadataVersionKey ? metadataVersionKey
 								                                               : key.removePrefix(self->vsValuePrefix)];
 								const auto& iter = std::find_if(
-								    value_ts.cbegin(), value_ts.cend(),
+								    value_ts.cbegin(),
+								    value_ts.cend(),
 								    [value_version](const std::pair<Version, Standalone<StringRef>>& pair) {
 									    return value_version == pair.first;
 								    });
@@ -410,7 +415,8 @@ struct VersionStampWorkload : TestWorkload {
 				break;
 			}
 
-			if (now() - startTime > self->testDuration) break;
+			if (now() - startTime > self->testDuration)
+				break;
 		}
 		//TraceEvent("VST_Start").detail("Count", count).detail("NodeCount", self->nodeCount);
 		return Void();

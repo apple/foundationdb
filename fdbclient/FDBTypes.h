@@ -156,13 +156,16 @@ static std::string describe(T const& item) {
 
 template <class K, class V>
 static std::string describe(std::map<K, V> const& items, int max_items = -1) {
-	if (!items.size()) return "[no items]";
+	if (!items.size())
+		return "[no items]";
 
 	std::string s;
 	int count = 0;
 	for (auto it = items.begin(); it != items.end(); it++) {
-		if (++count > max_items && max_items >= 0) break;
-		if (count > 1) s += ",";
+		if (++count > max_items && max_items >= 0)
+			break;
+		if (count > 1)
+			s += ",";
 		s += describe(it->first) + "=>" + describe(it->second);
 	}
 	return s;
@@ -170,13 +173,16 @@ static std::string describe(std::map<K, V> const& items, int max_items = -1) {
 
 template <class T>
 static std::string describeList(T const& items, int max_items) {
-	if (!items.size()) return "[no items]";
+	if (!items.size())
+		return "[no items]";
 
 	std::string s;
 	int count = 0;
 	for (auto const& item : items) {
-		if (++count > max_items && max_items >= 0) break;
-		if (count > 1) s += ",";
+		if (++count > max_items && max_items >= 0)
+			break;
+		if (count > 1)
+			s += ",";
 		s += describe(item);
 	}
 	return s;
@@ -201,12 +207,14 @@ std::string printable(const KeyValueRef& val);
 
 template <class T>
 std::string printable(const Optional<T>& val) {
-	if (val.present()) return printable(val.get());
+	if (val.present())
+		return printable(val.get());
 	return "[not set]";
 }
 
 inline bool equalsKeyAfter(const KeyRef& key, const KeyRef& compareKey) {
-	if (key.size() + 1 != compareKey.size() || compareKey[compareKey.size() - 1] != 0) return false;
+	if (key.size() + 1 != compareKey.size() || compareKey[compareKey.size() - 1] != 0)
+		return false;
 	return compareKey.startsWith(key);
 }
 
@@ -254,8 +262,10 @@ struct KeyRangeRef {
 
 	struct ArbitraryOrder {
 		bool operator()(KeyRangeRef const& a, KeyRangeRef const& b) const {
-			if (a.begin < b.begin) return true;
-			if (a.begin > b.begin) return false;
+			if (a.begin < b.begin)
+				return true;
+			if (a.begin > b.begin)
+				return false;
 			return a.end < b.end;
 		}
 	};
@@ -279,7 +289,8 @@ struct Traceable<KeyRangeRef> : std::true_type {
 
 inline KeyRangeRef operator&(const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
 	KeyRef b = std::max(lhs.begin, rhs.begin), e = std::min(lhs.end, rhs.end);
-	if (e < b) return KeyRangeRef();
+	if (e < b)
+		return KeyRangeRef();
 	return KeyRangeRef(b, e);
 }
 
@@ -377,7 +388,8 @@ typedef Standalone<struct KeySelectorRef> KeySelector;
 enum { invalidVersion = -1, latestVersion = -2 };
 
 inline Key keyAfter(const KeyRef& key) {
-	if (key == LiteralStringRef("\xff\xff")) return key;
+	if (key == LiteralStringRef("\xff\xff"))
+		return key;
 
 	Standalone<StringRef> r;
 	uint8_t* s = new (r.arena()) uint8_t[key.size() + 1];
@@ -387,7 +399,8 @@ inline Key keyAfter(const KeyRef& key) {
 	return r;
 }
 inline KeyRef keyAfter(const KeyRef& key, Arena& arena) {
-	if (key == LiteralStringRef("\xff\xff")) return key;
+	if (key == LiteralStringRef("\xff\xff"))
+		return key;
 	uint8_t* t = new (arena) uint8_t[key.size() + 1];
 	memcpy(t, key.begin(), key.size());
 	t[key.size()] = 0;
@@ -460,9 +473,10 @@ public:
 		// which is large, then we can translate it to an equivalent key selector with a smaller key
 		if (key.size() > (key.startsWith(LiteralStringRef("\xff")) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
 		                                                           : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-			this->key = key.substr(0, (key.startsWith(LiteralStringRef("\xff")) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
-			                                                                    : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-			                              1);
+			this->key = key.substr(0,
+			                       (key.startsWith(LiteralStringRef("\xff")) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
+			                                                                 : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
+			                           1);
 		else
 			this->key = key;
 	}
@@ -609,7 +623,8 @@ struct KeyValueStoreType {
 
 	KeyValueStoreType() : type(END) {}
 	KeyValueStoreType(StoreType type) : type(type) {
-		if ((uint32_t)type > END) this->type = END;
+		if ((uint32_t)type > END)
+			this->type = END;
 	}
 	operator StoreType() const { return StoreType(type); }
 
@@ -670,9 +685,12 @@ struct TLogVersion {
 	}
 
 	static ErrorOr<TLogVersion> FromStringRef(StringRef s) {
-		if (s == LiteralStringRef("2")) return V2;
-		if (s == LiteralStringRef("3")) return V3;
-		if (s == LiteralStringRef("4")) return V4;
+		if (s == LiteralStringRef("2"))
+			return V2;
+		if (s == LiteralStringRef("3"))
+			return V3;
+		if (s == LiteralStringRef("4"))
+			return V4;
 		return default_error_or();
 	}
 };
@@ -721,8 +739,10 @@ struct TLogSpillType {
 	}
 
 	static ErrorOr<TLogSpillType> FromStringRef(StringRef s) {
-		if (s == LiteralStringRef("1")) return VALUE;
-		if (s == LiteralStringRef("2")) return REFERENCE;
+		if (s == LiteralStringRef("1"))
+			return VALUE;
+		if (s == LiteralStringRef("2"))
+			return REFERENCE;
 		return default_error_or();
 	}
 
@@ -760,8 +780,10 @@ struct LogMessageVersion {
 	}
 
 	bool operator<(LogMessageVersion const& r) const {
-		if (version < r.version) return true;
-		if (r.version < version) return false;
+		if (version < r.version)
+			return true;
+		if (r.version < version)
+			return false;
 		return sub < r.sub;
 	}
 
@@ -784,7 +806,8 @@ struct AddressExclusion {
 	explicit AddressExclusion(const IPAddress& ip, int port) : ip(ip), port(port) {}
 
 	bool operator<(AddressExclusion const& r) const {
-		if (ip != r.ip) return ip < r.ip;
+		if (ip != r.ip)
+			return ip < r.ip;
 		return port < r.port;
 	}
 	bool operator==(AddressExclusion const& r) const { return ip == r.ip && port == r.port; }
@@ -793,13 +816,15 @@ struct AddressExclusion {
 	bool isValid() const { return ip.isValid() || port != 0; }
 
 	bool excludes(NetworkAddress const& addr) const {
-		if (isWholeMachine()) return ip == addr.ip;
+		if (isWholeMachine())
+			return ip == addr.ip;
 		return ip == addr.ip && port == addr.port;
 	}
 
 	// This is for debugging and IS NOT to be used for serialization to persistant state
 	std::string toString() const {
-		if (!isWholeMachine()) return formatIpPort(ip, port);
+		if (!isWholeMachine())
+			return formatIpPort(ip, port);
 		return ip.toString();
 	}
 
@@ -852,7 +877,8 @@ struct ClusterControllerPriorityInfo {
 		return processClassFitness == r.processClassFitness && isExcluded == r.isExcluded && dcFitness == r.dcFitness;
 	}
 	ClusterControllerPriorityInfo()
-	  : ClusterControllerPriorityInfo(/*ProcessClass::UnsetFit*/ 2, false,
+	  : ClusterControllerPriorityInfo(/*ProcessClass::UnsetFit*/ 2,
+	                                  false,
 	                                  ClusterControllerPriorityInfo::FitnessUnknown) {}
 	ClusterControllerPriorityInfo(uint8_t processClassFitness, bool isExcluded, uint8_t dcFitness)
 	  : processClassFitness(processClassFitness), isExcluded(isExcluded), dcFitness(dcFitness) {}
@@ -916,8 +942,14 @@ struct HealthMetrics {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, worstStorageQueue, worstStorageDurabilityLag, worstTLogQueue, tpsLimit, batchLimited,
-		           storageStats, tLogQueue);
+		serializer(ar,
+		           worstStorageQueue,
+		           worstStorageDurabilityLag,
+		           worstTLogQueue,
+		           tpsLimit,
+		           batchLimited,
+		           storageStats,
+		           tLogQueue);
 	}
 };
 

@@ -45,7 +45,8 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 	virtual std::string description() { return "AtomicSwitchover"; }
 
 	virtual Future<Void> setup(Database const& cx) {
-		if (clientId != 0) return Void();
+		if (clientId != 0)
+			return Void();
 		return _setup(cx, this);
 	}
 
@@ -53,17 +54,24 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		state DatabaseBackupAgent backupAgent(cx);
 		try {
 			TraceEvent("AS_Submit1");
-			wait(backupAgent.submitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, false,
-			                              StringRef(), StringRef(), true));
+			wait(backupAgent.submitBackup(self->extraDB,
+			                              BackupAgentBase::getDefaultTag(),
+			                              self->backupRanges,
+			                              false,
+			                              StringRef(),
+			                              StringRef(),
+			                              true));
 			TraceEvent("AS_Submit2");
 		} catch (Error& e) {
-			if (e.code() != error_code_backup_duplicate) throw;
+			if (e.code() != error_code_backup_duplicate)
+				throw;
 		}
 		return Void();
 	}
 
 	virtual Future<Void> start(Database const& cx) {
-		if (clientId != 0) return Void();
+		if (clientId != 0)
+			return Void();
 		return _start(cx, this);
 	}
 
@@ -71,8 +79,10 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 
 	virtual void getMetrics(vector<PerfMetric>& m) {}
 
-	ACTOR static Future<Void> diffRanges(Standalone<VectorRef<KeyRangeRef>> ranges, StringRef backupPrefix,
-	                                     Database src, Database dest) {
+	ACTOR static Future<Void> diffRanges(Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                     StringRef backupPrefix,
+	                                     Database src,
+	                                     Database dest) {
 		state int rangeIndex;
 		for (rangeIndex = 0; rangeIndex < ranges.size(); ++rangeIndex) {
 			state KeyRangeRef range = ranges[rangeIndex];
@@ -163,15 +173,15 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		TraceEvent("AS_Ready1");
 		wait(delay(deterministicRandom()->random01() * self->switch1delay));
 		TraceEvent("AS_Switch1");
-		wait(backupAgent.atomicSwitchover(self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges,
-		                                  StringRef(), StringRef()));
+		wait(backupAgent.atomicSwitchover(
+		    self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()));
 		TraceEvent("AS_Wait2");
 		wait(success(restoreAgent.waitBackup(cx, BackupAgentBase::getDefaultTag(), false)));
 		TraceEvent("AS_Ready2");
 		wait(delay(deterministicRandom()->random01() * self->switch2delay));
 		TraceEvent("AS_Switch2");
-		wait(restoreAgent.atomicSwitchover(cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(),
-		                                   StringRef()));
+		wait(restoreAgent.atomicSwitchover(
+		    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()));
 		TraceEvent("AS_Wait3");
 		wait(success(backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false)));
 		TraceEvent("AS_Ready3");

@@ -65,7 +65,11 @@ extern bool noUnseed;
 
 class KeyValueStoreMemory : public IKeyValueStore, NonCopyable {
 public:
-	KeyValueStoreMemory(IDiskQueue* log, UID id, int64_t memoryLimit, bool disableSnapshot, bool replaceContent,
+	KeyValueStoreMemory(IDiskQueue* log,
+	                    UID id,
+	                    int64_t memoryLimit,
+	                    bool disableSnapshot,
+	                    bool replaceContent,
 	                    bool exactRecovery);
 
 	// IClosable
@@ -103,7 +107,9 @@ public:
 		int64_t availableSize = std::min(getAvailableSize(), diskQueueBytes.available / 4 - uncommittedBytes);
 		int64_t totalSize = std::min(memoryLimit, diskQueueBytes.total / 4 - uncommittedBytes);
 
-		return StorageBytes(std::max((int64_t)0, freeSize), std::max((int64_t)0, totalSize), diskQueueBytes.used,
+		return StorageBytes(std::max((int64_t)0, freeSize),
+		                    std::max((int64_t)0, totalSize),
+		                    diskQueueBytes.used,
 		                    std::max((int64_t)0, availableSize));
 	}
 
@@ -125,7 +131,8 @@ public:
 
 	virtual void set(KeyValueRef keyValue, const Arena* arena) {
 		// A commit that occurs with no available space returns Never, so we can throw out all modifications
-		if (getAvailableSize() <= 0) return;
+		if (getAvailableSize() <= 0)
+			return;
 
 		if (transactionIsLarge) {
 			KeyValueMapPair pair(keyValue.key, keyValue.value);
@@ -140,7 +147,8 @@ public:
 
 	virtual void clear(KeyRangeRef range, const Arena* arena) {
 		// A commit that occurs with no available space returns Never, so we can throw out all modifications
-		if (getAvailableSize() <= 0) return;
+		if (getAvailableSize() <= 0)
+			return;
 
 		if (transactionIsLarge) {
 			data.erase(data.lower_bound(range.begin), data.lower_bound(range.end));
@@ -158,8 +166,10 @@ public:
 			return Never();
 		}
 
-		if (recovering.isError()) throw recovering.getError();
-		if (!recovering.isReady()) return waitAndCommit(this, sequential);
+		if (recovering.isError())
+			throw recovering.getError();
+		if (!recovering.isReady())
+			return waitAndCommit(this, sequential);
 
 		if (!disableSnapshot && replaceContent && !firstCommitWithSnapshot) {
 			transactionSize += SERVER_KNOBS->REPLACE_CONTENTS_BYTES;
@@ -206,21 +216,28 @@ public:
 	}
 
 	virtual Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) {
-		if (recovering.isError()) throw recovering.getError();
-		if (!recovering.isReady()) return waitAndReadValue(this, key);
+		if (recovering.isError())
+			throw recovering.getError();
+		if (!recovering.isReady())
+			return waitAndReadValue(this, key);
 
 		auto it = data.find(key);
-		if (it == data.end()) return Optional<Value>();
+		if (it == data.end())
+			return Optional<Value>();
 		return Optional<Value>(it->value);
 	}
 
-	virtual Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength,
+	virtual Future<Optional<Value>> readValuePrefix(KeyRef key,
+	                                                int maxLength,
 	                                                Optional<UID> debugID = Optional<UID>()) {
-		if (recovering.isError()) throw recovering.getError();
-		if (!recovering.isReady()) return waitAndReadValuePrefix(this, key, maxLength);
+		if (recovering.isError())
+			throw recovering.getError();
+		if (!recovering.isReady())
+			return waitAndReadValuePrefix(this, key, maxLength);
 
 		auto it = data.find(key);
-		if (it == data.end()) return Optional<Value>();
+		if (it == data.end())
+			return Optional<Value>();
 		auto val = it->value;
 		if (maxLength < val.size()) {
 			return Optional<Value>(val.substr(0, maxLength));
@@ -231,10 +248,13 @@ public:
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
-	virtual Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit = 1 << 30,
+	virtual Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys,
+	                                                     int rowLimit = 1 << 30,
 	                                                     int byteLimit = 1 << 30) {
-		if (recovering.isError()) throw recovering.getError();
-		if (!recovering.isReady()) return waitAndReadRange(this, keys, rowLimit, byteLimit);
+		if (recovering.isError())
+			throw recovering.getError();
+		if (!recovering.isReady())
+			return waitAndReadRange(this, keys, rowLimit, byteLimit);
 
 		Standalone<RangeResultRef> result;
 		if (rowLimit == 0) {
@@ -408,7 +428,8 @@ private:
 				data.erase(data.lower_bound(o->p1), data.end());
 			} else
 				ASSERT(false);
-			if (log) log_location = log_op(o->op, o->p1, o->p2);
+			if (log)
+				log_location = log_op(o->op, o->p1, o->p2);
 		}
 		if (sequential) {
 			data.insert(dataSets);
@@ -581,7 +602,8 @@ private:
 					}
 
 					TEST(true); // Fixing a partial commit at the end of the KeyValueStoreMemory log
-					for (int i = 0; i < zeroFillSize; i++) self->log->push(StringRef((const uint8_t*)"", 1));
+					for (int i = 0; i < zeroFillSize; i++)
+						self->log->push(StringRef((const uint8_t*)"", 1));
 				}
 				// self->rollback(); not needed, since we are about to discard anything left in the recoveryQueue
 				//TraceEvent("KVSMemRecRollback", self->id).detail("QueueEmpty", data.size() == 0);
@@ -715,8 +737,10 @@ private:
 		wait(self->recovering);
 		return self->readValuePrefix(key, maxLength).get();
 	}
-	ACTOR static Future<Standalone<RangeResultRef>> waitAndReadRange(KeyValueStoreMemory* self, KeyRange keys,
-	                                                                 int rowLimit, int byteLimit) {
+	ACTOR static Future<Standalone<RangeResultRef>> waitAndReadRange(KeyValueStoreMemory* self,
+	                                                                 KeyRange keys,
+	                                                                 int rowLimit,
+	                                                                 int byteLimit) {
 		wait(self->recovering);
 		return self->readRange(keys, rowLimit, byteLimit).get();
 	}
@@ -725,7 +749,8 @@ private:
 		wait(self->commit(sequential));
 		return Void();
 	}
-	ACTOR static Future<Void> commitAndUpdateVersions(KeyValueStoreMemory* self, Future<Void> commit,
+	ACTOR static Future<Void> commitAndUpdateVersions(KeyValueStoreMemory* self,
+	                                                  Future<Void> commit,
 	                                                  IDiskQueue::location location) {
 		wait(commit);
 		self->log->pop(location);
@@ -733,8 +758,12 @@ private:
 	}
 };
 
-KeyValueStoreMemory::KeyValueStoreMemory(IDiskQueue* log, UID id, int64_t memoryLimit, bool disableSnapshot,
-                                         bool replaceContent, bool exactRecovery)
+KeyValueStoreMemory::KeyValueStoreMemory(IDiskQueue* log,
+                                         UID id,
+                                         int64_t memoryLimit,
+                                         bool disableSnapshot,
+                                         bool replaceContent,
+                                         bool exactRecovery)
   : log(log), id(id), previousSnapshotEnd(-1), currentSnapshotEnd(-1), resetSnapshot(false), memoryLimit(memoryLimit),
     committedWriteBytes(0), overheadWriteBytes(0), committedDataSize(0), transactionSize(0), transactionIsLarge(false),
     disableSnapshot(disableSnapshot), replaceContent(replaceContent), snapshotCount(0), firstCommitWithSnapshot(true) {
@@ -749,7 +778,11 @@ IKeyValueStore* keyValueStoreMemory(std::string const& basename, UID logID, int6
 	return new KeyValueStoreMemory(log, logID, memoryLimit, false, false, false);
 }
 
-IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue, UID logID, int64_t memoryLimit, bool disableSnapshot,
-                                       bool replaceContent, bool exactRecovery) {
+IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
+                                       UID logID,
+                                       int64_t memoryLimit,
+                                       bool disableSnapshot,
+                                       bool replaceContent,
+                                       bool exactRecovery) {
 	return new KeyValueStoreMemory(queue, logID, memoryLimit, disableSnapshot, replaceContent, exactRecovery);
 }

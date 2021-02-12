@@ -270,21 +270,51 @@ public:
 	//   - Optionally wait for the restore's completion.  Will restore_error if restore fails or is aborted.
 	// restore() will return the targetVersion which will be either the valid version passed in or the max restorable
 	// version for the given url.
-	Future<Version> restore(Database cx, Optional<Database> cxOrig, Key tagName, Key url,
-	                        Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete = true,
-	                        Version targetVersion = -1, bool verbose = true, Key addPrefix = Key(),
-	                        Key removePrefix = Key(), bool lockDB = true);
-	Future<Version> restore(Database cx, Optional<Database> cxOrig, Key tagName, Key url, bool waitForComplete = true,
-	                        Version targetVersion = -1, bool verbose = true, KeyRange range = normalKeys,
-	                        Key addPrefix = Key(), Key removePrefix = Key(), bool lockDB = true) {
+	Future<Version> restore(Database cx,
+	                        Optional<Database> cxOrig,
+	                        Key tagName,
+	                        Key url,
+	                        Standalone<VectorRef<KeyRangeRef>> ranges,
+	                        bool waitForComplete = true,
+	                        Version targetVersion = -1,
+	                        bool verbose = true,
+	                        Key addPrefix = Key(),
+	                        Key removePrefix = Key(),
+	                        bool lockDB = true);
+	Future<Version> restore(Database cx,
+	                        Optional<Database> cxOrig,
+	                        Key tagName,
+	                        Key url,
+	                        bool waitForComplete = true,
+	                        Version targetVersion = -1,
+	                        bool verbose = true,
+	                        KeyRange range = normalKeys,
+	                        Key addPrefix = Key(),
+	                        Key removePrefix = Key(),
+	                        bool lockDB = true) {
 		Standalone<VectorRef<KeyRangeRef>> rangeRef;
 		rangeRef.push_back_deep(rangeRef.arena(), range);
-		return restore(cx, cxOrig, tagName, url, rangeRef, waitForComplete, targetVersion, verbose, addPrefix,
-		               removePrefix, lockDB);
+		return restore(cx,
+		               cxOrig,
+		               tagName,
+		               url,
+		               rangeRef,
+		               waitForComplete,
+		               targetVersion,
+		               verbose,
+		               addPrefix,
+		               removePrefix,
+		               lockDB);
 	}
-	Future<Version> atomicRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges,
-	                              Key addPrefix = Key(), Key removePrefix = Key());
-	Future<Version> atomicRestore(Database cx, Key tagName, KeyRange range = normalKeys, Key addPrefix = Key(),
+	Future<Version> atomicRestore(Database cx,
+	                              Key tagName,
+	                              Standalone<VectorRef<KeyRangeRef>> ranges,
+	                              Key addPrefix = Key(),
+	                              Key removePrefix = Key());
+	Future<Version> atomicRestore(Database cx,
+	                              Key tagName,
+	                              KeyRange range = normalKeys,
+	                              Key addPrefix = Key(),
 	                              Key removePrefix = Key()) {
 		Standalone<VectorRef<KeyRangeRef>> rangeRef;
 		rangeRef.push_back_deep(rangeRef.arena(), range);
@@ -306,11 +336,18 @@ public:
 
 	/** BACKUP METHODS **/
 
-	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, int snapshotIntervalSeconds,
-	                          std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr,
+	                          Key outContainer,
+	                          int snapshotIntervalSeconds,
+	                          std::string tagName,
+	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                          bool stopWhenDone = true);
-	Future<Void> submitBackup(Database cx, Key outContainer, int snapshotIntervalSeconds, std::string tagName,
-	                          Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true) {
+	Future<Void> submitBackup(Database cx,
+	                          Key outContainer,
+	                          int snapshotIntervalSeconds,
+	                          std::string tagName,
+	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                          bool stopWhenDone = true) {
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone);
 		});
@@ -342,8 +379,11 @@ public:
 
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
 	// will return when the backup directory is restorable.
-	Future<int> waitBackup(Database cx, std::string tagName, bool stopWhenDone = true,
-	                       Reference<IBackupContainer>* pContainer = nullptr, UID* pUID = nullptr);
+	Future<int> waitBackup(Database cx,
+	                       std::string tagName,
+	                       bool stopWhenDone = true,
+	                       Reference<IBackupContainer>* pContainer = nullptr,
+	                       UID* pUID = nullptr);
 
 	static const Key keyLastRestorable;
 
@@ -397,8 +437,12 @@ public:
 		return taskBucket->run(cx, futureBucket, pollDelay, maxConcurrentTasks);
 	}
 
-	Future<Void> atomicSwitchover(Database dest, Key tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                              Key addPrefix, Key removePrefix, bool forceAction = false);
+	Future<Void> atomicSwitchover(Database dest,
+	                              Key tagName,
+	                              Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                              Key addPrefix,
+	                              Key removePrefix,
+	                              bool forceAction = false);
 
 	Future<Void> unlockBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	Future<Void> unlockBackup(Database cx, Key tagName) {
@@ -406,16 +450,25 @@ public:
 		                         [=](Reference<ReadYourWritesTransaction> tr) { return unlockBackup(tr, tagName); });
 	}
 
-	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr, Key tagName,
-	                          Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true,
-	                          Key addPrefix = StringRef(), Key removePrefix = StringRef(), bool lockDatabase = false,
+	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr,
+	                          Key tagName,
+	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                          bool stopWhenDone = true,
+	                          Key addPrefix = StringRef(),
+	                          Key removePrefix = StringRef(),
+	                          bool lockDatabase = false,
 	                          bool databasesInSync = false);
-	Future<Void> submitBackup(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                          bool stopWhenDone = true, Key addPrefix = StringRef(), Key removePrefix = StringRef(),
-	                          bool lockDatabase = false, bool databasesInSync = false) {
+	Future<Void> submitBackup(Database cx,
+	                          Key tagName,
+	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                          bool stopWhenDone = true,
+	                          Key addPrefix = StringRef(),
+	                          Key removePrefix = StringRef(),
+	                          bool lockDatabase = false,
+	                          bool databasesInSync = false) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
-			return submitBackup(tr, tagName, backupRanges, stopWhenDone, addPrefix, removePrefix, lockDatabase,
-			                    databasesInSync);
+			return submitBackup(
+			    tr, tagName, backupRanges, stopWhenDone, addPrefix, removePrefix, lockDatabase, databasesInSync);
 		});
 	}
 
@@ -499,30 +552,54 @@ struct RCGroup {
 
 bool copyParameter(Reference<Task> source, Reference<Task> dest, Key key);
 Version getVersionFromString(std::string const& value);
-Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion, Version endVersion, Key destUidValue,
+Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion,
+                                                Version endVersion,
+                                                Key destUidValue,
                                                 int blockSize = CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE);
 Standalone<VectorRef<KeyRangeRef>> getApplyRanges(Version beginVersion, Version endVersion, Key backupUid);
-Future<Void> eraseLogData(Reference<ReadYourWritesTransaction> tr, Key logUidValue, Key destUidValue,
-                          Optional<Version> endVersion = Optional<Version>(), bool checkBackupUid = false,
+Future<Void> eraseLogData(Reference<ReadYourWritesTransaction> tr,
+                          Key logUidValue,
+                          Key destUidValue,
+                          Optional<Version> endVersion = Optional<Version>(),
+                          bool checkBackupUid = false,
                           Version backupUid = 0);
 Key getApplyKey(Version version, Key backupUid);
 std::pair<uint64_t, uint32_t> decodeBKMutationLogKey(Key key);
 Standalone<VectorRef<MutationRef>> decodeBackupLogValue(StringRef value);
-void decodeBackupLogValue(Arena& arena, VectorRef<MutationRef>& result, int64_t& mutationSize, StringRef value,
-                          StringRef addPrefix = StringRef(), StringRef removePrefix = StringRef());
+void decodeBackupLogValue(Arena& arena,
+                          VectorRef<MutationRef>& result,
+                          int64_t& mutationSize,
+                          StringRef value,
+                          StringRef addPrefix = StringRef(),
+                          StringRef removePrefix = StringRef());
 Future<Void> logError(Database cx, Key keyErrors, const std::string& message);
 Future<Void> logError(Reference<ReadYourWritesTransaction> tr, Key keyErrors, const std::string& message);
 Future<Void> checkVersion(Reference<ReadYourWritesTransaction> const& tr);
-ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RangeResultWithVersion> results, Reference<FlowLock> lock,
-                                 KeyRangeRef range, bool terminator = true, bool systemAccess = false,
+ACTOR Future<Void> readCommitted(Database cx,
+                                 PromiseStream<RangeResultWithVersion> results,
+                                 Reference<FlowLock> lock,
+                                 KeyRangeRef range,
+                                 bool terminator = true,
+                                 bool systemAccess = false,
                                  bool lockAware = false);
-ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Future<Void> active,
-                                 Reference<FlowLock> lock, KeyRangeRef range,
-                                 std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy, bool terminator = true,
-                                 bool systemAccess = false, bool lockAware = false);
-ACTOR Future<Void> applyMutations(Database cx, Key uid, Key addPrefix, Key removePrefix, Version beginVersion,
-                                  Version* endVersion, RequestStream<CommitTransactionRequest> commit,
-                                  NotifiedVersion* committedVersion, Reference<KeyRangeMap<Version>> keyVersion);
+ACTOR Future<Void> readCommitted(Database cx,
+                                 PromiseStream<RCGroup> results,
+                                 Future<Void> active,
+                                 Reference<FlowLock> lock,
+                                 KeyRangeRef range,
+                                 std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy,
+                                 bool terminator = true,
+                                 bool systemAccess = false,
+                                 bool lockAware = false);
+ACTOR Future<Void> applyMutations(Database cx,
+                                  Key uid,
+                                  Key addPrefix,
+                                  Key removePrefix,
+                                  Version beginVersion,
+                                  Version* endVersion,
+                                  RequestStream<CommitTransactionRequest> commit,
+                                  NotifiedVersion* committedVersion,
+                                  Reference<KeyRangeMap<Version>> keyVersion);
 ACTOR Future<Void> cleanupBackup(Database cx, bool deleteData);
 
 typedef BackupAgentBase::enumState EBackupState;
@@ -570,7 +647,8 @@ public:
 	TagUidMap(const StringRef& prefix) : TagMap(LiteralStringRef("tag->uid/").withPrefix(prefix)), prefix(prefix) {}
 
 	ACTOR static Future<std::vector<KeyBackedTag>> getAll_impl(TagUidMap* tagsMap,
-	                                                           Reference<ReadYourWritesTransaction> tr, bool snapshot);
+	                                                           Reference<ReadYourWritesTransaction> tr,
+	                                                           bool snapshot);
 
 	Future<std::vector<KeyBackedTag>> getAll(Reference<ReadYourWritesTransaction> tr, bool snapshot = false) {
 		return getAll_impl(this, tr, snapshot);
@@ -622,10 +700,11 @@ public:
 		UID u = uid; // 'this' could be invalid in lambda
 		Key p = prefix;
 		return map(tag().get(tr), [u, p, task](Optional<std::string> const& tag) -> Void {
-			if (!tag.present()) throw restore_error();
+			if (!tag.present())
+				throw restore_error();
 			// Validation contition is that the uidPair key must be exactly {u, false}
-			TaskBucket::setValidationCondition(task, KeyBackedTag(tag.get(), p).key,
-			                                   Codec<UidAndAbortedFlagT>::pack({ u, false }).pack());
+			TaskBucket::setValidationCondition(
+			    task, KeyBackedTag(tag.get(), p).key, Codec<UidAndAbortedFlagT>::pack({ u, false }).pack());
 			return Void();
 		});
 	}
@@ -748,7 +827,8 @@ public:
 
 		Future<Version> beginVersion = tr->getReadVersion();
 		Future<int64_t> defaultInterval = 0;
-		if (intervalSeconds < 0) defaultInterval = copy.snapshotIntervalSeconds().getOrThrow(tr);
+		if (intervalSeconds < 0)
+			defaultInterval = copy.snapshotIntervalSeconds().getOrThrow(tr);
 
 		// Make sure read version and possibly the snapshot interval value are ready, then clear/init the snapshot
 		// config members
@@ -759,7 +839,8 @@ public:
 			copy.snapshotBatchFuture().clear(tr);
 			copy.snapshotBatchDispatchDoneKey().clear(tr);
 
-			if (intervalSeconds < 0) intervalSeconds = defaultInterval.get();
+			if (intervalSeconds < 0)
+				intervalSeconds = defaultInterval.get();
 			Version endVersion = beginVersion.get() + intervalSeconds * CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 
 			copy.snapshotBeginVersion().set(tr, beginVersion.get());
@@ -830,7 +911,8 @@ public:
 		    .detail("Description", details)
 		    .detail("TaskInstance", (uint64_t)taskInstance);
 		// These should not happen
-		if (e.code() == error_code_key_not_found) t.backtrace();
+		if (e.code() == error_code_key_not_found)
+			t.backtrace();
 
 		return updateErrorInfo(cx, e, details);
 	}

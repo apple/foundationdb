@@ -87,8 +87,11 @@ struct BulkLoadWorkload : TestWorkload {
 				state uint64_t txnBytes = 0;
 				try {
 					for (int i = 0; i < self->writesPerTransaction; i++) {
-						std::string key = format("%s/bulkload/%04x/%04x/%08x", self->keyPrefix.toString().c_str(),
-						                         self->clientId, actorId, idx + i);
+						std::string key = format("%s/bulkload/%04x/%04x/%08x",
+						                         self->keyPrefix.toString().c_str(),
+						                         self->clientId,
+						                         actorId,
+						                         idx + i);
 						tr.set(key, self->value);
 						txnBytes += key.size() + self->value.size();
 					}
@@ -105,7 +108,8 @@ struct BulkLoadWorkload : TestWorkload {
 			self->latencies.addSample(now() - tstart);
 			++self->transactions;
 			idx += self->writesPerTransaction;
-			if (totalBytes > self->targetBytes / self->clientCount / self->actorCount) return Void();
+			if (totalBytes > self->targetBytes / self->clientCount / self->actorCount)
+				return Void();
 		}
 	}
 };

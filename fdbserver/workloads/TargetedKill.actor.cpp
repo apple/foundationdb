@@ -45,7 +45,8 @@ struct TargetedKillWorkload : TestWorkload {
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
 	virtual Future<Void> start(Database const& cx) {
 		TraceEvent("StartTargetedKill").detail("Enabled", enabled);
-		if (enabled) return assassin(cx, this);
+		if (enabled)
+			return assassin(cx, this);
 		return Void();
 	}
 	virtual Future<bool> check(Database const& cx) { return true; }
@@ -91,7 +92,8 @@ struct TargetedKillWorkload : TestWorkload {
 			for (int i = 0; i < proxies->size(); i++) {
 				MasterProxyInterface mpi = proxies->getInterface(o);
 				machine = mpi.address();
-				if (machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress()) break;
+				if (machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
+					break;
 				o = ++o % proxies->size();
 			}
 		} else if (self->machineToKill == "tlog") {
@@ -100,7 +102,8 @@ struct TargetedKillWorkload : TestWorkload {
 			for (int i = 0; i < tlogs.size(); i++) {
 				TLogInterface tli = tlogs[o];
 				machine = tli.address();
-				if (machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress()) break;
+				if (machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
+					break;
 				o = ++o % tlogs.size();
 			}
 		} else if (self->machineToKill == "storage" || self->machineToKill == "ss" ||
@@ -109,7 +112,8 @@ struct TargetedKillWorkload : TestWorkload {
 			for (int i = 0; i < storageServers.size(); i++) {
 				StorageServerInterface ssi = storageServers[o];
 				machine = ssi.address();
-				if (machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress()) break;
+				if (machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
+					break;
 				o = ++o % storageServers.size();
 			}
 		} else if (self->machineToKill == "clustercontroller" || self->machineToKill == "cc") {

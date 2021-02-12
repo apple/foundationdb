@@ -66,7 +66,8 @@ void makecontext(ucontext_t* ucp, void (*func)(void), int argc, ...) {
 	va_list va;
 
 	memset(&ucp->uc_mcontext, 0, sizeof ucp->uc_mcontext);
-	if (argc != 2) __builtin_trap();
+	if (argc != 2)
+		__builtin_trap();
 	va_start(va, argc);
 	ucp->uc_mcontext.mc_rdi = va_arg(va, int);
 	ucp->uc_mcontext.mc_rsi = va_arg(va, int);
@@ -87,7 +88,8 @@ void makecontext(ucontext_t* uc, void (*fn)(void), int argc, ...) {
 
 	sp = (int*)uc->uc_stack.ss_sp + uc->uc_stack.ss_size / 4;
 	va_start(arg, argc);
-	for (i = 0; i < 4 && i < argc; i++) uc->uc_mcontext.gregs[i] = va_arg(arg, uint);
+	for (i = 0; i < 4 && i < argc; i++)
+		uc->uc_mcontext.gregs[i] = va_arg(arg, uint);
 	va_end(arg);
 	uc->uc_mcontext.gregs[13] = (uint)sp;
 	uc->uc_mcontext.gregs[14] = (uint)fn;
@@ -96,7 +98,8 @@ void makecontext(ucontext_t* uc, void (*fn)(void), int argc, ...) {
 
 #ifdef NEEDSWAPCONTEXT
 int swapcontext(ucontext_t* oucp, const ucontext_t* ucp) {
-	if (getcontext(oucp) == 0) setcontext(ucp);
+	if (getcontext(oucp) == 0)
+		setcontext(ucp);
 	return 0;
 }
 #endif

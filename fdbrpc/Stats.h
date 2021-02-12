@@ -70,7 +70,8 @@ struct CounterCollection {
 	CounterCollection(std::string name, std::string id = std::string()) : name(name), id(id) {}
 	std::vector<struct ICounter*> counters, counters_to_remove;
 	~CounterCollection() {
-		for (auto c : counters_to_remove) c->remove();
+		for (auto c : counters_to_remove)
+			c->remove();
 	}
 	std::string name;
 	std::string id;
@@ -140,8 +141,11 @@ static void specialCounter(CounterCollection& collection, std::string const& nam
 }
 
 Future<Void> traceCounters(
-    std::string const& traceEventName, UID const& traceEventID, double const& interval,
-    CounterCollection* const& counters, std::string const& trackLatestName = std::string(),
+    std::string const& traceEventName,
+    UID const& traceEventID,
+    double const& interval,
+    CounterCollection* const& counters,
+    std::string const& trackLatestName = std::string(),
     std::function<void(TraceEvent&)> const& decorator = [](TraceEvent& te) {});
 
 class LatencyBands {

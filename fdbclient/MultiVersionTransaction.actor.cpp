@@ -86,17 +86,34 @@ ThreadFuture<Key> DLTransaction::getKey(const KeySelectorRef& key, bool snapshot
 	});
 }
 
-ThreadFuture<Standalone<RangeResultRef>> DLTransaction::getRange(const KeySelectorRef& begin, const KeySelectorRef& end,
-                                                                 int limit, bool snapshot, bool reverse) {
+ThreadFuture<Standalone<RangeResultRef>> DLTransaction::getRange(const KeySelectorRef& begin,
+                                                                 const KeySelectorRef& end,
+                                                                 int limit,
+                                                                 bool snapshot,
+                                                                 bool reverse) {
 	return getRange(begin, end, GetRangeLimits(limit), snapshot, reverse);
 }
 
-ThreadFuture<Standalone<RangeResultRef>> DLTransaction::getRange(const KeySelectorRef& begin, const KeySelectorRef& end,
-                                                                 GetRangeLimits limits, bool snapshot, bool reverse) {
-	FdbCApi::FDBFuture* f =
-	    api->transactionGetRange(tr, begin.getKey().begin(), begin.getKey().size(), begin.orEqual, begin.offset,
-	                             end.getKey().begin(), end.getKey().size(), end.orEqual, end.offset, limits.rows,
-	                             limits.bytes, FDBStreamingModes::EXACT, 0, snapshot, reverse);
+ThreadFuture<Standalone<RangeResultRef>> DLTransaction::getRange(const KeySelectorRef& begin,
+                                                                 const KeySelectorRef& end,
+                                                                 GetRangeLimits limits,
+                                                                 bool snapshot,
+                                                                 bool reverse) {
+	FdbCApi::FDBFuture* f = api->transactionGetRange(tr,
+	                                                 begin.getKey().begin(),
+	                                                 begin.getKey().size(),
+	                                                 begin.orEqual,
+	                                                 begin.offset,
+	                                                 end.getKey().begin(),
+	                                                 end.getKey().size(),
+	                                                 end.orEqual,
+	                                                 end.offset,
+	                                                 limits.rows,
+	                                                 limits.bytes,
+	                                                 FDBStreamingModes::EXACT,
+	                                                 0,
+	                                                 snapshot,
+	                                                 reverse);
 	return toThreadFuture<Standalone<RangeResultRef>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		const FdbCApi::FDBKeyValue* kvs;
 		int count;
@@ -110,14 +127,18 @@ ThreadFuture<Standalone<RangeResultRef>> DLTransaction::getRange(const KeySelect
 	});
 }
 
-ThreadFuture<Standalone<RangeResultRef>> DLTransaction::getRange(const KeyRangeRef& keys, int limit, bool snapshot,
+ThreadFuture<Standalone<RangeResultRef>> DLTransaction::getRange(const KeyRangeRef& keys,
+                                                                 int limit,
+                                                                 bool snapshot,
                                                                  bool reverse) {
-	return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), GetRangeLimits(limit), snapshot,
-	                reverse);
+	return getRange(
+	    firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), GetRangeLimits(limit), snapshot, reverse);
 }
 
-ThreadFuture<Standalone<RangeResultRef>> DLTransaction::getRange(const KeyRangeRef& keys, GetRangeLimits limits,
-                                                                 bool snapshot, bool reverse) {
+ThreadFuture<Standalone<RangeResultRef>> DLTransaction::getRange(const KeyRangeRef& keys,
+                                                                 GetRangeLimits limits,
+                                                                 bool snapshot,
+                                                                 bool reverse) {
 	return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse);
 }
 
@@ -154,13 +175,13 @@ ThreadFuture<Standalone<StringRef>> DLTransaction::getVersionstamp() {
 }
 
 void DLTransaction::addReadConflictRange(const KeyRangeRef& keys) {
-	throwIfError(api->transactionAddConflictRange(tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(),
-	                                              keys.end.size(), FDBConflictRangeTypes::READ));
+	throwIfError(api->transactionAddConflictRange(
+	    tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), FDBConflictRangeTypes::READ));
 }
 
 void DLTransaction::atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) {
-	api->transactionAtomicOp(tr, key.begin(), key.size(), value.begin(), value.size(),
-	                         (FDBMutationTypes::Option)operationType);
+	api->transactionAtomicOp(
+	    tr, key.begin(), key.size(), value.begin(), value.size(), (FDBMutationTypes::Option)operationType);
 }
 
 void DLTransaction::set(const KeyRef& key, const ValueRef& value) {
@@ -186,8 +207,8 @@ ThreadFuture<Void> DLTransaction::watch(const KeyRef& key) {
 }
 
 void DLTransaction::addWriteConflictRange(const KeyRangeRef& keys) {
-	throwIfError(api->transactionAddConflictRange(tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(),
-	                                              keys.end.size(), FDBConflictRangeTypes::WRITE));
+	throwIfError(api->transactionAddConflictRange(
+	    tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), FDBConflictRangeTypes::WRITE));
 }
 
 ThreadFuture<Void> DLTransaction::commit() {
@@ -217,8 +238,8 @@ ThreadFuture<int64_t> DLTransaction::getApproximateSize() {
 }
 
 void DLTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
-	throwIfError(api->transactionSetOption(tr, option, value.present() ? value.get().begin() : NULL,
-	                                       value.present() ? value.get().size() : 0));
+	throwIfError(api->transactionSetOption(
+	    tr, option, value.present() ? value.get().begin() : NULL, value.present() ? value.get().size() : 0));
 }
 
 ThreadFuture<Void> DLTransaction::onError(Error const& e) {
@@ -254,8 +275,8 @@ Reference<ITransaction> DLDatabase::createTransaction() {
 }
 
 void DLDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
-	throwIfError(api->databaseSetOption(db, option, value.present() ? value.get().begin() : NULL,
-	                                    value.present() ? value.get().size() : 0));
+	throwIfError(api->databaseSetOption(
+	    db, option, value.present() ? value.get().begin() : NULL, value.present() ? value.get().size() : 0));
 }
 
 // DLApi
@@ -301,15 +322,18 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionGetKey, lib, fdbCPath, "fdb_transaction_get_key");
 	loadClientFunction(&api->transactionGetAddressesForKey, lib, fdbCPath, "fdb_transaction_get_addresses_for_key");
 	loadClientFunction(&api->transactionGetRange, lib, fdbCPath, "fdb_transaction_get_range");
-	loadClientFunction(&api->transactionGetVersionstamp, lib, fdbCPath, "fdb_transaction_get_versionstamp",
-	                   headerVersion >= 410);
+	loadClientFunction(
+	    &api->transactionGetVersionstamp, lib, fdbCPath, "fdb_transaction_get_versionstamp", headerVersion >= 410);
 	loadClientFunction(&api->transactionSet, lib, fdbCPath, "fdb_transaction_set");
 	loadClientFunction(&api->transactionClear, lib, fdbCPath, "fdb_transaction_clear");
 	loadClientFunction(&api->transactionClearRange, lib, fdbCPath, "fdb_transaction_clear_range");
 	loadClientFunction(&api->transactionAtomicOp, lib, fdbCPath, "fdb_transaction_atomic_op");
 	loadClientFunction(&api->transactionCommit, lib, fdbCPath, "fdb_transaction_commit");
 	loadClientFunction(&api->transactionGetCommittedVersion, lib, fdbCPath, "fdb_transaction_get_committed_version");
-	loadClientFunction(&api->transactionGetApproximateSize, lib, fdbCPath, "fdb_transaction_get_approximate_size",
+	loadClientFunction(&api->transactionGetApproximateSize,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_transaction_get_approximate_size",
 	                   headerVersion >= 620);
 	loadClientFunction(&api->transactionWatch, lib, fdbCPath, "fdb_transaction_watch");
 	loadClientFunction(&api->transactionOnError, lib, fdbCPath, "fdb_transaction_on_error");
@@ -318,8 +342,8 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionAddConflictRange, lib, fdbCPath, "fdb_transaction_add_conflict_range");
 
 	loadClientFunction(&api->futureGetDatabase, lib, fdbCPath, "fdb_future_get_database");
-	loadClientFunction(&api->futureGetInt64, lib, fdbCPath,
-	                   headerVersion >= 620 ? "fdb_future_get_int64" : "fdb_future_get_version");
+	loadClientFunction(
+	    &api->futureGetInt64, lib, fdbCPath, headerVersion >= 620 ? "fdb_future_get_int64" : "fdb_future_get_version");
 	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error");
 	loadClientFunction(&api->futureGetKey, lib, fdbCPath, "fdb_future_get_key");
 	loadClientFunction(&api->futureGetValue, lib, fdbCPath, "fdb_future_get_value");
@@ -354,8 +378,8 @@ const char* DLApi::getClientVersion() {
 }
 
 void DLApi::setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {
-	throwIfError(api->setNetworkOption(option, value.present() ? value.get().begin() : NULL,
-	                                   value.present() ? value.get().size() : 0));
+	throwIfError(api->setNetworkOption(
+	    option, value.present() ? value.get().begin() : NULL, value.present() ? value.get().size() : 0));
 }
 
 void DLApi::setupNetwork() {
@@ -401,13 +425,14 @@ Reference<IDatabase> DLApi::createDatabase609(const char* clusterFilePath) {
 			    return ErrorOr<ThreadFuture<FdbCApi::FDBDatabase*>>(cluster.getError());
 		    }
 
-		    auto innerDbFuture = toThreadFuture<FdbCApi::FDBDatabase*>(
-		        innerApi, innerApi->clusterCreateDatabase(cluster.get(), (uint8_t*)"DB", 2),
-		        [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-			        FdbCApi::FDBDatabase* db;
-			        api->futureGetDatabase(f, &db);
-			        return db;
-		        });
+		    auto innerDbFuture =
+		        toThreadFuture<FdbCApi::FDBDatabase*>(innerApi,
+		                                              innerApi->clusterCreateDatabase(cluster.get(), (uint8_t*)"DB", 2),
+		                                              [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+			                                              FdbCApi::FDBDatabase* db;
+			                                              api->futureGetDatabase(f, &db);
+			                                              return db;
+		                                              });
 
 		    return ErrorOr<ThreadFuture<FdbCApi::FDBDatabase*>>(
 		        mapThreadFuture<FdbCApi::FDBDatabase*, FdbCApi::FDBDatabase*>(
@@ -519,8 +544,10 @@ ThreadFuture<Key> MultiVersionTransaction::getKey(const KeySelectorRef& key, boo
 }
 
 ThreadFuture<Standalone<RangeResultRef>> MultiVersionTransaction::getRange(const KeySelectorRef& begin,
-                                                                           const KeySelectorRef& end, int limit,
-                                                                           bool snapshot, bool reverse) {
+                                                                           const KeySelectorRef& end,
+                                                                           int limit,
+                                                                           bool snapshot,
+                                                                           bool reverse) {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getRange(begin, end, limit, snapshot, reverse)
 	                        : ThreadFuture<Standalone<RangeResultRef>>(Never());
@@ -529,7 +556,8 @@ ThreadFuture<Standalone<RangeResultRef>> MultiVersionTransaction::getRange(const
 
 ThreadFuture<Standalone<RangeResultRef>> MultiVersionTransaction::getRange(const KeySelectorRef& begin,
                                                                            const KeySelectorRef& end,
-                                                                           GetRangeLimits limits, bool snapshot,
+                                                                           GetRangeLimits limits,
+                                                                           bool snapshot,
                                                                            bool reverse) {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getRange(begin, end, limits, snapshot, reverse)
@@ -537,8 +565,10 @@ ThreadFuture<Standalone<RangeResultRef>> MultiVersionTransaction::getRange(const
 	return abortableFuture(f, tr.onChange);
 }
 
-ThreadFuture<Standalone<RangeResultRef>> MultiVersionTransaction::getRange(const KeyRangeRef& keys, int limit,
-                                                                           bool snapshot, bool reverse) {
+ThreadFuture<Standalone<RangeResultRef>> MultiVersionTransaction::getRange(const KeyRangeRef& keys,
+                                                                           int limit,
+                                                                           bool snapshot,
+                                                                           bool reverse) {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getRange(keys, limit, snapshot, reverse)
 	                        : ThreadFuture<Standalone<RangeResultRef>>(Never());
@@ -546,7 +576,8 @@ ThreadFuture<Standalone<RangeResultRef>> MultiVersionTransaction::getRange(const
 }
 
 ThreadFuture<Standalone<RangeResultRef>> MultiVersionTransaction::getRange(const KeyRangeRef& keys,
-                                                                           GetRangeLimits limits, bool snapshot,
+                                                                           GetRangeLimits limits,
+                                                                           bool snapshot,
                                                                            bool reverse) {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getRange(keys, limits, snapshot, reverse)
@@ -690,7 +721,9 @@ void MultiVersionTransaction::reset() {
 }
 
 // MultiVersionDatabase
-MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api, std::string clusterFilePath, Reference<IDatabase> db,
+MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
+                                           std::string clusterFilePath,
+                                           Reference<IDatabase> db,
                                            bool openConnectors)
   : dbState(new DatabaseState()) {
 	dbState->db = db;
@@ -1152,7 +1185,8 @@ void MultiVersionApi::setupNetwork() {
 
 		if (!bypassMultiClientApi) {
 			transportId = (uint64_t(uint32_t(platform::getRandomSeed())) << 32) ^ uint32_t(platform::getRandomSeed());
-			if (transportId <= 1) transportId += 2;
+			if (transportId <= 1)
+				transportId += 2;
 			localClient->api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT_TRANSPORT_ID,
 			                                   std::to_string(transportId));
 		}
@@ -1721,12 +1755,14 @@ private:
 struct DLTest {
 	static FutureInfo createThreadFuture(FutureInfo f) {
 		return FutureInfo(
-		    toThreadFuture<int>(getApi(), (FdbCApi::FDBFuture*)f.future.extractPtr(),
+		    toThreadFuture<int>(getApi(),
+		                        (FdbCApi::FDBFuture*)f.future.extractPtr(),
 		                        [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 			                        ASSERT(((ThreadSingleAssignmentVar<int>*)f)->debugGetReferenceCount() >= 1);
 			                        return ((ThreadSingleAssignmentVar<int>*)f)->get();
 		                        }),
-		    f.expectedValue, f.legalErrors);
+		    f.expectedValue,
+		    f.legalErrors);
 	}
 
 	static Reference<FdbCApi> getApi() {
@@ -1831,7 +1867,8 @@ struct FlatMapTest {
 				        return ErrorOr<ThreadFuture<int>>(mapFuture.future);
 			        }
 		        }),
-		    mapFuture.expectedValue, f.legalErrors);
+		    mapFuture.expectedValue,
+		    f.legalErrors);
 	}
 };
 

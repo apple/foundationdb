@@ -178,7 +178,8 @@ struct FileIdentifierFor<std::vector<T, Allocator>> : ComposedIdentifierExternal
 template <class Archive, class T>
 inline void save(Archive& ar, const std::vector<T>& value) {
 	ar << (int)value.size();
-	for (auto it = value.begin(); it != value.end(); ++it) ar << *it;
+	for (auto it = value.begin(); it != value.end(); ++it)
+		ar << *it;
 	ASSERT(ar.protocolVersion().isValid());
 }
 template <class Archive, class T>
@@ -196,7 +197,8 @@ inline void load(Archive& ar, std::vector<T>& value) {
 
 template <class Archive, class T, size_t N>
 inline void save(Archive& ar, const std::array<T, N>& value) {
-	for (int ii = 0; ii < N; ++ii) ar << value[ii];
+	for (int ii = 0; ii < N; ++ii)
+		ar << value[ii];
 	ASSERT(ar.protocolVersion().isValid());
 }
 template <class Archive, class T, size_t N>
@@ -210,7 +212,8 @@ inline void load(Archive& ar, std::array<T, N>& value) {
 template <class Archive, class T>
 inline void save(Archive& ar, const std::set<T>& value) {
 	ar << (int)value.size();
-	for (auto it = value.begin(); it != value.end(); ++it) ar << *it;
+	for (auto it = value.begin(); it != value.end(); ++it)
+		ar << *it;
 	ASSERT(ar.protocolVersion().isValid());
 }
 template <class Archive, class T>
@@ -255,7 +258,8 @@ static bool valgrindCheck(const void* data, int bytes, const char* context) {
 	if (first) {
 		int und = 0;
 		for (int b = 0; b < bytes; b++)
-			if (VALGRIND_CHECK_MEM_IS_DEFINED((uint8_t*)data + b, 1)) und++;
+			if (VALGRIND_CHECK_MEM_IS_DEFINED((uint8_t*)data + b, 1))
+				und++;
 		TraceEvent(SevError, "UndefinedData")
 		    .detail("In", context)
 		    .detail("Size", bytes)
@@ -621,7 +625,8 @@ public:
 		// Reads and returns the next bytes.
 		// The returned pointer has the lifetime of this.arena()
 		// Could be implemented zero-copy if [begin,end) was in this.arena() already; for now is a copy
-		if (!bytes) return NULL;
+		if (!bytes)
+			return NULL;
 		uint8_t* dat = new (arena()) uint8_t[bytes];
 		serializeBytes(dat, bytes);
 		return dat;

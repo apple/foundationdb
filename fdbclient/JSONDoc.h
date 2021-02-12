@@ -83,7 +83,8 @@ struct JSONDoc {
 	// Construction from non-const json_spirit::mValue - will convert the mValue to
 	// an object if it isn't already and then attach to it.
 	JSONDoc(json_spirit::mValue& v) {
-		if (v.type() != json_spirit::obj_type) v = json_spirit::mObject();
+		if (v.type() != json_spirit::obj_type)
+			v = json_spirit::mObject();
 		wpObj = &v.get_obj();
 		pObj = wpObj;
 	}
@@ -96,9 +97,11 @@ struct JSONDoc {
 	// path into on the "dot" character.
 	// When a path is found, pLast is updated.
 	bool has(std::string path, bool split = true) {
-		if (pObj == NULL) return false;
+		if (pObj == NULL)
+			return false;
 
-		if (path.empty()) return false;
+		if (path.empty())
+			return false;
 		size_t start = 0;
 		const json_spirit::mValue* curVal = NULL;
 		while (start < path.size()) {
@@ -106,7 +109,8 @@ struct JSONDoc {
 			size_t dot;
 			if (split) {
 				dot = path.find_first_of('.', start);
-				if (dot == std::string::npos) dot = path.size();
+				if (dot == std::string::npos)
+					dot = path.size();
 			} else {
 				dot = path.size();
 			}
@@ -117,7 +121,8 @@ struct JSONDoc {
 			const json_spirit::mObject* curObj = curVal ? &curVal->get_obj() : pObj;
 
 			// Make sure key exists, if not then return false
-			if (!curObj->count(key)) return false;
+			if (!curObj->count(key))
+				return false;
 
 			// Advance curVal
 			curVal = &curObj->at(key);
@@ -133,7 +138,8 @@ struct JSONDoc {
 	// Creates the given path (forcing Objects to exist along its depth, replacing whatever else might have been there)
 	// and returns a reference to the Value at that location.
 	json_spirit::mValue& create(std::string path, bool split = true) {
-		if (wpObj == NULL || path.empty()) throw std::runtime_error("JSON Object not writable or bad JSON path");
+		if (wpObj == NULL || path.empty())
+			throw std::runtime_error("JSON Object not writable or bad JSON path");
 
 		size_t start = 0;
 		json_spirit::mValue* curVal = nullptr;
@@ -142,24 +148,28 @@ struct JSONDoc {
 			size_t dot;
 			if (split) {
 				dot = path.find_first_of('.', start);
-				if (dot == std::string::npos) dot = path.size();
+				if (dot == std::string::npos)
+					dot = path.size();
 			} else {
 				dot = path.size();
 			}
 			std::string key = path.substr(start, dot - start);
-			if (key.empty()) throw std::runtime_error("invalid JSON path");
+			if (key.empty())
+				throw std::runtime_error("invalid JSON path");
 
 			// Get/create pointer to the current Object that the key has to be in
 			// If curVal is defined then force it to be an Object
 			json_spirit::mObject* curObj;
 			if (curVal != nullptr) {
-				if (curVal->type() != json_spirit::obj_type) *curVal = json_spirit::mObject();
+				if (curVal->type() != json_spirit::obj_type)
+					*curVal = json_spirit::mObject();
 				curObj = &curVal->get_obj();
 			} else // Otherwise start with the object *this is writing to
 				curObj = wpObj;
 
 			// Make sure key exists, if not then return false
-			if (!curObj->count(key)) (*curObj)[key] = json_spirit::mValue();
+			if (!curObj->count(key))
+				(*curObj)[key] = json_spirit::mValue();
 
 			// Advance curVal
 			curVal = &((*curObj)[key]);
@@ -182,24 +192,33 @@ struct JSONDoc {
 	// Ensures that a an Object exists at path and returns a JSONDoc that writes to it.
 	JSONDoc subDoc(std::string path, bool split = true) {
 		json_spirit::mValue& v = create(path, split);
-		if (v.type() != json_spirit::obj_type) v = json_spirit::mObject();
+		if (v.type() != json_spirit::obj_type)
+			v = json_spirit::mObject();
 		return JSONDoc(v.get_obj());
 	}
 
 	// Apply a merge operation to two values.  Works for int, double, and string
 	template <typename T>
-	static json_spirit::mObject mergeOperator(const std::string& op, const json_spirit::mObject& op_a,
-	                                          const json_spirit::mObject& op_b, T const& a, T const& b) {
-		if (op == "$max") return { { op, std::max<T>(a, b) } };
-		if (op == "$min") return { { op, std::min<T>(a, b) } };
-		if (op == "$sum") return { { op, a + b } };
+	static json_spirit::mObject mergeOperator(const std::string& op,
+	                                          const json_spirit::mObject& op_a,
+	                                          const json_spirit::mObject& op_b,
+	                                          T const& a,
+	                                          T const& b) {
+		if (op == "$max")
+			return { { op, std::max<T>(a, b) } };
+		if (op == "$min")
+			return { { op, std::min<T>(a, b) } };
+		if (op == "$sum")
+			return { { op, a + b } };
 		throw std::exception();
 	}
 
 	// This is just a convenience function to make calling mergeOperator look cleaner
 	template <typename T>
-	static json_spirit::mObject mergeOperatorWrapper(const std::string& op, const json_spirit::mObject& op_a,
-	                                                 const json_spirit::mObject& op_b, const json_spirit::mValue& a,
+	static json_spirit::mObject mergeOperatorWrapper(const std::string& op,
+	                                                 const json_spirit::mObject& op_a,
+	                                                 const json_spirit::mObject& op_b,
+	                                                 const json_spirit::mValue& a,
 	                                                 const json_spirit::mValue& b) {
 		return mergeOperator<T>(op, op_a, op_b, a.get_value<T>(), b.get_value<T>());
 	}
@@ -207,7 +226,8 @@ struct JSONDoc {
 	static inline const std::string& getOperator(const json_spirit::mObject& obj) {
 		static const std::string empty;
 		for (auto& k : obj)
-			if (!k.first.empty() && k.first[0] == '$') return k.first;
+			if (!k.first.empty() && k.first[0] == '$')
+				return k.first;
 		return empty;
 	}
 
@@ -218,15 +238,18 @@ struct JSONDoc {
 	// Remove any merge operators that never met any mates.
 	static void cleanOps(json_spirit::mObject& obj);
 	void cleanOps() {
-		if (wpObj == nullptr) throw std::runtime_error("JSON Object not writable");
+		if (wpObj == nullptr)
+			throw std::runtime_error("JSON Object not writable");
 
 		return cleanOps(*wpObj);
 	}
 
 	void absorb(const JSONDoc& doc) {
-		if (wpObj == nullptr) throw std::runtime_error("JSON Object not writable");
+		if (wpObj == nullptr)
+			throw std::runtime_error("JSON Object not writable");
 
-		if (doc.pObj == nullptr) throw std::runtime_error("JSON Object not readable");
+		if (doc.pObj == nullptr)
+			throw std::runtime_error("JSON Object not readable");
 
 		mergeInto(*wpObj, *doc.pObj);
 	}
@@ -240,7 +263,8 @@ struct JSONDoc {
 	template <typename T>
 	bool get(const std::string path, T& out, bool split = true) {
 		bool r = has(path, split);
-		if (r) out = pLast->get_value<T>();
+		if (r)
+			out = pLast->get_value<T>();
 		return r;
 	}
 
@@ -255,7 +279,8 @@ struct JSONDoc {
 	}
 
 	const json_spirit::mValue& at(const std::string path, bool split = true) {
-		if (has(path, split)) return last();
+		if (has(path, split))
+			return last();
 		throw std::runtime_error("JSON path doesn't exist");
 	}
 

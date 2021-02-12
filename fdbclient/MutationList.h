@@ -80,7 +80,8 @@ public:
 		MutationRef item;
 
 		void decode() {
-			if (!ptr) return;
+			if (!ptr)
+				return;
 			item.type = (MutationRef::Type)ptr->type;
 			item.param1 = StringRef(ptr->p1begin(), ptr->p1len);
 			item.param2 = StringRef(ptr->p2begin(), ptr->p2len);
@@ -92,7 +93,8 @@ public:
 		append_deep(ar, r.begin(), r.end());
 	}
 	Iterator begin() const {
-		if (blob_begin) return Iterator(blob_begin, (Header*)blob_begin->data.begin());
+		if (blob_begin)
+			return Iterator(blob_begin, (Header*)blob_begin->data.begin());
 		return Iterator(NULL, NULL);
 	}
 	Iterator end() const { return Iterator(NULL, NULL); }
@@ -108,8 +110,8 @@ public:
 		memcpy(p + 1, m.param1.begin(), p->p1len);
 		memcpy((uint8_t*)(p + 1) + p->p1len, m.param2.begin(), p->p2len);
 		totalBytes += mutationSize;
-		return MutationRef((MutationRef::Type)p->type, StringRef(p->p1begin(), p->p1len),
-		                   StringRef(p->p2begin(), p->p2len));
+		return MutationRef(
+		    (MutationRef::Type)p->type, StringRef(p->p1begin(), p->p1len), StringRef(p->p2begin(), p->p2len));
 	}
 	void append_deep(Arena& arena, Iterator begin, Iterator end) {
 		for (auto blob = begin.blob; blob; blob = blob->next) {
@@ -122,12 +124,14 @@ public:
 				totalBytes += len;
 			}
 
-			if (blob == end.blob) break;
+			if (blob == end.blob)
+				break;
 		}
 	}
 	void append_deep(Arena& arena, MutationRef const* begin, int count) {
 		// FIXME: More efficient?  Eliminate?
-		for (int i = 0; i < count; i++) push_back_deep(arena, begin[i]);
+		for (int i = 0; i < count; i++)
+			push_back_deep(arena, begin[i]);
 	}
 
 	template <class Ar>
@@ -147,7 +151,8 @@ public:
 	template <class Ar>
 	void serialize_save(Ar& ar) const {
 		serializer(ar, totalBytes);
-		for (auto b = blob_begin; b; b = b->next) ar.serializeBytes(b->data);
+		for (auto b = blob_begin; b; b = b->next)
+			ar.serializeBytes(b->data);
 	}
 
 private:

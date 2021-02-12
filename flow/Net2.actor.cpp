@@ -948,7 +948,8 @@ ACTOR static Future<Void> watchFileForChanges(std::string filename, AsyncTrigger
 }
 
 ACTOR static Future<Void> reloadCertificatesOnChange(
-    TLSConfig config, std::function<void()> onPolicyFailure,
+    TLSConfig config,
+    std::function<void()> onPolicyFailure,
     AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>>* contextVar) {
 	if (FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS <= 0) {
 		return Void();
@@ -1059,7 +1060,8 @@ void Net2::run() {
 	thread_network = this;
 
 #ifdef WIN32
-	if (timeBeginPeriod(1) != TIMERR_NOERROR) TraceEvent(SevError, "TimeBeginPeriodError");
+	if (timeBeginPeriod(1) != TIMERR_NOERROR)
+		TraceEvent(SevError, "TimeBeginPeriodError");
 #endif
 
 	timeOffsetLogger = logTimeOffset();
@@ -1095,7 +1097,8 @@ void Net2::run() {
 		bool b = ready.empty();
 		if (b) {
 			b = threadReady.canSleep();
-			if (!b) ++countCantSleep;
+			if (!b)
+				++countCantSleep;
 		} else
 			++countWontSleep;
 		if (b) {
@@ -1261,7 +1264,8 @@ void Net2::processThreadReady() {
 	int numReady = 0;
 	while (true) {
 		Optional<OrderedTask> t = threadReady.pop();
-		if (!t.present()) break;
+		if (!t.present())
+			break;
 		t.get().priority -= ++tasksIssued;
 		ASSERT(t.get().task != 0);
 		ready.push(t.get());
@@ -1313,7 +1317,8 @@ bool Net2::check_yield(TaskPriority taskID, bool isRunLoop) {
 
 	processThreadReady();
 
-	if (taskID == TaskPriority::DefaultYield) taskID = currentTaskID;
+	if (taskID == TaskPriority::DefaultYield)
+		taskID = currentTaskID;
 	if (!ready.empty() && ready.top().priority > int64_t(taskID) << 32) {
 		return true;
 	}
@@ -1345,7 +1350,8 @@ bool Net2::check_yield(TaskPriority taskID) {
 
 Future<class Void> Net2::yield(TaskPriority taskID) {
 	++countYieldCalls;
-	if (taskID == TaskPriority::DefaultYield) taskID = currentTaskID;
+	if (taskID == TaskPriority::DefaultYield)
+		taskID = currentTaskID;
 	if (check_yield(taskID, false)) {
 		++countYieldCallsTrue;
 		return delay(0, taskID);
@@ -1371,7 +1377,8 @@ Future<Void> Net2::delay(double seconds, TaskPriority taskId) {
 }
 
 void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {
-	if (stopped) return;
+	if (stopped)
+		return;
 	PromiseTask* p = new PromiseTask(std::move(signal));
 	int64_t priority = int64_t(taskID) << 32;
 
@@ -1379,7 +1386,8 @@ void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {
 		processThreadReady();
 		this->ready.push(OrderedTask(priority - (++tasksIssued), taskID, p));
 	} else {
-		if (threadReady.push(OrderedTask(priority, taskID, p))) reactor.wake();
+		if (threadReady.push(OrderedTask(priority, taskID, p)))
+			reactor.wake();
 	}
 }
 
@@ -1398,7 +1406,8 @@ Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, std::string 
 	return Connection::connect(&this->reactor.ios, toAddr);
 }
 
-ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* self, std::string host,
+ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* self,
+                                                                         std::string host,
                                                                          std::string service) {
 	state tcp::resolver tcpResolver(self->reactor.ios);
 	Promise<std::vector<NetworkAddress>> promise;
@@ -1444,9 +1453,11 @@ Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint(std::string host, s
 
 bool Net2::isAddressOnThisHost(NetworkAddress const& addr) {
 	auto it = addressOnHostCache.find(addr.ip);
-	if (it != addressOnHostCache.end()) return it->second;
+	if (it != addressOnHostCache.end())
+		return it->second;
 
-	if (addressOnHostCache.size() > 50000) addressOnHostCache.clear(); // Bound cache memory; should not really happen
+	if (addressOnHostCache.size() > 50000)
+		addressOnHostCache.clear(); // Bound cache memory; should not really happen
 
 	try {
 		boost::asio::io_service ioService;
@@ -1456,7 +1467,8 @@ bool Net2::isAddressOnThisHost(NetworkAddress const& addr) {
 		bool local = addr.ip.isV6() ? socket.local_endpoint().address().to_v6().to_bytes() == addr.ip.toV6()
 		                            : socket.local_endpoint().address().to_v4().to_ulong() == addr.ip.toV4();
 		socket.close();
-		if (local) TraceEvent(SevInfo, "AddressIsOnHost").detail("Address", addr);
+		if (local)
+			TraceEvent(SevInfo, "AddressIsOnHost").detail("Address", addr);
 		return addressOnHostCache[addr.ip] = local;
 	} catch (boost::system::system_error e) {
 		TraceEvent(SevWarnAlways, "IsAddressOnHostError")
@@ -1554,12 +1566,14 @@ void ASIOReactor::sleep(double sleepTime) {
 		}
 		++network->countASIOEvents;
 	} else if (sleepTime > 0) {
-		if (!(FLOW_KNOBS->REACTOR_FLAGS & 8)) threadYield();
+		if (!(FLOW_KNOBS->REACTOR_FLAGS & 8))
+			threadYield();
 	}
 }
 
 void ASIOReactor::react() {
-	while (ios.poll_one()) ++network->countASIOEvents; // Make this a task?
+	while (ios.poll_one())
+		++network->countASIOEvents; // Make this a task?
 }
 
 void ASIOReactor::wake() {

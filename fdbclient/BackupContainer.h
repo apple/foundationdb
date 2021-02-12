@@ -178,8 +178,10 @@ public:
 
 	// Open a log file or range file for writing
 	virtual Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) = 0;
-	virtual Future<Reference<IBackupFile>> writeRangeFile(Version snapshotBeginVersion, int snapshotFileCount,
-	                                                      Version fileVersion, int blockSize) = 0;
+	virtual Future<Reference<IBackupFile>> writeRangeFile(Version snapshotBeginVersion,
+	                                                      int snapshotFileCount,
+	                                                      Version fileVersion,
+	                                                      int blockSize) = 0;
 
 	// Write a KeyspaceSnapshotFile of range file names representing a full non overlapping
 	// snapshot of the key ranges this backup is targeting.
@@ -200,7 +202,9 @@ public:
 	//   - ends at or before restorableBeginVersion
 	// If force is true, data is deleted unconditionally which could leave the backup in an unusable state.  This is not
 	// recommended. Returns true if expiration was done.
-	virtual Future<Void> expireData(Version expireEndVersion, bool force = false, ExpireProgress* progress = nullptr,
+	virtual Future<Void> expireData(Version expireEndVersion,
+	                                bool force = false,
+	                                ExpireProgress* progress = nullptr,
 	                                Version restorableBeginVersion = std::numeric_limits<Version>::max()) = 0;
 
 	// Delete entire container.  During the process, if pNumDeleted is not null it will be

@@ -48,7 +48,8 @@ Tuple::Tuple(StringRef const& str, bool exclude_incomplete) {
 	}
 	// If incomplete tuples are allowed, remove the last offset if i is now beyond size()
 	// Strings will never be considered incomplete due to the way the string end is found.
-	if (exclude_incomplete && i > data.size()) offsets.pop_back();
+	if (exclude_incomplete && i > data.size())
+		offsets.pop_back();
 }
 
 Tuple Tuple::unpack(StringRef const& str, bool exclude_incomplete) {

@@ -360,7 +360,8 @@ public:
 #ifndef SO_MAX_ARGS
 	/*! @brief Deallocate any allocated memory. */
 	~CSimpleOptTempl() {
-		if (m_rgShuffleBuf) free(m_rgShuffleBuf);
+		if (m_rgShuffleBuf)
+			free(m_rgShuffleBuf);
 	}
 #endif
 
@@ -507,7 +508,8 @@ private:
 
 	// Find the '=' character within a string.
 	inline SOCHAR* FindEquals(SOCHAR* s) const {
-		while (*s && *s != (SOCHAR)'=') ++s;
+		while (*s && *s != (SOCHAR)'=')
+			++s;
 		return *s ? s : NULL;
 	}
 	bool IsEqual(SOCHAR a_cLeft, SOCHAR a_cRight, int a_nArgType) const;
@@ -515,7 +517,8 @@ private:
 	inline void Copy(SOCHAR** ppDst, SOCHAR** ppSrc, int nCount) const {
 #ifdef SO_MAX_ARGS
 		// keep our promise of no CLIB usage
-		while (nCount-- > 0) *ppDst++ = *ppSrc++;
+		while (nCount-- > 0)
+			*ppDst++ = *ppSrc++;
 #else
 		memcpy(ppDst, ppSrc, nCount * sizeof(SOCHAR*));
 #endif
@@ -800,7 +803,8 @@ bool CSimpleOptTempl<SOCHAR>::NextClumped() {
 	if (nArgType == SO_REQ_CMB && *m_pszClump) {
 		m_nOptionId = m_rgOptions[nTableIdx].nId;
 		m_pszOptionArg = m_pszClump;
-		while (*m_pszClump) ++m_pszClump; // must point to an empty string
+		while (*m_pszClump)
+			++m_pszClump; // must point to an empty string
 		return true;
 	}
 
@@ -932,8 +936,10 @@ template <class SOCHAR>
 bool CSimpleOptTempl<SOCHAR>::IsEqual(SOCHAR a_cLeft, SOCHAR a_cRight, int a_nArgType) const {
 	// if this matches then we are doing case-insensitive matching
 	if (m_nFlags & a_nArgType) {
-		if (a_cLeft >= 'A' && a_cLeft <= 'Z') a_cLeft += 'a' - 'A';
-		if (a_cRight >= 'A' && a_cRight <= 'Z') a_cRight += 'a' - 'A';
+		if (a_cLeft >= 'A' && a_cLeft <= 'Z')
+			a_cLeft += 'a' - 'A';
+		if (a_cRight >= 'A' && a_cRight <= 'Z')
+			a_cRight += 'a' - 'A';
 	}
 	return a_cLeft == a_cRight;
 }

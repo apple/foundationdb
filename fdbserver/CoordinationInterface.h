@@ -60,8 +60,10 @@ struct UniqueGeneration {
 	UniqueGeneration() : generation(0) {}
 	UniqueGeneration(uint64_t generation, UID uid) : generation(generation), uid(uid) {}
 	bool operator<(UniqueGeneration const& r) const {
-		if (generation < r.generation) return true;
-		if (r.generation < generation) return false;
+		if (generation < r.generation)
+			return true;
+		if (r.generation < generation)
+			return false;
 		return uid < r.uid;
 	}
 	bool operator==(UniqueGeneration const& r) const { return generation == r.generation && uid == r.uid; }

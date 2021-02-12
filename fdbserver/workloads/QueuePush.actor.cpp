@@ -117,11 +117,13 @@ struct QueuePushWorkload : TestWorkload {
 					if (self->forward) {
 						Key _lastKey = wait(tr.getKey(lastLessThan(self->endingKey), true));
 						lastKey = _lastKey;
-						if (lastKey == StringRef()) lastKey = self->startingKey;
+						if (lastKey == StringRef())
+							lastKey = self->startingKey;
 					} else {
 						Key _lastKey = wait(tr.getKey(firstGreaterThan(self->startingKey), true));
 						lastKey = _lastKey;
-						if (!normalKeys.contains(lastKey)) lastKey = self->endingKey;
+						if (!normalKeys.contains(lastKey))
+							lastKey = self->endingKey;
 					}
 
 					std::pair<int, int> unpacked = valuesForKey(lastKey);

@@ -106,7 +106,8 @@ public:
 	template <typename T>
 	RAPIDJSON_FORCEINLINE void Reserve(size_t count = 1) {
 		// Expand the stack if needed
-		if (RAPIDJSON_UNLIKELY(stackTop_ + sizeof(T) * count > stackEnd_)) Expand<T>(count);
+		if (RAPIDJSON_UNLIKELY(stackTop_ + sizeof(T) * count > stackEnd_))
+			Expand<T>(count);
 	}
 
 	template <typename T>
@@ -179,14 +180,16 @@ private:
 		// Only expand the capacity if the current stack exists. Otherwise just create a stack with initial capacity.
 		size_t newCapacity;
 		if (stack_ == 0) {
-			if (!allocator_) ownAllocator_ = allocator_ = RAPIDJSON_NEW(Allocator());
+			if (!allocator_)
+				ownAllocator_ = allocator_ = RAPIDJSON_NEW(Allocator());
 			newCapacity = initialCapacity_;
 		} else {
 			newCapacity = GetCapacity();
 			newCapacity += (newCapacity + 1) / 2;
 		}
 		size_t newSize = GetSize() + sizeof(T) * count;
-		if (newCapacity < newSize) newCapacity = newSize;
+		if (newCapacity < newSize)
+			newCapacity = newSize;
 
 		Resize(newCapacity);
 	}

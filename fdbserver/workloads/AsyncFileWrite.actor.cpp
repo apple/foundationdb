@@ -58,7 +58,8 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 	virtual std::string description() { return "AsyncFileWrite"; }
 
 	virtual Future<Void> setup(Database const& cx) {
-		if (enabled) return _setup(this);
+		if (enabled)
+			return _setup(this);
 
 		return Void();
 	}
@@ -73,18 +74,21 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 		self->writeBuffer = self->allocateBuffer(self->writeSize);
 
 		int64_t initialSize = self->fileSize;
-		if (self->sequential) initialSize = 0;
+		if (self->sequential)
+			initialSize = 0;
 
 		wait(self->openFile(self, IAsyncFile::OPEN_READWRITE, 0666, initialSize));
 
 		int64_t fileSize = wait(self->fileHandle->file->size());
-		if (fileSize != 0) self->fileSize = fileSize;
+		if (fileSize != 0)
+			self->fileSize = fileSize;
 
 		return Void();
 	}
 
 	virtual Future<Void> start(Database const& cx) {
-		if (enabled) return _start(this);
+		if (enabled)
+			return _start(this);
 
 		return Void();
 	}
@@ -123,7 +127,8 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 					offset += self->writeSize;
 
 					// If the file is exhausted, start over at the beginning
-					if (offset >= self->fileSize) offset = 0;
+					if (offset >= self->fileSize)
+						offset = 0;
 				} else if (self->unbufferedIO)
 					offset = (int64_t)(deterministicRandom()->random01() * (self->fileSize - 1) /
 					                   AsyncFileWorkload::_PAGE_SIZE) *

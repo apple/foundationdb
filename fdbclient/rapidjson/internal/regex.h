@@ -160,7 +160,8 @@ private:
 
 	private:
 		void Decode() {
-			if (!Encoding::Decode(ss_, &codepoint_)) codepoint_ = 0;
+			if (!Encoding::Decode(ss_, &codepoint_))
+				codepoint_ = 0;
 		}
 
 		SourceStream& ss_;
@@ -209,7 +210,8 @@ private:
 
 			case '|':
 				while (!operatorStack.Empty() && *operatorStack.template Top<Operator>() < kAlternation)
-					if (!Eval(operandStack, *operatorStack.template Pop<Operator>(1))) return;
+					if (!Eval(operandStack, *operatorStack.template Pop<Operator>(1)))
+						return;
 				*operatorStack.template Push<Operator>() = kAlternation;
 				*atomCountStack.template Top<unsigned>() = 0;
 				break;
@@ -221,28 +223,34 @@ private:
 
 			case ')':
 				while (!operatorStack.Empty() && *operatorStack.template Top<Operator>() != kLeftParenthesis)
-					if (!Eval(operandStack, *operatorStack.template Pop<Operator>(1))) return;
-				if (operatorStack.Empty()) return;
+					if (!Eval(operandStack, *operatorStack.template Pop<Operator>(1)))
+						return;
+				if (operatorStack.Empty())
+					return;
 				operatorStack.template Pop<Operator>(1);
 				atomCountStack.template Pop<unsigned>(1);
 				ImplicitConcatenation(atomCountStack, operatorStack);
 				break;
 
 			case '?':
-				if (!Eval(operandStack, kZeroOrOne)) return;
+				if (!Eval(operandStack, kZeroOrOne))
+					return;
 				break;
 
 			case '*':
-				if (!Eval(operandStack, kZeroOrMore)) return;
+				if (!Eval(operandStack, kZeroOrMore))
+					return;
 				break;
 
 			case '+':
-				if (!Eval(operandStack, kOneOrMore)) return;
+				if (!Eval(operandStack, kOneOrMore))
+					return;
 				break;
 
 			case '{': {
 				unsigned n, m;
-				if (!ParseUnsigned(ds, &n)) return;
+				if (!ParseUnsigned(ds, &n))
+					return;
 
 				if (ds.Peek() == ',') {
 					ds.Take();
@@ -253,7 +261,8 @@ private:
 				} else
 					m = n;
 
-				if (!EvalQuantifier(operandStack, n, m) || ds.Peek() != '}') return;
+				if (!EvalQuantifier(operandStack, n, m) || ds.Peek() != '}')
+					return;
 				ds.Take();
 			} break;
 
@@ -264,7 +273,8 @@ private:
 
 			case '[': {
 				SizeType range;
-				if (!ParseRange(ds, &range)) return;
+				if (!ParseRange(ds, &range))
+					return;
 				SizeType s = NewState(kRegexInvalidState, kRegexInvalidState, kRangeCharacterClass);
 				GetState(s).rangeStart = range;
 				*operandStack.template Push<Frag>() = Frag(s, s, s);
@@ -273,7 +283,8 @@ private:
 				break;
 
 			case '\\': // Escape character
-				if (!CharacterEscape(ds, &codepoint)) return; // Unsupported escape character
+				if (!CharacterEscape(ds, &codepoint))
+					return; // Unsupported escape character
 				// fall through to default
 
 			default: // Pattern character
@@ -283,7 +294,8 @@ private:
 		}
 
 		while (!operatorStack.Empty())
-			if (!Eval(operandStack, *operatorStack.template Pop<Operator>(1))) return;
+			if (!Eval(operandStack, *operatorStack.template Pop<Operator>(1)))
+				return;
 
 		// Link the operand to matching state.
 		if (operandStack.GetSize() == sizeof(Frag)) {
@@ -325,13 +337,15 @@ private:
 	}
 
 	void ImplicitConcatenation(Stack<Allocator>& atomCountStack, Stack<Allocator>& operatorStack) {
-		if (*atomCountStack.template Top<unsigned>()) *operatorStack.template Push<Operator>() = kConcatenation;
+		if (*atomCountStack.template Top<unsigned>())
+			*operatorStack.template Push<Operator>() = kConcatenation;
 		(*atomCountStack.template Top<unsigned>())++;
 	}
 
 	SizeType Append(SizeType l1, SizeType l2) {
 		SizeType old = l1;
-		while (GetState(l1).out != kRegexInvalidState) l1 = GetState(l1).out;
+		while (GetState(l1).out != kRegexInvalidState)
+			l1 = GetState(l1).out;
 		GetState(l1).out = l2;
 		return old;
 	}
@@ -408,8 +422,10 @@ private:
 				Eval(operandStack, kZeroOrMore); // a{0,} -> a*
 			else {
 				Eval(operandStack, kZeroOrOne); // a{0,5} -> a?
-				for (unsigned i = 0; i < m - 1; i++) CloneTopOperand(operandStack); // a{0,5} -> a? a? a? a? a?
-				for (unsigned i = 0; i < m - 1; i++) Eval(operandStack, kConcatenation); // a{0,5} -> a?a?a?a?a?
+				for (unsigned i = 0; i < m - 1; i++)
+					CloneTopOperand(operandStack); // a{0,5} -> a? a? a? a? a?
+				for (unsigned i = 0; i < m - 1; i++)
+					Eval(operandStack, kConcatenation); // a{0,5} -> a?a?a?a?a?
 			}
 			return true;
 		}
@@ -422,8 +438,10 @@ private:
 		else if (m > n) {
 			CloneTopOperand(operandStack); // a{3,5} -> a a a a
 			Eval(operandStack, kZeroOrOne); // a{3,5} -> a a a a?
-			for (unsigned i = n; i < m - 1; i++) CloneTopOperand(operandStack); // a{3,5} -> a a a a? a?
-			for (unsigned i = n; i < m; i++) Eval(operandStack, kConcatenation); // a{3,5} -> a a aa?a?
+			for (unsigned i = n; i < m - 1; i++)
+				CloneTopOperand(operandStack); // a{3,5} -> a a a a? a?
+			for (unsigned i = n; i < m; i++)
+				Eval(operandStack, kConcatenation); // a{3,5} -> a a aa?a?
 		}
 
 		for (unsigned i = 0; i < n - 1; i++)
@@ -441,8 +459,10 @@ private:
 		State* s = states_.template Push<State>(count);
 		memcpy(s, &GetState(src.minIndex), count * sizeof(State));
 		for (SizeType j = 0; j < count; j++) {
-			if (s[j].out != kRegexInvalidState) s[j].out += count;
-			if (s[j].out1 != kRegexInvalidState) s[j].out1 += count;
+			if (s[j].out != kRegexInvalidState)
+				s[j].out += count;
+			if (s[j].out1 != kRegexInvalidState)
+				s[j].out1 += count;
 		}
 		*operandStack.template Push<Frag>() = Frag(src.start + count, src.out + count, src.minIndex + count);
 		stateCount_ += count;
@@ -451,7 +471,8 @@ private:
 	template <typename InputStream>
 	bool ParseUnsigned(DecodedStream<InputStream>& ds, unsigned* u) {
 		unsigned r = 0;
-		if (ds.Peek() < '0' || ds.Peek() > '9') return false;
+		if (ds.Peek() < '0' || ds.Peek() > '9')
+			return false;
 		while (ds.Peek() >= '0' && ds.Peek() <= '9') {
 			if (r >= 429496729 && ds.Peek() > '5') // 2^32 - 1 = 4294967295
 				return false; // overflow
@@ -480,13 +501,15 @@ private:
 
 			switch (codepoint) {
 			case ']':
-				if (start == kRegexInvalidRange) return false; // Error: nothing inside []
+				if (start == kRegexInvalidRange)
+					return false; // Error: nothing inside []
 				if (step == 2) { // Add trailing '-'
 					SizeType r = NewRange('-');
 					RAPIDJSON_ASSERT(current != kRegexInvalidRange);
 					GetRange(current).next = r;
 				}
-				if (negate) GetRange(start).start |= kRangeNegationFlag;
+				if (negate)
+					GetRange(start).start |= kRangeNegationFlag;
 				*range = start;
 				return true;
 
@@ -509,8 +532,10 @@ private:
 
 				case 0: {
 					SizeType r = NewRange(codepoint);
-					if (current != kRegexInvalidRange) GetRange(current).next = r;
-					if (start == kRegexInvalidRange) start = r;
+					if (current != kRegexInvalidRange)
+						GetRange(current).next = r;
+					if (start == kRegexInvalidRange)
+						start = r;
 					current = r;
 				}
 					step = 1;
@@ -595,9 +620,11 @@ private:
 				if (sr.codepoint == codepoint || sr.codepoint == kAnyCharacterClass ||
 				    (sr.codepoint == kRangeCharacterClass && MatchRange(sr.rangeStart, codepoint))) {
 					matched = AddState(*next, sr.out) || matched;
-					if (!anchorEnd && matched) return true;
+					if (!anchorEnd && matched)
+						return true;
 				}
-				if (!anchorBegin) AddState(*next, root_);
+				if (!anchorBegin)
+					AddState(*next, root_);
 			}
 			internal::Swap(current, next);
 		}
@@ -627,7 +654,8 @@ private:
 		bool yes = (GetRange(rangeIndex).start & kRangeNegationFlag) == 0;
 		while (rangeIndex != kRegexInvalidRange) {
 			const Range& r = GetRange(rangeIndex);
-			if (codepoint >= (r.start & ~kRangeNegationFlag) && codepoint <= r.end) return yes;
+			if (codepoint >= (r.start & ~kRangeNegationFlag) && codepoint <= r.end)
+				return yes;
 			rangeIndex = r.next;
 		}
 		return !yes;

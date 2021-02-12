@@ -72,8 +72,16 @@ struct CoreTLogSet {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, tLogs, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality,
-		           startVersion, satelliteTagLocations);
+		serializer(ar,
+		           tLogs,
+		           tLogWriteAntiQuorum,
+		           tLogReplicationFactor,
+		           tLogPolicy,
+		           tLogLocalities,
+		           isLocal,
+		           locality,
+		           startVersion,
+		           satelliteTagLocations);
 		if (ar.isDeserializing && !ar.protocolVersion().hasTLogVersion()) {
 			tLogVersion = TLogVersion::V2;
 		} else {
@@ -103,8 +111,13 @@ struct OldTLogCoreData {
 			serializer(ar, tLogs, logRouterTags, epochEnd);
 		} else if (ar.isDeserializing) {
 			tLogs.push_back(CoreTLogSet());
-			serializer(ar, tLogs[0].tLogs, tLogs[0].tLogWriteAntiQuorum, tLogs[0].tLogReplicationFactor,
-			           tLogs[0].tLogPolicy, epochEnd, tLogs[0].tLogLocalities);
+			serializer(ar,
+			           tLogs[0].tLogs,
+			           tLogs[0].tLogWriteAntiQuorum,
+			           tLogs[0].tLogReplicationFactor,
+			           tLogs[0].tLogPolicy,
+			           epochEnd,
+			           tLogs[0].tLogLocalities);
 			tLogs[0].tLogVersion = TLogVersion::V2;
 		}
 		if (ar.protocolVersion().hasPseudoLocalities()) {
@@ -170,7 +183,11 @@ struct DBCoreState {
 			}
 		} else if (ar.isDeserializing) {
 			tLogs.push_back(CoreTLogSet());
-			serializer(ar, tLogs[0].tLogs, tLogs[0].tLogWriteAntiQuorum, recoveryCount, tLogs[0].tLogReplicationFactor,
+			serializer(ar,
+			           tLogs[0].tLogs,
+			           tLogs[0].tLogWriteAntiQuorum,
+			           recoveryCount,
+			           tLogs[0].tLogReplicationFactor,
 			           logSystemType);
 			tLogs[0].tLogVersion = TLogVersion::V2;
 

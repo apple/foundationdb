@@ -218,7 +218,8 @@ int Coro_startCoro_(Coro* self, Coro* other, void* context, CoroStartCallback* c
 	block->func = callback;
 
 	result = Coro_allocStackIfNeeded(other);
-	if (result) return result;
+	if (result)
+		return result;
 
 	Coro_setup(other, block);
 	Coro_switchTo_(self, other);
@@ -376,7 +377,8 @@ void Coro_setup(Coro* self, void* arg) {
 	}
 
 	self->fiber = CreateFiber(Coro_stackSize(self), (LPFIBER_START_ROUTINE)Coro_StartWithArg, (LPVOID)arg);
-	if (!self->fiber) criticalError(FDB_EXIT_ABORT, "SchedulerError", "unable to create fiber");
+	if (!self->fiber)
+		criticalError(FDB_EXIT_ABORT, "SchedulerError", "unable to create fiber");
 }
 
 #elif defined(__CYGWIN__)

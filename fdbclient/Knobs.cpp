@@ -37,7 +37,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 
 	init(FAILURE_MAX_DELAY, 5.0);
 	init(FAILURE_MIN_DELAY, 4.0);
-	if (randomize && BUGGIFY) FAILURE_MIN_DELAY = 1.0;
+	if (randomize && BUGGIFY)
+		FAILURE_MIN_DELAY = 1.0;
 	init(FAILURE_TIMEOUT_DELAY, FAILURE_MIN_DELAY);
 	init(CLIENT_FAILURE_TIMEOUT_DELAY, FAILURE_MIN_DELAY);
 	init(FAILURE_EMERGENCY_DELAY, 30.0);
@@ -51,7 +52,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init(CLIENT_EXAMPLE_AMOUNT, 20);
 	init(MAX_CLIENT_STATUS_AGE, 1.0);
 	init(MAX_PROXY_CONNECTIONS, 5);
-	if (randomize && BUGGIFY) MAX_PROXY_CONNECTIONS = 1;
+	if (randomize && BUGGIFY)
+		MAX_PROXY_CONNECTIONS = 1;
 	init(STATUS_IDLE_TIMEOUT, 120.0);
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
@@ -67,7 +69,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 		FUTURE_VERSION_RETRY_DELAY = deterministicRandom()->random01(); // FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY;
 	init(REPLY_BYTE_LIMIT, 80000);
 	init(DEFAULT_BACKOFF, .01);
-	if (randomize && BUGGIFY) DEFAULT_BACKOFF = deterministicRandom()->random01();
+	if (randomize && BUGGIFY)
+		DEFAULT_BACKOFF = deterministicRandom()->random01();
 	init(DEFAULT_MAX_BACKOFF, 1.0);
 	init(BACKOFF_GROWTH_RATE, 2.0);
 	init(RESOURCE_CONSTRAINED_MAX_BACKOFF, 30.0);
@@ -79,28 +82,36 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init(SYSTEM_KEY_SIZE_LIMIT, 3e4);
 	init(VALUE_SIZE_LIMIT, 1e5);
 	init(SPLIT_KEY_SIZE_LIMIT, KEY_SIZE_LIMIT / 2);
-	if (randomize && BUGGIFY) SPLIT_KEY_SIZE_LIMIT = KEY_SIZE_LIMIT - 31; // serverKeysPrefixFor(UID()).size() - 1;
+	if (randomize && BUGGIFY)
+		SPLIT_KEY_SIZE_LIMIT = KEY_SIZE_LIMIT - 31; // serverKeysPrefixFor(UID()).size() - 1;
 	init(METADATA_VERSION_CACHE_SIZE, 1000);
 
 	init(MAX_BATCH_SIZE, 1000);
-	if (randomize && BUGGIFY) MAX_BATCH_SIZE = 1;
+	if (randomize && BUGGIFY)
+		MAX_BATCH_SIZE = 1;
 	init(GRV_BATCH_TIMEOUT, 0.005);
-	if (randomize && BUGGIFY) GRV_BATCH_TIMEOUT = 0.1;
+	if (randomize && BUGGIFY)
+		GRV_BATCH_TIMEOUT = 0.1;
 	init(BROADCAST_BATCH_SIZE, 20);
-	if (randomize && BUGGIFY) BROADCAST_BATCH_SIZE = 1;
+	if (randomize && BUGGIFY)
+		BROADCAST_BATCH_SIZE = 1;
 	init(TRANSACTION_TIMEOUT_DELAY_INTERVAL, 10.0);
-	if (randomize && BUGGIFY) TRANSACTION_TIMEOUT_DELAY_INTERVAL = 1.0;
+	if (randomize && BUGGIFY)
+		TRANSACTION_TIMEOUT_DELAY_INTERVAL = 1.0;
 
 	init(LOCATION_CACHE_EVICTION_SIZE, 300000);
 	init(LOCATION_CACHE_EVICTION_SIZE_SIM, 10);
-	if (randomize && BUGGIFY) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
+	if (randomize && BUGGIFY)
+		LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
 
 	init(GET_RANGE_SHARD_LIMIT, 2);
 	init(WARM_RANGE_SHARD_LIMIT, 100);
 	init(STORAGE_METRICS_SHARD_LIMIT, 100);
-	if (randomize && BUGGIFY) STORAGE_METRICS_SHARD_LIMIT = 3;
+	if (randomize && BUGGIFY)
+		STORAGE_METRICS_SHARD_LIMIT = 3;
 	init(SHARD_COUNT_LIMIT, 80);
-	if (randomize && BUGGIFY) SHARD_COUNT_LIMIT = 3;
+	if (randomize && BUGGIFY)
+		SHARD_COUNT_LIMIT = 3;
 	init(STORAGE_METRICS_UNFAIR_SPLIT_LIMIT, 2.0 / 3.0);
 	init(STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, 15.0);
 	init(AGGREGATE_HEALTH_METRICS_MAX_STALENESS, 0.5);
@@ -108,7 +119,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 
 	// KeyRangeMap
 	init(KRM_GET_RANGE_LIMIT, 1e5);
-	if (randomize && BUGGIFY) KRM_GET_RANGE_LIMIT = 10;
+	if (randomize && BUGGIFY)
+		KRM_GET_RANGE_LIMIT = 10;
 	init(KRM_GET_RANGE_LIMIT_BYTES, 1e8);
 	if (randomize && BUGGIFY)
 		KRM_GET_RANGE_LIMIT_BYTES = 10000; // This must be sufficiently larger than KEY_SIZE_LIMIT to ensure that at
@@ -117,13 +129,17 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init(DEFAULT_MAX_OUTSTANDING_WATCHES, 1e4);
 	init(ABSOLUTE_MAX_WATCHES, 1e6);
 	init(WATCH_POLLING_TIME, 1.0);
-	if (randomize && BUGGIFY) WATCH_POLLING_TIME = 5.0;
+	if (randomize && BUGGIFY)
+		WATCH_POLLING_TIME = 5.0;
 	init(NO_RECENT_UPDATES_DURATION, 20.0);
-	if (randomize && BUGGIFY) NO_RECENT_UPDATES_DURATION = 0.1;
+	if (randomize && BUGGIFY)
+		NO_RECENT_UPDATES_DURATION = 0.1;
 	init(FAST_WATCH_TIMEOUT, 20.0);
-	if (randomize && BUGGIFY) FAST_WATCH_TIMEOUT = 1.0;
+	if (randomize && BUGGIFY)
+		FAST_WATCH_TIMEOUT = 1.0;
 	init(WATCH_TIMEOUT, 900.0);
-	if (randomize && BUGGIFY) WATCH_TIMEOUT = 20.0;
+	if (randomize && BUGGIFY)
+		WATCH_TIMEOUT = 20.0;
 
 	// Core
 	init(CORE_VERSIONSPERSECOND, 1e6);
@@ -134,22 +150,27 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init(TASKBUCKET_LOGGING_DELAY, 5.0);
 	init(TASKBUCKET_MAX_PRIORITY, 1);
 	init(TASKBUCKET_CHECK_TIMEOUT_CHANCE, 0.02);
-	if (randomize && BUGGIFY) TASKBUCKET_CHECK_TIMEOUT_CHANCE = 1.0;
+	if (randomize && BUGGIFY)
+		TASKBUCKET_CHECK_TIMEOUT_CHANCE = 1.0;
 	init(TASKBUCKET_TIMEOUT_JITTER_OFFSET, 0.9);
 	init(TASKBUCKET_TIMEOUT_JITTER_RANGE, 0.2);
 	init(TASKBUCKET_CHECK_ACTIVE_DELAY, 0.5);
 	init(TASKBUCKET_CHECK_ACTIVE_AMOUNT, 10);
 	init(TASKBUCKET_TIMEOUT_VERSIONS, 60 * CORE_VERSIONSPERSECOND);
-	if (randomize && BUGGIFY) TASKBUCKET_TIMEOUT_VERSIONS = 30 * CORE_VERSIONSPERSECOND;
+	if (randomize && BUGGIFY)
+		TASKBUCKET_TIMEOUT_VERSIONS = 30 * CORE_VERSIONSPERSECOND;
 	init(TASKBUCKET_MAX_TASK_KEYS, 1000);
-	if (randomize && BUGGIFY) TASKBUCKET_MAX_TASK_KEYS = 20;
+	if (randomize && BUGGIFY)
+		TASKBUCKET_MAX_TASK_KEYS = 20;
 
 	// Backup
 	init(BACKUP_LOCAL_FILE_WRITE_BLOCK, 1024 * 1024);
-	if (randomize && BUGGIFY) BACKUP_LOCAL_FILE_WRITE_BLOCK = 100;
+	if (randomize && BUGGIFY)
+		BACKUP_LOCAL_FILE_WRITE_BLOCK = 100;
 	init(BACKUP_CONCURRENT_DELETES, 100);
 	init(BACKUP_SIMULATED_LIMIT_BYTES, 1e6);
-	if (randomize && BUGGIFY) BACKUP_SIMULATED_LIMIT_BYTES = 1000;
+	if (randomize && BUGGIFY)
+		BACKUP_SIMULATED_LIMIT_BYTES = 1000;
 	init(BACKUP_GET_RANGE_LIMIT_BYTES, 1e6);
 	init(BACKUP_LOCK_BYTES, 1e8);
 	init(BACKUP_RANGE_TIMEOUT, TASKBUCKET_TIMEOUT_VERSIONS / CORE_VERSIONSPERSECOND / 2.0);
@@ -157,21 +178,25 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init(BACKUP_SNAPSHOT_DISPATCH_INTERVAL_SEC, 10 * 60); // 10 minutes
 	init(BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC, 3600 * 24 * 10); // 10 days
 	init(BACKUP_SHARD_TASK_LIMIT, 1000);
-	if (randomize && BUGGIFY) BACKUP_SHARD_TASK_LIMIT = 4;
+	if (randomize && BUGGIFY)
+		BACKUP_SHARD_TASK_LIMIT = 4;
 	init(BACKUP_AGGREGATE_POLL_RATE_UPDATE_INTERVAL, 60);
 	init(BACKUP_AGGREGATE_POLL_RATE, 2.0); // polls per second target for all agents on the cluster
 	init(BACKUP_LOG_WRITE_BATCH_MAX_SIZE, 1e6); // Must be much smaller than TRANSACTION_SIZE_LIMIT
 	init(BACKUP_LOG_ATOMIC_OPS_SIZE, 1000);
 	init(BACKUP_OPERATION_COST_OVERHEAD, 50);
 	init(BACKUP_MAX_LOG_RANGES, 21);
-	if (randomize && BUGGIFY) BACKUP_MAX_LOG_RANGES = 4;
+	if (randomize && BUGGIFY)
+		BACKUP_MAX_LOG_RANGES = 4;
 	init(BACKUP_SIM_COPY_LOG_RANGES, 100);
 	init(BACKUP_VERSION_DELAY, 5 * CORE_VERSIONSPERSECOND);
 	bool buggifyMapLimits = randomize && BUGGIFY;
 	init(BACKUP_MAP_KEY_LOWER_LIMIT, 1e4);
-	if (buggifyMapLimits) BACKUP_MAP_KEY_LOWER_LIMIT = 4;
+	if (buggifyMapLimits)
+		BACKUP_MAP_KEY_LOWER_LIMIT = 4;
 	init(BACKUP_MAP_KEY_UPPER_LIMIT, 1e5);
-	if (buggifyMapLimits) BACKUP_MAP_KEY_UPPER_LIMIT = 30;
+	if (buggifyMapLimits)
+		BACKUP_MAP_KEY_UPPER_LIMIT = 30;
 	init(BACKUP_COPY_TASKS, 90);
 	init(BACKUP_BLOCK_SIZE, LOG_RANGE_BLOCK_SIZE / 10);
 	init(BACKUP_TASKS_PER_AGENT, 10);
@@ -181,7 +206,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init(BACKUP_DISPATCH_ADDTASK_SIZE, 50);
 	init(RESTORE_DISPATCH_ADDTASK_SIZE, 150);
 	init(RESTORE_DISPATCH_BATCH_SIZE, 30000);
-	if (randomize && BUGGIFY) RESTORE_DISPATCH_BATCH_SIZE = 20;
+	if (randomize && BUGGIFY)
+		RESTORE_DISPATCH_BATCH_SIZE = 20;
 	init(RESTORE_WRITE_TX_SIZE, 256 * 1024);
 	init(APPLY_MAX_LOCK_BYTES, 1e9);
 	init(APPLY_MIN_LOCK_BYTES, 11e6); // Must be bigger than TRANSACTION_SIZE_LIMIT

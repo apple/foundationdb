@@ -69,13 +69,15 @@ struct ExceptionContract {
 			    .detail("Thrown", true)
 			    .detail("Expected", i->second == Possible ? "possible" : "always")
 			    .backtrace();
-			if (augment) augment(evt);
+			if (augment)
+				augment(evt);
 			return;
 		}
 
 		TraceEvent evt(SevError, func.c_str());
 		evt.error(e).detail("Thrown", true).detail("Expected", "never").backtrace();
-		if (augment) augment(evt);
+		if (augment)
+			augment(evt);
 		throw e;
 	}
 
@@ -88,7 +90,8 @@ struct ExceptionContract {
 				    .detail("Thrown", false)
 				    .detail("Expected", "always")
 				    .backtrace();
-				if (augment) augment(evt);
+				if (augment)
+					augment(evt);
 			}
 		}
 	}
@@ -96,8 +99,8 @@ struct ExceptionContract {
 
 struct FuzzApiCorrectnessWorkload : TestWorkload {
 	static std::once_flag onceFlag;
-	static std::vector<std::function<Future<Void>(unsigned int const&, FuzzApiCorrectnessWorkload* const&,
-	                                              Reference<ITransaction> const&)>>
+	static std::vector<std::function<
+	    Future<Void>(unsigned int const&, FuzzApiCorrectnessWorkload* const&, Reference<ITransaction> const&)>>
 	    testCases;
 
 	double testDuration;
@@ -212,13 +215,15 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		try {
 			loop {
 				state int i = 0;
-				state int keysPerBatch = std::min<int64_t>(
-				    1000, 1 + CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT / 2 /
-				                  (self->getKeyForIndex(self->nodes).size() + self->valueSizeRange.second));
+				state int keysPerBatch =
+				    std::min<int64_t>(1000,
+				                      1 + CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT / 2 /
+				                              (self->getKeyForIndex(self->nodes).size() + self->valueSizeRange.second));
 				for (; i < self->nodes; i += keysPerBatch) {
 					state Reference<ITransaction> tr = cx->createTransaction();
 					loop {
-						if (now() - startTime > self->testDuration) return Void();
+						if (now() - startTime > self->testDuration)
+							return Void();
 						try {
 							if (i == 0) {
 								tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -227,7 +232,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 								              // cancelled from being reordered after this transaction
 								tr->clear(normalKeys);
 							}
-							if (self->useSystemKeys) tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							if (self->useSystemKeys)
+								tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 							int end = std::min(self->nodes, i + keysPerBatch);
 							tr->clear(KeyRangeRef(self->getKeyForIndex(i), self->getKeyForIndex(end)));
@@ -258,10 +264,12 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					try {
 						wait(self->randomTransaction(cx, self) && delay(self->numOps * .001));
 					} catch (Error& e) {
-						if (e.code() != error_code_not_committed) throw e;
+						if (e.code() != error_code_not_committed)
+							throw e;
 						break;
 					}
-					if (now() - startTime > self->testDuration) return Void();
+					if (now() - startTime > self->testDuration)
+						return Void();
 				}
 			}
 		} catch (Error& e) {
@@ -279,8 +287,10 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		loop {
 			state bool cancelled = false;
-			if (readYourWritesDisabled) tr->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
-			if (readAheadDisabled) tr->setOption(FDBTransactionOptions::READ_AHEAD_DISABLE);
+			if (readYourWritesDisabled)
+				tr->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+			if (readAheadDisabled)
+				tr->setOption(FDBTransactionOptions::READ_AHEAD_DISABLE);
 			if (self->useSystemKeys) {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			}
@@ -400,7 +410,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			double ksrv = deterministicRandom()->random01();
 
 			// 25% of the time it's empty, 25% it's above range.
-			if (ksrv < 0.25) return Key();
+			if (ksrv < 0.25)
+				return Key();
 
 			int64_t key_size;
 			if (ksrv < 0.5)
@@ -411,7 +422,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 			std::string skey;
 			skey.reserve(key_size);
-			for (size_t j = 0; j < key_size; ++j) skey.append(1, (char)deterministicRandom()->randomInt(0, 256));
+			for (size_t j = 0; j < key_size; ++j)
+				skey.append(1, (char)deterministicRandom()->randomInt(0, 256));
 
 			return Key(skey);
 		}
@@ -420,7 +432,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			double vrv = deterministicRandom()->random01();
 
 			// 25% of the time it's empty, 25% it's above range.
-			if (vrv < 0.25) return Value();
+			if (vrv < 0.25)
+				return Value();
 
 			int64_t value_size;
 			if (vrv < 0.5)
@@ -431,7 +444,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 			std::string svalue;
 			svalue.reserve(value_size);
-			for (size_t j = 0; j < value_size; ++j) svalue.append(1, (char)deterministicRandom()->randomInt(0, 256));
+			for (size_t j = 0; j < value_size; ++j)
+				svalue.append(1, (char)deterministicRandom()->randomInt(0, 256));
 
 			return Value(svalue);
 		}
@@ -459,7 +473,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					rowlimit = deterministicRandom()->randomInt(0, INT_MAX) + 1;
 			}
 
-			if (deterministicRandom()->coinflip()) return GetRangeLimits(rowlimit);
+			if (deterministicRandom()->coinflip())
+				return GetRangeLimits(rowlimit);
 
 			lrv = deterministicRandom()->random01();
 			int bytelimit = 0;
@@ -471,7 +486,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			}
 
 			// Try again if both are 0.
-			if (!rowlimit && !bytelimit) return makeRangeLimits();
+			if (!rowlimit && !bytelimit)
+				return makeRangeLimits();
 
 			return GetRangeLimits(rowlimit, bytelimit);
 		}
@@ -500,7 +516,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 
 		static bool isProtectedKey(const Key& begin, const Key& end) {
-			if (end < begin) return false;
+			if (end < begin)
+				return false;
 
 			return (isOverlapping(begin, end, keyServersKeys) || isOverlapping(begin, end, serverListKeys) ||
 			        isOverlapping(begin, end, processClassKeys) || isOverlapping(begin, end, configKeys) ||
@@ -653,8 +670,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 
 		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
-			return tr->getRange(keysel1, keysel2, limit, deterministicRandom()->coinflip(),
-			                    deterministicRandom()->coinflip());
+			return tr->getRange(
+			    keysel1, keysel2, limit, deterministicRandom()->coinflip(), deterministicRandom()->coinflip());
 		}
 
 		void augmentTrace(TraceEvent& e) const {
@@ -685,8 +702,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 
 		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
-			return tr->getRange(keysel1, keysel2, limits, deterministicRandom()->coinflip(),
-			                    deterministicRandom()->coinflip());
+			return tr->getRange(
+			    keysel1, keysel2, limits, deterministicRandom()->coinflip(), deterministicRandom()->coinflip());
 		}
 
 		void augmentTrace(TraceEvent& e) const {
@@ -727,8 +744,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 
 		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
-			return tr->getRange(KeyRangeRef(key1, key2), limit, deterministicRandom()->coinflip(),
-			                    deterministicRandom()->coinflip());
+			return tr->getRange(
+			    KeyRangeRef(key1, key2), limit, deterministicRandom()->coinflip(), deterministicRandom()->coinflip());
 		}
 
 		void augmentTrace(TraceEvent& e) const {
@@ -747,8 +764,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			key2 = makeKey();
 			limits = makeRangeLimits();
 			contract = { std::make_pair(error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2)),
-				         std::make_pair(error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf(
-				                                                             !limits.isReached() && !limits.isValid())),
+				         std::make_pair(
+				             error_code_range_limits_invalid,
+				             ExceptionContract::possibleButRequiredIf(!limits.isReached() && !limits.isValid())),
 				         std::make_pair(error_code_client_invalid_operation, ExceptionContract::Possible),
 				         std::make_pair(error_code_key_outside_legal_range,
 				                        ExceptionContract::requiredIf(
@@ -758,8 +776,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 
 		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
-			return tr->getRange(KeyRangeRef(key1, key2), limits, deterministicRandom()->coinflip(),
-			                    deterministicRandom()->coinflip());
+			return tr->getRange(
+			    KeyRangeRef(key1, key2), limits, deterministicRandom()->coinflip(), deterministicRandom()->coinflip());
 		}
 
 		void augmentTrace(TraceEvent& e) const {
@@ -830,18 +848,22 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			if (arv < 0.25) {
 				int val = UINT8_MAX;
 				for (auto i = FDBMutationTypes::optionInfo.begin(); i != FDBMutationTypes::optionInfo.end(); ++i)
-					if (i->first < val) val = i->first;
+					if (i->first < val)
+						val = i->first;
 				op = deterministicRandom()->randomInt(0, val);
 			} else if (arv < 0.50) {
 				int val = 0;
 				for (auto i = FDBMutationTypes::optionInfo.begin(); i != FDBMutationTypes::optionInfo.end(); ++i)
-					if (i->first > val) val = i->first;
+					if (i->first > val)
+						val = i->first;
 				op = deterministicRandom()->randomInt(val + 1, UINT8_MAX);
 			} else {
 				int minval = UINT8_MAX, maxval = 0;
 				for (auto i = FDBMutationTypes::optionInfo.begin(); i != FDBMutationTypes::optionInfo.end(); ++i) {
-					if (i->first < minval) minval = i->first;
-					if (i->first > maxval) maxval = i->first;
+					if (i->first < minval)
+						minval = i->first;
+					if (i->first > maxval)
+						maxval = i->first;
 				}
 				op = deterministicRandom()->randomInt(minval, maxval + 1);
 			}
@@ -1054,20 +1076,24 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				int val = INT_MAX;
 				for (auto i = FDBTransactionOptions::optionInfo.begin(); i != FDBTransactionOptions::optionInfo.end();
 				     ++i)
-					if (i->first < val) val = i->first;
+					if (i->first < val)
+						val = i->first;
 				op = deterministicRandom()->randomInt(INT_MIN, val);
 			} else if (arv < 0.50) {
 				int val = INT_MIN;
 				for (auto i = FDBTransactionOptions::optionInfo.begin(); i != FDBTransactionOptions::optionInfo.end();
 				     ++i)
-					if (i->first > val) val = i->first;
+					if (i->first > val)
+						val = i->first;
 				op = deterministicRandom()->randomInt(val + 1, INT_MAX);
 			} else {
 				int minval = INT_MAX, maxval = INT_MIN;
 				for (auto i = FDBTransactionOptions::optionInfo.begin(); i != FDBTransactionOptions::optionInfo.end();
 				     ++i) {
-					if (i->first < minval) minval = i->first;
-					if (i->first > maxval) maxval = i->first;
+					if (i->first < minval)
+						minval = i->first;
+					if (i->first > maxval)
+						maxval = i->first;
 				}
 				op = deterministicRandom()->randomInt(minval, maxval + 1);
 			}
@@ -1132,7 +1158,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			tr->onError(Error::fromUnvalidatedCode(errorcode));
 			// This is necessary here, as onError will have reset this
 			// value, we will be looking at the wrong thing.
-			if (workload->useSystemKeys) tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			if (workload->useSystemKeys)
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		}
 
 		void augmentTrace(TraceEvent& e) const {
@@ -1164,7 +1191,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 };
 
 std::once_flag FuzzApiCorrectnessWorkload::onceFlag;
-std::vector<std::function<Future<Void>(unsigned int const&, FuzzApiCorrectnessWorkload* const&,
-                                       Reference<ITransaction> const&)>>
+std::vector<std::function<
+    Future<Void>(unsigned int const&, FuzzApiCorrectnessWorkload* const&, Reference<ITransaction> const&)>>
     FuzzApiCorrectnessWorkload::testCases;
 WorkloadFactory<FuzzApiCorrectnessWorkload> FuzzApiCorrectnessWorkloadFactory("FuzzApiCorrectness");

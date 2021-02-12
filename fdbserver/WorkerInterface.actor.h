@@ -86,9 +86,27 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver,
-		           storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest,
-		           traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq, workerSnapReq);
+		serializer(ar,
+		           clientInterface,
+		           locality,
+		           tLog,
+		           master,
+		           masterProxy,
+		           dataDistributor,
+		           ratekeeper,
+		           resolver,
+		           storage,
+		           logRouter,
+		           debugPing,
+		           coordinationPing,
+		           waitFailure,
+		           setMetricsRate,
+		           eventLogRequest,
+		           traceBatchDumpRequest,
+		           testerInterface,
+		           diskStoreRequest,
+		           execReq,
+		           workerSnapReq);
 	}
 };
 
@@ -133,8 +151,23 @@ struct InitializeTLogRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, recruitmentID, recoverFrom, recoverAt, knownCommittedVersion, epoch, recoverTags, allTags,
-		           storeType, remoteTag, locality, isPrimary, startVersion, logRouterTags, reply, logVersion, spillType,
+		serializer(ar,
+		           recruitmentID,
+		           recoverFrom,
+		           recoverAt,
+		           knownCommittedVersion,
+		           epoch,
+		           recoverTags,
+		           allTags,
+		           storeType,
+		           remoteTag,
+		           locality,
+		           isPrimary,
+		           startVersion,
+		           logRouterTags,
+		           reply,
+		           logVersion,
+		           spillType,
 		           txsTags);
 	}
 };
@@ -424,7 +457,9 @@ private:
 	}
 };
 
-void startRole(const Role& role, UID roleId, UID workerId,
+void startRole(const Role& role,
+               UID roleId,
+               UID workerId,
                const std::map<std::string, std::string>& details = std::map<std::string, std::string>(),
                const std::string& origination = "Recruited");
 void endRole(const Role& role, UID id, std::string reason, bool ok = true, Error e = Error());
@@ -433,51 +468,82 @@ struct ServerDBInfo;
 
 class Database openDBOnServer(Reference<AsyncVar<ServerDBInfo>> const& db,
                               TaskPriority taskID = TaskPriority::DefaultEndpoint,
-                              bool enableLocalityLoadBalance = true, bool lockAware = false);
+                              bool enableLocalityLoadBalance = true,
+                              bool lockAware = false);
 class Database openDBOnServer(Reference<AsyncVar<CachedSerialization<ServerDBInfo>>> const& db,
                               TaskPriority taskID = TaskPriority::DefaultEndpoint,
-                              bool enableLocalityLoadBalance = true, bool lockAware = false);
+                              bool enableLocalityLoadBalance = true,
+                              bool lockAware = false);
 ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> a,
                                            Reference<AsyncVar<Optional<struct ClusterInterface>>> b);
 
-ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> ccf, LocalityData localities, ProcessClass processClass,
-                        std::string dataFolder, std::string coordFolder, int64_t memoryLimit,
-                        std::string metricsConnFile, std::string metricsPrefix, int64_t memoryProfilingThreshold,
+ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> ccf,
+                        LocalityData localities,
+                        ProcessClass processClass,
+                        std::string dataFolder,
+                        std::string coordFolder,
+                        int64_t memoryLimit,
+                        std::string metricsConnFile,
+                        std::string metricsPrefix,
+                        int64_t memoryProfilingThreshold,
                         std::string whitelistBinPaths);
 
 ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> ccf,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-                                     Future<Void> recoveredDiskFiles, LocalityData locality);
+                                     Future<Void> recoveredDiskFiles,
+                                     LocalityData locality);
 
 // These servers are started by workerServer
 class IKeyValueStore;
 class ServerCoordinators;
 class IDiskQueue;
-ACTOR Future<Void> storageServer(IKeyValueStore* persistentData, StorageServerInterface ssi, Tag seedTag,
+ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
+                                 StorageServerInterface ssi,
+                                 Tag seedTag,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
-                                 Reference<AsyncVar<ServerDBInfo>> db, std::string folder);
+                                 Reference<AsyncVar<ServerDBInfo>> db,
+                                 std::string folder);
 ACTOR Future<Void> storageServer(
-    IKeyValueStore* persistentData, StorageServerInterface ssi, Reference<AsyncVar<ServerDBInfo>> db,
-    std::string folder, Promise<Void> recovered,
+    IKeyValueStore* persistentData,
+    StorageServerInterface ssi,
+    Reference<AsyncVar<ServerDBInfo>> db,
+    std::string folder,
+    Promise<Void> recovered,
     Reference<ClusterConnectionFile>
         connFile); // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
-ACTOR Future<Void> masterServer(MasterInterface mi, Reference<AsyncVar<ServerDBInfo>> db,
-                                ServerCoordinators serverCoordinators, LifetimeToken lifetime, bool forceRecovery);
-ACTOR Future<Void> masterProxyServer(MasterProxyInterface proxy, InitializeMasterProxyRequest req,
-                                     Reference<AsyncVar<ServerDBInfo>> db, std::string whitelistBinPaths);
-ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
-                        PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, UID workerID,
-                        bool restoreFromDisk, Promise<Void> oldLog, Promise<Void> recovered, std::string folder,
-                        Reference<AsyncVar<bool>> degraded, Reference<AsyncVar<UID>> activeSharedTLog);
+ACTOR Future<Void> masterServer(MasterInterface mi,
+                                Reference<AsyncVar<ServerDBInfo>> db,
+                                ServerCoordinators serverCoordinators,
+                                LifetimeToken lifetime,
+                                bool forceRecovery);
+ACTOR Future<Void> masterProxyServer(MasterProxyInterface proxy,
+                                     InitializeMasterProxyRequest req,
+                                     Reference<AsyncVar<ServerDBInfo>> db,
+                                     std::string whitelistBinPaths);
+ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
+                        IDiskQueue* persistentQueue,
+                        Reference<AsyncVar<ServerDBInfo>> db,
+                        LocalityData locality,
+                        PromiseStream<InitializeTLogRequest> tlogRequests,
+                        UID tlogId,
+                        UID workerID,
+                        bool restoreFromDisk,
+                        Promise<Void> oldLog,
+                        Promise<Void> recovered,
+                        std::string folder,
+                        Reference<AsyncVar<bool>> degraded,
+                        Reference<AsyncVar<UID>> activeSharedTLog);
 
 ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
-                                       Reference<ClusterConnectionFile> ccf, LocalityData locality,
+                                       Reference<ClusterConnectionFile> ccf,
+                                       LocalityData locality,
                                        Reference<AsyncVar<ServerDBInfo>> dbInfo);
-ACTOR Future<Void> resolver(ResolverInterface proxy, InitializeResolverRequest initReq,
+ACTOR Future<Void> resolver(ResolverInterface proxy,
+                            InitializeResolverRequest initReq,
                             Reference<AsyncVar<ServerDBInfo>> db);
-ACTOR Future<Void> logRouter(TLogInterface interf, InitializeLogRouterRequest req,
+ACTOR Future<Void> logRouter(TLogInterface interf,
+                             InitializeLogRouterRequest req,
                              Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo>> db);
@@ -486,15 +552,27 @@ void registerThreadForProfiling();
 void updateCpuProfiler(ProfilerRequest req);
 
 namespace oldTLog_4_6 {
-ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality, UID tlogId, UID workerID);
+ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
+                        IDiskQueue* persistentQueue,
+                        Reference<AsyncVar<ServerDBInfo>> db,
+                        LocalityData locality,
+                        UID tlogId,
+                        UID workerID);
 }
 namespace oldTLog_6_0 {
-ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
-                        PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, UID workerID,
-                        bool restoreFromDisk, Promise<Void> oldLog, Promise<Void> recovered, std::string folder,
-                        Reference<AsyncVar<bool>> degraded, Reference<AsyncVar<UID>> activeSharedTLog);
+ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
+                        IDiskQueue* persistentQueue,
+                        Reference<AsyncVar<ServerDBInfo>> db,
+                        LocalityData locality,
+                        PromiseStream<InitializeTLogRequest> tlogRequests,
+                        UID tlogId,
+                        UID workerID,
+                        bool restoreFromDisk,
+                        Promise<Void> oldLog,
+                        Promise<Void> recovered,
+                        std::string folder,
+                        Reference<AsyncVar<bool>> degraded,
+                        Reference<AsyncVar<UID>> activeSharedTLog);
 }
 
 typedef decltype(&tLog) TLogFn;

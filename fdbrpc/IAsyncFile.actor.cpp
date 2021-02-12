@@ -79,7 +79,9 @@ TEST_CASE("/fileio/zero") {
 	return Void();
 }
 
-ACTOR static Future<Void> incrementalDeleteHelper(std::string filename, bool mustBeDurable, int64_t truncateAmt,
+ACTOR static Future<Void> incrementalDeleteHelper(std::string filename,
+                                                  bool mustBeDurable,
+                                                  int64_t truncateAmt,
                                                   double interval) {
 	state Reference<IAsyncFile> file;
 	state int64_t remainingFileSize;
@@ -108,7 +110,8 @@ ACTOR static Future<Void> incrementalDeleteHelper(std::string filename, bool mus
 }
 
 Future<Void> IAsyncFileSystem::incrementalDeleteFile(std::string filename, bool mustBeDurable) {
-	return uncancellable(incrementalDeleteHelper(filename, mustBeDurable,
+	return uncancellable(incrementalDeleteHelper(filename,
+	                                             mustBeDurable,
 	                                             FLOW_KNOBS->INCREMENTAL_DELETE_TRUNCATE_AMOUNT,
 	                                             FLOW_KNOBS->INCREMENTAL_DELETE_INTERVAL));
 }

@@ -129,8 +129,10 @@ public:
 	Future<Void> watch(const Key& key) override;
 
 	using Transaction::getRange;
-	Future<FDBStandalone<RangeResultRef>> getRange(const KeySelector& begin, const KeySelector& end,
-	                                               GetRangeLimits limits = GetRangeLimits(), bool snapshot = false,
+	Future<FDBStandalone<RangeResultRef>> getRange(const KeySelector& begin,
+	                                               const KeySelector& end,
+	                                               GetRangeLimits limits = GetRangeLimits(),
+	                                               bool snapshot = false,
 	                                               bool reverse = false,
 	                                               FDBStreamingMode streamingMode = FDB_STREAMING_MODE_SERIAL) override;
 
@@ -174,7 +176,8 @@ private:
 };
 
 static inline void throw_on_error(fdb_error_t e) {
-	if (e) throw Error(e);
+	if (e)
+		throw Error(e);
 }
 
 void CFuture::blockUntilReady() {
@@ -336,14 +339,29 @@ Future<FDBStandalone<KeyRef>> TransactionImpl::getKey(const KeySelector& key, bo
 	    });
 }
 
-Future<FDBStandalone<RangeResultRef>> TransactionImpl::getRange(const KeySelector& begin, const KeySelector& end,
-                                                                GetRangeLimits limits, bool snapshot, bool reverse,
+Future<FDBStandalone<RangeResultRef>> TransactionImpl::getRange(const KeySelector& begin,
+                                                                const KeySelector& end,
+                                                                GetRangeLimits limits,
+                                                                bool snapshot,
+                                                                bool reverse,
                                                                 FDBStreamingMode streamingMode) {
 	// FIXME: iteration
 	return backToFuture<FDBStandalone<RangeResultRef>>(
-	    fdb_transaction_get_range(tr, begin.key.begin(), begin.key.size(), begin.orEqual, begin.offset, end.key.begin(),
-	                              end.key.size(), end.orEqual, end.offset, limits.rows, limits.bytes, streamingMode, 1,
-	                              snapshot, reverse),
+	    fdb_transaction_get_range(tr,
+	                              begin.key.begin(),
+	                              begin.key.size(),
+	                              begin.orEqual,
+	                              begin.offset,
+	                              end.key.begin(),
+	                              end.key.size(),
+	                              end.orEqual,
+	                              end.offset,
+	                              limits.rows,
+	                              limits.bytes,
+	                              streamingMode,
+	                              1,
+	                              snapshot,
+	                              reverse),
 	    [](Reference<CFuture> f) {
 		    FDBKeyValue const* kv;
 		    int count;
@@ -357,8 +375,8 @@ Future<FDBStandalone<RangeResultRef>> TransactionImpl::getRange(const KeySelecto
 }
 
 void TransactionImpl::addReadConflictRange(KeyRangeRef const& keys) {
-	throw_on_error(fdb_transaction_add_conflict_range(tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(),
-	                                                  keys.end.size(), FDB_CONFLICT_RANGE_TYPE_READ));
+	throw_on_error(fdb_transaction_add_conflict_range(
+	    tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), FDB_CONFLICT_RANGE_TYPE_READ));
 }
 
 void TransactionImpl::addReadConflictKey(KeyRef const& key) {
@@ -366,8 +384,8 @@ void TransactionImpl::addReadConflictKey(KeyRef const& key) {
 }
 
 void TransactionImpl::addWriteConflictRange(KeyRangeRef const& keys) {
-	throw_on_error(fdb_transaction_add_conflict_range(tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(),
-	                                                  keys.end.size(), FDB_CONFLICT_RANGE_TYPE_WRITE));
+	throw_on_error(fdb_transaction_add_conflict_range(
+	    tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), FDB_CONFLICT_RANGE_TYPE_WRITE));
 }
 
 void TransactionImpl::addWriteConflictKey(KeyRef const& key) {

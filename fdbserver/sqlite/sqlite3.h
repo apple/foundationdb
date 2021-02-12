@@ -2262,7 +2262,8 @@ SQLITE_API int sqlite3_set_authorizer(sqlite3*,
 ** subject to change in future versions of SQLite.
 */
 SQLITE_API void* sqlite3_trace(sqlite3*, void (*xTrace)(void*, const char*), void*);
-SQLITE_API SQLITE_EXPERIMENTAL void* sqlite3_profile(sqlite3*, void (*xProfile)(void*, const char*, sqlite3_uint64),
+SQLITE_API SQLITE_EXPERIMENTAL void* sqlite3_profile(sqlite3*,
+                                                     void (*xProfile)(void*, const char*, sqlite3_uint64),
                                                      void*);
 
 /*
@@ -3486,18 +3487,31 @@ SQLITE_API int sqlite3_reset(sqlite3_stmt* pStmt);
 ** close the database connection nor finalize or reset the prepared
 ** statement in which the function is running.
 */
-SQLITE_API int sqlite3_create_function(sqlite3* db, const char* zFunctionName, int nArg, int eTextRep, void* pApp,
+SQLITE_API int sqlite3_create_function(sqlite3* db,
+                                       const char* zFunctionName,
+                                       int nArg,
+                                       int eTextRep,
+                                       void* pApp,
                                        void (*xFunc)(sqlite3_context*, int, sqlite3_value**),
                                        void (*xStep)(sqlite3_context*, int, sqlite3_value**),
                                        void (*xFinal)(sqlite3_context*));
-SQLITE_API int sqlite3_create_function16(sqlite3* db, const void* zFunctionName, int nArg, int eTextRep, void* pApp,
+SQLITE_API int sqlite3_create_function16(sqlite3* db,
+                                         const void* zFunctionName,
+                                         int nArg,
+                                         int eTextRep,
+                                         void* pApp,
                                          void (*xFunc)(sqlite3_context*, int, sqlite3_value**),
                                          void (*xStep)(sqlite3_context*, int, sqlite3_value**),
                                          void (*xFinal)(sqlite3_context*));
-SQLITE_API int sqlite3_create_function_v2(sqlite3* db, const char* zFunctionName, int nArg, int eTextRep, void* pApp,
+SQLITE_API int sqlite3_create_function_v2(sqlite3* db,
+                                          const char* zFunctionName,
+                                          int nArg,
+                                          int eTextRep,
+                                          void* pApp,
                                           void (*xFunc)(sqlite3_context*, int, sqlite3_value**),
                                           void (*xStep)(sqlite3_context*, int, sqlite3_value**),
-                                          void (*xFinal)(sqlite3_context*), void (*xDestroy)(void*));
+                                          void (*xFinal)(sqlite3_context*),
+                                          void (*xDestroy)(void*));
 
 /*
 ** CAPI3REF: Text Encodings
@@ -3919,12 +3933,21 @@ SQLITE_API void sqlite3_result_zeroblob(sqlite3_context*, int n);
 **
 ** See also:  [sqlite3_collation_needed()] and [sqlite3_collation_needed16()].
 */
-SQLITE_API int sqlite3_create_collation(sqlite3*, const char* zName, int eTextRep, void* pArg,
+SQLITE_API int sqlite3_create_collation(sqlite3*,
+                                        const char* zName,
+                                        int eTextRep,
+                                        void* pArg,
                                         int (*xCompare)(void*, int, const void*, int, const void*));
-SQLITE_API int sqlite3_create_collation_v2(sqlite3*, const char* zName, int eTextRep, void* pArg,
+SQLITE_API int sqlite3_create_collation_v2(sqlite3*,
+                                           const char* zName,
+                                           int eTextRep,
+                                           void* pArg,
                                            int (*xCompare)(void*, int, const void*, int, const void*),
                                            void (*xDestroy)(void*));
-SQLITE_API int sqlite3_create_collation16(sqlite3*, const void* zName, int eTextRep, void* pArg,
+SQLITE_API int sqlite3_create_collation16(sqlite3*,
+                                          const void* zName,
+                                          int eTextRep,
+                                          void* pArg,
                                           int (*xCompare)(void*, int, const void*, int, const void*));
 
 /*
@@ -3965,8 +3988,10 @@ typedef struct Btree Btree;
 typedef unsigned int Pgno;
 
 #ifdef SQLITE_HAS_CODEC
-SQLITE_API void sqlite3BtreePagerSetCodec(Btree* bt, void* (*xCodec)(void*, void*, Pgno, int),
-                                          void (*xCodecSizeChng)(void*, int, int), void (*xCodecFree)(void*),
+SQLITE_API void sqlite3BtreePagerSetCodec(Btree* bt,
+                                          void* (*xCodec)(void*, void*, Pgno, int),
+                                          void (*xCodecSizeChng)(void*, int, int),
+                                          void (*xCodecFree)(void*),
                                           void* pCodec);
 
 #if !defined(SQLITE_HAS_CODEC_NO_ENCRYPTION)
@@ -3978,7 +4003,8 @@ SQLITE_API void sqlite3BtreePagerSetCodec(Btree* bt, void* (*xCodec)(void*, void
 ** of SQLite.
 */
 SQLITE_API int sqlite3_key(sqlite3* db, /* Database to be rekeyed */
-                           const void* pKey, int nKey /* The key */
+                           const void* pKey,
+                           int nKey /* The key */
 );
 
 /*
@@ -3990,7 +4016,8 @@ SQLITE_API int sqlite3_key(sqlite3* db, /* Database to be rekeyed */
 ** of SQLite.
 */
 SQLITE_API int sqlite3_rekey(sqlite3* db, /* Database to be rekeyed */
-                             const void* pKey, int nKey /* The new key */
+                             const void* pKey,
+                             int nKey /* The new key */
 );
 
 /*
@@ -4527,8 +4554,11 @@ struct sqlite3_module {
 	int (*xSync)(sqlite3_vtab* pVTab);
 	int (*xCommit)(sqlite3_vtab* pVTab);
 	int (*xRollback)(sqlite3_vtab* pVTab);
-	int (*xFindFunction)(sqlite3_vtab* pVtab, int nArg, const char* zName,
-	                     void (**pxFunc)(sqlite3_context*, int, sqlite3_value**), void** ppArg);
+	int (*xFindFunction)(sqlite3_vtab* pVtab,
+	                     int nArg,
+	                     const char* zName,
+	                     void (**pxFunc)(sqlite3_context*, int, sqlite3_value**),
+	                     void** ppArg);
 	int (*xRename)(sqlite3_vtab* pVtab, const char* zNew);
 };
 
@@ -4818,8 +4848,13 @@ typedef struct sqlite3_blob sqlite3_blob;
 ** To avoid a resource leak, every open [BLOB handle] should eventually
 ** be released by a call to [sqlite3_blob_close()].
 */
-SQLITE_API int sqlite3_blob_open(sqlite3*, const char* zDb, const char* zTable, const char* zColumn, sqlite3_int64 iRow,
-                                 int flags, sqlite3_blob** ppBlob);
+SQLITE_API int sqlite3_blob_open(sqlite3*,
+                                 const char* zDb,
+                                 const char* zTable,
+                                 const char* zColumn,
+                                 sqlite3_int64 iRow,
+                                 int flags,
+                                 sqlite3_blob** ppBlob);
 
 /*
 ** CAPI3REF: Move a BLOB Handle to a New Row
@@ -6334,10 +6369,11 @@ typedef struct sqlite3_rtree_geometry sqlite3_rtree_geometry;
 **
 **   SELECT ... FROM <rtree> WHERE <rtree col> MATCH $zGeom(... params ...)
 */
-SQLITE_API int sqlite3_rtree_geometry_callback(sqlite3* db, const char* zGeom,
-                                               int (*xGeom)(sqlite3_rtree_geometry*, int nCoord, double* aCoord,
-                                                            int* pRes),
-                                               void* pContext);
+SQLITE_API int sqlite3_rtree_geometry_callback(
+    sqlite3* db,
+    const char* zGeom,
+    int (*xGeom)(sqlite3_rtree_geometry*, int nCoord, double* aCoord, int* pRes),
+    void* pContext);
 
 /*
 ** A pointer to a structure of the following type is passed as the first

@@ -44,7 +44,9 @@ void insertData(FDBTransaction* tr) {
 	}
 }
 
-int runTest(int (*testFxn)(FDBTransaction*, struct ResultSet*), FDBTransaction* tr, struct ResultSet* rs,
+int runTest(int (*testFxn)(FDBTransaction*, struct ResultSet*),
+            FDBTransaction* tr,
+            struct ResultSet* rs,
             const char* kpiName) {
 	int numRuns = 25;
 	int* results = malloc(sizeof(int) * numRuns);
@@ -74,8 +76,10 @@ int getSingle(FDBTransaction* tr, struct ResultSet* rs) {
 	double start = getTime();
 	for (i = 0; i < numKeys; ++i) {
 		FDBFuture* f = fdb_transaction_get(tr, keys[5001], keySize, 0);
-		if (getError(fdb_future_block_until_ready(f), "GetSingle (block for get)", rs)) return -1;
-		if (getError(fdb_future_get_value(f, &present, &value, &length), "GetSingle (get result)", rs)) return -1;
+		if (getError(fdb_future_block_until_ready(f), "GetSingle (block for get)", rs))
+			return -1;
+		if (getError(fdb_future_get_value(f, &present, &value, &length), "GetSingle (get result)", rs))
+			return -1;
 		fdb_future_destroy(f);
 	}
 	double end = getTime();
@@ -92,7 +96,8 @@ int getManySequential(FDBTransaction* tr, struct ResultSet* rs) {
 	double start = getTime();
 	for (i = 0; i < numKeys; ++i) {
 		FDBFuture* f = fdb_transaction_get(tr, keys[i], keySize, 0);
-		if (getError(fdb_future_block_until_ready(f), "GetManySequential (block for get)", rs)) return -1;
+		if (getError(fdb_future_block_until_ready(f), "GetManySequential (block for get)", rs))
+			return -1;
 		if (getError(fdb_future_get_value(f, &present, &value, &length), "GetManySequential (get result)", rs))
 			return -1;
 		fdb_future_destroy(f);
@@ -110,11 +115,18 @@ int getRangeBasic(FDBTransaction* tr, struct ResultSet* rs) {
 
 	double start = getTime();
 	for (i = 0; i < 100; ++i) {
-		FDBFuture* f =
-		    fdb_transaction_get_range(tr, FDB_KEYSEL_LAST_LESS_OR_EQUAL(keys[0], keySize),
-		                              FDB_KEYSEL_LAST_LESS_OR_EQUAL(keys[numKeys], keySize), numKeys, 0, 0, 1, 0, 0);
+		FDBFuture* f = fdb_transaction_get_range(tr,
+		                                         FDB_KEYSEL_LAST_LESS_OR_EQUAL(keys[0], keySize),
+		                                         FDB_KEYSEL_LAST_LESS_OR_EQUAL(keys[numKeys], keySize),
+		                                         numKeys,
+		                                         0,
+		                                         0,
+		                                         1,
+		                                         0,
+		                                         0);
 
-		if (getError(fdb_future_block_until_ready(f), "GetRangeBasic (block for get range)", rs)) return -1;
+		if (getError(fdb_future_block_until_ready(f), "GetRangeBasic (block for get range)", rs))
+			return -1;
 		if (getError(fdb_future_get_keyvalue_array(f, &kvs, &count, &more), "GetRangeBasic (get range results)", rs))
 			return -1;
 
@@ -141,13 +153,20 @@ int singleClearGetRange(FDBTransaction* tr, struct ResultSet* rs) {
 
 	double start = getTime();
 	for (i = 0; i < 100; ++i) {
-		FDBFuture* f =
-		    fdb_transaction_get_range(tr, FDB_KEYSEL_LAST_LESS_OR_EQUAL(keys[0], keySize),
-		                              FDB_KEYSEL_LAST_LESS_OR_EQUAL(keys[numKeys], keySize), numKeys, 0, 0, 1, 0, 0);
+		FDBFuture* f = fdb_transaction_get_range(tr,
+		                                         FDB_KEYSEL_LAST_LESS_OR_EQUAL(keys[0], keySize),
+		                                         FDB_KEYSEL_LAST_LESS_OR_EQUAL(keys[numKeys], keySize),
+		                                         numKeys,
+		                                         0,
+		                                         0,
+		                                         1,
+		                                         0,
+		                                         0);
 
-		if (getError(fdb_future_block_until_ready(f), "SingleClearGetRange (block for get range)", rs)) return -1;
-		if (getError(fdb_future_get_keyvalue_array(f, &kvs, &count, &more), "SingleClearGetRange (get range results)",
-		             rs))
+		if (getError(fdb_future_block_until_ready(f), "SingleClearGetRange (block for get range)", rs))
+			return -1;
+		if (getError(
+		        fdb_future_get_keyvalue_array(f, &kvs, &count, &more), "SingleClearGetRange (get range results)", rs))
 			return -1;
 
 		fdb_future_destroy(f);
@@ -176,13 +195,20 @@ int clearRangeGetRange(FDBTransaction* tr, struct ResultSet* rs) {
 
 	double start = getTime();
 	for (i = 0; i < 100; ++i) {
-		FDBFuture* f =
-		    fdb_transaction_get_range(tr, FDB_KEYSEL_LAST_LESS_OR_EQUAL(keys[0], keySize),
-		                              FDB_KEYSEL_LAST_LESS_OR_EQUAL(keys[numKeys], keySize), numKeys, 0, 0, 1, 0, 0);
+		FDBFuture* f = fdb_transaction_get_range(tr,
+		                                         FDB_KEYSEL_LAST_LESS_OR_EQUAL(keys[0], keySize),
+		                                         FDB_KEYSEL_LAST_LESS_OR_EQUAL(keys[numKeys], keySize),
+		                                         numKeys,
+		                                         0,
+		                                         0,
+		                                         1,
+		                                         0,
+		                                         0);
 
-		if (getError(fdb_future_block_until_ready(f), "ClearRangeGetRange (block for get range)", rs)) return -1;
-		if (getError(fdb_future_get_keyvalue_array(f, &kvs, &count, &more), "ClearRangeGetRange (get range results)",
-		             rs))
+		if (getError(fdb_future_block_until_ready(f), "ClearRangeGetRange (block for get range)", rs))
+			return -1;
+		if (getError(
+		        fdb_future_get_keyvalue_array(f, &kvs, &count, &more), "ClearRangeGetRange (get range results)", rs))
 			return -1;
 
 		fdb_future_destroy(f);
@@ -215,7 +241,8 @@ int interleavedSetsGets(FDBTransaction* tr, struct ResultSet* rs) {
 
 	for (i = 0; i < 10000; ++i) {
 		FDBFuture* f = fdb_transaction_get(tr, k, 3, 0);
-		if (getError(fdb_future_block_until_ready(f), "InterleavedSetsGets (block for get)", rs)) return -1;
+		if (getError(fdb_future_block_until_ready(f), "InterleavedSetsGets (block for get)", rs))
+			return -1;
 		if (getError(fdb_future_get_value(f, &present, &value, &length), "InterleavedSetsGets (get result)", rs))
 			return -1;
 		fdb_future_destroy(f);

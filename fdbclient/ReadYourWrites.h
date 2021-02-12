@@ -75,19 +75,35 @@ public:
 	Future<Version> getReadVersion();
 	Future<Optional<Value>> get(const Key& key, bool snapshot = false);
 	Future<Key> getKey(const KeySelector& key, bool snapshot = false);
-	Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin, const KeySelector& end, int limit,
-	                                            bool snapshot = false, bool reverse = false);
-	Future<Standalone<RangeResultRef>> getRange(KeySelector begin, KeySelector end, GetRangeLimits limits,
-	                                            bool snapshot = false, bool reverse = false);
-	Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys, int limit, bool snapshot = false,
+	Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin,
+	                                            const KeySelector& end,
+	                                            int limit,
+	                                            bool snapshot = false,
+	                                            bool reverse = false);
+	Future<Standalone<RangeResultRef>> getRange(KeySelector begin,
+	                                            KeySelector end,
+	                                            GetRangeLimits limits,
+	                                            bool snapshot = false,
+	                                            bool reverse = false);
+	Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys,
+	                                            int limit,
+	                                            bool snapshot = false,
 	                                            bool reverse = false) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
-		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()), limit, snapshot, reverse);
+		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
+		                limit,
+		                snapshot,
+		                reverse);
 	}
-	Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys, GetRangeLimits limits, bool snapshot = false,
+	Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys,
+	                                            GetRangeLimits limits,
+	                                            bool snapshot = false,
 	                                            bool reverse = false) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
-		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()), limits, snapshot, reverse);
+		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
+		                limits,
+		                snapshot,
+		                reverse);
 	}
 
 	Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key);
@@ -132,7 +148,8 @@ public:
 
 	void checkDeferredError() {
 		tr.checkDeferredError();
-		if (deferredError.code() != invalid_error_code) throw deferredError;
+		if (deferredError.code() != invalid_error_code)
+			throw deferredError;
 	}
 
 	void getWriteConflicts(KeyRangeMap<bool>* result);

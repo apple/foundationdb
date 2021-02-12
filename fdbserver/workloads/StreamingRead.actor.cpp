@@ -73,8 +73,8 @@ struct StreamingReadWorkload : TestWorkload {
 	virtual void getMetrics(vector<PerfMetric>& m) {
 		m.push_back(transactions.getMetric());
 		m.push_back(readKeys.getMetric());
-		m.push_back(PerfMetric("Bytes read/sec",
-		                       (readKeys.getValue() * keyBytes + readValueBytes.getValue()) / testDuration, false));
+		m.push_back(PerfMetric(
+		    "Bytes read/sec", (readKeys.getValue() * keyBytes + readValueBytes.getValue()) / testDuration, false));
 
 		m.push_back(PerfMetric("Mean Latency (ms)", 1000 * latencies.mean(), true));
 		m.push_back(PerfMetric("Median Latency (ms, averaged)", 1000 * latencies.median(), true));
@@ -110,7 +110,8 @@ struct StreamingReadWorkload : TestWorkload {
 				    (range < self->rangesPerTransaction - 1)
 				        ? rangeSize
 				        : self->readsPerTransaction - (self->rangesPerTransaction - 1) * rangeSize;
-				if (self->readSequentially && thisRangeSize > maxIndex - minIndex) thisRangeSize = maxIndex - minIndex;
+				if (self->readSequentially && thisRangeSize > maxIndex - minIndex)
+					thisRangeSize = maxIndex - minIndex;
 				loop {
 					try {
 						if (!self->readSequentially)
@@ -118,13 +119,16 @@ struct StreamingReadWorkload : TestWorkload {
 						else if (currentIndex > maxIndex - thisRangeSize)
 							currentIndex = minIndex;
 
-						Standalone<RangeResultRef> values = wait(tr.getRange(
-						    firstGreaterOrEqual(self->keyForIndex(currentIndex)),
-						    firstGreaterOrEqual(self->keyForIndex(currentIndex + thisRangeSize)), thisRangeSize));
+						Standalone<RangeResultRef> values =
+						    wait(tr.getRange(firstGreaterOrEqual(self->keyForIndex(currentIndex)),
+						                     firstGreaterOrEqual(self->keyForIndex(currentIndex + thisRangeSize)),
+						                     thisRangeSize));
 
-						for (int i = 0; i < values.size(); i++) self->readValueBytes += values[i].value.size();
+						for (int i = 0; i < values.size(); i++)
+							self->readValueBytes += values[i].value.size();
 
-						if (self->readSequentially) currentIndex += values.size();
+						if (self->readSequentially)
+							currentIndex += values.size();
 
 						self->readKeys += values.size();
 						break;
@@ -133,9 +137,11 @@ struct StreamingReadWorkload : TestWorkload {
 					}
 				}
 
-				if (now() - tstart > 3) break;
+				if (now() - tstart > 3)
+					break;
 
-				if (++range == self->rangesPerTransaction) break;
+				if (++range == self->rangesPerTransaction)
+					break;
 			}
 			self->latencies.addSample(now() - tstart);
 			++self->transactions;

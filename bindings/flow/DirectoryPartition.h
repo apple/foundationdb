@@ -32,11 +32,12 @@ class DirectoryPartition : public DirectorySubspace {
 
 public:
 	DirectoryPartition(Path const& path, StringRef const& prefix, Reference<DirectoryLayer> parentDirectoryLayer)
-	  : DirectorySubspace(
-	        path, prefix,
-	        Reference<DirectoryLayer>(new DirectoryLayer(
-	            Subspace(DirectoryLayer::DEFAULT_NODE_SUBSPACE_PREFIX.withPrefix(prefix)), Subspace(prefix))),
-	        DirectoryLayer::PARTITION_LAYER),
+	  : DirectorySubspace(path,
+	                      prefix,
+	                      Reference<DirectoryLayer>(new DirectoryLayer(
+	                          Subspace(DirectoryLayer::DEFAULT_NODE_SUBSPACE_PREFIX.withPrefix(prefix)),
+	                          Subspace(prefix))),
+	                      DirectoryLayer::PARTITION_LAYER),
 	    parentDirectoryLayer(parentDirectoryLayer) {
 		this->directoryLayer->path = path;
 	}

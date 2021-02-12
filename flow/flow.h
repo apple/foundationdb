@@ -138,7 +138,8 @@ public:
 	ErrorOr() : error(default_error_or()) {}
 	ErrorOr(Error const& error) : error(error) {}
 	ErrorOr(const ErrorOr<T>& o) : error(o.error) {
-		if (present()) new (&value) T(o.get());
+		if (present())
+			new (&value) T(o.get());
 	}
 
 	template <class U>
@@ -147,7 +148,8 @@ public:
 	}
 
 	ErrorOr(Arena& a, const ErrorOr<T>& o) : error(o.error) {
-		if (present()) new (&value) T(a, o.get());
+		if (present())
+			new (&value) T(a, o.get());
 	}
 	int expectedSize() const { return present() ? get().expectedSize() : 0; }
 
@@ -166,7 +168,8 @@ public:
 	}
 
 	~ErrorOr() {
-		if (present()) ((T*)&value)->~T();
+		if (present())
+			((T*)&value)->~T();
 	}
 
 	ErrorOr& operator=(ErrorOr const& o) {
@@ -201,7 +204,8 @@ public:
 		// SOMEDAY: specialize for space efficiency?
 		serializer(ar, error);
 		if (present()) {
-			if (Ar::isDeserializing) new (&value) T();
+			if (Ar::isDeserializing)
+				new (&value) T();
 			serializer(ar, *(T*)&value);
 		}
 	}
@@ -382,12 +386,14 @@ struct Callback {
 		// callback
 		next->prev = prev;
 		prev->next = next;
-		if (prev == next) next->unwait();
+		if (prev == next)
+			next->unwait();
 	}
 
 	int countCallbacks() {
 		int count = 0;
-		for (Callback* c = next; c != this; c = c->next) count++;
+		for (Callback* c = next; c != this; c = c->next)
+			count++;
 		return count;
 	}
 };
@@ -433,7 +439,8 @@ public:
 		Callback<T>::prev = Callback<T>::next = this;
 	}
 	~SAV() {
-		if (int16_t(error_state.code()) == SET_ERROR_CODE) value().~T();
+		if (int16_t(error_state.code()) == SET_ERROR_CODE)
+			value().~T();
 	}
 
 	bool isSet() const { return int16_t(error_state.code()) > NEVER_ERROR_CODE; }
@@ -442,7 +449,8 @@ public:
 
 	T const& get() {
 		ASSERT(isSet());
-		if (isError()) throw error_state;
+		if (isError())
+			throw error_state;
 		return value();
 	}
 
@@ -451,7 +459,8 @@ public:
 		ASSERT(canBeSet());
 		new (&value_storage) T(std::forward<U>(value));
 		this->error_state = Error::fromCode(SET_ERROR_CODE);
-		while (Callback<T>::next != this) Callback<T>::next->fire(this->value());
+		while (Callback<T>::next != this)
+			Callback<T>::next->fire(this->value());
 	}
 
 	void send(Never) {
@@ -462,7 +471,8 @@ public:
 	void sendError(Error err) {
 		ASSERT(canBeSet() && int16_t(err.code()) > 0);
 		this->error_state = err;
-		while (Callback<T>::next != this) Callback<T>::next->error(err);
+		while (Callback<T>::next != this)
+			Callback<T>::next->error(err);
 	}
 
 	template <class U>
@@ -481,15 +491,18 @@ public:
 	void finishSendAndDelPromiseRef() {
 		// Call only after value_storage has already been initialized!
 		this->error_state = Error::fromCode(SET_ERROR_CODE);
-		while (Callback<T>::next != this) Callback<T>::next->fire(this->value());
+		while (Callback<T>::next != this)
+			Callback<T>::next->fire(this->value());
 
-		if (!--promises && !futures) destroy();
+		if (!--promises && !futures)
+			destroy();
 	}
 
 	void sendAndDelPromiseRef(Never) {
 		ASSERT(canBeSet());
 		this->error_state = Error::fromCode(NEVER_ERROR_CODE);
-		if (!--promises && !futures) destroy();
+		if (!--promises && !futures)
+			destroy();
 	}
 
 	void sendErrorAndDelPromiseRef(Error err) {
@@ -501,9 +514,11 @@ public:
 		}
 
 		this->error_state = err;
-		while (Callback<T>::next != this) Callback<T>::next->error(err);
+		while (Callback<T>::next != this)
+			Callback<T>::next->error(err);
 
-		if (!--promises && !futures) destroy();
+		if (!--promises && !futures)
+			destroy();
 	}
 
 	void addPromiseRef() { promises++; }
@@ -517,7 +532,8 @@ public:
 				                       // the promise reference count
 			}
 			promises = 0;
-			if (!futures) destroy();
+			if (!futures)
+				destroy();
 		} else
 			--promises;
 	}
@@ -539,19 +555,22 @@ public:
 	void addCallbackAndDelFutureRef(Callback<T>* cb) {
 		// We are always *logically* dropping one future reference from this, but if we are adding a first callback
 		// we also need to add one (since futures is defined as being +1 if there are any callbacks), so net nothing
-		if (Callback<T>::next != this) delFutureRef();
+		if (Callback<T>::next != this)
+			delFutureRef();
 		cb->insert(this);
 	}
 
 	void addYieldedCallbackAndDelFutureRef(Callback<T>* cb) {
 		// Same contract as addCallbackAndDelFutureRef, except that the callback is placed at the end of the callback
 		// chain rather than at the beginning
-		if (Callback<T>::next != this) delFutureRef();
+		if (Callback<T>::next != this)
+			delFutureRef();
 		cb->insertBack(this);
 	}
 
 	void addCallbackChainAndDelFutureRef(Callback<T>* cb) {
-		if (Callback<T>::next != this) delFutureRef();
+		if (Callback<T>::next != this)
+			delFutureRef();
 		cb->insertChain(this);
 	}
 
@@ -576,7 +595,8 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 
 	T pop() {
 		if (queue.empty()) {
-			if (error.isValid()) throw error;
+			if (error.isValid())
+				throw error;
 			throw internal_error();
 		}
 		auto copy = queue.front();
@@ -586,7 +606,8 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 
 	template <class U>
 	void send(U&& value) {
-		if (error.isValid()) return;
+		if (error.isValid())
+			return;
 
 		if (SingleCallback<T>::next != this) {
 			SingleCallback<T>::next->fire(std::forward<U>(value));
@@ -596,10 +617,12 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 	}
 
 	void sendError(Error err) {
-		if (error.isValid()) return;
+		if (error.isValid())
+			return;
 
 		this->error = err;
-		if (SingleCallback<T>::next != this) SingleCallback<T>::next->error(err);
+		if (SingleCallback<T>::next != this)
+			SingleCallback<T>::next->error(err);
 	}
 
 	void addPromiseRef() { promises++; }
@@ -655,7 +678,8 @@ public:
 
 	Future() : sav(0) {}
 	Future(const Future<T>& rhs) : sav(rhs.sav) {
-		if (sav) sav->addFutureRef();
+		if (sav)
+			sav->addFutureRef();
 		// if (sav->endpoint.isValid()) cout << "Future copied for " << sav->endpoint.key << endl;
 	}
 	Future(Future<T>&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) {
@@ -673,16 +697,20 @@ public:
 
 	~Future() {
 		// if (sav && sav->endpoint.isValid()) cout << "Future destroyed for " << sav->endpoint.key << endl;
-		if (sav) sav->delFutureRef();
+		if (sav)
+			sav->delFutureRef();
 	}
 	void operator=(const Future<T>& rhs) {
-		if (rhs.sav) rhs.sav->addFutureRef();
-		if (sav) sav->delFutureRef();
+		if (rhs.sav)
+			rhs.sav->addFutureRef();
+		if (sav)
+			sav->delFutureRef();
 		sav = rhs.sav;
 	}
 	void operator=(Future<T>&& rhs) BOOST_NOEXCEPT {
 		if (sav != rhs.sav) {
-			if (sav) sav->delFutureRef();
+			if (sav)
+				sav->delFutureRef();
 			sav = rhs.sav;
 			rhs.sav = 0;
 		}
@@ -691,7 +719,8 @@ public:
 	bool operator!=(const Future& rhs) { return rhs.sav != sav; }
 
 	void cancel() {
-		if (sav) sav->cancel();
+		if (sav)
+			sav->cancel();
 	}
 
 	void addCallbackAndClear(Callback<T>* cb) {
@@ -764,17 +793,21 @@ public:
 	Promise(const Promise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
 	Promise(Promise&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) { rhs.sav = 0; }
 	~Promise() {
-		if (sav) sav->delPromiseRef();
+		if (sav)
+			sav->delPromiseRef();
 	}
 
 	void operator=(const Promise& rhs) {
-		if (rhs.sav) rhs.sav->addPromiseRef();
-		if (sav) sav->delPromiseRef();
+		if (rhs.sav)
+			rhs.sav->addPromiseRef();
+		if (sav)
+			sav->delPromiseRef();
 		sav = rhs.sav;
 	}
 	void operator=(Promise&& rhs) BOOST_NOEXCEPT {
 		if (sav != rhs.sav) {
-			if (sav) sav->delPromiseRef();
+			if (sav)
+				sav->delPromiseRef();
 			sav = rhs.sav;
 			rhs.sav = 0;
 		}
@@ -815,16 +848,19 @@ public:
 	FutureStream(const FutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
 	FutureStream(FutureStream&& rhs) BOOST_NOEXCEPT : queue(rhs.queue) { rhs.queue = 0; }
 	~FutureStream() {
-		if (queue) queue->delFutureRef();
+		if (queue)
+			queue->delFutureRef();
 	}
 	void operator=(const FutureStream& rhs) {
 		rhs.queue->addFutureRef();
-		if (queue) queue->delFutureRef();
+		if (queue)
+			queue->delFutureRef();
 		queue = rhs.queue;
 	}
 	void operator=(FutureStream&& rhs) BOOST_NOEXCEPT {
 		if (rhs.queue != queue) {
-			if (queue) queue->delFutureRef();
+			if (queue)
+				queue->delFutureRef();
 			queue = rhs.queue;
 			rhs.queue = 0;
 		}
@@ -915,18 +951,21 @@ public:
 	PromiseStream(PromiseStream&& rhs) BOOST_NOEXCEPT : queue(rhs.queue) { rhs.queue = 0; }
 	void operator=(const PromiseStream& rhs) {
 		rhs.queue->addPromiseRef();
-		if (queue) queue->delPromiseRef();
+		if (queue)
+			queue->delPromiseRef();
 		queue = rhs.queue;
 	}
 	void operator=(PromiseStream&& rhs) BOOST_NOEXCEPT {
 		if (queue != rhs.queue) {
-			if (queue) queue->delPromiseRef();
+			if (queue)
+				queue->delPromiseRef();
 			queue = rhs.queue;
 			rhs.queue = 0;
 		}
 	}
 	~PromiseStream() {
-		if (queue) queue->delPromiseRef();
+		if (queue)
+			queue->delPromiseRef();
 		// queue = (NotifiedQueue<T>*)0xdeadbeef;
 	}
 

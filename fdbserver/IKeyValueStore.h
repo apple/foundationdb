@@ -50,12 +50,14 @@ public:
 	virtual Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) = 0;
 
 	// Like readValue(), but returns only the first maxLength bytes of the value if it is longer
-	virtual Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength,
+	virtual Future<Optional<Value>> readValuePrefix(KeyRef key,
+	                                                int maxLength,
 	                                                Optional<UID> debugID = Optional<UID>()) = 0;
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
-	virtual Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit = 1 << 30,
+	virtual Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys,
+	                                                     int rowLimit = 1 << 30,
 	                                                     int byteLimit = 1 << 30) = 0;
 
 	// Returns the amount of free and total space for this store, in bytes
@@ -86,16 +88,29 @@ protected:
 	virtual ~IKeyValueStore() {}
 };
 
-extern IKeyValueStore* keyValueStoreSQLite(std::string const& filename, UID logID, KeyValueStoreType storeType,
-                                           bool checkChecksums = false, bool checkIntegrity = false);
+extern IKeyValueStore* keyValueStoreSQLite(std::string const& filename,
+                                           UID logID,
+                                           KeyValueStoreType storeType,
+                                           bool checkChecksums = false,
+                                           bool checkIntegrity = false);
 extern IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename, UID logID);
-extern IKeyValueStore* keyValueStoreMemory(std::string const& basename, UID logID, int64_t memoryLimit,
+extern IKeyValueStore* keyValueStoreMemory(std::string const& basename,
+                                           UID logID,
+                                           int64_t memoryLimit,
                                            std::string ext = "fdq");
-extern IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue, UID logID, int64_t memoryLimit,
-                                              bool disableSnapshot, bool replaceContent, bool exactRecovery);
+extern IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
+                                              UID logID,
+                                              int64_t memoryLimit,
+                                              bool disableSnapshot,
+                                              bool replaceContent,
+                                              bool exactRecovery);
 
-inline IKeyValueStore* openKVStore(KeyValueStoreType storeType, std::string const& filename, UID logID,
-                                   int64_t memoryLimit, bool checkChecksums = false, bool checkIntegrity = false) {
+inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
+                                   std::string const& filename,
+                                   UID logID,
+                                   int64_t memoryLimit,
+                                   bool checkChecksums = false,
+                                   bool checkIntegrity = false) {
 	switch (storeType) {
 	case KeyValueStoreType::SSD_BTREE_V1:
 		return keyValueStoreSQLite(filename, logID, KeyValueStoreType::SSD_BTREE_V1, false, checkIntegrity);

@@ -47,7 +47,8 @@ public:
 			ASSERT(arr != nullptr);
 		}
 		ASSERT(capacity() >= end || end == 0);
-		for (uint32_t i = 0; i < end; i++) new (&arr[i]) T(r[i]);
+		for (uint32_t i = 0; i < end; i++)
+			new (&arr[i]) T(r[i]);
 		// FIXME: Specialization for POD types using memcpy?
 	}
 
@@ -63,7 +64,8 @@ public:
 			ASSERT(arr != nullptr);
 		}
 		ASSERT(capacity() >= end || end == 0);
-		for (uint32_t i = 0; i < end; i++) new (&arr[i]) T(r[i]);
+		for (uint32_t i = 0; i < end; i++)
+			new (&arr[i]) T(r[i]);
 		// FIXME: Specialization for POD types using memcpy?
 	}
 
@@ -87,23 +89,27 @@ public:
 	}
 
 	bool operator==(const Deque& r) const {
-		if (size() != r.size()) return false;
+		if (size() != r.size())
+			return false;
 		for (uint32_t i = 0; i < size(); i++)
-			if ((*this)[i] != r[i]) return false;
+			if ((*this)[i] != r[i])
+				return false;
 		return true;
 	}
 
 	~Deque() { cleanup(); }
 
 	void push_back(const T& val) {
-		if (full()) grow();
+		if (full())
+			grow();
 		new (&arr[end & mask]) T(val);
 		end++;
 	}
 
 	template <class... U>
 	reference emplace_back(U&&... val) {
-		if (full()) grow();
+		if (full())
+			grow();
 		new (&arr[end & mask]) T(std::forward<U>(val)...);
 		reference result = arr[end & mask];
 		end++;
@@ -127,7 +133,8 @@ public:
 	}
 
 	void clear() {
-		for (uint32_t i = begin; i != end; i++) arr[i & mask].~T();
+		for (uint32_t i = begin; i != end; i++)
+			arr[i & mask].~T();
 		begin = end = 0;
 	}
 
@@ -148,11 +155,13 @@ public:
 	T const& operator[](int i) const { return arr[(begin + i) & mask]; }
 
 	T& at(int i) {
-		if (i < 0 || i >= end - begin) throw std::out_of_range("requires 0 <= i < size");
+		if (i < 0 || i >= end - begin)
+			throw std::out_of_range("requires 0 <= i < size");
 		return (*this)[i];
 	}
 	T const& at(int i) const {
-		if (i < 0 || i >= end - begin) throw std::out_of_range("requires 0 <= i < size");
+		if (i < 0 || i >= end - begin)
+			throw std::out_of_range("requires 0 <= i < size");
 		return (*this)[i];
 	}
 
@@ -166,7 +175,8 @@ private:
 
 		size_t mp1 = arr ? size_t(mask) + 1 : 4;
 		size_t newSize = mp1 * 2;
-		if (newSize > max_size()) throw std::bad_alloc();
+		if (newSize > max_size())
+			throw std::bad_alloc();
 		// printf("Growing to %lld (%u-%u mask %u)\n", (long long)newSize, begin, end, mask);
 		T* newArr = (T*)aligned_alloc(std::max(__alignof(T), sizeof(void*)),
 		                              newSize * sizeof(T)); // SOMEDAY: FastAllocator, exception safety
@@ -183,8 +193,10 @@ private:
 	}
 
 	void cleanup() {
-		for (int i = begin; i != end; i++) arr[i & mask].~T();
-		if (arr) aligned_free(arr);
+		for (int i = begin; i != end; i++)
+			arr[i & mask].~T();
+		if (arr)
+			aligned_free(arr);
 	}
 };
 

@@ -46,7 +46,8 @@ public:
 						when(wait(self->cursor->getMore())) { break; }
 						when(wait(self->localityChanged)) {
 							self->cursor = self->logSystem->peekTxs(
-							    UID(), self->recoveryLoc,
+							    UID(),
+							    self->recoveryLoc,
 							    self->peekLocality ? self->peekLocality->get().primaryLocality : tagLocalityInvalid,
 							    self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion,
 							    self->totalRecoveredBytes == 0);
@@ -57,12 +58,16 @@ public:
 						                    : SERVER_KNOBS->DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME))) {
 							self->peekTypeSwitches++;
 							if (self->peekTypeSwitches % 3 == 1) {
-								self->cursor = self->logSystem->peekTxs(UID(), self->recoveryLoc, tagLocalityInvalid,
-								                                        invalidVersion, self->totalRecoveredBytes == 0);
+								self->cursor = self->logSystem->peekTxs(UID(),
+								                                        self->recoveryLoc,
+								                                        tagLocalityInvalid,
+								                                        invalidVersion,
+								                                        self->totalRecoveredBytes == 0);
 								self->localityChanged = Never();
 							} else if (self->peekTypeSwitches % 3 == 2) {
 								self->cursor = self->logSystem->peekTxs(
-								    UID(), self->recoveryLoc,
+								    UID(),
+								    self->recoveryLoc,
 								    self->peekLocality ? self->peekLocality->get().secondaryLocality
 								                       : tagLocalityInvalid,
 								    self->peekLocality ? self->peekLocality->get().knownCommittedVersion
@@ -71,7 +76,8 @@ public:
 								self->localityChanged = self->peekLocality->onChange();
 							} else {
 								self->cursor = self->logSystem->peekTxs(
-								    UID(), self->recoveryLoc,
+								    UID(),
+								    self->recoveryLoc,
 								    self->peekLocality ? self->peekLocality->get().primaryLocality : tagLocalityInvalid,
 								    self->peekLocality ? self->peekLocality->get().knownCommittedVersion
 								                       : invalidVersion,
@@ -99,19 +105,21 @@ public:
 					self->recoveryQueueLoc = self->recoveryLoc;
 					self->totalRecoveredBytes = 0;
 					if (self->peekTypeSwitches % 3 == 1) {
-						self->cursor = self->logSystem->peekTxs(UID(), self->recoveryLoc, tagLocalityInvalid,
-						                                        invalidVersion, true);
+						self->cursor = self->logSystem->peekTxs(
+						    UID(), self->recoveryLoc, tagLocalityInvalid, invalidVersion, true);
 						self->localityChanged = Never();
 					} else if (self->peekTypeSwitches % 3 == 2) {
 						self->cursor = self->logSystem->peekTxs(
-						    UID(), self->recoveryLoc,
+						    UID(),
+						    self->recoveryLoc,
 						    self->peekLocality ? self->peekLocality->get().secondaryLocality : tagLocalityInvalid,
 						    self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion,
 						    true);
 						self->localityChanged = self->peekLocality->onChange();
 					} else {
 						self->cursor = self->logSystem->peekTxs(
-						    UID(), self->recoveryLoc,
+						    UID(),
+						    self->recoveryLoc,
 						    self->peekLocality ? self->peekLocality->get().primaryLocality : tagLocalityInvalid,
 						    self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion,
 						    true);
@@ -135,7 +143,8 @@ public:
 			self->recoveryQueueDataSize += self->recoveryQueue.back().size();
 			self->totalRecoveredBytes += self->recoveryQueue.back().size();
 			self->cursor->nextMessage();
-			if (!self->cursor->hasMessage()) self->recoveryLoc = self->cursor->version().version;
+			if (!self->cursor->hasMessage())
+				self->recoveryLoc = self->cursor->version().version;
 
 			//TraceEvent("PeekNextResults").detail("From", self->recoveryLoc).detail("Queue", self->recoveryQueue.size()).detail("Bytes", bytes).detail("Has", self->cursor->hasMessage()).detail("End", self->logSystem->getEnd());
 		}
@@ -144,7 +153,8 @@ public:
 			self->recoveryQueue.resize(1);
 		}
 
-		if (self->recoveryQueueDataSize == 0) return Standalone<StringRef>();
+		if (self->recoveryQueueDataSize == 0)
+			return Standalone<StringRef>();
 
 		ASSERT(self->recoveryQueue[0].size() == self->recoveryQueueDataSize);
 
@@ -161,7 +171,8 @@ public:
 };
 
 Future<Standalone<StringRef>> LogSystemDiskQueueAdapter::readNext(int bytes) {
-	if (!enableRecovery) return Standalone<StringRef>();
+	if (!enableRecovery)
+		return Standalone<StringRef>();
 	return LogSystemDiskQueueAdapterImpl::readNext(this, bytes);
 }
 

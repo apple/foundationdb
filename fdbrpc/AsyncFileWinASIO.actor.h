@@ -55,10 +55,13 @@ public:
 		}
 
 		HANDLE h =
-		    CreateFile(open_filename.c_str(), GENERIC_READ | ((flags & OPEN_READWRITE) ? GENERIC_WRITE : 0),
-		               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+		    CreateFile(open_filename.c_str(),
+		               GENERIC_READ | ((flags & OPEN_READWRITE) ? GENERIC_WRITE : 0),
+		               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+		               NULL,
 		               (flags & OPEN_EXCLUSIVE) ? CREATE_NEW : (flags & OPEN_CREATE) ? OPEN_ALWAYS : OPEN_EXISTING,
-		               FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED | FILE_FLAG_NO_BUFFERING, NULL);
+		               FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED | FILE_FLAG_NO_BUFFERING,
+		               NULL);
 		if (h == INVALID_HANDLE_VALUE) {
 			bool notFound = GetLastError() == ERROR_FILE_NOT_FOUND;
 			Error e = notFound ? file_not_found() : io_error();
@@ -105,7 +108,9 @@ public:
 			onReady.send(bytesRead);
 		}
 	}
-	static void onWriteReady(Promise<Void> onReady, size_t bytesExpected, const boost::system::error_code& error,
+	static void onWriteReady(Promise<Void> onReady,
+	                         size_t bytesExpected,
+	                         const boost::system::error_code& error,
 	                         size_t bytesWritten) {
 		if (error) {
 			Error e = io_error();
@@ -128,12 +133,15 @@ public:
 		// the size call is set inline
 		auto end = this->size().get();
 		//TraceEvent("WinAsyncRead").detail("Offset", offset).detail("Length", length).detail("FileSize", end).detail("FileName", filename);
-		if (offset >= end) return 0;
+		if (offset >= end)
+			return 0;
 
 		Promise<int> result;
-		file.async_read_some_at(offset, boost::asio::mutable_buffers_1(data, length),
-		                        boost::bind(&onReadReady, result, boost::asio::placeholders::error,
-		                                    boost::asio::placeholders::bytes_transferred));
+		file.async_read_some_at(
+		    offset,
+		    boost::asio::mutable_buffers_1(data, length),
+		    boost::bind(
+		        &onReadReady, result, boost::asio::placeholders::error, boost::asio::placeholders::bytes_transferred));
 
 		return result.getFuture();
 	}
@@ -145,20 +153,28 @@ public:
 		    fileValidData = length+offset;
 		}*/
 		Promise<Void> result;
-		boost::asio::async_write_at(file, offset, boost::asio::const_buffers_1(data, length),
-		                            boost::bind(&onWriteReady, result, length, boost::asio::placeholders::error,
+		boost::asio::async_write_at(file,
+		                            offset,
+		                            boost::asio::const_buffers_1(data, length),
+		                            boost::bind(&onWriteReady,
+		                                        result,
+		                                        length,
+		                                        boost::asio::placeholders::error,
 		                                        boost::asio::placeholders::bytes_transferred));
 		return result.getFuture();
 	}
 	virtual Future<Void> truncate(int64_t size) {
 		// FIXME: Possibly use SetFileInformationByHandle( file.native_handle(), FileEndOfFileInfo, ... ) instead
-		if (!SetFilePointerEx(file.native_handle(), *(LARGE_INTEGER*)&size, NULL, FILE_BEGIN)) throw io_error();
-		if (!SetEndOfFile(file.native_handle())) throw io_error();
+		if (!SetFilePointerEx(file.native_handle(), *(LARGE_INTEGER*)&size, NULL, FILE_BEGIN))
+			throw io_error();
+		if (!SetEndOfFile(file.native_handle()))
+			throw io_error();
 		return Void();
 	}
 	virtual Future<Void> sync() {
 		// FIXME: Do FlushFileBuffers in a worker thread (using g_network->createThreadPool)?
-		if (!FlushFileBuffers(file.native_handle())) throw io_error();
+		if (!FlushFileBuffers(file.native_handle()))
+			throw io_error();
 
 		if (flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
 			flags &= ~OPEN_ATOMIC_WRITE_AND_CREATE;
@@ -170,7 +186,8 @@ public:
 	}
 	virtual Future<int64_t> size() {
 		LARGE_INTEGER s;
-		if (!GetFileSizeEx(file.native_handle(), &s)) throw io_error();
+		if (!GetFileSizeEx(file.native_handle(), &s))
+			throw io_error();
 		return *(int64_t*)&s;
 	}
 	virtual std::string getFilename() { return filename; }

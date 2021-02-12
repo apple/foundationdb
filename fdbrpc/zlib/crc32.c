@@ -99,12 +99,14 @@ local void make_crc_table() {
 
 		/* make exclusive-or pattern from polynomial (0xedb88320UL) */
 		poly = 0;
-		for (n = 0; n < (int)(sizeof(p) / sizeof(unsigned char)); n++) poly |= (z_crc_t)1 << (31 - p[n]);
+		for (n = 0; n < (int)(sizeof(p) / sizeof(unsigned char)); n++)
+			poly |= (z_crc_t)1 << (31 - p[n]);
 
 		/* generate a crc for every 8-bit value */
 		for (n = 0; n < 256; n++) {
 			c = (z_crc_t)n;
-			for (k = 0; k < 8; k++) c = c & 1 ? poly ^ (c >> 1) : c >> 1;
+			for (k = 0; k < 8; k++)
+				c = c & 1 ? poly ^ (c >> 1) : c >> 1;
 			crc_table[0][n] = c;
 		}
 
@@ -135,7 +137,8 @@ local void make_crc_table() {
 		FILE* out;
 
 		out = fopen("crc32.h", "w");
-		if (out == NULL) return;
+		if (out == NULL)
+			return;
 		fprintf(out, "/* crc32.h -- tables for rapid CRC calculation\n");
 		fprintf(out, " * Generated automatically by crc32.c\n */\n\n");
 		fprintf(out, "local const z_crc_t FAR ");
@@ -162,7 +165,10 @@ const z_crc_t FAR* table;
 	int n;
 
 	for (n = 0; n < 256; n++)
-		fprintf(out, "%s0x%08lxUL%s", n % 5 ? "" : "    ", (unsigned long)(table[n]),
+		fprintf(out,
+		        "%s0x%08lxUL%s",
+		        n % 5 ? "" : "    ",
+		        (unsigned long)(table[n]),
 		        n == 255 ? "\n" : (n % 5 == 4 ? ",\n" : ", "));
 }
 #endif /* MAKECRCH */
@@ -179,7 +185,8 @@ const z_crc_t FAR* table;
  */
 const z_crc_t FAR* ZEXPORT get_crc_table() {
 #ifdef DYNAMIC_CRC_TABLE
-	if (crc_table_empty) make_crc_table();
+	if (crc_table_empty)
+		make_crc_table();
 #endif /* DYNAMIC_CRC_TABLE */
 	return (const z_crc_t FAR*)crc_table;
 }
@@ -201,10 +208,12 @@ unsigned long ZEXPORT crc32(crc, buf, len) unsigned long crc;
 const unsigned char FAR* buf;
 uInt len;
 {
-	if (buf == Z_NULL) return 0UL;
+	if (buf == Z_NULL)
+		return 0UL;
 
 #ifdef DYNAMIC_CRC_TABLE
-	if (crc_table_empty) make_crc_table();
+	if (crc_table_empty)
+		make_crc_table();
 #endif /* DYNAMIC_CRC_TABLE */
 
 #ifdef BYFOUR
@@ -223,7 +232,8 @@ uInt len;
 		DO8;
 		len -= 8;
 	}
-	if (len) do {
+	if (len)
+		do {
 			DO1;
 		} while (--len);
 	return crc ^ 0xffffffffUL;
@@ -271,7 +281,8 @@ unsigned len;
 	}
 	buf = (const unsigned char FAR*)buf4;
 
-	if (len) do {
+	if (len)
+		do {
 			c = crc_table[0][(c ^ *buf++) & 0xff] ^ (c >> 8);
 		} while (--len);
 	c = ~c;
@@ -320,7 +331,8 @@ unsigned len;
 	buf4++;
 	buf = (const unsigned char FAR*)buf4;
 
-	if (len) do {
+	if (len)
+		do {
 			c = crc_table[4][(c >> 24) ^ *buf++] ^ (c << 8);
 		} while (--len);
 	c = ~c;
@@ -339,7 +351,8 @@ unsigned long vec;
 
 	sum = 0;
 	while (vec) {
-		if (vec & 1) sum ^= *mat;
+		if (vec & 1)
+			sum ^= *mat;
 		vec >>= 1;
 		mat++;
 	}
@@ -352,7 +365,8 @@ unsigned long* mat;
 {
 	int n;
 
-	for (n = 0; n < GF2_DIM; n++) square[n] = gf2_matrix_times(mat, mat[n]);
+	for (n = 0; n < GF2_DIM; n++)
+		square[n] = gf2_matrix_times(mat, mat[n]);
 }
 
 /* ========================================================================= */
@@ -366,7 +380,8 @@ z_off64_t len2;
 	unsigned long odd[GF2_DIM]; /* odd-power-of-two zeros operator */
 
 	/* degenerate case (also disallow negative lengths) */
-	if (len2 <= 0) return crc1;
+	if (len2 <= 0)
+		return crc1;
 
 	/* put operator for one zero bit in odd */
 	odd[0] = 0xedb88320UL; /* CRC-32 polynomial */
@@ -387,15 +402,18 @@ z_off64_t len2;
 	do {
 		/* apply zeros operator for this bit of len2 */
 		gf2_matrix_square(even, odd);
-		if (len2 & 1) crc1 = gf2_matrix_times(even, crc1);
+		if (len2 & 1)
+			crc1 = gf2_matrix_times(even, crc1);
 		len2 >>= 1;
 
 		/* if no more bits set, then done */
-		if (len2 == 0) break;
+		if (len2 == 0)
+			break;
 
 		/* another iteration of the loop with odd and even swapped */
 		gf2_matrix_square(odd, even);
-		if (len2 & 1) crc1 = gf2_matrix_times(odd, crc1);
+		if (len2 & 1)
+			crc1 = gf2_matrix_times(odd, crc1);
 		len2 >>= 1;
 
 		/* if no more bits set, then done */

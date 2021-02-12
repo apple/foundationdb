@@ -40,7 +40,8 @@
 static uint32_t append_trivial(uint32_t crc, const uint8_t* input, size_t length) {
 	for (size_t i = 0; i < length; ++i) {
 		crc = crc ^ input[i];
-		for (int j = 0; j < 8; j++) crc = (crc >> 1) ^ 0x80000000 ^ ((~crc & 1) * POLY);
+		for (int j = 0; j < 8; j++)
+			crc = (crc >> 1) ^ 0x80000000 ^ ((~crc & 1) * POLY);
 	}
 	return crc;
 }

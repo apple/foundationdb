@@ -40,7 +40,8 @@ struct DiskDurabilityTest : TestWorkload {
 	virtual std::string description() { return "DiskDurabilityTest"; }
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
 	virtual Future<Void> start(Database const& cx) {
-		if (enabled) return durabilityTest(this, cx);
+		if (enabled)
+			return durabilityTest(this, cx);
 		return Void();
 	}
 	virtual Future<bool> check(Database const& cx) { return true; }
@@ -60,12 +61,14 @@ struct DiskDurabilityTest : TestWorkload {
 
 	void encodePage(uint8_t* page, int64_t value) {
 		int64_t* ipage = (int64_t*)page;
-		for (int i = 0; i < 4096 / 8; i++) ipage[i] = value + i;
+		for (int i = 0; i < 4096 / 8; i++)
+			ipage[i] = value + i;
 	}
 	int64_t decodePage(uint8_t* page) {
 		int64_t* ipage = (int64_t*)page;
 		for (int i = 0; i < 4096 / 8; i++)
-			if (ipage[i] != ipage[0] + i) return 0;
+			if (ipage[i] != ipage[0] + i)
+				return 0;
 		return ipage[0];
 	}
 
@@ -107,7 +110,8 @@ struct DiskDurabilityTest : TestWorkload {
 			}
 		}
 
-		if (failed) throw operation_failed();
+		if (failed)
+			throw operation_failed();
 
 		printf("Verified %d/%" PRId64 " pages\n", verifyPages, size / 4096);
 		TraceEvent(SevInfo, "Verified").detail("Pages", verifyPages).detail("Of", size / 4096);
@@ -118,7 +122,8 @@ struct DiskDurabilityTest : TestWorkload {
 			state vector<int64_t> targetPages;
 			for (int i = deterministicRandom()->randomInt(1, 100); i > 0 && targetPages.size() < size / 4096; i--) {
 				auto p = deterministicRandom()->randomInt(0, size / 4096);
-				if (!std::count(targetPages.begin(), targetPages.end(), p)) targetPages.push_back(p);
+				if (!std::count(targetPages.begin(), targetPages.end(), p))
+					targetPages.push_back(p);
 			}
 			for (int i = deterministicRandom()->randomInt(1, 4); i > 0; i--) {
 				targetPages.push_back(size / 4096);
@@ -126,12 +131,14 @@ struct DiskDurabilityTest : TestWorkload {
 			}
 
 			state vector<int64_t> targetValues(targetPages.size());
-			for (auto& v : targetValues) v = deterministicRandom()->randomUniqueID().first();
+			for (auto& v : targetValues)
+				v = deterministicRandom()->randomUniqueID().first();
 
 			tr.reset();
 			loop {
 				try {
-					for (int i = 0; i < targetPages.size(); i++) tr.clear(self->encodeKey(targetPages[i]));
+					for (int i = 0; i < targetPages.size(); i++)
+						tr.clear(self->encodeKey(targetPages[i]));
 
 					if (!first) {
 						Optional<Value> v = wait(tr.get(LiteralStringRef("syncs").withPrefix(self->metrics.begin)));

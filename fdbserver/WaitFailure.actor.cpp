@@ -37,8 +37,10 @@ ACTOR Future<Void> waitFailureServer(FutureStream<ReplyPromise<Void>> waitFailur
 	}
 }
 
-ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailure, double reactionTime,
-                                     double reactionSlope, TaskPriority taskID) {
+ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailure,
+                                     double reactionTime,
+                                     double reactionSlope,
+                                     TaskPriority taskID) {
 	loop {
 		try {
 			state double start = now();
@@ -51,16 +53,19 @@ ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailu
 				return Void();
 			}
 			double w = start + SERVER_KNOBS->WAIT_FAILURE_DELAY_LIMIT - now();
-			if (w > 0) wait(delay(w, taskID));
+			if (w > 0)
+				wait(delay(w, taskID));
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			TraceEvent(SevError, "WaitFailureClientError").error(e);
 			ASSERT(false); // unknown error from waitFailureServer
 		}
 	}
 }
 
-ACTOR Future<Void> waitFailureClientStrict(RequestStream<ReplyPromise<Void>> waitFailure, double failureReactionTime,
+ACTOR Future<Void> waitFailureClientStrict(RequestStream<ReplyPromise<Void>> waitFailure,
+                                           double failureReactionTime,
                                            TaskPriority taskID) {
 	loop {
 		wait(waitFailureClient(waitFailure, 0, 0, taskID));
@@ -72,8 +77,11 @@ ACTOR Future<Void> waitFailureClientStrict(RequestStream<ReplyPromise<Void>> wai
 	}
 }
 
-ACTOR Future<Void> waitFailureTracker(RequestStream<ReplyPromise<Void>> waitFailure, Reference<AsyncVar<bool>> failed,
-                                      double reactionTime, double reactionSlope, TaskPriority taskID) {
+ACTOR Future<Void> waitFailureTracker(RequestStream<ReplyPromise<Void>> waitFailure,
+                                      Reference<AsyncVar<bool>> failed,
+                                      double reactionTime,
+                                      double reactionSlope,
+                                      TaskPriority taskID) {
 	loop {
 		try {
 			failed->set(IFailureMonitor::failureMonitor().getState(waitFailure.getEndpoint()).isFailed());
@@ -85,11 +93,13 @@ ACTOR Future<Void> waitFailureTracker(RequestStream<ReplyPromise<Void>> waitFail
 				    waitFailure.getReplyUnlessFailedFor(ReplyPromise<Void>(), reactionTime, reactionSlope, taskID));
 				if (x.present()) {
 					double w = start + SERVER_KNOBS->WAIT_FAILURE_DELAY_LIMIT - now();
-					if (w > 0) wait(delay(w, taskID));
+					if (w > 0)
+						wait(delay(w, taskID));
 				}
 			}
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			TraceEvent(SevError, "WaitFailureClientError").error(e);
 			ASSERT(false); // unknown error from waitFailureServer
 		}

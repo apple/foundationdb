@@ -83,7 +83,8 @@ typedef JSONDoc StatusObjectReader;
 template <>
 inline bool JSONDoc::get<JSONDoc>(const std::string path, StatusObjectReader& out, bool split) {
 	bool r = has(path, split);
-	if (r) out = pLast->get_obj();
+	if (r)
+		out = pLast->get_obj();
 	return r;
 }
 
@@ -91,7 +92,8 @@ inline bool JSONDoc::get<JSONDoc>(const std::string path, StatusObjectReader& ou
 // the key.
 static bool findMessagesByName(StatusObjectReader object, std::set<std::string> to_find) {
 
-	if (!object.has("messages") || object.last().type() != json_spirit::array_type) return false;
+	if (!object.has("messages") || object.last().type() != json_spirit::array_type)
+		return false;
 
 	StatusObject::Array const& messages = object.last().get_array();
 
@@ -101,7 +103,8 @@ static bool findMessagesByName(StatusObjectReader object, std::set<std::string> 
 		// Since we are looking for a positive match, any exceptions thrown when trying to read
 		// the object in the messages array will be perceived as not-a-match and therefore ignored.
 		try {
-			if (to_find.count(i.get_obj().at("name").get_str())) return true;
+			if (to_find.count(i.get_obj().at("name").get_str()))
+				return true;
 		} catch (std::exception&) {
 		}
 	}

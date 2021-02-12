@@ -84,10 +84,14 @@ Future<Reference<IAsyncFile>> AsyncFileCached::open_impl(std::string filename, i
 	return open_impl(filename, flags, mode, pageCache);
 }
 
-Future<Void> AsyncFileCached::read_write_impl(AsyncFileCached* self, void* data, int length, int64_t offset,
+Future<Void> AsyncFileCached::read_write_impl(AsyncFileCached* self,
+                                              void* data,
+                                              int length,
+                                              int64_t offset,
                                               bool writing) {
 	if (writing) {
-		if (offset + length > self->length) self->length = offset + length;
+		if (offset + length > self->length)
+			self->length = offset + length;
 	}
 
 	std::vector<Future<Void>> actors;
@@ -114,7 +118,8 @@ Future<Void> AsyncFileCached::read_write_impl(AsyncFileCached* self, void* data,
 
 		auto w = writing ? p->second->write(cdata, bytesInPage, offsetInPage)
 		                 : p->second->read(cdata, bytesInPage, offsetInPage);
-		if (!w.isReady() || w.isError()) actors.push_back(w);
+		if (!w.isReady() || w.isError())
+			actors.push_back(w);
 
 		cdata += bytesInPage;
 		pageOffset += self->pageCache->pageSize;
@@ -196,7 +201,8 @@ Future<Void> AsyncFileCached::changeFileSize(int64_t size) {
 		auto p = pages.find(pageOffset);
 		if (p != pages.end()) {
 			auto f = p->second->flush();
-			if (!f.isReady() || f.isError()) actors.push_back(f);
+			if (!f.isReady() || f.isError())
+				actors.push_back(f);
 		} else {
 			TEST(true); // Truncating to the middle of a page that isn't in cache
 		}
@@ -257,9 +263,11 @@ Future<Void> AsyncFileCached::flush() {
 	for (int i = 0; i < flushable.size();) {
 		auto p = flushable[i];
 		auto f = p->flush();
-		if (!f.isReady() || f.isError()) unflushed.push_back(f);
+		if (!f.isReady() || f.isError())
+			unflushed.push_back(f);
 		ASSERT((i < flushable.size() && flushable[i] == p) != f.isReady());
-		if (!f.isReady()) i++;
+		if (!f.isReady())
+			i++;
 	}
 	ASSERT(flushable.size() <= debug_count);
 
@@ -271,7 +279,8 @@ Future<Void> AsyncFileCached::quiesce() {
 
 	for (auto i = pages.begin(); i != pages.end(); ++i) {
 		auto f = i->second->quiesce();
-		if (!f.isReady()) unquiescent.push_back(f);
+		if (!f.isReady())
+			unquiescent.push_back(f);
 	}
 
 	// Errors are absorbed because we need everything to finish

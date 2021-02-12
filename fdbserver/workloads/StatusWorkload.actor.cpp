@@ -66,19 +66,21 @@ struct StatusWorkload : TestWorkload {
 		return Void();
 	}
 	virtual Future<Void> start(Database const& cx) {
-		if (clientId != 0) return Void();
+		if (clientId != 0)
+			return Void();
 
 		return success(timeout(fetcher(cx, this), testDuration));
 	}
 	virtual Future<bool> check(Database const& cx) { return errors.getValue() == 0; }
 
 	virtual void getMetrics(vector<PerfMetric>& m) {
-		if (clientId != 0) return;
+		if (clientId != 0)
+			return;
 
 		m.push_back(requests.getMetric());
 		m.push_back(replies.getMetric());
-		m.push_back(PerfMetric("Average Reply Size", replies.getValue() ? totalSize.getValue() / replies.getValue() : 0,
-		                       false));
+		m.push_back(PerfMetric(
+		    "Average Reply Size", replies.getValue() ? totalSize.getValue() / replies.getValue() : 0, false));
 		m.push_back(errors.getMetric());
 	}
 

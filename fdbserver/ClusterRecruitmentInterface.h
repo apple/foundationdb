@@ -73,8 +73,15 @@ struct ClusterControllerFullInterface {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, clientInterface, recruitFromConfiguration, recruitRemoteFromConfiguration, recruitStorage,
-		           registerWorker, getWorkers, registerMaster, getServerDBInfo);
+		serializer(ar,
+		           clientInterface,
+		           recruitFromConfiguration,
+		           recruitRemoteFromConfiguration,
+		           recruitStorage,
+		           registerWorker,
+		           getWorkers,
+		           registerMaster,
+		           getServerDBInfo);
 	}
 };
 
@@ -93,8 +100,8 @@ struct RecruitFromConfigurationReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tLogs, satelliteTLogs, proxies, resolvers, storageServers, oldLogRouters, dcId,
-		           satelliteFallback);
+		serializer(
+		    ar, tLogs, satelliteTLogs, proxies, resolvers, storageServers, oldLogRouters, dcId, satelliteFallback);
 	}
 };
 
@@ -106,7 +113,8 @@ struct RecruitFromConfigurationRequest {
 	ReplyPromise<struct RecruitFromConfigurationReply> reply;
 
 	RecruitFromConfigurationRequest() {}
-	explicit RecruitFromConfigurationRequest(DatabaseConfiguration const& configuration, bool recruitSeedServers,
+	explicit RecruitFromConfigurationRequest(DatabaseConfiguration const& configuration,
+	                                         bool recruitSeedServers,
 	                                         int maxOldLogRouters)
 	  : configuration(configuration), recruitSeedServers(recruitSeedServers), maxOldLogRouters(maxOldLogRouters) {}
 
@@ -136,8 +144,10 @@ struct RecruitRemoteFromConfigurationRequest {
 	ReplyPromise<struct RecruitRemoteFromConfigurationReply> reply;
 
 	RecruitRemoteFromConfigurationRequest() {}
-	RecruitRemoteFromConfigurationRequest(DatabaseConfiguration const& configuration, Optional<Key> const& dcId,
-	                                      int logRouterCount, const std::vector<UID>& exclusionWorkerIds)
+	RecruitRemoteFromConfigurationRequest(DatabaseConfiguration const& configuration,
+	                                      Optional<Key> const& dcId,
+	                                      int logRouterCount,
+	                                      const std::vector<UID>& exclusionWorkerIds)
 	  : configuration(configuration), dcId(dcId), logRouterCount(logRouterCount),
 	    exclusionWorkerIds(exclusionWorkerIds) {}
 
@@ -202,17 +212,29 @@ struct RegisterWorkerRequest {
 
 	RegisterWorkerRequest()
 	  : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
-	RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass,
-	                      ClusterControllerPriorityInfo priorityInfo, Generation generation,
-	                      Optional<DataDistributorInterface> ddInterf, Optional<RatekeeperInterface> rkInterf,
+	RegisterWorkerRequest(WorkerInterface wi,
+	                      ProcessClass initialClass,
+	                      ProcessClass processClass,
+	                      ClusterControllerPriorityInfo priorityInfo,
+	                      Generation generation,
+	                      Optional<DataDistributorInterface> ddInterf,
+	                      Optional<RatekeeperInterface> rkInterf,
 	                      bool degraded)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), degraded(degraded) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, wi, initialClass, processClass, priorityInfo, generation, distributorInterf, ratekeeperInterf,
-		           reply, degraded);
+		serializer(ar,
+		           wi,
+		           initialClass,
+		           processClass,
+		           priorityInfo,
+		           generation,
+		           distributorInterf,
+		           ratekeeperInterf,
+		           reply,
+		           degraded);
 	}
 };
 
@@ -255,8 +277,19 @@ struct RegisterMasterRequest {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, id, mi, logSystemConfig, proxies, resolvers, recoveryCount, registrationCount, configuration,
-		           priorCommittedLogServers, recoveryState, recoveryStalled, reply);
+		serializer(ar,
+		           id,
+		           mi,
+		           logSystemConfig,
+		           proxies,
+		           resolvers,
+		           recoveryCount,
+		           registrationCount,
+		           configuration,
+		           priorCommittedLogServers,
+		           recoveryState,
+		           recoveryStalled,
+		           reply);
 	}
 };
 

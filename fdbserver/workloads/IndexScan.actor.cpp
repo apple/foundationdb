@@ -58,7 +58,8 @@ struct IndexScanWorkload : KVWorkload {
 	virtual Future<bool> check(const Database&) { return true; }
 
 	virtual void getMetrics(vector<PerfMetric>& m) {
-		if (singleProcess && clientId != 0) return;
+		if (singleProcess && clientId != 0)
+			return;
 
 		m.push_back(PerfMetric("FailedTransactions", failedTransactions, false));
 		m.push_back(PerfMetric("RowsRead", rowsRead, false));
@@ -111,7 +112,8 @@ struct IndexScanWorkload : KVWorkload {
 		state double startTime;
 		loop {
 			state ReadYourWritesTransaction tr(cx);
-			if (!self->readYourWrites) tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+			if (!self->readYourWrites)
+				tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
 			startTime = now();
 			rowsRead = 0;
 			chunks = 0;
@@ -129,7 +131,8 @@ struct IndexScanWorkload : KVWorkload {
 
 				break;
 			} catch (Error& e) {
-				if (e.code() != error_code_actor_cancelled) ++self->failedTransactions;
+				if (e.code() != error_code_actor_cancelled)
+					++self->failedTransactions;
 				wait(tr.onError(e));
 			}
 		}

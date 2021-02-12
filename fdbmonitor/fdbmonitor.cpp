@@ -87,7 +87,8 @@ typedef int fdb_fd_set;
 void monitor_fd(fdb_fd_set list, int fd, int* maxfd, void* cmd) {
 #ifdef __linux__
 	FD_SET(fd, list);
-	if (fd > *maxfd) *maxfd = fd;
+	if (fd > *maxfd)
+		*maxfd = fd;
 #elif defined __APPLE__
 	/* ignore maxfd */
 	struct kevent ev;
@@ -139,11 +140,19 @@ void vlog_process_msg(Severity severity, const char* process, const char* format
 	if (daemonize) {
 		char buf[4096];
 		int len = vsnprintf(buf, 4096, format, args);
-		syslog(severity_to_priority(severity), "LogGroup=\"%s\" Process=\"%s\": %.*s", logGroup.c_str(), process, len,
+		syslog(severity_to_priority(severity),
+		       "LogGroup=\"%s\" Process=\"%s\": %.*s",
+		       logGroup.c_str(),
+		       process,
+		       len,
 		       buf);
 	} else {
-		fprintf(stderr, "Time=\"%.6f\" Severity=\"%d\" LogGroup=\"%s\" Process=\"%s\": ", get_cur_timestamp(),
-		        (int)severity, logGroup.c_str(), process);
+		fprintf(stderr,
+		        "Time=\"%.6f\" Severity=\"%d\" LogGroup=\"%s\" Process=\"%s\": ",
+		        get_cur_timestamp(),
+		        (int)severity,
+		        logGroup.c_str(),
+		        process);
 		vfprintf(stderr, format, args);
 	}
 }
@@ -185,7 +194,8 @@ const char* get_value_multi(const CSimpleIni& ini, const char* key, ...) {
 	va_list ap;
 	va_start(ap, key);
 
-	while (!ret && (section = va_arg(ap, const char*))) ret = ini.GetValue(section, key, NULL);
+	while (!ret && (section = va_arg(ap, const char*)))
+		ret = ini.GetValue(section, key, NULL);
 
 	va_end(ap);
 
@@ -217,8 +227,10 @@ int randomInt(int min, int max) {
 std::string joinPath(std::string const& directory, std::string const& filename) {
 	auto d = directory;
 	auto f = filename;
-	while (f.size() && (f[0] == '/' || f[0] == CANONICAL_PATH_SEPARATOR)) f = f.substr(1);
-	while (d.size() && (d.back() == '/' || d.back() == CANONICAL_PATH_SEPARATOR)) d = d.substr(0, d.size() - 1);
+	while (f.size() && (f[0] == '/' || f[0] == CANONICAL_PATH_SEPARATOR))
+		f = f.substr(1);
+	while (d.size() && (d.back() == '/' || d.back() == CANONICAL_PATH_SEPARATOR))
+		d = d.substr(0, d.size() - 1);
 	return d + CANONICAL_PATH_SEPARATOR + f;
 }
 
@@ -234,7 +246,8 @@ std::string cleanPath(std::string const& path) {
 		}
 		std::string part = path.substr(i, sep - i);
 		i = sep + 1;
-		if (part.size() == 0 || (part.size() == 1 && part[0] == '.')) continue;
+		if (part.size() == 0 || (part.size() == 1 && part[0] == '.'))
+			continue;
 		if (part == "..") {
 			if (!finalParts.empty() && finalParts.back() != "..") {
 				finalParts.pop_back();
@@ -319,7 +332,8 @@ std::string abspath(std::string const& path, bool resolveLinks = true) {
 			if (!prefix.empty()) {
 				std::string abs = abspath(prefix, true);
 				// An empty return from abspath() means there was an error.
-				if (abs.empty()) return abs;
+				if (abs.empty())
+					return abs;
 				return cleanPath(joinPath(abs, suffix));
 			}
 		}
@@ -338,7 +352,8 @@ int mkdir(std::string const& directory) {
 	do {
 		sep = directory.find_first_of('/', sep + 1);
 		if (mkdir(directory.substr(0, sep).c_str(), 0755) != 0) {
-			if (errno == EEXIST) continue;
+			if (errno == EEXIST)
+				continue;
 
 			return -1;
 		}
@@ -417,8 +432,8 @@ public:
 			}
 		}
 
-		const char* mrd = get_value_multi(ini, "initial_restart_delay", ssection.c_str(), section.c_str(), "general",
-		                                  "fdbmonitor", NULL);
+		const char* mrd = get_value_multi(
+		    ini, "initial_restart_delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", NULL);
 		if (!mrd) {
 			initial_restart_delay = 0;
 		} else {
@@ -447,8 +462,8 @@ public:
 			}
 		}
 
-		const char* rdri = get_value_multi(ini, "restart_delay_reset_interval", ssection.c_str(), section.c_str(),
-		                                   "general", "fdbmonitor", NULL);
+		const char* rdri = get_value_multi(
+		    ini, "restart_delay_reset_interval", ssection.c_str(), section.c_str(), "general", "fdbmonitor", NULL);
 		if (!rdri) {
 			restart_delay_reset_interval = max_restart_delay;
 		} else {
@@ -461,7 +476,8 @@ public:
 
 		const char* q =
 		    get_value_multi(ini, "disable_lifecycle_logging", ssection.c_str(), section.c_str(), "general", NULL);
-		if (q && !strcmp(q, "true")) quiet = true;
+		if (q && !strcmp(q, "true"))
+			quiet = true;
 
 		const char* del_env =
 		    get_value_multi(ini, "delete_envvars", ssection.c_str(), section.c_str(), "general", NULL);
@@ -479,7 +495,8 @@ public:
 			return;
 		}
 		std::stringstream ss(binary);
-		std::copy(std::istream_iterator<std::string>(ss), std::istream_iterator<std::string>(),
+		std::copy(std::istream_iterator<std::string>(ss),
+		          std::istream_iterator<std::string>(),
 		          std::back_inserter<std::vector<std::string>>(commands));
 
 		const char* id_s = ssection.c_str() + strlen(section.c_str()) + 1;
@@ -496,14 +513,17 @@ public:
 
 			std::size_t pos = 0;
 
-			while ((pos = opt.find("$ID", pos)) != opt.npos) opt.replace(pos, 3, id_s, strlen(id_s));
+			while ((pos = opt.find("$ID", pos)) != opt.npos)
+				opt.replace(pos, 3, id_s, strlen(id_s));
 
 			const char* flagName = i.pItem + 5;
 			if (strncmp("flag_", i.pItem, 5) == 0 && strlen(flagName) > 0) {
 				if (opt == "true")
 					commands.push_back(std::string("--") + flagName);
 				else if (opt != "false") {
-					log_msg(SevError, "Bad flag value, must be true/false.  Flag: '%s'  Value: '%s'\n", flagName,
+					log_msg(SevError,
+					        "Bad flag value, must be true/false.  Flag: '%s'  Value: '%s'\n",
+					        flagName,
 					        opt.c_str());
 					return;
 				}
@@ -542,10 +562,12 @@ public:
 		current_restart_delay = std::max<double>(initial_restart_delay, current_restart_delay);
 	}
 	bool operator!=(const Command& rhs) {
-		if (rhs.commands.size() != commands.size()) return true;
+		if (rhs.commands.size() != commands.size())
+			return true;
 
 		for (size_t i = 0; i < commands.size(); i++) {
-			if (commands[i].compare(rhs.commands[i]) != 0) return true;
+			if (commands[i].compare(rhs.commands[i]) != 0)
+				return true;
 		}
 
 		return false;
@@ -580,7 +602,8 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONFFILE, "--conffile", SO_REQ_SEP }
 	                                  SO_END_OF_OPTIONS };
 
 void start_process(Command* cmd, uint64_t id, uid_t uid, gid_t gid, int delay, sigset_t* mask) {
-	if (!cmd->argv) return;
+	if (!cmd->argv)
+		return;
 
 	pid_t pid = fork();
 
@@ -588,8 +611,12 @@ void start_process(Command* cmd, uint64_t id, uid_t uid, gid_t gid, int delay, s
 		cmd->last_start = timer();
 		int fork_delay = cmd->get_and_update_current_restart_delay();
 		cmd->fork_retry_time = cmd->last_start + fork_delay;
-		log_err("fork", errno, "Unable to fork new %s process, restarting %s in %d seconds", cmd->argv[0],
-		        cmd->ssection.c_str(), fork_delay);
+		log_err("fork",
+		        errno,
+		        "Unable to fork new %s process, restarting %s in %d seconds",
+		        cmd->argv[0],
+		        cmd->ssection.c_str(),
+		        fork_delay);
 		return;
 	} else if (pid == 0) { /* we are the child */
 		/* remove signal handlers from parent */
@@ -611,12 +638,16 @@ void start_process(Command* cmd, uint64_t id, uid_t uid, gid_t gid, int delay, s
 				fprintf(stdout, "Deleting parent environment variable: \'%s\'\n", var.c_str());
 				fflush(stdout);
 				if (unsetenv(var.c_str())) {
-					fprintf(stderr, "Unable to remove parent environment variable: %s (unsetenv error %d: %s)\n",
-					        var.c_str(), errno, strerror(errno));
+					fprintf(stderr,
+					        "Unable to remove parent environment variable: %s (unsetenv error %d: %s)\n",
+					        var.c_str(),
+					        errno,
+					        strerror(errno));
 					exit(1);
 				}
 				start = bound;
-				while (vars[start] == ' ') start++;
+				while (vars[start] == ' ')
+					start++;
 			} while (start <= vars.length());
 		}
 
@@ -674,7 +705,8 @@ volatile int exit_signal = 0;
 
 #ifdef __linux__
 void signal_handler(int sig) {
-	if (sig > exit_signal) exit_signal = sig;
+	if (sig > exit_signal)
+		exit_signal = sig;
 }
 #endif
 
@@ -709,11 +741,13 @@ bool argv_equal(const char** a1, const char** a2) {
 	int i = 0;
 
 	while (a1[i] && a2[i]) {
-		if (strcmp(a1[i], a2[i])) return false;
+		if (strcmp(a1[i], a2[i]))
+			return false;
 		i++;
 	}
 
-	if (a1[i] != NULL || a2[i] != NULL) return false;
+	if (a1[i] != NULL || a2[i] != NULL)
+		return false;
 	return true;
 }
 
@@ -829,7 +863,8 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 		}
 	}
 
-	for (auto i : kill_ids) kill_process(i);
+	for (auto i : kill_ids)
+		kill_process(i);
 
 	for (auto i : start_ids) {
 		start_process(i.second, i.first, uid, gid, 0, mask);
@@ -977,7 +1012,8 @@ std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string
 	std::unordered_map<int, std::unordered_set<std::string>> additional_watch_wds;
 	struct stat path_stat;
 
-	if (path.size() < 2) return additional_watch_wds;
+	if (path.size() < 2)
+		return additional_watch_wds;
 
 	int idx = 1;
 	bool exists = true;
@@ -1066,7 +1102,10 @@ int testPathFunction(const char* name, std::function<std::string(std::string)> f
 	return r ? 0 : 1;
 }
 
-int testPathFunction2(const char* name, std::function<std::string(std::string, bool)> fun, std::string a, bool x,
+int testPathFunction2(const char* name,
+                      std::function<std::string(std::string, bool)> fun,
+                      std::string a,
+                      bool x,
                       std::string b) {
 	std::string o = fun(a, x);
 	bool r = b == o;
@@ -1114,17 +1153,17 @@ void testPathOps() {
 	rc = symlink("one/two", "simfdb/backups/four") == 0 ? 0 : 1;
 	rc = symlink("../backups/four", "simfdb/backups/five") ? 0 : 1;
 
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../two", true,
-	                            joinPath(cwd, "simfdb/backups/one/two"));
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../three", true,
-	                            joinPath(cwd, "simfdb/backups/one/three"));
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../three/../four", true,
-	                            joinPath(cwd, "simfdb/backups/one/four"));
+	errors += testPathFunction2(
+	    "abspath", abspath, "simfdb/backups/five/../two", true, joinPath(cwd, "simfdb/backups/one/two"));
+	errors += testPathFunction2(
+	    "abspath", abspath, "simfdb/backups/five/../three", true, joinPath(cwd, "simfdb/backups/one/three"));
+	errors += testPathFunction2(
+	    "abspath", abspath, "simfdb/backups/five/../three/../four", true, joinPath(cwd, "simfdb/backups/one/four"));
 
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../two", true,
-	                            joinPath(cwd, "simfdb/backups/one/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../three", true,
-	                            joinPath(cwd, "simfdb/backups/one/"));
+	errors += testPathFunction2(
+	    "parentDirectory", parentDirectory, "simfdb/backups/five/../two", true, joinPath(cwd, "simfdb/backups/one/"));
+	errors += testPathFunction2(
+	    "parentDirectory", parentDirectory, "simfdb/backups/five/../three", true, joinPath(cwd, "simfdb/backups/one/"));
 
 	errors += testPathFunction2("abspath", abspath, "/", false, "/");
 	errors += testPathFunction2("abspath", abspath, "/foo//bar//baz/.././", false, "/foo/bar");
@@ -1149,25 +1188,26 @@ void testPathOps() {
 	errors += testPathFunction2("parentDirectory", parentDirectory, "/a", true, "/");
 	errors += testPathFunction2("parentDirectory", parentDirectory, ".", false, cleanPath(joinPath(cwd, "..")) + "/");
 	errors += testPathFunction2("parentDirectory", parentDirectory, "./foo", false, cleanPath(cwd) + "/");
-	errors += testPathFunction2("parentDirectory", parentDirectory, "one/two/three/four", false,
-	                            joinPath(cwd, "one/two/three/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "one/two/three/./four", false,
-	                            joinPath(cwd, "one/two/three/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "one/two/three/./four/..", false,
-	                            joinPath(cwd, "one/two/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "one/./two/../three/./four", false,
-	                            joinPath(cwd, "one/three/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/four/../two", false,
-	                            joinPath(cwd, "simfdb/backups/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../two", false,
-	                            joinPath(cwd, "simfdb/backups/"));
+	errors += testPathFunction2(
+	    "parentDirectory", parentDirectory, "one/two/three/four", false, joinPath(cwd, "one/two/three/"));
+	errors += testPathFunction2(
+	    "parentDirectory", parentDirectory, "one/two/three/./four", false, joinPath(cwd, "one/two/three/"));
+	errors += testPathFunction2(
+	    "parentDirectory", parentDirectory, "one/two/three/./four/..", false, joinPath(cwd, "one/two/"));
+	errors += testPathFunction2(
+	    "parentDirectory", parentDirectory, "one/./two/../three/./four", false, joinPath(cwd, "one/three/"));
+	errors += testPathFunction2(
+	    "parentDirectory", parentDirectory, "simfdb/backups/four/../two", false, joinPath(cwd, "simfdb/backups/"));
+	errors += testPathFunction2(
+	    "parentDirectory", parentDirectory, "simfdb/backups/five/../two", false, joinPath(cwd, "simfdb/backups/"));
 	errors +=
 	    testPathFunction2("parentDirectory", parentDirectory, "foo/./../foo2/./bar//", false, joinPath(cwd, "foo2/"));
 	errors +=
 	    testPathFunction2("parentDirectory", parentDirectory, "foo/./../foo2/./bar//", true, joinPath(cwd, "foo2/"));
 
 	printf("%d errors.\n", errors);
-	if (errors) exit(-1);
+	if (errors)
+		exit(-1);
 }
 
 int main(int argc, char** argv) {
@@ -1313,8 +1353,8 @@ int main(int argc, char** argv) {
 		exit(1);
 	}
 	if (lockf(lockfile_fd, F_LOCK, 0) < 0) {
-		log_err("lockf", errno, "Unable to lock fdbmonitor lockfile %s (is fdbmonitor already running?)",
-		        lockfile.c_str());
+		log_err(
+		    "lockf", errno, "Unable to lock fdbmonitor lockfile %s (is fdbmonitor already running?)", lockfile.c_str());
 		exit(0);
 	}
 
@@ -1411,8 +1451,8 @@ int main(int argc, char** argv) {
 			conffile_wd = inotify_add_watch(ifd, confpath.c_str(), IN_CLOSE_WRITE);
 			if (conffile_wd < 0) {
 				if (errno != ENOENT) {
-					log_err("inotify_add_watch", errno, "Unable to set watch on configuration file %s",
-					        confpath.c_str());
+					log_err(
+					    "inotify_add_watch", errno, "Unable to set watch on configuration file %s", confpath.c_str());
 					exit(1);
 				} else {
 					log_msg(SevInfo, "Conf file has been deleted %s\n", confpath.c_str());
@@ -1424,7 +1464,9 @@ int main(int argc, char** argv) {
 			confdir_wd = inotify_add_watch(ifd, confdir.c_str(), IN_CLOSE_WRITE | IN_MOVED_TO);
 			if (confdir_wd < 0) {
 				if (errno != ENOENT) {
-					log_err("inotify_add_watch", errno, "Unable to set watch on configuration file parent directory %s",
+					log_err("inotify_add_watch",
+					        errno,
+					        "Unable to set watch on configuration file parent directory %s",
 					        confdir.c_str());
 					exit(1);
 				} else {
@@ -1546,8 +1588,10 @@ int main(int argc, char** argv) {
 					i.second->fork_retry_time = -1;
 				}
 				reload = true;
-				log_msg(SevInfo, "Received signal %d (%s), resetting timeouts and reloading configuration\n",
-				        exit_signal, strsignal(exit_signal));
+				log_msg(SevInfo,
+				        "Received signal %d (%s), resetting timeouts and reloading configuration\n",
+				        exit_signal,
+				        strsignal(exit_signal));
 				break;
 			case SIGINT:
 			case SIGTERM:
@@ -1602,7 +1646,8 @@ int main(int argc, char** argv) {
 
 			if (FD_ISSET(ifd, &srfds)) {
 				len = read(ifd, buf, 4096);
-				if (len < 0) log_err("read", errno, "Error reading inotify message");
+				if (len < 0)
+					log_err("read", errno, "Error reading inotify message");
 
 				while (i < len) {
 					struct inotify_event* event = (struct inotify_event*)&buf[i];
@@ -1610,8 +1655,11 @@ int main(int argc, char** argv) {
 					auto search = additional_watch_wds.find(event->wd);
 					if (event->wd != conffile_wd) {
 						if (search != additional_watch_wds.end() && event->len && search->second.count(event->name)) {
-							log_msg(SevInfo, "Changes detected on watched symlink `%s': (%d, %#010x)\n", event->name,
-							        event->wd, event->mask);
+							log_msg(SevInfo,
+							        "Changes detected on watched symlink `%s': (%d, %#010x)\n",
+							        event->name,
+							        event->wd,
+							        event->mask);
 
 							char* redone_confpath = realpath(_confpath.c_str(), NULL);
 							if (!redone_confpath) {
@@ -1661,7 +1709,8 @@ int main(int argc, char** argv) {
 			int child_status;
 			while ((pid = waitpid(-1, &child_status, WNOHANG))) {
 				if (pid < 0) {
-					if (errno != ECHILD) log_err("waitpid", errno, "Error while waiting for child process");
+					if (errno != ECHILD)
+						log_err("waitpid", errno, "Error while waiting for child process");
 					break;
 				}
 
@@ -1679,16 +1728,24 @@ int main(int argc, char** argv) {
 					if (!cmd->quiet) {
 						if (WIFEXITED(child_status)) {
 							Severity priority = (WEXITSTATUS(child_status) == 0) ? SevWarn : SevError;
-							log_process_msg(priority, cmd->ssection.c_str(),
-							                "Process %d exited %d, restarting in %d seconds\n", pid,
-							                WEXITSTATUS(child_status), delay);
+							log_process_msg(priority,
+							                cmd->ssection.c_str(),
+							                "Process %d exited %d, restarting in %d seconds\n",
+							                pid,
+							                WEXITSTATUS(child_status),
+							                delay);
 						} else if (WIFSIGNALED(child_status))
-							log_process_msg(SevWarn, cmd->ssection.c_str(),
-							                "Process %d terminated by signal %d, restarting in %d seconds\n", pid,
-							                WTERMSIG(child_status), delay);
+							log_process_msg(SevWarn,
+							                cmd->ssection.c_str(),
+							                "Process %d terminated by signal %d, restarting in %d seconds\n",
+							                pid,
+							                WTERMSIG(child_status),
+							                delay);
 						else
-							log_process_msg(SevWarnAlways, cmd->ssection.c_str(),
-							                "Process %d exited for unknown reason, restarting in %d seconds\n", pid,
+							log_process_msg(SevWarnAlways,
+							                cmd->ssection.c_str(),
+							                "Process %d exited for unknown reason, restarting in %d seconds\n",
+							                pid,
 							                delay);
 					}
 

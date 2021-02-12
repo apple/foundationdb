@@ -103,7 +103,8 @@ std::vector<NetworkAddress> NetworkAddress::parseList(std::string const& addrs) 
 	std::vector<NetworkAddress> coord;
 	for (int p = 0; p <= addrs.size();) {
 		int pComma = addrs.find_first_of(',', p);
-		if (pComma == addrs.npos) pComma = addrs.size();
+		if (pComma == addrs.npos)
+			pComma = addrs.size();
 		NetworkAddress parsedAddress = NetworkAddress::parse(addrs.substr(p, pComma - p));
 		coord.push_back(parsedAddress);
 		p = pComma + 1;
@@ -145,13 +146,15 @@ Future<Reference<IConnection>> INetworkConnections::connect(std::string host, st
 	Future<NetworkAddress> pickEndpoint =
 	    map(resolveTCPEndpoint(host, service), [=](std::vector<NetworkAddress> const& addresses) -> NetworkAddress {
 		    NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
-		    if (useTLS) addr.flags = NetworkAddress::FLAG_TLS;
+		    if (useTLS)
+			    addr.flags = NetworkAddress::FLAG_TLS;
 		    return addr;
 	    });
 
 	// Wait for the endpoint to return, then wait for connect(endpoint) and return it.
 	// Template types are being provided explicitly because they can't be automatically deduced for some reason.
-	return mapAsync<NetworkAddress, std::function<Future<Reference<IConnection>>(NetworkAddress const&)>,
+	return mapAsync<NetworkAddress,
+	                std::function<Future<Reference<IConnection>>(NetworkAddress const&)>,
 	                Reference<IConnection>>(
 	    pickEndpoint,
 	    [=](NetworkAddress const& addr) -> Future<Reference<IConnection>> { return connect(addr, host); });

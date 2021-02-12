@@ -222,7 +222,8 @@ inline DiyFp GetCachedPower(int e, int* K) {
 	// int k = static_cast<int>(ceil((-61 - e) * 0.30102999566398114)) + 374;
 	double dk = (-61 - e) * 0.30102999566398114 + 347; // dk must be positive, so can do ceiling in positive
 	int k = static_cast<int>(dk);
-	if (dk - k > 0.0) k++;
+	if (dk - k > 0.0)
+		k++;
 
 	unsigned index = static_cast<unsigned>((k >> 3) + 1);
 	*K = -(-348 + static_cast<int>(index << 3)); // decimal exponent no need lookup table

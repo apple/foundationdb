@@ -35,21 +35,25 @@ public:
 	typedef std::vector<Standalone<StringRef>> Path;
 
 	virtual Future<Reference<DirectorySubspace>> create(
-	    Reference<Transaction> const& tr, Path const& path,
+	    Reference<Transaction> const& tr,
+	    Path const& path,
 	    Standalone<StringRef> const& layer = Standalone<StringRef>(),
 	    Optional<Standalone<StringRef>> const& prefix = Optional<Standalone<StringRef>>()) = 0;
 
-	virtual Future<Reference<DirectorySubspace>> open(Reference<Transaction> const& tr, Path const& path,
+	virtual Future<Reference<DirectorySubspace>> open(Reference<Transaction> const& tr,
+	                                                  Path const& path,
 	                                                  Standalone<StringRef> const& layer = Standalone<StringRef>()) = 0;
 	virtual Future<Reference<DirectorySubspace>> createOrOpen(
-	    Reference<Transaction> const& tr, Path const& path,
+	    Reference<Transaction> const& tr,
+	    Path const& path,
 	    Standalone<StringRef> const& layer = Standalone<StringRef>()) = 0;
 
 	virtual Future<bool> exists(Reference<Transaction> const& tr, Path const& path = Path()) = 0;
 	virtual Future<Standalone<VectorRef<StringRef>>> list(Reference<Transaction> const& tr,
 	                                                      Path const& path = Path()) = 0;
 
-	virtual Future<Reference<DirectorySubspace>> move(Reference<Transaction> const& tr, Path const& oldPath,
+	virtual Future<Reference<DirectorySubspace>> move(Reference<Transaction> const& tr,
+	                                                  Path const& oldPath,
 	                                                  Path const& newPath) = 0;
 	virtual Future<Reference<DirectorySubspace>> moveTo(Reference<Transaction> const& tr,
 	                                                    Path const& newAbsolutePath) = 0;

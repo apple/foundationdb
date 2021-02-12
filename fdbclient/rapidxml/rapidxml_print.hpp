@@ -34,7 +34,8 @@ namespace internal {
 // Copy characters from given range to given output iterator
 template <class OutIt, class Ch>
 inline OutIt copy_chars(const Ch* begin, const Ch* end, OutIt out) {
-	while (begin != end) *out++ = *begin++;
+	while (begin != end)
+		*out++ = *begin++;
 	return out;
 }
 
@@ -94,7 +95,8 @@ inline OutIt copy_and_expand_chars(const Ch* begin, const Ch* end, Ch noexpand, 
 // Fill given output iterator with repetitions of the same character
 template <class OutIt, class Ch>
 inline OutIt fill_chars(OutIt out, int n, Ch ch) {
-	for (int i = 0; i < n; ++i) *out++ = ch;
+	for (int i = 0; i < n; ++i)
+		*out++ = ch;
 	return out;
 }
 
@@ -102,7 +104,8 @@ inline OutIt fill_chars(OutIt out, int n, Ch ch) {
 template <class Ch, Ch ch>
 inline bool find_char(const Ch* begin, const Ch* end) {
 	while (begin != end)
-		if (*begin++ == ch) return true;
+		if (*begin++ == ch)
+			return true;
 	return false;
 }
 
@@ -133,13 +136,13 @@ inline OutIt print_attributes(OutIt out, const xml_node<Ch>* node, int flags) {
 			// Print attribute value using appropriate quote type
 			if (find_char<Ch, Ch('"')>(attribute->value(), attribute->value() + attribute->value_size())) {
 				*out = Ch('\''), ++out;
-				out = copy_and_expand_chars(attribute->value(), attribute->value() + attribute->value_size(), Ch('"'),
-				                            out);
+				out = copy_and_expand_chars(
+				    attribute->value(), attribute->value() + attribute->value_size(), Ch('"'), out);
 				*out = Ch('\''), ++out;
 			} else {
 				*out = Ch('"'), ++out;
-				out = copy_and_expand_chars(attribute->value(), attribute->value() + attribute->value_size(), Ch('\''),
-				                            out);
+				out = copy_and_expand_chars(
+				    attribute->value(), attribute->value() + attribute->value_size(), Ch('\''), out);
 				*out = Ch('"'), ++out;
 			}
 		}
@@ -151,7 +154,8 @@ inline OutIt print_attributes(OutIt out, const xml_node<Ch>* node, int flags) {
 template <class OutIt, class Ch>
 inline OutIt print_data_node(OutIt out, const xml_node<Ch>* node, int flags, int indent) {
 	assert(node->type() == node_data);
-	if (!(flags & print_no_indenting)) out = fill_chars(out, indent, Ch('\t'));
+	if (!(flags & print_no_indenting))
+		out = fill_chars(out, indent, Ch('\t'));
 	out = copy_and_expand_chars(node->value(), node->value() + node->value_size(), Ch(0), out);
 	return out;
 }
@@ -160,7 +164,8 @@ inline OutIt print_data_node(OutIt out, const xml_node<Ch>* node, int flags, int
 template <class OutIt, class Ch>
 inline OutIt print_cdata_node(OutIt out, const xml_node<Ch>* node, int flags, int indent) {
 	assert(node->type() == node_cdata);
-	if (!(flags & print_no_indenting)) out = fill_chars(out, indent, Ch('\t'));
+	if (!(flags & print_no_indenting))
+		out = fill_chars(out, indent, Ch('\t'));
 	*out = Ch('<');
 	++out;
 	*out = Ch('!');
@@ -195,7 +200,8 @@ inline OutIt print_element_node(OutIt out, const xml_node<Ch>* node, int flags, 
 	assert(node->type() == node_element);
 
 	// Print element name and attributes, if any
-	if (!(flags & print_no_indenting)) out = fill_chars(out, indent, Ch('\t'));
+	if (!(flags & print_no_indenting))
+		out = fill_chars(out, indent, Ch('\t'));
 	*out = Ch('<'), ++out;
 	out = copy_chars(node->name(), node->name() + node->name_size(), out);
 	out = print_attributes(out, node, flags);
@@ -219,9 +225,11 @@ inline OutIt print_element_node(OutIt out, const xml_node<Ch>* node, int flags, 
 			out = copy_and_expand_chars(child->value(), child->value() + child->value_size(), Ch(0), out);
 		} else {
 			// Print all children with full indenting
-			if (!(flags & print_no_indenting)) *out = Ch('\n'), ++out;
+			if (!(flags & print_no_indenting))
+				*out = Ch('\n'), ++out;
 			out = print_children(out, node, flags, indent + 1);
-			if (!(flags & print_no_indenting)) out = fill_chars(out, indent, Ch('\t'));
+			if (!(flags & print_no_indenting))
+				out = fill_chars(out, indent, Ch('\t'));
 		}
 
 		// Print node end
@@ -237,7 +245,8 @@ inline OutIt print_element_node(OutIt out, const xml_node<Ch>* node, int flags, 
 template <class OutIt, class Ch>
 inline OutIt print_declaration_node(OutIt out, const xml_node<Ch>* node, int flags, int indent) {
 	// Print declaration start
-	if (!(flags & print_no_indenting)) out = fill_chars(out, indent, Ch('\t'));
+	if (!(flags & print_no_indenting))
+		out = fill_chars(out, indent, Ch('\t'));
 	*out = Ch('<'), ++out;
 	*out = Ch('?'), ++out;
 	*out = Ch('x'), ++out;
@@ -258,7 +267,8 @@ inline OutIt print_declaration_node(OutIt out, const xml_node<Ch>* node, int fla
 template <class OutIt, class Ch>
 inline OutIt print_comment_node(OutIt out, const xml_node<Ch>* node, int flags, int indent) {
 	assert(node->type() == node_comment);
-	if (!(flags & print_no_indenting)) out = fill_chars(out, indent, Ch('\t'));
+	if (!(flags & print_no_indenting))
+		out = fill_chars(out, indent, Ch('\t'));
 	*out = Ch('<'), ++out;
 	*out = Ch('!'), ++out;
 	*out = Ch('-'), ++out;
@@ -274,7 +284,8 @@ inline OutIt print_comment_node(OutIt out, const xml_node<Ch>* node, int flags, 
 template <class OutIt, class Ch>
 inline OutIt print_doctype_node(OutIt out, const xml_node<Ch>* node, int flags, int indent) {
 	assert(node->type() == node_doctype);
-	if (!(flags & print_no_indenting)) out = fill_chars(out, indent, Ch('\t'));
+	if (!(flags & print_no_indenting))
+		out = fill_chars(out, indent, Ch('\t'));
 	*out = Ch('<'), ++out;
 	*out = Ch('!'), ++out;
 	*out = Ch('D'), ++out;
@@ -294,7 +305,8 @@ inline OutIt print_doctype_node(OutIt out, const xml_node<Ch>* node, int flags, 
 template <class OutIt, class Ch>
 inline OutIt print_pi_node(OutIt out, const xml_node<Ch>* node, int flags, int indent) {
 	assert(node->type() == node_pi);
-	if (!(flags & print_no_indenting)) out = fill_chars(out, indent, Ch('\t'));
+	if (!(flags & print_no_indenting))
+		out = fill_chars(out, indent, Ch('\t'));
 	*out = Ch('<'), ++out;
 	*out = Ch('?'), ++out;
 	out = copy_chars(node->name(), node->name() + node->name_size(), out);
@@ -358,7 +370,8 @@ inline OutIt print_node(OutIt out, const xml_node<Ch>* node, int flags, int inde
 	}
 
 	// If indenting not disabled, add line break after node
-	if (!(flags & print_no_indenting)) *out = Ch('\n'), ++out;
+	if (!(flags & print_no_indenting))
+		*out = Ch('\n'), ++out;
 
 	// Return modified iterator
 	return out;

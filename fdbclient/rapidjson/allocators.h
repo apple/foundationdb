@@ -123,7 +123,9 @@ public:
 	    \param chunkSize The size of memory chunk. The default is kDefaultChunkSize.
 	    \param baseAllocator The allocator for allocating memory chunks.
 	*/
-	MemoryPoolAllocator(void* buffer, size_t size, size_t chunkSize = kDefaultChunkCapacity,
+	MemoryPoolAllocator(void* buffer,
+	                    size_t size,
+	                    size_t chunkSize = kDefaultChunkCapacity,
 	                    BaseAllocator* baseAllocator = 0)
 	  : chunkHead_(0), chunk_capacity_(chunkSize), userBuffer_(buffer), baseAllocator_(baseAllocator),
 	    ownBaseAllocator_(0) {
@@ -150,7 +152,8 @@ public:
 			baseAllocator_->Free(chunkHead_);
 			chunkHead_ = next;
 		}
-		if (chunkHead_ && chunkHead_ == userBuffer_) chunkHead_->size = 0; // Clear user buffer
+		if (chunkHead_ && chunkHead_ == userBuffer_)
+			chunkHead_->size = 0; // Clear user buffer
 	}
 
 	//! Computes the total capacity of allocated memory chunks.
@@ -158,7 +161,8 @@ public:
 	 */
 	size_t Capacity() const {
 		size_t capacity = 0;
-		for (ChunkHeader* c = chunkHead_; c != 0; c = c->next) capacity += c->capacity;
+		for (ChunkHeader* c = chunkHead_; c != 0; c = c->next)
+			capacity += c->capacity;
 		return capacity;
 	}
 
@@ -167,17 +171,20 @@ public:
 	 */
 	size_t Size() const {
 		size_t size = 0;
-		for (ChunkHeader* c = chunkHead_; c != 0; c = c->next) size += c->size;
+		for (ChunkHeader* c = chunkHead_; c != 0; c = c->next)
+			size += c->size;
 		return size;
 	}
 
 	//! Allocates a memory block. (concept Allocator)
 	void* Malloc(size_t size) {
-		if (!size) return NULL;
+		if (!size)
+			return NULL;
 
 		size = RAPIDJSON_ALIGN(size);
 		if (chunkHead_ == 0 || chunkHead_->size + size > chunkHead_->capacity)
-			if (!AddChunk(chunk_capacity_ > size ? chunk_capacity_ : size)) return NULL;
+			if (!AddChunk(chunk_capacity_ > size ? chunk_capacity_ : size))
+				return NULL;
 
 		void* buffer = reinterpret_cast<char*>(chunkHead_) + RAPIDJSON_ALIGN(sizeof(ChunkHeader)) + chunkHead_->size;
 		chunkHead_->size += size;
@@ -186,15 +193,18 @@ public:
 
 	//! Resizes a memory block (concept Allocator)
 	void* Realloc(void* originalPtr, size_t originalSize, size_t newSize) {
-		if (originalPtr == 0) return Malloc(newSize);
+		if (originalPtr == 0)
+			return Malloc(newSize);
 
-		if (newSize == 0) return NULL;
+		if (newSize == 0)
+			return NULL;
 
 		originalSize = RAPIDJSON_ALIGN(originalSize);
 		newSize = RAPIDJSON_ALIGN(newSize);
 
 		// Do not shrink if new size is smaller than original
-		if (originalSize >= newSize) return originalPtr;
+		if (originalSize >= newSize)
+			return originalPtr;
 
 		// Simply expand it if it is the last allocation and there is sufficient space
 		if (originalPtr == reinterpret_cast<char*>(chunkHead_) + RAPIDJSON_ALIGN(sizeof(ChunkHeader)) +
@@ -208,7 +218,8 @@ public:
 
 		// Realloc process: allocate and copy memory, do not free original buffer.
 		if (void* newBuffer = Malloc(newSize)) {
-			if (originalSize) std::memcpy(newBuffer, originalPtr, originalSize);
+			if (originalSize)
+				std::memcpy(newBuffer, originalPtr, originalSize);
 			return newBuffer;
 		} else
 			return NULL;
@@ -228,7 +239,8 @@ private:
 	    \return true if success.
 	*/
 	bool AddChunk(size_t capacity) {
-		if (!baseAllocator_) ownBaseAllocator_ = baseAllocator_ = RAPIDJSON_NEW(BaseAllocator());
+		if (!baseAllocator_)
+			ownBaseAllocator_ = baseAllocator_ = RAPIDJSON_NEW(BaseAllocator());
 		if (ChunkHeader* chunk = reinterpret_cast<ChunkHeader*>(
 		        baseAllocator_->Malloc(RAPIDJSON_ALIGN(sizeof(ChunkHeader)) + capacity))) {
 			chunk->capacity = capacity;

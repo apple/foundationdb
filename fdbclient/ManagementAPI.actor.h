@@ -123,15 +123,18 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options);
 
 // All versions of changeConfig apply the given set of configuration tokens to the database, and return a
 // ConfigurationResult (or error).
-Future<ConfigurationResult::Type> changeConfig(Database const& cx, std::string const& configMode,
+Future<ConfigurationResult::Type> changeConfig(Database const& cx,
+                                               std::string const& configMode,
                                                bool force); // Accepts tokens separated by spaces in a single string
 
 ConfigureAutoResult parseConfig(StatusObject const& status);
-Future<ConfigurationResult::Type> changeConfig(Database const& cx, std::vector<StringRef> const& modes,
+Future<ConfigurationResult::Type> changeConfig(Database const& cx,
+                                               std::vector<StringRef> const& modes,
                                                Optional<ConfigureAutoResult> const& conf,
                                                bool force); // Accepts a vector of configuration tokens
 ACTOR Future<ConfigurationResult::Type> changeConfig(
-    Database cx, std::map<std::string, std::string> m,
+    Database cx,
+    std::map<std::string, std::string> m,
     bool force); // Accepts a full configuration in key/value format (from buildConfiguration)
 
 ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx);
@@ -172,7 +175,8 @@ ACTOR Future<vector<AddressExclusion>> getExcludedServers(Database cx);
 // Check for the given, previously excluded servers to be evacuated (no longer used for state).  If waitForExclusion is
 // true, this actor returns once it is safe to shut down all such machines without impacting fault tolerance, until and
 // unless any of them are explicitly included with includeServers()
-ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vector<AddressExclusion> servers,
+ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx,
+                                                                vector<AddressExclusion> servers,
                                                                 bool waitForAllExcluded);
 
 // Gets a list of all workers in the cluster (excluding testers)
@@ -209,8 +213,12 @@ ACTOR Future<Void> waitForPrimaryDC(Database cx, StringRef dcId);
 ACTOR Future<std::vector<NetworkAddress>> getCoordinators(Database cx);
 
 void schemaCoverage(std::string const& spath, bool covered = true);
-bool schemaMatch(json_spirit::mValue const& schema, json_spirit::mValue const& result, std::string& errorStr,
-                 Severity sev = SevError, bool checkCoverage = false, std::string path = std::string(),
+bool schemaMatch(json_spirit::mValue const& schema,
+                 json_spirit::mValue const& result,
+                 std::string& errorStr,
+                 Severity sev = SevError,
+                 bool checkCoverage = false,
+                 std::string path = std::string(),
                  std::string schema_path = std::string());
 
 // execute payload in 'snapCmd' on all the coordinators, TLogs and

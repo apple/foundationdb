@@ -62,7 +62,8 @@ private:
 		return self->dedup(s);
 	}
 	bool dedup(Seq s) {
-		if (s != ready.get() || started) return false;
+		if (s != ready.get() || started)
+			return false;
 		started = true;
 		return true;
 	}

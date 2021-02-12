@@ -58,9 +58,14 @@ void seedShardServers(Arena& trArena, CommitTransactionRef& tr, vector<StorageSe
 // Called by the master server to write the very first transaction to the database
 // establishing a set of shard servers and all invariants of the systemKeys.
 
-ACTOR Future<Void> moveKeys(Database occ, KeyRange keys, vector<UID> destinationTeam, vector<UID> healthyDestinations,
-                            MoveKeysLock lock, Promise<Void> dataMovementComplete,
-                            FlowLock* startMoveKeysParallelismLock, FlowLock* finishMoveKeysParallelismLock,
+ACTOR Future<Void> moveKeys(Database occ,
+                            KeyRange keys,
+                            vector<UID> destinationTeam,
+                            vector<UID> healthyDestinations,
+                            MoveKeysLock lock,
+                            Promise<Void> dataMovementComplete,
+                            FlowLock* startMoveKeysParallelismLock,
+                            FlowLock* finishMoveKeysParallelismLock,
                             bool hasRemote,
                             UID relocationIntervalId); // for logging only
 // Eventually moves the given keys to the given destination team

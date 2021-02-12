@@ -73,13 +73,19 @@ void ExecCmdValueString::dbgPrint() {
 }
 
 #if defined(_WIN32) || defined(__APPLE__)
-ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync,
+ACTOR Future<int> spawnProcess(std::string binPath,
+                               std::vector<std::string> paramList,
+                               double maxWaitTime,
+                               bool isSync,
                                double maxSimDelayTime) {
 	wait(delay(0.0));
 	return 0;
 }
 #else
-ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync,
+ACTOR Future<int> spawnProcess(std::string binPath,
+                               std::vector<std::string> paramList,
+                               double maxWaitTime,
+                               bool isSync,
                                double maxSimDelayTime) {
 	state std::string argsString;
 	for (auto const& elem : paramList) {
@@ -89,8 +95,8 @@ ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> par
 
 	state int err = 0;
 	state double runTime = 0;
-	state boost::process::child c(binPath, boost::process::args(paramList),
-	                              boost::process::std_err > boost::process::null);
+	state boost::process::child c(
+	    binPath, boost::process::args(paramList), boost::process::std_err > boost::process::null);
 
 	// for async calls in simulator, always delay by a deterinistic amount of time and do the call
 	// synchronously, otherwise the predictability of the simulator breaks

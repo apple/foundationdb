@@ -71,7 +71,8 @@ struct PingWorkload : TestWorkload {
 
 	virtual std::string description() { return "PingWorkload"; }
 	virtual Future<Void> setup(Database const& cx) {
-		if (pingWorkers || !registerInterface) return Void();
+		if (pingWorkers || !registerInterface)
+			return Void();
 		return persistInterface(this, cx);
 	}
 	virtual Future<Void> start(Database const& cx) {
@@ -79,7 +80,8 @@ struct PingWorkload : TestWorkload {
 		if (pingWorkers) {
 			clients.push_back(workerPinger(this));
 		} else if (broadcastTest) {
-			if (parallelBroadcast || !clientId) clients.push_back(payloadSender(this, cx));
+			if (parallelBroadcast || !clientId)
+				clients.push_back(payloadSender(this, cx));
 			// clients.push_back( payloadPinger( this, cx ) );
 		} else if (!broadcastTest) {
 			clients.push_back(pinger(this, cx));
@@ -105,7 +107,8 @@ struct PingWorkload : TestWorkload {
 			try {
 				Optional<Value> val = wait(tr.get(StringRef(format("Ping/Client/%d", self->clientId))));
 				if (val.present()) {
-					if (val.get() != serializedInterface) throw operation_failed();
+					if (val.get() != serializedInterface)
+						throw operation_failed();
 					break;
 				}
 				tr.set(format("Ping/Client/%d", self->clientId), serializedInterface);
@@ -160,16 +163,19 @@ struct PingWorkload : TestWorkload {
 			self->totalMessageLatency += elapsed;
 			self->maxMessageLatency += std::max(0.0, elapsed * 1000.0 - self->maxMessageLatency.getValue());
 			++self->messages;
-			if (self->logging) TraceEvent("Ping").detail("Elapsed", elapsed).detail("To", addr);
+			if (self->logging)
+				TraceEvent("Ping").detail("Elapsed", elapsed).detail("To", addr);
 		}
 	}
 
 	ACTOR Future<Void> pinger(PingWorkload* self, Database cx) {
 		vector<PingWorkloadInterface> testers = wait(self->fetchInterfaces(self, cx));
 		vector<RequestStream<LoadedPingRequest>> peers;
-		for (int i = 0; i < testers.size(); i++) peers.push_back(testers[i].payloadPing);
+		for (int i = 0; i < testers.size(); i++)
+			peers.push_back(testers[i].payloadPing);
 		vector<Future<Void>> pingers;
-		for (int i = 0; i < self->actorCount; i++) pingers.push_back(self->pinger(self, peers));
+		for (int i = 0; i < self->actorCount; i++)
+			pingers.push_back(self->pinger(self, peers));
 		wait(waitForAll(pingers));
 		return Void();
 	}
@@ -177,9 +183,11 @@ struct PingWorkload : TestWorkload {
 	ACTOR Future<Void> workerPinger(PingWorkload* self) {
 		vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 		vector<RequestStream<LoadedPingRequest>> peers;
-		for (int i = 0; i < workers.size(); i++) peers.push_back(workers[i].interf.debugPing);
+		for (int i = 0; i < workers.size(); i++)
+			peers.push_back(workers[i].interf.debugPing);
 		vector<Future<Void>> pingers;
-		for (int i = 0; i < self->actorCount; i++) pingers.push_back(self->pinger(self, peers));
+		for (int i = 0; i < self->actorCount; i++)
+			pingers.push_back(self->pinger(self, peers));
 		wait(waitForAll(pingers));
 		return Void();
 	}
@@ -202,10 +210,12 @@ struct PingWorkload : TestWorkload {
 
 		if (self->workerBroadcast) {
 			vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
-			for (int i = 0; i < workers.size(); i++) endpoints.push_back(workers[i].interf.debugPing);
+			for (int i = 0; i < workers.size(); i++)
+				endpoints.push_back(workers[i].interf.debugPing);
 		} else {
 			vector<PingWorkloadInterface> peers = wait(self->fetchInterfaces(self, cx));
-			for (int i = 0; i < peers.size(); i++) endpoints.push_back(peers[i].payloadPing);
+			for (int i = 0; i < peers.size(); i++)
+				endpoints.push_back(peers[i].payloadPing);
 		}
 
 		// std::random_shuffle( peers.begin(), peers.end() );

@@ -241,11 +241,16 @@ ecb_function_ int ecb_ctz32(uint32_t x) {
 	r += !!(x & 0xff00ff00) << 3;
 	r += !!(x & 0xffff0000) << 4;
 #else
-	if (x & 0xaaaaaaaa) r += 1;
-	if (x & 0xcccccccc) r += 2;
-	if (x & 0xf0f0f0f0) r += 4;
-	if (x & 0xff00ff00) r += 8;
-	if (x & 0xffff0000) r += 16;
+	if (x & 0xaaaaaaaa)
+		r += 1;
+	if (x & 0xcccccccc)
+		r += 2;
+	if (x & 0xf0f0f0f0)
+		r += 4;
+	if (x & 0xff00ff00)
+		r += 8;
+	if (x & 0xffff0000)
+		r += 16;
 #endif
 
 	return r;
@@ -380,7 +385,8 @@ ecb_function_ void ecb_unreachable(void) {}
 /* try to tell the compiler that some condition is definitely true */
 #define ecb_assume(cond)                                                                                               \
 	do {                                                                                                               \
-		if (!(cond)) ecb_unreachable();                                                                                \
+		if (!(cond))                                                                                                   \
+			ecb_unreachable();                                                                                         \
 	} while (0)
 
 ecb_function_ unsigned char ecb_byteorder_helper(void) ecb_const;

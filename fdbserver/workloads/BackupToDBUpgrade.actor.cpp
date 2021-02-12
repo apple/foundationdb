@@ -56,17 +56,17 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			// Add backup ranges
 			for (int rangeLoop = 0; rangeLoop < backupRangesCount; rangeLoop++) {
 				// Get a random range of a random sizes
-				beginRange =
-				    KeyRef(backupRanges.arena(), deterministicRandom()->randomAlphaNumeric(
-				                                     deterministicRandom()->randomInt(1, backupRangeLengthMax + 1)));
-				endRange =
-				    KeyRef(backupRanges.arena(), deterministicRandom()->randomAlphaNumeric(
-				                                     deterministicRandom()->randomInt(1, backupRangeLengthMax + 1)));
+				beginRange = KeyRef(backupRanges.arena(),
+				                    deterministicRandom()->randomAlphaNumeric(
+				                        deterministicRandom()->randomInt(1, backupRangeLengthMax + 1)));
+				endRange = KeyRef(backupRanges.arena(),
+				                  deterministicRandom()->randomAlphaNumeric(
+				                      deterministicRandom()->randomInt(1, backupRangeLengthMax + 1)));
 
 				// Add the range to the array
-				backupRanges.push_back_deep(backupRanges.arena(), (beginRange < endRange)
-				                                                      ? KeyRangeRef(beginRange, endRange)
-				                                                      : KeyRangeRef(endRange, beginRange));
+				backupRanges.push_back_deep(backupRanges.arena(),
+				                            (beginRange < endRange) ? KeyRangeRef(beginRange, endRange)
+				                                                    : KeyRangeRef(endRange, beginRange));
 
 				// Track the added range
 				TraceEvent("DRU_BackupRange")
@@ -84,12 +84,14 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 	virtual std::string description() { return "BackupToDBUpgrade"; }
 
 	virtual Future<Void> setup(Database const& cx) {
-		if (clientId != 0) return Void();
+		if (clientId != 0)
+			return Void();
 		return _setup(cx, this);
 	}
 
 	virtual Future<Void> start(Database const& cx) {
-		if (clientId != 0) return Void();
+		if (clientId != 0)
+			return Void();
 		return _start(cx, this);
 	}
 
@@ -97,8 +99,11 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 	virtual void getMetrics(vector<PerfMetric>& m) {}
 
-	ACTOR static Future<Void> doBackup(BackupToDBUpgradeWorkload* self, DatabaseBackupAgent* backupAgent, Database cx,
-	                                   Key tag, Standalone<VectorRef<KeyRangeRef>> backupRanges) {
+	ACTOR static Future<Void> doBackup(BackupToDBUpgradeWorkload* self,
+	                                   DatabaseBackupAgent* backupAgent,
+	                                   Database cx,
+	                                   Key tag,
+	                                   Standalone<VectorRef<KeyRangeRef>> backupRanges) {
 		try {
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->extraDB));
 			loop {
@@ -132,7 +137,10 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> checkData(Database cx, UID logUid, UID destUid, Key tag,
+	ACTOR static Future<Void> checkData(Database cx,
+	                                    UID logUid,
+	                                    UID destUid,
+	                                    Key tag,
 	                                    DatabaseBackupAgent* backupAgent) {
 		state Key backupAgentKey = uidPrefixKey(logRangesRange.begin, logUid);
 		state Key backupLogValuesKey = uidPrefixKey(backupLogKeys.begin, destUid);
@@ -202,7 +210,8 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 				// Error if the system keyspace for the backup tag is not empty
 				if (agentValues.size() > 0) {
 					displaySystemKeys++;
-					printf("BackupCorrectnessLeftoverMutationKeys: (%d) %s\n", agentValues.size(),
+					printf("BackupCorrectnessLeftoverMutationKeys: (%d) %s\n",
+					       agentValues.size(),
 					       printable(backupAgentKey).c_str());
 					TraceEvent(SevError, "BackupCorrectnessLeftoverMutationKeys")
 					    .detail("BackupTag", printable(tag))
@@ -212,7 +221,8 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 						TraceEvent("DRU_LeftoverKey")
 						    .detail("Key", printable(StringRef(s.key.toString())))
 						    .detail("Value", printable(StringRef(s.value.toString())));
-						printf("   Key: %-50s  Value: %s\n", printable(StringRef(s.key.toString())).c_str(),
+						printf("   Key: %-50s  Value: %s\n",
+						       printable(StringRef(s.key.toString())).c_str(),
 						       printable(StringRef(s.value.toString())).c_str());
 					}
 				} else {
@@ -238,7 +248,8 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					// Error if the log/mutation keyspace for the backup tag is not empty
 					if (logValues.size() > 0) {
 						displaySystemKeys++;
-						printf("BackupCorrectnessLeftoverLogKeys: (%d) %s\n", logValues.size(),
+						printf("BackupCorrectnessLeftoverLogKeys: (%d) %s\n",
+						       logValues.size(),
 						       printable(backupLogValuesKey).c_str());
 						TraceEvent(SevError, "BackupCorrectnessLeftoverLogKeys")
 						    .detail("BackupTag", printable(tag))
@@ -249,7 +260,8 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 							TraceEvent("DRU_LeftoverKey")
 							    .detail("Key", printable(StringRef(s.key.toString())))
 							    .detail("Value", printable(StringRef(s.value.toString())));
-							printf("   Key: %-50s  Value: %s\n", printable(StringRef(s.key.toString())).c_str(),
+							printf("   Key: %-50s  Value: %s\n",
+							       printable(StringRef(s.key.toString())).c_str(),
 							       printable(StringRef(s.value.toString())).c_str());
 						}
 					} else {
@@ -291,8 +303,10 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> diffRanges(Standalone<VectorRef<KeyRangeRef>> ranges, StringRef backupPrefix,
-	                                     Database src, Database dest) {
+	ACTOR static Future<Void> diffRanges(Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                     StringRef backupPrefix,
+	                                     Database src,
+	                                     Database dest) {
 		state int rangeIndex;
 		for (rangeIndex = 0; rangeIndex < ranges.size(); ++rangeIndex) {
 			state KeyRangeRef range = ranges[rangeIndex];
@@ -477,18 +491,20 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 			state Standalone<VectorRef<KeyRangeRef>> restoreRanges;
 			for (auto r : prevBackupRanges) {
-				restoreRanges.push_back_deep(restoreRanges.arena(), KeyRangeRef(r.begin.withPrefix(self->backupPrefix),
-				                                                                r.end.withPrefix(self->backupPrefix)));
+				restoreRanges.push_back_deep(
+				    restoreRanges.arena(),
+				    KeyRangeRef(r.begin.withPrefix(self->backupPrefix), r.end.withPrefix(self->backupPrefix)));
 			}
 
 			// start restoring db
 			try {
 				TraceEvent("DRU_RestoreDb").detail("RestoreTag", printable(self->restoreTag));
-				wait(restoreAgent.submitBackup(cx, self->restoreTag, restoreRanges, true, StringRef(),
-				                               self->backupPrefix));
+				wait(restoreAgent.submitBackup(
+				    cx, self->restoreTag, restoreRanges, true, StringRef(), self->backupPrefix));
 			} catch (Error& e) {
 				TraceEvent("DRU_RestoreSubmitBackupError").error(e).detail("Tag", printable(self->restoreTag));
-				if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate) throw;
+				if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
+					throw;
 			}
 
 			wait(success(restoreAgent.waitBackup(cx, self->restoreTag)));

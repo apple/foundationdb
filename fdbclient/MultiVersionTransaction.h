@@ -59,12 +59,16 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 
 	// Database
 	fdb_error_t (*databaseCreateTransaction)(FDBDatabase* database, FDBTransaction** tr);
-	fdb_error_t (*databaseSetOption)(FDBDatabase* database, FDBDatabaseOptions::Option option, uint8_t const* value,
+	fdb_error_t (*databaseSetOption)(FDBDatabase* database,
+	                                 FDBDatabaseOptions::Option option,
+	                                 uint8_t const* value,
 	                                 int valueLength);
 	void (*databaseDestroy)(FDBDatabase* database);
 
 	// Transaction
-	fdb_error_t (*transactionSetOption)(FDBTransaction* tr, FDBTransactionOptions::Option option, uint8_t const* value,
+	fdb_error_t (*transactionSetOption)(FDBTransaction* tr,
+	                                    FDBTransactionOptions::Option option,
+	                                    uint8_t const* value,
 	                                    int valueLength);
 	void (*transactionDestroy)(FDBTransaction* tr);
 
@@ -72,23 +76,47 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	FDBFuture* (*transactionGetReadVersion)(FDBTransaction* tr);
 
 	FDBFuture* (*transactionGet)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength, fdb_bool_t snapshot);
-	FDBFuture* (*transactionGetKey)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength, fdb_bool_t orEqual,
-	                                int offset, fdb_bool_t snapshot);
+	FDBFuture* (*transactionGetKey)(FDBTransaction* tr,
+	                                uint8_t const* keyName,
+	                                int keyNameLength,
+	                                fdb_bool_t orEqual,
+	                                int offset,
+	                                fdb_bool_t snapshot);
 	FDBFuture* (*transactionGetAddressesForKey)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength);
-	FDBFuture* (*transactionGetRange)(FDBTransaction* tr, uint8_t const* beginKeyName, int beginKeyNameLength,
-	                                  fdb_bool_t beginOrEqual, int beginOffset, uint8_t const* endKeyName,
-	                                  int endKeyNameLength, fdb_bool_t endOrEqual, int endOffset, int limit,
-	                                  int targetBytes, FDBStreamingModes::Option mode, int iteration,
-	                                  fdb_bool_t snapshot, fdb_bool_t reverse);
+	FDBFuture* (*transactionGetRange)(FDBTransaction* tr,
+	                                  uint8_t const* beginKeyName,
+	                                  int beginKeyNameLength,
+	                                  fdb_bool_t beginOrEqual,
+	                                  int beginOffset,
+	                                  uint8_t const* endKeyName,
+	                                  int endKeyNameLength,
+	                                  fdb_bool_t endOrEqual,
+	                                  int endOffset,
+	                                  int limit,
+	                                  int targetBytes,
+	                                  FDBStreamingModes::Option mode,
+	                                  int iteration,
+	                                  fdb_bool_t snapshot,
+	                                  fdb_bool_t reverse);
 	FDBFuture* (*transactionGetVersionstamp)(FDBTransaction* tr);
 
-	void (*transactionSet)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength, uint8_t const* value,
+	void (*transactionSet)(FDBTransaction* tr,
+	                       uint8_t const* keyName,
+	                       int keyNameLength,
+	                       uint8_t const* value,
 	                       int valueLength);
 	void (*transactionClear)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength);
-	void (*transactionClearRange)(FDBTransaction* tr, uint8_t const* beginKeyName, int beginKeyNameLength,
-	                              uint8_t const* endKeyName, int endKeyNameLength);
-	void (*transactionAtomicOp)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength, uint8_t const* param,
-	                            int paramLength, FDBMutationTypes::Option operationType);
+	void (*transactionClearRange)(FDBTransaction* tr,
+	                              uint8_t const* beginKeyName,
+	                              int beginKeyNameLength,
+	                              uint8_t const* endKeyName,
+	                              int endKeyNameLength);
+	void (*transactionAtomicOp)(FDBTransaction* tr,
+	                            uint8_t const* keyName,
+	                            int keyNameLength,
+	                            uint8_t const* param,
+	                            int paramLength,
+	                            FDBMutationTypes::Option operationType);
 
 	FDBFuture* (*transactionCommit)(FDBTransaction* tr);
 	fdb_error_t (*transactionGetCommittedVersion)(FDBTransaction* tr, int64_t* outVersion);
@@ -98,8 +126,11 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	void (*transactionReset)(FDBTransaction* tr);
 	void (*transactionCancel)(FDBTransaction* tr);
 
-	fdb_error_t (*transactionAddConflictRange)(FDBTransaction* tr, uint8_t const* beginKeyName, int beginKeyNameLength,
-	                                           uint8_t const* endKeyName, int endKeyNameLength,
+	fdb_error_t (*transactionAddConflictRange)(FDBTransaction* tr,
+	                                           uint8_t const* beginKeyName,
+	                                           int beginKeyNameLength,
+	                                           uint8_t const* endKeyName,
+	                                           int endKeyNameLength,
 	                                           FDBConflictRangeTypes::Option);
 
 	// Future
@@ -132,15 +163,24 @@ public:
 
 	ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot = false) override;
 	ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false) override;
-	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin, const KeySelectorRef& end, int limit,
-	                                                  bool snapshot = false, bool reverse = false) override;
-	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin, const KeySelectorRef& end,
-	                                                  GetRangeLimits limits, bool snapshot = false,
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin,
+	                                                  const KeySelectorRef& end,
+	                                                  int limit,
+	                                                  bool snapshot = false,
 	                                                  bool reverse = false) override;
-	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys, int limit, bool snapshot = false,
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin,
+	                                                  const KeySelectorRef& end,
+	                                                  GetRangeLimits limits,
+	                                                  bool snapshot = false,
 	                                                  bool reverse = false) override;
-	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys, GetRangeLimits limits,
-	                                                  bool snapshot = false, bool reverse = false) override;
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys,
+	                                                  int limit,
+	                                                  bool snapshot = false,
+	                                                  bool reverse = false) override;
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys,
+	                                                  GetRangeLimits limits,
+	                                                  bool snapshot = false,
+	                                                  bool reverse = false) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 
@@ -240,15 +280,24 @@ public:
 
 	ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot = false) override;
 	ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false) override;
-	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin, const KeySelectorRef& end, int limit,
-	                                                  bool snapshot = false, bool reverse = false) override;
-	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin, const KeySelectorRef& end,
-	                                                  GetRangeLimits limits, bool snapshot = false,
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin,
+	                                                  const KeySelectorRef& end,
+	                                                  int limit,
+	                                                  bool snapshot = false,
 	                                                  bool reverse = false) override;
-	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys, int limit, bool snapshot = false,
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin,
+	                                                  const KeySelectorRef& end,
+	                                                  GetRangeLimits limits,
+	                                                  bool snapshot = false,
 	                                                  bool reverse = false) override;
-	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys, GetRangeLimits limits,
-	                                                  bool snapshot = false, bool reverse = false) override;
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys,
+	                                                  int limit,
+	                                                  bool snapshot = false,
+	                                                  bool reverse = false) override;
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys,
+	                                                  GetRangeLimits limits,
+	                                                  bool snapshot = false,
+	                                                  bool reverse = false) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 
@@ -315,7 +364,9 @@ class MultiVersionApi;
 
 class MultiVersionDatabase : public IDatabase, ThreadSafeReferenceCounted<MultiVersionDatabase> {
 public:
-	MultiVersionDatabase(MultiVersionApi* api, std::string clusterFilePath, Reference<IDatabase> db,
+	MultiVersionDatabase(MultiVersionApi* api,
+	                     std::string clusterFilePath,
+	                     Reference<IDatabase> db,
 	                     bool openConnectors = true);
 	~MultiVersionDatabase();
 

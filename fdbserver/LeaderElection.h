@@ -29,8 +29,10 @@
 class ServerCoordinators;
 
 template <class LeaderInterface>
-Future<Void> tryBecomeLeader(ServerCoordinators const& coordinators, LeaderInterface const& proposedInterface,
-                             Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader, bool hasConnected,
+Future<Void> tryBecomeLeader(ServerCoordinators const& coordinators,
+                             LeaderInterface const& proposedInterface,
+                             Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader,
+                             bool hasConnected,
                              Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo);
 
 // Participates in the given coordination group's leader election process, nominating the given
@@ -47,20 +49,26 @@ Future<Void> changeLeaderCoordinators(ServerCoordinators const& coordinators, Va
 
 #pragma region Implementation
 
-Future<Void> tryBecomeLeaderInternal(ServerCoordinators const& coordinators, Value const& proposedSerializedInterface,
-                                     Reference<AsyncVar<Value>> const& outSerializedLeader, bool const& hasConnected,
+Future<Void> tryBecomeLeaderInternal(ServerCoordinators const& coordinators,
+                                     Value const& proposedSerializedInterface,
+                                     Reference<AsyncVar<Value>> const& outSerializedLeader,
+                                     bool const& hasConnected,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo);
 
 template <class LeaderInterface>
-Future<Void> tryBecomeLeader(ServerCoordinators const& coordinators, LeaderInterface const& proposedInterface,
-                             Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader, bool hasConnected,
+Future<Void> tryBecomeLeader(ServerCoordinators const& coordinators,
+                             LeaderInterface const& proposedInterface,
+                             Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader,
+                             bool hasConnected,
                              Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo) {
 	Reference<AsyncVar<Value>> serializedInfo(new AsyncVar<Value>);
 	Future<Void> m = tryBecomeLeaderInternal(coordinators,
 	                                         FLOW_KNOBS->USE_OBJECT_SERIALIZER
 	                                             ? ObjectWriter::toValue(proposedInterface, IncludeVersion())
 	                                             : BinaryWriter::toValue(proposedInterface, IncludeVersion()),
-	                                         serializedInfo, hasConnected, asyncPriorityInfo);
+	                                         serializedInfo,
+	                                         hasConnected,
+	                                         asyncPriorityInfo);
 	return m || asyncDeserialize(serializedInfo, outKnownLeader, FLOW_KNOBS->USE_OBJECT_SERIALIZER);
 }
 

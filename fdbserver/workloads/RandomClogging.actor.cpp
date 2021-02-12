@@ -49,7 +49,8 @@ struct RandomCloggingWorkload : TestWorkload {
 		if (&g_simulator == g_network && enabled)
 			return timeout(
 			    reportErrors(swizzleClog ? swizzleClogClient(this) : clogClient(this), "RandomCloggingError"),
-			    testDuration, Void());
+			    testDuration,
+			    Void());
 		else
 			return Void();
 	}
@@ -64,7 +65,8 @@ struct RandomCloggingWorkload : TestWorkload {
 	void clogRandomPair(double t) {
 		auto m1 = deterministicRandom()->randomChoice(g_simulator.getAllProcesses());
 		auto m2 = deterministicRandom()->randomChoice(g_simulator.getAllProcesses());
-		if (m1->address.ip != m2->address.ip) g_simulator.clogPair(m1->address.ip, m2->address.ip, t);
+		if (m1->address.ip != m2->address.ip)
+			g_simulator.clogPair(m1->address.ip, m2->address.ip, t);
 	}
 
 	ACTOR Future<Void> clogClient(RandomCloggingWorkload* self) {
@@ -101,10 +103,12 @@ struct RandomCloggingWorkload : TestWorkload {
 					starts.push_back(deterministicRandom()->random01() * t / 2);
 					ends.push_back(deterministicRandom()->random01() * t / 2 + t / 2);
 				}
-			for (int i = 0; i < 10; i++) self->clogRandomPair(t);
+			for (int i = 0; i < 10; i++)
+				self->clogRandomPair(t);
 
 			vector<Future<Void>> cloggers;
-			for (int i = 0; i < swizzled.size(); i++) self->doClog(swizzled[i], ends[i] - starts[i], starts[i]);
+			for (int i = 0; i < swizzled.size(); i++)
+				self->doClog(swizzled[i], ends[i] - starts[i], starts[i]);
 		}
 	}
 };

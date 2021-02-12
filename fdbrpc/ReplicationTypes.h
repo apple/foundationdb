@@ -76,20 +76,20 @@ struct KeyValueMap : public ReferenceCounted<KeyValueMap> {
 	int getMemoryUsed() const { return sizeof(_keyvaluearray) + (_keyvaluearray.size() * sizeof(AttribRecord)); }
 
 	Optional<AttribValue> getValue(AttribKey const& indexKey) const {
-		auto itKey = std::lower_bound(_keyvaluearray.begin(), _keyvaluearray.end(),
-		                              AttribRecord(indexKey, AttribValue(0)), compareKey);
+		auto itKey = std::lower_bound(
+		    _keyvaluearray.begin(), _keyvaluearray.end(), AttribRecord(indexKey, AttribValue(0)), compareKey);
 		return ((itKey != _keyvaluearray.end()) && (itKey->first == indexKey)) ? itKey->second
 		                                                                       : Optional<AttribValue>();
 	}
 
 	bool isPresent(AttribKey const& indexKey) const {
-		auto lower = std::lower_bound(_keyvaluearray.begin(), _keyvaluearray.end(),
-		                              AttribRecord(indexKey, AttribValue(0)), compareKey);
+		auto lower = std::lower_bound(
+		    _keyvaluearray.begin(), _keyvaluearray.end(), AttribRecord(indexKey, AttribValue(0)), compareKey);
 		return ((lower != _keyvaluearray.end()) && (lower->first == indexKey));
 	}
 	bool isPresent(AttribKey indexKey, AttribValue indexValue) const {
-		auto lower = std::lower_bound(_keyvaluearray.begin(), _keyvaluearray.end(), AttribRecord(indexKey, indexValue),
-		                              compareKeyValue);
+		auto lower = std::lower_bound(
+		    _keyvaluearray.begin(), _keyvaluearray.end(), AttribRecord(indexKey, indexValue), compareKeyValue);
 		return ((lower != _keyvaluearray.end()) && (lower->first == indexKey) && (lower->second == indexValue));
 	}
 

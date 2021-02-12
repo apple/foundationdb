@@ -82,7 +82,8 @@ class ThreadReturnPromise : NonCopyable {
 public:
 	ThreadReturnPromise() {}
 	~ThreadReturnPromise() {
-		if (promise.isValid()) sendError(broken_promise());
+		if (promise.isValid())
+			sendError(broken_promise());
 	}
 
 	Future<T> getFuture() { // Call only on the originating thread!

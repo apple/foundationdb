@@ -40,7 +40,8 @@ uint64_t getOption(VectorRef<KeyValueRef> options, Key key, uint64_t defaultValu
 int64_t getOption(VectorRef<KeyValueRef> options, Key key, int64_t defaultValue);
 double getOption(VectorRef<KeyValueRef> options, Key key, double defaultValue);
 bool getOption(VectorRef<KeyValueRef> options, Key key, bool defaultValue);
-vector<std::string> getOption(VectorRef<KeyValueRef> options, Key key,
+vector<std::string> getOption(VectorRef<KeyValueRef> options,
+                              Key key,
                               vector<std::string> defaultValue); // comma-separated strings
 
 struct WorkloadContext {
@@ -64,7 +65,8 @@ struct TestWorkload : NonCopyable, WorkloadContext {
 	explicit TestWorkload(WorkloadContext const& wcx) : WorkloadContext(wcx) {
 		bool runSetup = getOption(options, LiteralStringRef("runSetup"), true);
 		phases = TestWorkload::EXECUTION | TestWorkload::CHECK | TestWorkload::METRICS;
-		if (runSetup) phases |= TestWorkload::SETUP;
+		if (runSetup)
+			phases |= TestWorkload::SETUP;
 	}
 	virtual ~TestWorkload(){};
 	virtual std::string description() = 0;
@@ -105,7 +107,8 @@ struct KVWorkload : TestWorkload {
 struct IWorkloadFactory {
 	static TestWorkload* create(std::string const& name, WorkloadContext const& wcx) {
 		auto it = factories().find(name);
-		if (it == factories().end()) return NULL; // or throw?
+		if (it == factories().end())
+			return NULL; // or throw?
 		return it->second->create(wcx);
 	}
 	static std::map<std::string, IWorkloadFactory*>& factories() {
@@ -155,7 +158,11 @@ public:
 		simBackupAgents = ISimulator::NoBackupAgents;
 		simDrAgents = ISimulator::NoBackupAgents;
 	}
-	TestSpec(StringRef title, bool dump, bool clear, double startDelay = 30.0, bool useDB = true,
+	TestSpec(StringRef title,
+	         bool dump,
+	         bool clear,
+	         double startDelay = 30.0,
+	         bool useDB = true,
 	         double databasePingDelay = -1.0)
 	  : title(title), dumpAfterTest(dump), clearAfterTest(clear), startDelay(startDelay), useDB(useDB), timeout(600),
 	    databasePingDelay(databasePingDelay), runConsistencyCheck(g_network->isSimulated()),
@@ -163,7 +170,8 @@ public:
 	    simConnectionFailuresDisableDuration(0), simBackupAgents(ISimulator::NoBackupAgents),
 	    simDrAgents(ISimulator::NoBackupAgents) {
 		phases = TestWorkload::SETUP | TestWorkload::EXECUTION | TestWorkload::CHECK | TestWorkload::METRICS;
-		if (databasePingDelay < 0) databasePingDelay = g_network->isSimulated() ? 0.0 : 15.0;
+		if (databasePingDelay < 0)
+			databasePingDelay = g_network->isSimulated() ? 0.0 : 15.0;
 	}
 
 	Standalone<StringRef> title;
@@ -203,9 +211,13 @@ double testKeyToDouble(const KeyRef& p, const KeyRef& prefix);
 
 ACTOR Future<Void> databaseWarmer(Database cx);
 
-Future<Void> quietDatabase(Database const& cx, Reference<AsyncVar<struct ServerDBInfo>> const&, std::string phase,
-                           int64_t dataInFlightGate = 2e6, int64_t maxTLogQueueGate = 5e6,
-                           int64_t maxStorageServerQueueGate = 5e6, int64_t maxDataDistributionQueueSize = 0,
+Future<Void> quietDatabase(Database const& cx,
+                           Reference<AsyncVar<struct ServerDBInfo>> const&,
+                           std::string phase,
+                           int64_t dataInFlightGate = 2e6,
+                           int64_t maxTLogQueueGate = 5e6,
+                           int64_t maxStorageServerQueueGate = 5e6,
+                           int64_t maxDataDistributionQueueSize = 0,
                            int64_t maxPoppedVersionLag = 30e6);
 
 #include "flow/unactorcompiler.h"

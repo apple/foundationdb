@@ -33,8 +33,13 @@
 #include <tls.h>
 
 struct FDBLibTLSSession : ITLSSession, ReferenceCounted<FDBLibTLSSession> {
-	FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy, bool is_client, const char* servername,
-	                 TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx,
+	FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy,
+	                 bool is_client,
+	                 const char* servername,
+	                 TLSSendCallbackFunc send_func,
+	                 void* send_ctx,
+	                 TLSRecvCallbackFunc recv_func,
+	                 void* recv_ctx,
 	                 void* uid);
 	virtual ~FDBLibTLSSession();
 

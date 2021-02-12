@@ -125,7 +125,8 @@ struct MakoWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		// use all the clients to populate data
-		if (populateData) return _setup(cx, this);
+		if (populateData)
+			return _setup(cx, this);
 		return Void();
 	}
 
@@ -198,7 +199,8 @@ struct MakoWorkload : TestWorkload {
 		Key result = makeString(keyBytes);
 		char* data = reinterpret_cast<char*>(mutateString(result));
 		format((KEYPREFIX + "%0*d").c_str(), seqNumLen, ind).copy(data, KEYPREFIXLEN + seqNumLen);
-		for (int i = KEYPREFIXLEN + seqNumLen; i < keyBytes; ++i) data[i] = 'x';
+		for (int i = KEYPREFIXLEN + seqNumLen; i < keyBytes; ++i)
+			data[i] = 'x';
 		return result;
 	}
 
@@ -251,8 +253,15 @@ struct MakoWorkload : TestWorkload {
 		state Promise<double> loadTime;
 		state Promise<std::vector<std::pair<uint64_t, double>>> ratesAtKeyCounts;
 
-		wait(bulkSetup(cx, self, self->rowCount, loadTime, self->insertionCountsToMeasure.empty(), self->warmingDelay,
-		               self->maxInsertRate, self->insertionCountsToMeasure, ratesAtKeyCounts));
+		wait(bulkSetup(cx,
+		               self,
+		               self->rowCount,
+		               loadTime,
+		               self->insertionCountsToMeasure.empty(),
+		               self->warmingDelay,
+		               self->maxInsertRate,
+		               self->insertionCountsToMeasure,
+		               ratesAtKeyCounts));
 
 		// This is the setup time
 		self->loadTime = loadTime.getFuture().get();
@@ -279,7 +288,8 @@ struct MakoWorkload : TestWorkload {
 			clients.push_back(self->makoClient(cx, self, self->actorCountPerClient / self->transactionsPerSecond, c));
 		}
 
-		if (self->enableLogging) clients.push_back(tracePeriodically(self));
+		if (self->enableLogging)
+			clients.push_back(tracePeriodically(self));
 
 		wait(timeout(waitForAll(clients), self->testDuration, Void()));
 		return Void();
@@ -310,7 +320,8 @@ struct MakoWorkload : TestWorkload {
 				// user-defined value: whether commit read-only ops or not; default is false
 				doCommit = self->commitGet;
 				for (i = 0; i < MAX_OP; ++i) {
-					if (i == OP_COMMIT) continue;
+					if (i == OP_COMMIT)
+						continue;
 					for (count = 0; count < self->operations[i][0]; ++count) {
 						range = std::min(RANGELIMIT, self->operations[i][1]);
 						rangeLen = digits(range);
@@ -379,7 +390,8 @@ struct MakoWorkload : TestWorkload {
 							for (int range_i = 0; range_i < range; ++range_i) {
 								format("%0.*d", rangeLen, range_i).copy(rkeyPtr + self->keyBytes - rangeLen, rangeLen);
 								tr.set(rkey, self->randomValue());
-								if (range_i == 0) scr_start_key = rkey.toString();
+								if (range_i == 0)
+									scr_start_key = rkey.toString();
 							}
 							scr_end_key = rkey.toString();
 							commitStart = now();

@@ -27,7 +27,8 @@
 
 BOOL WINAPI DllMain(HINSTANCE dll, DWORD reason, LPVOID reserved) {
 
-	if (reason == DLL_THREAD_DETACH) releaseAllThreadMagazines();
+	if (reason == DLL_THREAD_DETACH)
+		releaseAllThreadMagazines();
 	return TRUE;
 }
 

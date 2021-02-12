@@ -152,7 +152,8 @@ public:
 	KeyBackedProperty(KeyRef key) : key(key) {}
 	Future<Optional<T>> get(Reference<ReadYourWritesTransaction> tr, bool snapshot = false) const {
 		return map(tr->get(key, snapshot), [](Optional<Value> const& val) -> Optional<T> {
-			if (val.present()) return Codec<T>::unpack(Tuple::unpack(val.get()));
+			if (val.present())
+				return Codec<T>::unpack(Tuple::unpack(val.get()));
 			return {};
 		});
 	}
@@ -161,7 +162,8 @@ public:
 		return map(get(tr, snapshot), [=](Optional<T> val) -> T { return val.present() ? val.get() : defaultValue; });
 	}
 	// Get property's value or throw error if it doesn't exist
-	Future<T> getOrThrow(Reference<ReadYourWritesTransaction> tr, bool snapshot = false,
+	Future<T> getOrThrow(Reference<ReadYourWritesTransaction> tr,
+	                     bool snapshot = false,
 	                     Error err = key_not_found()) const {
 		auto keyCopy = key;
 		auto backtrace = platform::get_backtrace();
@@ -235,7 +237,8 @@ public:
 	KeyBackedBinaryValue(KeyRef key) : key(key) {}
 	Future<Optional<T>> get(Reference<ReadYourWritesTransaction> tr, bool snapshot = false) const {
 		return map(tr->get(key, snapshot), [](Optional<Value> const& val) -> Optional<T> {
-			if (val.present()) return BinaryReader::fromStringRef<T>(val.get(), Unversioned());
+			if (val.present())
+				return BinaryReader::fromStringRef<T>(val.get(), Unversioned());
 			return {};
 		});
 	}
@@ -266,29 +269,35 @@ public:
 	typedef std::vector<PairType> PairsType;
 
 	// If end is not present one key past the end of the map is used.
-	Future<PairsType> getRange(Reference<ReadYourWritesTransaction> tr, KeyType const& begin,
-	                           Optional<KeyType> const& end, int limit, bool snapshot = false,
+	Future<PairsType> getRange(Reference<ReadYourWritesTransaction> tr,
+	                           KeyType const& begin,
+	                           Optional<KeyType> const& end,
+	                           int limit,
+	                           bool snapshot = false,
 	                           bool reverse = false) const {
 		Subspace s = space; // 'this' could be invalid inside lambda
 		Key endKey = end.present() ? s.pack(Codec<KeyType>::pack(end.get())) : space.range().end;
-		return map(tr->getRange(KeyRangeRef(s.pack(Codec<KeyType>::pack(begin)), endKey), GetRangeLimits(limit),
-		                        snapshot, reverse),
-		           [s](Standalone<RangeResultRef> const& kvs) -> PairsType {
-			           PairsType results;
-			           for (int i = 0; i < kvs.size(); ++i) {
-				           KeyType key = Codec<KeyType>::unpack(s.unpack(kvs[i].key));
-				           ValueType val = Codec<ValueType>::unpack(Tuple::unpack(kvs[i].value));
-				           results.push_back(PairType(key, val));
-			           }
-			           return results;
-		           });
+		return map(
+		    tr->getRange(
+		        KeyRangeRef(s.pack(Codec<KeyType>::pack(begin)), endKey), GetRangeLimits(limit), snapshot, reverse),
+		    [s](Standalone<RangeResultRef> const& kvs) -> PairsType {
+			    PairsType results;
+			    for (int i = 0; i < kvs.size(); ++i) {
+				    KeyType key = Codec<KeyType>::unpack(s.unpack(kvs[i].key));
+				    ValueType val = Codec<ValueType>::unpack(Tuple::unpack(kvs[i].value));
+				    results.push_back(PairType(key, val));
+			    }
+			    return results;
+		    });
 	}
 
-	Future<Optional<ValueType>> get(Reference<ReadYourWritesTransaction> tr, KeyType const& key,
+	Future<Optional<ValueType>> get(Reference<ReadYourWritesTransaction> tr,
+	                                KeyType const& key,
 	                                bool snapshot = false) const {
 		return map(tr->get(space.pack(Codec<KeyType>::pack(key)), snapshot),
 		           [](Optional<Value> const& val) -> Optional<ValueType> {
-			           if (val.present()) return Codec<ValueType>::unpack(Tuple::unpack(val.get()));
+			           if (val.present())
+				           return Codec<ValueType>::unpack(Tuple::unpack(val.get()));
 			           return {};
 		           });
 	}
@@ -326,8 +335,11 @@ public:
 	typedef std::vector<ValueType> Values;
 
 	// If end is not present one key past the end of the map is used.
-	Future<Values> getRange(Reference<ReadYourWritesTransaction> tr, ValueType const& begin,
-	                        Optional<ValueType> const& end, int limit, bool snapshot = false) const {
+	Future<Values> getRange(Reference<ReadYourWritesTransaction> tr,
+	                        ValueType const& begin,
+	                        Optional<ValueType> const& end,
+	                        int limit,
+	                        bool snapshot = false) const {
 		Subspace s = space; // 'this' could be invalid inside lambda
 		Key endKey = end.present() ? s.pack(Codec<ValueType>::pack(end.get())) : space.range().end;
 		return map(

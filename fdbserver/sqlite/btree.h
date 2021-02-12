@@ -151,7 +151,13 @@ int sqlite3BtreeCursorHasMoved(BtCursor*, int*);
 int sqlite3BtreeDelete(BtCursor*);
 int sqlite3BtreeDeleteRange(BtCursor*, BtCursor*, int* stackBegin, int* stackEnd);
 int sqlite3BtreeLazyDelete(BtCursor*, int* stackBegin, int* stackEnd, int desiredPages, int* pagesDeleted);
-int sqlite3BtreeInsert(BtCursor*, const void* pKey, i64 nKey, const void* pData, int nData, int nZero, int bias,
+int sqlite3BtreeInsert(BtCursor*,
+                       const void* pKey,
+                       i64 nKey,
+                       const void* pData,
+                       int nData,
+                       int nZero,
+                       int bias,
                        int seekResult);
 int sqlite3BtreeFirst(BtCursor*, int* pRes);
 int sqlite3BtreeLast(BtCursor*, int* pRes);

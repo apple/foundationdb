@@ -71,10 +71,14 @@ class Database {
 public:
 	enum { API_VERSION_LATEST = -1 };
 
-	static Database createDatabase(Reference<ClusterConnectionFile> connFile, int apiVersion, bool internal = true,
+	static Database createDatabase(Reference<ClusterConnectionFile> connFile,
+	                               int apiVersion,
+	                               bool internal = true,
 	                               LocalityData const& clientLocality = LocalityData(),
 	                               DatabaseContext* preallocatedDb = nullptr);
-	static Database createDatabase(std::string connFileName, int apiVersion, bool internal = true,
+	static Database createDatabase(std::string connFileName,
+	                               int apiVersion,
+	                               bool internal = true,
 	                               LocalityData const& clientLocality = LocalityData());
 
 	Database() {} // an uninitialized database can be destructed or reassigned safely; that's it
@@ -219,19 +223,35 @@ public:
 	Future<Void> watch(Reference<Watch> watch);
 	Future<Key> getKey(const KeySelector& key, bool snapshot = false);
 	// Future< Optional<KeyValue> > get( const KeySelectorRef& key );
-	Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin, const KeySelector& end, int limit,
-	                                            bool snapshot = false, bool reverse = false);
-	Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin, const KeySelector& end, GetRangeLimits limits,
-	                                            bool snapshot = false, bool reverse = false);
-	Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys, int limit, bool snapshot = false,
+	Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin,
+	                                            const KeySelector& end,
+	                                            int limit,
+	                                            bool snapshot = false,
+	                                            bool reverse = false);
+	Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin,
+	                                            const KeySelector& end,
+	                                            GetRangeLimits limits,
+	                                            bool snapshot = false,
+	                                            bool reverse = false);
+	Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys,
+	                                            int limit,
+	                                            bool snapshot = false,
 	                                            bool reverse = false) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
-		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()), limit, snapshot, reverse);
+		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
+		                limit,
+		                snapshot,
+		                reverse);
 	}
-	Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys, GetRangeLimits limits, bool snapshot = false,
+	Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys,
+	                                            GetRangeLimits limits,
+	                                            bool snapshot = false,
 	                                            bool reverse = false) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
-		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()), limits, snapshot, reverse);
+		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
+		                limits,
+		                snapshot,
+		                reverse);
 	}
 
 	Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key);
@@ -243,17 +263,22 @@ public:
 
 	Future<Void> warmRange(Database cx, KeyRange keys);
 
-	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys, StorageMetrics const& min,
+	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
+	                                                                    StorageMetrics const& min,
 	                                                                    StorageMetrics const& max,
 	                                                                    StorageMetrics const& permittedError,
-	                                                                    int shardLimit, int expectedShardCount);
+	                                                                    int shardLimit,
+	                                                                    int expectedShardCount);
 	Future<StorageMetrics> getStorageMetrics(KeyRange const& keys, int shardLimit);
-	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys, StorageMetrics const& limit,
+	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys,
+	                                                          StorageMetrics const& limit,
 	                                                          StorageMetrics const& estimated);
 
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
 	void set(const KeyRef& key, const ValueRef& value, bool addConflictRange = true);
-	void atomicOp(const KeyRef& key, const ValueRef& value, MutationRef::Type operationType,
+	void atomicOp(const KeyRef& key,
+	              const ValueRef& value,
+	              MutationRef::Type operationType,
 	              bool addConflictRange = true);
 	void clear(const KeyRangeRef& range, bool addConflictRange = true);
 	void clear(const KeyRef& key, bool addConflictRange = true);
@@ -318,7 +343,8 @@ ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version);
 
 std::string unprintable(const std::string&);
 
-int64_t extractIntOption(Optional<StringRef> value, int64_t minValue = std::numeric_limits<int64_t>::min(),
+int64_t extractIntOption(Optional<StringRef> value,
+                         int64_t minValue = std::numeric_limits<int64_t>::min(),
                          int64_t maxValue = std::numeric_limits<int64_t>::max());
 
 // Takes a snapshot of the cluster, specifically the following persistent

@@ -293,8 +293,14 @@ bool debugMutation(const char* context, Version version, MutationRef const& muta
 	                                   : mutation.type == MutationRef::DebugKeyRange
 	                                         ? "DebugKeyRange"
 	                                         : mutation.type == MutationRef::DebugKey ? "DebugKey" : "UnknownMutation";
-	printf("DEBUGMUTATION:\t%.6f\t%s\t%s\t%lld\t%s\t%s\t%s\n", now(), g_network->getLocalAddress().toString().c_str(),
-	       context, version, type, printable(mutation.param1).c_str(), printable(mutation.param2).c_str());
+	printf("DEBUGMUTATION:\t%.6f\t%s\t%s\t%lld\t%s\t%s\t%s\n",
+	       now(),
+	       g_network->getLocalAddress().toString().c_str(),
+	       context,
+	       version,
+	       type,
+	       printable(mutation.param1).c_str(),
+	       printable(mutation.param2).c_str());
 
 	return true;
 }
@@ -352,8 +358,8 @@ BOOL CreatePermissiveReadWriteDACL(SECURITY_ATTRIBUTES* pSA) {
 	    TEXT("(A;OICI;GR;;;AU)") // Allow read/write/execute to authenticated users
 	    TEXT("(A;OICI;GA;;;BA)"); // Allow full control to administrators
 
-	return ConvertStringSecurityDescriptorToSecurityDescriptor(szSD, SDDL_REVISION_1, &(pSA->lpSecurityDescriptor),
-	                                                           NULL);
+	return ConvertStringSecurityDescriptorToSecurityDescriptor(
+	    szSD, SDDL_REVISION_1, &(pSA->lpSecurityDescriptor), NULL);
 }
 #endif
 
@@ -405,12 +411,12 @@ UID getSharedMemoryMachineId() {
 	loop {
 		try {
 			// "0" is the default parameter "addr"
-			boost::interprocess::managed_shared_memory segment(boost::interprocess::open_or_create,
-			                                                   sharedMemoryIdentifier.c_str(), 1000, 0, p.permission);
+			boost::interprocess::managed_shared_memory segment(
+			    boost::interprocess::open_or_create, sharedMemoryIdentifier.c_str(), 1000, 0, p.permission);
 			machineId = segment.find_or_construct<UID>("machineId")(deterministicRandom()->randomUniqueID());
 			if (!machineId)
-				criticalError(FDB_EXIT_ERROR, "SharedMemoryError",
-				              "Could not locate or create shared memory - 'machineId'");
+				criticalError(
+				    FDB_EXIT_ERROR, "SharedMemoryError", "Could not locate or create shared memory - 'machineId'");
 			return *machineId;
 		} catch (boost::interprocess::interprocess_exception&) {
 			try {
@@ -425,7 +431,8 @@ UID getSharedMemoryMachineId() {
 				// Retry in case the shared memory was deleted in between the call to open_or_create and open_read_only
 				// Don't keep trying forever in case this is caused by some other problem
 				if (++numTries == 10)
-					criticalError(FDB_EXIT_ERROR, "SharedMemoryError",
+					criticalError(FDB_EXIT_ERROR,
+					              "SharedMemoryError",
 					              format("Could not open shared memory - %s", ex.what()).c_str());
 			}
 		}
@@ -441,7 +448,8 @@ ACTOR void failAfter(Future<Void> trigger, ISimulator::ProcessInfo* m = g_simula
 }
 
 void failAfter(Future<Void> trigger, Endpoint e) {
-	if (g_network == &g_simulator) failAfter(trigger, g_simulator.getProcess(e));
+	if (g_network == &g_simulator)
+		failAfter(trigger, g_simulator.getProcess(e));
 }
 
 ACTOR Future<Void> histogramReport() {
@@ -558,7 +566,8 @@ ACTOR Future<Void> dumpDatabase(Database cx, std::string outputFilename, KeyRang
 						std::string key = toHTML(results[r].key), value = toHTML(results[r].value);
 						fprintf(output, "<p>%s <b>:=</b> %s</p>\n", key.c_str(), value.c_str());
 					}
-					if (results.size() < 1000) break;
+					if (results.size() < 1000)
+						break;
 					iter = firstGreaterThan(KeyRef(arena, results[results.size() - 1].key));
 				}
 				fprintf(output, "</body></html>");
@@ -579,8 +588,10 @@ ACTOR Future<Void> dumpDatabase(Database cx, std::string outputFilename, KeyRang
 void memoryTest();
 void skipListTest();
 
-Future<Void> startSystemMonitor(std::string dataFolder, Optional<Standalone<StringRef>> dcId,
-                                Optional<Standalone<StringRef>> zoneId, Optional<Standalone<StringRef>> machineId) {
+Future<Void> startSystemMonitor(std::string dataFolder,
+                                Optional<Standalone<StringRef>> dcId,
+                                Optional<Standalone<StringRef>> zoneId,
+                                Optional<Standalone<StringRef>> machineId) {
 	initializeSystemMonitorMachineState(
 	    SystemMonitorMachineState(dataFolder, dcId, zoneId, machineId, g_network->getLocalAddress().ip));
 
@@ -595,7 +606,8 @@ void parentWatcher(void* parentHandle) {
 	HANDLE parent = (HANDLE)parentHandle;
 	int signal = WaitForSingleObject(parent, INFINITE);
 	CloseHandle(parentHandle);
-	if (signal == WAIT_OBJECT_0) criticalError(FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited");
+	if (signal == WAIT_OBJECT_0)
+		criticalError(FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited");
 	TraceEvent(SevError, "ParentProcessWaitFailed").detail("RetCode", signal).GetLastError();
 }
 #else
@@ -603,7 +615,8 @@ void* parentWatcher(void* arg) {
 	int* parent_pid = (int*)arg;
 	while (1) {
 		sleep(1);
-		if (getppid() != *parent_pid) criticalError(FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited");
+		if (getppid() != *parent_pid)
+			criticalError(FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited");
 	}
 }
 #endif
@@ -776,7 +789,8 @@ extern bool g_crashOnError;
 #if defined(ALLOC_INSTRUMENTATION) || defined(ALLOC_INSTRUMENTATION_STDOUT)
 void* operator new(std::size_t size) throw(std::bad_alloc) {
 	void* p = malloc(size);
-	if (!p) throw std::bad_alloc();
+	if (!p)
+		throw std::bad_alloc();
 	recordAllocation(p, size);
 	return p;
 }
@@ -799,7 +813,8 @@ void operator delete(void* ptr, const std::nothrow_t&) throw() {
 // array throwing new and matching delete[]
 void* operator new[](std::size_t size) throw(std::bad_alloc) {
 	void* p = malloc(size);
-	if (!p) throw std::bad_alloc();
+	if (!p)
+		throw std::bad_alloc();
 	recordAllocation(p, size);
 	return p;
 }
@@ -823,14 +838,16 @@ void operator delete[](void* ptr, const std::nothrow_t&) throw() {
 Optional<bool> checkBuggifyOverride(const char* testFile) {
 	std::ifstream ifs;
 	ifs.open(testFile, std::ifstream::in);
-	if (!ifs.good()) return 0;
+	if (!ifs.good())
+		return 0;
 
 	std::string cline;
 
 	while (ifs.good()) {
 		getline(ifs, cline);
 		std::string line = removeWhitespace(std::string(cline));
-		if (!line.size() || line.find(';') == 0) continue;
+		if (!line.size() || line.find(';') == 0)
+			continue;
 
 		size_t found = line.find('=');
 		if (found == std::string::npos)
@@ -890,15 +907,18 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 				const IPAddress publicIP = determinePublicIPAutomatically(connectionFile.getConnectionString());
 				currentPublicAddress = NetworkAddress(publicIP, parsedAddress.port, true, parsedAddress.isTLS());
 			} catch (Error& e) {
-				fprintf(stderr, "ERROR: could not determine public address automatically from `%s': %s\n",
-				        publicAddressStr.c_str(), e.what());
+				fprintf(stderr,
+				        "ERROR: could not determine public address automatically from `%s': %s\n",
+				        publicAddressStr.c_str(),
+				        e.what());
 				throw;
 			}
 		} else {
 			try {
 				currentPublicAddress = NetworkAddress::parse(publicAddressStr);
 			} catch (Error&) {
-				fprintf(stderr, "ERROR: Could not parse network address `%s' (specify as IP_ADDRESS:PORT)\n",
+				fprintf(stderr,
+				        "ERROR: Could not parse network address `%s' (specify as IP_ADDRESS:PORT)\n",
 				        publicAddressStr.c_str());
 				throw;
 			}
@@ -923,7 +943,8 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 			try {
 				currentListenAddress = NetworkAddress::parse(listenAddressStr);
 			} catch (Error&) {
-				fprintf(stderr, "ERROR: Could not parse network address `%s' (specify as IP_ADDRESS:PORT)\n",
+				fprintf(stderr,
+				        "ERROR: Could not parse network address `%s' (specify as IP_ADDRESS:PORT)\n",
 				        listenAddressStr.c_str());
 				throw;
 			}
@@ -931,7 +952,8 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 			if (currentListenAddress.isTLS() != currentPublicAddress.isTLS()) {
 				fprintf(stderr,
 				        "ERROR: TLS state of listen address: %s is not equal to the TLS state of public address: %s.\n",
-				        listenAddressStr.c_str(), publicAddressStr.c_str());
+				        listenAddressStr.c_str(),
+				        publicAddressStr.c_str());
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 		}
@@ -949,7 +971,8 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 			return true;
 		});
 		if (!hasSameCoord) {
-			fprintf(stderr, "ERROR: TLS state of public address %s does not match in coordinator list.\n",
+			fprintf(stderr,
+			        "ERROR: TLS state of public address %s does not match in coordinator list.\n",
 			        publicAddressStr.c_str());
 			flushAndExit(FDB_EXIT_ERROR);
 		}
@@ -997,7 +1020,8 @@ int main(int argc, char* argv[]) {
 
 		std::string commandLine;
 		for (int a = 0; a < argc; a++) {
-			if (a) commandLine += ' ';
+			if (a)
+				commandLine += ' ';
 			commandLine += argv[a];
 		}
 
@@ -1468,20 +1492,22 @@ int main(int argc, char* argv[]) {
 		}
 
 		if (seedConnString.length() && seedConnFile.length()) {
-			fprintf(stderr, "%s\n",
-			        "--seed_cluster_file and --seed_connection_string may not both be specified at once.");
+			fprintf(
+			    stderr, "%s\n", "--seed_cluster_file and --seed_connection_string may not both be specified at once.");
 			return FDB_EXIT_ERROR;
 		}
 
 		bool seedSpecified = seedConnFile.length() || seedConnString.length();
 
 		if (seedSpecified && !connFile.length()) {
-			fprintf(stderr, "%s\n",
+			fprintf(stderr,
+			        "%s\n",
 			        "If -seed_cluster_file or --seed_connection_string is specified, -C must be specified as well.");
 			return FDB_EXIT_ERROR;
 		}
 
-		if (metricsConnFile == connFile) metricsConnFile = "";
+		if (metricsConnFile == connFile)
+			metricsConnFile = "";
 
 		if (metricsConnFile != "" && metricsPrefix == "") {
 			fprintf(stderr, "If a metrics cluster file is specified, a metrics prefix is required.\n");
@@ -1489,8 +1515,9 @@ int main(int argc, char* argv[]) {
 		}
 
 		bool autoPublicAddress =
-		    std::any_of(publicAddressStrs.begin(), publicAddressStrs.end(),
-		                [](const std::string& addr) { return StringRef(addr).startsWith(LiteralStringRef("auto:")); });
+		    std::any_of(publicAddressStrs.begin(), publicAddressStrs.end(), [](const std::string& addr) {
+			    return StringRef(addr).startsWith(LiteralStringRef("auto:"));
+		    });
 		Reference<ClusterConnectionFile> connectionFile;
 		if ((role != Simulation && role != CreateTemplateDatabase && role != KVFileIntegrityCheck &&
 		     role != KVFileGenerateIOLogChecksums) ||
@@ -1503,7 +1530,8 @@ int main(int argc, char* argv[]) {
 					try {
 						connectionString = readFileBytes(seedConnFile, MAX_CLUSTER_FILE_BYTES);
 					} catch (Error& e) {
-						fprintf(stderr, "%s\n",
+						fprintf(stderr,
+						        "%s\n",
 						        ClusterConnectionFile::getErrorString(std::make_pair(seedConnFile, false), e).c_str());
 						throw;
 					}
@@ -1552,7 +1580,8 @@ int main(int argc, char* argv[]) {
 			publicAddresses.address = NetworkAddress(publicIP, ::getpid());
 		}
 
-		if (role == Simulation) printf("Random seed is %u...\n", randomSeed);
+		if (role == Simulation)
+			printf("Random seed is %u...\n", randomSeed);
 
 		if (zoneId.present())
 			printf("ZoneId set to %s, dcId to %s\n", printable(zoneId).c_str(), printable(dcId).c_str());
@@ -1561,7 +1590,8 @@ int main(int argc, char* argv[]) {
 
 		if (role == Simulation) {
 			Optional<bool> buggifyOverride = checkBuggifyOverride(testFile);
-			if (buggifyOverride.present()) buggifyEnabled = buggifyOverride.get();
+			if (buggifyOverride.present())
+				buggifyEnabled = buggifyOverride.get();
 		}
 		enableBuggify(buggifyEnabled, BuggifyType::General);
 
@@ -1575,9 +1605,11 @@ int main(int argc, char* argv[]) {
 		SERVER_KNOBS = serverKnobs;
 		CLIENT_KNOBS = clientKnobs;
 
-		if (!serverKnobs->setKnob("log_directory", logFolder)) ASSERT(false);
+		if (!serverKnobs->setKnob("log_directory", logFolder))
+			ASSERT(false);
 		if (role != Simulation) {
-			if (!serverKnobs->setKnob("commit_batches_mem_bytes_hard_limit", std::to_string(memLimit))) ASSERT(false);
+			if (!serverKnobs->setKnob("commit_batches_mem_bytes_hard_limit", std::to_string(memLimit)))
+				ASSERT(false);
 		}
 		for (auto k = knobs.begin(); k != knobs.end(); ++k) {
 			try {
@@ -1588,7 +1620,9 @@ int main(int argc, char* argv[]) {
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr, "WARNING: Invalid value '%s' for knob option '%s'\n", k->second.c_str(),
+					fprintf(stderr,
+					        "WARNING: Invalid value '%s' for knob option '%s'\n",
+					        k->second.c_str(),
 					        k->first.c_str());
 					TraceEvent(SevWarnAlways, "InvalidKnobValue")
 					    .detail("Knob", printable(k->first))
@@ -1603,7 +1637,8 @@ int main(int argc, char* argv[]) {
 				}
 			}
 		}
-		if (!serverKnobs->setKnob("server_mem_limit", std::to_string(memLimit))) ASSERT(false);
+		if (!serverKnobs->setKnob("server_mem_limit", std::to_string(memLimit)))
+			ASSERT(false);
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(flowKnobs->CACHE_EVICTION_POLICY);
@@ -1697,12 +1732,15 @@ int main(int argc, char* argv[]) {
 					try {
 						const Future<Void>& errorF = FlowTransport::transport().bind(publicAddress, listenAddress);
 						listenErrors.push_back(errorF);
-						if (errorF.isReady()) errorF.get();
+						if (errorF.isReady())
+							errorF.get();
 					} catch (Error& e) {
 						TraceEvent("BindError").error(e);
 						fprintf(stderr,
 						        "Error initializing networking with public address %s and listen address %s (%s)\n",
-						        publicAddress.toString().c_str(), listenAddress.toString().c_str(), e.what());
+						        publicAddress.toString().c_str(),
+						        listenAddress.toString().c_str(),
+						        e.what());
 						printHelpTeaser(argv[0]);
 						flushAndExit(FDB_EXIT_ERROR);
 					}
@@ -1723,7 +1761,8 @@ int main(int argc, char* argv[]) {
 			cwd = platform::getWorkingDirectory();
 		} catch (Error& e) {
 			// Allow for platform error by rethrowing all _other_ errors
-			if (e.code() != error_code_platform_error) throw;
+			if (e.code() != error_code_platform_error)
+				throw;
 		}
 
 		TraceEvent("ProgramStart")
@@ -1774,7 +1813,8 @@ int main(int argc, char* argv[]) {
 		if (!localities.isPresent(LocalityData::keyMachineId))
 			localities.set(LocalityData::keyMachineId, zoneId.present() ? zoneId : machineId);
 
-		if (!localities.isPresent(LocalityData::keyDcId) && dcId.present()) localities.set(LocalityData::keyDcId, dcId);
+		if (!localities.isPresent(LocalityData::keyDcId) && dcId.present())
+			localities.set(LocalityData::keyDcId, dcId);
 
 		if (role == Simulation) {
 			TraceEvent("Simulation").detail("TestFile", testFile);
@@ -1785,7 +1825,8 @@ int main(int argc, char* argv[]) {
 			flowKnobs->trace();
 			serverKnobs->trace();
 
-			if (!dataFolder.size()) dataFolder = "simfdb";
+			if (!dataFolder.size())
+				dataFolder = "simfdb";
 
 			std::vector<std::string> directories = platform::listDirectories(dataFolder);
 			for (int i = 0; i < directories.size(); i++)
@@ -1796,13 +1837,15 @@ int main(int argc, char* argv[]) {
 					    .detail("SuspiciousFile", directories[i]);
 					fprintf(stderr,
 					        "ERROR: Data folder `%s' had non fdb file `%s'; please use clean, fdb-only folder\n",
-					        dataFolder.c_str(), directories[i].c_str());
+					        dataFolder.c_str(),
+					        directories[i].c_str());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 			std::vector<std::string> files = platform::listFiles(dataFolder);
 			if ((files.size() > 1 || (files.size() == 1 && files[0] != "restartInfo.ini")) && !restarting) {
 				TraceEvent(SevError, "IncompatibleFileFound").detail("DataFolder", dataFolder);
-				fprintf(stderr, "ERROR: Data folder `%s' is non-empty; please use clean, fdb-only folder\n",
+				fprintf(stderr,
+				        "ERROR: Data folder `%s' is non-empty; please use clean, fdb-only folder\n",
 				        dataFolder.c_str());
 				flushAndExit(FDB_EXIT_ERROR);
 			} else if (files.empty() && restarting) {
@@ -1913,17 +1956,29 @@ int main(int argc, char* argv[]) {
 				dataFolder = format("fdb/%d/", publicAddresses.address.port); // SOMEDAY: Better default
 
 			vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
-			actors.push_back(fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit,
-			                      metricsConnFile, metricsPrefix, rsssize, whitelistBinPaths));
+			actors.push_back(fdbd(connectionFile,
+			                      localities,
+			                      processClass,
+			                      dataFolder,
+			                      dataFolder,
+			                      storageMemLimit,
+			                      metricsConnFile,
+			                      metricsPrefix,
+			                      rsssize,
+			                      whitelistBinPaths));
 			actors.push_back(histogramReport());
 			// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 
 			f = stopAfter(waitForAll(actors));
 			g_network->run();
 		} else if (role == MultiTester) {
-			f = stopAfter(runTests(connectionFile, TEST_TYPE_FROM_FILE,
-			                       testOnServers ? TEST_ON_SERVERS : TEST_ON_TESTERS, minTesterCount, testFile,
-			                       StringRef(), localities));
+			f = stopAfter(runTests(connectionFile,
+			                       TEST_TYPE_FROM_FILE,
+			                       testOnServers ? TEST_ON_SERVERS : TEST_ON_TESTERS,
+			                       minTesterCount,
+			                       testFile,
+			                       StringRef(),
+			                       localities));
 			g_network->run();
 		} else if (role == Test) {
 			auto m = startSystemMonitor(dataFolder, dcId, zoneId, zoneId);
@@ -2013,10 +2068,13 @@ int main(int argc, char* argv[]) {
 		//	cout << "  " << Actor::allActors[i]->getName() << endl;
 
 		int total = 0;
-		for (auto i = Error::errorCounts().begin(); i != Error::errorCounts().end(); ++i) total += i->second;
-		if (total) printf("%d errors:\n", total);
 		for (auto i = Error::errorCounts().begin(); i != Error::errorCounts().end(); ++i)
-			if (i->second > 0) printf("  %d: %d %s\n", i->second, i->first, Error::fromCode(i->first).what());
+			total += i->second;
+		if (total)
+			printf("%d errors:\n", total);
+		for (auto i = Error::errorCounts().begin(); i != Error::errorCounts().end(); ++i)
+			if (i->second > 0)
+				printf("  %d: %d %s\n", i->second, i->first, Error::fromCode(i->first).what());
 
 		if (&g_simulator == g_network) {
 			auto processes = g_simulator.getAllProcesses();
@@ -2070,8 +2128,12 @@ int main(int argc, char* argv[]) {
 			for (int i = 0; i < typeNames.size(); i++) {
 				const char* n = typeNames[i].second;
 				auto& f = allocInstr[n];
-				printf("%+d\t%+d\t%d\t%d\t%s\n", f.allocCount, -f.deallocCount, f.allocCount - f.deallocCount,
-				       f.maxAllocated, typeNames[i].first.c_str());
+				printf("%+d\t%+d\t%d\t%d\t%s\n",
+				       f.allocCount,
+				       -f.deallocCount,
+				       f.allocCount - f.deallocCount,
+				       f.maxAllocated,
+				       typeNames[i].first.c_str());
 			}
 
 			// We're about to exit and clean up data structures, this will wreak havoc on allocation recording

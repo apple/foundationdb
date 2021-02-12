@@ -55,14 +55,17 @@ TEST_CASE("/flow/Deque/queue") {
 
 TEST_CASE("/flow/Deque/max_size") {
 	Deque<uint8_t> q;
-	for (int i = 0; i < 10; i++) q.push_back(i);
+	for (int i = 0; i < 10; i++)
+		q.push_back(i);
 	q.pop_front();
-	for (int64_t i = 10; i <= q.max_size(); i++) q.push_back(i);
+	for (int64_t i = 10; i <= q.max_size(); i++)
+		q.push_back(i);
 	for (int i = 0; i < 100; i++) {
 		q.pop_front();
 		q.push_back(1);
 	}
-	for (int i = 0; i < 100; i++) ASSERT(q[q.size() - 100 + i] == 1);
+	for (int i = 0; i < 100; i++)
+		ASSERT(q[q.size() - 100 + i] == 1);
 	for (int64_t i = 101; i <= q.max_size(); i++) {
 		ASSERT(q[i - 101] == uint8_t(i));
 	}

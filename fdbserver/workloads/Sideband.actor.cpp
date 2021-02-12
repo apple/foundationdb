@@ -72,8 +72,10 @@ struct SidebandWorkload : TestWorkload {
 	}
 	virtual Future<bool> check(Database const& cx) {
 		int errors = 0;
-		for (int c = 0; c < clients.size(); c++) errors += clients[c].isError();
-		if (errors) TraceEvent(SevError, "TestFailure").detail("Reason", "There were client errors.");
+		for (int c = 0; c < clients.size(); c++)
+			errors += clients[c].isError();
+		if (errors)
+			TraceEvent(SevError, "TestFailure").detail("Reason", "There were client errors.");
 		clients.clear();
 		if (consistencyErrors.getValue())
 			TraceEvent(SevError, "TestFailure").detail("Reason", "There were causal consistency errors.");
@@ -95,7 +97,8 @@ struct SidebandWorkload : TestWorkload {
 			try {
 				Optional<Value> val = wait(tr.get(StringRef(format("Sideband/Client/%d", self->clientId))));
 				if (val.present()) {
-					if (val.get() != serializedInterface) throw operation_failed();
+					if (val.get() != serializedInterface)
+						throw operation_failed();
 					break;
 				}
 				tr.set(format("Sideband/Client/%d", self->clientId), serializedInterface);

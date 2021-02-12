@@ -117,7 +117,8 @@ public:
 
 	// Returns when the status of the given endpoint has continuously been "failed" for sustainedFailureDuration +
 	// (elapsedTime*sustainedFailureSlope)
-	Future<Void> onFailedFor(Endpoint const& endpoint, double sustainedFailureDuration,
+	Future<Void> onFailedFor(Endpoint const& endpoint,
+	                         double sustainedFailureDuration,
 	                         double sustainedFailureSlope = 0.0);
 
 	// Returns the failure monitor that the calling machine should use

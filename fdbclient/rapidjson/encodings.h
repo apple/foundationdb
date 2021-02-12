@@ -212,7 +212,8 @@ struct UTF8 {
 	TRANS(0x70)
 		Ch c;
 		COPY();
-		if (!(c & 0x80)) return true;
+		if (!(c & 0x80))
+			return true;
 
 		bool result = true;
 		switch (GetRange(static_cast<unsigned char>(c))) {
@@ -285,11 +286,14 @@ struct UTF8 {
 	static CharType TakeBOM(InputByteStream& is) {
 		RAPIDJSON_STATIC_ASSERT(sizeof(typename InputByteStream::Ch) == 1);
 		typename InputByteStream::Ch c = Take(is);
-		if (static_cast<unsigned char>(c) != 0xEFu) return c;
+		if (static_cast<unsigned char>(c) != 0xEFu)
+			return c;
 		c = is.Take();
-		if (static_cast<unsigned char>(c) != 0xBBu) return c;
+		if (static_cast<unsigned char>(c) != 0xBBu)
+			return c;
 		c = is.Take();
-		if (static_cast<unsigned char>(c) != 0xBFu) return c;
+		if (static_cast<unsigned char>(c) != 0xBFu)
+			return c;
 		c = is.Take();
 		return c;
 	}
@@ -718,7 +722,8 @@ struct Transcoder {
 	template <typename InputStream, typename OutputStream>
 	RAPIDJSON_FORCEINLINE static bool Transcode(InputStream& is, OutputStream& os) {
 		unsigned codepoint;
-		if (!SourceEncoding::Decode(is, &codepoint)) return false;
+		if (!SourceEncoding::Decode(is, &codepoint))
+			return false;
 		TargetEncoding::Encode(os, codepoint);
 		return true;
 	}
@@ -726,7 +731,8 @@ struct Transcoder {
 	template <typename InputStream, typename OutputStream>
 	RAPIDJSON_FORCEINLINE static bool TranscodeUnsafe(InputStream& is, OutputStream& os) {
 		unsigned codepoint;
-		if (!SourceEncoding::Decode(is, &codepoint)) return false;
+		if (!SourceEncoding::Decode(is, &codepoint))
+			return false;
 		TargetEncoding::EncodeUnsafe(os, codepoint);
 		return true;
 	}

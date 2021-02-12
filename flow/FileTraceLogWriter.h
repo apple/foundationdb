@@ -41,8 +41,12 @@ private:
 	std::function<void()> onError;
 
 public:
-	FileTraceLogWriter(std::string directory, std::string processName, std::string basename, std::string extension,
-	                   uint64_t maxLogsSize, std::function<void()> onError);
+	FileTraceLogWriter(std::string directory,
+	                   std::string processName,
+	                   std::string basename,
+	                   std::string extension,
+	                   uint64_t maxLogsSize,
+	                   std::function<void()> onError);
 
 	void addref();
 	void delref();

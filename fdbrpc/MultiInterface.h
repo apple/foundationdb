@@ -57,7 +57,8 @@ struct ReferencedInterface : public ReferenceCounted<ReferencedInterface<T>> {
 	int8_t distance;
 	std::string toString() const { return interf.toString(); }
 	ReferencedInterface(T const& interf, LocalityData const& locality = LocalityData()) : interf(interf) {
-		distance = LBLocalityData<T>::Present ? loadBalanceDistance(locality, LBLocalityData<T>::getLocality(interf),
+		distance = LBLocalityData<T>::Present ? loadBalanceDistance(locality,
+		                                                            LBLocalityData<T>::getLocality(interf),
 		                                                            LBLocalityData<T>::getAddress(interf))
 		                                      : LBDistance::DISTANT;
 	}
@@ -72,11 +73,13 @@ template <class T>
 class MultiInterface : public ReferenceCounted<MultiInterface<T>> {
 public:
 	MultiInterface(const vector<T>& v, LocalityData const& locality = LocalityData()) : bestCount(0) {
-		for (int i = 0; i < v.size(); i++) alternatives.push_back(KVPair<int, T>(LBDistance::DISTANT, v[i]));
+		for (int i = 0; i < v.size(); i++)
+			alternatives.push_back(KVPair<int, T>(LBDistance::DISTANT, v[i]));
 		deterministicRandom()->randomShuffle(alternatives);
 		if (LBLocalityData<T>::Present) {
 			for (int a = 0; a < alternatives.size(); a++)
-				alternatives[a].k = loadBalanceDistance(locality, LBLocalityData<T>::getLocality(alternatives[a].v),
+				alternatives[a].k = loadBalanceDistance(locality,
+				                                        LBLocalityData<T>::getLocality(alternatives[a].v),
 				                                        LBLocalityData<T>::getAddress(alternatives[a].v));
 			std::stable_sort(alternatives.begin(), alternatives.end());
 		}
@@ -88,7 +91,8 @@ public:
 	int size() const { return alternatives.size(); }
 	int countBest() const { return bestCount; }
 	LBDistance::Type bestDistance() const {
-		if (!size()) return LBDistance::DISTANT;
+		if (!size())
+			return LBDistance::DISTANT;
 		return (LBDistance::Type)alternatives[0].k;
 	}
 	bool alwaysFresh() const { return LBLocalityData<T>::alwaysFresh(); }
@@ -132,7 +136,8 @@ public:
 	int size() const { return alternatives.size(); }
 	int countBest() const { return bestCount; }
 	LBDistance::Type bestDistance() const {
-		if (!size()) return LBDistance::DISTANT;
+		if (!size())
+			return LBDistance::DISTANT;
 		return (LBDistance::Type)alternatives[0]->distance;
 	}
 	bool alwaysFresh() const { return LBLocalityData<T>::alwaysFresh(); }

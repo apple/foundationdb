@@ -45,8 +45,8 @@ void systemMonitor() {
 SystemStatistics getSystemStatistics() {
 	static StatisticsState statState = StatisticsState();
 	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
-	return getSystemStatistics(machineState.folder.present() ? machineState.folder.get() : "", &ipAddr,
-	                           &statState.systemState, false);
+	return getSystemStatistics(
+	    machineState.folder.present() ? machineState.folder.get() : "", &ipAddr, &statState.systemState, false);
 }
 
 #define TRACEALLOCATOR(size)                                                                                           \
@@ -63,8 +63,8 @@ SystemStatistics getSystemStatistics() {
 
 SystemStatistics customSystemMonitor(std::string eventName, StatisticsState* statState, bool machineMetrics) {
 	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
-	SystemStatistics currentStats = getSystemStatistics(machineState.folder.present() ? machineState.folder.get() : "",
-	                                                    &ipAddr, &statState->systemState, true);
+	SystemStatistics currentStats = getSystemStatistics(
+	    machineState.folder.present() ? machineState.folder.get() : "", &ipAddr, &statState->systemState, true);
 	NetworkData netData;
 	netData.init();
 	if (!DEBUG_DETERMINISM && currentStats.initialized) {
@@ -114,14 +114,17 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState* sta
 			    .detail("MachineID", machineState.machineId)
 			    .detail("AIOSubmitCount", netData.countAIOSubmit - statState->networkState.countAIOSubmit)
 			    .detail("AIOCollectCount", netData.countAIOCollect - statState->networkState.countAIOCollect)
-			    .detail("AIOSubmitLag", (g_network->networkInfo.metrics.secSquaredSubmit -
-			                             statState->networkMetricsState.secSquaredSubmit) /
-			                                currentStats.elapsed)
-			    .detail("AIODiskStall", (g_network->networkInfo.metrics.secSquaredDiskStall -
-			                             statState->networkMetricsState.secSquaredDiskStall) /
-			                                currentStats.elapsed)
-			    .detail("CurrentConnections", netData.countConnEstablished - netData.countConnClosedWithError -
-			                                      netData.countConnClosedWithoutError)
+			    .detail("AIOSubmitLag",
+			            (g_network->networkInfo.metrics.secSquaredSubmit -
+			             statState->networkMetricsState.secSquaredSubmit) /
+			                currentStats.elapsed)
+			    .detail("AIODiskStall",
+			            (g_network->networkInfo.metrics.secSquaredDiskStall -
+			             statState->networkMetricsState.secSquaredDiskStall) /
+			                currentStats.elapsed)
+			    .detail("CurrentConnections",
+			            netData.countConnEstablished - netData.countConnClosedWithError -
+			                netData.countConnClosedWithoutError)
 			    .detail("ConnectionsEstablished",
 			            (double)(netData.countConnEstablished - statState->networkState.countConnEstablished) /
 			                currentStats.elapsed)
@@ -201,8 +204,9 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState* sta
 				}
 
 				n.detail(format("PriorityBusy%d", g_network->networkInfo.metrics.priorityBins[i]).c_str(),
-				         std::min(currentStats.elapsed, g_network->networkInfo.metrics.priorityBlockedDuration[i] -
-				                                            statState->networkMetricsState.priorityBlockedDuration[i]));
+				         std::min(currentStats.elapsed,
+				                  g_network->networkInfo.metrics.priorityBlockedDuration[i] -
+				                      statState->networkMetricsState.priorityBlockedDuration[i]));
 				n.detail(format("PriorityMaxBusy%d", g_network->networkInfo.metrics.priorityBins[i]).c_str(),
 				         g_network->networkInfo.metrics.priorityMaxBlockedDuration[i]);
 
@@ -233,7 +237,8 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState* sta
 #ifdef ALLOC_INSTRUMENTATION
 	{
 		static double firstTime = 0.0;
-		if (firstTime == 0.0) firstTime = now();
+		if (firstTime == 0.0)
+			firstTime = now();
 		if (now() - firstTime > 10 || g_network->isSimulated()) {
 			firstTime = now();
 			std::vector<std::pair<std::string, const char*>> typeNames;

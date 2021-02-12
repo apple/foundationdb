@@ -85,11 +85,13 @@ struct MutationRef {
 
 	std::string toString() const {
 		if (type < MutationRef::MAX_ATOMIC_OP) {
-			return format("code: %s param1: %s param2: %s", typeString[type], printable(param1).c_str(),
+			return format("code: %s param1: %s param2: %s",
+			              typeString[type],
+			              printable(param1).c_str(),
 			              printable(param2).c_str());
 		} else {
-			return format("code: %s param1: %s param2: %s", "Invalid", printable(param1).c_str(),
-			              printable(param2).c_str());
+			return format(
+			    "code: %s param1: %s param2: %s", "Invalid", printable(param1).c_str(), printable(param2).c_str());
 		}
 	}
 

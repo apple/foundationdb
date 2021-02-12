@@ -54,8 +54,10 @@ struct Increment : TestWorkload {
 	}
 	virtual Future<bool> check(Database const& cx) {
 		int errors = 0;
-		for (int c = 0; c < clients.size(); c++) errors += clients[c].isError();
-		if (errors) TraceEvent(SevError, "TestFailure").detail("Reason", "There were client errors.");
+		for (int c = 0; c < clients.size(); c++)
+			errors += clients[c].isError();
+		if (errors)
+			TraceEvent(SevError, "TestFailure").detail("Reason", "There were client errors.");
 		clients.clear();
 		return incrementCheck(cx->clone(), this, !errors);
 	}
@@ -82,10 +84,12 @@ struct Increment : TestWorkload {
 				while (true) {
 					try {
 						tr.atomicOp(intToTestKey(deterministicRandom()->randomInt(0, self->nodeCount / 2)),
-						            LiteralStringRef("\x01"), MutationRef::AddValue);
+						            LiteralStringRef("\x01"),
+						            MutationRef::AddValue);
 						tr.atomicOp(
 						    intToTestKey(deterministicRandom()->randomInt(self->nodeCount / 2, self->nodeCount)),
-						    LiteralStringRef("\x01"), MutationRef::AddValue);
+						    LiteralStringRef("\x01"),
+						    MutationRef::AddValue);
 						wait(tr.commit());
 						break;
 					} catch (Error& e) {
@@ -140,8 +144,10 @@ struct Increment : TestWorkload {
 		if (self->transactions.getMetric().value() < self->testDuration * self->minExpectedTransactionsPerSecond) {
 			TraceEvent(SevWarnAlways, "TestFailure")
 			    .detail("Reason", "Rate below desired rate")
-			    .detail("Details", format("%.2f", self->transactions.getMetric().value() /
-			                                          (self->transactionsPerSecond * self->testDuration)))
+			    .detail(
+			        "Details",
+			        format("%.2f",
+			               self->transactions.getMetric().value() / (self->transactionsPerSecond * self->testDuration)))
 			    .detail("TransactionsAchieved", self->transactions.getMetric().value())
 			    .detail("MinTransactionsExpected", self->testDuration * self->minExpectedTransactionsPerSecond)
 			    .detail("TransactionGoal", self->transactionsPerSecond * self->testDuration);
@@ -156,7 +162,8 @@ struct Increment : TestWorkload {
 					state Version v = wait(tr.getReadVersion());
 					Standalone<RangeResultRef> data =
 					    wait(tr.getRange(firstGreaterOrEqual(intToTestKey(0)),
-					                     firstGreaterOrEqual(intToTestKey(self->nodeCount)), self->nodeCount + 1));
+					                     firstGreaterOrEqual(intToTestKey(self->nodeCount)),
+					                     self->nodeCount + 1));
 					ok = self->incrementCheckData(data, v, self) && ok;
 					break;
 				} catch (Error& e) {

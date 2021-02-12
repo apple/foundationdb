@@ -102,7 +102,8 @@ struct CompactPreOrderTree {
 			auto ke = keyEnd();
 			int o = (uint8_t*)ptr - ke;
 			ASSERT(ENABLE_LEFT_PTR ? (int16_t(o) == o) : o == IMPLICIT_LPTR_VALUE);
-			if (ENABLE_LEFT_PTR) *(uint16_t*)(ke + LPTR_OFFSET) = o;
+			if (ENABLE_LEFT_PTR)
+				*(uint16_t*)(ke + LPTR_OFFSET) = o;
 		}
 		void setRightPointer(Node* ptr) {
 			auto ke = keyEnd();
@@ -128,7 +129,8 @@ struct CompactPreOrderTree {
 
 		while (nBFIndex < nodeCount) {
 			int np = n->keyPrefixLength();
-			if (ENABLE_PREFETCH_RIGHT) _mm_prefetch((const char*)n->right(), _MM_HINT_T0);
+			if (ENABLE_PREFETCH_RIGHT)
+				_mm_prefetch((const char*)n->right(), _MM_HINT_T0);
 			if (prefixSize < np) {
 				// The searchKey differs from this node's logical key in the prefix this node shares with its parent
 				// So the comparison between this node and searchKey has the same result as the comparison with the
@@ -140,7 +142,8 @@ struct CompactPreOrderTree {
 				int cl = al < bl ? al : bl;
 				int prefixLen = commonPrefixLength(searchKey.begin() + np, n->keyData(), cl);
 				dir = prefixLen == cl ? al < bl : searchKey[np + prefixLen] < n->keyData()[prefixLen];
-				if (Node::ENABLE_PREFIX) prefixSize = np + prefixLen;
+				if (Node::ENABLE_PREFIX)
+					prefixSize = np + prefixLen;
 			}
 
 			nBFIndex = nBFIndex + nBFIndex + 2 - dir;
@@ -152,8 +155,10 @@ struct CompactPreOrderTree {
 		return b;
 	}
 
-	static std::pair<Node*, Node*> lastLessOrEqual2(CompactPreOrderTree* this1, CompactPreOrderTree* this2,
-	                                                StringRef searchKey1, StringRef searchKey2) {
+	static std::pair<Node*, Node*> lastLessOrEqual2(CompactPreOrderTree* this1,
+	                                                CompactPreOrderTree* this2,
+	                                                StringRef searchKey1,
+	                                                StringRef searchKey2) {
 		// Do two separate lastLessOrEqual operations at once, to make better use of the memory subsystem.
 		// Don't try to read this code, it is write only (constructed by copy/paste from lastLessOrEqual and adding 1
 		// and 2 to variables as necessary)
@@ -339,12 +344,14 @@ struct CompactPreOrderTree {
 		return (uint8_t*)build(root, prefix, &input[0], &input[0] + input.size()) - (uint8_t*)this;
 	}
 	Node* build(Node& node, std::string const& prefix, std::string* begin, std::string* end) {
-		if (begin == end) return &node;
+		if (begin == end)
+			return &node;
 		int mid = perfectSubtreeSplitPoint(end - begin);
 		std::string& s = begin[mid];
-		int prefixLen = Node::ENABLE_PREFIX ? commonPrefixLength((uint8_t*)&prefix[0], (uint8_t*)&s[0],
-		                                                         std::min(prefix.size(), s.size()))
-		                                    : 0;
+		int prefixLen =
+		    Node::ENABLE_PREFIX
+		        ? commonPrefixLength((uint8_t*)&prefix[0], (uint8_t*)&s[0], std::min(prefix.size(), s.size()))
+		        : 0;
 		// printf("Node: %s at %d, subtree size %d, mid=%d, prefix %d\n", s.c_str(), relAddr(&node), end-begin, mid,
 		// prefixLen);
 		node.setKeyPrefixLength(prefixLen);
@@ -369,7 +376,8 @@ struct CompactPreOrderTree {
 #endif
 };
 
-void compactMapTests(std::vector<std::string> testData, std::vector<std::string> sampleQueries,
+void compactMapTests(std::vector<std::string> testData,
+                     std::vector<std::string> sampleQueries,
                      std::string prefixTreeDOTFile = "") {
 	double t1, t2;
 	int r = 0;
@@ -381,10 +389,12 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	}*/
 
 	int totalKeyBytes = 0;
-	for (auto& s : testData) totalKeyBytes += s.size();
+	for (auto& s : testData)
+		totalKeyBytes += s.size();
 	printf("%d bytes in %lu keys\n", totalKeyBytes, testData.size());
 
-	for (int i = 0; i < 5; i++) printf("  '%s'\n", printable(StringRef(testData[i])).c_str());
+	for (int i = 0; i < 5; i++)
+		printf("  '%s'\n", printable(StringRef(testData[i])).c_str());
 
 	CompactPreOrderTree* t =
 	    (CompactPreOrderTree*)new uint8_t[sizeof(CompactPreOrderTree) + totalKeyBytes +
@@ -399,7 +409,8 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 
 	t1 = timer_monotonic();
 	const int nBuild = 20000;
-	for (int i = 0; i < nBuild; i++) r += t->build(testData);
+	for (int i = 0; i < nBuild; i++)
+		r += t->build(testData);
 	t2 = timer_monotonic();
 	printf("Build time %0.0f us (%0.2f M/sec)\n", (t2 - t1) / nBuild * 1e6, nBuild / (t2 - t1) / 1e6);
 
@@ -430,7 +441,8 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 
 	printf("PrefixTree tree is %d bytes\n", prefixTreeBytes);
 	printf("Perfect compressed size with no overhead is %d, average PrefixTree overhead is %.2f per item\n",
-	       perfectSize, double(prefixTreeBytes - perfectSize) / testData.size());
+	       perfectSize,
+	       double(prefixTreeBytes - perfectSize) / testData.size());
 	printf("PrefixTree Build time %0.0f us (%0.2f M/sec)\n", (t2 - t1) * 1e6, 1 / (t2 - t1) / 1e6);
 
 	// Test cursor forward iteration
@@ -456,7 +468,8 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	printf("PrefixTree reverse scan passed\n");
 
 	t1 = timer_monotonic();
-	for (int i = 0; i < nBuild; i++) r += pt->build(&*keys.begin(), &*keys.end(), StringRef(), StringRef());
+	for (int i = 0; i < nBuild; i++)
+		r += pt->build(&*keys.begin(), &*keys.end(), StringRef(), StringRef());
 	t2 = timer_monotonic();
 	printf("PrefixTree Build time %0.0f us (%0.2f M/sec)\n", (t2 - t1) / nBuild * 1e6, nBuild / (t2 - t1) / 1e6);
 
@@ -545,17 +558,23 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	printf("shuffled\n");
 
 	t1 = timer_monotonic();
-	for (auto& q : sampleQueries) r += (intptr_t)t->lastLessOrEqual(q);
+	for (auto& q : sampleQueries)
+		r += (intptr_t)t->lastLessOrEqual(q);
 	t2 = timer_monotonic();
-	printf("compactmap, in cache: %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 - t1,
+	printf("compactmap, in cache: %d queries in %0.3f sec: %0.3f M/sec\n",
+	       (int)sampleQueries.size(),
+	       t2 - t1,
 	       sampleQueries.size() / (t2 - t1) / 1e6);
 
 	auto cur = pt->getCursor(StringRef(), StringRef());
 
 	t1 = timer_monotonic();
-	for (auto& q : sampleQueries) r += cur.seekLessThanOrEqual(StringRef(q)) ? 1 : 0;
+	for (auto& q : sampleQueries)
+		r += cur.seekLessThanOrEqual(StringRef(q)) ? 1 : 0;
 	t2 = timer_monotonic();
-	printf("prefixtree, in cache: %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 - t1,
+	printf("prefixtree, in cache: %d queries in %0.3f sec: %0.3f M/sec\n",
+	       (int)sampleQueries.size(),
+	       t2 - t1,
 	       sampleQueries.size() / (t2 - t1) / 1e6);
 
 	/*	t1 = timer_monotonic();
@@ -569,9 +588,12 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	*/
 
 	t1 = timer_monotonic();
-	for (int q = 0; q < sampleQueries.size(); q++) r += (intptr_t)copies[q]->lastLessOrEqual(sampleQueries[q]);
+	for (int q = 0; q < sampleQueries.size(); q++)
+		r += (intptr_t)copies[q]->lastLessOrEqual(sampleQueries[q]);
 	t2 = timer_monotonic();
-	printf("compactmap, out of cache: %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 - t1,
+	printf("compactmap, out of cache: %d queries in %0.3f sec: %0.3f M/sec\n",
+	       (int)sampleQueries.size(),
+	       t2 - t1,
 	       sampleQueries.size() / (t2 - t1) / 1e6);
 
 	std::vector<PrefixTree::Cursor> cursors;
@@ -579,9 +601,12 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 		cursors.push_back(prefixTreeCopies[q]->getCursor(StringRef(), StringRef()));
 
 	t1 = timer_monotonic();
-	for (int q = 0; q < sampleQueries.size(); q++) r += cursors[q].seekLessThanOrEqual(sampleQueries[q]) ? 1 : 0;
+	for (int q = 0; q < sampleQueries.size(); q++)
+		r += cursors[q].seekLessThanOrEqual(sampleQueries[q]) ? 1 : 0;
 	t2 = timer_monotonic();
-	printf("prefixtree, out of cache: %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 - t1,
+	printf("prefixtree, out of cache: %d queries in %0.3f sec: %0.3f M/sec\n",
+	       (int)sampleQueries.size(),
+	       t2 - t1,
 	       sampleQueries.size() / (t2 - t1) / 1e6);
 
 	/*
@@ -600,7 +625,9 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 		r += (intptr_t)(std::lower_bound(array_copies[q].begin(), array_copies[q].end(), sampleQueries[q]) -
 		                testData.begin());
 	t2 = timer_monotonic();
-	printf("std::lower_bound: %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 - t1,
+	printf("std::lower_bound: %d queries in %0.3f sec: %0.3f M/sec\n",
+	       (int)sampleQueries.size(),
+	       t2 - t1,
 	       sampleQueries.size() / (t2 - t1) / 1e6);
 }
 
@@ -654,7 +681,8 @@ std::vector<std::string> sampleBPlusTreeSeparators(std::vector<std::string> rawD
 
 		for (int j = i + 1; j < i + 11; j++) {
 			StringRef s = shortestKeyBetween(rawDocs[j], rawDocs[j + 1]);
-			if (s.size() < bestSplitPoint.size()) bestSplitPoint = s;
+			if (s.size() < bestSplitPoint.size())
+				bestSplitPoint = s;
 		}
 
 		testData.push_back(bestSplitPoint.substr(prefixToStrip).toString());
@@ -706,16 +734,20 @@ void ingestBenchmark() {
 	Arena arena;
 	std::set<StringRef> testmap;
 	for (int i = 0; i < 1000000; ++i) {
-		keys_generated.push_back(StringRef(
-		    arena, format("........%02X......%02X.....%02X........%02X", deterministicRandom()->randomInt(0, 100),
-		                  deterministicRandom()->randomInt(0, 100), deterministicRandom()->randomInt(0, 100),
-		                  deterministicRandom()->randomInt(0, 100))));
+		keys_generated.push_back(StringRef(arena,
+		                                   format("........%02X......%02X.....%02X........%02X",
+		                                          deterministicRandom()->randomInt(0, 100),
+		                                          deterministicRandom()->randomInt(0, 100),
+		                                          deterministicRandom()->randomInt(0, 100),
+		                                          deterministicRandom()->randomInt(0, 100))));
 	}
 
 	double t1 = timer_monotonic();
-	for (const auto& k : keys_generated) testmap.insert(k);
+	for (const auto& k : keys_generated)
+		testmap.insert(k);
 	double t2 = timer_monotonic();
-	printf("Ingested %d elements into map, Speed %f M/s\n", (int)keys_generated.size(),
+	printf("Ingested %d elements into map, Speed %f M/s\n",
+	       (int)keys_generated.size(),
 	       keys_generated.size() / (t2 - t1) / 1e6);
 
 	// sort a group after k elements were added
@@ -736,7 +768,8 @@ void ingestBenchmark() {
 				for (auto& key : keys_generated) {
 					int p = deterministicRandom()->randomInt(0, pageCount);
 					Page*& pPage = pages[p];
-					if (pPage == nullptr) pPage = new Page();
+					if (pPage == nullptr)
+						pPage = new Page();
 					Page& page = *pPage;
 
 					page.add(key);
@@ -769,8 +802,15 @@ void ingestBenchmark() {
 				elapsed = timer_monotonic() - elapsed;
 				printf("%6d keys  %6d pages %3f builds/page %6d builds/s  %6d pages/s  %5d avg keys/page  sort every "
 				       "%d deltas  rebuild every %5d bytes  %7d keys/s %8d keybytes/s\n",
-				       (int)keys_generated.size(), pageCount, (double)builds / pageCount, int(builds / elapsed),
-				       int(pageCount / elapsed), g, k, r, int(keys_generated.size() / elapsed),
+				       (int)keys_generated.size(),
+				       pageCount,
+				       (double)builds / pageCount,
+				       int(builds / elapsed),
+				       int(pageCount / elapsed),
+				       g,
+				       k,
+				       r,
+				       int(keys_generated.size() / elapsed),
 				       int(keybytes / elapsed));
 
 				for (auto p : pages) {
@@ -828,7 +868,8 @@ int main() {
 	testData.clear();
 	sampleQueries.clear();
 	for (int i = 0; i < 100; i++) {
-		testData.push_back(format("%d Main Street #%d, New York NY 12345, United States of America|", 1234 * (i / 100),
+		testData.push_back(format("%d Main Street #%d, New York NY 12345, United States of America|",
+		                          1234 * (i / 100),
 		                          (i / 10) % 10 + 1000) +
 		                   deterministicRandom()->randomUniqueID().shortString());
 	}
@@ -839,7 +880,8 @@ int main() {
 	printf("\nb+tree separators for index keys\n");
 	testData.clear();
 	for (int i = 0; i < 100000; i++) {
-		testData.push_back(format("%d Main Street #%d, New York NY 12345, United States of America|", 12 * (i / 100),
+		testData.push_back(format("%d Main Street #%d, New York NY 12345, United States of America|",
+		                          12 * (i / 100),
 		                          (i / 10) % 10 + 1000) +
 		                   deterministicRandom()->randomUniqueID().shortString());
 	}
