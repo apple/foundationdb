@@ -196,10 +196,10 @@ public:
 
 	FlowLock updateVersionLock;
 	FlowLock fetchKeysParallelismLock;
-	vector< Promise<FetchInjectionInfo*> > readyFetchKeys;
-
 	Promise<Void> otherError;
 	Promise<Void> coreStarted;
+
+	vector< Promise<FetchInjectionInfo*> > readyFetchKeys;
 
 	bool debug_inApplyUpdate;
 	double debug_lastValidateTime;
@@ -266,6 +266,7 @@ public:
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
 	}
 
+	~StorageCacheData() { TraceEvent(SevDebug, "SCUpdateError").backtrace();}
 	// Puts the given cacheRange into cachedRangeMap.  The caller is responsible for adding cacheRanges
 	//   for all ranges in cachedRangeMap.getAffectedRangesAfterInsertion(newCacheRange->keys)), because these
 	//   cacheRanges are invalidated by the call.
@@ -1452,7 +1453,10 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 				removeDataRange( data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->cachedRangeMap, keys );
 				//data->storage.clearRange( keys );
 			} else {
-				ASSERT( data->data().getLatestVersion() > data->version.get() );
+				//TraceEvent(SevDebug, interval.end(), data->thisServerID).
+				//	detail("PTreeVersion", data->data().getLatestVersion()).
+				//	detail("DataVersion", data->version.get());
+				//ASSERT( data->data().getLatestVersion() > data->version.get() );
 				removeDataRange( data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->cachedRangeMap, keys );
 				//setAvailableStatus(data, keys, false);
 				// Prevent another, overlapping fetchKeys from entering the Fetching phase until data->data().getLatestVersion() is durable
@@ -1476,7 +1480,7 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 AddingCacheRange::AddingCacheRange( StorageCacheData* server, KeyRangeRef const& keys )
 	: server(server), keys(keys), transferredVersion(invalidVersion), phase(WaitPrevious)
 {
-	fetchClient = fetchKeys(server, this);
+	fetchClient = fetchKeys(server, this);// || server->otherError.getFuture();
 }
 
 void AddingCacheRange::addMutation( Version version, MutationRef const& mutation ){
@@ -1864,6 +1868,7 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data )
 					auto fk = data->readyFetchKeys.back();
 					data->readyFetchKeys.pop_back();
 					fk.send( &fii );
+					if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
 				}
 				if (data->cacheRangeChangeCounter == changeCounter) break;
 				//TEST(true); // A fetchKeys completed while we were doing this, so eager might be outdated.  Read it again.
@@ -2137,6 +2142,7 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi, uint16_t id, R
 	actors.add(traceRole(Role::STORAGE_CACHE, ssi.id()));
 	self.coreStarted.send( Void() );
 
+	try {
 	loop {
 		++self.counters.loops;
 		choose {
@@ -2172,5 +2178,9 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi, uint16_t id, R
 		}
 		when(wait(actors.getResult())) {}
 		}
+	}
+	} catch (Error& e) {
+		TraceEvent(SevDebug, "SCActorFailed").error(e);
+		throw;
 	}
 }
