@@ -1222,7 +1222,7 @@ int init_args(mako_args_t* args) {
 	args->tpsmin = -1;
 	args->tpsinterval = 10;
 	args->tpschange = TPS_SIN;
-	args->stats_samplerate = 1000;
+	args->stats_samplerate = 100;
 	args->sampling = 1000;
 	args->key_length = 32;
 	args->value_length = 16;
