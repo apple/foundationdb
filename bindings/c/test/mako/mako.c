@@ -1387,7 +1387,7 @@ void usage() {
 	printf("%-24s %s\n", "    --tpsmin=TPS", "Specify the target min TPS");
 	printf("%-24s %s\n", "    --tpsinterval=SEC", "Specify the TPS change interval (Default: 10 seconds)");
 	printf("%-24s %s\n", "    --tpschange=<sin|square|pulse>", "Specify the TPS change type (Default: sin)");
-	printf("%-24s %s\n", "    --stats-samplerate=RATE", "Specify the sampling rate for tps stats (Default: sample once per 1000 ms)");
+	printf("%-24s %s\n", "    --stats_samplerate=RATE", "Specify the sampling rate for tps stats (Default: sample once per 1000 ms)");
 	printf("%-24s %s\n", "    --sampling=RATE", "Specify the sampling rate for latency stats");
 	printf("%-24s %s\n", "-m, --mode=MODE", "Specify the mode (build, run, clean)");
 	printf("%-24s %s\n", "-z, --zipf", "Use zipfian distribution instead of uniform distribution");
@@ -1661,7 +1661,7 @@ int validate_args(mako_args_t* args) {
 		}
 	}
 	if (args->stats_samplerate < 100) {
-		fprintf(stderr, "ERROR: --stats-samplerate must be set to sample every 100 ms or more\n");
+		fprintf(stderr, "ERROR: --stats_samplerate must be set to sample every 100 ms or more\n");
 		return -1;
 	}
 	return 0;
