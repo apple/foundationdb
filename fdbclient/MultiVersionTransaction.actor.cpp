@@ -1008,6 +1008,8 @@ void MultiVersionApi::setCallbacksOnExternalThreads() {
 }
 void MultiVersionApi::addExternalLibrary(std::string path) {
 	std::string filename = basename(path);
+	// we need at least one external library thread to run this library.
+	threadCount = std::max(threadCount, 1);
 
 	if (filename.empty() || !fileExists(path)) {
 		TraceEvent("ExternalClientNotFound").detail("LibraryPath", filename);
@@ -1023,6 +1025,8 @@ void MultiVersionApi::addExternalLibrary(std::string path) {
 void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 	TraceEvent("AddingExternalClientDirectory").detail("Directory", path);
 	std::vector<std::string> files = platform::listFiles(path, DYNAMIC_LIB_EXT);
+	// we need at least one external library thread to run these libraries.
+	threadCount = std::max(threadCount, 1);
 
 	for(auto filename : files) {
 		std::string lib = abspath(joinPath(path, filename));
@@ -1086,7 +1090,7 @@ void MultiVersionApi::disableLocalClient() {
 	if(networkStartSetup || bypassMultiClientApi) {
 		throw invalid_option();
 	}
-
+	threadCount = std::max(threadCount, 1);
 	localClientDisabled = true;
 }
 
@@ -1158,8 +1162,10 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		MutexHolder holder(lock);
 		validateOption(value, true, false, false);
 		ASSERT(!networkStartSetup);
-		disableLocalClient();
 		threadCount = extractIntOption(value, 1, 1024);
+		if (threadCount > 1) {
+			disableLocalClient();
+		}
 	}
 	else {
 		MutexHolder holder(lock);
@@ -1322,17 +1328,22 @@ Reference<IDatabase> MultiVersionApi::createDatabase(const char *clusterFilePath
 		lock.leave();
 		throw network_not_setup();
 	}
-
-	int threadIdx = nextThread;
-	nextThread = (nextThread + 1) % threadCount;
-
-	lock.leave();
-
 	std::string clusterFile(clusterFilePath);
-	if(localClientDisabled) {
+
+	if (threadCount > 1) {
+		ASSERT(localClientDisabled);
+		ASSERT(!bypassMultiClientApi);
+		
+		int threadIdx = nextThread;
+		nextThread = (nextThread + 1) % threadCount;
+		lock.leave();
+		for(auto it : externalClients) {
+			TraceEvent("CreatingDatabaseOnExternalClient").detail("LibraryPath", it.first).detail("Failed", it.second[threadIdx]->failed);
+		}
 		return Reference<IDatabase>(new MultiVersionDatabase(this, threadIdx, clusterFile, Reference<IDatabase>()));
 	}
-	ASSERT(threadCount == 1); // threadCount must be one if local client is enabled.
+
+	lock.leave();
 
 	auto db = localClient->api->createDatabase(clusterFilePath);
 	if(bypassMultiClientApi) {
@@ -1340,9 +1351,9 @@ Reference<IDatabase> MultiVersionApi::createDatabase(const char *clusterFilePath
 	}
 	else {
 		for(auto it : externalClients) {
-			TraceEvent("CreatingDatabaseOnExternalClient").detail("LibraryPath", it.first/*[threadIdx]->libPath*/).detail("Failed", it.second[threadIdx]->failed);
+			TraceEvent("CreatingDatabaseOnExternalClient").detail("LibraryPath", it.first).detail("Failed", it.second[0]->failed);
 		}
-		return Reference<IDatabase>(new MultiVersionDatabase(this, threadIdx, clusterFile, db));
+		return Reference<IDatabase>(new MultiVersionDatabase(this, 0, clusterFile, db));
 	}
 }
 
@@ -1447,7 +1458,7 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 	envOptionsLoaded = true;
 }
 
-MultiVersionApi::MultiVersionApi() : bypassMultiClientApi(false), networkStartSetup(false), networkSetup(false), callbackOnMainThread(true), externalClient(false), localClientDisabled(false), apiVersion(0), envOptionsLoaded(false), threadCount(1) {}
+MultiVersionApi::MultiVersionApi() : bypassMultiClientApi(false), networkStartSetup(false), networkSetup(false), callbackOnMainThread(true), externalClient(false), localClientDisabled(false), apiVersion(0), envOptionsLoaded(false), threadCount(0) {}
 
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 

@@ -8,7 +8,7 @@ function usage {
 	exit 1
 }
 
-if (( $# != 2 )) ; then
+if (( $# != 3 )) ; then
 	echo Wrong number of arguments
 	usage
 fi
@@ -21,11 +21,13 @@ if [ ! -f ${FDB} ]; then
 	usage
 fi
 
+rm -rf ./loopback-cluster-*
+
 for i in `seq 1 $2` ; do
 	DIR=./loopback-cluster-$i
-	PORT_PREFIX=${i}50
-	rm -rf ${DIR}
 	mkdir -p ${DIR}
+
+	PORT_PREFIX=${i}50
 	CLUSTER_FILE="test$i:testdb$i@127.0.0.1:${PORT_PREFIX}1"
 	CLUSTER=${DIR}/fdb.cluster
 	echo $CLUSTER_FILE > $CLUSTER
@@ -39,6 +41,8 @@ for i in `seq 1 $2` ; do
 	done
 	
 	CLI="$ROOT/bin/fdbcli -C ${CLUSTER} --exec"
-	( sleep 2 ; $CLI "configure new ssd single" ; sleep 1 ; $CLI "status minimal" ) &
+	( sleep 2 ; $CLI "configure new ssd single" ) &
 done;
-sleep 10000000000
+
+sleep 2
+$3
