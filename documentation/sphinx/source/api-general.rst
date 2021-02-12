@@ -125,7 +125,7 @@ Because it can have only a single network thread, a client process may become li
 
 If you suspect that a client process's workload may be saturating the network thread, this can be confirmed by checking whether the network thread is running with high CPU usage. In the :ref:`client trace logs <client-trace-logging>`, the ``ProcessMetrics`` trace event has a field for ``MainThreadCPUSeconds`` that indicates the number of seconds out of ``Elapsed`` that the network thread was busy. You can also attempt to identify a busy thread from any tool that reports the CPU activity of threads in your process.
 
-.. note:: FoundationDB 6.3 introduced :ref:`multi-threaded client <_multi-threaded-client>`, and can alternatively be used to scale clients.
+.. note:: FoundationDB 6.3 introduced :ref:`multi-threaded client <multi-threaded-client>`, and can alternatively be used to scale clients.
 
 .. _multi-threaded-client:
 

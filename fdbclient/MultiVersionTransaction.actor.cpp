@@ -729,7 +729,7 @@ MultiVersionDatabase::~MultiVersionDatabase() {
 
 Reference<IDatabase> MultiVersionDatabase::debugCreateFromExistingDatabase(Reference<IDatabase> db) {
 	return Reference<IDatabase>(new MultiVersionDatabase(
-	    MultiVersionApi::api, 0, "", db, false)); // XXX better choice of thread to run this database on?
+	    MultiVersionApi::api, 0, "", db, false));
 }
 
 Reference<ITransaction> MultiVersionDatabase::createTransaction() {
@@ -856,7 +856,7 @@ void MultiVersionDatabase::DatabaseState::stateChanged() {
 	}
 
 	if(newIndex == -1) {
-		ASSERT(currentClientIndex == 0); // This can only happen for the local client, which we set as the current connection before we know it's connected
+		ASSERT_EQ(currentClientIndex, 0); // This can only happen for the local client, which we set as the current connection before we know it's connected
 		return;
 	}
 
@@ -919,7 +919,7 @@ void MultiVersionDatabase::DatabaseState::cancelConnections() {
 // MultiVersionApi
 
 bool MultiVersionApi::apiVersionAtLeast(int minVersion) {
-	ASSERT(MultiVersionApi::api->apiVersion != 0);
+	ASSERT_NE(MultiVersionApi::api->apiVersion, 0);
 	return MultiVersionApi::api->apiVersion >= minVersion || MultiVersionApi::api->apiVersion < 0;
 }
 
@@ -945,13 +945,12 @@ void MultiVersionApi::runOnExternalClients(int threadIdx, std::function<void(Ref
 		}
 		catch(Error &e) {
 			if(e.code() == error_code_external_client_already_loaded) {
-				// XXX report libPath that was configured; not the temp file name
-				TraceEvent(SevInfo, "ExternalClientAlreadyLoaded").error(e).detail("LibPath", client->libPath);
+				TraceEvent(SevInfo, "ExternalClientAlreadyLoaded").error(e).detail("LibPath", c->first);
 				c = externalClients.erase(c);
 				continue;
 			}
 			else {
-				TraceEvent(SevWarnAlways, "ExternalClientFailure").error(e).detail("LibPath", client->libPath);
+				TraceEvent(SevWarnAlways, "ExternalClientFailure").error(e).detail("LibPath", c->first);
 				client->failed = true;
 				newFailure = true;
 			}
@@ -1044,10 +1043,15 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 		}
 	}
 }
-
-std::vector<std::string> MultiVersionApi::copyExternalLibraryPerThread(std::string path) {
+#if defined(__unixish__)
+std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPerThread(std::string path) {
+	ASSERT_GE(threadCount, 1);
 	// Copy library for each thread configured per version
-	std::vector<std::string> paths;
+	std::vector<std::pair<std::string, bool>> paths;
+	// It's tempting to use the so once without copying.  However, we don't know
+	// if the thing we're about to copy is the shared object executing this code
+	// or not, so this optimization is unsafe.
+	// paths.push_back({path, false});
 	for (int ii = 0; ii < threadCount; ++ii) {
 		std::string filename = basename(path);
 
@@ -1063,7 +1067,6 @@ std::vector<std::string> MultiVersionApi::copyExternalLibraryPerThread(std::stri
 
 		constexpr size_t buf_sz = 4096;
 		char buf[buf_sz];
-		std::cout << path << " -> " << tempName << std::endl;
 		while (1) {
 			ssize_t readCount = read(fd, buf, buf_sz);
 			if (readCount == 0) {
@@ -1086,11 +1089,21 @@ std::vector<std::string> MultiVersionApi::copyExternalLibraryPerThread(std::stri
 		close(fd);
 		close(tempFd);
 
-		paths.push_back(tempName);
+		paths.push_back({tempName, true}); // use + delete temporary copies of the library.
 	}
 
 	return paths;
 }
+#else
+std::vector<std::pair< std::string, bool> > MultiVersionApi::copyExternalLibraryPerThread(std::string path) {
+	if (threadCount > 1) {
+		throw platform_error(); // not supported
+	}
+	std::vector<std::pair<std::string, bool>> paths;
+	paths.push_back({ path , false });
+	return paths;
+}
+#endif
 
 void MultiVersionApi::disableLocalClient() {
 	MutexHolder holder(lock);
@@ -1169,7 +1182,12 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		MutexHolder holder(lock);
 		validateOption(value, true, false, false);
 		ASSERT(!networkStartSetup);
+#if defined(__unixish__)
 		threadCount = extractIntOption(value, 1, 1024);
+#else
+		// multiple client threads are not supported on windows.
+		threadCount = extractIntOption(value, 1, 1);
+#endif
 		if (threadCount > 1) {
 			disableLocalClient();
 		}
@@ -1212,9 +1230,9 @@ void MultiVersionApi::setupNetwork() {
 					TraceEvent("AddingExternalClient")
 					    .detail("FileName", filename)
 					    .detail("LibraryPath", path)
-					    .detail("TempPath", tmp);
+					    .detail("TempPath", tmp.first);
 					externalClients[filename].push_back(
-					    Reference<ClientInfo>(new ClientInfo(new DLApi(tmp, true /*unlink on load*/), path)));
+					    Reference<ClientInfo>(new ClientInfo(new DLApi(tmp.first, tmp.second /*unlink on load*/), path)));
 				}
 			}
 		}
@@ -1489,7 +1507,7 @@ void ClientInfo::loadProtocolVersion() {
 	protocolVersion = ProtocolVersion(strtoull(protocolVersionStr.c_str(), &next, 16));
 
 	ASSERT(protocolVersion.version() != 0 && protocolVersion.version() != ULLONG_MAX);
-	ASSERT(next == &protocolVersionStr[protocolVersionStr.length()]);
+	ASSERT_EQ(next, &protocolVersionStr[protocolVersionStr.length()]);
 }
 
 bool ClientInfo::canReplace(Reference<ClientInfo> other) const {
@@ -1537,7 +1555,7 @@ TEST_CASE("/fdbclient/multiversionclient/EnvironmentVariableParsing" ) {
 		ASSERT(false);
 	}
 	catch(Error &e) {
-		ASSERT(e.code() == error_code_invalid_option_value);
+		ASSERT_EQ(e.code(), error_code_invalid_option_value);
 	}
 
 	return Void();
@@ -1696,7 +1714,7 @@ ACTOR Future<Void> checkUndestroyedFutures(std::vector<ThreadSingleAssignmentVar
 	for(fNum = 0; fNum < undestroyed.size(); ++fNum) {
 		f = undestroyed[fNum];
 
-		ASSERT(f->debugGetReferenceCount() == 1);
+		ASSERT_EQ(f->debugGetReferenceCount(), 1);
 		ASSERT(f->isReady());
 
 		f->cancel();
@@ -1780,7 +1798,7 @@ struct AbortableTest {
 		auto newFuture = FutureInfo(abortableFuture(f.future, ThreadFuture<Void>(abort)), f.expectedValue, f.legalErrors);
 
 		if(!abort->isReady() && deterministicRandom()->coinflip()) {
-			ASSERT(abort->status == ThreadSingleAssignmentVarBase::Unset);
+			ASSERT_EQ(abort->status, ThreadSingleAssignmentVarBase::Unset);
 			newFuture.threads.push_back(g_network->startThread(setAbort, abort));
 		}
 
@@ -1824,7 +1842,7 @@ private:
 struct DLTest {
 	static FutureInfo createThreadFuture(FutureInfo f) {
 		return FutureInfo(toThreadFuture<int>(getApi(), (FdbCApi::FDBFuture*)f.future.extractPtr(), [](FdbCApi::FDBFuture *f, FdbCApi *api) {
-			ASSERT(((ThreadSingleAssignmentVar<int>*)f)->debugGetReferenceCount() >= 1);
+			ASSERT_GE(((ThreadSingleAssignmentVar<int>*)f)->debugGetReferenceCount(), 1);
 			return ((ThreadSingleAssignmentVar<int>*)f)->get();
 		}), f.expectedValue, f.legalErrors);
 	}
