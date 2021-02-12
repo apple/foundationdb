@@ -778,7 +778,7 @@ bool TLSPolicy::verify_peer(bool preverified, X509_STORE_CTX* store_ctx) {
 	}
 
 	if(!preverified) {
-		TraceEvent("TLSPolicyFailure").suppressFor(1.0).detail("Reason", "preverification failed").detail("VerifyError", X509_verify_cert_error_string(X509_STORE_CTX_get_error(store_ctx)));
+		TraceEvent(SevWarn, "TLSPolicyFailure").suppressFor(1.0).detail("Reason", "preverification failed").detail("VerifyError", X509_verify_cert_error_string(X509_STORE_CTX_get_error(store_ctx)));
 		return false;
 	}
 
@@ -801,7 +801,7 @@ bool TLSPolicy::verify_peer(bool preverified, X509_STORE_CTX* store_ctx) {
 	if (!rc) {
 		// log the various failure reasons
 		for (std::string reason : verify_failure_reasons) {
-			TraceEvent("TLSPolicyFailure").suppressFor(1.0).detail("Reason", reason);
+			TraceEvent(SevWarn, "TLSPolicyFailure").suppressFor(1.0).detail("Reason", reason);
 		}
 	}
 	return rc;
