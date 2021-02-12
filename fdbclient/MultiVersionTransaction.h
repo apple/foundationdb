@@ -283,7 +283,7 @@ struct ClientDesc {
 	std::string const libPath;
 	bool const external;
 
-	ClientDesc(std::string libPath, bool external) : libPath(libPath), external(external) { }
+	ClientDesc(std::string libPath, bool external) : libPath(libPath), external(external) {}
 };
 
 struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
@@ -293,8 +293,9 @@ struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
 	std::vector<std::pair<void (*)(void*), void*>> threadCompletionHooks;
 
 	ClientInfo() : ClientDesc(std::string(), false), protocolVersion(0), api(NULL), failed(true) {}
-	ClientInfo(IClientApi *api) : ClientDesc("internal", false), protocolVersion(0), api(api), failed(false) {}
-	ClientInfo(IClientApi *api, std::string libPath) : ClientDesc(libPath, true), protocolVersion(0), api(api), failed(false) {}
+	ClientInfo(IClientApi* api) : ClientDesc("internal", false), protocolVersion(0), api(api), failed(false) {}
+	ClientInfo(IClientApi* api, std::string libPath)
+	  : ClientDesc(libPath, true), protocolVersion(0), api(api), failed(false) {}
 
 	void loadProtocolVersion();
 	bool canReplace(Reference<ClientInfo> other) const;
@@ -304,7 +305,8 @@ class MultiVersionApi;
 
 class MultiVersionDatabase : public IDatabase, ThreadSafeReferenceCounted<MultiVersionDatabase> {
 public:
-	MultiVersionDatabase(MultiVersionApi *api, int threadIdx, std::string clusterFilePath, Reference<IDatabase> db, bool openConnectors=true);
+	MultiVersionDatabase(MultiVersionApi* api, int threadIdx, std::string clusterFilePath, Reference<IDatabase> db,
+	                     bool openConnectors = true);
 	~MultiVersionDatabase();
 
 	Reference<ITransaction> createTransaction() override;
@@ -386,8 +388,9 @@ public:
 	static MultiVersionApi* api;
 
 	Reference<ClientInfo> getLocalClient();
-	void runOnExternalClients(int threadId, std::function<void(Reference<ClientInfo>)>, bool runOnFailedClients=false);
-	void runOnExternalClientsAllThreads(std::function<void(Reference<ClientInfo>)>, bool runOnFailedClients=false);
+	void runOnExternalClients(int threadId, std::function<void(Reference<ClientInfo>)>,
+	                          bool runOnFailedClients = false);
+	void runOnExternalClientsAllThreads(std::function<void(Reference<ClientInfo>)>, bool runOnFailedClients = false);
 
 	void updateSupportedVersions();
 
