@@ -2277,8 +2277,7 @@ ACTOR Future<Void> sameVersionDiffValue(Version ver, Key key, Optional<Value> va
 				metadata->watchFutureSS.cancel();
 			}
 
-			if (valSS ==
-			    value) { // val_3 == val_2 (storage server value matches value passed into the function -> new watch)
+			if (valSS == value) { // val_3 == val_2 (storage server value matches value passed into the function -> new watch)
 				metadata = makeReference<WatchMetadata>(key, value, ver, info, tags);
 				KeyRef keyRef = cx->setWatchMetadata(metadata);
 
