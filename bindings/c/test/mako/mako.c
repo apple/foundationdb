@@ -2104,7 +2104,8 @@ int stats_process_main(mako_args_t* args, mako_stats_t* stats, volatile double* 
 		clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_now);
 
 		/* print stats every stats_samplerate milliseconds */
-		if (timer_now.tv_nsec > timer_prev.tv_nsec + args->stats_samplerate * 1000000) {
+	if (timer_now.tv_sec * 1000000000.0 + timer_now.tv_nsec >
+		timer_prev.tv_sec * 1000000000.0 + timer_prev.tv_nsec + args->stats_samplerate * 1000000) {
 
 			/* adjust throttle rate if needed */
 			if (args->tpsmax != args->tpsmin) {
