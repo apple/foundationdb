@@ -29,7 +29,7 @@ Fixes
 
 Status
 ------
-* Added transactions.rejected_for_queued_too_long to bookkeeping the number of transactions rejected by commit proxy because its queuing time exceeds MVCC window. `(PR #4288) <https://github.com/apple/foundationdb/pull/4288>`_
+* Added transactions.rejected_for_queued_too_long for bookkeeping the number of transactions rejected by commit proxy because its queuing time exceeds MVCC window. `(PR #4288) <https://github.com/apple/foundationdb/pull/4288>`_
 
 
 Bindings
