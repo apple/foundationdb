@@ -601,6 +601,11 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "counter":0,
                "roughness":0.0
             },
+            "rejected_for_queued_too_long":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
             "committed":{
                "hz":0.0,
                "counter":0,

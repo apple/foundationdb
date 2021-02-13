@@ -52,6 +52,7 @@ struct ProxyStats {
 	Counter txnCommitIn, txnCommitVersionAssigned, txnCommitResolving, txnCommitResolved, txnCommitOut,
 	    txnCommitOutSuccess, txnCommitErrors;
 	Counter txnConflicts;
+	Counter txnRejectedForQueuedTooLong;
 	Counter commitBatchIn, commitBatchOut;
 	Counter mutationBytes;
 	Counter mutations;
@@ -82,15 +83,16 @@ struct ProxyStats {
 
 	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion,
 	                    int64_t* commitBatchesMemBytesCountPtr)
-	  : cc("ProxyStats", id.toString()), maxComputeNS(0), minComputeNS(1e12),
-	    txnCommitIn("TxnCommitIn", cc), txnCommitVersionAssigned("TxnCommitVersionAssigned", cc),
-	    txnCommitResolving("TxnCommitResolving", cc), txnCommitResolved("TxnCommitResolved", cc),
-	    txnCommitOut("TxnCommitOut", cc), txnCommitOutSuccess("TxnCommitOutSuccess", cc),
-	    txnCommitErrors("TxnCommitErrors", cc), txnConflicts("TxnConflicts", cc), commitBatchIn("CommitBatchIn", cc),
-	    commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc), mutations("Mutations", cc),
-	    conflictRanges("ConflictRanges", cc), keyServerLocationIn("KeyServerLocationIn", cc),
-	    keyServerLocationOut("KeyServerLocationOut", cc), keyServerLocationErrors("KeyServerLocationErrors", cc),
-	    lastCommitVersionAssigned(0), txnExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
+	  : cc("ProxyStats", id.toString()), maxComputeNS(0), minComputeNS(1e12), txnCommitIn("TxnCommitIn", cc),
+	    txnCommitVersionAssigned("TxnCommitVersionAssigned", cc), txnCommitResolving("TxnCommitResolving", cc),
+	    txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
+	    txnCommitOutSuccess("TxnCommitOutSuccess", cc), txnCommitErrors("TxnCommitErrors", cc),
+	    txnConflicts("TxnConflicts", cc), commitBatchIn("CommitBatchIn", cc),
+	    txnRejectedForQueuedTooLong("TxnRejectedForQueuedTooLong", cc), commitBatchOut("CommitBatchOut", cc),
+	    mutationBytes("MutationBytes", cc), mutations("Mutations", cc), conflictRanges("ConflictRanges", cc),
+	    keyServerLocationIn("KeyServerLocationIn", cc), keyServerLocationOut("KeyServerLocationOut", cc),
+	    keyServerLocationErrors("KeyServerLocationErrors", cc), lastCommitVersionAssigned(0),
+	    txnExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
 	    commitLatencySample("CommitLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    commitLatencyBands("CommitLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
