@@ -632,7 +632,18 @@ std::string encodeFailedServersKey(AddressExclusion const& addr) {
 	return failedServersPrefix.toString() + addr.toString();
 }
 
-const KeyRangeRef workerListKeys(LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0"));
+const KeyRangeRef globalConfigKeys( LiteralStringRef("\xff/globalConfig/"), LiteralStringRef("\xff/globalConfig0") );
+const KeyRef globalConfigPrefix = globalConfigKeys.begin;
+
+const KeyRangeRef globalConfigDataKeys( LiteralStringRef("\xff/globalConfig/k/"), LiteralStringRef("\xff/globalConfig/k0") );
+const KeyRef globalConfigDataPrefix = globalConfigDataKeys.begin;
+
+const KeyRangeRef globalConfigHistoryKeys( LiteralStringRef("\xff/globalConfig/h/"), LiteralStringRef("\xff/globalConfig/h0") );
+const KeyRef globalConfigHistoryPrefix = globalConfigHistoryKeys.begin;
+
+const KeyRef globalConfigVersionKey = LiteralStringRef("\xff/globalConfig/v");
+
+const KeyRangeRef workerListKeys( LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0") );
 const KeyRef workerListPrefix = workerListKeys.begin;
 
 const Key workerListKeyFor(StringRef processID) {

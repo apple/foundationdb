@@ -3198,26 +3198,65 @@ ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				state Optional<Value> globalConfigVersion = wait(tr.get(globalConfigVersionKey));
 				state Optional<Value> rateVal = wait(tr.get(fdbClientInfoTxnSampleRate));
 				state Optional<Value> limitVal = wait(tr.get(fdbClientInfoTxnSizeLimit));
-				ClientDBInfo clientInfo = db->clientInfo->get();
-				double sampleRate = rateVal.present()
-				                        ? BinaryReader::fromStringRef<double>(rateVal.get(), Unversioned())
-				                        : std::numeric_limits<double>::infinity();
-				int64_t sizeLimit =
-				    limitVal.present() ? BinaryReader::fromStringRef<int64_t>(limitVal.get(), Unversioned()) : -1;
-				if (sampleRate != clientInfo.clientTxnInfoSampleRate ||
-				    sizeLimit != clientInfo.clientTxnInfoSampleRate) {
+				state ClientDBInfo clientInfo = db->clientInfo->get();
+
+				if (globalConfigVersion.present()) {
+					BinaryReader versionReader = BinaryReader(globalConfigVersion.get(), AssumeVersion(g_network->protocolVersion()));
+					Version version;
+					ProtocolVersion protocolVersion;
+					versionReader >> version >> protocolVersion;
+
+					state Arena arena;
+					if (protocolVersion == g_network->protocolVersion()) {
+						Standalone<RangeResultRef> globalConfigHistory = wait(tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY));
+						// If the global configuration version key has been
+						// set, the history should contain at least one item.
+						ASSERT(globalConfigHistory.size() > 0);
+						clientInfo.history.clear();
+
+						for (const auto& kv : globalConfigHistory) {
+							BinaryReader rd = BinaryReader(kv.value, AssumeVersion(g_network->protocolVersion()));
+							Standalone<std::pair<Version, VectorRef<MutationRef>>> data;
+							rd >> data >> arena;
+							clientInfo.history.push_back(data);
+						}
+
+						// History should be ordered by version, ascending.
+						std::sort(clientInfo.history.begin(), clientInfo.history.end(), [](const auto& lhs, const auto& rhs) {
+							return lhs.first < rhs.first;
+						});
+					} else {
+						// If the protocol version has changed, the
+						// GlobalConfig actor should refresh its view by
+						// reading the entire global configuration key range.
+						// An empty mutation list will signal the actor to
+						// refresh.
+						clientInfo.history.clear();
+					}
+
+					clientInfo.id = deterministicRandom()->randomUniqueID();
+					db->clientInfo->set(clientInfo);
+				}
+
+				// TODO: Remove this and move to global config space
+				double sampleRate = rateVal.present() ? BinaryReader::fromStringRef<double>(rateVal.get(), Unversioned()) : std::numeric_limits<double>::infinity();
+				int64_t sizeLimit = limitVal.present() ? BinaryReader::fromStringRef<int64_t>(limitVal.get(), Unversioned()) : -1;
+				if (sampleRate != clientInfo.clientTxnInfoSampleRate || sizeLimit != clientInfo.clientTxnInfoSampleRate) {
 					clientInfo.id = deterministicRandom()->randomUniqueID();
 					clientInfo.clientTxnInfoSampleRate = sampleRate;
 					clientInfo.clientTxnInfoSizeLimit = sizeLimit;
 					db->clientInfo->set(clientInfo);
 				}
 
+				state Future<Void> globalConfigFuture = tr.watch(globalConfigVersionKey);
 				state Future<Void> watchRateFuture = tr.watch(fdbClientInfoTxnSampleRate);
 				state Future<Void> watchLimitFuture = tr.watch(fdbClientInfoTxnSizeLimit);
 				wait(tr.commit());
 				choose {
+					when (wait(globalConfigFuture)) { break; }
 					when(wait(watchRateFuture)) { break; }
 					when(wait(watchLimitFuture)) { break; }
 				}

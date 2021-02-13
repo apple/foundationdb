@@ -113,6 +113,7 @@ struct ClientDBInfo {
 	vector<CommitProxyInterface> commitProxies;
 	Optional<CommitProxyInterface>
 	    firstCommitProxy; // not serialized, used for commitOnFirstProxy when the commit proxies vector has been shrunk
+	vector<Standalone<std::pair<Version, VectorRef<MutationRef>>>> history;
 	double clientTxnInfoSampleRate;
 	int64_t clientTxnInfoSizeLimit;
 	Optional<Value> forward;
@@ -132,15 +133,8 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar,
-		           grvProxies,
-		           commitProxies,
-		           id,
-		           clientTxnInfoSampleRate,
-		           clientTxnInfoSizeLimit,
-		           forward,
-		           transactionTagSampleRate,
-		           transactionTagSampleCost);
+		serializer(ar, grvProxies, commitProxies, id, history, clientTxnInfoSampleRate, clientTxnInfoSizeLimit,
+	               forward, transactionTagSampleRate, transactionTagSampleCost);
 	}
 };
 

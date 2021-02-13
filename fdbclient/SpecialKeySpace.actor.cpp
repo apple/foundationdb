@@ -21,7 +21,7 @@
 #include "boost/lexical_cast.hpp"
 #include "boost/algorithm/string.hpp"
 
-#include "fdbclient/Knobs.h"
+#include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "flow/Arena.h"
 #include "flow/UnitTest.h"
@@ -64,6 +64,8 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	{ SpecialKeySpace::MODULE::ERRORMSG, singleKeyRange(LiteralStringRef("\xff\xff/error_message")) },
 	{ SpecialKeySpace::MODULE::CONFIGURATION,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/configuration/"), LiteralStringRef("\xff\xff/configuration0")) },
+	{ SpecialKeySpace::MODULE::GLOBALCONFIG,
+	  KeyRangeRef(LiteralStringRef("\xff\xff/global_config/"), LiteralStringRef("\xff\xff/global_config0")) },
 	{ SpecialKeySpace::MODULE::TRACING,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/tracing/"), LiteralStringRef("\xff\xff/tracing0")) }
 };
@@ -1369,11 +1371,128 @@ Future<Optional<std::string>> ConsistencyCheckImpl::commit(ReadYourWritesTransac
 	return Optional<std::string>();
 }
 
-TracingOptionsImpl::TracingOptionsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {
-	TraceEvent("TracingOptionsImpl::TracingOptionsImpl").detail("Range", kr);
+GlobalConfigImpl::GlobalConfigImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<Standalone<RangeResultRef>> GlobalConfigImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                              KeyRangeRef kr) const {
+	Standalone<RangeResultRef> result;
+
+	// if (kr.begin != kr.end) {
+	// 	ryw->setSpecialKeySpaceErrorMsg("get range disabled, please fetch a single key");
+	// 	throw special_keys_api_failure();
+	// }
+
+	auto& globalConfig = GlobalConfig::globalConfig();
+	KeyRef key = kr.begin.removePrefix(getKeyRange().begin);
+	const std::any& any = globalConfig.get(key);
+	if (any.has_value()) {
+		if (any.type() == typeid(Standalone<StringRef>)) {
+			result.push_back_deep(result.arena(), KeyValueRef(kr.begin, std::any_cast<Standalone<StringRef>>(globalConfig.get(key)).contents()));
+		} else if (any.type() == typeid(int64_t)) {
+			result.push_back_deep(result.arena(), KeyValueRef(kr.begin, std::to_string(std::any_cast<int64_t>(globalConfig.get(key)))));
+		} else {
+			ASSERT(false);
+		}
+	}
+	return result;
 }
 
-Future<Standalone<RangeResultRef>> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+void GlobalConfigImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
+	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(value)));
+}
+
+ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* globalConfig, ReadYourWritesTransaction* ryw) {
+	state Transaction& tr = ryw->getTransaction();
+
+	// History should only contain three most recent updates. If it currently
+	// has three items, remove the oldest to make room for a new item.
+	Standalone<RangeResultRef> history = wait(tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY, false, true));
+	constexpr int kGlobalConfigMaxHistorySize = 3;
+	if (history.size() > kGlobalConfigMaxHistorySize - 1) {
+		std::vector<KeyRef> keys;
+		for (const auto& kv : history) {
+			keys.push_back(kv.key);
+		}
+		// Fix ordering of returned keys. This will ensure versions are ordered
+		// numerically; for example \xff/globalConfig/h/1000 should come after
+		// \xff/globalConfig/h/999.
+		std::sort(keys.begin(), keys.end(), [](const KeyRef& lhs, const KeyRef& rhs) {
+			if (lhs.size() != rhs.size()) {
+				return lhs.size() < rhs.size();
+			}
+			return lhs.compare(rhs) < 0;
+		});
+
+		// Cannot use a range clear because of how keys are ordered in FDB.
+		//   \xff/globalConfig/h/999 -> ...
+		//   \xff/globalConfig/h/1000 -> ...
+		//   \xff/globalConfig/h/1001 -> ...
+		//
+		//   clear_range(\xff/globalConfig/h, \xff/globalConfig/h/1000) results
+		//   in zero key-value pairs being deleted (999 is lexicographically
+		//   larger than 1000, and the range is exclusive).
+		for (int i = 0; i < keys.size() - (kGlobalConfigMaxHistorySize - 1); ++i) {
+			tr.clear(keys[i]);
+		}
+	}
+
+	// TODO: Should probably be using the commit version...
+	Version readVersion = wait(ryw->getReadVersion());
+	BinaryWriter wr = BinaryWriter(AssumeVersion(g_network->protocolVersion()));
+
+	Arena arena;
+	VectorRef<MutationRef> mutations;
+
+	// Transform writes from special-key-space (\xff\xff/global_config/) to
+	// system key space (\xff/globalConfig/).
+	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
+	    ryw->getSpecialKeySpaceWriteMap().containedRanges(specialKeys);
+	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::iterator iter = ranges.begin();
+	while (iter != ranges.end()) {
+		Key bareKey = iter->begin().removePrefix(globalConfig->getKeyRange().begin);
+		Key systemKey = bareKey.withPrefix(globalConfigDataPrefix);
+		std::pair<bool, Optional<Value>> entry = iter->value();
+		if (entry.first) {
+			if (entry.second.present()) {
+				mutations.emplace_back_deep(arena, MutationRef(MutationRef::SetValue, bareKey, entry.second.get()));
+				tr.set(systemKey, entry.second.get());
+			} else {
+				mutations.emplace_back_deep(arena, MutationRef(MutationRef::ClearRange, bareKey, keyAfter(bareKey)));
+				tr.clear(systemKey);
+			}
+		}
+		++iter;
+	}
+
+	wr << std::make_pair(readVersion, mutations);
+
+	// Record the mutations in this commit into the global configuration history.
+	Key historyVersionKey = globalConfigHistoryPrefix.withSuffix(std::to_string(readVersion));
+	tr.set(historyVersionKey, wr.toValue());
+
+	ProtocolVersion protocolVersion = g_network->protocolVersion();
+	BinaryWriter versionWriter = BinaryWriter(AssumeVersion(protocolVersion));
+	versionWriter << readVersion << protocolVersion;
+	tr.set(globalConfigVersionKey, versionWriter.toValue());
+
+	return Optional<std::string>();
+
+}
+
+Future<Optional<std::string>> GlobalConfigImpl::commit(ReadYourWritesTransaction* ryw) {
+	return globalConfigCommitActor(this, ryw);
+}
+
+void GlobalConfigImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
+	// TODO
+}
+
+void GlobalConfigImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
+	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
+}
+
+Future<Standalone<RangeResultRef>> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                                KeyRangeRef kr) const {
 	Standalone<RangeResultRef> result;
 	for (const auto& option : SpecialKeySpace::getTracingOptions()) {
 		auto key = getKeyRange().begin.withSuffix(option);

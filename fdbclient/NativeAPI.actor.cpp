@@ -36,6 +36,7 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
@@ -962,6 +963,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 
+	GlobalConfig::create(this, clientInfo);
+
 	if (apiVersionAtLeast(700)) {
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::ERRORMSG,
 		                              SpecialKeySpace::IMPLTYPE::READONLY,
@@ -1018,9 +1021,13 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		        singleKeyRange(LiteralStringRef("consistency_check_suspended"))
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeySpaceModule(
-		    SpecialKeySpace::MODULE::TRACING,
-		    SpecialKeySpace::IMPLTYPE::READWRITE,
-		    std::make_unique<TracingOptionsImpl>(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::TRACING)));
+		    SpecialKeySpace::MODULE::GLOBALCONFIG, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<GlobalConfigImpl>(
+		        SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG)));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::TRACING, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<TracingOptionsImpl>(
+		        SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::TRACING)));
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::CONFIGURATION,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
