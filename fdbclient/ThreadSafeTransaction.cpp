@@ -22,6 +22,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/versions.h"
+#include "fdbclient/NativeAPI.actor.h"
 
 // Users of ThreadSafeTransaction might share Reference<ThreadSafe...> between different threads as long as they don't call addRef (e.g. C API follows this).
 // Therefore, it is unsafe to call (explicitly or implicitly) this->addRef in any of these functions.
@@ -67,6 +68,31 @@ void ThreadSafeDatabase::setOption( FDBDatabaseOptions::Option option, Optional<
 	}, &db->deferredError );
 }
 
+ThreadFuture<int64_t> ThreadSafeDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
+	DatabaseContext *db = this->db;
+	Key addressKey = address;
+	return onMainThread( [db, addressKey, check, duration]() -> Future<int64_t> {
+		return db->rebootWorker(addressKey, check, duration);
+	} );
+}
+
+ThreadFuture<Void> ThreadSafeDatabase::forceRecoveryWithDataLoss(const StringRef &dcid) {
+	DatabaseContext *db = this->db;
+	Key dcidKey = dcid;
+	return onMainThread( [db, dcidKey]() -> Future<Void> {
+		return db->forceRecoveryWithDataLoss(dcidKey);
+	} );
+}
+
+ThreadFuture<Void> ThreadSafeDatabase::createSnapshot(const StringRef& uid, const StringRef& snapshot_command) {
+	DatabaseContext *db = this->db;
+	Key snapUID = uid;
+	Key cmd = snapshot_command;
+	return onMainThread([db, snapUID, cmd]() -> Future<Void> {
+		return db->createSnapshot(snapUID, cmd);
+	});
+}
+
 ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
 	ClusterConnectionFile *connFile = new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFilename).first);
 
@@ -84,12 +110,12 @@ ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion)
 		catch(...) {
 			new (db) DatabaseContext(unknown_error());
 		}
-	}, NULL);
+	}, nullptr);
 }
 
 ThreadSafeDatabase::~ThreadSafeDatabase() {
 	DatabaseContext *db = this->db;
-	onMainThreadVoid( [db](){ db->delref(); }, NULL );
+	onMainThreadVoid( [db](){ db->delref(); }, nullptr );
 }
 
 ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx) {
@@ -107,18 +133,18 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx) {
 		    cx->addref();
 		    new (tr) ReadYourWritesTransaction(Database(cx));
 	    },
-	    NULL);
+	    nullptr);
 }
 
 ThreadSafeTransaction::~ThreadSafeTransaction() {
 	ReadYourWritesTransaction *tr = this->tr;
 	if (tr)
-		onMainThreadVoid( [tr](){ tr->delref(); }, NULL );
+		onMainThreadVoid( [tr](){ tr->delref(); }, nullptr );
 }
 
 void ThreadSafeTransaction::cancel() {
 	ReadYourWritesTransaction *tr = this->tr;
-	onMainThreadVoid( [tr](){ tr->cancel(); }, NULL );
+	onMainThreadVoid( [tr](){ tr->cancel(); }, nullptr );
 }
 
 void ThreadSafeTransaction::setVersion( Version v ) {
@@ -164,6 +190,16 @@ ThreadFuture<int64_t> ThreadSafeTransaction::getEstimatedRangeSizeBytes( const K
 		} );
 }
 
+ThreadFuture<Standalone<VectorRef<KeyRef>>> ThreadSafeTransaction::getRangeSplitPoints(const KeyRangeRef& range,
+                                                                                       int64_t chunkSize) {
+	KeyRange r = range;
+
+	ReadYourWritesTransaction* tr = this->tr;
+	return onMainThread([tr, r, chunkSize]() -> Future<Standalone<VectorRef<KeyRef>>> {
+		tr->checkDeferredError();
+		return tr->getRangeSplitPoints(r, chunkSize);
+	});
+}
 
 ThreadFuture< Standalone<RangeResultRef> > ThreadSafeTransaction::getRange( const KeySelectorRef& begin, const KeySelectorRef& end, int limit, bool snapshot, bool reverse ) {
 	KeySelector b = begin;
@@ -328,17 +364,17 @@ ThreadFuture<Void> ThreadSafeTransaction::onError( Error const& e ) {
 
 void ThreadSafeTransaction::operator=(ThreadSafeTransaction&& r) noexcept {
 	tr = r.tr;
-	r.tr = NULL;
+	r.tr = nullptr;
 }
 
 ThreadSafeTransaction::ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept {
 	tr = r.tr;
-	r.tr = NULL;
+	r.tr = nullptr;
 }
 
 void ThreadSafeTransaction::reset() {
 	ReadYourWritesTransaction *tr = this->tr;
-	onMainThreadVoid( [tr](){ tr->reset(); }, NULL );
+	onMainThreadVoid( [tr](){ tr->reset(); }, nullptr );
 }
 
 extern const char* getSourceVersion();
@@ -352,6 +388,15 @@ void ThreadSafeApi::selectApiVersion(int apiVersion) {
 const char* ThreadSafeApi::getClientVersion() {
 	// There is only one copy of the ThreadSafeAPI, and it never gets deleted. Also, clientVersion is never modified.
 	return clientVersion.c_str();
+}
+
+ThreadFuture<uint64_t> ThreadSafeApi::getServerProtocol(const char* clusterFilePath) {
+	auto [clusterFile, isDefault] = ClusterConnectionFile::lookupClusterFileName(std::string(clusterFilePath));
+
+	Reference<ClusterConnectionFile> f = Reference<ClusterConnectionFile>(new ClusterConnectionFile(clusterFile));
+	return onMainThread( [f]() -> Future< uint64_t > {
+			return getCoordinatorProtocols(f);
+		} );
 }
 
 void ThreadSafeApi::setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {

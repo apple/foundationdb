@@ -173,24 +173,20 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		TraceEvent("RemapEventSeverity").detail("TargetEvent", "LargeTransaction").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
 	}
 
-	virtual std::string description() { return "FuzzApiCorrectness"; }
+	std::string description() const override { return "FuzzApiCorrectness"; }
 
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		if( clientId == 0 ) {
 			return loadAndRun( cx, this );
 		}
 		return Void();
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
-		return success;
-	}
+	Future<bool> check(Database const& cx) override { return success; }
 
-	Key getRandomKey() {
-		return getKeyForIndex( deterministicRandom()->randomInt(0, nodes ) );
-	}
+	Key getRandomKey() const { return getKeyForIndex(deterministicRandom()->randomInt(0, nodes)); }
 
-	Key getKeyForIndex( int idx ) {
+	Key getKeyForIndex(int idx) const {
 		idx += minNode;
 		if( adjacentKeys ) {
 			return Key( keyPrefix + std::string( idx, '\x00' ) );
@@ -199,11 +195,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	Value getRandomValue() {
+	Value getRandomValue() const {
 		return Value( std::string( deterministicRandom()->randomInt(valueSizeRange.first,valueSizeRange.second+1), 'x' ) );
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		//m.push_back( transactions.getMetric() );
 		//m.push_back( retries.getMetric() );
 	}
@@ -427,7 +423,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			for (size_t j = 0; j < key_size; ++j)
 				skey.append(1, (char) deterministicRandom()->randomInt(0, 256));
 
-			return Key(skey);
+			// 15% (= 20% * 75%) of the time generating keys after \xff\xff to test special keys code
+			if (deterministicRandom()->random01() < 0.2)
+				return Key(skey).withPrefix(specialKeys.begin);
+			else
+				return Key(skey);
 		}
 
 		static Value makeValue() {
@@ -557,12 +557,12 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		BaseTestCallback(unsigned int id, FuzzApiCorrectnessWorkload *wl, const char *func)
 			: BaseTest<Subclass, Void>(id, wl, func) {}
 
-		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
+		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) override {
 			callback(tr);
 			return tr.castTo<ThreadSafeTransaction>()->checkDeferredError();
 		}
 
-		Void errorCheck(Reference<ITransaction> tr, value_type result) {
+		Void errorCheck(Reference<ITransaction> tr, value_type result) override {
 			callbackErrorCheck(tr);
 			return Void();
 		}
@@ -589,18 +589,18 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		}
 
-		ThreadFuture<Version> createFuture(Reference<ITransaction> tr) {
+		ThreadFuture<Version> createFuture(Reference<ITransaction> tr) override {
 			tr->setVersion(v);
 			pre_steps.push_back(tr.castTo<ThreadSafeTransaction>()->checkDeferredError());
 			return tr->getReadVersion();
 		}
 
-		Void errorCheck(Reference<ITransaction> tr, value_type result) {
+		Void errorCheck(Reference<ITransaction> tr, value_type result) override {
 			ASSERT(v == result);
 			return Void();
 		}
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
 			e.detail("Version", v);
 		}
@@ -625,11 +625,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			};
 		}
 
-		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
+		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) override {
 			return tr->get(key, deterministicRandom()->coinflip());
 		}
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
 			e.detail("Key", printable(key));
 		}
@@ -648,11 +648,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			};
 		}
 
-		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
+		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) override {
 			return tr->getKey(keysel, deterministicRandom()->coinflip());
 		}
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
 			e.detail("KeySel", keysel.toString());
 		}
@@ -676,7 +676,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					limit = deterministicRandom()->randomInt(0, INT_MAX)+1;
 			}
 
-			bool isSpecialKeyRange = specialKeys.contains(keysel1.getKey()) && keysel2.getKey() <= specialKeys.end;
+			bool isSpecialKeyRange = specialKeys.contains(keysel1.getKey()) && specialKeys.begin <= keysel2.getKey() &&
+			                         keysel2.getKey() <= specialKeys.end;
 
 			contract = {
 				std::make_pair(error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf(limit < 0)),
@@ -694,11 +695,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			};
 		}
 
-		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
+		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) override {
 			return tr->getRange(keysel1, keysel2, limit, deterministicRandom()->coinflip(), deterministicRandom()->coinflip());
 		}
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
 			e.detail("KeySel1", keysel1.toString()).detail("KeySel2", keysel2.toString()).detail("Limit", limit);
 		}
@@ -714,7 +715,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			keysel2 = makeKeySel();
 			limits = makeRangeLimits();
 
-			bool isSpecialKeyRange = specialKeys.contains(keysel1.getKey()) && keysel2.getKey() <= specialKeys.end;
+			bool isSpecialKeyRange = specialKeys.contains(keysel1.getKey()) && specialKeys.begin <= keysel2.getKey() &&
+			                         keysel2.getKey() <= specialKeys.end;
 
 			contract = {
 				std::make_pair(error_code_range_limits_invalid,
@@ -733,11 +735,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			};
 		}
 
-		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
+		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) override {
 			return tr->getRange(keysel1, keysel2, limits, deterministicRandom()->coinflip(), deterministicRandom()->coinflip());
 		}
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
 			e.detail("KeySel1", keysel1.toString()).detail("KeySel2", keysel2.toString());
 			std::stringstream ss;
@@ -764,7 +766,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					limit = deterministicRandom()->randomInt(0, INT_MAX)+1;
 			}
 
-			bool isSpecialKeyRange = specialKeys.contains(key1) && key2 <= specialKeys.end;
+			bool isSpecialKeyRange = specialKeys.contains(key1) && specialKeys.begin <= key2 && key2 <= specialKeys.end;
 
 			contract = {
 				std::make_pair(error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2)),
@@ -783,12 +785,12 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			};
 		}
 
-		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
+		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) override {
 			return tr->getRange(KeyRangeRef(key1, key2),
 					limit, deterministicRandom()->coinflip(), deterministicRandom()->coinflip());
 		}
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
 			e.detail("Key1", printable(key1)).detail("Key2", printable(key2)).detail("Limit", limit);
 		}
@@ -804,7 +806,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			key2 = makeKey();
 			limits = makeRangeLimits();
 
-			bool isSpecialKeyRange = specialKeys.contains(key1) && key2 <= specialKeys.end;
+			bool isSpecialKeyRange = specialKeys.contains(key1) && specialKeys.begin <= key2 && key2 <= specialKeys.end;
 
 			contract = {
 				std::make_pair(error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2)),
@@ -824,11 +826,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			};
 		}
 
-		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
+		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) override {
 			return tr->getRange(KeyRangeRef(key1, key2), limits, deterministicRandom()->coinflip(), deterministicRandom()->coinflip());
 		}
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
 			e.detail("Key1", printable(key1)).detail("Key2", printable(key2));
 			std::stringstream ss;
@@ -848,11 +850,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			};
 		}
 
-		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
+		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) override {
 			return tr->getAddressesForKey(key);
 		}
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
 			e.detail("Key", printable(key));
 		}
@@ -873,11 +875,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			};
 		}
 
-		void callback(Reference<ITransaction> tr) {
-			tr->addReadConflictRange(KeyRangeRef(key1, key2));
-		}
+		void callback(Reference<ITransaction> tr) override { tr->addReadConflictRange(KeyRangeRef(key1, key2)); }
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
 			e.detail("Key1", printable(key1)).detail("Key2", printable(key2));
 		}
@@ -941,11 +941,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			};
 		}
 
-		void callback(Reference<ITransaction> tr) {
-			tr->atomicOp(key, value, (FDBMutationTypes::Option) op);
-		}
+		void callback(Reference<ITransaction> tr) override { tr->atomicOp(key, value, (FDBMutationTypes::Option)op); }
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
 			e.detail("Key", printable(key)).detail("Value", printable(value)).detail("Op", op).detail("Pos", pos);
 		}
@@ -981,11 +979,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				                                                      workload->specialKeysWritesEnabled)) };
 		}
 
-		void callback(Reference<ITransaction> tr) {
-			tr->set(key, value);
-		}
+		void callback(Reference<ITransaction> tr) override { tr->set(key, value); }
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
 			e.detail("Key", printable(key)).detail("Value", printable(value));
 		}
@@ -1021,11 +1017,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			};
 		}
 
-		void callback(Reference<ITransaction> tr) {
-			tr->clear(key1, key2);
-		}
+		void callback(Reference<ITransaction> tr) override { tr->clear(key1, key2); }
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
 			e.detail("Key1", printable(key1)).detail("Key2", printable(key2));
 		}
@@ -1061,11 +1055,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			};
 		}
 
-		void callback(Reference<ITransaction> tr) {
-			tr->clear(KeyRangeRef(key1, key2));
-		}
+		void callback(Reference<ITransaction> tr) override { tr->clear(KeyRangeRef(key1, key2)); }
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
 			e.detail("Key1", printable(key1)).detail("Key2", printable(key2));
 		}
@@ -1091,11 +1083,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				                                                      workload->specialKeysWritesEnabled)) };
 		}
 
-		void callback(Reference<ITransaction> tr) {
-			tr->clear(key);
-		}
+		void callback(Reference<ITransaction> tr) override { tr->clear(key); }
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
 			e.detail("Key", printable(key));
 		}
@@ -1117,11 +1107,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			};
 		}
 
-		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
-			return tr->watch(key);
-		}
+		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) override { return tr->watch(key); }
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
 			e.detail("Key", printable(key));
 		}
@@ -1142,11 +1130,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			};
 		}
 
-		void callback(Reference<ITransaction> tr) {
-			tr->addWriteConflictRange(KeyRangeRef(key1, key2));
-		}
+		void callback(Reference<ITransaction> tr) override { tr->addWriteConflictRange(KeyRangeRef(key1, key2)); }
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
 			e.detail("Key1", printable(key1)).detail("Key2", printable(key2));
 		}
@@ -1181,7 +1167,20 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				}
 				op = deterministicRandom()->randomInt(minval, maxval+1);
 			}
-			if(op == FDBTransactionOptions::ACCESS_SYSTEM_KEYS || op == FDBTransactionOptions::READ_SYSTEM_KEYS) //do not test access system keys since the option is actually used by the workload
+
+			//do not test the following options since they are actually used by the workload
+			if(op == FDBTransactionOptions::ACCESS_SYSTEM_KEYS ||
+			   op == FDBTransactionOptions::READ_SYSTEM_KEYS ||
+			   op == FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES)
+			{
+				op = -1;
+			}
+			
+			// do not test the option since it's already used by the workload
+			if (op == FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED)
+				op = -1;
+			// disable for now(see issue#3934, pr#3930)
+			if (op == FDBTransactionOptions::CHECK_WRITES_ENABLE)
 				op = -1;
 
 			double orv = deterministicRandom()->random01();
@@ -1207,11 +1206,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			};
 		}
 
-		void callback(Reference<ITransaction> tr) {
+		void callback(Reference<ITransaction> tr) override {
 			tr->setOption((FDBTransactionOptions::Option) op, val.castTo<StringRef>());
 		}
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
 			e.detail("Op", op).detail("Val", printable(val));
 		}
@@ -1232,7 +1231,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			}
 		}
 
-		void callback(Reference<ITransaction> tr) {
+		void callback(Reference<ITransaction> tr) override {
 			tr->onError(Error::fromUnvalidatedCode(errorcode));
 			// This is necessary here, as onError will have reset this
 			// value, we will be looking at the wrong thing.
@@ -1240,7 +1239,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				tr->setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
 		}
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
 			e.detail("ErrorCode", errorcode);
 		}

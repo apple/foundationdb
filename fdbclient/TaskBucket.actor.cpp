@@ -29,9 +29,15 @@ Reference<TaskFuture> Task::getDoneFuture(Reference<FutureBucket> fb) {
 struct UnblockFutureTaskFunc : TaskFuncBase {
 	static StringRef name;
 
-	StringRef getName() const { return name; };
-	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
-	Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+	StringRef getName() const override { return name; };
+	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb,
+	                     Reference<Task> task) override {
+		return Void();
+	};
+	Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb,
+	                    Reference<Task> task) override {
+		return _finish(tr, tb, fb, task);
+	};
 
 	ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 		state Reference<TaskFuture> future = futureBucket->unpack(task->params[Task::reservedTaskParamKeyFuture]);
@@ -55,9 +61,13 @@ REGISTER_TASKFUNC(UnblockFutureTaskFunc);
 struct AddTaskFunc : TaskFuncBase {
 	static StringRef name;
 
-	StringRef getName() const { return name; };
-	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
-	Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { 
+	StringRef getName() const override { return name; };
+	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb,
+	                     Reference<Task> task) override {
+		return Void();
+	};
+	Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb,
+	                    Reference<Task> task) override {
 		task->params[Task::reservedTaskParamKeyType] = task->params[Task::reservedTaskParamKeyAddTask];
 		tb->addTask(tr, task);
 		return Void();
@@ -69,11 +79,17 @@ REGISTER_TASKFUNC(AddTaskFunc);
 
 struct IdleTaskFunc : TaskFuncBase {
 	static StringRef name;
-	static const uint32_t version = 1;
+	static constexpr uint32_t version = 1;
 
-	StringRef getName() const { return name; };
-	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
-	Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return tb->finish(tr, task); };
+	StringRef getName() const override { return name; };
+	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb,
+	                     Reference<Task> task) override {
+		return Void();
+	};
+	Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb,
+	                    Reference<Task> task) override {
+		return tb->finish(tr, task);
+	};
 };
 StringRef IdleTaskFunc::name = LiteralStringRef("idle");
 REGISTER_TASKFUNC(IdleTaskFunc);
@@ -234,17 +250,17 @@ public:
 	ACTOR static Future<bool> taskVerify(Reference<TaskBucket> tb, Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
 
 		if (task->params.find(Task::reservedTaskParamValidKey) == task->params.end()) {
-			TraceEvent("TB_TaskVerifyInvalidTask")
-				.detail("Task", task->params[Task::reservedTaskParamKeyType])
-				.detail("ReservedTaskParamValidKey", "missing");
+			TraceEvent("TaskBucketTaskVerifyInvalidTask")
+			    .detail("Task", task->params[Task::reservedTaskParamKeyType])
+			    .detail("ReservedTaskParamValidKey", "missing");
 			return false;
 		}
 
 		if (task->params.find(Task::reservedTaskParamValidValue) == task->params.end()) {
-			TraceEvent("TB_TaskVerifyInvalidTask")
-				.detail("Task", task->params[Task::reservedTaskParamKeyType])
-				.detail("ReservedTaskParamValidKey", task->params[Task::reservedTaskParamValidKey])
-				.detail("ReservedTaskParamValidValue", "missing");
+			TraceEvent("TaskBucketTaskVerifyInvalidTask")
+			    .detail("Task", task->params[Task::reservedTaskParamKeyType])
+			    .detail("ReservedTaskParamValidKey", task->params[Task::reservedTaskParamValidKey])
+			    .detail("ReservedTaskParamValidValue", "missing");
 			return false;
 		}
 
@@ -253,20 +269,20 @@ public:
 		Optional<Value> keyValue = wait(tr->get(task->params[Task::reservedTaskParamValidKey]));
 
 		if (!keyValue.present()) {
-			TraceEvent("TB_TaskVerifyInvalidTask")
-				.detail("Task", task->params[Task::reservedTaskParamKeyType])
-				.detail("ReservedTaskParamValidKey", task->params[Task::reservedTaskParamValidKey])
-				.detail("ReservedTaskParamValidValue", task->params[Task::reservedTaskParamValidValue])
-				.detail("KeyValue", "missing");
+			TraceEvent("TaskBucketTaskVerifyInvalidTask")
+			    .detail("Task", task->params[Task::reservedTaskParamKeyType])
+			    .detail("ReservedTaskParamValidKey", task->params[Task::reservedTaskParamValidKey])
+			    .detail("ReservedTaskParamValidValue", task->params[Task::reservedTaskParamValidValue])
+			    .detail("KeyValue", "missing");
 			return false;
 		}
 
 		if (keyValue.get().compare(StringRef(task->params[Task::reservedTaskParamValidValue]))) {
-			TraceEvent("TB_TaskVerifyAbortedTask")
-				.detail("Task", task->params[Task::reservedTaskParamKeyType])
-				.detail("ReservedTaskParamValidKey", task->params[Task::reservedTaskParamValidKey])
-				.detail("ReservedTaskParamValidValue", task->params[Task::reservedTaskParamValidValue])
-				.detail("KeyValue", keyValue.get());
+			TraceEvent("TaskBucketTaskVerifyAbortedTask")
+			    .detail("Task", task->params[Task::reservedTaskParamKeyType])
+			    .detail("ReservedTaskParamValidKey", task->params[Task::reservedTaskParamValidKey])
+			    .detail("ReservedTaskParamValidValue", task->params[Task::reservedTaskParamValidValue])
+			    .detail("KeyValue", keyValue.get());
 			return false;
 		}
 
@@ -332,10 +348,10 @@ public:
 
 			if(now() - start > 300) {
 				TraceEvent(SevWarnAlways, "TaskBucketLongExtend")
-				.detail("Duration", now() - start)
-				.detail("TaskUID", task->key)
-				.detail("TaskType", task->params[Task::reservedTaskParamKeyType])
-				.detail("Priority", task->getPriority());
+				    .detail("Duration", now() - start)
+				    .detail("TaskUID", task->key)
+				    .detail("TaskType", task->params[Task::reservedTaskParamKeyType])
+				    .detail("Priority", task->getPriority());
 			}
 			// Take the extendMutex lock until we either succeed or stop trying to extend due to failure
 			wait(task->extendMutex.take());
@@ -402,19 +418,19 @@ public:
 				}));
 			}
 		} catch(Error &e) {
-			TraceEvent(SevWarn, "TB_ExecuteFailure")
-				.error(e)
-				.detail("TaskUID", task->key)
-				.detail("TaskType", task->params[Task::reservedTaskParamKeyType].printable())
-				.detail("Priority", task->getPriority());
+			TraceEvent(SevWarn, "TaskBucketExecuteFailure")
+			    .error(e)
+			    .detail("TaskUID", task->key)
+			    .detail("TaskType", task->params[Task::reservedTaskParamKeyType].printable())
+			    .detail("Priority", task->getPriority());
 			try {
 				wait(taskFunc->handleError(cx, task, e));
 			} catch(Error &e) {
-				TraceEvent(SevWarn, "TB_ExecuteFailureLogErrorFailed")
-					.error(e) // output handleError() error instead of original task error
-					.detail("TaskUID", task->key.printable())
-					.detail("TaskType", task->params[Task::reservedTaskParamKeyType].printable())
-					.detail("Priority", task->getPriority());
+				TraceEvent(SevWarn, "TaskBucketExecuteFailureLogErrorFailed")
+				    .error(e) // output handleError() error instead of original task error
+				    .detail("TaskUID", task->key.printable())
+				    .detail("TaskType", task->params[Task::reservedTaskParamKeyType].printable())
+				    .detail("Priority", task->getPriority());
 			}
 		}
 
@@ -513,7 +529,7 @@ public:
 	}
 
 	ACTOR static Future<Void> run(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, double *pollDelay, int maxConcurrentTasks) {
-		state Reference<AsyncVar<bool>> paused = Reference<AsyncVar<bool>>( new AsyncVar<bool>(true) );
+		state Reference<AsyncVar<bool>> paused = makeReference<AsyncVar<bool>>(true);
 		state Future<Void> watchPausedFuture = watchPaused(cx, taskBucket, paused);
 		taskBucket->metricLogger = traceCounters("TaskBucketMetrics", taskBucket->dbgid, CLIENT_KNOBS->TASKBUCKET_LOGGING_DELAY, &taskBucket->cc);
 		loop {
@@ -528,7 +544,7 @@ public:
 	static Future<Standalone<StringRef>> addIdle(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket) {
 		taskBucket->setOptions(tr);
 
-		Reference<Task> newTask(new Task(IdleTaskFunc::name, IdleTaskFunc::version));
+		auto newTask = makeReference<Task>(IdleTaskFunc::name, IdleTaskFunc::version);
 		return taskBucket->addTask(tr, newTask);
 	}
 
@@ -727,14 +743,17 @@ public:
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		Standalone<RangeResultRef> values = wait(tr->getRange(subspace.range(), CLIENT_KNOBS->TOO_MANY));
-		TraceEvent("TaskBucket").detail("DebugPrintRange", "Print DB Range").detail("Key", subspace.key()).detail("Count", values.size()).detail("Msg", msg);
-		
+		TraceEvent("TaskBucketDebugPrintRange")
+		    .detail("Key", subspace.key())
+		    .detail("Count", values.size())
+		    .detail("Msg", msg);
+
 		/*printf("debugPrintRange  key: (%d) %s\n", values.size(), printable(subspace.key()).c_str());
 		for (auto & s : values) {
-			printf("   key: %-40s   value: %s\n", printable(s.key).c_str(), s.value.c_str());
-			TraceEvent("TaskBucket").detail("DebugPrintRange", msg)
-				.detail("Key", s.key)
-				.detail("Value", s.value);
+		    printf("   key: %-40s   value: %s\n", printable(s.key).c_str(), s.value.c_str());
+		    TraceEvent("TaskBucketDebugPrintKV").detail("Msg", msg)
+		        .detail("Key", s.key)
+		        .detail("Value", s.value);
 		}*/
 
 		return Void();
@@ -870,9 +889,9 @@ ACTOR static Future<Key> actorAddTask(TaskBucket* tb, Reference<ReadYourWritesTr
 	Optional<Value> validationValue = wait(tr->get(validationKey));
 
 	if (!validationValue.present()) {
-		TraceEvent(SevError, "TB_AddTaskInvalidKey")
-			.detail("Task", task->params[Task::reservedTaskParamKeyType])
-			.detail("ValidationKey", validationKey);
+		TraceEvent(SevError, "TaskBucketAddTaskInvalidKey")
+		    .detail("Task", task->params[Task::reservedTaskParamKeyType])
+		    .detail("ValidationKey", validationKey);
 		throw invalid_option_value();
 	}
 
@@ -988,7 +1007,7 @@ Future<Void> FutureBucket::clear(Reference<ReadYourWritesTransaction> tr){
 Reference<TaskFuture> FutureBucket::future(Reference<ReadYourWritesTransaction> tr){
 	setOptions(tr);
 
-	Reference<TaskFuture> taskFuture(new TaskFuture(Reference<FutureBucket>::addRef(this)));
+	auto taskFuture = makeReference<TaskFuture>(Reference<FutureBucket>::addRef(this));
 	taskFuture->addBlock(tr, StringRef());
 
 	return taskFuture;
@@ -999,7 +1018,7 @@ Future<bool> FutureBucket::isEmpty(Reference<ReadYourWritesTransaction> tr) {
 }
 
 Reference<TaskFuture> FutureBucket::unpack(Key key) {
-	return Reference<TaskFuture>(new TaskFuture(Reference<FutureBucket>::addRef(this), key));
+	return makeReference<TaskFuture>(Reference<FutureBucket>::addRef(this), key);
 }
 
 class TaskFutureImpl {
@@ -1025,7 +1044,7 @@ public:
 		for (int i = 0; i < vectorFuture.size(); ++i) {
 			Key key = StringRef(deterministicRandom()->randomUniqueID().toString());
 			taskFuture->addBlock(tr, key);
-			Reference<Task> task(new Task());
+			auto task = makeReference<Task>();
 			task->params[Task::reservedTaskParamKeyType] = LiteralStringRef("UnblockFuture");
 			task->params[Task::reservedTaskParamKeyFuture] = taskFuture->key;
 			task->params[Task::reservedTaskParamKeyBlockID] = key;
@@ -1108,7 +1127,7 @@ public:
 				// If we see a new task ID and the old one isn't empty then process the task accumulated so far and make a new task
 				if(taskID.size() != 0 && taskID != lastTaskID) {
 					actions.push_back(performAction(tr, taskBucket, taskFuture, task));
-					task = Reference<Task>(new Task());
+					task = makeReference<Task>();
 				}
 				task->params[key] = s.value;
 				lastTaskID = taskID;
@@ -1138,9 +1157,9 @@ public:
 		Optional<Value> validationValue = wait(tr->get(validationKey));
 
 		if (!validationValue.present()) {
-			TraceEvent(SevError, "TB_OnSetAddTaskInvalidKey")
-				.detail("Task", task->params[Task::reservedTaskParamKeyType])
-				.detail("ValidationKey", validationKey);
+			TraceEvent(SevError, "TaskBucketOnSetAddTaskInvalidKey")
+			    .detail("Task", task->params[Task::reservedTaskParamKeyType])
+			    .detail("ValidationKey", validationKey);
 			throw invalid_option_value();
 		}
 
@@ -1239,6 +1258,6 @@ ACTOR Future<Key> getCompletionKey(TaskCompletionKey *self, Future<Reference<Tas
 }
 
 Future<Key> TaskCompletionKey::get(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket) {
-	ASSERT(key.present() == (joinFuture.getPtr() == NULL));
+	ASSERT(key.present() == (joinFuture.getPtr() == nullptr));
 	return key.present() ? key.get() : getCompletionKey(this, joinFuture->joinedFuture(tr, taskBucket));
 }

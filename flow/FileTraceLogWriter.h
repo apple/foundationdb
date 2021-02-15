@@ -30,20 +30,20 @@
 #include <functional>
 
 struct IssuesListImpl;
-struct IssuesList : ITraceLogIssuesReporter, ThreadSafeReferenceCounted<IssuesList> {
+struct IssuesList final : ITraceLogIssuesReporter, ThreadSafeReferenceCounted<IssuesList> {
 	IssuesList();
-	virtual ~IssuesList();
+	~IssuesList() override;
 	void addIssue(std::string issue) override;
 
-	void retrieveIssues(std::set<std::string>& out) override;
+	void retrieveIssues(std::set<std::string>& out) const override;
 
 	void resolveIssue(std::string issue) override;
 
-	void addref() { ThreadSafeReferenceCounted<IssuesList>::addref(); }
-	void delref() { ThreadSafeReferenceCounted<IssuesList>::delref(); }
+	void addref() override { ThreadSafeReferenceCounted<IssuesList>::addref(); }
+	void delref() override { ThreadSafeReferenceCounted<IssuesList>::delref(); }
 
 private:
-	IssuesListImpl* impl;
+	std::unique_ptr<IssuesListImpl> impl;
 };
 
 class FileTraceLogWriter : public ITraceLogWriter, ReferenceCounted<FileTraceLogWriter> {
@@ -66,8 +66,8 @@ public:
 	FileTraceLogWriter(std::string directory, std::string processName, std::string basename, std::string extension,
 	                   uint64_t maxLogsSize, std::function<void()> onError, Reference<ITraceLogIssuesReporter> issues);
 
-	void addref();
-	void delref();
+	void addref() override;
+	void delref() override;
 
 	void lastError(int err);
 

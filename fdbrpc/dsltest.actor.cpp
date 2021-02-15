@@ -621,7 +621,7 @@ void showArena( ArenaBlock* a, ArenaBlock* parent) {
 }
 
 void arenaTest() {
-	BinaryWriter wr(AssumeVersion(currentProtocolVersion));
+	BinaryWriter wr(AssumeVersion(g_network->protocolVersion()));
 	{
 		Arena arena;
 		VectorRef<StringRef> test;
@@ -639,7 +639,7 @@ void arenaTest() {
 	{
 		Arena arena2;
 		VectorRef<StringRef> test2;
-		BinaryReader reader(wr.getData(),wr.getLength(), AssumeVersion(currentProtocolVersion));
+		BinaryReader reader(wr.getData(),wr.getLength(), AssumeVersion(g_network->protocolVersion()));
 		reader >> test2 >> arena2;
 
 		for(auto i = test2.begin(); i != test2.end(); ++i)
@@ -1057,8 +1057,8 @@ void sleeptest() {
 			timespec ts;
 			ts.tv_sec = times[j] / 1000000;
 			ts.tv_nsec = (times[j] % 1000000)*1000;
-			clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, NULL);
-			//nanosleep(&ts, NULL);
+			clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, nullptr);
+			//nanosleep(&ts, nullptr);
 		}
 		double t = timer() - b;
 		printf("Sleep test (%dus x %d): %0.1f\n", times[j], n, double(t)/n*1e6);

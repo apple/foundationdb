@@ -21,6 +21,7 @@
 #pragma once
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
+#include <utility>
 #if defined(NO_INTELLISENSE) && !defined(FLOW_GENERICACTORS_ACTOR_G_H)
 	#define FLOW_GENERICACTORS_ACTOR_G_H
 	#include "flow/genericactors.actor.g.h"
@@ -308,9 +309,8 @@ Future<U> mapAsync(Future<T> what, F actorFunc) {
 }
 
 //maps a vector of futures with an asynchronous function
-template<class T, class F>
-std::vector<Future<std::invoke_result_t<F, T>>> mapAsync(std::vector<Future<T>> const& what, F const& actorFunc)
-{
+template <class T, class F>
+auto mapAsync(std::vector<Future<T>> const& what, F const& actorFunc) {
 	std::vector<std::invoke_result_t<F, T>> ret;
 	ret.reserve(what.size());
 	for (const auto& f : what) ret.push_back(mapAsync(f, actorFunc));
@@ -367,9 +367,8 @@ Future<std::invoke_result_t<F, T>> map(Future<T> what, F func)
 }
 
 //maps a vector of futures
-template<class T, class F>
-std::vector<Future<std::invoke_result_t<F, T>>> map(std::vector<Future<T>> const& what, F const& func)
-{
+template <class T, class F>
+auto map(std::vector<Future<T>> const& what, F const& func) {
 	std::vector<Future<std::invoke_result_t<F, T>>> ret;
 	ret.reserve(what.size());
 	for (const auto& f : what) ret.push_back(map(f, func));
@@ -443,9 +442,7 @@ Future<Void> asyncFilter( FutureStream<T> input, F actorPred, PromiseStream<T> o
 	loop {
 		try {
 			choose {
-				when ( T nextInput = waitNext(input) ) {
-					futures.push_back( std::pair<T, Future<bool>>(nextInput, actorPred(nextInput)) );
-				}
+				when(T nextInput = waitNext(input)) { futures.emplace_back(nextInput, actorPred(nextInput)); }
 				when ( bool pass = wait( futures.size() == 0 ? Never() : futures.front().second ) ) {
 					if(pass) output.send(futures.front().first);
 					futures.pop_front();
@@ -667,13 +664,9 @@ class ReferencedObject : NonCopyable, public ReferenceCounted<ReferencedObject<V
 			value = std::move(v);
 		}
 
-		static Reference<ReferencedObject<V>> from(V const& v) {
-			return Reference<ReferencedObject<V>>(new ReferencedObject<V>(v));
-		}
+	    static Reference<ReferencedObject<V>> from(V const& v) { return makeReference<ReferencedObject<V>>(v); }
 
-		static Reference<ReferencedObject<V>> from(V&& v) {
-			return Reference<ReferencedObject<V>>(new ReferencedObject<V>(std::move(v)));
-		}
+	    static Reference<ReferencedObject<V>> from(V&& v) { return makeReference<ReferencedObject<V>>(std::move(v)); }
 
 	private:
 		V value;
@@ -732,8 +725,8 @@ private:
 class Debouncer : NonCopyable {
 public:
 	explicit Debouncer( double delay ) { worker = debounceWorker(this, delay); }
-	Debouncer(Debouncer&& at) : input(std::move(at.input)), output(std::move(at.output)) {}
-	void operator=(Debouncer&& at) { input = std::move(at.input); output = std::move(at.output); }
+	Debouncer(Debouncer&& at) = default;
+	Debouncer& operator=(Debouncer&& at) = default;
 	Future<Void> onTrigger() {
 		return output.onChange();
 	}
@@ -804,7 +797,7 @@ Future<Void> setAfter(Reference<AsyncVar<T>> var, double time, T val) {
 }
 
 ACTOR template <class T>
-Future<Void> resetAfter( Reference<AsyncVar<T>> var, double time, T val, int warningLimit = -1, double warningResetDelay = 0, const char* context = NULL ) {
+Future<Void> resetAfter( Reference<AsyncVar<T>> var, double time, T val, int warningLimit = -1, double warningResetDelay = 0, const char* context = nullptr ) {
 	state bool isEqual = var->get() == val;
 	state Future<Void> resetDelay = isEqual ? Never() : delay(time);
 	state int resetCount = 0;
@@ -873,6 +866,35 @@ Future<T> ioTimeoutError( Future<T> what, double time ) {
 }
 
 ACTOR template <class T>
+Future<T> ioDegradedOrTimeoutError(Future<T> what, double errTime, Reference<AsyncVar<bool>> degraded,
+                                   double degradedTime) {
+	if (degradedTime < errTime) {
+		Future<Void> degradedEnd = lowPriorityDelay(degradedTime);
+		choose {
+			when(T t = wait(what)) { return t; }
+			when(wait(degradedEnd)) {
+				TEST(true); // TLog degraded
+				TraceEvent(SevWarnAlways, "IoDegraded");
+				degraded->set(true);
+			}
+		}
+	}
+
+	Future<Void> end = lowPriorityDelay(errTime - degradedTime);
+	choose {
+		when(T t = wait(what)) { return t; }
+		when(wait(end)) {
+			Error err = io_timeout();
+			if (g_network->isSimulated()) {
+				err = err.asInjectedFault();
+			}
+			TraceEvent(SevError, "IoTimeoutError").error(err);
+			throw err;
+		}
+	}
+}
+
+ACTOR template <class T>
 Future<Void> streamHelper( PromiseStream<T> output, PromiseStream<Error> errors, Future<T> input ) {
 	try {
 		T value = wait(input);
@@ -906,12 +928,12 @@ struct Quorum : SAV<Void> {
 		return sizeof(Quorum<T>) + sizeof(QuorumCallback<T>)*count;
 	}
 
-	virtual void destroy() {
+	void destroy() override {
 		int size = sizeFor(this->count);
 		this->~Quorum();
 		freeFast(size, this);
 	}
-	virtual void cancel() {
+	void cancel() override {
 		int cancelled_callbacks = 0;
 		for (int i = 0; i < count; i++)
 			if (callbacks()[i].next) {
@@ -946,12 +968,12 @@ struct Quorum : SAV<Void> {
 template <class T>
 class QuorumCallback : public Callback<T> {
 public:
-	virtual void fire(const T& value) {
+	void fire(const T& value) override {
 		Callback<T>::remove();
 		Callback<T>::next = 0;
 		head->oneSuccess();
 	}
-	virtual void error(Error error) {
+	void error(Error error) override {
 		Callback<T>::remove();
 		Callback<T>::next = 0;
 		head->oneError(error);
@@ -1086,7 +1108,7 @@ Future<T> reportErrorsExcept( Future<T> in, const char* context, UID id, std::se
 
 template <class T>
 Future<T> reportErrors( Future<T> const& in, const char* context, UID id = UID() ) {
-	return reportErrorsExcept(in, context, id, NULL);
+	return reportErrorsExcept(in, context, id, nullptr);
 }
 
 ACTOR template <class T>
@@ -1309,7 +1331,8 @@ private:
 	Promise<Void> broken_on_destruct;
 
 	ACTOR static Future<Void> takeActor(FlowLock* lock, TaskPriority taskID, int64_t amount) {
-		state std::list<std::pair<Promise<Void>, int64_t>>::iterator it = lock->takers.insert(lock->takers.end(), std::make_pair(Promise<Void>(), amount));
+		state std::list<std::pair<Promise<Void>, int64_t>>::iterator it =
+		    lock->takers.emplace(lock->takers.end(), Promise<Void>(), amount);
 
 		try {
 			wait( it->first.getFuture() );
@@ -1366,7 +1389,7 @@ struct NotifiedInt {
 	Future<Void> whenAtLeast( int64_t limit ) {
 		if (val >= limit) return Void();
 		Promise<Void> p;
-		waiting.push( std::make_pair(limit,p) );
+		waiting.emplace(limit, p);
 		return p.getFuture();
 	}
 
@@ -1488,16 +1511,13 @@ struct YieldedFutureActor : SAV<Void>, ActorCallback<YieldedFutureActor, 1, Void
 		f.addYieldedCallbackAndClear(static_cast< ActorCallback< YieldedFutureActor, 1, Void >* >(this));
 	}
 
-	void cancel()
-	{
+	void cancel() override {
 		if (!SAV<Void>::canBeSet()) return;  // Cancel could be invoked *by* a callback within finish().  Otherwise it's guaranteed that we are waiting either on the original future or on a delay().
 		ActorCallback<YieldedFutureActor, 1, Void>::remove();
 		SAV<Void>::sendErrorAndDelPromiseRef(actor_cancelled());
 	}
 
-	virtual void destroy() {
-		delete this;
-	}
+	void destroy() override { delete this; }
 
 	void a_callback_fire(ActorCallback<YieldedFutureActor, 1, Void>*, Void) {
 		if (int16_t(in_error_state.code()) == UNSET_ERROR_CODE) {
@@ -1555,7 +1575,7 @@ inline Future<Void> yieldedFuture(Future<Void> f) {
 template <class K, class V>
 class YieldedAsyncMap : public AsyncMap<K, V> {
 public:
-	Future<Void> onChange(K const& k) {	// throws broken_promise if this is destroyed
+	Future<Void> onChange(K const& k) override { // throws broken_promise if this is destroyed
 		auto &item = AsyncMap<K, V>::items[k];
 		if (item.value == AsyncMap<K, V>::defaultValue)
 			return destroyOnCancelYield(this, k, item.change.getFuture());
@@ -1809,6 +1829,37 @@ Future<Void> timeReply(Future<T> replyToTime, PromiseStream<double> timeOutput){
 	return Void();
 }
 
+// Monad
+
+ACTOR template <class Fun, class T>
+Future<decltype(std::declval<Fun>()(std::declval<T>()))> fmap(Fun fun, Future<T> f) {
+	T val = wait(f);
+	return fun(val);
+}
+
+ACTOR template <class T, class Fun>
+Future<decltype(std::declval<Fun>()(std::declval<T>()).getValue())> runAfter(Future<T> lhs, Fun rhs) {
+	T val1 = wait(lhs);
+	decltype(std::declval<Fun>()(std::declval<T>()).getValue()) res = wait(rhs(val1));
+	return res;
+}
+
+ACTOR template <class T, class U>
+Future<U> runAfter(Future<T> lhs, Future<U> rhs) {
+	T val1 = wait(lhs);
+	U res = wait(rhs);
+	return res;
+}
+
+template <class T, class Res>
+Future<Res> operator>>=(Future<T> lhs, std::function<Future<Res>(T const&)> rhs) {
+	return runAfter(lhs, rhs);
+}
+
+template <class T, class U>
+Future<U> operator>> (Future<T> const& lhs, Future<U> const& rhs) {
+	return runAfter(lhs, rhs);
+}
 
 #include "flow/unactorcompiler.h"
 

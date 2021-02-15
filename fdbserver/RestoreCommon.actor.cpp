@@ -36,14 +36,6 @@
 
 // Split RestoreConfigFR defined in FileBackupAgent.actor.cpp to declaration in Restore.actor.h and implementation in
 // RestoreCommon.actor.cpp
-template <>
-inline Tuple Codec<ERestoreState>::pack(ERestoreState const& val) {
-	return Tuple().append(val);
-}
-template <>
-inline ERestoreState Codec<ERestoreState>::unpack(Tuple const& val) {
-	return (ERestoreState)val.getInt(0);
-}
 
 KeyBackedProperty<ERestoreState> RestoreConfigFR::stateEnum() {
 	return configSpace.pack(LiteralStringRef(__FUNCTION__));
@@ -311,6 +303,8 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IA
 	state Standalone<StringRef> buf = makeString(len);
 	int rLen = wait(file->read(mutateString(buf), len, offset));
 	if (rLen != len) throw restore_bad_read();
+
+	simulateBlobFailure();
 
 	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
 	state StringRefReader reader(buf, restore_corrupted_data());

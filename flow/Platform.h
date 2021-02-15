@@ -22,6 +22,8 @@
 #define FLOW_PLATFORM_H
 #pragma once
 
+#include "flow/config.h"
+
 #if (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 #define __unixish__ 1
 #endif
@@ -88,17 +90,6 @@
 #endif
 
 /*
- * Visual Studio 2005 and beyond allow virtual and sealed while
- * targetting native code, and we get better error messages at compile
- * time with it where appropriate. Not supported with any other
- * compiler.
- */
-#if _MSC_VER < 1400
-#define sealed
-#define override
-#endif
-
-/*
  * Visual Studio (.NET 2003 and beyond) has an __assume compiler
  * intrinsic to hint to the compiler that a given condition is true
  * and will remain true until the expression is altered. This can be
@@ -160,7 +151,7 @@ THREAD_HANDLE startThread(void (func) (void *), void *arg, int stackSize = 0);
 #define THREAD_FUNC_RETURN void *
 #define THREAD_HANDLE pthread_t
 THREAD_HANDLE startThread(void *(func) (void *), void *arg, int stackSize = 0);
-#define THREAD_RETURN return NULL
+#define THREAD_RETURN return nullptr
 #else
 #error How do I start a new thread on this platform?
 #endif
@@ -517,7 +508,7 @@ inline static int64_t flowInterlockedAnd64( int64_t* p, int64_t a ) { auto old=*
 #if defined(_WIN32)
 inline static void flushOutputStreams() { _flushall(); }
 #elif defined(__unixish__)
-inline static void flushOutputStreams() { fflush(NULL); }
+inline static void flushOutputStreams() { fflush(nullptr); }
 #else
 #error Missing flush output stream
 #endif

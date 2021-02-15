@@ -47,6 +47,9 @@ inline static bool TRACE_SAMPLE() { return false; }
 
 extern thread_local int g_allocation_tracing_disabled;
 
+// Each major level of severity has 10 levels of minor levels, which are not all
+// used. when the numbers of severity events in each level are counted, they are
+// grouped by the major level.
 enum Severity {
 	SevVerbose = 0,
 	SevSample = 1,
@@ -58,6 +61,8 @@ enum Severity {
 	SevMaxUsed = SevError,
 	SevMax = 1000000
 };
+
+const int NUM_MAJOR_LEVELS_OF_EVENTS = SevMaxUsed / 10 + 1;
 
 class TraceEventFields {
 public:
@@ -395,6 +400,7 @@ struct TraceEvent {
 	static bool isNetworkThread();
 
 	static double getCurrentTime();
+	static std::string printRealTime(double time);
 
 	//Must be called directly after constructing the trace event
 	TraceEvent& error(const class Error& e, bool includeCancelled=false) {
@@ -491,7 +497,7 @@ public:
 	// Return the number of invocations of TraceEvent() at the specified logging level.
 	static unsigned long CountEventsLoggedAt(Severity);
 
-	DynamicEventMetric *tmpEventMetric;  // This just just a place to store fields
+	std::unique_ptr<DynamicEventMetric> tmpEventMetric; // This just just a place to store fields
 
 private:
 	bool initialized;
@@ -510,7 +516,7 @@ private:
 
 	void setSizeLimits();
 
-	static unsigned long eventCounts[5];
+	static unsigned long eventCounts[NUM_MAJOR_LEVELS_OF_EVENTS];
 	static thread_local bool networkThread;
 
 	bool init();
@@ -588,7 +594,7 @@ bool validateTraceClockSource(std::string source);
 
 void addTraceRole(std::string role);
 void removeTraceRole(std::string role);
-void retriveTraceLogIssues(std::set<std::string>& out);
+void retrieveTraceLogIssues(std::set<std::string>& out);
 void setTraceLogGroup(const std::string& role);
 template <class T>
 struct Future;

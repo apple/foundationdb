@@ -142,7 +142,7 @@ struct OpenFileInfo : NonCopyable {
 
 struct AFCPage;
 
-class AsyncFileCached : public IAsyncFile, public ReferenceCounted<AsyncFileCached> {
+class AsyncFileCached final : public IAsyncFile, public ReferenceCounted<AsyncFileCached> {
 	friend struct AFCPage;
 
 public:
@@ -160,7 +160,7 @@ public:
 		return openFiles[filename].get();
 	}
 
-	virtual Future<int> read( void* data, int length, int64_t offset ) {
+	Future<int> read(void* data, int length, int64_t offset) override {
 		++countFileCacheReads;
 		++countCacheReads;
 		if (offset + length > this->length) {
@@ -190,17 +190,15 @@ public:
 		return Void();
 	}
 
-	virtual Future<Void> write( void const* data, int length, int64_t offset ) {
+	Future<Void> write(void const* data, int length, int64_t offset) override {
 		return write_impl(this, data, length, offset);
 	}
 
-	virtual Future<Void> readZeroCopy( void** data, int* length, int64_t offset );
-	virtual void releaseZeroCopy( void* data, int length, int64_t offset );
+	Future<Void> readZeroCopy(void** data, int* length, int64_t offset) override;
+	void releaseZeroCopy(void* data, int length, int64_t offset) override;
 
 	// This waits for previously started truncates to finish and then truncates
-	virtual Future<Void> truncate( int64_t size ) {
-		return truncate_impl(this, size);
-	}
+	Future<Void> truncate(int64_t size) override { return truncate_impl(this, size); }
 
 	// This is the 'real' truncate that does the actual removal of cache blocks and then shortens the file
 	Future<Void> changeFileSize( int64_t size );
@@ -215,34 +213,36 @@ public:
 		return Void();
 	}
 
-	virtual Future<Void> sync() {
-		return waitAndSync( this, flush() );
-	}
+	Future<Void> sync() override { return waitAndSync(this, flush()); }
 
-	virtual Future<int64_t> size() {
-		return length;
-	}
+	Future<int64_t> size() const override { return length; }
 
-	virtual int64_t debugFD() {
-		return uncached->debugFD();
-	}
+	int64_t debugFD() const override { return uncached->debugFD(); }
 
-	virtual std::string getFilename() {
-		return filename;
-	}
+	std::string getFilename() const override { return filename; }
 
-	virtual void addref() { 
+	void setRateControl(Reference<IRateControl> const& rc) override { rateControl = rc; }
+
+	Reference<IRateControl> const& getRateControl() override { return rateControl; }
+
+	void addref() override { 
 		ReferenceCounted<AsyncFileCached>::addref(); 
 		//TraceEvent("AsyncFileCachedAddRef").detail("Filename", filename).detail("Refcount", debugGetReferenceCount()).backtrace();
 	}
-	virtual void delref() {
+	void delref() override {
 		if (delref_no_destroy()) {
 			// If this is ever ThreadSafeReferenceCounted...
 			// setrefCountUnsafe(0);
 
+			if(rateControl) {
+				TraceEvent(SevDebug, "AsyncFileCachedKillWaiters")
+					.detail("Filename", filename);
+				rateControl->killWaiters(io_error());
+			}
+
 			auto f = quiesce();
-			//TraceEvent("AsyncFileCachedDel").detail("Filename", filename)
-			//	.detail("Refcount", debugGetReferenceCount()).detail("CanDie", f.isReady()).backtrace();
+			TraceEvent("AsyncFileCachedDel").detail("Filename", filename)
+				.detail("Refcount", debugGetReferenceCount()).detail("CanDie", f.isReady()).backtrace();
 			if (f.isReady())
 				delete this;
 			else
@@ -250,7 +250,7 @@ public:
 		}
 	}
 
-	~AsyncFileCached();
+	~AsyncFileCached() override;
 
 private:
 	static std::map< std::string, OpenFileInfo > openFiles;
@@ -263,6 +263,7 @@ private:
 	Reference<EvictablePageCache> pageCache;
 	Future<Void> currentTruncate;
 	int64_t currentTruncateSize;
+	Reference<IRateControl> rateControl;
 
 	// Map of pointers which hold page buffers for pages which have been overwritten
 	// but at the time of write there were still readZeroCopy holders.
@@ -288,8 +289,10 @@ private:
 	Int64MetricHandle countCachePageReadsMerged;
 	Int64MetricHandle countCacheReadBytes;
 
-	AsyncFileCached( Reference<IAsyncFile> uncached, const std::string& filename, int64_t length, Reference<EvictablePageCache> pageCache )
-		: uncached(uncached), filename(filename), length(length), prevLength(length), pageCache(pageCache), currentTruncate(Void()), currentTruncateSize(0) {
+	AsyncFileCached(Reference<IAsyncFile> uncached, const std::string& filename, int64_t length,
+	                Reference<EvictablePageCache> pageCache)
+	  : uncached(uncached), filename(filename), length(length), prevLength(length), pageCache(pageCache),
+	    currentTruncate(Void()), currentTruncateSize(0), rateControl(nullptr) {
 		if( !g_network->isSimulated() ) {
 			countFileCacheWrites.init(LiteralStringRef("AsyncFile.CountFileCacheWrites"), filename);
 			countFileCacheReads.init(LiteralStringRef("AsyncFile.CountFileCacheReads"), filename);
@@ -337,7 +340,7 @@ private:
 		}
 	}
 
-	virtual Future<Void> flush();
+	Future<Void> flush() override;
 
 	Future<Void> quiesce();
 
@@ -356,7 +359,7 @@ private:
 };
 
 struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
-	virtual bool evict() {
+	bool evict() override {
 		if ( notReading.isReady() && notFlushing.isReady() && !dirty && !zeroCopyRefCount && !truncated ) {
 			owner->remove_page( this );
 			delete this;
@@ -507,6 +510,18 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 			wait( self->notReading && self->notFlushing );
 
 			if (dirty) {
+				// Wait for rate control if it is set
+				if (self->owner->getRateControl()) {
+					int allowance = 1;
+					// If I/O size is defined, wait for the calculated I/O quota
+					if (FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_IO_SIZE > 0) {
+						allowance = (self->pageCache->pageSize + FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_IO_SIZE - 1) /
+						            FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_IO_SIZE; // round up
+						ASSERT(allowance > 0);
+					}
+					wait(self->owner->getRateControl()->getAllowance(allowance));
+				}
+
 				if ( self->pageOffset + self->pageCache->pageSize > self->owner->length ) {
 					ASSERT(self->pageOffset < self->owner->length);
 					memset( static_cast<uint8_t *>(self->data) + self->owner->length - self->pageOffset, 0, self->pageCache->pageSize - (self->owner->length - self->pageOffset) );
@@ -580,7 +595,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 		pageCache->allocate(this);
 	}
 
-	virtual ~AFCPage() {
+	~AFCPage() override {
 		clearDirty();
 		ASSERT_ABORT( flushableIndex == -1 );
 	}

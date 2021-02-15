@@ -47,13 +47,17 @@ struct LowLatencyWorkload : TestWorkload {
 		testKey = getOption(options, LiteralStringRef("testKey"), LiteralStringRef("testKey"));
 	}
 
-	virtual std::string description() { return "LowLatency"; }
+	std::string description() const override { return "LowLatency"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
+	Future<Void> setup(Database const& cx) override {
+		if (g_network->isSimulated()) {
+			ASSERT(const_cast<ServerKnobs*>(SERVER_KNOBS)->setKnob("min_delay_cc_worst_fit_candidacy_seconds", "5"));
+			ASSERT(const_cast<ServerKnobs*>(SERVER_KNOBS)->setKnob("max_delay_cc_worst_fit_candidacy_seconds", "10"));
+		}
 		return Void();
 	}
 
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		if( clientId == 0 )
 			return _start( cx, this );
 		return Void();
@@ -102,11 +106,9 @@ struct LowLatencyWorkload : TestWorkload {
 		}
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
-		return ok;
-	}
+	Future<bool> check(Database const& cx) override { return ok; }
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		double duration = testDuration;
 		m.push_back( PerfMetric( "Operations/sec", operations.getValue() / duration, false ) );
 		m.push_back( operations.getMetric() );

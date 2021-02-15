@@ -799,8 +799,14 @@ Transaction misc functions
 
 .. method:: Transaction.get_estimated_range_size_bytes(begin_key, end_key)
 
-    Get the estimated byte size of the given key range. Returns a :class:`FutureInt64`.
+    Gets the estimated byte size of the given key range. Returns a :class:`FutureInt64`.
     .. note:: The estimated size is calculated based on the sampling done by FDB server. The sampling algorithm works roughly in this way: the larger the key-value pair is, the more likely it would be sampled and the more accurate its sampled size would be. And due to that reason it is recommended to use this API to query against large ranges for accuracy considerations. For a rough reference, if the returned size is larger than 3MB, one can consider the size to be accurate.
+
+.. method:: Transaction.get_range_split_points(self, begin_key, end_key, chunk_size)
+
+    Gets a list of keys that can split the given range into (roughly) equally sized chunks based on ``chunk_size``. Returns a :class:`FutureKeyArray`.
+    .. note:: The returned split points contain the start key and end key of the given range
+
 
 .. _api-python-transaction-options:
 

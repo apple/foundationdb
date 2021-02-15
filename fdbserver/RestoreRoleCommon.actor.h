@@ -124,6 +124,7 @@ public:
 	virtual std::string describeNode() = 0;
 };
 
+void updateProcessStats(Reference<RestoreRoleData> self);
 ACTOR Future<Void> updateProcessMetrics(Reference<RestoreRoleData> self);
 ACTOR Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::string role);
 ACTOR Future<Void> traceRoleVersionBatchProgress(Reference<RestoreRoleData> self, std::string role);

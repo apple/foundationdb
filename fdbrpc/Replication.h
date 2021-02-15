@@ -184,7 +184,7 @@ public:
 			localitySet = itKeyValue->_resultset;
 		}
 		else {
-			localitySet = Reference<LocalitySet>(new LocalitySet(*_localitygroup));
+			localitySet = makeReference<LocalitySet>(*_localitygroup);
 			_cachemisses ++;
 			// If the key is not within the current key set, skip it because no items within
 			// the current entry array has the key
@@ -213,7 +213,7 @@ public:
 
 	// This function is used to create an subset containing the specified entries
 	Reference<LocalitySet> restrict(std::vector<LocalityEntry> const&	entryArray) {
-		Reference<LocalitySet>	localitySet(new LocalitySet(*_localitygroup));
+		auto localitySet = makeReference<LocalitySet>(*_localitygroup);
 		for (auto& entry : entryArray) {
 			localitySet->add(getRecordViaEntry(entry), *this);
 		}
@@ -505,16 +505,16 @@ protected:
 struct LocalityGroup : public LocalitySet {
 	LocalityGroup():LocalitySet(*this), _valuemap(new StringToIntMap()) {}
 	LocalityGroup(LocalityGroup const& source):LocalitySet(source), _recordArray(source._recordArray), _valuemap(source._valuemap) {}
-	virtual ~LocalityGroup() { }
+	~LocalityGroup() override {}
 
 	LocalityEntry const& add(LocalityData const& data) {
 		// _recordArray.size() is the new entry index for the new data
-		Reference<LocalityRecord>	record(new LocalityRecord(convertToAttribMap(data), _recordArray.size()));
+		auto record = makeReference<LocalityRecord>(convertToAttribMap(data), _recordArray.size());
 		_recordArray.push_back(record);
 		return LocalitySet::add(record, *this);
 	}
 
-	virtual void clear() {
+	void clear() override {
 		LocalitySet::clear();
 		_valuemap->clear();
 		_recordArray.clear();
@@ -534,15 +534,15 @@ struct LocalityGroup : public LocalitySet {
 		return *this;
 	}
 
-	virtual Reference<LocalityRecord> const& getRecord(int recordIndex) const {
+	Reference<LocalityRecord> const& getRecord(int recordIndex) const override {
 		ASSERT((recordIndex >= 0) && (recordIndex < _recordArray.size()));
 		return _recordArray[recordIndex];
 	}
 
 	// Get the locality info for debug purpose
-	virtual std::vector<Reference<LocalityRecord>> const& getRecordArray() const { return _recordArray; }
+	std::vector<Reference<LocalityRecord>> const& getRecordArray() const override { return _recordArray; }
 
-	virtual int	getMemoryUsed() const {
+	int getMemoryUsed() const override {
 		int memorySize = sizeof(_recordArray) + _keymap->getMemoryUsed();
 		for (auto& record : _recordArray) {
 			memorySize += record->getMemoryUsed();
@@ -552,7 +552,7 @@ struct LocalityGroup : public LocalitySet {
 
 	// Convert locality data to sorted vector of int pairs
 	Reference<KeyValueMap>	convertToAttribMap(LocalityData const&	data) {
-		Reference<KeyValueMap>	attribHashMap(new KeyValueMap);
+		auto attribHashMap = makeReference<KeyValueMap>();
 		for (auto& dataPair : data._data) {
 			auto indexKey = keyIndex(dataPair.first);
 			auto indexValue = valueIndex(dataPair.second);
@@ -563,18 +563,14 @@ struct LocalityGroup : public LocalitySet {
 		return attribHashMap;
 	}
 
-	virtual Reference<StringToIntMap> const&	getGroupValueMap() const
-	{	return _valuemap; }
+	Reference<StringToIntMap> const& getGroupValueMap() const override { return _valuemap; }
 
-	virtual Reference<StringToIntMap> const&	getGroupKeyMap() const
-	{	return _keymap; }
+	Reference<StringToIntMap> const& getGroupKeyMap() const override { return _keymap; }
 
 protected:
-	virtual Reference<StringToIntMap> &	getGroupValueMap()
-	{	return _valuemap; }
+	Reference<StringToIntMap>& getGroupValueMap() override { return _valuemap; }
 
-	virtual Reference<StringToIntMap> &	getGroupKeyMap()
-	{	return _keymap; }
+	Reference<StringToIntMap>& getGroupKeyMap() override { return _keymap; }
 
 protected:
 	std::vector<Reference<LocalityRecord>>	_recordArray;
@@ -585,7 +581,7 @@ template <class V>
 struct LocalityMap : public LocalityGroup  {
 	LocalityMap():LocalityGroup() {}
 	LocalityMap(LocalityMap const& source):LocalityGroup(source), _objectArray(source._objectArray) {}
-	virtual ~LocalityMap() {}
+	~LocalityMap() override {}
 
 	bool selectReplicas(
 		Reference<IReplicationPolicy> const&								policy,
@@ -649,12 +645,12 @@ struct LocalityMap : public LocalityGroup  {
 		return getObject(record->_entryIndex);
 	}
 
-	virtual void clear() {
+	void clear() override {
 		LocalityGroup::clear();
 		_objectArray.clear();
 	}
 
-	virtual int	getMemoryUsed() const {
+	int getMemoryUsed() const override {
 		return LocalitySet::getMemoryUsed() + sizeof(_objectArray) + (sizeof(V*) * _objectArray.size());
 	}
 

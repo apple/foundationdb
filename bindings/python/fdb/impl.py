@@ -462,16 +462,29 @@ class TransactionRead(_FDBBase):
         return self.get(key)
     
     def get_estimated_range_size_bytes(self, begin_key, end_key):
-        if begin_key is None:
-            begin_key = b''
-        if end_key is None:
-            end_key = b'\xff'
+        if begin_key is None or end_key is None:
+            if fdb.get_api_version() >= 700:
+                raise Exception('Invalid begin key or end key')
+            else:
+                if begin_key is None:
+                    begin_key = b''
+                if end_key is None:
+                    end_key = b'\xff'
         return FutureInt64(self.capi.fdb_transaction_get_estimated_range_size_bytes(
             self.tpointer,
             begin_key, len(begin_key),
             end_key, len(end_key)
             ))
-
+    
+    def get_range_split_points(self, begin_key, end_key, chunk_size):
+        if begin_key is None or end_key is None or chunk_size <=0:
+            raise Exception('Invalid begin key, end key or chunk size')
+        return FutureKeyArray(self.capi.fdb_transaction_get_range_split_points(
+            self.tpointer,
+            begin_key, len(begin_key),
+            end_key, len(end_key),
+            chunk_size
+            ))
 
 class Transaction(TransactionRead):
     """A modifiable snapshot of a Database.
@@ -720,6 +733,12 @@ class FutureInt64(Future):
         self.capi.fdb_future_get_int64(self.fpointer, ctypes.byref(value))
         return value.value
 
+class FutureUInt64(Future):
+    def wait(self):
+        self.block_until_ready()
+        value = ctypes.c_uint64()
+        self.capi.fdb_future_get_uint64(self.fpointer, ctypes.byref(value))
+        return value.value
 
 class FutureKeyValueArray(Future):
     def wait(self):
@@ -735,6 +754,14 @@ class FutureKeyValueArray(Future):
         # KVs but before returning, but then we would have to store
         # the KVs on the python side and in most cases we are about to
         # destroy the future anyway
+
+class FutureKeyArray(Future):
+    def wait(self):
+        self.block_until_ready()
+        ks = ctypes.pointer(KeyStruct())
+        count = ctypes.c_int()
+        self.capi.fdb_future_get_key_array(self.fpointer, ctypes.byref(ks), ctypes.byref(count))
+        return [ctypes.string_at(x.key, x.key_length) for x in ks[0:count.value]]
 
 
 class FutureStringArray(Future):
@@ -1217,6 +1244,11 @@ class KeyValueStruct(ctypes.Structure):
                 ('value_length', ctypes.c_int)]
     _pack_ = 4
 
+class KeyStruct(ctypes.Structure):
+    _fields_ = [('key', ctypes.POINTER(ctypes.c_byte)),
+                ('key_length', ctypes.c_int)]
+    _pack_ = 4
+
 
 class KeyValue(object):
     def __init__(self, key, value):
@@ -1391,6 +1423,10 @@ def init_c_api():
     _capi.fdb_future_get_int64.restype = ctypes.c_int
     _capi.fdb_future_get_int64.errcheck = check_error_code
 
+    _capi.fdb_future_get_uint64.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint64)]
+    _capi.fdb_future_get_uint64.restype = ctypes.c_uint
+    _capi.fdb_future_get_uint64.errcheck = check_error_code
+
     _capi.fdb_future_get_key.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_byte)),
                                          ctypes.POINTER(ctypes.c_int)]
     _capi.fdb_future_get_key.restype = ctypes.c_int
@@ -1405,6 +1441,11 @@ def init_c_api():
         ctypes.POINTER(KeyValueStruct)), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
     _capi.fdb_future_get_keyvalue_array.restype = int
     _capi.fdb_future_get_keyvalue_array.errcheck = check_error_code
+
+    _capi.fdb_future_get_key_array.argtypes = [ctypes.c_void_p, ctypes.POINTER(
+        ctypes.POINTER(KeyStruct)), ctypes.POINTER(ctypes.c_int)]
+    _capi.fdb_future_get_key_array.restype = int
+    _capi.fdb_future_get_key_array.errcheck = check_error_code
 
     _capi.fdb_future_get_string_array.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_char_p)), ctypes.POINTER(ctypes.c_int)]
     _capi.fdb_future_get_string_array.restype = int
@@ -1451,6 +1492,9 @@ def init_c_api():
     _capi.fdb_transaction_get_estimated_range_size_bytes.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
     _capi.fdb_transaction_get_estimated_range_size_bytes.restype = ctypes.c_void_p
 
+    _capi.fdb_transaction_get_range_split_points.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+    _capi.fdb_transaction_get_range_split_points.restype = ctypes.c_void_p
+
     _capi.fdb_transaction_add_conflict_range.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
     _capi.fdb_transaction_add_conflict_range.restype = ctypes.c_int
     _capi.fdb_transaction_add_conflict_range.errcheck = check_error_code
@@ -1486,6 +1530,9 @@ def init_c_api():
 
     _capi.fdb_transaction_get_approximate_size.argtypes = [ctypes.c_void_p]
     _capi.fdb_transaction_get_approximate_size.restype = ctypes.c_void_p
+
+    _capi.fdb_get_server_protocol.argtypes = [ctypes.c_char_p]
+    _capi.fdb_get_server_protocol.restype = ctypes.c_void_p
 
     _capi.fdb_transaction_get_versionstamp.argtypes = [ctypes.c_void_p]
     _capi.fdb_transaction_get_versionstamp.restype = ctypes.c_void_p
@@ -1686,6 +1733,12 @@ open_databases = {}
 
 cacheLock = threading.Lock()
 
+def get_server_protocol(clusterFilePath=None):
+    with _network_thread_reentrant_lock:
+        if not _network_thread:
+            init()
+
+    return FutureUInt64(_capi.fdb_get_server_protocol(optionalParamToBytes(clusterFilePath)[0]))
 
 def open(cluster_file=None, event_model=None):
     """Opens the given database (or the default database of the cluster indicated

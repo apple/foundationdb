@@ -94,50 +94,39 @@ struct FlowTransactionWrapper : public TransactionWrapper {
 			transaction = T(extraDB);
 		}
 	}
-	virtual ~FlowTransactionWrapper() { }
+	~FlowTransactionWrapper() override {}
 
 	//Sets a key-value pair in the database
-	void set(KeyRef &key, ValueRef &value) {
-		transaction.set(key, value);
-	}
+	void set(KeyRef& key, ValueRef& value) override { transaction.set(key, value); }
 
 	//Commits modifications to the database
-	Future<Void> commit() {
-		return transaction.commit();
-	}
+	Future<Void> commit() override { return transaction.commit(); }
 
 	//Gets a value associated with a given key from the database
-	Future<Optional<Value>> get(KeyRef &key) {
-		return transaction.get(key);
-	}
+	Future<Optional<Value>> get(KeyRef& key) override { return transaction.get(key); }
 
 	//Gets a range of key-value pairs from the database specified by a key range
-	Future<Standalone<RangeResultRef>> getRange(KeyRangeRef &keys, int limit, bool reverse) {
+	Future<Standalone<RangeResultRef>> getRange(KeyRangeRef& keys, int limit, bool reverse) override {
 		return transaction.getRange(keys, limit, false, reverse);
 	}
 
 	//Gets a range of key-value pairs from the database specified by a pair of key selectors
-	Future<Standalone<RangeResultRef>> getRange(KeySelectorRef &begin, KeySelectorRef &end, int limit, bool reverse) {
+	Future<Standalone<RangeResultRef>> getRange(KeySelectorRef& begin, KeySelectorRef& end, int limit,
+	                                            bool reverse) override {
 		return transaction.getRange(begin, end, limit, false, reverse);
 	}
 
 	//Gets the key from the database specified by a given key selector
-	Future<Key> getKey(KeySelectorRef &key) {
-		return transaction.getKey(key);
-	}
+	Future<Key> getKey(KeySelectorRef& key) override { return transaction.getKey(key); }
 
 	//Clears a key from the database
-	void clear(KeyRef &key) {
-		transaction.clear(key);
-	}
+	void clear(KeyRef& key) override { transaction.clear(key); }
 
 	//Clears a range of keys from the database
-	void clear(KeyRangeRef &range) {
-		transaction.clear(range);
-	}
+	void clear(KeyRangeRef& range) override { transaction.clear(range); }
 
 	//Processes transaction error conditions
-	Future<Void> onError(Error const& e) {
+	Future<Void> onError(Error const& e) override {
 		Future<Void> returnVal = transaction.onError(e);
 		if( useExtraDB ) {
 			lastTransaction = std::move(transaction);
@@ -147,23 +136,15 @@ struct FlowTransactionWrapper : public TransactionWrapper {
 	}
 
 	//Gets the read version of a transaction
-	Future<Version> getReadVersion() {
-		return transaction.getReadVersion();
-	}
+	Future<Version> getReadVersion() override { return transaction.getReadVersion(); }
 
 	//Gets the committed version of a transaction
-	Version getCommittedVersion() {
-		return transaction.getCommittedVersion();
-	}
+	Version getCommittedVersion() override { return transaction.getCommittedVersion(); }
 
 	//Prints debugging messages for a transaction
-	void debugTransaction(UID debugId) {
-		transaction.debugTransaction(debugId);
-	}
+	void debugTransaction(UID debugId) override { transaction.debugTransaction(debugId); }
 
-	void addReadConflictRange( KeyRangeRef const& keys ) {
-		transaction.addReadConflictRange(keys);
-	}
+	void addReadConflictRange(KeyRangeRef const& keys) override { transaction.addReadConflictRange(keys); }
 };
 
 //A wrapper class for ThreadSafeTransactions.  Converts ThreadFutures into Futures for interchangeability with flow transactions
@@ -172,66 +153,47 @@ struct ThreadTransactionWrapper : public TransactionWrapper {
 	Reference<ITransaction> transaction;
 
 	ThreadTransactionWrapper(Reference<IDatabase> db, Reference<IDatabase> extraDB, bool useExtraDB) : transaction(db->createTransaction()) { }
-	virtual ~ThreadTransactionWrapper() { }
+	~ThreadTransactionWrapper() override {}
 
 	//Sets a key-value pair in the database
-	void set(KeyRef &key, ValueRef &value) {
-		transaction->set(key, value);
-	}
+	void set(KeyRef& key, ValueRef& value) override { transaction->set(key, value); }
 
 	//Commits modifications to the database
-	Future<Void> commit() {
-		return unsafeThreadFutureToFuture(transaction->commit());
-	}
+	Future<Void> commit() override { return unsafeThreadFutureToFuture(transaction->commit()); }
 
 	//Gets a value associated with a given key from the database
-	Future<Optional<Value>> get(KeyRef &key) {
-		return unsafeThreadFutureToFuture(transaction->get(key));
-	}
+	Future<Optional<Value>> get(KeyRef& key) override { return unsafeThreadFutureToFuture(transaction->get(key)); }
 
 	//Gets a range of key-value pairs from the database specified by a key range
-	Future<Standalone<RangeResultRef>> getRange(KeyRangeRef &keys, int limit, bool reverse) {
+	Future<Standalone<RangeResultRef>> getRange(KeyRangeRef& keys, int limit, bool reverse) override {
 		return unsafeThreadFutureToFuture(transaction->getRange(keys, limit, false, reverse));
 	}
 
 	//Gets a range of key-value pairs from the database specified by a pair of key selectors
-	Future<Standalone<RangeResultRef>> getRange(KeySelectorRef &begin, KeySelectorRef &end, int limit, bool reverse) {
+	Future<Standalone<RangeResultRef>> getRange(KeySelectorRef& begin, KeySelectorRef& end, int limit,
+	                                            bool reverse) override {
 		return unsafeThreadFutureToFuture(transaction->getRange(begin, end, limit, false, reverse));
 	}
 
 	//Gets the key from the database specified by a given key selector
-	Future<Key> getKey(KeySelectorRef &key) {
-		return unsafeThreadFutureToFuture(transaction->getKey(key));
-	}
+	Future<Key> getKey(KeySelectorRef& key) override { return unsafeThreadFutureToFuture(transaction->getKey(key)); }
 
 	//Clears a key from the database
-	void clear(KeyRef &key) {
-		transaction->clear(key);
-	}
+	void clear(KeyRef& key) override { transaction->clear(key); }
 
 	//Clears a range of keys from the database
-	void clear(KeyRangeRef &range) {
-		transaction->clear(range);
-	}
+	void clear(KeyRangeRef& range) override { transaction->clear(range); }
 
 	//Processes transaction error conditions
-	Future<Void> onError(Error const& e) {
-		return unsafeThreadFutureToFuture(transaction->onError(e));
-	}
+	Future<Void> onError(Error const& e) override { return unsafeThreadFutureToFuture(transaction->onError(e)); }
 
 	//Gets the read version of a transaction
-	Future<Version> getReadVersion() {
-		return unsafeThreadFutureToFuture(transaction->getReadVersion());
-	}
+	Future<Version> getReadVersion() override { return unsafeThreadFutureToFuture(transaction->getReadVersion()); }
 
 	//Gets the committed version of a transaction
-	Version getCommittedVersion() {
-		return transaction->getCommittedVersion();
-	}
+	Version getCommittedVersion() override { return transaction->getCommittedVersion(); }
 
-	void addReadConflictRange( KeyRangeRef const& keys ) {
-		transaction->addReadConflictRange(keys);
-	}
+	void addReadConflictRange(KeyRangeRef const& keys) override { transaction->addReadConflictRange(keys); }
 };
 
 //A factory interface for creating different kinds of TransactionWrappers
@@ -252,10 +214,10 @@ struct TransactionFactory : public TransactionFactoryInterface {
 	bool useExtraDB;
 
 	TransactionFactory(DB dbHandle, DB extraDbHandle, bool useExtraDB) : dbHandle(dbHandle), extraDbHandle(extraDbHandle), useExtraDB(useExtraDB) { }
-	virtual ~TransactionFactory() { }
+	~TransactionFactory() override {}
 
 	//Creates a new transaction
-	Reference<TransactionWrapper> createTransaction() {
+	Reference<TransactionWrapper> createTransaction() override {
 		return Reference<TransactionWrapper>(new T(dbHandle, extraDbHandle, useExtraDB));
 	}
 };
@@ -264,7 +226,7 @@ struct ApiWorkload : TestWorkload {
 	bool useExtraDB;
 	Database extraDB;
 
-	ApiWorkload(WorkloadContext const& wcx, int maxClients = -1) : TestWorkload(wcx), success(true), transactionFactory(NULL), maxClients(maxClients) {
+	ApiWorkload(WorkloadContext const& wcx, int maxClients = -1) : TestWorkload(wcx), success(true), transactionFactory(nullptr), maxClients(maxClients) {
 		clientPrefixInt = getOption(options, LiteralStringRef("clientId"), clientId);
 		clientPrefix = format("%010d", clientPrefixInt);
 
@@ -278,16 +240,16 @@ struct ApiWorkload : TestWorkload {
 		minValueLength = getOption(options, LiteralStringRef("minValueLength"), 1);
 		maxValueLength = getOption(options, LiteralStringRef("maxValueLength"), 10000);
 
-		useExtraDB = g_simulator.extraDB != NULL;
+		useExtraDB = g_simulator.extraDB != nullptr;
 		if(useExtraDB) {
-			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
+			auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
 			extraDB = Database::createDatabase(extraFile, -1);
 		}
 	}
 
-	Future<Void> setup(Database const& cx);
-	Future<Void> start(Database const& cx);
-	Future<bool> check(Database const& cx);
+	Future<Void> setup(Database const& cx) override;
+	Future<Void> start(Database const& cx) override;
+	Future<bool> check(Database const& cx) override;
 
 	//Compares the contents of this client's key-space in the database with the in-memory key-value store
 	Future<bool> compareDatabaseToMemory();

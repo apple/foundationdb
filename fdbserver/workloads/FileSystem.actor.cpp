@@ -63,22 +63,18 @@ struct FileSystemWorkload : TestWorkload {
 		loggingQueries = getOption( options, LiteralStringRef("loggingQueries"), false );
 	}
 
-	virtual std::string description() { return "ReadWrite"; }
+	std::string description() const override { return "ReadWrite"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
-		return nodeSetup( cx, this );
-	}
+	Future<Void> setup(Database const& cx) override { return nodeSetup(cx, this); }
 
-	virtual Future<Void> start( Database const& cx ) {
-		return _start( cx, this );
-	}
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
-	virtual Future<bool> check( Database const& cx ) {
+	Future<bool> check(Database const& cx) override {
 		clients.clear();
 		return true;
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		double duration = testDuration * (discardEdgeMeasurements ? 0.75 : 1.0);
 		m.push_back( PerfMetric( "Measured Duration", duration, true ) );
 		m.push_back( PerfMetric( "Transactions/sec", queries.getValue() / duration, false ) );
@@ -316,17 +312,17 @@ struct FileSystemWorkload : TestWorkload {
 	}
 
 	class RecentModificationQuery : public FileSystemOp {
-		virtual Future<Optional<Version>> run( FileSystemWorkload *self, Transaction* tr ) {
+		Future<Optional<Version>> run(FileSystemWorkload* self, Transaction* tr) override {
 			return self->modificationQuery( self, tr );
 		}
-		virtual const char* name() { return "RecentUserModifications"; }
+		const char* name() override { return "RecentUserModifications"; }
 	};
 
 	class ServerDeletionCountQuery : public FileSystemOp {
-		virtual Future<Optional<Version>> run( FileSystemWorkload *self, Transaction* tr ) {
+		Future<Optional<Version>> run(FileSystemWorkload* self, Transaction* tr) override {
 			return self->deletionQuery( self, tr );
 		}
-		virtual const char* name() { return "ServerDeletions"; }
+		const char* name() override { return "ServerDeletions"; }
 	};
 };
 

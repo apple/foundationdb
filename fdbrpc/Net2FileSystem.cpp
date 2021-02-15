@@ -40,8 +40,7 @@
 #include "fdbrpc/AsyncFileWriteChecker.h"
 
 // Opens a file for asynchronous I/O
-Future< Reference<class IAsyncFile> > Net2FileSystem::open( std::string filename, int64_t flags, int64_t mode )
-{
+Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& filename, int64_t flags, int64_t mode) {
 #ifdef __linux__
 	if (checkFileSystem) {
 		dev_t fileDeviceId = getDeviceId(filename);
@@ -65,7 +64,7 @@ Future< Reference<class IAsyncFile> > Net2FileSystem::open( std::string filename
 	// EIO.
 	if ((flags & IAsyncFile::OPEN_UNBUFFERED) && !(flags & IAsyncFile::OPEN_NO_AIO) &&
 	    !FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO)
-		f = AsyncFileKAIO::open(filename, flags, mode, NULL);
+		f = AsyncFileKAIO::open(filename, flags, mode, nullptr);
 	else
 #endif
 	f = Net2AsyncFile::open(filename, flags, mode, static_cast<boost::asio::io_service*> ((void*) g_network->global(INetwork::enASIOService)));
@@ -75,22 +74,19 @@ Future< Reference<class IAsyncFile> > Net2FileSystem::open( std::string filename
 }
 
 // Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
-Future< Void > Net2FileSystem::deleteFile( std::string filename, bool mustBeDurable )
-{
+Future<Void> Net2FileSystem::deleteFile(const std::string& filename, bool mustBeDurable) {
 	return Net2AsyncFile::deleteFile(filename, mustBeDurable);
 }
 
-Future< std::time_t > Net2FileSystem::lastWriteTime( std::string filename ) {
+Future<std::time_t> Net2FileSystem::lastWriteTime(const std::string& filename) {
 	return Net2AsyncFile::lastWriteTime( filename );
 }
 
-void Net2FileSystem::newFileSystem(double ioTimeout, std::string fileSystemPath)
-{
+void Net2FileSystem::newFileSystem(double ioTimeout, const std::string& fileSystemPath) {
 	g_network->setGlobal(INetwork::enFileSystem, (flowGlobalType) new Net2FileSystem(ioTimeout, fileSystemPath));
 }
 
-Net2FileSystem::Net2FileSystem(double ioTimeout, std::string fileSystemPath)
-{
+Net2FileSystem::Net2FileSystem(double ioTimeout, const std::string& fileSystemPath) {
 	Net2AsyncFile::init();
 #ifdef __linux__
 	if (!FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO)

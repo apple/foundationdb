@@ -30,7 +30,9 @@
 #include "flow/Arena.h"
 #include "flow/FileIdentifier.h"
 #include "flow/ObjectSerializer.h"
+#include "flow/network.h"
 #include <algorithm>
+#include <deque>
 
 // Though similar, is_binary_serializable cannot be replaced by std::is_pod, as doing so would prefer
 // memcpy over a defined serialize() method on a POD struct.  As not all of our structs are packed,
@@ -39,9 +41,11 @@
 // A more intelligent SFINAE that does "binarySerialize if POD and no serialize() is defined" could
 // replace the usage of is_binary_serializable.
 template <class T>
-struct is_binary_serializable { enum { value = 0 }; };
+struct is_binary_serializable : std::false_type {};
 
-#define BINARY_SERIALIZABLE( T ) template<> struct is_binary_serializable<T> { enum { value = 1 }; };
+#define BINARY_SERIALIZABLE(T)                                                                                         \
+	template <>                                                                                                        \
+	struct is_binary_serializable<T> : std::true_type {};
 
 BINARY_SERIALIZABLE( int8_t );
 BINARY_SERIALIZABLE( uint8_t );
@@ -141,10 +145,19 @@ inline void save( Archive& ar, const std::string& value ) {
 }
 
 template <class Archive, class T>
-class Serializer< Archive, T, typename std::enable_if< is_binary_serializable<T>::value >::type> {
+class Serializer<Archive, T, typename std::enable_if_t<is_binary_serializable<T>::value>> {
 public:
 	static void serialize( Archive& ar, T& t ) {
 		ar.serializeBinaryItem(t);
+	}
+};
+
+template <class Archive, class T>
+class Serializer<Archive, T, typename std::enable_if_t<std::is_enum_v<T>>> {
+public:
+	static void serialize(Archive& ar, T& t) {
+		static_assert(is_binary_serializable<std::underlying_type_t<T>>::value);
+		ar.serializeBinaryItem(reinterpret_cast<std::underlying_type_t<T>&>(t));
 	}
 };
 
@@ -172,6 +185,26 @@ inline void save( Archive& ar, const std::vector<T>& value ) {
 }
 template <class Archive, class T>
 inline void load( Archive& ar, std::vector<T>& value ) {
+	int s;
+	ar >> s;
+	value.clear();
+	value.reserve(s);
+	for (int i = 0; i < s; i++) {
+		value.push_back(T());
+		ar >> value[i];
+	}
+	ASSERT(ar.protocolVersion().isValid());
+}
+
+template <class Archive, class T>
+inline void save(Archive& ar, const std::deque<T>& value) {
+	ar << (int)value.size();
+	for (auto it = value.begin(); it != value.end(); ++it) ar << *it;
+	ASSERT(ar.protocolVersion().isValid());
+}
+
+template <class Archive, class T>
+inline void load(Archive& ar, std::deque<T>& value) {
 	int s;
 	ar >> s;
 	value.clear();
@@ -324,14 +357,14 @@ public:
 		*(T*)writeBytes(sizeof(T)) = t;
 	}
 	void* getData() { return data; }
-	int getLength() { return size; }
-	Standalone<StringRef> toValue() { return Standalone<StringRef>( StringRef(data,size), arena ); }
+	int getLength() const { return size; }
+	Standalone<StringRef> toValue() const { return Standalone<StringRef>(StringRef(data, size), arena); }
 	template <class VersionOptions>
-	explicit BinaryWriter( VersionOptions vo ) : data(NULL), size(0), allocated(0) { vo.write(*this); }
+	explicit BinaryWriter( VersionOptions vo ) : data(nullptr), size(0), allocated(0) { vo.write(*this); }
 	BinaryWriter( BinaryWriter&& rhs ) : arena(std::move(rhs.arena)), data(rhs.data), size(rhs.size), allocated(rhs.allocated), m_protocolVersion(rhs.m_protocolVersion) {
 		rhs.size = 0;
 		rhs.allocated = 0;
-		rhs.data = 0;
+		rhs.data = nullptr;
 	}
 	void operator=( BinaryWriter&& r) {
 		arena = std::move(r.arena);
@@ -341,7 +374,7 @@ public:
 		m_protocolVersion = r.m_protocolVersion;
 		r.size = 0;
 		r.allocated = 0;
-		r.data = 0;
+		r.data = nullptr;
 	}
 
 	template <class T, class VersionOptions>
@@ -690,15 +723,17 @@ public:
 struct PacketBuffer : SendBuffer {
 private:
 	int reference_count;
-	uint32_t size_;
+	uint32_t const size_;
 	static constexpr size_t PACKET_BUFFER_MIN_SIZE = 16384;
-	static constexpr size_t PACKET_BUFFER_OVERHEAD = 32;
+	static constexpr size_t PACKET_BUFFER_OVERHEAD = 40;
 
 public:
+	double const enqueue_time;
+
 	size_t size() const { return size_; }
 
 private:
-	explicit PacketBuffer(size_t size) : reference_count(1), size_(size) {
+	explicit PacketBuffer(size_t size) : reference_count(1), size_(size), enqueue_time(g_network->now()) {
 		next = nullptr;
 		bytes_written = bytes_sent = 0;
 		_data = reinterpret_cast<uint8_t*>(this + 1);
@@ -729,16 +764,16 @@ public:
 };
 
 struct PacketWriter {
-	static const int isDeserializing = 0;
+	static constexpr int isDeserializing = 0;
 	static constexpr bool isSerializing = true;
 	typedef PacketWriter WRITER;
 
 	PacketBuffer* buffer;
-	struct ReliablePacket *reliable;  // NULL if this is unreliable; otherwise the last entry in the ReliablePacket::cont chain
+	struct ReliablePacket *reliable;  // nullptr if this is unreliable; otherwise the last entry in the ReliablePacket::cont chain
 	int length;
 	ProtocolVersion m_protocolVersion;
 
-	// reliable is NULL if this is an unreliable packet, or points to a ReliablePacket.  PacketWriter is responsible
+	// reliable is nullptr if this is an unreliable packet, or points to a ReliablePacket.  PacketWriter is responsible
 	//   for filling in reliable->buffer, ->cont, ->begin, and ->end, but not ->prev or ->next.
 	template <class VersionOptions>
 	PacketWriter(PacketBuffer* buf, ReliablePacket* reliable, VersionOptions vo) { init(buf, reliable); vo.read(*this); }
@@ -751,9 +786,7 @@ struct PacketWriter {
 			serializeBytesAcrossBoundary(data, bytes);
 		}
 	}
-	void serializeBytesAcrossBoundary(const void* data, int bytes);
 	void writeAhead( int bytes, struct SplitBuffer* );
-	void nextBuffer(size_t size = 0 /* downstream it will default to at least 4k minus some padding */);
 	PacketBuffer* finish();
 	int size() const { return length; }
 
@@ -773,6 +806,8 @@ struct PacketWriter {
 	void setProtocolVersion(ProtocolVersion pv) { m_protocolVersion = pv; }
 
 private:
+	void serializeBytesAcrossBoundary(const void* data, int bytes);
+	void nextBuffer(size_t size = 0 /* downstream it will default to at least 4k minus some padding */);
 	uint8_t* writeBytes(size_t size) {
 		if (size > buffer->bytes_unwritten()) {
 			nextBuffer(size);
@@ -797,7 +832,7 @@ struct ISerializeSource {
 template <class T, class V>
 struct MakeSerializeSource : ISerializeSource {
 	using value_type = V;
-	virtual void serializePacketWriter(PacketWriter& w) const {
+	void serializePacketWriter(PacketWriter& w) const override {
 		ObjectWriter writer([&](size_t size) { return w.writeBytes(size); }, AssumeVersion(w.protocolVersion()));
 		writer.serialize(get()); // Writes directly into buffer supplied by |w|
 	}
@@ -809,10 +844,8 @@ struct SerializeSource : MakeSerializeSource<SerializeSource<T>, T> {
 	using value_type = T;
 	T const& value;
 	SerializeSource(T const& value) : value(value) {}
-	virtual void serializeObjectWriter(ObjectWriter& w) const {
-		w.serialize(value);
-	}
-	virtual T const& get() const { return value; }
+	void serializeObjectWriter(ObjectWriter& w) const override { w.serialize(value); }
+	T const& get() const override { return value; }
 };
 
 #endif

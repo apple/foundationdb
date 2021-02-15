@@ -157,7 +157,7 @@ class ApiTest(Test):
         read_conflicts = ['READ_CONFLICT_RANGE', 'READ_CONFLICT_KEY']
         write_conflicts = ['WRITE_CONFLICT_RANGE', 'WRITE_CONFLICT_KEY', 'DISABLE_WRITE_CONFLICT']
         txn_sizes = ['GET_APPROXIMATE_SIZE']
-        storage_metrics = ['GET_ESTIMATED_RANGE_SIZE']
+        storage_metrics = ['GET_ESTIMATED_RANGE_SIZE', 'GET_RANGE_SPLIT_POINTS']
 
         op_choices += reads
         op_choices += mutations
@@ -551,6 +551,23 @@ class ApiTest(Test):
                     key1, key2 = key2, key1
 
                 instructions.push_args(key1, key2)
+                instructions.append(op)
+                self.add_strings(1)
+            elif op == 'GET_RANGE_SPLIT_POINTS':
+                # Protect against inverted range and identical keys
+                key1 = self.workspace.pack(self.random.random_tuple(1))
+                key2 = self.workspace.pack(self.random.random_tuple(1))
+
+                while key1 == key2:
+                    key1 = self.workspace.pack(self.random.random_tuple(1))
+                    key2 = self.workspace.pack(self.random.random_tuple(1))
+
+                if key1 > key2:
+                    key1, key2 = key2, key1
+
+                # TODO: randomize chunkSize but should not exceed 100M(shard limit)
+                chunkSize = 10000000 # 10M
+                instructions.push_args(key1, key2, chunkSize)
                 instructions.append(op)
                 self.add_strings(1)
 

@@ -1,0 +1,80 @@
+/*
+ * BuildFlags.h
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef FDBCLIENT_BUILDFLAGS_H
+#define FDBCLIENT_BUILDFLAGS_H
+
+#include <string>
+
+#include "fdbclient/JSONDoc.h"
+
+#ifdef __GLIBC__
+#define C_VERSION_MAJOR __GLIBC__
+#define C_VERSION_MINOR __GLIBC_MINOR__
+#else
+#define C_VERSION_MAJOR 0
+#define C_VERSION_MINOR 0
+#endif
+
+// FDB info.
+const std::string kGitHash = "@CURRENT_GIT_VERSION_WNL@";
+const std::string kFdbVersion = "@FDB_VERSION@";
+
+// System architecture.
+const std::string kArch = "@CMAKE_SYSTEM@";
+// ID of compiler used for build, ie "Clang", "GNU", etc...
+const std::string kCompiler = "@CMAKE_CXX_COMPILER_ID@";
+
+// Library versions.
+const std::string kBoostVersion = "@Boost_LIB_VERSION@";
+
+// Build info and flags.
+const std::string kCMakeVersion = "@CMAKE_VERSION@";
+const std::string kCCacheEnabled = "@USE_CCACHE@";
+
+// GNU C library major and minor versions.
+constexpr int kCVersionMajor = C_VERSION_MAJOR;
+constexpr int kCVersionMinor = C_VERSION_MINOR;
+
+// C++ standard. Possible values are 201402L, 201703L, etc...
+constexpr int kCppStandard = __cplusplus;
+
+// Returns a JSON string with information about how the binary was built.
+std::string jsonBuildInformation() {
+	json_spirit::mValue json;	
+	JSONDoc doc(json);
+
+	doc.create("git_hash") = kGitHash;
+	doc.create("fdb_version") = kFdbVersion;
+
+	doc.create("arch") = kArch;
+	doc.create("compiler") = kCompiler;
+
+	doc.create("boost_version") = kBoostVersion;
+	doc.create("cmake_version") = kCMakeVersion;
+	doc.create("ccache") = kCCacheEnabled;
+
+	doc.create("glibc_version") = std::to_string(kCVersionMajor) + "." + std::to_string(kCVersionMinor);
+	doc.create("cpp_standard") = kCppStandard;
+
+	return json_spirit::write_string(json, json_spirit::pretty_print) + "\n";
+}
+
+#endif

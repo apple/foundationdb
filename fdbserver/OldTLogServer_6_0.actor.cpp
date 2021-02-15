@@ -75,7 +75,7 @@ struct AlternativeTLogQueueEntryRef {
 	Version knownCommittedVersion;
 	std::vector<TagsAndMessage>* alternativeMessages;
 
-	AlternativeTLogQueueEntryRef() : version(0), knownCommittedVersion(0), alternativeMessages(NULL) {}
+	AlternativeTLogQueueEntryRef() : version(0), knownCommittedVersion(0), alternativeMessages(nullptr) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -128,10 +128,16 @@ public:
 	Future<Void> commit() { return queue->commit(); }
 
 	// Implements IClosable
-	virtual Future<Void> getError() { return queue->getError(); }
-	virtual Future<Void> onClosed() { return queue->onClosed(); }
-	virtual void dispose() { queue->dispose(); delete this; }
-	virtual void close() { queue->close(); delete this; }
+	Future<Void> getError() override { return queue->getError(); }
+	Future<Void> onClosed() override { return queue->onClosed(); }
+	void dispose() override {
+		queue->dispose();
+		delete this;
+	}
+	void close() override {
+		queue->close();
+		delete this;
+	}
 
 private:
 	IDiskQueue* queue;
@@ -589,8 +595,8 @@ ACTOR Future<Void> tLogLock( TLogData* self, ReplyPromise< TLogLockResult > repl
 	state Version stopVersion = logData->version.get();
 
 	TEST(true); // TLog stopped by recovering master
-	TEST( logData->stopped );
-	TEST( !logData->stopped );
+	TEST( logData->stopped ); // logData already stopped
+	TEST( !logData->stopped ); // logData not yet stopped
 
 	TraceEvent("TLogStop", logData->logId).detail("Ver", stopVersion).detail("IsStopped", logData->stopped).detail("QueueCommitted", logData->queueCommittedVersion.get());
 
@@ -1295,7 +1301,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		if(sequenceData.isSet()) {
 			trackerData.duplicatePeeks++;
 			if(sequenceData.getFuture().get().first != reply.end) {
-				TEST(true); //tlog peek second attempt ended at a different version
+				TEST(true); //tlog peek second attempt ended at a different version (2)
 				req.reply.sendError(operation_obsolete());
 				return Void();
 			}
@@ -1306,19 +1312,6 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 	}
 
 	req.reply.send( reply );
-	return Void();
-}
-
-ACTOR Future<Void> watchDegraded(TLogData* self) {
-	if(g_network->isSimulated() && g_simulator.speedUpSimulation) {
-		return Void();
-	}
-
-	wait(lowPriorityDelay(SERVER_KNOBS->TLOG_DEGRADED_DURATION));
-	
-	TraceEvent(SevWarnAlways, "TLogDegraded", self->dbgid);
-	TEST(true); //6.0 TLog degraded
-	self->degraded->set(true);
 	return Void();
 }
 
@@ -1334,12 +1327,11 @@ ACTOR Future<Void> doQueueCommit( TLogData* self, Reference<LogData> logData, st
 	self->diskQueueCommitBytes = 0;
 	self->largeDiskQueueCommitBytes.set(false);
 
-	state Future<Void> degraded = watchDegraded(self);
-	wait(c);
+	wait(ioDegradedOrTimeoutError(c, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, self->degraded,
+	                              SERVER_KNOBS->TLOG_DEGRADED_DURATION));
 	if(g_network->isSimulated() && !g_simulator.speedUpSimulation && BUGGIFY_WITH_PROB(0.0001)) {
 		wait(delay(6.0));
 	}
-	degraded.cancel();
 	wait(self->queueCommitEnd.whenAtLeast(commitNumber-1));
 
 	//Calling check_yield instead of yield to avoid a destruction ordering problem in simulation
@@ -2136,6 +2128,11 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		DUMPTOKEN( recruited.lock );
 		DUMPTOKEN( recruited.getQueuingMetrics );
 		DUMPTOKEN( recruited.confirmRunning );
+		DUMPTOKEN( recruited.waitFailure );
+		DUMPTOKEN( recruited.recoveryFinished );
+		DUMPTOKEN( recruited.disablePopRequest );
+		DUMPTOKEN( recruited.enablePopRequest );
+		DUMPTOKEN( recruited.snapRequest );
 
 		//We do not need the remoteTag, because we will not be loading any additional data
 		logData = Reference<LogData>( new LogData(self, recruited, Tag(), true, id_logRouterTags[id1], id_txsTags[id1], UID(), std::vector<Tag>(), "Restored") );
@@ -2303,6 +2300,11 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 	DUMPTOKEN( recruited.lock );
 	DUMPTOKEN( recruited.getQueuingMetrics );
 	DUMPTOKEN( recruited.confirmRunning );
+	DUMPTOKEN( recruited.waitFailure );
+	DUMPTOKEN( recruited.recoveryFinished );
+	DUMPTOKEN( recruited.disablePopRequest );
+	DUMPTOKEN( recruited.enablePopRequest );
+	DUMPTOKEN( recruited.snapRequest );
 
 	for(auto it : self->id_data) {
 		if( !it.second->stopped ) {

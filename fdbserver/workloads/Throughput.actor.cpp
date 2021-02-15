@@ -69,7 +69,7 @@ struct RWTransactor : ITransactor {
 
 	Value randomValue() { return StringRef( (const uint8_t*)valueString.c_str(), deterministicRandom()->randomInt(minValueBytes, maxValueBytes+1) ); };
 
-	virtual Future<Void> doTransaction(Database const& db, Stats* stats) {
+	Future<Void> doTransaction(Database const& db, Stats* stats) override {
 		return rwTransaction(db, Reference<RWTransactor>::addRef(this), stats );
 	}
 
@@ -131,7 +131,7 @@ struct ABTransactor : ITransactor {
 	{
 	}
 
-	virtual Future<Void> doTransaction(Database const& db, Stats* stats) {
+	Future<Void> doTransaction(Database const& db, Stats* stats) override {
 		return deterministicRandom()->random01() >= alpha ? a->doTransaction(db,stats) : b->doTransaction(db,stats);
 	}
 };
@@ -149,7 +149,7 @@ struct SweepTransactor : ITransactor {
 	{
 	}
 
-	virtual Future<Void> doTransaction(Database const& db, Stats* stats) {
+	Future<Void> doTransaction(Database const& db, Stats* stats) override {
 		if (startTime==-1) startTime = now()+startDelay;
 		
 		double alpha;
@@ -181,8 +181,11 @@ struct MeasureSinglePeriod : IMeasurer {
 
 	MeasureSinglePeriod( double delay, double duration ) : delay(delay), duration(duration), totalLatency(2000), grvLatency(2000), rowReadLatency(2000), commitLatency(2000) {}
 
-	virtual Future<Void> start() { startT = now(); return Void(); }
-	virtual void addTransaction(ITransactor::Stats* st, double now) {
+	Future<Void> start() override {
+		startT = now();
+		return Void();
+	}
+	void addTransaction(ITransactor::Stats* st, double now) override {
 		if (!(now >= startT+delay && now < startT+delay+duration)) return;
 
 		totalLatency.addSample( st->totalLatency );
@@ -195,7 +198,7 @@ struct MeasureSinglePeriod : IMeasurer {
 
 		stats += *st;
 	}
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		double measureDuration = duration;
 		m.push_back( PerfMetric( "Transactions/sec", stats.transactions / measureDuration, false ) );
 		m.push_back( PerfMetric( "Retries/sec", stats.retries / measureDuration, false ) );
@@ -225,14 +228,12 @@ struct MeasurePeriodically : IMeasurer {
 
 	MeasurePeriodically( double period, std::set<std::string> includeMetrics ) : period(period), includeMetrics(includeMetrics), msp(0,period), msp0(0,period) {}
 
-	virtual Future<Void> start() { 
+	Future<Void> start() override {
 		msp.start();
 		return periodicActor(this);
 	}
-	virtual void addTransaction(ITransactor::Stats* st, double now) {
-		msp.addTransaction(st, now);
-	}
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void addTransaction(ITransactor::Stats* st, double now) override { msp.addTransaction(st, now); }
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.insert(m.end(), accumulatedMetrics.begin(), accumulatedMetrics.end());
 	}
 	void nextPeriod(double t) {
@@ -263,17 +264,17 @@ struct MeasurePeriodically : IMeasurer {
 
 struct MeasureMulti : IMeasurer {
 	vector<Reference<IMeasurer>> ms;
-	virtual Future<Void> start() {
+	Future<Void> start() override {
 		vector<Future<Void>> s;
 		for(auto m=ms.begin(); m!=ms.end(); ++m)
 			s.push_back( (*m)->start() );
 		return waitForAll(s);
 	}
-	virtual void addTransaction(ITransactor::Stats* stats, double now) {
+	void addTransaction(ITransactor::Stats* stats, double now) override {
 		for(auto m=ms.begin(); m!=ms.end(); ++m)
 			(*m)->addTransaction(stats, now);
 	}
-	virtual void getMetrics( vector<PerfMetric>& metrics ) {
+	void getMetrics(vector<PerfMetric>& metrics) override {
 		for(auto m=ms.begin(); m!=ms.end(); ++m)
 			(*m)->getMetrics(metrics);
 	}
@@ -290,7 +291,7 @@ struct ThroughputWorkload : TestWorkload {
 	ThroughputWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx), activeActors(0), totalLatencyIntegral(0), totalTransactionsIntegral(0)
 	{
-		Reference<MeasureMulti> multi( new MeasureMulti );
+		auto multi = makeReference<MeasureMulti>();
 		measurer = multi;
 
 		targetLatency = getOption( options, LiteralStringRef("targetLatency"), 0.05 );
@@ -335,13 +336,13 @@ struct ThroughputWorkload : TestWorkload {
 		//testDuration = getOption( options, LiteralStringRef("testDuration"), measureDelay + measureDuration );
 	}
 
-	virtual std::string description() { return "Throughput"; }
+	std::string description() const override { return "Throughput"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
+	Future<Void> setup(Database const& cx) override {
 		return Void();  // No setup for now - use a separate workload to do setup
 	}
 
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		startT = now();
 		PromiseStream<Future<Void>> add;
 		Future<Void> ac = actorCollection( add.getFuture(), &activeActors );
@@ -351,7 +352,7 @@ struct ThroughputWorkload : TestWorkload {
 		return r;
 	}
 
-	virtual Future<bool> check( Database const& cx ) { return true; }
+	Future<bool> check(Database const& cx) override { return true; }
 
 	ACTOR static Future<Void> throughputActor( Database db, ThroughputWorkload* self, PromiseStream<Future<Void>> add ) {
 		state double before = now();
@@ -388,8 +389,6 @@ struct ThroughputWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-		measurer->getMetrics(m);
-	}
+	void getMetrics(vector<PerfMetric>& m) override { measurer->getMetrics(m); }
 };
 WorkloadFactory<ThroughputWorkload> ThroughputWorkloadFactory("Throughput");

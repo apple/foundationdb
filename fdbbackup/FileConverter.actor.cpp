@@ -31,6 +31,7 @@
 #include "fdbclient/MutationList.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
+#include "fdbclient/BuildFlags.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace file_converter {
@@ -51,10 +52,15 @@ void printConvertUsage() {
 	          << "  --trace_format FORMAT\n"
 	          << "                  Select the format of the trace files. xml (the default) and json are supported.\n"
 	          << "                  Has no effect unless --log is specified.\n"
+	          << "  --build_flags   Print build information and exit.\n"
 	          << "  -h, --help      Display this help and exit.\n"
 	          << "\n";
 
 	return;
+}
+
+void printBuildInformation() {
+	printf("%s", jsonBuildInformation().c_str());
 }
 
 void printLogFiles(std::string msg, const std::vector<LogFile>& files) {
@@ -175,7 +181,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 					int msgSize = bigEndian32(reader.consume<int>());
 					const uint8_t* message = reader.consume(msgSize);
 
-					ArenaReader rd(buf.arena(), StringRef(message, msgSize), AssumeVersion(currentProtocolVersion));
+					ArenaReader rd(buf.arena(), StringRef(message, msgSize), AssumeVersion(g_network->protocolVersion()));
 					MutationRef m;
 					rd >> m;
 					count++;
@@ -298,7 +304,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 		// Attempt decode the first few blocks of log files until beginVersion is consumed
 		std::vector<Future<Void>> fileDecodes;
 		for (int i = 0; i < asyncFiles.size(); i++) {
-			Reference<FileProgress> fp(new FileProgress(asyncFiles[i].get(), i));
+			auto fp = makeReference<FileProgress>(asyncFiles[i].get(), i);
 			progress->fileProgress.push_back(fp);
 			fileDecodes.push_back(
 			    decodeToVersion(fp, progress->beginVersion, progress->endVersion, progress->getLogFile(i)));
@@ -433,7 +439,7 @@ ACTOR Future<Void> convert(ConvertParams params) {
 	state BackupDescription desc = wait(container->describeBackup());
 	std::cout << "\n" << desc.toString() << "\n";
 
-	// std::cout << "Using Protocol Version: 0x" << std::hex << currentProtocolVersion.version() << std::dec << "\n";
+	// std::cout << "Using Protocol Version: 0x" << std::hex << g_network->protocolVersion().version() << std::dec << "\n";
 
 	std::vector<LogFile> logs = getRelevantLogFiles(listing.logs, params.begin, params.end);
 	printLogFiles("Range has", logs);
@@ -460,7 +466,7 @@ ACTOR Future<Void> convert(ConvertParams params) {
 			arena = Arena();
 		}
 
-		ArenaReader rd(data.arena, data.message, AssumeVersion(currentProtocolVersion));
+		ArenaReader rd(data.arena, data.message, AssumeVersion(g_network->protocolVersion()));
 		MutationRef m;
 		rd >> m;
 		std::cout << data.version.toString() << " m = " << m.toString() << "\n";
@@ -534,6 +540,10 @@ int parseCommandLine(ConvertParams* param, CSimpleOpt* args) {
 
 		case OPT_TRACE_LOG_GROUP:
 			param->trace_log_group = args->OptionArg();
+			break;
+		case OPT_BUILD_FLAGS:
+			printBuildInformation();
+			return FDB_EXIT_ERROR;
 			break;
 		}
 	}

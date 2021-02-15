@@ -1,0 +1,55 @@
+[[test]]
+testTitle = 'SubmitBackup'
+simBackupAgents= 'BackupToFile'
+clearAfterTest = false
+runConsistencyCheck=false
+
+    [[test.workload]]
+    testName = 'SubmitBackup'
+    delayFor = 0
+    stopWhenDone = false
+
+[[test]]
+testTitle = 'FirstCycleTest'
+clearAfterTest=false
+runConsistencyCheck = false
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 30000
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+    expectedRate = 0
+    keyPrefix = 'BeforeRestart'
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 90.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 90.0
+    testDuration = 90.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 90.0
+
+    [[test.workload]]
+    testName='Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 90.0
+
+[[test]]
+testTitle = 'SaveDatabase'
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'SaveAndKill'
+    restartInfoLocation = 'simfdb/restartInfo.ini'
+    testDuration=30.0

@@ -125,10 +125,10 @@ std::string NetworkAddress::toString() const {
 	return formatIpPort(ip, port) + (isTLS() ? ":tls" : "");
 }
 
-std::string toIPVectorString(std::vector<uint32_t> ips) {
+std::string toIPVectorString(const std::vector<uint32_t> &ips) {
 	std::string output;
 	const char* space = "";
-	for (auto ip : ips) {
+	for (const auto &ip : ips) {
 		output += format("%s%d.%d.%d.%d", space, (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
 		space = " ";
 	}
@@ -150,7 +150,7 @@ std::string formatIpPort(const IPAddress& ip, uint16_t port) {
 	return format(patt, ip.toString().c_str(), port);
 }
 
-Future<Reference<IConnection>> INetworkConnections::connect( std::string host, std::string service, bool useTLS ) {
+Future<Reference<IConnection>> INetworkConnections::connect( const std::string &host, const std::string &service, bool useTLS ) {
 	// Use map to create an actor that returns an endpoint or throws
 	Future<NetworkAddress> pickEndpoint = map(resolveTCPEndpoint(host, service), [=](std::vector<NetworkAddress> const &addresses) -> NetworkAddress {
 		NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
@@ -161,11 +161,13 @@ Future<Reference<IConnection>> INetworkConnections::connect( std::string host, s
 
 	// Wait for the endpoint to return, then wait for connect(endpoint) and return it.
 	// Template types are being provided explicitly because they can't be automatically deduced for some reason.
-	return mapAsync<NetworkAddress, std::function<Future<Reference<IConnection>>(NetworkAddress const &)>, Reference<IConnection> >
-		(pickEndpoint, [=](NetworkAddress const &addr) -> Future<Reference<IConnection>> {
-		return connect(addr, host);
-	});
+	return mapAsync<NetworkAddress, std::function<Future<Reference<IConnection>>(NetworkAddress const&)>,
+	                Reference<IConnection>>(
+	    pickEndpoint,
+	    [=](NetworkAddress const& addr) -> Future<Reference<IConnection>> { return connectExternal(addr, host); });
 }
+
+IUDPSocket::~IUDPSocket() {}
 
 const std::vector<int> NetworkMetrics::starvationBins = { 1, 3500, 7000, 7500, 8500, 8900, 10500 };
 

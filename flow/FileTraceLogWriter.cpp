@@ -31,9 +31,9 @@
 #define TRACEFILE_FLAGS O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC
 #define TRACEFILE_MODE 0664
 #elif defined(_WIN32)
-#include <windows.h>
-#undef max
-#undef min
+//#include <windows.h>
+//#undef max
+//#undef min
 #include <io.h>
 #include <stdio.h>
 #include <sys/stat.h>
@@ -55,7 +55,7 @@ struct IssuesListImpl {
 		issues.insert(issue);
 	}
 
-	void retrieveIssues(std::set<std::string>& out) {
+	void retrieveIssues(std::set<std::string>& out) const {
 		MutexHolder h(mutex);
 		for (auto const& i : issues) {
 			out.insert(i);
@@ -68,14 +68,16 @@ struct IssuesListImpl {
 	}
 
 private:
-	Mutex mutex;
+	mutable Mutex mutex;
 	std::set<std::string> issues;
 };
 
-IssuesList::IssuesList() : impl(new IssuesListImpl{}) {}
-IssuesList::~IssuesList() { delete impl; }
+IssuesList::IssuesList() : impl(std::make_unique<IssuesListImpl>()) {}
+IssuesList::~IssuesList() = default;
 void IssuesList::addIssue(std::string issue) { impl->addIssue(issue); }
-void IssuesList::retrieveIssues(std::set<std::string> &out) { impl->retrieveIssues(out); }
+void IssuesList::retrieveIssues(std::set<std::string>& out) const {
+	impl->retrieveIssues(out);
+}
 void IssuesList::resolveIssue(std::string issue) { impl->resolveIssue(issue); }
 
 FileTraceLogWriter::FileTraceLogWriter(std::string directory, std::string processName, std::string basename,
@@ -170,11 +172,11 @@ void FileTraceLogWriter::open() {
 					.detail("Filename", finalname)
 					.detail("ErrorCode", errorNum)
 					.detail("Error", strerror(errorNum))
-					.trackLatest("TraceFileOpenError"); }, NULL);
+					.trackLatest("TraceFileOpenError"); }, nullptr);
 			threadSleep(FLOW_KNOBS->TRACE_RETRY_OPEN_INTERVAL);
 		}
 	}
-	onMainThreadVoid([]{ latestEventCache.clear("TraceFileOpenError"); }, NULL);
+	onMainThreadVoid([]{ latestEventCache.clear("TraceFileOpenError"); }, nullptr);
 	if (needsResolve) {
 		issues->resolveIssue("trace_log_could_not_create_file");
 	}

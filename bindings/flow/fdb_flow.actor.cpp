@@ -20,6 +20,7 @@
 
 #include "fdb_flow.h"
 
+#include <cstdint>
 #include <stdio.h>
 #include <cinttypes>
 
@@ -101,6 +102,9 @@ namespace FDB {
 
 		Reference<Transaction> createTransaction() override;
 		void setDatabaseOption(FDBDatabaseOption option, Optional<StringRef> value = Optional<StringRef>()) override;
+		Future<int64_t> rebootWorker(const StringRef& address, bool check = false, int duration = 0) override;
+		Future<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
+		Future<Void> createSnapshot(const StringRef& uid, const StringRef& snap_command) override;
 
 	private:
 		FDBDatabase* db;
@@ -134,6 +138,7 @@ namespace FDB {
 													   FDBStreamingMode streamingMode = FDB_STREAMING_MODE_SERIAL) override;
 		
 		Future<int64_t> getEstimatedRangeSizeBytes(const KeyRange& keys) override;
+		Future<FDBStandalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRange& range, int64_t chunkSize) override;
 
 		void addReadConflictRange(KeyRangeRef const& keys) override;
 		void addReadConflictKey(KeyRef const& key) override;
@@ -157,14 +162,14 @@ namespace FDB {
 		void cancel() override;
 		void reset() override;
 
-		TransactionImpl() : tr(NULL) {}
+		TransactionImpl() : tr(nullptr) {}
 	    TransactionImpl(TransactionImpl&& r) noexcept {
 		    tr = r.tr;
-		    r.tr = NULL;
+		    r.tr = nullptr;
 	    }
 	    TransactionImpl& operator=(TransactionImpl&& r) noexcept {
 		    tr = r.tr;
-		    r.tr = NULL;
+		    r.tr = nullptr;
 			return *this;
 	    }
 
@@ -207,10 +212,10 @@ namespace FDB {
 		if ( value.present() )
 			throw_on_error( fdb_network_set_option( option, value.get().begin(), value.get().size() ) );
 		else
-			throw_on_error( fdb_network_set_option( option, NULL, 0 ) );
+			throw_on_error( fdb_network_set_option( option, nullptr, 0 ) );
 	}
 
-	API* API::instance = NULL;
+	API* API::instance = nullptr;
 	API::API(int version) : version(version) {}
 
 	API* API::selectAPIVersion(int apiVersion) {
@@ -234,11 +239,11 @@ namespace FDB {
 	}
 
 	bool API::isAPIVersionSelected() {
-		return API::instance != NULL;
+		return API::instance != nullptr;
 	}
 
 	API* API::getInstance() {
-		if(API::instance == NULL) {
+		if(API::instance == nullptr) {
 			throw api_version_unset();
 		}
 		else {
@@ -280,10 +285,36 @@ namespace FDB {
 		if (value.present())
 			throw_on_error(fdb_database_set_option(db, option, value.get().begin(), value.get().size()));
 		else
-			throw_on_error(fdb_database_set_option(db, option, NULL, 0));
+			throw_on_error(fdb_database_set_option(db, option, nullptr, 0));
 	}
 
-	TransactionImpl::TransactionImpl(FDBDatabase* db) {
+	Future<int64_t> DatabaseImpl::rebootWorker(const StringRef &address, bool check, int duration) {
+		return backToFuture<int64_t>( fdb_database_reboot_worker(db, address.begin(), address.size(), check, duration), [](Reference<CFuture> f) {
+				int64_t res;
+
+				throw_on_error(fdb_future_get_int64( f->f, &res ) );
+
+				return res;
+			} );
+	}
+
+	Future<Void> DatabaseImpl::forceRecoveryWithDataLoss(const StringRef &dcid) {
+		return backToFuture< Void > ( fdb_database_force_recovery_with_data_loss(db, dcid.begin(), dcid.size()), [](Reference<CFuture> f){
+			throw_on_error( fdb_future_get_error( f->f ) );
+			return Void();
+		});
+	}
+
+	Future<Void> DatabaseImpl::createSnapshot(const StringRef& uid, const StringRef& snap_command) {
+		return backToFuture<Void>(
+			fdb_database_create_snapshot(db, uid.begin(), uid.size(), snap_command.begin(), snap_command.size()),
+			[](Reference<CFuture> f) {
+				throw_on_error(fdb_future_get_error(f->f));
+				return Void();
+			});
+	}
+
+    TransactionImpl::TransactionImpl(FDBDatabase* db) {
 		throw_on_error(fdb_database_create_transaction(db, &tr));
 	}
 
@@ -356,6 +387,16 @@ namespace FDB {
 		});
 	}
 
+	Future<FDBStandalone<VectorRef<KeyRef>>> TransactionImpl::getRangeSplitPoints(const KeyRange& range, int64_t chunkSize) {
+		return backToFuture<FDBStandalone<VectorRef<KeyRef>>>(fdb_transaction_get_range_split_points(tr, range.begin.begin(), range.begin.size(), range.end.begin(), range.end.size(), chunkSize), [](Reference<CFuture> f) {
+			FDBKey const* ks;
+			int count;
+			throw_on_error(fdb_future_get_key_array(f->f, &ks, &count));
+
+			return FDBStandalone<VectorRef<KeyRef>>(f, VectorRef<KeyRef>((KeyRef*)ks, count));
+		});
+	}
+
 	void TransactionImpl::addReadConflictRange(KeyRangeRef const& keys) {
 		throw_on_error( fdb_transaction_add_conflict_range( tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), FDB_CONFLICT_RANGE_TYPE_READ ) );
 	}
@@ -417,7 +458,7 @@ namespace FDB {
 		if ( value.present() ) {
 			throw_on_error( fdb_transaction_set_option( tr, option, value.get().begin(), value.get().size() ) );
 		} else {
-			throw_on_error( fdb_transaction_set_option( tr, option, NULL, 0 ) );
+			throw_on_error( fdb_transaction_set_option( tr, option, nullptr, 0 ) );
 		}
 	}
 

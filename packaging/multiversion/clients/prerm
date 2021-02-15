@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+alternatives --remove fdbclients /usr/lib/foundationdb-@PROJECT_VERSION@/bin/fdbcli

@@ -112,11 +112,9 @@ struct MachineAttritionWorkload : TestWorkload {
 		return machines;
 	}
 
-	virtual std::string description() { return "MachineAttritionWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) {
-		return Void();
-	}
-	virtual Future<Void> start( Database const& cx ) {
+	std::string description() const override { return "MachineAttritionWorkload"; }
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override {
 		if (enabled) {
 			std::map<Optional<Standalone<StringRef>>,LocalityData> machineIDMap;
 			auto processes = getServers();
@@ -149,9 +147,8 @@ struct MachineAttritionWorkload : TestWorkload {
 			throw please_reboot();
 		return Void();
 	}
-	virtual Future<bool> check( Database const& cx ) { return ignoreSSFailures; }
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-	}
+	Future<bool> check(Database const& cx) override { return ignoreSSFailures; }
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	static bool noSimIsViableKill(WorkerDetails worker) {
 		return (worker.processClass != ProcessClass::ClassType::TesterClass);
@@ -270,13 +267,15 @@ struct MachineAttritionWorkload : TestWorkload {
 
 			ISimulator::KillType kt = ISimulator::Reboot;
 			if( !self->reboot ) {
-				int killType = deterministicRandom()->randomInt(0,3);
+				int killType = deterministicRandom()->randomInt(0,3); //FIXME: enable disk stalls
 				if( killType == 0 )
 					kt = ISimulator::KillInstantly;
 				else if( killType == 1 )
 					kt = ISimulator::InjectFaults;
-				else
+				else if( killType == 2 )
 					kt = ISimulator::RebootAndDelete;
+				else
+					kt = ISimulator::FailDisk;
 			}
 			TraceEvent("Assassination").detail("TargetDatacenter", target).detail("Reboot", self->reboot).detail("KillType", kt);
 
@@ -336,7 +335,20 @@ struct MachineAttritionWorkload : TestWorkload {
 						TraceEvent("RebootAndDelete").detail("TargetMachine", targetMachine.toString());
 						g_simulator.killZone( targetMachine.zoneId(), ISimulator::RebootAndDelete );
 					} else {
-						auto kt = (deterministicRandom()->random01() < 0.5 || !self->allowFaultInjection) ? ISimulator::KillInstantly : ISimulator::InjectFaults;
+						auto kt = ISimulator::KillInstantly;
+						if( self->allowFaultInjection ) {
+							if( randomDouble < 0.50 ) {
+								kt = ISimulator::InjectFaults;
+							}
+							//FIXME: enable disk stalls
+							/*
+							if( randomDouble < 0.56 ) {
+								kt = ISimulator::InjectFaults;
+							} else if( randomDouble < 0.66 ) {
+								kt = ISimulator::FailDisk;
+							}
+							*/
+						}
 						g_simulator.killZone( targetMachine.zoneId(), kt );
 					}
 				}

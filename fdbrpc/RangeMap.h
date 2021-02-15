@@ -164,6 +164,11 @@ public:
 		i.decrementNonEnd();
 		return iterator(i);
 	}
+	const_iterator lastItem() const {
+		auto i(map.lastItem());
+		i.decrementNonEnd();
+		return const_iterator(i);
+	}
 	int size() const { return map.size() - 1; } // We always have one range bounded by two entries
 	iterator randomRange() { return iterator(map.index(deterministicRandom()->randomInt(0, map.size() - 1))); }
 	const_iterator randomRange() const {
@@ -183,6 +188,8 @@ public:
 	//void clear( const Val& value ) { ranges.clear(); ranges.insert(std::make_pair(Key(),value)); }
 
 	void insert( const Range& keys, const Val& value );
+
+	Future<Void> clearAsync() { return map.clearAsync(); }
 
 protected:
 	Map<Key,Val,pair_type,Metric> map;

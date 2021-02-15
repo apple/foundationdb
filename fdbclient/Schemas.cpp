@@ -47,7 +47,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "storage",
                   "transaction",
                   "resolution",
-                  "proxy",
+                  "commit_proxy",
+                  "grv_proxy",
                   "master",
                   "test",
                   "storage_cache"
@@ -83,7 +84,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "role":{
                      "$enum":[
                         "master",
-                        "proxy",
+                        "commit_proxy",
+                        "grv_proxy",
                         "log",
                         "storage",
                         "resolver",
@@ -112,6 +114,11 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      "roughness":0.0
                   },
                   "finished_queries":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "low_priority_queries":{
                      "hz":0.0,
                      "counter":0,
                      "roughness":0.0
@@ -184,6 +191,13 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      "$map": 1
                   },
                   "busiest_read_tag":{
+                     "tag": "",
+                     "fractional_cost": 0.0,
+                     "estimated_cost":{
+                        "hz": 0.0
+                     }
+                  },
+                  "busiest_write_tag":{
                      "tag": "",
                      "fractional_cost": 0.0,
                      "estimated_cost":{
@@ -269,15 +283,20 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             "run_loop_busy":0.2
          }
       },
-      "old_logs":[
+      "logs":[
          {
-            "logs":[
+            "log_interfaces":[
                {
                   "id":"7f8d623d0cb9966e",
                   "healthy":true,
                   "address":"1.2.3.4:1234"
                }
             ],
+            "epoch":1,
+            "current":false,
+            "begin_version":23,
+            "end_version":112315141,
+            "possibly_losing_data":true,
             "log_replication_factor":3,
             "log_write_anti_quorum":0,
             "log_fault_tolerance":2,
@@ -341,11 +360,14 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "batch_released_transactions_per_second":0,
          "released_transactions_per_second":0,
          "throttled_tags":{
-            "auto":{
-               "count":0
+            "auto" : {
+                "busy_read" : 0,
+                "busy_write" : 0,
+                "count" : 0,
+                "recommended_only": 0
             },
-            "manual":{
-               "count":0
+            "manual" : {
+                "count" : 0
             }
          },
          "limiting_queue_bytes_storage_server":0,
@@ -473,8 +495,10 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 )statusSchema"
                                                           R"statusSchema(
       "recovery_state":{
+         "seconds_since_last_recovered":1,
          "required_resolvers":1,
-         "required_proxies":1,
+         "required_commit_proxies":1,
+         "required_grv_proxies":1,
          "name":{
             "$enum":[
                "reading_coordinated_state",
@@ -512,6 +536,11 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "roughness":0.0
             },
             "read_requests":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "low_priority_reads":{
                "hz":0.0,
                "counter":0,
                "roughness":0.0
@@ -568,6 +597,11 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "roughness":0.0
             },
             "conflicted":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "rejected_for_queued_too_long":{
                "hz":0.0,
                "counter":0,
                "roughness":0.0
@@ -662,10 +696,12 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "address":"10.0.4.1"
             }
          ],
-         "auto_proxies":3,
+         "auto_commit_proxies":3,
+         "auto_grv_proxies":1,
          "auto_resolvers":1,
          "auto_logs":3,
-         "proxies":5,
+         "commit_proxies":5,
+         "grv_proxies":1,
          "backup_worker_enabled":1
       },
       "data":{
@@ -765,7 +801,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "coordinators":[
             {
                "reachable":true,
-               "address":"127.0.0.1:4701"
+               "address":"127.0.0.1:4701",
+               "protocol": "0fdb00b070010001"
             }
          ],
          "quorum_reachable":true
@@ -864,10 +901,12 @@ const KeyRef JSONSchemas::clusterConfigurationSchema = LiteralStringRef(R"config
         "ssd-2",
         "memory"
     ]},
-    "auto_proxies":3,
+    "auto_commit_proxies":3,
+    "auto_grv_proxies":1,
     "auto_resolvers":1,
     "auto_logs":3,
-    "proxies":5
+    "commit_proxies":5,
+    "grv_proxies":1
 })configSchema");
 
 const KeyRef JSONSchemas::latencyBandConfigurationSchema = LiteralStringRef(R"configSchema(
@@ -916,6 +955,8 @@ const KeyRef JSONSchemas::storageHealthSchema = LiteralStringRef(R"""(
 const KeyRef JSONSchemas::aggregateHealthSchema = LiteralStringRef(R"""(
 {
   "batch_limited": false,
+  "limiting_storage_durability_lag": 5050809,
+  "limiting_storage_queue": 2030,
   "tps_limit": 457082.8105811302,
   "worst_storage_durability_lag": 5050809,
   "worst_storage_queue": 2030,

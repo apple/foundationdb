@@ -32,9 +32,10 @@
 class Knobs {
 public:
 	bool setKnob( std::string const& name, std::string const& value ); // Returns true if the knob name is known, false if it is unknown
-	void trace();
+	void trace() const;
 
 protected:
+	Knobs()=default;
 	void initKnob( double& knob, double value, std::string const& name );
 	void initKnob( int64_t& knob, int64_t value, std::string const& name );
 	void initKnob( int& knob, int value, std::string const& name );
@@ -69,6 +70,9 @@ public:
 	double HUGE_ARENA_LOGGING_BYTES;
 	double HUGE_ARENA_LOGGING_INTERVAL;
 
+	bool WRITE_TRACING_ENABLED;
+	int TRACING_UDP_LISTENER_PORT;
+
 	//run loop profiling
 	double RUN_LOOP_PROFILING_INTERVAL;
 	double SLOWTASK_PROFILING_LOG_INTERVAL;
@@ -93,8 +97,12 @@ public:
 	double MAX_RECONNECTION_TIME;
 	double RECONNECTION_TIME_GROWTH_RATE;
 	double RECONNECTION_RESET_TIME;
+	double ALWAYS_ACCEPT_DELAY;
 	int ACCEPT_BATCH_SIZE;
 	double INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING;
+	double PING_LOGGING_INTERVAL;
+	int PING_SAMPLE_AMOUNT;
+	int NETWORK_CONNECT_SAMPLE_AMOUNT;
 
 	int TLS_CERT_REFRESH_DELAY_SECONDS;
 	double TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT;
@@ -126,6 +134,7 @@ public:
 	double TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY;
 	int TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT;
 	int PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT;
+	int FLOW_CACHEDFILE_WRITE_IO_SIZE;
 
 	//AsyncFileEIO
 	int EIO_MAX_PARALLELISM;
@@ -144,6 +153,7 @@ public:
 	//GenericActors
 	double BUGGIFY_FLOW_LOCK_RELEASE_DELAY;
 	int LOW_PRIORITY_DELAY_COUNT;
+	double LOW_PRIORITY_MAX_DELAY;
 
 	//IAsyncFile
 	int64_t INCREMENTAL_DELETE_TRUNCATE_AMOUNT;
@@ -158,6 +168,7 @@ public:
 	int64_t REACTOR_FLAGS;
 	double MIN_LOGGED_PRIORITY_BUSY_FRACTION;
 	int CERT_FILE_MAX_SIZE;
+	int READY_QUEUE_RESERVED_SIZE;
 
 	//Network
 	int64_t PACKET_LIMIT;
@@ -188,6 +199,7 @@ public:
 	double TRACE_RETRY_OPEN_INTERVAL;
 	int MIN_TRACE_SEVERITY;
 	int MAX_TRACE_SUPPRESSIONS;
+	bool TRACE_DATETIME_ENABLED;
 	int TRACE_SYNC_ENABLED;
 	int TRACE_EVENT_METRIC_UNITS_PER_SAMPLE;
 	int TRACE_EVENT_THROTTLER_SAMPLE_EXPIRY;
@@ -233,6 +245,9 @@ public:
 	double BASIC_LOAD_BALANCE_MAX_CHANGE;
 	double BASIC_LOAD_BALANCE_MAX_PROB;
 	int BASIC_LOAD_BALANCE_BUCKETS;
+	int BASIC_LOAD_BALANCE_COMPUTE_PRECISION;
+	double BASIC_LOAD_BALANCE_MIN_REQUESTS;
+	double BASIC_LOAD_BALANCE_MIN_CPU;
 
 	// Health Monitor
 	int FAILURE_DETECTION_DELAY;
@@ -244,6 +259,7 @@ public:
 	void initialize(bool randomize = false, bool isSimulated = false);
 };
 
+extern std::unique_ptr<FlowKnobs> globalFlowKnobs;
 extern FlowKnobs const* FLOW_KNOBS;
 
 #endif

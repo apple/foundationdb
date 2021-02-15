@@ -36,15 +36,14 @@ namespace ClientLogEventsParser {
 		FdbClientLogEvents::EventGetVersion_V2 gv;
 		reader >> gv;
 		ASSERT(gv.latency < 10000);
-		ASSERT(gv.priorityType >= 0 && gv.priorityType < FdbClientLogEvents::PRIORITY_END);
 	}
 
 	void parseEventGetVersion_V3(BinaryReader &reader) {
 		FdbClientLogEvents::EventGetVersion_V3 gv;
 		reader >> gv;
 		ASSERT(gv.latency < 10000);
-		ASSERT(gv.priorityType >= 0 && gv.priorityType < FdbClientLogEvents::PRIORITY_END && gv.readVersion > 0);
-	}
+	    ASSERT(gv.readVersion > 0);
+    }
 
 	void parseEventGet(BinaryReader &reader) {
 		FdbClientLogEvents::EventGet g;
@@ -101,18 +100,18 @@ namespace ClientLogEventsParser {
 	ParserBase::~ParserBase() {}
 
 	struct Parser_V1 : ParserBase {
-		virtual ~Parser_V1() override {}
+		~Parser_V1() override {}
 	};
 	struct Parser_V2 : ParserBase {
 		Parser_V2() { parseGetVersion = parseEventGetVersion_V2; }
-		virtual ~Parser_V2() override {}
+		~Parser_V2() override {}
 	};
 	struct Parser_V3 : ParserBase {
 		Parser_V3() {
 			parseGetVersion = parseEventGetVersion_V3;
 			parseCommit = parseEventCommit_V2;
 		}
-		virtual ~Parser_V3() override {}
+		~Parser_V3() override {}
 	};
 
 	struct ParserFactory {
@@ -142,25 +141,25 @@ bool checkTxInfoEntryFormat(BinaryReader &reader) {
 		reader >> event;
 		switch (event.type)
 		{
-		case FdbClientLogEvents::GET_VERSION_LATENCY:
+		case FdbClientLogEvents::EventType::GET_VERSION_LATENCY:
 			parser->parseGetVersion(reader);
 			break;
-		case FdbClientLogEvents::GET_LATENCY:
+		case FdbClientLogEvents::EventType::GET_LATENCY:
 			parser->parseGet(reader);
 			break;
-		case FdbClientLogEvents::GET_RANGE_LATENCY:
+		case FdbClientLogEvents::EventType::GET_RANGE_LATENCY:
 			parser->parseGetRange(reader);
 			break;
-		case FdbClientLogEvents::COMMIT_LATENCY:
+		case FdbClientLogEvents::EventType::COMMIT_LATENCY:
 			parser->parseCommit(reader);
 			break;
-		case FdbClientLogEvents::ERROR_GET:
+		case FdbClientLogEvents::EventType::ERROR_GET:
 			parser->parseErrorGet(reader);
 			break;
-		case FdbClientLogEvents::ERROR_GET_RANGE:
+		case FdbClientLogEvents::EventType::ERROR_GET_RANGE:
 			parser->parseErrorGetRange(reader);
 			break;
-		case FdbClientLogEvents::ERROR_COMMIT:
+		case FdbClientLogEvents::EventType::ERROR_COMMIT:
 			parser->parseErrorCommit(reader);
 			break;
 		default:
@@ -184,31 +183,27 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 		TraceEvent(SevInfo, "ClientTransactionProfilingSetup").detail("ClientId", clientId).detail("SamplingProbability", samplingProbability).detail("TrInfoSizeLimit", trInfoSizeLimit);
 	}
 
-	virtual std::string description() { return "ClientTransactionProfileCorrectness"; }
+	std::string description() const override { return "ClientTransactionProfileCorrectness"; }
 
-	virtual Future<Void> setup(Database const& cx) {
+	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
-			const_cast<ClientKnobs *>(CLIENT_KNOBS)->CSI_STATUS_DELAY = 2.0; // 2 seconds
+			globalClientKnobs->CSI_STATUS_DELAY = 2.0; // 2 seconds
 			return changeProfilingParameters(cx, trInfoSizeLimit, samplingProbability);
 		}
 		return Void();
 	}
 
-	virtual Future<Void> start(Database const& cx) {
-		return Void();
-	}
+	Future<Void> start(Database const& cx) override { return Void(); }
 
-	int getNumChunks(KeyRef key) {
+	int getNumChunks(KeyRef key) const {
 		return bigEndian32(BinaryReader::fromStringRef<int>(key.substr(numChunksStartIndex, chunkFormatSize), Unversioned()));
 	}
 
-	int getChunkNum(KeyRef key) {
+	int getChunkNum(KeyRef key) const {
 		return bigEndian32(BinaryReader::fromStringRef<int>(key.substr(chunkNumStartIndex, chunkFormatSize), Unversioned()));
 	}
 
-	std::string getTrId(KeyRef key) {
-		return key.substr(trIdStartIndex, trIdFormatSize).toString();
-	}
+	std::string getTrId(KeyRef key) const { return key.substr(trIdStartIndex, trIdFormatSize).toString(); }
 
 	bool checkTxInfoEntriesFormat(const Standalone<RangeResultRef> &txInfoEntries) {
 		std::string val;
@@ -337,15 +332,13 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 		return self->checkTxInfoEntriesFormat(txInfoEntries);
 	}
 
-	virtual Future<bool> check(Database const& cx) {
+	Future<bool> check(Database const& cx) override {
 		if (clientId != 0)
 			return true;
 		return _check(cx, this);
 	}
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
-	}
-
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<ClientTransactionProfileCorrectnessWorkload> ClientTransactionProfileCorrectnessWorkloadFactory("ClientTransactionProfileCorrectness");

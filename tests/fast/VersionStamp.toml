@@ -4,3 +4,6 @@ testTitle = 'VersionStamp'
     [[test.workload]]
     testName = 'VersionStamp'
     soleOwnerOfMetadataVersionKey = true
+
+    [[test.workload]]
+    testName = 'LockDatabaseFrequently'

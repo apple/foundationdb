@@ -72,6 +72,8 @@ struct StorageServerInterface {
 	RequestStream<ReplyPromise<KeyValueStoreType>> getKeyValueStoreType;
 	RequestStream<struct WatchValueRequest> watchValue;
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
+	RequestStream<struct SplitRangeRequest> getRangeSplitPoints;
+
 	explicit StorageServerInterface(UID uid) : uniqueID( uid ) {}
 	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
 	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }
@@ -98,6 +100,7 @@ struct StorageServerInterface {
 				getKeyValueStoreType = RequestStream<ReplyPromise<KeyValueStoreType>>( getValue.getEndpoint().getAdjustedEndpoint(9) );
 				watchValue = RequestStream<struct WatchValueRequest>( getValue.getEndpoint().getAdjustedEndpoint(10) );
 				getReadHotRanges = RequestStream<struct ReadHotSubRangeRequest>( getValue.getEndpoint().getAdjustedEndpoint(11) );
+				getRangeSplitPoints = RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -125,6 +128,7 @@ struct StorageServerInterface {
 		streams.push_back(getKeyValueStoreType.getReceiver());
 		streams.push_back(watchValue.getReceiver());
 		streams.push_back(getReadHotRanges.getReceiver());
+		streams.push_back(getRangeSplitPoints.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -437,7 +441,12 @@ struct SplitMetricsRequest {
 // Should always be used inside a `Standalone`.
 struct ReadHotRangeWithMetrics {
 	KeyRangeRef keys;
+	// density refers to the ratio of bytes sent(because of the read) and bytes on disk.
+	// For example if key range [A, B) and [B, C) respectively has byte size 100 bytes on disk.
+	// Key range [A,B) was read 30 times.
+	// The density for key range [A,C) is 30 * 100 / 200 = 15
 	double density;
+	// How many bytes of data was sent in a period of time because of read requests.
 	double readBandwidth;
 
 	ReadHotRangeWithMetrics() = default;
@@ -447,7 +456,7 @@ struct ReadHotRangeWithMetrics {
 	ReadHotRangeWithMetrics(Arena& arena, const ReadHotRangeWithMetrics& rhs)
 	  : keys(arena, rhs.keys), density(rhs.density), readBandwidth(rhs.readBandwidth) {}
 
-	int expectedSize() { return keys.expectedSize() + sizeof(density) + sizeof(readBandwidth); }
+	int expectedSize() const { return keys.expectedSize() + sizeof(density) + sizeof(readBandwidth); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -476,6 +485,34 @@ struct ReadHotSubRangeRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, keys, reply, arena);
+	}
+};
+
+struct SplitRangeReply {
+	constexpr static FileIdentifier file_identifier = 11813134;
+	// If the given range can be divided, contains the split points.
+	// If the given range cannot be divided(for exmaple its total size is smaller than the chunk size), this would be
+	// empty
+	Standalone<VectorRef<KeyRef>> splitPoints;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, splitPoints);
+	}
+};
+struct SplitRangeRequest {
+	constexpr static FileIdentifier file_identifier = 10725174;
+	Arena arena;
+	KeyRangeRef keys;
+	int64_t chunkSize;
+	ReplyPromise<SplitRangeReply> reply;
+
+	SplitRangeRequest() {}
+	SplitRangeRequest(KeyRangeRef const& keys, int64_t chunkSize) : keys(arena, keys), chunkSize(chunkSize) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keys, chunkSize, reply, arena);
 	}
 };
 

@@ -24,11 +24,13 @@
 #include <set>
 #include <vector>
 
+#include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbserver/MutationTracking.h"
 #include "flow/IndexedSet.h"
+#include "flow/Knobs.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/Replication.h"
@@ -37,12 +39,22 @@ struct DBCoreState;
 struct TLogSet;
 struct CoreTLogSet;
 
+struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
+	double lastReset;
+	Future<Void> resetCheck;
+	int slowReplies;
+	int fastReplies;
+
+	ConnectionResetInfo() : lastReset(now()), slowReplies(0), fastReplies(0), resetCheck(Void()) {}
+};
+
 // The set of tLog servers, logRouters and backupWorkers for a log tag
 class LogSet : NonCopyable, public ReferenceCounted<LogSet> {
 public:
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logServers;
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logRouters;
 	std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers;
+	std::vector<Reference<ConnectionResetInfo>> connectionResetTrackers;
 	int32_t tLogWriteAntiQuorum;
 	int32_t tLogReplicationFactor;
 	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
@@ -317,11 +329,11 @@ struct ILogSystem {
 
 		//if hasMessage() returns true, getMessage(), getMessageWithTags(), or reader() can be called.
 		//does not modify the cursor
-		virtual bool hasMessage() = 0;
+		virtual bool hasMessage() const = 0;
 
 		//pre: only callable if hasMessage() returns true
 		//return the tags associated with the message for the current sequence
-		virtual VectorRef<Tag> getTags() = 0;
+		virtual VectorRef<Tag> getTags() const = 0;
 
 		//pre: only callable if hasMessage() returns true
 		//returns the arena containing the contents of getMessage(), getMessageWithTags(), and reader()
@@ -362,32 +374,32 @@ struct ILogSystem {
 		// (1) the failure monitor detects that the servers associated with the cursor is failed
 		// (2) the interface is not present
 		// (3) the cursor cannot return any more results
-		virtual bool isActive() = 0;
+		virtual bool isActive() const = 0;
 
 		//returns true if the cursor cannot return any more results
-		virtual bool isExhausted() = 0;
+		virtual bool isExhausted() const = 0;
 
 		// Returns the smallest possible message version which the current message (if any) or a subsequent message might have
 		// (If hasMessage(), this is therefore the message version of the current message)
-		virtual const LogMessageVersion& version() = 0;
+		virtual const LogMessageVersion& version() const = 0;
 
 		//So far, the cursor has returned all messages which both satisfy the criteria passed to peek() to create the cursor AND have (popped(),0) <= message version number <= version()
 		//Other messages might have been skipped
-		virtual Version popped() = 0;
+		virtual Version popped() const = 0;
 
 		// Returns the maximum version known to have been pushed (not necessarily durably) into the log system (0 is always a possible result!)
-		virtual Version getMaxKnownVersion() { return 0; }
+		virtual Version getMaxKnownVersion() const { return 0; }
 
-		virtual Version getMinKnownCommittedVersion() = 0;
+		virtual Version getMinKnownCommittedVersion() const = 0;
 
-		virtual Optional<UID> getPrimaryPeekLocation() = 0;
+		virtual Optional<UID> getPrimaryPeekLocation() const = 0;
 
 		virtual void addref() = 0;
 
 		virtual void delref() = 0;
 	};
 
-	struct ServerPeekCursor : IPeekCursor, ReferenceCounted<ServerPeekCursor> {
+	struct ServerPeekCursor final : IPeekCursor, ReferenceCounted<ServerPeekCursor> {
 		Reference<AsyncVar<OptionalInterface<TLogInterface>>> interf;
 		const Tag tag;
 
@@ -416,37 +428,33 @@ struct ILogSystem {
 		ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf, Tag tag, Version begin, Version end, bool returnIfBlocked, bool parallelGetMore );
 		ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, TagsAndMessage const& message, bool hasMsg, Version poppedVersion, Tag tag );
 
-		virtual Reference<IPeekCursor> cloneNoMore();
-		virtual void setProtocolVersion( ProtocolVersion version );
-		virtual Arena& arena();
-		virtual ArenaReader* reader();
-		virtual bool hasMessage();
-		virtual void nextMessage();
-		virtual StringRef getMessage();
-		virtual StringRef getMessageWithTags();
-		virtual VectorRef<Tag> getTags();
-		virtual void advanceTo(LogMessageVersion n);
-		virtual Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply);
-		virtual Future<Void> onFailed();
-		virtual bool isActive();
-		virtual bool isExhausted();
-		virtual const LogMessageVersion& version();
-		virtual Version popped();
-		virtual Version getMinKnownCommittedVersion();
-		virtual Optional<UID> getPrimaryPeekLocation();
+		Reference<IPeekCursor> cloneNoMore() override;
+		void setProtocolVersion(ProtocolVersion version) override;
+		Arena& arena() override;
+		ArenaReader* reader() override;
+		bool hasMessage() const override;
+		void nextMessage() override;
+		StringRef getMessage() override;
+		StringRef getMessageWithTags() override;
+		VectorRef<Tag> getTags() const override;
+		void advanceTo(LogMessageVersion n) override;
+		Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
+		Future<Void> onFailed() override;
+		bool isActive() const override;
+		bool isExhausted() const override;
+		const LogMessageVersion& version() const override;
+		Version popped() const override;
+		Version getMinKnownCommittedVersion() const override;
+		Optional<UID> getPrimaryPeekLocation() const override;
 
-		virtual void addref() {
-			ReferenceCounted<ServerPeekCursor>::addref();
-		}
+		void addref() override { ReferenceCounted<ServerPeekCursor>::addref(); }
 
-		virtual void delref() {
-			ReferenceCounted<ServerPeekCursor>::delref();
-		}
+		void delref() override { ReferenceCounted<ServerPeekCursor>::delref(); }
 
-		virtual Version getMaxKnownVersion() { return results.maxKnownVersion; }
+		Version getMaxKnownVersion() const override { return results.maxKnownVersion; }
 	};
 
-	struct MergedPeekCursor : IPeekCursor, ReferenceCounted<MergedPeekCursor> {
+	struct MergedPeekCursor final : IPeekCursor, ReferenceCounted<MergedPeekCursor> {
 		Reference<LogSet> logSet;
 		std::vector< Reference<IPeekCursor> > serverCursors;
 		std::vector<LocalityEntry> locations;
@@ -464,37 +472,33 @@ struct ILogSystem {
 		MergedPeekCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, int bestServer, int readQuorum, Tag tag, Version begin, Version end, bool parallelGetMore, std::vector<LocalityData> const& tLogLocalities, Reference<IReplicationPolicy> const tLogPolicy, int tLogReplicationFactor );
 		MergedPeekCursor( std::vector< Reference<IPeekCursor> > const& serverCursors, LogMessageVersion const& messageVersion, int bestServer, int readQuorum, Optional<LogMessageVersion> nextVersion, Reference<LogSet> logSet, int tLogReplicationFactor );
 
-		virtual Reference<IPeekCursor> cloneNoMore();
-		virtual void setProtocolVersion( ProtocolVersion version );
-		virtual Arena& arena();
-		virtual ArenaReader* reader();
+		Reference<IPeekCursor> cloneNoMore() override;
+		void setProtocolVersion(ProtocolVersion version) override;
+		Arena& arena() override;
+		ArenaReader* reader() override;
 		void calcHasMessage();
 		void updateMessage(bool usePolicy);
-		virtual bool hasMessage();
-		virtual void nextMessage();
-		virtual StringRef getMessage();
-		virtual StringRef getMessageWithTags();
-		virtual VectorRef<Tag> getTags();
-		virtual void advanceTo(LogMessageVersion n);
-		virtual Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply);
-		virtual Future<Void> onFailed();
-		virtual bool isActive();
-		virtual bool isExhausted();
-		virtual const LogMessageVersion& version();
-		virtual Version popped();
-		virtual Version getMinKnownCommittedVersion();
-		virtual Optional<UID> getPrimaryPeekLocation();
+		bool hasMessage() const override;
+		void nextMessage() override;
+		StringRef getMessage() override;
+		StringRef getMessageWithTags() override;
+		VectorRef<Tag> getTags() const override;
+		void advanceTo(LogMessageVersion n) override;
+		Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
+		Future<Void> onFailed() override;
+		bool isActive() const override;
+		bool isExhausted() const override;
+		const LogMessageVersion& version() const override;
+		Version popped() const override;
+		Version getMinKnownCommittedVersion() const override;
+		Optional<UID> getPrimaryPeekLocation() const override;
 
-		virtual void addref() {
-			ReferenceCounted<MergedPeekCursor>::addref();
-		}
+		void addref() override { ReferenceCounted<MergedPeekCursor>::addref(); }
 
-		virtual void delref() {
-			ReferenceCounted<MergedPeekCursor>::delref();
-		}
+		void delref() override { ReferenceCounted<MergedPeekCursor>::delref(); }
 	};
 
-	struct SetPeekCursor : IPeekCursor, ReferenceCounted<SetPeekCursor> {
+	struct SetPeekCursor final : IPeekCursor, ReferenceCounted<SetPeekCursor> {
 		std::vector<Reference<LogSet>> logSets;
 		std::vector< std::vector< Reference<IPeekCursor> > > serverCursors;
 		Tag tag;
@@ -511,72 +515,64 @@ struct ILogSystem {
 		SetPeekCursor( std::vector<Reference<LogSet>> const& logSets, int bestSet, int bestServer, Tag tag, Version begin, Version end, bool parallelGetMore );
 		SetPeekCursor( std::vector<Reference<LogSet>> const& logSets, std::vector< std::vector< Reference<IPeekCursor> > > const& serverCursors, LogMessageVersion const& messageVersion, int bestSet, int bestServer, Optional<LogMessageVersion> nextVersion, bool useBestSet );
 
-		virtual Reference<IPeekCursor> cloneNoMore();
-		virtual void setProtocolVersion( ProtocolVersion version );
-		virtual Arena& arena();
-		virtual ArenaReader* reader();
+		Reference<IPeekCursor> cloneNoMore() override;
+		void setProtocolVersion(ProtocolVersion version) override;
+		Arena& arena() override;
+		ArenaReader* reader() override;
 		void calcHasMessage();
 		void updateMessage(int logIdx, bool usePolicy);
-		virtual bool hasMessage();
-		virtual void nextMessage();
-		virtual StringRef getMessage();
-		virtual StringRef getMessageWithTags();
-		virtual VectorRef<Tag> getTags();
-		virtual void advanceTo(LogMessageVersion n);
-		virtual Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply);
-		virtual Future<Void> onFailed();
-		virtual bool isActive();
-		virtual bool isExhausted();
-		virtual const LogMessageVersion& version();
-		virtual Version popped();
-		virtual Version getMinKnownCommittedVersion();
-		virtual Optional<UID> getPrimaryPeekLocation();
+		bool hasMessage() const override;
+		void nextMessage() override;
+		StringRef getMessage() override;
+		StringRef getMessageWithTags() override;
+		VectorRef<Tag> getTags() const override;
+		void advanceTo(LogMessageVersion n) override;
+		Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
+		Future<Void> onFailed() override;
+		bool isActive() const override;
+		bool isExhausted() const override;
+		const LogMessageVersion& version() const override;
+		Version popped() const override;
+		Version getMinKnownCommittedVersion() const override;
+		Optional<UID> getPrimaryPeekLocation() const override;
 
-		virtual void addref() {
-			ReferenceCounted<SetPeekCursor>::addref();
-		}
+		void addref() override { ReferenceCounted<SetPeekCursor>::addref(); }
 
-		virtual void delref() {
-			ReferenceCounted<SetPeekCursor>::delref();
-		}
+		void delref() override { ReferenceCounted<SetPeekCursor>::delref(); }
 	};
 
-	struct MultiCursor : IPeekCursor, ReferenceCounted<MultiCursor> {
+	struct MultiCursor final : IPeekCursor, ReferenceCounted<MultiCursor> {
 		std::vector<Reference<IPeekCursor>> cursors;
 		std::vector<LogMessageVersion> epochEnds;
 		Version poppedVersion;
 
 		MultiCursor( std::vector<Reference<IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds );
 
-		virtual Reference<IPeekCursor> cloneNoMore();
-		virtual void setProtocolVersion( ProtocolVersion version );
-		virtual Arena& arena();
-		virtual ArenaReader* reader();
-		virtual bool hasMessage();
-		virtual void nextMessage();
-		virtual StringRef getMessage();
-		virtual StringRef getMessageWithTags();
-		virtual VectorRef<Tag> getTags();
-		virtual void advanceTo(LogMessageVersion n);
-		virtual Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply);
-		virtual Future<Void> onFailed();
-		virtual bool isActive();
-		virtual bool isExhausted();
-		virtual const LogMessageVersion& version();
-		virtual Version popped();
-		virtual Version getMinKnownCommittedVersion();
-		virtual Optional<UID> getPrimaryPeekLocation();
+		Reference<IPeekCursor> cloneNoMore() override;
+		void setProtocolVersion(ProtocolVersion version) override;
+		Arena& arena() override;
+		ArenaReader* reader() override;
+		bool hasMessage() const override;
+		void nextMessage() override;
+		StringRef getMessage() override;
+		StringRef getMessageWithTags() override;
+		VectorRef<Tag> getTags() const override;
+		void advanceTo(LogMessageVersion n) override;
+		Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
+		Future<Void> onFailed() override;
+		bool isActive() const override;
+		bool isExhausted() const override;
+		const LogMessageVersion& version() const override;
+		Version popped() const override;
+		Version getMinKnownCommittedVersion() const override;
+		Optional<UID> getPrimaryPeekLocation() const override;
 
-		virtual void addref() {
-			ReferenceCounted<MultiCursor>::addref();
-		}
+		void addref() override { ReferenceCounted<MultiCursor>::addref(); }
 
-		virtual void delref() {
-			ReferenceCounted<MultiCursor>::delref();
-		}
+		void delref() override { ReferenceCounted<MultiCursor>::delref(); }
 	};
 
-	struct BufferedCursor : IPeekCursor, ReferenceCounted<BufferedCursor> {
+	struct BufferedCursor final : IPeekCursor, ReferenceCounted<BufferedCursor> {
 		struct BufferedMessage {
 			Arena arena;
 			StringRef message;
@@ -620,39 +616,35 @@ struct ILogSystem {
 		BufferedCursor( std::vector<Reference<IPeekCursor>> cursors, Version begin, Version end, bool withTags, bool collectTags, bool canDiscardPopped );
 		BufferedCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, Tag tag, Version begin, Version end, bool parallelGetMore );
 
-		virtual Reference<IPeekCursor> cloneNoMore();
-		virtual void setProtocolVersion( ProtocolVersion version );
-		virtual Arena& arena();
-		virtual ArenaReader* reader();
-		virtual bool hasMessage();
-		virtual void nextMessage();
-		virtual StringRef getMessage();
-		virtual StringRef getMessageWithTags();
-		virtual VectorRef<Tag> getTags();
-		virtual void advanceTo(LogMessageVersion n);
-		virtual Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply);
-		virtual Future<Void> onFailed();
-		virtual bool isActive();
-		virtual bool isExhausted();
-		virtual const LogMessageVersion& version();
-		virtual Version popped();
-		virtual Version getMinKnownCommittedVersion();
-		virtual Optional<UID> getPrimaryPeekLocation();
+		Reference<IPeekCursor> cloneNoMore() override;
+		void setProtocolVersion(ProtocolVersion version) override;
+		Arena& arena() override;
+		ArenaReader* reader() override;
+		bool hasMessage() const override;
+		void nextMessage() override;
+		StringRef getMessage() override;
+		StringRef getMessageWithTags() override;
+		VectorRef<Tag> getTags() const override;
+		void advanceTo(LogMessageVersion n) override;
+		Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
+		Future<Void> onFailed() override;
+		bool isActive() const override;
+		bool isExhausted() const override;
+		const LogMessageVersion& version() const override;
+		Version popped() const override;
+		Version getMinKnownCommittedVersion() const override;
+		Optional<UID> getPrimaryPeekLocation() const override;
 
-		virtual void addref() {
-			ReferenceCounted<BufferedCursor>::addref();
-		}
+		void addref() override { ReferenceCounted<BufferedCursor>::addref(); }
 
-		virtual void delref() {
-			ReferenceCounted<BufferedCursor>::delref();
-		}
+		void delref() override { ReferenceCounted<BufferedCursor>::delref(); }
 	};
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 
-	virtual std::string describe() = 0;
-	virtual UID getDebugID() = 0;
+	virtual std::string describe() const = 0;
+	virtual UID getDebugID() const = 0;
 
 	virtual void toCoreState( DBCoreState& ) = 0;
 
@@ -668,7 +660,7 @@ struct ILogSystem {
 		// Never returns normally, but throws an error if the subsystem stops working
 
 	//Future<Void> push( UID bundle, int64_t seq, VectorRef<TaggedMessageRef> messages );
-	virtual Future<Version> push( Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, struct LogPushData& data, Optional<UID> debugID = Optional<UID>() ) = 0;
+	virtual Future<Version> push( Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, struct LogPushData& data, SpanID const& spanContext, Optional<UID> debugID = Optional<UID>() ) = 0;
 		// Waits for the version number of the bundle (in this epoch) to be prevVersion (i.e. for all pushes ordered earlier)
 		// Puts the given messages into the bundle, each with the given tags, and with message versions (version, 0) - (version, N)
 		// Changes the version number of the bundle to be version (unblocking the next push)
@@ -724,9 +716,10 @@ struct ILogSystem {
 		// Ensures that any calls to push or confirmEpochLive in the current epoch but strictly later than change_epoch will not return
 		// Whenever changes in the set of available log servers require restarting recovery with a different end sequence, outLogSystem will be changed to a new ILogSystem
 
-	virtual Version getEnd() = 0;
-		// Call only on an ILogSystem obtained from recoverAndEndEpoch()
-		// Returns the first unreadable version number of the recovered epoch (i.e. message version numbers < (get_end(), 0) will be readable)
+	virtual Version getEnd() const = 0;
+	// Call only on an ILogSystem obtained from recoverAndEndEpoch()
+	// Returns the first unreadable version number of the recovered epoch (i.e. message version numbers < (get_end(), 0)
+	// will be readable)
 
 	// Returns the start version of current epoch for backup workers.
 	virtual Version getBackupStartVersion() const = 0;
@@ -747,15 +740,17 @@ struct ILogSystem {
 		// Call only on an ILogSystem obtained from recoverAndEndEpoch()
 		// Returns an ILogSystem representing a new epoch immediately following this one.  The new epoch is only provisional until the caller updates the coordinated DBCoreState
 
-	virtual LogSystemConfig getLogSystemConfig() = 0;
-		// Returns the physical configuration of this LogSystem, that could be used to construct an equivalent LogSystem using fromLogSystemConfig()
+	virtual LogSystemConfig getLogSystemConfig() const = 0;
+	// Returns the physical configuration of this LogSystem, that could be used to construct an equivalent LogSystem
+	// using fromLogSystemConfig()
 
-	virtual Standalone<StringRef> getLogsValue() = 0;
+	virtual Standalone<StringRef> getLogsValue() const = 0;
 
 	virtual Future<Void> onLogSystemConfigChange() = 0;
 		// Returns when the log system configuration has changed due to a tlog rejoin.
 
-	virtual void getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, bool allLocations = false) = 0;
+	virtual void getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations,
+	                              bool allLocations = false) const = 0;
 
 	void getPushLocations(std::vector<Tag> const& tags, std::vector<int>& locations, bool allLocations = false) {
 		getPushLocations(VectorRef<Tag>((Tag*)&tags.front(), tags.size()), locations, allLocations);
@@ -776,9 +771,9 @@ struct ILogSystem {
 
 	// Returns the pseudo tag to be popped for the given process class. If the
 	// process class doesn't use pseudo tag, return the same tag.
-	virtual Tag getPseudoPopTag(Tag tag, ProcessClass::ClassType type) = 0;
+	virtual Tag getPseudoPopTag(Tag tag, ProcessClass::ClassType type) const = 0;
 
-	virtual bool hasPseudoLocality(int8_t locality) = 0;
+	virtual bool hasPseudoLocality(int8_t locality) const = 0;
 
 	// Returns the actual version to be popped from the log router tag for the given pseudo tag.
 	// For instance, a pseudo tag (-8, 2) means the actual popping tag is (-2, 2). Assuming there
@@ -807,7 +802,7 @@ struct LengthPrefixedStringRef {
 	int expectedSize() const { ASSERT(length); return *length; }
 	uint32_t* getLengthPtr() const { return length; }
 
-	LengthPrefixedStringRef() : length(NULL) {}
+	LengthPrefixedStringRef() : length(nullptr) {}
 	LengthPrefixedStringRef(uint32_t* length) : length(length) {}
 };
 
@@ -818,6 +813,18 @@ struct CompareFirst {
 	}
 };
 
+// Structure to store serialized mutations sent from the proxy to the
+// transaction logs. The serialization repeats with the following format:
+//
+// +----------------------+ +----------------------+ +----------+ +----------------+         +----------------------+
+// |     Message size     | |      Subsequence     | | # of tags| |      Tag       | . . . . |       Mutation       |
+// +----------------------+ +----------------------+ +----------+ +----------------+         +----------------------+
+// <------- 32 bits ------> <------- 32 bits ------> <- 16 bits-> <---- 24 bits --->         <---- variable bits --->
+//
+// `Mutation` can be a serialized MutationRef or a special metadata message
+// such as LogProtocolMessage or SpanContextMessage. The type of `Mutation` is
+// uniquely identified by its first byte -- a value from MutationRef::Type.
+//
 struct LogPushData : NonCopyable {
 	// Log subsequences have to start at 1 (the MergedPeekCursor relies on this to make sure we never have !hasMessage() in the middle of data for a version
 
@@ -825,7 +832,7 @@ struct LogPushData : NonCopyable {
 		for(auto& log : logSystem->getLogSystemConfig().tLogs) {
 			if(log.isLocal) {
 				for(int i = 0; i < log.tLogs.size(); i++) {
-					messagesWriter.push_back( BinaryWriter( AssumeVersion(currentProtocolVersion) ) );
+					messagesWriter.push_back( BinaryWriter( AssumeVersion(g_network->protocolVersion()) ) );
 				}
 			}
 		}
@@ -849,7 +856,14 @@ struct LogPushData : NonCopyable {
 		next_message_tags.insert(next_message_tags.end(), tags.begin(), tags.end());
 	}
 
-	void addMessage( StringRef rawMessageWithoutLength, bool usePreviousLocations ) {
+	// Add transaction info to be written before the first mutation in the transaction.
+	void addTransactionInfo(SpanID const& context) {
+		TEST(!spanContext.isValid()); // addTransactionInfo with invalid SpanID
+		spanContext = context;
+		writtenLocations.clear();
+	}
+
+	void writeMessage( StringRef rawMessageWithoutLength, bool usePreviousLocations ) {
 		if( !usePreviousLocations ) {
 			prev_tags.clear();
 			if(logSystem->hasRemoteLogs()) {
@@ -865,15 +879,16 @@ struct LogPushData : NonCopyable {
 		uint32_t subseq = this->subsequence++;
 		uint32_t msgsize = rawMessageWithoutLength.size() + sizeof(subseq) + sizeof(uint16_t) + sizeof(Tag)*prev_tags.size();
 		for(int loc : msg_locations) {
-			messagesWriter[loc] << msgsize << subseq << uint16_t(prev_tags.size());
+			BinaryWriter& wr = messagesWriter[loc];
+			wr << msgsize << subseq << uint16_t(prev_tags.size());
 			for(auto& tag : prev_tags)
-				messagesWriter[loc] << tag;
-			messagesWriter[loc].serializeBytes(rawMessageWithoutLength);
+				wr << tag;
+			wr.serializeBytes(rawMessageWithoutLength);
 		}
 	}
 
 	template <class T>
-	void addTypedMessage(T const& item, bool allLocations = false) {
+	void writeTypedMessage(T const& item, bool metadataMessage = false, bool allLocations = false) {
 		prev_tags.clear();
 		if(logSystem->hasRemoteLogs()) {
 			prev_tags.push_back( logSystem->getRandomRouterTag() );
@@ -884,13 +899,41 @@ struct LogPushData : NonCopyable {
 		msg_locations.clear();
 		logSystem->getPushLocations(prev_tags, msg_locations, allLocations);
 
-		BinaryWriter bw(AssumeVersion(currentProtocolVersion));
+		BinaryWriter bw(AssumeVersion(g_network->protocolVersion()));
+
+		// Metadata messages (currently LogProtocolMessage is the only metadata
+		// message) should be written before span information. If this isn't a
+		// metadata message, make sure all locations have had transaction info
+		// written to them.  Mutations may have different sets of tags, so it
+		// is necessary to check all tag locations each time a mutation is
+		// written.
+		if (!metadataMessage) {
+			uint32_t subseq = this->subsequence++;
+			bool updatedLocation = false;
+			for (int loc : msg_locations) {
+				updatedLocation = writeTransactionInfo(loc, subseq) || updatedLocation;
+			}
+			// If this message doesn't write to any new locations, the
+			// subsequence wasn't actually used and can be decremented.
+			if (!updatedLocation) {
+				this->subsequence--;
+				TEST(true);  // No new SpanContextMessage written to transaction logs
+				ASSERT(this->subsequence > 0);
+			}
+		} else {
+			// When writing a metadata message, make sure transaction state has
+			// been reset. If you are running into this assertion, make sure
+			// you are calling addTransactionInfo before each transaction.
+			ASSERT(writtenLocations.size() == 0);
+		}
+
 		uint32_t subseq = this->subsequence++;
 		bool first = true;
 		int firstOffset=-1, firstLength=-1;
 		for(int loc : msg_locations) {
+			BinaryWriter& wr = messagesWriter[loc];
+
 			if (first) {
-				BinaryWriter& wr = messagesWriter[loc];
 				firstOffset = wr.getLength();
 				wr << uint32_t(0) << subseq << uint16_t(prev_tags.size());
 				for(auto& tag : prev_tags)
@@ -901,7 +944,6 @@ struct LogPushData : NonCopyable {
 				DEBUG_TAGS_AND_MESSAGE("ProxyPushLocations", invalidVersion, StringRef(((uint8_t*)wr.getData() + firstOffset), firstLength)).detail("PushLocations", msg_locations);
 				first = false;
 			} else {
-				BinaryWriter& wr = messagesWriter[loc];
 				BinaryWriter& from = messagesWriter[msg_locations[0]];
 				wr.serializeBytes( (uint8_t*)from.getData() + firstOffset, firstLength );
 			}
@@ -919,7 +961,37 @@ private:
 	std::vector<Tag> prev_tags;
 	std::vector<BinaryWriter> messagesWriter;
 	std::vector<int> msg_locations;
+	// Stores message locations that have had span information written to them
+	// for the current transaction. Adding transaction info will reset this
+	// field.
+	std::unordered_set<int> writtenLocations;
 	uint32_t subsequence;
+	SpanID spanContext;
+
+	// Writes transaction info to the message stream at the given location if
+	// it has not already been written (for the current transaction). Returns
+	// true on a successful write, and false if the location has already been
+	// written.
+	bool writeTransactionInfo(int location, uint32_t subseq) {
+		if (!FLOW_KNOBS->WRITE_TRACING_ENABLED || logSystem->getTLogVersion() < TLogVersion::V6 || writtenLocations.count(location) != 0) {
+			return false;
+		}
+
+		TEST(true);  // Wrote SpanContextMessage to a transaction log
+		writtenLocations.insert(location);
+
+		BinaryWriter& wr = messagesWriter[location];
+		SpanContextMessage contextMessage(spanContext);
+
+		int offset = wr.getLength();
+		wr << uint32_t(0) << subseq << uint16_t(prev_tags.size());
+		for(auto& tag : prev_tags)
+			wr << tag;
+		wr << contextMessage;
+		int length = wr.getLength() - offset;
+		*(uint32_t*)((uint8_t*)wr.getData() + offset) = length - sizeof(uint32_t);
+		return true;
+	}
 };
 
 #endif

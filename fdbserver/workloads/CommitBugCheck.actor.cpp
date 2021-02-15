@@ -33,20 +33,11 @@ struct CommitBugWorkload : TestWorkload
 		success = true;
 	}
 
-	virtual std::string description()
-	{
-		return "CommitBugWorkload";
-	}
+	std::string description() const override { return "CommitBugWorkload"; }
 
-	virtual Future<Void> setup(Database const& cx)
-	{
-		return Void();
-	}
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	virtual Future<Void> start(Database const& cx)
-	{
-		return timeout(bug1(cx, this) && bug2(cx, this), 60, Void());
-	}
+	Future<Void> start(Database const& cx) override { return timeout(bug1(cx, this) && bug2(cx, this), 60, Void()); }
 
 	ACTOR Future<Void> bug1(Database cx, CommitBugWorkload *self)
 	{
@@ -170,15 +161,9 @@ struct CommitBugWorkload : TestWorkload
 		return Void();
 	}
 
-	virtual Future<bool> check(Database const& cx)
-	{
-		return success;
-	}
+	Future<bool> check(Database const& cx) override { return success; }
 
-	virtual void getMetrics( vector<PerfMetric>& m )
-	{
-
-	}
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<CommitBugWorkload> CommitBugWorkloadFactory("CommitBug");

@@ -32,9 +32,9 @@ struct ActorFuzzWorkload : TestWorkload {
 		enabled = !clientId; // only do this on the "first" client
 	}
 
-	virtual std::string description() { return "ActorFuzzWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) { return Void(); }
-	virtual Future<Void> start( Database const& cx ) {
+	std::string description() const override { return "ActorFuzzWorkload"; }
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override {
 		if (enabled) {
 			// Only include this test outside of Windows because of MSVC compiler bug
 			fuzzResults.second = 0;
@@ -49,8 +49,8 @@ struct ActorFuzzWorkload : TestWorkload {
 		}
 		return Void();
 	}
-	virtual Future<bool> check( Database const& cx ) { return fuzzResults.first == fuzzResults.second; }
-	virtual void getMetrics( vector<PerfMetric>& m ) {}
+	Future<bool> check(Database const& cx) override { return fuzzResults.first == fuzzResults.second; }
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<ActorFuzzWorkload> ActorFuzzWorkloadFactory("ActorFuzz");

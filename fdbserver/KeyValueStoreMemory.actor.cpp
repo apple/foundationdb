@@ -18,30 +18,30 @@
  * limitations under the License.
  */
 
-#include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/IDiskQueue.h"
-#include "flow/IKeyValueContainer.h"
-#include "flow/RadixTree.h"
-#include "flow/ActorCollection.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
 #include "fdbserver/DeltaTree.h"
+#include "fdbserver/IDiskQueue.h"
+#include "fdbserver/IKeyValueContainer.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/RadixTree.h"
+#include "flow/ActorCollection.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 #define OP_DISK_OVERHEAD (sizeof(OpHeader) + 1)
 
 extern bool noUnseed;
 
 template <typename Container>
-class KeyValueStoreMemory : public IKeyValueStore, NonCopyable {
+class KeyValueStoreMemory final : public IKeyValueStore, NonCopyable {
 public:
 	KeyValueStoreMemory(IDiskQueue* log, UID id, int64_t memoryLimit, KeyValueStoreType storeType, bool disableSnapshot,
 	                    bool replaceContent, bool exactRecovery);
 
 	// IClosable
-	virtual Future<Void> getError() override { return log->getError(); }
-	virtual Future<Void> onClosed() override { return log->onClosed(); }
-	virtual void dispose() override {
+	Future<Void> getError() override { return log->getError(); }
+	Future<Void> onClosed() override { return log->onClosed(); }
+	void dispose() override {
 		recovering.cancel();
 		log->dispose();
 		if (reserved_buffer != nullptr) {
@@ -50,7 +50,7 @@ public:
 		}
 		delete this;
 	}
-	virtual void close() override {
+	void close() override {
 		recovering.cancel();
 		log->close();
 		if (reserved_buffer != nullptr) {
@@ -61,9 +61,9 @@ public:
 	}
 
 	// IKeyValueStore
-	virtual KeyValueStoreType getType() const override { return type; }
+	KeyValueStoreType getType() const override { return type; }
 
-	virtual std::tuple<size_t, size_t, size_t> getSize() const override { return data.size(); }
+	std::tuple<size_t, size_t, size_t> getSize() const override { return data.size(); }
 
 	int64_t getAvailableSize() const {
 		int64_t residentSize = data.sumTo(data.end()) + queue.totalSize() + // doesn't account for overhead in queue
@@ -72,7 +72,7 @@ public:
 		return memoryLimit - residentSize;
 	}
 
-	virtual StorageBytes getStorageBytes() const override {
+	StorageBytes getStorageBytes() const override {
 		StorageBytes diskQueueBytes = log->getStorageBytes();
 
 		// Try to bound how many in-memory bytes we might need to write to disk if we commit() now
@@ -103,7 +103,7 @@ public:
 		committedWriteBytes += bytesWritten;
 	}
 
-	virtual void set(KeyValueRef keyValue, const Arena* arena) override {
+	void set(KeyValueRef keyValue, const Arena* arena) override {
 		// A commit that occurs with no available space returns Never, so we can throw out all modifications
 		if (getAvailableSize() <= 0) return;
 
@@ -117,7 +117,7 @@ public:
 		}
 	}
 
-	virtual void clear(KeyRangeRef range, const Arena* arena) override {
+	void clear(KeyRangeRef range, const Arena* arena) override {
 		// A commit that occurs with no available space returns Never, so we can throw out all modifications
 		if (getAvailableSize() <= 0) return;
 
@@ -131,7 +131,7 @@ public:
 		}
 	}
 
-	virtual Future<Void> commit(bool sequential) override {
+	Future<Void> commit(bool sequential) override {
 		if(getAvailableSize() <= 0) {
 			TraceEvent(SevError, "KeyValueStoreMemory_OutOfSpace", id);
 			return Never();
@@ -184,7 +184,7 @@ public:
 		return c;
 	}
 
-	virtual Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) override {
+	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) override {
 		if (recovering.isError()) throw recovering.getError();
 		if (!recovering.isReady()) return waitAndReadValue(this, key);
 
@@ -193,8 +193,8 @@ public:
 		return Optional<Value>(it.getValue());
 	}
 
-	virtual Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength,
-	                                                Optional<UID> debugID = Optional<UID>()) override {
+	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength,
+	                                        Optional<UID> debugID = Optional<UID>()) override {
 		if (recovering.isError()) throw recovering.getError();
 		if (!recovering.isReady()) return waitAndReadValuePrefix(this, key, maxLength);
 
@@ -210,8 +210,8 @@ public:
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
-	virtual Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit = 1 << 30,
-	                                                     int byteLimit = 1 << 30) override {
+	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit = 1 << 30,
+	                                             int byteLimit = 1 << 30) override {
 		if(recovering.isError()) throw recovering.getError();
 		if (!recovering.isReady()) return waitAndReadRange(this, keys, rowLimit, byteLimit);
 
@@ -253,13 +253,13 @@ public:
 		return result;
 	}
 
-	virtual void resyncLog() override {
+	void resyncLog() override {
 		ASSERT(recovering.isReady());
 		resetSnapshot = true;
 		log_op(OpSnapshotAbort, StringRef(), StringRef());
 	}
 
-	virtual void enableSnapshot() override { disableSnapshot = false; }
+	void enableSnapshot() override { disableSnapshot = false; }
 
 private:
 	enum OpType {
@@ -279,7 +279,7 @@ private:
 		StringRef p1, p2;
 		OpRef() {}
 		OpRef(Arena& a, OpRef const& o) : op(o.op), p1(a, o.p1), p2(a, o.p2) {}
-		size_t expectedSize() { return p1.expectedSize() + p2.expectedSize(); }
+		size_t expectedSize() const { return p1.expectedSize() + p2.expectedSize(); }
 	};
 	struct OpHeader {
 		int op;
@@ -299,13 +299,13 @@ private:
 
 		void rollback() { clear(); }
 
-		void set(KeyValueRef keyValue, const Arena* arena = NULL) {
+		void set(KeyValueRef keyValue, const Arena* arena = nullptr) {
 			queue_op(OpSet, keyValue.key, keyValue.value, arena);
 		}
 
-		void clear(KeyRangeRef range, const Arena* arena = NULL) { queue_op(OpClear, range.begin, range.end, arena); }
+		void clear(KeyRangeRef range, const Arena* arena = nullptr) { queue_op(OpClear, range.begin, range.end, arena); }
 
-		void clear_to_end(StringRef fromKey, const Arena* arena = NULL) {
+		void clear_to_end(StringRef fromKey, const Arena* arena = nullptr) {
 			queue_op(OpClearToEnd, fromKey, StringRef(), arena);
 		}
 
@@ -316,7 +316,7 @@ private:
 			r.op = op;
 			r.p1 = p1;
 			r.p2 = p2;
-			if (arena == NULL) {
+			if (arena == nullptr) {
 				operations.push_back_deep(operations.arena(), r);
 			} else {
 				operations.push_back(operations.arena(), r);

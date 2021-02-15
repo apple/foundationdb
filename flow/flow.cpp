@@ -26,7 +26,7 @@
 #include <stdarg.h>
 #include <cinttypes>
 
-#if (defined (__linux__) || defined (__FreeBSD__)) && defined(__AVX__)
+#if (defined(__linux__) || defined(__FreeBSD__)) && defined(__AVX__) && !defined(MEMORY_SANITIZER)
 // For benchmarking; need a version of rte_memcpy that doesn't live in the same compilation unit as the test.
 void * rte_memcpy_noinline(void *__restrict __dest, const void *__restrict __src, size_t __n) {
 	return rte_memcpy(__dest, __src, __n);
@@ -41,7 +41,7 @@ __attribute__((visibility ("default"))) void *memcpy (void *__restrict __dest, c
 void * rte_memcpy_noinline(void *__restrict __dest, const void *__restrict __src, size_t __n) {
 	return memcpy(__dest, __src, __n);
 }
-#endif // (defined (__linux__) || defined (__FreeBSD__)) && defined(__AVX__)
+#endif // (defined (__linux__) || defined (__FreeBSD__)) && defined(__AVX__) && !defined(MEMORY_SANITIZER)
 
 INetwork *g_network = 0;
 

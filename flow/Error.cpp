@@ -107,14 +107,14 @@ ErrorCodeTable& Error::errorCodeTable() {
 }
 
 const char* Error::name() const {
-	auto table = errorCodeTable();
+	const auto& table = errorCodeTable();
 	auto it = table.find(error_code);
 	if (it == table.end()) return "UNKNOWN_ERROR";
 	return it->second.first;
 }
 
 const char* Error::what() const {
-	auto table = errorCodeTable();
+	const auto& table = errorCodeTable();
 	auto it = table.find(error_code);
 	if (it == table.end()) return "UNKNOWN_ERROR";
 	return it->second.second;

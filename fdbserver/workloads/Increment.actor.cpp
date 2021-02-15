@@ -44,19 +44,17 @@ struct Increment : TestWorkload {
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption( options, LiteralStringRef("expectedRate"), 0.7 );
 	}
 
-	virtual std::string description() { return "IncrementWorkload"; }
+	std::string description() const override { return "IncrementWorkload"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
-		return Void();
-	}
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override {
 		for(int c=0; c<actorCount; c++)
 			clients.push_back(
 				timeout(
 					incrementClient( cx->clone(), this, actorCount / transactionsPerSecond ), testDuration, Void()) );
 		return delay(testDuration);
 	}
-	virtual Future<bool> check( Database const& cx ) {
+	Future<bool> check(Database const& cx) override {
 		int errors = 0;
 		for(int c=0; c<clients.size(); c++)
 			errors += clients[c].isError();
@@ -65,7 +63,7 @@ struct Increment : TestWorkload {
 		clients.clear();
 		return incrementCheck( cx->clone(), this, !errors );
 	}
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back( transactions.getMetric() );
 		m.push_back( retries.getMetric() );
 		m.push_back( tooOldRetries.getMetric() );
@@ -109,7 +107,7 @@ struct Increment : TestWorkload {
 		}
 	}
 	bool incrementCheckData( const VectorRef<KeyValueRef>& data, Version v, Increment* self ) {
-		TEST( self->transactions.getValue() );
+		TEST( self->transactions.getValue() ); // incrementCheckData transaction has value
 		if (self->transactions.getValue() && data.size() == 0) {
 			TraceEvent(SevError, "TestFailure").detail("Reason", "No successful increments").detail("Before", nodeCount).detail("After", data.size()).detail("Version", v);
 			return false;

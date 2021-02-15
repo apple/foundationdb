@@ -20,9 +20,11 @@
 
 #ifndef FLOW_SIMULATOR_H
 #define FLOW_SIMULATOR_H
+#include "flow/ProtocolVersion.h"
 #pragma once
 
 #include "flow/flow.h"
+#include "flow/Histogram.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/IAsyncFile.h"
@@ -34,12 +36,16 @@ enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
 class ISimulator : public INetwork {
 public:
-	ISimulator() : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), drAgents(WaitForType), extraDB(NULL), allowLogSetKills(true), usableRegions(1) {}
+	ISimulator()
+	  : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1),
+	    isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false),
+	    allSwapsDisabled(false), backupAgents(BackupAgentType::WaitForType), drAgents(BackupAgentType::WaitForType), extraDB(nullptr),
+	    allowLogSetKills(true), usableRegions(1) {}
 
 	// Order matters!
-	enum KillType { KillInstantly, InjectFaults, RebootAndDelete, RebootProcessAndDelete, Reboot, RebootProcess, None };
+	enum KillType { KillInstantly, InjectFaults, FailDisk, RebootAndDelete, RebootProcessAndDelete, Reboot, RebootProcess, None };
 
-	enum BackupAgentType { NoBackupAgents, WaitForType, BackupToFile, BackupToDB };
+	enum class BackupAgentType { NoBackupAgents, WaitForType, BackupToFile, BackupToDB };
 
 	// Subclasses may subclass ProcessInfo as well
 	struct MachineInfo;
@@ -54,7 +60,9 @@ public:
 		LocalityData	locality;
 		ProcessClass startingClass;
 		TDMetricCollection tdmetrics;
+		HistogramRegistry histograms;
 		std::map<NetworkAddress, Reference<IListener>> listenerMap;
+		std::map<NetworkAddress, Reference<IUDPSocket>> boundUDPSockets;
 		bool failed;
 		bool excluded;
 		bool cleared;
@@ -65,38 +73,50 @@ public:
 
 		uint64_t fault_injection_r;
 		double fault_injection_p1, fault_injection_p2;
+		bool failedDisk;
+
+		UID uid;
+
+		ProtocolVersion protocolVersion;
 
 		ProcessInfo(const char* name, LocalityData locality, ProcessClass startingClass, NetworkAddressList addresses,
 		            INetworkConnections* net, const char* dataFolder, const char* coordinationFolder)
 		  : name(name), locality(locality), startingClass(startingClass), addresses(addresses),
 		    address(addresses.address), dataFolder(dataFolder), network(net), coordinationFolder(coordinationFolder),
 		    failed(false), excluded(false), rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
-		    fault_injection_r(0), machine(0), cleared(false) {}
+		    fault_injection_r(0), machine(0), cleared(false), failedDisk(false) {
+			uid = deterministicRandom()->randomUniqueID();
+		}
 
 		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
 
-		bool isReliable() const { return !failed && fault_injection_p1 == 0 && fault_injection_p2 == 0; }
+		bool isReliable() const { return !failed && fault_injection_p1 == 0 && fault_injection_p2 == 0 && !failedDisk; }
 		bool isAvailable() const { return !isExcluded() && isReliable(); }
 		bool isExcluded() const { return excluded; }
 		bool isCleared() const { return cleared; }
-		std::string getReliableInfo() {
+		std::string getReliableInfo() const {
 			std::stringstream ss;
 			ss << "failed:" << failed << " fault_injection_p1:" << fault_injection_p1
 			   << " fault_injection_p2:" << fault_injection_p2;
 			return ss.str();
 		}
 
-		// Returns true if the class represents an acceptable worker
+		// Return true if the class type is suitable for stateful roles, such as tLog and StorageServer.
 		bool isAvailableClass() const {
 			switch (startingClass._class) {
 				case ProcessClass::UnsetClass: return true;
 				case ProcessClass::StorageClass: return true;
 				case ProcessClass::TransactionClass: return true;
 				case ProcessClass::ResolutionClass: return false;
-				case ProcessClass::ProxyClass: return false;
-				case ProcessClass::MasterClass: return false;
-				case ProcessClass::TesterClass: return false;
-				case ProcessClass::StatelessClass: return false;
+			    case ProcessClass::CommitProxyClass:
+				    return false;
+			    case ProcessClass::GrvProxyClass:
+				    return false;
+			    case ProcessClass::MasterClass:
+				    return false;
+			    case ProcessClass::TesterClass:
+				    return false;
+			    case ProcessClass::StatelessClass: return false;
 				case ProcessClass::LogClass: return true;
 				case ProcessClass::LogRouterClass: return false;
 				case ProcessClass::ClusterControllerClass: return false;
@@ -108,7 +128,7 @@ public:
 			}
 		}
 
-		const Reference<IListener> getListener(const NetworkAddress& addr) {
+		Reference<IListener> getListener(const NetworkAddress& addr) const {
 			auto listener = listenerMap.find(addr);
 			ASSERT( listener != listenerMap.end());
 			return listener->second;
@@ -138,7 +158,7 @@ public:
 		std::set<std::string> closingFiles;
 		Optional<Standalone<StringRef>>	machineId;
 
-		MachineInfo() : machineProcess(0) {}
+		MachineInfo() : machineProcess(nullptr) {}
 	};
 
 	ProcessInfo* getProcess( Endpoint const& endpoint ) { return getProcessByAddress(endpoint.getPrimaryAddress()); }
@@ -150,26 +170,26 @@ public:
 
 	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, bool sslEnabled, uint16_t listenPerProcess,
 	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,
-	                                const char* coordinationFolder) = 0;
+	                                const char* coordinationFolder, ProtocolVersion protocol) = 0;
 	virtual void killProcess( ProcessInfo* machine, KillType ) = 0;
 	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses ) = 0;
 	virtual void rebootProcess( ProcessInfo* process, KillType kt ) = 0;
 	virtual void killInterface( NetworkAddress address, KillType ) = 0;
-	virtual bool killMachine(Optional<Standalone<StringRef>> machineId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
-	virtual bool killZone(Optional<Standalone<StringRef>> zoneId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
-	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
+	virtual bool killMachine(Optional<Standalone<StringRef>> machineId, KillType kt, bool forceKill = false, KillType* ktFinal = nullptr) = 0;
+	virtual bool killZone(Optional<Standalone<StringRef>> zoneId, KillType kt, bool forceKill = false, KillType* ktFinal = nullptr) = 0;
+	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, bool forceKill = false, KillType* ktFinal = nullptr) = 0;
 	//virtual KillType getMachineKillState( UID zoneID ) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const = 0;
 	virtual bool isAvailable() const = 0;
 	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual void displayWorkers() const;
-
-	virtual void addRole(NetworkAddress const& address, std::string const& role) {
+	ProtocolVersion protocolVersion() override = 0;
+	void addRole(NetworkAddress const& address, std::string const& role) {
 		roleAddresses[address][role] ++;
 		TraceEvent("RoleAdd").detail("Address", address).detail("Role", role).detail("NumRoles", roleAddresses[address].size()).detail("Value", roleAddresses[address][role]);
 	}
 
-	virtual void removeRole(NetworkAddress const& address, std::string const& role) {
+	void removeRole(NetworkAddress const& address, std::string const& role) {
 		auto addressIt = roleAddresses.find(address);
 		if (addressIt != roleAddresses.end()) {
 			auto rolesIt = addressIt->second.find(role);
@@ -198,7 +218,7 @@ public:
 		}
 	}
 
-	virtual std::string getRoles(NetworkAddress const& address, bool skipWorkers = true) const {
+	std::string getRoles(NetworkAddress const& address, bool skipWorkers = true) const {
 		auto addressIt = roleAddresses.find(address);
 		std::string roleText;
 		if (addressIt != roleAddresses.end()) {
@@ -212,20 +232,20 @@ public:
 		return roleText;
 	}
 
-	virtual void clearAddress(NetworkAddress const& address) {
+	void clearAddress(NetworkAddress const& address) {
 		clearedAddresses[address]++;
 		TraceEvent("ClearAddress").detail("Address", address).detail("Value", clearedAddresses[address]);
 	}
-	virtual bool isCleared(NetworkAddress const& address) const {
+	bool isCleared(NetworkAddress const& address) const {
 		return clearedAddresses.find(address) != clearedAddresses.end();
 	}
 
-	virtual void excludeAddress(NetworkAddress const& address) {
+	void excludeAddress(NetworkAddress const& address) {
 		excludedAddresses[address]++;
 		TraceEvent("ExcludeAddress").detail("Address", address).detail("Value", excludedAddresses[address]);
 	}
 
-	virtual void includeAddress(NetworkAddress const& address) {
+	void includeAddress(NetworkAddress const& address) {
 		auto addressIt = excludedAddresses.find(address);
 		if (addressIt != excludedAddresses.end()) {
 			if (addressIt->second > 1) {
@@ -241,29 +261,27 @@ public:
 			TraceEvent(SevWarn,"IncludeAddress").detail("Address", address).detail("Result", "Missing");
 		}
 	}
-	virtual void includeAllAddresses() {
+	void includeAllAddresses() {
 		TraceEvent("IncludeAddressAll").detail("AddressTotal", excludedAddresses.size());
 		excludedAddresses.clear();
 	}
-	virtual bool isExcluded(NetworkAddress const& address) const {
+	bool isExcluded(NetworkAddress const& address) const {
 		return excludedAddresses.find(address) != excludedAddresses.end();
 	}
 
-	virtual void disableSwapToMachine(Optional<Standalone<StringRef>> zoneId ) {
-		swapsDisabled.insert(zoneId);
-	}
-	virtual void enableSwapToMachine(Optional<Standalone<StringRef>> zoneId ) {
+	void disableSwapToMachine(Optional<Standalone<StringRef>> zoneId) { swapsDisabled.insert(zoneId); }
+	void enableSwapToMachine(Optional<Standalone<StringRef>> zoneId) {
 		swapsDisabled.erase(zoneId);
 		allSwapsDisabled = false;
 	}
-	virtual bool canSwapToMachine(Optional<Standalone<StringRef>> zoneId ) {
+	bool canSwapToMachine(Optional<Standalone<StringRef>> zoneId) const {
 		return swapsDisabled.count( zoneId ) == 0 && !allSwapsDisabled && !extraDB;
 	}
-	virtual void enableSwapsToAll() {
+	void enableSwapsToAll() {
 		swapsDisabled.clear();
 		allSwapsDisabled = false;
 	}
-	virtual void disableSwapsToAll() {
+	void disableSwapsToAll() {
 		swapsDisabled.clear();
 		allSwapsDisabled = true;
 	}
@@ -274,7 +292,7 @@ public:
 	virtual ProcessInfo* getProcessByAddress( NetworkAddress const& address ) = 0;
 	virtual MachineInfo* getMachineByNetworkAddress(NetworkAddress const& address) = 0;
 	virtual MachineInfo* getMachineById(Optional<Standalone<StringRef>> const& machineId) = 0;
-	virtual void run() {}
+	void run() override {}
 	virtual void destroyProcess( ProcessInfo *p ) = 0;
 	virtual void destroyMachine(Optional<Standalone<StringRef>> const& machineId ) = 0;
 
@@ -315,15 +333,15 @@ public:
 	BackupAgentType backupAgents;
 	BackupAgentType drAgents;
 
-	virtual flowGlobalType global(int id) const { return getCurrentProcess()->global(id); };
-	virtual void setGlobal(size_t id, flowGlobalType v) { getCurrentProcess()->setGlobal(id,v); };
+	bool hasDiffProtocolProcess; // true if simulator is testing a process with a different version
+	bool setDiffProtocol; // true if a process with a different protocol version has been started
 
-	virtual void disableFor(const std::string& desc, double time) {
-		disabledMap[desc] = time;
-	}
+	flowGlobalType global(int id) const final { return getCurrentProcess()->global(id); };
+	void setGlobal(size_t id, flowGlobalType v) final { getCurrentProcess()->setGlobal(id, v); };
 
-	virtual double checkDisabled(const std::string& desc) const
-	{
+	void disableFor(const std::string& desc, double time) { disabledMap[desc] = time; }
+
+	double checkDisabled(const std::string& desc) const {
 		auto iter = disabledMap.find(desc);
 		if (iter != disabledMap.end()) {
 			return iter->second;
@@ -366,16 +384,16 @@ extern Future<Void> waitUntilDiskReady(Reference<DiskParameters> parameters, int
 class Sim2FileSystem : public IAsyncFileSystem {
 public:
 	// Opens a file for asynchronous I/O
-	virtual Future< Reference<class IAsyncFile> > open( std::string filename, int64_t flags, int64_t mode );
+	Future<Reference<class IAsyncFile>> open(const std::string& filename, int64_t flags, int64_t mode) override;
 
 	// Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
-	virtual Future< Void > deleteFile( std::string filename, bool mustBeDurable );
+	Future<Void> deleteFile(const std::string& filename, bool mustBeDurable) override;
 
-	virtual Future< std::time_t > lastWriteTime( std::string filename );
+	Future<std::time_t> lastWriteTime(const std::string& filename) override;
 
 	Sim2FileSystem() {}
 
-	virtual ~Sim2FileSystem() {}
+	~Sim2FileSystem() override {}
 
 	static void newFileSystem();
 };

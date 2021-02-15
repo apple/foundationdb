@@ -32,11 +32,9 @@ struct DummyWorkload : TestWorkload {
 		displayDelay = getOption(options, LiteralStringRef("displayDelay"), 0.0);
 	}
 
-	virtual std::string description() {
-		return "DummyWorkload";
-	}
+	std::string description() const override { return "DummyWorkload"; }
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		if ((clientId == 0) && (displayWorkers)) {
 			return _start(this, cx);
 		}
@@ -50,12 +48,9 @@ struct DummyWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<bool> check(Database const& cx) {
-		return true;
-	}
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
-	}
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<DummyWorkload> DummyWorkloadFactory("DummyWorkload");

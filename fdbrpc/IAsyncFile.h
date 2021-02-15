@@ -24,9 +24,10 @@
 
 #include <ctime>
 #include "flow/flow.h"
+#include "fdbrpc/IRateControl.h"
 
 // All outstanding operations must be cancelled before the destructor of IAsyncFile is called.
-// The desirability of the above semantic is disputed. Some classes (AsyncFileBlobStore,
+// The desirability of the above semantic is disputed. Some classes (AsyncFileS3BlobStore,
 // AsyncFileCached) maintain references, while others (AsyncFileNonDurable) don't, and the comment
 // is unapplicable to some others as well (AsyncFileKAIO). It's safest to assume that all operations
 // must complete or cancel, but you should probably look at the file implementations you'll be using.
@@ -63,8 +64,8 @@ public:
 	virtual Future<Void> truncate( int64_t size ) = 0;
 	virtual Future<Void> sync() = 0;
 	virtual Future<Void> flush() { return Void();  }      // Sends previous writes to the OS if they have been buffered in memory, but does not make them power safe
-	virtual Future<int64_t> size() = 0;
-	virtual std::string getFilename() = 0;
+	virtual Future<int64_t> size() const = 0;
+	virtual std::string getFilename() const = 0;
 
 	// Attempt to read the *length bytes at offset without copying.  If successful, a pointer to the
 	//   requested bytes is written to *data, and the number of bytes successfully read is
@@ -80,7 +81,11 @@ public:
 	virtual Future<Void> readZeroCopy( void** data, int* length, int64_t offset ) { return io_error(); }
 	virtual void releaseZeroCopy( void* data, int length, int64_t offset ) {}
 
-	virtual int64_t debugFD() = 0;
+	virtual int64_t debugFD() const = 0;
+
+	// Used for rate control, at present, only AsyncFileCached supports it
+	virtual Reference<IRateControl> const& getRateControl() { throw unsupported_operation(); }
+	virtual void setRateControl(Reference<IRateControl> const& rc) { throw unsupported_operation(); }
 };
 
 typedef void (*runCycleFuncPtr)();
@@ -88,17 +93,17 @@ typedef void (*runCycleFuncPtr)();
 class IAsyncFileSystem {
 public:
 	// Opens a file for asynchronous I/O
-	virtual Future< Reference<class IAsyncFile> > open( std::string filename, int64_t flags, int64_t mode ) = 0;
+	virtual Future<Reference<class IAsyncFile>> open(const std::string& filename, int64_t flags, int64_t mode) = 0;
 
 	// Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
-	virtual Future< Void > deleteFile( std::string filename, bool mustBeDurable ) = 0;
+	virtual Future<Void> deleteFile(const std::string& filename, bool mustBeDurable) = 0;
 
 	// Unlinks a file and then deletes it slowly by truncating the file repeatedly.
 	// If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
-	virtual Future<Void> incrementalDeleteFile( std::string filename, bool mustBeDurable );
+	virtual Future<Void> incrementalDeleteFile(const std::string& filename, bool mustBeDurable);
 
 	// Returns the time of the last modification of the file.
-	virtual Future<std::time_t> lastWriteTime( std::string filename ) = 0;
+	virtual Future<std::time_t> lastWriteTime(const std::string& filename) = 0;
 
 	static IAsyncFileSystem* filesystem() { return filesystem(g_network); }
 	static runCycleFuncPtr runCycleFunc() { return reinterpret_cast<runCycleFuncPtr>(reinterpret_cast<flowGlobalType>(g_network->global(INetwork::enRunCycleFunc))); }

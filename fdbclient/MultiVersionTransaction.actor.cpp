@@ -18,14 +18,17 @@
  * limitations under the License.
  */
 
+#include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 
+#include "flow/network.h"
 #include "flow/Platform.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 void throwIfError(FdbCApi::fdb_error_t e) {
 	if(e) {
@@ -159,6 +162,23 @@ ThreadFuture<int64_t> DLTransaction::getEstimatedRangeSizeBytes(const KeyRangeRe
 	});
 }
 
+ThreadFuture<Standalone<VectorRef<KeyRef>>> DLTransaction::getRangeSplitPoints(const KeyRangeRef& range,
+                                                                               int64_t chunkSize) {
+	if (!api->transactionGetRangeSplitPoints) {
+		return unsupported_operation();
+	}
+	FdbCApi::FDBFuture* f = api->transactionGetRangeSplitPoints(tr, range.begin.begin(), range.begin.size(),
+	                                                            range.end.begin(), range.end.size(), chunkSize);
+
+	return toThreadFuture<Standalone<VectorRef<KeyRef>>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		const FdbCApi::FDBKey* splitKeys;
+		int keysArrayLength;
+		FdbCApi::fdb_error_t error = api->futureGetKeyArray(f, &splitKeys, &keysArrayLength);
+		ASSERT(!error);
+		return Standalone<VectorRef<KeyRef>>(VectorRef<KeyRef>((KeyRef*)splitKeys, keysArrayLength), Arena());
+	});
+}
+
 void DLTransaction::addReadConflictRange(const KeyRangeRef& keys) {
 	throwIfError(api->transactionAddConflictRange(tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), FDBConflictRangeTypes::READ));
 }
@@ -224,7 +244,7 @@ ThreadFuture<int64_t> DLTransaction::getApproximateSize() {
 }
 
 void DLTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
-	throwIfError(api->transactionSetOption(tr, option, value.present() ? value.get().begin() : NULL, value.present() ? value.get().size() : 0));
+	throwIfError(api->transactionSetOption(tr, option, value.present() ? value.get().begin() : nullptr, value.present() ? value.get().size() : 0));
 }
 
 ThreadFuture<Void> DLTransaction::onError(Error const& e) {
@@ -262,14 +282,49 @@ Reference<ITransaction> DLDatabase::createTransaction() {
 }
 
 void DLDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
-	throwIfError(api->databaseSetOption(db, option, value.present() ? value.get().begin() : NULL, value.present() ? value.get().size() : 0));
+	throwIfError(api->databaseSetOption(db, option, value.present() ? value.get().begin() : nullptr, value.present() ? value.get().size() : 0));
 }
-	
+
+ThreadFuture<int64_t> DLDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
+	if(!api->databaseRebootWorker) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture *f = api->databaseRebootWorker(db, address.begin(), address.size(), check, duration);
+	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
+		int64_t res;
+		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &res);
+		ASSERT(!error);
+		return res;
+	});
+}
+
+ThreadFuture<Void> DLDatabase::forceRecoveryWithDataLoss(const StringRef &dcid) {
+	if(!api->databaseForceRecoveryWithDataLoss) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture *f = api->databaseForceRecoveryWithDataLoss(db, dcid.begin(), dcid.size());
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
+		return Void();
+	});
+}
+
+ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef& uid, const StringRef& snapshot_command) {
+	if (!api->databaseCreateSnapshot) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f =
+	    api->databaseCreateSnapshot(db, uid.begin(), uid.size(), snapshot_command.begin(), snapshot_command.size());
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
+}
+
 // DLApi
 template<class T>
 void loadClientFunction(T *fp, void *lib, std::string libPath, const char *functionName, bool requireFunction = true) {
 	*(void**)(fp) = loadFunction(lib, functionName);
-	if(*fp == NULL && requireFunction) {
+	if(*fp == nullptr && requireFunction) {
 		TraceEvent(SevError, "ErrorLoadingFunction").detail("LibraryPath", libPath).detail("Function", functionName);
 		throw platform_error();
 	}
@@ -283,7 +338,7 @@ void DLApi::init() {
 	}
 
 	void* lib = loadLibrary(fdbCPath.c_str());
-	if(lib == NULL) {
+	if(lib == nullptr) {
 		TraceEvent(SevError, "ErrorLoadingExternalClientLibrary").detail("LibraryPath", fdbCPath);
 		throw platform_error();
 	}
@@ -299,6 +354,10 @@ void DLApi::init() {
 	loadClientFunction(&api->databaseCreateTransaction, lib, fdbCPath, "fdb_database_create_transaction");
 	loadClientFunction(&api->databaseSetOption, lib, fdbCPath, "fdb_database_set_option");
 	loadClientFunction(&api->databaseDestroy, lib, fdbCPath, "fdb_database_destroy");
+	loadClientFunction(&api->databaseRebootWorker, lib, fdbCPath, "fdb_database_reboot_worker", headerVersion >= 700);
+	loadClientFunction(&api->databaseForceRecoveryWithDataLoss, lib, fdbCPath, "fdb_database_force_recovery_with_data_loss", headerVersion >= 700);
+	loadClientFunction(&api->databaseCreateSnapshot, lib, fdbCPath, "fdb_database_create_snapshot",
+	                   headerVersion >= 700);
 
 	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option");
 	loadClientFunction(&api->transactionDestroy, lib, fdbCPath, "fdb_transaction_destroy");
@@ -322,12 +381,16 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionCancel, lib, fdbCPath, "fdb_transaction_cancel");
 	loadClientFunction(&api->transactionAddConflictRange, lib, fdbCPath, "fdb_transaction_add_conflict_range");
 	loadClientFunction(&api->transactionGetEstimatedRangeSizeBytes, lib, fdbCPath, "fdb_transaction_get_estimated_range_size_bytes", headerVersion >= 630);
+	loadClientFunction(&api->transactionGetRangeSplitPoints, lib, fdbCPath, "fdb_transaction_get_range_split_points",
+	                   headerVersion >= 700);
 
 	loadClientFunction(&api->futureGetInt64, lib, fdbCPath, headerVersion >= 620 ? "fdb_future_get_int64" : "fdb_future_get_version");
+	loadClientFunction(&api->futureGetUInt64, lib, fdbCPath, "fdb_future_get_uint64");
 	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error");
 	loadClientFunction(&api->futureGetKey, lib, fdbCPath, "fdb_future_get_key");
 	loadClientFunction(&api->futureGetValue, lib, fdbCPath, "fdb_future_get_value");
 	loadClientFunction(&api->futureGetStringArray, lib, fdbCPath, "fdb_future_get_string_array");
+	loadClientFunction(&api->futureGetKeyArray, lib, fdbCPath, "fdb_future_get_key_array", headerVersion >= 700);
 	loadClientFunction(&api->futureGetKeyValueArray, lib, fdbCPath, "fdb_future_get_keyvalue_array");
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback");
 	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel");
@@ -347,7 +410,7 @@ void DLApi::selectApiVersion(int apiVersion) {
 
 	init();
 	throwIfError(api->selectApiVersion(apiVersion, headerVersion));
-	throwIfError(api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT, NULL, 0));
+	throwIfError(api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT, nullptr, 0));
 }
 
 const char* DLApi::getClientVersion() {
@@ -358,8 +421,13 @@ const char* DLApi::getClientVersion() {
 	return api->getClientVersion();
 }
 
+ThreadFuture<uint64_t> DLApi::getServerProtocol(const char *clusterFilePath) {
+	ASSERT(false);
+	return ThreadFuture<uint64_t>();
+}
+
 void DLApi::setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {
-	throwIfError(api->setNetworkOption(option, value.present() ? value.get().begin() : NULL, value.present() ? value.get().size() : 0));
+	throwIfError(api->setNetworkOption(option, value.present() ? value.get().begin() : nullptr, value.present() ? value.get().size() : 0));
 }
 
 void DLApi::setupNetwork() {
@@ -418,7 +486,7 @@ Reference<IDatabase> DLApi::createDatabase609(const char *clusterFilePath) {
 		}));
 	});
 
-	return Reference<DLDatabase>(new DLDatabase(api, dbFuture));
+	return makeReference<DLDatabase>(api, dbFuture);
 }
 
 Reference<IDatabase> DLApi::createDatabase(const char *clusterFilePath) {
@@ -565,6 +633,14 @@ void MultiVersionTransaction::addReadConflictRange(const KeyRangeRef& keys) {
 ThreadFuture<int64_t> MultiVersionTransaction::getEstimatedRangeSizeBytes(const KeyRangeRef& keys) {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getEstimatedRangeSizeBytes(keys) : ThreadFuture<int64_t>(Never());
+	return abortableFuture(f, tr.onChange);
+}
+
+ThreadFuture<Standalone<VectorRef<KeyRef>>> MultiVersionTransaction::getRangeSplitPoints(const KeyRangeRef& range,
+                                                                                         int64_t chunkSize) {
+	auto tr = getTransaction();
+	auto f = tr.transaction ? tr.transaction->getRangeSplitPoints(range, chunkSize)
+	                        : ThreadFuture<Standalone<VectorRef<KeyRef>>>(Never());
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -744,6 +820,23 @@ void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional
 	}
 }
 
+ThreadFuture<int64_t> MultiVersionDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
+	if (dbState->db) {
+		return dbState->db->rebootWorker(address, check, duration);
+	}
+	return false;
+}
+
+ThreadFuture<Void> MultiVersionDatabase::forceRecoveryWithDataLoss(const StringRef &dcid) {
+	auto f = dbState->db ? dbState->db->forceRecoveryWithDataLoss(dcid) : ThreadFuture<Void>(Never());
+	return abortableFuture(f, dbState->dbVar->get().onChange);
+}
+
+ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef& uid, const StringRef& snapshot_command) {
+	auto f = dbState->db ? dbState->db->createSnapshot(uid, snapshot_command) : ThreadFuture<Void>(Never());
+	return abortableFuture(f, dbState->dbVar->get().onChange);
+}
+
 void MultiVersionDatabase::Connector::connect() {
 	addref();
 	onMainThreadVoid([this]() {
@@ -786,7 +879,7 @@ void MultiVersionDatabase::Connector::connect() {
 		else {
 			delref();
 		}
-	}, NULL);
+	}, nullptr);
 }
 
 // Only called from main thread
@@ -805,7 +898,7 @@ void MultiVersionDatabase::Connector::fire(const Void &unused, int& userParam) {
 			dbState->stateChanged();
 		}
 		delref();
-	}, NULL);
+	}, nullptr);
 }
 
 void MultiVersionDatabase::Connector::error(const Error& e, int& userParam) {
@@ -820,7 +913,7 @@ void MultiVersionDatabase::Connector::error(const Error& e, int& userParam) {
 }
 
 MultiVersionDatabase::DatabaseState::DatabaseState()
-	: dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(NULL))), currentClientIndex(-1) {}
+	: dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(nullptr))), currentClientIndex(-1) {}
 
 // Only called from main thread
 void MultiVersionDatabase::DatabaseState::stateChanged() {
@@ -879,7 +972,8 @@ void MultiVersionDatabase::DatabaseState::stateChanged() {
 
 void MultiVersionDatabase::DatabaseState::addConnection(Reference<ClientInfo> client, std::string clusterFilePath) {
 	clients.push_back(client);
-	connectionAttempts.push_back(Reference<Connector>(new Connector(Reference<DatabaseState>::addRef(this), client, clusterFilePath)));
+	connectionAttempts.push_back(
+	    makeReference<Connector>(Reference<DatabaseState>::addRef(this), client, clusterFilePath));
 }
 
 void MultiVersionDatabase::DatabaseState::startConnections() {
@@ -898,7 +992,7 @@ void MultiVersionDatabase::DatabaseState::cancelConnections() {
 		connectionAttempts.clear();
 		clients.clear();
 		delref();
-	}, NULL);
+	}, nullptr);
 }
 
 // MultiVersionApi
@@ -946,7 +1040,7 @@ Reference<ClientInfo> MultiVersionApi::getLocalClient() {
 
 void MultiVersionApi::selectApiVersion(int apiVersion) {
 	if(!localClient) {
-		localClient = Reference<ClientInfo>(new ClientInfo(ThreadSafeApi::api));
+		localClient = makeReference<ClientInfo>(ThreadSafeApi::api);
 	}
 
 	if(this->apiVersion != 0 && this->apiVersion != apiVersion) {
@@ -959,6 +1053,11 @@ void MultiVersionApi::selectApiVersion(int apiVersion) {
 
 const char* MultiVersionApi::getClientVersion() {
 	return localClient->api->getClientVersion();
+}
+
+
+ThreadFuture<uint64_t> MultiVersionApi::getServerProtocol(const char *clusterFilePath) {
+	return api->localClient->api->getServerProtocol(clusterFilePath);
 }
 
 void validateOption(Optional<StringRef> value, bool canBePresent, bool canBeAbsent, bool canBeEmpty=true) {
@@ -1005,7 +1104,7 @@ void MultiVersionApi::addExternalLibrary(std::string path) {
 
 	if(externalClients.count(filename) == 0) {
 		TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
-		externalClients[filename] = Reference<ClientInfo>(new ClientInfo(new DLApi(path), path));
+		externalClients[filename] = makeReference<ClientInfo>(new DLApi(path), path);
 	}
 }
 
@@ -1022,7 +1121,7 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 		std::string lib = abspath(joinPath(path, filename));
 		if(externalClients.count(filename) == 0) {
 			TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
-			externalClients[filename] = Reference<ClientInfo>(new ClientInfo(new DLApi(lib), lib));
+			externalClients[filename] = makeReference<ClientInfo>(new DLApi(lib), lib);
 		}	
 	}
 }
@@ -1043,7 +1142,7 @@ void MultiVersionApi::setSupportedClientVersions(Standalone<StringRef> versions)
 	// This option must be set on the main thread because it modifes structures that can be used concurrently by the main thread
 	onMainThreadVoid([this, versions](){
 		localClient->api->setNetworkOption(FDBNetworkOptions::SUPPORTED_CLIENT_VERSIONS, versions);
-	}, NULL);
+	}, nullptr);
 
 	if(!bypassMultiClientApi) {
 		runOnExternalClients([versions](Reference<ClientInfo> client) {
@@ -1436,18 +1535,18 @@ TEST_CASE("/fdbclient/multiversionclient/EnvironmentVariableParsing" ) {
 	return Void();
 }
 
-class ValidateFuture : public ThreadCallback {
+class ValidateFuture final : public ThreadCallback {
 public:
 	ValidateFuture(ThreadFuture<int> f, ErrorOr<int> expectedValue, std::set<int> legalErrors) : f(f), expectedValue(expectedValue), legalErrors(legalErrors) { }
 
-	virtual bool canFire(int notMadeActive) { return true; }
+	bool canFire(int notMadeActive) const override { return true; }
 
-	virtual void fire(const Void &unused, int& userParam) {
+	void fire(const Void& unused, int& userParam) override {
 		ASSERT(!f.isError() && !expectedValue.isError() && f.get() == expectedValue.get());
 		delete this;
 	}
 
-	virtual void error(const Error& e, int& userParam) {
+	void error(const Error& e, int& userParam) override {
 		ASSERT(legalErrors.count(e.code()) > 0 || (f.isError() && expectedValue.isError() && f.getError().code() == expectedValue.getError().code()));
 		delete this;
 	}
@@ -1654,7 +1753,7 @@ THREAD_FUNC runSingleAssignmentVarTest(void *arg) {
 
 		onMainThreadVoid([done](){
 			*done = true;
-		}, NULL);
+		}, nullptr);
 	}
 	catch(Error &e) {
 		printf("Caught error in test: %s\n", e.name());
@@ -1693,17 +1792,17 @@ TEST_CASE("/fdbclient/multiversionclient/AbortableSingleAssignmentVar" ) {
 	return Void();
 }
 
-class CAPICallback : public ThreadCallback {
+class CAPICallback final : public ThreadCallback {
 public:
 	CAPICallback(void (*callbackf)(FdbCApi::FDBFuture*, void*), FdbCApi::FDBFuture* f, void* userdata)
 		: callbackf(callbackf), f(f), userdata(userdata) {}
 
-	virtual bool canFire(int notMadeActive) { return true; }
-	virtual void fire(const Void& unused, int& userParam) {
+	bool canFire(int notMadeActive) const override { return true; }
+	void fire(const Void& unused, int& userParam) override {
 		(*callbackf)(f, userdata);
 		delete this;
 	}
-	virtual void error(const Error& e, int& userParam) {
+	void error(const Error& e, int& userParam) override {
 		(*callbackf)(f, userdata);
 		delete this;
 	}
@@ -1725,7 +1824,7 @@ struct DLTest {
 	static Reference<FdbCApi> getApi() {
 		static Reference<FdbCApi> api;
 		if(!api) {
-			api = Reference<FdbCApi>(new FdbCApi());
+			api = makeReference<FdbCApi>();
 
 			// Functions needed for DLSingleAssignmentVar
 			api->futureSetCallback = [](FdbCApi::FDBFuture *f, FdbCApi::FDBCallback callback, void *callbackParameter) {  

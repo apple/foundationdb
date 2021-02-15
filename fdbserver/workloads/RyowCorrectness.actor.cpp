@@ -74,9 +74,7 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 		opsPerTransaction = getOption(options, LiteralStringRef("opsPerTransaction"), 50);
 	}
 
-	virtual std::string description() {
-		return "RyowCorrectness";
-	}
+	std::string description() const override { return "RyowCorrectness"; }
 
 	ACTOR Future<Void> performSetup(Database cx, RyowCorrectnessWorkload *self) {
 		std::vector<TransactionType> types;
@@ -86,9 +84,7 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 		return Void();
 	}
 
-	Future<Void> performSetup(Database const& cx) {
-		return performSetup(cx, this);
-	}
+	Future<Void> performSetup(Database const& cx) override { return performSetup(cx, this); }
 
 	//Generates a random sequence of operations to perform in a single transaction
 	std::vector<Operation> generateOperationSequence(Standalone<VectorRef<KeyValueRef>> const& data) {
@@ -349,13 +345,11 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 		}
 	}
 
-	Future<Void> performTest(Database const& cx, Standalone<VectorRef<KeyValueRef>> const& data) {
+	Future<Void> performTest(Database const& cx, Standalone<VectorRef<KeyValueRef>> const& data) override {
 		return ::success(timeout(performTest(cx, data, this), duration));
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-
-	}
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<RyowCorrectnessWorkload> RyowCorrectnessWorkloadFactory("RyowCorrectness");

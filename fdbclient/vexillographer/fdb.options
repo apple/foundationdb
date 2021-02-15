@@ -125,6 +125,9 @@ description is not currently required but encouraged.
     <Option name="client_buggify_section_fired_probability" code="83"
             paramType="Int" paramDescription="probability expressed as a percentage between 0 and 100"
             description="Set the probability of an active CLIENT_BUGGIFY section being fired. A section will only fire if it was activated" />
+    <Option name="distributed_client_tracer" code="90"
+            paramType="String" paramDescription="Distributed tracer type. Choose from none, log_file, network_async, or network_lossy"
+            description="Set a tracer to run on the client. Should be set to the same value as the tracer set on the server." />
     <Option name="supported_client_versions" code="1000"
             paramType="String" paramDescription="[release version],[source version],[protocol version];..."
             description="This option is set automatically to communicate the list of supported clients to the active client."
@@ -182,6 +185,10 @@ description is not currently required but encouraged.
     <Option name="transaction_include_port_in_address" code="505"
             description="Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect."
             defaultFor="23"/>
+    <Option name="distributed_transaction_trace_enable" code="600"
+            description="Enable tracing for all transactions. This is the default." />
+    <Option name="distributed_transaction_trace_disable" code="601"
+            description="Disable tracing for all transactions." />
   </Scope>
   
   <Scope name="TransactionOption">
@@ -195,7 +202,7 @@ description is not currently required but encouraged.
     <Option name="next_write_no_write_conflict_range" code="30"
             description="The next write performed on this transaction will not generate a write conflict range. As a result, other transactions which read the key(s) being modified by the next write will not conflict with this transaction. Care needs to be taken when using this option on a transaction that is shared between multiple threads. When setting this option, write conflict ranges will be disabled on the next write operation, regardless of what thread it is on." />
     <Option name="commit_on_first_proxy" code="40"
-            description="Committing this transaction will bypass the normal load balancing across proxies and go directly to the specifically nominated 'first proxy'."
+            description="Committing this transaction will bypass the normal load balancing across commit proxies and go directly to the specifically nominated 'first commit proxy'."
             hidden="true" />
     <Option name="check_writes_enable" code="50"
             hidden="true" />

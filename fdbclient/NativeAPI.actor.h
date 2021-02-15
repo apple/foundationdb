@@ -30,7 +30,7 @@
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/ClusterInterface.h"
@@ -268,6 +268,9 @@ public:
 	Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( KeyRange const& keys, StorageMetrics const& limit, StorageMetrics const& estimated );
 	Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(KeyRange const& keys);
 
+	// Try to split the given range into equally sized chunks based on estimated size.
+	// The returned list would still be in form of [keys.begin, splitPoint1, splitPoint2, ... , keys.end]
+	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize);
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
 	void set( const KeyRef& key, const ValueRef& value, bool addConflictRange = true );
 	void atomicOp( const KeyRef& key, const ValueRef& value, MutationRef::Type operationType, bool addConflictRange = true );
@@ -281,6 +284,8 @@ public:
 	[[nodiscard]] Future<Standalone<StringRef>>
 	getVersionstamp(); // Will be fulfilled only after commit() returns success
 
+	Future<uint64_t> getProtocolVersion();
+
 	Promise<Standalone<StringRef>> versionstampPromise;
 
 	uint32_t getSize();
@@ -288,9 +293,7 @@ public:
 	void flushTrLogsIfEnabled();
 
 	// These are to permit use as state variables in actors:
-	Transaction()
-	  : info(TaskPriority::DefaultEndpoint, deterministicRandom()->randomUniqueID()),
-	    span(info.spanID, "Transaction"_loc) {}
+	Transaction();
 	void operator=(Transaction&& r) noexcept;
 
 	void reset();
@@ -319,6 +322,9 @@ public:
 	Span span;
 	double startTime;
 	Reference<TransactionLogInfo> trLogInfo;
+
+	void setTransactionID(uint64_t id);
+	void setToken(uint64_t token);
 
 	const vector<Future<std::pair<Key, Key>>>& getExtraReadConflictRanges() const { return extraConflictRanges; }
 	Standalone<VectorRef<KeyRangeRef>> readConflictRanges() const {
@@ -357,5 +363,10 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
 ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exclusions);
 
+ACTOR Future<uint64_t> getCoordinatorProtocols(Reference<ClusterConnectionFile> f);
+
+inline uint64_t getWriteOperationCost(uint64_t bytes) {
+	return bytes / std::max(1, CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR) + 1;
+}
 #include "flow/unactorcompiler.h"
 #endif

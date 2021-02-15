@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_ICLIENTAPI_H
 #define FDBCLIENT_ICLIENTAPI_H
+#include "fdbclient/ManagementAPI.actor.h"
 #pragma once
 
 #include "fdbclient/FDBOptions.g.h"
@@ -49,6 +50,8 @@ public:
 
 	virtual void addReadConflictRange(const KeyRangeRef& keys) = 0;
 	virtual ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) = 0;
+	virtual ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
+	                                                                        int64_t chunkSize) = 0;
 
 	virtual void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) = 0;
 	virtual void set(const KeyRef& key, const ValueRef& value) = 0;
@@ -82,6 +85,13 @@ public:
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
+
+	// Management API, attempt to kill or suspend a process, return 1 for request sent out, 0 for failure
+	virtual ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) = 0;
+	// Management API, force the database to recover into DCID, causing the database to lose the most recently committed mutations
+	virtual ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) = 0;
+	// Management API, create snapshot
+	virtual ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) = 0;
 };
 
 class IClientApi {
@@ -90,6 +100,7 @@ public:
 
 	virtual void selectApiVersion(int apiVersion) = 0;
 	virtual const char* getClientVersion() = 0;
+	virtual ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath) = 0;
 
 	virtual void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
 	virtual void setupNetwork() = 0;

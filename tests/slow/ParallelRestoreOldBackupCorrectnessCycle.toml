@@ -10,8 +10,8 @@ timeout = 360000
 
     [[test.workload]]
     testName = 'Cycle'
-    #    nodeCount=30000
-    nodeCount = 1000
+    nodeCount=30000
+    #    nodeCount = 1000
     #    transactionsPerSecond=500.0
     transactionsPerSecond = 2500.0
     testDuration = 30.0

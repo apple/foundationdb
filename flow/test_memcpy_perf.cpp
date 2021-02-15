@@ -91,19 +91,19 @@ init_buffers(void)
 	unsigned i;
 
 	large_buf_read = rte_malloc("memcpy", LARGE_BUFFER_SIZE + ALIGNMENT_UNIT, ALIGNMENT_UNIT);
-	if (large_buf_read == NULL)
+	if (large_buf_read == nullptr)
 		goto error_large_buf_read;
 
 	large_buf_write = rte_malloc("memcpy", LARGE_BUFFER_SIZE + ALIGNMENT_UNIT, ALIGNMENT_UNIT);
-	if (large_buf_write == NULL)
+	if (large_buf_write == nullptr)
 		goto error_large_buf_write;
 
 	small_buf_read = rte_malloc("memcpy", SMALL_BUFFER_SIZE + ALIGNMENT_UNIT, ALIGNMENT_UNIT);
-	if (small_buf_read == NULL)
+	if (small_buf_read == nullptr)
 		goto error_small_buf_read;
 
 	small_buf_write = rte_malloc("memcpy", SMALL_BUFFER_SIZE + ALIGNMENT_UNIT, ALIGNMENT_UNIT);
-	if (small_buf_write == NULL)
+	if (small_buf_write == nullptr)
 		goto error_small_buf_write;
 
 	for (i = 0; i < LARGE_BUFFER_SIZE; i++)
@@ -314,30 +314,30 @@ TEST_CASE("performance/memcpy/rte") {
 	printf("\n================================= %2dB aligned =================================",
 		ALIGNMENT_UNIT);
 	/* Do aligned tests where size is a variable */
-	gettimeofday(&tv_begin, NULL);
+	gettimeofday(&tv_begin, nullptr);
 	perf_test_variable_aligned();
-	gettimeofday(&tv_end, NULL);
+	gettimeofday(&tv_end, nullptr);
 	time_aligned = (double)(tv_end.tv_sec - tv_begin.tv_sec)
 		+ ((double)tv_end.tv_usec - tv_begin.tv_usec)/1000000;
 	printf("\n------- ----------------- ----------------- ----------------- -----------------");
 	/* Do aligned tests where size is a compile-time constant */
-	gettimeofday(&tv_begin, NULL);
+	gettimeofday(&tv_begin, nullptr);
 	perf_test_constant_aligned();
-	gettimeofday(&tv_end, NULL);
+	gettimeofday(&tv_end, nullptr);
 	time_aligned_const = (double)(tv_end.tv_sec - tv_begin.tv_sec)
 		+ ((double)tv_end.tv_usec - tv_begin.tv_usec)/1000000;
 	printf("\n================================== Unaligned ==================================");
 	/* Do unaligned tests where size is a variable */
-	gettimeofday(&tv_begin, NULL);
+	gettimeofday(&tv_begin, nullptr);
 	perf_test_variable_unaligned();
-	gettimeofday(&tv_end, NULL);
+	gettimeofday(&tv_end, nullptr);
 	time_unaligned = (double)(tv_end.tv_sec - tv_begin.tv_sec)
 		+ ((double)tv_end.tv_usec - tv_begin.tv_usec)/1000000;
 	printf("\n------- ----------------- ----------------- ----------------- -----------------");
 	/* Do unaligned tests where size is a compile-time constant */
-	gettimeofday(&tv_begin, NULL);
+	gettimeofday(&tv_begin, nullptr);
 	perf_test_constant_unaligned();
-	gettimeofday(&tv_end, NULL);
+	gettimeofday(&tv_end, nullptr);
 	time_unaligned_const = (double)(tv_end.tv_sec - tv_begin.tv_sec)
 		+ ((double)tv_end.tv_usec - tv_begin.tv_usec)/1000000;
 	printf("\n======= ================= ================= ================= =================\n\n");

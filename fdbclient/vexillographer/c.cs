@@ -52,8 +52,8 @@ namespace vexillographer
         {
             string parameterComment = "";
             if (o.scope.ToString().EndsWith("Option"))
-                parameterComment = String.Format("{0}// {1}\n", indent, "Parameter: " + o.getParameterComment());
-            return String.Format("{0}// {2}\n{5}{0}{1}{3}={4}", indent, prefix, o.comment, o.name.ToUpper(), o.code, parameterComment);
+                parameterComment = String.Format("{0}/* {1} */\n", indent, "Parameter: " + o.getParameterComment());
+            return String.Format("{0}/* {2} */\n{5}{0}{1}{3}={4}", indent, prefix, o.comment, o.name.ToUpper(), o.code, parameterComment);
         }
 
         private static void writeCEnum(TextWriter outFile, Scope scope, IEnumerable<Option> options)

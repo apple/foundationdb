@@ -71,17 +71,27 @@ if(NOT WIN32)
     test/mako/mako.h
     test/mako/utils.c
     test/mako/utils.h)
+  add_subdirectory(test/unit/third_party)
+  find_package(Threads REQUIRED)
+  set(UNIT_TEST_SRCS
+    test/unit/unit_tests.cpp
+    test/unit/fdb_api.cpp
+    test/unit/fdb_api.hpp)
 
   if(OPEN_FOR_IDE)
     add_library(fdb_c_performance_test OBJECT test/performance_test.c test/test.h)
     add_library(fdb_c_ryw_benchmark OBJECT test/ryw_benchmark.c test/test.h)
     add_library(fdb_c_txn_size_test OBJECT test/txn_size_test.c test/test.h)
     add_library(mako OBJECT ${MAKO_SRCS})
+    add_library(fdb_c_setup_tests OBJECT test/unit/setup_tests.cpp)
+    add_library(fdb_c_unit_tests OBJECT ${UNIT_TEST_SRCS})
   else()
     add_executable(fdb_c_performance_test test/performance_test.c test/test.h)
     add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
     add_executable(fdb_c_txn_size_test test/txn_size_test.c test/test.h)
     add_executable(mako ${MAKO_SRCS})
+    add_executable(fdb_c_setup_tests test/unit/setup_tests.cpp)
+    add_executable(fdb_c_unit_tests ${UNIT_TEST_SRCS})
     strip_debug_symbols(fdb_c_performance_test)
     strip_debug_symbols(fdb_c_ryw_benchmark)
     strip_debug_symbols(fdb_c_txn_size_test)
@@ -89,9 +99,49 @@ if(NOT WIN32)
   target_link_libraries(fdb_c_performance_test PRIVATE fdb_c)
   target_link_libraries(fdb_c_ryw_benchmark PRIVATE fdb_c)
   target_link_libraries(fdb_c_txn_size_test PRIVATE fdb_c)
+
+  add_dependencies(fdb_c_setup_tests doctest)
+  add_dependencies(fdb_c_unit_tests doctest)
+  target_include_directories(fdb_c_setup_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
+  target_include_directories(fdb_c_unit_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
+  target_link_libraries(fdb_c_setup_tests PRIVATE fdb_c Threads::Threads)
+  target_link_libraries(fdb_c_unit_tests PRIVATE fdb_c Threads::Threads)
+
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
   target_link_libraries(mako PRIVATE fdb_c)
+
+  if(NOT OPEN_FOR_IDE)
+    # Make sure that fdb_c.h is compatible with c90
+    add_executable(fdb_c90_test test/fdb_c90_test.c)
+    set_property(TARGET fdb_c90_test PROPERTY C_STANDARD 90)
+    target_compile_options(fdb_c90_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    target_link_libraries(fdb_c90_test PRIVATE fdb_c)
+  endif()
+
+  add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_c> ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
+    DEPENDS fdb_c
+    COMMENT "Copy libfdb_c to use as external client for test")
+  add_custom_target(external_client DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so)
+  add_dependencies(fdb_c_unit_tests external_client)
+
+  add_fdbclient_test(
+    NAME fdb_c_setup_tests
+    COMMAND $<TARGET_FILE:fdb_c_setup_tests>)
+  add_fdbclient_test(
+    NAME fdb_c_unit_tests
+    COMMAND $<TARGET_FILE:fdb_c_unit_tests>
+            @CLUSTER_FILE@
+            fdb)
+  add_fdbclient_test(
+    NAME fdb_c_external_client_unit_tests
+    COMMAND $<TARGET_FILE:fdb_c_unit_tests>
+            @CLUSTER_FILE@
+            fdb
+            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
+            )
 endif()
 
 set(c_workloads_srcs

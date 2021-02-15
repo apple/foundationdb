@@ -104,7 +104,7 @@ Field Name                        Description                                   
 ``Name for the snapshot file``    recommended name for the disk snapshot                     cluster-name:ip-addr:port:UID
 ================================  ========================================================   ========================================================
 
-``snapshot create binary`` will not be invoked on processes which does not have any persistent data (for example, Cluster Controller or Master or MasterProxy). Since these processes are stateless, there is no need for a snapshot. Any specialized configuration knobs used for one of these stateless processes need to be copied and restored externally.
+``snapshot create binary`` will not be invoked on processes which does not have any persistent data (for example, Cluster Controller or Master or CommitProxy). Since these processes are stateless, there is no need for a snapshot. Any specialized configuration knobs used for one of these stateless processes need to be copied and restored externally.
 
 Management of disk snapshots
 ----------------------------

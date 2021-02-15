@@ -1,4 +1,6 @@
-FROM foundationdb/foundationdb-build:0.1.14
+ARG IMAGE_TAG=0.1.24
+ARG IMAGE_VERSION=0.11.15
+FROM foundationdb/foundationdb-build:${IMAGE_TAG}
 
 USER root
 
@@ -7,7 +9,7 @@ ADD artifacts /mnt/artifacts
 
 # Install build tools for building via make
 RUN \
-	yum install -y distcc-server gperf rubygems python34 libmpc-devel npm
+	yum install -y distcc-server gperf rubygems python34 libmpc-devel npm cgdb jq
 
 # Download and install llvm-10.0.0
 RUN cd / &&\
@@ -17,7 +19,9 @@ RUN cd / &&\
 
 # Download and install gcc-9.3.0
 RUN cd / &&\
-	curl -L $FDB_ARTIFACTSURL/downloads/docker/foundationdb-dev/gcc-9.3.0.tar.gz | tar -xvz
+	curl -L $FDB_ARTIFACTSURL/downloads/docker/foundationdb-dev/gcc-9.3.0.tar.gz | tar -xvz &&\
+	mv -iv /usr/local/bin/go /usr/local/bin/go.gcc93 &&\
+	mv -iv /usr/local/bin/gofmt /usr/local/bin/gofmt.gcc93
 
 # Download and install distcc 3.3.2 new centos binaries
 RUN cd / &&\
@@ -48,8 +52,8 @@ RUN cp -iv /usr/local/bin/clang++ /usr/local/bin/clang++.deref &&\
 	ldconfig &&\
 	rm -rf /mnt/artifacts
 
-LABEL version=0.11.6
-ENV DOCKER_IMAGEVER=0.11.6
+LABEL version=${IMAGE_VERSION}
+ENV DOCKER_IMAGEVER=${IMAGE_VERSION}
 
 ENV CLANGCC=/usr/local/bin/clang.de8a65ef
 ENV CLANGCXX=/usr/local/bin/clang++.de8a65ef
@@ -61,8 +65,5 @@ ENV CC=/usr/local/bin/clang.de8a65ef
 ENV CXX=/usr/local/bin/clang++.de8a65ef
 ENV USE_LD=LLD
 ENV USE_LIBCXX=1
-ENV CCACHE_NOHASHDIR=true
-ENV CCACHE_UMASK=0000
-ENV CCACHE_SLOPPINESS="file_macro,time_macros,include_file_mtime,include_file_ctime,file_stat_matches"
 
 CMD scl enable devtoolset-8 rh-python36 rh-ruby24 -- bash

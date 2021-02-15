@@ -43,25 +43,23 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
 	}
 
-	virtual std::string description() { return "SelectorCorrectness"; }
+	std::string description() const override { return "SelectorCorrectness"; }
 
-	virtual Future<Void> setup( Database const& cx ) { 
-		return SelectorCorrectnessSetup( cx->clone(), this );
-	}
+	Future<Void> setup(Database const& cx) override { return SelectorCorrectnessSetup(cx->clone(), this); }
 
-	virtual Future<Void> start( Database const& cx ) { 
+	Future<Void> start(Database const& cx) override {
 		clients.push_back(
 			timeout(
 			SelectorCorrectnessClient( cx->clone(), this), testDuration, Void()) );
 		return delay(testDuration);
 	}
 
-	virtual Future<bool> check( Database const& cx ) { 
+	Future<bool> check(Database const& cx) override {
 		clients.clear();
 		return true;
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back( transactions.getMetric() );
 		m.push_back( retries.getMetric() );
 	}

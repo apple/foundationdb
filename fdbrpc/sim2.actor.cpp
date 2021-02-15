@@ -19,9 +19,19 @@
  */
 
 #include <cinttypes>
+#include <deque>
+#include <memory>
+#include <vector>
 
 #include "fdbrpc/simulator.h"
+#define BOOST_SYSTEM_NO_LIB
+#define BOOST_DATE_TIME_NO_LIB
+#define BOOST_REGEX_NO_LIB
+#include "fdbrpc/SimExternalConnection.h"
+#include "flow/ActorCollection.h"
+#include "flow/IRandom.h"
 #include "flow/IThreadPool.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/Util.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
@@ -29,6 +39,8 @@
 #include "flow/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/FaultInjection.h"
+#include "flow/flow.h"
+#include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/TLSConfig.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
@@ -85,25 +97,12 @@ void ISimulator::displayWorkers() const
 	return;
 }
 
-const UID TOKEN_ENDPOINT_NOT_FOUND(-1, -1);
-
-ISimulator* g_pSimulator = 0;
-thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = 0;
 int openCount = 0;
 
 struct SimClogging {
-	double getSendDelay( NetworkAddress from, NetworkAddress to ) {
-		return halfLatency();
-		double tnow = now();
-		double t = tnow + halfLatency();
+	double getSendDelay(NetworkAddress from, NetworkAddress to) const { return halfLatency(); }
 
-		if (!g_simulator.speedUpSimulation && clogSendUntil.count( to.ip ))
-			t = std::max( t, clogSendUntil[ to.ip ] );
-
-		return t - tnow;
-	}
-
-	double getRecvDelay( NetworkAddress from, NetworkAddress to ) {
+	double getRecvDelay(NetworkAddress from, NetworkAddress to) {
 		auto pair = std::make_pair( from.ip, to.ip );
 
 		double tnow = now();
@@ -158,7 +157,7 @@ private:
 
 SimClogging g_clogging;
 
-struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
+struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 	Sim2Conn( ISimulator::ProcessInfo* process )
 		: process(process), dbgid( deterministicRandom()->randomUniqueID() ), opened(false), closedByCaller(false), stopReceive(Never())
 	{
@@ -182,19 +181,20 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 		ASSERT_ABORT( !opened || closedByCaller );
 	}
 
-	virtual void addref() { ReferenceCounted<Sim2Conn>::addref(); }
-	virtual void delref() { ReferenceCounted<Sim2Conn>::delref(); }
-	virtual void close() { closedByCaller = true; closeInternal(); }
-
-	virtual Future<Void> acceptHandshake() { return delay(0.01*deterministicRandom()->random01()); }
-	virtual Future<Void> connectHandshake() { return delay(0.01*deterministicRandom()->random01()); }
-
-	virtual Future<Void> onWritable() { return whenWritable(this); }
-	virtual Future<Void> onReadable() { return whenReadable(this); }
-
-	bool isPeerGone() {
-		return !peer || peerProcess->failed;
+	void addref() override { ReferenceCounted<Sim2Conn>::addref(); }
+	void delref() override { ReferenceCounted<Sim2Conn>::delref(); }
+	void close() override {
+		closedByCaller = true;
+		closeInternal();
 	}
+
+	Future<Void> acceptHandshake() override { return delay(0.01 * deterministicRandom()->random01()); }
+	Future<Void> connectHandshake() override { return delay(0.01 * deterministicRandom()->random01()); }
+
+	Future<Void> onWritable() override { return whenWritable(this); }
+	Future<Void> onReadable() override { return whenReadable(this); }
+
+	bool isPeerGone() const { return !peer || peerProcess->failed; }
 
 	void peerClosed() {
 		leakedConnectionTracker = trackLeakedConnection(this);
@@ -203,7 +203,7 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 
 	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read (might be 0)
 	// (or may throw an error if the connection dies)
-	virtual int read( uint8_t* begin, uint8_t* end ) {
+	int read(uint8_t* begin, uint8_t* end) override {
 		rollRandomClose();
 
 		int64_t avail = receivedBytes.get() - readBytes.get();  // SOMEDAY: random?
@@ -218,7 +218,7 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 
 	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of bytes written (might be 0)
 	// (or may throw an error if the connection dies)
-	virtual int write( SendBuffer const* buffer, int limit) {
+	int write(SendBuffer const* buffer, int limit) override {
 		rollRandomClose();
 		ASSERT(limit > 0);
 
@@ -255,8 +255,8 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 
 	// Returns the network address and port of the other end of the connection.  In the case of an incoming connection, this may not
 	// be an address we can connect to!
-	virtual NetworkAddress getPeerAddress() const override { return peerEndpoint; }
-	virtual UID getDebugID() const override { return dbgid; }
+	NetworkAddress getPeerAddress() const override { return peerEndpoint; }
+	UID getDebugID() const override { return dbgid; }
 
 	bool opened, closedByCaller;
 
@@ -425,8 +425,10 @@ public:
 
 	static bool should_poll() { return false; }
 
-	ACTOR static Future<Reference<IAsyncFile>> open( std::string filename, int flags, int mode,
-													Reference<DiskParameters> diskParameters = Reference<DiskParameters>(new DiskParameters(25000, 150000000)), bool delayOnWrite = true ) {
+	ACTOR static Future<Reference<IAsyncFile>> open(
+	    std::string filename, int flags, int mode,
+	    Reference<DiskParameters> diskParameters = makeReference<DiskParameters>(25000, 150000000),
+	    bool delayOnWrite = true) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 
@@ -475,38 +477,26 @@ public:
 		}
 	}
 
-	virtual void addref() { ReferenceCounted<SimpleFile>::addref(); }
-	virtual void delref() { ReferenceCounted<SimpleFile>::delref(); }
+	void addref() override { ReferenceCounted<SimpleFile>::addref(); }
+	void delref() override { ReferenceCounted<SimpleFile>::delref(); }
 
-	virtual int64_t debugFD() { return (int64_t)h; }
+	int64_t debugFD() const override { return (int64_t)h; }
 
-	virtual Future<int> read( void* data, int length, int64_t offset ) {
-		return read_impl( this, data, length, offset );
-	}
+	Future<int> read(void* data, int length, int64_t offset) override { return read_impl(this, data, length, offset); }
 
-	virtual Future<Void> write( void const* data, int length, int64_t offset ) {
+	Future<Void> write(void const* data, int length, int64_t offset) override {
 		return write_impl( this, StringRef((const uint8_t*)data, length), offset );
 	}
 
-	virtual Future<Void> truncate( int64_t size ) {
-		return truncate_impl( this, size );
-	}
+	Future<Void> truncate(int64_t size) override { return truncate_impl(this, size); }
 
-	virtual Future<Void> sync() {
-		return sync_impl( this );
-	}
+	Future<Void> sync() override { return sync_impl(this); }
 
-	virtual Future<int64_t> size() {
-		return size_impl( this );
-	}
+	Future<int64_t> size() const override { return size_impl(this); }
 
-	virtual std::string getFilename() {
-		return actualFilename;
-	}
+	std::string getFilename() const override { return actualFilename; }
 
-	~SimpleFile() {
-		_close( h );
-	}
+	~SimpleFile() override { _close(h); }
 
 private:
 	int h;
@@ -563,8 +553,8 @@ private:
 
 		debugFileCheck("SimpleFileRead", self->filename, data, offset, length);
 
-		INJECT_FAULT(io_timeout, "SimpleFile::read");
-		INJECT_FAULT(io_error, "SimpleFile::read");
+		INJECT_FAULT(io_timeout, "SimpleFile::read"); // SimpleFile::read io_timeout injected
+		INJECT_FAULT(io_error, "SimpleFile::read"); // SimpleFile::read io_error injected
 
 		return read_bytes;
 	}
@@ -601,8 +591,8 @@ private:
 
 		debugFileCheck("SimpleFileWrite", self->filename, (void*)data.begin(), offset, data.size());
 
-		INJECT_FAULT(io_timeout, "SimpleFile::write");
-		INJECT_FAULT(io_error, "SimpleFile::write");
+		INJECT_FAULT(io_timeout, "SimpleFile::write"); // SimpleFile::write inject io_timeout
+		INJECT_FAULT(io_error, "SimpleFile::write"); // SimpleFile::write inject io_error
 
 		return Void();
 	}
@@ -628,8 +618,8 @@ private:
 		if (randLog)
 			fprintf( randLog, "SFT2 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str());
 
-		INJECT_FAULT( io_timeout, "SimpleFile::truncate" );
-		INJECT_FAULT( io_error, "SimpleFile::truncate" );
+		INJECT_FAULT( io_timeout, "SimpleFile::truncate" ); // SimpleFile::truncate inject io_timeout
+		INJECT_FAULT( io_error, "SimpleFile::truncate" ); // SimpleFile::truncate inject io_error
 
 		return Void();
 	}
@@ -661,13 +651,13 @@ private:
 		if (randLog)
 			fprintf( randLog, "SFC2 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str());
 
-		INJECT_FAULT( io_timeout, "SimpleFile::sync" );
-		INJECT_FAULT( io_error, "SimpleFile::sync" );
+		INJECT_FAULT( io_timeout, "SimpleFile::sync" ); // SimpleFile::sync inject io_timeout
+		INJECT_FAULT( io_error, "SimpleFile::sync" ); // SimpleFile::sync inject io_errot
 
 		return Void();
 	}
 
-	ACTOR static Future<int64_t> size_impl( SimpleFile* self ) {
+	ACTOR static Future<int64_t> size_impl(SimpleFile const* self) {
 		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)
 			fprintf(randLog, "SFS1 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str());
@@ -682,7 +672,7 @@ private:
 
 		if (randLog)
 			fprintf(randLog, "SFS2 %s %s %s %" PRId64 "\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), pos);
-		INJECT_FAULT( io_error, "SimpleFile::size" );
+		INJECT_FAULT( io_error, "SimpleFile::size" ); // SimpleFile::size inject io_error
 
 		return pos;
 	}
@@ -696,7 +686,7 @@ struct SimDiskSpace {
 
 void doReboot( ISimulator::ProcessInfo* const& p, ISimulator::KillType const& kt );
 
-struct Sim2Listener : IListener, ReferenceCounted<Sim2Listener> {
+struct Sim2Listener final : IListener, ReferenceCounted<Sim2Listener> {
 	explicit Sim2Listener( ISimulator::ProcessInfo* process, const NetworkAddress& listenAddr )
 		: process(process),
 	      address(listenAddr) {}
@@ -705,14 +695,12 @@ struct Sim2Listener : IListener, ReferenceCounted<Sim2Listener> {
 		incoming( Reference<Sim2Listener>::addRef( this ), seconds, conn );
 	}
 
-	virtual void addref() { ReferenceCounted<Sim2Listener>::addref(); }
-	virtual void delref() { ReferenceCounted<Sim2Listener>::delref(); }
+	void addref() override { ReferenceCounted<Sim2Listener>::addref(); }
+	void delref() override { ReferenceCounted<Sim2Listener>::delref(); }
 
-	virtual Future<Reference<IConnection>> accept() {
-		return popOne( nextConnection.getFuture() );
-	}
+	Future<Reference<IConnection>> accept() override { return popOne(nextConnection.getFuture()); }
 
-	virtual NetworkAddress getListenAddress() const override { return address; }
+	NetworkAddress getListenAddress() const override { return address; }
 
 private:
 	ISimulator::ProcessInfo* process;
@@ -739,19 +727,21 @@ private:
 
 #define g_sim2 ((Sim2&)g_simulator)
 
-class Sim2 : public ISimulator, public INetworkConnections {
+class Sim2 final : public ISimulator, public INetworkConnections {
 public:
 	// Implement INetwork interface
 	// Everything actually network related is delegated to the Sim2Net class; Sim2 is only concerned with simulating machines and time
-	virtual double now() const override { return time; }
+	double now() const override { return time; }
 
 	// timer() can be up to 0.1 seconds ahead of now()
-	virtual double timer() {
+	double timer() override {
 		timerTime += deterministicRandom()->random01()*(time+0.1-timerTime)/2.0;
-		return timerTime; 
+		return timerTime;
 	}
 
-	virtual Future<class Void> delay( double seconds, TaskPriority taskID ) {
+	double timer_monotonic() override { return timer(); }
+
+	Future<class Void> delay(double seconds, TaskPriority taskID) override {
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 		return delay( seconds, taskID, currentProcess );
 	}
@@ -777,7 +767,7 @@ public:
 		self->setCurrentTask(taskID);
 		return Void();
 	}
-	virtual Future<class Void> yield( TaskPriority taskID ) {
+	Future<class Void> yield(TaskPriority taskID) override {
 		if (taskID == TaskPriority::DefaultYield) taskID = currentTaskID;
 		if (check_yield(taskID)) {
 			// We want to check that yielders can handle actual time elapsing (it sometimes will outside simulation), but
@@ -787,7 +777,7 @@ public:
 		setCurrentTask(taskID);
 		return Void();
 	}
-	virtual bool check_yield( TaskPriority taskID ) {
+	bool check_yield(TaskPriority taskID) override {
 		if (yielded) return true;
 		if (--yield_limit <= 0) {
 			yield_limit = deterministicRandom()->randomInt(1, 150);  // If yield returns false *too* many times in a row, there could be a stack overflow, since we can't deterministically check stack size as the real network does
@@ -795,19 +785,17 @@ public:
 		}
 		return yielded = BUGGIFY_WITH_PROB(0.01);
 	}
-	virtual TaskPriority getCurrentTask() const override { return currentTaskID; }
-	virtual void setCurrentTask(TaskPriority taskID ) {
-		currentTaskID = taskID;
-	}
+	TaskPriority getCurrentTask() const override { return currentTaskID; }
+	void setCurrentTask(TaskPriority taskID) override { currentTaskID = taskID; }
 	// Sets the taskID/priority of the current task, without yielding
-	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host ) {
+	Future<Reference<IConnection>> connect(NetworkAddress toAddr, const std::string &host) override {
 		ASSERT( host.empty());
 		if (!addressMap.count( toAddr )) {
 			return waitForProcessAndConnect( toAddr, this );
 		}
 		auto peerp = getProcessByAddress(toAddr);
-		Reference<Sim2Conn> myc( new Sim2Conn( getCurrentProcess() ) );
-		Reference<Sim2Conn> peerc( new Sim2Conn( peerp ) );
+		auto myc = makeReference<Sim2Conn>(getCurrentProcess());
+		auto peerc = makeReference<Sim2Conn>(peerp);
 
 		myc->connect(peerc, toAddr);
 		IPAddress localIp;
@@ -824,8 +812,16 @@ public:
 		((Sim2Listener*)peerp->getListener(toAddr).getPtr())->incomingConnection( 0.5*deterministicRandom()->random01(), Reference<IConnection>(peerc) );
 		return onConnect( ::delay(0.5*deterministicRandom()->random01()), myc );
 	}
-	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service) {
-		throw lookup_failed();
+
+	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, const std::string &host) override {
+		return SimExternalConnection::connect(toAddr);
+	}
+
+	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
+	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6 = false) override;
+
+	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string &host, const std::string &service) override {
+		return SimExternalConnection::resolveTCPEndpoint(host, service);
 	}
 	ACTOR static Future<Reference<IConnection>> onConnect( Future<Void> ready, Reference<Sim2Conn> conn ) {
 		wait(ready);
@@ -839,7 +835,7 @@ public:
 		conn->opened = true;
 		return conn;
 	}
-	virtual Reference<IListener> listen( NetworkAddress localAddr ) {
+	Reference<IListener> listen(NetworkAddress localAddr) override {
 		Reference<IListener> listener( getCurrentProcess()->getListener(localAddr) );
 		ASSERT(listener);
 		return listener;
@@ -855,22 +851,16 @@ public:
 			}
 		}
 	}
-	virtual const TLSConfig& getTLSConfig() const override {
+	const TLSConfig& getTLSConfig() const override {
 		static TLSConfig emptyConfig;
 		return emptyConfig;
 	}
 
-	virtual bool checkRunnable() {
-		return net2->checkRunnable();
-	}
+	bool checkRunnable() override { return net2->checkRunnable(); }
 
-	virtual void stop() {
-		isStopped = true;
-	}
-	virtual void addStopCallback( std::function<void()> fn ) {
-		stopCallbacks.emplace_back(std::move(fn));
-	}
-	virtual bool isSimulated() const { return true; }
+	void stop() override { isStopped = true; }
+	void addStopCallback(std::function<void()> fn) override { stopCallbacks.emplace_back(std::move(fn)); }
+	bool isSimulated() const override { return true; }
 
 	struct SimThreadArgs {
 		THREAD_FUNC_RETURN (*func) (void*);
@@ -894,12 +884,12 @@ public:
 		THREAD_RETURN;
 	}
 
-	virtual THREAD_HANDLE startThread( THREAD_FUNC_RETURN (*func) (void*), void *arg ) {
+	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg) override {
 		SimThreadArgs *simArgs = new SimThreadArgs(func, arg);
 		return ::startThread(simStartThread, simArgs);
 	}
 
-	virtual void getDiskBytes( std::string const& directory, int64_t& free, int64_t& total) {
+	void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) override {
 		ProcessInfo *proc = getCurrentProcess();
 		SimDiskSpace &diskSpace = diskSpaceMap[proc->address.ip];
 
@@ -934,7 +924,7 @@ public:
 		if(free == 0)
 			TraceEvent(SevWarnAlways, "Sim2NoFreeSpace").detail("TotalSpace", diskSpace.totalSpace).detail("BaseFreeSpace", diskSpace.baseFreeSpace).detail("TotalFileSize", totalFileSize).detail("NumFiles", numFiles);
 	}
-	virtual bool isAddressOnThisHost(NetworkAddress const& addr) const override {
+	bool isAddressOnThisHost(NetworkAddress const& addr) const override {
 		return addr.ip == getCurrentProcess()->address.ip;
 	}
 
@@ -1000,13 +990,13 @@ public:
 	}
 
 	// Implement ISimulator interface
-	virtual void run() {
+	void run() override {
 		Future<Void> loopFuture = runLoop(this);
 		net2->run();
 	}
-	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, bool sslEnabled, uint16_t listenPerProcess,
-	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,
-	                                const char* coordinationFolder) {
+	ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, bool sslEnabled, uint16_t listenPerProcess,
+							LocalityData locality, ProcessClass startingClass, const char* dataFolder,
+							const char* coordinationFolder, ProtocolVersion protocol) override {
 		ASSERT( locality.machineId().present() );
 		MachineInfo& machine = machines[ locality.machineId().get() ];
 		if (!machine.machineId.present())
@@ -1049,6 +1039,7 @@ public:
 		currentlyRebootingProcesses.erase(addresses.address);
 		m->excluded = g_simulator.isExcluded(NetworkAddress(ip, port, true, false));
 		m->cleared = g_simulator.isCleared(addresses.address);
+		m->protocolVersion = protocol;
 
 		m->setGlobal(enTDMetrics, (flowGlobalType) &m->tdmetrics);
 		m->setGlobal(enNetworkConnections, (flowGlobalType) m->network);
@@ -1060,8 +1051,7 @@ public:
 
 		return m;
 	}
-	virtual bool isAvailable() const
-	{
+	bool isAvailable() const override {
 		std::vector<ProcessInfo*> processesLeft, processesDead;
 		for (auto processInfo : getAllProcesses()) {
 			if (processInfo->isAvailableClass()) {
@@ -1072,11 +1062,10 @@ public:
 				}
 			}
 		}
-		return canKillProcesses(processesLeft, processesDead, KillInstantly, NULL);
+		return canKillProcesses(processesLeft, processesDead, KillInstantly, nullptr);
 	}
 
-	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const
-	{
+	bool datacenterDead(Optional<Standalone<StringRef>> dcId) const override {
 		if(!dcId.present()) {
 			return false;
 		}
@@ -1106,13 +1095,14 @@ public:
 	}
 
 	// The following function will determine if the specified configuration of available and dead processes can allow the cluster to survive
-	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const
-	{
+	bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses,
+	                      std::vector<ProcessInfo*> const& deadProcesses, KillType kt,
+	                      KillType* newKillType) const override {
 		bool canSurvive = true;
 		int nQuorum = ((desiredCoordinators+1)/2)*2-1;
 
 		KillType newKt = kt;
-		if ((kt == KillInstantly) || (kt == InjectFaults) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete))
+		if ((kt == KillInstantly) || (kt == InjectFaults) || (kt == FailDisk) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete))
 		{
 			LocalityGroup primaryProcessesLeft, primaryProcessesDead;
 			LocalityGroup primarySatelliteProcessesLeft, primarySatelliteProcessesDead;
@@ -1257,7 +1247,7 @@ public:
 		return canSurvive;
 	}
 
-	virtual void destroyProcess( ISimulator::ProcessInfo *p ) {
+	void destroyProcess(ISimulator::ProcessInfo* p) override {
 		TraceEvent("ProcessDestroyed").detail("Name", p->name).detail("Address", p->address).detail("MachineId", p->locality.machineId());
 		currentlyRebootingProcesses.insert(std::pair<NetworkAddress, ProcessInfo*>(p->address, p));
 		std::vector<ProcessInfo*>& processes = machines[ p->locality.machineId().get() ].processes;
@@ -1272,6 +1262,7 @@ public:
 		TEST( true ); // Simulated machine was killed with any kill type
 		TEST( kt == KillInstantly ); // Simulated machine was killed instantly
 		TEST( kt == InjectFaults ); // Simulated machine was killed with faults
+		TEST( kt == FailDisk ); // Simulated machine was killed with a failed disk
 
 		if (kt == KillInstantly) {
 			TraceEvent(SevWarn, "FailMachine")
@@ -1298,19 +1289,22 @@ public:
 			machine->fault_injection_r = deterministicRandom()->randomUniqueID().first();
 			machine->fault_injection_p1 = 0.1;
 			machine->fault_injection_p2 = deterministicRandom()->random01();
+		} else if (kt == FailDisk) {
+			TraceEvent(SevWarn, "FailDiskMachine").detail("Name", machine->name).detail("Address", machine->address).detail("ZoneId", machine->locality.zoneId()).detail("Process", machine->toString()).detail("Rebooting", machine->rebooting).detail("Protected", protectedAddresses.count(machine->address)).backtrace();
+			machine->failedDisk = true;
 		} else {
 			ASSERT( false );
 		}
 		ASSERT(!protectedAddresses.count(machine->address) || machine->rebooting);
 	}
-	virtual void rebootProcess( ProcessInfo* process, KillType kt ) {
+	void rebootProcess(ProcessInfo* process, KillType kt) override {
 		if( kt == RebootProcessAndDelete && protectedAddresses.count(process->address) ) {
 			TraceEvent("RebootChanged").detail("ZoneId", process->locality.describeZone()).detail("KillType", RebootProcess).detail("OrigKillType", kt).detail("Reason", "Protected process");
 			kt = RebootProcess;
 		}
 		doReboot( process, kt );
 	}
-	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses ) {
+	void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses) override {
 		if( allProcesses ) {
 			auto processes = getAllProcesses();
 			for( int i = 0; i < processes.size(); i++ )
@@ -1327,20 +1321,20 @@ public:
 				doReboot( deterministicRandom()->randomChoice( processes ), RebootProcess );
 		}
 	}
-	virtual void killProcess( ProcessInfo* machine, KillType kt ) {
+	void killProcess(ProcessInfo* machine, KillType kt) override {
 		TraceEvent("AttemptingKillProcess").detail("ProcessInfo", machine->toString());
 		if (kt < RebootAndDelete ) {
 			killProcess_internal( machine, kt );
 		}
 	}
-	virtual void killInterface( NetworkAddress address, KillType kt  ) {
+	void killInterface(NetworkAddress address, KillType kt) override {
 		if (kt < RebootAndDelete ) {
 			std::vector<ProcessInfo*>& processes = machines[ addressMap[address]->locality.machineId() ].processes;
 			for( int i = 0; i < processes.size(); i++ )
 				killProcess_internal( processes[i], kt );
 		}
 	}
-	virtual bool killZone(Optional<Standalone<StringRef>> zoneId, KillType kt, bool forceKill, KillType* ktFinal) {
+	bool killZone(Optional<Standalone<StringRef>> zoneId, KillType kt, bool forceKill, KillType* ktFinal) override {
 		auto processes = getAllProcesses();
 		std::set<Optional<Standalone<StringRef>>> zoneMachines;
 		for (auto& process : processes) {
@@ -1356,7 +1350,8 @@ public:
 		}
 		return result;
 	}
-	virtual bool killMachine(Optional<Standalone<StringRef>> machineId, KillType kt, bool forceKill, KillType* ktFinal) {
+	bool killMachine(Optional<Standalone<StringRef>> machineId, KillType kt, bool forceKill,
+	                 KillType* ktFinal) override {
 		auto ktOrig = kt;
 
 		TEST(true); // Trying to killing a machine
@@ -1388,7 +1383,7 @@ public:
 		}
 
 		// Check if machine can be removed, if requested
-		if (!forceKill && ((kt == KillInstantly) || (kt == InjectFaults) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete)))
+		if (!forceKill && ((kt == KillInstantly) || (kt == InjectFaults) || (kt == FailDisk) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete)))
 		{
 			std::vector<ProcessInfo*> processesLeft, processesDead;
 			int	protectedWorker = 0, unavailable = 0, excluded = 0, cleared = 0;
@@ -1421,7 +1416,7 @@ public:
 			if (!canKillProcesses(processesLeft, processesDead, kt, &kt)) {
 				TraceEvent("ChangedKillMachine").detail("MachineId", machineId).detail("KillType", kt).detail("OrigKillType", ktOrig).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("TotalProcesses", machines.size()).detail("ProcessesPerMachine", processesPerMachine).detail("Protected", protectedWorker).detail("Unavailable", unavailable).detail("Excluded", excluded).detail("Cleared", cleared).detail("ProtectedTotal", protectedAddresses.size()).detail("TLogPolicy", tLogPolicy->info()).detail("StoragePolicy", storagePolicy->info());
 			}
-			else if ((kt == KillInstantly) || (kt == InjectFaults)) {
+			else if ((kt == KillInstantly) || (kt == InjectFaults) || (kt == FailDisk)) {
 				TraceEvent("DeadMachine").detail("MachineId", machineId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("TotalProcesses", machines.size()).detail("ProcessesPerMachine", processesPerMachine).detail("TLogPolicy", tLogPolicy->info()).detail("StoragePolicy", storagePolicy->info());
 				for (auto process : processesLeft) {
 					TraceEvent("DeadMachineSurvivors").detail("MachineId", machineId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("SurvivingProcess", process->toString());
@@ -1453,7 +1448,7 @@ public:
 
 		// Check if any processes on machine are rebooting
 		if ( processesOnMachine != processesPerMachine ) {
-			TEST(true); //Attempted reboot, but the target did not have all of its processes running
+			TEST(true); //Attempted reboot and kill, but the target did not have all of its processes running
 			TraceEvent(SevWarn, "AbortedKill").detail("KillType", kt).detail("MachineId", machineId).detail("Reason", "Machine processes does not match number of processes per machine").detail("Processes", processesOnMachine).detail("ProcessesPerMachine", processesPerMachine).backtrace();
 			if (ktFinal) *ktFinal = None;
 			return false;
@@ -1461,7 +1456,7 @@ public:
 
 		TraceEvent("KillMachine").detail("MachineId", machineId).detail("Kt", kt).detail("KtOrig", ktOrig).detail("KillableMachines", processesOnMachine).detail("ProcessPerMachine", processesPerMachine).detail("KillChanged", kt!=ktOrig);
 		if ( kt < RebootAndDelete ) {
-			if(kt == InjectFaults && machines[machineId].machineProcess != nullptr)
+			if((kt == InjectFaults || kt == FailDisk) && machines[machineId].machineProcess != nullptr)
 				killProcess_internal( machines[machineId].machineProcess, kt );
 			for (auto& process : machines[machineId].processes) {
 				TraceEvent("KillMachineProcess").detail("KillType", kt).detail("Process", process->toString()).detail("StartingClass", process->startingClass.toString()).detail("Failed", process->failed).detail("Excluded", process->excluded).detail("Cleared", process->cleared).detail("Rebooting", process->rebooting);
@@ -1486,7 +1481,7 @@ public:
 		return true;
 	}
 
-	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, bool forceKill, KillType* ktFinal) {
+	bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, bool forceKill, KillType* ktFinal) override {
 		auto ktOrig = kt;
 		auto processes = getAllProcesses();
 		std::map<Optional<Standalone<StringRef>>, int> datacenterMachines;
@@ -1509,7 +1504,7 @@ public:
 		}
 
 		// Check if machine can be removed, if requested
-		if (!forceKill && ((kt == KillInstantly) || (kt == InjectFaults) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete)))
+		if (!forceKill && ((kt == KillInstantly) || (kt == InjectFaults) || (kt == FailDisk) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete)))
 		{
 			std::vector<ProcessInfo*>	processesLeft, processesDead;
 			for (auto processInfo : getAllProcesses()) {
@@ -1564,18 +1559,18 @@ public:
 			.detail("KilledDC", kt==ktMin);
 
 		TEST(kt != ktMin); // DataCenter kill was rejected by killMachine
-		TEST((kt==ktMin) && (kt == RebootAndDelete)); // Resulted in a reboot and delete
-		TEST((kt==ktMin) && (kt == Reboot)); // Resulted in a reboot
-		TEST((kt==ktMin) && (kt == KillInstantly)); // Resulted in an instant kill
-		TEST((kt==ktMin) && (kt == InjectFaults));  // Resulted in a kill by injecting faults
-		TEST((kt==ktMin) && (kt != ktOrig)); // Kill request was downgraded
-		TEST((kt==ktMin) && (kt == ktOrig)); // Requested kill was done
+		TEST((kt==ktMin) && (kt == RebootAndDelete)); // Datacenter kill Resulted in a reboot and delete
+		TEST((kt==ktMin) && (kt == Reboot)); // Datacenter kill Resulted in a reboot
+		TEST((kt==ktMin) && (kt == KillInstantly)); // Datacenter kill Resulted in an instant kill
+		TEST((kt==ktMin) && (kt == InjectFaults));  // Datacenter kill Resulted in a kill by injecting faults
+		TEST((kt==ktMin) && (kt != ktOrig)); // Datacenter Kill request was downgraded
+		TEST((kt==ktMin) && (kt == ktOrig)); // Datacenter kill - Requested kill was done
 
 		if (ktFinal) *ktFinal = ktMin;
 
 		return (kt == ktMin);
 	}
-	virtual void clogInterface(const IPAddress& ip, double seconds, ClogMode mode = ClogDefault) {
+	void clogInterface(const IPAddress& ip, double seconds, ClogMode mode = ClogDefault) override {
 		if (mode == ClogDefault) {
 			double a = deterministicRandom()->random01();
 			if ( a < 0.3 ) mode = ClogSend;
@@ -1592,10 +1587,10 @@ public:
 		if (mode == ClogReceive || mode==ClogAll)
 			g_clogging.clogRecvFor( ip, seconds );
 	}
-	virtual void clogPair(const IPAddress& from, const IPAddress& to, double seconds) {
+	void clogPair(const IPAddress& from, const IPAddress& to, double seconds) override {
 		g_clogging.clogPairFor( from, to, seconds );
 	}
-	virtual std::vector<ProcessInfo*> getAllProcesses() const {
+	std::vector<ProcessInfo*> getAllProcesses() const override {
 		std::vector<ProcessInfo*> processes;
 		for( auto& c : machines ) {
 			processes.insert( processes.end(), c.second.processes.begin(), c.second.processes.end() );
@@ -1605,22 +1600,22 @@ public:
 		}
 		return processes;
 	}
-	virtual ProcessInfo* getProcessByAddress( NetworkAddress const& address ) {
+	ProcessInfo* getProcessByAddress(NetworkAddress const& address) override {
 		NetworkAddress normalizedAddress(address.ip, address.port, true, address.isTLS());
 		ASSERT( addressMap.count( normalizedAddress ) );
 		// NOTE: addressMap[normalizedAddress]->address may not equal to normalizedAddress
 		return addressMap[normalizedAddress];
 	}
 
-	virtual MachineInfo* getMachineByNetworkAddress(NetworkAddress const& address) {
+	MachineInfo* getMachineByNetworkAddress(NetworkAddress const& address) override {
 		return &machines[addressMap[address]->locality.machineId()];
 	}
 
-	virtual MachineInfo* getMachineById(Optional<Standalone<StringRef>> const& machineId) {
+	MachineInfo* getMachineById(Optional<Standalone<StringRef>> const& machineId) override {
 		return &machines[machineId];
 	}
 
-	virtual void destroyMachine(Optional<Standalone<StringRef>> const& machineId ) {
+	void destroyMachine(Optional<Standalone<StringRef>> const& machineId) override {
 		auto& machine = machines[machineId];
 		for( auto process : machine.processes ) {
 			ASSERT( process->failed );
@@ -1632,7 +1627,7 @@ public:
 	}
 
 	Sim2() : time(0.0), timerTime(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(TaskPriority::Zero) {
-		// Not letting currentProcess be NULL eliminates some annoying special cases
+		// Not letting currentProcess be nullptr eliminates some annoying special cases
 		currentProcess = new ProcessInfo("NoMachine", LocalityData(Optional<Standalone<StringRef>>(), StringRef(), StringRef(), StringRef()), ProcessClass(), {NetworkAddress()}, this, "", "");
 		g_network = net2 = newNet2(TLSConfig(), false, true);
 		g_network->addStopCallback( Net2FileSystem::stop );
@@ -1693,7 +1688,7 @@ public:
 		}
 	}
 
-	virtual void onMainThread( Promise<Void>&& signal, TaskPriority taskID ) {
+	void onMainThread(Promise<Void>&& signal, TaskPriority taskID) override {
 		// This is presumably coming from either a "fake" thread pool thread, i.e. it is actually on this thread
 		// or a thread created with g_network->startThread
 		ASSERT(getCurrentProcess());
@@ -1706,13 +1701,17 @@ public:
 	bool isOnMainThread() const override {
 		return net2->isOnMainThread();
 	}
-	virtual Future<Void> onProcess( ISimulator::ProcessInfo *process, TaskPriority taskID ) {
+	Future<Void> onProcess(ISimulator::ProcessInfo* process, TaskPriority taskID) override {
 		return delay( 0, taskID, process );
 	}
-	virtual Future<Void> onMachine( ISimulator::ProcessInfo *process, TaskPriority taskID ) {
+	Future<Void> onMachine(ISimulator::ProcessInfo* process, TaskPriority taskID) override {
 		if( process->machine == 0 )
 			return Void();
 		return delay( 0, taskID, process->machine->machineProcess );
+	}
+	
+	ProtocolVersion protocolVersion() override {
+		return getCurrentProcess()->protocolVersion;
 	}
 
 	//time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
@@ -1743,6 +1742,210 @@ public:
 	bool yielded;
 	int yield_limit;  // how many more times yield may return false before next returning true
 };
+
+class UDPSimSocket : public IUDPSocket, ReferenceCounted<UDPSimSocket> {
+	using Packet = std::shared_ptr<std::vector<uint8_t>>;
+	UID id;
+	ISimulator::ProcessInfo* process;
+	Optional<NetworkAddress> peerAddress;
+	Optional<ISimulator::ProcessInfo*> peerProcess;
+	Optional<Reference<UDPSimSocket>> peerSocket;
+	ActorCollection actors;
+	Promise<Void> closed;
+	std::deque<std::pair<NetworkAddress, Packet>> recvBuffer;
+	AsyncVar<int64_t> writtenPackets;
+	NetworkAddress _localAddress;
+	bool randomDropPacket() {
+		auto res = deterministicRandom()->random01() < .000001;
+		TEST(res); // UDP packet drop
+		return res;
+	}
+
+	bool isClosed() const { return closed.getFuture().isReady(); }
+	Future<Void> onClosed() const { return closed.getFuture(); }
+
+	ACTOR static Future<Void> cleanupPeerSocket(UDPSimSocket* self) {
+		wait(self->peerSocket.get()->onClosed());
+		self->peerSocket.reset();
+		return Void();
+	}
+
+	ACTOR static Future<Void> send(UDPSimSocket* self, Reference<UDPSimSocket> peerSocket, uint8_t const* begin,
+	                               uint8_t const* end) {
+		state Packet packet(std::make_shared<std::vector<uint8_t>>());
+		packet->resize(end - begin);
+		std::copy(begin, end, packet->begin());
+		wait( delay( .002 * deterministicRandom()->random01() ) );
+		peerSocket->recvBuffer.emplace_back(self->_localAddress, std::move(packet));
+		peerSocket->writtenPackets.set(peerSocket->writtenPackets.get() + 1);
+		return Void();
+	}
+
+	ACTOR static Future<int> receiveFrom(UDPSimSocket* self, uint8_t* begin, uint8_t* end, NetworkAddress* sender) {
+		state TaskPriority currentTaskID = g_sim2.getCurrentTask();
+		wait(self->writtenPackets.onChange());
+		wait(g_sim2.onProcess(self->process, currentTaskID));
+		auto packet = self->recvBuffer.front().second;
+		int sz = packet->size();
+		ASSERT(sz <= end - begin);
+		if (sender) {
+			*sender = self->recvBuffer.front().first;
+		}
+		std::copy(packet->begin(), packet->end(), begin);
+		self->recvBuffer.pop_front();
+		return sz;
+	}
+
+public:
+	UDPSimSocket(NetworkAddress const& localAddress, Optional<NetworkAddress> const& peerAddress)
+	  : id(deterministicRandom()->randomUniqueID()), process(g_simulator.getCurrentProcess()), peerAddress(peerAddress),
+	    actors(false), _localAddress(localAddress) {
+		g_sim2.addressMap.emplace(_localAddress, process);
+		ASSERT(process->boundUDPSockets.find(localAddress) == process->boundUDPSockets.end());
+		process->boundUDPSockets.emplace(localAddress, this);
+	}
+	~UDPSimSocket() override {
+		if (!closed.getFuture().isReady()) {
+			close();
+			closed.send(Void());
+		}
+		actors.clear(true);
+	}
+	void close() override {
+		process->boundUDPSockets.erase(_localAddress);
+		g_sim2.addressMap.erase(_localAddress);
+	}
+	UID getDebugID() const override { return id; }
+	void addref() override { ReferenceCounted<UDPSimSocket>::addref(); }
+	void delref() override { ReferenceCounted<UDPSimSocket>::delref(); }
+
+	Future<int> send(uint8_t const* begin, uint8_t const* end) override {
+		int sz = int(end - begin);
+		auto res = fmap([sz](Void){ return sz; }, delay(0.0));
+		ASSERT(sz <= IUDPSocket::MAX_PACKET_SIZE);
+		ASSERT(peerAddress.present());
+		if (!peerProcess.present()) {
+			auto iter = g_sim2.addressMap.find(peerAddress.get());
+			if (iter == g_sim2.addressMap.end()) {
+				return res;
+			}
+			peerProcess = iter->second;
+		}
+		if (!peerSocket.present() || peerSocket.get()->isClosed()) {
+			peerSocket.reset();
+			auto iter = peerProcess.get()->boundUDPSockets.find(peerAddress.get());
+			if (iter == peerProcess.get()->boundUDPSockets.end()) {
+				return fmap([sz](Void){ return sz; }, delay(0.0));
+			}
+			peerSocket = iter->second.castTo<UDPSimSocket>();
+			// the notation of leaking connections doesn't make much sense in the context of UDP
+			// so we simply handle those in the simulator
+			actors.add(cleanupPeerSocket(this));
+		}
+		if (randomDropPacket()) {
+			return res;
+		}
+		actors.add(send(this, peerSocket.get(), begin, end));
+		return res;
+	}
+	Future<int> sendTo(uint8_t const* begin, uint8_t const* end, NetworkAddress const& peer) override {
+		int sz = int(end - begin);
+		auto res = fmap([sz](Void){ return sz; }, delay(0.0));
+		ASSERT(sz <= MAX_PACKET_SIZE);
+		ISimulator::ProcessInfo* peerProcess = nullptr;
+		Reference<UDPSimSocket> peerSocket;
+		{
+			auto iter = g_sim2.addressMap.find(peer);
+			if (iter == g_sim2.addressMap.end()) {
+				return res;
+			}
+			peerProcess = iter->second;
+		}
+		{
+			auto iter = peerProcess->boundUDPSockets.find(peer);
+			if (iter == peerProcess->boundUDPSockets.end()) {
+				return res;
+			}
+			peerSocket = iter->second.castTo<UDPSimSocket>();
+		}
+		actors.add(send(this, peerSocket, begin, end));
+		return res;
+	}
+	Future<int> receive(uint8_t* begin, uint8_t* end) override {
+		return receiveFrom(begin, end, nullptr);
+	}
+	Future<int> receiveFrom(uint8_t* begin, uint8_t* end, NetworkAddress* sender) override {
+		if (!recvBuffer.empty()) {
+			auto buf = recvBuffer.front().second;
+			if (sender) {
+				*sender = recvBuffer.front().first;
+			}
+			int sz = buf->size();
+			ASSERT(sz <= end - begin);
+			std::copy(buf->begin(), buf->end(), begin);
+			auto res = fmap([sz](Void){ return sz; }, delay(0.0));
+			recvBuffer.pop_front();
+			return res;
+		}
+		return receiveFrom(this, begin, end, sender);
+	}
+	void bind(NetworkAddress const& addr) override {
+		g_sim2.addressMap.erase(_localAddress);
+		process->boundUDPSockets.erase(_localAddress);
+		process->boundUDPSockets.emplace(addr, Reference<UDPSimSocket>::addRef(this));
+		_localAddress = addr;
+		g_sim2.addressMap.emplace(_localAddress, process);
+	}
+
+	NetworkAddress localAddress() const override {
+		return _localAddress;
+	}
+
+	boost::asio::ip::udp::socket::native_handle_type native_handle() override {
+		return 0;
+	}
+
+};
+
+Future<Reference<IUDPSocket>> Sim2::createUDPSocket(NetworkAddress toAddr) {
+	NetworkAddress localAddress;
+	auto process = g_simulator.getCurrentProcess();
+	if (process->address.ip.isV6()) {
+		IPAddress::IPAddressStore store = process->address.ip.toV6();
+		uint16_t* ipParts = (uint16_t*)store.data();
+		ipParts[7] += deterministicRandom()->randomInt(0, 256);
+		localAddress.ip = IPAddress(store);
+	} else {
+		localAddress.ip = IPAddress(process->address.ip.toV4() + deterministicRandom()->randomInt(0, 256));
+	}
+	localAddress.port = deterministicRandom()->randomInt(40000, 60000);
+	while (process->boundUDPSockets.find(localAddress) != process->boundUDPSockets.end()) {
+		localAddress.port = deterministicRandom()->randomInt(40000, 60000);
+	}
+	return Reference<IUDPSocket>(new UDPSimSocket(localAddress, toAddr));
+}
+
+Future<Reference<IUDPSocket>> Sim2::createUDPSocket(bool isV6) {
+	NetworkAddress localAddress;
+	auto process = g_simulator.getCurrentProcess();
+	if (process->address.ip.isV6() == isV6) {
+		localAddress = process->address;
+	} else {
+		ASSERT(process->addresses.secondaryAddress.present() &&
+		       process->addresses.secondaryAddress.get().isV6() == isV6);
+		localAddress = process->addresses.secondaryAddress.get();
+	}
+	if (localAddress.ip.isV6()) {
+		IPAddress::IPAddressStore store = localAddress.ip.toV6();
+		uint16_t* ipParts = (uint16_t*)store.data();
+		ipParts[7] += deterministicRandom()->randomInt(0, 256);
+		localAddress.ip = IPAddress(store);
+	} else {
+		localAddress.ip = IPAddress(localAddress.ip.toV4() + deterministicRandom()->randomInt(0, 256));
+	}
+	localAddress.port = deterministicRandom()->randomInt(40000, 60000);
+	return Reference<IUDPSocket>(new UDPSimSocket(localAddress, Optional<NetworkAddress>{}));
+}
 
 void startNewSimulator() {
 	ASSERT( !g_network );
@@ -1799,6 +2002,9 @@ ACTOR void doReboot( ISimulator::ProcessInfo *p, ISimulator::KillType kt ) {
 
 //Simulates delays for performing operations on disk
 Future<Void> waitUntilDiskReady( Reference<DiskParameters> diskParameters, int64_t size, bool sync ) {
+	if(g_simulator.getCurrentProcess()->failedDisk) {
+		return Never();
+	}
 	if(g_simulator.connectionFailuresDisableDuration > 1e4)
 		return delay(0.0001);
 
@@ -1823,12 +2029,12 @@ Future<Void> waitUntilDiskReady( Reference<DiskParameters> diskParameters, int64
 
 int sf_open( const char* filename, int flags, int convFlags, int mode ) {
 	HANDLE wh = CreateFile( filename, GENERIC_READ | ((flags&IAsyncFile::OPEN_READWRITE) ? GENERIC_WRITE : 0),
-		FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, NULL,
+		FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, nullptr,
 		(flags&IAsyncFile::OPEN_EXCLUSIVE) ? CREATE_NEW :
 			(flags&IAsyncFile::OPEN_CREATE) ? OPEN_ALWAYS :
 			OPEN_EXISTING,
 		FILE_ATTRIBUTE_NORMAL,
-		NULL );
+		nullptr );
 	int h = -1;
 	if (wh != INVALID_HANDLE_VALUE) h = _open_osfhandle( (intptr_t)wh, convFlags );
 	else errno = GetLastError() == ERROR_FILE_NOT_FOUND ? ENOENT : EFAULT;
@@ -1838,8 +2044,7 @@ int sf_open( const char* filename, int flags, int convFlags, int mode ) {
 #endif
 
 // Opens a file for asynchronous I/O
-Future< Reference<class IAsyncFile> > Sim2FileSystem::open( std::string filename, int64_t flags, int64_t mode )
-{
+Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& filename, int64_t flags, int64_t mode) {
 	ASSERT( (flags & IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE) ||
 			!(flags & IAsyncFile::OPEN_CREATE) ||
 			StringRef(filename).endsWith(LiteralStringRef(".fdb-lock")) );  // We don't use "ordinary" non-atomic file creation right now except for folder locking, and we don't have code to simulate its unsafeness.
@@ -1862,7 +2067,8 @@ Future< Reference<class IAsyncFile> > Sim2FileSystem::open( std::string filename
 			}
 			// Simulated disk parameters are shared by the AsyncFileNonDurable and the underlying SimpleFile.
 			// This way, they can both keep up with the time to start the next operation
-			Reference<DiskParameters> diskParameters(new DiskParameters(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH));
+			auto diskParameters =
+			    makeReference<DiskParameters>(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH);
 			machineCache[actualFilename] = AsyncFileNonDurable::open(filename, actualFilename, SimpleFile::open(filename, flags, mode, diskParameters, false), diskParameters);
 		}
 		Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open( machineCache[actualFilename] );
@@ -1875,12 +2081,11 @@ Future< Reference<class IAsyncFile> > Sim2FileSystem::open( std::string filename
 }
 
 // Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
-Future< Void > Sim2FileSystem::deleteFile( std::string filename, bool mustBeDurable )
-{
+Future<Void> Sim2FileSystem::deleteFile(const std::string& filename, bool mustBeDurable) {
 	return Sim2::deleteFileImpl(&g_sim2, filename, mustBeDurable);
 }
 
-Future< std::time_t > Sim2FileSystem::lastWriteTime( std::string filename ) {
+Future<std::time_t> Sim2FileSystem::lastWriteTime(const std::string& filename) {
 	// TODO: update this map upon file writes.
 	static std::map<std::string, double> fileWrites;
 	if (BUGGIFY && deterministicRandom()->random01() < 0.01) {

@@ -241,7 +241,7 @@ public:
 
 		void setFile(Reference<IAsyncFile> f) {
 			this->f = f;
-			this->syncQueue = Reference<SyncQueue>( new SyncQueue(1, f) );
+			this->syncQueue = makeReference<SyncQueue>(1, f);
 		}
 	};
 	File files[2];  // After readFirstAndLastPages(), files[0] is logically before files[1] (pushes are always into files[1])
@@ -785,7 +785,7 @@ public:
 	// FIXME: Is setting lastCommittedSeq to -1 instead of 0 necessary?
 	DiskQueue( std::string basename, std::string fileExtension, UID dbgid, DiskQueueVersion diskQueueVersion, int64_t fileSizeWarningLimit )
 		: rawQueue( new RawDiskQueue_TwoFiles(basename, fileExtension, dbgid, fileSizeWarningLimit) ), dbgid(dbgid), diskQueueVersion(diskQueueVersion), anyPopped(false), nextPageSeq(0), poppedSeq(0), lastPoppedSeq(0),
-		  nextReadLocation(-1), readBufPage(NULL), readBufPos(0), pushed_page_buffer(NULL), recovered(false), initialized(false), lastCommittedSeq(-1), warnAlwaysForMemory(true)
+		  nextReadLocation(-1), readBufPage(nullptr), readBufPos(0), pushed_page_buffer(nullptr), recovered(false), initialized(false), lastCommittedSeq(-1), warnAlwaysForMemory(true)
 	{
 	}
 
@@ -1396,14 +1396,20 @@ public:
 	DiskQueue_PopUncommitted( std::string basename, std::string fileExtension, UID dbgid, DiskQueueVersion diskQueueVersion, int64_t fileSizeWarningLimit ) : queue(new DiskQueue(basename, fileExtension, dbgid, diskQueueVersion, fileSizeWarningLimit)), pushed(0), popped(0), committed(0) { };
 
 	//IClosable
-	Future<Void> getError() { return queue->getError(); }
-	Future<Void> onClosed() { return queue->onClosed(); }
-	void dispose() { queue->dispose(); delete this; }
-	void close() { queue->close(); delete this; }
+	Future<Void> getError() override { return queue->getError(); }
+	Future<Void> onClosed() override { return queue->onClosed(); }
+	void dispose() override {
+		queue->dispose();
+		delete this;
+	}
+	void close() override {
+		queue->close();
+		delete this;
+	}
 
 	//IDiskQueue
-	Future<bool> initializeRecovery(location recoverAt) { return queue->initializeRecovery(recoverAt); }
-	Future<Standalone<StringRef>> readNext( int bytes ) { return readNext(this, bytes); }
+	Future<bool> initializeRecovery(location recoverAt) override { return queue->initializeRecovery(recoverAt); }
+	Future<Standalone<StringRef>> readNext(int bytes) override { return readNext(this, bytes); }
 
 	location getNextReadLocation() const override { return queue->getNextReadLocation(); }
 

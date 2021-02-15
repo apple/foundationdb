@@ -45,6 +45,9 @@ extern const KeyRangeRef specialKeys; // [FF][FF] to [FF][FF][FF], some client f
 extern const KeyRef afterAllKeys;
 
 //    "\xff/keyServers/[[begin]]" := "[[vector<serverID>, vector<serverID>]|[vector<Tag>, vector<Tag>]]"
+//	An internal mapping of where shards are located in the database. [[begin]] is the start of the shard range
+//	and the result is a list of serverIDs or Tags where these shards are located. These values can be changed
+//	as data movement occurs.
 extern const KeyRangeRef keyServersKeys, keyServersKeyServersKeys;
 extern const KeyRef keyServersPrefix, keyServersEnd, keyServersKeyServersKey;
 const Key keyServersKey( const KeyRef& k );
@@ -63,6 +66,10 @@ void decodeKeyServersValue( std::map<Tag, UID> const& tag_uid, const ValueRef& v
                             std::vector<UID>& src, std::vector<UID>& dest );
 
 // "\xff/storageCacheServer/[[UID]] := StorageServerInterface"
+// This will be added by the cache server on initialization and removed by DD
+// TODO[mpilman]: We will need a way to map uint16_t ids to UIDs in a future
+//                versions. For now caches simply cache everything so the ids
+//                are not yet meaningful.
 extern const KeyRangeRef storageCacheServerKeys;
 extern const KeyRef storageCacheServersPrefix, storageCacheServersEnd;
 const Key storageCacheServerKey(UID id);
@@ -75,7 +82,11 @@ const Key storageCacheKey( const KeyRef& k );
 const Value storageCacheValue( const std::vector<uint16_t>& serverIndices );
 void decodeStorageCacheValue( const ValueRef& value, std::vector<uint16_t>& serverIndices );
 
-//    "\xff/serverKeys/[[serverID]]/[[begin]]" := "" | "1" | "2"
+//    "\xff/serverKeys/[[serverID]]/[[begin]]" := "[[serverKeysTrue]]" |" [[serverKeysFalse]]"
+//	An internal mapping of what shards any given server currently has ownership of
+//	Using the serverID as a prefix, then followed by the beginning of the shard range
+//	as the key, the value indicates whether the shard does or does not exist on the server.
+//	These values can be changed as data movement occurs.
 extern const KeyRef serverKeysPrefix;
 extern const ValueRef serverKeysTrue, serverKeysFalse;
 const Key serverKeysKey( UID serverID, const KeyRef& keys );
@@ -103,6 +114,8 @@ const Key cacheChangeKeyFor( uint16_t idx );
 uint16_t cacheChangeKeyDecodeIndex( const KeyRef& key );
 
 // "\xff/serverTag/[[serverID]]" = "[[Tag]]"
+//	Provides the Tag for the given serverID. Used to access a
+//	storage server's corresponding TLog in order to apply mutations.
 extern const KeyRangeRef serverTagKeys;
 extern const KeyRef serverTagPrefix;
 extern const KeyRangeRef serverTagMaxKeys;
@@ -122,6 +135,8 @@ Tag decodeServerTagValue( ValueRef const& );
 const Key serverTagConflictKeyFor( Tag );
 
 //    "\xff/tagLocalityList/[[datacenterID]]" := "[[tagLocality]]"
+//	Provides the tagLocality for the given datacenterID
+//	See "FDBTypes.h" struct Tag for more details on tagLocality
 extern const KeyRangeRef tagLocalityListKeys;
 extern const KeyRef tagLocalityListPrefix;
 const Key tagLocalityListKeyFor( Optional<Value> dcID );
@@ -130,6 +145,8 @@ Optional<Value> decodeTagLocalityListKey( KeyRef const& );
 int8_t decodeTagLocalityListValue( ValueRef const& );
 
 //    "\xff\x02/datacenterReplicas/[[datacenterID]]" := "[[replicas]]"
+//	Provides the number of replicas for the given datacenterID.
+//	Used in the initialization of the Data Distributor.
 extern const KeyRangeRef datacenterReplicasKeys;
 extern const KeyRef datacenterReplicasPrefix;
 const Key datacenterReplicasKeyFor( Optional<Value> dcID );
@@ -138,6 +155,8 @@ Optional<Value> decodeDatacenterReplicasKey( KeyRef const& );
 int decodeDatacenterReplicasValue( ValueRef const& );
 
 //    "\xff\x02/tLogDatacenters/[[datacenterID]]"
+//	The existence of an empty string as a value signifies that the datacenterID is valid
+//	(as opposed to having no value at all)
 extern const KeyRangeRef tLogDatacentersKeys;
 extern const KeyRef tLogDatacentersPrefix;
 const Key tLogDatacentersKeyFor( Optional<Value> dcID );
@@ -170,29 +189,46 @@ ProcessClass decodeProcessClassValue( ValueRef const& );
 UID decodeProcessClassKeyOld( KeyRef const& key );
 
 //   "\xff/conf/[[option]]" := "value"
+//	An umbrella prefix for options mostly used by the DatabaseConfiguration class.
+//	See DatabaseConfiguration.cpp ::setInternal for more examples.
 extern const KeyRangeRef configKeys;
 extern const KeyRef configKeysPrefix;
+
+// Change the value of this key to anything and that will trigger detailed data distribution team info log.
+extern const KeyRef triggerDDTeamInfoPrintKey;
+
+//	The differences between excluded and failed can be found in "command-line-interface.rst"
+//	and in the help message of the fdbcli command "exclude".
 
 //   "\xff/conf/excluded/1.2.3.4" := ""
 //   "\xff/conf/excluded/1.2.3.4:4000" := ""
 //   These are inside configKeysPrefix since they represent a form of configuration and they are convenient
 //   to track in the same way by the tlog and recovery process, but they are ignored by the DatabaseConfiguration
 //   class.
+//	 The existence of an empty string as a value signifies that the provided IP has been excluded.
+//	 (as opposed to having no value at all)
 extern const KeyRef excludedServersPrefix;
 extern const KeyRangeRef excludedServersKeys;
 extern const KeyRef excludedServersVersionKey;  // The value of this key shall be changed by any transaction that modifies the excluded servers list
 const AddressExclusion decodeExcludedServersKey( KeyRef const& key ); // where key.startsWith(excludedServersPrefix)
 std::string encodeExcludedServersKey( AddressExclusion const& );
 
+//   "\xff/conf/failed/1.2.3.4" := ""
+//   "\xff/conf/failed/1.2.3.4:4000" := ""
+//   These are inside configKeysPrefix since they represent a form of configuration and they are convenient
+//   to track in the same way by the tlog and recovery process, but they are ignored by the DatabaseConfiguration
+//   class.
+//	 The existence of an empty string as a value signifies that the provided IP has been marked as failed.
+//	 (as opposed to having no value at all)
 extern const KeyRef failedServersPrefix;
 extern const KeyRangeRef failedServersKeys;
 extern const KeyRef failedServersVersionKey;  // The value of this key shall be changed by any transaction that modifies the failed servers list
 const AddressExclusion decodeFailedServersKey( KeyRef const& key ); // where key.startsWith(failedServersPrefix)
 std::string encodeFailedServersKey( AddressExclusion const& );
 
-//    "\xff/workers/[[processID]]" := ""
-//    Asynchronously updated by the cluster controller, this is a list of fdbserver processes that have joined the cluster
-//    and are currently (recently) available
+//	"\xff/workers/[[processID]]" := ""
+//	Asynchronously updated by the cluster controller, this is a list of fdbserver processes that have joined the cluster
+//	and are currently (recently) available
 extern const KeyRangeRef workerListKeys;
 extern const KeyRef workerListPrefix;
 const Key workerListKeyFor(StringRef processID );
@@ -200,7 +236,9 @@ const Value workerListValue( ProcessData const& );
 Key decodeWorkerListKey( KeyRef const& );
 ProcessData decodeWorkerListValue( ValueRef const& );
 
-//    "\xff\x02/backupProgress/[[workerID]]" := "[[WorkerBackupStatus]]"
+//	"\xff\x02/backupProgress/[[workerID]]" := "[[WorkerBackupStatus]]"
+//	Provides the progress for the given backup worker.
+//	See "FDBTypes.h" struct WorkerBackupStatus for more details on the return type value.
 extern const KeyRangeRef backupProgressKeys;
 extern const KeyRef backupProgressPrefix;
 const Key backupProgressKeyFor(UID workerID);
@@ -214,18 +252,31 @@ extern const KeyRef backupStartedKey;
 Value encodeBackupStartedValue(const std::vector<std::pair<UID, Version>>& ids);
 std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& value);
 
-// The key to signal backup workers that they should pause or resume.
+// The key to signal backup workers that they should resume or pause.
 //    "\xff\x02/backupPaused" := "[[0|1]]"
+// 0 = Send a signal to resume/already resumed.
+// 1 = Send a signal to pause/already paused.
 extern const KeyRef backupPausedKey;
 
+//	"\xff/coordinators" = "[[ClusterConnectionString]]"
+//	Set to the encoded structure of the cluster's current set of coordinators.
+//	Changed when performing quorumChange.
+//	See "CoordinationInterface.h" struct ClusterConnectionString for more details
 extern const KeyRef coordinatorsKey;
+
+//	"\xff/logs" = "[[LogsValue]]"
+//	Used during master recovery in order to communicate
+//	and store info about the logs system.
 extern const KeyRef logsKey;
+
+//	"\xff/minRequiredCommitVersion" = "[[Version]]"
+//	Used during backup/recovery to restrict version requirements
 extern const KeyRef minRequiredCommitVersionKey;
 
 const Value logsValue( const vector<std::pair<UID, NetworkAddress>>& logs, const vector<std::pair<UID, NetworkAddress>>& oldLogs );
 std::pair<vector<std::pair<UID, NetworkAddress>>,vector<std::pair<UID, NetworkAddress>>> decodeLogsValue( const ValueRef& value );
 
-// The "global keys" are send to each storage server any time they are changed
+// The "global keys" are sent to each storage server any time they are changed
 extern const KeyRef globalKeysPrefix;
 extern const KeyRef lastEpochEndKey;
 extern const KeyRef lastEpochEndPrivateKey;
@@ -253,6 +304,7 @@ extern const KeyRef tagThrottleLimitKey;
 extern const KeyRef tagThrottleCountKey;
 
 // Log Range constant variables
+// Used in the backup pipeline to track mutations
 // \xff/logRanges/[16-byte UID][begin key] := serialize( make_pair([end key], [destination key prefix]), IncludeVersion() )
 extern const KeyRangeRef logRangesRange;
 
@@ -260,10 +312,10 @@ extern const KeyRangeRef logRangesRange;
 Key logRangesEncodeKey(KeyRef keyBegin, UID logUid);
 
 // Returns the start key and optionally the logRange Uid
-KeyRef logRangesDecodeKey(KeyRef key, UID* logUid = NULL);
+KeyRef logRangesDecodeKey(KeyRef key, UID* logUid = nullptr);
 
 // Returns the end key and optionally the key prefix
-Key logRangesDecodeValue(KeyRef keyValue, Key* destKeyPrefix = NULL);
+Key logRangesDecodeValue(KeyRef keyValue, Key* destKeyPrefix = nullptr);
 
 // Returns the encoded key value comprised of the end key and destination prefix
 Key logRangesEncodeValue(KeyRef keyEnd, KeyRef destPath);
@@ -351,6 +403,7 @@ extern const KeyRef metricConfPrefix;
 extern const KeyRef maxUIDKey;
 
 extern const KeyRef databaseLockedKey;
+extern const KeyRef databaseLockedKeyEnd;
 extern const KeyRef metadataVersionKey;
 extern const KeyRef metadataVersionKeyEnd;
 extern const KeyRef metadataVersionRequiredValue;
@@ -394,6 +447,19 @@ std::pair<Key,Version> decodeHealthyZoneValue( ValueRef const& );
 // All mutations done to this range are blindly copied into txnStateStore.
 // Used to create artifically large txnStateStore instances in testing.
 extern const KeyRangeRef testOnlyTxnStateStorePrefixRange;
+
+// Snapshot + Incremental Restore
+
+//	"\xff/writeRecovery" = "[[writeRecoveryKeyTrue]]"
+//	Flag used for the snapshot-restore pipeline in order to avoid
+//	anomalous behaviour with multiple recoveries.
+extern const KeyRef writeRecoveryKey;
+extern const ValueRef writeRecoveryKeyTrue;
+
+//	"\xff/snapshotEndVersion" = "[[Version]]"
+//	Written by master server during recovery if recovering from a snapshot.
+//	Allows incremental restore to read and set starting version for consistency. 
+extern const KeyRef snapshotEndVersionKey;
 
 #pragma clang diagnostic pop
 

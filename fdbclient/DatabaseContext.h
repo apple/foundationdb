@@ -29,7 +29,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
@@ -43,7 +43,8 @@ public:
 	static Reference<StorageServerInfo> getInterface( DatabaseContext *cx, StorageServerInterface const& interf, LocalityData const& locality );
 	void notifyContextDestroyed();
 
-	virtual ~StorageServerInfo();
+	~StorageServerInfo() override;
+
 private:
 	DatabaseContext *cx;
 	StorageServerInfo( DatabaseContext *cx, StorageServerInterface const& interf, LocalityData const& locality ) : cx(cx), ReferencedInterface<StorageServerInterface>(interf, locality) {}
@@ -68,7 +69,8 @@ struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>
 	}
 };
 
-typedef ModelInterface<MasterProxyInterface> ProxyInfo;
+using CommitProxyInfo = ModelInterface<CommitProxyInterface>;
+using GrvProxyInfo = ModelInterface<GrvProxyInterface>;
 
 class ClientTagThrottleData : NonCopyable {
 private:
@@ -160,11 +162,14 @@ public:
 	void invalidateCache( const KeyRef&, bool isBackward = false );
 	void invalidateCache( const KeyRangeRef& );
 
-	bool sampleReadTags();
+	bool sampleReadTags() const;
+	bool sampleOnCost(uint64_t cost) const;
 
-	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies);
-	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);
-	Future<Void> onMasterProxiesChanged();
+	void updateProxies();
+	Reference<CommitProxyInfo> getCommitProxies(bool useProvisionalProxies);
+	Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(bool useProvisionalProxies);
+	Reference<GrvProxyInfo> getGrvProxies(bool useProvisionalProxies);
+	Future<Void> onProxiesChanged();
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 
 	// Update the watch counter for the database
@@ -201,6 +206,13 @@ public:
 	Future<Void> switchConnectionFile(Reference<ClusterConnectionFile> standby);
 	Future<Void> connectionFileChanged();
 	bool switchable = false;
+ 
+	// Management API, Attempt to kill or suspend a process, return 1 for request sent out, 0 for failure
+	Future<int64_t> rebootWorker(StringRef address, bool check = false, int duration = 0);
+	// Management API, force the database to recover into DCID, causing the database to lose the most recently committed mutations
+	Future<Void> forceRecoveryWithDataLoss(StringRef dcId);
+	// Management API, create snapshot
+	Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
 
 //private: 
 	explicit DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
@@ -213,11 +225,12 @@ public:
 
 	// Key DB-specific information
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
-	AsyncTrigger masterProxiesChangeTrigger;
-	Future<Void> monitorMasterProxiesInfoChange;
-	Reference<ProxyInfo> masterProxies;
-	bool provisional;
-	UID masterProxiesLastChange;
+	AsyncTrigger proxiesChangeTrigger;
+	Future<Void> monitorProxiesInfoChange;
+	Reference<CommitProxyInfo> commitProxies;
+	Reference<GrvProxyInfo> grvProxies;
+	bool proxyProvisional; // Provisional commit proxy and grv proxy are used at the same time.
+	UID proxiesLastChange;
 	LocalityData clientLocality;
 	QueueModel queueModel;
 	bool enableLocalityLoadBalance;
@@ -298,6 +311,7 @@ public:
 	Counter transactionsCommitCompleted;
 	Counter transactionKeyServerLocationRequests;
 	Counter transactionKeyServerLocationRequestsCompleted;
+	Counter transactionStatusRequests;
 	Counter transactionsTooOld;
 	Counter transactionsFutureVersions;
 	Counter transactionsNotCommitted;
@@ -305,6 +319,7 @@ public:
 	Counter transactionsResourceConstrained;
 	Counter transactionsProcessBehind;
 	Counter transactionsThrottled;
+	Counter transactionsExpensiveClearCostEstCount;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit, bytesPerCommit;
 
@@ -312,6 +327,8 @@ public:
 	int maxOutstandingWatches;
 
 	int snapshotRywEnabled;
+
+	int transactionTracingEnabled;
 
 	Future<Void> logger;
 	Future<Void> throttleExpirer;
@@ -337,6 +354,7 @@ public:
 	HealthMetrics healthMetrics;
 	double healthMetricsLastUpdated;
 	double detailedHealthMetricsLastUpdated;
+	Smoother smoothMidShardSize;
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
 
@@ -345,7 +363,7 @@ public:
 	std::vector<std::unique_ptr<SpecialKeyRangeReadImpl>> specialKeySpaceModules;
 	std::unique_ptr<SpecialKeySpace> specialKeySpace;
 	void registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module, SpecialKeySpace::IMPLTYPE type,
-	                                   std::unique_ptr<SpecialKeyRangeReadImpl> impl);
+	                                   std::unique_ptr<SpecialKeyRangeReadImpl> &&impl);
 
 	static bool debugUseTags;
 	static const std::vector<std::string> debugTransactionTagChoices; 

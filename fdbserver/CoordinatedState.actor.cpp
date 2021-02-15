@@ -189,11 +189,18 @@ struct CoordinatedStateImpl {
 	}
 };
 
-CoordinatedState::CoordinatedState( ServerCoordinators const& coord ) : impl( new CoordinatedStateImpl(coord) ) { }
-CoordinatedState::~CoordinatedState() { delete impl; }
-Future<Value> CoordinatedState::read() { return CoordinatedStateImpl::read(impl); }
-Future<Void> CoordinatedState::onConflict() { return CoordinatedStateImpl::onConflict(impl); }
-Future<Void> CoordinatedState::setExclusive(Value v) { return CoordinatedStateImpl::setExclusive(impl,v); }
+CoordinatedState::CoordinatedState(ServerCoordinators const& coord)
+  : impl(std::make_unique<CoordinatedStateImpl>(coord)) {}
+CoordinatedState::~CoordinatedState() = default;
+Future<Value> CoordinatedState::read() {
+	return CoordinatedStateImpl::read(impl.get());
+}
+Future<Void> CoordinatedState::onConflict() {
+	return CoordinatedStateImpl::onConflict(impl.get());
+}
+Future<Void> CoordinatedState::setExclusive(Value v) {
+	return CoordinatedStateImpl::setExclusive(impl.get(), v);
+}
 uint64_t CoordinatedState::getConflict() { return impl->getConflict(); }
 
 struct MovableValue {
@@ -239,7 +246,7 @@ struct MovableCoordinatedStateImpl {
 		}
 		// SOMEDAY: If moveState.mode == MovingFrom, read (without locking) old state and assert that it corresponds with our state and is ReallyTo(coordinators)
 		if (moveState.mode == MovableValue::MaybeTo) {
-			TEST(true);
+			TEST(true); // Maybe moveto state
 			ASSERT( moveState.other.present() );
 			wait( self->moveTo( self, &self->cs, ClusterConnectionString( moveState.other.get().toString() ), moveState.value ) );
 		}
@@ -306,20 +313,15 @@ struct MovableCoordinatedStateImpl {
 	}
 };
 
-void MovableCoordinatedState::operator=(MovableCoordinatedState&& av) { 
-	if(impl) {
-		delete impl;
-	}
-	impl = av.impl; 
-	av.impl = 0; 
+MovableCoordinatedState& MovableCoordinatedState::operator=(MovableCoordinatedState&&) = default;
+MovableCoordinatedState::MovableCoordinatedState(class ServerCoordinators const& coord)
+  : impl(std::make_unique<MovableCoordinatedStateImpl>(coord)) {}
+MovableCoordinatedState::~MovableCoordinatedState() = default;
+Future<Value> MovableCoordinatedState::read() {
+	return MovableCoordinatedStateImpl::read(impl.get());
 }
-MovableCoordinatedState::MovableCoordinatedState( class ServerCoordinators const& coord ) : impl( new MovableCoordinatedStateImpl(coord) ) {}
-MovableCoordinatedState::~MovableCoordinatedState() { 
-	if(impl) {
-		delete impl; 
-	}
-}
-Future<Value> MovableCoordinatedState::read() { return MovableCoordinatedStateImpl::read(impl); }
 Future<Void> MovableCoordinatedState::onConflict() { return impl->onConflict(); }
 Future<Void> MovableCoordinatedState::setExclusive(Value v) { return impl->setExclusive(v); }
-Future<Void> MovableCoordinatedState::move( ClusterConnectionString const& nc ) { return MovableCoordinatedStateImpl::move(impl, nc); }
+Future<Void> MovableCoordinatedState::move(ClusterConnectionString const& nc) {
+	return MovableCoordinatedStateImpl::move(impl.get(), nc);
+}

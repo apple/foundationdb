@@ -20,6 +20,7 @@
 
 #include "boost/lexical_cast.hpp"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/DatabaseContext.h"
@@ -50,6 +51,7 @@
 #endif
 
 #include "fdbclient/versions.h"
+#include "fdbclient/BuildFlags.h"
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -69,6 +71,7 @@ enum {
 	OPT_NO_HINTS,
 	OPT_STATUS_FROM_JSON,
 	OPT_VERSION,
+	OPT_BUILD_FLAGS,
 	OPT_TRACE_FORMAT,
 	OPT_KNOB,
 	OPT_DEBUG_TLS
@@ -89,6 +92,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_STATUS_FROM_JSON, "--status-from-json", SO_REQ_SEP },
 	                                  { OPT_VERSION, "--version", SO_NONE },
 	                                  { OPT_VERSION, "-v", SO_NONE },
+	                                  { OPT_BUILD_FLAGS, "--build_flags", SO_NONE },
 	                                  { OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
 	                                  { OPT_KNOB, "--knob_", SO_REQ_SEP },
 	                                  { OPT_DEBUG_TLS, "--debug-tls", SO_NONE },
@@ -102,7 +106,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 void printAtCol(const char* text, int col) {
 	const char* iter = text;
 	const char* start = text;
-	const char* space = NULL;
+	const char* space = nullptr;
 
 	do {
 		iter++;
@@ -112,7 +116,7 @@ void printAtCol(const char* text, int col) {
 			printf("%.*s\n", (int)(space - start), start);
 			start = space;
 			if (*start == ' ' || *start == '\n') start++;
-			space = NULL;
+			space = nullptr;
 		}
 	} while (*iter);
 }
@@ -120,7 +124,7 @@ void printAtCol(const char* text, int col) {
 std::string lineWrap(const char* text, int col) {
 	const char* iter = text;
 	const char* start = text;
-	const char* space = NULL;
+	const char* space = nullptr;
 	std::string out = "";
 	do {
 		iter++;
@@ -130,7 +134,7 @@ std::string lineWrap(const char* text, int col) {
 			out += format("%.*s\n", (int)(space - start), start);
 			start = space;
 			if (*start == ' '/* || *start == '\n'*/) start++;
-			space = NULL;
+			space = nullptr;
 		}
 	} while (*iter);
 	return out;
@@ -151,17 +155,16 @@ public:
 
 	//Applies all enabled transaction options to the given transaction
 	void apply(Reference<ReadYourWritesTransaction> tr) {
-		for(auto itr = transactionOptions.options.begin(); itr != transactionOptions.options.end(); ++itr)
-			tr->setOption(itr->first, itr->second.castTo<StringRef>());
+		for (const auto& [name, value] : transactionOptions.options) {
+			tr->setOption(name, value.castTo<StringRef>());
+		}
 	}
 
 	//Returns true if any options have been set
-	bool hasAnyOptionsEnabled() {
-		return !transactionOptions.options.empty();
-	}
+	bool hasAnyOptionsEnabled() const { return !transactionOptions.options.empty(); }
 
 	//Prints a list of enabled options, along with their parameters (if any)
-	void print() {
+	void print() const {
 		bool found = false;
 		found = found || transactionOptions.print();
 
@@ -170,14 +173,10 @@ public:
 	}
 
 	//Returns a vector of the names of all documented options
-	std::vector<std::string> getValidOptions() {
-		return transactionOptions.getValidOptions();
-	}
+	std::vector<std::string> getValidOptions() const { return transactionOptions.getValidOptions(); }
 
 	//Prints the help string obtained by invoking `help options'
-	void printHelpString() {
-		transactionOptions.printHelpString();
-	}
+	void printHelpString() const { transactionOptions.printHelpString(); }
 
 private:
 	//Sets a transaction option. If intrans == true, then this option is also applied to the passed in transaction.
@@ -218,7 +217,7 @@ private:
 		}
 
 		//Prints a list of all enabled options in this group
-		bool print() {
+		bool print() const {
 			bool found = false;
 
 			for(auto itr = legalOptions.begin(); itr != legalOptions.end(); ++itr) {
@@ -237,7 +236,7 @@ private:
 		}
 
 		//Returns true if the specified option is documented
-		bool isDocumented(typename T::Option option) {
+		bool isDocumented(typename T::Option option) const {
 			FDBOptionInfo info = T::optionInfo.getMustExist(option);
 
 			std::string deprecatedStr = "Deprecated";
@@ -245,7 +244,7 @@ private:
 		}
 
 		//Returns a vector of the names of all documented options
-		std::vector<std::string> getValidOptions() {
+		std::vector<std::string> getValidOptions() const {
 			std::vector<std::string> ret;
 
 			for (auto itr = legalOptions.begin(); itr != legalOptions.end(); ++itr)
@@ -257,7 +256,7 @@ private:
 
 		//Prints a help string for each option in this group. Any options with no comment
 		//are excluded from this help string. Lines are wrapped to 80 characters.
-		void printHelpString() {
+		void printHelpString() const {
 			for(auto itr = legalOptions.begin(); itr != legalOptions.end(); ++itr) {
 				if(isDocumented(itr->second)) {
 					FDBOptionInfo info = T::optionInfo.getMustExist(itr->second);
@@ -432,6 +431,7 @@ static void printProgramUsage(const char* name) {
 	       "                 Changes a knob option. KNOBNAME should be lowercase.\n"
 				 "  --debug-tls    Prints the TLS configuration and certificate chain, then exits.\n"
 				 "                 Useful in reporting and diagnosing TLS issues.\n"
+	       "  --build_flags  Print build information and exit.\n"
 	       "  -v, --version  Print FoundationDB CLI version information and exit.\n"
 	       "  -h, --help     Display this help and exit.\n");
 }
@@ -469,9 +469,29 @@ void initHelp() {
 		"clear a range of keys from the database",
 		"All keys between BEGINKEY (inclusive) and ENDKEY (exclusive) are cleared from the database. This command will succeed even if the specified range is empty, but may fail because of conflicts." ESCAPINGK);
 	helpMap["configure"] = CommandHelp(
-		"configure [new] <single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
-		"change the database configuration",
-		"The `new' option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When used, both a redundancy mode and a storage engine must be specified.\n\nRedundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies of data (survive one failure).\n  triple - three copies of data (survive two failures).\n  three_data_hall - See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small datasets.\n\nproxies=<PROXIES>: Sets the desired number of proxies in the cluster. Must be at least 1, or set to -1 which restores the number of proxies to the default value.\n\nlogs=<LOGS>: Sets the desired number of log servers in the cluster. Must be at least 1, or set to -1 which restores the number of logs to the default value.\n\nresolvers=<RESOLVERS>: Sets the desired number of resolvers in the cluster. Must be at least 1, or set to -1 which restores the number of resolvers to the default value.\n\nSee the FoundationDB Administration Guide for more information.");
+	    "configure [new] "
+	    "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|"
+	    "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
+	    "change the database configuration",
+	    "The `new' option, if present, initializes a new database with the given configuration rather than changing "
+	    "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
+	    "specified.\n\nRedundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies "
+	    "of data (survive one failure).\n  triple - three copies of data (survive two failures).\n  three_data_hall - "
+	    "See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage "
+	    "engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small "
+	    "datasets.\n\nproxies=<PROXIES>: Sets the desired number of proxies in the cluster. The proxy role is being "
+		"deprecated and split into GRV proxy and Commit proxy, now prefer configure 'grv_proxies' and 'commit_proxies' "
+		"separately. Generally we should follow that 'commit_proxies' is three times of 'grv_proxies' and 'grv_proxies' "
+		"should be not more than 4. If 'proxies' is specified, it will be converted to 'grv_proxies' and 'commit_proxies'. "
+		"Must be at least 2 (1 GRV proxy, 1 Commit proxy), or set to -1 which restores the number of proxies to the "
+		"default value.\n\ncommit_proxies=<COMMIT_PROXIES>: Sets the desired number of commit proxies in the cluster. "
+	    "Must be at least 1, or set to -1 which restores the number of commit proxies to the default "
+	    "value.\n\ngrv_proxies=<GRV_PROXIES>: Sets the desired number of GRV proxies in the cluster. Must be at least "
+	    "1, or set to -1 which restores the number of GRV proxies to the default value.\n\nlogs=<LOGS>: Sets the "
+	    "desired number of log servers in the cluster. Must be at least 1, or set to -1 which restores the number of "
+	    "logs to the default value.\n\nresolvers=<RESOLVERS>: Sets the desired number of resolvers in the cluster. "
+	    "Must be at least 1, or set to -1 which restores the number of resolvers to the default value.\n\nSee the "
+	    "FoundationDB Administration Guide for more information.");
 	helpMap["fileconfigure"] = CommandHelp(
 		"fileconfigure [new] <FILENAME>",
 		"change the database configuration from a file",
@@ -594,6 +614,9 @@ void initHelp() {
 	    CommandHelp("unlock <UID>", "unlock the database with the provided lockUID",
 	                "Unlocks the database with the provided lockUID. This is a potentially dangerous operation, so the "
 	                "user will be asked to enter a passphrase to confirm their intent.");
+	helpMap["triggerddteaminfolog"] =
+	    CommandHelp("triggerddteaminfolog", "trigger the data distributor teams logging",
+	                "Trigger the data distributor to log detailed information about its teams.");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -606,11 +629,15 @@ void printVersion() {
 	printf("protocol %" PRIx64 "\n", currentProtocolVersion.version());
 }
 
+void printBuildInformation() {
+	printf("%s", jsonBuildInformation().c_str());
+}
+
 void printHelpOverview() {
 	printf("\nList of commands:\n\n");
-	for (auto i = helpMap.begin(); i != helpMap.end(); ++i)
-		if (i->second.short_desc.size())
-			printf(" %s:\n      %s\n", i->first.c_str(), i->second.short_desc.c_str());
+	for (const auto& [command, help] : helpMap) {
+		if (help.short_desc.size()) printf(" %s:\n      %s\n", command.c_str(), help.short_desc.c_str());
+	}
 	printf("\nFor information on a specific command, type `help <command>'.");
 	printf("\nFor information on escaping keys and values, type `help escaping'.");
 	printf("\nFor information on available options, type `help options'.\n\n");
@@ -857,7 +884,13 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							fatalRecoveryState = true;
 
 							if (name == "recruiting_transaction_servers") {
-								description += format("\nNeed at least %d log servers across unique zones, %d proxies and %d resolvers.", recoveryState["required_logs"].get_int(), recoveryState["required_proxies"].get_int(), recoveryState["required_resolvers"].get_int());
+								description +=
+								    format("\nNeed at least %d log servers across unique zones, %d commit proxies, "
+								           "%d GRV proxies and %d resolvers.",
+								           recoveryState["required_logs"].get_int(),
+								           recoveryState["required_commit_proxies"].get_int(),
+								           recoveryState["required_grv_proxies"].get_int(),
+								           recoveryState["required_resolvers"].get_int());
 								if (statusObjCluster.has("machines") && statusObjCluster.has("processes")) {
 									auto numOfNonExcludedProcessesAndZones = getNumOfNonExcludedProcessAndZones(statusObjCluster);
 									description += format("\nHave %d non-excluded processes on %d machines across %d zones.", numOfNonExcludedProcessesAndZones.first, getNumofNonExcludedMachines(statusObjCluster), numOfNonExcludedProcessesAndZones.second);
@@ -881,9 +914,8 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 						}
 					}
 				}
+			} catch (std::runtime_error&) {
 			}
-			catch (std::runtime_error& ){ }
-
 
 			// Check if cluster controllable is reachable
 			try {
@@ -1008,8 +1040,11 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					outputString += format("\n  Exclusions             - %d (type `exclude' for details)", excludedServersArr.size());
 				}
 
-				if (statusObjConfig.get("proxies", intVal))
-					outputString += format("\n  Desired Proxies        - %d", intVal);
+				if (statusObjConfig.get("commit_proxies", intVal))
+					outputString += format("\n  Desired Commit Proxies - %d", intVal);
+
+				if (statusObjConfig.get("grv_proxies", intVal))
+					outputString += format("\n  Desired GRV Proxies    - %d", intVal);
 
 				if (statusObjConfig.get("resolvers", intVal))
 					outputString += format("\n  Desired Resolvers      - %d", intVal);
@@ -1034,10 +1069,10 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				if (statusObjConfig.has("regions")) {
 					outputString += "\n  Regions: ";
 					regions = statusObjConfig["regions"].get_array();
-					bool isPrimary = false;
-					std::vector<std::string> regionSatelliteDCs;
-					std::string regionDC;
 					for (StatusObjectReader region : regions) {
+						bool isPrimary = false;
+						std::vector<std::string> regionSatelliteDCs;
+						std::string regionDC;
 						for (StatusObjectReader dc : region["datacenters"].get_array()) {
 							if (!dc.has("satellite")) {
 								regionDC = dc["id"].get_str();
@@ -1212,13 +1247,53 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 						int minLoss = std::min(availLoss, dataLoss);
 						const char *faultDomain = machinesAreZones ? "machine" : "zone";
-						if (minLoss == 1)
-							outputString += format("1 %s", faultDomain);
-						else
-							outputString += format("%d %ss", minLoss, faultDomain);
+						outputString += format("%d %ss", minLoss, faultDomain);
 
 						if (dataLoss > availLoss){
 							outputString += format(" (%d without data loss)", dataLoss);
+						}
+
+						if (dataLoss == -1) {
+							ASSERT_WE_THINK(availLoss == -1);
+							outputString += format(
+							    "\n\n  Warning: the database may have data loss and availability loss. Please restart "
+							    "following tlog interfaces, otherwise storage servers may never be able to catch "
+							    "up.\n");
+							StatusObjectReader logs;
+							if (statusObjCluster.has("logs")) {
+								for (StatusObjectReader logEpoch : statusObjCluster.last().get_array()) {
+									bool possiblyLosingData;
+									if (logEpoch.get("possibly_losing_data", possiblyLosingData) &&
+									    !possiblyLosingData) {
+										continue;
+									}
+									// Current epoch doesn't have an end version.
+									int64_t epoch, beginVersion, endVersion = invalidVersion;
+									bool current;
+									logEpoch.get("epoch", epoch);
+									logEpoch.get("begin_version", beginVersion);
+									logEpoch.get("end_version", endVersion);
+									logEpoch.get("current", current);
+									std::string missing_log_interfaces;
+									if (logEpoch.has("log_interfaces")) {
+										for (StatusObjectReader logInterface : logEpoch.last().get_array()) {
+											bool healthy;
+											std::string address, id;
+											if (logInterface.get("healthy", healthy) && !healthy) {
+												logInterface.get("id", id);
+												logInterface.get("address", address);
+												missing_log_interfaces += format("%s,%s ", id.c_str(), address.c_str());
+											}
+										}
+									}
+									outputString += format(
+									    "  %s log epoch: %ld begin: %ld end: %s, missing "
+									    "log interfaces(id,address): %s\n",
+									    current ? "Current" : "Old", epoch, beginVersion,
+									    endVersion == invalidVersion ? "(unknown)" : format("%ld", endVersion).c_str(),
+									    missing_log_interfaces.c_str());
+								}
+							}
 						}
 					}
 				}
@@ -1705,6 +1780,23 @@ int printStatusFromJSON( std::string const& jsonFileName ) {
 	}
 }
 
+ACTOR Future<Void> triggerDDTeamInfoLog(Database db) {
+	state ReadYourWritesTransaction tr(db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			std::string v = deterministicRandom()->randomUniqueID().toString();
+			tr.set(triggerDDTeamInfoPrintKey, v);
+			wait(tr.commit());
+			printf("Triggered team info logging in data distribution.\n");
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> timeWarning( double when, const char* msg ) {
 	wait( delay(when) );
 	fputs( msg, stderr );
@@ -1743,7 +1835,7 @@ ACTOR Future<Void> commitTransaction( Reference<ReadYourWritesTransaction> tr ) 
 }
 
 ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Reference<ClusterConnectionFile> ccf, LineNoise* linenoise, Future<Void> warn ) {
-	state ConfigurationResult::Type result;
+	state ConfigurationResult result;
 	state int startToken = 1;
 	state bool force = false;
 	if (tokens.size() < 2)
@@ -1768,16 +1860,17 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 			}
 
 			bool noChanges = conf.get().old_replication == conf.get().auto_replication &&
-				conf.get().old_logs == conf.get().auto_logs &&
-				conf.get().old_proxies == conf.get().auto_proxies &&
-				conf.get().old_resolvers == conf.get().auto_resolvers &&
-				conf.get().old_processes_with_transaction == conf.get().auto_processes_with_transaction &&
-				conf.get().old_machines_with_transaction == conf.get().auto_machines_with_transaction;
+			                 conf.get().old_logs == conf.get().auto_logs &&
+			                 conf.get().old_commit_proxies == conf.get().auto_commit_proxies &&
+			                 conf.get().old_grv_proxies == conf.get().auto_grv_proxies &&
+			                 conf.get().old_resolvers == conf.get().auto_resolvers &&
+			                 conf.get().old_processes_with_transaction == conf.get().auto_processes_with_transaction &&
+			                 conf.get().old_machines_with_transaction == conf.get().auto_machines_with_transaction;
 
-			bool noDesiredChanges = noChanges &&
-				conf.get().old_logs == conf.get().desired_logs &&
-				conf.get().old_proxies == conf.get().desired_proxies &&
-				conf.get().old_resolvers == conf.get().desired_resolvers;
+			bool noDesiredChanges = noChanges && conf.get().old_logs == conf.get().desired_logs &&
+			                        conf.get().old_commit_proxies == conf.get().desired_commit_proxies &&
+			                        conf.get().old_grv_proxies == conf.get().desired_grv_proxies &&
+			                        conf.get().old_resolvers == conf.get().desired_resolvers;
 
 			std::string outputString;
 
@@ -1794,8 +1887,16 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 			outputString += format("| replication                 | %16s | %16s |\n", conf.get().old_replication.c_str(), conf.get().auto_replication.c_str());
 			outputString += format("| logs                        | %16d | %16d |", conf.get().old_logs, conf.get().auto_logs);
 			outputString += conf.get().auto_logs != conf.get().desired_logs ? format(" (manually set; would be %d)\n", conf.get().desired_logs) : "\n";
-			outputString += format("| proxies                     | %16d | %16d |", conf.get().old_proxies, conf.get().auto_proxies);
-			outputString += conf.get().auto_proxies != conf.get().desired_proxies ? format(" (manually set; would be %d)\n", conf.get().desired_proxies) : "\n";
+			outputString += format("| commit_proxies              | %16d | %16d |", conf.get().old_commit_proxies,
+			                       conf.get().auto_commit_proxies);
+			outputString += conf.get().auto_commit_proxies != conf.get().desired_commit_proxies
+			                    ? format(" (manually set; would be %d)\n", conf.get().desired_commit_proxies)
+			                    : "\n";
+			outputString += format("| grv_proxies                 | %16d | %16d |", conf.get().old_grv_proxies,
+			                       conf.get().auto_grv_proxies);
+			outputString += conf.get().auto_grv_proxies != conf.get().desired_grv_proxies
+			                    ? format(" (manually set; would be %d)\n", conf.get().desired_grv_proxies)
+			                    : "\n";
 			outputString += format("| resolvers                   | %16d | %16d |", conf.get().old_resolvers, conf.get().auto_resolvers);
 			outputString += conf.get().auto_resolvers != conf.get().desired_resolvers ? format(" (manually set; would be %d)\n", conf.get().desired_resolvers) : "\n";
 			outputString += format("| transaction-class processes | %16d | %16d |\n", conf.get().old_processes_with_transaction, conf.get().auto_processes_with_transaction);
@@ -1815,7 +1916,8 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 			}
 		}
 
-		ConfigurationResult::Type r  = wait( makeInterruptable( changeConfig( db, std::vector<StringRef>(tokens.begin()+startToken,tokens.end()), conf, force) ) );
+		ConfigurationResult r = wait(makeInterruptable(
+		    changeConfig(db, std::vector<StringRef>(tokens.begin() + startToken, tokens.end()), conf, force)));
 		result = r;
 	}
 
@@ -1926,22 +2028,24 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 		configString = "new";
 	}
 
-	for(auto kv : configJSON) {
+	for (const auto& [name, value] : configJSON) {
 		if(!configString.empty()) {
 			configString += " ";
 		}
-		if( kv.second.type() == json_spirit::int_type ) {
-			configString += kv.first + ":=" + format("%d", kv.second.get_int());
-		} else if( kv.second.type() == json_spirit::str_type ) {
-			configString += kv.second.get_str();
-		} else if( kv.second.type() == json_spirit::array_type ) {
-			configString += kv.first + "=" + json_spirit::write_string(json_spirit::mValue(kv.second.get_array()), json_spirit::Output_options::none);
+		if (value.type() == json_spirit::int_type) {
+			configString += name + ":=" + format("%d", value.get_int());
+		} else if (value.type() == json_spirit::str_type) {
+			configString += value.get_str();
+		} else if (value.type() == json_spirit::array_type) {
+			configString +=
+			    name + "=" +
+			    json_spirit::write_string(json_spirit::mValue(value.get_array()), json_spirit::Output_options::none);
 		} else {
 			printUsage(LiteralStringRef("fileconfigure"));
 			return true;
 		}
 	}
-	ConfigurationResult::Type result = wait( makeInterruptable( changeConfig(db, configString, force) ) );
+	ConfigurationResult result = wait(makeInterruptable(changeConfig(db, configString, force)));
 	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
 	// there are various results specific to changeConfig() that we need to report:
 	bool ret;
@@ -2072,7 +2176,7 @@ ACTOR Future<bool> coordinators( Database db, std::vector<StringRef> tokens, boo
 	}
 	if(setName.size()) change = nameQuorumChange( setName.toString(), change );
 
-	CoordinatorsResult::Type r = wait( makeInterruptable( changeQuorum( db, change ) ) );
+	CoordinatorsResult r = wait(makeInterruptable(changeQuorum(db, change)));
 
 	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
 	// there are various results specific to changeConfig() that we need to report:
@@ -2150,8 +2254,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 		}
 
 		printf("There are currently %zu servers or processes being excluded from the database:\n", excl.size());
-		for(auto& e : excl)
-			printf("  %s\n", e.toString().c_str());
+		for (const auto& e : excl) printf("  %s\n", e.toString().c_str());
 
 		printf("To find out whether it is safe to remove one or more of these\n"
 			   "servers from the cluster, type `exclude <addresses>'.\n"
@@ -2356,7 +2459,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 
 		bool foundCoordinator = false;
 		auto ccs = ClusterConnectionFile( ccf->getFilename() ).getConnectionString();
-		for( auto& c : ccs.coordinators()) {
+		for (const auto& c : ccs.coordinators()) {
 			if (std::count(exclusionVector.begin(), exclusionVector.end(), AddressExclusion(c.ip, c.port)) ||
 			    std::count(exclusionVector.begin(), exclusionVector.end(), AddressExclusion(c.ip))) {
 				printf("WARNING: %s is a coordinator!\n", c.toString().c_str());
@@ -2404,7 +2507,7 @@ ACTOR Future<bool> setClass( Database db, std::vector<StringRef> tokens ) {
 		std::sort(workers.begin(), workers.end(), ProcessData::sort_by_address());
 
 		printf("There are currently %zu processes in the database:\n", workers.size());
-		for(auto& w : workers)
+		for (const auto& w : workers)
 			printf("  %s: %s (%s)\n", w.address.toString().c_str(), w.processClass.toString().c_str(), w.processClass.sourceString().c_str());
 		return false;
 	}
@@ -2430,7 +2533,7 @@ ACTOR Future<bool> setClass( Database db, std::vector<StringRef> tokens ) {
 
 Reference<ReadYourWritesTransaction> getTransaction(Database db, Reference<ReadYourWritesTransaction> &tr, FdbOptions *options, bool intrans) {
 	if(!tr || !intrans) {
-		tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(db));
+		tr = makeReference<ReadYourWritesTransaction>(db);
 		options->apply(tr);
 	}
 
@@ -2445,7 +2548,7 @@ void compGenerator(const char* text, bool help, std::vector<std::string>& lc) {
 	std::map<std::string, CommandHelp>::const_iterator iter;
 	int len = strlen(text);
 
-	const char* helpExtra[] = {"escaping", "options", NULL};
+	const char* helpExtra[] = {"escaping", "options", nullptr};
 
 	const char** he = helpExtra;
 
@@ -2504,7 +2607,24 @@ void onOffGenerator(const char* text, const char *line, std::vector<std::string>
 }
 
 void configureGenerator(const char* text, const char *line, std::vector<std::string>& lc) {
-	const char* opts[] = {"new", "single", "double", "triple", "three_data_hall", "three_datacenter", "ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2", "memory-radixtree-beta", "proxies=", "logs=", "resolvers=", nullptr};
+	const char* opts[] = { "new",
+		                   "single",
+		                   "double",
+		                   "triple",
+		                   "three_data_hall",
+		                   "three_datacenter",
+		                   "ssd",
+		                   "ssd-1",
+		                   "ssd-2",
+		                   "memory",
+		                   "memory-1",
+		                   "memory-2",
+		                   "memory-radixtree-beta",
+		                   "commit_proxies=",
+		                   "grv_proxies=",
+		                   "logs=",
+		                   "resolvers=",
+		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
 }
 
@@ -2540,6 +2660,16 @@ void throttleGenerator(const char* text, const char *line, std::vector<std::stri
 	else if(tokens.size() == 2 && (tokencmp(tokens[1], "enable") || tokencmp(tokens[1], "disable"))) {
 		const char* opts[] = { "auto", nullptr };
 		arrayGenerator(text, line, opts, lc);
+	}
+	else if(tokens.size() >= 2 && tokencmp(tokens[1], "list")) {
+		if(tokens.size() == 2) {
+			const char* opts[] = { "throttled", "recommended", "all", nullptr };
+			arrayGenerator(text, line, opts, lc);
+		}
+		else if(tokens.size() == 3) {
+			const char* opts[] = {"LIMITS", nullptr};
+			arrayGenerator(text, line, opts, lc);
+		}
 	}
 }
 
@@ -2661,6 +2791,14 @@ std::vector<const char*> throttleHintGenerator(std::vector<StringRef> const& tok
 	else if((tokencmp(tokens[1], "enable") || tokencmp(tokens[1], "disable")) && tokens.size() == 2) {
 		return { "auto" };
 	}
+	else if(tokens.size() >= 2 && tokencmp(tokens[1], "list")) {
+		if(tokens.size() == 2) {
+			return { "[throttled|recommended|all]", "[LIMITS]" };
+		}
+		else if(tokens.size() == 3 && (tokencmp(tokens[2], "throttled") || tokencmp(tokens[2], "recommended") || tokencmp(tokens[2], "all"))){
+			return {"[LIMITS]"};
+		}
+	}
 	else if(tokens.size() == 2 && inArgument) {
 		return { "[ARGS]" };
 	}
@@ -2719,38 +2857,33 @@ struct CLIOptions {
 			return;
 		}
 
-		delete FLOW_KNOBS;
-		FlowKnobs* flowKnobs = new FlowKnobs;
-		FLOW_KNOBS = flowKnobs;
-
-		delete CLIENT_KNOBS;
-		ClientKnobs* clientKnobs = new ClientKnobs;
-		CLIENT_KNOBS = clientKnobs;
-
-		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
+		for (const auto& [knob, value] : knobs) {
 			try {
-				if (!flowKnobs->setKnob( k->first, k->second ) &&
-					!clientKnobs->setKnob( k->first, k->second ))
-				{
-					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", k->first.c_str());
-					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(k->first));
+				if (!globalFlowKnobs->setKnob(knob, value) && !globalClientKnobs->setKnob(knob, value)) {
+					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", knob.c_str());
+					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(knob));
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr, "WARNING: Invalid value '%s' for knob option '%s'\n", k->second.c_str(), k->first.c_str());
-					TraceEvent(SevWarnAlways, "InvalidKnobValue").detail("Knob", printable(k->first)).detail("Value", printable(k->second));
+					fprintf(stderr, "WARNING: Invalid value '%s' for knob option '%s'\n", value.c_str(), knob.c_str());
+					TraceEvent(SevWarnAlways, "InvalidKnobValue")
+					    .detail("Knob", printable(knob))
+					    .detail("Value", printable(value));
 				}
 				else {
-					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", k->first.c_str(), e.what());
-					TraceEvent(SevError, "FailedToSetKnob").detail("Knob", printable(k->first)).detail("Value", printable(k->second)).error(e);
+					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knob.c_str(), e.what());
+					TraceEvent(SevError, "FailedToSetKnob")
+					    .detail("Knob", printable(knob))
+					    .detail("Value", printable(value))
+					    .error(e);
 					exit_code = FDB_EXIT_ERROR;
 				}
 			}
 		}
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		flowKnobs->initialize(true);
-		clientKnobs->initialize(true);
+		globalFlowKnobs->initialize(true);
+		globalClientKnobs->initialize(true);
 	}
 
 	int processArg(CSimpleOpt& args) {
@@ -2835,6 +2968,9 @@ struct CLIOptions {
 			case OPT_VERSION:
 				printVersion();
 				return FDB_EXIT_SUCCESS;
+			case OPT_BUILD_FLAGS:
+				printBuildInformation();
+				return FDB_EXIT_SUCCESS;
 		}
 		return -1;
 	}
@@ -2897,7 +3033,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	state std::pair<std::string, bool> resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName( opt.clusterFile );
 	try {
-		ccf = Reference<ClusterConnectionFile>( new ClusterConnectionFile( resolvedClusterFile.first ) );
+		ccf = makeReference<ClusterConnectionFile>(resolvedClusterFile.first);
 	} catch (Error& e) {
 		fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
 		return 1;
@@ -2924,7 +3060,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 			.detail("SourceVersion", getSourceVersion())
 			.detail("Version", FDB_VT_VERSION)
 			.detail("PackageName", FDB_VT_PACKAGE_NAME)
-			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 			.detail("ClusterFile", ccf->getFilename().c_str())
 			.detail("ConnectionString", ccf->getConnectionString().toString())
 			.setMaxFieldLength(10000)
@@ -3123,6 +3259,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					if (!opt.exec.present()) printf("\n");
 					printStatus(s, level);
 					if (!opt.exec.present()) printf("\n");
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "triggerddteaminfolog")) {
+					wait(triggerDDTeamInfoLog(db));
 					continue;
 				}
 
@@ -3358,7 +3499,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
 						                                   CLIENT_KNOBS->TOO_MANY)));
 						ASSERT(!kvs.more);
-						Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+						auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
 						std::vector<Future<Void>> addInterfs;
 						for( auto it : kvs ) {
 							addInterfs.push_back(addInterface(&address_interface, connectLock, it));
@@ -3423,7 +3564,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
 						                                   CLIENT_KNOBS->TOO_MANY)));
 						ASSERT(!kvs.more);
-						Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+						auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
 						std::vector<Future<Void>> addInterfs;
 						for( auto it : kvs ) {
 							addInterfs.push_back(addInterface(&address_interface, connectLock, it));
@@ -3761,7 +3902,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
 						                                   CLIENT_KNOBS->TOO_MANY)));
 						ASSERT(!kvs.more);
-						Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+						auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
 						std::vector<Future<Void>> addInterfs;
 						for( auto it : kvs ) {
 							addInterfs.push_back(addInterface(&address_interface, connectLock, it));
@@ -4077,8 +4218,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						continue;
 					}
 					else if(tokencmp(tokens[1], "list")) {
-						if(tokens.size() > 3) {
-							printf("Usage: throttle list [LIMIT]\n");
+						if(tokens.size() > 4) {
+							printf("Usage: throttle list [throttled|recommended|all] [LIMIT]\n");
 							printf("\n");
 							printf("Lists tags that are currently throttled.\n");
 							printf("The default LIMIT is 100 tags.\n");
@@ -4086,36 +4227,72 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							continue;
 						}
 
-						state int throttleListLimit = 100;
+						state bool reportThrottled = true;
+						state bool reportRecommended = false;
 						if(tokens.size() >= 3) {
-							char *end;
-							throttleListLimit = std::strtol((const char*)tokens[2].begin(), &end, 10);
-							if ((tokens.size() > 3 && !std::isspace(*end)) || (tokens.size() == 3 && *end != '\0')) {
-								printf("ERROR: failed to parse limit `%s'.\n", printable(tokens[2]).c_str());
+							if(tokencmp(tokens[2], "recommended")) {
+								reportThrottled = false; reportRecommended = true;
+							}
+							else if(tokencmp(tokens[2], "all")){
+								reportThrottled = true; reportRecommended = true;
+							}
+							else if(!tokencmp(tokens[2], "throttled")){
+								printf("ERROR: failed to parse `%s'.\n", printable(tokens[2]).c_str());
 								is_error = true;
 								continue;
 							}
 						}
 
-						std::vector<TagThrottleInfo> tags = wait(ThrottleApi::getThrottledTags(db, throttleListLimit));
+						state int throttleListLimit = 100;
+						if(tokens.size() >= 4) {
+							char *end;
+							throttleListLimit = std::strtol((const char*)tokens[3].begin(), &end, 10);
+							if ((tokens.size() > 4 && !std::isspace(*end)) || (tokens.size() == 4 && *end != '\0')) {
+								printf("ERROR: failed to parse limit `%s'.\n", printable(tokens[3]).c_str());
+								is_error = true;
+								continue;
+							}
+						}
+
+						state std::vector<TagThrottleInfo> tags;
+						if(reportThrottled && reportRecommended) {
+							wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit, true)));
+						}
+						else if(reportThrottled) {
+							wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit)));
+						}
+						else if(reportRecommended) {
+							wait(store(tags, ThrottleApi::getRecommendedTags(db, throttleListLimit)));
+						}
 
 						bool anyLogged = false;
 						for(auto itr = tags.begin(); itr != tags.end(); ++itr) {
 							if(itr->expirationTime > now()) {
 								if(!anyLogged) {
 									printf("Throttled tags:\n\n");
-									printf("  Rate (txn/s) | Expiration (s) | Priority  | Type   | Tag\n");
-									printf(" --------------+----------------+-----------+--------+------------------\n");
+									printf("  Rate (txn/s) | Expiration (s) | Priority  | Type   | Reason     |Tag\n");
+									printf(" --------------+----------------+-----------+--------+------------+------\n");
 									
 									anyLogged = true;
 								}
 
-								printf("  %12d | %13ds | %9s | %6s | %s\n", 
-									(int)(itr->tpsRate), 
-									std::min((int)(itr->expirationTime-now()), (int)(itr->initialDuration)), 
-									transactionPriorityToString(itr->priority, false), 
-									itr->throttleType == TagThrottleType::AUTO ? "auto" : "manual", 
-									itr->tag.toString().c_str());
+								std::string reasonStr = "unset";
+								if(itr->reason == TagThrottledReason::MANUAL){
+									reasonStr = "manual";
+								}
+								else if(itr->reason == TagThrottledReason::BUSY_WRITE) {
+									reasonStr = "busy write";
+								}
+								else if(itr->reason == TagThrottledReason::BUSY_READ) {
+									reasonStr = "busy read";
+								}
+
+								printf("  %12d | %13ds | %9s | %6s | %10s |%s\n", (int)(itr->tpsRate),
+								       std::min((int)(itr->expirationTime - now()), (int)(itr->initialDuration)),
+								       transactionPriorityToString(itr->priority, false),
+								       itr->throttleType == TagThrottleType::AUTO ? "auto" : "manual",
+								       reasonStr.c_str(),
+								       itr->tag.toString().c_str());
 							}
 						}
 
@@ -4124,7 +4301,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							printf("Usage: throttle list [LIMIT]\n");
 						}
 						if(!anyLogged) {
-							printf("There are no throttled tags\n");
+							printf("There are no %s tags\n", reportThrottled ? "throttled" : "recommended");
 						}
 					}
 					else if(tokencmp(tokens[1], "on")) {	
@@ -4463,7 +4640,7 @@ int main(int argc, char **argv) {
 	sigemptyset( &act.sa_mask );
 	act.sa_flags = 0;
 	act.sa_handler = SIG_IGN;
-	sigaction(SIGINT, &act, NULL);
+	sigaction(SIGINT, &act, nullptr);
 #endif
 
 	CLIOptions opt(argc, argv);

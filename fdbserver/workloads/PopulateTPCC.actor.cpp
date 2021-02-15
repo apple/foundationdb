@@ -19,7 +19,6 @@
  */
 
 #include "flow/Arena.h"
-#include "flow/actorcompiler.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/workloads/TPCCWorkload.h"
@@ -153,7 +152,7 @@ struct PopulateTPCC : TestWorkload {
 		}
 	}
 
-	virtual std::string description() override { return DESCRIPTION; }
+	std::string description() const override { return DESCRIPTION; }
 
 	ACTOR static Future<Void> populateItems(PopulateTPCC* self, Database cx) {
 		state Transaction tr(cx);
@@ -507,11 +506,11 @@ struct PopulateTPCC : TestWorkload {
 		return populate(this, cx);
 	}
 
-	virtual Future<Void> start(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override { return Void(); }
 
-	virtual Future<bool> check(Database const& cx) override { return true; }
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 } // namespace

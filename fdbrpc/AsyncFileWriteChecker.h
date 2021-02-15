@@ -27,26 +27,26 @@
 
 class AsyncFileWriteChecker : public IAsyncFile, public ReferenceCounted<AsyncFileWriteChecker> {
 public:
-	void addref() { ReferenceCounted<AsyncFileWriteChecker>::addref(); }
-	void delref() { ReferenceCounted<AsyncFileWriteChecker>::delref(); }
+	void addref() override { ReferenceCounted<AsyncFileWriteChecker>::addref(); }
+	void delref() override { ReferenceCounted<AsyncFileWriteChecker>::delref(); }
 
 	// For read() and write(), the data buffer must remain valid until the future is ready
-	Future<int> read( void* data, int length, int64_t offset ) {
+	Future<int> read(void* data, int length, int64_t offset) override {
 		return map(m_f->read(data, length, offset), [=](int r) {
 			updateChecksumHistory(false, offset, r, (uint8_t*)data);
 			return r;
 		});
 	}
-	Future<Void> readZeroCopy( void** data, int* length, int64_t offset ) {
+	Future<Void> readZeroCopy(void** data, int* length, int64_t offset) override {
 		return map(m_f->readZeroCopy(data, length, offset), [=](Void r) { updateChecksumHistory(false, offset, *length, (uint8_t *)data); return r; });
 	}
 
-	Future<Void> write( void const* data, int length, int64_t offset ) {
+	Future<Void> write(void const* data, int length, int64_t offset) override {
 		updateChecksumHistory(true, offset, length, (uint8_t *)data);
 		return m_f->write(data, length, offset);
 	}
 
-	Future<Void> truncate( int64_t size )  {
+	Future<Void> truncate(int64_t size) override {
 		return map(m_f->truncate(size), [=](Void r) {
 			// Truncate the page checksum history if it is in use
 			if( (size / checksumHistoryPageSize) < checksumHistory.size() ) {
@@ -58,12 +58,14 @@ public:
 		});
 	}
 
-	Future<Void> sync() { return m_f->sync(); }
-	Future<Void> flush() { return m_f->flush(); }
-	Future<int64_t> size() { return m_f->size(); }
-	std::string getFilename() { return m_f->getFilename(); }
-	void releaseZeroCopy( void* data, int length, int64_t offset )  { return m_f->releaseZeroCopy(data, length, offset); }
-	int64_t debugFD() { return m_f->debugFD(); }
+	Future<Void> sync() override { return m_f->sync(); }
+	Future<Void> flush() override { return m_f->flush(); }
+	Future<int64_t> size() const override { return m_f->size(); }
+	std::string getFilename() const override { return m_f->getFilename(); }
+	void releaseZeroCopy(void* data, int length, int64_t offset) override {
+		return m_f->releaseZeroCopy(data, length, offset);
+	}
+	int64_t debugFD() const override { return m_f->debugFD(); }
 
 	AsyncFileWriteChecker(Reference<IAsyncFile> f) : m_f(f) {
 		// Initialize the static history budget the first time (and only the first time) a file is opened.
@@ -75,7 +77,7 @@ public:
 		checksumHistoryBudget.get() -= checksumHistory.capacity();
 	}
 
-	virtual ~AsyncFileWriteChecker() { checksumHistoryBudget.get() += checksumHistory.capacity(); }
+	~AsyncFileWriteChecker() override { checksumHistoryBudget.get() += checksumHistory.capacity(); }
 
 private:
 	Reference<IAsyncFile> m_f;

@@ -27,6 +27,10 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+// Choose a random proxy and a random tLog, represented as unclogTlog.
+// The workload first clogs network link between the chosen proxy and all tLogs but the unclogTlog;
+// While the network is still clogged, the workload kills the proxy and clogs the unclogged tlog's interface.
+// Note: The clogged network link's latency will become "clogDuration".
 struct RollbackWorkload : TestWorkload {
 	bool enableFailures, multiple, enabled;
 	double meanDelay, clogDuration, testDuration;
@@ -42,29 +46,28 @@ struct RollbackWorkload : TestWorkload {
 		multiple = getOption( options, LiteralStringRef("multiple"), true );
 	}
 
-	virtual std::string description() { return "RollbackWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) { return Void(); }
-	virtual Future<Void> start( Database const& cx ) {
+	std::string description() const override { return "RollbackWorkload"; }
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override {
 		if (&g_simulator == g_network && enabled)
 			return timeout( 
 				reportErrors( rollbackFailureWorker( cx, this, meanDelay ), "RollbackFailureWorkerError" ), 
 				testDuration, Void() );
 		return Void();
 	}
-	virtual Future<bool> check( Database const& cx ) { return true; }
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-	}
+	Future<bool> check(Database const& cx) override { return true; }
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR Future<Void> simulateFailure( Database cx, RollbackWorkload* self ) {
 		state ServerDBInfo system = self->dbInfo->get();
 		auto tlogs = system.logSystemConfig.allPresentLogs();
-		
-		if( tlogs.empty() || system.client.proxies.empty() ) {
+
+		if (tlogs.empty() || system.client.commitProxies.empty()) {
 			TraceEvent(SevInfo, "UnableToTriggerRollback").detail("Reason", "No tlogs in System Map");
 			return Void();
 		}
 
-		state MasterProxyInterface proxy = deterministicRandom()->randomChoice( system.client.proxies );
+		state CommitProxyInterface proxy = deterministicRandom()->randomChoice(system.client.commitProxies);
 
 		int utIndex = deterministicRandom()->randomInt(0, tlogs.size());
 		state NetworkAddress uncloggedTLog = tlogs[utIndex].address();
@@ -77,22 +80,24 @@ struct RollbackWorkload : TestWorkload {
 				}
 
 		TraceEvent("AttemptingToTriggerRollback")
-			.detail("Proxy", proxy.address())
-			.detail("UncloggedTLog", uncloggedTLog);
+		    .detail("CommitProxy", proxy.address())
+		    .detail("UncloggedTLog", uncloggedTLog);
 
-		for(int t=0; t<tlogs.size(); t++)
-			if (t != utIndex)
+		for (int t = 0; t < tlogs.size(); t++) {
+			if (t != utIndex) {
 				g_simulator.clogPair( 
 					proxy.address().ip,
 					tlogs[t].address().ip,
 					self->clogDuration );
 				//g_simulator.clogInterface( g_simulator.getProcess( system.tlogs[t].commit.getEndpoint() ), self->clogDuration, ClogAll );
+			}
+		}
 
 		// While the clogged machines are still clogged...
 		wait( delay( self->clogDuration/3 ) );
 		system = self->dbInfo->get();
 
-		// Kill the proxy and the unclogged tlog
+		// Kill the proxy and clog the unclogged tlog
 		if (self->enableFailures) {
 			g_simulator.killProcess( g_simulator.getProcessByAddress( proxy.address() ), ISimulator::KillInstantly );
 			g_simulator.clogInterface( uncloggedTLog.ip, self->clogDuration, ClogAll );

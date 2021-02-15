@@ -59,21 +59,16 @@ struct SyncFileForSim : ReferenceCounted<SyncFileForSim> {
 		f = fopen(filename.c_str(), "wb");
 	}
 
-	virtual bool isOpen() {
-		return f != nullptr;
-	}
+	bool isOpen() const { return f != nullptr; }
 
-	virtual void addref() { ReferenceCounted<SyncFileForSim>::addref(); }
-	virtual void delref() { ReferenceCounted<SyncFileForSim>::delref(); }
+	int64_t debugFD() const { return (int64_t)f; }
 
-	virtual int64_t debugFD() { return (int64_t)f; }
-
-	virtual Future<int> read( void* data, int length, int64_t offset ) {
+	Future<int> read(void* data, int length, int64_t offset) {
 		ASSERT(false);
 		throw internal_error();
 	}
 
-	virtual Future<Void> write( void const* data, int length, int64_t offset ) {
+	Future<Void> write(void const* data, int length, int64_t offset) {
 		ASSERT(isOpen());
 		fseek(f, offset, SEEK_SET);
 		if (fwrite(data, 1, length, f) != length)
@@ -81,23 +76,23 @@ struct SyncFileForSim : ReferenceCounted<SyncFileForSim> {
 		return Void();
 	}
 
-	virtual Future<Void> truncate( int64_t size ) {
+	Future<Void> truncate(int64_t size) {
 		ASSERT( size == 0 );
 		return Void();
 	}
 
-	virtual Future<Void> flush() {
+	Future<Void> flush() {
 		ASSERT(isOpen());
 		fflush(f);
 		return Void();
 	}
 
-	virtual Future<Void> sync() {
+	Future<Void> sync() {
 		ASSERT(false);
 		throw internal_error();
 	}
 
-	virtual Future<int64_t> size() {
+	Future<int64_t> size() const {
 		ASSERT(false);
 		throw internal_error();
 	}
@@ -163,7 +158,7 @@ struct Profiler {
 	}
 
 	void enableSignal(bool enabled) {
-		sigprocmask( enabled?SIG_UNBLOCK:SIG_BLOCK, &profilingSignals, NULL );
+		sigprocmask( enabled?SIG_UNBLOCK:SIG_BLOCK, &profilingSignals, nullptr );
 	}
 
 	void phdr( struct dl_phdr_info* info ) {
@@ -185,7 +180,7 @@ struct Profiler {
 
 	ACTOR static Future<Void> profile(Profiler* self, int period, std::string outfn) {
 		// Open and truncate output file
-		state Reference<SyncFileForSim> outFile = Reference<SyncFileForSim>(new SyncFileForSim(outfn));
+		state Reference<SyncFileForSim> outFile = makeReference<SyncFileForSim>(outfn);
 		if(!outFile->isOpen()) {
 			TraceEvent(SevWarn, "FailedToOpenProfilingOutputFile").detail("Filename", outfn).GetLastError();
 			return Void();
@@ -216,7 +211,7 @@ struct Profiler {
 		act.sa_sigaction = SignalClosure::signal_handler;
 		sigemptyset(&act.sa_mask);
 		act.sa_flags = SA_SIGINFO;
-		sigaction( SIGPROF, &act, NULL );
+		sigaction( SIGPROF, &act, nullptr );
 
 		// Set up periodic profiling timer
 		int period_ns = period * 1000;
@@ -236,7 +231,7 @@ struct Profiler {
 			return Void();
 		}
 		self->timerInitialized = true;
-		if(timer_settime( self->periodicTimer, 0, &tv, NULL ) != 0) {
+		if(timer_settime( self->periodicTimer, 0, &tv, nullptr ) != 0) {
 			TraceEvent(SevWarn, "FailedToSetProfilingTimer").GetLastError();
 			return Void();
 		}
@@ -261,7 +256,8 @@ struct Profiler {
 	}
 };
 
-Profiler* Profiler::active_profiler = 0;
+// Outlives main
+Profiler* Profiler::active_profiler = nullptr;
 
 std::string findAndReplace( std::string const& fn, std::string const& symbol, std::string const& value ) {
 	auto i = fn.find(symbol);

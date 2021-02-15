@@ -28,9 +28,7 @@ TLSPolicy::~TLSPolicy() {}
 namespace TLS {
 
 void DisableOpenSSLAtExitHandler() {
-#ifdef TLS_DISABLED
-	return;
-#else
+#ifdef HAVE_OPENSSL_INIT_NO_ATEXIT
 	static bool once = false;
 	if (!once) {
 		once = true;
@@ -43,9 +41,7 @@ void DisableOpenSSLAtExitHandler() {
 }
 
 void DestroyOpenSSLGlobalState() {
-#ifdef TLS_DISABLED
-	return;
-#else
+#ifdef HAVE_OPENSSL_INIT_NO_ATEXIT
 	OPENSSL_cleanup();
 #endif
 }
@@ -128,7 +124,7 @@ void LoadedTLSConfig::print(FILE* fp) {
 	X509_STORE* store = SSL_CTX_get_cert_store(context.native_handle());
 	X509_STORE_CTX* store_ctx = X509_STORE_CTX_new();
 	X509* cert = SSL_CTX_get0_certificate(context.native_handle());
-	X509_STORE_CTX_init(store_ctx, store, cert, NULL);
+	X509_STORE_CTX_init(store_ctx, store, cert, nullptr);
 
 	X509_verify_cert(store_ctx);
 	STACK_OF(X509)* chain = X509_STORE_CTX_get0_chain(store_ctx);
@@ -153,7 +149,7 @@ void ConfigureSSLContext( const LoadedTLSConfig& loaded, boost::asio::ssl::conte
 		context->set_verify_mode(boost::asio::ssl::context::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
 
 		if (loaded.isTLSEnabled()) {
-			Reference<TLSPolicy> tlsPolicy = Reference<TLSPolicy>(new TLSPolicy(loaded.getEndpointType()));
+			auto tlsPolicy = makeReference<TLSPolicy>(loaded.getEndpointType());
 			tlsPolicy->set_verify_peers({ loaded.getVerifyPeers() });
 
 			context->set_verify_callback([policy=tlsPolicy, onPolicyFailure](bool preverified, boost::asio::ssl::verify_context& ctx) {
@@ -326,7 +322,7 @@ ACTOR Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
 }
 
 std::string TLSPolicy::ErrorString(boost::system::error_code e) {
-	char* str = ERR_error_string(e.value(), NULL);
+	char* str = ERR_error_string(e.value(), nullptr);
 	return std::string(str);
 }
 
@@ -483,7 +479,7 @@ static NID abbrevToNID(std::string const& sn) {
 
 static X509Location locationForNID(NID nid) {
 	const char* name = OBJ_nid2ln(nid);
-	if (name == NULL) {
+	if (name == nullptr) {
 		throw std::runtime_error("locationForNID");
 	}
 	if (strncmp(name, "X509v3", 6) == 0) {
@@ -596,13 +592,13 @@ TLSPolicy::Rule::Rule(std::string input) {
 
 bool match_criteria_entry(const std::string& criteria, ASN1_STRING* entry, MatchType mt) {
 	bool rc = false;
-	ASN1_STRING* asn_criteria = NULL;
-	unsigned char* criteria_utf8 = NULL;
+	ASN1_STRING* asn_criteria = nullptr;
+	unsigned char* criteria_utf8 = nullptr;
 	int criteria_utf8_len = 0;
-	unsigned char* entry_utf8 = NULL;
+	unsigned char* entry_utf8 = nullptr;
 	int entry_utf8_len = 0;
 
-	if ((asn_criteria = ASN1_IA5STRING_new()) == NULL)
+	if ((asn_criteria = ASN1_IA5STRING_new()) == nullptr)
 		goto err;
 	if (ASN1_STRING_set(asn_criteria, criteria.c_str(), criteria.size()) != 1)
 		goto err;
@@ -640,7 +636,7 @@ bool match_name_criteria(X509_NAME *name, NID nid, const std::string& criteria, 
 		return false;
 	if (X509_NAME_get_index_by_NID(name, nid, idx) != -1)
 		return false;
-	if ((name_entry = X509_NAME_get_entry(name, idx)) == NULL)
+	if ((name_entry = X509_NAME_get_entry(name, idx)) == nullptr)
 		return false;
 
 	return match_criteria_entry(criteria, X509_NAME_ENTRY_get_data(name_entry), mt);
@@ -657,8 +653,8 @@ bool match_extension_criteria(X509 *cert, NID nid, const std::string& value, Mat
 	}
 	std::string value_gen = value.substr(0, pos);
 	std::string value_val = value.substr(pos+1, value.npos);
-	STACK_OF(GENERAL_NAME)* sans = reinterpret_cast<STACK_OF(GENERAL_NAME)*>(X509_get_ext_d2i(cert, nid, NULL, NULL));
-	if (sans == NULL) {
+	STACK_OF(GENERAL_NAME)* sans = reinterpret_cast<STACK_OF(GENERAL_NAME)*>(X509_get_ext_d2i(cert, nid, nullptr, nullptr));
+	if (sans == nullptr) {
 		return false;
 	}
 	int num_sans = sk_GENERAL_NAME_num( sans );
@@ -721,13 +717,13 @@ bool match_criteria(X509* cert, X509_NAME* subject, NID nid, const std::string& 
 std::tuple<bool,std::string> check_verify(const TLSPolicy::Rule* verify, X509_STORE_CTX* store_ctx, bool is_client) {
 	X509_NAME *subject, *issuer;
 	bool rc = false;
-	X509* cert = NULL;
+	X509* cert = nullptr;
 	// if returning false, give a reason string
 	std::string reason = "";
 
 	// Check subject criteria.
 	cert = sk_X509_value(X509_STORE_CTX_get0_chain(store_ctx), 0);
-	if ((subject = X509_get_subject_name(cert)) == NULL) {
+	if ((subject = X509_get_subject_name(cert)) == nullptr) {
 		reason = "Cert subject error";
 		goto err;
 	}
@@ -739,7 +735,7 @@ std::tuple<bool,std::string> check_verify(const TLSPolicy::Rule* verify, X509_ST
 	}
 
 	// Check issuer criteria.
-	if ((issuer = X509_get_issuer_name(cert)) == NULL) {
+	if ((issuer = X509_get_issuer_name(cert)) == nullptr) {
 		reason = "Cert issuer error";
 		goto err;
 	}
@@ -752,7 +748,7 @@ std::tuple<bool,std::string> check_verify(const TLSPolicy::Rule* verify, X509_ST
 
 	// Check root criteria - this is the subject of the final certificate in the stack.
 	cert = sk_X509_value(X509_STORE_CTX_get0_chain(store_ctx), sk_X509_num(X509_STORE_CTX_get0_chain(store_ctx)) - 1);
-	if ((subject = X509_get_subject_name(cert)) == NULL) {
+	if ((subject = X509_get_subject_name(cert)) == nullptr) {
 		reason = "Root subject error";
 		goto err;
 	}

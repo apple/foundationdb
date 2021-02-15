@@ -256,7 +256,7 @@ public:
 	//This should only be called from the ObjectSerializer load function
 	Standalone<StringRef> getCache() const {
 		if(cacheType != SerializeType::Object) {
-			cache = ObjectWriter::toValue(ErrorOr<EnsureTable<T>>(data), AssumeVersion(currentProtocolVersion));
+			cache = ObjectWriter::toValue(ErrorOr<EnsureTable<T>>(data), AssumeVersion(g_network->protocolVersion()));
 			cacheType = SerializeType::Object;
 		}
 		return cache;
@@ -283,7 +283,7 @@ public:
 				serializer(ar, data);
 			} else {
 				if (cacheType != SerializeType::Binary) {
-					cache = BinaryWriter::toValue(data, AssumeVersion(currentProtocolVersion));
+					cache = BinaryWriter::toValue(data, AssumeVersion(g_network->protocolVersion()));
 					cacheType = SerializeType::Binary;
 				}
 				ar.serializeBytes(const_cast<uint8_t*>(cache.begin()), cache.size());
@@ -327,7 +327,7 @@ struct serialize_raw<ErrorOr<EnsureTable<CachedSerialization<V>>>> : std::true_t
 	static uint8_t* save_raw(Context& context, const ErrorOr<EnsureTable<CachedSerialization<V>>>& obj) {
 		auto cache = obj.present() ? obj.get().asUnderlyingType().getCache()
 		                           : ObjectWriter::toValue(ErrorOr<EnsureTable<V>>(obj.getError()),
-		                                                   AssumeVersion(currentProtocolVersion));
+		                                                   AssumeVersion(g_network->protocolVersion()));
 		uint8_t* out = context.allocate(cache.size());
 		memcpy(out, cache.begin(), cache.size());
 		return out;
@@ -339,6 +339,7 @@ struct Callback {
 	Callback<T> *prev, *next;
 
 	virtual void fire(T const&) {}
+	virtual void fire(T&&) {}
 	virtual void error(Error) {}
 	virtual void unwait() {}
 
@@ -433,10 +434,10 @@ public:
 	bool canBeSet() const { return int16_t(error_state.code()) == UNSET_ERROR_CODE; }
 	bool isError() const { return int16_t(error_state.code()) > SET_ERROR_CODE; }
 
-	T const& get() {
+	T const& get() const {
 		ASSERT(isSet());
 		if (isError()) throw error_state;
-		return value();
+		return *(T const*)&value_storage;
 	}
 
 	template <class U>
@@ -558,8 +559,8 @@ public:
 		cb->insertChain(this);
 	}
 
-	virtual void unwait() override { delFutureRef(); }
-	virtual void fire(T const&) override { ASSERT(false); }
+	void unwait() override { delFutureRef(); }
+	void fire(T const&) override { ASSERT(false); }
 };
 
 template <class T>
@@ -640,9 +641,9 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		ASSERT(SingleCallback<T>::next == this);
 		cb->insert(this);
 	}
-	virtual void unwait() override { delFutureRef(); }
-	virtual void fire(T const&) override { ASSERT(false); }
-	virtual void fire(T&&) override { ASSERT(false); }
+	void unwait() override { delFutureRef(); }
+	void fire(T const&) override { ASSERT(false); }
+	void fire(T&&) override { ASSERT(false); }
 };
 
 
@@ -774,8 +775,7 @@ private:
 };
 
 template <class T>
-class Promise sealed
-{
+class Promise final {
 public:
 	template <class U>
 	void send(U && value) const {
@@ -785,14 +785,15 @@ public:
 	void sendError(const E& exc) const { sav->sendError(exc); }
 
 	Future<T> getFuture() const { sav->addFutureRef(); return Future<T>(sav); }
-	bool isSet() { return sav->isSet(); }
-	bool canBeSet() { return sav->canBeSet(); }
-	bool isValid() const { return sav != NULL; }
+	bool isSet() const { return sav->isSet(); }
+	bool canBeSet() const { return sav->canBeSet(); }
+
+	bool isValid() const { return sav != nullptr; }
 	Promise() : sav(new SAV<T>(0, 1)) {}
 	Promise(const Promise& rhs) : sav(rhs.sav) {
 		sav->addPromiseRef();
 	}
-	Promise(Promise&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) { rhs.sav = 0; }
+	Promise(Promise&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
 
 	~Promise() { if (sav) sav->delPromiseRef(); }
 
@@ -816,7 +817,7 @@ public:
 	}
 
 	// Beware, these operations are very unsafe
-	SAV<T>* extractRawPointer() { auto ptr = sav; sav = NULL; return ptr; }
+	SAV<T>* extractRawPointer() { auto ptr = sav; sav = nullptr; return ptr; }
 	explicit Promise<T>(SAV<T>* ptr) : sav(ptr) {}
 
 	int getFutureReferenceCount() const { return sav->getFutureReferenceCount(); }
@@ -825,7 +826,6 @@ public:
 private:
 	SAV<T> *sav;
 };
-
 
 template <class T>
 class FutureStream {
@@ -844,7 +844,7 @@ public:
 		queue->addCallbackAndDelFutureRef(cb);
 		queue = 0;
 	}
-	FutureStream() : queue(NULL) {}
+	FutureStream() : queue(nullptr) {}
 	FutureStream(const FutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
 	FutureStream(FutureStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	~FutureStream() { if (queue) queue->delFutureRef(); }
@@ -1004,21 +1004,15 @@ struct Actor<void> {
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorCallback : Callback<ValueType> {
-	virtual void fire(ValueType const& value) override { static_cast<ActorType*>(this)->a_callback_fire(this, value); }
-	virtual void error(Error e) override { static_cast<ActorType*>(this)->a_callback_error(this, e); }
+	void fire(ValueType const& value) override { static_cast<ActorType*>(this)->a_callback_fire(this, value); }
+	void error(Error e) override { static_cast<ActorType*>(this)->a_callback_error(this, e); }
 };
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorSingleCallback : SingleCallback<ValueType> {
-	virtual void fire(ValueType const& value) override {
-		static_cast<ActorType*>(this)->a_callback_fire(this, value);
-	}
-	virtual void fire(ValueType && value) override {
-		static_cast<ActorType*>(this)->a_callback_fire(this, std::move(value));
-	}
-	virtual void error(Error e) override {
-		static_cast<ActorType*>(this)->a_callback_error(this, e);
-	}
+	void fire(ValueType const& value) override { static_cast<ActorType*>(this)->a_callback_fire(this, value); }
+	void fire(ValueType&& value) override { static_cast<ActorType*>(this)->a_callback_fire(this, std::move(value)); }
+	void error(Error e) override { static_cast<ActorType*>(this)->a_callback_error(this, e); }
 };
 inline double now() { return g_network->now(); }
 inline Future<Void> delay(double seconds, TaskPriority taskID = TaskPriority::DefaultDelay) { return g_network->delay(seconds, taskID); }

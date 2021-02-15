@@ -28,6 +28,7 @@ void forceLinkFlowTests();
 void forceLinkVersionedMapTests();
 void forceLinkMemcpyTests();
 void forceLinkMemcpyPerfTests();
+void forceLinkSimExternalConnectionTests();
 
 struct UnitTestWorkload : TestWorkload {
 	bool enabled;
@@ -49,17 +50,18 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkVersionedMapTests();
 		forceLinkMemcpyTests();
 		forceLinkMemcpyPerfTests();
+		forceLinkSimExternalConnectionTests();
 	}
 
-	virtual std::string description() { return "UnitTests"; }
-	virtual Future<Void> setup(Database const& cx) { return Void(); }
-	virtual Future<Void> start(Database const& cx) {
+	std::string description() const override { return "UnitTests"; }
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override {
 		if (enabled)
 			return runUnitTests(this);
 		return Void();
 	}
-	virtual Future<bool> check(Database const& cx) { return testsFailed.getValue() == 0; }
-	virtual void getMetrics(vector<PerfMetric>& m) {
+	Future<bool> check(Database const& cx) override { return testsFailed.getValue() == 0; }
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back(testsAvailable.getMetric());
 		m.push_back(testsExecuted.getMetric());
 		m.push_back(testsFailed.getMetric());
@@ -70,7 +72,7 @@ struct UnitTestWorkload : TestWorkload {
 	ACTOR static Future<Void> runUnitTests(UnitTestWorkload* self) {
 		state std::vector<UnitTest*> tests;
 
-		for (auto test = g_unittests.tests; test != NULL; test = test->next) {
+		for (auto test = g_unittests.tests; test != nullptr; test = test->next) {
 			if (StringRef(test->name).startsWith(self->testPattern)) {
 				++self->testsAvailable;
 				tests.push_back(test);

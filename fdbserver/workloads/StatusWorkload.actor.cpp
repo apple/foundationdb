@@ -27,8 +27,6 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-extern bool noUnseed;
-
 struct StatusWorkload : TestWorkload {
 	double testDuration, requestsPerSecond;
 	bool enableLatencyBands;
@@ -53,29 +51,25 @@ struct StatusWorkload : TestWorkload {
 			// This is sort of a hack, but generate code coverage *requirements* for everything in schema
 			schemaCoverageRequirements(parsedSchema.get());
 		}
-
-		noUnseed = true;
 	}
 
-	virtual std::string description() { return "StatusWorkload"; }
-	virtual Future<Void> setup(Database const& cx) {
+	std::string description() const override { return "StatusWorkload"; }
+	Future<Void> setup(Database const& cx) override {
 		if(enableLatencyBands) {
 			latencyBandActor = configureLatencyBands(this, cx);
 		}
 
 		return Void();
 	}
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
 
 		return success(timeout(fetcher(cx, this), testDuration));
 	}
-	virtual Future<bool> check(Database const& cx) {
-		return errors.getValue() == 0;
-	}
+	Future<bool> check(Database const& cx) override { return errors.getValue() == 0; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		if (clientId != 0)
 			return;
 
@@ -172,7 +166,7 @@ struct StatusWorkload : TestWorkload {
 				state double issued = now();
 				StatusObject result = wait(StatusClient::statusFetcher(cx));
 				++self->replies;
-				BinaryWriter br(AssumeVersion(currentProtocolVersion));
+				BinaryWriter br(AssumeVersion(g_network->protocolVersion()));
 				save(br, result);
 				self->totalSize += br.getLength();
 				TraceEvent("StatusWorkloadReply").detail("ReplySize", br.getLength()).detail("Latency", now() - issued);//.detail("Reply", json_spirit::write_string(json_spirit::mValue(result)));
