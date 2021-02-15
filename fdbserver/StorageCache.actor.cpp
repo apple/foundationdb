@@ -108,9 +108,9 @@ public:
 	static CacheRangeInfo* newNotAssigned(KeyRange keys) { return new CacheRangeInfo(keys, nullptr, nullptr); }
 	static CacheRangeInfo* newReadWrite(KeyRange keys, StorageCacheData* data) { return new CacheRangeInfo(keys, nullptr, data); }
 	static CacheRangeInfo* newAdding(StorageCacheData* data, KeyRange keys) { return new CacheRangeInfo(keys, std::make_unique<AddingCacheRange>(data, keys), nullptr); }
-	addingSplitLeft( KeyRange keys, AddingCacheRange* oldCacheRange)
+	static CacheRangeInfo* addingSplitLeft( KeyRange keys, AddingCacheRange* oldCacheRange)
 	{
-		return new CacheRangeInfo(keys, new AddingCacheRange(oldCacheRange, keys), nullptr);
+		return new CacheRangeInfo(keys, std::make_unique<AddingCacheRange>(oldCacheRange, keys), nullptr);
 	}
 
 	bool isReadable() const { return readWrite!=nullptr; }
@@ -1294,9 +1294,9 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 						// The remaining unfetched keys [nfk,keys.end) will become a separate AddingCacheRange with its own fetchKeys.
 						cacheRange->server->addCacheRange( CacheRangeInfo::addingSplitLeft( KeyRangeRef(keys.begin, nfk), cacheRange ) );
 						cacheRange->server->addCacheRange( CacheRangeInfo::newAdding( data, KeyRangeRef(nfk, keys.end) ) );
-						cacheRange = data->cachedRangeMap.rangeContaining( keys.begin ).value()->adding;
+						cacheRange = data->cachedRangeMap.rangeContaining( keys.begin ).value()->adding.get();
 						//warningLogger = logFetchKeysWarning(cacheRange);
-						AddingCacheRange* otherCacheRange = data->cachedRangeMap.rangeContaining( nfk ).value()->adding;
+						AddingCacheRange* otherCacheRange = data->cachedRangeMap.rangeContaining( nfk ).value()->adding.get();
 						keys = cacheRange->keys;
 
 						// Split our prior updates.  The ones that apply to our new, restricted key range will go back into cacheRange->updates,
@@ -1307,8 +1307,8 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 							splitMutations(data, data->cachedRangeMap, *u);
 						}
 
-						TEST( true );
-						TEST( cacheRange->updates.size() );
+						TEST( true ); // fetchkeys has more
+						TEST( cacheRange->updates.size() ); //Cache Range has updates
 						ASSERT( otherCacheRange->updates.empty() );
 					}
 				}
