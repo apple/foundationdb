@@ -1,5 +1,6 @@
 set(RUN_JAVA_TESTS ON CACHE BOOL "Run Java unit tests")
 set(RUN_JUNIT_TESTS OFF CACHE BOOL "Compile and run junit tests")
+set(RUN_JAVA_INTEGRATION_TESTS OFF CACHE BOOL "Compile and run integration tests")
 
 set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/async/AsyncIterable.java
@@ -81,7 +82,6 @@ set(JAVA_TESTS_SRCS
   src/test/com/apple/foundationdb/test/ContinuousSample.java
   src/test/com/apple/foundationdb/test/DirectoryExtension.java
   src/test/com/apple/foundationdb/test/DirectoryOperation.java
-  src/test/com/apple/foundationdb/test/DirectoryTest.java
   src/test/com/apple/foundationdb/test/DirectoryUtil.java
   src/test/com/apple/foundationdb/test/Example.java
   src/test/com/apple/foundationdb/test/Instruction.java
@@ -107,7 +107,7 @@ set(JAVA_TESTS_SRCS
   src/test/com/apple/foundationdb/test/WatchTest.java
   src/test/com/apple/foundationdb/test/WhileTrueTest.java)
 
-include(src/junit/tests.cmake)
+include(src/tests.cmake)
 
 set(GENERATED_JAVA_DIR ${CMAKE_CURRENT_BINARY_DIR}/src/main/com/apple/foundationdb)
 file(MAKE_DIRECTORY ${GENERATED_JAVA_DIR})
@@ -254,41 +254,36 @@ if(NOT OPEN_FOR_IDE)
   add_dependencies(fat-jar copy_lib)
   add_dependencies(packages fat-jar)
 
-  if(RUN_JAVA_TESTS)
-    set(enabled ENABLED)
-  else()
-    set(enabled DISABLED)
-  endif()
   set(TEST_CP ${tests_jar} ${target_jar})
-  message(STATUS "TEST_CP ${TEST_CP}")
-  add_java_test(NAME DirectoryTest CLASS_PATH ${TEST_CP}
-    CLASS com.apple.foundationdb.test.DirectoryTest ${enabled})
 
-  if(RUN_JUNIT_TESTS)
+  if(RUN_JUNIT_TESTS OR RUN_JAVA_INTEGRATION_TESTS)
+    # We use Junit libraries for both JUnit and integration testing structures, so download in either case
     file(DOWNLOAD "https://search.maven.org/remotecontent?filepath=junit/junit/4.13/junit-4.13.jar"
       ${CMAKE_BINARY_DIR}/packages/junit-4.13.jar
       EXPECTED_HASH SHA256=4b8532f63bdc0e0661507f947eb324a954d1dbac631ad19c8aa9a00feed1d863)
     file(DOWNLOAD "https://repo1.maven.org/maven2/org/hamcrest/hamcrest-all/1.3/hamcrest-all-1.3.jar"
       ${CMAKE_BINARY_DIR}/packages/hamcrest-all-1.3.jar
       EXPECTED_HASH SHA256=4877670629ab96f34f5f90ab283125fcd9acb7e683e66319a68be6eb2cca60de)
-    add_jar(fdb-junit SOURCES ${JAVA_JUNIT_TESTS} INCLUDE_JARS fdb-java ${CMAKE_BINARY_DIR}/packages/junit-4.13.jar)
-    get_property(junit_jar_path TARGET fdb-junit PROPERTY JAR_FILE)
+  endif()
 
-#      Add a ctest test configuration for each Junit class in the JAVA_JUNIT_TESTS variable.
-#
-#      To add a new junit test, add the class to the JAVA_JUNIT_TESTS variable in `src/junit/tests.cmake`. Note that if you run a Suite, 
-#      ctest will NOT display underlying details of the suite itself, so it's best to avoid junit suites in general. Also,
-#      if you need a different runner other than JUnitCore, you'll have to modify this so be aware.
-#
-#      To run tests (once built): navigate to bindings/java and type
-#
-#      ctest .
-#
-#      To see details of what tests run and what failures, use
-#
-#      ctest . --output-on-failure
-#
-#      And so on (see ctest documentation for more details)
+  if(RUN_JUNIT_TESTS)
+    # Sets up the JUnit testing structure to run through ctest
+    #
+    # To add a new junit test, add the class to the JAVA_JUNIT_TESTS variable in `src/tests.cmake`. Note that if you run a Suite, 
+    # ctest will NOT display underlying details of the suite itself, so it's best to avoid junit suites in general. Also,
+    # if you need a different runner other than JUnitCore, you'll have to modify this so be aware.
+    #
+    # To run tests (once built), run:
+    #
+    # ctest .
+    #
+    # from the ${BUILD_DIR}/bindings/java subdirectory
+    #
+    # ctest has lots of flexible command options, so be sure to refer to its documentation if you want to do something specific(documentation
+    # can be found at https://cmake.org/cmake/help/v3.19/manual/ctest.1.html)
+
+    add_jar(fdb-junit SOURCES ${JAVA_JUNIT_TESTS} ${JUNIT_RESOURCES} INCLUDE_JARS fdb-java ${CMAKE_BINARY_DIR}/packages/junit-4.13.jar ${CMAKE_BINARY_DIR}/packages/hamcrest-all-1.3.jar)
+    get_property(junit_jar_path TARGET fdb-junit PROPERTY JAR_FILE)
     
     foreach(JTEST IN LISTS JAVA_JUNIT_TESTS)
             string(REPLACE "/" "." TEST_CLASS ${JTEST})
@@ -299,6 +294,40 @@ if(NOT OPEN_FOR_IDE)
                 -cp "${target_jar}:${junit_jar_path}:${CMAKE_BINARY_DIR}/packages/junit-4.13.jar:${CMAKE_BINARY_DIR}/packages/hamcrest-all-1.3.jar"
                 -Djava.library.path=${CMAKE_BINARY_DIR}/lib
                 org.junit.runner.JUnitCore "${TEST_CLASS}"
+        )
+    endforeach()
+  endif()
+
+  if(RUN_JAVA_INTEGRATION_TESTS)
+    # Set up the integration tests. These tests generally require a running database server to function properly
+    #
+    # Integration tests are run through ctest the same way as unit tests, but their label is prefixed with the entry 'integration-'.
+    # Note that most java integration tests will be skipped if they can't quickly connect to a running FDB instance(depending on how the test is written, anyway). 
+    # However, if you want to explicitly skip them, you can run 
+    #
+    # `ctest -E integration`
+    #
+    # To run only integration tests, execute
+    #
+    # `ctest -R integration`
+    #
+    # (Note: both of these commands must be run from ${BUILD_DIR}/bindings/java)
+    #
+    # To add an integration test, add the relative class file path to the JAVA_INTEGRATION_TESTS variable in `src/tests.cmake`
+    add_jar(fdb-integration SOURCES ${JAVA_INTEGRATION_TESTS} ${JAVA_INTEGRATION_RESOURCES} INCLUDE_JARS fdb-java ${CMAKE_BINARY_DIR}/packages/junit-4.13.jar ${CMAKE_BINARY_DIR}/packages/hamcrest-all-1.3.jar)
+    get_property(integration_jar_path TARGET fdb-integration PROPERTY JAR_FILE)
+
+    foreach(JTEST IN LISTS JAVA_INTEGRATION_TESTS)
+            string(REPLACE "/" "." TEST_CLASS ${JTEST})
+            string(REGEX REPLACE ".java$" "" TEST_CLASS ${TEST_CLASS})
+            string(REGEX REPLACE "^src.integration." "" TEST_CLASS ${TEST_CLASS})
+            add_test(NAME "integration-${TEST_CLASS}"
+                    COMMAND ${CMAKE_COMMAND} 
+                    -E env "FDB_CLUSTER_FILE=${PROJECT_BINARY_DIR}/fdb.cluster"
+                    ${Java_JAVA_EXECUTABLE}
+                      -cp "${target_jar}:${integration_jar_path}:${CMAKE_BINARY_DIR}/packages/junit-4.13.jar:${CMAKE_BINARY_DIR}/packages/hamcrest-all-1.3.jar"
+                      -Djava.library.path=${CMAKE_BINARY_DIR}/lib
+                      org.junit.runner.JUnitCore "${TEST_CLASS}"
         )
     endforeach()
   endif()

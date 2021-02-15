@@ -33,7 +33,7 @@ import sun.misc.Unsafe;
  * This is borrowed and slightly modified from Guava's UnsignedBytes
  * class to be able to compare arrays that start at non-zero offsets.
  */
-abstract class FastByteComparisons {
+public abstract class FastByteComparisons {
 
     private static final int UNSIGNED_MASK = 0xFF;
     /**
