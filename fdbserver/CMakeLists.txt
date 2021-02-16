@@ -225,6 +225,7 @@ set(FDBSERVER_SRCS
   workloads/VersionStamp.actor.cpp
   workloads/WatchAndWait.actor.cpp
   workloads/Watches.actor.cpp
+  workloads/WatchesSameKeyCorrectness.actor.cpp
   workloads/WorkerErrors.actor.cpp
   workloads/workloads.actor.h
   workloads/WriteBandwidth.actor.cpp
