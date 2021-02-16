@@ -94,7 +94,7 @@ struct DataDistributionTracker {
 	// The reference to trackerCancelled must be extracted by actors,
 	// because by the time (trackerCancelled == true) this memory cannot
 	// be accessed
-	bool const& trackerCancelled;
+	bool& trackerCancelled;
 
 	// This class extracts the trackerCancelled reference from a DataDistributionTracker object
 	// Because some actors spawned by the dataDistributionTracker outlive the DataDistributionTracker
@@ -123,7 +123,7 @@ struct DataDistributionTracker {
 	                        PromiseStream<RelocateShard> const& output,
 	                        Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
 	                        Reference<AsyncVar<bool>> anyZeroHealthyTeams, KeyRangeMap<ShardTrackedData>& shards,
-	                        bool const& trackerCancelled)
+	                        bool& trackerCancelled)
 	  : cx(cx), distributorId(distributorId), dbSizeEstimate(new AsyncVar<int64_t>()), systemSizeEstimate(0),
 	    maxShardSize(new AsyncVar<Optional<int64_t>>()), sizeChanges(false), readyToStart(readyToStart), output(output),
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), anyZeroHealthyTeams(anyZeroHealthyTeams),
@@ -131,6 +131,7 @@ struct DataDistributionTracker {
 
 	~DataDistributionTracker()
 	{
+		trackerCancelled = true;
 		//Cancel all actors so they aren't waiting on sizeChanged broken promise
 		sizeChanges.clear(false);
 	}
@@ -903,7 +904,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            FutureStream<Promise<int64_t>> getAverageShardBytes,
                                            Promise<Void> readyToStart, Reference<AsyncVar<bool>> anyZeroHealthyTeams,
                                            UID distributorId, KeyRangeMap<ShardTrackedData>* shards,
-                                           bool const* trackerCancelled) {
+                                           bool* trackerCancelled) {
 	state DataDistributionTracker self(cx, distributorId, readyToStart, output, shardsAffectedByTeamFailure,
 	                                   anyZeroHealthyTeams, *shards, *trackerCancelled);
 	state Future<Void> loggingTrigger = Void();
