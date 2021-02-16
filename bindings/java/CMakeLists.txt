@@ -82,6 +82,7 @@ set(JAVA_TESTS_SRCS
   src/test/com/apple/foundationdb/test/Instruction.java
   src/test/com/apple/foundationdb/test/IterableTest.java
   src/test/com/apple/foundationdb/test/LocalityTests.java
+  src/test/com/apple/foundationdb/test/MultiThreadedClientTest.java
   src/test/com/apple/foundationdb/test/ParallelRandomScan.java
   src/test/com/apple/foundationdb/test/PerformanceTester.java
   src/test/com/apple/foundationdb/test/RangeTest.java
