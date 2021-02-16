@@ -71,7 +71,7 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	                      .withPrefix(moduleToBoundary[MODULE::CONFIGURATION].begin) }
 };
 
-std::set<std::string> SpecialKeySpace::options = { "excluded/force", "failed/force", "coordinators/auto" };
+std::set<std::string> SpecialKeySpace::options = { "excluded/force", "failed/force" };
 
 std::set<std::string> SpecialKeySpace::tracingOptions = { kTracingTransactionIdKey, kTracingTokenKey };
 
@@ -493,24 +493,11 @@ KeyRange SpecialKeySpace::decode(const KeyRangeRef& kr) {
 	return KeyRangeRef(begin->value()->decode(kr.begin), begin->value()->decode(kr.end));
 }
 
-// Sometimes, we need to force impl::commit to execute without write to the underlying key range
-void precommitUpdate(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw,
-                     std::set<SpecialKeyRangeRWImpl*>& writeModulePtrs) {
-	// if "coordinators/auto" is set, make sure we execute CoordinatorsImpl::commit
-	Key option_key = SpecialKeySpace::getManagementApiCommandOptionSpecialKey("coordinators", "auto");
-	auto entry = ryw->getSpecialKeySpaceWriteMap()[option_key];
-	if (entry.first) {
-		writeModulePtrs.insert(
-		    sks->getRWImpls().rangeContaining(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"))->value());
-	}
-}
-
 ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw) {
 	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
 	    ryw->getSpecialKeySpaceWriteMap().containedRanges(specialKeys);
 	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::iterator iter = ranges.begin();
 	state std::set<SpecialKeyRangeRWImpl*> writeModulePtrs;
-	precommitUpdate(sks, ryw, writeModulePtrs);
 	while (iter != ranges.end()) {
 		std::pair<bool, Optional<Value>> entry = iter->value();
 		if (entry.first) {
@@ -1449,17 +1436,11 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 		}
 	}
 
-	// check auto option
-	auto auto_option = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
-	    "coordinators", "auto")];
-	if (auto_option.first) {
-		change = autoQuorumChange();
-	} else {
-		if (addressesVec.size())
-			change = specifiedQuorumChange(addressesVec);
-		else
-			change = noQuorumChange();
-	}
+	
+	if (addressesVec.size())
+		change = specifiedQuorumChange(addressesVec);
+	else
+		change = noQuorumChange();
 
 	// check update for cluster_description
 	Key cluster_decription_key = LiteralStringRef("cluster_description").withPrefix(kr.begin);
@@ -1480,7 +1461,6 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 
 	TraceEvent(SevDebug, "SKSChangeCoordinatorsStart")
 	    .detail("NewAddresses", describe(addressesVec))
-	    .detail("Auto", auto_option.first)
 	    .detail("Description", entry.first ? entry.second.get().toString() : "");
 
 	Optional<CoordinatorsResult> r = wait(changeQuorumChecker(&ryw->getTransaction(), change, &addressesVec));
