@@ -2,6 +2,10 @@
 Release Notes
 #############
 
+6.2.31
+======
+* Fix a rare invalid memory access on data distributor when snapshotting large clusters. This is a follow up to `PR #4076 <https://github.com/apple/foundationdb/pull/4076>`_. `(PR #4317) <https://github.com/apple/foundationdb/pull/4317>`_
+
 6.2.30
 ======
 * A storage server which has fallen behind will deprioritize reads in order to catch up. This change causes some saturating workloads to experience high read latencies instead of high GRV latencies. `(PR #4218) <https://github.com/apple/foundationdb/pull/4218>`_
