@@ -24,6 +24,7 @@ If you want to access the cluster from your machine, here's a `cluster file` rea
 
 ```bash
 echo "docker:docker@127.0.0.1:4500" > docker.cluster
+FDB_CLUSTER_FILE=./docker.cluster fdbcli
 ```
 
 ## Stop the golang demo

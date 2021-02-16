@@ -103,6 +103,7 @@ enum class TaskPriority {
 	RestoreLoaderFinishVersionBatch = 2220,
 	RestoreLoaderSendMutations = 2210,
 	RestoreLoaderLoadFiles = 2200,
+	LowPriorityRead = 2100,
 	Low = 2000,
 
 	Min = 1000,

@@ -25,6 +25,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/genericactors.actor.h"
 #include <vector>
+#include <unordered_map>
 #pragma once
 
 #include "fdbclient/NativeAPI.actor.h"
@@ -140,6 +141,21 @@ public:
 	}
 };
 
+class WatchMetadata: public ReferenceCounted<WatchMetadata> {
+public:
+	Key key;
+	Optional<Value> value;
+	Version version;
+	Promise<Version> watchPromise;
+	Future<Version> watchFuture;
+	Future<Void> watchFutureSS;
+
+	TransactionInfo info;
+	TagSet tags;
+
+	WatchMetadata(Key key, Optional<Value> value, Version version, TransactionInfo info, TagSet tags);
+};
+
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
 	static DatabaseContext* allocateOnForeignThread() {
@@ -175,7 +191,13 @@ public:
 	// Update the watch counter for the database
 	void addWatch();
 	void removeWatch();
-	
+
+	// watch map operations
+	Reference<WatchMetadata> getWatchMetadata(KeyRef key) const;
+	KeyRef setWatchMetadata(Reference<WatchMetadata> metadata);
+	void deleteWatchMetadata(KeyRef key);
+	void clearWatchMetadata();
+
 	void setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value );
 
 	Error deferredError;
@@ -211,6 +233,8 @@ public:
 	Future<int64_t> rebootWorker(StringRef address, bool check = false, int duration = 0);
 	// Management API, force the database to recover into DCID, causing the database to lose the most recently committed mutations
 	Future<Void> forceRecoveryWithDataLoss(StringRef dcId);
+	// Management API, create snapshot
+	Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
 
 //private: 
 	explicit DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
@@ -364,7 +388,8 @@ public:
 	                                   std::unique_ptr<SpecialKeyRangeReadImpl> &&impl);
 
 	static bool debugUseTags;
-	static const std::vector<std::string> debugTransactionTagChoices; 
+	static const std::vector<std::string> debugTransactionTagChoices;
+	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;
 };
 
 #endif

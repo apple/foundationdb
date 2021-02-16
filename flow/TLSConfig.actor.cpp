@@ -28,9 +28,7 @@ TLSPolicy::~TLSPolicy() {}
 namespace TLS {
 
 void DisableOpenSSLAtExitHandler() {
-#ifdef TLS_DISABLED
-	return;
-#else
+#ifdef HAVE_OPENSSL_INIT_NO_ATEXIT
 	static bool once = false;
 	if (!once) {
 		once = true;
@@ -43,9 +41,7 @@ void DisableOpenSSLAtExitHandler() {
 }
 
 void DestroyOpenSSLGlobalState() {
-#ifdef TLS_DISABLED
-	return;
-#else
+#ifdef HAVE_OPENSSL_INIT_NO_ATEXIT
 	OPENSSL_cleanup();
 #endif
 }
@@ -782,7 +778,7 @@ bool TLSPolicy::verify_peer(bool preverified, X509_STORE_CTX* store_ctx) {
 	}
 
 	if(!preverified) {
-		TraceEvent("TLSPolicyFailure").suppressFor(1.0).detail("Reason", "preverification failed").detail("VerifyError", X509_verify_cert_error_string(X509_STORE_CTX_get_error(store_ctx)));
+		TraceEvent(SevWarn, "TLSPolicyFailure").suppressFor(1.0).detail("Reason", "preverification failed").detail("VerifyError", X509_verify_cert_error_string(X509_STORE_CTX_get_error(store_ctx)));
 		return false;
 	}
 
@@ -805,7 +801,7 @@ bool TLSPolicy::verify_peer(bool preverified, X509_STORE_CTX* store_ctx) {
 	if (!rc) {
 		// log the various failure reasons
 		for (std::string reason : verify_failure_reasons) {
-			TraceEvent("TLSPolicyFailure").suppressFor(1.0).detail("Reason", reason);
+			TraceEvent(SevWarn, "TLSPolicyFailure").suppressFor(1.0).detail("Reason", reason);
 		}
 	}
 	return rc;

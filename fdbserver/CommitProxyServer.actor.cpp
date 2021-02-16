@@ -587,7 +587,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 		}
 		++pProxyCommitData->stats.commitBatchOut;
 		pProxyCommitData->stats.txnCommitOut += trs.size();
-		pProxyCommitData->stats.txnConflicts += trs.size();
+		pProxyCommitData->stats.txnRejectedForQueuedTooLong += trs.size();
 		self->rejected = true;
 		return Void();
 	}

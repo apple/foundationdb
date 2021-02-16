@@ -225,6 +225,7 @@ set(FDBSERVER_SRCS
   workloads/VersionStamp.actor.cpp
   workloads/WatchAndWait.actor.cpp
   workloads/Watches.actor.cpp
+  workloads/WatchesSameKeyCorrectness.actor.cpp
   workloads/WorkerErrors.actor.cpp
   workloads/workloads.actor.h
   workloads/WriteBandwidth.actor.cpp
@@ -276,7 +277,7 @@ else()
   target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
 endif()
 
-target_link_libraries(fdbserver PRIVATE toml11_target)
+target_link_libraries(fdbserver PRIVATE toml11_target jemalloc)
 
 if (GPERFTOOLS_FOUND)
   target_link_libraries(fdbserver PRIVATE gperftools)

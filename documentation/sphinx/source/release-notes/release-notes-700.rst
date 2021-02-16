@@ -29,7 +29,7 @@ Fixes
 
 Status
 ------
-
+* Added transactions.rejected_for_queued_too_long for bookkeeping the number of transactions rejected by commit proxy because its queuing time exceeds MVCC window. `(PR #4288) <https://github.com/apple/foundationdb/pull/4288>`_
 
 
 Bindings
@@ -37,6 +37,7 @@ Bindings
 * Python: The function ``get_estimated_range_size_bytes`` will now throw an error if the ``begin_key`` or ``end_key`` is ``None``. `(PR #3394) <https://github.com/apple/foundationdb/pull/3394>`_
 * C: Added a function, ``fdb_database_reboot_worker``, to reboot or suspend the specified process. `(PR #4094) <https://github.com/apple/foundationdb/pull/4094>`_
 * C: Added a function, ``fdb_database_force_recovery_with_data_loss``, to force the database to recover into the given datacenter. `(PR #4420) <https://github.com/apple/foundationdb/pull/4220>`_
+* C: Added a function, ``fdb_database_create_snapshot``, to create a snapshot of the database. `(PR #) <https://github.com/apple/foundationdb/pull/4241/files>`_
 
 Other Changes
 -------------

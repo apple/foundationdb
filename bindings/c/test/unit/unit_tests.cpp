@@ -34,6 +34,7 @@
 #include <thread>
 #include <tuple>
 #include <vector>
+#include <random>
 
 #define DOCTEST_CONFIG_IMPLEMENT
 #include "doctest.h"
@@ -2046,6 +2047,42 @@ TEST_CASE("fdb_database_force_recovery_with_data_loss") {
   }
 }
 
+std::string random_hex_string(size_t length) {
+	const char charset[] = "0123456789"
+	                       "ABCDEF"
+	                       "abcdef";
+	// construct a random generator engine from a time-based seed:
+	std::default_random_engine generator(time(nullptr));
+	std::uniform_int_distribution<int> distribution(0, strlen(charset) - 1);
+	auto randchar = [&charset, &generator, &distribution]() -> char { return charset[distribution(generator)]; };
+	std::string str(length, 0);
+	std::generate_n(str.begin(), length, randchar);
+	return str;
+}
+
+TEST_CASE("fdb_database_create_snapshot") {
+	std::string snapshot_command = "test";
+	std::string uid = "invalid_uid";
+	bool retry = false;
+	while (1) {
+		fdb::EmptyFuture f =
+		    fdb::Database::create_snapshot(db, (const uint8_t*)uid.c_str(), uid.length(),
+		                                   (const uint8_t*)snapshot_command.c_str(), snapshot_command.length());
+		fdb_error_t err = wait_future(f);
+		if (err == 2509) { // expected error code
+			CHECK(!retry);
+			uid = random_hex_string(32);
+			retry = true;
+		} else if (err == 2505) {
+			CHECK(retry);
+			break;
+		} else {
+			// Otherwise, something went wrong.
+			CHECK(false);
+		}
+	}
+}
+
 TEST_CASE("fdb_error_predicate") {
   CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 1007)); // transaction_too_old
   CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 1020)); // not_committed
@@ -2112,16 +2149,23 @@ TEST_CASE("block_from_callback") {
 }
 
 int main(int argc, char **argv) {
-  if (argc != 3) {
+  if (argc != 3 && argc != 4) {
     std::cout << "Unit tests for the FoundationDB C API.\n"
-              << "Usage: fdb_c_unit_tests /path/to/cluster_file key_prefix"
-              << std::endl;
+              << "Usage: fdb_c_unit_tests /path/to/cluster_file key_prefix [externalClient]" << std::endl;
     return 1;
+  }
+  fdb_check(fdb_select_api_version(700));
+  if (argc == 4) {
+    std::string externalClientLibrary = argv[3];
+    fdb_check(fdb_network_set_option(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT,
+                                     reinterpret_cast<const uint8_t*>(""), 0));
+    fdb_check(fdb_network_set_option(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_LIBRARY,
+                                     reinterpret_cast<const uint8_t*>(externalClientLibrary.c_str()),
+                                     externalClientLibrary.size()));
   }
 
   doctest::Context context;
 
-  fdb_check(fdb_select_api_version(700));
   fdb_check(fdb_setup_network());
   std::thread network_thread{ &fdb_run_network };
 

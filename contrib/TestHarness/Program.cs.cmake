@@ -609,12 +609,14 @@ namespace SummarizeTest
             public List<string> Errors { get; set; }
             int maxErrorLength;
             int maxErrors;
+            bool errorsExceeded;
 
-            public ErrorOutputListener(int maxErrorLength = 100, int maxErrors = 10)
+            public ErrorOutputListener(int maxErrorLength = 1000, int maxErrors = 10)
             {
                 Errors = new List<string>();
                 this.maxErrorLength = maxErrorLength;
                 this.maxErrors = maxErrors;
+                this.errorsExceeded = false;
             }
 
             public bool hasError = false;
@@ -623,8 +625,18 @@ namespace SummarizeTest
                 if(!String.IsNullOrEmpty(errLine.Data))
                 {
                     hasError = true;
-                    if(Errors.Count < maxErrors)
-                        Errors.Add(errLine.Data.Substring(0, Math.Min(maxErrorLength, errLine.Data.Length)));
+                    if(Errors.Count < maxErrors) {
+                        if(errLine.Data.Length > maxErrorLength) {
+                            Errors.Add(errLine.Data.Substring(0, maxErrorLength) + "...");
+                        }
+                        else {
+                            Errors.Add(errLine.Data);
+                        }
+                    }
+                    else if(!errorsExceeded) {
+                        Errors.Add("TestHarness error limit exceeded");
+                        errorsExceeded = true;
+                    }
                 }
             }
         }

@@ -411,11 +411,11 @@ protected:
 			char confFileDirectory[2048];
 			char *fileNameStart;
 			if( !GetFullPathName( confFile.c_str(), 2048, confFileDirectory, &fileNameStart ) ) {
-				errorExit( format( "get path of conf file (%s)", confFile ).c_str() );
+				errorExit( format( "get path of conf file (%s)", confFile.c_str() ).c_str() );
 			}
 
 			if( !fileNameStart ) {
-				errorExit( format( "file name not present (%s)", confFile ).c_str() );
+				errorExit( format( "file name not present (%s)", confFile.c_str() ).c_str() );
 			}
 
 			// Test file existence
@@ -838,7 +838,7 @@ void print_usage(const char *name) {
 		"  -h, --help      Display this help and exit.\n", name);
 }
 
-int main(DWORD argc, LPCSTR *argv) {
+int main(int argc, LPCSTR *argv) {
 	_set_FMA3_enable(0); // Workaround for VS 2013 code generation bug. See https://connect.microsoft.com/VisualStudio/feedback/details/811093/visual-studio-2013-rtm-c-x64-code-generation-bug-for-avx2-instructions
 
 	int		status = 0;
@@ -866,14 +866,14 @@ int main(DWORD argc, LPCSTR *argv) {
 		}
 
 		// Check, if logging is enabled
-		else if ((!strnicmp("-l", argv[loop], 2)) ||
+		else if ((!_strnicmp("-l", argv[loop], 2)) ||
 			(!_strnicmp("--l", argv[loop], 3)))
 		{
 			logging = true;
 		}
 
 		// Check, if help is requested
-		else if ((!strnicmp("-h", argv[loop], 2)) ||
+		else if ((!_strnicmp("-h", argv[loop], 2)) ||
 			(!_strnicmp("--h", argv[loop], 3)))
 		{
 			print_usage(argv[0]);
