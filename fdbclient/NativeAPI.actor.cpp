@@ -2339,13 +2339,8 @@ Future<Void> getWatchFuture(Version ver, Key key, Optional<Value> value, Databas
 ACTOR Future<Void> watchValueMap(Future<Version> version, Key key, Optional<Value> value, Database cx,
                               TransactionInfo info, TagSet tags) {
 	state Version ver = wait(version);
-	try {
-		Future<Void> watchFuture = getWatchFuture(ver, key, value, cx, info, tags);
-		wait(watchFuture);
-		return Void();
-	} catch (Error & e) {
-		throw;
-	}
+	wait(getWatchFuture(ver, key, value, cx, info, tags));
+	return Void();
 }
 
 void transformRangeLimits(GetRangeLimits limits, bool reverse, GetKeyValuesRequest &req) {
