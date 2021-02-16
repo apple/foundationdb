@@ -1486,7 +1486,7 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 	Optional<CoordinatorsResult> r = wait(changeQuorumChecker(&ryw->getTransaction(), change, &addressesVec));
 
 	TraceEvent(SevDebug, "SKSChangeCoordinatorsFinish")
-	    .detail("Result", r.present() ? int(r.get()) : -1); // -1 means success
+	    .detail("Result", r.present() ? static_cast<int>(r.get()) : -1); // -1 means success
 	if (r.present()) {
 		auto res = r.get();
 		std::string error_msg;
