@@ -27,6 +27,8 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/Knobs.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h"
 
 struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
@@ -440,11 +442,12 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			    wait(tx->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
 			                                  LiteralStringRef("\xff\xff/worker_interfaces0")),
 			                      CLIENT_KNOBS->TOO_MANY));
-			// We should have at least 1 process in the cluster
-			ASSERT(result.size());
-			state KeyValueRef entry = deterministicRandom()->randomChoice(result);
-			Optional<Value> singleRes = wait(tx->get(entry.key));
-			ASSERT(singleRes.present() && singleRes.get() == entry.value);
+			// Note: there's possibility we get zero workers
+			if (result.size()) {
+				state KeyValueRef entry = deterministicRandom()->randomChoice(result);
+				Optional<Value> singleRes = wait(tx->get(entry.key));
+				ASSERT(singleRes.present() && singleRes.get() == entry.value);
+			}
 			tx->reset();
 		} catch (Error& e) {
 			wait(tx->onError(e));
@@ -763,7 +766,11 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					    Key("process/class_source/" + address)
 					        .withPrefix(
 					            SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin)));
-					ASSERT(class_source.present() && class_source.get() == LiteralStringRef("set_class"));
+					TraceEvent(SevDebug, "SetClassSourceDebug")
+					    .detail("Present", class_source.present())
+					    .detail("ClassSource", class_source.present() ? class_source.get().toString() : "__Nothing");
+					// Very rarely, we get an empty worker list, thus no class_source data
+					if (class_source.present()) ASSERT(class_source.get() == LiteralStringRef("set_class"));
 					tx->reset();
 				} else {
 					// If no worker process returned, skip the test
@@ -968,11 +975,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 						            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")),
 						        Value(new_cluster_description));
 						wait(tx->commit());
-						tx->reset();
-						break;
+						ASSERT(false);
 					} catch (Error& e) {
 						TraceEvent(SevDebug, "CoordinatorsManualChange").error(e);
-						// if we repeat doing the change, we will get this error:
+						// if we repeat doing the change, we will get the error:
 						// CoordinatorsResult::SAME_NETWORK_ADDRESSES
 						if (e.code() == error_code_special_keys_api_failure) {
 							Optional<Value> errorMsg =
@@ -983,16 +989,21 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 							auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
 							// special_key_space_management_api_error_msg schema validation
 							ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
-							ASSERT(valueObj["command"].get_str() == "coordinators" &&
-							       !valueObj["retriable"].get_bool());
-							ASSERT(valueObj["message"].get_str() ==
-							       "No change (existing configuration satisfies request)");
-							tx->reset();
-							break;
+							TraceEvent(SevDebug, "CoordinatorsManualChange")
+							    .detail("ErrorMessage", valueObj["message"].get_str());
+							ASSERT(valueObj["command"].get_str() == "coordinators");
+							if (valueObj["retriable"].get_bool()) { // coordinators not reachable, retry
+								tx->reset();
+							} else {
+								ASSERT(valueObj["message"].get_str() ==
+								       "No change (existing configuration satisfies request)");
+								tx->reset();
+								break;
+							}
 						} else {
 							wait(tx->onError(e));
-							wait(delay(1.0));
 						}
+						wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 					}
 				}
 				// change successful, now check it is already changed
@@ -1010,43 +1021,56 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 						       new_coordinator_process == address_str);
 					}
 					// verify the cluster decription
-					TraceEvent(SevDebug, "CoordinatorsManualChange")
-					    .detail("NewClsuterDescription", cs.clusterKeyName());
 					ASSERT(new_cluster_description == cs.clusterKeyName().toString());
 					tx->reset();
 				} catch (Error& e) {
 					wait(tx->onError(e));
-					wait(delay(1.0));
+					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 				}
-			}
-		}
-		// test coordinators' "auto" option
-		loop {
-			try {
-				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				tx->set(SpecialKeySpace::getManagementApiCommandOptionSpecialKey("coordinators", "auto"), ValueRef());
-				wait(tx->commit()); // if an "auto" change happened, the commit may or may not succeed
-				tx->reset();
-			} catch (Error& e) {
-				TraceEvent(SevDebug, "CoordinatorsAutoChange").error(e);
-				// if we repeat doing "auto" change, we will get this error: CoordinatorsResult::SAME_NETWORK_ADDRESSES
-				if (e.code() == error_code_special_keys_api_failure) {
-					Optional<Value> errorMsg =
-					    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
-					ASSERT(errorMsg.present());
-					std::string errorStr;
-					auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
-					auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
-					// special_key_space_management_api_error_msg schema validation
-					TraceEvent(SevDebug, "CoordinatorsAutoChange").detail("SKSErrorMessage", valueObj["message"].get_str());
-					ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
-					ASSERT(valueObj["command"].get_str() == "coordinators" && !valueObj["retriable"].get_bool());
-					// ASSERT(valueObj["message"].get_str() == "No change (existing configuration satisfies request)");
-					tx->reset();
-					break;
-				} else {
-					wait(tx->onError(e));
-					wait(delay(1.0));
+				// change back to original settings
+				loop {
+					try {
+						std::string new_processes_key;
+						tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+						for (const auto& address : old_coordinators_processes) {
+							new_processes_key += new_processes_key.size() ? "," : "";
+							new_processes_key += address;
+						}
+						tx->set(LiteralStringRef("processes")
+						            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")),
+						        Value(new_processes_key));
+						wait(tx->commit());
+						ASSERT(false);
+					} catch (Error& e) {
+						TraceEvent(SevDebug, "CoordinatorsManualChangeRevert").error(e);
+						if (e.code() == error_code_special_keys_api_failure) {
+							Optional<Value> errorMsg =
+							    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
+							ASSERT(errorMsg.present());
+							std::string errorStr;
+							auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+							auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+							// special_key_space_management_api_error_msg schema validation
+							ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+							TraceEvent(SevDebug, "CoordinatorsManualChangeRevert")
+							    .detail("ErrorMessage", valueObj["message"].get_str());
+							ASSERT(valueObj["command"].get_str() == "coordinators");
+							if (valueObj["retriable"].get_bool()) {
+								tx->reset();
+							} else if (valueObj["message"].get_str() ==
+							           "No change (existing configuration satisfies request)") {
+								tx->reset();
+								break;
+							} else {
+								TraceEvent(SevError, "CoordinatorsManualChangeRevert")
+								    .detail("UnexpectedError", valueObj["message"].get_str());
+								throw special_keys_api_failure();
+							}
+						} else {
+							wait(tx->onError(e));
+						}
+						wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+					}
 				}
 			}
 		}

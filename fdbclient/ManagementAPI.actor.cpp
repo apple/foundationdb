@@ -1009,7 +1009,8 @@ ACTOR Future<std::vector<NetworkAddress>> getCoordinators( Database cx ) {
 	}
 }
 
-ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr, Reference<IQuorumChange> change, std::vector<NetworkAddress>* desiredCoordinators, int* retries, int* notEnoughMachineResults) {
+ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr, Reference<IQuorumChange> change,
+                                                               std::vector<NetworkAddress>* desiredCoordinators) {
 	tr->setOption( FDBTransactionOptions::LOCK_AWARE );
 	tr->setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
 	tr->setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
@@ -1028,24 +1029,19 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr, 
 		*desiredCoordinators = _desiredCoordinators;
 	}
 
-	if(result == CoordinatorsResult::NOT_ENOUGH_MACHINES && *notEnoughMachineResults < 1) {
-		//we could get not_enough_machines if we happen to see the database while the cluster controller is updating the worker list, so make sure it happens twice before returning a failure
-		(*notEnoughMachineResults)++;
-		wait( delay(1.0) );
-		tr->reset();
-		return Optional<CoordinatorsResult>();
-	}
 	if (result != CoordinatorsResult::SUCCESS)
 		return result;
+
 	if (!desiredCoordinators->size())
 		return CoordinatorsResult::INVALID_NETWORK_ADDRESSES;
+
 	std::sort(desiredCoordinators->begin(), desiredCoordinators->end());
 
 	std::string newName = change->getDesiredClusterKeyName();
 	if (newName.empty()) newName = old.clusterKeyName().toString();
 
 	if ( old.coordinators() == *desiredCoordinators && old.clusterKeyName() == newName)
-		return *retries ? CoordinatorsResult::SUCCESS : CoordinatorsResult::SAME_NETWORK_ADDRESSES;
+		return CoordinatorsResult::SAME_NETWORK_ADDRESSES;
 
 	state ClusterConnectionString conn( *desiredCoordinators, StringRef( newName + ':' + deterministicRandom()->randomAlphaNumeric( 32 ) ) );
 
@@ -1060,12 +1056,6 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr, 
 			TraceEvent("ProtectCoordinator").detail("Address", (*desiredCoordinators)[i]).backtrace();
 		}
 	}
-
-	TraceEvent("AttemptingQuorumChange")
-		.detail("FromCS", old.toString())
-		.detail("ToCS", conn.toString())
-		.detail("OldClusterDescription", old.clusterKeyName())
-		.detail("NewClusterDescription", conn.clusterKeyName());
 
 	vector<Future<Optional<LeaderInfo>>> leaderServers;
 	ClientCoordinators coord( Reference<ClusterConnectionFile>( new ClusterConnectionFile( conn ) ) );

@@ -1411,9 +1411,7 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 	state std::vector<NetworkAddress> addressesVec;
 	state std::vector<std::string> process_address_strs;
 	state Optional<std::string> msg;
-	state int retry = 0;
 	state int index;
-	state int notEnoughMachineResults;
 	state bool parse_error = false;
 
 	// check update for cluster_description
@@ -1485,14 +1483,14 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 	    .detail("Auto", auto_option.first)
 	    .detail("Description", entry.first ? entry.second.get().toString() : "");
 
-	Optional<CoordinatorsResult> r =
-	    wait(changeQuorumChecker(&ryw->getTransaction(), change, &addressesVec, &retry, &notEnoughMachineResults));
+	Optional<CoordinatorsResult> r = wait(changeQuorumChecker(&ryw->getTransaction(), change, &addressesVec));
 
 	TraceEvent(SevDebug, "SKSChangeCoordinatorsFinish")
 	    .detail("Result", r.present() ? int(r.get()) : -1); // -1 means success
 	if (r.present()) {
 		auto res = r.get();
 		std::string error_msg;
+		bool retriable = false;
 		if (res == CoordinatorsResult::INVALID_NETWORK_ADDRESSES) {
 			error_msg = "The specified network addresses are invalid";
 		} else if (res == CoordinatorsResult::SAME_NETWORK_ADDRESSES) {
@@ -1505,6 +1503,7 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 			error_msg = "The database is in an unexpected state from which changing coordinators might be unsafe";
 		} else if (res == CoordinatorsResult::COORDINATOR_UNREACHABLE) {
 			error_msg = "One of the specified coordinators is unreachable";
+			retriable = true;
 		} else if (res == CoordinatorsResult::NOT_ENOUGH_MACHINES) {
 			error_msg = "Too few fdbserver machines to provide coordination at the current redundancy level";
 		} else if (res == CoordinatorsResult::SUCCESS) {
@@ -1512,7 +1511,7 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 		} else {
 			ASSERT(false);
 		}
-		msg = ManagementAPIError::toJsonString(false, "coordinators", error_msg);
+		msg = ManagementAPIError::toJsonString(retriable, "coordinators", error_msg);
 	}
 	return msg;
 }
