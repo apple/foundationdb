@@ -95,9 +95,8 @@ struct Span {
 enum class TracerType {
 	DISABLED = 0,
 	LOG_FILE = 1,
-	NETWORK_ASYNC = 2,
-	NETWORK_LOSSY = 3,
-	END = 4
+	NETWORK_LOSSY = 2,
+	END = 3
 };
 
 struct ITracer {
