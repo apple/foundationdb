@@ -24,6 +24,7 @@
 
 #include <functional>
 #include <iomanip>
+#include <memory>
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -64,7 +65,7 @@ struct LogfileTracer : ITracer {
 };
 
 struct TraceRequest {
-	uint8_t* buffer;
+	std::unique_ptr<uint8_t[]> buffer;
 	// Amount of data in buffer (bytes).
 	std::size_t data_size;
 	// Size of buffer (bytes).
@@ -76,7 +77,7 @@ struct TraceRequest {
 
 	void write_bytes(const uint8_t* buf, std::size_t n) {
 		resize(n);
-		std::copy(buf, buf + n, buffer + data_size);
+		std::copy(buf, buf + n, buffer.get() + data_size);
 		data_size += n;
 	}
 
@@ -91,10 +92,9 @@ struct TraceRequest {
 		}
 
 		TraceEvent(SevInfo, "TracingSpanResizedBuffer").detail("OldSize", buffer_size).detail("NewSize", size);
-		uint8_t* new_buffer = new uint8_t[size];
-		std::copy(buffer, buffer + data_size, new_buffer);
-		free(buffer);
-		buffer = new_buffer;
+		auto new_buffer = std::make_unique<uint8_t[]>(size);
+		std::copy(buffer.get(), buffer.get() + data_size, new_buffer.get());
+		buffer = std::move(new_buffer);
 		buffer_size = size;
 	}
 
@@ -122,28 +122,6 @@ ACTOR Future<Void> simulationStartServer() {
 		// array notation. In the future, the entire message should be
 		// deserialized to make sure all data is written correctly.
 		ASSERT(message[0] == (4 | 0b10010000) || (5 | 0b10010000));
-	}
-}
-
-ACTOR Future<Void> traceSend(FutureStream<TraceRequest> inputStream, std::queue<TraceRequest>* buffers, int* pendingMessages, bool* sendError) {
-	state NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
-	state Reference<IUDPSocket> socket = wait(INetworkConnections::net()->createUDPSocket(localAddress));
-
-	loop choose {
-		when(state TraceRequest request = waitNext(inputStream)) {
-			try {
-				if (!(*sendError)) {
-					int bytesSent = wait(socket->send(request.buffer, request.buffer + request.data_size));
-					TEST(bytesSent > 0);  // Successfully sent serialized trace
-				}
-				 --(*pendingMessages);
-				request.reset();
-				buffers->push(request);
-			} catch (Error& e) {
-				TraceEvent("TracingSpanSendError").detail("Error", e.what());
-				*sendError = true;
-			}
-		}
 	}
 }
 
@@ -277,69 +255,6 @@ private:
 };
 
 #ifndef WIN32
-struct AsyncUDPTracer : public UDPTracer {
-public:
-	AsyncUDPTracer() : pending_messages_(0), send_error_(false) {}
-
-	~AsyncUDPTracer() override {
-		while (!buffers_.empty()) {
-			auto& request = buffers_.front();
-			buffers_.pop();
-			free(request.buffer);
-		}
-	}
-
-	TracerType type() const override { return TracerType::NETWORK_ASYNC; }
-
-	// Serializes the given span to msgpack format and sends the data via UDP.
-	void trace(Span const& span) override {
-		static std::once_flag once;
-		std::call_once(once, [&]() {
-			send_actor_ = traceSend(stream_.getFuture(), &buffers_, &pending_messages_, &send_error_);
-			log_actor_ = traceLog(&pending_messages_, &send_error_);
-			if (g_network->isSimulated()) {
-				udp_server_actor_ = simulationStartServer();
-			}
-		});
-
-		if (span.location.name.size() == 0) {
-			return;
-		}
-
-		// ASSERT(!send_actor_.isReady());
-		// ASSERT(!log_actor_.isReady());
-
-		if (buffers_.empty()) {
-			buffers_.push(TraceRequest{
-				.buffer = new uint8_t[kTraceBufferSize],
-				.data_size = 0,
-				.buffer_size = kTraceBufferSize
-			});
-		}
-
-		auto request = buffers_.front();
-		buffers_.pop();
-
-		serialize_span(span, request);
-
-		++pending_messages_;
-		stream_.send(request);
-	}
-
-private:
-	// Sending data is asynchronous and it is necessary to keep the buffer
-	// around until the send completes. Therefore, multiple buffers may be
-	// needed at any one time to handle multiple send calls.
-	std::queue<TraceRequest> buffers_;
-	int pending_messages_;
-	bool send_error_;
-
-	PromiseStream<TraceRequest> stream_;
-	Future<Void> send_actor_;
-	Future<Void> log_actor_;
-	Future<Void> udp_server_actor_;
-};
-
 ACTOR Future<Void> fastTraceLogger(int* unreadyMessages, int* failedMessages, int* totalMessages, bool* sendError) {
 	state bool sendErrorReset = false;
 
@@ -363,13 +278,11 @@ ACTOR Future<Void> fastTraceLogger(int* unreadyMessages, int* failedMessages, in
 struct FastUDPTracer : public UDPTracer {
 	FastUDPTracer() : socket_fd_(-1), unready_socket_messages_(0), failed_messages_(0), total_messages_(0), send_error_(false) {
 		request_ = TraceRequest{
-			.buffer = new uint8_t[kTraceBufferSize],
+			.buffer = std::make_unique<uint8_t[]>(kTraceBufferSize),
 			.data_size = 0,
 			.buffer_size = kTraceBufferSize
 		};
 	}
-
-	~FastUDPTracer() override { free(request_.buffer); }
 
 	TracerType type() const override { return TracerType::NETWORK_LOSSY; }
 
@@ -403,7 +316,7 @@ struct FastUDPTracer : public UDPTracer {
 
 		serialize_span(span, request_);
 
-		int bytesSent = send(socket_fd_, request_.buffer, request_.data_size, MSG_DONTWAIT);
+		int bytesSent = send(socket_fd_, request_.buffer.get(), request_.data_size, MSG_DONTWAIT);
 		if (bytesSent == -1) {
 			// Will forgo checking errno here, and assume all error messages
 			// should be treated the same.
@@ -446,11 +359,6 @@ void openTracer(TracerType type) {
 		break;
 	case TracerType::LOG_FILE:
 		g_tracer = new LogfileTracer{};
-		break;
-	case TracerType::NETWORK_ASYNC:
-#ifndef WIN32
-		g_tracer = new AsyncUDPTracer{};
-#endif
 		break;
 	case TracerType::NETWORK_LOSSY:
 #ifndef WIN32
