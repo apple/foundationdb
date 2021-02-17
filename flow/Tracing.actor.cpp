@@ -92,7 +92,7 @@ struct TraceRequest {
 		}
 
 		TraceEvent(SevInfo, "TracingSpanResizedBuffer").detail("OldSize", buffer_size).detail("NewSize", size);
-		std::unique_ptr<uint8_t[]> new_buffer = std::make_unique<uint8_t[]>(size);
+		auto new_buffer = std::make_unique<uint8_t[]>(size);
 		std::copy(buffer.get(), buffer.get() + data_size, new_buffer.get());
 		buffer = std::move(new_buffer);
 		buffer_size = size;
