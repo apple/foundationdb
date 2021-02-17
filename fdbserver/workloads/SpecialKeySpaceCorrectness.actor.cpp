@@ -446,7 +446,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			if (result.size()) {
 				state KeyValueRef entry = deterministicRandom()->randomChoice(result);
 				Optional<Value> singleRes = wait(tx->get(entry.key));
-				ASSERT(singleRes.present() && singleRes.get() == entry.value);
+				if (singleRes.present()) ASSERT(singleRes.get() == entry.value);
 			}
 			tx->reset();
 		} catch (Error& e) {
