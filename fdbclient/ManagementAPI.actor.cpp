@@ -982,11 +982,12 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 
 			if(g_network->isSimulated()) {
 				for(int i = 0; i < (desiredCoordinators.size()/2)+1; i++) {
-					auto addresses = g_simulator.getProcessByAddress(desiredCoordinators[i])->addresses;
-					
-					g_simulator.protectedAddresses.insert(addresses.address);
-					if(addresses.secondaryAddress.present()) {
-						g_simulator.protectedAddresses.insert(addresses.secondaryAddress.get());
+					auto process = g_simulator.getProcessByAddress(desiredCoordinators[i]);
+					ASSERT(process->isReliable() || process->rebooting);
+
+					g_simulator.protectedAddresses.insert(process->addresses.address);
+					if (process->addresses.secondaryAddress.present()) {
+						g_simulator.protectedAddresses.insert(process->addresses.secondaryAddress.get());
 					}
 					TraceEvent("ProtectCoordinator").detail("Address", desiredCoordinators[i]).backtrace();
 				}
@@ -1183,6 +1184,11 @@ struct AutoQuorumChange : IQuorumChange {
 			bool found = false;
 			for (auto worker = remainingWorkers.begin(); worker != remainingWorkers.end(); worker++) {
 				if(addressExcluded(excluded, worker->address)) {
+					continue;
+				}
+				// Exclude faulty node due to machine assassination
+				if (g_network->isSimulated() && !g_simulator.getProcessByAddress(worker->address)->isReliable()) {
+					TraceEvent("AutoSelectCoordinators").detail("SkipUnreliableWorker", worker->address.toString());
 					continue;
 				}
 				bool valid = true;
@@ -1966,6 +1972,12 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 		data.locality.set(LiteralStringRef("zoneid"), StringRef(rack));
 		data.locality.set(LiteralStringRef("machineid"), StringRef(machineId));
 		data.address.ip = IPAddress(i);
+
+		if (g_network->isSimulated()) {
+			g_simulator.newProcess(
+			    format("TestProcess%d", i).c_str(), data.address.ip, data.address.port, false, 1, data.locality,
+			    ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource), "", "");
+		}
 
 		workers.push_back(data);
 	}
