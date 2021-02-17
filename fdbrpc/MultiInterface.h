@@ -43,7 +43,7 @@ std::string describe( KVPair<K,V> const& p ) { return format("%d ", p.k) + descr
 template <class T>
 struct ReferencedInterface : public ReferenceCounted<ReferencedInterface<T>> {
 	T interf;
-	int8_t distance; // choose one enum value in LBDistance type
+	int8_t distance; // one of enum values in struct LBDistance
 	std::string toString() const {
 		return interf.toString();
 	}

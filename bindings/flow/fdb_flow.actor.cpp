@@ -94,7 +94,7 @@ void fdb_flow_test() {
 	g_network->run();
 }
 
-// FDB obj used by bindings
+// FDB object used by bindings
 namespace FDB {
 	class DatabaseImpl : public Database, NonCopyable {
 	public:

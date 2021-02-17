@@ -170,7 +170,7 @@ void addLaggingRequest(Future<Optional<Reply>> reply, Promise<Void> requestFinis
 // Keep trying to get a reply from any of servers until success or cancellation; tries to take into account
 //   failMon's information for load balancing and avoiding failed servers
 // If ALL the servers are failed and the list of servers is not fresh, throws an exception to let the caller refresh the
-// list of servers When model is set, load balance among alternatives in the same DC, aiming to balance request queue
+// list of servers. When model is set, load balance among alternatives in the same DC, aiming to balance request queue
 // length on these interfaces. If too many interfaces in the same DC are bad, try remote interfaces.
 ACTOR template <class Interface, class Request, class Multi>
 Future< REPLY_TYPE(Request) > loadBalance(
@@ -211,7 +211,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 			// countBest(): the number of alternatives in the same locality (i.e., DC by default) as alternatives[0].
 			// if the if-statement is correct, it won't try to send requests to the remote ones.
 			if(badServers < std::min(i, FLOW_KNOBS->LOAD_BALANCE_MAX_BAD_OPTIONS + 1) && i == alternatives->countBest()) {
-				// If there are not enough local servers that are bad,
+				// If the number of local bad servers is limited,
 				// we won't even try to send requests to remote servers.
 				// An interface is bad if its endpoint fails or if reply from the interface has a high penalty.
 				break;

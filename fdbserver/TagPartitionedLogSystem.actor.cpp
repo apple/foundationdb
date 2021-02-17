@@ -340,6 +340,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return logSystem;
 	}
 
+	// Convert TagPartitionedLogSystem to DBCoreState and override input newState as return value
 	void toCoreState(DBCoreState& newState) final {
 		if( recoveryComplete.isValid() && recoveryComplete.isError() )
 			throw recoveryComplete.getError();
