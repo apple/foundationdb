@@ -76,8 +76,11 @@ if(BOOST_ROOT)
 endif()
 
 if(WIN32)
-  # set(BOOST_REQUIRED REQUIRED)
-  find_package(Boost 1.72.0 EXACT QUIET REQUIRED CONFIG PATHS ${BOOST_HINT_PATHS})
+  # this should be done with the line below -- but apparently the CI is not set up
+  # properly for config mode. So we use the old way on Windows
+  #  find_package(Boost 1.72.0 EXACT QUIET REQUIRED CONFIG PATHS ${BOOST_HINT_PATHS})
+  # I think depending on the cmake version this will cause weird warnings
+  find_package(Boost 1.72)
   add_library(boost_target INTERFACE)
   target_link_libraries(boost_target INTERFACE Boost::boost)
   return()
