@@ -27,8 +27,6 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/Knobs.h"
-#include "flow/Trace.h"
 #include "flow/actorcompiler.h"
 
 struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
