@@ -43,7 +43,7 @@ public:
 	    allowLogSetKills(true), usableRegions(1) {}
 
 	// Order matters!
-	enum KillType { KillInstantly, InjectFaults, RebootAndDelete, RebootProcessAndDelete, Reboot, RebootProcess, None };
+	enum KillType { KillInstantly, InjectFaults, FailDisk, RebootAndDelete, RebootProcessAndDelete, Reboot, RebootProcess, None };
 
 	enum class BackupAgentType { NoBackupAgents, WaitForType, BackupToFile, BackupToDB };
 
@@ -73,6 +73,7 @@ public:
 
 		uint64_t fault_injection_r;
 		double fault_injection_p1, fault_injection_p2;
+		bool failedDisk;
 
 		UID uid;
 
@@ -83,13 +84,13 @@ public:
 		  : name(name), locality(locality), startingClass(startingClass), addresses(addresses),
 		    address(addresses.address), dataFolder(dataFolder), network(net), coordinationFolder(coordinationFolder),
 		    failed(false), excluded(false), rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
-		    fault_injection_r(0), machine(0), cleared(false) {
+		    fault_injection_r(0), machine(0), cleared(false), failedDisk(false) {
 			uid = deterministicRandom()->randomUniqueID();
 		}
 
 		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
 
-		bool isReliable() const { return !failed && fault_injection_p1 == 0 && fault_injection_p2 == 0; }
+		bool isReliable() const { return !failed && fault_injection_p1 == 0 && fault_injection_p2 == 0 && !failedDisk; }
 		bool isAvailable() const { return !isExcluded() && isReliable(); }
 		bool isExcluded() const { return excluded; }
 		bool isCleared() const { return cleared; }

@@ -68,6 +68,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	void (*databaseDestroy)(FDBDatabase *database);
 	FDBFuture* (*databaseRebootWorker)(FDBDatabase *database, uint8_t const *address, int addressLength, fdb_bool_t check, int duration);
 	FDBFuture* (*databaseForceRecoveryWithDataLoss)(FDBDatabase *database, uint8_t const *dcid, int dcidLength);
+    FDBFuture* (*databaseCreateSnapshot)(FDBDatabase *database, uint8_t const *uid, int uidLength, uint8_t const *snapshotCommmand, int snapshotCommandLength);
 
 	//Transaction
 	fdb_error_t (*transactionSetOption)(FDBTransaction *tr, FDBTransactionOptions::Option option, uint8_t const *value, int valueLength);
@@ -199,6 +200,7 @@ public:
 
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
+	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
 private:
 	const Reference<FdbCApi> api;
@@ -333,6 +335,7 @@ public:
 
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
+	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
 private:
 	struct DatabaseState;

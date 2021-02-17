@@ -34,6 +34,7 @@
 #include <thread>
 #include <tuple>
 #include <vector>
+#include <random>
 
 #define DOCTEST_CONFIG_IMPLEMENT
 #include "doctest.h"
@@ -2044,6 +2045,42 @@ TEST_CASE("fdb_database_force_recovery_with_data_loss") {
 		fdb_check(wait_future(f));
 		break;
   }
+}
+
+std::string random_hex_string(size_t length) {
+	const char charset[] = "0123456789"
+	                       "ABCDEF"
+	                       "abcdef";
+	// construct a random generator engine from a time-based seed:
+	std::default_random_engine generator(time(nullptr));
+	std::uniform_int_distribution<int> distribution(0, strlen(charset) - 1);
+	auto randchar = [&charset, &generator, &distribution]() -> char { return charset[distribution(generator)]; };
+	std::string str(length, 0);
+	std::generate_n(str.begin(), length, randchar);
+	return str;
+}
+
+TEST_CASE("fdb_database_create_snapshot") {
+	std::string snapshot_command = "test";
+	std::string uid = "invalid_uid";
+	bool retry = false;
+	while (1) {
+		fdb::EmptyFuture f =
+		    fdb::Database::create_snapshot(db, (const uint8_t*)uid.c_str(), uid.length(),
+		                                   (const uint8_t*)snapshot_command.c_str(), snapshot_command.length());
+		fdb_error_t err = wait_future(f);
+		if (err == 2509) { // expected error code
+			CHECK(!retry);
+			uid = random_hex_string(32);
+			retry = true;
+		} else if (err == 2505) {
+			CHECK(retry);
+			break;
+		} else {
+			// Otherwise, something went wrong.
+			CHECK(false);
+		}
+	}
 }
 
 TEST_CASE("fdb_error_predicate") {
