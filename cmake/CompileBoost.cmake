@@ -76,10 +76,14 @@ if(BOOST_ROOT)
 endif()
 
 if(WIN32)
-  set(BOOST_REQUIRED REQUIRED)
+  # set(BOOST_REQUIRED REQUIRED)
+  find_package(Boost 1.72.0 EXACT QUIET REQUIRED CONFIG PATHS ${BOOST_HINT_PATHS})
+  add_library(boost_target INTERFACE)
+  target_link_libraries(boost_target INTERFACE Boost::boost)
+  return()
 endif()
 
-find_package(Boost 1.72.0 EXACT QUIET ${BOOST_REQUIRED} COMPONENTS context CONFIG PATHS ${BOOST_HINT_PATHS})
+find_package(Boost 1.72.0 EXACT QUIET COMPONENTS context CONFIG PATHS ${BOOST_HINT_PATHS})
 set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores any installed boost")
 
 if(Boost_FOUND AND NOT FORCE_BOOST_BUILD)

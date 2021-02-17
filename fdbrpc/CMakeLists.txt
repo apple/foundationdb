@@ -63,3 +63,7 @@ if(COMPILE_EIO)
   target_compile_options(eio BEFORE PRIVATE -w) # disable warnings for eio
   target_link_libraries(fdbrpc PRIVATE eio)
 endif()
+if(WIN32)
+  add_library(coro STATIC libcoroutine/Common.c libcoroutine/Coro.c)
+  target_link_libraries(fdbrpc PRIVATE coro)
+endif()
