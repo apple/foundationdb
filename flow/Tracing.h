@@ -97,9 +97,9 @@ struct Span {
 // values in this enum can change without notice.
 enum class TracerType {
 	DISABLED = 0,
-	LOG_FILE = 1,
-	NETWORK_LOSSY = 2,
-	END = 3
+	NETWORK_LOSSY = 1,
+	END = 2,  // Any tracers that come after END will not be tested in simulation
+	LOG_FILE = 3
 };
 
 struct ITracer {
