@@ -149,22 +149,27 @@ else()
     add_compile_options("-fdebug-prefix-map=${CMAKE_SOURCE_DIR}=." "-fdebug-prefix-map=${CMAKE_BINARY_DIR}=.")
   endif()
 
+  set(SANITIZER_COMPILE_OPTIONS)
+  set(SANITIZER_LINK_OPTIONS)
+
   # we always compile with debug symbols. CPack will strip them out
   # and create a debuginfo rpm
   add_compile_options(-ggdb -fno-omit-frame-pointer)
   if(USE_ASAN)
-    add_compile_options(-fsanitize=address)
-    add_link_options(-fsanitize=address)
+    list(APPEND SANITIZER_COMPILE_OPTIONS
+      -fsanitize=address
+      -DADDRESS_SANITIZER
+      -DBOOST_USE_ASAN
+      -DBOOST_USE_UCONTEXT)
+    list(APPEND SANITIZER_LINK_OPTIONS -fsanitize=address)
   endif()
 
   if(USE_MSAN)
     if(NOT CLANG)
       message(FATAL_ERROR "Unsupported configuration: USE_MSAN only works with Clang")
     endif()
-    add_compile_options(
-      -fsanitize=memory
-      -fsanitize-memory-track-origins=2)
-    add_link_options(-fsanitize=memory)
+    list(APPEND SANITIZER_COMPILE_OPTIONS -fsanitize=memory -fsanitize-memory-track-origins=2)
+    list(APPEND SANITIZER_LINK_OPTIONS -fsanitize=memory)
   endif()
 
   if(USE_GCOV)
@@ -172,17 +177,26 @@ else()
   endif()
 
   if(USE_UBSAN)
-    add_compile_options(
+    list(APPEND SANITIZER_COMPILE_OPTIONS
       -fsanitize=undefined
       # TODO(atn34) Re-enable -fsanitize=alignment once https://github.com/apple/foundationdb/issues/1434 is resolved
       -fno-sanitize=alignment)
-    add_link_options(-fsanitize=undefined)
+    list(APPEND SANITIZER_LINK_OPTIONS -fsanitize=undefined)
   endif()
 
   if(USE_TSAN)
-    add_compile_options(
-      -fsanitize=thread)
-    add_link_options(-fsanitize=thread)
+    list(APPEND SANITIZER_COMPILE_OPTIONS -fsanitize=thread)
+    list(APPEND SANITIZER_LINK_OPTIONS -fsanitize=thread)
+  endif()
+
+  set(USE_SANITIZER OFF)
+  if(SANITIZER_COMPILE_OPTIONS)
+    add_compile_options(${SANITIZER_COMPILE_OPTIONS})
+    set(USE_SANITIZER ON)
+  endif()
+  if(SANITIZER_LINK_OPTIONS)
+    add_link_options(${SANITIZER_LINK_OPTIONS})
+    set(USE_SANITIZER ON)
   endif()
 
   if(PORTABLE_BINARY)
