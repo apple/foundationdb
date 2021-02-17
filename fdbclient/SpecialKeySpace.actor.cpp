@@ -1436,7 +1436,6 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 		}
 	}
 
-	
 	if (addressesVec.size())
 		change = specifiedQuorumChange(addressesVec);
 	else
@@ -1507,4 +1506,51 @@ void CoordinatorsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& 
 void CoordinatorsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	return throwSpecialKeyApiFailure(ryw, "coordinators",
 	                                 "Clear operation is meaningless thus forbidden for coordinators");
+}
+
+CoordinatorsAutoImpl::CoordinatorsAutoImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
+
+ACTOR static Future<Standalone<RangeResultRef>> CoordinatorsAutoImplActor(ReadYourWritesTransaction* ryw,
+                                                                          KeyRangeRef kr) {
+	state Standalone<RangeResultRef> res;
+	state std::string autoCoordinatorsKey;
+	state Transaction& tr = ryw->getTransaction();
+
+	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+	tr.setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
+	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	Optional<Value> currentKey = wait(tr.get(coordinatorsKey));
+
+	if (!currentKey.present()) {
+		ryw->setSpecialKeySpaceErrorMsg(
+		    ManagementAPIError::toJsonString(false, "auto_coordinators", "The coordinator key does not exist"));
+		throw special_keys_api_failure();
+	}
+	state ClusterConnectionString old(currentKey.get().toString());
+	state CoordinatorsResult result = CoordinatorsResult::SUCCESS;
+
+	std::vector<NetworkAddress> _desiredCoordinators = wait(autoQuorumChange()->getDesiredCoordinators(
+	    &tr, old.coordinators(), Reference<ClusterConnectionFile>(new ClusterConnectionFile(old)), result));
+
+	if (result == CoordinatorsResult::NOT_ENOUGH_MACHINES) {
+		// we could get not_enough_machines if we happen to see the database while the cluster controller is updating
+		// the worker list, so make sure it happens twice before returning a failure
+		ryw->setSpecialKeySpaceErrorMsg(ManagementAPIError::toJsonString(
+		    true, "auto_coordinators", "The auto change attempt did not get enough machines, please try again"));
+		throw special_keys_api_failure();
+	}
+
+	for (const auto& address : _desiredCoordinators) {
+		autoCoordinatorsKey += autoCoordinatorsKey.size() ? "," : "";
+		autoCoordinatorsKey += address.toString();
+	}
+	res.push_back_deep(res.arena(), KeyValueRef(kr.begin, Value(autoCoordinatorsKey)));
+	return res;
+}
+
+Future<Standalone<RangeResultRef>> CoordinatorsAutoImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                                  KeyRangeRef kr) const {
+	// single key range, the queried range should always be the same as the underlying range
+	ASSERT(kr == getKeyRange());
+	return CoordinatorsAutoImplActor(ryw, kr);
 }
