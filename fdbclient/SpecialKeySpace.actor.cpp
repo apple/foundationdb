@@ -1382,7 +1382,7 @@ Future<Standalone<RangeResultRef>> CoordinatorsImpl::getRange(ReadYourWritesTran
 	std::sort(coordinator_processes.begin(), coordinator_processes.end(),
 	          [](const NetworkAddress& lhs, const NetworkAddress& rhs) { return lhs.toString() < rhs.toString(); });
 	std::string processes_str;
-	for (auto& w : coordinator_processes) {
+	for (const auto& w : coordinator_processes) {
 		if (processes_str.size()) processes_str += ",";
 		processes_str += w.toString();
 	}
@@ -1422,7 +1422,7 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 				else
 					addressesVec.push_back(a);
 			} catch (Error& e) {
-				TraceEvent(SevDebug, "SpeicalKeysNetworkParseError").error(e);
+				TraceEvent(SevDebug, "SpecialKeysNetworkParseError").error(e);
 				parse_error = true;
 			}
 
