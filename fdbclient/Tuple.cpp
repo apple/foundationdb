@@ -20,6 +20,18 @@
 
 #include "fdbclient/Tuple.h"
 
+static float bigEndianFloat(float orig) {
+	int32_t big = *(int32_t*)&orig;
+	big = bigEndian32(big);
+	return *(float*)&big;
+}
+
+static double bigEndianDouble(double orig) {
+	int64_t big = *(int64_t*)&orig;
+	big = bigEndian64(big);
+	return *(double*)&big;
+}
+
 static size_t find_string_terminator(const StringRef data, size_t offset) {
 	size_t i = offset;
 	while (i < data.size() - 1 && !(data[i] == '\x00' && data[i + 1] != (uint8_t)'\xff')) {
@@ -27,6 +39,19 @@ static size_t find_string_terminator(const StringRef data, size_t offset) {
 	}
 
 	return i;
+}
+
+// If encoding and the sign bit is 1 (the number is negative), flip all the bits.
+// If decoding and the sign bit is 0 (the number is negative), flip all the bits.
+// Otherwise, the number is positive, so flip the sign bit.
+static void adjust_floating_point(uint8_t *bytes, size_t size, bool encode) {
+	if((encode && ((uint8_t)(bytes[0] & 0x80) != (uint8_t)0x00)) || (!encode && ((uint8_t)(bytes[0] & 0x80) != (uint8_t)0x80))) {
+		for(size_t i = 0; i < size; i++) {
+			bytes[i] ^= (uint8_t)0xff;
+		}
+	} else {
+		bytes[0] ^= (uint8_t)0x80;
+	}
 }
 
 Tuple::Tuple(StringRef const& str, bool exclude_incomplete) {
@@ -226,6 +251,45 @@ int64_t Tuple::getInt(size_t index, bool allow_incomplete) const {
 	}
 
 	return swap;
+}
+
+// TODO: Combine with bindings/flow/Tuple.*. This code is copied from there.
+float Tuple::getFloat(size_t index) const {
+	if(index >= offsets.size()) {
+		throw invalid_tuple_index();
+	}
+	ASSERT_LT(offsets[index], data.size());
+	uint8_t code = data[offsets[index]];
+	if(code != 0x20) {
+		throw invalid_tuple_data_type();
+	}
+
+	float swap;
+	uint8_t* bytes = (uint8_t*)&swap;
+	ASSERT_LE(offsets[index] + 1 + sizeof(float), data.size());
+	swap = *(float*)(data.begin() + offsets[index] + 1);
+	adjust_floating_point( bytes, sizeof(float), false );
+
+	return bigEndianFloat(swap);
+}
+
+double Tuple::getDouble(size_t index) const {
+	if(index >= offsets.size()) {
+		throw invalid_tuple_index();
+	}
+	ASSERT_LT(offsets[index], data.size());
+	uint8_t code = data[offsets[index]];
+	if(code != 0x21) {
+		throw invalid_tuple_data_type();
+	}
+
+	double swap;
+	uint8_t* bytes = (uint8_t*)&swap;
+	ASSERT_LE(offsets[index] + 1 + sizeof(double), data.size());
+	swap = *(double*)(data.begin() + offsets[index] + 1);
+	adjust_floating_point( bytes, sizeof(double), false );
+
+	return bigEndianDouble(swap);
 }
 
 KeyRange Tuple::range(Tuple const& tuple) const {

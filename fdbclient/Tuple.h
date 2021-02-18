@@ -47,7 +47,7 @@ struct Tuple {
 		return append(t);
 	}
 
-	enum ElementType { NULL_TYPE, INT, BYTES, UTF8 };
+	enum ElementType { NULL_TYPE, INT, BYTES, UTF8, FLOAT, DOUBLE };
 
 	// this is number of elements, not length of data
 	size_t size() const { return offsets.size(); }
@@ -55,6 +55,8 @@ struct Tuple {
 	ElementType getType(size_t index) const;
 	Standalone<StringRef> getString(size_t index) const;
 	int64_t getInt(size_t index, bool allow_incomplete = false) const;
+	float getFloat(size_t index) const;
+	double getDouble(size_t index) const;
 
 	KeyRange range(Tuple const& tuple = Tuple()) const;
 

@@ -40,7 +40,7 @@ GlobalConfig& GlobalConfig::globalConfig() {
 const std::any GlobalConfig::get(StringRef name) {
 	auto it = data.find(name);
 	if (it == data.end()) {
-		return nullptr;
+		return std::any{};
 	}
 	return it->second;
 }
@@ -51,10 +51,15 @@ Future<Void> GlobalConfig::onInitialized() {
 
 void GlobalConfig::insert(KeyRef key, ValueRef value) {
 	Tuple t = Tuple::unpack(value);
-	// TODO: Add more Tuple types
 	if (t.getType(0) == Tuple::ElementType::UTF8) {
 		data[key] = t.getString(0);
 	} else if (t.getType(0) == Tuple::ElementType::INT) {
 		data[key] = t.getInt(0);
+	} else if (t.getType(0) == Tuple::ElementType::FLOAT) {
+		data[key] = t.getFloat(0);
+	} else if (t.getType(0) == Tuple::ElementType::DOUBLE) {
+		data[key] = t.getDouble(0);
+	} else {
+		ASSERT(false);
 	}
 }
