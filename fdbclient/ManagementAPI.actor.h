@@ -144,7 +144,7 @@ struct IQuorumChange : ReferenceCounted<IQuorumChange> {
 };
 
 // Change to use the given set of coordination servers
-ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> change);
+ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> change, bool force = false);
 Reference<IQuorumChange> autoQuorumChange(int desired = -1);
 Reference<IQuorumChange> noQuorumChange();
 Reference<IQuorumChange> specifiedQuorumChange(vector<NetworkAddress> const&);

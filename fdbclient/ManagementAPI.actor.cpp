@@ -40,7 +40,7 @@
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Replication.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
-
+#include "flow/genericactors.actor.h"
 
 bool isInteger(const std::string& s) {
 	if( s.empty() ) return false;
@@ -1009,7 +1009,7 @@ ACTOR Future<std::vector<NetworkAddress>> getCoordinators( Database cx ) {
 	}
 }
 
-ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> change) {
+ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> change, bool force) {
 	state Transaction tr(cx);
 	state int retries = 0;
 	state std::vector<NetworkAddress> desiredCoordinators;
@@ -1078,11 +1078,13 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 			for( int i = 0; i < coord.clientLeaderServers.size(); i++ )
 				leaderServers.push_back( retryBrokenPromise( coord.clientLeaderServers[i].getLeader, GetLeaderRequest( coord.clusterKey, UID() ), TaskPriority::CoordinationReply ) );
 
+			// If forced, go through with coordination changes even if some may be unreachable, but still require a
+			// quorum of live machines
+			Future<Void> coordinatorsChanged =
+			    force ? quorum(leaderServers, (leaderServers.size() + 1) / 2) : waitForAll(leaderServers);
 			choose {
-				when( wait( waitForAll( leaderServers ) ) ) {}
-				when( wait( delay(5.0) ) ) {
-					return CoordinatorsResult::COORDINATOR_UNREACHABLE;
-				}
+				when(wait(coordinatorsChanged)) {}
+				when(wait(delay(5.0))) { return CoordinatorsResult::COORDINATOR_UNREACHABLE; }
 			}
 
 			tr.set( coordinatorsKey, conn.toString() );
