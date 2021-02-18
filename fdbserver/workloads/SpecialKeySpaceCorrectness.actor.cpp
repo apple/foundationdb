@@ -875,6 +875,33 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				}
 			}
 		}
+		// advanceversion
+		try {
+			Version v1 = wait(tx->getReadVersion());
+			TraceEvent(SevDebug, "InitialReadVersion").detail("Version", v1);
+			state Version v2 = 2 * v1;
+			loop {
+				try {
+					// loop until the grv is larger than the set version
+					Version v3 = wait(tx->getReadVersion());
+					if (v3 > v2) {
+						TraceEvent(SevDebug, "AdvanceVersionSuccess").detail("Version", v3);
+						break;
+					}
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					// force the cluster to recover at v2
+					tx->set(SpecialKeySpace::getManagementApiCommandPrefix("advanceversion"), std::to_string(v2));
+					wait(tx->commit());
+					ASSERT(false); // Should fail with commit_unknown_result
+				} catch (Error& e) {
+					TraceEvent(SevDebug, "AdvanceVersionCommitFailure").error(e);
+					wait(tx->onError(e));
+				}
+			}
+			tx->reset();
+		} catch (Error& e) {
+			wait(tx->onError(e));
+		}
 		return Void();
 	}
 };

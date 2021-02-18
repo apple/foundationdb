@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include "boost/lexical_cast.hpp"
+
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -27,7 +29,7 @@
 namespace {
 const std::string kTracingTransactionIdKey = "transaction_id";
 const std::string kTracingTokenKey = "token";
-}
+} // namespace
 
 std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToBoundary = {
 	{ SpecialKeySpace::MODULE::TRANSACTION,
@@ -55,7 +57,9 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	                .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "lock", singleKeyRange(LiteralStringRef("db_locked")).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "consistencycheck", singleKeyRange(LiteralStringRef("consistency_check_suspended"))
-	                          .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
+	                          .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "advanceversion", singleKeyRange(LiteralStringRef("min_required_commit_version"))
+	                        .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
 };
 
 std::set<std::string> SpecialKeySpace::options = { "excluded/force", "failed/force" };
@@ -178,13 +182,12 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, ReadYourWrite
 		TraceEvent(SevDebug, "ReadToBoundary")
 		    .detail("TerminateKey", ks->getKey())
 		    .detail("TerminateOffset", ks->offset);
-		// If still not normalized after moving to the boundary, 
+		// If still not normalized after moving to the boundary,
 		// let key selector clamp up to the boundary
 		if (ks->offset < 1) {
 			result->readToBegin = true;
 			ks->setKey(boundary.begin);
-		}
-		else {
+		} else {
 			result->readThroughEnd = true;
 			ks->setKey(boundary.end);
 		}
@@ -1296,8 +1299,7 @@ TracingOptionsImpl::TracingOptionsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(k
 	TraceEvent("TracingOptionsImpl::TracingOptionsImpl").detail("Range", kr);
 }
 
-Future<Standalone<RangeResultRef>> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw,
-                                                                KeyRangeRef kr) const {
+Future<Standalone<RangeResultRef>> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
 	Standalone<RangeResultRef> result;
 	for (const auto& option : SpecialKeySpace::getTracingOptions()) {
 		auto key = getKeyRange().begin.withSuffix(option);
@@ -1306,9 +1308,11 @@ Future<Standalone<RangeResultRef>> TracingOptionsImpl::getRange(ReadYourWritesTr
 		}
 
 		if (key.endsWith(kTracingTransactionIdKey)) {
-			result.push_back_deep(result.arena(), KeyValueRef(key, std::to_string(ryw->getTransactionInfo().spanID.first())));
+			result.push_back_deep(result.arena(),
+			                      KeyValueRef(key, std::to_string(ryw->getTransactionInfo().spanID.first())));
 		} else if (key.endsWith(kTracingTokenKey)) {
-			result.push_back_deep(result.arena(), KeyValueRef(key, std::to_string(ryw->getTransactionInfo().spanID.second())));
+			result.push_back_deep(result.arena(),
+			                      KeyValueRef(key, std::to_string(ryw->getTransactionInfo().spanID.second())));
 		}
 	}
 	return result;
@@ -1350,4 +1354,65 @@ void TracingOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef
 void TracingOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	ryw->setSpecialKeySpaceErrorMsg("clear disabled");
 	throw special_keys_api_failure();
+}
+
+ACTOR static Future<Standalone<RangeResultRef>> getMinCommitVersionActor(ReadYourWritesTransaction* ryw,
+                                                                         KeyRangeRef kr) {
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+	Optional<Value> val = wait(ryw->getTransaction().get(minRequiredCommitVersionKey));
+	Standalone<RangeResultRef> result;
+	if (val.present()) {
+		Version minRequiredCommitVersion = BinaryReader::fromStringRef<Version>(val.get(), Unversioned());
+		ValueRef version(result.arena(), boost::lexical_cast<std::string>(minRequiredCommitVersion));
+		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, version));
+	}
+	return result;
+}
+
+AdvanceVersionImpl::AdvanceVersionImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<Standalone<RangeResultRef>> AdvanceVersionImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+	// single key range, the queried range should always be the same as the underlying range
+	ASSERT(kr == getKeyRange());
+	auto entry = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("advanceversion")];
+	if (!ryw->readYourWritesDisabled() && entry.first) {
+		// ryw enabled and we have written to the special key
+		Standalone<RangeResultRef> result;
+		if (entry.second.present()) {
+			result.push_back_deep(result.arena(), KeyValueRef(kr.begin, entry.second.get()));
+		}
+		return result;
+	} else {
+		return getMinCommitVersionActor(ryw, kr);
+	}
+}
+
+ACTOR static Future<Optional<std::string>> advanceVersionCommitActor(ReadYourWritesTransaction* ryw, Version v) {
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+	Version rv = wait(ryw->getTransaction().getReadVersion());
+	if (rv <= v) {
+		ryw->getTransaction().set(minRequiredCommitVersionKey, BinaryWriter::toValue(v + 1, Unversioned()));
+	} else {
+		return ManagementAPIError::toJsonString(false, "advanceversion",
+		                                        "Current read version is larger than the given version");
+	}
+	return Optional<std::string>();
+}
+
+Future<Optional<std::string>> AdvanceVersionImpl::commit(ReadYourWritesTransaction* ryw) {
+	auto minCommitVersion =
+	    ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("advanceversion")].second;
+	if (minCommitVersion.present()) {
+		try {
+			// Version is int64_t
+			Version v = boost::lexical_cast<int64_t>(minCommitVersion.get().toString());
+			return advanceVersionCommitActor(ryw, v);
+		} catch (boost::bad_lexical_cast& e) {
+			return Optional<std::string>(ManagementAPIError::toJsonString(
+			    false, "advanceversion", "Invalid version(int64_t) argument: " + minCommitVersion.get().toString()));
+		}
+	} else {
+		ryw->getTransaction().clear(minRequiredCommitVersionKey);
+	}
+	return Optional<std::string>();
 }
