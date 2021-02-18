@@ -2250,6 +2250,8 @@ ACTOR Future<Void> watchStorageServerResp(KeyRef key, Database cx) {
 			} else if (metadata->watchPromise.getFutureReferenceCount() == 1) {
 				cx->deleteWatchMetadata(key);
 				return Void();
+			} else if (e.code() == error_code_future_version) {
+				continue;
 			}
 			cx->deleteWatchMetadata(key);
 			metadata->watchPromise.sendError(e);
