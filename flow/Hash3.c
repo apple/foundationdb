@@ -483,7 +483,7 @@ void hashlittle2(
   u.ptr = key;
   if (HASH_LITTLE_ENDIAN && ((u.i & 0x3) == 0)) {
     const uint32_t *k = (const uint32_t *)key;         /* read 32-bit chunks */
-#ifdef VALGRIND
+#if defined(VALGRIND) || defined(ADDRESS_SANITIZER)
     const uint8_t  *k8;
 #endif
 
@@ -508,7 +508,7 @@ void hashlittle2(
      * still catch it and complain.  The masking trick does make the hash
      * noticably faster for short strings (like English words).
      */
-#ifndef VALGRIND
+#if !defined(VALGRIND) && !defined(ADDRESS_SANITIZER)
 
     switch(length)
     {
