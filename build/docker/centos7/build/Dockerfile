@@ -1,43 +1,65 @@
 FROM centos:7
 
 WORKDIR /tmp
-
-RUN rpmkeys --import "http://pool.sks-keyservers.net/pks/lookup?op=get&search=0x3fa7e0328081bff6a14da29aa6a19b38d3d831ef" && \
+COPY mono-project.com.rpmkey.pgp ./
+RUN rpmkeys --import mono-project.com.rpmkey.pgp && \
     curl -Ls https://download.mono-project.com/repo/centos7-stable.repo -o /etc/yum.repos.d/mono-centos7-stable.repo && \
     yum repolist && \
     yum install -y \
-        centos-release-scl \
-        scl-utils && \
+        centos-release-scl-rh \
+        epel-release \
+        scl-utils \
+        yum-utils && \
     yum install -y \
         autoconf \
         automake \
         binutils-devel \
         curl \
+        debbuild \
         devtoolset-8 \
         devtoolset-8-libubsan-devel \
         devtoolset-8-valgrind-devel \
         dos2unix \
         dpkg \
+        gettext-devel \
         git \
-        go-toolset-7 \
-        java-11-openjdk-devel.x86_64 \
+        golang \
+        java-11-openjdk-devel \
+        libcurl-devel \
+        libxslt \
         lz4 \
         lz4-devel \
         lz4-static \
         mono-devel \
-        rh-git218 \
         rh-python36 \
-        rh-python36-devel \
+        rh-python36-python-devel \
         rh-ruby26 \
         rpm-build \
+        tcl-devel \
         unzip \
         wget && \
     yum clean all && \
     rm -rf /var/cache/yum
 
-# install Ninja
+# build/install git
+RUN source /opt/rh/devtoolset-8/enable && \
+    curl -Ls https://github.com/git/git/archive/v2.30.0.tar.gz -o git.tar.gz && \
+    echo "8db4edd1a0a74ebf4b78aed3f9e25c8f2a7db3c00b1aaee94d1e9834fae24e61  git.tar.gz" > git-sha.txt && \
+    sha256sum -c git-sha.txt && \
+    mkdir git && \
+    tar --strip-components 1 --no-same-owner --directory git -xf git.tar.gz && \
+    cd git && \
+    make configure && \
+    ./configure \
+    && make && \
+    make install && \
+    rm -rf /tmp/*
+
+# build/install ninja
 RUN source /opt/rh/devtoolset-8/enable && \
     curl -Ls https://github.com/ninja-build/ninja/archive/v1.9.0.zip -o ninja.zip && \
+    echo "8e2e654a418373f10c22e4cc9bdbe9baeca8527ace8d572e0b421e9d9b85b7ef  ninja.zip" > ninja-sha.txt && \
+    sha256sum -c ninja-sha.txt && \
     unzip ninja.zip && \
     cd ninja-1.9.0 && \
     ./configure.py --bootstrap && \
@@ -54,15 +76,15 @@ RUN curl -Ls https://github.com/Kitware/CMake/releases/download/v3.13.4/cmake-3.
     cp -r cmake/* /usr/local/ && \
     rm -rf /tmp/*
 
-# install LLVM
+# build/install LLVM
 RUN source /opt/rh/devtoolset-8/enable && \
     curl -Ls https://github.com/llvm/llvm-project/releases/download/llvmorg-11.0.0/llvm-project-11.0.0.tar.xz -o llvm.tar.xz && \
     echo "b7b639fc675fa1c86dd6d0bc32267be9eb34451748d2efd03f674b773000e92b  llvm.tar.xz" > llvm-sha.txt && \
     sha256sum -c llvm-sha.txt && \
-    mkdir llvm && \
-    tar --strip-components 1 --no-same-owner --directory llvm -xf llvm.tar.xz && \
-    mkdir build && \
-    cd build && \
+    mkdir llvm-project && \
+    tar --strip-components 1 --no-same-owner --directory llvm-project -xf llvm.tar.xz && \
+    mkdir -p llvm-project/build && \
+    cd llvm-project/build && \
     cmake \
         -DCMAKE_BUILD_TYPE=Release \
         -G Ninja \
@@ -70,13 +92,13 @@ RUN source /opt/rh/devtoolset-8/enable && \
         -DLLVM_INCLUDE_TESTS=OFF \
         -DLLVM_ENABLE_PROJECTS="clang;clang-tools-extra;compiler-rt;libcxx;libcxxabi;libunwind;lld;lldb" \
         -DLLVM_STATIC_LINK_CXX_STDLIB=ON \
-        ../llvm/llvm && \
+        ../llvm && \
     cmake --build . && \
     cmake --build . --target install && \
-    cd .. && \
+    cd ../.. && \
     rm -rf /tmp/*
 
-# install openssl
+# build/install openssl
 RUN source /opt/rh/devtoolset-8/enable && \
     curl -Ls https://www.openssl.org/source/openssl-1.1.1h.tar.gz -o openssl.tar.gz && \
     echo "5c9ca8774bd7b03e5784f26ae9e9e6d749c9da2438545077e6b3d755a06595d9  openssl.tar.gz" > openssl-sha.txt && \
@@ -91,14 +113,13 @@ RUN source /opt/rh/devtoolset-8/enable && \
     cd .. && \
     rm -rf /tmp/*
 
-# install RocksDB
+# install rocksdb to /opt
 RUN curl -Ls https://github.com/facebook/rocksdb/archive/v6.10.1.tar.gz -o rocksdb.tar.gz && \
     echo "d573d2f15cdda883714f7e0bc87b814a8d4a53a82edde558f08f940e905541ee  rocksdb.tar.gz" > rocksdb-sha.txt && \
     sha256sum -c rocksdb-sha.txt && \
     tar --directory /opt -xf rocksdb.tar.gz && \
     rm -rf /tmp/*
 
-# install Boost
 # install boost 1.67 to /opt
 RUN curl -Ls https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.tar.bz2 -o boost_1_67_0.tar.bz2 && \
     echo "2684c972994ee57fc5632e03bf044746f6eb45d4920c343937a465fd67a5adba  boost_1_67_0.tar.bz2" > boost-sha-67.txt && \
@@ -147,7 +168,7 @@ RUN source /opt/rh/devtoolset-8/enable && \
     cd .. && \
     rm -rf /tmp/*
 
-# Install toml11
+# build/install toml
 RUN source /opt/rh/devtoolset-8/enable && \
     curl -Ls https://github.com/ToruNiina/toml11/archive/v3.4.0.tar.gz -o toml.tar.gz && \
     echo "bc6d733efd9216af8c119d8ac64a805578c79cc82b813e4d1d880ca128bd154d  toml.tar.gz" > toml-sha256.txt && \
@@ -176,3 +197,5 @@ RUN source /opt/rh/devtoolset-8/enable && \
     make install && \
     cd .. && \
     rm -rf /tmp/*
+
+RUN curl -Ls https://github.com/manticoresoftware/manticoresearch/raw/master/misc/junit/ctest2junit.xsl -o /opt/ctest2junit.xsl
