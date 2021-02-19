@@ -132,7 +132,8 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @param selector the relative key location to resolve
 	 *
-	 * @return a {@code CompletableFuture} which will be set to an absolute database key
+	 * @return a {@code CompletableFuture} which will be set to an absolute database key. 
+	 *         If no key is found, then a byte array with length 0 will be returned.
 	 */
 	CompletableFuture<byte[]> getKey(KeySelector selector);
 

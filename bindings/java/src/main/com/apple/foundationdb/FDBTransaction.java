@@ -95,9 +95,9 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		//  getRange -> KeySelectors
 		///////////////////
 		@Override
-		public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
-				int limit, boolean reverse, StreamingMode mode) {
-			return new RangeQuery(FDBTransaction.this, true, begin, end, limit, reverse, mode,timer);
+		public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end, int limit, boolean reverse,
+				StreamingMode mode) {
+			return new RangeQuery(FDBTransaction.this, true, begin, end, limit, reverse, mode, timer);
 		}
 		@Override
 		public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
@@ -342,9 +342,9 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	//  getRange -> KeySelectors
 	///////////////////
 	@Override
-	public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
-			int limit, boolean reverse, StreamingMode mode) {
-		return new RangeQuery(this, false, begin, end, limit, reverse, mode,timer);
+	public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end, int limit, boolean reverse,
+			StreamingMode mode) {
+		return new RangeQuery(this, false, begin, end, limit, reverse, mode, timer);
 	}
 	@Override
 	public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
@@ -428,9 +428,27 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 					" -- range get: (%s, %s) limit: %d, bytes: %d, mode: %d, iteration: %d, snap: %s, reverse %s",
 				begin.toString(), end.toString(), rowLimit, targetBytes, streamingMode,
 				iteration, Boolean.toString(isSnapshot), Boolean.toString(reverse)));*/
-			return new FutureResults(
-				Transaction_getRange(getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(),
-									 end.getKey(), end.orEqual(), end.getOffset(), rowLimit, targetBytes,
+
+			/*
+			 * correctness note: KeySelector.exact() isn't a viable start key, because it
+			 * won't return correct results, but it's nice to use from a caller standpoint.
+			 * Bute when KeySelector.exact() is used, the caller is implicitly asking for
+			 * "firstGreaterOrEqual", because that's how Range scans are expected to work
+			 * (i.e. return the range [A,B)). So we go ahead and make that happen. To
+			 * convert from "exact" to "firstGreaterOrEqual", we just move the offset up by
+			 * 1. There are multiple places where we could do this logic, but doing it here
+			 * means that we can avoid some extra object creation.
+			 */
+			int beginOffset = begin.getOffset();
+			if (begin.isExact()) {
+				beginOffset++;
+			}
+			int endOffset = end.getOffset();
+			if (end.isExact()) {
+				endOffset++;
+			}
+			return new FutureResults(Transaction_getRange(getPtr(), begin.getKey(), begin.orEqual(), beginOffset,
+									 end.getKey(), end.orEqual(), endOffset, rowLimit, targetBytes,
 									 streamingMode, iteration, isSnapshot, reverse),
 				FDB.instance().isDirectBufferQueriesEnabled(), executor,timer);
 		} finally {

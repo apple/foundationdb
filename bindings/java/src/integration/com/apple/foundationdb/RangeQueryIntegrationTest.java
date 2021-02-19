@@ -19,16 +19,10 @@
  */
 package com.apple.foundationdb;
 
-import java.util.AbstractMap;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.NavigableMap;
-import java.util.Random;
 import java.util.TreeMap;
-import java.util.concurrent.Callable;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 import com.apple.foundationdb.async.AsyncIterable;
@@ -51,34 +45,34 @@ public class RangeQueryIntegrationTest {
     public static final TestRule dbRule = RequiresDatabase.require();
     private static final FDB fdb = FDB.selectAPIVersion(700);
 
-    private void writeReadTest(NavigableMap<byte[],byte[]> dataToLoad, Consumer<Database> test){
-        try(Database db = fdb.open()){
-            db.run(tr->{
-                for(Map.Entry<byte[],byte[]> entry : dataToLoad.entrySet()){
-                    tr.set(entry.getKey(),entry.getValue());
-                }
+    @Test
+    public void getWithExactKeySelectorWillIgnoreRow() throws Exception{
+        // TODO: Move this to its own integration test
+        byte[] key = new byte[]{(byte)0x02,0x01};
+        byte[] value = "testValue".getBytes();
+        NavigableMap<byte[],byte[]> data = new TreeMap<>(FastByteComparisons.comparator());
+        data.put(key,value);
+        writeReadTest(data, (db)->{
+            db.run(tr ->{
+                byte[] selectKey = new byte[]{(byte)0x01};
+                byte[] shouldBeEmpty = tr.getKey(KeySelector.exact(selectKey)).join();
+                Assert.assertNotNull("Returned a null key!",shouldBeEmpty);
+                Assert.assertEquals("Did not return an empty key!",0,shouldBeEmpty.length);
+
                 return null;
             });
-            try{
-                test.accept(db);
-            }finally{
-                db.run(tr->{
-                    tr.clear(new Range(dataToLoad.firstKey(),ByteArrayUtil.strinc(dataToLoad.lastKey())));
-                    return null;
-                });
-            }
-        }
+        });
+
     }
 
     @Test
-    public void canGetRowWithKeySelector() throws Exception{
-        Random rand = new Random();
-        byte[] key= new byte[128];
-        byte[] value = new byte[128];
-        rand.nextBytes(key);
-        key[0] = (byte)0xEE;
-        rand.nextBytes(value);
+    public void canGetRowWithExactKeySelector() throws Exception{
+        /*
+         * Tests that a row is retrieved if you get a getRange(exact(),exact()).
+         */
 
+        byte[] key = new byte[]{(byte)0xEE,0x01};
+        byte[] value = "testValue".getBytes();
         NavigableMap<byte[],byte[]> data = new TreeMap<>(FastByteComparisons.comparator());
         data.put(key,value);
         writeReadTest(data, (db)->{
@@ -87,9 +81,9 @@ public class RangeQueryIntegrationTest {
                 Assert.assertNotNull("Missing key!",actualValue);
                 Assert.assertArrayEquals("incorrect value!",value, actualValue);
 
+                KeySelector start =  KeySelector.exact(new byte[]{key[0]});
+                KeySelector end = KeySelector.exact(ByteArrayUtil.strinc(start.getKey()));
 
-                KeySelector start =  KeySelector.firstGreaterOrEqual(new byte[]{key[0]});
-                KeySelector end = KeySelector.firstGreaterOrEqual(ByteArrayUtil.strinc(start.getKey()));
                 AsyncIterable<KeyValue> kvIterable = tr.getRange(start,end);
                 AsyncIterator<KeyValue> kvs = kvIterable.iterator();
 
@@ -103,6 +97,71 @@ public class RangeQueryIntegrationTest {
         });
     }
 
+    @Test
+    public void lessThanOrEqualExcludesEndKey() throws Exception{
+        /*
+         * This does a scan on the range [0xAA, lastLessOrEqual(0xAB)), with a single
+         * key in the value {0xAA,0x01}. The key should be ignored because lastLessOrEqual will
+         * identify the end of the range as {0xAA,0x01}, and getRange is exclusive on the end value.
+         */
+        byte[] key = new byte[]{(byte)0xAA,0x01};
+        byte[] value = "testValue".getBytes();
+        NavigableMap<byte[],byte[]> data = new TreeMap<>(FastByteComparisons.comparator());
+        data.put(key,value);
+        writeReadTest(data, (db)->{
+            db.run(tr ->{
+                byte[] actualValue = tr.get(key).join();
+                Assert.assertNotNull("Missing key!",actualValue);
+                Assert.assertArrayEquals("incorrect value!",value, actualValue);
+
+                KeySelector start =  KeySelector.exact(new byte[]{key[0]});
+                KeySelector end = KeySelector.lastLessOrEqual(ByteArrayUtil.strinc(start.getKey()));
+
+                AsyncIterable<KeyValue> kvIterable = tr.getRange(start,end);
+                AsyncIterator<KeyValue> kvs = kvIterable.iterator();
+
+                Assert.assertFalse("Did not return a record!", kvs.hasNext());
+
+                return null;
+            });
+        });
+    }
+
+    @Test
+    public void greaterThanIncludeStartKey() throws Exception{
+        /*
+         * This does a scan on the range [firstGreaterThan(0xBB), 0xBC), with a single
+         * key in the value {0xBB,0x01}. The key should NOT be ignored because firstGreaterThan will
+         * identify the start of the range as {0xBB,0x01}, and getRange is inclusive on the start value
+         */
+        byte[] key = new byte[]{(byte)0xBB,0x01};
+        byte[] value = "testValue".getBytes();
+        NavigableMap<byte[],byte[]> data = new TreeMap<>(FastByteComparisons.comparator());
+        data.put(key,value);
+        writeReadTest(data, (db)->{
+            db.run(tr ->{
+                byte[] actualValue = tr.get(key).join();
+                Assert.assertNotNull("Missing key!",actualValue);
+                Assert.assertArrayEquals("incorrect value!",value, actualValue);
+
+                KeySelector start =  KeySelector.firstGreaterThan(new byte[]{key[0]});
+                KeySelector end = KeySelector.exact(ByteArrayUtil.strinc(new byte[]{key[0]}));
+
+                AsyncIterable<KeyValue> kvIterable = tr.getRange(start,end);
+                AsyncIterator<KeyValue> kvs = kvIterable.iterator();
+
+                Assert.assertTrue("Did not return a record!",kvs.hasNext());
+                KeyValue kv = kvs.next();
+                Assert.assertArrayEquals("Incorrect key",key, kv.getKey());
+                Assert.assertArrayEquals("Incorrect value",value, kv.getValue());
+
+                Assert.assertFalse("Returned too many records!", kvs.hasNext());
+
+                return null;
+            });
+        });
+    }
+
 
     @Test
     public void rangeQueryReturnsResults() throws Exception {
@@ -110,13 +169,9 @@ public class RangeQueryIntegrationTest {
          * A quick test that if you insert a record, then do a range query which
          * includes the record, it'll be returned
          */
-        try(Database db = fdb.open()){
-            db.run(tr ->{
-                tr.set("vcount".getBytes(),"zz".getBytes());
-                return null;
-            });
-
-            try{
+        NavigableMap<byte[],byte[]> map = new TreeMap<>(FastByteComparisons.comparator());
+        map.put("vcount".getBytes(),"zz".getBytes());
+        writeReadTest(map, (db)->{
             db.run(tr->{
                 AsyncIterable<KeyValue> kvs = tr.getRange("v".getBytes(), "y".getBytes());
                 int cnt = 0;
@@ -129,14 +184,7 @@ public class RangeQueryIntegrationTest {
 
                 return null;
             });
-        }finally{
-            db.run(tr ->{
-                //remove what we wrote
-                tr.clear("vcount".getBytes());
-                return null;
-            });
-        }
-        }
+        });
     }
 
     @Test
@@ -145,32 +193,15 @@ public class RangeQueryIntegrationTest {
          * A quick test that if you insert a record, then do a range query which does
          * not include the record, it won't be returned
          */
-        try (Database db = fdb.open()) {
-            db.run(tr -> {
-                tr.set("rangeEmpty".getBytes(), "zz".getBytes());
-                return null;
+        NavigableMap<byte[],byte[]> map = new TreeMap<>(FastByteComparisons.comparator());
+        map.put("rangeEmpty".getBytes(),"zz".getBytes());
+        writeReadTest(map,(db)->{
+            db.run(tr->{
+                    AsyncIterator<KeyValue> kvs = tr.getRange("b".getBytes(), "c".getBytes()).iterator();
+                    Assert.assertFalse("Incorrectly returning data!",kvs.hasNext());
+                    return null;
             });
-
-            try {
-                db.run(tr -> {
-                    AsyncIterable<KeyValue> kvs = tr.getRange("b".getBytes(), "c".getBytes());
-                    int cnt = 0;
-                    for (KeyValue kv : kvs) {
-                        Assert.fail("Found kvs when it really shouldn't!");
-                        cnt++;
-                    }
-                    Assert.assertEquals("Incorrect number of KeyValues returned", 0, cnt);
-
-                    return null;
-                });
-            } finally {
-                db.run(tr -> {
-                    // remove what we wrote
-                    tr.clear("rangeEmpty".getBytes());
-                    return null;
-                });
-            }
-        }
+        });
     }
 
     @Test
@@ -179,32 +210,47 @@ public class RangeQueryIntegrationTest {
          * Make sure that you can return multiple rows if you ask for it. 
          * Hopefully this is large enough to force multiple batches
          */
-        int numRows = 100;
-        try (Database db = fdb.open()) {
-            db.run(tr -> {
-                for(int i=0;i<numRows;i++){
-                    tr.set(("multiRow"+i).getBytes(),("multiValue"+i).getBytes());
+        int numRows =25;
+        TreeMap<byte[],byte[]> data = new TreeMap<>(FastByteComparisons.comparator());
+        for(int i=0;i<numRows;i++){
+            data.put(("multiRow"+i).getBytes(),("multiValue"+i).getBytes());
+        }
+        writeReadTest(data, db->{
+            db.run(tr->{
+                    AsyncIterator<KeyValue> kvs = tr.getRange("multi".getBytes(), "multj".getBytes()).iterator();
+                    Iterator<Map.Entry<byte[],byte[]>> expectedKvs = data.entrySet().iterator();
+                    int cnt = 0;
+                    while(expectedKvs.hasNext()){
+                        Assert.assertTrue("returned range is too small!",kvs.hasNext());
+                        Map.Entry<byte[],byte[]> expectedKv = expectedKvs.next();
+                        KeyValue actualKv = kvs.next();
+                        Assert.assertArrayEquals("["+cnt+"]Incorrect row returned",expectedKv.getKey(),actualKv.getKey());
+                        Assert.assertArrayEquals("["+cnt+"]Incorrect value returned",expectedKv.getValue(),actualKv.getValue());
+                        
+                        cnt++;
+                    }
+                    Assert.assertFalse("Iterator range is too great!",kvs.hasNext());
+                    Assert.assertEquals("Incorrect number of KeyValues returned", numRows, cnt);
+                return null;
+            });
+        });
+    }
+
+    /* ***********************************************************************************************************/
+    /*private helper methods*/
+    private void writeReadTest(NavigableMap<byte[],byte[]> dataToLoad, Consumer<Database> test){
+        try(Database db = fdb.open()){
+            db.run(tr->{
+                for(Map.Entry<byte[],byte[]> entry : dataToLoad.entrySet()){
+                    tr.set(entry.getKey(),entry.getValue());
                 }
                 return null;
             });
-
-            try {
-                db.run(tr -> {
-                    AsyncIterable<KeyValue> kvs = tr.getRange("multi".getBytes(), "multj".getBytes());
-                    int cnt = 0;
-                    for (KeyValue kv : kvs) {
-                        Assert.assertArrayEquals("Incorrect row returned",("multiRow"+cnt).getBytes(),kv.getKey());
-                        Assert.assertArrayEquals("Incorrect value returned",("multiValue"+cnt).getBytes(),kv.getValue());
-                        cnt++;
-                    }
-                    Assert.assertEquals("Incorrect number of KeyValues returned", numRows, cnt);
-
-                    return null;
-                });
-            } finally {
-                db.run(tr -> {
-                    // remove what we wrote
-                    tr.clear("multiRow".getBytes(),"multiRox".getBytes());
+            try{
+                test.accept(db);
+            }finally{
+                db.run(tr->{
+                    tr.clear(new Range(dataToLoad.firstKey(),ByteArrayUtil.strinc(dataToLoad.lastKey())));
                     return null;
                 });
             }
