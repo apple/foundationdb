@@ -48,8 +48,10 @@ public:
 
 	static void create(DatabaseContext* cx, Reference<AsyncVar<ClientDBInfo>> dbInfo);
 	static GlobalConfig& globalConfig();
+
 	const std::any get(KeyRef name);
 	const std::map<KeyRef, std::any> get(KeyRangeRef range);
+
 	Future<Void> onInitialized();
 
 private:
@@ -57,63 +59,8 @@ private:
 	void erase(KeyRef key);
 	void erase(KeyRangeRef range);
 
-	ACTOR static Future<Void> refresh(GlobalConfig* self) {
-		Transaction tr(self->cx);
-		Standalone<RangeResultRef> result = wait(tr.getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
-		for (const auto& kv : result) {
-			KeyRef systemKey = kv.key.removePrefix(globalConfigDataPrefix);
-			self->insert(systemKey, kv.value);
-		}
-		return Void();
-	}
-
-	ACTOR static Future<Void> updater(GlobalConfig* self, Reference<AsyncVar<ClientDBInfo>> dbInfo) {
-		wait(refresh(self));
-		self->initialized.send(Void());
-
-		loop {
-			try {
-				wait(dbInfo->onChange());
-
-				auto& history = dbInfo->get().history;
-				if (history.size() == 0 || (self->lastUpdate < history[0].first && self->lastUpdate != 0)) {
-					// This process missed too many global configuration
-					// history updates or the protocol version changed, so it
-					// must re-read the entire configuration range.
-					wait(refresh(self));
-					self->lastUpdate = dbInfo->get().history.back().contents().first;
-				} else {
-					// Apply history in order, from lowest version to highest
-					// version. Mutation history should already be stored in
-					// ascending version order.
-					for (int i = 0; i < history.size(); ++i) {
-						const std::pair<Version, VectorRef<MutationRef>>& pair = history[i].contents();
-
-						Version version = pair.first;
-						if (version <= self->lastUpdate) {
-							continue;  // already applied this mutation
-						}
-
-						const VectorRef<MutationRef>& mutations = pair.second;
-						for (const auto& mutation : mutations) {
-							if (mutation.type == MutationRef::SetValue) {
-								self->insert(mutation.param1, mutation.param2);
-							} else if (mutation.type == MutationRef::ClearRange) {
-								self->erase(KeyRangeRef(mutation.param1, mutation.param2));
-							} else {
-								ASSERT(false);
-							}
-						}
-
-						ASSERT(version > self->lastUpdate);
-						self->lastUpdate = version;
-					}
-				}
-			} catch (Error& e) {
-				throw;
-			}
-		}
-	}
+	ACTOR static Future<Void> refresh(GlobalConfig* self);
+	ACTOR static Future<Void> updater(GlobalConfig* self, Reference<AsyncVar<ClientDBInfo>> dbInfo);
 
 	Database cx;
 	Future<Void> _updater;

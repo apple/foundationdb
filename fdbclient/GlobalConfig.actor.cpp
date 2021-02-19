@@ -25,7 +25,7 @@
 GlobalConfig::GlobalConfig() : lastUpdate(0) {}
 
 void GlobalConfig::create(DatabaseContext* cx, Reference<AsyncVar<ClientDBInfo>> dbInfo) {
-	auto config = new GlobalConfig{}; // TODO: memory leak?
+	auto config = new GlobalConfig{};
 	config->cx = Database(cx);
 	g_network->setGlobal(INetwork::enGlobalConfig, config);
 	config->_updater = updater(config, dbInfo);
@@ -87,6 +87,64 @@ void GlobalConfig::erase(KeyRangeRef range) {
 			it = data.erase(it);
 		} else {
 			++it;
+		}
+	}
+}
+
+ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
+	Transaction tr(self->cx);
+	Standalone<RangeResultRef> result = wait(tr.getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
+	for (const auto& kv : result) {
+		KeyRef systemKey = kv.key.removePrefix(globalConfigDataPrefix);
+		self->insert(systemKey, kv.value);
+	}
+	return Void();
+}
+
+ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, Reference<AsyncVar<ClientDBInfo>> dbInfo) {
+	wait(self->refresh(self));
+	self->initialized.send(Void());
+
+	loop {
+		try {
+			wait(dbInfo->onChange());
+
+			auto& history = dbInfo->get().history;
+			if (history.size() == 0 || (self->lastUpdate < history[0].first && self->lastUpdate != 0)) {
+				// This process missed too many global configuration
+				// history updates or the protocol version changed, so it
+				// must re-read the entire configuration range.
+				wait(self->refresh(self));
+				self->lastUpdate = dbInfo->get().history.back().contents().first;
+			} else {
+				// Apply history in order, from lowest version to highest
+				// version. Mutation history should already be stored in
+				// ascending version order.
+				for (int i = 0; i < history.size(); ++i) {
+					const std::pair<Version, VectorRef<MutationRef>>& pair = history[i].contents();
+
+					Version version = pair.first;
+					if (version <= self->lastUpdate) {
+						continue;  // already applied this mutation
+					}
+
+					const VectorRef<MutationRef>& mutations = pair.second;
+					for (const auto& mutation : mutations) {
+						if (mutation.type == MutationRef::SetValue) {
+							self->insert(mutation.param1, mutation.param2);
+						} else if (mutation.type == MutationRef::ClearRange) {
+							self->erase(KeyRangeRef(mutation.param1, mutation.param2));
+						} else {
+							ASSERT(false);
+						}
+					}
+
+					ASSERT(version > self->lastUpdate);
+					self->lastUpdate = version;
+				}
+			}
+		} catch (Error& e) {
+			throw;
 		}
 	}
 }
