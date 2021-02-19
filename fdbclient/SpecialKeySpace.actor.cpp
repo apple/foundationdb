@@ -1436,10 +1436,6 @@ ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* gl
 		}
 	}
 
-	// TODO: Should probably be using the commit version...
-	Version readVersion = wait(ryw->getReadVersion());
-	BinaryWriter wr = BinaryWriter(AssumeVersion(g_network->protocolVersion()));
-
 	Arena arena;
 	VectorRef<MutationRef> mutations;
 
@@ -1464,16 +1460,24 @@ ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* gl
 		++iter;
 	}
 
-	wr << std::make_pair(readVersion, mutations);
+	ProtocolVersion protocolVersion = g_network->protocolVersion();
 
 	// Record the mutations in this commit into the global configuration history.
-	Key historyVersionKey = globalConfigHistoryPrefix.withSuffix(std::to_string(readVersion));
-	tr.set(historyVersionKey, wr.toValue());
+	BinaryWriter historyKeyWriter(AssumeVersion(protocolVersion));
+	historyKeyWriter.serializeBytes(globalConfigHistoryPrefix);
+	Key historyKey = addVersionStampAtEnd(historyKeyWriter.toValue());
 
-	ProtocolVersion protocolVersion = g_network->protocolVersion();
-	BinaryWriter versionWriter = BinaryWriter(AssumeVersion(protocolVersion));
-	versionWriter << readVersion << protocolVersion;
-	tr.set(globalConfigVersionKey, versionWriter.toValue());
+	BinaryWriter historyMutationsWriter(AssumeVersion(protocolVersion));
+	historyMutationsWriter << mutations;
+
+	tr.atomicOp(historyKey, historyMutationsWriter.toValue(), MutationRef::SetVersionstampedKey);
+
+	// Write version key to trigger update in cluster controller.
+	tr.atomicOp(globalConfigVersionKey,
+	            BinaryWriter::toValue(protocolVersion, AssumeVersion(protocolVersion))
+	                .withPrefix(LiteralStringRef("0123456789")) // placeholder for versionstamp
+	                .withSuffix(LiteralStringRef("\x00\x00\x00\x00")),
+	            MutationRef::SetVersionstampedValue);
 
 	return Optional<std::string>();
 

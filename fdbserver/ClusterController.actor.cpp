@@ -3205,9 +3205,10 @@ ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db
 
 				if (globalConfigVersion.present()) {
 					BinaryReader versionReader = BinaryReader(globalConfigVersion.get(), AssumeVersion(g_network->protocolVersion()));
-					Version version;
-					ProtocolVersion protocolVersion;
-					versionReader >> version >> protocolVersion;
+					int64_t commitVersion;
+					int16_t serializationOrder;
+					state ProtocolVersion protocolVersion;
+					versionReader >> commitVersion >> serializationOrder >> protocolVersion;
 
 					state Arena arena;
 					if (protocolVersion == g_network->protocolVersion()) {
@@ -3218,9 +3219,21 @@ ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db
 						clientInfo.history.clear();
 
 						for (const auto& kv : globalConfigHistory) {
-							BinaryReader rd = BinaryReader(kv.value, AssumeVersion(g_network->protocolVersion()));
 							Standalone<std::pair<Version, VectorRef<MutationRef>>> data;
-							rd >> data >> arena;
+
+							// Read commit version out of versionstamp at end of key.
+							BinaryReader versionReader = BinaryReader(kv.key.removePrefix(globalConfigHistoryPrefix), AssumeVersion(protocolVersion));
+							Version historyCommitVersion;
+							versionReader >> historyCommitVersion;
+							historyCommitVersion = bigEndian64(historyCommitVersion);
+							data.first = historyCommitVersion;
+
+							// Read the list of mutations that occurred at this version.
+							BinaryReader mutationReader = BinaryReader(kv.value, AssumeVersion(protocolVersion));
+							VectorRef<MutationRef> mutations;
+							mutationReader >> mutations;
+							data.second = VectorRef(arena, mutations);
+
 							clientInfo.history.push_back(data);
 						}
 
