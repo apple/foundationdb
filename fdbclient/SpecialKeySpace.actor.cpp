@@ -1377,23 +1377,26 @@ Future<Standalone<RangeResultRef>> GlobalConfigImpl::getRange(ReadYourWritesTran
                                                               KeyRangeRef kr) const {
 	Standalone<RangeResultRef> result;
 
-	// if (kr.begin != kr.end) {
-	// 	ryw->setSpecialKeySpaceErrorMsg("get range disabled, please fetch a single key");
-	// 	throw special_keys_api_failure();
-	// }
-
 	auto& globalConfig = GlobalConfig::globalConfig();
-	KeyRef key = kr.begin.removePrefix(getKeyRange().begin);
-	const std::any& any = globalConfig.get(key);
-	if (any.has_value()) {
-		if (any.type() == typeid(Standalone<StringRef>)) {
-			result.push_back_deep(result.arena(), KeyValueRef(kr.begin, std::any_cast<Standalone<StringRef>>(globalConfig.get(key)).contents()));
-		} else if (any.type() == typeid(int64_t)) {
-			result.push_back_deep(result.arena(), KeyValueRef(kr.begin, std::to_string(std::any_cast<int64_t>(globalConfig.get(key)))));
-		} else {
-			ASSERT(false);
+	KeyRangeRef modified = KeyRangeRef(kr.begin.removePrefix(getKeyRange().begin), kr.end.removePrefix(getKeyRange().begin));
+	std::map<KeyRef, std::any> values = globalConfig.get(modified);
+	for (const auto& [key, any] : values) {
+		Key prefixedKey = key.withPrefix(getKeyRange().begin);
+		if (any.has_value()) {
+			if (any.type() == typeid(Standalone<StringRef>)) {
+				result.push_back_deep(result.arena(), KeyValueRef(prefixedKey, std::any_cast<Standalone<StringRef>>(any).contents()));
+			} else if (any.type() == typeid(int64_t)) {
+				result.push_back_deep(result.arena(), KeyValueRef(prefixedKey, std::to_string(std::any_cast<int64_t>(any))));
+			} else if (any.type() == typeid(float)) {
+				result.push_back_deep(result.arena(), KeyValueRef(prefixedKey, std::to_string(std::any_cast<float>(any))));
+			} else if (any.type() == typeid(double)) {
+				result.push_back_deep(result.arena(), KeyValueRef(prefixedKey, std::to_string(std::any_cast<double>(any))));
+			} else {
+				ASSERT(false);
+			}
 		}
 	}
+
 	return result;
 }
 

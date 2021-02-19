@@ -27,6 +27,7 @@
 #define FDBCLIENT_GLOBALCONFIG_ACTOR_H
 
 #include <any>
+#include <map>
 #include <unordered_map>
 
 #include "fdbclient/CommitProxyInterface.h"
@@ -47,11 +48,14 @@ public:
 
 	static void create(DatabaseContext* cx, Reference<AsyncVar<ClientDBInfo>> dbInfo);
 	static GlobalConfig& globalConfig();
-	const std::any get(StringRef name);
+	const std::any get(KeyRef name);
+	const std::map<KeyRef, std::any> get(KeyRangeRef range);
 	Future<Void> onInitialized();
 
 private:
 	void insert(KeyRef key, ValueRef value);
+	void erase(KeyRef key);
+	void erase(KeyRangeRef range);
 
 	ACTOR static Future<Void> refresh(GlobalConfig* self) {
 		Transaction tr(self->cx);
@@ -83,28 +87,19 @@ private:
 					// version. Mutation history should already be stored in
 					// ascending version order.
 					for (int i = 0; i < history.size(); ++i) {
-						std::pair<Version, VectorRef<MutationRef>> pair = history[i].contents();
+						const std::pair<Version, VectorRef<MutationRef>>& pair = history[i].contents();
 
 						Version version = pair.first;
 						if (version <= self->lastUpdate) {
 							continue;  // already applied this mutation
 						}
 
-						VectorRef<MutationRef>& mutations = pair.second;
+						const VectorRef<MutationRef>& mutations = pair.second;
 						for (const auto& mutation : mutations) {
 							if (mutation.type == MutationRef::SetValue) {
 								self->insert(mutation.param1, mutation.param2);
 							} else if (mutation.type == MutationRef::ClearRange) {
-								// TODO: Could be optimized if using std::map..
-								KeyRangeRef range(mutation.param1, mutation.param2);
-								auto it = self->data.begin();
-								while (it != self->data.end()) {
-									if (range.contains(it->first)) {
-										it = self->data.erase(it);
-									} else {
-										++it;
-									}
-								}
+								self->erase(KeyRangeRef(mutation.param1, mutation.param2));
 							} else {
 								ASSERT(false);
 							}
@@ -123,8 +118,7 @@ private:
 	Database cx;
 	Future<Void> _updater;
 	Promise<Void> initialized;
-	// TODO: Arena to store all data in
-	// TODO: Change to std::map for faster range access
+	Arena arena;
 	std::unordered_map<StringRef, std::any> data;
 	Version lastUpdate;
 };

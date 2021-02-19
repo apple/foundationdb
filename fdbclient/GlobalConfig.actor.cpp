@@ -37,7 +37,7 @@ GlobalConfig& GlobalConfig::globalConfig() {
 	return *reinterpret_cast<GlobalConfig*>(res);
 }
 
-const std::any GlobalConfig::get(StringRef name) {
+const std::any GlobalConfig::get(KeyRef name) {
 	auto it = data.find(name);
 	if (it == data.end()) {
 		return std::any{};
@@ -45,21 +45,48 @@ const std::any GlobalConfig::get(StringRef name) {
 	return it->second;
 }
 
+const std::map<KeyRef, std::any> GlobalConfig::get(KeyRangeRef range) {
+	std::map<KeyRef, std::any> results;
+	for (const auto& [key, value] : data) {
+		if (range.contains(key)) {
+			results[key] = value;
+		}
+	}
+	return results;
+}
+
 Future<Void> GlobalConfig::onInitialized() {
 	return initialized.getFuture();
 }
 
 void GlobalConfig::insert(KeyRef key, ValueRef value) {
+	KeyRef stableKey = KeyRef(arena, key);
 	Tuple t = Tuple::unpack(value);
 	if (t.getType(0) == Tuple::ElementType::UTF8) {
-		data[key] = t.getString(0);
+		data[stableKey] = t.getString(0);
 	} else if (t.getType(0) == Tuple::ElementType::INT) {
-		data[key] = t.getInt(0);
+		data[stableKey] = t.getInt(0);
 	} else if (t.getType(0) == Tuple::ElementType::FLOAT) {
-		data[key] = t.getFloat(0);
+		data[stableKey] = t.getFloat(0);
 	} else if (t.getType(0) == Tuple::ElementType::DOUBLE) {
-		data[key] = t.getDouble(0);
+		data[stableKey] = t.getDouble(0);
 	} else {
 		ASSERT(false);
+	}
+}
+
+void GlobalConfig::erase(KeyRef key) {
+	erase(KeyRangeRef(key, keyAfter(key)));
+}
+
+void GlobalConfig::erase(KeyRangeRef range) {
+	// TODO: Memory leak -- memory for key remains allocated in arena
+	auto it = data.begin();
+	while (it != data.end()) {
+		if (range.contains(it->first)) {
+			it = data.erase(it);
+		} else {
+			++it;
+		}
 	}
 }
