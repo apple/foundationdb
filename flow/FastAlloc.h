@@ -22,6 +22,8 @@
 #define FLOW_FASTALLOC_H
 #pragma once
 
+#include "jemalloc/jemalloc.h"
+
 #include "flow/Error.h"
 #include "flow/Platform.h"
 #include "flow/config.h"
@@ -191,19 +193,22 @@ template <class Object>
 class FastAllocated {
 public:
 	[[nodiscard]] static void* operator new(size_t s) {
-		if (s != sizeof(Object)) abort();
-		INSTRUMENT_ALLOCATE(typeid(Object).name());
-		void* p = FastAllocator < sizeof(Object) <= 64 ? 64 : nextFastAllocatedSize(sizeof(Object)) > ::allocate();
-		return p;
+		ASSERT(s == sizeof(Object));
+		// return je_malloc(sizeof(Object));
+		// return malloc(sizeof(Object));
+		return FastAllocator < sizeof(Object) <= 64 ? 64 : nextFastAllocatedSize(sizeof(Object)) > ::allocate();
+		// return FastAllocator<nextFastAllocatedSize(sizeof(Object))>::allocate();
 	}
 
 	static void operator delete(void* s) {
-		INSTRUMENT_RELEASE(typeid(Object).name());
-		FastAllocator<sizeof(Object) <= 64 ? 64 : nextFastAllocatedSize(sizeof(Object))>::release(s);
+		// return je_sdallocx(s, sizeof(Object), /*flags*/ 0);
+		// return free(s);
+		return FastAllocator < sizeof(Object) <= 64 ? 64 : nextFastAllocatedSize(sizeof(Object)) > ::release(s);
+		// return FastAllocator<nextFastAllocatedSize(sizeof(Object))>::release(s);
 	}
 	// Redefine placement new so you can still use it
-	static void* operator new( size_t, void* p ) { return p; }
-	static void operator delete( void*, void* ) { }
+	static void* operator new(size_t, void* p) { return p; }
+	static void operator delete(void*, void*) {}
 };
 
 [[nodiscard]] inline void* allocateFast(int size) {
