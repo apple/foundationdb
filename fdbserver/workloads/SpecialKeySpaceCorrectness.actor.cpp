@@ -28,7 +28,6 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h"
 
