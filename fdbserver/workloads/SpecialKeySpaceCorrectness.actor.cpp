@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include "boost/lexical_cast.hpp"
+
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -25,6 +27,8 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/Arena.h"
+#include "flow/IRandom.h"
 #include "flow/actorcompiler.h"
 
 struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
@@ -434,9 +438,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		}
 		// test case when registered range is the same as the underlying module
 		try {
-			state Standalone<RangeResultRef> result = wait(tx->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
-			                         LiteralStringRef("\xff\xff/worker_interfaces0")),
-			             CLIENT_KNOBS->TOO_MANY));
+			state Standalone<RangeResultRef> result =
+			    wait(tx->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+			                                  LiteralStringRef("\xff\xff/worker_interfaces0")),
+			                      CLIENT_KNOBS->TOO_MANY));
 			// We should have at least 1 process in the cluster
 			ASSERT(result.size());
 			state KeyValueRef entry = deterministicRandom()->randomChoice(result);
@@ -901,6 +906,105 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			tx->reset();
 		} catch (Error& e) {
 			wait(tx->onError(e));
+		}
+		// profile client get
+		loop {
+			try {
+				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				// client_txn_sample_rate
+				state Optional<Value> txnSampleRate =
+				    wait(tx->get(LiteralStringRef("client_txn_sample_rate")
+				                     .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile"))));
+				ASSERT(txnSampleRate.present());
+				Optional<Value> txnSampleRateKey = wait(tx->get(fdbClientInfoTxnSampleRate));
+				if (txnSampleRateKey.present()) {
+					const double sampleRateDbl =
+					    BinaryReader::fromStringRef<double>(txnSampleRateKey.get(), Unversioned());
+					if (!std::isinf(sampleRateDbl)) {
+						ASSERT(txnSampleRate.get().toString() == boost::lexical_cast<std::string>(sampleRateDbl));
+					} else {
+						ASSERT(txnSampleRate.get().toString() == "default");
+					}
+				} else {
+					ASSERT(txnSampleRate.get().toString() == "default");
+				}
+				// client_txn_size_limit
+				state Optional<Value> txnSizeLimit =
+				    wait(tx->get(LiteralStringRef("client_txn_size_limit")
+				                     .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile"))));
+				ASSERT(txnSizeLimit.present());
+				Optional<Value> txnSizeLimitKey = wait(tx->get(fdbClientInfoTxnSizeLimit));
+				if (txnSizeLimitKey.present()) {
+					const int64_t sizeLimit =
+					    BinaryReader::fromStringRef<int64_t>(txnSizeLimitKey.get(), Unversioned());
+					if (sizeLimit != -1) {
+						ASSERT(txnSizeLimit.get().toString() == boost::lexical_cast<std::string>(sizeLimit));
+					} else {
+						ASSERT(txnSizeLimit.get().toString() == "default");
+					}
+				} else {
+					ASSERT(txnSizeLimit.get().toString() == "default");
+				}
+				tx->reset();
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevDebug, "ProfileClientGet").error(e);
+				wait(tx->onError(e));
+			}
+		}
+		{
+			state double r_sample_rate = deterministicRandom()->random01();
+			state int64_t r_size_limit = deterministicRandom()->randomInt64(1e3, 1e6);
+			// update the sample rate and size limit
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tx->set(LiteralStringRef("client_txn_sample_rate")
+					            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile")),
+					        Value(boost::lexical_cast<std::string>(r_sample_rate)));
+					tx->set(LiteralStringRef("client_txn_size_limit")
+					            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile")),
+					        Value(boost::lexical_cast<std::string>(r_size_limit)));
+					wait(tx->commit());
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					wait(tx->onError(e));
+				}
+			}
+			// commit successfully, verify the system key changed
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					Optional<Value> sampleRate = wait(tx->get(fdbClientInfoTxnSampleRate));
+					ASSERT(sampleRate.present());
+					ASSERT(r_sample_rate == BinaryReader::fromStringRef<double>(sampleRate.get(), Unversioned()));
+					Optional<Value> sizeLimit = wait(tx->get(fdbClientInfoTxnSizeLimit));
+					ASSERT(sizeLimit.present());
+					ASSERT(r_size_limit == BinaryReader::fromStringRef<int64_t>(sizeLimit.get(), Unversioned()));
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					wait(tx->onError(e));
+				}
+			}
+			// Change back to default
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tx->set(LiteralStringRef("client_txn_sample_rate")
+					            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile")),
+					        LiteralStringRef("default"));
+					tx->set(LiteralStringRef("client_txn_size_limit")
+					            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile")),
+					        LiteralStringRef("default"));
+					wait(tx->commit());
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					wait(tx->onError(e));
+				}
+			}
 		}
 		return Void();
 	}
