@@ -2091,6 +2091,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 			}
 		}
 	}
+	// Recruit storage cache role. The storage cache project is paused. Its code path is unlikely used.
 	Optional<uint16_t> newStorageCache = req.storageCacheInterf.present() ? req.storageCacheInterf.get().first : Optional<uint16_t>();
 	auto& cacheInfo = self->id_worker[w.locality.processId()].storageCacheInfo;
 	if (req.storageCacheInterf.present()) {

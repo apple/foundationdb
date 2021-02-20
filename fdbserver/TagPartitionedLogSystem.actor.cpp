@@ -949,6 +949,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
+	// Return a peek cursor that peeks data at tag from the begin version to either the recovery version if peeking at
+	// the latest epoch or the peek cursor's epoch's end version if peeking at an old epoch.
 	Reference<IPeekCursor> peekLogRouter(UID dbgid, Version begin, Tag tag) final {
 		bool found = false;
 		for (const auto& log : tLogs) {
