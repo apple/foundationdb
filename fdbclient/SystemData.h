@@ -232,14 +232,14 @@ std::string encodeFailedServersKey(AddressExclusion const&);
 
 //   "\xff/globalConfig/[[option]]" := "value"
 //	 An umbrella prefix for global configuration data synchronized to all nodes.
-extern const KeyRangeRef globalConfigData;
-extern const KeyRef globalConfigDataPrefix;
+// extern const KeyRangeRef globalConfigData;
+// extern const KeyRef globalConfigDataPrefix;
 
 //   "\xff/globalConfig/k/[[key]]" := "value"
 //	 Key-value pairs that have been set. The range this keyspace represents
 //	 contains all globally configured options.
 extern const KeyRangeRef globalConfigDataKeys;
-extern const KeyRef globalConfigDataPrefix;
+extern const KeyRef globalConfigKeysPrefix;
 
 //   "\xff/globalConfig/h/[[version]]" := "value"
 //   Maps a commit version to a list of mutations made to the global

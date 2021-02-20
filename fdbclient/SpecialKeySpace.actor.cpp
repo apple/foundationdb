@@ -1449,7 +1449,7 @@ ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* gl
 	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::iterator iter = ranges.begin();
 	while (iter != ranges.end()) {
 		Key bareKey = iter->begin().removePrefix(globalConfig->getKeyRange().begin);
-		Key systemKey = bareKey.withPrefix(globalConfigDataPrefix);
+		Key systemKey = bareKey.withPrefix(globalConfigKeysPrefix);
 		std::pair<bool, Optional<Value>> entry = iter->value();
 		if (entry.first) {
 			if (entry.second.present()) {
@@ -1497,6 +1497,8 @@ void GlobalConfigImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& 
 void GlobalConfigImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
 }
+
+TracingOptionsImpl::TracingOptionsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
 Future<Standalone<RangeResultRef>> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw,
                                                                 KeyRangeRef kr) const {
