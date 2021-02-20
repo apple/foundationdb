@@ -173,14 +173,11 @@ void addLaggingRequest(Future<Optional<Reply>> reply, Promise<Void> requestFinis
 // list of servers. When model is set, load balance among alternatives in the same DC, aiming to balance request queue
 // length on these interfaces. If too many interfaces in the same DC are bad, try remote interfaces.
 ACTOR template <class Interface, class Request, class Multi>
-Future< REPLY_TYPE(Request) > loadBalance(
-	Reference<MultiInterface<Multi>> alternatives,
-	RequestStream<Request> Interface::* channel,
-	Request request = Request(),
-	TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
-	bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
-	QueueModel* model = NULL) 
-{
+Future<REPLY_TYPE(Request)> loadBalance(
+    Reference<MultiInterface<Multi>> alternatives, RequestStream<Request> Interface::*channel,
+    Request request = Request(), TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
+    bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
+    QueueModel* model = NULL) {
 	state Future<Optional<REPLY_TYPE(Request)>> firstRequest;
 	state Optional<uint64_t> firstRequestEndpoint;
 	state Future<Optional<REPLY_TYPE(Request)>> secondRequest;

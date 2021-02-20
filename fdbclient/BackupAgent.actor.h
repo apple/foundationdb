@@ -377,6 +377,9 @@ public:
 	Reference<FutureBucket> futureBucket;
 };
 
+template<> inline Tuple Codec<FileBackupAgent::ERestoreState>::pack(FileBackupAgent::ERestoreState const &val) { return Tuple().append(val); }
+template<> inline FileBackupAgent::ERestoreState Codec<FileBackupAgent::ERestoreState>::unpack(Tuple const &val) { return (FileBackupAgent::ERestoreState)val.getInt(0); }
+
 class DatabaseBackupAgent : public BackupAgentBase {
 public:
 	DatabaseBackupAgent();
@@ -428,7 +431,8 @@ public:
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return discontinueBackup(tr, tagName); });
 	}
 
-	Future<Void> abortBackup(Database cx, Key tagName, bool partial = false, bool abortOldBackup = false, bool dstOnly = false);
+	Future<Void> abortBackup(Database cx, Key tagName, bool partial = false, bool abortOldBackup = false,
+	                         bool dstOnly = false, bool waitForDestUID = false);
 
 	Future<std::string> getStatus(Database cx, int errorLimit, Key tagName);
 

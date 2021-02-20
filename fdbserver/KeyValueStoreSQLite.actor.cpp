@@ -25,12 +25,14 @@
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Hash3.h"
+#include "flow/xxhash.h"
 
 extern "C" {
 #include "fdbserver/sqlite/sqliteInt.h"
 u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 }
 #include "flow/ThreadPrimitives.h"
+#include "fdbserver/VFSAsync.h"
 #include "fdbserver/template_fdb.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -100,34 +102,58 @@ struct PageChecksumCodec {
 			return true;
 		}
 
-		SumType sum;
+		SumType crc32Sum;
 		if (pSumInPage->part1 == 0) {
-			// part1 being 0 indicates with high probability that a CRC32 checksum
+			// part1 being 0 indicates with very high probability that a CRC32 checksum
 			// was used, so check that first. If this checksum fails, there is still
-			// some chance the page was written with hashlittle2, so fall back to checking
-			// hashlittle2
-			sum.part1 = 0;
-			sum.part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
-			if (sum == *pSumInPage) return true;
+			// some chance the page was written with another checksum algorithm
+			crc32Sum.part1 = 0;
+			crc32Sum.part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
+			if (crc32Sum == *pSumInPage) return true;
 		}
 
+		// Try xxhash3
+		SumType xxHash3Sum;
+		if ((pSumInPage->part1 >> 24) == 0) {
+			// The first 8 bits of part1 being 0 indicates with high probability that an
+			// xxHash3 checksum was used, so check that next. If this checksum fails, there is
+			// still some chance the page was written with hashlittle2, so fall back to checking
+			// hashlittle2
+			auto xxHash3 = XXH3_64bits(data, dataLen);
+			xxHash3Sum.part1 = static_cast<uint32_t>((xxHash3 >> 32) & 0x00ffffff);
+			xxHash3Sum.part2 = static_cast<uint32_t>(xxHash3 & 0xffffffff);
+			if (xxHash3Sum == *pSumInPage) {
+				TEST(true); // Read xxHash3 checksum
+				return true;
+			}
+		}
+
+		// Try hashlittle2
 		SumType hashLittle2Sum;
 		hashLittle2Sum.part1 = pageNumber; // DO NOT CHANGE
 		hashLittle2Sum.part2 = 0x5ca1ab1e;
 		hashlittle2(pData, dataLen, &hashLittle2Sum.part1, &hashLittle2Sum.part2);
-		if (hashLittle2Sum == *pSumInPage) return true;
+		if (hashLittle2Sum == *pSumInPage) {
+			TEST(true); // Read HashLittle2 checksum
+			return true;
+		}
 
 		if (!silent) {
 			TraceEvent trEvent(SevError, "SQLitePageChecksumFailure");
 			trEvent.error(checksum_failed())
-			    .detail("CodecPageSize", pageSize)
-			    .detail("CodecReserveSize", reserveSize)
-			    .detail("Filename", filename)
-			    .detail("PageNumber", pageNumber)
-			    .detail("PageSize", pageLen)
-			    .detail("ChecksumInPage", pSumInPage->toString())
-			    .detail("ChecksumCalculatedHL2", hashLittle2Sum.toString());
-			if (pSumInPage->part1 == 0) trEvent.detail("ChecksumCalculatedCRC", sum.toString());
+				.detail("CodecPageSize", pageSize)
+				.detail("CodecReserveSize", reserveSize)
+				.detail("Filename", filename)
+				.detail("PageNumber", pageNumber)
+				.detail("PageSize", pageLen)
+				.detail("ChecksumInPage", pSumInPage->toString())
+				.detail("ChecksumCalculatedHL2", hashLittle2Sum.toString());
+			if (pSumInPage->part1 == 0) {
+				trEvent.detail("ChecksumCalculatedCRC", crc32Sum.toString());
+			}
+			if (pSumInPage->part1 >> 24 == 0) {
+				trEvent.detail("ChecksumCalculatedXXHash3", xxHash3Sum.toString());
+			}
 		}
 		return false;
 	}
@@ -211,9 +237,19 @@ struct SQLiteDB : NonCopyable {
 	void open(bool writable);
 	void createFromScratch();
 
-	SQLiteDB( std::string filename, bool page_checksums, bool fragment_values): filename(filename), db(NULL), btree(NULL), table(-1), freetable(-1), haveMutex(false), page_checksums(page_checksums), fragment_values(fragment_values) {}
+	SQLiteDB( std::string filename, bool page_checksums, bool fragment_values): filename(filename), db(NULL), btree(NULL), table(-1), freetable(-1), haveMutex(false), page_checksums(page_checksums), fragment_values(fragment_values) {
+		TraceEvent(SevDebug, "SQLiteDBCreate")
+			.detail("This", (void*)this)
+			.detail("Filename", filename)
+			.backtrace();
+	}
 
 	~SQLiteDB() {
+		TraceEvent(SevDebug, "SQLiteDBDestroy")
+			.detail("This", (void*)this)
+			.detail("Filename", filename)
+			.backtrace();
+
 		if (db) {
 			if (haveMutex) {
 				sqlite3_mutex_leave(db->mutex);
@@ -239,10 +275,11 @@ struct SQLiteDB : NonCopyable {
 		//if (deterministicRandom()->random01() < .001) rc = SQLITE_INTERRUPT;
 		if (rc) {
 			// Our exceptions don't propagate through sqlite, so we don't know for sure if the error that caused this was
-			// an injected fault.  Assume that if fault injection is happening, this is an injected fault.
+			// an injected fault.  Assume that if VFSAsyncFile caught an injected Error that it caused this error return code.
 			Error err = io_error();
-			if (g_network->isSimulated() && (g_simulator.getCurrentProcess()->fault_injection_p1 || g_simulator.getCurrentProcess()->machine->machineProcess->fault_injection_p1 || g_simulator.getCurrentProcess()->rebooting))
+			if (g_network->isSimulated() && VFSAsyncFile::checkInjectedError()) {
 				err = err.asInjectedFault();
+			}
 
 			if (db)
 				db->errCode = rc;
@@ -252,6 +289,7 @@ struct SQLiteDB : NonCopyable {
 			throw err;
 		}
 	}
+
 	void checkpoint( bool restart ) {
 		int logSize=0, checkpointCount=0;
 		//double t = timer();
@@ -282,7 +320,7 @@ struct SQLiteDB : NonCopyable {
 		int tables[] = {1, table, freetable};
 		TraceEvent("BTreeIntegrityCheckBegin").detail("Filename", filename);
 		char* e = sqlite3BtreeIntegrityCheck(btree, tables, 3, 1000, &errors, verbose);
-		if (!(g_network->isSimulated() && (g_simulator.getCurrentProcess()->fault_injection_p1 || g_simulator.getCurrentProcess()->rebooting))) {
+		if (!(g_network->isSimulated() && VFSAsyncFile::checkInjectedError())) {
 			TraceEvent((errors||e) ? SevError : SevInfo, "BTreeIntegrityCheckResults").detail("Filename", filename).detail("ErrorTotal", errors);
 			if(e != nullptr) {
 				// e is a string containing 1 or more lines.  Create a separate trace event for each line.
@@ -1296,6 +1334,7 @@ int SQLiteDB::checkAllPageChecksums() {
 		.detail("TotalErrors", totalErrors);
 
 	ASSERT(!vfsAsyncIsOpen(filename));
+	ASSERT(!vfsAsyncIsOpen(filename + "-wal"));
 
 	return totalErrors;
 }
@@ -1345,6 +1384,22 @@ void SQLiteDB::open(bool writable) {
 	}
 	if (dbFile.isError()) throw dbFile.getError(); // If we've failed to open the file, throw an exception
 	if (walFile.isError()) throw walFile.getError(); // If we've failed to open the file, throw an exception
+
+	// Set Rate control if SERVER_KNOBS are positive
+	if (SERVER_KNOBS->SQLITE_WRITE_WINDOW_LIMIT > 0 && SERVER_KNOBS->SQLITE_WRITE_WINDOW_SECONDS > 0) {
+		// The writer thread is created before the readers, so it should initialize the rate controls.
+		if(writable) {
+			// Create a new rate control and assign it to both files.
+			Reference<SpeedLimit> rc(
+			    new SpeedLimit(SERVER_KNOBS->SQLITE_WRITE_WINDOW_LIMIT, SERVER_KNOBS->SQLITE_WRITE_WINDOW_SECONDS));
+			dbFile.get()->setRateControl(rc);
+			walFile.get()->setRateControl(rc);
+		} else {
+			// When a reader thread is opened, the rate controls should already be equal and not null
+			ASSERT(dbFile.get()->getRateControl() == walFile.get()->getRateControl());
+			ASSERT(dbFile.get()->getRateControl());
+		}
+	}
 
 	//TraceEvent("KVThreadInitStage").detail("Stage",2).detail("Filename", filename).detail("Writable", writable);
 
@@ -1493,6 +1548,7 @@ private:
 	volatile int64_t freeListPages;
 
 	vector< Reference<ReadCursor> > readCursors;
+	Reference<IAsyncFile> dbFile, walFile;
 
 	struct Reader : IThreadPoolReceiver {
 		SQLiteDB conn;
@@ -1574,6 +1630,7 @@ private:
 	};
 
 	struct Writer : IThreadPoolReceiver {
+		KeyValueStoreSQLite *kvs;
 		SQLiteDB conn;
 		Cursor* cursor;
 		int commits;
@@ -1588,8 +1645,9 @@ private:
 		bool checkAllChecksumsOnOpen;
 		bool checkIntegrityOnOpen;
 
-		explicit Writer( std::string const& filename, bool isBtreeV2, bool checkAllChecksumsOnOpen, bool checkIntegrityOnOpen, volatile int64_t& writesComplete, volatile SpringCleaningStats& springCleaningStats, volatile int64_t& diskBytesUsed, volatile int64_t& freeListPages, UID dbgid, vector<Reference<ReadCursor>>* pReadThreads )
-			: conn( filename, isBtreeV2, isBtreeV2 ),
+		explicit Writer( KeyValueStoreSQLite *kvs, bool isBtreeV2, bool checkAllChecksumsOnOpen, bool checkIntegrityOnOpen, volatile int64_t& writesComplete, volatile SpringCleaningStats& springCleaningStats, volatile int64_t& diskBytesUsed, volatile int64_t& freeListPages, UID dbgid, vector<Reference<ReadCursor>>* pReadThreads )
+			: kvs(kvs),
+			  conn( kvs->filename, isBtreeV2, isBtreeV2 ),
 			  commits(), setsThisCommit(),
 			  freeTableEmpty(false),
 			  writesComplete(writesComplete),
@@ -1619,6 +1677,8 @@ private:
 				}
 			}
 			conn.open(true);
+			kvs->dbFile = conn.dbFile;
+			kvs->walFile = conn.walFile;
 
 			//If a wal file fails during the commit process before finishing a checkpoint, then it is possible that our wal file will be non-empty
 			//when we reload it.  We execute a checkpoint here to remedy that situation.  This call must come before before creating a cursor because
@@ -1630,7 +1690,7 @@ private:
 			if (checkIntegrityOnOpen || EXPENSIVE_VALIDATION) {
 				if(conn.check(false) != 0) {
 					// A corrupt btree structure must not be used.
-					if (g_network->isSimulated() && (g_simulator.getCurrentProcess()->fault_injection_p1 || g_simulator.getCurrentProcess()->machine->machineProcess->fault_injection_p1 || g_simulator.getCurrentProcess()->rebooting)) {
+					if (g_network->isSimulated() && VFSAsyncFile::checkInjectedError()) {
 						throw file_corrupt().asInjectedFault();
 					} else {
 						throw file_corrupt();
@@ -1855,6 +1915,24 @@ private:
 		}
 	}
 
+	void disableRateControl() {
+		if(dbFile && dbFile->getRateControl()) {
+			TraceEvent(SevDebug, "KeyValueStoreSQLiteShutdownRateControl").detail("Filename", dbFile->getFilename());
+			Reference<IRateControl> rc = dbFile->getRateControl();
+			dbFile->setRateControl({});
+			rc->wakeWaiters();
+		}
+		dbFile.clear();
+
+		if(walFile && walFile->getRateControl()) {
+			TraceEvent(SevDebug, "KeyValueStoreSQLiteShutdownRateControl").detail("Filename", walFile->getFilename());
+			Reference<IRateControl> rc = walFile->getRateControl();
+			walFile->setRateControl({});
+			rc->wakeWaiters();
+		}
+		walFile.clear();
+	}
+
 	ACTOR static Future<Void> stopOnError( KeyValueStoreSQLite* self ) {
 		try {
 			wait( self->readThreads->getError() || self->writeThread->getError() );
@@ -1863,8 +1941,9 @@ private:
 			if (e.code() == error_code_actor_cancelled)
 				throw;
 
-			self->readThreads->stop(e);
-			self->writeThread->stop(e);
+			self->disableRateControl();
+			self->readThreads->stop(e).isReady();
+			self->writeThread->stop(e).isReady();
 		}
 
 		return Void();
@@ -1872,8 +1951,13 @@ private:
 
 	ACTOR static void doClose( KeyValueStoreSQLite* self, bool deleteOnClose ) {
 		state Error error = success();
+
+		self->disableRateControl();
+
 		try {
-			TraceEvent("KVClose", self->logID).detail("Del", deleteOnClose);
+			TraceEvent("KVClose", self->logID)
+				.detail("Filename", self->filename)
+				.detail("Del", deleteOnClose);
 			self->starting.cancel();
 			self->cleaning.cancel();
 			self->logging.cancel();
@@ -1884,12 +1968,14 @@ private:
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "KVDoCloseError", self->logID)
-				.error(e,true)
+				.detail("Filename", self->filename)
+				.error(e, true)
 				.detail("Reason", e.code() == error_code_platform_error ? "could not delete database" : "unknown");
 			error = e;
 		}
 
-		TraceEvent("KVClosed", self->logID);
+		TraceEvent("KVClosed", self->logID)
+			.detail("Filename", self->filename);
 		if( error.code() != error_code_actor_cancelled ) {
 			self->stopped.send(Void());
 			delete self;
@@ -1937,6 +2023,9 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename, UID id, Ke
 	  writeThread(CoroThreadPool::createThreadPool()),
 	  readsRequested(0), writesRequested(0), writesComplete(0), diskBytesUsed(0), freeListPages(0)
 {
+	TraceEvent(SevDebug, "KeyValueStoreSQLiteCreate")
+		.detail("Filename", filename);
+
 	stopOnErr = stopOnError(this);
 
 	#if SQLITE_THREADSAFE == 0
@@ -1949,13 +2038,14 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename, UID id, Ke
 
 	//The DB file should not already be open
 	ASSERT(!vfsAsyncIsOpen(filename));
+	ASSERT(!vfsAsyncIsOpen(filename + "-wal"));
 
-	readCursors.resize(64); //< number of read threads
+	readCursors.resize(SERVER_KNOBS->SQLITE_READER_THREADS); //< number of read threads
 
 	sqlite3_soft_heap_limit64( SERVER_KNOBS->SOFT_HEAP_LIMIT );  // SOMEDAY: Is this a performance issue?  Should we drop the cache sizes for individual threads?
 	TaskPriority taskId = g_network->getCurrentTask();
 	g_network->setCurrentTask(TaskPriority::DiskWrite);
-	writeThread->addThread( new Writer(filename, type==KeyValueStoreType::SSD_BTREE_V2, checkChecksums, checkIntegrity, writesComplete, springCleaningStats, diskBytesUsed, freeListPages, id, &readCursors) );
+	writeThread->addThread(new Writer(this, type==KeyValueStoreType::SSD_BTREE_V2, checkChecksums, checkIntegrity, writesComplete, springCleaningStats, diskBytesUsed, freeListPages, id, &readCursors));
 	g_network->setCurrentTask(taskId);
 	auto p = new Writer::InitAction();
 	auto f = p->result.getFuture();

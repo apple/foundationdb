@@ -22,6 +22,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Xml.Linq;
 using System.IO;
@@ -29,6 +30,7 @@ using System.Diagnostics;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Xml;
+using System.Runtime.Serialization.Json;
 
 namespace SummarizeTest
 {
@@ -147,7 +149,7 @@ namespace SummarizeTest
                     {
                         var xout = new XElement("TestHarnessError",
                             new XAttribute("Severity", (int)Magnesium.Severity.SevError),
-                            new XAttribute("ErrorMessage", e.Message));
+                            new XAttribute("ErrorMessage", e.ToString()));
 
                         AppendXmlMessageToSummary("summary.xml", xout, true);
                         throw;
@@ -213,6 +215,30 @@ namespace SummarizeTest
             return ((System.Collections.IStructuralComparable)version1).CompareTo(version2, System.Collections.Generic.Comparer<int>.Default) >= 0;
         }
 
+        static bool versionLessThan(string ver1, string ver2) {
+            return !versionGreaterThanOrEqual(ver1, ver2);
+        }
+
+        static string getFdbserverVersion(string fdbserverName) {
+           using (var process = new System.Diagnostics.Process())
+           {
+              process.StartInfo.UseShellExecute = false;
+              process.StartInfo.RedirectStandardOutput = true;
+              process.StartInfo.FileName = fdbserverName;
+              process.StartInfo.Arguments = "--version";
+              process.StartInfo.RedirectStandardError = true;
+
+              process.Start();
+              var output = process.StandardOutput.ReadToEnd();
+              // If the process finished successfully, we call the parameterless WaitForExit to ensure that output buffers get flushed
+              process.WaitForExit();
+
+              var match = Regex.Match(output, @"v(\d+\.\d+\.\d+)");
+              if (match.Groups.Count < 1) return "";
+              return match.Groups[1].Value;
+            }
+        }
+
         static int Run(string fdbserverName, string tlsPluginFile, string testFolder, string summaryFileName, string errorFileName, string runDir, string oldBinaryFolder, bool useValgrind, int maxTries, bool traceToStdout = false, string tlsPluginFile_5_1 = "")
         {
             int seed = random.Next(1000000000);
@@ -263,16 +289,23 @@ namespace SummarizeTest
                     }
                     uniqueFiles = uniqueFileSet.ToArray();
                     testFile = random.Choice(uniqueFiles);
-                    string oldBinaryVersionLowerBound = "0.0.0";
+                    // The on-disk format changed in 4.0.0, and 5.x can't load files from 3.x.
+                    string oldBinaryVersionLowerBound = "4.0.0";
                     string lastFolderName = Path.GetFileName(Path.GetDirectoryName(testFile));
                     if (lastFolderName.Contains("from_") || lastFolderName.Contains("to_")) // Only perform upgrade/downgrade tests from certain versions
                     {
                         oldBinaryVersionLowerBound = lastFolderName.Split('_').Last();
                     }
+                    string oldBinaryVersionUpperBound = getFdbserverVersion(fdbserverName);
+                    if (versionGreaterThanOrEqual("4.0.0", oldBinaryVersionUpperBound)) {
+                        // If the binary under test is from 3.x, then allow upgrade tests from 3.x binaries.
+                        oldBinaryVersionLowerBound = "0.0.0";
+                    }
                     string[] currentBinary = { fdbserverName };
                     IEnumerable<string> oldBinaries = Array.FindAll(
                                                          Directory.GetFiles(oldBinaryFolder),
-                                                         x => versionGreaterThanOrEqual(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionLowerBound));
+                                                         x => versionGreaterThanOrEqual(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionLowerBound)
+                                                           && versionLessThan(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionUpperBound));
                     oldBinaries = oldBinaries.Concat(currentBinary);
                     oldServerName = random.Choice(oldBinaries.ToList<string>());
                 }
@@ -306,10 +339,13 @@ namespace SummarizeTest
                     int unseed;
                     string uid = Guid.NewGuid().ToString();
                     bool useNewPlugin = (oldServerName == fdbserverName) || versionGreaterThanOrEqual(oldServerName.Split('-').Last(), "5.2.0");
-                    result = RunTest(firstServerName, useNewPlugin ? tlsPluginFile : tlsPluginFile_5_1, summaryFileName, errorFileName, seed, buggify, testFile + "-1.txt", runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, false, true, oldServerName, traceToStdout);
+                    bool useToml = File.Exists(testFile + "-1.toml");
+                    string testFile1 = useToml ? testFile + "-1.toml" : testFile + "-1.txt";
+                    result = RunTest(firstServerName, useNewPlugin ? tlsPluginFile : tlsPluginFile_5_1, summaryFileName, errorFileName, seed, buggify, testFile1, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, false, true, oldServerName, traceToStdout);
                     if (result == 0)
                     {
-                        result = RunTest(secondServerName, tlsPluginFile, summaryFileName, errorFileName, seed+1, buggify, testFile + "-2.txt", runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, true, false, oldServerName, traceToStdout);
+                        string testFile2 = useToml ? testFile + "-2.toml" : testFile + "-2.txt";
+                        result = RunTest(secondServerName, tlsPluginFile, summaryFileName, errorFileName, seed+1, buggify, testFile2, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, true, false, oldServerName, traceToStdout);
                     }
                 }
                 else
@@ -366,20 +402,22 @@ namespace SummarizeTest
                 {
                     ErrorOutputListener errorListener = new ErrorOutputListener();
                     process.StartInfo.UseShellExecute = false;
+                    string tlsPluginArg = "";
                     if (tlsPluginFile.Length > 0) {
                         process.StartInfo.EnvironmentVariables["FDB_TLS_PLUGIN"] = tlsPluginFile;
+                        tlsPluginArg = "--tls_plugin=" + tlsPluginFile;
                     }
                     process.StartInfo.RedirectStandardOutput = true;
                     var args = "";
                     if (willRestart && oldBinaryName.EndsWith("alpha6"))
                     {
-                        args = string.Format("-Rs 1000000000 -r simulation {0} -s {1} -f \"{2}\" -b {3} --tls_plugin={4} --crash",
-                            IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", tlsPluginFile);
+                        args = string.Format("-Rs 1000000000 -r simulation {0} -s {1} -f \"{2}\" -b {3} {4} --crash",
+                            IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", tlsPluginArg);
                     }
                     else
                     {
-                        args = string.Format("-Rs 1GB -r simulation {0} -s {1} -f \"{2}\" -b {3} --tls_plugin={4} --crash",
-                            IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", tlsPluginFile);
+                        args = string.Format("-Rs 1GB -r simulation {0} -s {1} -f \"{2}\" -b {3} {4} --crash",
+                            IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", tlsPluginArg);
                     }
                     if (restarting) args = args + " --restarting";
                     if (useValgrind && !willRestart)
@@ -484,7 +522,7 @@ namespace SummarizeTest
                     memCheckThread.Join();
                     consoleThread.Join();
 
-                    var traceFiles = Directory.GetFiles(tempPath, "trace*.xml");
+                    var traceFiles = Directory.GetFiles(tempPath, "trace*.*").Where(s => s.EndsWith(".xml") || s.EndsWith(".json")).ToArray();
                     if (traceFiles.Length == 0)
                     {
                         if (!traceToStdout)
@@ -571,12 +609,14 @@ namespace SummarizeTest
             public List<string> Errors { get; set; }
             int maxErrorLength;
             int maxErrors;
+            bool errorsExceeded;
 
-            public ErrorOutputListener(int maxErrorLength = 100, int maxErrors = 10)
+            public ErrorOutputListener(int maxErrorLength = 1000, int maxErrors = 10)
             {
                 Errors = new List<string>();
                 this.maxErrorLength = maxErrorLength;
                 this.maxErrors = maxErrors;
+                this.errorsExceeded = false;
             }
 
             public bool hasError = false;
@@ -585,8 +625,18 @@ namespace SummarizeTest
                 if(!String.IsNullOrEmpty(errLine.Data))
                 {
                     hasError = true;
-                    if(Errors.Count < maxErrors)
-                        Errors.Add(errLine.Data.Substring(0, Math.Min(maxErrorLength, errLine.Data.Length)));
+                    if(Errors.Count < maxErrors) {
+                        if(errLine.Data.Length > maxErrorLength) {
+                            Errors.Add(errLine.Data.Substring(0, maxErrorLength) + "...");
+                        }
+                        else {
+                            Errors.Add(errLine.Data);
+                        }
+                    }
+                    else if(!errorsExceeded) {
+                        Errors.Add("TestHarness error limit exceeded");
+                        errorsExceeded = true;
+                    }
                 }
             }
         }
@@ -665,6 +715,10 @@ namespace SummarizeTest
             return whats.ToArray();
         }
 
+        delegate IEnumerable<Magnesium.Event> parseDelegate(System.IO.Stream stream, string file,
+            bool keepOriginalElement = false, double startTime = -1, double endTime = Double.MaxValue,
+            double samplingFactor = 1.0);
+
         static int Summarize(string[] traceFiles, string summaryFileName,
             string errorFileName, bool? killed, List<string> outputErrors, int? exitCode, long? peakMemory,
             string uid, string valgrindOutputFileName, int expectedUnseed, out int unseed, out bool retryableError, bool logOnRetryableError,
@@ -696,7 +750,12 @@ namespace SummarizeTest
                 {
                     try
                     {
-                        foreach (var ev in Magnesium.XmlParser.Parse(traceFile, traceFileName))
+                        parseDelegate parse;
+                        if (traceFileName.EndsWith(".json"))
+                            parse = Magnesium.JsonParser.Parse;
+                        else
+                            parse = Magnesium.XmlParser.Parse;
+                        foreach (var ev in parse(traceFile, traceFileName))
                         {
                             Magnesium.Severity newSeverity;
                             if (severityMap.TryGetValue(new KeyValuePair<string, Magnesium.Severity>(ev.Type, ev.Severity), out newSeverity))
@@ -1096,10 +1155,20 @@ namespace SummarizeTest
 
         private static void AppendToSummary(string summaryFileName, XElement xout, bool traceToStdout = false, bool shouldLock = true)
         {
+            bool useXml = true;
+            if (summaryFileName != null && summaryFileName.EndsWith(".json")) {
+                useXml = false;
+            }
+
             if (traceToStdout)
             {
-                using (var wr = System.Xml.XmlWriter.Create(Console.OpenStandardOutput(), new System.Xml.XmlWriterSettings() { OmitXmlDeclaration = true, Encoding = new System.Text.UTF8Encoding(false) }))
-                    xout.WriteTo(wr);
+                if (useXml) {
+                    using (var wr = System.Xml.XmlWriter.Create(Console.OpenStandardOutput(), new System.Xml.XmlWriterSettings() { OmitXmlDeclaration = true, Encoding = new System.Text.UTF8Encoding(false) }))
+                        xout.WriteTo(wr);
+                } else {
+                    using (var wr = System.Runtime.Serialization.Json.JsonReaderWriterFactory.CreateJsonWriter(Console.OpenStandardOutput()))
+                        xout.WriteTo(wr);
+                }
                 Console.WriteLine();
                 return;
             }
@@ -1110,7 +1179,6 @@ namespace SummarizeTest
                 takeLock(summaryFileName);
             try
             {
-
                 using (var f = System.IO.File.Open(summaryFileName, System.IO.FileMode.Append, System.IO.FileAccess.Write))
                 {
                     if (f.Length == 0)
@@ -1118,8 +1186,13 @@ namespace SummarizeTest
                         byte[] bytes = Encoding.UTF8.GetBytes("<Trace>");
                         f.Write(bytes, 0, bytes.Length);
                     }
-                    using (var wr = System.Xml.XmlWriter.Create(f, new System.Xml.XmlWriterSettings() { OmitXmlDeclaration = true }))
-                        xout.Save(wr);
+                    if (useXml) {
+                        using (var wr = System.Xml.XmlWriter.Create(f, new System.Xml.XmlWriterSettings() { OmitXmlDeclaration = true }))
+                            xout.Save(wr);
+                    } else {
+                        using (var wr = System.Runtime.Serialization.Json.JsonReaderWriterFactory.CreateJsonWriter(f))
+                            xout.WriteTo(wr);
+                    }
                     var endl = Encoding.UTF8.GetBytes(Environment.NewLine);
                     f.Write(endl, 0, endl.Length);
                 }
@@ -1130,6 +1203,7 @@ namespace SummarizeTest
                     releaseLock(summaryFileName);
             }
         }
+
         private static void AppendXmlMessageToSummary(string summaryFileName, XElement xout, bool traceToStdout = false, string testFile = null,
             int? seed = null, bool? buggify = null, bool? determinismCheck = null, string oldBinaryName = null)
         {

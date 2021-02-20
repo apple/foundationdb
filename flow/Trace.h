@@ -26,6 +26,7 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <string>
+#include <chrono>
 #include <map>
 #include <set>
 #include <type_traits>
@@ -394,6 +395,7 @@ struct TraceEvent {
 	static bool isNetworkThread();
 
 	static double getCurrentTime();
+	static std::string printRealTime(double time);
 
 	//Must be called directly after constructing the trace event
 	TraceEvent& error(const class Error& e, bool includeCancelled=false) {
@@ -612,7 +614,7 @@ bool validateTraceClockSource(std::string source);
 
 void addTraceRole(std::string role);
 void removeTraceRole(std::string role);
-void retriveTraceLogIssues(std::set<std::string>& out);
+void retrieveTraceLogIssues(std::set<std::string>& out);
 void setTraceLogGroup(const std::string& role);
 template <class T>
 struct Future;

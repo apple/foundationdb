@@ -236,6 +236,7 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 	virtual void setCurrentTask(TaskPriority taskID) { baseNetwork->setCurrentTask(taskID); }
 	virtual double now() { return baseNetwork->now(); }
 	virtual double timer() { return baseNetwork->timer(); }
+	double timer_monotonic() override { return baseNetwork->timer_monotonic(); }
 	virtual void stop() { return baseNetwork->stop(); }
 	virtual void addStopCallback( std::function<void()> fn ) { ASSERT(false); return; }
 	virtual bool isSimulated() const { return baseNetwork->isSimulated(); }

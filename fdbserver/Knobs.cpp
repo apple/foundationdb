@@ -98,9 +98,10 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( PEEK_STATS_SLOW_RATIO,                                 0.5 );
 	init( PUSH_RESET_INTERVAL,                                 300.0 ); if ( randomize && BUGGIFY ) PUSH_RESET_INTERVAL = 20.0;
 	init( PUSH_MAX_LATENCY,                                      0.5 ); if ( randomize && BUGGIFY ) PUSH_MAX_LATENCY = 0.0;
-	init( PUSH_STATS_INTERVAL,                                  10.0 ); 
+	init( PUSH_STATS_INTERVAL,                                  10.0 );
 	init( PUSH_STATS_SLOW_AMOUNT,                                  2 );
 	init( PUSH_STATS_SLOW_RATIO,                                 0.5 );
+	init( TLOG_POP_BATCH_SIZE,                                  1000 ); if ( randomize && BUGGIFY ) TLOG_POP_BATCH_SIZE = 10;
 
 	// disk snapshot max timeout, to be put in TLog, storage and coordinator nodes
 	init( SNAP_CREATE_MAX_TIMEOUT,                             300.0 );
@@ -244,6 +245,9 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( DD_SS_FAILURE_VERSIONLAG,                        250000000 );
 	init( DD_SS_ALLOWED_VERSIONLAG,                        200000000 ); if( randomize && BUGGIFY ) { DD_SS_FAILURE_VERSIONLAG = deterministicRandom()->randomInt(15000000, 500000000); DD_SS_ALLOWED_VERSIONLAG = 0.75 * DD_SS_FAILURE_VERSIONLAG; }
 	init( DD_SS_STUCK_TIME_LIMIT,                              300.0 ); if( randomize && BUGGIFY ) { DD_SS_STUCK_TIME_LIMIT = 200.0 + deterministicRandom()->random01() * 100.0; }
+	init( DD_TEAMS_INFO_PRINT_INTERVAL,                           60 ); if( randomize && BUGGIFY ) DD_TEAMS_INFO_PRINT_INTERVAL = 10;
+	init( DD_TEAMS_INFO_PRINT_YIELD_COUNT,                       100 ); if( randomize && BUGGIFY ) DD_TEAMS_INFO_PRINT_YIELD_COUNT = deterministicRandom()->random01() * 1000 + 1;
+	init( DD_TEAM_ZERO_SERVER_LEFT_LOG_DELAY,                    120 ); if( randomize && BUGGIFY ) DD_TEAM_ZERO_SERVER_LEFT_LOG_DELAY = 5;
 
 	// TeamRemover
 	init( TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER,                false ); if( randomize && BUGGIFY ) TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true
@@ -274,6 +278,17 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( SQLITE_BTREE_PAGE_USABLE,                          4096 - 8);  // pageSize - reserveSize for page checksum
 	init( SQLITE_CHUNK_SIZE_PAGES,                             25600 );  // 100MB
 	init( SQLITE_CHUNK_SIZE_PAGES_SIM,                          1024 );  // 4MB
+	init( SQLITE_READER_THREADS,                                  64 );  // number of read threads
+	init( SQLITE_WRITE_WINDOW_SECONDS,                            -1 );
+	init( SQLITE_WRITE_WINDOW_LIMIT,                              -1 );
+	if( randomize && BUGGIFY ) {
+		// Choose an window between .01 and 1.01 seconds.
+		SQLITE_WRITE_WINDOW_SECONDS = 0.01 + deterministicRandom()->random01();
+		// Choose random operations per second
+		int opsPerSecond = deterministicRandom()->randomInt(1000, 5000);
+		// Set window limit to opsPerSecond scaled down to window size
+		SQLITE_WRITE_WINDOW_LIMIT = opsPerSecond * SQLITE_WRITE_WINDOW_SECONDS;
+	}
 
 	// Maximum and minimum cell payload bytes allowed on primary page as calculated in SQLite.
 	// These formulas are copied from SQLite, using its hardcoded constants, so if you are
@@ -315,7 +330,12 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 
 	// KeyValueStoreRocksDB
 	init( ROCKSDB_BACKGROUND_PARALLELISM,                          0 );
+	init( ROCKSDB_READ_PARALLELISM,                                4 );
 	init( ROCKSDB_MEMTABLE_BYTES,                  512 * 1024 * 1024 );
+	init( ROCKSDB_UNSAFE_AUTO_FSYNC,                           false );
+	init( ROCKSDB_PERIODIC_COMPACTION_SECONDS,                     0 );
+	init( ROCKSDB_PREFIX_LEN,                                      0 );
+	init( ROCKSDB_BLOCK_CACHE_SIZE,                                0 );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
@@ -374,6 +394,12 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( PROXY_COMPUTE_BUCKETS,                                20000 );
 	init( PROXY_COMPUTE_GROWTH_RATE,                             0.01 );
 	init( TXN_STATE_SEND_AMOUNT,                                    4 );
+	init( PROXY_REJECT_BATCH_QUEUED_TOO_LONG,                    true );
+
+	init( RESET_MASTER_BATCHES,                                   200 );
+	init( RESET_RESOLVER_BATCHES,                                 200 );
+	init( RESET_MASTER_DELAY,                                   300.0 );
+	init( RESET_RESOLVER_DELAY,                                 300.0 );
 
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)
@@ -479,7 +505,11 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( SPRING_BYTES_STORAGE_SERVER_BATCH,                   100e6 ); if( smallStorageTarget ) SPRING_BYTES_STORAGE_SERVER_BATCH = 150e3;
 	init( STORAGE_HARD_LIMIT_BYTES,                           1500e6 ); if( smallStorageTarget ) STORAGE_HARD_LIMIT_BYTES = 4500e3;
 	init( STORAGE_DURABILITY_LAG_HARD_MAX,                    2000e6 ); if( smallStorageTarget ) STORAGE_DURABILITY_LAG_HARD_MAX = 100e6;
-	init( STORAGE_DURABILITY_LAG_SOFT_MAX,                     200e6 ); if( smallStorageTarget ) STORAGE_DURABILITY_LAG_SOFT_MAX = 10e6;
+	init( STORAGE_DURABILITY_LAG_SOFT_MAX,                     250e6 ); if( smallStorageTarget ) STORAGE_DURABILITY_LAG_SOFT_MAX = 10e6;
+
+	//FIXME: Low priority reads are disabled by assigning very high knob values, reduce knobs for 7.0
+	init( LOW_PRIORITY_STORAGE_QUEUE_BYTES,                    775e8 ); if( smallStorageTarget ) LOW_PRIORITY_STORAGE_QUEUE_BYTES = 1750e3;
+	init( LOW_PRIORITY_DURABILITY_LAG,                         200e6 ); if( smallStorageTarget ) LOW_PRIORITY_DURABILITY_LAG = 15e6;
 
 	bool smallTlogTarget = randomize && BUGGIFY;
 	init( TARGET_BYTES_PER_TLOG,                              2400e6 ); if( smallTlogTarget ) TARGET_BYTES_PER_TLOG = 2000e3;
@@ -506,7 +536,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( NEEDED_TPS_HISTORY_SAMPLES,                            200 );
 	init( TARGET_DURABILITY_LAG_VERSIONS,                      350e6 ); // Should be larger than STORAGE_DURABILITY_LAG_SOFT_MAX
 	init( AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS,           250e6 );
-	init( TARGET_DURABILITY_LAG_VERSIONS_BATCH,                250e6 ); // Should be larger than STORAGE_DURABILITY_LAG_SOFT_MAX
+	init( TARGET_DURABILITY_LAG_VERSIONS_BATCH,                150e6 ); // Should be larger than STORAGE_DURABILITY_LAG_SOFT_MAX
 	init( DURABILITY_LAG_UNLIMITED_THRESHOLD,                   50e6 );
 	init( INITIAL_DURABILITY_LAG_MULTIPLIER,                    1.02 );
 	init( DURABILITY_LAG_REDUCTION_RATE,                      0.9999 );
@@ -568,6 +598,10 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( READ_TAG_MEASUREMENT_INTERVAL,                        30.0 ); if( randomize && BUGGIFY ) READ_TAG_MEASUREMENT_INTERVAL = 1.0;
 	init( OPERATION_COST_BYTE_FACTOR,                          16384 ); if( randomize && BUGGIFY ) OPERATION_COST_BYTE_FACTOR = 4096;
 	init( PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS,                    true ); if( randomize && BUGGIFY ) PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS = false;
+	init( REPORT_DD_METRICS,                                    true );
+	init( DD_METRICS_REPORT_INTERVAL,                           30.0 );
+	init( FETCH_KEYS_TOO_LONG_TIME_CRITERIA,                   300.0 );
+	init( MAX_STORAGE_COMMIT_TIME,                             120.0 ); //The max fsync stall time on the storage server and tlog before marking a disk as failed
 
 	//Wait Failure
 	init( MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS,                 250 ); if( randomize && BUGGIFY ) MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS = 2;
@@ -600,6 +634,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( MAX_STATUS_REQUESTS_PER_SECOND,                      256.0 );
 	init( CONFIGURATION_ROWS_TO_FETCH,                         20000 );
 	init( DISABLE_DUPLICATE_LOG_WARNING,                       false );
+	init( HISTOGRAM_REPORT_INTERVAL,                           300.0 );
 
 	// IPager
 	init( PAGER_RESERVED_PAGES,                                    1 );

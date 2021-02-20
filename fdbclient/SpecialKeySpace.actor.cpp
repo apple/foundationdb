@@ -115,27 +115,46 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, ReadYourWrite
                                              KeyRangeRef boundary, int* actualOffset,
                                              Standalone<RangeResultRef>* result,
                                              Optional<Standalone<RangeResultRef>>* cache) {
+	// If offset < 1, where we need to move left, iter points to the range containing at least one smaller key
+	// (It's a wasting of time to walk through the range whose begin key is same as ks->key)
+	// (rangeContainingKeyBefore itself handles the case where ks->key == Key())
+	// Otherwise, we only need to move right if offset > 1, iter points to the range containing the key
+	// Since boundary.end is always a key in the RangeMap, it is always safe to move right
 	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter =
 	    ks->offset < 1 ? sks->getImpls().rangeContainingKeyBefore(ks->getKey())
 	                   : sks->getImpls().rangeContaining(ks->getKey());
-	while ((ks->offset < 1 && iter->begin() > boundary.begin) || (ks->offset > 1 && iter->begin() < boundary.end)) {
+	while ((ks->offset < 1 && iter->begin() >= boundary.begin) || (ks->offset > 1 && iter->begin() < boundary.end)) {
 		if (iter->value() != nullptr) {
 			wait(moveKeySelectorOverRangeActor(iter->value(), ryw, ks, cache));
 		}
-		ks->offset < 1 ? --iter : ++iter;
+		// Check if we can still move the iterator left
+		if (ks->offset < 1) {
+			if (iter == sks->getImpls().ranges().begin()) {
+				break;
+			} else {
+				--iter;
+			}
+		} else if (ks->offset > 1) {
+			// Always safe to move right
+			++iter;
+		}
 	}
 	*actualOffset = ks->offset;
-	if (iter->begin() == boundary.begin || iter->begin() == boundary.end) ks->setKey(iter->begin());
 
 	if (!ks->isFirstGreaterOrEqual()) {
-		// The Key Selector clamps up to the legal key space
-		TraceEvent(SevInfo, "ReadToBoundary")
+		TraceEvent(SevDebug, "ReadToBoundary")
 		    .detail("TerminateKey", ks->getKey())
 		    .detail("TerminateOffset", ks->offset);
-		if (ks->offset < 1)
+		// If still not normalized after moving to the boundary, 
+		// let key selector clamp up to the boundary
+		if (ks->offset < 1) {
 			result->readToBegin = true;
-		else
+			ks->setKey(boundary.begin);
+		}
+		else {
 			result->readThroughEnd = true;
+			ks->setKey(boundary.end);
+		}
 		ks->offset = 1;
 	}
 	return Void();
@@ -347,25 +366,34 @@ Future<Standalone<RangeResultRef>> ConflictingKeysImpl::getRange(ReadYourWritesT
 }
 
 ACTOR Future<Standalone<RangeResultRef>> ddMetricsGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
-	try {
-		auto keys = kr.removePrefix(ddStatsRange.begin);
-		Standalone<VectorRef<DDMetricsRef>> resultWithoutPrefix =
-		    wait(waitDataDistributionMetricsList(ryw->getDatabase(), keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT));
-		Standalone<RangeResultRef> result;
-		for (const auto& ddMetricsRef : resultWithoutPrefix) {
-			// each begin key is the previous end key, thus we only encode the begin key in the result
-			KeyRef beginKey = ddMetricsRef.beginKey.withPrefix(ddStatsRange.begin, result.arena());
-			// Use json string encoded in utf-8 to encode the values, easy for adding more fields in the future
-			json_spirit::mObject statsObj;
-			statsObj["shard_bytes"] = ddMetricsRef.shardBytes;
-			std::string statsString =
-			    json_spirit::write_string(json_spirit::mValue(statsObj), json_spirit::Output_options::raw_utf8);
-			ValueRef bytes(result.arena(), statsString);
-			result.push_back(result.arena(), KeyValueRef(beginKey, bytes));
+	loop {
+		try {
+			auto keys = kr.removePrefix(ddStatsRange.begin);
+			Standalone<VectorRef<DDMetricsRef>> resultWithoutPrefix = wait(
+			    waitDataDistributionMetricsList(ryw->getDatabase(), keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT));
+			Standalone<RangeResultRef> result;
+			for (const auto& ddMetricsRef : resultWithoutPrefix) {
+				// each begin key is the previous end key, thus we only encode the begin key in the result
+				KeyRef beginKey = ddMetricsRef.beginKey.withPrefix(ddStatsRange.begin, result.arena());
+				// Use json string encoded in utf-8 to encode the values, easy for adding more fields in the future
+				json_spirit::mObject statsObj;
+				statsObj["shard_bytes"] = ddMetricsRef.shardBytes;
+				std::string statsString =
+				    json_spirit::write_string(json_spirit::mValue(statsObj), json_spirit::Output_options::raw_utf8);
+				ValueRef bytes(result.arena(), statsString);
+				result.push_back(result.arena(), KeyValueRef(beginKey, bytes));
+			}
+			return result;
+		} catch (Error& e) {
+			state Error err(e);
+			if (e.code() == error_code_operation_failed) {
+				TraceEvent(SevWarnAlways, "DataDistributorNotPresent")
+				    .detail("Operation", "DDMetricsReqestThroughSpecialKeys");
+				wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				continue;
+			}
+			throw err;
 		}
-		return result;
-	} catch (Error& e) {
-		throw;
 	}
 }
 

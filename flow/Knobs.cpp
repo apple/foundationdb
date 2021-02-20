@@ -82,8 +82,9 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT,                20.0 );
 	init( PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT,           3600.0 );
 	init( INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING,              5.0 );
-	init( PING_LOGGING_INTERVAL,                               1.0 );
+	init( PING_LOGGING_INTERVAL,                               3.0 );
 	init( PING_SAMPLE_AMOUNT,                                  100 );
+	init( NETWORK_CONNECT_SAMPLE_AMOUNT,                       100 );
 
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
 	init( TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT,              9.0 );
@@ -112,6 +113,11 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( MAX_EVICT_ATTEMPTS,                                  100 ); if( randomize && BUGGIFY ) MAX_EVICT_ATTEMPTS = 2;
 	init( CACHE_EVICTION_POLICY,                          "random" );
 	init( PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION,                 0.1 ); if( randomize && BUGGIFY ) PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION = 0.0; else if( randomize && BUGGIFY ) PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION = 1.0;
+	init( FLOW_CACHEDFILE_WRITE_IO_SIZE,                         0 );
+	if ( randomize && BUGGIFY) {
+		// Choose 16KB to 64KB as I/O size
+		FLOW_CACHEDFILE_WRITE_IO_SIZE = deterministicRandom()->randomInt(16384, 65537);
+	}
 
 	//AsyncFileEIO
 	init( EIO_MAX_PARALLELISM,                                  4  );
@@ -130,6 +136,7 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	//GenericActors
 	init( BUGGIFY_FLOW_LOCK_RELEASE_DELAY,                     1.0 );
 	init( LOW_PRIORITY_DELAY_COUNT,                              5 );
+	init( LOW_PRIORITY_MAX_DELAY,                              5.0 );
 
 	//IAsyncFile
 	init( INCREMENTAL_DELETE_TRUNCATE_AMOUNT,                  5e8 ); //500MB
@@ -143,6 +150,7 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( TSC_YIELD_TIME,                                  1000000 );
 	init( MIN_LOGGED_PRIORITY_BUSY_FRACTION,                  0.05 );
 	init( CERT_FILE_MAX_SIZE,                      5 * 1024 * 1024 );
+	init( READY_QUEUE_RESERVED_SIZE,                          8192 );
 
 	//Network
 	init( PACKET_LIMIT,                                  100LL<<20 );
@@ -172,6 +180,7 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( TRACE_RETRY_OPEN_INTERVAL,						  1.00 );
 	init( MIN_TRACE_SEVERITY,                 isSimulated ? 1 : 10 ); // Related to the trace severity in Trace.h
 	init( MAX_TRACE_SUPPRESSIONS,                              1e4 );
+	init( TRACE_DATETIME_ENABLED,                             true ); // trace time in human readable format (always real time)
 	init( TRACE_SYNC_ENABLED,                                    0 );
 	init( TRACE_EVENT_METRIC_UNITS_PER_SAMPLE,                 500 );
 	init( TRACE_EVENT_THROTTLER_SAMPLE_EXPIRY,              1800.0 ); // 30 mins

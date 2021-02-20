@@ -11,6 +11,7 @@ endif()
 ################################################################################
 # SSL
 ################################################################################
+
 include(CheckSymbolExists)
 
 set(DISABLE_TLS OFF CACHE BOOL "Don't try to find OpenSSL and always build without TLS support")
@@ -21,13 +22,13 @@ else()
   find_package(OpenSSL)
   if(OPENSSL_FOUND)
     set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
+    set(WITH_TLS ON)
+    add_compile_options(-DHAVE_OPENSSL)
     check_symbol_exists("OPENSSL_INIT_NO_ATEXIT" "openssl/crypto.h" OPENSSL_HAS_NO_ATEXIT)
     if(OPENSSL_HAS_NO_ATEXIT)
-      set(WITH_TLS ON)
-      add_compile_options(-DHAVE_OPENSSL)
+      add_compile_options(-DHAVE_OPENSSL_INIT_NO_AT_EXIT)
     else()
-      message(WARNING "An OpenSSL version was found, but it doesn't support OPENSSL_INIT_NO_ATEXIT - Will compile without TLS Support")
-      set(WITH_TLS OFF)
+      message(STATUS "Found OpenSSL without OPENSSL_INIT_NO_ATEXIT: assuming BoringSSL")
     endif()
   else()
     message(STATUS "OpenSSL was not found - Will compile without TLS Support")
@@ -106,10 +107,10 @@ endif()
 # RocksDB
 ################################################################################
 
-set(SSD_ROCKSDB_EXPERIMENTAL OFF CACHE BOOL "Build with experimental RocksDB support")
+set(SSD_ROCKSDB_EXPERIMENTAL ON CACHE BOOL "Build with experimental RocksDB support")
 # RocksDB is currently enabled by default for GCC but does not build with the latest
 # Clang.
-if (SSD_ROCKSDB_EXPERIMENTAL OR GCC)
+if (SSD_ROCKSDB_EXPERIMENTAL AND GCC)
   set(WITH_ROCKSDB_EXPERIMENTAL ON)
 else()
   set(WITH_ROCKSDB_EXPERIMENTAL OFF)

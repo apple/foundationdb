@@ -1234,6 +1234,7 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 	} else {
 		if (key == LiteralStringRef("\xff\xff/status/json")) {
 			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
+				++tr.getDatabase()->transactionStatusRequests;
 				return getJSON(tr.getDatabase());
 			} else {
 				return Optional<Value>();
@@ -1309,7 +1310,8 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	bool reverse )
 {
 	if (getDatabase()->apiVersionAtLeast(630)) {
-		if (specialKeys.contains(begin.getKey()) && end.getKey() <= specialKeys.end) {
+		if (specialKeys.contains(begin.getKey()) && specialKeys.begin <= end.getKey() &&
+		    end.getKey() <= specialKeys.end) {
 			TEST(true); // Special key space get range
 			return getDatabase()->specialKeySpace->getRange(this, begin, end, limits, reverse);
 		}

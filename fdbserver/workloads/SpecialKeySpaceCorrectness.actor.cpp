@@ -119,8 +119,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		Future<Void> f;
 		{
 			ReadYourWritesTransaction ryw{ cx->clone() };
-			if(!ryw.getDatabase()->apiVersionAtLeast(630)) {
-				//This test is not valid for API versions smaller than 630
+			if (!ryw.getDatabase()->apiVersionAtLeast(630)) {
+				// This test is not valid for API versions smaller than 630
 				return;
 			}
 			f = success(ryw.get(LiteralStringRef("\xff\xff/status/json")));
@@ -352,6 +352,32 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			tx->reset();
 		} catch (Error& e) {
 			throw;
+		}
+		// base key of the end key selector not in (\xff\xff, \xff\xff\xff), throw key_outside_legal_range()
+		try {
+			const KeySelector startKeySelector = KeySelectorRef(LiteralStringRef("\xff\xff/test"), true, -200);
+			const KeySelector endKeySelector = KeySelectorRef(LiteralStringRef("test"), true, -10);
+			Standalone<RangeResultRef> result =
+			    wait(tx->getRange(startKeySelector, endKeySelector, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_key_outside_legal_range);
+			tx->reset();
+		}
+		// test case when registered range is the same as the underlying module
+		try {
+			state Standalone<RangeResultRef> result = wait(tx->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+			                         LiteralStringRef("\xff\xff/worker_interfaces0")),
+			             CLIENT_KNOBS->TOO_MANY));
+			// We should have at least 1 process in the cluster
+			ASSERT(result.size());
+			state KeyValueRef entry = deterministicRandom()->randomChoice(result);
+			Optional<Value> singleRes = wait(tx->get(entry.key));
+			ASSERT(singleRes.present() && singleRes.get() == entry.value);
+			tx->reset();
+		} catch (Error& e) {
+			wait(tx->onError(e));
 		}
 
 		return Void();

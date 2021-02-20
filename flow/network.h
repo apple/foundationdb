@@ -30,8 +30,9 @@
 #ifndef TLS_DISABLED
 #include "boost/asio/ssl.hpp"
 #endif
-#include "flow/serialize.h"
+#include "flow/Arena.h"
 #include "flow/IRandom.h"
+#include "flow/Trace.h"
 
 enum class TaskPriority {
 	Max = 1000000,
@@ -98,6 +99,7 @@ enum class TaskPriority {
 	RestoreLoaderFinishVersionBatch = 2220,
 	RestoreLoaderSendMutations = 2210,
 	RestoreLoaderLoadFiles = 2200,
+	LowPriorityRead = 2100,
 	Low = 2000,
 
 	Min = 1000,
@@ -119,8 +121,6 @@ inline TaskPriority incrementPriorityIfEven(TaskPriority p) {
 }
 
 class Void;
-
-template<class T> class Optional;
 
 struct IPAddress {
 	typedef boost::asio::ip::address_v6::bytes_type IPAddressStore;
@@ -369,6 +369,9 @@ public:
 	virtual Future<int64_t> read() = 0;
 };
 
+// forward declare SendBuffer, declared in serialize.h
+struct SendBuffer;
+
 class IConnection {
 public:
 	// IConnection is reference-counted (use Reference<IConnection>), but the caller must explicitly call close()
@@ -449,7 +452,8 @@ public:
 		enASIOTimedOut = 9,
 		enBlobCredentialFiles = 10,
 		enNetworkAddressesFunc = 11,
-		enClientFailureMonitor = 12
+		enClientFailureMonitor = 12,
+		enSQLiteInjectedError = 13
 	};
 
 	virtual void longTaskCheck( const char* name ) {}
@@ -461,6 +465,9 @@ public:
 	virtual double timer() = 0;
 	// A wrapper for directly getting the system time. The time returned by now() only updates in the run loop, 
 	// so it cannot be used to measure times of functions that do not have wait statements.
+
+	virtual double timer_monotonic() = 0;
+	// Similar to timer, but monotonic
 
 	virtual Future<class Void> delay( double seconds, TaskPriority taskID ) = 0;
 	// The given future will be set after seconds have elapsed

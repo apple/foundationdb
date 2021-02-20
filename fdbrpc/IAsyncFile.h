@@ -24,6 +24,7 @@
 
 #include <ctime>
 #include "flow/flow.h"
+#include "fdbrpc/IRateControl.h"
 
 // All outstanding operations must be cancelled before the destructor of IAsyncFile is called.
 // The desirability of the above semantic is disputed. Some classes (AsyncFileBlobStore,
@@ -81,6 +82,10 @@ public:
 	virtual void releaseZeroCopy( void* data, int length, int64_t offset ) {}
 
 	virtual int64_t debugFD() = 0;
+
+	// Used for rate control, at present, only AsyncFileCached supports it
+	virtual Reference<IRateControl> const& getRateControl() { throw unsupported_operation(); }
+	virtual void setRateControl(Reference<IRateControl> const& rc) { throw unsupported_operation(); }
 };
 
 typedef void (*runCycleFuncPtr)();

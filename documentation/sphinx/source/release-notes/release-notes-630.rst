@@ -4,6 +4,21 @@
 Release Notes
 #############
 
+6.3.10
+======
+* Make fault tolerance metric calculation in HA clusters consistent with 6.2 branch. `(PR #4175) <https://github.com/apple/foundationdb/pull/4175>`_
+* Bug fix, stack overflow in redwood storage engine. `(PR #4161) <https://github.com/apple/foundationdb/pull/4161>`_
+* Bug fix, getting certain special keys fail. `(PR #4128) <https://github.com/apple/foundationdb/pull/4128>`_ 
+* Prevent slow task on TLog by yielding while processing ignored pop requests. `(PR #4112) <https://github.com/apple/foundationdb/pull/4112>`_
+* Support reading xxhash3 sqlite checksums. `(PR #4104) <https://github.com/apple/foundationdb/pull/4104>`_
+* Fix a race between submit and abort backup. `(PR #3935) <https://github.com/apple/foundationdb/pull/3935>`_
+
+Packaging
+---------
+
+* Create versioned RPM and DEB packages. This will allow users to install multiple versions of FoundationDB on the same machine and use alternatives to switch between versions. `(PR #3983) <https://github.com/apple/foundationdb/pull/3983>`_
+* Remove support for RHEL 6 and CentOS 6. This version reached EOL and is not anymore officially supported by FoundationDB. `(PR #3983) <https://github.com/apple/foundationdb/pull/3983>`_
+
 6.3.9
 =====
 
@@ -65,6 +80,7 @@ Fixes
 * Fix an issue where ``fdbcli --exec 'exclude no_wait ...'`` would incorrectly report that processes can safely be removed from the cluster. [6.3.5] `(PR #3566) <https://github.com/apple/foundationdb/pull/3566>`_
 * Commit latencies could become large because of inaccurate compute estimates. [6.3.9] `(PR #3845) <https://github.com/apple/foundationdb/pull/3845>`_
 * Added a timeout on TLS handshakes to prevent them from hanging indefinitely. [6.3.9] `(PR #3850) <https://github.com/apple/foundationdb/pull/3850>`_
+* Bug fix, blob client did not support authentication key sizes over 64 bytes.  `(PR #3964) <https://github.com/apple/foundationdb/pull/3964>`_
 
 Status
 ------
@@ -74,6 +90,7 @@ Status
 * Removed fields ``worst_version_lag_storage_server`` and ``limiting_version_lag_storage_server`` from the ``cluster.qos`` section. The ``worst_data_lag_storage_server`` and ``limiting_data_lag_storage_server`` objects can be used instead. `(PR #3196) <https://github.com/apple/foundationdb/pull/3196>`_
 * If a process is unable to flush trace logs to disk, the problem will now be reported via the output of ``status`` command inside ``fdbcli``. `(PR #2605) <https://github.com/apple/foundationdb/pull/2605>`_ `(PR #2820) <https://github.com/apple/foundationdb/pull/2820>`_
 * When a configuration key is changed, it will always be included in ``status json`` output, even the value is reverted back to the default value. [6.3.5] `(PR #3610) <https://github.com/apple/foundationdb/pull/3610>`_
+* Added transactions.rejected_for_queued_too_long for bookkeeping the number of transactions rejected by commit proxy because its queuing time exceeds MVCC window. `(PR #4353) <https://github.com/apple/foundationdb/pull/4353>`_
 
 Bindings
 --------
@@ -123,6 +140,8 @@ Fixes from previous versions
 * The 6.3.1 patch release includes all fixes from the patch releases 6.2.21 and 6.2.22. :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
 * The 6.3.3 patch release includes all fixes from the patch release 6.2.23. :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
 * The 6.3.5 patch release includes all fixes from the patch releases 6.2.24 and 6.2.25. :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
+* The 6.3.9 patch release includes all fixes from the patch releases 6.2.26. :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
+* The 6.3.10 patch release includes all fixes from the patch releases 6.2.27-6.2.29 :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
 
 Fixes only impacting 6.3.0+
 ---------------------------

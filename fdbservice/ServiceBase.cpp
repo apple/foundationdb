@@ -118,7 +118,7 @@ CServiceBase::CServiceBase(char *serviceName,
                            bool fCanPauseContinue)
 {
     // Service name must be a valid string and cannot be NULL.
-    m_name = (serviceName == NULL) ? "" : serviceName;
+    m_name = (serviceName == NULL) ? const_cast<char*>("") : serviceName;
 
     m_statusHandle = NULL;
 
