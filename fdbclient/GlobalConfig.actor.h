@@ -32,13 +32,12 @@
 
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/SystemData.h"
-#include "fdbclient/Tuple.h"
-#include "flow/flow.h"
-#include "flow/genericactors.actor.h"
-#include "flow/Knobs.h"
 
 #include "flow/actorcompiler.h" // has to be last include
+
+// The global configuration is a series of typed key-value pairs synced to all
+// nodes (server and client) in an FDB cluster in an eventually consistent
+// manner.
 
 class GlobalConfig {
 public:
@@ -51,6 +50,10 @@ public:
 
 	const std::any get(KeyRef name);
 	const std::map<KeyRef, std::any> get(KeyRangeRef range);
+
+	// To write into the global configuration, submit a transaction to
+	// \xff\xff/global_config/<your-key> with <your-value> encoded using the
+	// FDB tuple typecodes.
 
 	Future<Void> onInitialized();
 

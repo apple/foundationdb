@@ -65,7 +65,14 @@ Tuple::Tuple(StringRef const& str, bool exclude_incomplete) {
 			i = find_string_terminator(str, i + 1) + 1;
 		} else if (data[i] >= '\x0c' && data[i] <= '\x1c') {
 			i += abs(data[i] - '\x14') + 1;
-		} else if (data[i] == '\x00') {
+		}
+		else if(data[i] == 0x20) {
+			i += sizeof(float) + 1;
+		}
+		else if(data[i] == 0x21) {
+			i += sizeof(double) + 1;
+		}
+		else if(data[i] == '\x00') {
 			i += 1;
 		} else {
 			throw invalid_tuple_data_type();
@@ -138,6 +145,29 @@ Tuple& Tuple::append(int64_t value) {
 	return *this;
 }
 
+Tuple& Tuple::appendFloat( float value ) {
+	offsets.push_back( data.size() );
+	float swap = bigEndianFloat(value);
+	uint8_t *bytes = (uint8_t*)&swap;
+	adjust_floating_point(bytes, sizeof(float), true);
+
+	data.push_back( data.arena(), 0x20 );
+	data.append( data.arena(), bytes, sizeof(float) );
+	return *this;
+}
+
+Tuple& Tuple::appendDouble( double value ) {
+	offsets.push_back( data.size() );
+	double swap = value;
+	swap = bigEndianDouble(swap);
+	uint8_t *bytes = (uint8_t*)&swap;
+	adjust_floating_point(bytes, sizeof(double), true);
+
+	data.push_back( data.arena(), 0x21 );
+	data.append( data.arena(), bytes, sizeof(double) );
+	return *this;
+}
+
 Tuple& Tuple::appendNull() {
 	offsets.push_back(data.size());
 	data.push_back(data.arena(), (uint8_t)'\x00');
@@ -159,7 +189,14 @@ Tuple::ElementType Tuple::getType(size_t index) const {
 		return ElementType::UTF8;
 	} else if (code >= '\x0c' && code <= '\x1c') {
 		return ElementType::INT;
-	} else {
+	}
+	else if(code == 0x20) {
+		return ElementType::FLOAT;
+	}
+	else if(code == 0x21) {
+		return ElementType::DOUBLE;
+	}
+	else {
 		throw invalid_tuple_data_type();
 	}
 }

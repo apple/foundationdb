@@ -19,6 +19,10 @@
  */
 
 #include "fdbclient/GlobalConfig.actor.h"
+#include "fdbclient/SystemData.h"
+#include "fdbclient/Tuple.h"
+#include "flow/flow.h"
+#include "flow/genericactors.actor.h"
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -61,17 +65,21 @@ Future<Void> GlobalConfig::onInitialized() {
 
 void GlobalConfig::insert(KeyRef key, ValueRef value) {
 	KeyRef stableKey = KeyRef(arena, key);
-	Tuple t = Tuple::unpack(value);
-	if (t.getType(0) == Tuple::ElementType::UTF8) {
-		data[stableKey] = t.getString(0);
-	} else if (t.getType(0) == Tuple::ElementType::INT) {
-		data[stableKey] = t.getInt(0);
-	} else if (t.getType(0) == Tuple::ElementType::FLOAT) {
-		data[stableKey] = t.getFloat(0);
-	} else if (t.getType(0) == Tuple::ElementType::DOUBLE) {
-		data[stableKey] = t.getDouble(0);
-	} else {
-		ASSERT(false);
+	try {
+		Tuple t = Tuple::unpack(value);
+		if (t.getType(0) == Tuple::ElementType::UTF8) {
+			data[stableKey] = t.getString(0);
+		} else if (t.getType(0) == Tuple::ElementType::INT) {
+			data[stableKey] = t.getInt(0);
+		} else if (t.getType(0) == Tuple::ElementType::FLOAT) {
+			data[stableKey] = t.getFloat(0);
+		} else if (t.getType(0) == Tuple::ElementType::DOUBLE) {
+			data[stableKey] = t.getDouble(0);
+		} else {
+			ASSERT(false);
+		}
+	} catch (Error& e) {
+		TraceEvent("GlobalConfigTupleError").detail("What", e.what());
 	}
 }
 

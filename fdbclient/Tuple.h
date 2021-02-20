@@ -38,6 +38,10 @@ struct Tuple {
 	Tuple& append(Tuple const& tuple);
 	Tuple& append(StringRef const& str, bool utf8 = false);
 	Tuple& append(int64_t);
+	// There are some ambiguous append calls in fdbclient, so to make it easier
+	// to add append for floats and doubles, name them differently for now.
+	Tuple& appendFloat(float);
+	Tuple& appendDouble(double);
 	Tuple& appendNull();
 
 	StringRef pack() const { return StringRef(data.begin(), data.size()); }
