@@ -993,7 +993,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 					ASSERT(process->isReliable() || process->rebooting);
 
 					g_simulator.protectedAddresses.insert(process->addresses.address);
-					if(process->addresses.secondaryAddress.present()) {
+					if (process->addresses.secondaryAddress.present()) {
 						g_simulator.protectedAddresses.insert(process->addresses.secondaryAddress.get());
 					}
 					TraceEvent("ProtectCoordinator").detail("Address", desiredCoordinators[i]).backtrace();
@@ -2020,10 +2020,10 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 		data.locality.set(LiteralStringRef("machineid"), StringRef(machineId));
 		data.address.ip = IPAddress(i);
 
-		if(g_network->isSimulated()) {
-			g_simulator.newProcess("TestCoordinator", data.address.ip, data.address.port, false, 1,
-			                       data.locality, ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource),
-			                       "", "");
+		if (g_network->isSimulated()) {
+			g_simulator.newProcess("TestCoordinator", data.address.ip, data.address.port, false, 1, data.locality,
+			                       ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource), "",
+			                       "");
 		}
 
 		workers.push_back(data);
