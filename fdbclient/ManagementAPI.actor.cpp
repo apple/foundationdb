@@ -1125,7 +1125,7 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 					ASSERT(process->isReliable() || process->rebooting);
 
 					g_simulator.protectedAddresses.insert(process->addresses.address);
-					if(process->addresses.secondaryAddress.present()) {
+					if (process->addresses.secondaryAddress.present()) {
 						g_simulator.protectedAddresses.insert(process->addresses.secondaryAddress.get());
 					}
 					TraceEvent("ProtectCoordinator").detail("Address", desiredCoordinators[i]).backtrace();

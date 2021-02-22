@@ -108,7 +108,10 @@ description is not currently required but encouraged.
             paramType="String" paramDescription="path to directory containing client libraries"
             description="Searches the specified path for dynamic libraries and adds them to the list of client libraries for use by the multi-version client API. Must be set before setting up the network." />
     <Option name="disable_local_client" code="64"
-            description="Prevents connections through the local client, allowing only connections through externally loaded client libraries. Intended primarily for testing." />
+            description="Prevents connections through the local client, allowing only connections through externally loaded client libraries." />
+    <Option name="client_threads_per_version" code="65"
+            paramType="Int" paramDescription="Number of client threads to be spawned.  Each server will be serviced by a single client thread."
+            description="Spawns multiple worker threads for each version of the client that is loaded.  Setting this to a number greater than one implies disable_local_client." />
     <Option name="disable_client_statistics_logging" code="70"
             description="Disables logging of client statistics, such as sampled transaction activity." />
     <Option name="enable_slow_task_profiling" code="71"
