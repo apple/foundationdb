@@ -332,5 +332,20 @@ public:
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
 };
 
+class CoordinatorsImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit CoordinatorsImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+};
+
+class CoordinatorsAutoImpl : public SpecialKeyRangeReadImpl {
+public:
+	explicit CoordinatorsAutoImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+};
+
 #include "flow/unactorcompiler.h"
 #endif

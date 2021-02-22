@@ -950,6 +950,16 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		    SpecialKeySpace::MODULE::TRACING, SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<TracingOptionsImpl>(
 		        SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::TRACING)));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::CONFIGURATION, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<CoordinatorsImpl>(
+		        KeyRangeRef(LiteralStringRef("coordinators/"), LiteralStringRef("coordinators0"))
+		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin)));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READONLY,
+		    std::make_unique<CoordinatorsAutoImpl>(
+		        singleKeyRange(LiteralStringRef("auto_coordinators"))
+		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 	}
 	if (apiVersionAtLeast(630)) {
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, SpecialKeySpace::IMPLTYPE::READONLY,
@@ -2250,6 +2260,8 @@ ACTOR Future<Void> watchStorageServerResp(KeyRef key, Database cx) {
 			} else if (metadata->watchPromise.getFutureReferenceCount() == 1) {
 				cx->deleteWatchMetadata(key);
 				return Void();
+			} else if (e.code() == error_code_future_version) {
+				continue;
 			}
 			cx->deleteWatchMetadata(key);
 			metadata->watchPromise.sendError(e);

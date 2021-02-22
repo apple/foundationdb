@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <boost/algorithm/string.hpp>
+
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -27,7 +29,16 @@
 namespace {
 const std::string kTracingTransactionIdKey = "transaction_id";
 const std::string kTracingTokenKey = "token";
+
+static bool isAlphaNumeric(const std::string& key) {
+	// [A-Za-z0-9_]+
+	if (!key.size()) return false;
+	for (const char& c : key) {
+		if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_')) return false;
+	}
+	return true;
 }
+} // namespace
 
 std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToBoundary = {
 	{ SpecialKeySpace::MODULE::TRANSACTION,
@@ -55,7 +66,9 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	                .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "lock", singleKeyRange(LiteralStringRef("db_locked")).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "consistencycheck", singleKeyRange(LiteralStringRef("consistency_check_suspended"))
-	                          .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
+	                          .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "coordinators", KeyRangeRef(LiteralStringRef("coordinators/"), LiteralStringRef("coordinators0"))
+	                      .withPrefix(moduleToBoundary[MODULE::CONFIGURATION].begin) }
 };
 
 std::set<std::string> SpecialKeySpace::options = { "excluded/force", "failed/force" };
@@ -178,13 +191,12 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, ReadYourWrite
 		TraceEvent(SevDebug, "ReadToBoundary")
 		    .detail("TerminateKey", ks->getKey())
 		    .detail("TerminateOffset", ks->offset);
-		// If still not normalized after moving to the boundary, 
+		// If still not normalized after moving to the boundary,
 		// let key selector clamp up to the boundary
 		if (ks->offset < 1) {
 			result->readToBegin = true;
 			ks->setKey(boundary.begin);
-		}
-		else {
+		} else {
 			result->readThroughEnd = true;
 			ks->setKey(boundary.end);
 		}
@@ -1296,8 +1308,7 @@ TracingOptionsImpl::TracingOptionsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(k
 	TraceEvent("TracingOptionsImpl::TracingOptionsImpl").detail("Range", kr);
 }
 
-Future<Standalone<RangeResultRef>> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw,
-                                                                KeyRangeRef kr) const {
+Future<Standalone<RangeResultRef>> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
 	Standalone<RangeResultRef> result;
 	for (const auto& option : SpecialKeySpace::getTracingOptions()) {
 		auto key = getKeyRange().begin.withSuffix(option);
@@ -1306,9 +1317,11 @@ Future<Standalone<RangeResultRef>> TracingOptionsImpl::getRange(ReadYourWritesTr
 		}
 
 		if (key.endsWith(kTracingTransactionIdKey)) {
-			result.push_back_deep(result.arena(), KeyValueRef(key, std::to_string(ryw->getTransactionInfo().spanID.first())));
+			result.push_back_deep(result.arena(),
+			                      KeyValueRef(key, std::to_string(ryw->getTransactionInfo().spanID.first())));
 		} else if (key.endsWith(kTracingTokenKey)) {
-			result.push_back_deep(result.arena(), KeyValueRef(key, std::to_string(ryw->getTransactionInfo().spanID.second())));
+			result.push_back_deep(result.arena(),
+			                      KeyValueRef(key, std::to_string(ryw->getTransactionInfo().spanID.second())));
 		}
 	}
 	return result;
@@ -1350,4 +1363,194 @@ void TracingOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef
 void TracingOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	ryw->setSpecialKeySpaceErrorMsg("clear disabled");
 	throw special_keys_api_failure();
+}
+
+CoordinatorsImpl::CoordinatorsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<Standalone<RangeResultRef>> CoordinatorsImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+	Standalone<RangeResultRef> result;
+	KeyRef prefix(getKeyRange().begin);
+	// the constructor of ClusterConnectionFile already checks whether the file is valid
+	auto cs = ClusterConnectionFile(ryw->getDatabase()->getConnectionFile()->getFilename()).getConnectionString();
+	auto coordinator_processes = cs.coordinators();
+	Key cluster_decription_key = prefix.withSuffix(LiteralStringRef("cluster_description"));
+	if (kr.contains(cluster_decription_key)) {
+		result.push_back_deep(result.arena(), KeyValueRef(cluster_decription_key, cs.clusterKeyName()));
+	}
+	// Note : the sort by string is anti intuition, ex. 1.1.1.1:11 < 1.1.1.1:5
+	// include :tls in keys if the network addresss is TLS
+	std::sort(coordinator_processes.begin(), coordinator_processes.end(),
+	          [](const NetworkAddress& lhs, const NetworkAddress& rhs) { return lhs.toString() < rhs.toString(); });
+	std::string processes_str;
+	for (const auto& w : coordinator_processes) {
+		if (processes_str.size()) processes_str += ",";
+		processes_str += w.toString();
+	}
+	Key processes_key = prefix.withSuffix(LiteralStringRef("processes"));
+	if (kr.contains(processes_key)) {
+		result.push_back_deep(result.arena(), KeyValueRef(processes_key, Value(processes_str)));
+	}
+	return rywGetRange(ryw, kr, result);
+}
+
+ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+	state Reference<IQuorumChange> change;
+	state std::vector<NetworkAddress> addressesVec;
+	state std::vector<std::string> process_address_strs;
+	state Optional<std::string> msg;
+	state int index;
+	state bool parse_error = false;
+
+	// check update for cluster_description
+	Key processes_key = LiteralStringRef("processes").withPrefix(kr.begin);
+	auto processes_entry = ryw->getSpecialKeySpaceWriteMap()[processes_key];
+	if (processes_entry.first) {
+		ASSERT(processes_entry.second.present()); // no clear should be seen here
+		auto processesStr = processes_entry.second.get().toString();
+		boost::split(process_address_strs, processesStr, [](char c) { return c == ','; });
+		if (!process_address_strs.size()) {
+			return ManagementAPIError::toJsonString(
+			    false, "coordinators",
+			    "New coordinators\' processes are empty, please specify new processes\' network addresses with format "
+			    "\"IP:PORT,IP:PORT,...,IP:PORT\"");
+		}
+		for (index = 0; index < process_address_strs.size(); index++) {
+			try {
+				auto a = NetworkAddress::parse(process_address_strs[index]);
+				if (!a.isValid())
+					parse_error = true;
+				else
+					addressesVec.push_back(a);
+			} catch (Error& e) {
+				TraceEvent(SevDebug, "SpecialKeysNetworkParseError").error(e);
+				parse_error = true;
+			}
+
+			if (parse_error) {
+				std::string error =
+				    "ERROR: \'" + process_address_strs[index] + "\' is not a valid network endpoint address\n";
+				if (process_address_strs[index].find(":tls") != std::string::npos)
+					error += "        Do not include the `:tls' suffix when naming a process\n";
+				return ManagementAPIError::toJsonString(false, "coordinators", error);
+			}
+		}
+	}
+
+	if (addressesVec.size())
+		change = specifiedQuorumChange(addressesVec);
+	else
+		change = noQuorumChange();
+
+	// check update for cluster_description
+	Key cluster_decription_key = LiteralStringRef("cluster_description").withPrefix(kr.begin);
+	auto entry = ryw->getSpecialKeySpaceWriteMap()[cluster_decription_key];
+	if (entry.first) {
+		// check valid description [a-zA-Z0-9_]+
+		if (entry.second.present() && isAlphaNumeric(entry.second.get().toString())) {
+			// do the name change
+			change = nameQuorumChange(entry.second.get().toString(), change);
+		} else {
+			// throw the error
+			return Optional<std::string>(ManagementAPIError::toJsonString(
+			    false, "coordinators", "Cluster description must match [A-Za-z0-9_]+"));
+		}
+	}
+
+	ASSERT(change.isValid());
+
+	TraceEvent(SevDebug, "SKSChangeCoordinatorsStart")
+	    .detail("NewAddresses", describe(addressesVec))
+	    .detail("Description", entry.first ? entry.second.get().toString() : "");
+
+	Optional<CoordinatorsResult> r = wait(changeQuorumChecker(&ryw->getTransaction(), change, &addressesVec));
+
+	TraceEvent(SevDebug, "SKSChangeCoordinatorsFinish")
+	    .detail("Result", r.present() ? static_cast<int>(r.get()) : -1); // -1 means success
+	if (r.present()) {
+		auto res = r.get();
+		std::string error_msg;
+		bool retriable = false;
+		if (res == CoordinatorsResult::INVALID_NETWORK_ADDRESSES) {
+			error_msg = "The specified network addresses are invalid";
+		} else if (res == CoordinatorsResult::SAME_NETWORK_ADDRESSES) {
+			error_msg = "No change (existing configuration satisfies request)";
+		} else if (res == CoordinatorsResult::NOT_COORDINATORS) {
+			error_msg = "Coordination servers are not running on the specified network addresses";
+		} else if (res == CoordinatorsResult::DATABASE_UNREACHABLE) {
+			error_msg = "Database unreachable";
+		} else if (res == CoordinatorsResult::BAD_DATABASE_STATE) {
+			error_msg = "The database is in an unexpected state from which changing coordinators might be unsafe";
+		} else if (res == CoordinatorsResult::COORDINATOR_UNREACHABLE) {
+			error_msg = "One of the specified coordinators is unreachable";
+			retriable = true;
+		} else if (res == CoordinatorsResult::NOT_ENOUGH_MACHINES) {
+			error_msg = "Too few fdbserver machines to provide coordination at the current redundancy level";
+		} else if (res == CoordinatorsResult::SUCCESS) {
+			TraceEvent(SevError, "SpecialKeysForCoordinators").detail("UnexpectedSuccessfulResult", "");
+		} else {
+			ASSERT(false);
+		}
+		msg = ManagementAPIError::toJsonString(retriable, "coordinators", error_msg);
+	}
+	return msg;
+}
+
+Future<Optional<std::string>> CoordinatorsImpl::commit(ReadYourWritesTransaction* ryw) {
+	return coordinatorsCommitActor(ryw, getKeyRange());
+}
+
+void CoordinatorsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
+	return throwSpecialKeyApiFailure(ryw, "coordinators", "Clear range is meaningless thus forbidden for coordinators");
+}
+
+void CoordinatorsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
+	return throwSpecialKeyApiFailure(ryw, "coordinators",
+	                                 "Clear operation is meaningless thus forbidden for coordinators");
+}
+
+CoordinatorsAutoImpl::CoordinatorsAutoImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
+
+ACTOR static Future<Standalone<RangeResultRef>> CoordinatorsAutoImplActor(ReadYourWritesTransaction* ryw,
+                                                                          KeyRangeRef kr) {
+	state Standalone<RangeResultRef> res;
+	state std::string autoCoordinatorsKey;
+	state Transaction& tr = ryw->getTransaction();
+
+	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+	tr.setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
+	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	Optional<Value> currentKey = wait(tr.get(coordinatorsKey));
+
+	if (!currentKey.present()) {
+		ryw->setSpecialKeySpaceErrorMsg(
+		    ManagementAPIError::toJsonString(false, "auto_coordinators", "The coordinator key does not exist"));
+		throw special_keys_api_failure();
+	}
+	state ClusterConnectionString old(currentKey.get().toString());
+	state CoordinatorsResult result = CoordinatorsResult::SUCCESS;
+
+	std::vector<NetworkAddress> _desiredCoordinators = wait(autoQuorumChange()->getDesiredCoordinators(
+	    &tr, old.coordinators(), Reference<ClusterConnectionFile>(new ClusterConnectionFile(old)), result));
+
+	if (result == CoordinatorsResult::NOT_ENOUGH_MACHINES) {
+		// we could get not_enough_machines if we happen to see the database while the cluster controller is updating
+		// the worker list, so make sure it happens twice before returning a failure
+		ryw->setSpecialKeySpaceErrorMsg(ManagementAPIError::toJsonString(
+		    true, "auto_coordinators", "The auto change attempt did not get enough machines, please try again"));
+		throw special_keys_api_failure();
+	}
+
+	for (const auto& address : _desiredCoordinators) {
+		autoCoordinatorsKey += autoCoordinatorsKey.size() ? "," : "";
+		autoCoordinatorsKey += address.toString();
+	}
+	res.push_back_deep(res.arena(), KeyValueRef(kr.begin, Value(autoCoordinatorsKey)));
+	return res;
+}
+
+Future<Standalone<RangeResultRef>> CoordinatorsAutoImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                                  KeyRangeRef kr) const {
+	// single key range, the queried range should always be the same as the underlying range
+	ASSERT(kr == getKeyRange());
+	return CoordinatorsAutoImplActor(ryw, kr);
 }
