@@ -125,6 +125,17 @@ Because it can have only a single network thread, a client process may become li
 
 If you suspect that a client process's workload may be saturating the network thread, this can be confirmed by checking whether the network thread is running with high CPU usage. In the :ref:`client trace logs <client-trace-logging>`, the ``ProcessMetrics`` trace event has a field for ``MainThreadCPUSeconds`` that indicates the number of seconds out of ``Elapsed`` that the network thread was busy. You can also attempt to identify a busy thread from any tool that reports the CPU activity of threads in your process.
 
+.. note:: FoundationDB 6.3 introduced :ref:`multi-threaded client <multi-threaded-client>`, and can alternatively be used to scale clients.
+
+.. _multi-threaded-client:
+
+Multi-threaded Client
+=====================
+
+FoundationDB client library can start multiple worker threads for each version of client that is loaded. Every single cluster will be serviced by a one client thread. If the client is connected to only one cluster, exactly one thread would be active and the rest will remain idle. Hence, using this feature is useful when the client is actively using more than one cluster.
+
+Clients can be configured to use worker-threads by setting the ``FDBNetworkOptions::CLIENT_THREADS_PER_VERSION`` option.
+
 .. _client-trace-logging:
 
 Client trace logging
