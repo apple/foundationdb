@@ -344,7 +344,7 @@ else()
   # Check whether we can use dtrace probes
   include(CheckSymbolExists)
   check_symbol_exists(DTRACE_PROBE sys/sdt.h SUPPORT_DTRACE)
-  check_symbol_exists(aligned_alloc stdlib.h HAS_ALIGNED_ALLOC)
+  check_symbol_exists(aligned_alloc stdlib.h malloc.h HAS_ALIGNED_ALLOC)
   message(STATUS "Has aligned_alloc: ${HAS_ALIGNED_ALLOC}")
   if((SUPPORT_DTRACE) AND (USE_DTRACE))
     set(DTRACE_PROBES 1)
