@@ -196,9 +196,9 @@ Future<REPLY_TYPE(Request)> loadBalance(
 		nextAlt++;
 
 	if(model) {
-		double bestMetric = 1e9;  // Server with the shortest queue size.
+		double bestMetric = 1e9;  // Storage server with the least outstanding requests.
 		double nextMetric = 1e9;
-		double bestTime = 1e9;  // The latency to the server with shortest queue size.
+		double bestTime = 1e9;  // The latency to the server with the least outstanding requests.
 		double nextTime = 1e9;
 		int badServers = 0;
 
