@@ -27,21 +27,23 @@
 #include "flow/Knobs.h"
 #include "flow/ActorCollection.h"
 
-/*
-The data structure used for the client-side load balancer to decide which
-storage server to read data from. Conceptually, it represents the size of
-storage server read request queue. One QueueData represents one storage
-server.
-*/
+// The data structure used for the client-side load balancing algorithm to
+// decide which storage server to read data from. Conceptually, it tracks the
+// number of outstanding requests the current client sent to each storage
+// server. One "QueueData" represents one storage server.
 struct QueueData {
-	// The latest queue size in this storage server.
+	// The current outstanding requests sent by the local client to this storage
+	// server. The number is smoothed out over a continuous timeline.
 	Smoother smoothOutstanding;
+	
+	// The last client perceived latency to this storage server.
 	double latency;
 
-	// The additional queue size used in the next request to this storage
-	// server. This penalty is sent from the storage server from the last
-	// request, which is the server side mechanism to ask the client to slow
-	// down request.
+	// Represents the "cost" of each storage request. By default, the penalty is
+	// 1 indicates that each outstanding request corresponds 1 outstanding
+	// request. However, storage server can also increase the penalty if it
+	// decides to ask the client to slow down sending requests to it. Penalty
+	// is updated after each LoadBalancedReply.
 	double penalty;
 
 	// Do not consider this storage server if the current time hasn't reach this
@@ -69,7 +71,7 @@ public:
 	// Finishes the request sent to storage server with `id`.
 	//   - latency: the measured client-side latency of the request.
 	//   - penalty: the server side penalty sent along with the response from
-	//              the storage server.
+	//              the storage server. Requires >= 1.
 	//   - delta: Update server `id`'s queue model by substract this amount.
 	//            This value should be the value returned by `addRequest` below.
 	//   - clean: indicates whether the there was an error or not.
