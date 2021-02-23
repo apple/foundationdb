@@ -4036,7 +4036,6 @@ ACTOR Future<Void> serveWatchValueRequestsImpl( StorageServer* self, FutureStrea
 			}
 
 		}
-		return Void();
 	}
 }
 
