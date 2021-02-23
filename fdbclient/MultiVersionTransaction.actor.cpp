@@ -1084,14 +1084,14 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 				break;
 			}
 			if (readCount == -1) {
-				TraceEvent("ExternalClientCopyFailedReadError").GetLastError().detail("LibraryPath", path);
+				TraceEvent(SevError, "ExternalClientCopyFailedReadError").GetLastError().detail("LibraryPath", path);
 				throw platform_error();
 			}
 			ssize_t written = 0;
 			while (written != readCount) {
 				ssize_t writeCount = write(tempFd, buf + written, readCount - written);
 				if (writeCount == -1) {
-					TraceEvent("ExternalClientCopyFailedWriteError").GetLastError().detail("LibraryPath", path);
+					TraceEvent(SevError, "ExternalClientCopyFailedWriteError").GetLastError().detail("LibraryPath", path);
 					throw platform_error();
 				}
 				written += writeCount;
