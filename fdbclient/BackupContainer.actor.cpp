@@ -979,7 +979,7 @@ public:
 		// possible the metadata is wrong.  So, try the backup describe again but with the deepScan option set
 		// true so it will scan all log files in the backup to determine restorability and re-initialize the 
 		// log version metadata in the backup.
-		state bool useDeepScan = false;
+		state bool useDeepScan = BUGGIFY ? deterministicRandom()->coinflip() : false;
 		state Version scanBegin = 0;
 
 		loop {
