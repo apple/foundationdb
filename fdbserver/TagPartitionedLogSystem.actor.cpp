@@ -959,8 +959,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	// Return a peek cursor that peeks data at tag from the begin version to either the recovery version if peeking at
-	// the latest epoch or the peek cursor's epoch's end version if peeking at an old epoch.
+	// LogRouter or BackupWorker use this function to obtain a cursor for peeking tlogs of a generation (i.e., epoch).
+	// Specifically, the epoch is determined by looking up "dbgid" in tlog sets of generations.
+	// The returned cursor can peek data at the "tag" from the given "begin" version to that epoch's end version or
+	// the recovery version for the latest old epoch. For the current epoch, the cursor has no end version.
 	Reference<IPeekCursor> peekLogRouter(UID dbgid, Version begin, Tag tag) final {
 		bool found = false;
 		for (const auto& log : tLogs) {
