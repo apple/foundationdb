@@ -53,6 +53,8 @@ public class KeySelector {
 	private final boolean orEqual;
 	private final int offset;
 
+	final boolean isExact;
+
 	/**
 	 * Constructs a new {@code KeySelector} from the given parameters.  Client code
 	 *  will not generally call this constructor. A key selector can be used to
@@ -74,9 +76,14 @@ public class KeySelector {
 	 *               resolving to a key based on the {@code key} and {@code orEqual} parameters
 	 */
 	public KeySelector(byte[] key, boolean orEqual, int offset) {
+		this(key,orEqual,offset,false);
+	}
+
+	private KeySelector(byte[] key, boolean orEqual, int offset,boolean isExact) {
 		this.key = key;
 		this.orEqual = orEqual;
 		this.offset = offset;
+		this.isExact = isExact;
 	}
 
 	/**
@@ -124,6 +131,17 @@ public class KeySelector {
 	}
 
 	/**
+	 * Creates a {@code KeySelector} that picks "exactly" the key specified.
+	 * 
+	 * This is a bit of syntactic sugar for use in range scans
+	 * @param key
+	 * @return
+	 */
+	public static KeySelector exact(byte[] key){
+		return new KeySelector(key,true,0,true);
+	}
+
+	/**
 	 * Returns a new {@code KeySelector} offset by a given
 	 *  number of keys from this one. For example, an offset of {@code 1} means
 	 *  that the new {@code KeySelector} specifies the key in the database
@@ -156,6 +174,10 @@ public class KeySelector {
 		byte[] res = new byte[key.length];
 		System.arraycopy(key, 0, res, 0, key.length);
 		return res;
+	}
+
+	public boolean isExact(){
+		return isExact;
 	}
 
 	@Override

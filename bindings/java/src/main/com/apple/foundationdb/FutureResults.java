@@ -23,11 +23,15 @@ package com.apple.foundationdb;
 import java.nio.ByteBuffer;
 import java.util.concurrent.Executor;
 
+import com.apple.foundationdb.TransactionTimer.Events;
+
 class FutureResults extends NativeFuture<RangeResultInfo> {
-	FutureResults(long cPtr, boolean enableDirectBufferQueries, Executor executor) {
+	private final TransactionTimer timer;
+	FutureResults(long cPtr, boolean enableDirectBufferQueries, Executor executor,TransactionTimer timer) {
 		super(cPtr);
 		registerMarshalCallback(executor);
 		this.enableDirectBufferQueries = enableDirectBufferQueries;
+		this.timer = timer;
 	}
 
 	@Override
@@ -37,6 +41,9 @@ class FutureResults extends NativeFuture<RangeResultInfo> {
 
 	@Override
 	protected RangeResultInfo getIfDone_internal(long cPtr) throws FDBException {
+		if(timer!=null){
+			timer.increment(Events.JNI_CALL);
+		}
 		FDBException err = Future_getError(cPtr);
 
 		if(err != null && !err.isSuccess()) {
@@ -53,11 +60,19 @@ class FutureResults extends NativeFuture<RangeResultInfo> {
 		try {
 			pointerReadLock.lock();
 			if (buffer != null) {
+				if(timer!=null){
+					timer.increment(Events.RANGE_QUERY_DIRECT_BUFFER_HIT);
+					timer.increment(Events.JNI_CALL);
+				}
 				try (DirectBufferIterator directIterator = new DirectBufferIterator(buffer)) {
 					FutureResults_getDirect(getPtr(), directIterator.getBuffer(), directIterator.getBuffer().capacity());
 					return new RangeResult(directIterator);
 				}
 			} else {
+				if(timer!=null){
+					timer.increment(Events.RANGE_QUERY_DIRECT_BUFFER_MISS);
+					timer.increment(Events.JNI_CALL);
+				}
 				return FutureResults_get(getPtr());
 			}
 		} finally {
@@ -68,6 +83,6 @@ class FutureResults extends NativeFuture<RangeResultInfo> {
 	private boolean enableDirectBufferQueries = false;
 
 	private native RangeResult FutureResults_get(long cPtr) throws FDBException;
-	private native void FutureResults_getDirect(long cPtr, ByteBuffer buffer, int capacity)
+	private native boolean FutureResults_getDirect(long cPtr, ByteBuffer buffer, int capacity)
 		throws FDBException;
 }

@@ -33,7 +33,7 @@ import sun.misc.Unsafe;
  * This is borrowed and slightly modified from Guava's UnsignedBytes
  * class to be able to compare arrays that start at non-zero offsets.
  */
-abstract class FastByteComparisons {
+public abstract class FastByteComparisons {
 
     private static final int UNSIGNED_MASK = 0xFF;
     /**
@@ -72,6 +72,13 @@ abstract class FastByteComparisons {
                                       T buffer2, int offset2, int length2);
     }
 
+    /**
+     * @return a byte[] comparator for use in sorting, collections, and so on internally
+     * to the Java code.
+     */
+    public static Comparator<byte[]> comparator(){
+        return LexicographicalComparerHolder.getBestComparer();
+    }
     /**
      * Pure Java Comparer
      *

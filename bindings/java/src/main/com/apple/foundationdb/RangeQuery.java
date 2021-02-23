@@ -26,6 +26,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiConsumer;
 
+import com.apple.foundationdb.TransactionTimer.Events;
 import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncIterator;
 import com.apple.foundationdb.async.AsyncUtil;
@@ -51,11 +52,12 @@ class RangeQuery implements AsyncIterable<KeyValue> {
 	private final boolean snapshot;
 	private final int rowLimit;
 	private final boolean reverse;
-	private final StreamingMode streamingMode;
+	private final StreamingMode streamingMode; 
+	private final TransactionTimer timer;
 
 	RangeQuery(FDBTransaction transaction, boolean isSnapshot,
 			KeySelector begin, KeySelector end, int rowLimit,
-			boolean reverse, StreamingMode streamingMode) {
+			boolean reverse, StreamingMode streamingMode,TransactionTimer timer) {
 		this.tr = transaction;
 		this.begin = begin;
 		this.end = end;
@@ -63,6 +65,7 @@ class RangeQuery implements AsyncIterable<KeyValue> {
 		this.rowLimit = rowLimit;
 		this.reverse = reverse;
 		this.streamingMode = streamingMode;
+		this.timer = timer;
 	}
 
 	/**
@@ -90,7 +93,7 @@ class RangeQuery implements AsyncIterable<KeyValue> {
 
 		// If the streaming mode is not EXACT, simply collect the results of an iteration into a list
 		return AsyncUtil.collect(
-				new RangeQuery(tr, snapshot, begin, end, rowLimit, reverse, mode), tr.getExecutor());
+				new RangeQuery(tr, snapshot, begin, end, rowLimit, reverse, mode,timer), tr.getExecutor());
 	}
 
 	/**
@@ -153,6 +156,9 @@ class RangeQuery implements AsyncIterable<KeyValue> {
 			public void accept(RangeResultInfo data, Throwable error) {
 				try {
 					if(error != null) {
+						if(timer!=null){
+							timer.increment(Events.RANGE_QUERY_CHUNK_FAILED);
+						}
 						promise.completeExceptionally(error);
 						if(error instanceof Error) {
 							throw (Error) error;
@@ -213,11 +219,21 @@ class RangeQuery implements AsyncIterable<KeyValue> {
 			fetchOutstanding = true;
 			nextChunk = null;
 
+
+			nextFuture = new CompletableFuture<>();
+			if (timer != null) {
+				timer.increment(Events.RANGE_QUERY_FETCHES);
+				final long sTime = System.nanoTime();
+				nextFuture = nextFuture.thenApply((bool)->{
+					timer.timeNanos(Events.RANGE_QUERY_FETCH_TIME_NANOS,System.nanoTime()-sTime);
+					return bool;
+				});
+			}			
+
 			fetchingChunk = tr.getRange_internal(begin, end,
 					rowsLimited ? rowsRemaining : 0, 0, streamingMode.code(),
 					++iteration, snapshot, reverse);
 
-			nextFuture = new CompletableFuture<>();
 			fetchingChunk.whenComplete(new FetchComplete(fetchingChunk, nextFuture));
 		}
 
@@ -266,6 +282,15 @@ class RangeQuery implements AsyncIterable<KeyValue> {
 					KeyValue result = chunk.values.get(index);
 					prevKey = result.getKey();
 					index++;
+
+					if(timer!=null){
+						// We record the BYTES_FETCHED here, rather than at a lower level,
+						// because some parts of the construction of a RangeResult occur underneath
+						// the JNI boundary, and we don't want to pass the timer down there
+						// (note: account for the length fields as well when recording the bytes fetched)
+						timer.count(Events.BYTES_FETCHED, result.getKey().length+result.getValue().length+8);
+						timer.increment(Events.RANGE_QUERY_TUPLES_FETCHED);
+					}
 
 					// If this is the first call to next() on a chunk there cannot
 					//  be another waiting, since we could not have issued a request

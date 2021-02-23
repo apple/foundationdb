@@ -27,14 +27,12 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Arrays;
 import java.util.List;
-import java.util.Random;
 
 import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
 import org.junit.Ignore;
+import org.junit.Test;
 
 /**
  * @author Ben
@@ -309,58 +307,68 @@ public class ArrayUtilTests {
 		fail("Not yet implemented");
 	}
 
-	private static final int SAMPLE_COUNT = 1000000;
-	private static final int SAMPLE_MAX_SIZE = 2048;
-	private List<byte[]> unsafe;
-	private List<byte[]> java;
-	@Before
-	public void init() {
-		unsafe = new ArrayList(SAMPLE_COUNT);
-		java = new ArrayList(SAMPLE_COUNT);
-		Random random = new Random();
-		for (int i = 0; i <= SAMPLE_COUNT; i++) {
-			byte[] addition = new byte[random.nextInt(SAMPLE_MAX_SIZE)];
-			random.nextBytes(addition);
-			unsafe.add(addition);
-			java.add(addition);
-		}
+	@Test(expected = NullPointerException.class)
+	public void cannotReplaceNullBytes() throws Exception{
+		ByteArrayUtil.replace(null,0,1,new byte[]{0x00}, new byte[]{0x00,(byte)0xFF});
+	}
+
+	@Test(expected = IllegalArgumentException.class)
+	public void cannotReplaceWithNegativeOffset() throws Exception {
+		ByteArrayUtil.replace(new byte[]{0x00, 0x01}, -1, 2, new byte[]{0x00}, new byte[]{0x00, (byte)0xFF});
+	}
+
+	@Test(expected = IllegalArgumentException.class)
+	public void cannotReplaceWithNegativeLength() throws Exception {
+		ByteArrayUtil.replace(new byte[]{0x00, 0x01}, 1, -1, new byte[]{0x00}, new byte[]{0x00, (byte)0xFF});
+	}
+
+	@Test(expected = IllegalArgumentException.class)
+	public void cannotReplaceWithOffsetAfterEndOfArray() throws Exception {
+		ByteArrayUtil.replace(new byte[]{0x00, 0x01}, 3, 2, new byte[]{0x00}, new byte[]{0x00, (byte)0xFF});
+	}
+
+	@Test(expected = IllegalArgumentException.class)
+	public void cannotReplaceWithLengthAfterEndOfArray() throws Exception {
+		ByteArrayUtil.replace(new byte[]{0x00, 0x01}, 1, 2, new byte[]{0x00}, new byte[]{0x00, (byte)0xFF});
 	}
 
 	@Test
-	public void testComparatorSort() {
-		Collections.sort(unsafe, FastByteComparisons.lexicographicalComparerUnsafeImpl());
-		Collections.sort(java, FastByteComparisons.lexicographicalComparerJavaImpl());
-		Assert.assertTrue(unsafe.equals(java));
-	}
+	public void replaceWorks() throws Exception {
+		List<byte[]> arrays = Arrays.asList(
+				new byte[]{0x01, 0x02, 0x01, 0x02}, new byte[]{0x01, 0x02}, new byte[]{0x03, 0x04}, new byte[]{0x03, 0x04, 0x03, 0x04},
+				new byte[]{0x01, 0x02, 0x01, 0x02}, new byte[]{0x01, 0x02}, new byte[]{0x03}, new byte[]{0x03, 0x03},
+				new byte[]{0x01, 0x02, 0x01, 0x02}, new byte[]{0x01, 0x02}, new byte[]{0x03, 0x04, 0x05}, new byte[]{0x03, 0x04, 0x05, 0x03, 0x04, 0x05},
+				new byte[]{0x00, 0x01, 0x02, 0x00, 0x01, 0x02, 0x00}, new byte[]{0x01, 0x02}, new byte[]{0x03, 0x04, 0x05}, new byte[]{0x00, 0x03, 0x04, 0x05, 0x00, 0x03, 0x04, 0x05, 0x00},
+				new byte[]{0x01, 0x01, 0x01, 0x01}, new byte[]{0x01, 0x02}, new byte[]{0x03, 0x04}, new byte[]{0x01, 0x01, 0x01, 0x01},
+				new byte[]{0x01, 0x01, 0x01, 0x01}, new byte[]{0x01, 0x02}, new byte[]{0x03}, new byte[]{0x01, 0x01, 0x01, 0x01},
+				new byte[]{0x01, 0x01, 0x01, 0x01}, new byte[]{0x01, 0x02}, new byte[]{0x03, 0x04, 0x05}, new byte[]{0x01, 0x01, 0x01, 0x01},
+				new byte[]{0x01, 0x01, 0x01, 0x01, 0x01}, new byte[]{0x01, 0x01}, new byte[]{0x03, 0x04, 0x05}, new byte[]{0x03, 0x04, 0x05, 0x03, 0x04, 0x05, 0x01},
+				new byte[]{0x01, 0x01, 0x01, 0x01, 0x01}, new byte[]{0x01, 0x01}, new byte[]{0x03, 0x04}, new byte[]{0x03, 0x04, 0x03, 0x04, 0x01},
+				new byte[]{0x01, 0x01, 0x01, 0x01, 0x01}, new byte[]{0x01, 0x01}, new byte[]{0x03}, new byte[]{0x03, 0x03, 0x01},
+				new byte[]{0x01, 0x02, 0x01, 0x02}, new byte[]{0x01, 0x02}, null, new byte[0],
+				new byte[]{0x01, 0x02, 0x01, 0x02}, new byte[]{0x01, 0x02}, new byte[0], new byte[0],
+				new byte[]{0x01, 0x02, 0x01, 0x02}, null, new byte[]{0x04}, new byte[]{0x01, 0x02, 0x01, 0x02},
+				new byte[]{0x01, 0x02, 0x01, 0x02}, new byte[0], new byte[]{0x04}, new byte[]{0x01, 0x02, 0x01, 0x02},
+				null, new byte[]{0x01, 0x02}, new byte[]{0x04}, null
+		);
+		for(int i = 0; i < arrays.size(); i += 4) {
+			byte[] src = arrays.get(i);
+			byte[] pattern = arrays.get(i + 1);
+			byte[] replacement = arrays.get(i + 2);
+			byte[] expectedResults = arrays.get(i + 3);
+			byte[] results = ByteArrayUtil.replace(src, pattern, replacement);
+			String errorMsg =String.format("results <%s> did not match expected results <%s> when replaceing <%s> with <%s> in <%s>",
+								ByteArrayUtil.printable(results),
+								ByteArrayUtil.printable(expectedResults),
+								ByteArrayUtil.printable(pattern),
+								ByteArrayUtil.printable(replacement),
+								ByteArrayUtil.printable(src));
 
-	@Test
-	public void testUnsafeComparison() {
-		for (int i =0; i< SAMPLE_COUNT; i++) {
-			Assert.assertEquals(FastByteComparisons.lexicographicalComparerUnsafeImpl().compare(unsafe.get(i), java.get(i)), 0);
+			Assert.assertArrayEquals(errorMsg, expectedResults,results);
+			if(src!=null){
+				Assert.assertTrue(String.format("src and results array are pointer-equal when replacing <%s> with <%s> in <%s>",
+				ByteArrayUtil.printable(pattern),ByteArrayUtil.printable(replacement),ByteArrayUtil.printable(src)),src!=results);
+			}
 		}
 	}
-
-	@Test
-	public void testJavaComparison() {
-		for (int i =0; i< SAMPLE_COUNT; i++) {
-			Assert.assertEquals(FastByteComparisons.lexicographicalComparerJavaImpl().compare(unsafe.get(i), java.get(i)), 0);
-		}
-	}
-
-	@Test
-	public void testUnsafeComparisonWithOffet() {
-		for (int i =0; i< SAMPLE_COUNT; i++) {
-			if (unsafe.get(i).length > 5)
-				Assert.assertEquals(FastByteComparisons.lexicographicalComparerUnsafeImpl().compareTo(unsafe.get(i), 4, unsafe.get(i).length - 4,  java.get(i), 4, java.get(i).length - 4), 0);
-		}
-	}
-
-	@Test
-	public void testJavaComparisonWithOffset() {
-		for (int i =0; i< SAMPLE_COUNT; i++) {
-			if (unsafe.get(i).length > 5)
-				Assert.assertEquals(FastByteComparisons.lexicographicalComparerJavaImpl().compareTo(unsafe.get(i), 4, unsafe.get(i).length - 4,  java.get(i), 4, java.get(i).length - 4), 0);
-		}
-	}
-
 }
