@@ -945,6 +945,7 @@ public:
 		}
 	}
 
+	// Check if txn system is recruited successfully in each region
 	void checkRegions(const std::vector<RegionInfo>& regions) {
 		if(desiredDcIds.get().present() && desiredDcIds.get().get().size() == 2 && desiredDcIds.get().get()[0].get() == regions[0].dcId && desiredDcIds.get().get()[1].get() == regions[1].dcId) {
 			return;
@@ -2090,6 +2091,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 			}
 		}
 	}
+	// Recruit storage cache role. The storage cache project is paused. Its code path is unlikely used.
 	Optional<uint16_t> newStorageCache = req.storageCacheInterf.present() ? req.storageCacheInterf.get().first : Optional<uint16_t>();
 	auto& cacheInfo = self->id_worker[w.locality.processId()].storageCacheInfo;
 	if (req.storageCacheInterf.present()) {

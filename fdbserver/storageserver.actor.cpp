@@ -744,6 +744,7 @@ public:
 		return counters.bytesInput.getValue() - counters.bytesDurable.getValue();
 	}
 
+	// penalty used by loadBalance() to balance requests among SSes. We prefer SS with less write queue size.
 	double getPenalty() {
 		return std::max(std::max(1.0, (queueSize() - (SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER -
 													  2.0 * SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER)) /
