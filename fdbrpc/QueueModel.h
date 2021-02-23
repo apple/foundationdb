@@ -43,7 +43,7 @@ struct QueueData {
 	// request, which is the server side mechanism to ask the client to slow
 	// down request.
 	double penalty;
-	
+
 	// Do not consider this storage server if the current time hasn't reach this
 	// time. This field is computed after each request to not repeatedly try the
 	// same storage server that is likely not going to return a valid result.
@@ -57,7 +57,9 @@ struct QueueData {
 	// hasn't returned a valid result, increase above `futureVersionBackoff`
 	// to increase the future backoff amount.
 	double increaseBackoffTime;
-	QueueData() : latency(0.001), penalty(1.0), smoothOutstanding(FLOW_KNOBS->QUEUE_MODEL_SMOOTHING_AMOUNT), failedUntil(0), futureVersionBackoff(FLOW_KNOBS->FUTURE_VERSION_INITIAL_BACKOFF), increaseBackoffTime(0) {}
+	QueueData()
+	  : latency(0.001), penalty(1.0), smoothOutstanding(FLOW_KNOBS->QUEUE_MODEL_SMOOTHING_AMOUNT), failedUntil(0),
+	    futureVersionBackoff(FLOW_KNOBS->FUTURE_VERSION_INITIAL_BACKOFF), increaseBackoffTime(0) {}
 };
 
 typedef double TimeEstimate;
@@ -67,33 +69,32 @@ public:
 	// Finishes the request sent to storage server with `id`.
 	//   - latency: the measured client-side latency of the request.
 	//   - penalty: the server side penalty sent along with the response from
-    //              the storage server.
+	//              the storage server.
 	//   - delta: Update server `id`'s queue model by substract this amount.
 	//            This value should be the value returned by `addRequest` below.
-    //   - clean: indicates whether the there was an error or not.
+	//   - clean: indicates whether the there was an error or not.
 	// 	 - futureVersion: indicates whether there was "future version" error or
 	//					  not.
-	void endRequest( uint64_t id, double latency, double penalty, double delta, bool clean, bool futureVersion );
-	QueueData& getMeasurement( uint64_t id );
+	void endRequest(uint64_t id, double latency, double penalty, double delta, bool clean, bool futureVersion);
+	QueueData& getMeasurement(uint64_t id);
 
-    // Starts a new request to storage server with `id`. If the storage
-    // server contains a penalty, add it to the queue size, and return the
-    // penalty. The returned penalty should be passed as `delta` to `endRequest`
-    // to make `smoothOutstanding` to reflect the real storage queue size.
-	double addRequest( uint64_t id );
+	// Starts a new request to storage server with `id`. If the storage
+	// server contains a penalty, add it to the queue size, and return the
+	// penalty. The returned penalty should be passed as `delta` to `endRequest`
+	// to make `smoothOutstanding` to reflect the real storage queue size.
+	double addRequest(uint64_t id);
 	double secondMultiplier;
 	double secondBudget;
-	PromiseStream< Future<Void> > addActor;
+	PromiseStream<Future<Void>> addActor;
 	Future<Void> laggingRequests; // requests for which a different recipient already answered
 	int laggingRequestCount;
 
 	QueueModel() : secondMultiplier(1.0), secondBudget(0), laggingRequestCount(0) {
-		laggingRequests = actorCollection( addActor.getFuture(), &laggingRequestCount );
+		laggingRequests = actorCollection(addActor.getFuture(), &laggingRequestCount);
 	}
 
-	~QueueModel() {
-		laggingRequests.cancel();
-	}
+	~QueueModel() { laggingRequests.cancel(); }
+
 private:
 	std::unordered_map<uint64_t, QueueData> data;
 };
@@ -101,20 +102,20 @@ private:
 /* old queue model
 class QueueModel {
 public:
-	QueueModel() : new_index(0) {
-		total_time[0] = 0;
-		total_time[1] = 0;
-	}
-	void addMeasurement( uint64_t id, QueueDetails qd );
-	TimeEstimate getTimeEstimate( uint64_t id );
-	TimeEstimate getAverageTimeEstimate();
-	QueueDetails getMeasurement( uint64_t id );
-	void expire();
+    QueueModel() : new_index(0) {
+        total_time[0] = 0;
+        total_time[1] = 0;
+    }
+    void addMeasurement( uint64_t id, QueueDetails qd );
+    TimeEstimate getTimeEstimate( uint64_t id );
+    TimeEstimate getAverageTimeEstimate();
+    QueueDetails getMeasurement( uint64_t id );
+    void expire();
 
 private:
-	std::map<uint64_t, QueueDetails> data[2]; 
-	double total_time[2]; 
-	int new_index; // data[new_index] is the new data
+    std::map<uint64_t, QueueDetails> data[2];
+    double total_time[2];
+    int new_index; // data[new_index] is the new data
 };
 */
 
