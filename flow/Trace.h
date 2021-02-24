@@ -473,9 +473,13 @@ public:
 	// changed multiple times in a single event.
 	TraceEvent& setMaxFieldLength(int maxFieldLength);
 
+	int getMaxFieldLength() const;
+
 	// Sets the maximum event length before the event gets suppressed and a warning is logged. A value of 0 uses the default,
 	// a negative value disables length suppression. This should be called before adding details.
 	TraceEvent& setMaxEventLength(int maxEventLength);
+
+	int getMaxEventLength() const;
 
 	//Cannot call other functions which could disable the trace event afterwords
 	TraceEvent& suppressFor( double duration, bool logSuppressedEventCount=true );

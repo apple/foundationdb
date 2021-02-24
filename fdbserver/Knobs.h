@@ -475,6 +475,7 @@ public:
 	double STORAGE_SERVER_LIST_FETCH_TIMEOUT;
 
 	// disk snapshot
+	int64_t MAX_FORKED_PROCESS_OUTPUT;
 	double SNAP_CREATE_MAX_TIMEOUT;
 
 	//Storage Metrics
