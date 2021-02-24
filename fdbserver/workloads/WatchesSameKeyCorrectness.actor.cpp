@@ -49,7 +49,6 @@ struct WatchesSameKeyWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override { 
 		return waitForAll( cases );
-		return Void();
 	}
 
 	Future<bool> check(Database const& cx) override {
