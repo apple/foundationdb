@@ -129,8 +129,9 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, Reference<AsyncVar<
 				// history updates or the protocol version changed, so it
 				// must re-read the entire configuration range.
 				wait(self->refresh(self));
-				ASSERT(dbInfo->get().history.size() > 0);
-				self->lastUpdate = dbInfo->get().history.back().contents().first;
+				if (dbInfo->get().history.size() > 0) {
+					self->lastUpdate = dbInfo->get().history.back().contents().first;
+				}
 			} else {
 				// Apply history in order, from lowest version to highest
 				// version. Mutation history should already be stored in
