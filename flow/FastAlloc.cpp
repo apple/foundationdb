@@ -27,6 +27,8 @@
 #include "flow/crc32c.h"
 #include "flow/flow.h"
 
+#include "jemalloc/jemalloc.h"
+
 #include <atomic>
 #include <cstdint>
 #include <unordered_map>
@@ -603,3 +605,37 @@ template class FastAllocator<2048>;
 template class FastAllocator<4096>;
 template class FastAllocator<8192>;
 template class FastAllocator<16384>;
+
+#if defined(USE_SANITIZER) || defined(USE_VALGRIND)
+[[nodiscard]] void* allocateFast(int size) noexcept {
+	return malloc(size);
+}
+void freeFast(int size, void* ptr) noexcept {
+	return free(ptr);
+}
+void freeFast(void* ptr) noexcept {
+	return free(ptr);
+}
+[[nodiscard]] void* alignedAllocateFast(int align, int size) noexcept {
+	return aligned_alloc(align, size);
+}
+void alignedFreeFast(void* ptr, int align, int size) noexcept {
+	return free(ptr);
+}
+#else
+[[nodiscard]] void* allocateFast(int size) noexcept {
+	return je_mallocx(size, /*flags*/ 0);
+}
+void freeFast(int size, void* ptr) noexcept {
+	return je_sdallocx(ptr, size, /*flags*/ 0);
+}
+void freeFast(void* ptr) noexcept {
+	return je_dallocx(ptr, /*flags*/ 0);
+}
+[[nodiscard]] void* alignedAllocateFast(int align, int size) noexcept {
+	return je_mallocx(size, /*flags*/ MALLOCX_ALIGN(align));
+}
+void alignedFreeFast(void* ptr, int align, int size) noexcept {
+	return je_sdallocx(ptr, size, /*flags*/ MALLOCX_ALIGN(align));
+}
+#endif

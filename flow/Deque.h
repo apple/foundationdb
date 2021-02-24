@@ -23,6 +23,7 @@
 #pragma once
 
 #include "flow/Platform.h"
+#include "flow/FastAlloc.h"
 #include <stdexcept>
 
 template <class T>
@@ -43,7 +44,7 @@ public:
 	// TODO: iterator construction, other constructors
 	Deque(Deque const& r) : arr(nullptr), begin(0), end(r.size()), mask(r.mask) {
 		if (r.capacity() > 0) {
-			arr = (T*)aligned_alloc(std::max(__alignof(T), sizeof(void*)), capacity() * sizeof(T));
+			arr = (T*)alignedAllocateFast(std::max(__alignof(T), sizeof(void*)), capacity() * sizeof(T));
 			ASSERT(arr != nullptr);
 		}
 		ASSERT(capacity() >= end || end == 0);
@@ -66,7 +67,7 @@ public:
 		end = r.size();
 		mask = r.mask;
 		if (r.capacity() > 0) {
-			arr = (T*)aligned_alloc(std::max(__alignof(T), sizeof(void*)), capacity() * sizeof(T));
+			arr = (T*)alignedAllocateFast(std::max(__alignof(T), sizeof(void*)), capacity() * sizeof(T));
 			ASSERT(arr != nullptr);
 		}
 		ASSERT(capacity() >= end || end == 0);
@@ -180,8 +181,7 @@ private:
 		size_t newSize = mp1 * 2;
 		if (newSize > max_size()) throw std::bad_alloc();
 		//printf("Growing to %lld (%u-%u mask %u)\n", (long long)newSize, begin, end, mask);
-		T* newArr = (T*)aligned_alloc(std::max(__alignof(T), sizeof(void*)),
-		                              newSize * sizeof(T)); // SOMEDAY: FastAllocator
+		T* newArr = (T*)alignedAllocateFast(std::max(__alignof(T), sizeof(void*)), newSize * sizeof(T));
 		ASSERT(newArr != nullptr);
 		for (int i = begin; i != end; i++) {
 			try {
@@ -195,7 +195,9 @@ private:
 			static_assert(std::is_nothrow_destructible_v<T>);
 			arr[i&mask].~T();
 		}
-		aligned_free(arr);
+		if (arr) {
+			alignedFreeFast(arr, std::max(__alignof(T), sizeof(void*)), mp1 * sizeof(T));
+		}
 		arr = newArr;
 		end -= begin;
 		begin = 0;
@@ -206,14 +208,14 @@ private:
 		for (int i = 0; i < size; ++i) {
 			data[i].~T();
 		}
-		aligned_free(data);
+		alignedFreeFast(data, std::max(__alignof(T), sizeof(void*)), size * sizeof(T));
 	}
 
 	void cleanup() noexcept {
 		for (int i = begin; i != end; i++)
 			arr[i&mask].~T();
-		if(arr)
-			aligned_free(arr);
+		size_t mp1 = arr ? size_t(mask) + 1 : 4;
+		if (arr) alignedFreeFast(arr, std::max(__alignof(T), sizeof(void*)), mp1 * sizeof(T));
 	}
 };
 

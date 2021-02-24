@@ -241,15 +241,15 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 	ArenaBlock* b;
 	if (dataSize <= SMALL - TINY_HEADER && !next) {
 		if (dataSize <= 16 - TINY_HEADER) {
-			b = (ArenaBlock*)FastAllocator<16>::allocate();
+			b = (ArenaBlock*)allocateFast(16);
 			b->tinySize = 16;
 			INSTRUMENT_ALLOCATE("Arena16");
 		} else if (dataSize <= 32 - TINY_HEADER) {
-			b = (ArenaBlock*)FastAllocator<32>::allocate();
+			b = (ArenaBlock*)allocateFast(32);
 			b->tinySize = 32;
 			INSTRUMENT_ALLOCATE("Arena32");
 		} else {
-			b = (ArenaBlock*)FastAllocator<64>::allocate();
+			b = (ArenaBlock*)allocateFast(64);
 			b->tinySize = 64;
 			INSTRUMENT_ALLOCATE("Arena64");
 		}
@@ -269,31 +269,31 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 
 		if (reqSize < LARGE) {
 			if (reqSize <= 128) {
-				b = (ArenaBlock*)FastAllocator<128>::allocate();
+				b = (ArenaBlock*)allocateFast(128);
 				b->bigSize = 128;
 				INSTRUMENT_ALLOCATE("Arena128");
 			} else if (reqSize <= 256) {
-				b = (ArenaBlock*)FastAllocator<256>::allocate();
+				b = (ArenaBlock*)allocateFast(256);
 				b->bigSize = 256;
 				INSTRUMENT_ALLOCATE("Arena256");
 			} else if (reqSize <= 512) {
-				b = (ArenaBlock*)FastAllocator<512>::allocate();
+				b = (ArenaBlock*)allocateFast(512);
 				b->bigSize = 512;
 				INSTRUMENT_ALLOCATE("Arena512");
 			} else if (reqSize <= 1024) {
-				b = (ArenaBlock*)FastAllocator<1024>::allocate();
+				b = (ArenaBlock*)allocateFast(1024);
 				b->bigSize = 1024;
 				INSTRUMENT_ALLOCATE("Arena1024");
 			} else if (reqSize <= 2048) {
-				b = (ArenaBlock*)FastAllocator<2048>::allocate();
+				b = (ArenaBlock*)allocateFast(2048);
 				b->bigSize = 2048;
 				INSTRUMENT_ALLOCATE("Arena2048");
 			} else if (reqSize <= 4096) {
-				b = (ArenaBlock*)FastAllocator<4096>::allocate();
+				b = (ArenaBlock*)allocateFast(4096);
 				b->bigSize = 4096;
 				INSTRUMENT_ALLOCATE("Arena4096");
 			} else {
-				b = (ArenaBlock*)FastAllocator<8192>::allocate();
+				b = (ArenaBlock*)allocateFast(8192);
 				b->bigSize = 8192;
 				INSTRUMENT_ALLOCATE("Arena8192");
 			}
@@ -303,7 +303,7 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 #ifdef ALLOC_INSTRUMENTATION
 			allocInstr["ArenaHugeKB"].alloc((reqSize + 1023) >> 10);
 #endif
-			b = (ArenaBlock*)new uint8_t[reqSize];
+			b = (ArenaBlock*)allocateFast(reqSize);
 			b->tinySize = b->tinyUsed = NOT_TINY;
 			b->bigSize = reqSize;
 			b->bigUsed = sizeof(ArenaBlock);
@@ -364,43 +364,43 @@ void ArenaBlock::destroy() {
 void ArenaBlock::destroyLeaf() {
 	if (isTiny()) {
 		if (tinySize <= 16) {
-			FastAllocator<16>::release(this);
+			freeFast(16, this);
 			INSTRUMENT_RELEASE("Arena16");
 		} else if (tinySize <= 32) {
-			FastAllocator<32>::release(this);
+			freeFast(32, this);
 			INSTRUMENT_RELEASE("Arena32");
 		} else {
-			FastAllocator<64>::release(this);
+			freeFast(64, this);
 			INSTRUMENT_RELEASE("Arena64");
 		}
 	} else {
 		if (bigSize <= 128) {
-			FastAllocator<128>::release(this);
+			freeFast(128, this);
 			INSTRUMENT_RELEASE("Arena128");
 		} else if (bigSize <= 256) {
-			FastAllocator<256>::release(this);
+			freeFast(256, this);
 			INSTRUMENT_RELEASE("Arena256");
 		} else if (bigSize <= 512) {
-			FastAllocator<512>::release(this);
+			freeFast(512, this);
 			INSTRUMENT_RELEASE("Arena512");
 		} else if (bigSize <= 1024) {
-			FastAllocator<1024>::release(this);
+			freeFast(1024, this);
 			INSTRUMENT_RELEASE("Arena1024");
 		} else if (bigSize <= 2048) {
-			FastAllocator<2048>::release(this);
+			freeFast(2048, this);
 			INSTRUMENT_RELEASE("Arena2048");
 		} else if (bigSize <= 4096) {
-			FastAllocator<4096>::release(this);
+			freeFast(4096, this);
 			INSTRUMENT_RELEASE("Arena4096");
 		} else if (bigSize <= 8192) {
-			FastAllocator<8192>::release(this);
+			freeFast(8192, this);
 			INSTRUMENT_RELEASE("Arena8192");
 		} else {
 #ifdef ALLOC_INSTRUMENTATION
 			allocInstr["ArenaHugeKB"].dealloc((bigSize + 1023) >> 10);
 #endif
 			g_hugeArenaMemory.fetch_sub(bigSize);
-			delete[](uint8_t*) this;
+			freeFast(bigSize, this);
 		}
 	}
 }

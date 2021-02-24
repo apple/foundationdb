@@ -756,7 +756,8 @@ void AsyncFileKAIO::KAIOLogEvent(FILE *logFile, uint32_t id, OpLogEntry::EOperat
 #endif
 
 ACTOR Future<Void> runTestOps(Reference<IAsyncFile> f, int numIterations, int fileSize, bool expectedToSucceed) {
-	state void *buf = FastAllocator<4096>::allocate(); // we leak this if there is an error, but that shouldn't be a big deal
+	state void* buf =
+	    alignedAllocateFast(4096, 4096); // we leak this if there is an error, but that shouldn't be a big deal
 	state int iteration = 0;
 
 	state bool opTimedOut = false;
@@ -792,8 +793,8 @@ ACTOR Future<Void> runTestOps(Reference<IAsyncFile> f, int numIterations, int fi
 			ASSERT(!expectedToSucceed && e.code() == error_code_io_timeout);
 		}
 	}
-	
-	FastAllocator<4096>::release(buf);
+
+	alignedFreeFast(buf, 4096, 4096);
 
 	ASSERT(expectedToSucceed || opTimedOut);
 	return Void();
