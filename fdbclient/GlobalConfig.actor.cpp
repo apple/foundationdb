@@ -129,13 +129,8 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, Reference<AsyncVar<
 				// history updates or the protocol version changed, so it
 				// must re-read the entire configuration range.
 				wait(self->refresh(self));
-				// TODO: This check is a temporary fix while old functionality
-				// for setting ClientDBInfo fields exist, but eventually it
-				// should be replaced with an assert that the size of `history`
-				// is greater than 0.
-				if (dbInfo->get().history.size() > 0) {
-					self->lastUpdate = dbInfo->get().history.back().contents().first;
-				}
+				ASSERT(dbInfo->get().history.size() > 0);
+				self->lastUpdate = dbInfo->get().history.back().contents().first;
 			} else {
 				// Apply history in order, from lowest version to highest
 				// version. Mutation history should already be stored in
