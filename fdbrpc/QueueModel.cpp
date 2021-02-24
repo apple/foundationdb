@@ -23,6 +23,8 @@
 
 void QueueModel::endRequest( uint64_t id, double latency, double penalty, double delta, bool clean, bool futureVersion ) {
 	auto& d = data[id];
+
+	// Remove the penalty added when starting the request.
 	d.smoothOutstanding.addDelta(-delta);
 
 	if(clean) {
