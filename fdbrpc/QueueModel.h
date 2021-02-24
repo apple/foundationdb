@@ -40,7 +40,7 @@ struct QueueData {
 	double latency;
 
 	// Represents the "cost" of each storage request. By default, the penalty is
-	// 1 indicates that each outstanding request corresponds 1 outstanding
+	// 1 indicating that each outstanding request corresponds 1 outstanding
 	// request. However, storage server can also increase the penalty if it
 	// decides to ask the client to slow down sending requests to it. Penalty
 	// is updated after each LoadBalancedReply.
