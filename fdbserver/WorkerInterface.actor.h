@@ -210,8 +210,10 @@ struct RecruitFromConfigurationReply {
 	std::vector<WorkerInterface> proxies;
 	std::vector<WorkerInterface> resolvers;
 	std::vector<WorkerInterface> storageServers;
-	std::vector<WorkerInterface> oldLogRouters;
-	Optional<Key> dcId;
+	std::vector<WorkerInterface> oldLogRouters; // During recovery, log routers for older generations will be recruited.
+	Optional<Key> dcId; // dcId is where master is recruited. It prefers to be in configuration.primaryDcId, but
+	                    // it can be recruited from configuration.secondaryDc: The dcId will be the secondaryDcId and
+	                    // this generation's primaryDC in memory is different from configuration.primaryDcId.
 	bool satelliteFallback;
 
 	RecruitFromConfigurationReply() : satelliteFallback(false) {}
@@ -385,7 +387,7 @@ struct InitializeBackupReply {
 	LogEpoch backupEpoch;
 
 	InitializeBackupReply() = default;
-	InitializeBackupReply(BackupInterface interface, LogEpoch e) : interf(interface), backupEpoch(e) {}
+	InitializeBackupReply(BackupInterface bi, LogEpoch e) : interf(bi), backupEpoch(e) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

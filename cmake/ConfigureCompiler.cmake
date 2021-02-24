@@ -68,6 +68,8 @@ if (NOT OPEN_FOR_IDE)
 endif()
 if(WIN32)
   add_definitions(-DUSE_USEFIBERS)
+  add_definitions(-DBOOST_USE_WINDOWS_H)
+  add_definitions(-DWIN32_LEAN_AND_MEAN)
 else()
   add_definitions(-DUSE_UCONTEXT)
 endif()
@@ -107,7 +109,7 @@ if(WIN32)
     string(REGEX REPLACE "/W[0-4]" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
   endif()
   add_compile_options(/W0 /EHsc /bigobj $<$<CONFIG:Release>:/Zi> /MP /FC /Gm-)
-  add_compile_definitions(_WIN32_WINNT=${WINDOWS_TARGET} WINVER=${WINDOWS_TARGET} NTDDI_VERSION=0x05020000 BOOST_ALL_NO_LIB)
+  add_compile_definitions(_WIN32_WINNT=${WINDOWS_TARGET} WINVER=${WINDOWS_TARGET} NTDDI_VERSION=0x05020000 BOOST_ALL_NO_LIB NOMINMAX)
   set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
   set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
 else()
@@ -259,7 +261,6 @@ else()
       -Wno-unused-function
       -Wno-unused-local-typedef
       -Wno-unused-parameter
-      -Wno-unused-value
       -Wno-self-assign
       )
     if (USE_CCACHE)

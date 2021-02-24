@@ -453,6 +453,11 @@ struct RolesInfo {
 			obj.setKeyRawNumber("query_queue_max", storageMetrics.getValue("QueryQueueMax"));
 			obj["total_queries"] = StatusCounter(storageMetrics.getValue("QueryQueue")).getStatus();
 			obj["finished_queries"] = StatusCounter(storageMetrics.getValue("FinishedQueries")).getStatus();
+			try { //FIXME: This field was added in a patch release, the try-catch can be removed for the 7.0 release
+				obj["low_priority_queries"] = StatusCounter(storageMetrics.getValue("LowPriorityQueries")).getStatus();
+			} catch(Error &e) {
+				if(e.code() != error_code_attribute_not_found) throw e;
+			}
 			obj["bytes_queried"] = StatusCounter(storageMetrics.getValue("BytesQueried")).getStatus();
 			obj["keys_queried"] = StatusCounter(storageMetrics.getValue("RowsQueried")).getStatus();
 			obj["mutation_bytes"] = StatusCounter(storageMetrics.getValue("MutationBytes")).getStatus();
@@ -1607,6 +1612,7 @@ ACTOR static Future<vector<std::pair<MasterProxyInterface, EventMap>>> getProxie
 	return results;
 }
 
+// Returns the number of zones eligble for recruiting new tLogs after failures, to maintain the current replication factor.
 static int getExtraTLogEligibleZones(const vector<WorkerDetails>& workers, const DatabaseConfiguration& configuration) {
 	std::set<StringRef> allZones;
 	std::map<Key,std::set<StringRef>> dcId_zone;
@@ -1700,6 +1706,8 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		StatusCounter mutations;
 		StatusCounter mutationBytes;
 		StatusCounter txnConflicts;
+		StatusCounter txnRejectedForQueuedTooLong;
+
 		StatusCounter txnStartOut;
 		StatusCounter txnSystemPriorityStartOut;
 		StatusCounter txnDefaultPriorityStartOut;
@@ -1712,6 +1720,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 			mutations.updateValues( StatusCounter(ps.getValue("Mutations")) );
 			mutationBytes.updateValues( StatusCounter(ps.getValue("MutationBytes")) );
 			txnConflicts.updateValues( StatusCounter(ps.getValue("TxnConflicts")) );
+			txnRejectedForQueuedTooLong.updateValues(StatusCounter(ps.getValue("TxnRejectedForQueuedTooLong")));
 			txnStartOut.updateValues( StatusCounter(ps.getValue("TxnStartOut")) );
 			txnSystemPriorityStartOut.updateValues(StatusCounter(ps.getValue("TxnSystemPriorityStartOut")));
 			txnDefaultPriorityStartOut.updateValues(StatusCounter(ps.getValue("TxnDefaultPriorityStartOut")));
@@ -1731,6 +1740,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		JsonBuilderObject transactions;
 		transactions["conflicted"] = txnConflicts.getStatus();
 		transactions["started"] = txnStartOut.getStatus();
+		transactions["rejected_for_queued_too_long"] = txnRejectedForQueuedTooLong.getStatus();
 		transactions["started_immediate_priority"] = txnSystemPriorityStartOut.getStatus();
 		transactions["started_default_priority"] = txnDefaultPriorityStartOut.getStatus();
 		transactions["started_batch_priority"] = txnBatchPriorityStartOut.getStatus();
@@ -1819,6 +1829,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		StatusCounter reads;
 		StatusCounter readKeys;
 		StatusCounter readBytes;
+		StatusCounter lowPriorityReads;
 
 		for(auto &ss : storageServers.get()) {
 			TraceEventFields const& storageMetrics = ss.second.at("StorageMetrics");
@@ -1836,6 +1847,19 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		keysObj["read"] = readKeys.getStatus();
 		bytesObj["read"] = readBytes.getStatus();
 
+		try { 
+			for(auto &ss : storageServers.get()) {
+				TraceEventFields const& storageMetrics = ss.second.at("StorageMetrics");
+
+				if (storageMetrics.size() > 0) {
+					//FIXME: This field was added in a patch release, for the 7.0 release move this to above loop
+					lowPriorityReads.updateValues(StatusCounter(storageMetrics.getValue("LowPriorityQueries")));
+				}
+			}
+			operationsObj["low_priority_reads"] = lowPriorityReads.getStatus();
+		} catch(Error &e) {
+			if(e.code() != error_code_attribute_not_found) throw e;
+		}
 	}
 	catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
@@ -1944,7 +1968,14 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance, const std::vector<T
 			if(currentFaultTolerance >= 0) {
 				localSetsWithNonNegativeFaultTolerance++;
 			}
-			minFaultTolerance = std::min(minFaultTolerance, currentFaultTolerance);
+
+			if (tLogs[i].locality == tagLocalitySatellite) {
+				// FIXME: This hack to bump satellite fault tolerance, is to make it consistent
+				//  with 6.2.
+				minFaultTolerance = std::min(minFaultTolerance, currentFaultTolerance + 1);
+			} else {
+				minFaultTolerance = std::min(minFaultTolerance, currentFaultTolerance);
+			}
 		}
 
 		if (tLogs[i].isLocal && tLogs[i].locality == tagLocalitySatellite) {

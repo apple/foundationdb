@@ -212,8 +212,7 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 
 			endRole(err.role, err.id, "Error", ok, err.error);
 
-
-			if (err.error.code() == error_code_please_reboot || err.error.code() == error_code_io_timeout || (err.role == Role::SHARED_TRANSACTION_LOG && err.error.code() == error_code_io_error )) throw err.error;
+			if (err.error.code() == error_code_please_reboot || (err.role == Role::SHARED_TRANSACTION_LOG && (err.error.code() == error_code_io_error ||  err.error.code() == error_code_io_timeout))) throw err.error;
 		}
 	}
 }
@@ -978,7 +977,8 @@ ACTOR Future<Void> workerServer(
 
 	filesClosed.add(stopping.getFuture());
 
-	initializeSystemMonitorMachineState(SystemMonitorMachineState(folder, locality.zoneId(), locality.machineId(), g_network->getLocalAddress().ip));
+	initializeSystemMonitorMachineState(SystemMonitorMachineState(
+	    folder, locality.dcId(), locality.zoneId(), locality.machineId(), g_network->getLocalAddress().ip));
 
 	{
 		auto recruited = interf;  //ghetto! don't we all love a good #define

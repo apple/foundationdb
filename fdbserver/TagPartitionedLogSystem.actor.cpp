@@ -166,7 +166,7 @@ OldTLogCoreData::OldTLogCoreData(const OldLogData& oldData)
 struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogSystem> {
 	const UID dbgid;
 	LogSystemType logSystemType;
-	std::vector<Reference<LogSet>> tLogs; // LogSets in different locations: primary, remote or satellite
+	std::vector<Reference<LogSet>> tLogs; // LogSets in different locations: primary, satellite, or remote
 	int expectedLogSets;
 	int logRouterTags;
 	int txsTags;
@@ -195,7 +195,14 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	Version knownCommittedVersion;
 	Version backupStartVersion = invalidVersion; // max(tLogs[0].startVersion, previous epochEnd).
 	LocalityData locality;
-	std::map< std::pair<UID, Tag>, std::pair<Version, Version> > outstandingPops;  // For each currently running popFromLog actor, (log server #, tag)->popped version
+	// For each currently running popFromLog actor, outstandingPops is
+	// (logID, tag)->(max popped version, durableKnownCommittedVersion).
+	// Why do we need durableKnownCommittedVersion? knownCommittedVersion gives the lower bound of what data
+	// will need to be copied into the next generation to restore the replication factor.
+	// Guess: It probably serves as a minimum version of what data should be on a TLog in the next generation and
+	// sending a pop for anything less than durableKnownCommittedVersion for the TLog will be absurd.
+	std::map<std::pair<UID, Tag>, std::pair<Version, Version>> outstandingPops;
+
 	Optional<PromiseStream<Future<Void>>> addActor;
 	ActorCollection popActors;
 	std::vector<OldLogData> oldLogData; // each element has the log info. in one old epoch.
@@ -270,6 +277,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		Version& localityVersion = pseudoLocalityPopVersion[tag];
 		localityVersion = std::max(localityVersion, upTo);
 		Version minVersion = localityVersion;
+		// Why do we need to use the minimum popped version among all tags? Reason: for example,
+		// 2 pseudo tags pop 100 or 150, respectively. It's only safe to pop min(100, 150),
+		// because [101,150) is needed by another pseudo tag.
 		for (const int8_t locality : pseudoLocalities) {
 			minVersion = std::min(minVersion, pseudoLocalityPopVersion[Tag(locality, tag.id)]);
 		}
@@ -340,6 +350,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return logSystem;
 	}
 
+	// Convert TagPartitionedLogSystem to DBCoreState and override input newState as return value
 	void toCoreState(DBCoreState& newState) final {
 		if( recoveryComplete.isValid() && recoveryComplete.isError() )
 			throw recoveryComplete.getError();
@@ -948,6 +959,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
+	// LogRouter or BackupWorker use this function to obtain a cursor for peeking tlogs of a generation (i.e., epoch).
+	// Specifically, the epoch is determined by looking up "dbgid" in tlog sets of generations.
+	// The returned cursor can peek data at the "tag" from the given "begin" version to that epoch's end version or
+	// the recovery version for the latest old epoch. For the current epoch, the cursor has no end version.
 	Reference<IPeekCursor> peekLogRouter(UID dbgid, Version begin, Tag tag) final {
 		bool found = false;
 		for (const auto& log : tLogs) {
@@ -1038,7 +1053,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					bestSet = bestSatelliteSet;
 				}
 
-				TraceEvent("TLogPeekLogRouterOldSets", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("OldEpoch", old.epochEnd).detail("RecoveredAt", recoveredAt.present() ? recoveredAt.get() : -1).detail("FirstOld", firstOld);
+				TraceEvent("TLogPeekLogRouterOldSets", dbgid)
+				    .detail("Tag", tag.toString())
+				    .detail("Begin", begin)
+				    .detail("OldEpoch", old.epochEnd)
+				    .detail("RecoveredAt", recoveredAt.present() ? recoveredAt.get() : -1)
+				    .detail("FirstOld", firstOld);
 				//FIXME: do this merge on one of the logs in the other data center to avoid sending multiple copies across the WAN
 				return Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( localSets, bestSet, localSets[bestSet]->bestLocationFor( tag ), tag, begin, firstOld && recoveredAt.present() ? recoveredAt.get() + 1 : old.epochEnd, true ) );
 			}
@@ -1109,6 +1129,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
+	// pop 'tag.locality' type data up to the 'upTo' version
 	void pop(Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality) final {
 		if (upTo <= 0) return;
 		if (tag.locality == tagLocalityRemoteLog) {
@@ -1134,6 +1155,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
+	// pop tag from log up to the version defined in self->outstandingPops[].first
 	ACTOR static Future<Void> popFromLog(TagPartitionedLogSystem* self,
 	                                     Reference<AsyncVar<OptionalInterface<TLogInterface>>> log, Tag tag,
 	                                     double time) {
@@ -1141,6 +1163,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		loop {
 			wait( delay(time, TaskPriority::TLogPop) );
 
+			// to: first is upto version, second is durableKnownComittedVersion
 			state std::pair<Version,Version> to = self->outstandingPops[ std::make_pair(log->get().id(),tag) ];
 
 			if (to.first <= last) {

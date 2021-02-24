@@ -24,6 +24,8 @@ set(FLOW_SRCS
   FileTraceLogWriter.h
   Hash3.c
   Hash3.h
+  Histogram.cpp
+  Histogram.h
   IDispatched.h
   IRandom.h
   IThreadPool.cpp
@@ -81,7 +83,9 @@ set(FLOW_SRCS
   serialize.h
   stacktrace.amalgamation.cpp
   stacktrace.h
-  version.cpp)
+  version.cpp
+  xxhash.c
+  xxhash.h)
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/SourceVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h)
 

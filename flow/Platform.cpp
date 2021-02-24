@@ -25,6 +25,7 @@
 #include <math.h> // For _set_FMA3_enable workaround in platformInit
 #endif
 
+#include <errno.h>
 #include "flow/Platform.h"
 #include "flow/Arena.h"
 
@@ -47,7 +48,6 @@
 #include "flow/FaultInjection.h"
 
 #ifdef _WIN32
-#define NOMINMAX
 #include <windows.h>
 #include <winioctl.h>
 #include <io.h>
@@ -2607,7 +2607,13 @@ int64_t fileSize(std::string const& filename) {
 std::string readFileBytes( std::string const& filename, int maxSize ) {
 	std::string s;
 	FILE* f = fopen(filename.c_str(), "rb" FOPEN_CLOEXEC_MODE);
-	if (!f) throw file_not_readable();
+	if (!f) {
+		TraceEvent(SevWarn, "FileOpenError")
+			.detail("Filename", filename)
+			.detail("Errno", errno)
+			.detail("ErrorDescription", strerror(errno));
+		throw file_not_readable();
+	}
 	try {
 		fseek(f, 0, SEEK_END);
 		size_t size = ftell(f);

@@ -50,6 +50,10 @@ struct LowLatencyWorkload : TestWorkload {
 	virtual std::string description() { return "LowLatency"; }
 
 	virtual Future<Void> setup( Database const& cx ) {
+		if (g_network->isSimulated()) {
+			ASSERT(const_cast<ServerKnobs*>(SERVER_KNOBS)->setKnob("min_delay_cc_worst_fit_candidacy_seconds", "5"));
+			ASSERT(const_cast<ServerKnobs*>(SERVER_KNOBS)->setKnob("max_delay_cc_worst_fit_candidacy_seconds", "10"));
+		}
 		return Void();
 	}
 

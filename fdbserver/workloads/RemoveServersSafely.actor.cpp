@@ -408,6 +408,9 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			if (coordinators.size() > 2) {
 				auto randomCoordinator = deterministicRandom()->randomChoice(coordinators);
 				coordExcl = AddressExclusion(randomCoordinator.ip, randomCoordinator.port);
+				TraceEvent("RemoveAndKill", functionId)
+				    .detail("Step", "ChooseCoordinator")
+				    .detail("Coordinator", describe(coordExcl));
 			}
 		}
 		std::copy(toKill.begin(), toKill.end(), std::back_inserter(toKillArray));
@@ -417,11 +420,12 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				state bool safe = false;
 				state std::set<AddressExclusion> failSet =
 				    random_subset(toKillArray, deterministicRandom()->randomInt(0, toKillArray.size() + 1));
-				if (coordExcl.isValid()) {
-					failSet.insert(coordExcl);
-				}
 				toKillMarkFailedArray.resize(failSet.size());
 				std::copy(failSet.begin(), failSet.end(), toKillMarkFailedArray.begin());
+				std::sort(toKillMarkFailedArray.begin(), toKillMarkFailedArray.end());
+				if (coordExcl.isValid()) {
+					toKillMarkFailedArray.push_back(coordExcl);
+				}
 				TraceEvent("RemoveAndKill", functionId)
 				    .detail("Step", "SafetyCheck")
 				    .detail("Exclusions", describe(toKillMarkFailedArray));
@@ -460,6 +464,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				toKillMarkFailedArray.erase(removeServer);
 			}
 			ASSERT(toKillMarkFailedArray.size() <= toKillArray.size());
+			std::sort(toKillArray.begin(), toKillArray.end());
 			auto removeServer = toKill.begin();
 			TraceEvent("RemoveAndKill", functionId)
 				.detail("Step", "ReplaceNonFailedKillSet")
