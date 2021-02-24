@@ -1448,18 +1448,22 @@ ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* gl
 	    ryw->getSpecialKeySpaceWriteMap().containedRanges(specialKeys);
 	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::iterator iter = ranges.begin();
 	while (iter != ranges.end()) {
-		Key bareKey = iter->begin().removePrefix(globalConfig->getKeyRange().begin);
-		Key systemKey = bareKey.withPrefix(globalConfigKeysPrefix);
 		std::pair<bool, Optional<Value>> entry = iter->value();
 		if (entry.first) {
 			if (entry.second.present()) {
+				Key bareKey = iter->begin().removePrefix(globalConfig->getKeyRange().begin);
 				mutations.emplace_back_deep(arena, MutationRef(MutationRef::SetValue, bareKey, entry.second.get()));
+
+				Key systemKey = bareKey.withPrefix(globalConfigKeysPrefix);
 				tr.set(systemKey, entry.second.get());
 			} else {
-				KeyRef clearRangeBegin = iter->range().begin.removePrefix(globalConfig->getKeyRange().begin);
-				KeyRef clearRangeEnd = iter->range().end.removePrefix(globalConfig->getKeyRange().begin);
-				mutations.emplace_back_deep(arena, MutationRef(MutationRef::ClearRange, clearRangeBegin, clearRangeEnd));
-				tr.clear(systemKey);
+				KeyRef bareRangeBegin = iter->range().begin.removePrefix(globalConfig->getKeyRange().begin);
+				KeyRef bareRangeEnd = iter->range().end.removePrefix(globalConfig->getKeyRange().begin);
+				mutations.emplace_back_deep(arena, MutationRef(MutationRef::ClearRange, bareRangeBegin, bareRangeEnd));
+
+				Key systemRangeBegin = bareRangeBegin.withPrefix(globalConfigKeysPrefix);
+				Key systemRangeEnd = bareRangeEnd.withPrefix(globalConfigKeysPrefix);
+				tr.clear(KeyRangeRef(systemRangeBegin, systemRangeEnd));
 			}
 		}
 		++iter;
