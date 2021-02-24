@@ -379,8 +379,6 @@ extern const KeyRangeRef applyMutationsKeyVersionCountRange;
 
 // FdbClient Info prefix
 extern const KeyRangeRef fdbClientInfoPrefixRange;
-extern const KeyRef fdbClientInfoTxnSampleRate;
-extern const KeyRef fdbClientInfoTxnSizeLimit;
 
 // Consistency Check settings
 extern const KeyRef fdbShouldConsistencyCheckBeSuspended;

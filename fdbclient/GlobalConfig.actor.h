@@ -39,6 +39,13 @@
 // nodes (server and client) in an FDB cluster in an eventually consistent
 // manner.
 
+// Keys
+extern const KeyRef fdbClientInfoTxnSampleRate;
+extern const KeyRef fdbClientInfoTxnSizeLimit;
+
+extern const KeyRef transactionTagSampleRate;
+extern const KeyRef transactionTagSampleCost;
+
 class GlobalConfig {
 public:
 	GlobalConfig();
@@ -50,6 +57,26 @@ public:
 
 	const std::any get(KeyRef name);
 	const std::map<KeyRef, std::any> get(KeyRangeRef range);
+
+	template <typename T>
+	const T get(KeyRef name) {
+		try {
+			auto any = get(name);
+			return std::any_cast<T>(any);
+		} catch (Error& e) {
+			throw;
+		}
+	}
+
+	template <typename T>
+	const T get(KeyRef name, T defaultVal) {
+		auto any = get(name);
+		if (any.has_value()) {
+			return std::any_cast<T>(any);
+		}
+
+		return defaultVal;
+	}
 
 	// To write into the global configuration, submit a transaction to
 	// \xff\xff/global_config/<your-key> with <your-value> encoded using the

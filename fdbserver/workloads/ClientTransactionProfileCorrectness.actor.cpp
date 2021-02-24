@@ -1,5 +1,6 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
@@ -268,13 +269,17 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 
 	ACTOR Future<Void> changeProfilingParameters(Database cx, int64_t sizeLimit, double sampleProbability) {
 
-		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->set(fdbClientInfoTxnSampleRate, BinaryWriter::toValue(sampleProbability, Unversioned()));
-			tr->set(fdbClientInfoTxnSizeLimit, BinaryWriter::toValue(sizeLimit, Unversioned()));
-			return Void();
-		}));
+		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void>
+						{
+							tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+							tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+							Tuple rate = Tuple().appendDouble(sampleProbability);
+							Tuple size = Tuple().append(sizeLimit);
+							tr->set(fdbClientInfoTxnSampleRate.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG).begin), rate.pack());
+							tr->set(fdbClientInfoTxnSizeLimit.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG).begin), size.pack());
+							return Void();
+						}
+					 ));
 		return Void();
 	}
 

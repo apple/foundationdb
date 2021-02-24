@@ -2715,9 +2715,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		clientInfo.id = deterministicRandom()->randomUniqueID();
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
-		clientInfo.clientTxnInfoSampleRate = db->clientInfo->get().clientTxnInfoSampleRate;
-		clientInfo.clientTxnInfoSizeLimit = db->clientInfo->get().clientTxnInfoSizeLimit;
-		db->clientInfo->set(clientInfo);
+		db->clientInfo->set( clientInfo );
 		dbInfo.client = db->clientInfo->get();
 	}
 
@@ -3199,13 +3197,11 @@ ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				state Optional<Value> globalConfigVersion = wait(tr.get(globalConfigVersionKey));
-				state Optional<Value> rateVal = wait(tr.get(fdbClientInfoTxnSampleRate));
-				state Optional<Value> limitVal = wait(tr.get(fdbClientInfoTxnSizeLimit));
 				state ClientDBInfo clientInfo = db->clientInfo->get();
 
 				if (globalConfigVersion.present()) {
 					BinaryReader versionReader = BinaryReader(globalConfigVersion.get(), AssumeVersion(g_network->protocolVersion()));
-					int64_t commitVersion;
+					int64_t commitVersion;  // Currently unused. Convert to little endian if you want to use it
 					int16_t serializationOrder;
 					state ProtocolVersion protocolVersion;
 					versionReader >> commitVersion >> serializationOrder >> protocolVersion;
@@ -3254,24 +3250,10 @@ ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db
 					db->clientInfo->set(clientInfo);
 				}
 
-				// TODO: Remove this and move to global config space
-				double sampleRate = rateVal.present() ? BinaryReader::fromStringRef<double>(rateVal.get(), Unversioned()) : std::numeric_limits<double>::infinity();
-				int64_t sizeLimit = limitVal.present() ? BinaryReader::fromStringRef<int64_t>(limitVal.get(), Unversioned()) : -1;
-				if (sampleRate != clientInfo.clientTxnInfoSampleRate || sizeLimit != clientInfo.clientTxnInfoSampleRate) {
-					clientInfo.id = deterministicRandom()->randomUniqueID();
-					clientInfo.clientTxnInfoSampleRate = sampleRate;
-					clientInfo.clientTxnInfoSizeLimit = sizeLimit;
-					db->clientInfo->set(clientInfo);
-				}
-
 				state Future<Void> globalConfigFuture = tr.watch(globalConfigVersionKey);
-				state Future<Void> watchRateFuture = tr.watch(fdbClientInfoTxnSampleRate);
-				state Future<Void> watchLimitFuture = tr.watch(fdbClientInfoTxnSizeLimit);
 				wait(tr.commit());
 				choose {
 					when (wait(globalConfigFuture)) { break; }
-					when(wait(watchRateFuture)) { break; }
-					when(wait(watchLimitFuture)) { break; }
 				}
 			} catch (Error& e) {
 				wait(tr.onError(e));

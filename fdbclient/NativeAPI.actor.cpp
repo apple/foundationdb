@@ -506,12 +506,11 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 				}
 			}
 			cx->clientStatusUpdater.outStatusQ.clear();
-			double clientSamplingProbability = std::isinf(cx->clientInfo->get().clientTxnInfoSampleRate)
-			                                       ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY
-			                                       : cx->clientInfo->get().clientTxnInfoSampleRate;
-			int64_t clientTxnInfoSizeLimit = cx->clientInfo->get().clientTxnInfoSizeLimit == -1
-			                                     ? CLIENT_KNOBS->CSI_SIZE_LIMIT
-			                                     : cx->clientInfo->get().clientTxnInfoSizeLimit;
+			wait(GlobalConfig::globalConfig().onInitialized());
+			double sampleRate = GlobalConfig::globalConfig().get<double>(fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
+			double clientSamplingProbability = std::isinf(sampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : sampleRate;
+			double sizeLimit = GlobalConfig::globalConfig().get<double>(fdbClientInfoTxnSizeLimit, -1);
+			int64_t clientTxnInfoSizeLimit = sizeLimit == -1 ? CLIENT_KNOBS->CSI_SIZE_LIMIT : sizeLimit;
 			if (!trChunksQ.empty() && deterministicRandom()->random01() < clientSamplingProbability)
 				wait(delExcessClntTxnEntriesActor(&tr, clientTxnInfoSizeLimit));
 
@@ -957,13 +956,13 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	getValueSubmitted.init(LiteralStringRef("NativeAPI.GetValueSubmitted"));
 	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
 
+	GlobalConfig::create(this, clientInfo);
+
 	monitorProxiesInfoChange = monitorProxiesChange(clientInfo, &proxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
-
-	GlobalConfig::create(this, clientInfo);
 
 	if (apiVersionAtLeast(700)) {
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::ERRORMSG,
@@ -1273,14 +1272,14 @@ Future<Void> DatabaseContext::onProxiesChanged() {
 }
 
 bool DatabaseContext::sampleReadTags() const {
-	return clientInfo->get().transactionTagSampleRate > 0 &&
-	       deterministicRandom()->random01() <= clientInfo->get().transactionTagSampleRate;
+	double sampleRate = GlobalConfig::globalConfig().get(transactionTagSampleRate, CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
+	return sampleRate > 0 && deterministicRandom()->random01() <= sampleRate;
 }
 
 bool DatabaseContext::sampleOnCost(uint64_t cost) const {
-	if (clientInfo->get().transactionTagSampleCost <= 0)
-		return false;
-	return deterministicRandom()->random01() <= (double)cost / clientInfo->get().transactionTagSampleCost;
+	double sampleCost = GlobalConfig::globalConfig().get<double>(transactionTagSampleCost, CLIENT_KNOBS->COMMIT_SAMPLE_COST);
+	if (sampleCost <= 0) return false;
+	return deterministicRandom()->random01() <= (double)cost / sampleCost;
 }
 
 int64_t extractIntOption(Optional<StringRef> value, int64_t minValue, int64_t maxValue) {
@@ -5375,14 +5374,11 @@ void Transaction::checkDeferredError() {
 	cx->checkDeferredError();
 }
 
-Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(const Database& cx) {
-	if (!cx->isError()) {
-		double clientSamplingProbability = std::isinf(cx->clientInfo->get().clientTxnInfoSampleRate)
-		                                       ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY
-		                                       : cx->clientInfo->get().clientTxnInfoSampleRate;
-		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) &&
-		    deterministicRandom()->random01() < clientSamplingProbability &&
-		    (!g_network->isSimulated() || !g_simulator.speedUpSimulation)) {
+Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(const Database &cx) {
+	if(!cx->isError()) {
+		double sampleRate = GlobalConfig::globalConfig().get<double>(fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
+		double clientSamplingProbability = std::isinf(sampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : sampleRate;
+		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) && deterministicRandom()->random01() < clientSamplingProbability && (!g_network->isSimulated() || !g_simulator.speedUpSimulation)) {
 			return makeReference<TransactionLogInfo>(TransactionLogInfo::DATABASE);
 		}
 	}

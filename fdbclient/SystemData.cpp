@@ -757,10 +757,8 @@ const KeyRef tagThrottleLimitKey = LiteralStringRef("\xff\x02/throttledTags/manu
 const KeyRef tagThrottleCountKey = LiteralStringRef("\xff\x02/throttledTags/manualThrottleCount");
 
 // Client status info prefix
-const KeyRangeRef fdbClientInfoPrefixRange(LiteralStringRef("\xff\x02/fdbClientInfo/"),
-                                           LiteralStringRef("\xff\x02/fdbClientInfo0"));
-const KeyRef fdbClientInfoTxnSampleRate = LiteralStringRef("\xff\x02/fdbClientInfo/client_txn_sample_rate/");
-const KeyRef fdbClientInfoTxnSizeLimit = LiteralStringRef("\xff\x02/fdbClientInfo/client_txn_size_limit/");
+const KeyRangeRef fdbClientInfoPrefixRange(LiteralStringRef("\xff\x02/fdbClientInfo/"), LiteralStringRef("\xff\x02/fdbClientInfo0"));
+// See remaining fields in GlobalConfig.actor.h
 
 // ConsistencyCheck settings
 const KeyRef fdbShouldConsistencyCheckBeSuspended = LiteralStringRef("\xff\x02/ConsistencyCheck/Suspend");
