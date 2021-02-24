@@ -48,7 +48,6 @@ extern const KeyRef transactionTagSampleCost;
 
 class GlobalConfig {
 public:
-	GlobalConfig();
 	GlobalConfig(const GlobalConfig&) = delete;
 	GlobalConfig& operator=(const GlobalConfig&) = delete;
 
@@ -85,6 +84,8 @@ public:
 	Future<Void> onInitialized();
 
 private:
+	GlobalConfig();
+
 	void insert(KeyRef key, ValueRef value);
 	void erase(KeyRef key);
 	void erase(KeyRangeRef range);

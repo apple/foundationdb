@@ -1456,7 +1456,9 @@ ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* gl
 				mutations.emplace_back_deep(arena, MutationRef(MutationRef::SetValue, bareKey, entry.second.get()));
 				tr.set(systemKey, entry.second.get());
 			} else {
-				mutations.emplace_back_deep(arena, MutationRef(MutationRef::ClearRange, bareKey, keyAfter(bareKey)));
+				KeyRef clearRangeBegin = iter->range().begin.removePrefix(globalConfig->getKeyRange().begin);
+				KeyRef clearRangeEnd = iter->range().end.removePrefix(globalConfig->getKeyRange().begin);
+				mutations.emplace_back_deep(arena, MutationRef(MutationRef::ClearRange, clearRangeBegin, clearRangeEnd));
 				tr.clear(systemKey);
 			}
 		}
@@ -1491,7 +1493,7 @@ Future<Optional<std::string>> GlobalConfigImpl::commit(ReadYourWritesTransaction
 }
 
 void GlobalConfigImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
-	// TODO
+	ryw->getSpecialKeySpaceWriteMap().insert(range, std::make_pair(true, Optional<Value>()));
 }
 
 void GlobalConfigImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
