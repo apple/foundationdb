@@ -1,5 +1,6 @@
 set(RUN_JAVA_TESTS ON CACHE BOOL "Run Java unit tests")
 set(RUN_JUNIT_TESTS OFF CACHE BOOL "Compile and run junit tests")
+set(RUN_JAVA_INTEGRATION_TESTS OFF CACHE BOOL "Compile and run integration tests")
 
 set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/async/AsyncIterable.java
@@ -81,7 +82,6 @@ set(JAVA_TESTS_SRCS
   src/test/com/apple/foundationdb/test/ContinuousSample.java
   src/test/com/apple/foundationdb/test/DirectoryExtension.java
   src/test/com/apple/foundationdb/test/DirectoryOperation.java
-  src/test/com/apple/foundationdb/test/DirectoryTest.java
   src/test/com/apple/foundationdb/test/DirectoryUtil.java
   src/test/com/apple/foundationdb/test/Example.java
   src/test/com/apple/foundationdb/test/Instruction.java
@@ -107,9 +107,7 @@ set(JAVA_TESTS_SRCS
   src/test/com/apple/foundationdb/test/WatchTest.java
   src/test/com/apple/foundationdb/test/WhileTrueTest.java)
 
-set(JAVA_JUNIT_TESTS
-  src/junit/com/apple/foundationdb/tuple/AllTests.java
-  src/junit/com/apple/foundationdb/tuple/ArrayUtilTests.java)
+include(src/tests.cmake)
 
 set(GENERATED_JAVA_DIR ${CMAKE_CURRENT_BINARY_DIR}/src/main/com/apple/foundationdb)
 file(MAKE_DIRECTORY ${GENERATED_JAVA_DIR})
@@ -256,29 +254,119 @@ if(NOT OPEN_FOR_IDE)
   add_dependencies(fat-jar copy_lib)
   add_dependencies(packages fat-jar)
 
-  if(RUN_JAVA_TESTS)
-    set(enabled ENABLED)
-  else()
-    set(enabled DISABLED)
-  endif()
   set(TEST_CP ${tests_jar} ${target_jar})
-  message(STATUS "TEST_CP ${TEST_CP}")
-  add_java_test(NAME DirectoryTest CLASS_PATH ${TEST_CP}
-    CLASS com.apple.foundationdb.test.DirectoryTest ${enabled})
+
+  if(RUN_JUNIT_TESTS OR RUN_JAVA_INTEGRATION_TESTS)
+    # We use Junit libraries for both JUnit and integration testing structures, so download in either case
+    # https://search.maven.org/remotecontent?filepath=org/junit/jupiter/junit-jupiter-engine/5.7.1/junit-jupiter-engine-5.7.1.jar
+    file(DOWNLOAD "https://search.maven.org/remotecontent?filepath=org/junit/jupiter/junit-jupiter-engine/5.7.1/junit-jupiter-engine-5.7.1.jar"
+      ${CMAKE_BINARY_DIR}/packages/junit-jupiter-engine-5.7.1.jar
+      EXPECTED_HASH SHA256=56616c9350b3624f76cffef6b24ce7bb222915bfd5688f96d3cf4cef34f077cb)
+      # https://search.maven.org/remotecontent?filepath=org/junit/jupiter/junit-jupiter-api/5.7.1/junit-jupiter-api-5.7.1.jar
+    file(DOWNLOAD "https://search.maven.org/remotecontent?filepath=org/junit/jupiter/junit-jupiter-api/5.7.1/junit-jupiter-api-5.7.1.jar"
+      ${CMAKE_BINARY_DIR}/packages/junit-jupiter-api-5.7.1.jar
+      EXPECTED_HASH SHA256=ce7b985bc469e2625759a4ebc45533c70581a05a348278c1d6408e9b2e35e314)
+    file(DOWNLOAD "https://search.maven.org/remotecontent?filepath=org/junit/jupiter/junit-jupiter-params/5.7.1/junit-jupiter-params-5.7.1.jar"
+      ${CMAKE_BINARY_DIR}/packages/junit-jupiter-params-5.7.1.jar
+      EXPECTED_HASH SHA256=8effdd7f8a4ba5558b568184dee08008b2443c86c673ef81de5861fbc7ef0613)
+    file(DOWNLOAD "https://search.maven.org/remotecontent?filepath=org/junit/platform/junit-platform-commons/1.7.1/junit-platform-commons-1.7.1.jar"
+      ${CMAKE_BINARY_DIR}/packages/junit-platform-commons-1.7.1.jar
+      EXPECTED_HASH SHA256=7c546be86864718fbaceb79fa84ff1d3a516500fc428f1b21d061c2e0fbc5a4b)
+    file(DOWNLOAD "https://search.maven.org/remotecontent?filepath=org/junit/platform/junit-platform-engine/1.7.1/junit-platform-engine-1.7.1.jar"
+      ${CMAKE_BINARY_DIR}/packages/junit-platform-engine-1.7.1.jar
+      EXPECTED_HASH SHA256=37df5a9cd6dbc1f754ba2b46f96b8874a83660e1796bf38c738f022dcf86c23f)
+    file(DOWNLOAD "https://search.maven.org/remotecontent?filepath=org/junit/platform/junit-platform-launcher/1.7.1/junit-platform-launcher-1.7.1.jar"
+      ${CMAKE_BINARY_DIR}/packages/junit-platform-launcher-1.7.1.jar
+      EXPECTED_HASH SHA256=3122ac6fb284bc50e3afe46419fc977f94d580e9d3d1ea58805d200b510a99ee)
+    file(DOWNLOAD "https://search.maven.org/remotecontent?filepath=org/junit/platform/junit-platform-console/1.7.1/junit-platform-console-1.7.1.jar"
+      ${CMAKE_BINARY_DIR}/packages/junit-platform-console-1.7.1.jar
+      EXPECTED_HASH SHA256=11ed48fcdfcea32f2fa98872db7ecba2d49d178f76493e7a149a2242363ad12e)
+    file(DOWNLOAD "https://search.maven.org/remotecontent?filepath=org/apiguardian/apiguardian-api/1.1.1/apiguardian-api-1.1.1.jar"
+      ${CMAKE_BINARY_DIR}/packages/apiguardian-api-1.1.1.jar
+      EXPECTED_HASH SHA256=fc68f0d28633caccf3980fdf1e99628fba9c49424ee56dc685cd8b4d2a9fefde)
+    file(DOWNLOAD "https://search.maven.org/remotecontent?filepath=org/opentest4j/opentest4j/1.2.0/opentest4j-1.2.0.jar"
+      ${CMAKE_BINARY_DIR}/packages/opentest4j-1.2.0.jar)
+
+    set(JUNIT_CLASSPATH "${CMAKE_BINARY_DIR}/packages/junit-jupiter-api-5.7.1.jar:${CMAKE_BINARY_DIR}/packages/junit-jupiter-engine-5.7.1.jar:${CMAKE_BINARY_DIR}/packages/junit-jupiter-params-5.7.1.jar:${CMAKE_BINARY_DIR}/packages/opentest4j-1.2.0.jar:${CMAKE_BINARY_DIR}/packages/apiguardian-api-1.1.1.jar")
+    set(JUNIT_CLASSPATH "${JUNIT_CLASSPATH}:${CMAKE_BINARY_DIR}/packages/junit-platform-console-1.7.1.jar:${CMAKE_BINARY_DIR}/packages/junit-platform-commons-1.7.1.jar")
+    set(JUNIT_CLASSPATH "${JUNIT_CLASSPATH}:${CMAKE_BINARY_DIR}/packages/junit-platform-engine-1.7.1.jar:${CMAKE_BINARY_DIR}/packages/junit-platform-launcher-1.7.1.jar")
+  endif()
 
   if(RUN_JUNIT_TESTS)
-    file(DOWNLOAD "https://search.maven.org/remotecontent?filepath=junit/junit/4.13/junit-4.13.jar"
-      ${CMAKE_BINARY_DIR}/packages/junit-4.13.jar
-      EXPECTED_HASH SHA256=4b8532f63bdc0e0661507f947eb324a954d1dbac631ad19c8aa9a00feed1d863)
-    file(DOWNLOAD "https://repo1.maven.org/maven2/org/hamcrest/hamcrest-all/1.3/hamcrest-all-1.3.jar"
-      ${CMAKE_BINARY_DIR}/packages/hamcrest-all-1.3.jar
-      EXPECTED_HASH SHA256=4877670629ab96f34f5f90ab283125fcd9acb7e683e66319a68be6eb2cca60de)
-    add_jar(fdb-junit SOURCES ${JAVA_JUNIT_TESTS} INCLUDE_JARS fdb-java ${CMAKE_BINARY_DIR}/packages/junit-4.13.jar)
+    # Sets up the JUnit testing structure to run through ctest
+    #
+    # To add a new junit test, add the class to the JAVA_JUNIT_TESTS variable in `src/tests.cmake`. Note that if you run a Suite, 
+    # ctest will NOT display underlying details of the suite itself, so it's best to avoid junit suites in general. Also,
+    # if you need a different runner other than JUnitCore, you'll have to modify this so be aware.
+    #
+    # To run tests (once built), run:
+    #
+    # ctest .
+    #
+    # from the ${BUILD_DIR}/bindings/java subdirectory. 
+    # 
+    # Note: if you are running from ${BUILD_DIR}, additional tests of the native logic will be run. To avoid these, use
+    #
+    # ctest . -R junit 
+    #
+    # ctest has lots of flexible command options, so be sure to refer to its documentation if you want to do something specific(documentation
+    # can be found at https://cmake.org/cmake/help/v3.19/manual/ctest.1.html)
+
+    add_jar(fdb-junit SOURCES ${JAVA_JUNIT_TESTS} ${JUNIT_RESOURCES} INCLUDE_JARS fdb-java 
+            ${CMAKE_BINARY_DIR}/packages/junit-jupiter-api-5.7.1.jar 
+            ${CMAKE_BINARY_DIR}/packages/junit-jupiter-engine-5.7.1.jar
+            ${CMAKE_BINARY_DIR}/packages/junit-jupiter-params-5.7.1.jar
+            ${CMAKE_BINARY_DIR}/packages/opentest4j-1.2.0.jar
+            ${CMAKE_BINARY_DIR}/packages/apiguardian-api-1.1.1.jar
+    )
     get_property(junit_jar_path TARGET fdb-junit PROPERTY JAR_FILE)
-    add_test(NAME junit
+    
+    add_test(NAME java-unit
       COMMAND ${Java_JAVA_EXECUTABLE}
-              -cp "${target_jar}:${junit_jar_path}:${CMAKE_BINARY_DIR}/packages/junit-4.13.jar:${CMAKE_BINARY_DIR}/packages/hamcrest-all-1.3.jar"
-              -Djava.library.path=${CMAKE_BINARY_DIR}/lib
-              org.junit.runner.JUnitCore "com.apple.foundationdb.tuple.AllTests")
+            -classpath "${target_jar}:${junit_jar_path}:${JUNIT_CLASSPATH}"
+            -Djava.library.path=${CMAKE_BINARY_DIR}/lib
+            org.junit.platform.console.ConsoleLauncher "--details=summary" "-class-path=${junit_jar_path}" "--scan-classpath" "--disable-banner"
+    )
+
+  endif()
+
+  if(RUN_JAVA_INTEGRATION_TESTS)
+    # Set up the integration tests. These tests generally require a running database server to function properly. Most tests
+    # should be written such that they can be run in parallel with other integration tests (e.g. try to use a unique key range for each test
+    # whenever possible), because it's a reasonable assumption that a single server will be shared among multiple tests, and might do so 
+    # concurrently.
+    #
+    # Integration tests are run through ctest the same way as unit tests, but their label is prefixed with the entry 'integration-'.
+    # Note that most java integration tests will fail if they can't quickly connect to a running FDB instance(depending on how the test is written, anyway). 
+    # However, if you want to explicitly skip them, you can run 
+    #
+    # `ctest -E integration`
+    #
+    # To run only integration tests, execute
+    #
+    # `ctest -R integration`
+    #
+    # (Note: both of these commands are assumed to be running from the ${BUILD_DIR}/bindings/java directory).
+    #
+    # To add an integration test, add the relative class file path to the JAVA_INTEGRATION_TESTS variable in `src/tests.cmake`
+    #
+    add_jar(fdb-integration SOURCES ${JAVA_INTEGRATION_TESTS} ${JAVA_INTEGRATION_RESOURCES} INCLUDE_JARS fdb-java 
+            ${CMAKE_BINARY_DIR}/packages/junit-jupiter-api-5.7.1.jar 
+            ${CMAKE_BINARY_DIR}/packages/junit-jupiter-engine-5.7.1.jar
+            ${CMAKE_BINARY_DIR}/packages/junit-jupiter-params-5.7.1.jar
+            ${CMAKE_BINARY_DIR}/packages/opentest4j-1.2.0.jar
+            ${CMAKE_BINARY_DIR}/packages/apiguardian-api-1.1.1.jar)
+    get_property(integration_jar_path TARGET fdb-integration PROPERTY JAR_FILE)
+
+
+    add_test(NAME java-integration 
+                    COMMAND ${CMAKE_COMMAND} 
+                    -E env "FDB_CLUSTER_FILE=${PROJECT_BINARY_DIR}/fdb.cluster"
+                    ${Java_JAVA_EXECUTABLE}
+                      -classpath "${target_jar}:${integration_jar_path}:${JUNIT_CLASSPATH}"
+                      -Djava.library.path=${CMAKE_BINARY_DIR}/lib
+                      org.junit.platform.console.ConsoleLauncher "--details=summary" "--class-path=${integration_jar_path}" "--scan-classpath" "--disable-banner"
+    )
+
   endif()
 endif()

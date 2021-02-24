@@ -105,32 +105,49 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	}
 
 	/**
-	 * Creates a copy of this {@code Tuple} with an appended last element. The parameter
-	 *  is untyped but only {@link String}, {@code byte[]}, {@link Number}s, {@link UUID}s,
-	 *  {@link Boolean}s, {@link List}s, {@code Tuple}s, and {@code null} are allowed. If an object of
-	 *  another type is passed, then an {@link IllegalArgumentException} is thrown.
+	 * Creates a copy of this {@code Tuple} with an appended last element. The
+	 * parameter is untyped but only {@link String}, {@code byte[]},
+	 * {@link Number}s, {@link UUID}s, {@link Boolean}s, {@link List}s,
+	 * {@code Tuple}s, and {@code null} are allowed. If an object of another type is
+	 * passed, then an {@link IllegalArgumentException} is thrown.
 	 *
 	 * @param o the object to append. Must be {@link String}, {@code byte[]},
-	 *  {@link Number}s, {@link UUID}, {@link List}, {@link Boolean}, or {@code null}.
+	 *          {@link Number}s, {@link UUID}, {@link List}, {@link Boolean}, or
+	 *          {@code null}.
 	 *
 	 * @return a newly created {@code Tuple}
 	 */
 	public Tuple addObject(Object o) {
-		if(o != null &&
-				!(o instanceof String) &&
-				!(o instanceof byte[]) &&
-				!(o instanceof UUID) &&
-				!(o instanceof List<?>) &&
-				!(o instanceof Tuple) &&
-				!(o instanceof Boolean) &&
-				!(o instanceof Number) &&
-				!(o instanceof Versionstamp)) {
+		if (o instanceof String) {
+			return add((String) o);
+		} 
+		else if (o instanceof byte[]) {
+			return add((byte[]) o);
+		} 
+		else if (o instanceof UUID) {
+			return add((UUID) o);
+		} 
+		else if (o instanceof List<?>) {
+			return add((List<?>) o);
+		} 
+		else if (o instanceof Tuple) {
+			return add((Tuple) o);
+		} 
+		else if (o instanceof Boolean) {
+			return add((Boolean) o);
+		} 
+		else if (o instanceof Versionstamp) {
+			return add((Versionstamp) o);
+		} 
+		else if (o instanceof Number) {
+			return new Tuple(this, o, false);
+		} 
+		else if (o == null) {
+			return new Tuple(this, o, false);
+		} 
+		else {
 			throw new IllegalArgumentException("Parameter type (" + o.getClass().getName() + ") not recognized");
 		}
-		return new Tuple(this, o,
-				(o instanceof Versionstamp && !((Versionstamp)o).isComplete()) ||
-						(o instanceof List<?> && TupleUtil.hasIncompleteVersionstamp(((List<?>)o).stream())) ||
-						(o instanceof Tuple && ((Tuple) o).hasIncompleteVersionstamp()));
 	}
 
 	/**
