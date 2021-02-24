@@ -716,12 +716,12 @@ class FastAllocatedPage : public IPage, public FastAllocated<FastAllocatedPage>,
 public:
 	// Create a fast-allocated page with size total bytes INCLUDING checksum
 	FastAllocatedPage(int size, int bufferSize) : logicalSize(size), bufferSize(bufferSize) {
-		buffer = (uint8_t*)allocateFast(bufferSize);
+		buffer = (uint8_t*)je_aligned_alloc(4096, bufferSize);
 		// Mark any unused page portion defined
 		VALGRIND_MAKE_MEM_DEFINED(buffer + logicalSize, bufferSize - logicalSize);
 	};
 
-	~FastAllocatedPage() override { freeFast(bufferSize, buffer); }
+	~FastAllocatedPage() override { je_sdallocx(buffer, bufferSize, /*flags*/ 0); }
 
 	Reference<IPage> clone() const override {
 		FastAllocatedPage* p = new FastAllocatedPage(logicalSize, bufferSize);
