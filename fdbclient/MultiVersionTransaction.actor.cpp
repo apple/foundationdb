@@ -293,9 +293,7 @@ void DLApi::init() {
 	if (unlinkOnLoad) {
 		int err = unlink(fdbCPath.c_str());
 		if (err) {
-			TraceEvent(SevError, "ErrorUnlinkingTempClientLibraryFile")
-			    .detail("errno", errno)
-			    .detail("LibraryPath", fdbCPath);
+			TraceEvent(SevError, "ErrorUnlinkingTempClientLibraryFile").GetLastError().detail("LibraryPath", fdbCPath);
 			throw platform_error();
 		}
 	}
@@ -1015,13 +1013,19 @@ void MultiVersionApi::setCallbacksOnExternalThreads() {
 }
 void MultiVersionApi::addExternalLibrary(std::string path) {
 	std::string filename = basename(path);
-	// we need at least one external library thread to run this library.
-	threadCount = std::max(threadCount, 1);
 
 	if (filename.empty() || !fileExists(path)) {
 		TraceEvent("ExternalClientNotFound").detail("LibraryPath", filename);
 		throw file_not_found();
 	}
+
+	MutexHolder holder(lock);
+	if (networkStartSetup) {
+		throw invalid_option(); // SOMEDAY: it might be good to allow clients to be added after the network is setup
+	}
+
+	// external libraries always run on their own thread; ensure we allocate at least one thread to run this library.
+	threadCount = std::max(threadCount, 1);
 
 	if (externalClientDescriptions.count(filename) == 0) {
 		TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
@@ -1032,7 +1036,13 @@ void MultiVersionApi::addExternalLibrary(std::string path) {
 void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 	TraceEvent("AddingExternalClientDirectory").detail("Directory", path);
 	std::vector<std::string> files = platform::listFiles(path, DYNAMIC_LIB_EXT);
-	// we need at least one external library thread to run these libraries.
+
+	MutexHolder holder(lock);
+	if (networkStartSetup) {
+		throw invalid_option(); // SOMEDAY: it might be good to allow clients to be added after the network is setup
+	}
+
+	// external libraries always run on their own thread; ensure we allocate at least one thread to run this library.
 	threadCount = std::max(threadCount, 1);
 
 	for(auto filename : files) {
@@ -1074,13 +1084,15 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 				break;
 			}
 			if (readCount == -1) {
-				throw platform_error;
+				TraceEvent(SevError, "ExternalClientCopyFailedReadError").GetLastError().detail("LibraryPath", path);
+				throw platform_error();
 			}
 			ssize_t written = 0;
 			while (written != readCount) {
 				ssize_t writeCount = write(tempFd, buf + written, readCount - written);
 				if (writeCount == -1) {
-					throw platform_error;
+					TraceEvent(SevError, "ExternalClientCopyFailedWriteError").GetLastError().detail("LibraryPath", path);
+					throw platform_error();
 				}
 				written += writeCount;
 			}
@@ -1097,7 +1109,8 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 #else
 std::vector<std::pair< std::string, bool> > MultiVersionApi::copyExternalLibraryPerThread(std::string path) {
 	if (threadCount > 1) {
-		throw platform_error(); // not supported
+		TraceEvent(SevError, "MultipleClientThreadsUnsupportedOnWindows");
+		throw unsupported_operation();
 	}
 	std::vector<std::pair<std::string, bool>> paths;
 	paths.push_back({ path , false });
@@ -1356,7 +1369,7 @@ Reference<IDatabase> MultiVersionApi::createDatabase(const char *clusterFilePath
 	}
 	std::string clusterFile(clusterFilePath);
 
-	if (threadCount > 1) {
+	if (threadCount > 1 || localClientDisabled) {
 		ASSERT(localClientDisabled);
 		ASSERT(!bypassMultiClientApi);
 

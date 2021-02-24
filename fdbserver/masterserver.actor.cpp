@@ -610,13 +610,16 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything( Refere
 	self->backupWorkers.swap(recruits.backupWorkers);
 
 	TraceEvent("MasterRecoveryState", self->dbgid)
-		.detail("StatusCode", RecoveryStatus::initializing_transaction_servers)
-		.detail("Status", RecoveryStatus::names[RecoveryStatus::initializing_transaction_servers])
-		.detail("Proxies", recruits.proxies.size())
-		.detail("TLogs", recruits.tLogs.size())
-		.detail("Resolvers", recruits.resolvers.size())
-		.detail("BackupWorkers", self->backupWorkers.size())
-		.trackLatest("MasterRecoveryState");
+	    .detail("StatusCode", RecoveryStatus::initializing_transaction_servers)
+	    .detail("Status", RecoveryStatus::names[RecoveryStatus::initializing_transaction_servers])
+	    .detail("Proxies", recruits.proxies.size())
+	    .detail("TLogs", recruits.tLogs.size())
+	    .detail("Resolvers", recruits.resolvers.size())
+	    .detail("SatelliteTLogs", recruits.satelliteTLogs.size())
+	    .detail("OldLogRouters", recruits.oldLogRouters.size())
+	    .detail("StorageServers", recruits.storageServers.size())
+	    .detail("BackupWorkers", self->backupWorkers.size())
+	    .trackLatest("MasterRecoveryState");
 
 	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand new database we are sort of lying that we are
 	// past the recruitment phase.  In a perfect world we would split that up so that the recruitment part happens above (in parallel with recruiting the transaction servers?).

@@ -50,7 +50,7 @@ void QueueModel::endRequest( uint64_t id, double latency, double penalty, double
 }
 
 QueueData& QueueModel::getMeasurement( uint64_t id ) {
-	return data[id];
+	return data[id]; // return smoothed penalty
 }
 
 double QueueModel::addRequest( uint64_t id ) {
