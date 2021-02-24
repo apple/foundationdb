@@ -167,6 +167,30 @@ public interface EventKeeper {
 			public boolean isTimeEvent() {
 				return true;
 			}
-		};
-	}
+		},
+        /**
+         * The number of transactions created
+         */
+        TRANSACTIONS_CREATED, 
+        /**
+         * The number of commits executed
+         */
+        COMMITS, 
+        /**
+         * The number of set() calls performed
+         */
+        DATA_SETS, 
+        /**
+         * The number of bytes written
+         */
+        BYTES_WRITTEN, 
+        /**
+         * The number of GET calls executed
+         */
+        GETS, 
+        /**
+         * The number of GET_KEY calls performed
+         */
+        GET_KEY;
+    }
 }

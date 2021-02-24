@@ -26,6 +26,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
+import com.apple.foundationdb.EventKeeper.Events;
 import com.apple.foundationdb.async.AsyncUtil;
 
 class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsumer {
@@ -126,6 +127,10 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 		pointerReadLock.lock();
 		Transaction tr = null;
 		try {
+			if(eventKeeper != null ){
+				eventKeeper.increment(Events.JNI_CALL); //setting the option also accounts for a JNI call
+				eventKeeper.increment(Events.TRANSACTIONS_CREATED);
+			}
 			tr = new FDBTransaction(Database_createTransaction(getPtr()), this, e, eventKeeper);
 			tr.options().setUsedDuringCommitProtectionDisable();
 			return tr;

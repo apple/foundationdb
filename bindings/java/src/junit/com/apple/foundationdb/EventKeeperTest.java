@@ -80,7 +80,7 @@ class EventKeeperTest {
 
 		RangeQuery query = new RangeQuery(txn, true, KeySelector.firstGreaterOrEqual(new byte[] { 0x00 }),
 		                                  KeySelector.firstGreaterOrEqual(new byte[] { (byte)0xFF }), -1, false,
-		                                  StreamingMode.ITERATOR, timer);
+		                                  StreamingMode.ITERATOR, TargetBytesStrategy.deferToNative(),timer);
 		AsyncIterator<KeyValue> iter = query.iterator();
 
 		List<KeyValue> iteratedItems = new ArrayList<>();
