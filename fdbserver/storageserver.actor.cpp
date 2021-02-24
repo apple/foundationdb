@@ -999,7 +999,7 @@ Future<Version> waitForVersion(StorageServer* data, Version version, SpanID span
 	}
 
 	if (version < data->oldestVersion.get() || version <= 0) {
-		TraceEvent("Nim_waitversion err");
+		// TraceEvent("Nim_waitversion err");
 		return transaction_too_old();
 	} else if (version <= data->version.get()) {
 		return version;
@@ -1153,8 +1153,6 @@ ACTOR Future<Version> watchValue_impl( StorageServer* data, SpanID parent, KeyRe
 	state Reference<ServerWatchMetadata> metadata = data->getWatchMetadata(key);
 
 	try {
-		++data->counters.watchQueries;
-
 		if( metadata->debugID.present() )
 			g_traceBatch.addEvent("WatchValueDebug", metadata->debugID.get().first(), "watchValueQ.Before"); //.detail("TaskID", g_network->getCurrentTask());
 
@@ -1167,7 +1165,7 @@ ACTOR Future<Version> watchValue_impl( StorageServer* data, SpanID parent, KeyRe
 		loop {
 			try {
 				metadata = data->getWatchMetadata(key);
-				TraceEvent("Nim_watchImpl").detail("Key", metadata->key).detail("Value", metadata->value);
+				// TraceEvent("Nim_watchImpl").detail("Key", metadata->key).detail("Value", metadata->value);
 				state Version latest = data->version.get();
 				TEST(latest >= minVersion && latest < data->data().latestVersion); // Starting watch loop with latestVersion > data->version
 				GetValueRequest getReq( span.context, metadata->key, latest, metadata->tags, metadata->debugID );
@@ -1189,17 +1187,16 @@ ACTOR Future<Version> watchValue_impl( StorageServer* data, SpanID parent, KeyRe
 					g_traceBatch.addEvent("WatchValueDebug", metadata->debugID.get().first(), "watchValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
 
 				if( reply.value != metadata->value && latest >= metadata->version ) {
-					TraceEvent("Nim_watchImpl return").detail("Key", metadata->key).detail("Value", metadata->value);
+					// TraceEvent("Nim_watchImpl return").detail("Key", metadata->key).detail("Value", metadata->value);
 					return latest; // fire watch
 				}
 
 				if( data->watchBytes > SERVER_KNOBS->MAX_STORAGE_SERVER_WATCH_BYTES ) {
-					TraceEvent("Nim_watchImpl cancelled").detail("Key", metadata->key).detail("Value", metadata->value);
+					// TraceEvent("Nim_watchImpl cancelled").detail("Key", metadata->key).detail("Value", metadata->value);
 					TEST(true); //Too many watches, reverting to polling
 					throw watch_cancelled();
 				}
 
-				++data->numWatches;
 				// TODO: Change the calculation of watchBytes to account for changes
 				data->watchBytes += (metadata->key.expectedSize() + metadata->value.expectedSize() + WATCH_OVERHEAD_BYTES);
 				try {
@@ -1213,11 +1210,9 @@ ACTOR Future<Version> watchValue_impl( StorageServer* data, SpanID parent, KeyRe
 						watchFuture = watchFuture || delay(deterministicRandom()->random01());
 					}
 					wait(watchFuture);
-					--data->numWatches;
 					// TODO: Change the calculation of watchBytes to account for changes
 					data->watchBytes -= (metadata->key.expectedSize() + metadata->value.expectedSize() + WATCH_OVERHEAD_BYTES);
 				} catch( Error &e ) {
-					--data->numWatches;
 					// TODO: Change the calculation of watchBytes to account for changes
 					data->watchBytes -= (metadata->key.expectedSize() + metadata->value.expectedSize() + WATCH_OVERHEAD_BYTES);
 					throw;
@@ -1234,7 +1229,7 @@ ACTOR Future<Version> watchValue_impl( StorageServer* data, SpanID parent, KeyRe
 			wait(data->version.whenAtLeast(data->data().latestVersion));
 		}
 	} catch (Error& e) {
-		TraceEvent("Nim_watchImpl exe").detail("Key", key).detail("Code", e.code());
+		// TraceEvent("Nim_watchImpl exe").detail("Key", key).detail("Code", e.code());
 		throw e;
 	}
 }
@@ -1250,6 +1245,8 @@ void checkCancelWatchImpl( StorageServer* data, WatchValueRequest req ) {
 
 ACTOR Future<Void> watchValueQ( StorageServer* data, WatchValueRequest req, Future<Version> resp ) {
 	state double startTime = now();
+	++data->counters.watchQueries;
+	++data->numWatches;
 
 	loop {
 		double timeoutDelay = -1;
@@ -1258,38 +1255,35 @@ ACTOR Future<Void> watchValueQ( StorageServer* data, WatchValueRequest req, Futu
 		} else if(!BUGGIFY) {
 			timeoutDelay = std::max(CLIENT_KNOBS->WATCH_TIMEOUT - (now() - startTime), 0.0);
 		}
-		TraceEvent("Nim_watchQ").detail("Key", req.key);
+		// TraceEvent("Nim_watchQ").detail("Key", req.key);
 
 		try {
 			choose {
 				when( Version ver = wait( resp ) ) {
 					// fire watch
-					TraceEvent("Nim_watchQ return").detail("Key", req.key).detail("Value", req.value);
+					// TraceEvent("Nim_watchQ return").detail("Key", req.key).detail("Value", req.value);
 					req.reply.send(WatchValueReply{ ver });
 					checkCancelWatchImpl(data, req);
+					--data->numWatches;
 					return Void();
 				}
 				when( wait( timeoutDelay < 0 ? Never() : delay(timeoutDelay) ) ) {
 					// watch timed out
-					TraceEvent("Nim_watchQ timeout").detail("Key", req.key).detail("Value", req.value);
+					// TraceEvent("Nim_watchQ timeout").detail("Key", req.key).detail("Value", req.value);
 					data->sendErrorWithPenalty(req.reply, timed_out(), data->getPenalty());
 					checkCancelWatchImpl(data, req);
+					--data->numWatches;
 					return Void();
 				}
 				when( wait( data->noRecentUpdates.onChange()) ) {}
 			}
 		} catch (Error& e) {
-			TraceEvent("Nim_watchQ exe").detail("Key", req.key).detail("Code", e.code());
+			// TraceEvent("Nim_watchQ exe").detail("Key", req.key).detail("Code", e.code());
 			checkCancelWatchImpl(data, req);
-			if(!canReplyWith(e)) {
-				TraceEvent("Nim_watchQ throw").detail("Key", req.key).detail("Code", e.code());
-				throw e;
-			} else {
-				if (e.code() == error_code_watch_cancelled) {
-					TraceEvent("Nim_watchQ cancelled").detail("Key", req.key);
-				}
-				data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
-			}
+			--data->numWatches;
+
+			if (!canReplyWith(e)) throw e;
+			data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 			return Void();
 		}
 	}
@@ -3984,10 +3978,10 @@ ACTOR Future<Void> watchValueProxy( StorageServer* self, WatchValueRequest req, 
 	state Span span("SS:watchValueProxy"_loc, { req.spanContext });
 	try {
 		wait(success(waitForVersionNoTooOld(self, req.version)));
-		TraceEvent("Nim_proxy").detail("Key", req.key).detail("Value", req.value);
+		// TraceEvent("Nim_proxy").detail("Key", req.key).detail("Value", req.value);
 		stream.send(req);
 	} catch (Error& e) {
-		TraceEvent("Nim_proxy err").detail("Key", req.key).detail("Code", e.code());
+		// TraceEvent("Nim_proxy err").detail("Key", req.key).detail("Code", e.code());
 		if(!canReplyWith(e)) throw e;
 		self->sendErrorWithPenalty(req.reply, e, self->getPenalty());
 	}
@@ -3996,113 +3990,95 @@ ACTOR Future<Void> watchValueProxy( StorageServer* self, WatchValueRequest req, 
 
 ACTOR Future<Void> serveWatchValueRequestsImpl( StorageServer* self, FutureStream<WatchValueRequest> stream ) {
 	loop {
-		try {
-			state WatchValueRequest req = waitNext(stream);
-			state Reference<ServerWatchMetadata> metadata = self->getWatchMetadata(req.key.contents());
-			state Span span("SS:serveWatchValueRequestsImpl"_loc, { req.spanContext });
-			TraceEvent("Nim_case start").detail("Key", req.key).detail("Value", req.value);
+		state WatchValueRequest req = waitNext(stream);
+		state Reference<ServerWatchMetadata> metadata = self->getWatchMetadata(req.key.contents());
+		state Span span("SS:serveWatchValueRequestsImpl"_loc, { req.spanContext });
+		// TraceEvent("Nim_case start").detail("Key", req.key).detail("Value", req.value);
 
-			if (!metadata.isValid()) { // case 1: no watch set for the current key
-				TraceEvent("Nim_case 1").detail("Key", req.key).detail("Value", req.value);
-				metadata = makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
-				KeyRef key = self->setWatchMetadata(metadata);
-				metadata->watch_impl = forward(watchValue_impl(self, span.context, key), metadata->versionPromise);
-				try {
-					self->actors.add(watchValueQ(self, req, metadata->versionPromise.getFuture()));
-				} catch (Error& e) {
-					TraceEvent("Nim_case 1 err").detail("Code", e.code());
-					throw e;
-				}
+		if (!metadata.isValid()) { // case 1: no watch set for the current key
+			// TraceEvent("Nim_case 1").detail("Key", req.key).detail("Value", req.value);
+			metadata = makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
+			KeyRef key = self->setWatchMetadata(metadata);
+			metadata->watch_impl = forward(watchValue_impl(self, span.context, key), metadata->versionPromise);
+			self->actors.add(watchValueQ(self, req, metadata->versionPromise.getFuture()));
+		}
+		else if (metadata->value == req.value) { // case 2: there is a watch in the map and it has the same value so just update version
+			// TraceEvent("Nim_case 2").detail("Key", req.key).detail("Value", req.value);
+			if (req.version > metadata->version) {
+				// TraceEvent("Nim_case 2 update ver").detail("Key", req.key).detail("Value", req.value);
+				metadata->version = req.version;
+				metadata->tags = req.tags;
+				metadata->debugID = req.debugID;
 			}
-			else if (metadata->value == req.value) { // case 2: there is a watch in the map and it has the same value so just update version
-				TraceEvent("Nim_case 2").detail("Key", req.key).detail("Value", req.value);
-				if (req.version > metadata->version) {
-					metadata->version = req.version;
-					metadata->tags = req.tags;
-					metadata->debugID = req.debugID;
-				}
+			self->actors.add(watchValueQ(self, req, metadata->versionPromise.getFuture()));
+		}
+		else if (req.version > metadata->version) { // case 3: version in map has a lower version so trigger watch and create a new entry in map
+			// TraceEvent("Nim_case 3").detail("Key", req.key).detail("Value", req.value);
+			self->deleteWatchMetadata(req.key.contents());
+			metadata->versionPromise.send(req.version);
+			metadata->watch_impl.cancel();
+
+			metadata = makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
+			KeyRef key = self->setWatchMetadata(metadata);
+			metadata->watch_impl = forward(watchValue_impl(self, span.context, key), metadata->versionPromise);
+
+			self->actors.add(watchValueQ(self, req, metadata->versionPromise.getFuture()));
+		} else if (req.version < metadata->version) { // case 4: version in the map is higher so immediately trigger watch
+			// TraceEvent("Nim_case 4").detail("Key", req.key).detail("Value", req.value);
+			TEST(true); // watch version in map is higher so trigger watch (case 3)
+			req.reply.send(WatchValueReply{ metadata->version });
+		} else { // case 5: watch value differs but their versions are the same (rare case) so check with the SS
+			// TraceEvent("Nim_case 5").detail("Key", req.key).detail("Value", req.value);
+			TEST(true); // watch version in the map is the same but value is different (case 5)
+			loop {
 				try {
-					self->actors.add(watchValueQ(self, req, metadata->versionPromise.getFuture()));
-				} catch (Error& e) {
-					TraceEvent("Nim_case 2 err").detail("Code", e.code());
-					throw e;
-				}
-			}
-			else if (req.version > metadata->version) { // case 3: version in map has a lower version so trigger watch and create a new entry in map
-				TraceEvent("Nim_case 3").detail("Key", req.key).detail("Value", req.value);
-				self->deleteWatchMetadata(req.key.contents());
-				metadata->versionPromise.send(req.version);
-				metadata->watch_impl.cancel();
+					state Version latest = self->version.get();
+					GetValueRequest getReq( span.context, metadata->key, latest, metadata->tags, metadata->debugID );
+					state Future<Void> getValue = getValueQ( self, getReq );
+					GetValueReply reply = wait( getReq.reply.getFuture() );
+					metadata = self->getWatchMetadata(req.key.contents());
 
-				metadata = makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
-				KeyRef key = self->setWatchMetadata(metadata);
-				metadata->watch_impl = forward(watchValue_impl(self, span.context, key), metadata->versionPromise);
-
-				self->actors.add(watchValueQ(self, req, metadata->versionPromise.getFuture()));
-			} else if (req.version < metadata->version) { // case 4: version in the map is higher so immediately trigger watch
-				TraceEvent("Nim_case 4").detail("Key", req.key).detail("Value", req.value);
-				req.reply.send(WatchValueReply{ metadata->version });
-			} else { // case 5: watch value differs but their version are the same (rare case) so check with the SS
-				TraceEvent("Nim_case 5").detail("Key", req.key).detail("Value", req.value);
-				loop {
-					try {
-						state Version latest = self->version.get();
-						GetValueRequest getReq( span.context, metadata->key, latest, metadata->tags, metadata->debugID );
-						state Future<Void> getValue = getValueQ( self, getReq );
-						GetValueReply reply = wait( getReq.reply.getFuture() );
-						metadata = self->getWatchMetadata(req.key.contents());
-
-						if (metadata.isValid() && reply.value != metadata->value) { // valSS != valMap
-							self->deleteWatchMetadata(req.key.contents());
-							metadata->versionPromise.send(req.version);
-							metadata->watch_impl.cancel();
-						}
-
-						if (reply.value == req.value) { // valSS == valreq
-							metadata = makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
-							KeyRef key = self->setWatchMetadata(metadata);
-							metadata->watch_impl = forward(watchValue_impl(self, span.context, key), metadata->versionPromise);
-							self->actors.add(watchValueQ(self, req, metadata->versionPromise.getFuture()));
-						} else {
-							req.reply.send(WatchValueReply{ latest });
-						}
-						break;
-					} catch (Error& e) {
-						TraceEvent("Nim_case 5 err").detail("Code", e.code()).detail("Key", req.key);
-						if( e.code() != error_code_transaction_too_old ) {
-							if(!canReplyWith(e)) throw e;
-							self->sendErrorWithPenalty(req.reply, e, self->getPenalty());
-							break;
-						}
-						TEST(true); // Reading a watched key failed with transaction_too_old case 5
+					if (metadata.isValid() && reply.value != metadata->value) { // valSS != valMap
+						self->deleteWatchMetadata(req.key.contents());
+						metadata->versionPromise.send(req.version);
+						metadata->watch_impl.cancel();
 					}
 
+					if (reply.value == req.value) { // valSS == valreq
+						metadata = makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
+						KeyRef key = self->setWatchMetadata(metadata);
+						metadata->watch_impl = forward(watchValue_impl(self, span.context, key), metadata->versionPromise);
+						self->actors.add(watchValueQ(self, req, metadata->versionPromise.getFuture()));
+					} else {
+						req.reply.send(WatchValueReply{ latest });
+					}
+					break;
+				} catch (Error& e) {
+					// TraceEvent("Nim_case 5 err").detail("Code", e.code()).detail("Key", req.key);
+					if( e.code() != error_code_transaction_too_old ) {
+						if(!canReplyWith(e)) throw e;
+						self->sendErrorWithPenalty(req.reply, e, self->getPenalty());
+						break;
+					}
+					TEST(true); // Reading a watched key failed with transaction_too_old case 5
 				}
 			}
-		} catch(Error &e) {
-			TraceEvent("Nim_serveW err 2").detail("Code", e.code());
-			throw e;
 		}
 	}
 }
 
 ACTOR Future<Void> serveWatchValueRequests( StorageServer* self, FutureStream<WatchValueRequest> watchValue ) {
-	try {
-		state PromiseStream<WatchValueRequest> stream;
-		self->actors.add(serveWatchValueRequestsImpl(self, stream.getFuture()));
+	state PromiseStream<WatchValueRequest> stream;
+	self->actors.add(serveWatchValueRequestsImpl(self, stream.getFuture()));
 
-		loop {
-			WatchValueRequest req = waitNext(watchValue);
-			TraceEvent("Nim_serve got request").detail("Key", req.key).detail("Value", req.value);
-			// TODO: fast load balancing?
-			if(self->shouldRead(req)) {
-				TraceEvent("Nim_serve should read").detail("Key", req.key).detail("Value", req.value);
-				self->actors.add(watchValueProxy(self, req, stream));
-			}
+	loop {
+		WatchValueRequest req = waitNext(watchValue);
+		// TraceEvent("Nim_serve got request").detail("Key", req.key).detail("Value", req.value);
+		// TODO: fast load balancing?
+		if(self->shouldRead(req)) {
+			// TraceEvent("Nim_serve should read").detail("Key", req.key).detail("Value", req.value);
+			self->actors.add(watchValueProxy(self, req, stream));
 		}
-	} catch (Error &e) {
-		TraceEvent("Nim_serveW err 1").detail("Code", e.code());
-		throw e;
 	}
 }
 
