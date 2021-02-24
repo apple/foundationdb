@@ -39,23 +39,20 @@ struct WatchesSameKeyWorkload : TestWorkload {
 	std::string description() const override { return "WatchesSameKeyCorrectness"; }
 
 	Future<Void> setup(Database const& cx) override { 
-		if ( clientId == 0 ) {
-			cases.push_back( case1(cx, LiteralStringRef("foo1"), this) );
-			cases.push_back( case2(cx, LiteralStringRef("foo2"), this) );
-			cases.push_back( case3(cx, LiteralStringRef("foo3"), this) );
-			cases.push_back( case4(cx, LiteralStringRef("foo4"), this) );
-			cases.push_back( case5(cx, LiteralStringRef("foo5"), this) );
-		}
+		cases.push_back( case1(cx, LiteralStringRef("foo1"), this) );
+		cases.push_back( case2(cx, LiteralStringRef("foo2"), this) );
+		cases.push_back( case3(cx, LiteralStringRef("foo3"), this) );
+		cases.push_back( case4(cx, LiteralStringRef("foo4"), this) );
+		cases.push_back( case5(cx, LiteralStringRef("foo5"), this) );
 		return Void();
 	}
 
 	Future<Void> start(Database const& cx) override { 
-		if (clientId == 0) return waitForAll( cases );
+		return waitForAll( cases );
 		return Void();
 	}
 
 	Future<bool> check(Database const& cx) override {
-		if ( clientId != 0 ) return true;
 		bool ok = true;
 		for( int i = 0; i < cases.size(); i++ ) {
 			if ( cases[i].isError() ) ok = false;

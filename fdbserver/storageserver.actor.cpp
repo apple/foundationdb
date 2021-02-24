@@ -4039,17 +4039,20 @@ ACTOR Future<Void> serveWatchValueRequestsImpl( StorageServer* self, FutureStrea
 					metadata = self->getWatchMetadata(req.key.contents());
 
 					if (metadata.isValid() && reply.value != metadata->value) { // valSS != valMap
+						// TraceEvent("Nim_case 5 valSS != valMap").detail("Key", req.key).detail("Value", req.value);
 						self->deleteWatchMetadata(req.key.contents());
 						metadata->versionPromise.send(req.version);
 						metadata->watch_impl.cancel();
 					}
 
 					if (reply.value == req.value) { // valSS == valreq
+						// TraceEvent("Nim_case 5 valSS == valReq").detail("Key", req.key).detail("Value", req.value);
 						metadata = makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
 						KeyRef key = self->setWatchMetadata(metadata);
 						metadata->watch_impl = forward(watchValue_impl(self, span.context, key), metadata->versionPromise);
 						self->actors.add(watchValueQ(self, req, metadata->versionPromise.getFuture()));
 					} else {
+						// TraceEvent("Nim_case 5 valSS != valReq").detail("Key", req.key).detail("Value", req.value);
 						req.reply.send(WatchValueReply{ latest });
 					}
 					break;
