@@ -26,6 +26,7 @@ RUN rpmkeys --import mono-project.com.rpmkey.pgp && \
         golang \
         java-11-openjdk-devel \
         libcurl-devel \
+        libuuid-devel \
         libxslt \
         lz4 \
         lz4-devel \
