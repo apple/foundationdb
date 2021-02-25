@@ -31,6 +31,7 @@ RUN sed -i -e '/enabled/d' /etc/yum.repos.d/CentOS-Base.repo && \
         golang \
         java-1.8.0-openjdk-devel \
         libcurl-devel \
+        libuuid-devel \
         libxslt \
         lz4 \
         lz4-devel \
@@ -42,8 +43,7 @@ RUN sed -i -e '/enabled/d' /etc/yum.repos.d/CentOS-Base.repo && \
         rpm-build \
         tcl-devel \
         unzip \
-        wget \
-        libuuid-devel && \
+        wget && \
     yum clean all && \
     rm -rf /var/cache/yum
 
