@@ -1643,9 +1643,8 @@ ACTOR static Future<Standalone<RangeResultRef>> ClientProfilingGetRangeActor(Rea
 	if (kr.contains(sampleRateKey)) {
 		auto entry = ryw->getSpecialKeySpaceWriteMap()[sampleRateKey];
 		if (!ryw->readYourWritesDisabled() && entry.first) {
-			if (entry.second.present())
-				result.push_back_deep(result.arena(), KeyValueRef(sampleRateKey, entry.second.get()));
-			// check clear is forbidden
+			ASSERT(entry.second.present()); // clear is forbidden
+			result.push_back_deep(result.arena(), KeyValueRef(sampleRateKey, entry.second.get()));
 		} else {
 			Optional<Value> f = wait(ryw->getTransaction().get(fdbClientInfoTxnSampleRate));
 			std::string sampleRateStr = "default";
@@ -1663,9 +1662,8 @@ ACTOR static Future<Standalone<RangeResultRef>> ClientProfilingGetRangeActor(Rea
 	if (kr.contains(txnSizeLimitKey)) {
 		auto entry = ryw->getSpecialKeySpaceWriteMap()[txnSizeLimitKey];
 		if (!ryw->readYourWritesDisabled() && entry.first) {
-			if (entry.second.present())
-				result.push_back_deep(result.arena(), KeyValueRef(txnSizeLimitKey, entry.second.get()));
-			// check clear is forbidden
+			ASSERT(entry.second.present()); // clear is forbidden
+			result.push_back_deep(result.arena(), KeyValueRef(txnSizeLimitKey, entry.second.get()));
 		} else {
 			Optional<Value> f = wait(ryw->getTransaction().get(fdbClientInfoTxnSizeLimit));
 			std::string sizeLimitStr = "default";
