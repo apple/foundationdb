@@ -28,6 +28,7 @@
 
 #include <any>
 #include <map>
+#include <type_traits>
 #include <unordered_map>
 
 #include "fdbclient/CommitProxyInterface.h"
@@ -46,6 +47,11 @@ extern const KeyRef fdbClientInfoTxnSizeLimit;
 extern const KeyRef transactionTagSampleRate;
 extern const KeyRef transactionTagSampleCost;
 
+struct ConfigValue {
+	Arena arena;
+	std::any value;
+};
+
 class GlobalConfig {
 public:
 	GlobalConfig(const GlobalConfig&) = delete;
@@ -54,27 +60,31 @@ public:
 	static void create(DatabaseContext* cx, Reference<AsyncVar<ClientDBInfo>> dbInfo);
 	static GlobalConfig& globalConfig();
 
-	const std::any get(KeyRef name);
-	const std::map<KeyRef, std::any> get(KeyRangeRef range);
+	const ConfigValue get(KeyRef name);
+	const std::map<KeyRef, ConfigValue> get(KeyRangeRef range);
 
-	template <typename T>
+	template <typename T, typename std::enable_if<std::is_arithmetic<T>{}, bool>::type = true>
 	const T get(KeyRef name) {
 		try {
-			auto any = get(name);
+			auto any = get(name).value;
 			return std::any_cast<T>(any);
 		} catch (Error& e) {
 			throw;
 		}
 	}
 
-	template <typename T>
+	template <typename T, typename std::enable_if<std::is_arithmetic<T>{}, bool>::type = true>
 	const T get(KeyRef name, T defaultVal) {
-		auto any = get(name);
-		if (any.has_value()) {
-			return std::any_cast<T>(any);
-		}
+		try {
+			auto any = get(name).value;
+			if (any.has_value()) {
+				return std::any_cast<T>(any);
+			}
 
-		return defaultVal;
+			return defaultVal;
+		} catch (Error& e) {
+			throw;
+		}
 	}
 
 	// To write into the global configuration, submit a transaction to
@@ -96,8 +106,7 @@ private:
 	Database cx;
 	Future<Void> _updater;
 	Promise<Void> initialized;
-	Arena arena;
-	std::unordered_map<StringRef, std::any> data;
+	std::unordered_map<StringRef, ConfigValue> data;
 	Version lastUpdate;
 };
 

@@ -26,19 +26,21 @@
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-const KeyRef fdbClientInfoTxnSampleRate = LiteralStringRef("fdbClientInfo/client_txn_sample_rate");
-const KeyRef fdbClientInfoTxnSizeLimit = LiteralStringRef("fdbClientInfo/client_txn_size_limit");
+const KeyRef fdbClientInfoTxnSampleRate = LiteralStringRef("config/fdbClientInfo/client_txn_sample_rate");
+const KeyRef fdbClientInfoTxnSizeLimit = LiteralStringRef("config/fdbClientInfo/client_txn_size_limit");
 
-const KeyRef transactionTagSampleRate = LiteralStringRef("transactionTagSampleRate");
-const KeyRef transactionTagSampleCost = LiteralStringRef("transactionTagSampleCost");
+const KeyRef transactionTagSampleRate = LiteralStringRef("config/transactionTagSampleRate");
+const KeyRef transactionTagSampleCost = LiteralStringRef("config/transactionTagSampleCost");
 
 GlobalConfig::GlobalConfig() : lastUpdate(0) {}
 
 void GlobalConfig::create(DatabaseContext* cx, Reference<AsyncVar<ClientDBInfo>> dbInfo) {
-	auto config = new GlobalConfig{};
-	config->cx = Database(cx);
-	g_network->setGlobal(INetwork::enGlobalConfig, config);
-	config->_updater = updater(config, dbInfo);
+	if (g_network->global(INetwork::enGlobalConfig) == nullptr) {
+		auto config = new GlobalConfig{};
+		config->cx = Database(cx);
+		g_network->setGlobal(INetwork::enGlobalConfig, config);
+		config->_updater = updater(config, dbInfo);
+	}
 }
 
 GlobalConfig& GlobalConfig::globalConfig() {
@@ -47,16 +49,16 @@ GlobalConfig& GlobalConfig::globalConfig() {
 	return *reinterpret_cast<GlobalConfig*>(res);
 }
 
-const std::any GlobalConfig::get(KeyRef name) {
+const ConfigValue GlobalConfig::get(KeyRef name) {
 	auto it = data.find(name);
 	if (it == data.end()) {
-		return std::any{};
+		return ConfigValue{ Arena(), std::any{} };
 	}
 	return it->second;
 }
 
-const std::map<KeyRef, std::any> GlobalConfig::get(KeyRangeRef range) {
-	std::map<KeyRef, std::any> results;
+const std::map<KeyRef, ConfigValue> GlobalConfig::get(KeyRangeRef range) {
+	std::map<KeyRef, ConfigValue> results;
 	for (const auto& [key, value] : data) {
 		if (range.contains(key)) {
 			results[key] = value;
@@ -70,17 +72,18 @@ Future<Void> GlobalConfig::onInitialized() {
 }
 
 void GlobalConfig::insert(KeyRef key, ValueRef value) {
+	Arena arena(1);
 	KeyRef stableKey = KeyRef(arena, key);
 	try {
 		Tuple t = Tuple::unpack(value);
 		if (t.getType(0) == Tuple::ElementType::UTF8) {
-			data[stableKey] = t.getString(0);
+			data[stableKey] = ConfigValue{ arena, StringRef(arena, t.getString(0).contents()) };
 		} else if (t.getType(0) == Tuple::ElementType::INT) {
-			data[stableKey] = t.getInt(0);
+			data[stableKey] = ConfigValue{ arena, t.getInt(0) };
 		} else if (t.getType(0) == Tuple::ElementType::FLOAT) {
-			data[stableKey] = t.getFloat(0);
+			data[stableKey] = ConfigValue{ arena, t.getFloat(0) };
 		} else if (t.getType(0) == Tuple::ElementType::DOUBLE) {
-			data[stableKey] = t.getDouble(0);
+			data[stableKey] = ConfigValue{ arena, t.getDouble(0) };
 		} else {
 			ASSERT(false);
 		}
@@ -94,7 +97,6 @@ void GlobalConfig::erase(KeyRef key) {
 }
 
 void GlobalConfig::erase(KeyRangeRef range) {
-	// TODO: Memory leak -- memory for key remains allocated in arena
 	auto it = data.begin();
 	while (it != data.end()) {
 		if (range.contains(it->first)) {
