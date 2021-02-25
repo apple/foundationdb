@@ -24,10 +24,6 @@
 #include "flow/TDMetric.actor.h"
 #include "flow/SystemMonitor.h"
 
-#if defined(ALLOC_INSTRUMENTATION) && defined(__linux__)
-#include <cxxabi.h>
-#endif
-
 SystemMonitorMachineState machineState;
 
 void initializeSystemMonitorMachineState(SystemMonitorMachineState machineState) {
@@ -67,7 +63,6 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 			    .detail("UptimeSeconds", now() - machineState.monitorStartTime)
 			    .detail("Memory", currentStats.processMemory)
 			    .detail("ResidentMemory", currentStats.processResidentMemory)
-			    .detail("UnusedAllocatedMemory", getTotalUnusedAllocatedMemory())
 			    .detail("MbpsSent",
 			            ((netData.bytesSent - statState->networkState.bytesSent) * 8e-6) / currentStats.elapsed)
 			    .detail("MbpsReceived",
@@ -127,23 +122,6 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 			            (netData.countTLSPolicyFailures - statState->networkState.countTLSPolicyFailures) /
 			                currentStats.elapsed)
 			    .trackLatest(eventName);
-
-			TraceEvent("MemoryMetrics")
-			    .DETAILALLOCATORMEMUSAGE(16)
-			    .DETAILALLOCATORMEMUSAGE(32)
-			    .DETAILALLOCATORMEMUSAGE(64)
-			    .DETAILALLOCATORMEMUSAGE(96)
-			    .DETAILALLOCATORMEMUSAGE(128)
-			    .DETAILALLOCATORMEMUSAGE(256)
-			    .DETAILALLOCATORMEMUSAGE(512)
-			    .DETAILALLOCATORMEMUSAGE(1024)
-			    .DETAILALLOCATORMEMUSAGE(2048)
-			    .DETAILALLOCATORMEMUSAGE(4096)
-			    .DETAILALLOCATORMEMUSAGE(8192)
-			    .detail("HugeArenaMemory", g_hugeArenaMemory.load())
-			    .detail("DCID", machineState.dcId)
-			    .detail("ZoneID", machineState.zoneId)
-			    .detail("MachineID", machineState.machineId);
 
 			TraceEvent n("NetworkMetrics");
 			n.detail("Elapsed", currentStats.elapsed)
@@ -242,114 +220,6 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 		}
 	}
 
-#ifdef ALLOC_INSTRUMENTATION
-	{
-		static double firstTime = 0.0;
-		if(firstTime == 0.0) firstTime = now();
-		if( now() - firstTime > 10 || g_network->isSimulated() ) {
-			firstTime = now();
-			std::vector< std::pair<std::string, const char*> > typeNames;
-			for( auto i = allocInstr.begin(); i != allocInstr.end(); ++i ) {
-				std::string s;
-#ifdef __linux__
-				char *demangled = abi::__cxa_demangle(i->first, nullptr, nullptr, nullptr);
-				if (demangled) {
-					s = demangled;
-					if (StringRef(s).startsWith(LiteralStringRef("(anonymous namespace)::")))
-						s = s.substr(LiteralStringRef("(anonymous namespace)::").size());
-					free(demangled);
-				} else
-					s = i->first;
-#else
-				s = i->first;
-				if (StringRef(s).startsWith(LiteralStringRef("class `anonymous namespace'::")))
-					s = s.substr(LiteralStringRef("class `anonymous namespace'::").size());
-				else if (StringRef(s).startsWith(LiteralStringRef("class ")))
-					s = s.substr(LiteralStringRef("class ").size());
-				else if (StringRef(s).startsWith(LiteralStringRef("struct ")))
-					s = s.substr(LiteralStringRef("struct ").size());
-#endif
-				typeNames.push_back( std::make_pair(s, i->first) );
-			}
-			std::sort(typeNames.begin(), typeNames.end());
-			for(int i=0; i<typeNames.size(); i++) {
-				const char* n = typeNames[i].second;
-				auto& f = allocInstr[n];
-				if(f.maxAllocated > 10000)
-					TraceEvent("AllocInstrument").detail("CurrentAlloc", f.allocCount-f.deallocCount)
-						.detail("Name", typeNames[i].first.c_str());
-			}
-
-			std::unordered_map<uint32_t, BackTraceAccount> traceCounts;
-			size_t memSampleSize;
-			memSample_entered = true;
-			{
-				ThreadSpinLockHolder holder(memLock);
-				traceCounts = backTraceLookup;
-				memSampleSize = memSample.size();
-			}
-			memSample_entered = false;
-
-			uint64_t totalSize = 0;
-			uint64_t totalCount = 0;
-			for( auto i = traceCounts.begin(); i != traceCounts.end(); ++i ) {
-				char buf[1024];
-				std::vector<void *> *frames = i->second.backTrace;
-				std::string backTraceStr;
-#if defined(_WIN32)
-				for (int j = 1; j < frames->size(); j++) {
-					_snprintf(buf, 1024, "%p ", frames->at(j));
-					backTraceStr += buf;
-				}
-#else
-				backTraceStr = platform::format_backtrace(&(*frames)[0], frames->size());
-#endif
-
-				TraceEvent("MemSample")
-					.detail("Count", (int64_t)i->second.count)
-					.detail("TotalSize", i->second.totalSize)
-					.detail("SampleCount", i->second.sampleCount)
-					.detail("Hash", format("%lld", i->first))
-					.detail("Bt", backTraceStr);
-
-				totalSize += i->second.totalSize;
-				totalCount += i->second.count;
-			}
-
-			TraceEvent("MemSampleSummary")
-				.detail("InverseByteSampleRatio", SAMPLE_BYTES)
-				.detail("MemorySamples", memSampleSize)
-				.detail("BackTraces", traceCounts.size())
-				.detail("TotalSize", totalSize)
-				.detail("TotalCount", totalCount);
-
-			TraceEvent("MemSample")
-				.detail("Count", traceCounts.size())
-				.detail("TotalSize", traceCounts.size() * ((int)(sizeof(uint32_t) + sizeof(size_t) + sizeof(size_t))))
-				.detail("SampleCount", traceCounts.size())
-				.detail("Hash", "backTraces")
-				.detail("Bt", "na");
-
-			TraceEvent("MemSample")
-				.detail("Count", memSampleSize)
-				.detail("TotalSize", memSampleSize * ((int)(sizeof(void*) + sizeof(uint32_t) + sizeof(size_t))))
-				.detail("SampleCount", memSampleSize)
-				.detail("Hash", "memSamples")
-				.detail("Bt", "na");
-			TRACEALLOCATOR(16);
-			TRACEALLOCATOR(32);
-			TRACEALLOCATOR(64);
-			TRACEALLOCATOR(96);
-			TRACEALLOCATOR(128);
-			TRACEALLOCATOR(256);
-			TRACEALLOCATOR(512);
-			TRACEALLOCATOR(1024);
-			TRACEALLOCATOR(2048);
-			TRACEALLOCATOR(4096);
-			TRACEALLOCATOR(8192);
-		}
-	}
-#endif
 	statState->networkMetricsState = g_network->networkInfo.metrics;
 	statState->networkState = netData;
 	return currentStats;

@@ -1,4 +1,3 @@
-#cmakedefine ALLOC_INSTRUMENTATION
 #cmakedefine NDEBUG
 #cmakedefine FDB_RELEASE
 #ifdef FDB_RELEASE

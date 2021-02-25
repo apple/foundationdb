@@ -243,15 +243,12 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 		if (dataSize <= 16 - TINY_HEADER) {
 			b = (ArenaBlock*)allocateFast(16);
 			b->tinySize = 16;
-			INSTRUMENT_ALLOCATE("Arena16");
 		} else if (dataSize <= 32 - TINY_HEADER) {
 			b = (ArenaBlock*)allocateFast(32);
 			b->tinySize = 32;
-			INSTRUMENT_ALLOCATE("Arena32");
 		} else {
 			b = (ArenaBlock*)allocateFast(64);
 			b->tinySize = 64;
-			INSTRUMENT_ALLOCATE("Arena64");
 		}
 		b->tinyUsed = TINY_HEADER;
 
@@ -271,50 +268,32 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 			if (reqSize <= 128) {
 				b = (ArenaBlock*)allocateFast(128);
 				b->bigSize = 128;
-				INSTRUMENT_ALLOCATE("Arena128");
 			} else if (reqSize <= 256) {
 				b = (ArenaBlock*)allocateFast(256);
 				b->bigSize = 256;
-				INSTRUMENT_ALLOCATE("Arena256");
 			} else if (reqSize <= 512) {
 				b = (ArenaBlock*)allocateFast(512);
 				b->bigSize = 512;
-				INSTRUMENT_ALLOCATE("Arena512");
 			} else if (reqSize <= 1024) {
 				b = (ArenaBlock*)allocateFast(1024);
 				b->bigSize = 1024;
-				INSTRUMENT_ALLOCATE("Arena1024");
 			} else if (reqSize <= 2048) {
 				b = (ArenaBlock*)allocateFast(2048);
 				b->bigSize = 2048;
-				INSTRUMENT_ALLOCATE("Arena2048");
 			} else if (reqSize <= 4096) {
 				b = (ArenaBlock*)allocateFast(4096);
 				b->bigSize = 4096;
-				INSTRUMENT_ALLOCATE("Arena4096");
 			} else {
 				b = (ArenaBlock*)allocateFast(8192);
 				b->bigSize = 8192;
-				INSTRUMENT_ALLOCATE("Arena8192");
 			}
 			b->tinySize = b->tinyUsed = NOT_TINY;
 			b->bigUsed = sizeof(ArenaBlock);
 		} else {
-#ifdef ALLOC_INSTRUMENTATION
-			allocInstr["ArenaHugeKB"].alloc((reqSize + 1023) >> 10);
-#endif
 			b = (ArenaBlock*)allocateFast(reqSize);
 			b->tinySize = b->tinyUsed = NOT_TINY;
 			b->bigSize = reqSize;
 			b->bigUsed = sizeof(ArenaBlock);
-
-			if (FLOW_KNOBS && g_allocation_tracing_disabled == 0 &&
-			    nondeterministicRandom()->random01() < (reqSize / FLOW_KNOBS->HUGE_ARENA_LOGGING_BYTES)) {
-				++g_allocation_tracing_disabled;
-				hugeArenaSample(reqSize);
-				--g_allocation_tracing_disabled;
-			}
-			g_hugeArenaMemory.fetch_add(reqSize);
 
 			// If the new block has less free space than the old block, make the old block depend on it
 			if (next && !next->isTiny() && next->unused() >= reqSize - dataSize) {
@@ -365,41 +344,27 @@ void ArenaBlock::destroyLeaf() {
 	if (isTiny()) {
 		if (tinySize <= 16) {
 			freeFast(16, this);
-			INSTRUMENT_RELEASE("Arena16");
 		} else if (tinySize <= 32) {
 			freeFast(32, this);
-			INSTRUMENT_RELEASE("Arena32");
 		} else {
 			freeFast(64, this);
-			INSTRUMENT_RELEASE("Arena64");
 		}
 	} else {
 		if (bigSize <= 128) {
 			freeFast(128, this);
-			INSTRUMENT_RELEASE("Arena128");
 		} else if (bigSize <= 256) {
 			freeFast(256, this);
-			INSTRUMENT_RELEASE("Arena256");
 		} else if (bigSize <= 512) {
 			freeFast(512, this);
-			INSTRUMENT_RELEASE("Arena512");
 		} else if (bigSize <= 1024) {
 			freeFast(1024, this);
-			INSTRUMENT_RELEASE("Arena1024");
 		} else if (bigSize <= 2048) {
 			freeFast(2048, this);
-			INSTRUMENT_RELEASE("Arena2048");
 		} else if (bigSize <= 4096) {
 			freeFast(4096, this);
-			INSTRUMENT_RELEASE("Arena4096");
 		} else if (bigSize <= 8192) {
 			freeFast(8192, this);
-			INSTRUMENT_RELEASE("Arena8192");
 		} else {
-#ifdef ALLOC_INSTRUMENTATION
-			allocInstr["ArenaHugeKB"].dealloc((bigSize + 1023) >> 10);
-#endif
-			g_hugeArenaMemory.fetch_sub(bigSize);
 			freeFast(bigSize, this);
 		}
 	}

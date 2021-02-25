@@ -32,6 +32,7 @@
 #include "flow/flow.h"
 #include "flow/serialize.h"
 #include "fdbclient/BuildFlags.h"
+#include "flow/Hash3.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace file_converter {

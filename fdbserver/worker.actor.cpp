@@ -631,9 +631,11 @@ void runHeapProfiler(const char* msg) {
 #endif
 }
 
+void dumpHeapProfile();
+
 ACTOR Future<Void> runProfiler(ProfilerRequest req) {
 	if (req.type == ProfilerRequest::Type::GPROF_HEAP) {
-		runHeapProfiler("User triggered heap dump");
+		dumpHeapProfile();
 	} else {
 		wait( runCpuProfiler(req) );
 	}
