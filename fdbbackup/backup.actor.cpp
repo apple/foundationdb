@@ -672,7 +672,6 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_BACKUPKEYS,      "--keys",           SO_REQ_SEP },
 	{ OPT_WAITFORDONE,     "-w",               SO_NONE },
 	{ OPT_WAITFORDONE,     "--waitfordone",    SO_NONE },
-	{ OPT_RESTORE_BEGIN_VERSION, "--begin_version", SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "--version",        SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "-v",               SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
@@ -693,6 +692,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 	{ OPT_INCREMENTALONLY,  "--incremental",    SO_NONE },
+	{ OPT_RESTORE_BEGIN_VERSION, "--begin_version", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -1057,9 +1057,9 @@ static void printBackupUsage(bool devhelp) {
 	       "                 remove mutations for it. By default this is set to one hour.\n");
 	printf("  --delete_data\n"
 		   "                 This flag will cause cleanup to remove mutations for the most stale backup or DR.\n");
-	// TODO: Enable this command-line argument once atomics are supported
-	// printf("  --incremental\n"
-	//        "                 Performs incremental backup without the base backup.\n");
+	printf("  --incremental\n"
+	       "                 Performs incremental backup without the base backup.\n"
+		   "                 This option indicates to the backup agent that it will only need to record the log files, and ignore the range files.\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -1125,9 +1125,13 @@ static void printRestoreUsage(bool devhelp ) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 		   "                 Has no effect unless --log is specified.\n");
-	// TODO: Enable this command-line argument once atomics are supported
-	// printf("  --incremental\n"
-	//        "                 Performs incremental restore without the base backup.\n");
+	printf("  --incremental\n"
+	       "                 Performs incremental restore without the base backup.\n"
+		   "                 This tells the backup agent to only replay the log files from the backup source.\n"
+		   "                 This also allows a restore to be performed into a non-empty destination database.\n");
+	printf("  --begin_version\n"
+		   "                 To be used in conjunction with incremental restore.\n"
+		   "                 Indicates to the backup agent to only begin replaying log files from a certain version, instead of the entire set.\n");
 #ifndef TLS_DISABLED
 	    printf(TLS_HELP);
 #endif
