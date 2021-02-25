@@ -1152,85 +1152,80 @@ ACTOR Future<Version> watchValue_impl( StorageServer* data, SpanID parent, KeyRe
 	state Span span(spanLocation, { parent });
 	state Reference<ServerWatchMetadata> metadata = data->getWatchMetadata(key);
 
-	try {
-		if( metadata->debugID.present() )
-			g_traceBatch.addEvent("WatchValueDebug", metadata->debugID.get().first(), "watchValueQ.Before"); //.detail("TaskID", g_network->getCurrentTask());
+	if( metadata->debugID.present() )
+		g_traceBatch.addEvent("WatchValueDebug", metadata->debugID.get().first(), "watchValueQ.Before"); //.detail("TaskID", g_network->getCurrentTask());
 
-		wait(success(waitForVersionNoTooOld(data, metadata->version)));
-		if( metadata->debugID.present() )
-			g_traceBatch.addEvent("WatchValueDebug", metadata->debugID.get().first(), "watchValueQ.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
+	wait(success(waitForVersionNoTooOld(data, metadata->version)));
+	if( metadata->debugID.present() )
+		g_traceBatch.addEvent("WatchValueDebug", metadata->debugID.get().first(), "watchValueQ.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
 
-		state Version minVersion = data->data().latestVersion;
-		state Future<Void> watchFuture = data->watches.onChange(metadata->key);
-		loop {
-			try {
-				metadata = data->getWatchMetadata(key);
-				// TraceEvent("Nim_watchImpl").detail("Key", metadata->key).detail("Value", metadata->value);
-				state Version latest = data->version.get();
-				TEST(latest >= minVersion && latest < data->data().latestVersion); // Starting watch loop with latestVersion > data->version
-				GetValueRequest getReq( span.context, metadata->key, latest, metadata->tags, metadata->debugID );
-				state Future<Void> getValue = getValueQ( data, getReq ); //we are relying on the delay zero at the top of getValueQ, if removed we need one here
-				GetValueReply reply = wait( getReq.reply.getFuture() );
-				span = Span(spanLocation, parent);
+	state Version minVersion = data->data().latestVersion;
+	state Future<Void> watchFuture = data->watches.onChange(metadata->key);
+	loop {
+		try {
+			metadata = data->getWatchMetadata(key);
+			// TraceEvent("Nim_watchImpl").detail("Key", metadata->key).detail("Value", metadata->value);
+			state Version latest = data->version.get();
+			TEST(latest >= minVersion && latest < data->data().latestVersion); // Starting watch loop with latestVersion > data->version
+			GetValueRequest getReq( span.context, metadata->key, latest, metadata->tags, metadata->debugID );
+			state Future<Void> getValue = getValueQ( data, getReq ); //we are relying on the delay zero at the top of getValueQ, if removed we need one here
+			GetValueReply reply = wait( getReq.reply.getFuture() );
+			span = Span(spanLocation, parent);
 
-				if(reply.error.present()) {
-					ASSERT(reply.error.get().code() != error_code_future_version);
-					throw reply.error.get();
-				}
-				if(BUGGIFY) {
-					throw transaction_too_old();
-				}
-				
-				DEBUG_MUTATION("ShardWatchValue", latest, MutationRef(MutationRef::DebugKey, metadata->key, reply.value.present() ? StringRef( reply.value.get() ) : LiteralStringRef("<null>") ) );
+			if(reply.error.present()) {
+				ASSERT(reply.error.get().code() != error_code_future_version);
+				throw reply.error.get();
+			}
+			if(BUGGIFY) {
+				throw transaction_too_old();
+			}
+			
+			DEBUG_MUTATION("ShardWatchValue", latest, MutationRef(MutationRef::DebugKey, metadata->key, reply.value.present() ? StringRef( reply.value.get() ) : LiteralStringRef("<null>") ) );
 
-				if( metadata->debugID.present() )
-					g_traceBatch.addEvent("WatchValueDebug", metadata->debugID.get().first(), "watchValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
+			if( metadata->debugID.present() )
+				g_traceBatch.addEvent("WatchValueDebug", metadata->debugID.get().first(), "watchValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
 
-				if( reply.value != metadata->value && latest >= metadata->version ) {
-					// TraceEvent("Nim_watchImpl return").detail("Key", metadata->key).detail("Value", metadata->value);
-					return latest; // fire watch
-				}
-
-				if( data->watchBytes > SERVER_KNOBS->MAX_STORAGE_SERVER_WATCH_BYTES ) {
-					// TraceEvent("Nim_watchImpl cancelled").detail("Key", metadata->key).detail("Value", metadata->value);
-					TEST(true); //Too many watches, reverting to polling
-					throw watch_cancelled();
-				}
-
-				// TODO: Change the calculation of watchBytes to account for changes
-				data->watchBytes += (metadata->key.expectedSize() + metadata->value.expectedSize() + WATCH_OVERHEAD_BYTES);
-				try {
-					if(latest < minVersion) {
-						// If the version we read is less than minVersion, then we may fail to be notified of any changes that occur up to or including minVersion
-						// To prevent that, we'll check the key again once the version reaches our minVersion
-						watchFuture = watchFuture || data->version.whenAtLeast(minVersion);
-					}
-					if(BUGGIFY) {
-						// Simulate a trigger on the watch that results in the loop going around without the value changing
-						watchFuture = watchFuture || delay(deterministicRandom()->random01());
-					}
-					wait(watchFuture);
-					// TODO: Change the calculation of watchBytes to account for changes
-					data->watchBytes -= (metadata->key.expectedSize() + metadata->value.expectedSize() + WATCH_OVERHEAD_BYTES);
-				} catch( Error &e ) {
-					// TODO: Change the calculation of watchBytes to account for changes
-					data->watchBytes -= (metadata->key.expectedSize() + metadata->value.expectedSize() + WATCH_OVERHEAD_BYTES);
-					throw;
-				}
-			} catch( Error &e ) {
-				if( e.code() != error_code_transaction_too_old ) {
-					throw e;
-				}
-
-				TEST(true); // Reading a watched key failed with transaction_too_old
+			if( reply.value != metadata->value && latest >= metadata->version ) {
+				// TraceEvent("Nim_watchImpl return").detail("Key", metadata->key).detail("Value", metadata->value);
+				return latest; // fire watch
 			}
 
-			watchFuture = data->watches.onChange(metadata->key);
-			wait(data->version.whenAtLeast(data->data().latestVersion));
+			if( data->watchBytes > SERVER_KNOBS->MAX_STORAGE_SERVER_WATCH_BYTES ) {
+				// TraceEvent("Nim_watchImpl cancelled").detail("Key", metadata->key).detail("Value", metadata->value);
+				TEST(true); //Too many watches, reverting to polling
+				throw watch_cancelled();
+			}
+
+			// TODO: Change the calculation of watchBytes to account for changes
+			data->watchBytes += (metadata->key.expectedSize() + metadata->value.expectedSize() + WATCH_OVERHEAD_BYTES);
+			try {
+				if(latest < minVersion) {
+					// If the version we read is less than minVersion, then we may fail to be notified of any changes that occur up to or including minVersion
+					// To prevent that, we'll check the key again once the version reaches our minVersion
+					watchFuture = watchFuture || data->version.whenAtLeast(minVersion);
+				}
+				if(BUGGIFY) {
+					// Simulate a trigger on the watch that results in the loop going around without the value changing
+					watchFuture = watchFuture || delay(deterministicRandom()->random01());
+				}
+				wait(watchFuture);
+				// TODO: Change the calculation of watchBytes to account for changes
+				data->watchBytes -= (metadata->key.expectedSize() + metadata->value.expectedSize() + WATCH_OVERHEAD_BYTES);
+			} catch( Error &e ) {
+				// TODO: Change the calculation of watchBytes to account for changes
+				data->watchBytes -= (metadata->key.expectedSize() + metadata->value.expectedSize() + WATCH_OVERHEAD_BYTES);
+				throw;
+			}
+		} catch( Error &e ) {
+			if( e.code() != error_code_transaction_too_old ) {
+				throw e;
+			}
+
+			TEST(true); // Reading a watched key failed with transaction_too_old
 		}
-	} catch (Error& e) {
-		// TraceEvent("Nim_watchImpl exe").detail("Key", key).detail("Code", e.code());
-		throw e;
+
+		watchFuture = data->watches.onChange(metadata->key);
+		wait(data->version.whenAtLeast(data->data().latestVersion));
 	}
 }
 
