@@ -43,7 +43,6 @@ RUN sed -i -e '/enabled/d' /etc/yum.repos.d/CentOS-Base.repo && \
         tcl-devel \
         unzip \
         wget \
-        libcurl-devel \
         libuuid-devel && \
     yum clean all && \
     rm -rf /var/cache/yum

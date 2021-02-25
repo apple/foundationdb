@@ -38,7 +38,6 @@ RUN rpmkeys --import mono-project.com.rpmkey.pgp && \
         tcl-devel \
         unzip \
         wget \
-        libcurl-devel \
         libuuid-devel && \
     yum clean all && \
     rm -rf /var/cache/yum
