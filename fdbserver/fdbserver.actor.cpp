@@ -687,54 +687,19 @@ static void printUsage( const char *name, bool devhelp ) {
 
 extern bool g_crashOnError;
 
-#if defined(ALLOC_INSTRUMENTATION) || defined(ALLOC_INSTRUMENTATION_STDOUT)
-	void* operator new (std::size_t size)  {
-		void* p = malloc(size);
-		if(!p)
-			throw std::bad_alloc();
-		recordAllocation( p, size );
-		return p;
-	}
-	void operator delete (void* ptr) throw() {
-		recordDeallocation( ptr );
-		free( ptr );
-	}
-
-	//scalar, nothrow new and it matching delete
-	void* operator new (std::size_t size,const std::nothrow_t&) throw() {
-		void* p = malloc(size);
-		recordAllocation( p, size );
-		return p;
-	}
-	void operator delete (void* ptr, const std::nothrow_t&) throw() {
-		recordDeallocation( ptr );
-		free( ptr );
-	}
-
-	//array throwing new and matching delete[]
-	void* operator new  [](std::size_t size) {
-		void* p = malloc(size);
-		if(!p)
-			throw std::bad_alloc();
-		recordAllocation( p, size );
-		return p;
-	}
-	void operator delete[](void* ptr) throw() {
-		recordDeallocation( ptr );
-		free( ptr );
-	}
-
-	//array, nothrow new and matching delete[]
-	void* operator new [](std::size_t size, const std::nothrow_t&) throw() {
-		void* p = malloc(size);
-		recordAllocation( p, size );
-		return p;
-	}
-	void operator delete[](void* ptr, const std::nothrow_t&) throw() {
-		recordDeallocation( ptr );
-		free( ptr );
-	}
-#endif
+// replacement of a minimal set of functions:
+void* operator new(std::size_t sz) // no inline, required by [replacement.functions]/3
+{
+	if (sz == 0) ++sz; // avoid allocateFast(0)
+	if (void* ptr = allocateFast(sz)) return ptr;
+	throw std::bad_alloc{}; // required by [new.delete.single]/3
+}
+void operator delete(void* ptr) noexcept {
+	freeFast(ptr);
+}
+void operator delete(void* ptr, size_t sz) noexcept {
+	freeFast(sz, ptr);
+}
 
 Optional<bool> checkBuggifyOverride(const char *testFile) {
 	std::ifstream ifs;
