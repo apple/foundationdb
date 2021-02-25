@@ -202,7 +202,7 @@ inline constexpr int nextFastAllocatedSize(int x) {
 
 // allocate, free, and sized free
 
-// Obtain a heap allocation of |size| bytes
+// Obtain a heap allocation of |size| bytes. |size| must be > 0
 [[nodiscard]] void* allocateFast(int size) noexcept;
 // |size| must be as passed to allocateFast to obtain |ptr|. |ptr| must not be null.
 void freeFast(int size, void* ptr) noexcept;
