@@ -9,7 +9,9 @@ RUN yum repolist && \
         tree \
         emacs-nox \
         vim \
-        bash-completion && \
+        bash-completion \
+        jq \
+        cgdb && \
     yum clean all && \
     rm -rf /var/cache/yum
 
