@@ -209,7 +209,7 @@ else()
       add_link_options(-static-libstdc++ -static-libgcc)
     endif()
   endif()
-  add_compile_options(-fsized-deallocation)
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fsized-deallocation>)
   # # Instruction sets we require to be supported by the CPU
   # TODO(atn34) Re-enable once https://github.com/apple/foundationdb/issues/1434 is resolved
   # Some of the following instructions have alignment requirements, so it seems
