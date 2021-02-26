@@ -18,6 +18,7 @@ ExternalProject_add(Jemalloc_project
   URL_HASH SHA256=34330e5ce276099e2e8950d9335db5a875689a4c6a56751ef3b1d8c537f887f6
   BUILD_BYPRODUCTS "${JEMALLOC_DIR}/include/jemalloc/jemalloc.h"
   "${JEMALLOC_DIR}/lib/libjemalloc.a"
+  "${JEMALLOC_DIR}/lib/libjemalloc_pic.a"
   CONFIGURE_COMMAND ./configure --prefix=${JEMALLOC_DIR} --enable-static --disable-cxx --without-export --enable-stats --with-jemalloc-prefix=je_ --enable-prof
   BUILD_IN_SOURCE ON
   BUILD_COMMAND make
