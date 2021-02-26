@@ -5020,6 +5020,23 @@ static std::set<int> const& normalDataDistributorErrors() {
 	return s;
 }
 
+ACTOR static Future<Void> ddSnapCreateValidateServerDBInfo(Database cx, ServerDBInfo db) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			wait(success(tr.getReadVersion())); // get read version to update ClientDBInfo
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	if (db.client.id != cx->clientInfo->get().id) {
+		TEST(true); // Outdated ServerDBInfo
+		throw snap_with_recovery_unsupported();
+	}
+	return Void();
+}
+
 ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, true, true);
 	TraceEvent("SnapDataDistributor_SnapReqEnter")
@@ -5094,6 +5111,10 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		TraceEvent("SnapDataDistributor_AfterSnapCoords")
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
+		wait(ddSnapCreateValidateServerDBInfo(cx, db->get()));
+		TraceEvent("SnapDataDistributor_AfterValidateServerDBInfo")
+		    .detail("SnapPayload", snapReq.snapPayload)
+		    .detail("SnapUID", snapReq.snapUID);
 	} catch (Error& err) {
 		state Error e = err;
 		TraceEvent("SnapDataDistributor_SnapReqExit")
