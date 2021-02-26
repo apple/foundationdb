@@ -25,7 +25,7 @@
 void dumpHeapProfile() {
 	TraceEvent("HeapProfileNotSupported");
 }
-void traceHeapStats();
+void traceHeapStats() {}
 [[nodiscard]] void* allocateFast(int size) noexcept {
 	return malloc(size);
 }
