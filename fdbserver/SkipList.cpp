@@ -263,7 +263,7 @@ private:
 			setMaxVersion(level, v);
 		}
 
-		void destroy() { freeFast(getNodeSize(), this); }
+		void destroy() { freeFast(this, getNodeSize()); }
 
 	private:
 		int getNodeSize() const { return sizeof(Node) + valueLength + nPointers * (sizeof(Node*) + sizeof(Version)); }

@@ -931,7 +931,7 @@ struct Quorum : SAV<Void> {
 	void destroy() override {
 		int size = sizeFor(this->count);
 		this->~Quorum();
-		freeFast(size, this);
+		freeFast(this, size);
 	}
 	void cancel() override {
 		int cancelled_callbacks = 0;

@@ -341,33 +341,7 @@ void ArenaBlock::destroy() {
 }
 
 void ArenaBlock::destroyLeaf() {
-	if (isTiny()) {
-		if (tinySize <= 16) {
-			freeFast(16, this);
-		} else if (tinySize <= 32) {
-			freeFast(32, this);
-		} else {
-			freeFast(64, this);
-		}
-	} else {
-		if (bigSize <= 128) {
-			freeFast(128, this);
-		} else if (bigSize <= 256) {
-			freeFast(256, this);
-		} else if (bigSize <= 512) {
-			freeFast(512, this);
-		} else if (bigSize <= 1024) {
-			freeFast(1024, this);
-		} else if (bigSize <= 2048) {
-			freeFast(2048, this);
-		} else if (bigSize <= 4096) {
-			freeFast(4096, this);
-		} else if (bigSize <= 8192) {
-			freeFast(8192, this);
-		} else {
-			freeFast(bigSize, this);
-		}
-	}
+	freeFast(this, size());
 }
 
 namespace {

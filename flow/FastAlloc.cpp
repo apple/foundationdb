@@ -29,7 +29,7 @@ void traceHeapStats() {}
 [[nodiscard]] void* allocateFast(int size) noexcept {
 	return malloc(size);
 }
-void freeFast(int size, void* ptr) noexcept {
+void freeFast(void* ptr, int size) noexcept {
 	return free(ptr);
 }
 void freeFast(void* ptr) noexcept {
@@ -74,7 +74,7 @@ void traceHeapStats() {
 [[nodiscard]] void* allocateFast(int size) noexcept {
 	return je_mallocx(size, /*flags*/ 0);
 }
-void freeFast(int size, void* ptr) noexcept {
+void freeFast(void* ptr, int size) noexcept {
 	return je_sdallocx(ptr, size, /*flags*/ 0);
 }
 void freeFast(void* ptr) noexcept {

@@ -680,6 +680,7 @@ static void printUsage( const char *name, bool devhelp ) {
 
 extern bool g_crashOnError;
 
+#if !(defined(_WIN32) || defined(USE_SANITIZER) || defined(USE_VALGRIND) || defined(__FreeBSD__))
 // replacement of a minimal set of functions:
 void* operator new(std::size_t sz) // no inline, required by [replacement.functions]/3
 {
@@ -691,8 +692,9 @@ void operator delete(void* ptr) noexcept {
 	freeFast(ptr);
 }
 void operator delete(void* ptr, size_t sz) noexcept {
-	freeFast(sz, ptr);
+	freeFast(ptr, sz);
 }
+#endif
 
 Optional<bool> checkBuggifyOverride(const char *testFile) {
 	std::ifstream ifs;

@@ -749,7 +749,7 @@ public:
 	void addref() { ++reference_count; }
 	void delref() {
 		if (!--reference_count) {
-			freeFast(size_ + PACKET_BUFFER_OVERHEAD, this);
+			freeFast(this, size_ + PACKET_BUFFER_OVERHEAD);
 		}
 	}
 	int bytes_unwritten() const { return size_ - bytes_written; }

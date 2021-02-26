@@ -76,7 +76,7 @@ inline constexpr int nextFastAllocatedSize(int x) {
 // Obtain a heap allocation of |size| bytes. |size| must be > 0
 [[nodiscard]] void* allocateFast(int size) noexcept;
 // |size| must be as passed to allocateFast to obtain |ptr|. |ptr| must not be null.
-void freeFast(int size, void* ptr) noexcept;
+void freeFast(void* ptr, int size) noexcept;
 // |ptr| must have been returned by allocateFast. Prefer the overload accepting |size| when possible. |ptr| must not be
 // null.
 void freeFast(void* ptr) noexcept;
@@ -93,11 +93,19 @@ class FastAllocated {
 public:
 	[[nodiscard]] static void* operator new(std::size_t s) {
 		ASSERT(s == sizeof(Object));
-		return alignedAllocateFast(alignof(Object), sizeof(Object));
+		if constexpr (alignof(Object) <= sizeof(void*)) {
+			return allocateFast(sizeof(Object));
+		} else {
+			return alignedAllocateFast(alignof(Object), sizeof(Object));
+		}
 	}
 
 	static void operator delete(void* s) {
-		return alignedFreeFast(s, alignof(Object), sizeof(Object));
+		if constexpr (alignof(Object) <= sizeof(void*)) {
+			return freeFast(s, sizeof(Object));
+		} else {
+			return alignedFreeFast(s, alignof(Object), sizeof(Object));
+		}
 	}
 	// Redefine placement new so you can still use it
 	static void* operator new(std::size_t, void* p) { return p; }
