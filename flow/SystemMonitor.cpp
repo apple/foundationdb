@@ -48,6 +48,7 @@ SystemStatistics getSystemStatistics() {
 #define TRACEALLOCATOR( size ) TraceEvent("MemSample").detail("Count", FastAllocator<size>::getApproximateMemoryUnused()/size).detail("TotalSize", FastAllocator<size>::getApproximateMemoryUnused()).detail("SampleCount", 1).detail("Hash", "FastAllocatedUnused" #size ).detail("Bt", "na")
 #define DETAILALLOCATORMEMUSAGE( size ) detail("TotalMemory"#size, FastAllocator<size>::getTotalMemory()).detail("ApproximateUnusedMemory"#size, FastAllocator<size>::getApproximateMemoryUnused()).detail("ActiveThreads"#size, FastAllocator<size>::getActiveThreads())
 
+void traceHeapStats();
 SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *statState, bool machineMetrics) {
 	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
 	SystemStatistics currentStats = getSystemStatistics(machineState.folder.present() ? machineState.folder.get() : "",
@@ -156,6 +157,8 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 					n.detail(format("SlowTask%dM", 1 << i).c_str(), c);
 				}
 			}
+
+			traceHeapStats();
 
 			std::map<TaskPriority, double> loggedDurations;
 			for (auto &itr : g_network->networkInfo.metrics.activeTrackers) {

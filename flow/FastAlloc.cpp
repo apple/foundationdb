@@ -25,6 +25,7 @@
 void dumpHeapProfile() {
 	TraceEvent("HeapProfileNotSupported");
 }
+void traceHeapStats();
 [[nodiscard]] void* allocateFast(int size) noexcept {
 	return malloc(size);
 }
@@ -48,6 +49,27 @@ void dumpHeapProfile() {
 	const char* name = fileName.c_str();
 	je_mallctl("prof.dump", nullptr, nullptr, &name, sizeof(name));
 	TraceEvent("HeapProfile").detail("FileName", name);
+}
+void traceHeapStats() {
+	// Force cached stats to update
+	je_mallctl("thread.tcache.flush", nullptr, nullptr, nullptr, 0);
+	size_t epoch = 0;
+	je_mallctl("epoch", nullptr, nullptr, &epoch, sizeof(epoch));
+
+	size_t sz, allocated, active, metadata, resident, mapped;
+	sz = sizeof(size_t);
+	if (je_mallctl("stats.allocated", &allocated, &sz, nullptr, 0) == 0 &&
+	    je_mallctl("stats.active", &active, &sz, nullptr, 0) == 0 &&
+	    je_mallctl("stats.metadata", &metadata, &sz, nullptr, 0) == 0 &&
+	    je_mallctl("stats.resident", &resident, &sz, nullptr, 0) == 0 &&
+	    je_mallctl("stats.mapped", &mapped, &sz, nullptr, 0) == 0) {
+		TraceEvent("HeapStats")
+		    .detail("Allocated", allocated)
+		    .detail("Active", active)
+		    .detail("Metadata", metadata)
+		    .detail("Resident", resident)
+		    .detail("Mapped", mapped);
+	}
 }
 [[nodiscard]] void* allocateFast(int size) noexcept {
 	return je_mallocx(size, /*flags*/ 0);
