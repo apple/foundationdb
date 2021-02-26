@@ -60,19 +60,17 @@ public:
 	static void create(DatabaseContext* cx, Reference<AsyncVar<ClientDBInfo>> dbInfo);
 	static GlobalConfig& globalConfig();
 
+	// Get a value from the framework. Values are returned in a ConfigValue
+	// struct which also contains a reference to the arena containing the
+	// memory for the object. As long as the caller keeps a reference to the
+	// returned ConfigValue, the value is guaranteed to be readable (if it
+	// exists).
 	const ConfigValue get(KeyRef name);
 	const std::map<KeyRef, ConfigValue> get(KeyRangeRef range);
 
-	template <typename T, typename std::enable_if<std::is_arithmetic<T>{}, bool>::type = true>
-	const T get(KeyRef name) {
-		try {
-			auto any = get(name).value;
-			return std::any_cast<T>(any);
-		} catch (Error& e) {
-			throw;
-		}
-	}
-
+	// For arithmetic value types, returns a copy of the value for the given
+	// key, or the supplied default value if the framework does not know about
+	// the key.
 	template <typename T, typename std::enable_if<std::is_arithmetic<T>{}, bool>::type = true>
 	const T get(KeyRef name, T defaultVal) {
 		try {

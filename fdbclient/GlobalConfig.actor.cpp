@@ -72,7 +72,7 @@ Future<Void> GlobalConfig::onInitialized() {
 }
 
 void GlobalConfig::insert(KeyRef key, ValueRef value) {
-	Arena arena(1);
+	Arena arena(key.expectedSize() + value.expectedSize());
 	KeyRef stableKey = KeyRef(arena, key);
 	try {
 		Tuple t = Tuple::unpack(value);
