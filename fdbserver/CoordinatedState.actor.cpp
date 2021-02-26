@@ -57,7 +57,7 @@ ACTOR Future<GenerationRegReadReply> nonemptyToNever( Future<GenerationRegReadRe
 	return r;
 }
 
-struct CoordinatedStateImpl {
+class CoordinatedState : NonCopyable {
 	ServerCoordinators coordinators;
 	int stage;
 	UniqueGeneration gen;
@@ -66,16 +66,13 @@ struct CoordinatedStateImpl {
 	ActorCollection ac; //Errors are not reported
 	bool initial;
 
-	CoordinatedStateImpl( ServerCoordinators const& c ) : coordinators(c), stage(0), conflictGen(0), doomed(false), ac(false), initial(false) {}
-	uint64_t getConflict() { return conflictGen; }
-
-	bool isDoomed( GenerationRegReadReply const& rep ) {
+	bool isDoomed(GenerationRegReadReply const& rep) const {
 		return rep.gen > gen // setExclusive is doomed, because there was a write at least started at a higher generation, which means a read completed at that higher generation
 			// || rep.rgen > gen // setExclusive isn't absolutely doomed, but it may/probably will fail
 			;
 	}
 
-	ACTOR static Future<Value> read( CoordinatedStateImpl* self ) {
+	ACTOR static Future<Value> read(CoordinatedState* self) {
 		ASSERT( self->stage == 0 );
 
 		{
@@ -98,7 +95,7 @@ struct CoordinatedStateImpl {
 			return rep.value.present() ? rep.value.get() : Value();
 		}
 	}
-	ACTOR static Future<Void> onConflict( CoordinatedStateImpl* self ) {
+	ACTOR static Future<Void> onConflict(CoordinatedState* self) {
 		ASSERT( self->stage == 4 );
 		if (self->doomed) return Void();
 		loop {
@@ -112,7 +109,7 @@ struct CoordinatedStateImpl {
 		wait( Future<Void>(Never()) );
 		return Void();
 	}
-	ACTOR static Future<Void> setExclusive( CoordinatedStateImpl* self, Value v ) {
+	ACTOR static Future<Void> setExclusive(CoordinatedState* self, Value v) {
 		ASSERT( self->stage == 4 );
 		self->stage = 5;
 
@@ -131,7 +128,7 @@ struct CoordinatedStateImpl {
 		}
 	}
 
-	ACTOR static Future<GenerationRegReadReply> replicatedRead( CoordinatedStateImpl* self, GenerationRegReadRequest req ) {
+	ACTOR static Future<GenerationRegReadReply> replicatedRead(CoordinatedState* self, GenerationRegReadRequest req) {
 		state std::vector<GenerationRegInterface> &replicas = self->coordinators.stateServers;
 		state vector< Future<GenerationRegReadReply> > rep_empty_reply;
 		state vector< Future<GenerationRegReadReply> > rep_reply;
@@ -170,7 +167,7 @@ struct CoordinatedStateImpl {
 		}
 	}
 
-	ACTOR static Future<UniqueGeneration> replicatedWrite( CoordinatedStateImpl* self, GenerationRegWriteRequest req ) {
+	ACTOR static Future<UniqueGeneration> replicatedWrite(CoordinatedState* self, GenerationRegWriteRequest req) {
 		state std::vector<GenerationRegInterface> &replicas = self->coordinators.stateServers;
 		state vector< Future<UniqueGeneration> > wrep_reply;
 		for(int i=0; i<replicas.size(); i++) {
@@ -187,14 +184,15 @@ struct CoordinatedStateImpl {
 				maxGen = std::max(maxGen, wrep_reply[i].get());
 		return maxGen;
 	}
-};
 
-CoordinatedState::CoordinatedState( ServerCoordinators const& coord ) : impl( new CoordinatedStateImpl(coord) ) { }
-CoordinatedState::~CoordinatedState() { delete impl; }
-Future<Value> CoordinatedState::read() { return CoordinatedStateImpl::read(impl); }
-Future<Void> CoordinatedState::onConflict() { return CoordinatedStateImpl::onConflict(impl); }
-Future<Void> CoordinatedState::setExclusive(Value v) { return CoordinatedStateImpl::setExclusive(impl,v); }
-uint64_t CoordinatedState::getConflict() { return impl->getConflict(); }
+public:
+	CoordinatedState(ServerCoordinators const& c)
+	  : coordinators(c), stage(0), conflictGen(0), doomed(false), ac(false), initial(false) {}
+	Future<Value> read() { return read(this); }
+	Future<Void> onConflict() { return onConflict(this); }
+	Future<Void> setExclusive(Value v) { return setExclusive(this, v); }
+	uint64_t getConflict() const { return conflictGen; }
+};
 
 struct MovableValue {
 	enum MoveState {
