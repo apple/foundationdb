@@ -1514,7 +1514,9 @@ private:
 				maxLogsSize = maxLogs * rollsize;
 			}
 		}
-		machineId = getSharedMemoryMachineId().toString();
+		if (!zoneId.present() && !(localities.isPresent(LocalityData::keyZoneId) && localities.isPresent(LocalityData::keyMachineId))) {
+			machineId = getSharedMemoryMachineId().toString();
+		}
 		if (!localities.isPresent(LocalityData::keyZoneId))
 			localities.set(LocalityData::keyZoneId, zoneId.present() ? zoneId : machineId);
 
