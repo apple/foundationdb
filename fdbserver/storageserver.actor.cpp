@@ -1144,7 +1144,7 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 // Pessimistic estimate the number of overhead bytes used by each
 // watch. Watch key references are stored in an AsyncMap<Key,bool>, and actors
 // must be kept alive until the watch is finished.
-static constexpr size_t WATCH_OVERHEAD_BYTES = 1000;
+extern size_t WATCH_OVERHEAD_WATCHQ, WATCH_OVERHEAD_WATCHIMPL;
 
 ACTOR Future<Version> watchValue_impl( StorageServer* data, SpanID parent, KeyRef key ) {
 	state Location spanLocation = "SS:WatchValueImpl"_loc;
@@ -1192,8 +1192,9 @@ ACTOR Future<Version> watchValue_impl( StorageServer* data, SpanID parent, KeyRe
 				throw watch_cancelled();
 			}
 
-			// TODO: Change the calculation of watchBytes to account for changes
-			data->watchBytes += (metadata->key.expectedSize() + metadata->value.expectedSize() + WATCH_OVERHEAD_BYTES);
+			data->watchBytes +=
+			    (metadata->key.expectedSize() + metadata->value.expectedSize() + key.expectedSize() +
+			     sizeof(Reference<ServerWatchMetadata>) + sizeof(ServerWatchMetadata) + WATCH_OVERHEAD_WATCHIMPL);
 			try {
 				if(latest < minVersion) {
 					// If the version we read is less than minVersion, then we may fail to be notified of any changes that occur up to or including minVersion
@@ -1205,11 +1206,13 @@ ACTOR Future<Version> watchValue_impl( StorageServer* data, SpanID parent, KeyRe
 					watchFuture = watchFuture || delay(deterministicRandom()->random01());
 				}
 				wait(watchFuture);
-				// TODO: Change the calculation of watchBytes to account for changes
-				data->watchBytes -= (metadata->key.expectedSize() + metadata->value.expectedSize() + WATCH_OVERHEAD_BYTES);
+				data->watchBytes -=
+				    (metadata->key.expectedSize() + metadata->value.expectedSize() + key.expectedSize() +
+				     sizeof(Reference<ServerWatchMetadata>) + sizeof(ServerWatchMetadata) + WATCH_OVERHEAD_WATCHIMPL);
 			} catch( Error &e ) {
-				// TODO: Change the calculation of watchBytes to account for changes
-				data->watchBytes -= (metadata->key.expectedSize() + metadata->value.expectedSize() + WATCH_OVERHEAD_BYTES);
+				data->watchBytes -=
+				    (metadata->key.expectedSize() + metadata->value.expectedSize() + key.expectedSize() +
+				     sizeof(Reference<ServerWatchMetadata>) + sizeof(ServerWatchMetadata) + WATCH_OVERHEAD_WATCHIMPL);
 				throw;
 			}
 		} catch( Error &e ) {
@@ -1234,10 +1237,12 @@ void checkCancelWatchImpl( StorageServer* data, WatchValueRequest req ) {
 	}
 }
 
-ACTOR Future<Void> watchValueQ( StorageServer* data, WatchValueRequest req, Future<Version> resp ) {
+ACTOR Future<Void> watchValueQ(StorageServer* data, WatchValueRequest req, Future<Version> resp, SpanID spanContext) {
+	state Span span("SS:watchValue"_loc, { spanContext });
 	state double startTime = now();
 	++data->counters.watchQueries;
 	++data->numWatches;
+	data->watchBytes += WATCH_OVERHEAD_WATCHQ;
 
 	loop {
 		double timeoutDelay = -1;
@@ -1254,6 +1259,7 @@ ACTOR Future<Void> watchValueQ( StorageServer* data, WatchValueRequest req, Futu
 					req.reply.send(WatchValueReply{ ver });
 					checkCancelWatchImpl(data, req);
 					--data->numWatches;
+					data->watchBytes -= WATCH_OVERHEAD_WATCHQ;
 					return Void();
 				}
 				when( wait( timeoutDelay < 0 ? Never() : delay(timeoutDelay) ) ) {
@@ -1261,11 +1267,13 @@ ACTOR Future<Void> watchValueQ( StorageServer* data, WatchValueRequest req, Futu
 					data->sendErrorWithPenalty(req.reply, timed_out(), data->getPenalty());
 					checkCancelWatchImpl(data, req);
 					--data->numWatches;
+					data->watchBytes -= WATCH_OVERHEAD_WATCHQ;
 					return Void();
 				}
 				when( wait( data->noRecentUpdates.onChange()) ) {}
 			}
 		} catch (Error& e) {
+			data->watchBytes -= WATCH_OVERHEAD_WATCHQ;
 			checkCancelWatchImpl(data, req);
 			--data->numWatches;
 
@@ -1275,6 +1283,14 @@ ACTOR Future<Void> watchValueQ( StorageServer* data, WatchValueRequest req, Futu
 		}
 	}
 }
+
+#ifdef NO_INTELLISENSE
+size_t WATCH_OVERHEAD_WATCHQ = sizeof(WatchValueQActorState<WatchValueQActor>) + sizeof(WatchValueQActor);
+size_t WATCH_OVERHEAD_WATCHIMPL = sizeof(WatchValue_implActorState<WatchValue_implActor>) + sizeof(WatchValue_implActor);
+#else
+size_t WATCH_OVERHEAD_WATCHQ = 0; // only used in IDE so value is irrelevant
+size_t WATCH_OVERHEAD_WATCHIMPL = 0;
+#endif
 
 ACTOR Future<Void> getShardState_impl( StorageServer* data, GetShardStateRequest req ) {
 	ASSERT( req.mode != GetShardStateRequest::NO_WAIT );
@@ -3983,7 +3999,7 @@ ACTOR Future<Void> serveWatchValueRequestsImpl( StorageServer* self, FutureStrea
 			metadata = makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
 			KeyRef key = self->setWatchMetadata(metadata);
 			metadata->watch_impl = forward(watchValue_impl(self, span.context, key), metadata->versionPromise);
-			self->actors.add(watchValueQ(self, req, metadata->versionPromise.getFuture()));
+			self->actors.add(watchValueQ(self, req, metadata->versionPromise.getFuture(), span.context));
 		}
 		else if (metadata->value == req.value) { // case 2: there is a watch in the map and it has the same value so just update version
 			if (req.version > metadata->version) {
@@ -3991,7 +4007,7 @@ ACTOR Future<Void> serveWatchValueRequestsImpl( StorageServer* self, FutureStrea
 				metadata->tags = req.tags;
 				metadata->debugID = req.debugID;
 			}
-			self->actors.add(watchValueQ(self, req, metadata->versionPromise.getFuture()));
+			self->actors.add(watchValueQ(self, req, metadata->versionPromise.getFuture(), span.context));
 		}
 		else if (req.version > metadata->version) { // case 3: version in map has a lower version so trigger watch and create a new entry in map
 			self->deleteWatchMetadata(req.key.contents());
@@ -4002,7 +4018,7 @@ ACTOR Future<Void> serveWatchValueRequestsImpl( StorageServer* self, FutureStrea
 			KeyRef key = self->setWatchMetadata(metadata);
 			metadata->watch_impl = forward(watchValue_impl(self, span.context, key), metadata->versionPromise);
 
-			self->actors.add(watchValueQ(self, req, metadata->versionPromise.getFuture()));
+			self->actors.add(watchValueQ(self, req, metadata->versionPromise.getFuture(), span.context));
 		} else if (req.version < metadata->version) { // case 4: version in the map is higher so immediately trigger watch
 			TEST(true); // watch version in map is higher so trigger watch (case 4)
 			req.reply.send(WatchValueReply{ metadata->version });
@@ -4026,7 +4042,7 @@ ACTOR Future<Void> serveWatchValueRequestsImpl( StorageServer* self, FutureStrea
 						metadata = makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
 						KeyRef key = self->setWatchMetadata(metadata);
 						metadata->watch_impl = forward(watchValue_impl(self, span.context, key), metadata->versionPromise);
-						self->actors.add(watchValueQ(self, req, metadata->versionPromise.getFuture()));
+						self->actors.add(watchValueQ(self, req, metadata->versionPromise.getFuture(), span.context));
 					} else {
 						req.reply.send(WatchValueReply{ latest });
 					}
