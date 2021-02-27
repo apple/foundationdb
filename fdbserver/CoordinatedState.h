@@ -23,11 +23,12 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
+#include <memory>
 
 class MovableCoordinatedState : NonCopyable {
 public:
 	MovableCoordinatedState( class ServerCoordinators const& );
-	void operator=(MovableCoordinatedState&& av);
+	MovableCoordinatedState& operator=(MovableCoordinatedState&& av);
 	~MovableCoordinatedState();
 
 	Future<Value> read();
@@ -43,7 +44,7 @@ public:
 	// (and therefore the caller should die).
 
 private:
-	struct MovableCoordinatedStateImpl *impl;
+	std::unique_ptr<struct MovableCoordinatedStateImpl> impl;
 };
 
 #endif

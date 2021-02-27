@@ -304,20 +304,14 @@ struct MovableCoordinatedStateImpl {
 	}
 };
 
-void MovableCoordinatedState::operator=(MovableCoordinatedState&& av) { 
-	if(impl) {
-		delete impl;
-	}
-	impl = av.impl; 
-	av.impl = 0; 
-}
+MovableCoordinatedState& MovableCoordinatedState::operator=(MovableCoordinatedState&& av) = default;
 MovableCoordinatedState::MovableCoordinatedState( class ServerCoordinators const& coord ) : impl( new MovableCoordinatedStateImpl(coord) ) {}
-MovableCoordinatedState::~MovableCoordinatedState() { 
-	if(impl) {
-		delete impl; 
-	}
+MovableCoordinatedState::~MovableCoordinatedState() = default;
+Future<Value> MovableCoordinatedState::read() {
+	return MovableCoordinatedStateImpl::read(impl.get());
 }
-Future<Value> MovableCoordinatedState::read() { return MovableCoordinatedStateImpl::read(impl); }
 Future<Void> MovableCoordinatedState::onConflict() { return impl->onConflict(); }
 Future<Void> MovableCoordinatedState::setExclusive(Value v) { return impl->setExclusive(v); }
-Future<Void> MovableCoordinatedState::move( ClusterConnectionString const& nc ) { return MovableCoordinatedStateImpl::move(impl, nc); }
+Future<Void> MovableCoordinatedState::move(ClusterConnectionString const& nc) {
+	return MovableCoordinatedStateImpl::move(impl.get(), nc);
+}
