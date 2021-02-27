@@ -541,23 +541,6 @@ inline static void flushOutputStreams() { fflush(nullptr); }
 #define strtoull(nptr, endptr, base) _strtoui64(nptr, endptr, base)
 #endif
 
-#if defined(_MSC_VER)
-inline static void *aligned_alloc(size_t alignment, size_t size) {
-  return _aligned_malloc(size, alignment);
-}
-inline static void aligned_free(void *ptr) { _aligned_free(ptr); }
-#else
-#if !defined(HAS_ALIGNED_ALLOC)
-#include <cstdlib>
-inline static void *aligned_alloc(size_t alignment, size_t size) {
-  void *ptr = nullptr;
-  posix_memalign(&ptr, alignment, size);
-  return ptr;
-}
-#endif
-inline static void aligned_free(void *ptr) { free(ptr); }
-#endif
-
 // lib_path may be a relative or absolute path or a name to be
 // resolved by whatever linker is hanging around on this system
 bool isLibraryLoaded(const char* lib_path);

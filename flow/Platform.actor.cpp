@@ -2767,7 +2767,7 @@ std::string getWorkingDirectory() {
 		throw platform_error();
 	}
 	std::string result(buf);
-	free(buf);
+	// free(buf);
 	return result;
 }
 

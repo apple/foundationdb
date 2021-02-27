@@ -22,6 +22,7 @@
 #include "flow/flow.h"
 
 #if defined(_WIN32) || defined(USE_SANITIZER) || defined(USE_VALGRIND) || defined(__FreeBSD__)
+
 void dumpHeapProfile() {
 	TraceEvent("HeapProfileNotSupported");
 }
@@ -35,13 +36,32 @@ void freeFast(void* ptr, int size) noexcept {
 void freeFast(void* ptr) noexcept {
 	return free(ptr);
 }
+
+#if defined(_WIN32)
 [[nodiscard]] void* alignedAllocateFast(int align, int size) noexcept {
+	return _aligned_malloc(size, align);
 	return aligned_alloc(align, size);
 }
 void alignedFreeFast(void* ptr, int align, int size) noexcept {
-	return free(ptr);
+	return aligned_free(ptr);
 }
 #else
+[[nodiscard]] void* alignedAllocateFast(int align, int size) noexcept {
+#if defined(HAS_ALIGNED_ALLOC)
+	return aligned_alloc(align, size);
+#else
+	void* ptr = nullptr;
+	posix_memalign(&ptr, alignment, size);
+	return ptr;
+#endif
+}
+void alignedFreeFast(void* ptr, int align, int size) noexcept {
+	return aligned_free(ptr);
+}
+#endif
+
+#else
+
 #include "jemalloc/jemalloc.h"
 const char* je_malloc_conf = "prof:true";
 void dumpHeapProfile() {

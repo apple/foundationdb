@@ -23,6 +23,7 @@
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
 #include "flow/UnitTest.h"
+#include "flow/FastAlloc.h"
 #include <iostream>
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -33,7 +34,7 @@ const static unsigned int FOUR_KILOBYTES = 4<<10;
 
 ACTOR static Future<Void> zeroRangeHelper( Reference<IAsyncFile> f, int64_t offset, int64_t length, int fixedbyte) {
 	state int64_t pos = offset;
-	state void* zeros = aligned_alloc( ONE_MEGABYTE, ONE_MEGABYTE );
+	state void* zeros = alignedAllocateFast(ONE_MEGABYTE, ONE_MEGABYTE);
 	memset( zeros, fixedbyte, ONE_MEGABYTE );
 
 	while(pos < offset+length) {
@@ -43,7 +44,7 @@ ACTOR static Future<Void> zeroRangeHelper( Reference<IAsyncFile> f, int64_t offs
 		wait( yield() );
 	}
 
-	aligned_free(zeros);
+	alignedFreeFast(zeros, ONE_MEGABYTE, ONE_MEGABYTE);
 	return Void();
 }
 

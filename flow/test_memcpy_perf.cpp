@@ -74,8 +74,10 @@ static size_t round_up(size_t sz, size_t alignment) {
 	return (((sz - 1) / alignment) + 1) * alignment;
 }
 
-static uint8_t * rte_malloc(char const * ignored, size_t sz, size_t align) {
-	return (uint8_t*) aligned_alloc(align, round_up(sz, align));
+static uint8_t* rte_malloc(char const* ignored, size_t sz, size_t align) {
+	void* ptr = nullptr;
+	posix_memalign(&ptr, align, round_up(sz, align));
+	return (uint8_t*)ptr;
 }
 
 static void rte_free(void * ptr) {
