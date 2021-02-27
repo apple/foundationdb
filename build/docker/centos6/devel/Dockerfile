@@ -22,7 +22,7 @@ RUN echo -en "\n"\
     "source /opt/rh/rh-ruby24/enable\n"\
     "\n"\
     "function cmk() {\n"\
-    "    cmake -S ${HOME}/src/foundationdb -B build_output -D USE_CCACHE=1 -G Ninja && ninja -C build_output -j 84 \n"\
+    "    cmake -S ${HOME}/src/foundationdb -B build_output -D USE_CCACHE=1 -D RocksDB_ROOT=/opt/rocksdb-6.10.1 -G Ninja && ninja -C build_output -j 84 \n"\
     "}\n"\
     "function ct() {\n"\
     "    cd ${HOME}/build_output && ctest -j 32 --output-on-failure\n"\
