@@ -2761,14 +2761,23 @@ int setEnvironmentVar(const char *name, const char *value, int overwrite)
 #define getcwd(buf, maxlen) _getcwd(buf, maxlen)
 #endif
 std::string getWorkingDirectory() {
-	char *buf;
-	if( (buf = getcwd(nullptr, 0)) == nullptr ) {
-		TraceEvent(SevWarnAlways, "GetWorkingDirectoryError").GetLastError();
-		throw platform_error();
+	size_t size = 100;
+	// If we use the variant of getcwd which internally calls malloc, it might not call the right malloc when we replace
+	// malloc.
+	for (;;) {
+		char* buffer = (char*)malloc(size);
+		if (getcwd(buffer, size) == buffer) {
+			std::string result{ buffer };
+			free(buffer);
+			return result;
+		}
+		free(buffer);
+		if (errno != ERANGE) {
+			TraceEvent(SevWarnAlways, "GetWorkingDirectoryError").GetLastError();
+			throw platform_error();
+		}
+		size *= 2;
 	}
-	std::string result(buf);
-	// free(buf);
-	return result;
 }
 
 } // namespace platform
