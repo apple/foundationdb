@@ -123,6 +123,16 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 		};
 		void action(OpenAction& a) {
+			// If the DB has already been initialized, this should be a no-op.
+			if (db != nullptr) {
+				TraceEvent(SevInfo, "RocksDB")
+				    .detail("Path", a.path)
+				    .detail("Method", "Open")
+				    .detail("Skipping", "Already Open");
+				a.done.send(Void());
+				return;
+			}
+
 			std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
 				"default", getCFOptions() } };
 			std::vector<rocksdb::ColumnFamilyHandle*> handle;
@@ -478,3 +488,45 @@ IKeyValueStore* keyValueStoreRocksDB(std::string const& path, UID logID, KeyValu
 	return nullptr;
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 }
+
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
+#include "flow/UnitTest.h"
+
+namespace {
+
+TEST_CASE("fdbserver/KeyValueStoreRocksDB/Reopen") {
+	state const std::string rocksDBTestDir = "rocksdb-kvstore-reopen-test-db";
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+
+	state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	kvStore->set({ LiteralStringRef("foo"), LiteralStringRef("bar") });
+	wait(kvStore->commit(false));
+
+	Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
+	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
+
+	Future<Void> closed = kvStore->onClosed();
+	kvStore->close();
+	wait(closed);
+
+	kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+	// Confirm that `init()` is idempotent.
+	wait(kvStore->init());
+
+	Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
+	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
+
+	Future<Void> closed = kvStore->onClosed();
+	kvStore->close();
+	wait(closed);
+
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+	return Void();
+}
+
+} // namespace
+
+#endif // SSD_ROCKSDB_EXPERIMENTAL
