@@ -159,6 +159,8 @@ THREAD_HANDLE startThread(void(func)(void*), void* arg, int stackSize = 0, const
 #define THREAD_FUNC static void *
 #define THREAD_FUNC_RETURN void *
 #define THREAD_HANDLE pthread_t
+// The last parameter is an optional name for the thread. It is only supported on Linux and has a
+// limit of 16 characters.
 THREAD_HANDLE startThread(void*(func)(void*), void* arg, int stackSize = 0, const char* name = nullptr);
 #define THREAD_RETURN return NULL
 #else

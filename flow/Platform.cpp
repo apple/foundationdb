@@ -2519,15 +2519,7 @@ void setCloseOnExec( int fd ) {
 
 #ifdef _WIN32
 THREAD_HANDLE startThread(void (*func)(void*), void* arg, int stackSize, const char* name) {
-	// Convert `const char*` to `const wchar*` because Windows.
-	size_t newsize = strlen(orig) + 1;
-	wchar_t* wcstring = new wchar_t[newsize];
-	size_t convertedChars = 0;
-	mbstowcs_s(&convertedChars, wcstring, newsize, name, _TRUNCATE);
-	auto handle = _beginthread(func, stackSize, arg);
-	SetThreadDescription(handle, wcstring);
-	delete[] wcstring;
-	return (void*)handle;
+	return (void *)_beginthread(func, stackSize, arg);
 }
 #elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const char* name) {
@@ -2549,10 +2541,12 @@ THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const 
 	pthread_create(&t, &attr, func, arg);
 	pthread_attr_destroy(&attr);
 
+#if defined(__linux__)
 	if (name != nullptr) {
 		// TODO: Should this just truncate?
 		ASSERT_EQ(pthread_setname_np(t, name), 0);
 	}
+#endif
 
 	return t;
 }
