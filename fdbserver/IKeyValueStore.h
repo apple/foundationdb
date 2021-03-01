@@ -78,6 +78,8 @@ public:
 			commit()
 			read()
 	*/
+	// `init()` MUST be idempotent as it will be called more than once on a KeyValueStore in case
+	// of a rollback.
 	virtual Future<Void> init() {
 		return Void();
 	}
