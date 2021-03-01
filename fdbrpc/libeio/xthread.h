@@ -128,7 +128,10 @@ thread_create (xthread_t *tid, void *(*proc)(void *), void *arg)
 
   pthread_attr_init (&attr);
   pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_DETACHED);
-  pthread_attr_setstacksize (&attr, PTHREAD_STACK_MIN < X_STACKSIZE ? X_STACKSIZE : PTHREAD_STACK_MIN);
+  // Fix stack overflow when using jemalloc by using the default stack size. See
+  // https://github.com/apple/foundationdb/issues/4386#issuecomment-786986483.
+  //
+  // pthread_attr_setstacksize (&attr, PTHREAD_STACK_MIN < X_STACKSIZE ? X_STACKSIZE : PTHREAD_STACK_MIN);
 #ifdef PTHREAD_SCOPE_PROCESS
   pthread_attr_setscope (&attr, PTHREAD_SCOPE_PROCESS);
 #endif
