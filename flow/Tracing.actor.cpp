@@ -365,7 +365,7 @@ void openTracer(TracerType type) {
 		g_tracer = new FastUDPTracer{};
 #endif
 		break;
-	case TracerType::END:
+	case TracerType::SIM_END:
 		ASSERT(false);
 		break;
 	}
