@@ -113,7 +113,7 @@ private:
 		self->addActor.send( onConflict );
 
 		if( prevDBStateRaw.size() ) {
-			self->prevDBState = BinaryReader::fromStringRef<DBCoreState>(prevDBStateRaw, IncludeVersion());
+			self->prevDBState = BinaryReader::fromStringRef<DBCoreState>(prevDBStateRaw, IncludeVersion(supportDowngradeProtocolVersion));
 			self->myDBState = self->prevDBState;
 		}
 
@@ -144,7 +144,7 @@ private:
 			Value rereadDBStateRaw = wait( self->cstate.read() );
 			DBCoreState readState;
 			if( rereadDBStateRaw.size() )
-				readState = BinaryReader::fromStringRef<DBCoreState>(rereadDBStateRaw, IncludeVersion());
+				readState = BinaryReader::fromStringRef<DBCoreState>(rereadDBStateRaw, IncludeVersion(supportDowngradeProtocolVersion));
 
 			if( readState != newState ) {
 				TraceEvent("MasterTerminated", self->dbgid).detail("Reason", "CStateChanged");

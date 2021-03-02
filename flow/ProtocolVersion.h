@@ -98,6 +98,7 @@ public: // introduced features
 //                                                         xyzdev
 //                                                         vvvv
 constexpr ProtocolVersion currentProtocolVersion(0x0FDB00B062010001LL);
+constexpr ProtocolVersion supportDowngradeProtocolVersion(0x0FDB00B063010000LL);
 // This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to
 // change when we reach version 10.
 static_assert(currentProtocolVersion.version() < 0x0FDB00B100000000LL, "Unexpected protocol version");

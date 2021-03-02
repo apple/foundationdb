@@ -89,19 +89,27 @@ struct OldTLogCoreData {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		if( ar.protocolVersion().hasTagLocality()) {
-			serializer(ar, tLogs, logRouterTags, epochEnd);
-		}
-		else if(ar.isDeserializing) {
-			tLogs.push_back(CoreTLogSet());
-			serializer(ar, tLogs[0].tLogs, tLogs[0].tLogWriteAntiQuorum, tLogs[0].tLogReplicationFactor, tLogs[0].tLogPolicy, epochEnd, tLogs[0].tLogLocalities);
-			tLogs[0].tLogVersion = TLogVersion::V2;
-		}
-		if (ar.protocolVersion().hasPseudoLocalities()) {
-			serializer(ar, pseudoLocalities);
-		}
-		if (ar.protocolVersion().hasShardedTxsTags()) {
-			serializer(ar, txsTags);
+		if( ar.protocolVersion() == supportDowngradeProtocolVersion && ar.isDeserializing ) {
+			serializer(ar, tLogs, logRouterTags, epochEnd, pseudoLocalities, txsTags);
+			// 6.3 specific fields
+			Version epochBegin;
+			LogEpoch epoch;
+			serializer(ar, epoch, epochBegin);
+		} else {
+			if( ar.protocolVersion().hasTagLocality()) {
+				serializer(ar, tLogs, logRouterTags, epochEnd);
+			}
+			else if(ar.isDeserializing) {
+				tLogs.push_back(CoreTLogSet());
+				serializer(ar, tLogs[0].tLogs, tLogs[0].tLogWriteAntiQuorum, tLogs[0].tLogReplicationFactor, tLogs[0].tLogPolicy, epochEnd, tLogs[0].tLogLocalities);
+				tLogs[0].tLogVersion = TLogVersion::V2;
+			}
+			if (ar.protocolVersion().hasPseudoLocalities()) {
+				serializer(ar, pseudoLocalities);
+			}
+			if (ar.protocolVersion().hasShardedTxsTags()) {
+				serializer(ar, txsTags);
+			}
 		}
 	}
 };
