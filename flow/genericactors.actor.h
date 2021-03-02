@@ -1829,6 +1829,20 @@ Future<Void> timeReply(Future<T> replyToTime, PromiseStream<double> timeOutput){
 	return Void();
 }
 
+ACTOR template<class T>
+Future<T> forward(Future<T> from, Promise<T> to) {
+	try {
+		T res = wait(from);
+		to.send(res);
+		return res;
+	} catch (Error& e) {
+		if (e.code() != error_code_actor_cancelled) {
+			to.sendError(e);
+		}
+		throw e;
+	}
+}
+
 // Monad
 
 ACTOR template <class Fun, class T>
