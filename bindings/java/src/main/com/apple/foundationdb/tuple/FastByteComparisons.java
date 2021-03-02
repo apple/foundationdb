@@ -291,4 +291,8 @@ abstract class FastByteComparisons {
             }
         }
     }
+
+    public static Comparator<byte[]> comparator() {
+        return LexicographicalComparerHolder.BEST_COMPARER;
+    }
 }
