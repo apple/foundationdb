@@ -3206,7 +3206,6 @@ ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db
 					state ProtocolVersion protocolVersion;
 					versionReader >> commitVersion >> serializationOrder >> protocolVersion;
 
-					state Arena arena;
 					if (protocolVersion == g_network->protocolVersion()) {
 						Standalone<RangeResultRef> globalConfigHistory = wait(tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY));
 						// If the global configuration version key has been
@@ -3228,7 +3227,7 @@ ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db
 							BinaryReader mutationReader = BinaryReader(kv.value, AssumeVersion(protocolVersion));
 							VectorRef<MutationRef> mutations;
 							mutationReader >> mutations;
-							data.second = VectorRef(arena, mutations);
+							data.second = VectorRef(data.arena(), mutations);
 
 							clientInfo.history.push_back(data);
 						}
