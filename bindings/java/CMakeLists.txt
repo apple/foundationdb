@@ -307,7 +307,7 @@ if(NOT OPEN_FOR_IDE)
     # 
     # Note: if you are running from ${BUILD_DIR}, additional tests of the native logic will be run. To avoid these, use
     #
-    # ctest . -R junit 
+    # ctest . -R java-unit
     #
     # ctest has lots of flexible command options, so be sure to refer to its documentation if you want to do something specific(documentation
     # can be found at https://cmake.org/cmake/help/v3.19/manual/ctest.1.html)
@@ -350,6 +350,11 @@ if(NOT OPEN_FOR_IDE)
     #
     # To add an integration test, add the relative class file path to the JAVA_INTEGRATION_TESTS variable in `src/tests.cmake`
     #
+    # All integration tests share the same fdb cluster, so you should design
+    # your test with that in mind (e.g. don't depend on the database being
+    # empty, consider generating a random prefix for the keys you write, use
+    # the directory layer with a unique path, etc.)
+    #
     add_jar(fdb-integration SOURCES ${JAVA_INTEGRATION_TESTS} ${JAVA_INTEGRATION_RESOURCES} INCLUDE_JARS fdb-java 
             ${CMAKE_BINARY_DIR}/packages/junit-jupiter-api-5.7.1.jar 
             ${CMAKE_BINARY_DIR}/packages/junit-jupiter-engine-5.7.1.jar
@@ -359,10 +364,9 @@ if(NOT OPEN_FOR_IDE)
     get_property(integration_jar_path TARGET fdb-integration PROPERTY JAR_FILE)
 
 
-    add_test(NAME java-integration 
-                    COMMAND ${CMAKE_COMMAND} 
-                    -E env "FDB_CLUSTER_FILE=${PROJECT_BINARY_DIR}/fdb.cluster"
-                    ${Java_JAVA_EXECUTABLE}
+    # add_fdbclient_test will set FDB_CLUSTER_FILE if it's not set already
+    add_fdbclient_test(NAME java-integration
+                    COMMAND ${Java_JAVA_EXECUTABLE}
                       -classpath "${target_jar}:${integration_jar_path}:${JUNIT_CLASSPATH}"
                       -Djava.library.path=${CMAKE_BINARY_DIR}/lib
                       org.junit.platform.console.ConsoleLauncher "--details=summary" "--class-path=${integration_jar_path}" "--scan-classpath" "--disable-banner"
