@@ -48,7 +48,7 @@ std::string describe( KVPair<K,V> const& p ) { return format("%d ", p.k) + descr
 template <class T>
 struct ReferencedInterface : public ReferenceCounted<ReferencedInterface<T>> {
 	T interf;
-	int8_t distance;
+	int8_t distance; // one of enum values in struct LBDistance
 	std::string toString() const {
 		return interf.toString();
 	}
@@ -239,7 +239,8 @@ public:
 	}
 private:
 	std::vector<Reference<ReferencedInterface<T>>> alternatives;
-	int16_t bestCount;
+	int16_t bestCount; // The number of interfaces in the same location as alternatives[0]. The same location means
+	                   // DC by default and machine if more than one alternatives are on the same machine).
 };
 
 template <class Ar, class T> void load(Ar& ar, Reference<MultiInterface<T>>&) { ASSERT(false); }	//< required for Future<T>

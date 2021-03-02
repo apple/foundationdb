@@ -169,7 +169,9 @@ void addLaggingRequest(Future<Optional<Reply>> reply, Promise<Void> requestFinis
 
 // Keep trying to get a reply from any of servers until success or cancellation; tries to take into account
 //   failMon's information for load balancing and avoiding failed servers
-// If ALL the servers are failed and the list of servers is not fresh, throws an exception to let the caller refresh the list of servers
+// If ALL the servers are failed and the list of servers is not fresh, throws an exception to let the caller refresh the
+// list of servers. When model is set, load balance among alternatives in the same DC, aiming to balance request queue
+// length on these interfaces. If too many interfaces in the same DC are bad, try remote interfaces.
 ACTOR template <class Interface, class Request, class Multi>
 Future< REPLY_TYPE(Request) > loadBalance(
 	Reference<MultiInterface<Multi>> alternatives,
@@ -199,17 +201,22 @@ Future< REPLY_TYPE(Request) > loadBalance(
 		nextAlt++;
 
 	if(model) {
-		double bestMetric = 1e9;
+		double bestMetric = 1e9;  // Storage server with the least outstanding requests.
 		double nextMetric = 1e9;
-		double bestTime = 1e9;
+		double bestTime = 1e9;  // The latency to the server with the least outstanding requests.
 		double nextTime = 1e9;
 		int badServers = 0;
 
 		for(int i=0; i<alternatives->size(); i++) {
+			// countBest(): the number of alternatives in the same locality (i.e., DC by default) as alternatives[0].
+			// if the if-statement is correct, it won't try to send requests to the remote ones.
 			if(badServers < std::min(i, FLOW_KNOBS->LOAD_BALANCE_MAX_BAD_OPTIONS + 1) && i == alternatives->countBest()) {
+				// When we have at least one healthy local server, and the bad
+				// server count is within "LOAD_BALANCE_MAX_BAD_OPTIONS". We
+				// do not need to consider any remote servers.
 				break;
 			}
-			
+
 			RequestStream<Request> const* thisStream = &alternatives->get( i, channel );
 			if (!IFailureMonitor::failureMonitor().getState( thisStream->getEndpoint() ).failed) {
 				auto& qd = model->getMeasurement(thisStream->getEndpoint().token.first());
@@ -217,9 +224,12 @@ Future< REPLY_TYPE(Request) > loadBalance(
 					double thisMetric = qd.smoothOutstanding.smoothTotal();
 					double thisTime = qd.latency;
 					if(FLOW_KNOBS->LOAD_BALANCE_PENALTY_IS_BAD && qd.penalty > 1.001) {
+						// When a server wants to penalize itself (the default
+						// penalty value is 1.0), consider this server as bad.
+						// penalty is sent from server.
 						++badServers;
 					}
-				
+
 					if(thisMetric < bestMetric) {
 						if(i != bestAlt) {
 							nextAlt = bestAlt;
@@ -242,6 +252,9 @@ Future< REPLY_TYPE(Request) > loadBalance(
 			}
 		}
 		if( nextMetric > 1e8 ) {
+			// If we still don't have a second best choice to issue request to,
+			// go through all the remote servers again, since we may have
+			// skipped it.
 			for(int i=alternatives->countBest(); i<alternatives->size(); i++) {
 				RequestStream<Request> const* thisStream = &alternatives->get( i, channel );
 				if (!IFailureMonitor::failureMonitor().getState( thisStream->getEndpoint() ).failed) {
@@ -249,7 +262,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 					if(now() > qd.failedUntil) {
 						double thisMetric = qd.smoothOutstanding.smoothTotal();
 						double thisTime = qd.latency;
-				
+
 						if( thisMetric < nextMetric ) {
 							nextAlt = i;
 							nextMetric = thisMetric;
@@ -261,6 +274,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 		}
 
 		if(nextTime < 1e9) {
+			// Decide when to send the request to the second best choice.
 			if(bestTime > FLOW_KNOBS->INSTANT_SECOND_REQUEST_MULTIPLIER*(model->secondMultiplier*(nextTime) + FLOW_KNOBS->BASE_SECOND_REQUEST_TIME)) {
 				secondDelay = Void();
 			} else {
@@ -278,6 +292,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 	state int numAttempts = 0;
 	state double backoff = 0;
 	state bool triedAllOptions = false;
+	// Issue requests to selected servers.
 	loop {
 		if(now() - startTime > (g_network->isSimulated() ? 30.0 : 600.0)) {
 			TraceEvent ev(g_network->isSimulated() ? SevWarn : SevWarnAlways, "LoadBalanceTooLong");
@@ -295,7 +310,9 @@ Future< REPLY_TYPE(Request) > loadBalance(
 			}
 		}
 
-		// Find an alternative, if any, that is not failed, starting with nextAlt
+		// Find an alternative, if any, that is not failed, starting with
+		// nextAlt. This logic matters only if model == NULL. Otherwise, the
+		// bestAlt and nextAlt have been decided.
 		state RequestStream<Request> const* stream = nullptr;
 		for(int alternativeNum=0; alternativeNum<alternatives->size(); alternativeNum++) {
 			int useAlt = nextAlt;

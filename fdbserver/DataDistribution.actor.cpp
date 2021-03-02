@@ -5165,9 +5165,8 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID)
 			.error(e, true /*includeCancelled */);
-		if (e.code() == error_code_snap_storage_failed
-			|| e.code() == error_code_snap_tlog_failed
-			|| e.code() == error_code_operation_cancelled) {
+		if (e.code() == error_code_snap_storage_failed || e.code() == error_code_snap_tlog_failed ||
+		    e.code() == error_code_operation_cancelled || e.code() == error_code_snap_disable_tlog_pop_failed) {
 			// enable tlog pop on local tlog nodes
 			std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs(false);
 			try {
