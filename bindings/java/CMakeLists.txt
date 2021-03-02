@@ -350,6 +350,11 @@ if(NOT OPEN_FOR_IDE)
     #
     # To add an integration test, add the relative class file path to the JAVA_INTEGRATION_TESTS variable in `src/tests.cmake`
     #
+    # All integration tests share the same fdb cluster, so you should design
+    # your test with that in mind (e.g. don't depend on the database being
+    # empty, consider generating a random prefix for the keys you write, use
+    # the directory layer with a unique path, etc.)
+    #
     add_jar(fdb-integration SOURCES ${JAVA_INTEGRATION_TESTS} ${JAVA_INTEGRATION_RESOURCES} INCLUDE_JARS fdb-java 
             ${CMAKE_BINARY_DIR}/packages/junit-jupiter-api-5.7.1.jar 
             ${CMAKE_BINARY_DIR}/packages/junit-jupiter-engine-5.7.1.jar
