@@ -20,6 +20,7 @@
 
 #include <cinttypes>
 
+#include "IRandom.h"
 #include "fdbrpc/simulator.h"
 #include "flow/IThreadPool.h"
 #include "flow/Util.h"
@@ -1845,6 +1846,11 @@ Future< Reference<class IAsyncFile> > Sim2FileSystem::open( std::string filename
 Future< Void > Sim2FileSystem::deleteFile( std::string filename, bool mustBeDurable )
 {
 	return Sim2::deleteFileImpl(&g_sim2, filename, mustBeDurable);
+}
+
+Future<Void> Sim2FileSystem::renameFile(std::string const& from, std::string const& to) {
+	::renameFile(from, to);
+	return delay(deterministicRandom()->random01());
 }
 
 Future< std::time_t > Sim2FileSystem::lastWriteTime( std::string filename ) {
