@@ -98,7 +98,7 @@ struct Span {
 enum class TracerType {
 	DISABLED = 0,
 	NETWORK_LOSSY = 1,
-	END = 2,  // Any tracers that come after END will not be tested in simulation
+	SIM_END = 2,  // Any tracers that come after SIM_END will not be tested in simulation
 	LOG_FILE = 3
 };
 
