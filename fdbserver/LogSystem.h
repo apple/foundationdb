@@ -63,7 +63,7 @@ public:
 	Reference<LocalitySet> logServerSet;
 	std::vector<int> logIndexArray;
 	std::vector<LocalityEntry> logEntryArray;
-	bool isLocal;
+	bool isLocal; // true if the LogSet is in primary DC or primary DC's satellite
 	int8_t locality;
 	Version startVersion;
 	std::vector<Future<TLogLockResult>> replies;

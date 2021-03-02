@@ -223,6 +223,7 @@ public: // workload functions
 						snapFailed = true;
 						break;
 					}
+					wait(delay(5.0));
 				}
 			}
 			CSimpleIni ini;

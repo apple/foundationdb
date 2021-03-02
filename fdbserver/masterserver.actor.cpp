@@ -650,6 +650,9 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything( Refere
 	    .detail("GrvProxies", recruits.grvProxies.size())
 	    .detail("TLogs", recruits.tLogs.size())
 	    .detail("Resolvers", recruits.resolvers.size())
+	    .detail("SatelliteTLogs", recruits.satelliteTLogs.size())
+	    .detail("OldLogRouters", recruits.oldLogRouters.size())
+	    .detail("StorageServers", recruits.storageServers.size())
 	    .detail("BackupWorkers", self->backupWorkers.size())
 	    .trackLatest("MasterRecoveryState");
 

@@ -351,6 +351,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return logSystem;
 	}
 
+	// Convert TagPartitionedLogSystem to DBCoreState and override input newState as return value
 	void toCoreState(DBCoreState& newState) final {
 		if( recoveryComplete.isValid() && recoveryComplete.isError() )
 			throw recoveryComplete.getError();
@@ -1003,6 +1004,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
+	// LogRouter or BackupWorker use this function to obtain a cursor for peeking tlogs of a generation (i.e., epoch).
+	// Specifically, the epoch is determined by looking up "dbgid" in tlog sets of generations.
+	// The returned cursor can peek data at the "tag" from the given "begin" version to that epoch's end version or
+	// the recovery version for the latest old epoch. For the current epoch, the cursor has no end version.
 	Reference<IPeekCursor> peekLogRouter(UID dbgid, Version begin, Tag tag) final {
 		bool found = false;
 		for (const auto& log : tLogs) {
@@ -1095,7 +1100,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					bestSet = bestSatelliteSet;
 				}
 
-				TraceEvent("TLogPeekLogRouterOldSets", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("OldEpoch", old.epochEnd).detail("RecoveredAt", recoveredAt.present() ? recoveredAt.get() : -1).detail("FirstOld", firstOld);
+				TraceEvent("TLogPeekLogRouterOldSets", dbgid)
+				    .detail("Tag", tag.toString())
+				    .detail("Begin", begin)
+				    .detail("OldEpoch", old.epochEnd)
+				    .detail("RecoveredAt", recoveredAt.present() ? recoveredAt.get() : -1)
+				    .detail("FirstOld", firstOld);
 				//FIXME: do this merge on one of the logs in the other data center to avoid sending multiple copies across the WAN
 				return makeReference<ILogSystem::SetPeekCursor>(
 				    localSets, bestSet, localSets[bestSet]->bestLocationFor(tag), tag, begin,
