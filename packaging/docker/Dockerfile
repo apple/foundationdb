@@ -27,7 +27,7 @@ RUN apt-get update && \
 		lsof>=4.89+dfsg-0.1 \
 		tcptraceroute>=1.5beta7+debian-4build1 \
 		telnet>=0.17-41 \
-		netcat>= 1.10-41.1 \
+		netcat>=1.10-41.1 \
 		strace>=4.21-1ubuntu1 \
 		tcpdump>=4.9.3-0ubuntu0.18.04.1 \
 		less>=487-0.1 \

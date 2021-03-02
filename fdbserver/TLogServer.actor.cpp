@@ -619,7 +619,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		specialCounter(cc, "QueueDiskBytesTotal", [tLogData](){ return tLogData->rawPersistentQueue->getStorageBytes().total; });
 		specialCounter(cc, "PeekMemoryReserved", [tLogData]() { return tLogData->peekMemoryLimiter.activePermits(); });
 		specialCounter(cc, "PeekMemoryRequestsStalled", [tLogData]() { return tLogData->peekMemoryLimiter.waiters(); });
-		specialCounter(cc, "Geneartion", [this]() { return this->recoveryCount; });
+		specialCounter(cc, "Generation", [this]() { return this->recoveryCount; });
 	}
 
 	~LogData() {
@@ -1096,18 +1096,13 @@ ACTOR Future<Void> processPopRequests(TLogData* self, Reference<LogData> logData
 		}
 	}
 	wait(waitForAll(ignoredPops));
+	TraceEvent("ResetIgnorePopRequest")
+	    .detail("IgnorePopRequest", self->ignorePopRequest)
+	    .detail("IgnorePopDeadline", self->ignorePopDeadline);
 	return Void();
 }
 
 ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogData> logData ) {
-	// timeout check for ignorePopRequest
-	if (self->ignorePopRequest && (g_network->now() > self->ignorePopDeadline)) {
-		TraceEvent("EnableTLogPlayAllIgnoredPops").detail("IgnoredPopDeadline", self->ignorePopDeadline);
-		wait(processPopRequests(self, logData));
-		TraceEvent("ResetIgnorePopRequest")
-		    .detail("IgnorePopRequest", self->ignorePopRequest)
-		    .detail("IgnorePopDeadline", self->ignorePopDeadline);
-	}
 	if (self->ignorePopRequest) {
 		TraceEvent(SevDebug, "IgnoringPopRequest").detail("IgnorePopDeadline", self->ignorePopDeadline);
 
@@ -2277,6 +2272,11 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 		}
 		when( TLogSnapRequest snapReq = waitNext( tli.snapRequest.getFuture() ) ) {
 			logData->addActor.send( tLogSnapCreate( snapReq, self, logData) );
+		}
+		when(wait(self->ignorePopRequest ? delayUntil(self->ignorePopDeadline) : Never())) {
+			TEST(true); // Hit ignorePopDeadline
+			TraceEvent("EnableTLogPlayAllIgnoredPops").detail("IgnoredPopDeadline", self->ignorePopDeadline);
+			logData->addActor.send(processPopRequests(self, logData));
 		}
 	}
 }

@@ -207,6 +207,10 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 				if(g_network->isSimulated() && e.code() != error_code_io_timeout && (bool)g_network->global(INetwork::enASIOTimedOut))
 					TraceEvent(SevError, "IOTimeoutErrorSuppressed").detail("ErrorCode", e.code()).detail("RandomId", randomId).backtrace();
 
+				if (e.code() == error_code_io_timeout && !onShutdown.isReady()) {
+					onShutdown = ISimulator::RebootProcess;
+				}
+
 				if (onShutdown.isReady() && onShutdown.isError()) throw onShutdown.getError();
 				if(e.code() != error_code_actor_cancelled)
 					printf("SimulatedFDBDTerminated: %s\n", e.what());

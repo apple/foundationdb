@@ -148,7 +148,7 @@ public:
 		if(transactionItr != transactionOptions.legalOptions.end())
 			setTransactionOption(tr, transactionItr->second, enabled, arg, intrans);
 		else {
-			printf("ERROR: invalid option '%s'. Try `help options' for a list of available options.\n", optionStr.toString().c_str());
+			fprintf(stderr, "ERROR: invalid option '%s'. Try `help options' for a list of available options.\n", optionStr.toString().c_str());
 			throw invalid_option();
 		}
 	}
@@ -182,7 +182,7 @@ private:
 	//Sets a transaction option. If intrans == true, then this option is also applied to the passed in transaction.
 	void setTransactionOption(Reference<ReadYourWritesTransaction> tr, FDBTransactionOptions::Option option, bool enabled, Optional<StringRef> arg, bool intrans) {
 		if(enabled && arg.present() != FDBTransactionOptions::optionInfo.getMustExist(option).hasParameter)	{
-			printf("ERROR: option %s a parameter\n", arg.present() ? "did not expect" : "expected");
+			fprintf(stderr, "ERROR: option %s a parameter\n", arg.present() ? "did not expect" : "expected");
 			throw invalid_option_value();
 		}
 
@@ -663,7 +663,7 @@ void printUsage(StringRef command) {
 	if (i != helpMap.end())
 		printf("Usage: %s\n", i->second.usage.c_str());
 	else
-		printf("ERROR: Unknown command `%s'\n", command.toString().c_str());
+		fprintf(stderr, "ERROR: Unknown command `%s'\n", command.toString().c_str());
 }
 
 std::string getCoordinatorsInfoString(StatusObjectReader statusObj) {
@@ -804,7 +804,7 @@ std::pair<int, int> getNumOfNonExcludedProcessAndZones(StatusObjectReader status
 
 void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, bool displayDatabaseAvailable = true, bool hideErrorMessages = false) {
 	if (FlowTransport::transport().incompatibleOutgoingConnectionsPresent()) {
-		printf("WARNING: One or more of the processes in the cluster is incompatible with this version of fdbcli.\n\n");
+		fprintf(stderr, "WARNING: One or more of the processes in the cluster is incompatible with this version of fdbcli.\n\n");
 	}
 
 	try {
@@ -1730,7 +1730,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 				bool upToDate;
 				if (!statusObjClient.get("cluster_file.up_to_date", upToDate) || !upToDate){
-					printf("WARNING: The cluster file is not up to date. Type 'status' for more information.\n");
+					fprintf(stderr, "WARNING: The cluster file is not up to date. Type 'status' for more information.\n");
 				}
 			}
 			catch (std::runtime_error& ){
@@ -1933,11 +1933,11 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 		ret=true;
 		break;
 	case ConfigurationResult::INVALID_CONFIGURATION:
-		printf("ERROR: These changes would make the configuration invalid\n");
+		fprintf(stderr, "ERROR: These changes would make the configuration invalid\n");
 		ret=true;
 		break;
 	case ConfigurationResult::DATABASE_ALREADY_CREATED:
-		printf("ERROR: Database already exists! To change configuration, don't say `new'\n");
+		fprintf(stderr, "ERROR: Database already exists! To change configuration, don't say `new'\n");
 		ret=true;
 		break;
 	case ConfigurationResult::DATABASE_CREATED:
@@ -1945,43 +1945,43 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 		ret=false;
 		break;
 	case ConfigurationResult::DATABASE_UNAVAILABLE:
-		printf("ERROR: The database is unavailable\n");
-		printf("Type `configure FORCE <TOKEN...>' to configure without this check\n");
+		fprintf(stderr, "ERROR: The database is unavailable\n");
+		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::STORAGE_IN_UNKNOWN_DCID:
-		printf("ERROR: All storage servers must be in one of the known regions\n");
-		printf("Type `configure FORCE <TOKEN...>' to configure without this check\n");
+		fprintf(stderr, "ERROR: All storage servers must be in one of the known regions\n");
+		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::REGION_NOT_FULLY_REPLICATED:
-		printf("ERROR: When usable_regions > 1, all regions with priority >= 0 must be fully replicated before changing the configuration\n");
-		printf("Type `configure FORCE <TOKEN...>' to configure without this check\n");
+		fprintf(stderr, "ERROR: When usable_regions > 1, all regions with priority >= 0 must be fully replicated before changing the configuration\n");
+		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::MULTIPLE_ACTIVE_REGIONS:
-		printf("ERROR: When changing usable_regions, only one region can have priority >= 0\n");
-		printf("Type `configure FORCE <TOKEN...>' to configure without this check\n");
+		fprintf(stderr, "ERROR: When changing usable_regions, only one region can have priority >= 0\n");
+		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::REGIONS_CHANGED:
-		printf("ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
-		printf("Type `configure FORCE <TOKEN...>' to configure without this check\n");
+		fprintf(stderr, "ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
+		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::NOT_ENOUGH_WORKERS:
-		printf("ERROR: Not enough processes exist to support the specified configuration\n");
-		printf("Type `configure FORCE <TOKEN...>' to configure without this check\n");
+		fprintf(stderr, "ERROR: Not enough processes exist to support the specified configuration\n");
+		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::REGION_REPLICATION_MISMATCH:
-		printf("ERROR: `three_datacenter' replication is incompatible with region configuration\n");
-		printf("Type `configure FORCE <TOKEN...>' to configure without this check\n");
+		fprintf(stderr, "ERROR: `three_datacenter' replication is incompatible with region configuration\n");
+		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::DCID_MISSING:
-		printf("ERROR: `No storage servers in one of the specified regions\n");
-		printf("Type `configure FORCE <TOKEN...>' to configure without this check\n");
+		fprintf(stderr, "ERROR: `No storage servers in one of the specified regions\n");
+		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::SUCCESS:
@@ -1989,7 +1989,7 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 		ret=false;
 		break;
 	case ConfigurationResult::LOCKED_NOT_NEW:
-		printf("ERROR: `only new databases can be configured as locked`\n");
+		fprintf(stderr, "ERROR: `only new databases can be configured as locked`\n");
 		ret = true;
 		break;
 	default:
@@ -2003,11 +2003,11 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 	std::string contents(readFileBytes(filePath, 100000));
 	json_spirit::mValue config;
 	if(!json_spirit::read_string( contents, config )) {
-		printf("ERROR: Invalid JSON\n");
+		fprintf(stderr, "ERROR: Invalid JSON\n");
 		return true;
 	}
 	if(config.type() != json_spirit::obj_type) {
-		printf("ERROR: Configuration file must contain a JSON object\n");
+		fprintf(stderr, "ERROR: Configuration file must contain a JSON object\n");
 		return true;
 	}
 	StatusObject configJSON = config.get_obj();
@@ -2051,27 +2051,27 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 	bool ret;
 	switch(result) {
 	case ConfigurationResult::NO_OPTIONS_PROVIDED:
-		printf("ERROR: No options provided\n");
+		fprintf(stderr, "ERROR: No options provided\n");
 		ret=true;
 		break;
 	case ConfigurationResult::CONFLICTING_OPTIONS:
-		printf("ERROR: Conflicting options\n");
+		fprintf(stderr, "ERROR: Conflicting options\n");
 		ret=true;
 		break;
 	case ConfigurationResult::UNKNOWN_OPTION:
-		printf("ERROR: Unknown option\n"); //This should not be possible because of schema match
+		fprintf(stderr, "ERROR: Unknown option\n"); //This should not be possible because of schema match
 		ret=true;
 		break;
 	case ConfigurationResult::INCOMPLETE_CONFIGURATION:
-		printf("ERROR: Must specify both a replication level and a storage engine when creating a new database\n");
+		fprintf(stderr, "ERROR: Must specify both a replication level and a storage engine when creating a new database\n");
 		ret=true;
 		break;
 	case ConfigurationResult::INVALID_CONFIGURATION:
-		printf("ERROR: These changes would make the configuration invalid\n");
+		fprintf(stderr, "ERROR: These changes would make the configuration invalid\n");
 		ret=true;
 		break;
 	case ConfigurationResult::DATABASE_ALREADY_CREATED:
-		printf("ERROR: Database already exists! To change configuration, don't say `new'\n");
+		fprintf(stderr, "ERROR: Database already exists! To change configuration, don't say `new'\n");
 		ret=true;
 		break;
 	case ConfigurationResult::DATABASE_CREATED:
@@ -2079,42 +2079,42 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 		ret=false;
 		break;
 	case ConfigurationResult::DATABASE_UNAVAILABLE:
-		printf("ERROR: The database is unavailable\n");
+		fprintf(stderr, "ERROR: The database is unavailable\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::STORAGE_IN_UNKNOWN_DCID:
-		printf("ERROR: All storage servers must be in one of the known regions\n");
+		fprintf(stderr, "ERROR: All storage servers must be in one of the known regions\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::REGION_NOT_FULLY_REPLICATED:
-		printf("ERROR: When usable_regions > 1, All regions with priority >= 0 must be fully replicated before changing the configuration\n");
+		fprintf(stderr, "ERROR: When usable_regions > 1, All regions with priority >= 0 must be fully replicated before changing the configuration\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::MULTIPLE_ACTIVE_REGIONS:
-		printf("ERROR: When changing usable_regions, only one region can have priority >= 0\n");
+		fprintf(stderr, "ERROR: When changing usable_regions, only one region can have priority >= 0\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::REGIONS_CHANGED:
-		printf("ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
+		fprintf(stderr, "ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::NOT_ENOUGH_WORKERS:
-		printf("ERROR: Not enough processes exist to support the specified configuration\n");
+		fprintf(stderr, "ERROR: Not enough processes exist to support the specified configuration\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::REGION_REPLICATION_MISMATCH:
-		printf("ERROR: `three_datacenter' replication is incompatible with region configuration\n");
+		fprintf(stderr, "ERROR: `three_datacenter' replication is incompatible with region configuration\n");
 		printf("Type `fileconfigure FORCE <TOKEN...>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::DCID_MISSING:
-		printf("ERROR: `No storage servers in one of the specified regions\n");
+		fprintf(stderr, "ERROR: `No storage servers in one of the specified regions\n");
 		printf("Type `fileconfigure FORCE <TOKEN...>' to configure without this check\n");
 		ret=true;
 		break;
@@ -2158,13 +2158,13 @@ ACTOR Future<bool> coordinators( Database db, std::vector<StringRef> tokens, boo
 				// SOMEDAY: Check for keywords
 				auto const& addr = NetworkAddress::parse( t->toString() );
 				if (addresses.count(addr)){
-					printf("ERROR: passed redundant coordinators: `%s'\n", addr.toString().c_str());
+					fprintf(stderr, "ERROR: passed redundant coordinators: `%s'\n", addr.toString().c_str());
 					return true;
 				}
 				addresses.insert(addr);
 			} catch (Error& e) {
 				if (e.code() == error_code_connection_string_invalid) {
-					printf("ERROR: '%s' is not a valid network endpoint address\n", t->toString().c_str());
+					fprintf(stderr, "ERROR: '%s' is not a valid network endpoint address\n", t->toString().c_str());
 					return true;
 				}
 				throw;
@@ -2183,30 +2183,30 @@ ACTOR Future<bool> coordinators( Database db, std::vector<StringRef> tokens, boo
 	bool err = true;
 	switch(r) {
 	case CoordinatorsResult::INVALID_NETWORK_ADDRESSES:
-		printf("ERROR: The specified network addresses are invalid\n");
+		fprintf(stderr, "ERROR: The specified network addresses are invalid\n");
 		break;
 	case CoordinatorsResult::SAME_NETWORK_ADDRESSES:
 		printf("No change (existing configuration satisfies request)\n");
 		err = false;
 		break;
 	case CoordinatorsResult::NOT_COORDINATORS:
-		printf("ERROR: Coordination servers are not running on the specified network addresses\n");
+		fprintf(stderr, "ERROR: Coordination servers are not running on the specified network addresses\n");
 		break;
 	case CoordinatorsResult::DATABASE_UNREACHABLE:
-		printf("ERROR: Database unreachable\n");
+		fprintf(stderr, "ERROR: Database unreachable\n");
 		break;
 	case CoordinatorsResult::BAD_DATABASE_STATE:
-		printf("ERROR: The database is in an unexpected state from which changing coordinators might be unsafe\n");
+		fprintf(stderr, "ERROR: The database is in an unexpected state from which changing coordinators might be unsafe\n");
 		break;
 	case CoordinatorsResult::COORDINATOR_UNREACHABLE:
-		printf("ERROR: One of the specified coordinators is unreachable\n");
+		fprintf(stderr, "ERROR: One of the specified coordinators is unreachable\n");
 		break;
 	case CoordinatorsResult::SUCCESS:
 		printf("Coordination state changed\n");
 		err=false;
 		break;
 	case CoordinatorsResult::NOT_ENOUGH_MACHINES:
-		printf("ERROR: Too few fdbserver machines to provide coordination at the current redundancy level\n");
+		fprintf(stderr, "ERROR: Too few fdbserver machines to provide coordination at the current redundancy level\n");
 		break;
 	default:
 		ASSERT(false);
@@ -2226,7 +2226,7 @@ ACTOR Future<bool> include( Database db, std::vector<StringRef> tokens ) {
 		} else {
 			auto a = AddressExclusion::parse( *t );
 			if (!a.isValid()) {
-				printf("ERROR: '%s' is not a valid network endpoint address\n", t->toString().c_str());
+				fprintf(stderr, "ERROR: '%s' is not a valid network endpoint address\n", t->toString().c_str());
 				if( t->toString().find(":tls") != std::string::npos )
 					printf("        Do not include the `:tls' suffix when naming a process\n");
 				return true;
@@ -2277,7 +2277,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 			} else {
 				auto a = AddressExclusion::parse( *t );
 				if (!a.isValid()) {
-					printf("ERROR: '%s' is not a valid network endpoint address\n", t->toString().c_str());
+					fprintf(stderr, "ERROR: '%s' is not a valid network endpoint address\n", t->toString().c_str());
 					if( t->toString().find(":tls") != std::string::npos )
 						printf("        Do not include the `:tls' suffix when naming a process\n");
 					return true;
@@ -2319,13 +2319,13 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 
 			StatusObjectReader statusObjCluster;
 			if (!statusObj.get("cluster", statusObjCluster)) {
-				printf("%s", errorString.c_str());
+				fprintf(stderr, "%s", errorString.c_str());
 				return true;
 			}
 
 			StatusObjectReader processesMap;
 			if (!statusObjCluster.get("processes", processesMap)) {
-				printf("%s", errorString.c_str());
+				fprintf(stderr, "%s", errorString.c_str());
 				return true;
 			}
 
@@ -2349,7 +2349,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 					StatusObjectReader process(proc.second);
 					std::string addrStr;
 					if (!process.get("address", addrStr)) {
-						printf("%s", errorString.c_str());
+						fprintf(stderr, "%s", errorString.c_str());
 						return true;
 					}
 					NetworkAddress addr = NetworkAddress::parse(addrStr);
@@ -2362,19 +2362,19 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 					if(!excluded) {
 						StatusObjectReader disk;
 						if (!process.get("disk", disk)) {
-							printf("%s", errorString.c_str());
+							fprintf(stderr, "%s", errorString.c_str());
 							return true;
 						}
 
 						int64_t total_bytes;
 						if (!disk.get("total_bytes", total_bytes)) {
-							printf("%s", errorString.c_str());
+							fprintf(stderr, "%s", errorString.c_str());
 							return true;
 						}
 
 						int64_t free_bytes;
 						if (!disk.get("free_bytes", free_bytes)) {
-							printf("%s", errorString.c_str());
+							fprintf(stderr, "%s", errorString.c_str());
 							return true;
 						}
 
@@ -2384,12 +2384,12 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 			}
 			catch (...)  // std::exception
 			{
-				printf("%s", errorString.c_str());
+				fprintf(stderr, "%s", errorString.c_str());
 				return true;
 			}
 
 			if( ssExcludedCount==ssTotalCount || (1-worstFreeSpaceRatio)*ssTotalCount/(ssTotalCount-ssExcludedCount) > 0.9 ) {
-				printf("ERROR: This exclude may cause the total free space in the cluster to drop below 10%%.\n"
+				fprintf(stderr, "ERROR: This exclude may cause the total free space in the cluster to drop below 10%%.\n"
 					   "Type `exclude FORCE <ADDRESS...>' to exclude without checking free space.\n");
 				return true;
 			}
@@ -2425,22 +2425,22 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 		for (const auto& exclusion : exclusionVector) {
 			if (absentExclusions.find(exclusion) != absentExclusions.end()) {
 				if (exclusion.port == 0) {
-					printf("  %s(Whole machine)  ---- WARNING: Missing from cluster!Be sure that you excluded the "
+					fprintf(stderr, "  %s(Whole machine)  ---- WARNING: Missing from cluster!Be sure that you excluded the "
 					       "correct machines before removing them from the cluster!\n",
 					       exclusion.ip.toString().c_str());
 				} else {
-					printf("  %s  ---- WARNING: Missing from cluster! Be sure that you excluded the correct processes "
+					fprintf(stderr, "  %s  ---- WARNING: Missing from cluster! Be sure that you excluded the correct processes "
 					       "before removing them from the cluster!\n",
 					       exclusion.toString().c_str());
 				}
 			} else if (std::any_of(notExcludedServers.begin(), notExcludedServers.end(),
 			                       [&](const NetworkAddress& a) { return addressExcluded({ exclusion }, a); })) {
 				if (exclusion.port == 0) {
-					printf("  %s(Whole machine)  ---- WARNING: Exclusion in progress! It is not safe to remove this "
+					fprintf(stderr, "  %s(Whole machine)  ---- WARNING: Exclusion in progress! It is not safe to remove this "
 					       "machine from the cluster\n",
 					       exclusion.ip.toString().c_str());
 				} else {
-					printf("  %s  ---- WARNING: Exclusion in progress! It is not safe to remove this process from the "
+					fprintf(stderr, "  %s  ---- WARNING: Exclusion in progress! It is not safe to remove this process from the "
 					       "cluster\n",
 					       exclusion.toString().c_str());
 				}
@@ -2462,7 +2462,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 		for (const auto& c : ccs.coordinators()) {
 			if (std::count(exclusionVector.begin(), exclusionVector.end(), AddressExclusion(c.ip, c.port)) ||
 			    std::count(exclusionVector.begin(), exclusionVector.end(), AddressExclusion(c.ip))) {
-				printf("WARNING: %s is a coordinator!\n", c.toString().c_str());
+				fprintf(stderr, "WARNING: %s is a coordinator!\n", c.toString().c_str());
 				foundCoordinator = true;
 			}
 		}
@@ -2514,7 +2514,7 @@ ACTOR Future<bool> setClass( Database db, std::vector<StringRef> tokens ) {
 
 	AddressExclusion addr = AddressExclusion::parse( tokens[1] );
 	if (!addr.isValid()) {
-		printf("ERROR: '%s' is not a valid network endpoint address\n", tokens[1].toString().c_str());
+		fprintf(stderr, "ERROR: '%s' is not a valid network endpoint address\n", tokens[1].toString().c_str());
 		if( tokens[1].toString().find(":tls") != std::string::npos )
 			printf("        Do not include the `:tls' suffix when naming a process\n");
 		return true;
@@ -2522,7 +2522,7 @@ ACTOR Future<bool> setClass( Database db, std::vector<StringRef> tokens ) {
 
 	ProcessClass processClass(tokens[2].toString(), ProcessClass::DBSource);
 	if(processClass.classType() == ProcessClass::InvalidClass && tokens[2] != LiteralStringRef("default")) {
-		printf("ERROR: '%s' is not a valid process class\n", tokens[2].toString().c_str());
+		fprintf(stderr, "ERROR: '%s' is not a valid process class\n", tokens[2].toString().c_str());
 		return true;
 	}
 
@@ -3049,7 +3049,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 		}
 	}
 	catch (Error& e) {
-		printf("ERROR: %s (%d)\n", e.what(), e.code());
+		fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code());
 		printf("Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
 		return 1;
 	}
@@ -3143,9 +3143,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 
 				if (tokencmp(tokens[0], "parse_error")) {
-					printf("ERROR: Command failed to completely parse.\n");
+					fprintf(stderr, "ERROR: Command failed to completely parse.\n");
 					if (tokens.size() > 1) {
-						printf("ERROR: Not running partial or malformed command:");
+						fprintf(stderr, "ERROR: Not running partial or malformed command:");
 						for (auto t = tokens.begin() + 1; t != tokens.end(); ++t)
 							printf(" %s", formatStringRef(*t, true).c_str());
 						printf("\n");
@@ -3162,7 +3162,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (!helpMap.count(tokens[0].toString()) && !hiddenCommands.count(tokens[0].toString())) {
-					printf("ERROR: Unknown command `%s'. Try `help'?\n", formatStringRef(tokens[0]).c_str());
+					fprintf(stderr, "ERROR: Unknown command `%s'. Try `help'?\n", formatStringRef(tokens[0]).c_str());
 					is_error = true;
 					continue;
 				}
@@ -3364,7 +3364,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								throw e;
 							}
 						} else {
-							printf("ERROR: Incorrect passphrase entered.\n");
+							fprintf(stderr, "ERROR: Incorrect passphrase entered.\n");
 							is_error = true;
 						}
 					}
@@ -3387,7 +3387,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else if (intrans) {
-						printf("ERROR: Already in transaction\n");
+						fprintf(stderr, "ERROR: Already in transaction\n");
 						is_error = true;
 					} else {
 						activeOptions = FdbOptions(globalOptions);
@@ -3404,7 +3404,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else if (!intrans) {
-						printf("ERROR: No active transaction\n");
+						fprintf(stderr, "ERROR: No active transaction\n");
 						is_error = true;
 					} else {
 						wait( commitTransaction( tr ) );
@@ -3420,7 +3420,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else if (!intrans) {
-						printf("ERROR: No active transaction\n");
+						fprintf(stderr, "ERROR: No active transaction\n");
 						is_error = true;
 					} else {
 						tr->reset();
@@ -3437,7 +3437,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else if (!intrans) {
-						printf("ERROR: No active transaction\n");
+						fprintf(stderr, "ERROR: No active transaction\n");
 						is_error = true;
 					} else {
 						intrans = false;
@@ -3527,14 +3527,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								tr->set(LiteralStringRef("\xff\xff/reboot_worker"), it.second.first);
 						}
 						if (address_interface.size() == 0) {
-							printf("ERROR: no processes to kill. You must run the `kill’ command before running `kill all’.\n");
+							fprintf(stderr, "ERROR: no processes to kill. You must run the `kill’ command before running `kill all’.\n");
 						} else {
 							printf("Attempted to kill %zu processes\n", address_interface.size());
 						}
 					} else {
 						for(int i = 1; i < tokens.size(); i++) {
 							if(!address_interface.count(tokens[i])) {
-								printf("ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
+								fprintf(stderr, "ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
 								is_error = true;
 								break;
 							}
@@ -3587,7 +3587,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					} else {
 						for(int i = 2; i < tokens.size(); i++) {
 							if(!address_interface.count(tokens[i])) {
-								printf("ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
+								fprintf(stderr, "ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
 								is_error = true;
 								break;
 							}
@@ -3682,7 +3682,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "profile")) {
 					if (tokens.size() == 1) {
-						printf("ERROR: Usage: profile <client|list|flow|heap>\n");
+						fprintf(stderr, "ERROR: Usage: profile <client|list|flow|heap>\n");
 						is_error = true;
 						continue;
 					}
@@ -3690,13 +3690,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						getTransaction(db, tr, options, intrans);
 						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						if (tokens.size() == 2) {
-							printf("ERROR: Usage: profile client <get|set>\n");
+							fprintf(stderr, "ERROR: Usage: profile client <get|set>\n");
 							is_error = true;
 							continue;
 						}
 						if (tokencmp(tokens[2], "get")) {
 							if (tokens.size() != 3) {
-								printf("ERROR: Addtional arguments to `get` are not supported.\n");
+								fprintf(stderr, "ERROR: Addtional arguments to `get` are not supported.\n");
 								is_error = true;
 								continue;
 							}
@@ -3721,7 +3721,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 						if (tokencmp(tokens[2], "set")) {
 							if (tokens.size() != 5) {
-								printf("ERROR: Usage: profile client set <RATE|default> <SIZE|default>\n");
+								fprintf(stderr, "ERROR: Usage: profile client set <RATE|default> <SIZE|default>\n");
 								is_error = true;
 								continue;
 							}
@@ -3732,7 +3732,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								char* end;
 								sampleRate = std::strtod((const char*)tokens[3].begin(), &end);
 								if (!std::isspace(*end)) {
-									printf("ERROR: %s failed to parse.\n", printable(tokens[3]).c_str());
+									fprintf(stderr, "ERROR: %s failed to parse.\n", printable(tokens[3]).c_str());
 									is_error = true;
 									continue;
 								}
@@ -3745,7 +3745,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								if (parsed.present()) {
 									sizeLimit = parsed.get();
 								} else {
-									printf("ERROR: `%s` failed to parse.\n", printable(tokens[4]).c_str());
+									fprintf(stderr, "ERROR: `%s` failed to parse.\n", printable(tokens[4]).c_str());
 									is_error = true;
 									continue;
 								}
@@ -3757,13 +3757,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							}
 							continue;
 						}
-						printf("ERROR: Unknown action: %s\n", printable(tokens[2]).c_str());
+						fprintf(stderr, "ERROR: Unknown action: %s\n", printable(tokens[2]).c_str());
 						is_error = true;
 						continue;
 					}
 					if (tokencmp(tokens[1], "list")) {
 						if (tokens.size() != 2) {
-							printf("ERROR: Usage: profile list\n");
+							fprintf(stderr, "ERROR: Usage: profile list\n");
 							is_error = true;
 							continue;
 						}
@@ -3784,13 +3784,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					}
 					if (tokencmp(tokens[1], "flow")) {
 						if (tokens.size() == 2) {
-							printf("ERROR: Usage: profile flow <run>\n");
+							fprintf(stderr, "ERROR: Usage: profile flow <run>\n");
 							is_error = true;
 							continue;
 						}
 						if (tokencmp(tokens[2], "run")) {
 							if (tokens.size() < 6) {
-								printf("ERROR: Usage: profile flow run <DURATION_IN_SECONDS> <FILENAME> <PROCESS...>\n");
+								fprintf(stderr, "ERROR: Usage: profile flow run <DURATION_IN_SECONDS> <FILENAME> <PROCESS...>\n");
 								is_error = true;
 								continue;
 							}
@@ -3803,7 +3803,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							char *duration_end;
 							int duration = std::strtol((const char*)tokens[3].begin(), &duration_end, 10);
 							if (!std::isspace(*duration_end)) {
-								printf("ERROR: Failed to parse %s as an integer.", printable(tokens[3]).c_str());
+								fprintf(stderr, "ERROR: Failed to parse %s as an integer.", printable(tokens[3]).c_str());
 								is_error = true;
 								continue;
 							}
@@ -3828,7 +3828,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								for (int tokenidx = 5; tokenidx < tokens.size(); tokenidx++) {
 									auto element = interfaces.find(tokens[tokenidx]);
 									if (element == interfaces.end()) {
-										printf("ERROR: process '%s' not recognized.\n", printable(tokens[tokenidx]).c_str());
+										fprintf(stderr, "ERROR: process '%s' not recognized.\n", printable(tokens[tokenidx]).c_str());
 										is_error = true;
 									}
 								}
@@ -3846,7 +3846,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								for (int i = 0; i < all_profiler_responses.size(); i++) {
 									const ErrorOr<Void>& err = all_profiler_responses[i].get();
 									if (err.isError()) {
-										printf("ERROR: %s: %s: %s\n", printable(all_profiler_addresses[i]).c_str(), err.getError().name(), err.getError().what());
+										fprintf(stderr, "ERROR: %s: %s: %s\n", printable(all_profiler_addresses[i]).c_str(), err.getError().name(), err.getError().what());
 									}
 								}
 							}
@@ -3857,7 +3857,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					}
 					if (tokencmp(tokens[1], "heap")) {
 						if (tokens.size() != 3) {
-							printf("ERROR: Usage: profile heap <PROCESS>\n");
+							fprintf(stderr, "ERROR: Usage: profile heap <PROCESS>\n");
 							is_error = true;
 							continue;
 						}
@@ -3877,7 +3877,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 						state Key ip_port = tokens[2];
 						if (interfaces.find(ip_port) == interfaces.end()) {
-							printf("ERROR: host %s not found\n", printable(ip_port).c_str());
+							fprintf(stderr, "ERROR: host %s not found\n", printable(ip_port).c_str());
 							is_error = true;
 							continue;
 						}
@@ -3885,11 +3885,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						profileRequest.outputFile = LiteralStringRef("heapz");
 						ErrorOr<Void> response = wait(interfaces[ip_port].profiler.tryGetReply(profileRequest));
 						if (response.isError()) {
-							printf("ERROR: %s: %s: %s\n", printable(ip_port).c_str(), response.getError().name(), response.getError().what());
+							fprintf(stderr, "ERROR: %s: %s: %s\n", printable(ip_port).c_str(), response.getError().name(), response.getError().what());
 						}
 						continue;
 					}
-					printf("ERROR: Unknown type: %s\n", printable(tokens[1]).c_str());
+					fprintf(stderr, "ERROR: Unknown type: %s\n", printable(tokens[1]).c_str());
 					is_error = true;
 					continue;
 				}
@@ -3930,14 +3930,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"), it.second.first);
 						}
 						if (address_interface.size() == 0) {
-							printf("ERROR: no processes to check. You must run the `expensive_data_check’ command before running `expensive_data_check all’.\n");
+							fprintf(stderr, "ERROR: no processes to check. You must run the `expensive_data_check’ command before running `expensive_data_check all’.\n");
 						} else {
 							printf("Attempted to kill and check %zu processes\n", address_interface.size());
 						}
 					} else {
 						for(int i = 1; i < tokens.size(); i++) {
 							if(!address_interface.count(tokens[i])) {
-								printf("ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
+								fprintf(stderr, "ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
 								is_error = true;
 								break;
 							}
@@ -3973,7 +3973,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							// limit at the (already absurd)
 							// nearly-a-billion
 							if (tokens[3].size() > 9) {
-								printf("ERROR: bad limit\n");
+								fprintf(stderr, "ERROR: bad limit\n");
 								is_error = true;
 								continue;
 							}
@@ -3989,7 +3989,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								place *= 10;
 							}
 							if (!valid) {
-								printf("ERROR: bad limit\n");
+								fprintf(stderr, "ERROR: bad limit\n");
 								is_error = true;
 								continue;
 							}
@@ -4049,7 +4049,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "set")) {
 					if(!writeMode) {
-						printf("ERROR: writemode must be enabled to set or clear keys in the database.\n");
+						fprintf(stderr, "ERROR: writemode must be enabled to set or clear keys in the database.\n");
 						is_error = true;
 						continue;
 					}
@@ -4070,7 +4070,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "clear")) {
 					if(!writeMode) {
-						printf("ERROR: writemode must be enabled to set or clear keys in the database.\n");
+						fprintf(stderr, "ERROR: writemode must be enabled to set or clear keys in the database.\n");
 						is_error = true;
 						continue;
 					}
@@ -4091,7 +4091,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "clearrange")) {
 					if(!writeMode) {
-						printf("ERROR: writemode must be enabled to set or clear keys in the database.\n");
+						fprintf(stderr, "ERROR: writemode must be enabled to set or clear keys in the database.\n");
 						is_error = true;
 						continue;
 					}
@@ -4167,7 +4167,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								printf("\n");
 							}
 							else
-								printf("There are no options enabled\n");
+								fprintf(stderr, "There are no options enabled\n");
 
 							continue;
 						}
@@ -4177,12 +4177,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 						else if(tokencmp(tokens[1], "off")) {
 							if(intrans) {
-								printf("ERROR: Cannot turn option off when using a transaction created with `begin'\n");
+								fprintf(stderr, "ERROR: Cannot turn option off when using a transaction created with `begin'\n");
 								is_error = true;
 								continue;
 							}
 							if(tokens.size() > 3) {
-								printf("ERROR: Cannot specify option argument when turning option off\n");
+								fprintf(stderr, "ERROR: Cannot specify option argument when turning option off\n");
 								is_error = true;
 								continue;
 							}
@@ -4190,7 +4190,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							isOn = false;
 						}
 						else {
-							printf("ERROR: Invalid option state `%s': option must be turned `on' or `off'\n", formatStringRef(tokens[1]).c_str());
+							fprintf(stderr, "ERROR: Invalid option state `%s': option must be turned `on' or `off'\n", formatStringRef(tokens[1]).c_str());
 							is_error = true;
 							continue;
 						}
@@ -4248,7 +4248,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							char *end;
 							throttleListLimit = std::strtol((const char*)tokens[3].begin(), &end, 10);
 							if ((tokens.size() > 4 && !std::isspace(*end)) || (tokens.size() == 4 && *end != '\0')) {
-								printf("ERROR: failed to parse limit `%s'.\n", printable(tokens[3]).c_str());
+								fprintf(stderr, "ERROR: failed to parse limit `%s'.\n", printable(tokens[3]).c_str());
 								is_error = true;
 								continue;
 							}
@@ -4324,12 +4324,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							char *end;
 							tpsRate = std::strtod((const char*)tokens[4].begin(), &end);
 							if((tokens.size() > 5 && !std::isspace(*end)) || (tokens.size() == 5 && *end != '\0')) {
-								printf("ERROR: failed to parse rate `%s'.\n", printable(tokens[4]).c_str());
+								fprintf(stderr, "ERROR: failed to parse rate `%s'.\n", printable(tokens[4]).c_str());
 								is_error = true;
 								continue;
 							}
 							if(tpsRate < 0) {
-								printf("ERROR: rate cannot be negative `%f'\n", tpsRate);
+								fprintf(stderr, "ERROR: rate cannot be negative `%f'\n", tpsRate);
 								is_error = true;
 								continue;
 							}
@@ -4337,14 +4337,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						if(tokens.size() == 6) {
 							Optional<uint64_t> parsedDuration = parseDuration(tokens[5].toString());
 							if(!parsedDuration.present()) {
-								printf("ERROR: failed to parse duration `%s'.\n", printable(tokens[5]).c_str());
+								fprintf(stderr, "ERROR: failed to parse duration `%s'.\n", printable(tokens[5]).c_str());
 								is_error = true;
 								continue;
 							}
 							duration = parsedDuration.get();
 
 							if(duration == 0) {
-								printf("ERROR: throttle duration cannot be 0\n");
+								fprintf(stderr, "ERROR: throttle duration cannot be 0\n");
 								is_error = true;
 								continue;
 							}
@@ -4360,7 +4360,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								priority = TransactionPriority::BATCH;
 							}
 							else {
-								printf("ERROR: unrecognized priority `%s'. Must be one of `default',\n  `immediate', or `batch'.\n", tokens[6].toString().c_str());
+								fprintf(stderr, "ERROR: unrecognized priority `%s'. Must be one of `default',\n  `immediate', or `batch'.\n", tokens[6].toString().c_str());
 								is_error = true;
 								continue;
 							}
@@ -4517,7 +4517,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 
-				printf("ERROR: Unknown command `%s'. Try `help'?\n", formatStringRef(tokens[0]).c_str());
+				fprintf(stderr, "ERROR: Unknown command `%s'. Try `help'?\n", formatStringRef(tokens[0]).c_str());
 				is_error = true;
 			}
 
@@ -4525,7 +4525,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 		} catch (Error& e) {
 			if(e.code() != error_code_actor_cancelled)
-				printf("ERROR: %s (%d)\n", e.what(), e.code());
+				fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code());
 			is_error = true;
 			if (intrans) {
 				printf("Rolling back current transaction\n");
@@ -4721,7 +4721,7 @@ int main(int argc, char **argv) {
 			printf("\n");
 			loaded.print(stdout);
 		} catch (Error& e) {
-			printf("ERROR: %s (%d)\n", e.what(), e.code());
+			fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code());
 			printf("Use --log and look at the trace logs for more detailed information on the failure.\n");
 			return 1;
 		}
@@ -4745,7 +4745,7 @@ int main(int argc, char **argv) {
 			return 1;
 		}
 	} catch (Error& e) {
-		printf("ERROR: %s (%d)\n", e.what(), e.code());
+		fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code());
 		return 1;
 	}
 }

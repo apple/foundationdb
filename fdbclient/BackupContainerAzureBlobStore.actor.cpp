@@ -90,7 +90,7 @@ public:
 			}
 			m_cursor += length;
 			auto p = static_cast<char const*>(data);
-			buffer.insert(buffer.cend(), p, p + length);
+			buffer.append(p, length);
 			if (buffer.size() > bufferLimit) {
 				return sync();
 			} else {

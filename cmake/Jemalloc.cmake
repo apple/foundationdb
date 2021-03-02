@@ -1,12 +1,13 @@
 add_library(jemalloc INTERFACE)
 
 set(USE_JEMALLOC ON)
-if(USE_SANITIZER OR WIN32)
+# We don't want to use jemalloc on Windows
+# Nor on FreeBSD, where jemalloc is the default system allocator
+if(USE_SANITIZER OR WIN32 OR (CMAKE_SYSTEM_NAME STREQUAL "FreeBSD"))
   set(USE_JEMALLOC OFF)
   return()
 endif()
 
-# We don't want to use jemalloc on Windows
 find_path(JEMALLOC_INCLUDE_DIR
   NAMES
   jemalloc/jemalloc.h

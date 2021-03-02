@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import os
 import shutil
 import subprocess
 import sys
@@ -52,6 +53,8 @@ if __name__ == '__main__':
     - All occurrences of @DATA_DIR@ will be replaced with the path to the data directory.
     - All occurrences of @LOG_DIR@ will be replaced with the path to the log directory.
     - All occurrences of @ETC_DIR@ will be replaced with the path to the configuration directory.
+
+    The environment variable FDB_CLUSTER_FILE is set to the generated cluster for the command if it is not set already.
     """)
     parser.add_argument('--build-dir', '-b', metavar='BUILD_DIRECTORY', help='FDB build directory', required=True)
     parser.add_argument('cmd', metavar="COMMAND", nargs="+", help="The command to run")
@@ -74,5 +77,7 @@ if __name__ == '__main__':
                 cmd_args.append(str(cluster.etc))
             else:
                 cmd_args.append(cmd)
-        errcode = subprocess.run(cmd_args, stdout=sys.stdout, stderr=sys.stderr).returncode
+        env = dict(**os.environ)
+        env['FDB_CLUSTER_FILE'] = env.get('FDB_CLUSTER_FILE', cluster.etc.joinpath('fdb.cluster'))
+        errcode = subprocess.run(cmd_args, stdout=sys.stdout, stderr=sys.stderr, env=env).returncode
     sys.exit(errcode)
