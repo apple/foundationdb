@@ -116,7 +116,7 @@ Net2FileSystem::Net2FileSystem(double ioTimeout, std::string fileSystemPath)
 }
 
 Future<Void> Net2FileSystem::renameFile(const std::string &from, const std::string &to) {
-	return Void();
+	return Net2AsyncFile::renameFile(from, to);
 }
 
 void Net2FileSystem::stop() {
