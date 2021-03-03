@@ -668,11 +668,12 @@ struct ILogSystem {
 
 	//Future<Void> push( UID bundle, int64_t seq, VectorRef<TaggedMessageRef> messages );
 	virtual Future<Version> push( Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, struct LogPushData& data, Optional<UID> debugID = Optional<UID>() ) = 0;
-		// Waits for the version number of the bundle (in this epoch) to be prevVersion (i.e. for all pushes ordered earlier)
-		// Puts the given messages into the bundle, each with the given tags, and with message versions (version, 0) - (version, N)
-		// Changes the version number of the bundle to be version (unblocking the next push)
-		// Returns when the preceding changes are durable.  (Later we will need multiple return signals for diffferent durability levels)
-		// If the current epoch has ended, push will not return, and the pushed messages will not be visible in any subsequent epoch (but may become visible in this epoch)
+	// Waits for the version number of the bundle (in this epoch) to be prevVersion (i.e. for all pushes ordered
+	// earlier) Puts the given messages into the bundle, each with the given tags, and with message versions (version,
+	// 0) - (version, N) Changes the version number of the bundle to be version (unblocking the next push) Returns when
+	// the preceding changes are durable.  (Later we will need multiple return signals for different durability levels)
+	// If the current epoch has ended, push will not return, and the pushed messages will not be visible in any
+	// subsequent epoch (but may become visible in this epoch)
 
 	virtual Reference<IPeekCursor> peek( UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore = false ) = 0;
 		// Returns (via cursor interface) a stream of messages with the given tag and message versions >= (begin, 0), ordered by message version
