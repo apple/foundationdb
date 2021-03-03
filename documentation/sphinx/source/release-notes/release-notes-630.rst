@@ -4,6 +4,10 @@
 Release Notes
 #############
 
+6.3.12
+======
+* Change the default for --knob_tls_server_handshake_threads to 0. The previous was 1000. This avoids starting 1000 threads by default, but may adversely affect recovery time for large clusters using tls. Users with large tls clusters should consider explicitly setting this knob in their foundationdb.conf file. `(PR #4421) <https://github.com/apple/foundationdb/pull/4421>`_
+
 6.3.11
 ======
 * Added a hint field in the trace event when all replicas of some data are lost. `(PR #4209) <https://github.com/apple/foundationdb/pull/4209>`_
