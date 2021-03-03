@@ -22,7 +22,7 @@
 #include <string>
 
 #include "fdbrpc/simulator.h"
-#include "flow.h"
+#include "flow/flow.h"
 #include "flow/IThreadPool.h"
 #include "flow/Util.h"
 #include "fdbrpc/IAsyncFile.h"
