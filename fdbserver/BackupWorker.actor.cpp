@@ -504,7 +504,7 @@ ACTOR Future<Void> setBackupKeys(BackupData* self, std::map<UID, Version> savedL
 			state std::vector<Future<Optional<Version>>> prevVersions;
 			state std::vector<BackupConfig> versionConfigs;
 			state std::vector<Future<Optional<bool>>> allWorkersReady;
-			for (const auto [uid, version] : savedLogVersions) {
+			for (const auto& [uid, version] : savedLogVersions) {
 				versionConfigs.emplace_back(uid);
 				prevVersions.push_back(versionConfigs.back().latestBackupWorkerSavedVersion().get(tr));
 				allWorkersReady.push_back(versionConfigs.back().allWorkerStarted().get(tr));
@@ -569,7 +569,7 @@ ACTOR Future<Void> monitorBackupProgress(BackupData* self) {
 			if (self->recruitedEpoch == self->oldestBackupEpoch) {
 				// update update progress so far if previous epochs are done
 				Version v = std::numeric_limits<Version>::max();
-				for (const auto [tag, version] : tagVersions) {
+				for (const auto& [tag, version] : tagVersions) {
 					v = std::min(v, version);
 				}
 				savedLogVersions.emplace(uid, v);
@@ -781,7 +781,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		    .detail("TagId", self->tag.id)
 		    .detail("File", file->getFileName());
 	}
-	for (const UID uid : activeUids) {
+	for (const UID& uid : activeUids) {
 		self->backups[uid].lastSavedVersion = popVersion + 1;
 	}
 
