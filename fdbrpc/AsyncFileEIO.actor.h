@@ -107,6 +107,33 @@ public:
 			return Void();
 	}
 
+	ACTOR static Future<Void> renameFile(std::string from, std::string to) {
+		state TaskPriority taskID = g_network->getCurrentTask();
+		state Promise<Void> p;
+		state eio_req* r = eio_rename(from.c_str(), to.c_str(), 0, eio_callback, &p);
+		try {
+			wait(p.getFuture());
+		} catch (...) {
+			g_network->setCurrentTask(taskID);
+			eio_cancel(r);
+			throw;
+		}
+		try {
+			state int result = r->result;
+			if(result == -1) {
+				TraceEvent(SevError, "FileRenameError").detail("Errno", r->errorno);
+				throw internal_error();
+			} else {
+				wait(delay(0, taskID));
+				return Void();
+			}
+		} catch (Error& e) {
+			state Error _e = e;
+			wait(delay(0, taskID));
+			throw _e;
+		}
+	}
+
 	ACTOR static Future<std::time_t> lastWriteTime( std::string filename ) {
 		EIO_STRUCT_STAT statdata = wait(stat_impl(filename));
 		return statdata.st_mtime;
