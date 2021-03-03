@@ -55,7 +55,7 @@ const Value keyServersValue( Standalone<RangeResultRef> result, const std::vecto
 	std::vector<Tag> destTag;
 
 	bool foundOldLocality = false;
-	for (const KeyValueRef kv : result) {
+	for (const KeyValueRef& kv : result) {
 		UID uid = decodeServerTagKey(kv.key);
 		if (std::find(src.begin(), src.end(), uid) != src.end()) {
 			srcTag.push_back( decodeServerTagValue(kv.value) );
@@ -107,7 +107,7 @@ void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& v
 	src.clear();
 	dest.clear();
 
-	for (const KeyValueRef kv : result) {
+	for (const KeyValueRef& kv : result) {
 		Tag tag = decodeServerTagValue(kv.value);
 		if (std::find(srcTag.begin(), srcTag.end(), tag) != srcTag.end()) {
 			src.push_back( decodeServerTagKey(kv.key) );
@@ -120,7 +120,7 @@ void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& v
 	std::sort(dest.begin(), dest.end());
 	if(missingIsError && (src.size() != srcTag.size() || dest.size() != destTag.size())) {
 		TraceEvent(SevError, "AttemptedToDecodeMissingTag");
-		for (const KeyValueRef kv : result) {
+		for (const KeyValueRef& kv : result) {
 			Tag tag = decodeServerTagValue(kv.value);
 			UID serverID = decodeServerTagKey(kv.key);
 			TraceEvent("TagUIDMap").detail("Tag", tag.toString()).detail("UID", serverID.toString());
