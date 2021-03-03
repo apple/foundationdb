@@ -20,7 +20,6 @@
 
 #include <cinttypes>
 
-#include "IRandom.h"
 #include "fdbrpc/simulator.h"
 #include "flow/IThreadPool.h"
 #include "flow/Util.h"
