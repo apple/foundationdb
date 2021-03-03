@@ -20,6 +20,7 @@
 
 #ifndef FLOW_SIMULATOR_H
 #define FLOW_SIMULATOR_H
+#include <string>
 #pragma once
 
 #include "flow/flow.h"
@@ -361,12 +362,14 @@ extern Future<Void> waitUntilDiskReady(Reference<DiskParameters> parameters, int
 class Sim2FileSystem : public IAsyncFileSystem {
 public:
 	// Opens a file for asynchronous I/O
-	virtual Future< Reference<class IAsyncFile> > open( std::string filename, int64_t flags, int64_t mode );
+	Future<Reference<class IAsyncFile>> open( std::string filename, int64_t flags, int64_t mode ) override;
 
 	// Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
-	virtual Future< Void > deleteFile( std::string filename, bool mustBeDurable );
+	Future<Void> deleteFile(std::string filename, bool mustBeDurable) override;
 
-	virtual Future< std::time_t > lastWriteTime( std::string filename );
+	Future<Void> renameFile(std::string const& from, std::string const& to) override;
+
+	Future< std::time_t > lastWriteTime( std::string filename ) override;
 
 	Sim2FileSystem() {}
 

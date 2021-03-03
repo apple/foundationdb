@@ -132,3 +132,55 @@ TEST_CASE("/fileio/incrementalDelete" ) {
 	wait(IAsyncFileSystem::filesystem()->incrementalDeleteFile(filename, true));
 	return Void();
 }
+
+TEST_CASE("/fileio/rename") {
+	// create a file
+	state int64_t fileSize = 100e6;
+	state std::string filename = "/tmp/__JUNK__." + deterministicRandom()->randomUniqueID().toString();
+	state std::string renamedFile = "/tmp/__RENAMED_JUNK__." + deterministicRandom()->randomUniqueID().toString();
+	state std::unique_ptr<char[]> data(new char[4096]);
+	state std::unique_ptr<char[]> readData(new char[4096]);
+	state Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
+	    filename, IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE,
+	    0644));
+	;
+	wait(f->sync());
+	wait(f->truncate(fileSize));
+	memset(data.get(), 0, 4096);
+	// write a random string at the beginning of the file which we can verify after rename
+	for (int i = 0; i < 16; ++i) {
+		data[i] = deterministicRandom()->randomAlphaNumeric();
+	}
+	// write first and block
+	wait(f->write(data.get(), 4096, 0));
+	wait(f->write(data.get(), 4096, fileSize - 4096));
+	wait(f->sync());
+	// close file
+	f.clear();
+	wait(IAsyncFileSystem::filesystem()->renameFile(filename, renamedFile));
+	Reference<IAsyncFile> _f = wait(IAsyncFileSystem::filesystem()->open(renamedFile, IAsyncFile::OPEN_READONLY, 0));
+	f = _f;
+
+	// verify rename happened
+	bool renamedExists = false;
+	auto bName = basename(renamedFile);
+	auto files = platform::listFiles("/tmp/");
+	for (const auto& file : files) {
+		if (file == bName) {
+			renamedExists = true;
+		}
+		ASSERT(file != filename);
+	}
+	ASSERT(renamedExists);
+
+	// verify magic string at beginning of file
+	int length = wait(f->read(readData.get(), 4096, 0));
+	ASSERT(length == 4096);
+	ASSERT(memcmp(readData.get(), data.get(), 4096) == 0);
+	// close the file
+	f.clear();
+
+	// clean up
+	wait(IAsyncFileSystem::filesystem()->deleteFile(renamedFile, true));
+	return Void();
+}
