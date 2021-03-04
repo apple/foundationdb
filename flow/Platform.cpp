@@ -1047,9 +1047,8 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 		reads = total_transfers_read;
 		writes = total_transfers_write;
 		writeSectors = total_blocks_read;
-		readSectors = total_blocks_write;        
+		readSectors = total_blocks_write;
 	}
-	
 }
 
 dev_t getDeviceId(std::string path) {
@@ -2519,11 +2518,11 @@ void setCloseOnExec( int fd ) {
 } // namespace platform
 
 #ifdef _WIN32
-THREAD_HANDLE startThread(void (*func) (void *), void *arg, int stackSize) {
+THREAD_HANDLE startThread(void (*func)(void*), void* arg, int stackSize, const char* name) {
 	return (void *)_beginthread(func, stackSize, arg);
 }
 #elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
-THREAD_HANDLE startThread(void *(*func) (void *), void *arg, int stackSize) {
+THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const char* name) {
 	pthread_t t;
 	pthread_attr_t attr;
 
@@ -2541,6 +2540,13 @@ THREAD_HANDLE startThread(void *(*func) (void *), void *arg, int stackSize) {
 
 	pthread_create(&t, &attr, func, arg);
 	pthread_attr_destroy(&attr);
+
+#if defined(__linux__)
+	if (name != nullptr) {
+		// TODO: Should this just truncate?
+		ASSERT_EQ(pthread_setname_np(t, name), 0);
+	}
+#endif
 
 	return t;
 }
@@ -3273,7 +3279,7 @@ int64_t getNumProfilesCaptured() {
 
 void profileHandler(int sig) {
 #ifdef __linux__
-	if(!profileThread) { 
+	if (!profileThread) {
 		return;
 	}
 
@@ -3311,7 +3317,7 @@ void profileHandler(int sig) {
 #endif
 }
 
-void setProfilingEnabled(int enabled) { 
+void setProfilingEnabled(int enabled) {
 #ifdef __linux__
 	if(profileThread && enabled && !profilingEnabled && profileRequested) {
 		profilingEnabled = true;
@@ -3323,7 +3329,7 @@ void setProfilingEnabled(int enabled) {
 	}
 #else
 	// No profiling for other platforms!
-#endif	
+#endif
 }
 
 void* checkThread(void *arg) {

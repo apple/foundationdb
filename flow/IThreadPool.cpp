@@ -95,9 +95,9 @@ public:
 	virtual Future<Void> getError() { return Never(); }  // FIXME
 	virtual void addref() { ReferenceCounted<ThreadPool>::addref(); }
 	virtual void delref() { if (ReferenceCounted<ThreadPool>::delref_no_destroy()) stop(); }
-	void addThread( IThreadPoolReceiver* userData ) {
+	void addThread(IThreadPoolReceiver* userData, const char* name) {
 		threads.push_back(new Thread(this, userData));
-		startThread(start, threads.back(), stackSize);
+		startThread(start, threads.back(), stackSize, name);
 	}
 	void post( PThreadAction action ) {
 		ios.post( ActionWrapper( action ) );
