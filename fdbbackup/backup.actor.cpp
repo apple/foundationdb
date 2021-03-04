@@ -136,6 +136,7 @@ enum {
 	OPT_PREFIX_REMOVE,
 	OPT_RESTORE_CLUSTERFILE_DEST,
 	OPT_RESTORE_CLUSTERFILE_ORIG,
+	OPT_RESTORE_BEGIN_VERSION,
 
 	// Shared constants
 	OPT_CLUSTERFILE,
@@ -639,6 +640,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
 	{ OPT_WAITFORDONE, "-w", SO_NONE },
 	{ OPT_WAITFORDONE, "--waitfordone", SO_NONE },
+	{ OPT_RESTORE_BEGIN_VERSION, "--begin_version", SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "--version", SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "-v", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
@@ -2135,6 +2137,7 @@ ACTOR Future<Void> runRestore(Database db,
                               std::string tagName,
                               std::string container,
                               Standalone<VectorRef<KeyRangeRef>> ranges,
+                              Version beginVersion,
                               Version targetVersion,
                               std::string targetTimestamp,
                               bool performRestore,
@@ -2142,7 +2145,8 @@ ACTOR Future<Void> runRestore(Database db,
                               bool waitForDone,
                               std::string addPrefix,
                               std::string removePrefix,
-			      bool incrementalBackupOnly) {
+                              bool incrementalBackupOnly,
+                              beginVersion) {
 	if (ranges.empty()) {
 		ranges.push_back_deep(ranges.arena(), normalKeys);
 	}
@@ -2877,6 +2881,7 @@ int main(int argc, char* argv[]) {
 		std::string removePrefix;
 		Standalone<VectorRef<KeyRangeRef>> backupKeys;
 		int maxErrors = 20;
+		Version beginVersion = invalidVersion;
 		Version restoreVersion = invalidVersion;
 		std::string restoreTimestamp;
 		bool waitForDone = false;
@@ -3088,7 +3093,6 @@ int main(int argc, char* argv[]) {
 					printHelpTeaser(argv[0]);
 					return FDB_EXIT_ERROR;
 				}
-<<<<<<< HEAD
 				break;
 			case OPT_DESTCONTAINER:
 				destinationContainer = args->OptionArg();
@@ -3105,55 +3109,16 @@ int main(int argc, char* argv[]) {
 					fprintf(stderr, "ERROR: Could not parse snapshot interval `%s'\n", a);
 					printHelpTeaser(argv[0]);
 					return FDB_EXIT_ERROR;
-=======
-				case OPT_MOD_VERIFY_UID:
-					modifyOptions.verifyUID = args->OptionArg();
-					break;
-				case OPT_WAITFORDONE:
-					waitForDone = true;
-					break;
-				case OPT_NOSTOPWHENDONE:
-					stopWhenDone = false;
-					break;
-				case OPT_INCREMENTALONLY:
-					incrementalBackupOnly = true;
-					break;
-				case OPT_RESTORECONTAINER:
-					restoreContainer = args->OptionArg();
-					// If the url starts with '/' then prepend "file://" for backwards compatibility
-					if(StringRef(restoreContainer).startsWith(LiteralStringRef("/")))
-						restoreContainer = std::string("file://") + restoreContainer;
-					break;
-				case OPT_DESCRIBE_DEEP:
-					describeDeep = true;
-					break;
-				case OPT_DESCRIBE_TIMESTAMPS:
-					describeTimestamps = true;
-					break;
-				case OPT_PREFIX_ADD:
-					addPrefix = args->OptionArg();
-					break;
-				case OPT_PREFIX_REMOVE:
-					removePrefix = args->OptionArg();
-					break;
-				case OPT_ERRORLIMIT: {
-					const char* a = args->OptionArg();
-					if (!sscanf(a, "%d", &maxErrors)) {
-						fprintf(stderr, "ERROR: Could not parse max number of errors `%s'\n", a);
-						printHelpTeaser(argv[0]);
-						return FDB_EXIT_ERROR;
+					}
+					if(optId == OPT_SNAPSHOTINTERVAL) {
+						snapshotIntervalSeconds = seconds;
+						modifyOptions.snapshotIntervalSeconds = seconds;
+					}
+					else if(optId == OPT_MOD_ACTIVE_INTERVAL) {
+						modifyOptions.activeSnapshotIntervalSeconds = seconds;
 					}
 					break;
->>>>>>> 0265490f1 (initial commit to introduce incremental restore only (ignore base snap))
 				}
-				if (optId == OPT_SNAPSHOTINTERVAL) {
-					snapshotIntervalSeconds = seconds;
-					modifyOptions.snapshotIntervalSeconds = seconds;
-				} else if (optId == OPT_MOD_ACTIVE_INTERVAL) {
-					modifyOptions.activeSnapshotIntervalSeconds = seconds;
-				}
-				break;
-			}
 			case OPT_MOD_VERIFY_UID:
 				modifyOptions.verifyUID = args->OptionArg();
 				break;
@@ -3163,10 +3128,13 @@ int main(int argc, char* argv[]) {
 			case OPT_NOSTOPWHENDONE:
 				stopWhenDone = false;
 				break;
+			case OPT_INCREMENTALONLY:
+				incrementalBackupOnly = true;
+				break;
 			case OPT_RESTORECONTAINER:
 				restoreContainer = args->OptionArg();
 				// If the url starts with '/' then prepend "file://" for backwards compatibility
-				if (StringRef(restoreContainer).startsWith(LiteralStringRef("/")))
+				if(StringRef(restoreContainer).startsWith(LiteralStringRef("/")))
 					restoreContainer = std::string("file://") + restoreContainer;
 				break;
 			case OPT_DESCRIBE_DEEP:
@@ -3188,6 +3156,17 @@ int main(int argc, char* argv[]) {
 					printHelpTeaser(argv[0]);
 					return FDB_EXIT_ERROR;
 				}
+				break;
+			}
+			case OPT_RESTORE_BEGIN_VERSION: {
+				const char* a = args->OptionArg();
+				long long ver = 0;
+				if (!sscanf(a, "%lld", &ver)) {
+					fprintf(stderr, "ERROR: Could not parse database beginVersion `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					return FDB_EXIT_ERROR;
+				}
+				beginVersion = ver;
 				break;
 			}
 			case OPT_RESTORE_VERSION: {
@@ -3710,6 +3689,7 @@ int main(int argc, char* argv[]) {
 				                         restoreContainer,
 				                         backupKeys,
 				                         restoreVersion,
+				                         beginVersion,
 				                         restoreTimestamp,
 				                         !dryRun,
 				                         !quietDisplay,
