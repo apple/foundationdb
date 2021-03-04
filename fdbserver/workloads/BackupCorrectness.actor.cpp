@@ -69,7 +69,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		allowPauses = getOption(options, LiteralStringRef("allowPauses"), true);
 		shareLogRange = getOption(options, LiteralStringRef("shareLogRange"), false);
 		prefixesMandatory = getOption(options, LiteralStringRef("prefixesMandatory"), std::vector<std::string>());
-		shouldSkipRestoreRanges = deterministicRandom()->random01() < 0.3 ? true : false;
+		shouldSkipRestoreRanges = false;
 
 		TraceEvent("BARW_ClientId").detail("Id", wcx.clientId);
 		UID randomID = nondeterministicRandom()->randomUniqueID();
@@ -403,7 +403,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				                                  normalKeys,
 				                                  Key(),
 				                                  Key(),
-				                                  self->locked)));
+				                                  self->locked,
+				                                  true)));
 				TraceEvent(SevError, "BARW_RestoreAllowedOverwrittingDatabase", randomID);
 				ASSERT(false);
 			} catch (Error& e) {
@@ -551,6 +552,9 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" +
 						                                 std::to_string(restoreIndex));
 						restoreTags.push_back(restoreTag);
+						printf("BackupCorrectness, restore for each range: backupAgent.restore is called for "
+						       "restoreIndex:%d tag:%s\n",
+						       restoreIndex, restoreTag.toString().c_str());
 						restores.push_back(backupAgent.restore(cx,
 						                                       cx,
 						                                       restoreTag,
@@ -561,12 +565,15 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						                                       range,
 						                                       Key(),
 						                                       Key(),
-						                                       self->locked));
+						                                       self->locked,
+						                                       true));
 					}
 				} else {
 					multipleRangesInOneTag = true;
 					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
 					restoreTags.push_back(restoreTag);
+					printf("BackupCorrectness, backupAgent.restore is called for restoreIndex:%d tag:%s\n",
+					       restoreIndex, restoreTag.toString().c_str());
 					restores.push_back(backupAgent.restore(cx,
 					                                       cx,
 					                                       restoreTag,
@@ -577,7 +584,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					                                       true,
 					                                       Key(),
 					                                       Key(),
-					                                       self->locked));
+					                                       self->locked,
+					                                       true));
 				}
 
 				// Sometimes kill and restart the restore
@@ -603,7 +611,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 							                                             true,
 							                                             Key(),
 							                                             Key(),
-							                                             self->locked);
+							                                             self->locked,
+							                                             true);
 						}
 					} else {
 						for (restoreIndex = 0; restoreIndex < restores.size(); restoreIndex++) {

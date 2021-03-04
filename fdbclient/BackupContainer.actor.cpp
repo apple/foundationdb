@@ -20,6 +20,7 @@
 
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
@@ -696,6 +697,26 @@ public:
 		return v;
 	}
 
+	// Computes the continuous end version for non-partitioned mutation logs up to
+	// the "targetVersion". If "outLogs" is not nullptr, it will be updated with
+	// continuous log files. "*end" is updated with the continuous end version.
+	static void computeRestoreEndVersion(const std::vector<LogFile>& logs, std::vector<LogFile>* outLogs, Version* end,
+	                                     Version targetVersion) {
+		auto i = logs.begin();
+		if (outLogs != nullptr) outLogs->push_back(*i);
+
+		// Add logs to restorable logs set until continuity is broken OR we reach targetVersion
+		while (++i != logs.end()) {
+			if (i->beginVersion > *end || i->beginVersion > targetVersion) break;
+
+			// If the next link in the log chain is found, update the end
+			if (i->beginVersion == *end) {
+				if (outLogs != nullptr) outLogs->push_back(*i);
+				*end = i->endVersion;
+			}
+		}
+	}
+
 	ACTOR static Future<BackupDescription> describeBackup_impl(Reference<BackupContainerFileSystem> bc,
 	                                                           bool deepScan,
 	                                                           Version logStartVersionOverride) {
@@ -1097,9 +1118,24 @@ public:
 		                       progress,
 		                       restorableBeginVersion);
 	}
-
 	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc,
-	                                                                    Version targetVersion) {
+	                                                                    Version targetVersion,
+	                                                                    bool logsOnly) {
+		if (logsOnly) {
+			state RestorableFileSet restorableSet;
+			state std::vector<LogFile> logFiles;
+			wait(store(logFiles, bc->listLogFiles(0, targetVersion)));
+			if (!logFiles.empty()) {
+				Version end = logFiles.begin()->endVersion;
+				computeRestoreEndVersion(logFiles, &restorableSet.logs, &end, targetVersion);
+				if (end >= targetVersion) {
+					restorableSet.continuousBeginVersion = logFiles.begin()->beginVersion;
+					restorableSet.continuousEndVersion = end;
+					return Optional<RestorableFileSet>(restorableSet);
+				}
+			}
+			return Optional<RestorableFileSet>();
+		}
 		// Find the most recent keyrange snapshot to end at or before targetVersion
 		state Optional<KeyspaceSnapshotFile> snapshot;
 		std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
@@ -1127,22 +1163,11 @@ public:
 
 			// If there are logs and the first one starts at or before the snapshot begin version then proceed
 			if (!logs.empty() && logs.front().beginVersion <= snapshot.get().beginVersion) {
-				auto i = logs.begin();
-				Version end = i->endVersion;
-				restorable.logs.push_back(*i);
-
-				// Add logs to restorable logs set until continuity is broken OR we reach targetVersion
-				while (++i != logs.end()) {
-					if (i->beginVersion > end || i->beginVersion > targetVersion)
-						break;
-					// If the next link in the log chain is found, update the end
-					if (i->beginVersion == end) {
-						restorable.logs.push_back(*i);
-						end = i->endVersion;
-					}
-				}
-
+				Version end = logs.begin()->endVersion;
+				computeRestoreEndVersion(logs, &restorable.logs, &end, targetVersion);
 				if (end >= targetVersion) {
+					restorable.continuousBeginVersion = logs.begin()->beginVersion;
+					restorable.continuousEndVersion = end;
 					return Optional<RestorableFileSet>(restorable);
 				}
 			}
@@ -1151,8 +1176,8 @@ public:
 		return Optional<RestorableFileSet>();
 	}
 
-	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion) {
-		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion);
+	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion, bool logsOnly) final {
+		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion, logsOnly);
 	}
 
 private:

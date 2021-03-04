@@ -148,7 +148,10 @@ struct RestorableFileSet {
 	Version targetVersion;
 	std::vector<LogFile> logs;
 	std::vector<RangeFile> ranges;
-	KeyspaceSnapshotFile snapshot;
+	// Mutation logs continuous range [begin, end)
+	Version continuousBeginVersion, continuousEndVersion;
+
+	KeyspaceSnapshotFile snapshot; // Info. for debug purposes
 };
 
 /* IBackupContainer is an interface to a set of backup data, which contains
@@ -224,7 +227,7 @@ public:
 
 	// Get exactly the files necessary to restore to targetVersion.  Returns non-present if
 	// restore to given version is not possible.
-	virtual Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion) = 0;
+	virtual Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion, bool logsOnly = false) = 0;
 
 	// Get an IBackupContainer based on a container spec string
 	static Reference<IBackupContainer> openContainer(std::string url);

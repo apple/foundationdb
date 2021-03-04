@@ -3429,7 +3429,6 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 			// Set the starting point for the next task in case we stop inside this file
 			endVersion = f.version;
 			beginFile = f.fileName;
-
 			state int64_t j = beginBlock * f.blockSize;
 			// For each block of the file
 			for (; j < f.fileSize; j += f.blockSize) {
@@ -3438,9 +3437,9 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 					break;
 
 				if (f.isRange) {
-					if (incrementalBackupOnly.get().present() && incrementalBackupOnly.get().get()) {
-						continue;
-					}
+					// if (incrementalBackupOnly.get().present() && incrementalBackupOnly.get().get()) {
+					// 	continue;
+					// }
 					addTaskFutures.push_back(
 					    RestoreRangeTaskFunc::addTask(tr,
 					                                  taskBucket,
@@ -3791,13 +3790,27 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			}
 		}
 
+		TraceEvent("RestoreCheckpoint1");
+		state Future<Optional<bool>> logsOnly = restore.incrementalBackupOnly().get(tr);
+		wait(success(logsOnly));
+		state bool incremental = false;
+		if (logsOnly.isReady() && logsOnly.get().present() && logsOnly.get().get()) {
+			incremental = true;
+		}
 		Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion));
+		state Version beginVer = 0;
+		if (!incremental) {
+			beginVer = restorable.get().snapshot.beginVersion;
+		}
 
+		TraceEvent("RestoreCheckpoint2")
+			.detail("BeginVer", beginVer)
+			.detail("Incremental", incremental);
 		if (!restorable.present())
 			throw restore_missing_data();
 
 		// First version for which log data should be applied
-		Params.firstVersion().set(task, restorable.get().snapshot.beginVersion);
+		Params.firstVersion().set(task, beginVer);
 
 		// Convert the two lists in restorable (logs and ranges) to a single list of RestoreFiles.
 		// Order does not matter, they will be put in order when written to the restoreFileMap below.
@@ -4751,7 +4764,7 @@ public:
 		if (targetVersion == invalidVersion && desc.maxRestorableVersion.present())
 			targetVersion = desc.maxRestorableVersion.get();
 
-		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
+		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion, incrementalBackupOnly));
 
 		if (!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
