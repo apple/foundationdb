@@ -8,7 +8,7 @@ Release Notes
 ======
 * Added a hint field in the trace event when all replicas of some data are lost. `(PR #4209) <https://github.com/apple/foundationdb/pull/4209>`_
 * Rewrote SQLite injected fault handling. `(PR #4212) <https://github.com/apple/foundationdb/pull/4212>`_
-* Add a SevWarnAlways trace line to help debug a rare failure. `(PR #4214) <https://github.com/apple/foundationdb/pull/4214>`_
+* Add a SevWarnAlways trace line to help diagnose a rare situation that may block excluding a storage server. `(PR #4214) <https://github.com/apple/foundationdb/pull/4214>`_
 * Use VFSAsyncFile::checkInjectedError to detect injected faults. `(PR #4253) <https://github.com/apple/foundationdb/pull/4253>`_ 
 * Build on Windows using VS 2019 + LLVM/Clang. `(PR #4258) <https://github.com/apple/foundationdb/pull/4258>`_ 
 * RateControl support in AFCCached to enable write op throttling. The feature is disabled by default. `(PR #4229) <https://github.com/apple/foundationdb/pull/4229>`_ 
@@ -25,6 +25,7 @@ Release Notes
 * Make the RocksDB init method idempotent. `(PR #4400) <https://github.com/apple/foundationdb/pull/4400>`_  
 * Fix bugs turned up by _GLIBCXX_DEBUG. `(PR #4301) <https://github.com/apple/foundationdb/pull/4301>`_  
 * Add New Unit and Integration Tests, and associated infrastructure. `(PR #4366) <https://github.com/apple/foundationdb/pull/4366>`_  
+* * Added transactions.rejected_for_queued_too_long for bookkeeping the number of transactions rejected by commit proxy because its queuing time exceeds MVCC window. `(PR #4353) <https://github.com/apple/foundationdb/pull/4353>`_
 
 6.3.10
 ======
@@ -112,7 +113,6 @@ Status
 * Removed fields ``worst_version_lag_storage_server`` and ``limiting_version_lag_storage_server`` from the ``cluster.qos`` section. The ``worst_data_lag_storage_server`` and ``limiting_data_lag_storage_server`` objects can be used instead. `(PR #3196) <https://github.com/apple/foundationdb/pull/3196>`_
 * If a process is unable to flush trace logs to disk, the problem will now be reported via the output of ``status`` command inside ``fdbcli``. `(PR #2605) <https://github.com/apple/foundationdb/pull/2605>`_ `(PR #2820) <https://github.com/apple/foundationdb/pull/2820>`_
 * When a configuration key is changed, it will always be included in ``status json`` output, even the value is reverted back to the default value. [6.3.5] `(PR #3610) <https://github.com/apple/foundationdb/pull/3610>`_
-* Added transactions.rejected_for_queued_too_long for bookkeeping the number of transactions rejected by commit proxy because its queuing time exceeds MVCC window.[6.3.11] `(PR #4353) <https://github.com/apple/foundationdb/pull/4353>`_
 
 Bindings
 --------
