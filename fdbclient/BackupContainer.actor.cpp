@@ -1314,7 +1314,7 @@ public:
 			wait(f->m_file->sync());
 			std::string name = f->m_file->getFilename();
 			f->m_file.clear();
-			renameFile(name, f->m_finalFullPath);
+			wait(IAsyncFileSystem::filesystem()->renameFile(name, f->m_finalFullPath));
 			return Void();
 		}
 
@@ -1337,7 +1337,7 @@ public:
 	};
 
 	Future<Reference<IBackupFile>> writeFile(std::string path) {
-		int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE;
+		int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE;
 		std::string fullPath = joinPath(m_path, path);
 		platform::createDirectory(parentDirectory(fullPath));
 		std::string temp = fullPath  + "." + deterministicRandom()->randomUniqueID().toString() + ".temp";
