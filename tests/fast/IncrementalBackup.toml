@@ -16,7 +16,7 @@ simBackupAgents = 'BackupToFile'
     testName = 'Cycle'
     nodeCount = 3000
     transactionsPerSecond = 3000.0
-    testDuration = 10.0
+    testDuration = 120.0
     expectedRate = 0
 
 [[test]]
