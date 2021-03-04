@@ -3747,8 +3747,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				wait(checkTaskVersion(tr->getDatabase(), task, name, version));
 				Version _restoreVersion = wait(restore.restoreVersion().getOrThrow(tr));
 				restoreVersion = _restoreVersion;
-				Version _beginVersion = wait(restore.beginVersion().getOrThrow(tr));
-				beginVersion = _beginVersion;
+				Optional<Version> _beginVersion = wait(restore.beginVersion().get(tr));
+				beginVersion = _beginVersion.present() ? _beginVersion.get() : invalidVersion;
 				wait(taskBucket->keepRunning(tr, task));
 
 				ERestoreState oldState = wait(restore.stateEnum().getD(tr));
@@ -3794,7 +3794,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			}
 		}
 
-		state bool incremental = wait(restore.incrementalBackupOnly().getOrThrow(tr));
+		Optional<bool> _incremental = wait(restore.incrementalBackupOnly().get(tr));
+		state bool incremental = _incremental.present() ? _incremental.get() : false;
 		if (beginVersion == invalidVersion) {
 			beginVersion = 0;
 		}
