@@ -2210,6 +2210,7 @@ ACTOR Future<Void> runRestore(Database db,
 			                                                   verbose,
 			                                                   KeyRef(addPrefix),
 			                                                   KeyRef(removePrefix),
+			                                                   true,
 									   incrementalBackupOnly));
 
 			if (waitForDone && verbose) {

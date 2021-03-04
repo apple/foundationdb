@@ -4124,6 +4124,7 @@ public:
 	                                        Key removePrefix,
 						bool incrementalBackupOnly,
 	                                        bool lockDB,
+	                                        bool incrementalBackupOnly,
 	                                        UID uid) {
 		KeyRangeMap<int> restoreRangeSet;
 		for (auto& range : ranges) {
@@ -4733,8 +4734,8 @@ public:
 	                                     bool verbose,
 	                                     Key addPrefix,
 	                                     Key removePrefix,
-					     bool incrementalBackupOnly,
 	                                     bool lockDB,
+	                                     bool incrementalBackupOnly,
 	                                     UID randomUid) {
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
 
@@ -4770,7 +4771,7 @@ public:
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				wait(submitRestore(
-				    backupAgent, tr, tagName, url, ranges, targetVersion, addPrefix, removePrefix, incrementalBackupOnly, lockDB, randomUid));
+				    backupAgent, tr, tagName, url, ranges, targetVersion, addPrefix, removePrefix, lockDB, incrementalBackupOnly, randomUid));
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
@@ -4905,7 +4906,7 @@ public:
 		                           addPrefix,
 		                           removePrefix,
 		                           true,
-					   invalidVersion,
+		                           false,
 		                           randomUid));
 		return ver;
 	}
@@ -4925,8 +4926,8 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          bool verbose,
                                          Key addPrefix,
                                          Key removePrefix,
-					 bool incrementalBackupOnly,
-                                         bool lockDB) {
+                                         bool lockDB,
+                                         bool incrementalBackupOnly) {
 	return FileBackupAgentImpl::restore(this,
 	                                    cx,
 	                                    cxOrig,
@@ -4938,8 +4939,8 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	                                    verbose,
 	                                    addPrefix,
 	                                    removePrefix,
-					    incrementalBackupOnly,
 	                                    lockDB,
+	                                    incrementalBackupOnly,
 	                                    deterministicRandom()->randomUniqueID());
 }
 
