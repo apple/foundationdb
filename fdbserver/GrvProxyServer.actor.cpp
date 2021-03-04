@@ -38,6 +38,7 @@ struct GrvProxyStats {
 	Counter txnThrottled;
 	double transactionRateAllowed, batchTransactionRateAllowed;
 	double transactionLimit, batchTransactionLimit;
+	// how much of the GRV requests queue was processed in one attempt to hand out read version.
 	double percentageOfDefaultGRVQueueProcessed;
 	double percentageOfBatchGRVQueueProcessed;
 
