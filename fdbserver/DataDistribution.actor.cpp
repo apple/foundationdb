@@ -2687,7 +2687,9 @@ ACTOR Future<Void> updateServerMetrics( TCServerInfo *server ) {
 			}
 	} else if ( server->serverMetrics.get().versionLag > SERVER_KNOBS->DD_SS_FAILURE_VERSIONLAG  ) {
 		if (server->ssVersionTooFarBehind.get() == false) {
-			TraceEvent("SSVersionDiffLarge", server->collection->distributorId).detail("ServerId", server->id.toString()).detail("VersionLag", server->serverMetrics.get().versionLag);
+			TraceEvent(SevWarn, "SSVersionDiffLarge", server->collection->distributorId)
+			    .detail("ServerId", server->id.toString())
+			    .detail("VersionLag", server->serverMetrics.get().versionLag);
 			server->ssVersionTooFarBehind.set(true);
 			server->collection->addLaggingStorageServer(server->lastKnownInterface.locality.zoneId().get());
 		}
