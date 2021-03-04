@@ -140,6 +140,7 @@ public:
 	}
 	KeyBackedProperty<Key> addPrefix() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 	KeyBackedProperty<Key> removePrefix() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<bool> incrementalBackupOnly() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 	// XXX: Remove restoreRange() once it is safe to remove. It has been changed to restoreRanges
 	KeyBackedProperty<KeyRange> restoreRange() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 	KeyBackedProperty<std::vector<KeyRange>> restoreRanges() {
@@ -3796,9 +3797,12 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		// Convert the two lists in restorable (logs and ranges) to a single list of RestoreFiles.
 		// Order does not matter, they will be put in order when written to the restoreFileMap below.
 		state std::vector<RestoreConfig::RestoreFile> files;
+		state Future<Optional<bool>> incrementalBackupOnly = restore.incrementalBackupOnly().get(tr);
 
-		for (const RangeFile& f : restorable.get().ranges) {
-			files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
+		if (!incrementalBackupOnly.get().present() || !incrementalBackupOnly.get().get()) {
+			for (const RangeFile& f : restorable.get().ranges) {
+				files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
+			}
 		}
 		for (const LogFile& f : restorable.get().logs) {
 			files.push_back({ f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion });
@@ -4118,6 +4122,7 @@ public:
 	                                        Version restoreVersion,
 	                                        Key addPrefix,
 	                                        Key removePrefix,
+						bool incrementalBackupOnly,
 	                                        bool lockDB,
 	                                        UID uid) {
 		KeyRangeMap<int> restoreRangeSet;
@@ -4185,6 +4190,7 @@ public:
 		restore.sourceContainer().set(tr, bc);
 		restore.stateEnum().set(tr, ERestoreState::QUEUED);
 		restore.restoreVersion().set(tr, restoreVersion);
+		restore.incrementalBackupOnly().set(tr, incrementalBackupOnly);
 		if (BUGGIFY && restoreRanges.size() == 1) {
 			restore.restoreRange().set(tr, restoreRanges[0]);
 		} else {
@@ -4727,6 +4733,7 @@ public:
 	                                     bool verbose,
 	                                     Key addPrefix,
 	                                     Key removePrefix,
+					     bool incrementalBackupOnly,
 	                                     bool lockDB,
 	                                     UID randomUid) {
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
@@ -4763,7 +4770,7 @@ public:
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				wait(submitRestore(
-				    backupAgent, tr, tagName, url, ranges, targetVersion, addPrefix, removePrefix, lockDB, randomUid));
+				    backupAgent, tr, tagName, url, ranges, targetVersion, addPrefix, removePrefix, incrementalBackupOnly, lockDB, randomUid));
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
@@ -4898,6 +4905,7 @@ public:
 		                           addPrefix,
 		                           removePrefix,
 		                           true,
+					   invalidVersion,
 		                           randomUid));
 		return ver;
 	}
@@ -4917,6 +4925,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          bool verbose,
                                          Key addPrefix,
                                          Key removePrefix,
+					 bool incrementalBackupOnly,
                                          bool lockDB) {
 	return FileBackupAgentImpl::restore(this,
 	                                    cx,
@@ -4929,6 +4938,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	                                    verbose,
 	                                    addPrefix,
 	                                    removePrefix,
+					    incrementalBackupOnly,
 	                                    lockDB,
 	                                    deterministicRandom()->randomUniqueID());
 }

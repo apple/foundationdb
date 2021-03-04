@@ -231,6 +231,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
+	{ OPT_INCREMENTALONLY,  "--incremental",    SO_NONE },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -657,6 +658,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
+	{ OPT_INCREMENTALONLY,  "--incremental",    SO_NONE },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -2139,7 +2141,8 @@ ACTOR Future<Void> runRestore(Database db,
                               bool verbose,
                               bool waitForDone,
                               std::string addPrefix,
-                              std::string removePrefix) {
+                              std::string removePrefix,
+			      bool incrementalBackupOnly) {
 	if (ranges.empty()) {
 		ranges.push_back_deep(ranges.arena(), normalKeys);
 	}
@@ -2206,7 +2209,8 @@ ACTOR Future<Void> runRestore(Database db,
 			                                                   targetVersion,
 			                                                   verbose,
 			                                                   KeyRef(addPrefix),
-			                                                   KeyRef(removePrefix)));
+			                                                   KeyRef(removePrefix),
+									   incrementalBackupOnly));
 
 			if (waitForDone && verbose) {
 				// If restore is now complete then report version restored
@@ -3707,7 +3711,8 @@ int main(int argc, char* argv[]) {
 				                         !quietDisplay,
 				                         waitForDone,
 				                         addPrefix,
-				                         removePrefix));
+				                         removePrefix,
+							 incrementalBackupOnly));
 				break;
 			case RESTORE_WAIT:
 				f = stopAfter(success(ba.waitRestore(db, KeyRef(tagName), true)));
