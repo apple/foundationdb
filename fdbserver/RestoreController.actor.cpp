@@ -890,6 +890,7 @@ ACTOR static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInt
 	    .detail("BatchIndex", batchIndex)
 	    .detail("Appliers", appliersInterf.size());
 	std::vector<std::pair<UID, RestoreVersionBatchRequest>> requestsToAppliers;
+	requestsToAppliers.reserve(appliersInterf.size());
 	for (auto& applier : appliersInterf) {
 		requestsToAppliers.emplace_back(applier.first, RestoreVersionBatchRequest(batchIndex));
 	}
@@ -899,6 +900,7 @@ ACTOR static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInt
 	    .detail("BatchIndex", batchIndex)
 	    .detail("Loaders", loadersInterf.size());
 	std::vector<std::pair<UID, RestoreVersionBatchRequest>> requestsToLoaders;
+	requestsToLoaders.reserve(loadersInterf.size());
 	for (auto& loader : loadersInterf) {
 		requestsToLoaders.emplace_back(loader.first, RestoreVersionBatchRequest(batchIndex));
 	}
@@ -1029,6 +1031,7 @@ ACTOR static Future<Void> notifyLoadersVersionBatchFinished(std::map<UID, Restor
                                                             int batchIndex) {
 	TraceEvent("FastRestoreControllerPhaseNotifyLoadersVersionBatchFinishedStart").detail("BatchIndex", batchIndex);
 	std::vector<std::pair<UID, RestoreVersionBatchRequest>> requestsToLoaders;
+	requestsToLoaders.reserve(loadersInterf.size());
 	for (auto& loader : loadersInterf) {
 		requestsToLoaders.emplace_back(loader.first, RestoreVersionBatchRequest(batchIndex));
 	}

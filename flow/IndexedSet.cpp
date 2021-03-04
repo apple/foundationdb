@@ -263,8 +263,8 @@ TEST_CASE("performance/flow/IndexedSet/integers") {
 	std::mt19937_64 urng(deterministicRandom()->randomUInt32());
 
 	std::vector<int> x;
-	for (int i = 0; i<1000000; i++)
-		x.push_back(deterministicRandom()->randomInt(0, 10000000));
+	x.reserve(1000000);
+	for (int i = 0; i < 1000000; i++) x.push_back(deterministicRandom()->randomInt(0, 10000000));
 
 	IndexedSet<int, int> is;
 	double start = timer();
@@ -462,8 +462,8 @@ TEST_CASE("/flow/IndexedSet/all numbers") {
 	std::mt19937_64 urng(deterministicRandom()->randomUInt32());
 
 	std::vector<int> allNumbers;
-	for (int i = 0; i<1000000; i++)
-		allNumbers.push_back(i);
+	allNumbers.reserve(1000000);
+	for (int i = 0; i < 1000000; i++) allNumbers.push_back(i);
 	std::shuffle(allNumbers.begin(), allNumbers.end(), urng);
 
 	for (int i = 0; i<allNumbers.size(); i++)

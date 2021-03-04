@@ -278,6 +278,7 @@ namespace ThrottleApi {
 		loop {
 			try {
 				state std::vector<Future<Optional<Value>>> values;
+				values.reserve(keys.size());
 				for(auto key : keys) {
 					values.push_back(tr.get(key));
 				}

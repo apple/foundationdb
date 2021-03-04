@@ -446,8 +446,8 @@ public:
 		// Since the futures have to be kept in a vector to be compatible with waitForAny(), we'll keep a queue
 		// of available slots in it.  Initially, they're all available.
 		state std::vector<int> availableSlots;
-		for(int i = 0; i < tasks.size(); ++i)
-			availableSlots.push_back(i);
+		availableSlots.reserve(tasks.size());
+		for (int i = 0; i < tasks.size(); ++i) availableSlots.push_back(i);
 
 		state std::vector<Future<Reference<Task>>> getTasks;
 		state unsigned int getBatchSize = 1;

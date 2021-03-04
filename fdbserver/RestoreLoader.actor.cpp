@@ -879,6 +879,7 @@ ACTOR Future<Void> sendMutationsToApplier(
 			// to improve bandwidth from a loader to appliers
 			if (msgSize >= SERVER_KNOBS->FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES) {
 				std::vector<std::pair<UID, RestoreSendVersionedMutationsRequest>> requests;
+				requests.reserve(applierIDs.size());
 				for (const UID& applierID : applierIDs) {
 					requests.emplace_back(
 					    applierID, RestoreSendVersionedMutationsRequest(batchIndex, asset, msgIndex, isRangeFile,
@@ -903,6 +904,7 @@ ACTOR Future<Void> sendMutationsToApplier(
 	if (msgSize > 0) {
 		// TODO: Sanity check each asset has been received exactly once!
 		std::vector<std::pair<UID, RestoreSendVersionedMutationsRequest>> requests;
+		requests.reserve(applierIDs.size());
 		for (const UID& applierID : applierIDs) {
 			requests.emplace_back(applierID,
 			                      RestoreSendVersionedMutationsRequest(batchIndex, asset, msgIndex, isRangeFile,
@@ -1308,6 +1310,7 @@ ACTOR static Future<Void> parseLogFileToMutationsOnLoader(NotifiedVersion* pProc
 // Return applier IDs that are used to apply key-values
 std::vector<UID> getApplierIDs(std::map<Key, UID>& rangeToApplier) {
 	std::vector<UID> applierIDs;
+	applierIDs.reserve(rangeToApplier.size());
 	for (auto& applier : rangeToApplier) {
 		applierIDs.push_back(applier.second);
 	}

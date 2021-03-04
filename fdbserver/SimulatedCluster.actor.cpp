@@ -1279,6 +1279,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 			}
 
 			std::vector<IPAddress> ips;
+			ips.reserve(processesPerMachine);
 			for (int i = 0; i < processesPerMachine; i++) {
 				ips.push_back(makeIPAddressForSim(useIPv6, { 2, dc, deterministicRandom()->randomInt(1, i + 2), machine }));
 			}
@@ -1294,7 +1295,8 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 
 			if (requiresExtraDBMachines) {
 				std::vector<IPAddress> extraIps;
-				for (int i = 0; i < processesPerMachine; i++){
+				extraIps.reserve(processesPerMachine);
+				for (int i = 0; i < processesPerMachine; i++) {
 					extraIps.push_back(makeIPAddressForSim(useIPv6, { 4, dc, deterministicRandom()->randomInt(1, i + 2), machine }));
 				}
 

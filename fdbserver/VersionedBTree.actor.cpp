@@ -7162,6 +7162,7 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/IntIntPair") {
 
 	// Repeatedly seek for one of a set of pregenerated random pairs and time it.
 	std::vector<IntIntPair> randomPairs;
+	randomPairs.reserve(10 * N);
 	for (int i = 0; i < 10 * N; ++i) {
 		randomPairs.push_back(randomPair());
 	}

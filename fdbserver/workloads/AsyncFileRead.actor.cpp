@@ -279,7 +279,8 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload
 
 			std::vector<Future<Void>> readers;
 
-			for(int i=0; i<self->numParallelReads; i++)
+			readers.reserve(self->numParallelReads);
+			for (int i = 0; i < self->numParallelReads; i++)
 				readers.push_back( readLoop(self, i, self->fixedRate / self->numParallelReads) );
 			wait(waitForAll(readers));
 

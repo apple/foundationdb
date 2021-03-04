@@ -219,6 +219,7 @@ struct DDBalanceWorkload : TestWorkload {
 			while(nextBin == currentBin) nextBin = deterministicRandom()->randomInt(key_space_drift,self->binCount+key_space_drift);
 
 			vector<Future<Void>> fs;
+			fs.reserve(self->actorsPerClient / self->moversPerClient);
 			for (int i = 0; i < self->actorsPerClient / self->moversPerClient; i++)
 				fs.push_back( self->ddBalanceWorker(cx, self, moverId, currentBin, nextBin, i*self->nodesPerActor, (i+1)*self->nodesPerActor, clientBegin, &lastTime, 1.0 / self->transactionsPerSecond));
 			wait( waitForAll(fs) );

@@ -86,8 +86,8 @@ struct RWTransactor : ITransactor {
 
 		for(int op = 0; op < self->reads || op < self->writes; op++ )
 			keys.push_back( self->randomKey() );
-		for(int op = 0; op < self->writes; op++ )
-			values.push_back( self->randomValue() );
+		values.reserve(self->writes);
+		for (int op = 0; op < self->writes; op++) values.push_back(self->randomValue());
 
 		loop {
 			try {
@@ -97,8 +97,8 @@ struct RWTransactor : ITransactor {
 				state double rrLatency = -t_rv * self->reads;
 
 				state vector<Future<Optional<Value>>> reads;
-				for(int i=0; i<self->reads; i++)
-					reads.push_back( getLatency( tr.get( keys[i] ), &rrLatency ) );
+				reads.reserve(self->reads);
+				for (int i = 0; i < self->reads; i++) reads.push_back(getLatency(tr.get(keys[i]), &rrLatency));
 				wait( waitForAll(reads) );
 				for(int i=0; i<self->writes; i++)
 					tr.set( keys[i], values[i] );

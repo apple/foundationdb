@@ -35,8 +35,8 @@ ACTOR Future<Void> unitPerfTest() {
 
 	state int counter = 0;
 	state vector<Future<Void>> sleepy;
-	for(int i=0; i<100000; i++)
-		sleepy.push_back( sleepyActor( .1, &counter ) );
+	sleepy.reserve(100000);
+	for (int i = 0; i < 100000; i++) sleepy.push_back(sleepyActor(.1, &counter));
 
 	wait( delay(10) );
 	sleepy.clear();
