@@ -4,6 +4,11 @@
 Release Notes
 #############
 
+6.2.33
+======
+* Fix backup agent stall when writing to local filesystem with slow metadata operations. `(PR #4428) <https://github.com/apple/foundationdb/pull/4428>`_
+* Backup agent writes to local filesystems without 4k caching layer, resulting in larger write operations. `(PR #4428) <https://github.com/apple/foundationdb/pull/4428>`_
+
 6.2.32
 ======
 * Fix an issue where symbolic links in cmake-built RPMs are broken if you unpack the RPM to a custom directory. `(PR #4380) <https://github.com/apple/foundationdb/pull/4380>`_
