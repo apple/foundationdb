@@ -1601,8 +1601,8 @@ bool Net2::isAddressOnThisHost( NetworkAddress const& addr ) {
 Reference<IListener> Net2::listen( NetworkAddress localAddr ) {
 	try {
 #ifndef TLS_DISABLED
-		initTLS(ETLSInitState::LISTEN);
 		if ( localAddr.isTLS() ) {
+			initTLS(ETLSInitState::LISTEN);
 			return Reference<IListener>(new SSLListener( reactor.ios, &this->sslContextVar, localAddr ));
 		}
 #endif
