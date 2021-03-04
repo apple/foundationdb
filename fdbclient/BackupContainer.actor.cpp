@@ -1125,6 +1125,8 @@ public:
 			state RestorableFileSet restorableSet;
 			state std::vector<LogFile> logFiles;
 			wait(store(logFiles, bc->listLogFiles(0, targetVersion)));
+			// List logs in version order so log continuity can be analyzed
+			std::sort(logFiles.begin(), logFiles.end());
 			if (!logFiles.empty()) {
 				Version end = logFiles.begin()->endVersion;
 				computeRestoreEndVersion(logFiles, &restorableSet.logs, &end, targetVersion);

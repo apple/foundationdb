@@ -3790,22 +3790,18 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			}
 		}
 
-		TraceEvent("RestoreCheckpoint1");
 		state Future<Optional<bool>> logsOnly = restore.incrementalBackupOnly().get(tr);
 		wait(success(logsOnly));
 		state bool incremental = false;
 		if (logsOnly.isReady() && logsOnly.get().present() && logsOnly.get().get()) {
 			incremental = true;
 		}
-		Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion));
+		Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion, incremental));
 		state Version beginVer = 0;
 		if (!incremental) {
 			beginVer = restorable.get().snapshot.beginVersion;
 		}
 
-		TraceEvent("RestoreCheckpoint2")
-			.detail("BeginVer", beginVer)
-			.detail("Incremental", incremental);
 		if (!restorable.present())
 			throw restore_missing_data();
 
@@ -3886,15 +3882,21 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		}
 
 		restore.stateEnum().set(tr, ERestoreState::RUNNING);
-
 		// Set applyMutation versions
+
 		restore.setApplyBeginVersion(tr, firstVersion);
 		restore.setApplyEndVersion(tr, firstVersion);
-
 		// Apply range data and log data in order
 		wait(success(RestoreDispatchTaskFunc::addTask(
 		    tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE)));
-
+		state Future<Optional<bool>> logsOnly = restore.incrementalBackupOnly().get(tr);
+		wait(success(logsOnly));
+		if (logsOnly.isReady() && logsOnly.get().present() && logsOnly.get().get()) {
+			// If this is an incremental restore, we need to set the applyMutationsMapPrefix
+			// to the earliest log version so no mutations are missed
+			Value versionEncoded = BinaryWriter::toValue(Params.firstVersion().get(task), Unversioned());
+			wait(krmSetRange(tr, restore.applyMutationsMapPrefix(), normalKeys, versionEncoded));
+		}
 		wait(taskBucket->finish(tr, task));
 		return Void();
 	}
@@ -4190,7 +4192,7 @@ public:
 			                                .removePrefix(removePrefix)
 			                                .withPrefix(addPrefix);
 			Standalone<RangeResultRef> existingRows = wait(tr->getRange(restoreIntoRange, 1));
-			if (existingRows.size() > 0) {
+			if (existingRows.size() > 0 && !incrementalBackupOnly) {
 				throw restore_destination_not_empty();
 			}
 		}
@@ -4763,6 +4765,10 @@ public:
 		printf("Backup Description\n%s", desc.toString().c_str());
 		if (targetVersion == invalidVersion && desc.maxRestorableVersion.present())
 			targetVersion = desc.maxRestorableVersion.get();
+
+		if (targetVersion == invalidVersion && incrementalBackupOnly && desc.maxLogEnd.present()) {
+			targetVersion = desc.maxLogEnd.get() - 1;
+		}
 
 		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion, incrementalBackupOnly));
 
