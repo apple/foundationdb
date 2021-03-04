@@ -315,6 +315,8 @@ public:
 			LogicalPageID nextPageID;
 			uint16_t nextOffset;
 			uint16_t endOffset;
+			uint16_t curSuperPage;
+			uint16_t superBlockEnd;
 			uint8_t* begin() { return (uint8_t*)(this + 1); }
 		};
 #pragma pack(pop)
@@ -363,7 +365,7 @@ public:
 			debug_printf("FIFOQueue::Cursor(%s) Adding page %s init=%d\n", toString().c_str(),
 			             ::toString(newPageID).c_str(), initializeNewPage);
 
-			// Update existing page and write, if it exists
+			// Update existing page/newLastPageID and write, if it exists
 			if (page) {
 				setNext(newPageID, newOffset);
 				debug_printf("FIFOQueue::Cursor(%s) Linked new page\n", toString().c_str());
@@ -1221,6 +1223,22 @@ public:
 		pageCache.setSizeLimit(1 + ((pageCacheBytes - 1) / physicalPageSize));
 	}
 
+	void setSuperPageSize(int size) {
+		// Super page can't be smaller than the regular page
+		// TODO: Should we assert that it's a multiple of logical page size?
+		ASSERT(size >= self->logicalPageSize);
+		logicalSuperPageSize = size;
+		// Physical page size is the total size of the smallest number of physical blocks needed to store
+		// logicalPageSize bytes
+		int blocks = 1 + ((logicalSuperPageSize - 1) / smallestPhysicalBlock);
+		physicalSuperPageSize = blocks * smallestPhysicalBlock;
+		if (pHeader != nullptr) {
+			pHeader->superPageSize = logicalSuperPageSize;
+		}
+		//TODO: we should probabky use the same page cache?
+		//superPageCache.setSizeLimit(1 + ((superPageCacheBytes - 1) / physicalSuperPageSize));
+	}
+
 	void updateCommittedHeader() {
 		memcpy(lastCommittedHeaderPage->mutate(), headerPage->begin(), smallestPhysicalBlock);
 	}
@@ -1304,7 +1322,11 @@ public:
 				    .detail("DesiredPageSize", self->desiredPageSize);
 			}
 
+
+			self->setSuperPageSize(self->pHeader->superPageSize);
+
 			self->freeList.recover(self, self->pHeader->freeList, "FreeListRecovered");
+			self->superPageFreeList.recover(self, self->pHeader->superPageFreeList, "SuperPageFreeListRecovered");
 			self->delayedFreeList.recover(self, self->pHeader->delayedFreeList, "DelayedFreeListRecovered");
 			self->remapQueue.recover(self, self->pHeader->remapQueue, "RemapQueueRecovered");
 
@@ -1423,7 +1445,7 @@ public:
 		return id;
 	};
 
-	// Grow the pager file by pone page and return it
+	// Grow the pager file by one page and return it
 	LogicalPageID newLastPageID() {
 		LogicalPageID id = pHeader->pageCount;
 		++pHeader->pageCount;
@@ -2069,7 +2091,10 @@ private:
 		uint16_t formatVersion;
 		uint32_t pageSize;
 		int64_t pageCount;
+		uint32_t superPageSize; // TODO: NEELAM: byte size or number of small pages?
+		int64_t superPageCount; // TODO: NEELAM: Should we keep track separately?
 		FIFOQueue<LogicalPageID>::QueueState freeList;
+		FIFOQueue<LogicalPageID>::QueueState superPageFreeList; // free list for super pages
 		FIFOQueue<DelayedFreePage>::QueueState delayedFreeList;
 		FIFOQueue<RemappedPage>::QueueState remapQueue;
 		Version committedVersion;
@@ -2117,6 +2142,10 @@ private:
 	static constexpr int smallestPhysicalBlock = 4096;
 	int physicalPageSize;
 	int logicalPageSize; // In simulation testing it can be useful to use a small logical page size
+
+	// Super pages are big pages used by the FIFO queues
+	int physicalSuperPageSize;
+	int logicalSuperPageSize; // In simulation testing it can be useful to use a small logical page size
 
 	int64_t pageCacheBytes;
 
