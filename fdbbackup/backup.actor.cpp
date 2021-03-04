@@ -2189,7 +2189,7 @@ ACTOR Future<Void> runRestore(Database db,
 			BackupDescription desc = wait(bc->describeBackup());
 
 			if (incrementalBackupOnly && desc.maxLogEnd.present()) {
-				targetVersion = desc.maxLogEnd.get() - 1;
+				targetVersion = desc.maxLogEnd.get();
 			} else if (desc.maxRestorableVersion.present()) {
 				targetVersion = desc.maxRestorableVersion.get();
 			} else {
