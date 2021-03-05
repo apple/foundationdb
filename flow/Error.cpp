@@ -40,25 +40,25 @@ Error Error::fromUnvalidatedCode(int code) {
 		Error e = Error::fromCode(error_code_unknown_error);
 		TraceEvent(SevWarn, "ConvertedUnvalidatedErrorCode").error(e).detail("OriginalCode", code);
 		return e;
-	}
-	else
+	} else
 		return Error::fromCode(code);
 }
 
-Error internal_error_impl( const char* file, int line ) {
+Error internal_error_impl(const char* file, int line) {
 	fprintf(stderr, "Internal Error @ %s %d:\n  %s\n", file, line, platform::get_backtrace().c_str());
 
 	TraceEvent(SevError, "InternalError")
-		.error(Error::fromCode(error_code_internal_error))
-		.detail("File", file)
-		.detail("Line", line)
-		.backtrace();
+	    .error(Error::fromCode(error_code_internal_error))
+	    .detail("File", file)
+	    .detail("Line", line)
+	    .backtrace();
 	flushTraceFileVoid();
 	return Error(error_code_internal_error);
 }
 
 Error::Error(int error_code) : error_code(error_code), flags(0) {
-	if (TRACE_SAMPLE()) TraceEvent(SevSample, "ErrorCreated").detail("ErrorCode", error_code);
+	if (TRACE_SAMPLE())
+		TraceEvent(SevSample, "ErrorCreated").detail("ErrorCode", error_code);
 	// std::cout << "Error: " << error_code << std::endl;
 	if (error_code >= 3000 && error_code < 6000) {
 		{
@@ -83,7 +83,7 @@ Error::Error(int error_code) : error_code(error_code), flags(0) {
 		}
 	}
 	/*if (error_code)
-		errorCounts()[error_code]++;*/
+	    errorCounts()[error_code]++;*/
 }
 
 ErrorCodeTable& Error::errorCodeTable() {
@@ -94,14 +94,16 @@ ErrorCodeTable& Error::errorCodeTable() {
 const char* Error::name() const {
 	auto table = errorCodeTable();
 	auto it = table.find(error_code);
-	if (it == table.end()) return "UNKNOWN_ERROR";
+	if (it == table.end())
+		return "UNKNOWN_ERROR";
 	return it->second.first;
 }
 
 const char* Error::what() const {
 	auto table = errorCodeTable();
 	auto it = table.find(error_code);
-	if (it == table.end()) return "UNKNOWN_ERROR";
+	if (it == table.end())
+		return "UNKNOWN_ERROR";
 	return it->second.second;
 }
 
@@ -116,11 +118,13 @@ Error Error::asInjectedFault() const {
 }
 
 ErrorCodeTable::ErrorCodeTable() {
-	#define ERROR(name, number, description) addCode(number, #name, description); enum { Duplicate_Error_Code_##number = 0 };
-	#include "error_definitions.h"
+#define ERROR(name, number, description)                                                                               \
+	addCode(number, #name, description);                                                                               \
+	enum { Duplicate_Error_Code_##number = 0 };
+#include "error_definitions.h"
 }
 
-void ErrorCodeTable::addCode(int code, const char *name, const char *description) {
+void ErrorCodeTable::addCode(int code, const char* name, const char* description) {
 	(*this)[code] = std::make_pair(name, description);
 }
 

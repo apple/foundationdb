@@ -19,7 +19,7 @@
  */
 
 #if defined(NO_INTELLISENSE)
-	#include "fdbserver/StorageMetrics.actor.g.h"
+#include "fdbserver/StorageMetrics.actor.g.h"
 #else
-	#include "fdbserver/StorageMetrics.actor.h"
+#include "fdbserver/StorageMetrics.actor.h"
 #endif

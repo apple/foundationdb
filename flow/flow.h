@@ -22,9 +22,10 @@
 #define FLOW_FLOW_H
 #pragma once
 
-#pragma warning( disable: 4244 4267 ) // SOMEDAY: Carefully check for integer overflow issues (e.g. size_t to int conversions like this suppresses)
-#pragma warning( disable: 4345 )
-#pragma warning( error: 4239 )
+#pragma warning(disable : 4244 4267) // SOMEDAY: Carefully check for integer overflow issues (e.g. size_t to int
+                                     // conversions like this suppresses)
+#pragma warning(disable : 4345)
+#pragma warning(error : 4239)
 
 #include <vector>
 #include <queue>
@@ -70,24 +71,25 @@ if (BUGGIFY) (
 
 extern std::vector<double> P_BUGGIFIED_SECTION_ACTIVATED, P_BUGGIFIED_SECTION_FIRES;
 extern double P_EXPENSIVE_VALIDATION;
-enum class BuggifyType : uint8_t {
-	General=0, Client
-};
+enum class BuggifyType : uint8_t { General = 0, Client };
 bool isBuggifyEnabled(BuggifyType type);
 void clearBuggifySections(BuggifyType type);
 int getSBVar(std::string file, int line, BuggifyType);
-void enableBuggify(bool enabled, BuggifyType type);   // Currently controls buggification and (randomized) expensive validation
+void enableBuggify(bool enabled,
+                   BuggifyType type); // Currently controls buggification and (randomized) expensive validation
 bool validationIsEnabled(BuggifyType type);
 
-#define BUGGIFY_WITH_PROB(x) (getSBVar(__FILE__, __LINE__, BuggifyType::General) && deterministicRandom()->random01() < (x))
+#define BUGGIFY_WITH_PROB(x)                                                                                           \
+	(getSBVar(__FILE__, __LINE__, BuggifyType::General) && deterministicRandom()->random01() < (x))
 #define BUGGIFY BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::General)])
-#define EXPENSIVE_VALIDATION (validationIsEnabled(BuggifyType::General) && deterministicRandom()->random01() < P_EXPENSIVE_VALIDATION)
+#define EXPENSIVE_VALIDATION                                                                                           \
+	(validationIsEnabled(BuggifyType::General) && deterministicRandom()->random01() < P_EXPENSIVE_VALIDATION)
 
 extern Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_unit = "");
 extern std::string format(const char* form, ...);
 
 // On success, returns the number of characters written. On failure, returns a negative number.
-extern int vsformat(std::string &outputString, const char* form, va_list args);
+extern int vsformat(std::string& outputString, const char* form, va_list args);
 
 extern Standalone<StringRef> strinc(StringRef const& str);
 extern StringRef strinc(StringRef const& str, Arena& arena);
@@ -95,17 +97,17 @@ extern Standalone<StringRef> addVersionStampAtEnd(StringRef const& str);
 extern StringRef addVersionStampAtEnd(StringRef const& str, Arena& arena);
 
 template <typename Iter>
-StringRef concatenate( Iter b, Iter const& e, Arena& arena ) {
+StringRef concatenate(Iter b, Iter const& e, Arena& arena) {
 	int rsize = 0;
 	Iter i = b;
-	while(i != e) {
+	while (i != e) {
 		rsize += i->size();
 		++i;
 	}
-	uint8_t* s = new (arena) uint8_t[ rsize ];
+	uint8_t* s = new (arena) uint8_t[rsize];
 	uint8_t* p = s;
-	while(b != e) {
-		memcpy(p, b->begin(),b->size());
+	while (b != e) {
+		memcpy(p, b->begin(), b->size());
 		p += b->size();
 		++b;
 	}
@@ -113,9 +115,9 @@ StringRef concatenate( Iter b, Iter const& e, Arena& arena ) {
 }
 
 template <typename Iter>
-Standalone<StringRef> concatenate( Iter b, Iter const& e ) {
+Standalone<StringRef> concatenate(Iter b, Iter const& e) {
 	Standalone<StringRef> r;
-	((StringRef &)r) = concatenate(b, e, r.arena());
+	((StringRef&)r) = concatenate(b, e, r.arena());
 	return r;
 }
 
@@ -136,35 +138,41 @@ public:
 	ErrorOr() : error(default_error_or()) {}
 	ErrorOr(Error const& error) : error(error) {}
 	ErrorOr(const ErrorOr<T>& o) : error(o.error) {
-		if (present()) new (&value) T(o.get());
+		if (present())
+			new (&value) T(o.get());
 	}
 
 	template <class U>
-	ErrorOr(const U& t) : error() { new (&value) T(t); }
+	ErrorOr(const U& t) : error() {
+		new (&value) T(t);
+	}
 
 	ErrorOr(Arena& a, const ErrorOr<T>& o) : error(o.error) {
-		if (present()) new (&value) T(a, o.get());
+		if (present())
+			new (&value) T(a, o.get());
 	}
 	int expectedSize() const { return present() ? get().expectedSize() : 0; }
 
-	template <class R> ErrorOr<R> castTo() const {
-		return map<R>([](const T& v){ return (R)v; });
+	template <class R>
+	ErrorOr<R> castTo() const {
+		return map<R>([](const T& v) { return (R)v; });
 	}
 
-	template <class R> ErrorOr<R> map(std::function<R(T)> f) const {
+	template <class R>
+	ErrorOr<R> map(std::function<R(T)> f) const {
 		if (present()) {
 			return ErrorOr<R>(f(get()));
-		}
-		else {
+		} else {
 			return ErrorOr<R>(error);
 		}
 	}
 
 	~ErrorOr() {
-		if (present()) ((T*)&value)->~T();
+		if (present())
+			((T*)&value)->~T();
 	}
 
-	ErrorOr & operator=(ErrorOr const& o) {
+	ErrorOr& operator=(ErrorOr const& o) {
 		if (present()) {
 			((T*)&value)->~T();
 		}
@@ -184,24 +192,33 @@ public:
 		UNSTOPPABLE_ASSERT(present());
 		return *(T const*)&value;
 	}
-	T orDefault(T const& default_value) const { if (present()) return get(); else return default_value; }
+	T orDefault(T const& default_value) const {
+		if (present())
+			return get();
+		else
+			return default_value;
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		// SOMEDAY: specialize for space efficiency?
 		serializer(ar, error);
 		if (present()) {
-			if (Ar::isDeserializing) new (&value) T();
+			if (Ar::isDeserializing)
+				new (&value) T();
 			serializer(ar, *(T*)&value);
 		}
 	}
 
 	bool isError() const { return error.code() != invalid_error_code; }
 	bool isError(int code) const { return error.code() == code; }
-	const Error& getError() const { ASSERT(isError()); return error; }
+	const Error& getError() const {
+		ASSERT(isError());
+		return error;
+	}
 
 private:
-	typename std::aligned_storage< sizeof(T), __alignof(T) >::type value;
+	typename std::aligned_storage<sizeof(T), __alignof(T)>::type value;
 	Error error;
 };
 
@@ -210,9 +227,13 @@ struct union_like_traits<ErrorOr<T>> : std::true_type {
 	using Member = ErrorOr<T>;
 	using alternatives = pack<Error, T>;
 	template <class Context>
-	static uint8_t index(const Member& variant, Context&) { return variant.present() ? 1 : 0; }
+	static uint8_t index(const Member& variant, Context&) {
+		return variant.present() ? 1 : 0;
+	}
 	template <class Context>
-	static bool empty(const Member& variant, Context&) { return false; }
+	static bool empty(const Member& variant, Context&) {
+		return false;
+	}
 
 	template <int i, class Context>
 	static const index_t<i, alternatives>& get(const Member& m, Context&) {
@@ -240,13 +261,13 @@ class CachedSerialization {
 public:
 	constexpr static FileIdentifier file_identifier = FileIdentifierFor<T>::value;
 
-	//FIXME: this code will not work for caching a direct serialization from ObjectWriter, because it adds an ErrorOr, 
+	// FIXME: this code will not work for caching a direct serialization from ObjectWriter, because it adds an ErrorOr,
 	// we should create a separate SerializeType for direct serialization
 	enum class SerializeType { None, Binary, Object };
 
 	CachedSerialization() : cacheType(SerializeType::None) {}
 	explicit CachedSerialization(const T& data) : data(data), cacheType(SerializeType::None) {}
-	
+
 	const T& read() const { return data; }
 
 	T& mutate() {
@@ -254,24 +275,18 @@ public:
 		return data;
 	}
 
-	//This should only be called from the ObjectSerializer load function
+	// This should only be called from the ObjectSerializer load function
 	Standalone<StringRef> getCache() const {
-		if(cacheType != SerializeType::Object) {
+		if (cacheType != SerializeType::Object) {
 			cache = ObjectWriter::toValue(ErrorOr<EnsureTable<T>>(data), AssumeVersion(currentProtocolVersion));
 			cacheType = SerializeType::Object;
 		}
 		return cache;
 	}
 
-	bool operator == (CachedSerialization<T> const& rhs) const {
-		return data == rhs.data;
-	}
-	bool operator != (CachedSerialization<T> const& rhs) const {
-		return !(*this == rhs);
-	}
-	bool operator < (CachedSerialization<T> const& rhs) const {
-		return data < rhs.data;
-	}
+	bool operator==(CachedSerialization<T> const& rhs) const { return data == rhs.data; }
+	bool operator!=(CachedSerialization<T> const& rhs) const { return !(*this == rhs); }
+	bool operator<(CachedSerialization<T> const& rhs) const { return data < rhs.data; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -304,12 +319,9 @@ namespace detail {
 
 template <class T, class Context>
 struct LoadSaveHelper<CachedSerialization<T>, Context> : Context {
-	LoadSaveHelper(const Context& context)
-		: Context(context), helper(context) {}
+	LoadSaveHelper(const Context& context) : Context(context), helper(context) {}
 
-	void load(CachedSerialization<T>& member, const uint8_t* current) {
-		helper.load(member.mutate(), current);
-	}
+	void load(CachedSerialization<T>& member, const uint8_t* current) { helper.load(member.mutate(), current); }
 
 	template <class Writer>
 	RelativeOffset save(const CachedSerialization<T>& member, Writer& writer, const VTableSet* vtables) {
@@ -337,7 +349,7 @@ struct serialize_raw<ErrorOr<EnsureTable<CachedSerialization<V>>>> : std::true_t
 
 template <class T>
 struct Callback {
-	Callback<T> *prev, *next;
+	Callback<T>*prev, *next;
 
 	virtual void fire(T const&) {}
 	virtual void error(Error) {}
@@ -370,7 +382,8 @@ struct Callback {
 	}
 
 	void remove() {
-		// Remove this callback from the list it is in, and call unwait() on the head of that list if this was the last callback
+		// Remove this callback from the list it is in, and call unwait() on the head of that list if this was the last
+		// callback
 		next->prev = prev;
 		prev->next = next;
 		if (prev == next)
@@ -388,7 +401,7 @@ struct Callback {
 template <class T>
 struct SingleCallback {
 	// Used for waiting on FutureStreams, which don't support multiple callbacks
-	SingleCallback<T> *next;
+	SingleCallback<T>* next;
 
 	virtual void fire(T const&) {}
 	virtual void error(Error) {}
@@ -409,10 +422,11 @@ struct SingleCallback {
 template <class T>
 struct SAV : private Callback<T>, FastAllocated<SAV<T>> {
 	int promises; // one for each promise (and one for an active actor if this is an actor)
-	int futures;  // one for each future and one more if there are any callbacks
+	int futures; // one for each future and one more if there are any callbacks
 
 private:
-	typename std::aligned_storage< sizeof(T), __alignof(T) >::type value_storage;
+	typename std::aligned_storage<sizeof(T), __alignof(T)>::type value_storage;
+
 public:
 	Error error_state;
 
@@ -420,7 +434,8 @@ public:
 
 	T& value() { return *(T*)&value_storage; }
 
-	SAV(int futures, int promises) : futures(futures), promises(promises), error_state(Error::fromCode(UNSET_ERROR_CODE)) {
+	SAV(int futures, int promises)
+	  : futures(futures), promises(promises), error_state(Error::fromCode(UNSET_ERROR_CODE)) {
 		Callback<T>::prev = Callback<T>::next = this;
 	}
 	~SAV() {
@@ -434,12 +449,13 @@ public:
 
 	T const& get() {
 		ASSERT(isSet());
-		if (isError()) throw error_state;
+		if (isError())
+			throw error_state;
 		return value();
 	}
 
 	template <class U>
-	void send(U && value) {
+	void send(U&& value) {
 		ASSERT(canBeSet());
 		new (&value_storage) T(std::forward<U>(value));
 		this->error_state = Error::fromCode(SET_ERROR_CODE);
@@ -460,7 +476,7 @@ public:
 	}
 
 	template <class U>
-	void sendAndDelPromiseRef(U && value) {
+	void sendAndDelPromiseRef(U&& value) {
 		ASSERT(canBeSet());
 		if (promises == 1 && !futures) {
 			// No one is left to receive the value, so we can just die
@@ -512,13 +528,13 @@ public:
 		if (promises == 1) {
 			if (futures && canBeSet()) {
 				sendError(broken_promise());
-				ASSERT(promises == 1);  // Once there is only one promise, there is no one else with the right to change the promise reference count
+				ASSERT(promises == 1); // Once there is only one promise, there is no one else with the right to change
+				                       // the promise reference count
 			}
 			promises = 0;
 			if (!futures)
 				destroy();
-		}
-		else
+		} else
 			--promises;
 	}
 	void delFutureRef() {
@@ -545,7 +561,8 @@ public:
 	}
 
 	void addYieldedCallbackAndDelFutureRef(Callback<T>* cb) {
-		// Same contract as addCallbackAndDelFutureRef, except that the callback is placed at the end of the callback chain rather than at the beginning
+		// Same contract as addCallbackAndDelFutureRef, except that the callback is placed at the end of the callback
+		// chain rather than at the beginning
 		if (Callback<T>::next != this)
 			delFutureRef();
 		cb->insertBack(this);
@@ -557,32 +574,29 @@ public:
 		cb->insertChain(this);
 	}
 
-	virtual void unwait() {
-		delFutureRef();
-	}
+	virtual void unwait() { delFutureRef(); }
 	virtual void fire() { ASSERT(false); }
 };
 
 template <class T>
 struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>> {
 	int promises; // one for each promise (and one for an active actor if this is an actor)
-	int futures;  // one for each future and one more if there are any callbacks
+	int futures; // one for each future and one more if there are any callbacks
 
 	// Invariant: SingleCallback<T>::next==this || (queue.empty() && !error.isValid())
 	std::queue<T, Deque<T>> queue;
 	Error error;
 
-	NotifiedQueue(int futures, int promises) : futures(futures), promises(promises) {
-		SingleCallback<T>::next = this;
-	}
+	NotifiedQueue(int futures, int promises) : futures(futures), promises(promises) { SingleCallback<T>::next = this; }
 
 	bool isReady() const { return !queue.empty() || error.isValid(); }
-	bool isError() const { return queue.empty() && error.isValid(); }  // the *next* thing queued is an error
+	bool isError() const { return queue.empty() && error.isValid(); } // the *next* thing queued is an error
 	uint32_t size() const { return queue.size(); }
 
 	T pop() {
 		if (queue.empty()) {
-			if (error.isValid()) throw error;
+			if (error.isValid())
+				throw error;
 			throw internal_error();
 		}
 		auto copy = queue.front();
@@ -591,19 +605,20 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 	}
 
 	template <class U>
-	void send(U && value) {
-		if (error.isValid()) return;
+	void send(U&& value) {
+		if (error.isValid())
+			return;
 
 		if (SingleCallback<T>::next != this) {
 			SingleCallback<T>::next->fire(std::forward<U>(value));
-		}
-		else {
+		} else {
 			queue.emplace(std::forward<U>(value));
 		}
 	}
 
 	void sendError(Error err) {
-		if (error.isValid()) return;
+		if (error.isValid())
+			return;
 
 		this->error = err;
 		if (SingleCallback<T>::next != this)
@@ -617,8 +632,7 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		if (!--promises) {
 			if (futures) {
 				sendError(broken_promise());
-			}
-			else
+			} else
 				destroy();
 		}
 	}
@@ -641,32 +655,22 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		ASSERT(SingleCallback<T>::next == this);
 		cb->insert(this);
 	}
-	virtual void unwait() {
-		delFutureRef();
-	}
+	virtual void unwait() { delFutureRef(); }
 	virtual void fire() { ASSERT(false); }
 };
-
 
 template <class T>
 class Promise;
 
 template <class T>
-class Future
-{
+class Future {
 public:
 	T const& get() const { return sav->get(); }
 	T getValue() const { return get(); }
 
-	bool isValid() const {
-		return sav != 0;
-	}
-	bool isReady() const {
-		return sav->isSet();
-	}
-	bool isError() const {
-		return sav->isError();
-	}
+	bool isValid() const { return sav != 0; }
+	bool isReady() const { return sav->isSet(); }
+	bool isError() const { return sav->isError(); }
 	Error& getError() const {
 		ASSERT(isError());
 		return sav->error_state;
@@ -674,55 +678,49 @@ public:
 
 	Future() : sav(0) {}
 	Future(const Future<T>& rhs) : sav(rhs.sav) {
-		if (sav) sav->addFutureRef();
-		//if (sav->endpoint.isValid()) cout << "Future copied for " << sav->endpoint.key << endl;
+		if (sav)
+			sav->addFutureRef();
+		// if (sav->endpoint.isValid()) cout << "Future copied for " << sav->endpoint.key << endl;
 	}
 	Future(Future<T>&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) {
 		rhs.sav = 0;
-		//if (sav->endpoint.isValid()) cout << "Future moved for " << sav->endpoint.key << endl;
+		// if (sav->endpoint.isValid()) cout << "Future moved for " << sav->endpoint.key << endl;
 	}
-	Future(const T& presentValue)
-		: sav(new SAV<T>(1, 0))
-	{
-		sav->send(presentValue);
-	}
-	Future(Never)
-		: sav(new SAV<T>(1, 0))
-	{
-		sav->send(Never());
-	}
-	Future(const Error& error)
-		: sav(new SAV<T>(1, 0))
-	{
-		sav->sendError(error);
-	}
+	Future(const T& presentValue) : sav(new SAV<T>(1, 0)) { sav->send(presentValue); }
+	Future(Never) : sav(new SAV<T>(1, 0)) { sav->send(Never()); }
+	Future(const Error& error) : sav(new SAV<T>(1, 0)) { sav->sendError(error); }
 
 #ifndef NO_INTELLISENSE
-	template<class U>
+	template <class U>
 	Future(const U&, typename std::enable_if<std::is_assignable<T, U>::value, int*>::type = 0) {}
 #endif
 
 	~Future() {
-		//if (sav && sav->endpoint.isValid()) cout << "Future destroyed for " << sav->endpoint.key << endl;
-		if (sav) sav->delFutureRef();
+		// if (sav && sav->endpoint.isValid()) cout << "Future destroyed for " << sav->endpoint.key << endl;
+		if (sav)
+			sav->delFutureRef();
 	}
 	void operator=(const Future<T>& rhs) {
-		if (rhs.sav) rhs.sav->addFutureRef();
-		if (sav) sav->delFutureRef();
+		if (rhs.sav)
+			rhs.sav->addFutureRef();
+		if (sav)
+			sav->delFutureRef();
 		sav = rhs.sav;
 	}
 	void operator=(Future<T>&& rhs) BOOST_NOEXCEPT {
 		if (sav != rhs.sav) {
-			if (sav) sav->delFutureRef();
+			if (sav)
+				sav->delFutureRef();
 			sav = rhs.sav;
 			rhs.sav = 0;
 		}
 	}
-	bool operator == (const Future& rhs) { return rhs.sav == sav; }
-	bool operator != (const Future& rhs) { return rhs.sav != sav; }
+	bool operator==(const Future& rhs) { return rhs.sav == sav; }
+	bool operator!=(const Future& rhs) { return rhs.sav != sav; }
 
 	void cancel() {
-		if (sav) sav->cancel();
+		if (sav)
+			sav->cancel();
 	}
 
 	void addCallbackAndClear(Callback<T>* cb) {
@@ -743,8 +741,8 @@ public:
 	int getFutureReferenceCount() const { return sav->getFutureReferenceCount(); }
 	int getPromiseReferenceCount() const { return sav->getPromiseReferenceCount(); }
 
-	explicit Future(SAV<T> * sav) : sav(sav) {
-		//if (sav->endpoint.isValid()) cout << "Future created for " << sav->endpoint.key << endl;
+	explicit Future(SAV<T>* sav) : sav(sav) {
+		// if (sav->endpoint.isValid()) cout << "Future created for " << sav->endpoint.key << endl;
 	}
 
 private:
@@ -759,79 +757,87 @@ private:
 //
 // Future<T> x = ...
 // T result = wait(x); // This is the correct code
-// Future<T> result = wait(x); // This is legal if wait() generates Futures, but it's probably wrong. It's a compilation error if wait() generates StrictFutures.
+// Future<T> result = wait(x); // This is legal if wait() generates Futures, but it's probably wrong. It's a compilation
+// error if wait() generates StrictFutures.
 template <class T>
 class StrictFuture : public Future<T> {
 public:
 	inline StrictFuture(Future<T> const& f) : Future<T>(f) {}
 	inline StrictFuture(Never n) : Future<T>(n) {}
+
 private:
 	StrictFuture(T t) {}
 	StrictFuture(Error e) {}
 };
 
 template <class T>
-class Promise sealed
-{
+class Promise sealed {
 public:
 	template <class U>
-	void send(U && value) const {
+	void send(U&& value) const {
 		sav->send(std::forward<U>(value));
 	}
 	template <class E>
-	void sendError(const E& exc) const { sav->sendError(exc); }
+	void sendError(const E& exc) const {
+		sav->sendError(exc);
+	}
 
-	Future<T> getFuture() const { sav->addFutureRef(); return Future<T>(sav); }
+	Future<T> getFuture() const {
+		sav->addFutureRef();
+		return Future<T>(sav);
+	}
 	bool isSet() { return sav->isSet(); }
 	bool canBeSet() { return sav->canBeSet(); }
 	bool isValid() const { return sav != NULL; }
 	Promise() : sav(new SAV<T>(0, 1)) {}
 	Promise(const Promise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
 	Promise(Promise&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) { rhs.sav = 0; }
-	~Promise() { if (sav) sav->delPromiseRef(); }
+	~Promise() {
+		if (sav)
+			sav->delPromiseRef();
+	}
 
 	void operator=(const Promise& rhs) {
-		if (rhs.sav) rhs.sav->addPromiseRef();
-		if (sav) sav->delPromiseRef();
+		if (rhs.sav)
+			rhs.sav->addPromiseRef();
+		if (sav)
+			sav->delPromiseRef();
 		sav = rhs.sav;
 	}
-	void operator=(Promise && rhs) BOOST_NOEXCEPT {
+	void operator=(Promise&& rhs) BOOST_NOEXCEPT {
 		if (sav != rhs.sav) {
-			if (sav) sav->delPromiseRef();
+			if (sav)
+				sav->delPromiseRef();
 			sav = rhs.sav;
 			rhs.sav = 0;
 		}
 	}
-	void reset() {
-		*this = Promise<T>();
-	}
-	void swap(Promise& other) {
-		std::swap(sav, other.sav);
-	}
+	void reset() { *this = Promise<T>(); }
+	void swap(Promise& other) { std::swap(sav, other.sav); }
 
 	// Beware, these operations are very unsafe
-	SAV<T>* extractRawPointer() { auto ptr = sav; sav = NULL; return ptr; }
+	SAV<T>* extractRawPointer() {
+		auto ptr = sav;
+		sav = NULL;
+		return ptr;
+	}
 	explicit Promise<T>(SAV<T>* ptr) : sav(ptr) {}
 
 	int getFutureReferenceCount() const { return sav->getFutureReferenceCount(); }
 	int getPromiseReferenceCount() const { return sav->getPromiseReferenceCount(); }
 
 private:
-	SAV<T> *sav;
+	SAV<T>* sav;
 };
-
 
 template <class T>
 class FutureStream {
 public:
-	bool isValid() const {
-		return queue != 0;
-	}
-	bool isReady() const {
-		return queue->isReady();
-	}
+	bool isValid() const { return queue != 0; }
+	bool isReady() const { return queue->isReady(); }
 	bool isError() const {
-		// This means that the next thing to be popped is an error - it will be false if there is an error in the stream but some actual data first
+		// This means that the next thing to be popped is an error - it will be false if there is an error in the stream
+		// but some actual data first
 		return queue->isError();
 	}
 	void addCallbackAndClear(SingleCallback<T>* cb) {
@@ -841,25 +847,28 @@ public:
 	FutureStream() : queue(NULL) {}
 	FutureStream(const FutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
 	FutureStream(FutureStream&& rhs) BOOST_NOEXCEPT : queue(rhs.queue) { rhs.queue = 0; }
-	~FutureStream() { if (queue) queue->delFutureRef(); }
+	~FutureStream() {
+		if (queue)
+			queue->delFutureRef();
+	}
 	void operator=(const FutureStream& rhs) {
 		rhs.queue->addFutureRef();
-		if (queue) queue->delFutureRef();
+		if (queue)
+			queue->delFutureRef();
 		queue = rhs.queue;
 	}
 	void operator=(FutureStream&& rhs) BOOST_NOEXCEPT {
 		if (rhs.queue != queue) {
-			if (queue) queue->delFutureRef();
+			if (queue)
+				queue->delFutureRef();
 			queue = rhs.queue;
 			rhs.queue = 0;
 		}
 	}
-	bool operator == (const FutureStream& rhs) { return rhs.queue == queue; }
-	bool operator != (const FutureStream& rhs) { return rhs.queue != queue; }
+	bool operator==(const FutureStream& rhs) { return rhs.queue == queue; }
+	bool operator!=(const FutureStream& rhs) { return rhs.queue != queue; }
 
-	T pop() {
-		return queue->pop();
-	}
+	T pop() { return queue->pop(); }
 	Error getError() {
 		ASSERT(queue->isError());
 		return queue->error;
@@ -872,13 +881,13 @@ private:
 };
 
 template <class Request>
-decltype(fake<Request>().reply) const& getReplyPromise(Request const& r) { return r.reply; }
-
-
+decltype(fake<Request>().reply) const& getReplyPromise(Request const& r) {
+	return r.reply;
+}
 
 // Neither of these implementations of REPLY_TYPE() works on both MSVC and g++, so...
 #ifdef __GNUG__
-#define REPLY_TYPE(RequestType) decltype( getReplyPromise( fake<RequestType>() ).getFuture().getValue() )
+#define REPLY_TYPE(RequestType) decltype(getReplyPromise(fake<RequestType>()).getFuture().getValue())
 //#define REPLY_TYPE(RequestType) decltype( getReplyFuture( fake<RequestType>() ).getValue() )
 #else
 template <class T>
@@ -887,7 +896,8 @@ struct ReplyType {
 	//   breaks IntelliSense in VS2010; this is a workaround.
 	typedef decltype(fake<T>().reply.getFuture().getValue()) Type;
 };
-template <class T> class ReplyPromise;
+template <class T>
+class ReplyPromise;
 template <class T>
 struct ReplyType<ReplyPromise<T>> {
 	typedef T Type;
@@ -895,24 +905,18 @@ struct ReplyType<ReplyPromise<T>> {
 #define REPLY_TYPE(RequestType) typename ReplyType<RequestType>::Type
 #endif
 
-
-
-
 template <class T>
 class PromiseStream {
 public:
 	// stream.send( request )
 	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
 
-	void send(const T& value) const {
-		queue->send(value);
-	}
-	void sendError(const Error& error) const {
-		queue->sendError(error);
-	}
+	void send(const T& value) const { queue->send(value); }
+	void sendError(const Error& error) const { queue->sendError(error); }
 
 	// stream.getReply( request )
-	//   Reliable at least once delivery: Eventually delivers request at least once and returns one of the replies if communication is possible.  Might deliver request
+	//   Reliable at least once delivery: Eventually delivers request at least once and returns one of the replies if
+	//   communication is possible.  Might deliver request
 	//      more than once.
 	//   If a reply is returned, request was or will be delivered one or more times.
 	//   If cancelled, request was or will be delivered zero or more times.
@@ -938,18 +942,23 @@ public:
 		return getReply(reply);
 	}
 
-	FutureStream<T> getFuture() const { queue->addFutureRef(); return FutureStream<T>(queue); }
+	FutureStream<T> getFuture() const {
+		queue->addFutureRef();
+		return FutureStream<T>(queue);
+	}
 	PromiseStream() : queue(new NotifiedQueue<T>(0, 1)) {}
 	PromiseStream(const PromiseStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
 	PromiseStream(PromiseStream&& rhs) BOOST_NOEXCEPT : queue(rhs.queue) { rhs.queue = 0; }
 	void operator=(const PromiseStream& rhs) {
 		rhs.queue->addPromiseRef();
-		if (queue) queue->delPromiseRef();
+		if (queue)
+			queue->delPromiseRef();
 		queue = rhs.queue;
 	}
 	void operator=(PromiseStream&& rhs) BOOST_NOEXCEPT {
 		if (queue != rhs.queue) {
-			if (queue) queue->delPromiseRef();
+			if (queue)
+				queue->delPromiseRef();
 			queue = rhs.queue;
 			rhs.queue = 0;
 		}
@@ -957,18 +966,17 @@ public:
 	~PromiseStream() {
 		if (queue)
 			queue->delPromiseRef();
-		//queue = (NotifiedQueue<T>*)0xdeadbeef;
+		// queue = (NotifiedQueue<T>*)0xdeadbeef;
 	}
 
-	bool operator == (const PromiseStream<T>& rhs) const { return queue == rhs.queue; }
+	bool operator==(const PromiseStream<T>& rhs) const { return queue == rhs.queue; }
 	bool isEmpty() const { return !queue->isReady(); }
 
 private:
 	NotifiedQueue<T>* queue;
 };
 
-
-//extern int actorCount;
+// extern int actorCount;
 
 template <class T>
 static inline void destruct(T& t) {
@@ -977,9 +985,11 @@ static inline void destruct(T& t) {
 
 template <class ReturnValue>
 struct Actor : SAV<ReturnValue> {
-	int8_t actor_wait_state;  // -1 means actor is cancelled; 0 means actor is not waiting; 1-N mean waiting in callback group #
+	int8_t actor_wait_state; // -1 means actor is cancelled; 0 means actor is not waiting; 1-N mean waiting in callback
+	                         // group #
 
-	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(0) { /*++actorCount;*/ }
+	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(0) { /*++actorCount;*/
+	}
 	//~Actor() { --actorCount; }
 };
 
@@ -987,37 +997,44 @@ template <>
 struct Actor<void> {
 	// This specialization is for a void actor (one not returning a future, hence also uncancellable)
 
-	int8_t actor_wait_state;  // 0 means actor is not waiting; 1-N mean waiting in callback group #
+	int8_t actor_wait_state; // 0 means actor is not waiting; 1-N mean waiting in callback group #
 
-	Actor() : actor_wait_state(0) { /*++actorCount;*/ }
+	Actor() : actor_wait_state(0) { /*++actorCount;*/
+	}
 	//~Actor() { --actorCount; }
 };
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorCallback : Callback<ValueType> {
-	virtual void fire(ValueType const& value) {
-		static_cast<ActorType*>(this)->a_callback_fire(this, value);
-	}
-	virtual void error(Error e) {
-		static_cast<ActorType*>(this)->a_callback_error(this, e);
-	}
+	virtual void fire(ValueType const& value) { static_cast<ActorType*>(this)->a_callback_fire(this, value); }
+	virtual void error(Error e) { static_cast<ActorType*>(this)->a_callback_error(this, e); }
 };
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorSingleCallback : SingleCallback<ValueType> {
-	virtual void fire(ValueType const& value) {
-		static_cast<ActorType*>(this)->a_callback_fire(this, value);
-	}
-	virtual void error(Error e) {
-		static_cast<ActorType*>(this)->a_callback_error(this, e);
-	}
+	virtual void fire(ValueType const& value) { static_cast<ActorType*>(this)->a_callback_fire(this, value); }
+	virtual void error(Error e) { static_cast<ActorType*>(this)->a_callback_error(this, e); }
 };
-inline double now() { return g_network->now(); }
-inline Future<Void> delay(double seconds, TaskPriority taskID = TaskPriority::DefaultDelay) { return g_network->delay(seconds, taskID); }
-inline Future<Void> delayUntil(double time, TaskPriority taskID = TaskPriority::DefaultDelay) { return g_network->delay(std::max(0.0, time - g_network->now()), taskID); }
-inline Future<Void> delayJittered(double seconds, TaskPriority taskID = TaskPriority::DefaultDelay) { return g_network->delay(seconds*(FLOW_KNOBS->DELAY_JITTER_OFFSET + FLOW_KNOBS->DELAY_JITTER_RANGE*deterministicRandom()->random01()), taskID); }
-inline Future<Void> yield(TaskPriority taskID = TaskPriority::DefaultYield) { return g_network->yield(taskID); }
-inline bool check_yield(TaskPriority taskID = TaskPriority::DefaultYield) { return g_network->check_yield(taskID); }
+inline double now() {
+	return g_network->now();
+}
+inline Future<Void> delay(double seconds, TaskPriority taskID = TaskPriority::DefaultDelay) {
+	return g_network->delay(seconds, taskID);
+}
+inline Future<Void> delayUntil(double time, TaskPriority taskID = TaskPriority::DefaultDelay) {
+	return g_network->delay(std::max(0.0, time - g_network->now()), taskID);
+}
+inline Future<Void> delayJittered(double seconds, TaskPriority taskID = TaskPriority::DefaultDelay) {
+	return g_network->delay(seconds * (FLOW_KNOBS->DELAY_JITTER_OFFSET +
+	                                   FLOW_KNOBS->DELAY_JITTER_RANGE * deterministicRandom()->random01()),
+	                        taskID);
+}
+inline Future<Void> yield(TaskPriority taskID = TaskPriority::DefaultYield) {
+	return g_network->yield(taskID);
+}
+inline bool check_yield(TaskPriority taskID = TaskPriority::DefaultYield) {
+	return g_network->check_yield(taskID);
+}
 
 #include "flow/genericactors.actor.h"
 #endif

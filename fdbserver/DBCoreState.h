@@ -43,10 +43,12 @@ struct OldLogData;
 //   ensure durability of locking and recovery is therefore tLogWriteAntiQuorum + 1.
 
 struct CoreTLogSet {
-	std::vector< UID > tLogs;
-	int32_t tLogWriteAntiQuorum; // The write anti quorum previously used to write to tLogs, which might be different from the anti quorum suggested by the current configuration going forward!
-	int32_t tLogReplicationFactor; // The replication factor previously used to write to tLogs, which might be different from the current configuration
-	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
+	std::vector<UID> tLogs;
+	int32_t tLogWriteAntiQuorum; // The write anti quorum previously used to write to tLogs, which might be different
+	                             // from the anti quorum suggested by the current configuration going forward!
+	int32_t tLogReplicationFactor; // The replication factor previously used to write to tLogs, which might be different
+	                               // from the current configuration
+	std::vector<LocalityData> tLogLocalities; // Stores the localities of the log servers
 	Reference<IReplicationPolicy> tLogPolicy;
 	bool isLocal;
 	int8_t locality;
@@ -54,17 +56,32 @@ struct CoreTLogSet {
 	std::vector<std::vector<int>> satelliteTagLocations;
 	TLogVersion tLogVersion;
 
-	CoreTLogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityUpgraded), startVersion(invalidVersion) {}
+	CoreTLogSet()
+	  : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityUpgraded),
+	    startVersion(invalidVersion) {}
 	explicit CoreTLogSet(const LogSet& logset);
 
-	bool operator == (CoreTLogSet const& rhs) const { 
-		return tLogs == rhs.tLogs && tLogWriteAntiQuorum == rhs.tLogWriteAntiQuorum && tLogReplicationFactor == rhs.tLogReplicationFactor && isLocal == rhs.isLocal && satelliteTagLocations == rhs.satelliteTagLocations &&
-			locality == rhs.locality && startVersion == rhs.startVersion && ((!tLogPolicy && !rhs.tLogPolicy) || (tLogPolicy && rhs.tLogPolicy && (tLogPolicy->info() == rhs.tLogPolicy->info())));
+	bool operator==(CoreTLogSet const& rhs) const {
+		return tLogs == rhs.tLogs && tLogWriteAntiQuorum == rhs.tLogWriteAntiQuorum &&
+		       tLogReplicationFactor == rhs.tLogReplicationFactor && isLocal == rhs.isLocal &&
+		       satelliteTagLocations == rhs.satelliteTagLocations && locality == rhs.locality &&
+		       startVersion == rhs.startVersion &&
+		       ((!tLogPolicy && !rhs.tLogPolicy) ||
+		        (tLogPolicy && rhs.tLogPolicy && (tLogPolicy->info() == rhs.tLogPolicy->info())));
 	}
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, tLogs, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations);
+		serializer(ar,
+		           tLogs,
+		           tLogWriteAntiQuorum,
+		           tLogReplicationFactor,
+		           tLogPolicy,
+		           tLogLocalities,
+		           isLocal,
+		           locality,
+		           startVersion,
+		           satelliteTagLocations);
 		if (ar.isDeserializing && !ar.protocolVersion().hasTLogVersion()) {
 			tLogVersion = TLogVersion::V2;
 		} else {
@@ -83,18 +100,24 @@ struct OldTLogCoreData {
 	OldTLogCoreData() : epochEnd(0), logRouterTags(0), txsTags(0) {}
 	explicit OldTLogCoreData(const OldLogData&);
 
-	bool operator == (OldTLogCoreData const& rhs) const { 
-		return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags && epochEnd == rhs.epochEnd && pseudoLocalities == rhs.pseudoLocalities;
+	bool operator==(OldTLogCoreData const& rhs) const {
+		return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags &&
+		       epochEnd == rhs.epochEnd && pseudoLocalities == rhs.pseudoLocalities;
 	}
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		if( ar.protocolVersion().hasTagLocality()) {
+		if (ar.protocolVersion().hasTagLocality()) {
 			serializer(ar, tLogs, logRouterTags, epochEnd);
-		}
-		else if(ar.isDeserializing) {
+		} else if (ar.isDeserializing) {
 			tLogs.push_back(CoreTLogSet());
-			serializer(ar, tLogs[0].tLogs, tLogs[0].tLogWriteAntiQuorum, tLogs[0].tLogReplicationFactor, tLogs[0].tLogPolicy, epochEnd, tLogs[0].tLogLocalities);
+			serializer(ar,
+			           tLogs[0].tLogs,
+			           tLogs[0].tLogWriteAntiQuorum,
+			           tLogs[0].tLogReplicationFactor,
+			           tLogs[0].tLogPolicy,
+			           epochEnd,
+			           tLogs[0].tLogLocalities);
 			tLogs[0].tLogVersion = TLogVersion::V2;
 		}
 		if (ar.protocolVersion().hasPseudoLocalities()) {
@@ -111,22 +134,22 @@ struct DBCoreState {
 	int32_t logRouterTags;
 	int32_t txsTags;
 	std::vector<OldTLogCoreData> oldTLogData;
-	DBRecoveryCount recoveryCount;  // Increases with sequential successful recoveries.
+	DBRecoveryCount recoveryCount; // Increases with sequential successful recoveries.
 	LogSystemType logSystemType;
 	std::set<int8_t> pseudoLocalities;
-	
+
 	DBCoreState() : logRouterTags(0), txsTags(0), recoveryCount(0), logSystemType(LogSystemType::empty) {}
 
 	vector<UID> getPriorCommittedLogServers() {
 		vector<UID> priorCommittedLogServers;
-		for(auto& it : tLogs) {
-			for(auto& log : it.tLogs) {
+		for (auto& it : tLogs) {
+			for (auto& log : it.tLogs) {
 				priorCommittedLogServers.push_back(log);
 			}
 		}
-		for(int i = 0; i < oldTLogData.size(); i++) {
-			for(auto& it : oldTLogData[i].tLogs) {
-				for(auto& log : it.tLogs) {
+		for (int i = 0; i < oldTLogData.size(); i++) {
+			for (auto& it : oldTLogData[i].tLogs) {
+				for (auto& log : it.tLogs) {
 					priorCommittedLogServers.push_back(log);
 				}
 			}
@@ -135,20 +158,22 @@ struct DBCoreState {
 	}
 
 	bool isEqual(DBCoreState const& r) const {
-		return logSystemType == r.logSystemType && recoveryCount == r.recoveryCount && tLogs == r.tLogs && oldTLogData == r.oldTLogData && logRouterTags == r.logRouterTags && txsTags == r.txsTags && pseudoLocalities == r.pseudoLocalities;
+		return logSystemType == r.logSystemType && recoveryCount == r.recoveryCount && tLogs == r.tLogs &&
+		       oldTLogData == r.oldTLogData && logRouterTags == r.logRouterTags && txsTags == r.txsTags &&
+		       pseudoLocalities == r.pseudoLocalities;
 	}
-	bool operator == ( const DBCoreState& rhs ) const { return isEqual(rhs); }
+	bool operator==(const DBCoreState& rhs) const { return isEqual(rhs); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		//FIXME: remove when we no longer need to test upgrades from 4.X releases
-		if(g_network->isSimulated() && !ar.protocolVersion().hasMultiGenerationTLog()) {
+		// FIXME: remove when we no longer need to test upgrades from 4.X releases
+		if (g_network->isSimulated() && !ar.protocolVersion().hasMultiGenerationTLog()) {
 			TraceEvent("ElapsedTime").detail("SimTime", now()).detail("RealTime", 0).detail("RandomUnseed", 0);
 			flushAndExit(0);
 		}
-		
+
 		ASSERT(ar.protocolVersion().hasMultiGenerationTLog());
-		if(ar.protocolVersion().hasTagLocality()) {
+		if (ar.protocolVersion().hasTagLocality()) {
 			serializer(ar, tLogs, logRouterTags, oldTLogData, recoveryCount, logSystemType);
 			if (ar.protocolVersion().hasPseudoLocalities()) {
 				serializer(ar, pseudoLocalities);
@@ -156,9 +181,14 @@ struct DBCoreState {
 			if (ar.protocolVersion().hasShardedTxsTags()) {
 				serializer(ar, txsTags);
 			}
-		} else if(ar.isDeserializing) {
+		} else if (ar.isDeserializing) {
 			tLogs.push_back(CoreTLogSet());
-			serializer(ar, tLogs[0].tLogs, tLogs[0].tLogWriteAntiQuorum, recoveryCount, tLogs[0].tLogReplicationFactor, logSystemType);
+			serializer(ar,
+			           tLogs[0].tLogs,
+			           tLogs[0].tLogWriteAntiQuorum,
+			           recoveryCount,
+			           tLogs[0].tLogReplicationFactor,
+			           logSystemType);
 			tLogs[0].tLogVersion = TLogVersion::V2;
 
 			uint64_t tLocalitySize = (uint64_t)tLogs[0].tLogLocalities.size();
@@ -171,10 +201,10 @@ struct DBCoreState {
 					tLogs[0].tLogLocalities.push_back(locality);
 				}
 
-				if(oldTLogData.size()) {
+				if (oldTLogData.size()) {
 					tLogs[0].startVersion = oldTLogData[0].epochEnd;
-					for(int i = 0; i < oldTLogData.size() - 1; i++) {
-						oldTLogData[i].tLogs[0].startVersion = oldTLogData[i+1].epochEnd;
+					for (int i = 0; i < oldTLogData.size() - 1; i++) {
+						oldTLogData[i].tLogs[0].startVersion = oldTLogData[i + 1].epochEnd;
 					}
 				}
 			}

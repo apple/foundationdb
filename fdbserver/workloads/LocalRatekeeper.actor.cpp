@@ -51,8 +51,9 @@ struct LocalRatekeeperWorkload : TestWorkload {
 
 	LocalRatekeeperWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		startAfter = getOption(options, LiteralStringRef("startAfter"), startAfter);
-		blockWritesFor = getOption(options, LiteralStringRef("blockWritesFor"),
-								   double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX)/double(1e6));
+		blockWritesFor = getOption(options,
+		                           LiteralStringRef("blockWritesFor"),
+		                           double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) / double(1e6));
 	}
 	virtual std::string description() { return "LocalRatekeeperWorkload"; }
 
@@ -61,20 +62,24 @@ struct LocalRatekeeperWorkload : TestWorkload {
 		state std::vector<Future<GetValueReply>> requests;
 		requests.reserve(100);
 		loop {
-			state StorageQueuingMetricsReply metrics = wait(brokenPromiseToNever(ssi.getQueuingMetrics.getReply(StorageQueuingMetricsRequest{})));
+			state StorageQueuingMetricsReply metrics =
+			    wait(brokenPromiseToNever(ssi.getQueuingMetrics.getReply(StorageQueuingMetricsRequest{})));
 			auto durabilityLag = metrics.version - metrics.durableVersion;
 			double expectedRateLimit = 1.0;
 			if (durabilityLag >= SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) {
 				expectedRateLimit = 0.0;
 			} else if (durabilityLag > SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX) {
-				expectedRateLimit = 1.0 - double(durabilityLag-SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX) / double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX-SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX);
+				expectedRateLimit = 1.0 - double(durabilityLag - SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX) /
+				                              double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX -
+				                                     SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX);
 			}
-			if (expectedRateLimit < metrics.localRateLimit - 0.01 || expectedRateLimit > metrics.localRateLimit + 0.01) {
+			if (expectedRateLimit < metrics.localRateLimit - 0.01 ||
+			    expectedRateLimit > metrics.localRateLimit + 0.01) {
 				self->testFailed = true;
 				TraceEvent(SevError, "StorageRateLimitTooFarOff")
-					.detail("Storage", ssi.id())
-					.detail("Expected", expectedRateLimit)
-					.detail("Actual", metrics.localRateLimit);
+				    .detail("Storage", ssi.id())
+				    .detail("Expected", expectedRateLimit)
+				    .detail("Actual", metrics.localRateLimit);
 			}
 			tr.reset();
 			Version readVersion = wait(tr.getReadVersion());
@@ -94,8 +99,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 				if (resp.isError()) {
 					self->testFailed = true;
 					++errors;
-					TraceEvent(SevError, "LoadBalancedResponseReturnedError")
-						.error(resp.getError());
+					TraceEvent(SevError, "LoadBalancedResponseReturnedError").error(resp.getError());
 				} else if (resp.get().error.present() && resp.get().error.get().code() == error_code_future_version) {
 					++failedRequests;
 				}
@@ -103,8 +107,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 					break;
 				}
 			}
-			TraceEvent("RejectedVersions")
-				.detail("NumRejected", failedRequests);
+			TraceEvent("RejectedVersions").detail("NumRejected", failedRequests);
 			if (self->testFailed) {
 				return Void();
 			}
@@ -118,7 +121,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 		g_simulator.disableFor(format("%s/updateStorage", ssi.id().toString().c_str()), now() + self->blockWritesFor);
 		state Future<Void> done = delay(self->blockWritesFor);
 		// not much will happen until the storage goes over the soft limit
-		wait(delay(double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX/1e6)));
+		wait(delay(double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX / 1e6)));
 		wait(testStorage(self, cx, ssi) || done);
 		return Void();
 	}

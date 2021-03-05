@@ -49,7 +49,7 @@ void DestroyOpenSSLGlobalState() {
 } // namespace TLS
 #ifdef TLS_DISABLED
 
-void LoadedTLSConfig::print(FILE *fp) {
+void LoadedTLSConfig::print(FILE* fp) {
 	fprintf(fp, "Cannot print LoadedTLSConfig.  TLS support is not enabled.\n");
 }
 
@@ -85,8 +85,7 @@ void LoadedTLSConfig::print(FILE *fp) {
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "flow/genericactors.actor.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
-
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 std::vector<std::string> LoadedTLSConfig::getVerifyPeers() const {
 	if (tlsVerifyPeers.size()) {
@@ -95,10 +94,10 @@ std::vector<std::string> LoadedTLSConfig::getVerifyPeers() const {
 
 	std::string envVerifyPeers;
 	if (platform::getEnvironmentVar("FDB_TLS_VERIFY_PEERS", envVerifyPeers)) {
-		return {envVerifyPeers};
+		return { envVerifyPeers };
 	}
 
-	return {"Check.Valid=1"};
+	return { "Check.Valid=1" };
 }
 
 std::string LoadedTLSConfig::getPassword() const {
@@ -133,7 +132,7 @@ void LoadedTLSConfig::print(FILE* fp) {
 
 	num_certs = sk_X509_num(chain);
 	if (num_certs) {
-		for ( int i = 0; i < num_certs; i++ ) {
+		for (int i = 0; i < num_certs; i++) {
 			printf("\n");
 			X509* cert = sk_X509_value(chain, i);
 			X509_print_fp(fp, cert);
@@ -143,48 +142,54 @@ void LoadedTLSConfig::print(FILE* fp) {
 	X509_STORE_CTX_free(store_ctx);
 }
 
-void ConfigureSSLContext( const LoadedTLSConfig& loaded, boost::asio::ssl::context* context, std::function<void()> onPolicyFailure ) {
+void ConfigureSSLContext(const LoadedTLSConfig& loaded,
+                         boost::asio::ssl::context* context,
+                         std::function<void()> onPolicyFailure) {
 	try {
 		context->set_options(boost::asio::ssl::context::default_workarounds);
-		context->set_verify_mode(boost::asio::ssl::context::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
+		context->set_verify_mode(boost::asio::ssl::context::verify_peer |
+		                         boost::asio::ssl::verify_fail_if_no_peer_cert);
 
 		if (loaded.isTLSEnabled()) {
 			Reference<TLSPolicy> tlsPolicy = Reference<TLSPolicy>(new TLSPolicy(loaded.getEndpointType()));
 			tlsPolicy->set_verify_peers({ loaded.getVerifyPeers() });
 
-			context->set_verify_callback([policy=tlsPolicy, onPolicyFailure](bool preverified, boost::asio::ssl::verify_context& ctx) {
-					bool success = policy->verify_peer(preverified, ctx.native_handle());
-					if (!success) {
-						onPolicyFailure();
-					}
-					return success;
-				});
+			context->set_verify_callback(
+			    [policy = tlsPolicy, onPolicyFailure](bool preverified, boost::asio::ssl::verify_context& ctx) {
+				    bool success = policy->verify_peer(preverified, ctx.native_handle());
+				    if (!success) {
+					    onPolicyFailure();
+				    }
+				    return success;
+			    });
 		} else {
 			// Insecurely always except if TLS is not enabled.
-			context->set_verify_callback([](bool, boost::asio::ssl::verify_context&){ return true; });
+			context->set_verify_callback([](bool, boost::asio::ssl::verify_context&) { return true; });
 		}
 
-		context->set_password_callback(
-				[password=loaded.getPassword()](size_t, boost::asio::ssl::context::password_purpose) {
-					return password;
-				});
+		context->set_password_callback([password = loaded.getPassword()](
+		                                   size_t, boost::asio::ssl::context::password_purpose) { return password; });
 
 		const std::string& CABytes = loaded.getCABytes();
-		if ( CABytes.size() ) {
+		if (CABytes.size()) {
 			context->add_certificate_authority(boost::asio::buffer(CABytes.data(), CABytes.size()));
 		}
 
 		const std::string& keyBytes = loaded.getKeyBytes();
 		if (keyBytes.size()) {
-			context->use_private_key(boost::asio::buffer(keyBytes.data(), keyBytes.size()), boost::asio::ssl::context::pem);
+			context->use_private_key(boost::asio::buffer(keyBytes.data(), keyBytes.size()),
+			                         boost::asio::ssl::context::pem);
 		}
 
 		const std::string& certBytes = loaded.getCertificateBytes();
-		if ( certBytes.size() ) {
+		if (certBytes.size()) {
 			context->use_certificate_chain(boost::asio::buffer(certBytes.data(), certBytes.size()));
 		}
 	} catch (boost::system::system_error& e) {
-		TraceEvent("TLSConfigureError").detail("What", e.what()).detail("Value", e.code().value()).detail("WhichMeans", TLSPolicy::ErrorString(e.code()));
+		TraceEvent("TLSConfigureError")
+		    .detail("What", e.what())
+		    .detail("Value", e.code().value())
+		    .detail("WhichMeans", TLSPolicy::ErrorString(e.code()));
 		throw tls_error();
 	}
 }
@@ -199,12 +204,12 @@ std::string TLSConfig::getCertificatePathSync() const {
 		return envCertPath;
 	}
 
-	const char *defaultCertFileName = "fdb.pem";
-	if( fileExists(defaultCertFileName) ) {
+	const char* defaultCertFileName = "fdb.pem";
+	if (fileExists(defaultCertFileName)) {
 		return defaultCertFileName;
 	}
 
-	if( fileExists( joinPath(platform::getDefaultConfigPath(), defaultCertFileName) ) ) {
+	if (fileExists(joinPath(platform::getDefaultConfigPath(), defaultCertFileName))) {
 		return joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
 	}
 
@@ -221,12 +226,12 @@ std::string TLSConfig::getKeyPathSync() const {
 		return envKeyPath;
 	}
 
-	const char *defaultCertFileName = "fdb.pem";
-	if( fileExists(defaultCertFileName) ) {
+	const char* defaultCertFileName = "fdb.pem";
+	if (fileExists(defaultCertFileName)) {
 		return defaultCertFileName;
 	}
 
-	if( fileExists( joinPath(platform::getDefaultConfigPath(), defaultCertFileName) ) ) {
+	if (fileExists(joinPath(platform::getDefaultConfigPath(), defaultCertFileName))) {
 		return joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
 	}
 
@@ -248,21 +253,21 @@ LoadedTLSConfig TLSConfig::loadSync() const {
 
 	const std::string certPath = getCertificatePathSync();
 	if (certPath.size()) {
-		loaded.tlsCertBytes = readFileBytes( certPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE );
+		loaded.tlsCertBytes = readFileBytes(certPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
 	} else {
 		loaded.tlsCertBytes = tlsCertBytes;
 	}
 
 	const std::string keyPath = getKeyPathSync();
 	if (keyPath.size()) {
-		loaded.tlsKeyBytes = readFileBytes( keyPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE );
+		loaded.tlsKeyBytes = readFileBytes(keyPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
 	} else {
 		loaded.tlsKeyBytes = tlsKeyBytes;
 	}
 
 	const std::string CAPath = getCAPathSync();
 	if (CAPath.size()) {
-		loaded.tlsCABytes = readFileBytes( CAPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE );
+		loaded.tlsCABytes = readFileBytes(CAPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
 	} else {
 		loaded.tlsCABytes = tlsCABytes;
 	}
@@ -276,8 +281,9 @@ LoadedTLSConfig TLSConfig::loadSync() const {
 
 // And now do the same thing, but async...
 
-ACTOR static Future<Void> readEntireFile( std::string filename, std::string* destination ) {
-	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(filename, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
+ACTOR static Future<Void> readEntireFile(std::string filename, std::string* destination) {
+	state Reference<IAsyncFile> file =
+	    wait(IAsyncFileSystem::filesystem()->open(filename, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
 	state int64_t filesize = wait(file->size());
 	if (filesize > FLOW_KNOBS->CERT_FILE_MAX_SIZE) {
 		throw file_too_large();
@@ -293,21 +299,21 @@ ACTOR Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
 
 	const std::string& certPath = self->getCertificatePathSync();
 	if (certPath.size()) {
-		reads.push_back( readEntireFile( certPath, &loaded.tlsCertBytes ) );
+		reads.push_back(readEntireFile(certPath, &loaded.tlsCertBytes));
 	} else {
 		loaded.tlsCertBytes = self->tlsCertBytes;
 	}
 
 	const std::string& keyPath = self->getKeyPathSync();
 	if (keyPath.size()) {
-		reads.push_back( readEntireFile( keyPath, &loaded.tlsKeyBytes ) );
+		reads.push_back(readEntireFile(keyPath, &loaded.tlsKeyBytes));
 	} else {
 		loaded.tlsKeyBytes = self->tlsKeyBytes;
 	}
 
 	const std::string& CAPath = self->getCAPathSync();
 	if (CAPath.size()) {
-		reads.push_back( readEntireFile( CAPath, &loaded.tlsCABytes ) );
+		reads.push_back(readEntireFile(CAPath, &loaded.tlsCABytes));
 	} else {
 		loaded.tlsCABytes = self->tlsKeyBytes;
 	}
@@ -329,7 +335,7 @@ std::string TLSPolicy::ErrorString(boost::system::error_code e) {
 std::string TLSPolicy::toString() const {
 	std::stringstream ss;
 	ss << "TLSPolicy{ Rules=[";
-	for (const auto &r : rules) {
+	for (const auto& r : rules) {
 		ss << " " << r.toString() << ",";
 	}
 	ss << " ] }";
@@ -339,8 +345,7 @@ std::string TLSPolicy::toString() const {
 std::string TLSPolicy::Rule::toString() const {
 	std::stringstream ss;
 
-	ss << "Rule{ verify_cert=" << verify_cert
-		 << ", verify_time=" << verify_time;
+	ss << "Rule{ verify_cert=" << verify_cert << ", verify_time=" << verify_time;
 	ss << ", Subject=[";
 	for (const auto& s : subject_criteria) {
 		ss << " { NID=" << s.first << ", Criteria=" << s.second.criteria << "},";
@@ -375,24 +380,24 @@ static int hexValue(char c) {
 static std::string de4514(std::string const& input, int start, int& out_end) {
 	std::string output;
 
-	if(input[start] == '#' || input[start] == ' ') {
+	if (input[start] == '#' || input[start] == ' ') {
 		out_end = start;
 		return output;
 	}
 
 	int space_count = 0;
 
-	for(int p = start; p < input.size();) {
-		switch(input[p]) {
+	for (int p = start; p < input.size();) {
+		switch (input[p]) {
 		case '\\': // Handle escaped sequence
 
 			// Backslash escaping nothing!
-			if(p == input.size() - 1) {
+			if (p == input.size() - 1) {
 				out_end = p;
 				goto FIN;
 			}
 
-			switch(input[p+1]) {
+			switch (input[p + 1]) {
 			case ' ':
 			case '"':
 			case '#':
@@ -404,24 +409,24 @@ static std::string de4514(std::string const& input, int start, int& out_end) {
 			case '>':
 			case '|':
 			case '\\':
-				output += input[p+1];
+				output += input[p + 1];
 				p += 2;
 				space_count = 0;
 				continue;
 
 			default:
 				// Backslash escaping pair of hex digits requires two characters
-				if(p == input.size() - 2) {
+				if (p == input.size() - 2) {
 					out_end = p;
 					goto FIN;
 				}
 
 				try {
-					output += hexValue(input[p+1]) * 16 + hexValue(input[p+2]);
+					output += hexValue(input[p + 1]) * 16 + hexValue(input[p + 2]);
 					p += 3;
 					space_count = 0;
 					continue;
-				} catch( ... ) {
+				} catch (...) {
 					out_end = p;
 					goto FIN;
 				}
@@ -441,7 +446,7 @@ static std::string de4514(std::string const& input, int start, int& out_end) {
 		default:
 			// Character is what it is
 			output += input[p];
-			if(input[p] == ' ')
+			if (input[p] == ' ')
 				space_count++;
 			else
 				space_count = 0;
@@ -451,7 +456,7 @@ static std::string de4514(std::string const& input, int start, int& out_end) {
 
 	out_end = input.size();
 
- FIN:
+FIN:
 	out_end -= space_count;
 	output.resize(output.size() - space_count);
 
@@ -460,16 +465,17 @@ static std::string de4514(std::string const& input, int start, int& out_end) {
 
 static std::pair<std::string, std::string> splitPair(std::string const& input, char c) {
 	int p = input.find_first_of(c);
-	if(p == input.npos) {
+	if (p == input.npos) {
 		throw std::runtime_error("splitPair");
 	}
-	return std::make_pair(input.substr(0, p), input.substr(p+1, input.size()));
+	return std::make_pair(input.substr(0, p), input.substr(p + 1, input.size()));
 }
 
 static NID abbrevToNID(std::string const& sn) {
 	NID nid = NID_undef;
 
-	if (sn == "C" || sn == "CN" || sn == "L" || sn == "ST" || sn == "O" || sn == "OU" || sn == "UID" || sn == "DC" || sn == "subjectAltName")
+	if (sn == "C" || sn == "CN" || sn == "L" || sn == "ST" || sn == "O" || sn == "OU" || sn == "UID" || sn == "DC" ||
+	    sn == "subjectAltName")
 		nid = OBJ_sn2nid(sn.c_str());
 	if (nid == NID_undef)
 		throw std::runtime_error("abbrevToNID");
@@ -495,18 +501,18 @@ void TLSPolicy::set_verify_peers(std::vector<std::string> verify_peers) {
 		try {
 			std::string& verifyString = verify_peers[i];
 			int start = 0;
-			while(start < verifyString.size()) {
+			while (start < verifyString.size()) {
 				int split = verifyString.find('|', start);
-				if(split == std::string::npos) {
+				if (split == std::string::npos) {
 					break;
 				}
-				if(split == start || verifyString[split-1] != '\\') {
-					rules.emplace_back(verifyString.substr(start,split-start));
-					start = split+1;
+				if (split == start || verifyString[split - 1] != '\\') {
+					rules.emplace_back(verifyString.substr(start, split - start));
+					start = split + 1;
 				}
 			}
 			rules.emplace_back(verifyString.substr(start));
-		} catch ( const std::runtime_error& e ) {
+		} catch (const std::runtime_error& e) {
 			rules.clear();
 			std::string& verifyString = verify_peers[i];
 			TraceEvent(SevError, "FDBLibTLSVerifyPeersParseError").detail("Config", verifyString);
@@ -525,8 +531,10 @@ TLSPolicy::Rule::Rule(std::string input) {
 			throw std::runtime_error("parse_verify");
 
 		MatchType mt = MatchType::EXACT;
-		if (input[eq-1] == '>') mt = MatchType::PREFIX;
-		if (input[eq-1] == '<') mt = MatchType::SUFFIX;
+		if (input[eq - 1] == '>')
+			mt = MatchType::PREFIX;
+		if (input[eq - 1] == '<')
+			mt = MatchType::SUFFIX;
 		std::string term = input.substr(s, eq - s - (mt == MatchType::EXACT ? 0 : 1));
 
 		if (term.find("Check.") == 0) {
@@ -555,7 +563,7 @@ TLSPolicy::Rule::Rule(std::string input) {
 
 			s = eq + 3;
 		} else {
-			std::map< int, Criteria >* criteria = &subject_criteria;
+			std::map<int, Criteria>* criteria = &subject_criteria;
 
 			if (term.find('.') != term.npos) {
 				auto scoped = splitPair(term, '.');
@@ -607,12 +615,10 @@ bool match_criteria_entry(const std::string& criteria, ASN1_STRING* entry, Match
 	if ((entry_utf8_len = ASN1_STRING_to_UTF8(&entry_utf8, entry)) < 1)
 		goto err;
 	if (mt == MatchType::EXACT) {
-		if (criteria_utf8_len == entry_utf8_len &&
-		    memcmp(criteria_utf8, entry_utf8, criteria_utf8_len) == 0)
+		if (criteria_utf8_len == entry_utf8_len && memcmp(criteria_utf8, entry_utf8, criteria_utf8_len) == 0)
 			rc = true;
 	} else if (mt == MatchType::PREFIX) {
-		if (criteria_utf8_len <= entry_utf8_len &&
-		    memcmp(criteria_utf8, entry_utf8, criteria_utf8_len) == 0)
+		if (criteria_utf8_len <= entry_utf8_len && memcmp(criteria_utf8, entry_utf8, criteria_utf8_len) == 0)
 			rc = true;
 	} else if (mt == MatchType::SUFFIX) {
 		if (criteria_utf8_len <= entry_utf8_len &&
@@ -620,15 +626,15 @@ bool match_criteria_entry(const std::string& criteria, ASN1_STRING* entry, Match
 			rc = true;
 	}
 
-	err:
+err:
 	ASN1_STRING_free(asn_criteria);
 	free(criteria_utf8);
 	free(entry_utf8);
 	return rc;
 }
 
-bool match_name_criteria(X509_NAME *name, NID nid, const std::string& criteria, MatchType mt) {
-	X509_NAME_ENTRY *name_entry;
+bool match_name_criteria(X509_NAME* name, NID nid, const std::string& criteria, MatchType mt) {
+	X509_NAME_ENTRY* name_entry;
 	int idx;
 
 	// If name does not exist, or has multiple of this RDN, refuse to proceed.
@@ -642,7 +648,7 @@ bool match_name_criteria(X509_NAME *name, NID nid, const std::string& criteria, 
 	return match_criteria_entry(criteria, X509_NAME_ENTRY_get_data(name_entry), mt);
 }
 
-bool match_extension_criteria(X509 *cert, NID nid, const std::string& value, MatchType mt) {
+bool match_extension_criteria(X509* cert, NID nid, const std::string& value, MatchType mt) {
 	if (nid != NID_subject_alt_name && nid != NID_issuer_alt_name) {
 		// I have no idea how other extensions work.
 		return false;
@@ -652,28 +658,26 @@ bool match_extension_criteria(X509 *cert, NID nid, const std::string& value, Mat
 		return false;
 	}
 	std::string value_gen = value.substr(0, pos);
-	std::string value_val = value.substr(pos+1, value.npos);
+	std::string value_val = value.substr(pos + 1, value.npos);
 	STACK_OF(GENERAL_NAME)* sans = reinterpret_cast<STACK_OF(GENERAL_NAME)*>(X509_get_ext_d2i(cert, nid, NULL, NULL));
 	if (sans == NULL) {
 		return false;
 	}
-	int num_sans = sk_GENERAL_NAME_num( sans );
+	int num_sans = sk_GENERAL_NAME_num(sans);
 	bool rc = false;
-	for( int i = 0; i < num_sans && !rc; ++i ) {
-		GENERAL_NAME* altname = sk_GENERAL_NAME_value( sans, i );
+	for (int i = 0; i < num_sans && !rc; ++i) {
+		GENERAL_NAME* altname = sk_GENERAL_NAME_value(sans, i);
 		std::string matchable;
 		switch (altname->type) {
 		case GEN_OTHERNAME:
 			break;
 		case GEN_EMAIL:
-			if (value_gen == "EMAIL" &&
-			    match_criteria_entry( value_val, altname->d.rfc822Name, mt)) {
+			if (value_gen == "EMAIL" && match_criteria_entry(value_val, altname->d.rfc822Name, mt)) {
 				rc = true;
 				break;
 			}
 		case GEN_DNS:
-			if (value_gen == "DNS" &&
-			    match_criteria_entry( value_val, altname->d.dNSName, mt )) {
+			if (value_gen == "DNS" && match_criteria_entry(value_val, altname->d.dNSName, mt)) {
 				rc = true;
 				break;
 			}
@@ -682,14 +686,12 @@ bool match_extension_criteria(X509 *cert, NID nid, const std::string& value, Mat
 		case GEN_EDIPARTY:
 			break;
 		case GEN_URI:
-			if (value_gen == "URI" &&
-			    match_criteria_entry( value_val, altname->d.uniformResourceIdentifier, mt )) {
+			if (value_gen == "URI" && match_criteria_entry(value_val, altname->d.uniformResourceIdentifier, mt)) {
 				rc = true;
 				break;
 			}
 		case GEN_IPADD:
-			if (value_gen == "IP" &&
-			    match_criteria_entry( value_val, altname->d.iPAddress, mt )) {
+			if (value_gen == "IP" && match_criteria_entry(value_val, altname->d.iPAddress, mt)) {
 				rc = true;
 				break;
 			}
@@ -701,8 +703,13 @@ bool match_extension_criteria(X509 *cert, NID nid, const std::string& value, Mat
 	return rc;
 }
 
-bool match_criteria(X509* cert, X509_NAME* subject, NID nid, const std::string& criteria, MatchType mt, X509Location loc) {
-	switch(loc) {
+bool match_criteria(X509* cert,
+                    X509_NAME* subject,
+                    NID nid,
+                    const std::string& criteria,
+                    MatchType mt,
+                    X509Location loc) {
+	switch (loc) {
 	case X509Location::NAME: {
 		return match_name_criteria(subject, nid, criteria, mt);
 	}
@@ -714,7 +721,7 @@ bool match_criteria(X509* cert, X509_NAME* subject, NID nid, const std::string& 
 	return false;
 }
 
-std::tuple<bool,std::string> check_verify(const TLSPolicy::Rule* verify, X509_STORE_CTX* store_ctx, bool is_client) {
+std::tuple<bool, std::string> check_verify(const TLSPolicy::Rule* verify, X509_STORE_CTX* store_ctx, bool is_client) {
 	X509_NAME *subject, *issuer;
 	bool rc = false;
 	X509* cert = NULL;
@@ -727,8 +734,9 @@ std::tuple<bool,std::string> check_verify(const TLSPolicy::Rule* verify, X509_ST
 		reason = "Cert subject error";
 		goto err;
 	}
-	for (auto &pair: verify->subject_criteria) {
-		if (!match_criteria(cert, subject, pair.first, pair.second.criteria, pair.second.match_type, pair.second.location)) {
+	for (auto& pair : verify->subject_criteria) {
+		if (!match_criteria(
+		        cert, subject, pair.first, pair.second.criteria, pair.second.match_type, pair.second.location)) {
 			reason = "Cert subject match failure";
 			goto err;
 		}
@@ -739,8 +747,9 @@ std::tuple<bool,std::string> check_verify(const TLSPolicy::Rule* verify, X509_ST
 		reason = "Cert issuer error";
 		goto err;
 	}
-	for (auto &pair: verify->issuer_criteria) {
-		if (!match_criteria(cert, issuer, pair.first, pair.second.criteria, pair.second.match_type, pair.second.location)) {
+	for (auto& pair : verify->issuer_criteria) {
+		if (!match_criteria(
+		        cert, issuer, pair.first, pair.second.criteria, pair.second.match_type, pair.second.location)) {
 			reason = "Cert issuer match failure";
 			goto err;
 		}
@@ -752,8 +761,9 @@ std::tuple<bool,std::string> check_verify(const TLSPolicy::Rule* verify, X509_ST
 		reason = "Root subject error";
 		goto err;
 	}
-	for (auto &pair: verify->root_criteria) {
-		if (!match_criteria(cert, subject, pair.first, pair.second.criteria, pair.second.match_type, pair.second.location)) {
+	for (auto& pair : verify->root_criteria) {
+		if (!match_criteria(
+		        cert, subject, pair.first, pair.second.criteria, pair.second.match_type, pair.second.location)) {
 			reason = "Root subject match failure";
 			goto err;
 		}
@@ -762,7 +772,7 @@ std::tuple<bool,std::string> check_verify(const TLSPolicy::Rule* verify, X509_ST
 	// If we got this far, everything checked out...
 	rc = true;
 
- err:
+err:
 	return std::make_tuple(rc, reason);
 }
 
@@ -773,21 +783,24 @@ bool TLSPolicy::verify_peer(bool preverified, X509_STORE_CTX* store_ctx) {
 	std::string verify_failure_reason;
 
 	// If certificate verification is disabled, there's nothing more to do.
-	if (std::any_of(rules.begin(), rules.end(), [](const Rule& r){ return !r.verify_cert; })) {
+	if (std::any_of(rules.begin(), rules.end(), [](const Rule& r) { return !r.verify_cert; })) {
 		return true;
 	}
 
-	if(!preverified) {
-		TraceEvent("TLSPolicyFailure").suppressFor(1.0).detail("Reason", "preverification failed").detail("VerifyError", X509_verify_cert_error_string(X509_STORE_CTX_get_error(store_ctx)));
+	if (!preverified) {
+		TraceEvent("TLSPolicyFailure")
+		    .suppressFor(1.0)
+		    .detail("Reason", "preverification failed")
+		    .detail("VerifyError", X509_verify_cert_error_string(X509_STORE_CTX_get_error(store_ctx)));
 		return false;
 	}
 
-	if(!rules.size()) {
+	if (!rules.size()) {
 		return true;
 	}
 
 	// Any matching rule is sufficient.
-	for (auto &verify_rule: rules) {
+	for (auto& verify_rule : rules) {
 		std::tie(verify_success, verify_failure_reason) = check_verify(&verify_rule, store_ctx, is_client);
 		if (verify_success) {
 			rc = true;
