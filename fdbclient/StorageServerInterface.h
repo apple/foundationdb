@@ -536,7 +536,10 @@ struct MutationRefAndVersion {
 struct RangeFeedReply {
 	constexpr static FileIdentifier file_identifier = 11815134;
 	VectorRef<MutationRefAndVersion> mutations;
+	bool cached;
 	Arena arena;
+
+	RangeFeedReply() : cached(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
