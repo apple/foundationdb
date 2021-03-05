@@ -3093,13 +3093,11 @@ Future< Standalone< VectorRef< const char*>>> Transaction::getAddressesForKey( c
 	return getAddressesForKeyActor(key, ver, cx, info, options);
 }
 
-ACTOR Future<Void> registerRangeFeedActor(StringRef rangeID, KeyRangeRef range, Future<Version> ver, Database cx,
-                                                                         TransactionInfo info,
-                                                                         TransactionOptions options) {
+ACTOR Future<Void> registerRangeFeedActor(Transaction *tr, StringRef rangeID, KeyRangeRef range) {
 	state Key rangeIDKey = rangeID.withPrefix(rangeFeedPrefix);
-	Optional<Value> val = wait( getValue(ver, rangeIDKey, cx, info, trLogInfo, options.readTags) );
+	Optional<Value> val = wait( tr->get(rangeIDKey) );
 	if(!val.present()) {
-		set(rangeIDKey, rangeFeedValue(range));
+		tr->set(rangeIDKey, rangeFeedValue(range));
 	} else if(decodeRangeFeedValue(val.get()) != range) {
 		throw unsupported_operation();
 	}
@@ -3107,8 +3105,7 @@ ACTOR Future<Void> registerRangeFeedActor(StringRef rangeID, KeyRangeRef range, 
 }
 
 Future<Void> Transaction::registerRangeFeed( const StringRef& rangeID, const KeyRangeRef& range ) {
-	auto ver = getReadVersion();
-	return registerRangeFeedActor(rangeID, range, ver, cx, info, options);
+	return registerRangeFeedActor(this, rangeID, range);
 }
 
 ACTOR Future< Key > getKeyAndConflictRange(
