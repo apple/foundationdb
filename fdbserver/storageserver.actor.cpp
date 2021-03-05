@@ -2889,7 +2889,7 @@ private:
 			for(auto r = rs.begin(); r != rs.end(); ++r) {
 				r->value().push_back( rangeFeedInfo );
 			}
-			data->keyRangeFeed.coalesce( rangeFeedRange );
+			data->keyRangeFeed.coalesce( rangeFeedRange.contents() );
 		} else {
 			ASSERT(false);  // Unknown private mutation
 		}
