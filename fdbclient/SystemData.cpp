@@ -1075,7 +1075,7 @@ const Value rangeFeedValue( KeyRangeRef const& range ) {
 	wr << range;
 	return wr.toValue();
 }
-KeyRange decodeFeedValue( ValueRef const& value ) {
+KeyRange decodeRangeFeedValue( ValueRef const& value ) {
 	KeyRange range;
 	BinaryReader reader( value, IncludeVersion() );
 	reader >> range;
