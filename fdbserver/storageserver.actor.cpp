@@ -350,8 +350,7 @@ public:
 				UIDofLongest = deterministicRandom()->randomUniqueID();
 			}
 			if(keyRangeMap.count(UIDofLongest)) {
-				const KeyRange& range = keyRangeMap[UIDofLongest];
-				return {longest, range};
+				return {longest, keyRangeMap.at(UIDofLongest)};
 			}
 			return {-1, emptyKeyRange};
 		}
