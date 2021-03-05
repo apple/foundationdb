@@ -61,7 +61,7 @@ add_flow_target(STATIC_LIBRARY NAME fdbrpc
   DISABLE_ACTOR_DIAGNOSTICS ${FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS})
 target_include_directories(fdbrpc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
 target_link_libraries(fdbrpc PRIVATE uring)
-target_link_libraries(fdbrpc PRIVATE thirdparty)
+#target_link_libraries(fdbrpc PRIVATE thirdparty)
 target_link_libraries(fdbrpc PUBLIC flow)
 if(COMPILE_EIO)
   add_library(eio STATIC libeio/eio.c)
