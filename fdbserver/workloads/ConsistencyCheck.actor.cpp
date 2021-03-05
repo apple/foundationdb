@@ -48,6 +48,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	// Whether or not perform consistency check between storage cache servers and storage servers
 	bool performCacheCheck;
 
+	// Whether or not to perform consistency check between storage servers and pair TSS
+	bool performTSSCheck;
+
 	// How long to wait for the database to go quiet before failing (if doing quiescent checks)
 	double quiescentWaitTimeout;
 
@@ -94,6 +97,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	ConsistencyCheckWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		performQuiescentChecks = getOption(options, LiteralStringRef("performQuiescentChecks"), false);
 		performCacheCheck = getOption(options, LiteralStringRef("performCacheCheck"), false);
+		performTSSCheck = getOption(options, LiteralStringRef("performTSSCheck"), false);
 		quiescentWaitTimeout = getOption(options, LiteralStringRef("quiescentWaitTimeout"), 600.0);
 		distributed = getOption(options, LiteralStringRef("distributed"), true);
 		shardSampleFactor = std::max(getOption(options, LiteralStringRef("shardSampleFactor"), 1), 1);
@@ -1057,7 +1061,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					TraceEvent("ConsistencyCheck_FailedToFetchMetrics")
 					    .detail("Begin", printable(shard.begin))
 					    .detail("End", printable(shard.end))
-					    .detail("StorageServer", storageServers[i].id());
+					    .detail("StorageServer", storageServers[i].id())
+					    .detail("IsTSS", storageServers[i].isTss ? "True" : "False")
+					    .error(reply.getError());
 					estimatedBytes.push_back(-1);
 				}
 
@@ -1074,7 +1080,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						    .detail("Begin", printable(shard.begin))
 						    .detail("End", printable(shard.end))
 						    .detail("StorageServer1", storageServers[firstValidStorageServer].id())
-						    .detail("StorageServer2", storageServers[i].id());
+						    .detail("StorageServer2", storageServers[i].id())
+						    .detail("IsTSS",
+						            storageServers[i].isTss || storageServers[firstValidStorageServer].isTss ? "True"
+						                                                                                     : "False");
 					}
 				}
 			}
@@ -1236,6 +1245,28 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 			}
 
+			// add TSS to end of list, if configured and if not relocating
+			if (!isRelocating && self->performTSSCheck) {
+				printf("CCheck: Checking for tss to add: isRelocating: %s, performTSSCheck: %s\n",
+				       isRelocating ? "T" : "F",
+				       self->performTSSCheck ? "T" : "F");
+				int initialSize = storageServers.size();
+				for (int i = 0; i < initialSize; i++) {
+					Optional<StorageServerInterface> tssPair = cx->clientInfo->get().getTssPair(storageServers[i]);
+					if (tssPair.present()) {
+						printf("CCheck: Adding TSS %s to consistency check!\n", tssPair.get().id().toString().c_str());
+						storageServers.push_back(tssPair.get().id());
+						storageServerInterfaces.push_back(tssPair.get());
+					} else {
+						printf("CCheck: SS %s doesn't have tss pair\n", storageServers[i].toString().c_str());
+					}
+				}
+			} else {
+				printf("CCheck: Not checking for tss to add: isRelocating: %s, performTSSCheck: %s\n",
+				       isRelocating ? "T" : "F",
+				       self->performTSSCheck ? "T" : "F");
+			}
+
 			state vector<int64_t> estimatedBytes = wait(self->getStorageSizeEstimate(storageServerInterfaces, range));
 
 			// Gets permitted size range of shard
@@ -1323,7 +1354,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 										// Be especially verbose if in simulation
 										if (g_network->isSimulated()) {
 											int invalidIndex = -1;
-											printf("\nSERVER %d (%s); shard = %s - %s:\n",
+											printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
+											       storageServerInterfaces[j].isTss ? "TSS " : "",
 											       j,
 											       storageServerInterfaces[j].address().toString().c_str(),
 											       printable(req.begin.getKey()).c_str(),
@@ -1341,7 +1373,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 											}
 
 											printf(
-											    "\nSERVER %d (%s); shard = %s - %s:\n",
+											    "\n%sSERVER %d (%s); shard = %s - %s:\n",
+											    storageServerInterfaces[firstValidServer].isTss ? "TSS " : "",
 											    firstValidServer,
 											    storageServerInterfaces[firstValidServer].address().toString().c_str(),
 											    printable(req.begin.getKey()).c_str(),
@@ -1430,16 +1463,31 @@ struct ConsistencyCheckWorkload : TestWorkload {
 										            printable(referenceUniqueKey))
 										    .detail("ValueMismatches", valueMismatches)
 										    .detail("ValueMismatchKey", printable(valueMismatchKey))
-										    .detail("MatchingKVPairs", matchingKVPairs);
+										    .detail("MatchingKVPairs", matchingKVPairs)
+										    .detail("IsTSS",
+										            storageServerInterfaces[j].isTss ||
+										                    storageServerInterfaces[firstValidServer].isTss
+										                ? "True"
+										                : "False");
 
-										self->testFailure("Data inconsistent", true);
-										return false;
+										// TODO should the test still fail if TSS is wrong? Or is just logging the trace
+										// logs ok
+										if ((g_network->isSimulated() &&
+										     g_simulator.tssMode != ISimulator::TSSMode::EnabledDropMutations) ||
+										    (!storageServerInterfaces[j].isTss &&
+										     !storageServerInterfaces[firstValidServer].isTss)) {
+											self->testFailure("Data inconsistent", true);
+											return false;
+										}
 									}
 								}
 							}
 
 							// If the data is not available and we aren't relocating this shard
 							else if (!isRelocating) {
+								Error e =
+								    rangeResult.isError() ? rangeResult.getError() : rangeResult.get().error.get();
+
 								TraceEvent("ConsistencyCheck_StorageServerUnavailable")
 								    .suppressFor(1.0)
 								    .detail("StorageServer", storageServers[j])
@@ -1448,10 +1496,20 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								    .detail("Address", storageServerInterfaces[j].address())
 								    .detail("UID", storageServerInterfaces[j].id())
 								    .detail("GetKeyValuesToken",
-								            storageServerInterfaces[j].getKeyValues.getEndpoint().token);
+								            storageServerInterfaces[j].getKeyValues.getEndpoint().token)
+								    .detail("IsTSS", storageServerInterfaces[j].isTss ? "True" : "False")
+								    .error(e);
+
+								printf("CC %sSS %s failed with error % d\n",
+								       storageServerInterfaces[j].isTss ? "T" : "",
+								       storageServers[j].toString().c_str(),
+								       e.code());
 
 								// All shards should be available in quiscence
-								if (self->performQuiescentChecks) {
+								// TODO should the test still fail if TSS is unavailable? Or is just logging the trace
+								// logs ok
+								if (self->performQuiescentChecks &&
+								    (g_network->isSimulated() || !storageServerInterfaces[j].isTss)) {
 									self->testFailure("Storage server unavailable");
 									return false;
 								}
@@ -1546,19 +1604,25 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				bool hasValidEstimate = estimatedBytes.size() > 0;
 
 				// If the storage servers' sampled estimate of shard size is different from ours
+				// TODO should the test still fail if TSS has wrong estimate? Or is just logging the trace logs ok
 				if (self->performQuiescentChecks) {
 					for (int j = 0; j < estimatedBytes.size(); j++) {
 						if (estimatedBytes[j] >= 0 && estimatedBytes[j] != sampledBytes) {
 							TraceEvent("ConsistencyCheck_IncorrectEstimate")
 							    .detail("EstimatedBytes", estimatedBytes[j])
 							    .detail("CorrectSampledBytes", sampledBytes)
-							    .detail("StorageServer", storageServers[j]);
-							self->testFailure("Storage servers had incorrect sampled estimate");
+							    .detail("StorageServer", storageServers[j])
+							    .detail("IsTSS", storageServerInterfaces[j].isTss ? "True" : "False");
+
+							if (!storageServerInterfaces[j].isTss) {
+								self->testFailure("Storage servers had incorrect sampled estimate");
+							}
 
 							hasValidEstimate = false;
 
 							break;
-						} else if (estimatedBytes[j] < 0) {
+						} else if (estimatedBytes[j] < 0 &&
+						           (g_network->isSimulated() || !storageServerInterfaces[j].isTss)) {
 							self->testFailure("Could not get storage metrics from server");
 							hasValidEstimate = false;
 							break;
@@ -1670,7 +1734,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			if (!keyValueStoreType.present()) {
 				TraceEvent("ConsistencyCheck_ServerUnavailable").detail("ServerID", storageServers[i].id());
 				self->testFailure("Storage server unavailable");
-			} else if (keyValueStoreType.get() != configuration.storageServerStoreType) {
+			} else if ((!storageServers[i].isTss && keyValueStoreType.get() != configuration.storageServerStoreType) ||
+			           (storageServers[i].isTss &&
+			            keyValueStoreType.get() != configuration.testingStorageServerStoreType)) {
 				TraceEvent("ConsistencyCheck_WrongKeyValueStoreType")
 				    .detail("ServerID", storageServers[i].id())
 				    .detail("StoreType", keyValueStoreType.get().toString())
@@ -1681,6 +1747,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 			// Check each pair of storage servers for an address match
 			for (j = i + 1; j < storageServers.size(); j++) {
+				// TODO change this hack back once i fix recruitment
+				/*if (storageServers[i].isTss || storageServers[j].isTss) {
+				    continue;
+				}*/
 				if (storageServers[i].address() == storageServers[j].address()) {
 					TraceEvent("ConsistencyCheck_UndesirableServer")
 					    .detail("StorageServer1", storageServers[i].id())
@@ -1701,8 +1771,18 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	                                   ConsistencyCheckWorkload* self) {
 		state vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 		state vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
-		std::set<Optional<Key>> missingStorage;
+		std::vector<Optional<Key>> missingStorage; // vector instead of a set to get the count
 
+		printf("CC starting check for storage: %d workers, %d SS\n", workers.size(), storageServers.size());
+		printf("CC checking %d regions: ", configuration.regions.size());
+		if (configuration.regions.size() == 1) {
+			printf("%s", configuration.regions[0].dcId.toString().c_str());
+		} else if (configuration.regions.size() == 2) {
+			printf("%s %s",
+			       configuration.regions[0].dcId.toString().c_str(),
+			       configuration.regions[1].dcId.toString().c_str());
+		}
+		printf("\n");
 		for (int i = 0; i < workers.size(); i++) {
 			NetworkAddress addr = workers[i].interf.stableAddress();
 			if (!configuration.isExcludedServer(workers[i].interf.addresses()) &&
@@ -1712,29 +1792,83 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				for (int j = 0; j < storageServers.size(); j++) {
 					if (storageServers[j].stableAddress() == addr) {
 						found = true;
+						printf("CC found SS %s on %s in dc %s\n",
+						       storageServers[j].id().toString().c_str(),
+						       addr.toString().c_str(),
+						       workers[i].interf.locality.dcId().present()
+						           ? workers[i].interf.locality.dcId().get().toString().c_str()
+						           : "");
 						break;
 					}
 				}
 				if (!found) {
+					if (configuration.regions.size() == 0 ||
+					    (configuration.regions.size() == 1 &&
+					     workers[i].interf.locality.dcId() == configuration.regions[0].dcId) ||
+					    (configuration.regions.size() == 2 &&
+					     (workers[i].interf.locality.dcId() == configuration.regions[0].dcId ||
+					      workers[i].interf.locality.dcId() == configuration.regions[1].dcId))) {
+						printf("CC found no SS on %s in dc %s\n",
+						       addr.toString().c_str(),
+						       workers[i].interf.locality.dcId().present()
+						           ? workers[i].interf.locality.dcId().get().toString().c_str()
+						           : "");
+					}
+
 					TraceEvent("ConsistencyCheck_NoStorage")
 					    .detail("Address", addr)
 					    .detail("ProcessClassEqualToStorageClass",
 					            (int)(workers[i].processClass == ProcessClass::StorageClass));
-					missingStorage.insert(workers[i].interf.locality.dcId());
+					missingStorage.push_back(workers[i].interf.locality.dcId());
 				}
 			}
 		}
 
+		int missingDc0 = configuration.regions.size() == 0
+		                     ? 0
+		                     : std::count(missingStorage.begin(), missingStorage.end(), configuration.regions[0].dcId);
+		int missingDc1 = configuration.regions.size() < 2
+		                     ? 0
+		                     : std::count(missingStorage.begin(), missingStorage.end(), configuration.regions[1].dcId);
+
 		if ((configuration.regions.size() == 0 && missingStorage.size()) ||
-		    (configuration.regions.size() == 1 && missingStorage.count(configuration.regions[0].dcId)) ||
-		    (configuration.regions.size() == 2 && configuration.usableRegions == 1 &&
-		     missingStorage.count(configuration.regions[0].dcId) &&
-		     missingStorage.count(configuration.regions[1].dcId)) ||
-		    (configuration.regions.size() == 2 && configuration.usableRegions > 1 &&
-		     (missingStorage.count(configuration.regions[0].dcId) ||
-		      missingStorage.count(configuration.regions[1].dcId)))) {
-			self->testFailure("No storage server on worker");
-			return false;
+		    (configuration.regions.size() == 1 && missingDc0) ||
+		    (configuration.regions.size() == 2 && configuration.usableRegions == 1 && missingDc0 && missingDc1) ||
+		    (configuration.regions.size() == 2 && configuration.usableRegions > 1 && (missingDc0 || missingDc1))) {
+
+			// TODO could improve this check by also ensuring DD is currently recruiting a TSS by using quietdb?
+			bool couldExpectMissingTss =
+			    (configuration.desiredTSSCount - self->dbInfo->get().client.tssMapping.size()) > 0;
+			printf("CC couldExpectMissingTss = %s\n", couldExpectMissingTss ? "True" : "False");
+
+			int countMissing = missingStorage.size();
+			int acceptableTssMissing = 1;
+			if (configuration.regions.size() == 1) {
+				countMissing = missingDc0;
+			} else if (configuration.regions.size() == 2) {
+				if (configuration.usableRegions == 1) {
+					// all processes should be missing from 1, so take the number missing from the other
+					countMissing = std::min(missingDc0, missingDc1);
+				} else if (configuration.usableRegions == 2) {
+					countMissing = missingDc0 + missingDc1;
+					acceptableTssMissing = 2;
+				} else {
+					ASSERT(false); // in case fdb ever adds 3+ region support?
+				}
+			}
+
+			if (!couldExpectMissingTss || countMissing > acceptableTssMissing) {
+				printf("No storage server on %d workers. CouldBeTSS=%s, acceptableTssMissing=%d\n",
+				       countMissing,
+				       couldExpectMissingTss ? "T" : "F",
+				       acceptableTssMissing);
+				self->testFailure("No storage server on worker");
+				return false;
+			} else {
+				// TODO sev=30 warn instead of print
+				printf("CC found %d missing storage server on worker, but it is likely a tss(es) waiting for a pair\n",
+				       configuration.usableRegions);
+			}
 		}
 
 		return true;
@@ -1751,8 +1885,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state bool foundExtraDataStore = false;
 		state std::vector<struct ProcessInfo*> protectedProcessesToKill;
 
+		printf("CC checking for extra data stores\n");
 		state std::map<NetworkAddress, std::set<UID>> statefulProcesses;
 		for (const auto& ss : storageServers) {
+			printf("CC Marking %ss as ok\n", ss.id().toString().c_str());
 			statefulProcesses[ss.address()].insert(ss.id());
 			// A process may have two addresses (same ip, different ports)
 			if (ss.secondaryAddress().present()) {
@@ -1809,6 +1945,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				if (statefulProcesses[itr->interf.address()].count(id)) {
 					continue;
 				}
+				printf("CC found extra data store %s on %s\n",
+				       id.toString().c_str(),
+				       itr->interf.address().toString().c_str());
 				// For extra data store
 				TraceEvent("ConsistencyCheck_ExtraDataStore")
 				    .detail("Address", itr->interf.address())
@@ -1841,7 +1980,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			}
 		}
 
+		printf("CC check for extra data stores complete\n");
+
 		if (foundExtraDataStore) {
+			printf("CC Extra Data Stores\n");
 			self->testFailure("Extra data stores present on workers");
 			return false;
 		}

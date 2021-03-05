@@ -95,12 +95,14 @@ void applyMetadataMutations(SpanID const& spanContext,
 
 						for (const auto& id : src) {
 							auto storageInfo = getStorageInfo(id, storageCache, txnStateStore);
+							ASSERT(!storageInfo->interf.isTss);
 							ASSERT(storageInfo->tag != invalidTag);
 							info.tags.push_back(storageInfo->tag);
 							info.src_info.push_back(storageInfo);
 						}
 						for (const auto& id : dest) {
 							auto storageInfo = getStorageInfo(id, storageCache, txnStateStore);
+							ASSERT(!storageInfo->interf.isTss);
 							ASSERT(storageInfo->tag != invalidTag);
 							info.tags.push_back(storageInfo->tag);
 							info.dest_info.push_back(storageInfo);
@@ -113,6 +115,11 @@ void applyMetadataMutations(SpanID const& spanContext,
 					txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			} else if (m.param1.startsWith(serverKeysPrefix)) {
 				if (toCommit) {
+					Optional<Value> t =
+					    txnStateStore->readValue(serverTagKeyFor(serverKeysDecodeServer(m.param1))).get();
+					// printf("got SetValue for serverKeysPrefix/%s, tag=%s\n",
+					// serverKeysDecodeServer(m.param1).toString().c_str(), t.present() ?
+					// decodeServerTagValue(t.get()).toString().c_str() : "");
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 					TraceEvent(SevDebug, "SendingPrivateMutation", dbgid)

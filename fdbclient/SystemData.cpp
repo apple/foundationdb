@@ -25,6 +25,7 @@
 #include "flow/Arena.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/serialize.h"
+#include "flow/UnitTest.h"
 
 const KeyRef systemKeysPrefix = LiteralStringRef("\xff");
 const KeyRangeRef normalKeys(KeyRef(), systemKeysPrefix);
@@ -345,7 +346,11 @@ uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key) {
 	return idx;
 }
 
+const KeyRef tssMappingChangeKey = LiteralStringRef("\xff\x02/tssMappingChangeKey");
+const KeyRangeRef tssMappingKeys(LiteralStringRef("\xff/tss/"), LiteralStringRef("\xff/tss0"));
+
 const KeyRangeRef serverTagKeys(LiteralStringRef("\xff/serverTag/"), LiteralStringRef("\xff/serverTag0"));
+
 const KeyRef serverTagPrefix = serverTagKeys.begin;
 const KeyRangeRef serverTagConflictKeys(LiteralStringRef("\xff/serverTagConflict/"),
                                         LiteralStringRef("\xff/serverTagConflict0"));
@@ -532,6 +537,7 @@ const Key serverListKeyFor(UID serverID) {
 	return wr.toValue();
 }
 
+// TODO use flatbuffers depending on version
 const Value serverListValue(StorageServerInterface const& server) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withServerListValue()));
 	wr << server;
@@ -547,6 +553,18 @@ StorageServerInterface decodeServerListValue(ValueRef const& value) {
 	StorageServerInterface s;
 	BinaryReader reader(value, IncludeVersion());
 	reader >> s;
+	return s;
+}
+
+// TODO merge this with above stuff or something
+const Value serverListValueFB(StorageServerInterface const& server) {
+	return ObjectWriter::toValue(server, IncludeVersion());
+}
+
+StorageServerInterface decodeServerListValueFB(ValueRef const& value) {
+	StorageServerInterface s;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(s);
 	return s;
 }
 
@@ -636,15 +654,17 @@ std::string encodeFailedServersKey(AddressExclusion const& addr) {
 // const KeyRangeRef globalConfigKeys( LiteralStringRef("\xff/globalConfig/"), LiteralStringRef("\xff/globalConfig0") );
 // const KeyRef globalConfigPrefix = globalConfigKeys.begin;
 
-const KeyRangeRef globalConfigDataKeys( LiteralStringRef("\xff/globalConfig/k/"), LiteralStringRef("\xff/globalConfig/k0") );
+const KeyRangeRef globalConfigDataKeys(LiteralStringRef("\xff/globalConfig/k/"),
+                                       LiteralStringRef("\xff/globalConfig/k0"));
 const KeyRef globalConfigKeysPrefix = globalConfigDataKeys.begin;
 
-const KeyRangeRef globalConfigHistoryKeys( LiteralStringRef("\xff/globalConfig/h/"), LiteralStringRef("\xff/globalConfig/h0") );
+const KeyRangeRef globalConfigHistoryKeys(LiteralStringRef("\xff/globalConfig/h/"),
+                                          LiteralStringRef("\xff/globalConfig/h0"));
 const KeyRef globalConfigHistoryPrefix = globalConfigHistoryKeys.begin;
 
 const KeyRef globalConfigVersionKey = LiteralStringRef("\xff/globalConfig/v");
 
-const KeyRangeRef workerListKeys( LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0") );
+const KeyRangeRef workerListKeys(LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0"));
 const KeyRef workerListPrefix = workerListKeys.begin;
 
 const Key workerListKeyFor(StringRef processID) {
@@ -1085,3 +1105,62 @@ const KeyRangeRef testOnlyTxnStateStorePrefixRange(LiteralStringRef("\xff/TESTON
 const KeyRef writeRecoveryKey = LiteralStringRef("\xff/writeRecovery");
 const ValueRef writeRecoveryKeyTrue = LiteralStringRef("1");
 const KeyRef snapshotEndVersionKey = LiteralStringRef("\xff/snapshotEndVersion");
+
+// for tests
+void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {
+	printf("ssi=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\naddress=%s\ngetValue=%s\n\n\n",
+	       ssi.id().toString().c_str(),
+	       ssi.locality.toString().c_str(),
+	       ssi.isTss ? "true" : "false",
+	       ssi.isTss ? ssi.tssPairID.toString().c_str() : "",
+	       ssi.address().toString().c_str(),
+	       ssi.getValue.getEndpoint().token.toString().c_str());
+
+	StorageServerInterface ssi2 =
+	    (useFB) ? decodeServerListValueFB(serverListValueFB(ssi)) : decodeServerListValue(serverListValue(ssi));
+
+	printf("ssi2=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\naddress=%s\ngetValue=%s\n\n\n",
+	       ssi2.id().toString().c_str(),
+	       ssi2.locality.toString().c_str(),
+	       ssi2.isTss ? "true" : "false",
+	       ssi2.isTss ? ssi2.tssPairID.toString().c_str() : "",
+	       ssi2.address().toString().c_str(),
+	       ssi2.getValue.getEndpoint().token.toString().c_str());
+
+	ASSERT(ssi.id() == ssi2.id());
+	ASSERT(ssi.locality == ssi2.locality);
+	ASSERT(ssi.isTss == ssi2.isTss);
+	if (ssi.isTss) {
+		ASSERT(ssi2.tssPairID == ssi2.tssPairID);
+	}
+	ASSERT(ssi.address() == ssi2.address());
+	ASSERT(ssi.getValue.getEndpoint().token == ssi2.getValue.getEndpoint().token);
+}
+
+// unit test for serialization since tss stuff had bugs
+TEST_CASE("/SystemData/SerDes/SSI") {
+	printf("testing ssi serdes\n");
+	LocalityData localityData(Optional<Standalone<StringRef>>(),
+	                          Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
+	                          Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
+	                          Optional<Standalone<StringRef>>());
+
+	// non-tss
+	StorageServerInterface ssi;
+	ssi.uniqueID = UID(0x1234123412341234, 0x5678567856785678);
+	ssi.locality = localityData;
+	ssi.isTss = false;
+	ssi.initEndpoints();
+
+	testSSISerdes(ssi, false);
+	testSSISerdes(ssi, true);
+
+	ssi.isTss = true;
+	ssi.tssPairID = UID(0x2345234523452345, 0x1238123812381238);
+
+	testSSISerdes(ssi, false);
+	testSSISerdes(ssi, true);
+	printf("ssi serdes test complete\n");
+
+	return Void();
+}

@@ -869,6 +869,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
                                     std::vector<TesterInterface> testers,
                                     bool doQuiescentCheck,
                                     bool doCacheCheck,
+                                    bool doTSSCheck,
                                     double quiescentWaitTimeout,
                                     double softTimeLimit,
                                     double databasePingDelay,
@@ -885,11 +886,15 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	Standalone<VectorRef<KeyValueRef>> options;
 	StringRef performQuiescent = LiteralStringRef("false");
 	StringRef performCacheCheck = LiteralStringRef("false");
+	StringRef performTSSCheck = LiteralStringRef("false");
 	if (doQuiescentCheck) {
 		performQuiescent = LiteralStringRef("true");
 	}
 	if (doCacheCheck) {
 		performCacheCheck = LiteralStringRef("true");
+	}
+	if (doTSSCheck) {
+		performTSSCheck = LiteralStringRef("true");
 	}
 	spec.title = LiteralStringRef("ConsistencyCheck");
 	spec.databasePingDelay = databasePingDelay;
@@ -898,6 +903,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ConsistencyCheck")));
 	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("performQuiescentChecks"), performQuiescent));
 	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("performCacheCheck"), performCacheCheck));
+	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("performTSSCheck"), performTSSCheck));
 	options.push_back_deep(options.arena(),
 	                       KeyValueRef(LiteralStringRef("quiescentWaitTimeout"),
 	                                   ValueRef(options.arena(), format("%f", quiescentWaitTimeout))));
@@ -973,6 +979,8 @@ ACTOR Future<bool> runTest(Database cx,
 				                                   testers,
 				                                   quiescent,
 				                                   spec.runConsistencyCheckOnCache,
+				                                   // spec.runConsistencyCheckOnTSS, // TODO override with true to test
+				                                   true,
 				                                   10000.0,
 				                                   18000,
 				                                   spec.databasePingDelay,
@@ -1107,6 +1115,11 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  [](const std::string& value, TestSpec* spec) {
 	      spec->runConsistencyCheckOnCache = (value == "true");
 	      TraceEvent("TestParserTest").detail("ParsedRunConsistencyCheckOnCache", spec->runConsistencyCheckOnCache);
+	  } },
+	{ "runConsistencyCheckOnTSS",
+	  [](const std::string& value, TestSpec* spec) {
+	      spec->runConsistencyCheckOnTSS = (value == "true");
+	      TraceEvent("TestParserTest").detail("ParsedRunConsistencyCheckOnTSS", spec->runConsistencyCheckOnTSS);
 	  } },
 	{ "waitForQuiescence",
 	  [](const std::string& value, TestSpec* spec) {
@@ -1416,13 +1429,18 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	if (useDB && startingConfiguration != StringRef()) {
 		try {
 			wait(timeoutError(changeConfiguration(cx, testers, startingConfiguration), 2000.0));
+			printf("starting config changed\n");
 			if (g_network->isSimulated() && enableDD) {
+				printf("waiting for DD\n");
 				wait(success(setDDMode(cx, 1)));
+				printf("done waiting for DD\n");
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to set starting configuration");
 		}
 	}
+
+	printf("starting configuration set, moving on\n");
 
 	if (useDB && waitForQuiescenceBegin) {
 		TraceEvent("TesterStartingPreTestChecks")
@@ -1438,6 +1456,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 			throw;
 		}
 	}
+
+	printf("database quiesced, starting tests.\n");
 
 	TraceEvent("TestsExpectedToPass").detail("Count", tests.size());
 	state int idx = 0;

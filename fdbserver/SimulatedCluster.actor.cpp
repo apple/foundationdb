@@ -1138,6 +1138,7 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 			storage_engine_type = deterministicRandom()->randomInt(0, 4);
 		}
 	}
+
 	switch (storage_engine_type) {
 	case 0: {
 		TEST(true); // Simulated cluster using ssd storage engine
@@ -1162,6 +1163,17 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	default:
 		ASSERT(false); // Programmer forgot to adjust cases.
 	}
+
+	int tssCount = 0;
+	// if (!testConfig.simpleConfig && deterministicRandom()->random01() < 0.25) {
+	if (true) {
+		// if (false) {
+		// tss
+		// 1 or 2 tss
+		tssCount = deterministicRandom()->randomInt(1, 3);
+		printf("Initial tss count to %d\n", tssCount);
+	}
+
 	//	if (deterministicRandom()->random01() < 0.5) {
 	//		set_config("ssd");
 	//	} else {
@@ -1494,6 +1506,29 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	} else {
 		processes_per_machine = deterministicRandom()->randomInt(1, (extraDB ? 14 : 28) / machine_count + 2);
 	}
+
+	// reduce tss to half of extra non-seed servers that can be recruited in usable regions.
+	tssCount =
+	    std::max(0, std::min(tssCount, (db.usableRegions * (machine_count / datacenters) - replication_type) / 2));
+	printf("Adjusted tss count to %d\n", tssCount);
+
+	if (tssCount > 0) {
+		std::string confStr = format("tss_count:=%d tss_storage_engine:=%d", tssCount, db.storageServerStoreType);
+		set_config(confStr);
+		double tssRandom = deterministicRandom()->random01();
+		if (tssRandom > 0.5) {
+			// normal tss mode
+			g_simulator.tssMode = ISimulator::TSSMode::EnabledNormal;
+			printf("normal tss mode\n");
+		} else if (tssRandom < 0.25) {
+			// delay injection
+			g_simulator.tssMode = ISimulator::TSSMode::EnabledAddDelay;
+		} else {
+			// fault injection
+			g_simulator.tssMode = ISimulator::TSSMode::EnabledDropMutations;
+		}
+		printf("enabling tss for simulation in mode %d: %s\n", g_simulator.tssMode, confStr.c_str());
+	}
 }
 
 // Configures the system according to the given specifications in order to run
@@ -1517,6 +1552,9 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		startingConfigString += " locked";
 	}
 	for (auto kv : startingConfigJSON) {
+		if ("tss_storage_engine" == kv.first) {
+			continue;
+		}
 		startingConfigString += " ";
 		if (kv.second.type() == json_spirit::int_type) {
 			startingConfigString += kv.first + ":=" + format("%d", kv.second.get_int());
@@ -1529,6 +1567,12 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		} else {
 			ASSERT(false);
 		}
+	}
+
+	// handle tss_storage_engine separately because the passthrough needs the enum ordinal, but it's serialized to json
+	// as the string name
+	if (simconfig.db.desiredTSSCount > 0) {
+		startingConfigString += format(" tss_storage_engine:=%d", simconfig.db.testingStorageServerStoreType);
 	}
 
 	if (g_simulator.originalRegions != "") {

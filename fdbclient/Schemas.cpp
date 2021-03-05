@@ -431,6 +431,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "seconds" : 1.0,
          "versions" : 1000000
       },
+      "active_tss_count":0,
       "degraded_processes":0,
       "database_available":true,
       "database_lock_state": {
@@ -729,6 +730,19 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "memory-2",
              "memory-radixtree-beta"
          ]},
+         "tss_count":1,
+         "tss_storage_engine":{
+         "$enum":[
+             "ssd",
+             "ssd-1",
+             "ssd-2",
+             "ssd-redwood-experimental",
+             "ssd-rocksdb-experimental",
+             "memory",
+             "memory-1",
+             "memory-2",
+             "memory-radixtree-beta"
+         ]},
          "coordinators_count":1,
          "excluded_servers":[
             {
@@ -802,7 +816,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                 }
             }
          ],
-         "least_operating_space_bytes_storage_server":0
+         "least_operating_space_bytes_storage_server":0,
+         "max_machine_failures_without_losing_data":0
       },
       "machines":{
          "$map":{

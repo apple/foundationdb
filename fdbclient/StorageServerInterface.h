@@ -29,7 +29,9 @@
 #include "fdbrpc/LoadBalance.actor.h"
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
+#include "fdbrpc/TSSComparison.h"
 #include "fdbclient/TagThrottle.h"
+#include "flow/UnitTest.h"
 
 // Dead code, removed in the next protocol version
 struct VersionReply {
@@ -54,6 +56,10 @@ struct StorageServerInterface {
 
 	LocalityData locality;
 	UID uniqueID;
+	// TODO get rid of explicit mapping?
+	// Effectively implements Optional<UID> but serializer didn't like Optional
+	bool isTss;
+	UID tssPairID;
 
 	RequestStream<struct GetValueRequest> getValue;
 	RequestStream<struct GetKeyRequest> getKey;
@@ -74,8 +80,8 @@ struct StorageServerInterface {
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct SplitRangeRequest> getRangeSplitPoints;
 
-	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
-	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
+	explicit StorageServerInterface(UID uid) : uniqueID(uid), isTss(false) {}
+	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()), isTss(false) {}
 	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }
 	NetworkAddress stableAddress() const { return getValue.getEndpoint().getStableAddress(); }
 	Optional<NetworkAddress> secondaryAddress() const { return getValue.getEndpoint().addresses.secondaryAddress; }
@@ -88,7 +94,11 @@ struct StorageServerInterface {
 		// considered
 
 		if (ar.protocolVersion().hasSmallEndpoints()) {
-			serializer(ar, uniqueID, locality, getValue);
+			if (ar.protocolVersion().hasTSS()) {
+				serializer(ar, uniqueID, locality, getValue, isTss, tssPairID);
+			} else {
+				serializer(ar, uniqueID, locality, getValue);
+			}
 			if (Ar::isDeserializing) {
 				getKey = RequestStream<struct GetKeyRequest>(getValue.getEndpoint().getAdjustedEndpoint(1));
 				getKeyValues = RequestStream<struct GetKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(2));
@@ -127,8 +137,9 @@ struct StorageServerInterface {
 			           waitFailure,
 			           getQueuingMetrics,
 			           getKeyValueStoreType);
-			if (ar.protocolVersion().hasWatches())
+			if (ar.protocolVersion().hasWatches()) {
 				serializer(ar, watchValue);
+			}
 		}
 	}
 	bool operator==(StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }

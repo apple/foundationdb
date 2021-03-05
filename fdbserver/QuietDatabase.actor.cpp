@@ -294,6 +294,11 @@ ACTOR Future<int64_t> getMaxStorageServerQueueSize(Database cx, Reference<AsyncV
 	state std::vector<StorageServerInterface> servers = wait(serversFuture);
 	state std::vector<WorkerDetails> workers = wait(workersFuture);
 
+	/*printf("Found %d storage servers:\n", servers.size());
+	for (auto& it : servers) {
+	    printf("    %s\n", it.id().toString().c_str());
+	}*/
+
 	std::map<NetworkAddress, WorkerInterface> workersMap;
 	for (auto worker : workers) {
 		workersMap[worker.interf.address()] = worker.interf;
@@ -323,6 +328,7 @@ ACTOR Future<int64_t> getMaxStorageServerQueueSize(Database cx, Reference<AsyncV
 		try {
 			maxQueueSize = std::max(maxQueueSize, getQueueSize(messages[i].get()));
 		} catch (Error& e) {
+			printf("Error getting max storage server queue size: %d\n", e.code());
 			TraceEvent("QuietDatabaseFailure")
 			    .detail("Reason", "Failed to extract MaxStorageServerQueue")
 			    .detail("SS", servers[i].id());
@@ -516,7 +522,15 @@ ACTOR Future<bool> getStorageServersRecruiting(Database cx, WorkerInterface dist
 		                      1.0));
 
 		TraceEvent("StorageServersRecruiting").detail("Message", recruitingMessage.toString());
-		return recruitingMessage.getValue("State") == "Recruiting";
+
+		if (recruitingMessage.getValue("State") == "Recruiting") {
+			std::string tssValue;
+			// if we're tss recruiting, that's fine because that can block indefinitely if only 1 free storage process
+			if (!recruitingMessage.tryGetValue("IsTSS", tssValue) || tssValue == "False") {
+				return true;
+			}
+		}
+		return false;
 	} catch (Error& e) {
 		TraceEvent("QuietDatabaseFailure", distributorWorker.id())
 		    .detail("Reason", "Failed to extract StorageServersRecruiting")
