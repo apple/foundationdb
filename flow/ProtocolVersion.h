@@ -132,6 +132,7 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010000LL, StableInterfaces);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, TagThrottleValueReason);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, SpanContext);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, RangeFeed);
 };
 
 // These impact both communications and the deserialization of certain database and IKeyValueStore keys.

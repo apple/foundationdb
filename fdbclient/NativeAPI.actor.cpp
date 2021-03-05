@@ -3093,6 +3093,24 @@ Future< Standalone< VectorRef< const char*>>> Transaction::getAddressesForKey( c
 	return getAddressesForKeyActor(key, ver, cx, info, options);
 }
 
+ACTOR Future<Void> registerRangeFeedActor(StringRef rangeID, KeyRangeRef range, Future<Version> ver, Database cx,
+                                                                         TransactionInfo info,
+                                                                         TransactionOptions options) {
+	state Key rangeIDKey = rangeID.withPrefix(rangeFeedPrefix);
+	Optional<Value> val = wait( getValue(ver, rangeIDKey, cx, info, trLogInfo, options.readTags) );
+	if(!val.present()) {
+		set(rangeIDKey, rangeFeedValue(range));
+	} else if(decodeRangeFeedValue(val.get()) != range) {
+		throw unsupported_operation();
+	}
+	return Void();
+}
+
+Future<Void> Transaction::registerRangeFeed( const StringRef& rangeID, const KeyRangeRef& range ) {
+	auto ver = getReadVersion();
+	return registerRangeFeedActor(rangeID, range, ver, cx, info, options);
+}
+
 ACTOR Future< Key > getKeyAndConflictRange(
 	Database cx, KeySelector k, Future<Version> version, Promise<std::pair<Key, Key>> conflictRange, TransactionInfo info, TagSet tags)
 {
@@ -5024,4 +5042,35 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid,
 		throw snap_invalid_uid_string();
 	}
 	return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
+}
+
+ACTOR Future<Standalone<VectorRef<MutationRefAndVersion>>> getRangeFeedMutationsActor(Reference<DatabaseContext> db, StringRef rangeID) {
+	state Database cx(db);
+	state Transaction tr(cx);
+	state Key rangeIDKey = rangeID.withPrefix(rangeFeedPrefix);
+	state Span span("NAPI:GetRangeFeedMutations"_loc);
+	Optional<Value> val = wait( tr.get(rangeIDKey) );
+	if(!val.present()) {
+		throw unsupported_operation();
+	}
+	KeyRange keys = decodeRangeFeedValue(val.get());
+	state vector< pair<KeyRange, Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, 100,
+	  false, &StorageServerInterface::rangeFeed, TransactionInfo(TaskPriority::DefaultEndpoint, span.context) ) );
+
+	if(locations.size() > 1) {
+		throw unsupported_operation();
+	}
+
+	state RangeFeedRequest req;
+	req.rangeID = rangeID;
+
+	RangeFeedReply rep =
+						wait(loadBalance(cx.getPtr(), locations[0].second, &StorageServerInterface::rangeFeed, req,
+										 TaskPriority::DefaultPromiseEndpoint, false,
+										 cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
+	return Standalone<VectorRef<MutationRefAndVersion>>(rep.mutations, rep.arena);
+}
+
+Future<Standalone<VectorRef<MutationRefAndVersion>>> DatabaseContext::getRangeFeedMutations(StringRef rangeID) {
+	return getRangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID);
 }

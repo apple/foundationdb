@@ -259,6 +259,12 @@ struct FetchInjectionInfo {
 	vector<VerUpdateRef> changes;
 };
 
+struct RangeFeedInfo : ReferenceCounted<RangeFeedInfo> {
+	std::deque<MutationRefAndVersion> mutations;
+	KeyRange range;
+	Key id;
+};
+
 struct StorageServer {
 	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
 
@@ -436,7 +442,9 @@ public:
 	KeyRangeMap< Reference<ShardInfo> > shards;
 	uint64_t shardChangeCounter;      // max( shards->changecounter )
 
-	KeyRangeMap <bool> cachedRangeMap; // indicates if a key-range is being cached
+	KeyRangeMap<bool> cachedRangeMap; // indicates if a key-range is being cached
+	KeyRangeMap<std::vector<Reference<RangeFeedInfo>>> keyRangeFeed;
+	std::unordered_map<UID, Reference<RangeFeedInfo>> uidRangeFeed;
 
 	// newestAvailableVersion[k]
 	//   == invalidVersion -> k is unavailable at all versions
@@ -492,7 +500,6 @@ public:
 	FlowLock durableVersionLock;
 	FlowLock fetchKeysParallelismLock;
 	vector< Promise<FetchInjectionInfo*> > readyFetchKeys;
-
 	int64_t instanceID;
 
 	Promise<Void> otherError;
@@ -1204,6 +1211,16 @@ ACTOR Future<Void> watchValueQ( StorageServer* data, WatchValueRequest req ) {
 			when( wait( data->noRecentUpdates.onChange()) ) {}
 		}
 	}
+}
+
+ACTOR Future<Void> rangeFeedQ( StorageServer* data, RangeFeedRequest req ) {
+	wait(delay(0));
+	RangeFeedReply reply;
+	for(auto& it : data->uidRangeFeed[req.rangeID]->mutations) {
+		reply.mutations.push_back(reply.arena, it);
+	}
+	req.reply.send(reply);
+	return Void();
 }
 
 ACTOR Future<Void> getShardState_impl( StorageServer* data, GetShardStateRequest req ) {
@@ -2001,7 +2018,7 @@ bool expandMutation( MutationRef& m, StorageServer::VersionedData const& data, U
 	return true;
 }
 
-void applyMutation( StorageServer *self, MutationRef const& m, Arena& arena, StorageServer::VersionedData &data ) {
+void applyMutation( StorageServer *self, MutationRef const& m, Arena& arena, StorageServer::VersionedData &data, Version version ) {
 	// m is expected to be in arena already
 	// Clear split keys are added to arena
 	StorageMetrics metrics;
@@ -2027,12 +2044,21 @@ void applyMutation( StorageServer *self, MutationRef const& m, Arena& arena, Sto
 		}
 		data.insert( m.param1, ValueOrClearToRef::value(m.param2) );
 		self->watches.trigger( m.param1 );
+
+		for(auto& it : self->keyRangeFeed[m.param1]) {
+			it->mutations.emplace_back(m,version);
+		}
 	} else if (m.type == MutationRef::ClearRange) {
 		data.erase( m.param1, m.param2 );
 		ASSERT( m.param2 > m.param1 );
 		ASSERT( !data.isClearContaining( data.atLatest(), m.param1 ) );
 		data.insert( m.param1, ValueOrClearToRef::clearTo(m.param2) );
 		self->watches.triggerRange( m.param1, m.param2 );
+
+		auto ranges = self->keyRangeFeed.intersectingRanges(KeyRangeRef(m.param1, m.param2));
+		for(auto &it : ranges) {
+			it.value()->mutations.emplace_back(m,version);
+		}
 	}
 
 }
@@ -2720,7 +2746,7 @@ void StorageServer::addMutation(Version version, MutationRef const& mutation, Ke
 	}
 	expanded = addMutationToMutationLog(mLog, expanded);
 	DEBUG_MUTATION("applyMutation", version, expanded).detail("UID", thisServerID).detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
-	applyMutation( this, expanded, mLog.arena(), mutableData() );
+	applyMutation( this, expanded, mLog.arena(), mutableData(), version );
 	//printf("\nSSUpdate: Printing versioned tree after applying mutation\n");
 	//mutableData().printTree(version);
 }
@@ -2850,6 +2876,18 @@ private:
 			data->primaryLocality = BinaryReader::fromStringRef<int8_t>(m.param2, Unversioned());
 			auto& mLV = data->addVersionToMutationLog( data->data().getLatestVersion() );
 			data->addMutationToMutationLog( mLV, MutationRef(MutationRef::SetValue, persistPrimaryLocality, m.param2) );
+		} else if (m.type == MutationRef::SetValue && m.param1.startsWith(rangeFeedPrivatePrefix)) {
+			Key rangeFeedId = m.param1.removePrefix(rangeFeedPrivatePrefix);
+			KeyRange rangeFeedRange = decodeRangeFeedValue( m.param2 );
+			Reference<RangeFeedInfo> rangeFeedInfo( new RangeFeedInfo() );
+			rangeFeedInfo->range = rangeFeedRange;
+			rangeFeedInfo->id = rangeFeedId;
+			data->uidRangeFeed[rangeFeedId] = rangeFeedInfo;
+			auto rs = data->keyRangeFeed.modify( rangeFeedRange );
+			for(auto r = rs.begin(); r != rs.end(); ++r) {
+				r->value().push_back( rangeFeedInfo );
+			}
+			data->uidRangeFeed.coalesce( rangeFeedRange );
 		} else {
 			ASSERT(false);  // Unknown private mutation
 		}
@@ -3900,6 +3938,13 @@ ACTOR Future<Void> serveWatchValueRequests( StorageServer* self, FutureStream<Wa
 	}
 }
 
+ACTOR Future<Void> serveRangeFeedRequests( StorageServer* self, FutureStream<RangeFeedRequest> rangeFeed ) {
+	loop {
+		RangeFeedRequest req = waitNext(rangeFeed);
+		self->actors.add(self->readGuard(req, rangeFeedQ));
+	}
+}
+
 ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 	if (!SERVER_KNOBS->REPORT_DD_METRICS) {
 		return Void();
@@ -3948,6 +3993,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 	self->actors.add(serveGetKeyValuesRequests(self, ssi.getKeyValues.getFuture()));
 	self->actors.add(serveGetKeyRequests(self, ssi.getKey.getFuture()));
 	self->actors.add(serveWatchValueRequests(self, ssi.watchValue.getFuture()));
+	self->actors.add(serveRangeFeedRequests(self, ssi.rangeFeed.getFuture()));
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 	self->actors.add(reportStorageServerState(self));
 

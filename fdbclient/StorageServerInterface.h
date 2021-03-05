@@ -73,6 +73,7 @@ struct StorageServerInterface {
 	RequestStream<struct WatchValueRequest> watchValue;
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct SplitRangeRequest> getRangeSplitPoints;
+	RequestStream<struct RangeFeedRequest> rangeFeed;
 
 	explicit StorageServerInterface(UID uid) : uniqueID( uid ) {}
 	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
@@ -101,6 +102,7 @@ struct StorageServerInterface {
 				watchValue = RequestStream<struct WatchValueRequest>( getValue.getEndpoint().getAdjustedEndpoint(10) );
 				getReadHotRanges = RequestStream<struct ReadHotSubRangeRequest>( getValue.getEndpoint().getAdjustedEndpoint(11) );
 				getRangeSplitPoints = RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
+				rangeFeed = RequestStream<struct RangeFeedRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -129,6 +131,7 @@ struct StorageServerInterface {
 		streams.push_back(watchValue.getReceiver());
 		streams.push_back(getReadHotRanges.getReceiver());
 		streams.push_back(getRangeSplitPoints.getReceiver());
+		streams.push_back(rangeFeed.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -513,6 +516,42 @@ struct SplitRangeRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, keys, chunkSize, reply, arena);
+	}
+};
+
+struct MutationRefAndVersion {
+	MutationRef mutation;
+	Version version;
+
+	MutationRefAndVersion(MutationRef mutation, Version version, Arena arena) : mutation(mutation), version(version) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, mutation, version);
+	}
+};
+
+struct RangeFeedReply {
+	constexpr static FileIdentifier file_identifier = 11815134;
+	VectorRef<MutationRefAndVersion> mutations;
+	Arena arena;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, mutations, arena);
+	}
+};
+struct RangeFeedRequest {
+	constexpr static FileIdentifier file_identifier = 10726174;
+	Key rangeID;
+	ReplyPromise<RangeFeedReply> reply;
+
+	RangeFeedRequest() {}
+	RangeFeedRequest(Key const& rangeID) : rangeID(rangeID) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rangeID, reply);
 	}
 };
 

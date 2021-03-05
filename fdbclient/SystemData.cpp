@@ -1062,3 +1062,22 @@ const KeyRangeRef testOnlyTxnStateStorePrefixRange(
 const KeyRef writeRecoveryKey = LiteralStringRef("\xff/writeRecovery");
 const ValueRef writeRecoveryKeyTrue = LiteralStringRef("1");
 const KeyRef snapshotEndVersionKey = LiteralStringRef("\xff/snapshotEndVersion");
+
+const KeyRangeRef rangeFeedKeys(
+	LiteralStringRef("\xff\x02/feed/"),
+	LiteralStringRef("\xff\x02/feed0")
+);
+const KeyRef rangeFeedPrefix = rangeFeedKeys.begin;
+const KeyRef rangeFeedPrivatePrefix = LiteralStringRef("\xff\xff\x02/feed/");
+
+const Value rangeFeedValue( KeyRangeRef const& range ) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRangeFeed()));
+	wr << range;
+	return wr.toValue();
+}
+KeyRange decodeFeedValue( ValueRef const& value ) {
+	KeyRange range;
+	BinaryReader reader( value, IncludeVersion() );
+	reader >> range;
+	return range;
+}

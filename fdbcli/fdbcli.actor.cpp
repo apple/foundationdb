@@ -617,6 +617,10 @@ void initHelp() {
 	helpMap["triggerddteaminfolog"] =
 	    CommandHelp("triggerddteaminfolog", "trigger the data distributor teams logging",
 	                "Trigger the data distributor to log detailed information about its teams.");
+	helpMap["rangefeed"] = CommandHelp(
+		"rangefeed <register|get> <RANGEID> <BEGINKEY> <ENDKEY>",
+		"",
+		"");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -3265,6 +3269,40 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "triggerddteaminfolog")) {
 					wait(triggerDDTeamInfoLog(db));
 					continue;
+				}
+
+				if (tokencmp(tokens[0], "rangefeed")) {
+					if(tokens.size() == 1) {
+						printUsage(tokens[0]);
+						is_error = true;
+						continue;
+					}
+					if(tokencmp(tokens[1], "register")) {
+						if(tokens.size() != 5) {
+							printUsage(tokens[0]);
+							is_error = true;
+							continue;
+						}
+						state Transaction trx(db);
+						loop {
+							try {
+								wait(trx.registerRangeFeed(tokens[2], KeyRangeRef(tokens[3], tokens[4])));
+								wait(trx.commit());
+							} catch( Error &e ) {
+								wait(trx.onError(e));
+							}
+						}
+					} else if(tokencmp(tokens[1], "get")) {
+						if(tokens.size() != 3) {
+							printUsage(tokens[0]);
+							is_error = true;
+							continue;
+						}
+						Standalone<VectorRef<MutationRefAndVersion> res = wait(db->getRangeFeedMutations(tokens[2]));
+						for(auto& it : res) {
+							printf("%lld %s\n", it.version, it.mutation.toString().c_str());
+						}
+					}
 				}
 
 				if (tokencmp(tokens[0], "configure")) {
