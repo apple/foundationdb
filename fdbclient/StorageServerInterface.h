@@ -524,7 +524,8 @@ struct MutationRefAndVersion {
 	MutationRef mutation;
 	Version version;
 
-	MutationRefAndVersion(MutationRef mutation, Version version, Arena arena) : mutation(mutation), version(version) {}
+	MutationRefAndVersion() {}
+	MutationRefAndVersion(MutationRef mutation, Version version) : mutation(mutation), version(version) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
