@@ -444,7 +444,7 @@ public:
 
 	KeyRangeMap<bool> cachedRangeMap; // indicates if a key-range is being cached
 	KeyRangeMap<std::vector<Reference<RangeFeedInfo>>> keyRangeFeed;
-	std::unordered_map<Key, Reference<RangeFeedInfo>> uidRangeFeed;
+	std::map<Key, Reference<RangeFeedInfo>> uidRangeFeed;
 
 	// newestAvailableVersion[k]
 	//   == invalidVersion -> k is unavailable at all versions
