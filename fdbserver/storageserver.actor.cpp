@@ -351,7 +351,7 @@ public:
 			}
 			auto it = keyRangeMap.find(UIDofLongest);
 			if(it != keyRangeMap.end()) {
-				return {longest, *it};
+				return {longest, it->second};
 			}
 			return {-1, emptyKeyRange};
 		}
