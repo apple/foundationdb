@@ -220,9 +220,16 @@ func (o NetworkOptions) SetExternalClientDirectory(param string) error {
 	return o.setOpt(63, []byte(param))
 }
 
-// Prevents connections through the local client, allowing only connections through externally loaded client libraries. Intended primarily for testing.
+// Prevents connections through the local client, allowing only connections through externally loaded client libraries.
 func (o NetworkOptions) SetDisableLocalClient() error {
 	return o.setOpt(64, nil)
+}
+
+// Spawns multiple worker threads for each version of the client that is loaded.  Setting this to a number greater than one implies disable_local_client.
+//
+// Parameter: Number of client threads to be spawned.  Each cluster will be serviced by a single client thread.
+func (o NetworkOptions) SetClientThreadsPerVersion(param int64) error {
+	return o.setOpt(65, int64ToBytes(param))
 }
 
 // Disables logging of client statistics, such as sampled transaction activity.
@@ -519,6 +526,25 @@ func (o TransactionOptions) SetUseProvisionalProxies() error {
 // The transaction can retrieve keys that are conflicting with other transactions.
 func (o TransactionOptions) SetReportConflictingKeys() error {
 	return o.setOpt(712, nil)
+}
+
+// By default, the special key space will only allow users to read from exactly one module (a subspace in the special key space). Use this option to allow reading from zero or more modules. Users who set this option should be prepared for new modules, which may have different behaviors than the modules they're currently reading. For example, a new module might block or return an error.
+func (o TransactionOptions) SetSpecialKeySpaceRelaxed() error {
+	return o.setOpt(713, nil)
+}
+
+// Adds a tag to the transaction that can be used to apply manual targeted throttling. At most 5 tags can be set on a transaction.
+//
+// Parameter: String identifier used to associated this transaction with a throttling group. Must not exceed 16 characters.
+func (o TransactionOptions) SetTag(param string) error {
+	return o.setOpt(800, []byte(param))
+}
+
+// Adds a tag to the transaction that can be used to apply manual or automatic targeted throttling. At most 5 tags can be set on a transaction.
+//
+// Parameter: String identifier used to associated this transaction with a throttling group. Must not exceed 16 characters.
+func (o TransactionOptions) SetAutoThrottleTag(param string) error {
+	return o.setOpt(801, []byte(param))
 }
 
 type StreamingMode int
