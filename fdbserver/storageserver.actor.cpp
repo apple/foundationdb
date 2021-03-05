@@ -3952,10 +3952,10 @@ ACTOR Future<Void> serveRangeFeedRequests( StorageServer* self, FutureStream<Ran
 ACTOR Future<Void> serveRangeFeedPopRequests( StorageServer* self, FutureStream<RangeFeedPopRequest> rangeFeedPops ) {
 	loop {
 		RangeFeedPopRequest req = waitNext(rangeFeedPops);
-		while(data->uidRangeFeed[req.rangeID]->mutations.front().version < req.version) {
-			data->uidRangeFeed[req.rangeID]->mutations.pop_front();
+		while(self->uidRangeFeed[req.rangeID]->mutations.front().version < req.version) {
+			self->uidRangeFeed[req.rangeID]->mutations.pop_front();
 		}
-		TraceEvent("RangeFeedPopQuery", data->thisServerID).detail("RangeID", req.rangeID.printable()).detail("Version", req.version);
+		TraceEvent("RangeFeedPopQuery", self->thisServerID).detail("RangeID", req.rangeID.printable()).detail("Version", req.version);
 		req.reply.send(Void());
 	}
 }
