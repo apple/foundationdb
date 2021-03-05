@@ -5071,3 +5071,32 @@ ACTOR Future<Standalone<VectorRef<MutationRefAndVersion>>> getRangeFeedMutations
 Future<Standalone<VectorRef<MutationRefAndVersion>>> DatabaseContext::getRangeFeedMutations(StringRef rangeID) {
 	return getRangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID);
 }
+
+ACTOR Future<Void> popRangeFeedMutationsActor(Reference<DatabaseContext> db, StringRef rangeID, Version version) {
+	state Database cx(db);
+	state Transaction tr(cx);
+	state Key rangeIDKey = rangeID.withPrefix(rangeFeedPrefix);
+	state Span span("NAPI:PopRangeFeedMutations"_loc);
+	Optional<Value> val = wait( tr.get(rangeIDKey) );
+	if(!val.present()) {
+		throw unsupported_operation();
+	}
+	KeyRange keys = decodeRangeFeedValue(val.get());
+	state vector< pair<KeyRange, Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, 100,
+	  false, &StorageServerInterface::rangeFeed, TransactionInfo(TaskPriority::DefaultEndpoint, span.context) ) );
+
+	if(locations.size() > 1) {
+		throw unsupported_operation();
+	}
+
+	state std::vector<Future<Void>> popRequests;
+	for(int i = 0; i < locations[0].second->size(); i++) {
+		popRequests.push_back(locations[0].second->getInterface(i).rangeFeedPop.getReply(RangeFeedPopRequest(rangeID, version)));
+	}
+	wait(waitForAll(popRequests));
+	return Void();
+}
+
+Future<Void> DatabaseContext::popRangeFeedMutations(StringRef rangeID, Version version) {
+	return popRangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, version);
+}

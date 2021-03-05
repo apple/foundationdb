@@ -75,6 +75,7 @@ struct StorageServerInterface {
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct SplitRangeRequest> getRangeSplitPoints;
 	RequestStream<struct RangeFeedRequest> rangeFeed;
+	RequestStream<struct RangeFeedPopRequest> rangeFeedPop;
 
 	explicit StorageServerInterface(UID uid) : uniqueID( uid ) {}
 	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
@@ -104,6 +105,7 @@ struct StorageServerInterface {
 				getReadHotRanges = RequestStream<struct ReadHotSubRangeRequest>( getValue.getEndpoint().getAdjustedEndpoint(11) );
 				getRangeSplitPoints = RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
 				rangeFeed = RequestStream<struct RangeFeedRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
+				rangeFeedPop = RequestStream<struct RangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -133,6 +135,7 @@ struct StorageServerInterface {
 		streams.push_back(getReadHotRanges.getReceiver());
 		streams.push_back(getRangeSplitPoints.getReceiver());
 		streams.push_back(rangeFeed.getReceiver());
+		streams.push_back(rangeFeedPop.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -560,6 +563,21 @@ struct RangeFeedRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, rangeID, reply);
+	}
+};
+
+struct RangeFeedPopRequest {
+	constexpr static FileIdentifier file_identifier = 10726174;
+	Key rangeID;
+	Version version;
+	ReplyPromise<Void> reply;
+
+	RangeFeedPopRequest() {}
+	RangeFeedPopRequest(Key const& rangeID, Version version) : rangeID(rangeID), version(version) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rangeID, version, reply);
 	}
 };
 

@@ -618,7 +618,7 @@ void initHelp() {
 	    CommandHelp("triggerddteaminfolog", "trigger the data distributor teams logging",
 	                "Trigger the data distributor to log detailed information about its teams.");
 	helpMap["rangefeed"] = CommandHelp(
-		"rangefeed <register|get> <RANGEID> <BEGINKEY> <ENDKEY>",
+		"rangefeed <register|get|pop> <RANGEID> <BEGINKEY> <ENDKEY>",
 		"",
 		"");
 
@@ -3302,6 +3302,20 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						Standalone<VectorRef<MutationRefAndVersion>> res = wait(db->getRangeFeedMutations(tokens[2]));
 						for(auto& it : res) {
 							printf("%lld %s\n", it.version, it.mutation.toString().c_str());
+						}
+					} else if(tokencmp(tokens[1], "pop")) {
+						if(tokens.size() != 4) {
+							printUsage(tokens[0]);
+							is_error = true;
+							continue;
+						}
+						Version v;
+						int n = 0;
+						if (sscanf(tokens[3].toString().c_str(), "%ld%n", &v, &n) != 1 || n != tokens[3].size()) {
+							printUsage(tokens[0]);
+							is_error = true;
+						} else {
+							wait(db->popRangeFeedMutations(tokens[2], v));
 						}
 					}
 					continue;

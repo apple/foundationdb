@@ -3949,6 +3949,17 @@ ACTOR Future<Void> serveRangeFeedRequests( StorageServer* self, FutureStream<Ran
 	}
 }
 
+ACTOR Future<Void> serveRangeFeedPopRequests( StorageServer* self, FutureStream<RangeFeedPopRequest> rangeFeedPops ) {
+	loop {
+		RangeFeedPopRequest req = waitNext(rangeFeedPops);
+		while(data->uidRangeFeed[req.rangeID]->mutations.front().version < req.version) {
+			data->uidRangeFeed[req.rangeID]->mutations.pop_front();
+		}
+		TraceEvent("RangeFeedPopQuery", data->thisServerID).detail("RangeID", req.rangeID.printable()).detail("Version", req.version);
+		req.reply.send(Void());
+	}
+}
+
 ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 	if (!SERVER_KNOBS->REPORT_DD_METRICS) {
 		return Void();
@@ -3998,6 +4009,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 	self->actors.add(serveGetKeyRequests(self, ssi.getKey.getFuture()));
 	self->actors.add(serveWatchValueRequests(self, ssi.watchValue.getFuture()));
 	self->actors.add(serveRangeFeedRequests(self, ssi.rangeFeed.getFuture()));
+	self->actors.add(serveRangeFeedPopRequests(self, ssi.rangeFeedPop.getFuture()));
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 	self->actors.add(reportStorageServerState(self));
 

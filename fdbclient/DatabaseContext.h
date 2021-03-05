@@ -237,6 +237,7 @@ public:
 	Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
 
 	Future<Standalone<VectorRef<MutationRefAndVersion>>> getRangeFeedMutations(StringRef rangeID);
+	Future<Void> popRangeFeedMutations(StringRef rangeID, Version version);
 
 //private: 
 	explicit DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
