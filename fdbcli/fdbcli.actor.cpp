@@ -3288,6 +3288,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							try {
 								wait(trx.registerRangeFeed(tokens[2], KeyRangeRef(tokens[3], tokens[4])));
 								wait(trx.commit());
+								break;
 							} catch( Error &e ) {
 								wait(trx.onError(e));
 							}
