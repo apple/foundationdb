@@ -30,6 +30,7 @@
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
 #include "fdbclient/TagThrottle.h"
+#include "fdbclient/CommitTransaction.h"
 
 // Dead code, removed in the next protocol version
 struct VersionReply {
