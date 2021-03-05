@@ -1294,6 +1294,11 @@ public:
 		}
 
 		Future<Void> flush(int size) {
+			// Avoid empty write
+			if(size == 0) {
+				return Void();
+			}
+
 			ASSERT(size <= m_buffer.size());
 
 			// Keep a reference to the old buffer
@@ -1310,7 +1315,10 @@ public:
 
 		ACTOR static Future<Void> finish_impl(Reference<BackupFile> f) {
 			wait(f->flush(f->m_buffer.size()));
-			wait(f->m_file->truncate(f->size()));  // Some IAsyncFile implementations extend in whole block sizes.
+			// Avoid truncation from 0 to 0 because simulation won't allow it since KAIO would not.
+			if(f->size() != 0) {
+				wait(f->m_file->truncate(f->size()));  // Some IAsyncFile implementations extend in whole block sizes.
+			}
 			wait(f->m_file->sync());
 			std::string name = f->m_file->getFilename();
 			f->m_file.clear();
@@ -1776,21 +1784,27 @@ int chooseFileSize(std::vector<int> &sizes) {
 }
 
 ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<IBackupFile> f, int size) {
-	state Standalone<StringRef> content;
-	if(size > 0) {
-		content = makeString(size);
-		for(int i = 0; i < content.size(); ++i)
-			mutateString(content)[i] = (uint8_t)deterministicRandom()->randomInt(0, 256);
+	state Standalone<VectorRef<uint8_t>> content;
+	content.resize(content.arena(), size);
+	for(int i = 0; i < content.size(); ++i) {
+		content[i] = (uint8_t)deterministicRandom()->randomInt(0, 256);
+	}
 
-		wait(f->append(content.begin(), content.size()));
+	state VectorRef<uint8_t> sendBuf = content;
+	while(sendBuf.size() > 0) {
+		state int n = std::min(sendBuf.size(), deterministicRandom()->randomInt(1, 16384));
+		wait(f->append(sendBuf.begin(), n));
+		sendBuf.pop_front(n);
 	}
 	wait(f->finish());
+
 	state Reference<IAsyncFile> inputFile = wait(c->readFile(f->getFileName()));
 	int64_t fileSize = wait(inputFile->size());
 	ASSERT(size == fileSize);
 	if(size > 0) {
-		state Standalone<StringRef> buf = makeString(size);
-		int b = wait(inputFile->read(mutateString(buf), buf.size(), 0));
+		state Standalone<VectorRef<uint8_t>> buf;
+		buf.resize(buf.arena(), fileSize);
+		int b = wait(inputFile->read(buf.begin(), buf.size(), 0));
 		ASSERT(b == buf.size());
 		ASSERT(buf == content);
 	}

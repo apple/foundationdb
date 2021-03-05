@@ -455,20 +455,25 @@ private:
 
 		debugFileCheck("AsyncFileNonDurableWriteAfterWait", self->filename, dataCopy.begin(), offset, length);
 
-		//Only page-aligned writes are supported
-		ASSERT(offset % 4096 == 0 && length % 4096 == 0);
-
 		//Non-durable writes should introduce errors at the page level and corrupt at the sector level
 		//Otherwise, we can perform the entire write at once
-		int pageLength = saveDurable ? length : 4096;
-		int sectorLength = saveDurable ? length : 512;
+		int diskPageLength = saveDurable ? length : 4096;
+		int diskSectorLength = saveDurable ? length : 512;
 
 		vector<Future<Void>> writeFutures;
-		for(int writeOffset = 0; writeOffset < length; writeOffset += pageLength) {
+		for(int writeOffset = 0; writeOffset < length; ) {
+			// Number of bytes to the next diskPageLength offset within the write or the end of the write.
+			// First and last pages can be short.
+			int pageLength = std::min<int64_t>((int64_t)length - writeOffset, diskPageLength - ((offset + writeOffset) % diskPageLength));
+
 			//choose a random action to perform on this page write (write correctly, corrupt, or don't write)
 			KillMode pageKillMode = (KillMode)deterministicRandom()->randomInt(0, self->killMode + 1);
 		
-			for(int pageOffset = 0; pageOffset < pageLength; pageOffset += sectorLength) {
+			for(int pageOffset = 0; pageOffset < pageLength; ) {
+				// Number of bytes to the next diskSectorLength offset within the write or the end of the write.
+				// First and last pages can be short.
+				int sectorLength = std::min<int64_t>((int64_t)length - (writeOffset + pageOffset), diskSectorLength - ((offset + writeOffset + pageOffset) % diskSectorLength));
+
 				//If saving durable, then perform the write correctly.  Otherwise, perform the write correcly with a probability of 1/3.
 				//If corrupting the write, then this sector will be written correctly with a 1/4 chance
 				if(saveDurable || pageKillMode == NO_CORRUPTION || (pageKillMode == FULL_CORRUPTION && deterministicRandom()->random01() < 0.25)) {
@@ -523,7 +528,11 @@ private:
 					TraceEvent("AsyncFileNonDurable_DroppedWrite", self->id).detail("Offset", offset + writeOffset + pageOffset).detail("Length", sectorLength).detail("Filename", self->filename);
 					TEST(true); //AsyncFileNonDurable dropped write
 				}
+
+				pageOffset += sectorLength;
 			}
+
+			writeOffset += pageLength;
 		}
 			
 		wait(waitForAll(writeFutures));
