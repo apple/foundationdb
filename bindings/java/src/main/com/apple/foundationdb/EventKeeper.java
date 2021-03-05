@@ -136,7 +136,7 @@ public interface EventKeeper {
         JNI_CALL,
 
         /**
-         * The total number of bytes fetched over the network, from
+         * The total number of bytes pulled from the native layer, including length delimiters., from
          * {@link Transaction#get(byte[])}, {@link Transaction#getKey(KeySelector)},
          * {@link Transaction#getRange(KeySelector, KeySelector)} (and related method
          * overrides), or any other read-type operation which occurs on a Transaction
