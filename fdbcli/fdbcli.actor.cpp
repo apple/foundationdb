@@ -3304,6 +3304,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							printf("%lld %s\n", it.version, it.mutation.toString().c_str());
 						}
 					}
+					continue;
 				}
 
 				if (tokencmp(tokens[0], "configure")) {
