@@ -1321,7 +1321,29 @@ Reference<ProxyInfo> DatabaseContext::getMasterProxies(bool useProvisionalProxie
 			masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, false ) );
 			grvProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, true ) );
 			provisional = clientInfo->get().proxies[0].provisional;
+
+			// if any TSS present, update model's endpoint mapping
+			std::unordered_map<uint64_t, Endpoint> tssEndpointMap;
+			if (!clientInfo->get().tssMapping.empty()) {
+				for(auto& it : clientInfo->get().tssMapping) {
+					if(server_interf.count(it.first)) {
+						// TODO any other requests it makes sense to duplicate?
+						// add each read data request interface to map (getValue, getKey, getKeyValues)
+						tssEndpointMap[server_interf[it.first]->interf.getValue.getEndpoint().token.first()] = it.second.getValue.getEndpoint();
+						tssEndpointMap[server_interf[it.first]->interf.getKey.getEndpoint().token.first()] = it.second.getKey.getEndpoint();
+						tssEndpointMap[server_interf[it.first]->interf.getKeyValues.getEndpoint().token.first()] = it.second.getKeyValues.getEndpoint();
+					}
+				}
+			}
+			// TODO REMOVE check and print
+			if (!tssEndpointMap.empty()) {
+				printf("updating tss mapping with %d endpoints\n", tssEndpointMap.size());
+			} else {
+				printf("no tss mapping\n");
+			}
+			queueModel.updateTss(tssEndpointMap);
 		}
+		
 	}
 	if(provisional && !useProvisionalProxies) {
 		return Reference<ProxyInfo>();

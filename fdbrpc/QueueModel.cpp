@@ -59,6 +59,40 @@ double QueueModel::addRequest( uint64_t id ) {
 	return d.penalty;
 }
 
+void QueueModel::updateTss( std::unordered_map<uint64_t, Endpoint> tssEndpointMap ) {
+	if (tssCount == 0 && tssEndpointMap.empty()) {
+		// optization to avoid doing anything if there are no tss mappings to add or clean up
+		return;
+	}
+
+	if (tssCount > 0) {
+		// expire old tss mappings that aren't present in new mapping
+		for (auto& it : data) {
+			if (it.second.tss.present() && !tssEndpointMap.count(it.first)) {
+				// TODO REMOVE print
+				printf("Removing tss endpoint for %d\n", it.first);
+				it.second.tss = Optional<Endpoint>();
+				tssCount--;
+			}
+		}
+	}
+
+	// add or update mapping
+	for (auto& it: tssEndpointMap) {
+		auto& d  = data[it.first];
+		if (!d.tss.present()) {
+			tssCount++;	
+		}
+		// TODO REMOVE print
+		printf("Setting tss endpoint for %d\n", it.first);
+		d.tss = Optional<Endpoint>(it.second);
+	}
+}
+
+Optional<Endpoint> QueueModel::getTss(uint64_t id) {
+	return data[id].tss;
+}
+
 Optional<LoadBalancedReply> getLoadBalancedReply(const LoadBalancedReply *reply) {
 	return *reply;
 }

@@ -35,6 +35,7 @@
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
+#include "fdbrpc/TSSComparison.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::vector;
@@ -129,6 +130,28 @@ bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, boo
 	return false;
 }
 
+// TODO req will probably be useful for debugging what request was supposed to be.
+ACTOR template <class Req, class Resp>
+Future<Void> tssComparison(Req req, Future<ErrorOr<Resp>> fSource, Future<ErrorOr<Resp>> fTss) {
+	state ErrorOr<Resp> src = wait(fSource);
+	state ErrorOr<Resp> tss = wait(fTss);
+
+	if (src.isError()) {
+		// ignore
+	} else if (tss.isError()) {
+		// TODO should be acceptable error types we can ignore, others we should report as failures?
+		printf("Tss got error %d\n", tss.getError().code());
+	} else {
+		if (!TSSComparison::tssCompare(src.get(), tss.get())) {
+			// TODO return something about actual mismatch, and save it in FF. Will also need tss id and stuff
+			printf("Found tss mismatch!!\n");
+		}
+	}
+
+	return Void();
+}
+
+// TODO this function declaration is long, do we have a recommended max line length?
 ACTOR template <class Request>
 Future<Optional<REPLY_TYPE(Request)>> makeRequest(RequestStream<Request> const* stream, Request request, double backoff, Future<Void> requestUnneeded, QueueModel *model, bool isFirstRequest, bool atMostOnce, bool triedAllOptions) {
 	if(backoff > 0.0) {
@@ -140,8 +163,23 @@ Future<Optional<REPLY_TYPE(Request)>> makeRequest(RequestStream<Request> const* 
 	}
 
 	state Reference<ModelHolder> holder(new ModelHolder(model, stream->getEndpoint().token.first()));
+	Future<ErrorOr<REPLY_TYPE(Request)>> fResult = stream->tryGetReply(request);
+	if(model) {
+		// TODO why not just store request stream in model instead of Endpoint? (maybe resource leak issues?) then we wouldn't have to make a new request stream?
+		// Send parallel request to TSS pair, if it exists
+		// TODO uncomment once actual TSS stuff set up. For now randomly simulate it
+		// Optional<Endpoint> tssEndpoint = model->getTss(stream->getEndpoint().token.first());
+		Optional<Endpoint> tssEndpoint = (deterministicRandom()->randomInt(0, 10) == 1) ? stream->getEndpoint() : Optional<Endpoint>();
+		
+		if (tssEndpoint.present()) {
+			//FIXME: optimize to avoid creating new netNotifiedQueue for each message
+			RequestStream<Request> tssRequestStream(tssEndpoint.get());
+			Future<ErrorOr<REPLY_TYPE(Request)>> fTssResult = tssRequestStream.tryGetReply(request);
+			model->addActor.send(tssComparison(request, fResult, fTssResult));
+		}
+	}
 
-	ErrorOr<REPLY_TYPE(Request)> result = wait(stream->tryGetReply(request));
+	ErrorOr<REPLY_TYPE(Request)> result = wait(fResult);
 	if(checkAndProcessResult(result, holder, atMostOnce, triedAllOptions)) {
 		return result.get();	
 	}

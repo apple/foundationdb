@@ -28,7 +28,8 @@ set(FDBRPC_SRCS
   sim2.actor.cpp
   sim_validation.cpp
   TimedRequest.h
-  TraceFileIO.cpp)
+  TraceFileIO.cpp
+  TSSComparison.h)
 
 set(FDBRPC_THIRD_PARTY_SRCS
   libcoroutine/Common.c

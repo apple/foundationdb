@@ -108,6 +108,7 @@ struct ClientDBInfo {
 	int64_t clientTxnInfoSizeLimit;
 	Optional<Value> forward;
 	double transactionTagSampleRate;
+	std::vector<std::pair<UID, StorageServerInterface>> tssMapping; // logically map<ssid, tss interface> for all active TSS pairs
 
 	ClientDBInfo() : clientTxnInfoSampleRate(std::numeric_limits<double>::infinity()), clientTxnInfoSizeLimit(-1), transactionTagSampleRate(CLIENT_KNOBS->READ_TAG_SAMPLE_RATE) {}
 
@@ -119,7 +120,8 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward, transactionTagSampleRate);
+		// TODO is adding tssMapping backwards compatible? If not, how to make it backwards compatible?
+		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward, transactionTagSampleRate, tssMapping);
 	}
 };
 

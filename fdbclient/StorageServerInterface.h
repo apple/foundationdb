@@ -29,6 +29,7 @@
 #include "fdbrpc/LoadBalance.actor.h"
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
+#include "fdbrpc/TSSComparison.h"
 #include "fdbclient/TagThrottle.h"
 
 // Dead code, removed in the next protocol version

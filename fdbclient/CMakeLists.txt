@@ -58,6 +58,7 @@ set(FDBCLIENT_SRCS
   Status.h
   StatusClient.actor.cpp
   StatusClient.h
+  StorageServerInterface.cpp
   StorageServerInterface.h
   Subspace.cpp
   Subspace.h

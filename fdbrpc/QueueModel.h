@@ -26,6 +26,7 @@
 #include "fdbrpc/Smoother.h"
 #include "flow/Knobs.h"
 #include "flow/ActorCollection.h"
+#include "fdbrpc/FlowTransport.h" // For Endpoint
 
 // The data structure used for the client-side load balancing algorithm to
 // decide which storage server to read data from. Conceptually, it tracks the
@@ -59,9 +60,14 @@ struct QueueData {
 	// hasn't returned a valid result, increase above `futureVersionBackoff`
 	// to increase the future backoff amount.
 	double increaseBackoffTime;
+
+	// a bit of a hack to store this here, but it's the only centralized place for per-endpoint tracking
+	Optional<Endpoint> tss;
+
 	QueueData()
 	  : latency(0.001), penalty(1.0), smoothOutstanding(FLOW_KNOBS->QUEUE_MODEL_SMOOTHING_AMOUNT), failedUntil(0),
 	    futureVersionBackoff(FLOW_KNOBS->FUTURE_VERSION_INITIAL_BACKOFF), increaseBackoffTime(0) {}
+
 };
 
 typedef double TimeEstimate;
@@ -91,6 +97,10 @@ public:
 	Future<Void> laggingRequests; // requests for which a different recipient already answered
 	int laggingRequestCount;
 
+	// passes all updates in one function so that data map can remove tss mapping for old endpoints
+	void updateTss(std::unordered_map<uint64_t, Endpoint> tssMapping);
+	Optional<Endpoint> getTss(uint64_t id);
+
 	QueueModel() : secondMultiplier(1.0), secondBudget(0), laggingRequestCount(0) {
 		laggingRequests = actorCollection(addActor.getFuture(), &laggingRequestCount);
 	}
@@ -99,6 +109,7 @@ public:
 
 private:
 	std::unordered_map<uint64_t, QueueData> data;
+	uint32_t tssCount = 0; // optimization to avoid removing old tss mappings if there are none
 };
 
 /* old queue model
