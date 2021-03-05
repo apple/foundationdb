@@ -346,7 +346,10 @@ public:
 					UIDofLongest = kv.first;
 				}
 			}
-			if(UIDofLongest.present()) {
+			if(BUGGIFY) {
+				UIDofLongest = Optional<UID>();
+			}
+			if(UIDofLongest.present() && keyRangeMap.count(UIDofLongest.get())) {
 				return {longest, keyRangeMap[UIDofLongest.get()]};
 			}
 			return {-1, emptyKeyRange};
