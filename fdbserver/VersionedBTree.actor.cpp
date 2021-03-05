@@ -3330,7 +3330,7 @@ public:
 	}
 
 	ACTOR static Future<Void> clearAllAndCheckSanity_impl(VersionedBTree* self) {
-		ASSERT(g_network->isSimulated());
+	//ASSERT(g_network->isSimulated());
 
 		debug_printf("Clearing tree.\n");
 		self->setWriteVersion(self->getLatestVersion() + 1);

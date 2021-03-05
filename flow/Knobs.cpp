@@ -130,6 +130,9 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	//AsyncFileKAIO
 	init( MAX_OUTSTANDING,                                      64 );
 	init( MIN_SUBMIT,                                           10 );
+	init( ENABLE_IO_URING,										false);
+	init (IO_URING_DIRECT_SUBMIT,								false);
+	init (IO_URING_EVENTFD, true);
 
 	init( PAGE_WRITE_CHECKSUM_HISTORY,                           0 ); if( randomize && BUGGIFY ) PAGE_WRITE_CHECKSUM_HISTORY = 10000000;
 	init( DISABLE_POSIX_KERNEL_AIO,                              0 );
@@ -239,6 +242,13 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS,    true );
 	init( HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS,          30 );
 	init( HEALTH_MONITOR_CONNECTION_MAX_CLOSED,                  5 );
+
+	init( ENABLE_IO_URING,					                  false); //Use io_uring instead of kaio
+	init( USE_IO_URING_FOR_CACHED,				              false); //Use uncached io_uring instead of cached
+	init( IO_URING_DIRECT_SUBMIT,							  false); //Bypass the op queue and dispatch  ops to the io_uring ring directly
+	init( IO_URING_FIXED_BUFFERS,							          false); //Use fixed buffers
+	init (IO_URING_BATCH, false);
+	init (IO_URING_POLL, false);
 }
 // clang-format on
 
@@ -254,6 +264,7 @@ static std::string toLower( std::string const& name ) {
 
 bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 	explicitlySetKnobs.insert(toLower(knob));
+	//printf("Explicitly setting knob %s to %s\n",knob.c_str(),value.c_str());
 	if (double_knobs.count(knob)) {
 		double v;
 		int n=0;

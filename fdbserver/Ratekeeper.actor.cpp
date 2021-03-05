@@ -1043,6 +1043,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			double x =  smoothedRate / (inputRate * targetRateRatio);
 			double lim = actualTps * x;
 			if (lim < limitTps) {
+				//printf("RK: lim %f limitTps %f smoothedRate %f inputRate %f targetRateRatio %f x %f actualTPS %f\n",lim,limitTps,smoothedRate, inputRate, targetRateRatio , x, actualTps );
 				limitTps = lim;
 				if (ssLimitReason == limitReason_t::unlimited || ssLimitReason == limitReason_t::storage_server_write_bandwidth_mvcc) {
 					ssLimitReason = limitReason_t::storage_server_write_queue_size;

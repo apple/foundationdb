@@ -1348,7 +1348,6 @@ bool Net2::checkRunnable() {
 void Net2::run() {
 	TraceEvent::setNetworkThread();
 	TraceEvent("Net2Running");
-
 	thread_network = this;
 
 #ifdef WIN32
@@ -1383,6 +1382,7 @@ void Net2::run() {
 			trackAtPriority(TaskPriority::RunLoop, taskEnd);
 			countLaunchTime += taskEnd - taskBegin;
 			checkForSlowTask(tscBegin, timestampCounter(), taskEnd - taskBegin, TaskPriority::RunCycleFunction);
+			// printf("fun run\n");
 		}
 
 		double sleepTime = 0;

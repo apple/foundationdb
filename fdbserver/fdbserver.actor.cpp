@@ -1913,7 +1913,6 @@ int main(int argc, char* argv[]) {
 				                      opts.whitelistBinPaths));
 				actors.push_back(histogramReport());
 				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
-
 				f = stopAfter(waitForAll(actors));
 				g_network->run();
 			}

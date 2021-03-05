@@ -1,0 +1,44 @@
+.\" Copyright (C) 2020 Jens Axboe <axboe@kernel.dk>
+.\" Copyright (C) 2020 Red Hat, Inc.
+.\"
+.\" SPDX-License-Identifier: LGPL-2.0-or-later
+.\"
+.TH io_uring_queue_init 3 "July 10, 2020" "liburing-0.7" "liburing Manual"
+.SH NAME
+io_uring_queue_init - setup io_uring submission and completion queues
+.SH SYNOPSIS
+.nf
+.BR "#include <liburing.h>"
+.PP
+.BI "int io_uring_queue_init(unsigned " entries ", struct io_uring *" ring ,
+.BI "                        unsigned " flags );
+.fi
+.PP
+.SH DESCRIPTION
+.PP
+The io_uring_queue_init() function executes the io_uring_setup syscall to
+initialize the submission and completion queues in the kernel with at least
+.I entries
+entries and then maps the resulting file descriptor to memory shared between the
+application and the kernel.
+
+On success io_uring_queue_init() returns 0 and
+.I ring
+will point to the shared memory containing the io_uring queues. On failure
+-errno is returned.
+
+.I flags
+will be passed through to the io_uring_setup syscall (see 
+.BR io_uring_setup (2)).
+
+On success, the resources held by
+.I ring
+should be released via a corresponding call to
+.BR io_uring_queue_exit (3).
+.SH RETURN VALUE
+.BR io_uring_queue_init (3)
+returns 0 on success and -errno on failure.
+.SH SEE ALSO
+.BR io_uring_setup (2),
+.BR mmap (2),
+.BR io_uring_queue_exit (3)

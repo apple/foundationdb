@@ -163,7 +163,7 @@ public:
 			ctx.preSubmitTruncateBytes.init(LiteralStringRef("AsyncFile.PreAIOSubmitTruncateBytes"));
 			ctx.slowAioSubmitMetric.init(LiteralStringRef("AsyncFile.SlowAIOSubmit"));
 		}
-		
+
 		int rc = io_setup( FLOW_KNOBS->MAX_OUTSTANDING, &ctx.iocx );
 		if (rc<0) {
 			TraceEvent("IOSetupError").GetLastError();
@@ -208,6 +208,7 @@ public:
 	Future<Void> write(void const* data, int length, int64_t offset) override {
 		++countFileLogicalWrites;
 		++countLogicalWrites;
+
 		//printf("%p Begin logical write\n", getCurrentCoro());
 
 		if(failed) {
@@ -218,12 +219,11 @@ public:
 		io->buf = (void*)data;
 		io->nbytes = length;
 		io->offset = offset;
-
 		nextFileSize = std::max( nextFileSize, offset+length );
 
 		enqueue(io, "write", this);
 		Future<int> result = io->result.getFuture();
-		
+
 #if KAIO_LOGGING
 		//result = map(result, [=](int r) mutable { KAIOLogBlockEvent(io, OpLogEntry::READY, r); return r; });
 #endif
@@ -513,6 +513,8 @@ private:
 		Int64MetricHandle countAIOSubmit;
 		Int64MetricHandle countAIOCollect;
 		Int64MetricHandle submitMetric;
+
+
 		
 		double ioTimeout;
 		bool timeoutWarnOnly;
@@ -619,6 +621,9 @@ private:
 	}
 
 	void enqueue( IOBlock* io, const char* op, AsyncFileKAIO* owner ) {
+                ASSERT( int64_t(io->buf) % 4096 == 0);
+                ASSERT(io->offset % 4096 == 0);
+                ASSERT( io->nbytes % 4096 == 0 );
 		ASSERT( int64_t(io->buf) % 4096 == 0 && io->offset % 4096 == 0 && io->nbytes % 4096 == 0 );
 
 		KAIOLogBlockEvent(owner->logFile, io, OpLogEntry::START);

@@ -1,0 +1,37 @@
+.\" Copyright (C) 2020 Jens Axboe <axboe@kernel.dk>
+.\" Copyright (C) 2020 Red Hat, Inc.
+.\"
+.\" SPDX-License-Identifier: LGPL-2.0-or-later
+.\"
+.TH io_uring_get_sqe 3 "July 10, 2020" "liburing-0.7" "liburing Manual"
+.SH NAME
+io_uring_get_sqe - get the next vacant event from the submission queue
+.SH SYNOPSIS
+.nf
+.BR "#include <liburing.h>"
+.PP
+.BI "struct io_uring_sqe *io_uring_get_sqe(struct io_uring " *ring );
+.fi
+.PP
+.SH DESCRIPTION
+.PP
+The io_uring_get_sqe() function gets the next vacant event from the submission
+queue belonging to the
+.I ring
+param.
+
+On success io_uring_get_sqe() returns a pointer to the submission queue event.
+On failure NULL is returned.
+
+If a submission queue event is returned, it should be filled out via one of the
+prep functions such as
+.BR io_uring_prep_read (3)
+and submitted via
+.BR io_uring_submit (3).
+
+.SH RETURN VALUE
+.BR io_uring_get_sqe (3)
+returns a pointer to the next submission queue event on success and NULL on
+failure.
+.SH SEE ALSO
+.BR io_uring_submit (3)

@@ -35,6 +35,7 @@
 #include "fdbrpc/AsyncFileEIO.actor.h"
 #include "fdbrpc/AsyncFileWinASIO.actor.h"
 #include "fdbrpc/AsyncFileKAIO.actor.h"
+#include "fdbrpc/AsyncFileIOUring.actor.h"
 #include "flow/AsioReactor.h"
 #include "flow/Platform.h"
 #include "fdbrpc/AsyncFileWriteChecker.h"
@@ -50,11 +51,14 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& file
 		}
 	}
 #endif
-
 	if ( (flags & IAsyncFile::OPEN_EXCLUSIVE) ) ASSERT( flags & IAsyncFile::OPEN_CREATE );
-	if (!(flags & IAsyncFile::OPEN_UNCACHED))
+	if (!(flags & IAsyncFile::OPEN_UNCACHED)) {
+#ifdef __linux__
+		if (FLOW_KNOBS->ENABLE_IO_URING && FLOW_KNOBS->USE_IO_URING_FOR_CACHED)
+			return AsyncFileIOUring::open(filename, flags, mode);
+#endif
 		return AsyncFileCached::open(filename, flags, mode);
-
+	}
 	Future<Reference<IAsyncFile>> f;
 #ifdef __linux__
 	// In the vast majority of cases, we wish to use Kernel AIO. However, some systems
@@ -64,7 +68,10 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& file
 	// EIO.
 	if ((flags & IAsyncFile::OPEN_UNBUFFERED) && !(flags & IAsyncFile::OPEN_NO_AIO) &&
 	    !FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO)
-		f = AsyncFileKAIO::open(filename, flags, mode, nullptr);
+		if(!FLOW_KNOBS->ENABLE_IO_URING)
+			f = AsyncFileKAIO::open(filename, flags, mode, nullptr);
+		else
+			f =  AsyncFileIOUring::open(filename, flags, mode); // TODO: make this Knobable
 	else
 #endif
 	f = Net2AsyncFile::open(filename, flags, mode, static_cast<boost::asio::io_service*> ((void*) g_network->global(INetwork::enASIOService)));
@@ -90,7 +97,10 @@ Net2FileSystem::Net2FileSystem(double ioTimeout, const std::string& fileSystemPa
 	Net2AsyncFile::init();
 #ifdef __linux__
 	if (!FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO)
-		AsyncFileKAIO::init( Reference<IEventFD>(N2::ASIOReactor::getEventFD()), ioTimeout );
+		if(!FLOW_KNOBS->ENABLE_IO_URING)
+			AsyncFileKAIO::init( Reference<IEventFD>(N2::ASIOReactor::getEventFD()), ioTimeout );
+		else
+			AsyncFileIOUring::init( Reference<IEventFD>(N2::ASIOReactor::getEventFD()), ioTimeout );
 
 	if (fileSystemPath.empty()) {
 		checkFileSystem = false;
