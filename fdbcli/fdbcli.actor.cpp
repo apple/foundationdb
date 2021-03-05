@@ -3298,7 +3298,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							is_error = true;
 							continue;
 						}
-						Standalone<VectorRef<MutationRefAndVersion> res = wait(db->getRangeFeedMutations(tokens[2]));
+						Standalone<VectorRef<MutationRefAndVersion>> res = wait(db->getRangeFeedMutations(tokens[2]));
 						for(auto& it : res) {
 							printf("%lld %s\n", it.version, it.mutation.toString().c_str());
 						}
