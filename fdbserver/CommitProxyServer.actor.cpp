@@ -1507,6 +1507,7 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 
 	loop {
 		GetStorageServerRejoinInfoRequest req = waitNext(proxy.getStorageServerRejoinInfo.getFuture());
+		printf("Proxy got Rejoin req for %s\n", req.id.toString().c_str());
 		if (commitData->txnStateStore->readValue(serverListKeyFor(req.id)).get().present()) {
 			GetStorageServerRejoinInfoReply rep;
 			rep.version = commitData->version;
@@ -1567,8 +1568,10 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 				}
 				rep.newTag = Tag(maxTagLocality + 1, 0);
 			}
+			printf("Proxy sent Rejoin response for %s\n", req.id.toString().c_str());
 			req.reply.send(rep);
 		} else {
+			printf("Proxy notifying %s it can't rejoin because it was removed.\n", req.id.toString().c_str());
 			req.reply.sendError(worker_removed());
 		}
 	}

@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
+
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/LoadBalance.h"
 
@@ -58,6 +60,39 @@ double QueueModel::addRequest(uint64_t id) {
 	auto& d = data[id];
 	d.smoothOutstanding.addDelta(d.penalty);
 	return d.penalty;
+}
+
+void QueueModel::updateTssEndpoint(uint64_t endpointId, TSSEndpointData tssData) {
+	auto& d = data[endpointId];
+	if (!d.tssData.present()) {
+		tssCount++;
+	}
+
+	d.tssData = Optional<TSSEndpointData>(tssData);
+	// TODO REMOVE print
+	printf("Setting tss endpoint for %" PRIx64 " = %s\n", endpointId, tssData.endpoint.token.toString().c_str());
+}
+
+void QueueModel::removeOldTssData(UID currentGeneration) {
+	if (tssCount > 0) {
+		// expire old tss mappings that aren't present in new mapping
+		for (auto& it : data) {
+			if (it.second.tssData.present() && it.second.tssData.get().generation != currentGeneration) {
+				// TODO REMOVE print
+				printf("Removing tss endpoint for %" PRIx64
+				       " because its generation %s doesn't match the current one %s\n",
+				       it.first,
+				       it.second.tssData.get().generation.toString().c_str(),
+				       currentGeneration.toString().c_str());
+				it.second.tssData = Optional<TSSEndpointData>();
+				tssCount--;
+			}
+		}
+	}
+}
+
+Optional<TSSEndpointData> QueueModel::getTssData(uint64_t id) {
+	return data[id].tssData;
 }
 
 Optional<LoadBalancedReply> getLoadBalancedReply(const LoadBalancedReply* reply) {

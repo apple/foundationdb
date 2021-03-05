@@ -614,11 +614,18 @@ struct InitializeStorageRequest {
 	UID reqId;
 	UID interfaceId;
 	KeyValueStoreType storeType;
+	bool isTss;
+	UID tssPairID;
+	Version tssPairVersion;
 	ReplyPromise<InitializeStorageReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, seedTag, reqId, interfaceId, storeType, reply);
+		if (ar.protocolVersion().hasTSS()) {
+			serializer(ar, seedTag, reqId, interfaceId, storeType, reply, isTss, tssPairID, tssPairVersion);
+		} else {
+			serializer(ar, seedTag, reqId, interfaceId, storeType, reply);
+		}
 	}
 };
 
@@ -770,6 +777,7 @@ struct DiskStoreRequest {
 struct Role {
 	static const Role WORKER;
 	static const Role STORAGE_SERVER;
+	static const Role TESTING_STORAGE_SERVER;
 	static const Role TRANSACTION_LOG;
 	static const Role SHARED_TRANSACTION_LOG;
 	static const Role COMMIT_PROXY;
@@ -840,6 +848,7 @@ class IDiskQueue;
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Tag seedTag,
+                                 Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo>> db,
                                  std::string folder);

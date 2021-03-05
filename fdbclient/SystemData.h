@@ -115,6 +115,11 @@ extern const KeyRef cacheChangePrefix;
 const Key cacheChangeKeyFor(uint16_t idx);
 uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key);
 
+//    "\xff/tss/[[serverId]]" := "[[tssId]]"
+extern const KeyRef tssMappingChangeKey;
+extern const KeyRangeRef tssMappingKeys;
+extern const KeyRef tssMappingPrefix;
+
 // "\xff/serverTag/[[serverID]]" = "[[Tag]]"
 //	Provides the Tag for the given serverID. Used to access a
 //	storage server's corresponding TLog in order to apply mutations.

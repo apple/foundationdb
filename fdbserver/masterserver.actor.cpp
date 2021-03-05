@@ -417,10 +417,13 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
                                   RecruitFromConfigurationReply recruits,
                                   vector<StorageServerInterface>* servers) {
+	printf("Seeding initial %d storage servers\n", recruits.storageServers.size());
 	// This is only necessary if the database is at version 0
 	servers->clear();
 	if (self->lastEpochEnd)
 		return Void();
+
+	// TODO might need to make this handle TSS recruitment (or make RecruitFromConfiguration handle it?) for simulation
 
 	state int idx = 0;
 	state std::map<Optional<Value>, Tag> dcId_tags;
@@ -434,6 +437,7 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 		                  ? dcId_tags[recruits.storageServers[idx].locality.dcId()]
 		                  : Tag(nextLocality, 0);
 		isr.storeType = self->configuration.storageServerStoreType;
+		isr.isTss = false;
 		isr.reqId = deterministicRandom()->randomUniqueID();
 		isr.interfaceId = deterministicRandom()->randomUniqueID();
 
@@ -468,6 +472,8 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 	TraceEvent("MasterRecruitedInitialStorageServers", self->dbgid)
 	    .detail("TargetCount", self->configuration.storageTeamSize)
 	    .detail("Servers", describe(*servers));
+
+	printf("Seed servers sees %d desired tss\n", self->configuration.desiredTSSCount);
 
 	return Void();
 }

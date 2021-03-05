@@ -1885,10 +1885,10 @@ ACTOR static Future<vector<std::pair<CommitProxyInterface, EventMap>>> getCommit
 ACTOR static Future<vector<std::pair<GrvProxyInterface, EventMap>>> getGrvProxiesAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	vector<std::pair<GrvProxyInterface, EventMap>> results =
-	    wait(getServerMetrics(db->get().client.grvProxies,
-	                          address_workers,
-	                          std::vector<std::string>{ "GRVLatencyMetrics", "GRVLatencyBands", "GRVBatchLatencyMetrics" }));
+	vector<std::pair<GrvProxyInterface, EventMap>> results = wait(
+	    getServerMetrics(db->get().client.grvProxies,
+	                     address_workers,
+	                     std::vector<std::string>{ "GRVLatencyMetrics", "GRVLatencyBands", "GRVBatchLatencyMetrics" }));
 	return results;
 }
 
@@ -3009,6 +3009,14 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 		statusObj["incompatible_connections"] = incompatibleConnectionsArray;
 		statusObj["datacenter_lag"] = getLagObject(datacenterVersionDifference);
+
+		int activeTSSCount = 0;
+		for (auto& it : storageServers) {
+			if (it.first.isTss) {
+				activeTSSCount++;
+			}
+		}
+		statusObj["active_tss_count"] = activeTSSCount;
 
 		int totalDegraded = 0;
 		for (auto& it : workers) {

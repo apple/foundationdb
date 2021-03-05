@@ -1671,6 +1671,11 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 
 	Version poppedVer = poppedVersion(logData, req.tag);
 	if (poppedVer > req.begin) {
+		printf("tag %s - %s tried to peek popped data!!: %lld > %lld\n",
+		       req.tag.toString().c_str(),
+		       peekId.toString().c_str(),
+		       poppedVer,
+		       req.begin);
 		TLogPeekReply rep;
 		rep.maxKnownVersion = logData->version.get();
 		rep.minKnownCommittedVersion = logData->minKnownCommittedVersion;

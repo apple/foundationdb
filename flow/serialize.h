@@ -22,6 +22,9 @@
 #define FLOW_SERIALIZE_H
 #pragma once
 
+// TODO REMOVE
+#include <cinttypes>
+
 #include <stdint.h>
 #include <array>
 #include <set>
@@ -109,6 +112,12 @@ class Serializer {
 public:
 	static void serialize(Archive& ar, T& t) {
 		t.serialize(ar);
+		// TODO REMOVE
+		if (!ar.protocolVersion().isValid()) {
+			printf("invalid protocol version %" PRIx64 " < %" PRIx64 "!!!\n",
+			       ar.protocolVersion().version(),
+			       ProtocolVersion::minValidProtocolVersion);
+		}
 		ASSERT(ar.protocolVersion().isValid());
 	}
 };

@@ -38,6 +38,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/JsonBuilder.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -121,6 +122,52 @@ NetworkOptions::NetworkOptions()
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
 
+// TODO make tss function here
+void DatabaseContext::maybeAddTssMapping(StorageServerInterface const& ssi) {
+	// add tss mapping if server is new
+
+	Optional<StorageServerInterface> tssPair = clientInfo->get().getTssPair(ssi.id());
+	if (tssPair.present()) {
+		addTssMapping(ssi, tssPair.get());
+	}
+}
+
+// calling getInterface potentially recursively is weird, but since this function is only called when an entry is
+// created/changed, the recursive call should never recurse itself.
+void DatabaseContext::addTssMapping(StorageServerInterface const& ssi, StorageServerInterface const& tssi) {
+	// TODO get both with a getInterface call which will create the tss endpoint and/or update both endpoints if there
+	// was a change in endpoint tokens
+
+	// the order of these is important because it hits the "different token same locality" issue, so we always want to
+	// request the tss first so the ss request overrides it.
+	// TODO this shouldn't be necessary after i stop doing the same server hack
+	Reference<StorageServerInfo> tssInfo = StorageServerInfo::getInterface(this, tssi, clientLocality);
+	Reference<StorageServerInfo> ssInfo = StorageServerInfo::getInterface(this, ssi, clientLocality);
+
+	// add new tss metrics object to queue
+	Reference<TSSMetrics> metrics = makeReference<TSSMetrics>();
+	tssMetrics[tssi.id()] = metrics;
+
+	// TODO any other requests it makes sense to duplicate?
+	// add each read data request interface to map (getValue, getKey, getKeyValues, watchValue)
+	queueModel.updateTssEndpoint(
+	    ssInfo->interf.getValue.getEndpoint().token.first(),
+	    TSSEndpointData(tssi.id(), tssInfo->interf.getValue.getEndpoint(), metrics, clientInfo->get().id));
+	queueModel.updateTssEndpoint(
+	    ssInfo->interf.getKey.getEndpoint().token.first(),
+	    TSSEndpointData(tssi.id(), tssInfo->interf.getKey.getEndpoint(), metrics, clientInfo->get().id));
+	queueModel.updateTssEndpoint(
+	    ssInfo->interf.getKeyValues.getEndpoint().token.first(),
+	    TSSEndpointData(tssi.id(), tssInfo->interf.getKeyValues.getEndpoint(), metrics, clientInfo->get().id));
+	queueModel.updateTssEndpoint(
+	    ssInfo->interf.watchValue.getEndpoint().token.first(),
+	    TSSEndpointData(tssi.id(), tssInfo->interf.watchValue.getEndpoint(), metrics, clientInfo->get().id));
+
+	// TODO REMOVE
+	printf(
+	    "added tss endpoints to queue for mapping %s=%s\n", ssi.id().toString().c_str(), tssi.id().toString().c_str());
+}
+
 Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx,
                                                              StorageServerInterface const& ssi,
                                                              LocalityData const& locality) {
@@ -133,11 +180,19 @@ Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx
 				//       pointing to. This is technically correct, but is very unnatural. We may want to refactor load
 				//       balance to take an AsyncVar<Reference<Interface>> so that it is notified when the interface
 				//       changes.
+
 				it->second->interf = ssi;
+
+				// TODO remove print
+				printf("maybeAddTss same locality %s\n", ssi.id().toString().c_str());
+				cx->maybeAddTssMapping(ssi);
 			} else {
 				it->second->notifyContextDestroyed();
 				Reference<StorageServerInfo> loc(new StorageServerInfo(cx, ssi, locality));
 				cx->server_interf[ssi.id()] = loc.getPtr();
+				// TODO REMOVE print
+				printf("maybeAddTss different locality %s\n", ssi.id().toString().c_str());
+				cx->maybeAddTssMapping(ssi);
 				return loc;
 			}
 		}
@@ -147,6 +202,9 @@ Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx
 
 	Reference<StorageServerInfo> loc(new StorageServerInfo(cx, ssi, locality));
 	cx->server_interf[ssi.id()] = loc.getPtr();
+	// TODO REMOVE print
+	// printf("maybeAddTss new ssi %s\n", ssi.id().toString().c_str());
+	cx->maybeAddTssMapping(ssi);
 	return loc;
 }
 
@@ -326,6 +384,55 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 		cx->commitLatencies.clear();
 		cx->mutationsPerCommit.clear();
 		cx->bytesPerCommit.clear();
+
+		for (const auto& it : cx->tssMetrics) {
+			// TODO could skip this tss if request counter is zero? would potentially complicate elapsed calculation
+			// though
+			if (it.second->mismatches.getIntervalDelta()) {
+				printf("Found tss %s with %d mismatches!!\n",
+				       it.first.toString().c_str(),
+				       it.second->mismatches.getIntervalDelta());
+				cx->tssMismatchStream.send(it.first);
+			}
+			TraceEvent tssEv("TSSClientMetrics", cx->dbId);
+			tssEv.detail("TSSID", it.first)
+			    .detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
+			    .detail("Internal", cx->internal);
+
+			it.second->cc.logToTraceEvent(tssEv);
+
+			tssEv.detail("MeanSSGetValueLatency", it.second->SSgetValueLatency.mean())
+			    .detail("MedianSSGetValueLatency", it.second->SSgetValueLatency.median())
+			    .detail("SSGetValueLatency90", it.second->SSgetValueLatency.percentile(0.90))
+			    .detail("SSGetValueLatency99", it.second->SSgetValueLatency.percentile(0.99));
+
+			tssEv.detail("MeanTSSGetValueLatency", it.second->TSSgetValueLatency.mean())
+			    .detail("MedianTSSGetValueLatency", it.second->TSSgetValueLatency.median())
+			    .detail("TSSGetValueLatency90", it.second->TSSgetValueLatency.percentile(0.90))
+			    .detail("TSSGetValueLatencyDiff99", it.second->TSSgetValueLatency.percentile(0.99));
+
+			tssEv.detail("MeanSSGetKeyLatency", it.second->SSgetKeyLatency.mean())
+			    .detail("MedianSSGetKeyLatency", it.second->SSgetKeyLatency.median())
+			    .detail("SSGetKeyLatency90", it.second->SSgetKeyLatency.percentile(0.90))
+			    .detail("SSGetKeyLatency99", it.second->SSgetKeyLatency.percentile(0.99));
+
+			tssEv.detail("MeanTSSGetKeyLatency", it.second->TSSgetKeyLatency.mean())
+			    .detail("MedianTSSGetKeyLatency", it.second->TSSgetKeyLatency.median())
+			    .detail("TSSGetKeyLatency90", it.second->TSSgetKeyLatency.percentile(0.90))
+			    .detail("TSSGetKeyLatencyDiff99", it.second->TSSgetKeyLatency.percentile(0.99));
+
+			tssEv.detail("MeanSSGetKeyValuesLatency", it.second->SSgetKeyLatency.mean())
+			    .detail("MedianSSGetKeyValuesLatency", it.second->SSgetKeyLatency.median())
+			    .detail("SSGetKeyValuesLatency90", it.second->SSgetKeyLatency.percentile(0.90))
+			    .detail("SSGetKeyValuesLatency99", it.second->SSgetKeyLatency.percentile(0.99));
+
+			tssEv.detail("MeanTSSGetKeyValuesLatency", it.second->TSSgetKeyValuesLatency.mean())
+			    .detail("MedianTSSGetKeyValuesLatency", it.second->TSSgetKeyValuesLatency.median())
+			    .detail("TSSGetKeyValuesLatency90", it.second->TSSgetKeyValuesLatency.percentile(0.90))
+			    .detail("TSSGetKeyValuesLatencyDiff99", it.second->TSSgetKeyValuesLatency.percentile(0.99));
+
+			it.second->clear();
+		}
 
 		lastLogged = now();
 	}
@@ -711,6 +818,110 @@ ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
 	}
 }
 
+// updates tss mapping when set of tss servers changes
+ACTOR static Future<Void> monitorTssChange(DatabaseContext* cx) {
+	state vector<std::pair<UID, StorageServerInterface>> curTssMapping;
+	curTssMapping = cx->clientInfo->get().tssMapping;
+
+	loop {
+		wait(cx->clientInfo->onChange());
+		if (cx->clientInfo->get().tssMapping != curTssMapping) {
+			// TODO maybe re-read this from system keys instead if it changes
+			ClientDBInfo clientInfo = cx->clientInfo->get();
+			curTssMapping = clientInfo.tssMapping;
+
+			// TODO REMOVE print
+			// printf("gonna do tss stuff with %d tss's\n", curTssMapping.size());
+
+			std::unordered_set<UID> seenTssIds;
+
+			if (curTssMapping.size()) {
+				for (const auto& it : curTssMapping) {
+					seenTssIds.insert(it.second.id());
+
+					if (cx->server_interf.count(it.first)) {
+						// TODO REMOVE
+						printf("found new tss mapping %s -> %s\n",
+						       it.first.toString().c_str(),
+						       it.second.id().toString().c_str());
+						cx->addTssMapping(cx->server_interf[it.first]->interf, it.second);
+					} else {
+						// TODO REMOVE case and print
+						// printf("server %s with tss pair %s not in server_interf, skipping for now\n",
+						// it.first.toString().c_str(), it.second.id().toString().c_str());
+					}
+				}
+			}
+
+			for (auto it = cx->tssMetrics.begin(); it != cx->tssMetrics.end();) {
+				if (seenTssIds.count(it->first)) {
+					it++;
+				} else {
+					// TODO REMOVE
+					printf("Erasing tss %s from tss_metrics\n", it->first.toString().c_str());
+					it = cx->tssMetrics.erase(it);
+				}
+			}
+
+			cx->queueModel.removeOldTssData(clientInfo.id);
+		}
+	}
+}
+
+ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
+	state Reference<ReadYourWritesTransaction> tr;
+	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
+	loop {
+		state UID tssID = waitNext(cx->tssMismatchStream.getFuture());
+		// find ss pair id so we can remove it from the mapping
+		state UID tssPairID;
+		bool found = false;
+		for (const auto& it : cx->clientInfo->get().tssMapping) {
+			if (it.second.id() == tssID) {
+				tssPairID = it.first;
+				found = true;
+				break;
+			}
+		}
+		// TODO maybe instead of assert, do a trace event because it's possible that by the time we checked the mismatch
+		// the tss is gone?
+		if (found) {
+			// TODO add trace event
+			TEST(true); // killing TSS because it got mismatch
+			printf("KILLING TSS %s (partner=%s) BECAUSE OF TSS MISMATCH\n",
+			       tssID.toString().c_str(),
+			       tssPairID.toString().c_str());
+
+			// TODO we could write something to the system keyspace and then have DD listen to that keyspace and then DD
+			// do exactly this, so why not just cut out the middle man (or the middle system keys, as it were)
+			tr = makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(cx)));
+			loop {
+				try {
+					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+					tr->clear(serverTagKeyFor(tssID));
+					tssMapDB.erase(tr, tssPairID);
+
+					tr->set(tssMappingChangeKey, deterministicRandom()->randomUniqueID().toString());
+					wait(tr->commit());
+
+					break;
+				} catch (Error& e) {
+					printf("Kill Mismatch TSS Transaction got error %d\n", e.code());
+					wait(tr->onError(e));
+				}
+			}
+			tr = makeReference<ReadYourWritesTransaction>(); // clear out txn so that the extra ref gets decref'd and we
+			                                                 // can free cx
+
+		} else {
+			TEST(true); // Not killing TSS with mismatch because it's already gone
+			printf("Not killing TSS %s because of tss mismatch, must be already removed\n", tssID.toString().c_str());
+		}
+	}
+}
+
 ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext* cx, bool detailed) {
 	if (now() - cx->healthMetricsLastUpdated < CLIENT_KNOBS->AGGREGATE_HEALTH_METRICS_MAX_STALENESS) {
 		if (detailed) {
@@ -958,6 +1169,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
 
 	monitorProxiesInfoChange = monitorProxiesChange(clientInfo, &proxiesChangeTrigger);
+	monitorTssInfoChange = monitorTssChange(this);
+	tssMismatchHandler = handleTssMismatches(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
 
@@ -1197,6 +1410,8 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo,
 DatabaseContext::~DatabaseContext() {
 	cacheListMonitor.cancel();
 	monitorProxiesInfoChange.cancel();
+	monitorTssInfoChange.cancel();
+	tssMismatchHandler.cancel();
 	for (auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
 	ASSERT_ABORT(server_interf.empty());
@@ -2345,6 +2560,11 @@ ACTOR Future<Key> getKey(Database cx, KeySelector k, Future<Version> version, Tr
 				    "NativeAPI.getKey.Before"); //.detail("StartKey",
 				                                // k.getKey()).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
 			++cx->transactionPhysicalReads;
+
+			GetKeyRequest req(
+			    span.context, k, version.get(), cx->sampleReadTags() ? tags : Optional<TagSet>(), getKeyID);
+			req.arena.dependsOn(k.arena());
+
 			state GetKeyReply reply;
 			try {
 				choose {
@@ -2353,11 +2573,7 @@ ACTOR Future<Key> getKey(Database cx, KeySelector k, Future<Version> version, Tr
 					         wait(loadBalance(cx.getPtr(),
 					                          ssi.second,
 					                          &StorageServerInterface::getKey,
-					                          GetKeyRequest(span.context,
-					                                        k,
-					                                        version.get(),
-					                                        cx->sampleReadTags() ? tags : Optional<TagSet>(),
-					                                        getKeyID),
+					                          req,
 					                          TaskPriority::DefaultPromiseEndpoint,
 					                          false,
 					                          cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
@@ -2718,6 +2934,9 @@ ACTOR Future<RangeResult> getExactRange(Database cx,
 			req.end = firstGreaterOrEqual(range.end);
 			req.spanContext = span.context;
 
+			// keep shard's arena around in case of async tss comparison
+			req.arena.dependsOn(locations[shard].first.arena());
+
 			transformRangeLimits(limits, reverse, req);
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
 
@@ -3034,6 +3253,9 @@ ACTOR Future<RangeResult> getRange(Database cx,
 			req.isFetchKeys = (info.taskID == TaskPriority::FetchKeys);
 			req.version = readVersion;
 
+			// In case of async tss comparison, also make req arena depend on begin, end, and/or shard's arena depending
+			// on which  is used
+			bool dependOnShard = false;
 			if (reverse && (begin - 1).isDefinitelyLess(shard.begin) &&
 			    (!begin.isFirstGreaterOrEqual() ||
 			     begin.getKey() != shard.begin)) { // In this case we would be setting modifiedSelectors to true, but
@@ -3041,14 +3263,23 @@ ACTOR Future<RangeResult> getRange(Database cx,
 
 				req.begin = firstGreaterOrEqual(shard.begin);
 				modifiedSelectors = true;
-			} else
+				req.arena.dependsOn(shard.arena());
+				dependOnShard = true;
+			} else {
 				req.begin = begin;
+				req.arena.dependsOn(begin.arena());
+			}
 
 			if (!reverse && end.isDefinitelyGreater(shard.end)) {
 				req.end = firstGreaterOrEqual(shard.end);
 				modifiedSelectors = true;
-			} else
+				if (!dependOnShard) {
+					req.arena.dependsOn(shard.arena());
+				}
+			} else {
 				req.end = end;
+				req.arena.dependsOn(end.arena());
+			}
 
 			transformRangeLimits(limits, reverse, req);
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
@@ -3133,10 +3364,18 @@ ACTOR Future<RangeResult> getRange(Database cx,
 					output.readThroughEnd = readThroughEnd;
 
 					if (BUGGIFY && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows)) {
+						printf("Buggify resizing in nativeapi\n");
+						// Copy instead of resizing because TSS maybe be using output's arena for comparison. This only
+						// happens in simulation so it's fine
+						Standalone<RangeResultRef> copy;
+						int newSize =
+						    deterministicRandom()->randomInt(std::max(1, originalLimits.minRows), output.size());
+						for (int i = 0; i < newSize; i++) {
+							copy.push_back_deep(copy.arena(), output[i]);
+						}
+						output = copy;
 						output.more = true;
-						output.resize(
-						    output.arena(),
-						    deterministicRandom()->randomInt(std::max(1, originalLimits.minRows), output.size()));
+
 						getRangeFinished(cx,
 						                 trLogInfo,
 						                 startTime,
@@ -4180,6 +4419,8 @@ ACTOR static Future<Void> tryCommit(Database cx,
 		choose {
 			when(wait(cx->onProxiesChanged())) {
 				reply.cancel();
+				// TODO REMOVE
+				printf("tryCommit proxies changed ERROR!\n");
 				throw request_maybe_delivered();
 			}
 			when(CommitID ci = wait(reply)) {
