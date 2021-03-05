@@ -112,7 +112,7 @@ class EventKeeperTest {
 
 		// now check the timer and see if it recorded any events
 		Assertions.assertEquals(1, timer.getCount(Events.RANGE_QUERY_FETCHES), "Unexpected number of chunk fetches");
-		Assertions.assertEquals(testKvs.size(), timer.getCount(Events.RANGE_QUERY_TUPLES_FETCHED),
+		Assertions.assertEquals(testKvs.size(), timer.getCount(Events.RANGE_QUERY_RECORDS_FETCHED),
 		                        "Unexpected number of tuples fetched");
 		Assertions.assertEquals(expectedByteSize, timer.getCount(Events.BYTES_FETCHED),
 		                        "Incorrect number of bytes fetched");
@@ -124,12 +124,7 @@ class EventKeeperTest {
 
 		@Override
 		public void count(Event event, long amt) {
-			Long currCnt = counterMap.get(event);
-			if (currCnt == null) {
-				counterMap.put(event, amt);
-			} else {
-				counterMap.put(event, currCnt + amt);
-			}
+			counterMap.compute(event, (e,present)->present==null? amt:amt+present);
 		}
 
 		@Override

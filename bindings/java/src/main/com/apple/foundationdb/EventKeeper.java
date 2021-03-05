@@ -1,5 +1,5 @@
 /*
- * TransactionTimer.java
+ * EventKeeper.java
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -160,7 +160,7 @@ public interface EventKeeper {
         /**
          * The number of tuples fetched during a range query
          */
-        RANGE_QUERY_TUPLES_FETCHED,
+        RANGE_QUERY_RECORDS_FETCHED,
         /**
          * The number of times a range query chunk fetch failed
          */

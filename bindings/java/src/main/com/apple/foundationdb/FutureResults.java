@@ -27,7 +27,7 @@ import com.apple.foundationdb.EventKeeper.Events;
 
 class FutureResults extends NativeFuture<RangeResultInfo> {
 	private final EventKeeper eventKeeper;
-	FutureResults(long cPtr, boolean enableDirectBufferQueries, Executor executor,EventKeeper eventKeeper) {
+	FutureResults(long cPtr, boolean enableDirectBufferQueries, Executor executor, EventKeeper eventKeeper) {
 		super(cPtr);
 		registerMarshalCallback(executor);
 		this.enableDirectBufferQueries = enableDirectBufferQueries;
@@ -54,25 +54,23 @@ class FutureResults extends NativeFuture<RangeResultInfo> {
 	}
 
 	public RangeResult getResults() {
-		ByteBuffer buffer = enableDirectBufferQueries
-			? DirectBufferPool.getInstance().poll()
-			: null;
+		ByteBuffer buffer = enableDirectBufferQueries ? DirectBufferPool.getInstance().poll() : null;
+		if (buffer != null && eventKeeper != null) {
+			eventKeeper.increment(Events.RANGE_QUERY_DIRECT_BUFFER_HIT);
+			eventKeeper.increment(Events.JNI_CALL);
+		} else if (eventKeeper != null) {
+			eventKeeper.increment(Events.RANGE_QUERY_DIRECT_BUFFER_MISS);
+			eventKeeper.increment(Events.JNI_CALL);
+		}
+
 		try {
 			pointerReadLock.lock();
 			if (buffer != null) {
-				if (eventKeeper != null) {
-					eventKeeper.increment(Events.RANGE_QUERY_DIRECT_BUFFER_HIT);
-					eventKeeper.increment(Events.JNI_CALL);
-				}
 				try (DirectBufferIterator directIterator = new DirectBufferIterator(buffer)) {
 					FutureResults_getDirect(getPtr(), directIterator.getBuffer(), directIterator.getBuffer().capacity());
 					return new RangeResult(directIterator);
 				}
 			} else {
-				if (eventKeeper != null) {
-					eventKeeper.increment(Events.RANGE_QUERY_DIRECT_BUFFER_MISS);
-					eventKeeper.increment(Events.JNI_CALL);
-				}
 				return FutureResults_get(getPtr());
 			}
 		} finally {

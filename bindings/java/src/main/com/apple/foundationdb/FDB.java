@@ -428,7 +428,7 @@ public class FDB {
 	 *
 	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
 	 */
-	public Database open(String clusterFilePath, Executor e,EventKeeper eventKeeper) throws FDBException {
+	public Database open(String clusterFilePath, Executor e, EventKeeper eventKeeper) throws FDBException {
 		synchronized(this) {
 			if(!isConnected()) {
 				startNetwork();

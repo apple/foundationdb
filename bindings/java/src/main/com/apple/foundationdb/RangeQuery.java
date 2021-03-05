@@ -288,7 +288,7 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 						// (note: account for the length fields as well when recording the bytes
 						// fetched)
 						eventKeeper.count(Events.BYTES_FETCHED, result.getKey().length + result.getValue().length + 8);
-						eventKeeper.increment(Events.RANGE_QUERY_TUPLES_FETCHED);
+						eventKeeper.increment(Events.RANGE_QUERY_RECORDS_FETCHED);
 					}
 
 					// If this is the first call to next() on a chunk there cannot

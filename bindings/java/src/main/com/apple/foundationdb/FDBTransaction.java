@@ -191,7 +191,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		this(cPtr,database,executor,null);
 	}
 
-	protected FDBTransaction(long cPtr, Database database, Executor executor,EventKeeper eventKeeper) {
+	protected FDBTransaction(long cPtr, Database database, Executor executor, EventKeeper eventKeeper) {
 		super(cPtr);
 		this.database = database;
 		this.executor = executor;
@@ -318,7 +318,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	@Override
 	public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
 			int limit, boolean reverse, StreamingMode mode) {
-		return new RangeQuery(this, false, begin, end, limit, reverse, mode,eventKeeper);
+		return new RangeQuery(this, false, begin, end, limit, reverse, mode, eventKeeper);
 	}
 	@Override
 	public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
@@ -406,7 +406,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 				Transaction_getRange(getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(),
 									 end.getKey(), end.orEqual(), end.getOffset(), rowLimit, targetBytes,
 									 streamingMode, iteration, isSnapshot, reverse),
-				FDB.instance().isDirectBufferQueriesEnabled(), executor,eventKeeper);
+				FDB.instance().isDirectBufferQueriesEnabled(), executor, eventKeeper);
 		} finally {
 			pointerReadLock.unlock();
 		}
