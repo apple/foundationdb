@@ -260,7 +260,7 @@ struct FetchInjectionInfo {
 };
 
 struct RangeFeedInfo : ReferenceCounted<RangeFeedInfo> {
-	std::deque<MutationRefAndVersion> mutations;
+	std::deque<Standalone<MutationRefAndVersion>> mutations;
 	KeyRange range;
 	Key id;
 };
