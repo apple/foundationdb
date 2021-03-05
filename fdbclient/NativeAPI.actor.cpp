@@ -3093,7 +3093,7 @@ Future< Standalone< VectorRef< const char*>>> Transaction::getAddressesForKey( c
 	return getAddressesForKeyActor(key, ver, cx, info, options);
 }
 
-ACTOR Future<Void> registerRangeFeedActor(Transaction *tr, StringRef rangeID, KeyRangeRef range) {
+ACTOR Future<Void> registerRangeFeedActor(Transaction *tr, Key rangeID, KeyRange range) {
 	state Key rangeIDKey = rangeID.withPrefix(rangeFeedPrefix);
 	Optional<Value> val = wait( tr->get(rangeIDKey) );
 	if(!val.present()) {
@@ -3104,7 +3104,7 @@ ACTOR Future<Void> registerRangeFeedActor(Transaction *tr, StringRef rangeID, Ke
 	return Void();
 }
 
-Future<Void> Transaction::registerRangeFeed( const StringRef& rangeID, const KeyRangeRef& range ) {
+Future<Void> Transaction::registerRangeFeed( const Key& rangeID, const KeyRange& range ) {
 	return registerRangeFeedActor(this, rangeID, range);
 }
 
