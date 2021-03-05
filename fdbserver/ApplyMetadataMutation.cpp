@@ -318,7 +318,8 @@ void applyMetadataMutations(SpanID const& spanContext, UID const& dbgid, Arena& 
 					++firstRange;
 					if (firstRange == ranges.end()) {
 						ranges.begin().value().populateTags();
-						toCommit->addTags(ranges.begin().value().tags);
+						TraceEvent("RangeFeedTags1").detail("Tags", describe(ranges.begin().value().tags));
+						//toCommit->addTags(ranges.begin().value().tags);
 					}
 					else {
 						std::set<Tag> allSources;
@@ -326,9 +327,10 @@ void applyMetadataMutations(SpanID const& spanContext, UID const& dbgid, Arena& 
 							r.value().populateTags();
 							allSources.insert(r.value().tags.begin(), r.value().tags.end());
 						}
-						toCommit->addTags(allSources);
+						TraceEvent("RangeFeedTags2").detail("Tags", describe(allSources));
+						//toCommit->addTags(allSources);
 					}
-					toCommit->writeTypedMessage(privatized);
+					//toCommit->writeTypedMessage(privatized);
 				}
 			}
 		} else if (m.param2.size() > 1 && m.param2[0] == systemKeys.begin[0] && m.type == MutationRef::ClearRange) {
