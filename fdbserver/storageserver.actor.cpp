@@ -2883,7 +2883,6 @@ private:
 			Key rangeFeedId = m.param1.removePrefix(rangeFeedPrivatePrefix);
 			KeyRange rangeFeedRange = decodeRangeFeedValue( m.param2 );
 			TraceEvent("AddingRangeFeed", data->thisServerID).detail("RangeID", rangeFeedId.printable()).detail("Range", rangeFeedRange.toString());
-			/*
 			Reference<RangeFeedInfo> rangeFeedInfo( new RangeFeedInfo() );
 			rangeFeedInfo->range = rangeFeedRange;
 			rangeFeedInfo->id = rangeFeedId;
@@ -2893,7 +2892,6 @@ private:
 				r->value().push_back( rangeFeedInfo );
 			}
 			data->keyRangeFeed.coalesce( rangeFeedRange.contents() );
-			*/
 		} else {
 			ASSERT(false);  // Unknown private mutation
 		}
