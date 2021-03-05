@@ -1219,6 +1219,7 @@ ACTOR Future<Void> rangeFeedQ( StorageServer* data, RangeFeedRequest req ) {
 	for(auto& it : data->uidRangeFeed[req.rangeID]->mutations) {
 		reply.mutations.push_back(reply.arena, it);
 	}
+	TraceEvent("RangeFeedQuery", data->thisServerID).detail("RangeID", req.rangeID.printable()).detail("Mutations", reply.mutations.size());
 	req.reply.send(reply);
 	return Void();
 }
@@ -2890,6 +2891,7 @@ private:
 				r->value().push_back( rangeFeedInfo );
 			}
 			data->keyRangeFeed.coalesce( rangeFeedRange.contents() );
+			TraceEvent("AddingRangeFeed", data->thisServerID).detail("RangeID", rangeFeedId.printable()).detail("Range", rangeFeedRange.toString());
 		} else {
 			ASSERT(false);  // Unknown private mutation
 		}
