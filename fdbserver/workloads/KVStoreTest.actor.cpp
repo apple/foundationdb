@@ -309,6 +309,7 @@ ACTOR Future<Void> testKVStoreMain( KVStoreTestWorkload* workload, KVTest* ptest
 			}
 		} else {
 			vector<Future<Void>> actors;
+			actors.reserve(100);
 			for (int a = 0; a < 100; a++)
 				actors.push_back(testKVReadSaturation(&test, &workload->readLatency, &workload->reads));
 			wait(timeout(waitForAll(actors), workload->testDuration, Void()));

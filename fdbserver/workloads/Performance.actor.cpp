@@ -113,8 +113,8 @@ struct PerformanceWorkload : TestWorkload {
 		}
 
 		vector<TesterInterface> ts;
-		for(int i=0; i<workers.size(); i++)
-			ts.push_back(workers[i].interf.testerInterface);
+		ts.reserve(workers.size());
+		for (int i = 0; i < workers.size(); i++) ts.push_back(workers[i].interf.testerInterface);
 		return ts;
 	}
 

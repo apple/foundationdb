@@ -480,7 +480,8 @@ public:
 
 	ACTOR static Future<Void> openFiles( RawDiskQueue_TwoFiles* self ) {
 		state vector<Future<Reference<IAsyncFile>>> fs;
-		for(int i=0; i<2; i++)
+		fs.reserve(2);
+		for (int i = 0; i < 2; i++)
 			fs.push_back( IAsyncFileSystem::filesystem()->open( self->filename(i), IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_LOCK, 0 ) );
 		wait( waitForAllReady(fs) );
 
@@ -516,8 +517,8 @@ public:
 		// process could have written (but not synchronized) data to the file which we will read but which
 		// might not survive a reboot.  The recovery code assumes otherwise and could corrupt the disk.
 		vector<Future<Void>> syncs;
-		for(int i=0; i<fs.size(); i++)
-			syncs.push_back( fs[i].get()->sync() );
+		syncs.reserve(fs.size());
+		for (int i = 0; i < fs.size(); i++) syncs.push_back(fs[i].get()->sync());
 		wait(waitForAll(syncs));
 
 		// Successfully opened or created; fill in self->files[]
@@ -573,8 +574,8 @@ public:
 
 			// Get the file sizes
 			vector<Future<int64_t>> fsize;
-			for(int i=0; i<2; i++)
-				fsize.push_back( self->files[i].f->size() );
+			fsize.reserve(2);
+			for (int i = 0; i < 2; i++) fsize.push_back(self->files[i].f->size());
 			vector<int64_t> file_sizes = wait( getAll(fsize) );
 			for(int i=0; i<2; i++) {
 				// SOMEDAY: If the file size is not a multiple of page size, it may never be shortened.  Change this?

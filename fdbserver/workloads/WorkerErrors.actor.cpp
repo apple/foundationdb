@@ -39,14 +39,16 @@ struct WorkerErrorsWorkload : TestWorkload {
 
 	ACTOR Future< std::vector< TraceEventFields > > latestEventOnWorkers( std::vector<WorkerDetails> workers ) {
 		state vector<Future<TraceEventFields>> eventTraces;
-		for(int c = 0; c < workers.size(); c++) {
+		eventTraces.reserve(workers.size());
+		for (int c = 0; c < workers.size(); c++) {
 			eventTraces.push_back( workers[c].interf.eventLogRequest.getReply( EventLogRequest() ) );
 		}
 
 		wait( timeoutError( waitForAll( eventTraces ), 2.0 ) );
 
 		vector<TraceEventFields> results;
-		for(int i = 0; i < eventTraces.size(); i++) {
+		results.reserve(eventTraces.size());
+		for (int i = 0; i < eventTraces.size(); i++) {
 			results.push_back( eventTraces[i].get() );
 		}
 

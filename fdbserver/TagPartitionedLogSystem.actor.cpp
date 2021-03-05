@@ -761,7 +761,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
-		for(auto tag : tags) {
+		cursors.reserve(tags.size());
+		for (auto tag : tags) {
 			cursors.push_back(peek(dbgid, begin, end, tag, parallelGetMore));
 		}
 		return makeReference<ILogSystem::BufferedCursor>(cursors, begin, end.present() ? end.get() + 1 : getPeekEnd(),
@@ -914,7 +915,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		if(peekLocality < 0 || localEnd == invalidVersion || localEnd <= begin) {
 			std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
-			for(int i = 0; i < maxTxsTags; i++) {
+			cursors.reserve(maxTxsTags);
+			for (int i = 0; i < maxTxsTags; i++) {
 				cursors.push_back(peekAll(dbgid, begin, end, Tag(tagLocalityTxs, i), true));
 			}
 			//SOMEDAY: remove once upgrades from 6.2 are no longer supported
@@ -928,7 +930,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		try {
 			if(localEnd >= end) {
 				std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
-				for(int i = 0; i < maxTxsTags; i++) {
+				cursors.reserve(maxTxsTags);
+				for (int i = 0; i < maxTxsTags; i++) {
 					cursors.push_back(peekLocal(dbgid, Tag(tagLocalityTxs, i), begin, end, true, peekLocality));
 				}
 				//SOMEDAY: remove once upgrades from 6.2 are no longer supported
@@ -965,7 +968,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		} catch( Error& e ) {
 			if(e.code() == error_code_worker_removed) {
 				std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
-				for(int i = 0; i < maxTxsTags; i++) {
+				cursors.reserve(maxTxsTags);
+				for (int i = 0; i < maxTxsTags; i++) {
 					cursors.push_back(peekAll(dbgid, begin, end, Tag(tagLocalityTxs, i), true));
 				}
 				//SOMEDAY: remove once upgrades from 6.2 are no longer supported
@@ -2262,7 +2266,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			req.txsTags = self->txsTags;
 		}
 
-		for( int i = 0; i < remoteWorkers.remoteTLogs.size(); i++ )
+		remoteTLogInitializationReplies.reserve(remoteWorkers.remoteTLogs.size());
+		for (int i = 0; i < remoteWorkers.remoteTLogs.size(); i++)
 			remoteTLogInitializationReplies.push_back( transformErrors( throwErrorOr( remoteWorkers.remoteTLogs[i].tLog.getReplyUnlessFailedFor( remoteTLogReqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 
 		TraceEvent("RemoteLogRecruitment_InitializingRemoteLogs").detail("StartVersion", logSet->startVersion).detail("LocalStart", self->tLogs[0]->startVersion).detail("LogRouterTags", self->logRouterTags);
@@ -2281,7 +2286,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
 
 		std::vector<Future<Void>> recoveryComplete;
-		for( int i = 0; i < logSet->logServers.size(); i++)
+		recoveryComplete.reserve(logSet->logServers.size());
+		for (int i = 0; i < logSet->logServers.size(); i++)
 			recoveryComplete.push_back( transformErrors( throwErrorOr( logSet->logServers[i]->get().interf().recoveryFinished.getReplyUnlessFailedFor( TLogRecoveryFinishedRequest(), SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 
 		self->remoteRecoveryComplete = waitForAll(recoveryComplete);
@@ -2483,7 +2489,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			req.txsTags = logSystem->txsTags;
 		}
 
-		for( int i = 0; i < recr.tLogs.size(); i++ )
+		initializationReplies.reserve(recr.tLogs.size());
+		for (int i = 0; i < recr.tLogs.size(); i++)
 			initializationReplies.push_back( transformErrors( throwErrorOr( recr.tLogs[i].tLog.getReplyUnlessFailedFor( reqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 
 		state std::vector<Future<Void>> recoveryComplete;
@@ -2545,7 +2552,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				req.txsTags = logSystem->txsTags;
 			}
 
-			for( int i = 0; i < recr.satelliteTLogs.size(); i++ )
+			satelliteInitializationReplies.reserve(recr.satelliteTLogs.size());
+			for (int i = 0; i < recr.satelliteTLogs.size(); i++)
 				satelliteInitializationReplies.push_back( transformErrors( throwErrorOr( recr.satelliteTLogs[i].tLog.getReplyUnlessFailedFor( sreqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 
 			wait( waitForAll( satelliteInitializationReplies ) || oldRouterRecruitment );

@@ -290,6 +290,7 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<C
 		state StatusObject statusObj;
 
 		state vector<Future<Optional<LeaderInfo>>> leaderServers;
+		leaderServers.reserve(coord.clientLeaderServers.size());
 		for (int i = 0; i < coord.clientLeaderServers.size(); i++)
 			leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader, GetLeaderRequest(coord.clusterKey, UID()), TaskPriority::CoordinationReply));
 
