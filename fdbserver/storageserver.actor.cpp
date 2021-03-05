@@ -349,8 +349,9 @@ public:
 			if(BUGGIFY) {
 				UIDofLongest = deterministicRandom()->randomUniqueID();
 			}
-			if(keyRangeMap.count(UIDofLongest)) {
-				return {longest, keyRangeMap.at(UIDofLongest)};
+			auto it = keyRangeMap.find(UIDofLongest);
+			if(it != keyRangeMap.end()) {
+				return {longest, *it};
 			}
 			return {-1, emptyKeyRange};
 		}
