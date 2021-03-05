@@ -37,13 +37,13 @@ RUN sed -i -e '/enabled/d' /etc/yum.repos.d/CentOS-Base.repo && \
         lz4-devel \
         lz4-static \
         mono-devel \
-        rh-python36 \
-        rh-python36-python-devel \
-        rh-ruby24 \
         rpm-build \
         tcl-devel \
         unzip \
-        wget && \
+        wget \
+        rh-python36 \
+        rh-python36-python-devel \
+        rh-ruby24 && \
     yum clean all && \
     rm -rf /var/cache/yum
 
