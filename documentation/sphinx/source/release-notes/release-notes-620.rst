@@ -4,6 +4,10 @@
 Release Notes
 #############
 
+6.2.33
+======
+* Fixed a issue where storage servers could shutdown with ``unknown_error``. `(PR #4380) <https://github.com/apple/foundationdb/pull/4437>`_
+
 6.2.32
 ======
 * Fix an issue where symbolic links in cmake-built RPMs are broken if you unpack the RPM to a custom directory. `(PR #4380) <https://github.com/apple/foundationdb/pull/4380>`_
