@@ -236,7 +236,7 @@ public:
 	// Management API, create snapshot
 	Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
 
-	Future<Standalone<VectorRef<MutationRefAndVersion>> getRangeFeedMutations(StringRef rangeID);
+	Future<Standalone<VectorRef<MutationRefAndVersion>>> getRangeFeedMutations(StringRef rangeID);
 
 //private: 
 	explicit DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
