@@ -2047,7 +2047,7 @@ void applyMutation( StorageServer *self, MutationRef const& m, Arena& arena, Sto
 		self->watches.trigger( m.param1 );
 
 		for(auto& it : self->keyRangeFeed[m.param1]) {
-			it->mutations.emplace_back(m,version);
+			it->mutations.push_back(MutationRefAndVersion(m,version));
 		}
 	} else if (m.type == MutationRef::ClearRange) {
 		data.erase( m.param1, m.param2 );
@@ -2059,7 +2059,7 @@ void applyMutation( StorageServer *self, MutationRef const& m, Arena& arena, Sto
 		auto ranges = self->keyRangeFeed.intersectingRanges(KeyRangeRef(m.param1, m.param2));
 		for(auto &r : ranges) {
 			for(auto& it : r.value()) {
-				it->mutations.emplace_back(m,version);
+				it->mutations.push_back(MutationRefAndVersion(m,version));
 			}
 		}
 	}
