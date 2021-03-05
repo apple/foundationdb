@@ -338,15 +338,18 @@ public:
 
 			const double currentTime = now();
 			double longest = 0;
-			UID UIDofLongest;
+			Optional<UID> UIDofLongest;
 			for (const auto& kv: startTimeMap) {
 				const double currentRunningTime = currentTime - kv.second;
-				if (longest < currentRunningTime) {
+				if (longest <= currentRunningTime) {
 					longest = currentRunningTime;
 					UIDofLongest = kv.first;
 				}
 			}
-			return {longest, keyRangeMap.at(UIDofLongest)};
+			if(UIDofLongest.present()) {
+				return {longest, keyRangeMap[UIDofLongest.get()]};
+			}
+			return {-1, emptyKeyRange};
 		}
 
 		int numRunning() const { return startTimeMap.size(); }
