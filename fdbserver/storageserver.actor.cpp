@@ -2056,8 +2056,10 @@ void applyMutation( StorageServer *self, MutationRef const& m, Arena& arena, Sto
 		self->watches.triggerRange( m.param1, m.param2 );
 
 		auto ranges = self->keyRangeFeed.intersectingRanges(KeyRangeRef(m.param1, m.param2));
-		for(auto &it : ranges) {
-			it.value()->mutations.emplace_back(m,version);
+		for(auto &r : ranges) {
+			for(auto& it : r.value()) {
+				it->mutations.emplace_back(m,version);
+			}
 		}
 	}
 
@@ -2887,7 +2889,7 @@ private:
 			for(auto r = rs.begin(); r != rs.end(); ++r) {
 				r->value().push_back( rangeFeedInfo );
 			}
-			data->uidRangeFeed.coalesce( rangeFeedRange );
+			data->keyRangeFeed.coalesce( rangeFeedRange );
 		} else {
 			ASSERT(false);  // Unknown private mutation
 		}
