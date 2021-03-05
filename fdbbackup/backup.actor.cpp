@@ -122,6 +122,7 @@ enum {
 	OPT_TAGNAME,
 	OPT_BACKUPKEYS,
 	OPT_WAITFORDONE,
+	OPT_INCREMENTALONLY,
 
 	// Backup Modify
 	OPT_MOD_ACTIVE_INTERVAL,
@@ -1084,6 +1085,8 @@ static void printRestoreUsage(bool devhelp) {
 	printf("  --trace_format FORMAT\n"
 	       "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 	       "                 Has no effect unless --log is specified.\n");
+	printf("  --incremental\n"
+	       "                 Performs incremental restore without the base backup.\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -2870,6 +2873,7 @@ int main(int argc, char* argv[]) {
 		std::string restoreTimestamp;
 		bool waitForDone = false;
 		bool stopWhenDone = true;
+		bool incrementalBackupOnly = false;
 		bool forceAction = false;
 		bool trace = false;
 		bool quietDisplay = false;
@@ -3076,6 +3080,7 @@ int main(int argc, char* argv[]) {
 					printHelpTeaser(argv[0]);
 					return FDB_EXIT_ERROR;
 				}
+<<<<<<< HEAD
 				break;
 			case OPT_DESTCONTAINER:
 				destinationContainer = args->OptionArg();
@@ -3092,6 +3097,46 @@ int main(int argc, char* argv[]) {
 					fprintf(stderr, "ERROR: Could not parse snapshot interval `%s'\n", a);
 					printHelpTeaser(argv[0]);
 					return FDB_EXIT_ERROR;
+=======
+				case OPT_MOD_VERIFY_UID:
+					modifyOptions.verifyUID = args->OptionArg();
+					break;
+				case OPT_WAITFORDONE:
+					waitForDone = true;
+					break;
+				case OPT_NOSTOPWHENDONE:
+					stopWhenDone = false;
+					break;
+				case OPT_INCREMENTALONLY:
+					incrementalBackupOnly = true;
+					break;
+				case OPT_RESTORECONTAINER:
+					restoreContainer = args->OptionArg();
+					// If the url starts with '/' then prepend "file://" for backwards compatibility
+					if(StringRef(restoreContainer).startsWith(LiteralStringRef("/")))
+						restoreContainer = std::string("file://") + restoreContainer;
+					break;
+				case OPT_DESCRIBE_DEEP:
+					describeDeep = true;
+					break;
+				case OPT_DESCRIBE_TIMESTAMPS:
+					describeTimestamps = true;
+					break;
+				case OPT_PREFIX_ADD:
+					addPrefix = args->OptionArg();
+					break;
+				case OPT_PREFIX_REMOVE:
+					removePrefix = args->OptionArg();
+					break;
+				case OPT_ERRORLIMIT: {
+					const char* a = args->OptionArg();
+					if (!sscanf(a, "%d", &maxErrors)) {
+						fprintf(stderr, "ERROR: Could not parse max number of errors `%s'\n", a);
+						printHelpTeaser(argv[0]);
+						return FDB_EXIT_ERROR;
+					}
+					break;
+>>>>>>> 0265490f1 (initial commit to introduce incremental restore only (ignore base snap))
 				}
 				if (optId == OPT_SNAPSHOTINTERVAL) {
 					snapshotIntervalSeconds = seconds;
