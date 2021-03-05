@@ -338,7 +338,7 @@ public:
 
 			const double currentTime = now();
 			double longest = 0;
-			Optional<UID> UIDofLongest;
+			UID UIDofLongest;
 			for (const auto& kv: startTimeMap) {
 				const double currentRunningTime = currentTime - kv.second;
 				if (longest <= currentRunningTime) {
@@ -347,10 +347,10 @@ public:
 				}
 			}
 			if(BUGGIFY) {
-				UIDofLongest = Optional<UID>();
+				UIDofLongest = deterministicRandom()->randomUniqueID();
 			}
-			if(UIDofLongest.present() && keyRangeMap.count(UIDofLongest.get())) {
-				return {longest, keyRangeMap[UIDofLongest.get()]};
+			if(keyRangeMap.count(UIDofLongest)) {
+				return {longest, keyRangeMap[UIDofLongest]};
 			}
 			return {-1, emptyKeyRange};
 		}
