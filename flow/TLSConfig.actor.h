@@ -18,12 +18,13 @@
  * limitations under the License.
  */
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
+// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
+// version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_TLS_CONFIG_ACTOR_G_H)
-	#define FLOW_TLS_CONFIG_ACTOR_G_H
-	#include "flow/TLSConfig.actor.g.h"
+#define FLOW_TLS_CONFIG_ACTOR_G_H
+#include "flow/TLSConfig.actor.g.h"
 #elif !defined(FLOW_TLS_CONFIG_ACTOR_H)
-	#define FLOW_TLS_CONFIG_ACTOR_H
+#define FLOW_TLS_CONFIG_ACTOR_H
 
 #pragma once
 
@@ -71,14 +72,10 @@ enum class X509Location {
 };
 
 struct Criteria {
-	Criteria( const std::string& s )
-		: criteria(s), match_type(MatchType::EXACT), location(X509Location::NAME) {}
-	Criteria( const std::string& s, MatchType mt )
-		: criteria(s), match_type(mt), location(X509Location::NAME) {}
-	Criteria( const std::string& s, X509Location loc)
-		: criteria(s), match_type(MatchType::EXACT), location(loc) {}
-	Criteria( const std::string& s, MatchType mt, X509Location loc)
-		: criteria(s), match_type(mt), location(loc) {}
+	Criteria(const std::string& s) : criteria(s), match_type(MatchType::EXACT), location(X509Location::NAME) {}
+	Criteria(const std::string& s, MatchType mt) : criteria(s), match_type(mt), location(X509Location::NAME) {}
+	Criteria(const std::string& s, X509Location loc) : criteria(s), match_type(MatchType::EXACT), location(loc) {}
+	Criteria(const std::string& s, MatchType mt, X509Location loc) : criteria(s), match_type(mt), location(loc) {}
 
 	std::string criteria;
 	MatchType match_type;
@@ -92,14 +89,11 @@ struct Criteria {
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-enum class TLSEndpointType {
-	UNSET = 0,
-	CLIENT,
-	SERVER
-};
+enum class TLSEndpointType { UNSET = 0, CLIENT, SERVER };
 
 class TLSConfig;
-template <typename T> class LoadAsyncActorState;
+template <typename T>
+class LoadAsyncActorState;
 // TODO: Remove this once this code is merged with master/to-be 7.0 and actors can access private variables.
 #ifndef PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP
 #define PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP private
@@ -107,17 +101,11 @@ template <typename T> class LoadAsyncActorState;
 
 class LoadedTLSConfig {
 public:
-	std::string getCertificateBytes() const {
-		return tlsCertBytes;
-	}
+	std::string getCertificateBytes() const { return tlsCertBytes; }
 
-	std::string getKeyBytes() const {
-		return tlsKeyBytes;
-	}
+	std::string getKeyBytes() const { return tlsKeyBytes; }
 
-	std::string getCABytes() const {
-		return tlsCABytes;
-	}
+	std::string getCABytes() const { return tlsCABytes; }
 
 	// Return the explicitly set verify peers string.
 	// If no verify peers string was set, return the environment setting
@@ -129,13 +117,9 @@ public:
 	// If no environment setting exists, return an empty string
 	std::string getPassword() const;
 
-	TLSEndpointType getEndpointType() const {
-		return endpointType;
-	}
+	TLSEndpointType getEndpointType() const { return endpointType; }
 
-	bool isTLSEnabled() const {
-		return endpointType != TLSEndpointType::UNSET;
-	}
+	bool isTLSEnabled() const { return endpointType != TLSEndpointType::UNSET; }
 
 	void print(FILE* fp);
 
@@ -152,54 +136,54 @@ PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP:
 
 class TLSConfig {
 public:
-	enum { OPT_TLS = 100000, OPT_TLS_PLUGIN, OPT_TLS_CERTIFICATES, OPT_TLS_KEY, OPT_TLS_VERIFY_PEERS, OPT_TLS_CA_FILE, OPT_TLS_PASSWORD };
+	enum {
+		OPT_TLS = 100000,
+		OPT_TLS_PLUGIN,
+		OPT_TLS_CERTIFICATES,
+		OPT_TLS_KEY,
+		OPT_TLS_VERIFY_PEERS,
+		OPT_TLS_CA_FILE,
+		OPT_TLS_PASSWORD
+	};
 
 	TLSConfig() = default;
-	explicit TLSConfig( TLSEndpointType endpointType )
-		: endpointType( endpointType ) {
-	}
+	explicit TLSConfig(TLSEndpointType endpointType) : endpointType(endpointType) {}
 
-	void setCertificatePath( const std::string& path ) {
+	void setCertificatePath(const std::string& path) {
 		tlsCertPath = path;
 		tlsCertBytes = "";
 	}
 
-	void setCertificateBytes( const std::string& bytes ) {
+	void setCertificateBytes(const std::string& bytes) {
 		tlsCertBytes = bytes;
 		tlsCertPath = "";
 	}
 
-	void setKeyPath( const std::string& path ) {
+	void setKeyPath(const std::string& path) {
 		tlsKeyPath = path;
 		tlsKeyBytes = "";
 	}
 
-	void setKeyBytes( const std::string& bytes ) {
+	void setKeyBytes(const std::string& bytes) {
 		tlsKeyBytes = bytes;
 		tlsKeyPath = "";
 	}
 
-	void setCAPath( const std::string& path ) {
+	void setCAPath(const std::string& path) {
 		tlsCAPath = path;
 		tlsCABytes = "";
 	}
 
-	void setCABytes( const std::string& bytes ) {
+	void setCABytes(const std::string& bytes) {
 		tlsCABytes = bytes;
 		tlsCAPath = "";
 	}
 
-	void setPassword( const std::string& password ) {
-		tlsPassword = password;
-	}
+	void setPassword(const std::string& password) { tlsPassword = password; }
 
-	void clearVerifyPeers() {
-		tlsVerifyPeers.clear();
-	}
+	void clearVerifyPeers() { tlsVerifyPeers.clear(); }
 
-	void addVerifyPeers( const std::string& verifyPeers ) {
-		tlsVerifyPeers.push_back( verifyPeers );
-	}
+	void addVerifyPeers(const std::string& verifyPeers) { tlsVerifyPeers.push_back(verifyPeers); }
 
 	// Load all specified certificates into memory, and return an object that
 	// allows access to them.
@@ -209,9 +193,7 @@ public:
 	// Load all specified certificates into memory, and return an object that
 	// allows access to them.
 	// If self has any certificates by path, they will be *asynchronously* loaded from disk.
-	Future<LoadedTLSConfig> loadAsync() const {
-		return loadAsync(this);
-	}
+	Future<LoadedTLSConfig> loadAsync() const { return loadAsync(this); }
 
 	// Return the explicitly set path.
 	// If one was not set, return the path from the environment.
@@ -237,13 +219,21 @@ PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP:
 };
 
 #ifndef TLS_DISABLED
-namespace boost { namespace asio { namespace ssl { struct context; }}}
-void ConfigureSSLContext(const LoadedTLSConfig& loaded, boost::asio::ssl::context* context, std::function<void()> onPolicyFailure = [](){});
+namespace boost {
+namespace asio {
+namespace ssl {
+struct context;
+}
+} // namespace asio
+} // namespace boost
+void ConfigureSSLContext(
+    const LoadedTLSConfig& loaded,
+    boost::asio::ssl::context* context,
+    std::function<void()> onPolicyFailure = []() {});
 #endif
 
 class TLSPolicy : ReferenceCounted<TLSPolicy> {
 public:
-
 	TLSPolicy(TLSEndpointType client) : is_client(client == TLSEndpointType::CLIENT) {}
 	virtual ~TLSPolicy();
 
@@ -263,9 +253,9 @@ public:
 
 		std::string toString() const;
 
-		std::map< NID, Criteria > subject_criteria;
-		std::map< NID, Criteria > issuer_criteria;
-		std::map< NID, Criteria > root_criteria;
+		std::map<NID, Criteria> subject_criteria;
+		std::map<NID, Criteria> issuer_criteria;
+		std::map<NID, Criteria> root_criteria;
 
 		bool verify_cert = true;
 		bool verify_time = true;
@@ -283,27 +273,27 @@ public:
 #define TLS_CA_FILE_FLAG "--tls_ca_file"
 #define TLS_PASSWORD_FLAG "--tls_password"
 
-#define TLS_OPTION_FLAGS \
-	{ TLSConfig::OPT_TLS_PLUGIN,       TLS_PLUGIN_FLAG,           SO_REQ_SEP }, \
-	{ TLSConfig::OPT_TLS_CERTIFICATES, TLS_CERTIFICATE_FILE_FLAG, SO_REQ_SEP }, \
-	{ TLSConfig::OPT_TLS_KEY,          TLS_KEY_FILE_FLAG,         SO_REQ_SEP }, \
-	{ TLSConfig::OPT_TLS_VERIFY_PEERS, TLS_VERIFY_PEERS_FLAG,     SO_REQ_SEP }, \
-	{ TLSConfig::OPT_TLS_PASSWORD,     TLS_PASSWORD_FLAG,         SO_REQ_SEP }, \
-	{ TLSConfig::OPT_TLS_CA_FILE,      TLS_CA_FILE_FLAG,          SO_REQ_SEP },
+#define TLS_OPTION_FLAGS                                                                                               \
+	{ TLSConfig::OPT_TLS_PLUGIN, TLS_PLUGIN_FLAG, SO_REQ_SEP },                                                        \
+	    { TLSConfig::OPT_TLS_CERTIFICATES, TLS_CERTIFICATE_FILE_FLAG, SO_REQ_SEP },                                    \
+	    { TLSConfig::OPT_TLS_KEY, TLS_KEY_FILE_FLAG, SO_REQ_SEP },                                                     \
+	    { TLSConfig::OPT_TLS_VERIFY_PEERS, TLS_VERIFY_PEERS_FLAG, SO_REQ_SEP },                                        \
+	    { TLSConfig::OPT_TLS_PASSWORD, TLS_PASSWORD_FLAG, SO_REQ_SEP },                                                \
+	    { TLSConfig::OPT_TLS_CA_FILE, TLS_CA_FILE_FLAG, SO_REQ_SEP },
 
-#define TLS_HELP \
-	"  " TLS_CERTIFICATE_FILE_FLAG " CERTFILE\n" \
-	"                 The path of a file containing the TLS certificate and CA\n" \
-	"                 chain.\n"											\
-	"  " TLS_CA_FILE_FLAG " CERTAUTHFILE\n" \
-	"                 The path of a file containing the CA certificates chain.\n"	\
-	"  " TLS_KEY_FILE_FLAG " KEYFILE\n" \
-	"                 The path of a file containing the private key corresponding\n" \
-	"                 to the TLS certificate.\n"						\
-	"  " TLS_PASSWORD_FLAG " PASSCODE\n" \
-	"                 The passphrase of encrypted private key\n" \
-	"  " TLS_VERIFY_PEERS_FLAG " CONSTRAINTS\n" \
-	"                 The constraints by which to validate TLS peers. The contents\n" \
+#define TLS_HELP                                                                                                       \
+	"  " TLS_CERTIFICATE_FILE_FLAG " CERTFILE\n"                                                                       \
+	"                 The path of a file containing the TLS certificate and CA\n"                                      \
+	"                 chain.\n"                                                                                        \
+	"  " TLS_CA_FILE_FLAG " CERTAUTHFILE\n"                                                                            \
+	"                 The path of a file containing the CA certificates chain.\n"                                      \
+	"  " TLS_KEY_FILE_FLAG " KEYFILE\n"                                                                                \
+	"                 The path of a file containing the private key corresponding\n"                                   \
+	"                 to the TLS certificate.\n"                                                                       \
+	"  " TLS_PASSWORD_FLAG " PASSCODE\n"                                                                               \
+	"                 The passphrase of encrypted private key\n"                                                       \
+	"  " TLS_VERIFY_PEERS_FLAG " CONSTRAINTS\n"                                                                        \
+	"                 The constraints by which to validate TLS peers. The contents\n"                                  \
 	"                 and format of CONSTRAINTS are plugin-specific.\n"
 
 #include "flow/unactorcompiler.h"
