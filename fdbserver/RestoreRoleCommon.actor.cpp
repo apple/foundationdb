@@ -81,9 +81,9 @@ void updateProcessStats(Reference<RestoreRoleData> self) {
 	if (g_network->isSimulated()) {
 		// memUsage and cpuUsage are not relevant in the simulator,
 		// and relying on the actual values could break seed determinism
-		if (deterministicRandom()->random01() < 0.2) { // not fully utilized cpu
+		if (deterministicRandom()->random01() < 0.4) { // not fully utilized cpu
 			self->cpuUsage = deterministicRandom()->random01() * SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT;
-		} else if (deterministicRandom()->random01() < 0.6) { // achieved target cpu but cpu is not busy
+		} else if (deterministicRandom()->random01() < 0.7) { // achieved target cpu but cpu is not busy
 			self->cpuUsage = SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT +
 			                 deterministicRandom()->random01() * (SERVER_KNOBS->FASTRESTORE_SCHED_MAX_CPU_PERCENT -
 			                                                      SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT);
@@ -119,7 +119,7 @@ ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatch
 		if (g_network->isSimulated() && BUGGIFY) {
 			// Intentionally randomly block actors for low memory reason.
 			// memory will be larger than threshold when deterministicRandom()->random01() > 1/2
-			if (deterministicRandom()->random01() < 0.4) { // enough memory
+			if (deterministicRandom()->random01() < 0.7) { // enough memory
 				memory = SERVER_KNOBS->FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT * deterministicRandom()->random01();
 			} else { // used too much memory, needs throttling
 				memory = SERVER_KNOBS->FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT +

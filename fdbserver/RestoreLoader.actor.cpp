@@ -74,6 +74,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 		state int curVBInflightReqs = 0;
 		state int sendLoadParams = 0;
 		state int lastLoadReqs = 0;
+		state bool releasedReqs = false;
 		loop {
 			TraceEvent(SevDebug, "FastRestoreLoaderDispatchRequests", self->id())
 			    .detail("SendingQueue", self->sendingQueue.size())
@@ -125,16 +126,14 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 				    self->cpuUsage < SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT) {
 					self->addActor.send(handleSendMutationsRequest(req, self));
 					self->sendingQueue.pop();
+					releasedReqs = true;
 				}
 			}
 			// When shall the node pause the process of other requests, e.g., load file requests
 			// TODO: Revisit if we should have (self->inflightSendingReqs > 0 && self->inflightLoadingReqs > 0)
-			if ((self->inflightSendingReqs > 0 && self->inflightLoadingReqs > 0) &&
-			    (self->inflightSendingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SEND_REQS ||
-			     self->inflightLoadingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS ||
-			     (self->inflightSendingReqs >= 1 &&
-			      self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT) ||
-			     self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_MAX_CPU_PERCENT)) {
+			if ((self->inflightSendingReqs >= 1 &&
+			     self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT) ||
+			    self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_MAX_CPU_PERCENT) {
 				if (self->inflightSendingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SEND_REQS) {
 					TraceEvent(SevWarn, "FastRestoreLoaderTooManyInflightRequests")
 					    .detail("VersionBatchesBlockedAtSendingMutationsToAppliers", self->inflightSendingReqs)
@@ -156,42 +155,55 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 				} else {
 					req.toSched.send(Void());
 					self->sendLoadParamQueue.pop();
+					releasedReqs = true;
 				}
 			}
 			sendLoadParams = 0;
 			curVBInflightReqs = self->inflightSendLoadParamReqs[self->finishedSendingVB + 1];
 			while (!self->sendLoadParamQueue.empty()) {
 				const RestoreLoaderSchedSendLoadParamRequest& req = self->sendLoadParamQueue.top();
-				if (curVBInflightReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SENDPARAM_THRESHOLD ||
+				if ((req.batchIndex > self->finishedBatch.get() + 1 &&
+				     curVBInflightReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SENDPARAM_THRESHOLD) ||
 				    sendLoadParams >= SERVER_KNOBS->FASTRESTORE_SCHED_SEND_FUTURE_VB_REQS_BATCH) {
 					// Too many future VB requests are released
 					break;
-				} else {
+				} else { // always release as many sendParam reqs as possible for current VB.
 					req.toSched.send(Void());
 					self->sendLoadParamQueue.pop();
 					sendLoadParams++;
+					releasedReqs = true;
 				}
 			}
 
-			// Dispatch loading backup file requests
+			// Dispatch loading backup file requests;
 			lastLoadReqs = 0;
 			while (!self->loadingQueue.empty()) {
-				if (lastLoadReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_LOAD_REQ_BATCHSIZE) {
+				const RestoreLoadFileRequest& req = self->loadingQueue.top();
+				if ((req.batchIndex > self->finishedBatch.get() + 1 &&
+				     self->inflightLoadingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS) ||
+				    lastLoadReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_LOAD_REQ_BATCHSIZE) {
+					// Do not load future version batch requests if we have enough pending loading reqs
 					break;
 				}
-				const RestoreLoadFileRequest& req = self->loadingQueue.top();
 				if (req.batchIndex <= self->finishedBatch.get()) {
 					TraceEvent(SevError, "FastRestoreLoaderDispatchRestoreLoadFileRequestTooOld")
 					    .detail("FinishedBatchIndex", self->finishedBatch.get())
 					    .detail("RequestBatchIndex", req.batchIndex);
 					req.reply.send(RestoreLoadFileReply(req.param, true));
 					self->loadingQueue.pop();
+					releasedReqs = true;
 					ASSERT(false); // Check if this ever happens easily
 				} else {
 					self->addActor.send(handleLoadFileRequest(req, self));
 					self->loadingQueue.pop();
 					lastLoadReqs++;
+					releasedReqs = true;
 				}
+			}
+
+			if (!releasedReqs) { // not release any request in this loop; wait a bit before try again
+				wait(delay(SERVER_KNOBS->FASTRESTORE_SCHED_UPDATE_DELAY));
+				releasedReqs = false;
 			}
 
 			if (self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT) {
@@ -203,7 +215,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 				TraceEvent(SevDebug, "FastRestoreLoaderDispatchRequestsWaitOnRequests", self->id())
 				    .detail("HasPendingRequests", self->hasPendingRequests->get());
 				self->hasPendingRequests->set(false);
-				wait(self->hasPendingRequests->onChange()); // CAREFUL:Improper req release may cause restore stuck here
+				wait(self->hasPendingRequests->onChange() || delay(5.0)); // CAREFUL:Improper req release may cause restore stuck here
 			}
 		}
 	} catch (Error& e) {
@@ -247,7 +259,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 					hasQueuedRequests = !self->loadingQueue.empty() || !self->sendingQueue.empty();
 					self->initBackupContainer(req.param.url);
 					self->loadingQueue.push(req);
-					if (!hasQueuedRequests) {
+					if (!hasQueuedRequests || !self->hasPendingRequests->get()) {
 						self->hasPendingRequests->set(true);
 					}
 				}
@@ -255,7 +267,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 					requestTypeStr = "sendMutations";
 					hasQueuedRequests = !self->loadingQueue.empty() || !self->sendingQueue.empty();
 					self->sendingQueue.push(req);
-					if (!hasQueuedRequests) {
+					if (!hasQueuedRequests || !self->hasPendingRequests->get()) {
 						self->hasPendingRequests->set(true);
 					}
 				}
@@ -1333,17 +1345,29 @@ ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest re
 			// Still has pending requests from earlier batchIndex  and current batchIndex, which should not happen
 			TraceEvent(SevWarn, "FastRestoreLoaderHasPendingLoadFileRequests")
 			    .detail("PendingRequest", self->loadingQueue.top().toString());
+			const RestoreLoadFileRequest& oldReq = self->loadingQueue.top();
+			oldReq.reply.send(RestoreLoadFileReply(oldReq.param, true));
 			self->loadingQueue.pop();
 		}
 		while (!self->sendingQueue.empty() && self->sendingQueue.top().batchIndex <= req.batchIndex) {
 			TraceEvent(SevWarn, "FastRestoreLoaderHasPendingSendRequests")
 			    .detail("PendingRequest", self->sendingQueue.top().toString());
+			const RestoreSendMutationsToAppliersRequest& oldReq = self->sendingQueue.top();
+			oldReq.reply.send(RestoreCommonReply(self->id(), true));
 			self->sendingQueue.pop();
 		}
 		while (!self->sendLoadParamQueue.empty() && self->sendLoadParamQueue.top().batchIndex <= req.batchIndex) {
 			TraceEvent(SevWarn, "FastRestoreLoaderHasPendingSendLoadParamRequests")
 			    .detail("PendingRequest", self->sendLoadParamQueue.top().toString());
+			const RestoreLoaderSchedSendLoadParamRequest& oldReq = self->sendLoadParamQueue.top();
+			oldReq.toSched.send(Void());
 			self->sendLoadParamQueue.pop();
+		}
+		if (self->loadingQueue.empty() && self->sendingQueue.empty() && self->sendLoadParamQueue.empty()) {
+			TraceEvent(SevDebug, "FastRestoreLoaderFinishVersionBatchRequestClearAllRequests", self->id())
+				.detail("HasPendingRequests", self->hasPendingRequests->get())
+				.detail("BatchIndex", req.batchIndex);
+			self->hasPendingRequests->set(false);
 		}
 
 		self->finishedBatch.set(req.batchIndex);
