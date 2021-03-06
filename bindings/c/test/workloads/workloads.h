@@ -33,15 +33,11 @@ struct FDBWorkloadFactoryImpl : FDBWorkloadFactory {
 	std::shared_ptr<FDBWorkload> create(const std::string& name) override;
 };
 
-template<class WorkloadType>
+template <class WorkloadType>
 struct FDBWorkloadFactoryT : IFDBWorkloadFactory {
-	explicit FDBWorkloadFactoryT(const std::string& name) {
-		FDBWorkloadFactoryImpl::factories()[name] = this;
-	}
+	explicit FDBWorkloadFactoryT(const std::string& name) { FDBWorkloadFactoryImpl::factories()[name] = this; }
 
-	std::shared_ptr<FDBWorkload> create() override {
-		return std::make_shared<WorkloadType>();
-	}
+	std::shared_ptr<FDBWorkload> create() override { return std::make_shared<WorkloadType>(); }
 };
 
 extern "C" DLLEXPORT FDBWorkloadFactory* workloadFactory(FDBLogger*);

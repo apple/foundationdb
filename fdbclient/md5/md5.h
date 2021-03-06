@@ -23,7 +23,7 @@
  * See md5.c for more information.
  */
 
-#if defined(HAVE_OPENSSL) && !defined(TLS_DISABLED) 
+#if defined(HAVE_OPENSSL) && !defined(TLS_DISABLED)
 #include <openssl/md5.h>
 #elif !defined(_MD5_H)
 #define _MD5_H
@@ -42,9 +42,9 @@ typedef struct {
 #ifdef __cplusplus
 extern "C" {
 #endif
-	extern void MULTIPLY_DEFINED_SYMBOL MD5_Init(MD5_CTX *ctx);
-	extern void MULTIPLY_DEFINED_SYMBOL MD5_Update(MD5_CTX *ctx, const void *data, unsigned long size);
-	extern void MULTIPLY_DEFINED_SYMBOL MD5_Final(unsigned char *result, MD5_CTX *ctx);
+extern void MULTIPLY_DEFINED_SYMBOL MD5_Init(MD5_CTX* ctx);
+extern void MULTIPLY_DEFINED_SYMBOL MD5_Update(MD5_CTX* ctx, const void* data, unsigned long size);
+extern void MULTIPLY_DEFINED_SYMBOL MD5_Final(unsigned char* result, MD5_CTX* ctx);
 #ifdef __cplusplus
 }
 #endif

@@ -28,30 +28,34 @@
 struct Smoother {
 	// Times (t) are expected to be nondecreasing
 
-	explicit Smoother( double eFoldingTime ) : eFoldingTime(eFoldingTime) { reset(0); }
-	void reset(double value) { time = 0; total = value; estimate = value; }
+	explicit Smoother(double eFoldingTime) : eFoldingTime(eFoldingTime) { reset(0); }
+	void reset(double value) {
+		time = 0;
+		total = value;
+		estimate = value;
+	}
 
-	void setTotal( double total, double t = now() ) { addDelta( total - this->total, t); }
-	void addDelta( double delta, double t = now() ) {
+	void setTotal(double total, double t = now()) { addDelta(total - this->total, t); }
+	void addDelta(double delta, double t = now()) {
 		update(t);
 		total += delta;
 	}
 	// smoothTotal() is a continuous (under)estimate of the sum of all addDeltas()
-	double smoothTotal( double t = now() ) {
+	double smoothTotal(double t = now()) {
 		update(t);
 		return estimate;
 	}
 	// smoothRate() is d/dt[smoothTotal], and is NOT continuous
-	double smoothRate( double t = now() ) {
+	double smoothRate(double t = now()) {
 		update(t);
-		return (total-estimate) / eFoldingTime;
+		return (total - estimate) / eFoldingTime;
 	}
 
 	void update(double t) {
 		double elapsed = t - time;
-		if(elapsed) {
+		if (elapsed) {
 			time = t;
-			estimate += (total-estimate) * (1-exp( -elapsed/eFoldingTime ));
+			estimate += (total - estimate) * (1 - exp(-elapsed / eFoldingTime));
 		}
 	}
 
@@ -62,29 +66,33 @@ struct Smoother {
 struct TimerSmoother {
 	// Times (t) are expected to be nondecreasing
 
-	explicit TimerSmoother( double eFoldingTime ) : eFoldingTime(eFoldingTime) { reset(0); }
-	void reset(double value) { time = 0; total = value; estimate = value; }
+	explicit TimerSmoother(double eFoldingTime) : eFoldingTime(eFoldingTime) { reset(0); }
+	void reset(double value) {
+		time = 0;
+		total = value;
+		estimate = value;
+	}
 
-	void setTotal( double total, double t = timer() ) { addDelta( total - this->total, t); }
-	void addDelta( double delta, double t = timer() ) {
+	void setTotal(double total, double t = timer()) { addDelta(total - this->total, t); }
+	void addDelta(double delta, double t = timer()) {
 		update(t);
 		total += delta;
 	}
 	// smoothTotal() is a continuous (under)estimate of the sum of all addDeltas()
-	double smoothTotal( double t = timer() ) {
+	double smoothTotal(double t = timer()) {
 		update(t);
 		return estimate;
 	}
 	// smoothRate() is d/dt[smoothTotal], and is NOT continuous
-	double smoothRate( double t = timer() ) {
+	double smoothRate(double t = timer()) {
 		update(t);
-		return (total-estimate) / eFoldingTime;
+		return (total - estimate) / eFoldingTime;
 	}
 
 	void update(double t) {
 		double elapsed = t - time;
 		time = t;
-		estimate += (total-estimate) * (1-exp( -elapsed/eFoldingTime ));
+		estimate += (total - estimate) * (1 - exp(-elapsed / eFoldingTime));
 	}
 
 	double eFoldingTime;

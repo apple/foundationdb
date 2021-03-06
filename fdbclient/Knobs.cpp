@@ -25,7 +25,7 @@
 
 ClientKnobs const* CLIENT_KNOBS = new ClientKnobs();
 
-#define init( knob, value ) initKnob( knob, value, #knob )
+#define init(knob, value) initKnob(knob, value, #knob)
 
 ClientKnobs::ClientKnobs() {
 	initialize();

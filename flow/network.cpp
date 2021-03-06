@@ -63,14 +63,14 @@ bool IPAddress::isValid() const {
 	return std::get<uint32_t>(addr) != 0;
 }
 
-NetworkAddress NetworkAddress::parse( std::string const& s ) {
+NetworkAddress NetworkAddress::parse(std::string const& s) {
 	if (s.empty()) {
 		throw connection_string_invalid();
 	}
 
 	bool isTLS = false;
 	std::string f;
-	if( s.size() > 4 && strcmp(s.c_str() + s.size() - 4, ":tls") == 0 ) {
+	if (s.size() > 4 && strcmp(s.c_str() + s.size() - 4, ":tls") == 0) {
 		isTLS = true;
 		f = s.substr(0, s.size() - 4);
 	} else {
@@ -108,14 +108,15 @@ Optional<NetworkAddress> NetworkAddress::parseOptional(std::string const& s) {
 	}
 }
 
-std::vector<NetworkAddress> NetworkAddress::parseList( std::string const& addrs ) {
+std::vector<NetworkAddress> NetworkAddress::parseList(std::string const& addrs) {
 	// Split addrs on ',' and parse them individually
 	std::vector<NetworkAddress> coord;
-	for(int p = 0; p <= addrs.size(); ) {
+	for (int p = 0; p <= addrs.size();) {
 		int pComma = addrs.find_first_of(',', p);
-		if (pComma == addrs.npos) pComma = addrs.size();
-		NetworkAddress parsedAddress = NetworkAddress::parse( addrs.substr(p, pComma-p) );
-		coord.push_back( parsedAddress );
+		if (pComma == addrs.npos)
+			pComma = addrs.size();
+		NetworkAddress parsedAddress = NetworkAddress::parse(addrs.substr(p, pComma - p));
+		coord.push_back(parsedAddress);
 		p = pComma + 1;
 	}
 	return coord;
@@ -150,21 +151,23 @@ std::string formatIpPort(const IPAddress& ip, uint16_t port) {
 	return format(patt, ip.toString().c_str(), port);
 }
 
-Future<Reference<IConnection>> INetworkConnections::connect( std::string host, std::string service, bool useTLS ) {
+Future<Reference<IConnection>> INetworkConnections::connect(std::string host, std::string service, bool useTLS) {
 	// Use map to create an actor that returns an endpoint or throws
-	Future<NetworkAddress> pickEndpoint = map(resolveTCPEndpoint(host, service), [=](std::vector<NetworkAddress> const &addresses) -> NetworkAddress {
-		NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
-		if(useTLS)
-			addr.flags = NetworkAddress::FLAG_TLS;
-		return addr;
-	});
+	Future<NetworkAddress> pickEndpoint =
+	    map(resolveTCPEndpoint(host, service), [=](std::vector<NetworkAddress> const& addresses) -> NetworkAddress {
+		    NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
+		    if (useTLS)
+			    addr.flags = NetworkAddress::FLAG_TLS;
+		    return addr;
+	    });
 
 	// Wait for the endpoint to return, then wait for connect(endpoint) and return it.
 	// Template types are being provided explicitly because they can't be automatically deduced for some reason.
-	return mapAsync<NetworkAddress, std::function<Future<Reference<IConnection>>(NetworkAddress const &)>, Reference<IConnection> >
-		(pickEndpoint, [=](NetworkAddress const &addr) -> Future<Reference<IConnection>> {
-		return connect(addr, host);
-	});
+	return mapAsync<NetworkAddress,
+	                std::function<Future<Reference<IConnection>>(NetworkAddress const&)>,
+	                Reference<IConnection>>(
+	    pickEndpoint,
+	    [=](NetworkAddress const& addr) -> Future<Reference<IConnection>> { return connect(addr, host); });
 }
 
 const std::vector<int> NetworkMetrics::starvationBins = { 1, 3500, 7000, 7500, 8500, 8900, 10500 };
@@ -213,4 +216,4 @@ TEST_CASE("/flow/network/ipaddress") {
 	return Void();
 }
 
-NetworkInfo::NetworkInfo() : handshakeLock( new FlowLock(FLOW_KNOBS->TLS_HANDSHAKE_LIMIT) ) {}
+NetworkInfo::NetworkInfo() : handshakeLock(new FlowLock(FLOW_KNOBS->TLS_HANDSHAKE_LIMIT)) {}
