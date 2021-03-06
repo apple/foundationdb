@@ -364,7 +364,9 @@ namespace HTTP {
 
 				state int trySend = CLIENT_KNOBS->HTTP_SEND_SIZE;
 				wait(sendRate->getAllowance(trySend));
-				int len = conn->write(pContent->getUnsent(), trySend);
+				state size_t len;
+				wait(conn->asyncWrite(pContent->getUnsent(), &len, trySend));
+
 				if(pSent != nullptr)
 					*pSent += len;
 				sendRate->returnUnused(trySend - len);
@@ -373,7 +375,6 @@ namespace HTTP {
 				if(pContent->empty())
 					break;
 
-				wait(conn->onWritable());
 				wait(yield(TaskPriority::WriteSocket));
 			}
 

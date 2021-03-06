@@ -485,7 +485,9 @@ ACTOR Future<Void> connectionWriter( Reference<Peer> self, Reference<IConnection
 		loop {
 			lastWriteTime = now();
 
-			int sent = conn->write(self->unsent.getUnsent(), /* limit= */ FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
+			state size_t sent;
+			wait(conn->asyncWrite(self->unsent.getUnsent(), &sent, FLOW_KNOBS->MAX_PACKET_SEND_BYTES));
+
 			if (sent) {
 				self->bytesSent += sent;
 				self->transport->bytesSent += sent;
@@ -496,8 +498,7 @@ ACTOR Future<Void> connectionWriter( Reference<Peer> self, Reference<IConnection
 				break;
 			}
 
-			TEST(true); // We didn't write everything, so apparently the write buffer is full.  Wait for it to be nonfull.
-			wait( conn->onWritable() );
+			TEST(true);
 			wait( yield(TaskPriority::WriteSocket) );
 		}
 
@@ -912,7 +913,7 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 		}
 
 		if (e-p<packetLen) break;
-		ASSERT( packetLen >= sizeof(UID) );
+		ASSERT_GE( packetLen, sizeof(UID) );
 
 		if (checksumEnabled) {
 			bool isBuggifyEnabled = false;
