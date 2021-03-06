@@ -3809,7 +3809,7 @@ public:
 		Optional<Value> lastBackupTimestamp = wait(backupAgent->lastBackupTimestamp().get(tr));
 
 		if ((lastBackupTimestamp.present()) && (lastBackupTimestamp.get() >= nowStr)) {
-			fprintf(stderr, "ERROR: The last backup `%s' happened in the future.\n", printable(lastBackupTimestamp.get()).c_str());
+			fprintf(stderr, "ERROR: The last backup `%s' appears to have started in the future.\n", printable(lastBackupTimestamp.get()).c_str());
 			throw backup_error();
 		}
 

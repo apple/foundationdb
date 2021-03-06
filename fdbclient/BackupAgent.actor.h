@@ -232,7 +232,7 @@ public:
 		time_t curTime = t;
 		char buffer[128];
 		struct tm* timeinfo;
-		timeinfo = localtime(&curTime);
+		timeinfo = gmtime(&curTime);
 		strftime(buffer, 128, "%Y-%m-%d-%H-%M-%S", timeinfo);
 
 		std::string time(buffer);
