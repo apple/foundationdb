@@ -1147,7 +1147,7 @@ namespace fileBackup {
 						wait(rangeFile.writeKey(nextKey));
 
 						if(BUGGIFY) {
-							rangeFile.padEnd();
+							wait(rangeFile.padEnd());
 						}
 
 						bool usedFile = wait(finishRangeFile(outFile, cx, task, taskBucket, KeyRangeRef(beginKey, nextKey), outVersion));
