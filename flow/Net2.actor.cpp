@@ -28,6 +28,7 @@
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/range.hpp>
 #include <boost/algorithm/string/join.hpp>
+#include <boost/system/error_code.hpp>
 #include "flow/network.h"
 #include "flow/IThreadPool.h"
 
@@ -171,7 +172,7 @@ public:
 	virtual bool isAddressOnThisHost( NetworkAddress const& addr );
 	void updateNow(){ currentTime = timer_monotonic(); }
 
-	virtual flowGlobalType global(int id) { return (globals.size() > id) ? globals[id] : NULL; }
+	virtual flowGlobalType global(int id) { return (globals.size() > id) ? globals[id] : nullptr; }
 	virtual void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; }
 	std::vector<flowGlobalType>		globals;
 
@@ -350,10 +351,9 @@ public:
 		closeSocket();
 	}
 
-	explicit Connection( boost::asio::io_service& io_service )
-		: id(nondeterministicRandom()->randomUniqueID()), socket(io_service)
-	{
-	}
+	explicit Connection(boost::asio::io_service& io_service)
+	  : id(nondeterministicRandom()->randomUniqueID()), socket(io_service),
+	    failureInjector(FailureInjector::injector()) {}
 
 	// This is not part of the IConnection interface, because it is wrapped by INetwork::connect()
 	ACTOR static Future<Reference<IConnection>> connect( boost::asio::io_service* ios, NetworkAddress addr ) {
@@ -406,10 +406,13 @@ public:
 
 	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read (might be 0)
 	virtual int read( uint8_t* begin, uint8_t* end ) {
-		boost::system::error_code err;
+		boost::system::error_code err = failureInjector->rollRandomClose();
 		++g_net2->countReads;
 		size_t toRead = end-begin;
-		size_t size = socket.read_some( boost::asio::mutable_buffers_1(begin, toRead), err );
+		size_t size = 0;
+		if (!err) {
+			size = socket.read_some(boost::asio::mutable_buffers_1(begin, toRead), err);
+		}
 		g_net2->bytesReceived += size;
 		//TraceEvent("ConnRead", this->id).detail("Bytes", size);
 		if (err) {
@@ -427,10 +430,16 @@ public:
 
 	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of bytes written (might be 0)
 	virtual int write( SendBuffer const* data, int limit ) {
-		boost::system::error_code err;
+		bool writeOnInjectedError = deterministicRandom()->coinflip();
+		boost::system::error_code err =
+		    writeOnInjectedError ? boost::system::error_code() : failureInjector->rollRandomClose();
 		++g_net2->countWrites;
 
-		size_t sent = socket.write_some( boost::iterator_range<SendBufferIterator>(SendBufferIterator(data, limit), SendBufferIterator()), err );
+		size_t sent = 0;
+		if (!err) {
+			sent = socket.write_some(
+			    boost::iterator_range<SendBufferIterator>(SendBufferIterator(data, limit), SendBufferIterator()), err);
+		}
 
 		if (err) {
 			// Since there was an error, sent's value can't be used to infer that the buffer has data and the limit is positive so check explicitly.
@@ -464,6 +473,7 @@ private:
 	UID id;
 	tcp::socket socket;
 	NetworkAddress peer_address;
+	FailureInjector* failureInjector;
 
 	void init() {
 		// Socket settings that have to be set after connect or accept succeeds
@@ -1717,6 +1727,14 @@ INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetric
 	}
 
 	return N2::g_net2;
+}
+
+boost::system::error_code FailureInjector::rollRandomClose() const {
+	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES && FLOW_KNOBS->INJECT_CONNECTION_FAILURES &&
+	    deterministicRandom()->random01() < .000005) {
+		return boost::system::errc::make_error_code(boost::system::errc::network_reset);
+	}
+	return boost::system::error_code();
 }
 
 struct TestGVR {
