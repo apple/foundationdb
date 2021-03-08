@@ -463,7 +463,8 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterCon
 
 	std::vector<Future<Void>> actors;
 	// Ask all coordinators if the worker is considered as a leader (leader nominee) by the coordinator.
-	for(int i=0; i<coordinators.clientLeaderServers.size(); i++)
+	actors.reserve(coordinators.clientLeaderServers.size());
+	for (int i = 0; i < coordinators.clientLeaderServers.size(); i++)
 		actors.push_back( monitorNominee( coordinators.clusterKey, coordinators.clientLeaderServers[i], &nomineeChange, &nominees[i] ) );
 	allActors = waitForAll(actors);
 
@@ -646,7 +647,8 @@ ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddres
 
 	std::vector<Future<Void>> actors;
 	// Ask all coordinators if the worker is considered as a leader (leader nominee) by the coordinator.
-	for(int i=0; i<clientLeaderServers.size(); i++) {
+	actors.reserve(clientLeaderServers.size());
+	for (int i = 0; i < clientLeaderServers.size(); i++) {
 		actors.push_back( monitorNominee( clusterKey, clientLeaderServers[i], &nomineeChange, &nominees[i] ) );
 	}
 	actors.push_back( getClientInfoFromLeader( knownLeader, clientData ) );

@@ -87,8 +87,8 @@ struct PubSubMultiplesWorkload : TestWorkload {
 	ACTOR Future<Void> createNodes( PubSubMultiplesWorkload *self, Database cx ) {
 		state PubSub ps(cx);
 		vector<Future<Void>> actors;
-		for(int i=0; i<self->actorCount; i++)
-			actors.push_back( self->createNodeSwath( self, i, cx->clone() ) );
+		actors.reserve(self->actorCount);
+		for (int i = 0; i < self->actorCount; i++) actors.push_back(self->createNodeSwath(self, i, cx->clone()));
 		wait( waitForAll( actors ) );
 		TraceEvent("PSMNodesCreated").detail("ClientIdx", self->clientId);
 		return Void();
@@ -106,8 +106,8 @@ struct PubSubMultiplesWorkload : TestWorkload {
 
 	ACTOR Future<Void> startTests( PubSubMultiplesWorkload *self, Database cx ) {
 		vector<Future<Void>> subscribers;
-		for(int i=0; i<self->actorCount; i++)
-			subscribers.push_back( self->createSubscriptions( self, i, cx ) );
+		subscribers.reserve(self->actorCount);
+		for (int i = 0; i < self->actorCount; i++) subscribers.push_back(self->createSubscriptions(self, i, cx));
 		wait( waitForAll( subscribers ) );
 
 		state Future<Void> sender = self->messageSender( self, cx );

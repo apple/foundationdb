@@ -221,8 +221,8 @@ ACTOR Future<vector<StorageServerInterface>> getStorageServers( Database cx, boo
 			ASSERT( !serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY );
 
 			vector<StorageServerInterface> servers;
-			for( int i = 0; i < serverList.size(); i++ )
-				servers.push_back( decodeServerListValue( serverList[i].value ) );
+			servers.reserve(serverList.size());
+			for (int i = 0; i < serverList.size(); i++) servers.push_back(decodeServerListValue(serverList[i].value));
 			return servers;
 		}
 		catch(Error &e) {

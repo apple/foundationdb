@@ -460,6 +460,7 @@ int main(int argc, char* argv[]) {
 	}
 	// now we start the actors
 	std::vector<Future<Void>> all;
+	all.reserve(toRun.size());
 	for (auto& f : toRun) {
 		all.emplace_back(f());
 	}

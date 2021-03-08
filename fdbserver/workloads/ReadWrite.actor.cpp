@@ -233,7 +233,8 @@ struct ReadWriteWorkload : KVWorkload {
 					         wait(db->get().clusterInterface.getWorkers.tryGetReply(GetWorkersRequest()))) {
 						if( workerList.present() ) {
 							std::vector<Future<ErrorOr<Void>>> dumpRequests;
-							for( int i = 0; i < workerList.get().size(); i++)
+							dumpRequests.reserve(workerList.get().size());
+							for (int i = 0; i < workerList.get().size(); i++)
 								dumpRequests.push_back( workerList.get()[i].interf.traceBatchDumpRequest.tryGetReply( TraceBatchDumpRequest() ) );
 							wait( waitForAll( dumpRequests ) );
 							return true;
@@ -611,10 +612,11 @@ struct ReadWriteWorkload : KVWorkload {
 						keys.push_back(startKey + op);
 				}
 
-				for (int op = 0; op<writes; op++)
-					values.push_back(self->randomValue());
+				values.reserve(writes);
+				for (int op = 0; op < writes; op++) values.push_back(self->randomValue());
 
-				for (int op = 0; op<extra_read_conflict_ranges + extra_write_conflict_ranges; op++)
+				extra_ranges.reserve(extra_read_conflict_ranges + extra_write_conflict_ranges);
+				for (int op = 0; op < extra_read_conflict_ranges + extra_write_conflict_ranges; op++)
 					extra_ranges.push_back(singleKeyRange( deterministicRandom()->randomUniqueID().toString() ));
 
 				state Trans tr(cx);

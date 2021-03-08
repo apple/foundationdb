@@ -125,6 +125,7 @@ ACTOR Future<int> spawnProcess(std::string path, std::vector<std::string> args, 
 	}
 
 	std::vector<char*> paramList;
+	paramList.reserve(args.size());
 	for (int i = 0; i < args.size(); i++) {
 		paramList.push_back(&args[i][0]);
 	}

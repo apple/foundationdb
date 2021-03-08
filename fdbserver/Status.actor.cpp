@@ -1656,10 +1656,11 @@ static Future<vector<std::pair<iface, EventMap>>> getServerMetrics(vector<iface>
 ACTOR template <class iface>
 static Future<vector<TraceEventFields>> getServerBusiestWriteTags(vector<iface> servers, std::unordered_map<NetworkAddress, WorkerInterface> address_workers, WorkerDetails rkWorker) {
     state vector<Future<Optional<TraceEventFields>>> futures;
-    for (const auto& s : servers) {
+	futures.reserve(servers.size());
+	for (const auto& s : servers) {
 		futures.push_back(latestEventOnWorker(rkWorker.interf, s.id().toString() + "/BusiestWriteTag"));
-    }
-    wait(waitForAll(futures));
+	}
+	wait(waitForAll(futures));
 
 	vector<TraceEventFields> result(servers.size());
 	for(int i = 0; i < servers.size(); ++ i) {
