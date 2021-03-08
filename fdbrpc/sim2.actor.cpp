@@ -622,8 +622,8 @@ private:
 		if (randLog)
 			fprintf( randLog, "SFT1 %s %s %s %" PRId64 "\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), size );
 
-		if (size == 0) {
-			// KAIO will return EINVAL, as len==0 is an error.
+		// KAIO will return EINVAL, as len==0 is an error.
+		if( (self->flags & IAsyncFile::OPEN_NO_AIO) == 0 && size == 0) {
 			throw io_error();
 		}
 
@@ -1832,7 +1832,7 @@ Future< Reference<class IAsyncFile> > Sim2FileSystem::open( std::string filename
 			}
 			//Simulated disk parameters are shared by the AsyncFileNonDurable and the underlying SimpleFile.  This way, they can both keep up with the time to start the next operation
 			Reference<DiskParameters> diskParameters(new DiskParameters(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH));
-			machineCache[actualFilename] = AsyncFileNonDurable::open(filename, actualFilename, SimpleFile::open(filename, flags, mode, diskParameters, false), diskParameters);
+			machineCache[actualFilename] = AsyncFileNonDurable::open(filename, actualFilename, SimpleFile::open(filename, flags, mode, diskParameters, false), diskParameters, (flags & IAsyncFile::OPEN_NO_AIO) == 0);
 		}
 		Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open( machineCache[actualFilename] );
 		if(FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)

@@ -1278,16 +1278,19 @@ public:
 	class BackupFile : public IBackupFile, ReferenceCounted<BackupFile> {
 	public:
 		BackupFile(std::string fileName, Reference<IAsyncFile> file, std::string finalFullPath)
-			: IBackupFile(fileName), m_file(file), m_finalFullPath(finalFullPath), m_writeOffset(0)
+			: IBackupFile(fileName), m_file(file), m_finalFullPath(finalFullPath), m_writeOffset(0), m_blockSize(CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK)
 		{
-			m_buffer.reserve(m_buffer.arena(), CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK);
+			if(BUGGIFY) {
+				m_blockSize = deterministicRandom()->randomInt(100, 20000);
+			}
+			m_buffer.reserve(m_buffer.arena(), m_blockSize);
 		}
 
 		Future<Void> append(const void *data, int len) {
 			m_buffer.append(m_buffer.arena(), (const uint8_t *)data, len);
 
-			if(m_buffer.size() >= CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK) {
-				return flush(CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK);
+			if(m_buffer.size() >= m_blockSize) {
+				return flush(m_blockSize);
 			}
 
 			return Void();
@@ -1315,10 +1318,7 @@ public:
 
 		ACTOR static Future<Void> finish_impl(Reference<BackupFile> f) {
 			wait(f->flush(f->m_buffer.size()));
-			// Avoid truncation from 0 to 0 because simulation won't allow it since KAIO would not.
-			if(f->size() != 0) {
-				wait(f->m_file->truncate(f->size()));  // Some IAsyncFile implementations extend in whole block sizes.
-			}
+			wait(f->m_file->truncate(f->size()));  // Some IAsyncFile implementations extend in whole block sizes.
 			wait(f->m_file->sync());
 			std::string name = f->m_file->getFilename();
 			f->m_file.clear();
@@ -1342,6 +1342,7 @@ public:
 		Standalone<VectorRef<uint8_t>> m_buffer;
 		int64_t m_writeOffset;
 		std::string m_finalFullPath;
+		int m_blockSize;
 	};
 
 	Future<Reference<IBackupFile>> writeFile(std::string path) {
@@ -1775,16 +1776,22 @@ ACTOR Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version v, Reference
 }
 
 int chooseFileSize(std::vector<int> &sizes) {
-	int size = 1000;
 	if(!sizes.empty()) {
-		size = sizes.back();
+		int size = sizes.back();
 		sizes.pop_back();
+		return size;
 	}
-	return size;
+	return deterministicRandom()->randomInt(0, 2e6);
 }
 
-ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<IBackupFile> f, int size) {
+ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<IBackupFile> f, int size, FlowLock *lock) {
 	state Standalone<VectorRef<uint8_t>> content;
+
+	wait(lock->take(TaskPriority::DefaultYield, size));
+	state FlowLock::Releaser releaser(*lock, size);
+
+	printf("writeAndVerify size=%d file=%s\n", size, f->getFileName().c_str());
+
 	content.resize(content.arena(), size);
 	for(int i = 0; i < content.size(); ++i) {
 		content[i] = (uint8_t)deterministicRandom()->randomInt(0, 256);
@@ -1818,6 +1825,8 @@ Version nextVersion(Version v) {
 }
 
 ACTOR Future<Void> testBackupContainer(std::string url) {
+	state FlowLock lock(100e6);
+
 	printf("BackupContainerTest URL %s\n", url.c_str());
 
 	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url);
@@ -1840,7 +1849,11 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	state Version v = deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max() / 2);
 
 	// List of sizes to use to test edge cases on underlying file implementations
-	state std::vector<int> fileSizes = {0, 10000000, 5000005};
+	state std::vector<int> fileSizes = {0};
+	if(StringRef(url).startsWith(LiteralStringRef("blob"))) {
+		fileSizes.push_back(CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE);
+		fileSizes.push_back(CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE + 10);
+	}
 
 	loop {
 		state Version logStart = v;
@@ -1861,7 +1874,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 
 			int size = chooseFileSize(fileSizes);
 			snapshotSizes.rbegin()->second += size;
-			writes.push_back(writeAndVerifyFile(c, range, size));
+			writes.push_back(writeAndVerifyFile(c, range, size, &lock));
 
 			if(deterministicRandom()->random01() < .2) {
 				writes.push_back(c->writeKeyspaceSnapshotFile(snapshots.rbegin()->second, snapshotSizes.rbegin()->second));
@@ -1879,7 +1892,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 		state Reference<IBackupFile> log = wait(c->writeLogFile(logStart, v, 10));
 		logs[logStart] = log->getFileName();
 		int size = chooseFileSize(fileSizes);
-		writes.push_back(writeAndVerifyFile(c, log, size));
+		writes.push_back(writeAndVerifyFile(c, log, size, &lock));
 
 		// Randomly stop after a snapshot has finished and all manually seeded file sizes have been used.
 		if(fileSizes.empty() && !snapshots.empty() && snapshots.rbegin()->second.empty() && deterministicRandom()->random01() < .2) {
