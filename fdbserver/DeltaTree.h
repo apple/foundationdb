@@ -391,7 +391,8 @@ public:
 			DecodedNode* n = root;
 			bool addLeftChild = false;
 
-			while (n != nullptr) {
+			ASSERT(n != nullptr);
+			while (true) {
 				int cmp = k.compare(n->item, skipLen);
 
 				if (cmp >= 0) {
