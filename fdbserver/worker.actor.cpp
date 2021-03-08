@@ -1148,6 +1148,15 @@ ACTOR Future<Void> workerServer(
 					flushAndExit(0);
 				}
 			}
+			when(SetFailureInjection req = waitNext(interf.clientInterface.setFailureInjection.getFuture())) {
+				if (!FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
+					req.reply.sendError(client_invalid_operation());
+				}
+				if (req.injectNetworkFailures.present()) {
+					FailureInjector::injector()->setConnectionFailures(req.injectNetworkFailures.get());
+				}
+				req.reply.send(Void());
+			}
 			when( ProfilerRequest req = waitNext(interf.clientInterface.profiler.getFuture()) ) {
 				state ProfilerRequest profilerReq = req;
 				// There really isn't a great "filepath sanitizer" or "filepath escape" function available,

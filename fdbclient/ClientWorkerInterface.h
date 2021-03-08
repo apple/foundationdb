@@ -33,6 +33,7 @@ struct ClientWorkerInterface {
 	constexpr static FileIdentifier file_identifier = 12418152;
 	RequestStream< struct RebootRequest > reboot;
 	RequestStream< struct ProfilerRequest > profiler;
+	RequestStream<struct SetFailureInjection> setFailureInjection;
 
 	bool operator == (ClientWorkerInterface const& r) const { return id() == r.id(); }
 	bool operator != (ClientWorkerInterface const& r) const { return id() != r.id(); }
@@ -45,7 +46,7 @@ struct ClientWorkerInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, reboot, profiler);
+		serializer(ar, reboot, profiler, setFailureInjection);
 	}
 };
 
@@ -95,5 +96,16 @@ struct ProfilerRequest {
 };
 BINARY_SERIALIZABLE( ProfilerRequest::Type );
 BINARY_SERIALIZABLE( ProfilerRequest::Action );
+
+struct SetFailureInjection {
+	constexpr static FileIdentifier file_identifier = 15439864;
+	Optional<bool> injectNetworkFailures;
+	ReplyPromise<Void> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, injectNetworkFailures, reply);
+	}
+};
 
 #endif
