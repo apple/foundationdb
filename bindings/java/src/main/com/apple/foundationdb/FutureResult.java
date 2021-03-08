@@ -22,16 +22,27 @@ package com.apple.foundationdb;
 
 import java.util.concurrent.Executor;
 
-class FutureResult extends NativeFuture<byte[]> {
+import com.apple.foundationdb.EventKeeper.Events;
 
-	FutureResult(long cPtr, Executor executor) {
+class FutureResult extends NativeFuture<byte[]> {
+	private final EventKeeper eventKeeper;
+
+	FutureResult(long cPtr, Executor executor,EventKeeper eventKeeper) {
 		super(cPtr);
+		this.eventKeeper = eventKeeper;
 		registerMarshalCallback(executor);
 	}
 
 	@Override
 	protected byte[] getIfDone_internal(long cPtr) throws FDBException {
 		return FutureResult_get(cPtr);
+	}
+
+	@Override
+	protected void postMarshal(byte[] value){
+		if(value!=null && eventKeeper!=null){
+			eventKeeper.count(Events.BYTES_FETCHED, value.length);
+		}
 	}
 
 	private native byte[] FutureResult_get(long cPtr) throws FDBException;

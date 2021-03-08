@@ -35,7 +35,7 @@ class FutureResults extends NativeFuture<RangeResultInfo> {
 	}
 
 	@Override
-	protected void postMarshal() {
+	protected void postMarshal(RangeResultInfo rri) {
 		// We can't close because this class actually marshals on-demand
 	}
 
