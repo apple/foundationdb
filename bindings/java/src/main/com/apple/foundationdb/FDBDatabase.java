@@ -37,7 +37,7 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 		this(cPtr, executor, null);
 	}
 
-	protected FDBDatabase(long cPtr, Executor executor,EventKeeper eventKeeper) {
+	protected FDBDatabase(long cPtr, Executor executor, EventKeeper eventKeeper) {
 		super(cPtr);
 		this.executor = executor;
 		this.options = new DatabaseOptions(this);
@@ -118,6 +118,11 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 
 	@Override
 	public Transaction createTransaction(Executor e) {
+		return createTransaction(e, eventKeeper);
+	}
+
+	@Override
+	public Transaction createTransaction(Executor e, EventKeeper eventKeeper) {
 		pointerReadLock.lock();
 		Transaction tr = null;
 		try {

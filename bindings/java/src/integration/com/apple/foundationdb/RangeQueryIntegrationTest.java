@@ -21,18 +21,9 @@ package com.apple.foundationdb;
 
 import java.util.Iterator;
 import java.util.Map;
-import java.util.TreeMap;
-import java.util.AbstractMap;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Random;
 import java.util.TreeMap;
-import java.util.concurrent.Callable;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Consumer;
 
 import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncIterator;
@@ -45,7 +36,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
- * Integration tests around Range Queries. This requires a running FDB instance to work properly; 
+ * Integration tests around Range Queries. This requires a running FDB instance to work properly;
  * all tests will be skipped if it can't connect to a running instance relatively quickly.
  */
 @ExtendWith(RequiresDatabase.class)
@@ -111,7 +102,7 @@ class RangeQueryIntegrationTest {
 	@Test
 	void rangeQueryReturnsResults() throws Exception {
 		/*
-		 * A quick test that if you insert a record, then do a range query which includes 
+		 * A quick test that if you insert a record, then do a range query which includes
 		 * the record, it'll be returned
 		 */
 		try (Database db = fdb.open()) {

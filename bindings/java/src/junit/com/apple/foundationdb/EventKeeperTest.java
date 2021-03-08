@@ -43,7 +43,7 @@ class EventKeeperTest {
 	@Test
 	void testSetVersion() throws Exception {
 
-		EventKeeper timer = new TestKeeper();
+		EventKeeper timer = new MapEventKeeper();
 
 		try (FDBTransaction txn = new FDBTransaction(1, null, null, timer)) {
 			Assertions.assertThrows(UnsatisfiedLinkError.class,
@@ -51,13 +51,14 @@ class EventKeeperTest {
 			long jniCalls = timer.getCount(Events.JNI_CALL);
 
 			Assertions.assertEquals(1L, jniCalls, "Unexpected number of JNI calls:");
-		} catch (UnsatisfiedLinkError ignored) {
+		}catch(UnsatisfiedLinkError ignored){
+			//this is necessary to prevent an exception being thrown at close time
 		}
 	}
 
 	@Test
 	void testGetReadVersion() throws Exception {
-		EventKeeper timer = new TestKeeper();
+		EventKeeper timer = new MapEventKeeper();
 
 		try (FDBTransaction txn = new FDBTransaction(1, null, null, timer)) {
 			Assertions.assertThrows(UnsatisfiedLinkError.class,
@@ -65,13 +66,14 @@ class EventKeeperTest {
 			long jniCalls = timer.getCount(Events.JNI_CALL);
 
 			Assertions.assertEquals(1L, jniCalls, "Unexpected number of JNI calls:");
-		} catch (UnsatisfiedLinkError ignored) {
+		}catch(UnsatisfiedLinkError ignored){
+			//required to prevent an extra exception being thrown at close time
 		}
 	}
 
 	@Test
 	void testGetRangeRecordsFetches() throws Exception {
-		EventKeeper timer = new TestKeeper();
+		EventKeeper timer = new MapEventKeeper();
 		List<KeyValue> testKvs = Arrays.asList(new KeyValue("hello".getBytes(), "goodbye".getBytes()));
 
 		FDBTransaction txn = new FakeFDBTransaction(testKvs, 1L, null, null);
@@ -118,28 +120,4 @@ class EventKeeperTest {
 		                        "Incorrect number of bytes fetched");
 	}
 
-	/* private helper methods and classes */
-	private static class TestKeeper implements EventKeeper {
-		private Map<Event, Long> counterMap = new HashMap<>();
-
-		@Override
-		public void count(Event event, long amt) {
-			counterMap.compute(event, (e,present)->present==null? amt:amt+present);
-		}
-
-		@Override
-		public void timeNanos(Event event, long nanos) {
-			count(event, nanos);
-		}
-
-		@Override
-		public long getCount(Event event) {
-			return counterMap.getOrDefault(event, 0L);
-		}
-
-		@Override
-		public long getTimeNanos(Event event) {
-			return counterMap.getOrDefault(event, 0L);
-		}
-	}
 }

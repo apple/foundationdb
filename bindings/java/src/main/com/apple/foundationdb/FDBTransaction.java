@@ -289,7 +289,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		try {
 			return new FutureKey(
 			    Transaction_getKey(getPtr(), selector.getKey(), selector.orEqual(), selector.getOffset(), isSnapshot),
-			    executor,eventKeeper);
+			    executor, eventKeeper);
 		} finally {
 			pointerReadLock.unlock();
 		}

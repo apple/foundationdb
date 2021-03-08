@@ -26,7 +26,7 @@ import com.apple.foundationdb.EventKeeper.Events;
 
 class FutureKey extends NativeFuture<byte[]> {
 	private final EventKeeper eventKeeper;
-	FutureKey(long cPtr, Executor executor,EventKeeper eventKeeper) {
+	FutureKey(long cPtr, Executor executor, EventKeeper eventKeeper) {
 		super(cPtr);
 		this.eventKeeper = eventKeeper;
 		registerMarshalCallback(executor);
@@ -40,8 +40,9 @@ class FutureKey extends NativeFuture<byte[]> {
 	@Override
 	protected void postMarshal(byte[] value) {
 		if(value!=null && eventKeeper!=null){
-			eventKeeper.count(Events.BYTES_FETCHED,value.length);
+			eventKeeper.count(Events.BYTES_FETCHED, value.length);
 		}
+		super.postMarshal(value);
 	}
 
 	private native byte[] FutureKey_get(long cPtr) throws FDBException;

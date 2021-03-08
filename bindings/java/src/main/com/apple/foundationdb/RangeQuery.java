@@ -24,7 +24,6 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
 import java.util.function.BiConsumer;
 
 import com.apple.foundationdb.EventKeeper.Events;
@@ -227,6 +226,7 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 
 			BiConsumer<RangeResultInfo,Throwable> cons = new FetchComplete(fetchingChunk,nextFuture);
 			if(eventKeeper!=null){
+				eventKeeper.increment(Events.RANGE_QUERY_FETCHES);
 				cons = cons.andThen((r,t)->{
 					eventKeeper.timeNanos(Events.RANGE_QUERY_FETCH_TIME_NANOS, System.nanoTime()-sTime);
 				});
