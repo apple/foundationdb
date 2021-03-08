@@ -2120,7 +2120,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("Primary", primary)
 		    .detail("AddedTeams", addedTeams)
 		    .detail("TeamsToBuild", teamsToBuild)
-		    .detail("CurrentTeams", teams.size())
+		    .detail("CurrentServerTeams", teams.size())
 		    .detail("DesiredTeams", desiredTeams)
 		    .detail("MaxTeams", maxTeams)
 		    .detail("StorageTeamSize", configuration.storageTeamSize)
