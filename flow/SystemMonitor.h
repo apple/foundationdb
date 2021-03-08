@@ -36,8 +36,10 @@ struct SystemMonitorMachineState {
 
 	SystemMonitorMachineState() : monitorStartTime(0) {}
 	explicit SystemMonitorMachineState(const IPAddress& ip) : ip(ip), monitorStartTime(0) {}
-	SystemMonitorMachineState(std::string folder, Optional<Standalone<StringRef>> dcId,
-	                          Optional<Standalone<StringRef>> zoneId, Optional<Standalone<StringRef>> machineId,
+	SystemMonitorMachineState(std::string folder,
+	                          Optional<Standalone<StringRef>> dcId,
+	                          Optional<Standalone<StringRef>> zoneId,
+	                          Optional<Standalone<StringRef>> machineId,
 	                          const IPAddress& ip)
 	  : folder(folder), dcId(dcId), zoneId(zoneId), machineId(machineId), ip(ip), monitorStartTime(0) {}
 };
@@ -109,7 +111,8 @@ struct NetworkData {
 		countSlowTaskSignals = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountSlowTaskSignals"));
 		countConnEstablished = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountConnEstablished"));
 		countConnClosedWithError = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountConnClosedWithError"));
-		countConnClosedWithoutError = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountConnClosedWithoutError"));
+		countConnClosedWithoutError =
+		    Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountConnClosedWithoutError"));
 		countTLSPolicyFailures = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountTLSPolicyFailures"));
 		countLaunchTime = DoubleMetric::getValueOrDefault(LiteralStringRef("Net2.CountLaunchTime"));
 		countReactTime = DoubleMetric::getValueOrDefault(LiteralStringRef("Net2.CountReactTime"));
@@ -119,19 +122,24 @@ struct NetworkData {
 		countAIOCollect = Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountAIOCollect"));
 		countFileCacheWrites = Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCacheWrites"));
 		countFileCacheReads = Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCacheReads"));
-		countFileCacheWritesBlocked = Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCacheWritesBlocked"));
-		countFileCacheReadsBlocked = Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCacheReadsBlocked"));
-		countFileCachePageReadsMerged = Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCachePageReadsMerged"));
+		countFileCacheWritesBlocked =
+		    Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCacheWritesBlocked"));
+		countFileCacheReadsBlocked =
+		    Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCacheReadsBlocked"));
+		countFileCachePageReadsMerged =
+		    Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCachePageReadsMerged"));
 		countFileCacheFinds = Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCacheFinds"));
 		countFileCacheReadBytes = Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCacheReadBytes"));
 		countFilePageCacheHits = Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCachePageReadsHit"));
-		countFilePageCacheMisses = Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCachePageReadsMissed"));
-		countFilePageCacheEvictions = Int64Metric::getValueOrDefault(LiteralStringRef("EvictablePageCache.CacheEvictions"));
+		countFilePageCacheMisses =
+		    Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCachePageReadsMissed"));
+		countFilePageCacheEvictions =
+		    Int64Metric::getValueOrDefault(LiteralStringRef("EvictablePageCache.CacheEvictions"));
 	}
 };
 
 struct StatisticsState {
-	SystemStatisticsState *systemState;
+	SystemStatisticsState* systemState;
 	NetworkData networkState;
 	NetworkMetrics networkMetricsState;
 
@@ -139,7 +147,7 @@ struct StatisticsState {
 };
 
 void systemMonitor();
-SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *statState, bool machineMetrics = false);
+SystemStatistics customSystemMonitor(std::string eventName, StatisticsState* statState, bool machineMetrics = false);
 SystemStatistics getSystemStatistics();
 
 #endif /* FLOW_SYSTEM_MONITOR_H */

@@ -23,7 +23,8 @@
 uint64_t DeterministicRandom::gen64() {
 	uint64_t curr = next;
 	next = (uint64_t(random()) << 32) ^ random();
-	if (TRACE_SAMPLE()) TraceEvent(SevSample, "Random");
+	if (TRACE_SAMPLE())
+		TraceEvent(SevSample, "Random");
 	return curr;
 }
 
@@ -34,7 +35,8 @@ DeterministicRandom::DeterministicRandom(uint32_t seed, bool useRandLog)
 
 double DeterministicRandom::random01() {
 	double d = gen64() / double(uint64_t(-1));
-	if (randLog && useRandLog) fprintf(randLog, "R01  %f\n", d);
+	if (randLog && useRandLog)
+		fprintf(randLog, "R01  %f\n", d);
 	return d;
 }
 
@@ -53,7 +55,8 @@ int DeterministicRandom::randomInt(int min, int maxPlusOne) {
 		i = -static_cast<int>(-static_cast<unsigned int>(min + 1) - v) - 1;
 	else
 		i = v + min;
-	if (randLog && useRandLog) fprintf(randLog, "Rint %d\n", i);
+	if (randLog && useRandLog)
+		fprintf(randLog, "Rint %d\n", i);
 	return i;
 }
 
@@ -72,7 +75,8 @@ int64_t DeterministicRandom::randomInt64(int64_t min, int64_t maxPlusOne) {
 		i = -static_cast<int64_t>(-static_cast<uint64_t>(min + 1) - v) - 1;
 	else
 		i = v + min;
-	if (randLog && useRandLog) fprintf(randLog, "Rint64 %" PRId64 "\n", i);
+	if (randLog && useRandLog)
+		fprintf(randLog, "Rint64 %" PRId64 "\n", i);
 	return i;
 }
 
@@ -92,21 +96,24 @@ UID DeterministicRandom::randomUniqueID() {
 	uint64_t x, y;
 	x = gen64();
 	y = gen64();
-	if (randLog && useRandLog) fprintf(randLog, "Ruid %" PRIx64 " %" PRIx64 "\n", x, y);
+	if (randLog && useRandLog)
+		fprintf(randLog, "Ruid %" PRIx64 " %" PRIx64 "\n", x, y);
 	return UID(x, y);
 }
 
 char DeterministicRandom::randomAlphaNumeric() {
 	static const char alphanum[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 	char c = alphanum[gen64() % 62];
-	if (randLog && useRandLog) fprintf(randLog, "Rchar %c\n", c);
+	if (randLog && useRandLog)
+		fprintf(randLog, "Rchar %c\n", c);
 	return c;
 }
 
 std::string DeterministicRandom::randomAlphaNumeric(int length) {
 	std::string s;
 	s.reserve(length);
-	for (int i = 0; i < length; i++) s += randomAlphaNumeric();
+	for (int i = 0; i < length; i++)
+		s += randomAlphaNumeric();
 	return s;
 }
 

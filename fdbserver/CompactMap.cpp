@@ -26,7 +26,8 @@
 
 static int nextPowerOfTwo(int n) {
 	int p;
-	for (p = 1; p < n; p += p);
+	for (p = 1; p < n; p += p)
+		;
 	return p;
 }
 
@@ -45,25 +46,33 @@ static int less(StringRef a, StringRef b) {
 }
 
 struct CompactPreOrderTree {
-	enum { ENABLE_PREFETCH_RIGHT=1 };  // Use rather more memory BW, but hide a little latency when a right branch takes us out of a cache line.  Seems to help slightly.
+	enum {
+		ENABLE_PREFETCH_RIGHT = 1
+	}; // Use rather more memory BW, but hide a little latency when a right branch takes us out of a cache line.  Seems
+	   // to help slightly.
 
 	struct Node {
-		enum { ENABLE_PREFIX=1 };   // Enable or disable key prefix compression within a CompactPreOrderTree
+		enum { ENABLE_PREFIX = 1 }; // Enable or disable key prefix compression within a CompactPreOrderTree
 		enum { ENABLE_LEFT_PTR = 0 };
 
 		// offsets relative to `this`:
-		enum { KEY_LENGTH_OFFSET = ENABLE_PREFIX*1 };
-		enum { KEY_DATA_OFFSET = KEY_LENGTH_OFFSET+1 };
+		enum { KEY_LENGTH_OFFSET = ENABLE_PREFIX * 1 };
+		enum { KEY_DATA_OFFSET = KEY_LENGTH_OFFSET + 1 };
 
 		// offsets relative to `keyEnd()`:
 		enum { LPTR_OFFSET = 0 };
-		enum { RPTR_OFFSET = 2*ENABLE_LEFT_PTR };
+		enum { RPTR_OFFSET = 2 * ENABLE_LEFT_PTR };
 		enum { END_OFFSET = RPTR_OFFSET + 2 };
-		enum { IMPLICIT_LPTR_VALUE = END_OFFSET }; 
+		enum { IMPLICIT_LPTR_VALUE = END_OFFSET };
 
 		static int getMaxOverhead() { return KEY_DATA_OFFSET + END_OFFSET; }
 
-		int keyPrefixLength() { if (ENABLE_PREFIX) return *(uint8_t*)this; else return 0; }
+		int keyPrefixLength() {
+			if (ENABLE_PREFIX)
+				return *(uint8_t*)this;
+			else
+				return 0;
+		}
 		int keyLength() { return *((uint8_t*)this + KEY_LENGTH_OFFSET); }
 		uint8_t const* keyData() { return (uint8_t const*)this + KEY_DATA_OFFSET; }
 		uint8_t const* keyEnd() { return (uint8_t const*)this + KEY_DATA_OFFSET + keyLength(); }
@@ -82,11 +91,13 @@ struct CompactPreOrderTree {
 			if (ENABLE_PREFIX) {
 				ASSERT(l < 256);
 				*(uint8_t*)this = l;
-			}
-			else
+			} else
 				ASSERT(!l);
 		}
-		void setKeyLength(int l) { ASSERT(l < 256); *((uint8_t*)this + KEY_LENGTH_OFFSET) = l; }
+		void setKeyLength(int l) {
+			ASSERT(l < 256);
+			*((uint8_t*)this + KEY_LENGTH_OFFSET) = l;
+		}
 		void setLeftPointer(Node* ptr) {
 			auto ke = keyEnd();
 			int o = (uint8_t*)ptr - ke;
@@ -94,7 +105,7 @@ struct CompactPreOrderTree {
 			if (ENABLE_LEFT_PTR)
 				*(uint16_t*)(ke + LPTR_OFFSET) = o;
 		}
-		void setRightPointer(Node* ptr) { 
+		void setRightPointer(Node* ptr) {
 			auto ke = keyEnd();
 			int o = (uint8_t*)ptr - ke;
 			ASSERT(-32768 <= o && o < 32767);
@@ -108,28 +119,31 @@ struct CompactPreOrderTree {
 	int relAddr(Node* n) { return (uint8_t*)n - (uint8_t*)this; }
 
 	Node* lastLessOrEqual(StringRef searchKey) {
-		Node* n = &root;     // n is the root of the subtree we are searching
-		Node* b = 0;         // b is the greatest node <= searchKey which is a parent of n
-		int nBFIndex = 0;    // the index of the node n in the entire tree in "breadth first order", i.e. level by level.  This is NOT the order the tree is stored in!
-		int prefixSize = 0;  // the number of bytes of searchKey which are equal to the first bytes of the logical key of the parent of n
+		Node* n = &root; // n is the root of the subtree we are searching
+		Node* b = 0; // b is the greatest node <= searchKey which is a parent of n
+		int nBFIndex = 0; // the index of the node n in the entire tree in "breadth first order", i.e. level by level.
+		                  // This is NOT the order the tree is stored in!
+		int prefixSize = 0; // the number of bytes of searchKey which are equal to the first bytes of the logical key of
+		                    // the parent of n
 		int dir;
 
 		while (nBFIndex < nodeCount) {
 			int np = n->keyPrefixLength();
-			if (ENABLE_PREFETCH_RIGHT) _mm_prefetch((const char*)n->right(), _MM_HINT_T0);
+			if (ENABLE_PREFETCH_RIGHT)
+				_mm_prefetch((const char*)n->right(), _MM_HINT_T0);
 			if (prefixSize < np) {
 				// The searchKey differs from this node's logical key in the prefix this node shares with its parent
-				// So the comparison between this node and searchKey has the same result as the comparison with the parent and searchKey
-				// (dir is unchanged)
-			}
-			else {
+				// So the comparison between this node and searchKey has the same result as the comparison with the
+				// parent and searchKey (dir is unchanged)
+			} else {
 				// The searchKey is equal to this node's logical key up to the beginning of the compressed key
 				int al = searchKey.size() - np;
 				int bl = n->keyLength();
 				int cl = al < bl ? al : bl;
-				int prefixLen = commonPrefixLength(searchKey.begin()+np, n->keyData(), cl);
-				dir = prefixLen == cl ? al<bl : searchKey[np+prefixLen] < n->keyData()[prefixLen];
-				if (Node::ENABLE_PREFIX) prefixSize = np + prefixLen;
+				int prefixLen = commonPrefixLength(searchKey.begin() + np, n->keyData(), cl);
+				dir = prefixLen == cl ? al < bl : searchKey[np + prefixLen] < n->keyData()[prefixLen];
+				if (Node::ENABLE_PREFIX)
+					prefixSize = np + prefixLen;
 			}
 
 			nBFIndex = nBFIndex + nBFIndex + 2 - dir;
@@ -141,20 +155,28 @@ struct CompactPreOrderTree {
 		return b;
 	}
 
-	static std::pair<Node*, Node*> lastLessOrEqual2(CompactPreOrderTree* this1, CompactPreOrderTree* this2, StringRef searchKey1, StringRef searchKey2) {
+	static std::pair<Node*, Node*> lastLessOrEqual2(CompactPreOrderTree* this1,
+	                                                CompactPreOrderTree* this2,
+	                                                StringRef searchKey1,
+	                                                StringRef searchKey2) {
 		// Do two separate lastLessOrEqual operations at once, to make better use of the memory subsystem.
-		// Don't try to read this code, it is write only (constructed by copy/paste from lastLessOrEqual and adding 1 and 2 to variables as necessary)
+		// Don't try to read this code, it is write only (constructed by copy/paste from lastLessOrEqual and adding 1
+		// and 2 to variables as necessary)
 
-		Node* n1 = &this1->root;     // n is the root of the subtree we are searching
-		Node* b1 = 0;         // b is the greatest node <= searchKey which is a parent of n
-		int nBFIndex1 = 0;    // the index of the node n in the entire tree in "breadth first order", i.e. level by level.  This is NOT the order the tree is stored in!
-		int prefixSize1 = 0;  // the number of bytes of searchKey which are equal to the first bytes of the logical key of the parent of n
+		Node* n1 = &this1->root; // n is the root of the subtree we are searching
+		Node* b1 = 0; // b is the greatest node <= searchKey which is a parent of n
+		int nBFIndex1 = 0; // the index of the node n in the entire tree in "breadth first order", i.e. level by level.
+		                   // This is NOT the order the tree is stored in!
+		int prefixSize1 = 0; // the number of bytes of searchKey which are equal to the first bytes of the logical key
+		                     // of the parent of n
 		int dir1;
 
-		Node* n2 = &this2->root;     // n is the root of the subtree we are searching
-		Node* b2 = 0;         // b is the greatest node <= searchKey which is a parent of n
-		int nBFIndex2 = 0;    // the index of the node n in the entire tree in "breadth first order", i.e. level by level.  This is NOT the order the tree is stored in!
-		int prefixSize2 = 0;  // the number of bytes of searchKey which are equal to the first bytes of the logical key of the parent of n
+		Node* n2 = &this2->root; // n is the root of the subtree we are searching
+		Node* b2 = 0; // b is the greatest node <= searchKey which is a parent of n
+		int nBFIndex2 = 0; // the index of the node n in the entire tree in "breadth first order", i.e. level by level.
+		                   // This is NOT the order the tree is stored in!
+		int prefixSize2 = 0; // the number of bytes of searchKey which are equal to the first bytes of the logical key
+		                     // of the parent of n
 		int dir2;
 
 		while (nBFIndex1 < this1->nodeCount && nBFIndex2 < this2->nodeCount) {
@@ -166,30 +188,28 @@ struct CompactPreOrderTree {
 			}
 			if (prefixSize1 < np1) {
 				// The searchKey differs from this node's logical key in the prefix this node shares with its parent
-				// So the comparison between this node and searchKey has the same result as the comparison with the parent and searchKey
-				// (dir is unchanged)
-			}
-			else {
+				// So the comparison between this node and searchKey has the same result as the comparison with the
+				// parent and searchKey (dir is unchanged)
+			} else {
 				// The searchKey is equal to this node's logical key up to the beginning of the compressed key
 				int al1 = searchKey1.size() - np1;
 				int bl1 = n1->keyLength();
 				int cl1 = al1 < bl1 ? al1 : bl1;
 				int prefixLen1 = commonPrefixLength(searchKey1.begin() + np1, n1->keyData(), cl1);
-				dir1 = prefixLen1 == cl1 ? al1<bl1 : searchKey1[np1 + prefixLen1] < n1->keyData()[prefixLen1];
+				dir1 = prefixLen1 == cl1 ? al1 < bl1 : searchKey1[np1 + prefixLen1] < n1->keyData()[prefixLen1];
 				prefixSize1 = np1 + prefixLen1;
 			}
 			if (prefixSize2 < np2) {
 				// The searchKey differs from this node's logical key in the prefix this node shares with its parent
-				// So the comparison between this node and searchKey has the same result as the comparison with the parent and searchKey
-				// (dir is unchanged)
-			}
-			else {
+				// So the comparison between this node and searchKey has the same result as the comparison with the
+				// parent and searchKey (dir is unchanged)
+			} else {
 				// The searchKey is equal to this node's logical key up to the beginning of the compressed key
 				int al2 = searchKey2.size() - np2;
 				int bl2 = n2->keyLength();
 				int cl2 = al2 < bl2 ? al2 : bl2;
 				int prefixLen2 = commonPrefixLength(searchKey2.begin() + np2, n2->keyData(), cl2);
-				dir2 = prefixLen2 == cl2 ? al2<bl2 : searchKey2[np2 + prefixLen2] < n2->keyData()[prefixLen2];
+				dir2 = prefixLen2 == cl2 ? al2 < bl2 : searchKey2[np2 + prefixLen2] < n2->keyData()[prefixLen2];
 				prefixSize2 = np2 + prefixLen2;
 			}
 
@@ -207,16 +227,15 @@ struct CompactPreOrderTree {
 			int np1 = n1->keyPrefixLength();
 			if (prefixSize1 < np1) {
 				// The searchKey differs from this node's logical key in the prefix this node shares with its parent
-				// So the comparison between this node and searchKey has the same result as the comparison with the parent and searchKey
-				// (dir is unchanged)
-			}
-			else {
+				// So the comparison between this node and searchKey has the same result as the comparison with the
+				// parent and searchKey (dir is unchanged)
+			} else {
 				// The searchKey is equal to this node's logical key up to the beginning of the compressed key
 				int al1 = searchKey1.size() - np1;
 				int bl1 = n1->keyLength();
 				int cl1 = al1 < bl1 ? al1 : bl1;
 				int prefixLen1 = commonPrefixLength(searchKey1.begin() + np1, n1->keyData(), cl1);
-				dir1 = prefixLen1 == cl1 ? al1<bl1 : searchKey1[np1 + prefixLen1] < n1->keyData()[prefixLen1];
+				dir1 = prefixLen1 == cl1 ? al1 < bl1 : searchKey1[np1 + prefixLen1] < n1->keyData()[prefixLen1];
 				prefixSize1 = np1 + prefixLen1;
 			}
 			nBFIndex1 = nBFIndex1 + nBFIndex1 + 2 - dir1;
@@ -229,16 +248,15 @@ struct CompactPreOrderTree {
 			int np2 = n2->keyPrefixLength();
 			if (prefixSize2 < np2) {
 				// The searchKey differs from this node's logical key in the prefix this node shares with its parent
-				// So the comparison between this node and searchKey has the same result as the comparison with the parent and searchKey
-				// (dir is unchanged)
-			}
-			else {
+				// So the comparison between this node and searchKey has the same result as the comparison with the
+				// parent and searchKey (dir is unchanged)
+			} else {
 				// The searchKey is equal to this node's logical key up to the beginning of the compressed key
 				int al2 = searchKey2.size() - np2;
 				int bl2 = n2->keyLength();
 				int cl2 = al2 < bl2 ? al2 : bl2;
 				int prefixLen2 = commonPrefixLength(searchKey2.begin() + np2, n2->keyData(), cl2);
-				dir2 = prefixLen2 == cl2 ? al2<bl2 : searchKey2[np2 + prefixLen2] < n2->keyData()[prefixLen2];
+				dir2 = prefixLen2 == cl2 ? al2 < bl2 : searchKey2[np2 + prefixLen2] < n2->keyData()[prefixLen2];
 				prefixSize2 = np2 + prefixLen2;
 			}
 			nBFIndex2 = nBFIndex2 + nBFIndex2 + 2 - dir2;
@@ -247,7 +265,7 @@ struct CompactPreOrderTree {
 			n2 = dir2 ? l2 : r2;
 		}
 
-		return std::make_pair(b1,b2);
+		return std::make_pair(b1, b2);
 	}
 
 #if 0
@@ -319,35 +337,38 @@ struct CompactPreOrderTree {
 	}
 
 #else
-	enum { ENABLE_FANCY_BUILD=0 };
+	enum { ENABLE_FANCY_BUILD = 0 };
 
 	int build(std::vector<std::string>& input, std::string const& prefix = std::string()) {
 		nodeCount = input.size();
-		return (uint8_t*)build(root, prefix, &input[0], &input[0]+input.size()) - (uint8_t*)this;
+		return (uint8_t*)build(root, prefix, &input[0], &input[0] + input.size()) - (uint8_t*)this;
 	}
 	Node* build(Node& node, std::string const& prefix, std::string* begin, std::string* end) {
-		if (begin == end) return &node;
-		int mid = perfectSubtreeSplitPoint(end-begin);
+		if (begin == end)
+			return &node;
+		int mid = perfectSubtreeSplitPoint(end - begin);
 		std::string& s = begin[mid];
-		int prefixLen = Node::ENABLE_PREFIX ? commonPrefixLength((uint8_t*)&prefix[0], (uint8_t*)&s[0], std::min(prefix.size(), s.size())) : 0;
-		//printf("Node: %s at %d, subtree size %d, mid=%d, prefix %d\n", s.c_str(), relAddr(&node), end-begin, mid, prefixLen);
+		int prefixLen =
+		    Node::ENABLE_PREFIX
+		        ? commonPrefixLength((uint8_t*)&prefix[0], (uint8_t*)&s[0], std::min(prefix.size(), s.size()))
+		        : 0;
+		// printf("Node: %s at %d, subtree size %d, mid=%d, prefix %d\n", s.c_str(), relAddr(&node), end-begin, mid,
+		// prefixLen);
 		node.setKeyPrefixLength(prefixLen);
-		node.setKeyLength(s.size()-prefixLen);
-		memcpy((uint8_t*)node.key().begin(), &s[prefixLen], s.size()-prefixLen);
+		node.setKeyLength(s.size() - prefixLen);
+		memcpy((uint8_t*)node.key().begin(), &s[prefixLen], s.size() - prefixLen);
 
 		Node* next = (Node*)node.getEnd();
 		if (begin != begin + mid) {
 			node.setLeftPointer(next);
 			next = build(*node.left(), s, begin, begin + mid);
-		}
-		else if (Node::ENABLE_LEFT_PTR)
+		} else if (Node::ENABLE_LEFT_PTR)
 			node.setLeftPointer(&node);
-		
+
 		if (begin + mid + 1 != end) {
 			node.setRightPointer(next);
 			next = build(*node.right(), s, begin + mid + 1, end);
-		}
-		else
+		} else
 			node.setRightPointer(&node);
 
 		return next;
@@ -355,14 +376,16 @@ struct CompactPreOrderTree {
 #endif
 };
 
-void compactMapTests(std::vector<std::string> testData, std::vector<std::string> sampleQueries, std::string prefixTreeDOTFile = "") {
+void compactMapTests(std::vector<std::string> testData,
+                     std::vector<std::string> sampleQueries,
+                     std::string prefixTreeDOTFile = "") {
 	double t1, t2;
 	int r = 0;
 	std::sort(testData.begin(), testData.end());
 
 	/*for (int i = 0; i < testData.size() - 1; i++) {
-		ASSERT(testData[i + 1].substr(0, 4) != testData[i].substr(0, 4));
-		ASSERT(_byteswap_ulong(*(uint32_t*)&testData[i][0]) < _byteswap_ulong(*(uint32_t*)&testData[i + 1][0]));
+	    ASSERT(testData[i + 1].substr(0, 4) != testData[i].substr(0, 4));
+	    ASSERT(_byteswap_ulong(*(uint32_t*)&testData[i][0]) < _byteswap_ulong(*(uint32_t*)&testData[i + 1][0]));
 	}*/
 
 	int totalKeyBytes = 0;
@@ -373,26 +396,29 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	for (int i = 0; i < 5; i++)
 		printf("  '%s'\n", printable(StringRef(testData[i])).c_str());
 
-	CompactPreOrderTree* t = (CompactPreOrderTree*)new uint8_t[sizeof(CompactPreOrderTree) + totalKeyBytes + CompactPreOrderTree::Node::getMaxOverhead() * testData.size()];
+	CompactPreOrderTree* t =
+	    (CompactPreOrderTree*)new uint8_t[sizeof(CompactPreOrderTree) + totalKeyBytes +
+	                                      CompactPreOrderTree::Node::getMaxOverhead() * testData.size()];
 
 	t1 = timer_monotonic();
 	int compactTreeBytes = t->build(testData);
 	t2 = timer_monotonic();
 
 	printf("Compact tree is %d bytes\n", compactTreeBytes);
-	printf("Build time %0.0f us (%0.2f M/sec)\n", (t2 - t1)*1e6, 1 / (t2 - t1) / 1e6);
+	printf("Build time %0.0f us (%0.2f M/sec)\n", (t2 - t1) * 1e6, 1 / (t2 - t1) / 1e6);
 
 	t1 = timer_monotonic();
 	const int nBuild = 20000;
 	for (int i = 0; i < nBuild; i++)
 		r += t->build(testData);
 	t2 = timer_monotonic();
-	printf("Build time %0.0f us (%0.2f M/sec)\n", (t2 - t1)/nBuild*1e6, nBuild / (t2 - t1) / 1e6);
+	printf("Build time %0.0f us (%0.2f M/sec)\n", (t2 - t1) / nBuild * 1e6, nBuild / (t2 - t1) / 1e6);
 
-	PrefixTree *pt = (PrefixTree *)new uint8_t[sizeof(PrefixTree) + totalKeyBytes + testData.size() * PrefixTree::Node::getMaxOverhead(1, 256, 256)];
+	PrefixTree* pt = (PrefixTree*)new uint8_t[sizeof(PrefixTree) + totalKeyBytes +
+	                                          testData.size() * PrefixTree::Node::getMaxOverhead(1, 256, 256)];
 
 	std::vector<PrefixTree::EntryRef> keys;
-	for(auto &k : testData) {
+	for (auto& k : testData) {
 		keys.emplace_back(k, StringRef());
 	}
 
@@ -400,29 +426,31 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	int prefixTreeBytes = pt->build(&*keys.begin(), &*keys.end(), StringRef(), StringRef());
 	t2 = timer_monotonic();
 
-	if(!prefixTreeDOTFile.empty()) {
-		FILE *fout = fopen(prefixTreeDOTFile.c_str(), "w");
+	if (!prefixTreeDOTFile.empty()) {
+		FILE* fout = fopen(prefixTreeDOTFile.c_str(), "w");
 		fprintf(fout, "%s\n", pt->toDOT(StringRef(), StringRef()).c_str());
 		fclose(fout);
 	}
 
 	// Calculate perfect prefix-compressed size
 	int perfectSize = testData.front().size();
-	for(int i = 1; i < testData.size(); ++i) {
+	for (int i = 1; i < testData.size(); ++i) {
 		int common = commonPrefixLength(StringRef(testData[i]), StringRef(testData[i - 1]));
 		perfectSize += (testData[i].size() - common);
 	}
 
 	printf("PrefixTree tree is %d bytes\n", prefixTreeBytes);
-	printf("Perfect compressed size with no overhead is %d, average PrefixTree overhead is %.2f per item\n", perfectSize, double(prefixTreeBytes - perfectSize) / testData.size());
-	printf("PrefixTree Build time %0.0f us (%0.2f M/sec)\n", (t2 - t1)*1e6, 1 / (t2 - t1) / 1e6);
+	printf("Perfect compressed size with no overhead is %d, average PrefixTree overhead is %.2f per item\n",
+	       perfectSize,
+	       double(prefixTreeBytes - perfectSize) / testData.size());
+	printf("PrefixTree Build time %0.0f us (%0.2f M/sec)\n", (t2 - t1) * 1e6, 1 / (t2 - t1) / 1e6);
 
 	// Test cursor forward iteration
 	auto c = pt->getCursor(StringRef(), StringRef());
 	ASSERT(c.moveFirst());
 
 	bool end = false;
-	for(int i = 0; i < keys.size(); ++i) {
+	for (int i = 0; i < keys.size(); ++i) {
 		ASSERT(c.getKeyRef() == keys[i].key);
 		end = !c.moveNext();
 	}
@@ -432,7 +460,7 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	// Test cursor backward iteration
 	ASSERT(c.moveLast());
 
-	for(int i = keys.size() - 1; i >= 0; --i) {
+	for (int i = keys.size() - 1; i >= 0; --i) {
 		ASSERT(c.getKeyRef() == keys[i].key);
 		end = !c.movePrev();
 	}
@@ -443,17 +471,17 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	for (int i = 0; i < nBuild; i++)
 		r += pt->build(&*keys.begin(), &*keys.end(), StringRef(), StringRef());
 	t2 = timer_monotonic();
-	printf("PrefixTree Build time %0.0f us (%0.2f M/sec)\n", (t2 - t1)/nBuild*1e6, nBuild / (t2 - t1) / 1e6);
+	printf("PrefixTree Build time %0.0f us (%0.2f M/sec)\n", (t2 - t1) / nBuild * 1e6, nBuild / (t2 - t1) / 1e6);
 
 	t->lastLessOrEqual(LiteralStringRef("8f9fad2e5e2af980a"));
 
 	{
 		std::string s, s1;
-		CompactPreOrderTree::Node *n;
+		CompactPreOrderTree::Node* n;
 		for (int i = 0; i < testData.size(); i++) {
 			s = testData[i];
 
-			auto s1 = s;// s.substr(0, s.size() - 1);
+			auto s1 = s; // s.substr(0, s.size() - 1);
 			if (!s1.back())
 				s1 = s1.substr(0, s1.size() - 1);
 			else {
@@ -461,14 +489,14 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 				s1 += "\xff\xff\xff\xff\xff\xff";
 			}
 			auto n = t->lastLessOrEqual(s1);
-			//printf("lastLessOrEqual(%s) = %s\n", s1.c_str(), n ? n->key().toString().c_str() : "(null)");
+			// printf("lastLessOrEqual(%s) = %s\n", s1.c_str(), n ? n->key().toString().c_str() : "(null)");
 			ASSERT(i ? testData[i - 1].substr(n->keyPrefixLength()) == n->key() : !n);
 			n = t->lastLessOrEqual(s);
-			//printf("lastLessOrEqual(%s) = %s\n", s.c_str(), n ? n->key().toString().c_str() : "(null)");
+			// printf("lastLessOrEqual(%s) = %s\n", s.c_str(), n ? n->key().toString().c_str() : "(null)");
 			ASSERT(n->key() == s.substr(n->keyPrefixLength()));
 			s1 = s + "a";
 			auto n1 = t->lastLessOrEqual(s1);
-			//printf("lastLessOrEqual(%s) = %s\n", s1.c_str(), n ? n->key().toString().c_str() : "(null)");
+			// printf("lastLessOrEqual(%s) = %s\n", s1.c_str(), n ? n->key().toString().c_str() : "(null)");
 			ASSERT(n1->key() == s.substr(n1->keyPrefixLength()));
 
 			ASSERT(CompactPreOrderTree::lastLessOrEqual2(t, t, s, s1) == std::make_pair(n, n1));
@@ -488,14 +516,13 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 
 			StringRef shortString = s.substr(0, s.size() - 1);
 			bool shorter = cur.seekLessThanOrEqual(shortString);
-			if(i > 0) {
-				if(shortString >= keys[i - 1].key) {
+			if (i > 0) {
+				if (shortString >= keys[i - 1].key) {
 					ASSERT(shorter);
 					ASSERT(cur.valid());
 					ASSERT(cur.getKey() == keys[i - 1].key);
 				}
-			}
-			else {
+			} else {
 				ASSERT(!shorter);
 			}
 
@@ -506,18 +533,18 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 		printf("PrefixTree lastLessOrEqual tests passed\n");
 	}
 
-	printf("Making %lu copies:\n", 2*sampleQueries.size());
+	printf("Making %lu copies:\n", 2 * sampleQueries.size());
 
 	std::vector<CompactPreOrderTree*> copies;
-	for (int i = 0; i < 2*sampleQueries.size(); i++) {
-		copies.push_back((CompactPreOrderTree*) new uint8_t[compactTreeBytes]);
+	for (int i = 0; i < 2 * sampleQueries.size(); i++) {
+		copies.push_back((CompactPreOrderTree*)new uint8_t[compactTreeBytes]);
 		memcpy(copies.back(), t, compactTreeBytes);
 	}
 	deterministicRandom()->randomShuffle(copies);
 
 	std::vector<PrefixTree*> prefixTreeCopies;
-	for (int i = 0; i < 2*sampleQueries.size(); i++) {
-		prefixTreeCopies.push_back((PrefixTree *) new uint8_t[prefixTreeBytes]);
+	for (int i = 0; i < 2 * sampleQueries.size(); i++) {
+		prefixTreeCopies.push_back((PrefixTree*)new uint8_t[prefixTreeBytes]);
 		memcpy(prefixTreeCopies.back(), pt, prefixTreeBytes);
 	}
 	deterministicRandom()->randomShuffle(prefixTreeCopies);
@@ -534,7 +561,10 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	for (auto& q : sampleQueries)
 		r += (intptr_t)t->lastLessOrEqual(q);
 	t2 = timer_monotonic();
-	printf("compactmap, in cache: %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 - t1, sampleQueries.size() / (t2 - t1) / 1e6);
+	printf("compactmap, in cache: %d queries in %0.3f sec: %0.3f M/sec\n",
+	       (int)sampleQueries.size(),
+	       t2 - t1,
+	       sampleQueries.size() / (t2 - t1) / 1e6);
 
 	auto cur = pt->getCursor(StringRef(), StringRef());
 
@@ -542,62 +572,82 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	for (auto& q : sampleQueries)
 		r += cur.seekLessThanOrEqual(StringRef(q)) ? 1 : 0;
 	t2 = timer_monotonic();
-	printf("prefixtree, in cache: %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 - t1, sampleQueries.size() / (t2 - t1) / 1e6);
+	printf("prefixtree, in cache: %d queries in %0.3f sec: %0.3f M/sec\n",
+	       (int)sampleQueries.size(),
+	       t2 - t1,
+	       sampleQueries.size() / (t2 - t1) / 1e6);
 
-/*	t1 = timer_monotonic();
-	for (int q = 0; q < sampleQueries.size(); q += 2) {
-		auto x = CompactPreOrderTree::lastLessOrEqual2(t, t, sampleQueries[q], sampleQueries[q + 1]);
-		r += (intptr_t)x.first + (intptr_t)x.second;
-	}
-	t2 = timer_monotonic();
-	printf("in cache (2x interleaved): %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 - t1, sampleQueries.size() / (t2 - t1) / 1e6);
-*/
+	/*	t1 = timer_monotonic();
+	    for (int q = 0; q < sampleQueries.size(); q += 2) {
+	        auto x = CompactPreOrderTree::lastLessOrEqual2(t, t, sampleQueries[q], sampleQueries[q + 1]);
+	        r += (intptr_t)x.first + (intptr_t)x.second;
+	    }
+	    t2 = timer_monotonic();
+	    printf("in cache (2x interleaved): %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 - t1,
+	   sampleQueries.size() / (t2 - t1) / 1e6);
+	*/
 
 	t1 = timer_monotonic();
 	for (int q = 0; q < sampleQueries.size(); q++)
 		r += (intptr_t)copies[q]->lastLessOrEqual(sampleQueries[q]);
 	t2 = timer_monotonic();
-	printf("compactmap, out of cache: %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 - t1, sampleQueries.size() / (t2 - t1) / 1e6);
+	printf("compactmap, out of cache: %d queries in %0.3f sec: %0.3f M/sec\n",
+	       (int)sampleQueries.size(),
+	       t2 - t1,
+	       sampleQueries.size() / (t2 - t1) / 1e6);
 
 	std::vector<PrefixTree::Cursor> cursors;
 	for (int q = 0; q < sampleQueries.size(); q++)
 		cursors.push_back(prefixTreeCopies[q]->getCursor(StringRef(), StringRef()));
-		
+
 	t1 = timer_monotonic();
 	for (int q = 0; q < sampleQueries.size(); q++)
 		r += cursors[q].seekLessThanOrEqual(sampleQueries[q]) ? 1 : 0;
 	t2 = timer_monotonic();
-	printf("prefixtree, out of cache: %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 - t1, sampleQueries.size() / (t2 - t1) / 1e6);
+	printf("prefixtree, out of cache: %d queries in %0.3f sec: %0.3f M/sec\n",
+	       (int)sampleQueries.size(),
+	       t2 - t1,
+	       sampleQueries.size() / (t2 - t1) / 1e6);
 
-/*
-	t1 = timer_monotonic();
-	for (int q = 0; q < sampleQueries.size(); q += 2) {
-		auto x = CompactPreOrderTree::lastLessOrEqual2(copies[q + sampleQueries.size()], copies[q + sampleQueries.size() + 1], sampleQueries[q], sampleQueries[q + 1]);
-		r += (intptr_t)x.first + (intptr_t)x.second;
-	}
-	t2 = timer_monotonic();
-	printf("out of cache (2x interleaved): %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 - t1, sampleQueries.size() / (t2 - t1) / 1e6);
-*/
+	/*
+	    t1 = timer_monotonic();
+	    for (int q = 0; q < sampleQueries.size(); q += 2) {
+	        auto x = CompactPreOrderTree::lastLessOrEqual2(copies[q + sampleQueries.size()], copies[q +
+	   sampleQueries.size() + 1], sampleQueries[q], sampleQueries[q + 1]); r += (intptr_t)x.first + (intptr_t)x.second;
+	    }
+	    t2 = timer_monotonic();
+	    printf("out of cache (2x interleaved): %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 -
+	   t1, sampleQueries.size() / (t2 - t1) / 1e6);
+	*/
 
 	t1 = timer_monotonic();
 	for (int q = 0; q < sampleQueries.size(); q++)
-		r += (intptr_t)(std::lower_bound(array_copies[q].begin(), array_copies[q].end(), sampleQueries[q]) - testData.begin());
+		r += (intptr_t)(std::lower_bound(array_copies[q].begin(), array_copies[q].end(), sampleQueries[q]) -
+		                testData.begin());
 	t2 = timer_monotonic();
-	printf("std::lower_bound: %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 - t1, sampleQueries.size() / (t2 - t1) / 1e6);
-
+	printf("std::lower_bound: %d queries in %0.3f sec: %0.3f M/sec\n",
+	       (int)sampleQueries.size(),
+	       t2 - t1,
+	       sampleQueries.size() / (t2 - t1) / 1e6);
 }
 
 std::vector<std::string> sampleDocuments(int N) {
 	std::vector<std::string> testData;
 	std::string p = "pre";
-	std::string n = "\x01""name\x00\x00";
-	std::string a = "\x01""address\x00\x00";
-	std::string o = "\x01""orders\x00\x00";
-	std::string oi = "\x01""id\x00\x00";
-	std::string oa = "\x01""amount\x00\x00";
+	std::string n = "\x01"
+	                "name\x00\x00";
+	std::string a = "\x01"
+	                "address\x00\x00";
+	std::string o = "\x01"
+	                "orders\x00\x00";
+	std::string oi = "\x01"
+	                 "id\x00\x00";
+	std::string oa = "\x01"
+	                 "amount\x00\x00";
 	std::string dbl = "\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00";
 	for (int i = 0; i < N; i++) {
-		std::string id = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned()).substr(12).toString();
+		std::string id =
+		    BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned()).substr(12).toString();
 		testData.push_back(p + id + n);
 		testData.push_back(p + id + a);
 		for (int j = 0; j < 5; j++) {
@@ -615,7 +665,7 @@ StringRef shortestKeyBetween(StringRef a, StringRef b) {
 	return b.substr(0, p + 1);
 }
 
-std::vector<std::string> sampleBPlusTreeSeparators( std::vector<std::string> rawDocs, int prefixToStrip ) {
+std::vector<std::string> sampleBPlusTreeSeparators(std::vector<std::string> rawDocs, int prefixToStrip) {
 	// In the middle of a B+Tree, we won't have adjacent document keys but separators between
 	// pages.  These need only contain as many bytes as necessary to distinguish the last item
 	// in the previous page and the first item in the next page ("suffix compression"), and when
@@ -644,7 +694,7 @@ struct Page {
 	Page() : tree(nullptr), size(0), sizeBuilt(0), unsortedKeys(0) {}
 
 	std::vector<PrefixTree::EntryRef> keys;
-	PrefixTree *tree;
+	PrefixTree* tree;
 	std::string treeBuffer;
 	int size;
 	int sizeBuilt;
@@ -657,8 +707,8 @@ struct Page {
 	}
 
 	void sort() {
-		static auto cmp = [=](const PrefixTree::EntryRef &a, const PrefixTree::EntryRef &b) { return a.key < b.key; };
-		if(unsortedKeys > 0) {
+		static auto cmp = [=](const PrefixTree::EntryRef& a, const PrefixTree::EntryRef& b) { return a.key < b.key; };
+		if (unsortedKeys > 0) {
 			// sort newest elements, then merge
 			std::sort(keys.end() - unsortedKeys, keys.end(), cmp);
 			std::inplace_merge(keys.begin(), keys.end() - unsortedKeys, keys.end(), cmp);
@@ -667,10 +717,10 @@ struct Page {
 	}
 
 	int build() {
-		if(sizeBuilt != size) {
+		if (sizeBuilt != size) {
 			sort();
 			treeBuffer.reserve(keys.size() * PrefixTree::Node::getMaxOverhead(1, 256, 256) + size);
-			tree = (PrefixTree *)treeBuffer.data();
+			tree = (PrefixTree*)treeBuffer.data();
 			int b = tree->build(&*keys.begin(), &*keys.end(), StringRef(), StringRef());
 			sizeBuilt = size;
 			return b;
@@ -683,65 +733,66 @@ void ingestBenchmark() {
 	std::vector<StringRef> keys_generated;
 	Arena arena;
 	std::set<StringRef> testmap;
-	for(int i = 0; i < 1000000; ++i) {
-		keys_generated.push_back(StringRef(arena, format("........%02X......%02X.....%02X........%02X", 
-			deterministicRandom()->randomInt(0, 100),
-			deterministicRandom()->randomInt(0, 100),
-			deterministicRandom()->randomInt(0, 100),
-			deterministicRandom()->randomInt(0, 100)
-		)));
+	for (int i = 0; i < 1000000; ++i) {
+		keys_generated.push_back(StringRef(arena,
+		                                   format("........%02X......%02X.....%02X........%02X",
+		                                          deterministicRandom()->randomInt(0, 100),
+		                                          deterministicRandom()->randomInt(0, 100),
+		                                          deterministicRandom()->randomInt(0, 100),
+		                                          deterministicRandom()->randomInt(0, 100))));
 	}
 
 	double t1 = timer_monotonic();
-	for(const auto &k : keys_generated)
+	for (const auto& k : keys_generated)
 		testmap.insert(k);
 	double t2 = timer_monotonic();
 	printf("Ingested %d elements into map, Speed %f M/s\n",
-		(int)keys_generated.size(), keys_generated.size() / (t2 - t1) / 1e6);
+	       (int)keys_generated.size(),
+	       keys_generated.size() / (t2 - t1) / 1e6);
 
 	// sort a group after k elements were added
-	for(int k = 5; k <= 20; k += 5) {
+	for (int k = 5; k <= 20; k += 5) {
 		// g is average page delta size
-		for(int g = 10; g <= 150; g += 10) {
+		for (int g = 10; g <= 150; g += 10) {
 			// rebuild page after r bytes added
-			for(int r = 500; r <= 4000; r += 500) {
+			for (int r = 500; r <= 4000; r += 500) {
 				double elapsed = timer_monotonic();
 				int builds = 0;
 				int buildbytes = 0;
 				int keybytes = 0;
 
-				std::vector<Page *> pages;
+				std::vector<Page*> pages;
 				int pageCount = keys_generated.size() / g;
 				pages.resize(pageCount);
 
-				for(auto &key : keys_generated) {
+				for (auto& key : keys_generated) {
 					int p = deterministicRandom()->randomInt(0, pageCount);
-					Page *&pPage = pages[p];
-					if(pPage == nullptr)
+					Page*& pPage = pages[p];
+					if (pPage == nullptr)
 						pPage = new Page();
-					Page &page = *pPage;
+					Page& page = *pPage;
 
 					page.add(key);
 					keybytes += key.size();
 
-					if(page.keys.size() % k == 0) {
+					if (page.keys.size() % k == 0) {
 						page.sort();
 					}
 
 					// Rebuild page after r bytes added
-					if(page.size - page.sizeBuilt > r) {
+					if (page.size - page.sizeBuilt > r) {
 						int b = page.build();
-						if(b > 0) {
+						if (b > 0) {
 							++builds;
 							buildbytes += b;
 						}
 					}
 				}
 
-				for(auto p : pages) {
-					if(p) {
+				for (auto p : pages) {
+					if (p) {
 						int b = p->build();
-						if(b > 0) {
+						if (b > 0) {
 							++builds;
 							buildbytes += b;
 						}
@@ -749,10 +800,20 @@ void ingestBenchmark() {
 				}
 
 				elapsed = timer_monotonic() - elapsed;
-				printf("%6d keys  %6d pages %3f builds/page %6d builds/s  %6d pages/s  %5d avg keys/page  sort every %d deltas  rebuild every %5d bytes  %7d keys/s %8d keybytes/s\n",
-					(int)keys_generated.size(), pageCount, (double)builds / pageCount, int(builds / elapsed), int(pageCount/elapsed), g, k, r, int(keys_generated.size() / elapsed), int(keybytes / elapsed));
+				printf("%6d keys  %6d pages %3f builds/page %6d builds/s  %6d pages/s  %5d avg keys/page  sort every "
+				       "%d deltas  rebuild every %5d bytes  %7d keys/s %8d keybytes/s\n",
+				       (int)keys_generated.size(),
+				       pageCount,
+				       (double)builds / pageCount,
+				       int(builds / elapsed),
+				       int(pageCount / elapsed),
+				       g,
+				       k,
+				       r,
+				       int(keys_generated.size() / elapsed),
+				       int(keybytes / elapsed));
 
-				for(auto p : pages) {
+				for (auto p : pages) {
 					delete p;
 				}
 			}
@@ -774,20 +835,21 @@ int main() {
 
 	setThreadLocalDeterministicRandomSeed(1);
 
-	//ingestBenchmark();
+	// ingestBenchmark();
 
 	/*for (int subtree_size = 1; subtree_size < 20; subtree_size++) {
-		printf("Subtree of size %d:\n", subtree_size);
+	    printf("Subtree of size %d:\n", subtree_size);
 
-		int s = lessOrEqualPowerOfTwo((subtree_size - 1) / 2 + 1) - 1;
+	    int s = lessOrEqualPowerOfTwo((subtree_size - 1) / 2 + 1) - 1;
 
-		printf("  s=%d\n", s);
-		printf("  1 + s + s=%d\n", 1 + s + s);
-		printf("  left: %d\n", subtree_size - 1 - 2 * s);
+	    printf("  s=%d\n", s);
+	    printf("  1 + s + s=%d\n", 1 + s + s);
+	    printf("  left: %d\n", subtree_size - 1 - 2 * s);
 
-		printf("  s*2+1: %d %d\n", s * 2 + 1, subtree_size - (s * 2 + 1) - 1);
-		printf("  n-s-1: %d %d\n", subtree_size-s-1, s);
-		printf("  min:   %d %d\n", std::min(s * 2 + 1, subtree_size - s - 1), subtree_size - std::min(s * 2 + 1, subtree_size - s - 1) - 1);
+	    printf("  s*2+1: %d %d\n", s * 2 + 1, subtree_size - (s * 2 + 1) - 1);
+	    printf("  n-s-1: %d %d\n", subtree_size-s-1, s);
+	    printf("  min:   %d %d\n", std::min(s * 2 + 1, subtree_size - s - 1), subtree_size - std::min(s * 2 + 1,
+	subtree_size - s - 1) - 1);
 	}*/
 
 	printf("\n16 byte hexadecimal random keys\n");
@@ -797,14 +859,19 @@ int main() {
 	}
 	std::vector<std::string> sampleQueries;
 	for (int i = 0; i < 10000; i++) {
-		sampleQueries.push_back(deterministicRandom()->randomUniqueID().shortString().substr(0, deterministicRandom()->randomInt(0, 16)));
+		sampleQueries.push_back(
+		    deterministicRandom()->randomUniqueID().shortString().substr(0, deterministicRandom()->randomInt(0, 16)));
 	}
 	compactMapTests(testData, sampleQueries);
 
 	printf("\nRaw index keys\n");
-	testData.clear(); sampleQueries.clear();
+	testData.clear();
+	sampleQueries.clear();
 	for (int i = 0; i < 100; i++) {
-		testData.push_back(format("%d Main Street #%d, New York NY 12345, United States of America|", 1234 * (i / 100), (i/10) % 10 + 1000) + deterministicRandom()->randomUniqueID().shortString());
+		testData.push_back(format("%d Main Street #%d, New York NY 12345, United States of America|",
+		                          1234 * (i / 100),
+		                          (i / 10) % 10 + 1000) +
+		                   deterministicRandom()->randomUniqueID().shortString());
 	}
 	for (int i = 0; i < 10000; i++)
 		sampleQueries.push_back(format("%d Main Street", deterministicRandom()->randomInt(1000, 10000)));
@@ -813,7 +880,10 @@ int main() {
 	printf("\nb+tree separators for index keys\n");
 	testData.clear();
 	for (int i = 0; i < 100000; i++) {
-		testData.push_back(format("%d Main Street #%d, New York NY 12345, United States of America|", 12 * (i / 100), (i/10) % 10 + 1000) + deterministicRandom()->randomUniqueID().shortString());
+		testData.push_back(format("%d Main Street #%d, New York NY 12345, United States of America|",
+		                          12 * (i / 100),
+		                          (i / 10) % 10 + 1000) +
+		                   deterministicRandom()->randomUniqueID().shortString());
 	}
 	testData = sampleBPlusTreeSeparators(testData, 0);
 	compactMapTests(testData, sampleQueries);
@@ -823,7 +893,8 @@ int main() {
 	sampleQueries.clear();
 	std::string p = "pre";
 	for (int i = 0; i < 10000; i++)
-		sampleQueries.push_back(p + BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned()).substr(12).toString());
+		sampleQueries.push_back(
+		    p + BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned()).substr(12).toString());
 	compactMapTests(testData, sampleQueries);
 
 	printf("\nb+tree split keys for documents\n");
@@ -832,4 +903,3 @@ int main() {
 
 	return 0;
 }
-

@@ -36,7 +36,8 @@ struct LoadContext {
 		if constexpr (Ar::ownsUnderlyingMemory) {
 			return ptr;
 		} else {
-			if (len == 0) return nullptr;
+			if (len == 0)
+				return nullptr;
 			uint8_t* dat = new (arena()) uint8_t[len];
 			std::copy(ptr, ptr + len, dat);
 			return dat;
@@ -59,9 +60,7 @@ struct SaveContext {
 
 	void addArena(Arena& arena) {}
 
-	uint8_t* allocate(size_t s) {
-		return allocator(s);
-	}
+	uint8_t* allocate(size_t s) { return allocator(s); }
 
 	SaveContext& context() { return *this; }
 };
@@ -69,8 +68,8 @@ struct SaveContext {
 template <class ReaderImpl>
 class _ObjectReader {
 	ProtocolVersion mProtocolVersion;
-public:
 
+public:
 	ProtocolVersion protocolVersion() const { return mProtocolVersion; }
 	void setProtocolVersion(ProtocolVersion v) { mProtocolVersion = v; }
 
@@ -78,8 +77,10 @@ public:
 	void deserialize(FileIdentifier file_identifier, Items&... items) {
 		const uint8_t* data = static_cast<ReaderImpl*>(this)->data();
 		LoadContext<ReaderImpl> context(static_cast<ReaderImpl*>(this));
-		if(read_file_identifier(data) != file_identifier) {
-			TraceEvent(SevError, "MismatchedFileIdentifier").detail("Expected", file_identifier).detail("Read", read_file_identifier(data));
+		if (read_file_identifier(data) != file_identifier) {
+			TraceEvent(SevError, "MismatchedFileIdentifier")
+			    .detail("Expected", file_identifier)
+			    .detail("Read", read_file_identifier(data));
 			ASSERT(false);
 		}
 		load_members(data, context, items...);
@@ -93,17 +94,18 @@ public:
 
 class ObjectReader : public _ObjectReader<ObjectReader> {
 	friend struct _IncludeVersion;
-	ObjectReader& operator>> (ProtocolVersion& version) {
+	ObjectReader& operator>>(ProtocolVersion& version) {
 		uint64_t result;
 		memcpy(&result, _data, sizeof(result));
 		_data += sizeof(result);
 		version = ProtocolVersion(result);
 		return *this;
 	}
+
 public:
 	static constexpr bool ownsUnderlyingMemory = false;
 
-	template<class VersionOptions>
+	template <class VersionOptions>
 	ObjectReader(const uint8_t* data, VersionOptions vo) : _data(data) {
 		vo.read(*this);
 	}
@@ -119,13 +121,14 @@ private:
 
 class ArenaObjectReader : public _ObjectReader<ArenaObjectReader> {
 	friend struct _IncludeVersion;
-	ArenaObjectReader& operator>> (ProtocolVersion& version) {
+	ArenaObjectReader& operator>>(ProtocolVersion& version) {
 		uint64_t result;
 		memcpy(&result, _data, sizeof(result));
 		_data += sizeof(result);
 		version = ProtocolVersion(result);
 		return *this;
 	}
+
 public:
 	static constexpr bool ownsUnderlyingMemory = true;
 
@@ -147,11 +150,12 @@ private:
 class ObjectWriter {
 	friend struct _IncludeVersion;
 	bool writeProtocolVersion = false;
-	ObjectWriter& operator<< (const ProtocolVersion& version) {
+	ObjectWriter& operator<<(const ProtocolVersion& version) {
 		writeProtocolVersion = true;
 		return *this;
 	}
 	ProtocolVersion mProtocolVersion;
+
 public:
 	template <class VersionOptions>
 	ObjectWriter(VersionOptions vo) {
@@ -191,9 +195,7 @@ public:
 		serialize(FileIdentifierFor<Item>::value, item);
 	}
 
-	StringRef toStringRef() const {
-		return StringRef(data, size);
-	}
+	StringRef toStringRef() const { return StringRef(data, size); }
 
 	Standalone<StringRef> toString() const {
 		ASSERT(!customAllocator);
@@ -226,8 +228,7 @@ namespace detail {
 
 template <class T, class Context>
 struct LoadSaveHelper<Standalone<T>, Context> : Context {
-	LoadSaveHelper(const Context& context)
-		: Context(context), helper(context) {}
+	LoadSaveHelper(const Context& context) : Context(context), helper(context) {}
 
 	void load(Standalone<T>& member, const uint8_t* current) {
 		helper.load(member.contents(), current);

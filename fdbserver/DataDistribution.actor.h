@@ -35,19 +35,19 @@ struct RelocateShard {
 	int priority;
 
 	RelocateShard() : priority(0) {}
-	RelocateShard( KeyRange const& keys, int priority ) : keys(keys), priority(priority) {}
+	RelocateShard(KeyRange const& keys, int priority) : keys(keys), priority(priority) {}
 };
 
 struct IDataDistributionTeam {
 	virtual vector<StorageServerInterface> getLastKnownServerInterfaces() = 0;
 	virtual int size() = 0;
 	virtual vector<UID> const& getServerIDs() = 0;
-	virtual void addDataInFlightToTeam( int64_t delta ) = 0;
+	virtual void addDataInFlightToTeam(int64_t delta) = 0;
 	virtual int64_t getDataInFlightToTeam() = 0;
-	virtual int64_t getLoadBytes( bool includeInFlight = true, double inflightPenalty = 1.0 ) = 0;
-	virtual int64_t getMinAvailableSpace( bool includeInFlight = true ) = 0;
-	virtual double getMinAvailableSpaceRatio( bool includeInFlight = true ) = 0;
-	virtual bool hasHealthyAvailableSpace( double minRatio ) = 0;
+	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) = 0;
+	virtual int64_t getMinAvailableSpace(bool includeInFlight = true) = 0;
+	virtual double getMinAvailableSpaceRatio(bool includeInFlight = true) = 0;
+	virtual bool hasHealthyAvailableSpace(double minRatio) = 0;
 	virtual Future<Void> updateStorageMetrics() = 0;
 	virtual void addref() = 0;
 	virtual void delref() = 0;
@@ -58,15 +58,16 @@ struct IDataDistributionTeam {
 	virtual bool isOptimal() = 0;
 	virtual bool isWrongConfiguration() = 0;
 	virtual void setWrongConfiguration(bool) = 0;
-	virtual void addServers(const vector<UID> &servers) = 0;
+	virtual void addServers(const vector<UID>& servers) = 0;
 	virtual std::string getTeamID() = 0;
 
 	std::string getDesc() {
 		const auto& servers = getLastKnownServerInterfaces();
 		std::string s = format("TeamID:%s", getTeamID().c_str());
 		s += format("Size %d; ", servers.size());
-		for(int i=0; i<servers.size(); i++) {
-			if (i) s += ", ";
+		for (int i = 0; i < servers.size(); i++) {
+			if (i)
+				s += ", ";
 			s += servers[i].address().toString() + " " + servers[i].id().shortString();
 		}
 		return s;
@@ -81,23 +82,28 @@ struct GetTeamRequest {
 	double inflightPenalty;
 	std::vector<UID> completeSources;
 	std::vector<UID> src;
-	Promise< std::pair<Optional<Reference<IDataDistributionTeam>>,bool> > reply;
+	Promise<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> reply;
 
 	GetTeamRequest() {}
-	GetTeamRequest( bool wantsNewServers, bool wantsTrueBest, bool preferLowerUtilization, bool teamMustHaveShards, double inflightPenalty = 1.0 ) 
-		: wantsNewServers( wantsNewServers ), wantsTrueBest( wantsTrueBest ), preferLowerUtilization( preferLowerUtilization ), teamMustHaveShards( teamMustHaveShards ), inflightPenalty( inflightPenalty ) {}
+	GetTeamRequest(bool wantsNewServers,
+	               bool wantsTrueBest,
+	               bool preferLowerUtilization,
+	               bool teamMustHaveShards,
+	               double inflightPenalty = 1.0)
+	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerUtilization(preferLowerUtilization),
+	    teamMustHaveShards(teamMustHaveShards), inflightPenalty(inflightPenalty) {}
 };
 
 struct GetMetricsRequest {
 	KeyRange keys;
-	Promise< StorageMetrics > reply;
+	Promise<StorageMetrics> reply;
 
 	GetMetricsRequest() {}
-	GetMetricsRequest( KeyRange const& keys ) : keys(keys) {}
+	GetMetricsRequest(KeyRange const& keys) : keys(keys) {}
 };
 
 struct TeamCollectionInterface {
-	PromiseStream< GetTeamRequest > getTeam;
+	PromiseStream<GetTeamRequest> getTeam;
 };
 
 class ShardsAffectedByTeamFailure : public ReferenceCounted<ShardsAffectedByTeamFailure> {
@@ -105,19 +111,18 @@ public:
 	ShardsAffectedByTeamFailure() {}
 
 	struct Team {
-		vector<UID> servers;  // sorted
+		vector<UID> servers; // sorted
 		bool primary;
 
 		Team() : primary(true) {}
 		Team(vector<UID> const& servers, bool primary) : servers(servers), primary(primary) {}
 
-		bool operator < ( const Team& r ) const {
-			if( servers == r.servers ) return primary < r.primary;
+		bool operator<(const Team& r) const {
+			if (servers == r.servers)
+				return primary < r.primary;
 			return servers < r.servers;
 		}
-		bool operator == ( const Team& r ) const {
-			return servers == r.servers && primary == r.primary;
-		}
+		bool operator==(const Team& r) const { return servers == r.servers && primary == r.primary; }
 	};
 
 	// This tracks the data distribution on the data distribution server so that teamTrackers can
@@ -135,30 +140,35 @@ public:
 	//       no longer in the map), the servers will be set for all contained shards and added to all
 	//       intersecting shards.
 
-	int getNumberOfShards( UID ssID );
-	vector<KeyRange> getShardsFor( Team team );
+	int getNumberOfShards(UID ssID);
+	vector<KeyRange> getShardsFor(Team team);
 	bool hasShards(Team team);
 
-	//The first element of the pair is either the source for non-moving shards or the destination team for in-flight shards
-	//The second element of the pair is all previous sources for in-flight shards
-	std::pair<vector<Team>,vector<Team>> getTeamsFor( KeyRangeRef keys );
+	// The first element of the pair is either the source for non-moving shards or the destination team for in-flight
+	// shards The second element of the pair is all previous sources for in-flight shards
+	std::pair<vector<Team>, vector<Team>> getTeamsFor(KeyRangeRef keys);
 
-	void defineShard( KeyRangeRef keys );
-	void moveShard( KeyRangeRef keys, std::vector<Team> destinationTeam );
-	void finishMove( KeyRangeRef keys );
+	void defineShard(KeyRangeRef keys);
+	void moveShard(KeyRangeRef keys, std::vector<Team> destinationTeam);
+	void finishMove(KeyRangeRef keys);
 	void check();
+
 private:
 	struct OrderByTeamKey {
-		bool operator()( const std::pair<Team,KeyRange>& lhs, const std::pair<Team,KeyRange>& rhs ) const {
-			if (lhs.first < rhs.first) return true;
-			if (lhs.first > rhs.first) return false;
+		bool operator()(const std::pair<Team, KeyRange>& lhs, const std::pair<Team, KeyRange>& rhs) const {
+			if (lhs.first < rhs.first)
+				return true;
+			if (lhs.first > rhs.first)
+				return false;
 			return lhs.second.begin < rhs.second.begin;
 		}
 	};
 
-	KeyRangeMap< std::pair<vector<Team>,vector<Team>> > shard_teams;	// A shard can be affected by the failure of multiple teams if it is a queued merge, or when usable_regions > 1
-	std::set< std::pair<Team,KeyRange>, OrderByTeamKey > team_shards;
-	std::map< UID, int > storageServerShards;
+	KeyRangeMap<std::pair<vector<Team>, vector<Team>>>
+	    shard_teams; // A shard can be affected by the failure of multiple teams if it is a queued merge, or when
+	                 // usable_regions > 1
+	std::set<std::pair<Team, KeyRange>, OrderByTeamKey> team_shards;
+	std::map<UID, int> storageServerShards;
 
 	void erase(Team team, KeyRange const& range);
 	void insert(Team team, KeyRange const& range);
@@ -205,38 +215,48 @@ struct ShardTrackedData {
 	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
 };
 
-ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData, Database cx,
+ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData,
+                                           Database cx,
                                            PromiseStream<RelocateShard> output,
                                            Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                            PromiseStream<GetMetricsRequest> getShardMetrics,
                                            FutureStream<Promise<int64_t>> getAverageShardBytes,
-                                           Promise<Void> readyToStart, Reference<AsyncVar<bool>> zeroHealthyTeams,
-                                           UID distributorId, KeyRangeMap<ShardTrackedData>* shards,
+                                           Promise<Void> readyToStart,
+                                           Reference<AsyncVar<bool>> zeroHealthyTeams,
+                                           UID distributorId,
+                                           KeyRangeMap<ShardTrackedData>* shards,
                                            bool* trackerCancelled);
 
-ACTOR Future<Void> dataDistributionQueue(
-    Database cx, PromiseStream<RelocateShard> output, FutureStream<RelocateShard> input,
-    PromiseStream<GetMetricsRequest> getShardMetrics, Reference<AsyncVar<bool>> processingUnhealthy,
-    vector<TeamCollectionInterface> teamCollection, Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-    MoveKeysLock lock, PromiseStream<Promise<int64_t>> getAverageShardBytes, UID distributorId, int teamSize,
-    int singleRegionTeamSize, double* lastLimited);
+ACTOR Future<Void> dataDistributionQueue(Database cx,
+                                         PromiseStream<RelocateShard> output,
+                                         FutureStream<RelocateShard> input,
+                                         PromiseStream<GetMetricsRequest> getShardMetrics,
+                                         Reference<AsyncVar<bool>> processingUnhealthy,
+                                         vector<TeamCollectionInterface> teamCollection,
+                                         Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
+                                         MoveKeysLock lock,
+                                         PromiseStream<Promise<int64_t>> getAverageShardBytes,
+                                         UID distributorId,
+                                         int teamSize,
+                                         int singleRegionTeamSize,
+                                         double* lastLimited);
 
-//Holds the permitted size and IO Bounds for a shard
+// Holds the permitted size and IO Bounds for a shard
 struct ShardSizeBounds {
 	StorageMetrics max;
 	StorageMetrics min;
 	StorageMetrics permittedError;
 
-	bool operator == ( ShardSizeBounds const& rhs ) const {
+	bool operator==(ShardSizeBounds const& rhs) const {
 		return max == rhs.max && min == rhs.min && permittedError == rhs.permittedError;
 	}
 };
 
-//Gets the permitted size and IO bounds for a shard
+// Gets the permitted size and IO bounds for a shard
 ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize);
 
-//Determines the maximum shard size based on the size of the database
-int64_t getMaxShardSize( double dbSizeEstimate );
+// Determines the maximum shard size based on the size of the database
+int64_t getMaxShardSize(double dbSizeEstimate);
 
 struct DDTeamCollection;
 ACTOR Future<vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(Transaction* tr);

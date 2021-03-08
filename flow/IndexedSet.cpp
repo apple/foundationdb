@@ -34,95 +34,107 @@
 #include "flow/UnitTest.h"
 
 template <class Node>
-int ISGetHeight(Node* n){
-	if (!n) return 0;
+int ISGetHeight(Node* n) {
+	if (!n)
+		return 0;
 	int lh = ISGetHeight(n->child[0]);
 	int rh = ISGetHeight(n->child[1]);
 	return std::max(lh, rh) + 1;
 }
 
 void indent(int depth) {
-	for(int i=0; i<depth; i++)
+	for (int i = 0; i < depth; i++)
 		printf(" ");
 }
 
 template <class T, class Metric>
-std::pair<int, int> IndexedSet<T, Metric>::testonly_assertBalanced(typename IndexedSet<T, Metric>::Node* n, int depth, bool checkAVL) {
+std::pair<int, int> IndexedSet<T, Metric>::testonly_assertBalanced(typename IndexedSet<T, Metric>::Node* n,
+                                                                   int depth,
+                                                                   bool checkAVL) {
 	/* An IndexedSet (sub)tree n has the following invariants:
-		(1) BST invariant: Every descendant x of n->child[0] has x->data < n->data, and every descendant x of n->child[1] has x->data > n->data
-		(2) Balance invariant: n->balance is the difference between the height (greatest distance to a descendant) of n->child[1] and the height of n->child[0]
-		(3) AVL invariant: n->balance is -1, 0 or 1
-		(4) Metric invariant: n->total is the sum of the metric value with which n and each of its descendants was inserted 
-		(5) Parent invariant: Every child x of n has x->parent==n
+	    (1) BST invariant: Every descendant x of n->child[0] has x->data < n->data, and every descendant x of
+	n->child[1] has x->data > n->data (2) Balance invariant: n->balance is the difference between the height (greatest
+	distance to a descendant) of n->child[1] and the height of n->child[0] (3) AVL invariant: n->balance is -1, 0 or 1
+	    (4) Metric invariant: n->total is the sum of the metric value with which n and each of its descendants was
+	inserted (5) Parent invariant: Every child x of n has x->parent==n
 
-	This function checks all of these for all descendants of n.  It assumes that every node was inserted with a metric of 3 in order to check the metric invariant.
-	If checkAVL==false, it does not check the AVL invariant (since this is often temporarily broken and then restored during operations, this permits checking invariants e.g. before a rebalancing operation)
-		*/
-	if (!n && depth == 0) n = root;
+	This function checks all of these for all descendants of n.  It assumes that every node was inserted with a metric
+	of 3 in order to check the metric invariant. If checkAVL==false, it does not check the AVL invariant (since this is
+	often temporarily broken and then restored during operations, this permits checking invariants e.g. before a
+	rebalancing operation)
+	    */
+	if (!n && depth == 0)
+		n = root;
 
-	if (!n) { 
+	if (!n) {
 		return std::make_pair(0, 0);
 	}
 	bool ok = true;
-	for(int i=0; i<2; i++) {
+	for (int i = 0; i < 2; i++) {
 		if (n->child[i] && n->child[i]->parent != n) {
-			indent(depth); printf("Parent check failed\n");
+			indent(depth);
+			printf("Parent check failed\n");
 			ok = false;
 		}
 	}
 	if (n->child[0] && !(n->child[0]->data < n->data)) {
-		indent(depth); printf("Not a binary search tree\n");
+		indent(depth);
+		printf("Not a binary search tree\n");
 		ok = false;
 	}
 	if (n->child[1] && !(n->data < n->child[1]->data)) {
-		indent(depth); printf("Not a binary search tree\n");
+		indent(depth);
+		printf("Not a binary search tree\n");
 		ok = false;
 	}
-	auto lp = testonly_assertBalanced(n->child[0], depth+1, checkAVL);
+	auto lp = testonly_assertBalanced(n->child[0], depth + 1, checkAVL);
 	auto rp = testonly_assertBalanced(n->child[1], depth + 1, checkAVL);
 	int lh = lp.first;
 	int rh = rp.first;
-	if (n->balance != rh-lh){
-		indent(depth); printf("Balance is incorrect %d %d %d (@%d)\n", n->balance, rh, lh, n->data);
+	if (n->balance != rh - lh) {
+		indent(depth);
+		printf("Balance is incorrect %d %d %d (@%d)\n", n->balance, rh, lh, n->data);
 		ok = false;
 	}
-	if (checkAVL && (n->balance < -1 || n->balance > 1)){
-		indent(depth); printf("AVL invariant broken %d %d %d\n", n->balance, rh, lh);
+	if (checkAVL && (n->balance < -1 || n->balance > 1)) {
+		indent(depth);
+		printf("AVL invariant broken %d %d %d\n", n->balance, rh, lh);
 		ok = false;
 	}
 	if (n->total != lp.second + rp.second + 3) {
-		indent(depth); printf("Metric totals are wrong %d != %d + %d + 3\n", n->total, lp.second, rp.second);
+		indent(depth);
+		printf("Metric totals are wrong %d != %d + %d + 3\n", n->total, lp.second, rp.second);
 		ok = false;
 	}
 
 	ASSERT(ok);
-	return std::make_pair( std::max(lh, rh) + 1, n->total );
+	return std::make_pair(std::max(lh, rh) + 1, n->total);
 }
 
-bool operator < (std::string const& l, const char* r) {
-	return strcmp(l.c_str(), r)<0;
+bool operator<(std::string const& l, const char* r) {
+	return strcmp(l.c_str(), r) < 0;
 }
-bool operator < (const char* l, std::string const& r) {
-	return strcmp(l, r.c_str())<0;
+bool operator<(const char* l, std::string const& r) {
+	return strcmp(l, r.c_str()) < 0;
 }
 
 /*IndexedSet<int,int> concat_unbalanced( IndexedSet<int,int> &&a, int v, IndexedSet<int,int> && b ) {
-	IndexedSet<int,int>::Node* n = new IndexedSet<int,int>::Node( std::move(v), 1, NULL );
-	n->child[0] = a.root; a.root = NULL;
-	n->child[1] = b.root; b.root = NULL;
-	if (n->child[0]) n->child[0]->parent = n;
-	if (n->child[1]) n->child[1]->parent = n;
-	n->balance = ISGetHeight( n->child[1] ) - ISGetHeight( n->child[0] );
-	if (n->child[0]) n->total += n->child[0]->total;
-	if (n->child[1]) n->total += n->child[1]->total;
-	IndexedSet<int,int> s;
-	s.root = n;
-	return std::move(s);
+    IndexedSet<int,int>::Node* n = new IndexedSet<int,int>::Node( std::move(v), 1, NULL );
+    n->child[0] = a.root; a.root = NULL;
+    n->child[1] = b.root; b.root = NULL;
+    if (n->child[0]) n->child[0]->parent = n;
+    if (n->child[1]) n->child[1]->parent = n;
+    n->balance = ISGetHeight( n->child[1] ) - ISGetHeight( n->child[0] );
+    if (n->child[0]) n->total += n->child[0]->total;
+    if (n->child[1]) n->total += n->child[1]->total;
+    IndexedSet<int,int> s;
+    s.root = n;
+    return std::move(s);
 }*/
 
 TEST_CASE("/flow/IndexedSet/erase 400k of 1M") {
 	IndexedSet<int, int> is;
-	for (int n = 0; n<1000000; n++)
+	for (int n = 0; n < 1000000; n++)
 		is.insert(n, 3);
 
 	is.erase(is.lower_bound(300000), is.lower_bound(700001));
@@ -130,89 +142,90 @@ TEST_CASE("/flow/IndexedSet/erase 400k of 1M") {
 	is.testonly_assertBalanced();
 
 	int count = 0;
-	for (auto iter = is.begin(); iter != is.end(); ++iter) ++count;
+	for (auto iter = is.begin(); iter != is.end(); ++iter)
+		++count;
 
-	ASSERT(count*3 == is.sumTo(is.end()));
+	ASSERT(count * 3 == is.sumTo(is.end()));
 
 	return Void();
 }
 
 /*TEST_CASE("/flow/IndexedSet/performance") {
-	std::vector<int> x;
-	for (int i = 0; i<1000000; i++)
-		x.push_back(deterministicRandom()->randomInt(0, 10000000));
+    std::vector<int> x;
+    for (int i = 0; i<1000000; i++)
+        x.push_back(deterministicRandom()->randomInt(0, 10000000));
 
-	IndexedSet<int, int> is;
-	double start = timer();
-	for (int i = 0; i<x.size(); i++) {
-		int t = x[i];
-		is.insert(std::move(t), 3);
-	}
-	double end = timer();
-	double kps = x.size() / 1000.0 / (end - start);
-	printf("%0.1f Kinsert/sec\n", kps);
-	ASSERT(kps >= 500);                                           //< Or something?
+    IndexedSet<int, int> is;
+    double start = timer();
+    for (int i = 0; i<x.size(); i++) {
+        int t = x[i];
+        is.insert(std::move(t), 3);
+    }
+    double end = timer();
+    double kps = x.size() / 1000.0 / (end - start);
+    printf("%0.1f Kinsert/sec\n", kps);
+    ASSERT(kps >= 500);                                           //< Or something?
 
-	start = timer();
-	for (int i = 0; i<x.size(); i++)
-		ASSERT(is.find(x[i]) != is.end());
-	end = timer();
-	kps = x.size() / 1000.0 / (end - start);
-	printf("%0.1f Kfind/sec\n", kps);
-	ASSERT(kps >= 500);
+    start = timer();
+    for (int i = 0; i<x.size(); i++)
+        ASSERT(is.find(x[i]) != is.end());
+    end = timer();
+    kps = x.size() / 1000.0 / (end - start);
+    printf("%0.1f Kfind/sec\n", kps);
+    ASSERT(kps >= 500);
 
-	{
-		//std::set<int> ss;
-		IndexedSet<int, NoMetric> ss;
-		double start = timer();
-		for (int i = 0; i<x.size(); i++) {
-			int t = x[i];
-			ss.insert(t, NoMetric());
-		}
-		double end = timer();
-		printf("%0.1f Kinsert/sec (set)\n", x.size() / 1000.0 / (end - start));
+    {
+        //std::set<int> ss;
+        IndexedSet<int, NoMetric> ss;
+        double start = timer();
+        for (int i = 0; i<x.size(); i++) {
+            int t = x[i];
+            ss.insert(t, NoMetric());
+        }
+        double end = timer();
+        printf("%0.1f Kinsert/sec (set)\n", x.size() / 1000.0 / (end - start));
 
-		start = timer();
-		for (int i = 0; i<x.size(); i++)
-			ASSERT(ss.find(x[i]) != ss.end());
-		end = timer();
-		printf("%0.1f Kfind/sec\n", x.size() / 1000.0 / (end - start));
-	}
+        start = timer();
+        for (int i = 0; i<x.size(); i++)
+            ASSERT(ss.find(x[i]) != ss.end());
+        end = timer();
+        printf("%0.1f Kfind/sec\n", x.size() / 1000.0 / (end - start));
+    }
 
-	for (int i = 0; i<x.size(); i++)
-		ASSERT(is.find(x[i]) != is.end());
+    for (int i = 0; i<x.size(); i++)
+        ASSERT(is.find(x[i]) != is.end());
 
-	ASSERT(is.find(-6) == is.end());
+    ASSERT(is.find(-6) == is.end());
 
-	std::sort(x.begin(), x.end());
-	x.resize(std::unique(x.begin(), x.end()) - x.begin());
+    std::sort(x.begin(), x.end());
+    x.resize(std::unique(x.begin(), x.end()) - x.begin());
 
-	int i = 0;
-	for (auto it = is.begin(); it != is.end(); ++it, ++i)
-		ASSERT(*it == x[i]);
-	ASSERT(i == x.size());
+    int i = 0;
+    for (auto it = is.begin(); it != is.end(); ++it, ++i)
+        ASSERT(*it == x[i]);
+    ASSERT(i == x.size());
 
-	is.testonly_assertBalanced();
+    is.testonly_assertBalanced();
 
-	std::random_shuffle(x.begin(), x.end());
-	start = timer();
-	for (int i = 0; i<x.size(); i++) {
-		is.erase(x[i]);
-	}
-	end = timer();
-	is.testonly_assertBalanced();
+    std::random_shuffle(x.begin(), x.end());
+    start = timer();
+    for (int i = 0; i<x.size(); i++) {
+        is.erase(x[i]);
+    }
+    end = timer();
+    is.testonly_assertBalanced();
 
-	printf("%0.1f Kerase/sec\n", x.size() / 1000.0 / (end - start));
-	is.testonly_assertBalanced();
-	for (int i = 0; i<x.size() / 2; i++)
-		ASSERT(is.find(x[i]) == is.end());
+    printf("%0.1f Kerase/sec\n", x.size() / 1000.0 / (end - start));
+    is.testonly_assertBalanced();
+    for (int i = 0; i<x.size() / 2; i++)
+        ASSERT(is.find(x[i]) == is.end());
 }*/
 
 TEST_CASE("/flow/IndexedSet/random ops") {
-	for (int t = 0; t<100; t++) {
+	for (int t = 0; t < 100; t++) {
 		IndexedSet<int, int> is;
 		int rr = deterministicRandom()->randomInt(0, 600) * deterministicRandom()->randomInt(0, 600);
-		for (int n = 0; n<rr; n++) {
+		for (int n = 0; n < rr; n++) {
 			if (deterministicRandom()->random01() < (double)is.sumTo(is.end()) / rr * 2)
 				is.erase(is.lower_bound(deterministicRandom()->randomInt(0, 10000000)));
 			else
@@ -220,16 +233,17 @@ TEST_CASE("/flow/IndexedSet/random ops") {
 		}
 
 		int b = deterministicRandom()->randomInt(0, 10000000);
-		//int e = b + deterministicRandom()->randomInt(0, 10);
+		// int e = b + deterministicRandom()->randomInt(0, 10);
 		int e = deterministicRandom()->randomInt(0, 10000000);
-		if (e<b) std::swap(b, e);
+		if (e < b)
+			std::swap(b, e);
 		auto ib = is.lower_bound(b);
 		auto ie = is.lower_bound(e);
 
-		int original_count = is.sumTo(is.end())/3;
-		int original_incount = is.sumRange(ib, ie)/3;
+		int original_count = is.sumTo(is.end()) / 3;
+		int original_incount = is.sumRange(ib, ie) / 3;
 
-		//printf("\n#%d Erasing %d of %d items\n", t, original_incount, original_count);
+		// printf("\n#%d Erasing %d of %d items\n", t, original_incount, original_count);
 
 		is.erase(ib, ie);
 		is.testonly_assertBalanced();
@@ -237,25 +251,25 @@ TEST_CASE("/flow/IndexedSet/random ops") {
 		int count = 0, incount = 0;
 		for (auto i : is) {
 			++count;
-			if (i >= b && i < e) { 
-				//printf("Remaining item: %d (%d - %d)\n", i, b, e); 
-				incount++; 
+			if (i >= b && i < e) {
+				// printf("Remaining item: %d (%d - %d)\n", i, b, e);
+				incount++;
 			}
 		}
 
-		//printf("%d items remain, totalling %d\n", count, is.sumTo(is.end()));
-		//printf("%d items remain in erased range\n", incount);
+		// printf("%d items remain, totalling %d\n", count, is.sumTo(is.end()));
+		// printf("%d items remain in erased range\n", incount);
 
 		ASSERT(incount == 0);
 		ASSERT(count == original_count - original_incount);
-		ASSERT(is.sumTo(is.end()) == count*3);
+		ASSERT(is.sumTo(is.end()) == count * 3);
 	}
 	return Void();
 }
 
 TEST_CASE("/flow/IndexedSet/strings") {
-	Map< std::string, int > myMap;
-	std::map< std::string, int > aMap;
+	Map<std::string, int> myMap;
+	std::map<std::string, int> aMap;
 	myMap["Hello"] = 1;
 	myMap["Planet"] = 5;
 	for (auto i = myMap.begin(); i != myMap.end(); ++i)
@@ -268,22 +282,22 @@ TEST_CASE("/flow/IndexedSet/strings") {
 	auto a = myMap.upper_bound("A")->key;
 	auto x = myMap.lower_bound("M")->key;
 
-	ASSERT((a + x) == (std::string)"HelloPlanet");
+	ASSERT((a + x) == (std::string) "HelloPlanet");
 
 	/* This was a performance test:
 
-		double start = timer();
-		volatile int tt=0;
-		for(int i=0; i<1000000; i++)
-		tt += myMap.find( "Hello" )->value;
-		double end = timer();
-		printf("%0.1f Map.KfindStr/sec\n", 1000000/1000.0/(end-start));
+	    double start = timer();
+	    volatile int tt=0;
+	    for(int i=0; i<1000000; i++)
+	    tt += myMap.find( "Hello" )->value;
+	    double end = timer();
+	    printf("%0.1f Map.KfindStr/sec\n", 1000000/1000.0/(end-start));
 
-		start = timer();
-		for(int i=0; i<1000000; i++)
-		aMap.find( "Hello" );
-		end = timer();
-		printf("%0.1f std::map.KfindStr/sec\n", 1000000/1000.0/(end-start));
+	    start = timer();
+	    for(int i=0; i<1000000; i++)
+	    aMap.find( "Hello" );
+	    end = timer();
+	    printf("%0.1f std::map.KfindStr/sec\n", 1000000/1000.0/(end-start));
 	*/
 
 	return Void();
@@ -319,7 +333,7 @@ TEST_CASE("/flow/IndexedSets/ints") {
 	}
 	ASSERT(is.find(10) != is.end());
 	ASSERT(is.find(20) == is.end());
-	//test( std::distance( is.begin(), is.end() ) == 1 );
+	// test( std::distance( is.begin(), is.end() ) == 1 );
 
 	// Only a single `10` should remain
 	auto i = is.begin();
@@ -338,17 +352,17 @@ TEST_CASE("/flow/IndexedSet/data constructor and destructor calls match") {
 		int value;
 		Counter(int value) : value(value) { count++; }
 		~Counter() { count--; }
-		Counter(const Counter& r) :value(r.value) { count++; }
+		Counter(const Counter& r) : value(r.value) { count++; }
 		void operator=(const Counter& r) { value = r.value; }
 		bool operator<(const Counter& r) const { return value < r.value; }
 	};
 	IndexedSet<Counter, NoMetric> mySet;
-	for (int i = 0; i<1000000; i++) {
+	for (int i = 0; i < 1000000; i++) {
 		mySet.insert(Counter(deterministicRandom()->randomInt(0, 1000000)), NoMetric());
 		mySet.erase(Counter(deterministicRandom()->randomInt(0, 1000000)));
 	}
 	int count2 = 0;
-	for (int i = 0; i<1000000; i++)
+	for (int i = 0; i < 1000000; i++)
 		count2 += mySet.count(Counter(i));
 	ASSERT(count == count2);
 	mySet.clear();
@@ -359,22 +373,22 @@ TEST_CASE("/flow/IndexedSet/data constructor and destructor calls match") {
 TEST_CASE("/flow/IndexedSet/comparison to std::set") {
 	IndexedSet<int, int> is;
 	std::set<int> ss;
-	for (int i = 0; i<1000000; i++) {
+	for (int i = 0; i < 1000000; i++) {
 		int p = deterministicRandom()->randomInt(0, 2000000);
 		is.insert(std::move(p), 1);
 		ss.insert(p);
 	}
 
-	for (int i = 0; i<2000000; i++) {
-		int p = i; //deterministicRandom()->randomInt(0, 2000000);
+	for (int i = 0; i < 2000000; i++) {
+		int p = i; // deterministicRandom()->randomInt(0, 2000000);
 		auto sit = ss.upper_bound(p);
 		int snext = sit != ss.end() ? *sit : 2000000;
 		auto iit = is.upper_bound(p);
 		int inext = iit != is.end() ? *iit : 2000000;
 		ASSERT(snext == inext);
-		//if (snext != inext)
+		// if (snext != inext)
 		//	printf("Fail %d %d %d\n", p, snext, inext);
-		//else
+		// else
 		//	printf("OK %d %d %d\n", p, snext, inext);
 	}
 	return Void();
@@ -385,18 +399,18 @@ TEST_CASE("/flow/IndexedSet/all numbers") {
 	std::mt19937_64 urng(deterministicRandom()->randomUInt32());
 
 	std::vector<int> allNumbers;
-	for (int i = 0; i<1000000; i++)
+	for (int i = 0; i < 1000000; i++)
 		allNumbers.push_back(i);
 	std::shuffle(allNumbers.begin(), allNumbers.end(), urng);
 
-	for (int i = 0; i<allNumbers.size(); i++)
+	for (int i = 0; i < allNumbers.size(); i++)
 		is.insert(allNumbers[i], allNumbers[i]);
 
-	ASSERT(is.sumTo(is.end()) == allNumbers.size()*(allNumbers.size() - 1) / 2);
+	ASSERT(is.sumTo(is.end()) == allNumbers.size() * (allNumbers.size() - 1) / 2);
 
-	for (int i = 0; i<100000; i++) {
+	for (int i = 0; i < 100000; i++) {
 		int b = deterministicRandom()->randomInt(1, (int)allNumbers.size());
-		int64_t ntotal = int64_t(b)*(b - 1) / 2;
+		int64_t ntotal = int64_t(b) * (b - 1) / 2;
 		int64_t n = ntotal;
 		auto ii = is.index(n);
 		int ib = ii != is.end() ? *ii : 1000000;
@@ -405,22 +419,23 @@ TEST_CASE("/flow/IndexedSet/all numbers") {
 			printf("%s %" PRId64 " %d %d %" PRId64 "\n", ib == b ? "OK" : "ERROR", n, b, ib, is.sumTo(ii));
 	}
 
-	for (int i = 0; i<100000; i++) {
+	for (int i = 0; i < 100000; i++) {
 		int a = deterministicRandom()->randomInt(0, (int)allNumbers.size());
 		int b = deterministicRandom()->randomInt(0, (int)allNumbers.size());
-		if (a>b) std::swap(a, b);
+		if (a > b)
+			std::swap(a, b);
 
 		int64_t itotal = is.sumRange(a, b);
-		//int ntotal = int64_t(b)*(b-1)/2 - int64_t(a)*(a-1)/2;
-		int64_t ntotal = int64_t(b - a)*(a + b - 1) / 2;
+		// int ntotal = int64_t(b)*(b-1)/2 - int64_t(a)*(a-1)/2;
+		int64_t ntotal = int64_t(b - a) * (a + b - 1) / 2;
 		ASSERT(itotal == ntotal);
 		if (itotal != ntotal)
 			printf("%s %" PRId64 " %" PRId64 "\n", itotal == ntotal ? "OK" : "ERROR", ntotal, itotal);
 	}
 
-	//double a = timer();
+	// double a = timer();
 	is.erase(is.begin(), is.end());
-	//a = timer() - a;
+	// a = timer() - a;
 
 	return Void();
 }

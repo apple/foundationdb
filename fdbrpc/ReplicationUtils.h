@@ -25,52 +25,45 @@
 #include "flow/flow.h"
 #include "fdbrpc/ReplicationTypes.h"
 
+typedef std::string repTestType;
 
-typedef std::string	repTestType;
-
-extern repTestType	convertToTestType(int	iValue);
-
+extern repTestType convertToTestType(int iValue);
 
 extern int testReplication();
 
-extern double ratePolicy(
-	Reference<LocalitySet> &					localitySet,
-	Reference<IReplicationPolicy>	const&			policy,
-	unsigned int							nSelectTests);
+extern double ratePolicy(Reference<LocalitySet>& localitySet,
+                         Reference<IReplicationPolicy> const& policy,
+                         unsigned int nSelectTests);
 
-extern bool findBestPolicySet(
-	std::vector<LocalityEntry>&	bestResults,
-	Reference<LocalitySet> &						localitySet,
-	Reference<IReplicationPolicy>	const&				policy,
-	unsigned int								nMinItems,
-	unsigned int								nSelectTests,
-	unsigned int								nPolicyTests);
+extern bool findBestPolicySet(std::vector<LocalityEntry>& bestResults,
+                              Reference<LocalitySet>& localitySet,
+                              Reference<IReplicationPolicy> const& policy,
+                              unsigned int nMinItems,
+                              unsigned int nSelectTests,
+                              unsigned int nPolicyTests);
 
-extern bool findBestUniquePolicySet(
-	std::vector<LocalityEntry>&	bestResults,
-	Reference<LocalitySet> &						localitySet,
-	Reference<IReplicationPolicy>	const&				policy,
-	StringRef										localityUniquenessKey,
-	unsigned int								nMinItems,
-	unsigned int								nSelectTests,
-	unsigned int								nPolicyTests);
+extern bool findBestUniquePolicySet(std::vector<LocalityEntry>& bestResults,
+                                    Reference<LocalitySet>& localitySet,
+                                    Reference<IReplicationPolicy> const& policy,
+                                    StringRef localityUniquenessKey,
+                                    unsigned int nMinItems,
+                                    unsigned int nSelectTests,
+                                    unsigned int nPolicyTests);
 
 // The following function will return TRUE if all possible combinations
 // of the new Item array will not pass the specified policy
-extern bool validateAllCombinations(
-	std::vector<LocalityData> &				offendingCombo,
-	LocalityGroup const&							localitySet,
-	Reference<IReplicationPolicy>	const&							policy,
-	std::vector<LocalityData> const&	newItems,
-	unsigned int											nCombinationSize,
-	bool															bCheckIfValid = true);
+extern bool validateAllCombinations(std::vector<LocalityData>& offendingCombo,
+                                    LocalityGroup const& localitySet,
+                                    Reference<IReplicationPolicy> const& policy,
+                                    std::vector<LocalityData> const& newItems,
+                                    unsigned int nCombinationSize,
+                                    bool bCheckIfValid = true);
 
-extern bool validateAllCombinations(
-	LocalityGroup const&							localitySet,
-	Reference<IReplicationPolicy>	const&							policy,
-	std::vector<LocalityData> const&	newItems,
-	unsigned int											nCombinationSize,
-	bool															bCheckIfValid = true);
+extern bool validateAllCombinations(LocalityGroup const& localitySet,
+                                    Reference<IReplicationPolicy> const& policy,
+                                    std::vector<LocalityData> const& newItems,
+                                    unsigned int nCombinationSize,
+                                    bool bCheckIfValid = true);
 
 /// Remove all pieces of locality information from the LocalityData that will not be used when validating the policy.
 void filterLocalityDataForPolicy(Reference<IReplicationPolicy> policy, LocalityData* ld);
