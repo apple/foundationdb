@@ -391,7 +391,6 @@ public:
 			DecodedNode* n = root;
 			bool addLeftChild = false;
 
-			ASSERT(n != nullptr);
 			while (true) {
 				int cmp = k.compare(n->item, skipLen);
 
@@ -433,6 +432,7 @@ public:
 				return false;
 			}
 
+			ASSERT(n != nullptr);
 			// Insert k as the left or right child of n, depending on the value of addLeftChild
 			// First, see if it will fit.
 			const T* prev = addLeftChild ? n->prev : &n->item;
