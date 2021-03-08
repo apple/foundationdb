@@ -20,10 +20,10 @@
 
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_MOVEKEYS_ACTOR_G_H)
-	#define FDBSERVER_MOVEKEYS_ACTOR_G_H
-	#include "fdbserver/MoveKeys.actor.g.h"
+#define FDBSERVER_MOVEKEYS_ACTOR_G_H
+#include "fdbserver/MoveKeys.actor.g.h"
 #elif !defined(FDBSERVER_MOVEKEYS_ACTOR_H)
-	#define FDBSERVER_MOVEKEYS_ACTOR_H
+#define FDBSERVER_MOVEKEYS_ACTOR_H
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/CommitTransaction.h"
@@ -34,7 +34,9 @@
 struct MoveKeysLock {
 	UID prevOwner, myOwner, prevWrite;
 	template <class Ar>
-	void serialize(Ar& ar) { serializer(ar, prevOwner, myOwner, prevWrite); }
+	void serialize(Ar& ar) {
+		serializer(ar, prevOwner, myOwner, prevWrite);
+	}
 };
 
 // Calling moveKeys, etc with the return value of this actor ensures that no movekeys, etc
@@ -52,16 +54,18 @@ bool isDDEnabled();
 bool setDDEnabled(bool status, UID snapUID);
 // sets the in-memory DDEnabled flag
 
-void seedShardServers(
-	Arena& trArena,
-	CommitTransactionRef &tr,
-	vector<StorageServerInterface> servers );
+void seedShardServers(Arena& trArena, CommitTransactionRef& tr, vector<StorageServerInterface> servers);
 // Called by the master server to write the very first transaction to the database
 // establishing a set of shard servers and all invariants of the systemKeys.
 
-ACTOR Future<Void> moveKeys(Database occ, KeyRange keys, vector<UID> destinationTeam, vector<UID> healthyDestinations,
-                            MoveKeysLock lock, Promise<Void> dataMovementComplete,
-                            FlowLock* startMoveKeysParallelismLock, FlowLock* finishMoveKeysParallelismLock,
+ACTOR Future<Void> moveKeys(Database occ,
+                            KeyRange keys,
+                            vector<UID> destinationTeam,
+                            vector<UID> healthyDestinations,
+                            MoveKeysLock lock,
+                            Promise<Void> dataMovementComplete,
+                            FlowLock* startMoveKeysParallelismLock,
+                            FlowLock* finishMoveKeysParallelismLock,
                             bool hasRemote,
                             UID relocationIntervalId); // for logging only
 // Eventually moves the given keys to the given destination team

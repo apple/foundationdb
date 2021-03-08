@@ -60,7 +60,9 @@ struct PopulateTPCC : TestWorkload {
 	}
 
 	int NURand(int C, int A, int x, int y) {
-		return (((deterministicRandom()->randomInt(0, A + 1) | deterministicRandom()->randomInt(x, y + 1)) + C) % (y - x + 1)) + x;
+		return (((deterministicRandom()->randomInt(0, A + 1) | deterministicRandom()->randomInt(x, y + 1)) + C) %
+		        (y - x + 1)) +
+		       x;
 	}
 
 	StringRef aString(Arena& arena, int x, int y) {
@@ -503,7 +505,8 @@ struct PopulateTPCC : TestWorkload {
 	}
 
 	Future<Void> setup(Database const& cx) override {
-		if (clientId >= clientsUsed) return Void();
+		if (clientId >= clientsUsed)
+			return Void();
 		return populate(this, cx);
 	}
 
