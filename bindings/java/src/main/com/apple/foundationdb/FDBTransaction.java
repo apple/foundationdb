@@ -267,7 +267,18 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		}
 		pointerReadLock.lock();
 		try {
-			return new FutureResult(Transaction_get(getPtr(), key, isSnapshot), executor, eventKeeper);
+			CompletableFuture<byte[]> future =
+			    new FutureResult(Transaction_get(getPtr(), key, isSnapshot), executor);
+			if (eventKeeper != null) {
+				future = future.thenApply((bytes) -> {
+					if (bytes != null) {
+						eventKeeper.count(Events.BYTES_FETCHED, bytes.length);
+					}
+					return bytes;
+				});
+			}
+
+			return future;
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -287,8 +298,18 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		}
 		pointerReadLock.lock();
 		try {
-			return new FutureKey(Transaction_getKey(getPtr(), 
-							selector.getKey(), selector.orEqual(), selector.getOffset(), isSnapshot), executor, eventKeeper);
+			CompletableFuture<byte[]> future = new FutureKey(
+			    Transaction_getKey(getPtr(), selector.getKey(), selector.orEqual(), selector.getOffset(), isSnapshot),
+			    executor);
+			if (eventKeeper != null) {
+				future = future.thenApply((bytes) -> {
+					if (bytes != null) {
+						eventKeeper.count(Events.BYTES_FETCHED, bytes.length);
+					}
+					return bytes;
+				});
+			}
+			return future;
 		} finally {
 			pointerReadLock.unlock();
 		}
