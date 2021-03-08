@@ -11,7 +11,7 @@
 #include "versions.h"
 #endif
 #include "fdbserver/Knobs.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 ExecCmdValueString::ExecCmdValueString(StringRef pCmdValueString) {
 	cmdValueString = pCmdValueString;
@@ -73,14 +73,20 @@ void ExecCmdValueString::dbgPrint() {
 }
 
 #if defined(_WIN32) || defined(__APPLE__)
-ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync, double maxSimDelayTime)
-{
+ACTOR Future<int> spawnProcess(std::string binPath,
+                               std::vector<std::string> paramList,
+                               double maxWaitTime,
+                               bool isSync,
+                               double maxSimDelayTime) {
 	wait(delay(0.0));
 	return 0;
 }
 #else
-ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync, double maxSimDelayTime)
-{
+ACTOR Future<int> spawnProcess(std::string binPath,
+                               std::vector<std::string> paramList,
+                               double maxWaitTime,
+                               bool isSync,
+                               double maxSimDelayTime) {
 	state std::string argsString;
 	for (auto const& elem : paramList) {
 		argsString += elem + ",";
@@ -89,8 +95,8 @@ ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> par
 
 	state int err = 0;
 	state double runTime = 0;
-	state boost::process::child c(binPath, boost::process::args(paramList),
-								  boost::process::std_err > boost::process::null);
+	state boost::process::child c(
+	    binPath, boost::process::args(paramList), boost::process::std_err > boost::process::null);
 
 	// for async calls in simulator, always delay by a deterinistic amount of time and do the call
 	// synchronously, otherwise the predictability of the simulator breaks
@@ -98,8 +104,7 @@ ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> par
 		double snapDelay = std::max(maxSimDelayTime - 1, 0.0);
 		// add some randomness
 		snapDelay += deterministicRandom()->random01();
-		TraceEvent("SnapDelaySpawnProcess")
-			.detail("SnapDelay", snapDelay);
+		TraceEvent("SnapDelaySpawnProcess").detail("SnapDelay", snapDelay);
 		wait(delay(snapDelay));
 	}
 
@@ -121,22 +126,16 @@ ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> par
 	}
 
 	if (c.running()) {
-		TraceEvent(SevWarnAlways, "ChildTermination")
-				.detail("Cmd", binPath)
-				.detail("Args", argsString);
+		TraceEvent(SevWarnAlways, "ChildTermination").detail("Cmd", binPath).detail("Args", argsString);
 		c.terminate();
 		err = -1;
 		if (!c.wait_for(std::chrono::seconds(1))) {
-			TraceEvent(SevWarnAlways, "SpawnProcessFailedToExit")
-				.detail("Cmd", binPath)
-				.detail("Args", argsString);
+			TraceEvent(SevWarnAlways, "SpawnProcessFailedToExit").detail("Cmd", binPath).detail("Args", argsString);
 		}
 	} else {
 		err = c.exit_code();
 	}
-	TraceEvent("SpawnProcess")
-		.detail("Cmd", binPath)
-		.detail("Error", err);
+	TraceEvent("SpawnProcess").detail("Cmd", binPath).detail("Error", err);
 	return err;
 }
 #endif
@@ -257,8 +256,8 @@ void printStorageVersionInfo() {
 	NetworkAddress addr = g_network->getLocalAddress();
 	for (auto itr = workerStorageVersionInfo[addr].begin(); itr != workerStorageVersionInfo[addr].end(); itr++) {
 		TraceEvent("StorageVersionInfo")
-			.detail("UID", itr->first)
-			.detail("Version", itr->second.version)
-			.detail("DurableVersion", itr->second.durableVersion);
+		    .detail("UID", itr->first)
+		    .detail("Version", itr->second.version)
+		    .detail("DurableVersion", itr->second.durableVersion);
 	}
 }

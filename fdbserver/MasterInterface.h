@@ -33,10 +33,11 @@ typedef uint64_t DBRecoveryCount;
 struct MasterInterface {
 	constexpr static FileIdentifier file_identifier = 5979145;
 	LocalityData locality;
-	RequestStream< ReplyPromise<Void> > waitFailure;
-	RequestStream< struct TLogRejoinRequest > tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new master
-	RequestStream< struct ChangeCoordinatorsRequest > changeCoordinators;
-	RequestStream< struct GetCommitVersionRequest > getCommitVersion;
+	RequestStream<ReplyPromise<Void>> waitFailure;
+	RequestStream<struct TLogRejoinRequest>
+	    tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new master
+	RequestStream<struct ChangeCoordinatorsRequest> changeCoordinators;
+	RequestStream<struct GetCommitVersionRequest> getCommitVersion;
 
 	NetworkAddress address() const { return changeCoordinators.getEndpoint().getPrimaryAddress(); }
 
@@ -44,14 +45,14 @@ struct MasterInterface {
 	template <class Archive>
 	void serialize(Archive& ar) {
 		if constexpr (!is_fb_function<Archive>) {
-                ASSERT( ar.protocolVersion().isValid() );
-        }
+			ASSERT(ar.protocolVersion().isValid());
+		}
 		serializer(ar, locality, waitFailure, tlogRejoin, changeCoordinators, getCommitVersion);
 	}
 
 	void initEndpoints() {
-		getCommitVersion.getEndpoint( TaskPriority::GetConsistentReadVersion );
-		tlogRejoin.getEndpoint( TaskPriority::MasterTLogRejoin );
+		getCommitVersion.getEndpoint(TaskPriority::GetConsistentReadVersion);
+		tlogRejoin.getEndpoint(TaskPriority::MasterTLogRejoin);
 	}
 };
 
@@ -75,8 +76,8 @@ struct TLogRejoinRequest {
 	TLogInterface myInterface;
 	ReplyPromise<TLogRejoinReply> reply;
 
-	TLogRejoinRequest() { }
-	explicit TLogRejoinRequest(const TLogInterface &interf) : myInterface(interf) { }
+	TLogRejoinRequest() {}
+	explicit TLogRejoinRequest(const TLogInterface& interf) : myInterface(interf) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, myInterface, reply);
@@ -86,7 +87,7 @@ struct TLogRejoinRequest {
 struct ChangeCoordinatorsRequest {
 	constexpr static FileIdentifier file_identifier = 13605416;
 	Standalone<StringRef> newConnectionString;
-	ReplyPromise<Void> reply;  // normally throws even on success!
+	ReplyPromise<Void> reply; // normally throws even on success!
 
 	ChangeCoordinatorsRequest() {}
 	ChangeCoordinatorsRequest(Standalone<StringRef> newConnectionString) : newConnectionString(newConnectionString) {}
@@ -104,21 +105,15 @@ struct ResolverMoveRef {
 
 	ResolverMoveRef() : dest(0) {}
 	ResolverMoveRef(KeyRangeRef const& range, int dest) : range(range), dest(dest) {}
-	ResolverMoveRef( Arena& a, const ResolverMoveRef& copyFrom ) : range(a, copyFrom.range), dest(copyFrom.dest) {}
+	ResolverMoveRef(Arena& a, const ResolverMoveRef& copyFrom) : range(a, copyFrom.range), dest(copyFrom.dest) {}
 
-	bool operator == ( ResolverMoveRef const& rhs ) const {
-		return range == rhs.range && dest == rhs.dest;
-	}
-	bool operator != ( ResolverMoveRef const& rhs ) const {
-		return range != rhs.range || dest != rhs.dest;
-	}
+	bool operator==(ResolverMoveRef const& rhs) const { return range == rhs.range && dest == rhs.dest; }
+	bool operator!=(ResolverMoveRef const& rhs) const { return range != rhs.range || dest != rhs.dest; }
 
-	size_t expectedSize() const {
-		return range.expectedSize();
-	}
+	size_t expectedSize() const { return range.expectedSize(); }
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
+	void serialize(Ar& ar) {
 		serializer(ar, range, dest);
 	}
 };
@@ -132,7 +127,8 @@ struct GetCommitVersionReply {
 	uint64_t requestNum;
 
 	GetCommitVersionReply() : resolverChangesVersion(0), version(0), prevVersion(0), requestNum(0) {}
-	explicit GetCommitVersionReply( Version version, Version prevVersion, uint64_t requestNum ) : version(version), prevVersion(prevVersion), resolverChangesVersion(0), requestNum(requestNum) {}
+	explicit GetCommitVersionReply(Version version, Version prevVersion, uint64_t requestNum)
+	  : version(version), prevVersion(prevVersion), resolverChangesVersion(0), requestNum(requestNum) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -147,9 +143,10 @@ struct GetCommitVersionRequest {
 	UID requestingProxy;
 	ReplyPromise<GetCommitVersionReply> reply;
 
-	GetCommitVersionRequest() { }
+	GetCommitVersionRequest() {}
 	GetCommitVersionRequest(uint64_t requestNum, uint64_t mostRecentProcessedRequestNum, UID requestingProxy)
-		: requestNum(requestNum), mostRecentProcessedRequestNum(mostRecentProcessedRequestNum), requestingProxy(requestingProxy) {}
+	  : requestNum(requestNum), mostRecentProcessedRequestNum(mostRecentProcessedRequestNum),
+	    requestingProxy(requestingProxy) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -163,15 +160,11 @@ struct LifetimeToken {
 
 	LifetimeToken() : count(0) {}
 
-	bool isStillValid( LifetimeToken const& latestToken, bool isLatestID ) const {
+	bool isStillValid(LifetimeToken const& latestToken, bool isLatestID) const {
 		return ccID == latestToken.ccID && (count >= latestToken.count || isLatestID);
 	}
-	std::string toString() const {
-		return ccID.shortString() + format("#%lld", count);
-	}
-	void operator++() {
-		++count;
-	}
+	std::string toString() const { return ccID.shortString() + format("#%lld", count); }
+	void operator++() { ++count; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

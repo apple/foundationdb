@@ -9,7 +9,7 @@
 **    May you share freely, never taking more than you give.
 **
 *************************************************************************
-** 
+**
 ** This file defines various limits of what SQLite can process.
 */
 
@@ -21,7 +21,7 @@
 ** to count the size: 2^31-1 or 2147483647.
 */
 #ifndef SQLITE_MAX_LENGTH
-# define SQLITE_MAX_LENGTH 1000000000
+#define SQLITE_MAX_LENGTH 1000000000
 #endif
 
 /*
@@ -42,7 +42,7 @@
 ** dozen values in any of the other situations described above.
 */
 #ifndef SQLITE_MAX_COLUMN
-# define SQLITE_MAX_COLUMN 2000
+#define SQLITE_MAX_COLUMN 2000
 #endif
 
 /*
@@ -53,13 +53,13 @@
 ** to turn this limit off.
 */
 #ifndef SQLITE_MAX_SQL_LENGTH
-# define SQLITE_MAX_SQL_LENGTH 1000000000
+#define SQLITE_MAX_SQL_LENGTH 1000000000
 #endif
 
 /*
-** The maximum depth of an expression tree. This is limited to 
-** some extent by SQLITE_MAX_SQL_LENGTH. But sometime you might 
-** want to place more severe limits on the complexity of an 
+** The maximum depth of an expression tree. This is limited to
+** some extent by SQLITE_MAX_SQL_LENGTH. But sometime you might
+** want to place more severe limits on the complexity of an
 ** expression.
 **
 ** A value of 0 used to mean that the limit was not enforced.
@@ -67,7 +67,7 @@
 ** at all times.
 */
 #ifndef SQLITE_MAX_EXPR_DEPTH
-# define SQLITE_MAX_EXPR_DEPTH 1000
+#define SQLITE_MAX_EXPR_DEPTH 1000
 #endif
 
 /*
@@ -79,7 +79,7 @@
 ** any limit on the number of terms in a compount SELECT.
 */
 #ifndef SQLITE_MAX_COMPOUND_SELECT
-# define SQLITE_MAX_COMPOUND_SELECT 500
+#define SQLITE_MAX_COMPOUND_SELECT 500
 #endif
 
 /*
@@ -87,14 +87,14 @@
 ** Not currently enforced.
 */
 #ifndef SQLITE_MAX_VDBE_OP
-# define SQLITE_MAX_VDBE_OP 25000
+#define SQLITE_MAX_VDBE_OP 25000
 #endif
 
 /*
 ** The maximum number of arguments to an SQL function.
 */
 #ifndef SQLITE_MAX_FUNCTION_ARG
-# define SQLITE_MAX_FUNCTION_ARG 127
+#define SQLITE_MAX_FUNCTION_ARG 127
 #endif
 
 /*
@@ -102,10 +102,10 @@
 ** table and for temporary tables.  The SQLITE_DEFAULT_CACHE_SIZE
 */
 #ifndef SQLITE_DEFAULT_CACHE_SIZE
-# define SQLITE_DEFAULT_CACHE_SIZE  2000
+#define SQLITE_DEFAULT_CACHE_SIZE 2000
 #endif
 #ifndef SQLITE_DEFAULT_TEMP_CACHE_SIZE
-# define SQLITE_DEFAULT_TEMP_CACHE_SIZE  500
+#define SQLITE_DEFAULT_TEMP_CACHE_SIZE 500
 #endif
 
 /*
@@ -113,7 +113,7 @@
 ** checkpointing the database in WAL mode.
 */
 #ifndef SQLITE_DEFAULT_WAL_AUTOCHECKPOINT
-# define SQLITE_DEFAULT_WAL_AUTOCHECKPOINT  1000
+#define SQLITE_DEFAULT_WAL_AUTOCHECKPOINT 1000
 #endif
 
 /*
@@ -122,15 +122,14 @@
 ** is used internally to track attached databases.
 */
 #ifndef SQLITE_MAX_ATTACHED
-# define SQLITE_MAX_ATTACHED 10
+#define SQLITE_MAX_ATTACHED 10
 #endif
-
 
 /*
 ** The maximum value of a ?nnn wildcard that the parser will accept.
 */
 #ifndef SQLITE_MAX_VARIABLE_NUMBER
-# define SQLITE_MAX_VARIABLE_NUMBER 999
+#define SQLITE_MAX_VARIABLE_NUMBER 999
 #endif
 
 /* Maximum page size.  The upper bound on this value is 65536.  This a limit
@@ -138,27 +137,26 @@
 **
 ** Earlier versions of SQLite allowed the user to change this value at
 ** compile time. This is no longer permitted, on the grounds that it creates
-** a library that is technically incompatible with an SQLite library 
-** compiled with a different limit. If a process operating on a database 
-** with a page-size of 65536 bytes crashes, then an instance of SQLite 
-** compiled with the default page-size limit will not be able to rollback 
+** a library that is technically incompatible with an SQLite library
+** compiled with a different limit. If a process operating on a database
+** with a page-size of 65536 bytes crashes, then an instance of SQLite
+** compiled with the default page-size limit will not be able to rollback
 ** the aborted transaction. This could lead to database corruption.
 */
 #ifdef SQLITE_MAX_PAGE_SIZE
-# undef SQLITE_MAX_PAGE_SIZE
+#undef SQLITE_MAX_PAGE_SIZE
 #endif
 #define SQLITE_MAX_PAGE_SIZE 65536
-
 
 /*
 ** The default size of a database page.
 */
 #ifndef SQLITE_DEFAULT_PAGE_SIZE
-# define SQLITE_DEFAULT_PAGE_SIZE 1024
+#define SQLITE_DEFAULT_PAGE_SIZE 1024
 #endif
-#if SQLITE_DEFAULT_PAGE_SIZE>SQLITE_MAX_PAGE_SIZE
-# undef SQLITE_DEFAULT_PAGE_SIZE
-# define SQLITE_DEFAULT_PAGE_SIZE SQLITE_MAX_PAGE_SIZE
+#if SQLITE_DEFAULT_PAGE_SIZE > SQLITE_MAX_PAGE_SIZE
+#undef SQLITE_DEFAULT_PAGE_SIZE
+#define SQLITE_DEFAULT_PAGE_SIZE SQLITE_MAX_PAGE_SIZE
 #endif
 
 /*
@@ -169,13 +167,12 @@
 ** SQLite will choose on its own.
 */
 #ifndef SQLITE_MAX_DEFAULT_PAGE_SIZE
-# define SQLITE_MAX_DEFAULT_PAGE_SIZE 8192
+#define SQLITE_MAX_DEFAULT_PAGE_SIZE 8192
 #endif
-#if SQLITE_MAX_DEFAULT_PAGE_SIZE>SQLITE_MAX_PAGE_SIZE
-# undef SQLITE_MAX_DEFAULT_PAGE_SIZE
-# define SQLITE_MAX_DEFAULT_PAGE_SIZE SQLITE_MAX_PAGE_SIZE
+#if SQLITE_MAX_DEFAULT_PAGE_SIZE > SQLITE_MAX_PAGE_SIZE
+#undef SQLITE_MAX_DEFAULT_PAGE_SIZE
+#define SQLITE_MAX_DEFAULT_PAGE_SIZE SQLITE_MAX_PAGE_SIZE
 #endif
-
 
 /*
 ** Maximum number of pages in one database file.
@@ -185,7 +182,7 @@
 ** max_page_count macro.
 */
 #ifndef SQLITE_MAX_PAGE_COUNT
-# define SQLITE_MAX_PAGE_COUNT 1073741823
+#define SQLITE_MAX_PAGE_COUNT 1073741823
 #endif
 
 /*
@@ -193,16 +190,16 @@
 ** operator.
 */
 #ifndef SQLITE_MAX_LIKE_PATTERN_LENGTH
-# define SQLITE_MAX_LIKE_PATTERN_LENGTH 50000
+#define SQLITE_MAX_LIKE_PATTERN_LENGTH 50000
 #endif
 
 /*
 ** Maximum depth of recursion for triggers.
 **
 ** A value of 1 means that a trigger program will not be able to itself
-** fire any triggers. A value of 0 means that no trigger programs at all 
+** fire any triggers. A value of 0 means that no trigger programs at all
 ** may be executed.
 */
 #ifndef SQLITE_MAX_TRIGGER_DEPTH
-# define SQLITE_MAX_TRIGGER_DEPTH 1000
+#define SQLITE_MAX_TRIGGER_DEPTH 1000
 #endif

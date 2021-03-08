@@ -1,4 +1,14 @@
-find_package(Boost 1.67)
+if(NOT BOOSTROOT AND NOT BOOST_ROOT)
+  # the boost dir in the official docker file
+  # This is a hack because FindBoost.cmake is kind of limited
+  # We can fix this for boost versions > 1.70
+  set(BOOST_ROOT /opt/boost_1_67_0)
+endif()
+
+# Bug in boost subprocess in 1.72! In release-6.3 and later we replaced the
+# boost subprocess usage with our own thing, but for release-6.2 it's important
+# that we use boost 1.67 exactly.
+find_package(Boost 1.67 EXACT)
 
 if(Boost_FOUND)
   add_library(boost_target INTERFACE)
