@@ -29,30 +29,44 @@ import java.util.concurrent.atomic.AtomicLong;
  * This class is thread-safe(per the {@link EventKeeper} spec). It holds all counters in memory;
  */
 public class MapEventKeeper implements EventKeeper {
-	private final ConcurrentMap<Event, AtomicLong> map = new ConcurrentHashMap<>();
+	private final ConcurrentMap<Event, Count> map = new ConcurrentHashMap<>();
 
 	@Override
 	public void count(Event event, long amt) {
-		AtomicLong cnt = map.computeIfAbsent(event, (l) -> new AtomicLong(0L));
-		cnt.addAndGet(amt);
+		Count counter = map.computeIfAbsent(event, (l) -> new Count());
+		counter.cnt.addAndGet(amt);
 	}
 
 	@Override
 	public void timeNanos(Event event, long nanos) {
-		count(event, nanos);
+		Count counter = map.computeIfAbsent(event, (l)->new Count());
+		counter.cnt.incrementAndGet();
+		counter.duration.addAndGet(nanos);
 	}
 
 	@Override
 	public long getCount(Event event) {
-		AtomicLong lng = map.get(event);
+		Count lng = map.get(event);
 		if (lng == null) {
 			return 0L;
 		}
-		return lng.get();
+		return lng.cnt.get();
 	}
 
 	@Override
 	public long getTimeNanos(Event event) {
-		return getCount(event);
+		Count lng = map.get(event);
+		if (lng == null) {
+			return 0L;
+		}
+		return lng.duration.get();
+	}
+
+	private static class Count {
+		private final AtomicLong cnt = new AtomicLong(0L);
+
+		private final AtomicLong duration = new AtomicLong(0L);
+
+		Count(){ }
 	}
 }
