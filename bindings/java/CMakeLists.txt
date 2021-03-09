@@ -57,6 +57,8 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/subspace/Subspace.java
   src/main/com/apple/foundationdb/Transaction.java
   src/main/com/apple/foundationdb/TransactionContext.java
+  src/main/com/apple/foundationdb/EventKeeper.java
+  src/main/com/apple/foundationdb/MapEventKeeper.java
   src/main/com/apple/foundationdb/testing/AbstractWorkload.java
   src/main/com/apple/foundationdb/testing/WorkloadContext.java
   src/main/com/apple/foundationdb/testing/Promise.java
