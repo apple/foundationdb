@@ -386,12 +386,16 @@ public:
 		// have changed (they won't if k already exists in the tree but was deleted).
 		// Returns true if successful, false if k does not fit in the space available
 		// or if k is already in the tree (and was not already deleted).
+		// Insertion on an empty tree returns false as well.
 		bool insert(const T& k, int skipLen = 0, int maxHeightAllowed = std::numeric_limits<int>::max()) {
+			if (root == nullptr) {
+				return false;
+			}
 			int height = 1;
 			DecodedNode* n = root;
 			bool addLeftChild = false;
 
-			while (n != nullptr) {
+			while (true) {
 				int cmp = k.compare(n->item, skipLen);
 
 				if (cmp >= 0) {
