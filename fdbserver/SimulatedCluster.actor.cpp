@@ -741,7 +741,7 @@ StringRef StringRefOf(const char* s) {
 
 void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumRegions) {
 	set_config("new");
-	const bool simple = false;  // Set true to simplify simulation configs for easier debugging
+	const bool simple = true;  // Set true to simplify simulation configs for easier debugging
 	// generateMachineTeamTestConfig set up the number of servers per machine and the number of machines such that
 	// if we do not remove the surplus server and machine teams, the simulation test will report error.
 	// This is needed to make sure the number of server (and machine) teams is no larger than the desired number.

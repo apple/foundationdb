@@ -2959,7 +2959,7 @@ private:
 					data->cachedRangeMap.insert(intersectingRange, true);
 				}
 			}
-			processedStartKey = false;
+			processedCacheStartKey = false;
 		} else if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix)) {
 			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
 			cacheStartKey = m.param1;

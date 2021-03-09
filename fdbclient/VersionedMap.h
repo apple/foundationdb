@@ -682,7 +682,13 @@ public:
 			latestVersion = version;
 			Tree r = getRoot(version);
 			roots.emplace_back(version, r);
-		} else ASSERT( version == latestVersion );
+		} else {
+			if (version != latestVersion) {
+				TraceEvent(SevDebug, "PTreeCreateNewVersion").detail("Version", version).
+					detail("LatestVersion", latestVersion);
+			}
+			ASSERT( version == latestVersion );
+		}
 	}
 
 	// insert() and erase() invalidate atLatest() and all iterators into it
