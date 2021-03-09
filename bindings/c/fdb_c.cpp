@@ -415,9 +415,9 @@ FDBFuture* fdb_transaction_get_range_impl(FDBTransaction* tr,
 	const int mode_bytes_array[] = { CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED, 256, 1000, 4096, 80000 };
 
 	/* The progression used for FDB_STREAMING_MODE_ITERATOR.
-	   Goes from small -> medium -> large.  Then 1.5 * previous until serial. */
+	   Goes 1.5 * previous. */
 	static const int iteration_progression[] = {
-		256, 1000, 4096, 6144, 9216, 13824, 20736, 31104, 46656, 69984, 80000
+		4096, 6144, 9216, 13824, 20736, 31104, 46656, 69984, 80000, 120000 
 	};
 
 	/* length(iteration_progression) */
