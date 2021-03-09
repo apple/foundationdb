@@ -1948,6 +1948,13 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance, const std::vector<T
 	int localSetsWithNonNegativeFaultTolerance = 0;
 
 	for (int i = 0; i < tLogs.size(); i++) {
+		if (tLogs[i].tLogs.size() == 0) {
+			// We can have LogSets where there are no tLogs but some LogRouters. Its the way
+			// recruiting is implemented for old LogRouters in TagPartitionedLogSystem, where
+			// it adds an empty LogSet for missing locality.
+			continue;
+		}
+
 		int failedLogs = 0;
 		for (auto& log : tLogs[i].tLogs) {
 			JsonBuilderObject logObj;
@@ -1964,6 +1971,7 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance, const std::vector<T
 		}
 
 		if (tLogs[i].isLocal) {
+			ASSERT_WE_THINK(tLogs[i].tLogReplicationFactor > 0);
 			int currentFaultTolerance = tLogs[i].tLogReplicationFactor - 1 - tLogs[i].tLogWriteAntiQuorum - failedLogs;
 			if(currentFaultTolerance >= 0) {
 				localSetsWithNonNegativeFaultTolerance++;
