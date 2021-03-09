@@ -19,15 +19,15 @@
  */
 
 #include "flow/flow.h"
-#include "fdbrpc/genericactors.actor.h"	// Gets genericactors.actor.g.h indirectly
+#include "fdbrpc/genericactors.actor.h" // Gets genericactors.actor.g.h indirectly
 #include "flow/network.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"
 
-ACTOR Future<Void> disableConnectionFailuresAfter( double time, std::string context ) {
-	wait( delay(time) );
+ACTOR Future<Void> disableConnectionFailuresAfter(double time, std::string context) {
+	wait(delay(time));
 
-	if(g_network->isSimulated()) {
+	if (g_network->isSimulated()) {
 		g_simulator.connectionFailuresDisableDuration = 1e6;
 		g_simulator.speedUpSimulation = true;
 		TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());

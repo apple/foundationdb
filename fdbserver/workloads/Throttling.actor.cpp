@@ -89,9 +89,10 @@ struct ThrottlingWorkload : KVWorkload {
 	bool healthMetricsStoppedUpdating;
 
 	ThrottlingWorkload(WorkloadContext const& wcx)
-	  : KVWorkload(wcx), transactionsCommitted(0), worstStorageQueue(0), worstStorageDurabilityLag(0), worstTLogQueue(0),
-	    detailedWorstStorageQueue(0), detailedWorstStorageDurabilityLag(0), detailedWorstTLogQueue(0), detailedWorstCpuUsage(0.0),
-	    detailedWorstDiskUsage(0.0), healthMetricsStoppedUpdating(false) {
+	  : KVWorkload(wcx), transactionsCommitted(0), worstStorageQueue(0), worstStorageDurabilityLag(0),
+	    worstTLogQueue(0), detailedWorstStorageQueue(0), detailedWorstStorageDurabilityLag(0),
+	    detailedWorstTLogQueue(0), detailedWorstCpuUsage(0.0), detailedWorstDiskUsage(0.0),
+	    healthMetricsStoppedUpdating(false) {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 60.0);
 		healthMetricsCheckInterval = getOption(options, LiteralStringRef("healthMetricsCheckInterval"), 1.0);
 		actorsPerClient = getOption(options, LiteralStringRef("actorsPerClient"), 10);
@@ -111,18 +112,17 @@ struct ThrottlingWorkload : KVWorkload {
 		loop {
 			wait(delay(self->healthMetricsCheckInterval));
 			HealthMetrics newHealthMetrics = wait(cx->getHealthMetrics(self->sendDetailedHealthMetrics));
-			if (healthMetrics == newHealthMetrics)
-			{
+			if (healthMetrics == newHealthMetrics) {
 				if (++repeated > self->maxAllowedStaleness / self->healthMetricsCheckInterval)
 					self->healthMetricsStoppedUpdating = true;
-			}
-			else
+			} else
 				repeated = 0;
 			healthMetrics = newHealthMetrics;
 
 			self->tokenBucket.transactionRate = healthMetrics.tpsLimit * self->throttlingMultiplier / self->clientCount;
 			self->worstStorageQueue = std::max(self->worstStorageQueue, healthMetrics.worstStorageQueue);
-			self->worstStorageDurabilityLag = std::max(self->worstStorageDurabilityLag, healthMetrics.worstStorageDurabilityLag);
+			self->worstStorageDurabilityLag =
+			    std::max(self->worstStorageDurabilityLag, healthMetrics.worstStorageDurabilityLag);
 			self->worstTLogQueue = std::max(self->worstTLogQueue, healthMetrics.worstTLogQueue);
 
 			TraceEvent("HealthMetrics")
@@ -139,8 +139,10 @@ struct ThrottlingWorkload : KVWorkload {
 				auto storageStats = ss.second;
 				self->detailedWorstStorageQueue = std::max(self->detailedWorstStorageQueue, storageStats.storageQueue);
 				traceStorageQueue.detail(format("Storage/%s", ss.first.toString().c_str()), storageStats.storageQueue);
-				self->detailedWorstStorageDurabilityLag = std::max(self->detailedWorstStorageDurabilityLag, storageStats.storageDurabilityLag);
-				traceStorageDurabilityLag.detail(format("Storage/%s", ss.first.toString().c_str()), storageStats.storageDurabilityLag);
+				self->detailedWorstStorageDurabilityLag =
+				    std::max(self->detailedWorstStorageDurabilityLag, storageStats.storageDurabilityLag);
+				traceStorageDurabilityLag.detail(format("Storage/%s", ss.first.toString().c_str()),
+				                                 storageStats.storageDurabilityLag);
 				self->detailedWorstCpuUsage = std::max(self->detailedWorstCpuUsage, storageStats.cpuUsage);
 				traceCpuUsage.detail(format("Storage/%s", ss.first.toString().c_str()), storageStats.cpuUsage);
 				self->detailedWorstDiskUsage = std::max(self->detailedWorstDiskUsage, storageStats.diskUsage);
@@ -155,7 +157,9 @@ struct ThrottlingWorkload : KVWorkload {
 		}
 	}
 
-	static Value getRandomValue() { return Standalone<StringRef>(format("Value/%d", deterministicRandom()->randomInt(0, 10e6))); }
+	static Value getRandomValue() {
+		return Standalone<StringRef>(format("Value/%d", deterministicRandom()->randomInt(0, 10e6)));
+	}
 
 	ACTOR static Future<Void> clientActor(Database cx, ThrottlingWorkload* self) {
 		state ReadYourWritesTransaction tr(cx);
@@ -172,7 +176,8 @@ struct ThrottlingWorkload : KVWorkload {
 					tr.set(self->getRandomKey(), getRandomValue());
 				}
 				wait(tr.commit());
-				if (deterministicRandom()->randomInt(0, 1000) == 0) TraceEvent("TransactionCommittedx1000");
+				if (deterministicRandom()->randomInt(0, 1000) == 0)
+					TraceEvent("TransactionCommittedx1000");
 				++self->transactionsCommitted;
 			} catch (Error& e) {
 				// ignore failing transactions
@@ -215,28 +220,29 @@ struct ThrottlingWorkload : KVWorkload {
 			return false;
 		}
 		bool correctHealthMetricsState = true;
-		if (worstStorageQueue == 0 || worstStorageDurabilityLag == 0 || worstTLogQueue == 0 || transactionsCommitted == 0)
+		if (worstStorageQueue == 0 || worstStorageDurabilityLag == 0 || worstTLogQueue == 0 ||
+		    transactionsCommitted == 0)
 			correctHealthMetricsState = false;
 		if (sendDetailedHealthMetrics) {
-			if (detailedWorstStorageQueue == 0 || detailedWorstStorageDurabilityLag == 0 || detailedWorstTLogQueue == 0 ||
-			    detailedWorstCpuUsage == 0.0 || detailedWorstDiskUsage == 0.0)
+			if (detailedWorstStorageQueue == 0 || detailedWorstStorageDurabilityLag == 0 ||
+			    detailedWorstTLogQueue == 0 || detailedWorstCpuUsage == 0.0 || detailedWorstDiskUsage == 0.0)
 				correctHealthMetricsState = false;
 		} else {
-			if (detailedWorstStorageQueue != 0 || detailedWorstStorageDurabilityLag != 0 || detailedWorstTLogQueue != 0 ||
-			    detailedWorstCpuUsage != 0.0 || detailedWorstDiskUsage != 0.0)
+			if (detailedWorstStorageQueue != 0 || detailedWorstStorageDurabilityLag != 0 ||
+			    detailedWorstTLogQueue != 0 || detailedWorstCpuUsage != 0.0 || detailedWorstDiskUsage != 0.0)
 				correctHealthMetricsState = false;
 		}
 		if (!correctHealthMetricsState) {
 			TraceEvent(SevError, "IncorrectHealthMetricsState")
-				.detail("WorstStorageQueue", worstStorageQueue)
-				.detail("WorstStorageDurabilityLag", worstStorageDurabilityLag)
-				.detail("WorstTLogQueue", worstTLogQueue)
-				.detail("DetailedWorstStorageQueue", detailedWorstStorageQueue)
-				.detail("DetailedWorstStorageDurabilityLag", detailedWorstStorageDurabilityLag)
-				.detail("DetailedWorstTLogQueue", detailedWorstTLogQueue)
-				.detail("DetailedWorstCpuUsage", detailedWorstCpuUsage)
-				.detail("DetailedWorstDiskUsage", detailedWorstDiskUsage)
-				.detail("SendingDetailedHealthMetrics", sendDetailedHealthMetrics);
+			    .detail("WorstStorageQueue", worstStorageQueue)
+			    .detail("WorstStorageDurabilityLag", worstStorageDurabilityLag)
+			    .detail("WorstTLogQueue", worstTLogQueue)
+			    .detail("DetailedWorstStorageQueue", detailedWorstStorageQueue)
+			    .detail("DetailedWorstStorageDurabilityLag", detailedWorstStorageDurabilityLag)
+			    .detail("DetailedWorstTLogQueue", detailedWorstTLogQueue)
+			    .detail("DetailedWorstCpuUsage", detailedWorstCpuUsage)
+			    .detail("DetailedWorstDiskUsage", detailedWorstDiskUsage)
+			    .detail("SendingDetailedHealthMetrics", sendDetailedHealthMetrics);
 		}
 		return correctHealthMetricsState;
 	}

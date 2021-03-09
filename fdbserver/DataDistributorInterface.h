@@ -37,12 +37,8 @@ struct DataDistributorInterface {
 	void initEndpoints() {}
 	UID id() const { return waitFailure.getEndpoint().token; }
 	NetworkAddress address() const { return waitFailure.getEndpoint().getPrimaryAddress(); }
-	bool operator== (const DataDistributorInterface& r) const {
-		return id() == r.id();
-	}
-	bool operator!= (const DataDistributorInterface& r) const {
-		return !(*this == r);
-	}
+	bool operator==(const DataDistributorInterface& r) const { return id() == r.id(); }
+	bool operator!=(const DataDistributorInterface& r) const { return !(*this == r); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {
@@ -58,14 +54,13 @@ struct HaltDataDistributorRequest {
 	HaltDataDistributorRequest() {}
 	explicit HaltDataDistributorRequest(UID uid) : requesterID(uid) {}
 
-	template<class Ar>
+	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, requesterID, reply);
 	}
 };
 
-struct DistributorSnapRequest
-{
+struct DistributorSnapRequest {
 	constexpr static FileIdentifier file_identifier = 22204900;
 	Arena arena;
 	StringRef snapPayload;
@@ -74,7 +69,8 @@ struct DistributorSnapRequest
 	Optional<UID> debugID;
 
 	explicit DistributorSnapRequest(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
-	explicit DistributorSnapRequest(StringRef snap, UID snapUID, Optional<UID> debugID = Optional<UID>()) : snapPayload(snap), snapUID(snapUID), debugID(debugID) {}
+	explicit DistributorSnapRequest(StringRef snap, UID snapUID, Optional<UID> debugID = Optional<UID>())
+	  : snapPayload(snap), snapUID(snapUID), debugID(debugID) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -82,4 +78,4 @@ struct DistributorSnapRequest
 	}
 };
 
-#endif //FDBSERVER_DATADISTRIBUTORINTERFACE_H
+#endif // FDBSERVER_DATADISTRIBUTORINTERFACE_H
