@@ -391,7 +391,7 @@ public:
 		++g_net2->countWriteProbes;
 		BindPromise p("N2_WriteProbeError", id);
 		auto f = p.getFuture();
-		socket.async_write_some( boost::asio::null_buffers(), std::move(p) );
+		socket.async_wait( tcp::socket::wait_write, std::move(p) );
 		return f;
 	}
 
@@ -400,7 +400,7 @@ public:
 		++g_net2->countReadProbes;
 		BindPromise p("N2_ReadProbeError", id);
 		auto f = p.getFuture();
-		socket.async_read_some( boost::asio::null_buffers(), std::move(p) );
+		socket.async_wait( tcp::socket::wait_read, std::move(p) );
 		return f;
 	}
 
@@ -965,7 +965,7 @@ public:
 		++g_net2->countWriteProbes;
 		BindPromise p("N2_WriteProbeError", id);
 		auto f = p.getFuture();
-		socket.async_write_some( boost::asio::null_buffers(), std::move(p) );
+		socket.async_wait( tcp::socket::wait_write, std::move(p) );
 		return f;
 	}
 
@@ -974,7 +974,7 @@ public:
 		++g_net2->countReadProbes;
 		BindPromise p("N2_ReadProbeError", id);
 		auto f = p.getFuture();
-		socket.async_read_some( boost::asio::null_buffers(), std::move(p) );
+		socket.async_wait( tcp::socket::wait_read, std::move(p) );
 		return f;
 	}
 
@@ -1856,6 +1856,10 @@ ASIOReactor::ASIOReactor(Net2* net)
 #endif
 }
 
+// The caller wants us to stop processing work until an I/O is ready or until a
+// timer expires.  sleepTime is the time of the next timer expiration, far in
+// the future if there are no timers, or zero if we should do nothing and
+// immediately return.
 void ASIOReactor::sleep(double sleepTime) {
 	if (sleepTime > FLOW_KNOBS->BUSY_WAIT_THRESHOLD) {
 		if (FLOW_KNOBS->REACTOR_FLAGS & 4) {
@@ -1873,8 +1877,27 @@ void ASIOReactor::sleep(double sleepTime) {
 				this->firstTimer.expires_from_now(boost::posix_time::microseconds(int64_t(sleepTime*1e6)));
 				this->firstTimer.async_wait(&nullWaitHandler);
 			}
-			setProfilingEnabled(0); // The following line generates false positives for slow task profiling
-			ios.run_one();
+			setProfilingEnabled(0); // Putting the thread to sleep generates false positives for slow task profiling
+			size_t count = 0;
+
+			if (FLOW_KNOBS->BUSY_WAIT_THRESHOLD != 0) {
+				// poll epoll_wait for a short time in the hope that an I/O will complete
+				// This is usually a good assumption (if we're running right now, we're probably not about
+				// to become completely idle), and it is faster than having Linux suspend and reschedule us.
+				double spinEndTime = lastIO + FLOW_KNOBS->BUSY_WAIT_THRESHOLD;
+				while ((count = ios.poll_one()) == 0) {
+					if (timer_monotonic() > spinEndTime) {
+						break;
+					}
+				}
+			}
+			if (!count) {
+				// synchronously wait until an I/O completes
+				ios.run_one();
+			}
+			if (FLOW_KNOBS->BUSY_WAIT_THRESHOLD != 0) {
+				lastIO = timer_monotonic();
+			}
 			setProfilingEnabled(1);
 			this->firstTimer.cancel();
 		}
