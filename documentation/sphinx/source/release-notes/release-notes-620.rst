@@ -6,7 +6,7 @@ Release Notes
 
 6.2.33
 ======
-* Fixed a issue where storage servers could shutdown with ``unknown_error``. `(PR #4380) <https://github.com/apple/foundationdb/pull/4437>`_
+* Fixed an issue where storage servers could shutdown with ``unknown_error``. `(PR #4380) <https://github.com/apple/foundationdb/pull/4437>`_
 
 6.2.32
 ======
