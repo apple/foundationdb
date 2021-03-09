@@ -333,27 +333,27 @@ public:
 
 		std::pair<double, KeyRange> longestTime() const {
 			if (numRunning() == 0) {
-				return {-1, emptyKeyRange};
+				return { -1, emptyKeyRange };
 			}
 
 			const double currentTime = now();
 			double longest = 0;
 			UID UIDofLongest;
-			for (const auto& kv: startTimeMap) {
+			for (const auto& kv : startTimeMap) {
 				const double currentRunningTime = currentTime - kv.second;
 				if (longest <= currentRunningTime) {
 					longest = currentRunningTime;
 					UIDofLongest = kv.first;
 				}
 			}
-			if(BUGGIFY) {
+			if (BUGGIFY) {
 				UIDofLongest = deterministicRandom()->randomUniqueID();
 			}
 			auto it = keyRangeMap.find(UIDofLongest);
-			if(it != keyRangeMap.end()) {
-				return {longest, it->second};
+			if (it != keyRangeMap.end()) {
+				return { longest, it->second };
 			}
-			return {-1, emptyKeyRange};
+			return { -1, emptyKeyRange };
 		}
 
 		int numRunning() const { return startTimeMap.size(); }
