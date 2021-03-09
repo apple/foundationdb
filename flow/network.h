@@ -591,7 +591,7 @@ struct FailureInjector : FastAllocated<FailureInjector> {
 	double getSendDelay(NetworkAddress const& peer);
 	double getReceiveDelay(NetworkAddress const& peer);
 
-	void cloggFor(Optional<NetworkAddress> const& peer, double time);
+	void clogFor(Optional<NetworkAddress> const& peer, double time);
 
 private: // members
 	// like in simulation, we want to default to true for this one

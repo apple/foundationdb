@@ -1156,7 +1156,7 @@ ACTOR Future<Void> workerServer(
 					FailureInjector::injector()->setConnectionFailures(req.injectNetworkFailures.get());
 				}
 				if (req.clog.present()) {
-					FailureInjector::injector()->cloggFor(req.clog.get().address, req.clog.get().time);
+					FailureInjector::injector()->clogFor(req.clog.get().address, req.clog.get().time);
 				}
 				req.reply.send(Void());
 			}

@@ -1745,7 +1745,7 @@ boost::system::error_code FailureInjector::rollRandomClose() const {
 	return boost::system::error_code();
 }
 
-void FailureInjector::cloggFor(const Optional<NetworkAddress>& peer, double time) {
+void FailureInjector::clogFor(const Optional<NetworkAddress>& peer, double time) {
 	if (peer.present()) {
 		auto& until = clogConnection[peer.get()];
 		until = std::max(until, now() + time);
