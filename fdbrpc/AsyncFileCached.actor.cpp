@@ -24,7 +24,7 @@
 Optional<Reference<EvictablePageCache>> pc4k, pc64k;
 
 //The simulator needs to store separate page caches for each machine
-static std::map<NetworkAddress, std::pair<Reference<EvictablePageCache>, Reference<EvictablePageCache>>> simulatorPageCaches;
+static phmap::parallel_flat_hash_map<NetworkAddress, std::pair<Reference<EvictablePageCache>, Reference<EvictablePageCache>>> simulatorPageCaches;
 
 EvictablePage::~EvictablePage() {
 	if (data) {
@@ -45,7 +45,7 @@ EvictablePage::~EvictablePage() {
 	}
 }
 
-std::map< std::string, OpenFileInfo > AsyncFileCached::openFiles;
+phmap::parallel_flat_hash_map< std::string, OpenFileInfo > AsyncFileCached::openFiles;
 
 void AsyncFileCached::remove_page( AFCPage* page ) {
 	pages.erase( page->pageOffset );

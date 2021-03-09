@@ -28,6 +28,7 @@
 	#define FLOW_ASYNCFILECACHED_ACTOR_H
 
 #include <boost/intrusive/list.hpp>
+#include <parallel_hashmap/phmap.h>
 #include <type_traits>
 
 #include "flow/flow.h"
@@ -253,12 +254,12 @@ public:
 	~AsyncFileCached() override;
 
 private:
-	static std::map< std::string, OpenFileInfo > openFiles;
+	static phmap::parallel_flat_hash_map< std::string, OpenFileInfo > openFiles;
 	std::string filename;
 	Reference<IAsyncFile> uncached;
 	int64_t length;
 	int64_t prevLength;
-	std::unordered_map<int64_t, AFCPage*> pages;
+	phmap::parallel_flat_hash_map<int64_t, AFCPage*> pages;
 	std::vector<AFCPage*> flushable;
 	Reference<EvictablePageCache> pageCache;
 	Future<Void> currentTruncate;
@@ -267,7 +268,7 @@ private:
 
 	// Map of pointers which hold page buffers for pages which have been overwritten
 	// but at the time of write there were still readZeroCopy holders.
-	std::unordered_map<void *, int> orphanedPages;
+	phmap::parallel_flat_hash_map<void *, int> orphanedPages;
 
 	Int64MetricHandle countFileCacheFinds;
 	Int64MetricHandle countFileCacheReads;
