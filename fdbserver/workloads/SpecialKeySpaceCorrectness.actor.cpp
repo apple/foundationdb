@@ -1199,6 +1199,35 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					wait(tx->onError(e));
 				}
 			}
+			// Test invalid values
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tx->set((deterministicRandom()->coinflip() ? LiteralStringRef("client_txn_sample_rate")
+					                                           : LiteralStringRef("client_txn_size_limit"))
+					            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile")),
+					        LiteralStringRef("invalid_value"));
+					wait(tx->commit());
+					ASSERT(false);
+				} catch (Error& e) {
+					if (e.code() == error_code_special_keys_api_failure) {
+						Optional<Value> errorMsg =
+						    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
+						ASSERT(errorMsg.present());
+						std::string errorStr;
+						auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+						auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+						// special_key_space_management_api_error_msg schema validation
+						ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+						ASSERT(valueObj["command"].get_str() == "profile" && !valueObj["retriable"].get_bool());
+						tx->reset();
+						break;
+					} else {
+						wait(tx->onError(e));
+					}
+					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				}
+			}
 		}
 		return Void();
 	}
