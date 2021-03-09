@@ -99,12 +99,22 @@ BINARY_SERIALIZABLE( ProfilerRequest::Action );
 
 struct SetFailureInjection {
 	constexpr static FileIdentifier file_identifier = 15439864;
-	Optional<bool> injectNetworkFailures;
 	ReplyPromise<Void> reply;
+	Optional<bool> injectNetworkFailures;
+	struct ClogCommand {
+		double time;
+		Optional<NetworkAddress> address;
+
+		template <class Ar>
+		void serialize(Ar& ar) {
+			serializer(ar, time, address);
+		}
+	};
+	Optional<ClogCommand> clog;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, injectNetworkFailures, reply);
+		serializer(ar, reply, injectNetworkFailures, clog);
 	}
 };
 

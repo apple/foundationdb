@@ -1155,6 +1155,9 @@ ACTOR Future<Void> workerServer(
 				if (req.injectNetworkFailures.present()) {
 					FailureInjector::injector()->setConnectionFailures(req.injectNetworkFailures.get());
 				}
+				if (req.clog.present()) {
+					FailureInjector::injector()->cloggFor(req.clog.get().address, req.clog.get().time);
+				}
 				req.reply.send(Void());
 			}
 			when( ProfilerRequest req = waitNext(interf.clientInterface.profiler.getFuture()) ) {

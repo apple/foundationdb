@@ -26,6 +26,7 @@
 #include <string>
 #include <stdint.h>
 #include <variant>
+#include <unordered_map>
 #include "boost/asio.hpp"
 #ifndef TLS_DISABLED
 #include "boost/asio/ssl.hpp"
@@ -587,9 +588,16 @@ struct FailureInjector : FastAllocated<FailureInjector> {
 
 	void setConnectionFailures(bool enabled) { injectConnectionFailures = enabled; }
 
+	double getSendDelay(NetworkAddress const& peer);
+	double getReceiveDelay(NetworkAddress const& peer);
+
+	void cloggFor(Optional<NetworkAddress> const& peer, double time);
+
 private: // members
 	// like in simulation, we want to default to true for this one
 	bool injectConnectionFailures = true;
+	double clogAllUntil = 0.0;
+	std::unordered_map<NetworkAddress, double> clogConnection;
 
 private: // construction
 	FailureInjector() = default;
