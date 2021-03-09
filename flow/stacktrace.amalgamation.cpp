@@ -21,12 +21,12 @@ namespace debug_internal {
 
 // Return whether the byte at *addr is readable, without faulting.
 // Save and restores errno.
-bool AddressIsReadable(const void *addr);
+bool AddressIsReadable(const void* addr);
 
-}  // namespace debug_internal
-}  // namespace absl
+} // namespace debug_internal
+} // namespace absl
 
-#endif  // ABSL_DEBUGGING_INTERNAL_ADDRESS_IS_READABLE_H_
+#endif // ABSL_DEBUGGING_INTERNAL_ADDRESS_IS_READABLE_H_
 /*
  * Copyright 2017 The Abseil Authors.
  *
@@ -58,100 +58,98 @@ bool AddressIsReadable(const void *addr);
 #error ABSL_HAVE_ELF_MEM_IMAGE cannot be directly set
 #endif
 
-#if defined(__ELF__) && defined(__GLIBC__) && !defined(__native_client__) && \
-    !defined(__asmjs__)
+#if defined(__ELF__) && defined(__GLIBC__) && !defined(__native_client__) && !defined(__asmjs__)
 #define ABSL_HAVE_ELF_MEM_IMAGE 1
 #endif
 
 #if ABSL_HAVE_ELF_MEM_IMAGE
 
-#include <link.h>  // for ElfW
+#include <link.h> // for ElfW
 
 namespace absl {
 namespace debug_internal {
 
 // An in-memory ELF image (may not exist on disk).
 class ElfMemImage {
- public:
-  // Sentinel: there could never be an elf image at this address.
-  static const void *const kInvalidBase;
+public:
+	// Sentinel: there could never be an elf image at this address.
+	static const void* const kInvalidBase;
 
-  // Information about a single vdso symbol.
-  // All pointers are into .dynsym, .dynstr, or .text of the VDSO.
-  // Do not free() them or modify through them.
-  struct SymbolInfo {
-    const char      *name;      // E.g. "__vdso_getcpu"
-    const char      *version;   // E.g. "LINUX_2.6", could be ""
-                                // for unversioned symbol.
-    const void      *address;   // Relocated symbol address.
-    const ElfW(Sym) *symbol;    // Symbol in the dynamic symbol table.
-  };
+	// Information about a single vdso symbol.
+	// All pointers are into .dynsym, .dynstr, or .text of the VDSO.
+	// Do not free() them or modify through them.
+	struct SymbolInfo {
+		const char* name; // E.g. "__vdso_getcpu"
+		const char* version; // E.g. "LINUX_2.6", could be ""
+		                     // for unversioned symbol.
+		const void* address; // Relocated symbol address.
+		const ElfW(Sym) * symbol; // Symbol in the dynamic symbol table.
+	};
 
-  // Supports iteration over all dynamic symbols.
-  class SymbolIterator {
-   public:
-    friend class ElfMemImage;
-    const SymbolInfo *operator->() const;
-    const SymbolInfo &operator*() const;
-    SymbolIterator& operator++();
-    bool operator!=(const SymbolIterator &rhs) const;
-    bool operator==(const SymbolIterator &rhs) const;
-   private:
-    SymbolIterator(const void *const image, int index);
-    void Update(int incr);
-    SymbolInfo info_;
-    int index_;
-    const void *const image_;
-  };
+	// Supports iteration over all dynamic symbols.
+	class SymbolIterator {
+	public:
+		friend class ElfMemImage;
+		const SymbolInfo* operator->() const;
+		const SymbolInfo& operator*() const;
+		SymbolIterator& operator++();
+		bool operator!=(const SymbolIterator& rhs) const;
+		bool operator==(const SymbolIterator& rhs) const;
 
+	private:
+		SymbolIterator(const void* const image, int index);
+		void Update(int incr);
+		SymbolInfo info_;
+		int index_;
+		const void* const image_;
+	};
 
-  explicit ElfMemImage(const void *base);
-  void                 Init(const void *base);
-  bool                 IsPresent() const { return ehdr_ != nullptr; }
-  const ElfW(Phdr)*    GetPhdr(int index) const;
-  const ElfW(Sym)*     GetDynsym(int index) const;
-  const ElfW(Versym)*  GetVersym(int index) const;
-  const ElfW(Verdef)*  GetVerdef(int index) const;
-  const ElfW(Verdaux)* GetVerdefAux(const ElfW(Verdef) *verdef) const;
-  const char*          GetDynstr(ElfW(Word) offset) const;
-  const void*          GetSymAddr(const ElfW(Sym) *sym) const;
-  const char*          GetVerstr(ElfW(Word) offset) const;
-  int                  GetNumSymbols() const;
+	explicit ElfMemImage(const void* base);
+	void Init(const void* base);
+	bool IsPresent() const { return ehdr_ != nullptr; }
+	const ElfW(Phdr) * GetPhdr(int index) const;
+	const ElfW(Sym) * GetDynsym(int index) const;
+	const ElfW(Versym) * GetVersym(int index) const;
+	const ElfW(Verdef) * GetVerdef(int index) const;
+	const ElfW(Verdaux) * GetVerdefAux(const ElfW(Verdef) * verdef) const;
+	const char* GetDynstr(ElfW(Word) offset) const;
+	const void* GetSymAddr(const ElfW(Sym) * sym) const;
+	const char* GetVerstr(ElfW(Word) offset) const;
+	int GetNumSymbols() const;
 
-  SymbolIterator begin() const;
-  SymbolIterator end() const;
+	SymbolIterator begin() const;
+	SymbolIterator end() const;
 
-  // Look up versioned dynamic symbol in the image.
-  // Returns false if image is not present, or doesn't contain given
-  // symbol/version/type combination.
-  // If info_out is non-null, additional details are filled in.
-  bool LookupSymbol(const char *name, const char *version,
-                    int symbol_type, SymbolInfo *info_out) const;
+	// Look up versioned dynamic symbol in the image.
+	// Returns false if image is not present, or doesn't contain given
+	// symbol/version/type combination.
+	// If info_out is non-null, additional details are filled in.
+	bool LookupSymbol(const char* name, const char* version, int symbol_type, SymbolInfo* info_out) const;
 
-  // Find info about symbol (if any) which overlaps given address.
-  // Returns true if symbol was found; false if image isn't present
-  // or doesn't have a symbol overlapping given address.
-  // If info_out is non-null, additional details are filled in.
-  bool LookupSymbolByAddress(const void *address, SymbolInfo *info_out) const;
+	// Find info about symbol (if any) which overlaps given address.
+	// Returns true if symbol was found; false if image isn't present
+	// or doesn't have a symbol overlapping given address.
+	// If info_out is non-null, additional details are filled in.
+	bool LookupSymbolByAddress(const void* address, SymbolInfo* info_out) const;
 
- private:
-  const ElfW(Ehdr) *ehdr_;
-  const ElfW(Sym) *dynsym_;
-  const ElfW(Versym) *versym_;
-  const ElfW(Verdef) *verdef_;
-  const ElfW(Word) *hash_;
-  const char *dynstr_;
-  size_t strsize_;
-  size_t verdefnum_;
-  ElfW(Addr) link_base_;     // Link-time base (p_vaddr of first PT_LOAD).
+private:
+	const ElfW(Ehdr) * ehdr_;
+	const ElfW(Sym) * dynsym_;
+	const ElfW(Versym) * versym_;
+	const ElfW(Verdef) * verdef_;
+	const ElfW(Word) * hash_;
+	const char* dynstr_;
+	size_t strsize_;
+	size_t verdefnum_;
+	ElfW(Addr) link_base_; // Link-time base (p_vaddr of first PT_LOAD).
 };
 
-}  // namespace debug_internal
-}  // namespace absl
+} // namespace debug_internal
+} // namespace absl
 
-#endif  // ABSL_HAVE_ELF_MEM_IMAGE
+#endif // ABSL_HAVE_ELF_MEM_IMAGE
 
-#endif  // ABSL_DEBUGGING_INTERNAL_ELF_MEM_IMAGE_H_
+#endif // ABSL_DEBUGGING_INTERNAL_ELF_MEM_IMAGE_H_
 /*
  * Copyright 2017 The Abseil Authors.
  *
@@ -178,54 +176,44 @@ class ElfMemImage {
 // First, test platforms which only support a stub.
 #if ABSL_STACKTRACE_INL_HEADER
 #error ABSL_STACKTRACE_INL_HEADER cannot be directly set
-#elif defined(__native_client__) || defined(__APPLE__) || \
-    defined(__ANDROID__) || defined(__myriad2__) || defined(asmjs__) || \
-    defined(__Fuchsia__)
-#define ABSL_STACKTRACE_INL_HEADER \
-    "stacktrace_internal/stacktrace_unimplemented-inl.inc"
+#elif defined(__native_client__) || defined(__APPLE__) || defined(__ANDROID__) || defined(__myriad2__) ||              \
+    defined(asmjs__) || defined(__Fuchsia__)
+#define ABSL_STACKTRACE_INL_HEADER "stacktrace_internal/stacktrace_unimplemented-inl.inc"
 
 // Next, test for Mips and Windows.
 // TODO(marmstrong): Mips case, remove the check for ABSL_STACKTRACE_INL_HEADER
 #elif defined(__mips__) && !defined(ABSL_STACKTRACE_INL_HEADER)
-#define ABSL_STACKTRACE_INL_HEADER \
-    "stacktrace_internal/stacktrace_unimplemented-inl.inc"
-#elif defined(_WIN32)  // windows
-#define ABSL_STACKTRACE_INL_HEADER \
-    "stacktrace_internal/stacktrace_win32-inl.inc"
+#define ABSL_STACKTRACE_INL_HEADER "stacktrace_internal/stacktrace_unimplemented-inl.inc"
+#elif defined(_WIN32) // windows
+#define ABSL_STACKTRACE_INL_HEADER "stacktrace_internal/stacktrace_win32-inl.inc"
 
 // Finally, test NO_FRAME_POINTER.
 #elif !defined(NO_FRAME_POINTER)
-# if defined(__i386__) || defined(__x86_64__)
-#define ABSL_STACKTRACE_INL_HEADER \
-    "stacktrace_internal/stacktrace_x86-inl.inc"
-# elif defined(__ppc__) || defined(__PPC__)
-#define ABSL_STACKTRACE_INL_HEADER \
-    "stacktrace_internal/stacktrace_powerpc-inl.inc"
-# elif defined(__aarch64__)
-#define ABSL_STACKTRACE_INL_HEADER \
-    "stacktrace_internal/stacktrace_aarch64-inl.inc"
-# elif defined(__arm__)
-#define ABSL_STACKTRACE_INL_HEADER \
-    "stacktrace_internal/stacktrace_arm-inl.inc"
-# endif
-#else  // defined(NO_FRAME_POINTER)
-# if defined(__i386__) || defined(__x86_64__) || defined(__aarch64__)
-#define ABSL_STACKTRACE_INL_HEADER \
-    "stacktrace_internal/stacktrace_unimplemented-inl.inc"
-# elif defined(__ppc__) || defined(__PPC__)
+#if defined(__i386__) || defined(__x86_64__)
+#define ABSL_STACKTRACE_INL_HEADER "stacktrace_internal/stacktrace_x86-inl.inc"
+#elif defined(__ppc__) || defined(__PPC__)
+#define ABSL_STACKTRACE_INL_HEADER "stacktrace_internal/stacktrace_powerpc-inl.inc"
+#elif defined(__aarch64__)
+#define ABSL_STACKTRACE_INL_HEADER "stacktrace_internal/stacktrace_aarch64-inl.inc"
+#elif defined(__arm__)
+#define ABSL_STACKTRACE_INL_HEADER "stacktrace_internal/stacktrace_arm-inl.inc"
+#endif
+#else // defined(NO_FRAME_POINTER)
+#if defined(__i386__) || defined(__x86_64__) || defined(__aarch64__)
+#define ABSL_STACKTRACE_INL_HEADER "stacktrace_internal/stacktrace_unimplemented-inl.inc"
+#elif defined(__ppc__) || defined(__PPC__)
 //  Use glibc's backtrace.
-#define ABSL_STACKTRACE_INL_HEADER \
-    "stacktrace_internal/stacktrace_generic-inl.inc"
-# elif defined(__arm__)
-#   error stacktrace without frame pointer is not supported on ARM
-# endif
-#endif  // NO_FRAME_POINTER
+#define ABSL_STACKTRACE_INL_HEADER "stacktrace_internal/stacktrace_generic-inl.inc"
+#elif defined(__arm__)
+#error stacktrace without frame pointer is not supported on ARM
+#endif
+#endif // NO_FRAME_POINTER
 
 #if !defined(ABSL_STACKTRACE_INL_HEADER)
 #error Not supported yet
 #endif
 
-#endif  // ABSL_DEBUGGING_INTERNAL_STACKTRACE_CONFIG_H_
+#endif // ABSL_DEBUGGING_INTERNAL_STACKTRACE_CONFIG_H_
 //
 // Copyright 2017 The Abseil Authors.
 //
@@ -269,7 +257,6 @@ class ElfMemImage {
 
 #include <atomic>
 
-
 #ifdef ABSL_HAVE_ELF_MEM_IMAGE
 
 #ifdef ABSL_HAVE_VDSO_SUPPORT
@@ -284,87 +271,89 @@ namespace debug_internal {
 // NOTE: this class may be used from within tcmalloc, and can not
 // use any memory allocation routines.
 class VDSOSupport {
- public:
-  VDSOSupport();
+public:
+	VDSOSupport();
 
-  typedef ElfMemImage::SymbolInfo SymbolInfo;
-  typedef ElfMemImage::SymbolIterator SymbolIterator;
+	typedef ElfMemImage::SymbolInfo SymbolInfo;
+	typedef ElfMemImage::SymbolIterator SymbolIterator;
 
-  // On PowerPC64 VDSO symbols can either be of type STT_FUNC or STT_NOTYPE
-  // depending on how the kernel is built.  The kernel is normally built with
-  // STT_NOTYPE type VDSO symbols.  Let's make things simpler first by using a
-  // compile-time constant.
+	// On PowerPC64 VDSO symbols can either be of type STT_FUNC or STT_NOTYPE
+	// depending on how the kernel is built.  The kernel is normally built with
+	// STT_NOTYPE type VDSO symbols.  Let's make things simpler first by using a
+	// compile-time constant.
 #ifdef __powerpc64__
-  enum { kVDSOSymbolType = STT_NOTYPE };
+	enum { kVDSOSymbolType = STT_NOTYPE };
 #else
-  enum { kVDSOSymbolType = STT_FUNC };
+	enum { kVDSOSymbolType = STT_FUNC };
 #endif
 
-  // Answers whether we have a vdso at all.
-  bool IsPresent() const { return image_.IsPresent(); }
+	// Answers whether we have a vdso at all.
+	bool IsPresent() const { return image_.IsPresent(); }
 
-  // Allow to iterate over all VDSO symbols.
-  SymbolIterator begin() const { return image_.begin(); }
-  SymbolIterator end() const { return image_.end(); }
+	// Allow to iterate over all VDSO symbols.
+	SymbolIterator begin() const { return image_.begin(); }
+	SymbolIterator end() const { return image_.end(); }
 
-  // Look up versioned dynamic symbol in the kernel VDSO.
-  // Returns false if VDSO is not present, or doesn't contain given
-  // symbol/version/type combination.
-  // If info_out != nullptr, additional details are filled in.
-  bool LookupSymbol(const char *name, const char *version,
-                    int symbol_type, SymbolInfo *info_out) const;
+	// Look up versioned dynamic symbol in the kernel VDSO.
+	// Returns false if VDSO is not present, or doesn't contain given
+	// symbol/version/type combination.
+	// If info_out != nullptr, additional details are filled in.
+	bool LookupSymbol(const char* name, const char* version, int symbol_type, SymbolInfo* info_out) const;
 
-  // Find info about symbol (if any) which overlaps given address.
-  // Returns true if symbol was found; false if VDSO isn't present
-  // or doesn't have a symbol overlapping given address.
-  // If info_out != nullptr, additional details are filled in.
-  bool LookupSymbolByAddress(const void *address, SymbolInfo *info_out) const;
+	// Find info about symbol (if any) which overlaps given address.
+	// Returns true if symbol was found; false if VDSO isn't present
+	// or doesn't have a symbol overlapping given address.
+	// If info_out != nullptr, additional details are filled in.
+	bool LookupSymbolByAddress(const void* address, SymbolInfo* info_out) const;
 
-  // Used only for testing. Replace real VDSO base with a mock.
-  // Returns previous value of vdso_base_. After you are done testing,
-  // you are expected to call SetBase() with previous value, in order to
-  // reset state to the way it was.
-  const void *SetBase(const void *s);
+	// Used only for testing. Replace real VDSO base with a mock.
+	// Returns previous value of vdso_base_. After you are done testing,
+	// you are expected to call SetBase() with previous value, in order to
+	// reset state to the way it was.
+	const void* SetBase(const void* s);
 
-  // Computes vdso_base_ and returns it. Should be called as early as
-  // possible; before any thread creation, chroot or setuid.
-  static const void *Init();
+	// Computes vdso_base_ and returns it. Should be called as early as
+	// possible; before any thread creation, chroot or setuid.
+	static const void* Init();
 
- private:
-  // image_ represents VDSO ELF image in memory.
-  // image_.ehdr_ == nullptr implies there is no VDSO.
-  ElfMemImage image_;
+private:
+	// image_ represents VDSO ELF image in memory.
+	// image_.ehdr_ == nullptr implies there is no VDSO.
+	ElfMemImage image_;
 
-  // Cached value of auxv AT_SYSINFO_EHDR, computed once.
-  // This is a tri-state:
-  //   kInvalidBase   => value hasn't been determined yet.
-  //              0   => there is no VDSO.
-  //           else   => vma of VDSO Elf{32,64}_Ehdr.
-  //
-  // When testing with mock VDSO, low bit is set.
-  // The low bit is always available because vdso_base_ is
-  // page-aligned.
-  static std::atomic<const void *> vdso_base_;
+	// Cached value of auxv AT_SYSINFO_EHDR, computed once.
+	// This is a tri-state:
+	//   kInvalidBase   => value hasn't been determined yet.
+	//              0   => there is no VDSO.
+	//           else   => vma of VDSO Elf{32,64}_Ehdr.
+	//
+	// When testing with mock VDSO, low bit is set.
+	// The low bit is always available because vdso_base_ is
+	// page-aligned.
+	static std::atomic<const void*> vdso_base_;
 
-  // NOLINT on 'long' because these routines mimic kernel api.
-  // The 'cache' parameter may be used by some versions of the kernel,
-  // and should be nullptr or point to a static buffer containing at
-  // least two 'long's.
-  static long InitAndGetCPU(unsigned *cpu, void *cache,     // NOLINT 'long'.
-                            void *unused);
-  static long GetCPUViaSyscall(unsigned *cpu, void *cache,  // NOLINT 'long'.
-                               void *unused);
-  typedef long (*GetCpuFn)(unsigned *cpu, void *cache,      // NOLINT 'long'.
-                           void *unused);
+	// NOLINT on 'long' because these routines mimic kernel api.
+	// The 'cache' parameter may be used by some versions of the kernel,
+	// and should be nullptr or point to a static buffer containing at
+	// least two 'long's.
+	static long InitAndGetCPU(unsigned* cpu,
+	                          void* cache, // NOLINT 'long'.
+	                          void* unused);
+	static long GetCPUViaSyscall(unsigned* cpu,
+	                             void* cache, // NOLINT 'long'.
+	                             void* unused);
+	typedef long (*GetCpuFn)(unsigned* cpu,
+	                         void* cache, // NOLINT 'long'.
+	                         void* unused);
 
-  // This function pointer may point to InitAndGetCPU,
-  // GetCPUViaSyscall, or __vdso_getcpu at different stages of initialization.
-  static std::atomic<GetCpuFn> getcpu_fn_;
+	// This function pointer may point to InitAndGetCPU,
+	// GetCPUViaSyscall, or __vdso_getcpu at different stages of initialization.
+	static std::atomic<GetCpuFn> getcpu_fn_;
 
-  friend int GetCPU(void);  // Needs access to getcpu_fn_.
+	friend int GetCPU(void); // Needs access to getcpu_fn_.
 
-  VDSOSupport(const VDSOSupport&) = delete;
-  VDSOSupport& operator=(const VDSOSupport&) = delete;
+	VDSOSupport(const VDSOSupport&) = delete;
+	VDSOSupport& operator=(const VDSOSupport&) = delete;
 };
 
 // Same as sched_getcpu() on later glibc versions.
@@ -374,12 +363,12 @@ class VDSOSupport {
 // support SYS_getcpu.
 int GetCPU();
 
-}  // namespace debug_internal
-}  // namespace absl
+} // namespace debug_internal
+} // namespace absl
 
-#endif  // ABSL_HAVE_ELF_MEM_IMAGE
+#endif // ABSL_HAVE_ELF_MEM_IMAGE
 
-#endif  // ABSL_DEBUGGING_INTERNAL_VDSO_SUPPORT_H_
+#endif // ABSL_DEBUGGING_INTERNAL_VDSO_SUPPORT_H_
 // Copyright 2017 The Abseil Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -489,10 +478,10 @@ int GetCPU();
 // have an implicit 'this' argument, the arguments of such methods
 // should be counted from two, not one."
 #if ABSL_HAVE_ATTRIBUTE(format) || (defined(__GNUC__) && !defined(__clang__))
-#define ABSL_PRINTF_ATTRIBUTE(string_index, first_to_check) \
-  __attribute__((__format__(__printf__, string_index, first_to_check)))
-#define ABSL_SCANF_ATTRIBUTE(string_index, first_to_check) \
-  __attribute__((__format__(__scanf__, string_index, first_to_check)))
+#define ABSL_PRINTF_ATTRIBUTE(string_index, first_to_check)                                                            \
+	__attribute__((__format__(__printf__, string_index, first_to_check)))
+#define ABSL_SCANF_ATTRIBUTE(string_index, first_to_check)                                                             \
+	__attribute__((__format__(__scanf__, string_index, first_to_check)))
 #else
 #define ABSL_PRINTF_ATTRIBUTE(string_index, first_to_check)
 #define ABSL_SCANF_ATTRIBUTE(string_index, first_to_check)
@@ -502,8 +491,7 @@ int GetCPU();
 // ABSL_ATTRIBUTE_NOINLINE
 //
 // Forces functions to either inline or not inline. Introduced in gcc 3.1.
-#if ABSL_HAVE_ATTRIBUTE(always_inline) || \
-    (defined(__GNUC__) && !defined(__clang__))
+#if ABSL_HAVE_ATTRIBUTE(always_inline) || (defined(__GNUC__) && !defined(__clang__))
 #define ABSL_ATTRIBUTE_ALWAYS_INLINE __attribute__((always_inline))
 #define ABSL_HAVE_ATTRIBUTE_ALWAYS_INLINE 1
 #else
@@ -526,8 +514,7 @@ int GetCPU();
 #define ABSL_ATTRIBUTE_NO_TAIL_CALL __attribute__((disable_tail_calls))
 #elif defined(__GNUC__) && !defined(__clang__)
 #define ABSL_HAVE_ATTRIBUTE_NO_TAIL_CALL 1
-#define ABSL_ATTRIBUTE_NO_TAIL_CALL \
-  __attribute__((optimize("no-optimize-sibling-calls")))
+#define ABSL_ATTRIBUTE_NO_TAIL_CALL __attribute__((optimize("no-optimize-sibling-calls")))
 #else
 #define ABSL_ATTRIBUTE_NO_TAIL_CALL
 #define ABSL_HAVE_ATTRIBUTE_NO_TAIL_CALL 0
@@ -645,10 +632,8 @@ int GetCPU();
 // where certain behavior (eg. devision by zero) is being used intentionally.
 // NOTE: GCC supports UndefinedBehaviorSanitizer(ubsan) since 4.9.
 // https://gcc.gnu.org/gcc-4.9/changes.html
-#if defined(__GNUC__) && \
-    (defined(UNDEFINED_BEHAVIOR_SANITIZER) || defined(ADDRESS_SANITIZER))
-#define ABSL_ATTRIBUTE_NO_SANITIZE_UNDEFINED \
-  __attribute__((no_sanitize("undefined")))
+#if defined(__GNUC__) && (defined(UNDEFINED_BEHAVIOR_SANITIZER) || defined(ADDRESS_SANITIZER))
+#define ABSL_ATTRIBUTE_NO_SANITIZE_UNDEFINED __attribute__((no_sanitize("undefined")))
 #else
 #define ABSL_ATTRIBUTE_NO_SANITIZE_UNDEFINED
 #endif
@@ -669,9 +654,7 @@ int GetCPU();
 // supported on Darwin/iOS.
 #ifdef ABSL_HAVE_ATTRIBUTE_SECTION
 #error ABSL_HAVE_ATTRIBUTE_SECTION cannot be directly set
-#elif (ABSL_HAVE_ATTRIBUTE(section) ||                \
-       (defined(__GNUC__) && !defined(__clang__))) && \
-    !defined(__APPLE__)
+#elif (ABSL_HAVE_ATTRIBUTE(section) || (defined(__GNUC__) && !defined(__clang__))) && !defined(__APPLE__)
 #define ABSL_HAVE_ATTRIBUTE_SECTION 1
 
 // ABSL_ATTRIBUTE_SECTION
@@ -683,8 +666,7 @@ int GetCPU();
 // whatever section its caller is placed into.
 //
 #ifndef ABSL_ATTRIBUTE_SECTION
-#define ABSL_ATTRIBUTE_SECTION(name) \
-  __attribute__((section(#name))) __attribute__((noinline))
+#define ABSL_ATTRIBUTE_SECTION(name) __attribute__((section(#name))) __attribute__((noinline))
 #endif
 
 // ABSL_ATTRIBUTE_SECTION_VARIABLE
@@ -705,9 +687,9 @@ int GetCPU();
 // a no-op on ELF but not on Mach-O.
 //
 #ifndef ABSL_DECLARE_ATTRIBUTE_SECTION_VARS
-#define ABSL_DECLARE_ATTRIBUTE_SECTION_VARS(name) \
-  extern char __start_##name[] ABSL_ATTRIBUTE_WEAK;    \
-  extern char __stop_##name[] ABSL_ATTRIBUTE_WEAK
+#define ABSL_DECLARE_ATTRIBUTE_SECTION_VARS(name)                                                                      \
+	extern char __start_##name[] ABSL_ATTRIBUTE_WEAK;                                                                  \
+	extern char __stop_##name[] ABSL_ATTRIBUTE_WEAK
 #endif
 #ifndef ABSL_DEFINE_ATTRIBUTE_SECTION_VARS
 #define ABSL_INIT_ATTRIBUTE_SECTION_VARS(name)
@@ -722,11 +704,9 @@ int GetCPU();
 // One must ABSL_DECLARE_ATTRIBUTE_SECTION_VARS(name) for this to compile and
 // link.
 //
-#define ABSL_ATTRIBUTE_SECTION_START(name) \
-  (reinterpret_cast<void *>(__start_##name))
-#define ABSL_ATTRIBUTE_SECTION_STOP(name) \
-  (reinterpret_cast<void *>(__stop_##name))
-#else  // !ABSL_HAVE_ATTRIBUTE_SECTION
+#define ABSL_ATTRIBUTE_SECTION_START(name) (reinterpret_cast<void*>(__start_##name))
+#define ABSL_ATTRIBUTE_SECTION_STOP(name) (reinterpret_cast<void*>(__stop_##name))
+#else // !ABSL_HAVE_ATTRIBUTE_SECTION
 
 #define ABSL_HAVE_ATTRIBUTE_SECTION 0
 
@@ -736,26 +716,24 @@ int GetCPU();
 #define ABSL_INIT_ATTRIBUTE_SECTION_VARS(name)
 #define ABSL_DEFINE_ATTRIBUTE_SECTION_VARS(name)
 #define ABSL_DECLARE_ATTRIBUTE_SECTION_VARS(name)
-#define ABSL_ATTRIBUTE_SECTION_START(name) (reinterpret_cast<void *>(0))
-#define ABSL_ATTRIBUTE_SECTION_STOP(name) (reinterpret_cast<void *>(0))
-#endif  // ABSL_ATTRIBUTE_SECTION
+#define ABSL_ATTRIBUTE_SECTION_START(name) (reinterpret_cast<void*>(0))
+#define ABSL_ATTRIBUTE_SECTION_STOP(name) (reinterpret_cast<void*>(0))
+#endif // ABSL_ATTRIBUTE_SECTION
 
 // ABSL_ATTRIBUTE_STACK_ALIGN_FOR_OLD_LIBC
 //
 // Support for aligning the stack on 32-bit x86.
-#if ABSL_HAVE_ATTRIBUTE(force_align_arg_pointer) || \
-    (defined(__GNUC__) && !defined(__clang__))
+#if ABSL_HAVE_ATTRIBUTE(force_align_arg_pointer) || (defined(__GNUC__) && !defined(__clang__))
 #if defined(__i386__)
-#define ABSL_ATTRIBUTE_STACK_ALIGN_FOR_OLD_LIBC \
-  __attribute__((force_align_arg_pointer))
+#define ABSL_ATTRIBUTE_STACK_ALIGN_FOR_OLD_LIBC __attribute__((force_align_arg_pointer))
 #define ABSL_REQUIRE_STACK_ALIGN_TRAMPOLINE (0)
 #elif defined(__x86_64__)
 #define ABSL_REQUIRE_STACK_ALIGN_TRAMPOLINE (1)
 #define ABSL_ATTRIBUTE_STACK_ALIGN_FOR_OLD_LIBC
-#else  // !__i386__ && !__x86_64
+#else // !__i386__ && !__x86_64
 #define ABSL_REQUIRE_STACK_ALIGN_TRAMPOLINE (0)
 #define ABSL_ATTRIBUTE_STACK_ALIGN_FOR_OLD_LIBC
-#endif  // __i386__
+#endif // __i386__
 #else
 #define ABSL_ATTRIBUTE_STACK_ALIGN_FOR_OLD_LIBC
 #define ABSL_REQUIRE_STACK_ALIGN_TRAMPOLINE (0)
@@ -844,13 +822,11 @@ int GetCPU();
 // packages/targets, as this may lead to conflicting definitions of functions at
 // link-time.
 //
-#if ABSL_HAVE_CPP_ATTRIBUTE(clang::xray_always_instrument) && \
-    !defined(ABSL_NO_XRAY_ATTRIBUTES)
+#if ABSL_HAVE_CPP_ATTRIBUTE(clang::xray_always_instrument) && !defined(ABSL_NO_XRAY_ATTRIBUTES)
 #define ABSL_XRAY_ALWAYS_INSTRUMENT [[clang::xray_always_instrument]]
 #define ABSL_XRAY_NEVER_INSTRUMENT [[clang::xray_never_instrument]]
 #if ABSL_HAVE_CPP_ATTRIBUTE(clang::xray_log_args)
-#define ABSL_XRAY_LOG_ARGS(N) \
-    [[clang::xray_always_instrument, clang::xray_log_args(N)]]
+#define ABSL_XRAY_LOG_ARGS(N) [[clang::xray_always_instrument, clang::xray_log_args(N)]]
 #else
 #define ABSL_XRAY_LOG_ARGS(N) [[clang::xray_always_instrument]]
 #endif
@@ -912,9 +888,9 @@ int GetCPU();
 #define ABSL_CONST_INIT [[clang::require_constant_initialization]]
 #else
 #define ABSL_CONST_INIT
-#endif  // ABSL_HAVE_CPP_ATTRIBUTE(clang::require_constant_initialization)
+#endif // ABSL_HAVE_CPP_ATTRIBUTE(clang::require_constant_initialization)
 
-#endif  // ABSL_BASE_ATTRIBUTES_H_
+#endif // ABSL_BASE_ATTRIBUTES_H_
 //
 // Copyright 2017 The Abseil Authors.
 //
@@ -970,7 +946,7 @@ int GetCPU();
 #ifdef __cplusplus
 // Included for __GLIBCXX__, _LIBCPP_VERSION
 #include <cstddef>
-#endif  // __cplusplus
+#endif // __cplusplus
 
 #if defined(__APPLE__)
 // Included for TARGET_OS_IPHONE, __IPHONE_OS_VERSION_MIN_REQUIRED,
@@ -978,7 +954,6 @@ int GetCPU();
 #include <Availability.h>
 #include <TargetConditionals.h>
 #endif
-
 
 // -----------------------------------------------------------------------------
 // Compiler Feature Checks
@@ -1024,11 +999,11 @@ int GetCPU();
 // Since NDK r16, `__NDK_MAJOR__` and `__NDK_MINOR__` are defined in
 // <android/ndk-version.h>. For NDK < r16, users should define these macros,
 // e.g. `-D__NDK_MAJOR__=11 -D__NKD_MINOR__=0` for NDK r11.
-#if defined(__NDK_MAJOR__) && defined(__NDK_MINOR__) && \
+#if defined(__NDK_MAJOR__) && defined(__NDK_MINOR__) &&                                                                \
     ((__NDK_MAJOR__ < 12) || ((__NDK_MAJOR__ == 12) && (__NDK_MINOR__ < 1)))
 #undef ABSL_HAVE_TLS
 #endif
-#endif  // defined(__ANDROID__) && defined(__clang__)
+#endif // defined(__ANDROID__) && defined(__clang__)
 
 // ABSL_HAVE_STD_IS_TRIVIALLY_DESTRUCTIBLE
 //
@@ -1038,9 +1013,9 @@ int GetCPU();
 // gcc >= 4.8.1 using libstdc++, and Visual Studio.
 #ifdef ABSL_HAVE_STD_IS_TRIVIALLY_DESTRUCTIBLE
 #error ABSL_HAVE_STD_IS_TRIVIALLY_DESTRUCTIBLE cannot be directly set
-#elif defined(_LIBCPP_VERSION) ||                                        \
-    (!defined(__clang__) && defined(__GNUC__) && defined(__GLIBCXX__) && \
-     (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 8))) ||        \
+#elif defined(_LIBCPP_VERSION) ||                                                                                      \
+    (!defined(__clang__) && defined(__GNUC__) && defined(__GLIBCXX__) &&                                               \
+     (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 8))) ||                                                      \
     defined(_MSC_VER)
 #define ABSL_HAVE_STD_IS_TRIVIALLY_DESTRUCTIBLE 1
 #endif
@@ -1060,10 +1035,9 @@ int GetCPU();
 #error ABSL_HAVE_STD_IS_TRIVIALLY_CONSTRUCTIBLE cannot be directly set
 #elif defined(ABSL_HAVE_STD_IS_TRIVIALLY_ASSIGNABLE)
 #error ABSL_HAVE_STD_IS_TRIVIALLY_ASSIGNABLE cannot directly set
-#elif (defined(__clang__) && defined(_LIBCPP_VERSION)) ||        \
-    (!defined(__clang__) && defined(__GNUC__) &&                 \
-     (__GNUC__ > 5 || (__GNUC__ == 5 && __GNUC_MINOR__ >= 1)) && \
-     (defined(_LIBCPP_VERSION) || defined(__GLIBCXX__))) ||      \
+#elif (defined(__clang__) && defined(_LIBCPP_VERSION)) ||                                                              \
+    (!defined(__clang__) && defined(__GNUC__) && (__GNUC__ > 5 || (__GNUC__ == 5 && __GNUC_MINOR__ >= 1)) &&           \
+     (defined(_LIBCPP_VERSION) || defined(__GLIBCXX__))) ||                                                            \
     defined(_MSC_VER)
 #define ABSL_HAVE_STD_IS_TRIVIALLY_CONSTRUCTIBLE 1
 #define ABSL_HAVE_STD_IS_TRIVIALLY_ASSIGNABLE 1
@@ -1075,9 +1049,8 @@ int GetCPU();
 // supported.
 #ifdef ABSL_HAVE_THREAD_LOCAL
 #error ABSL_HAVE_THREAD_LOCAL cannot be directly set
-#elif !defined(__apple_build_version__) ||   \
-    ((__apple_build_version__ >= 8000042) && \
-     !(TARGET_OS_IPHONE && __IPHONE_OS_VERSION_MIN_REQUIRED < __IPHONE_9_0))
+#elif !defined(__apple_build_version__) ||                                                                             \
+    ((__apple_build_version__ >= 8000042) && !(TARGET_OS_IPHONE && __IPHONE_OS_VERSION_MIN_REQUIRED < __IPHONE_9_0))
 // Notes: Xcode's clang did not support `thread_local` until version
 // 8, and even then not for all iOS < 9.0.
 #define ABSL_HAVE_THREAD_LOCAL 1
@@ -1094,12 +1067,9 @@ int GetCPU();
 // __SIZEOF_INT128__ but not all versions actually support __int128.
 #ifdef ABSL_HAVE_INTRINSIC_INT128
 #error ABSL_HAVE_INTRINSIC_INT128 cannot be directly set
-#elif (defined(__clang__) && defined(__SIZEOF_INT128__) &&               \
-       !defined(__ppc64__) && !defined(__aarch64__)) ||                  \
-    (defined(__CUDACC__) && defined(__SIZEOF_INT128__) &&                \
-     __CUDACC_VER__ >= 70000) ||                                         \
-    (!defined(__clang__) && !defined(__CUDACC__) && defined(__GNUC__) && \
-     defined(__SIZEOF_INT128__))
+#elif (defined(__clang__) && defined(__SIZEOF_INT128__) && !defined(__ppc64__) && !defined(__aarch64__)) ||            \
+    (defined(__CUDACC__) && defined(__SIZEOF_INT128__) && __CUDACC_VER__ >= 70000) ||                                  \
+    (!defined(__clang__) && !defined(__CUDACC__) && defined(__GNUC__) && defined(__SIZEOF_INT128__))
 #define ABSL_HAVE_INTRINSIC_INT128 1
 #endif
 
@@ -1125,11 +1095,11 @@ int GetCPU();
 //   http://releases.llvm.org/3.6.0/tools/clang/docs/ReleaseNotes.html#the-exceptions-macro
 #if defined(__EXCEPTIONS) && __has_feature(cxx_exceptions)
 #define ABSL_HAVE_EXCEPTIONS 1
-#endif  // defined(__EXCEPTIONS) && __has_feature(cxx_exceptions)
+#endif // defined(__EXCEPTIONS) && __has_feature(cxx_exceptions)
 
 // Handle remaining special cases and default to exceptions being supported.
-#elif !(defined(__GNUC__) && (__GNUC__ < 5) && !defined(__EXCEPTIONS)) &&    \
-    !(defined(__GNUC__) && (__GNUC__ >= 5) && !defined(__cpp_exceptions)) && \
+#elif !(defined(__GNUC__) && (__GNUC__ < 5) && !defined(__EXCEPTIONS)) &&                                              \
+    !(defined(__GNUC__) && (__GNUC__ >= 5) && !defined(__cpp_exceptions)) &&                                           \
     !(defined(_MSC_VER) && !defined(_CPPUNWIND))
 #define ABSL_HAVE_EXCEPTIONS 1
 #endif
@@ -1160,8 +1130,8 @@ int GetCPU();
 // POSIX.1-2001.
 #ifdef ABSL_HAVE_MMAP
 #error ABSL_HAVE_MMAP cannot be directly set
-#elif defined(__linux__) || defined(__APPLE__) || defined(__ros__) || \
-    defined(__native_client__) || defined(__asmjs__) || defined(__Fuchsia__)
+#elif defined(__linux__) || defined(__APPLE__) || defined(__ros__) || defined(__native_client__) ||                    \
+    defined(__asmjs__) || defined(__Fuchsia__)
 #define ABSL_HAVE_MMAP 1
 #endif
 
@@ -1236,11 +1206,9 @@ int GetCPU();
 #error "ABSL_IS_LITTLE_ENDIAN cannot be directly set."
 #endif
 
-#if (defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) && \
-     __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+#if (defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
 #define ABSL_IS_LITTLE_ENDIAN 1
-#elif defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && \
-    __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#elif defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 #define ABSL_IS_BIG_ENDIAN 1
 #elif defined(_WIN32)
 #define ABSL_IS_LITTLE_ENDIAN 1
@@ -1287,7 +1255,7 @@ int GetCPU();
 #endif
 #endif
 
-#endif  // ABSL_BASE_CONFIG_H_
+#endif // ABSL_BASE_CONFIG_H_
 //
 // Copyright 2017 The Abseil Authors.
 //
@@ -1312,7 +1280,6 @@ int GetCPU();
 #ifndef ABSL_BASE_OPTIMIZATION_H_
 #define ABSL_BASE_OPTIMIZATION_H_
 
-
 // ABSL_BLOCK_TAIL_CALL_OPTIMIZATION
 //
 // Instructs the compiler to avoid optimizing tail-call recursion. Use of this
@@ -1327,7 +1294,10 @@ int GetCPU();
 //     return result;
 //   }
 #if defined(__pnacl__)
-#define ABSL_BLOCK_TAIL_CALL_OPTIMIZATION() if (volatile int x = 0) { (void)x; }
+#define ABSL_BLOCK_TAIL_CALL_OPTIMIZATION()                                                                            \
+	if (volatile int x = 0) {                                                                                          \
+		(void)x;                                                                                                       \
+	}
 #elif defined(__clang__)
 // Clang will not tail call given inline volatile assembly.
 #define ABSL_BLOCK_TAIL_CALL_OPTIMIZATION() __asm__ __volatile__("")
@@ -1339,7 +1309,10 @@ int GetCPU();
 // The __nop() intrinsic blocks the optimisation.
 #define ABSL_BLOCK_TAIL_CALL_OPTIMIZATION() __nop()
 #else
-#define ABSL_BLOCK_TAIL_CALL_OPTIMIZATION() if (volatile int x = 0) { (void)x; }
+#define ABSL_BLOCK_TAIL_CALL_OPTIMIZATION()                                                                            \
+	if (volatile int x = 0) {                                                                                          \
+		(void)x;                                                                                                       \
+	}
 #endif
 
 // ABSL_CACHELINE_SIZE
@@ -1421,7 +1394,7 @@ int GetCPU();
 //    applying it to types. This tends to localize the effect.
 #define ABSL_CACHELINE_ALIGNED __attribute__((aligned(ABSL_CACHELINE_SIZE)))
 
-#else  // not GCC
+#else // not GCC
 #define ABSL_CACHELINE_SIZE 64
 #define ABSL_CACHELINE_ALIGNED
 #endif
@@ -1442,8 +1415,7 @@ int GetCPU();
 // Compilers can use the information that a certain branch is not likely to be
 // taken (for instance, a CHECK failure) to optimize for the common case in
 // the absence of better information (ie. compiling gcc with `-fprofile-arcs`).
-#if ABSL_HAVE_BUILTIN(__builtin_expect) || \
-    (defined(__GNUC__) && !defined(__clang__))
+#if ABSL_HAVE_BUILTIN(__builtin_expect) || (defined(__GNUC__) && !defined(__clang__))
 #define ABSL_PREDICT_FALSE(x) (__builtin_expect(x, 0))
 #define ABSL_PREDICT_TRUE(x) (__builtin_expect(!!(x), 1))
 #else
@@ -1451,7 +1423,7 @@ int GetCPU();
 #define ABSL_PREDICT_TRUE(x) x
 #endif
 
-#endif  // ABSL_BASE_OPTIMIZATION_H_
+#endif // ABSL_BASE_OPTIMIZATION_H_
 //
 // Copyright 2017 The Abseil Authors.
 //
@@ -1485,7 +1457,6 @@ int GetCPU();
 
 #include <cstddef>
 
-
 // ABSL_ARRAYSIZE()
 //
 // Returns the # of elements in an array as a compile-time constant, which can
@@ -1499,10 +1470,9 @@ namespace absl {
 namespace macros_internal {
 template <typename T, size_t N>
 char (&ArraySizeHelper(T (&array)[N]))[N];
-}  // namespace macros_internal
-}  // namespace absl
-#define ABSL_ARRAYSIZE(array) \
-  (sizeof(::absl::macros_internal::ArraySizeHelper(array)))
+} // namespace macros_internal
+} // namespace absl
+#define ABSL_ARRAYSIZE(array) (sizeof(::absl::macros_internal::ArraySizeHelper(array)))
 
 // kLinkerInitialized
 //
@@ -1527,10 +1497,10 @@ char (&ArraySizeHelper(T (&array)[N]))[N];
 namespace absl {
 namespace base_internal {
 enum LinkerInitialized {
-  kLinkerInitialized = 0,
+	kLinkerInitialized = 0,
 };
-}  // namespace base_internal
-}  // namespace absl
+} // namespace base_internal
+} // namespace absl
 
 // ABSL_FALLTHROUGH_INTENDED
 //
@@ -1579,9 +1549,9 @@ enum LinkerInitialized {
 #endif
 
 #ifndef ABSL_FALLTHROUGH_INTENDED
-#define ABSL_FALLTHROUGH_INTENDED \
-  do {                            \
-  } while (0)
+#define ABSL_FALLTHROUGH_INTENDED                                                                                      \
+	do {                                                                                                               \
+	} while (0)
 #endif
 
 // ABSL_DEPRECATED()
@@ -1626,10 +1596,9 @@ enum LinkerInitialized {
 //   #endif // ABSL_BAD_CALL_IF
 
 #if defined(__clang__)
-# if __has_attribute(enable_if)
-#  define ABSL_BAD_CALL_IF(expr, msg) \
-    __attribute__((enable_if(expr, "Bad call trap"), unavailable(msg)))
-# endif
+#if __has_attribute(enable_if)
+#define ABSL_BAD_CALL_IF(expr, msg) __attribute__((enable_if(expr, "Bad call trap"), unavailable(msg)))
+#endif
 #endif
 
 // ABSL_ASSERT()
@@ -1647,11 +1616,10 @@ enum LinkerInitialized {
 #if defined(NDEBUG)
 #define ABSL_ASSERT(expr) (false ? (void)(expr) : (void)0)
 #else
-#define ABSL_ASSERT(expr) \
-  (ABSL_PREDICT_TRUE((expr)) ? (void)0 : [] { assert(false && #expr); }())
+#define ABSL_ASSERT(expr) (ABSL_PREDICT_TRUE((expr)) ? (void)0 : [] { assert(false && #expr); }())
 #endif
 
-#endif  // ABSL_BASE_MACROS_H_
+#endif // ABSL_BASE_MACROS_H_
 /*
  *  Copyright 2017 The Abseil Authors.
  *
@@ -1701,208 +1669,187 @@ enum LinkerInitialized {
 #define ABSL_BASE_DYNAMIC_ANNOTATIONS_H_
 
 #ifndef DYNAMIC_ANNOTATIONS_ENABLED
-# define DYNAMIC_ANNOTATIONS_ENABLED 0
+#define DYNAMIC_ANNOTATIONS_ENABLED 0
 #endif
 
 #if defined(__native_client__)
-  #include "nacl/dynamic_annotations.h"
+#include "nacl/dynamic_annotations.h"
 
-  // Stub out the macros missing from the NaCl version.
-  #ifndef ANNOTATE_CONTIGUOUS_CONTAINER
-    #define ANNOTATE_CONTIGUOUS_CONTAINER(beg, end, old_mid, new_mid)
-  #endif
-  #ifndef ANNOTATE_RWLOCK_CREATE_STATIC
-    #define ANNOTATE_RWLOCK_CREATE_STATIC(lock)
-  #endif
-  #ifndef ADDRESS_SANITIZER_REDZONE
-    #define ADDRESS_SANITIZER_REDZONE(name)
-  #endif
-  #ifndef ANNOTATE_MEMORY_IS_UNINITIALIZED
-    #define ANNOTATE_MEMORY_IS_UNINITIALIZED(address, size)
-  #endif
+// Stub out the macros missing from the NaCl version.
+#ifndef ANNOTATE_CONTIGUOUS_CONTAINER
+#define ANNOTATE_CONTIGUOUS_CONTAINER(beg, end, old_mid, new_mid)
+#endif
+#ifndef ANNOTATE_RWLOCK_CREATE_STATIC
+#define ANNOTATE_RWLOCK_CREATE_STATIC(lock)
+#endif
+#ifndef ADDRESS_SANITIZER_REDZONE
+#define ADDRESS_SANITIZER_REDZONE(name)
+#endif
+#ifndef ANNOTATE_MEMORY_IS_UNINITIALIZED
+#define ANNOTATE_MEMORY_IS_UNINITIALIZED(address, size)
+#endif
 
 #else /* !__native_client__ */
 
 #if DYNAMIC_ANNOTATIONS_ENABLED != 0
 
-  /* -------------------------------------------------------------
-     Annotations that suppress errors.  It is usually better to express the
-     program's synchronization using the other annotations, but these can
-     be used when all else fails. */
+/* -------------------------------------------------------------
+   Annotations that suppress errors.  It is usually better to express the
+   program's synchronization using the other annotations, but these can
+   be used when all else fails. */
 
-  /* Report that we may have a benign race at "pointer", with size
-     "sizeof(*(pointer))". "pointer" must be a non-void* pointer.  Insert at the
-     point where "pointer" has been allocated, preferably close to the point
-     where the race happens.  See also ANNOTATE_BENIGN_RACE_STATIC. */
-  #define ANNOTATE_BENIGN_RACE(pointer, description) \
-    AnnotateBenignRaceSized(__FILE__, __LINE__, pointer, \
-                            sizeof(*(pointer)), description)
+/* Report that we may have a benign race at "pointer", with size
+   "sizeof(*(pointer))". "pointer" must be a non-void* pointer.  Insert at the
+   point where "pointer" has been allocated, preferably close to the point
+   where the race happens.  See also ANNOTATE_BENIGN_RACE_STATIC. */
+#define ANNOTATE_BENIGN_RACE(pointer, description)                                                                     \
+	AnnotateBenignRaceSized(__FILE__, __LINE__, pointer, sizeof(*(pointer)), description)
 
-  /* Same as ANNOTATE_BENIGN_RACE(address, description), but applies to
-     the memory range [address, address+size). */
-  #define ANNOTATE_BENIGN_RACE_SIZED(address, size, description) \
-    AnnotateBenignRaceSized(__FILE__, __LINE__, address, size, description)
+/* Same as ANNOTATE_BENIGN_RACE(address, description), but applies to
+   the memory range [address, address+size). */
+#define ANNOTATE_BENIGN_RACE_SIZED(address, size, description)                                                         \
+	AnnotateBenignRaceSized(__FILE__, __LINE__, address, size, description)
 
-  /* Enable (enable!=0) or disable (enable==0) race detection for all threads.
-     This annotation could be useful if you want to skip expensive race analysis
-     during some period of program execution, e.g. during initialization. */
-  #define ANNOTATE_ENABLE_RACE_DETECTION(enable) \
-    AnnotateEnableRaceDetection(__FILE__, __LINE__, enable)
+/* Enable (enable!=0) or disable (enable==0) race detection for all threads.
+   This annotation could be useful if you want to skip expensive race analysis
+   during some period of program execution, e.g. during initialization. */
+#define ANNOTATE_ENABLE_RACE_DETECTION(enable) AnnotateEnableRaceDetection(__FILE__, __LINE__, enable)
 
-  /* -------------------------------------------------------------
-     Annotations useful for debugging. */
+/* -------------------------------------------------------------
+   Annotations useful for debugging. */
 
-  /* Report the current thread name to a race detector. */
-  #define ANNOTATE_THREAD_NAME(name) \
-    AnnotateThreadName(__FILE__, __LINE__, name)
+/* Report the current thread name to a race detector. */
+#define ANNOTATE_THREAD_NAME(name) AnnotateThreadName(__FILE__, __LINE__, name)
 
-  /* -------------------------------------------------------------
-     Annotations useful when implementing locks.  They are not
-     normally needed by modules that merely use locks.
-     The "lock" argument is a pointer to the lock object. */
+/* -------------------------------------------------------------
+   Annotations useful when implementing locks.  They are not
+   normally needed by modules that merely use locks.
+   The "lock" argument is a pointer to the lock object. */
 
-  /* Report that a lock has been created at address "lock". */
-  #define ANNOTATE_RWLOCK_CREATE(lock) \
-    AnnotateRWLockCreate(__FILE__, __LINE__, lock)
+/* Report that a lock has been created at address "lock". */
+#define ANNOTATE_RWLOCK_CREATE(lock) AnnotateRWLockCreate(__FILE__, __LINE__, lock)
 
-  /* Report that a linker initialized lock has been created at address "lock".
-   */
+/* Report that a linker initialized lock has been created at address "lock".
+ */
 #ifdef THREAD_SANITIZER
-  #define ANNOTATE_RWLOCK_CREATE_STATIC(lock) \
-    AnnotateRWLockCreateStatic(__FILE__, __LINE__, lock)
+#define ANNOTATE_RWLOCK_CREATE_STATIC(lock) AnnotateRWLockCreateStatic(__FILE__, __LINE__, lock)
 #else
-  #define ANNOTATE_RWLOCK_CREATE_STATIC(lock) ANNOTATE_RWLOCK_CREATE(lock)
+#define ANNOTATE_RWLOCK_CREATE_STATIC(lock) ANNOTATE_RWLOCK_CREATE(lock)
 #endif
 
-  /* Report that the lock at address "lock" is about to be destroyed. */
-  #define ANNOTATE_RWLOCK_DESTROY(lock) \
-    AnnotateRWLockDestroy(__FILE__, __LINE__, lock)
+/* Report that the lock at address "lock" is about to be destroyed. */
+#define ANNOTATE_RWLOCK_DESTROY(lock) AnnotateRWLockDestroy(__FILE__, __LINE__, lock)
 
-  /* Report that the lock at address "lock" has been acquired.
-     is_w=1 for writer lock, is_w=0 for reader lock. */
-  #define ANNOTATE_RWLOCK_ACQUIRED(lock, is_w) \
-    AnnotateRWLockAcquired(__FILE__, __LINE__, lock, is_w)
+/* Report that the lock at address "lock" has been acquired.
+   is_w=1 for writer lock, is_w=0 for reader lock. */
+#define ANNOTATE_RWLOCK_ACQUIRED(lock, is_w) AnnotateRWLockAcquired(__FILE__, __LINE__, lock, is_w)
 
-  /* Report that the lock at address "lock" is about to be released. */
-  #define ANNOTATE_RWLOCK_RELEASED(lock, is_w) \
-    AnnotateRWLockReleased(__FILE__, __LINE__, lock, is_w)
+/* Report that the lock at address "lock" is about to be released. */
+#define ANNOTATE_RWLOCK_RELEASED(lock, is_w) AnnotateRWLockReleased(__FILE__, __LINE__, lock, is_w)
 
-#else  /* DYNAMIC_ANNOTATIONS_ENABLED == 0 */
+#else /* DYNAMIC_ANNOTATIONS_ENABLED == 0 */
 
-  #define ANNOTATE_RWLOCK_CREATE(lock) /* empty */
-  #define ANNOTATE_RWLOCK_CREATE_STATIC(lock) /* empty */
-  #define ANNOTATE_RWLOCK_DESTROY(lock) /* empty */
-  #define ANNOTATE_RWLOCK_ACQUIRED(lock, is_w) /* empty */
-  #define ANNOTATE_RWLOCK_RELEASED(lock, is_w) /* empty */
-  #define ANNOTATE_BENIGN_RACE(address, description) /* empty */
-  #define ANNOTATE_BENIGN_RACE_SIZED(address, size, description) /* empty */
-  #define ANNOTATE_THREAD_NAME(name) /* empty */
-  #define ANNOTATE_ENABLE_RACE_DETECTION(enable) /* empty */
+#define ANNOTATE_RWLOCK_CREATE(lock) /* empty */
+#define ANNOTATE_RWLOCK_CREATE_STATIC(lock) /* empty */
+#define ANNOTATE_RWLOCK_DESTROY(lock) /* empty */
+#define ANNOTATE_RWLOCK_ACQUIRED(lock, is_w) /* empty */
+#define ANNOTATE_RWLOCK_RELEASED(lock, is_w) /* empty */
+#define ANNOTATE_BENIGN_RACE(address, description) /* empty */
+#define ANNOTATE_BENIGN_RACE_SIZED(address, size, description) /* empty */
+#define ANNOTATE_THREAD_NAME(name) /* empty */
+#define ANNOTATE_ENABLE_RACE_DETECTION(enable) /* empty */
 
-#endif  /* DYNAMIC_ANNOTATIONS_ENABLED */
+#endif /* DYNAMIC_ANNOTATIONS_ENABLED */
 
 /* These annotations are also made available to LLVM's Memory Sanitizer */
 #if DYNAMIC_ANNOTATIONS_ENABLED == 1 || defined(MEMORY_SANITIZER)
-  #define ANNOTATE_MEMORY_IS_INITIALIZED(address, size) \
-    AnnotateMemoryIsInitialized(__FILE__, __LINE__, address, size)
+#define ANNOTATE_MEMORY_IS_INITIALIZED(address, size) AnnotateMemoryIsInitialized(__FILE__, __LINE__, address, size)
 
-  #define ANNOTATE_MEMORY_IS_UNINITIALIZED(address, size) \
-    AnnotateMemoryIsUninitialized(__FILE__, __LINE__, address, size)
+#define ANNOTATE_MEMORY_IS_UNINITIALIZED(address, size) AnnotateMemoryIsUninitialized(__FILE__, __LINE__, address, size)
 #else
-  #define ANNOTATE_MEMORY_IS_INITIALIZED(address, size) /* empty */
-  #define ANNOTATE_MEMORY_IS_UNINITIALIZED(address, size) /* empty */
-#endif  /* DYNAMIC_ANNOTATIONS_ENABLED || MEMORY_SANITIZER */
+#define ANNOTATE_MEMORY_IS_INITIALIZED(address, size) /* empty */
+#define ANNOTATE_MEMORY_IS_UNINITIALIZED(address, size) /* empty */
+#endif /* DYNAMIC_ANNOTATIONS_ENABLED || MEMORY_SANITIZER */
 /* TODO(delesley) -- Replace __CLANG_SUPPORT_DYN_ANNOTATION__ with the
    appropriate feature ID. */
-#if defined(__clang__) && (!defined(SWIG)) \
-    && defined(__CLANG_SUPPORT_DYN_ANNOTATION__)
+#if defined(__clang__) && (!defined(SWIG)) && defined(__CLANG_SUPPORT_DYN_ANNOTATION__)
 
-  #if DYNAMIC_ANNOTATIONS_ENABLED == 0
-    #define ANNOTALYSIS_ENABLED
-  #endif
+#if DYNAMIC_ANNOTATIONS_ENABLED == 0
+#define ANNOTALYSIS_ENABLED
+#endif
 
-  /* When running in opt-mode, GCC will issue a warning, if these attributes are
-     compiled. Only include them when compiling using Clang. */
-  #define ATTRIBUTE_IGNORE_READS_BEGIN \
-      __attribute((exclusive_lock_function("*")))
-  #define ATTRIBUTE_IGNORE_READS_END \
-      __attribute((unlock_function("*")))
+/* When running in opt-mode, GCC will issue a warning, if these attributes are
+   compiled. Only include them when compiling using Clang. */
+#define ATTRIBUTE_IGNORE_READS_BEGIN __attribute((exclusive_lock_function("*")))
+#define ATTRIBUTE_IGNORE_READS_END __attribute((unlock_function("*")))
 #else
-  #define ATTRIBUTE_IGNORE_READS_BEGIN  /* empty */
-  #define ATTRIBUTE_IGNORE_READS_END  /* empty */
-#endif  /* defined(__clang__) && ... */
+#define ATTRIBUTE_IGNORE_READS_BEGIN /* empty */
+#define ATTRIBUTE_IGNORE_READS_END /* empty */
+#endif /* defined(__clang__) && ... */
 
 #if (DYNAMIC_ANNOTATIONS_ENABLED != 0) || defined(ANNOTALYSIS_ENABLED)
-  #define ANNOTATIONS_ENABLED
+#define ANNOTATIONS_ENABLED
 #endif
 
 #if (DYNAMIC_ANNOTATIONS_ENABLED != 0)
 
-  /* Request the analysis tool to ignore all reads in the current thread
-     until ANNOTATE_IGNORE_READS_END is called.
-     Useful to ignore intentional racey reads, while still checking
-     other reads and all writes.
-     See also ANNOTATE_UNPROTECTED_READ. */
-  #define ANNOTATE_IGNORE_READS_BEGIN() \
-    AnnotateIgnoreReadsBegin(__FILE__, __LINE__)
+/* Request the analysis tool to ignore all reads in the current thread
+   until ANNOTATE_IGNORE_READS_END is called.
+   Useful to ignore intentional racey reads, while still checking
+   other reads and all writes.
+   See also ANNOTATE_UNPROTECTED_READ. */
+#define ANNOTATE_IGNORE_READS_BEGIN() AnnotateIgnoreReadsBegin(__FILE__, __LINE__)
 
-  /* Stop ignoring reads. */
-  #define ANNOTATE_IGNORE_READS_END() \
-    AnnotateIgnoreReadsEnd(__FILE__, __LINE__)
+/* Stop ignoring reads. */
+#define ANNOTATE_IGNORE_READS_END() AnnotateIgnoreReadsEnd(__FILE__, __LINE__)
 
-  /* Similar to ANNOTATE_IGNORE_READS_BEGIN, but ignore writes instead. */
-  #define ANNOTATE_IGNORE_WRITES_BEGIN() \
-    AnnotateIgnoreWritesBegin(__FILE__, __LINE__)
+/* Similar to ANNOTATE_IGNORE_READS_BEGIN, but ignore writes instead. */
+#define ANNOTATE_IGNORE_WRITES_BEGIN() AnnotateIgnoreWritesBegin(__FILE__, __LINE__)
 
-  /* Stop ignoring writes. */
-  #define ANNOTATE_IGNORE_WRITES_END() \
-    AnnotateIgnoreWritesEnd(__FILE__, __LINE__)
+/* Stop ignoring writes. */
+#define ANNOTATE_IGNORE_WRITES_END() AnnotateIgnoreWritesEnd(__FILE__, __LINE__)
 
 /* Clang provides limited support for static thread-safety analysis
    through a feature called Annotalysis. We configure macro-definitions
    according to whether Annotalysis support is available. */
 #elif defined(ANNOTALYSIS_ENABLED)
 
-  #define ANNOTATE_IGNORE_READS_BEGIN() \
-    StaticAnnotateIgnoreReadsBegin(__FILE__, __LINE__)
+#define ANNOTATE_IGNORE_READS_BEGIN() StaticAnnotateIgnoreReadsBegin(__FILE__, __LINE__)
 
-  #define ANNOTATE_IGNORE_READS_END() \
-    StaticAnnotateIgnoreReadsEnd(__FILE__, __LINE__)
+#define ANNOTATE_IGNORE_READS_END() StaticAnnotateIgnoreReadsEnd(__FILE__, __LINE__)
 
-  #define ANNOTATE_IGNORE_WRITES_BEGIN() \
-    StaticAnnotateIgnoreWritesBegin(__FILE__, __LINE__)
+#define ANNOTATE_IGNORE_WRITES_BEGIN() StaticAnnotateIgnoreWritesBegin(__FILE__, __LINE__)
 
-  #define ANNOTATE_IGNORE_WRITES_END() \
-    StaticAnnotateIgnoreWritesEnd(__FILE__, __LINE__)
+#define ANNOTATE_IGNORE_WRITES_END() StaticAnnotateIgnoreWritesEnd(__FILE__, __LINE__)
 
 #else
-  #define ANNOTATE_IGNORE_READS_BEGIN()  /* empty */
-  #define ANNOTATE_IGNORE_READS_END()  /* empty */
-  #define ANNOTATE_IGNORE_WRITES_BEGIN()  /* empty */
-  #define ANNOTATE_IGNORE_WRITES_END()  /* empty */
+#define ANNOTATE_IGNORE_READS_BEGIN() /* empty */
+#define ANNOTATE_IGNORE_READS_END() /* empty */
+#define ANNOTATE_IGNORE_WRITES_BEGIN() /* empty */
+#define ANNOTATE_IGNORE_WRITES_END() /* empty */
 #endif
 
 /* Implement the ANNOTATE_IGNORE_READS_AND_WRITES_* annotations using the more
    primitive annotations defined above. */
 #if defined(ANNOTATIONS_ENABLED)
 
-  /* Start ignoring all memory accesses (both reads and writes). */
-  #define ANNOTATE_IGNORE_READS_AND_WRITES_BEGIN() \
-    do {                                           \
-      ANNOTATE_IGNORE_READS_BEGIN();               \
-      ANNOTATE_IGNORE_WRITES_BEGIN();              \
-    }while (0)
+/* Start ignoring all memory accesses (both reads and writes). */
+#define ANNOTATE_IGNORE_READS_AND_WRITES_BEGIN()                                                                       \
+	do {                                                                                                               \
+		ANNOTATE_IGNORE_READS_BEGIN();                                                                                 \
+		ANNOTATE_IGNORE_WRITES_BEGIN();                                                                                \
+	} while (0)
 
-  /* Stop ignoring both reads and writes. */
-  #define ANNOTATE_IGNORE_READS_AND_WRITES_END()   \
-    do {                                           \
-      ANNOTATE_IGNORE_WRITES_END();                \
-      ANNOTATE_IGNORE_READS_END();                 \
-    }while (0)
+/* Stop ignoring both reads and writes. */
+#define ANNOTATE_IGNORE_READS_AND_WRITES_END()                                                                         \
+	do {                                                                                                               \
+		ANNOTATE_IGNORE_WRITES_END();                                                                                  \
+		ANNOTATE_IGNORE_READS_END();                                                                                   \
+	} while (0)
 
 #else
-  #define ANNOTATE_IGNORE_READS_AND_WRITES_BEGIN()  /* empty */
-  #define ANNOTATE_IGNORE_READS_AND_WRITES_END()  /* empty */
+#define ANNOTATE_IGNORE_READS_AND_WRITES_BEGIN() /* empty */
+#define ANNOTATE_IGNORE_READS_AND_WRITES_END() /* empty */
 #endif
 
 /* Use the macros above rather than using these functions directly. */
@@ -1910,41 +1857,30 @@ enum LinkerInitialized {
 #ifdef __cplusplus
 extern "C" {
 #endif
-void AnnotateRWLockCreate(const char *file, int line,
-                          const volatile void *lock);
-void AnnotateRWLockCreateStatic(const char *file, int line,
-                          const volatile void *lock);
-void AnnotateRWLockDestroy(const char *file, int line,
-                           const volatile void *lock);
-void AnnotateRWLockAcquired(const char *file, int line,
-                            const volatile void *lock, long is_w);  /* NOLINT */
-void AnnotateRWLockReleased(const char *file, int line,
-                            const volatile void *lock, long is_w);  /* NOLINT */
-void AnnotateBenignRace(const char *file, int line,
-                        const volatile void *address,
-                        const char *description);
-void AnnotateBenignRaceSized(const char *file, int line,
-                        const volatile void *address,
-                        size_t size,
-                        const char *description);
-void AnnotateThreadName(const char *file, int line,
-                        const char *name);
-void AnnotateEnableRaceDetection(const char *file, int line, int enable);
-void AnnotateMemoryIsInitialized(const char *file, int line,
-                                 const volatile void *mem, size_t size);
-void AnnotateMemoryIsUninitialized(const char *file, int line,
-                                   const volatile void *mem, size_t size);
+void AnnotateRWLockCreate(const char* file, int line, const volatile void* lock);
+void AnnotateRWLockCreateStatic(const char* file, int line, const volatile void* lock);
+void AnnotateRWLockDestroy(const char* file, int line, const volatile void* lock);
+void AnnotateRWLockAcquired(const char* file, int line, const volatile void* lock, long is_w); /* NOLINT */
+void AnnotateRWLockReleased(const char* file, int line, const volatile void* lock, long is_w); /* NOLINT */
+void AnnotateBenignRace(const char* file, int line, const volatile void* address, const char* description);
+void AnnotateBenignRaceSized(const char* file,
+                             int line,
+                             const volatile void* address,
+                             size_t size,
+                             const char* description);
+void AnnotateThreadName(const char* file, int line, const char* name);
+void AnnotateEnableRaceDetection(const char* file, int line, int enable);
+void AnnotateMemoryIsInitialized(const char* file, int line, const volatile void* mem, size_t size);
+void AnnotateMemoryIsUninitialized(const char* file, int line, const volatile void* mem, size_t size);
 
 /* Annotations expand to these functions, when Dynamic Annotations are enabled.
    These functions are either implemented as no-op calls, if no Sanitizer is
    attached, or provided with externally-linked implementations by a library
    like ThreadSanitizer. */
-void AnnotateIgnoreReadsBegin(const char *file, int line)
-    ATTRIBUTE_IGNORE_READS_BEGIN;
-void AnnotateIgnoreReadsEnd(const char *file, int line)
-    ATTRIBUTE_IGNORE_READS_END;
-void AnnotateIgnoreWritesBegin(const char *file, int line);
-void AnnotateIgnoreWritesEnd(const char *file, int line);
+void AnnotateIgnoreReadsBegin(const char* file, int line) ATTRIBUTE_IGNORE_READS_BEGIN;
+void AnnotateIgnoreReadsEnd(const char* file, int line) ATTRIBUTE_IGNORE_READS_END;
+void AnnotateIgnoreWritesBegin(const char* file, int line);
+void AnnotateIgnoreWritesEnd(const char* file, int line);
 
 #if defined(ANNOTALYSIS_ENABLED)
 /* When Annotalysis is enabled without Dynamic Annotations, the use of
@@ -1955,14 +1891,22 @@ void AnnotateIgnoreWritesEnd(const char *file, int line);
    allows IGNORE_READS_AND_WRITES to work properly. */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
-static inline void StaticAnnotateIgnoreReadsBegin(const char *file, int line)
-    ATTRIBUTE_IGNORE_READS_BEGIN { (void)file; (void)line; }
-static inline void StaticAnnotateIgnoreReadsEnd(const char *file, int line)
-    ATTRIBUTE_IGNORE_READS_END { (void)file; (void)line; }
-static inline void StaticAnnotateIgnoreWritesBegin(
-    const char *file, int line) { (void)file; (void)line; }
-static inline void StaticAnnotateIgnoreWritesEnd(
-    const char *file, int line) { (void)file; (void)line; }
+static inline void StaticAnnotateIgnoreReadsBegin(const char* file, int line) ATTRIBUTE_IGNORE_READS_BEGIN {
+	(void)file;
+	(void)line;
+}
+static inline void StaticAnnotateIgnoreReadsEnd(const char* file, int line) ATTRIBUTE_IGNORE_READS_END {
+	(void)file;
+	(void)line;
+}
+static inline void StaticAnnotateIgnoreWritesBegin(const char* file, int line) {
+	(void)file;
+	(void)line;
+}
+static inline void StaticAnnotateIgnoreWritesEnd(const char* file, int line) {
+	(void)file;
+	(void)line;
+}
 #pragma GCC diagnostic pop
 #endif
 
@@ -2010,32 +1954,30 @@ double ValgrindSlowdown(void);
         ... = ANNOTATE_UNPROTECTED_READ(x); */
 #if defined(__cplusplus) && defined(ANNOTATIONS_ENABLED)
 template <typename T>
-inline T ANNOTATE_UNPROTECTED_READ(const volatile T &x) { /* NOLINT */
-  ANNOTATE_IGNORE_READS_BEGIN();
-  T res = x;
-  ANNOTATE_IGNORE_READS_END();
-  return res;
-  }
+inline T ANNOTATE_UNPROTECTED_READ(const volatile T& x) { /* NOLINT */
+	ANNOTATE_IGNORE_READS_BEGIN();
+	T res = x;
+	ANNOTATE_IGNORE_READS_END();
+	return res;
+}
 #else
-  #define ANNOTATE_UNPROTECTED_READ(x) (x)
+#define ANNOTATE_UNPROTECTED_READ(x) (x)
 #endif
 
 #if DYNAMIC_ANNOTATIONS_ENABLED != 0 && defined(__cplusplus)
-  /* Apply ANNOTATE_BENIGN_RACE_SIZED to a static variable. */
-  #define ANNOTATE_BENIGN_RACE_STATIC(static_var, description)        \
-    namespace {                                                       \
-      class static_var ## _annotator {                                \
-       public:                                                        \
-        static_var ## _annotator() {                                  \
-          ANNOTATE_BENIGN_RACE_SIZED(&static_var,                     \
-                                      sizeof(static_var),             \
-            # static_var ": " description);                           \
-        }                                                             \
-      };                                                              \
-      static static_var ## _annotator the ## static_var ## _annotator;\
-    }  // namespace
+/* Apply ANNOTATE_BENIGN_RACE_SIZED to a static variable. */
+#define ANNOTATE_BENIGN_RACE_STATIC(static_var, description)                                                           \
+	namespace {                                                                                                        \
+	class static_var##_annotator {                                                                                     \
+	public:                                                                                                            \
+		static_var##_annotator() {                                                                                     \
+			ANNOTATE_BENIGN_RACE_SIZED(&static_var, sizeof(static_var), #static_var ": " description);                 \
+		}                                                                                                              \
+	};                                                                                                                 \
+	static static_var##_annotator the##static_var##_annotator;                                                         \
+	} // namespace
 #else /* DYNAMIC_ANNOTATIONS_ENABLED == 0 */
-  #define ANNOTATE_BENIGN_RACE_STATIC(static_var, description)  /* empty */
+#define ANNOTATE_BENIGN_RACE_STATIC(static_var, description) /* empty */
 #endif /* DYNAMIC_ANNOTATIONS_ENABLED */
 
 #ifdef ADDRESS_SANITIZER
@@ -2043,14 +1985,16 @@ inline T ANNOTATE_UNPROTECTED_READ(const volatile T &x) { /* NOLINT */
  * std::vector or std::string. For more details see
  * sanitizer/common_interface_defs.h, which is provided by the compiler. */
 #include <sanitizer/common_interface_defs.h>
-#define ANNOTATE_CONTIGUOUS_CONTAINER(beg, end, old_mid, new_mid) \
-  __sanitizer_annotate_contiguous_container(beg, end, old_mid, new_mid)
-#define ADDRESS_SANITIZER_REDZONE(name)         \
-  struct { char x[8] __attribute__ ((aligned (8))); } name
+#define ANNOTATE_CONTIGUOUS_CONTAINER(beg, end, old_mid, new_mid)                                                      \
+	__sanitizer_annotate_contiguous_container(beg, end, old_mid, new_mid)
+#define ADDRESS_SANITIZER_REDZONE(name)                                                                                \
+	struct {                                                                                                           \
+		char x[8] __attribute__((aligned(8)));                                                                         \
+	} name
 #else
 #define ANNOTATE_CONTIGUOUS_CONTAINER(beg, end, old_mid, new_mid)
 #define ADDRESS_SANITIZER_REDZONE(name)
-#endif  // ADDRESS_SANITIZER
+#endif // ADDRESS_SANITIZER
 
 /* Undefine the macros intended only in this file. */
 #undef ANNOTALYSIS_ENABLED
@@ -2060,10 +2004,12 @@ inline T ANNOTATE_UNPROTECTED_READ(const volatile T &x) { /* NOLINT */
 
 #endif /* !__native_client__ */
 
-#endif  /* ABSL_BASE_DYNAMIC_ANNOTATIONS_H_ */
+#endif /* ABSL_BASE_DYNAMIC_ANNOTATIONS_H_ */
 
 #define ABSL_RAW_CHECK(cond, msg) assert((cond) && (msg))
-#define ABSL_RAW_LOG(sev, ...) do {} while(0)
+#define ABSL_RAW_LOG(sev, ...)                                                                                         \
+	do {                                                                                                               \
+	} while (0)
 
 // Copyright 2017 The Abseil Authors.
 //
@@ -2101,21 +2047,19 @@ inline T ANNOTATE_UNPROTECTED_READ(const volatile T &x) { /* NOLINT */
 // correctly when absl::GetStackTrace() is called with max_depth == 0.
 // Some code may do that.
 
-
 #include <atomic>
-
 
 #if defined(ABSL_STACKTRACE_INL_HEADER)
 #include ABSL_STACKTRACE_INL_HEADER
 #else
-# error Cannot calculate stack trace: will need to write for your environment
-# include "stacktrace_internal/stacktrace_aarch64-inl.inc"
-# include "stacktrace_internal/stacktrace_arm-inl.inc"
-# include "stacktrace_internal/stacktrace_generic-inl.inc"
-# include "stacktrace_internal/stacktrace_powerpc-inl.inc"
-# include "stacktrace_internal/stacktrace_unimplemented-inl.inc"
-# include "stacktrace_internal/stacktrace_win32-inl.inc"
-# include "stacktrace_internal/stacktrace_x86-inl.inc"
+#error Cannot calculate stack trace: will need to write for your environment
+#include "stacktrace_internal/stacktrace_aarch64-inl.inc"
+#include "stacktrace_internal/stacktrace_arm-inl.inc"
+#include "stacktrace_internal/stacktrace_generic-inl.inc"
+#include "stacktrace_internal/stacktrace_powerpc-inl.inc"
+#include "stacktrace_internal/stacktrace_unimplemented-inl.inc"
+#include "stacktrace_internal/stacktrace_win32-inl.inc"
+#include "stacktrace_internal/stacktrace_x86-inl.inc"
 #endif
 
 namespace absl {
@@ -2125,75 +2069,75 @@ typedef int (*Unwinder)(void**, int*, int, int, const void*, int*);
 std::atomic<Unwinder> custom;
 
 template <bool IS_STACK_FRAMES, bool IS_WITH_CONTEXT>
-ABSL_ATTRIBUTE_ALWAYS_INLINE inline int Unwind(void** result, int* sizes,
-                                               int max_depth, int skip_count,
+ABSL_ATTRIBUTE_ALWAYS_INLINE inline int Unwind(void** result,
+                                               int* sizes,
+                                               int max_depth,
+                                               int skip_count,
                                                const void* uc,
                                                int* min_dropped_frames) {
-  Unwinder f = &UnwindImpl<IS_STACK_FRAMES, IS_WITH_CONTEXT>;
-  Unwinder g = custom.load(std::memory_order_acquire);
-  if (g != nullptr) f = g;
+	Unwinder f = &UnwindImpl<IS_STACK_FRAMES, IS_WITH_CONTEXT>;
+	Unwinder g = custom.load(std::memory_order_acquire);
+	if (g != nullptr)
+		f = g;
 
-  // Add 1 to skip count for the unwinder function itself
-  int size = (*f)(result, sizes, max_depth, skip_count + 1, uc,
-                  min_dropped_frames);
-  // To disable tail call to (*f)(...)
-  ABSL_BLOCK_TAIL_CALL_OPTIMIZATION();
-  return size;
+	// Add 1 to skip count for the unwinder function itself
+	int size = (*f)(result, sizes, max_depth, skip_count + 1, uc, min_dropped_frames);
+	// To disable tail call to (*f)(...)
+	ABSL_BLOCK_TAIL_CALL_OPTIMIZATION();
+	return size;
 }
 
-}  // anonymous namespace
+} // anonymous namespace
 
 int GetStackFrames(void** result, int* sizes, int max_depth, int skip_count) {
-  return Unwind<true, false>(result, sizes, max_depth, skip_count, nullptr,
-                             nullptr);
+	return Unwind<true, false>(result, sizes, max_depth, skip_count, nullptr, nullptr);
 }
 
-int GetStackFramesWithContext(void** result, int* sizes, int max_depth,
-                              int skip_count, const void* uc,
+int GetStackFramesWithContext(void** result,
+                              int* sizes,
+                              int max_depth,
+                              int skip_count,
+                              const void* uc,
                               int* min_dropped_frames) {
-  return Unwind<true, true>(result, sizes, max_depth, skip_count, uc,
-                            min_dropped_frames);
+	return Unwind<true, true>(result, sizes, max_depth, skip_count, uc, min_dropped_frames);
 }
 
 int GetStackTrace(void** result, int max_depth, int skip_count) {
-  return Unwind<false, false>(result, nullptr, max_depth, skip_count, nullptr,
-                              nullptr);
+	return Unwind<false, false>(result, nullptr, max_depth, skip_count, nullptr, nullptr);
 }
 
-int GetStackTraceWithContext(void** result, int max_depth, int skip_count,
-                             const void* uc, int* min_dropped_frames) {
-  return Unwind<false, true>(result, nullptr, max_depth, skip_count, uc,
-                             min_dropped_frames);
+int GetStackTraceWithContext(void** result, int max_depth, int skip_count, const void* uc, int* min_dropped_frames) {
+	return Unwind<false, true>(result, nullptr, max_depth, skip_count, uc, min_dropped_frames);
 }
 
 void SetStackUnwinder(Unwinder w) {
-  custom.store(w, std::memory_order_release);
+	custom.store(w, std::memory_order_release);
 }
 
-int DefaultStackUnwinder(void** pcs, int* sizes, int depth, int skip,
-                         const void* uc, int* min_dropped_frames) {
-  skip++;  // For this function
-  Unwinder f = nullptr;
-  if (sizes == nullptr) {
-    if (uc == nullptr) {
-      f = &UnwindImpl<false, false>;
-    } else {
-      f = &UnwindImpl<false, true>;
-    }
-  } else {
-    if (uc == nullptr) {
-      f = &UnwindImpl<true, false>;
-    } else {
-      f = &UnwindImpl<true, true>;
-    }
-  }
-  volatile int x = 0;
-  int n = (*f)(pcs, sizes, depth, skip, uc, min_dropped_frames);
-  x = 1; (void) x;  // To disable tail call to (*f)(...)
-  return n;
+int DefaultStackUnwinder(void** pcs, int* sizes, int depth, int skip, const void* uc, int* min_dropped_frames) {
+	skip++; // For this function
+	Unwinder f = nullptr;
+	if (sizes == nullptr) {
+		if (uc == nullptr) {
+			f = &UnwindImpl<false, false>;
+		} else {
+			f = &UnwindImpl<false, true>;
+		}
+	} else {
+		if (uc == nullptr) {
+			f = &UnwindImpl<true, false>;
+		} else {
+			f = &UnwindImpl<true, true>;
+		}
+	}
+	volatile int x = 0;
+	int n = (*f)(pcs, sizes, depth, skip, uc, min_dropped_frames);
+	x = 1;
+	(void)x; // To disable tail call to (*f)(...)
+	return n;
 }
 
-}  // namespace absl
+} // namespace absl
 // Copyright 2017 The Abseil Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -2211,17 +2155,18 @@ int DefaultStackUnwinder(void** pcs, int* sizes, int depth, int skip,
 // base::AddressIsReadable() probes an address to see whether it is readable,
 // without faulting.
 
-
 #if !defined(__linux__) || defined(__ANDROID__)
 
 namespace absl {
 namespace debug_internal {
 
 // On platforms other than Linux, just return true.
-bool AddressIsReadable(const void* /* addr */) { return true; }
+bool AddressIsReadable(const void* /* addr */) {
+	return true;
+}
 
-}  // namespace debug_internal
-}  // namespace absl
+} // namespace debug_internal
+} // namespace absl
 
 #else
 
@@ -2232,97 +2177,93 @@ bool AddressIsReadable(const void* /* addr */) { return true; }
 #include <cerrno>
 #include <cstdint>
 
-
 namespace absl {
 namespace debug_internal {
 
 // Pack a pid and two file descriptors into a 64-bit word,
 // using 16, 24, and 24 bits for each respectively.
 static uint64_t Pack(uint64_t pid, uint64_t read_fd, uint64_t write_fd) {
-  ABSL_RAW_CHECK((read_fd >> 24) == 0 && (write_fd >> 24) == 0,
-                 "fd out of range");
-  return (pid << 48) | ((read_fd & 0xffffff) << 24) | (write_fd & 0xffffff);
+	ABSL_RAW_CHECK((read_fd >> 24) == 0 && (write_fd >> 24) == 0, "fd out of range");
+	return (pid << 48) | ((read_fd & 0xffffff) << 24) | (write_fd & 0xffffff);
 }
 
 // Unpack x into a pid and two file descriptors, where x was created with
 // Pack().
-static void Unpack(uint64_t x, int *pid, int *read_fd, int *write_fd) {
-  *pid = x >> 48;
-  *read_fd = (x >> 24) & 0xffffff;
-  *write_fd = x & 0xffffff;
+static void Unpack(uint64_t x, int* pid, int* read_fd, int* write_fd) {
+	*pid = x >> 48;
+	*read_fd = (x >> 24) & 0xffffff;
+	*write_fd = x & 0xffffff;
 }
 
 // Return whether the byte at *addr is readable, without faulting.
 // Save and restores errno.   Returns true on systems where
 // unimplemented.
 // This is a namespace-scoped variable for correct zero-initialization.
-static std::atomic<uint64_t> pid_and_fds;  // initially 0, an invalid pid.
-bool AddressIsReadable(const void *addr) {
-  int save_errno = errno;
-  // We test whether a byte is readable by using write().  Normally, this would
-  // be done via a cached file descriptor to /dev/null, but linux fails to
-  // check whether the byte is readable when the destination is /dev/null, so
-  // we use a cached pipe.  We store the pid of the process that created the
-  // pipe to handle the case where a process forks, and the child closes all
-  // the file descriptors and then calls this routine.  This is not perfect:
-  // the child could use the routine, then close all file descriptors and then
-  // use this routine again.  But the likely use of this routine is when
-  // crashing, to test the validity of pages when dumping the stack.  Beware
-  // that we may leak file descriptors, but we're unlikely to leak many.
-  int bytes_written;
-  int current_pid = getpid() & 0xffff;   // we use only the low order 16 bits
-  do {  // until we do not get EBADF trying to use file descriptors
-    int pid;
-    int read_fd;
-    int write_fd;
-    uint64_t local_pid_and_fds = pid_and_fds.load(std::memory_order_relaxed);
-    Unpack(local_pid_and_fds, &pid, &read_fd, &write_fd);
-    while (current_pid != pid) {
-      int p[2];
-      // new pipe
-      if (pipe(p) != 0) {
-        ABSL_RAW_LOG(FATAL, "Failed to create pipe, errno=%d", errno);
-      }
-      fcntl(p[0], F_SETFD, FD_CLOEXEC);
-      fcntl(p[1], F_SETFD, FD_CLOEXEC);
-      uint64_t new_pid_and_fds = Pack(current_pid, p[0], p[1]);
-      if (pid_and_fds.compare_exchange_strong(
-              local_pid_and_fds, new_pid_and_fds, std::memory_order_relaxed,
-              std::memory_order_relaxed)) {
-        local_pid_and_fds = new_pid_and_fds;  // fds exposed to other threads
-      } else {  // fds not exposed to other threads; we can close them.
-        close(p[0]);
-        close(p[1]);
-        local_pid_and_fds = pid_and_fds.load(std::memory_order_relaxed);
-      }
-      Unpack(local_pid_and_fds, &pid, &read_fd, &write_fd);
-    }
-    errno = 0;
-    // Use syscall(SYS_write, ...) instead of write() to prevent ASAN
-    // and other checkers from complaining about accesses to arbitrary
-    // memory.
-    do {
-      bytes_written = syscall(SYS_write, write_fd, addr, 1);
-    } while (bytes_written == -1 && errno == EINTR);
-    if (bytes_written == 1) {   // remove the byte from the pipe
-      char c;
-      while (read(read_fd, &c, 1) == -1 && errno == EINTR) {
-      }
-    }
-    if (errno == EBADF) {  // Descriptors invalid.
-      // If pid_and_fds contains the problematic file descriptors we just used,
-      // this call will forget them, and the loop will try again.
-      pid_and_fds.compare_exchange_strong(local_pid_and_fds, 0,
-                                          std::memory_order_relaxed,
-                                          std::memory_order_relaxed);
-    }
-  } while (errno == EBADF);
-  errno = save_errno;
-  return bytes_written == 1;
+static std::atomic<uint64_t> pid_and_fds; // initially 0, an invalid pid.
+bool AddressIsReadable(const void* addr) {
+	int save_errno = errno;
+	// We test whether a byte is readable by using write().  Normally, this would
+	// be done via a cached file descriptor to /dev/null, but linux fails to
+	// check whether the byte is readable when the destination is /dev/null, so
+	// we use a cached pipe.  We store the pid of the process that created the
+	// pipe to handle the case where a process forks, and the child closes all
+	// the file descriptors and then calls this routine.  This is not perfect:
+	// the child could use the routine, then close all file descriptors and then
+	// use this routine again.  But the likely use of this routine is when
+	// crashing, to test the validity of pages when dumping the stack.  Beware
+	// that we may leak file descriptors, but we're unlikely to leak many.
+	int bytes_written;
+	int current_pid = getpid() & 0xffff; // we use only the low order 16 bits
+	do { // until we do not get EBADF trying to use file descriptors
+		int pid;
+		int read_fd;
+		int write_fd;
+		uint64_t local_pid_and_fds = pid_and_fds.load(std::memory_order_relaxed);
+		Unpack(local_pid_and_fds, &pid, &read_fd, &write_fd);
+		while (current_pid != pid) {
+			int p[2];
+			// new pipe
+			if (pipe(p) != 0) {
+				ABSL_RAW_LOG(FATAL, "Failed to create pipe, errno=%d", errno);
+			}
+			fcntl(p[0], F_SETFD, FD_CLOEXEC);
+			fcntl(p[1], F_SETFD, FD_CLOEXEC);
+			uint64_t new_pid_and_fds = Pack(current_pid, p[0], p[1]);
+			if (pid_and_fds.compare_exchange_strong(
+			        local_pid_and_fds, new_pid_and_fds, std::memory_order_relaxed, std::memory_order_relaxed)) {
+				local_pid_and_fds = new_pid_and_fds; // fds exposed to other threads
+			} else { // fds not exposed to other threads; we can close them.
+				close(p[0]);
+				close(p[1]);
+				local_pid_and_fds = pid_and_fds.load(std::memory_order_relaxed);
+			}
+			Unpack(local_pid_and_fds, &pid, &read_fd, &write_fd);
+		}
+		errno = 0;
+		// Use syscall(SYS_write, ...) instead of write() to prevent ASAN
+		// and other checkers from complaining about accesses to arbitrary
+		// memory.
+		do {
+			bytes_written = syscall(SYS_write, write_fd, addr, 1);
+		} while (bytes_written == -1 && errno == EINTR);
+		if (bytes_written == 1) { // remove the byte from the pipe
+			char c;
+			while (read(read_fd, &c, 1) == -1 && errno == EINTR) {
+			}
+		}
+		if (errno == EBADF) { // Descriptors invalid.
+			// If pid_and_fds contains the problematic file descriptors we just used,
+			// this call will forget them, and the loop will try again.
+			pid_and_fds.compare_exchange_strong(
+			    local_pid_and_fds, 0, std::memory_order_relaxed, std::memory_order_relaxed);
+		}
+	} while (errno == EBADF);
+	errno = save_errno;
+	return bytes_written == 1;
 }
 
-}  // namespace debug_internal
-}  // namespace absl
+} // namespace debug_internal
+} // namespace absl
 
 #endif
 // Copyright 2017 The Abseil Authors.
@@ -2342,8 +2283,7 @@ bool AddressIsReadable(const void *addr) {
 // Allow dynamic symbol lookup in an in-memory Elf image.
 //
 
-
-#ifdef ABSL_HAVE_ELF_MEM_IMAGE  // defined in elf_mem_image.h
+#ifdef ABSL_HAVE_ELF_MEM_IMAGE // defined in elf_mem_image.h
 
 #include <string.h>
 #include <cassert>
@@ -2369,21 +2309,29 @@ namespace {
 
 #if __WORDSIZE == 32
 const int kElfClass = ELFCLASS32;
-int ElfBind(const ElfW(Sym) *symbol) { return ELF32_ST_BIND(symbol->st_info); }
-int ElfType(const ElfW(Sym) *symbol) { return ELF32_ST_TYPE(symbol->st_info); }
+int ElfBind(const ElfW(Sym) * symbol) {
+	return ELF32_ST_BIND(symbol->st_info);
+}
+int ElfType(const ElfW(Sym) * symbol) {
+	return ELF32_ST_TYPE(symbol->st_info);
+}
 #elif __WORDSIZE == 64
 const int kElfClass = ELFCLASS64;
-int ElfBind(const ElfW(Sym) *symbol) { return ELF64_ST_BIND(symbol->st_info); }
-int ElfType(const ElfW(Sym) *symbol) { return ELF64_ST_TYPE(symbol->st_info); }
+int ElfBind(const ElfW(Sym) * symbol) {
+	return ELF64_ST_BIND(symbol->st_info);
+}
+int ElfType(const ElfW(Sym) * symbol) {
+	return ELF64_ST_TYPE(symbol->st_info);
+}
 #else
 const int kElfClass = -1;
 int ElfBind(const ElfW(Sym) *) {
-  ABSL_RAW_LOG(FATAL, "Unexpected word size");
-  return 0;
+	ABSL_RAW_LOG(FATAL, "Unexpected word size");
+	return 0;
 }
 int ElfType(const ElfW(Sym) *) {
-  ABSL_RAW_LOG(FATAL, "Unexpected word size");
-  return 0;
+	ABSL_RAW_LOG(FATAL, "Unexpected word size");
+	return 0;
 }
 #endif
 
@@ -2391,335 +2339,310 @@ int ElfType(const ElfW(Sym) *) {
 // This is just a simple arithmetic and a glorified cast.
 // Callers are responsible for bounds checking.
 template <typename T>
-const T *GetTableElement(const ElfW(Ehdr) * ehdr, ElfW(Off) table_offset,
-                         ElfW(Word) element_size, size_t index) {
-  return reinterpret_cast<const T*>(reinterpret_cast<const char *>(ehdr)
-                                    + table_offset
-                                    + index * element_size);
+const T* GetTableElement(const ElfW(Ehdr) * ehdr, ElfW(Off) table_offset, ElfW(Word) element_size, size_t index) {
+	return reinterpret_cast<const T*>(reinterpret_cast<const char*>(ehdr) + table_offset + index * element_size);
 }
 
-}  // namespace
+} // namespace
 
-const void *const ElfMemImage::kInvalidBase =
-    reinterpret_cast<const void *>(~0L);
+const void* const ElfMemImage::kInvalidBase = reinterpret_cast<const void*>(~0L);
 
-ElfMemImage::ElfMemImage(const void *base) {
-  ABSL_RAW_CHECK(base != kInvalidBase, "bad pointer");
-  Init(base);
+ElfMemImage::ElfMemImage(const void* base) {
+	ABSL_RAW_CHECK(base != kInvalidBase, "bad pointer");
+	Init(base);
 }
 
 int ElfMemImage::GetNumSymbols() const {
-  if (!hash_) {
-    return 0;
-  }
-  // See http://www.caldera.com/developers/gabi/latest/ch5.dynamic.html#hash
-  return hash_[1];
+	if (!hash_) {
+		return 0;
+	}
+	// See http://www.caldera.com/developers/gabi/latest/ch5.dynamic.html#hash
+	return hash_[1];
 }
 
-const ElfW(Sym) *ElfMemImage::GetDynsym(int index) const {
-  ABSL_RAW_CHECK(index < GetNumSymbols(), "index out of range");
-  return dynsym_ + index;
+const ElfW(Sym) * ElfMemImage::GetDynsym(int index) const {
+	ABSL_RAW_CHECK(index < GetNumSymbols(), "index out of range");
+	return dynsym_ + index;
 }
 
-const ElfW(Versym) *ElfMemImage::GetVersym(int index) const {
-  ABSL_RAW_CHECK(index < GetNumSymbols(), "index out of range");
-  return versym_ + index;
+const ElfW(Versym) * ElfMemImage::GetVersym(int index) const {
+	ABSL_RAW_CHECK(index < GetNumSymbols(), "index out of range");
+	return versym_ + index;
 }
 
-const ElfW(Phdr) *ElfMemImage::GetPhdr(int index) const {
-  ABSL_RAW_CHECK(index < ehdr_->e_phnum, "index out of range");
-  return GetTableElement<ElfW(Phdr)>(ehdr_,
-                                     ehdr_->e_phoff,
-                                     ehdr_->e_phentsize,
-                                     index);
+const ElfW(Phdr) * ElfMemImage::GetPhdr(int index) const {
+	ABSL_RAW_CHECK(index < ehdr_->e_phnum, "index out of range");
+	return GetTableElement<ElfW(Phdr)>(ehdr_, ehdr_->e_phoff, ehdr_->e_phentsize, index);
 }
 
-const char *ElfMemImage::GetDynstr(ElfW(Word) offset) const {
-  ABSL_RAW_CHECK(offset < strsize_, "offset out of range");
-  return dynstr_ + offset;
+const char* ElfMemImage::GetDynstr(ElfW(Word) offset) const {
+	ABSL_RAW_CHECK(offset < strsize_, "offset out of range");
+	return dynstr_ + offset;
 }
 
-const void *ElfMemImage::GetSymAddr(const ElfW(Sym) *sym) const {
-  if (sym->st_shndx == SHN_UNDEF || sym->st_shndx >= SHN_LORESERVE) {
-    // Symbol corresponds to "special" (e.g. SHN_ABS) section.
-    return reinterpret_cast<const void *>(sym->st_value);
-  }
-  ABSL_RAW_CHECK(link_base_ < sym->st_value, "symbol out of range");
-  return GetTableElement<char>(ehdr_, 0, 1, sym->st_value) - link_base_;
+const void* ElfMemImage::GetSymAddr(const ElfW(Sym) * sym) const {
+	if (sym->st_shndx == SHN_UNDEF || sym->st_shndx >= SHN_LORESERVE) {
+		// Symbol corresponds to "special" (e.g. SHN_ABS) section.
+		return reinterpret_cast<const void*>(sym->st_value);
+	}
+	ABSL_RAW_CHECK(link_base_ < sym->st_value, "symbol out of range");
+	return GetTableElement<char>(ehdr_, 0, 1, sym->st_value) - link_base_;
 }
 
-const ElfW(Verdef) *ElfMemImage::GetVerdef(int index) const {
-  ABSL_RAW_CHECK(0 <= index && static_cast<size_t>(index) <= verdefnum_,
-                 "index out of range");
-  const ElfW(Verdef) *version_definition = verdef_;
-  while (version_definition->vd_ndx < index && version_definition->vd_next) {
-    const char *const version_definition_as_char =
-        reinterpret_cast<const char *>(version_definition);
-    version_definition =
-        reinterpret_cast<const ElfW(Verdef) *>(version_definition_as_char +
-                                               version_definition->vd_next);
-  }
-  return version_definition->vd_ndx == index ? version_definition : nullptr;
+const ElfW(Verdef) * ElfMemImage::GetVerdef(int index) const {
+	ABSL_RAW_CHECK(0 <= index && static_cast<size_t>(index) <= verdefnum_, "index out of range");
+	const ElfW(Verdef)* version_definition = verdef_;
+	while (version_definition->vd_ndx < index && version_definition->vd_next) {
+		const char* const version_definition_as_char = reinterpret_cast<const char*>(version_definition);
+		version_definition =
+		    reinterpret_cast<const ElfW(Verdef)*>(version_definition_as_char + version_definition->vd_next);
+	}
+	return version_definition->vd_ndx == index ? version_definition : nullptr;
 }
 
-const ElfW(Verdaux) *ElfMemImage::GetVerdefAux(
-    const ElfW(Verdef) *verdef) const {
-  return reinterpret_cast<const ElfW(Verdaux) *>(verdef+1);
+const ElfW(Verdaux) * ElfMemImage::GetVerdefAux(const ElfW(Verdef) * verdef) const {
+	return reinterpret_cast<const ElfW(Verdaux)*>(verdef + 1);
 }
 
-const char *ElfMemImage::GetVerstr(ElfW(Word) offset) const {
-  ABSL_RAW_CHECK(offset < strsize_, "offset out of range");
-  return dynstr_ + offset;
+const char* ElfMemImage::GetVerstr(ElfW(Word) offset) const {
+	ABSL_RAW_CHECK(offset < strsize_, "offset out of range");
+	return dynstr_ + offset;
 }
 
-void ElfMemImage::Init(const void *base) {
-  ehdr_      = nullptr;
-  dynsym_    = nullptr;
-  dynstr_    = nullptr;
-  versym_    = nullptr;
-  verdef_    = nullptr;
-  hash_      = nullptr;
-  strsize_   = 0;
-  verdefnum_ = 0;
-  link_base_ = ~0L;  // Sentinel: PT_LOAD .p_vaddr can't possibly be this.
-  if (!base) {
-    return;
-  }
-  const intptr_t base_as_uintptr_t = reinterpret_cast<uintptr_t>(base);
-  // Fake VDSO has low bit set.
-  const bool fake_vdso = ((base_as_uintptr_t & 1) != 0);
-  base = reinterpret_cast<const void *>(base_as_uintptr_t & ~1);
-  const char *const base_as_char = reinterpret_cast<const char *>(base);
-  if (base_as_char[EI_MAG0] != ELFMAG0 || base_as_char[EI_MAG1] != ELFMAG1 ||
-      base_as_char[EI_MAG2] != ELFMAG2 || base_as_char[EI_MAG3] != ELFMAG3) {
-    assert(false);
-    return;
-  }
-  int elf_class = base_as_char[EI_CLASS];
-  if (elf_class != kElfClass) {
-    assert(false);
-    return;
-  }
-  switch (base_as_char[EI_DATA]) {
-    case ELFDATA2LSB: {
-      if (__LITTLE_ENDIAN != __BYTE_ORDER) {
-        assert(false);
-        return;
-      }
-      break;
-    }
-    case ELFDATA2MSB: {
-      if (__BIG_ENDIAN != __BYTE_ORDER) {
-        assert(false);
-        return;
-      }
-      break;
-    }
-    default: {
-      assert(false);
-      return;
-    }
-  }
+void ElfMemImage::Init(const void* base) {
+	ehdr_ = nullptr;
+	dynsym_ = nullptr;
+	dynstr_ = nullptr;
+	versym_ = nullptr;
+	verdef_ = nullptr;
+	hash_ = nullptr;
+	strsize_ = 0;
+	verdefnum_ = 0;
+	link_base_ = ~0L; // Sentinel: PT_LOAD .p_vaddr can't possibly be this.
+	if (!base) {
+		return;
+	}
+	const intptr_t base_as_uintptr_t = reinterpret_cast<uintptr_t>(base);
+	// Fake VDSO has low bit set.
+	const bool fake_vdso = ((base_as_uintptr_t & 1) != 0);
+	base = reinterpret_cast<const void*>(base_as_uintptr_t & ~1);
+	const char* const base_as_char = reinterpret_cast<const char*>(base);
+	if (base_as_char[EI_MAG0] != ELFMAG0 || base_as_char[EI_MAG1] != ELFMAG1 || base_as_char[EI_MAG2] != ELFMAG2 ||
+	    base_as_char[EI_MAG3] != ELFMAG3) {
+		assert(false);
+		return;
+	}
+	int elf_class = base_as_char[EI_CLASS];
+	if (elf_class != kElfClass) {
+		assert(false);
+		return;
+	}
+	switch (base_as_char[EI_DATA]) {
+	case ELFDATA2LSB: {
+		if (__LITTLE_ENDIAN != __BYTE_ORDER) {
+			assert(false);
+			return;
+		}
+		break;
+	}
+	case ELFDATA2MSB: {
+		if (__BIG_ENDIAN != __BYTE_ORDER) {
+			assert(false);
+			return;
+		}
+		break;
+	}
+	default: {
+		assert(false);
+		return;
+	}
+	}
 
-  ehdr_ = reinterpret_cast<const ElfW(Ehdr) *>(base);
-  const ElfW(Phdr) *dynamic_program_header = nullptr;
-  for (int i = 0; i < ehdr_->e_phnum; ++i) {
-    const ElfW(Phdr) *const program_header = GetPhdr(i);
-    switch (program_header->p_type) {
-      case PT_LOAD:
-        if (!~link_base_) {
-          link_base_ = program_header->p_vaddr;
-        }
-        break;
-      case PT_DYNAMIC:
-        dynamic_program_header = program_header;
-        break;
-    }
-  }
-  if (!~link_base_ || !dynamic_program_header) {
-    assert(false);
-    // Mark this image as not present. Can not recur infinitely.
-    Init(nullptr);
-    return;
-  }
-  ptrdiff_t relocation =
-      base_as_char - reinterpret_cast<const char *>(link_base_);
-  ElfW(Dyn) *dynamic_entry =
-      reinterpret_cast<ElfW(Dyn) *>(dynamic_program_header->p_vaddr +
-                                    relocation);
-  for (; dynamic_entry->d_tag != DT_NULL; ++dynamic_entry) {
-    ElfW(Xword) value = dynamic_entry->d_un.d_val;
-    if (fake_vdso) {
-      // A complication: in the real VDSO, dynamic entries are not relocated
-      // (it wasn't loaded by a dynamic loader). But when testing with a
-      // "fake" dlopen()ed vdso library, the loader relocates some (but
-      // not all!) of them before we get here.
-      if (dynamic_entry->d_tag == DT_VERDEF) {
-        // The only dynamic entry (of the ones we care about) libc-2.3.6
-        // loader doesn't relocate.
-        value += relocation;
-      }
-    } else {
-      // Real VDSO. Everything needs to be relocated.
-      value += relocation;
-    }
-    switch (dynamic_entry->d_tag) {
-      case DT_HASH:
-        hash_ = reinterpret_cast<ElfW(Word) *>(value);
-        break;
-      case DT_SYMTAB:
-        dynsym_ = reinterpret_cast<ElfW(Sym) *>(value);
-        break;
-      case DT_STRTAB:
-        dynstr_ = reinterpret_cast<const char *>(value);
-        break;
-      case DT_VERSYM:
-        versym_ = reinterpret_cast<ElfW(Versym) *>(value);
-        break;
-      case DT_VERDEF:
-        verdef_ = reinterpret_cast<ElfW(Verdef) *>(value);
-        break;
-      case DT_VERDEFNUM:
-        verdefnum_ = dynamic_entry->d_un.d_val;
-        break;
-      case DT_STRSZ:
-        strsize_ = dynamic_entry->d_un.d_val;
-        break;
-      default:
-        // Unrecognized entries explicitly ignored.
-        break;
-    }
-  }
-  if (!hash_ || !dynsym_ || !dynstr_ || !versym_ ||
-      !verdef_ || !verdefnum_ || !strsize_) {
-    assert(false);  // invalid VDSO
-    // Mark this image as not present. Can not recur infinitely.
-    Init(nullptr);
-    return;
-  }
+	ehdr_ = reinterpret_cast<const ElfW(Ehdr)*>(base);
+	const ElfW(Phdr)* dynamic_program_header = nullptr;
+	for (int i = 0; i < ehdr_->e_phnum; ++i) {
+		const ElfW(Phdr)* const program_header = GetPhdr(i);
+		switch (program_header->p_type) {
+		case PT_LOAD:
+			if (!~link_base_) {
+				link_base_ = program_header->p_vaddr;
+			}
+			break;
+		case PT_DYNAMIC:
+			dynamic_program_header = program_header;
+			break;
+		}
+	}
+	if (!~link_base_ || !dynamic_program_header) {
+		assert(false);
+		// Mark this image as not present. Can not recur infinitely.
+		Init(nullptr);
+		return;
+	}
+	ptrdiff_t relocation = base_as_char - reinterpret_cast<const char*>(link_base_);
+	ElfW(Dyn)* dynamic_entry = reinterpret_cast<ElfW(Dyn)*>(dynamic_program_header->p_vaddr + relocation);
+	for (; dynamic_entry->d_tag != DT_NULL; ++dynamic_entry) {
+		ElfW(Xword) value = dynamic_entry->d_un.d_val;
+		if (fake_vdso) {
+			// A complication: in the real VDSO, dynamic entries are not relocated
+			// (it wasn't loaded by a dynamic loader). But when testing with a
+			// "fake" dlopen()ed vdso library, the loader relocates some (but
+			// not all!) of them before we get here.
+			if (dynamic_entry->d_tag == DT_VERDEF) {
+				// The only dynamic entry (of the ones we care about) libc-2.3.6
+				// loader doesn't relocate.
+				value += relocation;
+			}
+		} else {
+			// Real VDSO. Everything needs to be relocated.
+			value += relocation;
+		}
+		switch (dynamic_entry->d_tag) {
+		case DT_HASH:
+			hash_ = reinterpret_cast<ElfW(Word)*>(value);
+			break;
+		case DT_SYMTAB:
+			dynsym_ = reinterpret_cast<ElfW(Sym)*>(value);
+			break;
+		case DT_STRTAB:
+			dynstr_ = reinterpret_cast<const char*>(value);
+			break;
+		case DT_VERSYM:
+			versym_ = reinterpret_cast<ElfW(Versym)*>(value);
+			break;
+		case DT_VERDEF:
+			verdef_ = reinterpret_cast<ElfW(Verdef)*>(value);
+			break;
+		case DT_VERDEFNUM:
+			verdefnum_ = dynamic_entry->d_un.d_val;
+			break;
+		case DT_STRSZ:
+			strsize_ = dynamic_entry->d_un.d_val;
+			break;
+		default:
+			// Unrecognized entries explicitly ignored.
+			break;
+		}
+	}
+	if (!hash_ || !dynsym_ || !dynstr_ || !versym_ || !verdef_ || !verdefnum_ || !strsize_) {
+		assert(false); // invalid VDSO
+		// Mark this image as not present. Can not recur infinitely.
+		Init(nullptr);
+		return;
+	}
 }
 
-bool ElfMemImage::LookupSymbol(const char *name,
-                               const char *version,
-                               int type,
-                               SymbolInfo *info_out) const {
-  for (const SymbolInfo& info : *this) {
-    if (strcmp(info.name, name) == 0 && strcmp(info.version, version) == 0 &&
-        ElfType(info.symbol) == type) {
-      if (info_out) {
-        *info_out = info;
-      }
-      return true;
-    }
-  }
-  return false;
+bool ElfMemImage::LookupSymbol(const char* name, const char* version, int type, SymbolInfo* info_out) const {
+	for (const SymbolInfo& info : *this) {
+		if (strcmp(info.name, name) == 0 && strcmp(info.version, version) == 0 && ElfType(info.symbol) == type) {
+			if (info_out) {
+				*info_out = info;
+			}
+			return true;
+		}
+	}
+	return false;
 }
 
-bool ElfMemImage::LookupSymbolByAddress(const void *address,
-                                        SymbolInfo *info_out) const {
-  for (const SymbolInfo& info : *this) {
-    const char *const symbol_start =
-        reinterpret_cast<const char *>(info.address);
-    const char *const symbol_end = symbol_start + info.symbol->st_size;
-    if (symbol_start <= address && address < symbol_end) {
-      if (info_out) {
-        // Client wants to know details for that symbol (the usual case).
-        if (ElfBind(info.symbol) == STB_GLOBAL) {
-          // Strong symbol; just return it.
-          *info_out = info;
-          return true;
-        } else {
-          // Weak or local. Record it, but keep looking for a strong one.
-          *info_out = info;
-        }
-      } else {
-        // Client only cares if there is an overlapping symbol.
-        return true;
-      }
-    }
-  }
-  return false;
+bool ElfMemImage::LookupSymbolByAddress(const void* address, SymbolInfo* info_out) const {
+	for (const SymbolInfo& info : *this) {
+		const char* const symbol_start = reinterpret_cast<const char*>(info.address);
+		const char* const symbol_end = symbol_start + info.symbol->st_size;
+		if (symbol_start <= address && address < symbol_end) {
+			if (info_out) {
+				// Client wants to know details for that symbol (the usual case).
+				if (ElfBind(info.symbol) == STB_GLOBAL) {
+					// Strong symbol; just return it.
+					*info_out = info;
+					return true;
+				} else {
+					// Weak or local. Record it, but keep looking for a strong one.
+					*info_out = info;
+				}
+			} else {
+				// Client only cares if there is an overlapping symbol.
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
-ElfMemImage::SymbolIterator::SymbolIterator(const void *const image, int index)
-    : index_(index), image_(image) {
-}
+ElfMemImage::SymbolIterator::SymbolIterator(const void* const image, int index) : index_(index), image_(image) {}
 
-const ElfMemImage::SymbolInfo *ElfMemImage::SymbolIterator::operator->() const {
-  return &info_;
+const ElfMemImage::SymbolInfo* ElfMemImage::SymbolIterator::operator->() const {
+	return &info_;
 }
 
 const ElfMemImage::SymbolInfo& ElfMemImage::SymbolIterator::operator*() const {
-  return info_;
+	return info_;
 }
 
-bool ElfMemImage::SymbolIterator::operator==(const SymbolIterator &rhs) const {
-  return this->image_ == rhs.image_ && this->index_ == rhs.index_;
+bool ElfMemImage::SymbolIterator::operator==(const SymbolIterator& rhs) const {
+	return this->image_ == rhs.image_ && this->index_ == rhs.index_;
 }
 
-bool ElfMemImage::SymbolIterator::operator!=(const SymbolIterator &rhs) const {
-  return !(*this == rhs);
+bool ElfMemImage::SymbolIterator::operator!=(const SymbolIterator& rhs) const {
+	return !(*this == rhs);
 }
 
-ElfMemImage::SymbolIterator &ElfMemImage::SymbolIterator::operator++() {
-  this->Update(1);
-  return *this;
+ElfMemImage::SymbolIterator& ElfMemImage::SymbolIterator::operator++() {
+	this->Update(1);
+	return *this;
 }
 
 ElfMemImage::SymbolIterator ElfMemImage::begin() const {
-  SymbolIterator it(this, 0);
-  it.Update(0);
-  return it;
+	SymbolIterator it(this, 0);
+	it.Update(0);
+	return it;
 }
 
 ElfMemImage::SymbolIterator ElfMemImage::end() const {
-  return SymbolIterator(this, GetNumSymbols());
+	return SymbolIterator(this, GetNumSymbols());
 }
 
 void ElfMemImage::SymbolIterator::Update(int increment) {
-  const ElfMemImage *image = reinterpret_cast<const ElfMemImage *>(image_);
-  ABSL_RAW_CHECK(image->IsPresent() || increment == 0, "");
-  if (!image->IsPresent()) {
-    return;
-  }
-  index_ += increment;
-  if (index_ >= image->GetNumSymbols()) {
-    index_ = image->GetNumSymbols();
-    return;
-  }
-  const ElfW(Sym)    *symbol = image->GetDynsym(index_);
-  const ElfW(Versym) *version_symbol = image->GetVersym(index_);
-  ABSL_RAW_CHECK(symbol && version_symbol, "");
-  const char *const symbol_name = image->GetDynstr(symbol->st_name);
-  const ElfW(Versym) version_index = version_symbol[0] & VERSYM_VERSION;
-  const ElfW(Verdef) *version_definition = nullptr;
-  const char *version_name = "";
-  if (symbol->st_shndx == SHN_UNDEF) {
-    // Undefined symbols reference DT_VERNEED, not DT_VERDEF, and
-    // version_index could well be greater than verdefnum_, so calling
-    // GetVerdef(version_index) may trigger assertion.
-  } else {
-    version_definition = image->GetVerdef(version_index);
-  }
-  if (version_definition) {
-    // I am expecting 1 or 2 auxiliary entries: 1 for the version itself,
-    // optional 2nd if the version has a parent.
-    ABSL_RAW_CHECK(
-        version_definition->vd_cnt == 1 || version_definition->vd_cnt == 2,
-        "wrong number of entries");
-    const ElfW(Verdaux) *version_aux = image->GetVerdefAux(version_definition);
-    version_name = image->GetVerstr(version_aux->vda_name);
-  }
-  info_.name    = symbol_name;
-  info_.version = version_name;
-  info_.address = image->GetSymAddr(symbol);
-  info_.symbol  = symbol;
+	const ElfMemImage* image = reinterpret_cast<const ElfMemImage*>(image_);
+	ABSL_RAW_CHECK(image->IsPresent() || increment == 0, "");
+	if (!image->IsPresent()) {
+		return;
+	}
+	index_ += increment;
+	if (index_ >= image->GetNumSymbols()) {
+		index_ = image->GetNumSymbols();
+		return;
+	}
+	const ElfW(Sym)* symbol = image->GetDynsym(index_);
+	const ElfW(Versym)* version_symbol = image->GetVersym(index_);
+	ABSL_RAW_CHECK(symbol && version_symbol, "");
+	const char* const symbol_name = image->GetDynstr(symbol->st_name);
+	const ElfW(Versym) version_index = version_symbol[0] & VERSYM_VERSION;
+	const ElfW(Verdef)* version_definition = nullptr;
+	const char* version_name = "";
+	if (symbol->st_shndx == SHN_UNDEF) {
+		// Undefined symbols reference DT_VERNEED, not DT_VERDEF, and
+		// version_index could well be greater than verdefnum_, so calling
+		// GetVerdef(version_index) may trigger assertion.
+	} else {
+		version_definition = image->GetVerdef(version_index);
+	}
+	if (version_definition) {
+		// I am expecting 1 or 2 auxiliary entries: 1 for the version itself,
+		// optional 2nd if the version has a parent.
+		ABSL_RAW_CHECK(version_definition->vd_cnt == 1 || version_definition->vd_cnt == 2, "wrong number of entries");
+		const ElfW(Verdaux)* version_aux = image->GetVerdefAux(version_definition);
+		version_name = image->GetVerstr(version_aux->vda_name);
+	}
+	info_.name = symbol_name;
+	info_.version = version_name;
+	info_.address = image->GetSymAddr(symbol);
+	info_.symbol = symbol;
 }
 
-}  // namespace debug_internal
-}  // namespace absl
+} // namespace debug_internal
+} // namespace absl
 
-#endif  // ABSL_HAVE_ELF_MEM_IMAGE
+#endif // ABSL_HAVE_ELF_MEM_IMAGE
 // Copyright 2017 The Abseil Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -2738,31 +2661,27 @@ void ElfMemImage::SymbolIterator::Update(int increment) {
 //
 // VDSOSupport -- a class representing kernel VDSO (if present).
 
-
-#ifdef ABSL_HAVE_VDSO_SUPPORT     // defined in vdso_support.h
+#ifdef ABSL_HAVE_VDSO_SUPPORT // defined in vdso_support.h
 
 #include <fcntl.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
-
 #ifndef AT_SYSINFO_EHDR
-#define AT_SYSINFO_EHDR 33  // for crosstoolv10
+#define AT_SYSINFO_EHDR 33 // for crosstoolv10
 #endif
 
 namespace absl {
 namespace debug_internal {
 
-std::atomic<const void *> VDSOSupport::vdso_base_(
-    debug_internal::ElfMemImage::kInvalidBase);
+std::atomic<const void*> VDSOSupport::vdso_base_(debug_internal::ElfMemImage::kInvalidBase);
 std::atomic<VDSOSupport::GetCpuFn> VDSOSupport::getcpu_fn_(&InitAndGetCPU);
 VDSOSupport::VDSOSupport()
-    // If vdso_base_ is still set to kInvalidBase, we got here
-    // before VDSOSupport::Init has been called. Call it now.
-    : image_(vdso_base_.load(std::memory_order_relaxed) ==
-                     debug_internal::ElfMemImage::kInvalidBase
-                 ? Init()
-                 : vdso_base_.load(std::memory_order_relaxed)) {}
+  // If vdso_base_ is still set to kInvalidBase, we got here
+  // before VDSOSupport::Init has been called. Call it now.
+  : image_(vdso_base_.load(std::memory_order_relaxed) == debug_internal::ElfMemImage::kInvalidBase
+               ? Init()
+               : vdso_base_.load(std::memory_order_relaxed)) {}
 
 // NOTE: we can't use GoogleOnceInit() below, because we can be
 // called by tcmalloc, and none of the *once* stuff may be functional yet.
@@ -2773,98 +2692,92 @@ VDSOSupport::VDSOSupport()
 //
 // Finally, even if there is a race here, it is harmless, because
 // the operation should be idempotent.
-const void *VDSOSupport::Init() {
-  if (vdso_base_.load(std::memory_order_relaxed) ==
-      debug_internal::ElfMemImage::kInvalidBase) {
-    {
-      // Valgrind zaps AT_SYSINFO_EHDR and friends from the auxv[]
-      // on stack, and so glibc works as if VDSO was not present.
-      // But going directly to kernel via /proc/self/auxv below bypasses
-      // Valgrind zapping. So we check for Valgrind separately.
-      if (RunningOnValgrind()) {
-        vdso_base_.store(nullptr, std::memory_order_relaxed);
-        getcpu_fn_.store(&GetCPUViaSyscall, std::memory_order_relaxed);
-        return nullptr;
-      }
-      int fd = open("/proc/self/auxv", O_RDONLY);
-      if (fd == -1) {
-        // Kernel too old to have a VDSO.
-        vdso_base_.store(nullptr, std::memory_order_relaxed);
-        getcpu_fn_.store(&GetCPUViaSyscall, std::memory_order_relaxed);
-        return nullptr;
-      }
-      ElfW(auxv_t) aux;
-      while (read(fd, &aux, sizeof(aux)) == sizeof(aux)) {
-        if (aux.a_type == AT_SYSINFO_EHDR) {
-          vdso_base_.store(reinterpret_cast<void *>(aux.a_un.a_val),
-                           std::memory_order_relaxed);
-          break;
-        }
-      }
-      close(fd);
-    }
-    if (vdso_base_.load(std::memory_order_relaxed) ==
-        debug_internal::ElfMemImage::kInvalidBase) {
-      // Didn't find AT_SYSINFO_EHDR in auxv[].
-      vdso_base_.store(nullptr, std::memory_order_relaxed);
-    }
-  }
-  GetCpuFn fn = &GetCPUViaSyscall;  // default if VDSO not present.
-  if (vdso_base_.load(std::memory_order_relaxed)) {
-    VDSOSupport vdso;
-    SymbolInfo info;
-    if (vdso.LookupSymbol("__vdso_getcpu", "LINUX_2.6", STT_FUNC, &info)) {
-      fn = reinterpret_cast<GetCpuFn>(const_cast<void *>(info.address));
-    }
-  }
-  // Subtle: this code runs outside of any locks; prevent compiler
-  // from assigning to getcpu_fn_ more than once.
-  getcpu_fn_.store(fn, std::memory_order_relaxed);
-  return vdso_base_.load(std::memory_order_relaxed);
+const void* VDSOSupport::Init() {
+	if (vdso_base_.load(std::memory_order_relaxed) == debug_internal::ElfMemImage::kInvalidBase) {
+		{
+			// Valgrind zaps AT_SYSINFO_EHDR and friends from the auxv[]
+			// on stack, and so glibc works as if VDSO was not present.
+			// But going directly to kernel via /proc/self/auxv below bypasses
+			// Valgrind zapping. So we check for Valgrind separately.
+			if (RunningOnValgrind()) {
+				vdso_base_.store(nullptr, std::memory_order_relaxed);
+				getcpu_fn_.store(&GetCPUViaSyscall, std::memory_order_relaxed);
+				return nullptr;
+			}
+			int fd = open("/proc/self/auxv", O_RDONLY);
+			if (fd == -1) {
+				// Kernel too old to have a VDSO.
+				vdso_base_.store(nullptr, std::memory_order_relaxed);
+				getcpu_fn_.store(&GetCPUViaSyscall, std::memory_order_relaxed);
+				return nullptr;
+			}
+			ElfW(auxv_t) aux;
+			while (read(fd, &aux, sizeof(aux)) == sizeof(aux)) {
+				if (aux.a_type == AT_SYSINFO_EHDR) {
+					vdso_base_.store(reinterpret_cast<void*>(aux.a_un.a_val), std::memory_order_relaxed);
+					break;
+				}
+			}
+			close(fd);
+		}
+		if (vdso_base_.load(std::memory_order_relaxed) == debug_internal::ElfMemImage::kInvalidBase) {
+			// Didn't find AT_SYSINFO_EHDR in auxv[].
+			vdso_base_.store(nullptr, std::memory_order_relaxed);
+		}
+	}
+	GetCpuFn fn = &GetCPUViaSyscall; // default if VDSO not present.
+	if (vdso_base_.load(std::memory_order_relaxed)) {
+		VDSOSupport vdso;
+		SymbolInfo info;
+		if (vdso.LookupSymbol("__vdso_getcpu", "LINUX_2.6", STT_FUNC, &info)) {
+			fn = reinterpret_cast<GetCpuFn>(const_cast<void*>(info.address));
+		}
+	}
+	// Subtle: this code runs outside of any locks; prevent compiler
+	// from assigning to getcpu_fn_ more than once.
+	getcpu_fn_.store(fn, std::memory_order_relaxed);
+	return vdso_base_.load(std::memory_order_relaxed);
 }
 
-const void *VDSOSupport::SetBase(const void *base) {
-  ABSL_RAW_CHECK(base != debug_internal::ElfMemImage::kInvalidBase,
-                 "internal error");
-  const void *old_base = vdso_base_.load(std::memory_order_relaxed);
-  vdso_base_.store(base, std::memory_order_relaxed);
-  image_.Init(base);
-  // Also reset getcpu_fn_, so GetCPU could be tested with simulated VDSO.
-  getcpu_fn_.store(&InitAndGetCPU, std::memory_order_relaxed);
-  return old_base;
+const void* VDSOSupport::SetBase(const void* base) {
+	ABSL_RAW_CHECK(base != debug_internal::ElfMemImage::kInvalidBase, "internal error");
+	const void* old_base = vdso_base_.load(std::memory_order_relaxed);
+	vdso_base_.store(base, std::memory_order_relaxed);
+	image_.Init(base);
+	// Also reset getcpu_fn_, so GetCPU could be tested with simulated VDSO.
+	getcpu_fn_.store(&InitAndGetCPU, std::memory_order_relaxed);
+	return old_base;
 }
 
-bool VDSOSupport::LookupSymbol(const char *name,
-                               const char *version,
-                               int type,
-                               SymbolInfo *info) const {
-  return image_.LookupSymbol(name, version, type, info);
+bool VDSOSupport::LookupSymbol(const char* name, const char* version, int type, SymbolInfo* info) const {
+	return image_.LookupSymbol(name, version, type, info);
 }
 
-bool VDSOSupport::LookupSymbolByAddress(const void *address,
-                                        SymbolInfo *info_out) const {
-  return image_.LookupSymbolByAddress(address, info_out);
+bool VDSOSupport::LookupSymbolByAddress(const void* address, SymbolInfo* info_out) const {
+	return image_.LookupSymbolByAddress(address, info_out);
 }
 
 // NOLINT on 'long' because this routine mimics kernel api.
-long VDSOSupport::GetCPUViaSyscall(unsigned *cpu,  // NOLINT(runtime/int)
-                                   void *, void *) {
+long VDSOSupport::GetCPUViaSyscall(unsigned* cpu, // NOLINT(runtime/int)
+                                   void*,
+                                   void*) {
 #ifdef SYS_getcpu
-  return syscall(SYS_getcpu, cpu, nullptr, nullptr);
+	return syscall(SYS_getcpu, cpu, nullptr, nullptr);
 #else
-  // x86_64 never implemented sys_getcpu(), except as a VDSO call.
-  errno = ENOSYS;
-  return -1;
+	// x86_64 never implemented sys_getcpu(), except as a VDSO call.
+	errno = ENOSYS;
+	return -1;
 #endif
 }
 
 // Use fast __vdso_getcpu if available.
-long VDSOSupport::InitAndGetCPU(unsigned *cpu,  // NOLINT(runtime/int)
-                                void *x, void *y) {
-  Init();
-  GetCpuFn fn = getcpu_fn_.load(std::memory_order_relaxed);
-  ABSL_RAW_CHECK(fn != &InitAndGetCPU, "Init() did not set getcpu_fn_");
-  return (*fn)(cpu, x, y);
+long VDSOSupport::InitAndGetCPU(unsigned* cpu, // NOLINT(runtime/int)
+                                void* x,
+                                void* y) {
+	Init();
+	GetCpuFn fn = getcpu_fn_.load(std::memory_order_relaxed);
+	ABSL_RAW_CHECK(fn != &InitAndGetCPU, "Init() did not set getcpu_fn_");
+	return (*fn)(cpu, x, y);
 }
 
 // This function must be very fast, and may be called from very
@@ -2872,9 +2785,9 @@ long VDSOSupport::InitAndGetCPU(unsigned *cpu,  // NOLINT(runtime/int)
 // GoogleOnceInit() and ::operator new.
 ABSL_ATTRIBUTE_NO_SANITIZE_MEMORY
 int GetCPU() {
-  unsigned cpu;
-  int ret_code = (*VDSOSupport::getcpu_fn_)(&cpu, nullptr, nullptr);
-  return ret_code == 0 ? cpu : ret_code;
+	unsigned cpu;
+	int ret_code = (*VDSOSupport::getcpu_fn_)(&cpu, nullptr, nullptr);
+	return ret_code == 0 ? cpu : ret_code;
 }
 
 // We need to make sure VDSOSupport::Init() is called before
@@ -2885,14 +2798,14 @@ int GetCPU() {
 // is an allowed exception to the normal rule against non-trivial
 // global constructors.
 static class VDSOInitHelper {
- public:
-  VDSOInitHelper() { VDSOSupport::Init(); }
+public:
+	VDSOInitHelper() { VDSOSupport::Init(); }
 } vdso_init_helper;
 
-}  // namespace debug_internal
-}  // namespace absl
+} // namespace debug_internal
+} // namespace absl
 
-#endif  // ABSL_HAVE_VDSO_SUPPORT
+#endif // ABSL_HAVE_VDSO_SUPPORT
 // Copyright 2017 The Abseil Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -2910,7 +2823,6 @@ static class VDSOInitHelper {
 #include <stdlib.h>
 #include <string.h>
 
-
 #ifndef __has_feature
 #define __has_feature(x) 0
 #endif
@@ -2920,7 +2832,7 @@ static class VDSOInitHelper {
    and provides its own definitions of the functions. */
 
 #ifndef DYNAMIC_ANNOTATIONS_EXTERNAL_IMPL
-# define DYNAMIC_ANNOTATIONS_EXTERNAL_IMPL 0
+#define DYNAMIC_ANNOTATIONS_EXTERNAL_IMPL 0
 #endif
 
 /* Each function is empty and called (via a macro) only in debug mode.
@@ -2936,88 +2848,77 @@ static class VDSOInitHelper {
 extern "C" {
 #endif
 
-void AnnotateRWLockCreate(const char *, int,
-                          const volatile void *){}
-void AnnotateRWLockDestroy(const char *, int,
-                           const volatile void *){}
-void AnnotateRWLockAcquired(const char *, int,
-                            const volatile void *, long){}
-void AnnotateRWLockReleased(const char *, int,
-                            const volatile void *, long){}
-void AnnotateBenignRace(const char *, int,
-                        const volatile void *,
-                        const char *){}
-void AnnotateBenignRaceSized(const char *, int,
-                             const volatile void *,
-                             size_t,
-                             const char *) {}
-void AnnotateThreadName(const char *, int,
-                        const char *){}
-void AnnotateIgnoreReadsBegin(const char *, int){}
-void AnnotateIgnoreReadsEnd(const char *, int){}
-void AnnotateIgnoreWritesBegin(const char *, int){}
-void AnnotateIgnoreWritesEnd(const char *, int){}
-void AnnotateEnableRaceDetection(const char *, int, int){}
-void AnnotateMemoryIsInitialized(const char *, int,
-                                 const volatile void *mem, size_t size) {
+void AnnotateRWLockCreate(const char*, int, const volatile void*) {}
+void AnnotateRWLockDestroy(const char*, int, const volatile void*) {}
+void AnnotateRWLockAcquired(const char*, int, const volatile void*, long) {}
+void AnnotateRWLockReleased(const char*, int, const volatile void*, long) {}
+void AnnotateBenignRace(const char*, int, const volatile void*, const char*) {}
+void AnnotateBenignRaceSized(const char*, int, const volatile void*, size_t, const char*) {}
+void AnnotateThreadName(const char*, int, const char*) {}
+void AnnotateIgnoreReadsBegin(const char*, int) {}
+void AnnotateIgnoreReadsEnd(const char*, int) {}
+void AnnotateIgnoreWritesBegin(const char*, int) {}
+void AnnotateIgnoreWritesEnd(const char*, int) {}
+void AnnotateEnableRaceDetection(const char*, int, int) {}
+void AnnotateMemoryIsInitialized(const char*, int, const volatile void* mem, size_t size) {
 #if __has_feature(memory_sanitizer)
-  __msan_unpoison(mem, size);
+	__msan_unpoison(mem, size);
 #else
-  (void)mem;
-  (void)size;
+	(void)mem;
+	(void)size;
 #endif
 }
 
-void AnnotateMemoryIsUninitialized(const char *, int,
-                                   const volatile void *mem, size_t size) {
+void AnnotateMemoryIsUninitialized(const char*, int, const volatile void* mem, size_t size) {
 #if __has_feature(memory_sanitizer)
-  __msan_allocated_memory(mem, size);
+	__msan_allocated_memory(mem, size);
 #else
-  (void)mem;
-  (void)size;
+	(void)mem;
+	(void)size;
 #endif
 }
 
 static int GetRunningOnValgrind(void) {
 #ifdef RUNNING_ON_VALGRIND
-  if (RUNNING_ON_VALGRIND) return 1;
+	if (RUNNING_ON_VALGRIND)
+		return 1;
 #endif
-  char *running_on_valgrind_str = getenv("RUNNING_ON_VALGRIND");
-  if (running_on_valgrind_str) {
-    return strcmp(running_on_valgrind_str, "0") != 0;
-  }
-  return 0;
+	char* running_on_valgrind_str = getenv("RUNNING_ON_VALGRIND");
+	if (running_on_valgrind_str) {
+		return strcmp(running_on_valgrind_str, "0") != 0;
+	}
+	return 0;
 }
 
 /* See the comments in dynamic_annotations.h */
 int RunningOnValgrind(void) {
-  static volatile int running_on_valgrind = -1;
-  int local_running_on_valgrind = running_on_valgrind;
-  /* C doesn't have thread-safe initialization of statics, and we
-     don't want to depend on pthread_once here, so hack it. */
-  ANNOTATE_BENIGN_RACE(&running_on_valgrind, "safe hack");
-  if (local_running_on_valgrind == -1)
-    running_on_valgrind = local_running_on_valgrind = GetRunningOnValgrind();
-  return local_running_on_valgrind;
+	static volatile int running_on_valgrind = -1;
+	int local_running_on_valgrind = running_on_valgrind;
+	/* C doesn't have thread-safe initialization of statics, and we
+	   don't want to depend on pthread_once here, so hack it. */
+	ANNOTATE_BENIGN_RACE(&running_on_valgrind, "safe hack");
+	if (local_running_on_valgrind == -1)
+		running_on_valgrind = local_running_on_valgrind = GetRunningOnValgrind();
+	return local_running_on_valgrind;
 }
 
 /* See the comments in dynamic_annotations.h */
 double ValgrindSlowdown(void) {
-  /* Same initialization hack as in RunningOnValgrind(). */
-  static volatile double slowdown = 0.0;
-  double local_slowdown = slowdown;
-  ANNOTATE_BENIGN_RACE(&slowdown, "safe hack");
-  if (RunningOnValgrind() == 0) {
-    return 1.0;
-  }
-  if (local_slowdown == 0.0) {
-    char *env = getenv("VALGRIND_SLOWDOWN");
-    slowdown = local_slowdown = env ? atof(env) : 50.0;
-  }
-  return local_slowdown;
+	/* Same initialization hack as in RunningOnValgrind(). */
+	static volatile double slowdown = 0.0;
+	double local_slowdown = slowdown;
+	ANNOTATE_BENIGN_RACE(&slowdown, "safe hack");
+	if (RunningOnValgrind() == 0) {
+		return 1.0;
+	}
+	if (local_slowdown == 0.0) {
+		char* env = getenv("VALGRIND_SLOWDOWN");
+		slowdown = local_slowdown = env ? atof(env) : 50.0;
+	}
+	return local_slowdown;
 }
 
 #ifdef __cplusplus
-}  // extern "C"
+} // extern "C"
 #endif
-#endif  /* DYNAMIC_ANNOTATIONS_EXTERNAL_IMPL == 0 */
+#endif /* DYNAMIC_ANNOTATIONS_EXTERNAL_IMPL == 0 */

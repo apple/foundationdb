@@ -55,8 +55,10 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		}
 		auto switchConnFileDb = Database::createDatabase(cx->getConnectionFile(), -1);
 		originalDB = cx;
-		std::vector<Future<Void>> clients = { readerClientSeparateDBs(cx, this), doSwitch(switchConnFileDb, this),
-			                                  writerClient(cx, this), writerClient(extraDB, this) };
+		std::vector<Future<Void>> clients = { readerClientSeparateDBs(cx, this),
+			                                  doSwitch(switchConnFileDb, this),
+			                                  writerClient(cx, this),
+			                                  writerClient(extraDB, this) };
 		return success(timeout(waitForAll(clients), testDuration));
 	}
 

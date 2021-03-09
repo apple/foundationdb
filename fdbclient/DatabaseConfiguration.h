@@ -37,7 +37,7 @@ struct SatelliteInfo {
 	SatelliteInfo() : priority(0) {}
 
 	struct sort_by_priority {
-		bool operator ()(SatelliteInfo const&a, SatelliteInfo const& b) const { return a.priority > b.priority; }
+		bool operator()(SatelliteInfo const& a, SatelliteInfo const& b) const { return a.priority > b.priority; }
 	};
 
 	template <class Ar>
@@ -84,10 +84,19 @@ struct RegionInfo {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, dcId, priority, satelliteTLogPolicy, satelliteDesiredTLogCount, satelliteTLogReplicationFactor,
-		           satelliteTLogWriteAntiQuorum, satelliteTLogUsableDcs, satelliteTLogPolicyFallback,
-		           satelliteTLogReplicationFactorFallback, satelliteTLogWriteAntiQuorumFallback,
-		           satelliteTLogUsableDcsFallback, satellites);
+		serializer(ar,
+		           dcId,
+		           priority,
+		           satelliteTLogPolicy,
+		           satelliteDesiredTLogCount,
+		           satelliteTLogReplicationFactor,
+		           satelliteTLogWriteAntiQuorum,
+		           satelliteTLogUsableDcs,
+		           satelliteTLogPolicyFallback,
+		           satelliteTLogReplicationFactorFallback,
+		           satelliteTLogWriteAntiQuorumFallback,
+		           satelliteTLogUsableDcsFallback,
+		           satellites);
 	}
 };
 
@@ -165,8 +174,8 @@ struct DatabaseConfiguration {
 			worstSatellite =
 			    std::min(worstSatellite, r.satelliteTLogReplicationFactor - r.satelliteTLogWriteAntiQuorum);
 			if (r.satelliteTLogUsableDcsFallback > 0) {
-				worstSatellite = std::min(worstSatellite, r.satelliteTLogReplicationFactorFallback -
-				                                              r.satelliteTLogWriteAntiQuorumFallback);
+				worstSatellite = std::min(
+				    worstSatellite, r.satelliteTLogReplicationFactorFallback - r.satelliteTLogWriteAntiQuorumFallback);
 			}
 		}
 		if (usableRegions > 1 && fullyReplicatedRegions > 1 && worstSatellite > 0 &&
@@ -213,7 +222,7 @@ struct DatabaseConfiguration {
 	bool backupWorkerEnabled;
 
 	// Data centers
-	int32_t usableRegions;  // Number of regions which have a replica of the database.
+	int32_t usableRegions; // Number of regions which have a replica of the database.
 	int32_t repopulateRegionAntiQuorum;
 	std::vector<RegionInfo> regions;
 
@@ -222,33 +231,40 @@ struct DatabaseConfiguration {
 	std::set<AddressExclusion> getExcludedServers() const;
 
 	int32_t getDesiredProxies() const {
-		if (masterProxyCount == -1) return autoMasterProxyCount;
+		if (masterProxyCount == -1)
+			return autoMasterProxyCount;
 		return masterProxyCount;
 	}
 	int32_t getDesiredResolvers() const {
-		if (resolverCount == -1) return autoResolverCount;
+		if (resolverCount == -1)
+			return autoResolverCount;
 		return resolverCount;
 	}
 	int32_t getDesiredLogs() const {
-		if (desiredTLogCount == -1) return autoDesiredTLogCount;
+		if (desiredTLogCount == -1)
+			return autoDesiredTLogCount;
 		return desiredTLogCount;
 	}
 	int32_t getDesiredRemoteLogs() const {
-		if (remoteDesiredTLogCount == -1) return getDesiredLogs();
+		if (remoteDesiredTLogCount == -1)
+			return getDesiredLogs();
 		return remoteDesiredTLogCount;
 	}
 	int32_t getDesiredSatelliteLogs(Optional<Key> dcId) const {
 
 		auto desired = getRegion(dcId).satelliteDesiredTLogCount;
-		if (desired == -1) return autoDesiredTLogCount;
+		if (desired == -1)
+			return autoDesiredTLogCount;
 		return desired;
 	}
 	int32_t getRemoteTLogReplicationFactor() const {
-		if (remoteTLogReplicationFactor == 0) return tLogReplicationFactor;
+		if (remoteTLogReplicationFactor == 0)
+			return tLogReplicationFactor;
 		return remoteTLogReplicationFactor;
 	}
 	Reference<IReplicationPolicy> getRemoteTLogPolicy() const {
-		if (remoteTLogReplicationFactor == 0) return tLogPolicy;
+		if (remoteTLogReplicationFactor == 0)
+			return tLogPolicy;
 		return remoteTLogPolicy;
 	}
 
@@ -260,10 +276,12 @@ struct DatabaseConfiguration {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		if (!ar.isDeserializing) makeConfigurationImmutable();
+		if (!ar.isDeserializing)
+			makeConfigurationImmutable();
 		serializer(ar, rawConfiguration);
 		if (ar.isDeserializing) {
-			for (auto c = rawConfiguration.begin(); c != rawConfiguration.end(); ++c) setInternal(c->key, c->value);
+			for (auto c = rawConfiguration.begin(); c != rawConfiguration.end(); ++c)
+				setInternal(c->key, c->value);
 			setDefaultReplicationPolicy();
 		}
 	}

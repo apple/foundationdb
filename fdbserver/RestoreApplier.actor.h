@@ -229,9 +229,7 @@ public:
 	static const int DONE = 4;
 	static const int INVALID = 5;
 
-	explicit ApplierVersionBatchState(int newState) {
-		vbState = newState;
-	}
+	explicit ApplierVersionBatchState(int newState) { vbState = newState; }
 
 	virtual ~ApplierVersionBatchState() = default;
 
@@ -291,8 +289,10 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	    targetWriteRateMB(SERVER_KNOBS->FASTRESTORE_WRITE_BW_MB / SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS),
 	    totalBytesToWrite(-1), applyingDataBytes(0), vbState(ApplierVersionBatchState::NOT_INIT),
 	    receiveMutationReqs(0), receivedBytes(0), appliedBytes(0) {
-		pollMetrics = traceCounters(format("FastRestoreApplierMetrics%d", batchIndex), nodeID,
-		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY, &counters.cc,
+		pollMetrics = traceCounters(format("FastRestoreApplierMetrics%d", batchIndex),
+		                            nodeID,
+		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
+		                            &counters.cc,
 		                            nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));
 		TraceEvent("FastRestoreApplierMetricsCreated").detail("Node", nodeID);
 	}
@@ -330,7 +330,8 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	}
 
 	void sanityCheckMutationOps() {
-		if (kvOps.empty()) return;
+		if (kvOps.empty())
+			return;
 
 		ASSERT_WE_THINK(isKVOpsSorted());
 		ASSERT_WE_THINK(allOpsAreKnown());
