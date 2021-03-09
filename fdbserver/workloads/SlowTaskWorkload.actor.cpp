@@ -20,6 +20,7 @@
 
 #include <cinttypes>
 
+#include "fdbserver/CoroFlow.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/SignalSafeUnwind.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -27,30 +28,43 @@
 // Stress test the slow task profiler or flow profiler
 struct SlowTaskWorkload : TestWorkload {
 
-	SlowTaskWorkload(WorkloadContext const& wcx)
-	: TestWorkload(wcx) {
-	}
+	Reference<IThreadPool> coroPool = CoroThreadPool::createThreadPool();
+
+	struct CoroWorker : IThreadPoolReceiver {
+		void init() override {}
+		struct NoopAction : TypedAction<CoroWorker, NoopAction>, FastAllocated<NoopAction> {
+			ThreadReturnPromise<Void> result;
+			double getTimeEstimate() const override { return 0; }
+		};
+		void action(NoopAction& rv) {
+			breakpoint_me();
+			rv.result.send(Void());
+		}
+	};
+
+	SlowTaskWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) { coroPool->addThread(new CoroWorker); }
 
 	std::string description() const override { return "SlowTaskWorkload"; }
 
 	Future<Void> start(Database const& cx) override {
 		setupRunLoopProfiler();
-		return go();
+		return go(this);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(vector<PerfMetric>& m) override {}
 
-	ACTOR static Future<Void> go() {
+	ACTOR static Future<Void> go(SlowTaskWorkload* self) {
 		wait( delay(1) );
+
 		int64_t phc = dl_iterate_phdr_calls;
-		int64_t startProfilesDeferred = getNumProfilesDeferred();
-		int64_t startProfilesOverflowed = getNumProfilesOverflowed();
-		int64_t startProfilesCaptured = getNumProfilesCaptured();
+		state int64_t startProfilesDeferred = getNumProfilesDeferred();
+		state int64_t startProfilesOverflowed = getNumProfilesOverflowed();
+		state int64_t startProfilesCaptured = getNumProfilesCaptured();
 		int64_t exc = 0;
 		fprintf(stderr, "Slow task starting\n");
-		for(int i=0; i<10; i++) {
+		for (int i = 0; i < 10; i++) {
 			fprintf(stderr, "  %d\n", i);
 			double end = timer() + 1;
 			while( timer() < end ) {
@@ -63,6 +77,33 @@ struct SlowTaskWorkload : TestWorkload {
 		        getNumProfilesOverflowed() - startProfilesOverflowed,
 		        getNumProfilesCaptured() - startProfilesCaptured);
 
+		startProfilesDeferred = getNumProfilesDeferred();
+		startProfilesOverflowed = getNumProfilesOverflowed();
+		startProfilesCaptured = getNumProfilesCaptured();
+		state int i;
+		state int j;
+		state pthread_t mainThread = pthread_self();
+		for (j = 0; j < 1000; ++j) {
+			// Try to deliver SIGPROF somewhere in the coro switching call stack
+			state std::thread t = std::thread{ [mainThread = mainThread]() { pthread_kill(mainThread, SIGPROF); } };
+			try {
+				for (i = 0; i < 1000; ++i) {
+					wait(exercise_coro(self));
+				}
+				t.join();
+			} catch (...) {
+				t.join();
+				throw;
+			}
+		}
+		fprintf(stderr,
+		        "Coro switch test complete: %" PRId64 " profiles deferred, %" PRId64 " profiles overflowed, %" PRId64
+		        " profiles captured\n",
+		        getNumProfilesDeferred() - startProfilesDeferred, getNumProfilesOverflowed() - startProfilesOverflowed,
+		        getNumProfilesCaptured() - startProfilesCaptured);
+
+		wait(self->coroPool->stop());
+
 		return Void();
 	}
 
@@ -74,6 +115,14 @@ struct SlowTaskWorkload : TestWorkload {
 			} catch (Error& ) {
 				++*exc_count;
 			}
+	}
+
+	ACTOR static Future<Void> exercise_coro(SlowTaskWorkload* self) {
+		auto* p = new CoroWorker::NoopAction;
+		auto f = p->result.getFuture();
+		self->coroPool->post(p);
+		wait(f);
+		return Void();
 	}
 };
 
