@@ -168,7 +168,10 @@ else()
     if(NOT CLANG)
       message(FATAL_ERROR "Unsupported configuration: USE_MSAN only works with Clang")
     endif()
-    list(APPEND SANITIZER_COMPILE_OPTIONS -fsanitize=memory -fsanitize-memory-track-origins=2)
+    list(APPEND SANITIZER_COMPILE_OPTIONS
+      -fsanitize=memory
+      -fsanitize-memory-track-origins=2
+      -DBOOST_USE_UCONTEXT)
     list(APPEND SANITIZER_LINK_OPTIONS -fsanitize=memory)
   endif()
 
@@ -180,23 +183,25 @@ else()
     list(APPEND SANITIZER_COMPILE_OPTIONS
       -fsanitize=undefined
       # TODO(atn34) Re-enable -fsanitize=alignment once https://github.com/apple/foundationdb/issues/1434 is resolved
-      -fno-sanitize=alignment)
+      -fno-sanitize=alignment
+      -DBOOST_USE_UCONTEXT)
     list(APPEND SANITIZER_LINK_OPTIONS -fsanitize=undefined)
   endif()
 
   if(USE_TSAN)
-    list(APPEND SANITIZER_COMPILE_OPTIONS -fsanitize=thread)
+    list(APPEND SANITIZER_COMPILE_OPTIONS -fsanitize=thread -DBOOST_USE_UCONTEXT)
     list(APPEND SANITIZER_LINK_OPTIONS -fsanitize=thread)
   endif()
 
-  set(USE_SANITIZER OFF)
+  if(USE_VALGRIND)
+    list(APPEND SANITIZER_COMPILE_OPTIONS -DBOOST_USE_VALGRIND)
+  endif()
+
   if(SANITIZER_COMPILE_OPTIONS)
     add_compile_options(${SANITIZER_COMPILE_OPTIONS})
-    set(USE_SANITIZER ON)
   endif()
   if(SANITIZER_LINK_OPTIONS)
     add_link_options(${SANITIZER_LINK_OPTIONS})
-    set(USE_SANITIZER ON)
   endif()
 
   if(PORTABLE_BINARY)
