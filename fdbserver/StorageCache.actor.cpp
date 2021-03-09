@@ -1174,9 +1174,9 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 		// FIXME: enable when debugKeyRange is active
 		//debugKeyRange("fetchKeysBegin", data->version.get(), cacheRange->keys);
 
-		//TraceEvent(SevDebug, interval.begin(), data->thisServerID)
-		//	.detail("KeyBegin", cacheRange->keys.begin)
-		//	.detail("KeyEnd",cacheRange->keys.end);
+		TraceEvent(SevDebug, interval.begin(), data->thisServerID)
+			.detail("KeyBegin", cacheRange->keys.begin)
+			.detail("KeyEnd",cacheRange->keys.end);
 
 		validate(data);
 
