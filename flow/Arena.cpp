@@ -162,7 +162,8 @@ size_t ArenaBlock::totalSize() {
 // just for debugging:
 void ArenaBlock::getUniqueBlocks(std::set<ArenaBlock*>& a) {
 	a.insert(this);
-	if (isTiny()) return;
+	if (isTiny())
+		return;
 
 	int o = nextBlockOffset;
 	while (o) {
@@ -241,7 +242,8 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 
 	} else {
 		int reqSize = dataSize + sizeof(ArenaBlock);
-		if (next) reqSize += sizeof(ArenaBlockRef);
+		if (next)
+			reqSize += sizeof(ArenaBlockRef);
 
 		if (reqSize < LARGE) {
 			// Each block should be larger than the previous block, up to a limit, to minimize allocations
@@ -309,7 +311,8 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 			}
 		}
 		b->nextBlockOffset = 0;
-		if (next) b->makeReference(next.getPtr());
+		if (next)
+			b->makeReference(next.getPtr());
 	}
 	b->setrefCountUnsafe(1);
 	next.setPtrUnsafe(b);
@@ -336,7 +339,8 @@ void ArenaBlock::destroy() {
 				ArenaBlockRef* br = (ArenaBlockRef*)((char*)b->getData() + o);
 				VALGRIND_MAKE_MEM_DEFINED(br, sizeof(ArenaBlockRef));
 				allow_access(br->next);
-				if (br->next->delref_no_destroy()) stack.push_back(stackArena, br->next);
+				if (br->next->delref_no_destroy())
+					stack.push_back(stackArena, br->next);
 				disallow_access(br->next);
 				o = br->nextBlockOffset;
 			}

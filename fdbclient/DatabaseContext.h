@@ -35,13 +35,17 @@
 
 class StorageServerInfo : public ReferencedInterface<StorageServerInterface> {
 public:
-	static Reference<StorageServerInfo> getInterface( DatabaseContext *cx, StorageServerInterface const& interf, LocalityData const& locality );
+	static Reference<StorageServerInfo> getInterface(DatabaseContext* cx,
+	                                                 StorageServerInterface const& interf,
+	                                                 LocalityData const& locality);
 	void notifyContextDestroyed();
 
 	virtual ~StorageServerInfo();
+
 private:
-	DatabaseContext *cx;
-	StorageServerInfo( DatabaseContext *cx, StorageServerInterface const& interf, LocalityData const& locality ) : cx(cx), ReferencedInterface<StorageServerInterface>(interf, locality) {}
+	DatabaseContext* cx;
+	StorageServerInfo(DatabaseContext* cx, StorageServerInterface const& interf, LocalityData const& locality)
+	  : cx(cx), ReferencedInterface<StorageServerInterface>(interf, locality) {}
 };
 
 typedef MultiInterface<ReferencedInterface<StorageServerInterface>> LocationInfo;
@@ -59,9 +63,9 @@ private:
 
 public:
 	ClientTagThrottleData(ClientTagThrottleLimits const& limits)
-	  : tpsRate(limits.tpsRate), expiration(limits.expiration), lastCheck(now()), smoothRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW), 
-	    smoothReleased(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW) 
-	{
+	  : tpsRate(limits.tpsRate), expiration(limits.expiration), lastCheck(now()),
+	    smoothRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW),
+	    smoothReleased(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW) {
 		ASSERT(tpsRate >= 0);
 		smoothRate.reset(tpsRate);
 	}
@@ -70,44 +74,36 @@ public:
 		ASSERT(limits.tpsRate >= 0);
 		this->tpsRate = limits.tpsRate;
 
-		if(!rateSet || expired()) {
+		if (!rateSet || expired()) {
 			rateSet = true;
 			smoothRate.reset(limits.tpsRate);
-		}
-		else {
+		} else {
 			smoothRate.setTotal(limits.tpsRate);
 		}
 
 		expiration = limits.expiration;
 	}
 
-	void addReleased(int released) {
-		smoothReleased.addDelta(released);
-	}
+	void addReleased(int released) { smoothReleased.addDelta(released); }
 
-	bool expired() {
-		return expiration <= now();
-	}
+	bool expired() { return expiration <= now(); }
 
-	void updateChecked() {
-		lastCheck = now();
-	}
+	void updateChecked() { lastCheck = now(); }
 
-	bool canRecheck() {
-		return lastCheck < now() - CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL;
-	}
+	bool canRecheck() { return lastCheck < now() - CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL; }
 
 	double throttleDuration() {
-		if(expiration <= now()) {
+		if (expiration <= now()) {
 			return 0.0;
 		}
 
-		double capacity = (smoothRate.smoothTotal() - smoothReleased.smoothRate()) * CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW;
-		if(capacity >= 1) {
+		double capacity =
+		    (smoothRate.smoothTotal() - smoothReleased.smoothRate()) * CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW;
+		if (capacity >= 1) {
 			return 0.0;
 		}
 
-		if(tpsRate == 0) {
+		if (tpsRate == 0) {
 			return std::max(0.0, expiration - now());
 		}
 
@@ -122,20 +118,38 @@ public:
 	}
 
 	// For internal (fdbserver) use only
-	static Database create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor,
-	                       LocalityData clientLocality, bool enableLocalityLoadBalance,
-	                       TaskPriority taskID = TaskPriority::DefaultEndpoint, bool lockAware = false,
-	                       int apiVersion = Database::API_VERSION_LATEST, bool switchable = false);
+	static Database create(Reference<AsyncVar<ClientDBInfo>> clientInfo,
+	                       Future<Void> clientInfoMonitor,
+	                       LocalityData clientLocality,
+	                       bool enableLocalityLoadBalance,
+	                       TaskPriority taskID = TaskPriority::DefaultEndpoint,
+	                       bool lockAware = false,
+	                       int apiVersion = Database::API_VERSION_LATEST,
+	                       bool switchable = false);
 
 	~DatabaseContext();
 
-	Database clone() const { return Database(new DatabaseContext( connectionFile, clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, internal, apiVersion, switchable )); }
+	Database clone() const {
+		return Database(new DatabaseContext(connectionFile,
+		                                    clientInfo,
+		                                    clientInfoMonitor,
+		                                    taskID,
+		                                    clientLocality,
+		                                    enableLocalityLoadBalance,
+		                                    lockAware,
+		                                    internal,
+		                                    apiVersion,
+		                                    switchable));
+	}
 
-	std::pair<KeyRange,Reference<LocationInfo>> getCachedLocation( const KeyRef&, bool isBackward = false );
-	bool getCachedLocations( const KeyRangeRef&, vector<std::pair<KeyRange,Reference<LocationInfo>>>&, int limit, bool reverse );
-	Reference<LocationInfo> setCachedLocation( const KeyRangeRef&, const vector<struct StorageServerInterface>& );
-	void invalidateCache( const KeyRef&, bool isBackward = false );
-	void invalidateCache( const KeyRangeRef& );
+	std::pair<KeyRange, Reference<LocationInfo>> getCachedLocation(const KeyRef&, bool isBackward = false);
+	bool getCachedLocations(const KeyRangeRef&,
+	                        vector<std::pair<KeyRange, Reference<LocationInfo>>>&,
+	                        int limit,
+	                        bool reverse);
+	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const vector<struct StorageServerInterface>&);
+	void invalidateCache(const KeyRef&, bool isBackward = false);
+	void invalidateCache(const KeyRangeRef&);
 
 	bool sampleReadTags();
 
@@ -147,25 +161,24 @@ public:
 	// Update the watch counter for the database
 	void addWatch();
 	void removeWatch();
-	
-	void setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value );
+
+	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value);
 
 	Error deferredError;
 	bool lockAware;
 
-	bool isError() {
-		return deferredError.code() != invalid_error_code;	
-	}
+	bool isError() { return deferredError.code() != invalid_error_code; }
 
 	void checkDeferredError() {
-		if(isError()) {
+		if (isError()) {
 			throw deferredError;
 		}
 	}
 
 	int apiVersionAtLeast(int minVersion) { return apiVersion < 0 || apiVersion >= minVersion; }
 
-	Future<Void> onConnected(); // Returns after a majority of coordination servers are available and have reported a leader. The cluster file therefore is valid, but the database might be unavailable.
+	Future<Void> onConnected(); // Returns after a majority of coordination servers are available and have reported a
+	                            // leader. The cluster file therefore is valid, but the database might be unavailable.
 	Reference<ClusterConnectionFile> getConnectionFile();
 
 	// Switch the database to use the new connection file, and recreate all pending watches for committed transactions.
@@ -179,12 +192,19 @@ public:
 	Future<Void> connectionFileChanged();
 	bool switchable = false;
 
-//private: 
-	explicit DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
-		Future<Void> clientInfoMonitor, TaskPriority taskID, LocalityData const& clientLocality, 
-		bool enableLocalityLoadBalance, bool lockAware, bool internal = true, int apiVersion = Database::API_VERSION_LATEST, bool switchable = false );
+	// private:
+	explicit DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
+	                         Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
+	                         Future<Void> clientInfoMonitor,
+	                         TaskPriority taskID,
+	                         LocalityData const& clientLocality,
+	                         bool enableLocalityLoadBalance,
+	                         bool lockAware,
+	                         bool internal = true,
+	                         int apiVersion = Database::API_VERSION_LATEST,
+	                         bool switchable = false);
 
-	explicit DatabaseContext( const Error &err );
+	explicit DatabaseContext(const Error& err);
 
 	void expireThrottles();
 
@@ -205,7 +225,8 @@ public:
 		TagSet tags;
 		Optional<UID> debugID;
 
-		VersionRequest(TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>()) : tags(tags), debugID(debugID) {}
+		VersionRequest(TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>())
+		  : tags(tags), debugID(debugID) {}
 	};
 
 	// Transaction start request batching
@@ -225,17 +246,17 @@ public:
 
 	// Client status updater
 	struct ClientStatusUpdater {
-		std::vector< std::pair<std::string, BinaryWriter> > inStatusQ;
-		std::vector< std::pair<std::string, BinaryWriter> > outStatusQ;
+		std::vector<std::pair<std::string, BinaryWriter>> inStatusQ;
+		std::vector<std::pair<std::string, BinaryWriter>> outStatusQ;
 		Future<Void> actor;
 	};
 	ClientStatusUpdater clientStatusUpdater;
 
 	// Cache of location information
 	int locationCacheSize;
-	CoalescedKeyRangeMap< Reference<LocationInfo> > locationCache;
+	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
 
-	std::map< UID, StorageServerInfo* > server_interf;
+	std::map<UID, StorageServerInfo*> server_interf;
 
 	UID dbId;
 	bool internal; // Only contexts created through the C client and fdbcli are non-internal
@@ -283,7 +304,8 @@ public:
 	Counter transactionsProcessBehind;
 	Counter transactionsThrottled;
 
-	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit, bytesPerCommit;
+	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
+	    bytesPerCommit;
 
 	int outstandingWatches;
 	int maxOutstandingWatches;
@@ -322,7 +344,7 @@ public:
 	void registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module, std::unique_ptr<SpecialKeyRangeBaseImpl> impl);
 
 	static bool debugUseTags;
-	static const std::vector<std::string> debugTransactionTagChoices; 
+	static const std::vector<std::string> debugTransactionTagChoices;
 };
 
 #endif

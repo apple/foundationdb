@@ -26,7 +26,7 @@
 
 template <typename C>
 void swapAndPop(C* container, int index) {
-	if (index != container->size()-1) {
+	if (index != container->size() - 1) {
 		using std::swap;
 		swap((*container)[index], container->back());
 	}
@@ -35,27 +35,27 @@ void swapAndPop(C* container, int index) {
 }
 
 // Adds n to pCount upon construction, subtracts in upon destruction
-template<typename T>
+template <typename T>
 struct Hold {
-	Hold(T *pCount = nullptr, T n = 1) : pCount(pCount), n(n) {
-		if(pCount != nullptr) {
+	Hold(T* pCount = nullptr, T n = 1) : pCount(pCount), n(n) {
+		if (pCount != nullptr) {
 			*pCount += n;
 		}
 	}
 	~Hold() {
-		if(pCount != nullptr) {
+		if (pCount != nullptr) {
 			*pCount -= n;
 		}
 	}
 
-	Hold(Hold &&other) {
+	Hold(Hold&& other) {
 		pCount = other.pCount;
 		other.pCount = nullptr;
 		n = other.n;
 	}
 
-	Hold & operator=(Hold &&other) {
-		if(pCount != nullptr) {
+	Hold& operator=(Hold&& other) {
+		if (pCount != nullptr) {
 			*pCount -= n;
 		}
 		pCount = other.pCount;
@@ -65,16 +65,16 @@ struct Hold {
 	};
 
 	void release() {
-		if(pCount != nullptr) {
+		if (pCount != nullptr) {
 			*pCount -= n;
 			pCount = nullptr;
 		}
 	}
 
-	T *pCount;
+	T* pCount;
 	T n;
 
-	void operator=(const Hold &other) = delete;
+	void operator=(const Hold& other) = delete;
 };
 
-#endif  // _FLOW_UTIL_H_
+#endif // _FLOW_UTIL_H_

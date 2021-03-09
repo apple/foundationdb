@@ -33,7 +33,7 @@ struct DowngradeWorkload : TestWorkload {
 	DowngradeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		oldKey = getOption(options, LiteralStringRef("oldKey"), LiteralStringRef("oldKey"));
 		newKey = getOption(options, LiteralStringRef("newKey"), LiteralStringRef("newKey"));
-		numObjects = getOption(options, LiteralStringRef("numOptions"), deterministicRandom()->randomInt(0,100));
+		numObjects = getOption(options, LiteralStringRef("numOptions"), deterministicRandom()->randomInt(0, 100));
 	}
 
 	struct _Struct {
@@ -54,9 +54,7 @@ struct DowngradeWorkload : TestWorkload {
 	struct NewStruct : public _Struct {
 		int newField = 0;
 
-		bool isSet() const {
-			return oldField == 1 && newField == 2;
-		}
+		bool isSet() const { return oldField == 1 && newField == 2; }
 		void setFields() {
 			oldField = 1;
 			newField = 2;

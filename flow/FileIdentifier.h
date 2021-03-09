@@ -56,8 +56,7 @@ template <class T, uint32_t B, bool = HasFileIdentifier<T>::value>
 struct ComposedIdentifier;
 
 template <class T, uint32_t B>
-struct ComposedIdentifier<T, B, true>
-{
+struct ComposedIdentifier<T, B, true> {
 	static constexpr FileIdentifier file_identifier = (B << 24) | FileIdentifierFor<T>::value;
 };
 

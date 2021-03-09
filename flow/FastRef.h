@@ -35,9 +35,7 @@ class ThreadSafeReferenceCounted {
 public:
 	ThreadSafeReferenceCounted() : referenceCount(1) {}
 	// NO virtual destructor!  Subclass should have a virtual destructor if it is not sealed.
-	void addref() const {
-		interlockedIncrement(&referenceCount);
-	}
+	void addref() const { interlockedIncrement(&referenceCount); }
 	// If return value is true, caller is responsible for destruction of object
 	bool delref_no_destroy() const {
 		if (interlockedDecrement(&referenceCount) != 0) {
@@ -56,8 +54,9 @@ public:
 			delete (Subclass*)this;
 	}
 	void setrefCountUnsafe(int32_t count) const { referenceCount = count; }
-	int32_t debugGetReferenceCount() const { return referenceCount; }	// Never use in production code, only for tracing
+	int32_t debugGetReferenceCount() const { return referenceCount; } // Never use in production code, only for tracing
 	bool isSoleOwnerUnsafe() const { return referenceCount == 1; }
+
 private:
 	ThreadSafeReferenceCounted(const ThreadSafeReferenceCounted&) /* = delete*/;
 	void operator=(const ThreadSafeReferenceCounted&) /* = delete*/;
@@ -75,8 +74,9 @@ public:
 			delete (Subclass*)this;
 	}
 	bool delref_no_destroy() const { return !--referenceCount; }
-	int32_t debugGetReferenceCount() const { return referenceCount; }	// Never use in production code, only for tracing
+	int32_t debugGetReferenceCount() const { return referenceCount; } // Never use in production code, only for tracing
 	bool isSoleOwner() const { return referenceCount == 1; }
+
 private:
 	ThreadUnsafeReferenceCounted(const ThreadUnsafeReferenceCounted&) /* = delete*/;
 	void operator=(const ThreadUnsafeReferenceCounted&) /* = delete*/;
@@ -90,35 +90,54 @@ private:
 #endif
 
 template <class P>
-void addref( P* ptr ) { ptr->addref(); }
+void addref(P* ptr) {
+	ptr->addref();
+}
 
 template <class P>
-void delref( P* ptr ) { ptr->delref(); }
+void delref(P* ptr) {
+	ptr->delref();
+}
 
 template <class P>
-class Reference
-{
+class Reference {
 public:
 	Reference() : ptr(NULL) {}
-	explicit Reference( P* ptr ) : ptr(ptr) {}
-	static Reference<P> addRef( P* ptr ) { ptr->addref(); return Reference(ptr); }
+	explicit Reference(P* ptr) : ptr(ptr) {}
+	static Reference<P> addRef(P* ptr) {
+		ptr->addref();
+		return Reference(ptr);
+	}
 
-	Reference(const Reference& r) : ptr(r.getPtr()) { if (ptr) addref(ptr); }
-	Reference(Reference && r) BOOST_NOEXCEPT : ptr(r.getPtr()) { r.ptr = NULL; }
+	Reference(const Reference& r) : ptr(r.getPtr()) {
+		if (ptr)
+			addref(ptr);
+	}
+	Reference(Reference&& r) BOOST_NOEXCEPT : ptr(r.getPtr()) { r.ptr = NULL; }
 
 	template <class Q>
-	Reference(const Reference<Q>& r) : ptr(r.getPtr()) { if (ptr) addref(ptr); }
+	Reference(const Reference<Q>& r) : ptr(r.getPtr()) {
+		if (ptr)
+			addref(ptr);
+	}
 	template <class Q>
-	Reference(Reference<Q> && r) : ptr(r.getPtr()) { r.setPtrUnsafe(NULL); }
+	Reference(Reference<Q>&& r) : ptr(r.getPtr()) {
+		r.setPtrUnsafe(NULL);
+	}
 
-	~Reference() { if (ptr) delref(ptr); }
+	~Reference() {
+		if (ptr)
+			delref(ptr);
+	}
 	Reference& operator=(const Reference& r) {
 		P* oldPtr = ptr;
 		P* newPtr = r.ptr;
 		if (oldPtr != newPtr) {
-			if (newPtr) addref(newPtr);
+			if (newPtr)
+				addref(newPtr);
 			ptr = newPtr;
-			if (oldPtr) delref(oldPtr);
+			if (oldPtr)
+				delref(oldPtr);
 		}
 		return *this;
 	}
@@ -128,7 +147,8 @@ public:
 		if (oldPtr != newPtr) {
 			r.ptr = NULL;
 			ptr = newPtr;
-			if (oldPtr) delref(oldPtr);
+			if (oldPtr)
+				delref(oldPtr);
 		}
 		return *this;
 	}
@@ -145,9 +165,13 @@ public:
 	P& operator*() const { return *ptr; }
 	P* getPtr() const { return ptr; }
 
-	void setPtrUnsafe( P* p ) { ptr = p; }
+	void setPtrUnsafe(P* p) { ptr = p; }
 
-	P* extractPtr() { auto *p = ptr; ptr = NULL; return p; }
+	P* extractPtr() {
+		auto* p = ptr;
+		ptr = NULL;
+		return p;
+	}
 
 	template <class T>
 	Reference<T> castTo() {
@@ -158,11 +182,11 @@ public:
 	explicit operator bool() const { return ptr != NULL; }
 
 private:
-	P *ptr;
+	P* ptr;
 };
 
 template <class P>
-bool operator==( const Reference<P>& lhs, const Reference<P>& rhs ) {
+bool operator==(const Reference<P>& lhs, const Reference<P>& rhs) {
 	return lhs.getPtr() == rhs.getPtr();
 }
 
