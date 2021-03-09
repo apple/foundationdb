@@ -10,6 +10,9 @@ RUN yum repolist && \
         emacs-nox \
         vim \
         bash-completion \
+        ripgrep \
+        the_silver_searcher \
+        zsh \
         jq \
         cgdb && \
     yum clean all && \
