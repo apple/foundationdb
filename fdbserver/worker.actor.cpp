@@ -1009,6 +1009,10 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 
 	state Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
 
+	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
+		TraceEvent(SevWarnAlways, "ChaosFeaturesEnabled");
+	}
+
 	folder = abspath(folder);
 
 	if (metricsPrefix.size() > 0) {
