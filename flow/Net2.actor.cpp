@@ -397,7 +397,7 @@ public:
 		BindPromise p("N2_WriteProbeError", id);
 		auto f = p.getFuture();
 		socket.async_write_some(boost::asio::null_buffers(), std::move(p));
-		double clog = failureInjector->getReceiveDelay(peer_address);
+		double clog = failureInjector->getSendDelay(peer_address);
 		if (clog > 0.0) {
 			return delay(clog) && f;
 		}
@@ -1777,7 +1777,7 @@ INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetric
 }
 
 boost::system::error_code FailureInjector::rollRandomClose() const {
-	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES && FLOW_KNOBS->INJECT_CONNECTION_FAILURES &&
+	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES && injectConnectionFailures &&
 	    deterministicRandom()->random01() < .000005) {
 		return boost::system::errc::make_error_code(boost::system::errc::network_reset);
 	}

@@ -71,8 +71,7 @@ public:
 	double HUGE_ARENA_LOGGING_INTERVAL;
 
 	// Chaos testing
-	int ENABLE_CHAOS_FEATURES;
-	int INJECT_CONNECTION_FAILURES;
+	bool ENABLE_CHAOS_FEATURES;
 
 	// run loop profiling
 	double RUN_LOOP_PROFILING_INTERVAL;
