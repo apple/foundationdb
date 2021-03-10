@@ -200,7 +200,7 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 
 	ACTOR Future<Void> stopOnError( WorkPool* w ) {
 		try {
-			wait( w->getError() );
+			wait(w->getError());
 			ASSERT(false);
 		} catch (Error& e) {
 			w->stop(e);
@@ -221,7 +221,7 @@ public:
 	}
 
 	Future<Void> getError() const override { return pool->anyError.getResult(); }
-	void addThread(IThreadPoolReceiver* userData) override {
+	void addThread(IThreadPoolReceiver* userData, const char*) override {
 		checkError();
 
 		auto w = new Worker(pool.getPtr(), userData);

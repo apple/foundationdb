@@ -128,6 +128,12 @@ public:
 
 		return result.getFuture();
 	}
+
+	static Future<Void> renameFile(std::string const& from, std::string const& to) {
+		::renameFile(from, to);
+		return Void();
+	}
+
 	Future<Void> write(void const* data, int length, int64_t offset) override {
 		/*
 		FIXME
