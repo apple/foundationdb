@@ -77,7 +77,7 @@ struct RandomCloggingWorkload : TestWorkload {
 				TraceEvent(SevError, "ChaosDisabled")
 				    .detail("OnEndpoint", worker.waitFailure.getEndpoint().addresses.address.toString());
 			} else {
-				TraceEvent(SevError, "ClogginFailed")
+				TraceEvent(SevError, "CloggingFailed")
 				    .detail("OnEndpoint", worker.waitFailure.getEndpoint().addresses.address.toString())
 				    .error(err);
 			}
