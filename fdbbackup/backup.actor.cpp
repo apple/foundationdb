@@ -2553,8 +2553,8 @@ ACTOR Future<Void> expireBackupData(const char* name,
 			throw;
 		if (e.code() == error_code_backup_cannot_expire)
 			fprintf(stderr,
-			        "ERROR: Requested expiration would be unsafe.  Backup would not meet minimum "
-			        "restorability.  Use --force to delete data anyway.\n");
+			        "ERROR: Requested expiration would be unsafe.  Backup would not meet minimum restorability.  Use "
+			        "--force to delete data anyway.\n");
 		else
 			fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;

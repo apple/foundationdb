@@ -58,7 +58,6 @@ ACTOR Future<Void> appendStringRefWithLen(Reference<IBackupFile> file, Standalon
 	wait(file->append(s.begin(), s.size()));
 	return Void();
 }
-
 } // namespace IBackupFile_impl
 
 Future<Void> IBackupFile::appendStringRefWithLen(Standalone<StringRef> s) {

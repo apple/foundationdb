@@ -1432,7 +1432,6 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	std::vector<ProcessClass::ClassType> processClassesSubSet = { ProcessClass::UnsetClass,
 		                                                          ProcessClass::ResolutionClass,
 		                                                          ProcessClass::MasterClass };
-
 	for (int dc = 0; dc < dataCenters; dc++) {
 		// FIXME: test unset dcID
 		Optional<Standalone<StringRef>> dcUID = StringRef(format("%d", dc));

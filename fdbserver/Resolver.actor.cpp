@@ -30,7 +30,6 @@
 #include "fdbserver/Orderer.actor.h"
 #include "fdbserver/StorageMetrics.h"
 #include "fdbclient/SystemData.h"
-
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {

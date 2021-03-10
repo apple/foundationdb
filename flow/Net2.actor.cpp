@@ -1742,8 +1742,8 @@ THREAD_HANDLE Net2::startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg) {
 
 Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, const std::string& host) {
 #ifndef TLS_DISABLED
-	initTLS(ETLSInitState::CONNECT);
 	if (toAddr.isTLS()) {
+		initTLS(ETLSInitState::CONNECT);
 		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr);
 	}
 #endif
@@ -1839,8 +1839,8 @@ bool Net2::isAddressOnThisHost(NetworkAddress const& addr) const {
 Reference<IListener> Net2::listen(NetworkAddress localAddr) {
 	try {
 #ifndef TLS_DISABLED
-		initTLS(ETLSInitState::LISTEN);
 		if (localAddr.isTLS()) {
+			initTLS(ETLSInitState::LISTEN);
 			return Reference<IListener>(new SSLListener(reactor.ios, &this->sslContextVar, localAddr));
 		}
 #endif

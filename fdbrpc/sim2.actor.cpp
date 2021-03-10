@@ -1056,6 +1056,7 @@ public:
 	bool isAddressOnThisHost(NetworkAddress const& addr) const override {
 		return addr.ip == getCurrentProcess()->address.ip;
 	}
+	virtual bool isAddressOnThisHost(NetworkAddress const& addr) { return addr.ip == getCurrentProcess()->address.ip; }
 
 	ACTOR static Future<Void> deleteFileImpl(Sim2* self, std::string filename, bool mustBeDurable) {
 		// This is a _rudimentary_ simulation of the untrustworthiness of non-durable deletes and the possibility of

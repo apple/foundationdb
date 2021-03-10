@@ -21,6 +21,8 @@ package com.apple.foundationdb;
 
 import java.util.Iterator;
 import java.util.Map;
+import java.util.NavigableMap;
+import java.util.Random;
 import java.util.TreeMap;
 
 import com.apple.foundationdb.async.AsyncIterable;
@@ -50,6 +52,48 @@ class RangeQueryIntegrationTest {
 		try (Database db = fdb.open()) {
 			db.run(tr -> {
 				tr.clear(Range.startsWith(new byte[] { (byte)0x00 }));
+				return null;
+			});
+		}
+	}
+
+	private void loadData(Database db, Map<byte[], byte[]> dataToLoad) {
+		db.run(tr -> {
+			for (Map.Entry<byte[], byte[]> entry : dataToLoad.entrySet()) {
+				tr.set(entry.getKey(), entry.getValue());
+			}
+			return null;
+		});
+	}
+
+	@Test
+	public void canGetRowWithKeySelector() throws Exception {
+		Random rand = new Random();
+		byte[] key = new byte[128];
+		byte[] value = new byte[128];
+		rand.nextBytes(key);
+		key[0] = (byte)0xEE;
+		rand.nextBytes(value);
+
+		NavigableMap<byte[], byte[]> data = new TreeMap<>(ByteArrayUtil.comparator());
+		data.put(key, value);
+		try (Database db = fdb.open()) {
+			loadData(db, data);
+			db.run(tr -> {
+				byte[] actualValue = tr.get(key).join();
+				Assertions.assertNotNull(actualValue, "Missing key!");
+				Assertions.assertArrayEquals(value, actualValue, "incorrect value!");
+
+				KeySelector start = KeySelector.firstGreaterOrEqual(new byte[] { key[0] });
+				KeySelector end = KeySelector.firstGreaterOrEqual(ByteArrayUtil.strinc(start.getKey()));
+				AsyncIterable<KeyValue> kvIterable = tr.getRange(start, end);
+				AsyncIterator<KeyValue> kvs = kvIterable.iterator();
+
+				Assertions.assertTrue(kvs.hasNext(), "Did not return a record!");
+				KeyValue n = kvs.next();
+				Assertions.assertArrayEquals(key, n.getKey(), "Did not return a key correctly!");
+				Assertions.assertArrayEquals(value, n.getValue(), "Did not return the corect value!");
+
 				return null;
 			});
 		}
