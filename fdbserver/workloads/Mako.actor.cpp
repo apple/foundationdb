@@ -386,6 +386,7 @@ struct MakoWorkload : TestWorkload {
 
 	ACTOR Future<Void> _runBenchmark(Database cx, MakoWorkload* self) {
 		std::vector<Future<Void>> clients;
+		clients.reserve(self->actorCountPerClient);
 		for (int c = 0; c < self->actorCountPerClient; ++c) {
 			clients.push_back(self->makoClient(cx, self, self->actorCountPerClient / self->transactionsPerSecond, c));
 		}

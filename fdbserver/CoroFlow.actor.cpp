@@ -63,12 +63,18 @@ struct Coroutine /*: IThreadlike*/ {
 
 	void unblock() {
 		//Coro_switchTo_( swapCoro(coro), coro );
-		blocked.send(Void());
+
+		// Copy blocked before calling send, since the call to send might destroy it.
+		auto b = blocked;
+		b.send(Void());
 	}
 
-	void send(Future<Void> const& what) {
-		(*sink)(what);
+	void waitFor(Future<Void> const& what) {
+		ASSERT(current_coro == this);
+		current_coro = nullptr;
+		(*sink)(what); // Pass control back to the switcher actor
 		ASSERT(what.isReady());
+		current_coro = this;
 	}
 
 protected:
@@ -80,10 +86,7 @@ protected:
 			} catch (Error& e) {
 				// We just want to transfer control back to the coroutine. The coroutine will handle the error.
 			}
-			current_coro = self;
-			(*self->coro)(); // Transfer control to the coroutine, and wait until the coroutine has a future it needs to
-			                 // wait for
-			current_coro = nullptr;
+			(*self->coro)(); // Transfer control to the coroutine. This call "returns" after waitFor is called.
 			wait(delay(0, g_network->getCurrentTask()));
 		}
 	}
@@ -105,10 +108,10 @@ protected:
 	virtual void run() = 0;
 
 private:
-	std::unique_ptr<coro_t::pull_type> coro;
 	coro_t::push_type* sink;
 	Promise<Void> blocked;
 	std::shared_ptr<bool> alive{ std::make_shared<bool>(true) };
+	std::unique_ptr<coro_t::pull_type> coro;
 };
 
 template <class Threadlike, class Mutex, bool IS_CORO>
@@ -285,9 +288,8 @@ void CoroThreadPool::waitFor( Future<Void> what ) {
 	ASSERT(current_coro != nullptr);
 	if (what.isReady()) return;
 	// double t = now();
-	auto c = current_coro;
-	current_coro = nullptr;
-	c->send(what);
+	current_coro->waitFor(what);
+	what.get(); // Throw if |what| is an error
 }
 
 // Right After INet2::run

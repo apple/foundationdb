@@ -207,6 +207,10 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 				if(g_network->isSimulated() && e.code() != error_code_io_timeout && (bool)g_network->global(INetwork::enASIOTimedOut))
 					TraceEvent(SevError, "IOTimeoutErrorSuppressed").detail("ErrorCode", e.code()).detail("RandomId", randomId).backtrace();
 
+				if (e.code() == error_code_io_timeout && !onShutdown.isReady()) {
+					onShutdown = ISimulator::RebootProcess;
+				}
+
 				if (onShutdown.isReady() && onShutdown.isError()) throw onShutdown.getError();
 				if(e.code() != error_code_actor_cancelled)
 					printf("SimulatedFDBDTerminated: %s\n", e.what());
@@ -1275,6 +1279,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 			}
 
 			std::vector<IPAddress> ips;
+			ips.reserve(processesPerMachine);
 			for (int i = 0; i < processesPerMachine; i++) {
 				ips.push_back(makeIPAddressForSim(useIPv6, { 2, dc, deterministicRandom()->randomInt(1, i + 2), machine }));
 			}
@@ -1290,7 +1295,8 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 
 			if (requiresExtraDBMachines) {
 				std::vector<IPAddress> extraIps;
-				for (int i = 0; i < processesPerMachine; i++){
+				extraIps.reserve(processesPerMachine);
+				for (int i = 0; i < processesPerMachine; i++) {
 					extraIps.push_back(makeIPAddressForSim(useIPv6, { 4, dc, deterministicRandom()->randomInt(1, i + 2), machine }));
 				}
 

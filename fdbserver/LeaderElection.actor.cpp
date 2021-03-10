@@ -67,7 +67,8 @@ Future<Void> buggifyDelayedAsyncVar( Reference<AsyncVar<T>> &var ) {
 
 ACTOR Future<Void> changeLeaderCoordinators( ServerCoordinators coordinators, Value forwardingInfo ) {
 	std::vector<Future<Void>> forwardRequests;
-	for( int i = 0; i < coordinators.leaderElectionServers.size(); i++ )
+	forwardRequests.reserve(coordinators.leaderElectionServers.size());
+	for (int i = 0; i < coordinators.leaderElectionServers.size(); i++)
 		forwardRequests.push_back( retryBrokenPromise( coordinators.leaderElectionServers[i].forward, ForwardRequest( coordinators.clusterKey, forwardingInfo ) ) );
 	int quorum_size = forwardRequests.size()/2 + 1;
 	wait( quorum( forwardRequests, quorum_size ) );
@@ -108,7 +109,8 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators, Valu
 		myInfo.updateChangeID( asyncPriorityInfo->get() );
 
 		vector<Future<Void>> cand;
-		for(int i=0; i<coordinators.leaderElectionServers.size(); i++)
+		cand.reserve(coordinators.leaderElectionServers.size());
+		for (int i = 0; i < coordinators.leaderElectionServers.size(); i++)
 			cand.push_back( submitCandidacy( coordinators.clusterKey, coordinators.leaderElectionServers[i], myInfo, prevChangeID, nominees, i ) );
 		candidacies = waitForAll(cand);
 

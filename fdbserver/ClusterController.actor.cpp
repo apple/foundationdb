@@ -1011,6 +1011,7 @@ public:
 		}
 	}
 
+	// Check if txn system is recruited successfully in each region
 	void checkRegions(const std::vector<RegionInfo>& regions) {
 		if(desiredDcIds.get().present() && desiredDcIds.get().get().size() == 2 && desiredDcIds.get().get()[0].get() == regions[0].dcId && desiredDcIds.get().get()[1].get() == regions[1].dcId) {
 			return;

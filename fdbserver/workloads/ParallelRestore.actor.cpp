@@ -42,6 +42,7 @@ struct RunRestoreWorkerWorkload : TestWorkload {
 		TraceEvent("RunParallelRestoreWorkerWorkload").detail("Start", "RestoreToolDB").detail("Workers", num_myWorkers);
 		printf("RunParallelRestoreWorkerWorkload, we will start %d restore workers\n", num_myWorkers);
 		std::vector<Future<Void>> myWorkers;
+		myWorkers.reserve(num_myWorkers);
 		for (int i = 0; i < num_myWorkers; ++i) {
 			myWorkers.push_back(_restoreWorker(cx, LocalityData()));
 		}

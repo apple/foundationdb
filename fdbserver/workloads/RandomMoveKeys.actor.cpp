@@ -121,8 +121,8 @@ struct MoveKeysWorkload : TestWorkload {
 		for(int s=0; s<destinationTeam.size(); s++)
 			desc += format("%s (%llx),", destinationTeam[s].address().toString().c_str(), destinationTeam[s].id().first());
 		vector<UID> destinationTeamIDs;
-		for(int s=0; s<destinationTeam.size(); s++)
-			destinationTeamIDs.push_back( destinationTeam[s].id() );
+		destinationTeamIDs.reserve(destinationTeam.size());
+		for (int s = 0; s < destinationTeam.size(); s++) destinationTeamIDs.push_back(destinationTeam[s].id());
 
 		TraceEvent(relocateShardInterval.begin())
 			.detail("KeyBegin", printable(keys.begin)).detail("KeyEnd", printable(keys.end))

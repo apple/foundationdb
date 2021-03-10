@@ -265,20 +265,20 @@ struct CompoundWorkload : TestWorkload {
 	}
 	Future<Void> setup(Database const& cx) override {
 		vector<Future<Void>> all;
-		for(int w=0; w<workloads.size(); w++)
-			all.push_back( workloads[w]->setup(cx) );
+		all.reserve(workloads.size());
+		for (int w = 0; w < workloads.size(); w++) all.push_back(workloads[w]->setup(cx));
 		return waitForAll(all);
 	}
 	Future<Void> start(Database const& cx) override {
 		vector<Future<Void>> all;
-		for(int w=0; w<workloads.size(); w++)
-			all.push_back( workloads[w]->start(cx) );
+		all.reserve(workloads.size());
+		for (int w = 0; w < workloads.size(); w++) all.push_back(workloads[w]->start(cx));
 		return waitForAll(all);
 	}
 	Future<bool> check(Database const& cx) override {
 		vector<Future<bool>> all;
-		for(int w=0; w<workloads.size(); w++)
-			all.push_back( workloads[w]->check(cx) );
+		all.reserve(workloads.size());
+		for (int w = 0; w < workloads.size(); w++) all.push_back(workloads[w]->check(cx));
 		return allTrue(all);
 	}
 	void getMetrics(vector<PerfMetric>& m) override {
@@ -679,7 +679,8 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 		state std::vector< Future<ErrorOr<Void>> > setups;
 		printf("setting up test (%s)...\n", printable(spec.title).c_str());
 		TraceEvent("TestSetupStart").detail("WorkloadTitle", spec.title);
-		for(int i= 0; i < workloads.size(); i++)
+		setups.reserve(workloads.size());
+		for (int i = 0; i < workloads.size(); i++)
 			setups.push_back( workloads[i].setup.template getReplyUnlessFailedFor<Void>( waitForFailureTime, 0) );
 		wait( waitForAll( setups ) );
 		throwIfError(setups, "SetupFailedForWorkload" + printable(spec.title));
@@ -690,7 +691,8 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 		TraceEvent("TestStarting").detail("WorkloadTitle", spec.title);
 		printf("running test (%s)...\n", printable(spec.title).c_str());
 		state std::vector< Future<ErrorOr<Void>> > starts;
-		for(int i= 0; i < workloads.size(); i++)
+		starts.reserve(workloads.size());
+		for (int i = 0; i < workloads.size(); i++)
 			starts.push_back( workloads[i].start.template getReplyUnlessFailedFor<Void>(waitForFailureTime, 0) );
 		wait( waitForAll( starts ) );
 		throwIfError(starts, "StartFailedForWorkload" + printable(spec.title));
@@ -708,7 +710,8 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 
 		printf("checking test (%s)...\n", printable(spec.title).c_str());
 
-		for(int i= 0; i < workloads.size(); i++)
+		checks.reserve(workloads.size());
+		for (int i = 0; i < workloads.size(); i++)
 			checks.push_back(workloads[i].check.template getReplyUnlessFailedFor<CheckReply>(waitForFailureTime, 0));
 		wait( waitForAll( checks ) );
 
@@ -726,7 +729,8 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 		state std::vector< Future<ErrorOr<vector<PerfMetric>>> > metricTasks;
 		printf("fetching metrics (%s)...\n", printable(spec.title).c_str());
 		TraceEvent("TestFetchingMetrics").detail("WorkloadTitle", spec.title);
-		for(int i= 0; i < workloads.size(); i++)
+		metricTasks.reserve(workloads.size());
+		for (int i = 0; i < workloads.size(); i++)
 			metricTasks.push_back( workloads[i].metrics.template getReplyUnlessFailedFor<vector<PerfMetric>>(waitForFailureTime, 0) );
 		wait( waitForAll( metricTasks ) );
 		throwIfError(metricTasks, "MetricFailedForWorkload" + printable(spec.title));
@@ -1314,8 +1318,8 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	}
 
 	vector<TesterInterface> ts;
-	for(int i=0; i<workers.size(); i++)
-		ts.push_back(workers[i].interf.testerInterface);
+	ts.reserve(workers.size());
+	for (int i = 0; i < workers.size(); i++) ts.push_back(workers[i].interf.testerInterface);
 
 	wait( runTests( cc, ci, ts, tests, startingConfiguration, locality) );
 	return Void();

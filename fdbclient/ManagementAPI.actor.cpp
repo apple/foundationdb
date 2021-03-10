@@ -1059,7 +1059,8 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr, 
 
 	vector<Future<Optional<LeaderInfo>>> leaderServers;
 	ClientCoordinators coord( Reference<ClusterConnectionFile>( new ClusterConnectionFile( conn ) ) );
-	for( int i = 0; i < coord.clientLeaderServers.size(); i++ )
+	leaderServers.reserve(coord.clientLeaderServers.size());
+	for (int i = 0; i < coord.clientLeaderServers.size(); i++)
 		leaderServers.push_back( retryBrokenPromise( coord.clientLeaderServers[i].getLeader, GetLeaderRequest( coord.clusterKey, UID() ), TaskPriority::CoordinationReply ) );
 
 	choose {
@@ -1125,7 +1126,7 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 					ASSERT(process->isReliable() || process->rebooting);
 
 					g_simulator.protectedAddresses.insert(process->addresses.address);
-					if(process->addresses.secondaryAddress.present()) {
+					if (process->addresses.secondaryAddress.present()) {
 						g_simulator.protectedAddresses.insert(process->addresses.secondaryAddress.get());
 					}
 					TraceEvent("ProtectCoordinator").detail("Address", desiredCoordinators[i]).backtrace();
@@ -1138,7 +1139,8 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 
 			vector<Future<Optional<LeaderInfo>>> leaderServers;
 			ClientCoordinators coord( Reference<ClusterConnectionFile>( new ClusterConnectionFile( conn ) ) );
-			for( int i = 0; i < coord.clientLeaderServers.size(); i++ )
+			leaderServers.reserve(coord.clientLeaderServers.size());
+			for (int i = 0; i < coord.clientLeaderServers.size(); i++)
 				leaderServers.push_back( retryBrokenPromise( coord.clientLeaderServers[i].getLeader, GetLeaderRequest( coord.clusterKey, UID() ), TaskPriority::CoordinationReply ) );
 
 			choose {
@@ -1224,6 +1226,7 @@ struct AutoQuorumChange final : IQuorumChange {
 		// Check availability
 		ClientCoordinators coord(ccf);
 		vector<Future<Optional<LeaderInfo>>> leaderServers;
+		leaderServers.reserve(coord.clientLeaderServers.size());
 		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
 			leaderServers.push_back( retryBrokenPromise( coord.clientLeaderServers[i].getLeader, GetLeaderRequest( coord.clusterKey, UID() ), TaskPriority::CoordinationReply ) );
 		}

@@ -223,11 +223,13 @@ ACTOR Future<Void> networkTestClient( std:: string testServers ) {
 	state int completed = 0;
 	state LatencyStats latency;
 
-	for( int i = 0; i < servers.size(); i++ ) {
+	interfs.reserve(servers.size());
+	for (int i = 0; i < servers.size(); i++) {
 		interfs.push_back( NetworkTestInterface( servers[i] ) );
 	}
 
 	state std::vector<Future<Void>> clients;
+	clients.reserve(FLOW_KNOBS->NETWORK_TEST_CLIENT_COUNT);
 	for (int i = 0; i < FLOW_KNOBS->NETWORK_TEST_CLIENT_COUNT; i++) {
 		clients.push_back(testClient(interfs, &sent, &completed, &latency));
 	}

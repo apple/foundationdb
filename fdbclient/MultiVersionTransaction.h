@@ -210,7 +210,7 @@ private:
 
 class DLApi : public IClientApi {
 public:
-	DLApi(std::string fdbCPath);
+	DLApi(std::string fdbCPath, bool unlinkOnLoad = false);
 
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
@@ -229,6 +229,7 @@ public:
 private:
 	const std::string fdbCPath;
 	const Reference<FdbCApi> api;
+	const bool unlinkOnLoad;
 	int headerVersion;
 	bool networkSetup;
 
@@ -302,17 +303,23 @@ private:
 	std::vector<std::pair<FDBTransactionOptions::Option, Optional<Standalone<StringRef>>>> persistentOptions;
 };
 
-struct ClientInfo : ThreadSafeReferenceCounted<ClientInfo> {
+struct ClientDesc {
+	std::string const libPath;
+	bool const external;
+
+	ClientDesc(std::string libPath, bool external) : libPath(libPath), external(external) {}
+};
+
+struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
 	ProtocolVersion protocolVersion;
 	IClientApi *api;
-	std::string libPath;
-	bool external;
 	bool failed;
 	std::vector<std::pair<void (*)(void*), void*>> threadCompletionHooks;
 
-	ClientInfo() : protocolVersion(0), api(nullptr), external(false), failed(true) {}
-	ClientInfo(IClientApi *api) : protocolVersion(0), api(api), libPath("internal"), external(false), failed(false) {}
-	ClientInfo(IClientApi *api, std::string libPath) : protocolVersion(0), api(api), libPath(libPath), external(true), failed(false) {}
+	ClientInfo() : ClientDesc(std::string(), false), protocolVersion(0), api(nullptr), failed(true) {}
+	ClientInfo(IClientApi* api) : ClientDesc("internal", false), protocolVersion(0), api(api), failed(false) {}
+	ClientInfo(IClientApi* api, std::string libPath)
+	  : ClientDesc(libPath, true), protocolVersion(0), api(api), failed(false) {}
 
 	void loadProtocolVersion();
 	bool canReplace(Reference<ClientInfo> other) const;
@@ -322,7 +329,8 @@ class MultiVersionApi;
 
 class MultiVersionDatabase final : public IDatabase, ThreadSafeReferenceCounted<MultiVersionDatabase> {
 public:
-	MultiVersionDatabase(MultiVersionApi *api, std::string clusterFilePath, Reference<IDatabase> db, bool openConnectors=true);
+	MultiVersionDatabase(MultiVersionApi* api, int threadIdx, std::string clusterFilePath, Reference<IDatabase> db,
+	                     bool openConnectors = true);
 	~MultiVersionDatabase() override;
 
 	Reference<ITransaction> createTransaction() override;
@@ -389,6 +397,7 @@ private:
 	};
 
 	const Reference<DatabaseState> dbState;
+	const int threadIdx;
 	friend class MultiVersionTransaction;
 };
 
@@ -408,7 +417,9 @@ public:
 	static MultiVersionApi* api;
 
 	Reference<ClientInfo> getLocalClient();
-	void runOnExternalClients(std::function<void(Reference<ClientInfo>)>, bool runOnFailedClients=false);
+	void runOnExternalClients(int threadId, std::function<void(Reference<ClientInfo>)>,
+	                          bool runOnFailedClients = false);
+	void runOnExternalClientsAllThreads(std::function<void(Reference<ClientInfo>)>, bool runOnFailedClients = false);
 
 	void updateSupportedVersions();
 
@@ -426,19 +437,26 @@ private:
 	void setCallbacksOnExternalThreads();
 	void addExternalLibrary(std::string path);
 	void addExternalLibraryDirectory(std::string path);
+	// Return a vector of (pathname, unlink_on_close) pairs.  Makes threadCount - 1 copies of the library stored in path,
+	// and returns a vector of length threadCount.
+	std::vector<std::pair<std::string, bool>> copyExternalLibraryPerThread(std::string path);
 	void disableLocalClient();
 	void setSupportedClientVersions(Standalone<StringRef> versions);
 
 	void setNetworkOptionInternal(FDBNetworkOptions::Option option, Optional<StringRef> value);
 
 	Reference<ClientInfo> localClient;
-	std::map<std::string, Reference<ClientInfo>> externalClients;
+	std::map<std::string, ClientDesc> externalClientDescriptions;
+	std::map<std::string, std::vector<Reference<ClientInfo>>> externalClients;
 
 	bool networkStartSetup;
 	volatile bool networkSetup;
 	volatile bool bypassMultiClientApi;
 	volatile bool externalClient;
 	int apiVersion;
+
+	int nextThread = 0;
+	int threadCount;
 
 	Mutex lock;
 	std::vector<std::pair<FDBNetworkOptions::Option, Optional<Standalone<StringRef>>>> options;

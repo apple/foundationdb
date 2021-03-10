@@ -1785,7 +1785,8 @@ ACTOR Future<Optional<StorageServerInterface>> fetchServerInterface( Database cx
 
 ACTOR Future<Optional<vector<StorageServerInterface>>> transactionalGetServerInterfaces( Future<Version> ver, Database cx, TransactionInfo info, vector<UID> ids, TagSet tags ) {
 	state vector< Future< Optional<StorageServerInterface> > > serverListEntries;
-	for( int s = 0; s < ids.size(); s++ ) {
+	serverListEntries.reserve(ids.size());
+	for (int s = 0; s < ids.size(); s++) {
 		serverListEntries.push_back( fetchServerInterface( cx, info, ids[s], tags, ver ) );
 	}
 
@@ -4925,6 +4926,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 	TraceEvent("ExclusionSafetyCheckCoordinators");
 	state ClientCoordinators coordinatorList(cx->getConnectionFile());
 	state vector<Future<Optional<LeaderInfo>>> leaderServers;
+	leaderServers.reserve(coordinatorList.clientLeaderServers.size());
 	for (int i = 0; i < coordinatorList.clientLeaderServers.size(); i++) {
 		leaderServers.push_back(retryBrokenPromise(coordinatorList.clientLeaderServers[i].getLeader,
 		                                           GetLeaderRequest(coordinatorList.clusterKey, UID()),

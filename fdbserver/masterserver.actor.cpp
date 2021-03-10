@@ -406,6 +406,7 @@ ACTOR Future<Void> newSeedServers( Reference<MasterData> self, RecruitFromConfig
 
 Future<Void> waitCommitProxyFailure(vector<CommitProxyInterface> const& commitProxies) {
 	std::vector<Future<Void>> failed;
+	failed.reserve(commitProxies.size());
 	for (auto commitProxy : commitProxies) {
 		failed.push_back(waitFailureClient(commitProxy.waitFailure, SERVER_KNOBS->TLOG_TIMEOUT,
 		                                   -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
@@ -417,7 +418,8 @@ Future<Void> waitCommitProxyFailure(vector<CommitProxyInterface> const& commitPr
 
 Future<Void> waitGrvProxyFailure( vector<GrvProxyInterface> const& grvProxies ) {
 	vector<Future<Void>> failed;
-	for(int i=0; i<grvProxies.size(); i++)
+	failed.reserve(grvProxies.size());
+	for (int i = 0; i < grvProxies.size(); i++)
 		failed.push_back(waitFailureClient(grvProxies[i].waitFailure, SERVER_KNOBS->TLOG_TIMEOUT,
 		                                   -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
 		                                   /*trace=*/true));
@@ -427,6 +429,7 @@ Future<Void> waitGrvProxyFailure( vector<GrvProxyInterface> const& grvProxies ) 
 
 Future<Void> waitResolverFailure( vector<ResolverInterface> const& resolvers ) {
 	std::vector<Future<Void>> failed;
+	failed.reserve(resolvers.size());
 	for (auto resolver : resolvers) {
 		failed.push_back(waitFailureClient(resolver.waitFailure, SERVER_KNOBS->TLOG_TIMEOUT,
 		                                   -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
@@ -650,6 +653,9 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything( Refere
 	    .detail("GrvProxies", recruits.grvProxies.size())
 	    .detail("TLogs", recruits.tLogs.size())
 	    .detail("Resolvers", recruits.resolvers.size())
+	    .detail("SatelliteTLogs", recruits.satelliteTLogs.size())
+	    .detail("OldLogRouters", recruits.oldLogRouters.size())
+	    .detail("StorageServers", recruits.storageServers.size())
 	    .detail("BackupWorkers", self->backupWorkers.size())
 	    .trackLatest("MasterRecoveryState");
 
@@ -1363,6 +1369,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 
 	state std::vector<std::pair<UID, Tag>> idsTags; // worker IDs and tags for current epoch
 	state int logRouterTags = self->logSystem->getLogRouterTags();
+	idsTags.reserve(logRouterTags);
 	for (int i = 0; i < logRouterTags; i++) {
 		idsTags.emplace_back(deterministicRandom()->randomUniqueID(), Tag(tagLocalityLogRouter, i));
 	}

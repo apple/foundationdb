@@ -170,11 +170,11 @@ struct PingWorkload : TestWorkload {
 	ACTOR Future<Void> pinger( PingWorkload *self, Database cx ) {
 		vector<PingWorkloadInterface> testers = wait( self->fetchInterfaces( self, cx ) );
 		vector<RequestStream<LoadedPingRequest>> peers;
-		for(int i=0; i<testers.size(); i++)
-			peers.push_back( testers[i].payloadPing );
+		peers.reserve(testers.size());
+		for (int i = 0; i < testers.size(); i++) peers.push_back(testers[i].payloadPing);
 		vector<Future<Void>> pingers;
-		for(int i=0; i<self->actorCount; i++)
-			pingers.push_back( self->pinger( self, peers ) );
+		pingers.reserve(self->actorCount);
+		for (int i = 0; i < self->actorCount; i++) pingers.push_back(self->pinger(self, peers));
 		wait( waitForAll(pingers) );
 		return Void();
 	}
@@ -182,11 +182,11 @@ struct PingWorkload : TestWorkload {
 	ACTOR Future<Void> workerPinger( PingWorkload* self ) {
 		vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
 		vector<RequestStream<LoadedPingRequest>> peers;
-		for(int i=0; i<workers.size(); i++)
-			peers.push_back( workers[i].interf.debugPing );
+		peers.reserve(workers.size());
+		for (int i = 0; i < workers.size(); i++) peers.push_back(workers[i].interf.debugPing);
 		vector<Future<Void>> pingers;
-		for(int i=0; i<self->actorCount; i++)
-			pingers.push_back( self->pinger( self, peers ) );
+		pingers.reserve(self->actorCount);
+		for (int i = 0; i < self->actorCount; i++) pingers.push_back(self->pinger(self, peers));
 		wait( waitForAll(pingers) );
 		return Void();
 	}

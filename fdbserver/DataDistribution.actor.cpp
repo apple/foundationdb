@@ -339,8 +339,8 @@ private:
 
 	ACTOR Future<Void> doUpdateStorageMetrics( TCTeamInfo* self ) {
 		std::vector<Future<Void>> updates;
-		for( int i = 0; i< self->servers.size(); i++ )
-			updates.push_back( updateServerMetrics( self->servers[i] ) );
+		updates.reserve(self->servers.size());
+		for (int i = 0; i < self->servers.size(); i++) updates.push_back(updateServerMetrics(self->servers[i]));
 		wait( waitForAll( updates ) );
 		return Void();
 	}
@@ -5078,7 +5078,8 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		// disable tlog pop on local tlog nodes
 		state std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs(false);
 		std::vector<Future<Void>> disablePops;
-		for (const auto & tlog : tlogs) {
+		disablePops.reserve(tlogs.size());
+		for (const auto& tlog : tlogs) {
 			disablePops.push_back(
 				transformErrors(throwErrorOr(tlog.disablePopRequest.tryGetReply(TLogDisablePopRequest(snapReq.snapUID))), snap_disable_tlog_pop_failed())
 				);
@@ -5094,7 +5095,8 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
 		std::vector<Future<Void>> storageSnapReqs;
-		for (const auto & worker : storageWorkers) {
+		storageSnapReqs.reserve(storageWorkers.size());
+		for (const auto& worker : storageWorkers) {
 			storageSnapReqs.push_back(
 				transformErrors(throwErrorOr(worker.workerSnapReq.tryGetReply(WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("storage")))), snap_storage_failed())
 				);
@@ -5106,7 +5108,8 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 			.detail("SnapUID", snapReq.snapUID);
 		// snap local tlog nodes
 		std::vector<Future<Void>> tLogSnapReqs;
-		for (const auto & tlog : tlogs) {
+		tLogSnapReqs.reserve(tlogs.size());
+		for (const auto& tlog : tlogs) {
 			tLogSnapReqs.push_back(
 				transformErrors(throwErrorOr(tlog.snapRequest.tryGetReply(TLogSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("tlog")))), snap_tlog_failed())
 				);
@@ -5118,7 +5121,8 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 			.detail("SnapUID", snapReq.snapUID);
 		// enable tlog pop on local tlog nodes
 		std::vector<Future<Void>> enablePops;
-		for (const auto & tlog : tlogs) {
+		enablePops.reserve(tlogs.size());
+		for (const auto& tlog : tlogs) {
 			enablePops.push_back(
 				transformErrors(throwErrorOr(tlog.enablePopRequest.tryGetReply(TLogEnablePopRequest(snapReq.snapUID))), snap_enable_tlog_pop_failed())
 				);
@@ -5134,7 +5138,8 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
 		std::vector<Future<Void>> coordSnapReqs;
-		for (const auto & worker : coordWorkers) {
+		coordSnapReqs.reserve(coordWorkers.size());
+		for (const auto& worker : coordWorkers) {
 			coordSnapReqs.push_back(
 				transformErrors(throwErrorOr(worker.workerSnapReq.tryGetReply(WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("coord")))), snap_coord_failed())
 				);
@@ -5165,14 +5170,14 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID)
 			.error(e, true /*includeCancelled */);
-		if (e.code() == error_code_snap_storage_failed
-			|| e.code() == error_code_snap_tlog_failed
-			|| e.code() == error_code_operation_cancelled) {
+		if (e.code() == error_code_snap_storage_failed || e.code() == error_code_snap_tlog_failed ||
+		    e.code() == error_code_operation_cancelled || e.code() == error_code_snap_disable_tlog_pop_failed) {
 			// enable tlog pop on local tlog nodes
 			std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs(false);
 			try {
 				std::vector<Future<Void>> enablePops;
-				for (const auto & tlog : tlogs) {
+				enablePops.reserve(tlogs.size());
+				for (const auto& tlog : tlogs) {
 					enablePops.push_back(
 						transformErrors(throwErrorOr(tlog.enablePopRequest.tryGetReply(TLogEnablePopRequest(snapReq.snapUID))), snap_enable_tlog_pop_failed())
 						);

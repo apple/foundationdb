@@ -644,8 +644,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 		}
 
 		state vector<int> shardOrder;
-		for(int k = 0; k < ranges.size(); k++)
-			shardOrder.push_back(k);
+		shardOrder.reserve(ranges.size());
+		for (int k = 0; k < ranges.size(); k++) shardOrder.push_back(k);
 		if(self->shuffleShards) {
 			uint32_t seed = self->sharedRandomNumber + self->repetitions;
 			DeterministicRandom sharedRandom( seed == 0 ? 1 : seed );
@@ -707,7 +707,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 			loop {
 				try {
 					vector< Future< Optional<Value> > > serverListEntries;
-					for(int s=0; s<storageServers.size(); s++)
+					serverListEntries.reserve(storageServers.size());
+					for (int s = 0; s < storageServers.size(); s++)
 						serverListEntries.push_back( tr.get( serverListKeyFor(storageServers[s]) ) );
 					state vector<Optional<Value>> serverListValues = wait( getAll(serverListEntries) );
 					for(int s=0; s<serverListValues.size(); s++) {
