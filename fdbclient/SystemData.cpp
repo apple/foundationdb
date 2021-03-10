@@ -312,6 +312,37 @@ uint16_t cacheChangeKeyDecodeIndex( const KeyRef& key ) {
 	return idx;
 }
 
+const KeyRef tssMappingChangeKey = LiteralStringRef("\xff\x02/tssMappingChangeKey");
+const KeyRangeRef tssMappingKeys( LiteralStringRef("\xff/tss/"), LiteralStringRef("\xff/tss0") );
+const KeyRef tssMappingPrefix = tssMappingKeys.begin;
+
+const Key tssKeyFor( UID serverID ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( tssMappingPrefix );
+	wr << serverID;
+	return wr.toValue();
+}
+
+const Value tssValueFor( UID tssId ) {
+	BinaryWriter wr(Unversioned());
+	wr << tssId;
+	return wr.toValue();
+}
+
+UID decodeTssMappingKey( Key key ) {
+	UID serverID;
+	BinaryReader rd( key.removePrefix(tssMappingPrefix), Unversioned() );
+	rd >> serverID;
+	return serverID;
+}
+
+UID decodeTssMappingValue( Value value ) {
+	UID serverID;
+	BinaryReader rd( value, Unversioned() );
+	rd >> serverID;
+	return serverID;
+}
+
 const KeyRangeRef serverTagKeys(
 	LiteralStringRef("\xff/serverTag/"),
 	LiteralStringRef("\xff/serverTag0") );

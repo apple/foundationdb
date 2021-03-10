@@ -167,9 +167,10 @@ Future<Optional<REPLY_TYPE(Request)>> makeRequest(RequestStream<Request> const* 
 	if(model) {
 		// TODO why not just store request stream in model instead of Endpoint? (maybe resource leak issues?) then we wouldn't have to make a new request stream?
 		// Send parallel request to TSS pair, if it exists
-		// TODO uncomment once actual TSS stuff set up. For now randomly simulate it
-		// Optional<Endpoint> tssEndpoint = model->getTss(stream->getEndpoint().token.first());
-		Optional<Endpoint> tssEndpoint = (deterministicRandom()->randomInt(0, 10) == 1) ? stream->getEndpoint() : Optional<Endpoint>();
+		Optional<Endpoint> tssEndpoint = model->getTssEndpoint(stream->getEndpoint().token.first());
+
+		// TODO remove old hack
+		// Optional<Endpoint> tssEndpoint = (deterministicRandom()->randomInt(0, 10) == 1) ? stream->getEndpoint() : Optional<Endpoint>();
 		
 		if (tssEndpoint.present()) {
 			//FIXME: optimize to avoid creating new netNotifiedQueue for each message

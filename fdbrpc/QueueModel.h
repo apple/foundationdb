@@ -63,6 +63,7 @@ struct QueueData {
 
 	// a bit of a hack to store this here, but it's the only centralized place for per-endpoint tracking
 	Optional<Endpoint> tss;
+	UID tssGeneration; // TODO this isn't exactly like a generation since it's not ordered, i'll try to think of a better name
 
 	QueueData()
 	  : latency(0.001), penalty(1.0), smoothOutstanding(FLOW_KNOBS->QUEUE_MODEL_SMOOTHING_AMOUNT), failedUntil(0),
@@ -97,11 +98,11 @@ public:
 	Future<Void> laggingRequests; // requests for which a different recipient already answered
 	int laggingRequestCount;
 
-	// passes all updates in one function so that data map can remove tss mapping for old endpoints
-	void updateTss(std::unordered_map<uint64_t, Endpoint> tssMapping);
-	Optional<Endpoint> getTss(uint64_t id);
+	void updateTssEndpoint(uint64_t id, UID generation, Endpoint endpoint);
+	void removeOldTssEndpoints(UID currentGeneration);
+	Optional<Endpoint> getTssEndpoint(uint64_t id);
 
-	QueueModel() : secondMultiplier(1.0), secondBudget(0), laggingRequestCount(0) {
+	QueueModel() : secondMultiplier(1.0), secondBudget(0), laggingRequestCount(0), tssCount(0) {
 		laggingRequests = actorCollection(addActor.getFuture(), &laggingRequestCount);
 	}
 
@@ -109,7 +110,7 @@ public:
 
 private:
 	std::unordered_map<uint64_t, QueueData> data;
-	uint32_t tssCount = 0; // optimization to avoid removing old tss mappings if there are none
+	uint32_t tssCount;
 };
 
 /* old queue model

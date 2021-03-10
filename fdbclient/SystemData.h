@@ -96,6 +96,16 @@ extern const KeyRef cacheChangePrefix;
 const Key cacheChangeKeyFor( uint16_t idx );
 uint16_t cacheChangeKeyDecodeIndex( const KeyRef& key );
 
+//    "\xff/tss/[[serverId]]" := "[[tssId]]"
+extern const KeyRef tssMappingChangeKey;
+extern const KeyRangeRef tssMappingKeys;
+extern const KeyRef tssMappingPrefix;
+
+const Key tssMappingKeyFor( UID serverId );
+const Value tssMappingValueFor ( UID tssId );
+UID decodeTssMappingKey(Key serverId);
+UID decodeTssMappingValue(Value serverId);
+
 // "\xff/serverTag/[[serverID]]" = "[[Tag]]"
 extern const KeyRangeRef serverTagKeys;
 extern const KeyRef serverTagPrefix;

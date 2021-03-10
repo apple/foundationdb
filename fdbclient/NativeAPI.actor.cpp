@@ -80,6 +80,15 @@ NetworkOptions::NetworkOptions()
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
 
+// TODO make tss function here
+void DatabaseContext::addTssMapping(StorageServerInterface ssi, StorageServerInterface tssi) {
+	// TODO any other requests it makes sense to duplicate? watches?
+	// add each read data request interface to map (getValue, getKey, getKeyValues)
+	queueModel.updateTssEndpoint(ssi.getValue.getEndpoint().token.first(), clientInfo->get().id, tssi.getValue.getEndpoint());
+	queueModel.updateTssEndpoint(ssi.getKey.getEndpoint().token.first(), clientInfo->get().id, tssi.getKey.getEndpoint());
+	queueModel.updateTssEndpoint(ssi.getKeyValues.getEndpoint().token.first(), clientInfo->get().id, tssi.getKeyValues.getEndpoint());
+}
+
 Reference<StorageServerInfo> StorageServerInfo::getInterface( DatabaseContext *cx, StorageServerInterface const& ssi, LocalityData const& locality ) {
 	auto it = cx->server_interf.find( ssi.id() );
 	if( it != cx->server_interf.end() ) {
@@ -98,6 +107,15 @@ Reference<StorageServerInfo> StorageServerInfo::getInterface( DatabaseContext *c
 		}
 
 		return Reference<StorageServerInfo>::addRef( it->second );
+	}
+
+	// add tss mapping if server is new
+	// TODO can maps be serialized in ClientDBInfo? could change this to a map instead of a vector<pair<>>
+	for (auto& it : cx->clientInfo->get().tssMapping) {
+		if (it.first == ssi.id()) {
+			cx->addTssMapping(ssi, it.second);
+			break;
+		}
 	}
 
 	Reference<StorageServerInfo> loc( new StorageServerInfo(cx, ssi, locality) );
@@ -1327,21 +1345,12 @@ Reference<ProxyInfo> DatabaseContext::getMasterProxies(bool useProvisionalProxie
 			if (!clientInfo->get().tssMapping.empty()) {
 				for(auto& it : clientInfo->get().tssMapping) {
 					if(server_interf.count(it.first)) {
-						// TODO any other requests it makes sense to duplicate?
-						// add each read data request interface to map (getValue, getKey, getKeyValues)
-						tssEndpointMap[server_interf[it.first]->interf.getValue.getEndpoint().token.first()] = it.second.getValue.getEndpoint();
-						tssEndpointMap[server_interf[it.first]->interf.getKey.getEndpoint().token.first()] = it.second.getKey.getEndpoint();
-						tssEndpointMap[server_interf[it.first]->interf.getKeyValues.getEndpoint().token.first()] = it.second.getKeyValues.getEndpoint();
+						addTssMapping(server_interf[it.first]->interf, it.second);
 					}
 				}
 			}
-			// TODO REMOVE check and print
-			if (!tssEndpointMap.empty()) {
-				printf("updating tss mapping with %d endpoints\n", tssEndpointMap.size());
-			} else {
-				printf("no tss mapping\n");
-			}
-			queueModel.updateTss(tssEndpointMap);
+			
+			queueModel.removeOldTssEndpoints(clientInfo->get().id);
 		}
 		
 	}

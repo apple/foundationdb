@@ -1938,17 +1938,25 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 		isChanged = true;
 	}
 
+	// TODO remove debugging
+	printf("CC:\ntss_count=%d\ntss_storage_engine=%s\n", db->config.desiredTSSCount, db->config.testingStorageServerStoreType);
+
 	// Construct the client information
 	if (db->clientInfo->get().proxies != req.proxies) {
 		isChanged = true;
+		// TODO why construct a new one and not just copy the old one and change proxies + id?
 		ClientDBInfo clientInfo;
 		clientInfo.id = deterministicRandom()->randomUniqueID();
 		clientInfo.proxies = req.proxies;
 		clientInfo.clientTxnInfoSampleRate = db->clientInfo->get().clientTxnInfoSampleRate;
 		clientInfo.clientTxnInfoSizeLimit = db->clientInfo->get().clientTxnInfoSizeLimit;
+		clientInfo.tssMapping = db->clientInfo->get().tssMapping;
+		
 		db->clientInfo->set( clientInfo );
 		dbInfo.client = db->clientInfo->get();
 	}
+
+	// TODO might need to update dbInfo with tss count or some such thing
 
 	if( !dbInfo.logSystemConfig.isEqual(req.logSystemConfig) ) {
 		isChanged = true;
@@ -2502,6 +2510,108 @@ ACTOR Future<Void> monitorStorageCache(ClusterControllerData* self) {
 	}
 }
 
+ACTOR Future<Void> monitorTSSMapping(ClusterControllerData* self) {
+	loop {
+		state ReadYourWritesTransaction tr(self->db.db);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+
+				Standalone<RangeResultRef> tssResults = wait(tr.getRange(tssMappingKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT( !tssResults.more && tssResults.size() < CLIENT_KNOBS->TOO_MANY );
+
+				state std::unordered_map<UID, UID> tssIdMap;
+				std::set<UID> seenTssIds;
+
+				for (auto& it : tssResults) {
+					UID tssId = decodeTssMappingValue(it.value);
+					tssIdMap[decodeTssMappingKey(it.key)] = tssId;
+
+					// ensure two storage servers don't map to same TSS
+					ASSERT( seenTssIds.insert(tssId).second );
+				}
+
+				// TODO REMOVE print
+				printf("tss mapping of size %d\n", tssIdMap.size());
+
+				// TODO is copying storage server interfaces bad?
+				state std::vector<std::pair<UID, StorageServerInterface>> newMapping;
+				state std::map<UID, StorageServerInterface> oldMapping;
+				state bool mappingChanged = false;
+
+				state ClientDBInfo clientInfo = self->db.clientInfo->get();
+
+				for (auto& it : clientInfo.tssMapping) {
+					oldMapping[it.first] = it.second;
+					if (!tssIdMap.count(it.first)) {
+						// TODO add trace event
+						printf("tss mapping removed: %s=%s\n", it.first.toString().c_str(), it.second.id().toString().c_str());
+						mappingChanged = true;
+					}
+				}
+
+				for (auto& it : tssIdMap) {
+					bool requestAndAdd = false;
+					bool ssAlreadyPaired = oldMapping.count(it.first);
+
+					if (ssAlreadyPaired) {
+						auto interf = oldMapping[it.first];
+						// check if this SS maps to a new TSS
+						if (interf.id() == it.second) {
+							newMapping.push_back(std::pair<UID, StorageServerInterface>(it.first, interf));
+						} else {
+							// TODO add trace event
+							printf("tss mapping updated: %s=%s\n", it.first.toString().c_str(), it.second.toString().c_str());
+							requestAndAdd = true;
+						}
+					} else {
+						// TODO add trace event
+						printf("tss mapping added: %s=%s\n", it.first.toString().c_str(), it.second.toString().c_str());
+						requestAndAdd = true;
+					}
+
+					// TODO would it be more efficient to batch these into one getAll? it probably would
+					if (requestAndAdd) {
+						state UID ssid = it.first;
+						state UID tssid = it.second;
+						// request storage server interface for tssid, add it to results
+						Optional<Value> tssiVal = wait(tr.get(serverListKeyFor(it.second)));
+						if (tssiVal.present()) {
+							// TODO REMOVE print
+							printf("Successfully fetched ssi for tss %s\n", tssid.toString().c_str());
+							newMapping.push_back(std::pair<UID, StorageServerInterface>(ssid, decodeServerListValue(tssiVal.get())));
+						} else {
+							// TODO add trace event warning or maybe an assert if this should never happen
+							printf("storage server %s was in the tss mapping as a tss, but was not registered!!\n", tssid.toString().c_str());
+						}
+					}
+				}
+
+				// if nothing changed, skip updating
+				if (mappingChanged) {
+					clientInfo.id = deterministicRandom()->randomUniqueID();
+					clientInfo.tssMapping = newMapping;
+					self->db.clientInfo->set( clientInfo );
+				}
+
+				// TODO will this error if key doesn't exist? where do the change keys get created?
+				state Future<Void> tssChangeFuture = tr.watch(tssMappingChangeKey);
+
+				wait(tr.commit());
+				wait(tssChangeFuture);
+
+				break;
+			}
+			catch (Error &e) {
+				wait(tr.onError(e));		
+			}
+		}
+	}
+}
+
+
 ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db) {
 	loop {
 		state ReadYourWritesTransaction tr(db->db);
@@ -2952,6 +3062,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	self.addActor.send( monitorDataDistributor(&self) );
 	self.addActor.send( monitorRatekeeper(&self) );
 	self.addActor.send( monitorStorageCache(&self) );
+	self.addActor.send( monitorTSSMapping(&self) );
 	self.addActor.send( dbInfoUpdater(&self) );
 	self.addActor.send( traceCounters("ClusterControllerMetrics", self.id, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &self.clusterControllerMetrics, self.id.toString() + "/ClusterControllerMetrics") );
 	self.addActor.send( traceRole(Role::CLUSTER_CONTROLLER, interf.id()) );

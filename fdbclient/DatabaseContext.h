@@ -323,6 +323,9 @@ public:
 
 	static bool debugUseTags;
 	static const std::vector<std::string> debugTransactionTagChoices; 
+
+	// TODO should this be private?
+	void addTssMapping(StorageServerInterface ssi, StorageServerInterface tssi);
 };
 
 #endif
