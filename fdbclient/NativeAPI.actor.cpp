@@ -577,18 +577,22 @@ Reference<LocationInfo> addCaches(const Reference<LocationInfo>& loc,
 }
 
 ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, StorageServerInterface>* cacheServers) {
-	state Database db(self);
-	state ReadYourWritesTransaction tr(db);
+	state Transaction tr;
 	state Value trueValue = storageCacheValue(std::vector<uint16_t>{ 0 });
 	state Value falseValue = storageCacheValue(std::vector<uint16_t>{});
 	try {
 		loop {
+			// Need to make sure that we eventually destroy tr. We can't rely on getting cancelled to do this because of
+			// the cyclic reference to self.
+			tr = Transaction();
+			wait(delay(0)); // Give ourselves the chance to get cancelled if self was destroyed
 			wait(self->updateCache.onTrigger());
-			tr.reset();
+			tr = Transaction(Database(Reference<DatabaseContext>::addRef(self)));
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			try {
 				Standalone<RangeResultRef> range = wait(tr.getRange(storageCacheKeys, CLIENT_KNOBS->TOO_MANY));
+				tr = Transaction();
 				ASSERT(!range.more);
 				std::vector<Reference<ReferencedInterface<StorageServerInterface>>> cacheInterfaces;
 				cacheInterfaces.reserve(cacheServers->size());
@@ -649,9 +653,11 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 	}
 }
 
+// The reason for getting a pointer to DatabaseContext instead of a reference counted object is because reference
+// counting will increment reference count for DatabaseContext which holds the future of this actor. This creates a
+// cyclic reference and hence this actor and Database object will not be destroyed at all.
 ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
-	state Database db(self);
-	state Transaction tr(db);
+	state Transaction tr;
 	state std::map<UID, StorageServerInterface> cacheServerMap;
 	state Future<Void> updateRanges = updateCachedRanges(self, &cacheServerMap);
 	// if no caches are configured, we don't want to run this actor at all
@@ -659,10 +665,15 @@ ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
 	wait(self->updateCache.onTrigger());
 	try {
 		loop {
-			tr.reset();
+			// Need to make sure that we eventually destroy tr. We can't rely on getting cancelled to do this because of
+			// the cyclic reference to self.
+			tr = Transaction();
+			wait(delay(0)); // Give ourselves the chance to get cancelled if self was destroyed
+			tr = Transaction(Database(Reference<DatabaseContext>::addRef(self)));
 			try {
 				Standalone<RangeResultRef> cacheList =
 				    wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));
+				tr = Transaction();
 				ASSERT(!cacheList.more);
 				bool hasChanges = false;
 				std::map<UID, StorageServerInterface> allCacheServers;
