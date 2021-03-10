@@ -79,7 +79,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			self->impls.push_back(std::make_shared<SKSCTestImpl>(KeyRangeRef(startKey, endKey)));
 			// Although there are already ranges registered, the testing range will replace them
 			cx->specialKeySpace->registerKeyRange(SpecialKeySpace::MODULE::TESTONLY,
-			                                      SpecialKeySpace::IMPLTYPE::READWRITE, self->keys.back(),
+			                                      SpecialKeySpace::IMPLTYPE::READWRITE,
+			                                      self->keys.back(),
 			                                      self->impls.back().get());
 			// generate keys in each key range
 			int keysInRange = deterministicRandom()->randomInt(self->minKeysPerRange, self->maxKeysPerRange + 1);
@@ -95,9 +96,11 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		testRywLifetime(cx);
 		wait(timeout(self->testSpecialKeySpaceErrors(cx, self) && self->getRangeCallActor(cx, self) &&
 		                 testConflictRanges(cx, /*read*/ true, self) && testConflictRanges(cx, /*read*/ false, self),
-		             self->testDuration, Void()));
+		             self->testDuration,
+		             Void()));
 		// Only use one client to avoid potential conflicts on changing cluster configuration
-		if (self->clientId == 0) wait(self->managementApiCorrectnessActor(cx, self));
+		if (self->clientId == 0)
+			wait(self->managementApiCorrectnessActor(cx, self));
 		return Void();
 	}
 
@@ -288,7 +291,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			    CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_special_keys_cross_module_read);
 			tx->reset();
 		}
@@ -299,7 +303,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			    CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_special_keys_cross_module_read);
 			tx->reset();
 		}
@@ -310,7 +315,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			    CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_special_keys_cross_module_read);
 			tx->reset();
 		}
@@ -355,7 +361,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			                          CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_special_keys_no_module_found);
 			tx->reset();
 		}
@@ -366,7 +373,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			wait(success(tx->getRange(begin, end, CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_special_keys_no_module_found);
 			tx->reset();
 		}
@@ -397,7 +405,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		try {
 			tx->set(LiteralStringRef("\xff\xff/I_am_not_a_range_can_be_written"), ValueRef());
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_special_keys_write_disabled);
 			tx->reset();
 		}
@@ -407,7 +416,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			tx->set(LiteralStringRef("\xff\xff/I_am_not_a_range_can_be_written"), ValueRef());
 			ASSERT(false);
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_special_keys_no_write_module_found);
 			tx->reset();
 		}
@@ -418,7 +428,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			                      SpecialKeySpace::getManamentApiCommandRange("failed").end));
 			ASSERT(false);
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_special_keys_cross_module_clear);
 			tx->reset();
 		}
@@ -430,7 +441,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			    wait(tx->getRange(startKeySelector, endKeySelector, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_key_outside_legal_range);
 			tx->reset();
 		}
@@ -444,7 +456,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			if (result.size()) {
 				state KeyValueRef entry = deterministicRandom()->randomChoice(result);
 				Optional<Value> singleRes = wait(tx->get(entry.key));
-				if (singleRes.present()) ASSERT(singleRes.get() == entry.value);
+				if (singleRes.present())
+					ASSERT(singleRes.get() == entry.value);
 			}
 			tx->reset();
 		} catch (Error& e) {
@@ -507,7 +520,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			try {
 				wait(tx->commit());
 			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) throw;
+				if (e.code() == error_code_actor_cancelled)
+					throw;
 				return Void();
 			}
 			TEST(true); // Read write conflict range of committed transaction
@@ -516,7 +530,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			wait(success(tx->get(LiteralStringRef("\xff\xff/1314109/i_hope_this_isn't_registered"))));
 			ASSERT(false);
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_special_keys_no_module_found);
 		}
 		for (int i = 0; i < self->conflictRangeSizeFactor; ++i) {
@@ -526,7 +541,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			loop {
 				begin = firstGreaterOrEqual(deterministicRandom()->randomChoice(keys));
 				end = firstGreaterOrEqual(deterministicRandom()->randomChoice(keys));
-				if (begin.getKey() < end.getKey()) break;
+				if (begin.getKey() < end.getKey())
+					break;
 			}
 			bool reverse = deterministicRandom()->coinflip();
 
@@ -584,7 +600,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				had_error = true;
 				++self->wrongResults;
 			}
-			if (had_error) break;
+			if (had_error)
+				break;
 		}
 		return Void();
 	}
@@ -634,7 +651,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			wait(tx->commit());
 			ASSERT(false);
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			if (e.code() == error_code_special_keys_api_failure) {
 				Optional<Value> errorMsg =
 				    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
@@ -702,7 +720,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					TraceEvent(SevDebug, "EmptyWorkerListInSetClassTest");
 				}
 			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) throw;
+				if (e.code() == error_code_actor_cancelled)
+					throw;
 				if (e.code() == error_code_special_keys_api_failure) {
 					Optional<Value> errorMsg =
 					    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
@@ -768,7 +787,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					    .detail("Present", class_source.present())
 					    .detail("ClassSource", class_source.present() ? class_source.get().toString() : "__Nothing");
 					// Very rarely, we get an empty worker list, thus no class_source data
-					if (class_source.present()) ASSERT(class_source.get() == LiteralStringRef("set_class"));
+					if (class_source.present())
+						ASSERT(class_source.get() == LiteralStringRef("set_class"));
 					tx->reset();
 				} else {
 					// If no worker process returned, skip the test
@@ -814,7 +834,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			tx->reset();
 			Standalone<RangeResultRef> res = wait(tx->getRange(normalKeys, 1));
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_database_locked);
 		}
 		// make sure we unlock the database
@@ -896,8 +917,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				                     .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"))));
 				ASSERT(coordinator_processes_key.present());
 				std::vector<std::string> process_addresses;
-				boost::split(process_addresses, coordinator_processes_key.get().toString(),
-				             [](char c) { return c == ','; });
+				boost::split(
+				    process_addresses, coordinator_processes_key.get().toString(), [](char c) { return c == ','; });
 				ASSERT(process_addresses.size() == cs.coordinators().size());
 				// compare the coordinator process network addresses one by one
 				for (const auto& network_address : cs.coordinators()) {
@@ -927,8 +948,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					    wait(tx->get(LiteralStringRef("processes")
 					                     .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"))));
 					ASSERT(processes_key.present());
-					boost::split(old_coordinators_processes, processes_key.get().toString(),
-					             [](char c) { return c == ','; });
+					boost::split(
+					    old_coordinators_processes, processes_key.get().toString(), [](char c) { return c == ','; });
 					// pick up one non-coordinator process if possible
 					vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
 					TraceEvent(SevDebug, "CoordinatorsManualChange")
@@ -938,7 +959,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 						loop {
 							auto worker = deterministicRandom()->randomChoice(workers);
 							new_coordinator_process = worker.address.toString();
-							if (std::find(old_coordinators_processes.begin(), old_coordinators_processes.end(),
+							if (std::find(old_coordinators_processes.begin(),
+							              old_coordinators_processes.end(),
 							              worker.address.toString()) == old_coordinators_processes.end()) {
 								break;
 							}
@@ -1014,7 +1036,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					// verify the coordinators' addresses
 					for (const auto& network_address : cs.coordinators()) {
 						std::string address_str = network_address.toString();
-						ASSERT(std::find(old_coordinators_processes.begin(), old_coordinators_processes.end(),
+						ASSERT(std::find(old_coordinators_processes.begin(),
+						                 old_coordinators_processes.end(),
 						                 address_str) != old_coordinators_processes.end() ||
 						       new_coordinator_process == address_str);
 					}

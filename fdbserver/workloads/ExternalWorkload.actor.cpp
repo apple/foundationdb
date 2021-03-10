@@ -61,7 +61,8 @@ struct FDBLoggerImpl : FDBLogger {
 		static FDBLoggerImpl impl;
 		return &impl;
 	}
-	void trace(FDBSeverity sev, const std::string& name,
+	void trace(FDBSeverity sev,
+	           const std::string& name,
 	           const std::vector<std::pair<std::string, std::string>>& details) override {
 		auto traceFun = [=]() -> Future<Void> {
 			Severity severity;
@@ -95,7 +96,7 @@ struct FDBLoggerImpl : FDBLogger {
 			onMainThreadVoid(
 			    [traceFun]() -> Future<Void> {
 				    traceFun();
-					flushTraceFileVoid();
+				    flushTraceFileVoid();
 				    return Void();
 			    },
 			    nullptr);
@@ -238,7 +239,8 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 	}
 
 	// context implementation
-	void trace(FDBSeverity sev, const std::string& name,
+	void trace(FDBSeverity sev,
+	           const std::string& name,
 	           const std::vector<std::pair<std::string, std::string>>& details) override {
 		return FDBLoggerImpl::instance()->trace(sev, name, details);
 	}

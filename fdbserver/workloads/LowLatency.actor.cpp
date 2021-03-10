@@ -24,7 +24,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct LowLatencyWorkload : TestWorkload {
 	double testDuration;
@@ -37,12 +37,11 @@ struct LowLatencyWorkload : TestWorkload {
 	bool ok;
 
 	LowLatencyWorkload(WorkloadContext const& wcx)
-		: TestWorkload(wcx), operations("Operations"), retries("Retries") , ok(true)
-	{
-		testDuration = getOption( options, LiteralStringRef("testDuration"), 600.0 );
+	  : TestWorkload(wcx), operations("Operations"), retries("Retries"), ok(true) {
+		testDuration = getOption(options, LiteralStringRef("testDuration"), 600.0);
 		maxGRVLatency = getOption(options, LiteralStringRef("maxGRVLatency"), 20.0);
 		maxCommitLatency = getOption(options, LiteralStringRef("maxCommitLatency"), 30.0);
-		checkDelay = getOption( options, LiteralStringRef("checkDelay"), 1.0 );
+		checkDelay = getOption(options, LiteralStringRef("checkDelay"), 1.0);
 		testWrites = getOption(options, LiteralStringRef("testWrites"), true);
 		testKey = getOption(options, LiteralStringRef("testKey"), LiteralStringRef("testKey"));
 	}
@@ -58,17 +57,17 @@ struct LowLatencyWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		if( clientId == 0 )
-			return _start( cx, this );
+		if (clientId == 0)
+			return _start(cx, this);
 		return Void();
 	}
 
-	ACTOR static Future<Void> _start( Database cx, LowLatencyWorkload* self ) {
+	ACTOR static Future<Void> _start(Database cx, LowLatencyWorkload* self) {
 		state double testStart = now();
 		try {
 			loop {
-				wait( delay( self->checkDelay ) );
-				state Transaction tr( cx );
+				wait(delay(self->checkDelay));
+				state Transaction tr(cx);
 				state double operationStart = now();
 				state bool doCommit = self->testWrites && deterministicRandom()->coinflip();
 				state double maxLatency = doCommit ? self->maxCommitLatency : self->maxGRVLatency;
@@ -84,8 +83,8 @@ struct LowLatencyWorkload : TestWorkload {
 							wait(success(tr.getReadVersion()));
 						}
 						break;
-					} catch( Error &e ) {
-						wait( tr.onError(e) );
+					} catch (Error& e) {
+						wait(tr.onError(e));
 						++self->retries;
 					}
 				}
@@ -96,12 +95,12 @@ struct LowLatencyWorkload : TestWorkload {
 					    .detail("IsCommit", doCommit);
 					self->ok = false;
 				}
-				if( now() - testStart > self->testDuration )
+				if (now() - testStart > self->testDuration)
 					break;
 			}
 			return Void();
-		} catch( Error &e ) {
-			TraceEvent(SevError, "LowLatencyError").error(e,true);
+		} catch (Error& e) {
+			TraceEvent(SevError, "LowLatencyError").error(e, true);
 			throw;
 		}
 	}
@@ -110,9 +109,9 @@ struct LowLatencyWorkload : TestWorkload {
 
 	void getMetrics(vector<PerfMetric>& m) override {
 		double duration = testDuration;
-		m.push_back( PerfMetric( "Operations/sec", operations.getValue() / duration, false ) );
-		m.push_back( operations.getMetric() );
-		m.push_back( retries.getMetric() );
+		m.push_back(PerfMetric("Operations/sec", operations.getValue() / duration, false));
+		m.push_back(operations.getMetric());
+		m.push_back(retries.getMetric());
 	}
 };
 

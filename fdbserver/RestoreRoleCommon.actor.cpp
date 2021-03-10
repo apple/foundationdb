@@ -181,7 +181,10 @@ ACTOR Future<Void> traceRoleVersionBatchProgress(Reference<RestoreRoleData> self
 		int maxPrintBatchIndex = batchIndex + SERVER_KNOBS->FASTRESTORE_VB_PARALLELISM;
 
 		TraceEvent ev("FastRestoreVersionBatchProgressState", self->nodeID);
-		ev.detail("Role", role).detail("Node", self->nodeID).detail("FinishedBatch", batchIndex).detail("InitializedBatch", maxBatchIndex);
+		ev.detail("Role", role)
+		    .detail("Node", self->nodeID)
+		    .detail("FinishedBatch", batchIndex)
+		    .detail("InitializedBatch", maxBatchIndex);
 		while (batchIndex <= maxBatchIndex) {
 			if (batchIndex > maxPrintBatchIndex) {
 				ev.detail("SkipVersionBatches", maxBatchIndex - batchIndex + 1);
@@ -201,7 +204,8 @@ ACTOR Future<Void> traceRoleVersionBatchProgress(Reference<RestoreRoleData> self
 std::string getHexString(StringRef input) {
 	std::stringstream ss;
 	for (int i = 0; i < input.size(); i++) {
-		if (i % 4 == 0) ss << " ";
+		if (i % 4 == 0)
+			ss << " ";
 		if (i == 12) { // The end of 12bytes, which is the version size for value
 			ss << "|";
 		}

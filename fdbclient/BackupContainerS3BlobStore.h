@@ -41,7 +41,8 @@ class BackupContainerS3BlobStore final : public BackupContainerFileSystem,
 	friend class BackupContainerS3BlobStoreImpl;
 
 public:
-	BackupContainerS3BlobStore(Reference<S3BlobStoreEndpoint> bstore, const std::string& name,
+	BackupContainerS3BlobStore(Reference<S3BlobStoreEndpoint> bstore,
+	                           const std::string& name,
 	                           const S3BlobStoreEndpoint::ParametersT& params);
 
 	void addref() override;

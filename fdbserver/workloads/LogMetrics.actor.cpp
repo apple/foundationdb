@@ -28,40 +28,38 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct LogMetricsWorkload : TestWorkload {
 	std::string dataFolder;
 	double logAt, logDuration, logsPerSecond;
 
-	LogMetricsWorkload( WorkloadContext const& wcx )
-		: TestWorkload(wcx)
-	{
-		logAt = getOption( options, LiteralStringRef("logAt"), 0.0 );
-		logDuration = getOption( options, LiteralStringRef("logDuration"), 30.0 );
-		logsPerSecond = getOption( options, LiteralStringRef("logsPerSecond"), 20 );
-		dataFolder = getOption( options, LiteralStringRef("dataFolder"), LiteralStringRef("") ).toString();
+	LogMetricsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+		logAt = getOption(options, LiteralStringRef("logAt"), 0.0);
+		logDuration = getOption(options, LiteralStringRef("logDuration"), 30.0);
+		logsPerSecond = getOption(options, LiteralStringRef("logsPerSecond"), 20);
+		dataFolder = getOption(options, LiteralStringRef("dataFolder"), LiteralStringRef("")).toString();
 	}
 
 	std::string description() const override { return "LogMetricsWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
-		if(clientId)
+		if (clientId)
 			return Void();
-		return _start( cx, this );
+		return _start(cx, this);
 	}
 
-	ACTOR Future<Void> setSystemRate( LogMetricsWorkload *self, Database cx, uint32_t rate ) {
+	ACTOR Future<Void> setSystemRate(LogMetricsWorkload* self, Database cx, uint32_t rate) {
 		// set worker interval and ss interval
 		state BinaryWriter br(Unversioned());
-		vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
-		//vector<Future<Void>> replies;
+		vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
+		// vector<Future<Void>> replies;
 		TraceEvent("RateChangeTrigger");
 		SetMetricsLogRateRequest req(rate);
-		for(int i = 0; i < workers.size(); i++) {
-			workers[i].interf.setMetricsRate.send( req );
+		for (int i = 0; i < workers.size(); i++) {
+			workers[i].interf.setMetricsRate.send(req);
 		}
-		//wait( waitForAll( replies ) );
+		// wait( waitForAll( replies ) );
 
 		br << rate;
 		loop {
@@ -70,24 +68,24 @@ struct LogMetricsWorkload : TestWorkload {
 				wait(success(tr.getReadVersion()));
 				tr.set(fastLoggingEnabled, br.toValue());
 				tr.makeSelfConflicting();
-				wait( tr.commit() );
+				wait(tr.commit());
 				break;
-			} catch(Error& e) {
-				wait( tr.onError(e) );
+			} catch (Error& e) {
+				wait(tr.onError(e));
 			}
 		}
 
 		return Void();
 	}
 
-	ACTOR Future<Void> _start( Database cx, LogMetricsWorkload *self ) {
-		wait( delay( self->logAt ) );
+	ACTOR Future<Void> _start(Database cx, LogMetricsWorkload* self) {
+		wait(delay(self->logAt));
 
-		wait( self->setSystemRate( self, cx, self->logsPerSecond ) );
-		wait( timeout( recurring( &systemMonitor, 1.0 / self->logsPerSecond ), self->logDuration, Void() ) );
+		wait(self->setSystemRate(self, cx, self->logsPerSecond));
+		wait(timeout(recurring(&systemMonitor, 1.0 / self->logsPerSecond), self->logDuration, Void()));
 
 		// We're done, set everything back
-		wait( self->setSystemRate( self, cx, 1.0 ) );
+		wait(self->setSystemRate(self, cx, 1.0));
 
 		return Void();
 	}
