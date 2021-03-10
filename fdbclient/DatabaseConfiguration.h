@@ -203,6 +203,10 @@ struct DatabaseConfiguration {
 	int32_t storageTeamSize;
 	KeyValueStoreType storageServerStoreType;
 
+	// Testing StorageServers
+	int32_t desiredTSSCount;
+	KeyValueStoreType testingStorageServerStoreType;
+
 	// Remote TLogs
 	int32_t desiredLogRouterCount;
 	int32_t remoteDesiredTLogCount;

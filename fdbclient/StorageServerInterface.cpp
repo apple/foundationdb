@@ -30,7 +30,7 @@ bool TSSComparison::tssCompare(GetValueReply src, GetValueReply tss) {
 		printf("GetValue mismatch: src=%s, tss=%s\n", src.value.present() ? src.value.get().toString().c_str() : "missing", tss.value.present() ? tss.value.get().toString().c_str() : "missing");
 		return false;
 	}
-    // printf("tss GetValueReply matched!\n");
+    printf("tss GetValueReply matched!\n");
 	return true;
 }
 
@@ -41,7 +41,7 @@ bool TSSComparison::tssCompare(GetKeyReply src, GetKeyReply tss) {
         printf("GetKey mismatch\n");
 		return false;
 	}
-    // printf("tss GetKeyReply matched!\n");
+    printf("tss GetKeyReply matched!\n");
 	return true;
 }
 
@@ -52,7 +52,7 @@ bool TSSComparison::tssCompare(GetKeyValuesReply src, GetKeyValuesReply tss) {
         printf("GetKeyValues mismatch\n");
 		return false;
 	}
-    // printf("tss GetKeyValues matched!\n");
+    printf("tss GetKeyValues matched!\n");
 	return true;
 }
 
