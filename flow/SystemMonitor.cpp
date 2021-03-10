@@ -39,23 +39,32 @@ void initializeSystemMonitorMachineState(SystemMonitorMachineState machineState)
 
 void systemMonitor() {
 	static StatisticsState statState = StatisticsState();
-	customSystemMonitor("ProcessMetrics", &statState, true );
+	customSystemMonitor("ProcessMetrics", &statState, true);
 }
 
 SystemStatistics getSystemStatistics() {
 	static StatisticsState statState = StatisticsState();
 	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
 	return getSystemStatistics(
-		machineState.folder.present() ? machineState.folder.get() : "", &ipAddr, &statState.systemState, false);
+	    machineState.folder.present() ? machineState.folder.get() : "", &ipAddr, &statState.systemState, false);
 }
 
-#define TRACEALLOCATOR( size ) TraceEvent("MemSample").detail("Count", FastAllocator<size>::getApproximateMemoryUnused()/size).detail("TotalSize", FastAllocator<size>::getApproximateMemoryUnused()).detail("SampleCount", 1).detail("Hash", "FastAllocatedUnused" #size ).detail("Bt", "na")
-#define DETAILALLOCATORMEMUSAGE( size ) detail("TotalMemory"#size, FastAllocator<size>::getTotalMemory()).detail("ApproximateUnusedMemory"#size, FastAllocator<size>::getApproximateMemoryUnused()).detail("ActiveThreads"#size, FastAllocator<size>::getActiveThreads())
+#define TRACEALLOCATOR(size)                                                                                           \
+	TraceEvent("MemSample")                                                                                            \
+	    .detail("Count", FastAllocator<size>::getApproximateMemoryUnused() / size)                                     \
+	    .detail("TotalSize", FastAllocator<size>::getApproximateMemoryUnused())                                        \
+	    .detail("SampleCount", 1)                                                                                      \
+	    .detail("Hash", "FastAllocatedUnused" #size)                                                                   \
+	    .detail("Bt", "na")
+#define DETAILALLOCATORMEMUSAGE(size)                                                                                  \
+	detail("TotalMemory" #size, FastAllocator<size>::getTotalMemory())                                                 \
+	    .detail("ApproximateUnusedMemory" #size, FastAllocator<size>::getApproximateMemoryUnused())                    \
+	    .detail("ActiveThreads" #size, FastAllocator<size>::getActiveThreads())
 
-SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *statState, bool machineMetrics) {
+SystemStatistics customSystemMonitor(std::string eventName, StatisticsState* statState, bool machineMetrics) {
 	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
-	SystemStatistics currentStats = getSystemStatistics(machineState.folder.present() ? machineState.folder.get() : "",
-	                                                    &ipAddr, &statState->systemState, true);
+	SystemStatistics currentStats = getSystemStatistics(
+	    machineState.folder.present() ? machineState.folder.get() : "", &ipAddr, &statState->systemState, true);
 	NetworkData netData;
 	netData.init();
 	if (!DEBUG_DETERMINISM && currentStats.initialized) {
@@ -105,14 +114,17 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 			    .detail("MachineID", machineState.machineId)
 			    .detail("AIOSubmitCount", netData.countAIOSubmit - statState->networkState.countAIOSubmit)
 			    .detail("AIOCollectCount", netData.countAIOCollect - statState->networkState.countAIOCollect)
-			    .detail("AIOSubmitLag", (g_network->networkInfo.metrics.secSquaredSubmit -
-			                             statState->networkMetricsState.secSquaredSubmit) /
-			                                currentStats.elapsed)
-			    .detail("AIODiskStall", (g_network->networkInfo.metrics.secSquaredDiskStall -
-			                             statState->networkMetricsState.secSquaredDiskStall) /
-			                                currentStats.elapsed)
-			    .detail("CurrentConnections", netData.countConnEstablished - netData.countConnClosedWithError -
-			                                      netData.countConnClosedWithoutError)
+			    .detail("AIOSubmitLag",
+			            (g_network->networkInfo.metrics.secSquaredSubmit -
+			             statState->networkMetricsState.secSquaredSubmit) /
+			                currentStats.elapsed)
+			    .detail("AIODiskStall",
+			            (g_network->networkInfo.metrics.secSquaredDiskStall -
+			             statState->networkMetricsState.secSquaredDiskStall) /
+			                currentStats.elapsed)
+			    .detail("CurrentConnections",
+			            netData.countConnEstablished - netData.countConnClosedWithError -
+			                netData.countConnClosedWithoutError)
 			    .detail("ConnectionsEstablished",
 			            (double)(netData.countConnEstablished - statState->networkState.countConnEstablished) /
 			                currentStats.elapsed)
@@ -172,21 +184,31 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 			    .detail("ZoneID", machineState.zoneId)
 			    .detail("MachineID", machineState.machineId);
 
-			for (int i = 0; i<NetworkMetrics::SLOW_EVENT_BINS; i++) {
-				if (int c = g_network->networkInfo.metrics.countSlowEvents[i] - statState->networkMetricsState.countSlowEvents[i]) {
+			for (int i = 0; i < NetworkMetrics::SLOW_EVENT_BINS; i++) {
+				if (int c = g_network->networkInfo.metrics.countSlowEvents[i] -
+				            statState->networkMetricsState.countSlowEvents[i]) {
 					n.detail(format("SlowTask%dM", 1 << i).c_str(), c);
 				}
 			}
 
-			for (int i = 0; i < NetworkMetrics::PRIORITY_BINS && g_network->networkInfo.metrics.priorityBins[i] != TaskPriority::Zero; i++) {
-				if(g_network->networkInfo.metrics.priorityBlocked[i]) {
-					g_network->networkInfo.metrics.priorityBlockedDuration[i] += now() - g_network->networkInfo.metrics.windowedPriorityTimer[i];
-					g_network->networkInfo.metrics.priorityMaxBlockedDuration[i] = std::max(g_network->networkInfo.metrics.priorityMaxBlockedDuration[i], now() - g_network->networkInfo.metrics.priorityTimer[i]);
+			for (int i = 0; i < NetworkMetrics::PRIORITY_BINS &&
+			                g_network->networkInfo.metrics.priorityBins[i] != TaskPriority::Zero;
+			     i++) {
+				if (g_network->networkInfo.metrics.priorityBlocked[i]) {
+					g_network->networkInfo.metrics.priorityBlockedDuration[i] +=
+					    now() - g_network->networkInfo.metrics.windowedPriorityTimer[i];
+					g_network->networkInfo.metrics.priorityMaxBlockedDuration[i] =
+					    std::max(g_network->networkInfo.metrics.priorityMaxBlockedDuration[i],
+					             now() - g_network->networkInfo.metrics.priorityTimer[i]);
 					g_network->networkInfo.metrics.windowedPriorityTimer[i] = now();
 				}
 
-				n.detail(format("PriorityBusy%d", g_network->networkInfo.metrics.priorityBins[i]).c_str(), std::min(currentStats.elapsed, g_network->networkInfo.metrics.priorityBlockedDuration[i] - statState->networkMetricsState.priorityBlockedDuration[i]));
-				n.detail(format("PriorityMaxBusy%d", g_network->networkInfo.metrics.priorityBins[i]).c_str(), g_network->networkInfo.metrics.priorityMaxBlockedDuration[i]);
+				n.detail(format("PriorityBusy%d", g_network->networkInfo.metrics.priorityBins[i]).c_str(),
+				         std::min(currentStats.elapsed,
+				                  g_network->networkInfo.metrics.priorityBlockedDuration[i] -
+				                      statState->networkMetricsState.priorityBlockedDuration[i]));
+				n.detail(format("PriorityMaxBusy%d", g_network->networkInfo.metrics.priorityBins[i]).c_str(),
+				         g_network->networkInfo.metrics.priorityMaxBlockedDuration[i]);
 
 				g_network->networkInfo.metrics.priorityMaxBlockedDuration[i] = 0;
 			}
@@ -194,7 +216,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 			n.trackLatest("NetworkMetrics");
 		}
 
-		if(machineMetrics) {
+		if (machineMetrics) {
 			TraceEvent("MachineMetrics")
 			    .detail("Elapsed", currentStats.elapsed)
 			    .detail("MbpsSent", currentStats.machineMegabitsSent / currentStats.elapsed)
@@ -215,14 +237,15 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 #ifdef ALLOC_INSTRUMENTATION
 	{
 		static double firstTime = 0.0;
-		if(firstTime == 0.0) firstTime = now();
-		if( now() - firstTime > 10 || g_network->isSimulated() ) {
+		if (firstTime == 0.0)
 			firstTime = now();
-			std::vector< std::pair<std::string, const char*> > typeNames;
-			for( auto i = allocInstr.begin(); i != allocInstr.end(); ++i ) {
+		if (now() - firstTime > 10 || g_network->isSimulated()) {
+			firstTime = now();
+			std::vector<std::pair<std::string, const char*>> typeNames;
+			for (auto i = allocInstr.begin(); i != allocInstr.end(); ++i) {
 				std::string s;
 #ifdef __linux__
-				char *demangled = abi::__cxa_demangle(i->first, NULL, NULL, NULL);
+				char* demangled = abi::__cxa_demangle(i->first, NULL, NULL, NULL);
 				if (demangled) {
 					s = demangled;
 					if (StringRef(s).startsWith(LiteralStringRef("(anonymous namespace)::")))
@@ -239,15 +262,16 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				else if (StringRef(s).startsWith(LiteralStringRef("struct ")))
 					s = s.substr(LiteralStringRef("struct ").size());
 #endif
-				typeNames.push_back( std::make_pair(s, i->first) );
+				typeNames.push_back(std::make_pair(s, i->first));
 			}
 			std::sort(typeNames.begin(), typeNames.end());
-			for(int i=0; i<typeNames.size(); i++) {
+			for (int i = 0; i < typeNames.size(); i++) {
 				const char* n = typeNames[i].second;
 				auto& f = allocInstr[n];
-				if(f.maxAllocated > 10000)
-					TraceEvent("AllocInstrument").detail("CurrentAlloc", f.allocCount-f.deallocCount)
-						.detail("Name", typeNames[i].first.c_str());
+				if (f.maxAllocated > 10000)
+					TraceEvent("AllocInstrument")
+					    .detail("CurrentAlloc", f.allocCount - f.deallocCount)
+					    .detail("Name", typeNames[i].first.c_str());
 			}
 
 			std::unordered_map<uint32_t, BackTraceAccount> traceCounts;
@@ -262,9 +286,9 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 
 			uint64_t totalSize = 0;
 			uint64_t totalCount = 0;
-			for( auto i = traceCounts.begin(); i != traceCounts.end(); ++i ) {
+			for (auto i = traceCounts.begin(); i != traceCounts.end(); ++i) {
 				char buf[1024];
-				std::vector<void *> *frames = i->second.backTrace;
+				std::vector<void*>* frames = i->second.backTrace;
 				std::string backTraceStr;
 #if defined(_WIN32)
 				for (int j = 1; j < frames->size(); j++) {
@@ -276,36 +300,36 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 #endif
 
 				TraceEvent("MemSample")
-					.detail("Count", (int64_t)i->second.count)
-					.detail("TotalSize", i->second.totalSize)
-					.detail("SampleCount", i->second.sampleCount)
-					.detail("Hash", format("%lld", i->first))
-					.detail("Bt", backTraceStr);
+				    .detail("Count", (int64_t)i->second.count)
+				    .detail("TotalSize", i->second.totalSize)
+				    .detail("SampleCount", i->second.sampleCount)
+				    .detail("Hash", format("%lld", i->first))
+				    .detail("Bt", backTraceStr);
 
 				totalSize += i->second.totalSize;
 				totalCount += i->second.count;
 			}
 
 			TraceEvent("MemSampleSummary")
-				.detail("InverseByteSampleRatio", SAMPLE_BYTES)
-				.detail("MemorySamples", memSampleSize)
-				.detail("BackTraces", traceCounts.size())
-				.detail("TotalSize", totalSize)
-				.detail("TotalCount", totalCount);
+			    .detail("InverseByteSampleRatio", SAMPLE_BYTES)
+			    .detail("MemorySamples", memSampleSize)
+			    .detail("BackTraces", traceCounts.size())
+			    .detail("TotalSize", totalSize)
+			    .detail("TotalCount", totalCount);
 
 			TraceEvent("MemSample")
-				.detail("Count", traceCounts.size())
-				.detail("TotalSize", traceCounts.size() * ((int)(sizeof(uint32_t) + sizeof(size_t) + sizeof(size_t))))
-				.detail("SampleCount", traceCounts.size())
-				.detail("Hash", "backTraces")
-				.detail("Bt", "na");
+			    .detail("Count", traceCounts.size())
+			    .detail("TotalSize", traceCounts.size() * ((int)(sizeof(uint32_t) + sizeof(size_t) + sizeof(size_t))))
+			    .detail("SampleCount", traceCounts.size())
+			    .detail("Hash", "backTraces")
+			    .detail("Bt", "na");
 
 			TraceEvent("MemSample")
-				.detail("Count", memSampleSize)
-				.detail("TotalSize", memSampleSize * ((int)(sizeof(void*) + sizeof(uint32_t) + sizeof(size_t))))
-				.detail("SampleCount", memSampleSize)
-				.detail("Hash", "memSamples")
-				.detail("Bt", "na");
+			    .detail("Count", memSampleSize)
+			    .detail("TotalSize", memSampleSize * ((int)(sizeof(void*) + sizeof(uint32_t) + sizeof(size_t))))
+			    .detail("SampleCount", memSampleSize)
+			    .detail("Hash", "memSamples")
+			    .detail("Bt", "na");
 			TRACEALLOCATOR(16);
 			TRACEALLOCATOR(32);
 			TRACEALLOCATOR(64);

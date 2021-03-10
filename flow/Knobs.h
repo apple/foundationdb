@@ -30,15 +30,16 @@
 
 class Knobs {
 public:
-	bool setKnob( std::string const& name, std::string const& value ); // Returns true if the knob name is known, false if it is unknown
+	bool setKnob(std::string const& name,
+	             std::string const& value); // Returns true if the knob name is known, false if it is unknown
 	void trace();
 
 protected:
-	void initKnob( double& knob, double value, std::string const& name );
-	void initKnob( int64_t& knob, int64_t value, std::string const& name );
-	void initKnob( int& knob, int value, std::string const& name );
-	void initKnob( std::string& knob, const std::string& value, const std::string& name );
-	void initKnob( bool& knob, bool value, std::string const& name );
+	void initKnob(double& knob, double value, std::string const& name);
+	void initKnob(int64_t& knob, int64_t value, std::string const& name);
+	void initKnob(int& knob, int value, std::string const& name);
+	void initKnob(std::string& knob, const std::string& value, const std::string& name);
+	void initKnob(bool& knob, bool value, std::string const& name);
 
 	std::map<std::string, double*> double_knobs;
 	std::map<std::string, int64_t*> int64_knobs;
@@ -67,19 +68,19 @@ public:
 	double HUGE_ARENA_LOGGING_BYTES;
 	double HUGE_ARENA_LOGGING_INTERVAL;
 
-	//slow task profiling
+	// slow task profiling
 	double SLOWTASK_PROFILING_INTERVAL;
 	double SLOWTASK_PROFILING_MAX_LOG_INTERVAL;
 	double SLOWTASK_PROFILING_LOG_BACKOFF;
 
-	//connectionMonitor
+	// connectionMonitor
 	double CONNECTION_MONITOR_LOOP_TIME;
 	double CONNECTION_MONITOR_TIMEOUT;
 	double CONNECTION_MONITOR_IDLE_TIMEOUT;
 	double CONNECTION_MONITOR_INCOMING_IDLE_MULTIPLIER;
 	double CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY;
 
-	//FlowTransport
+	// FlowTransport
 	double CONNECTION_REJECTED_MESSAGE_DELAY;
 	double CONNECTION_ID_TIMEOUT;
 	double CONNECTION_CLEANUP_DELAY;
@@ -99,8 +100,8 @@ public:
 	double TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT;
 	int TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS;
 	int TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS;
-	
-	//AsyncFileCached
+
+	// AsyncFileCached
 	int64_t PAGE_CACHE_4K;
 	int64_t PAGE_CACHE_64K;
 	int64_t SIM_PAGE_CACHE_4K;
@@ -114,30 +115,30 @@ public:
 	int TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT;
 	int FLOW_CACHEDFILE_WRITE_IO_SIZE;
 
-	//AsyncFileEIO
+	// AsyncFileEIO
 	int EIO_MAX_PARALLELISM;
 	int EIO_USE_ODIRECT;
 
-	//AsyncFileKAIO
+	// AsyncFileKAIO
 	int MAX_OUTSTANDING;
 	int MIN_SUBMIT;
 
 	int PAGE_WRITE_CHECKSUM_HISTORY;
 	int DISABLE_POSIX_KERNEL_AIO;
 
-	//AsyncFileNonDurable
+	// AsyncFileNonDurable
 	double MAX_PRIOR_MODIFICATION_DELAY;
 
-	//GenericActors
+	// GenericActors
 	double BUGGIFY_FLOW_LOCK_RELEASE_DELAY;
 	int LOW_PRIORITY_DELAY_COUNT;
 	double LOW_PRIORITY_MAX_DELAY;
 
-	//IAsyncFile
+	// IAsyncFile
 	int64_t INCREMENTAL_DELETE_TRUNCATE_AMOUNT;
 	double INCREMENTAL_DELETE_INTERVAL;
 
-	//Net2
+	// Net2
 	double MIN_COALESCE_DELAY;
 	double MAX_COALESCE_DELAY;
 	double SLOW_LOOP_CUTOFF;
@@ -147,9 +148,9 @@ public:
 	int CERT_FILE_MAX_SIZE;
 	int READY_QUEUE_RESERVED_SIZE;
 
-	//Network
+	// Network
 	int64_t PACKET_LIMIT;
-	int64_t PACKET_WARNING;  // 2MB packet warning quietly allows for 1MB system messages
+	int64_t PACKET_WARNING; // 2MB packet warning quietly allows for 1MB system messages
 	double TIME_OFFSET_LOGGING_INTERVAL;
 	int MAX_PACKET_SEND_BYTES;
 	int MIN_PACKET_BUFFER_BYTES;
@@ -157,8 +158,8 @@ public:
 	int UNRESTRICTED_HANDSHAKE_LIMIT;
 	int BOUNDED_HANDSHAKE_LIMIT;
 
-	//Sim2
-	//FIMXE: more parameters could be factored out
+	// Sim2
+	// FIMXE: more parameters could be factored out
 	double MIN_OPEN_TIME;
 	double MAX_OPEN_TIME;
 	int64_t SIM_DISK_IOPS;
@@ -170,7 +171,7 @@ public:
 	double MAX_BUGGIFIED_DELAY;
 	int SIM_CONNECT_ERROR_MODE;
 
-	//Tracefiles
+	// Tracefiles
 	int ZERO_LENGTH_FILE_PAD;
 	double TRACE_FLUSH_INTERVAL;
 	double TRACE_RETRY_OPEN_INTERVAL;
@@ -185,7 +186,7 @@ public:
 	int MAX_TRACE_EVENT_LENGTH;
 	bool ALLOCATION_TRACING_ENABLED;
 
-	//TDMetrics
+	// TDMetrics
 	int64_t MAX_METRIC_SIZE;
 	int64_t MAX_METRIC_LEVEL;
 	double METRIC_LEVEL_DIVISOR;
@@ -193,7 +194,7 @@ public:
 	int METRIC_LIMIT_RESPONSE_FACTOR;
 	int MAX_METRICS;
 
-	//Load Balancing
+	// Load Balancing
 	int LOAD_BALANCE_ZONE_ID_LOCALITY_ENABLED;
 	int LOAD_BALANCE_DC_ID_LOCALITY_ENABLED;
 	double LOAD_BALANCE_MAX_BACKOFF;

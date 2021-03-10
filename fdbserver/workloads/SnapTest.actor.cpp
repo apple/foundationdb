@@ -35,7 +35,10 @@ void getTagAndDurableVersion(TraceEventFields md, Version version, Tag& tag, Ver
 	durableVersion = boost::lexical_cast<int64_t>(md.getValue("DurableVersion"));
 }
 
-void getMinAndMaxTLogVersions(TraceEventFields md, Version version, Tag tag, Version& minTLogVersion,
+void getMinAndMaxTLogVersions(TraceEventFields md,
+                              Version version,
+                              Tag tag,
+                              Version& minTLogVersion,
                               Version& maxTLogVersion) {
 	Version verifyVersion;
 	Tag verifyTag;
@@ -56,12 +59,12 @@ void getMinAndMaxTLogVersions(TraceEventFields md, Version version, Tag tag, Ver
 }
 
 void filterEmptyMessages(std::vector<Future<TraceEventFields>>& messages) {
-	messages.erase(std::remove_if(messages.begin(), messages.end(),
-								  [](Future<TraceEventFields>const & msgFuture)
-								  {
-									  return !msgFuture.isReady() || msgFuture.get().size() == 0;
-								  }
-					   ), messages.end());
+	messages.erase(std::remove_if(messages.begin(),
+	                              messages.end(),
+	                              [](Future<TraceEventFields> const& msgFuture) {
+		                              return !msgFuture.isReady() || msgFuture.get().size() == 0;
+	                              }),
+	               messages.end());
 	return;
 }
 
@@ -122,7 +125,8 @@ public: // workload functions
 		// read the key SnapFailedTLog.$UID
 		loop {
 			try {
-				Standalone<StringRef> keyStr = LiteralStringRef("\xff/SnapTestFailStatus/").withSuffix(StringRef(self->snapUID.toString()));
+				Standalone<StringRef> keyStr =
+				    LiteralStringRef("\xff/SnapTestFailStatus/").withSuffix(StringRef(self->snapUID.toString()));
 				TraceEvent("TestKeyStr").detail("Value", keyStr);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				Optional<Value> val = wait(tr.get(keyStr));
@@ -131,7 +135,7 @@ public: // workload functions
 				}
 				// wait for the key to be written out by TLogs
 				wait(delay(0.1));
-			} catch (Error &e) {
+			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
 		}
@@ -299,7 +303,7 @@ public: // workload functions
 					break;
 				} catch (Error& e) {
 					if (e.code() == error_code_snap_not_fully_recovered_unsupported ||
-						e.code() == error_code_snap_log_anti_quorum_unsupported) {
+					    e.code() == error_code_snap_log_anti_quorum_unsupported) {
 						snapFailed = true;
 						break;
 					}

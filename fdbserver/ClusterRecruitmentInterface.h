@@ -33,43 +33,39 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/Knobs.h"
 
-// This interface and its serialization depend on slicing, since the client will deserialize only the first part of this structure
+// This interface and its serialization depend on slicing, since the client will deserialize only the first part of this
+// structure
 struct ClusterControllerFullInterface {
-    constexpr static FileIdentifier file_identifier =
-        ClusterControllerClientInterface::file_identifier;
+	constexpr static FileIdentifier file_identifier = ClusterControllerClientInterface::file_identifier;
 	ClusterInterface clientInterface;
-	RequestStream< struct RecruitFromConfigurationRequest > recruitFromConfiguration;
-	RequestStream< struct RecruitRemoteFromConfigurationRequest > recruitRemoteFromConfiguration;
-	RequestStream< struct RecruitStorageRequest > recruitStorage;
-	RequestStream< struct RegisterWorkerRequest > registerWorker;
-	RequestStream< struct GetWorkersRequest > getWorkers;
-	RequestStream< struct RegisterMasterRequest > registerMaster;
-	RequestStream< struct GetServerDBInfoRequest > getServerDBInfo;
+	RequestStream<struct RecruitFromConfigurationRequest> recruitFromConfiguration;
+	RequestStream<struct RecruitRemoteFromConfigurationRequest> recruitRemoteFromConfiguration;
+	RequestStream<struct RecruitStorageRequest> recruitStorage;
+	RequestStream<struct RegisterWorkerRequest> registerWorker;
+	RequestStream<struct GetWorkersRequest> getWorkers;
+	RequestStream<struct RegisterMasterRequest> registerMaster;
+	RequestStream<struct GetServerDBInfoRequest> getServerDBInfo;
 
 	UID id() const { return clientInterface.id(); }
-	bool operator == (ClusterControllerFullInterface const& r) const { return id() == r.id(); }
-	bool operator != (ClusterControllerFullInterface const& r) const { return id() != r.id(); }
+	bool operator==(ClusterControllerFullInterface const& r) const { return id() == r.id(); }
+	bool operator!=(ClusterControllerFullInterface const& r) const { return id() != r.id(); }
 
 	bool hasMessage() {
-		return clientInterface.hasMessage() ||
-				recruitFromConfiguration.getFuture().isReady() ||
-				recruitRemoteFromConfiguration.getFuture().isReady() ||
-				recruitStorage.getFuture().isReady() ||
-				registerWorker.getFuture().isReady() || 
-				getWorkers.getFuture().isReady() || 
-				registerMaster.getFuture().isReady() ||
-				getServerDBInfo.getFuture().isReady();
+		return clientInterface.hasMessage() || recruitFromConfiguration.getFuture().isReady() ||
+		       recruitRemoteFromConfiguration.getFuture().isReady() || recruitStorage.getFuture().isReady() ||
+		       registerWorker.getFuture().isReady() || getWorkers.getFuture().isReady() ||
+		       registerMaster.getFuture().isReady() || getServerDBInfo.getFuture().isReady();
 	}
 
 	void initEndpoints() {
 		clientInterface.initEndpoints();
-		recruitFromConfiguration.getEndpoint( TaskPriority::ClusterControllerRecruit );
-		recruitRemoteFromConfiguration.getEndpoint( TaskPriority::ClusterControllerRecruit );
-		recruitStorage.getEndpoint( TaskPriority::ClusterController );
-		registerWorker.getEndpoint( TaskPriority::ClusterControllerWorker );
-		getWorkers.getEndpoint( TaskPriority::ClusterController );
-		registerMaster.getEndpoint( TaskPriority::ClusterControllerRegister );
-		getServerDBInfo.getEndpoint( TaskPriority::ClusterController );
+		recruitFromConfiguration.getEndpoint(TaskPriority::ClusterControllerRecruit);
+		recruitRemoteFromConfiguration.getEndpoint(TaskPriority::ClusterControllerRecruit);
+		recruitStorage.getEndpoint(TaskPriority::ClusterController);
+		registerWorker.getEndpoint(TaskPriority::ClusterControllerWorker);
+		getWorkers.getEndpoint(TaskPriority::ClusterController);
+		registerMaster.getEndpoint(TaskPriority::ClusterControllerRegister);
+		getServerDBInfo.getEndpoint(TaskPriority::ClusterController);
 	}
 
 	template <class Ar>
@@ -77,8 +73,15 @@ struct ClusterControllerFullInterface {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, clientInterface, recruitFromConfiguration, recruitRemoteFromConfiguration, recruitStorage,
-		           registerWorker, getWorkers, registerMaster, getServerDBInfo);
+		serializer(ar,
+		           clientInterface,
+		           recruitFromConfiguration,
+		           recruitRemoteFromConfiguration,
+		           recruitStorage,
+		           registerWorker,
+		           getWorkers,
+		           registerMaster,
+		           getServerDBInfo);
 	}
 };
 
@@ -96,8 +99,9 @@ struct RecruitFromConfigurationReply {
 	RecruitFromConfigurationReply() : satelliteFallback(false) {}
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
-		serializer(ar, tLogs, satelliteTLogs, proxies, resolvers, storageServers, oldLogRouters, dcId, satelliteFallback);
+	void serialize(Ar& ar) {
+		serializer(
+		    ar, tLogs, satelliteTLogs, proxies, resolvers, storageServers, oldLogRouters, dcId, satelliteFallback);
 	}
 };
 
@@ -106,14 +110,16 @@ struct RecruitFromConfigurationRequest {
 	DatabaseConfiguration configuration;
 	bool recruitSeedServers;
 	int maxOldLogRouters;
-	ReplyPromise< struct RecruitFromConfigurationReply > reply;
+	ReplyPromise<struct RecruitFromConfigurationReply> reply;
 
 	RecruitFromConfigurationRequest() {}
-	explicit RecruitFromConfigurationRequest(DatabaseConfiguration const& configuration, bool recruitSeedServers, int maxOldLogRouters)
-		: configuration(configuration), recruitSeedServers(recruitSeedServers), maxOldLogRouters(maxOldLogRouters) {}
+	explicit RecruitFromConfigurationRequest(DatabaseConfiguration const& configuration,
+	                                         bool recruitSeedServers,
+	                                         int maxOldLogRouters)
+	  : configuration(configuration), recruitSeedServers(recruitSeedServers), maxOldLogRouters(maxOldLogRouters) {}
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
+	void serialize(Ar& ar) {
 		serializer(ar, configuration, recruitSeedServers, maxOldLogRouters, reply);
 	}
 };
@@ -124,7 +130,7 @@ struct RecruitRemoteFromConfigurationReply {
 	vector<WorkerInterface> logRouters;
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
+	void serialize(Ar& ar) {
 		serializer(ar, remoteTLogs, logRouters);
 	}
 };
@@ -135,13 +141,18 @@ struct RecruitRemoteFromConfigurationRequest {
 	Optional<Key> dcId;
 	int logRouterCount;
 	std::vector<UID> exclusionWorkerIds;
-	ReplyPromise< struct RecruitRemoteFromConfigurationReply > reply;
+	ReplyPromise<struct RecruitRemoteFromConfigurationReply> reply;
 
 	RecruitRemoteFromConfigurationRequest() {}
-	RecruitRemoteFromConfigurationRequest(DatabaseConfiguration const& configuration, Optional<Key> const& dcId, int logRouterCount, const std::vector<UID> &exclusionWorkerIds) : configuration(configuration), dcId(dcId), logRouterCount(logRouterCount), exclusionWorkerIds(exclusionWorkerIds){}
+	RecruitRemoteFromConfigurationRequest(DatabaseConfiguration const& configuration,
+	                                      Optional<Key> const& dcId,
+	                                      int logRouterCount,
+	                                      const std::vector<UID>& exclusionWorkerIds)
+	  : configuration(configuration), dcId(dcId), logRouterCount(logRouterCount),
+	    exclusionWorkerIds(exclusionWorkerIds) {}
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
+	void serialize(Ar& ar) {
 		serializer(ar, configuration, dcId, logRouterCount, exclusionWorkerIds, reply);
 	}
 };
@@ -152,21 +163,21 @@ struct RecruitStorageReply {
 	ProcessClass processClass;
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
+	void serialize(Ar& ar) {
 		serializer(ar, worker, processClass);
 	}
 };
 
 struct RecruitStorageRequest {
 	constexpr static FileIdentifier file_identifier = 905920;
-	std::vector<Optional<Standalone<StringRef>>> excludeMachines;	//< Don't recruit any of these machines
-	std::vector<AddressExclusion> excludeAddresses;		//< Don't recruit any of these addresses
+	std::vector<Optional<Standalone<StringRef>>> excludeMachines; //< Don't recruit any of these machines
+	std::vector<AddressExclusion> excludeAddresses; //< Don't recruit any of these addresses
 	std::vector<Optional<Standalone<StringRef>>> includeDCs;
-	bool criticalRecruitment;							//< True if machine classes are to be ignored
-	ReplyPromise< RecruitStorageReply > reply;
+	bool criticalRecruitment; //< True if machine classes are to be ignored
+	ReplyPromise<RecruitStorageReply> reply;
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
+	void serialize(Ar& ar) {
 		serializer(ar, excludeMachines, excludeAddresses, includeDCs, criticalRecruitment, reply);
 	}
 };
@@ -176,11 +187,13 @@ struct RegisterWorkerReply {
 	ProcessClass processClass;
 	ClusterControllerPriorityInfo priorityInfo;
 
-	RegisterWorkerReply() : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
-	RegisterWorkerReply(ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo) : processClass(processClass), priorityInfo(priorityInfo) {}
+	RegisterWorkerReply()
+	  : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
+	RegisterWorkerReply(ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo)
+	  : processClass(processClass), priorityInfo(priorityInfo) {}
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
+	void serialize(Ar& ar) {
 		serializer(ar, processClass, priorityInfo);
 	}
 };
@@ -197,13 +210,31 @@ struct RegisterWorkerRequest {
 	ReplyPromise<RegisterWorkerReply> reply;
 	bool degraded;
 
-	RegisterWorkerRequest() : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
-	RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, Generation generation, Optional<DataDistributorInterface> ddInterf, Optional<RatekeeperInterface> rkInterf, bool degraded) :
-	wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo), generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), degraded(degraded) {}
+	RegisterWorkerRequest()
+	  : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
+	RegisterWorkerRequest(WorkerInterface wi,
+	                      ProcessClass initialClass,
+	                      ProcessClass processClass,
+	                      ClusterControllerPriorityInfo priorityInfo,
+	                      Generation generation,
+	                      Optional<DataDistributorInterface> ddInterf,
+	                      Optional<RatekeeperInterface> rkInterf,
+	                      bool degraded)
+	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
+	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), degraded(degraded) {}
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
-		serializer(ar, wi, initialClass, processClass, priorityInfo, generation, distributorInterf, ratekeeperInterf, reply, degraded);
+	void serialize(Ar& ar) {
+		serializer(ar,
+		           wi,
+		           initialClass,
+		           processClass,
+		           priorityInfo,
+		           generation,
+		           distributorInterf,
+		           ratekeeperInterf,
+		           reply,
+		           degraded);
 	}
 };
 
@@ -246,8 +277,19 @@ struct RegisterMasterRequest {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, id, mi, logSystemConfig, proxies, resolvers, recoveryCount, registrationCount, configuration,
-		           priorCommittedLogServers, recoveryState, recoveryStalled, reply);
+		serializer(ar,
+		           id,
+		           mi,
+		           logSystemConfig,
+		           proxies,
+		           resolvers,
+		           recoveryCount,
+		           registrationCount,
+		           configuration,
+		           priorCommittedLogServers,
+		           recoveryState,
+		           recoveryStalled,
+		           reply);
 	}
 };
 

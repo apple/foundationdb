@@ -37,11 +37,12 @@ public:
 	int64_t MAX_VERSIONS_IN_FLIGHT_FORCED;
 	int64_t MAX_READ_TRANSACTION_LIFE_VERSIONS;
 	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
-	double MAX_COMMIT_BATCH_INTERVAL; // Each master proxy generates a CommitTransactionBatchRequest at least this often, so that versions always advance smoothly
+	double MAX_COMMIT_BATCH_INTERVAL; // Each master proxy generates a CommitTransactionBatchRequest at least this
+	                                  // often, so that versions always advance smoothly
 
 	// TLogs
-	double TLOG_TIMEOUT;  // tlog OR master proxy failure - master's reaction time
-	double RECOVERY_TLOG_SMART_QUORUM_DELAY;		// smaller might be better for bug amplification
+	double TLOG_TIMEOUT; // tlog OR master proxy failure - master's reaction time
+	double RECOVERY_TLOG_SMART_QUORUM_DELAY; // smaller might be better for bug amplification
 	double TLOG_STORAGE_MIN_UPDATE_INTERVAL;
 	double BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL;
 	double UNFLUSHED_DATA_RATIO;
@@ -60,7 +61,9 @@ public:
 	int64_t REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT;
 	double TLOG_PEEK_DELAY;
 	int LEGACY_TLOG_UPGRADE_ENTRIES_PER_VERSION;
-	int VERSION_MESSAGES_OVERHEAD_FACTOR_1024THS; // Multiplicative factor to bound total space used to store a version message (measured in 1/1024ths, e.g. a value of 2048 yields a factor of 2).
+	int VERSION_MESSAGES_OVERHEAD_FACTOR_1024THS; // Multiplicative factor to bound total space used to store a version
+	                                              // message (measured in 1/1024ths, e.g. a value of 2048 yields a
+	                                              // factor of 2).
 	int64_t VERSION_MESSAGES_ENTRY_BYTES_WITH_OVERHEAD;
 	double TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
 	int64_t TLOG_MESSAGE_BLOCK_BYTES;
@@ -81,7 +84,7 @@ public:
 	int64_t TLOG_SPILL_REFERENCE_MAX_BYTES_PER_BATCH;
 	int64_t DISK_QUEUE_FILE_EXTENSION_BYTES; // When we grow the disk queue, by how many bytes should it grow?
 	int64_t DISK_QUEUE_FILE_SHRINK_BYTES; // When we shrink the disk queue, by how many bytes should it shrink?
-	int DISK_QUEUE_MAX_TRUNCATE_BYTES;  // A truncate larger than this will cause the file to be replaced instead.
+	int DISK_QUEUE_MAX_TRUNCATE_BYTES; // A truncate larger than this will cause the file to be replaced instead.
 	double TLOG_DEGRADED_DURATION;
 	double TXS_POPPED_MAX_DELAY;
 	double TLOG_MAX_CREATE_DURATION;
@@ -119,7 +122,7 @@ public:
 	double INFLIGHT_PENALTY_UNHEALTHY;
 	double INFLIGHT_PENALTY_ONE_LEFT;
 	bool USE_OLD_NEEDED_SERVERS;
-	
+
 	// Higher priorities are executed first
 	// Priority/100 is the "priority group"/"superpriority".  Priority inversion
 	//   is possible within but not between priority groups; fewer priority groups
@@ -144,8 +147,8 @@ public:
 	double DATA_DISTRIBUTION_FAILURE_REACTION_TIME;
 	int MIN_SHARD_BYTES, SHARD_BYTES_RATIO, SHARD_BYTES_PER_SQRT_BYTES, MAX_SHARD_BYTES, KEY_SERVER_SHARD_BYTES;
 	int64_t SHARD_MAX_BYTES_PER_KSEC, // Shards with more than this bandwidth will be split immediately
-		SHARD_MIN_BYTES_PER_KSEC,     // Shards with more than this bandwidth will not be merged
-		SHARD_SPLIT_BYTES_PER_KSEC;   // When splitting a shard, it is split into pieces with less than this bandwidth
+	    SHARD_MIN_BYTES_PER_KSEC, // Shards with more than this bandwidth will not be merged
+	    SHARD_SPLIT_BYTES_PER_KSEC; // When splitting a shard, it is split into pieces with less than this bandwidth
 	double STORAGE_METRIC_TIMEOUT;
 	double METRIC_DELAY;
 	double ALL_DATA_REMOVED_DELAY;
@@ -193,7 +196,8 @@ public:
 
 	bool TR_FLAG_DISABLE_SERVER_TEAM_REMOVER; // disable the serverTeamRemover actor
 	double TR_REMOVE_SERVER_TEAM_DELAY; // wait for the specified time before try to remove next server team
-	double TR_REMOVE_SERVER_TEAM_EXTRA_DELAY; // serverTeamRemover waits for the delay and check DD healthyness again to ensure it runs after machineTeamRemover
+	double TR_REMOVE_SERVER_TEAM_EXTRA_DELAY; // serverTeamRemover waits for the delay and check DD healthyness again to
+	                                          // ensure it runs after machineTeamRemover
 
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
@@ -268,9 +272,9 @@ public:
 	double COMMIT_TRANSACTION_BATCH_INTERVAL_MAX;
 	double COMMIT_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION;
 	double COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA;
-	int    COMMIT_TRANSACTION_BATCH_COUNT_MAX;
-	int    COMMIT_TRANSACTION_BATCH_BYTES_MIN;
-	int    COMMIT_TRANSACTION_BATCH_BYTES_MAX;
+	int COMMIT_TRANSACTION_BATCH_COUNT_MAX;
+	int COMMIT_TRANSACTION_BATCH_BYTES_MIN;
+	int COMMIT_TRANSACTION_BATCH_BYTES_MAX;
 	double COMMIT_TRANSACTION_BATCH_BYTES_SCALE_BASE;
 	double COMMIT_TRANSACTION_BATCH_BYTES_SCALE_POWER;
 	int64_t COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT;
@@ -318,7 +322,7 @@ public:
 	double SAMPLE_POLL_TIME;
 	int64_t RESOLVER_STATE_MEMORY_LIMIT;
 
-	//Cluster Controller
+	// Cluster Controller
 	double CLUSTER_CONTROLLER_LOGGING_DELAY;
 	double MASTER_FAILURE_REACTION_TIME;
 	double MASTER_FAILURE_SLOPE_DURING_RECOVERY;
@@ -346,8 +350,8 @@ public:
 	double CLIENT_REGISTER_INTERVAL;
 
 	// Knobs used to select the best policy (via monte carlo)
-	int POLICY_RATING_TESTS;	// number of tests per policy (in order to compare)
-	int POLICY_GENERATIONS;		// number of policies to generate
+	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)
+	int POLICY_GENERATIONS; // number of policies to generate
 
 	int EXPECTED_MASTER_FITNESS;
 	int EXPECTED_TLOG_FITNESS;
@@ -356,23 +360,25 @@ public:
 	int EXPECTED_RESOLVER_FITNESS;
 	double RECRUITMENT_TIMEOUT;
 
-	//Move Keys
+	// Move Keys
 	double SHARD_READY_DELAY;
 	double SERVER_READY_QUORUM_INTERVAL;
 	double SERVER_READY_QUORUM_TIMEOUT;
 	double REMOVE_RETRY_DELAY;
 	int MOVE_KEYS_KRM_LIMIT;
-	int MOVE_KEYS_KRM_LIMIT_BYTES; //This must be sufficiently larger than CLIENT_KNOBS->KEY_SIZE_LIMIT (fdbclient/Knobs.h) to ensure that at least two entries will be returned from an attempt to read a key range map
+	int MOVE_KEYS_KRM_LIMIT_BYTES; // This must be sufficiently larger than CLIENT_KNOBS->KEY_SIZE_LIMIT
+	                               // (fdbclient/Knobs.h) to ensure that at least two entries will be returned from an
+	                               // attempt to read a key range map
 	int MAX_SKIP_TAGS;
 	double MAX_ADDED_SOURCES_MULTIPLIER;
 
-	//FdbServer
+	// FdbServer
 	double MIN_REBOOT_TIME;
 	double MAX_REBOOT_TIME;
 	std::string LOG_DIRECTORY;
 	int64_t SERVER_MEM_LIMIT;
 
-	//Ratekeeper
+	// Ratekeeper
 	double SMOOTHING_AMOUNT;
 	double SLOW_SMOOTHING_AMOUNT;
 	double METRIC_UPDATE_RATE;
@@ -386,7 +392,7 @@ public:
 	int64_t STORAGE_HARD_LIMIT_BYTES;
 	int64_t STORAGE_DURABILITY_LAG_HARD_MAX;
 	int64_t STORAGE_DURABILITY_LAG_SOFT_MAX;
-	
+
 	int64_t LOW_PRIORITY_STORAGE_QUEUE_BYTES;
 	int64_t LOW_PRIORITY_DURABILITY_LAG;
 
@@ -421,17 +427,17 @@ public:
 	double INITIAL_DURABILITY_LAG_MULTIPLIER;
 	double DURABILITY_LAG_REDUCTION_RATE;
 	double DURABILITY_LAG_INCREASE_RATE;
-	
+
 	double STORAGE_SERVER_LIST_FETCH_TIMEOUT;
-	
-	//Storage Metrics
+
+	// Storage Metrics
 	double STORAGE_METRICS_AVERAGE_INTERVAL;
 	double STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	double SPLIT_JITTER_AMOUNT;
 	int64_t IOPS_UNITS_PER_SAMPLE;
 	int64_t BANDWIDTH_UNITS_PER_SAMPLE;
 
-	//Storage Server
+	// Storage Server
 	double STORAGE_LOGGING_DELAY;
 	double STORAGE_SERVER_POLL_METRICS_DELAY;
 	double FUTURE_VERSION_DELAY;
@@ -464,11 +470,11 @@ public:
 	double FETCH_KEYS_TOO_LONG_TIME_CRITERIA;
 	double MAX_STORAGE_COMMIT_TIME;
 
-	//Wait Failure
+	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
 	double WAIT_FAILURE_DELAY_LIMIT;
 
-	//Worker
+	// Worker
 	double WORKER_LOGGING_INTERVAL;
 	double INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING;
 	double HEAP_PROFILER_INTERVAL;

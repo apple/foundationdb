@@ -52,7 +52,8 @@ public:
 	double STATUS_IDLE_TIMEOUT;
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
-	double WRONG_SHARD_SERVER_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
+	double WRONG_SHARD_SERVER_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is
+	                                 // mostly wrong (e.g. dumping the database after a test)
 	double FUTURE_VERSION_RETRY_DELAY;
 	int REPLY_BYTE_LIMIT;
 	double DEFAULT_BACKOFF;
@@ -86,12 +87,13 @@ public:
 	double AGGREGATE_HEALTH_METRICS_MAX_STALENESS;
 	double DETAILED_HEALTH_METRICS_MAX_STALENESS;
 
-	//KeyRangeMap
+	// KeyRangeMap
 	int KRM_GET_RANGE_LIMIT;
-	int KRM_GET_RANGE_LIMIT_BYTES; //This must be sufficiently larger than KEY_SIZE_LIMIT to ensure that at least two entries will be returned from an attempt to read a key range map
+	int KRM_GET_RANGE_LIMIT_BYTES; // This must be sufficiently larger than KEY_SIZE_LIMIT to ensure that at least two
+	                               // entries will be returned from an attempt to read a key range map
 
 	int DEFAULT_MAX_OUTSTANDING_WATCHES;
-	int ABSOLUTE_MAX_WATCHES; //The client cannot set the max outstanding watches higher than this
+	int ABSOLUTE_MAX_WATCHES; // The client cannot set the max outstanding watches higher than this
 	double WATCH_POLLING_TIME;
 	double NO_RECENT_UPDATES_DURATION;
 	double FAST_WATCH_TIMEOUT;
@@ -99,9 +101,8 @@ public:
 
 	double IS_ACCEPTABLE_DELAY;
 
-
 	// Core
-	int64_t CORE_VERSIONSPERSECOND;  // This is defined within the server but used for knobs based on server value
+	int64_t CORE_VERSIONSPERSECOND; // This is defined within the server but used for knobs based on server value
 	int LOG_RANGE_BLOCK_SIZE;
 	int MUTATION_BLOCK_SIZE;
 

@@ -31,14 +31,14 @@ pthread_t netThread;
 const int numKeys = 100;
 uint8_t** keys = NULL;
 
-#define KEY_SIZE   16
+#define KEY_SIZE 16
 #define VALUE_SIZE 100
 uint8_t valueStr[VALUE_SIZE];
 
 fdb_error_t getSize(struct ResultSet* rs, FDBTransaction* tr, int64_t* out_size) {
 	fdb_error_t e;
 	FDBFuture* future = fdb_transaction_get_approximate_size(tr);
-	
+
 	e = maybeLogError(fdb_future_block_until_ready(future), "waiting for get future", rs);
 	if (e) {
 		fdb_future_destroy(future);
@@ -55,11 +55,11 @@ fdb_error_t getSize(struct ResultSet* rs, FDBTransaction* tr, int64_t* out_size)
 	return 0;
 }
 
-void runTests(struct ResultSet *rs) {
+void runTests(struct ResultSet* rs) {
 	int64_t sizes[numKeys];
 	int i = 0, j = 0;
-	FDBDatabase *db = openDatabase(rs, &netThread);
-	FDBTransaction *tr = NULL;
+	FDBDatabase* db = openDatabase(rs, &netThread);
+	FDBTransaction* tr = NULL;
 	fdb_error_t e = fdb_database_create_transaction(db, &tr);
 	checkError(e, "create transaction", rs);
 	memset(sizes, 0, numKeys * sizeof(uint32_t));
@@ -82,7 +82,7 @@ void runTests(struct ResultSet *rs) {
 	printf("size %d: %u\n", i, sizes[i]);
 	i++;
 
-	fdb_transaction_clear_range(tr, keys[i], KEY_SIZE, keys[i+1], KEY_SIZE);
+	fdb_transaction_clear_range(tr, keys[i], KEY_SIZE, keys[i + 1], KEY_SIZE);
 	e = getSize(rs, tr, sizes + i);
 	checkError(e, "transaction get size", rs);
 	printf("size %d: %u\n", i, sizes[i]);
@@ -94,9 +94,9 @@ void runTests(struct ResultSet *rs) {
 	printf("Test passed!\n");
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
 	srand(time(NULL));
-	struct ResultSet *rs = newResultSet();
+	struct ResultSet* rs = newResultSet();
 	checkError(fdb_select_api_version(620), "select API version", rs);
 	printf("Running performance test at client version: %s\n", fdb_get_client_version());
 
