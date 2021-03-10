@@ -42,6 +42,7 @@ public:
 
 	// TLogs
 	double TLOG_TIMEOUT; // tlog OR master proxy failure - master's reaction time
+	double TLOG_SLOW_REJOIN_WARN_TIMEOUT_SECS; // Warns if a tlog takes too long to rejoin
 	double RECOVERY_TLOG_SMART_QUORUM_DELAY; // smaller might be better for bug amplification
 	double TLOG_STORAGE_MIN_UPDATE_INTERVAL;
 	double BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL;
