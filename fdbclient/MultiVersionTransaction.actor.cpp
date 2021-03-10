@@ -1136,52 +1136,64 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 	ASSERT_GE(threadCount, 1);
 	// Copy library for each thread configured per version
 	std::vector<std::pair<std::string, bool>> paths;
-	// It's tempting to use the so once without copying.  However, we don't know
-	// if the thing we're about to copy is the shared object executing this code
-	// or not, so this optimization is unsafe.
-	// paths.push_back({path, false});
-	for (int ii = 0; ii < threadCount; ++ii) {
-		std::string filename = basename(path);
 
-		char tempName[PATH_MAX + 12];
-		sprintf(tempName, "/tmp/%s-XXXXXX", filename.c_str());
-		int tempFd = mkstemp(tempName);
-		int fd;
+	if (threadCount == 1) {
+		paths.push_back({ path, false });
+	} else {
+		// It's tempting to use the so once without copying. However, we don't know
+		// if the thing we're about to copy is the shared object executing this code
+		// or not, so this optimization is unsafe.
+		// paths.push_back({path, false});
+		for (int ii = 0; ii < threadCount; ++ii) {
+			std::string filename = basename(path);
 
-		if ((fd = open(path.c_str(), O_RDONLY)) == -1) {
-			TraceEvent("ExternalClientNotFound").detail("LibraryPath", path);
-			throw file_not_found();
-		}
+			char tempName[PATH_MAX + 12];
+			sprintf(tempName, "/tmp/%s-XXXXXX", filename.c_str());
+			int tempFd = mkstemp(tempName);
+			int fd;
 
-		constexpr size_t buf_sz = 4096;
-		char buf[buf_sz];
-		while (1) {
-			ssize_t readCount = read(fd, buf, buf_sz);
-			if (readCount == 0) {
-				// eof
-				break;
+			if ((fd = open(path.c_str(), O_RDONLY)) == -1) {
+				TraceEvent("ExternalClientNotFound").detail("LibraryPath", path);
+				throw file_not_found();
 			}
-			if (readCount == -1) {
-				TraceEvent(SevError, "ExternalClientCopyFailedReadError").GetLastError().detail("LibraryPath", path);
-				throw platform_error();
-			}
-			ssize_t written = 0;
-			while (written != readCount) {
-				ssize_t writeCount = write(tempFd, buf + written, readCount - written);
-				if (writeCount == -1) {
-					TraceEvent(SevError, "ExternalClientCopyFailedWriteError")
+
+			TraceEvent("CopyingExternalClient")
+			    .detail("FileName", filename)
+			    .detail("LibraryPath", path)
+			    .detail("TempPath", tempName);
+
+			constexpr size_t buf_sz = 4096;
+			char buf[buf_sz];
+			while (1) {
+				ssize_t readCount = read(fd, buf, buf_sz);
+				if (readCount == 0) {
+					// eof
+					break;
+				}
+				if (readCount == -1) {
+					TraceEvent(SevError, "ExternalClientCopyFailedReadError")
 					    .GetLastError()
 					    .detail("LibraryPath", path);
 					throw platform_error();
 				}
-				written += writeCount;
+				ssize_t written = 0;
+				while (written != readCount) {
+					ssize_t writeCount = write(tempFd, buf + written, readCount - written);
+					if (writeCount == -1) {
+						TraceEvent(SevError, "ExternalClientCopyFailedWriteError")
+						    .GetLastError()
+						    .detail("LibraryPath", path);
+						throw platform_error();
+					}
+					written += writeCount;
+				}
 			}
+
+			close(fd);
+			close(tempFd);
+
+			paths.push_back({ tempName, true }); // use + delete temporary copies of the library.
 		}
-
-		close(fd);
-		close(tempFd);
-
-		paths.push_back({ tempName, true }); // use + delete temporary copies of the library.
 	}
 
 	return paths;
@@ -1315,10 +1327,6 @@ void MultiVersionApi::setupNetwork() {
 			if (externalClients.count(filename) == 0) {
 				externalClients[filename] = {};
 				for (const auto& tmp : copyExternalLibraryPerThread(path)) {
-					TraceEvent("AddingExternalClient")
-					    .detail("FileName", filename)
-					    .detail("LibraryPath", path)
-					    .detail("TempPath", tmp.first);
 					externalClients[filename].push_back(Reference<ClientInfo>(
 					    new ClientInfo(new DLApi(tmp.first, tmp.second /*unlink on load*/), path)));
 				}
