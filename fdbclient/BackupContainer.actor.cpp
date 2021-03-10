@@ -1135,7 +1135,7 @@ public:
 	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc,
 	                                                                    Version targetVersion,
 	                                                                    bool logsOnly,
-	                                                                    Version beginVersio) {
+	                                                                    Version beginVersion) {
 		if (logsOnly) {
 			state RestorableFileSet restorableSet;
 			state std::vector<LogFile> logFiles;

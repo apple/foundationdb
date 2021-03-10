@@ -2145,8 +2145,7 @@ ACTOR Future<Void> runRestore(Database db,
                               bool waitForDone,
                               std::string addPrefix,
                               std::string removePrefix,
-                              bool incrementalBackupOnly,
-                              beginVersion) {
+                              bool incrementalBackupOnly) {
 	if (ranges.empty()) {
 		ranges.push_back_deep(ranges.arena(), normalKeys);
 	}
