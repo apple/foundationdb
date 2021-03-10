@@ -61,6 +61,6 @@ CSimpleOpt::SOption gConverterOptions[] = { { OPT_CONTAINER, "-r", SO_REQ_SEP },
 	                                        { OPT_HELP, "--help", SO_NONE },
 	                                        SO_END_OF_OPTIONS };
 
-}  // namespace file_converter
+} // namespace file_converter
 
-#endif  // FDBBACKUP_FILECONVERTER_H
+#endif // FDBBACKUP_FILECONVERTER_H

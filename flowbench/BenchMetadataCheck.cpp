@@ -31,7 +31,8 @@ static const std::array<MutationRef, 5> mutations = {
 	MutationRef(MutationRef::Type::ClearRange, LiteralStringRef("a"), LiteralStringRef("b")),
 	MutationRef(MutationRef::Type::ClearRange, LiteralStringRef("aaaaaaaaaa"), LiteralStringRef("bbbbbbbbbb")),
 	MutationRef(MutationRef::Type::ClearRange, normalKeys.begin, systemKeys.end),
-	MutationRef(MutationRef::Type::ClearRange, LiteralStringRef("a").withPrefix(systemKeys.begin),
+	MutationRef(MutationRef::Type::ClearRange,
+	            LiteralStringRef("a").withPrefix(systemKeys.begin),
 	            LiteralStringRef("b").withPrefix(systemKeys.begin)),
 };
 

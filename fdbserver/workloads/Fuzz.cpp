@@ -26,9 +26,7 @@ struct ActorFuzzWorkload : TestWorkload {
 	bool enabled;
 	std::pair<int, int> fuzzResults;
 
-	ActorFuzzWorkload( WorkloadContext const& wcx )
-		: TestWorkload(wcx), fuzzResults( std::make_pair(0, 0) )
-	{
+	ActorFuzzWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), fuzzResults(std::make_pair(0, 0)) {
 		enabled = !clientId; // only do this on the "first" client
 	}
 
@@ -40,10 +38,10 @@ struct ActorFuzzWorkload : TestWorkload {
 			fuzzResults.second = 0;
 
 			// Only include this test outside of Windows because of MSVC compiler bug
-#ifndef	WIN32
+#ifndef WIN32
 			fuzzResults = actorFuzzTests();
 #endif
-			if( fuzzResults.second == 0 )
+			if (fuzzResults.second == 0)
 				// if there are no total tests, then mark this as "non-passing"
 				fuzzResults.first = 1;
 		}

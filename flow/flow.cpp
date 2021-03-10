@@ -28,22 +28,22 @@
 
 #if (defined(__linux__) || defined(__FreeBSD__)) && defined(__AVX__) && !defined(MEMORY_SANITIZER)
 // For benchmarking; need a version of rte_memcpy that doesn't live in the same compilation unit as the test.
-void * rte_memcpy_noinline(void *__restrict __dest, const void *__restrict __src, size_t __n) {
+void* rte_memcpy_noinline(void* __restrict __dest, const void* __restrict __src, size_t __n) {
 	return rte_memcpy(__dest, __src, __n);
 }
 
 // This compilation unit will be linked in to the main binary, so this should override glibc memcpy
-__attribute__((visibility ("default"))) void *memcpy (void *__restrict __dest, const void *__restrict __src, size_t __n) {
+__attribute__((visibility("default"))) void* memcpy(void* __restrict __dest, const void* __restrict __src, size_t __n) {
 	// folly_memcpy is faster for small copies, but rte seems to win out in most other circumstances
 	return rte_memcpy(__dest, __src, __n);
 }
 #else
-void * rte_memcpy_noinline(void *__restrict __dest, const void *__restrict __src, size_t __n) {
+void* rte_memcpy_noinline(void* __restrict __dest, const void* __restrict __src, size_t __n) {
 	return memcpy(__dest, __src, __n);
 }
 #endif // (defined (__linux__) || defined (__FreeBSD__)) && defined(__AVX__) && !defined(MEMORY_SANITIZER)
 
-INetwork *g_network = 0;
+INetwork* g_network = 0;
 
 FILE* randLog = 0;
 thread_local Reference<IRandom> seededRandom;
@@ -55,7 +55,7 @@ void setThreadLocalDeterministicRandomSeed(uint32_t seed) {
 }
 
 Reference<IRandom> deterministicRandom() {
-	if(!seededRandom) {
+	if (!seededRandom) {
 		seededRandom = Reference<IRandom>(new DeterministicRandom(platform::getRandomSeed(), true));
 	}
 	return seededRandom;
@@ -63,7 +63,7 @@ Reference<IRandom> deterministicRandom() {
 
 Reference<IRandom> nondeterministicRandom() {
 	static thread_local Reference<IRandom> random;
-	if(!random) {
+	if (!random) {
 		random = Reference<IRandom>(new DeterministicRandom(platform::getRandomSeed()));
 	}
 	return random;
@@ -73,11 +73,11 @@ std::string UID::toString() const {
 	return format("%016llx%016llx", part[0], part[1]);
 }
 
-UID UID::fromString( std::string const& s ) {
-	ASSERT( s.size() == 32 );
-	uint64_t a=0, b=0;
-	int r = sscanf( s.c_str(), "%16" SCNx64 "%16" SCNx64, &a, &b );
-	ASSERT( r == 2 );
+UID UID::fromString(std::string const& s) {
+	ASSERT(s.size() == 32);
+	uint64_t a = 0, b = 0;
+	int r = sscanf(s.c_str(), "%16" SCNx64 "%16" SCNx64, &a, &b);
+	ASSERT(r == 2);
 	return UID(a, b);
 }
 
@@ -85,10 +85,10 @@ std::string UID::shortString() const {
 	return format("%016llx", part[0]);
 }
 
-void detectFailureAfter( int const& address, double const& delay );
+void detectFailureAfter(int const& address, double const& delay);
 
 Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_unit) {
-	char *endptr;
+	char* endptr;
 
 	uint64_t ret = strtoull(toparse.c_str(), &endptr, 10);
 
@@ -139,7 +139,7 @@ Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_un
 // h - hours
 // d - days
 Optional<uint64_t> parseDuration(std::string str, std::string defaultUnit) {
-	char *endptr;
+	char* endptr;
 	uint64_t ret = strtoull(str.c_str(), &endptr, 10);
 
 	if (endptr == str.c_str()) {
@@ -172,7 +172,7 @@ Optional<uint64_t> parseDuration(std::string str, std::string defaultUnit) {
 	return ret;
 }
 
-int vsformat( std::string &outputString, const char* form, va_list args) {
+int vsformat(std::string& outputString, const char* form, va_list args) {
 	char buf[200];
 
 	va_list args2;
@@ -180,23 +180,24 @@ int vsformat( std::string &outputString, const char* form, va_list args) {
 	int size = vsnprintf(buf, sizeof(buf), form, args2);
 	va_end(args2);
 
-	if(size >= 0 && size < sizeof(buf)) {
+	if (size >= 0 && size < sizeof(buf)) {
 		outputString = std::string(buf, size);
 		return size;
 	}
 
-	#ifdef _WIN32
-	// Microsoft's non-standard vsnprintf doesn't return a correct size, but just an error, so determine the necessary size
+#ifdef _WIN32
+	// Microsoft's non-standard vsnprintf doesn't return a correct size, but just an error, so determine the necessary
+	// size
 	va_copy(args2, args);
 	size = _vscprintf(form, args2);
 	va_end(args2);
-	#endif
+#endif
 
 	if (size < 0) {
 		return -1;
 	}
 
-	TEST(true); //large format result
+	TEST(true); // large format result
 
 	outputString.resize(size + 1);
 	size = vsnprintf(&outputString[0], outputString.size(), form, args);
@@ -208,7 +209,7 @@ int vsformat( std::string &outputString, const char* form, va_list args) {
 	return size;
 }
 
-std::string format( const char* form, ... ) {
+std::string format(const char* form, ...) {
 	va_list args;
 	va_start(args, form);
 
@@ -222,31 +223,31 @@ std::string format( const char* form, ... ) {
 
 Standalone<StringRef> strinc(StringRef const& str) {
 	int index;
-	for(index = str.size() - 1; index >= 0; index--)
-		if(str[index] != 255)
+	for (index = str.size() - 1; index >= 0; index--)
+		if (str[index] != 255)
 			break;
 
 	// Must not be called with a string that consists only of zero or more '\xff' bytes.
 	ASSERT(index >= 0);
 
-	Standalone<StringRef> r = str.substr(0, index+1);
-	uint8_t *p = mutateString(r);
-	p[r.size()-1]++;
+	Standalone<StringRef> r = str.substr(0, index + 1);
+	uint8_t* p = mutateString(r);
+	p[r.size() - 1]++;
 	return r;
 }
 
 StringRef strinc(StringRef const& str, Arena& arena) {
 	int index;
-	for(index = str.size() - 1; index >= 0; index--)
-		if(str[index] != 255)
+	for (index = str.size() - 1; index >= 0; index--)
+		if (str[index] != 255)
 			break;
 
 	// Must not be called with a string that consists only of zero or more '\xff' bytes.
 	ASSERT(index >= 0);
 
-	StringRef r( arena, str.substr(0, index+1) );
-	uint8_t *p = mutateString(r);
-	p[r.size()-1]++;
+	StringRef r(arena, str.substr(0, index + 1));
+	uint8_t* p = mutateString(r);
+	p[r.size() - 1]++;
 	return r;
 }
 
@@ -255,37 +256,39 @@ StringRef addVersionStampAtEnd(StringRef const& str, Arena& arena) {
 	uint8_t* s = new (arena) uint8_t[size + 14];
 	memcpy(s, str.begin(), size);
 	memset(&s[size], 0, 10);
-	memcpy(&s[size+10], &size, 4);
-	return StringRef(s,size + 14);
+	memcpy(&s[size + 10], &size, 4);
+	return StringRef(s, size + 14);
 }
 
 Standalone<StringRef> addVersionStampAtEnd(StringRef const& str) {
 	Standalone<StringRef> r;
-	((StringRef &)r) = addVersionStampAtEnd(str, r.arena());
+	((StringRef&)r) = addVersionStampAtEnd(str, r.arena());
 	return r;
 }
 
 namespace {
 
-std::vector<bool> buggifyActivated{false, false};
-std::map<BuggifyType, std::map<std::pair<std::string,int>, int>> typedSBVars;
+std::vector<bool> buggifyActivated{ false, false };
+std::map<BuggifyType, std::map<std::pair<std::string, int>, int>> typedSBVars;
 
-}
+} // namespace
 
-std::vector<double> P_BUGGIFIED_SECTION_ACTIVATED{.25, .25};
-std::vector<double> P_BUGGIFIED_SECTION_FIRES{.25, .25};
+std::vector<double> P_BUGGIFIED_SECTION_ACTIVATED{ .25, .25 };
+std::vector<double> P_BUGGIFIED_SECTION_FIRES{ .25, .25 };
 
 double P_EXPENSIVE_VALIDATION = .05;
 
-int getSBVar(std::string file, int line, BuggifyType type){
-	if (!buggifyActivated[int(type)]) return 0;
+int getSBVar(std::string file, int line, BuggifyType type) {
+	if (!buggifyActivated[int(type)])
+		return 0;
 
-	const auto &flPair = std::make_pair(file, line);
+	const auto& flPair = std::make_pair(file, line);
 	auto& SBVars = typedSBVars[type];
-	if (!SBVars.count(flPair)){
+	if (!SBVars.count(flPair)) {
 		SBVars[flPair] = deterministicRandom()->random01() < P_BUGGIFIED_SECTION_ACTIVATED[int(type)];
-		g_traceBatch.addBuggify( SBVars[flPair], line, file );
-		if( g_network ) g_traceBatch.dump();
+		g_traceBatch.addBuggify(SBVars[flPair], line, file);
+		if (g_network)
+			g_traceBatch.dump();
 	}
 
 	return SBVars[flPair];

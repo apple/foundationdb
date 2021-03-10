@@ -26,29 +26,27 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/serialize.h"
 #include <cstring>
 
 struct CycleWorkload : TestWorkload {
 	int actorCount, nodeCount;
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond, traceParentProbability;
-	Key		keyPrefix;
+	Key keyPrefix;
 
 	vector<Future<Void>> clients;
 	PerfIntCounter transactions, retries, tooOldRetries, commitFailedRetries;
 	PerfDoubleCounter totalLatency;
 
 	CycleWorkload(WorkloadContext const& wcx)
-		: TestWorkload(wcx),
-		transactions("Transactions"), retries("Retries"), totalLatency("Latency"),
-		tooOldRetries("Retries.too_old"), commitFailedRetries("Retries.commit_failed")
-	{
-		testDuration = getOption( options, "testDuration"_sr, 10.0 );
-		transactionsPerSecond = getOption( options, "transactionsPerSecond"_sr, 5000.0 ) / clientCount;
-		actorCount = getOption( options, "actorsPerClient"_sr, transactionsPerSecond / 5 );
+	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), totalLatency("Latency"),
+	    tooOldRetries("Retries.too_old"), commitFailedRetries("Retries.commit_failed") {
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
+		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);
 		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
-		keyPrefix = unprintable( getOption(options, "keyPrefix"_sr, LiteralStringRef("")).toString() );
+		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, LiteralStringRef("")).toString());
 		traceParentProbability = getOption(options, "traceParentProbability "_sr, 0.01);
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
 	}
@@ -56,49 +54,50 @@ struct CycleWorkload : TestWorkload {
 	std::string description() const override { return "CycleWorkload"; }
 	Future<Void> setup(Database const& cx) override { return bulkSetup(cx, this, nodeCount, Promise<double>()); }
 	Future<Void> start(Database const& cx) override {
-		for(int c=0; c<actorCount; c++)
+		for (int c = 0; c < actorCount; c++)
 			clients.push_back(
-				timeout(
-					cycleClient( cx->clone(), this, actorCount / transactionsPerSecond ), testDuration, Void()) );
+			    timeout(cycleClient(cx->clone(), this, actorCount / transactionsPerSecond), testDuration, Void()));
 		return delay(testDuration);
 	}
 	Future<bool> check(Database const& cx) override {
 		int errors = 0;
-		for(int c=0; c<clients.size(); c++)
+		for (int c = 0; c < clients.size(); c++)
 			errors += clients[c].isError();
 		if (errors)
 			TraceEvent(SevError, "TestFailure").detail("Reason", "There were client errors.");
 		clients.clear();
-		return cycleCheck( cx->clone(), this, !errors );
+		return cycleCheck(cx->clone(), this, !errors);
 	}
 	void getMetrics(vector<PerfMetric>& m) override {
-		m.push_back( transactions.getMetric() );
-		m.push_back( retries.getMetric() );
-		m.push_back( tooOldRetries.getMetric() );
-		m.push_back( commitFailedRetries.getMetric() );
-		m.push_back( PerfMetric( "Avg Latency (ms)", 1000 * totalLatency.getValue() / transactions.getValue(), true ) );
-		m.push_back( PerfMetric( "Read rows/simsec (approx)", transactions.getValue() * 3 / testDuration, false ) );
-		m.push_back( PerfMetric( "Write rows/simsec (approx)", transactions.getValue() * 4 / testDuration, false ) );
+		m.push_back(transactions.getMetric());
+		m.push_back(retries.getMetric());
+		m.push_back(tooOldRetries.getMetric());
+		m.push_back(commitFailedRetries.getMetric());
+		m.push_back(PerfMetric("Avg Latency (ms)", 1000 * totalLatency.getValue() / transactions.getValue(), true));
+		m.push_back(PerfMetric("Read rows/simsec (approx)", transactions.getValue() * 3 / testDuration, false));
+		m.push_back(PerfMetric("Write rows/simsec (approx)", transactions.getValue() * 4 / testDuration, false));
 	}
 
-	Key keyForIndex( int n ) { return key( n ); }
+	Key keyForIndex(int n) { return key(n); }
 	Key key(int n) { return doubleToTestKey((double)n / nodeCount, keyPrefix); }
 	Value value(int n) { return doubleToTestKey(n, keyPrefix); }
 	int fromValue(const ValueRef& v) { return testKeyToDouble(v, keyPrefix); }
 
-	Standalone<KeyValueRef> operator()( int n ) {
-		return KeyValueRef( key( n ), value( (n+1) % nodeCount ) );
+	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(key(n), value((n + 1) % nodeCount)); }
+
+	void badRead(const char* name, int r, Transaction& tr) {
+		TraceEvent(SevError, "CycleBadRead")
+		    .detail(name, r)
+		    .detail("Key", printable(key(r)))
+		    .detail("Version", tr.getReadVersion().get())
+		    .detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken);
 	}
 
-	void badRead(const char *name, int r, Transaction& tr) {
-		TraceEvent(SevError, "CycleBadRead").detail(name, r).detail("Key", printable(key(r))).detail("Version", tr.getReadVersion().get()).detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken);
-	}
-
-	ACTOR Future<Void> cycleClient( Database cx, CycleWorkload* self, double delay ) {
+	ACTOR Future<Void> cycleClient(Database cx, CycleWorkload* self, double delay) {
 		state double lastTime = now();
 		try {
 			loop {
-				wait( poisson( &lastTime, delay ) );
+				wait(poisson(&lastTime, delay));
 
 				state double tstart = now();
 				state int r = deterministicRandom()->randomInt(0, self->nodeCount);
@@ -112,31 +111,36 @@ struct CycleWorkload : TestWorkload {
 				while (true) {
 					try {
 						// Reverse next and next^2 node
-						Optional<Value> v = wait( tr.get( self->key(r) ) );
-						if (!v.present()) self->badRead("KeyR", r, tr);
+						Optional<Value> v = wait(tr.get(self->key(r)));
+						if (!v.present())
+							self->badRead("KeyR", r, tr);
 						state int r2 = self->fromValue(v.get());
-						Optional<Value> v2 = wait( tr.get( self->key(r2) ) );
-						if (!v2.present()) self->badRead("KeyR2", r2, tr);
+						Optional<Value> v2 = wait(tr.get(self->key(r2)));
+						if (!v2.present())
+							self->badRead("KeyR2", r2, tr);
 						state int r3 = self->fromValue(v2.get());
-						Optional<Value> v3 = wait( tr.get( self->key(r3) ) );
-						if (!v3.present()) self->badRead("KeyR3", r3, tr);
+						Optional<Value> v3 = wait(tr.get(self->key(r3)));
+						if (!v3.present())
+							self->badRead("KeyR3", r3, tr);
 						int r4 = self->fromValue(v3.get());
 
-						tr.clear( self->key(r) );	//< Shouldn't have an effect, but will break with wrong ordering
-						tr.set( self->key(r), self->value(r3) );
-						tr.set( self->key(r2), self->value(r4) );
-						tr.set( self->key(r3), self->value(r2) );
+						tr.clear(self->key(r)); //< Shouldn't have an effect, but will break with wrong ordering
+						tr.set(self->key(r), self->value(r3));
+						tr.set(self->key(r2), self->value(r4));
+						tr.set(self->key(r3), self->value(r2));
 						// TraceEvent("CyclicTest").detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString());
 						// TraceEvent("CyclicTest").detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
 						// TraceEvent("CyclicTest").detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
 
-						wait( tr.commit() );
+						wait(tr.commit());
 						// TraceEvent("CycleCommit");
 						break;
 					} catch (Error& e) {
-						if (e.code() == error_code_transaction_too_old) ++self->tooOldRetries;
-						else if (e.code() == error_code_not_committed) ++self->commitFailedRetries;
-						wait( tr.onError(e) );
+						if (e.code() == error_code_transaction_too_old)
+							++self->tooOldRetries;
+						else if (e.code() == error_code_not_committed)
+							++self->commitFailedRetries;
+						wait(tr.onError(e));
 					}
 					++self->retries;
 				}
@@ -161,57 +165,82 @@ struct CycleWorkload : TestWorkload {
 		}
 	}
 
-	bool cycleCheckData( const VectorRef<KeyValueRef>& data, Version v ) {
+	bool cycleCheckData(const VectorRef<KeyValueRef>& data, Version v) {
 		if (data.size() != nodeCount) {
 			logTestData(data);
-			TraceEvent(SevError, "TestFailure").detail("Reason", "Node count changed").detail("Before", nodeCount).detail("After", data.size()).detail("Version", v).detail("KeyPrefix", keyPrefix.printable());
+			TraceEvent(SevError, "TestFailure")
+			    .detail("Reason", "Node count changed")
+			    .detail("Before", nodeCount)
+			    .detail("After", data.size())
+			    .detail("Version", v)
+			    .detail("KeyPrefix", keyPrefix.printable());
 			TraceEvent(SevError, "TestFailureInfo")
 			    .detail("DataSize", data.size())
 			    .detail("NodeCount", nodeCount)
 			    .detail("Workload", description());
 			return false;
 		}
-		int i=0;
-		int iPrev=0;
+		int i = 0;
+		int iPrev = 0;
 		double d;
 		int c;
-		for(c=0; c<nodeCount; c++) {
+		for (c = 0; c < nodeCount; c++) {
 			if (c && !i) {
-				TraceEvent(SevError, "TestFailure").detail("Reason", "Cycle got shorter").detail("Before", nodeCount).detail("After", c).detail("KeyPrefix", keyPrefix.printable());
+				TraceEvent(SevError, "TestFailure")
+				    .detail("Reason", "Cycle got shorter")
+				    .detail("Before", nodeCount)
+				    .detail("After", c)
+				    .detail("KeyPrefix", keyPrefix.printable());
 				logTestData(data);
 				return false;
 			}
 			if (data[i].key != key(i)) {
-				TraceEvent(SevError, "TestFailure").detail("Reason", "Key changed").detail("KeyPrefix", keyPrefix.printable());
+				TraceEvent(SevError, "TestFailure")
+				    .detail("Reason", "Key changed")
+				    .detail("KeyPrefix", keyPrefix.printable());
 				logTestData(data);
 				return false;
 			}
 			d = testKeyToDouble(data[i].value, keyPrefix);
 			iPrev = i;
 			i = (int)d;
-			if ( i != d || i<0 || i>=nodeCount) {
-				TraceEvent(SevError, "TestFailure").detail("Reason", "Invalid value").detail("KeyPrefix", keyPrefix.printable());
+			if (i != d || i < 0 || i >= nodeCount) {
+				TraceEvent(SevError, "TestFailure")
+				    .detail("Reason", "Invalid value")
+				    .detail("KeyPrefix", keyPrefix.printable());
 				logTestData(data);
 				return false;
 			}
 		}
 		if (i != 0) {
-			TraceEvent(SevError, "TestFailure").detail("Reason", "Cycle got longer").detail("KeyPrefix", keyPrefix.printable()).detail("Key", key(i)).detail("Value", data[i].value).
-				detail("Iteration", c).detail("Nodecount", nodeCount).detail("Int", i).detail("Double", d).detail("ValuePrev", data[iPrev].value).detail("KeyPrev", data[iPrev].key);
+			TraceEvent(SevError, "TestFailure")
+			    .detail("Reason", "Cycle got longer")
+			    .detail("KeyPrefix", keyPrefix.printable())
+			    .detail("Key", key(i))
+			    .detail("Value", data[i].value)
+			    .detail("Iteration", c)
+			    .detail("Nodecount", nodeCount)
+			    .detail("Int", i)
+			    .detail("Double", d)
+			    .detail("ValuePrev", data[iPrev].value)
+			    .detail("KeyPrev", data[iPrev].key);
 			logTestData(data);
 			return false;
 		}
 		return true;
 	}
-	ACTOR Future<bool> cycleCheck( Database cx, CycleWorkload* self, bool ok ) {
+	ACTOR Future<bool> cycleCheck(Database cx, CycleWorkload* self, bool ok) {
 		if (self->transactions.getMetric().value() < self->testDuration * self->minExpectedTransactionsPerSecond) {
 			TraceEvent(SevWarnAlways, "TestFailure")
-				.detail("Reason", "Rate below desired rate")
-				.detail("File", __FILE__)
-				.detail("Details", format("%.2f", self->transactions.getMetric().value() / (self->transactionsPerSecond * self->testDuration)))
-				.detail("TransactionsAchieved", self->transactions.getMetric().value())
-				.detail("MinTransactionsExpected", self->testDuration * self->minExpectedTransactionsPerSecond)
-				.detail("TransactionGoal", self->transactionsPerSecond * self->testDuration);
+			    .detail("Reason", "Rate below desired rate")
+			    .detail("File", __FILE__)
+			    .detail(
+			        "Details",
+			        format("%.2f",
+			               self->transactions.getMetric().value() / (self->transactionsPerSecond * self->testDuration)))
+			    .detail("TransactionsAchieved", self->transactions.getMetric().value())
+			    .detail("MinTransactionsExpected", self->testDuration * self->minExpectedTransactionsPerSecond)
+			    .detail("TransactionGoal", self->transactionsPerSecond * self->testDuration);
 			ok = false;
 		}
 		if (!self->clientId) {
@@ -220,9 +249,12 @@ struct CycleWorkload : TestWorkload {
 			state int retryCount = 0;
 			loop {
 				try {
-					state Version v = wait( tr.getReadVersion() );
-					Standalone<RangeResultRef> data = wait(tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)), firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)), self->nodeCount + 1));
-					ok = self->cycleCheckData( data, v ) && ok;
+					state Version v = wait(tr.getReadVersion());
+					Standalone<RangeResultRef> data =
+					    wait(tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
+					                     firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)),
+					                     self->nodeCount + 1));
+					ok = self->cycleCheckData(data, v) && ok;
 					break;
 				} catch (Error& e) {
 					retryCount++;

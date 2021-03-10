@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-
 #ifndef FLOW_FILE_TRACE_LOG_WRITER_H
 #define FLOW_FILE_TRACE_LOG_WRITER_H
 #pragma once
@@ -63,8 +62,13 @@ private:
 	void write(const char* str, size_t size);
 
 public:
-	FileTraceLogWriter(std::string directory, std::string processName, std::string basename, std::string extension,
-	                   uint64_t maxLogsSize, std::function<void()> onError, Reference<ITraceLogIssuesReporter> issues);
+	FileTraceLogWriter(std::string directory,
+	                   std::string processName,
+	                   std::string basename,
+	                   std::string extension,
+	                   uint64_t maxLogsSize,
+	                   std::function<void()> onError,
+	                   Reference<ITraceLogIssuesReporter> issues);
 
 	void addref() override;
 	void delref() override;

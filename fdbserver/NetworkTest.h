@@ -27,17 +27,17 @@
 #include "flow/FileIdentifier.h"
 
 struct NetworkTestInterface {
-	RequestStream< struct NetworkTestRequest > test;
+	RequestStream<struct NetworkTestRequest> test;
 	NetworkTestInterface() {}
-	NetworkTestInterface( NetworkAddress remote );
-	NetworkTestInterface( INetwork* local );
+	NetworkTestInterface(NetworkAddress remote);
+	NetworkTestInterface(INetwork* local);
 };
 
 struct NetworkTestReply {
 	constexpr static FileIdentifier file_identifier = 14465374;
 	Value value;
 	NetworkTestReply() {}
-	NetworkTestReply( Value value ) : value(value) {}
+	NetworkTestReply(Value value) : value(value) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, value);
@@ -49,8 +49,8 @@ struct NetworkTestRequest {
 	Key key;
 	uint32_t replySize;
 	ReplyPromise<struct NetworkTestReply> reply;
-	NetworkTestRequest(){}
-	NetworkTestRequest( Key key, uint32_t replySize ) : key(key), replySize(replySize) {}
+	NetworkTestRequest() {}
+	NetworkTestRequest(Key key, uint32_t replySize) : key(key), replySize(replySize) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, key, replySize, reply);
@@ -59,6 +59,6 @@ struct NetworkTestRequest {
 
 Future<Void> networkTestServer();
 
-Future<Void> networkTestClient( std:: string const& testServers );
+Future<Void> networkTestClient(std::string const& testServers);
 
 #endif

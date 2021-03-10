@@ -46,7 +46,8 @@ static Future<T> joinErrorGroup(Future<T> f, Promise<Void> p) {
 		wait(success(f) || p.getFuture());
 		return f.get();
 	} catch (Error& e) {
-		if (p.canBeSet()) p.sendError(e);
+		if (p.canBeSet())
+			p.sendError(e);
 		throw;
 	}
 }
@@ -117,7 +118,8 @@ public:
 	}
 
 	Future<Void> write(void const* data, int length, int64_t offset) override {
-		if (offset != m_cursor) throw non_sequential_op();
+		if (offset != m_cursor)
+			throw non_sequential_op();
 		m_cursor += length;
 
 		return m_error.getFuture() ||
@@ -125,15 +127,16 @@ public:
 	}
 
 	Future<Void> truncate(int64_t size) override {
-		if (size != m_cursor) return non_sequential_op();
+		if (size != m_cursor)
+			return non_sequential_op();
 		return Void();
 	}
 
 	ACTOR static Future<std::string> doPartUpload(AsyncFileS3BlobStoreWrite* f, Part* p) {
 		p->finalizeMD5();
 		std::string upload_id = wait(f->getUploadID());
-		std::string etag = wait(f->m_bstore->uploadPart(f->m_bucket, f->m_object, upload_id, p->number, &p->content,
-		                                                p->length, p->md5string));
+		std::string etag = wait(f->m_bstore->uploadPart(
+		    f->m_bucket, f->m_object, upload_id, p->number, &p->content, p->length, p->md5string));
 		return etag;
 	}
 
@@ -142,8 +145,8 @@ public:
 		if (f->m_parts.size() == 1) {
 			Reference<Part> part = f->m_parts.back();
 			part->finalizeMD5();
-			wait(f->m_bstore->writeEntireFileFromBuffer(f->m_bucket, f->m_object, &part->content, part->length,
-			                                            part->md5string));
+			wait(f->m_bstore->writeEntireFileFromBuffer(
+			    f->m_bucket, f->m_object, &part->content, part->length, part->md5string));
 			return Void();
 		}
 
@@ -221,7 +224,8 @@ private:
 
 	// End the current part and start uploading it, but also wait for a part to finish if too many are in transit.
 	ACTOR static Future<Void> endCurrentPart(AsyncFileS3BlobStoreWrite* f, bool startNew = false) {
-		if (f->m_parts.back()->length == 0) return Void();
+		if (f->m_parts.back()->length == 0)
+			return Void();
 
 		// Wait for an upload slot to be available
 		wait(f->m_concurrentUploads.take());
@@ -241,7 +245,8 @@ private:
 	}
 
 	Future<std::string> getUploadID() {
-		if (!m_upload_id.isValid()) m_upload_id = m_bstore->beginMultiPartUpload(m_bucket, m_object);
+		if (!m_upload_id.isValid())
+			m_upload_id = m_bstore->beginMultiPartUpload(m_bucket, m_object);
 		return m_upload_id;
 	}
 

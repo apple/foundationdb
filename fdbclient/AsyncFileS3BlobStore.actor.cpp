@@ -24,7 +24,8 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 Future<int64_t> AsyncFileS3BlobStoreRead::size() const {
-	if (!m_size.isValid()) m_size = m_bstore->objectSize(m_bucket, m_object);
+	if (!m_size.isValid())
+		m_size = m_bstore->objectSize(m_bucket, m_object);
 	return m_size;
 }
 
@@ -48,7 +49,8 @@ ACTOR Future<Void> sendStuff(int id, Reference<IRateControl> t, int bytes) {
 
 TEST_CASE("/backup/throttling") {
 	// Test will not work in simulation.
-	if (g_network->isSimulated()) return Void();
+	if (g_network->isSimulated())
+		return Void();
 
 	state int limit = 100000;
 	state Reference<IRateControl> t(new SpeedLimit(limit, 1));

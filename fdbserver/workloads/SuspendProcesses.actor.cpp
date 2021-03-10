@@ -14,7 +14,8 @@ struct SuspendProcessesWorkload : TestWorkload {
 	double waitTimeDuration;
 
 	SuspendProcessesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		prefixSuspendProcesses = getOption(options, LiteralStringRef("prefixesSuspendProcesses"), std::vector<std::string>());
+		prefixSuspendProcesses =
+		    getOption(options, LiteralStringRef("prefixesSuspendProcesses"), std::vector<std::string>());
 		waitTimeDuration = getOption(options, LiteralStringRef("waitTimeDuration"), 0);
 		suspendTimeDuration = getOption(options, LiteralStringRef("suspendTimeDuration"), 0);
 	}
@@ -60,7 +61,8 @@ struct SuspendProcessesWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		if (clientId != 0) return Void();
+		if (clientId != 0)
+			return Void();
 		return _start(cx, this);
 	}
 

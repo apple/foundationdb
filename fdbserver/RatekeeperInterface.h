@@ -40,12 +40,8 @@ struct RatekeeperInterface {
 	void initEndpoints() {}
 	UID id() const { return myId; }
 	NetworkAddress address() const { return getRateInfo.getEndpoint().getPrimaryAddress(); }
-	bool operator== (const RatekeeperInterface& r) const {
-		return id() == r.id();
-	}
-	bool operator!= (const RatekeeperInterface& r) const {
-		return !(*this == r);
-	}
+	bool operator==(const RatekeeperInterface& r) const { return id() == r.id(); }
+	bool operator!=(const RatekeeperInterface& r) const { return !(*this == r); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {
@@ -64,13 +60,13 @@ struct ClientTagThrottleLimits {
 	void serialize(Archive& ar) {
 		// Convert expiration time to a duration to avoid clock differences
 		double duration = 0;
-		if(!ar.isDeserializing) {
+		if (!ar.isDeserializing) {
 			duration = expiration - now();
 		}
 
 		serializer(ar, tpsRate, duration);
 
-		if(ar.isDeserializing) {
+		if (ar.isDeserializing) {
 			expiration = now() + duration;
 		}
 	}
@@ -132,16 +128,19 @@ struct GetRateInfoRequest {
 	ReplyPromise<struct GetRateInfoReply> reply;
 
 	GetRateInfoRequest() {}
-	GetRateInfoRequest(UID const& requesterID, int64_t totalReleasedTransactions, int64_t batchReleasedTransactions,
-	                   TransactionTagMap<uint64_t> throttledTagCounts, bool detailed)
+	GetRateInfoRequest(UID const& requesterID,
+	                   int64_t totalReleasedTransactions,
+	                   int64_t batchReleasedTransactions,
+	                   TransactionTagMap<uint64_t> throttledTagCounts,
+	                   bool detailed)
 	  : requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions),
 	    batchReleasedTransactions(batchReleasedTransactions), throttledTagCounts(throttledTagCounts),
 	    detailed(detailed) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requesterID, totalReleasedTransactions, batchReleasedTransactions, throttledTagCounts, detailed,
-		           reply);
+		serializer(
+		    ar, requesterID, totalReleasedTransactions, batchReleasedTransactions, throttledTagCounts, detailed, reply);
 	}
 };
 
@@ -153,7 +152,7 @@ struct HaltRatekeeperRequest {
 	HaltRatekeeperRequest() {}
 	explicit HaltRatekeeperRequest(UID uid) : requesterID(uid) {}
 
-	template<class Ar>
+	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, requesterID, reply);
 	}
@@ -174,4 +173,4 @@ struct ReportCommitCostEstimationRequest {
 	}
 };
 
-#endif //FDBSERVER_RATEKEEPERINTERFACE_H
+#endif // FDBSERVER_RATEKEEPERINTERFACE_H

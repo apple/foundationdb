@@ -22,10 +22,10 @@
 #include "flow/IRandom.h"
 #include "flow/Tracing.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_NATIVEAPI_ACTOR_G_H)
-	#define FDBCLIENT_NATIVEAPI_ACTOR_G_H
-	#include "fdbclient/NativeAPI.actor.g.h"
+#define FDBCLIENT_NATIVEAPI_ACTOR_G_H
+#include "fdbclient/NativeAPI.actor.g.h"
 #elif !defined(FDBCLIENT_NATIVEAPI_ACTOR_H)
-	#define FDBCLIENT_NATIVEAPI_ACTOR_H
+#define FDBCLIENT_NATIVEAPI_ACTOR_H
 
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
@@ -40,13 +40,16 @@
 
 // CLIENT_BUGGIFY should be used to randomly introduce failures at run time (like BUGGIFY but for client side testing)
 // Unlike BUGGIFY, CLIENT_BUGGIFY can be enabled and disabled at runtime.
-#define CLIENT_BUGGIFY_WITH_PROB(x) (getSBVar(__FILE__, __LINE__, BuggifyType::Client) && deterministicRandom()->random01() < (x))
+#define CLIENT_BUGGIFY_WITH_PROB(x)                                                                                    \
+	(getSBVar(__FILE__, __LINE__, BuggifyType::Client) && deterministicRandom()->random01() < (x))
 #define CLIENT_BUGGIFY CLIENT_BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)])
 
 // Incomplete types that are reference counted
 class DatabaseContext;
-template <> void addref( DatabaseContext* ptr );
-template <> void delref( DatabaseContext* ptr );
+template <>
+void addref(DatabaseContext* ptr);
+template <>
+void delref(DatabaseContext* ptr);
 
 void validateOptionValue(Optional<StringRef> value, bool shouldBePresent);
 
@@ -73,18 +76,25 @@ class Database {
 public:
 	enum { API_VERSION_LATEST = -1 };
 
-	static Database createDatabase( Reference<ClusterConnectionFile> connFile, int apiVersion, bool internal=true, LocalityData const& clientLocality=LocalityData(), DatabaseContext *preallocatedDb=nullptr );
-	static Database createDatabase( std::string connFileName, int apiVersion, bool internal=true, LocalityData const& clientLocality=LocalityData() ); 
+	static Database createDatabase(Reference<ClusterConnectionFile> connFile,
+	                               int apiVersion,
+	                               bool internal = true,
+	                               LocalityData const& clientLocality = LocalityData(),
+	                               DatabaseContext* preallocatedDb = nullptr);
+	static Database createDatabase(std::string connFileName,
+	                               int apiVersion,
+	                               bool internal = true,
+	                               LocalityData const& clientLocality = LocalityData());
 
-	Database() {}  // an uninitialized database can be destructed or reassigned safely; that's it
-	void operator= ( Database const& rhs ) { db = rhs.db; }
-	Database( Database const& rhs ) : db(rhs.db) {}
+	Database() {} // an uninitialized database can be destructed or reassigned safely; that's it
+	void operator=(Database const& rhs) { db = rhs.db; }
+	Database(Database const& rhs) : db(rhs.db) {}
 	Database(Database&& r) noexcept : db(std::move(r.db)) {}
 	void operator=(Database&& r) noexcept { db = std::move(r.db); }
 
 	// For internal use by the native client:
 	explicit Database(Reference<DatabaseContext> cx) : db(cx) {}
-	explicit Database( DatabaseContext* cx ) : db(cx) {}
+	explicit Database(DatabaseContext* cx) : db(cx) {}
 	inline DatabaseContext* getPtr() const { return db.getPtr(); }
 	inline DatabaseContext* extractPtr() { return db.extractPtr(); }
 	DatabaseContext* operator->() const { return db.getPtr(); }
@@ -95,7 +105,7 @@ private:
 	Reference<DatabaseContext> db;
 };
 
-void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );
+void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 
 // Configures the global networking machinery
 void setupNetwork(uint64_t transportId = 0, bool useMetrics = false);
@@ -171,14 +181,15 @@ struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopy
 
 	TransactionLogInfo() : logLocation(DONT_LOG), maxFieldLength(0) {}
 	TransactionLogInfo(LoggingLocation location) : logLocation(location), maxFieldLength(0) {}
-	TransactionLogInfo(std::string id, LoggingLocation location) : logLocation(location), identifier(id), maxFieldLength(0) {}
+	TransactionLogInfo(std::string id, LoggingLocation location)
+	  : logLocation(location), identifier(id), maxFieldLength(0) {}
 
 	void setIdentifier(std::string id) { identifier = id; }
 	void logTo(LoggingLocation loc) { logLocation = logLocation | loc; }
 
 	template <typename T>
 	void addLog(const T& event) {
-		if(logLocation & TRACE_LOG) {
+		if (logLocation & TRACE_LOG) {
 			ASSERT(!identifier.empty());
 			event.logEvent(identifier, maxFieldLength);
 		}
@@ -187,9 +198,10 @@ struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopy
 			return;
 		}
 
-		if(logLocation & DATABASE) {
+		if (logLocation & DATABASE) {
 			logsAdded = true;
-			static_assert(std::is_base_of<FdbClientLogEvents::Event, T>::value, "Event should be derived class of FdbClientLogEvents::Event");
+			static_assert(std::is_base_of<FdbClientLogEvents::Event, T>::value,
+			              "Event should be derived class of FdbClientLogEvents::Event");
 			trLogWriter << event;
 		}
 	}
@@ -212,23 +224,22 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 	Promise<Void> onSetWatchTrigger;
 	Future<Void> watchFuture;
 
-	Watch() : watchFuture(Never()), valuePresent(false), setPresent(false) { }
-	Watch(Key key) : key(key), watchFuture(Never()), valuePresent(false), setPresent(false) { }
-	Watch(Key key, Optional<Value> val) : key(key), value(val), watchFuture(Never()), valuePresent(true), setPresent(false) { }
+	Watch() : watchFuture(Never()), valuePresent(false), setPresent(false) {}
+	Watch(Key key) : key(key), watchFuture(Never()), valuePresent(false), setPresent(false) {}
+	Watch(Key key, Optional<Value> val)
+	  : key(key), value(val), watchFuture(Never()), valuePresent(true), setPresent(false) {}
 
 	void setWatch(Future<Void> watchFuture);
 };
 
 class Transaction : NonCopyable {
 public:
-	explicit Transaction( Database const& cx );
+	explicit Transaction(Database const& cx);
 	~Transaction();
 
-	void preinitializeOnForeignThread() {
-		committedVersion = invalidVersion;
-	}
+	void preinitializeOnForeignThread() { committedVersion = invalidVersion; }
 
-	void setVersion( Version v );
+	void setVersion(Version v);
 	Future<Version> getReadVersion() { return getReadVersion(0); }
 	Future<Version> getRawReadVersion();
 	Optional<Version> getCachedReadVersion();
@@ -236,51 +247,76 @@ public:
 	[[nodiscard]] Future<Optional<Value>> get(const Key& key, bool snapshot = false);
 	[[nodiscard]] Future<Void> watch(Reference<Watch> watch);
 	[[nodiscard]] Future<Key> getKey(const KeySelector& key, bool snapshot = false);
-	//Future< Optional<KeyValue> > get( const KeySelectorRef& key );
-	[[nodiscard]] Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin, const KeySelector& end,
-	                                                          int limit, bool snapshot = false, bool reverse = false);
-	[[nodiscard]] Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin, const KeySelector& end,
-	                                                          GetRangeLimits limits, bool snapshot = false,
+	// Future< Optional<KeyValue> > get( const KeySelectorRef& key );
+	[[nodiscard]] Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin,
+	                                                          const KeySelector& end,
+	                                                          int limit,
+	                                                          bool snapshot = false,
 	                                                          bool reverse = false);
-	[[nodiscard]] Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys, int limit, bool snapshot = false,
+	[[nodiscard]] Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin,
+	                                                          const KeySelector& end,
+	                                                          GetRangeLimits limits,
+	                                                          bool snapshot = false,
+	                                                          bool reverse = false);
+	[[nodiscard]] Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys,
+	                                                          int limit,
+	                                                          bool snapshot = false,
 	                                                          bool reverse = false) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
-		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()), limit, snapshot, reverse);
+		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
+		                limit,
+		                snapshot,
+		                reverse);
 	}
-	[[nodiscard]] Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys, GetRangeLimits limits,
-	                                                          bool snapshot = false, bool reverse = false) {
+	[[nodiscard]] Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys,
+	                                                          GetRangeLimits limits,
+	                                                          bool snapshot = false,
+	                                                          bool reverse = false) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
-		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()), limits, snapshot, reverse);
+		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
+		                limits,
+		                snapshot,
+		                reverse);
 	}
 
 	[[nodiscard]] Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key);
 
 	void enableCheckWrites();
-	void addReadConflictRange( KeyRangeRef const& keys );
-	void addWriteConflictRange( KeyRangeRef const& keys );
+	void addReadConflictRange(KeyRangeRef const& keys);
+	void addWriteConflictRange(KeyRangeRef const& keys);
 	void makeSelfConflicting();
 
-	Future< Void > warmRange( Database cx, KeyRange keys );
+	Future<Void> warmRange(Database cx, KeyRange keys);
 
-	Future< std::pair<Optional<StorageMetrics>, int> > waitStorageMetrics( KeyRange const& keys, StorageMetrics const& min, StorageMetrics const& max, StorageMetrics const& permittedError, int shardLimit, int expectedShardCount );
+	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
+	                                                                    StorageMetrics const& min,
+	                                                                    StorageMetrics const& max,
+	                                                                    StorageMetrics const& permittedError,
+	                                                                    int shardLimit,
+	                                                                    int expectedShardCount);
 	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
-	Future< StorageMetrics > getStorageMetrics( KeyRange const& keys, int shardLimit );
-	Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( KeyRange const& keys, StorageMetrics const& limit, StorageMetrics const& estimated );
+	Future<StorageMetrics> getStorageMetrics(KeyRange const& keys, int shardLimit);
+	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys,
+	                                                          StorageMetrics const& limit,
+	                                                          StorageMetrics const& estimated);
 	Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(KeyRange const& keys);
 
 	// Try to split the given range into equally sized chunks based on estimated size.
 	// The returned list would still be in form of [keys.begin, splitPoint1, splitPoint2, ... , keys.end]
 	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize);
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
-	void set( const KeyRef& key, const ValueRef& value, bool addConflictRange = true );
-	void atomicOp( const KeyRef& key, const ValueRef& value, MutationRef::Type operationType, bool addConflictRange = true );
-	void clear( const KeyRangeRef& range, bool addConflictRange = true );
-	void clear( const KeyRef& key, bool addConflictRange = true );
+	void set(const KeyRef& key, const ValueRef& value, bool addConflictRange = true);
+	void atomicOp(const KeyRef& key,
+	              const ValueRef& value,
+	              MutationRef::Type operationType,
+	              bool addConflictRange = true);
+	void clear(const KeyRangeRef& range, bool addConflictRange = true);
+	void clear(const KeyRef& key, bool addConflictRange = true);
 	[[nodiscard]] Future<Void> commit(); // Throws not_committed or commit_unknown_result errors in normal operation
 
-	void setOption( FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );
+	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 
-	Version getCommittedVersion() { return committedVersion; }   // May be called only after commit() returns success
+	Version getCommittedVersion() { return committedVersion; } // May be called only after commit() returns success
 	[[nodiscard]] Future<Standalone<StringRef>>
 	getVersionstamp(); // Will be fulfilled only after commit() returns success
 
@@ -314,9 +350,7 @@ public:
 
 	void checkDeferredError();
 
-	Database getDatabase() const {
-		return cx;
-	}
+	Database getDatabase() const { return cx; }
 	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(const Database& cx);
 	TransactionOptions options;
 	Span span;
@@ -349,12 +383,15 @@ private:
 };
 
 ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanID spanContext);
-ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx, KeyRange keys,
-                                                                               int shardLimit);
+ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx,
+                                                                                  KeyRange keys,
+                                                                                  int shardLimit);
 
-std::string unprintable( const std::string& );
+std::string unprintable(const std::string&);
 
-int64_t extractIntOption( Optional<StringRef> value, int64_t minValue = std::numeric_limits<int64_t>::min(), int64_t maxValue = std::numeric_limits<int64_t>::max() );
+int64_t extractIntOption(Optional<StringRef> value,
+                         int64_t minValue = std::numeric_limits<int64_t>::min(),
+                         int64_t maxValue = std::numeric_limits<int64_t>::max());
 
 // Takes a snapshot of the cluster, specifically the following persistent
 // states: coordinator, TLog and storage state

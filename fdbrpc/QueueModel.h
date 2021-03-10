@@ -35,7 +35,7 @@ struct QueueData {
 	// The current outstanding requests sent by the local client to this storage
 	// server. The number is smoothed out over a continuous timeline.
 	Smoother smoothOutstanding;
-	
+
 	// The last client perceived latency to this storage server.
 	double latency;
 
