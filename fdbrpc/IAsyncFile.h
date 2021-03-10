@@ -20,6 +20,7 @@
 
 #ifndef FLOW_IASYNCFILE_H
 #define FLOW_IASYNCFILE_H
+#include <string>
 #pragma once
 
 #include <ctime>
@@ -97,6 +98,9 @@ public:
 
 	// Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
 	virtual Future<Void> deleteFile(const std::string& filename, bool mustBeDurable) = 0;
+
+	// renames the file, doesn't sync the directory
+	virtual Future<Void> renameFile(std::string const& from, std::string const& to) = 0;
 
 	// Unlinks a file and then deletes it slowly by truncating the file repeatedly.
 	// If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.

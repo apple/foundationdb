@@ -121,7 +121,7 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 			}
 		}
 
-		for (const Tag tag : tags) { // tags without progress data
+		for (const Tag& tag : tags) { // tags without progress data
 			tagVersions.insert({ tag, adjustedBeginVersion });
 			TraceEvent("BackupVersionRange", dbgid)
 			    .detail("OldEpoch", epoch)

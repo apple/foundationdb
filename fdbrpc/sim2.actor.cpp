@@ -19,9 +19,7 @@
  */
 
 #include <cinttypes>
-#include <deque>
 #include <memory>
-#include <vector>
 
 #include "fdbrpc/simulator.h"
 #define BOOST_SYSTEM_NO_LIB
@@ -2083,6 +2081,17 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 // Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
 Future<Void> Sim2FileSystem::deleteFile(const std::string& filename, bool mustBeDurable) {
 	return Sim2::deleteFileImpl(&g_sim2, filename, mustBeDurable);
+}
+
+ACTOR Future<Void> renameFileImpl(std::string from, std::string to) {
+	wait(delay(0.5*deterministicRandom()->random01()));
+	::renameFile(from, to);
+	wait(delay(0.5*deterministicRandom()->random01()));
+	return Void();
+}
+
+Future<Void> Sim2FileSystem::renameFile(std::string const& from, std::string const& to) {
+	return renameFileImpl(from, to);
 }
 
 Future<std::time_t> Sim2FileSystem::lastWriteTime(const std::string& filename) {
