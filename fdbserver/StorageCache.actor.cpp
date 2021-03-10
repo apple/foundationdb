@@ -1174,9 +1174,9 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 		// FIXME: enable when debugKeyRange is active
 		//debugKeyRange("fetchKeysBegin", data->version.get(), cacheRange->keys);
 
-		TraceEvent(SevDebug, interval.begin(), data->thisServerID)
-			.detail("KeyBegin", cacheRange->keys.begin)
-			.detail("KeyEnd",cacheRange->keys.end);
+		//TraceEvent(SevDebug, interval.begin(), data->thisServerID)
+		//	.detail("KeyBegin", cacheRange->keys.begin)
+		//	.detail("KeyEnd",cacheRange->keys.end);
 
 		validate(data);
 
@@ -1213,7 +1213,6 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 
 		cacheRange->phase = AddingCacheRange::Fetching;
 		state Version fetchVersion = data->version.get();
-		state Version updateVersion;
 
 		data->updateVersionLock.release();
 
@@ -1256,8 +1255,7 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 				//Write this_block to mutationLog and versionedMap
 				state KeyValueRef *kvItr = this_block.begin();
 				for(; kvItr != this_block.end(); ++kvItr) {
-					updateVersion = data->mutableData().latestVersion;
-					applyMutation(data->updater, data, MutationRef(MutationRef::SetValue, kvItr->key, kvItr->value), updateVersion/*fetchVersion*/);
+					applyMutation(data->updater, data, MutationRef(MutationRef::SetValue, kvItr->key, kvItr->value), fetchVersion);
 					data->counters.bytesFetched += expectedSize;
 					wait(yield());
 				}
@@ -1278,10 +1276,8 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 				TraceEvent("SCFKBlockFail", data->thisServerID).error(e,true).suppressFor(1.0).detail("FKID", interval.pairID);
 				if (e.code() == error_code_transaction_too_old){
 					TEST(true); // A storage server has forgotten the history data we are fetching
-					state Version lastFV = fetchVersion;
-					wait( data->updateVersionLock.take() );
+					Version lastFV = fetchVersion;
 					fetchVersion = data->version.get();
-					data->updateVersionLock.release();
 					isTooOld = false;
 
 					// Throw away deferred updates from before fetchVersion, since we don't need them to use blocks fetched at that version
@@ -1390,7 +1386,6 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 		//data->counters.fetchExecutingMS += 1000*(now() - executeStart);
 
 		// TraceEvent(SevDebug, interval.end(), data->thisServerID);
-		TraceEvent(SevDebug, interval.end(), data->thisServerID).detail("Version", data->version.get());
 	} catch (Error &e){
 		// TraceEvent(SevDebug, interval.end(), data->thisServerID).error(e, true).detail("Version", data->version.get());
 
@@ -1401,7 +1396,7 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 				removeDataRange( data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->cachedRangeMap, keys );
 				//data->storage.clearRange( keys );
 			} else {
-				//ASSERT( data->data().getLatestVersion() > data->version.get() );
+				ASSERT( data->data().getLatestVersion() > data->version.get() );
 				removeDataRange( data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->cachedRangeMap, keys );
 				//setAvailableStatus(data, keys, false);
 				// Prevent another, overlapping fetchKeys from entering the Fetching phase until data->data().getLatestVersion() is durable
@@ -1736,7 +1731,7 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 
 			start = now();
 			wait( data->updateVersionLock.take(TaskPriority::TLogPeekReply,1) );
-			state std::unique_ptr<FlowLock::Releaser> holdingUVL = std::make_unique<FlowLock::Releaser>(data->updateVersionLock);
+			state FlowLock::Releaser holdingDVL( data->updateVersionLock );
 			if(now() - start > 0.1)
 				TraceEvent("SCSlowTakeLock1", data->thisServerID).detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken).detail("Duration", now() - start).detail("Version", data->version.get());
 
@@ -1944,7 +1939,6 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 			}
 		}
 
-		holdingUVL->release();
 		tagAt = std::max( tagAt, cursor->version().version);
 	}
 }
