@@ -1266,16 +1266,17 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				}
 			}
 			when(SetFailureInjection req = waitNext(interf.clientInterface.setFailureInjection.getFuture())) {
-				if (!FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
+				if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
+					if (req.injectNetworkFailures.present()) {
+						FailureInjector::injector()->setConnectionFailures(req.injectNetworkFailures.get());
+					}
+					if (req.clog.present()) {
+						FailureInjector::injector()->clogFor(req.clog.get().address, req.clog.get().time);
+					}
+					req.reply.send(Void());
+				} else {
 					req.reply.sendError(client_invalid_operation());
 				}
-				if (req.injectNetworkFailures.present()) {
-					FailureInjector::injector()->setConnectionFailures(req.injectNetworkFailures.get());
-				}
-				if (req.clog.present()) {
-					FailureInjector::injector()->clogFor(req.clog.get().address, req.clog.get().time);
-				}
-				req.reply.send(Void());
 			}
 			when(ProfilerRequest req = waitNext(interf.clientInterface.profiler.getFuture())) {
 				state ProfilerRequest profilerReq = req;
