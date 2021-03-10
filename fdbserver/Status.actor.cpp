@@ -2099,7 +2099,7 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance,
 
 	for (int i = 0; i < tLogs.size(); i++) {
 		if (tLogs[i].tLogs.size() == 0) {
-			// We can have LogSets where there are no tLogs but some LogRouters. Its the way
+			// We can have LogSets where there are no tLogs but some LogRouters. It's the way
 			// recruiting is implemented for old LogRouters in TagPartitionedLogSystem, where
 			// it adds an empty LogSet for missing locality.
 			continue;
