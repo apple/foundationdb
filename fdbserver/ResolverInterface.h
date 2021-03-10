@@ -31,25 +31,25 @@ struct ResolverInterface {
 
 	LocalityData locality;
 	UID uniqueID;
-	RequestStream< struct ResolveTransactionBatchRequest > resolve;
-	RequestStream< struct ResolutionMetricsRequest > metrics;
-	RequestStream< struct ResolutionSplitRequest > split;
+	RequestStream<struct ResolveTransactionBatchRequest> resolve;
+	RequestStream<struct ResolutionMetricsRequest> metrics;
+	RequestStream<struct ResolutionSplitRequest> split;
 
 	RequestStream<ReplyPromise<Void>> waitFailure;
 
-	ResolverInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
+	ResolverInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }
-	bool operator == ( ResolverInterface const& r ) const { return id() == r.id(); }
-	bool operator != ( ResolverInterface const& r ) const { return id() != r.id(); }
+	bool operator==(ResolverInterface const& r) const { return id() == r.id(); }
+	bool operator!=(ResolverInterface const& r) const { return id() != r.id(); }
 	NetworkAddress address() const { return resolve.getEndpoint().getPrimaryAddress(); }
 	void initEndpoints() {
-		metrics.getEndpoint( TaskPriority::ResolutionMetrics );
-		split.getEndpoint( TaskPriority::ResolutionMetrics );
+		metrics.getEndpoint(TaskPriority::ResolutionMetrics);
+		split.getEndpoint(TaskPriority::ResolutionMetrics);
 	}
 
-	template <class Ar> 
-	void serialize( Ar& ar ) {
+	template <class Ar>
+	void serialize(Ar& ar) {
 		serializer(ar, uniqueID, locality, resolve, metrics, split, waitFailure);
 	}
 };
@@ -57,13 +57,13 @@ struct ResolverInterface {
 struct StateTransactionRef {
 	constexpr static FileIdentifier file_identifier = 6150271;
 	StateTransactionRef() {}
-	StateTransactionRef(const bool committed, VectorRef<MutationRef> const& mutations) : committed(committed), mutations(mutations) {}
-	StateTransactionRef(Arena &p, const StateTransactionRef &toCopy) : committed(toCopy.committed), mutations(p, toCopy.mutations) {}
+	StateTransactionRef(const bool committed, VectorRef<MutationRef> const& mutations)
+	  : committed(committed), mutations(mutations) {}
+	StateTransactionRef(Arena& p, const StateTransactionRef& toCopy)
+	  : committed(toCopy.committed), mutations(p, toCopy.mutations) {}
 	bool committed;
 	VectorRef<MutationRef> mutations;
-	size_t expectedSize() const {
-		return mutations.expectedSize();
-	}
+	size_t expectedSize() const { return mutations.expectedSize(); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {
@@ -76,7 +76,7 @@ struct ResolveTransactionBatchReply {
 	Arena arena;
 	VectorRef<uint8_t> committed;
 	Optional<UID> debugID;
-	VectorRef<VectorRef<StateTransactionRef>> stateMutations;  // [version][transaction#] -> (committed, [mutation#])
+	VectorRef<VectorRef<StateTransactionRef>> stateMutations; // [version][transaction#] -> (committed, [mutation#])
 	std::map<int, VectorRef<int>>
 	    conflictingKeyRangeMap; // transaction index -> conflicting read_conflict_range ids given by the resolver
 
@@ -84,7 +84,6 @@ struct ResolveTransactionBatchReply {
 	void serialize(Archive& ar) {
 		serializer(ar, committed, stateMutations, debugID, conflictingKeyRangeMap, arena);
 	}
-
 };
 
 struct ResolveTransactionBatchRequest {
@@ -92,16 +91,18 @@ struct ResolveTransactionBatchRequest {
 	Arena arena;
 
 	Version prevVersion;
-	Version version;   // FIXME: ?
+	Version version; // FIXME: ?
 	Version lastReceivedVersion;
 	VectorRef<CommitTransactionRef> transactions;
-	VectorRef<int> txnStateTransactions;   // Offsets of elements of transactions that have (transaction subsystem state) mutations
+	VectorRef<int>
+	    txnStateTransactions; // Offsets of elements of transactions that have (transaction subsystem state) mutations
 	ReplyPromise<ResolveTransactionBatchReply> reply;
 	Optional<UID> debugID;
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, prevVersion, version, lastReceivedVersion, transactions, txnStateTransactions, reply, arena, debugID);
+		serializer(
+		    ar, prevVersion, version, lastReceivedVersion, transactions, txnStateTransactions, reply, arena, debugID);
 	}
 };
 
@@ -136,7 +137,6 @@ struct ResolutionSplitReply {
 	void serialize(Archive& ar) {
 		serializer(ar, key, used);
 	}
-
 };
 
 struct ResolutionSplitRequest {

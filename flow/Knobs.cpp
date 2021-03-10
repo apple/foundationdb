@@ -25,7 +25,7 @@
 
 FlowKnobs const* FLOW_KNOBS = new FlowKnobs();
 
-#define init( knob, value ) initKnob( knob, value, #knob )
+#define init(knob, value) initKnob(knob, value, #knob)
 
 FlowKnobs::FlowKnobs() {
 	initialize();
@@ -95,7 +95,7 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS,               1 );
 	init( TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS,               1 );
 	init( TLS_CLIENT_HANDSHAKE_THREADS,                          0 );
-	init( TLS_SERVER_HANDSHAKE_THREADS,                       1000 );
+	init( TLS_SERVER_HANDSHAKE_THREADS,                         64 );
 	init( TLS_HANDSHAKE_THREAD_STACKSIZE,                64 * 1024 );
 	init( TLS_MALLOC_ARENA_MAX,                                  6 );
 	init( TLS_HANDSHAKE_LIMIT,                                1000 );
@@ -241,9 +241,9 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 }
 // clang-format on
 
-static std::string toLower( std::string const& name ) {
+static std::string toLower(std::string const& name) {
 	std::string lower_name;
-	for(auto c = name.begin(); c != name.end(); ++c)
+	for (auto c = name.begin(); c != name.end(); ++c)
 		if (*c >= 'A' && *c <= 'Z')
 			lower_name += *c - 'A' + 'a';
 		else
@@ -251,24 +251,24 @@ static std::string toLower( std::string const& name ) {
 	return lower_name;
 }
 
-bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
+bool Knobs::setKnob(std::string const& knob, std::string const& value) {
 	explicitlySetKnobs.insert(toLower(knob));
 	if (double_knobs.count(knob)) {
 		double v;
-		int n=0;
+		int n = 0;
 		if (sscanf(value.c_str(), "%lf%n", &v, &n) != 1 || n != value.size())
 			throw invalid_option_value();
 		*double_knobs[knob] = v;
 		return true;
 	}
 	if (bool_knobs.count(knob)) {
-		if(toLower(value) == "true") {
+		if (toLower(value) == "true") {
 			*bool_knobs[knob] = true;
-		} else if(toLower(value) == "false") {
+		} else if (toLower(value) == "false") {
 			*bool_knobs[knob] = false;
 		} else {
 			int64_t v;
-			int n=0;
+			int n = 0;
 			if (StringRef(value).startsWith(LiteralStringRef("0x"))) {
 				if (sscanf(value.c_str(), "0x%" SCNx64 "%n", &v, &n) != 1 || n != value.size())
 					throw invalid_option_value();
@@ -282,7 +282,7 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 	}
 	if (int64_knobs.count(knob) || int_knobs.count(knob)) {
 		int64_t v;
-		int n=0;
+		int n = 0;
 		if (StringRef(value).startsWith(LiteralStringRef("0x"))) {
 			if (sscanf(value.c_str(), "0x%" SCNx64 "%n", &v, &n) != 1 || n != value.size())
 				throw invalid_option_value();
@@ -293,7 +293,7 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 		if (int64_knobs.count(knob))
 			*int64_knobs[knob] = v;
 		else {
-			if ( v < std::numeric_limits<int>::min() || v > std::numeric_limits<int>::max() )
+			if (v < std::numeric_limits<int>::min() || v > std::numeric_limits<int>::max())
 				throw invalid_option_value();
 			*int_knobs[knob] = v;
 		}
@@ -307,35 +307,35 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 	return false;
 }
 
-void Knobs::initKnob( double& knob, double value, std::string const& name ) {
+void Knobs::initKnob(double& knob, double value, std::string const& name) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
 		double_knobs[toLower(name)] = &knob;
 	}
 }
 
-void Knobs::initKnob( int64_t& knob, int64_t value, std::string const& name ) {
+void Knobs::initKnob(int64_t& knob, int64_t value, std::string const& name) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
 		int64_knobs[toLower(name)] = &knob;
 	}
 }
 
-void Knobs::initKnob( int& knob, int value, std::string const& name ) {
+void Knobs::initKnob(int& knob, int value, std::string const& name) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
 		int_knobs[toLower(name)] = &knob;
 	}
 }
 
-void Knobs::initKnob( std::string& knob, const std::string& value, const std::string& name ) {
+void Knobs::initKnob(std::string& knob, const std::string& value, const std::string& name) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
 		string_knobs[toLower(name)] = &knob;
 	}
 }
 
-void Knobs::initKnob( bool& knob, bool value, std::string const& name ) {
+void Knobs::initKnob(bool& knob, bool value, std::string const& name) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
 		bool_knobs[toLower(name)] = &knob;
@@ -343,14 +343,14 @@ void Knobs::initKnob( bool& knob, bool value, std::string const& name ) {
 }
 
 void Knobs::trace() {
-	for(auto &k : double_knobs)
+	for (auto& k : double_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
-	for(auto &k : int_knobs)
+	for (auto& k : int_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
-	for(auto &k : int64_knobs)
+	for (auto& k : int64_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
-	for(auto &k : string_knobs)
+	for (auto& k : string_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
-	for(auto &k : bool_knobs)
+	for (auto& k : bool_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
 }

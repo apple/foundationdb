@@ -46,7 +46,7 @@
 
 class ThreadSpinLock {
 public:
-// #ifdef _WIN32
+	// #ifdef _WIN32
 	ThreadSpinLock() {
 #if VALGRIND
 		ANNOTATE_RWLOCK_CREATE(this);
@@ -87,13 +87,22 @@ private:
 
 class ThreadSpinLockHolder {
 	ThreadSpinLock& lock;
+
 public:
-	ThreadSpinLockHolder( ThreadSpinLock& lock ) : lock(lock) { lock.enter(); }
+	ThreadSpinLockHolder(ThreadSpinLock& lock) : lock(lock) { lock.enter(); }
 	~ThreadSpinLockHolder() { lock.leave(); }
 };
 
-class ThreadUnsafeSpinLock { public: void enter(){}; void leave(){}; void assertNotEntered(){}; };
-class ThreadUnsafeSpinLockHolder { public: ThreadUnsafeSpinLockHolder(ThreadUnsafeSpinLock&){}; };
+class ThreadUnsafeSpinLock {
+public:
+	void enter(){};
+	void leave(){};
+	void assertNotEntered(){};
+};
+class ThreadUnsafeSpinLockHolder {
+public:
+	ThreadUnsafeSpinLockHolder(ThreadUnsafeSpinLock&){};
+};
 
 #if FLOW_THREAD_SAFE
 
@@ -124,11 +133,10 @@ private:
 	semaphore_t sem;
 #else
 #error Port me!
-#endif	
+#endif
 };
 
-class Mutex
-{
+class Mutex {
 	// A re-entrant process-local blocking lock (e.g. CRITICAL_SECTION on Windows)
 	// Thread safe even if !FLOW_THREAD_SAFE
 public:
@@ -136,14 +144,16 @@ public:
 	~Mutex();
 	void enter();
 	void leave();
+
 private:
 	void* impl;
 };
 
 class MutexHolder {
 	Mutex& lock;
+
 public:
-	MutexHolder( Mutex& lock ) : lock(lock) { lock.enter(); }
+	MutexHolder(Mutex& lock) : lock(lock) { lock.enter(); }
 	~MutexHolder() { lock.leave(); }
 };
 

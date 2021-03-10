@@ -23,7 +23,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbrpc/simulator.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct RandomCloggingWorkload : TestWorkload {
 	bool enabled;
@@ -31,41 +31,43 @@ struct RandomCloggingWorkload : TestWorkload {
 	double scale, clogginess;
 	int swizzleClog;
 
-	RandomCloggingWorkload(WorkloadContext const& wcx) 
-		: TestWorkload(wcx)
-	{
+	RandomCloggingWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
-		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
-		scale = getOption( options, LiteralStringRef("scale"), 1.0 );
-		clogginess = getOption( options, LiteralStringRef("clogginess"), 1.0 );
-		swizzleClog = getOption( options, LiteralStringRef("swizzle"), 0 );
+		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
+		scale = getOption(options, LiteralStringRef("scale"), 1.0);
+		clogginess = getOption(options, LiteralStringRef("clogginess"), 1.0);
+		swizzleClog = getOption(options, LiteralStringRef("swizzle"), 0);
 	}
 
-	virtual std::string description() { if (&g_simulator == g_network) return "RandomClogging"; else return "NoRC"; }
-	virtual Future<Void> setup( Database const& cx ) { return Void(); }
-	virtual Future<Void> start( Database const& cx ) {
+	virtual std::string description() {
+		if (&g_simulator == g_network)
+			return "RandomClogging";
+		else
+			return "NoRC";
+	}
+	virtual Future<Void> setup(Database const& cx) { return Void(); }
+	virtual Future<Void> start(Database const& cx) {
 		if (&g_simulator == g_network && enabled)
 			return timeout(reportErrors(swizzleClog ? swizzleClogClient<ISimulator::ProcessInfo*>(this)
 			                                        : clogClient<ISimulator::ProcessInfo*>(this),
 			                            "RandomCloggingError"),
-			               testDuration, Void());
+			               testDuration,
+			               Void());
 		else if (enabled) {
 			return timeout(
 			    reportErrors(swizzleClog ? swizzleClogClient<WorkerInterface>(this) : clogClient<WorkerInterface>(this),
 			                 "RandomCloggingError"),
-			    testDuration, Void());
+			    testDuration,
+			    Void());
 		} else
 			return Void();
 	}
-	virtual Future<bool> check( Database const& cx ) {
-		return true;
-	}
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-	}
+	virtual Future<bool> check(Database const& cx) { return true; }
+	virtual void getMetrics(vector<PerfMetric>& m) {}
 
-	ACTOR void doClog( ISimulator::ProcessInfo* machine, double t, double delay = 0.0 ) {
+	ACTOR void doClog(ISimulator::ProcessInfo* machine, double t, double delay = 0.0) {
 		wait(::delay(delay));
-		g_simulator.clogInterface( machine->address.ip, t );
+		g_simulator.clogInterface(machine->address.ip, t);
 	}
 
 	static void checkClogResult(Future<Void> res, WorkerInterface worker) {
@@ -111,8 +113,8 @@ struct RandomCloggingWorkload : TestWorkload {
 	}
 
 	void clogPair(ISimulator::ProcessInfo* m1, ISimulator::ProcessInfo* m2, double t) {
-		if( m1->address.ip != m2->address.ip )
-			g_simulator.clogPair( m1->address.ip, m2->address.ip, t );
+		if (m1->address.ip != m2->address.ip)
+			g_simulator.clogPair(m1->address.ip, m2->address.ip, t);
 	}
 
 	ACTOR void clogPair(WorkerInterface m1, WorkerInterface m2, double t) {
@@ -146,14 +148,14 @@ struct RandomCloggingWorkload : TestWorkload {
 		state double workloadEnd = now() + self->testDuration;
 		state std::vector<W> machines;
 		loop {
-			wait( poisson( &lastTime, self->scale / self->clogginess ) );
+			wait(poisson(&lastTime, self->scale / self->clogginess));
 			wait(RandomCloggingWorkload::getAllWorkers(self, &machines));
 			auto machine = deterministicRandom()->randomChoice(machines);
-			double t = self->scale * 10.0 * exp( -10.0 * deterministicRandom()->random01() );
+			double t = self->scale * 10.0 * exp(-10.0 * deterministicRandom()->random01());
 			t = std::max(0.0, std::min(t, workloadEnd - now()));
-			self->doClog(machine,t);
+			self->doClog(machine, t);
 
-			t = self->scale * 20.0 * exp( -10.0 * deterministicRandom()->random01() );
+			t = self->scale * 20.0 * exp(-10.0 * deterministicRandom()->random01());
 			t = std::max(0.0, std::min(t, workloadEnd - now()));
 			self->clogRandomPair(machines, t);
 		}
@@ -169,7 +171,7 @@ struct RandomCloggingWorkload : TestWorkload {
 		loop {
 			allProcesses.clear();
 			swizzled.clear();
-			wait( poisson( &lastTime, self->scale / self->clogginess ) );
+			wait(poisson(&lastTime, self->scale / self->clogginess));
 			t = self->scale * 10.0 * exp(-10.0 * deterministicRandom()->random01());
 			t = std::max(0.0, std::min(t, workloadEnd - now()));
 
@@ -178,16 +180,17 @@ struct RandomCloggingWorkload : TestWorkload {
 			wait(RandomCloggingWorkload::getAllWorkers(self, &allProcesses));
 			vector<double> starts, ends;
 			for (int m = 0; m < allProcesses.size(); m++)
-				if (deterministicRandom()->random01() < 0.5){
+				if (deterministicRandom()->random01() < 0.5) {
 					swizzled.push_back(allProcesses[m]);
 					starts.push_back(deterministicRandom()->random01() * t / 2);
 					ends.push_back(deterministicRandom()->random01() * t / 2 + t / 2);
 				}
-			for (int i = 0; i < 10; i++) self->clogRandomPair(allProcesses, t);
+			for (int i = 0; i < 10; i++)
+				self->clogRandomPair(allProcesses, t);
 
 			vector<Future<Void>> cloggers;
-			for (int i=0;i<swizzled.size();i++)
-				self->doClog(swizzled[i], ends[i]-starts[i], starts[i]);
+			for (int i = 0; i < swizzled.size(); i++)
+				self->doClog(swizzled[i], ends[i] - starts[i], starts[i]);
 		}
 	}
 };

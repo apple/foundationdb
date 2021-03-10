@@ -46,8 +46,7 @@ IPAddress determinePublicIPAutomatically(ClusterConnectionString const& ccs) {
 		socket.close();
 
 		return ip;
-	}
-	catch(boost::system::system_error e) {
+	} catch (boost::system::system_error e) {
 		fprintf(stderr, "Error determining public address: %s\n", e.what());
 		throw bind_failed();
 	}

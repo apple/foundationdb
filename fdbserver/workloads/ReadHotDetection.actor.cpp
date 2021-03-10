@@ -50,16 +50,19 @@ struct ReadHotDetectionWorkload : TestWorkload {
 
 	virtual Future<Void> start(Database const& cx) {
 		for (int c = 0; c < actorCount; c++) {
-			clients.push_back(timeout(keyReader(cx->clone(), this, actorCount / transactionsPerSecond,
-			                                    deterministicRandom()->random01() > 0.4),
-			                          testDuration, Void()));
+			clients.push_back(timeout(
+			    keyReader(
+			        cx->clone(), this, actorCount / transactionsPerSecond, deterministicRandom()->random01() > 0.4),
+			    testDuration,
+			    Void()));
 		}
 		readHotCheck = clientId == 0 ? _check(cx->clone(), this) : Void();
 		return delay(testDuration);
 	}
 
 	virtual Future<bool> check(Database const& cx) {
-		if (clientId != 0) return true;
+		if (clientId != 0)
+			return true;
 		return passed;
 	}
 

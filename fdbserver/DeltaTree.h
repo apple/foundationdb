@@ -100,10 +100,12 @@ static int perfectSubtreeSplitPointCached(int subtree_size) {
 	static const int max = 500;
 	if (points == nullptr) {
 		points = new uint16_t[max];
-		for (int i = 0; i < max; ++i) points[i] = perfectSubtreeSplitPoint(i);
+		for (int i = 0; i < max; ++i)
+			points[i] = perfectSubtreeSplitPoint(i);
 	}
 
-	if (subtree_size < max) return points[subtree_size];
+	if (subtree_size < max)
+		return points[subtree_size];
 	return perfectSubtreeSplitPoint(subtree_size);
 }
 
@@ -742,7 +744,8 @@ public:
 			node = n;
 			while (n != nullptr) {
 				n = n->getLeftChild(mirror->arena);
-				if (n != nullptr) node = n;
+				if (n != nullptr)
+					node = n;
 			}
 			return _hideDeletedForward();
 		}
@@ -752,7 +755,8 @@ public:
 			node = n;
 			while (n != nullptr) {
 				n = n->getRightChild(mirror->arena);
-				if (n != nullptr) node = n;
+				if (n != nullptr)
+					node = n;
 			}
 			return _hideDeletedBackward();
 		}

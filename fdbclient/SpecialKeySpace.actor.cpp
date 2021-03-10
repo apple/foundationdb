@@ -40,8 +40,10 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 // The cache object is used to cache the first read result from the rpc call during the key resolution,
 // then when we need to do key resolution or result filtering,
 // we, instead of rpc call, read from this cache object have consistent results
-ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeBaseImpl* skrImpl, ReadYourWritesTransaction* ryw,
-                                                 KeySelector* ks, Optional<Standalone<RangeResultRef>>* cache) {
+ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeBaseImpl* skrImpl,
+                                                 ReadYourWritesTransaction* ryw,
+                                                 KeySelector* ks,
+                                                 Optional<Standalone<RangeResultRef>>* cache) {
 	ASSERT(!ks->orEqual); // should be removed before calling
 	ASSERT(ks->offset != 1); // never being called if KeySelector is already normalized
 
@@ -51,10 +53,12 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeBaseImpl* 
 
 	if (ks->offset < 1) {
 		// less than the given key
-		if (skrImpl->getKeyRange().contains(ks->getKey())) endKey = ks->getKey();
+		if (skrImpl->getKeyRange().contains(ks->getKey()))
+			endKey = ks->getKey();
 	} else {
 		// greater than the given key
-		if (skrImpl->getKeyRange().contains(ks->getKey())) startKey = ks->getKey();
+		if (skrImpl->getKeyRange().contains(ks->getKey()))
+			startKey = ks->getKey();
 	}
 	ASSERT(startKey < endKey); // Note : startKey never equals endKey here
 
@@ -111,8 +115,11 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeBaseImpl* 
 // to maintain; Thus, separate each part to make the code easy to understand and more compact
 // Boundary is the range of the legal key space, which, by default is the range of the module
 // And (\xff\xff, \xff\xff\xff) if SPECIAL_KEY_SPACE_RELAXED is turned on
-ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeySelector* ks,
-                                             KeyRangeRef boundary, int* actualOffset,
+ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks,
+                                             ReadYourWritesTransaction* ryw,
+                                             KeySelector* ks,
+                                             KeyRangeRef boundary,
+                                             int* actualOffset,
                                              Standalone<RangeResultRef>* result,
                                              Optional<Standalone<RangeResultRef>>* cache) {
 	// If offset < 1, where we need to move left, iter points to the range containing at least one smaller key
@@ -145,13 +152,12 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, ReadYourWrite
 		TraceEvent(SevDebug, "ReadToBoundary")
 		    .detail("TerminateKey", ks->getKey())
 		    .detail("TerminateOffset", ks->offset);
-		// If still not normalized after moving to the boundary, 
+		// If still not normalized after moving to the boundary,
 		// let key selector clamp up to the boundary
 		if (ks->offset < 1) {
 			result->readToBegin = true;
 			ks->setKey(boundary.begin);
-		}
-		else {
+		} else {
 			result->readThroughEnd = true;
 			ks->setKey(boundary.end);
 		}
@@ -162,8 +168,10 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, ReadYourWrite
 
 ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::checkRYWValid(SpecialKeySpace* sks,
                                                                         ReadYourWritesTransaction* ryw,
-                                                                        KeySelector begin, KeySelector end,
-                                                                        GetRangeLimits limits, bool reverse) {
+                                                                        KeySelector begin,
+                                                                        KeySelector end,
+                                                                        GetRangeLimits limits,
+                                                                        bool reverse) {
 	ASSERT(ryw);
 	choose {
 		when(Standalone<RangeResultRef> result =
@@ -176,7 +184,8 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::checkRYWValid(SpecialK
 
 ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationActor(SpecialKeySpace* sks,
                                                                                    ReadYourWritesTransaction* ryw,
-                                                                                   KeySelector begin, KeySelector end,
+                                                                                   KeySelector begin,
+                                                                                   KeySelector end,
                                                                                    GetRangeLimits limits,
                                                                                    bool reverse) {
 	// This function handles ranges which cover more than one keyrange and aggregates all results
@@ -230,7 +239,8 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 	if (reverse) {
 		while (iter != ranges.begin()) {
 			--iter;
-			if (iter->value() == nullptr) continue;
+			if (iter->value() == nullptr)
+				continue;
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
@@ -259,7 +269,8 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 		}
 	} else {
 		for (iter = ranges.begin(); iter != ranges.end(); ++iter) {
-			if (iter->value() == nullptr) continue;
+			if (iter->value() == nullptr)
+				continue;
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
@@ -290,10 +301,14 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 	return result;
 }
 
-Future<Standalone<RangeResultRef>> SpecialKeySpace::getRange(ReadYourWritesTransaction* ryw, KeySelector begin,
-                                                             KeySelector end, GetRangeLimits limits, bool reverse) {
+Future<Standalone<RangeResultRef>> SpecialKeySpace::getRange(ReadYourWritesTransaction* ryw,
+                                                             KeySelector begin,
+                                                             KeySelector end,
+                                                             GetRangeLimits limits,
+                                                             bool reverse) {
 	// validate limits here
-	if (!limits.isValid()) return range_limits_invalid();
+	if (!limits.isValid())
+		return range_limits_invalid();
 	if (limits.isReached()) {
 		TEST(true); // read limit 0
 		return Standalone<RangeResultRef>();
@@ -310,12 +325,15 @@ Future<Standalone<RangeResultRef>> SpecialKeySpace::getRange(ReadYourWritesTrans
 	return checkRYWValid(this, ryw, begin, end, limits, reverse);
 }
 
-ACTOR Future<Optional<Value>> SpecialKeySpace::getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw,
+ACTOR Future<Optional<Value>> SpecialKeySpace::getActor(SpecialKeySpace* sks,
+                                                        ReadYourWritesTransaction* ryw,
                                                         KeyRef key) {
 	// use getRange to workaround this
-	Standalone<RangeResultRef> result =
-	    wait(sks->getRange(ryw, KeySelector(firstGreaterOrEqual(key)), KeySelector(firstGreaterOrEqual(keyAfter(key))),
-	                       GetRangeLimits(CLIENT_KNOBS->TOO_MANY), false));
+	Standalone<RangeResultRef> result = wait(sks->getRange(ryw,
+	                                                       KeySelector(firstGreaterOrEqual(key)),
+	                                                       KeySelector(firstGreaterOrEqual(keyAfter(key))),
+	                                                       GetRangeLimits(CLIENT_KNOBS->TOO_MANY),
+	                                                       false));
 	ASSERT(result.size() <= 1);
 	if (result.size()) {
 		return Optional<Value>(result[0].value);
@@ -354,7 +372,8 @@ Future<Standalone<RangeResultRef>> ConflictingKeysImpl::getRange(ReadYourWritesT
 	if (ryw->getTransactionInfo().conflictingKeys) {
 		auto krMapPtr = ryw->getTransactionInfo().conflictingKeys.get();
 		auto beginIter = krMapPtr->rangeContaining(kr.begin);
-		if (beginIter->begin() != kr.begin) ++beginIter;
+		if (beginIter->begin() != kr.begin)
+			++beginIter;
 		auto endIter = krMapPtr->rangeContaining(kr.end);
 		for (auto it = beginIter; it != endIter; ++it) {
 			result.push_back_deep(result.arena(), KeyValueRef(it->begin(), it->value()));
