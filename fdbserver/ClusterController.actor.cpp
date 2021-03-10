@@ -1939,7 +1939,7 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 	}
 
 	// TODO remove debugging
-	printf("CC:\ntss_count=%d\ntss_storage_engine=%s\n", db->config.desiredTSSCount, db->config.testingStorageServerStoreType);
+	printf("CC:\ntss_count=%d\ntss_storage_engine=%s\n", db->config.desiredTSSCount, db->config.testingStorageServerStoreType.toString().c_str());
 
 	// Construct the client information
 	if (db->clientInfo->get().proxies != req.proxies) {
@@ -1950,11 +1950,14 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 		clientInfo.proxies = req.proxies;
 		clientInfo.clientTxnInfoSampleRate = db->clientInfo->get().clientTxnInfoSampleRate;
 		clientInfo.clientTxnInfoSizeLimit = db->clientInfo->get().clientTxnInfoSizeLimit;
-		clientInfo.tssMapping = db->clientInfo->get().tssMapping;
+		// clientInfo.tssMapping = db->clientInfo->get().tssMapping;
 		
 		db->clientInfo->set( clientInfo );
 		dbInfo.client = db->clientInfo->get();
 	}
+
+	// TODO REMOVE debugging
+	printf("CC:XXXXXYYYYY\n");
 
 	// TODO might need to update dbInfo with tss count or some such thing
 
@@ -2511,6 +2514,8 @@ ACTOR Future<Void> monitorStorageCache(ClusterControllerData* self) {
 }
 
 ACTOR Future<Void> monitorTSSMapping(ClusterControllerData* self) {
+	// TODO REMOVE
+	printf("monitoring tss mapping\n");
 	loop {
 		state ReadYourWritesTransaction tr(self->db.db);
 		loop {
@@ -2559,6 +2564,8 @@ ACTOR Future<Void> monitorTSSMapping(ClusterControllerData* self) {
 					if (ssAlreadyPaired) {
 						auto interf = oldMapping[it.first];
 						// check if this SS maps to a new TSS
+						// TODO REMOVE print
+						printf("interf.id=%s, tssid=%s\n", interf.id().toString().c_str(), it.second.toString().c_str());
 						if (interf.id() == it.second) {
 							newMapping.push_back(std::pair<UID, StorageServerInterface>(it.first, interf));
 						} else {
@@ -2574,6 +2581,7 @@ ACTOR Future<Void> monitorTSSMapping(ClusterControllerData* self) {
 
 					// TODO would it be more efficient to batch these into one getAll? it probably would
 					if (requestAndAdd) {
+						mappingChanged = true;
 						state UID ssid = it.first;
 						state UID tssid = it.second;
 						// request storage server interface for tssid, add it to results
@@ -2591,6 +2599,8 @@ ACTOR Future<Void> monitorTSSMapping(ClusterControllerData* self) {
 
 				// if nothing changed, skip updating
 				if (mappingChanged) {
+					// TODO REMOVE
+					printf("CC updating clientinfo\n");
 					clientInfo.id = deterministicRandom()->randomUniqueID();
 					clientInfo.tssMapping = newMapping;
 					self->db.clientInfo->set( clientInfo );

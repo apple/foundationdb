@@ -64,8 +64,9 @@ void QueueModel::updateTssEndpoint(uint64_t id, UID generation, Endpoint tssEndp
 	if (!d.tss.present()) {
 		tssCount++;
 	}
+	d.tssGeneration = generation;
 	// TODO REMOVE print
-	printf("Setting tss endpoint for %d\n at %s", id, generation.toString().c_str());
+	printf("Setting tss endpoint for %" PRIu64 " at %s\n", id, generation.toString().c_str());
 	d.tss = Optional<Endpoint>(tssEndpoint);
 }
 
@@ -75,8 +76,9 @@ void QueueModel::removeOldTssEndpoints(UID currentGeneration) {
 		for (auto& it : data) {
 			if (it.second.tss.present() && it.second.tssGeneration != currentGeneration) {
 				// TODO REMOVE print
-				printf("Removing tss endpoint for %d\n", it.first);
+				printf("Removing tss endpoint for %" PRIu64 " because its generation %s doesn't match the current one %s\n", it.first, it.second.tssGeneration.toString().c_str(), currentGeneration.toString().c_str());
 				it.second.tss = Optional<Endpoint>();
+				it.second.tssGeneration = currentGeneration;
 				tssCount--;
 			}
 		}

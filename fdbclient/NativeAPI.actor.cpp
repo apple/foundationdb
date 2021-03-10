@@ -87,6 +87,9 @@ void DatabaseContext::addTssMapping(StorageServerInterface ssi, StorageServerInt
 	queueModel.updateTssEndpoint(ssi.getValue.getEndpoint().token.first(), clientInfo->get().id, tssi.getValue.getEndpoint());
 	queueModel.updateTssEndpoint(ssi.getKey.getEndpoint().token.first(), clientInfo->get().id, tssi.getKey.getEndpoint());
 	queueModel.updateTssEndpoint(ssi.getKeyValues.getEndpoint().token.first(), clientInfo->get().id, tssi.getKeyValues.getEndpoint());
+
+	// TODO REMOVE
+	printf("added tss endpoints to queue for mapping %s=%s\n", ssi.id().toString().c_str(), tssi.id().toString().c_str());
 }
 
 Reference<StorageServerInfo> StorageServerInfo::getInterface( DatabaseContext *cx, StorageServerInterface const& ssi, LocalityData const& locality ) {
@@ -466,14 +469,20 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 	}
 }
 
+// TODO should maybe rename this now
 ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDBInfo>> clientDBInfo, AsyncTrigger *triggerVar) {
 	state vector< MasterProxyInterface > curProxies;
+	state vector<std::pair< UID, StorageServerInterface>> curTssMapping;
 	curProxies = clientDBInfo->get().proxies;
+	curTssMapping = clientDBInfo->get().tssMapping;
 
 	loop{
 		wait(clientDBInfo->onChange());
-		if (clientDBInfo->get().proxies != curProxies) {
+		if (clientDBInfo->get().proxies != curProxies || clientDBInfo->get().tssMapping != curTssMapping) {
+			// TODO REMOVE print
+			printf("proxies and/or tss changed\n");
 			curProxies = clientDBInfo->get().proxies;
+			curTssMapping = clientDBInfo->get().tssMapping;
 			triggerVar->trigger();
 		}
 	}
@@ -1335,24 +1344,30 @@ Reference<ProxyInfo> DatabaseContext::getMasterProxies(bool useProvisionalProxie
 		masterProxiesLastChange = clientInfo->get().id;
 		masterProxies.clear();
 		grvProxies.clear();
+
 		if( clientInfo->get().proxies.size() ) {
 			masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, false ) );
 			grvProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, true ) );
 			provisional = clientInfo->get().proxies[0].provisional;
+		}
 
-			// if any TSS present, update model's endpoint mapping
-			std::unordered_map<uint64_t, Endpoint> tssEndpointMap;
-			if (!clientInfo->get().tssMapping.empty()) {
-				for(auto& it : clientInfo->get().tssMapping) {
-					if(server_interf.count(it.first)) {
-						addTssMapping(server_interf[it.first]->interf, it.second);
-					}
+		printf("gonna do tss proxy stuff with %d tss's\n", clientInfo->get().tssMapping.size());
+
+		if ( clientInfo->get().tssMapping.size() ) {
+			for(auto& it : clientInfo->get().tssMapping) {
+				if(server_interf.count(it.first)) {
+					addTssMapping(server_interf[it.first]->interf, it.second);
+				} else {
+					// TODO REMOVE case and print
+					printf("tss server %s not in server_interf, skipping for now\n", it.first.toString().c_str());
 				}
 			}
-			
-			queueModel.removeOldTssEndpoints(clientInfo->get().id);
 		}
 		
+		queueModel.removeOldTssEndpoints(clientInfo->get().id);
+		// TODO REMOVE print
+		printf("removed old tss mapping for %s\n", clientInfo->get().id.toString().c_str());
+	
 	}
 	if(provisional && !useProvisionalProxies) {
 		return Reference<ProxyInfo>();
