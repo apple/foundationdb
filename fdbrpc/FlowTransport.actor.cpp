@@ -727,8 +727,17 @@ TransportData::~TransportData() {
 	}
 }
 
-ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader reader, bool inReadSocket) {
+ACTOR static void deliver(TransportData* self,
+                          Optional<NetworkAddress> peerAddress,
+                          Endpoint destination,
+                          ArenaReader reader,
+                          bool inReadSocket) {
 	TaskPriority priority = self->endpoints.getPriority(destination.token);
+	if (TaskPriority::UnknownEndpoint == priority) {
+		TraceEvent("GotUnknownEndpoint")
+		    .detail("EndpointToken", destination.token.shortString())
+		    .detail("PeerAddress", peerAddress.present() ? peerAddress.get().toString() : std::string("Local"));
+	}
 	if (priority < TaskPriority::ReadSocket || !inReadSocket) {
 		wait(delay(0, priority));
 	} else {
@@ -889,7 +898,7 @@ static void scanPackets(TransportData* transport,
 		}
 
 		ASSERT(!reader.empty());
-		deliver(transport, Endpoint({ peerAddress }, token), std::move(reader), true);
+		deliver(transport, peerAddress, Endpoint({ peerAddress }, token), std::move(reader), true);
 
 		unprocessed_begin = p = p + packetLen;
 	}
@@ -1327,7 +1336,11 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 #endif
 
 	ASSERT(copy.size() > 0);
-	deliver(self, destination, ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)), false);
+	deliver(self,
+	        Optional<NetworkAddress>{},
+	        destination,
+	        ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)),
+	        false);
 }
 
 static ReliablePacket* sendPacket(TransportData* self,
