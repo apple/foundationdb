@@ -35,11 +35,11 @@
 ** Similar is true for Mac OS X.  LFS is only supported on Mac OS X 9 and later.
 */
 #ifndef SQLITE_DISABLE_LFS
-# define _LARGE_FILE       1
-# ifndef _FILE_OFFSET_BITS
-#   define _FILE_OFFSET_BITS 64
-# endif
-# define _LARGEFILE_SOURCE 1
+#define _LARGE_FILE 1
+#ifndef _FILE_OFFSET_BITS
+#define _FILE_OFFSET_BITS 64
+#endif
+#define _LARGEFILE_SOURCE 1
 #endif
 
 /*
@@ -54,16 +54,16 @@
 
 /* Disable nuisance warnings on Borland compilers */
 #if defined(__BORLANDC__)
-#pragma warn -rch /* unreachable code */
-#pragma warn -ccc /* Condition is always true or false */
-#pragma warn -aus /* Assigned value is never used */
-#pragma warn -csu /* Comparing signed and unsigned */
-#pragma warn -spa /* Suspicious pointer arithmetic */
+#pragma warn - rch /* unreachable code */
+#pragma warn - ccc /* Condition is always true or false */
+#pragma warn - aus /* Assigned value is never used */
+#pragma warn - csu /* Comparing signed and unsigned */
+#pragma warn - spa /* Suspicious pointer arithmetic */
 #endif
 
 /* Needed for various definitions... */
 #ifndef _GNU_SOURCE
-# define _GNU_SOURCE
+#define _GNU_SOURCE
 #endif
 
 /*
@@ -77,7 +77,7 @@
 #endif
 
 /*
-** The number of samples of an index that SQLite takes in order to 
+** The number of samples of an index that SQLite takes in order to
 ** construct a histogram of the table content when running ANALYZE
 ** and with SQLITE_ENABLE_STAT2
 */
@@ -89,7 +89,7 @@
 ** to the next, so we have developed the following set of #if statements
 ** to generate appropriate macros for a wide range of compilers.
 **
-** The correct "ANSI" way to do this is to use the intptr_t type. 
+** The correct "ANSI" way to do this is to use the intptr_t type.
 ** Unfortunately, that typedef is not available on all compilers, or
 ** if it is available, it requires an #include of specific headers
 ** that vary from one machine to the next.
@@ -99,18 +99,18 @@
 ** So we have to define the macros in different ways depending on the
 ** compiler.
 */
-#if defined(__PTRDIFF_TYPE__)  /* This case should work for GCC */
-# define SQLITE_INT_TO_PTR(X)  ((void*)(__PTRDIFF_TYPE__)(X))
-# define SQLITE_PTR_TO_INT(X)  ((int)(__PTRDIFF_TYPE__)(X))
-#elif !defined(__GNUC__)       /* Works for compilers other than LLVM */
-# define SQLITE_INT_TO_PTR(X)  ((void*)&((char*)0)[X])
-# define SQLITE_PTR_TO_INT(X)  ((int)(((char*)X)-(char*)0))
-#elif defined(HAVE_STDINT_H)   /* Use this case if we have ANSI headers */
-# define SQLITE_INT_TO_PTR(X)  ((void*)(intptr_t)(X))
-# define SQLITE_PTR_TO_INT(X)  ((int)(intptr_t)(X))
-#else                          /* Generates a warning - but it always works */
-# define SQLITE_INT_TO_PTR(X)  ((void*)(X))
-# define SQLITE_PTR_TO_INT(X)  ((int)(X))
+#if defined(__PTRDIFF_TYPE__) /* This case should work for GCC */
+#define SQLITE_INT_TO_PTR(X) ((void*)(__PTRDIFF_TYPE__)(X))
+#define SQLITE_PTR_TO_INT(X) ((int)(__PTRDIFF_TYPE__)(X))
+#elif !defined(__GNUC__) /* Works for compilers other than LLVM */
+#define SQLITE_INT_TO_PTR(X) ((void*)&((char*)0)[X])
+#define SQLITE_PTR_TO_INT(X) ((int)(((char*)X) - (char*)0))
+#elif defined(HAVE_STDINT_H) /* Use this case if we have ANSI headers */
+#define SQLITE_INT_TO_PTR(X) ((void*)(intptr_t)(X))
+#define SQLITE_PTR_TO_INT(X) ((int)(intptr_t)(X))
+#else /* Generates a warning - but it always works */
+#define SQLITE_INT_TO_PTR(X) ((void*)(X))
+#define SQLITE_PTR_TO_INT(X) ((int)(X))
 #endif
 
 /*
@@ -126,20 +126,20 @@
 */
 #if !defined(SQLITE_THREADSAFE)
 #if defined(THREADSAFE)
-# define SQLITE_THREADSAFE THREADSAFE
+#define SQLITE_THREADSAFE THREADSAFE
 #else
-# define SQLITE_THREADSAFE 1 /* IMP: R-07272-22309 */
+#define SQLITE_THREADSAFE 1 /* IMP: R-07272-22309 */
 #endif
 #endif
 
 /*
 ** The SQLITE_DEFAULT_MEMSTATUS macro must be defined as either 0 or 1.
-** It determines whether or not the features related to 
+** It determines whether or not the features related to
 ** SQLITE_CONFIG_MEMSTATUS are available by default or not. This value can
 ** be overridden at runtime using the sqlite3_config() API.
 */
 #if !defined(SQLITE_DEFAULT_MEMSTATUS)
-# define SQLITE_DEFAULT_MEMSTATUS 1
+#define SQLITE_DEFAULT_MEMSTATUS 1
 #endif
 
 /*
@@ -155,12 +155,12 @@
 ** If none of the above are defined, then set SQLITE_SYSTEM_MALLOC as
 ** the default.
 */
-#if defined(SQLITE_SYSTEM_MALLOC)+defined(SQLITE_MEMDEBUG)>1
-# error "At most one of the following compile-time configuration options\
+#if defined(SQLITE_SYSTEM_MALLOC) + defined(SQLITE_MEMDEBUG) > 1
+#error "At most one of the following compile-time configuration options\
  is allows: SQLITE_SYSTEM_MALLOC, SQLITE_MEMDEBUG"
 #endif
-#if defined(SQLITE_SYSTEM_MALLOC)+defined(SQLITE_MEMDEBUG)==0
-# define SQLITE_SYSTEM_MALLOC 1
+#if defined(SQLITE_SYSTEM_MALLOC) + defined(SQLITE_MEMDEBUG) == 0
+#define SQLITE_SYSTEM_MALLOC 1
 #endif
 
 /*
@@ -168,7 +168,7 @@
 ** sizes of memory allocations below this value where possible.
 */
 #if !defined(SQLITE_MALLOC_SOFT_LIMIT)
-# define SQLITE_MALLOC_SOFT_LIMIT 1024
+#define SQLITE_MALLOC_SOFT_LIMIT 1024
 #endif
 
 /*
@@ -185,14 +185,14 @@
 ** See also ticket #2741.
 */
 #if !defined(_XOPEN_SOURCE) && !defined(__DARWIN__) && !defined(__APPLE__) && SQLITE_THREADSAFE
-#  define _XOPEN_SOURCE 500  /* Needed to enable pthread recursive mutexes */
+#define _XOPEN_SOURCE 500 /* Needed to enable pthread recursive mutexes */
 #endif
 
 /*
 ** The TCL headers are only needed when compiling the TCL bindings.
 */
 #if defined(SQLITE_TCL) || defined(TCLSH)
-# include <tcl.h>
+#include <tcl.h>
 #endif
 
 /*
@@ -202,12 +202,12 @@
 ** option is set.  Thus NDEBUG becomes an opt-in rather than an opt-out
 ** feature.
 */
-#if !defined(NDEBUG) && !defined(SQLITE_DEBUG) 
-# define NDEBUG 1
+#if !defined(NDEBUG) && !defined(SQLITE_DEBUG)
+#define NDEBUG 1
 #endif
 
 /*
-** The testcase() macro is used to aid in coverage testing.  When 
+** The testcase() macro is used to aid in coverage testing.  When
 ** doing coverage testing, the condition inside the argument to
 ** testcase() must be evaluated both true and false in order to
 ** get full branch coverage.  The testcase() macro is inserted
@@ -221,10 +221,13 @@
 **
 */
 #ifdef SQLITE_COVERAGE_TEST
-  void sqlite3Coverage(int);
-# define testcase(X)  if( X ){ sqlite3Coverage(__LINE__); }
+void sqlite3Coverage(int);
+#define testcase(X)                                                                                                    \
+	if (X) {                                                                                                           \
+		sqlite3Coverage(__LINE__);                                                                                     \
+	}
 #else
-# define testcase(X)
+#define testcase(X)
 #endif
 
 /*
@@ -233,9 +236,9 @@
 ** within testcase() and assert() macros.
 */
 #if !defined(NDEBUG) || defined(SQLITE_COVERAGE_TEST)
-# define TESTONLY(X)  X
+#define TESTONLY(X) X
 #else
-# define TESTONLY(X)
+#define TESTONLY(X)
 #endif
 
 /*
@@ -247,13 +250,13 @@
 ** code within VVA_ONLY() will only run during verification processes.
 */
 #ifndef NDEBUG
-# define VVA_ONLY(X)  X
+#define VVA_ONLY(X) X
 #else
-# define VVA_ONLY(X)
+#define VVA_ONLY(X)
 #endif
 
 /*
-** The ALWAYS and NEVER macros surround boolean expressions which 
+** The ALWAYS and NEVER macros surround boolean expressions which
 ** are intended to always be true or false, respectively.  Such
 ** expressions could be omitted from the code completely.  But they
 ** are included in a few cases in order to enhance the resilience
@@ -268,14 +271,14 @@
 ** not be counted as untested code.
 */
 #if defined(SQLITE_COVERAGE_TEST)
-# define ALWAYS(X)      (1)
-# define NEVER(X)       (0)
+#define ALWAYS(X) (1)
+#define NEVER(X) (0)
 #elif !defined(NDEBUG)
-# define ALWAYS(X)      ((X)?1:(assert(0),0))
-# define NEVER(X)       ((X)?(assert(0),1):0)
+#define ALWAYS(X) ((X) ? 1 : (assert(0), 0))
+#define NEVER(X) ((X) ? (assert(0), 1) : 0)
 #else
-# define ALWAYS(X)      (X)
-# define NEVER(X)       (X)
+#define ALWAYS(X) (X)
+#define NEVER(X) (X)
 #endif
 
 /*
@@ -283,7 +286,7 @@
 ** to fit in 32-bits.  This macro is used inside of various testcase()
 ** macros to verify that we have tested SQLite for large-file support.
 */
-#define IS_BIG_INT(X)  (((X)&~(i64)0xffffffff)!=0)
+#define IS_BIG_INT(X) (((X) & ~(i64)0xffffffff) != 0)
 
 /*
 ** The macro unlikely() is a hint that surrounds a boolean
@@ -292,11 +295,11 @@
 ** use these hints to generate better code, sometimes.
 */
 #if defined(__GNUC__) && 0
-# define likely(X)    __builtin_expect((X),1)
-# define unlikely(X)  __builtin_expect((X),0)
+#define likely(X) __builtin_expect((X), 1)
+#define unlikely(X) __builtin_expect((X), 0)
 #else
-# define likely(X)    !!(X)
-# define unlikely(X)  !!(X)
+#define likely(X) !!(X)
+#define unlikely(X) !!(X)
 #endif
 
 #include "sqlite3.h"
@@ -312,24 +315,24 @@
 ** substitute integer for floating-point
 */
 #ifdef SQLITE_OMIT_FLOATING_POINT
-# define double sqlite_int64
-# define float sqlite_int64
-# define LONGDOUBLE_TYPE sqlite_int64
-# ifndef SQLITE_BIG_DBL
-#   define SQLITE_BIG_DBL (((sqlite3_int64)1)<<50)
-# endif
-# define SQLITE_OMIT_DATETIME_FUNCS 1
-# define SQLITE_OMIT_TRACE 1
-# undef SQLITE_MIXED_ENDIAN_64BIT_FLOAT
-# undef SQLITE_HAVE_ISNAN
+#define double sqlite_int64
+#define float sqlite_int64
+#define LONGDOUBLE_TYPE sqlite_int64
+#ifndef SQLITE_BIG_DBL
+#define SQLITE_BIG_DBL (((sqlite3_int64)1) << 50)
+#endif
+#define SQLITE_OMIT_DATETIME_FUNCS 1
+#define SQLITE_OMIT_TRACE 1
+#undef SQLITE_MIXED_ENDIAN_64BIT_FLOAT
+#undef SQLITE_HAVE_ISNAN
 #endif
 #ifndef SQLITE_BIG_DBL
-# define SQLITE_BIG_DBL (1e99)
+#define SQLITE_BIG_DBL (1e99)
 #endif
 
 /*
 ** OMIT_TEMPDB is set to 1 if SQLITE_OMIT_TEMPDB is defined, or 0
-** afterward. Having this macro allows us to cause the C compiler 
+** afterward. Having this macro allows us to cause the C compiler
 ** to omit code used by TEMP tables without messy #ifndef statements.
 */
 #ifdef SQLITE_OMIT_TEMPDB
@@ -346,7 +349,7 @@
 */
 #define SQLITE_MAX_FILE_FORMAT 4
 #ifndef SQLITE_DEFAULT_FILE_FORMAT
-# define SQLITE_DEFAULT_FILE_FORMAT 1
+#define SQLITE_DEFAULT_FILE_FORMAT 1
 #endif
 
 /*
@@ -354,7 +357,7 @@
 ** changed at run-time using a pragma.
 */
 #ifndef SQLITE_DEFAULT_RECURSIVE_TRIGGERS
-# define SQLITE_DEFAULT_RECURSIVE_TRIGGERS 0
+#define SQLITE_DEFAULT_RECURSIVE_TRIGGERS 0
 #endif
 
 /*
@@ -362,7 +365,7 @@
 ** on the command-line
 */
 #ifndef SQLITE_TEMP_STORE
-# define SQLITE_TEMP_STORE 1
+#define SQLITE_TEMP_STORE 1
 #endif
 
 /*
@@ -370,7 +373,7 @@
 ** ourselves.
 */
 #ifndef offsetof
-#define offsetof(STRUCTURE,FIELD) ((int)((char*)&((STRUCTURE*)0)->FIELD))
+#define offsetof(STRUCTURE, FIELD) ((int)((char*)&((STRUCTURE*)0)->FIELD))
 #endif
 
 /*
@@ -378,9 +381,9 @@
 ** not, there are still machines out there that use EBCDIC.)
 */
 #if 'A' == '\301'
-# define SQLITE_EBCDIC 1
+#define SQLITE_EBCDIC 1
 #else
-# define SQLITE_ASCII 1
+#define SQLITE_ASCII 1
 #endif
 
 /*
@@ -391,50 +394,50 @@
 **         cc '-DUINTPTR_TYPE=long long int' ...
 */
 #ifndef UINT32_TYPE
-# ifdef HAVE_UINT32_T
-#  define UINT32_TYPE uint32_t
-# else
-#  define UINT32_TYPE unsigned int
-# endif
+#ifdef HAVE_UINT32_T
+#define UINT32_TYPE uint32_t
+#else
+#define UINT32_TYPE unsigned int
+#endif
 #endif
 #ifndef UINT16_TYPE
-# ifdef HAVE_UINT16_T
-#  define UINT16_TYPE uint16_t
-# else
-#  define UINT16_TYPE unsigned short int
-# endif
+#ifdef HAVE_UINT16_T
+#define UINT16_TYPE uint16_t
+#else
+#define UINT16_TYPE unsigned short int
+#endif
 #endif
 #ifndef INT16_TYPE
-# ifdef HAVE_INT16_T
-#  define INT16_TYPE int16_t
-# else
-#  define INT16_TYPE short int
-# endif
+#ifdef HAVE_INT16_T
+#define INT16_TYPE int16_t
+#else
+#define INT16_TYPE short int
+#endif
 #endif
 #ifndef UINT8_TYPE
-# ifdef HAVE_UINT8_T
-#  define UINT8_TYPE uint8_t
-# else
-#  define UINT8_TYPE unsigned char
-# endif
+#ifdef HAVE_UINT8_T
+#define UINT8_TYPE uint8_t
+#else
+#define UINT8_TYPE unsigned char
+#endif
 #endif
 #ifndef INT8_TYPE
-# ifdef HAVE_INT8_T
-#  define INT8_TYPE int8_t
-# else
-#  define INT8_TYPE signed char
-# endif
+#ifdef HAVE_INT8_T
+#define INT8_TYPE int8_t
+#else
+#define INT8_TYPE signed char
+#endif
 #endif
 #ifndef LONGDOUBLE_TYPE
-# define LONGDOUBLE_TYPE long double
+#define LONGDOUBLE_TYPE long double
 #endif
-typedef sqlite_int64 i64;          /* 8-byte signed integer */
-typedef sqlite_uint64 u64;         /* 8-byte unsigned integer */
-typedef UINT32_TYPE u32;           /* 4-byte unsigned integer */
-typedef UINT16_TYPE u16;           /* 2-byte unsigned integer */
-typedef INT16_TYPE i16;            /* 2-byte signed integer */
-typedef UINT8_TYPE u8;             /* 1-byte unsigned integer */
-typedef INT8_TYPE i8;              /* 1-byte signed integer */
+typedef sqlite_int64 i64; /* 8-byte signed integer */
+typedef sqlite_uint64 u64; /* 8-byte unsigned integer */
+typedef UINT32_TYPE u32; /* 4-byte unsigned integer */
+typedef UINT16_TYPE u16; /* 2-byte unsigned integer */
+typedef INT16_TYPE i16; /* 2-byte signed integer */
+typedef UINT8_TYPE u8; /* 1-byte unsigned integer */
+typedef INT8_TYPE i8; /* 1-byte signed integer */
 
 /*
 ** SQLITE_MAX_U32 is a u64 constant that is the maximum u64 value
@@ -442,7 +445,7 @@ typedef INT8_TYPE i8;              /* 1-byte signed integer */
 ** is 0x00000000ffffffff.  But because of quirks of some compilers, we
 ** have to specify the value in the less intuitive manner shown:
 */
-#define SQLITE_MAX_U32  ((((u64)1)<<32)-1)
+#define SQLITE_MAX_U32 ((((u64)1) << 32) - 1)
 
 /*
 ** Macros to determine whether the machine is big or little endian,
@@ -453,15 +456,14 @@ const int sqlite3one = 1;
 #else
 extern const int sqlite3one;
 #endif
-#if defined(i386) || defined(__i386__) || defined(_M_IX86)\
-                             || defined(__x86_64) || defined(__x86_64__)
-# define SQLITE_BIGENDIAN    0
-# define SQLITE_LITTLEENDIAN 1
-# define SQLITE_UTF16NATIVE  SQLITE_UTF16LE
+#if defined(i386) || defined(__i386__) || defined(_M_IX86) || defined(__x86_64) || defined(__x86_64__)
+#define SQLITE_BIGENDIAN 0
+#define SQLITE_LITTLEENDIAN 1
+#define SQLITE_UTF16NATIVE SQLITE_UTF16LE
 #else
-# define SQLITE_BIGENDIAN    (*(char *)(&sqlite3one)==0)
-# define SQLITE_LITTLEENDIAN (*(char *)(&sqlite3one)==1)
-# define SQLITE_UTF16NATIVE (SQLITE_BIGENDIAN?SQLITE_UTF16BE:SQLITE_UTF16LE)
+#define SQLITE_BIGENDIAN (*(char*)(&sqlite3one) == 0)
+#define SQLITE_LITTLEENDIAN (*(char*)(&sqlite3one) == 1)
+#define SQLITE_UTF16NATIVE (SQLITE_BIGENDIAN ? SQLITE_UTF16BE : SQLITE_UTF16LE)
 #endif
 
 /*
@@ -469,19 +471,19 @@ extern const int sqlite3one;
 ** These macros are designed to work correctly on both 32-bit and 64-bit
 ** compilers.
 */
-#define LARGEST_INT64  (0xffffffff|(((i64)0x7fffffff)<<32))
+#define LARGEST_INT64 (0xffffffff | (((i64)0x7fffffff) << 32))
 #define SMALLEST_INT64 (((i64)-1) - LARGEST_INT64)
 
-/* 
+/*
 ** Round up a number to the next larger multiple of 8.  This is used
 ** to force 8-byte alignment on 64-bit architectures.
 */
-#define ROUND8(x)     (((x)+7)&~7)
+#define ROUND8(x) (((x) + 7) & ~7)
 
 /*
 ** Round down to the nearest multiple of 8
 */
-#define ROUNDDOWN8(x) ((x)&~7)
+#define ROUNDDOWN8(x) ((x) & ~7)
 
 /*
 ** Assert that the pointer X is aligned to an 8-byte boundary.  This
@@ -493,15 +495,14 @@ extern const int sqlite3one;
 ** pointers.  In that case, only verify 4-byte alignment.
 */
 #ifdef SQLITE_4_BYTE_ALIGNED_MALLOC
-# define EIGHT_BYTE_ALIGNMENT(X)   ((((char*)(X) - (char*)0)&3)==0)
+#define EIGHT_BYTE_ALIGNMENT(X) ((((char*)(X) - (char*)0) & 3) == 0)
 #else
-# define EIGHT_BYTE_ALIGNMENT(X)   ((((char*)(X) - (char*)0)&7)==0)
+#define EIGHT_BYTE_ALIGNMENT(X) ((((char*)(X) - (char*)0) & 7) == 0)
 #endif
-
 
 /*
 ** An instance of the following structure is used to store the busy-handler
-** callback for a given sqlite handle. 
+** callback for a given sqlite handle.
 **
 ** The sqlite.busyHandler member of the sqlite struct contains the busy
 ** callback for the database handle. Each pager opened via the sqlite
@@ -510,9 +511,9 @@ extern const int sqlite3one;
 */
 typedef struct BusyHandler BusyHandler;
 struct BusyHandler {
-  int (*xFunc)(void *,int);  /* The busy callback */
-  void *pArg;                /* First arg to busy callback */
-  int nBusy;                 /* Incremented with each busy call */
+	int (*xFunc)(void*, int); /* The busy callback */
+	void* pArg; /* First arg to busy callback */
+	int nBusy; /* Incremented with each busy call */
 };
 
 /*
@@ -520,30 +521,30 @@ struct BusyHandler {
 ** is a special table that holds the names and attributes of all
 ** user tables and indices.
 */
-#define MASTER_NAME       "sqlite_master"
-#define TEMP_MASTER_NAME  "sqlite_temp_master"
+#define MASTER_NAME "sqlite_master"
+#define TEMP_MASTER_NAME "sqlite_temp_master"
 
 /*
 ** The root-page of the master database table.
 */
-#define MASTER_ROOT       1
+#define MASTER_ROOT 1
 
 /*
 ** The name of the schema table.
 */
-#define SCHEMA_TABLE(x)  ((!OMIT_TEMPDB)&&(x==1)?TEMP_MASTER_NAME:MASTER_NAME)
+#define SCHEMA_TABLE(x) ((!OMIT_TEMPDB) && (x == 1) ? TEMP_MASTER_NAME : MASTER_NAME)
 
 /*
 ** A convenience macro that returns the number of elements in
 ** an array.
 */
-#define ArraySize(X)    ((int)(sizeof(X)/sizeof(X[0])))
+#define ArraySize(X) ((int)(sizeof(X) / sizeof(X[0])))
 
 /*
 ** The following value as a destructor means to use sqlite3DbFree().
 ** This is an internal extension to SQLITE_STATIC and SQLITE_TRANSIENT.
 */
-#define SQLITE_DYNAMIC   ((sqlite3_destructor_type)sqlite3DbFree)
+#define SQLITE_DYNAMIC ((sqlite3_destructor_type)sqlite3DbFree)
 
 /*
 ** When SQLITE_OMIT_WSD is defined, it means that the target platform does
@@ -560,22 +561,22 @@ struct BusyHandler {
 ** macros become no-ops and have zero performance impact.
 */
 #ifdef SQLITE_OMIT_WSD
-  #define SQLITE_WSD const
-  #define GLOBAL(t,v) (*(t*)sqlite3_wsd_find((void*)&(v), sizeof(v)))
-  #define sqlite3GlobalConfig GLOBAL(struct Sqlite3Config, sqlite3Config)
-  int sqlite3_wsd_init(int N, int J);
-  void *sqlite3_wsd_find(void *K, int L);
+#define SQLITE_WSD const
+#define GLOBAL(t, v) (*(t*)sqlite3_wsd_find((void*)&(v), sizeof(v)))
+#define sqlite3GlobalConfig GLOBAL(struct Sqlite3Config, sqlite3Config)
+int sqlite3_wsd_init(int N, int J);
+void* sqlite3_wsd_find(void* K, int L);
 #else
-  #define SQLITE_WSD 
-  #define GLOBAL(t,v) v
-  #define sqlite3GlobalConfig sqlite3Config
+#define SQLITE_WSD
+#define GLOBAL(t, v) v
+#define sqlite3GlobalConfig sqlite3Config
 #endif
 
 /*
 ** The following macros are used to suppress compiler warnings and to
-** make it clear to human readers when a function parameter is deliberately 
+** make it clear to human readers when a function parameter is deliberately
 ** left unused within the body of a function. This usually happens when
-** a function is called via a function pointer. For example the 
+** a function is called via a function pointer. For example the
 ** implementation of an SQL aggregate step callback may not use the
 ** parameter indicating the number of arguments passed to the aggregate,
 ** if it knows that this is enforced elsewhere.
@@ -588,7 +589,7 @@ struct BusyHandler {
 ** cases the parameters are named as per the usual conventions.
 */
 #define UNUSED_PARAMETER(x) (void)(x)
-#define UNUSED_PARAMETER2(x,y) UNUSED_PARAMETER(x),UNUSED_PARAMETER(y)
+#define UNUSED_PARAMETER2(x, y) UNUSED_PARAMETER(x), UNUSED_PARAMETER(y)
 
 /*
 ** Forward references to structures
@@ -637,7 +638,7 @@ typedef struct WhereInfo WhereInfo;
 typedef struct WhereLevel WhereLevel;
 
 /*
-** Defer sourcing vdbe.h and btree.h until after the "u8" and 
+** Defer sourcing vdbe.h and btree.h until after the "u8" and
 ** "BusyHandler" typedefs. vdbe.h also requires a few of the opaque
 ** pointer types (i.e. FuncDef) defined above.
 */
@@ -659,11 +660,11 @@ typedef struct WhereLevel WhereLevel;
 ** databases may be attached.
 */
 struct Db {
-  char *zName;         /* Name of this database */
-  Btree *pBt;          /* The B*Tree structure for this database file */
-  u8 inTrans;          /* 0: not writable.  1: Transaction.  2: Checkpoint */
-  u8 safety_level;     /* How aggressive at syncing data to disk */
-  Schema *pSchema;     /* Pointer to database schema (possibly shared) */
+	char* zName; /* Name of this database */
+	Btree* pBt; /* The B*Tree structure for this database file */
+	u8 inTrans; /* 0: not writable.  1: Transaction.  2: Checkpoint */
+	u8 safety_level; /* How aggressive at syncing data to disk */
+	Schema* pSchema; /* Pointer to database schema (possibly shared) */
 };
 
 /*
@@ -673,7 +674,7 @@ struct Db {
 ** the Schema for the TEMP databaes (sqlite3.aDb[1]) which is free-standing.
 ** In shared cache mode, a single Schema object can be shared by multiple
 ** Btrees that refer to the same underlying BtShared object.
-** 
+**
 ** Schema objects are automatically deallocated when the last Btree that
 ** references them is destroyed.   The TEMP Schema is manually freed by
 ** sqlite3_close().
@@ -684,27 +685,27 @@ struct Db {
 ** For a TEMP Schema, on the connection mutex is required.
 */
 struct Schema {
-  int schema_cookie;   /* Database schema version number for this file */
-  int iGeneration;     /* Generation counter.  Incremented with each change */
-  Hash tblHash;        /* All tables indexed by name */
-  Hash idxHash;        /* All (named) indices indexed by name */
-  Hash trigHash;       /* All triggers indexed by name */
-  Hash fkeyHash;       /* All foreign keys by referenced table name */
-  Table *pSeqTab;      /* The sqlite_sequence table used by AUTOINCREMENT */
-  u8 file_format;      /* Schema format version for this file */
-  u8 enc;              /* Text encoding used by this database */
-  u16 flags;           /* Flags associated with this schema */
-  int cache_size;      /* Number of pages to use in the cache */
+	int schema_cookie; /* Database schema version number for this file */
+	int iGeneration; /* Generation counter.  Incremented with each change */
+	Hash tblHash; /* All tables indexed by name */
+	Hash idxHash; /* All (named) indices indexed by name */
+	Hash trigHash; /* All triggers indexed by name */
+	Hash fkeyHash; /* All foreign keys by referenced table name */
+	Table* pSeqTab; /* The sqlite_sequence table used by AUTOINCREMENT */
+	u8 file_format; /* Schema format version for this file */
+	u8 enc; /* Text encoding used by this database */
+	u16 flags; /* Flags associated with this schema */
+	int cache_size; /* Number of pages to use in the cache */
 };
 
 /*
-** These macros can be used to test, set, or clear bits in the 
+** These macros can be used to test, set, or clear bits in the
 ** Db.pSchema->flags field.
 */
-#define DbHasProperty(D,I,P)     (((D)->aDb[I].pSchema->flags&(P))==(P))
-#define DbHasAnyProperty(D,I,P)  (((D)->aDb[I].pSchema->flags&(P))!=0)
-#define DbSetProperty(D,I,P)     (D)->aDb[I].pSchema->flags|=(P)
-#define DbClearProperty(D,I,P)   (D)->aDb[I].pSchema->flags&=~(P)
+#define DbHasProperty(D, I, P) (((D)->aDb[I].pSchema->flags & (P)) == (P))
+#define DbHasAnyProperty(D, I, P) (((D)->aDb[I].pSchema->flags & (P)) != 0)
+#define DbSetProperty(D, I, P) (D)->aDb[I].pSchema->flags |= (P)
+#define DbClearProperty(D, I, P) (D)->aDb[I].pSchema->flags &= ~(P)
 
 /*
 ** Allowed values for the DB.pSchema->flags field.
@@ -716,15 +717,15 @@ struct Schema {
 ** have been filled out.  If the schema changes, these column names might
 ** changes and so the view will need to be reset.
 */
-#define DB_SchemaLoaded    0x0001  /* The schema has been loaded */
-#define DB_UnresetViews    0x0002  /* Some views have defined column names */
-#define DB_Empty           0x0004  /* The file is empty (length 0 bytes) */
+#define DB_SchemaLoaded 0x0001 /* The schema has been loaded */
+#define DB_UnresetViews 0x0002 /* Some views have defined column names */
+#define DB_Empty 0x0004 /* The file is empty (length 0 bytes) */
 
 /*
 ** The number of different kinds of things that can be limited
 ** using the sqlite3_limit() interface.
 */
-#define SQLITE_N_LIMIT (SQLITE_LIMIT_TRIGGER_DEPTH+1)
+#define SQLITE_N_LIMIT (SQLITE_LIMIT_TRIGGER_DEPTH + 1)
 
 /*
 ** Lookaside malloc is a set of fixed-size buffers that can be used
@@ -747,18 +748,18 @@ struct Schema {
 ** lookaside allocations are not used to construct the schema objects.
 */
 struct Lookaside {
-  u16 sz;                 /* Size of each buffer in bytes */
-  u8 bEnabled;            /* False to disable new lookaside allocations */
-  u8 bMalloced;           /* True if pStart obtained from sqlite3_malloc() */
-  int nOut;               /* Number of buffers currently checked out */
-  int mxOut;              /* Highwater mark for nOut */
-  int anStat[3];          /* 0: hits.  1: size misses.  2: full misses */
-  LookasideSlot *pFree;   /* List of available buffers */
-  void *pStart;           /* First byte of available memory space */
-  void *pEnd;             /* First byte past end of available space */
+	u16 sz; /* Size of each buffer in bytes */
+	u8 bEnabled; /* False to disable new lookaside allocations */
+	u8 bMalloced; /* True if pStart obtained from sqlite3_malloc() */
+	int nOut; /* Number of buffers currently checked out */
+	int mxOut; /* Highwater mark for nOut */
+	int anStat[3]; /* 0: hits.  1: size misses.  2: full misses */
+	LookasideSlot* pFree; /* List of available buffers */
+	void* pStart; /* First byte of available memory space */
+	void* pEnd; /* First byte past end of available space */
 };
 struct LookasideSlot {
-  LookasideSlot *pNext;    /* Next buffer in the list of free buffers */
+	LookasideSlot* pNext; /* Next buffer in the list of free buffers */
 };
 
 /*
@@ -768,7 +769,7 @@ struct LookasideSlot {
 ** Collisions are on the FuncDef.pHash chain.
 */
 struct FuncDefHash {
-  FuncDef *a[23];       /* Hash table for functions */
+	FuncDef* a[23]; /* Hash table for functions */
 };
 
 /*
@@ -798,110 +799,110 @@ struct FuncDefHash {
 ** consistently.
 */
 struct sqlite3 {
-  sqlite3_vfs *pVfs;            /* OS Interface */
-  int nDb;                      /* Number of backends currently in use */
-  Db *aDb;                      /* All backends */
-  int flags;                    /* Miscellaneous flags. See below */
-  int openFlags;                /* Flags passed to sqlite3_vfs.xOpen() */
-  int errCode;                  /* Most recent error code (SQLITE_*) */
-  int errMask;                  /* & result codes with this before returning */
-  u8 autoCommit;                /* The auto-commit flag. */
-  u8 temp_store;                /* 1: file 2: memory 0: default */
-  u8 mallocFailed;              /* True if we have seen a malloc failure */
-  u8 dfltLockMode;              /* Default locking-mode for attached dbs */
-  signed char nextAutovac;      /* Autovac setting after VACUUM if >=0 */
-  u8 suppressErr;               /* Do not issue error messages if true */
-  int nextPagesize;             /* Pagesize after VACUUM if >0 */
-  int nTable;                   /* Number of tables in the database */
-  CollSeq *pDfltColl;           /* The default collating sequence (BINARY) */
-  i64 lastRowid;                /* ROWID of most recent insert (see above) */
-  u32 magic;                    /* Magic number for detect library misuse */
-  int nChange;                  /* Value returned by sqlite3_changes() */
-  int nTotalChange;             /* Value returned by sqlite3_total_changes() */
-  sqlite3_mutex *mutex;         /* Connection mutex */
-  int aLimit[SQLITE_N_LIMIT];   /* Limits */
-  struct sqlite3InitInfo {      /* Information used during initialization */
-    int iDb;                    /* When back is being initialized */
-    int newTnum;                /* Rootpage of table being initialized */
-    u8 busy;                    /* TRUE if currently initializing */
-    u8 orphanTrigger;           /* Last statement is orphaned TEMP trigger */
-  } init;
-  int nExtension;               /* Number of loaded extensions */
-  void **aExtension;            /* Array of shared library handles */
-  struct Vdbe *pVdbe;           /* List of active virtual machines */
-  int activeVdbeCnt;            /* Number of VDBEs currently executing */
-  int writeVdbeCnt;             /* Number of active VDBEs that are writing */
-  int vdbeExecCnt;              /* Number of nested calls to VdbeExec() */
-  void (*xTrace)(void*,const char*);        /* Trace function */
-  void *pTraceArg;                          /* Argument to the trace function */
-  void (*xProfile)(void*,const char*,u64);  /* Profiling function */
-  void *pProfileArg;                        /* Argument to profile function */
-  void *pCommitArg;                 /* Argument to xCommitCallback() */   
-  int (*xCommitCallback)(void*);    /* Invoked at every commit. */
-  void *pRollbackArg;               /* Argument to xRollbackCallback() */   
-  void (*xRollbackCallback)(void*); /* Invoked at every commit. */
-  void *pUpdateArg;
-  void (*xUpdateCallback)(void*,int, const char*,const char*,sqlite_int64);
+	sqlite3_vfs* pVfs; /* OS Interface */
+	int nDb; /* Number of backends currently in use */
+	Db* aDb; /* All backends */
+	int flags; /* Miscellaneous flags. See below */
+	int openFlags; /* Flags passed to sqlite3_vfs.xOpen() */
+	int errCode; /* Most recent error code (SQLITE_*) */
+	int errMask; /* & result codes with this before returning */
+	u8 autoCommit; /* The auto-commit flag. */
+	u8 temp_store; /* 1: file 2: memory 0: default */
+	u8 mallocFailed; /* True if we have seen a malloc failure */
+	u8 dfltLockMode; /* Default locking-mode for attached dbs */
+	signed char nextAutovac; /* Autovac setting after VACUUM if >=0 */
+	u8 suppressErr; /* Do not issue error messages if true */
+	int nextPagesize; /* Pagesize after VACUUM if >0 */
+	int nTable; /* Number of tables in the database */
+	CollSeq* pDfltColl; /* The default collating sequence (BINARY) */
+	i64 lastRowid; /* ROWID of most recent insert (see above) */
+	u32 magic; /* Magic number for detect library misuse */
+	int nChange; /* Value returned by sqlite3_changes() */
+	int nTotalChange; /* Value returned by sqlite3_total_changes() */
+	sqlite3_mutex* mutex; /* Connection mutex */
+	int aLimit[SQLITE_N_LIMIT]; /* Limits */
+	struct sqlite3InitInfo { /* Information used during initialization */
+		int iDb; /* When back is being initialized */
+		int newTnum; /* Rootpage of table being initialized */
+		u8 busy; /* TRUE if currently initializing */
+		u8 orphanTrigger; /* Last statement is orphaned TEMP trigger */
+	} init;
+	int nExtension; /* Number of loaded extensions */
+	void** aExtension; /* Array of shared library handles */
+	struct Vdbe* pVdbe; /* List of active virtual machines */
+	int activeVdbeCnt; /* Number of VDBEs currently executing */
+	int writeVdbeCnt; /* Number of active VDBEs that are writing */
+	int vdbeExecCnt; /* Number of nested calls to VdbeExec() */
+	void (*xTrace)(void*, const char*); /* Trace function */
+	void* pTraceArg; /* Argument to the trace function */
+	void (*xProfile)(void*, const char*, u64); /* Profiling function */
+	void* pProfileArg; /* Argument to profile function */
+	void* pCommitArg; /* Argument to xCommitCallback() */
+	int (*xCommitCallback)(void*); /* Invoked at every commit. */
+	void* pRollbackArg; /* Argument to xRollbackCallback() */
+	void (*xRollbackCallback)(void*); /* Invoked at every commit. */
+	void* pUpdateArg;
+	void (*xUpdateCallback)(void*, int, const char*, const char*, sqlite_int64);
 #ifndef SQLITE_OMIT_WAL
-  int (*xWalCallback)(void *, sqlite3 *, const char *, int);
-  void *pWalArg;
+	int (*xWalCallback)(void*, sqlite3*, const char*, int);
+	void* pWalArg;
 #endif
-  void(*xCollNeeded)(void*,sqlite3*,int eTextRep,const char*);
-  void(*xCollNeeded16)(void*,sqlite3*,int eTextRep,const void*);
-  void *pCollNeededArg;
-  sqlite3_value *pErr;          /* Most recent error message */
-  char *zErrMsg;                /* Most recent error message (UTF-8 encoded) */
-  char *zErrMsg16;              /* Most recent error message (UTF-16 encoded) */
-  union {
-    volatile int isInterrupted; /* True if sqlite3_interrupt has been called */
-    double notUsed1;            /* Spacer */
-  } u1;
-  Lookaside lookaside;          /* Lookaside malloc configuration */
+	void (*xCollNeeded)(void*, sqlite3*, int eTextRep, const char*);
+	void (*xCollNeeded16)(void*, sqlite3*, int eTextRep, const void*);
+	void* pCollNeededArg;
+	sqlite3_value* pErr; /* Most recent error message */
+	char* zErrMsg; /* Most recent error message (UTF-8 encoded) */
+	char* zErrMsg16; /* Most recent error message (UTF-16 encoded) */
+	union {
+		volatile int isInterrupted; /* True if sqlite3_interrupt has been called */
+		double notUsed1; /* Spacer */
+	} u1;
+	Lookaside lookaside; /* Lookaside malloc configuration */
 #ifndef SQLITE_OMIT_AUTHORIZATION
-  int (*xAuth)(void*,int,const char*,const char*,const char*,const char*);
-                                /* Access authorization function */
-  void *pAuthArg;               /* 1st argument to the access auth function */
+	int (*xAuth)(void*, int, const char*, const char*, const char*, const char*);
+	/* Access authorization function */
+	void* pAuthArg; /* 1st argument to the access auth function */
 #endif
 #ifndef SQLITE_OMIT_PROGRESS_CALLBACK
-  int (*xProgress)(void *);     /* The progress callback */
-  void *pProgressArg;           /* Argument to the progress callback */
-  int nProgressOps;             /* Number of opcodes for progress callback */
+	int (*xProgress)(void*); /* The progress callback */
+	void* pProgressArg; /* Argument to the progress callback */
+	int nProgressOps; /* Number of opcodes for progress callback */
 #endif
 #ifndef SQLITE_OMIT_VIRTUALTABLE
-  Hash aModule;                 /* populated by sqlite3_create_module() */
-  Table *pVTab;                 /* vtab with active Connect/Create method */
-  VTable **aVTrans;             /* Virtual tables with open transactions */
-  int nVTrans;                  /* Allocated size of aVTrans */
-  VTable *pDisconnect;    /* Disconnect these in next sqlite3_prepare() */
+	Hash aModule; /* populated by sqlite3_create_module() */
+	Table* pVTab; /* vtab with active Connect/Create method */
+	VTable** aVTrans; /* Virtual tables with open transactions */
+	int nVTrans; /* Allocated size of aVTrans */
+	VTable* pDisconnect; /* Disconnect these in next sqlite3_prepare() */
 #endif
-  FuncDefHash aFunc;            /* Hash table of connection functions */
-  Hash aCollSeq;                /* All collating sequences */
-  BusyHandler busyHandler;      /* Busy callback */
-  int busyTimeout;              /* Busy handler timeout, in msec */
-  Db aDbStatic[2];              /* Static space for the 2 default backends */
-  Savepoint *pSavepoint;        /* List of active savepoints */
-  int nSavepoint;               /* Number of non-transaction savepoints */
-  int nStatement;               /* Number of nested statement-transactions  */
-  u8 isTransactionSavepoint;    /* True if the outermost savepoint is a TS */
-  i64 nDeferredCons;            /* Net deferred constraints this transaction. */
-  int *pnBytesFreed;            /* If not NULL, increment this in DbFree() */
+	FuncDefHash aFunc; /* Hash table of connection functions */
+	Hash aCollSeq; /* All collating sequences */
+	BusyHandler busyHandler; /* Busy callback */
+	int busyTimeout; /* Busy handler timeout, in msec */
+	Db aDbStatic[2]; /* Static space for the 2 default backends */
+	Savepoint* pSavepoint; /* List of active savepoints */
+	int nSavepoint; /* Number of non-transaction savepoints */
+	int nStatement; /* Number of nested statement-transactions  */
+	u8 isTransactionSavepoint; /* True if the outermost savepoint is a TS */
+	i64 nDeferredCons; /* Net deferred constraints this transaction. */
+	int* pnBytesFreed; /* If not NULL, increment this in DbFree() */
 
 #ifdef SQLITE_ENABLE_UNLOCK_NOTIFY
-  /* The following variables are all protected by the STATIC_MASTER 
-  ** mutex, not by sqlite3.mutex. They are used by code in notify.c. 
-  **
-  ** When X.pUnlockConnection==Y, that means that X is waiting for Y to
-  ** unlock so that it can proceed.
-  **
-  ** When X.pBlockingConnection==Y, that means that something that X tried
-  ** tried to do recently failed with an SQLITE_LOCKED error due to locks
-  ** held by Y.
-  */
-  sqlite3 *pBlockingConnection; /* Connection that caused SQLITE_LOCKED */
-  sqlite3 *pUnlockConnection;           /* Connection to watch for unlock */
-  void *pUnlockArg;                     /* Argument to xUnlockNotify */
-  void (*xUnlockNotify)(void **, int);  /* Unlock notify callback */
-  sqlite3 *pNextBlocked;        /* Next in list of all blocked connections */
+	/* The following variables are all protected by the STATIC_MASTER
+	** mutex, not by sqlite3.mutex. They are used by code in notify.c.
+	**
+	** When X.pUnlockConnection==Y, that means that X is waiting for Y to
+	** unlock so that it can proceed.
+	**
+	** When X.pBlockingConnection==Y, that means that something that X tried
+	** tried to do recently failed with an SQLITE_LOCKED error due to locks
+	** held by Y.
+	*/
+	sqlite3* pBlockingConnection; /* Connection that caused SQLITE_LOCKED */
+	sqlite3* pUnlockConnection; /* Connection to watch for unlock */
+	void* pUnlockArg; /* Argument to xUnlockNotify */
+	void (*xUnlockNotify)(void**, int); /* Unlock notify callback */
+	sqlite3* pNextBlocked; /* Next in list of all blocked connections */
 #endif
 };
 
@@ -914,58 +915,59 @@ struct sqlite3 {
 /*
 ** Possible values for the sqlite3.flags.
 */
-#define SQLITE_VdbeTrace      0x00000100  /* True to trace VDBE execution */
-#define SQLITE_InternChanges  0x00000200  /* Uncommitted Hash table changes */
-#define SQLITE_FullColNames   0x00000400  /* Show full column names on SELECT */
-#define SQLITE_ShortColNames  0x00000800  /* Show short columns names */
-#define SQLITE_CountRows      0x00001000  /* Count rows changed by INSERT, */
+#define SQLITE_VdbeTrace 0x00000100 /* True to trace VDBE execution */
+#define SQLITE_InternChanges 0x00000200 /* Uncommitted Hash table changes */
+#define SQLITE_FullColNames 0x00000400 /* Show full column names on SELECT */
+#define SQLITE_ShortColNames 0x00000800 /* Show short columns names */
+#define SQLITE_CountRows 0x00001000 /* Count rows changed by INSERT, */
                                           /*   DELETE, or UPDATE and return */
                                           /*   the count using a callback. */
-#define SQLITE_NullCallback   0x00002000  /* Invoke the callback once if the */
+#define SQLITE_NullCallback 0x00002000 /* Invoke the callback once if the */
                                           /*   result set is empty */
-#define SQLITE_SqlTrace       0x00004000  /* Debug print SQL as it executes */
-#define SQLITE_VdbeListing    0x00008000  /* Debug listings of VDBE programs */
-#define SQLITE_WriteSchema    0x00010000  /* OK to update SQLITE_MASTER */
-#define SQLITE_NoReadlock     0x00020000  /* Readlocks are omitted when 
-                                          ** accessing read-only databases */
-#define SQLITE_IgnoreChecks   0x00040000  /* Do not enforce check constraints */
-#define SQLITE_ReadUncommitted 0x0080000  /* For shared-cache mode */
-#define SQLITE_LegacyFileFmt  0x00100000  /* Create new databases in format 1 */
-#define SQLITE_FullFSync      0x00200000  /* Use full fsync on the backend */
-#define SQLITE_CkptFullFSync  0x00400000  /* Use full fsync for checkpoint */
-#define SQLITE_RecoveryMode   0x00800000  /* Ignore schema errors */
-#define SQLITE_ReverseOrder   0x01000000  /* Reverse unordered SELECTs */
-#define SQLITE_RecTriggers    0x02000000  /* Enable recursive triggers */
-#define SQLITE_ForeignKeys    0x04000000  /* Enforce foreign key constraints  */
-#define SQLITE_AutoIndex      0x08000000  /* Enable automatic indexes */
-#define SQLITE_PreferBuiltin  0x10000000  /* Preference to built-in funcs */
-#define SQLITE_LoadExtension  0x20000000  /* Enable load_extension */
-#define SQLITE_EnableTrigger  0x40000000  /* True to enable triggers */
+#define SQLITE_SqlTrace 0x00004000 /* Debug print SQL as it executes */
+#define SQLITE_VdbeListing 0x00008000 /* Debug listings of VDBE programs */
+#define SQLITE_WriteSchema 0x00010000 /* OK to update SQLITE_MASTER */
+#define SQLITE_NoReadlock                                                                                              \
+	0x00020000 /* Readlocks are omitted when                                                                           \
+	           ** accessing read-only databases */
+#define SQLITE_IgnoreChecks 0x00040000 /* Do not enforce check constraints */
+#define SQLITE_ReadUncommitted 0x0080000 /* For shared-cache mode */
+#define SQLITE_LegacyFileFmt 0x00100000 /* Create new databases in format 1 */
+#define SQLITE_FullFSync 0x00200000 /* Use full fsync on the backend */
+#define SQLITE_CkptFullFSync 0x00400000 /* Use full fsync for checkpoint */
+#define SQLITE_RecoveryMode 0x00800000 /* Ignore schema errors */
+#define SQLITE_ReverseOrder 0x01000000 /* Reverse unordered SELECTs */
+#define SQLITE_RecTriggers 0x02000000 /* Enable recursive triggers */
+#define SQLITE_ForeignKeys 0x04000000 /* Enforce foreign key constraints  */
+#define SQLITE_AutoIndex 0x08000000 /* Enable automatic indexes */
+#define SQLITE_PreferBuiltin 0x10000000 /* Preference to built-in funcs */
+#define SQLITE_LoadExtension 0x20000000 /* Enable load_extension */
+#define SQLITE_EnableTrigger 0x40000000 /* True to enable triggers */
 
 /*
 ** Bits of the sqlite3.flags field that are used by the
 ** sqlite3_test_control(SQLITE_TESTCTRL_OPTIMIZATIONS,...) interface.
 ** These must be the low-order bits of the flags field.
 */
-#define SQLITE_QueryFlattener 0x01        /* Disable query flattening */
-#define SQLITE_ColumnCache    0x02        /* Disable the column cache */
-#define SQLITE_IndexSort      0x04        /* Disable indexes for sorting */
-#define SQLITE_IndexSearch    0x08        /* Disable indexes for searching */
-#define SQLITE_IndexCover     0x10        /* Disable index covering table */
-#define SQLITE_GroupByOrder   0x20        /* Disable GROUPBY cover of ORDERBY */
-#define SQLITE_FactorOutConst 0x40        /* Disable factoring out constants */
-#define SQLITE_OptMask        0xff        /* Mask of all disablable opts */
+#define SQLITE_QueryFlattener 0x01 /* Disable query flattening */
+#define SQLITE_ColumnCache 0x02 /* Disable the column cache */
+#define SQLITE_IndexSort 0x04 /* Disable indexes for sorting */
+#define SQLITE_IndexSearch 0x08 /* Disable indexes for searching */
+#define SQLITE_IndexCover 0x10 /* Disable index covering table */
+#define SQLITE_GroupByOrder 0x20 /* Disable GROUPBY cover of ORDERBY */
+#define SQLITE_FactorOutConst 0x40 /* Disable factoring out constants */
+#define SQLITE_OptMask 0xff /* Mask of all disablable opts */
 
 /*
 ** Possible values for the sqlite.magic field.
 ** The numbers are obtained at random and have no special meaning, other
 ** than being distinct from one another.
 */
-#define SQLITE_MAGIC_OPEN     0xa029a697  /* Database is open */
-#define SQLITE_MAGIC_CLOSED   0x9f3c2d33  /* Database is closed */
-#define SQLITE_MAGIC_SICK     0x4b771290  /* Error and awaiting close */
-#define SQLITE_MAGIC_BUSY     0xf03b7906  /* Database currently in use */
-#define SQLITE_MAGIC_ERROR    0xb5357930  /* An SQLITE_MISUSE error occurred */
+#define SQLITE_MAGIC_OPEN 0xa029a697 /* Database is open */
+#define SQLITE_MAGIC_CLOSED 0x9f3c2d33 /* Database is closed */
+#define SQLITE_MAGIC_SICK 0x4b771290 /* Error and awaiting close */
+#define SQLITE_MAGIC_BUSY 0xf03b7906 /* Database currently in use */
+#define SQLITE_MAGIC_ERROR 0xb5357930 /* An SQLITE_MISUSE error occurred */
 
 /*
 ** Each SQL function is defined by an instance of the following
@@ -1010,12 +1012,12 @@ struct FuncDestructor {
 /*
 ** Possible values for FuncDef.flags
 */
-#define SQLITE_FUNC_LIKE     0x01 /* Candidate for the LIKE optimization */
-#define SQLITE_FUNC_CASE     0x02 /* Case-sensitive LIKE-type function */
-#define SQLITE_FUNC_EPHEM    0x04 /* Ephemeral.  Delete with VDBE */
+#define SQLITE_FUNC_LIKE 0x01 /* Candidate for the LIKE optimization */
+#define SQLITE_FUNC_CASE 0x02 /* Case-sensitive LIKE-type function */
+#define SQLITE_FUNC_EPHEM 0x04 /* Ephemeral.  Delete with VDBE */
 #define SQLITE_FUNC_NEEDCOLL 0x08 /* sqlite3GetFuncCollSeq() might be called */
-#define SQLITE_FUNC_PRIVATE  0x10 /* Allowed for internal use only */
-#define SQLITE_FUNC_COUNT    0x20 /* Built-in count(*) aggregate */
+#define SQLITE_FUNC_PRIVATE 0x10 /* Allowed for internal use only */
+#define SQLITE_FUNC_COUNT 0x20 /* Built-in count(*) aggregate */
 #define SQLITE_FUNC_COALESCE 0x40 /* Built-in coalesce() or ifnull() function */
 
 /*
@@ -1043,17 +1045,14 @@ struct FuncDestructor {
 **     FuncDef.flags variable is set to the value passed as the flags
 **     parameter.
 */
-#define FUNCTION(zName, nArg, iArg, bNC, xFunc) \
-  {nArg, SQLITE_UTF8, bNC*SQLITE_FUNC_NEEDCOLL, \
-   SQLITE_INT_TO_PTR(iArg), 0, xFunc, 0, 0, #zName, 0, 0}
-#define STR_FUNCTION(zName, nArg, pArg, bNC, xFunc) \
-  {nArg, SQLITE_UTF8, bNC*SQLITE_FUNC_NEEDCOLL, \
-   pArg, 0, xFunc, 0, 0, #zName, 0, 0}
-#define LIKEFUNC(zName, nArg, arg, flags) \
-  {nArg, SQLITE_UTF8, flags, (void *)arg, 0, likeFunc, 0, 0, #zName, 0, 0}
-#define AGGREGATE(zName, nArg, arg, nc, xStep, xFinal) \
-  {nArg, SQLITE_UTF8, nc*SQLITE_FUNC_NEEDCOLL, \
-   SQLITE_INT_TO_PTR(arg), 0, 0, xStep,xFinal,#zName,0,0}
+#define FUNCTION(zName, nArg, iArg, bNC, xFunc)                                                                        \
+	{ nArg, SQLITE_UTF8, bNC *SQLITE_FUNC_NEEDCOLL, SQLITE_INT_TO_PTR(iArg), 0, xFunc, 0, 0, #zName, 0, 0 }
+#define STR_FUNCTION(zName, nArg, pArg, bNC, xFunc)                                                                    \
+	{ nArg, SQLITE_UTF8, bNC *SQLITE_FUNC_NEEDCOLL, pArg, 0, xFunc, 0, 0, #zName, 0, 0 }
+#define LIKEFUNC(zName, nArg, arg, flags)                                                                              \
+	{ nArg, SQLITE_UTF8, flags, (void*)arg, 0, likeFunc, 0, 0, #zName, 0, 0 }
+#define AGGREGATE(zName, nArg, arg, nc, xStep, xFinal)                                                                 \
+	{ nArg, SQLITE_UTF8, nc *SQLITE_FUNC_NEEDCOLL, SQLITE_INT_TO_PTR(arg), 0, 0, xStep, xFinal, #zName, 0, 0 }
 
 /*
 ** All current savepoints are stored in a linked list starting at
@@ -1071,9 +1070,9 @@ struct Savepoint {
 ** The following are used as the second parameter to sqlite3Savepoint(),
 ** and as the P1 argument to the OP_Savepoint instruction.
 */
-#define SAVEPOINT_BEGIN      0
-#define SAVEPOINT_RELEASE    1
-#define SAVEPOINT_ROLLBACK   2
+#define SAVEPOINT_BEGIN 0
+#define SAVEPOINT_RELEASE 1
+#define SAVEPOINT_ROLLBACK 2
 
 
 /*
@@ -1139,16 +1138,16 @@ struct CollSeq {
 /*
 ** Allowed values of CollSeq.type:
 */
-#define SQLITE_COLL_BINARY  1  /* The default memcmp() collating sequence */
-#define SQLITE_COLL_NOCASE  2  /* The built-in NOCASE collating sequence */
-#define SQLITE_COLL_REVERSE 3  /* The built-in REVERSE collating sequence */
-#define SQLITE_COLL_USER    0  /* Any other user-defined collating sequence */
+#define SQLITE_COLL_BINARY 1 /* The default memcmp() collating sequence */
+#define SQLITE_COLL_NOCASE 2 /* The built-in NOCASE collating sequence */
+#define SQLITE_COLL_REVERSE 3 /* The built-in REVERSE collating sequence */
+#define SQLITE_COLL_USER 0 /* Any other user-defined collating sequence */
 
 /*
 ** A sort order can be either ASC or DESC.
 */
-#define SQLITE_SO_ASC       0  /* Sort in ascending order */
-#define SQLITE_SO_DESC      1  /* Sort in ascending order */
+#define SQLITE_SO_ASC 0 /* Sort in ascending order */
+#define SQLITE_SO_DESC 1 /* Sort in ascending order */
 
 /*
 ** Column affinity types.
@@ -1164,27 +1163,27 @@ struct CollSeq {
 ** Note also that the numeric types are grouped together so that testing
 ** for a numeric type is a single comparison.
 */
-#define SQLITE_AFF_TEXT     'a'
-#define SQLITE_AFF_NONE     'b'
-#define SQLITE_AFF_NUMERIC  'c'
-#define SQLITE_AFF_INTEGER  'd'
-#define SQLITE_AFF_REAL     'e'
+#define SQLITE_AFF_TEXT 'a'
+#define SQLITE_AFF_NONE 'b'
+#define SQLITE_AFF_NUMERIC 'c'
+#define SQLITE_AFF_INTEGER 'd'
+#define SQLITE_AFF_REAL 'e'
 
-#define sqlite3IsNumericAffinity(X)  ((X)>=SQLITE_AFF_NUMERIC)
+#define sqlite3IsNumericAffinity(X) ((X) >= SQLITE_AFF_NUMERIC)
 
 /*
 ** The SQLITE_AFF_MASK values masks off the significant bits of an
 ** affinity value. 
 */
-#define SQLITE_AFF_MASK     0x67
+#define SQLITE_AFF_MASK 0x67
 
 /*
 ** Additional bit values that can be ORed with an affinity without
 ** changing the affinity.
 */
-#define SQLITE_JUMPIFNULL   0x08  /* jumps if either operand is NULL */
-#define SQLITE_STOREP2      0x10  /* Store result in reg[P2] rather than jump */
-#define SQLITE_NULLEQ       0x80  /* NULL=NULL */
+#define SQLITE_JUMPIFNULL 0x08 /* jumps if either operand is NULL */
+#define SQLITE_STOREP2 0x10 /* Store result in reg[P2] rather than jump */
+#define SQLITE_NULLEQ 0x80 /* NULL=NULL */
 
 /*
 ** An object of this type is created for each virtual table present in
@@ -1299,12 +1298,12 @@ struct Table {
 /*
 ** Allowed values for Tabe.tabFlags.
 */
-#define TF_Readonly        0x01    /* Read-only system table */
-#define TF_Ephemeral       0x02    /* An ephemeral table */
-#define TF_HasPrimaryKey   0x04    /* Table has a primary key */
-#define TF_Autoincrement   0x08    /* Integer primary key is autoincrement */
-#define TF_Virtual         0x10    /* Is a virtual table */
-#define TF_NeedMetadata    0x20    /* aCol[].zType and aCol[].pColl missing */
+#define TF_Readonly 0x01 /* Read-only system table */
+#define TF_Ephemeral 0x02 /* An ephemeral table */
+#define TF_HasPrimaryKey 0x04 /* Table has a primary key */
+#define TF_Autoincrement 0x08 /* Integer primary key is autoincrement */
+#define TF_Virtual 0x10 /* Is a virtual table */
+#define TF_NeedMetadata 0x20 /* aCol[].zType and aCol[].pColl missing */
 
 
 
@@ -1314,11 +1313,11 @@ struct Table {
 ** table support is omitted from the build.
 */
 #ifndef SQLITE_OMIT_VIRTUALTABLE
-#  define IsVirtual(X)      (((X)->tabFlags & TF_Virtual)!=0)
-#  define IsHiddenColumn(X) ((X)->isHidden)
+#define IsVirtual(X) (((X)->tabFlags & TF_Virtual) != 0)
+#define IsHiddenColumn(X) ((X)->isHidden)
 #else
-#  define IsVirtual(X)      0
-#  define IsHiddenColumn(X) 0
+#define IsVirtual(X) 0
+#define IsHiddenColumn(X) 0
 #endif
 
 /*
@@ -1382,32 +1381,32 @@ struct FKey {
 ** The following symbolic values are used to record which type
 ** of action to take.
 */
-#define OE_None     0   /* There is no constraint to check */
-#define OE_Rollback 1   /* Fail the operation and rollback the transaction */
-#define OE_Abort    2   /* Back out changes but do no rollback transaction */
-#define OE_Fail     3   /* Stop the operation but leave all prior changes */
-#define OE_Ignore   4   /* Ignore the error. Do not do the INSERT or UPDATE */
-#define OE_Replace  5   /* Delete existing record, then do INSERT or UPDATE */
+#define OE_None 0 /* There is no constraint to check */
+#define OE_Rollback 1 /* Fail the operation and rollback the transaction */
+#define OE_Abort 2 /* Back out changes but do no rollback transaction */
+#define OE_Fail 3 /* Stop the operation but leave all prior changes */
+#define OE_Ignore 4 /* Ignore the error. Do not do the INSERT or UPDATE */
+#define OE_Replace 5 /* Delete existing record, then do INSERT or UPDATE */
 
-#define OE_Restrict 6   /* OE_Abort for IMMEDIATE, OE_Rollback for DEFERRED */
-#define OE_SetNull  7   /* Set the foreign key value to NULL */
-#define OE_SetDflt  8   /* Set the foreign key value to its default */
-#define OE_Cascade  9   /* Cascade the changes */
+#define OE_Restrict 6 /* OE_Abort for IMMEDIATE, OE_Rollback for DEFERRED */
+#define OE_SetNull 7 /* Set the foreign key value to NULL */
+#define OE_SetDflt 8 /* Set the foreign key value to its default */
+#define OE_Cascade 9 /* Cascade the changes */
 
-#define OE_Default  99  /* Do whatever the default action is */
+#define OE_Default 99 /* Do whatever the default action is */
 
 #endif
 /*
 ** An instance of the following structure is passed as the first
-** argument to sqlite3VdbeKeyCompare and is used to control the 
+** argument to sqlite3VdbeKeyCompare and is used to control the
 ** comparison of the two index keys.
 */
 struct KeyInfo {
-  sqlite3 *db;        /* The database connection */
-  u8 enc;             /* Text encoding - one of the SQLITE_UTF* values */
-  u16 nField;         /* Number of entries in aColl[] */
-  u8 *aSortOrder;     /* Sort order for each column.  May be NULL */
-  CollSeq *aColl[1];  /* Collating sequence for each term of the key */
+	sqlite3* db; /* The database connection */
+	u8 enc; /* Text encoding - one of the SQLITE_UTF* values */
+	u16 nField; /* Number of entries in aColl[] */
+	u8* aSortOrder; /* Sort order for each column.  May be NULL */
+	CollSeq* aColl[1]; /* Collating sequence for each term of the key */
 };
 
 /*
@@ -1425,22 +1424,22 @@ struct KeyInfo {
 ** into its constituent fields.
 */
 struct UnpackedRecord {
-  KeyInfo *pKeyInfo;  /* Collation and sort-order information */
-  u16 nField;         /* Number of entries in apMem[] */
-  u16 flags;          /* Boolean settings.  UNPACKED_... below */
-  i64 rowid;          /* Used by UNPACKED_PREFIX_SEARCH */
-  Mem *aMem;          /* Values */
+	KeyInfo* pKeyInfo; /* Collation and sort-order information */
+	u16 nField; /* Number of entries in apMem[] */
+	u16 flags; /* Boolean settings.  UNPACKED_... below */
+	i64 rowid; /* Used by UNPACKED_PREFIX_SEARCH */
+	Mem* aMem; /* Values */
 };
 
 /*
 ** Allowed values of UnpackedRecord.flags
 */
-#define UNPACKED_NEED_FREE     0x0001  /* Memory is from sqlite3Malloc() */
-#define UNPACKED_NEED_DESTROY  0x0002  /* apMem[]s should all be destroyed */
-#define UNPACKED_IGNORE_ROWID  0x0004  /* Ignore trailing rowid on key1 */
-#define UNPACKED_INCRKEY       0x0008  /* Make this key an epsilon larger */
-#define UNPACKED_PREFIX_MATCH  0x0010  /* A prefix match is considered OK */
-#define UNPACKED_PREFIX_SEARCH 0x0020  /* A prefix match is considered OK */
+#define UNPACKED_NEED_FREE 0x0001 /* Memory is from sqlite3Malloc() */
+#define UNPACKED_NEED_DESTROY 0x0002 /* apMem[]s should all be destroyed */
+#define UNPACKED_IGNORE_ROWID 0x0004 /* Ignore trailing rowid on key1 */
+#define UNPACKED_INCRKEY 0x0008 /* Make this key an epsilon larger */
+#define UNPACKED_PREFIX_MATCH 0x0010 /* A prefix match is considered OK */
+#define UNPACKED_PREFIX_SEARCH 0x0020 /* A prefix match is considered OK */
 
 #if 0
 
@@ -1567,7 +1566,7 @@ struct AggInfo {
 ** to have prepared statements with over 32767 variables, and for them
 ** the option is available (at compile-time).
 */
-#if SQLITE_MAX_VARIABLE_NUMBER<=32767
+#if SQLITE_MAX_VARIABLE_NUMBER <= 32767
 typedef i16 ynVar;
 #else
 typedef int ynVar;
@@ -1674,7 +1673,7 @@ struct Expr {
   u8 op2;                /* If a TK_REGISTER, the original value of Expr.op */
   AggInfo *pAggInfo;     /* Used by TK_AGG_COLUMN and TK_AGG_FUNCTION */
   Table *pTab;           /* Table for TK_COLUMN expressions. */
-#if SQLITE_MAX_EXPR_DEPTH>0
+#if SQLITE_MAX_EXPR_DEPTH > 0
   int nHeight;           /* Height of the tree headed by this node */
 #endif
 };
@@ -1682,28 +1681,28 @@ struct Expr {
 /*
 ** The following are the meanings of bits in the Expr.flags field.
 */
-#define EP_FromJoin   0x0001  /* Originated in ON or USING clause of a join */
-#define EP_Agg        0x0002  /* Contains one or more aggregate functions */
-#define EP_Resolved   0x0004  /* IDs have been resolved to COLUMNs */
-#define EP_Error      0x0008  /* Expression contains one or more errors */
-#define EP_Distinct   0x0010  /* Aggregate function with DISTINCT keyword */
-#define EP_VarSelect  0x0020  /* pSelect is correlated, not constant */
-#define EP_DblQuoted  0x0040  /* token.z was originally in "..." */
-#define EP_InfixFunc  0x0080  /* True for an infix function: LIKE, GLOB, etc */
-#define EP_ExpCollate 0x0100  /* Collating sequence specified explicitly */
-#define EP_FixedDest  0x0200  /* Result needed in a specific register */
-#define EP_IntValue   0x0400  /* Integer value contained in u.iValue */
-#define EP_xIsSelect  0x0800  /* x.pSelect is valid (otherwise x.pList is) */
+#define EP_FromJoin 0x0001 /* Originated in ON or USING clause of a join */
+#define EP_Agg 0x0002 /* Contains one or more aggregate functions */
+#define EP_Resolved 0x0004 /* IDs have been resolved to COLUMNs */
+#define EP_Error 0x0008 /* Expression contains one or more errors */
+#define EP_Distinct 0x0010 /* Aggregate function with DISTINCT keyword */
+#define EP_VarSelect 0x0020 /* pSelect is correlated, not constant */
+#define EP_DblQuoted 0x0040 /* token.z was originally in "..." */
+#define EP_InfixFunc 0x0080 /* True for an infix function: LIKE, GLOB, etc */
+#define EP_ExpCollate 0x0100 /* Collating sequence specified explicitly */
+#define EP_FixedDest 0x0200 /* Result needed in a specific register */
+#define EP_IntValue 0x0400 /* Integer value contained in u.iValue */
+#define EP_xIsSelect 0x0800 /* x.pSelect is valid (otherwise x.pList is) */
 
-#define EP_Reduced    0x1000  /* Expr struct is EXPR_REDUCEDSIZE bytes only */
-#define EP_TokenOnly  0x2000  /* Expr struct is EXPR_TOKENONLYSIZE bytes only */
-#define EP_Static     0x4000  /* Held in memory not obtained from malloc() */
+#define EP_Reduced 0x1000 /* Expr struct is EXPR_REDUCEDSIZE bytes only */
+#define EP_TokenOnly 0x2000 /* Expr struct is EXPR_TOKENONLYSIZE bytes only */
+#define EP_Static 0x4000 /* Held in memory not obtained from malloc() */
 
 /*
 ** The following are the meanings of bits in the Expr.flags2 field.
 */
-#define EP2_MallocedToken  0x0001  /* Need to sqlite3DbFree() Expr.zToken */
-#define EP2_Irreducible    0x0002  /* Cannot EXPRDUP_REDUCE this Expr */
+#define EP2_MallocedToken 0x0001 /* Need to sqlite3DbFree() Expr.zToken */
+#define EP2_Irreducible 0x0002 /* Cannot EXPRDUP_REDUCE this Expr */
 
 /*
 ** The pseudo-routine sqlite3ExprSetIrreducible sets the EP2_Irreducible
@@ -1712,34 +1711,34 @@ struct Expr {
 ** so as not to burden production code.
 */
 #ifdef SQLITE_DEBUG
-# define ExprSetIrreducible(X)  (X)->flags2 |= EP2_Irreducible
+#define ExprSetIrreducible(X) (X)->flags2 |= EP2_Irreducible
 #else
-# define ExprSetIrreducible(X)
+#define ExprSetIrreducible(X)
 #endif
 
 /*
 ** These macros can be used to test, set, or clear bits in the 
 ** Expr.flags field.
 */
-#define ExprHasProperty(E,P)     (((E)->flags&(P))==(P))
-#define ExprHasAnyProperty(E,P)  (((E)->flags&(P))!=0)
-#define ExprSetProperty(E,P)     (E)->flags|=(P)
-#define ExprClearProperty(E,P)   (E)->flags&=~(P)
+#define ExprHasProperty(E, P) (((E)->flags & (P)) == (P))
+#define ExprHasAnyProperty(E, P) (((E)->flags & (P)) != 0)
+#define ExprSetProperty(E, P) (E)->flags |= (P)
+#define ExprClearProperty(E, P) (E)->flags &= ~(P)
 
 /*
 ** Macros to determine the number of bytes required by a normal Expr 
 ** struct, an Expr struct with the EP_Reduced flag set in Expr.flags 
 ** and an Expr struct with the EP_TokenOnly flag set.
 */
-#define EXPR_FULLSIZE           sizeof(Expr)           /* Full size */
-#define EXPR_REDUCEDSIZE        offsetof(Expr,iTable)  /* Common features */
-#define EXPR_TOKENONLYSIZE      offsetof(Expr,pLeft)   /* Fewer features */
+#define EXPR_FULLSIZE sizeof(Expr) /* Full size */
+#define EXPR_REDUCEDSIZE offsetof(Expr, iTable) /* Common features */
+#define EXPR_TOKENONLYSIZE offsetof(Expr, pLeft) /* Fewer features */
 
 /*
 ** Flags passed to the sqlite3ExprDup() function. See the header comment 
 ** above sqlite3ExprDup() for details.
 */
-#define EXPRDUP_REDUCE         0x0001  /* Used reduced-size Expr nodes */
+#define EXPRDUP_REDUCE 0x0001 /* Used reduced-size Expr nodes */
 
 /*
 ** A list of expressions.  Each expression may optionally have a
@@ -1811,7 +1810,7 @@ typedef u64 Bitmask;
 /*
 ** The number of bits in a Bitmask.  "BMS" means "BitMask Size".
 */
-#define BMS  ((int)(sizeof(Bitmask)*8))
+#define BMS ((int)(sizeof(Bitmask) * 8))
 
 /*
 ** The following structure describes the FROM clause of a SELECT statement.
@@ -1859,13 +1858,13 @@ struct SrcList {
 /*
 ** Permitted values of the SrcList.a.jointype field
 */
-#define JT_INNER     0x0001    /* Any kind of inner or cross join */
-#define JT_CROSS     0x0002    /* Explicit use of the CROSS keyword */
-#define JT_NATURAL   0x0004    /* True for a "natural" join */
-#define JT_LEFT      0x0008    /* Left outer join */
-#define JT_RIGHT     0x0010    /* Right outer join */
-#define JT_OUTER     0x0020    /* The "OUTER" keyword is present */
-#define JT_ERROR     0x0040    /* unknown or unsupported join type */
+#define JT_INNER 0x0001 /* Any kind of inner or cross join */
+#define JT_CROSS 0x0002 /* Explicit use of the CROSS keyword */
+#define JT_NATURAL 0x0004 /* True for a "natural" join */
+#define JT_LEFT 0x0008 /* Left outer join */
+#define JT_RIGHT 0x0010 /* Right outer join */
+#define JT_OUTER 0x0020 /* The "OUTER" keyword is present */
+#define JT_ERROR 0x0040 /* unknown or unsupported join type */
 
 
 /*
@@ -1941,15 +1940,15 @@ struct WhereLevel {
 ** Flags appropriate for the wctrlFlags parameter of sqlite3WhereBegin()
 ** and the WhereInfo.wctrlFlags member.
 */
-#define WHERE_ORDERBY_NORMAL   0x0000 /* No-op */
-#define WHERE_ORDERBY_MIN      0x0001 /* ORDER BY processing for min() func */
-#define WHERE_ORDERBY_MAX      0x0002 /* ORDER BY processing for max() func */
-#define WHERE_ONEPASS_DESIRED  0x0004 /* Want to do one-pass UPDATE/DELETE */
-#define WHERE_DUPLICATES_OK    0x0008 /* Ok to return a row more than once */
-#define WHERE_OMIT_OPEN        0x0010 /* Table cursors are already open */
-#define WHERE_OMIT_CLOSE       0x0020 /* Omit close of table & index cursors */
-#define WHERE_FORCE_TABLE      0x0040 /* Do not use an index-only search */
-#define WHERE_ONETABLE_ONLY    0x0080 /* Only code the 1st table in pTabList */
+#define WHERE_ORDERBY_NORMAL 0x0000 /* No-op */
+#define WHERE_ORDERBY_MIN 0x0001 /* ORDER BY processing for min() func */
+#define WHERE_ORDERBY_MAX 0x0002 /* ORDER BY processing for max() func */
+#define WHERE_ONEPASS_DESIRED 0x0004 /* Want to do one-pass UPDATE/DELETE */
+#define WHERE_DUPLICATES_OK 0x0008 /* Ok to return a row more than once */
+#define WHERE_OMIT_OPEN 0x0010 /* Table cursors are already open */
+#define WHERE_OMIT_CLOSE 0x0020 /* Omit close of table & index cursors */
+#define WHERE_FORCE_TABLE 0x0040 /* Do not use an index-only search */
+#define WHERE_ONETABLE_ONLY 0x0080 /* Only code the 1st table in pTabList */
 
 /*
 ** The WHERE clause processing routine has two halves.  The
@@ -2053,32 +2052,32 @@ struct Select {
 ** Allowed values for Select.selFlags.  The "SF" prefix stands for
 ** "Select Flag".
 */
-#define SF_Distinct        0x0001  /* Output should be DISTINCT */
-#define SF_Resolved        0x0002  /* Identifiers have been resolved */
-#define SF_Aggregate       0x0004  /* Contains aggregate functions */
-#define SF_UsesEphemeral   0x0008  /* Uses the OpenEphemeral opcode */
-#define SF_Expanded        0x0010  /* sqlite3SelectExpand() called on this */
-#define SF_HasTypeInfo     0x0020  /* FROM subqueries have Table metadata */
+#define SF_Distinct 0x0001 /* Output should be DISTINCT */
+#define SF_Resolved 0x0002 /* Identifiers have been resolved */
+#define SF_Aggregate 0x0004 /* Contains aggregate functions */
+#define SF_UsesEphemeral 0x0008 /* Uses the OpenEphemeral opcode */
+#define SF_Expanded 0x0010 /* sqlite3SelectExpand() called on this */
+#define SF_HasTypeInfo 0x0020 /* FROM subqueries have Table metadata */
 
 
 /*
 ** The results of a select can be distributed in several ways.  The
 ** "SRT" prefix means "SELECT Result Type".
 */
-#define SRT_Union        1  /* Store result as keys in an index */
-#define SRT_Except       2  /* Remove result from a UNION index */
-#define SRT_Exists       3  /* Store 1 if the result is not empty */
-#define SRT_Discard      4  /* Do not save the results anywhere */
+#define SRT_Union 1 /* Store result as keys in an index */
+#define SRT_Except 2 /* Remove result from a UNION index */
+#define SRT_Exists 3 /* Store 1 if the result is not empty */
+#define SRT_Discard 4 /* Do not save the results anywhere */
 
 /* The ORDER BY clause is ignored for all of the above */
-#define IgnorableOrderby(X) ((X->eDest)<=SRT_Discard)
+#define IgnorableOrderby(X) ((X->eDest) <= SRT_Discard)
 
-#define SRT_Output       5  /* Output each row of result */
-#define SRT_Mem          6  /* Store result in a memory cell */
-#define SRT_Set          7  /* Store results as keys in an index */
-#define SRT_Table        8  /* Store result as data with an automatic rowid */
-#define SRT_EphemTab     9  /* Create transient tab and store like SRT_Table */
-#define SRT_Coroutine   10  /* Generate a single row of result */
+#define SRT_Output 5 /* Output each row of result */
+#define SRT_Mem 6 /* Store result in a memory cell */
+#define SRT_Set 7 /* Store results as keys in an index */
+#define SRT_Table 8 /* Store result as data with an automatic rowid */
+#define SRT_EphemTab 9 /* Create transient tab and store like SRT_Table */
+#define SRT_Coroutine 10 /* Generate a single row of result */
 
 /*
 ** A structure used to customize the behavior of sqlite3Select(). See
@@ -2113,7 +2112,7 @@ struct AutoincInfo {
 ** Size of the column cache
 */
 #ifndef SQLITE_N_COLCACHE
-# define SQLITE_N_COLCACHE 10
+#define SQLITE_N_COLCACHE 10
 #endif
 
 /*
@@ -2145,7 +2144,7 @@ struct TriggerPrg {
 /*
 ** The yDbMask datatype for the bitmask of all attached databases.
 */
-#if SQLITE_MAX_ATTACHED>30
+#if SQLITE_MAX_ATTACHED > 30
   typedef sqlite3_uint64 yDbMask;
 #else
   typedef unsigned int yDbMask;
@@ -2259,9 +2258,9 @@ struct Parse {
 };
 
 #ifdef SQLITE_OMIT_VIRTUALTABLE
-  #define IN_DECLARE_VTAB 0
+#define IN_DECLARE_VTAB 0
 #else
-  #define IN_DECLARE_VTAB (pParse->declareVtab)
+#define IN_DECLARE_VTAB (pParse->declareVtab)
 #endif
 
 /*
@@ -2276,12 +2275,12 @@ struct AuthContext {
 /*
 ** Bitfield flags for P5 value in OP_Insert and OP_Delete
 */
-#define OPFLAG_NCHANGE       0x01    /* Set to update db->nChange */
-#define OPFLAG_LASTROWID     0x02    /* Set to update db->lastRowid */
-#define OPFLAG_ISUPDATE      0x04    /* This OP_Insert is an sql UPDATE */
-#define OPFLAG_APPEND        0x08    /* This is likely to be an append */
-#define OPFLAG_USESEEKRESULT 0x10    /* Try to avoid a seek in BtreeInsert() */
-#define OPFLAG_CLEARCACHE    0x20    /* Clear pseudo-table cache in OP_Column */
+#define OPFLAG_NCHANGE 0x01 /* Set to update db->nChange */
+#define OPFLAG_LASTROWID 0x02 /* Set to update db->lastRowid */
+#define OPFLAG_ISUPDATE 0x04 /* This OP_Insert is an sql UPDATE */
+#define OPFLAG_APPEND 0x08 /* This is likely to be an append */
+#define OPFLAG_USESEEKRESULT 0x10 /* Try to avoid a seek in BtreeInsert() */
+#define OPFLAG_CLEARCACHE 0x20 /* Clear pseudo-table cache in OP_Column */
 
 /*
  * Each trigger present in the database schema is stored as an instance of
@@ -2319,8 +2318,8 @@ struct Trigger {
 ** If there are multiple triggers, you might of some BEFORE and some AFTER.
 ** In that cases, the constants below can be ORed together.
 */
-#define TRIGGER_BEFORE  1
-#define TRIGGER_AFTER   2
+#define TRIGGER_BEFORE 1
+#define TRIGGER_AFTER 2
 
 /*
  * An instance of struct TriggerStep is used to store a single SQL statement
@@ -2476,19 +2475,22 @@ int sqlite3WalkSelectFrom(Walker*, Select*);
 ** Return code from the parse-tree walking primitives and their
 ** callbacks.
 */
-#define WRC_Continue    0   /* Continue down into children */
-#define WRC_Prune       1   /* Omit children but continue walking siblings */
-#define WRC_Abort       2   /* Abandon the tree walk */
+#define WRC_Continue 0 /* Continue down into children */
+#define WRC_Prune 1 /* Omit children but continue walking siblings */
+#define WRC_Abort 2 /* Abandon the tree walk */
 
 /*
 ** Assuming zIn points to the first byte of a UTF-8 character,
 ** advance zIn to point to the first byte of the next UTF-8 character.
 */
-#define SQLITE_SKIP_UTF8(zIn) {                        \
-  if( (*(zIn++))>=0xc0 ){                              \
-    while( (*zIn & 0xc0)==0x80 ){ zIn++; }             \
-  }                                                    \
-}
+#define SQLITE_SKIP_UTF8(zIn)                                                                                          \
+	{                                                                                                                  \
+		if ((*(zIn++)) >= 0xc0) {                                                                                      \
+			while ((*zIn & 0xc0) == 0x80) {                                                                            \
+				zIn++;                                                                                                 \
+			}                                                                                                          \
+		}                                                                                                              \
+	}
 
 #endif
 /*
@@ -2512,16 +2514,15 @@ int sqlite3CantopenError(int);
 ** the SQLITE_ENABLE_FTS4 macro to serve as an alisse for SQLITE_ENABLE_FTS3.
 */
 #if defined(SQLITE_ENABLE_FTS4) && !defined(SQLITE_ENABLE_FTS3)
-# define SQLITE_ENABLE_FTS3
+#define SQLITE_ENABLE_FTS3
 #endif
 
 /*
 ** The ctype.h header is needed for non-ASCII systems.  It is also
 ** needed by FTS3 when FTS3 is included in the amalgamation.
 */
-#if !defined(SQLITE_ASCII) || \
-    (defined(SQLITE_ENABLE_FTS3) && defined(SQLITE_AMALGAMATION))
-# include <ctype.h>
+#if !defined(SQLITE_ASCII) || (defined(SQLITE_ENABLE_FTS3) && defined(SQLITE_AMALGAMATION))
+#include <ctype.h>
 #endif
 
 /*
@@ -2530,34 +2531,34 @@ int sqlite3CantopenError(int);
 ** sqlite versions only work for ASCII characters, regardless of locale.
 */
 #ifdef SQLITE_ASCII
-# define sqlite3Toupper(x)  ((x)&~(sqlite3CtypeMap[(unsigned char)(x)]&0x20))
-# define sqlite3Isspace(x)   (sqlite3CtypeMap[(unsigned char)(x)]&0x01)
-# define sqlite3Isalnum(x)   (sqlite3CtypeMap[(unsigned char)(x)]&0x06)
-# define sqlite3Isalpha(x)   (sqlite3CtypeMap[(unsigned char)(x)]&0x02)
-# define sqlite3Isdigit(x)   (sqlite3CtypeMap[(unsigned char)(x)]&0x04)
-# define sqlite3Isxdigit(x)  (sqlite3CtypeMap[(unsigned char)(x)]&0x08)
-# define sqlite3Tolower(x)   (sqlite3UpperToLower[(unsigned char)(x)])
+#define sqlite3Toupper(x) ((x) & ~(sqlite3CtypeMap[(unsigned char)(x)] & 0x20))
+#define sqlite3Isspace(x) (sqlite3CtypeMap[(unsigned char)(x)] & 0x01)
+#define sqlite3Isalnum(x) (sqlite3CtypeMap[(unsigned char)(x)] & 0x06)
+#define sqlite3Isalpha(x) (sqlite3CtypeMap[(unsigned char)(x)] & 0x02)
+#define sqlite3Isdigit(x) (sqlite3CtypeMap[(unsigned char)(x)] & 0x04)
+#define sqlite3Isxdigit(x) (sqlite3CtypeMap[(unsigned char)(x)] & 0x08)
+#define sqlite3Tolower(x) (sqlite3UpperToLower[(unsigned char)(x)])
 #else
-# define sqlite3Toupper(x)   toupper((unsigned char)(x))
-# define sqlite3Isspace(x)   isspace((unsigned char)(x))
-# define sqlite3Isalnum(x)   isalnum((unsigned char)(x))
-# define sqlite3Isalpha(x)   isalpha((unsigned char)(x))
-# define sqlite3Isdigit(x)   isdigit((unsigned char)(x))
-# define sqlite3Isxdigit(x)  isxdigit((unsigned char)(x))
-# define sqlite3Tolower(x)   tolower((unsigned char)(x))
+#define sqlite3Toupper(x) toupper((unsigned char)(x))
+#define sqlite3Isspace(x) isspace((unsigned char)(x))
+#define sqlite3Isalnum(x) isalnum((unsigned char)(x))
+#define sqlite3Isalpha(x) isalpha((unsigned char)(x))
+#define sqlite3Isdigit(x) isdigit((unsigned char)(x))
+#define sqlite3Isxdigit(x) isxdigit((unsigned char)(x))
+#define sqlite3Tolower(x) tolower((unsigned char)(x))
 #endif
 #endif
 
 /*
 ** Internal function prototypes
 */
-int sqlite3StrICmp(const char *, const char *);
+int sqlite3StrICmp(const char*, const char*);
 int sqlite3Strlen30(const char*);
 #define sqlite3StrNICmp sqlite3_strnicmp
 
 int sqlite3MallocInit(void);
 void sqlite3MallocEnd(void);
-void *sqlite3Malloc(int);
+void* sqlite3Malloc(int);
 #if 0
 void *sqlite3MallocZero(int);
 void *sqlite3DbMallocZero(sqlite3*, int);
@@ -2587,13 +2588,13 @@ int sqlite3HeapNearlyFull(void);
 ** that deal with sqlite3StackAlloc() failures to be unreachable.
 */
 #ifdef SQLITE_USE_ALLOCA
-# define sqlite3StackAllocRaw(D,N)   alloca(N)
-# define sqlite3StackAllocZero(D,N)  memset(alloca(N), 0, N)
-# define sqlite3StackFree(D,P)       
+#define sqlite3StackAllocRaw(D, N) alloca(N)
+#define sqlite3StackAllocZero(D, N) memset(alloca(N), 0, N)
+#define sqlite3StackFree(D, P)
 #else
-# define sqlite3StackAllocRaw(D,N)   sqlite3DbMallocRaw(D,N)
-# define sqlite3StackAllocZero(D,N)  sqlite3DbMallocZero(D,N)
-# define sqlite3StackFree(D,P)       sqlite3DbFree(D,P)
+#define sqlite3StackAllocRaw(D, N) sqlite3DbMallocRaw(D, N)
+#define sqlite3StackAllocZero(D, N) sqlite3DbMallocZero(D, N)
+#define sqlite3StackFree(D, P) sqlite3DbFree(D, P)
 #endif
 
 #ifdef SQLITE_ENABLE_MEMSYS3
@@ -2606,11 +2607,11 @@ const sqlite3_mem_methods *sqlite3MemGetMemsys5(void);
 #endif
 
 #ifndef SQLITE_MUTEX_OMIT
-  sqlite3_mutex_methods const *sqlite3DefaultMutex(void);
-  sqlite3_mutex_methods const *sqlite3NoopMutex(void);
-  sqlite3_mutex *sqlite3MutexAlloc(int);
-  int sqlite3MutexInit(void);
-  int sqlite3MutexEnd(void);
+sqlite3_mutex_methods const* sqlite3DefaultMutex(void);
+sqlite3_mutex_methods const* sqlite3NoopMutex(void);
+sqlite3_mutex* sqlite3MutexAlloc(int);
+int sqlite3MutexInit(void);
+int sqlite3MutexEnd(void);
 #endif
 
 #if 0
@@ -2622,7 +2623,7 @@ void sqlite3StatusSet(int, int);
 #ifndef SQLITE_OMIT_FLOATING_POINT
   int sqlite3IsNaN(double);
 #else
-# define sqlite3IsNaN(X)  0
+#define sqlite3IsNaN(X) 0
 #endif
 
 void sqlite3VXPrintf(StrAccum*, int, const char*, va_list);
@@ -2697,7 +2698,7 @@ void sqlite3CreateView(Parse*,Token*,Token*,Token*,Select*,int,int);
 #if !defined(SQLITE_OMIT_VIEW) || !defined(SQLITE_OMIT_VIRTUALTABLE)
   int sqlite3ViewGetColumnNames(Parse*,Table*);
 #else
-# define sqlite3ViewGetColumnNames(A,B) 0
+#define sqlite3ViewGetColumnNames(A, B) 0
 #endif
 
 void sqlite3DropTable(Parse*, SrcList*, int, int);
@@ -2706,8 +2707,8 @@ void sqlite3DeleteTable(sqlite3*, Table*);
   void sqlite3AutoincrementBegin(Parse *pParse);
   void sqlite3AutoincrementEnd(Parse *pParse);
 #else
-# define sqlite3AutoincrementBegin(X)
-# define sqlite3AutoincrementEnd(X)
+#define sqlite3AutoincrementBegin(X)
+#define sqlite3AutoincrementEnd(X)
 #endif
 void sqlite3Insert(Parse*, SrcList*, ExprList*, Select*, IdList*, int);
 void *sqlite3ArrayAllocate(sqlite3*,void*,int,int,int*,int*,int*);
@@ -2839,17 +2840,17 @@ void sqlite3MaterializeView(Parse*, Table*, Expr*, int);
   void sqlite3DeleteTrigger(sqlite3*, Trigger*);
   void sqlite3UnlinkAndDeleteTrigger(sqlite3*,int,const char*);
   u32 sqlite3TriggerColmask(Parse*,Trigger*,ExprList*,int,int,Table*,int);
-# define sqlite3ParseToplevel(p) ((p)->pToplevel ? (p)->pToplevel : (p))
+#define sqlite3ParseToplevel(p) ((p)->pToplevel ? (p)->pToplevel : (p))
 #else
-# define sqlite3TriggersExist(B,C,D,E,F) 0
-# define sqlite3DeleteTrigger(A,B)
-# define sqlite3DropTriggerPtr(A,B)
-# define sqlite3UnlinkAndDeleteTrigger(A,B,C)
-# define sqlite3CodeRowTrigger(A,B,C,D,E,F,G,H,I)
-# define sqlite3CodeRowTriggerDirect(A,B,C,D,E,F)
-# define sqlite3TriggerList(X, Y) 0
-# define sqlite3ParseToplevel(p) p
-# define sqlite3TriggerColmask(A,B,C,D,E,F,G) 0
+#define sqlite3TriggersExist(B, C, D, E, F) 0
+#define sqlite3DeleteTrigger(A, B)
+#define sqlite3DropTriggerPtr(A, B)
+#define sqlite3UnlinkAndDeleteTrigger(A, B, C)
+#define sqlite3CodeRowTrigger(A, B, C, D, E, F, G, H, I)
+#define sqlite3CodeRowTriggerDirect(A, B, C, D, E, F)
+#define sqlite3TriggerList(X, Y) 0
+#define sqlite3ParseToplevel(p) p
+#define sqlite3TriggerColmask(A, B, C, D, E, F, G) 0
 #endif
 
 int sqlite3JoinType(Parse*, Token*, Token*, Token*);
@@ -2862,10 +2863,10 @@ void sqlite3DeferForeignKey(Parse*, int);
   void sqlite3AuthContextPop(AuthContext*);
   int sqlite3AuthReadCol(Parse*, const char *, const char *, int);
 #else
-# define sqlite3AuthRead(a,b,c,d)
-# define sqlite3AuthCheck(a,b,c,d,e)    SQLITE_OK
-# define sqlite3AuthContextPush(a,b,c)
-# define sqlite3AuthContextPop(a)  ((void)(a))
+#define sqlite3AuthRead(a, b, c, d)
+#define sqlite3AuthCheck(a, b, c, d, e) SQLITE_OK
+#define sqlite3AuthContextPush(a, b, c)
+#define sqlite3AuthContextPop(a) ((void)(a))
 #endif
 void sqlite3Attach(Parse*, Expr*, Expr*, Expr*);
 void sqlite3Detach(Parse*, Expr*);
@@ -2887,13 +2888,13 @@ int sqlite3Utf8Read(const u8*, const u8**);
 ** Routines to read and write variable-length integers.  These used to
 ** be defined locally, but now we use the varint routines in the util.c
 ** file.  Code should use the MACRO forms below, as the Varint32 versions
-** are coded to assume the single byte case is already handled (which 
+** are coded to assume the single byte case is already handled (which
 ** the MACRO form does).
 */
 int sqlite3PutVarint(unsigned char*, u64);
 int sqlite3PutVarint32(unsigned char*, u32);
-u8 sqlite3GetVarint(const unsigned char *, u64 *);
-u8 sqlite3GetVarint32(const unsigned char *, u32 *);
+u8 sqlite3GetVarint(const unsigned char*, u64*);
+u8 sqlite3GetVarint32(const unsigned char*, u32*);
 int sqlite3VarintLen(u64 v);
 
 /*
@@ -2913,12 +2914,12 @@ int sqlite3VarintLen(u64 v);
 **     x = putVarint32( A, B );
 **
 */
-#define getVarint32(A,B)  (u8)((*(A)<(u8)0x80) ? ((B) = (u32)*(A)),1 : sqlite3GetVarint32((A), (u32 *)&(B)))
-#define putVarint32(A,B)  (u8)(((u32)(B)<(u32)0x80) ? (*(A) = (unsigned char)(B)),1 : sqlite3PutVarint32((A), (B)))
-#define getVarint    sqlite3GetVarint
-#define putVarint    sqlite3PutVarint
+#define getVarint32(A, B) (u8)((*(A) < (u8)0x80) ? ((B) = (u32) * (A)), 1 : sqlite3GetVarint32((A), (u32*)&(B)))
+#define putVarint32(A, B) (u8)(((u32)(B) < (u32)0x80) ? (*(A) = (unsigned char)(B)), 1 : sqlite3PutVarint32((A), (B)))
+#define getVarint sqlite3GetVarint
+#define putVarint sqlite3PutVarint
 
-const char *sqlite3ErrStr(int);
+const char* sqlite3ErrStr(int);
 
 #if 0
 
@@ -3037,13 +3038,13 @@ void sqlite3AutoLoadExtensions(sqlite3*);
 #ifndef SQLITE_OMIT_LOAD_EXTENSION
   void sqlite3CloseExtensions(sqlite3*);
 #else
-# define sqlite3CloseExtensions(X)
+#define sqlite3CloseExtensions(X)
 #endif
 
 #ifndef SQLITE_OMIT_SHARED_CACHE
   void sqlite3TableLock(Parse *, int, int, u8, const char *);
 #else
-  #define sqlite3TableLock(v,w,x,y,z)
+#define sqlite3TableLock(v, w, x, y, z)
 #endif
 
 #ifdef SQLITE_TEST
@@ -3051,14 +3052,14 @@ void sqlite3AutoLoadExtensions(sqlite3*);
 #endif
 
 #ifdef SQLITE_OMIT_VIRTUALTABLE
-#  define sqlite3VtabClear(Y)
-#  define sqlite3VtabSync(X,Y) SQLITE_OK
-#  define sqlite3VtabRollback(X)
-#  define sqlite3VtabCommit(X)
-#  define sqlite3VtabInSync(db) 0
-#  define sqlite3VtabLock(X) 
-#  define sqlite3VtabUnlock(X)
-#  define sqlite3VtabUnlockList(X)
+#define sqlite3VtabClear(Y)
+#define sqlite3VtabSync(X, Y) SQLITE_OK
+#define sqlite3VtabRollback(X)
+#define sqlite3VtabCommit(X)
+#define sqlite3VtabInSync(db) 0
+#define sqlite3VtabLock(X)
+#define sqlite3VtabUnlock(X)
+#define sqlite3VtabUnlockList(X)
 #else
    void sqlite3VtabClear(sqlite3 *db, Table*);
    int sqlite3VtabSync(sqlite3 *db, char **);
@@ -3067,7 +3068,7 @@ void sqlite3AutoLoadExtensions(sqlite3*);
    void sqlite3VtabLock(VTable *);
    void sqlite3VtabUnlock(VTable *);
    void sqlite3VtabUnlockList(sqlite3*);
-#  define sqlite3VtabInSync(db) ((db)->nVTrans>0 && (db)->aVTrans==0)
+#define sqlite3VtabInSync(db) ((db)->nVTrans > 0 && (db)->aVTrans == 0)
 #endif
 void sqlite3VtabMakeWritable(Parse*,Table*);
 void sqlite3VtabBeginParse(Parse*, Token*, Token*, Token*);
@@ -3106,24 +3107,24 @@ int sqlite3WalDefaultHook(void*,sqlite3*,const char*,int);
   u32 sqlite3FkOldmask(Parse*, Table*);
   FKey *sqlite3FkReferences(Table *);
 #else
-  #define sqlite3FkActions(a,b,c,d)
-  #define sqlite3FkCheck(a,b,c,d)
-  #define sqlite3FkDropTable(a,b,c)
-  #define sqlite3FkOldmask(a,b)      0
-  #define sqlite3FkRequired(a,b,c,d) 0
+#define sqlite3FkActions(a, b, c, d)
+#define sqlite3FkCheck(a, b, c, d)
+#define sqlite3FkDropTable(a, b, c)
+#define sqlite3FkOldmask(a, b) 0
+#define sqlite3FkRequired(a, b, c, d) 0
 #endif
 #ifndef SQLITE_OMIT_FOREIGN_KEY
   void sqlite3FkDelete(sqlite3 *, Table*);
 #else
-  #define sqlite3FkDelete(a,b)
+#define sqlite3FkDelete(a, b)
 #endif
 
 
 /*
 ** Available fault injectors.  Should be numbered beginning with 0.
 */
-#define SQLITE_FAULTINJECTOR_MALLOC     0
-#define SQLITE_FAULTINJECTOR_COUNT      1
+#define SQLITE_FAULTINJECTOR_MALLOC 0
+#define SQLITE_FAULTINJECTOR_COUNT 1
 
 /*
 ** The interface to the code in fault.c used for identifying "benign"
@@ -3134,13 +3135,13 @@ int sqlite3WalDefaultHook(void*,sqlite3*,const char*,int);
   void sqlite3BeginBenignMalloc(void);
   void sqlite3EndBenignMalloc(void);
 #else
-  #define sqlite3BeginBenignMalloc()
-  #define sqlite3EndBenignMalloc()
+#define sqlite3BeginBenignMalloc()
+#define sqlite3EndBenignMalloc()
 #endif
 
-#define IN_INDEX_ROWID           1
-#define IN_INDEX_EPH             2
-#define IN_INDEX_INDEX           3
+#define IN_INDEX_ROWID 1
+#define IN_INDEX_EPH 2
+#define IN_INDEX_INDEX 3
 int sqlite3FindInIndex(Parse *, Expr *, int*);
 
 #ifdef SQLITE_ENABLE_ATOMIC_WRITE
@@ -3148,21 +3149,21 @@ int sqlite3FindInIndex(Parse *, Expr *, int*);
   int sqlite3JournalSize(sqlite3_vfs *);
   int sqlite3JournalCreate(sqlite3_file *);
 #else
-  #define sqlite3JournalSize(pVfs) ((pVfs)->szOsFile)
+#define sqlite3JournalSize(pVfs) ((pVfs)->szOsFile)
 #endif
 
 void sqlite3MemJournalOpen(sqlite3_file *);
 int sqlite3MemJournalSize(void);
 int sqlite3IsMemJournal(sqlite3_file *);
 
-#if SQLITE_MAX_EXPR_DEPTH>0
+#if SQLITE_MAX_EXPR_DEPTH > 0
   void sqlite3ExprSetHeight(Parse *pParse, Expr *p);
   int sqlite3SelectExprHeight(Select *);
   int sqlite3ExprCheckHeight(Parse*, int);
 #else
-  #define sqlite3ExprSetHeight(x,y)
-  #define sqlite3SelectExprHeight(x) 0
-  #define sqlite3ExprCheckHeight(x,y)
+#define sqlite3ExprSetHeight(x, y)
+#define sqlite3SelectExprHeight(x) 0
+#define sqlite3ExprCheckHeight(x, y)
 #endif
 
 u32 sqlite3Get4byte(const u8*);
@@ -3173,9 +3174,9 @@ void sqlite3Put4byte(u8*, u32);
   void sqlite3ConnectionUnlocked(sqlite3 *db);
   void sqlite3ConnectionClosed(sqlite3 *db);
 #else
-  #define sqlite3ConnectionBlocked(x,y)
-  #define sqlite3ConnectionUnlocked(x)
-  #define sqlite3ConnectionClosed(x)
+#define sqlite3ConnectionBlocked(x, y)
+#define sqlite3ConnectionUnlocked(x)
+#define sqlite3ConnectionClosed(x)
 #endif
 
 #ifdef SQLITE_DEBUG
@@ -3188,12 +3189,15 @@ void sqlite3Put4byte(u8*, u32);
 ** print I/O tracing messages. 
 */
 #ifdef SQLITE_ENABLE_IOTRACE
-# define IOTRACE(A)  if( sqlite3IoTrace ){ sqlite3IoTrace A; }
+#define IOTRACE(A)                                                                                                     \
+	if (sqlite3IoTrace) {                                                                                              \
+		sqlite3IoTrace A;                                                                                              \
+	}
   void sqlite3VdbeIOTraceSql(Vdbe*);
 SQLITE_EXTERN void (*sqlite3IoTrace)(const char*,...);
 #else
-# define IOTRACE(A)
-# define sqlite3VdbeIOTraceSql(X)
+#define IOTRACE(A)
+#define sqlite3VdbeIOTraceSql(X)
 #endif
 
 /*
@@ -3229,15 +3233,15 @@ SQLITE_EXTERN void (*sqlite3IoTrace)(const char*,...);
   int sqlite3MemdebugHasType(void*,u8);
   int sqlite3MemdebugNoType(void*,u8);
 #else
-# define sqlite3MemdebugSetType(X,Y)  /* no-op */
-# define sqlite3MemdebugHasType(X,Y)  1
-# define sqlite3MemdebugNoType(X,Y)   1
+#define sqlite3MemdebugSetType(X, Y) /* no-op */
+#define sqlite3MemdebugHasType(X, Y) 1
+#define sqlite3MemdebugNoType(X, Y) 1
 #endif
-#define MEMTYPE_HEAP       0x01  /* General heap allocations */
-#define MEMTYPE_LOOKASIDE  0x02  /* Might have been lookaside memory */
-#define MEMTYPE_SCRATCH    0x04  /* Scratch allocations */
-#define MEMTYPE_PCACHE     0x08  /* Page cache allocations */
-#define MEMTYPE_DB         0x10  /* Uses sqlite3DbMalloc, not sqlite_malloc */
+#define MEMTYPE_HEAP 0x01 /* General heap allocations */
+#define MEMTYPE_LOOKASIDE 0x02 /* Might have been lookaside memory */
+#define MEMTYPE_SCRATCH 0x04 /* Scratch allocations */
+#define MEMTYPE_PCACHE 0x08 /* Page cache allocations */
+#define MEMTYPE_DB 0x10 /* Uses sqlite3DbMalloc, not sqlite_malloc */
 
 #endif
 
@@ -3245,26 +3249,26 @@ SQLITE_EXTERN void (*sqlite3IoTrace)(const char*,...);
 // are currently only manipulated using SQLite functions.
 typedef struct VdbeFrame VdbeFrame;
 struct Mem {
-  sqlite3 *db;        /* The associated database connection */
-  char *z;            /* String or BLOB value */
-  double r;           /* Real value */
-  union {
-    i64 i;              /* Integer value used when MEM_Int is set in flags */
-    int nZero;          /* Used when bit MEM_Zero is set in flags */
-    FuncDef *pDef;      /* Used only when flags==MEM_Agg */
-    RowSet *pRowSet;    /* Used only when flags==MEM_RowSet */
-    VdbeFrame *pFrame;  /* Used when flags==MEM_Frame */
-  } u;
-  int n;              /* Number of characters in string value, excluding '\0' */
-  u16 flags;          /* Some combination of MEM_Null, MEM_Str, MEM_Dyn, etc. */
-  u8  type;           /* One of SQLITE_NULL, SQLITE_TEXT, SQLITE_INTEGER, etc */
-  u8  enc;            /* SQLITE_UTF8, SQLITE_UTF16BE, SQLITE_UTF16LE */
+	sqlite3* db; /* The associated database connection */
+	char* z; /* String or BLOB value */
+	double r; /* Real value */
+	union {
+		i64 i; /* Integer value used when MEM_Int is set in flags */
+		int nZero; /* Used when bit MEM_Zero is set in flags */
+		FuncDef* pDef; /* Used only when flags==MEM_Agg */
+		RowSet* pRowSet; /* Used only when flags==MEM_RowSet */
+		VdbeFrame* pFrame; /* Used when flags==MEM_Frame */
+	} u;
+	int n; /* Number of characters in string value, excluding '\0' */
+	u16 flags; /* Some combination of MEM_Null, MEM_Str, MEM_Dyn, etc. */
+	u8 type; /* One of SQLITE_NULL, SQLITE_TEXT, SQLITE_INTEGER, etc */
+	u8 enc; /* SQLITE_UTF8, SQLITE_UTF16BE, SQLITE_UTF16LE */
 #ifdef SQLITE_DEBUG
-  Mem *pScopyFrom;    /* This Mem is a shallow copy of pScopyFrom */
-  void *pFiller;      /* So that sizeof(Mem) is a multiple of 8 */
+	Mem* pScopyFrom; /* This Mem is a shallow copy of pScopyFrom */
+	void* pFiller; /* So that sizeof(Mem) is a multiple of 8 */
 #endif
-  void (*xDel)(void *);  /* If not null, call this function to delete Mem.z */
-  char *zMalloc;      /* Dynamic buffer allocated by sqlite3_malloc() */
+	void (*xDel)(void*); /* If not null, call this function to delete Mem.z */
+	char* zMalloc; /* Dynamic buffer allocated by sqlite3_malloc() */
 };
 
 #endif /* _SQLITEINT_H_ */

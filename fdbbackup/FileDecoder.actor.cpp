@@ -189,7 +189,8 @@ std::vector<MutationRef> decode_value(const StringRef& value) {
 
 	std::vector<MutationRef> mutations;
 	while (1) {
-		if (reader.eof()) break;
+		if (reader.eof())
+			break;
 
 		// Deserialization of a MutationRef, which was packed by MutationListRef::push_back_deep()
 		uint32_t type, p1len, p2len;
@@ -242,8 +243,7 @@ class DecodeProgress {
 public:
 	DecodeProgress() = default;
 	template <class U>
-	DecodeProgress(const LogFile& file, U &&values)
-	  : file(file), keyValues(std::forward<U>(values)) {}
+	DecodeProgress(const LogFile& file, U&& values) : file(file), keyValues(std::forward<U>(values)) {}
 
 	// If there are no more mutations to pull from the file.
 	// However, we could have unfinished version in the buffer when EOF is true,
@@ -289,7 +289,8 @@ public:
 			int idx = 1; // next kv pair in "keyValues"
 			int bufSize = kv.kv.size();
 			for (int lastPart = 0; idx < self->keyValues.size(); idx++, lastPart++) {
-				if (idx == self->keyValues.size()) break;
+				if (idx == self->keyValues.size())
+					break;
 
 				const auto& nextKV = self->keyValues[idx];
 				if (kv.version != nextKV.version) {
@@ -355,12 +356,14 @@ public:
 
 		try {
 			// Read header, currently only decoding version BACKUP_AGENT_MLOG_VERSION
-			if (reader.consume<int32_t>() != BACKUP_AGENT_MLOG_VERSION) throw restore_unsupported_file_version();
+			if (reader.consume<int32_t>() != BACKUP_AGENT_MLOG_VERSION)
+				throw restore_unsupported_file_version();
 
 			// Read k/v pairs. Block ends either at end of last value exactly or with 0xFF as first key len byte.
 			while (1) {
 				// If eof reached or first key len bytes is 0xFF then end of block was reached.
-				if (reader.eof() || *reader.rptr == 0xFF) break;
+				if (reader.eof() || *reader.rptr == 0xFF)
+					break;
 
 				// Read key and value.  If anything throws then there is a problem.
 				uint32_t kLen = reader.consumeNetworkUInt32();
@@ -379,7 +382,8 @@ public:
 
 			// Make sure any remaining bytes in the block are 0xFF
 			for (auto b : reader.remainder()) {
-				if (b != 0xFF) throw restore_corrupted_data_padding();
+				if (b != 0xFF)
+					throw restore_corrupted_data_padding();
 			}
 
 			// The (version, part) in a block can be out of order, i.e., (3, 0)
@@ -445,7 +449,8 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 
 	state BackupFileList listing = wait(container->dumpFileList());
 	// remove partitioned logs
-	listing.logs.erase(std::remove_if(listing.logs.begin(), listing.logs.end(),
+	listing.logs.erase(std::remove_if(listing.logs.begin(),
+	                                  listing.logs.end(),
 	                                  [](const LogFile& file) {
 		                                  std::string prefix("plogs/");
 		                                  return file.fileName.substr(0, prefix.size()) == prefix;
@@ -464,7 +469,8 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 	// Previous file's unfinished version data
 	state std::vector<VersionedKVPart> left;
 	for (; i < logs.size(); i++) {
-		if (logs[i].fileSize == 0) continue;
+		if (logs[i].fileSize == 0)
+			continue;
 
 		state DecodeProgress progress(logs[i], std::move(left));
 		wait(progress.openFile(container));

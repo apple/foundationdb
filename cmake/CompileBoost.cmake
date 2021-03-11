@@ -62,8 +62,13 @@ if(USE_SANITIZER)
     message(FATAL_ERROR "Sanitizers are not supported on Windows")
   endif()
   message(STATUS "A sanitizer is enabled, need to build boost from source")
-  compile_boost(TARGET boost_asan BUILD_ARGS context-impl=ucontext
-    CXXFLAGS ${SANITIZER_COMPILE_OPTIONS} LDFLAGS ${SANITIZER_LINK_OPTIONS})
+  if (USE_VALGRIND)
+    compile_boost(TARGET boost_asan BUILD_ARGS valgrind=on
+      CXXFLAGS ${SANITIZER_COMPILE_OPTIONS} LDFLAGS ${SANITIZER_LINK_OPTIONS})
+  else()
+    compile_boost(TARGET boost_asan BUILD_ARGS context-impl=ucontext
+      CXXFLAGS ${SANITIZER_COMPILE_OPTIONS} LDFLAGS ${SANITIZER_LINK_OPTIONS})
+  endif()
   return()
 endif()
 

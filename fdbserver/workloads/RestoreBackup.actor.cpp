@@ -58,8 +58,8 @@ struct RestoreBackupWorkload final : TestWorkload {
 				wait(tr.onError(e));
 			}
 		}
-		EBackupState backupState = wait(self->backupAgent.waitBackup(cx, self->tag.toString(), self->stopWhenDone,
-		                                                             &self->backupContainer, &backupUID));
+		EBackupState backupState = wait(self->backupAgent.waitBackup(
+		    cx, self->tag.toString(), self->stopWhenDone, &self->backupContainer, &backupUID));
 		if (backupState == EBackupState::STATE_COMPLETED) {
 			return Void();
 		} else if (backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL) {
@@ -110,8 +110,8 @@ struct RestoreBackupWorkload final : TestWorkload {
 		wait(delay(self->delayFor));
 		wait(waitOnBackup(self, cx));
 		wait(clearDatabase(cx));
-		wait(success(self->backupAgent.restore(cx, cx, self->tag, Key(self->backupContainer->getURL()), true,
-		                                       ::invalidVersion, true)));
+		wait(success(self->backupAgent.restore(
+		    cx, cx, self->tag, Key(self->backupContainer->getURL()), true, ::invalidVersion, true)));
 		return Void();
 	}
 

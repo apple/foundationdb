@@ -94,7 +94,8 @@ ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(st
 	// openFile() above for more info on why they are created.
 	if (g_network->isSimulated())
 		files.erase(
-		    std::remove_if(files.begin(), files.end(),
+		    std::remove_if(files.begin(),
+		                   files.end(),
 		                   [](std::string const& f) { return StringRef(f).endsWith(LiteralStringRef(".lnk")); }),
 		    files.end());
 
@@ -174,7 +175,8 @@ Future<std::vector<std::string>> BackupContainerLocalDirectory::listURLs(const s
 	std::vector<std::string> results;
 
 	for (const auto& r : dirs) {
-		if (r == "." || r == "..") continue;
+		if (r == "." || r == "..")
+			continue;
 		results.push_back(std::string("file://") + joinPath(path, r));
 	}
 
@@ -262,7 +264,8 @@ Future<Void> BackupContainerLocalDirectory::deleteFile(const std::string& path) 
 }
 
 Future<BackupContainerFileSystem::FilesAndSizesT> BackupContainerLocalDirectory::listFiles(
-    const std::string& path, std::function<bool(std::string const&)>) {
+    const std::string& path,
+    std::function<bool(std::string const&)>) {
 	return listFiles_impl(path, m_path);
 }
 
@@ -271,10 +274,12 @@ Future<Void> BackupContainerLocalDirectory::deleteContainer(int* pNumDeleted) {
 	// and make sure it has something in it.
 	return map(describeBackup(false, invalidVersion), [=](BackupDescription const& desc) {
 		// If the backup has no snapshots and no logs then it's probably not a valid backup
-		if (desc.snapshots.size() == 0 && !desc.minLogBegin.present()) throw backup_invalid_url();
+		if (desc.snapshots.size() == 0 && !desc.minLogBegin.present())
+			throw backup_invalid_url();
 
 		int count = platform::eraseDirectoryRecursive(m_path);
-		if (pNumDeleted != nullptr) *pNumDeleted = count;
+		if (pNumDeleted != nullptr)
+			*pNumDeleted = count;
 
 		return Void();
 	});
