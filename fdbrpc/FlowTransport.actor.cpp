@@ -735,6 +735,7 @@ ACTOR static void deliver(TransportData* self,
 	TaskPriority priority = self->endpoints.getPriority(destination.token);
 	if (TaskPriority::UnknownEndpoint == priority) {
 		TraceEvent("GotUnknownEndpoint")
+		    .suppressFor(1.0)
 		    .detail("EndpointToken", destination.token.shortString())
 		    .detail("PeerAddress", peerAddress.present() ? peerAddress.get().toString() : std::string("Local"));
 	}
