@@ -733,7 +733,7 @@ ACTOR static void deliver(TransportData* self,
                           ArenaReader reader,
                           bool inReadSocket) {
 	TaskPriority priority = self->endpoints.getPriority(destination.token);
-	if (TaskPriority::UnknownEndpoint == priority) {
+	if (TaskPriority::UnknownEndpoint == priority && destination.token.first() & TOKEN_STREAM_FLAG) {
 		uint32_t fileIdentifier = -1;
 		if (FLOW_KNOBS->USE_OBJECT_SERIALIZER) {
 			fileIdentifier = read_file_identifier(reinterpret_cast<const uint8_t*>(reader.peekBytes(8)));
