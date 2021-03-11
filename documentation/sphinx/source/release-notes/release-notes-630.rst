@@ -2,6 +2,32 @@
 Release Notes
 #############
 
+6.3.12
+======
+* Change the default for --knob_tls_server_handshake_threads to 64. The previous was 1000. This avoids starting 1000 threads by default, but may adversely affect recovery time for large clusters using tls. Users with large tls clusters should consider explicitly setting this knob in their foundationdb.conf file. `(PR #4421) <https://github.com/apple/foundationdb/pull/4421>`_
+
+6.3.11
+======
+* Added a hint field in the trace event when all replicas of some data are lost. `(PR #4209) <https://github.com/apple/foundationdb/pull/4209>`_
+* Rewrote SQLite injected fault handling. `(PR #4212) <https://github.com/apple/foundationdb/pull/4212>`_
+* Add a SevWarnAlways trace line to help debug a rare failure. `(PR #4214) <https://github.com/apple/foundationdb/pull/4214>`_
+* Use VFSAsyncFile::checkInjectedError to detect injected faults. `(PR #4253) <https://github.com/apple/foundationdb/pull/4253>`_ 
+* Build on Windows using VS 2019 + LLVM/Clang. `(PR #4258) <https://github.com/apple/foundationdb/pull/4258>`_ 
+* RateControl support in AFCCached to enable write op throttling. The feature is disabled by default. `(PR #4229) <https://github.com/apple/foundationdb/pull/4229>`_ 
+* Add knobs for prefix bloom filters and larger block cache for RocksDB. `(PR #4201) <https://github.com/apple/foundationdb/pull/4201>`_ 
+* Adding debug tools to FDB runtime image. `(PR #4247) <https://github.com/apple/foundationdb/pull/4247>`_ 
+* Fix bug in simulated coordinator selection. `(PR #4285) <https://github.com/apple/foundationdb/pull/4285>`_  
+* Add option to prevent synchronous file deletes on reads for RocksDB. `(PR #4270) <https://github.com/apple/foundationdb/pull/4270>`_  
+* Report warning when TLS verification fails. `(PR #4299) <https://github.com/apple/foundationdb/pull/4299>`_  
+* Support multiple worker threads for each version of client that is loaded so that each cluster will be serviced by a client thread. `(PR #4269) <https://github.com/apple/foundationdb/pull/4269>`_  
+* Reboot simulated process on io_timeout error. `(PR #4345) <https://github.com/apple/foundationdb/pull/4345>`_  
+* Fix Snapshot backup test failure. `(PR #4372) <https://github.com/apple/foundationdb/pull/4372>`_  
+* fdbcli: Output errors and warnings to stderr. `(PR #4332) <https://github.com/apple/foundationdb/pull/4332>`_  
+* Do not generate machine id in locality field if it is set by the user. `(PR #4022) <https://github.com/apple/foundationdb/pull/4022>`_  
+* Make the RocksDB init method idempotent. `(PR #4400) <https://github.com/apple/foundationdb/pull/4400>`_  
+* Fix bugs turned up by _GLIBCXX_DEBUG. `(PR #4301) <https://github.com/apple/foundationdb/pull/4301>`_  
+* Add New Unit and Integration Tests, and associated infrastructure. `(PR #4366) <https://github.com/apple/foundationdb/pull/4366>`_  
+
 6.3.10
 ======
 * Make fault tolerance metric calculation in HA clusters consistent with 6.2 branch. `(PR #4175) <https://github.com/apple/foundationdb/pull/4175>`_
@@ -88,7 +114,7 @@ Status
 * Removed fields ``worst_version_lag_storage_server`` and ``limiting_version_lag_storage_server`` from the ``cluster.qos`` section. The ``worst_data_lag_storage_server`` and ``limiting_data_lag_storage_server`` objects can be used instead. `(PR #3196) <https://github.com/apple/foundationdb/pull/3196>`_
 * If a process is unable to flush trace logs to disk, the problem will now be reported via the output of ``status`` command inside ``fdbcli``. `(PR #2605) <https://github.com/apple/foundationdb/pull/2605>`_ `(PR #2820) <https://github.com/apple/foundationdb/pull/2820>`_
 * When a configuration key is changed, it will always be included in ``status json`` output, even the value is reverted back to the default value. [6.3.5] `(PR #3610) <https://github.com/apple/foundationdb/pull/3610>`_
-* Added transactions.rejected_for_queued_too_long for bookkeeping the number of transactions rejected by commit proxy because its queuing time exceeds MVCC window. `(PR #4353) <https://github.com/apple/foundationdb/pull/4353>`_
+* Added transactions.rejected_for_queued_too_long for bookkeeping the number of transactions rejected by commit proxy because its queuing time exceeds MVCC window.[6.3.11] `(PR #4353) <https://github.com/apple/foundationdb/pull/4353>`_
 
 Bindings
 --------
@@ -140,6 +166,7 @@ Fixes from previous versions
 * The 6.3.5 patch release includes all fixes from the patch releases 6.2.24 and 6.2.25. :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
 * The 6.3.9 patch release includes all fixes from the patch releases 6.2.26. :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
 * The 6.3.10 patch release includes all fixes from the patch releases 6.2.27-6.2.29 :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
+* The 6.3.11 patch release includes all fixes from the patch releases 6.2.30-6.2.32 :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
 
 Fixes only impacting 6.3.0+
 ---------------------------

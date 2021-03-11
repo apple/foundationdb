@@ -68,7 +68,7 @@ public:
 	Standalone<StringRef> data;
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
+	void serialize(Ar& ar) {
 		serializer(ar, originatorFeed, messageId, data, data.arena());
 	}
 };
@@ -92,4 +92,3 @@ public:
 private:
 	Database cx;
 };
-

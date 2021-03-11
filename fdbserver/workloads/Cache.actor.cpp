@@ -1,15 +1,13 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct CacheWorkload : TestWorkload {
 	Key keyPrefix;
 
-	CacheWorkload(WorkloadContext const& wcx)
-		: TestWorkload(wcx)
-	{
-		keyPrefix = unprintable( getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef("")).toString() );
+	CacheWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+		keyPrefix = unprintable(getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef("")).toString());
 	}
 
 	std::string description() const override { return "CacheWorkload"; }

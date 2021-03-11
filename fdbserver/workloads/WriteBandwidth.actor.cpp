@@ -26,7 +26,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WriteBandwidthWorkload : KVWorkload {
 	int keysPerTransaction;
@@ -38,16 +38,14 @@ struct WriteBandwidthWorkload : KVWorkload {
 	ContinuousSample<double> commitLatencies, GRVLatencies;
 
 	WriteBandwidthWorkload(WorkloadContext const& wcx)
-		: KVWorkload(wcx),
-		commitLatencies( 2000 ), GRVLatencies( 2000 ),
-		loadTime( 0.0 ), transactions("Transactions"), retries("Retries")
-	{
-		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
-		keysPerTransaction = getOption( options, LiteralStringRef("keysPerTransaction"), 100 );
-		valueString = std::string( maxValueBytes, '.' );
+	  : KVWorkload(wcx), commitLatencies(2000), GRVLatencies(2000), loadTime(0.0), transactions("Transactions"),
+	    retries("Retries") {
+		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
+		keysPerTransaction = getOption(options, LiteralStringRef("keysPerTransaction"), 100);
+		valueString = std::string(maxValueBytes, '.');
 
-		warmingDelay = getOption( options, LiteralStringRef("warmingDelay"), 0.0 );
-		maxInsertRate = getOption( options, LiteralStringRef("maxInsertRate"), 1e12 );
+		warmingDelay = getOption(options, LiteralStringRef("warmingDelay"), 0.0);
+		maxInsertRate = getOption(options, LiteralStringRef("maxInsertRate"), 1e12);
 	}
 
 	std::string description() const override { return "WriteBandwidth"; }
@@ -69,67 +67,69 @@ struct WriteBandwidthWorkload : KVWorkload {
 
 		m.emplace_back("Mean GRV Latency (ms)", 1000 * GRVLatencies.mean(), true);
 		m.emplace_back("Median GRV Latency (ms, averaged)", 1000 * GRVLatencies.median(), true);
-		m.emplace_back("90% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile( 0.90 ), true);
-		m.emplace_back("98% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile( 0.98 ), true);
+		m.emplace_back("90% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile(0.90), true);
+		m.emplace_back("98% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile(0.98), true);
 
 		m.emplace_back("Mean Commit Latency (ms)", 1000 * commitLatencies.mean(), true);
 		m.emplace_back("Median Commit Latency (ms, averaged)", 1000 * commitLatencies.median(), true);
-		m.emplace_back("90% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile( 0.90 ), true);
-		m.emplace_back("98% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile( 0.98 ), true);
+		m.emplace_back("90% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile(0.90), true);
+		m.emplace_back("98% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile(0.98), true);
 
 		m.emplace_back("Write rows/sec", writes / duration, false);
-		m.emplace_back("Bytes written/sec", (writes * (keyBytes + (minValueBytes+maxValueBytes)*0.5)) / duration, false);
+		m.emplace_back(
+		    "Bytes written/sec", (writes * (keyBytes + (minValueBytes + maxValueBytes) * 0.5)) / duration, false);
 	}
 
-	Value randomValue() { return StringRef( (uint8_t*)valueString.c_str(), deterministicRandom()->randomInt(minValueBytes, maxValueBytes+1) );	}
-
-	Standalone<KeyValueRef> operator()( uint64_t n ) {
-		return KeyValueRef( keyForIndex( n, false ), randomValue() );
+	Value randomValue() {
+		return StringRef((uint8_t*)valueString.c_str(),
+		                 deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1));
 	}
 
-	ACTOR Future<Void> _setup( Database cx, WriteBandwidthWorkload *self ) {
+	Standalone<KeyValueRef> operator()(uint64_t n) { return KeyValueRef(keyForIndex(n, false), randomValue()); }
+
+	ACTOR Future<Void> _setup(Database cx, WriteBandwidthWorkload* self) {
 		state Promise<double> loadTime;
-		state Promise<std::vector<std::pair<uint64_t, double> > > ratesAtKeyCounts;
+		state Promise<std::vector<std::pair<uint64_t, double>>> ratesAtKeyCounts;
 
-		wait( bulkSetup( cx, self, self->nodeCount, loadTime, true, self->warmingDelay, self->maxInsertRate ) );
+		wait(bulkSetup(cx, self, self->nodeCount, loadTime, true, self->warmingDelay, self->maxInsertRate));
 		self->loadTime = loadTime.getFuture().get();
 		return Void();
 	}
 
-	ACTOR Future<Void> _start( Database cx, WriteBandwidthWorkload *self ) {
-		for( int i = 0; i < self->actorCount; i++ ) {
-			self->clients.push_back( self->writeClient( cx, self ) );
+	ACTOR Future<Void> _start(Database cx, WriteBandwidthWorkload* self) {
+		for (int i = 0; i < self->actorCount; i++) {
+			self->clients.push_back(self->writeClient(cx, self));
 		}
 
-		wait( timeout( waitForAll( self->clients ), self->testDuration, Void() ) );
+		wait(timeout(waitForAll(self->clients), self->testDuration, Void()));
 		self->clients.clear();
 		return Void();
 	}
 
-	ACTOR Future<Void> writeClient( Database cx, WriteBandwidthWorkload *self ) {
+	ACTOR Future<Void> writeClient(Database cx, WriteBandwidthWorkload* self) {
 		loop {
-			state Transaction tr( cx );
+			state Transaction tr(cx);
 			state uint64_t startIdx = deterministicRandom()->random01() * (self->nodeCount - self->keysPerTransaction);
 			loop {
 				try {
 					state double start = now();
 					wait(success(tr.getReadVersion()));
-					self->GRVLatencies.addSample( now() - start );
+					self->GRVLatencies.addSample(now() - start);
 
 					// Predefine a single large write conflict range over the whole key space
-					tr.addWriteConflictRange( KeyRangeRef( 
-							self->keyForIndex( startIdx, false ), 
-							keyAfter( self->keyForIndex( startIdx + self->keysPerTransaction - 1, false ) ) ) );
+					tr.addWriteConflictRange(
+					    KeyRangeRef(self->keyForIndex(startIdx, false),
+					                keyAfter(self->keyForIndex(startIdx + self->keysPerTransaction - 1, false))));
 
-					for( int i = 0; i < self->keysPerTransaction; i++ )
-						tr.set( self->keyForIndex( startIdx + i, false ), self->randomValue(), false );
+					for (int i = 0; i < self->keysPerTransaction; i++)
+						tr.set(self->keyForIndex(startIdx + i, false), self->randomValue(), false);
 
 					start = now();
-					wait( tr.commit() );
-					self->commitLatencies.addSample( now() - start );
+					wait(tr.commit());
+					self->commitLatencies.addSample(now() - start);
 					break;
-				} catch( Error& e ) {
-					wait( tr.onError( e ) );
+				} catch (Error& e) {
+					wait(tr.onError(e));
 					++self->retries;
 				}
 			}

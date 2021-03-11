@@ -93,9 +93,8 @@ void treeBenchmark(T& tree, F generateKey) {
 
 	timedRun("insert", keys, [&tree](key const& k) { tree.insert(k); });
 	timedRun("find", keys, [&tree](key const& k) { ASSERT(tree.find(k) != tree.not_found()); });
-	timedRun("lower_bound", keys, [&tree](key const & k) { ASSERT(tree.lower_bound(k) != tree.not_found()); });
-	timedRun("upper_bound", keys, [&tree](key const & k) { tree.upper_bound(k); });
-
+	timedRun("lower_bound", keys, [&tree](key const& k) { ASSERT(tree.lower_bound(k) != tree.not_found()); });
+	timedRun("upper_bound", keys, [&tree](key const& k) { tree.upper_bound(k); });
 
 	std::sort(keys.begin(), keys.end());
 	keys.resize(std::unique(keys.begin(), keys.end()) - keys.begin());
