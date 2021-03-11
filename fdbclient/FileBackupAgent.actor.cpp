@@ -1191,7 +1191,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 					wait(rangeFile.writeKey(nextKey));
 
 					if (BUGGIFY) {
-						rangeFile.padEnd();
+						wait(rangeFile.padEnd());
 					}
 
 					bool usedFile = wait(
