@@ -744,7 +744,7 @@ ACTOR static void deliver(TransportData* self,
 		    .detail("PeerAddress", peerAddress.present() ? peerAddress.get().toString() : std::string("Local"))
 		    .detail("FileIdentifier", fileIdentifier);
 	}
-	if (priority < TaskPriority::ReadSocket || !inReadSocket) {
+	if (TaskPriority::UnknownEndpoint != priority && (priority < TaskPriority::ReadSocket || !inReadSocket)) {
 		wait(delay(0, priority));
 	} else {
 		g_network->setCurrentTask(priority);
