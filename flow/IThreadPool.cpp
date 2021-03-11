@@ -90,14 +90,15 @@ public:
 		ReferenceCounted<ThreadPool>::delref();
 		return Void();
 	}
+
 	Future<Void> getError() const override { return Never(); } // FIXME
 	void addref() override { ReferenceCounted<ThreadPool>::addref(); }
 	void delref() override {
 		if (ReferenceCounted<ThreadPool>::delref_no_destroy()) stop();
 	}
-	void addThread(IThreadPoolReceiver* userData) override {
+	void addThread(IThreadPoolReceiver* userData, const char* name) override {
 		threads.push_back(new Thread(this, userData));
-		startThread(start, threads.back(), stackSize);
+		startThread(start, threads.back(), stackSize, name);
 	}
 	void post(PThreadAction action) override { ios.post(ActionWrapper(action)); }
 };

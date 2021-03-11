@@ -771,7 +771,7 @@ void MultiVersionTransaction::reset() {
 // MultiVersionDatabase
 MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api, int threadIdx, std::string clusterFilePath,
                                            Reference<IDatabase> db, bool openConnectors)
-  : dbState(new DatabaseState()), threadIdx(threadIdx) {
+  : dbState(new DatabaseState()) {
 	dbState->db = db;
 	dbState->dbVar->set(db);
 

@@ -21,6 +21,7 @@
 #ifndef FLOW_SIMULATOR_H
 #define FLOW_SIMULATOR_H
 #include "flow/ProtocolVersion.h"
+#include <string>
 #pragma once
 
 #include "flow/flow.h"
@@ -386,10 +387,12 @@ public:
 	// Opens a file for asynchronous I/O
 	Future<Reference<class IAsyncFile>> open(const std::string& filename, int64_t flags, int64_t mode) override;
 
-	// Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
+	// Deletes the given file. If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
 	Future<Void> deleteFile(const std::string& filename, bool mustBeDurable) override;
 
 	Future<std::time_t> lastWriteTime(const std::string& filename) override;
+
+	Future<Void> renameFile(std::string const& from, std::string const& to) override;
 
 	Sim2FileSystem() {}
 
