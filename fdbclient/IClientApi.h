@@ -36,15 +36,29 @@ public:
 	virtual void setVersion(Version v) = 0;
 	virtual ThreadFuture<Version> getReadVersion() = 0;
 
-	// These functions that read data return Standalone<...> objects, but these objects are not required to manage their own memory.
-	// It is guaranteed, however, that the ThreadFuture will hold a reference to the memory. It will persist until the ThreadFuture's 
-	// ThreadSingleAssignmentVar has its memory released or it is destroyed.
-	virtual ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot=false) = 0;
-	virtual ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot=false) = 0;
-	virtual ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin, const KeySelectorRef& end, int limit, bool snapshot=false, bool reverse=false) = 0;
-	virtual ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin, const KeySelectorRef& end, GetRangeLimits limits, bool snapshot=false, bool reverse=false) = 0;
-	virtual ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys, int limit, bool snapshot=false, bool reverse=false) = 0;
-	virtual ThreadFuture<Standalone<RangeResultRef>> getRange( const KeyRangeRef& keys, GetRangeLimits limits, bool snapshot=false, bool reverse=false) = 0;
+	// These functions that read data return Standalone<...> objects, but these objects are not required to manage their
+	// own memory. It is guaranteed, however, that the ThreadFuture will hold a reference to the memory. It will persist
+	// until the ThreadFuture's ThreadSingleAssignmentVar has its memory released or it is destroyed.
+	virtual ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot = false) = 0;
+	virtual ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false) = 0;
+	virtual ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin,
+	                                                          const KeySelectorRef& end,
+	                                                          int limit,
+	                                                          bool snapshot = false,
+	                                                          bool reverse = false) = 0;
+	virtual ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin,
+	                                                          const KeySelectorRef& end,
+	                                                          GetRangeLimits limits,
+	                                                          bool snapshot = false,
+	                                                          bool reverse = false) = 0;
+	virtual ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys,
+	                                                          int limit,
+	                                                          bool snapshot = false,
+	                                                          bool reverse = false) = 0;
+	virtual ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys,
+	                                                          GetRangeLimits limits,
+	                                                          bool snapshot = false,
+	                                                          bool reverse = false) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) = 0;
 	virtual ThreadFuture<Standalone<StringRef>> getVersionstamp() = 0;
 
@@ -67,7 +81,7 @@ public:
 	virtual Version getCommittedVersion() = 0;
 	virtual ThreadFuture<int64_t> getApproximateSize() = 0;
 
-	virtual void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value=Optional<StringRef>()) = 0;
+	virtual void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
 
 	virtual ThreadFuture<Void> onError(Error const& e) = 0;
 	virtual void reset() = 0;
@@ -88,7 +102,8 @@ public:
 
 	// Management API, attempt to kill or suspend a process, return 1 for request sent out, 0 for failure
 	virtual ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) = 0;
-	// Management API, force the database to recover into DCID, causing the database to lose the most recently committed mutations
+	// Management API, force the database to recover into DCID, causing the database to lose the most recently committed
+	// mutations
 	virtual ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) = 0;
 	// Management API, create snapshot
 	virtual ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) = 0;
@@ -102,14 +117,15 @@ public:
 	virtual const char* getClientVersion() = 0;
 	virtual ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath) = 0;
 
-	virtual void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
+	virtual void setNetworkOption(FDBNetworkOptions::Option option,
+	                              Optional<StringRef> value = Optional<StringRef>()) = 0;
 	virtual void setupNetwork() = 0;
 	virtual void runNetwork() = 0;
 	virtual void stopNetwork() = 0;
 
-	virtual Reference<IDatabase> createDatabase(const char *clusterFilePath) = 0;
+	virtual Reference<IDatabase> createDatabase(const char* clusterFilePath) = 0;
 
-	virtual void addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter) = 0;
+	virtual void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) = 0;
 };
 
 #endif

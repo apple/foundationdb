@@ -26,39 +26,37 @@
 #include <functional>
 
 struct LineNoise : NonCopyable {
-    // Wraps the linenoise library so that it can be called from asynchronous Flow code
-    // Only create one of these at a time; the linenoise library only supports one history
-    //
-    // The current implementation does not support calling read concurrently with any other
-    // function (or itself).
+	// Wraps the linenoise library so that it can be called from asynchronous Flow code
+	// Only create one of these at a time; the linenoise library only supports one history
+	//
+	// The current implementation does not support calling read concurrently with any other
+	// function (or itself).
 
-    struct Hint {
-        std::string text;
-        int color;
-        bool bold;
-        bool valid;
-        Hint() : text(), color(), bold(), valid() {}
-        Hint( std::string const& text, int color, bool bold ) : text(text), color(color), bold(bold), valid(true) {}
-    };
+	struct Hint {
+		std::string text;
+		int color;
+		bool bold;
+		bool valid;
+		Hint() : text(), color(), bold(), valid() {}
+		Hint(std::string const& text, int color, bool bold) : text(text), color(color), bold(bold), valid(true) {}
+	};
 
-    LineNoise(
-        std::function< void(std::string const&, std::vector<std::string>&) > completion_callback,
-        std::function< Hint(std::string const&) > hint_callback,
-        int maxHistoryLines,
-        bool multiline
-        );
-    ~LineNoise();
+	LineNoise(std::function<void(std::string const&, std::vector<std::string>&)> completion_callback,
+	          std::function<Hint(std::string const&)> hint_callback,
+	          int maxHistoryLines,
+	          bool multiline);
+	~LineNoise();
 
-    Future< Optional<std::string> > read( std::string const& prompt );  // Returns "nothing" on EOF
-    void historyAdd( std::string const& line );
+	Future<Optional<std::string>> read(std::string const& prompt); // Returns "nothing" on EOF
+	void historyAdd(std::string const& line);
 
-    void historyLoad( std::string const& filename );
-    void historySave( std::string const& filename );
+	void historyLoad(std::string const& filename);
+	void historySave(std::string const& filename);
 
-    static Future<Void> onKeyboardInterrupt();  // Returns when Ctrl-C is next pressed (i.e. SIGINT)
+	static Future<Void> onKeyboardInterrupt(); // Returns when Ctrl-C is next pressed (i.e. SIGINT)
 
-    Reference<class IThreadPool> threadPool;
-    struct LineNoiseReader* reader;
+	Reference<class IThreadPool> threadPool;
+	struct LineNoiseReader* reader;
 };
 
 #endif

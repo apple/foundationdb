@@ -23,8 +23,8 @@
 #define FDBCLIENT_GRVPROXYINTERFACE_H
 #pragma once
 
-// GrvProxy is proxy primarily specializing on serving GetReadVersion. It also serves health metrics since it communicates
-// with RateKeeper to gather health information of the cluster.
+// GrvProxy is proxy primarily specializing on serving GetReadVersion. It also serves health metrics since it
+// communicates with RateKeeper to gather health information of the cluster.
 struct GrvProxyInterface {
 	constexpr static FileIdentifier file_identifier = 8743216;
 	enum { LocationAwareLoadBalance = 1 };
@@ -33,23 +33,28 @@ struct GrvProxyInterface {
 	Optional<Key> processId;
 	bool provisional;
 
-	RequestStream< struct GetReadVersionRequest > getConsistentReadVersion;  // Returns a version which (1) is committed, and (2) is >= the latest version reported committed (by a commit response) when this request was sent
-	//   (at some point between when this request is sent and when its response is received, the latest version reported committed)
+	RequestStream<struct GetReadVersionRequest>
+	    getConsistentReadVersion; // Returns a version which (1) is committed, and (2) is >= the latest version reported
+	                              // committed (by a commit response) when this request was sent
+	//   (at some point between when this request is sent and when its response is received, the latest version reported
+	//   committed)
 	RequestStream<ReplyPromise<Void>> waitFailure; // reports heartbeat to master.
-	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
+	RequestStream<struct GetHealthMetricsRequest> getHealthMetrics;
 
 	UID id() const { return getConsistentReadVersion.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
-	bool operator == (GrvProxyInterface const& r) const { return id() == r.id(); }
-	bool operator != (GrvProxyInterface const& r) const { return id() != r.id(); }
+	bool operator==(GrvProxyInterface const& r) const { return id() == r.id(); }
+	bool operator!=(GrvProxyInterface const& r) const { return id() != r.id(); }
 	NetworkAddress address() const { return getConsistentReadVersion.getEndpoint().getPrimaryAddress(); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {
 		serializer(ar, processId, provisional, getConsistentReadVersion);
-		if( Archive::isDeserializing ) {
-			waitFailure = RequestStream<ReplyPromise<Void>>( getConsistentReadVersion.getEndpoint().getAdjustedEndpoint(1) );
-			getHealthMetrics = RequestStream< struct GetHealthMetricsRequest >( getConsistentReadVersion.getEndpoint().getAdjustedEndpoint(2) );
+		if (Archive::isDeserializing) {
+			waitFailure =
+			    RequestStream<ReplyPromise<Void>>(getConsistentReadVersion.getEndpoint().getAdjustedEndpoint(1));
+			getHealthMetrics = RequestStream<struct GetHealthMetricsRequest>(
+			    getConsistentReadVersion.getEndpoint().getAdjustedEndpoint(2));
 		}
 	}
 
@@ -61,6 +66,5 @@ struct GrvProxyInterface {
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
-
 
 #endif // FDBCLIENT_GRVPROXYINTERFACE_H

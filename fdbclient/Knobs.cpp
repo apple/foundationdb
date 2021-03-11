@@ -26,7 +26,7 @@
 std::unique_ptr<ClientKnobs> globalClientKnobs = std::make_unique<ClientKnobs>();
 ClientKnobs const* CLIENT_KNOBS = globalClientKnobs.get();
 
-#define init( knob, value ) initKnob( knob, value, #knob )
+#define init(knob, value) initKnob(knob, value, #knob)
 
 ClientKnobs::ClientKnobs() {
 	initialize();

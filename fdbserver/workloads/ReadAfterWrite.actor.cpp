@@ -36,7 +36,7 @@ ACTOR Future<double> latencyOfRead(Transaction* tr, Key k) {
 		try {
 			wait(success(tr->get(k)));
 			break;
-		} catch (Error &e) {
+		} catch (Error& e) {
 			if (e.code() == error_code_future_version) {
 				continue;
 			}
@@ -74,7 +74,7 @@ struct ReadAfterWriteWorkload : KVWorkload {
 				// server after we commit.  Its existence or non-existence is irrelevant.  We write back the exact same
 				// value (or clear the key, if empty) so that the database state is not mutated.  This means this
 				// workload can be paired with any other workload, and it won't affect any results.
-				Optional<Value> value = wait( writeTr.get(key) );
+				Optional<Value> value = wait(writeTr.get(key));
 				if (value.present()) {
 					writeTr.set(key, value.get());
 				} else {

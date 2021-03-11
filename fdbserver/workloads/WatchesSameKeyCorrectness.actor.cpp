@@ -24,37 +24,34 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WatchesSameKeyWorkload : TestWorkload {
 	int numWatches;
 	std::vector<Future<Void>> cases;
 
-	WatchesSameKeyWorkload(WorkloadContext const& wcx)
-		: TestWorkload(wcx)
-	{
-		numWatches = getOption( options, LiteralStringRef("numWatches"), 3 );
+	WatchesSameKeyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+		numWatches = getOption(options, LiteralStringRef("numWatches"), 3);
 	}
 
 	std::string description() const override { return "WatchesSameKeyCorrectness"; }
 
-	Future<Void> setup(Database const& cx) override { 
-		cases.push_back( case1(cx, LiteralStringRef("foo1"), this) );
-		cases.push_back( case2(cx, LiteralStringRef("foo2"), this) );
-		cases.push_back( case3(cx, LiteralStringRef("foo3"), this) );
-		cases.push_back( case4(cx, LiteralStringRef("foo4"), this) );
-		cases.push_back( case5(cx, LiteralStringRef("foo5"), this) );
+	Future<Void> setup(Database const& cx) override {
+		cases.push_back(case1(cx, LiteralStringRef("foo1"), this));
+		cases.push_back(case2(cx, LiteralStringRef("foo2"), this));
+		cases.push_back(case3(cx, LiteralStringRef("foo3"), this));
+		cases.push_back(case4(cx, LiteralStringRef("foo4"), this));
+		cases.push_back(case5(cx, LiteralStringRef("foo5"), this));
 		return Void();
 	}
 
-	Future<Void> start(Database const& cx) override { 
-		return waitForAll( cases );
-	}
+	Future<Void> start(Database const& cx) override { return waitForAll(cases); }
 
 	Future<bool> check(Database const& cx) override {
 		bool ok = true;
-		for( int i = 0; i < cases.size(); i++ ) {
-			if ( cases[i].isError() ) ok = false;
+		for (int i = 0; i < cases.size(); i++) {
+			if (cases[i].isError())
+				ok = false;
 		}
 		cases.clear();
 		return ok;
@@ -64,7 +61,8 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		state ReadYourWritesTransaction tr(cx);
 		loop {
 			try {
-				if (!val.present()) val = Value(deterministicRandom()->randomUniqueID().toString());
+				if (!val.present())
+					val = Value(deterministicRandom()->randomUniqueID().toString());
 				tr.set(key, val.get());
 				wait(tr.commit());
 				return Void();
@@ -102,7 +100,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 	ACTOR static Future<Void> case1(Database cx, Key key, WatchesSameKeyWorkload* self) {
 		/**
 		 * Tests case 2 in the design doc:
-		 *  - we get a watch that has the same value as a key in the watch map 
+		 *  - we get a watch that has the same value as a key in the watch map
 		 * */
 		state ReadYourWritesTransaction tr(cx);
 		loop {
@@ -110,14 +108,14 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				state std::vector<Future<Void>> watchFutures;
 				state int i;
 
-				for ( i = 0; i < self->numWatches; i++ ) {
+				for (i = 0; i < self->numWatches; i++) {
 					watchFutures.push_back(tr.watch(key));
 				}
 				wait(tr.commit());
 
-				wait( setKeyRandomValue(cx, key, Optional<Value>()) );
-				for ( i = 0; i < watchFutures.size(); i++) {
-					wait( watchFutures[i] );
+				wait(setKeyRandomValue(cx, key, Optional<Value>()));
+				for (i = 0; i < watchFutures.size(); i++) {
+					wait(watchFutures[i]);
 				}
 				return Void();
 			} catch (Error& e) {
@@ -137,17 +135,17 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				state std::vector<Future<Void>> watchFutures;
 				state Future<Void> watch1 = wait(watchKey(cx, key));
 				state int i;
-				
-				state Value val = Value( deterministicRandom()->randomUniqueID().toString() );
+
+				state Value val = Value(deterministicRandom()->randomUniqueID().toString());
 				tr.set(key, val);
-				for ( i = 0; i < self->numWatches; i++ ) {
+				for (i = 0; i < self->numWatches; i++) {
 					watchFutures.push_back(tr.watch(key));
 				}
-				wait ( tr.commit() );
-				wait( watch1 );
-				wait( setKeyRandomValue(cx, key, Optional<Value>()) );
-				for ( i = 0; i < watchFutures.size(); i++) {
-					wait( watchFutures[i] );
+				wait(tr.commit());
+				wait(watch1);
+				wait(setKeyRandomValue(cx, key, Optional<Value>()));
+				for (i = 0; i < watchFutures.size(); i++) {
+					wait(watchFutures[i]);
 				}
 				return Void();
 			} catch (Error& e) {
@@ -164,15 +162,15 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		state ReadYourWritesTransaction tr(cx);
 		loop {
 			try {
-				wait ( setKeyRandomValue(cx, key, Optional<Value>()) );
-				state Optional<Value> val = wait( getValue(cx, key) );
+				wait(setKeyRandomValue(cx, key, Optional<Value>()));
+				state Optional<Value> val = wait(getValue(cx, key));
 				state Future<Void> watch1 = wait(watchKey(cx, key));
-				wait ( setKeyRandomValue(cx, key, Optional<Value>()) );
-				
+				wait(setKeyRandomValue(cx, key, Optional<Value>()));
+
 				tr.set(key, val.get());
 				state Future<Void> watch2 = tr.watch(key);
-				wait( tr.commit() );
-				
+				wait(tr.commit());
+
 				watch1.cancel();
 				watch2.cancel();
 				return Void();
@@ -190,18 +188,18 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		state ReadYourWritesTransaction tr(cx);
 		loop {
 			try {
-				wait ( setKeyRandomValue(cx, key, Optional<Value>()) );
-				state Optional<Value> val = wait( getValue(cx, key) );
+				wait(setKeyRandomValue(cx, key, Optional<Value>()));
+				state Optional<Value> val = wait(getValue(cx, key));
 				state Future<Void> watch1 = wait(watchKey(cx, key));
-				wait ( setKeyRandomValue(cx, key, Optional<Value>()) );
-				
+				wait(setKeyRandomValue(cx, key, Optional<Value>()));
+
 				tr.set(key, val.get());
 				state Future<Void> watch2 = tr.watch(key);
-				wait( tr.commit() );
+				wait(tr.commit());
 
-				wait( setKeyRandomValue(cx, key, Optional<Value>()) );
-				wait( watch1 );
-				wait( watch2 );
+				wait(setKeyRandomValue(cx, key, Optional<Value>()));
+				wait(watch1);
+				wait(watch2);
 				return Void();
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -218,19 +216,19 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		state ReadYourWritesTransaction tr2(cx);
 		loop {
 			try {
-				state Value val1 = Value( deterministicRandom()->randomUniqueID().toString() );
-				state Value val2 = Value( deterministicRandom()->randomUniqueID().toString() );
-				tr1.setOption( FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE );
-				tr2.setOption( FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE );
+				state Value val1 = Value(deterministicRandom()->randomUniqueID().toString());
+				state Value val2 = Value(deterministicRandom()->randomUniqueID().toString());
+				tr1.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
+				tr2.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
 				tr1.set(key, val1);
 				tr2.set(key, val2);
 				state Future<Void> watch1 = tr1.watch(key);
 				state Future<Void> watch2 = tr2.watch(key);
-				wait( tr1.commit() && tr2.commit() );
+				wait(tr1.commit() && tr2.commit());
 
-				wait( watch1 || watch2 ); // since we enter case 5 at least one of the watches should be fired
-				wait( setKeyRandomValue(cx, key, Optional<Value>()) );
-				wait( watch1 && watch2 );
+				wait(watch1 || watch2); // since we enter case 5 at least one of the watches should be fired
+				wait(setKeyRandomValue(cx, key, Optional<Value>()));
+				wait(watch1 && watch2);
 
 				return Void();
 			} catch (Error& e) {

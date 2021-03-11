@@ -23,7 +23,6 @@
 UnitTestCollection g_unittests = { nullptr };
 
 UnitTest::UnitTest(const char* name, const char* file, int line, TestFunction func)
-	: name(name), file(file), line(line), func(func), next(g_unittests.tests)
-{
+  : name(name), file(file), line(line), func(func), next(g_unittests.tests) {
 	g_unittests.tests = this;
 }

@@ -28,34 +28,38 @@
 #include "DirectoryLayer.h"
 
 namespace FDB {
-	class DirectoryPartition : public DirectorySubspace {
+class DirectoryPartition : public DirectorySubspace {
 
-	public:
-		DirectoryPartition(Path const& path, StringRef const& prefix, Reference<DirectoryLayer> parentDirectoryLayer)
-			: DirectorySubspace(path, prefix, Reference<DirectoryLayer>(new DirectoryLayer(Subspace(DirectoryLayer::DEFAULT_NODE_SUBSPACE_PREFIX.withPrefix(prefix)), Subspace(prefix))), DirectoryLayer::PARTITION_LAYER),
-				parentDirectoryLayer(parentDirectoryLayer)
-		{
-			this->directoryLayer->path = path;
-		}
-		virtual ~DirectoryPartition() {}
+public:
+	DirectoryPartition(Path const& path, StringRef const& prefix, Reference<DirectoryLayer> parentDirectoryLayer)
+	  : DirectorySubspace(path,
+	                      prefix,
+	                      Reference<DirectoryLayer>(new DirectoryLayer(
+	                          Subspace(DirectoryLayer::DEFAULT_NODE_SUBSPACE_PREFIX.withPrefix(prefix)),
+	                          Subspace(prefix))),
+	                      DirectoryLayer::PARTITION_LAYER),
+	    parentDirectoryLayer(parentDirectoryLayer) {
+		this->directoryLayer->path = path;
+	}
+	virtual ~DirectoryPartition() {}
 
-		virtual Key key() const { throw cannot_use_partition_as_subspace(); }
-		virtual bool contains(KeyRef const& key) const { throw cannot_use_partition_as_subspace(); }
+	virtual Key key() const { throw cannot_use_partition_as_subspace(); }
+	virtual bool contains(KeyRef const& key) const { throw cannot_use_partition_as_subspace(); }
 
-		virtual Key pack(Tuple const& tuple = Tuple()) const { throw cannot_use_partition_as_subspace(); }
-		virtual Tuple unpack(KeyRef const& key) const { throw cannot_use_partition_as_subspace(); }
-		virtual KeyRange range(Tuple const& tuple = Tuple()) const { throw cannot_use_partition_as_subspace(); }
+	virtual Key pack(Tuple const& tuple = Tuple()) const { throw cannot_use_partition_as_subspace(); }
+	virtual Tuple unpack(KeyRef const& key) const { throw cannot_use_partition_as_subspace(); }
+	virtual KeyRange range(Tuple const& tuple = Tuple()) const { throw cannot_use_partition_as_subspace(); }
 
-		virtual Subspace subspace(Tuple const& tuple) const { throw cannot_use_partition_as_subspace(); }
-		virtual Subspace get(Tuple const& tuple) const { throw cannot_use_partition_as_subspace(); }
+	virtual Subspace subspace(Tuple const& tuple) const { throw cannot_use_partition_as_subspace(); }
+	virtual Subspace get(Tuple const& tuple) const { throw cannot_use_partition_as_subspace(); }
 
-	protected:
-		Reference<DirectoryLayer> parentDirectoryLayer;
+protected:
+	Reference<DirectoryLayer> parentDirectoryLayer;
 
-		virtual Reference<DirectoryLayer> getDirectoryLayerForPath(Path const& path) const {
-			return path.empty() ? parentDirectoryLayer : directoryLayer;
-		}
-	};
-}
+	virtual Reference<DirectoryLayer> getDirectoryLayerForPath(Path const& path) const {
+		return path.empty() ? parentDirectoryLayer : directoryLayer;
+	}
+};
+} // namespace FDB
 
 #endif

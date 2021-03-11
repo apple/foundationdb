@@ -20,15 +20,16 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
+// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
+// version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_INDEXEDSET_ACTOR_G_H)
-	#define FLOW_INDEXEDSET_ACTOR_G_H
-	#include "flow/IndexedSet.actor.g.h"
+#define FLOW_INDEXEDSET_ACTOR_G_H
+#include "flow/IndexedSet.actor.g.h"
 #elif !defined(FLOW_INDEXEDSET_ACTOR_H)
-	#define FLOW_INDEXEDSET_ACTOR_H
+#define FLOW_INDEXEDSET_ACTOR_H
 
 #include "flow/flow.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR template <class Node>
 [[flow_allow_discard]] Future<Void> ISFreeNodes(std::vector<Node*> toFree, bool synchronous) {
@@ -46,21 +47,23 @@ ACTOR template <class Node>
 	while (!prefetchQueue.empty() || !toFree.empty()) {
 
 		while (prefetchQueue.size() < 10 && !toFree.empty()) {
-			_mm_prefetch( (const char*)toFree.back(), _MM_HINT_T0 );
-			prefetchQueue.push_back( toFree.back() );
+			_mm_prefetch((const char*)toFree.back(), _MM_HINT_T0);
+			prefetchQueue.push_back(toFree.back());
 			toFree.pop_back();
 		}
-	
+
 		auto n = prefetchQueue.front();
 		prefetchQueue.pop_front();
 
-		if (n->child[0]) toFree.push_back(n->child[0]);
-		if (n->child[1]) toFree.push_back(n->child[1]);
+		if (n->child[0])
+			toFree.push_back(n->child[0]);
+		if (n->child[1])
+			toFree.push_back(n->child[1]);
 		n->child[0] = n->child[1] = 0;
 		delete n;
 		++eraseCount;
 
-		if(!synchronous && eraseCount % 1000 == 0)
+		if (!synchronous && eraseCount % 1000 == 0)
 			wait(yield());
 	}
 

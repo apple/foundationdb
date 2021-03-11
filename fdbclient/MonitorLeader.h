@@ -37,7 +37,10 @@ struct ClientStatusInfo {
 	Standalone<VectorRef<StringRef>> issues;
 
 	ClientStatusInfo() {}
-	ClientStatusInfo(Key const& traceLogGroup, Standalone<VectorRef<ClientVersionRef>> versions, Standalone<VectorRef<StringRef>> issues) : traceLogGroup(traceLogGroup), versions(versions), issues(issues) {}
+	ClientStatusInfo(Key const& traceLogGroup,
+	                 Standalone<VectorRef<ClientVersionRef>> versions,
+	                 Standalone<VectorRef<StringRef>> issues)
+	  : traceLogGroup(traceLogGroup), versions(versions), issues(issues) {}
 };
 
 struct ClientData {
@@ -46,7 +49,7 @@ struct ClientData {
 
 	OpenDatabaseRequest getRequest();
 
-	ClientData() : clientInfo( new AsyncVar<CachedSerialization<ClientDBInfo>>( CachedSerialization<ClientDBInfo>() ) ) {}
+	ClientData() : clientInfo(new AsyncVar<CachedSerialization<ClientDBInfo>>(CachedSerialization<ClientDBInfo>())) {}
 };
 
 struct MonitorLeaderInfo {
@@ -54,55 +57,67 @@ struct MonitorLeaderInfo {
 	Reference<ClusterConnectionFile> intermediateConnFile;
 
 	MonitorLeaderInfo() : hasConnected(false) {}
-	explicit MonitorLeaderInfo( Reference<ClusterConnectionFile> intermediateConnFile ) : intermediateConnFile(intermediateConnFile), hasConnected(false) {}
+	explicit MonitorLeaderInfo(Reference<ClusterConnectionFile> intermediateConnFile)
+	  : intermediateConnFile(intermediateConnFile), hasConnected(false) {}
 };
 
 // Monitors the given coordination group's leader election process and provides a best current guess
 // of the current leader.  If a leader is elected for long enough and communication with a quorum of
 // coordinators is possible, eventually outKnownLeader will be that leader's interface.
 template <class LeaderInterface>
-Future<Void> monitorLeader( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader );
+Future<Void> monitorLeader(Reference<ClusterConnectionFile> const& connFile,
+                           Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader);
 
-Future<Void> monitorLeaderForProxies( Value const& key, vector<NetworkAddress> const& coordinators, ClientData* const& clientData, Reference<AsyncVar<Optional<LeaderInfo>>> const& leaderInfo );
+Future<Void> monitorLeaderForProxies(Value const& key,
+                                     vector<NetworkAddress> const& coordinators,
+                                     ClientData* const& clientData,
+                                     Reference<AsyncVar<Optional<LeaderInfo>>> const& leaderInfo);
 
-Future<Void> monitorProxies( Reference<AsyncVar<Reference<ClusterConnectionFile>>> const& connFile, Reference<AsyncVar<ClientDBInfo>> const& clientInfo, Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> const& supportedVersions, Key const& traceLogGroup );
+Future<Void> monitorProxies(
+    Reference<AsyncVar<Reference<ClusterConnectionFile>>> const& connFile,
+    Reference<AsyncVar<ClientDBInfo>> const& clientInfo,
+    Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> const& supportedVersions,
+    Key const& traceLogGroup);
 
-void shrinkProxyList(ClientDBInfo& ni, std::vector<UID>& lastCommitProxyUIDs,
-                     std::vector<CommitProxyInterface>& lastCommitProxies, std::vector<UID>& lastGrvProxyUIDs,
+void shrinkProxyList(ClientDBInfo& ni,
+                     std::vector<UID>& lastCommitProxyUIDs,
+                     std::vector<CommitProxyInterface>& lastCommitProxies,
+                     std::vector<UID>& lastGrvProxyUIDs,
                      std::vector<GrvProxyInterface>& lastGrvProxies);
 
 #ifndef __INTEL_COMPILER
 #pragma region Implementation
 #endif
 
-Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Value>> const& outSerializedLeaderInfo );
+Future<Void> monitorLeaderInternal(Reference<ClusterConnectionFile> const& connFile,
+                                   Reference<AsyncVar<Value>> const& outSerializedLeaderInfo);
 
 template <class LeaderInterface>
 struct LeaderDeserializer {
 	Future<Void> operator()(const Reference<AsyncVar<Value>>& serializedInfo,
-							const Reference<AsyncVar<Optional<LeaderInterface>>>& outKnownLeader) {
+	                        const Reference<AsyncVar<Optional<LeaderInterface>>>& outKnownLeader) {
 		return asyncDeserialize(serializedInfo, outKnownLeader);
 	}
 };
 
 Future<Void> asyncDeserializeClusterInterface(const Reference<AsyncVar<Value>>& serializedInfo,
-											  const Reference<AsyncVar<Optional<ClusterInterface>>>& outKnownLeader);
+                                              const Reference<AsyncVar<Optional<ClusterInterface>>>& outKnownLeader);
 
 template <>
 struct LeaderDeserializer<ClusterInterface> {
 	Future<Void> operator()(const Reference<AsyncVar<Value>>& serializedInfo,
-							const Reference<AsyncVar<Optional<ClusterInterface>>>& outKnownLeader) {
+	                        const Reference<AsyncVar<Optional<ClusterInterface>>>& outKnownLeader) {
 		return asyncDeserializeClusterInterface(serializedInfo, outKnownLeader);
 	}
 };
 
 template <class LeaderInterface>
 Future<Void> monitorLeader(Reference<ClusterConnectionFile> const& connFile,
-						   Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader) {
+                           Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader) {
 	LeaderDeserializer<LeaderInterface> deserializer;
 	auto serializedInfo = makeReference<AsyncVar<Value>>();
-	Future<Void> m = monitorLeaderInternal( connFile, serializedInfo );
-	return m || deserializer( serializedInfo, outKnownLeader );
+	Future<Void> m = monitorLeaderInternal(connFile, serializedInfo);
+	return m || deserializer(serializedInfo, outKnownLeader);
 }
 
 #ifndef __INTEL_COMPILER

@@ -13,7 +13,7 @@ then
 fi
 
 
-alternatives --install /usr/bin/fdbcli fdbclients /usr/lib/foundationdb-@PROJECT_VERSION@/bin/fdbcli @ALTERNATIVES_PRIORITY@ \
+update-alternatives --install /usr/bin/fdbcli fdbclients /usr/lib/foundationdb-@PROJECT_VERSION@/bin/fdbcli @ALTERNATIVES_PRIORITY@ \
     --slave /usr/bin/fdbbackup fdbbackup /usr/lib/foundationdb-@PROJECT_VERSION@/bin/fdbbackup \
     --slave /usr/bin/fdbrestore fdbrestore /usr/lib/foundationdb-@PROJECT_VERSION@/bin/fdbbackup \
     --slave /usr/bin/dr_agent dr_agent /usr/lib/foundationdb-@PROJECT_VERSION@/bin/fdbbackup \

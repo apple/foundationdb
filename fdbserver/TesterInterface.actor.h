@@ -21,11 +21,10 @@
 #pragma once
 
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_TESTERINTERFACE_ACTOR_G_H)
-	#define FDBSERVER_TESTERINTERFACE_ACTOR_G_H
-	#include "fdbserver/TesterInterface.actor.g.h"
+#define FDBSERVER_TESTERINTERFACE_ACTOR_G_H
+#include "fdbserver/TesterInterface.actor.g.h"
 #elif !defined(FDBSERVER_TESTERINTERFACE_ACTOR_H)
-	#define FDBSERVER_TESTERINTERFACE_ACTOR_H
-
+#define FDBSERVER_TESTERINTERFACE_ACTOR_H
 
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/PerfMetric.h"
@@ -47,13 +46,13 @@ struct WorkloadInterface {
 	RequestStream<ReplyPromise<Void>> setup;
 	RequestStream<ReplyPromise<Void>> start;
 	RequestStream<ReplyPromise<CheckReply>> check;
-	RequestStream<ReplyPromise< std::vector<PerfMetric> > > metrics;
+	RequestStream<ReplyPromise<std::vector<PerfMetric>>> metrics;
 	RequestStream<ReplyPromise<Void>> stop;
 
 	UID id() const { return setup.getEndpoint().token; }
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
+	void serialize(Ar& ar) {
 		serializer(ar, setup, start, check, metrics, stop);
 	}
 };
@@ -74,19 +73,29 @@ struct WorkloadRequest {
 	//	 Parameter				Description
 	// - testName				the name of the test to run
 	// - testDuration			in seconds
-	// - transactionsPerSecond					
-	// - actorsPerClient						
+	// - transactionsPerSecond
+	// - actorsPerClient
 	// - nodeCount
 
-	VectorRef< VectorRef<KeyValueRef> > options;
+	VectorRef<VectorRef<KeyValueRef>> options;
 
-	int clientId;				// the "id" of the client receiving the request (0 indexed)
-	int clientCount;			// the total number of test clients participating in the workload
-	ReplyPromise< struct WorkloadInterface > reply;
+	int clientId; // the "id" of the client receiving the request (0 indexed)
+	int clientCount; // the total number of test clients participating in the workload
+	ReplyPromise<struct WorkloadInterface> reply;
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
-		serializer(ar, title, timeout, databasePingDelay, sharedRandomNumber, useDatabase, options, clientId, clientCount, reply, arena);
+	void serialize(Ar& ar) {
+		serializer(ar,
+		           title,
+		           timeout,
+		           databasePingDelay,
+		           sharedRandomNumber,
+		           useDatabase,
+		           options,
+		           clientId,
+		           clientCount,
+		           reply,
+		           arena);
 	}
 };
 
@@ -102,15 +111,21 @@ struct TesterInterface {
 	}
 };
 
-ACTOR Future<Void> testerServerCore(TesterInterface interf, Reference<ClusterConnectionFile> ccf,
-                                    Reference<AsyncVar<struct ServerDBInfo>> serverDBInfo, LocalityData locality);
+ACTOR Future<Void> testerServerCore(TesterInterface interf,
+                                    Reference<ClusterConnectionFile> ccf,
+                                    Reference<AsyncVar<struct ServerDBInfo>> serverDBInfo,
+                                    LocalityData locality);
 
 enum test_location_t { TEST_HERE, TEST_ON_SERVERS, TEST_ON_TESTERS };
 enum test_type_t { TEST_TYPE_FROM_FILE, TEST_TYPE_CONSISTENCY_CHECK };
 
-ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile, test_type_t whatToRun,
-                            test_location_t whereToRun, int minTestersExpected, std::string fileName = std::string(),
-                            StringRef startingConfiguration = StringRef(), LocalityData locality = LocalityData());
+ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
+                            test_type_t whatToRun,
+                            test_location_t whereToRun,
+                            int minTestersExpected,
+                            std::string fileName = std::string(),
+                            StringRef startingConfiguration = StringRef(),
+                            LocalityData locality = LocalityData());
 
 #include "flow/unactorcompiler.h"
 #endif

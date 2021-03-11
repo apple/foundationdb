@@ -152,9 +152,12 @@ std::string S3BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	return r;
 }
 
-Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(std::string const& url, std::string* resourceFromURL,
-                                                               std::string* error, ParametersT* ignored_parameters) {
-	if (resourceFromURL) resourceFromURL->clear();
+Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(std::string const& url,
+                                                               std::string* resourceFromURL,
+                                                               std::string* error,
+                                                               ParametersT* ignored_parameters) {
+	if (resourceFromURL)
+		resourceFromURL->clear();
 
 	try {
 		StringRef t(url);
@@ -172,7 +175,8 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(std::string const
 		// hostPort is at least a host or IP address, optionally followed by :portNumber or :serviceName
 		StringRef h(hostPort);
 		StringRef host = h.eat(":");
-		if (host.size() == 0) throw std::string("host cannot be empty");
+		if (host.size() == 0)
+			throw std::string("host cannot be empty");
 
 		StringRef service = h.eat();
 
@@ -180,7 +184,8 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(std::string const
 		HTTP::Headers extraHeaders;
 		while (1) {
 			StringRef name = t.eat("=");
-			if (name.size() == 0) break;
+			if (name.size() == 0)
+				break;
 			StringRef value = t.eat("&");
 
 			// Special case for header
@@ -191,7 +196,8 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(std::string const
 				if (headerFieldName.size() == 0 || headerFieldValue.size() == 0) {
 					throw format("'%s' is not a valid value for '%s' parameter.  Format is <FieldName>:<FieldValue> "
 					             "where strings are not empty.",
-					             originalValue.toString().c_str(), name.toString().c_str());
+					             originalValue.toString().c_str(),
+					             name.toString().c_str());
 				}
 				std::string& fieldValue = extraHeaders[headerFieldName.toString()];
 				// RFC 2616 section 4.2 says header field names can repeat but only if it is valid to concatenate their
@@ -229,17 +235,19 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(std::string const
 			ASSERT(knobs.set(name, ivalue));
 		}
 
-		if (resourceFromURL != nullptr) *resourceFromURL = resource.toString();
+		if (resourceFromURL != nullptr)
+			*resourceFromURL = resource.toString();
 
 		StringRef c(cred);
 		StringRef key = c.eat(":");
 		StringRef secret = c.eat();
 
-		return makeReference<S3BlobStoreEndpoint>(host.toString(), service.toString(), key.toString(),
-		                                          secret.toString(), knobs, extraHeaders);
+		return makeReference<S3BlobStoreEndpoint>(
+		    host.toString(), service.toString(), key.toString(), secret.toString(), knobs, extraHeaders);
 
 	} catch (std::string& err) {
-		if (error != nullptr) *error = err;
+		if (error != nullptr)
+			*error = err;
 		TraceEvent(SevWarnAlways, "S3BlobStoreEndpointBadURL")
 		    .suppressFor(60)
 		    .detail("Description", err)
@@ -258,7 +266,8 @@ std::string S3BlobStoreEndpoint::getResourceURL(std::string resource, std::strin
 
 	// If secret isn't being looked up from credentials files then it was passed explicitly in th URL so show it here.
 	std::string s;
-	if (!lookupSecret) s = std::string(":") + secret;
+	if (!lookupSecret)
+		s = std::string(":") + secret;
 
 	std::string r = format("blobstore://%s%s@%s/%s", key.c_str(), s.c_str(), hostPort.c_str(), resource.c_str());
 
@@ -281,7 +290,8 @@ std::string S3BlobStoreEndpoint::getResourceURL(std::string resource, std::strin
 		params.append(HTTP::urlEncode(v));
 	}
 
-	if (!params.empty()) r.append("?").append(params);
+	if (!params.empty())
+		r.append("?").append(params);
 
 	return r;
 }
@@ -338,8 +348,11 @@ Future<Void> S3BlobStoreEndpoint::deleteObject(std::string const& bucket, std::s
 	return deleteObject_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object);
 }
 
-ACTOR Future<Void> deleteRecursively_impl(Reference<S3BlobStoreEndpoint> b, std::string bucket, std::string prefix,
-                                          int* pNumDeleted, int64_t* pBytesDeleted) {
+ACTOR Future<Void> deleteRecursively_impl(Reference<S3BlobStoreEndpoint> b,
+                                          std::string bucket,
+                                          std::string prefix,
+                                          int* pNumDeleted,
+                                          int64_t* pBytesDeleted) {
 	state PromiseStream<S3BlobStoreEndpoint::ListResult> resultStream;
 	// Start a recursive parallel listing which will send results to resultStream as they are received
 	state Future<Void> done = b->listObjectsStream(bucket, resultStream, prefix, '/', std::numeric_limits<int>::max());
@@ -379,7 +392,8 @@ ACTOR Future<Void> deleteRecursively_impl(Reference<S3BlobStoreEndpoint> b, std:
 			}
 		}
 	} catch (Error& e) {
-		if (e.code() != error_code_end_of_stream) throw;
+		if (e.code() != error_code_end_of_stream)
+			throw;
 	}
 
 	while (deleteFutures.size() > 0) {
@@ -390,10 +404,12 @@ ACTOR Future<Void> deleteRecursively_impl(Reference<S3BlobStoreEndpoint> b, std:
 	return Void();
 }
 
-Future<Void> S3BlobStoreEndpoint::deleteRecursively(std::string const& bucket, std::string prefix, int* pNumDeleted,
+Future<Void> S3BlobStoreEndpoint::deleteRecursively(std::string const& bucket,
+                                                    std::string prefix,
+                                                    int* pNumDeleted,
                                                     int64_t* pBytesDeleted) {
-	return deleteRecursively_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, prefix, pNumDeleted,
-	                              pBytesDeleted);
+	return deleteRecursively_impl(
+	    Reference<S3BlobStoreEndpoint>::addRef(this), bucket, prefix, pNumDeleted, pBytesDeleted);
 }
 
 ACTOR Future<Void> createBucket_impl(Reference<S3BlobStoreEndpoint> b, std::string bucket) {
@@ -419,7 +435,8 @@ ACTOR Future<int64_t> objectSize_impl(Reference<S3BlobStoreEndpoint> b, std::str
 	HTTP::Headers headers;
 
 	Reference<HTTP::Response> r = wait(b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 }));
-	if (r->code == 404) throw file_not_found();
+	if (r->code == 404)
+		throw file_not_found();
 	return r->contentLen;
 }
 
@@ -464,10 +481,12 @@ ACTOR Future<Optional<json_spirit::mObject>> tryReadJSONFile(std::string path) {
 
 ACTOR Future<Void> updateSecret_impl(Reference<S3BlobStoreEndpoint> b) {
 	std::vector<std::string>* pFiles = (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
-	if (pFiles == nullptr) return Void();
+	if (pFiles == nullptr)
+		return Void();
 
 	state std::vector<Future<Optional<json_spirit::mObject>>> reads;
-	for (auto& f : *pFiles) reads.push_back(tryReadJSONFile(f));
+	for (auto& f : *pFiles)
+		reads.push_back(tryReadJSONFile(f));
 
 	wait(waitForAll(reads));
 
@@ -498,7 +517,8 @@ ACTOR Future<Void> updateSecret_impl(Reference<S3BlobStoreEndpoint> b) {
 	}
 
 	// If any sources were invalid
-	if (invalid > 0) throw backup_auth_unreadable();
+	if (invalid > 0)
+		throw backup_auth_unreadable();
 
 	// All sources were valid but didn't contain the desired info
 	throw backup_auth_missing();
@@ -524,7 +544,8 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 		}
 	}
 	std::string service = b->service;
-	if (service.empty()) service = b->knobs.secure_connection ? "https" : "http";
+	if (service.empty())
+		service = b->knobs.secure_connection ? "https" : "http";
 	state Reference<IConnection> conn =
 	    wait(INetworkConnections::net()->connect(b->host, service, b->knobs.secure_connection ? true : false));
 	wait(conn->connectHandshake());
@@ -534,7 +555,8 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 	    .detail("RemoteEndpoint", conn->getPeerAddress())
 	    .detail("ExpiresIn", b->knobs.max_connection_life);
 
-	if (b->lookupSecret) wait(b->updateSecret());
+	if (b->lookupSecret)
+		wait(b->updateSecret());
 
 	return S3BlobStoreEndpoint::ReusableConnection({ conn, now() + b->knobs.max_connection_life });
 }
@@ -545,16 +567,20 @@ Future<S3BlobStoreEndpoint::ReusableConnection> S3BlobStoreEndpoint::connect() {
 
 void S3BlobStoreEndpoint::returnConnection(ReusableConnection& rconn) {
 	// If it expires in the future then add it to the pool in the front
-	if (rconn.expirationTime > now()) connectionPool.push(rconn);
+	if (rconn.expirationTime > now())
+		connectionPool.push(rconn);
 	rconn.conn = Reference<IConnection>();
 }
 
 // Do a request, get a Response.
 // Request content is provided as UnsentPacketQueue *pContent which will be depleted as bytes are sent but the queue
 // itself must live for the life of this actor and be destroyed by the caller
-ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndpoint> bstore, std::string verb,
-                                                       std::string resource, HTTP::Headers headers,
-                                                       UnsentPacketQueue* pContent, int contentLen,
+ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                                       std::string verb,
+                                                       std::string resource,
+                                                       HTTP::Headers headers,
+                                                       UnsentPacketQueue* pContent,
+                                                       int contentLen,
                                                        std::set<unsigned int> successCodes) {
 	state UnsentPacketQueue contentCopy;
 
@@ -620,19 +646,27 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 			bstore->setAuthHeaders(verb, resource, headers);
 			remoteAddress = rconn.conn->getPeerAddress();
 			wait(bstore->requestRate->getAllowance(1));
-			Reference<HTTP::Response> _r =
-			    wait(timeoutError(HTTP::doRequest(rconn.conn, verb, resource, headers, &contentCopy, contentLen,
-			                                      bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate),
-			                      requestTimeout));
+			Reference<HTTP::Response> _r = wait(timeoutError(HTTP::doRequest(rconn.conn,
+			                                                                 verb,
+			                                                                 resource,
+			                                                                 headers,
+			                                                                 &contentCopy,
+			                                                                 contentLen,
+			                                                                 bstore->sendRate,
+			                                                                 &bstore->s_stats.bytes_sent,
+			                                                                 bstore->recvRate),
+			                                                 requestTimeout));
 			r = _r;
 
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we
 			// received the "Connection: close" header.
-			if (r->headers["Connection"] != "close") bstore->returnConnection(rconn);
+			if (r->headers["Connection"] != "close")
+				bstore->returnConnection(rconn);
 			rconn.conn.clear();
 
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			err = e;
 		}
 
@@ -675,7 +709,8 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 
 		// If r is not valid or not code 429 then increment the try count.  429's will not count against the attempt
 		// limit.
-		if (!r || r->code != 429) ++thisTry;
+		if (!r || r->code != 429)
+			++thisTry;
 
 		// We will wait delay seconds before the next retry, start with nextRetryDelay.
 		double delay = nextRetryDelay;
@@ -705,9 +740,11 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 			// We can't retry, so throw something.
 
 			// This error code means the authentication header was not accepted, likely the account or key is wrong.
-			if (r && r->code == 406) throw http_not_accepted();
+			if (r && r->code == 406)
+				throw http_not_accepted();
 
-			if (r && r->code == 401) throw http_auth_failed();
+			if (r && r->code == 401)
+				throw http_auth_failed();
 
 			// Recognize and throw specific errors
 			if (err.present()) {
@@ -718,7 +755,8 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 				// active connection timing out vs a connection timing out, though not between an active connection
 				// failing vs connection attempt failing.
 				// TODO:  Add more error types?
-				if (code == error_code_timed_out && !connectionEstablished) throw connection_failed();
+				if (code == error_code_timed_out && !connectionEstablished)
+					throw connection_failed();
 
 				if (code == error_code_timed_out || code == error_code_connection_failed ||
 				    code == error_code_lookup_failed)
@@ -730,24 +768,31 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 	}
 }
 
-Future<Reference<HTTP::Response>> S3BlobStoreEndpoint::doRequest(std::string const& verb, std::string const& resource,
+Future<Reference<HTTP::Response>> S3BlobStoreEndpoint::doRequest(std::string const& verb,
+                                                                 std::string const& resource,
                                                                  const HTTP::Headers& headers,
-                                                                 UnsentPacketQueue* pContent, int contentLen,
+                                                                 UnsentPacketQueue* pContent,
+                                                                 int contentLen,
                                                                  std::set<unsigned int> successCodes) {
-	return doRequest_impl(Reference<S3BlobStoreEndpoint>::addRef(this), verb, resource, headers, pContent, contentLen,
-	                      successCodes);
+	return doRequest_impl(
+	    Reference<S3BlobStoreEndpoint>::addRef(this), verb, resource, headers, pContent, contentLen, successCodes);
 }
 
-ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore, std::string bucket,
+ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                          std::string bucket,
                                           PromiseStream<S3BlobStoreEndpoint::ListResult> results,
-                                          Optional<std::string> prefix, Optional<char> delimiter, int maxDepth,
+                                          Optional<std::string> prefix,
+                                          Optional<char> delimiter,
+                                          int maxDepth,
                                           std::function<bool(std::string const&)> recurseFilter) {
 	// Request 1000 keys at a time, the maximum allowed
 	state std::string resource = "/";
 	resource.append(bucket);
 	resource.append("/?max-keys=1000");
-	if (prefix.present()) resource.append("&prefix=").append(HTTP::urlEncode(prefix.get()));
-	if (delimiter.present()) resource.append("&delimiter=").append(HTTP::urlEncode(std::string(1, delimiter.get())));
+	if (prefix.present())
+		resource.append("&prefix=").append(HTTP::urlEncode(prefix.get()));
+	if (delimiter.present())
+		resource.append("&delimiter=").append(HTTP::urlEncode(std::string(1, delimiter.get())));
 	resource.append("&marker=");
 	state std::string lastFile;
 	state bool more = true;
@@ -814,8 +859,8 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 						if (maxDepth > 0) {
 							// If there is no recurse filter or the filter returns true then start listing the subfolder
 							if (!recurseFilter || recurseFilter(prefix)) {
-								subLists.push_back(bstore->listObjectsStream(bucket, results, prefix, delimiter,
-								                                             maxDepth - 1, recurseFilter));
+								subLists.push_back(bstore->listObjectsStream(
+								    bucket, results, prefix, delimiter, maxDepth - 1, recurseFilter));
 							}
 							// Since prefix will not be in the final listResult below we have to set lastFile here in
 							// case it's greater than the last object
@@ -868,17 +913,21 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 	return Void();
 }
 
-Future<Void> S3BlobStoreEndpoint::listObjectsStream(std::string const& bucket, PromiseStream<ListResult> results,
-                                                    Optional<std::string> prefix, Optional<char> delimiter,
+Future<Void> S3BlobStoreEndpoint::listObjectsStream(std::string const& bucket,
+                                                    PromiseStream<ListResult> results,
+                                                    Optional<std::string> prefix,
+                                                    Optional<char> delimiter,
                                                     int maxDepth,
                                                     std::function<bool(std::string const&)> recurseFilter) {
-	return listObjectsStream_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, results, prefix, delimiter,
-	                              maxDepth, recurseFilter);
+	return listObjectsStream_impl(
+	    Reference<S3BlobStoreEndpoint>::addRef(this), bucket, results, prefix, delimiter, maxDepth, recurseFilter);
 }
 
 ACTOR Future<S3BlobStoreEndpoint::ListResult> listObjects_impl(Reference<S3BlobStoreEndpoint> bstore,
-                                                               std::string bucket, Optional<std::string> prefix,
-                                                               Optional<char> delimiter, int maxDepth,
+                                                               std::string bucket,
+                                                               Optional<std::string> prefix,
+                                                               Optional<char> delimiter,
+                                                               int maxDepth,
                                                                std::function<bool(std::string const&)> recurseFilter) {
 	state S3BlobStoreEndpoint::ListResult results;
 	state PromiseStream<S3BlobStoreEndpoint::ListResult> resultStream;
@@ -898,24 +947,28 @@ ACTOR Future<S3BlobStoreEndpoint::ListResult> listObjects_impl(Reference<S3BlobS
 				when(wait(done)) { done = Never(); }
 
 				when(S3BlobStoreEndpoint::ListResult info = waitNext(resultStream.getFuture())) {
-					results.commonPrefixes.insert(results.commonPrefixes.end(), info.commonPrefixes.begin(),
-					                              info.commonPrefixes.end());
+					results.commonPrefixes.insert(
+					    results.commonPrefixes.end(), info.commonPrefixes.begin(), info.commonPrefixes.end());
 					results.objects.insert(results.objects.end(), info.objects.begin(), info.objects.end());
 				}
 			}
 		}
 	} catch (Error& e) {
-		if (e.code() != error_code_end_of_stream) throw;
+		if (e.code() != error_code_end_of_stream)
+			throw;
 	}
 
 	return results;
 }
 
 Future<S3BlobStoreEndpoint::ListResult> S3BlobStoreEndpoint::listObjects(
-    std::string const& bucket, Optional<std::string> prefix, Optional<char> delimiter, int maxDepth,
+    std::string const& bucket,
+    Optional<std::string> prefix,
+    Optional<char> delimiter,
+    int maxDepth,
     std::function<bool(std::string const&)> recurseFilter) {
-	return listObjects_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, prefix, delimiter, maxDepth,
-	                        recurseFilter);
+	return listObjects_impl(
+	    Reference<S3BlobStoreEndpoint>::addRef(this), bucket, prefix, delimiter, maxDepth, recurseFilter);
 }
 
 ACTOR Future<std::vector<std::string>> listBuckets_impl(Reference<S3BlobStoreEndpoint> bstore) {
@@ -991,19 +1044,21 @@ Future<std::vector<std::string>> S3BlobStoreEndpoint::listBuckets() {
 std::string S3BlobStoreEndpoint::hmac_sha1(std::string const& msg) {
 	std::string key = secret;
 
-    // Hash key to shorten it if it is longer than SHA1 block size
-	if(key.size() > 64) {
+	// Hash key to shorten it if it is longer than SHA1 block size
+	if (key.size() > 64) {
 		key = SHA1::from_string(key);
 	}
 
-    // Pad key up to SHA1 block size if needed
+	// Pad key up to SHA1 block size if needed
 	key.append(64 - key.size(), '\0');
 
 	std::string kipad = key;
-	for (int i = 0; i < 64; ++i) kipad[i] ^= '\x36';
+	for (int i = 0; i < 64; ++i)
+		kipad[i] ^= '\x36';
 
 	std::string kopad = key;
-	for (int i = 0; i < 64; ++i) kopad[i] ^= '\x5c';
+	for (int i = 0; i < 64; ++i)
+		kopad[i] ^= '\x5c';
 
 	kipad.append(msg);
 	std::string hkipad = SHA1::from_string(kipad);
@@ -1025,10 +1080,12 @@ void S3BlobStoreEndpoint::setAuthHeaders(std::string const& verb, std::string co
 	msg.append(verb);
 	msg.append("\n");
 	auto contentMD5 = headers.find("Content-MD5");
-	if (contentMD5 != headers.end()) msg.append(contentMD5->second);
+	if (contentMD5 != headers.end())
+		msg.append(contentMD5->second);
 	msg.append("\n");
 	auto contentType = headers.find("Content-Type");
-	if (contentType != headers.end()) msg.append(contentType->second);
+	if (contentType != headers.end())
+		msg.append(contentType->second);
 	msg.append("\n");
 	msg.append(date);
 	msg.append("\n");
@@ -1045,7 +1102,8 @@ void S3BlobStoreEndpoint::setAuthHeaders(std::string const& verb, std::string co
 	msg.append(resource);
 	if (verb == "GET") {
 		size_t q = resource.find_last_of('?');
-		if (q != resource.npos) msg.resize(msg.size() - (resource.size() - q));
+		if (q != resource.npos)
+			msg.resize(msg.size() - (resource.size() - q));
 	}
 
 	std::string sig = base64::encoder::from_string(hmac_sha1(msg));
@@ -1058,14 +1116,16 @@ void S3BlobStoreEndpoint::setAuthHeaders(std::string const& verb, std::string co
 	headers["Authorization"] = auth;
 }
 
-ACTOR Future<std::string> readEntireFile_impl(Reference<S3BlobStoreEndpoint> bstore, std::string bucket,
+ACTOR Future<std::string> readEntireFile_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                              std::string bucket,
                                               std::string object) {
 	wait(bstore->requestRateRead->getAllowance(1));
 
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
 	Reference<HTTP::Response> r = wait(bstore->doRequest("GET", resource, headers, nullptr, 0, { 200, 404 }));
-	if (r->code == 404) throw file_not_found();
+	if (r->code == 404)
+		throw file_not_found();
 	return r->content;
 }
 
@@ -1073,10 +1133,14 @@ Future<std::string> S3BlobStoreEndpoint::readEntireFile(std::string const& bucke
 	return readEntireFile_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object);
 }
 
-ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<S3BlobStoreEndpoint> bstore, std::string bucket,
-                                                  std::string object, UnsentPacketQueue* pContent, int contentLen,
+ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                                  std::string bucket,
+                                                  std::string object,
+                                                  UnsentPacketQueue* pContent,
+                                                  int contentLen,
                                                   std::string contentMD5) {
-	if (contentLen > bstore->knobs.multipart_max_part_size) throw file_too_large();
+	if (contentLen > bstore->knobs.multipart_max_part_size)
+		throw file_too_large();
 
 	wait(bstore->requestRateWrite->getAllowance(1));
 	wait(bstore->concurrentUploads.take());
@@ -1090,17 +1154,21 @@ ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<S3BlobStoreEndpoint>
 	    wait(bstore->doRequest("PUT", resource, headers, pContent, contentLen, { 200 }));
 
 	// For uploads, Blobstore returns an MD5 sum of uploaded content so check it.
-	if (!r->verifyMD5(false, contentMD5)) throw checksum_failed();
+	if (!r->verifyMD5(false, contentMD5))
+		throw checksum_failed();
 
 	return Void();
 }
 
-ACTOR Future<Void> writeEntireFile_impl(Reference<S3BlobStoreEndpoint> bstore, std::string bucket, std::string object,
+ACTOR Future<Void> writeEntireFile_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                        std::string bucket,
+                                        std::string object,
                                         std::string content) {
 	state UnsentPacketQueue packets;
 	PacketWriter pw(packets.getWriteBuffer(content.size()), nullptr, Unversioned());
 	pw.serializeBytes(content);
-	if (content.size() > bstore->knobs.multipart_max_part_size) throw file_too_large();
+	if (content.size() > bstore->knobs.multipart_max_part_size)
+		throw file_too_large();
 
 	// Yield because we may have just had to copy several MB's into packet buffer chain and next we have to calculate an
 	// MD5 sum of it.
@@ -1121,28 +1189,37 @@ ACTOR Future<Void> writeEntireFile_impl(Reference<S3BlobStoreEndpoint> bstore, s
 	return Void();
 }
 
-Future<Void> S3BlobStoreEndpoint::writeEntireFile(std::string const& bucket, std::string const& object,
+Future<Void> S3BlobStoreEndpoint::writeEntireFile(std::string const& bucket,
+                                                  std::string const& object,
                                                   std::string const& content) {
 	return writeEntireFile_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object, content);
 }
 
-Future<Void> S3BlobStoreEndpoint::writeEntireFileFromBuffer(std::string const& bucket, std::string const& object,
-                                                            UnsentPacketQueue* pContent, int contentLen,
+Future<Void> S3BlobStoreEndpoint::writeEntireFileFromBuffer(std::string const& bucket,
+                                                            std::string const& object,
+                                                            UnsentPacketQueue* pContent,
+                                                            int contentLen,
                                                             std::string const& contentMD5) {
-	return writeEntireFileFromBuffer_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object, pContent,
-	                                      contentLen, contentMD5);
+	return writeEntireFileFromBuffer_impl(
+	    Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object, pContent, contentLen, contentMD5);
 }
 
-ACTOR Future<int> readObject_impl(Reference<S3BlobStoreEndpoint> bstore, std::string bucket, std::string object,
-                                  void* data, int length, int64_t offset) {
-	if (length <= 0) return 0;
+ACTOR Future<int> readObject_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                  std::string bucket,
+                                  std::string object,
+                                  void* data,
+                                  int length,
+                                  int64_t offset) {
+	if (length <= 0)
+		return 0;
 	wait(bstore->requestRateRead->getAllowance(1));
 
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
 	headers["Range"] = format("bytes=%lld-%lld", offset, offset + length - 1);
 	Reference<HTTP::Response> r = wait(bstore->doRequest("GET", resource, headers, nullptr, 0, { 200, 206, 404 }));
-	if (r->code == 404) throw file_not_found();
+	if (r->code == 404)
+		throw file_not_found();
 	if (r->contentLen !=
 	    r->content.size()) // Double check that this wasn't a header-only response, probably unnecessary
 		throw io_error();
@@ -1151,12 +1228,16 @@ ACTOR Future<int> readObject_impl(Reference<S3BlobStoreEndpoint> bstore, std::st
 	return r->contentLen;
 }
 
-Future<int> S3BlobStoreEndpoint::readObject(std::string const& bucket, std::string const& object, void* data,
-                                            int length, int64_t offset) {
+Future<int> S3BlobStoreEndpoint::readObject(std::string const& bucket,
+                                            std::string const& object,
+                                            void* data,
+                                            int length,
+                                            int64_t offset) {
 	return readObject_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object, data, length, offset);
 }
 
-ACTOR static Future<std::string> beginMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bstore, std::string bucket,
+ACTOR static Future<std::string> beginMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                                           std::string bucket,
                                                            std::string object) {
 	wait(bstore->requestRateWrite->getAllowance(1));
 
@@ -1188,9 +1269,14 @@ Future<std::string> S3BlobStoreEndpoint::beginMultiPartUpload(std::string const&
 	return beginMultiPartUpload_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object);
 }
 
-ACTOR Future<std::string> uploadPart_impl(Reference<S3BlobStoreEndpoint> bstore, std::string bucket, std::string object,
-                                          std::string uploadID, unsigned int partNumber, UnsentPacketQueue* pContent,
-                                          int contentLen, std::string contentMD5) {
+ACTOR Future<std::string> uploadPart_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                          std::string bucket,
+                                          std::string object,
+                                          std::string uploadID,
+                                          unsigned int partNumber,
+                                          UnsentPacketQueue* pContent,
+                                          int contentLen,
+                                          std::string contentMD5) {
 	wait(bstore->requestRateWrite->getAllowance(1));
 	wait(bstore->concurrentUploads.take());
 	state FlowLock::Releaser uploadReleaser(bstore->concurrentUploads, 1);
@@ -1207,25 +1293,38 @@ ACTOR Future<std::string> uploadPart_impl(Reference<S3BlobStoreEndpoint> bstore,
 	// successful request.
 
 	// For uploads, Blobstore returns an MD5 sum of uploaded content so check it.
-	if (!r->verifyMD5(false, contentMD5)) throw checksum_failed();
+	if (!r->verifyMD5(false, contentMD5))
+		throw checksum_failed();
 
 	// No etag -> bad response.
 	std::string etag = r->headers["ETag"];
-	if (etag.empty()) throw http_bad_response();
+	if (etag.empty())
+		throw http_bad_response();
 
 	return etag;
 }
 
-Future<std::string> S3BlobStoreEndpoint::uploadPart(std::string const& bucket, std::string const& object,
-                                                    std::string const& uploadID, unsigned int partNumber,
-                                                    UnsentPacketQueue* pContent, int contentLen,
+Future<std::string> S3BlobStoreEndpoint::uploadPart(std::string const& bucket,
+                                                    std::string const& object,
+                                                    std::string const& uploadID,
+                                                    unsigned int partNumber,
+                                                    UnsentPacketQueue* pContent,
+                                                    int contentLen,
                                                     std::string const& contentMD5) {
-	return uploadPart_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object, uploadID, partNumber, pContent,
-	                       contentLen, contentMD5);
+	return uploadPart_impl(Reference<S3BlobStoreEndpoint>::addRef(this),
+	                       bucket,
+	                       object,
+	                       uploadID,
+	                       partNumber,
+	                       pContent,
+	                       contentLen,
+	                       contentMD5);
 }
 
-ACTOR Future<Void> finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bstore, std::string bucket,
-                                              std::string object, std::string uploadID,
+ACTOR Future<Void> finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                              std::string bucket,
+                                              std::string object,
+                                              std::string uploadID,
                                               S3BlobStoreEndpoint::MultiPartSetT parts) {
 	state UnsentPacketQueue part_list; // NonCopyable state var so must be declared at top of actor
 	wait(bstore->requestRateWrite->getAllowance(1));
@@ -1248,7 +1347,9 @@ ACTOR Future<Void> finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bst
 	return Void();
 }
 
-Future<Void> S3BlobStoreEndpoint::finishMultiPartUpload(std::string const& bucket, std::string const& object,
-                                                        std::string const& uploadID, MultiPartSetT const& parts) {
+Future<Void> S3BlobStoreEndpoint::finishMultiPartUpload(std::string const& bucket,
+                                                        std::string const& object,
+                                                        std::string const& uploadID,
+                                                        MultiPartSetT const& parts) {
 	return finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object, uploadID, parts);
 }
