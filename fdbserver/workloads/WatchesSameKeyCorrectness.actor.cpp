@@ -71,8 +71,10 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		state ReadYourWritesTransaction tr(cx);
 		loop {
 			try {
-				if (!val.present()) val = Value(std::to_string(getId()));
-				tr.set(key, val.get());
+				Value valS;
+				if (!val.present()) valS = Value(std::to_string(getId()));
+				else valS = val.get();
+				tr.set(key, valS);
 				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
