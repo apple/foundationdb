@@ -810,6 +810,7 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface>
 ACTOR Future<Void> checkConsistency(Database cx,
                                     std::vector<TesterInterface> testers,
                                     bool doQuiescentCheck,
+                                    bool doCacheCheck,
                                     double quiescentWaitTimeout,
                                     double softTimeLimit,
                                     double databasePingDelay,
@@ -825,8 +826,12 @@ ACTOR Future<Void> checkConsistency(Database cx,
 
 	Standalone<VectorRef<KeyValueRef>> options;
 	StringRef performQuiescent = LiteralStringRef("false");
+	StringRef performCacheCheck = LiteralStringRef("false");
 	if (doQuiescentCheck) {
 		performQuiescent = LiteralStringRef("true");
+	}
+	if (doCacheCheck) {
+		performCacheCheck = LiteralStringRef("true");
 	}
 	spec.title = LiteralStringRef("ConsistencyCheck");
 	spec.databasePingDelay = databasePingDelay;
@@ -834,6 +839,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	options.push_back_deep(options.arena(),
 	                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ConsistencyCheck")));
 	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("performQuiescentChecks"), performQuiescent));
+	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("performCacheCheck"), performCacheCheck));
 	options.push_back_deep(options.arena(),
 	                       KeyValueRef(LiteralStringRef("quiescentWaitTimeout"),
 	                                   ValueRef(options.arena(), format("%f", quiescentWaitTimeout))));
@@ -905,8 +911,15 @@ ACTOR Future<bool> runTest(Database cx,
 		if (spec.runConsistencyCheck) {
 			try {
 				bool quiescent = g_network->isSimulated() ? !BUGGIFY : spec.waitForQuiescenceEnd;
-				wait(timeoutError(
-				    checkConsistency(cx, testers, quiescent, 10000.0, 18000, spec.databasePingDelay, dbInfo), 20000.0));
+				wait(timeoutError(checkConsistency(cx,
+				                                   testers,
+				                                   quiescent,
+				                                   spec.runConsistencyCheckOnCache,
+				                                   10000.0,
+				                                   18000,
+				                                   spec.databasePingDelay,
+				                                   dbInfo),
+				                  20000.0));
 			} catch (Error& e) {
 				TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to perform consistency check");
 				ok = false;
@@ -1027,6 +1040,11 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  [](const std::string& value, TestSpec* spec) {
 	      spec->runConsistencyCheck = (value == "true");
 	      TraceEvent("TestParserTest").detail("ParsedRunConsistencyCheck", spec->runConsistencyCheck);
+	  } },
+	{ "runConsistencyCheckOnCache",
+	  [](const std::string& value, TestSpec* spec) {
+	      spec->runConsistencyCheckOnCache = (value == "true");
+	      TraceEvent("TestParserTest").detail("ParsedRunConsistencyCheckOnCache", spec->runConsistencyCheckOnCache);
 	  } },
 	{ "waitForQuiescence",
 	  [](const std::string& value, TestSpec* spec) {

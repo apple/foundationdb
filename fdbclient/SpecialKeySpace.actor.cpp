@@ -18,9 +18,12 @@
  * limitations under the License.
  */
 
-#include <boost/algorithm/string.hpp>
+#include "boost/lexical_cast.hpp"
+#include "boost/algorithm/string.hpp"
 
+#include "fdbclient/Knobs.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
+#include "flow/Arena.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/StatusClient.h"
@@ -29,6 +32,10 @@
 namespace {
 const std::string kTracingTransactionIdKey = "transaction_id";
 const std::string kTracingTokenKey = "token";
+// Max version we can set for minRequiredCommitVersionKey,
+// making sure the cluster can still be alive for 1000 years after the recovery
+const Version maxAllowedVerion =
+    std::numeric_limits<int64_t>::max() - 1 - CLIENT_KNOBS->VERSIONS_PER_SECOND * 3600 * 24 * 365 * 1000;
 
 static bool isAlphaNumeric(const std::string& key) {
 	// [A-Za-z0-9_]+
@@ -74,7 +81,13 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "coordinators",
 	  KeyRangeRef(LiteralStringRef("coordinators/"), LiteralStringRef("coordinators0"))
-	      .withPrefix(moduleToBoundary[MODULE::CONFIGURATION].begin) }
+	      .withPrefix(moduleToBoundary[MODULE::CONFIGURATION].begin) },
+	{ "advanceversion",
+	  singleKeyRange(LiteralStringRef("min_required_commit_version"))
+	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "profile",
+	  KeyRangeRef(LiteralStringRef("profiling/"), LiteralStringRef("profiling0"))
+	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
 };
 
 std::set<std::string> SpecialKeySpace::options = { "excluded/force", "failed/force" };
@@ -1608,4 +1621,176 @@ Future<Standalone<RangeResultRef>> CoordinatorsAutoImpl::getRange(ReadYourWrites
 	// single key range, the queried range should always be the same as the underlying range
 	ASSERT(kr == getKeyRange());
 	return CoordinatorsAutoImplActor(ryw, kr);
+}
+
+ACTOR static Future<Standalone<RangeResultRef>> getMinCommitVersionActor(ReadYourWritesTransaction* ryw,
+                                                                         KeyRangeRef kr) {
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+	Optional<Value> val = wait(ryw->getTransaction().get(minRequiredCommitVersionKey));
+	Standalone<RangeResultRef> result;
+	if (val.present()) {
+		Version minRequiredCommitVersion = BinaryReader::fromStringRef<Version>(val.get(), Unversioned());
+		ValueRef version(result.arena(), boost::lexical_cast<std::string>(minRequiredCommitVersion));
+		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, version));
+	}
+	return result;
+}
+
+AdvanceVersionImpl::AdvanceVersionImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<Standalone<RangeResultRef>> AdvanceVersionImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+	// single key range, the queried range should always be the same as the underlying range
+	ASSERT(kr == getKeyRange());
+	auto entry = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("advanceversion")];
+	if (!ryw->readYourWritesDisabled() && entry.first) {
+		// ryw enabled and we have written to the special key
+		Standalone<RangeResultRef> result;
+		if (entry.second.present()) {
+			result.push_back_deep(result.arena(), KeyValueRef(kr.begin, entry.second.get()));
+		}
+		return result;
+	} else {
+		return getMinCommitVersionActor(ryw, kr);
+	}
+}
+
+ACTOR static Future<Optional<std::string>> advanceVersionCommitActor(ReadYourWritesTransaction* ryw, Version v) {
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+	TraceEvent(SevDebug, "AdvanceVersion").detail("MaxAllowedVersion", maxAllowedVerion);
+	if (v > maxAllowedVerion) {
+		return ManagementAPIError::toJsonString(
+		    false,
+		    "advanceversion",
+		    "The given version is larger than the maximum allowed value(2**63-1-version_per_second*3600*24*365*1000)");
+	}
+	Version rv = wait(ryw->getTransaction().getReadVersion());
+	if (rv <= v) {
+		ryw->getTransaction().set(minRequiredCommitVersionKey, BinaryWriter::toValue(v + 1, Unversioned()));
+	} else {
+		return ManagementAPIError::toJsonString(
+		    false, "advanceversion", "Current read version is larger than the given version");
+	}
+	return Optional<std::string>();
+}
+
+Future<Optional<std::string>> AdvanceVersionImpl::commit(ReadYourWritesTransaction* ryw) {
+	auto minCommitVersion =
+	    ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("advanceversion")].second;
+	if (minCommitVersion.present()) {
+		try {
+			// Version is int64_t
+			Version v = boost::lexical_cast<int64_t>(minCommitVersion.get().toString());
+			return advanceVersionCommitActor(ryw, v);
+		} catch (boost::bad_lexical_cast& e) {
+			return Optional<std::string>(ManagementAPIError::toJsonString(
+			    false, "advanceversion", "Invalid version(int64_t) argument: " + minCommitVersion.get().toString()));
+		}
+	} else {
+		ryw->getTransaction().clear(minRequiredCommitVersionKey);
+	}
+	return Optional<std::string>();
+}
+
+ClientProfilingImpl::ClientProfilingImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+ACTOR static Future<Standalone<RangeResultRef>> ClientProfilingGetRangeActor(ReadYourWritesTransaction* ryw,
+                                                                             KeyRef prefix,
+                                                                             KeyRangeRef kr) {
+	state Standalone<RangeResultRef> result;
+	// client_txn_sample_rate
+	state Key sampleRateKey = LiteralStringRef("client_txn_sample_rate").withPrefix(prefix);
+	if (kr.contains(sampleRateKey)) {
+		auto entry = ryw->getSpecialKeySpaceWriteMap()[sampleRateKey];
+		if (!ryw->readYourWritesDisabled() && entry.first) {
+			ASSERT(entry.second.present()); // clear is forbidden
+			result.push_back_deep(result.arena(), KeyValueRef(sampleRateKey, entry.second.get()));
+		} else {
+			Optional<Value> f = wait(ryw->getTransaction().get(fdbClientInfoTxnSampleRate));
+			std::string sampleRateStr = "default";
+			if (f.present()) {
+				const double sampleRateDbl = BinaryReader::fromStringRef<double>(f.get(), Unversioned());
+				if (!std::isinf(sampleRateDbl)) {
+					sampleRateStr = boost::lexical_cast<std::string>(sampleRateDbl);
+				}
+			}
+			result.push_back_deep(result.arena(), KeyValueRef(sampleRateKey, Value(sampleRateStr)));
+		}
+	}
+	// client_txn_size_limit
+	state Key txnSizeLimitKey = LiteralStringRef("client_txn_size_limit").withPrefix(prefix);
+	if (kr.contains(txnSizeLimitKey)) {
+		auto entry = ryw->getSpecialKeySpaceWriteMap()[txnSizeLimitKey];
+		if (!ryw->readYourWritesDisabled() && entry.first) {
+			ASSERT(entry.second.present()); // clear is forbidden
+			result.push_back_deep(result.arena(), KeyValueRef(txnSizeLimitKey, entry.second.get()));
+		} else {
+			Optional<Value> f = wait(ryw->getTransaction().get(fdbClientInfoTxnSizeLimit));
+			std::string sizeLimitStr = "default";
+			if (f.present()) {
+				const int64_t sizeLimit = BinaryReader::fromStringRef<int64_t>(f.get(), Unversioned());
+				if (sizeLimit != -1) {
+					sizeLimitStr = boost::lexical_cast<std::string>(sizeLimit);
+				}
+			}
+			result.push_back_deep(result.arena(), KeyValueRef(txnSizeLimitKey, Value(sizeLimitStr)));
+		}
+	}
+	return result;
+}
+
+Future<Standalone<RangeResultRef>> ClientProfilingImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+	return ClientProfilingGetRangeActor(ryw, getKeyRange().begin, kr);
+}
+
+Future<Optional<std::string>> ClientProfilingImpl::commit(ReadYourWritesTransaction* ryw) {
+	// client_txn_sample_rate
+	Key sampleRateKey = LiteralStringRef("client_txn_sample_rate").withPrefix(getKeyRange().begin);
+	auto rateEntry = ryw->getSpecialKeySpaceWriteMap()[sampleRateKey];
+
+	if (rateEntry.first && rateEntry.second.present()) {
+		std::string sampleRateStr = rateEntry.second.get().toString();
+		double sampleRate;
+		if (sampleRateStr == "default")
+			sampleRate = std::numeric_limits<double>::infinity();
+		else {
+			try {
+				sampleRate = boost::lexical_cast<double>(sampleRateStr);
+			} catch (boost::bad_lexical_cast& e) {
+				return Optional<std::string>(ManagementAPIError::toJsonString(
+				    false, "profile", "Invalid transaction sample rate(double): " + sampleRateStr));
+			}
+		}
+		ryw->getTransaction().set(fdbClientInfoTxnSampleRate, BinaryWriter::toValue(sampleRate, Unversioned()));
+	}
+	// client_txn_size_limit
+	Key txnSizeLimitKey = LiteralStringRef("client_txn_size_limit").withPrefix(getKeyRange().begin);
+	auto sizeLimitEntry = ryw->getSpecialKeySpaceWriteMap()[txnSizeLimitKey];
+	if (sizeLimitEntry.first && sizeLimitEntry.second.present()) {
+		std::string sizeLimitStr = sizeLimitEntry.second.get().toString();
+		int64_t sizeLimit;
+		if (sizeLimitStr == "default")
+			sizeLimit = -1;
+		else {
+			try {
+				sizeLimit = boost::lexical_cast<int64_t>(sizeLimitStr);
+			} catch (boost::bad_lexical_cast& e) {
+				return Optional<std::string>(ManagementAPIError::toJsonString(
+				    false, "profile", "Invalid transaction size limit(int64_t): " + sizeLimitStr));
+			}
+		}
+		ryw->getTransaction().set(fdbClientInfoTxnSizeLimit, BinaryWriter::toValue(sizeLimit, Unversioned()));
+	}
+	return Optional<std::string>();
+}
+
+void ClientProfilingImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
+	return throwSpecialKeyApiFailure(
+	    ryw, "profile", "Clear range is forbidden for profile client. You can set it to default to disable profiling.");
+}
+
+void ClientProfilingImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
+	return throwSpecialKeyApiFailure(
+	    ryw,
+	    "profile",
+	    "Clear operation is forbidden for profile client. You can set it to default to disable profiling.");
 }
