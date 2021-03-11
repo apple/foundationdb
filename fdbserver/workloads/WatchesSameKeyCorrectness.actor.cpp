@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <string>
+
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -29,6 +31,7 @@
 struct WatchesSameKeyWorkload : TestWorkload {
 	int numWatches;
 	std::vector<Future<Void>> cases;
+	static std::atomic<int32_t> uid;
 
 	WatchesSameKeyWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx)
@@ -60,26 +63,18 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		return ok;
 	}
 
+	static int getId() {
+		return uid++;
+	}
+
 	ACTOR static Future<Void> setKeyRandomValue(Database cx, Key key, Optional<Value> val) {
 		state ReadYourWritesTransaction tr(cx);
 		loop {
 			try {
-				if (!val.present()) val = Value(deterministicRandom()->randomUniqueID().toString());
+				if (!val.present()) val = Value(std::to_string(getId()));
 				tr.set(key, val.get());
 				wait(tr.commit());
 				return Void();
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-
-	ACTOR static Future<Optional<Value>> getValue(Database cx, Key key) {
-		state ReadYourWritesTransaction tr(cx);
-		loop {
-			try {
-				Optional<Value> val = wait(tr.get(key));
-				return val;
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
@@ -110,6 +105,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				state std::vector<Future<Void>> watchFutures;
 				state int i;
 
+				tr.set(key, Value(std::to_string(getId())));
 				for ( i = 0; i < self->numWatches; i++ ) {
 					watchFutures.push_back(tr.watch(key));
 				}
@@ -138,8 +134,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				state Future<Void> watch1 = wait(watchKey(cx, key));
 				state int i;
 				
-				state Value val = Value( deterministicRandom()->randomUniqueID().toString() );
-				tr.set(key, val);
+				tr.set(key, Value( std::to_string(getId()) ));
 				for ( i = 0; i < self->numWatches; i++ ) {
 					watchFutures.push_back(tr.watch(key));
 				}
@@ -162,14 +157,16 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		 * 	- i.e ABA but when the storage server responds the future count == 1 so we do nothing (no refire)
 		 * */
 		state ReadYourWritesTransaction tr(cx);
+		state ReadYourWritesTransaction tr2(cx);
 		loop {
 			try {
-				wait ( setKeyRandomValue(cx, key, Optional<Value>()) );
-				state Optional<Value> val = wait( getValue(cx, key) );
-				state Future<Void> watch1 = wait(watchKey(cx, key));
+				state Value val = std::to_string(getId());
+				tr2.set(key, val);
+				state Future<Void> watch1 = tr2.watch(key);
+				wait( tr2.commit() );
 				wait ( setKeyRandomValue(cx, key, Optional<Value>()) );
 				
-				tr.set(key, val.get());
+				tr.set(key, val);
 				state Future<Void> watch2 = tr.watch(key);
 				wait( tr.commit() );
 				
@@ -177,7 +174,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				watch2.cancel();
 				return Void();
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				wait(tr.onError(e) && tr2.onError(e));
 			}
 		}
 	}
@@ -188,14 +185,15 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		 * 	- i.e ABA but when the storage server responds the future count > 1 so we refire request to SS
 		 * */
 		state ReadYourWritesTransaction tr(cx);
+		state ReadYourWritesTransaction tr2(cx);
 		loop {
 			try {
+				state Value val = std::to_string(getId());
+				tr2.set(key, val);
+				state Future<Void> watch1 = tr2.watch(key);
+				wait( tr2.commit() );
 				wait ( setKeyRandomValue(cx, key, Optional<Value>()) );
-				state Optional<Value> val = wait( getValue(cx, key) );
-				state Future<Void> watch1 = wait(watchKey(cx, key));
-				wait ( setKeyRandomValue(cx, key, Optional<Value>()) );
-				
-				tr.set(key, val.get());
+				tr.set(key, val);
 				state Future<Void> watch2 = tr.watch(key);
 				wait( tr.commit() );
 
@@ -204,7 +202,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				wait( watch2 );
 				return Void();
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				wait(tr.onError(e) && tr2.onError(e));
 			}
 		}
 	}
@@ -218,12 +216,10 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		state ReadYourWritesTransaction tr2(cx);
 		loop {
 			try {
-				state Value val1 = Value( deterministicRandom()->randomUniqueID().toString() );
-				state Value val2 = Value( deterministicRandom()->randomUniqueID().toString() );
 				tr1.setOption( FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE );
 				tr2.setOption( FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE );
-				tr1.set(key, val1);
-				tr2.set(key, val2);
+				tr1.set(key, Value( std::to_string(getId()) ));
+				tr2.set(key, Value( std::to_string(getId()) ));
 				state Future<Void> watch1 = tr1.watch(key);
 				state Future<Void> watch2 = tr2.watch(key);
 				wait( tr1.commit() && tr2.commit() );
@@ -241,5 +237,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 
 	void getMetrics(vector<PerfMetric>& m) override {}
 };
+
+std::atomic<int32_t> WatchesSameKeyWorkload::uid = 0;
 
 WorkloadFactory<WatchesSameKeyWorkload> WatchesSameKeyWorkloadFactory("WatchesSameKeyCorrectness");
