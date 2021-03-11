@@ -1155,7 +1155,6 @@ void Net2::run() {
 			++countTasks;
 			currentTaskID = ready.top().taskID;
 			priorityMetric = static_cast<int64_t>(currentTaskID);
-			minTaskID = std::min(minTaskID, currentTaskID);
 			Task* task = ready.top().task;
 			ready.pop();
 
@@ -1166,6 +1165,8 @@ void Net2::run() {
 			} catch (...) {
 				TraceEvent(SevError, "TaskError").error(unknown_error());
 			}
+
+			minTaskID = std::min(minTaskID, currentTaskID);
 
 			if (check_yield(TaskPriority::Max, true)) {
 				FDB_TRACE_PROBE(run_loop_yield);
