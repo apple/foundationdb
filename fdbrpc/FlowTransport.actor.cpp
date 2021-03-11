@@ -734,10 +734,15 @@ ACTOR static void deliver(TransportData* self,
                           bool inReadSocket) {
 	TaskPriority priority = self->endpoints.getPriority(destination.token);
 	if (TaskPriority::UnknownEndpoint == priority) {
+		uint32_t fileIdentifier = -1;
+		if (FLOW_KNOBS->USE_OBJECT_SERIALIZER) {
+			fileIdentifier = read_file_identifier(reinterpret_cast<const uint8_t*>(reader.peekBytes(8)));
+		}
 		TraceEvent("GotUnknownEndpoint")
 		    .suppressFor(1.0)
 		    .detail("EndpointToken", destination.token.shortString())
-		    .detail("PeerAddress", peerAddress.present() ? peerAddress.get().toString() : std::string("Local"));
+		    .detail("PeerAddress", peerAddress.present() ? peerAddress.get().toString() : std::string("Local"))
+		    .detail("FileIdentifier", fileIdentifier);
 	}
 	if (priority < TaskPriority::ReadSocket || !inReadSocket) {
 		wait(delay(0, priority));
