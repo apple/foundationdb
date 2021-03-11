@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/GlobalConfig.actor.h"
+#include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tuple.h"
 #include "flow/flow.h"
@@ -47,6 +48,10 @@ GlobalConfig& GlobalConfig::globalConfig() {
 	void* res = g_network->global(INetwork::enGlobalConfig);
 	ASSERT(res);
 	return *reinterpret_cast<GlobalConfig*>(res);
+}
+
+Key GlobalConfig::prefixedKey(KeyRef key) {
+	return key.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG).begin);
 }
 
 const ConfigValue GlobalConfig::get(KeyRef name) {

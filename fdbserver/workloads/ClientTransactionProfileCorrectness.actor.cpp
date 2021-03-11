@@ -275,8 +275,8 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 							tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 							Tuple rate = Tuple().appendDouble(sampleProbability);
 							Tuple size = Tuple().append(sizeLimit);
-							tr->set(fdbClientInfoTxnSampleRate.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG).begin), rate.pack());
-							tr->set(fdbClientInfoTxnSizeLimit.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG).begin), size.pack());
+							tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate), rate.pack());
+							tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit), size.pack());
 							return Void();
 						}
 					 ));

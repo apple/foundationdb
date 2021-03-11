@@ -3891,8 +3891,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							Tuple rate = Tuple().appendDouble(sampleRate);
 							Tuple size = Tuple().append(sizeLimit);
 							tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-							tr->set(fdbClientInfoTxnSampleRate.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG).begin), rate.pack());
-							tr->set(fdbClientInfoTxnSizeLimit.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG).begin), size.pack());
+							tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate), rate.pack());
+							tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit), size.pack());
 							if (!intrans) {
 								wait(commitTransaction(tr));
 							}

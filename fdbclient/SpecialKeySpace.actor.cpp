@@ -1434,6 +1434,7 @@ ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* gl
 		//   clear_range(\xff/globalConfig/h, \xff/globalConfig/h/1000) results
 		//   in zero key-value pairs being deleted (999 is lexicographically
 		//   larger than 1000, and the range is exclusive).
+		// Delete the oldest key(s) in the history to make room for new data.
 		for (int i = 0; i < keys.size() - (kGlobalConfigMaxHistorySize - 1); ++i) {
 			tr.clear(keys[i]);
 		}

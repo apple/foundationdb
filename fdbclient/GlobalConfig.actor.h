@@ -60,6 +60,10 @@ public:
 	static void create(DatabaseContext* cx, Reference<AsyncVar<ClientDBInfo>> dbInfo);
 	static GlobalConfig& globalConfig();
 
+	// Use this function to turn a global configuration key defined above into
+	// the full path needed to set the value in the database.
+	static Key prefixedKey(KeyRef key);
+
 	// Get a value from the framework. Values are returned in a ConfigValue
 	// struct which also contains a reference to the arena containing the
 	// memory for the object. As long as the caller keeps a reference to the
