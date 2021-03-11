@@ -30,6 +30,9 @@
 #include "flow/flow.h"
 #include "flow/Knobs.h"
 
+// TODO REMOVE?
+#include <cinttypes>
+
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
@@ -120,6 +123,7 @@ bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, boo
 	}
 
 	if(atMostOnce && maybeDelivered) {
+		printf("checkAndProcessError: err_code=%d\n", errCode);
 		throw request_maybe_delivered();
 	}
 
@@ -173,9 +177,17 @@ Future<Optional<REPLY_TYPE(Request)>> makeRequest(RequestStream<Request> const* 
 		// Optional<Endpoint> tssEndpoint = (deterministicRandom()->randomInt(0, 10) == 1) ? stream->getEndpoint() : Optional<Endpoint>();
 		
 		if (tssEndpoint.present()) {
+			// TODO REMOVE log
+			printf("duplicating ss request %" PRIu64 " to tss %" PRIu64 "\n", stream->getEndpoint().token.first(), tssEndpoint.get().token.first());
+
+			// copy using copy constructor and make new promise. TODO is there a better way to make a new promise of unknown type than allocating a whole new Request object?
+			Request tssCopy = request;
+			Request x; // make a new one to make a new promise
+			tssCopy.reply = x.reply;
+
 			//FIXME: optimize to avoid creating new netNotifiedQueue for each message
 			RequestStream<Request> tssRequestStream(tssEndpoint.get());
-			Future<ErrorOr<REPLY_TYPE(Request)>> fTssResult = tssRequestStream.tryGetReply(request);
+			Future<ErrorOr<REPLY_TYPE(Request)>> fTssResult = tssRequestStream.tryGetReply(tssCopy);
 			model->addActor.send(tssComparison(request, fResult, fTssResult));
 		}
 	}
@@ -592,6 +604,8 @@ Future< REPLY_TYPE(Request) > basicLoadBalance(
 			}
 
 			if(atMostOnce) {
+				// TODO REMOVE
+				printf("basic load balance ERROR!\n");
 				throw request_maybe_delivered();
 			}
 

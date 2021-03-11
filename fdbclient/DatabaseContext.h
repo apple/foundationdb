@@ -192,6 +192,7 @@ public:
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
 	AsyncTrigger masterProxiesChangeTrigger;
 	Future<Void> monitorMasterProxiesInfoChange;
+	Future<Void> monitorTssInfoChange;
 	Reference<ProxyInfo> masterProxies;
 	Reference<ProxyInfo> grvProxies;
 	bool provisional;

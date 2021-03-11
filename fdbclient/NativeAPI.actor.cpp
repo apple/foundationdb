@@ -469,21 +469,45 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 	}
 }
 
-// TODO should maybe rename this now
 ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDBInfo>> clientDBInfo, AsyncTrigger *triggerVar) {
 	state vector< MasterProxyInterface > curProxies;
-	state vector<std::pair< UID, StorageServerInterface>> curTssMapping;
 	curProxies = clientDBInfo->get().proxies;
-	curTssMapping = clientDBInfo->get().tssMapping;
 
 	loop{
 		wait(clientDBInfo->onChange());
-		if (clientDBInfo->get().proxies != curProxies || clientDBInfo->get().tssMapping != curTssMapping) {
-			// TODO REMOVE print
-			printf("proxies and/or tss changed\n");
+		if (clientDBInfo->get().proxies != curProxies) {
 			curProxies = clientDBInfo->get().proxies;
-			curTssMapping = clientDBInfo->get().tssMapping;
 			triggerVar->trigger();
+		}
+	}
+}
+
+// updates tss mapping when set of tss servers changes
+ACTOR static Future<Void> monitorTssChange(DatabaseContext *cx) {
+	state vector<std::pair< UID, StorageServerInterface>> curTssMapping;
+	curTssMapping = cx->clientInfo->get().tssMapping;
+
+	loop{
+		wait(cx->clientInfo->onChange());
+		if (cx->clientInfo->get().tssMapping != curTssMapping) {
+			ClientDBInfo clientInfo = cx->clientInfo->get();
+			curTssMapping = clientInfo.tssMapping;
+			
+			// TODO REMOVE print
+			printf("gonna do tss stuff with %d tss's\n", curTssMapping.size());
+
+			if ( curTssMapping.size() ) {
+				for(auto& it : curTssMapping) {
+					if ( cx->server_interf.count(it.first) ) {
+						cx->addTssMapping(cx->server_interf[it.first]->interf, it.second);
+					} else {
+						// TODO REMOVE case and print
+						printf("tss server %s not in server_interf, skipping for now\n", it.first.toString().c_str());
+					}
+				}
+			}
+			
+			cx->queueModel.removeOldTssEndpoints(clientInfo.id);
 		}
 	}
 }
@@ -724,6 +748,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
 
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
+	monitorTssInfoChange = monitorTssChange(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	if (apiVersionAtLeast(630)) {
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
@@ -825,6 +850,7 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, F
 
 DatabaseContext::~DatabaseContext() {
 	monitorMasterProxiesInfoChange.cancel();
+	monitorTssInfoChange.cancel();
 	for(auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
 	ASSERT_ABORT( server_interf.empty() );
@@ -1350,24 +1376,6 @@ Reference<ProxyInfo> DatabaseContext::getMasterProxies(bool useProvisionalProxie
 			grvProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, true ) );
 			provisional = clientInfo->get().proxies[0].provisional;
 		}
-
-		printf("gonna do tss proxy stuff with %d tss's\n", clientInfo->get().tssMapping.size());
-
-		if ( clientInfo->get().tssMapping.size() ) {
-			for(auto& it : clientInfo->get().tssMapping) {
-				if(server_interf.count(it.first)) {
-					addTssMapping(server_interf[it.first]->interf, it.second);
-				} else {
-					// TODO REMOVE case and print
-					printf("tss server %s not in server_interf, skipping for now\n", it.first.toString().c_str());
-				}
-			}
-		}
-		
-		queueModel.removeOldTssEndpoints(clientInfo->get().id);
-		// TODO REMOVE print
-		printf("removed old tss mapping for %s\n", clientInfo->get().id.toString().c_str());
-	
 	}
 	if(provisional && !useProvisionalProxies) {
 		return Reference<ProxyInfo>();
@@ -3133,6 +3141,8 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		choose {
 			when ( wait( cx->onMasterProxiesChanged() ) ) {
 				reply.cancel();
+				// TODO REMOVE
+				printf("tryCommit proxies changed ERROR!\n");
 				throw request_maybe_delivered();
 			}
 			when (CommitID ci = wait( reply )) {

@@ -200,7 +200,10 @@ Future<ErrorOr<X>> waitValueOrSignal( Future<X> value, Future<Void> signal, Endp
 		try {
 			choose {
 				when(X x = wait(value)) { return x; }
-				when(wait(signal)) { return ErrorOr<X>(request_maybe_delivered()); }
+				when(wait(signal)) {
+					printf("waitValueOrSignal signalled, returning requestMaybeDelivered\n");
+					return ErrorOr<X>(request_maybe_delivered());
+				}
 			}
 		} catch (Error& e) {
 			if (signal.isError()) {
@@ -212,9 +215,12 @@ Future<ErrorOr<X>> waitValueOrSignal( Future<X> value, Future<Void> signal, Endp
 				throw e;
 
 			// broken_promise error normally means an endpoint failure, which in tryGetReply has the same semantics as receiving the failure signal
-			if (e.code() != error_code_broken_promise || signal.isError())
+			if (e.code() != error_code_broken_promise || signal.isError()) {
+				printf("waitValueORSignal broken promise: %d\n", e.code());
 				return ErrorOr<X>(e);
+			}
 
+			printf("other failure in waitValueORSignal %d\n", e.code());
 			IFailureMonitor::failureMonitor().endpointNotFound( endpoint );
 			value = Never();
 		}

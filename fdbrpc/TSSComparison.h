@@ -28,8 +28,8 @@
 // TODO is there a way to do this static method without a class?
 class TSSComparison {
     public:
-        template<class T>
-        static bool tssCompare(T src, T tss);
+        template<class Resp>
+        static bool tssCompare(Resp src, Resp tss);
 };
 
 #endif

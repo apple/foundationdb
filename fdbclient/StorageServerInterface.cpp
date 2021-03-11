@@ -20,7 +20,7 @@
 
 #include "fdbclient/StorageServerInterface.h"
 
-// Includes template specializations for all tss comparisons on storage server types.
+// Includes template specializations for all tss operations on storage server types.
 // New StorageServerInterface reply types must be added here or it won't compile.
 
 template<>
@@ -30,7 +30,7 @@ bool TSSComparison::tssCompare(GetValueReply src, GetValueReply tss) {
 		printf("GetValue mismatch: src=%s, tss=%s\n", src.value.present() ? src.value.get().toString().c_str() : "missing", tss.value.present() ? tss.value.get().toString().c_str() : "missing");
 		return false;
 	}
-    printf("tss GetValueReply matched!\n");
+    printf("tss GetValueReply matched! src=%s, tss=%s\n", src.value.present() ? src.value.get().toString().c_str() : "missing", tss.value.present() ? tss.value.get().toString().c_str() : "missing");
 	return true;
 }
 
@@ -52,7 +52,7 @@ bool TSSComparison::tssCompare(GetKeyValuesReply src, GetKeyValuesReply tss) {
         printf("GetKeyValues mismatch\n");
 		return false;
 	}
-    printf("tss GetKeyValues matched!\n");
+    printf("tss GetKeyValues matched! %d=%d\n", src.data.size(), tss.data.size());
 	return true;
 }
 

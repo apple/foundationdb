@@ -3812,13 +3812,21 @@ ACTOR Future<Void> serveGetValueRequests( StorageServer* self, FutureStream<GetV
 	loop {
 		GetValueRequest req = waitNext(getValue);
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade before doing real work
-		if( req.debugID.present() )
-			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "storageServer.received"); //.detail("TaskID", g_network->getCurrentTask());
 
-		if (SHORT_CIRCUT_ACTUAL_STORAGE && normalKeys.contains(req.key))
+		if( req.debugID.present() ) {
+			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "storageServer.received"); //.detail("TaskID", g_network->getCurrentTask());
+		}
+
+		// TODO HACK, REMOVE
+		if (req.key.size() >= 3 && req.key[0] == 102 && req.key[1] == 111 && req.key[2] == 111 && deterministicRandom()->random01() < 0.05) {
+			printf("fuzzing foo request on storage server %s!!!\n", self->thisServerID.toString().c_str());
 			req.reply.send(GetValueReply());
-		else
-			self->actors.add(self->readGuard(req , getValueQ));
+		} else {
+			if (SHORT_CIRCUT_ACTUAL_STORAGE && normalKeys.contains(req.key))
+				req.reply.send(GetValueReply());
+			else
+				self->actors.add(self->readGuard(req , getValueQ));
+		}
 	}
 }
 

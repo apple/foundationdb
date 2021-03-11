@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
+
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/LoadBalance.h"
 
@@ -44,7 +46,7 @@ void QueueModel::endRequest( uint64_t id, double latency, double penalty, double
 		d.increaseBackoffTime = 0.0;
 	}
 
-	if(penalty > 0) {
+	if (penalty > 0) {
 		d.penalty = penalty;
 	}
 }

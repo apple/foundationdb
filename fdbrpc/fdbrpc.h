@@ -308,6 +308,7 @@ public:
 		if (queue->isRemoteEndpoint()) {
 			Future<Void> disc = makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint(taskID));
 			if (disc.isReady()) {
+				printf("got disconnect or failure 1 :O\n");
 				return ErrorOr<REPLY_TYPE(X)>(request_maybe_delivered());
 			}
 			Reference<Peer> peer = FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(taskID), true);
@@ -324,6 +325,7 @@ public:
 		if (queue->isRemoteEndpoint()) {
 			Future<Void> disc = makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
 			if (disc.isReady()) {
+				printf("got disconnect or failure 2 :O\n");
 				return ErrorOr<REPLY_TYPE(X)>(request_maybe_delivered());
 			}
 			Reference<Peer> peer = FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
