@@ -1998,8 +1998,7 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 		TEST(err.code() == error_code_commit_proxy_failed); // Master: terminated because of a commit proxy failure
 		TEST(err.code() == error_code_grv_proxy_failed); // Master: terminated because of a GRV proxy failure
 		TEST(err.code() == error_code_master_resolver_failed); // Master: terminated because of a resolver failure
-		TEST(err.code() ==
-		     error_code_master_backup_worker_failed); // Master: terminated because of a backup worker failure
+		TEST(err.code() == error_code_master_backup_worker_failed); // Master: terminated because of a backup worker failure
 
 		if (normalMasterErrors().count(err.code())) {
 			TraceEvent("MasterTerminated", mi.id()).error(err);
