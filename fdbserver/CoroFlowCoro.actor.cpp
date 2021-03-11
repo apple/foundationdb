@@ -202,7 +202,7 @@ public:
 	}
 
 	Future<Void> getError() const override { return pool->anyError.getResult(); }
-	void addThread(IThreadPoolReceiver* userData) override {
+	void addThread(IThreadPoolReceiver* userData, const char*) override {
 		checkError();
 
 		auto w = new Worker(pool.getPtr(), userData);

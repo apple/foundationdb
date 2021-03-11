@@ -20,6 +20,7 @@
 
 #ifndef FLOW_NET2FILESYSTEM_H
 #define FLOW_NET2FILESYSTEM_H
+#include <string>
 #pragma once
 
 #include "fdbrpc/IAsyncFile.h"
@@ -29,11 +30,13 @@ public:
 	// Opens a file for asynchronous I/O
 	Future<Reference<class IAsyncFile>> open(const std::string& filename, int64_t flags, int64_t mode) override;
 
-	// Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
+	// Deletes the given file. If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
 	Future<Void> deleteFile(const std::string& filename, bool mustBeDurable) override;
 
 	// Returns the time of the last modification of the file.
 	Future<std::time_t> lastWriteTime(const std::string& filename) override;
+
+	Future<Void> renameFile(std::string const& from, std::string const& to) override;
 
 	//void init();
 	static void stop();

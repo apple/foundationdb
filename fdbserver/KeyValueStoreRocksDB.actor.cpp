@@ -367,9 +367,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	{
 		writeThread = createGenericThreadPool();
 		readThreads = createGenericThreadPool();
-		writeThread->addThread(new Writer(db, id));
+		writeThread->addThread(new Writer(db, id), "fdb-rocksdb-wr");
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
-			readThreads->addThread(new Reader(db));
+			readThreads->addThread(new Reader(db), "fdb-rocksdb-re");
 		}
 	}
 

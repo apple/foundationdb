@@ -22,6 +22,8 @@
 #define FLOW_ITHREADPOOL_H
 #pragma once
 
+#include <string_view>
+
 #include "flow/flow.h"
 
 // The IThreadPool interface represents a thread pool suitable for doing blocking disk-intensive work
@@ -47,7 +49,7 @@ public:
 	virtual void init() = 0;
 };
 
-struct ThreadAction { 
+struct ThreadAction {
 	virtual void operator()(IThreadPoolReceiver*) = 0;		// self-destructs
 	virtual void cancel() = 0;
 	virtual double getTimeEstimate() const = 0; // for simulation
@@ -58,7 +60,7 @@ class IThreadPool {
 public:
 	virtual ~IThreadPool() {}
 	virtual Future<Void> getError() const = 0; // asynchronously throws an error if there is an internal error
-	virtual void addThread( IThreadPoolReceiver* userData ) = 0;
+	virtual void addThread(IThreadPoolReceiver* userData, const char* name = nullptr) = 0;
 	virtual void post( PThreadAction action ) = 0;
 	virtual Future<Void> stop(Error const& e = success()) = 0;
 	virtual bool isCoro() const { return false; }
@@ -112,7 +114,7 @@ public:
 	~DummyThreadPool() override {}
 	DummyThreadPool() : thread(nullptr) {}
 	Future<Void> getError() const override { return errors.getFuture(); }
-	void addThread(IThreadPoolReceiver* userData) override {
+	void addThread(IThreadPoolReceiver* userData, const char* name = nullptr) override {
 		ASSERT( !thread );
 		thread = userData;
 	}

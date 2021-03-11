@@ -397,7 +397,6 @@ private:
 	};
 
 	const Reference<DatabaseState> dbState;
-	const int threadIdx;
 	friend class MultiVersionTransaction;
 };
 
