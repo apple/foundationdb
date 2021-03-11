@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/Knobs.h"
 #include "flow/Util.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/SystemData.h"
@@ -1193,6 +1194,7 @@ ACTOR Future<Void> moveKeys(Database cx,
 void seedShardServers(Arena& arena, CommitTransactionRef& tr, vector<StorageServerInterface> servers) {
 	std::map<Optional<Value>, Tag> dcId_locality;
 	std::map<UID, Tag> server_tag;
+	std::vector<UID> serverSrcUID;
 	int8_t nextLocality = 0;
 	for (auto& s : servers) {
 		if (!dcId_locality.count(s.locality.dcId())) {
@@ -1202,6 +1204,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, vector<StorageServ
 		}
 		Tag& t = dcId_locality[s.locality.dcId()];
 		server_tag[s.id()] = Tag(t.locality, t.id);
+		serverSrcUID.push_back(s.id());
 		t.id++;
 	}
 	std::sort(servers.begin(), servers.end());
@@ -1219,11 +1222,13 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, vector<StorageServ
 	for (int i = 0; i < servers.size(); i++)
 		serverTags.push_back(server_tag[servers[i].id()]);
 
+	auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS ? keyServersValue(serverTags)
+	                                                    : keyServersValue(Standalone<RangeResultRef>(), serverSrcUID);
+
 	// We have to set this range in two blocks, because the master tracking of "keyServersLocations" depends on a change
 	// to a specific
 	//   key (keyServersKeyServersKey)
-	krmSetPreviouslyEmptyRange(
-	    tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), keyServersValue(serverTags), Value());
+	krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, Value());
 
 	for (int s = 0; s < servers.size(); s++)
 		krmSetPreviouslyEmptyRange(
