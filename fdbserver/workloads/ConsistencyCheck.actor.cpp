@@ -21,9 +21,6 @@
 #include <math.h>
 #include "boost/lexical_cast.hpp"
 
-#include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/SystemData.h"
-#include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Tracing.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -37,6 +34,7 @@
 #include "fdbserver/QuietDatabase.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 #include "flow/network.h"
 

@@ -7,7 +7,6 @@ testTitle = 'Cached'
 
 [[test]]
 testTitle = 'Cycle'
-runConsistencyCheckOnCache = true
 
     [[test.workload]]
     testName = 'Cycle'
