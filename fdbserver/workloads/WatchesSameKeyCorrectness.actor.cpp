@@ -19,6 +19,7 @@
  */
 
 #include <string>
+#include <atomic>
 
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/ReadYourWrites.h"
