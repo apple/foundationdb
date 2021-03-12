@@ -495,6 +495,9 @@ public:
 	virtual void stop() = 0;
 	// Terminate the program
 
+	virtual void signalStop(int signal) = 0;
+	// Terminate the program in a signal handler
+
 	virtual void addStopCallback(std::function<void()> fn) = 0;
 	// Calls `fn` when stop() is called.
 	// addStopCallback can be called more than once, and each added `fn` will be run once.

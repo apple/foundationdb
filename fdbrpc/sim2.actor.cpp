@@ -976,6 +976,7 @@ public:
 	bool checkRunnable() override { return net2->checkRunnable(); }
 
 	void stop() override { isStopped = true; }
+	virtual void signalStop(int signal) { stop(); }
 	void addStopCallback(std::function<void()> fn) override { stopCallbacks.emplace_back(std::move(fn)); }
 	bool isSimulated() const override { return true; }
 

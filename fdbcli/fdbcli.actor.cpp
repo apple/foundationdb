@@ -4809,9 +4809,10 @@ int main(int argc, char** argv) {
 	uint64_t memLimit = 8LL << 30;
 	setMemoryQuota(memLimit);
 
-	registerCrashHandler();
+	registerSignalHandler();
 
 #ifdef __unixish__
+	// Replaces SIGINT handler from registerSignalHandler
 	struct sigaction act;
 
 	// We don't want ctrl-c to quit
