@@ -1070,10 +1070,8 @@ static void scanPackets(TransportData* transport,
 		// we ignore packets to unknown endpoints if they're not going to a stream anyways, so we can just
 		// return here. The main place where this seems to happen is if a ReplyPromise is not waited on
 		// long enough.
-		// It would be slightly more elegant/readable to put this if-block into the deliver actor, but if
-		// we have many messages to UnknownEndpoint we want to optimize earlier. As deliver is an actor it
-		// will allocate some state on the heap and this prevents it from doing that.
-		if (priority != TaskPriority::UnknownEndpoint || (token.first() & TOKEN_STREAM_FLAG) == 0) {
+		// It would be slightly more elegant to put this if-block
+		if (priority != TaskPriority::UnknownEndpoint || (token.first() & TOKEN_STREAM_FLAG) != 0) {
 			deliver(transport, Endpoint({ peerAddress }, token), priority, std::move(reader), true);
 		}
 
