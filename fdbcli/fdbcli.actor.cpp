@@ -1100,9 +1100,9 @@ void printStatus(StatusObjectReader statusObj,
 					outputString += "\n  Regions: ";
 					regions = statusObjConfig["regions"].get_array();
 					bool isPrimary = false;
-					std::vector<std::string> regionSatelliteDCs;
 					std::string regionDC;
 					for (StatusObjectReader region : regions) {
+						std::vector<std::string> regionSatelliteDCs;
 						for (StatusObjectReader dc : region["datacenters"].get_array()) {
 							if (!dc.has("satellite")) {
 								regionDC = dc["id"].get_str();
