@@ -908,7 +908,7 @@ static void scanPackets(TransportData* transport,
 		// It would be slightly more elegant/readable to put this if-block into the deliver actor, but if
 		// we have many messages to UnknownEndpoint we want to optimize earlier. As deliver is an actor it
 		// will allocate some state on the heap and this prevents it from doing that.
-		if (priority != TaskPriority::UnknownEndpoint || (token.first() & TOKEN_STREAM_FLAG) == 0) {
+		if (priority != TaskPriority::UnknownEndpoint || (token.first() & TOKEN_STREAM_FLAG) != 0) {
 			deliver(transport, Endpoint({ peerAddress }, token), priority, std::move(reader), true);
 		}
 
@@ -1349,7 +1349,7 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 
 	ASSERT(copy.size() > 0);
 	TaskPriority priority = self->endpoints.getPriority(destination.token);
-	if (priority != TaskPriority::UnknownEndpoint || (destination.token.first() & TOKEN_STREAM_FLAG) == 0) {
+	if (priority != TaskPriority::UnknownEndpoint || (destination.token.first() & TOKEN_STREAM_FLAG) != 0) {
 		deliver(
 		    self, destination, priority, ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)), false);
 	}
