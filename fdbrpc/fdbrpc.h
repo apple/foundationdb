@@ -52,6 +52,7 @@ struct FlowReceiver : public NetworkMessageReceiver {
 	// If already a remote endpoint, returns that.  Otherwise makes this
 	//   a local endpoint and returns that.
 	const Endpoint& getEndpoint(TaskPriority taskID) {
+		ASSERT(taskID != TaskPriority::UnknownEndpoint);
 		if (!endpoint.isValid()) {
 			m_isLocalEndpoint = true;
 			FlowTransport::transport().addEndpoint(endpoint, this, taskID);
