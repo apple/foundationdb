@@ -81,12 +81,35 @@ static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/"
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
 
 // TODO make tss function here
-void DatabaseContext::addTssMapping(StorageServerInterface ssi, StorageServerInterface tssi) {
+void DatabaseContext::maybeAddTssMapping(StorageServerInterface const& ssi) {
+	// add tss mapping if server is new
+	// TODO can maps be serialized in ClientDBInfo? could change this to a map instead of a vector<pair<>>
+	for (auto& it : clientInfo->get().tssMapping) {
+		if (it.first == ssi.id()) {
+			addTssMapping(ssi, it.second);
+			break;
+		}
+	}
+}
+
+// calling getInterface potentially recursively is weird, but since this function is only called when an entry is created/changed, the recursive call should never recurse itself.
+void DatabaseContext::addTssMapping(StorageServerInterface const& ssi, StorageServerInterface const& tssi) {
+	// TODO get both with a getInterface call which will create the tss endpoint and/or update both endpoints if there was a change in endpoint tokens
+
+	// the order of these is important because it hits the "different token same locality" issue, so we always want to request the tss first so the ss request overrides it.
+	// TODO this shouldn't be necessary after i stop doing the same server hack
+	Reference<StorageServerInfo> tssInfo = StorageServerInfo::getInterface( this, tssi, clientLocality );
+	Reference<StorageServerInfo> ssInfo = StorageServerInfo::getInterface( this, ssi, clientLocality );
+	
+
+	// TODO I think copy to map should mean it doesn't get destroyed after, right?
+	tss_server_interf[tssi.id()] = tssInfo;
+
 	// TODO any other requests it makes sense to duplicate? watches?
 	// add each read data request interface to map (getValue, getKey, getKeyValues)
-	queueModel.updateTssEndpoint(ssi.getValue.getEndpoint().token.first(), clientInfo->get().id, tssi.getValue.getEndpoint());
-	queueModel.updateTssEndpoint(ssi.getKey.getEndpoint().token.first(), clientInfo->get().id, tssi.getKey.getEndpoint());
-	queueModel.updateTssEndpoint(ssi.getKeyValues.getEndpoint().token.first(), clientInfo->get().id, tssi.getKeyValues.getEndpoint());
+	queueModel.updateTssEndpoint(ssInfo->interf.getValue.getEndpoint().token.first(), clientInfo->get().id, tssInfo->interf.getValue.getEndpoint());
+	queueModel.updateTssEndpoint(ssInfo->interf.getKey.getEndpoint().token.first(), clientInfo->get().id, tssInfo->interf.getKey.getEndpoint());
+	queueModel.updateTssEndpoint(ssInfo->interf.getKeyValues.getEndpoint().token.first(), clientInfo->get().id, tssInfo->interf.getKeyValues.getEndpoint());
 
 	// TODO REMOVE
 	printf("added tss endpoints to queue for mapping %s=%s\n", ssi.id().toString().c_str(), tssi.id().toString().c_str());
@@ -96,15 +119,24 @@ Reference<StorageServerInfo> StorageServerInfo::getInterface( DatabaseContext *c
 	auto it = cx->server_interf.find( ssi.id() );
 	if( it != cx->server_interf.end() ) {
 		if(it->second->interf.getValue.getEndpoint().token != ssi.getValue.getEndpoint().token) {
+			// need to update tss mapping
+			// TODO uncomment this one i stop doing the same server to same server hack!
+			// printf("endpoint token changed for %s: token %s != %s, token.first %" PRIu64 " != %" PRIu64 "\n", ssi.id().toString().c_str(), it->second->interf.getValue.getEndpoint().token.toString().c_str(), ssi.getValue.getEndpoint().token.toString().c_str(), it->second->interf.getValue.getEndpoint().token.first(), ssi.getValue.getEndpoint().token.first());
+
 			if(it->second->interf.locality == ssi.locality) {
 				//FIXME: load balance holds pointers to individual members of the interface, and this assignment will swap out the object they are
 				//       pointing to. This is technically correct, but is very unnatural. We may want to refactor load balance to take an AsyncVar<Reference<Interface>>
 				//       so that it is notified when the interface changes.
 				it->second->interf = ssi;
+				// TODO re-enable this one i stop doing the same server to same server hack!!
+				// printf("maybeAddTss same locality %s\n", ssi.id().toString().c_str());
+				// cx->maybeAddTssMapping( ssi );
 			} else {
 				it->second->notifyContextDestroyed();
 				Reference<StorageServerInfo> loc( new StorageServerInfo(cx, ssi, locality) );
 				cx->server_interf[ ssi.id() ] = loc.getPtr();
+				printf("maybeAddTss different locality %s\n", ssi.id().toString().c_str());
+				cx->maybeAddTssMapping( ssi );
 				return loc;
 			}
 		}
@@ -112,25 +144,20 @@ Reference<StorageServerInfo> StorageServerInfo::getInterface( DatabaseContext *c
 		return Reference<StorageServerInfo>::addRef( it->second );
 	}
 
-	// add tss mapping if server is new
-	// TODO can maps be serialized in ClientDBInfo? could change this to a map instead of a vector<pair<>>
-	for (auto& it : cx->clientInfo->get().tssMapping) {
-		if (it.first == ssi.id()) {
-			cx->addTssMapping(ssi, it.second);
-			break;
-		}
-	}
-
 	Reference<StorageServerInfo> loc( new StorageServerInfo(cx, ssi, locality) );
 	cx->server_interf[ ssi.id() ] = loc.getPtr();
+	printf("maybeAddTss new ssi %s\n", ssi.id().toString().c_str());
+	cx->maybeAddTssMapping( ssi );
 	return loc;
 }
 
 void StorageServerInfo::notifyContextDestroyed() {
+	printf("Notify cx destroyed for  Storage Server Info %s\n", interf.id().toString().c_str());
 	cx = NULL;
 }
 
 StorageServerInfo::~StorageServerInfo() {
+	printf("Destroying Storage Server Info %s\n", interf.id().toString().c_str());
 	if( cx ) {
 		auto it = cx->server_interf.find( interf.id() );
 		if( it != cx->server_interf.end() )
@@ -490,20 +517,38 @@ ACTOR static Future<Void> monitorTssChange(DatabaseContext *cx) {
 	loop{
 		wait(cx->clientInfo->onChange());
 		if (cx->clientInfo->get().tssMapping != curTssMapping) {
+			// TODO maybe re-read this from system keys instead if it changes
 			ClientDBInfo clientInfo = cx->clientInfo->get();
 			curTssMapping = clientInfo.tssMapping;
 			
 			// TODO REMOVE print
 			printf("gonna do tss stuff with %d tss's\n", curTssMapping.size());
 
+			std::unordered_set<UID> seenTssIds;
+
 			if ( curTssMapping.size() ) {
 				for(auto& it : curTssMapping) {
+					seenTssIds.insert(it.second.id());
+
 					if ( cx->server_interf.count(it.first) ) {
+						// TODO REMOVE
+						printf("found new tss mapping %s -> %s\n", it.first.toString().c_str(), it.second.id().toString().c_str());
 						cx->addTssMapping(cx->server_interf[it.first]->interf, it.second);
 					} else {
 						// TODO REMOVE case and print
-						printf("tss server %s not in server_interf, skipping for now\n", it.first.toString().c_str());
+						printf("server %s with tss pair %s not in server_interf, skipping for now\n", it.first.toString().c_str(), it.second.id().toString().c_str());
 					}
+				}
+			}
+
+			// remove old TSS mappings
+			for(auto it = cx->tss_server_interf.begin(); it != cx->tss_server_interf.end();) {
+				if (seenTssIds.count(it->first)) {
+					it++;
+				} else {
+					// TODO REMOVE
+					printf("Erasing tss %s from tss_server_interf\n", it->first.toString().c_str());
+					it = cx->tss_server_interf.erase(it);
 				}
 			}
 			

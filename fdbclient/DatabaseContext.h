@@ -41,7 +41,7 @@ public:
 	virtual ~StorageServerInfo();
 private:
 	DatabaseContext *cx;
-	StorageServerInfo( DatabaseContext *cx, StorageServerInterface const& interf, LocalityData const& locality ) : cx(cx), ReferencedInterface<StorageServerInterface>(interf, locality) {}
+	StorageServerInfo( DatabaseContext *cx, StorageServerInterface const& interf, LocalityData const& locality ) : cx(cx), ReferencedInterface<StorageServerInterface>(interf, locality) {printf("Creating Storage Server Info %s\n", interf.id().toString().c_str());}
 };
 
 typedef MultiInterface<ReferencedInterface<StorageServerInterface>> LocationInfo;
@@ -238,6 +238,9 @@ public:
 
 	std::map< UID, StorageServerInfo* > server_interf;
 
+	// this is to hold references for the StorageServerInfo for all active TSS servers, to track the mapping and keep the endpoints open because they'll never be in LocationCache
+	std::map< UID, Reference<StorageServerInfo> > tss_server_interf;
+
 	UID dbId;
 	bool internal; // Only contexts created through the C client and fdbcli are non-internal
 
@@ -326,7 +329,8 @@ public:
 	static const std::vector<std::string> debugTransactionTagChoices; 
 
 	// TODO should this be private?
-	void addTssMapping(StorageServerInterface ssi, StorageServerInterface tssi);
+	void maybeAddTssMapping(StorageServerInterface const& ssi);
+	void addTssMapping(StorageServerInterface const& ssi, StorageServerInterface const& tssi);
 };
 
 #endif
