@@ -3,8 +3,8 @@ Put description here...
 # Code-Reviewer Section
 The general guidlines can be found [here](https://github.com/apple/foundationdb/wiki/FoundationDB-Commit-Process).
 
-Please check each of the following things and check *all* boxed before accepting a PR.
+Please check each of the following things and check *all* boxes before accepting a PR.
 
-[ ] The PR has a description.
+[ ] The PR has a description, explaining both the problem and the solution.
 [ ] The description mentions which forms of testing were done and the testing seems reasonable.
 [ ] Every function/class/actor that was touched is reasonably well documented.
