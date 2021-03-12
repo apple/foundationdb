@@ -592,7 +592,6 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			try {
 				Standalone<RangeResultRef> range = wait(tr.getRange(storageCacheKeys, CLIENT_KNOBS->TOO_MANY));
-				tr = Transaction();
 				ASSERT(!range.more);
 				std::vector<Reference<ReferencedInterface<StorageServerInterface>>> cacheInterfaces;
 				cacheInterfaces.reserve(cacheServers->size());
@@ -673,7 +672,6 @@ ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
 			try {
 				Standalone<RangeResultRef> cacheList =
 				    wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));
-				tr = Transaction();
 				ASSERT(!cacheList.more);
 				bool hasChanges = false;
 				std::map<UID, StorageServerInterface> allCacheServers;
