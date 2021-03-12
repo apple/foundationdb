@@ -1333,6 +1333,18 @@ void MultiVersionApi::setupNetwork() {
 			}
 		}
 
+		if (externalClients.empty() && localClientDisabled) {
+			// SOMEDAY: this should be allowed when it's possible to add external clients after the
+			// network is setup.
+			//
+			// Typically we would create a more specific error for this case, but since we expect
+			// this case to go away soon, we can use a trace event and a generic error.
+			TraceEvent(SevWarn, "CannotSetupNetwork")
+			    .detail("Reason", "Local client is disabled and no external clients configured");
+
+			throw client_invalid_operation();
+		}
+
 		networkStartSetup = true;
 
 		if (externalClients.empty()) {
@@ -1453,8 +1465,7 @@ Reference<IDatabase> MultiVersionApi::createDatabase(const char* clusterFilePath
 	}
 	std::string clusterFile(clusterFilePath);
 
-	if (threadCount > 1 || localClientDisabled) {
-		ASSERT(localClientDisabled);
+	if (localClientDisabled) {
 		ASSERT(!bypassMultiClientApi);
 
 		int threadIdx = nextThread;
@@ -1469,6 +1480,8 @@ Reference<IDatabase> MultiVersionApi::createDatabase(const char* clusterFilePath
 	}
 
 	lock.leave();
+
+	ASSERT_LE(threadCount, 1);
 
 	auto db = localClient->api->createDatabase(clusterFilePath);
 	if (bypassMultiClientApi) {
