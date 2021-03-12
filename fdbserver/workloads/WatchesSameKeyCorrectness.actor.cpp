@@ -58,12 +58,14 @@ struct WatchesSameKeyWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> setKeyRandomValue(Database cx, Key key, Optional<Value> val) {
+		// set value at key to val if provided (random otherwise)
 		state ReadYourWritesTransaction tr(cx);
 		loop {
 			try {
-				if (!val.present())
-					val = Value(deterministicRandom()->randomUniqueID().toString());
-				tr.set(key, val.get());
+				Value valS;
+				if (!val.present()) valS = Value(deterministicRandom()->randomUniqueID().toString());
+				else valS = val.get();
+				tr.set(key, valS);
 				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
@@ -72,19 +74,8 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Optional<Value>> getValue(Database cx, Key key) {
-		state ReadYourWritesTransaction tr(cx);
-		loop {
-			try {
-				Optional<Value> val = wait(tr.get(key));
-				return val;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-
 	ACTOR static Future<Future<Void>> watchKey(Database cx, Key key) {
+		// sets a watch on a key and returns future
 		state ReadYourWritesTransaction tr(cx);
 		loop {
 			try {
@@ -108,12 +99,13 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				state std::vector<Future<Void>> watchFutures;
 				state int i;
 
-				for (i = 0; i < self->numWatches; i++) {
+				tr.set(key, Value(deterministicRandom()->randomUniqueID().toString()));
+				for ( i = 0; i < self->numWatches; i++ ) { // set watches for a given k/v pair set above
 					watchFutures.push_back(tr.watch(key));
 				}
 				wait(tr.commit());
 
-				wait(setKeyRandomValue(cx, key, Optional<Value>()));
+				wait(setKeyRandomValue(cx, key, Optional<Value>())); // trigger all watches created above
 				for (i = 0; i < watchFutures.size(); i++) {
 					wait(watchFutures[i]);
 				}
@@ -135,15 +127,14 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				state std::vector<Future<Void>> watchFutures;
 				state Future<Void> watch1 = wait(watchKey(cx, key));
 				state int i;
-
-				state Value val = Value(deterministicRandom()->randomUniqueID().toString());
-				tr.set(key, val);
-				for (i = 0; i < self->numWatches; i++) {
+				
+				tr.set(key, Value( deterministicRandom()->randomUniqueID().toString() ));
+				for ( i = 0; i < self->numWatches; i++ ) { // set watches for a given k/v pair set above
 					watchFutures.push_back(tr.watch(key));
 				}
 				wait(tr.commit());
 				wait(watch1);
-				wait(setKeyRandomValue(cx, key, Optional<Value>()));
+				wait(setKeyRandomValue(cx, key, Optional<Value>())); // trigger remaining watches
 				for (i = 0; i < watchFutures.size(); i++) {
 					wait(watchFutures[i]);
 				}
@@ -160,14 +151,16 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		 * 	- i.e ABA but when the storage server responds the future count == 1 so we do nothing (no refire)
 		 * */
 		state ReadYourWritesTransaction tr(cx);
+		state ReadYourWritesTransaction tr2(cx);
 		loop {
 			try {
-				wait(setKeyRandomValue(cx, key, Optional<Value>()));
-				state Optional<Value> val = wait(getValue(cx, key));
-				state Future<Void> watch1 = wait(watchKey(cx, key));
-				wait(setKeyRandomValue(cx, key, Optional<Value>()));
-
-				tr.set(key, val.get());
+				state Value val = deterministicRandom()->randomUniqueID().toString();
+				tr2.set(key, val);
+				state Future<Void> watch1 = tr2.watch(key);
+				wait( tr2.commit() );
+				wait ( setKeyRandomValue(cx, key, Optional<Value>()) );
+				
+				tr.set(key, val);
 				state Future<Void> watch2 = tr.watch(key);
 				wait(tr.commit());
 
@@ -175,7 +168,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				watch2.cancel();
 				return Void();
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				wait(tr.onError(e) && tr2.onError(e));
 			}
 		}
 	}
@@ -186,23 +179,25 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		 * 	- i.e ABA but when the storage server responds the future count > 1 so we refire request to SS
 		 * */
 		state ReadYourWritesTransaction tr(cx);
+		state ReadYourWritesTransaction tr2(cx);
 		loop {
 			try {
-				wait(setKeyRandomValue(cx, key, Optional<Value>()));
-				state Optional<Value> val = wait(getValue(cx, key));
-				state Future<Void> watch1 = wait(watchKey(cx, key));
-				wait(setKeyRandomValue(cx, key, Optional<Value>()));
-
-				tr.set(key, val.get());
+				// watch1 and watch2 are set on the same k/v pair
+				state Value val = deterministicRandom()->randomUniqueID().toString();
+				tr2.set(key, val);
+				state Future<Void> watch1 = tr2.watch(key);
+				wait( tr2.commit() );
+				wait ( setKeyRandomValue(cx, key, Optional<Value>()) );
+				tr.set(key, val); // trigger ABA (line above changes value and this line changes it back)
 				state Future<Void> watch2 = tr.watch(key);
 				wait(tr.commit());
 
-				wait(setKeyRandomValue(cx, key, Optional<Value>()));
+				wait(setKeyRandomValue(cx, key, Optional<Value>())); // since ABA has occured we need to trigger the watches with a new value
 				wait(watch1);
 				wait(watch2);
 				return Void();
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				wait(tr.onError(e) && tr2.onError(e));
 			}
 		}
 	}
@@ -216,18 +211,17 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		state ReadYourWritesTransaction tr2(cx);
 		loop {
 			try {
-				state Value val1 = Value(deterministicRandom()->randomUniqueID().toString());
-				state Value val2 = Value(deterministicRandom()->randomUniqueID().toString());
-				tr1.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
-				tr2.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
-				tr1.set(key, val1);
-				tr2.set(key, val2);
+				tr1.setOption( FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE );
+				tr2.setOption( FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE );
+				tr1.set(key, Value( deterministicRandom()->randomUniqueID().toString() ));
+				tr2.set(key, Value( deterministicRandom()->randomUniqueID().toString() ));
 				state Future<Void> watch1 = tr1.watch(key);
 				state Future<Void> watch2 = tr2.watch(key);
+				// each watch commits with a different value but (hopefully) the same version since there is no write conflict range
 				wait(tr1.commit() && tr2.commit());
 
 				wait(watch1 || watch2); // since we enter case 5 at least one of the watches should be fired
-				wait(setKeyRandomValue(cx, key, Optional<Value>()));
+				wait(setKeyRandomValue(cx, key, Optional<Value>())); // fire the watch that possibly wasn't triggered
 				wait(watch1 && watch2);
 
 				return Void();
