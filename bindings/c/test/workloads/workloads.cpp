@@ -23,19 +23,19 @@
 FDBWorkloadFactoryImpl::~FDBWorkloadFactoryImpl() {}
 
 std::map<std::string, IFDBWorkloadFactory*>& FDBWorkloadFactoryImpl::factories() {
-    static std::map<std::string, IFDBWorkloadFactory*> _factories;
-    return _factories;
+	static std::map<std::string, IFDBWorkloadFactory*> _factories;
+	return _factories;
 }
 
-std::shared_ptr<FDBWorkload> FDBWorkloadFactoryImpl::create(const std::string &name) {
-    auto res = factories().find(name);
-    if (res == factories().end()) {
-        return nullptr;
-    }
-    return res->second->create();
+std::shared_ptr<FDBWorkload> FDBWorkloadFactoryImpl::create(const std::string& name) {
+	auto res = factories().find(name);
+	if (res == factories().end()) {
+		return nullptr;
+	}
+	return res->second->create();
 }
 
 FDBWorkloadFactory* workloadFactory(FDBLogger*) {
-    static FDBWorkloadFactoryImpl impl;
-    return &impl;
+	static FDBWorkloadFactoryImpl impl;
+	return &impl;
 }

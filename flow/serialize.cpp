@@ -21,17 +21,17 @@
 #include "flow/serialize.h"
 #include "flow/network.h"
 
-_AssumeVersion::_AssumeVersion( ProtocolVersion version ) : v(version) {
-	if(!version.isValid()) {
+_AssumeVersion::_AssumeVersion(ProtocolVersion version) : v(version) {
+	if (!version.isValid()) {
 		ASSERT(!g_network->isSimulated());
 		throw serialization_failed();
 	}
 }
 
-const void* BinaryReader::readBytes( int bytes ) {
+const void* BinaryReader::readBytes(int bytes) {
 	const char* b = begin;
 	const char* e = b + bytes;
-	if( e > end ) {
+	if (e > end) {
 		ASSERT(!g_network->isSimulated());
 		throw serialization_failed();
 	}

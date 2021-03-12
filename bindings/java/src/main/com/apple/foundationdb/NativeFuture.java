@@ -54,8 +54,8 @@ abstract class NativeFuture<T> extends CompletableFuture<T> implements AutoClose
 	}
 
 	private void marshalWhenDone() {
+		T val = null;
 		try {
-			T val = null;
 			boolean shouldComplete = false;
 			try {
 				pointerReadLock.lock();
@@ -77,11 +77,11 @@ abstract class NativeFuture<T> extends CompletableFuture<T> implements AutoClose
 		} catch(Throwable t) {
 			completeExceptionally(t);
 		} finally {
-			postMarshal();
+			postMarshal(val);
 		}
 	}
 
-	protected void postMarshal() {
+	protected void postMarshal(T value) {
 		close();
 	}
 

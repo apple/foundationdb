@@ -23,6 +23,7 @@ package com.apple.foundationdb.tuple;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -313,6 +314,13 @@ public class ByteArrayUtil extends FastByteComparisons {
 	 */
 	public static int compareUnsigned(byte[] l, byte[] r) {
 		return compareTo(l, 0, l.length, r, 0, r.length);
+	}
+
+	/**
+	 * @return a {@link Comparator} instance which can be used for Java-level sorting of byte arrays.
+	 */
+	public static Comparator<byte[]> comparator(){
+		return FastByteComparisons.comparator();
 	}
 
 	/**
