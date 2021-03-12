@@ -906,7 +906,7 @@ static void scanPackets(TransportData* transport,
 		// return here. The main place where this seems to happen is if a ReplyPromise is not waited on
 		// long enough.
 		// It would be slightly more elegant to put this if-block
-		if (priority != TaskPriority::UnknownEndpoint || (token.first() & TOKEN_STREAM_FLAG) == 0) {
+		if (priority != TaskPriority::UnknownEndpoint || (token.first() & TOKEN_STREAM_FLAG) != 0) {
 			deliver(transport, Endpoint({ peerAddress }, token), priority, std::move(reader), true);
 		}
 
