@@ -643,8 +643,7 @@ void setupRunLoopProfiler();
 EXTERNC void setProfilingEnabled(int enabled);
 
 // Use _exit() or criticalError(), not exit()
-#define CALLS_TO_EXIT_ARE_FORBIDDEN_BY_POLICY() [====]
-#define exit CALLS_TO_EXIT_ARE_FORBIDDEN_BY_POLICY(0)
+#define exit static_assert(false, "Calls to exit() are forbidden by policy");
 
 #if defined(FDB_CLEAN_BUILD) && !( defined(NDEBUG) && !defined(_DEBUG) && !defined(SQLITE_DEBUG) )
 #error Clean builds must define NDEBUG, and not define various debug macros
