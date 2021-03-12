@@ -47,8 +47,8 @@ struct SignalClosure {
 
 	static void signal_handler(int s, siginfo_t* si, void* ucontext) {
 		// async signal safe!
-		// This is intended to work as a SIGPROF handler for past and future versions of the flow profiler (when
-		// multiple are running in a process!) So don't change what it does without really good reason
+		// This is intended to work as a SIGPROF handler for past and future versions of the flow profiler (when multiple are running in a process!)
+		// So don't change what it does without really good reason
 		SignalClosure* closure = (SignalClosure*)(si->si_value.sival_ptr);
 		closure->func(s, si, ucontext, closure->userdata);
 	}
@@ -56,9 +56,13 @@ struct SignalClosure {
 
 struct SyncFileForSim : ReferenceCounted<SyncFileForSim> {
 	FILE* f;
-	SyncFileForSim(std::string const& filename) { f = fopen(filename.c_str(), "wb"); }
+	SyncFileForSim( std::string const& filename ) {
+		f = fopen(filename.c_str(), "wb");
+	}
 
-	virtual bool isOpen() { return f != nullptr; }
+	virtual bool isOpen() {
+		return f != nullptr;
+	}
 
 	virtual void addref() { ReferenceCounted<SyncFileForSim>::addref(); }
 	virtual void delref() { ReferenceCounted<SyncFileForSim>::delref(); }
@@ -104,7 +108,9 @@ struct Profiler {
 	struct OutputBuffer {
 		std::vector<void*> output;
 
-		OutputBuffer() { output.reserve(100000); }
+		OutputBuffer() {
+			output.reserve( 100000 );
+		}
 		void clear() { output.clear(); }
 		void push(void* ptr) { // async signal safe!
 			if (output.size() < output.capacity())
@@ -130,9 +136,7 @@ struct Profiler {
 	timer_t periodicTimer;
 	bool timerInitialized;
 
-	Profiler(int period, std::string const& outfn, INetwork* network)
-	  : environmentInfoWriter(Unversioned()), signalClosure(signal_handler_for_closure, this), network(network),
-	    timerInitialized(false) {
+	Profiler(int period, std::string const& outfn, INetwork* network) : environmentInfoWriter(Unversioned()), signalClosure(signal_handler_for_closure, this), network(network), timerInitialized(false) {
 		actor = profile(this, period, outfn);
 	}
 
@@ -159,14 +163,16 @@ struct Profiler {
 		((Profiler*)self)->signal_handler();
 	}
 
-	void enableSignal(bool enabled) { sigprocmask(enabled ? SIG_UNBLOCK : SIG_BLOCK, &profilingSignals, NULL); }
+	void enableSignal(bool enabled) {
+		sigprocmask( enabled?SIG_UNBLOCK:SIG_BLOCK, &profilingSignals, NULL );
+	}
 
 	void phdr(struct dl_phdr_info* info) {
-		environmentInfoWriter << int64_t(1) << info->dlpi_addr
-		                      << StringRef((const uint8_t*)info->dlpi_name, strlen(info->dlpi_name));
+		environmentInfoWriter << int64_t(1) << info->dlpi_addr << StringRef((const uint8_t*)info->dlpi_name, strlen(info->dlpi_name));
 		for (int s = 0; s < info->dlpi_phnum; s++) {
 			auto const& h = info->dlpi_phdr[s];
-			environmentInfoWriter << int64_t(2) << h.p_type << h.p_flags // Word (uint32_t)
+			environmentInfoWriter << int64_t(2)
+				<< h.p_type << h.p_flags  // Word (uint32_t)
 			                      << h.p_offset // Off (uint64_t)
 			                      << h.p_vaddr << h.p_paddr // Addr (uint64_t)
 			                      << h.p_filesz << h.p_memsz << h.p_align; // XWord (uint64_t)
@@ -260,14 +266,11 @@ Profiler* Profiler::active_profiler = 0;
 
 std::string findAndReplace(std::string const& fn, std::string const& symbol, std::string const& value) {
 	auto i = fn.find(symbol);
-	if (i == std::string::npos)
-		return fn;
+	if (i == std::string::npos) return fn;
 	return fn.substr(0, i) + value + fn.substr(i + symbol.size());
 }
 
-void startProfiling(INetwork* network,
-                    Optional<int> maybePeriod /*= {}*/,
-                    Optional<StringRef> maybeOutputFile /*= {}*/) {
+void startProfiling(INetwork* network, Optional<int> maybePeriod /*= {}*/, Optional<StringRef> maybeOutputFile /*= {}*/) {
 	int period;
 	if (maybePeriod.present()) {
 		period = maybePeriod.get();
@@ -282,13 +285,7 @@ void startProfiling(INetwork* network,
 		const char* outfn = getenv("FLOW_PROFILER_OUTPUT");
 		outputFile = (outfn ? outfn : "profile.bin");
 	}
-	outputFile = findAndReplace(
-	    findAndReplace(
-	        findAndReplace(outputFile, "%ADDRESS%", findAndReplace(network->getLocalAddress().toString(), ":", ".")),
-	        "%PID%",
-	        format("%d", getpid())),
-	    "%TID%",
-	    format("%llx", (long long)gettid()));
+	outputFile = findAndReplace(findAndReplace(findAndReplace(outputFile, "%ADDRESS%", findAndReplace(network->getLocalAddress().toString(), ":", ".")), "%PID%", format("%d", getpid())), "%TID%", format("%llx", (long long)sys_gettid()));
 
 	if (!Profiler::active_profiler)
 		Profiler::active_profiler = new Profiler(period, outputFile, network);

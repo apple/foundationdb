@@ -554,7 +554,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						restoreTags.push_back(restoreTag);
 						printf("BackupCorrectness, restore for each range: backupAgent.restore is called for "
 						       "restoreIndex:%d tag:%s\n",
-						       restoreIndex, restoreTag.toString().c_str());
+						       restoreIndex,
+						       restoreTag.toString().c_str());
 						restores.push_back(backupAgent.restore(cx,
 						                                       cx,
 						                                       restoreTag,
@@ -573,7 +574,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
 					restoreTags.push_back(restoreTag);
 					printf("BackupCorrectness, backupAgent.restore is called for restoreIndex:%d tag:%s\n",
-					       restoreIndex, restoreTag.toString().c_str());
+					       restoreIndex,
+					       restoreTag.toString().c_str());
 					restores.push_back(backupAgent.restore(cx,
 					                                       cx,
 					                                       restoreTag,

@@ -2217,7 +2217,8 @@ ACTOR Future<Void> runRestore(Database db,
 			                                                   KeyRef(addPrefix),
 			                                                   KeyRef(removePrefix),
 			                                                   true,
-									   incrementalBackupOnly));
+			                                                   incrementalBackupOnly,
+			                                                   beginVersion));
 
 			if (waitForDone && verbose) {
 				// If restore is now complete then report version restored
@@ -2338,8 +2339,8 @@ ACTOR Future<Void> expireBackupData(const char* name,
 			throw;
 		if (e.code() == error_code_backup_cannot_expire)
 			fprintf(stderr,
-			        "ERROR: Requested expiration would be unsafe.  Backup would not meet minimum "
-			        "restorability.  Use --force to delete data anyway.\n");
+			        "ERROR: Requested expiration would be unsafe.  Backup would not meet minimum restorability.  Use "
+			        "--force to delete data anyway.\n");
 		else
 			fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
@@ -3112,8 +3113,7 @@ int main(int argc, char* argv[]) {
 					if(optId == OPT_SNAPSHOTINTERVAL) {
 						snapshotIntervalSeconds = seconds;
 						modifyOptions.snapshotIntervalSeconds = seconds;
-					}
-					else if(optId == OPT_MOD_ACTIVE_INTERVAL) {
+				} else if (optId == OPT_MOD_ACTIVE_INTERVAL) {
 						modifyOptions.activeSnapshotIntervalSeconds = seconds;
 					}
 					break;
@@ -3687,8 +3687,8 @@ int main(int argc, char* argv[]) {
 				                         tagName,
 				                         restoreContainer,
 				                         backupKeys,
-				                         restoreVersion,
 				                         beginVersion,
+				                         restoreVersion,
 				                         restoreTimestamp,
 				                         !dryRun,
 				                         !quietDisplay,

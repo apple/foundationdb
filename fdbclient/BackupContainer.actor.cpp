@@ -700,18 +700,23 @@ public:
 	// Computes the continuous end version for non-partitioned mutation logs up to
 	// the "targetVersion". If "outLogs" is not nullptr, it will be updated with
 	// continuous log files. "*end" is updated with the continuous end version.
-	static void computeRestoreEndVersion(const std::vector<LogFile>& logs, std::vector<LogFile>* outLogs, Version* end,
+	static void computeRestoreEndVersion(const std::vector<LogFile>& logs,
+	                                     std::vector<LogFile>* outLogs,
+	                                     Version* end,
 	                                     Version targetVersion) {
 		auto i = logs.begin();
-		if (outLogs != nullptr) outLogs->push_back(*i);
+		if (outLogs != nullptr)
+			outLogs->push_back(*i);
 
 		// Add logs to restorable logs set until continuity is broken OR we reach targetVersion
 		while (++i != logs.end()) {
-			if (i->beginVersion > *end || i->beginVersion > targetVersion) break;
+			if (i->beginVersion > *end || i->beginVersion > targetVersion)
+				break;
 
 			// If the next link in the log chain is found, update the end
 			if (i->beginVersion == *end) {
-				if (outLogs != nullptr) outLogs->push_back(*i);
+				if (outLogs != nullptr)
+					outLogs->push_back(*i);
 				*end = i->endVersion;
 			}
 		}
@@ -1181,10 +1186,11 @@ public:
 		return Optional<RestorableFileSet>();
 	}
 
-	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion, bool logsOnly,
+	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion,
+	                                                  bool logsOnly,
 	                                                  Version beginVersion) final {
-		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion, logsOnly,
-		                          beginVersion);
+		return getRestoreSet_impl(
+		    Reference<BackupContainerFileSystem>::addRef(this), targetVersion, logsOnly, beginVersion);
 	}
 
 private:

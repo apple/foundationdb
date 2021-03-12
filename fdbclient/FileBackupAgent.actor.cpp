@@ -3273,8 +3273,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		state Version restoreVersion;
 		state Future<Optional<bool>> incrementalBackupOnly = restore.incrementalBackupOnly().get(tr);
 
-		wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)) &&
-		     success(incrementalBackupOnly) &&
+		wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)) && success(incrementalBackupOnly) &&
 		     checkTaskVersion(tr->getDatabase(), task, name, version));
 
 		// If not adding to an existing batch then update the apply mutations end version so the mutations from the
@@ -3438,9 +3437,6 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 					break;
 
 				if (f.isRange) {
-					// if (incrementalBackupOnly.get().present() && incrementalBackupOnly.get().get()) {
-					// 	continue;
-					// }
 					addTaskFutures.push_back(
 					    RestoreRangeTaskFunc::addTask(tr,
 					                                  taskBucket,
@@ -3895,7 +3891,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		wait(taskBucket->finish(tr, task));
 		state Future<Optional<bool>> logsOnly = restore.incrementalBackupOnly().get(tr);
 		wait(success(logsOnly));
-		if (logsOnly.isReady() && logsOnly.get().present() && logsOnly.get().get()) {
+		if (logsOnly.get().present() && logsOnly.get().get()) {
 			// If this is an incremental restore, we need to set the applyMutationsMapPrefix
 			// to the earliest log version so no mutations are missed
 			Value versionEncoded = BinaryWriter::toValue(Params.firstVersion().get(task), Unversioned());
@@ -4798,8 +4794,18 @@ public:
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				wait(submitRestore(
-				    backupAgent, tr, tagName, url, ranges, targetVersion, addPrefix, removePrefix, lockDB, incrementalBackupOnly, beginVersion, randomUid));
+				wait(submitRestore(backupAgent,
+				                   tr,
+				                   tagName,
+				                   url,
+				                   ranges,
+				                   targetVersion,
+				                   addPrefix,
+				                   removePrefix,
+				                   lockDB,
+				                   incrementalBackupOnly,
+				                   beginVersion,
+				                   randomUid));
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
