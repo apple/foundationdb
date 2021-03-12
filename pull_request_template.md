@@ -5,7 +5,7 @@ The general guidlines can be found [here](https://github.com/apple/foundationdb/
 
 Please check each of the following things and check *all* boxed before accepting a PR.
 
-[ ] The PR has a description.
+[ ] The PR has a description, explaining both the problem and the solution.
 [ ] There is a good reason why this PR needs to go into a release branch and this reason is documented (either in the description above or in a linked GitHub issue)
 [ ] This change/bugfix is a cherry-pick from `master` or this change is not applicable for `master`
 [ ] The description mentions which forms of testing were done and the testing seems reasonable.
