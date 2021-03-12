@@ -166,6 +166,15 @@ public:
 		else
 			onMainThreadVoid([this] { this->stopImmediately(); }, nullptr);
 	}
+	virtual void signalStop(int signal) {
+		if (stopSignaled.is_lock_free() && stopSignaled == 0) {
+			stopSignaled = signal;
+		} else {
+			const char* terminationString = "Process terminated abruptly by signal.\n";
+			write(STDERR_FILENO, terminationString, strlen(terminationString));
+			_exit(signal + 128);
+		}
+	}
 	void addStopCallback(std::function<void()> fn) override {
 		if (thread_network == this)
 			stopCallbacks.emplace_back(std::move(fn));
@@ -218,6 +227,7 @@ public:
 	TDMetricCollection tdmetrics;
 	double currentTime;
 	bool stopped;
+	std::atomic<int> stopSignaled{ 0 };
 	mutable std::map<IPAddress, bool> addressOnHostCache;
 
 	std::atomic<bool> started;
@@ -1561,6 +1571,11 @@ void Net2::run() {
 		    nondeterministicRandom()->random01() < (nnow - now) * FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
 			TraceEvent("SomewhatSlowRunLoopBottom")
 			    .detail("Elapsed", nnow - now); // This includes the time spent running tasks
+
+		if (stopSignaled == 0) {
+			TraceEvent("ProcessTerminatedBySignal").detail("Signal", stopSignaled.load());
+			stopImmediately();
+		}
 	}
 
 	for (auto& fn : stopCallbacks) {

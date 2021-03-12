@@ -1578,7 +1578,7 @@ int main(int argc, char* argv[]) {
 #ifdef ALLOC_INSTRUMENTATION
 		g_extra_memory = new uint8_t[1000000];
 #endif
-		registerCrashHandler();
+		registerSignalHandler();
 
 		// Set default of line buffering standard out and error
 		setvbuf(stdout, nullptr, _IOLBF, BUFSIZ);
@@ -2025,15 +2025,17 @@ int main(int argc, char* argv[]) {
 			rc = FDB_EXIT_ERROR;
 		}
 
-		int unseed = noUnseed ? 0 : deterministicRandom()->randomInt(0, 100001);
-		TraceEvent("ElapsedTime")
-		    .detail("SimTime", now() - startNow)
-		    .detail("RealTime", timer() - start)
-		    .detail("RandomUnseed", unseed);
-
 		if (role == ServerRole::Simulation) {
+			int unseed = noUnseed ? 0 : deterministicRandom()->randomInt(0, 100001);
+			TraceEvent("ElapsedTime")
+			    .detail("SimTime", now() - startNow)
+			    .detail("RealTime", timer() - start)
+			    .detail("RandomUnseed", unseed);
+
 			printf("Unseed: %d\n", unseed);
 			printf("Elapsed: %f simsec, %f real seconds\n", now() - startNow, timer() - start);
+		} else {
+			TraceEvent("ProcessTerminated");
 		}
 
 		// IFailureMonitor::failureMonitor().address_info.clear();
