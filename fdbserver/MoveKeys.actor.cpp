@@ -1194,7 +1194,6 @@ ACTOR Future<Void> moveKeys(Database cx,
 void seedShardServers(Arena& arena, CommitTransactionRef& tr, vector<StorageServerInterface> servers) {
 	std::map<Optional<Value>, Tag> dcId_locality;
 	std::map<UID, Tag> server_tag;
-	std::vector<UID> serverSrcUID;
 	int8_t nextLocality = 0;
 	for (auto& s : servers) {
 		if (!dcId_locality.count(s.locality.dcId())) {
@@ -1204,7 +1203,6 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, vector<StorageServ
 		}
 		Tag& t = dcId_locality[s.locality.dcId()];
 		server_tag[s.id()] = Tag(t.locality, t.id);
-		serverSrcUID.push_back(s.id());
 		t.id++;
 	}
 	std::sort(servers.begin(), servers.end());
@@ -1213,14 +1211,17 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, vector<StorageServ
 	tr.read_snapshot = 0;
 	tr.read_conflict_ranges.push_back_deep(arena, allKeys);
 
-	for (int s = 0; s < servers.size(); s++) {
-		tr.set(arena, serverTagKeyFor(servers[s].id()), serverTagValue(server_tag[servers[s].id()]));
-		tr.set(arena, serverListKeyFor(servers[s].id()), serverListValue(servers[s]));
+	for (auto& s : servers) {
+		tr.set(arena, serverTagKeyFor(s.id()), serverTagValue(server_tag[s.id()]));
+		tr.set(arena, serverListKeyFor(s.id()), serverListValue(s));
 	}
 
 	std::vector<Tag> serverTags;
-	for (int i = 0; i < servers.size(); i++)
-		serverTags.push_back(server_tag[servers[i].id()]);
+	std::vector<UID> serverSrcUID;
+	for (auto& s : servers) {
+		serverTags.push_back(server_tag[s.id()]);
+		serverSrcUID.push_back(s.id());
+	}
 
 	auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS ? keyServersValue(serverTags)
 	                                                    : keyServersValue(Standalone<RangeResultRef>(), serverSrcUID);
@@ -1230,7 +1231,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, vector<StorageServ
 	//   key (keyServersKeyServersKey)
 	krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, Value());
 
-	for (int s = 0; s < servers.size(); s++)
-		krmSetPreviouslyEmptyRange(
-		    tr, arena, serverKeysPrefixFor(servers[s].id()), allKeys, serverKeysTrue, serverKeysFalse);
+	for (auto& s : servers) {
+		krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(s.id()), allKeys, serverKeysTrue, serverKeysFalse);
+	}
 }
