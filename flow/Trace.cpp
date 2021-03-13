@@ -1402,7 +1402,7 @@ const TraceEventFields::Field& TraceEventFields::operator[](int index) const {
 	return fields.at(index);
 }
 
-bool TraceEventFields::tryGetValue(std::string key, std::string& outValue) const {
+bool TraceEventFields::tryGetValue(const std::string& key, std::string& outValue) const {
 	for (auto itr = begin(); itr != end(); ++itr) {
 		if (itr->first == key) {
 			outValue = itr->second;
@@ -1413,7 +1413,7 @@ bool TraceEventFields::tryGetValue(std::string key, std::string& outValue) const
 	return false;
 }
 
-std::string TraceEventFields::getValue(std::string key) const {
+std::string TraceEventFields::getValue(const std::string& key) const {
 	std::string value;
 	if (tryGetValue(key, value)) {
 		return value;
@@ -1475,7 +1475,7 @@ void parseNumericValue(std::string const& s, int64_t& outValue, bool permissive 
 }
 
 template <class T>
-T getNumericValue(TraceEventFields const& fields, std::string key, bool permissive) {
+T getNumericValue(TraceEventFields const& fields, const std::string& key, bool permissive) {
 	std::string field = fields.getValue(key);
 
 	try {
@@ -1498,15 +1498,15 @@ T getNumericValue(TraceEventFields const& fields, std::string key, bool permissi
 }
 } // namespace
 
-int TraceEventFields::getInt(std::string key, bool permissive) const {
+int TraceEventFields::getInt(const std::string& key, bool permissive) const {
 	return getNumericValue<int>(*this, key, permissive);
 }
 
-int64_t TraceEventFields::getInt64(std::string key, bool permissive) const {
+int64_t TraceEventFields::getInt64(const std::string& key, bool permissive) const {
 	return getNumericValue<int64_t>(*this, key, permissive);
 }
 
-double TraceEventFields::getDouble(std::string key, bool permissive) const {
+double TraceEventFields::getDouble(const std::string& key, bool permissive) const {
 	return getNumericValue<double>(*this, key, permissive);
 }
 
