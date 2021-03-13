@@ -341,8 +341,7 @@ template <>
 struct Traceable<std::string> : TraceableStringImpl<std::string> {};
 
 template <class T>
-struct SpecialTraceMetricType
-  : std::conditional<std::is_integral<T>::value || std::is_enum<T>::value, std::true_type, std::false_type>::type {
+struct SpecialTraceMetricType : std::is_integral<T>::type {
 	static int64_t getValue(T v) { return v; }
 };
 
