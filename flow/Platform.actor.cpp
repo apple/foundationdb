@@ -3410,13 +3410,25 @@ void platformInit() {
 #endif
 }
 
+std::atomic<bool> terminationSignaled(false);
+
+void terminationHandler(int sig) {
+	g_network->signalStop(sig);
+#ifdef __unixish__
+	if (terminationSignaled.is_lock_free() && terminationSignaled.exchange(true)) {
+		g_network->stop();
+	} else {
+	}
+#endif
+}
+
 void crashHandler(int sig) {
-#ifdef __linux__
+#ifdef __unixish__
 	// Pretty much all of this handler is risking undefined behavior and hangs,
 	//  but the idea is that we're about to crash anyway...
 	std::string backtrace = platform::get_backtrace();
 
-	bool error = (sig != SIGUSR2);
+	bool error = (sig != SIGUSR2 && sig != SIGQUIT);
 
 	fflush(stdout);
 	TraceEvent(error ? SevError : SevInfo, error ? "Crash" : "ProcessTerminated")
@@ -3452,22 +3464,32 @@ void crashHandler(int sig) {
 #endif
 }
 
-void registerCrashHandler() {
-#ifdef __linux__
+void registerSignalHandler() {
+#ifdef __unixish__
+	struct sigaction termAction;
+	termAction.sa_handler = terminationHandler;
+	sigfillset(&termAction.sa_mask);
+	termAction.sa_flags = 0;
+
+	sigaction(SIGTERM, &termAction, NULL);
+	sigaction(SIGINT, &termAction, NULL);
+	sigaction(SIGHUP, &termAction, NULL);
+
 	// For these otherwise fatal errors, attempt to log a trace of
 	// what was happening and then exit
-	struct sigaction action;
-	action.sa_handler = crashHandler;
-	sigfillset(&action.sa_mask);
-	action.sa_flags = 0;
+	struct sigaction crashAction;
+	crashAction.sa_handler = crashHandler;
+	sigfillset(&crashAction.sa_mask);
+	crashAction.sa_flags = 0;
 
-	sigaction(SIGILL, &action, nullptr);
-	sigaction(SIGFPE, &action, nullptr);
-	sigaction(SIGSEGV, &action, nullptr);
-	sigaction(SIGBUS, &action, nullptr);
-	sigaction(SIGUSR2, &action, nullptr);
+	sigaction(SIGILL, &crashAction, NULL);
+	sigaction(SIGFPE, &crashAction, NULL);
+	sigaction(SIGSEGV, &crashAction, NULL);
+	sigaction(SIGBUS, &crashAction, NULL);
+	sigaction(SIGUSR2, &crashAction, NULL);
+	sigaction(SIGQUIT, &crashAction, NULL);
 #else
-	// No crash handler for other platforms!
+	// No signal handler for other platforms!
 #endif
 }
 
