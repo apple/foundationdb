@@ -315,11 +315,13 @@ void* FastAllocator<Size>::allocate() {
 	}
 
 #if defined(USE_GPERFTOOLS) || defined(ADDRESS_SANITIZER)
+	// Some usages of FastAllocator<4096> require 4096 byte alignment
 	return aligned_alloc(Size == 4096 ? Size : alignof(void*), Size);
 #endif
 
 #if VALGRIND
 	if (valgrindPrecise()) {
+		// Some usages of FastAllocator<4096> require 4096 byte alignment
 		return aligned_alloc(Size == 4096 ? Size : alignof(void*), Size);
 	}
 #endif
