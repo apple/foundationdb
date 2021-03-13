@@ -586,7 +586,8 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 			// the cyclic reference to self.
 			tr = Transaction();
 			wait(delay(0)); // Give ourselves the chance to get cancelled if self was destroyed
-			wait(self->updateCache.onTrigger());
+			wait(brokenPromiseToNever(self->updateCache.onTrigger())); // brokenPromiseToNever because self might get
+			                                                           // destroyed elsewhere while we're waiting here.
 			tr = Transaction(Database(Reference<DatabaseContext>::addRef(self)));
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
