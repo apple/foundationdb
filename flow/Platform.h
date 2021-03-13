@@ -56,20 +56,21 @@
 #endif
 
 #if defined(__linux__)
-#  if defined(__clang__)
-#    if ((__clang_major__ * 100 + __clang_minor__) < 303)
-#      error Clang 3.3 or later is required on this platform
-#    endif
-#  elif ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__) < 40500)
-#    error GCC 4.5.0 or later required on this platform
-#  endif
+#if defined(__clang__)
+#if ((__clang_major__ * 100 + __clang_minor__) < 303)
+#error Clang 3.3 or later is required on this platform
+#endif
+#elif ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__) < 40500)
+#error GCC 4.5.0 or later required on this platform
+#endif
 #endif
 
 #if defined(_WIN32) && (_MSC_VER < 1600)
 #error Visual Studio 2010 required on this platform
 #endif
 
-#if defined(__APPLE__) && (!((__clang__ == 1) || ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__) > 40800)))
+#if defined(__APPLE__) &&                                                                                              \
+    (!((__clang__ == 1) || ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__) > 40800)))
 #error Either Clang or GCC 4.8.0 or later required on this platform
 #endif
 
@@ -99,7 +100,11 @@
  */
 #ifndef _MSC_VER
 #if defined(__GNUG__)
-#define __assume(cond) do { if (!(cond)) __builtin_unreachable(); } while (0)
+#define __assume(cond)                                                                                                 \
+	do {                                                                                                               \
+		if (!(cond))                                                                                                   \
+			__builtin_unreachable();                                                                                   \
+	} while (0)
 #else
 #define __assume(cond)
 #endif
@@ -108,13 +113,13 @@
 #ifdef __unixish__
 #include <pthread.h>
 #define CRITICAL_SECTION pthread_mutex_t
-#define InitializeCriticalSection(m) \
-do { \
-	pthread_mutexattr_t mta; \
-	pthread_mutexattr_init(&mta); \
-	pthread_mutexattr_settype(&mta, PTHREAD_MUTEX_RECURSIVE); \
-	pthread_mutex_init(m, &mta); \
-	pthread_mutexattr_destroy(&mta); \
+#define InitializeCriticalSection(m)                                                                                   \
+	do {                                                                                                               \
+		pthread_mutexattr_t mta;                                                                                       \
+		pthread_mutexattr_init(&mta);                                                                                  \
+		pthread_mutexattr_settype(&mta, PTHREAD_MUTEX_RECURSIVE);                                                      \
+		pthread_mutex_init(m, &mta);                                                                                   \
+		pthread_mutexattr_destroy(&mta);                                                                               \
 	} while (0)
 #define DeleteCriticalSection(m) pthread_mutex_destroy(m)
 #define EnterCriticalSection(m) pthread_mutex_lock(m)
@@ -134,7 +139,9 @@ do { \
 // out that it's simple to force a name to be dependent, which is what
 // we'll do for now.
 template <class Ignore, class T>
-inline static T& makeDependent(T& value) { return value; }
+inline static T& makeDependent(T& value) {
+	return value;
+}
 
 #include <string>
 #include <vector>
@@ -143,12 +150,12 @@ inline static T& makeDependent(T& value) { return value; }
 #include <process.h>
 #define THREAD_FUNC static void __cdecl
 #define THREAD_FUNC_RETURN void
-#define THREAD_HANDLE void *
+#define THREAD_HANDLE void*
 THREAD_HANDLE startThread(void(func)(void*), void* arg, int stackSize = 0, const char* name = nullptr);
 #define THREAD_RETURN return
 #elif defined(__unixish__)
-#define THREAD_FUNC static void *
-#define THREAD_FUNC_RETURN void *
+#define THREAD_FUNC static void*
+#define THREAD_FUNC_RETURN void*
 #define THREAD_HANDLE pthread_t
 // The last parameter is an optional name for the thread. It is only supported on Linux and has a
 // limit of 16 characters.
@@ -185,7 +192,7 @@ void deprioritizeThread();
 
 #define DEBUG_DETERMINISM 0
 
-std::string removeWhitespace(const std::string &t);
+std::string removeWhitespace(const std::string& t);
 
 struct SystemStatistics {
 	bool initialized;
@@ -212,17 +219,23 @@ struct SystemStatistics {
 	int64_t machineCommittedRAM;
 	int64_t machineAvailableRAM;
 
-	SystemStatistics() : initialized(false), elapsed(0), processCPUSeconds(0), mainThreadCPUSeconds(0), processMemory(0),
-		processResidentMemory(0), processDiskTotalBytes(0), processDiskFreeBytes(0), processDiskQueueDepth(0), processDiskIdleSeconds(0), processDiskRead(0), processDiskWrite(0),
-		processDiskReadCount(0), processDiskWriteCount(0), processDiskWriteSectors(0), processDiskReadSectors(0), machineMegabitsSent(0), machineMegabitsReceived(0), machineOutSegs(0),
-		machineRetransSegs(0), machineCPUSeconds(0), machineTotalRAM(0), machineCommittedRAM(0), machineAvailableRAM(0) {}
+	SystemStatistics()
+	  : initialized(false), elapsed(0), processCPUSeconds(0), mainThreadCPUSeconds(0), processMemory(0),
+	    processResidentMemory(0), processDiskTotalBytes(0), processDiskFreeBytes(0), processDiskQueueDepth(0),
+	    processDiskIdleSeconds(0), processDiskRead(0), processDiskWrite(0), processDiskReadCount(0),
+	    processDiskWriteCount(0), processDiskWriteSectors(0), processDiskReadSectors(0), machineMegabitsSent(0),
+	    machineMegabitsReceived(0), machineOutSegs(0), machineRetransSegs(0), machineCPUSeconds(0), machineTotalRAM(0),
+	    machineCommittedRAM(0), machineAvailableRAM(0) {}
 };
 
 struct SystemStatisticsState;
 
 struct IPAddress;
 
-SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip, SystemStatisticsState **statState, bool logDetails);
+SystemStatistics getSystemStatistics(std::string dataFolder,
+                                     const IPAddress* ip,
+                                     SystemStatisticsState** statState,
+                                     bool logDetails);
 
 double getProcessorTimeThread();
 
@@ -242,28 +255,34 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo);
 
 void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total);
 
-void getNetworkTraffic(uint64_t& bytesSent, uint64_t& bytesReceived, uint64_t& outSegs,
-					   uint64_t& retransSegs);
+void getNetworkTraffic(uint64_t& bytesSent, uint64_t& bytesReceived, uint64_t& outSegs, uint64_t& retransSegs);
 
-void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint64_t& busyTicks, uint64_t& reads, uint64_t& writes, uint64_t& writeSectors);
+void getDiskStatistics(std::string const& directory,
+                       uint64_t& currentIOs,
+                       uint64_t& busyTicks,
+                       uint64_t& reads,
+                       uint64_t& writes,
+                       uint64_t& writeSectors);
 
 void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails);
 
-double timer();  // Returns the system real time clock with high precision.  May jump around when system time is adjusted!
-double timer_monotonic();  // Returns a high precision monotonic clock which is adjusted to be kind of similar to timer() at startup, but might not be a globally accurate time.
+double
+timer(); // Returns the system real time clock with high precision.  May jump around when system time is adjusted!
+double timer_monotonic(); // Returns a high precision monotonic clock which is adjusted to be kind of similar to timer()
+                          // at startup, but might not be a globally accurate time.
 uint64_t timer_int(); // Return timer as uint64_t
 
-void getLocalTime(const time_t *timep, struct tm *result);
+void getLocalTime(const time_t* timep, struct tm* result);
 
 void setMemoryQuota(size_t limit);
 
-void *allocate(size_t length, bool allowLargePages);
+void* allocate(size_t length, bool allowLargePages);
 
 void setAffinity(int proc);
 
-void threadSleep( double seconds );
+void threadSleep(double seconds);
 
-void threadYield();  // Attempt to yield to other processes or threads
+void threadYield(); // Attempt to yield to other processes or threads
 
 // Returns true iff the file exists
 bool fileExists(std::string const& filename);
@@ -276,16 +295,16 @@ int64_t fileSize(std::string const& filename);
 
 // Returns true if file is deleted, false if it was not found, throws platform_error() otherwise
 // Consider using IAsyncFileSystem::filesystem()->deleteFile() instead, especially if you need durability!
-bool deleteFile( std::string const& filename );
+bool deleteFile(std::string const& filename);
 
 // Renames the given file.  Does not fsync the directory.
-void renameFile( std::string const& fromPath, std::string const& toPath );
+void renameFile(std::string const& fromPath, std::string const& toPath);
 
 // Atomically replaces the contents of the specified file.
-void atomicReplace( std::string const& path, std::string const& content, bool textmode = true );
+void atomicReplace(std::string const& path, std::string const& content, bool textmode = true);
 
 // Read a file into memory
-std::string readFileBytes( std::string const& filename, int maxSize );
+std::string readFileBytes(std::string const& filename, int maxSize);
 
 // Write data buffer into file
 void writeFileBytes(std::string const& filename, const char* data, size_t count);
@@ -293,14 +312,14 @@ void writeFileBytes(std::string const& filename, const char* data, size_t count)
 // Write text into file
 void writeFile(std::string const& filename, std::string const& content);
 
-std::string joinPath( std::string const& directory, std::string const& filename );
+std::string joinPath(std::string const& directory, std::string const& filename);
 
 // cleanPath() does a 'logical' resolution of the given path string to a canonical form *without*
 // following symbolic links or verifying the existence of any path components.  It removes redundant
 // "." references and duplicate separators, and resolves any ".." references that can be resolved
 // using the preceding path components.
 // Relative paths remain relative and are NOT rebased on the current working directory.
-std::string cleanPath( std::string const& path );
+std::string cleanPath(std::string const& path);
 
 // Removes the last component from a path string (if possible) and returns the result with one trailing separator.
 // If there is only one path component, the result will be "" for relative paths and "/" for absolute paths.
@@ -314,7 +333,7 @@ std::string cleanPath( std::string const& path );
 //   /a/.
 //   /a/./
 //   /a//..//
-std::string popPath(const std::string &path);
+std::string popPath(const std::string& path);
 
 // abspath() resolves the given path to a canonical form.
 // If path is relative, the result will be based on the current working directory.
@@ -325,16 +344,16 @@ std::string popPath(const std::string &path);
 // User directory references such as '~' or '~user' are effectively treated as symbolic links which
 // are impossible to resolve, so resolveLinks=true results in failure and resolveLinks=false results
 // in the reference being left in-tact prior to resolving '..' references.
-std::string abspath( std::string const& path, bool resolveLinks = true, bool mustExist = false );
+std::string abspath(std::string const& path, bool resolveLinks = true, bool mustExist = false);
 
 // parentDirectory() returns the parent directory of the given file or directory in a canonical form,
 // with a single trailing path separator.
 // It uses absPath() with the same bool options to initially obtain a canonical form, and upon success
 // removes the final path component, if present.
-std::string parentDirectory( std::string const& path, bool resolveLinks = true, bool mustExist = false);
+std::string parentDirectory(std::string const& path, bool resolveLinks = true, bool mustExist = false);
 
 // Returns the portion of the path following the last path separator (e.g. the filename or directory name)
-std::string basename( std::string const& filename );
+std::string basename(std::string const& filename);
 
 // Returns the home directory of the current user
 std::string getUserHomeDirectory();
@@ -342,20 +361,20 @@ std::string getUserHomeDirectory();
 namespace platform {
 
 // Returns true if directory was created, false if it existed, throws platform_error() otherwise
-bool createDirectory( std::string const& directory );
+bool createDirectory(std::string const& directory);
 
 // e.g. extension==".fdb", returns filenames relative to directory
-std::vector<std::string> listFiles( std::string const& directory, std::string const& extension = "");
+std::vector<std::string> listFiles(std::string const& directory, std::string const& extension = "");
 
 // returns directory names relative to directory
-std::vector<std::string> listDirectories( std::string const& directory );
+std::vector<std::string> listDirectories(std::string const& directory);
 
-void findFilesRecursively(std::string path, std::vector<std::string> &out);
+void findFilesRecursively(std::string path, std::vector<std::string>& out);
 
 // Tag the given file as "temporary", i.e. not really needing commits to disk
-void makeTemporary( const char* filename );
+void makeTemporary(const char* filename);
 
-void setCloseOnExec( int fd );
+void setCloseOnExec(int fd);
 
 // Logs an out of memory error and exits the program
 void outOfMemory();
@@ -363,7 +382,7 @@ void outOfMemory();
 int getRandomSeed();
 
 bool getEnvironmentVar(const char* name, std::string& value);
-int setEnvironmentVar(const char *name, const char *value, int overwrite);
+int setEnvironmentVar(const char* name, const char* value, int overwrite);
 
 std::string getWorkingDirectory();
 
@@ -373,12 +392,12 @@ std::string getDefaultConfigPath();
 // Returns the absolute platform-dependant path for the default fdb.cluster file
 std::string getDefaultClusterFilePath();
 
-void *getImageOffset();
+void* getImageOffset();
 
 // Places the frame pointers in a string formatted as parameters for addr2line.
 size_t raw_backtrace(void** addresses, int maxStackDepth);
 std::string get_backtrace();
-std::string format_backtrace(void **addresses, int numAddresses);
+std::string format_backtrace(void** addresses, int numAddresses);
 
 // Avoid in production code: not atomic, not fast, not reliable in all environments
 int eraseDirectoryRecursive(std::string const& directory);
@@ -412,8 +431,8 @@ dev_t getDeviceId(std::string path);
 #if !(__has_builtin(__rdtsc))
 inline static uint64_t timestampCounter() {
 	uint64_t lo, hi;
-	asm( "rdtsc" : "=a" (lo), "=d" (hi) );
-	return( lo | (hi << 32) );
+	asm("rdtsc" : "=a"(lo), "=d"(hi));
+	return (lo | (hi << 32));
 }
 #else
 #define timestampCounter() __rdtsc()
@@ -422,9 +441,9 @@ inline static uint64_t timestampCounter() {
 // aarch64 does not have rdtsc counter
 // Use cntvct_el0 virtual counter instead
 inline static uint64_t timestampCounter() {
-    uint64_t timer;
-    asm volatile("mrs %0, cntvct_el0" : "=r"(timer));
-    return timer;
+	uint64_t timer;
+	asm volatile("mrs %0, cntvct_el0" : "=r"(timer));
+	return timer;
 }
 #else
 // all other platforms including Linux x86_64
@@ -435,59 +454,125 @@ inline static uint64_t timestampCounter() {
 #if !(__has_builtin(__rdtsc))
 inline static uint64_t __rdtsc() {
 	uint64_t lo, hi;
-	asm( "rdtsc" : "=a" (lo), "=d" (hi) );
-	return( lo | (hi << 32) );
+	asm("rdtsc" : "=a"(lo), "=d"(hi));
+	return (lo | (hi << 32));
 }
 #endif
 #endif
 
 #ifdef _WIN32
 #include <intrin.h>
-inline static int32_t interlockedIncrement(volatile int32_t *a) { return _InterlockedIncrement((long*)a); }
-inline static int64_t interlockedIncrement64(volatile int64_t *a) { return _InterlockedIncrement64(a); }
-inline static int32_t interlockedDecrement(volatile int32_t *a) { return _InterlockedDecrement((long*)a); }
-inline static int64_t interlockedDecrement64(volatile int64_t *a) { return _InterlockedDecrement64(a); }
-inline static int32_t interlockedCompareExchange(volatile int32_t *a, int32_t b, int32_t c) { return _InterlockedCompareExchange((long*)a, (long)b, (long)c); }
-inline static int64_t interlockedExchangeAdd64(volatile int64_t *a, int64_t b) { return _InterlockedExchangeAdd64(a, b); }
-inline static int64_t interlockedExchange64(volatile int64_t *a, int64_t b) { return _InterlockedExchange64(a, b); }
-inline static int64_t interlockedOr64(volatile int64_t *a, int64_t b) { return _InterlockedOr64(a, b); }
+inline static int32_t interlockedIncrement(volatile int32_t* a) {
+	return _InterlockedIncrement((long*)a);
+}
+inline static int64_t interlockedIncrement64(volatile int64_t* a) {
+	return _InterlockedIncrement64(a);
+}
+inline static int32_t interlockedDecrement(volatile int32_t* a) {
+	return _InterlockedDecrement((long*)a);
+}
+inline static int64_t interlockedDecrement64(volatile int64_t* a) {
+	return _InterlockedDecrement64(a);
+}
+inline static int32_t interlockedCompareExchange(volatile int32_t* a, int32_t b, int32_t c) {
+	return _InterlockedCompareExchange((long*)a, (long)b, (long)c);
+}
+inline static int64_t interlockedExchangeAdd64(volatile int64_t* a, int64_t b) {
+	return _InterlockedExchangeAdd64(a, b);
+}
+inline static int64_t interlockedExchange64(volatile int64_t* a, int64_t b) {
+	return _InterlockedExchange64(a, b);
+}
+inline static int64_t interlockedOr64(volatile int64_t* a, int64_t b) {
+	return _InterlockedOr64(a, b);
+}
 #elif defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8)
 #ifndef __aarch64__
 #include <xmmintrin.h>
 #endif
-inline static int32_t interlockedIncrement(volatile int32_t *a) { return __sync_add_and_fetch(a, 1); }
-inline static int64_t interlockedIncrement64(volatile int64_t *a) { return __sync_add_and_fetch(a, 1); }
-inline static int32_t interlockedDecrement(volatile int32_t *a) { return __sync_add_and_fetch(a, -1); }
-inline static int64_t interlockedDecrement64(volatile int64_t *a) { return __sync_add_and_fetch(a, -1); }
-inline static int32_t interlockedCompareExchange(volatile int32_t *a, int32_t b, int32_t c) { return __sync_val_compare_and_swap(a, c, b); }
-inline static int64_t interlockedExchangeAdd64(volatile int64_t *a, int64_t b) { return __sync_fetch_and_add(a, b); }
-inline static int64_t interlockedExchange64(volatile int64_t *a, int64_t b) {
+inline static int32_t interlockedIncrement(volatile int32_t* a) {
+	return __sync_add_and_fetch(a, 1);
+}
+inline static int64_t interlockedIncrement64(volatile int64_t* a) {
+	return __sync_add_and_fetch(a, 1);
+}
+inline static int32_t interlockedDecrement(volatile int32_t* a) {
+	return __sync_add_and_fetch(a, -1);
+}
+inline static int64_t interlockedDecrement64(volatile int64_t* a) {
+	return __sync_add_and_fetch(a, -1);
+}
+inline static int32_t interlockedCompareExchange(volatile int32_t* a, int32_t b, int32_t c) {
+	return __sync_val_compare_and_swap(a, c, b);
+}
+inline static int64_t interlockedExchangeAdd64(volatile int64_t* a, int64_t b) {
+	return __sync_fetch_and_add(a, b);
+}
+inline static int64_t interlockedExchange64(volatile int64_t* a, int64_t b) {
 	__sync_synchronize();
 	return __sync_lock_test_and_set(a, b);
 }
-inline static int64_t interlockedOr64(volatile int64_t *a, int64_t b) { return __sync_fetch_and_or(a, b); }
+inline static int64_t interlockedOr64(volatile int64_t* a, int64_t b) {
+	return __sync_fetch_and_or(a, b);
+}
 #else
 #error No implementation of atomic instructions
 #endif
 
-template <class T> inline static T* interlockedExchangePtr(T*volatile*a, T*b) { static_assert(sizeof(T*)==sizeof(int64_t),"Port me!"); return (T*)interlockedExchange64((volatile int64_t*)a, (int64_t)b); }
+template <class T>
+inline static T* interlockedExchangePtr(T* volatile* a, T* b) {
+	static_assert(sizeof(T*) == sizeof(int64_t), "Port me!");
+	return (T*)interlockedExchange64((volatile int64_t*)a, (int64_t)b);
+}
 
 #if FLOW_THREAD_SAFE
 #define thread_volatile volatile
-inline static int64_t flowInterlockedExchangeAdd64( volatile int64_t* p, int64_t a ) { return interlockedExchangeAdd64(p, a); }
-inline static int64_t flowInterlockedIncrement64( volatile int64_t* p ) { return interlockedIncrement64(p); }
-inline static int64_t flowInterlockedDecrement64( volatile int64_t* p ) { return interlockedDecrement64(p); }
-inline static int64_t flowInterlockedExchange64( volatile int64_t* p, int64_t a ) { return interlockedExchange64(p, a); }
-inline static int64_t flowInterlockedOr64( volatile int64_t* p, int64_t a ) { return interlockedOr64(p, a); }
-inline static int64_t flowInterlockedAnd64( volatile int64_t* p, int64_t a ) { return interlockedAnd64(p, a); }
+inline static int64_t flowInterlockedExchangeAdd64(volatile int64_t* p, int64_t a) {
+	return interlockedExchangeAdd64(p, a);
+}
+inline static int64_t flowInterlockedIncrement64(volatile int64_t* p) {
+	return interlockedIncrement64(p);
+}
+inline static int64_t flowInterlockedDecrement64(volatile int64_t* p) {
+	return interlockedDecrement64(p);
+}
+inline static int64_t flowInterlockedExchange64(volatile int64_t* p, int64_t a) {
+	return interlockedExchange64(p, a);
+}
+inline static int64_t flowInterlockedOr64(volatile int64_t* p, int64_t a) {
+	return interlockedOr64(p, a);
+}
+inline static int64_t flowInterlockedAnd64(volatile int64_t* p, int64_t a) {
+	return interlockedAnd64(p, a);
+}
 #else
 #define thread_volatile
-inline static int64_t flowInterlockedExchangeAdd64( int64_t* p, int64_t a ) { auto old=*p; *p+=a; return old; }
-inline static int64_t flowInterlockedIncrement64( int64_t* p ) { return ++*p; }
-inline static int64_t flowInterlockedDecrement64( int64_t* p ) { return --*p; }
-inline static int64_t flowInterlockedExchange64( int64_t* p, int64_t a ) { auto old=*p; *p=a; return old; }
-inline static int64_t flowInterlockedOr64( int64_t* p, int64_t a ) { auto old=*p; *p |= a; return old; }
-inline static int64_t flowInterlockedAnd64( int64_t* p, int64_t a ) { auto old=*p; *p &= a; return old; }
+inline static int64_t flowInterlockedExchangeAdd64(int64_t* p, int64_t a) {
+	auto old = *p;
+	*p += a;
+	return old;
+}
+inline static int64_t flowInterlockedIncrement64(int64_t* p) {
+	return ++*p;
+}
+inline static int64_t flowInterlockedDecrement64(int64_t* p) {
+	return --*p;
+}
+inline static int64_t flowInterlockedExchange64(int64_t* p, int64_t a) {
+	auto old = *p;
+	*p = a;
+	return old;
+}
+inline static int64_t flowInterlockedOr64(int64_t* p, int64_t a) {
+	auto old = *p;
+	*p |= a;
+	return old;
+}
+inline static int64_t flowInterlockedAnd64(int64_t* p, int64_t a) {
+	auto old = *p;
+	*p &= a;
+	return old;
+}
 #endif
 
 // We only run on little-endian system, so conversion to/from bigEndian64 is always a byte swap
@@ -496,7 +581,7 @@ inline static int64_t flowInterlockedAnd64( int64_t* p, int64_t a ) { auto old=*
 #define bigEndian32(value) uint32_t(_byteswap_ulong(value))
 #define bigEndian64(value) uint64_t(_byteswap_uint64(value))
 #elif __GNUG__
-#define bigEndian16(value) uint16_t((value>>8)|(value<<8))
+#define bigEndian16(value) uint16_t((value >> 8) | (value << 8))
 #define bigEndian32(value) uint32_t(__builtin_bswap32(value))
 #define bigEndian64(value) uint64_t(__builtin_bswap64(value))
 #else
@@ -508,18 +593,21 @@ inline static int64_t flowInterlockedAnd64( int64_t* p, int64_t a ) { auto old=*
 #define littleEndian64(value) value
 
 #if defined(_WIN32)
-inline static void flushOutputStreams() { _flushall(); }
+inline static void flushOutputStreams() {
+	_flushall();
+}
 #elif defined(__unixish__)
-inline static void flushOutputStreams() { fflush(nullptr); }
+inline static void flushOutputStreams() {
+	fflush(nullptr);
+}
 #else
 #error Missing flush output stream
 #endif
 
-
 #if defined(_MSC_VER)
 #define DLLEXPORT __declspec(dllexport)
 #elif defined(__GNUG__)
-#define DLLEXPORT __attribute__ ((visibility ("default")))
+#define DLLEXPORT __attribute__((visibility("default")))
 #else
 #error Missing symbol export
 #endif
@@ -531,29 +619,38 @@ inline static void flushOutputStreams() { fflush(nullptr); }
 #endif
 
 #if defined(__GNUG__)
-#define DEFAULT_CONSTRUCTORS(X) \
-	X( X const& rhs ) = default; \
-	X& operator=( X const& rhs ) = default;
+#define DEFAULT_CONSTRUCTORS(X)                                                                                        \
+	X(X const& rhs) = default;                                                                                         \
+	X& operator=(X const& rhs) = default;
 #else
 #define DEFAULT_CONSTRUCTORS(X)
 #endif
-
 
 #if defined(_WIN32)
 #define strtoull(nptr, endptr, base) _strtoui64(nptr, endptr, base)
 #endif
 
 #if defined(_MSC_VER)
-inline static void* aligned_alloc(size_t alignment, size_t size) { return _aligned_malloc(size, alignment); }
-inline static void aligned_free(void* ptr) { _aligned_free(ptr); }
+inline static void* aligned_alloc(size_t alignment, size_t size) {
+	return _aligned_malloc(size, alignment);
+}
+inline static void aligned_free(void* ptr) {
+	_aligned_free(ptr);
+}
 #elif defined(__linux__)
 #include <malloc.h>
-inline static void aligned_free(void* ptr) { free(ptr); }
+inline static void aligned_free(void* ptr) {
+	free(ptr);
+}
 #if (!defined(_ISOC11_SOURCE)) // old libc versions
-inline static void* aligned_alloc(size_t alignment, size_t size) { return memalign(alignment, size); }
+inline static void* aligned_alloc(size_t alignment, size_t size) {
+	return memalign(alignment, size);
+}
 #endif
 #elif defined(__FreeBSD__)
-inline static void aligned_free(void* ptr) { free(ptr); }
+inline static void aligned_free(void* ptr) {
+	free(ptr);
+}
 #elif defined(__APPLE__)
 #if !defined(HAS_ALIGNED_ALLOC)
 #include <cstdlib>
@@ -563,7 +660,9 @@ inline static void* aligned_alloc(size_t alignment, size_t size) {
 	return ptr;
 }
 #endif
-inline static void aligned_free(void* ptr) { free(ptr); }
+inline static void aligned_free(void* ptr) {
+	free(ptr);
+}
 #endif
 
 // lib_path may be a relative or absolute path or a name to be
@@ -576,33 +675,33 @@ void* loadFunction(void* lib, const char* func_name);
 std::string exePath();
 
 #ifdef _WIN32
-inline static int ctzll( uint64_t value ) {
-    unsigned long count = 0;
-    if( _BitScanForward64( &count, value ) ) {
-        return count;
-    }
-    return 64;
-}
-inline static int clzll( uint64_t value ) {
+inline static int ctzll(uint64_t value) {
 	unsigned long count = 0;
-    if( _BitScanReverse64( &count, value ) ) {
-        return 63 - count;
-    }
-    return 64;
+	if (_BitScanForward64(&count, value)) {
+		return count;
+	}
+	return 64;
 }
-inline static int ctz( uint32_t value ) {
-    unsigned long count = 0;
-    if( _BitScanForward( &count, value ) ) {
-        return count;
-    }
-    return 64;
-}
-inline static int clz( uint32_t value ) {
+inline static int clzll(uint64_t value) {
 	unsigned long count = 0;
-    if( _BitScanReverse( &count, value ) ) {
-        return 63 - count;
-    }
-    return 64;
+	if (_BitScanReverse64(&count, value)) {
+		return 63 - count;
+	}
+	return 64;
+}
+inline static int ctz(uint32_t value) {
+	unsigned long count = 0;
+	if (_BitScanForward(&count, value)) {
+		return count;
+	}
+	return 64;
+}
+inline static int clz(uint32_t value) {
+	unsigned long count = 0;
+	if (_BitScanReverse(&count, value)) {
+		return 63 - count;
+	}
+	return 64;
 }
 #else
 #define ctzll __builtin_ctzll
@@ -632,7 +731,7 @@ int64_t getNumProfilesCaptured();
 #endif
 
 // Logs a critical error message and exits the program
-EXTERNC void criticalError(int exitCode, const char *type, const char *message);
+EXTERNC void criticalError(int exitCode, const char* type, const char* message);
 EXTERNC void flushAndExit(int exitCode);
 
 // Initilization code that's run at the beginning of every entry point (except fdbmonitor)
@@ -643,10 +742,9 @@ void setupRunLoopProfiler();
 EXTERNC void setProfilingEnabled(int enabled);
 
 // Use _exit() or criticalError(), not exit()
-#define CALLS_TO_EXIT_ARE_FORBIDDEN_BY_POLICY() [====]
-#define exit CALLS_TO_EXIT_ARE_FORBIDDEN_BY_POLICY(0)
+#define exit static_assert(false, "Calls to exit() are forbidden by policy");
 
-#if defined(FDB_CLEAN_BUILD) && !( defined(NDEBUG) && !defined(_DEBUG) && !defined(SQLITE_DEBUG) )
+#if defined(FDB_CLEAN_BUILD) && !(defined(NDEBUG) && !defined(_DEBUG) && !defined(SQLITE_DEBUG))
 #error Clean builds must define NDEBUG, and not define various debug macros
 #endif
 
@@ -654,17 +752,24 @@ EXTERNC void setProfilingEnabled(int enabled);
 #if defined(DTRACE_PROBES)
 #include <sys/sdt.h>
 #define FDB_TRACE_PROBE_STRING_EXPAND(x) x
-#define FDB_TRACE_PROBE_STRING_CONCAT2(h, t) h ## t
+#define FDB_TRACE_PROBE_STRING_CONCAT2(h, t) h##t
 #define FDB_TRACE_PROBE_STRING_CONCAT(h, t) FDB_TRACE_PROBE_STRING_CONCAT2(h, t)
-#define FDB_TRACE_PROBE_EXPAND_MACRO(_0, _1, _2, _3, _4, _5, _6, _7, _8, _9,   \
-									 _10, _11, _12, NAME, ...)                 \
-	NAME
-#define FDB_TRACE_PROBE(...)                                                   \
-	FDB_TRACE_PROBE_EXPAND_MACRO(__VA_ARGS__, DTRACE_PROBE12, DTRACE_PROBE11,  \
-								 DTRACE_PROBE10, DTRACE_PROBE9, DTRACE_PROBE8, \
-								 DTRACE_PROBE7, DTRACE_PROBE6, DTRACE_PROBE5,  \
-								 DTRACE_PROBE4, DTRACE_PROBE3, DTRACE_PROBE2,  \
-								 DTRACE_PROBE1, DTRACE_PROBE)                  \
+#define FDB_TRACE_PROBE_EXPAND_MACRO(_0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, NAME, ...) NAME
+#define FDB_TRACE_PROBE(...)                                                                                           \
+	FDB_TRACE_PROBE_EXPAND_MACRO(__VA_ARGS__,                                                                          \
+	                             DTRACE_PROBE12,                                                                       \
+	                             DTRACE_PROBE11,                                                                       \
+	                             DTRACE_PROBE10,                                                                       \
+	                             DTRACE_PROBE9,                                                                        \
+	                             DTRACE_PROBE8,                                                                        \
+	                             DTRACE_PROBE7,                                                                        \
+	                             DTRACE_PROBE6,                                                                        \
+	                             DTRACE_PROBE5,                                                                        \
+	                             DTRACE_PROBE4,                                                                        \
+	                             DTRACE_PROBE3,                                                                        \
+	                             DTRACE_PROBE2,                                                                        \
+	                             DTRACE_PROBE1,                                                                        \
+	                             DTRACE_PROBE)                                                                         \
 	(foundationdb, __VA_ARGS__)
 
 extern void fdb_probe_actor_create(const char* name, unsigned long id);
@@ -672,7 +777,7 @@ extern void fdb_probe_actor_destroy(const char* name, unsigned long id);
 extern void fdb_probe_actor_enter(const char* name, unsigned long, int index);
 extern void fdb_probe_actor_exit(const char* name, unsigned long, int index);
 #else
-#define FDB_TRACE_PROBE_STRING_CONCAT(h, t) h ## t
+#define FDB_TRACE_PROBE_STRING_CONCAT(h, t) h##t
 #define FDB_TRACE_PROBE(...)
 inline void fdb_probe_actor_create(const char* name, unsigned long id) {}
 inline void fdb_probe_actor_destroy(const char* name, unsigned long id) {}
@@ -685,19 +790,19 @@ inline void fdb_probe_actor_exit(const char* name, unsigned long id, int index) 
 // aarch64
 #include <inttypes.h>
 static inline uint32_t hwCrc32cU8(unsigned int crc, unsigned char v) {
-    uint32_t ret;
-    asm volatile("crc32cb %w[r], %w[c], %w[v]":[r]"=r"(ret):[c]"r"(crc),[v]"r"(v));
-    return ret;
+	uint32_t ret;
+	asm volatile("crc32cb %w[r], %w[c], %w[v]" : [r] "=r"(ret) : [c] "r"(crc), [v] "r"(v));
+	return ret;
 }
 static inline uint32_t hwCrc32cU32(unsigned int crc, unsigned int v) {
-    uint32_t ret;
-    asm volatile("crc32cw %w[r], %w[c], %w[v]":[r]"=r"(ret):[c]"r"(crc),[v]"r"(v));
-    return ret;
+	uint32_t ret;
+	asm volatile("crc32cw %w[r], %w[c], %w[v]" : [r] "=r"(ret) : [c] "r"(crc), [v] "r"(v));
+	return ret;
 }
 static inline uint64_t hwCrc32cU64(uint64_t crc, uint64_t v) {
-    uint64_t ret;
-    asm volatile("crc32cx %w[r], %w[c], %x[v]":[r]"=r"(ret):[c]"r"(crc),[v]"r"(v));
-    return ret;
+	uint64_t ret;
+	asm volatile("crc32cx %w[r], %w[c], %x[v]" : [r] "=r"(ret) : [c] "r"(crc), [v] "r"(v));
+	return ret;
 }
 #else
 // Intel
