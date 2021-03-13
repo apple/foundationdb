@@ -1241,7 +1241,7 @@ std::string TraceEvent::printRealTime(double time) {
 	struct tm result;
 	ss << std::put_time(::gmtime_r(&ts, &result), "%Y-%m-%dT%H:%M:%SZ");
 #endif
-	return ss.str();
+	return std::move(ss).str();
 }
 
 TraceInterval& TraceInterval::begin() {
