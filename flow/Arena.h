@@ -1309,17 +1309,17 @@ struct Traceable<VectorRef<T>> {
 	constexpr static bool value = Traceable<T>::value;
 
 	static std::string toString(const VectorRef<T>& value) {
-		std::stringstream ss;
+		std::string result;
 		bool first = true;
 		for (const auto& v : value) {
 			if (first) {
 				first = false;
 			} else {
-				ss << ' ';
+				result.push_back(' ');
 			}
-			ss << Traceable<T>::toString(v);
+			result += Traceable<T>::toString(v);
 		}
-		return ss.str();
+		return result;
 	}
 };
 
