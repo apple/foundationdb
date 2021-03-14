@@ -8,6 +8,7 @@ set(FLOWBENCH_SRCS
   BenchRef.cpp
   BenchStream.actor.cpp
   BenchTimer.cpp
+  BenchTrace.cpp
   GlobalData.h
   GlobalData.cpp)
 

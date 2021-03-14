@@ -44,6 +44,7 @@ int main(int argc, char** argv) {
 	}
 	platformInit();
 	g_network = newNet2(TLSConfig(), false, true);
+	selectTraceFormatter("json");
 	Promise<Void> benchmarksDone;
 	std::thread benchmarkThread([&]() {
 		benchmark::RunSpecifiedBenchmarks();
