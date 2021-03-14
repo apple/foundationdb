@@ -140,7 +140,7 @@ struct MutationRef {
 
 template <>
 struct Traceable<MutationRef> : std::true_type {
-	static std::string toString(MutationRef const& value) { return value.toString(); }
+	static TraceValue toTraceValue(MutationRef const& value) { return value.toString(); }
 };
 
 static inline std::string getTypeString(MutationRef::Type type) {

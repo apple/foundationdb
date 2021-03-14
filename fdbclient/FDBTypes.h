@@ -123,7 +123,7 @@ struct struct_like_traits<Tag> : std::true_type {
 
 template <>
 struct Traceable<Tag> : std::true_type {
-	static std::string toString(const Tag& value) { return value.toString(); }
+	static TraceValue toTraceValue(const Tag& value) { return value.toString(); }
 };
 
 static const Tag invalidTag{ tagLocalitySpecial, 0 };
@@ -247,7 +247,7 @@ std::string describe(std::vector<T> const& items, int max_items = -1) {
 
 template <typename T>
 struct Traceable<std::vector<T>> : std::true_type {
-	static std::string toString(const std::vector<T>& value) { return describe(value); }
+	static TraceValue toTraceValue(const std::vector<T>& value) { return describe(value); }
 };
 
 template <class T>
@@ -257,7 +257,7 @@ std::string describe(std::set<T> const& items, int max_items = -1) {
 
 template <typename T>
 struct Traceable<std::set<T>> : std::true_type {
-	static std::string toString(const std::set<T>& value) { return describe(value); }
+	static TraceValue toTraceValue(const std::set<T>& value) { return describe(value); }
 };
 
 std::string printable(const StringRef& val);
@@ -362,16 +362,16 @@ struct KeyRangeRef {
 
 template <>
 struct Traceable<KeyRangeRef> : std::true_type {
-	static std::string toString(const KeyRangeRef& value) {
-		auto begin = Traceable<StringRef>::toString(value.begin);
-		auto end = Traceable<StringRef>::toString(value.end);
-		std::string result;
-		result.reserve(begin.size() + end.size() + 3);
-		std::copy(begin.begin(), begin.end(), std::back_inserter(result));
-		result.push_back(' ');
-		result.push_back('-');
-		result.push_back(' ');
-		std::copy(end.begin(), end.end(), std::back_inserter(result));
+	static TraceValue toTraceValue(const KeyRangeRef& value) {
+		auto begin = Traceable<StringRef>::toTraceValue(value.begin).value;
+		auto end = Traceable<StringRef>::toTraceValue(value.end).value;
+		TraceValue result;
+		result.value.reserve(begin.size() + end.size() + 3);
+		std::copy(begin.begin(), begin.end(), std::back_inserter(result.value));
+		result.value.push_back(' ');
+		result.value.push_back('-');
+		result.value.push_back(' ');
+		std::copy(end.begin(), end.end(), std::back_inserter(result.value));
 		return result;
 	}
 };
@@ -463,8 +463,8 @@ struct string_serialized_traits<KeyValueRef> : std::true_type {
 
 template <>
 struct Traceable<KeyValueRef> : std::true_type {
-	static std::string toString(const KeyValueRef& value) {
-		return Traceable<KeyRef>::toString(value.key) + format(":%d", value.value.size());
+	static TraceValue toTraceValue(const KeyValueRef& value) {
+		return Traceable<KeyRef>::toTraceValue(value.key).value + format(":%d", value.value.size());
 	}
 };
 
@@ -709,8 +709,8 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 
 template <>
 struct Traceable<RangeResultRef> : std::true_type {
-	static std::string toString(const RangeResultRef& value) {
-		return Traceable<VectorRef<KeyValueRef>>::toString(value);
+	static TraceValue toTraceValue(const RangeResultRef& value) {
+		return Traceable<VectorRef<KeyValueRef>>::toTraceValue(value);
 	}
 };
 
@@ -759,7 +759,7 @@ private:
 
 template <>
 struct Traceable<KeyValueStoreType> : std::true_type {
-	static std::string toString(KeyValueStoreType const& value) { return value.toString(); }
+	static TraceValue toTraceValue(KeyValueStoreType const& value) { return value.toString(); }
 };
 
 struct TLogVersion {
@@ -812,7 +812,7 @@ struct TLogVersion {
 
 template <>
 struct Traceable<TLogVersion> : std::true_type {
-	static std::string toString(TLogVersion const& value) { return Traceable<Version>::toString(value.version); }
+	static TraceValue toTraceValue(TLogVersion const& value) { return Traceable<Version>::toTraceValue(value.version); }
 };
 
 struct TLogSpillType {

@@ -45,22 +45,22 @@ const char* JsonTraceLogFormatter::getFooter() {
 
 namespace {
 
-void escapeString(std::stringstream& ss, const std::string& source) {
+void escapeString(std::ostringstream& oss, const std::string& source) {
 	for (auto c : source) {
 		if (c == '"') {
-			ss << "\\\"";
+			oss << "\\\"";
 		} else if (c == '\\') {
-			ss << "\\\\";
+			oss << "\\\\";
 		} else if (c == '\n') {
-			ss << "\\n";
+			oss << "\\n";
 		} else if (c == '\r') {
-			ss << "\\r";
+			oss << "\\r";
 		} else if (isprint(c)) {
-			ss << c;
+			oss << c;
 		} else {
 			constexpr char hex[] = "0123456789abcdef";
 			int x = int{ static_cast<uint8_t>(c) };
-			ss << "\\x" << hex[x / 16] << hex[x % 16];
+			oss << "\\x" << hex[x / 16] << hex[x % 16];
 		}
 	}
 }
@@ -68,18 +68,23 @@ void escapeString(std::stringstream& ss, const std::string& source) {
 } // namespace
 
 std::string JsonTraceLogFormatter::formatEvent(const TraceEventFields& fields) {
-	std::stringstream ss;
-	ss << "{  ";
+	std::ostringstream oss;
+	oss << "{  ";
 	for (auto iter = fields.begin(); iter != fields.end(); ++iter) {
 		if (iter != fields.begin()) {
-			ss << ", ";
+			oss << ", ";
 		}
-		ss << "\"";
-		escapeString(ss, iter->first);
-		ss << "\": \"";
-		escapeString(ss, iter->second);
-		ss << "\"";
+		oss << "\"";
+		escapeString(oss, iter->first);
+		oss << "\": ";
+		if (iter->second.isString) {
+			oss << "\"";
+		}
+		escapeString(oss, iter->second.value);
+		if (iter->second.isString) {
+			oss << "\"";
+		}
 	}
-	ss << " }\r\n";
-	return ss.str();
+	oss << " }\r\n";
+	return std::move(oss).str();
 }

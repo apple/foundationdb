@@ -57,11 +57,13 @@ struct ICounter {
 
 template <>
 struct Traceable<ICounter*> : std::true_type {
-	static std::string toString(ICounter const* counter) {
+	static TraceValue toTraceValue(ICounter const* counter) {
 		if (counter->hasRate() && counter->hasRoughness()) {
-			return format("%g %g %lld", counter->getRate(), counter->getRoughness(), (long long)counter->getValue());
+			return TraceValue(
+			    format("[%g,%g,%lld]", counter->getRate(), counter->getRoughness(), (long long)counter->getValue()),
+			    false);
 		} else {
-			return format("%lld", (long long)counter->getValue());
+			return TraceValue(format("%lld", (long long)counter->getValue()), false);
 		}
 	}
 };
@@ -122,8 +124,8 @@ private:
 
 template <>
 struct Traceable<Counter> : std::true_type {
-	static std::string toString(Counter const& counter) {
-		return Traceable<ICounter*>::toString((ICounter const*)&counter);
+	static TraceValue toTraceValue(Counter const& counter) {
+		return Traceable<ICounter*>::toTraceValue((ICounter const*)&counter);
 	}
 };
 

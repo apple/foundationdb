@@ -137,14 +137,14 @@ inline bool operator>=(const ExtStringRef& lhs, const ExtStringRef& rhs) {
 
 template <>
 struct Traceable<ExtStringRef> : std::true_type {
-	static std::string toString(const ExtStringRef str) {
+	static TraceValue toTraceValue(const ExtStringRef str) {
 		std::string result;
 		result.reserve(str.size());
 		std::copy(str.base.begin(), str.base.end(), std::back_inserter(result));
 		for (int i = 0; i < str.extra_zero_bytes; ++i) {
 			result.push_back('\0');
 		}
-		return Traceable<std::string>::toString(result);
+		return Traceable<std::string>::toTraceValue(result);
 	}
 };
 
