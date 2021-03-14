@@ -1368,6 +1368,16 @@ void TraceEventFields::addField(const std::string& key, const TraceValue& value)
 	fields.emplace_back(key, value);
 }
 
+void TraceEventFields::addField(const std::string& key, TraceValue&& value) {
+	bytes += key.size() + value.value.size();
+	fields.emplace_back(key, std::move(value));
+}
+
+void TraceEventFields::addField(std::string&& key, const TraceValue& value) {
+	bytes += key.size() + value.value.size();
+	fields.emplace_back(std::move(key), value);
+}
+
 void TraceEventFields::addField(std::string&& key, TraceValue&& value) {
 	bytes += key.size() + value.value.size();
 	fields.emplace_back(std::move(key), std::move(value));

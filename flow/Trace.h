@@ -96,6 +96,8 @@ public:
 	void setAnnotated();
 
 	void addField(const std::string& key, const TraceValue& value);
+	void addField(const std::string& key, TraceValue&& value);
+	void addField(std::string&& key, const TraceValue& value);
 	void addField(std::string&& key, TraceValue&& value);
 
 	const Field& operator[](int index) const;
