@@ -2477,7 +2477,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		checkOutstandingRequests(self);
 	} else if (info->second.details.interf.id() != w.id() || req.generation >= info->second.gen) {
 		if (!info->second.reply.isSet()) {
-			info->second.reply.send(Never());
+			info->second.reply.sendNever();
 		}
 		info->second.reply = req.reply;
 		info->second.details.processClass = newProcessClass;

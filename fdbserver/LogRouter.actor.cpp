@@ -517,7 +517,7 @@ ACTOR Future<Void> logRouterPeekMessages(LogRouterData* self, TLogPeekRequest re
 		    .detail("Begin", req.begin)
 		    .detail("Popped", poppedVer)
 		    .detail("Start", self->startVersion);
-		req.reply.send(Never());
+		req.reply.sendNever();
 		if (req.sequence.present()) {
 			auto& trackerData = self->peekTracker[peekId];
 			auto& sequenceData = trackerData.sequence_version[sequence + 1];

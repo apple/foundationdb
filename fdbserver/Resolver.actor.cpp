@@ -307,13 +307,13 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 			req.reply.send(batchItr->second);
 		} else {
 			TEST(true); // No outstanding batches for version on proxy
-			req.reply.send(Never());
+			req.reply.sendNever();
 		}
 	} else {
 		ASSERT_WE_THINK(false); // The first non-duplicate request with this proxyAddress, including this one, should
 		                        // have inserted this item in the map!
 		// TEST(true); // No prior proxy requests
-		req.reply.send(Never());
+		req.reply.sendNever();
 	}
 
 	++self->resolveBatchOut;

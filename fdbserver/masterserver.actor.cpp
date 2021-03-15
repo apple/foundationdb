@@ -629,10 +629,10 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Maste
 				rep.metadataVersion = metadataVersion;
 				req.reply.send(rep);
 			} else
-				req.reply.send(Never()); // We can't perform causally consistent reads without recovering
+				req.reply.sendNever(); // We can't perform causally consistent reads without recovering
 		}
 		when(CommitTransactionRequest req = waitNext(parent->provisionalCommitProxies[0].commit.getFuture())) {
-			req.reply.send(Never()); // don't reply (clients always get commit_unknown_result)
+			req.reply.sendNever(); // don't reply (clients always get commit_unknown_result)
 			auto t = &req.transaction;
 			if (t->read_snapshot == parent->lastEpochEnd && //< So no transactions can fall between the read snapshot
 			                                                // and the recovery transaction this (might) be merged with
@@ -662,7 +662,7 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Maste
 		}
 		when(GetKeyServerLocationsRequest req =
 		         waitNext(parent->provisionalCommitProxies[0].getKeyServersLocations.getFuture())) {
-			req.reply.send(Never());
+			req.reply.sendNever();
 		}
 		when(wait(waitCommitProxyFailure)) { throw worker_removed(); }
 		when(wait(waitGrvProxyFailure)) { throw worker_removed(); }
@@ -1097,7 +1097,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 
 	if (proxyItr == self->lastCommitProxyVersionReplies.end()) {
 		// Request from invalid proxy (e.g. from duplicate recruitment request)
-		req.reply.send(Never());
+		req.reply.sendNever();
 		return Void();
 	}
 
@@ -1113,7 +1113,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 		            // implementation
 		ASSERT(req.requestNum <
 		       proxyItr->second.latestRequestNum.get()); // The latest request can never be acknowledged
-		req.reply.send(Never());
+		req.reply.sendNever();
 	} else {
 		GetCommitVersionReply rep;
 

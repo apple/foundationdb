@@ -37,6 +37,9 @@ void networkSender(Future<T> input, Endpoint endpoint) {
 		FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(value), endpoint, false);
 	} catch (Error& err) {
 		// if (err.code() == error_code_broken_promise) return;
+		if (err.code() == error_code_never_reply) {
+			return;
+		}
 		ASSERT(err.code() != error_code_actor_cancelled);
 		FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(err), endpoint, false);
 	}

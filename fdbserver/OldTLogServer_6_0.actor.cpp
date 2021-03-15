@@ -1743,7 +1743,7 @@ ACTOR Future<Void> respondToRecovered(TLogInterface tli, Promise<Void> recoveryC
 		if (finishedRecovery) {
 			req.reply.send(Void());
 		} else {
-			req.reply.send(Never());
+			req.reply.sendNever();
 		}
 	}
 }
