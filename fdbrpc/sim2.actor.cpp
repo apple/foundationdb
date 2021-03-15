@@ -1983,7 +1983,8 @@ public:
 	}
 
 	Sim2()
-	  : time(0.0), timerTime(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(TaskPriority::Zero) {
+	  : time(0.0), timerTime(0.0), batchTime(0.0), taskCount(0), yielded(false), yield_limit(0),
+	    currentTaskID(TaskPriority::Zero) {
 		// Not letting currentProcess be nullptr eliminates some annoying special cases
 		currentProcess =
 		    new ProcessInfo("NoMachine",
@@ -2045,7 +2046,10 @@ public:
 			t.action.send(Never());
 		} else {
 			mutex.enter();
-			this->time = t.time;
+			if (t.time - this->time > this->batchTime) {
+				this->batchTime = deterministicRandom()->random01() * FLOW_KNOBS->MAX_RUNLOOP_TIME_BATCHING;
+				this->time = t.time;
+			}
 			this->timerTime = std::max(this->timerTime, this->time);
 			mutex.leave();
 
@@ -2094,6 +2098,7 @@ public:
 	// time should only be modified from the main thread.
 	double time;
 	double timerTime;
+	double batchTime;
 	TaskPriority currentTaskID;
 
 	// taskCount is guarded by ISimulator::mutex
