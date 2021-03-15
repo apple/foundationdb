@@ -1,34 +1,18 @@
-This PR resolves #...
+Put description here...
 
-Changes in this PR:
+# Code-Reviewer Section
 
--
--
--
+The general guidelines can be found [here](https://github.com/apple/foundationdb/wiki/FoundationDB-Commit-Process).
 
-## General guideline:
+Please check each of the following things and check *all* boxes before accepting a PR.
 
-- If this PR is ready to be merged (and all checkboxes below are either ticked or not applicable), make this a regular PR
-- If this PR still needs work, please make this a draft PR
-  - If you wish to get feedback/code-review, please add the label RFC to this PR
+[ ] The PR has a description, explaining both the problem and the solution.
+[ ] The description mentions which forms of testing were done and the testing seems reasonable.
+[ ] Every function/class/actor that was touched is reasonably well documented.
 
-Please verify that all things listed below were considered and check them. If an item doesn't apply to this type of PR (for example a documentation change doesn't need to be performance tested), you should make a ~~strikethrough~~ (markdown syntax: `~~strikethrough~~`). More infos on the guidlines can be found [here](https://github.com/apple/foundationdb/wiki/FoundationDB-Commit-Process).
+## For Release-Branches
 
-### Style
+If this PR is made against a release-branch, please also check the following:
 
-- [ ] All variable and function names make sense.
-- [ ] The code is properly formatted (consider running `git clang-format`).
-
-### Performance
-
-- [ ] All CPU-hot paths are well optimized.
-- [ ] The proper containers are used (for example `std::vector` vs `VectorRef`).
-- [ ] There are no new known `SlowTask` traces.
-
-### Testing
-
-- [ ] The code was sufficiently tested in simulation.
-- [ ] If there are new parameters or knobs, different values are tested in simulation.
-- [ ] `ASSERT`, `ASSERT_WE_THINK`, and `TEST` macros are added in appropriate places.
-- [ ] Unit tests were added for new algorithms and data structure that make sense to unit-test
-- [ ] If this is a bugfix: there is a test that can easily reproduce the bug.
+[ ] This change/bugfix is a cherry-pick from the next younger branch (younger `release-branch` or `master` if this is the youngest branch)
+[ ] There is a good reason why this PR needs to go into a release branch and this reason is documented (either in the description above or in a linked GitHub issue)
