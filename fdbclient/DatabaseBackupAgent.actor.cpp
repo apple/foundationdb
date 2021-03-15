@@ -1254,7 +1254,8 @@ struct CopyDiffLogsTaskFunc : TaskFuncBase {
 		}
 
 		// set the log version to the state
-		tr->set(StringRef(states.pack(DatabaseBackupAgent::keyStateLogBeginVersion)), BinaryWriter::toValue(beginVersion, Unversioned()));
+		tr->set(StringRef(states.pack(DatabaseBackupAgent::keyStateLogBeginVersion)),
+		        BinaryWriter::toValue(beginVersion, Unversioned()));
 		
 		if (!stopWhenDone.present()) {
 			state Reference<TaskFuture> allPartsDone = futureBucket->future(tr);
@@ -2835,7 +2836,8 @@ public:
 
 		if (! dstOnly) {
 			state Future<Void> partialTimeout = partial ? delay(30.0) : Never();
-			state Reference<ReadYourWritesTransaction> srcTr(new ReadYourWritesTransaction(backupAgent->taskBucket->src));
+			state Reference<ReadYourWritesTransaction> srcTr(
+			    new ReadYourWritesTransaction(backupAgent->taskBucket->src));
 			state Version beginVersion;
 			state Version endVersion;
 

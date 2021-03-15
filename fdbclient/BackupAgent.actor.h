@@ -479,7 +479,11 @@ public:
 		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return discontinueBackup(tr, tagName); });
 	}
 
-	Future<Void> abortBackup(Database cx, Key tagName, bool partial = false, bool abortOldBackup = false, bool dstOnly = false);
+	Future<Void> abortBackup(Database cx,
+	                         Key tagName,
+	                         bool partial = false,
+	                         bool abortOldBackup = false,
+	                         bool dstOnly = false);
 
 	Future<std::string> getStatus(Database cx, int errorLimit, Key tagName);
 
