@@ -340,14 +340,15 @@ struct NetworkMetrics {
 	};
 
 	std::unordered_map<TaskPriority, struct PriorityStats> activeTrackers;
-	double lastRunLoopBusyness;
-	std::vector<struct PriorityStats> starvationTrackers;
+	double lastRunLoopBusyness, networkBusyness;
+	std::vector<struct PriorityStats> starvationTrackers, starvationTrackersOneSecondInterval;
 
 	static const std::vector<int> starvationBins;
 
-	NetworkMetrics() : lastRunLoopBusyness(0) {
+	NetworkMetrics() : lastRunLoopBusyness(0), networkBusyness(0) {
 		for (int priority : starvationBins) {
 			starvationTrackers.emplace_back(static_cast<TaskPriority>(priority));
+			starvationTrackersOneSecondInterval.emplace_back(static_cast<TaskPriority>(priority));
 		}
 	}
 };

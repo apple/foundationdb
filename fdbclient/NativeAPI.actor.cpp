@@ -1746,6 +1746,10 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	g_network->addStopCallback(TLS::DestroyOpenSSLGlobalState);
 	FlowTransport::createInstance(true, transportId);
 	Net2FileSystem::newFileSystem();
+
+	TraceEvent("Nim_setupNetwork");
+	systemMonitorNetworkBusyness();
+	uncancellable(recurring(&systemMonitorNetworkBusyness, CLIENT_KNOBS->NETWORK_BUSYNESS_MONITOR_INTERVAL, TaskPriority::FlushTrace));
 }
 
 void runNetwork() {

@@ -366,6 +366,10 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_create_snapshot(FDBDatabase* db,
 	                        .extractPtr());
 }
 
+extern "C" DLLEXPORT double fdb_database_get_main_thread_busyness(FDBDatabase* d) {
+	return DB(d)->getMainThreadBusyness();
+}
+
 extern "C" DLLEXPORT void fdb_transaction_destroy(FDBTransaction* tr) {
 	try {
 		TXN(tr)->delref();
