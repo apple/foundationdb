@@ -33,6 +33,10 @@ extern "C" const char* __lsan_default_options(void) {
 #include <memcheck.h>
 #endif
 
+#ifdef ADDRESS_SANITIZER
+#include <sanitizer/asan_interface.h>
+#endif
+
 // For each use of arena-internal memory (e.g. ArenaBlock::getSize()), unpoison the memory before use and
 // poison it when done.
 // When creating a new ArenaBlock, poison the memory that will be later allocated to users.
@@ -67,6 +71,30 @@ void makeUndefined(void* addr, size_t size) {
 	if (valgrindPrecise()) {
 		VALGRIND_MAKE_MEM_UNDEFINED(addr, size);
 	}
+}
+#elif defined(ADDRESS_SANITIZER)
+void allowAccess(ArenaBlock* b) {
+	if (b) {
+		ASAN_UNPOISON_MEMORY_REGION(b, ArenaBlock::TINY_HEADER);
+		int headerSize = b->isTiny() ? ArenaBlock::TINY_HEADER : sizeof(ArenaBlock);
+		ASAN_UNPOISON_MEMORY_REGION(b, headerSize);
+	}
+}
+void disallowAccess(ArenaBlock* b) {
+	if (b) {
+		int headerSize = b->isTiny() ? ArenaBlock::TINY_HEADER : sizeof(ArenaBlock);
+		ASAN_POISON_MEMORY_REGION(b, headerSize);
+	}
+}
+void makeNoAccess(void* addr, size_t size) {
+	ASAN_POISON_MEMORY_REGION(addr, size);
+}
+void makeDefined(void* addr, size_t size) {
+	ASAN_UNPOISON_MEMORY_REGION(addr, size);
+}
+void makeUndefined(void* addr, size_t size) {
+	// ASAN doesn't track undefined memory. Just make it defined in case it was unaddressable before.
+	makeDefined(addr, size);
 }
 #else
 void allowAccess(ArenaBlock*) {}
