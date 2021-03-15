@@ -29,39 +29,36 @@
 #include "fdbclient/ClientWorkerInterface.h"
 
 struct ClusterInterface {
-    constexpr static FileIdentifier file_identifier = 15888863;
-	RequestStream< struct OpenDatabaseRequest > openDatabase;
-	RequestStream< struct FailureMonitoringRequest > failureMonitoring;
-	RequestStream< struct StatusRequest > databaseStatus;
-	RequestStream< ReplyPromise<Void> > ping;
-	RequestStream< struct GetClientWorkersRequest > getClientWorkers;
-	RequestStream< struct ForceRecoveryRequest > forceRecovery;
+	constexpr static FileIdentifier file_identifier = 15888863;
+	RequestStream<struct OpenDatabaseRequest> openDatabase;
+	RequestStream<struct FailureMonitoringRequest> failureMonitoring;
+	RequestStream<struct StatusRequest> databaseStatus;
+	RequestStream<ReplyPromise<Void>> ping;
+	RequestStream<struct GetClientWorkersRequest> getClientWorkers;
+	RequestStream<struct ForceRecoveryRequest> forceRecovery;
 
-	bool operator == (ClusterInterface const& r) const { return id() == r.id(); }
-	bool operator != (ClusterInterface const& r) const { return id() != r.id(); }
+	bool operator==(ClusterInterface const& r) const { return id() == r.id(); }
+	bool operator!=(ClusterInterface const& r) const { return id() != r.id(); }
 	UID id() const { return openDatabase.getEndpoint().token; }
 	NetworkAddress address() const { return openDatabase.getEndpoint().getPrimaryAddress(); }
 
 	bool hasMessage() {
-		return openDatabase.getFuture().isReady() ||
-		failureMonitoring.getFuture().isReady() || 
-		databaseStatus.getFuture().isReady() ||
-		ping.getFuture().isReady() ||
-		getClientWorkers.getFuture().isReady() ||
-		forceRecovery.getFuture().isReady();
+		return openDatabase.getFuture().isReady() || failureMonitoring.getFuture().isReady() ||
+		       databaseStatus.getFuture().isReady() || ping.getFuture().isReady() ||
+		       getClientWorkers.getFuture().isReady() || forceRecovery.getFuture().isReady();
 	}
 
 	void initEndpoints() {
-		openDatabase.getEndpoint( TaskPriority::ClusterController );
-		failureMonitoring.getEndpoint( TaskPriority::FailureMonitor );
-		databaseStatus.getEndpoint( TaskPriority::ClusterController );
-		ping.getEndpoint( TaskPriority::ClusterController );
-		getClientWorkers.getEndpoint( TaskPriority::ClusterController );
-		forceRecovery.getEndpoint( TaskPriority::ClusterController );
+		openDatabase.getEndpoint(TaskPriority::ClusterController);
+		failureMonitoring.getEndpoint(TaskPriority::FailureMonitor);
+		databaseStatus.getEndpoint(TaskPriority::ClusterController);
+		ping.getEndpoint(TaskPriority::ClusterController);
+		getClientWorkers.getEndpoint(TaskPriority::ClusterController);
+		forceRecovery.getEndpoint(TaskPriority::ClusterController);
 	}
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
+	void serialize(Ar& ar) {
 		serializer(ar, openDatabase, failureMonitoring, databaseStatus, ping, getClientWorkers, forceRecovery);
 	}
 };
@@ -88,12 +85,13 @@ struct ClientVersionRef {
 	StringRef sourceVersion;
 	StringRef protocolVersion;
 
-	ClientVersionRef() {
-		initUnknown();
-	}
+	ClientVersionRef() { initUnknown(); }
 
-	ClientVersionRef(Arena &arena, ClientVersionRef const& cv) : clientVersion(arena, cv.clientVersion), sourceVersion(arena, cv.sourceVersion), protocolVersion(arena, cv.protocolVersion) {}
-	ClientVersionRef(StringRef clientVersion, StringRef sourceVersion, StringRef protocolVersion) : clientVersion(clientVersion), sourceVersion(sourceVersion), protocolVersion(protocolVersion) {}
+	ClientVersionRef(Arena& arena, ClientVersionRef const& cv)
+	  : clientVersion(arena, cv.clientVersion), sourceVersion(arena, cv.sourceVersion),
+	    protocolVersion(arena, cv.protocolVersion) {}
+	ClientVersionRef(StringRef clientVersion, StringRef sourceVersion, StringRef protocolVersion)
+	  : clientVersion(clientVersion), sourceVersion(sourceVersion), protocolVersion(protocolVersion) {}
 	ClientVersionRef(StringRef versionString) {
 		std::vector<StringRef> parts = versionString.splitAny(LiteralStringRef(","));
 		if (parts.size() != 3) {
@@ -119,12 +117,12 @@ struct ClientVersionRef {
 	size_t expectedSize() const { return clientVersion.size() + sourceVersion.size() + protocolVersion.size(); }
 
 	bool operator<(const ClientVersionRef& rhs) const {
-		if(protocolVersion != rhs.protocolVersion) {
+		if (protocolVersion != rhs.protocolVersion) {
 			return protocolVersion < rhs.protocolVersion;
 		}
 
 		// These comparisons are arbitrary because they aren't ordered
-		if(clientVersion != rhs.clientVersion) {
+		if (clientVersion != rhs.clientVersion) {
 			return clientVersion < rhs.clientVersion;
 		}
 
@@ -136,10 +134,11 @@ template <class T>
 struct ItemWithExamples {
 	T item;
 	int count;
-	std::vector<std::pair<NetworkAddress,Key>> examples;
+	std::vector<std::pair<NetworkAddress, Key>> examples;
 
 	ItemWithExamples() : item{}, count(0) {}
-	ItemWithExamples(T const& item, int count, std::vector<std::pair<NetworkAddress,Key>> const& examples) : item(item), count(count), examples(examples) {}
+	ItemWithExamples(T const& item, int count, std::vector<std::pair<NetworkAddress, Key>> const& examples)
+	  : item(item), count(count), examples(examples) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -157,9 +156,9 @@ struct OpenDatabaseRequest {
 	std::vector<ItemWithExamples<Key>> issues;
 	std::vector<ItemWithExamples<Standalone<ClientVersionRef>>> supportedVersions;
 	std::vector<ItemWithExamples<Key>> maxProtocolSupported;
-	
+
 	UID knownClientInfoID;
-	ReplyPromise< struct ClientDBInfo > reply;
+	ReplyPromise<struct ClientDBInfo> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -176,7 +175,7 @@ struct SystemFailureStatus {
 	FailureStatus status;
 
 	SystemFailureStatus() {}
-	SystemFailureStatus( NetworkAddressList const& a, FailureStatus const& s ) : addresses(a), status(s) {}
+	SystemFailureStatus(NetworkAddressList const& a, FailureStatus const& s) : addresses(a), status(s) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -186,16 +185,24 @@ struct SystemFailureStatus {
 
 struct FailureMonitoringReply {
 	constexpr static FileIdentifier file_identifier = 6820325;
-	VectorRef< SystemFailureStatus > changes;
+	VectorRef<SystemFailureStatus> changes;
 	Version failureInformationVersion;
-	bool allOthersFailed;							// If true, changes are relative to all servers being failed, otherwise to the version given in the request
-	int clientRequestIntervalMS,        // after this many milliseconds, send another request
-		considerServerFailedTimeoutMS;  // after this many additional milliseconds, consider the ClusterController itself to be failed
+	bool allOthersFailed; // If true, changes are relative to all servers being failed, otherwise to the version given
+	                      // in the request
+	int clientRequestIntervalMS, // after this many milliseconds, send another request
+	    considerServerFailedTimeoutMS; // after this many additional milliseconds, consider the ClusterController itself
+	                                   // to be failed
 	Arena arena;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, changes, failureInformationVersion, allOthersFailed, clientRequestIntervalMS, considerServerFailedTimeoutMS, arena);
+		serializer(ar,
+		           changes,
+		           failureInformationVersion,
+		           allOthersFailed,
+		           clientRequestIntervalMS,
+		           considerServerFailedTimeoutMS,
+		           arena);
 	}
 };
 
@@ -214,7 +221,7 @@ struct FailureMonitoringRequest {
 	Optional<FailureStatus> senderStatus;
 	Version failureInformationVersion;
 	NetworkAddressList addresses;
-	ReplyPromise< struct FailureMonitoringReply > reply;
+	ReplyPromise<struct FailureMonitoringReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -228,20 +235,20 @@ struct StatusReply {
 	std::string statusStr;
 
 	StatusReply() {}
-	explicit StatusReply(StatusObject obj) : statusObj(obj), statusStr(json_spirit::write_string(json_spirit::mValue(obj))) {}
-	explicit StatusReply(std::string &&text) : statusStr(text) {}
+	explicit StatusReply(StatusObject obj)
+	  : statusObj(obj), statusStr(json_spirit::write_string(json_spirit::mValue(obj))) {}
+	explicit StatusReply(std::string&& text) : statusStr(text) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, statusStr);
-		if( ar.isDeserializing ) {
+		if (ar.isDeserializing) {
 			json_spirit::mValue mv;
-			if(g_network->isSimulated()) {
+			if (g_network->isSimulated()) {
 				mv = readJSONStrictly(statusStr);
-			}
-			else {
+			} else {
 				// In non-simulation allow errors because some status data is better than no status data
-				json_spirit::read_string( statusStr, mv );
+				json_spirit::read_string(statusStr, mv);
 			}
 			statusObj = std::move(mv.get_obj());
 		}
@@ -250,7 +257,7 @@ struct StatusReply {
 
 struct StatusRequest {
 	constexpr static FileIdentifier file_identifier = 14419140;
-	ReplyPromise< struct StatusReply > reply;
+	ReplyPromise<struct StatusReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

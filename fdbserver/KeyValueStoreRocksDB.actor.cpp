@@ -150,7 +150,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			DeleteVisitor(VectorRef<KeyRangeRef>& deletes, Arena& arena) : deletes(deletes), arena(arena) {}
 
-			rocksdb::Status DeleteRangeCF(uint32_t /*column_family_id*/, const rocksdb::Slice& begin,
+			rocksdb::Status DeleteRangeCF(uint32_t /*column_family_id*/,
+			                              const rocksdb::Slice& begin,
 			                              const rocksdb::Slice& end) override {
 				KeyRangeRef kr(toStringRef(begin), toStringRef(end));
 				deletes.push_back_deep(arena, kr);
@@ -227,9 +228,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			Key key;
 			Optional<UID> debugID;
 			ThreadReturnPromise<Optional<Value>> result;
-			ReadValueAction(KeyRef key, Optional<UID> debugID)
-				: key(key), debugID(debugID)
-			{}
+			ReadValueAction(KeyRef key, Optional<UID> debugID) : key(key), debugID(debugID) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValueAction& a) {
@@ -259,7 +258,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			int maxLength;
 			Optional<UID> debugID;
 			ThreadReturnPromise<Optional<Value>> result;
-			ReadValuePrefixAction(Key key, int maxLength, Optional<UID> debugID) : key(key), maxLength(maxLength), debugID(debugID) {};
+			ReadValuePrefixAction(Key key, int maxLength, Optional<UID> debugID)
+			  : key(key), maxLength(maxLength), debugID(debugID){};
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValuePrefixAction& a) {
@@ -267,18 +267,20 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			Optional<TraceBatch> traceBatch;
 			if (a.debugID.present()) {
 				traceBatch = { TraceBatch{} };
-				traceBatch.get().addEvent("GetValuePrefixDebug", a.debugID.get().first(),
+				traceBatch.get().addEvent("GetValuePrefixDebug",
+				                          a.debugID.get().first(),
 				                          "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
 			auto s = db->Get(getReadOptions(), db->DefaultColumnFamily(), toSlice(a.key), &value);
 			if (a.debugID.present()) {
-				traceBatch.get().addEvent("GetValuePrefixDebug", a.debugID.get().first(),
+				traceBatch.get().addEvent("GetValuePrefixDebug",
+				                          a.debugID.get().first(),
 				                          "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
 				traceBatch.get().dump();
 			}
 			if (s.ok()) {
 				a.result.send(Value(StringRef(reinterpret_cast<const uint8_t*>(value.data()),
-											  std::min(value.size(), size_t(a.maxLength)))));
+				                              std::min(value.size(), size_t(a.maxLength)))));
 			} else {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValuePrefix");
 				a.result.send(Optional<Value>());
@@ -289,7 +291,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			KeyRange keys;
 			int rowLimit, byteLimit;
 			ThreadReturnPromise<Standalone<RangeResultRef>> result;
-			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit) : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit) {}
+			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit)
+			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& a) {
@@ -346,7 +349,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			result.more =
 			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);
 			if (result.more) {
-			  result.readThrough = result[result.size()-1].key;
+				result.readThrough = result[result.size() - 1].key;
 			}
 			a.result.send(result);
 		}
@@ -361,21 +364,16 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Promise<Void> closePromise;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 
-	explicit RocksDBKeyValueStore(const std::string& path, UID id)
-		: path(path)
-		, id(id)
-	{
+	explicit RocksDBKeyValueStore(const std::string& path, UID id) : path(path), id(id) {
 		writeThread = createGenericThreadPool();
 		readThreads = createGenericThreadPool();
-		writeThread->addThread(new Writer(db, id));
+		writeThread->addThread(new Writer(db, id), "fdb-rocksdb-wr");
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
-			readThreads->addThread(new Reader(db));
+			readThreads->addThread(new Reader(db), "fdb-rocksdb-re");
 		}
 	}
 
-	Future<Void> getError() override {
-		return errorPromise.getFuture();
-	}
+	Future<Void> getError() override { return errorPromise.getFuture(); }
 
 	ACTOR static void doClose(RocksDBKeyValueStore* self, bool deleteOnClose) {
 		wait(self->readThreads->stop());
@@ -384,22 +382,18 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		self->writeThread->post(a);
 		wait(f);
 		wait(self->writeThread->stop());
-		if (self->closePromise.canBeSet()) self->closePromise.send(Void());
-		if (self->errorPromise.canBeSet()) self->errorPromise.send(Never());
+		if (self->closePromise.canBeSet())
+			self->closePromise.send(Void());
+		if (self->errorPromise.canBeSet())
+			self->errorPromise.send(Never());
 		delete self;
 	}
 
-	Future<Void> onClosed() override {
-		return closePromise.getFuture();
-	}
+	Future<Void> onClosed() override { return closePromise.getFuture(); }
 
-	void dispose() override {
-		doClose(this, true);
-	}
+	void dispose() override { doClose(this, true); }
 
-	void close() override {
-		doClose(this, false);
-	}
+	void close() override { doClose(this, false); }
 
 	KeyValueStoreType getType() const override { return KeyValueStoreType(KeyValueStoreType::SSD_ROCKSDB_V1); }
 
@@ -475,7 +469,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
-IKeyValueStore* keyValueStoreRocksDB(std::string const& path, UID logID, KeyValueStoreType storeType, bool checkChecksums, bool checkIntegrity) {
+IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
+                                     UID logID,
+                                     KeyValueStoreType storeType,
+                                     bool checkChecksums,
+                                     bool checkIntegrity) {
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 	return new RocksDBKeyValueStore(path, logID);
 #else

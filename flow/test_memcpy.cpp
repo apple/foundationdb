@@ -17,25 +17,22 @@
  * Set this to the maximum buffer size you want to test. If it is 0, then the
  * values in the buf_sizes[] array below will be used.
  */
-#define TEST_VALUE_RANGE        0
+#define TEST_VALUE_RANGE 0
 
 /* List of buffer sizes to test */
 #if TEST_VALUE_RANGE == 0
-static size_t buf_sizes[] = {
-	0, 1, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255,
-	256, 257, 320, 384, 511, 512, 513, 1023, 1024, 1025, 1518, 1522, 1600,
-	2048, 3072, 4096, 5120, 6144, 7168, 8192
-};
+static size_t buf_sizes[] = { 0,    1,    7,    8,    9,    15,   16,   17,   31,   32,   33,   63,  64,
+	                          65,   127,  128,  129,  255,  256,  257,  320,  384,  511,  512,  513, 1023,
+	                          1024, 1025, 1518, 1522, 1600, 2048, 3072, 4096, 5120, 6144, 7168, 8192 };
 /* MUST be as large as largest packet size above */
-#define SMALL_BUFFER_SIZE       8192
+#define SMALL_BUFFER_SIZE 8192
 #else /* TEST_VALUE_RANGE != 0 */
 static size_t buf_sizes[TEST_VALUE_RANGE];
-#define SMALL_BUFFER_SIZE       TEST_VALUE_RANGE
+#define SMALL_BUFFER_SIZE TEST_VALUE_RANGE
 #endif /* TEST_VALUE_RANGE == 0 */
 
 /* Data is aligned on this many bytes (power of 2) */
-#define ALIGNMENT_UNIT          32
-
+#define ALIGNMENT_UNIT 32
 
 /*
  * Create two buffers, and initialise one with random values. These are copied
@@ -43,25 +40,22 @@ static size_t buf_sizes[TEST_VALUE_RANGE];
  * The bytes outside the copied area are also checked to make sure they were not
  * changed.
  */
-static int
-test_single_memcpy(unsigned int off_src, unsigned int off_dst, size_t size)
-{
+static int test_single_memcpy(unsigned int off_src, unsigned int off_dst, size_t size) {
 	unsigned int i;
 	uint8_t dest[SMALL_BUFFER_SIZE + ALIGNMENT_UNIT];
 	uint8_t src[SMALL_BUFFER_SIZE + ALIGNMENT_UNIT];
-	void * ret;
+	void* ret;
 
 	/* Setup buffers */
 	for (i = 0; i < SMALL_BUFFER_SIZE + ALIGNMENT_UNIT; i++) {
 		dest[i] = 0;
-		src[i] = (uint8_t) deterministicRandom()->randomUInt32();
+		src[i] = (uint8_t)deterministicRandom()->randomUInt32();
 	}
 
 	/* Do the copy */
 	ret = memcpy(dest + off_dst, src + off_src, size);
 	if (ret != (dest + off_dst)) {
-		printf("memcpy() returned %p, not %p\n",
-		       ret, dest + off_dst);
+		printf("memcpy() returned %p, not %p\n", ret, dest + off_dst);
 	}
 
 	/* Check nothing before offset is affected */
@@ -69,7 +63,9 @@ test_single_memcpy(unsigned int off_src, unsigned int off_dst, size_t size)
 		if (dest[i] != 0) {
 			printf("memcpy() failed for %u bytes (offsets=%u,%u): "
 			       "[modified before start of dst].\n",
-			       (unsigned)size, off_src, off_dst);
+			       (unsigned)size,
+			       off_src,
+			       off_dst);
 			return -1;
 		}
 	}
@@ -79,7 +75,10 @@ test_single_memcpy(unsigned int off_src, unsigned int off_dst, size_t size)
 		if (dest[i + off_dst] != src[i + off_src]) {
 			printf("memcpy() failed for %u bytes (offsets=%u,%u): "
 			       "[didn't copy byte %u].\n",
-			       (unsigned)size, off_src, off_dst, i);
+			       (unsigned)size,
+			       off_src,
+			       off_dst,
+			       i);
 			return -1;
 		}
 	}
@@ -89,7 +88,9 @@ test_single_memcpy(unsigned int off_src, unsigned int off_dst, size_t size)
 		if (dest[i + off_dst] != 0) {
 			printf("memcpy() failed for %u bytes (offsets=%u,%u): "
 			       "[copied too many].\n",
-			       (unsigned)size, off_src, off_dst);
+			       (unsigned)size,
+			       off_src,
+			       off_dst);
 			return -1;
 		}
 	}
@@ -107,8 +108,7 @@ TEST_CASE("/rte/memcpy") {
 	for (off_src = 0; off_src < ALIGNMENT_UNIT; off_src++) {
 		for (off_dst = 0; off_dst < ALIGNMENT_UNIT; off_dst++) {
 			for (i = 0; i < num_buf_sizes; i++) {
-				ret = test_single_memcpy(off_src, off_dst,
-				                         buf_sizes[i]);
+				ret = test_single_memcpy(off_src, off_dst, buf_sizes[i]);
 				ASSERT(ret == 0);
 			}
 		}
@@ -116,4 +116,4 @@ TEST_CASE("/rte/memcpy") {
 	return Void();
 }
 
-void forceLinkMemcpyTests() { }
+void forceLinkMemcpyTests() {}

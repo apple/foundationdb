@@ -79,8 +79,9 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 				int endIndex = deterministicRandom()->randomInt(startIndex + 1, self->nodeCount);
 				state Key startKey = self->keyForIndex(startIndex);
 				state Key endKey = self->keyForIndex(endIndex);
-				// Find the last key <= startKey and use as the begin of the range. Since "Key()" is always the starting point, this key selector will never do cross_module_range_read.
-				// In addition, the first key in the result will be the last one <= startKey (Condition #1)
+				// Find the last key <= startKey and use as the begin of the range. Since "Key()" is always the starting
+				// point, this key selector will never do cross_module_range_read. In addition, the first key in the
+				// result will be the last one <= startKey (Condition #1)
 				state KeySelector begin =
 				    KeySelectorRef(startKey.withPrefix(ddStatsRange.begin, startKey.arena()), true, 0);
 				// Find the last key less than endKey, move forward 2 keys, and use this key as the (exclusive) end of
@@ -123,7 +124,8 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 				}
 			} catch (Error& e) {
 				// Ignore timed_out error and cross_module_read, the end key selector may read through the end
-				if (e.code() == error_code_timed_out || e.code() == error_code_special_keys_cross_module_read) continue;
+				if (e.code() == error_code_timed_out || e.code() == error_code_special_keys_cross_module_read)
+					continue;
 				TraceEvent(SevDebug, "FailedToRetrieveDDMetrics").error(e);
 				wait(tr->onError(e));
 			}
@@ -142,7 +144,8 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 			state Standalone<RangeResultRef> result = wait(tr->getRange(ddStatsRange, CLIENT_KNOBS->SHARD_COUNT_LIMIT));
 			ASSERT(!result.more);
 			self->numShards = result.size();
-			if (self->numShards < 1) return false;
+			if (self->numShards < 1)
+				return false;
 			state int64_t totalBytes = 0;
 			auto schema = readJSONStrictly(JSONSchemas::dataDistributionStatsSchema.toString()).get_obj();
 			for (int i = 0; i < result.size(); ++i) {
@@ -176,7 +179,8 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 	ACTOR Future<Void> _start(Database cx, DataDistributionMetricsWorkload* self) {
 		std::vector<Future<Void>> clients;
 		clients.push_back(self->resultConsistencyCheckClient(cx, self));
-		for (int i = 0; i < self->actorCount; ++i) clients.push_back(self->ddRWClient(cx, self));
+		for (int i = 0; i < self->actorCount; ++i)
+			clients.push_back(self->ddRWClient(cx, self));
 		wait(timeout(waitForAll(clients), self->testDuration, Void()));
 		wait(delay(5.0));
 		return Void();

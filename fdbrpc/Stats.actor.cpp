@@ -22,14 +22,15 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 Counter::Counter(std::string const& name, CounterCollection& collection)
-: name(name), interval_start(0), last_event(0), interval_sq_time(0), interval_start_value(0), interval_delta(0), roughness_interval_start(0)
-{
+  : name(name), interval_start(0), last_event(0), interval_sq_time(0), interval_start_value(0), interval_delta(0),
+    roughness_interval_start(0) {
 	metric.init(collection.name + "." + (char)toupper(name.at(0)) + name.substr(1), collection.id);
 	collection.counters.push_back(this);
 }
 
-void Counter::operator += (Value delta) {
-	if (!delta) return;  //< Otherwise last_event will be reset
+void Counter::operator+=(Value delta) {
+	if (!delta)
+		return; //< Otherwise last_event will be reset
 	interval_delta += delta;
 	auto t = now();
 	auto elapsed = t - last_event;
@@ -46,7 +47,7 @@ double Counter::getRate() const {
 
 double Counter::getRoughness() const {
 	double elapsed = last_event - roughness_interval_start;
-	if(elapsed == 0) {
+	if (elapsed == 0) {
 		return -1;
 	}
 
@@ -54,7 +55,7 @@ double Counter::getRoughness() const {
 	// n = size(T) = interval_delta
 	// m = mean(T) = elapsed / interval_delta
 	// v = sum(t^2) for t in T = interval_sq_time
-	// 
+	//
 	// The formula below is: (v/(m*n)) / m - 1
 	// This is equivalent to (v/n - m^2) / m^2 = Variance(T)/m^2
 	// Variance(T)/m^2 is equal to Variance(t/m) for t in T
@@ -67,7 +68,7 @@ void Counter::resetInterval() {
 	interval_delta = 0;
 	interval_sq_time = 0;
 	interval_start = now();
-	if(last_event == 0) {
+	if (last_event == 0) {
 		last_event = interval_start;
 	}
 	roughness_interval_start = last_event;
@@ -80,15 +81,18 @@ void Counter::clear() {
 	metric = 0;
 }
 
-void CounterCollection::logToTraceEvent(TraceEvent &te) const {
+void CounterCollection::logToTraceEvent(TraceEvent& te) const {
 	for (ICounter* c : counters) {
 		te.detail(c->getName().c_str(), c);
 		c->resetInterval();
 	}
 }
 
-ACTOR Future<Void> traceCounters(std::string traceEventName, UID traceEventID, double interval,
-                                 CounterCollection* counters, std::string trackLatestName,
+ACTOR Future<Void> traceCounters(std::string traceEventName,
+                                 UID traceEventID,
+                                 double interval,
+                                 CounterCollection* counters,
+                                 std::string trackLatestName,
                                  std::function<void(TraceEvent&)> decorator) {
 	wait(delay(0)); // Give an opportunity for all members used in special counters to be initialized
 
@@ -97,7 +101,7 @@ ACTOR Future<Void> traceCounters(std::string traceEventName, UID traceEventID, d
 
 	state double last_interval = now();
 
-	loop{
+	loop {
 		TraceEvent te(traceEventName.c_str(), traceEventID);
 		te.detail("Elapsed", now() - last_interval);
 

@@ -49,8 +49,8 @@ struct LogfileTracer : ITracer {
 	void trace(Span const& span) override {
 		TraceEvent te(SevInfo, "TracingSpan", span.context);
 		te.detail("Location", span.location.name)
-			.detail("Begin", format("%.6f", span.begin))
-			.detail("End", format("%.6f", span.end));
+		    .detail("Begin", format("%.6f", span.begin))
+		    .detail("End", format("%.6f", span.end));
 		if (span.parents.size() == 1) {
 			te.detail("Parent", *span.parents.begin());
 		} else {
@@ -71,9 +71,7 @@ struct TraceRequest {
 	// Size of buffer (bytes).
 	std::size_t buffer_size;
 
-	void write_byte(uint8_t byte) {
-		write_bytes(&byte, 1);
-	}
+	void write_byte(uint8_t byte) { write_bytes(&byte, 1); }
 
 	void write_bytes(const uint8_t* buf, std::size_t n) {
 		resize(n);
@@ -98,15 +96,14 @@ struct TraceRequest {
 		buffer_size = size;
 	}
 
-	void reset() {
-		data_size = 0;
-	}
+	void reset() { data_size = 0; }
 };
 
 // A server listening for UDP trace messages, run only in simulation.
 ACTOR Future<Void> simulationStartServer() {
 	TraceEvent(SevInfo, "UDPServerStarted").detail("Port", FLOW_KNOBS->TRACING_UDP_LISTENER_PORT);
-	state NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
+	state NetworkAddress localAddress =
+	    NetworkAddress::parse("127.0.0.1:" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
 	state Reference<IUDPSocket> serverSocket = wait(INetworkConnections::net()->createUDPSocket(localAddress));
 	serverSocket->bind(localAddress);
 
@@ -156,16 +153,17 @@ protected:
 		// the msgpack specification for more info on the bit patterns used
 		// here.
 		uint8_t size = 8;
-		if (span.parents.size() == 0) --size;
-		request.write_byte(size | 0b10010000);  // write as array
+		if (span.parents.size() == 0)
+			--size;
+		request.write_byte(size | 0b10010000); // write as array
 
-		serialize_string(g_network->getLocalAddress().toString(), request);  // ip:port
+		serialize_string(g_network->getLocalAddress().toString(), request); // ip:port
 
-		serialize_value(span.context.first(), request, 0xcf);  // trace id
-		serialize_value(span.context.second(), request, 0xcf);  // token (span id)
+		serialize_value(span.context.first(), request, 0xcf); // trace id
+		serialize_value(span.context.second(), request, 0xcf); // token (span id)
 
-		serialize_value(span.begin, request, 0xcb);  // start time
-		serialize_value(span.end - span.begin, request, 0xcb);  // duration
+		serialize_value(span.begin, request, 0xcb); // start time
+		serialize_value(span.end - span.begin, request, 0xcb); // duration
 
 		serialize_string(span.location.name.toString(), request);
 
@@ -259,10 +257,11 @@ ACTOR Future<Void> fastTraceLogger(int* unreadyMessages, int* failedMessages, in
 	state bool sendErrorReset = false;
 
 	loop {
-		TraceEvent("TracingSpanStats").detail("UnreadyMessages", *unreadyMessages)
-                                      .detail("FailedMessages", *failedMessages)
-                                      .detail("TotalMessages", *totalMessages)
-                                      .detail("SendError", *sendError);
+		TraceEvent("TracingSpanStats")
+		    .detail("UnreadyMessages", *unreadyMessages)
+		    .detail("FailedMessages", *failedMessages)
+		    .detail("TotalMessages", *totalMessages)
+		    .detail("SendError", *sendError);
 
 		if (sendErrorReset) {
 			sendErrorReset = false;
@@ -276,12 +275,11 @@ ACTOR Future<Void> fastTraceLogger(int* unreadyMessages, int* failedMessages, in
 }
 
 struct FastUDPTracer : public UDPTracer {
-	FastUDPTracer() : socket_fd_(-1), unready_socket_messages_(0), failed_messages_(0), total_messages_(0), send_error_(false) {
-		request_ = TraceRequest{
-			.buffer = std::make_unique<uint8_t[]>(kTraceBufferSize),
-			.data_size = 0,
-			.buffer_size = kTraceBufferSize
-		};
+	FastUDPTracer()
+	  : socket_fd_(-1), unready_socket_messages_(0), failed_messages_(0), total_messages_(0), send_error_(false) {
+		request_ = TraceRequest{ .buffer = std::make_unique<uint8_t[]>(kTraceBufferSize),
+			                     .data_size = 0,
+			                     .buffer_size = kTraceBufferSize };
 	}
 
 	TracerType type() const override { return TracerType::NETWORK_LOSSY; }
@@ -294,7 +292,8 @@ struct FastUDPTracer : public UDPTracer {
 				udp_server_actor_ = simulationStartServer();
 			}
 
-			NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
+			NetworkAddress localAddress =
+			    NetworkAddress::parse("127.0.0.1:" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
 			socket_ = INetworkConnections::net()->createUDPSocket(localAddress);
 		});
 

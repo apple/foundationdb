@@ -25,7 +25,7 @@
 std::unique_ptr<ServerKnobs> globalServerKnobs = std::make_unique<ServerKnobs>();
 ServerKnobs const* SERVER_KNOBS = globalServerKnobs.get();
 
-#define init( knob, value ) initKnob( knob, value, #knob )
+#define init(knob, value) initKnob(knob, value, #knob)
 
 ServerKnobs::ServerKnobs() {
 	initialize();

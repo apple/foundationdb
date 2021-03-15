@@ -63,6 +63,17 @@ public interface Database extends AutoCloseable, TransactionContext {
 	Transaction createTransaction(Executor e);
 
 	/**
+	 * Creates a {@link Transaction} that operates on this {@code Database} with the given {@link Executor}
+	 * for asynchronous callbacks.
+	 *
+	 * @param e the {@link Executor} to use when executing asynchronous callbacks for the database
+	 * @param eventKeeper the {@link EventKeeper} to use when tracking instrumented calls for the transaction.
+	 *
+	 * @return a newly created {@code Transaction} that reads from and writes to this {@code Database}.
+	 */
+	Transaction createTransaction(Executor e, EventKeeper eventKeeper);
+
+	/**
 	 * Returns a set of options that can be set on a {@code Database}
 	 *
 	 * @return a set of database-specific options affecting this {@code Database}

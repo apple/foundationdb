@@ -67,6 +67,15 @@ public class FakeFDBTransaction extends FDBTransaction {
 		}
 	}
 
+	public FakeFDBTransaction(List<KeyValue> backingData, long cPtr, Database db,
+	                          Executor executor) {
+		this(cPtr, db, executor);
+
+		for (KeyValue entry : backingData) {
+			this.backingData.put(entry.getKey(), entry.getValue());
+		}
+	}
+
 	@Override
 	public CompletableFuture<byte[]> get(byte[] key) {
 		return CompletableFuture.completedFuture(this.backingData.get(key));
@@ -92,7 +101,7 @@ public class FakeFDBTransaction extends FDBTransaction {
 
 		// holder variable so that we can pass the range to the results function safely
 		final NavigableMap<byte[], byte[]> retMap = range;
-		FutureResults fr = new FutureResults(-1L, false, executor) {
+		FutureResults fr = new FutureResults(-1L, false, executor, null) {
 			@Override
 			protected void registerMarshalCallback(Executor executor) {
 				// no-op

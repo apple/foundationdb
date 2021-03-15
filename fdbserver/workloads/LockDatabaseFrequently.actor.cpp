@@ -61,7 +61,9 @@ struct LockDatabaseFrequentlyWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> lockAndUnlock(LockDatabaseFrequentlyWorkload* self, Database cx, double* lastLock,
+	ACTOR static Future<Void> lockAndUnlock(LockDatabaseFrequentlyWorkload* self,
+	                                        Database cx,
+	                                        double* lastLock,
 	                                        double* lastUnlock) {
 		state UID uid = deterministicRandom()->randomUniqueID();
 		wait(lockDatabase(cx, uid) && poisson(lastLock, self->delayBetweenLocks));
