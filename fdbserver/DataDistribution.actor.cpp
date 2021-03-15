@@ -5264,13 +5264,15 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
 				TraceEvent("RemoveFailedServer", removeFailedServer.getFuture().get()).error(err);
 				wait(removeKeysFromFailedServer(cx, removeFailedServer.getFuture().get(), lock, ddEnabledState));
+				wait(removeStorageServer(cx, removeFailedServer.getFuture().get(), lock, ddEnabledState));
+			} else {
+				if (err.code() != error_code_movekeys_conflict)
+					throw err;
+				bool ddEnabled = wait(isDataDistributionEnabled(cx, ddEnabledState));
+				TraceEvent("DataDistributionMoveKeysConflict").detail("DataDistributionEnabled", ddEnabled).error(err);
+				if (ddEnabled)
+					throw err;
 			}
-			if (err.code() != error_code_movekeys_conflict)
-				throw err;
-			bool ddEnabled = wait(isDataDistributionEnabled(cx, ddEnabledState));
-			TraceEvent("DataDistributionMoveKeysConflict").detail("DataDistributionEnabled", ddEnabled).error(err);
-			if (ddEnabled)
-				throw err;
 		}
 	}
 }
