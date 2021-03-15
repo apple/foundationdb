@@ -69,6 +69,17 @@ void ThreadSafeDatabase::setOption(FDBDatabaseOptions::Option option, Optional<S
 	    &db->deferredError);
 }
 
+double ThreadSafeDatabase::getMainThreadBusyness() {
+	// Return the main network thread busyness
+	if (!g_network) {
+		TraceEvent("Nim_getBusyness g_network null");
+		// TODO: Is this the right thing to do in this case?
+		return 0.0;
+	}
+	TraceEvent("Nim_getBusyness g_network good");
+	return g_network->networkInfo.metrics.networkBusyness;
+}
+
 ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
 	ClusterConnectionFile* connFile =
 	    new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFilename).first);

@@ -42,6 +42,11 @@ void systemMonitor() {
 	customSystemMonitor("ProcessMetrics", &statState, true);
 }
 
+void systemMonitorNetworkBusyness() {
+	static StatisticsState statStateNetworkBusyness = StatisticsState();
+	customSystemMonitorNetworkBusyness("ProcessMetricsNetworkBusyness", &statStateNetworkBusyness);
+}
+
 SystemStatistics getSystemStatistics() {
 	static StatisticsState statState = StatisticsState();
 	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
@@ -60,6 +65,39 @@ SystemStatistics getSystemStatistics() {
 	detail("TotalMemory" #size, FastAllocator<size>::getTotalMemory())                                                 \
 	    .detail("ApproximateUnusedMemory" #size, FastAllocator<size>::getApproximateMemoryUnused())                    \
 	    .detail("ActiveThreads" #size, FastAllocator<size>::getActiveThreads())
+
+SystemStatistics customSystemMonitorNetworkBusyness(std::string eventName, StatisticsState* statState) {
+	const IPAddress ipAddr = IPAddress();
+	SystemStatistics currentStats = getSystemStatistics("",  &ipAddr, &statState->systemState, true);
+	NetworkData netData;
+	netData.init();
+	if (!g_network->isSimulated() && currentStats.initialized) {
+		{
+			bool firstTracker = true;
+			for (auto& itr : g_network->networkInfo.metrics.starvationTrackersOneSecondInterval) {
+				if (itr.active) {
+					itr.duration += now() - itr.windowedTimer;
+					itr.maxDuration = std::max(itr.maxDuration, now() - itr.timer);
+					itr.windowedTimer = now();
+				}
+
+				if (firstTracker) {
+					g_network->networkInfo.metrics.networkBusyness =
+					    std::min(currentStats.elapsed, itr.duration) / currentStats.elapsed;
+					TraceEvent("Nim_system monitor").detail("busyness", g_network->networkInfo.metrics.networkBusyness);
+					firstTracker = false;
+				}
+
+				itr.duration = 0;
+				itr.maxDuration = 0;
+			}
+		}
+	}
+
+	statState->networkMetricsState = g_network->networkInfo.metrics;
+	statState->networkState = netData;
+	return currentStats;
+}
 
 SystemStatistics customSystemMonitor(std::string eventName, StatisticsState* statState, bool machineMetrics) {
 	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();

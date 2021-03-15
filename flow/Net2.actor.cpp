@@ -124,6 +124,8 @@ thread_local INetwork* thread_network = 0;
 
 class Net2 sealed : public INetwork, public INetworkConnections {
 
+private:
+	void updateStarvationTrackers(struct NetworkMetrics::PriorityStats &binStats, TaskPriority priority, TaskPriority lastPriority, double now);
 public:
 	Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics);
 	void initTLS(ETLSInitState targetState);
@@ -1394,6 +1396,24 @@ void Net2::run() {
 #endif
 }
 
+void Net2::updateStarvationTrackers(struct NetworkMetrics::PriorityStats &binStats, TaskPriority priority, TaskPriority lastPriority, double now) {
+	// Updates the PriorityStats found in NetworkMetrics
+
+	// Busy -> idle at binStats.priority
+	if (binStats.priority > priority && binStats.priority <= lastPriority) {
+		binStats.active = false;
+		binStats.duration += now - binStats.windowedTimer;
+		binStats.maxDuration = std::max(binStats.maxDuration, now - binStats.timer);
+	}
+
+	// Idle -> busy at binStats.priority
+	else if (binStats.priority <= priority && binStats.priority > lastPriority) {
+		binStats.active = true;
+		binStats.timer = now;
+		binStats.windowedTimer = now;
+	}
+}
+
 void Net2::trackAtPriority(TaskPriority priority, double now) {
 	if (lastPriorityStats == nullptr || priority != lastPriorityStats->priority) {
 		// Start tracking current priority
@@ -1413,20 +1433,15 @@ void Net2::trackAtPriority(TaskPriority priority, double now) {
 			if (binStats.priority > lastPriority && binStats.priority > priority) {
 				break;
 			}
+			updateStarvationTrackers(binStats, priority, lastPriority, now);
+		}
 
-			// Busy -> idle at binStats.priority
-			if (binStats.priority > priority && binStats.priority <= lastPriority) {
-				binStats.active = false;
-				binStats.duration += now - binStats.windowedTimer;
-				binStats.maxDuration = std::max(binStats.maxDuration, now - binStats.timer);
+		// Update starvation trackers for 1s measurment interval
+		for (auto& binStats : networkInfo.metrics.starvationTrackersOneSecondInterval) {
+			if (binStats.priority > lastPriority && binStats.priority > priority) {
+				break;
 			}
-
-			// Idle -> busy at binStats.priority
-			else if (binStats.priority <= priority && binStats.priority > lastPriority) {
-				binStats.active = true;
-				binStats.timer = now;
-				binStats.windowedTimer = now;
-			}
+			updateStarvationTrackers(binStats, priority, lastPriority, now);
 		}
 
 		lastPriorityStats = &activeStatsItr.first->second;

@@ -93,6 +93,7 @@ public:
 
 	virtual Reference<ITransaction> createTransaction() = 0;
 	virtual void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
+	virtual double getMainThreadBusyness() = 0;
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;

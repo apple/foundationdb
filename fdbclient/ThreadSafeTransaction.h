@@ -34,7 +34,8 @@ public:
 
 	Reference<ITransaction> createTransaction();
 
-	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
+	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
+	double getMainThreadBusyness() override;
 
 	ThreadFuture<Void>
 	onConnected(); // Returns after a majority of coordination servers are available and have reported a leader. The
