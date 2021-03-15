@@ -5692,7 +5692,8 @@ std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize,
 	                                                           makeReference<AsyncVar<bool>>(true),
 	                                                           true,
 	                                                           makeReference<AsyncVar<bool>>(false),
-	                                                           PromiseStream<GetMetricsRequest>()));
+	                                                           PromiseStream<GetMetricsRequest>(),
+	                                                           Promise<UID>()));
 
 	for (int id = 1; id <= processCount; ++id) {
 		UID uid(id, 0);
@@ -5733,7 +5734,8 @@ std::unique_ptr<DDTeamCollection> testMachineTeamCollection(int teamSize,
 	                                                           makeReference<AsyncVar<bool>>(true),
 	                                                           true,
 	                                                           makeReference<AsyncVar<bool>>(false),
-	                                                           PromiseStream<GetMetricsRequest>()));
+	                                                           PromiseStream<GetMetricsRequest>(),
+	                                                           Promise<UID>()));
 
 	for (int id = 1; id <= processCount; id++) {
 		UID uid(id, 0);
