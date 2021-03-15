@@ -4144,12 +4144,12 @@ ACTOR Future<Void> storageServerTracker(
 				status.isUndesired = true;
 				status.isWrongConfiguration = true;
 				if (worstStatus == DDTeamCollection::Status::FAILED) {
-					while (!ddEnabledState->isDDEnabled()) {
-						wait(delay(1.0));
-					}
 					TraceEvent(SevWarn, "FailedServerRemoveKeys", self->distributorId)
 					    .detail("Server", server->id)
 					    .detail("Excluded", worstAddr.toString());
+					while (!ddEnabledState->isDDEnabled()) {
+						wait(delay(1.0));
+					}
 					if (self->removeFailedServer.canBeSet()) {
 						self->removeFailedServer.send(server->id);
 					}
