@@ -5259,7 +5259,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			primaryTeamCollection = Reference<DDTeamCollection>();
 			remoteTeamCollection = Reference<DDTeamCollection>();
 			wait(shards.clearAsync());
+			TraceEvent("DataDistributorTeamCollectionsDestroyed").error(err);
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
+				TraceEvent("RemoveFailedServer", removeFailedServer.getFuture().get()).error(err);
 				wait(removeKeysFromFailedServer(cx, removeFailedServer.getFuture().get(), lock, ddEnabledState));
 			}
 			if (err.code() != error_code_movekeys_conflict)
