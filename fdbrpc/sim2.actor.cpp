@@ -681,8 +681,8 @@ private:
 			        opId.shortString().c_str(),
 			        size);
 
-		if (size == 0) {
-			// KAIO will return EINVAL, as len==0 is an error.
+		// KAIO will return EINVAL, as len==0 is an error.
+		if ((self->flags & IAsyncFile::OPEN_NO_AIO) == 0 && size == 0) {
 			throw io_error();
 		}
 
@@ -2457,7 +2457,8 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 			    AsyncFileNonDurable::open(filename,
 			                              actualFilename,
 			                              SimpleFile::open(filename, flags, mode, diskParameters, false),
-			                              diskParameters);
+			                              diskParameters,
+			                              (flags & IAsyncFile::OPEN_NO_AIO) == 0);
 		}
 		Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open(machineCache[actualFilename]);
 		if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
