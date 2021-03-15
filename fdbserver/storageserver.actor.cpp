@@ -367,12 +367,19 @@ public:
 			UID UIDofLongest;
 			for (const auto& kv : startTimeMap) {
 				const double currentRunningTime = currentTime - kv.second;
-				if (longest < currentRunningTime) {
+				if (longest <= currentRunningTime) {
 					longest = currentRunningTime;
 					UIDofLongest = kv.first;
 				}
 			}
-			return { longest, keyRangeMap.at(UIDofLongest) };
+			if (BUGGIFY) {
+				UIDofLongest = deterministicRandom()->randomUniqueID();
+			}
+			auto it = keyRangeMap.find(UIDofLongest);
+			if (it != keyRangeMap.end()) {
+				return { longest, it->second };
+			}
+			return { -1, emptyKeyRange };
 		}
 
 		int numRunning() const { return startTimeMap.size(); }
