@@ -27,6 +27,7 @@
 #include <string>
 #include <stdint.h>
 #include <variant>
+#include <atomic>
 #include "boost/asio.hpp"
 #ifndef TLS_DISABLED
 #include "boost/asio/ssl.hpp"
@@ -340,7 +341,8 @@ struct NetworkMetrics {
 	};
 
 	std::unordered_map<TaskPriority, struct PriorityStats> activeTrackers;
-	double lastRunLoopBusyness, networkBusyness;
+	double lastRunLoopBusyness;
+	std::atomic<double> networkBusyness;
 	std::vector<struct PriorityStats> starvationTrackers, starvationTrackersOneSecondInterval;
 
 	static const std::vector<int> starvationBins;
@@ -350,6 +352,21 @@ struct NetworkMetrics {
 			starvationTrackers.emplace_back(static_cast<TaskPriority>(priority));
 			starvationTrackersOneSecondInterval.emplace_back(static_cast<TaskPriority>(priority));
 		}
+	}
+
+	NetworkMetrics& operator=(const NetworkMetrics& rhs) {
+		// Since networkBusyness is atomic we need to redfine copy assignment oeprator
+		for (int i = 0; i < SLOW_EVENT_BINS; i++) {
+			countSlowEvents[i] = rhs.countSlowEvents[i];
+		}
+		secSquaredSubmit = rhs.secSquaredSubmit;
+		secSquaredDiskStall = rhs.secSquaredDiskStall;
+		activeTrackers = rhs.activeTrackers;
+		lastRunLoopBusyness = rhs.lastRunLoopBusyness;
+		networkBusyness = rhs.networkBusyness.load();
+		starvationTrackers = rhs.starvationTrackers;
+		starvationTrackersOneSecondInterval = starvationTrackersOneSecondInterval;
+		return *this;
 	}
 };
 
