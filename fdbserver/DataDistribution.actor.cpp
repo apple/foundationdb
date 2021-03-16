@@ -4950,6 +4950,7 @@ ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo>> db,
 	}
 }
 
+// Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList,
                                     const DDEnabledState* ddEnabledState) {
@@ -5266,12 +5267,14 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				wait(removeKeysFromFailedServer(cx, removeFailedServer.getFuture().get(), lock, ddEnabledState));
 				wait(removeStorageServer(cx, removeFailedServer.getFuture().get(), lock, ddEnabledState));
 			} else {
-				if (err.code() != error_code_movekeys_conflict)
+				if (err.code() != error_code_movekeys_conflict) {
 					throw err;
+				}
 				bool ddEnabled = wait(isDataDistributionEnabled(cx, ddEnabledState));
 				TraceEvent("DataDistributionMoveKeysConflict").detail("DataDistributionEnabled", ddEnabled).error(err);
-				if (ddEnabled)
+				if (ddEnabled) {
 					throw err;
+				}
 			}
 		}
 	}
