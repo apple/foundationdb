@@ -42,12 +42,6 @@ void systemMonitor() {
 	customSystemMonitor("ProcessMetrics", &statState, true);
 }
 
-void systemMonitorNetworkBusyness() {
-	// update network busyness and save the state in StatisticsState
-	static StatisticsState statStateNetworkBusyness = StatisticsState();
-	customSystemMonitorNetworkBusyness("ProcessMetricsNetworkBusyness", &statStateNetworkBusyness);
-}
-
 SystemStatistics getSystemStatistics() {
 	static StatisticsState statState = StatisticsState();
 	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
@@ -67,37 +61,32 @@ SystemStatistics getSystemStatistics() {
 	    .detail("ApproximateUnusedMemory" #size, FastAllocator<size>::getApproximateMemoryUnused())                    \
 	    .detail("ActiveThreads" #size, FastAllocator<size>::getActiveThreads())
 
-SystemStatistics customSystemMonitorNetworkBusyness(std::string eventName, StatisticsState* statState) {
-	// Custom system monitor to update the network busyness on a 1s cadence
+// update the network busyness on a 1s cadence
+void monitorNetworkBusyness() {
 	const IPAddress ipAddr = IPAddress();
-	SystemStatistics currentStats = getSystemStatistics("", &ipAddr, &statState->systemState, true);
-	NetworkData netData;
-	netData.init();
+	static StatisticsState statState = StatisticsState();
+	SystemStatistics currentStats = getSystemStatistics("", &ipAddr, &(&statState)->systemState, true);
 	if (!g_network->isSimulated() && currentStats.initialized) {
-		{
-			bool firstTracker = true;
-			for (auto& itr : g_network->networkInfo.metrics.starvationTrackersOneSecondInterval) {
-				if (itr.active) {
-					itr.duration += now() - itr.windowedTimer;
-					itr.maxDuration = std::max(itr.maxDuration, now() - itr.timer);
-					itr.windowedTimer = now();
-				}
-
-				if (firstTracker) {
-					g_network->networkInfo.metrics.networkBusyness =
-					    std::min(currentStats.elapsed, itr.duration) / currentStats.elapsed;
-					firstTracker = false;
-				}
-
-				itr.duration = 0;
-				itr.maxDuration = 0;
+		bool firstTracker = true;
+		// iterate over the starvation trackers which are updated in Net2.actor.cpp
+		for (auto& itr : g_network->networkInfo.metrics.starvationTrackersNetworkBusyness) {
+			if (itr.active) {
+				itr.duration += now() - itr.windowedTimer;
+				itr.maxDuration = std::max(itr.maxDuration, now() - itr.timer);
+				itr.windowedTimer = now();
 			}
+
+			if (firstTracker) {
+				g_network->networkInfo.metrics.networkBusyness =
+				    std::min(currentStats.elapsed, itr.duration) /
+				    currentStats.elapsed; // average duration spent doing "work"
+				firstTracker = false;
+			}
+
+			itr.duration = 0;
+			itr.maxDuration = 0;
 		}
 	}
-
-	statState->networkMetricsState = g_network->networkInfo.metrics;
-	statState->networkState = netData;
-	return currentStats;
 }
 
 SystemStatistics customSystemMonitor(std::string eventName, StatisticsState* statState, bool machineMetrics) {

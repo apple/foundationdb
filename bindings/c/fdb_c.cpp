@@ -322,6 +322,7 @@ extern "C" DLLEXPORT fdb_error_t fdb_database_create_transaction(FDBDatabase* d,
 	                 *out_transaction = (FDBTransaction*)tr.extractPtr(););
 }
 
+// Get network thread busyness (updated every 1s)
 extern "C" DLLEXPORT double fdb_database_get_main_thread_busyness(FDBDatabase* d) {
 	return DB(d)->getMainThreadBusyness();
 }
