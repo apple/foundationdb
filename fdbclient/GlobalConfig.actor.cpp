@@ -112,6 +112,8 @@ void GlobalConfig::erase(KeyRangeRef range) {
 	}
 }
 
+// Updates local copy of global configuration by reading the entire key-range
+// from storage.
 ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
 	Transaction tr(self->cx);
 	Standalone<RangeResultRef> result = wait(tr.getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
@@ -122,6 +124,8 @@ ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
 	return Void();
 }
 
+// Applies updates to the local copy of the global configuration when this
+// process receives an updated history.
 ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, Reference<AsyncVar<ClientDBInfo>> dbInfo) {
 	wait(self->refresh(self));
 	self->initialized.send(Void());
@@ -131,28 +135,24 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, Reference<AsyncVar<
 			wait(dbInfo->onChange());
 
 			auto& history = dbInfo->get().history;
-			if (history.size() == 0 || (self->lastUpdate < history[0].first && self->lastUpdate != 0)) {
+			if (history.size() == 0 || (self->lastUpdate < history[0].version && self->lastUpdate != 0)) {
 				// This process missed too many global configuration
 				// history updates or the protocol version changed, so it
 				// must re-read the entire configuration range.
 				wait(self->refresh(self));
 				if (dbInfo->get().history.size() > 0) {
-					self->lastUpdate = dbInfo->get().history.back().contents().first;
+					self->lastUpdate = dbInfo->get().history.back().version;
 				}
 			} else {
 				// Apply history in order, from lowest version to highest
 				// version. Mutation history should already be stored in
 				// ascending version order.
-				for (int i = 0; i < history.size(); ++i) {
-					const std::pair<Version, VectorRef<MutationRef>>& pair = history[i].contents();
-
-					Version version = pair.first;
-					if (version <= self->lastUpdate) {
+				for (const auto& vh : history) {
+					if (vh.version <= self->lastUpdate) {
 						continue;  // already applied this mutation
 					}
 
-					const VectorRef<MutationRef>& mutations = pair.second;
-					for (const auto& mutation : mutations) {
+					for (const auto& mutation : vh.mutations.contents()) {
 						if (mutation.type == MutationRef::SetValue) {
 							self->insert(mutation.param1, mutation.param2);
 						} else if (mutation.type == MutationRef::ClearRange) {
@@ -162,8 +162,8 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, Reference<AsyncVar<
 						}
 					}
 
-					ASSERT(version > self->lastUpdate);
-					self->lastUpdate = version;
+					ASSERT(vh.version > self->lastUpdate);
+					self->lastUpdate = vh.version;
 				}
 			}
 		} catch (Error& e) {

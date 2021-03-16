@@ -41,6 +41,7 @@
 #include "fdbserver/Status.h"
 #include "fdbserver/LatencyBandConfig.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/GlobalConfig.actor.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/Replication.h"
@@ -3189,7 +3190,7 @@ ACTOR Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
 	}
 }
 
-ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db) {
+ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 	loop {
 		state ReadYourWritesTransaction tr(db->db);
 		loop {
@@ -3200,49 +3201,39 @@ ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db
 				state ClientDBInfo clientInfo = db->clientInfo->get();
 
 				if (globalConfigVersion.present()) {
-					BinaryReader versionReader = BinaryReader(globalConfigVersion.get(), AssumeVersion(g_network->protocolVersion()));
-					int64_t commitVersion;  // Currently unused. Convert to little endian if you want to use it
-					int16_t serializationOrder;
-					state ProtocolVersion protocolVersion;
-					versionReader >> commitVersion >> serializationOrder >> protocolVersion;
+					// Since the history keys end with versionstamps, they
+					// should be sorted correctly (versionstamps are stored in
+					// big-endian order).
+					Standalone<RangeResultRef> globalConfigHistory =
+					    wait(tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY));
+					// If the global configuration version key has been set,
+					// the history should contain at least one item.
+					ASSERT(globalConfigHistory.size() > 0);
+					clientInfo.history.clear();
 
-					if (protocolVersion == g_network->protocolVersion()) {
-						Standalone<RangeResultRef> globalConfigHistory = wait(tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY));
-						// If the global configuration version key has been
-						// set, the history should contain at least one item.
-						ASSERT(globalConfigHistory.size() > 0);
-						clientInfo.history.clear();
-
-						for (const auto& kv : globalConfigHistory) {
-							Standalone<std::pair<Version, VectorRef<MutationRef>>> data;
-
-							// Read commit version out of versionstamp at end of key.
-							BinaryReader versionReader = BinaryReader(kv.key.removePrefix(globalConfigHistoryPrefix), AssumeVersion(protocolVersion));
-							Version historyCommitVersion;
-							versionReader >> historyCommitVersion;
-							historyCommitVersion = bigEndian64(historyCommitVersion);
-							data.first = historyCommitVersion;
-
-							// Read the list of mutations that occurred at this version.
-							BinaryReader mutationReader = BinaryReader(kv.value, AssumeVersion(protocolVersion));
-							VectorRef<MutationRef> mutations;
-							mutationReader >> mutations;
-							data.second = VectorRef(data.arena(), mutations);
-
-							clientInfo.history.push_back(data);
+					for (const auto& kv : globalConfigHistory) {
+						VersionHistory vh;
+						ObjectReader reader(kv.value.begin(), IncludeVersion());
+						if (reader.protocolVersion() != g_network->protocolVersion()) {
+							// If the protocol version has changed, the
+							// GlobalConfig actor should refresh its view by
+							// reading the entire global configuration key
+							// range.  An empty mutation list will signal the
+							// actor to refresh.
+							clientInfo.history.clear();
+							break;
 						}
+						reader.deserialize(vh);
 
-						// History should be ordered by version, ascending.
-						std::sort(clientInfo.history.begin(), clientInfo.history.end(), [](const auto& lhs, const auto& rhs) {
-							return lhs.first < rhs.first;
-						});
-					} else {
-						// If the protocol version has changed, the
-						// GlobalConfig actor should refresh its view by
-						// reading the entire global configuration key range.
-						// An empty mutation list will signal the actor to
-						// refresh.
-						clientInfo.history.clear();
+						// Read commit version out of versionstamp at end of key.
+						BinaryReader versionReader =
+						    BinaryReader(kv.key.removePrefix(globalConfigHistoryPrefix), Unversioned());
+						Version historyCommitVersion;
+						versionReader >> historyCommitVersion;
+						historyCommitVersion = bigEndian64(historyCommitVersion);
+						vh.version = historyCommitVersion;
+
+						clientInfo.history.push_back(vh);
 					}
 
 					clientInfo.id = deterministicRandom()->randomUniqueID();
@@ -3711,29 +3702,25 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	state ClusterControllerData self(interf, locality);
 	state Future<Void> coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
 	state uint64_t step = 0;
-	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
+	state Future<ErrorOr<Void>> error = errorOr( actorCollection( self.addActor.getFuture() ) );
 
-	self.addActor.send(clusterWatchDatabase(&self, &self.db)); // Start the master database
-	self.addActor.send(self.updateWorkerList.init(self.db.db));
-	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(), &self, coordinators));
-	self.addActor.send(timeKeeper(&self));
-	self.addActor.send(monitorProcessClasses(&self));
-	self.addActor.send(monitorServerInfoConfig(&self.db));
-	self.addActor.send(monitorClientTxnInfoConfigs(&self.db));
-	self.addActor.send(updatedChangingDatacenters(&self));
-	self.addActor.send(updatedChangedDatacenters(&self));
-	self.addActor.send(updateDatacenterVersionDifference(&self));
-	self.addActor.send(handleForcedRecoveries(&self, interf));
-	self.addActor.send(monitorDataDistributor(&self));
-	self.addActor.send(monitorRatekeeper(&self));
-	self.addActor.send(dbInfoUpdater(&self));
-	self.addActor.send(traceCounters("ClusterControllerMetrics",
-	                                 self.id,
-	                                 SERVER_KNOBS->STORAGE_LOGGING_DELAY,
-	                                 &self.clusterControllerMetrics,
-	                                 self.id.toString() + "/ClusterControllerMetrics"));
-	self.addActor.send(traceRole(Role::CLUSTER_CONTROLLER, interf.id()));
-	// printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
+	self.addActor.send( clusterWatchDatabase( &self, &self.db ) );  // Start the master database
+	self.addActor.send( self.updateWorkerList.init( self.db.db ) );
+	self.addActor.send( statusServer( interf.clientInterface.databaseStatus.getFuture(), &self, coordinators));
+	self.addActor.send( timeKeeper(&self) );
+	self.addActor.send( monitorProcessClasses(&self) );
+	self.addActor.send( monitorServerInfoConfig(&self.db) );
+	self.addActor.send(monitorGlobalConfig(&self.db));
+	self.addActor.send( updatedChangingDatacenters(&self) );
+	self.addActor.send( updatedChangedDatacenters(&self) );
+	self.addActor.send( updateDatacenterVersionDifference(&self) );
+	self.addActor.send( handleForcedRecoveries(&self, interf) );
+	self.addActor.send( monitorDataDistributor(&self) );
+	self.addActor.send( monitorRatekeeper(&self) );
+	self.addActor.send( dbInfoUpdater(&self) );
+	self.addActor.send( traceCounters("ClusterControllerMetrics", self.id, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &self.clusterControllerMetrics, self.id.toString() + "/ClusterControllerMetrics") );
+	self.addActor.send( traceRole(Role::CLUSTER_CONTROLLER, interf.id()) );
+	//printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
 
 	loop choose {
 		when(ErrorOr<Void> err = wait(error)) {

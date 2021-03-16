@@ -31,6 +31,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbclient/TagThrottle.h"
+#include "fdbclient/GlobalConfig.h"
 
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
@@ -114,7 +115,7 @@ struct ClientDBInfo {
 	Optional<CommitProxyInterface>
 	    firstCommitProxy; // not serialized, used for commitOnFirstProxy when the commit proxies vector has been shrunk
 	Optional<Value> forward;
-	vector<Standalone<std::pair<Version, VectorRef<MutationRef>>>> history;
+	vector<VersionHistory> history;
 
 	ClientDBInfo() {}
 

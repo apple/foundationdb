@@ -32,6 +32,7 @@
 #include <unordered_map>
 
 #include "fdbclient/CommitProxyInterface.h"
+#include "fdbclient/GlobalConfig.h"
 #include "fdbclient/ReadYourWrites.h"
 
 #include "flow/actorcompiler.h" // has to be last include
@@ -62,6 +63,8 @@ public:
 
 	// Use this function to turn a global configuration key defined above into
 	// the full path needed to set the value in the database.
+	//
+	// For example, given "config/a", returns "\xff\xff/global_config/config/a".
 	static Key prefixedKey(KeyRef key);
 
 	// Get a value from the framework. Values are returned in a ConfigValue
@@ -91,8 +94,11 @@ public:
 
 	// To write into the global configuration, submit a transaction to
 	// \xff\xff/global_config/<your-key> with <your-value> encoded using the
-	// FDB tuple typecodes.
+	// FDB tuple typecodes. Use the helper function `prefixedKey` to correctly
+	// prefix your global configuration key.
 
+	// Triggers the returned future when the global configuration singleton has
+	// been created and is ready.
 	Future<Void> onInitialized();
 
 private:

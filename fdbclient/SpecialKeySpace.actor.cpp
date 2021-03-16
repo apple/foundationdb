@@ -1409,42 +1409,19 @@ ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* gl
 
 	// History should only contain three most recent updates. If it currently
 	// has three items, remove the oldest to make room for a new item.
-	Standalone<RangeResultRef> history = wait(tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY, false, true));
+	Standalone<RangeResultRef> history = wait(tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY));
 	constexpr int kGlobalConfigMaxHistorySize = 3;
 	if (history.size() > kGlobalConfigMaxHistorySize - 1) {
-		std::vector<KeyRef> keys;
-		for (const auto& kv : history) {
-			keys.push_back(kv.key);
-		}
-		// Fix ordering of returned keys. This will ensure versions are ordered
-		// numerically; for example \xff/globalConfig/h/1000 should come after
-		// \xff/globalConfig/h/999.
-		std::sort(keys.begin(), keys.end(), [](const KeyRef& lhs, const KeyRef& rhs) {
-			if (lhs.size() != rhs.size()) {
-				return lhs.size() < rhs.size();
-			}
-			return lhs.compare(rhs) < 0;
-		});
-
-		// Cannot use a range clear because of how keys are ordered in FDB.
-		//   \xff/globalConfig/h/999 -> ...
-		//   \xff/globalConfig/h/1000 -> ...
-		//   \xff/globalConfig/h/1001 -> ...
-		//
-		//   clear_range(\xff/globalConfig/h, \xff/globalConfig/h/1000) results
-		//   in zero key-value pairs being deleted (999 is lexicographically
-		//   larger than 1000, and the range is exclusive).
-		// Delete the oldest key(s) in the history to make room for new data.
-		for (int i = 0; i < keys.size() - (kGlobalConfigMaxHistorySize - 1); ++i) {
-			tr.clear(keys[i]);
+		for (int i = 0; i < history.size() - (kGlobalConfigMaxHistorySize - 1); ++i) {
+			tr.clear(history[i].key);
 		}
 	}
 
-	Arena arena;
-	VectorRef<MutationRef> mutations;
+	VersionHistory vh;
 
-	// Transform writes from special-key-space (\xff\xff/global_config/) to
-	// system key space (\xff/globalConfig/).
+	// Transform writes from the special-key-space (\xff\xff/global_config/) to
+	// the system key space (\xff/globalConfig/), and writes mutations to
+	// latest version history.
 	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
 	    ryw->getSpecialKeySpaceWriteMap().containedRanges(specialKeys);
 	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::iterator iter = ranges.begin();
@@ -1453,14 +1430,16 @@ ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* gl
 		if (entry.first) {
 			if (entry.second.present()) {
 				Key bareKey = iter->begin().removePrefix(globalConfig->getKeyRange().begin);
-				mutations.emplace_back_deep(arena, MutationRef(MutationRef::SetValue, bareKey, entry.second.get()));
+				vh.mutations.emplace_back_deep(vh.mutations.arena(),
+				                               MutationRef(MutationRef::SetValue, bareKey, entry.second.get()));
 
 				Key systemKey = bareKey.withPrefix(globalConfigKeysPrefix);
 				tr.set(systemKey, entry.second.get());
 			} else {
 				KeyRef bareRangeBegin = iter->range().begin.removePrefix(globalConfig->getKeyRange().begin);
 				KeyRef bareRangeEnd = iter->range().end.removePrefix(globalConfig->getKeyRange().begin);
-				mutations.emplace_back_deep(arena, MutationRef(MutationRef::ClearRange, bareRangeBegin, bareRangeEnd));
+				vh.mutations.emplace_back_deep(vh.mutations.arena(),
+				                               MutationRef(MutationRef::ClearRange, bareRangeBegin, bareRangeEnd));
 
 				Key systemRangeBegin = bareRangeBegin.withPrefix(globalConfigKeysPrefix);
 				Key systemRangeEnd = bareRangeEnd.withPrefix(globalConfigKeysPrefix);
@@ -1470,27 +1449,18 @@ ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* gl
 		++iter;
 	}
 
-	ProtocolVersion protocolVersion = g_network->protocolVersion();
-
 	// Record the mutations in this commit into the global configuration history.
-	BinaryWriter historyKeyWriter(AssumeVersion(protocolVersion));
-	historyKeyWriter.serializeBytes(globalConfigHistoryPrefix);
-	Key historyKey = addVersionStampAtEnd(historyKeyWriter.toValue());
-
-	BinaryWriter historyMutationsWriter(AssumeVersion(protocolVersion));
-	historyMutationsWriter << mutations;
-
-	tr.atomicOp(historyKey, historyMutationsWriter.toValue(), MutationRef::SetVersionstampedKey);
+	Key historyKey = addVersionStampAtEnd(globalConfigHistoryPrefix);
+	ObjectWriter historyWriter(IncludeVersion());
+	historyWriter.serialize(vh);
+	tr.atomicOp(historyKey, historyWriter.toStringRef(), MutationRef::SetVersionstampedKey);
 
 	// Write version key to trigger update in cluster controller.
 	tr.atomicOp(globalConfigVersionKey,
-	            BinaryWriter::toValue(protocolVersion, AssumeVersion(protocolVersion))
-	                .withPrefix(LiteralStringRef("0123456789")) // placeholder for versionstamp
-	                .withSuffix(LiteralStringRef("\x00\x00\x00\x00")),
+	            LiteralStringRef("0123456789\x00\x00\x00\x00"), // versionstamp
 	            MutationRef::SetVersionstampedValue);
 
 	return Optional<std::string>();
-
 }
 
 Future<Optional<std::string>> GlobalConfigImpl::commit(ReadYourWritesTransaction* ryw) {
