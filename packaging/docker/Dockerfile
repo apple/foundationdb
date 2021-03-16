@@ -84,3 +84,13 @@ ENV FDB_COORDINATOR ""
 ENV FDB_COORDINATOR_PORT 4500
 ENV FDB_CLUSTER_FILE_CONTENTS ""
 ENV FDB_PROCESS_CLASS unset
+
+# Adding tini as PID 1 https://github.com/krallin/tini
+ARG TINI_VERSION=v0.19.0
+RUN curl -sLO https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-amd64 && \
+    curl -sLO https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-amd64.sha256sum && \
+	sha256sum -c tini-amd64.sha256sum && \
+	rm -f tini-amd64.sha256sum && \
+    chmod +x tini-amd64 && \
+	mv tini-amd64 /usr/bin/tini
+ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
