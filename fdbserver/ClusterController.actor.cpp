@@ -1570,6 +1570,10 @@ public:
 			return false;
 		}
 
+		// Because a configuration with fewer proxies or resolvers does not cause this function to fail,
+		// we need an extra check to determine if the total number of processes has been reduced.
+		// This is mainly helpful in avoiding situations where avoiding a degraded process
+		// would result in a configuration with less total processes than desired.
 		if (oldTLogFit.count + oldInFit.proxy.count + oldInFit.grvProxy.count + oldInFit.resolver.count >
 		    newTLogFit.count + newInFit.proxy.count + newInFit.grvProxy.count + newInFit.resolver.count) {
 			return false;
