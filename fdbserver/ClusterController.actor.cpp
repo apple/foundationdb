@@ -1575,10 +1575,14 @@ public:
 		// Check backup worker fitness
 		RoleFitness oldBackupWorkersFit(backup_workers, ProcessClass::Backup);
 		const int nBackup = backup_addresses.size();
-		RoleFitness newBackupWorkersFit(
-		    getWorkersForRoleInDatacenter(
-		        clusterControllerDcId, ProcessClass::Backup, nBackup, db.config, id_used, true),
-		    ProcessClass::Backup);
+		RoleFitness newBackupWorkersFit(getWorkersForRoleInDatacenter(clusterControllerDcId,
+		                                                              ProcessClass::Backup,
+		                                                              nBackup,
+		                                                              db.config,
+		                                                              id_used,
+		                                                              Optional<WorkerFitnessInfo>(),
+		                                                              true),
+		                                ProcessClass::Backup);
 
 		if (oldTLogFit > newTLogFit || oldInFit > newInFit || oldSatelliteTLogFit > newSatelliteTLogFit ||
 		    oldRemoteTLogFit > newRemoteTLogFit || oldLogRoutersFit > newLogRoutersFit ||
