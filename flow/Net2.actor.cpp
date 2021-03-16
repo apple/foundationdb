@@ -1415,6 +1415,7 @@ void Net2::updateStarvationTrackers(struct NetworkMetrics::PriorityStats &binSta
 }
 
 void Net2::trackAtPriority(TaskPriority priority, double now) {
+	// Update both vectors of starvation trackers (one that updates every 5s and the other every 1s)
 	if (lastPriorityStats == nullptr || priority != lastPriorityStats->priority) {
 		// Start tracking current priority
 		auto activeStatsItr = networkInfo.metrics.activeTrackers.try_emplace(priority, priority);
