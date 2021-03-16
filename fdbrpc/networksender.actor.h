@@ -30,6 +30,7 @@
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// This actor is used by FlowTransport to serialize the response to a ReplyPromise across the network
 ACTOR template <class T>
 void networkSender(Future<T> input, Endpoint endpoint) {
 	try {

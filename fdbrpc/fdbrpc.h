@@ -121,6 +121,8 @@ public:
 	void sendError(const E& exc) const {
 		sav->sendError(exc);
 	}
+	// Call this function when a server will never send a reply to avoid sending
+	// a broken_promise when the ReplyPromise is destroyed
 	void sendNever() const {
 		sendError(never_reply());
 	}
