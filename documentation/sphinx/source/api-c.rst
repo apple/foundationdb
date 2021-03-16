@@ -481,7 +481,11 @@ An |database-blurb1| Modifications to a database are performed via transactions.
          |length-of| ``snapshot_command``
    
    .. note:: The function is exposing the functionality of the fdbcli command ``snapshot``. Please take a look at the documentation before using (see :ref:`disk-snapshot-backups`).
-         
+
+.. function:: double fdb_database_get_main_thread_busyness(FDBDatabase* database)
+
+   Returns a value between `0` and `1` representing the percentage of time the Network Thread is busy executing work from the TaskQueue. This value is updated every second.
+
 Transaction
 ===========
 

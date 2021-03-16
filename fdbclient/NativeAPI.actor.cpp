@@ -1733,6 +1733,33 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 	}
 }
 
+// update the network busyness on a 1s cadence
+ACTOR Future<Void> monitorNetworkBusyness() {
+	state double prevTime = now();
+	loop choose {
+		when(wait(delay(CLIENT_KNOBS->NETWORK_BUSYNESS_MONITOR_INTERVAL, TaskPriority::FlushTrace))) {
+			double elapsed = now() - prevTime; // get elapsed time from last execution
+			prevTime = now();
+			if (!g_network->isSimulated()) {
+				struct NetworkMetrics::PriorityStats& itr =
+				    g_network->networkInfo.metrics.starvationTrackerNetworkBusyness;
+
+				if (itr.active) { // update metrics
+					itr.duration += now() - itr.windowedTimer;
+					itr.maxDuration = std::max(itr.maxDuration, now() - itr.timer);
+					itr.windowedTimer = now();
+				}
+
+				g_network->networkInfo.metrics.networkBusyness =
+				    std::min(elapsed, itr.duration) / elapsed; // average duration spent doing "work"
+
+				itr.duration = 0;
+				itr.maxDuration = 0;
+			}
+		}
+	}
+}
+
 // Setup g_network and start monitoring for network busyness
 void setupNetwork(uint64_t transportId, bool useMetrics) {
 	if (g_network)
@@ -1748,8 +1775,7 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	FlowTransport::createInstance(true, transportId);
 	Net2FileSystem::newFileSystem();
 
-	monitorNetworkBusyness();
-	uncancellable(recurring(&monitorNetworkBusyness, CLIENT_KNOBS->NETWORK_BUSYNESS_MONITOR_INTERVAL, TaskPriority::FlushTrace));
+	uncancellable(monitorNetworkBusyness());
 }
 
 void runNetwork() {

@@ -93,6 +93,7 @@ ThreadFuture<Void> ThreadSafeDatabase::createSnapshot(const StringRef& uid, cons
 
 double ThreadSafeDatabase::getMainThreadBusyness() {
 	// Return the main network thread busyness
+	ASSERT(g_network);
 	return g_network->networkInfo.metrics.networkBusyness;
 }
 
