@@ -61,34 +61,6 @@ SystemStatistics getSystemStatistics() {
 	    .detail("ApproximateUnusedMemory" #size, FastAllocator<size>::getApproximateMemoryUnused())                    \
 	    .detail("ActiveThreads" #size, FastAllocator<size>::getActiveThreads())
 
-// update the network busyness on a 1s cadence
-void monitorNetworkBusyness() {
-	const IPAddress ipAddr = IPAddress();
-	static StatisticsState statState = StatisticsState();
-	SystemStatistics currentStats = getSystemStatistics("", &ipAddr, &(&statState)->systemState, true);
-	if (!g_network->isSimulated() && currentStats.initialized) {
-		bool firstTracker = true;
-		// iterate over the starvation trackers which are updated in Net2.actor.cpp
-		for (auto& itr : g_network->networkInfo.metrics.starvationTrackersNetworkBusyness) {
-			if (itr.active) {
-				itr.duration += now() - itr.windowedTimer;
-				itr.maxDuration = std::max(itr.maxDuration, now() - itr.timer);
-				itr.windowedTimer = now();
-			}
-
-			if (firstTracker) {
-				g_network->networkInfo.metrics.networkBusyness =
-				    std::min(currentStats.elapsed, itr.duration) /
-				    currentStats.elapsed; // average duration spent doing "work"
-				firstTracker = false;
-			}
-
-			itr.duration = 0;
-			itr.maxDuration = 0;
-		}
-	}
-}
-
 SystemStatistics customSystemMonitor(std::string eventName, StatisticsState* statState, bool machineMetrics) {
 	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
 	SystemStatistics currentStats = getSystemStatistics(

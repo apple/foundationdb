@@ -336,14 +336,16 @@ struct NetworkMetrics {
 	std::unordered_map<TaskPriority, struct PriorityStats> activeTrackers;
 	double lastRunLoopBusyness;
 	std::atomic<double> networkBusyness;
-	std::vector<struct PriorityStats> starvationTrackers, starvationTrackersNetworkBusyness;
+	std::vector<struct PriorityStats> starvationTrackers;
+	struct PriorityStats starvationTrackerNetworkBusyness;
 
 	static const std::vector<int> starvationBins;
 
-	NetworkMetrics() : lastRunLoopBusyness(0), networkBusyness(0) {
+	NetworkMetrics()
+	  : lastRunLoopBusyness(0), networkBusyness(0),
+	    starvationTrackerNetworkBusyness(PriorityStats(static_cast<TaskPriority>(starvationBins.at(0)))) {
 		for (int priority : starvationBins) {
 			starvationTrackers.emplace_back(static_cast<TaskPriority>(priority));
-			starvationTrackersNetworkBusyness.emplace_back(static_cast<TaskPriority>(priority));
 		}
 	}
 
@@ -358,7 +360,7 @@ struct NetworkMetrics {
 		lastRunLoopBusyness = rhs.lastRunLoopBusyness;
 		networkBusyness = rhs.networkBusyness.load();
 		starvationTrackers = rhs.starvationTrackers;
-		starvationTrackersNetworkBusyness = rhs.starvationTrackersNetworkBusyness;
+		starvationTrackerNetworkBusyness = rhs.starvationTrackerNetworkBusyness;
 		return *this;
 	}
 };

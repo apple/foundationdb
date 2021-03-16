@@ -148,7 +148,6 @@ struct StatisticsState {
 };
 
 void systemMonitor();
-void monitorNetworkBusyness();
 SystemStatistics customSystemMonitor(std::string eventName, StatisticsState* statState, bool machineMetrics = false);
 SystemStatistics getSystemStatistics();
 

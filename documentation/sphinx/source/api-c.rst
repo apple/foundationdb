@@ -420,6 +420,10 @@ An |database-blurb1| Modifications to a database are performed via transactions.
    ``*out_transaction``
       Set to point to the newly created :type:`FDBTransaction`.
 
+.. function:: double fdb_database_get_main_thread_busyness(FDBDatabase* database)
+
+   Returns a value between `0` and `1` representing the percentage of time the Network Thread is busy executing work from the TaskQueue. This value is updated every second.
+
 Transaction
 ===========
 

@@ -1444,13 +1444,8 @@ void Net2::trackAtPriority(TaskPriority priority, double now) {
 			updateStarvationTrackers(binStats, priority, lastPriority, now);
 		}
 
-		// Update starvation trackers for 1s measurment interval
-		for (auto& binStats : networkInfo.metrics.starvationTrackersNetworkBusyness) {
-			if (binStats.priority > lastPriority && binStats.priority > priority) {
-				break;
-			}
-			updateStarvationTrackers(binStats, priority, lastPriority, now);
-		}
+		// Update starvation trackers for network busyness
+		updateStarvationTrackers(networkInfo.metrics.starvationTrackerNetworkBusyness, priority, lastPriority, now);
 
 		lastPriorityStats = &activeStatsItr.first->second;
 	}
