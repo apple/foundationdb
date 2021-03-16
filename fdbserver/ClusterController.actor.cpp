@@ -1567,11 +1567,17 @@ public:
 			return false;
 		}
 
+		if (oldTLogFit.count + oldInFit.proxy.count + oldInFit.grvProxy.count + oldInFit.resolver.count >
+		    newTLogFit.count + newInFit.proxy.count + newInFit.grvProxy.count + newInFit.resolver.count) {
+			return false;
+		}
+
 		// Check backup worker fitness
 		RoleFitness oldBackupWorkersFit(backup_workers, ProcessClass::Backup);
 		const int nBackup = backup_addresses.size();
 		RoleFitness newBackupWorkersFit(
-		    getWorkersForRoleInDatacenter(clusterControllerDcId, ProcessClass::Backup, nBackup, db.config, id_used),
+		    getWorkersForRoleInDatacenter(
+		        clusterControllerDcId, ProcessClass::Backup, nBackup, db.config, id_used, true),
 		    ProcessClass::Backup);
 
 		if (oldTLogFit > newTLogFit || oldInFit > newInFit || oldSatelliteTLogFit > newSatelliteTLogFit ||
