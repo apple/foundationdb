@@ -132,7 +132,11 @@ thread_local INetwork* thread_network = 0;
 class Net2 final : public INetwork, public INetworkConnections {
 
 private:
-	void updateStarvationTrackers(struct NetworkMetrics::PriorityStats &binStats, TaskPriority priority, TaskPriority lastPriority, double now);
+	void updateStarvationTrackers(struct NetworkMetrics::PriorityStats& binStats,
+	                              TaskPriority priority,
+	                              TaskPriority lastPriority,
+	                              double now);
+
 public:
 	Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics);
 	void initTLS(ETLSInitState targetState) override;
@@ -1574,8 +1578,11 @@ void Net2::run() {
 #endif
 }
 
-void Net2::updateStarvationTrackers(struct NetworkMetrics::PriorityStats &binStats, TaskPriority priority, TaskPriority lastPriority, double now) {
-	// Updates the PriorityStats found in NetworkMetrics
+// Updates the PriorityStats found in NetworkMetrics
+void Net2::updateStarvationTrackers(struct NetworkMetrics::PriorityStats& binStats,
+                                    TaskPriority priority,
+                                    TaskPriority lastPriority,
+                                    double now) {
 
 	// Busy -> idle at binStats.priority
 	if (binStats.priority > priority && binStats.priority <= lastPriority) {
@@ -1616,7 +1623,7 @@ void Net2::trackAtPriority(TaskPriority priority, double now) {
 		}
 
 		// Update starvation trackers for 1s measurment interval
-		for (auto& binStats : networkInfo.metrics.starvationTrackersOneSecondInterval) {
+		for (auto& binStats : networkInfo.metrics.starvationTrackersNetworkBusyness) {
 			if (binStats.priority > lastPriority && binStats.priority > priority) {
 				break;
 			}

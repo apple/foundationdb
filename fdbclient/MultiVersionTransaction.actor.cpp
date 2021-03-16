@@ -347,6 +347,7 @@ ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef& uid, const String
 	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
 }
 
+// Get network thread busyness
 double DLDatabase::getMainThreadBusyness() {
 	if (api->databaseGetMainThreadBusyness != nullptr) {
 		return api->databaseGetMainThreadBusyness(db);
@@ -368,6 +369,7 @@ void loadClientFunction(T* fp, void* lib, std::string libPath, const char* funct
 DLApi::DLApi(std::string fdbCPath, bool unlinkOnLoad)
   : api(new FdbCApi()), fdbCPath(fdbCPath), unlinkOnLoad(unlinkOnLoad), networkSetup(false) {}
 
+// Loads client API functions (definitions are in FdbCApi struct)
 void DLApi::init() {
 	if (isLibraryLoaded(fdbCPath.c_str())) {
 		throw external_client_already_loaded();
@@ -930,6 +932,7 @@ ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef& uid, co
 	return abortableFuture(f, dbState->dbVar->get().onChange);
 }
 
+// Get network thread busyness
 double MultiVersionDatabase::getMainThreadBusyness() {
 	if (dbState->db) {
 		return dbState->db->getMainThreadBusyness();

@@ -148,9 +148,8 @@ struct StatisticsState {
 };
 
 void systemMonitor();
-void systemMonitorNetworkBusyness();
+void monitorNetworkBusyness();
 SystemStatistics customSystemMonitor(std::string eventName, StatisticsState* statState, bool machineMetrics = false);
-SystemStatistics customSystemMonitorNetworkBusyness(std::string eventName, StatisticsState* statState);
 SystemStatistics getSystemStatistics();
 
 #endif /* FLOW_SYSTEM_MONITOR_H */
