@@ -68,7 +68,7 @@ SystemStatistics getSystemStatistics() {
 
 SystemStatistics customSystemMonitorNetworkBusyness(std::string eventName, StatisticsState* statState) {
 	const IPAddress ipAddr = IPAddress();
-	SystemStatistics currentStats = getSystemStatistics("",  &ipAddr, &statState->systemState, true);
+	SystemStatistics currentStats = getSystemStatistics("", &ipAddr, &statState->systemState, true);
 	NetworkData netData;
 	netData.init();
 	if (!g_network->isSimulated() && currentStats.initialized) {
@@ -84,7 +84,6 @@ SystemStatistics customSystemMonitorNetworkBusyness(std::string eventName, Stati
 				if (firstTracker) {
 					g_network->networkInfo.metrics.networkBusyness =
 					    std::min(currentStats.elapsed, itr.duration) / currentStats.elapsed;
-					TraceEvent("Nim_system monitor").detail("busyness", g_network->networkInfo.metrics.networkBusyness);
 					firstTracker = false;
 				}
 
