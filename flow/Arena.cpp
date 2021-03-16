@@ -73,6 +73,9 @@ void makeUndefined(void* addr, size_t size) {
 	}
 }
 #elif defined(ADDRESS_SANITIZER)
+// https://github.com/google/sanitizers/wiki/AddressSanitizerManualPoisoning
+// These are approximate because of asan alignment requirements. ASAN_UNPOISON_MEMORY_REGION may unpoison slightly more
+// than requested and ASAN_POISON_MEMORY_REGION may poison slightly less than requested.
 void allowAccess(ArenaBlock* b) {
 	if (b) {
 		ASAN_UNPOISON_MEMORY_REGION(b, ArenaBlock::TINY_HEADER);
