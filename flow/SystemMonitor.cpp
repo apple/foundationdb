@@ -43,6 +43,7 @@ void systemMonitor() {
 }
 
 void systemMonitorNetworkBusyness() {
+	// update network busyness and save the state in StatisticsState
 	static StatisticsState statStateNetworkBusyness = StatisticsState();
 	customSystemMonitorNetworkBusyness("ProcessMetricsNetworkBusyness", &statStateNetworkBusyness);
 }
@@ -67,6 +68,7 @@ SystemStatistics getSystemStatistics() {
 	    .detail("ActiveThreads" #size, FastAllocator<size>::getActiveThreads())
 
 SystemStatistics customSystemMonitorNetworkBusyness(std::string eventName, StatisticsState* statState) {
+	// Custom system monitor to update the network busyness on a 1s cadence
 	const IPAddress ipAddr = IPAddress();
 	SystemStatistics currentStats = getSystemStatistics("", &ipAddr, &statState->systemState, true);
 	NetworkData netData;

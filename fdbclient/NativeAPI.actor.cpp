@@ -1734,6 +1734,7 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 }
 
 void setupNetwork(uint64_t transportId, bool useMetrics) {
+	// Setup g_network and start monitoring for network busyness
 	if (g_network)
 		throw network_already_setup();
 
