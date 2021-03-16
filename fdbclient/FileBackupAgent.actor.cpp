@@ -1205,7 +1205,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 					wait(rangeFile.writeKey(nextKey));
 
 					if (BUGGIFY) {
-						rangeFile.padEnd();
+						wait(rangeFile.padEnd());
 					}
 
 					bool usedFile = wait(
@@ -5014,15 +5014,16 @@ public:
 		return statusText;
 	}
 
-	ACTOR static Future<Version> getLastRestorable(FileBackupAgent* backupAgent,
-	                                               Reference<ReadYourWritesTransaction> tr,
-	                                               Key tagName,
-	                                               bool snapshot) {
+	ACTOR static Future<Optional<Version>> getLastRestorable(FileBackupAgent* backupAgent,
+	                                                         Reference<ReadYourWritesTransaction> tr, Key tagName,
+	                                                         bool snapshot) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state Optional<Value> version = wait(tr->get(backupAgent->lastRestorable.pack(tagName), snapshot));
 
-		return (version.present()) ? BinaryReader::fromStringRef<Version>(version.get(), Unversioned()) : 0;
+		return (version.present())
+		           ? Optional<Version>(BinaryReader::fromStringRef<Version>(version.get(), Unversioned()))
+		           : Optional<Version>();
 	}
 
 	static StringRef read(StringRef& data, int bytes) {
@@ -5390,9 +5391,8 @@ Future<std::string> FileBackupAgent::getStatusJSON(Database cx, std::string tagN
 	return FileBackupAgentImpl::getStatusJSON(this, cx, tagName);
 }
 
-Future<Version> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr,
-                                                   Key tagName,
-                                                   bool snapshot) {
+Future<Optional<Version>> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName,
+                                                             bool snapshot) {
 	return FileBackupAgentImpl::getLastRestorable(this, tr, tagName, snapshot);
 }
 
