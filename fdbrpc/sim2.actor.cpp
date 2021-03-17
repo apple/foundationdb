@@ -859,8 +859,7 @@ public:
 		seconds = std::max(0.0, seconds);
 		Future<Void> f;
 
-		bool ordered = currentProcess->rebooting || machine != currentProcess || !machine->machine ||
-		               currentProcess->shutdownSignal.isSet();
+		bool ordered = currentProcess->rebooting || machine != currentProcess || currentProcess->shutdownSignal.isSet();
 		if (!ordered && FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 &&
 		    deterministicRandom()->random01() < 0.25) { // FIXME: why doesnt this work when we are changing machines?
 			seconds += FLOW_KNOBS->MAX_BUGGIFIED_DELAY * pow(deterministicRandom()->random01(), 1000.0);
@@ -869,8 +868,9 @@ public:
 		mutex.enter();
 		tasks.push(Task(actualTime + seconds,
 		                taskID,
-		                taskCount++, // : (deterministicRandom()->randomUInt64() << 32) | taskCount++,
+		                ordered ? taskCount++ : (deterministicRandom()->randomUInt64() << 32) | taskCount++,
 		                machine,
+		                ordered,
 		                f));
 		mutex.leave();
 
@@ -1113,18 +1113,21 @@ public:
 			self->instantTasks.push_back(
 			    std::move(self->tasks.top())); // Unfortunately still a copy under gcc where .top() returns const&
 			self->time = self->tasks.top().time;
-			double batchTime = deterministicRandom()->random01() * FLOW_KNOBS->MAX_RUNLOOP_TIME_BATCHING;
+			bool ordered = self->tasks.top().ordered;
 			self->tasks.pop();
-			while (self->tasks.top().time - self->time < batchTime) {
-				self->instantTasks.push_back(std::move(self->tasks.top()));
-				self->tasks.pop();
-			}
-			std::sort(self->instantTasks.begin(), self->instantTasks.end(), [](const Task& a, const Task& b) {
-				if (a.taskID != b.taskID) {
-					return a.taskID > b.taskID;
+			if (!ordered) {
+				double batchTime = deterministicRandom()->random01() * FLOW_KNOBS->MAX_RUNLOOP_TIME_BATCHING;
+				while (self->tasks.top().time - self->time < batchTime && !self->tasks.top().ordered) {
+					self->instantTasks.push_back(std::move(self->tasks.top()));
+					self->tasks.pop();
 				}
-				return a.stable < b.stable;
-			});
+				std::sort(self->instantTasks.begin(), self->instantTasks.end(), [](const Task& a, const Task& b) {
+					if (a.taskID != b.taskID) {
+						return a.taskID > b.taskID;
+					}
+					return a.stable < b.stable;
+				});
+			}
 			self->mutex.leave();
 			for (auto& t : self->instantTasks) {
 				self->execTask(t);
@@ -2025,31 +2028,45 @@ public:
 		TaskPriority taskID;
 		double time;
 		uint64_t stable;
+		bool ordered;
 		ProcessInfo* machine;
 		Promise<Void> action;
-		Task(double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, Promise<Void>&& action)
-		  : time(time), taskID(taskID), stable(stable), machine(machine), action(std::move(action)) {}
-		Task(double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, Future<Void>& future)
-		  : time(time), taskID(taskID), stable(stable), machine(machine) {
+		Task(double time,
+		     TaskPriority taskID,
+		     uint64_t stable,
+		     bool ordered,
+		     ProcessInfo* machine,
+		     Promise<Void>&& action)
+		  : time(time), taskID(taskID), stable(stable), machine(machine), ordered(ordered), action(std::move(action)) {}
+		Task(double time,
+		     TaskPriority taskID,
+		     uint64_t stable,
+		     bool ordered,
+		     ProcessInfo* machine,
+		     Future<Void>& future)
+		  : time(time), taskID(taskID), stable(stable), machine(machine), ordered(ordered) {
 			future = action.getFuture();
 		}
 		Task(Task&& rhs) noexcept
-		  : time(rhs.time), taskID(rhs.taskID), stable(rhs.stable), machine(rhs.machine),
+		  : time(rhs.time), taskID(rhs.taskID), stable(rhs.stable), machine(rhs.machine), ordered(rhs.ordered),
 		    action(std::move(rhs.action)) {}
 		void operator=(Task const& rhs) {
 			taskID = rhs.taskID;
 			time = rhs.time;
 			stable = rhs.stable;
 			machine = rhs.machine;
+			ordered = rhs.ordered;
 			action = rhs.action;
 		}
 		Task(Task const& rhs)
-		  : taskID(rhs.taskID), time(rhs.time), stable(rhs.stable), machine(rhs.machine), action(rhs.action) {}
+		  : taskID(rhs.taskID), time(rhs.time), stable(rhs.stable), machine(rhs.machine), ordered(rhs.ordered),
+		    action(rhs.action) {}
 		void operator=(Task&& rhs) noexcept {
 			time = rhs.time;
 			taskID = rhs.taskID;
 			stable = rhs.stable;
 			machine = rhs.machine;
+			ordered = rhs.ordered;
 			action = std::move(rhs.action);
 		}
 
@@ -2098,7 +2115,7 @@ public:
 
 		mutex.enter();
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
-		tasks.push(Task(actualTime, taskID, taskCount++, getCurrentProcess(), std::move(signal)));
+		tasks.push(Task(actualTime, taskID, taskCount++, getCurrentProcess(), true, std::move(signal)));
 		mutex.leave();
 	}
 	bool isOnMainThread() const override { return net2->isOnMainThread(); }
