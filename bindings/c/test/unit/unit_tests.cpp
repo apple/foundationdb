@@ -1511,12 +1511,16 @@ TEST_CASE("fdb_transaction_get_approximate_size") {
 }
 
 TEST_CASE("fdb_get_server_protocol") {
+	// We don't really have any expectations other than "don't crash" here
 	FDBFuture* protocolFuture = fdb_get_server_protocol(clusterFilePath.c_str());
 	uint64_t out;
 
 	fdb_check(fdb_future_block_until_ready(protocolFuture));
 	fdb_check(fdb_future_get_uint64(protocolFuture, &out));
 	fdb_future_destroy(protocolFuture);
+
+	// "Default" cluster file version
+	fdb_future_destroy(fdb_get_server_protocol(nullptr));
 }
 
 TEST_CASE("fdb_transaction_watch read_your_writes_disable") {
