@@ -149,7 +149,7 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, Reference<AsyncVar<
 				// ascending version order.
 				for (const auto& vh : history) {
 					if (vh.version <= self->lastUpdate) {
-						continue;  // already applied this mutation
+						continue; // already applied this mutation
 					}
 
 					for (const auto& mutation : vh.mutations.contents()) {

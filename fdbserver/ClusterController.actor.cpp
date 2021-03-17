@@ -2716,7 +2716,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		clientInfo.id = deterministicRandom()->randomUniqueID();
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
-		db->clientInfo->set( clientInfo );
+		db->clientInfo->set(clientInfo);
 		dbInfo.client = db->clientInfo->get();
 	}
 
@@ -3702,25 +3702,29 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	state ClusterControllerData self(interf, locality);
 	state Future<Void> coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
 	state uint64_t step = 0;
-	state Future<ErrorOr<Void>> error = errorOr( actorCollection( self.addActor.getFuture() ) );
+	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
 
-	self.addActor.send( clusterWatchDatabase( &self, &self.db ) );  // Start the master database
-	self.addActor.send( self.updateWorkerList.init( self.db.db ) );
-	self.addActor.send( statusServer( interf.clientInterface.databaseStatus.getFuture(), &self, coordinators));
-	self.addActor.send( timeKeeper(&self) );
-	self.addActor.send( monitorProcessClasses(&self) );
-	self.addActor.send( monitorServerInfoConfig(&self.db) );
+	self.addActor.send(clusterWatchDatabase(&self, &self.db)); // Start the master database
+	self.addActor.send(self.updateWorkerList.init(self.db.db));
+	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(), &self, coordinators));
+	self.addActor.send(timeKeeper(&self));
+	self.addActor.send(monitorProcessClasses(&self));
+	self.addActor.send(monitorServerInfoConfig(&self.db));
 	self.addActor.send(monitorGlobalConfig(&self.db));
-	self.addActor.send( updatedChangingDatacenters(&self) );
-	self.addActor.send( updatedChangedDatacenters(&self) );
-	self.addActor.send( updateDatacenterVersionDifference(&self) );
-	self.addActor.send( handleForcedRecoveries(&self, interf) );
-	self.addActor.send( monitorDataDistributor(&self) );
-	self.addActor.send( monitorRatekeeper(&self) );
-	self.addActor.send( dbInfoUpdater(&self) );
-	self.addActor.send( traceCounters("ClusterControllerMetrics", self.id, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &self.clusterControllerMetrics, self.id.toString() + "/ClusterControllerMetrics") );
-	self.addActor.send( traceRole(Role::CLUSTER_CONTROLLER, interf.id()) );
-	//printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
+	self.addActor.send(updatedChangingDatacenters(&self));
+	self.addActor.send(updatedChangedDatacenters(&self));
+	self.addActor.send(updateDatacenterVersionDifference(&self));
+	self.addActor.send(handleForcedRecoveries(&self, interf));
+	self.addActor.send(monitorDataDistributor(&self));
+	self.addActor.send(monitorRatekeeper(&self));
+	self.addActor.send(dbInfoUpdater(&self));
+	self.addActor.send(traceCounters("ClusterControllerMetrics",
+	                                 self.id,
+	                                 SERVER_KNOBS->STORAGE_LOGGING_DELAY,
+	                                 &self.clusterControllerMetrics,
+	                                 self.id.toString() + "/ClusterControllerMetrics"));
+	self.addActor.send(traceRole(Role::CLUSTER_CONTROLLER, interf.id()));
+	// printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
 
 	loop choose {
 		when(ErrorOr<Void> err = wait(error)) {

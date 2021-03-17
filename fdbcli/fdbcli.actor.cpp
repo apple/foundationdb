@@ -3842,8 +3842,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								is_error = true;
 								continue;
 							}
-							const double sampleRateDbl = GlobalConfig::globalConfig().get<double>(fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
-							const int64_t sizeLimit = GlobalConfig::globalConfig().get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
+							const double sampleRateDbl = GlobalConfig::globalConfig().get<double>(
+							    fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
+							const int64_t sizeLimit =
+							    GlobalConfig::globalConfig().get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
 							std::string sampleRateStr = "default", sizeLimitStr = "default";
 							if (!std::isinf(sampleRateDbl)) {
 								sampleRateStr = boost::lexical_cast<std::string>(sampleRateDbl);

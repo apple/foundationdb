@@ -1378,19 +1378,24 @@ Future<Standalone<RangeResultRef>> GlobalConfigImpl::getRange(ReadYourWritesTran
 	Standalone<RangeResultRef> result;
 
 	auto& globalConfig = GlobalConfig::globalConfig();
-	KeyRangeRef modified = KeyRangeRef(kr.begin.removePrefix(getKeyRange().begin), kr.end.removePrefix(getKeyRange().begin));
+	KeyRangeRef modified =
+	    KeyRangeRef(kr.begin.removePrefix(getKeyRange().begin), kr.end.removePrefix(getKeyRange().begin));
 	std::map<KeyRef, ConfigValue> values = globalConfig.get(modified);
 	for (const auto& [key, config] : values) {
 		Key prefixedKey = key.withPrefix(getKeyRange().begin);
 		if (config.value.has_value()) {
 			if (config.value.type() == typeid(StringRef)) {
-				result.push_back_deep(result.arena(), KeyValueRef(prefixedKey, std::any_cast<StringRef>(config.value).toString()));
+				result.push_back_deep(result.arena(),
+				                      KeyValueRef(prefixedKey, std::any_cast<StringRef>(config.value).toString()));
 			} else if (config.value.type() == typeid(int64_t)) {
-				result.push_back_deep(result.arena(), KeyValueRef(prefixedKey, std::to_string(std::any_cast<int64_t>(config.value))));
+				result.push_back_deep(result.arena(),
+				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<int64_t>(config.value))));
 			} else if (config.value.type() == typeid(float)) {
-				result.push_back_deep(result.arena(), KeyValueRef(prefixedKey, std::to_string(std::any_cast<float>(config.value))));
+				result.push_back_deep(result.arena(),
+				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<float>(config.value))));
 			} else if (config.value.type() == typeid(double)) {
-				result.push_back_deep(result.arena(), KeyValueRef(prefixedKey, std::to_string(std::any_cast<double>(config.value))));
+				result.push_back_deep(result.arena(),
+				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<double>(config.value))));
 			} else {
 				ASSERT(false);
 			}
