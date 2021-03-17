@@ -1113,7 +1113,7 @@ public:
 				self->instantTasks.push_back(std::move(self->tasks.top()));
 				self->tasks.pop();
 			}
-			std::sort(self->instantTasks.begin(), self->instantTasks.end(), [](const Task& a, const Task& b) {
+			std::stable_sort(self->instantTasks.begin(), self->instantTasks.end(), [](const Task& a, const Task& b) {
 				return a.taskID > b.taskID;
 			});
 			self->mutex.leave();
