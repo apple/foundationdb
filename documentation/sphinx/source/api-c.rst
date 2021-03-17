@@ -484,7 +484,7 @@ An |database-blurb1| Modifications to a database are performed via transactions.
 
 .. function:: double fdb_database_get_main_thread_busyness(FDBDatabase* database)
 
-   Returns a value between `0` and `1` representing the percentage of time the Network Thread is busy executing work from the TaskQueue. This value is updated every second.
+   Returns a value where `0` indicates that the client is idle, whereas a value of 1 (or larger) indicates that the client is saturated. By default, this value is updated every second.
 
 Transaction
 ===========
