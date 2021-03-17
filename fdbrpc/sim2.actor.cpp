@@ -1093,7 +1093,6 @@ public:
 
 	ACTOR static Future<Void> runLoop(Sim2* self) {
 		state ISimulator::ProcessInfo* callingMachine = self->currentProcess;
-		randLog = fopen("randLog.txt", "wt");
 		while (!self->isStopped) {
 			wait(self->net2->yield(TaskPriority::DefaultYield));
 
@@ -1114,8 +1113,10 @@ public:
 				self->instantTasks.push_back(std::move(self->tasks.top()));
 				self->tasks.pop();
 			}
-			std::stable_sort(self->instantTasks.begin(), self->instantTasks.end(), [](const Task& a, const Task& b) {
-				return a.taskID > b.taskID;
+			std::sort(self->instantTasks.begin(), self->instantTasks.end(), [](const Task& a, const Task& b) {
+				if (a.taskID != b.taskID)
+					return a.taskID > b.taskID;
+				return a.stable < b.stable;
 			});
 			self->mutex.leave();
 			for (auto& t : self->instantTasks) {
