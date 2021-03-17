@@ -1093,6 +1093,7 @@ public:
 
 	ACTOR static Future<Void> runLoop(Sim2* self) {
 		state ISimulator::ProcessInfo* callingMachine = self->currentProcess;
+		randLog = fopen("randLog.txt", "wt");
 		while (!self->isStopped) {
 			wait(self->net2->yield(TaskPriority::DefaultYield));
 
@@ -1102,7 +1103,7 @@ public:
 				ASSERT(false);
 			}
 			// if (!randLog/* && now() >= 32.0*/)
-			//	randLog = fopen("randLog.txt", "wt");
+			//randLog = fopen("randLog.txt", "wt");
 			self->instantTasks.clear();
 			self->instantTasks.push_back(
 			    std::move(self->tasks.top())); // Unfortunately still a copy under gcc where .top() returns const&
@@ -2073,8 +2074,9 @@ public:
 
 			if (randLog)
 				fprintf(randLog,
-				        "T %f %d %s %" PRId64 "\n",
+				        "T %f %f %d %s %" PRId64 "\n",
 				        this->time,
+						this->actualTime,
 				        int(deterministicRandom()->peek() % 10000),
 				        t.machine ? t.machine->name : "none",
 				        t.stable);
