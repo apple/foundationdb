@@ -1115,8 +1115,12 @@ public:
 				self->tasks.pop();
 			}
 			std::sort(self->instantTasks.begin(), self->instantTasks.end(), [](const Task& a, const Task& b) {
-				if (a.taskID != b.taskID)
+				if (a.taskID != b.taskID) {
 					return a.taskID > b.taskID;
+				}
+				if (a.time != b.time) {
+					return a.time < b.time;
+				}
 				return a.stable < b.stable;
 			});
 			self->mutex.leave();
