@@ -81,10 +81,7 @@ std::vector<Reference<ActorLineage>> ActorLineageSet::copy() {
 	// after we're done we need to clean up all objects that contented on a lock. This won't be perfect (as some thread
 	// might not yet added the object to the free list), but whatever we don't get now we'll clean up in the next
 	// iteration
-	ActorLineage* toClean;
-	while (freeList.pop(toClean)) {
-		toClean->delref();
-	}
+	freeList.consume_all([](auto toClean) { toClean->delRef(); });
 	return result;
 }
 
