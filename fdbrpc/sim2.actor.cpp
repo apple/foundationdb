@@ -866,7 +866,7 @@ public:
 		}
 
 		mutex.enter();
-		tasks.push(Task(actualTime + seconds, taskID, taskCount++, machine, f));
+		tasks.push(Task(actualTime + seconds, taskID, deterministicRandom()->randomUInt64(), machine, f));
 		mutex.leave();
 
 		return f;
@@ -1117,9 +1117,6 @@ public:
 			std::sort(self->instantTasks.begin(), self->instantTasks.end(), [](const Task& a, const Task& b) {
 				if (a.taskID != b.taskID) {
 					return a.taskID > b.taskID;
-				}
-				if (a.time != b.time) {
-					return a.time < b.time;
 				}
 				return a.stable < b.stable;
 			});
