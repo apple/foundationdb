@@ -844,7 +844,7 @@ public:
 
 	// timer() can be up to 0.1 seconds ahead of now()
 	double timer() override {
-		timerTime += deterministicRandom()->random01() * (time + 0.1 - timerTime) / 2.0;
+		timerTime += deterministicRandom()->random01() * (trueTime + 0.1 - timerTime) / 2.0;
 		return timerTime;
 	}
 
@@ -866,7 +866,7 @@ public:
 		}
 
 		mutex.enter();
-		tasks.push(Task(time + seconds, taskID, taskCount++, machine, f));
+		tasks.push(Task(trueTime + seconds, taskID, taskCount++, machine, f));
 		mutex.leave();
 
 		return f;
@@ -1983,8 +1983,8 @@ public:
 	}
 
 	Sim2()
-	  : time(0.0), timerTime(0.0), batchTime(0.0), batchCount(0), taskCount(0), yielded(false), yield_limit(0),
-	    currentTaskID(TaskPriority::Zero) {
+	  : time(0.0), trueTime(0.0), timerTime(0.0), batchTime(0.0), batchCount(0), taskCount(0), yielded(false),
+	    yield_limit(0), currentTaskID(TaskPriority::Zero) {
 		// Not letting currentProcess be nullptr eliminates some annoying special cases
 		currentProcess =
 		    new ProcessInfo("NoMachine",
@@ -2046,12 +2046,14 @@ public:
 			t.action.send(Never());
 		} else {
 			mutex.enter();
-			if (t.time - this->time > this->batchTime || this->batchCount-- <= 0) {
+
+			this->trueTime = t.time;
+			if (t.time - this->time > this->batchTime || t.stable >= this->batchCount) {
 				this->batchTime = deterministicRandom()->random01() * FLOW_KNOBS->MAX_RUNLOOP_TIME_BATCHING;
-				this->batchCount = 100;
+				this->batchCount = this->taskCount;
 				this->time = t.time;
 			}
-			this->timerTime = std::max(this->timerTime, this->time);
+			this->timerTime = std::max(this->timerTime, this->trueTime);
 			mutex.leave();
 
 			this->currentProcess = t.machine;
@@ -2080,7 +2082,7 @@ public:
 
 		mutex.enter();
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
-		tasks.push(Task(time, taskID, taskCount++, getCurrentProcess(), std::move(signal)));
+		tasks.push(Task(trueTime, taskID, taskCount++, getCurrentProcess(), std::move(signal)));
 		mutex.leave();
 	}
 	bool isOnMainThread() const override { return net2->isOnMainThread(); }
@@ -2098,13 +2100,14 @@ public:
 	// time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
 	// time should only be modified from the main thread.
 	double time;
+	double trueTime;
 	double timerTime;
 	double batchTime;
-	int batchCount;
 	TaskPriority currentTaskID;
 
 	// taskCount is guarded by ISimulator::mutex
 	uint64_t taskCount;
+	uint64_t batchCount;
 
 	std::map<Optional<Standalone<StringRef>>, MachineInfo> machines;
 	std::map<NetworkAddress, ProcessInfo*> addressMap;
