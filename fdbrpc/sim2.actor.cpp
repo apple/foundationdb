@@ -2055,7 +2055,7 @@ public:
 		} else {
 			mutex.enter();
 			this->currentTaskID = t.taskID;
-			this->actualTime = t.time;
+			this->actualTime = std::max(this->actualTime, t.time);
 			this->timerTime = std::max(this->timerTime, this->actualTime);
 			mutex.leave();
 
