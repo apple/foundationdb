@@ -569,7 +569,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	if (self->localBatchNumber - self->pProxyCommitData->latestLocalCommitBatchResolving.get() >
 	        SERVER_KNOBS->RESET_MASTER_BATCHES &&
 	    now() - self->pProxyCommitData->lastMasterReset > SERVER_KNOBS->RESET_MASTER_DELAY) {
-		TraceEvent(SevWarnAlways, "ResetMasterNetwork")
+		TraceEvent(SevWarnAlways, "ResetMasterNetwork", self->pProxyCommitData->dbgid)
 		    .detail("CurrentBatch", self->localBatchNumber)
 		    .detail("InProcessBatch", self->pProxyCommitData->latestLocalCommitBatchResolving.get());
 		FlowTransport::transport().resetConnection(self->pProxyCommitData->master.address());
@@ -687,10 +687,11 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	if (self->localBatchNumber - self->pProxyCommitData->latestLocalCommitBatchLogging.get() >
 	        SERVER_KNOBS->RESET_RESOLVER_BATCHES &&
 	    now() - self->pProxyCommitData->lastResolverReset > SERVER_KNOBS->RESET_RESOLVER_DELAY) {
-		TraceEvent(SevWarnAlways, "ResetResolverNetwork")
-		    .detail("CurrentBatch", self->localBatchNumber)
-		    .detail("InProcessBatch", self->pProxyCommitData->latestLocalCommitBatchLogging.get());
 		for (int r = 0; r < self->pProxyCommitData->resolvers.size(); r++) {
+			TraceEvent(SevWarnAlways, "ResetResolverNetwork", self->pProxyCommitData->dbgid)
+			    .detail("PeerAddr", self->pProxyCommitData->resolvers[r].address())
+			    .detail("CurrentBatch", self->localBatchNumber)
+			    .detail("InProcessBatch", self->pProxyCommitData->latestLocalCommitBatchLogging.get());
 			FlowTransport::transport().resetConnection(self->pProxyCommitData->resolvers[r].address());
 		}
 		self->pProxyCommitData->lastResolverReset = now();

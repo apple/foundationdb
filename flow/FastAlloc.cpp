@@ -314,13 +314,15 @@ void* FastAllocator<Size>::allocate() {
 		initThread();
 	}
 
-#ifdef USE_GPERFTOOLS
-	return malloc(Size);
+#if defined(USE_GPERFTOOLS) || defined(ADDRESS_SANITIZER)
+	// Some usages of FastAllocator require 4096 byte alignment.
+	return aligned_alloc(Size >= 4096 ? 4096 : alignof(void*), Size);
 #endif
 
 #if VALGRIND
 	if (valgrindPrecise()) {
-		return aligned_alloc(Size, Size);
+		// Some usages of FastAllocator require 4096 byte alignment
+		return aligned_alloc(Size >= 4096 ? 4096 : alignof(void*), Size);
 	}
 #endif
 
@@ -368,8 +370,8 @@ void FastAllocator<Size>::release(void* ptr) {
 		initThread();
 	}
 
-#ifdef USE_GPERFTOOLS
-	return free(ptr);
+#if defined(USE_GPERFTOOLS) || defined(ADDRESS_SANITIZER)
+	return aligned_free(ptr);
 #endif
 
 #if VALGRIND

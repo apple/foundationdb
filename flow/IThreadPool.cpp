@@ -31,7 +31,7 @@ class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool>
 	struct Thread {
 		ThreadPool* pool;
 		IThreadPoolReceiver* userObject;
-		Event stopped;
+		THREAD_HANDLE handle; // Owned by main thread
 		static thread_local IThreadPoolReceiver* threadUserObject;
 		explicit Thread(ThreadPool* pool, IThreadPoolReceiver* userObject) : pool(pool), userObject(userObject) {}
 		~Thread() { ASSERT_ABORT(!userObject); }
@@ -49,7 +49,6 @@ class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool>
 			}
 			delete userObject;
 			userObject = nullptr;
-			stopped.set();
 		}
 		static void dispatch(PThreadAction action) { (*action)(threadUserObject); }
 	};
@@ -93,7 +92,7 @@ public:
 		ios.stop(); // doesn't work?
 		mode = Shutdown;
 		for (int i = 0; i < threads.size(); i++) {
-			threads[i]->stopped.block();
+			waitThread(threads[i]->handle);
 			delete threads[i];
 		}
 		ReferenceCounted<ThreadPool>::delref();
@@ -103,12 +102,14 @@ public:
 	Future<Void> getError() const override { return Never(); } // FIXME
 	void addref() override { ReferenceCounted<ThreadPool>::addref(); }
 	void delref() override {
-		if (ReferenceCounted<ThreadPool>::delref_no_destroy())
+		if (ReferenceCounted<ThreadPool>::delref_no_destroy()) {
 			stop();
+			delete this;
+		}
 	}
 	void addThread(IThreadPoolReceiver* userData, const char* name) override {
 		threads.push_back(new Thread(this, userData));
-		startThread(start, threads.back(), stackSize, name);
+		threads.back()->handle = startThread(start, threads.back(), stackSize);
 	}
 	void post(PThreadAction action) override { ios.post(ActionWrapper(action)); }
 };
