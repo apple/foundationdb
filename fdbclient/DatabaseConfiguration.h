@@ -160,33 +160,44 @@ struct DatabaseConfiguration {
 	}
 
 	// Retuns the maximum number of discrete failures a cluster can tolerate.
-	// In HA mode, `fullyReplicatedRegions` is set to false initially when data is being
-	// replicated to remote, and will be true later. `forAvailablity` is set to true
+	// In HA mode, `fullyReplicatedRegions` is set to 1 initially when data is being
+	// replicated to remote, and will be incremented later. `forAvailablity` is set to true
 	// if we want to account the number for machines that can recruit new tLogs/SS after failures.
-	// Killing an entire datacenter counts as killing one zone in modes that support it
+	// Killing an entire datacenter counts as killing one zone in modes that support it.
 	int32_t maxZoneFailuresTolerated(int fullyReplicatedRegions, bool forAvailability) const {
-		int worstSatellite = regions.size() ? std::numeric_limits<int>::max() : 0;
+		int worstSatelliteTLogReplicationFactor = regions.size() ? std::numeric_limits<int>::max() : 0;
 		int regionsWithNonNegativePriority = 0;
 		for (auto& r : regions) {
 			if (r.priority >= 0) {
 				regionsWithNonNegativePriority++;
 			}
-			worstSatellite =
-			    std::min(worstSatellite, r.satelliteTLogReplicationFactor - r.satelliteTLogWriteAntiQuorum);
+			worstSatelliteTLogReplicationFactor = std::min(
+			    worstSatelliteTLogReplicationFactor, r.satelliteTLogReplicationFactor - r.satelliteTLogWriteAntiQuorum);
 			if (r.satelliteTLogUsableDcsFallback > 0) {
-				worstSatellite = std::min(
-				    worstSatellite, r.satelliteTLogReplicationFactorFallback - r.satelliteTLogWriteAntiQuorumFallback);
+				worstSatelliteTLogReplicationFactor =
+				    std::min(worstSatelliteTLogReplicationFactor,
+				             r.satelliteTLogReplicationFactorFallback - r.satelliteTLogWriteAntiQuorumFallback);
 			}
 		}
-		if (usableRegions > 1 && fullyReplicatedRegions > 1 && worstSatellite > 0 &&
-		    (!forAvailability || regionsWithNonNegativePriority > 1)) {
-			return 1 + std::min(std::max(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, worstSatellite - 1),
-			                    storageTeamSize - 1);
-		} else if (worstSatellite > 0) {
-			// Primary and Satellite tLogs are synchronously replicated, hence we can lose all but 1.
-			return std::min(tLogReplicationFactor + worstSatellite - 1 - tLogWriteAntiQuorum, storageTeamSize - 1);
+
+		if (worstSatelliteTLogReplicationFactor <= 0) {
+			// HA is not enabled in this database. Return single cluster zone failures to tolerate.
+			return std::min(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, storageTeamSize - 1);
 		}
-		return std::min(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, storageTeamSize - 1);
+
+		// Compute HA enabled database zone failure tolerance.
+		auto isGeoReplicatedData = [this, &fullyReplicatedRegions]() {
+			return usableRegions > 1 && fullyReplicatedRegions > 1;
+		};
+
+		if (isGeoReplicatedData() && (!forAvailability || regionsWithNonNegativePriority > 1)) {
+			return 1 + std::min(std::max(tLogReplicationFactor - 1 - tLogWriteAntiQuorum,
+			                             worstSatelliteTLogReplicationFactor - 1),
+			                    storageTeamSize - 1);
+		}
+		// Primary and Satellite tLogs are synchronously replicated, hence we can lose all but 1.
+		return std::min(tLogReplicationFactor + worstSatelliteTLogReplicationFactor - 1 - tLogWriteAntiQuorum,
+		                storageTeamSize - 1);
 	}
 
 	// CommitProxy Servers
