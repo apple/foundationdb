@@ -844,7 +844,7 @@ public:
 
 	// timer() can be up to 0.1 seconds ahead of now()
 	double timer() override {
-		timerTime += deterministicRandom()->random01() * (trueTime + 0.1 - timerTime) / 2.0;
+		timerTime += deterministicRandom()->random01() * (actualTime + 0.1 - timerTime) / 2.0;
 		return timerTime;
 	}
 
@@ -866,7 +866,7 @@ public:
 		}
 
 		mutex.enter();
-		tasks.push(Task(trueTime + seconds, taskID, taskCount++, machine, f));
+		tasks.push(Task(actualTime + seconds, taskID, taskCount++, machine, f));
 		mutex.leave();
 
 		return f;
@@ -1103,13 +1103,21 @@ public:
 			}
 			// if (!randLog/* && now() >= 32.0*/)
 			//	randLog = fopen("randLog.txt", "wt");
-			Task t = std::move(self->tasks.top()); // Unfortunately still a copy under gcc where .top() returns const&
-			self->currentTaskID = t.taskID;
+			self->instantTasks.clear();
+			self->instantTasks.push_back(
+			    std::move(self->tasks.top())); // Unfortunately still a copy under gcc where .top() returns const&
+			self->time = self->tasks.top().time;
+			double batchTime = deterministicRandom()->random01() * FLOW_KNOBS->MAX_RUNLOOP_TIME_BATCHING;
 			self->tasks.pop();
+			while (self->tasks.top().time - self->time < batchTime) {
+				self->instantTasks.push_back(std::move(self->tasks.top()));
+				self->tasks.pop();
+			}
 			self->mutex.leave();
-
-			self->execTask(t);
-			self->yielded = false;
+			for (auto& t : self->instantTasks) {
+				self->execTask(t);
+				self->yielded = false;
+			}
 		}
 		self->currentProcess = callingMachine;
 		self->net2->stop();
@@ -1983,8 +1991,8 @@ public:
 	}
 
 	Sim2()
-	  : time(0.0), trueTime(0.0), timerTime(0.0), batchTime(0.0), batchCount(0), taskCount(0), yielded(false),
-	    yield_limit(0), currentTaskID(TaskPriority::Zero) {
+	  : time(0.0), actualTime(0.0), timerTime(0.0), taskCount(0), yielded(false), yield_limit(0),
+	    currentTaskID(TaskPriority::Zero) {
 		// Not letting currentProcess be nullptr eliminates some annoying special cases
 		currentProcess =
 		    new ProcessInfo("NoMachine",
@@ -2046,14 +2054,9 @@ public:
 			t.action.send(Never());
 		} else {
 			mutex.enter();
-
-			this->trueTime = t.time;
-			if (t.time - this->time > this->batchTime || t.stable >= this->batchCount) {
-				this->batchTime = deterministicRandom()->random01() * FLOW_KNOBS->MAX_RUNLOOP_TIME_BATCHING;
-				this->batchCount = this->taskCount;
-				this->time = t.time;
-			}
-			this->timerTime = std::max(this->timerTime, this->trueTime);
+			this->currentTaskID = t.taskID;
+			this->actualTime = t.time;
+			this->timerTime = std::max(this->timerTime, this->actualTime);
 			mutex.leave();
 
 			this->currentProcess = t.machine;
@@ -2082,7 +2085,7 @@ public:
 
 		mutex.enter();
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
-		tasks.push(Task(trueTime, taskID, taskCount++, getCurrentProcess(), std::move(signal)));
+		tasks.push(Task(actualTime, taskID, taskCount++, getCurrentProcess(), std::move(signal)));
 		mutex.leave();
 	}
 	bool isOnMainThread() const override { return net2->isOnMainThread(); }
@@ -2100,14 +2103,12 @@ public:
 	// time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
 	// time should only be modified from the main thread.
 	double time;
-	double trueTime;
+	double actualTime;
 	double timerTime;
-	double batchTime;
 	TaskPriority currentTaskID;
 
 	// taskCount is guarded by ISimulator::mutex
 	uint64_t taskCount;
-	uint64_t batchCount;
 
 	std::map<Optional<Standalone<StringRef>>, MachineInfo> machines;
 	std::map<NetworkAddress, ProcessInfo*> addressMap;
@@ -2115,6 +2116,7 @@ public:
 
 	// tasks is guarded by ISimulator::mutex
 	std::priority_queue<Task, std::vector<Task>> tasks;
+	std::vector<Task> instantTasks;
 
 	std::vector<std::function<void()>> stopCallbacks;
 
