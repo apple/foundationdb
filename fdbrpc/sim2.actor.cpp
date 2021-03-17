@@ -1117,10 +1117,7 @@ public:
 				return a.taskID > b.taskID;
 			});
 			self->mutex.leave();
-			TaskPriority lastID = self->instantTasks.begin()->taskID;
 			for (auto& t : self->instantTasks) {
-				ASSERT(lastID >= t.taskID);
-				lastID = t.taskID;
 				self->execTask(t);
 				self->yielded = false;
 			}
