@@ -26,14 +26,14 @@ Before all RPCs mentioned below, the client would first verify if the commit pro
 
 * The commit proxy sends a request for commit version, with a request number.
 
-* - The request number is a monotonically increasing number per commit proxy.
+  - The request number is a monotonically increasing number per commit proxy.
   - This ensures for each proxy, the master will process the requests in order.
 
 * The master server waits until the request number is current.
 
   When the current request number is larger than the incoming request number
 
-  * If a commit version is already assigned to the incoming request number, return the commit version and the version that is immediately before the commit version (prevVersion).
+  * If a commit version is already assigned to the incoming request number, return the commit version and the previous commit version. (i.e. `prevVersion`)
 
   * Otherwise return `Never`
 
@@ -41,7 +41,7 @@ Before all RPCs mentioned below, the client would first verify if the commit pro
 
     * Only one process serves as master. Thus the commit version is unique for each cluster.
 
-    * The monotonically increasing commit version will ensure each transaction processed in strict ordering.
+    * The monotonically increasing commit version will ensure that each transaction is processed in a strict serial order.
 
 ### Resolution section
 
@@ -56,26 +56,25 @@ Before all RPCs mentioned below, the client would first verify if the commit pro
 ### Post Resolution section
 
 * The proxy waits until the local batch number is current
-* The proxy will update the metadata keys and calculate which storage servers are affected
-* The proxy then waits until the commit version is current, i.e. only those commits in the MVCC window should be processed.
-* The proxy pushs the commit data to TLog
-* TLog waits the commit version to current, then persist the commit.
 
 ### TLog section
-
+* The proxy updates the metadata keys and attaches corresponding storage servers' tags to all mutations.
+* The proxy then waits until the commit version is current, i.e. the proxy's committed version is catching up with the commit version of the batch and these two versions are within the MVCC window.
+* The proxy pushs the commit data to TLog
+* TLog waits the commit version to current, then persist the commit.
 * Wait until *all* TLogs returns the transaction result.
 
 ### Reply section
 
-* The proxy will update the master its commit version
+* The proxy updates the master with the committed version for next GRV request at the master.
 * Reply the result to the client, base on the result from the resolver.
 
 ## Tracking the process using `g_traceBatch`
 
-`g_traceBatch` can be used for querying the transactions and commits. A typical query string:
+`g_traceBatch` can be used for querying the transactions and commits. A typical query string for Splunk is:
 
 ```
-index=iffdb LogGroup=loggroup Type=location Location=location
+LogGroup=loggroup Type=type Location=location
 ```
 
 The format of `location` is, in general, `<source_file_name>.<function/actor name>.<log information>`, e.g.
@@ -85,6 +84,17 @@ NativeAPI.getConsistentReadVersion.Before
 ```
 
 means the `location` is at `NativeAPI.actor.cpp`, `ACTOR` `getConsistentReadVersion`, `Before` requesting the read version from GRV Proxy.
+
+Some of example queries are:
+
+```
+LogGroup=loggroup Type=TransactionDebug Location=NativeAPI*
+```
+
+```
+LogGroup=loggroup Type=CommitDebug Location=storageserver*
+```
+
 
 In the following sections, <span style="color:green">green</span> tag indicates an attach; <span style="color:blue">blue</span> tag indicates an event that the location follows the format mentioned above, where only the `<log information>` is included; <span style="color:lightblue">light-blue</span> tag indicates an event that the location is not following the format, where the full location is included. All the `g_traceBatch` events are tabularized after the diagram.
 
