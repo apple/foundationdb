@@ -93,6 +93,7 @@ ActorLineageSet::Index ActorLineageSet::insert(const Reference<ActorLineage>& li
 	}
 	ASSERT(_set[res].load() & FREE);
 	auto ptr = reinterpret_cast<uintptr_t>(lineage.getPtr());
+	ASSERT((ptr % 4) == 0); // this needs to be at least 4-byte aligned
 	lineage->addref();
 	_set[res].store(ptr);
 	return res;
