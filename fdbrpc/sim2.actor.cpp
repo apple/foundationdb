@@ -866,7 +866,8 @@ public:
 		}
 
 		mutex.enter();
-		tasks.push(Task(actualTime + seconds, taskID, deterministicRandom()->randomUInt64(), machine, f));
+		tasks.push(Task(
+		    actualTime + seconds, taskID, (deterministicRandom()->randomUInt64() << 32) | taskCount++, machine, f));
 		mutex.leave();
 
 		return f;
