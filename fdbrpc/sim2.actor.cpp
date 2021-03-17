@@ -852,9 +852,9 @@ public:
 
 	Future<class Void> delay(double seconds, TaskPriority taskID) override {
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
-		return delay(seconds, taskID, currentProcess);
+		return delay(seconds, taskID, currentProcess, false);
 	}
-	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine) {
+	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine, bool ordered) {
 		ASSERT(seconds >= -0.0001);
 		seconds = std::max(0.0, seconds);
 		Future<Void> f;
@@ -866,8 +866,11 @@ public:
 		}
 
 		mutex.enter();
-		tasks.push(Task(
-		    actualTime + seconds, taskID, (deterministicRandom()->randomUInt64() << 32) | taskCount++, machine, f));
+		tasks.push(Task(actualTime + seconds,
+		                taskID,
+		                ordered ? taskCount++ : (deterministicRandom()->randomUInt64() << 32) | taskCount++,
+		                machine,
+		                f));
 		mutex.leave();
 
 		return f;
@@ -2099,12 +2102,12 @@ public:
 	}
 	bool isOnMainThread() const override { return net2->isOnMainThread(); }
 	Future<Void> onProcess(ISimulator::ProcessInfo* process, TaskPriority taskID) override {
-		return delay(0, taskID, process);
+		return delay(0, taskID, process, true);
 	}
 	Future<Void> onMachine(ISimulator::ProcessInfo* process, TaskPriority taskID) override {
 		if (process->machine == 0)
 			return Void();
-		return delay(0, taskID, process->machine->machineProcess);
+		return delay(0, taskID, process->machine->machineProcess, true);
 	}
 
 	ProtocolVersion protocolVersion() override { return getCurrentProcess()->protocolVersion; }
@@ -2357,7 +2360,7 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 	    .detail("Rebooting", p->rebooting)
 	    .detail("TaskPriorityDefaultDelay", TaskPriority::DefaultDelay);
 
-	wait(g_sim2.delay(0, TaskPriority::DefaultDelay, p)); // Switch to the machine in question
+	wait(g_sim2.delay(0, TaskPriority::DefaultDelay, p, true)); // Switch to the machine in question
 
 	try {
 		ASSERT(kt == ISimulator::RebootProcess || kt == ISimulator::Reboot || kt == ISimulator::RebootAndDelete ||
