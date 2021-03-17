@@ -3027,35 +3027,52 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	        logServers,
 	    FutureStream<struct TLogRejoinRequest> rejoinRequests) {
 		state std::map<UID, ReplyPromise<TLogRejoinReply>> lastReply;
+		state std::set<UID> logsWaiting;
+		state double startTime = now();
+		state Future<Void> warnTimeout = delay(SERVER_KNOBS->TLOG_SLOW_REJOIN_WARN_TIMEOUT_SECS);
+
+		for (const auto& log : logServers) {
+			logsWaiting.insert(log.first->get().id());
+		}
 
 		try {
-			loop {
-				TLogRejoinRequest req = waitNext(rejoinRequests);
-				int pos = -1;
-				for (int i = 0; i < logServers.size(); i++) {
-					if (logServers[i].first->get().id() == req.myInterface.id()) {
-						pos = i;
-						break;
+			loop choose {
+				when(TLogRejoinRequest req = waitNext(rejoinRequests)) {
+					int pos = -1;
+					for (int i = 0; i < logServers.size(); i++) {
+						if (logServers[i].first->get().id() == req.myInterface.id()) {
+							pos = i;
+							logsWaiting.erase(logServers[i].first->get().id());
+							break;
+						}
+					}
+					if (pos != -1) {
+						TraceEvent("TLogJoinedMe", dbgid)
+						    .detail("TLog", req.myInterface.id())
+						    .detail("Address", req.myInterface.commit.getEndpoint().getPrimaryAddress().toString());
+						if (!logServers[pos].first->get().present() ||
+						    req.myInterface.commit.getEndpoint() !=
+						        logServers[pos].first->get().interf().commit.getEndpoint()) {
+							TLogInterface interf = req.myInterface;
+							filterLocalityDataForPolicyDcAndProcess(logServers[pos].second, &interf.filteredLocality);
+							logServers[pos].first->setUnconditional(OptionalInterface<TLogInterface>(interf));
+						}
+						lastReply[req.myInterface.id()].send(TLogRejoinReply{ false });
+						lastReply[req.myInterface.id()] = req.reply;
+					} else {
+						TraceEvent("TLogJoinedMeUnknown", dbgid)
+						    .detail("TLog", req.myInterface.id())
+						    .detail("Address", req.myInterface.commit.getEndpoint().getPrimaryAddress().toString());
+						req.reply.send(true);
 					}
 				}
-				if (pos != -1) {
-					TraceEvent("TLogJoinedMe", dbgid)
-					    .detail("TLog", req.myInterface.id())
-					    .detail("Address", req.myInterface.commit.getEndpoint().getPrimaryAddress().toString());
-					if (!logServers[pos].first->get().present() ||
-					    req.myInterface.commit.getEndpoint() !=
-					        logServers[pos].first->get().interf().commit.getEndpoint()) {
-						TLogInterface interf = req.myInterface;
-						filterLocalityDataForPolicyDcAndProcess(logServers[pos].second, &interf.filteredLocality);
-						logServers[pos].first->setUnconditional(OptionalInterface<TLogInterface>(interf));
+				when(wait(warnTimeout)) {
+					for (const auto& logId : logsWaiting) {
+						TraceEvent(SevWarnAlways, "TLogRejoinSlow", dbgid)
+						    .detail("Elapsed", startTime - now())
+						    .detail("LogId", logId);
 					}
-					lastReply[req.myInterface.id()].send(TLogRejoinReply{ false });
-					lastReply[req.myInterface.id()] = req.reply;
-				} else {
-					TraceEvent("TLogJoinedMeUnknown", dbgid)
-					    .detail("TLog", req.myInterface.id())
-					    .detail("Address", req.myInterface.commit.getEndpoint().getPrimaryAddress().toString());
-					req.reply.send(true);
+					warnTimeout = Never();
 				}
 			}
 		} catch (...) {

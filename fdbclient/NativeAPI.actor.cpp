@@ -410,6 +410,14 @@ ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t 
 	}
 }
 
+// Delref and addref self to give self a chance to get destroyed.
+ACTOR static Future<Void> refreshTransaction(DatabaseContext* self, Transaction* tr) {
+	*tr = Transaction();
+	wait(delay(0)); // Give ourselves the chance to get cancelled if self was destroyed
+	*tr = Transaction(Database(Reference<DatabaseContext>::addRef(self)));
+	return Void();
+}
+
 // The reason for getting a pointer to DatabaseContext instead of a reference counted object is because reference
 // counting will increment reference count for DatabaseContext which holds the future of this actor. This creates a
 // cyclic reference and hence this actor and Database object will not be destroyed at all.
@@ -421,6 +429,9 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 	state int txBytes = 0;
 
 	loop {
+		// Need to make sure that we eventually destroy tr. We can't rely on getting cancelled to do this because of
+		// the cyclic reference to self.
+		wait(refreshTransaction(cx, &tr));
 		try {
 			ASSERT(cx->clientStatusUpdater.outStatusQ.empty());
 			cx->clientStatusUpdater.inStatusQ.swap(cx->clientStatusUpdater.outStatusQ);
@@ -458,7 +469,6 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 			    BUGGIFY ? deterministicRandom()->randomInt(200e3, 1.5 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT)
 			            : 0.8 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 			state std::vector<TrInfoChunk>::iterator tracking_iter = trChunksQ.begin();
-			tr = Transaction(Database(Reference<DatabaseContext>::addRef(cx)));
 			ASSERT(commitQ.empty() && (txBytes == 0));
 			loop {
 				state std::vector<TrInfoChunk>::iterator iter = tracking_iter;
@@ -504,10 +514,6 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 			if (!trChunksQ.empty() && deterministicRandom()->random01() < clientSamplingProbability)
 				wait(delExcessClntTxnEntriesActor(&tr, clientTxnInfoSizeLimit));
 
-			// tr is destructed because it hold a reference to DatabaseContext which creates a cycle mentioned above.
-			// Hence destroy the transacation before sleeping to give a chance for the actor to be cleanedup if the
-			// Database is destroyed by the user.
-			tr = Transaction();
 			wait(delay(CLIENT_KNOBS->CSI_STATUS_DELAY));
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
@@ -515,10 +521,6 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 			}
 			cx->clientStatusUpdater.outStatusQ.clear();
 			TraceEvent(SevWarnAlways, "UnableToWriteClientStatus").error(e);
-			// tr is destructed because it hold a reference to DatabaseContext which creates a cycle mentioned above.
-			// Hence destroy the transacation before sleeping to give a chance for the actor to be cleanedup if the
-			// Database is destroyed by the user.
-			tr = Transaction();
 			wait(delay(10.0));
 		}
 	}
@@ -577,14 +579,18 @@ Reference<LocationInfo> addCaches(const Reference<LocationInfo>& loc,
 }
 
 ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, StorageServerInterface>* cacheServers) {
-	state Database db(self);
-	state ReadYourWritesTransaction tr(db);
+	state Transaction tr;
 	state Value trueValue = storageCacheValue(std::vector<uint16_t>{ 0 });
 	state Value falseValue = storageCacheValue(std::vector<uint16_t>{});
 	try {
 		loop {
-			wait(self->updateCache.onTrigger());
-			tr.reset();
+			// Need to make sure that we eventually destroy tr. We can't rely on getting cancelled to do this because of
+			// the cyclic reference to self.
+			tr = Transaction();
+			wait(delay(0)); // Give ourselves the chance to get cancelled if self was destroyed
+			wait(brokenPromiseToNever(self->updateCache.onTrigger())); // brokenPromiseToNever because self might get
+			                                                           // destroyed elsewhere while we're waiting here.
+			tr = Transaction(Database(Reference<DatabaseContext>::addRef(self)));
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			try {
@@ -649,9 +655,11 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 	}
 }
 
+// The reason for getting a pointer to DatabaseContext instead of a reference counted object is because reference
+// counting will increment reference count for DatabaseContext which holds the future of this actor. This creates a
+// cyclic reference and hence this actor and Database object will not be destroyed at all.
 ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
-	state Database db(self);
-	state Transaction tr(db);
+	state Transaction tr;
 	state std::map<UID, StorageServerInterface> cacheServerMap;
 	state Future<Void> updateRanges = updateCachedRanges(self, &cacheServerMap);
 	// if no caches are configured, we don't want to run this actor at all
@@ -659,7 +667,9 @@ ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
 	wait(self->updateCache.onTrigger());
 	try {
 		loop {
-			tr.reset();
+			// Need to make sure that we eventually destroy tr. We can't rely on getting cancelled to do this because of
+			// the cyclic reference to self.
+			wait(refreshTransaction(self, &tr));
 			try {
 				Standalone<RangeResultRef> cacheList =
 				    wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));

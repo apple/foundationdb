@@ -891,7 +891,7 @@ ACTOR Future<Void> traceRole(Role role, UID roleId) {
 	}
 }
 
-ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, StringRef snapFolder) {
+ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, Standalone<StringRef> snapFolder) {
 	state ExecCmdValueString snapArg(snapReq.snapPayload);
 	try {
 		int err = wait(execHelper(&snapArg, snapReq.snapUID, snapFolder.toString(), snapReq.role.toString()));

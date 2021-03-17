@@ -404,7 +404,8 @@ public:
 	Future<std::string> getStatus(Database cx, bool showErrors, std::string tagName);
 	Future<std::string> getStatusJSON(Database cx, std::string tagName);
 
-	Future<Version> getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName, bool snapshot = false);
+	Future<Optional<Version>> getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName,
+	                                            bool snapshot = false);
 	void setLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName, Version version);
 
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
