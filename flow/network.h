@@ -315,6 +315,7 @@ template <class T>
 class Promise;
 
 struct NetworkMetrics {
+	// Metrics which represent various network properties
 	enum { SLOW_EVENT_BINS = 16 };
 	uint64_t countSlowEvents[SLOW_EVENT_BINS] = {};
 
@@ -334,8 +335,10 @@ struct NetworkMetrics {
 	};
 
 	std::unordered_map<TaskPriority, struct PriorityStats> activeTrackers;
-	double lastRunLoopBusyness;
-	std::atomic<double> networkBusyness;
+	double lastRunLoopBusyness; // network thread busyness (measured every 5s by default)
+	std::atomic<double> networkBusyness; // network thread busyness which is returned to the the client (measured every 1s by default)
+
+	// starvation trackers which keeps track of different task priorities
 	std::vector<struct PriorityStats> starvationTrackers;
 	struct PriorityStats starvationTrackerNetworkBusyness;
 
@@ -344,7 +347,7 @@ struct NetworkMetrics {
 	NetworkMetrics()
 	  : lastRunLoopBusyness(0), networkBusyness(0),
 	    starvationTrackerNetworkBusyness(PriorityStats(static_cast<TaskPriority>(starvationBins.at(0)))) {
-		for (int priority : starvationBins) {
+		for (int priority : starvationBins) { // initalize starvation trackers with given priorities
 			starvationTrackers.emplace_back(static_cast<TaskPriority>(priority));
 		}
 	}

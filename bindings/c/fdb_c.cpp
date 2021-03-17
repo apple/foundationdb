@@ -323,6 +323,8 @@ extern "C" DLLEXPORT fdb_error_t fdb_database_create_transaction(FDBDatabase* d,
 }
 
 // Get network thread busyness (updated every 1s)
+// A value of 0 indicates that the client is more or less idle
+// A value of 1 (or more) indicates that the client is saturated
 extern "C" DLLEXPORT double fdb_database_get_main_thread_busyness(FDBDatabase* d) {
 	return DB(d)->getMainThreadBusyness();
 }
