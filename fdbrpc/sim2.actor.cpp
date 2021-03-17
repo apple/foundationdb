@@ -869,8 +869,8 @@ public:
 		tasks.push(Task(actualTime + seconds,
 		                taskID,
 		                ordered ? taskCount++ : (deterministicRandom()->randomUInt64() << 32) | taskCount++,
+						ordered,
 		                machine,
-		                ordered,
 		                f));
 		mutex.leave();
 
@@ -2115,7 +2115,7 @@ public:
 
 		mutex.enter();
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
-		tasks.push(Task(actualTime, taskID, taskCount++, getCurrentProcess(), true, std::move(signal)));
+		tasks.push(Task(actualTime, taskID, taskCount++, true, getCurrentProcess(), std::move(signal)));
 		mutex.leave();
 	}
 	bool isOnMainThread() const override { return net2->isOnMainThread(); }
