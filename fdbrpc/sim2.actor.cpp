@@ -852,15 +852,15 @@ public:
 
 	Future<class Void> delay(double seconds, TaskPriority taskID) override {
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
-		return delay(seconds, taskID, currentProcess, false);
+		return delay(seconds, taskID, currentProcess);
 	}
-	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine, bool ordered) {
+	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine) {
 		ASSERT(seconds >= -0.0001);
 		seconds = std::max(0.0, seconds);
 		Future<Void> f;
 
-		if (!currentProcess->rebooting && machine == currentProcess && !currentProcess->shutdownSignal.isSet() &&
-		    FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 &&
+		bool ordered = currentProcess->rebooting || machine != currentProcess || currentProcess->shutdownSignal.isSet();
+		if (!ordered && FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 &&
 		    deterministicRandom()->random01() < 0.25) { // FIXME: why doesnt this work when we are changing machines?
 			seconds += FLOW_KNOBS->MAX_BUGGIFIED_DELAY * pow(deterministicRandom()->random01(), 1000.0);
 		}
@@ -2102,12 +2102,12 @@ public:
 	}
 	bool isOnMainThread() const override { return net2->isOnMainThread(); }
 	Future<Void> onProcess(ISimulator::ProcessInfo* process, TaskPriority taskID) override {
-		return delay(0, taskID, process, true);
+		return delay(0, taskID, process);
 	}
 	Future<Void> onMachine(ISimulator::ProcessInfo* process, TaskPriority taskID) override {
 		if (process->machine == 0)
 			return Void();
-		return delay(0, taskID, process->machine->machineProcess, true);
+		return delay(0, taskID, process->machine->machineProcess);
 	}
 
 	ProtocolVersion protocolVersion() override { return getCurrentProcess()->protocolVersion; }
@@ -2360,7 +2360,7 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 	    .detail("Rebooting", p->rebooting)
 	    .detail("TaskPriorityDefaultDelay", TaskPriority::DefaultDelay);
 
-	wait(g_sim2.delay(0, TaskPriority::DefaultDelay, p, true)); // Switch to the machine in question
+	wait(g_sim2.delay(0, TaskPriority::DefaultDelay, p)); // Switch to the machine in question
 
 	try {
 		ASSERT(kt == ISimulator::RebootProcess || kt == ISimulator::Reboot || kt == ISimulator::RebootAndDelete ||
