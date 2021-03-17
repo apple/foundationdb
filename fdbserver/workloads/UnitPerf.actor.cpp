@@ -25,7 +25,7 @@
 
 ACTOR Future<Void> sleepyActor(double interval, int* counter) {
 	loop {
-		wait( delay( interval ) );
+		wait(delay(interval));
 		++*counter;
 	}
 }
@@ -35,10 +35,11 @@ ACTOR Future<Void> unitPerfTest() {
 
 	state int counter = 0;
 	state vector<Future<Void>> sleepy;
-	for(int i=0; i<100000; i++)
-		sleepy.push_back( sleepyActor( .1, &counter ) );
+	sleepy.reserve(100000);
+	for (int i = 0; i < 100000; i++)
+		sleepy.push_back(sleepyActor(.1, &counter));
 
-	wait( delay(10) );
+	wait(delay(10));
 	sleepy.clear();
 	TraceEvent("Completed").detail("Count", counter);
 	printf("Completed: %d\n", counter);
@@ -50,9 +51,7 @@ ACTOR Future<Void> unitPerfTest() {
 struct UnitPerfWorkload : TestWorkload {
 	bool enabled;
 
-	UnitPerfWorkload(WorkloadContext const& wcx)
-		: TestWorkload(wcx)
-	{
+	UnitPerfWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
 	}
 

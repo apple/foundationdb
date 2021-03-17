@@ -41,30 +41,51 @@ struct ServerDBInfo {
 	// permitting them to communicate with each other.  It is not available to the client.  This mechanism
 	// (see GetServerDBInfoRequest) is closely parallel to OpenDatabaseRequest for the client.
 
-	UID id;  // Changes each time any other member changes
+	UID id; // Changes each time any other member changes
 	ClusterControllerFullInterface clusterInterface;
-	ClientDBInfo client;           // After a successful recovery, eventually proxies that communicate with it
-	Optional<DataDistributorInterface> distributor;  // The best guess of current data distributor.
-	MasterInterface master;        // The best guess as to the most recent master, which might still be recovering
+	ClientDBInfo client; // After a successful recovery, eventually proxies that communicate with it
+	Optional<DataDistributorInterface> distributor; // The best guess of current data distributor.
+	MasterInterface master; // The best guess as to the most recent master, which might still be recovering
 	Optional<RatekeeperInterface> ratekeeper;
 	std::vector<ResolverInterface> resolvers;
-	DBRecoveryCount recoveryCount; // A recovery count from DBCoreState.  A successful master recovery increments it twice; unsuccessful recoveries may increment it once. Depending on where the current master is in its recovery process, this might not have been written by the current master.
+	DBRecoveryCount
+	    recoveryCount; // A recovery count from DBCoreState.  A successful master recovery increments it twice;
+	                   // unsuccessful recoveries may increment it once. Depending on where the current master is in its
+	                   // recovery process, this might not have been written by the current master.
 	RecoveryState recoveryState;
-	LifetimeToken masterLifetime;  // Used by masterserver to detect not being the currently chosen master
-	LocalityData myLocality;       // (Not serialized) Locality information, if available, for the *local* process
+	LifetimeToken masterLifetime; // Used by masterserver to detect not being the currently chosen master
+	LocalityData myLocality; // (Not serialized) Locality information, if available, for the *local* process
 	LogSystemConfig logSystemConfig;
-	std::vector<UID> priorCommittedLogServers;   // If !fullyRecovered and logSystemConfig refers to a new log system which may not have been committed to the coordinated state yet, then priorCommittedLogServers are the previous, fully committed generation which need to stay alive in case this recovery fails
+	std::vector<UID> priorCommittedLogServers; // If !fullyRecovered and logSystemConfig refers to a new log system
+	                                           // which may not have been committed to the coordinated state yet, then
+	                                           // priorCommittedLogServers are the previous, fully committed generation
+	                                           // which need to stay alive in case this recovery fails
 	Optional<LatencyBandConfig> latencyBandConfig;
 	int64_t infoGeneration;
 
-	ServerDBInfo() : recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED), logSystemConfig(0), infoGeneration(0) {}
+	ServerDBInfo()
+	  : recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED), logSystemConfig(0), infoGeneration(0) {}
 
-	bool operator == (ServerDBInfo const& r) const { return id == r.id; }
-	bool operator != (ServerDBInfo const& r) const { return id != r.id; }
+	bool operator==(ServerDBInfo const& r) const { return id == r.id; }
+	bool operator!=(ServerDBInfo const& r) const { return id != r.id; }
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
-		serializer(ar, id, clusterInterface, client, distributor, master, ratekeeper, resolvers, recoveryCount, recoveryState, masterLifetime, logSystemConfig, priorCommittedLogServers, latencyBandConfig, infoGeneration);
+	void serialize(Ar& ar) {
+		serializer(ar,
+		           id,
+		           clusterInterface,
+		           client,
+		           distributor,
+		           master,
+		           ratekeeper,
+		           resolvers,
+		           recoveryCount,
+		           recoveryState,
+		           masterLifetime,
+		           logSystemConfig,
+		           priorCommittedLogServers,
+		           latencyBandConfig,
+		           infoGeneration);
 	}
 };
 
@@ -91,10 +112,12 @@ struct GetServerDBInfoRequest {
 	}
 };
 
-
 ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply);
 
-ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoRequest req, int sendAmount, Optional<Endpoint> sender, bool sendReply);
+ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoRequest req,
+                                                           int sendAmount,
+                                                           Optional<Endpoint> sender,
+                                                           bool sendReply);
 
 #include "flow/unactorcompiler.h"
 #endif

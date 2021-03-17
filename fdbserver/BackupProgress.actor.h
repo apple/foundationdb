@@ -54,14 +54,13 @@ public:
 	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> getUnfinishedBackup();
 
 	// Set the value for "backupStartedKey"
-	void setBackupStartedValue(Optional<Value> value) {
-		backupStartedValue = value;
-	}
+	void setBackupStartedValue(Optional<Value> value) { backupStartedValue = value; }
 
 	// Returns progress for an epoch.
 	std::map<Tag, Version> getEpochStatus(LogEpoch epoch) const {
 		const auto it = progress.find(epoch);
-		if (it == progress.end()) return {};
+		if (it == progress.end())
+			return {};
 		return it->second;
 	}
 
@@ -70,7 +69,7 @@ public:
 	void delref() { ReferenceCounted<BackupProgress>::delref(); }
 
 private:
-	std::set<Tag> enumerateLogRouterTags(int logRouterTags) {
+	std::set<Tag> enumerateLogRouterTags(int logRouterTags) const {
 		std::set<Tag> tags;
 		for (int i = 0; i < logRouterTags; i++) {
 			tags.insert(Tag(tagLocalityLogRouter, i));
@@ -80,8 +79,11 @@ private:
 
 	// For each tag in progress, the saved version is smaller than endVersion - 1,
 	// add {tag, savedVersion+1} to tagVersions and remove the tag from "tags".
-	void updateTagVersions(std::map<Tag, Version>* tagVersions, std::set<Tag>* tags,
-	                       const std::map<Tag, Version>& progress, Version endVersion, Version adjustedBeginVersion,
+	void updateTagVersions(std::map<Tag, Version>* tagVersions,
+	                       std::set<Tag>* tags,
+	                       const std::map<Tag, Version>& progress,
+	                       Version endVersion,
+	                       Version adjustedBeginVersion,
 	                       LogEpoch epoch);
 
 	const UID dbgid;

@@ -52,6 +52,7 @@ struct ProxyStats {
 	Counter txnCommitIn, txnCommitVersionAssigned, txnCommitResolving, txnCommitResolved, txnCommitOut,
 	    txnCommitOutSuccess, txnCommitErrors;
 	Counter txnConflicts;
+	Counter txnRejectedForQueuedTooLong;
 	Counter commitBatchIn, commitBatchOut;
 	Counter mutationBytes;
 	Counter mutations;
@@ -66,41 +67,47 @@ struct ProxyStats {
 	Future<Void> logger;
 
 	int64_t maxComputeNS;
-  	int64_t minComputeNS;
+	int64_t minComputeNS;
 
- 	int64_t getAndResetMaxCompute() {
-  		int64_t r = maxComputeNS;
-  		maxComputeNS = 0;
-  		return r;
-  	}
+	int64_t getAndResetMaxCompute() {
+		int64_t r = maxComputeNS;
+		maxComputeNS = 0;
+		return r;
+	}
 
-  	int64_t getAndResetMinCompute() {
-  		int64_t r = minComputeNS;
-  		minComputeNS = 1e12;
-  		return r;
-  	}
+	int64_t getAndResetMinCompute() {
+		int64_t r = minComputeNS;
+		minComputeNS = 1e12;
+		return r;
+	}
 
-	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion,
+	explicit ProxyStats(UID id,
+	                    Version* pVersion,
+	                    NotifiedVersion* pCommittedVersion,
 	                    int64_t* commitBatchesMemBytesCountPtr)
-	  : cc("ProxyStats", id.toString()), maxComputeNS(0), minComputeNS(1e12),
-	    txnCommitIn("TxnCommitIn", cc), txnCommitVersionAssigned("TxnCommitVersionAssigned", cc),
-	    txnCommitResolving("TxnCommitResolving", cc), txnCommitResolved("TxnCommitResolved", cc),
-	    txnCommitOut("TxnCommitOut", cc), txnCommitOutSuccess("TxnCommitOutSuccess", cc),
-	    txnCommitErrors("TxnCommitErrors", cc), txnConflicts("TxnConflicts", cc), commitBatchIn("CommitBatchIn", cc),
-	    commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc), mutations("Mutations", cc),
-	    conflictRanges("ConflictRanges", cc), keyServerLocationIn("KeyServerLocationIn", cc),
-	    keyServerLocationOut("KeyServerLocationOut", cc), keyServerLocationErrors("KeyServerLocationErrors", cc),
-	    lastCommitVersionAssigned(0), txnExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
-	    commitLatencySample("CommitLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	  : cc("ProxyStats", id.toString()), maxComputeNS(0), minComputeNS(1e12), txnCommitIn("TxnCommitIn", cc),
+	    txnCommitVersionAssigned("TxnCommitVersionAssigned", cc), txnCommitResolving("TxnCommitResolving", cc),
+	    txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
+	    txnCommitOutSuccess("TxnCommitOutSuccess", cc), txnCommitErrors("TxnCommitErrors", cc),
+	    txnConflicts("TxnConflicts", cc), commitBatchIn("CommitBatchIn", cc),
+	    txnRejectedForQueuedTooLong("TxnRejectedForQueuedTooLong", cc), commitBatchOut("CommitBatchOut", cc),
+	    mutationBytes("MutationBytes", cc), mutations("Mutations", cc), conflictRanges("ConflictRanges", cc),
+	    keyServerLocationIn("KeyServerLocationIn", cc), keyServerLocationOut("KeyServerLocationOut", cc),
+	    keyServerLocationErrors("KeyServerLocationErrors", cc), lastCommitVersionAssigned(0),
+	    txnExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
+	    commitLatencySample("CommitLatencyMetrics",
+	                        id,
+	                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    commitLatencyBands("CommitLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 		specialCounter(cc, "LastAssignedCommitVersion", [this]() { return this->lastCommitVersionAssigned; });
 		specialCounter(cc, "Version", [pVersion]() { return *pVersion; });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion]() { return pCommittedVersion->get(); });
-		specialCounter(cc, "CommitBatchesMemBytesCount",
-		               [commitBatchesMemBytesCountPtr]() { return *commitBatchesMemBytesCountPtr; });
-		specialCounter(cc, "MaxCompute", [this](){ return this->getAndResetMaxCompute(); });
-  		specialCounter(cc, "MinCompute", [this](){ return this->getAndResetMinCompute(); });
+		specialCounter(cc, "CommitBatchesMemBytesCount", [commitBatchesMemBytesCountPtr]() {
+			return *commitBatchesMemBytesCountPtr;
+		});
+		specialCounter(cc, "MaxCompute", [this]() { return this->getAndResetMaxCompute(); });
+		specialCounter(cc, "MinCompute", [this]() { return this->getAndResetMinCompute(); });
 		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
 	}
 };
@@ -213,9 +220,13 @@ struct ProxyCommitData {
 		}
 	}
 
-	ProxyCommitData(UID dbgid, MasterInterface master, RequestStream<GetReadVersionRequest> getConsistentReadVersion,
-	                Version recoveryTransactionVersion, RequestStream<CommitTransactionRequest> commit,
-	                Reference<AsyncVar<ServerDBInfo>> db, bool firstProxy)
+	ProxyCommitData(UID dbgid,
+	                MasterInterface master,
+	                RequestStream<GetReadVersionRequest> getConsistentReadVersion,
+	                Version recoveryTransactionVersion,
+	                RequestStream<CommitTransactionRequest> commit,
+	                Reference<AsyncVar<ServerDBInfo>> db,
+	                bool firstProxy)
 	  : dbgid(dbgid), stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master),
 	    logAdapter(nullptr), txnStateStore(nullptr), popRemoteTxs(false), committedVersion(recoveryTransactionVersion),
 	    version(0), minKnownCommittedVersion(0), lastVersionTime(0), commitVersionRequestNumber(1),
@@ -224,8 +235,8 @@ struct ProxyCommitData {
 	    commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN), firstProxy(firstProxy),
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true)), db(db),
 	    singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0), lastTxsPop(0),
-	    lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION),
-		lastCommitTime(0), lastMasterReset(now()), lastResolverReset(now()) {
+	    lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0),
+	    lastMasterReset(now()), lastResolverReset(now()) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}
 };

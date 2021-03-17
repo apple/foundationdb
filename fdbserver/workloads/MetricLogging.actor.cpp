@@ -23,7 +23,7 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MetricLoggingWorkload : TestWorkload {
 	int actorCount, metricCount;
@@ -35,18 +35,15 @@ struct MetricLoggingWorkload : TestWorkload {
 	std::vector<BoolMetricHandle> boolMetrics;
 	std::vector<Int64MetricHandle> int64Metrics;
 
-	MetricLoggingWorkload(WorkloadContext const& wcx)
-		: TestWorkload(wcx),
-		changes("Changes")
-	{
-		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
-		actorCount = getOption( options, LiteralStringRef("actorCount"), 1 );
-		metricCount = getOption( options, LiteralStringRef("metricCount"), 1 );
-		testBool = getOption( options, LiteralStringRef("testBool"), true );
-		enabled = getOption( options, LiteralStringRef("enabled"), true );
+	MetricLoggingWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), changes("Changes") {
+		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
+		actorCount = getOption(options, LiteralStringRef("actorCount"), 1);
+		metricCount = getOption(options, LiteralStringRef("metricCount"), 1);
+		testBool = getOption(options, LiteralStringRef("testBool"), true);
+		enabled = getOption(options, LiteralStringRef("enabled"), true);
 
-		for( int i = 0; i < metricCount; i++ ) {
-			if( testBool ) {
+		for (int i = 0; i < metricCount; i++) {
+			if (testBool) {
 				boolMetrics.push_back(BoolMetricHandle(LiteralStringRef("TestBool"), format("%d", i)));
 			} else {
 				int64Metrics.push_back(Int64MetricHandle(LiteralStringRef("TestInt"), format("%d", i)));
@@ -58,10 +55,10 @@ struct MetricLoggingWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
 
-	ACTOR Future<Void> _setup( MetricLoggingWorkload* self, Database cx ) {
-		wait( delay(2.0) );
-		for( int i = 0; i < self->metricCount; i++ ) {
-			if( self->testBool ) {
+	ACTOR Future<Void> _setup(MetricLoggingWorkload* self, Database cx) {
+		wait(delay(2.0));
+		for (int i = 0; i < self->metricCount; i++) {
+			if (self->testBool) {
 				self->boolMetrics[i]->setConfig(true);
 			} else {
 				self->int64Metrics[i]->setConfig(true);
@@ -71,9 +68,9 @@ struct MetricLoggingWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		for(int c = 0; c < actorCount; c++)
-			clients.push_back( timeout( MetricLoggingClient( cx, this, clientId, c ), testDuration, Void() ) );
-		return waitForAll( clients );
+		for (int c = 0; c < actorCount; c++)
+			clients.push_back(timeout(MetricLoggingClient(cx, this, clientId, c), testDuration, Void()));
+		return waitForAll(clients);
 	}
 
 	Future<bool> check(Database const& cx) override {
@@ -82,22 +79,22 @@ struct MetricLoggingWorkload : TestWorkload {
 	}
 
 	void getMetrics(vector<PerfMetric>& m) override {
-		m.push_back( changes.getMetric() );
-		m.push_back( PerfMetric( "Changes/sec", changes.getValue() / testDuration, false ) );
+		m.push_back(changes.getMetric());
+		m.push_back(PerfMetric("Changes/sec", changes.getValue() / testDuration, false));
 	}
 
-	ACTOR Future<Void> MetricLoggingClient( Database cx, MetricLoggingWorkload *self, int clientId, int actorId )	{
-		state BinaryWriter writer( Unversioned() );
+	ACTOR Future<Void> MetricLoggingClient(Database cx, MetricLoggingWorkload* self, int clientId, int actorId) {
+		state BinaryWriter writer(Unversioned());
 		loop {
-			for( int i = 0; i < 100; i++ ) {
-				if( self->testBool ) {
+			for (int i = 0; i < 100; i++) {
+				if (self->testBool) {
 					self->boolMetrics[self->changes.getValue() % self->metricCount]->toggle();
 				} else {
 					self->int64Metrics[self->changes.getValue() % self->metricCount] = (self->changes.getValue());
 				}
 				++self->changes;
 			}
-			wait( yield() );
+			wait(yield());
 		}
 	}
 };

@@ -30,7 +30,8 @@ RUN apt update
 # dnsutils is needed to have dig installed to create cluster file
 RUN apt install -y dnsutils 
 
-RUN wget "https://www.foundationdb.org/downloads/${FDB_VERSION}/ubuntu/installers/foundationdb-clients_${FDB_VERSION}-1_amd64.deb"
+ARG FDB_WEBSITE=https://foundationdb.org
+RUN wget "${FDB_WEBSITE}/downloads/${FDB_VERSION}/ubuntu/installers/foundationdb-clients_${FDB_VERSION}-1_amd64.deb"
 RUN dpkg -i foundationdb-clients_${FDB_VERSION}-1_amd64.deb
 
 COPY --from=fdb /var/fdb/scripts/create_cluster_file.bash /

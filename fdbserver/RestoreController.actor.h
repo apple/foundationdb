@@ -162,17 +162,17 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 		runningVersionBatches.set(0);
 	}
 
-	~RestoreControllerData() = default;
+	~RestoreControllerData() override = default;
 
 	int getVersionBatchState(int batchIndex) final { return RoleVersionBatchState::INVALID; }
 	void setVersionBatchState(int batchIndex, int vbState) final {}
 
-	void initVersionBatch(int batchIndex) {
+	void initVersionBatch(int batchIndex) override {
 		TraceEvent("FastRestoreControllerInitVersionBatch", id()).detail("VersionBatchIndex", batchIndex);
 	}
 
 	// Reset controller data at the beginning of each restore request
-	void resetPerRestoreRequest() {
+	void resetPerRestoreRequest() override {
 		TraceEvent("FastRestoreControllerReset").detail("OldVersionBatches", versionBatches.size());
 		versionBatches.clear();
 		batch.clear();
@@ -182,7 +182,7 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 		ASSERT(runningVersionBatches.get() == 0);
 	}
 
-	std::string describeNode() {
+	std::string describeNode() override {
 		std::stringstream ss;
 		ss << "Controller";
 		return ss.str();
@@ -232,7 +232,8 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 	// Input: Get the size of data in backup files in version range [prevVersion, nextVersion)
 	// Return: param1: the size of data at nextVersion, param2: the minimum range file index whose version >
 	// nextVersion, param3: log files with data in [prevVersion, nextVersion)
-	std::tuple<double, int, std::vector<RestoreFileFR>> getVersionSize(Version prevVersion, Version nextVersion,
+	std::tuple<double, int, std::vector<RestoreFileFR>> getVersionSize(Version prevVersion,
+	                                                                   Version nextVersion,
 	                                                                   const std::vector<RestoreFileFR>& rangeFiles,
 	                                                                   int rangeIdx,
 	                                                                   const std::vector<RestoreFileFR>& logFiles) {
@@ -277,8 +278,10 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 	// Assumption 2: range files at one version <= FASTRESTORE_VERSIONBATCH_MAX_BYTES.
 	// Note: We do not allow a versionBatch size larger than the FASTRESTORE_VERSIONBATCH_MAX_BYTES because the range
 	// file size at a version depends on the number of backupAgents and its upper bound is hard to get.
-	void buildVersionBatches(const std::vector<RestoreFileFR>& rangeFiles, const std::vector<RestoreFileFR>& logFiles,
-	                         std::map<Version, VersionBatch>* versionBatches, Version targetVersion) {
+	void buildVersionBatches(const std::vector<RestoreFileFR>& rangeFiles,
+	                         const std::vector<RestoreFileFR>& logFiles,
+	                         std::map<Version, VersionBatch>* versionBatches,
+	                         Version targetVersion) {
 		bool rewriteNextVersion = false;
 		int rangeIdx = 0;
 		int logIdx = 0; // Ensure each log file is included in version batch

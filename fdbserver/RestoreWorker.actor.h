@@ -25,7 +25,6 @@
 #elif !defined(FDBSERVER_RESTOREWORKER_H)
 #define FDBSERVER_RESTOREWORKER_H
 
-
 #include "fdbclient/Tuple.h"
 #include "flow/flow.h"
 #include "fdbrpc/fdbrpc.h"
@@ -41,12 +40,12 @@
 #include "fdbserver/RestoreLoader.actor.h"
 #include "fdbserver/RestoreApplier.actor.h"
 
-
 // Each restore worker (a process) is assigned for a role.
 // MAYBE Later: We will support multiple restore roles on a worker
-struct RestoreWorkerData :  NonCopyable, public ReferenceCounted<RestoreWorkerData> {
+struct RestoreWorkerData : NonCopyable, public ReferenceCounted<RestoreWorkerData> {
 	UID workerID;
-	std::map<UID, RestoreWorkerInterface> workerInterfaces; // UID is worker's node id, RestoreWorkerInterface is worker's communication workerInterface
+	std::map<UID, RestoreWorkerInterface>
+	    workerInterfaces; // UID is worker's node id, RestoreWorkerInterface is worker's communication workerInterface
 
 	// Restore Roles
 	Optional<RestoreControllerInterface> controllerInterf;

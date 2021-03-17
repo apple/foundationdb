@@ -39,9 +39,12 @@ struct RunRestoreWorkerWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		int num_myWorkers = SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS + SERVER_KNOBS->FASTRESTORE_NUM_LOADERS + 1;
-		TraceEvent("RunParallelRestoreWorkerWorkload").detail("Start", "RestoreToolDB").detail("Workers", num_myWorkers);
+		TraceEvent("RunParallelRestoreWorkerWorkload")
+		    .detail("Start", "RestoreToolDB")
+		    .detail("Workers", num_myWorkers);
 		printf("RunParallelRestoreWorkerWorkload, we will start %d restore workers\n", num_myWorkers);
 		std::vector<Future<Void>> myWorkers;
+		myWorkers.reserve(num_myWorkers);
 		for (int i = 0; i < num_myWorkers; ++i) {
 			myWorkers.push_back(_restoreWorker(cx, LocalityData()));
 		}

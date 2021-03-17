@@ -38,6 +38,7 @@ enum {
 	OPT_TRACE_FORMAT,
 	OPT_TRACE_LOG_GROUP,
 	OPT_INPUT_FILE,
+	OPT_BUILD_FLAGS,
 	OPT_HELP
 };
 
@@ -54,11 +55,12 @@ CSimpleOpt::SOption gConverterOptions[] = { { OPT_CONTAINER, "-r", SO_REQ_SEP },
 	                                        { OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	                                        { OPT_INPUT_FILE, "-i", SO_REQ_SEP },
 	                                        { OPT_INPUT_FILE, "--input", SO_REQ_SEP },
+	                                        { OPT_BUILD_FLAGS, "--build_flags", SO_NONE },
 	                                        { OPT_HELP, "-?", SO_NONE },
 	                                        { OPT_HELP, "-h", SO_NONE },
 	                                        { OPT_HELP, "--help", SO_NONE },
 	                                        SO_END_OF_OPTIONS };
 
-}  // namespace file_converter
+} // namespace file_converter
 
-#endif  // FDBBACKUP_FILECONVERTER_H
+#endif // FDBBACKUP_FILECONVERTER_H

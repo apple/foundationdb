@@ -444,7 +444,44 @@ An |database-blurb1| Modifications to a database are performed via transactions.
    ``duration``
         If positive, the process will be first suspended for ``duration`` seconds before being rebooted.
 
+.. function:: FDBFuture* fdb_database_force_recovery_with_data_loss(FDBDatabase* database, uint8_t const* dcId, int dcId_length)
 
+   Force the database to recover into the given datacenter.
+
+   This function is only useful in a fearless configuration where you want to recover your database even with losing recently committed mutations.
+   
+   In particular, the function will set usable_regions to 1 and the amount of mutations that will be lost depends on how far behind the remote datacenter is.
+   
+   The function will change the region configuration to have a positive priority for the chosen dcId, and a negative priority for all other dcIds.
+
+   In particular, no error will be thrown if the given dcId does not exist. It will just not attemp to force a recovery.
+   
+   If the database has already recovered, the function does nothing. Thus it's safe to call it multiple times.
+
+   |future-returnvoid|
+
+.. function:: FDBFuture* fdb_database_create_snapshot(FDBDatabase* database, uint8_t const* snapshot_command, int snapshot_command_length)
+
+   Create a snapshot of the database.
+
+   ``uid``
+         A UID used to create snapshot. A valid uid is a 32-length hex string, otherwise, it will fail with error_code_snap_invalid_uid_string.
+
+         It is the user's responsibility to make sure the given ``uid`` is unique.
+   
+   ``uid_length``
+         |length-of| ``uid``
+
+   ``snapshot_command``
+         A pointer to all the snapshot command arguments.
+
+         In particular, if the original ``fdbcli`` command is ``snapshot <arg1> <arg2> <argN>``, then the string ``snapshot_command`` points to is ``<arg1> <arg2> <argN>``.
+   
+   ``snapshot_command_length``
+         |length-of| ``snapshot_command``
+   
+   .. note:: The function is exposing the functionality of the fdbcli command ``snapshot``. Please take a look at the documentation before using (see :ref:`disk-snapshot-backups`).
+         
 Transaction
 ===========
 

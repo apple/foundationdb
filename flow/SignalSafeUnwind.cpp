@@ -27,15 +27,14 @@ int64_t dl_iterate_phdr_calls = 0;
 #include <link.h>
 #include <mutex>
 
-static int (*chain_dl_iterate_phdr)(
-		int (*callback) (struct dl_phdr_info *info, size_t size, void *data),
-		void *data) = nullptr;
+static int (*chain_dl_iterate_phdr)(int (*callback)(struct dl_phdr_info* info, size_t size, void* data),
+                                    void* data) = nullptr;
 
 static void initChain() {
 	static std::once_flag flag;
 
 	// Ensure that chain_dl_iterate_phdr points to the "real" function that we are overriding
-	std::call_once(flag, [](){ *(void**)&chain_dl_iterate_phdr = dlsym(RTLD_NEXT, "dl_iterate_phdr"); });
+	std::call_once(flag, []() { *(void**)&chain_dl_iterate_phdr = dlsym(RTLD_NEXT, "dl_iterate_phdr"); });
 
 	if (!chain_dl_iterate_phdr) {
 		criticalError(FDB_EXIT_ERROR, "SignalSafeUnwindError", "Unable to find dl_iterate_phdr symbol");
@@ -43,10 +42,7 @@ static void initChain() {
 }
 
 // This overrides the function in libc!
-extern "C" int dl_iterate_phdr(
-          int (*callback) (struct dl_phdr_info *info, size_t size, void *data),
-          void *data)
-{
+extern "C" int dl_iterate_phdr(int (*callback)(struct dl_phdr_info* info, size_t size, void* data), void* data) {
 	interlockedIncrement64(&dl_iterate_phdr_calls);
 
 	initChain();

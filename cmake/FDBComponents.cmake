@@ -1,6 +1,12 @@
 set(FORCE_ALL_COMPONENTS OFF CACHE BOOL "Fails cmake if not all dependencies are found")
 
 ################################################################################
+# jemalloc
+################################################################################
+
+include(Jemalloc)
+
+################################################################################
 # Valgrind
 ################################################################################
 
@@ -11,6 +17,7 @@ endif()
 ################################################################################
 # SSL
 ################################################################################
+
 include(CheckSymbolExists)
 
 set(DISABLE_TLS OFF CACHE BOOL "Don't try to find OpenSSL and always build without TLS support")
@@ -21,13 +28,13 @@ else()
   find_package(OpenSSL)
   if(OPENSSL_FOUND)
     set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
+    set(WITH_TLS ON)
+    add_compile_options(-DHAVE_OPENSSL)
     check_symbol_exists("OPENSSL_INIT_NO_ATEXIT" "openssl/crypto.h" OPENSSL_HAS_NO_ATEXIT)
     if(OPENSSL_HAS_NO_ATEXIT)
-      set(WITH_TLS ON)
-      add_compile_options(-DHAVE_OPENSSL)
+      add_compile_options(-DHAVE_OPENSSL_INIT_NO_AT_EXIT)
     else()
-      message(WARNING "An OpenSSL version was found, but it doesn't support OPENSSL_INIT_NO_ATEXIT - Will compile without TLS Support")
-      set(WITH_TLS OFF)
+      message(STATUS "Found OpenSSL without OPENSSL_INIT_NO_ATEXIT: assuming BoringSSL")
     endif()
   else()
     message(STATUS "OpenSSL was not found - Will compile without TLS Support")
@@ -88,6 +95,10 @@ find_program(GO_EXECUTABLE go)
 if(GO_EXECUTABLE AND NOT WIN32)
   set(WITH_GO ON)
 else()
+  set(WITH_GO OFF)
+endif()
+if (USE_SANITIZER)
+  # Disable building go for sanitizers, since _stacktester doesn't link properly
   set(WITH_GO OFF)
 endif()
 

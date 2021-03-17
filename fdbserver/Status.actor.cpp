@@ -32,28 +32,41 @@
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbclient/JsonBuilder.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
-const char* RecoveryStatus::names[] = {
-	"reading_coordinated_state", "locking_coordinated_state", "locking_old_transaction_servers", "reading_transaction_system_state",
-	"configuration_missing", "configuration_never_created", "configuration_invalid",
-	"recruiting_transaction_servers", "initializing_transaction_servers", "recovery_transaction",
-	"writing_coordinated_state", "accepting_commits", "all_logs_recruited", "storage_recovered", "fully_recovered"
-};
-static_assert( sizeof(RecoveryStatus::names) == sizeof(RecoveryStatus::names[0])*RecoveryStatus::END, "RecoveryStatus::names[] size" );
+const char* RecoveryStatus::names[] = { "reading_coordinated_state",
+	                                    "locking_coordinated_state",
+	                                    "locking_old_transaction_servers",
+	                                    "reading_transaction_system_state",
+	                                    "configuration_missing",
+	                                    "configuration_never_created",
+	                                    "configuration_invalid",
+	                                    "recruiting_transaction_servers",
+	                                    "initializing_transaction_servers",
+	                                    "recovery_transaction",
+	                                    "writing_coordinated_state",
+	                                    "accepting_commits",
+	                                    "all_logs_recruited",
+	                                    "storage_recovered",
+	                                    "fully_recovered" };
+static_assert(sizeof(RecoveryStatus::names) == sizeof(RecoveryStatus::names[0]) * RecoveryStatus::END,
+              "RecoveryStatus::names[] size");
 const char* RecoveryStatus::descriptions[] = {
 	// reading_coordinated_state
-	"Requesting information from coordination servers. Verify that a majority of coordination server processes are active.",
+	"Requesting information from coordination servers. Verify that a majority of coordination server processes are "
+	"active.",
 	// locking_coordinated_state
 	"Locking coordination state. Verify that a majority of coordination server processes are active.",
 	// locking_old_transaction_servers
-	"Locking old transaction servers. Verify that at least one transaction server from the previous generation is running.",
+	"Locking old transaction servers. Verify that at least one transaction server from the previous generation is "
+	"running.",
 	// reading_transaction_system_state
 	"Recovering transaction server state. Verify that the transaction server processes are active.",
 	// configuration_missing
 	"There appears to be a database, but its configuration does not appear to be initialized.",
 	// configuration_never_created
-	"The coordinator(s) have no record of this database. Either the coordinator addresses are incorrect, the coordination state on those machines is missing, or no database has been created.",
+	"The coordinator(s) have no record of this database. Either the coordinator addresses are incorrect, the "
+	"coordination state on those machines is missing, or no database has been created.",
 	// configuration_invalid
 	"The database configuration is invalid. Set a new, valid configuration to recover the database.",
 	// recruiting_transaction_servers
@@ -73,7 +86,8 @@ const char* RecoveryStatus::descriptions[] = {
 	// fully_recovered
 	"Recovery complete."
 };
-static_assert( sizeof(RecoveryStatus::descriptions) == sizeof(RecoveryStatus::descriptions[0])*RecoveryStatus::END, "RecoveryStatus::descriptions[] size" );
+static_assert(sizeof(RecoveryStatus::descriptions) == sizeof(RecoveryStatus::descriptions[0]) * RecoveryStatus::END,
+              "RecoveryStatus::descriptions[] size");
 
 // From Ratekeeper.actor.cpp
 extern int limitReasonEnd;
@@ -83,28 +97,31 @@ extern const char* limitReasonDesc[];
 struct WorkerEvents : std::map<NetworkAddress, TraceEventFields> {};
 typedef std::map<std::string, TraceEventFields> EventMap;
 
-ACTOR static Future< Optional<TraceEventFields> > latestEventOnWorker(WorkerInterface worker, std::string eventName) {
+ACTOR static Future<Optional<TraceEventFields>> latestEventOnWorker(WorkerInterface worker, std::string eventName) {
 	try {
-		EventLogRequest req = eventName.size() > 0 ? EventLogRequest(Standalone<StringRef>(eventName)) : EventLogRequest();
-		ErrorOr<TraceEventFields> eventTrace  = wait( errorOr(timeoutError(worker.eventLogRequest.getReply(req), 2.0)));
+		EventLogRequest req =
+		    eventName.size() > 0 ? EventLogRequest(Standalone<StringRef>(eventName)) : EventLogRequest();
+		ErrorOr<TraceEventFields> eventTrace = wait(errorOr(timeoutError(worker.eventLogRequest.getReply(req), 2.0)));
 
-		if (eventTrace.isError()){
+		if (eventTrace.isError()) {
 			return Optional<TraceEventFields>();
 		}
 		return eventTrace.get();
-	}
-	catch (Error &e){
+	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
 		return Optional<TraceEventFields>();
 	}
 }
 
-ACTOR static Future< Optional< std::pair<WorkerEvents, std::set<std::string>> > > latestEventOnWorkers(std::vector<WorkerDetails> workers, std::string eventName) {
+ACTOR static Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
+    std::vector<WorkerDetails> workers,
+    std::string eventName) {
 	try {
 		state vector<Future<ErrorOr<TraceEventFields>>> eventTraces;
 		for (int c = 0; c < workers.size(); c++) {
-			EventLogRequest req = eventName.size() > 0 ? EventLogRequest(Standalone<StringRef>(eventName)) : EventLogRequest();
+			EventLogRequest req =
+			    eventName.size() > 0 ? EventLogRequest(Standalone<StringRef>(eventName)) : EventLogRequest();
 			eventTraces.push_back(errorOr(timeoutError(workers[c].interf.eventLogRequest.getReply(req), 2.0)));
 		}
 
@@ -115,11 +132,10 @@ ACTOR static Future< Optional< std::pair<WorkerEvents, std::set<std::string>> > 
 
 		for (int i = 0; i < eventTraces.size(); i++) {
 			const ErrorOr<TraceEventFields>& v = eventTraces[i].get();
-			if (v.isError()){
+			if (v.isError()) {
 				failed.insert(workers[i].interf.address().toString());
 				results[workers[i].interf.address()] = TraceEventFields();
-			}
-			else {
+			} else {
 				results[workers[i].interf.address()] = v.get();
 			}
 		}
@@ -129,14 +145,15 @@ ACTOR static Future< Optional< std::pair<WorkerEvents, std::set<std::string>> > 
 		val.second = failed;
 
 		return val;
-	}
-	catch (Error &e){
-		ASSERT(e.code() == error_code_actor_cancelled); // All errors should be filtering through the errorOr actor above
+	} catch (Error& e) {
+		ASSERT(e.code() ==
+		       error_code_actor_cancelled); // All errors should be filtering through the errorOr actor above
 		throw;
 	}
 }
-static Future< Optional< std::pair<WorkerEvents, std::set<std::string>> > > latestErrorOnWorkers(std::vector<WorkerDetails> workers) {
-	return latestEventOnWorkers( workers, "" );
+static Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestErrorOnWorkers(
+    std::vector<WorkerDetails> workers) {
+	return latestEventOnWorkers(workers, "");
 }
 
 static Optional<WorkerDetails> getWorker(std::vector<WorkerDetails> const& workers, NetworkAddress const& address) {
@@ -145,15 +162,15 @@ static Optional<WorkerDetails> getWorker(std::vector<WorkerDetails> const& worke
 			if (address == workers[c].interf.address())
 				return workers[c];
 		return Optional<WorkerDetails>();
-	}
-	catch (Error& ){
+	} catch (Error&) {
 		return Optional<WorkerDetails>();
 	}
 }
 
-static Optional<WorkerDetails> getWorker(std::map<NetworkAddress, WorkerDetails> const& workersMap, NetworkAddress const& address) {
+static Optional<WorkerDetails> getWorker(std::map<NetworkAddress, WorkerDetails> const& workersMap,
+                                         NetworkAddress const& address) {
 	auto itr = workersMap.find(address);
-	if(itr == workersMap.end()) {
+	if (itr == workersMap.end()) {
 		return Optional<WorkerDetails>();
 	}
 
@@ -164,9 +181,7 @@ class StatusCounter {
 public:
 	StatusCounter() : hz(0), roughness(0), counter(0) {}
 	StatusCounter(double hz, double roughness, int64_t counter) : hz(hz), roughness(roughness), counter(counter) {}
-	StatusCounter(const std::string& parsableText) {
-		parseText(parsableText);
-	}
+	StatusCounter(const std::string& parsableText) { parseText(parsableText); }
 
 	StatusCounter& parseText(const std::string& parsableText) {
 		sscanf(parsableText.c_str(), "%lf %lf %" SCNd64 "", &hz, &roughness, &counter);
@@ -175,7 +190,9 @@ public:
 
 	StatusCounter& updateValues(const StatusCounter& statusCounter) {
 		double hzNew = hz + statusCounter.hz;
-		double roughnessNew = (hz + statusCounter.hz) ? (roughness*hz + statusCounter.roughness*statusCounter.hz) / (hz + statusCounter.hz) : 0.0;
+		double roughnessNew = (hz + statusCounter.hz) ? (roughness * hz + statusCounter.roughness * statusCounter.hz) /
+		                                                    (hz + statusCounter.hz)
+		                                              : 0.0;
 		int64_t counterNew = counter + statusCounter.counter;
 		hz = hzNew;
 		roughness = roughnessNew;
@@ -191,17 +208,11 @@ public:
 		return statusObject;
 	}
 
-	double getHz() {
-		return hz;
-	}
+	double getHz() { return hz; }
 
-	double getRoughness() {
-		return roughness;
-	}
+	double getRoughness() { return roughness; }
 
-	int64_t getCounter() {
-		return counter;
-	}
+	int64_t getCounter() { return counter; }
 
 protected:
 	double hz;
@@ -212,11 +223,10 @@ protected:
 static JsonBuilderObject getLocalityInfo(const LocalityData& locality) {
 	JsonBuilderObject localityObj;
 
-	for(auto it = locality._data.begin(); it != locality._data.end(); it++) {
-		if(it->second.present()) {
+	for (auto it = locality._data.begin(); it != locality._data.end(); it++) {
+		if (it->second.present()) {
 			localityObj[it->first] = it->second.get();
-		}
-		else {
+		} else {
 			localityObj[it->first] = JsonBuilder();
 		}
 	}
@@ -238,11 +248,10 @@ static JsonBuilderObject getError(const TraceEventFields& errorFields) {
 
 			std::string description = type;
 			std::string errorName;
-			if(errorFields.tryGetValue("Error", errorName)) {
+			if (errorFields.tryGetValue("Error", errorName)) {
 				statusObj["name"] = errorName;
 				description += ": " + errorName;
-			}
-			else
+			} else
 				statusObj["name"] = "process_error";
 
 			struct tm* timeinfo;
@@ -254,14 +263,16 @@ static JsonBuilderObject getError(const TraceEventFields& errorFields) {
 
 			statusObj["description"] = description;
 		}
-	}
-	catch (Error &e){
+	} catch (Error& e) {
 		TraceEvent(SevError, "StatusGetErrorError").error(e).detail("RawError", errorFields.toString());
 	}
 	return statusObj;
 }
 
-static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics, vector<WorkerDetails> workers, Optional<DatabaseConfiguration> configuration, std::set<std::string> *incomplete_reasons) {
+static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
+                                              vector<WorkerDetails> workers,
+                                              Optional<DatabaseConfiguration> configuration,
+                                              std::set<std::string>* incomplete_reasons) {
 	JsonBuilderObject machineMap;
 	double metric;
 	int failed = 0;
@@ -273,19 +284,19 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics, vector<Work
 	std::map<std::string, int32_t> workerContribMap;
 	std::map<std::string, JsonBuilderObject> machineJsonMap;
 
-	for (auto const& worker : workers){
+	for (auto const& worker : workers) {
 		locality[worker.interf.address()] = worker.interf.locality;
 		if (worker.interf.locality.dcId().present())
 			dcIds[worker.interf.address()] = worker.interf.locality.dcId().get().printable();
 	}
 
-	for(auto it = mMetrics.begin(); it != mMetrics.end(); it++) {
+	for (auto it = mMetrics.begin(); it != mMetrics.end(); it++) {
 
-		if (!it->second.size()){
+		if (!it->second.size()) {
 			continue;
 		}
 
-		JsonBuilderObject statusObj;  // Represents the status for a machine
+		JsonBuilderObject statusObj; // Represents the status for a machine
 		const TraceEventFields& event = it->second;
 
 		try {
@@ -297,11 +308,11 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics, vector<Work
 			if (machineJsonMap.count(machineId) == 0) {
 				statusObj["machine_id"] = machineId;
 
-				if (dcIds.count(it->first)){
+				if (dcIds.count(it->first)) {
 					statusObj["datacenter_id"] = dcIds[it->first];
 				}
 
-				if(locality.count(it->first)) {
+				if (locality.count(it->first)) {
 					statusObj["locality"] = getLocalityInfo(locality[it->first]);
 				}
 
@@ -316,39 +327,40 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics, vector<Work
 				JsonBuilderObject cpuObj;
 				double cpuSeconds = event.getDouble("CPUSeconds");
 				double elapsed = event.getDouble("Elapsed");
-				if (elapsed > 0){
+				if (elapsed > 0) {
 					cpuObj["logical_core_utilization"] = std::max(0.0, std::min(cpuSeconds / elapsed, 1.0));
 				}
 				statusObj["cpu"] = cpuObj;
 
 				JsonBuilderObject networkObj;
 				networkObj["megabits_sent"] = JsonBuilderObject().setKeyRawNumber("hz", event.getValue("MbpsSent"));
-				networkObj["megabits_received"] = JsonBuilderObject().setKeyRawNumber("hz", event.getValue("MbpsReceived"));
+				networkObj["megabits_received"] =
+				    JsonBuilderObject().setKeyRawNumber("hz", event.getValue("MbpsReceived"));
 
 				metric = event.getDouble("RetransSegs");
 				JsonBuilderObject retransSegsObj;
-				if (elapsed > 0){
+				if (elapsed > 0) {
 					retransSegsObj["hz"] = metric / elapsed;
 				}
 				networkObj["tcp_segments_retransmitted"] = retransSegsObj;
 				statusObj["network"] = networkObj;
 
-				if (configuration.present()){
-					notExcludedMap[machineId] = true; // Will be set to false below if this or any later process is not excluded
+				if (configuration.present()) {
+					notExcludedMap[machineId] =
+					    true; // Will be set to false below if this or any later process is not excluded
 				}
 
 				workerContribMap[machineId] = 0;
 				machineJsonMap[machineId] = statusObj;
 			}
 
-			//FIXME: this will not catch if the secondary address of the process was excluded
+			// FIXME: this will not catch if the secondary address of the process was excluded
 			NetworkAddressList tempList;
 			tempList.address = it->first;
 			if (configuration.present() && !configuration.get().isExcludedServer(tempList))
 				notExcludedMap[machineId] = false;
-			workerContribMap[machineId] ++;
-		}
-		catch (Error& ) {
+			workerContribMap[machineId]++;
+		} catch (Error&) {
 			++failed;
 		}
 	}
@@ -362,7 +374,7 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics, vector<Work
 		machineMap[machineId] = jsonItem;
 	}
 
-	if(failed > 0)
+	if (failed > 0)
 		incomplete_reasons->insert("Cannot retrieve all machine status information.");
 
 	return machineMap;
@@ -408,15 +420,13 @@ struct RolesInfo {
 		JsonBuilderObject latencyBands;
 		std::map<std::string, JsonBuilderObject> bands;
 
-		for(auto itr = metrics.begin(); itr != metrics.end(); ++itr) {
+		for (auto itr = metrics.begin(); itr != metrics.end(); ++itr) {
 			std::string band;
-			if(itr->first.substr(0, 4) == "Band") {
+			if (itr->first.substr(0, 4) == "Band") {
 				band = itr->first.substr(4);
-			}
-			else if(itr->first == "Filtered") {
+			} else if (itr->first == "Filtered") {
 				band = "filtered";
-			}
-			else {
+			} else {
 				continue;
 			}
 
@@ -426,13 +436,17 @@ struct RolesInfo {
 		return latencyBands;
 	}
 
-	JsonBuilderObject& addRole( NetworkAddress address, std::string const& role, UID id) {
+	JsonBuilderObject& addRole(NetworkAddress address, std::string const& role, UID id) {
 		JsonBuilderObject obj;
 		obj["id"] = id.shortString();
 		obj["role"] = role;
-		return roles.insert( std::make_pair(address, obj ))->second;
+		return roles.insert(std::make_pair(address, obj))->second;
 	}
-	JsonBuilderObject& addRole(std::string const& role, StorageServerInterface& iface, EventMap const& metrics, Version maxTLogVersion, double* pDataLagSeconds) {
+	JsonBuilderObject& addRole(std::string const& role,
+	                           StorageServerInterface& iface,
+	                           EventMap const& metrics,
+	                           Version maxTLogVersion,
+	                           double* pDataLagSeconds) {
 		JsonBuilderObject obj;
 		double dataLagSeconds = -1.0;
 		obj["id"] = iface.id().shortString();
@@ -453,6 +467,12 @@ struct RolesInfo {
 			obj.setKeyRawNumber("query_queue_max", storageMetrics.getValue("QueryQueueMax"));
 			obj["total_queries"] = StatusCounter(storageMetrics.getValue("QueryQueue")).getStatus();
 			obj["finished_queries"] = StatusCounter(storageMetrics.getValue("FinishedQueries")).getStatus();
+			try { // FIXME: This field was added in a patch release, the try-catch can be removed for the 7.0 release
+				obj["low_priority_queries"] = StatusCounter(storageMetrics.getValue("LowPriorityQueries")).getStatus();
+			} catch (Error& e) {
+				if (e.code() != error_code_attribute_not_found)
+					throw e;
+			}
 			obj["bytes_queried"] = StatusCounter(storageMetrics.getValue("BytesQueried")).getStatus();
 			obj["keys_queried"] = StatusCounter(storageMetrics.getValue("RowsQueried")).getStatus();
 			obj["mutation_bytes"] = StatusCounter(storageMetrics.getValue("MutationBytes")).getStatus();
@@ -466,22 +486,26 @@ struct RolesInfo {
 			obj["durable_version"] = durableVersion;
 
 			int64_t versionLag = storageMetrics.getInt64("VersionLag");
-			if(maxTLogVersion > 0) {
-				// It's possible that the storage server hasn't talked to the logs recently, in which case it may not be aware of how far behind it is.
-				// To account for that, we also compute the version difference between each storage server and the tlog with the largest version.
+			if (maxTLogVersion > 0) {
+				// It's possible that the storage server hasn't talked to the logs recently, in which case it may not be
+				// aware of how far behind it is. To account for that, we also compute the version difference between
+				// each storage server and the tlog with the largest version.
 				//
-				// Because this data is only logged periodically, this difference will likely be an overestimate for the lag. We subtract off the logging interval
-				// in order to make this estimate a bounded underestimate instead.
-				versionLag = std::max<int64_t>(versionLag, maxTLogVersion - version - SERVER_KNOBS->STORAGE_LOGGING_DELAY * SERVER_KNOBS->VERSIONS_PER_SECOND);
+				// Because this data is only logged periodically, this difference will likely be an overestimate for the
+				// lag. We subtract off the logging interval in order to make this estimate a bounded underestimate
+				// instead.
+				versionLag = std::max<int64_t>(
+				    versionLag,
+				    maxTLogVersion - version - SERVER_KNOBS->STORAGE_LOGGING_DELAY * SERVER_KNOBS->VERSIONS_PER_SECOND);
 			}
 
 			TraceEventFields const& readLatencyMetrics = metrics.at("ReadLatencyMetrics");
-			if(readLatencyMetrics.size()) {
+			if (readLatencyMetrics.size()) {
 				obj["read_latency_statistics"] = addLatencyStatistics(readLatencyMetrics);
 			}
 
 			TraceEventFields const& readLatencyBands = metrics.at("ReadLatencyBands");
-			if(readLatencyBands.size()) {
+			if (readLatencyBands.size()) {
 				obj["read_latency_bands"] = addLatencyBandInfo(readLatencyBands);
 			}
 
@@ -490,10 +514,10 @@ struct RolesInfo {
 			dataLagSeconds = versionLag / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
 
 			TraceEventFields const& busiestReadTag = metrics.at("BusiestReadTag");
-			if(busiestReadTag.size()) {
+			if (busiestReadTag.size()) {
 				int64_t tagCost = busiestReadTag.getInt64("TagCost");
 
-				if(tagCost > 0) {
+				if (tagCost > 0) {
 					JsonBuilderObject busiestReadTagObj;
 
 					int64_t totalSampledCost = busiestReadTag.getInt64("TotalSampledCost");
@@ -503,7 +527,7 @@ struct RolesInfo {
 					busiestReadTagObj["fractional_cost"] = (double)tagCost / totalSampledCost;
 
 					double elapsed = busiestReadTag.getDouble("Elapsed");
-					if(CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
+					if (CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
 						JsonBuilderObject estimatedCostObj;
 						estimatedCostObj["hz"] = tagCost / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE / elapsed;
 						busiestReadTagObj["estimated_cost"] = estimatedCostObj;
@@ -514,30 +538,30 @@ struct RolesInfo {
 			}
 
 			TraceEventFields const& busiestWriteTag = metrics.at("BusiestWriteTag");
-			if(busiestWriteTag.size()) {
+			if (busiestWriteTag.size()) {
 				int64_t tagCost = busiestWriteTag.getInt64("TagCost");
 
-				if(tagCost > 0) {
-				    JsonBuilderObject busiestWriteTagObj;
+				if (tagCost > 0) {
+					JsonBuilderObject busiestWriteTagObj;
 
-				    int64_t totalCost = busiestWriteTag.getInt64("TotalCost");
-				    ASSERT(totalCost > 0);
+					int64_t totalCost = busiestWriteTag.getInt64("TotalCost");
+					ASSERT(totalCost > 0);
 
-				    busiestWriteTagObj["tag"] = busiestWriteTag.getValue("Tag");
-				    busiestWriteTagObj["fractional_cost"] = (double)tagCost / totalCost;
+					busiestWriteTagObj["tag"] = busiestWriteTag.getValue("Tag");
+					busiestWriteTagObj["fractional_cost"] = (double)tagCost / totalCost;
 
-				    double elapsed = busiestWriteTag.getDouble("Elapsed");
-				    if(elapsed > 0) {
-					JsonBuilderObject estimatedCostObj;
-					estimatedCostObj["hz"] = tagCost / elapsed;
-					busiestWriteTagObj["estimated_cost"] = estimatedCostObj;
-				    }
+					double elapsed = busiestWriteTag.getDouble("Elapsed");
+					if (elapsed > 0) {
+						JsonBuilderObject estimatedCostObj;
+						estimatedCostObj["hz"] = tagCost / elapsed;
+						busiestWriteTagObj["estimated_cost"] = estimatedCostObj;
+					}
 
-				    obj["busiest_write_tag"] = busiestWriteTagObj;
+					obj["busiest_write_tag"] = busiestWriteTagObj;
 				}
 			}
 		} catch (Error& e) {
-			if(e.code() != error_code_attribute_not_found)
+			if (e.code() != error_code_attribute_not_found)
 				throw e;
 		}
 
@@ -545,11 +569,14 @@ struct RolesInfo {
 			*pDataLagSeconds = dataLagSeconds;
 		}
 
-		return roles.insert( std::make_pair(iface.address(), obj ))->second;
+		return roles.insert(std::make_pair(iface.address(), obj))->second;
 	}
-	JsonBuilderObject& addRole(std::string const& role, TLogInterface& iface, EventMap const& metrics, Version* pMetricVersion) {
+	JsonBuilderObject& addRole(std::string const& role,
+	                           TLogInterface& iface,
+	                           EventMap const& metrics,
+	                           Version* pMetricVersion) {
 		JsonBuilderObject obj;
-		Version	metricVersion = 0;
+		Version metricVersion = 0;
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
 		try {
@@ -568,12 +595,12 @@ struct RolesInfo {
 			metricVersion = tlogMetrics.getInt64("Version");
 			obj["data_version"] = metricVersion;
 		} catch (Error& e) {
-			if(e.code() != error_code_attribute_not_found)
+			if (e.code() != error_code_attribute_not_found)
 				throw e;
 		}
 		if (pMetricVersion)
 			*pMetricVersion = metricVersion;
-		return roles.insert( std::make_pair(iface.address(), obj ))->second;
+		return roles.insert(std::make_pair(iface.address(), obj))->second;
 	}
 	JsonBuilderObject& addRole(std::string const& role, CommitProxyInterface& iface, EventMap const& metrics) {
 		JsonBuilderObject obj;
@@ -581,21 +608,21 @@ struct RolesInfo {
 		obj["role"] = role;
 		try {
 			TraceEventFields const& commitLatencyMetrics = metrics.at("CommitLatencyMetrics");
-			if(commitLatencyMetrics.size()) {
+			if (commitLatencyMetrics.size()) {
 				obj["commit_latency_statistics"] = addLatencyStatistics(commitLatencyMetrics);
 			}
 
 			TraceEventFields const& commitLatencyBands = metrics.at("CommitLatencyBands");
-			if(commitLatencyBands.size()) {
+			if (commitLatencyBands.size()) {
 				obj["commit_latency_bands"] = addLatencyBandInfo(commitLatencyBands);
 			}
-		} catch (Error &e) {
-			if(e.code() != error_code_attribute_not_found) {
+		} catch (Error& e) {
+			if (e.code() != error_code_attribute_not_found) {
 				throw e;
 			}
 		}
 
-		return roles.insert( std::make_pair(iface.address(), obj ))->second;
+		return roles.insert(std::make_pair(iface.address(), obj))->second;
 	}
 	JsonBuilderObject& addRole(std::string const& role, GrvProxyInterface& iface, EventMap const& metrics) {
 		JsonBuilderObject obj;
@@ -603,7 +630,7 @@ struct RolesInfo {
 		obj["role"] = role;
 		try {
 			TraceEventFields const& grvLatencyMetrics = metrics.at("GRVLatencyMetrics");
-			if(grvLatencyMetrics.size()) {
+			if (grvLatencyMetrics.size()) {
 				JsonBuilderObject priorityStats;
 				// We only report default priority now, but this allows us to add other priorities if we want them
 				priorityStats["default"] = addLatencyStatistics(grvLatencyMetrics);
@@ -611,16 +638,16 @@ struct RolesInfo {
 			}
 
 			TraceEventFields const& grvLatencyBands = metrics.at("GRVLatencyBands");
-			if(grvLatencyBands.size()) {
+			if (grvLatencyBands.size()) {
 				obj["grv_latency_bands"] = addLatencyBandInfo(grvLatencyBands);
 			}
-		} catch (Error &e) {
-			if(e.code() != error_code_attribute_not_found) {
+		} catch (Error& e) {
+			if (e.code() != error_code_attribute_not_found) {
 				throw e;
 			}
 		}
 
-		return roles.insert( std::make_pair(iface.address(), obj ))->second;
+		return roles.insert(std::make_pair(iface.address(), obj))->second;
 	}
 	template <class InterfaceType>
 	JsonBuilderObject& addRole(std::string const& role, InterfaceType& iface) {
@@ -631,7 +658,7 @@ struct RolesInfo {
 		obj["role"] = "coordinator";
 		return roles.insert(std::make_pair(addr, obj))->second;
 	}
-	JsonBuilderArray getStatusForAddress( NetworkAddress a ) {
+	JsonBuilderArray getStatusForAddress(NetworkAddress a) {
 		JsonBuilderArray v;
 		auto it = roles.lower_bound(a);
 		while (it != roles.end() && it->first == a) {
@@ -643,13 +670,23 @@ struct RolesInfo {
 };
 
 ACTOR static Future<JsonBuilderObject> processStatusFetcher(
-    Reference<AsyncVar<ServerDBInfo>> db, std::vector<WorkerDetails> workers, WorkerEvents pMetrics,
-    WorkerEvents mMetrics, WorkerEvents nMetrics, WorkerEvents errors, WorkerEvents traceFileOpenErrors,
-    WorkerEvents programStarts, std::map<std::string, std::vector<JsonBuilderObject>> processIssues,
+    Reference<AsyncVar<ServerDBInfo>> db,
+    std::vector<WorkerDetails> workers,
+    WorkerEvents pMetrics,
+    WorkerEvents mMetrics,
+    WorkerEvents nMetrics,
+    WorkerEvents errors,
+    WorkerEvents traceFileOpenErrors,
+    WorkerEvents programStarts,
+    std::map<std::string, std::vector<JsonBuilderObject>> processIssues,
     vector<std::pair<StorageServerInterface, EventMap>> storageServers,
-    vector<std::pair<TLogInterface, EventMap>> tLogs, vector<std::pair<CommitProxyInterface, EventMap>> commitProxies,
-    vector<std::pair<GrvProxyInterface, EventMap>> grvProxies, ServerCoordinators coordinators, Database cx,
-    Optional<DatabaseConfiguration> configuration, Optional<Key> healthyZone,
+    vector<std::pair<TLogInterface, EventMap>> tLogs,
+    vector<std::pair<CommitProxyInterface, EventMap>> commitProxies,
+    vector<std::pair<GrvProxyInterface, EventMap>> grvProxies,
+    ServerCoordinators coordinators,
+    Database cx,
+    Optional<DatabaseConfiguration> configuration,
+    Optional<Key> healthyZone,
     std::set<std::string>* incomplete_reasons) {
 
 	state JsonBuilderObject processMap;
@@ -658,20 +695,23 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	// this is later added to the messages subsection
 	state std::map<std::string, JsonBuilderObject> tracefileOpenErrorMap;
 	state WorkerEvents::iterator traceFileErrorsItr;
-	for(traceFileErrorsItr = traceFileOpenErrors.begin(); traceFileErrorsItr != traceFileOpenErrors.end(); ++traceFileErrorsItr) {
+	for (traceFileErrorsItr = traceFileOpenErrors.begin(); traceFileErrorsItr != traceFileOpenErrors.end();
+	     ++traceFileErrorsItr) {
 		wait(yield());
-		if (traceFileErrorsItr->second.size()){
+		if (traceFileErrorsItr->second.size()) {
 			try {
 				// Have event fields, parse it and turn it into a message object describing the trace file opening error
 				const TraceEventFields& event = traceFileErrorsItr->second;
 				std::string fileName = event.getValue("Filename");
-				JsonBuilderObject msgObj = JsonString::makeMessage("file_open_error", format("Could not open file '%s' (%s).", fileName.c_str(), event.getValue("Error").c_str()).c_str());
+				JsonBuilderObject msgObj = JsonString::makeMessage(
+				    "file_open_error",
+				    format("Could not open file '%s' (%s).", fileName.c_str(), event.getValue("Error").c_str())
+				        .c_str());
 				msgObj["file_name"] = fileName;
 
 				// Map the address of the worker to the error message object
 				tracefileOpenErrorMap[traceFileErrorsItr->first.toString()] = msgObj;
-			}
-			catch(Error &e) {
+			} catch (Error& e) {
 				incomplete_reasons->insert("file_open_error details could not be retrieved");
 			}
 		}
@@ -679,24 +719,24 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 
 	state std::map<Optional<Standalone<StringRef>>, MachineMemoryInfo> machineMemoryUsage;
 	state std::vector<WorkerDetails>::iterator workerItr;
-	for(workerItr = workers.begin(); workerItr != workers.end(); ++workerItr) {
+	for (workerItr = workers.begin(); workerItr != workers.end(); ++workerItr) {
 		wait(yield());
-		state std::map<Optional<Standalone<StringRef>>, MachineMemoryInfo>::iterator memInfo = machineMemoryUsage.insert(std::make_pair(workerItr->interf.locality.machineId(), MachineMemoryInfo())).first;
+		state std::map<Optional<Standalone<StringRef>>, MachineMemoryInfo>::iterator memInfo =
+		    machineMemoryUsage.insert(std::make_pair(workerItr->interf.locality.machineId(), MachineMemoryInfo()))
+		        .first;
 		try {
 			ASSERT(pMetrics.count(workerItr->interf.address()));
 			const TraceEventFields& processMetrics = pMetrics[workerItr->interf.address()];
 			const TraceEventFields& programStart = programStarts[workerItr->interf.address()];
 
-			if(memInfo->second.valid()) {
-				if(processMetrics.size() > 0 && programStart.size() > 0) {
+			if (memInfo->second.valid()) {
+				if (processMetrics.size() > 0 && programStart.size() > 0) {
 					memInfo->second.memoryUsage += processMetrics.getDouble("Memory");
 					memInfo->second.aggregateLimit += programStart.getDouble("MemoryLimit");
-				}
-				else
+				} else
 					memInfo->second.invalidate();
 			}
-		}
-		catch(Error &e) {
+		} catch (Error& e) {
 			memInfo->second.invalidate();
 		}
 	}
@@ -714,25 +754,25 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("ratekeeper", db->get().ratekeeper.get());
 	}
 
-	for(auto& tLogSet : db->get().logSystemConfig.tLogs) {
-		for(auto& it : tLogSet.logRouters) {
-			if(it.present()) {
+	for (auto& tLogSet : db->get().logSystemConfig.tLogs) {
+		for (auto& it : tLogSet.logRouters) {
+			if (it.present()) {
 				roles.addRole("router", it.interf());
 			}
 		}
 	}
 
-	for(auto& old : db->get().logSystemConfig.oldTLogs) {
-		for(auto& tLogSet : old.tLogs) {
-			for(auto& it : tLogSet.logRouters) {
-				if(it.present()) {
+	for (auto& old : db->get().logSystemConfig.oldTLogs) {
+		for (auto& tLogSet : old.tLogs) {
+			for (auto& it : tLogSet.logRouters) {
+				if (it.present()) {
 					roles.addRole("router", it.interf());
 				}
 			}
 		}
 	}
 
-	for(auto& coordinator : coordinators.ccf->getConnectionString().coordinators()) {
+	for (auto& coordinator : coordinators.ccf->getConnectionString().coordinators()) {
 		roles.addCoordinatorRole(coordinator);
 	}
 
@@ -743,7 +783,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	}
 
 	state std::vector<std::pair<GrvProxyInterface, EventMap>>::iterator grvProxy;
-	for(grvProxy = grvProxies.begin(); grvProxy != grvProxies.end(); ++grvProxy) {
+	for (grvProxy = grvProxies.begin(); grvProxy != grvProxies.end(); ++grvProxy) {
 		roles.addRole("grv_proxy", grvProxy->first, grvProxy->second);
 		wait(yield());
 	}
@@ -752,9 +792,9 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	state Version maxTLogVersion = 0;
 
 	// Get largest TLog version
-	for(log = tLogs.begin(); log != tLogs.end(); ++log) {
+	for (log = tLogs.begin(); log != tLogs.end(); ++log) {
 		Version tLogVersion = 0;
-		roles.addRole( "log", log->first, log->second, &tLogVersion );
+		roles.addRole("log", log->first, log->second, &tLogVersion);
 		maxTLogVersion = std::max(maxTLogVersion, tLogVersion);
 		wait(yield());
 	}
@@ -762,8 +802,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	state std::vector<std::pair<StorageServerInterface, EventMap>>::iterator ss;
 	state std::map<NetworkAddress, double> ssLag;
 	state double lagSeconds;
-	for(ss = storageServers.begin(); ss != storageServers.end(); ++ss) {
-		roles.addRole( "storage", ss->first, ss->second, maxTLogVersion, &lagSeconds );
+	for (ss = storageServers.begin(); ss != storageServers.end(); ++ss) {
+		roles.addRole("storage", ss->first, ss->second, maxTLogVersion, &lagSeconds);
 		if (lagSeconds != -1.0) {
 			ssLag[ss->first.address()] = lagSeconds;
 		}
@@ -772,12 +812,12 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 
 	state std::vector<ResolverInterface>::const_iterator res;
 	state std::vector<ResolverInterface> resolvers = db->get().resolvers;
-	for(res = resolvers.begin(); res != resolvers.end(); ++res) {
-		roles.addRole( "resolver", *res );
+	for (res = resolvers.begin(); res != resolvers.end(); ++res) {
+		roles.addRole("resolver", *res);
 		wait(yield());
 	}
 
-	for(workerItr = workers.begin(); workerItr != workers.end(); ++workerItr) {
+	for (workerItr = workers.begin(); workerItr != workers.end(); ++workerItr) {
 		wait(yield());
 		state JsonBuilderObject statusObj;
 		try {
@@ -791,7 +831,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			if (processMetrics.size() > 0) {
 				std::string zoneID = processMetrics.getValue("ZoneID");
 				statusObj["fault_domain"] = zoneID;
-				if(healthyZone.present() && healthyZone == workerItr->interf.locality.zoneId()) {
+				if (healthyZone.present() && healthyZone == workerItr->interf.locality.zoneId()) {
 					statusObj["under_maintenance"] = true;
 				}
 
@@ -815,7 +855,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 					cpuObj["usage_cores"] = std::max(0.0, cpuSeconds / processMetricsElapsed);
 					statusObj["cpu"] = cpuObj;
 
-					diskObj["busy"] = std::max(0.0, std::min((processMetricsElapsed - diskIdleSeconds) / processMetricsElapsed, 1.0));
+					diskObj["busy"] =
+					    std::max(0.0, std::min((processMetricsElapsed - diskIdleSeconds) / processMetricsElapsed, 1.0));
 
 					JsonBuilderObject readsObj;
 					readsObj.setKeyRawNumber("counter", processMetrics.getValue("DiskReadsCount"));
@@ -872,7 +913,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			if (programStarts.count(address)) {
 				auto const& programStartEvent = programStarts.at(address);
 
-				if(programStartEvent.size() > 0) {
+				if (programStartEvent.size() > 0) {
 					memoryLimit = programStartEvent.getInt64("MemoryLimit");
 					memoryObj.setKey("limit_bytes", memoryLimit);
 
@@ -889,14 +930,15 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			}
 
 			// if this process address is in the machine metrics
-			if (mMetrics.count(address) && mMetrics[address].size()){
+			if (mMetrics.count(address) && mMetrics[address].size()) {
 				double availableMemory;
 				availableMemory = mMetrics[address].getDouble("AvailableMemory");
 
 				auto machineMemInfo = machineMemoryUsage[workerItr->interf.locality.machineId()];
 				if (machineMemInfo.valid() && memoryLimit > 0) {
 					ASSERT(machineMemInfo.aggregateLimit > 0);
-					int64_t memory = (availableMemory + machineMemInfo.memoryUsage) * memoryLimit / machineMemInfo.aggregateLimit;
+					int64_t memory =
+					    (availableMemory + machineMemInfo.memoryUsage) * memoryLimit / machineMemInfo.aggregateLimit;
 					memoryObj["available_bytes"] = std::min<int64_t>(std::max<int64_t>(memory, 0), memoryLimit);
 				}
 			}
@@ -919,12 +961,14 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			}
 
 			// If this process had a trace file open error, identified by strAddress, then add it to messages array
-			if (tracefileOpenErrorMap.count(strAddress)){
+			if (tracefileOpenErrorMap.count(strAddress)) {
 				messages.push_back(tracefileOpenErrorMap[strAddress]);
 			}
 
-			if(ssLag[address] >= 60) {
-				messages.push_back(JsonString::makeMessage("storage_server_lagging", format("Storage server lagging by %ld seconds.", (int64_t)ssLag[address]).c_str()));
+			if (ssLag[address] >= 60) {
+				messages.push_back(JsonString::makeMessage(
+				    "storage_server_lagging",
+				    format("Storage server lagging by %ld seconds.", (int64_t)ssLag[address]).c_str()));
 			}
 
 			// Store the message array into the status object that represents the worker process
@@ -933,13 +977,13 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			// Get roles for the worker's address as an array of objects
 			statusObj["roles"] = roles.getStatusForAddress(address);
 
-			if (configuration.present()){
+			if (configuration.present()) {
 				statusObj["excluded"] = configuration.get().isExcludedServer(workerItr->interf.addresses());
 			}
 
 			statusObj["class_type"] = workerItr->processClass.toString();
 			statusObj["class_source"] = workerItr->processClass.sourceString();
-			if(workerItr->degraded) {
+			if (workerItr->degraded) {
 				statusObj["degraded"] = true;
 			}
 
@@ -949,15 +993,15 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			try {
 				double runLoopBusy = networkMetrics.getDouble("PriorityStarvedBelow1");
 				statusObj["run_loop_busy"] = runLoopBusy / networkMetricsElapsed;
-			}
-			catch(Error &e) {
-				// This should only happen very early in the process lifetime before priority bin info has been populated
+			} catch (Error& e) {
+				// This should only happen very early in the process lifetime before priority bin info has been
+				// populated
 				incomplete_reasons->insert("Cannot retrieve run loop busyness.");
 			}
 
-		}
-		catch (Error& e){
-			// Something strange occurred, process list is incomplete but what was built so far, if anything, will be returned.
+		} catch (Error& e) {
+			// Something strange occurred, process list is incomplete but what was built so far, if anything, will be
+			// returned.
 			incomplete_reasons->insert("Cannot retrieve all process status information.");
 		}
 
@@ -973,7 +1017,8 @@ struct ClientStats {
 	ClientStats() : count(0) {}
 };
 
-static JsonBuilderObject clientStatusFetcher(std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatusMap) {
+static JsonBuilderObject clientStatusFetcher(
+    std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatusMap) {
 	JsonBuilderObject clientStatus;
 
 	int64_t clientCount = 0;
@@ -984,17 +1029,17 @@ static JsonBuilderObject clientStatusFetcher(std::map<NetworkAddress, std::pair<
 	for (auto iter = clientStatusMap->begin(); iter != clientStatusMap->end();) {
 		if (now() - iter->second.first < 2 * SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL) {
 			clientCount += iter->second.second.clientCount;
-			for(auto& it : iter->second.second.issues) {
+			for (auto& it : iter->second.second.issues) {
 				auto& issue = issues[it.item];
 				issue.count += it.count;
 				issue.examples.insert(it.examples.begin(), it.examples.end());
 			}
-			for(auto& it : iter->second.second.supportedVersions) {
+			for (auto& it : iter->second.second.supportedVersions) {
 				auto& version = supportedVersions[it.item];
 				version.count += it.count;
 				version.examples.insert(it.examples.begin(), it.examples.end());
 			}
-			for(auto& it : iter->second.second.maxProtocolSupported) {
+			for (auto& it : iter->second.second.maxProtocolSupported) {
 				auto& protocolVersion = maxSupportedProtocol[it.item];
 				protocolVersion.count += it.count;
 				protocolVersion.examples.insert(it.examples.begin(), it.examples.end());
@@ -1008,7 +1053,7 @@ static JsonBuilderObject clientStatusFetcher(std::map<NetworkAddress, std::pair<
 	clientStatus["count"] = clientCount;
 
 	JsonBuilderArray versionsArray = JsonBuilderArray();
-	for(auto& cv : supportedVersions) {
+	for (auto& cv : supportedVersions) {
 		JsonBuilderObject ver;
 		ver["count"] = (int64_t)cv.second.count;
 		ver["client_version"] = cv.first.clientVersion.toString();
@@ -1016,7 +1061,7 @@ static JsonBuilderObject clientStatusFetcher(std::map<NetworkAddress, std::pair<
 		ver["source_version"] = cv.first.sourceVersion.toString();
 
 		JsonBuilderArray clients = JsonBuilderArray();
-		for(auto& client : cv.second.examples) {
+		for (auto& client : cv.second.examples) {
 			JsonBuilderObject cli;
 			cli["address"] = client.first.toString();
 			cli["log_group"] = client.second.toString();
@@ -1024,9 +1069,9 @@ static JsonBuilderObject clientStatusFetcher(std::map<NetworkAddress, std::pair<
 		}
 
 		auto iter = maxSupportedProtocol.find(cv.first.protocolVersion);
-		if(iter != maxSupportedProtocol.end()) {
+		if (iter != maxSupportedProtocol.end()) {
 			JsonBuilderArray maxClients = JsonBuilderArray();
-			for(auto& client : iter->second.examples) {
+			for (auto& client : iter->second.examples) {
 				JsonBuilderObject cli;
 				cli["address"] = client.first.toString();
 				cli["log_group"] = client.second.toString();
@@ -1041,20 +1086,28 @@ static JsonBuilderObject clientStatusFetcher(std::map<NetworkAddress, std::pair<
 		versionsArray.push_back(ver);
 	}
 
-	if(versionsArray.size() > 0) {
+	if (versionsArray.size() > 0) {
 		clientStatus["supported_versions"] = versionsArray;
 	}
 
 	return clientStatus;
 }
 
-ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx, WorkerDetails mWorker, int workerCount, std::set<std::string> *incomplete_reasons, int* statusCode) {
+ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
+                                                                  WorkerDetails mWorker,
+                                                                  int workerCount,
+                                                                  std::set<std::string>* incomplete_reasons,
+                                                                  int* statusCode) {
 	state JsonBuilderObject message;
 	state Transaction tr(cx);
 	try {
-		state Future<TraceEventFields> mdActiveGensF = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryGenerations") ) ), 1.0);
-		state Future<TraceEventFields> mdF = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0);
-		state Future<TraceEventFields> mDBAvailableF = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryAvailable") ) ), 1.0);
+		state Future<TraceEventFields> mdActiveGensF = timeoutError(
+		    mWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("MasterRecoveryGenerations"))),
+		    1.0);
+		state Future<TraceEventFields> mdF = timeoutError(
+		    mWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("MasterRecoveryState"))), 1.0);
+		state Future<TraceEventFields> mDBAvailableF = timeoutError(
+		    mWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("MasterRecoveryAvailable"))), 1.0);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		state Future<ErrorOr<Version>> rvF = errorOr(timeoutError(tr.getReadVersion(), 1.0));
 
@@ -1065,7 +1118,8 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx, W
 		if (mStatusCode < 0 || mStatusCode >= RecoveryStatus::END)
 			throw attribute_not_found();
 
-		message = JsonString::makeMessage(RecoveryStatus::names[mStatusCode], RecoveryStatus::descriptions[mStatusCode]);
+		message =
+		    JsonString::makeMessage(RecoveryStatus::names[mStatusCode], RecoveryStatus::descriptions[mStatusCode]);
 		*statusCode = mStatusCode;
 
 		ErrorOr<Version> rv = rvF.get();
@@ -1073,7 +1127,8 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx, W
 		if (dbAvailableMsg.size() > 0) {
 			int64_t availableAtVersion = dbAvailableMsg.getInt64("AvailableAtVersion");
 			if (!rv.isError()) {
-				double lastRecoveredSecondsAgo = std::max((int64_t)0, (int64_t)(rv.get() - availableAtVersion)) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+				double lastRecoveredSecondsAgo = std::max((int64_t)0, (int64_t)(rv.get() - availableAtVersion)) /
+				                                 (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
 				message["seconds_since_last_recovered"] = lastRecoveredSecondsAgo;
 			}
 		} else {
@@ -1082,12 +1137,12 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx, W
 
 		// Add additional metadata for certain statuses
 		if (mStatusCode == RecoveryStatus::recruiting_transaction_servers) {
-			int requiredLogs = atoi( md.getValue("RequiredTLogs").c_str() );
+			int requiredLogs = atoi(md.getValue("RequiredTLogs").c_str());
 			int requiredCommitProxies = atoi(md.getValue("RequiredCommitProxies").c_str());
 			int requiredGrvProxies = atoi(md.getValue("RequiredGrvProxies").c_str());
-			int requiredResolvers = atoi( md.getValue("RequiredResolvers").c_str() );
-			//int requiredProcesses = std::max(requiredLogs, std::max(requiredResolvers, requiredCommitProxies));
-			//int requiredMachines = std::max(requiredLogs, 1);
+			int requiredResolvers = atoi(md.getValue("RequiredResolvers").c_str());
+			// int requiredProcesses = std::max(requiredLogs, std::max(requiredResolvers, requiredCommitProxies));
+			// int requiredMachines = std::max(requiredLogs, 1);
 
 			message["required_logs"] = requiredLogs;
 			message["required_commit_proxies"] = requiredCommitProxies;
@@ -1100,12 +1155,12 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx, W
 		//        time_in_state: 0.1
 
 		const TraceEventFields& mdActiveGens = mdActiveGensF.get();
-		if(mdActiveGens.size()) {
+		if (mdActiveGens.size()) {
 			int activeGenerations = mdActiveGens.getInt("ActiveGenerations");
 			message["active_generations"] = activeGenerations;
 		}
 
-	} catch (Error &e){
+	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
 	}
@@ -1118,28 +1173,29 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx, W
 	return message;
 }
 
-ACTOR static Future<double> doGrvProbe(Transaction *tr, Optional<FDBTransactionOptions::Option> priority = Optional<FDBTransactionOptions::Option>()) {
+ACTOR static Future<double> doGrvProbe(
+    Transaction* tr,
+    Optional<FDBTransactionOptions::Option> priority = Optional<FDBTransactionOptions::Option>()) {
 	state double start = g_network->timer_monotonic();
 
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			if(priority.present()) {
+			if (priority.present()) {
 				tr->setOption(priority.get());
 			}
 
 			wait(success(tr->getReadVersion()));
 			return g_network->timer_monotonic() - start;
-		}
-		catch(Error &e) {
+		} catch (Error& e) {
 			wait(tr->onError(e));
 		}
 	}
 }
 
-ACTOR static Future<double> doReadProbe(Future<double> grvProbe, Transaction *tr) {
+ACTOR static Future<double> doReadProbe(Future<double> grvProbe, Transaction* tr) {
 	ErrorOr<double> grv = wait(errorOr(grvProbe));
-	if(grv.isError()) {
+	if (grv.isError()) {
 		throw grv.getError();
 	}
 
@@ -1148,19 +1204,18 @@ ACTOR static Future<double> doReadProbe(Future<double> grvProbe, Transaction *tr
 	loop {
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
-			Optional<Standalone<StringRef> > _ = wait(tr->get(LiteralStringRef("\xff/StatusJsonTestKey62793")));
+			Optional<Standalone<StringRef>> _ = wait(tr->get(LiteralStringRef("\xff/StatusJsonTestKey62793")));
 			return g_network->timer_monotonic() - start;
-		}
-		catch(Error &e) {
+		} catch (Error& e) {
 			wait(tr->onError(e));
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		}
 	}
 }
 
-ACTOR static Future<double> doCommitProbe(Future<double> grvProbe, Transaction *sourceTr, Transaction *tr) {
+ACTOR static Future<double> doCommitProbe(Future<double> grvProbe, Transaction* sourceTr, Transaction* tr) {
 	ErrorOr<double> grv = wait(errorOr(grvProbe));
-	if(grv.isError()) {
+	if (grv.isError()) {
 		throw grv.getError();
 	}
 
@@ -1176,38 +1231,49 @@ ACTOR static Future<double> doCommitProbe(Future<double> grvProbe, Transaction *
 			tr->makeSelfConflicting();
 			wait(tr->commit());
 			return g_network->timer_monotonic() - start;
-		}
-		catch(Error &e) {
+		} catch (Error& e) {
 			wait(tr->onError(e));
 		}
 	}
 }
 
-ACTOR static Future<Void> doProbe(Future<double> probe, int timeoutSeconds, const char* prefix, const char* description, JsonBuilderObject *probeObj, JsonBuilderArray *messages, std::set<std::string> *incomplete_reasons, bool *isAvailable = nullptr) {
+ACTOR static Future<Void> doProbe(Future<double> probe,
+                                  int timeoutSeconds,
+                                  const char* prefix,
+                                  const char* description,
+                                  JsonBuilderObject* probeObj,
+                                  JsonBuilderArray* messages,
+                                  std::set<std::string>* incomplete_reasons,
+                                  bool* isAvailable = nullptr) {
 	choose {
 		when(ErrorOr<double> result = wait(errorOr(probe))) {
-			if(result.isError()) {
-				if(isAvailable != nullptr) {
+			if (result.isError()) {
+				if (isAvailable != nullptr) {
 					*isAvailable = false;
 				}
-				incomplete_reasons->insert(format("Unable to retrieve latency probe information (%s: %s).", description, result.getError().what()));
-			}
-			else {
+				incomplete_reasons->insert(format(
+				    "Unable to retrieve latency probe information (%s: %s).", description, result.getError().what()));
+			} else {
 				(*probeObj)[format("%s_seconds", prefix).c_str()] = result.get();
 			}
 		}
 		when(wait(delay(timeoutSeconds))) {
-			if(isAvailable != nullptr) {
+			if (isAvailable != nullptr) {
 				*isAvailable = false;
 			}
-			messages->push_back(JsonString::makeMessage(format("%s_probe_timeout", prefix).c_str(), format("Unable to %s after %d seconds.", description, timeoutSeconds).c_str()));
+			messages->push_back(
+			    JsonString::makeMessage(format("%s_probe_timeout", prefix).c_str(),
+			                            format("Unable to %s after %d seconds.", description, timeoutSeconds).c_str()));
 		}
 	}
 
 	return Void();
 }
 
-ACTOR static Future<JsonBuilderObject> latencyProbeFetcher(Database cx, JsonBuilderArray *messages, std::set<std::string> *incomplete_reasons, bool *isAvailable) {
+ACTOR static Future<JsonBuilderObject> latencyProbeFetcher(Database cx,
+                                                           JsonBuilderArray* messages,
+                                                           std::set<std::string>* incomplete_reasons,
+                                                           bool* isAvailable) {
 	state Transaction trImmediate(cx);
 	state Transaction trDefault(cx);
 	state Transaction trBatch(cx);
@@ -1226,22 +1292,44 @@ ACTOR static Future<JsonBuilderObject> latencyProbeFetcher(Database cx, JsonBuil
 		int timeoutSeconds = 5;
 
 		std::vector<Future<Void>> probes;
-		probes.push_back(doProbe(immediateGrvProbe, timeoutSeconds, "immediate_priority_transaction_start", "start immediate priority transaction", &statusObj, messages, incomplete_reasons, isAvailable));
-		probes.push_back(doProbe(defaultGrvProbe, timeoutSeconds, "transaction_start", "start default priority transaction", &statusObj, messages, incomplete_reasons));
-		probes.push_back(doProbe(batchGrvProbe, timeoutSeconds, "batch_priority_transaction_start", "start batch priority transaction", &statusObj, messages, incomplete_reasons));
-		probes.push_back(doProbe(readProbe, timeoutSeconds, "read", "read", &statusObj, messages, incomplete_reasons, isAvailable));
-		probes.push_back(doProbe(commitProbe, timeoutSeconds, "commit", "commit", &statusObj, messages, incomplete_reasons, isAvailable));
+		probes.push_back(doProbe(immediateGrvProbe,
+		                         timeoutSeconds,
+		                         "immediate_priority_transaction_start",
+		                         "start immediate priority transaction",
+		                         &statusObj,
+		                         messages,
+		                         incomplete_reasons,
+		                         isAvailable));
+		probes.push_back(doProbe(defaultGrvProbe,
+		                         timeoutSeconds,
+		                         "transaction_start",
+		                         "start default priority transaction",
+		                         &statusObj,
+		                         messages,
+		                         incomplete_reasons));
+		probes.push_back(doProbe(batchGrvProbe,
+		                         timeoutSeconds,
+		                         "batch_priority_transaction_start",
+		                         "start batch priority transaction",
+		                         &statusObj,
+		                         messages,
+		                         incomplete_reasons));
+		probes.push_back(
+		    doProbe(readProbe, timeoutSeconds, "read", "read", &statusObj, messages, incomplete_reasons, isAvailable));
+		probes.push_back(doProbe(
+		    commitProbe, timeoutSeconds, "commit", "commit", &statusObj, messages, incomplete_reasons, isAvailable));
 
 		wait(waitForAll(probes));
-	}
-	catch (Error &e) {
+	} catch (Error& e) {
 		incomplete_reasons->insert(format("Unable to retrieve latency probe information (%s).", e.what()));
 	}
 
 	return statusObj;
 }
 
-ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx, JsonBuilderArray *messages, std::set<std::string> *incomplete_reasons) {
+ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx,
+                                                        JsonBuilderArray* messages,
+                                                        std::set<std::string>* incomplete_reasons) {
 	try {
 		state Transaction tr(cx);
 		loop {
@@ -1249,22 +1337,29 @@ ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx, JsonBuilder
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				Optional<Value> ccSuspendVal = wait(timeoutError(BUGGIFY ? Never() : tr.get(fdbShouldConsistencyCheckBeSuspended), 5.0));
-				bool ccSuspend = ccSuspendVal.present() ? BinaryReader::fromStringRef<bool>(ccSuspendVal.get(), Unversioned()) : false;
-				if(ccSuspend) {
-					messages->push_back(JsonString::makeMessage("consistencycheck_disabled", "Consistency checker is disabled."));
+				Optional<Value> ccSuspendVal =
+				    wait(timeoutError(BUGGIFY ? Never() : tr.get(fdbShouldConsistencyCheckBeSuspended), 5.0));
+				bool ccSuspend = ccSuspendVal.present()
+				                     ? BinaryReader::fromStringRef<bool>(ccSuspendVal.get(), Unversioned())
+				                     : false;
+				if (ccSuspend) {
+					messages->push_back(
+					    JsonString::makeMessage("consistencycheck_disabled", "Consistency checker is disabled."));
 				}
 				break;
-			} catch(Error &e) {
-				if(e.code() == error_code_timed_out) {
-					messages->push_back(JsonString::makeMessage("consistencycheck_suspendkey_fetch_timeout",
-						format("Timed out trying to fetch `%s` from the database.", printable(fdbShouldConsistencyCheckBeSuspended).c_str()).c_str()));
+			} catch (Error& e) {
+				if (e.code() == error_code_timed_out) {
+					messages->push_back(
+					    JsonString::makeMessage("consistencycheck_suspendkey_fetch_timeout",
+					                            format("Timed out trying to fetch `%s` from the database.",
+					                                   printable(fdbShouldConsistencyCheckBeSuspended).c_str())
+					                                .c_str()));
 					break;
 				}
 				wait(tr.onError(e));
 			}
 		}
-	} catch(Error &e) {
+	} catch (Error& e) {
 		incomplete_reasons->insert(format("Unable to retrieve consistency check settings (%s).", e.what()));
 	}
 	return Void();
@@ -1276,14 +1371,18 @@ struct LogRangeAndUID {
 
 	LogRangeAndUID(KeyRange const& range, UID const& destID) : range(range), destID(destID) {}
 
-	bool operator < (LogRangeAndUID const& r) const {
-		if(range.begin != r.range.begin) return range.begin < r.range.begin;
-		if(range.end != r.range.end) return range.end < r.range.end;
+	bool operator<(LogRangeAndUID const& r) const {
+		if (range.begin != r.range.begin)
+			return range.begin < r.range.begin;
+		if (range.end != r.range.end)
+			return range.end < r.range.end;
 		return destID < r.destID;
 	}
 };
 
-ACTOR static Future<Void> logRangeWarningFetcher(Database cx, JsonBuilderArray *messages, std::set<std::string> *incomplete_reasons) {
+ACTOR static Future<Void> logRangeWarningFetcher(Database cx,
+                                                 JsonBuilderArray* messages,
+                                                 std::set<std::string>* incomplete_reasons) {
 	try {
 		state Transaction tr(cx);
 		state Future<Void> timeoutFuture = timeoutError(Future<Void>(Never()), 5.0);
@@ -1293,12 +1392,14 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx, JsonBuilderArray *
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-				state Future<Standalone<RangeResultRef>> existingDestUidValues = tr.getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY);
-				state Future<Standalone<RangeResultRef>> existingLogRanges = tr.getRange(logRangesRange, CLIENT_KNOBS->TOO_MANY);
-				wait( (success(existingDestUidValues) && success(existingLogRanges)) || timeoutFuture );
+				state Future<Standalone<RangeResultRef>> existingDestUidValues =
+				    tr.getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY);
+				state Future<Standalone<RangeResultRef>> existingLogRanges =
+				    tr.getRange(logRangesRange, CLIENT_KNOBS->TOO_MANY);
+				wait((success(existingDestUidValues) && success(existingLogRanges)) || timeoutFuture);
 
 				std::set<LogRangeAndUID> loggingRanges;
-				for(auto& it : existingLogRanges.get()) {
+				for (auto& it : existingLogRanges.get()) {
 					Key logDestination;
 					UID logUid;
 					KeyRef logRangeBegin = logRangesDecodeKey(it.key, &logUid);
@@ -1306,36 +1407,47 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx, JsonBuilderArray *
 					loggingRanges.insert(LogRangeAndUID(KeyRangeRef(logRangeBegin, logRangeEnd), logUid));
 				}
 
-				std::set<std::pair<Key,Key>> existingRanges;
-				for(auto& it : existingDestUidValues.get()) {
-					KeyRange range = BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion());
+				std::set<std::pair<Key, Key>> existingRanges;
+				for (auto& it : existingDestUidValues.get()) {
+					KeyRange range = BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix),
+					                                                       IncludeVersion());
 					UID logUid = BinaryReader::fromStringRef<UID>(it.value, Unversioned());
-					if(loggingRanges.count(LogRangeAndUID(range, logUid))) {
-						std::pair<Key,Key> rangePair = std::make_pair(range.begin,range.end);
-						if(existingRanges.count(rangePair)) {
-							messages->push_back(JsonString::makeMessage("duplicate_mutation_streams", format("Backup and DR are not sharing the same stream of mutations for `%s` - `%s`", printable(range.begin).c_str(), printable(range.end).c_str()).c_str()));
+					if (loggingRanges.count(LogRangeAndUID(range, logUid))) {
+						std::pair<Key, Key> rangePair = std::make_pair(range.begin, range.end);
+						if (existingRanges.count(rangePair)) {
+							messages->push_back(JsonString::makeMessage(
+							    "duplicate_mutation_streams",
+							    format("Backup and DR are not sharing the same stream of mutations for `%s` - `%s`",
+							           printable(range.begin).c_str(),
+							           printable(range.end).c_str())
+							        .c_str()));
 							break;
 						}
 						existingRanges.insert(rangePair);
 					} else {
-						//This cleanup is done during status, because it should only be required once after upgrading to 6.2.7 or later.
-						//There is no other good location to detect that the metadata is mismatched.
-						TraceEvent(SevWarnAlways, "CleaningDestUidLookup").detail("K", it.key.printable()).detail("V", it.value.printable());
+						// This cleanup is done during status, because it should only be required once after upgrading
+						// to 6.2.7 or later. There is no other good location to detect that the metadata is mismatched.
+						TraceEvent(SevWarnAlways, "CleaningDestUidLookup")
+						    .detail("K", it.key.printable())
+						    .detail("V", it.value.printable());
 						tr.clear(it.key);
 					}
 				}
 				wait(tr.commit() || timeoutFuture);
 				break;
-			} catch(Error &e) {
-				if(e.code() == error_code_timed_out) {
-					messages->push_back(JsonString::makeMessage("duplicate_mutation_fetch_timeout",
-						format("Timed out trying to fetch `%s` from the database.", printable(destUidLookupPrefix).c_str()).c_str()));
+			} catch (Error& e) {
+				if (e.code() == error_code_timed_out) {
+					messages->push_back(
+					    JsonString::makeMessage("duplicate_mutation_fetch_timeout",
+					                            format("Timed out trying to fetch `%s` from the database.",
+					                                   printable(destUidLookupPrefix).c_str())
+					                                .c_str()));
 					break;
 				}
 				wait(tr.onError(e));
 			}
 		}
-	} catch(Error &e) {
+	} catch (Error& e) {
 		incomplete_reasons->insert(format("Unable to retrieve log ranges (%s).", e.what()));
 	}
 	return Void();
@@ -1348,36 +1460,40 @@ struct LoadConfigurationResult {
 	bool rebalanceDDIgnored;
 	bool dataDistributionDisabled;
 
-	LoadConfigurationResult() : fullReplication(true), healthyZoneSeconds(0), rebalanceDDIgnored(false), dataDistributionDisabled(false) {}
+	LoadConfigurationResult()
+	  : fullReplication(true), healthyZoneSeconds(0), rebalanceDDIgnored(false), dataDistributionDisabled(false) {}
 };
 
-ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfigurationResult>>> loadConfiguration(Database cx, JsonBuilderArray *messages, std::set<std::string> *status_incomplete_reasons){
+ACTOR static Future<std::pair<Optional<DatabaseConfiguration>, Optional<LoadConfigurationResult>>>
+loadConfiguration(Database cx, JsonBuilderArray* messages, std::set<std::string>* status_incomplete_reasons) {
 	state Optional<DatabaseConfiguration> result;
 	state Optional<LoadConfigurationResult> loadResult;
 	state Transaction tr(cx);
 	state Future<Void> getConfTimeout = delay(5.0);
 
-	loop{
+	loop {
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr.setOption(FDBTransactionOptions::CAUSAL_READ_RISKY);
 		try {
-			choose{
-				when(Standalone<RangeResultRef> res = wait(tr.getRange(configKeys, SERVER_KNOBS->CONFIGURATION_ROWS_TO_FETCH))) {
+			choose {
+				when(Standalone<RangeResultRef> res =
+				         wait(tr.getRange(configKeys, SERVER_KNOBS->CONFIGURATION_ROWS_TO_FETCH))) {
 					DatabaseConfiguration configuration;
 					if (res.size() == SERVER_KNOBS->CONFIGURATION_ROWS_TO_FETCH) {
 						status_incomplete_reasons->insert("Too many configuration parameters set.");
-					}
-					else {
+					} else {
 						configuration.fromKeyValues((VectorRef<KeyValueRef>)res);
 					}
 
 					result = configuration;
 				}
 				when(wait(getConfTimeout)) {
-					if(!result.present()) {
-						messages->push_back(JsonString::makeMessage("unreadable_configuration", "Unable to read database configuration."));
+					if (!result.present()) {
+						messages->push_back(JsonString::makeMessage("unreadable_configuration",
+						                                            "Unable to read database configuration."));
 					} else {
-						messages->push_back(JsonString::makeMessage("full_replication_timeout", "Unable to read datacenter replicas."));
+						messages->push_back(
+						    JsonString::makeMessage("full_replication_timeout", "Unable to read datacenter replicas."));
 					}
 					break;
 				}
@@ -1385,7 +1501,7 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfi
 
 			ASSERT(result.present());
 			state std::vector<Future<Optional<Value>>> replicasFutures;
-			for(auto& region : result.get().regions) {
+			for (auto& region : result.get().regions) {
 				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
 			}
 			state Future<Optional<Value>> healthyZoneValue = tr.get(healthyZoneKey);
@@ -1393,23 +1509,27 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfi
 			state Future<Optional<Value>> ddModeKey = tr.get(dataDistributionModeKey);
 
 			choose {
-				when(wait(waitForAll(replicasFutures) && success(healthyZoneValue) && success(rebalanceDDIgnored) && success(ddModeKey))) {
+				when(wait(waitForAll(replicasFutures) && success(healthyZoneValue) && success(rebalanceDDIgnored) &&
+				          success(ddModeKey))) {
 					int unreplicated = 0;
-					for(int i = 0; i < result.get().regions.size(); i++) {
-						if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < result.get().storageTeamSize ) {
+					for (int i = 0; i < result.get().regions.size(); i++) {
+						if (!replicasFutures[i].get().present() ||
+						    decodeDatacenterReplicasValue(replicasFutures[i].get().get()) <
+						        result.get().storageTeamSize) {
 							unreplicated++;
 						}
 					}
 					LoadConfigurationResult res;
-					res.fullReplication = (!unreplicated || (result.get().usableRegions == 1 && unreplicated < result.get().regions.size()));
-					if(healthyZoneValue.get().present()) {
+					res.fullReplication = (!unreplicated || (result.get().usableRegions == 1 &&
+					                                         unreplicated < result.get().regions.size()));
+					if (healthyZoneValue.get().present()) {
 						auto healthyZone = decodeHealthyZoneValue(healthyZoneValue.get().get());
-						if(healthyZone.first == ignoreSSFailuresZoneString) {
+						if (healthyZone.first == ignoreSSFailuresZoneString) {
 							res.healthyZone = healthyZone.first;
-						}
-						else if(healthyZone.second > tr.getReadVersion().get()) {
+						} else if (healthyZone.second > tr.getReadVersion().get()) {
 							res.healthyZone = healthyZone.first;
-							res.healthyZoneSeconds = (healthyZone.second-tr.getReadVersion().get())/CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+							res.healthyZoneSeconds =
+							    (healthyZone.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 						}
 					}
 					res.rebalanceDDIgnored = rebalanceDDIgnored.get().present();
@@ -1424,22 +1544,24 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfi
 					loadResult = res;
 				}
 				when(wait(getConfTimeout)) {
-					messages->push_back(JsonString::makeMessage("full_replication_timeout", "Unable to read datacenter replicas."));
+					messages->push_back(
+					    JsonString::makeMessage("full_replication_timeout", "Unable to read datacenter replicas."));
 				}
 			}
 			break;
-		}
-		catch (Error &e) {
+		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
 	}
 	return std::make_pair(result, loadResult);
 }
 
-static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> conf, ServerCoordinators coordinators, std::set<std::string> *incomplete_reasons) {
+static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> conf,
+                                              ServerCoordinators coordinators,
+                                              std::set<std::string>* incomplete_reasons) {
 	JsonBuilderObject statusObj;
 	try {
-		if(conf.present()) {
+		if (conf.present()) {
 			DatabaseConfiguration configuration = conf.get();
 			statusObj.addContents(configuration.toJSON());
 
@@ -1452,28 +1574,35 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 			}
 			statusObj["excluded_servers"] = excludedServersArr;
 		}
-		vector< ClientLeaderRegInterface > coordinatorLeaderServers = coordinators.clientLeaderServers;
+		vector<ClientLeaderRegInterface> coordinatorLeaderServers = coordinators.clientLeaderServers;
 		int count = coordinatorLeaderServers.size();
 		statusObj["coordinators_count"] = count;
-	}
-	catch (Error& ){
+	} catch (Error&) {
 		incomplete_reasons->insert("Could not retrieve all configuration status information.");
 	}
 	return statusObj;
 }
 
-ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker, DatabaseConfiguration configuration, int *minReplicasRemaining) {
+ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
+                                                         DatabaseConfiguration configuration,
+                                                         int* minReplicasRemaining) {
 	state JsonBuilderObject statusObjData;
 
 	try {
 		std::vector<Future<TraceEventFields>> futures;
 
 		// TODO:  Should this be serial?
-		futures.push_back(timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStarting"))), 1.0));
-		futures.push_back(timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStats"))), 1.0));
-		futures.push_back(timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("MovingData"))), 1.0));
-		futures.push_back(timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlight"))), 1.0));
-		futures.push_back(timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlightRemote"))), 1.0));
+		futures.push_back(timeoutError(
+		    ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStarting"))), 1.0));
+		futures.push_back(timeoutError(
+		    ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStats"))), 1.0));
+		futures.push_back(timeoutError(
+		    ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("MovingData"))), 1.0));
+		futures.push_back(timeoutError(
+		    ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlight"))), 1.0));
+		futures.push_back(timeoutError(
+		    ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlightRemote"))),
+		    1.0));
 
 		std::vector<TraceEventFields> dataInfo = wait(getAll(futures));
 
@@ -1493,18 +1622,17 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 		// If we have a MovingData message, parse it.
 		int64_t partitionsInFlight = 0;
 		int movingHighestPriority = 1000;
-		if (md.size())
-		{
+		if (md.size()) {
 			int64_t partitionsInQueue = md.getInt64("InQueue");
 			int64_t averagePartitionSize = md.getInt64("AverageShardSize");
 			partitionsInFlight = md.getInt64("InFlight");
 			movingHighestPriority = md.getInt("HighestPriority");
 
-			if( averagePartitionSize >= 0 ) {
+			if (averagePartitionSize >= 0) {
 				JsonBuilderObject moving_data;
 				moving_data["in_queue_bytes"] = partitionsInQueue * averagePartitionSize;
 				moving_data["in_flight_bytes"] = partitionsInFlight * averagePartitionSize;
-				moving_data.setKeyRawNumber("total_written_bytes",md.getValue("BytesWritten"));
+				moving_data.setKeyRawNumber("total_written_bytes", md.getValue("BytesWritten"));
 				moving_data["highest_priority"] = movingHighestPriority;
 
 				// TODO: moving_data["rate_bytes"] = makeCounter(hz, c, r);
@@ -1513,15 +1641,14 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 			}
 		}
 
-		if (dataStats.size())
-		{
-			statusObjData.setKeyRawNumber("total_kv_size_bytes",dataStats.getValue("TotalSizeBytes"));
-			statusObjData.setKeyRawNumber("system_kv_size_bytes",dataStats.getValue("SystemSizeBytes"));
-			statusObjData.setKeyRawNumber("partitions_count",dataStats.getValue("Shards"));
+		if (dataStats.size()) {
+			statusObjData.setKeyRawNumber("total_kv_size_bytes", dataStats.getValue("TotalSizeBytes"));
+			statusObjData.setKeyRawNumber("system_kv_size_bytes", dataStats.getValue("SystemSizeBytes"));
+			statusObjData.setKeyRawNumber("partitions_count", dataStats.getValue("Shards"));
 		}
 
 		JsonBuilderArray teamTrackers;
-		for(int i = 0; i < 2; i++) {
+		for (int i = 0; i < 2; i++) {
 			TraceEventFields inFlight = dataInfo[3 + i];
 			if (!inFlight.size()) {
 				continue;
@@ -1539,8 +1666,8 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 
 			JsonBuilderObject team_tracker;
 			team_tracker["primary"] = primary;
-			team_tracker.setKeyRawNumber("in_flight_bytes",inFlight.getValue("TotalBytes"));
-			team_tracker.setKeyRawNumber("unhealthy_servers",inFlight.getValue("UnhealthyServers"));
+			team_tracker.setKeyRawNumber("in_flight_bytes", inFlight.getValue("TotalBytes"));
+			team_tracker.setKeyRawNumber("unhealthy_servers", inFlight.getValue("UnhealthyServers"));
 
 			JsonBuilderObject stateSectionObj;
 			if (highestPriority >= SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) {
@@ -1583,7 +1710,7 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 				stateSectionObj["description"] = "Removing storage server";
 			} else if (highestPriority == SERVER_KNOBS->PRIORITY_TEAM_HEALTHY) {
 				stateSectionObj["healthy"] = true;
- 				stateSectionObj["name"] = "healthy";
+				stateSectionObj["name"] = "healthy";
 			} else if (highestPriority >= SERVER_KNOBS->PRIORITY_RECOVER_MOVE) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy_rebalancing";
@@ -1593,35 +1720,36 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 				stateSectionObj["name"] = "healthy";
 			}
 
-			if(!stateSectionObj.empty()) {
+			if (!stateSectionObj.empty()) {
 				team_tracker["state"] = stateSectionObj;
 				teamTrackers.push_back(team_tracker);
-				if(primary) {
+				if (primary) {
 					statusObjData["state"] = stateSectionObj;
 				}
 			}
 
-			if(primary) {
+			if (primary) {
 				*minReplicasRemaining = std::max(*minReplicasRemaining, 0) + replicas;
-			}
-			else if(replicas > 0) {
+			} else if (replicas > 0) {
 				*minReplicasRemaining = std::max(*minReplicasRemaining, 0) + 1;
 			}
 		}
 		statusObjData["team_trackers"] = teamTrackers;
-	}
-	catch (Error &e) {
+	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
-		// The most likely reason to be here is a timeout, either way we have no idea if the data state is healthy or not
-		// from the "cluster" perspective - from the client perspective it is not but that is indicated elsewhere.
+		// The most likely reason to be here is a timeout, either way we have no idea if the data state is healthy or
+		// not from the "cluster" perspective - from the client perspective it is not but that is indicated elsewhere.
 	}
 
 	return statusObjData;
 }
 
 ACTOR template <class iface>
-static Future<vector<std::pair<iface, EventMap>>> getServerMetrics(vector<iface> servers, std::unordered_map<NetworkAddress, WorkerInterface> address_workers, std::vector<std::string> eventNames) {
+static Future<vector<std::pair<iface, EventMap>>> getServerMetrics(
+    vector<iface> servers,
+    std::unordered_map<NetworkAddress, WorkerInterface> address_workers,
+    std::vector<std::string> eventNames) {
 	state vector<Future<Optional<TraceEventFields>>> futures;
 	for (auto s : servers) {
 		for (auto name : eventNames) {
@@ -1649,38 +1777,51 @@ static Future<vector<std::pair<iface, EventMap>>> getServerMetrics(vector<iface>
 }
 
 ACTOR template <class iface>
-static Future<vector<TraceEventFields>> getServerBusiestWriteTags(vector<iface> servers, std::unordered_map<NetworkAddress, WorkerInterface> address_workers, WorkerDetails rkWorker) {
-    state vector<Future<Optional<TraceEventFields>>> futures;
-    for (const auto& s : servers) {
+static Future<vector<TraceEventFields>> getServerBusiestWriteTags(
+    vector<iface> servers,
+    std::unordered_map<NetworkAddress, WorkerInterface> address_workers,
+    WorkerDetails rkWorker) {
+	state vector<Future<Optional<TraceEventFields>>> futures;
+	futures.reserve(servers.size());
+	for (const auto& s : servers) {
 		futures.push_back(latestEventOnWorker(rkWorker.interf, s.id().toString() + "/BusiestWriteTag"));
-    }
-    wait(waitForAll(futures));
+	}
+	wait(waitForAll(futures));
 
 	vector<TraceEventFields> result(servers.size());
-	for(int i = 0; i < servers.size(); ++ i) {
-		if(futures[i].get().present()) {
+	for (int i = 0; i < servers.size(); ++i) {
+		if (futures[i].get().present()) {
 			result[i] = futures[i].get().get();
 		}
 	}
 	return result;
 }
 
-ACTOR static Future<vector<std::pair<StorageServerInterface, EventMap>>> getStorageServersAndMetrics(Database cx, std::unordered_map<NetworkAddress, WorkerInterface> address_workers, WorkerDetails rkWorker) {
+ACTOR static Future<vector<std::pair<StorageServerInterface, EventMap>>> getStorageServersAndMetrics(
+    Database cx,
+    std::unordered_map<NetworkAddress, WorkerInterface> address_workers,
+    WorkerDetails rkWorker) {
 	state vector<StorageServerInterface> servers = wait(timeoutError(getStorageServers(cx, true), 5.0));
 	state vector<std::pair<StorageServerInterface, EventMap>> results;
 	state vector<TraceEventFields> busiestWriteTags;
-	wait(store(results, getServerMetrics(servers, address_workers,std::vector<std::string>{ "StorageMetrics", "ReadLatencyMetrics","ReadLatencyBands", "BusiestReadTag" }))
-	    && store(busiestWriteTags, getServerBusiestWriteTags(servers, address_workers, rkWorker)));
+	wait(store(results,
+	           getServerMetrics(servers,
+	                            address_workers,
+	                            std::vector<std::string>{
+	                                "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands", "BusiestReadTag" })) &&
+	     store(busiestWriteTags, getServerBusiestWriteTags(servers, address_workers, rkWorker)));
 
 	ASSERT(busiestWriteTags.size() == results.size());
-	for(int i = 0; i < busiestWriteTags.size(); ++ i) {
+	for (int i = 0; i < busiestWriteTags.size(); ++i) {
 		results[i].second.emplace("BusiestWriteTag", busiestWriteTags[i]);
 	}
 
 	return results;
 }
 
-ACTOR static Future<vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetrics(Reference<AsyncVar<ServerDBInfo>> db, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
+ACTOR static Future<vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetrics(
+    Reference<AsyncVar<ServerDBInfo>> db,
+    std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
 	vector<TLogInterface> servers = db->get().logSystemConfig.allPresentLogs();
 	vector<std::pair<TLogInterface, EventMap>> results =
 	    wait(getServerMetrics(servers, address_workers, std::vector<std::string>{ "TLogMetrics" }));
@@ -1689,57 +1830,66 @@ ACTOR static Future<vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetri
 }
 
 ACTOR static Future<vector<std::pair<CommitProxyInterface, EventMap>>> getCommitProxiesAndMetrics(
-    Reference<AsyncVar<ServerDBInfo>> db, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
+    Reference<AsyncVar<ServerDBInfo>> db,
+    std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
 	vector<std::pair<CommitProxyInterface, EventMap>> results =
-	    wait(getServerMetrics(db->get().client.commitProxies, address_workers,
+	    wait(getServerMetrics(db->get().client.commitProxies,
+	                          address_workers,
 	                          std::vector<std::string>{ "CommitLatencyMetrics", "CommitLatencyBands" }));
 
 	return results;
 }
 
-ACTOR static Future<vector<std::pair<GrvProxyInterface, EventMap>>> getGrvProxiesAndMetrics(Reference<AsyncVar<ServerDBInfo>> db, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	vector<std::pair<GrvProxyInterface, EventMap>> results = wait(getServerMetrics(
-		db->get().client.grvProxies, address_workers, std::vector<std::string>{ "GRVLatencyMetrics", "GRVLatencyBands" }));
+ACTOR static Future<vector<std::pair<GrvProxyInterface, EventMap>>> getGrvProxiesAndMetrics(
+    Reference<AsyncVar<ServerDBInfo>> db,
+    std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
+	vector<std::pair<GrvProxyInterface, EventMap>> results =
+	    wait(getServerMetrics(db->get().client.grvProxies,
+	                          address_workers,
+	                          std::vector<std::string>{ "GRVLatencyMetrics", "GRVLatencyBands" }));
 	return results;
 }
 
+// Returns the number of zones eligble for recruiting new tLogs after failures, to maintain the current replication
+// factor.
 static int getExtraTLogEligibleZones(const vector<WorkerDetails>& workers, const DatabaseConfiguration& configuration) {
 	std::set<StringRef> allZones;
-	std::map<Key,std::set<StringRef>> dcId_zone;
-	for(auto const& worker : workers) {
-		if(worker.processClass.machineClassFitness(ProcessClass::TLog) < ProcessClass::NeverAssign
-			&& !configuration.isExcludedServer(worker.interf.addresses()))
-		{
+	std::map<Key, std::set<StringRef>> dcId_zone;
+	for (auto const& worker : workers) {
+		if (worker.processClass.machineClassFitness(ProcessClass::TLog) < ProcessClass::NeverAssign &&
+		    !configuration.isExcludedServer(worker.interf.addresses())) {
 			allZones.insert(worker.interf.locality.zoneId().get());
-			if(worker.interf.locality.dcId().present()) {
+			if (worker.interf.locality.dcId().present()) {
 				dcId_zone[worker.interf.locality.dcId().get()].insert(worker.interf.locality.zoneId().get());
 			}
 		}
 	}
 
-	if(configuration.regions.size() == 0) {
+	if (configuration.regions.size() == 0) {
 		return allZones.size() - std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize);
 	}
 	int extraTlogEligibleZones = 0;
 	int regionsWithNonNegativePriority = 0;
-	for(auto& region : configuration.regions) {
-		if( region.priority >= 0 ) {
-			int eligible = dcId_zone[region.dcId].size() - std::max(configuration.remoteTLogReplicationFactor, std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize) );
-			//FIXME: does not take into account fallback satellite policies
-			if(region.satelliteTLogReplicationFactor > 0 && configuration.usableRegions > 1) {
+	for (auto& region : configuration.regions) {
+		if (region.priority >= 0) {
+			int eligible = dcId_zone[region.dcId].size() -
+			               std::max(configuration.remoteTLogReplicationFactor,
+			                        std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize));
+			// FIXME: does not take into account fallback satellite policies
+			if (region.satelliteTLogReplicationFactor > 0 && configuration.usableRegions > 1) {
 				int totalSatelliteEligible = 0;
-				for(auto& sat : region.satellites) {
+				for (auto& sat : region.satellites) {
 					totalSatelliteEligible += dcId_zone[sat.dcId].size();
 				}
-				eligible = std::min<int>( eligible, totalSatelliteEligible - region.satelliteTLogReplicationFactor );
+				eligible = std::min<int>(eligible, totalSatelliteEligible - region.satelliteTLogReplicationFactor);
 			}
-			if(eligible >= 0) {
+			if (eligible >= 0) {
 				regionsWithNonNegativePriority++;
 			}
-			extraTlogEligibleZones = std::max( extraTlogEligibleZones, eligible );
+			extraTlogEligibleZones = std::max(extraTlogEligibleZones, eligible);
 		}
 	}
-	if(regionsWithNonNegativePriority > 1) {
+	if (regionsWithNonNegativePriority > 1) {
 		extraTlogEligibleZones++;
 	}
 	return extraTlogEligibleZones;
@@ -1757,21 +1907,26 @@ JsonBuilderObject getPerfLimit(TraceEventFields const& ratekeeper, double transP
 			if (!reason_server_id.empty())
 				perfLimit["reason_server_id"] = reason_server_id;
 		}
-	}
-	else {
+	} else {
 		perfLimit = JsonString::makeMessage("workload", "The database is not being saturated by the workload.");
 	}
 
-	if(!perfLimit.empty()) {
+	if (!perfLimit.empty()) {
 		perfLimit["reason_id"] = reason;
 	}
 
 	return perfLimit;
 }
 
-ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<ServerDBInfo>> db, vector<WorkerDetails> workers, WorkerDetails mWorker, WorkerDetails rkWorker,
-	JsonBuilderObject *qos, JsonBuilderObject *data_overlay, std::set<std::string> *incomplete_reasons, Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture)
-{
+ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
+    Reference<AsyncVar<ServerDBInfo>> db,
+    vector<WorkerDetails> workers,
+    WorkerDetails mWorker,
+    WorkerDetails rkWorker,
+    JsonBuilderObject* qos,
+    JsonBuilderObject* data_overlay,
+    std::set<std::string>* incomplete_reasons,
+    Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture) {
 	state JsonBuilderObject statusObj;
 	state JsonBuilderObject operationsObj;
 	state JsonBuilderObject bytesObj;
@@ -1792,14 +1947,16 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 				    worker.get().interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("ProxyMetrics"))),
 				    1.0));
 			else
-				throw all_alternatives_failed();  // We need data from all proxies for this result to be trustworthy
+				throw all_alternatives_failed(); // We need data from all proxies for this result to be trustworthy
 		}
-		for (auto &p : db->get().client.grvProxies) {
+		for (auto& p : db->get().client.grvProxies) {
 			auto worker = getWorker(workersMap, p.address());
 			if (worker.present())
-				grvProxyStatFutures.push_back(timeoutError(worker.get().interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("GrvProxyMetrics"))), 1.0));
+				grvProxyStatFutures.push_back(timeoutError(
+				    worker.get().interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("GrvProxyMetrics"))),
+				    1.0));
 			else
-				throw all_alternatives_failed();  // We need data from all proxies for this result to be trustworthy
+				throw all_alternatives_failed(); // We need data from all proxies for this result to be trustworthy
 		}
 		state vector<TraceEventFields> commitProxyStats = wait(getAll(commitProxyStatFutures));
 		state vector<TraceEventFields> grvProxyStats = wait(getAll(grvProxyStatFutures));
@@ -1812,12 +1969,13 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		StatusCounter mutations;
 		StatusCounter mutationBytes;
 		StatusCounter txnConflicts;
+		StatusCounter txnRejectedForQueuedTooLong;
 		StatusCounter txnCommitOutSuccess;
 		StatusCounter txnKeyLocationOut;
 		StatusCounter txnMemoryErrors;
 
-		for (auto &gps : grvProxyStats) {
-			txnStartOut.updateValues( StatusCounter(gps.getValue("TxnStartOut")) );
+		for (auto& gps : grvProxyStats) {
+			txnStartOut.updateValues(StatusCounter(gps.getValue("TxnStartOut")));
 			txnSystemPriorityStartOut.updateValues(StatusCounter(gps.getValue("TxnSystemPriorityStartOut")));
 			txnDefaultPriorityStartOut.updateValues(StatusCounter(gps.getValue("TxnDefaultPriorityStartOut")));
 			txnBatchPriorityStartOut.updateValues(StatusCounter(gps.getValue("TxnBatchPriorityStartOut")));
@@ -1828,6 +1986,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 			mutations.updateValues(StatusCounter(cps.getValue("Mutations")));
 			mutationBytes.updateValues(StatusCounter(cps.getValue("MutationBytes")));
 			txnConflicts.updateValues(StatusCounter(cps.getValue("TxnConflicts")));
+			txnRejectedForQueuedTooLong.updateValues(StatusCounter(cps.getValue("TxnRejectedForQueuedTooLong")));
 			txnCommitOutSuccess.updateValues(StatusCounter(cps.getValue("TxnCommitOutSuccess")));
 			txnKeyLocationOut.updateValues(StatusCounter(cps.getValue("KeyServerLocationOut")));
 			txnMemoryErrors.updateValues(StatusCounter(cps.getValue("KeyServerLocationErrors")));
@@ -1842,14 +2001,14 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		JsonBuilderObject transactions;
 		transactions["conflicted"] = txnConflicts.getStatus();
 		transactions["started"] = txnStartOut.getStatus();
+		transactions["rejected_for_queued_too_long"] = txnRejectedForQueuedTooLong.getStatus();
 		transactions["started_immediate_priority"] = txnSystemPriorityStartOut.getStatus();
 		transactions["started_default_priority"] = txnDefaultPriorityStartOut.getStatus();
 		transactions["started_batch_priority"] = txnBatchPriorityStartOut.getStatus();
 		transactions["committed"] = txnCommitOutSuccess.getStatus();
 
 		statusObj["transactions"] = transactions;
-	}
-	catch (Error& e) {
+	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
 		incomplete_reasons->insert("Unknown mutations, conflicts, and transactions state.");
@@ -1857,8 +2016,10 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 
 	// Transactions
 	try {
-		state TraceEventFields ratekeeper = wait( timeoutError(rkWorker.interf.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdate") ) ), 1.0) );
-		TraceEventFields batchRatekeeper = wait( timeoutError(rkWorker.interf.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdateBatch") ) ), 1.0) );
+		state TraceEventFields ratekeeper = wait(
+		    timeoutError(rkWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("RkUpdate"))), 1.0));
+		TraceEventFields batchRatekeeper = wait(timeoutError(
+		    rkWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("RkUpdateBatch"))), 1.0));
 
 		bool autoThrottlingEnabled = ratekeeper.getInt("AutoThrottlingEnabled");
 		double tpsLimit = ratekeeper.getDouble("TPSLimit");
@@ -1873,20 +2034,25 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		int tlogCount = ratekeeper.getInt("TLogs");
 		int64_t worstFreeSpaceStorageServer = ratekeeper.getInt64("WorstFreeSpaceStorageServer");
 		int64_t worstFreeSpaceTLog = ratekeeper.getInt64("WorstFreeSpaceTLog");
-		(*data_overlay).setKeyRawNumber("total_disk_used_bytes",ratekeeper.getValue("TotalDiskUsageBytes"));
+		(*data_overlay).setKeyRawNumber("total_disk_used_bytes", ratekeeper.getValue("TotalDiskUsageBytes"));
 
-		if(ssCount > 0) {
-			(*data_overlay)["least_operating_space_bytes_storage_server"] = std::max(worstFreeSpaceStorageServer, (int64_t)0);
+		if (ssCount > 0) {
+			(*data_overlay)["least_operating_space_bytes_storage_server"] =
+			    std::max(worstFreeSpaceStorageServer, (int64_t)0);
 			(*qos).setKeyRawNumber("worst_queue_bytes_storage_server", ratekeeper.getValue("WorstStorageServerQueue"));
-			(*qos).setKeyRawNumber("limiting_queue_bytes_storage_server", ratekeeper.getValue("LimitingStorageServerQueue"));
+			(*qos).setKeyRawNumber("limiting_queue_bytes_storage_server",
+			                       ratekeeper.getValue("LimitingStorageServerQueue"));
 
 			(*qos)["worst_data_lag_storage_server"] = getLagObject(ratekeeper.getInt64("WorstStorageServerVersionLag"));
-			(*qos)["limiting_data_lag_storage_server"] = getLagObject(ratekeeper.getInt64("LimitingStorageServerVersionLag"));
-			(*qos)["worst_durability_lag_storage_server"] = getLagObject(ratekeeper.getInt64("WorstStorageServerDurabilityLag"));
-			(*qos)["limiting_durability_lag_storage_server"] = getLagObject(ratekeeper.getInt64("LimitingStorageServerDurabilityLag"));
+			(*qos)["limiting_data_lag_storage_server"] =
+			    getLagObject(ratekeeper.getInt64("LimitingStorageServerVersionLag"));
+			(*qos)["worst_durability_lag_storage_server"] =
+			    getLagObject(ratekeeper.getInt64("WorstStorageServerDurabilityLag"));
+			(*qos)["limiting_durability_lag_storage_server"] =
+			    getLagObject(ratekeeper.getInt64("LimitingStorageServerDurabilityLag"));
 		}
 
-		if(tlogCount > 0) {
+		if (tlogCount > 0) {
 			(*data_overlay)["least_operating_space_bytes_log_server"] = std::max(worstFreeSpaceTLog, (int64_t)0);
 			(*qos).setKeyRawNumber("worst_queue_bytes_log_server", ratekeeper.getValue("WorstTLogQueue"));
 		}
@@ -1901,10 +2067,9 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		autoThrottledTagsObj["count"] = autoThrottledTags;
 		autoThrottledTagsObj["busy_read"] = autoThrottledTagsBusyRead;
 		autoThrottledTagsObj["busy_write"] = autoThrottledTagsBusyWrite;
-		if(autoThrottlingEnabled) {
+		if (autoThrottlingEnabled) {
 			autoThrottledTagsObj["recommended_only"] = 0;
-		}
-		else {
+		} else {
 			autoThrottledTagsObj["recommended_only"] = 1;
 		}
 
@@ -1917,15 +2082,15 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		(*qos)["throttled_tags"] = throttledTagsObj;
 
 		JsonBuilderObject perfLimit = getPerfLimit(ratekeeper, transPerSec, tpsLimit);
-		if(!perfLimit.empty()) {
+		if (!perfLimit.empty()) {
 			(*qos)["performance_limited_by"] = perfLimit;
 		}
 
 		JsonBuilderObject batchPerfLimit = getPerfLimit(batchRatekeeper, transPerSec, batchTpsLimit);
-		if(!batchPerfLimit.empty()) {
+		if (!batchPerfLimit.empty()) {
 			(*qos)["batch_performance_limited_by"] = batchPerfLimit;
 		}
-	} catch (Error &e){
+	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
 		incomplete_reasons->insert("Unknown performance state.");
@@ -1934,7 +2099,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 	// Reads
 	try {
 		ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>> storageServers = wait(storageServerFuture);
-		if(!storageServers.present()) {
+		if (!storageServers.present()) {
 			throw storageServers.getError();
 		}
 
@@ -1942,8 +2107,9 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		StatusCounter reads;
 		StatusCounter readKeys;
 		StatusCounter readBytes;
+		StatusCounter lowPriorityReads;
 
-		for(auto &ss : storageServers.get()) {
+		for (auto& ss : storageServers.get()) {
 			TraceEventFields const& storageMetrics = ss.second.at("StorageMetrics");
 
 			if (storageMetrics.size() > 0) {
@@ -1959,8 +2125,21 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		keysObj["read"] = readKeys.getStatus();
 		bytesObj["read"] = readBytes.getStatus();
 
-	}
-	catch (Error& e) {
+		try {
+			for (auto& ss : storageServers.get()) {
+				TraceEventFields const& storageMetrics = ss.second.at("StorageMetrics");
+
+				if (storageMetrics.size() > 0) {
+					// FIXME: This field was added in a patch release, for the 7.0 release move this to above loop
+					lowPriorityReads.updateValues(StatusCounter(storageMetrics.getValue("LowPriorityQueries")));
+				}
+			}
+			operationsObj["low_priority_reads"] = lowPriorityReads.getStatus();
+		} catch (Error& e) {
+			if (e.code() != error_code_attribute_not_found)
+				throw e;
+		}
+	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
 		incomplete_reasons->insert("Unknown read state.");
@@ -1973,9 +2152,11 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 	return statusObj;
 }
 
-ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(WorkerEvents pMetrics, Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture,
-	Future<ErrorOr<vector<std::pair<TLogInterface, EventMap>>>> tlogFuture, std::set<std::string> *incomplete_reasons)
-{
+ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(
+    WorkerEvents pMetrics,
+    Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture,
+    Future<ErrorOr<vector<std::pair<TLogInterface, EventMap>>>> tlogFuture,
+    std::set<std::string>* incomplete_reasons) {
 	state JsonBuilderObject statusObj;
 	try {
 		state JsonBuilderObject cacheStatistics;
@@ -1989,9 +2170,9 @@ ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(WorkerEve
 		double storageCacheHitsHz = 0;
 		double storageCacheMissesHz = 0;
 
-		for(auto &ss : storageServers.get()) {
+		for (auto& ss : storageServers.get()) {
 			auto processMetrics = pMetrics.find(ss.first.address());
-			if(processMetrics != pMetrics.end()) {
+			if (processMetrics != pMetrics.end()) {
 				int64_t hits = processMetrics->second.getInt64("CacheHits");
 				int64_t misses = processMetrics->second.getInt64("CacheMisses");
 				double elapsed = processMetrics->second.getDouble("Elapsed");
@@ -2000,20 +2181,21 @@ ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(WorkerEve
 			}
 		}
 
-		cacheStatistics["storage_hit_rate"] = (storageCacheMissesHz == 0) ? 1.0 : storageCacheHitsHz / (storageCacheHitsHz + storageCacheMissesHz);
+		cacheStatistics["storage_hit_rate"] =
+		    (storageCacheMissesHz == 0) ? 1.0 : storageCacheHitsHz / (storageCacheHitsHz + storageCacheMissesHz);
 
 		ErrorOr<vector<std::pair<TLogInterface, EventMap>>> tlogServers = wait(tlogFuture);
 
-		if(!tlogServers.present()) {
+		if (!tlogServers.present()) {
 			throw tlogServers.getError();
 		}
 
 		double logCacheHitsHz = 0;
 		double logCacheMissesHz = 0;
 
-		for(auto &log : tlogServers.get()) {
+		for (auto& log : tlogServers.get()) {
 			auto processMetrics = pMetrics.find(log.first.address());
-			if(processMetrics != pMetrics.end()) {
+			if (processMetrics != pMetrics.end()) {
 				int64_t hits = processMetrics->second.getInt64("CacheHits");
 				int64_t misses = processMetrics->second.getInt64("CacheMisses");
 				double elapsed = processMetrics->second.getDouble("Elapsed");
@@ -2022,10 +2204,10 @@ ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(WorkerEve
 			}
 		}
 
-		cacheStatistics["log_hit_rate"] = (logCacheMissesHz == 0) ? 1.0 : logCacheHitsHz / (logCacheHitsHz + logCacheMissesHz);
+		cacheStatistics["log_hit_rate"] =
+		    (logCacheMissesHz == 0) ? 1.0 : logCacheHitsHz / (logCacheHitsHz + logCacheMissesHz);
 		statusObj["page_cache"] = cacheStatistics;
-	}
-	catch (Error& e) {
+	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
 
@@ -2035,7 +2217,8 @@ ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(WorkerEve
 	return statusObj;
 }
 
-static JsonBuilderObject tlogFetcher(int* logFaultTolerance, const std::vector<TLogSet>& tLogs,
+static JsonBuilderObject tlogFetcher(int* logFaultTolerance,
+                                     const std::vector<TLogSet>& tLogs,
                                      std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
 	JsonBuilderObject statusObj;
 	JsonBuilderArray logsObj;
@@ -2064,10 +2247,17 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance, const std::vector<T
 
 		if (tLogs[i].isLocal) {
 			int currentFaultTolerance = tLogs[i].tLogReplicationFactor - 1 - tLogs[i].tLogWriteAntiQuorum - failedLogs;
-			if(currentFaultTolerance >= 0) {
+			if (currentFaultTolerance >= 0) {
 				localSetsWithNonNegativeFaultTolerance++;
 			}
-			minFaultTolerance = std::min(minFaultTolerance, currentFaultTolerance);
+
+			if (tLogs[i].locality == tagLocalitySatellite) {
+				// FIXME: This hack to bump satellite fault tolerance, is to make it consistent
+				//  with 6.2.
+				minFaultTolerance = std::min(minFaultTolerance, currentFaultTolerance + 1);
+			} else {
+				minFaultTolerance = std::min(minFaultTolerance, currentFaultTolerance);
+			}
 		}
 
 		if (tLogs[i].isLocal && tLogs[i].locality == tagLocalitySatellite) {
@@ -2083,11 +2273,11 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance, const std::vector<T
 			remote_log_fault_tolerance = tLogs[i].tLogReplicationFactor - 1 - failedLogs;
 		}
 	}
-	if(minFaultTolerance == 1000) {
-		//just in case we do not have any tlog sets
+	if (minFaultTolerance == 1000) {
+		// just in case we do not have any tlog sets
 		minFaultTolerance = 0;
 	}
-	if(localSetsWithNonNegativeFaultTolerance > 1) {
+	if (localSetsWithNonNegativeFaultTolerance > 1) {
 		minFaultTolerance++;
 	}
 	*logFaultTolerance = std::min(*logFaultTolerance, minFaultTolerance);
@@ -2100,11 +2290,15 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance, const std::vector<T
 		statusObj["satellite_log_replication_factor"] = sat_log_replication_factor.get();
 	if (sat_log_write_anti_quorum.present())
 		statusObj["satellite_log_write_anti_quorum"] = sat_log_write_anti_quorum.get();
-	if (sat_log_fault_tolerance.present()) statusObj["satellite_log_fault_tolerance"] = sat_log_fault_tolerance.get();
+	if (sat_log_fault_tolerance.present())
+		statusObj["satellite_log_fault_tolerance"] = sat_log_fault_tolerance.get();
 
-	if (log_replication_factor.present()) statusObj["log_replication_factor"] = log_replication_factor.get();
-	if (log_write_anti_quorum.present()) statusObj["log_write_anti_quorum"] = log_write_anti_quorum.get();
-	if (log_fault_tolerance.present()) statusObj["log_fault_tolerance"] = log_fault_tolerance.get();
+	if (log_replication_factor.present())
+		statusObj["log_replication_factor"] = log_replication_factor.get();
+	if (log_write_anti_quorum.present())
+		statusObj["log_write_anti_quorum"] = log_write_anti_quorum.get();
+	if (log_fault_tolerance.present())
+		statusObj["log_fault_tolerance"] = log_fault_tolerance.get();
 
 	if (remote_log_replication_factor.present())
 		statusObj["remote_log_replication_factor"] = remote_log_replication_factor.get();
@@ -2114,7 +2308,8 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance, const std::vector<T
 	return statusObj;
 }
 
-static JsonBuilderArray tlogFetcher(int* logFaultTolerance, Reference<AsyncVar<ServerDBInfo>> db,
+static JsonBuilderArray tlogFetcher(int* logFaultTolerance,
+                                    Reference<AsyncVar<ServerDBInfo>> db,
                                     std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
 	JsonBuilderArray tlogsArray;
 	JsonBuilderObject tlogsStatus;
@@ -2138,37 +2333,41 @@ static JsonBuilderArray tlogFetcher(int* logFaultTolerance, Reference<AsyncVar<S
 
 static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration configuration,
                                                      ServerCoordinators coordinators,
-                                                     std::vector<WorkerDetails>& workers, int extraTlogEligibleZones,
-                                                     int minReplicasRemaining, int oldLogFaultTolerance, 
-													 int fullyReplicatedRegions,
+                                                     std::vector<WorkerDetails>& workers,
+                                                     int extraTlogEligibleZones,
+                                                     int minReplicasRemaining,
+                                                     int oldLogFaultTolerance,
+                                                     int fullyReplicatedRegions,
                                                      bool underMaintenance) {
 	JsonBuilderObject statusObj;
 
 	// without losing data
 	int32_t maxZoneFailures = configuration.maxZoneFailuresTolerated(fullyReplicatedRegions, false);
-	if(underMaintenance) {
+	if (underMaintenance) {
 		maxZoneFailures--;
 	}
 	int maxCoordinatorFailures = (coordinators.clientLeaderServers.size() - 1) / 2;
 
 	std::map<NetworkAddress, StringRef> workerZones;
-	for(auto& worker : workers) {
+	for (auto& worker : workers) {
 		workerZones[worker.interf.address()] = worker.interf.locality.zoneId().orDefault(LiteralStringRef(""));
 	}
 	std::map<StringRef, int> coordinatorZoneCounts;
-	for(auto& coordinator : coordinators.ccf->getConnectionString().coordinators()) {
+	for (auto& coordinator : coordinators.ccf->getConnectionString().coordinators()) {
 		auto zone = workerZones[coordinator];
 		coordinatorZoneCounts[zone] += 1;
 	}
 	std::vector<std::pair<StringRef, int>> coordinatorZones(coordinatorZoneCounts.begin(), coordinatorZoneCounts.end());
-	std::sort(coordinatorZones.begin(), coordinatorZones.end(), [] (const std::pair<StringRef,int>& lhs, const std::pair<StringRef,int>& rhs) {
-		return lhs.second > rhs.second;
-	});
+	std::sort(coordinatorZones.begin(),
+	          coordinatorZones.end(),
+	          [](const std::pair<StringRef, int>& lhs, const std::pair<StringRef, int>& rhs) {
+		          return lhs.second > rhs.second;
+	          });
 	int lostCoordinators = 0;
 	int maxCoordinatorZoneFailures = 0;
-	for(auto zone : coordinatorZones) {
+	for (auto zone : coordinatorZones) {
 		lostCoordinators += zone.second;
-		if(lostCoordinators > maxCoordinatorFailures) {
+		if (lostCoordinators > maxCoordinatorFailures) {
 			break;
 		}
 		maxCoordinatorZoneFailures += 1;
@@ -2176,7 +2375,7 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 	// max zone failures that we can tolerate to not lose data
 	int zoneFailuresWithoutLosingData = std::min(maxZoneFailures, maxCoordinatorZoneFailures);
 
-	if (minReplicasRemaining >= 0){
+	if (minReplicasRemaining >= 0) {
 		zoneFailuresWithoutLosingData = std::min(zoneFailuresWithoutLosingData, minReplicasRemaining - 1);
 	}
 
@@ -2185,21 +2384,23 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 	statusObj["max_zone_failures_without_losing_data"] = zoneFailuresWithoutLosingData;
 
 	int32_t maxAvaiabilityZoneFailures = configuration.maxZoneFailuresTolerated(fullyReplicatedRegions, true);
-	if(underMaintenance) {
+	if (underMaintenance) {
 		maxAvaiabilityZoneFailures--;
 	}
 
-	statusObj["max_zone_failures_without_losing_availability"] =
-	    std::max(std::min(maxAvaiabilityZoneFailures,std::min(extraTlogEligibleZones, zoneFailuresWithoutLosingData)), -1);
+	statusObj["max_zone_failures_without_losing_availability"] = std::max(
+	    std::min(maxAvaiabilityZoneFailures, std::min(extraTlogEligibleZones, zoneFailuresWithoutLosingData)), -1);
 	return statusObj;
 }
 
 static std::string getIssueDescription(std::string name) {
-	if(name == "incorrect_cluster_file_contents") {
-		return "Cluster file contents do not match current cluster connection string. Verify the cluster file and its parent directory are writable and that the cluster file has not been overwritten externally.";
+	if (name == "incorrect_cluster_file_contents") {
+		return "Cluster file contents do not match current cluster connection string. Verify the cluster file and its "
+		       "parent directory are writable and that the cluster file has not been overwritten externally.";
 	}
 
-	// FIXME: name and description will be the same unless the message is 'incorrect_cluster_file_contents', which is currently the only possible message
+	// FIXME: name and description will be the same unless the message is 'incorrect_cluster_file_contents', which is
+	// currently the only possible message
 	return name;
 }
 
@@ -2215,8 +2416,7 @@ static std::map<std::string, std::vector<JsonBuilderObject>> getProcessIssuesAsM
 				    JsonString::makeMessage(issueStr.c_str(), getIssueDescription(issueStr).c_str()));
 			}
 		}
-	}
-	catch (Error &e) {
+	} catch (Error& e) {
 		TraceEvent(SevError, "ErrorParsingProcessIssues").error(e);
 		// swallow
 	}
@@ -2224,7 +2424,8 @@ static std::map<std::string, std::vector<JsonBuilderObject>> getProcessIssuesAsM
 	return issuesMap;
 }
 
-static JsonBuilderArray getClientIssuesAsMessages( std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatusMap ) {
+static JsonBuilderArray getClientIssuesAsMessages(
+    std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatusMap) {
 	JsonBuilderArray issuesList;
 
 	try {
@@ -2235,7 +2436,7 @@ static JsonBuilderArray getClientIssuesAsMessages( std::map<NetworkAddress, std:
 				for (auto& issue : iter->second.second.issues) {
 					auto& t = deduplicatedIssues[issue.item.toString()];
 					t.first += issue.count;
-					for(auto& example : issue.examples) {
+					for (auto& example : issue.examples) {
 						t.second.push_back(formatIpPort(example.first.ip, example.first.port));
 					}
 				}
@@ -2245,11 +2446,11 @@ static JsonBuilderArray getClientIssuesAsMessages( std::map<NetworkAddress, std:
 			}
 		}
 
-		//FIXME: add the log_group in addition to the network address
+		// FIXME: add the log_group in addition to the network address
 		for (auto i : deduplicatedIssues) {
 			JsonBuilderObject message = JsonString::makeMessage(i.first.c_str(), getIssueDescription(i.first).c_str());
 			JsonBuilderArray addresses;
-			for(auto addr : i.second.second) {
+			for (auto addr : i.second.second) {
 				addresses.push_back(addr);
 			}
 
@@ -2257,8 +2458,7 @@ static JsonBuilderArray getClientIssuesAsMessages( std::map<NetworkAddress, std:
 			message["addresses"] = addresses;
 			issuesList.push_back(message);
 		}
-	}
-	catch (Error &e) {
+	} catch (Error& e) {
 		TraceEvent(SevError, "ErrorParsingClientIssues").error(e);
 		// swallow
 	}
@@ -2266,7 +2466,9 @@ static JsonBuilderArray getClientIssuesAsMessages( std::map<NetworkAddress, std:
 	return issuesList;
 }
 
-ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx, JsonBuilderArray *messages, std::set<std::string> *incomplete_reasons) {
+ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx,
+                                                   JsonBuilderArray* messages,
+                                                   std::set<std::string>* incomplete_reasons) {
 	state StatusObject result;
 	state JSONDoc json(result);
 	state double tStart = now();
@@ -2277,42 +2479,44 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx, JsonBuilderArray
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				int64_t timeout_ms = 3000;
-				tr.setOption(FDBTransactionOptions::TIMEOUT, StringRef((uint8_t *)&timeout_ms, sizeof(int64_t)));
+				tr.setOption(FDBTransactionOptions::TIMEOUT, StringRef((uint8_t*)&timeout_ms, sizeof(int64_t)));
 
 				std::string jsonPrefix = layerStatusMetaPrefixRange.begin.toString() + "json/";
-				Standalone<RangeResultRef> jsonLayers = wait(tr.getRange(KeyRangeRef(jsonPrefix, strinc(jsonPrefix)), 1000));
+				Standalone<RangeResultRef> jsonLayers =
+				    wait(tr.getRange(KeyRangeRef(jsonPrefix, strinc(jsonPrefix)), 1000));
 				// TODO:  Also fetch other linked subtrees of meta keys
 
 				state std::vector<Future<Standalone<RangeResultRef>>> docFutures;
 				state int i;
-				for(i = 0; i < jsonLayers.size(); ++i)
-					docFutures.push_back(tr.getRange(KeyRangeRef(jsonLayers[i].value, strinc(jsonLayers[i].value)), 1000));
+				for (i = 0; i < jsonLayers.size(); ++i)
+					docFutures.push_back(
+					    tr.getRange(KeyRangeRef(jsonLayers[i].value, strinc(jsonLayers[i].value)), 1000));
 
 				result.clear();
 				JSONDoc::expires_reference_version = (uint64_t)tr.getReadVersion().get();
 
-				for(i = 0; i < docFutures.size(); ++i) {
+				for (i = 0; i < docFutures.size(); ++i) {
 					state Standalone<RangeResultRef> docs = wait(docFutures[i]);
 					state int j;
-					for(j = 0; j < docs.size(); ++j) {
+					for (j = 0; j < docs.size(); ++j) {
 						state json_spirit::mValue doc;
 						try {
 							json_spirit::read_string(docs[j].value.toString(), doc);
 							wait(yield());
 							json.absorb(doc.get_obj());
 							wait(yield());
-						} catch(Error &e) {
+						} catch (Error& e) {
 							TraceEvent(SevWarn, "LayerStatusBadJSON").detail("Key", docs[j].key);
 						}
 					}
 				}
 				json.create("_valid") = true;
 				break;
-			} catch(Error &e) {
+			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
 		}
-	} catch(Error &e) {
+	} catch (Error& e) {
 		TraceEvent(SevWarn, "LayerStatusError").error(e);
 		incomplete_reasons->insert(format("Unable to retrieve layer status (%s).", e.what()));
 		json.create("_error") = format("Unable to retrieve layer status (%s).", e.what());
@@ -2322,14 +2526,21 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx, JsonBuilderArray
 	json.cleanOps();
 	JsonBuilderObject statusObj;
 	statusObj.addContents(result);
-	TraceEvent("LayerStatusFetcher").detail("Duration", now()-tStart).detail("StatusSize",statusObj.getFinalLength());
+	TraceEvent("LayerStatusFetcher")
+	    .detail("Duration", now() - tStart)
+	    .detail("StatusSize", statusObj.getFinalLength());
 	return statusObj;
 }
 
-ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<ServerDBInfo>> db, JsonBuilderArray *messages, std::set<std::string> *incomplete_reasons) {
+ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<ServerDBInfo>> db,
+                                                    JsonBuilderArray* messages,
+                                                    std::set<std::string>* incomplete_reasons) {
 	state JsonBuilderObject statusObj;
 
-	state Database cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, false); // Open a new database connection that isn't lock-aware
+	state Database cx = openDBOnServer(db,
+	                                   TaskPriority::DefaultEndpoint,
+	                                   true,
+	                                   false); // Open a new database connection that isn't lock-aware
 	state Transaction tr(cx);
 	state int timeoutSeconds = 5;
 	state Future<Void> getTimeout = delay(timeoutSeconds);
@@ -2339,7 +2550,7 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<ServerDBI
 		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		try {
-			choose{
+			choose {
 				when(Optional<Value> lockUID = wait(tr.get(databaseLockedKey))) {
 					if (lockUID.present()) {
 						statusObj["locked"] = true;
@@ -2350,12 +2561,12 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<ServerDBI
 					}
 				}
 				when(wait(getTimeout)) {
-					incomplete_reasons->insert(format("Unable to determine if database is locked after %d seconds.", timeoutSeconds));
+					incomplete_reasons->insert(
+					    format("Unable to determine if database is locked after %d seconds.", timeoutSeconds));
 				}
 			}
 			break;
-		}
-		catch (Error &e) {
+		} catch (Error& e) {
 			try {
 				wait(tr.onError(e));
 			} catch (Error& e) {
@@ -2378,10 +2589,11 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicat
 			}
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			state Future<Standalone<RangeResultRef>> fReplicaKeys = tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY);
+			state Future<Standalone<RangeResultRef>> fReplicaKeys =
+			    tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY);
 			state Future<Optional<Value>> fPrimaryDatacenterKey = tr.get(primaryDatacenterKey);
 			wait(timeoutError(success(fPrimaryDatacenterKey) && success(fReplicaKeys), 5));
-			
+
 			*fullyReplicatedRegions = fReplicaKeys.get().size();
 
 			if (!fPrimaryDatacenterKey.get().present()) {
@@ -2403,15 +2615,14 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicat
 
 // constructs the cluster section of the json status output
 ACTOR Future<StatusReply> clusterGetStatus(
-		Reference<AsyncVar<ServerDBInfo>> db,
-		Database cx,
-		vector<WorkerDetails> workers,
-		std::vector<ProcessIssues> workerIssues,
-		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatus,
-		ServerCoordinators coordinators,
-		std::vector<NetworkAddress> incompatibleConnections,
-		Version datacenterVersionDifference )
-{
+    Reference<AsyncVar<ServerDBInfo>> db,
+    Database cx,
+    vector<WorkerDetails> workers,
+    std::vector<ProcessIssues> workerIssues,
+    std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatus,
+    ServerCoordinators coordinators,
+    std::vector<NetworkAddress> incompatibleConnections,
+    Version datacenterVersionDifference) {
 	state double tStart = timer();
 
 	// Check if master worker is present
@@ -2423,20 +2634,22 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 	try {
 		// Get the master Worker interface
-		Optional<WorkerDetails> _mWorker = getWorker( workers, db->get().master.address() );
+		Optional<WorkerDetails> _mWorker = getWorker(workers, db->get().master.address());
 		if (_mWorker.present()) {
 			mWorker = _mWorker.get();
 		} else {
-			messages.push_back(JsonString::makeMessage("unreachable_master_worker", "Unable to locate the master worker."));
+			messages.push_back(
+			    JsonString::makeMessage("unreachable_master_worker", "Unable to locate the master worker."));
 		}
 		// Get the DataDistributor worker interface
 		Optional<WorkerDetails> _ddWorker;
 		if (db->get().distributor.present()) {
-			_ddWorker = getWorker( workers, db->get().distributor.get().address() );
+			_ddWorker = getWorker(workers, db->get().distributor.get().address());
 		}
 
 		if (!db->get().distributor.present() || !_ddWorker.present()) {
-			messages.push_back(JsonString::makeMessage("unreachable_dataDistributor_worker", "Unable to locate the data distributor worker."));
+			messages.push_back(JsonString::makeMessage("unreachable_dataDistributor_worker",
+			                                           "Unable to locate the data distributor worker."));
 		} else {
 			ddWorker = _ddWorker.get();
 		}
@@ -2444,11 +2657,12 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		// Get the Ratekeeper worker interface
 		Optional<WorkerDetails> _rkWorker;
 		if (db->get().ratekeeper.present()) {
-			_rkWorker = getWorker( workers, db->get().ratekeeper.get().address() );
+			_rkWorker = getWorker(workers, db->get().ratekeeper.get().address());
 		}
 
 		if (!db->get().ratekeeper.present() || !_rkWorker.present()) {
-			messages.push_back(JsonString::makeMessage("unreachable_ratekeeper_worker", "Unable to locate the ratekeeper worker."));
+			messages.push_back(
+			    JsonString::makeMessage("unreachable_ratekeeper_worker", "Unable to locate the ratekeeper worker."));
 		} else {
 			rkWorker = _rkWorker.get();
 		}
@@ -2456,7 +2670,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		// Get latest events for various event types from ALL workers
 		// WorkerEvents is a map of worker's NetworkAddress to its event string
 		// The pair represents worker responses and a set of worker NetworkAddress strings which did not respond
-		std::vector< Future< Optional <std::pair<WorkerEvents, std::set<std::string>>> > > futures;
+		std::vector<Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>>> futures;
 		futures.push_back(latestEventOnWorkers(workers, "MachineMetrics"));
 		futures.push_back(latestEventOnWorkers(workers, "ProcessMetrics"));
 		futures.push_back(latestEventOnWorkers(workers, "NetworkMetrics"));
@@ -2465,7 +2679,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		futures.push_back(latestEventOnWorkers(workers, "ProgramStart"));
 
 		// Wait for all response pairs.
-		state std::vector< Optional <std::pair<WorkerEvents, std::set<std::string>>> > workerEventsVec = wait(getAll(futures));
+		state std::vector<Optional<std::pair<WorkerEvents, std::set<std::string>>>> workerEventsVec =
+		    wait(getAll(futures));
 
 		// Create a unique set of all workers who were unreachable for 1 or more of the event requests above.
 		// Since each event request is independent and to all workers, workers can have responded to some
@@ -2473,18 +2688,18 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		std::set<std::string> mergeUnreachable;
 
 		// For each (optional) pair, if the pair is present and not empty then add the unreachable workers to the set.
-		for (auto pair : workerEventsVec)
-		{
+		for (auto pair : workerEventsVec) {
 			if (pair.present() && pair.get().second.size())
 				mergeUnreachable.insert(pair.get().second.begin(), pair.get().second.end());
 		}
 
-		// We now have a unique set of workers who were in some way unreachable.  If there is anything in that set, create a message
-		// for it and include the list of unreachable processes.
-		if (mergeUnreachable.size()){
-			JsonBuilderObject message = JsonBuilder::makeMessage("unreachable_processes", "The cluster has some unreachable processes.");
+		// We now have a unique set of workers who were in some way unreachable.  If there is anything in that set,
+		// create a message for it and include the list of unreachable processes.
+		if (mergeUnreachable.size()) {
+			JsonBuilderObject message =
+			    JsonBuilder::makeMessage("unreachable_processes", "The cluster has some unreachable processes.");
 			JsonBuilderArray unreachableProcs;
-			for (auto m : mergeUnreachable){
+			for (auto m : mergeUnreachable) {
 				unreachableProcs.push_back(JsonBuilderObject().setKey("address", m));
 			}
 			message["unreachable_processes"] = unreachableProcs;
@@ -2492,20 +2707,24 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 
 		// construct status information for cluster subsections
-		state int statusCode = (int) RecoveryStatus::END;
-		state JsonBuilderObject recoveryStateStatus = wait(recoveryStateStatusFetcher(cx, mWorker, workers.size(), &status_incomplete_reasons, &statusCode));
+		state int statusCode = (int)RecoveryStatus::END;
+		state JsonBuilderObject recoveryStateStatus =
+		    wait(recoveryStateStatusFetcher(cx, mWorker, workers.size(), &status_incomplete_reasons, &statusCode));
 
 		// machine metrics
 		state WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
 		// process metrics
 		state WorkerEvents pMetrics = workerEventsVec[1].present() ? workerEventsVec[1].get().first : WorkerEvents();
-		state WorkerEvents networkMetrics = workerEventsVec[2].present() ? workerEventsVec[2].get().first : WorkerEvents();
+		state WorkerEvents networkMetrics =
+		    workerEventsVec[2].present() ? workerEventsVec[2].get().first : WorkerEvents();
 		state WorkerEvents latestError = workerEventsVec[3].present() ? workerEventsVec[3].get().first : WorkerEvents();
-		state WorkerEvents traceFileOpenErrors = workerEventsVec[4].present() ? workerEventsVec[4].get().first : WorkerEvents();
-		state WorkerEvents programStarts = workerEventsVec[5].present() ? workerEventsVec[5].get().first : WorkerEvents();
+		state WorkerEvents traceFileOpenErrors =
+		    workerEventsVec[4].present() ? workerEventsVec[4].get().first : WorkerEvents();
+		state WorkerEvents programStarts =
+		    workerEventsVec[5].present() ? workerEventsVec[5].get().first : WorkerEvents();
 
 		state JsonBuilderObject statusObj;
-		if(db->get().recoveryCount > 0) {
+		if (db->get().recoveryCount > 0) {
 			statusObj["generation"] = db->get().recoveryCount;
 		}
 
@@ -2524,15 +2743,16 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state Optional<DatabaseConfiguration> configuration;
 		state Optional<LoadConfigurationResult> loadResult;
 
-		if(statusCode != RecoveryStatus::configuration_missing) {
-			std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfigurationResult>> loadResults = wait(loadConfiguration(cx, &messages, &status_incomplete_reasons));
+		if (statusCode != RecoveryStatus::configuration_missing) {
+			std::pair<Optional<DatabaseConfiguration>, Optional<LoadConfigurationResult>> loadResults =
+			    wait(loadConfiguration(cx, &messages, &status_incomplete_reasons));
 			configuration = loadResults.first;
 			loadResult = loadResults.second;
 		}
 
-		if(loadResult.present()) {
+		if (loadResult.present()) {
 			statusObj["full_replication"] = loadResult.get().fullReplication;
-			if(loadResult.get().healthyZone.present()) {
+			if (loadResult.get().healthyZone.present()) {
 				if (loadResult.get().healthyZone.get() != ignoreSSFailuresZoneString) {
 					statusObj["maintenance_zone"] = loadResult.get().healthyZone.get().printable();
 					statusObj["maintenance_seconds_remaining"] = loadResult.get().healthyZoneSeconds;
@@ -2550,10 +2770,11 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		statusObj["machines"] = machineStatusFetcher(mMetrics, workers, configuration, &status_incomplete_reasons);
 
-		if (configuration.present()){
+		if (configuration.present()) {
 			// Do the latency probe by itself to avoid interference from other status activities
 			state bool isAvailable = true;
-			JsonBuilderObject latencyProbeResults = wait(latencyProbeFetcher(cx, &messages, &status_incomplete_reasons, &isAvailable));
+			JsonBuilderObject latencyProbeResults =
+			    wait(latencyProbeFetcher(cx, &messages, &status_incomplete_reasons, &isAvailable));
 
 			statusObj["database_available"] = isAvailable;
 			if (!latencyProbeResults.empty()) {
@@ -2561,35 +2782,41 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			state std::vector<Future<Void>> warningFutures;
-			if(isAvailable) {
-				warningFutures.push_back( consistencyCheckStatusFetcher(cx, &messages, &status_incomplete_reasons) );
-				if(!SERVER_KNOBS->DISABLE_DUPLICATE_LOG_WARNING) {
-					warningFutures.push_back( logRangeWarningFetcher(cx, &messages, &status_incomplete_reasons) );
+			if (isAvailable) {
+				warningFutures.push_back(consistencyCheckStatusFetcher(cx, &messages, &status_incomplete_reasons));
+				if (!SERVER_KNOBS->DISABLE_DUPLICATE_LOG_WARNING) {
+					warningFutures.push_back(logRangeWarningFetcher(cx, &messages, &status_incomplete_reasons));
 				}
 			}
 
-			// Start getting storage servers now (using system priority) concurrently.  Using sys priority because having storage servers
-			// in status output is important to give context to error messages in status that reference a storage server role ID.
+			// Start getting storage servers now (using system priority) concurrently.  Using sys priority because
+			// having storage servers in status output is important to give context to error messages in status that
+			// reference a storage server role ID.
 			state std::unordered_map<NetworkAddress, WorkerInterface> address_workers;
 			for (auto const& worker : workers) {
 				address_workers[worker.interf.address()] = worker.interf;
 			}
 
-			state Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture = errorOr(getStorageServersAndMetrics(cx, address_workers, rkWorker));
-			state Future<ErrorOr<vector<std::pair<TLogInterface, EventMap>>>> tLogFuture = errorOr(getTLogsAndMetrics(db, address_workers));
+			state Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture =
+			    errorOr(getStorageServersAndMetrics(cx, address_workers, rkWorker));
+			state Future<ErrorOr<vector<std::pair<TLogInterface, EventMap>>>> tLogFuture =
+			    errorOr(getTLogsAndMetrics(db, address_workers));
 			state Future<ErrorOr<vector<std::pair<CommitProxyInterface, EventMap>>>> commitProxyFuture =
 			    errorOr(getCommitProxiesAndMetrics(db, address_workers));
-			state Future<ErrorOr<vector<std::pair<GrvProxyInterface, EventMap>>>> grvProxyFuture = errorOr(getGrvProxiesAndMetrics(db, address_workers));
+			state Future<ErrorOr<vector<std::pair<GrvProxyInterface, EventMap>>>> grvProxyFuture =
+			    errorOr(getGrvProxiesAndMetrics(db, address_workers));
 
 			state int minReplicasRemaining = -1;
 			state int fullyReplicatedRegions = -1;
 			state Future<Optional<Value>> primaryDCFO = getActivePrimaryDC(cx, &fullyReplicatedRegions, &messages);
 			std::vector<Future<JsonBuilderObject>> futures2;
 			futures2.push_back(dataStatusFetcher(ddWorker, configuration.get(), &minReplicasRemaining));
-			futures2.push_back(workloadStatusFetcher(db, workers, mWorker, rkWorker, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture));
+			futures2.push_back(workloadStatusFetcher(
+			    db, workers, mWorker, rkWorker, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture));
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
-			futures2.push_back(clusterSummaryStatisticsFetcher(pMetrics, storageServerFuture, tLogFuture, &status_incomplete_reasons));
+			futures2.push_back(
+			    clusterSummaryStatisticsFetcher(pMetrics, storageServerFuture, tLogFuture, &status_incomplete_reasons));
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
 			wait(success(primaryDCFO));
 
@@ -2598,11 +2825,17 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				statusObj["logs"] = tlogFetcher(&logFaultTolerance, db, address_workers);
 			}
 
-			if(configuration.present()) {
+			if (configuration.present()) {
 				int extraTlogEligibleZones = getExtraTLogEligibleZones(workers, configuration.get());
-				statusObj["fault_tolerance"] = faultToleranceStatusFetcher(
-				    configuration.get(), coordinators, workers, extraTlogEligibleZones, minReplicasRemaining,
-				    logFaultTolerance, fullyReplicatedRegions, loadResult.present() && loadResult.get().healthyZone.present());
+				statusObj["fault_tolerance"] =
+				    faultToleranceStatusFetcher(configuration.get(),
+				                                coordinators,
+				                                workers,
+				                                extraTlogEligibleZones,
+				                                minReplicasRemaining,
+				                                logFaultTolerance,
+				                                fullyReplicatedRegions,
+				                                loadResult.present() && loadResult.get().healthyZone.present());
 			}
 
 			state JsonBuilderObject configObj =
@@ -2616,7 +2849,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				statusObj["configuration"] = configObj;
 			}
 
-			// workloadStatusFetcher returns the workload section but also optionally writes the qos section and adds to the data_overlay object
+			// workloadStatusFetcher returns the workload section but also optionally writes the qos section and adds to
+			// the data_overlay object
 			if (!workerStatuses[1].empty())
 				statusObj["workload"] = workerStatuses[1];
 
@@ -2627,9 +2861,10 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				statusObj["qos"] = qos;
 
 			// Merge data_overlay into data
-			JsonBuilderObject &clusterDataSection = workerStatuses[0];
+			JsonBuilderObject& clusterDataSection = workerStatuses[0];
 
-			// TODO:  This probably is no longer possible as there is no ability to merge json objects with an output-only model
+			// TODO:  This probably is no longer possible as there is no ability to merge json objects with an
+			// output-only model
 			clusterDataSection.addContents(data_overlay);
 
 			// If data section not empty, add it to statusObj
@@ -2637,12 +2872,12 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				statusObj["data"] = clusterDataSection;
 
 			// Insert database_lock_state section
-			if(!workerStatuses[3].empty()) {
+			if (!workerStatuses[3].empty()) {
 				statusObj["database_lock_state"] = workerStatuses[3];
 			}
 
 			// Insert cluster summary statistics
-			if(!workerStatuses[4].empty()) {
+			if (!workerStatuses[4].empty()) {
 				statusObj.addContents(workerStatuses[4]);
 			}
 
@@ -2650,18 +2885,18 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>> _storageServers = wait(storageServerFuture);
 			if (_storageServers.present()) {
 				storageServers = _storageServers.get();
-			}
-			else {
-				messages.push_back(JsonBuilder::makeMessage("storage_servers_error", "Timed out trying to retrieve storage servers."));
+			} else {
+				messages.push_back(
+				    JsonBuilder::makeMessage("storage_servers_error", "Timed out trying to retrieve storage servers."));
 			}
 
 			// ...also tlogs
 			ErrorOr<vector<std::pair<TLogInterface, EventMap>>> _tLogs = wait(tLogFuture);
 			if (_tLogs.present()) {
 				tLogs = _tLogs.get();
-			}
-			else {
-				messages.push_back(JsonBuilder::makeMessage("log_servers_error", "Timed out trying to retrieve log servers."));
+			} else {
+				messages.push_back(
+				    JsonBuilder::makeMessage("log_servers_error", "Timed out trying to retrieve log servers."));
 			}
 
 			// ...also commit proxies
@@ -2677,13 +2912,12 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			ErrorOr<vector<std::pair<GrvProxyInterface, EventMap>>> _grvProxies = wait(grvProxyFuture);
 			if (_grvProxies.present()) {
 				grvProxies = _grvProxies.get();
+			} else {
+				messages.push_back(
+				    JsonBuilder::makeMessage("grv_proxies_error", "Timed out trying to retrieve grv proxies."));
 			}
-			else {
-				messages.push_back(JsonBuilder::makeMessage("grv_proxies_error", "Timed out trying to retrieve grv proxies."));
-			}
-			wait( waitForAll(warningFutures) );
-		}
-		else {
+			wait(waitForAll(warningFutures));
+		} else {
 			// Set layers status to { _valid: false, error: "configurationMissing"}
 			JsonBuilderObject layers;
 			layers["_valid"] = false;
@@ -2691,23 +2925,38 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			statusObj["layers"] = layers;
 		}
 
-		JsonBuilderObject processStatus = wait(processStatusFetcher(
-		    db, workers, pMetrics, mMetrics, networkMetrics, latestError, traceFileOpenErrors, programStarts,
-		    processIssues, storageServers, tLogs, commitProxies, grvProxies, coordinators, cx, configuration,
-		    loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(), &status_incomplete_reasons));
+		JsonBuilderObject processStatus =
+		    wait(processStatusFetcher(db,
+		                              workers,
+		                              pMetrics,
+		                              mMetrics,
+		                              networkMetrics,
+		                              latestError,
+		                              traceFileOpenErrors,
+		                              programStarts,
+		                              processIssues,
+		                              storageServers,
+		                              tLogs,
+		                              commitProxies,
+		                              grvProxies,
+		                              coordinators,
+		                              cx,
+		                              configuration,
+		                              loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),
+		                              &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
 		statusObj["clients"] = clientStatusFetcher(clientStatus);
 
 		JsonBuilderArray incompatibleConnectionsArray;
-		for(auto it : incompatibleConnections) {
+		for (auto it : incompatibleConnections) {
 			incompatibleConnectionsArray.push_back(it.toString());
 		}
 		statusObj["incompatible_connections"] = incompatibleConnectionsArray;
 		statusObj["datacenter_lag"] = getLagObject(datacenterVersionDifference);
 
 		int totalDegraded = 0;
-		for(auto& it : workers) {
-			if(it.degraded) {
+		for (auto& it : workers) {
+			if (it.degraded) {
 				totalDegraded++;
 			}
 		}
@@ -2719,15 +2968,16 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		// cluster messages subsection;
 		JsonBuilderArray clientIssuesArr = getClientIssuesAsMessages(clientStatus);
 		if (clientIssuesArr.size() > 0) {
-			JsonBuilderObject clientIssueMessage = JsonBuilder::makeMessage("client_issues", "Some clients of this cluster have issues.");
+			JsonBuilderObject clientIssueMessage =
+			    JsonBuilder::makeMessage("client_issues", "Some clients of this cluster have issues.");
 			clientIssueMessage["issues"] = clientIssuesArr;
 			messages.push_back(clientIssueMessage);
 		}
 
 		// Create the status_incomplete message if there were any reasons that the status is incomplete.
-		if (!status_incomplete_reasons.empty())
-		{
-			JsonBuilderObject incomplete_message = JsonBuilder::makeMessage("status_incomplete", "Unable to retrieve all status information.");
+		if (!status_incomplete_reasons.empty()) {
+			JsonBuilderObject incomplete_message =
+			    JsonBuilder::makeMessage("status_incomplete", "Unable to retrieve all status information.");
 			// Make a JSON array of all of the reasons in the status_incomplete_reasons set.
 			JsonBuilderArray reasons;
 			for (auto i : status_incomplete_reasons) {
@@ -2740,20 +2990,22 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		statusObj["messages"] = messages;
 
 		int64_t clusterTime = g_network->timer();
-		if (clusterTime != -1){
+		if (clusterTime != -1) {
 			statusObj["cluster_controller_timestamp"] = clusterTime;
 		}
 
-		TraceEvent("ClusterGetStatus").detail("Duration", timer()-tStart).detail("StatusSize",statusObj.getFinalLength());
+		TraceEvent("ClusterGetStatus")
+		    .detail("Duration", timer() - tStart)
+		    .detail("StatusSize", statusObj.getFinalLength());
 
 		return StatusReply(statusObj.getJson());
-	} catch( Error&e ) {
+	} catch (Error& e) {
 		TraceEvent(SevError, "StatusError").error(e);
 		throw;
 	}
 }
 
-bool checkAsciiNumber(const char *s) {
+bool checkAsciiNumber(const char* s) {
 	JsonBuilderObject number;
 	number.setKeyRawNumber("number", s);
 	std::string js = number.getJson();
@@ -2762,7 +3014,7 @@ bool checkAsciiNumber(const char *s) {
 	try {
 		// Make sure it parses as JSON
 		readJSONStrictly(js);
-	} catch(Error &e) {
+	} catch (Error& e) {
 		printf("error: %s\n", e.what());
 		return false;
 	}
@@ -2770,7 +3022,7 @@ bool checkAsciiNumber(const char *s) {
 	return true;
 }
 
-bool checkJson(const JsonBuilder &j, const char *expected) {
+bool checkJson(const JsonBuilder& j, const char* expected) {
 	std::string js = j.getJson();
 	printf("json:     '%s'\n", js.c_str());
 	printf("expected: '%s'\n\n", expected);
@@ -2778,7 +3030,7 @@ bool checkJson(const JsonBuilder &j, const char *expected) {
 	try {
 		// Make sure it parses as JSON
 		readJSONStrictly(js);
-	} catch(Error &e) {
+	} catch (Error& e) {
 		printf("error: %s\n", e.what());
 		return false;
 	}
@@ -2829,10 +3081,12 @@ TEST_CASE("/status/json/builder") {
 	ASSERT(checkJson(object2, "{\"x\":1,\"y\":\"why\",\"z\":\"zee\"}"));
 
 	object2.addContents(object);
-	ASSERT(checkJson(object2, "{\"x\":1,\"y\":\"why\",\"z\":\"zee\",\"a\":5,\"b\":\"hi\",\"c\":[1,2,\"test\"],\"d\":[null]}"));
+	ASSERT(checkJson(object2,
+	                 "{\"x\":1,\"y\":\"why\",\"z\":\"zee\",\"a\":5,\"b\":\"hi\",\"c\":[1,2,\"test\"],\"d\":[null]}"));
 
 	object2.addContents(JsonBuilderObject());
-	ASSERT(checkJson(object2, "{\"x\":1,\"y\":\"why\",\"z\":\"zee\",\"a\":5,\"b\":\"hi\",\"c\":[1,2,\"test\"],\"d\":[null]}"));
+	ASSERT(checkJson(object2,
+	                 "{\"x\":1,\"y\":\"why\",\"z\":\"zee\",\"a\":5,\"b\":\"hi\",\"c\":[1,2,\"test\"],\"d\":[null]}"));
 
 	array2.addContents(array);
 	ASSERT(checkJson(array2, "[null,1,2,\"test\"]"));
@@ -2877,32 +3131,31 @@ TEST_CASE("/status/json/builder") {
 	return Void();
 }
 
-JsonBuilderObject randomDocument(const std::vector<std::string> &strings, int &limit, int level);
-JsonBuilderArray randomArray(const std::vector<std::string> &strings, int &limit, int level);
+JsonBuilderObject randomDocument(const std::vector<std::string>& strings, int& limit, int level);
+JsonBuilderArray randomArray(const std::vector<std::string>& strings, int& limit, int level);
 
-JsonBuilderArray randomArray(const std::vector<std::string> &strings, int &limit, int level) {
+JsonBuilderArray randomArray(const std::vector<std::string>& strings, int& limit, int level) {
 	JsonBuilderArray r;
 	int size = deterministicRandom()->randomInt(0, 50);
 
-	while(--size) {
-		if(--limit <= 0)
+	while (--size) {
+		if (--limit <= 0)
 			break;
 
-		if(level > 0 && deterministicRandom()->coinflip()) {
-			if(deterministicRandom()->coinflip())
+		if (level > 0 && deterministicRandom()->coinflip()) {
+			if (deterministicRandom()->coinflip())
 				r.push_back(randomDocument(strings, limit, level - 1));
 			else
 				r.push_back(randomArray(strings, limit, level - 1));
-		}
-		else {
-			switch(deterministicRandom()->randomInt(0, 3)) {
-				case 0:
-					r.push_back(deterministicRandom()->randomInt(0, 10000000));
-				case 1:
-					r.push_back(strings[deterministicRandom()->randomInt(0, strings.size())]);
-				case 2:
-				default:
-					r.push_back(deterministicRandom()->random01());
+		} else {
+			switch (deterministicRandom()->randomInt(0, 3)) {
+			case 0:
+				r.push_back(deterministicRandom()->randomInt(0, 10000000));
+			case 1:
+				r.push_back(strings[deterministicRandom()->randomInt(0, strings.size())]);
+			case 2:
+			default:
+				r.push_back(deterministicRandom()->random01());
 			}
 		}
 	}
@@ -2910,31 +3163,30 @@ JsonBuilderArray randomArray(const std::vector<std::string> &strings, int &limit
 	return r;
 }
 
-JsonBuilderObject randomDocument(const std::vector<std::string> &strings, int &limit, int level) {
+JsonBuilderObject randomDocument(const std::vector<std::string>& strings, int& limit, int level) {
 	JsonBuilderObject r;
 	int size = deterministicRandom()->randomInt(0, 300);
 
-	while(--size) {
-		if(--limit <= 0)
+	while (--size) {
+		if (--limit <= 0)
 			break;
 
-		const std::string &key = strings[deterministicRandom()->randomInt(0, strings.size())];
+		const std::string& key = strings[deterministicRandom()->randomInt(0, strings.size())];
 
-		if(level > 0 && deterministicRandom()->coinflip()) {
-			if(deterministicRandom()->coinflip())
+		if (level > 0 && deterministicRandom()->coinflip()) {
+			if (deterministicRandom()->coinflip())
 				r[key] = randomDocument(strings, limit, level - 1);
 			else
 				r[key] = randomArray(strings, limit, level - 1);
-		}
-		else {
-			switch(deterministicRandom()->randomInt(0, 3)) {
-				case 0:
-					r[key] = deterministicRandom()->randomInt(0, 10000000);
-				case 1:
-					r[key] = strings[deterministicRandom()->randomInt(0, strings.size())];
-				case 2:
-				default:
-					r[key] = deterministicRandom()->random01();
+		} else {
+			switch (deterministicRandom()->randomInt(0, 3)) {
+			case 0:
+				r[key] = deterministicRandom()->randomInt(0, 10000000);
+			case 1:
+				r[key] = strings[deterministicRandom()->randomInt(0, strings.size())];
+			case 2:
+			default:
+				r[key] = deterministicRandom()->random01();
 			}
 		}
 	}
@@ -2946,7 +3198,7 @@ TEST_CASE("/status/json/builderPerf") {
 	std::vector<std::string> strings;
 	int c = 1000000;
 	printf("Generating random strings\n");
-	while(--c)
+	while (--c)
 		strings.push_back(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, 50)));
 
 	int elements = 100000;
@@ -2958,7 +3210,7 @@ TEST_CASE("/status/json/builderPerf") {
 	int64_t bytes = 0;
 	double generated = 0;
 	double serialized = 0;
-	for(int i = 0; i < iterations; i++) {
+	for (int i = 0; i < iterations; i++) {
 		int n = elements;
 		double start;
 
@@ -2978,8 +3230,16 @@ TEST_CASE("/status/json/builderPerf") {
 		std::string jsStr = json_spirit::write_string(mv);
 		double jsSerialize = timer() - start;
 
-		printf("JsonBuilder: %8lu bytes  %-7.5f gen   +  %-7.5f serialize =  %-7.5f\n", s.size(), generate, serialize, generate + serialize);
-		printf("json_spirit: %8lu bytes  %-7.5f parse +  %-7.5f serialize =  %-7.5f\n", jsStr.size(), jsParse, jsSerialize, jsParse + jsSerialize);
+		printf("JsonBuilder: %8lu bytes  %-7.5f gen   +  %-7.5f serialize =  %-7.5f\n",
+		       s.size(),
+		       generate,
+		       serialize,
+		       generate + serialize);
+		printf("json_spirit: %8lu bytes  %-7.5f parse +  %-7.5f serialize =  %-7.5f\n",
+		       jsStr.size(),
+		       jsParse,
+		       jsSerialize,
+		       jsParse + jsSerialize);
 		printf("\n");
 
 		generated += generate;
@@ -2988,8 +3248,16 @@ TEST_CASE("/status/json/builderPerf") {
 	}
 
 	double elapsed = generated + serialized;
-	printf("RESULT: %" PRId64 " bytes  %d elements  %d levels  %f seconds (%f gen, %f serialize)  %f MB/s  %f items/s\n",
-		bytes, iterations*elements, level, elapsed, generated, elapsed - generated, bytes / elapsed / 1e6, iterations*elements / elapsed);
+	printf("RESULT: %" PRId64
+	       " bytes  %d elements  %d levels  %f seconds (%f gen, %f serialize)  %f MB/s  %f items/s\n",
+	       bytes,
+	       iterations * elements,
+	       level,
+	       elapsed,
+	       generated,
+	       elapsed - generated,
+	       bytes / elapsed / 1e6,
+	       iterations * elements / elapsed);
 
 	return Void();
 }
@@ -3071,10 +3339,18 @@ TEST_CASE("/status/json/merging") {
 	a.cleanOps();
 	printf("result = \n%s\n", json_spirit::write_string(json_spirit::mValue(objA), json_spirit::pretty_print).c_str());
 	std::string result = json_spirit::write_string(json_spirit::mValue(objA));
-	std::string expected = "{\"a\":\"justA\",\"b\":\"justB\",\"bool_true\":true,\"expired\":null,\"int_one\":1,\"int_total_30\":30,\"int_unmatched\":{\"ERROR\":\"Values do not match.\",\"a\":2,\"b\":3},\"last_hello\":\"hello\",\"latest_int_5\":5,\"latest_obj\":{\"a\":\"a\",\"b\":\"b\",\"not_expired\":\"Still alive.\"},\"mixed_numeric_min_0\":0,\"mixed_numeric_sum_6\":6,\"not_expired\":\"I am still valid\",\"not_expired_and_merged\":{\"one\":1,\"seven\":7},\"string\":\"test\",\"subdoc\":{\"double_max_5\":5,\"double_min_2\":2,\"int_11\":11,\"obj_count_3\":3}}";
+	std::string expected = "{\"a\":\"justA\",\"b\":\"justB\",\"bool_true\":true,\"expired\":null,\"int_one\":1,\"int_"
+	                       "total_30\":30,\"int_unmatched\":{\"ERROR\":\"Values do not "
+	                       "match.\",\"a\":2,\"b\":3},\"last_hello\":\"hello\",\"latest_int_5\":5,\"latest_obj\":{"
+	                       "\"a\":\"a\",\"b\":\"b\",\"not_expired\":\"Still "
+	                       "alive.\"},\"mixed_numeric_min_0\":0,\"mixed_numeric_sum_6\":6,\"not_expired\":\"I am still "
+	                       "valid\",\"not_expired_and_merged\":{\"one\":1,\"seven\":7},\"string\":\"test\",\"subdoc\":{"
+	                       "\"double_max_5\":5,\"double_min_2\":2,\"int_11\":11,\"obj_count_3\":3}}";
 
-	if(result != expected) {
-		printf("ERROR:  Combined doc does not match expected.\nexpected:\n\n%s\nresult:\n%s\n", expected.c_str(), result.c_str());
+	if (result != expected) {
+		printf("ERROR:  Combined doc does not match expected.\nexpected:\n\n%s\nresult:\n%s\n",
+		       expected.c_str(),
+		       result.c_str());
 		ASSERT(false);
 	}
 

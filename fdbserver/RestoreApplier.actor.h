@@ -84,12 +84,12 @@ struct StagingKey {
 			}
 			if (version < newVersion) {
 				DEBUG_MUTATION("StagingKeyAdd", newVersion.version, m)
-					    .detail("Version", version.toString())
-					    .detail("NewVersion", newVersion.toString())
-					    .detail("MType", getTypeString(type))
-					    .detail("Key", key)
-					    .detail("Val", val)
-					    .detail("NewMutation", m.toString());
+				    .detail("Version", version.toString())
+				    .detail("NewVersion", newVersion.toString())
+				    .detail("MType", getTypeString(type))
+				    .detail("Key", key)
+				    .detail("Val", val)
+				    .detail("NewMutation", m.toString());
 				key = m.param1;
 				val = m.param2;
 				type = (MutationRef::Type)m.type;
@@ -226,15 +226,13 @@ public:
 	static const int DONE = 4;
 	static const int INVALID = 5;
 
-	explicit ApplierVersionBatchState(int newState) {
-		vbState = newState;
-	}
+	explicit ApplierVersionBatchState(int newState) { vbState = newState; }
 
-	virtual ~ApplierVersionBatchState() = default;
+	~ApplierVersionBatchState() override = default;
 
-	virtual void operator=(int newState) { vbState = newState; }
+	void operator=(int newState) override { vbState = newState; }
 
-	virtual int get() { return vbState; }
+	int get() override { return vbState; }
 };
 
 struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
@@ -288,8 +286,10 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	    targetWriteRateMB(SERVER_KNOBS->FASTRESTORE_WRITE_BW_MB / SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS),
 	    totalBytesToWrite(-1), applyingDataBytes(0), vbState(ApplierVersionBatchState::NOT_INIT),
 	    receiveMutationReqs(0), receivedBytes(0), appliedBytes(0) {
-		pollMetrics = traceCounters(format("FastRestoreApplierMetrics%d", batchIndex), nodeID,
-		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY, &counters.cc,
+		pollMetrics = traceCounters(format("FastRestoreApplierMetrics%d", batchIndex),
+		                            nodeID,
+		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
+		                            &counters.cc,
 		                            nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));
 		TraceEvent("FastRestoreApplierMetricsCreated").detail("Node", nodeID);
 	}
@@ -327,7 +327,8 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	}
 
 	void sanityCheckMutationOps() {
-		if (kvOps.empty()) return;
+		if (kvOps.empty())
+			return;
 
 		ASSERT_WE_THINK(isKVOpsSorted());
 		ASSERT_WE_THINK(allOpsAreKnown());
@@ -377,7 +378,7 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 		role = RestoreRole::Applier;
 	}
 
-	~RestoreApplierData() = default;
+	~RestoreApplierData() override = default;
 
 	// getVersionBatchState may be called periodically to dump version batch state,
 	// even when no version batch has been started.
@@ -395,17 +396,17 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 		item->second->vbState = vbState;
 	}
 
-	void initVersionBatch(int batchIndex) {
+	void initVersionBatch(int batchIndex) override {
 		TraceEvent("FastRestoreApplierInitVersionBatch", id()).detail("BatchIndex", batchIndex);
 		batch[batchIndex] = Reference<ApplierBatchData>(new ApplierBatchData(nodeID, batchIndex));
 	}
 
-	void resetPerRestoreRequest() {
+	void resetPerRestoreRequest() override {
 		batch.clear();
 		finishedBatch = NotifiedVersion(0);
 	}
 
-	std::string describeNode() {
+	std::string describeNode() override {
 		std::stringstream ss;
 		ss << "NodeID:" << nodeID.toString() << " nodeIndex:" << nodeIndex;
 		return ss.str();

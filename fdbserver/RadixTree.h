@@ -40,39 +40,39 @@ const int INLINE_KEY_SIZE = sizeof(StringRef);
 
 StringRef radix_substr(const StringRef& key, int begin, int num) {
 	int size = key.size();
-    if (begin > size) {
-        throw std::out_of_range("out of range in radix_substr<StringRef>");
-    }
-    if((begin + num) > size) {
-        num = size - begin;
-    }
-    return key.substr(begin, num);
+	if (begin > size) {
+		throw std::out_of_range("out of range in radix_substr<StringRef>");
+	}
+	if ((begin + num) > size) {
+		num = size - begin;
+	}
+	return key.substr(begin, num);
 }
 
 StringRef radix_join(const StringRef& key1, const StringRef& key2, Arena& arena) {
 	int rsize = key1.size() + key2.size();
-    uint8_t* s = new (arena) uint8_t[ rsize ];
+	uint8_t* s = new (arena) uint8_t[rsize];
 
-    memcpy(s, key1.begin(), key1.size());
-    memcpy(s + key1.size(), key2.begin(), key2.size());
+	memcpy(s, key1.begin(), key1.size());
+	memcpy(s + key1.size(), key2.begin(), key2.size());
 
-    return StringRef(s, rsize);
+	return StringRef(s, rsize);
 }
 
 StringRef radix_constructStr(const StringRef& key, int begin, int num, Arena& arena) {
 	int size = key.size();
-    if (begin > size) {
-        throw std::out_of_range("out of range in radix_substr<StringRef>");
-    }
-    if((begin + num) > size) {
-        num = size - begin;
-    }
-    return StringRef(arena, key.substr(begin, num));
+	if (begin > size) {
+		throw std::out_of_range("out of range in radix_substr<StringRef>");
+	}
+	if ((begin + num) > size) {
+		num = size - begin;
+	}
+	return StringRef(arena, key.substr(begin, num));
 }
 
 class radix_tree {
 public:
-    typedef std::size_t size_type;
+	typedef std::size_t size_type;
 
 private:
 	// union used inside both base node and leaf node
@@ -105,7 +105,8 @@ private:
 			if (isInline) {
 				memcpy(key.inlineData, content.begin() + start, num);
 				m_inline_length = num;
-				if (!m_is_inline) arena = Arena();
+				if (!m_is_inline)
+					arena = Arena();
 			} else {
 				Arena new_arena(num);
 				key.data = radix_constructStr(content, start, num, new_arena);
@@ -114,7 +115,7 @@ private:
 			m_is_inline = isInline;
 		}
 
-		StringRef getKey() {
+		StringRef getKey() const {
 			if (m_is_inline) {
 				return StringRef(&key.inlineData[0], m_inline_length);
 			} else {
@@ -122,9 +123,9 @@ private:
 			}
 		}
 
-		inline int getKeySize() { return m_is_inline ? m_inline_length : key.data.size(); }
+		inline int getKeySize() const { return m_is_inline ? m_inline_length : key.data.size(); }
 
-		inline int16_t getFirstByte() {
+		inline int16_t getFirstByte() const {
 			if (m_is_inline) {
 				return m_inline_length == 0 ? LEAF_BYTE : key.inlineData[0];
 			} else {
@@ -132,7 +133,7 @@ private:
 			}
 		}
 
-		inline size_type getArenaSize() { return m_is_inline ? 0 : arena.getSize(); }
+		inline size_type getArenaSize() const { return m_is_inline ? 0 : arena.getSize(); }
 
 		uint32_t m_is_leaf : 1;
 		uint32_t m_is_fixed : 1; // if true, then we have fixed number of children (3)
@@ -144,7 +145,7 @@ private:
 		inlineUnion key;
 		// arena assign memory for key
 		Arena arena;
-		node *m_parent;
+		node* m_parent;
 	};
 
 	struct leafNode : FastAllocated<leafNode> {
@@ -160,7 +161,8 @@ private:
 			if (isInline) {
 				memcpy(value.inlineData, content.begin(), content.size());
 				inline_length = content.size();
-				if (!is_inline) arena = Arena();
+				if (!is_inline)
+					arena = Arena();
 			} else {
 				Arena new_arena(content.size());
 				value.data = StringRef(new_arena, content);
@@ -207,7 +209,7 @@ private:
 
 		node base;
 		// ordered map by char, m_children.begin() return the smallest value
-        std::vector<std::pair<int16_t, node *>> m_children;
+		std::vector<std::pair<int16_t, node*>> m_children;
 	};
 
 	struct internalNode4 : FastAllocated<internalNode4> {
@@ -233,13 +235,16 @@ public:
 		iterator() : m_pointee(nullptr) {}
 		iterator(const iterator& r) : m_pointee(r.m_pointee) {}
 		iterator(node* p) : m_pointee(p) {}
-		iterator& operator=(const iterator& r) { m_pointee = r.m_pointee; return *this; }
-        ~iterator() = default;
+		iterator& operator=(const iterator& r) {
+			m_pointee = r.m_pointee;
+			return *this;
+		}
+		~iterator() = default;
 
 		const iterator& operator++();
 		const iterator& operator--();
-		bool operator != (const iterator &lhs) const;
-        bool operator == (const iterator &lhs) const;
+		bool operator!=(const iterator& lhs) const;
+		bool operator==(const iterator& lhs) const;
 		StringRef getKey(uint8_t* content) const;
 		StringRef getValue() const {
 			ASSERT(m_pointee->m_is_leaf);
@@ -278,8 +283,8 @@ public:
 
 	// dummy method interface(to keep every interface same as IndexedSet )
 	static int getElementBytes() {
-        ASSERT(false);
-        return 0;
+		ASSERT(false);
+		return 0;
 	}
 
 	bool empty() const { return m_size == 0; }
@@ -315,9 +320,9 @@ public:
 	uint64_t sumTo(iterator to) const;
 
 private:
-    size_type m_size;
-    // number of nodes that has been created
-    size_type m_node;
+	size_type m_size;
+	// number of nodes that has been created
+	size_type m_node;
 	// number of nodes with key.size() <= 12
 	size_type inline_keys;
 	uint64_t total_bytes;
@@ -371,7 +376,8 @@ void radix_tree::add_child4(node* parent, node* child) {
 	int i = 0;
 
 	for (; i < parent_ref->num_children; ++i) {
-		if (parent_ref->keys[i] >= ch) break;
+		if (parent_ref->keys[i] >= ch)
+			break;
 	}
 
 	if (!parent_ref->num_children) {
@@ -390,8 +396,8 @@ void radix_tree::add_child4(node* parent, node* child) {
 	} else if (parent_ref->num_children < 3) {
 		// Shift to make room
 		memmove(parent_ref->keys + i + 1, parent_ref->keys + i, (parent_ref->num_children - i) * sizeof(int16_t));
-		memmove(parent_ref->m_children + i + 1, parent_ref->m_children + i,
-		        (parent_ref->num_children - i) * sizeof(void*));
+		memmove(
+		    parent_ref->m_children + i + 1, parent_ref->m_children + i, (parent_ref->num_children - i) * sizeof(void*));
 
 		// Insert element
 		parent_ref->keys[i] = ch;
@@ -426,7 +432,8 @@ void radix_tree::add_child_vector(node* parent, node* child) {
 	int i = 0;
 
 	for (; i < parent_ref->m_children.size(); ++i) {
-		if (parent_ref->m_children[i].first >= ch) break;
+		if (parent_ref->m_children[i].first >= ch)
+			break;
 	}
 
 	if (parent_ref->m_children.empty() || i == parent_ref->m_children.size() || parent_ref->m_children[i].first > ch) {
@@ -457,12 +464,13 @@ void radix_tree::delete_child4(radix_tree::node* parent, radix_tree::node* child
 	int i = 0;
 
 	for (; i < parent_ref->num_children; i++) {
-		if (parent_ref->keys[i] == ch) break;
+		if (parent_ref->keys[i] == ch)
+			break;
 	}
 	ASSERT(i != parent_ref->num_children);
 	memmove(parent_ref->keys + i, parent_ref->keys + i + 1, (parent_ref->num_children - 1 - i) * sizeof(int16_t));
-	memmove(parent_ref->m_children + i, parent_ref->m_children + i + 1,
-	        (parent_ref->num_children - 1 - i) * sizeof(void*));
+	memmove(
+	    parent_ref->m_children + i, parent_ref->m_children + i + 1, (parent_ref->num_children - 1 - i) * sizeof(void*));
 	parent_ref->num_children--;
 	total_bytes -= (getElementBytes(child) + child->getArenaSize());
 }
@@ -472,11 +480,12 @@ void radix_tree::delete_child_vector(radix_tree::node* parent, radix_tree::node*
 	internalNode* parent_ref = (internalNode*)parent;
 	int i = 0;
 
-    for(; i<parent_ref->m_children.size(); i++){
-        if(parent_ref->m_children[i].first == ch)  break;
-    }
-    ASSERT(i != parent_ref->m_children.size());
-    parent_ref->m_children.erase(parent_ref->m_children.begin() + i);
+	for (; i < parent_ref->m_children.size(); i++) {
+		if (parent_ref->m_children[i].first == ch)
+			break;
+	}
+	ASSERT(i != parent_ref->m_children.size());
+	parent_ref->m_children.erase(parent_ref->m_children.begin() + i);
 	total_bytes -= (getElementBytes(child) + child->getArenaSize() + sizeof(std::pair<int16_t, void*>));
 	if (parent_ref->m_children.size() && parent_ref->m_children.size() <= parent_ref->m_children.capacity() / 4)
 		parent_ref->m_children.shrink_to_fit();
@@ -487,12 +496,14 @@ int radix_tree::find_child(radix_tree::node* parent, int16_t ch) {
 	if (parent->m_is_fixed) {
 		internalNode4* parent_ref = (internalNode4*)parent;
 		for (; i < parent_ref->num_children; ++i) {
-			if (parent_ref->keys[i] == ch) return i;
+			if (parent_ref->keys[i] == ch)
+				return i;
 		}
 	} else {
 		internalNode* parent_ref = (internalNode*)parent;
 		for (; i != parent_ref->m_children.size(); ++i) {
-			if (parent_ref->m_children[i].first == ch) return i;
+			if (parent_ref->m_children[i].first == ch)
+				return i;
 		}
 	}
 	return i;
@@ -517,7 +528,8 @@ radix_tree::node* radix_tree::get_child(node* parent, int index) {
 
 radix_tree::node* radix_tree::iterator::increment(node* target) const {
 	radix_tree::node* parent = target->m_parent;
-	if (parent == nullptr) return nullptr;
+	if (parent == nullptr)
+		return nullptr;
 
 	int index = find_child(parent, target->getFirstByte());
 	ASSERT(index != child_size(parent));
@@ -531,7 +543,8 @@ radix_tree::node* radix_tree::iterator::increment(node* target) const {
 
 radix_tree::node* radix_tree::iterator::decrement(radix_tree::node* target) const {
 	radix_tree::node* parent = target->m_parent;
-	if (parent == nullptr) return nullptr;
+	if (parent == nullptr)
+		return nullptr;
 
 	int index = find_child(parent, target->getFirstByte());
 	ASSERT(index != child_size(parent));
@@ -554,32 +567,34 @@ bool radix_tree::iterator::operator==(const radix_tree::iterator& lhs) const {
 
 const radix_tree::iterator& radix_tree::iterator::operator++() {
 	if (m_pointee != nullptr) // it is undefined behaviour to dereference iterator that is out of bounds...
-        m_pointee = increment(m_pointee);
-    return *this;
+		m_pointee = increment(m_pointee);
+	return *this;
 }
 
 const radix_tree::iterator& radix_tree::iterator::operator--() {
 	if (m_pointee != nullptr && m_pointee->m_is_leaf) {
-        m_pointee = decrement(m_pointee);
-    }
-    return *this;
+		m_pointee = decrement(m_pointee);
+	}
+	return *this;
 }
 
 /*
  * reconstruct the key
  */
 StringRef radix_tree::iterator::getKey(uint8_t* content) const {
-	if (m_pointee == nullptr) return StringRef();
+	if (m_pointee == nullptr)
+		return StringRef();
 
 	ASSERT(m_pointee->m_is_leaf);
 	//  memset(content, 0, len);
 
 	auto node = m_pointee;
 	uint32_t pos = m_pointee->m_depth;
-	while(true){
+	while (true) {
 		memcpy(content + pos, node->getKey().begin(), node->getKeySize());
 		node = node->m_parent;
-		if (node == nullptr || pos <= 0) break;
+		if (node == nullptr || pos <= 0)
+			break;
 		pos -= node->getKeySize();
 	}
 	return StringRef(content, (m_pointee->m_depth + m_pointee->getKeySize()));
@@ -600,9 +615,9 @@ radix_tree::iterator radix_tree::begin() {
 /////////////////////// lookup //////////////////////////
 radix_tree::iterator radix_tree::find(const StringRef& key) {
 	if (m_root == nullptr)
-        return iterator(nullptr);
+		return iterator(nullptr);
 
-    auto node = find_node(key, m_root, 0);
+	auto node = find_node(key, m_root, 0);
 	StringRef key_sub = radix_substr(key, node->m_depth, (key.size() - node->m_depth));
 
 	if (node->m_is_leaf && key_sub == node->getKey())
@@ -617,7 +632,7 @@ radix_tree::iterator radix_tree::find(const StringRef& key) {
  */
 radix_tree::node* radix_tree::find_node(const StringRef& key, node* node, int depth) {
 	if (node->m_is_leaf)
-        return node;
+		return node;
 
 	int size = child_size(node);
 	//	printf("try to find key %s on node %s [%d]\n", printable(key).c_str(), printable(node->getKey()).c_str(), size);
@@ -653,13 +668,13 @@ radix_tree::node* radix_tree::find_node(const StringRef& key, node* node, int de
  * Returns the smallest node x such that *x>=key, or end()
  */
 radix_tree::iterator radix_tree::lower_bound(const StringRef& key) {
-	if(m_root == nullptr || m_size == 0)
-        return iterator(nullptr);
-    return lower_bound(key, m_root);
+	if (m_root == nullptr || m_size == 0)
+		return iterator(nullptr);
+	return lower_bound(key, m_root);
 }
 
 radix_tree::iterator radix_tree::lower_bound(const StringRef& key, node* node) {
-    iterator result(nullptr);
+	iterator result(nullptr);
 	int size = child_size(node);
 
 	for (int it = 0; it < size; ++it) {
@@ -680,7 +695,8 @@ radix_tree::iterator radix_tree::lower_bound(const StringRef& key, node* node) {
 		} else if (node_data > key_sub) {
 			return descend<0>(current);
 		}
-		if (result != end()) return result;
+		if (result != end())
+			return result;
 	}
 
 	return result;
@@ -690,16 +706,16 @@ radix_tree::iterator radix_tree::lower_bound(const StringRef& key, node* node) {
  * Returns the smallest x such that *x>key, or end()
  */
 radix_tree::iterator radix_tree::upper_bound(const StringRef& key) {
-	if(m_root == nullptr || m_size == 0)
-        return iterator(nullptr);
-    return upper_bound(key, m_root);
+	if (m_root == nullptr || m_size == 0)
+		return iterator(nullptr);
+	return upper_bound(key, m_root);
 }
 
 radix_tree::iterator radix_tree::upper_bound(const StringRef& key, node* node) {
-	if(node == nullptr || node->m_is_leaf)
-        return iterator(node);
+	if (node == nullptr || node->m_is_leaf)
+		return iterator(node);
 
-    iterator result(nullptr);
+	iterator result(nullptr);
 	int size = child_size(node);
 
 	for (int it = 0; it < size; ++it) {
@@ -712,30 +728,30 @@ radix_tree::iterator radix_tree::upper_bound(const StringRef& key, node* node) {
 		} else if (node_data > key_sub) {
 			return descend<0>(current);
 		}
-		if (result != end()) return result;
+		if (result != end())
+			return result;
 	}
 	return result;
 }
 
 // Return the sum of getT(x) for begin()<=x<to
 uint64_t radix_tree::sumTo(iterator to) const {
-	if(to == end()) {
-        return m_root ? total_bytes : 0;
-    }
-    else {
-        throw std::invalid_argument("sumTo method only support end() input");
-    }
+	if (to == end()) {
+		return m_root ? total_bytes : 0;
+	} else {
+		throw std::invalid_argument("sumTo method only support end() input");
+	}
 }
 
 radix_tree::iterator radix_tree::previous(radix_tree::iterator i) {
-	if(i == end()){
-        // for iterator == end(), find the largest element
+	if (i == end()) {
+		// for iterator == end(), find the largest element
 		return descend<1>(m_root);
 	} else if (i == begin()) {
 		return iterator(nullptr);
 	} else {
 		--i;
-        return i;
+		return i;
 	}
 }
 
@@ -758,7 +774,8 @@ radix_tree::node* radix_tree::append(node* parent, const StringRef& key, const S
 	} else {
 		node_c->setKey(key, depth, len);
 		// DEBUG
-		if (len <= INLINE_KEY_SIZE) inline_keys++;
+		if (len <= INLINE_KEY_SIZE)
+			inline_keys++;
 	}
 	// printf("node_c key is %s value is %s %p\n", printable(node_c->getKey()).c_str(),
 	// printable(((leafNode*)node_c)->getValue()).c_str(), node_c);
@@ -768,9 +785,9 @@ radix_tree::node* radix_tree::append(node* parent, const StringRef& key, const S
 }
 
 /*
- * step one : find common substring of node->m_key and val(findnode() method has already guaranteed that they have something in common)
- * step two : split the existing node into two based on the common substring
- * step three : append newly inserted node to node_a
+ * step one : find common substring of node->m_key and val(findnode() method has already guaranteed that they have
+ * something in common) step two : split the existing node into two based on the common substring step three : append
+ * newly inserted node to node_a
  *
  * @param node : split node
  * @param val : using val to create a newly inserted node
@@ -784,7 +801,8 @@ radix_tree::node* radix_tree::prepend(node* split, const StringRef& key, const S
 	StringRef original_data(temp_arena, split->getKey());
 
 	for (; count < len1 && count < len2; count++) {
-		if (!(original_data[count] == key[count + split->m_depth])) break;
+		if (!(original_data[count] == key[count + split->m_depth]))
+			break;
 	}
 	ASSERT(count != 0);
 
@@ -798,8 +816,10 @@ radix_tree::node* radix_tree::prepend(node* split, const StringRef& key, const S
 	add_child(node_a->m_parent, node_a); // replace original node* with node_a*
 
 	// DEBUG
-	if (count <= INLINE_KEY_SIZE) inline_keys++;
-	if (split->getKeySize() > INLINE_KEY_SIZE && (len1 - count) <= INLINE_KEY_SIZE) inline_keys++;
+	if (count <= INLINE_KEY_SIZE)
+		inline_keys++;
+	if (split->getKeySize() > INLINE_KEY_SIZE && (len1 - count) <= INLINE_KEY_SIZE)
+		inline_keys++;
 
 	// modify original internal node
 	split->m_depth += count;
@@ -809,7 +829,8 @@ radix_tree::node* radix_tree::prepend(node* split, const StringRef& key, const S
 	return append(node_a, key, val);
 }
 
-std::pair<radix_tree::iterator, bool> radix_tree::insert(const StringRef& key, const StringRef& val,
+std::pair<radix_tree::iterator, bool> radix_tree::insert(const StringRef& key,
+                                                         const StringRef& val,
                                                          bool replaceExisting) {
 	if (m_root == nullptr) {
 		m_root = (node*)new radix_tree::internalNode();
@@ -856,32 +877,38 @@ void radix_tree::erase(iterator it) {
 }
 
 bool radix_tree::erase(radix_tree::node* child) {
-	if (m_root == nullptr) return false;
+	if (m_root == nullptr)
+		return false;
 	ASSERT(child != nullptr);
 
-	if (!child->m_is_leaf) return false;
+	if (!child->m_is_leaf)
+		return false;
 
 	radix_tree::node* parent;
 
 	parent = child->m_parent;
 	delete_child(parent, child);
 	// DEBUG
-	if (child->getKeySize() <= INLINE_KEY_SIZE) inline_keys--;
+	if (child->getKeySize() <= INLINE_KEY_SIZE)
+		inline_keys--;
 	delete (leafNode*)child;
 	m_size--;
 	m_node--;
 
 	// can't do the merge if parent is root node
-	if (parent == m_root) return true;
+	if (parent == m_root)
+		return true;
 
-	if (child_size(parent) > 1) return true;
+	if (child_size(parent) > 1)
+		return true;
 	ASSERT(child_size(parent) == 1);
 
 	// parent has only one child left, merge parent with the sibling
 	node* brother = get_child(parent, 0);
 
 	// DEBUG
-	if (brother->getKeySize() <= INLINE_KEY_SIZE) inline_keys--;
+	if (brother->getKeySize() <= INLINE_KEY_SIZE)
+		inline_keys--;
 	delete_child(parent, brother);
 
 	Arena temp_arena;
@@ -892,8 +919,10 @@ bool radix_tree::erase(radix_tree::node* child) {
 	// delete parent and replace with brother
 	add_child(parent->m_parent, brother);
 	// DEBUG
-	if (brother->getKeySize() <= INLINE_KEY_SIZE) inline_keys++;
-	if (parent->getKeySize() <= INLINE_KEY_SIZE) inline_keys--;
+	if (brother->getKeySize() <= INLINE_KEY_SIZE)
+		inline_keys++;
+	if (parent->getKeySize() <= INLINE_KEY_SIZE)
+		inline_keys--;
 
 	parent->m_is_fixed ? delete (internalNode4*)parent : delete (internalNode*)parent;
 	m_node--;
@@ -904,13 +933,13 @@ bool radix_tree::erase(radix_tree::node* child) {
 // Erase the items in the indicated range.
 void radix_tree::erase(radix_tree::iterator begin, radix_tree::iterator end) {
 	std::vector<radix_tree::node*> node_set;
-	for(auto it = begin; it != end; ++it){
-        node_set.push_back(it.m_pointee);
-    }
+	for (auto it = begin; it != end; ++it) {
+		node_set.push_back(it.m_pointee);
+	}
 
-    for(int i = 0; i <node_set.size(); ++i) {
-        erase(node_set[i]);
-    }
+	for (int i = 0; i < node_set.size(); ++i) {
+		erase(node_set[i]);
+	}
 }
 
 #endif

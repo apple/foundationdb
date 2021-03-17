@@ -73,7 +73,7 @@ public:
 	void delref() override = 0;
 
 	BackupContainerFileSystem() {}
-	virtual ~BackupContainerFileSystem() {}
+	~BackupContainerFileSystem() override {}
 
 	// Create the container
 	Future<Void> create() override = 0;
@@ -101,11 +101,16 @@ public:
 
 	Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) final;
 
-	Future<Reference<IBackupFile>> writeTaggedLogFile(Version beginVersion, Version endVersion, int blockSize,
-	                                                  uint16_t tagId, int totalTags) final;
+	Future<Reference<IBackupFile>> writeTaggedLogFile(Version beginVersion,
+	                                                  Version endVersion,
+	                                                  int blockSize,
+	                                                  uint16_t tagId,
+	                                                  int totalTags) final;
 
-	Future<Reference<IBackupFile>> writeRangeFile(Version snapshotBeginVersion, int snapshotFileCount,
-	                                              Version fileVersion, int blockSize) override;
+	Future<Reference<IBackupFile>> writeRangeFile(Version snapshotBeginVersion,
+	                                              int snapshotFileCount,
+	                                              Version fileVersion,
+	                                              int blockSize) override;
 
 	Future<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>> readKeyspaceSnapshot(
 	    KeyspaceSnapshotFile snapshot);
@@ -136,13 +141,17 @@ public:
 	Future<BackupDescription> describeBackup(bool deepScan, Version logStartVersionOverride) final;
 
 	// Delete all data up to (but not including endVersion)
-	Future<Void> expireData(Version expireEndVersion, bool force, ExpireProgress* progress,
+	Future<Void> expireData(Version expireEndVersion,
+	                        bool force,
+	                        ExpireProgress* progress,
 	                        Version restorableBeginVersion) final;
 
 	Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file) final;
 
-	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion, VectorRef<KeyRangeRef> keyRangesFilter,
-	                                                  bool logsOnly, Version beginVersion) final;
+	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion,
+	                                                  VectorRef<KeyRangeRef> keyRangesFilter,
+	                                                  bool logsOnly,
+	                                                  Version beginVersion) final;
 
 private:
 	struct VersionProperty {

@@ -28,6 +28,7 @@ void forceLinkFlowTests();
 void forceLinkVersionedMapTests();
 void forceLinkMemcpyTests();
 void forceLinkMemcpyPerfTests();
+void forceLinkSimExternalConnectionTests();
 
 struct UnitTestWorkload : TestWorkload {
 	bool enabled;
@@ -38,8 +39,9 @@ struct UnitTestWorkload : TestWorkload {
 	PerfDoubleCounter totalWallTime, totalSimTime;
 
 	UnitTestWorkload(WorkloadContext const& wcx)
-		: TestWorkload(wcx), testsAvailable("Test Cases Available"), testsExecuted("Test Cases Executed"), testsFailed("Test Cases Failed"), totalWallTime("Total wall clock time (s)"), totalSimTime("Total flow time (s)")
-	{
+	  : TestWorkload(wcx), testsAvailable("Test Cases Available"), testsExecuted("Test Cases Executed"),
+	    testsFailed("Test Cases Failed"), totalWallTime("Total wall clock time (s)"),
+	    totalSimTime("Total flow time (s)") {
 		enabled = !clientId; // only do this on the "first" client
 		testPattern = getOption(options, LiteralStringRef("testsMatching"), Value()).toString();
 		testRunLimit = getOption(options, LiteralStringRef("maxTestCases"), -1);
@@ -49,6 +51,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkVersionedMapTests();
 		forceLinkMemcpyTests();
 		forceLinkMemcpyPerfTests();
+		forceLinkSimExternalConnectionTests();
 	}
 
 	std::string description() const override { return "UnitTests"; }
@@ -78,7 +81,7 @@ struct UnitTestWorkload : TestWorkload {
 		}
 		fprintf(stdout, "Found %zu tests\n", tests.size());
 		deterministicRandom()->randomShuffle(tests);
-		if (self->testRunLimit > 0 && tests.size() > self->testRunLimit) 
+		if (self->testRunLimit > 0 && tests.size() > self->testRunLimit)
 			tests.resize(self->testRunLimit);
 
 		state std::vector<UnitTest*>::iterator t;
@@ -92,8 +95,7 @@ struct UnitTestWorkload : TestWorkload {
 
 			try {
 				wait(test->func());
-			}
-			catch (Error& e) {
+			} catch (Error& e) {
 				++self->testsFailed;
 				result = e;
 			}
@@ -104,11 +106,12 @@ struct UnitTestWorkload : TestWorkload {
 			self->totalWallTime += wallTime;
 			self->totalSimTime += simTime;
 			TraceEvent(result.code() != error_code_success ? SevError : SevInfo, "UnitTest")
-				.error(result, true)
-				.detail("Name", test->name)
-				.detail("File", test->file).detail("Line", test->line)
-				.detail("WallTime", wallTime)
-				.detail("FlowTime", simTime);
+			    .error(result, true)
+			    .detail("Name", test->name)
+			    .detail("File", test->file)
+			    .detail("Line", test->line)
+			    .detail("WallTime", wallTime)
+			    .detail("FlowTime", simTime);
 		}
 
 		return Void();

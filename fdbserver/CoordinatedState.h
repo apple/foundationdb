@@ -27,14 +27,15 @@
 class CoordinatedState : NonCopyable {
 public:
 	// Callers must ensure that any outstanding operations have been cancelled before destructing *this!
-	CoordinatedState( class ServerCoordinators const& );
+	CoordinatedState(class ServerCoordinators const&);
 	~CoordinatedState();
 
 	Future<Value> read();
 	// May only be called once.
 	// Returns the most recent state if there are no concurrent calls to setExclusive
 	// Otherwise might return the state passed to a concurrent call, even if that call ultimately fails.
-	// Don't count on the result of this read being part of the serialized history until a subsequent setExclusive has succeeded!
+	// Don't count on the result of this read being part of the serialized history until a subsequent setExclusive has
+	// succeeded!
 
 	Future<Void> onConflict();
 	// May only be called once, and only after read returns.
@@ -49,18 +50,19 @@ public:
 	// If it returns Void, the state was successfully changed and the state returned by read was
 	//   the most recent before the new state.
 	// If it throws coordinated_state_conflict, the state may or may not have been changed, and the value
-	//   returned from read may or may not ever have been a valid state.  Probably there was a 
+	//   returned from read may or may not ever have been a valid state.  Probably there was a
 	//   call to read() or setExclusive() concurrently with this pair.
 
 	uint64_t getConflict();
+
 private:
-	struct CoordinatedStateImpl *impl;
+	std::unique_ptr<struct CoordinatedStateImpl> impl;
 };
 
 class MovableCoordinatedState : NonCopyable {
 public:
-	MovableCoordinatedState( class ServerCoordinators const& );
-	void operator=(MovableCoordinatedState&& av);
+	MovableCoordinatedState(class ServerCoordinators const&);
+	MovableCoordinatedState& operator=(MovableCoordinatedState&& av);
 	~MovableCoordinatedState();
 
 	Future<Value> read();
@@ -69,14 +71,14 @@ public:
 
 	Future<Void> setExclusive(Value v);
 
-	Future<Void> move( class ClusterConnectionString const& nc );
+	Future<Void> move(class ClusterConnectionString const& nc);
 	// Call only after setExclusive returns.  Attempts to move the coordinated state
 	// permanently to the new ServerCoordinators, which must be uninitialized.  Returns when the process has
 	// reached the point where a leader elected by the new coordinators should be doing the rest of the work
 	// (and therefore the caller should die).
 
 private:
-	struct MovableCoordinatedStateImpl *impl;
+	std::unique_ptr<struct MovableCoordinatedStateImpl> impl;
 };
 
 #endif

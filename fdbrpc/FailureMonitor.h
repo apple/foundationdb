@@ -122,7 +122,8 @@ public:
 
 	// Returns when the status of the given endpoint has continuously been "failed" for sustainedFailureDuration +
 	// (elapsedTime*sustainedFailureSlope)
-	Future<Void> onFailedFor(Endpoint const& endpoint, double sustainedFailureDuration,
+	Future<Void> onFailedFor(Endpoint const& endpoint,
+	                         double sustainedFailureDuration,
 	                         double sustainedFailureSlope = 0.0);
 
 	// Returns the failure monitor that the calling machine should use
@@ -138,8 +139,8 @@ public:
 class SimpleFailureMonitor : public IFailureMonitor {
 public:
 	SimpleFailureMonitor();
-	void setStatus(NetworkAddress const& address, FailureStatus const& status);
-	void endpointNotFound(Endpoint const&);
+	void setStatus(NetworkAddress const& address, FailureStatus const& status) override;
+	void endpointNotFound(Endpoint const&) override;
 	void notifyDisconnect(NetworkAddress const&) override;
 
 	Future<Void> onStateChanged(Endpoint const& endpoint) override;

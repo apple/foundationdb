@@ -47,6 +47,7 @@ set(FLOW_SRCS
   Platform.h
   Profiler.actor.cpp
   Profiler.h
+  SendBufferIterator.h
   SignalSafeUnwind.cpp
   SignalSafeUnwind.h
   SimpleOpt.h
@@ -64,7 +65,7 @@ set(FLOW_SRCS
   Trace.cpp
   Trace.h
   Tracing.h
-  Tracing.cpp
+  Tracing.actor.cpp
   TreeBenchmark.h
   UnitTest.cpp
   UnitTest.h
@@ -136,7 +137,12 @@ if(NOT WITH_TLS OR OPEN_FOR_IDE)
 else()
   target_link_libraries(flow PUBLIC OpenSSL::SSL)
 endif()
-target_link_libraries(flow PUBLIC boost_target Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(flow PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+if(USE_SANITIZER)
+  target_link_libraries(flow PUBLIC boost_asan)
+else()
+  target_link_libraries(flow PUBLIC boost_target)
+endif()
 if(USE_VALGRIND)
   target_link_libraries(flow PUBLIC Valgrind)
 endif()
