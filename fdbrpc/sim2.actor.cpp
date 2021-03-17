@@ -1102,7 +1102,8 @@ public:
 				ASSERT(false);
 			}
 			// if (!randLog/* && now() >= 32.0*/)
-			//randLog = fopen("randLog.txt", "wt");
+			//	randLog = fopen("randLog.txt", "wt");
+
 			self->instantTasks.clear();
 			self->instantTasks.push_back(
 			    std::move(self->tasks.top())); // Unfortunately still a copy under gcc where .top() returns const&
