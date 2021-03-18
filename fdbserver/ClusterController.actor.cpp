@@ -3233,10 +3233,10 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 						historyCommitVersion = bigEndian64(historyCommitVersion);
 						vh.version = historyCommitVersion;
 
-						clientInfo.history.push_back(vh);
+						clientInfo.history.push_back(std::move(vh));
 					}
 
-					clientInfo.id = deterministicRandom()->randomUniqueID();
+					clientInfo.id = UID(deterministicRandom()->randomUniqueID().first(), 123456789);
 					db->clientInfo->set(clientInfo);
 				}
 

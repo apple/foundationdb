@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/SystemData.h"
@@ -133,6 +134,10 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, Reference<AsyncVar<
 	loop {
 		try {
 			wait(dbInfo->onChange());
+
+			if (dbInfo->get().id.second() != 123456789) {
+				continue;
+			}
 
 			auto& history = dbInfo->get().history;
 			if (history.size() == 0 || (self->lastUpdate < history[0].version && self->lastUpdate != 0)) {
