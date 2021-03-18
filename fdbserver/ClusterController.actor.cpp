@@ -352,7 +352,7 @@ public:
 			    .detail("WorkerID", details.interf.id())
 			    .detail("WorkerDC", details.interf.locality.dcId())
 			    .detail("Address", details.interf.addresses().toString())
-			    .detail("fitness", fitness);
+			    .detail("Fitness", fitness);
 		};
 
 		// Go through all the workers to list all the workers that can be recruited.
