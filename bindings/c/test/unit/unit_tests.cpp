@@ -1520,7 +1520,10 @@ TEST_CASE("fdb_get_server_protocol") {
 	fdb_future_destroy(protocolFuture);
 
 	// "Default" cluster file version
-	fdb_future_destroy(fdb_get_server_protocol(nullptr));
+	protocolFuture = fdb_get_server_protocol(nullptr);
+	fdb_check(fdb_future_block_until_ready(protocolFuture));
+	fdb_check(fdb_future_get_uint64(protocolFuture, &out));
+	fdb_future_destroy(protocolFuture);
 }
 
 TEST_CASE("fdb_transaction_watch read_your_writes_disable") {
