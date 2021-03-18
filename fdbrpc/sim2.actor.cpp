@@ -1130,9 +1130,11 @@ public:
 			self->mutex.leave();
 			for (auto& t : self->instantTasks) {
 				while (self->orderedTasks.size() && !self->isStopped) {
+					self->mutex.enter();
 					Task o = std::move(self->orderedTasks.front());
 					self->orderedTasks.pop_front();
 					self->time = o.time;
+					self->mutex.leave();
 					self->execTask(o);
 					self->yielded = false;
 				}
