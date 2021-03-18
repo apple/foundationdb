@@ -1960,7 +1960,10 @@ ACTOR Future<Void> doQueueCommit(TLogData* self,
 		logData->recoveryComplete.send(Void());
 	}
 
-	//TraceEvent("TLogCommitDurable", self->dbgid).detail("Version", ver);
+	if(ver > 327594994) {
+		TraceEvent("TLogCommitDurable2", self->dbgid).detail("Version", ver);
+	}
+	
 	if (logData->logSystem->get() &&
 	    (!logData->isPrimary || logData->logRouterPoppedVersion < logData->logRouterPopToVersion)) {
 		logData->logRouterPoppedVersion = ver;
