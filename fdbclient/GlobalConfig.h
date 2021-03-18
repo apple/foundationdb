@@ -37,9 +37,6 @@ struct VersionHistory {
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
-		// The version is not serialized because this object is only sent over
-		// the network during a write. In this case, the version is included in
-		// the key, while this object will be written to the value.
-		serializer(ar, mutations);
+		serializer(ar, mutations, version);
 	}
 };
