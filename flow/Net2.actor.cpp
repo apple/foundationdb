@@ -221,6 +221,7 @@ public:
 	uint64_t tasksIssued;
 	TDMetricCollection tdmetrics;
 	double currentTime;
+	// May be accessed off the network thread, e.g. by onMainThread
 	std::atomic<bool> stopped;
 	mutable std::map<IPAddress, bool> addressOnHostCache;
 

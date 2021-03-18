@@ -401,6 +401,8 @@ const char* ThreadSafeApi::getClientVersion() {
 	return clientVersion.c_str();
 }
 
+// Wait until a quorum of coordinators with the same protocol version are available, and then return that protocol
+// version.
 ThreadFuture<uint64_t> ThreadSafeApi::getServerProtocol(const char* clusterFilePath) {
 	return onMainThread([clusterFilePath = std::string(clusterFilePath)]() -> Future<uint64_t> {
 		auto [clusterFile, isDefault] = ClusterConnectionFile::lookupClusterFileName(clusterFilePath);
