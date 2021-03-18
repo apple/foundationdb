@@ -127,7 +127,7 @@ LineNoise::LineNoise(std::function<void(std::string const&, std::vector<std::str
 }
 
 LineNoise::~LineNoise() {
-	threadPool.clear();
+	threadPool->stop();
 }
 
 Future<Optional<std::string>> LineNoise::read(std::string const& prompt) {

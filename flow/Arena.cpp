@@ -22,6 +22,11 @@
 
 #include "flow/UnitTest.h"
 
+// We don't align memory properly, and we need to tell lsan about that.
+extern "C" const char* __lsan_default_options(void) {
+	return "use_unaligned=1";
+}
+
 // See https://dox.ipxe.org/memcheck_8h_source.html and https://dox.ipxe.org/valgrind_8h_source.html for an explanation
 // of valgrind client requests
 #if VALGRIND

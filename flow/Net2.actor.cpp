@@ -48,6 +48,10 @@
 #include "flow/genericactors.actor.h"
 #include "flow/Util.h"
 
+#ifdef ADDRESS_SANITIZER
+#include <sanitizer/lsan_interface.h>
+#endif
+
 // See the comment in TLSConfig.actor.h for the explanation of why this module breaking include was done.
 #include "fdbrpc/IAsyncFile.h"
 
@@ -248,6 +252,10 @@ public:
 	void processThreadReady();
 	void trackAtPriority(TaskPriority priority, double now);
 	void stopImmediately() {
+#ifdef ADDRESS_SANITIZER
+		// Do leak check before intentionally leaking a bunch of memory
+		__lsan_do_leak_check();
+#endif
 		stopped = true;
 		decltype(ready) _1;
 		ready.swap(_1);
@@ -1483,10 +1491,6 @@ void Net2::run() {
 		while (!ready.empty()) {
 			++countTasks;
 			currentTaskID = ready.top().taskID;
-			if (currentTaskID < minTaskID) {
-				trackAtPriority(currentTaskID, taskBegin);
-				minTaskID = currentTaskID;
-			}
 			priorityMetric = static_cast<int64_t>(currentTaskID);
 			Task* task = ready.top().task;
 			ready.pop();
@@ -1497,6 +1501,11 @@ void Net2::run() {
 				TraceEvent(SevError, "TaskError").error(e);
 			} catch (...) {
 				TraceEvent(SevError, "TaskError").error(unknown_error());
+			}
+
+			if (currentTaskID < minTaskID) {
+				trackAtPriority(currentTaskID, taskBegin);
+				minTaskID = currentTaskID;
 			}
 
 			double tscNow = timestampCounter();

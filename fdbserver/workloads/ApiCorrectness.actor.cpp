@@ -619,7 +619,7 @@ public:
 		// Get the keys from the memory store and compare them
 		state int i;
 		for (i = 0; i < selectors.size(); i++) {
-			KeyRef key = self->store.getKey(selectors[i]);
+			Key key = self->store.getKey(selectors[i]);
 			if (keys[i].startsWith(StringRef(self->clientPrefix)) && keys[i] != key)
 				result = false;
 			else if (keys[i] < StringRef(self->clientPrefix) && key != self->store.startKey())
