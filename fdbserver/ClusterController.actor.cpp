@@ -387,7 +387,7 @@ public:
 			if (!dcList.empty()) {
 				dcList += ',';
 			}
-			dcList += dc;
+			dcList += printable(dc);
 		}
 
 		logServerSet = Reference<LocalitySet>(new LocalityMap<WorkerDetails>());
