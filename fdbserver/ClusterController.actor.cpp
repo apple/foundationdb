@@ -381,6 +381,15 @@ public:
 		LocalityMap<WorkerDetails>* logServerMap;
 		bool bCompleted = false;
 
+		// Construct the list of DCs where the TLog recruitment is happening. This is mainly for logging purpose.
+		std::string dcList;
+		for (const auto& dc : dcIds) {
+			if (!dcList.empty()) {
+				dcList += ',';
+			}
+			dcList += dc;
+		}
+
 		logServerSet = Reference<LocalitySet>(new LocalityMap<WorkerDetails>());
 		logServerMap = (LocalityMap<WorkerDetails>*)logServerSet.getPtr();
 		for (auto& it : id_worker) {
@@ -419,6 +428,7 @@ public:
 						break;
 					}
 					TraceEvent(SevWarn, "GWFTADNotAcceptable", id)
+					    .detail("DcIds", dcList)
 					    .detail("Fitness", fitness)
 					    .detail("Processes", logServerSet->size())
 					    .detail("Required", required)
@@ -446,6 +456,7 @@ public:
 							tLocalities.push_back(object->interf.locality);
 						}
 						TraceEvent("GWFTADBestResults", id)
+						    .detail("DcIds", dcList)
 						    .detail("Fitness", fitness)
 						    .detail("Processes", logServerSet->size())
 						    .detail("BestCount", bestSet.size())
@@ -459,6 +470,7 @@ public:
 						break;
 					}
 					TraceEvent(SevWarn, "GWFTADNoBest", id)
+					    .detail("DcIds", dcList)
 					    .detail("Fitness", fitness)
 					    .detail("Processes", logServerSet->size())
 					    .detail("Required", required)
@@ -477,6 +489,7 @@ public:
 			}
 
 			TraceEvent(SevWarn, "GetTLogTeamFailed")
+			    .detail("DcIds", dcList)
 			    .detail("Policy", policy->info())
 			    .detail("Processes", logServerSet->size())
 			    .detail("Workers", id_worker.size())
@@ -503,6 +516,7 @@ public:
 		}
 
 		TraceEvent("GetTLogTeamDone")
+		    .detail("DcIds", dcList)
 		    .detail("Completed", bCompleted)
 		    .detail("Policy", policy->info())
 		    .detail("Results", results.size())
