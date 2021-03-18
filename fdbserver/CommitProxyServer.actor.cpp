@@ -1378,6 +1378,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	                          pProxyCommitData->commitBatchInterval *
 	                              (1 - SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA)));
 
+	pProxyCommitData->stats.commitBatchingWindowSize.addMeasurement(pProxyCommitData->commitBatchInterval);
 	pProxyCommitData->commitBatchesMemBytesCount -= self->currentBatchMemBytesCount;
 	ASSERT_ABORT(pProxyCommitData->commitBatchesMemBytesCount >= 0);
 	wait(self->releaseFuture);
