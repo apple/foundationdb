@@ -860,7 +860,7 @@ public:
 		seconds = std::max(0.0, seconds);
 		Future<Void> f;
 
-		bool ordered = (seconds == 0.0) && (currentProcess->rebooting || machine != currentProcess ||
+		bool ordered = (seconds <= 0.0001) && (currentProcess->rebooting || machine != currentProcess ||
 		                                    currentProcess->shutdownSignal.isSet());
 		if (!ordered && FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 &&
 		    deterministicRandom()->random01() < 0.25) { // FIXME: why doesnt this work when we are changing machines?
