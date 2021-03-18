@@ -94,6 +94,11 @@ struct MutationRef {
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, type, param1, param2);
+		if (ar.isDeserializing && type == ClearRange && param2 == StringRef() && param1 != StringRef()) {
+			ASSERT(param1[param1.size() - 1] == '\x00');
+			param2 = param1;
+			param1 = param2.substr(0, param2.size() - 1);
+		}
 	}
 
 	// These masks define which mutation types have particular properties (they are used to implement isSingleKeyMutation() etc)
