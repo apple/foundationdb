@@ -296,7 +296,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 		    .detail("ZoneId", localities.zoneId());
 		wait(g_simulator.onProcess(simProcess));
 
-		wait(delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY)); // One last chance for the process to clean up?
+		wait(delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY +
+		           FLOW_KNOBS->MAX_RUNLOOP_TIME_BATCHING)); // One last chance for the process to clean up?
 
 		g_simulator.destroyProcess(
 		    process); // Leak memory here; the process may be used in other parts of the simulation
