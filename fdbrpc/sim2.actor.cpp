@@ -1129,12 +1129,15 @@ public:
 			});
 			self->mutex.leave();
 			for (auto& t : self->instantTasks) {
-				while (self->orderedTasks.size()) {
+				while (self->orderedTasks.size() && !self->isStopped) {
 					Task o = std::move(self->orderedTasks.front());
 					self->orderedTasks.pop_front();
 					self->time = o.time;
 					self->execTask(o);
 					self->yielded = false;
+				}
+				if (self->isStopped) {
+					break;
 				}
 				self->execTask(t);
 				self->yielded = false;
