@@ -871,8 +871,11 @@ public:
 		if (ordered) {
 			orderedTasks.emplace_back(actualTime, taskID, taskCount++, machine, f);
 		} else {
-			tasks.push(Task(
-			    actualTime + seconds, taskID, (deterministicRandom()->randomUInt64() << 32) | taskCount++, machine, f));
+			tasks.push(Task(std::max(actualTime, time + seconds),
+			                taskID,
+			                (deterministicRandom()->randomUInt64() << 32) | taskCount++,
+			                machine,
+			                f));
 		}
 		mutex.leave();
 
