@@ -482,8 +482,9 @@ public:
 			*self->firstPages[1] = *(const Page*)pageData.begin();
 		}
 
+		DbgPage* dbgPage = *(DbgPage*)pageData.begin();
 		TraceEvent("RDQWrite", self->dbgid).detail("File1name", self->files[1].dbgFilename).detail("File1size", self->files[1].size)
-		    .detail("WritingPos", self->writingPos).detail("WritingBytes", pageData.size());
+		    .detail("WritingPos", self->writingPos).detail("WritingBytes", pageData.size()).detail("Seq", dbgPage->seq);
 		self->files[1].size = std::max(self->files[1].size, self->writingPos + pageData.size());
 		toSync->push_back(self->files[1].syncQueue);
 		waitfor.push_back(self->files[1].f->write(pageData.begin(), pageData.size(), self->writingPos));
