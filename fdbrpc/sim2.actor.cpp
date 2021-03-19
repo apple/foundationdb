@@ -2100,7 +2100,7 @@ public:
 				fprintf(randLog,
 				        "T %f %f %d %s %" PRId64 "\n",
 				        this->time,
-						this->actualTime,
+				        this->actualTime,
 				        int(deterministicRandom()->peek() % 10000),
 				        t.machine ? t.machine->name : "none",
 				        t.stable);
