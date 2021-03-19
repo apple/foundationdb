@@ -34,30 +34,73 @@ auto WriteOnlySet<T, IndexType, CAPACITY>::insert(const Reference<T>& lineage) -
 		TraceEvent(SevWarnAlways, "NoCapacityInWriteOnlySet");
 		return npos;
 	}
-	ASSERT(_set[res].load() & FREE);
+	ASSERT(_set[res].load() == 0);
 	auto ptr = reinterpret_cast<uintptr_t>(lineage.getPtr());
-	ASSERT((ptr % 4) == 0); // this needs to be at least 4-byte aligned
-	ASSERT((ptr & FREE) == 0 && (ptr & LOCK) == 0);
+	ASSERT((ptr % 2) == 0); // this needs to be at least 2-byte aligned
+	ASSERT(ptr != 0);
 	lineage->addref();
 	_set[res].store(ptr);
 	return res;
 }
 
 template <class T, class IndexType, IndexType CAPACITY>
-void WriteOnlySet<T, IndexType, CAPACITY>::erase(Index idx) {
+bool WriteOnlySet<T, IndexType, CAPACITY>::eraseImpl(Index idx) {
 	while (true) {
 		auto ptr = _set[idx].load();
 		if (ptr & LOCK) {
-			_set[idx].store(FREE);
+			_set[idx].store(0);
 			freeList.push(reinterpret_cast<T*>(ptr ^ LOCK));
-			return;
+			return false;
 		} else {
-			if (_set[idx].compare_exchange_strong(ptr, FREE)) {
+			if (_set[idx].compare_exchange_strong(ptr, 0)) {
 				reinterpret_cast<T*>(ptr)->delref();
-				return;
+				return true;
 			}
 		}
 	}
+}
+
+template <class T, class IndexType, IndexType CAPACITY>
+bool WriteOnlySet<T, IndexType, CAPACITY>::erase(Index idx) {
+	auto res = eraseImpl(idx);
+	ASSERT(freeQueue.push(idx));
+	return res;
+}
+
+template <class T, class IndexType, IndexType CAPACITY>
+WriteOnlySet<T, IndexType, CAPACITY>::WriteOnlySet() : _set(CAPACITY) {
+	// insert the free indexes in reverse order
+	for (unsigned i = CAPACITY; i > 0; --i) {
+		freeQueue.push(i - 1);
+		_set[i] = uintptr_t(0);
+	}
+}
+
+template <class T, class IndexType, IndexType CAPACITY>
+std::vector<Reference<T>> WriteOnlySet<T, IndexType, CAPACITY>::copy() {
+	std::vector<Reference<T>> result;
+	for (int i = 0; i < CAPACITY; ++i) {
+		auto ptr = _set[i].load();
+		if (ptr) {
+			ASSERT((ptr & LOCK) == 0); // if we lock something we need to immediately unlock after we're done copying
+			// We attempt lock so this won't get deleted. We will try this only once, if the other thread removed the
+			// object from the set between the previews lines and now, we just won't make it part of the result.
+			if (_set[i].compare_exchange_strong(ptr, ptr | LOCK)) {
+				T* entry = reinterpret_cast<T*>(ptr);
+				ptr |= LOCK;
+				entry->addref();
+				// we try to unlock now. If this element was removed while we incremented the refcount, the element will
+				// end up in the freeList, so we will decrement later.
+				_set[i].compare_exchange_strong(ptr, ptr ^ LOCK);
+				result.emplace_back(entry);
+			}
+		}
+	}
+	// after we're done we need to clean up all objects that contented on a lock. This won't be perfect (as some thread
+	// might not yet added the object to the free list), but whatever we don't get now we'll clean up in the next
+	// iteration
+	freeList.consume_all([](auto toClean) { toClean->delref(); });
+	return result;
 }
 
 // Explicit instantiation
@@ -67,7 +110,10 @@ template class WriteOnlySet<ActorLineage, unsigned, 1024>;
 namespace {
 
 std::atomic<unsigned long> instanceCounter = 0;
-constexpr double iteration_frequency = 10.0;
+std::atomic<unsigned long> numInserts = 0;
+std::atomic<unsigned long> numErase = 0;
+std::atomic<unsigned long> numLockedErase = 0;
+std::atomic<unsigned long> numCopied = 0;
 
 struct TestObject {
 	mutable std::atomic<unsigned> _refCount = 1;
@@ -117,6 +163,7 @@ void testCopier(std::shared_ptr<TestSet> set, std::chrono::seconds runFor) {
 			return;
 		}
 		auto copy = set->copy();
+		numCopied.fetch_add(copy.size());
 		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 	}
 }
@@ -126,17 +173,32 @@ void writer(std::shared_ptr<TestSet> set, std::chrono::seconds runFor) {
 	std::random_device rDev;
 	DeterministicRandom rnd(rDev());
 	while (true) {
+		unsigned inserts = 0, erases = 0;
 		if (Clock::now() - start > runFor) {
 			return;
 		}
 		std::vector<TestSet::Index> positions;
 		for (int i = 0; i < rnd.randomInt(1, 101); ++i) {
-			positions.push_back(set->insert(Reference<TestObject>(new TestObject())));
+			Reference<TestObject> o(new TestObject());
+			auto pos = set->insert(o);
+			if (pos == TestSet::npos) {
+				// could not insert -- ignore
+				break;
+			}
+			++inserts;
+			ASSERT(pos < TestSet::capacity);
+			positions.push_back(pos);
 		}
 		rnd.randomShuffle(positions);
 		for (auto p : positions) {
-			set->erase(p);
+			if (!set->erase(p)) {
+				++numLockedErase;
+			}
+			++erases;
 		}
+		numInserts.fetch_add(inserts);
+		numErase.fetch_add(erases);
+		ASSERT(inserts == erases);
 		std::this_thread::sleep_for(std::chrono::milliseconds(1));
 	}
 }
@@ -154,6 +216,11 @@ TEST_CASE("/flow/WriteOnlySet") {
 	}
 	threads->emplace_back([set, runFor]() { testCopier(set, runFor); });
 	wait(threadjoiner(threads, set));
+	TraceEvent("WriteOnlySetTestResult")
+	    .detail("Inserts", numInserts.load())
+	    .detail("Erases", numErase.load())
+	    .detail("Copies", numCopied.load())
+	    .detail("LockedErase", numLockedErase.load());
 	return Void();
 }
 } // namespace

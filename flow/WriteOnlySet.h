@@ -31,6 +31,7 @@ public:
 	using Index = IndexType;
 	// For now we use a fixed size capacity
 	constexpr static Index npos = std::numeric_limits<Index>::max();
+	constexpr static IndexType capacity = CAPACITY;
 
 	explicit WriteOnlySet();
 	WriteOnlySet(const WriteOnlySet&) = delete;
@@ -43,12 +44,13 @@ public:
 	unsigned size();
 
 	Index insert(const Reference<T>& lineage);
-	void erase(Index idx);
+	bool erase(Index idx);
 	std::vector<Reference<T>> copy();
 
 private:
-	static constexpr uintptr_t FREE = 0b1;
-	static constexpr uintptr_t LOCK = 0b10;
+	bool eraseImpl(Index idx);
+
+	static constexpr uintptr_t LOCK = 0b1;
 	std::atomic<Index> _size = 0;
 	std::vector<std::atomic<std::uintptr_t>> _set;
 	static_assert(std::atomic<Index>::is_always_lock_free, "Index type can't be used as a lock-free type");
@@ -57,39 +59,7 @@ private:
 	boost::lockfree::queue<T*, boost::lockfree::fixed_sized<true>, boost::lockfree::capacity<CAPACITY>> freeList;
 };
 
-template <class T, class IndexType, IndexType CAPACITY>
-WriteOnlySet<T, IndexType, CAPACITY>::WriteOnlySet() : _set(CAPACITY) {
-	// insert the free indexes in reverse order
-	for (unsigned i = CAPACITY; i > 0; --i) {
-		freeQueue.push(i - 1);
-		_set[i] = uintptr_t(FREE);
-	}
-}
-
-template <class T, class IndexType, IndexType CAPACITY>
-std::vector<Reference<T>> WriteOnlySet<T, IndexType, CAPACITY>::copy() {
-	std::vector<Reference<T>> result;
-	for (int i = 0; i < CAPACITY; ++i) {
-		auto ptr = _set[i].load();
-		if ((ptr & FREE) != 0) {
-			ASSERT((ptr & LOCK) == 0);
-			if (_set[i].compare_exchange_strong(ptr, ptr | LOCK)) {
-				T* entry = reinterpret_cast<T*>(ptr);
-				ptr |= LOCK;
-				entry->addref();
-				// we try to unlock now. If this element was removed while we incremented the refcount, the element will
-				// end up in the freeList, so we will decrement later.
-				_set[i].compare_exchange_strong(ptr, ptr ^ LOCK);
-				result.emplace_back(entry);
-			}
-		}
-	}
-	// after we're done we need to clean up all objects that contented on a lock. This won't be perfect (as some thread
-	// might not yet added the object to the free list), but whatever we don't get now we'll clean up in the next
-	// iteration
-	freeList.consume_all([](auto toClean) { toClean->delref(); });
-	return result;
-}
-
 class ActorLineage;
 extern template class WriteOnlySet<ActorLineage, unsigned, 1024>;
+
+using ActorLineageSet = WriteOnlySet<ActorLineage, unsigned, 1024>;
