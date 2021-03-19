@@ -658,6 +658,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	AsyncTrigger printDetailedTeamsInfo;
 	PromiseStream<GetMetricsRequest> getShardMetrics;
+	bool shuttingDown;
 
 	void resetLocalitySet() {
 		storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
@@ -710,13 +711,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	    zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary),
 	    medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastMedianAvailableSpaceUpdate(0),
 	    processingUnhealthy(processingUnhealthy), lowestUtilizationTeam(0), highestUtilizationTeam(0),
-	    getShardMetrics(getShardMetrics) {
+	    getShardMetrics(getShardMetrics), shuttingDown(false) {
 		if (!primary || configuration.usableRegions == 1) {
 			TraceEvent("DDTrackerStarting", distributorId).detail("State", "Inactive").trackLatest("DDTrackerStarting");
 		}
 	}
 
 	~DDTeamCollection() {
+		shuttingDown = true;
 		TraceEvent("DDTeamCollectionDestructed", distributorId).detail("Primary", primary);
 		// Other teamCollections also hold pointer to this teamCollection;
 		// TeamTracker may access the destructed DDTeamCollection if we do not reset the pointer
@@ -1319,6 +1321,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	void addTeam(const vector<Reference<TCServerInfo>>& newTeamServers,
 	             bool isInitialTeam,
 	             bool redundantTeam = false) {
+		if (shuttingDown) {
+			throw movekeys_conflict();
+		}
 		auto teamInfo = makeReference<TCTeamInfo>(newTeamServers);
 
 		// Move satisfiesPolicy to the end for performance benefit
