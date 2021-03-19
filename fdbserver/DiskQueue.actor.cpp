@@ -773,12 +773,14 @@ public:
 				ASSERT(len == sizeof(Page));
 
 				bool middleValid = compare(self->firstPages[1], middlePage);
+				DbgPage* midpage = (DbgPage*)middlePage;
 
 				TraceEvent("RDQBS", self->dbgid)
 				    .detail("Begin", begin)
 				    .detail("End", end)
 				    .detail("Middle", middle)
 				    .detail("Valid", middleValid)
+					.detail("MiddleSeq", midpage->seq)
 				    .detail("File0Name", self->files[0].dbgFilename);
 
 				if (middleValid)
@@ -795,9 +797,11 @@ public:
 			int len2 = wait(self->files[1].f->read(middlePage, sizeof(Page), begin * sizeof(Page)));
 			ASSERT(len2 == sizeof(Page) && compare(self->firstPages[1], middlePage));
 
+			DbgPage* finalPage = (DbgPage*)middlePage;
 			TraceEvent("RDQEndFound", self->dbgid)
 			    .detail("File0Name", self->files[0].dbgFilename)
 			    .detail("Pos", begin)
+				.detail("Seq", finalPage->seq)
 			    .detail("FileSize", self->files[1].size);
 
 			return middlePageAllocation;
