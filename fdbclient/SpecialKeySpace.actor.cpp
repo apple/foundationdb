@@ -1380,22 +1380,22 @@ Future<Standalone<RangeResultRef>> GlobalConfigImpl::getRange(ReadYourWritesTran
 	auto& globalConfig = GlobalConfig::globalConfig();
 	KeyRangeRef modified =
 	    KeyRangeRef(kr.begin.removePrefix(getKeyRange().begin), kr.end.removePrefix(getKeyRange().begin));
-	std::map<KeyRef, ConfigValue> values = globalConfig.get(modified);
+	std::map<KeyRef, Reference<ConfigValue>> values = globalConfig.get(modified);
 	for (const auto& [key, config] : values) {
 		Key prefixedKey = key.withPrefix(getKeyRange().begin);
-		if (config.value.has_value()) {
-			if (config.value.type() == typeid(StringRef)) {
+		if (config.isValid() && config->value.has_value()) {
+			if (config->value.type() == typeid(StringRef)) {
 				result.push_back_deep(result.arena(),
-				                      KeyValueRef(prefixedKey, std::any_cast<StringRef>(config.value).toString()));
-			} else if (config.value.type() == typeid(int64_t)) {
+				                      KeyValueRef(prefixedKey, std::any_cast<StringRef>(config->value).toString()));
+			} else if (config->value.type() == typeid(int64_t)) {
 				result.push_back_deep(result.arena(),
-				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<int64_t>(config.value))));
-			} else if (config.value.type() == typeid(float)) {
+				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<int64_t>(config->value))));
+			} else if (config->value.type() == typeid(float)) {
 				result.push_back_deep(result.arena(),
-				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<float>(config.value))));
-			} else if (config.value.type() == typeid(double)) {
+				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<float>(config->value))));
+			} else if (config->value.type() == typeid(double)) {
 				result.push_back_deep(result.arena(),
-				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<double>(config.value))));
+				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<double>(config->value))));
 			} else {
 				ASSERT(false);
 			}

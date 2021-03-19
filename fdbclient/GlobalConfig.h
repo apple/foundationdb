@@ -28,6 +28,9 @@
 struct VersionHistory {
 	constexpr static FileIdentifier file_identifier = 5863456;
 
+	VersionHistory() {}
+	VersionHistory(Version v) : version(v) {}
+
 	Version version;
 	Standalone<VectorRef<MutationRef>> mutations;
 

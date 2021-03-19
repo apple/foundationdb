@@ -3212,17 +3212,21 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 					clientInfo.history.clear();
 
 					for (const auto& kv : globalConfigHistory) {
-						VersionHistory vh;
 						ObjectReader reader(kv.value.begin(), IncludeVersion());
 						if (reader.protocolVersion() != g_network->protocolVersion()) {
 							// If the protocol version has changed, the
 							// GlobalConfig actor should refresh its view by
 							// reading the entire global configuration key
-							// range.  An empty mutation list will signal the
-							// actor to refresh.
+							// range.  Setting the version to the max int64_t
+							// will always cause the global configuration
+							// updater to refresh its view of the configuration
+							// keyspace.
 							clientInfo.history.clear();
+							clientInfo.history.emplace_back(std::numeric_limits<Version>::max());
 							break;
 						}
+
+						VersionHistory vh;
 						reader.deserialize(vh);
 
 						// Read commit version out of versionstamp at end of key.
@@ -3236,7 +3240,7 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 						clientInfo.history.push_back(std::move(vh));
 					}
 
-					clientInfo.id = UID(deterministicRandom()->randomUniqueID().first(), 123456789);
+					clientInfo.id = deterministicRandom()->randomUniqueID();
 					db->clientInfo->set(clientInfo);
 				}
 

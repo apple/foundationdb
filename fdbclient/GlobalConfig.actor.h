@@ -48,9 +48,12 @@ extern const KeyRef fdbClientInfoTxnSizeLimit;
 extern const KeyRef transactionTagSampleRate;
 extern const KeyRef transactionTagSampleCost;
 
-struct ConfigValue {
+struct ConfigValue : ReferenceCounted<ConfigValue> {
 	Arena arena;
 	std::any value;
+
+	ConfigValue() {}
+	ConfigValue(Arena&& a, std::any&& v) : arena(a), value(v) {}
 };
 
 class GlobalConfig {
@@ -67,13 +70,12 @@ public:
 	// For example, given "config/a", returns "\xff\xff/global_config/config/a".
 	static Key prefixedKey(KeyRef key);
 
-	// Get a value from the framework. Values are returned in a ConfigValue
-	// struct which also contains a reference to the arena containing the
-	// memory for the object. As long as the caller keeps a reference to the
-	// returned ConfigValue, the value is guaranteed to be readable (if it
-	// exists).
-	const ConfigValue get(KeyRef name);
-	const std::map<KeyRef, ConfigValue> get(KeyRangeRef range);
+	// Get a value from the framework. Values are returned as a ConfigValue
+	// reference which also contains the arena holding the object. As long as
+	// the caller keeps the ConfigValue reference, the value is guaranteed to
+	// be readable. An empty reference is returned if the value does not exist.
+	const Reference<ConfigValue> get(KeyRef name);
+	const std::map<KeyRef, Reference<ConfigValue>> get(KeyRangeRef range);
 
 	// For arithmetic value types, returns a copy of the value for the given
 	// key, or the supplied default value if the framework does not know about
@@ -81,9 +83,11 @@ public:
 	template <typename T, typename std::enable_if<std::is_arithmetic<T>{}, bool>::type = true>
 	const T get(KeyRef name, T defaultVal) {
 		try {
-			auto any = get(name).value;
-			if (any.has_value()) {
-				return std::any_cast<T>(any);
+			auto configValue = get(name);
+			if (configValue.isValid()) {
+				if (configValue->value.has_value()) {
+					return std::any_cast<T>(configValue->value);
+				}
 			}
 
 			return defaultVal;
@@ -114,7 +118,7 @@ private:
 	Database cx;
 	Future<Void> _updater;
 	Promise<Void> initialized;
-	std::unordered_map<StringRef, ConfigValue> data;
+	std::unordered_map<StringRef, Reference<ConfigValue>> data;
 	Version lastUpdate;
 };
 

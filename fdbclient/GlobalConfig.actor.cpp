@@ -55,16 +55,16 @@ Key GlobalConfig::prefixedKey(KeyRef key) {
 	return key.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG).begin);
 }
 
-const ConfigValue GlobalConfig::get(KeyRef name) {
+const Reference<ConfigValue> GlobalConfig::get(KeyRef name) {
 	auto it = data.find(name);
 	if (it == data.end()) {
-		return ConfigValue{ Arena(), std::any{} };
+		return Reference<ConfigValue>();
 	}
 	return it->second;
 }
 
-const std::map<KeyRef, ConfigValue> GlobalConfig::get(KeyRangeRef range) {
-	std::map<KeyRef, ConfigValue> results;
+const std::map<KeyRef, Reference<ConfigValue>> GlobalConfig::get(KeyRangeRef range) {
+	std::map<KeyRef, Reference<ConfigValue>> results;
 	for (const auto& [key, value] : data) {
 		if (range.contains(key)) {
 			results[key] = value;
@@ -78,21 +78,25 @@ Future<Void> GlobalConfig::onInitialized() {
 }
 
 void GlobalConfig::insert(KeyRef key, ValueRef value) {
+	data.erase(key);
+
 	Arena arena(key.expectedSize() + value.expectedSize());
 	KeyRef stableKey = KeyRef(arena, key);
 	try {
+		std::any any;
 		Tuple t = Tuple::unpack(value);
 		if (t.getType(0) == Tuple::ElementType::UTF8) {
-			data[stableKey] = ConfigValue{ arena, StringRef(arena, t.getString(0).contents()) };
+			any = StringRef(arena, t.getString(0).contents());
 		} else if (t.getType(0) == Tuple::ElementType::INT) {
-			data[stableKey] = ConfigValue{ arena, t.getInt(0) };
+			any = t.getInt(0);
 		} else if (t.getType(0) == Tuple::ElementType::FLOAT) {
-			data[stableKey] = ConfigValue{ arena, t.getFloat(0) };
+			any = t.getFloat(0);
 		} else if (t.getType(0) == Tuple::ElementType::DOUBLE) {
-			data[stableKey] = ConfigValue{ arena, t.getDouble(0) };
+			any = t.getDouble(0);
 		} else {
 			ASSERT(false);
 		}
+		data[stableKey] = makeReference<ConfigValue>(std::move(arena), std::move(any));
 	} catch (Error& e) {
 		TraceEvent("GlobalConfigTupleError").detail("What", e.what());
 	}
@@ -135,12 +139,12 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, Reference<AsyncVar<
 		try {
 			wait(dbInfo->onChange());
 
-			if (dbInfo->get().id.second() != 123456789) {
+			auto& history = dbInfo->get().history;
+			if (history.size() == 0) {
 				continue;
 			}
 
-			auto& history = dbInfo->get().history;
-			if (history.size() == 0 || (self->lastUpdate < history[0].version && self->lastUpdate != 0)) {
+			if (self->lastUpdate < history[0].version) {
 				// This process missed too many global configuration
 				// history updates or the protocol version changed, so it
 				// must re-read the entire configuration range.
