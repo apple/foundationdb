@@ -320,6 +320,17 @@ public:
 		return results;
 	}
 
+	// Selects workers as TLogs from available workers based on input parameters.
+	//   conf:        the database configuration.
+	//   required:    the required number of TLog workers to select.
+	//   desired:     the desired number of TLog workers to select.
+	//   policy:      the TLog replication policy the selection needs to satisfy.
+	//   id_used:     keep track of process IDs of selected workers.
+	//   checkStable: when true, only select from workers that are considered as stable worker (not rebooted more than
+	//                twice recently).
+	//   dcIds:       the target data centers the workers are in. The selected workers must all be from these
+	//                data centers:
+	//   exclusionWorkerIds: the workers to be excluded from the selection.
 	std::vector<WorkerDetails> getWorkersForTlogs(DatabaseConfiguration const& conf,
 	                                              int32_t required,
 	                                              int32_t desired,
@@ -360,28 +371,28 @@ public:
 			const auto& worker_details = worker_info.details;
 			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), worker_details.interf.id()) !=
 			    exclusionWorkerIds.end()) {
-				logWorkerUnavailable("Worker is excluded.", worker_details, ProcessClass::UnsetFit);
+				logWorkerUnavailable("Worker is excluded", worker_details, ProcessClass::UnsetFit);
 				continue;
 			}
 
 			auto fitness = worker_details.processClass.machineClassFitness(ProcessClass::TLog);
 			if (!workerAvailable(worker_info, checkStable)) {
-				logWorkerUnavailable("Worker is not available.", worker_details, fitness);
+				logWorkerUnavailable("Worker is not available", worker_details, fitness);
 				continue;
 			}
 
 			if (conf.isExcludedServer(worker_details.interf.addresses())) {
-				logWorkerUnavailable("Worker's server is excluded from the cluster.", worker_details, fitness);
+				logWorkerUnavailable("Worker server is excluded from the cluster", worker_details, fitness);
 				continue;
 			}
 
 			if (fitness == ProcessClass::NeverAssign) {
-				logWorkerUnavailable("Worker's fitness is NeverAssign.", worker_details, fitness);
+				logWorkerUnavailable("Worker's fitness is NeverAssign", worker_details, fitness);
 				continue;
 			}
 
 			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
-				logWorkerUnavailable("Worker is not in the target DC.", worker_details, fitness);
+				logWorkerUnavailable("Worker is not in the target DC", worker_details, fitness);
 				continue;
 			}
 
