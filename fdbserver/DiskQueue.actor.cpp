@@ -651,6 +651,17 @@ public:
 					reads.push_back(self->files[i].f->read(self->firstPages[i], sizeof(Page), 0));
 			wait(waitForAll(reads));
 
+			Page* dbgp1 = (Page*)self->firstPages[0];
+			Page* dbgp2 = (Page*)self->firstPages[1];
+
+			TraceEvent("RDQFirstPages", self->dbgid)
+				    .detail("P1Seq", dbgp1->seq)
+				    .detail("P2Seq", dbgp2->seq)
+				    .detail("P1Hash", dbgp1->checkHash())
+				    .detail("P2Hash", dbgp2->checkHash())
+				    .detail("File0Name", self->files[0].dbgFilename);
+
+
 			// Determine which file comes first
 			if (compare(self->firstPages[1], self->firstPages[0])) {
 				std::swap(self->firstPages[0], self->firstPages[1]);
