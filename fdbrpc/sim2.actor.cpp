@@ -687,8 +687,12 @@ private:
 			throw io_error();
 		}
 
+		TraceEvent("SimpleFileTruncate1").detail("Size", size).detail("Filename", self->filename);
+
 		if (self->delayOnWrite)
 			wait(waitUntilDiskReady(self->diskParameters, 0));
+
+		TraceEvent("SimpleFileTruncate2").detail("Size", size).detail("Filename", self->filename);
 
 		if (_chsize(self->h, (long)size) == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError")
