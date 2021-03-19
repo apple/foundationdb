@@ -401,11 +401,14 @@ const char* ThreadSafeApi::getClientVersion() {
 	return clientVersion.c_str();
 }
 
+// Wait until a quorum of coordinators with the same protocol version are available, and then return that protocol
+// version.
 ThreadFuture<uint64_t> ThreadSafeApi::getServerProtocol(const char* clusterFilePath) {
-	auto [clusterFile, isDefault] = ClusterConnectionFile::lookupClusterFileName(std::string(clusterFilePath));
-
-	Reference<ClusterConnectionFile> f = Reference<ClusterConnectionFile>(new ClusterConnectionFile(clusterFile));
-	return onMainThread([f]() -> Future<uint64_t> { return getCoordinatorProtocols(f); });
+	return onMainThread([clusterFilePath = std::string(clusterFilePath)]() -> Future<uint64_t> {
+		auto [clusterFile, isDefault] = ClusterConnectionFile::lookupClusterFileName(clusterFilePath);
+		Reference<ClusterConnectionFile> f = Reference<ClusterConnectionFile>(new ClusterConnectionFile(clusterFile));
+		return getCoordinatorProtocols(f);
+	});
 }
 
 void ThreadSafeApi::setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {
