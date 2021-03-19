@@ -7,7 +7,7 @@ Release Notes
 6.3.12
 ======
 * Change the default for --knob_tls_server_handshake_threads to 64. The previous was 1000. This avoids starting 1000 threads by default, but may adversely affect recovery time for large clusters using tls. Users with large tls clusters should consider explicitly setting this knob in their foundationdb.conf file. `(PR #4421) <https://github.com/apple/foundationdb/pull/4421>`_
-* Bug fix, MasterProxyServer did not decrement latestLocalCommitBatchResolving for a commit batch which was rejected, resulting in commit faliures with ``error_code_proxy_memory_limit_exceeded``. `(PR #4526) <https://github.com/apple/foundationdb/pull/4526>`_  
+* Fix accounting error that could cause commits to incorrectly fail with ``proxy_memory_limit_exceeded``. `(PR #4526) <https://github.com/apple/foundationdb/pull/4526>`_
 
 6.3.11
 ======
