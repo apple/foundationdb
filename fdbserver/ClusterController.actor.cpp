@@ -359,20 +359,20 @@ public:
 		logServerMap = (LocalityMap<WorkerDetails>*)logServerSet.getPtr();
 
 		// Populate `unavailableLocals` and log the reason why the worker is considered as unavailable.
-		auto logWorkerUnavailable = [this, &unavailableLocals](const std::string& reason,
-		                                                       const WorkerDetails& details,
-		                                                       ProcessClass::Fitness fitness) {
+		auto logWorkerUnavailable = [this, &unavailableLocals, &dcList](const std::string& reason,
+		                                                                const WorkerDetails& details,
+		                                                                ProcessClass::Fitness fitness) {
 			unavailableLocals.push_back(details.interf.locality);
 
 			// Note that the recruitment happens only during initial database creation and recovery. So these trace
 			// events should be sparse.
-			// TODO(zhewu): Add targeting dcids.
 			TraceEvent("GetTLogTeamWorkerUnavailable", id)
 			    .detail("Reason", reason)
 			    .detail("WorkerID", details.interf.id())
 			    .detail("WorkerDC", details.interf.locality.dcId())
 			    .detail("Address", details.interf.addresses().toString())
-			    .detail("Fitness", fitness);
+			    .detail("Fitness", fitness)
+			    .detail("RecruitmentDcIds", dcList);
 		};
 
 		// Go through all the workers to list all the workers that can be recruited.
