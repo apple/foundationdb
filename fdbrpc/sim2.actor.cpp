@@ -645,8 +645,6 @@ private:
 			throw io_error();
 		}
 
-		TraceEvent("SimpleFileWrite").detail("Size", data.size()).detail("Filename", self->filename).detail("Fd", self->h);
-
 		unsigned int write_bytes = 0;
 		if ((write_bytes = _write(self->h, (void*)data.begin(), data.size())) == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 4);
@@ -689,12 +687,8 @@ private:
 			throw io_error();
 		}
 
-		TraceEvent("SimpleFileTruncate1").detail("Size", size).detail("Filename", self->filename).detail("Fd", self->h);
-
 		if (self->delayOnWrite)
 			wait(waitUntilDiskReady(self->diskParameters, 0));
-
-		TraceEvent("SimpleFileTruncate2").detail("Size", size).detail("Filename", self->filename).detail("Fd", self->h);
 
 		if (_chsize(self->h, (long)size) == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError")

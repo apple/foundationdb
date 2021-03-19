@@ -160,7 +160,6 @@ private:
 		loop {
 			state IDiskQueue::location startloc = self->queue->getNextReadLocation();
 			Standalone<StringRef> h = wait(self->queue->readNext(sizeof(uint32_t)));
-			TraceEvent("TLogRestRead1", tLog->dbgid).detail("StartLoc", startloc).detail("Size",h.size());
 			if (h.size() != sizeof(uint32_t)) {
 				if (h.size()) {
 					TEST(true); // Zero fill within size field
@@ -176,7 +175,6 @@ private:
 			ASSERT(payloadSize < (100 << 20));
 
 			Standalone<StringRef> e = wait(self->queue->readNext(payloadSize + 1));
-			TraceEvent("TLogRestRead2", tLog->dbgid).detail("Size",e.size()).detail("Expected", payloadSize + 1);
 			if (e.size() != payloadSize + 1) {
 				TEST(true); // Zero fill within payload
 				zeroFillSize = payloadSize + 1 - e.size();
@@ -190,7 +188,6 @@ private:
 				ar >> result;
 				const IDiskQueue::location endloc = self->queue->getNextReadLocation();
 				self->updateVersionSizes(result, tLog, startloc, endloc);
-				TraceEvent("TLogRestRead3", tLog->dbgid).detail("StartLoc",startloc).detail("EndLoc", endloc);
 				return result;
 			}
 		}
@@ -760,7 +757,7 @@ void TLogQueue::push(T const& qe, Reference<LogData> logData) {
 	const IDiskQueue::location startloc = queue->getNextPushLocation();
 	// FIXME: push shouldn't return anything.  We should call getNextPushLocation() again.
 	const IDiskQueue::location endloc = queue->push(wr.toValue());
-	TraceEvent("TLogQueueVersionWritten", dbgid).detail("Size", wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t)).detail("Start", startloc).detail("End", endloc).detail("Ver", qe.version);
+	//TraceEvent("TLogQueueVersionWritten", dbgid).detail("Size", wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t)).detail("Start", startloc).detail("End", endloc).detail("Ver", qe.version);
 	logData->versionLocation[qe.version] = std::make_pair(startloc, endloc);
 }
 
@@ -1963,10 +1960,7 @@ ACTOR Future<Void> doQueueCommit(TLogData* self,
 		logData->recoveryComplete.send(Void());
 	}
 
-	if(ver > 327594994) {
-		TraceEvent("TLogCommitDurable2", self->dbgid).detail("Version", ver);
-	}
-	
+	//TraceEvent("TLogCommitDurable2", self->dbgid).detail("Version", ver);
 	if (logData->logSystem->get() &&
 	    (!logData->isPrimary || logData->logRouterPoppedVersion < logData->logRouterPopToVersion)) {
 		logData->logRouterPoppedVersion = ver;
@@ -2953,11 +2947,11 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 						}
 					}
 
-					TraceEvent("TLogRecoveredQE", self->dbgid)
-					    .detail("LogId", qe.id)
-					    .detail("Ver", qe.version)
-					    .detail("MessageBytes", qe.messages.size())
-					    .detail("Version", logData->version.get());
+					//TraceEvent("TLogRecoveredQE", self->dbgid)
+					//    .detail("LogId", qe.id)
+					//    .detail("Ver", qe.version)
+					//    .detail("MessageBytes", qe.messages.size())
+					//    .detail("Version", logData->version.get());
 
 					if (logData) {
 						if (!self->spillOrder.size() || self->spillOrder.back() != qe.id) {
