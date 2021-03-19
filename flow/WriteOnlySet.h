@@ -1,9 +1,9 @@
 /*
- * ActorLineageSet.cpp
+ * WriteOnlySet.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,20 +18,23 @@
  * limitations under the License.
  */
 
-#include "flow/flow.h"
+#pragma once
+#include "flow/Error.h"
+#include "flow/FastRef.h"
+#include "flow/Trace.h"
 #include <boost/lockfree/queue.hpp>
 
-class ActorLineageSet {
+template <class T, class IndexType, IndexType CAPACITY>
+class WriteOnlySet {
 public:
 	// The type we use for lookup into the set. Gets assigned during insert
-	using Index = unsigned;
+	using Index = IndexType;
 	// For now we use a fixed size capacity
-	constexpr static Index CAPACITY = 1024;
 	constexpr static Index npos = std::numeric_limits<Index>::max();
 
-	explicit ActorLineageSet();
-	ActorLineageSet(const ActorLineageSet&) = delete;
-	ActorLineageSet& operator=(const ActorLineageSet&) = delete;
+	explicit WriteOnlySet();
+	WriteOnlySet(const WriteOnlySet&) = delete;
+	WriteOnlySet& operator=(const WriteOnlySet&) = delete;
 
 	// Returns the number of elements at the time of calling. Keep in mind that this is a lockfree data structure, so
 	// the actual size might change anytime after or even during the call. This function only guarantees that the size
@@ -39,36 +42,39 @@ public:
 	// to handle this is by assuming that this returns an estimate.
 	unsigned size();
 
-	Index insert(const Reference<ActorLineage>& lineage);
+	Index insert(const Reference<T>& lineage);
 	void erase(Index idx);
-	std::vector<Reference<ActorLineage>> copy();
+	std::vector<Reference<T>> copy();
 
 private:
 	static constexpr uintptr_t FREE = 0b1;
 	static constexpr uintptr_t LOCK = 0b10;
-	std::atomic<unsigned> _size = 0;
+	std::atomic<Index> _size = 0;
 	std::vector<std::atomic<std::uintptr_t>> _set;
+	static_assert(std::atomic<Index>::is_always_lock_free, "Index type can't be used as a lock-free type");
+	static_assert(std::atomic<Index>::is_always_lock_free, "uintptr_t can't be used as a lock-free type");
 	boost::lockfree::queue<Index, boost::lockfree::fixed_sized<true>, boost::lockfree::capacity<CAPACITY>> freeQueue;
-	boost::lockfree::queue<ActorLineage*, boost::lockfree::fixed_sized<true>, boost::lockfree::capacity<CAPACITY>>
-	    freeList;
+	boost::lockfree::queue<T*, boost::lockfree::fixed_sized<true>, boost::lockfree::capacity<CAPACITY>> freeList;
 };
 
-ActorLineageSet::ActorLineageSet() {
+template <class T, class IndexType, IndexType CAPACITY>
+WriteOnlySet<T, IndexType, CAPACITY>::WriteOnlySet() : _set(CAPACITY) {
 	// insert the free indexes in reverse order
 	for (unsigned i = CAPACITY; i > 0; --i) {
 		freeQueue.push(i - 1);
-		_set[i] = uintptr_t(1);
+		_set[i] = uintptr_t(FREE);
 	}
 }
 
-std::vector<Reference<ActorLineage>> ActorLineageSet::copy() {
-	std::vector<Reference<ActorLineage>> result;
+template <class T, class IndexType, IndexType CAPACITY>
+std::vector<Reference<T>> WriteOnlySet<T, IndexType, CAPACITY>::copy() {
+	std::vector<Reference<T>> result;
 	for (int i = 0; i < CAPACITY; ++i) {
 		auto ptr = _set[i].load();
 		if ((ptr & FREE) != 0) {
 			ASSERT((ptr & LOCK) == 0);
 			if (_set[i].compare_exchange_strong(ptr, ptr | LOCK)) {
-				ActorLineage* entry = reinterpret_cast<ActorLineage*>(ptr);
+				T* entry = reinterpret_cast<T*>(ptr);
 				ptr |= LOCK;
 				entry->addref();
 				// we try to unlock now. If this element was removed while we incremented the refcount, the element will
@@ -85,32 +91,5 @@ std::vector<Reference<ActorLineage>> ActorLineageSet::copy() {
 	return result;
 }
 
-ActorLineageSet::Index ActorLineageSet::insert(const Reference<ActorLineage>& lineage) {
-	Index res;
-	if (!freeQueue.pop(res)) {
-		TraceEvent(SevWarnAlways, "NoCapacityInActorLineageSet");
-		return npos;
-	}
-	ASSERT(_set[res].load() & FREE);
-	auto ptr = reinterpret_cast<uintptr_t>(lineage.getPtr());
-	ASSERT((ptr % 4) == 0); // this needs to be at least 4-byte aligned
-	lineage->addref();
-	_set[res].store(ptr);
-	return res;
-}
-
-void ActorLineageSet::erase(Index idx) {
-	while (true) {
-		auto ptr = _set[idx].load();
-		if (ptr & LOCK) {
-			_set[idx].store(FREE);
-			freeList.push(reinterpret_cast<ActorLineage*>(ptr ^ LOCK));
-			return;
-		} else {
-			if (_set[idx].compare_exchange_strong(ptr, FREE)) {
-				reinterpret_cast<ActorLineage*>(ptr)->delref();
-				return;
-			}
-		}
-	}
-}
+class ActorLineage;
+extern template class WriteOnlySet<ActorLineage, unsigned, 1024>;

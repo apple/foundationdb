@@ -3,7 +3,6 @@ find_package(Threads REQUIRED)
 set(FLOW_SRCS
   ActorCollection.actor.cpp
   ActorCollection.h
-  ActorLineageSet.cpp
   Arena.cpp
   Arena.h
   AsioReactor.h
@@ -70,6 +69,7 @@ set(FLOW_SRCS
   TreeBenchmark.h
   UnitTest.cpp
   UnitTest.h
+  WriteOnlySet.actor.cpp
   XmlTraceLogFormatter.cpp
   XmlTraceLogFormatter.h
   actorcompiler.h
