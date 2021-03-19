@@ -56,13 +56,11 @@ Before all RPCs mentioned below, the client would first verify if the commit pro
 ### Post Resolution section
 
 * The proxy waits until the local batch number is current
-
-### TLog section
 * The proxy updates the metadata keys and attaches corresponding storage servers' tags to all mutations.
 * The proxy then waits until the commit version is current, i.e. the proxy's committed version is catching up with the commit version of the batch and these two versions are within the MVCC window.
-* The proxy pushs the commit data to TLog
-* TLog waits the commit version to current, then persist the commit.
-* Wait until *all* TLogs returns the transaction result.
+* The proxy pushes the commit data to TLogs.
+* TLog waits the commit version to be current, then persists the commit.
+* Wait until *all* TLogs return the transaction result.
 
 ### Reply section
 
@@ -71,10 +69,10 @@ Before all RPCs mentioned below, the client would first verify if the commit pro
 
 ## Tracking the process using `g_traceBatch`
 
-`g_traceBatch` can be used for querying the transactions and commits. A typical query string for Splunk is:
+`g_traceBatch` can be used for querying the transactions and commits. A typical query in the trace logs is:
 
 ```
-LogGroup=loggroup Type=type Location=location
+Type=type Location=location
 ```
 
 The format of `location` is, in general, `<source_file_name>.<function/actor name>.<log information>`, e.g.
@@ -85,14 +83,14 @@ NativeAPI.getConsistentReadVersion.Before
 
 means the `location` is at `NativeAPI.actor.cpp`, `ACTOR` `getConsistentReadVersion`, `Before` requesting the read version from GRV Proxy.
 
-Some of example queries are:
+Some example queries are:
 
 ```
-LogGroup=loggroup Type=TransactionDebug Location=NativeAPI*
+Type=TransactionDebug Location=NativeAPI*
 ```
 
 ```
-LogGroup=loggroup Type=CommitDebug Location=storageserver*
+LogGroup=loggroup Type=CommitDebug Location=Resolver.resolveBatch.*
 ```
 
 
