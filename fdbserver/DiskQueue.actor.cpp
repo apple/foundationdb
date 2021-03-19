@@ -1414,6 +1414,7 @@ private:
 		self->poppedSeq = lastPage->popped;
 		self->nextReadLocation = std::max(recoverAt.lo, self->poppedSeq);
 
+		/*
 		state std::auto_ptr<Page> testPage(new Page);
 		state int fileNum;
 		for( fileNum=0; fileNum<2; fileNum++) {
@@ -1423,6 +1424,7 @@ private:
 		        TraceEvent("PageData").detail("File", self->rawQueue->files[fileNum].dbgFilename).detail("SizeNum", sizeNum).detail("Seq", testPage->seq).detail("Hash", testPage->checkHash()).detail("Popped", testPage->popped);
 		    }
 		}
+		*/
 
 		int file;
 		int64_t page;
