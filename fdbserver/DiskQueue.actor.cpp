@@ -353,7 +353,7 @@ public:
 				int p = self->files[1].size - self->writingPos;
 				if (p > 0) {
 					toSync->push_back(self->files[1].syncQueue);
-					TraceEvent("RDQWriteAndSwap", this->dbgid).detail("File1name", self->files[1].dbgFilename).detail("File1size", self->files[1].size)
+					TraceEvent("RDQWriteAndSwap", self->dbgid).detail("File1name", self->files[1].dbgFilename).detail("File1size", self->files[1].size)
 					    .detail("WritingPos", self->writingPos).detail("WritingBytes", p);
 					waitfor.push_back(self->files[1].f->write(pageData.begin(), p, self->writingPos));
 					pageData = pageData.substr(p);
@@ -400,8 +400,7 @@ public:
 			} else {
 				// Extend self->files[1] to accomodate the new write and about 10MB or 2x current size for future
 				// writes.
-				TraceEvent("RDQExtend", this->dbgid).detail("File1name", self->files[1].dbgFilename).detail("File1size", self->files[1].size)
-				    .detail("ExtensionBytes", fileExtensionBytes);
+				TraceEvent("RDQExtend", self->dbgid).detail("File1name", self->files[1].dbgFilename).detail("File1size", self->files[1].size);
 				int64_t minExtension = pageData.size() + self->writingPos - self->files[1].size;
 				self->files[1].size += std::min(std::max(self->fileExtensionBytes, minExtension),
 				                                self->files[0].size + self->files[1].size + minExtension);
