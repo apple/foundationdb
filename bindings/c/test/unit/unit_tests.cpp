@@ -40,6 +40,8 @@
 #include "doctest.h"
 #include "fdbclient/rapidjson/document.h"
 
+#include "flow/config.h"
+
 #include "fdb_api.hpp"
 
 void fdb_check(fdb_error_t e) {
@@ -1511,9 +1513,16 @@ TEST_CASE("fdb_transaction_get_approximate_size") {
 }
 
 TEST_CASE("fdb_get_server_protocol") {
+	// We don't really have any expectations other than "don't crash" here
 	FDBFuture* protocolFuture = fdb_get_server_protocol(clusterFilePath.c_str());
 	uint64_t out;
 
+	fdb_check(fdb_future_block_until_ready(protocolFuture));
+	fdb_check(fdb_future_get_uint64(protocolFuture, &out));
+	fdb_future_destroy(protocolFuture);
+
+	// "Default" cluster file version
+	protocolFuture = fdb_get_server_protocol(nullptr);
 	fdb_check(fdb_future_block_until_ready(protocolFuture));
 	fdb_check(fdb_future_get_uint64(protocolFuture, &out));
 	fdb_future_destroy(protocolFuture);
@@ -1958,6 +1967,11 @@ std::string get_valid_status_json() {
 }
 
 TEST_CASE("fdb_database_reboot_worker") {
+#ifdef USE_TSAN
+	MESSAGE(
+	    "fdb_database_reboot_worker disabled for tsan, since fdbmonitor doesn't seem to restart the killed process");
+	return;
+#endif
 	std::string status_json = get_valid_status_json();
 	rapidjson::Document statusJson;
 	statusJson.Parse(status_json.c_str());
