@@ -651,8 +651,8 @@ public:
 					reads.push_back(self->files[i].f->read(self->firstPages[i], sizeof(Page), 0));
 			wait(waitForAll(reads));
 
-			Page* dbgp1 = (Page*)self->firstPages[0];
-			Page* dbgp2 = (Page*)self->firstPages[1];
+			DiskQueue::Page* dbgp1 = (DiskQueue::Page*)self->firstPages[0];
+			DiskQueue::Page* dbgp2 = (DiskQueue::Page*)self->firstPages[1];
 
 			TraceEvent("RDQFirstPages", self->dbgid)
 				    .detail("P1Seq", dbgp1->seq)
