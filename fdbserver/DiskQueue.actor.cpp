@@ -853,6 +853,7 @@ public:
 		auto pos = readingPage * sizeof(Page);
 		readingPage += len / sizeof(Page);
 		ASSERT(int64_t(p) % sizeof(Page) == 0);
+		TraceEvent("RDQFillReadingBuffer").detail("File0name", files[readingFile].dbgFilename).detail("Len", len).detail("Pos", pos);
 		return files[readingFile].f->read(p, len, pos);
 	}
 
