@@ -369,13 +369,13 @@ public:
 		// Go through all the workers to list all the workers that can be recruited.
 		for (const auto& [worker_process_id, worker_info] : id_worker) {
 			const auto& worker_details = worker_info.details;
+			auto fitness = worker_details.processClass.machineClassFitness(ProcessClass::TLog);
 			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), worker_details.interf.id()) !=
 			    exclusionWorkerIds.end()) {
-				logWorkerUnavailable("Worker is excluded", worker_details, ProcessClass::UnsetFit);
+				logWorkerUnavailable("Worker is excluded", worker_details, fitness);
 				continue;
 			}
 
-			auto fitness = worker_details.processClass.machineClassFitness(ProcessClass::TLog);
 			if (!workerAvailable(worker_info, checkStable)) {
 				logWorkerUnavailable("Worker is not available", worker_details, fitness);
 				continue;
