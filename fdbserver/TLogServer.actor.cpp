@@ -160,7 +160,7 @@ private:
 		loop {
 			state IDiskQueue::location startloc = self->queue->getNextReadLocation();
 			Standalone<StringRef> h = wait(self->queue->readNext(sizeof(uint32_t)));
-			TraceEvent("TLogRestRead1", tLog->logId).detail("StartLoc", startloc).detail("Size",h.size());
+			TraceEvent("TLogRestRead1", tLog->dbgid).detail("StartLoc", startloc).detail("Size",h.size());
 			if (h.size() != sizeof(uint32_t)) {
 				if (h.size()) {
 					TEST(true); // Zero fill within size field
@@ -176,7 +176,7 @@ private:
 			ASSERT(payloadSize < (100 << 20));
 
 			Standalone<StringRef> e = wait(self->queue->readNext(payloadSize + 1));
-			TraceEvent("TLogRestRead2", tLog->logId).detail("Size",e.size()).detail("Expected", payloadSize + 1);
+			TraceEvent("TLogRestRead2", tLog->dbgid).detail("Size",e.size()).detail("Expected", payloadSize + 1);
 			if (e.size() != payloadSize + 1) {
 				TEST(true); // Zero fill within payload
 				zeroFillSize = payloadSize + 1 - e.size();
@@ -190,7 +190,7 @@ private:
 				ar >> result;
 				const IDiskQueue::location endloc = self->queue->getNextReadLocation();
 				self->updateVersionSizes(result, tLog, startloc, endloc);
-				TraceEvent("TLogRestRead3", tLog->logId).detail("StartLoc",startloc).detail("EndLoc", endloc);
+				TraceEvent("TLogRestRead3", tLog->dbgid).detail("StartLoc",startloc).detail("EndLoc", endloc);
 				return result;
 			}
 		}
