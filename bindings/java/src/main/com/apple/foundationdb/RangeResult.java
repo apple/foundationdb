@@ -60,7 +60,7 @@ class RangeResult {
 
 	RangeResult(DirectBufferIterator iterator) {
 		iterator.readResultsSummary();
-		more = iterator.hasMore();
+		this.more = iterator.hasMore();
 
 		int count = iterator.count();
 		values = new ArrayList<KeyValue>(count);

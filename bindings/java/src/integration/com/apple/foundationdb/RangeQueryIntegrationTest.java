@@ -24,7 +24,11 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Random;
 import java.util.TreeMap;
+import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import com.apple.foundationdb.EventKeeper.Event;
+import com.apple.foundationdb.EventKeeper.Events;
 import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncIterator;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
@@ -182,6 +186,56 @@ class RangeQueryIntegrationTest {
 				}
 				Assertions.assertFalse(kvs.hasNext(), "Iterator returned too much data");
 
+				return null;
+			});
+		}
+	}
+
+	@Test
+	void targetBytesLimitIsObeyed() throws Exception{
+		int numRows = 10;
+		Map<byte[],byte[]> expectedKvs = new TreeMap<>(ByteArrayUtil.comparator());
+		final AtomicInteger callCounter =new AtomicInteger(0);
+		EventKeeper timer = new MapEventKeeper(){
+			@Override
+			public void count(Event event, long amt) {
+				if(event == Events.RANGE_QUERY_RECORDS_FETCHED){
+					Assertions.assertEquals(1L,amt,"Incorrect number of tuples returned!");
+					callCounter.incrementAndGet();
+				}
+				super.count(event,amt);
+			}
+		};
+		try(Database db = fdb.open(null,timer)){
+			db.run(tr ->{
+				for(int i=0;i<numRows;i++){
+					byte[] key = ("target"+i).getBytes();
+					byte[] value = ("value"+i).getBytes();
+					tr.set(key,value);
+					expectedKvs.put(key,value);
+				}
+				return null;
+			});
+
+			db.run(tr->{
+				int[] sizes  = new int[expectedKvs.size()];
+				int i =0;
+				for(Map.Entry<byte[],byte[]> entry : expectedKvs.entrySet()){
+					sizes[i] = entry.getKey().length+entry.getValue().length;
+				}
+				Iterator<KeyValue> kvs = tr.getRange("target".getBytes(),"targeu".getBytes(),0,false,StreamingMode.ITERATOR,TargetBytesStrategy.fixedArray(sizes)).iterator();
+				Iterator<Map.Entry<byte[],byte[]>> expectedKvIter = expectedKvs.entrySet().iterator();
+				//the actual check occurs when we are calling the count() timer
+				while (expectedKvIter.hasNext()) {
+					Assertions.assertTrue(kvs.hasNext(), "iterator ended too early");
+					KeyValue actualKv = kvs.next();
+					Map.Entry<byte[], byte[]> expected = expectedKvIter.next();
+
+					Assertions.assertArrayEquals(expected.getKey(), actualKv.getKey(), "Incorrect key!");
+					Assertions.assertArrayEquals(expected.getValue(), actualKv.getValue(), "Incorrect value!");
+				}
+
+				Assertions.assertEquals(expectedKvs.size(),callCounter.get(), "Did not buffer one row at a time!");
 				return null;
 			});
 		}

@@ -58,7 +58,7 @@ public class ParallelRandomScan {
 		final AtomicInteger readsCompleted = new AtomicInteger(0);
 		final AtomicInteger errors = new AtomicInteger(0);
 		final Semaphore coordinator = new Semaphore(parallelism);
-		final ContinuousSample<Long> latencies = new ContinuousSample<>(1000);
+		final ContinuousSample<Long> latencies = new ContinuousSample.LongSample(1000);
 
 		try(Transaction tr = database.createTransaction()) {
 			tr.options().setReadYourWritesDisable();

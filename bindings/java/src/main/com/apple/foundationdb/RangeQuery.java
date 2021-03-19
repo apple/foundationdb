@@ -54,9 +54,10 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 	private final boolean reverse;
 	private final StreamingMode streamingMode;
 	private final EventKeeper eventKeeper;
+	private final TargetBytesStrategy bytesStrategy;
 
 	RangeQuery(FDBTransaction transaction, boolean isSnapshot, KeySelector begin, KeySelector end, int rowLimit,
-			boolean reverse, StreamingMode streamingMode, EventKeeper eventKeeper) {
+			boolean reverse, StreamingMode streamingMode, TargetBytesStrategy bytesStrategy,EventKeeper eventKeeper) {
 		this.tr = transaction;
 		this.begin = begin;
 		this.end = end;
@@ -65,6 +66,7 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 		this.reverse = reverse;
 		this.streamingMode = streamingMode;
 		this.eventKeeper = eventKeeper;
+		this.bytesStrategy = bytesStrategy;
 	}
 
 	/**
@@ -82,18 +84,16 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 			mode = (this.rowLimit == 0) ? StreamingMode.WANT_ALL : StreamingMode.EXACT;
 
 		// if the streaming mode is EXACT, try and grab things as one chunk
-		if(mode == StreamingMode.EXACT) {
-			FutureResults range = tr.getRange_internal(
-					this.begin, this.end, this.rowLimit, 0, StreamingMode.EXACT.code(),
-					1, this.snapshot, this.reverse);
-			return range.thenApply(result -> result.get().values)
-					.whenComplete((result, e) -> range.close());
+		if (mode == StreamingMode.EXACT) {
+			FutureResults range = tr.getRange_internal(this.begin, this.end, this.rowLimit, this.bytesStrategy.getTargetByteSize(1),
+					StreamingMode.EXACT.code(), 1, this.snapshot, this.reverse);
+			return range.thenApply(result -> result.get().values).whenComplete((result, e) -> range.close());
 		}
 
 		// If the streaming mode is not EXACT, simply collect the results of an
 		// iteration into a list
-		return AsyncUtil.collect(new RangeQuery(tr, snapshot, begin, end, rowLimit, reverse, mode, eventKeeper),
-		                         tr.getExecutor());
+		return AsyncUtil.collect(new RangeQuery(tr, snapshot, begin, end, rowLimit, reverse, mode, bytesStrategy,eventKeeper),
+				tr.getExecutor());
 	}
 
 	/**
@@ -221,7 +221,7 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 
 			nextFuture = new CompletableFuture<>();
 			final long sTime = System.nanoTime();
-			fetchingChunk = tr.getRange_internal(begin, end, rowsLimited ? rowsRemaining : 0, 0, streamingMode.code(),
+			fetchingChunk = tr.getRange_internal(begin, end, rowsLimited ? rowsRemaining : 0, bytesStrategy.getTargetByteSize(iteration), streamingMode.code(),
 					++iteration, snapshot, reverse);
 
 			BiConsumer<RangeResultInfo,Throwable> cons = new FetchComplete(fetchingChunk,nextFuture);

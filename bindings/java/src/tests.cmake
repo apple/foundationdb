@@ -53,6 +53,7 @@ set(JAVA_INTEGRATION_TESTS
 # utility classes, and so forth)
 set(JAVA_INTEGRATION_RESOURCES
   src/integration/com/apple/foundationdb/RequiresDatabase.java
+  src/integration/com/apple/foundationdb/MapTimer.java
 )
 
 
