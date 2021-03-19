@@ -102,6 +102,70 @@ struct StringBuffer {
 	}
 };
 
+#pragma pack(push, 1)
+	struct DbgPageHeader {
+		union {
+			UID hash;
+			struct {
+				uint32_t hash32;
+				uint32_t _unused;
+				uint16_t magic;
+				uint16_t implementationVersion;
+			};
+		};
+		uint64_t seq; // seq is the index of the virtually infinite disk queue file. Its unit is bytes.
+		uint64_t popped;
+		int payloadSize;
+	};
+	// The on disk format depends on the size of PageHeader.
+	static_assert(sizeof(DbgPageHeader) == 36, "PageHeader must be 36 bytes");
+
+	struct DbgPage : DbgPageHeader {
+		static const int maxPayload = _PAGE_SIZE - sizeof(DbgPageHeader);
+		uint8_t payload[maxPayload];
+
+		DiskQueueVersion diskQueueVersion() const { return static_cast<DiskQueueVersion>(implementationVersion); }
+		int remainingCapacity() const { return maxPayload - payloadSize; }
+		uint64_t endSeq() const { return seq + sizeof(DbgPageHeader) + payloadSize; }
+		UID checksum_hashlittle2() const {
+			// SOMEDAY: Better hash?
+			uint32_t part[2] = { 0x12345678, 0xbeefabcd };
+			hashlittle2(&seq, sizeof(DbgPage) - sizeof(UID), &part[0], &part[1]);
+			return UID(int64_t(part[0]) << 32 | part[1], 0xFDB);
+		}
+		uint32_t checksum_crc32c() const {
+			return crc32c_append(0xfdbeefdb, (uint8_t*)&_unused, sizeof(DbgPage) - sizeof(uint32_t));
+		}
+		void updateHash() {
+			switch (diskQueueVersion()) {
+			case DiskQueueVersion::V0: {
+				hash = checksum_hashlittle2();
+				return;
+			}
+			case DiskQueueVersion::V1:
+			default: {
+				hash32 = checksum_crc32c();
+				return;
+			}
+			}
+		}
+		bool checkHash() {
+			switch (diskQueueVersion()) {
+			case DiskQueueVersion::V0: {
+				return hash == checksum_hashlittle2();
+			}
+			case DiskQueueVersion::V1: {
+				return hash32 == checksum_crc32c();
+			}
+			default:
+				return false;
+			}
+		}
+		void zeroPad() { memset(payload + payloadSize, 0, maxPayload - payloadSize); }
+	};
+	static_assert(sizeof(DbgPage) == _PAGE_SIZE, "Page must be 4k");
+#pragma pack(pop)
+
 struct SyncQueue : ReferenceCounted<SyncQueue> {
 	SyncQueue(int outstandingLimit, Reference<IAsyncFile> file) : outstandingLimit(outstandingLimit), file(file) {
 		for (int i = 0; i < outstandingLimit; i++)
@@ -651,8 +715,8 @@ public:
 					reads.push_back(self->files[i].f->read(self->firstPages[i], sizeof(Page), 0));
 			wait(waitForAll(reads));
 
-			DiskQueue::Page* dbgp1 = (DiskQueue::Page*)self->firstPages[0];
-			DiskQueue::Page* dbgp2 = (DiskQueue::Page*)self->firstPages[1];
+			DbgPage* dbgp1 = (DbgPage*)self->firstPages[0];
+			DbgPage* dbgp2 = (DbgPage*)self->firstPages[1];
 
 			TraceEvent("RDQFirstPages", self->dbgid)
 				    .detail("P1Seq", dbgp1->seq)
