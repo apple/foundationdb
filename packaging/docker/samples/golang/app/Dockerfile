@@ -21,14 +21,14 @@
 # see https://github.com/moby/moby/issues/34129
 ARG FDB_VERSION
 FROM foundationdb/foundationdb:${FDB_VERSION} as fdb
-FROM golang:1.13.4-stretch
+FROM golang:1.16.2-stretch
 ARG FDB_VERSION
 
 WORKDIR /tmp
 
-RUN apt update
+RUN apt-get update
 # dnsutils is needed to have dig installed to create cluster file
-RUN apt install -y dnsutils 
+RUN apt-get install -y --no-install-recommends ca-certificates dnsutils
 
 ARG FDB_WEBSITE=https://foundationdb.org
 RUN wget "${FDB_WEBSITE}/downloads/${FDB_VERSION}/ubuntu/installers/foundationdb-clients_${FDB_VERSION}-1_amd64.deb"
