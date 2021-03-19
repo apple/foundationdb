@@ -353,8 +353,8 @@ public:
 				int p = self->files[1].size - self->writingPos;
 				if (p > 0) {
 					toSync->push_back(self->files[1].syncQueue);
-					/*TraceEvent("RDQWriteAndSwap", this->dbgid).detail("File1name", self->files[1].dbgFilename).detail("File1size", self->files[1].size)
-					    .detail("WritingPos", self->writingPos).detail("WritingBytes", p);*/
+					TraceEvent("RDQWriteAndSwap", this->dbgid).detail("File1name", self->files[1].dbgFilename).detail("File1size", self->files[1].size)
+					    .detail("WritingPos", self->writingPos).detail("WritingBytes", p);
 					waitfor.push_back(self->files[1].f->write(pageData.begin(), p, self->writingPos));
 					pageData = pageData.substr(p);
 				}
@@ -400,8 +400,8 @@ public:
 			} else {
 				// Extend self->files[1] to accomodate the new write and about 10MB or 2x current size for future
 				// writes.
-				/*TraceEvent("RDQExtend", this->dbgid).detail("File1name", self->files[1].dbgFilename).detail("File1size", self->files[1].size)
-				    .detail("ExtensionBytes", fileExtensionBytes);*/
+				TraceEvent("RDQExtend", this->dbgid).detail("File1name", self->files[1].dbgFilename).detail("File1size", self->files[1].size)
+				    .detail("ExtensionBytes", fileExtensionBytes);
 				int64_t minExtension = pageData.size() + self->writingPos - self->files[1].size;
 				self->files[1].size += std::min(std::max(self->fileExtensionBytes, minExtension),
 				                                self->files[0].size + self->files[1].size + minExtension);
@@ -419,8 +419,8 @@ public:
 			*self->firstPages[1] = *(const Page*)pageData.begin();
 		}
 
-		/*TraceEvent("RDQWrite", this->dbgid).detail("File1name", self->files[1].dbgFilename).detail("File1size", self->files[1].size)
-		    .detail("WritingPos", self->writingPos).detail("WritingBytes", pageData.size());*/
+		TraceEvent("RDQWrite", this->dbgid).detail("File1name", self->files[1].dbgFilename).detail("File1size", self->files[1].size)
+		    .detail("WritingPos", self->writingPos).detail("WritingBytes", pageData.size());
 		self->files[1].size = std::max(self->files[1].size, self->writingPos + pageData.size());
 		toSync->push_back(self->files[1].syncQueue);
 		waitfor.push_back(self->files[1].f->write(pageData.begin(), pageData.size(), self->writingPos));
@@ -1356,7 +1356,7 @@ private:
 				wait(self->rawQueue->truncateBeforeLastReadPage());
 				break;
 			}
-			//TraceEvent("DQRecPage", self->dbgid).detail("NextReadLoc", self->nextReadLocation).detail("Seq", self->readBufPage->seq).detail("Pop", self->readBufPage->popped).detail("Payload", self->readBufPage->payloadSize).detail("File0Name", self->rawQueue->files[0].dbgFilename);
+			TraceEvent("DQRecPage", self->dbgid).detail("NextReadLoc", self->nextReadLocation).detail("Seq", self->readBufPage->seq).detail("Pop", self->readBufPage->popped).detail("Payload", self->readBufPage->payloadSize).detail("File0Name", self->rawQueue->files[0].dbgFilename);
 			ASSERT(self->readBufPage->seq == pageFloor(self->nextReadLocation));
 			self->lastPoppedSeq = self->readBufPage->popped;
 		}
@@ -1414,7 +1414,6 @@ private:
 		self->poppedSeq = lastPage->popped;
 		self->nextReadLocation = std::max(recoverAt.lo, self->poppedSeq);
 
-		/*
 		state std::auto_ptr<Page> testPage(new Page);
 		state int fileNum;
 		for( fileNum=0; fileNum<2; fileNum++) {
@@ -1424,7 +1423,6 @@ private:
 		        TraceEvent("PageData").detail("File", self->rawQueue->files[fileNum].dbgFilename).detail("SizeNum", sizeNum).detail("Seq", testPage->seq).detail("Hash", testPage->checkHash()).detail("Popped", testPage->popped);
 		    }
 		}
-		*/
 
 		int file;
 		int64_t page;
