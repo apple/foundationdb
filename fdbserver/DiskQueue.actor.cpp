@@ -364,7 +364,9 @@ public:
 		state int64_t remainingFileSize = wait(file->size());
 
 		for (; remainingFileSize > 0; remainingFileSize -= FLOW_KNOBS->INCREMENTAL_DELETE_TRUNCATE_AMOUNT) {
+			TraceEvent("DiskQueueReplaceTruncate").detail("Size", remainingFileSize);
 			wait(file->truncate(remainingFileSize));
+			TraceEvent("DiskQueueReplaceTruncate2").detail("Size", remainingFileSize);
 			wait(file->sync());
 			wait(delay(FLOW_KNOBS->INCREMENTAL_DELETE_INTERVAL));
 		}
@@ -448,6 +450,9 @@ public:
 						    .detail("ElidedTruncateSize", maxShrink);
 						Reference<IAsyncFile> newFile = wait(replaceFile(self->files[1].f));
 						self->files[1].setFile(newFile);
+						TraceEvent("DiskQueueReplaceFile2", self->dbgid)
+						    .detail("Filename", self->files[1].f->getFilename())
+						    .detail("NewSize", self->fileExtensionBytes);
 						waitfor.push_back(self->files[1].f->truncate(self->fileExtensionBytes));
 						self->files[1].size = self->fileExtensionBytes;
 					} else {
