@@ -6,7 +6,7 @@ Release Notes
 
 6.2.32
 ======
-* Fix accounting error that could cause commits to incorrectly fail with ``proxy_memory_limit_exceeded``. `(PR #4526) <https://github.com/apple/foundationdb/pull/4526>`_
+* Fix accounting error that could cause commits to incorrectly fail with ``proxy_memory_limit_exceeded``. `(PR #4529) <https://github.com/apple/foundationdb/pull/4529>`_
 
 6.2.32
 ======
