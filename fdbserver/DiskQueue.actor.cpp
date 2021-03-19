@@ -724,7 +724,9 @@ public:
 				    .detail("P2Seq", dbgp2->seq)
 				    .detail("P1Hash", dbgp1->checkHash())
 				    .detail("P2Hash", dbgp2->checkHash())
-				    .detail("File0Name", self->files[0].dbgFilename);
+				    .detail("File0Name", self->files[0].dbgFilename)
+					.detail("File0size", self->files[0].size)
+					.detail("File1size", self->files[1].size);
 
 
 			// Determine which file comes first
@@ -1093,6 +1095,8 @@ public:
 		    .detail("LastPoppedSeq", lastPoppedSeq)
 		    .detail("PoppedSeq", poppedSeq)
 		    .detail("NextPageSeq", nextPageSeq)
+			.detail("File0Size", rawQueue->files[0].size)
+			.detail("File1Size", rawQueue->files[1].size)
 		    .detail("PoppedCommitted",
 		            rawQueue->dbg_file0BeginSeq + rawQueue->files[0].popped + rawQueue->files[1].popped)
 		    .detail("File0Name", rawQueue->files[0].dbgFilename);
