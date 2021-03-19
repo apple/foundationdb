@@ -165,8 +165,6 @@ ClientKnobs::ClientKnobs(bool randomize) {
 
 	// Backup
 	init(BACKUP_LOCAL_FILE_WRITE_BLOCK, 1024 * 1024);
-	if (randomize && BUGGIFY)
-		BACKUP_LOCAL_FILE_WRITE_BLOCK = 100;
 	init(BACKUP_CONCURRENT_DELETES, 100);
 	init(BACKUP_SIMULATED_LIMIT_BYTES, 1e6);
 	if (randomize && BUGGIFY)
