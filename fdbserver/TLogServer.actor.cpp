@@ -760,7 +760,7 @@ void TLogQueue::push(T const& qe, Reference<LogData> logData) {
 	const IDiskQueue::location startloc = queue->getNextPushLocation();
 	// FIXME: push shouldn't return anything.  We should call getNextPushLocation() again.
 	const IDiskQueue::location endloc = queue->push(wr.toValue());
-	//TraceEvent("TLogQueueVersionWritten", dbgid).detail("Size", wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t)).detail("Loc", loc);
+	TraceEvent("TLogQueueVersionWritten", dbgid).detail("Size", wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t)).detail("Start", startloc).detail("End", endloc).detail("Ver", qe.version);
 	logData->versionLocation[qe.version] = std::make_pair(startloc, endloc);
 }
 

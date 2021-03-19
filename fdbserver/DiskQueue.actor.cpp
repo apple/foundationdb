@@ -122,7 +122,9 @@ private:
 	ACTOR static Future<Void> waitAndSync(SyncQueue* self) {
 		wait(self->outstanding.front());
 		self->outstanding.pop_front();
+		TraceEvent("FileSyncStart").detail("Name", self->file->getFilename());
 		wait(self->file->sync());
+		TraceEvent("FileSyncEnd").detail("Name", self->file->getFilename());
 		return Void();
 	}
 };
@@ -479,9 +481,9 @@ public:
 
 			self->updatePopped(poppedPages * sizeof(Page));
 
-			/*TraceEvent("RDQCommitEnd", self->dbgid).detail("DeltaPopped", poppedPages*sizeof(Page)).detail("PoppedCommitted", self->dbg_file0BeginSeq + self->files[0].popped + self->files[1].popped)
+			TraceEvent("RDQCommitEnd", self->dbgid).detail("DeltaPopped", poppedPages*sizeof(Page)).detail("PoppedCommitted", self->dbg_file0BeginSeq + self->files[0].popped + self->files[1].popped)
 			    .detail("File0Size", self->files[0].size).detail("File1Size", self->files[1].size)
-			    .detail("File0Name", self->files[0].dbgFilename).detail("SyncedFiles", syncFiles.size());*/
+			    .detail("File0Name", self->files[0].dbgFilename).detail("SyncedFiles", syncFiles.size());
 
 			committed.send(Void());
 		} catch (Error& e) {
@@ -964,10 +966,10 @@ public:
 				warnAlwaysForMemory = false;
 		}
 
-		/*TraceEvent("DQCommit", dbgid).detail("Pages", pushedPageCount()).detail("LastPoppedSeq", lastPoppedSeq).detail("PoppedSeq", poppedSeq).detail("NextPageSeq", nextPageSeq)
+		TraceEvent("DQCommit", dbgid).detail("Pages", pushedPageCount()).detail("LastPoppedSeq", lastPoppedSeq).detail("PoppedSeq", poppedSeq).detail("NextPageSeq", nextPageSeq)
 		    .detail("RawFile0Size", rawQueue->files[0].size).detail("RawFile1Size",
 		   rawQueue->files[1].size).detail("WritingPos", rawQueue->writingPos) .detail("RawFile0Name",
-		   rawQueue->files[0].dbgFilename);*/
+		   rawQueue->files[0].dbgFilename);
 
 		lastCommittedSeq = backPage().endSeq();
 		auto f = rawQueue->pushAndCommit(
