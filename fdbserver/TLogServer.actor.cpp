@@ -2950,8 +2950,11 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 						}
 					}
 
-					TraceEvent("TLogRecoveredQE", self->dbgid).detail("LogId", qe.id).detail("Ver", qe.version).detail("MessageBytes", qe.messages.size()).detail("Tags", qe.tags.size())
-						.detail("Tag0", qe.tags.size() ? qe.tags[0].tag : invalidTag).detail("Version",logData->version.get());
+					TraceEvent("TLogRecoveredQE", self->dbgid)
+					    .detail("LogId", qe.id)
+					    .detail("Ver", qe.version)
+					    .detail("MessageBytes", qe.messages.size())
+					    .detail("Version", logData->version.get());
 
 					if (logData) {
 						if (!self->spillOrder.size() || self->spillOrder.back() != qe.id) {
