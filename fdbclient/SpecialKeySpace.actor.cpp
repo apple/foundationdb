@@ -1373,6 +1373,10 @@ Future<Optional<std::string>> ConsistencyCheckImpl::commit(ReadYourWritesTransac
 
 GlobalConfigImpl::GlobalConfigImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
+// Returns key-value pairs for each value stored in the global configuration
+// framework within the range specified. The special-key-space getrange
+// function should only be used for informational purposes. All values are
+// returned as strings regardless of their true type.
 Future<Standalone<RangeResultRef>> GlobalConfigImpl::getRange(ReadYourWritesTransaction* ryw,
                                                               KeyRangeRef kr) const {
 	Standalone<RangeResultRef> result;
@@ -1405,10 +1409,14 @@ Future<Standalone<RangeResultRef>> GlobalConfigImpl::getRange(ReadYourWritesTran
 	return result;
 }
 
+// Marks the key for insertion into global configuration.
 void GlobalConfigImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
 	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(value)));
 }
 
+// Writes global configuration changes to durable memory. Also writes the
+// changes made in the transaction to a recent history set, and updates the
+// latest version which the global configuration was updated at.
 ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* globalConfig, ReadYourWritesTransaction* ryw) {
 	state Transaction& tr = ryw->getTransaction();
 
@@ -1468,14 +1476,17 @@ ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* gl
 	return Optional<std::string>();
 }
 
+// Called when a transaction includes keys in the global configuration special-key-space range.
 Future<Optional<std::string>> GlobalConfigImpl::commit(ReadYourWritesTransaction* ryw) {
 	return globalConfigCommitActor(this, ryw);
 }
 
+// Marks the range for deletion from global configuration.
 void GlobalConfigImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
 	ryw->getSpecialKeySpaceWriteMap().insert(range, std::make_pair(true, Optional<Value>()));
 }
 
+// Marks the key for deletion from global configuration.
 void GlobalConfigImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
 }

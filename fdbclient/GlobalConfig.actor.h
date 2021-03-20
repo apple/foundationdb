@@ -48,6 +48,9 @@ extern const KeyRef fdbClientInfoTxnSizeLimit;
 extern const KeyRef transactionTagSampleRate;
 extern const KeyRef transactionTagSampleCost;
 
+// Structure used to hold the values stored by global configuration. The arena
+// is used as memory to store both the key and the value (the value is only
+// stored in the arena if it is an object; primitives are just copied).
 struct ConfigValue : ReferenceCounted<ConfigValue> {
 	Arena arena;
 	std::any value;
@@ -61,7 +64,14 @@ public:
 	GlobalConfig(const GlobalConfig&) = delete;
 	GlobalConfig& operator=(const GlobalConfig&) = delete;
 
+	// Creates a GlobalConfig singleton, accessed by calling GlobalConfig().
+	// This function should only be called once by each process (however, it is
+	// idempotent and calling it multiple times will have no effect).
 	static void create(DatabaseContext* cx, Reference<AsyncVar<ClientDBInfo>> dbInfo);
+
+	// Returns a reference to the global GlobalConfig object. Clients should
+	// call this function whenever they need to read a value out of the global
+	// configuration.
 	static GlobalConfig& globalConfig();
 
 	// Use this function to turn a global configuration key defined above into
@@ -108,8 +118,19 @@ public:
 private:
 	GlobalConfig();
 
+	// The functions below only affect the local copy of the global
+	// configuration keyspace! To insert or remove values across all nodes you
+	// must use a transaction (see the note above).
+
+	// Inserts the given key-value pair into the local copy of the global
+	// configuration keyspace, overwriting the old key-value pair if it exists.
+	// `value` must be encoded using the FDB tuple typecodes.
 	void insert(KeyRef key, ValueRef value);
+	// Removes the given key (and associated value) from the local copy of the
+	// global configuration keyspace.
 	void erase(KeyRef key);
+	// Removes the given key range (and associated values) from the local copy
+	// of the global configuration keyspace.
 	void erase(KeyRangeRef range);
 
 	ACTOR static Future<Void> refresh(GlobalConfig* self);

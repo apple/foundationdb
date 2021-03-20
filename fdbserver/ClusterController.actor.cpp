@@ -3190,6 +3190,11 @@ ACTOR Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
 	}
 }
 
+// Monitors the global configuration version key for changes. When changes are
+// made, the global configuration history is read and any updates are sent to
+// all processes in the system by updating the ClientDBInfo object. The
+// GlobalConfig actor class contains the functionality to read the latest
+// history and update the processes local view.
 ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 	loop {
 		state ReadYourWritesTransaction tr(db->db);
