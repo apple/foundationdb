@@ -22,6 +22,11 @@ env_set(USE_LIBCXX "${_use_libcxx}" BOOL "Use libc++")
 static_link_libcxx(_static_link_libcxx)
 env_set(STATIC_LINK_LIBCXX "${_static_link_libcxx}" BOOL "Statically link libstdcpp/libc++")
 
+set(USE_SANITIZER OFF)
+if(USE_ASAN OR USE_VALGRIND OR USE_MSAN OR USE_TSAN OR USE_UBSAN)
+  set(USE_SANITIZER ON)
+endif()
+
 if(USE_LIBCXX AND STATIC_LINK_LIBCXX AND NOT USE_LD STREQUAL "LLD")
   message(FATAL_ERROR "Unsupported configuration: STATIC_LINK_LIBCXX with libc++ only works if USE_LD=LLD")
 endif()
@@ -49,6 +54,11 @@ find_package(Threads REQUIRED)
 
 include_directories(${CMAKE_SOURCE_DIR})
 include_directories(${CMAKE_BINARY_DIR})
+
+if(WIN32)
+  add_definitions(-DBOOST_USE_WINDOWS_H)
+  add_definitions(-DWIN32_LEAN_AND_MEAN)
+endif()
 
 if (USE_CCACHE)
   FIND_PROGRAM(CCACHE_FOUND "ccache")
@@ -89,6 +99,7 @@ if(WIN32)
     string(REGEX REPLACE "/W[0-4]" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
   endif()
   add_compile_options(/W0 /EHsc /bigobj $<$<CONFIG:Release>:/Zi> /MP /FC /Gm-)
+  add_compile_definitions(NOMINMAX)
   set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
   set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
 else()
@@ -138,22 +149,30 @@ else()
     add_compile_options("-fdebug-prefix-map=${CMAKE_SOURCE_DIR}=." "-fdebug-prefix-map=${CMAKE_BINARY_DIR}=.")
   endif()
 
+  set(SANITIZER_COMPILE_OPTIONS)
+  set(SANITIZER_LINK_OPTIONS)
+
   # we always compile with debug symbols. CPack will strip them out
   # and create a debuginfo rpm
   add_compile_options(-ggdb -fno-omit-frame-pointer)
   if(USE_ASAN)
-    add_compile_options(-fsanitize=address)
-    add_link_options(-fsanitize=address)
+    list(APPEND SANITIZER_COMPILE_OPTIONS
+      -fsanitize=address
+      -DADDRESS_SANITIZER
+      -DBOOST_USE_ASAN
+      -DBOOST_USE_UCONTEXT)
+    list(APPEND SANITIZER_LINK_OPTIONS -fsanitize=address)
   endif()
 
   if(USE_MSAN)
     if(NOT CLANG)
       message(FATAL_ERROR "Unsupported configuration: USE_MSAN only works with Clang")
     endif()
-    add_compile_options(
+    list(APPEND SANITIZER_COMPILE_OPTIONS
       -fsanitize=memory
-      -fsanitize-memory-track-origins=2)
-    add_link_options(-fsanitize=memory)
+      -fsanitize-memory-track-origins=2
+      -DBOOST_USE_UCONTEXT)
+    list(APPEND SANITIZER_LINK_OPTIONS -fsanitize=memory)
   endif()
 
   if(USE_GCOV)
@@ -161,17 +180,28 @@ else()
   endif()
 
   if(USE_UBSAN)
-    add_compile_options(
+    list(APPEND SANITIZER_COMPILE_OPTIONS
       -fsanitize=undefined
       # TODO(atn34) Re-enable -fsanitize=alignment once https://github.com/apple/foundationdb/issues/1434 is resolved
-      -fno-sanitize=alignment)
-    add_link_options(-fsanitize=undefined)
+      -fno-sanitize=alignment
+      -DBOOST_USE_UCONTEXT)
+    list(APPEND SANITIZER_LINK_OPTIONS -fsanitize=undefined)
   endif()
 
   if(USE_TSAN)
-    add_compile_options(
-      -fsanitize=thread)
-    add_link_options(-fsanitize=thread)
+    list(APPEND SANITIZER_COMPILE_OPTIONS -fsanitize=thread -DBOOST_USE_UCONTEXT)
+    list(APPEND SANITIZER_LINK_OPTIONS -fsanitize=thread)
+  endif()
+
+  if(USE_VALGRIND)
+    list(APPEND SANITIZER_COMPILE_OPTIONS -DBOOST_USE_VALGRIND)
+  endif()
+
+  if(SANITIZER_COMPILE_OPTIONS)
+    add_compile_options(${SANITIZER_COMPILE_OPTIONS})
+  endif()
+  if(SANITIZER_LINK_OPTIONS)
+    add_link_options(${SANITIZER_LINK_OPTIONS})
   endif()
 
   if(PORTABLE_BINARY)

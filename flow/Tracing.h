@@ -80,9 +80,7 @@ struct Span {
 		parents.push_back(arena, span);
 	}
 
-	void addTag(const StringRef& key, const StringRef& value) {
-		tags[key] = value;
-	}
+	void addTag(const StringRef& key, const StringRef& value) { tags[key] = value; }
 
 	Arena arena;
 	UID context = UID();
@@ -92,12 +90,14 @@ struct Span {
 	std::unordered_map<StringRef, StringRef> tags;
 };
 
+// The user selects a tracer using a string passed to fdbserver on boot.
+// Clients should not refer to TracerType directly, and mappings of names to
+// values in this enum can change without notice.
 enum class TracerType {
 	DISABLED = 0,
-	LOG_FILE = 1,
-	NETWORK_ASYNC = 2,
-	NETWORK_LOSSY = 3,
-	END = 4
+	NETWORK_LOSSY = 1,
+	SIM_END = 2, // Any tracers that come after SIM_END will not be tested in simulation
+	LOG_FILE = 3
 };
 
 struct ITracer {

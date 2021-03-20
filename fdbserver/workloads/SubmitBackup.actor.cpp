@@ -53,8 +53,14 @@ struct SubmitBackupWorkload final : TestWorkload {
 		Standalone<VectorRef<KeyRangeRef>> backupRanges;
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 		try {
-			wait(self->backupAgent.submitBackup(cx, self->backupDir, self->snapshotInterval, self->tag.toString(),
-			                                    backupRanges, self->stopWhenDone, false, self->incremental));
+			wait(self->backupAgent.submitBackup(cx,
+			                                    self->backupDir,
+			                                    self->snapshotInterval,
+			                                    self->tag.toString(),
+			                                    backupRanges,
+			                                    self->stopWhenDone,
+			                                    false,
+			                                    self->incremental));
 		} catch (Error& e) {
 			TraceEvent("BackupSubmitError").error(e);
 			if (e.code() != error_code_backup_duplicate) {

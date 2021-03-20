@@ -11,7 +11,6 @@ set(FDBSERVER_SRCS
   CoordinatedState.h
   Coordination.actor.cpp
   CoordinationInterface.h
-  CoroFlow.actor.cpp
   CoroFlow.h
   DataDistribution.actor.cpp
   DataDistribution.actor.h
@@ -225,12 +224,20 @@ set(FDBSERVER_SRCS
   workloads/VersionStamp.actor.cpp
   workloads/WatchAndWait.actor.cpp
   workloads/Watches.actor.cpp
+  workloads/WatchesSameKeyCorrectness.actor.cpp
   workloads/WorkerErrors.actor.cpp
   workloads/workloads.actor.h
   workloads/WriteBandwidth.actor.cpp
   workloads/WriteDuringRead.actor.cpp
   workloads/WriteTagThrottling.actor.cpp
 )
+
+# ugly hack to make Windows work for now
+if(WIN32)
+  list(APPEND FDBSERVER_SRCS CoroFlowCoro.actor.cpp)
+else()
+  list(APPEND FDBSERVER_SRCS CoroFlow.actor.cpp)
+endif()
 
 add_library(fdb_sqlite STATIC
   sqlite/btree.h
@@ -276,7 +283,7 @@ else()
   target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
 endif()
 
-target_link_libraries(fdbserver PRIVATE toml11_target)
+target_link_libraries(fdbserver PRIVATE toml11_target jemalloc)
 
 if (GPERFTOOLS_FOUND)
   target_link_libraries(fdbserver PRIVATE gperftools)

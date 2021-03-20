@@ -73,7 +73,8 @@ public:
 	};
 
 	ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles(
-	    Reference<BackupContainerS3BlobStore> bc, std::string path,
+	    Reference<BackupContainerS3BlobStore> bc,
+	    std::string path,
 	    std::function<bool(std::string const&)> pathFilter) {
 		// pathFilter expects container based paths, so create a wrapper which converts a raw path
 		// to a container path by removing the known backup name prefix.
@@ -134,7 +135,8 @@ std::string BackupContainerS3BlobStore::indexEntry() {
 	return BackupContainerS3BlobStoreImpl::INDEXFOLDER + "/" + m_name;
 }
 
-BackupContainerS3BlobStore::BackupContainerS3BlobStore(Reference<S3BlobStoreEndpoint> bstore, const std::string& name,
+BackupContainerS3BlobStore::BackupContainerS3BlobStore(Reference<S3BlobStoreEndpoint> bstore,
+                                                       const std::string& name,
                                                        const S3BlobStoreEndpoint::ParametersT& params)
   : m_bstore(bstore), m_name(name), m_bucket("FDB_BACKUPS_V2") {
 
@@ -164,7 +166,9 @@ std::string BackupContainerS3BlobStore::getURLFormat() {
 Future<Reference<IAsyncFile>> BackupContainerS3BlobStore::readFile(const std::string& path) {
 	return Reference<IAsyncFile>(new AsyncFileReadAheadCache(
 	    Reference<IAsyncFile>(new AsyncFileS3BlobStoreRead(m_bstore, m_bucket, dataPath(path))),
-	    m_bstore->knobs.read_block_size, m_bstore->knobs.read_ahead_blocks, m_bstore->knobs.concurrent_reads_per_file,
+	    m_bstore->knobs.read_block_size,
+	    m_bstore->knobs.read_ahead_blocks,
+	    m_bstore->knobs.concurrent_reads_per_file,
 	    m_bstore->knobs.read_cache_blocks_per_file));
 }
 
@@ -183,9 +187,10 @@ Future<Void> BackupContainerS3BlobStore::deleteFile(const std::string& path) {
 }
 
 Future<BackupContainerFileSystem::FilesAndSizesT> BackupContainerS3BlobStore::listFiles(
-    const std::string& path, std::function<bool(std::string const&)> pathFilter) {
-	return BackupContainerS3BlobStoreImpl::listFiles(Reference<BackupContainerS3BlobStore>::addRef(this), path,
-	                                                 pathFilter);
+    const std::string& path,
+    std::function<bool(std::string const&)> pathFilter) {
+	return BackupContainerS3BlobStoreImpl::listFiles(
+	    Reference<BackupContainerS3BlobStore>::addRef(this), path, pathFilter);
 }
 
 Future<Void> BackupContainerS3BlobStore::create() {

@@ -100,10 +100,12 @@ static int perfectSubtreeSplitPointCached(int subtree_size) {
 	static const int max = 500;
 	if (points == nullptr) {
 		points = new uint16_t[max];
-		for (int i = 0; i < max; ++i) points[i] = perfectSubtreeSplitPoint(i);
+		for (int i = 0; i < max; ++i)
+			points[i] = perfectSubtreeSplitPoint(i);
 	}
 
-	if (subtree_size < max) return points[subtree_size];
+	if (subtree_size < max)
+		return points[subtree_size];
 	return perfectSubtreeSplitPoint(subtree_size);
 }
 
@@ -386,12 +388,16 @@ public:
 		// have changed (they won't if k already exists in the tree but was deleted).
 		// Returns true if successful, false if k does not fit in the space available
 		// or if k is already in the tree (and was not already deleted).
+		// Insertion on an empty tree returns false as well.
 		bool insert(const T& k, int skipLen = 0, int maxHeightAllowed = std::numeric_limits<int>::max()) {
+			if (root == nullptr) {
+				return false;
+			}
 			int height = 1;
 			DecodedNode* n = root;
 			bool addLeftChild = false;
 
-			while (n != nullptr) {
+			while (true) {
 				int cmp = k.compare(n->item, skipLen);
 
 				if (cmp >= 0) {
@@ -742,7 +748,8 @@ public:
 			node = n;
 			while (n != nullptr) {
 				n = n->getLeftChild(mirror->arena);
-				if (n != nullptr) node = n;
+				if (n != nullptr)
+					node = n;
 			}
 			return _hideDeletedForward();
 		}
@@ -752,7 +759,8 @@ public:
 			node = n;
 			while (n != nullptr) {
 				n = n->getRightChild(mirror->arena);
-				if (n != nullptr) node = n;
+				if (n != nullptr)
+					node = n;
 			}
 			return _hideDeletedBackward();
 		}

@@ -1,0 +1,158 @@
+version: 0.2
+
+env:
+  secrets-manager:
+    DOCKERHUB_AUTH: dockerhub_foundationdb:foundationdb
+phases:
+  install:
+    commands:
+      - echo "install phase"
+      - 'ACCOUNT_ID=$(echo $CODEBUILD_BUILD_ARN | cut -d : -f 5)'
+      - REGISTRY=${ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
+      - aws ecr get-login-password | docker login --username AWS --password-stdin ${REGISTRY}
+      - docker pull ${REGISTRY}/centos:6
+      - docker tag ${REGISTRY}/centos:6 centos:6
+      - docker pull ${REGISTRY}/centos:7
+      - docker tag ${REGISTRY}/centos:7 centos:7
+  pre_build:
+    commands:
+      - echo "pre_build phase"
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - DATE_STR=$(date +"%Y%m%d%H%M%S")
+  build:
+    commands:
+      - echo "build phase"
+      - ################################################################################
+      - # CENTOS 7 foundationdb/build
+      - ################################################################################
+      - cd ${CODEBUILD_SRC_DIR}/build/docker/centos7/build
+      - docker pull ${REGISTRY}/foundationdb/build:centos7-latest || true
+      - docker build --cache-from ${REGISTRY}/foundationdb/build:centos7-latest
+        --tag ${REGISTRY}/foundationdb/build:centos7-${DATE_STR}-${COMMIT_HASH}
+        --tag ${REGISTRY}/foundationdb/build:centos7-latest
+        --tag ${REGISTRY}/foundationdb/build:latest
+        --tag foundationdb/build:centos7-${DATE_STR}-${COMMIT_HASH}
+        --tag foundationdb/build:centos7-latest
+        --tag foundationdb/build:latest
+        .
+      - ################################################################################
+      - # CENTOS 7 foundationdb/devel
+      - ################################################################################
+      - cd ${CODEBUILD_SRC_DIR}/build/docker/centos7/devel
+      - docker pull ${REGISTRY}/foundationdb/devel:centos7-latest || true
+      - docker build --cache-from ${REGISTRY}/foundationdb/devel:centos7-latest
+        --build-arg REPOSITORY=${REGISTRY}/foundationdb/build
+        --tag ${REGISTRY}/foundationdb/devel:centos7-${DATE_STR}-${COMMIT_HASH}
+        --tag ${REGISTRY}/foundationdb/devel:centos7-latest
+        --tag ${REGISTRY}/foundationdb/devel:latest
+        --tag foundationdb/devel:centos7-${DATE_STR}-${COMMIT_HASH}
+        --tag foundationdb/devel:centos7-latest
+        --tag foundationdb/devel:latest
+        .
+      - ################################################################################
+      - # CENTOS 7 foundationdb/distcc
+      - ################################################################################
+      - cd ${CODEBUILD_SRC_DIR}/build/docker/centos7/distcc
+      - docker pull ${REGISTRY}/foundationdb/distcc:centos7-latest || true
+      - docker build --cache-from ${REGISTRY}/foundationdb/distcc:centos7-latest
+        --build-arg REPOSITORY=${REGISTRY}/foundationdb/build
+        --tag ${REGISTRY}/foundationdb/distcc:centos7-${DATE_STR}-${COMMIT_HASH}
+        --tag ${REGISTRY}/foundationdb/distcc:centos7-latest
+        --tag ${REGISTRY}/foundationdb/distcc:latest
+        --tag foundationdb/distcc:centos7-${DATE_STR}-${COMMIT_HASH}
+        --tag foundationdb/distcc:centos7-latest
+        --tag foundationdb/distcc:latest
+        .
+      - ################################################################################
+      - # CENTOS 6 foundationdb/build
+      - ################################################################################
+      - cd ${CODEBUILD_SRC_DIR}/build/docker/centos6/build
+      - docker pull ${REGISTRY}/foundationdb/build:centos6-latest || true
+      - docker build --cache-from ${REGISTRY}/foundationdb/build:centos6-latest
+        --tag ${REGISTRY}/foundationdb/build:centos6-${DATE_STR}-${COMMIT_HASH}
+        --tag ${REGISTRY}/foundationdb/build:centos6-latest
+        --tag foundationdb/build:centos6-${DATE_STR}-${COMMIT_HASH}
+        --tag foundationdb/build:centos6-latest
+        .
+      - ################################################################################
+      - # CENTOS 6 foundationdb/devel
+      - ################################################################################
+      - cd ${CODEBUILD_SRC_DIR}/build/docker/centos6/devel
+      - docker pull ${REGISTRY}/foundationdb/devel:centos6-latest || true
+      - docker build --cache-from ${REGISTRY}/foundationdb/devel:centos6-latest
+        --build-arg REPOSITORY=${REGISTRY}/foundationdb/build
+        --tag ${REGISTRY}/foundationdb/devel:centos6-${DATE_STR}-${COMMIT_HASH}
+        --tag ${REGISTRY}/foundationdb/devel:centos6-latest
+        --tag foundationdb/devel:centos6-${DATE_STR}-${COMMIT_HASH}
+        --tag foundationdb/devel:centos6-latest
+        .
+      - ################################################################################
+      - # CENTOS 6 foundationdb/distcc
+      - ################################################################################
+      - cd ${CODEBUILD_SRC_DIR}/build/docker/centos6/distcc
+      - docker pull ${REGISTRY}/foundationdb/distcc:centos6-latest || true
+      - docker build --cache-from ${REGISTRY}/foundationdb/distcc:centos6-latest
+        --build-arg REPOSITORY=${REGISTRY}/foundationdb/build
+        --tag ${REGISTRY}/foundationdb/distcc:centos6-${DATE_STR}-${COMMIT_HASH}
+        --tag ${REGISTRY}/foundationdb/distcc:centos6-latest
+        --tag foundationdb/distcc:centos6-${DATE_STR}-${COMMIT_HASH}
+        --tag foundationdb/distcc:centos6-latest
+        .
+  post_build:
+    commands:
+      - echo "post_build phase"
+      - echo ${DOCKERHUB_AUTH} | docker login --username foundationdb --password-stdin
+      - ################################################################################
+      - # CENTOS 7 PUSH TO ECR
+      - ################################################################################
+      - # PUSH TO build ECR
+      - docker push ${REGISTRY}/foundationdb/build:centos7-${DATE_STR}-${COMMIT_HASH}
+      - docker push ${REGISTRY}/foundationdb/build:centos7-latest
+      - docker push ${REGISTRY}/foundationdb/build:latest
+      - # PUSH TO devel ECR
+      - docker push ${REGISTRY}/foundationdb/devel:centos7-${DATE_STR}-${COMMIT_HASH}
+      - docker push ${REGISTRY}/foundationdb/devel:centos7-latest
+      - docker push ${REGISTRY}/foundationdb/devel:latest
+      - # PUSH TO distcc ECR
+      - docker push ${REGISTRY}/foundationdb/distcc:centos7-${DATE_STR}-${COMMIT_HASH}
+      - docker push ${REGISTRY}/foundationdb/distcc:centos7-latest
+      - docker push ${REGISTRY}/foundationdb/distcc:latest
+      - ################################################################################
+      - # CENTOS 7 PUSH TO DOCKERHUB
+      - ################################################################################
+      - # PUSH TO build DOCKERHUB
+      - docker push foundationdb/build:centos7-${DATE_STR}-${COMMIT_HASH}
+      - docker push foundationdb/build:centos7-latest
+      - docker push foundationdb/build:latest
+      - # PUSH TO devel DOCKERHUB
+      - docker push foundationdb/devel:centos7-${DATE_STR}-${COMMIT_HASH}
+      - docker push foundationdb/devel:centos7-latest
+      - docker push foundationdb/devel:latest
+      - # PUSH TO distcc DOCKERHUB
+      - docker push foundationdb/distcc:centos7-${DATE_STR}-${COMMIT_HASH}
+      - docker push foundationdb/distcc:centos7-latest
+      - docker push foundationdb/distcc:latest
+      - ################################################################################
+      - # CENTOS 6 PUSH TO ECR
+      - ################################################################################
+      - # PUSH TO build ECR
+      - docker push ${REGISTRY}/foundationdb/build:centos6-${DATE_STR}-${COMMIT_HASH}
+      - docker push ${REGISTRY}/foundationdb/build:centos6-latest
+      - # PUSH TO devel ECR
+      - docker push ${REGISTRY}/foundationdb/devel:centos6-${DATE_STR}-${COMMIT_HASH}
+      - docker push ${REGISTRY}/foundationdb/devel:centos6-latest
+      - # PUSH TO distcc ECR
+      - docker push ${REGISTRY}/foundationdb/distcc:centos6-${DATE_STR}-${COMMIT_HASH}
+      - docker push ${REGISTRY}/foundationdb/distcc:centos6-latest
+      - ################################################################################
+      - # CENTOS 6 PUSH TO DOCKERHUB
+      - ################################################################################
+      - # PUSH TO build DOCKERHUB
+      - docker push foundationdb/build:centos6-${DATE_STR}-${COMMIT_HASH}
+      - docker push foundationdb/build:centos6-latest
+      - # PUSH TO devel DOCKERHUB
+      - docker push foundationdb/devel:centos6-${DATE_STR}-${COMMIT_HASH}
+      - docker push foundationdb/devel:centos6-latest
+      - # PUSH TO distcc DOCKERHUB
+      - docker push foundationdb/distcc:centos6-${DATE_STR}-${COMMIT_HASH}
+      - docker push foundationdb/distcc:centos6-latest

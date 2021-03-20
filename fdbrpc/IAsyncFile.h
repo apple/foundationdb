@@ -20,10 +20,12 @@
 
 #ifndef FLOW_IASYNCFILE_H
 #define FLOW_IASYNCFILE_H
+#include <string>
 #pragma once
 
 #include <ctime>
 #include "flow/flow.h"
+#include "fdbrpc/IRateControl.h"
 
 // All outstanding operations must be cancelled before the destructor of IAsyncFile is called.
 // The desirability of the above semantic is disputed. Some classes (AsyncFileS3BlobStore,
@@ -59,14 +61,19 @@ public:
 	virtual void delref() = 0;
 
 	// For read() and write(), the data buffer must remain valid until the future is ready
-	virtual Future<int> read( void* data, int length, int64_t offset ) = 0;  // Returns number of bytes actually read (from [0,length])
-	virtual Future<Void> write( void const* data, int length, int64_t offset ) = 0;
+	virtual Future<int> read(void* data,
+	                         int length,
+	                         int64_t offset) = 0; // Returns number of bytes actually read (from [0,length])
+	virtual Future<Void> write(void const* data, int length, int64_t offset) = 0;
 	// The zeroed data is not guaranteed to be durable after `zeroRange` returns.  A call to sync() would be required.
-	// This operation holds a reference to the AsyncFile, and does not need to be cancelled before a reference is dropped.
-	virtual Future<Void> zeroRange( int64_t offset, int64_t length );
-	virtual Future<Void> truncate( int64_t size ) = 0;
+	// This operation holds a reference to the AsyncFile, and does not need to be cancelled before a reference is
+	// dropped.
+	virtual Future<Void> zeroRange(int64_t offset, int64_t length);
+	virtual Future<Void> truncate(int64_t size) = 0;
 	virtual Future<Void> sync() = 0;
-	virtual Future<Void> flush() { return Void();  }      // Sends previous writes to the OS if they have been buffered in memory, but does not make them power safe
+	virtual Future<Void> flush() {
+		return Void();
+	} // Sends previous writes to the OS if they have been buffered in memory, but does not make them power safe
 	virtual Future<int64_t> size() const = 0;
 	virtual std::string getFilename() const = 0;
 
@@ -81,10 +88,14 @@ public:
 	//   called, so the caller must always ensure that a matching call to releaseZeroCopy takes place.
 	// Between readZeroCopy and releaseZeroCopy, it is illegal (undefined behavior) to concurrently write
 	//   to an overlapping range of bytes, whether or not using the same IAsyncFile handle.
-	virtual Future<Void> readZeroCopy( void** data, int* length, int64_t offset ) { return io_error(); }
-	virtual void releaseZeroCopy( void* data, int length, int64_t offset ) {}
+	virtual Future<Void> readZeroCopy(void** data, int* length, int64_t offset) { return io_error(); }
+	virtual void releaseZeroCopy(void* data, int length, int64_t offset) {}
 
 	virtual int64_t debugFD() const = 0;
+
+	// Used for rate control, at present, only AsyncFileCached supports it
+	virtual Reference<IRateControl> const& getRateControl() { throw unsupported_operation(); }
+	virtual void setRateControl(Reference<IRateControl> const& rc) { throw unsupported_operation(); }
 };
 
 typedef void (*runCycleFuncPtr)();
@@ -94,8 +105,12 @@ public:
 	// Opens a file for asynchronous I/O
 	virtual Future<Reference<class IAsyncFile>> open(const std::string& filename, int64_t flags, int64_t mode) = 0;
 
-	// Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
+	// Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a
+	// power failure.
 	virtual Future<Void> deleteFile(const std::string& filename, bool mustBeDurable) = 0;
+
+	// renames the file, doesn't sync the directory
+	virtual Future<Void> renameFile(std::string const& from, std::string const& to) = 0;
 
 	// Unlinks a file and then deletes it slowly by truncating the file repeatedly.
 	// If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
@@ -105,14 +120,18 @@ public:
 	virtual Future<std::time_t> lastWriteTime(const std::string& filename) = 0;
 
 	static IAsyncFileSystem* filesystem() { return filesystem(g_network); }
-	static runCycleFuncPtr runCycleFunc() { return reinterpret_cast<runCycleFuncPtr>(reinterpret_cast<flowGlobalType>(g_network->global(INetwork::enRunCycleFunc))); }
+	static runCycleFuncPtr runCycleFunc() {
+		return reinterpret_cast<runCycleFuncPtr>(
+		    reinterpret_cast<flowGlobalType>(g_network->global(INetwork::enRunCycleFunc)));
+	}
 
-	static IAsyncFileSystem* filesystem(INetwork* networkPtr) { return static_cast<IAsyncFileSystem*>(networkPtr->global(INetwork::enFileSystem)); }
-
+	static IAsyncFileSystem* filesystem(INetwork* networkPtr) {
+		return static_cast<IAsyncFileSystem*>(networkPtr->global(INetwork::enFileSystem));
+	}
 
 protected:
 	IAsyncFileSystem() {}
-	virtual ~IAsyncFileSystem() {}	// Please don't try to delete through this interface!
+	virtual ~IAsyncFileSystem() {} // Please don't try to delete through this interface!
 };
 
 #endif
