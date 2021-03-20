@@ -109,12 +109,14 @@ template class WriteOnlySet<ActorLineage, unsigned, 1024>;
 // testing code
 namespace {
 
+// Some statistics
 std::atomic<unsigned long> instanceCounter = 0;
 std::atomic<unsigned long> numInserts = 0;
 std::atomic<unsigned long> numErase = 0;
 std::atomic<unsigned long> numLockedErase = 0;
 std::atomic<unsigned long> numCopied = 0;
 
+// A simple object that counts the number of its instances. This is used to detect memory leaks.
 struct TestObject {
 	mutable std::atomic<unsigned> _refCount = 1;
 	TestObject() { instanceCounter.fetch_add(1); }
@@ -130,6 +132,7 @@ struct TestObject {
 using TestSet = WriteOnlySet<TestObject, unsigned, 128>;
 using Clock = std::chrono::steady_clock;
 
+// An actor that can join a set of threads in an async way.
 ACTOR Future<Void> threadjoiner(std::shared_ptr<std::vector<std::thread>> threads, std::shared_ptr<TestSet> set) {
 	loop {
 		wait(delay(0.1));
@@ -156,6 +159,7 @@ ACTOR Future<Void> threadjoiner(std::shared_ptr<std::vector<std::thread>> thread
 	}
 }
 
+// occasionally copy the contents of the past set.
 void testCopier(std::shared_ptr<TestSet> set, std::chrono::seconds runFor) {
 	auto start = Clock::now();
 	while (true) {
@@ -168,6 +172,7 @@ void testCopier(std::shared_ptr<TestSet> set, std::chrono::seconds runFor) {
 	}
 }
 
+// In a loop adds and removes a set of objects to the set
 void writer(std::shared_ptr<TestSet> set, std::chrono::seconds runFor) {
 	auto start = Clock::now();
 	std::random_device rDev;
@@ -203,6 +208,7 @@ void writer(std::shared_ptr<TestSet> set, std::chrono::seconds runFor) {
 	}
 }
 
+// This unit test creates 5 writer threads and one copier thread.
 TEST_CASE("/flow/WriteOnlySet") {
 	if (g_network->isSimulated()) {
 		// This test is not deterministic, so we shouldn't run it in simulation
