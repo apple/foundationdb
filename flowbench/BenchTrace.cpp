@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Stats.h"
 #include "flow/network.h"
 #include "flow/Platform.h"
@@ -69,9 +70,13 @@ static void bench_trace(benchmark::State& state) {
 	Counter c("C", cc);
 	std::string shortString = "xxxxx";
 	std::string longString(100, 'x');
-	Standalone<VectorRef<int>> vec;
+	Standalone<VectorRef<int>> vec1;
+	std::vector<int> vec2;
 	for (int i = 0; i < 10; ++i) {
-		vec.push_back(vec.arena(), i);
+		vec1.push_back(vec1.arena(), i);
+	}
+	for (int i = 10; i < 20; ++i) {
+		vec2.push_back(i);
 	}
 	while (state.KeepRunning()) {
 		SampleTrace te;
@@ -91,7 +96,8 @@ static void bench_trace(benchmark::State& state) {
 		te.detail(shortString);
 		te.detail(longString);
 		te.detail(c);
-		te.detail(vec);
+		te.detail(vec1);
+		te.detail(vec2);
 	}
 	state.SetItemsProcessed(static_cast<long>(state.iterations()));
 }
