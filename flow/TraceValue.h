@@ -46,7 +46,8 @@ struct TraceString final {
 
 	TraceString() = default;
 	TraceString(std::string const& value) : value(value) {}
-	std::string toString() const { return value; }
+	std::string const& toString() const& { return value; }
+	std::string toString() && { return std::move(value); }
 
 	size_t heapSize() const { return value.size(); }
 
@@ -67,7 +68,8 @@ struct TraceNumeric final {
 
 	TraceNumeric() = default;
 	TraceNumeric(std::string const& value) : value(value) {}
-	std::string toString() const { return value; }
+	std::string toString() const& { return value; }
+	std::string toString() && { return std::move(value); }
 
 	size_t heapSize() const { return value.size(); }
 	static constexpr void truncate(int) {}
@@ -140,8 +142,12 @@ public:
 		return std::get<T>(std::move(value));
 	}
 
-	std::string toString() const {
+	std::string toString() const& {
 		return std::visit([](const auto& val) { return val.toString(); }, value);
+	}
+
+	std::string toString() && {
+		return std::visit([](auto&& val) { return std::move(val).toString(); }, value);
 	}
 
 	template <class Formatter>
