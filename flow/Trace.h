@@ -32,6 +32,7 @@
 #include "flow/IRandom.h"
 #include "flow/Error.h"
 #include "flow/ITrace.h"
+#include "flow/TraceValue.h"
 
 #define TRACE_DEFAULT_ROLL_SIZE (10 << 20)
 #define TRACE_DEFAULT_MAX_LOGS_SIZE (10 * TRACE_DEFAULT_ROLL_SIZE)
@@ -65,19 +66,6 @@ enum Severity {
 };
 
 const int NUM_MAJOR_LEVELS_OF_EVENTS = SevMaxUsed / 10 + 1;
-
-struct TraceValue {
-	std::string value;
-	// This field is ignored for the XML trace formatter, but the JSON formatter only adds quotes around strings
-	bool isString;
-	TraceValue() : isString(true) {}
-	TraceValue(const std::string& value, bool isString = true) : value(value), isString(isString) {}
-	TraceValue(std::string&& value, bool isString = true) : value(std::move(value)), isString(isString) {}
-	template <class Archiver>
-	void serialize(Archiver& ar) {
-		serializer(ar, value, isString);
-	}
-};
 
 class TraceEventFields {
 public:
@@ -225,7 +213,9 @@ struct Traceable : std::false_type {};
 #define FORMAT_NUMERIC_TRACEABLE(type, fmt)                                                                            \
 	template <>                                                                                                        \
 	struct Traceable<type> : std::true_type {                                                                          \
-		static TraceValue toTraceValue(type const& value) { return TraceValue(format(fmt, value), false); }            \
+		static TraceValue toTraceValue(type const& value) {                                                            \
+			return TraceValue::create<TraceNumeric>(format(fmt, value));                                               \
+		}                                                                                                              \
 	}
 
 FORMAT_NUMERIC_TRACEABLE(signed char, "%d");
@@ -248,7 +238,7 @@ FORMAT_NUMERIC_TRACEABLE(volatile double, "%g");
 
 template <>
 struct Traceable<bool> : std::true_type {
-	static TraceValue toTraceValue(bool value) { return TraceValue(value ? "true" : "false", false); }
+	static TraceValue toTraceValue(bool value) { return TraceValue::create<TraceBool>(value); }
 };
 
 template <>
@@ -330,20 +320,21 @@ struct TraceableStringImpl : std::true_type {
 		if (nonPrintables == 0 && numBackslashes == 0) {
 			return TraceableString<T>::toTraceValue(std::forward<Str>(value));
 		}
-		TraceValue result;
-		result.value.reserve(size - nonPrintables + (nonPrintables * 4) + numBackslashes);
+		TraceValue result = TraceValue("");
+		auto& resultString = result.get<TraceString>().value;
+		resultString.reserve(size - nonPrintables + (nonPrintables * 4) + numBackslashes);
 		for (auto iter = TraceableString<T>::begin(value); !TraceableString<T>::atEnd(value, iter); ++iter) {
 			if (isPrintable(*iter)) {
-				result.value.push_back(*iter);
+				resultString.push_back(*iter);
 			} else if (*iter == '\\') {
-				result.value.push_back('\\');
-				result.value.push_back('\\');
+				resultString.push_back('\\');
+				resultString.push_back('\\');
 			} else {
 				const uint8_t byte = *iter;
-				result.value.push_back('\\');
-				result.value.push_back('x');
-				result.value.push_back(base16Char(byte / 16));
-				result.value.push_back(base16Char(byte));
+				resultString.push_back('\\');
+				resultString.push_back('x');
+				resultString.push_back(base16Char(byte / 16));
+				resultString.push_back(base16Char(byte));
 			}
 		}
 		return result;
@@ -399,7 +390,7 @@ struct TraceEvent {
 	typename std::enable_if_t<Traceable<T>::value, TraceEvent&> detail(std::string&& key, const T& value) {
 		if (enabled && init()) {
 			auto v = Traceable<T>::toTraceValue(value);
-			addMetric(key.c_str(), value, v.value);
+			addMetric(key.c_str(), value, v.toString());
 			return detailImpl(std::move(key), std::move(v), false);
 		}
 		return *this;
@@ -409,7 +400,7 @@ struct TraceEvent {
 	typename std::enable_if_t<Traceable<T>::value, TraceEvent&> detail(const char* key, const T& value) {
 		if (enabled && init()) {
 			auto v = Traceable<T>::toTraceValue(value);
-			addMetric(key, value, v.value);
+			addMetric(key, value, v.toString());
 			return detailImpl(std::string(key), std::move(v), false);
 		}
 		return *this;
@@ -418,7 +409,7 @@ struct TraceEvent {
 	typename std::enable_if_t<std::is_enum<T>::value, TraceEvent&> detail(const char* key, T value) {
 		if (enabled && init()) {
 			setField(key, int64_t(value));
-			return detailImpl(std::string(key), TraceValue(format("%d", value), false), false);
+			return detailImpl(std::string(key), TraceValue::create<TraceNumeric>(format("%d", value)), false);
 		}
 		return *this;
 	}

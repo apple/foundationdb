@@ -23,6 +23,36 @@
 
 #include <sstream>
 
+static std::string escapeString(const std::string& source) {
+	std::string result;
+	for (auto c : source) {
+		if (c == '"') {
+			result += "\\\"";
+		} else if (c == '\\') {
+			result += "\\\\";
+		} else if (c == '\n') {
+			result += "\\n";
+		} else if (c == '\r') {
+			result += "\\r";
+		} else if (isprint(c)) {
+			result += c;
+		} else {
+			constexpr char hex[] = "0123456789abcdef";
+			int x = int{ static_cast<uint8_t>(c) };
+			result += "\\x" + hex[x / 16] + hex[x % 16];
+		}
+	}
+	return result;
+}
+
+class FormatValue {
+public:
+	std::string operator()(TraceBool const& v) const { return v.value ? "true" : "false"; }
+	std::string operator()(TraceString const& v) const { return "\"" + escapeString(v.value) + "\""; }
+	std::string operator()(TraceCounter const& v) const { return format("[%g,%g,%lld]", v.rate, v.roughness, v.value); }
+	std::string operator()(TraceNumeric const& v) const { return v.value; }
+} jsonValueFormatter;
+
 void JsonTraceLogFormatter::addref() {
 	ReferenceCounted<JsonTraceLogFormatter>::addref();
 }
@@ -43,48 +73,16 @@ const char* JsonTraceLogFormatter::getFooter() {
 	return "";
 }
 
-namespace {
-
-void escapeString(std::ostringstream& oss, const std::string& source) {
-	for (auto c : source) {
-		if (c == '"') {
-			oss << "\\\"";
-		} else if (c == '\\') {
-			oss << "\\\\";
-		} else if (c == '\n') {
-			oss << "\\n";
-		} else if (c == '\r') {
-			oss << "\\r";
-		} else if (isprint(c)) {
-			oss << c;
-		} else {
-			constexpr char hex[] = "0123456789abcdef";
-			int x = int{ static_cast<uint8_t>(c) };
-			oss << "\\x" << hex[x / 16] << hex[x % 16];
-		}
-	}
-}
-
-} // namespace
-
 std::string JsonTraceLogFormatter::formatEvent(const TraceEventFields& fields) {
-	std::ostringstream oss;
-	oss << "{  ";
+	std::string result = "{  ";
 	for (auto iter = fields.begin(); iter != fields.end(); ++iter) {
 		if (iter != fields.begin()) {
-			oss << ", ";
+			result += ", ";
 		}
-		oss << "\"";
-		escapeString(oss, iter->first);
-		oss << "\": ";
-		if (iter->second.isString) {
-			oss << "\"";
-		}
-		escapeString(oss, iter->second.value);
-		if (iter->second.isString) {
-			oss << "\"";
-		}
+		const auto& [key, value] = *iter;
+		result += "\"" + escapeString(key) + "\": ";
+		result += value.format(jsonValueFormatter);
 	}
-	oss << " }\r\n";
-	return std::move(oss).str();
+	result += " }\r\n";
+	return result;
 }

@@ -22,6 +22,40 @@
 #include "flow/XmlTraceLogFormatter.h"
 #include "flow/actorcompiler.h"
 
+static std::string escape(std::string source) {
+	std::string result;
+	loop {
+		int index = source.find_first_of(std::string({ '&', '"', '<', '>', '\r', '\n', '\0' }));
+		if (index == source.npos) {
+			break;
+		}
+
+		result += source.substr(0, index);
+		if (source[index] == '&') {
+			result += "&amp;";
+		} else if (source[index] == '"') {
+			result += "&quot;";
+		} else if (source[index] == '<') {
+			result += "&lt;";
+		} else if (source[index] == '>') {
+			result += "&gt;";
+		} else if (source[index] == '\n' || source[index] == '\r') {
+			result += " ";
+		} else if (source[index] == '\0') {
+			result += " ";
+			TraceEvent(SevWarnAlways, "StrippedIllegalCharacterFromTraceEvent")
+			    .detail("Source", StringRef(source).printable())
+			    .detail("Character", StringRef(source.substr(index, 1)).printable());
+		} else {
+			ASSERT(false);
+		}
+
+		source = source.substr(index + 1);
+	}
+	result += source;
+	return result;
+}
+
 void XmlTraceLogFormatter::addref() {
 	ReferenceCounted<XmlTraceLogFormatter>::addref();
 }
@@ -42,50 +76,13 @@ const char* XmlTraceLogFormatter::getFooter() {
 	return "</Trace>\r\n";
 }
 
-static void escape(std::ostringstream& oss, std::string source) {
-	loop {
-		int index = source.find_first_of(std::string({ '&', '"', '<', '>', '\r', '\n', '\0' }));
-		if (index == source.npos) {
-			break;
-		}
-
-		oss << source.substr(0, index);
-		if (source[index] == '&') {
-			oss << "&amp;";
-		} else if (source[index] == '"') {
-			oss << "&quot;";
-		} else if (source[index] == '<') {
-			oss << "&lt;";
-		} else if (source[index] == '>') {
-			oss << "&gt;";
-		} else if (source[index] == '\n' || source[index] == '\r') {
-			oss << " ";
-		} else if (source[index] == '\0') {
-			oss << " ";
-			TraceEvent(SevWarnAlways, "StrippedIllegalCharacterFromTraceEvent")
-			    .detail("Source", StringRef(source).printable())
-			    .detail("Character", StringRef(source.substr(index, 1)).printable());
-		} else {
-			ASSERT(false);
-		}
-
-		source = source.substr(index + 1);
-	}
-
-	oss << source;
-}
-
 std::string XmlTraceLogFormatter::formatEvent(const TraceEventFields& fields) {
-	std::ostringstream oss;
-	oss << "<Event ";
-
-	for (auto itr : fields) {
-		escape(oss, itr.first);
-		oss << "=\"";
-		escape(oss, itr.second.value);
-		oss << "\" ";
+	std::string result = "<Event ";
+	for (const auto& [key, value] : fields) {
+		result += escape(key) + "=\"";
+		result += value.toString();
+		result += "\" ";
 	}
-
-	oss << "/>\r\n";
-	return std::move(oss).str();
+	result += "/>\r\n";
+	return result;
 }

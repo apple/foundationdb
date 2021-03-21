@@ -292,7 +292,7 @@ inline void save(Archive& ar, const Optional<T>& value) {
 template <class T>
 struct Traceable<Optional<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
 	static TraceValue toTraceValue(const Optional<T>& value) {
-		return TraceValue(value.present() ? Traceable<T>::toTraceValue(value.get()).value : "[not set]");
+		return value.present() ? Traceable<T>::toTraceValue(value.get()) : TraceValue("[not set]");
 	}
 };
 
@@ -615,7 +615,7 @@ template <>
 struct Traceable<StringRef> : TraceableStringImpl<StringRef> {};
 
 inline std::string StringRef::printable() const {
-	return Traceable<StringRef>::toTraceValue(*this).value;
+	return Traceable<StringRef>::toTraceValue(*this).toString();
 }
 
 template <class T>
@@ -1309,17 +1309,18 @@ struct Traceable<VectorRef<T>> {
 	constexpr static bool value = Traceable<T>::value;
 
 	static TraceValue toTraceValue(const VectorRef<T>& value) {
-		TraceValue result("[", false);
+		TraceValue result = TraceValue::create<TraceString>("[");
+		auto& resultString = result.get<TraceString>().value;
 		bool first = true;
 		for (const auto& v : value) {
 			if (first) {
 				first = false;
 			} else {
-				result.value.push_back(',');
+				resultString.push_back(',');
 			}
-			result.value += Traceable<T>::toTraceValue(v).value;
+			resultString += Traceable<T>::toTraceValue(v).toString();
 		}
-		result.value.push_back(']');
+		resultString.push_back(']');
 		return result;
 	}
 };

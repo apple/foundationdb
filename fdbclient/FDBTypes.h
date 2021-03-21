@@ -363,15 +363,16 @@ struct KeyRangeRef {
 template <>
 struct Traceable<KeyRangeRef> : std::true_type {
 	static TraceValue toTraceValue(const KeyRangeRef& value) {
-		auto begin = Traceable<StringRef>::toTraceValue(value.begin).value;
-		auto end = Traceable<StringRef>::toTraceValue(value.end).value;
-		TraceValue result;
-		result.value.reserve(begin.size() + end.size() + 3);
-		std::copy(begin.begin(), begin.end(), std::back_inserter(result.value));
-		result.value.push_back(' ');
-		result.value.push_back('-');
-		result.value.push_back(' ');
-		std::copy(end.begin(), end.end(), std::back_inserter(result.value));
+		auto begin = Traceable<StringRef>::toTraceValue(value.begin).get<TraceString>().value;
+		auto end = Traceable<StringRef>::toTraceValue(value.end).get<TraceString>().value;
+		TraceValue result("");
+		auto& resultString = result.get<TraceString>().value;
+		resultString.reserve(begin.size() + end.size() + 3);
+		std::copy(begin.begin(), begin.end(), std::back_inserter(resultString));
+		resultString.push_back(' ');
+		resultString.push_back('-');
+		resultString.push_back(' ');
+		std::copy(end.begin(), end.end(), std::back_inserter(resultString));
 		return result;
 	}
 };
@@ -464,7 +465,7 @@ struct string_serialized_traits<KeyValueRef> : std::true_type {
 template <>
 struct Traceable<KeyValueRef> : std::true_type {
 	static TraceValue toTraceValue(const KeyValueRef& value) {
-		return Traceable<KeyRef>::toTraceValue(value.key).value + format(":%d", value.value.size());
+		return TraceValue(Traceable<KeyRef>::toTraceValue(value.key).toString() + format(":%d", value.value.size()));
 	}
 };
 

@@ -983,12 +983,15 @@ TraceEvent& TraceEvent::detailImpl(std::string&& key, TraceValue&& traceValue, b
 	init();
 	if (enabled) {
 		++g_allocation_tracing_disabled;
-		if (maxFieldLength >= 0 && traceValue.value.size() > maxFieldLength) {
-			traceValue.value = traceValue.value.substr(0, maxFieldLength) + "...";
+		// FIXME: Enable truncating again
+		/*
+		if (maxFieldLength >= 0 && valueStr.size() > maxFieldLength) {
+		    valueStr = valueStr.substr(0, maxFieldLength) + "...";
 		}
+		*/
 
 		if (writeEventMetricField) {
-			tmpEventMetric->setField(key.c_str(), Standalone<StringRef>(StringRef(traceValue.value)));
+			tmpEventMetric->setField(key.c_str(), Standalone<StringRef>(StringRef(traceValue.toString())));
 		}
 
 		fields.addField(std::move(key), std::move(traceValue));
@@ -1302,7 +1305,7 @@ void TraceBatch::dump() {
 
 	for (int i = 0; i < attachBatch.size(); i++) {
 		if (g_network->isSimulated()) {
-			attachBatch[i].fields.addField("Machine", TraceValue(machine));
+			attachBatch[i].fields.addField("Machine", machine);
 		}
 		g_traceLog.writeEvent(attachBatch[i].fields, "", false);
 	}
@@ -1364,22 +1367,22 @@ TraceBatch::BuggifyInfo::BuggifyInfo(double time, int activated, int line, std::
 TraceEventFields::TraceEventFields() : bytes(0), annotated(false) {}
 
 void TraceEventFields::addField(const std::string& key, const TraceValue& value) {
-	bytes += key.size() + value.value.size();
+	bytes += key.size() + value.size();
 	fields.emplace_back(key, value);
 }
 
 void TraceEventFields::addField(const std::string& key, TraceValue&& value) {
-	bytes += key.size() + value.value.size();
+	bytes += key.size() + value.size();
 	fields.emplace_back(key, std::move(value));
 }
 
 void TraceEventFields::addField(std::string&& key, const TraceValue& value) {
-	bytes += key.size() + value.value.size();
+	bytes += key.size() + value.size();
 	fields.emplace_back(std::move(key), value);
 }
 
 void TraceEventFields::addField(std::string&& key, TraceValue&& value) {
-	bytes += key.size() + value.value.size();
+	bytes += key.size() + value.size();
 	fields.emplace_back(std::move(key), std::move(value));
 }
 
@@ -1415,7 +1418,7 @@ const TraceEventFields::Field& TraceEventFields::operator[](int index) const {
 bool TraceEventFields::tryGetValue(const std::string& key, std::string& outValue) const {
 	for (auto itr = begin(); itr != end(); ++itr) {
 		if (itr->first == key) {
-			outValue = itr->second.value;
+			outValue = itr->second.toString();
 			return true;
 		}
 	}
@@ -1523,13 +1526,13 @@ double TraceEventFields::getDouble(const std::string& key, bool permissive) cons
 std::string TraceEventFields::toString() const {
 	std::string str;
 	bool first = true;
-	for (auto itr = begin(); itr != end(); ++itr) {
+	for (const auto& [key, value] : *this) {
 		if (!first) {
 			str += ", ";
 		}
 		first = false;
 
-		str += format("\"%s\"=\"%s\"", itr->first.c_str(), itr->second.value.c_str());
+		str += format("\"%s\"=\"%s\"", key.c_str(), value.toString().c_str());
 	}
 
 	return str;
@@ -1561,8 +1564,8 @@ void TraceEventFields::validateFormat() const {
 				        field.first.c_str(),
 				        toString().c_str());
 			}
-			if (field.first == "Type" && !validateField(field.second.value.c_str(), true)) {
-				fprintf(stderr, "Trace event detail Type `%s' is invalid\n", field.second.value.c_str());
+			if (field.first == "Type" && !validateField(field.second.toString().c_str(), true)) {
+				fprintf(stderr, "Trace event detail Type `%s' is invalid\n", field.second.toString().c_str());
 			}
 		}
 	}

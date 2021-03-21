@@ -59,11 +59,9 @@ template <>
 struct Traceable<ICounter*> : std::true_type {
 	static TraceValue toTraceValue(ICounter const* counter) {
 		if (counter->hasRate() && counter->hasRoughness()) {
-			return TraceValue(
-			    format("[%g,%g,%lld]", counter->getRate(), counter->getRoughness(), (long long)counter->getValue()),
-			    false);
+			return TraceValue::create<TraceCounter>(counter->getRate(), counter->getRoughness(), counter->getValue());
 		} else {
-			return TraceValue(format("%lld", (long long)counter->getValue()), false);
+			return TraceValue::create<TraceNumeric>(format("%lld", (long long)counter->getValue()));
 		}
 	}
 };
