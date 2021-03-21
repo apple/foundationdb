@@ -126,14 +126,17 @@ public:
 	}
 	template <class T>
 	T const& get() const& {
+		ASSERT(std::holds_alternative<T>(value));
 		return std::get<T>(value);
 	}
 	template <class T>
 	T& get() & {
+		ASSERT(std::holds_alternative<T>(value));
 		return std::get<T>(value);
 	}
 	template <class T>
 	T&& get() && {
+		ASSERT(std::holds_alternative<T>(value));
 		return std::get<T>(std::move(value));
 	}
 
