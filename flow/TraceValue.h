@@ -27,8 +27,7 @@
 struct TraceBool {
 	bool value;
 
-	TraceBool() : value(false) {}
-	TraceBool(bool value) : value(value) {}
+	TraceBool(bool value = false) : value(value) {}
 
 	std::string toString() const;
 
@@ -44,19 +43,12 @@ struct TraceBool {
 struct TraceString final {
 	std::string value;
 
-	TraceString() = default;
-	TraceString(std::string const& value) : value(value) {}
+	TraceString(std::string const& value = "") : value(value) {}
 	TraceString(std::string&& value) : value(std::move(value)) {}
 	std::string const& toString() const& { return value; }
 	std::string toString() && { return std::move(value); }
-
 	size_t heapSize() const { return value.size(); }
-
-	void truncate(int maxFieldLength) {
-		if (value.size() > maxFieldLength) {
-			value = value.substr(0, maxFieldLength) + "...";
-		}
-	}
+	void truncate(int maxFieldLength);
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -67,8 +59,7 @@ struct TraceString final {
 struct TraceNumeric final {
 	std::string value;
 
-	TraceNumeric() = default;
-	TraceNumeric(std::string const& value) : value(value) {}
+	TraceNumeric(std::string const& value = "") : value(value) {}
 	TraceNumeric(std::string&& value) : value(std::move(value)) {}
 	std::string toString() const& { return value; }
 	std::string toString() && { return std::move(value); }
@@ -122,8 +113,8 @@ struct TraceValue {
 	explicit TraceValue(std::in_place_type_t<T> typeId, Args&&... args) : value(typeId, std::forward<Args>(args)...) {}
 
 public:
-	TraceValue(std::string const& value = "") : TraceValue(std::in_place_type<TraceString>, value) {}
-	TraceValue(std::string&& value) : TraceValue(std::in_place_type<TraceString>, std::move(value)) {}
+	TraceValue(std::string const& value = "");
+	TraceValue(std::string&& value);
 
 	template <class T, class... Args>
 	static TraceValue create(Args&&... args) {
@@ -145,26 +136,16 @@ public:
 		return std::get<T>(std::move(value));
 	}
 
-	std::string toString() const& {
-		return std::visit([](const auto& val) { return val.toString(); }, value);
-	}
-
-	std::string toString() && {
-		return std::visit([](auto&& val) { return std::move(val).toString(); }, value);
-	}
+	std::string toString() const&;
+	std::string toString() &&;
 
 	template <class Formatter>
 	std::string format(Formatter const& f) const {
 		return std::visit(f, value);
 	}
 
-	size_t size() const {
-		return sizeof(TraceValue) + std::visit([](auto const& v) { return v.heapSize(); }, value);
-	}
-
-	void truncate(int maxFieldLength) {
-		std::visit([maxFieldLength](auto& v) { v.truncate(maxFieldLength); }, value);
-	}
+	size_t size() const;
+	void truncate(int maxFieldLength);
 
 	template <class Ar>
 	void serialize(Ar& ar) {

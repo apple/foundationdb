@@ -21,6 +21,12 @@
 #include "flow/Arena.h"
 #include "flow/TraceValue.h"
 
+void TraceString::truncate(int maxFieldLength) {
+	if (value.size() > maxFieldLength) {
+		value = value.substr(0, maxFieldLength) + "...";
+	}
+}
+
 std::string TraceBool::toString() const {
 	return format("%d", value);
 }
@@ -61,4 +67,23 @@ std::string TraceVector::toString() const {
 		}
 	}
 	return result;
+}
+
+TraceValue::TraceValue(std::string const& value) : TraceValue(std::in_place_type<TraceString>, value) {}
+TraceValue::TraceValue(std::string&& value) : TraceValue(std::in_place_type<TraceString>, std::move(value)) {}
+
+std::string TraceValue::toString() const& {
+	return std::visit([](const auto& val) { return val.toString(); }, value);
+}
+
+std::string TraceValue::toString() && {
+	return std::visit([](auto&& val) { return std::move(val).toString(); }, value);
+}
+
+size_t TraceValue::size() const {
+	return sizeof(TraceValue) + std::visit([](auto const& v) { return v.heapSize(); }, value);
+}
+
+void TraceValue::truncate(int maxFieldLength) {
+	std::visit([maxFieldLength](auto& v) { v.truncate(maxFieldLength); }, value);
 }
