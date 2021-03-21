@@ -38,6 +38,7 @@ public:
 	std::string toString() const { return format("%d", value); }
 
 	static constexpr size_t heapSize() { return 0; }
+	static constexpr void truncate(int) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -55,6 +56,12 @@ public:
 
 	size_t heapSize() const { return value.size(); }
 
+	void truncate(int maxFieldLength) {
+		if (value.size() > maxFieldLength) {
+			value = value.substr(0, maxFieldLength) + "...";
+		}
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, value);
@@ -70,6 +77,7 @@ public:
 	std::string toString() const { return value; }
 
 	size_t heapSize() const { return value.size(); }
+	static constexpr void truncate(int) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -88,6 +96,8 @@ public:
 	std::string toString() const { return format("%g %g %lld", rate, roughness, value); }
 
 	static constexpr size_t heapSize() { return 0; }
+	static constexpr void truncate(int) {}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, rate, roughness, value);
@@ -130,6 +140,10 @@ public:
 
 	size_t size() const {
 		return sizeof(TraceValue) + std::visit([](auto const& v) { return v.heapSize(); }, value);
+	}
+
+	void truncate(int maxFieldLength) {
+		std::visit([maxFieldLength](auto& v) { v.truncate(maxFieldLength); }, value);
 	}
 
 	template <class Ar>

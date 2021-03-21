@@ -983,12 +983,9 @@ TraceEvent& TraceEvent::detailImpl(std::string&& key, TraceValue&& traceValue, b
 	init();
 	if (enabled) {
 		++g_allocation_tracing_disabled;
-		// FIXME: Enable truncating again
-		/*
-		if (maxFieldLength >= 0 && valueStr.size() > maxFieldLength) {
-		    valueStr = valueStr.substr(0, maxFieldLength) + "...";
+		if (maxFieldLength >= 0) {
+			traceValue.truncate(maxFieldLength);
 		}
-		*/
 
 		if (writeEventMetricField) {
 			tmpEventMetric->setField(key.c_str(), Standalone<StringRef>(StringRef(traceValue.toString())));

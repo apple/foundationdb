@@ -67,8 +67,8 @@ static void bench_trace(benchmark::State& state) {
 	              "");
 	CounterCollection cc("CC");
 	Counter c("C", cc);
-	std::string shortString = ".....";
-	std::string longString(1000, '.');
+	std::string shortString = "xxxxx";
+	std::string longString(1000, 'x');
 	while (state.KeepRunning()) {
 		SampleTrace te;
 		te.createAndDetail<bool>();
