@@ -192,7 +192,7 @@ private:
 
 template <>
 struct Traceable<IPAddress> : std::true_type {
-	static TraceValue toTraceValue(const IPAddress& value) { return TraceValue(value.toString()); }
+	static TraceValue toTraceValue(const IPAddress& value) { return value.toString(); }
 };
 
 struct NetworkAddress {
@@ -265,7 +265,7 @@ struct NetworkAddress {
 
 template <>
 struct Traceable<NetworkAddress> : std::true_type {
-	static TraceValue toTraceValue(const NetworkAddress& value) { return TraceValue(value.toString()); }
+	static TraceValue toTraceValue(const NetworkAddress& value) { return value.toString(); }
 };
 
 namespace std {

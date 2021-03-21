@@ -252,7 +252,7 @@ struct TraceableString {
 
 	static bool atEnd(const Str& value, decltype(value.begin()) iter) { return iter == value.end(); }
 
-	static TraceValue toTraceValue(const Str& value) { return TraceValue(value.toString()); }
+	static TraceValue toTraceValue(const Str& value) { return value.toString(); }
 };
 
 template <>
@@ -287,7 +287,7 @@ struct TraceableString<char[S]> {
 		return iter - value == S - 1; // Exclude trailing \0 byte
 	}
 
-	static TraceValue toTraceValue(const char* value) { return TraceValue(traceableStringToString(value, S)); }
+	static TraceValue toTraceValue(const char* value) { return traceableStringToString(value, S); }
 };
 
 template <>
@@ -296,7 +296,7 @@ struct TraceableString<char*> {
 
 	static bool atEnd(char* value, const char* iter) { return *iter == '\0'; }
 
-	static TraceValue toTraceValue(char* value) { return TraceValue(std::string(value)); }
+	static TraceValue toTraceValue(char* value) { return std::string(value); }
 };
 
 template <class T>

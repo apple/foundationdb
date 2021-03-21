@@ -46,6 +46,7 @@ struct TraceString final {
 
 	TraceString() = default;
 	TraceString(std::string const& value) : value(value) {}
+	TraceString(std::string&& value) : value(std::move(value)) {}
 	std::string const& toString() const& { return value; }
 	std::string toString() && { return std::move(value); }
 
@@ -68,6 +69,7 @@ struct TraceNumeric final {
 
 	TraceNumeric() = default;
 	TraceNumeric(std::string const& value) : value(value) {}
+	TraceNumeric(std::string&& value) : value(std::move(value)) {}
 	std::string toString() const& { return value; }
 	std::string toString() && { return std::move(value); }
 
@@ -120,7 +122,8 @@ struct TraceValue {
 	explicit TraceValue(std::in_place_type_t<T> typeId, Args&&... args) : value(typeId, std::forward<Args>(args)...) {}
 
 public:
-	TraceValue(std::string const& value = "") : TraceValue(std::in_place_type<TraceString>, std::move(value)) {}
+	TraceValue(std::string const& value = "") : TraceValue(std::in_place_type<TraceString>, value) {}
+	TraceValue(std::string&& value) : TraceValue(std::in_place_type<TraceString>, std::move(value)) {}
 
 	template <class T, class... Args>
 	static TraceValue create(Args&&... args) {
