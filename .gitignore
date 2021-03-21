@@ -70,6 +70,8 @@ trace.*.xml
 *.user
 .idea/
 .project
+.projectile
+.dir-locals.el
 .pydevproject
 .vscode
 .vs/
