@@ -51,6 +51,20 @@ public:
 	std::string operator()(TraceString const& v) const { return "\"" + escapeString(v.value) + "\""; }
 	std::string operator()(TraceCounter const& v) const { return format("[%g,%g,%lld]", v.rate, v.roughness, v.value); }
 	std::string operator()(TraceNumeric const& v) const { return v.value; }
+	std::string operator()(TraceVector const& v) const {
+		std::string result = "[";
+		bool first = true;
+		for (const auto& tv : v.values) {
+			if (first) {
+				first = false;
+			} else {
+				result.push_back(',');
+			}
+			result += tv.toString();
+		}
+		result.push_back(']');
+		return result;
+	}
 } jsonValueFormatter;
 
 void JsonTraceLogFormatter::addref() {

@@ -64,6 +64,7 @@ set(FLOW_SRCS
   ThreadSafeQueue.h
   Trace.cpp
   Trace.h
+  TraceValue.cpp
   Tracing.h
   Tracing.actor.cpp
   TreeBenchmark.h

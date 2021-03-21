@@ -24,18 +24,13 @@
 
 #include <string>
 
-// forward declare format from flow.h as we
-// can't include flow.h here
-std::string format(const char* form, ...);
-
 struct TraceBool {
 	bool value;
 
-public:
 	TraceBool() : value(false) {}
 	TraceBool(bool value) : value(value) {}
 
-	std::string toString() const { return format("%d", value); }
+	std::string toString() const;
 
 	static constexpr size_t heapSize() { return 0; }
 	static constexpr void truncate(int) {}
@@ -49,7 +44,6 @@ public:
 struct TraceString final {
 	std::string value;
 
-public:
 	TraceString() = default;
 	TraceString(std::string const& value) : value(value) {}
 	std::string toString() const { return value; }
@@ -71,7 +65,6 @@ public:
 struct TraceNumeric final {
 	std::string value;
 
-public:
 	TraceNumeric() = default;
 	TraceNumeric(std::string const& value) : value(value) {}
 	std::string toString() const { return value; }
@@ -90,11 +83,10 @@ struct TraceCounter {
 	double roughness;
 	int64_t value;
 
-public:
 	TraceCounter() : rate(0.0), roughness(0.0), value(0) {}
 	TraceCounter(double rate, double roughness, int64_t value) : rate(rate), roughness(roughness), value(value) {}
-	std::string toString() const { return format("%g %g %lld", rate, roughness, value); }
 
+	std::string toString() const;
 	static constexpr size_t heapSize() { return 0; }
 	static constexpr void truncate(int) {}
 
@@ -104,8 +96,24 @@ public:
 	}
 };
 
+struct TraceVector {
+	int maxFieldLength{ -1 };
+	std::vector<struct TraceValue> values;
+
+	TraceVector() = default;
+	void push_back(TraceValue&&);
+	size_t heapSize() const;
+	void truncate(int maxFieldLength);
+	std::string toString() const;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, values);
+	}
+};
+
 struct TraceValue {
-	std::variant<TraceString, TraceBool, TraceCounter, TraceNumeric> value;
+	std::variant<TraceString, TraceBool, TraceCounter, TraceNumeric, TraceVector> value;
 	template <class T, class... Args>
 	explicit TraceValue(std::in_place_type_t<T> typeId, Args&&... args) : value(typeId, std::forward<Args>(args)...) {}
 

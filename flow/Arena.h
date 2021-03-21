@@ -1309,18 +1309,11 @@ struct Traceable<VectorRef<T>> {
 	constexpr static bool value = Traceable<T>::value;
 
 	static TraceValue toTraceValue(const VectorRef<T>& value) {
-		TraceValue result = TraceValue::create<TraceString>("[");
-		auto& resultString = result.get<TraceString>().value;
-		bool first = true;
+		auto result = TraceValue::create<TraceVector>();
+		auto& vec = result.get<TraceVector>();
 		for (const auto& v : value) {
-			if (first) {
-				first = false;
-			} else {
-				resultString.push_back(',');
-			}
-			resultString += Traceable<T>::toTraceValue(v).toString();
+			vec.push_back(Traceable<T>::toTraceValue(v));
 		}
-		resultString.push_back(']');
 		return result;
 	}
 };

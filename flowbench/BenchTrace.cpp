@@ -68,7 +68,11 @@ static void bench_trace(benchmark::State& state) {
 	CounterCollection cc("CC");
 	Counter c("C", cc);
 	std::string shortString = "xxxxx";
-	std::string longString(1000, 'x');
+	std::string longString(100, 'x');
+	Standalone<VectorRef<int>> vec;
+	for (int i = 0; i < 10; ++i) {
+		vec.push_back(vec.arena(), i);
+	}
 	while (state.KeepRunning()) {
 		SampleTrace te;
 		te.createAndDetail<bool>();
@@ -83,10 +87,11 @@ static void bench_trace(benchmark::State& state) {
 		te.createAndDetail<long long int>();
 		te.createAndDetail<unsigned long long int>();
 		te.createAndDetail<std::string>();
-		te.createAndDetail<std::string>(1000, '.');
+		te.createAndDetail<std::string>(100, 'x');
 		te.detail(shortString);
 		te.detail(longString);
 		te.detail(c);
+		te.detail(vec);
 	}
 	state.SetItemsProcessed(static_cast<long>(state.iterations()));
 }
