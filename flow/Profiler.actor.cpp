@@ -142,6 +142,8 @@ struct Profiler {
 	}
 
 	void signal_handler() { // async signal safe!
+		static std::atomic<bool> inSigHandler = false;
+		if (inSigHandler.exchange(true)) { return; }
 		if (profilingEnabled) {
 			double t = timer();
 			output_buffer->push(*(void**)&t);
