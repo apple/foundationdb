@@ -1567,7 +1567,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	    .detail("StartingConfiguration", pStartingConfiguration->toString());
 }
 
-
+// Populates the TestConfig fields according to what is found in the test file.
 void checkTestConf(const char* testFile, TestConfig* testConfig) {
 	std::ifstream ifs;
 	ifs.open(testFile, std::ifstream::in);
