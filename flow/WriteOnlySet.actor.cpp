@@ -92,7 +92,7 @@ std::vector<Reference<T>> WriteOnlySet<T, IndexType, CAPACITY>::copy() {
 				// we try to unlock now. If this element was removed while we incremented the refcount, the element will
 				// end up in the freeList, so we will decrement later.
 				_set[i].compare_exchange_strong(ptr, ptr ^ LOCK);
-				result.push_back(entry);
+				result.push_back(Reference(entry));
 			}
 		}
 	}
