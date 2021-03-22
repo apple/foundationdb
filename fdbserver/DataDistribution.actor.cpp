@@ -620,6 +620,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	int healthyTeamCount;
 	Reference<AsyncVar<bool>> zeroHealthyTeams;
+	bool shuttingDown = false;
 
 	int optimalTeamCount;
 	AsyncVar<bool> zeroOptimalTeams;
@@ -717,6 +718,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	~DDTeamCollection() {
+		shuttingDown = true; // Prevent recruiting new teams when zeroHealthyTeams signals
+		teamBuilder.cancel();
+		// TraceEvent("DDTeamCollectionDestructed", distributorId)
+		//    .detail("Primary", primary)
+		//    .detail("TeamBuilderDestroyed", server_info.size());
+
 		TraceEvent("DDTeamCollectionDestructed", distributorId).detail("Primary", primary);
 		// Other teamCollections also hold pointer to this teamCollection;
 		// TeamTracker may access the destructed DDTeamCollection if we do not reset the pointer
@@ -753,13 +760,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			info->tracker.cancel();
 			info->collection = nullptr;
 		}
-		// TraceEvent("DDTeamCollectionDestructed", distributorId)
-		//     .detail("Primary", primary)
-		//     .detail("ServerTrackerDestroyed", server_info.size());
-		teamBuilder.cancel();
-		// TraceEvent("DDTeamCollectionDestructed", distributorId)
-		//     .detail("Primary", primary)
-		//     .detail("TeamBuilderDestroyed", server_info.size());
+		TraceEvent("DDTeamCollectionDestructed", distributorId)
+		    .detail("Primary", primary)
+		    .detail("ServerTrackerDestroyed", server_info.size());
 	}
 
 	void addLaggingStorageServer(Key zoneId) {
@@ -4688,7 +4691,11 @@ ACTOR Future<Void> monitorHealthyTeams(DDTeamCollection* self) {
 			self->doBuildTeams = true;
 			wait(DDTeamCollection::checkBuildTeams(self));
 		}
-		when(wait(self->zeroHealthyTeams->onChange())) {}
+		when(wait(self->zeroHealthyTeams->onChange())) {
+			if (self->shuttingDown) {
+				return Void();
+			}
+		}
 	}
 }
 
@@ -4754,7 +4761,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(Reference<DDTeamCollection> te
 				self->restartRecruiting.trigger();
 			}
 			when(wait(self->zeroHealthyTeams->onChange())) {
-				if (self->zeroHealthyTeams->get()) {
+				if (self->zeroHealthyTeams->get() && !self->shuttingDown) {
 					self->restartRecruiting.trigger();
 					self->noHealthyTeams();
 				}
