@@ -1,5 +1,8 @@
 # How a commit is done in FDB
 
+This doc describes how commit is done in FDB 6.3+.
+The commit path in FDB 6.3 and before is documented in [documentation/sphinx/source/read-write-path.rst](https://github.com/apple/foundationdb/pull/4099).
+
 ## Overall description
 
 Legend:
