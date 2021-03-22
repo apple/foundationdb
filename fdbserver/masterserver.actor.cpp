@@ -1416,8 +1416,16 @@ ACTOR Future<Void> trackTlogRecovery(Reference<MasterData> self,
 		self->logSystem->toCoreState(newState);
 		newState.recoveryCount = recoverCount;
 		state Future<Void> changed = self->logSystem->onCoreStateChanged();
-		ASSERT(newState.tLogs[0].tLogWriteAntiQuorum == self->configuration.tLogWriteAntiQuorum &&
-		       newState.tLogs[0].tLogReplicationFactor == self->configuration.tLogReplicationFactor);
+		if (newState.tLogs[0].tLogWriteAntiQuorum != self->configuration.tLogWriteAntiQuorum ||
+		    newState.tLogs[0].tLogReplicationFactor != self->configuration.tLogReplicationFactor) {
+			TraceEvent("MasterConfigChanged", self->dbgid)
+			    .setMaxEventLength(11000)
+			    .setMaxFieldLength(10000)
+			    .detail("Config", self->configuration.toString())
+			    .detail("TLogWriteAntiQuorum", newState.tLogs[0].tLogWriteAntiQuorum)
+			    .detail("TLogReplicationFactor", newState.tLogs[0].tLogReplicationFactor);
+			throw master_recovery_failed();
+		}
 
 		state bool allLogs =
 		    newState.tLogs.size() ==
