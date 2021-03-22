@@ -1,5 +1,5 @@
 /*
- * WriteOnlySet.cpp
+ * WriteOnlySet.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -50,7 +50,9 @@ public:
 
 	explicit WriteOnlySet();
 	WriteOnlySet(const WriteOnlySet&) = delete;
+	WriteOnlySet(WriteOnlySet&&) = delete;
 	WriteOnlySet& operator=(const WriteOnlySet&) = delete;
+	WriteOnlySet& operator=(WriteOnlySet&&) = delete;
 
 	/**
 	 * Attempts to insert \p lineage into the set. This method can fail if the set is full (its size is equal to its
@@ -93,7 +95,7 @@ private:
 	// The actual memory
 	std::vector<std::atomic<std::uintptr_t>> _set;
 	static_assert(std::atomic<Index>::is_always_lock_free, "Index type can't be used as a lock-free type");
-	static_assert(std::atomic<Index>::is_always_lock_free, "uintptr_t can't be used as a lock-free type");
+	static_assert(std::atomic<uintptr_t>::is_always_lock_free, "uintptr_t can't be used as a lock-free type");
 
 	// The freeQueue. On creation all indexes (0..capacity-1) are pushed into this queue. On insert one element from
 	// this queue is consumed and the resulting number is used as an index into the set. On erase the index is given
