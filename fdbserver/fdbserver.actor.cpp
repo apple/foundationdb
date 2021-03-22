@@ -66,6 +66,7 @@
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
 #include "flow/Tracing.h"
+#include "flow/WriteOnlySet.h"
 
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
@@ -1572,6 +1573,9 @@ private:
 } // namespace
 
 int main(int argc, char* argv[]) {
+	// TODO: Remove later, this is just to force the statics to be initialized
+	// otherwise the unit test won't run
+	ActorLineageSet _;
 	try {
 		platformInit();
 
