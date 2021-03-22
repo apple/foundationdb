@@ -25,13 +25,14 @@
 #include <string>
 
 struct TraceBool {
+	constexpr static FileIdentifier file_identifier = 7918345;
 	bool value;
 
 	TraceBool(bool value = false) : value(value) {}
 
 	std::string toString() const;
 
-	static constexpr size_t heapSize() { return 0; }
+	static constexpr size_t size() { return 1; }
 	static constexpr void truncate(int) {}
 
 	template <class Ar>
@@ -41,13 +42,14 @@ struct TraceBool {
 };
 
 struct TraceString final {
+	constexpr static FileIdentifier file_identifier = 8923844;
 	std::string value;
 
 	TraceString(std::string const& value = "") : value(value) {}
 	TraceString(std::string&& value) : value(std::move(value)) {}
 	std::string const& toString() const& { return value; }
 	std::string toString() && { return std::move(value); }
-	size_t heapSize() const { return value.size(); }
+	size_t size() const { return value.size(); }
 	void truncate(int maxFieldLength);
 
 	template <class Ar>
@@ -57,6 +59,7 @@ struct TraceString final {
 };
 
 struct TraceNumeric final {
+	constexpr static FileIdentifier file_identifier = 285900351;
 	std::string value;
 
 	TraceNumeric(std::string const& value = "") : value(value) {}
@@ -64,7 +67,7 @@ struct TraceNumeric final {
 	std::string toString() const& { return value; }
 	std::string toString() && { return std::move(value); }
 
-	size_t heapSize() const { return value.size(); }
+	size_t size() const { return value.size(); }
 	static constexpr void truncate(int) {}
 
 	template <class Ar>
@@ -74,6 +77,7 @@ struct TraceNumeric final {
 };
 
 struct TraceCounter {
+	constexpr static FileIdentifier file_identifier = 19843497;
 	double rate;
 	double roughness;
 	int64_t value;
@@ -82,7 +86,9 @@ struct TraceCounter {
 	TraceCounter(double rate, double roughness, int64_t value) : rate(rate), roughness(roughness), value(value) {}
 
 	std::string toString() const;
-	static constexpr size_t heapSize() { return 0; }
+	size_t size() const {
+		return toString().size();
+	}
 	static constexpr void truncate(int) {}
 
 	template <class Ar>
@@ -92,18 +98,19 @@ struct TraceCounter {
 };
 
 struct TraceVector {
+	constexpr static FileIdentifier file_identifier = 6925899;
 	int maxFieldLength{ -1 };
 	std::vector<struct TraceValue> values;
 
 	TraceVector() = default;
 	void push_back(TraceValue&&);
-	size_t heapSize() const;
+	size_t size() const;
 	void truncate(int maxFieldLength);
 	std::string toString() const;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, values);
+		serializer(ar, maxFieldLength, values);
 	}
 };
 
@@ -113,6 +120,7 @@ struct TraceValue {
 	explicit TraceValue(std::in_place_type_t<T> typeId, Args&&... args) : value(typeId, std::forward<Args>(args)...) {}
 
 public:
+	constexpr static FileIdentifier file_identifier = 2947802;
 	TraceValue(std::string const& value = "");
 	TraceValue(std::string&& value);
 

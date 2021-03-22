@@ -43,7 +43,7 @@ void TraceVector::push_back(TraceValue&& tv) {
 	values.push_back(std::move(tv));
 }
 
-size_t TraceVector::heapSize() const {
+size_t TraceVector::size() const {
 	size_t result = 0;
 	for (const auto& v : values) {
 		result += v.size();
@@ -81,7 +81,7 @@ std::string TraceValue::toString() && {
 }
 
 size_t TraceValue::size() const {
-	return sizeof(TraceValue) + std::visit([](auto const& v) { return v.heapSize(); }, value);
+	return std::visit([](auto const& v) { return v.size(); }, value);
 }
 
 void TraceValue::truncate(int maxFieldLength) {
