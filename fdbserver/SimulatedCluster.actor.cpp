@@ -673,6 +673,9 @@ IPAddress makeIPAddressForSim(bool isIPv6, std::array<int, 4> parts) {
 
 #include "fdbclient/MonitorLeader.h"
 
+// Configures the system according to the given specifications in order to run
+// simulation, but with the additional consideration that it is meant to act
+// like a "rebooted" machine, mostly used for restarting tests.
 ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
                                           std::string baseFolder,
                                           int* pTesterCount,
@@ -1238,6 +1241,8 @@ void SimulationConfig::generateNormalConfig(TestConfig testConfig) {
 	}
 }
 
+// Configures the system according to the given specifications in order to run
+// simulation under the correct conditions
 void setupSimulatedSystem(vector<Future<Void>>* systemActors,
                           std::string baseFolder,
                           int* pTesterCount,
