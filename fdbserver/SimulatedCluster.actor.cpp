@@ -812,7 +812,7 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
 }
 
 struct SimulationConfig {
-	explicit SimulationConfig(TestConfig testConfig);
+	explicit SimulationConfig(const TestConfig& testConfig);
 	int extraDB;
 
 	DatabaseConfiguration db;
@@ -826,10 +826,10 @@ struct SimulationConfig {
 	int coordinators;
 
 private:
-	void generateNormalConfig(TestConfig testConfig);
+	void generateNormalConfig(const TestConfig& testConfig);
 };
 
-SimulationConfig::SimulationConfig(TestConfig testConfig) {
+SimulationConfig::SimulationConfig(const TestConfig& testConfig) {
 	generateNormalConfig(testConfig);
 }
 
@@ -846,7 +846,7 @@ StringRef StringRefOf(const char* s) {
 	return StringRef((uint8_t*)s, strlen(s));
 }
 
-void SimulationConfig::generateNormalConfig(TestConfig testConfig) {
+void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	set_config("new");
 	const bool simple = false; // Set true to simplify simulation configs for easier debugging
 	// generateMachineTeamTestConfig set up the number of servers per machine and the number of machines such that
