@@ -352,7 +352,7 @@ struct NetworkMetrics {
 		}
 	}
 
-	// Since networkBusyness is atomic we need to redfine copy assignment operator
+	// Since networkBusyness is atomic we need to redefine copy assignment operator
 	NetworkMetrics& operator=(const NetworkMetrics& rhs) {
 		for (int i = 0; i < SLOW_EVENT_BINS; i++) {
 			countSlowEvents[i] = rhs.countSlowEvents[i];
