@@ -478,7 +478,7 @@ public:
 					for (auto itr = events[idx].begin(); itr != events[idx].end(); ++itr) {
 						if (itr->first == "Time") {
 							time = TraceEvent::getCurrentTime();
-							rolledFields.addField("Time", format("%.6f", time));
+							rolledFields.addField("Time", TraceValue::create<TraceNumeric>(format("%.6f", time)));
 							rolledFields.addField("OriginalTime", itr->second);
 						} else if (itr->first == "DateTime") {
 							UNSTOPPABLE_ASSERT(time > 0); // "Time" field should always come first
@@ -925,7 +925,7 @@ bool TraceEvent::init() {
 		}
 
 		detail("Severity", int(severity));
-		detail("Time", "0.000000");
+		detail("Time", TraceValue::create<TraceNumeric>(std::string("0.000000")));
 		timeIndex = fields.size() - 1;
 		if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
 			detail("DateTime", "");
@@ -1329,7 +1329,7 @@ void TraceBatch::dump() {
 
 TraceBatch::EventInfo::EventInfo(double time, const char* name, uint64_t id, const char* location) {
 	fields.addField("Severity", format("%d", (int)TRACE_BATCH_IMPLICIT_SEVERITY));
-	fields.addField("Time", format("%.6f", time));
+	fields.addField("Time", TraceValue::create<TraceNumeric>(format("%.6f", time)));
 	if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
 		fields.addField("DateTime", printRealTime(time));
 	}
@@ -1340,7 +1340,7 @@ TraceBatch::EventInfo::EventInfo(double time, const char* name, uint64_t id, con
 
 TraceBatch::AttachInfo::AttachInfo(double time, const char* name, uint64_t id, uint64_t to) {
 	fields.addField("Severity", format("%d", (int)TRACE_BATCH_IMPLICIT_SEVERITY));
-	fields.addField("Time", format("%.6f", time));
+	fields.addField("Time", TraceValue::create<TraceNumeric>(format("%.6f", time)));
 	if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
 		fields.addField("DateTime", printRealTime(time));
 	}
@@ -1351,7 +1351,7 @@ TraceBatch::AttachInfo::AttachInfo(double time, const char* name, uint64_t id, u
 
 TraceBatch::BuggifyInfo::BuggifyInfo(double time, int activated, int line, std::string file) {
 	fields.addField("Severity", format("%d", (int)TRACE_BATCH_IMPLICIT_SEVERITY));
-	fields.addField("Time", format("%.6f", time));
+	fields.addField("Time", TraceValue::create<TraceNumeric>(format("%.6f", time)));
 	if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
 		fields.addField("DateTime", printRealTime(time));
 	}

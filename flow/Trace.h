@@ -236,6 +236,11 @@ FORMAT_NUMERIC_TRACEABLE(volatile unsigned long long, "%llu");
 FORMAT_NUMERIC_TRACEABLE(volatile double, "%g");
 
 template <>
+struct Traceable<TraceValue> : std::true_type {
+	static TraceValue toTraceValue(TraceValue const& traceValue) { return traceValue; }
+};
+
+template <>
 struct Traceable<bool> : std::true_type {
 	static TraceValue toTraceValue(bool value) { return TraceValue::create<TraceBool>(value); }
 };
