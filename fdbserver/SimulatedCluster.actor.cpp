@@ -1632,8 +1632,6 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state int testerCount = 1;
 	state TestConfig testConfig;
 	checkTestConf(testFile, &testConfig);
-	g_simulator.hasDiffProtocolProcess = testConfig.startIncompatibleProcess;
-	g_simulator.setDiffProtocol = false;
 
 	state ProtocolVersion protocolVersion = currentProtocolVersion;
 	if (testConfig.startIncompatibleProcess) {
