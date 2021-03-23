@@ -20,7 +20,6 @@
 
 #ifndef FDBCLIENT_ICLIENTAPI_H
 #define FDBCLIENT_ICLIENTAPI_H
-#include "fdbclient/ManagementAPI.actor.h"
 #pragma once
 
 #include "fdbclient/FDBOptions.g.h"
