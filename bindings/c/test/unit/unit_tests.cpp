@@ -2113,8 +2113,8 @@ TEST_CASE("block_from_callback") {
 	context.event.wait();
 }
 
+// monitors network busyness for 2 sec (40 readings)
 TEST_CASE("monitor_network_busyness") {
-	// monitors network busyness for 2 sec (40 readings)
 	bool containsGreaterZero = false;
 	for (int i = 0; i < 40; i++) {
 		double busyness = fdb_database_get_main_thread_busyness(db);
