@@ -45,8 +45,9 @@ struct TraceString final {
 	constexpr static FileIdentifier file_identifier = 8923844;
 	std::string value;
 
-	TraceString(std::string const& value = "") : value(value) {}
-	TraceString(std::string&& value) : value(std::move(value)) {}
+	TraceString() = default;
+	template <class U, typename std::enable_if_t<!std::is_same_v<std::decay_t<U>, TraceString>, int> = 0>
+	TraceString(U&& value) : value(std::forward<U>(value)) {}
 	std::string const& toString() const& { return value; }
 	std::string toString() && { return std::move(value); }
 	size_t size() const { return value.size(); }
@@ -62,8 +63,9 @@ struct TraceNumeric final {
 	constexpr static FileIdentifier file_identifier = 285900351;
 	std::string value;
 
-	TraceNumeric(std::string const& value = "") : value(value) {}
-	TraceNumeric(std::string&& value) : value(std::move(value)) {}
+	TraceNumeric() = default;
+	template <class U, typename std::enable_if_t<!std::is_same_v<std::decay_t<U>, TraceNumeric>, int> = 0>
+	TraceNumeric(U&& value) : value(std::forward<U>(value)) {}
 	std::string toString() const& { return value; }
 	std::string toString() && { return std::move(value); }
 
@@ -123,8 +125,9 @@ struct TraceValue {
 
 public:
 	constexpr static FileIdentifier file_identifier = 2947802;
-	TraceValue(std::string const& value = "");
-	TraceValue(std::string&& value);
+	TraceValue() : value(TraceString{}) {}
+	template <class U, typename std::enable_if_t<!std::is_same_v<std::decay_t<U>, TraceValue>, int> = 0>
+	TraceValue(U&& value) : value(TraceString(std::forward<U>(value))) {}
 
 	template <class T, class... Args>
 	static TraceValue create(Args&&... args) {

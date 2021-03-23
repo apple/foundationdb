@@ -396,7 +396,7 @@ public:
 		annotateEvent(fields);
 
 		if (!trackLatestKey.empty()) {
-			fields.addField("TrackLatestType", TraceValue("Original"));
+			fields.addField("TrackLatestType", "Original");
 		}
 
 		if (!isOpen() &&
@@ -485,7 +485,7 @@ public:
 							rolledFields.addField("DateTime", printRealTime(time));
 							rolledFields.addField("OriginalDateTime", itr->second);
 						} else if (itr->first == "TrackLatestType") {
-							rolledFields.addField("TrackLatestType", TraceValue("Rolled"));
+							rolledFields.addField("TrackLatestType", "Rolled");
 						} else {
 							rolledFields.addField(itr->first, itr->second);
 						}
@@ -925,7 +925,7 @@ bool TraceEvent::init() {
 		}
 
 		detail("Severity", int(severity));
-		detail("Time", TraceValue::create<TraceNumeric>(std::string("0.000000")));
+		detail("Time", TraceValue::create<TraceNumeric>("0.000000"));
 		timeIndex = fields.size() - 1;
 		if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
 			detail("DateTime", "");
@@ -1168,7 +1168,7 @@ void TraceEvent::log() {
 		try {
 			if (enabled) {
 				double time = TraceEvent::getCurrentTime();
-				fields.mutate(timeIndex).second = TraceValue(format("%.6f", time));
+				fields.mutate(timeIndex).second = format("%.6f", time);
 				if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
 					fields.mutate(timeIndex + 1).second = printRealTime(time);
 				}
@@ -1333,9 +1333,9 @@ TraceBatch::EventInfo::EventInfo(double time, const char* name, uint64_t id, con
 	if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
 		fields.addField("DateTime", printRealTime(time));
 	}
-	fields.addField("Type", TraceValue(name));
+	fields.addField("Type", name);
 	fields.addField("ID", format("%016" PRIx64, id));
-	fields.addField("Location", TraceValue(location));
+	fields.addField("Location", location);
 }
 
 TraceBatch::AttachInfo::AttachInfo(double time, const char* name, uint64_t id, uint64_t to) {
@@ -1344,7 +1344,7 @@ TraceBatch::AttachInfo::AttachInfo(double time, const char* name, uint64_t id, u
 	if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
 		fields.addField("DateTime", printRealTime(time));
 	}
-	fields.addField("Type", TraceValue(name));
+	fields.addField("Type", name);
 	fields.addField("ID", format("%016" PRIx64, id));
 	fields.addField("To", format("%016" PRIx64, to));
 }
@@ -1355,7 +1355,7 @@ TraceBatch::BuggifyInfo::BuggifyInfo(double time, int activated, int line, std::
 	if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
 		fields.addField("DateTime", printRealTime(time));
 	}
-	fields.addField("Type", TraceValue("BuggifySection"));
+	fields.addField("Type", "BuggifySection");
 	fields.addField("Activated", format("%d", activated));
 	fields.addField("File", std::move(file));
 	fields.addField("Line", format("%d", line));

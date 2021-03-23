@@ -69,9 +69,6 @@ std::string TraceVector::toString() const {
 	return result;
 }
 
-TraceValue::TraceValue(std::string const& value) : TraceValue(std::in_place_type<TraceString>, value) {}
-TraceValue::TraceValue(std::string&& value) : TraceValue(std::in_place_type<TraceString>, std::move(value)) {}
-
 std::string TraceValue::toString() const& {
 	return std::visit([](auto const& val) { return val.toString(); }, value);
 }

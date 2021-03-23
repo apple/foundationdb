@@ -282,7 +282,7 @@ struct TraceableString<const char*> {
 
 	static bool atEnd(const char* value, const char* iter) { return *iter == '\0'; }
 
-	static TraceValue toTraceValue(const char* value) { return TraceValue(std::string(value)); }
+	static TraceValue toTraceValue(const char* value) { return TraceValue(value); }
 };
 
 std::string traceableStringToString(const char* value, size_t S);
@@ -305,7 +305,7 @@ struct TraceableString<char*> {
 
 	static bool atEnd(char* value, const char* iter) { return *iter == '\0'; }
 
-	static TraceValue toTraceValue(char* value) { return std::string(value); }
+	static TraceValue toTraceValue(char* value) { return TraceValue(value); }
 };
 
 template <class T>
@@ -329,7 +329,7 @@ struct TraceableStringImpl : std::true_type {
 		if (nonPrintables == 0 && numBackslashes == 0) {
 			return TraceableString<T>::toTraceValue(std::forward<Str>(value));
 		}
-		TraceValue result = TraceValue("");
+		TraceValue result;
 		auto& resultString = result.get<TraceString>().value;
 		resultString.reserve(size - nonPrintables + (nonPrintables * 4) + numBackslashes);
 		for (auto iter = TraceableString<T>::begin(value); !TraceableString<T>::atEnd(value, iter); ++iter) {
@@ -360,7 +360,8 @@ template <>
 struct Traceable<std::string> : TraceableStringImpl<std::string> {};
 
 template <class T>
-struct SpecialTraceMetricType : std::is_integral<T>::type {
+struct SpecialTraceMetricType
+  : std::conditional_t<std::is_integral_v<T> || std::is_enum_v<T>, std::true_type, std::false_type> {
 	static int64_t getValue(T v) { return v; }
 };
 
