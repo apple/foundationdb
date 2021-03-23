@@ -137,9 +137,9 @@ class Net2 final : public INetwork, public INetworkConnections {
 
 private:
 	void updateStarvationTracker(struct NetworkMetrics::PriorityStats& binStats,
-	                              TaskPriority priority,
-	                              TaskPriority lastPriority,
-	                              double now);
+	                             TaskPriority priority,
+	                             TaskPriority lastPriority,
+	                             double now);
 
 public:
 	Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics);
@@ -1589,9 +1589,9 @@ void Net2::run() {
 
 // Updates the PriorityStats found in NetworkMetrics
 void Net2::updateStarvationTracker(struct NetworkMetrics::PriorityStats& binStats,
-                                    TaskPriority priority,
-                                    TaskPriority lastPriority,
-                                    double now) {
+                                   TaskPriority priority,
+                                   TaskPriority lastPriority,
+                                   double now) {
 
 	// Busy -> idle at binStats.priority
 	if (binStats.priority > priority && binStats.priority <= lastPriority) {
