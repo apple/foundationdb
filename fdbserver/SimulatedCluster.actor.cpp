@@ -829,7 +829,7 @@ private:
 	void generateNormalConfig(const TestConfig& testConfig);
 };
 
-SimulationConfig::SimulationConfig(const TestConfig& testConfig) {
+SimulationConfig::SimulationConfig(const TestConfig& testConfig) : extraDB(testConfig.extraDB) {
 	generateNormalConfig(testConfig);
 }
 
