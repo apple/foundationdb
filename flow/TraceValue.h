@@ -110,7 +110,9 @@ struct TraceVector {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, maxFieldLength, values);
+		// FIXME: Fix serialization once flatbuffers implementation supports
+		// recursive types
+		serializer(ar, maxFieldLength);
 	}
 };
 
