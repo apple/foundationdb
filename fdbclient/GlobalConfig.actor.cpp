@@ -98,12 +98,12 @@ void GlobalConfig::insert(KeyRef key, ValueRef value) {
 		}
 		data[stableKey] = makeReference<ConfigValue>(std::move(arena), std::move(any));
 	} catch (Error& e) {
-		TraceEvent("GlobalConfigTupleError").detail("What", e.what());
+		TraceEvent("GlobalConfigTupleParseError").detail("What", e.what());
 	}
 }
 
 void GlobalConfig::erase(KeyRef key) {
-	erase(KeyRangeRef(key, keyAfter(key)));
+	data.erase(key);
 }
 
 void GlobalConfig::erase(KeyRangeRef range) {
@@ -120,6 +120,8 @@ void GlobalConfig::erase(KeyRangeRef range) {
 // Updates local copy of global configuration by reading the entire key-range
 // from storage.
 ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
+	self->data.clear();
+
 	Transaction tr(self->cx);
 	Standalone<RangeResultRef> result = wait(tr.getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
 	for (const auto& kv : result) {

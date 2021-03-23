@@ -249,9 +249,9 @@ extern const KeyRef globalConfigKeysPrefix;
 extern const KeyRangeRef globalConfigHistoryKeys;
 extern const KeyRef globalConfigHistoryPrefix;
 
-//   "\xff/globalConfig/v" := "version,protocol"
-//   Read-only key which returns the version and protocol of the most recent
-//   data written to the global configuration keyspace.
+//   "\xff/globalConfig/v" := "version"
+//   Read-only key which returns the commit version of the most recent mutation
+//   made to the global configuration keyspace.
 extern const KeyRef globalConfigVersionKey;
 
 //	"\xff/workers/[[processID]]" := ""

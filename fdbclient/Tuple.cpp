@@ -20,6 +20,7 @@
 
 #include "fdbclient/Tuple.h"
 
+// TODO: Many functions copied from bindings/flow/Tuple.cpp. Merge at some point.
 static float bigEndianFloat(float orig) {
 	int32_t big = *(int32_t*)&orig;
 	big = bigEndian32(big);
@@ -32,7 +33,7 @@ static double bigEndianDouble(double orig) {
 	return *(double*)&big;
 }
 
-static size_t find_string_terminator(const StringRef data, size_t offset) {
+static size_t findStringTerminator(const StringRef data, size_t offset) {
 	size_t i = offset;
 	while (i < data.size() - 1 && !(data[i] == '\x00' && data[i + 1] != (uint8_t)'\xff')) {
 		i += (data[i] == '\x00' ? 2 : 1);
@@ -44,7 +45,7 @@ static size_t find_string_terminator(const StringRef data, size_t offset) {
 // If encoding and the sign bit is 1 (the number is negative), flip all the bits.
 // If decoding and the sign bit is 0 (the number is negative), flip all the bits.
 // Otherwise, the number is positive, so flip the sign bit.
-static void adjust_floating_point(uint8_t* bytes, size_t size, bool encode) {
+static void adjustFloatingPoint(uint8_t* bytes, size_t size, bool encode) {
 	if ((encode && ((uint8_t)(bytes[0] & 0x80) != (uint8_t)0x00)) ||
 	    (!encode && ((uint8_t)(bytes[0] & 0x80) != (uint8_t)0x80))) {
 		for (size_t i = 0; i < size; i++) {
@@ -63,7 +64,7 @@ Tuple::Tuple(StringRef const& str, bool exclude_incomplete) {
 		offsets.push_back(i);
 
 		if (data[i] == '\x01' || data[i] == '\x02') {
-			i = find_string_terminator(str, i + 1) + 1;
+			i = findStringTerminator(str, i + 1) + 1;
 		} else if (data[i] >= '\x0c' && data[i] <= '\x1c') {
 			i += abs(data[i] - '\x14') + 1;
 		} else if (data[i] == 0x20) {
@@ -147,7 +148,7 @@ Tuple& Tuple::appendFloat(float value) {
 	offsets.push_back(data.size());
 	float swap = bigEndianFloat(value);
 	uint8_t* bytes = (uint8_t*)&swap;
-	adjust_floating_point(bytes, sizeof(float), true);
+	adjustFloatingPoint(bytes, sizeof(float), true);
 
 	data.push_back(data.arena(), 0x20);
 	data.append(data.arena(), bytes, sizeof(float));
@@ -159,7 +160,7 @@ Tuple& Tuple::appendDouble(double value) {
 	double swap = value;
 	swap = bigEndianDouble(swap);
 	uint8_t* bytes = (uint8_t*)&swap;
-	adjust_floating_point(bytes, sizeof(double), true);
+	adjustFloatingPoint(bytes, sizeof(double), true);
 
 	data.push_back(data.arena(), 0x21);
 	data.append(data.arena(), bytes, sizeof(double));
@@ -300,7 +301,7 @@ float Tuple::getFloat(size_t index) const {
 	uint8_t* bytes = (uint8_t*)&swap;
 	ASSERT_LE(offsets[index] + 1 + sizeof(float), data.size());
 	swap = *(float*)(data.begin() + offsets[index] + 1);
-	adjust_floating_point(bytes, sizeof(float), false);
+	adjustFloatingPoint(bytes, sizeof(float), false);
 
 	return bigEndianFloat(swap);
 }
@@ -319,7 +320,7 @@ double Tuple::getDouble(size_t index) const {
 	uint8_t* bytes = (uint8_t*)&swap;
 	ASSERT_LE(offsets[index] + 1 + sizeof(double), data.size());
 	swap = *(double*)(data.begin() + offsets[index] + 1);
-	adjust_floating_point(bytes, sizeof(double), false);
+	adjustFloatingPoint(bytes, sizeof(double), false);
 
 	return bigEndianDouble(swap);
 }

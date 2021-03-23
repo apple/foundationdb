@@ -3245,15 +3245,29 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 						clientInfo.history.push_back(std::move(vh));
 					}
 
+					if (clientInfo.history.size() > 0) {
+						// The first item in the historical list of mutations
+						// is only used to:
+						//   a) Recognize that some historical changes may have
+						//      been missed, and the entire global
+						//      configuration keyspace needs to be read, or..
+						//   b) Check which historical updates have already
+						//      been applied. If this is the case, the first
+						//      history item must have a version greater than
+						//      or equal to whatever version the global
+						//      configuration was last updated at, and
+						//      therefore won't need to be applied again.
+						clientInfo.history[0].mutations = Standalone<VectorRef<MutationRef>>();
+					}
+
 					clientInfo.id = deterministicRandom()->randomUniqueID();
 					db->clientInfo->set(clientInfo);
 				}
 
 				state Future<Void> globalConfigFuture = tr.watch(globalConfigVersionKey);
 				wait(tr.commit());
-				choose {
-					when (wait(globalConfigFuture)) { break; }
-				}
+				wait(globalConfigFuture);
+				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}

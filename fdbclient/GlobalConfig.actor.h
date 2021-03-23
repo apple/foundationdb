@@ -39,7 +39,8 @@
 
 // The global configuration is a series of typed key-value pairs synced to all
 // nodes (server and client) in an FDB cluster in an eventually consistent
-// manner.
+// manner. Only small key-value pairs should be stored in global configuration;
+// an excessive amount of data can cause synchronization slowness.
 
 // Keys
 extern const KeyRef fdbClientInfoTxnSampleRate;
@@ -59,11 +60,8 @@ struct ConfigValue : ReferenceCounted<ConfigValue> {
 	ConfigValue(Arena&& a, std::any&& v) : arena(a), value(v) {}
 };
 
-class GlobalConfig {
+class GlobalConfig : NonCopyable {
 public:
-	GlobalConfig(const GlobalConfig&) = delete;
-	GlobalConfig& operator=(const GlobalConfig&) = delete;
-
 	// Creates a GlobalConfig singleton, accessed by calling GlobalConfig().
 	// This function should only be called once by each process (however, it is
 	// idempotent and calling it multiple times will have no effect).
@@ -106,10 +104,11 @@ public:
 		}
 	}
 
-	// To write into the global configuration, submit a transaction to
-	// \xff\xff/global_config/<your-key> with <your-value> encoded using the
-	// FDB tuple typecodes. Use the helper function `prefixedKey` to correctly
-	// prefix your global configuration key.
+	// Trying to write into the global configuration keyspace? To write data,
+	// submit a transaction to \xff\xff/global_config/<your-key> with
+	// <your-value> encoded using the FDB tuple typecodes. Use the helper
+	// function `prefixedKey` to correctly prefix your global configuration
+	// key.
 
 	// Triggers the returned future when the global configuration singleton has
 	// been created and is ready.

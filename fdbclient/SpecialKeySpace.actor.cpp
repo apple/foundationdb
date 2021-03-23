@@ -1441,14 +1441,15 @@ ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* gl
 	while (iter != ranges.end()) {
 		std::pair<bool, Optional<Value>> entry = iter->value();
 		if (entry.first) {
-			if (entry.second.present()) {
+			if (entry.second.present() && iter->begin().startsWith(globalConfig->getKeyRange().begin)) {
 				Key bareKey = iter->begin().removePrefix(globalConfig->getKeyRange().begin);
 				vh.mutations.emplace_back_deep(vh.mutations.arena(),
 				                               MutationRef(MutationRef::SetValue, bareKey, entry.second.get()));
 
 				Key systemKey = bareKey.withPrefix(globalConfigKeysPrefix);
 				tr.set(systemKey, entry.second.get());
-			} else {
+			} else if (!entry.second.present() && iter->range().begin.startsWith(globalConfig->getKeyRange().begin) &&
+			           iter->range().end.startsWith(globalConfig->getKeyRange().begin)) {
 				KeyRef bareRangeBegin = iter->range().begin.removePrefix(globalConfig->getKeyRange().begin);
 				KeyRef bareRangeEnd = iter->range().end.removePrefix(globalConfig->getKeyRange().begin);
 				vh.mutations.emplace_back_deep(vh.mutations.arena(),
