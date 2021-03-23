@@ -811,6 +811,7 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
 	return Void();
 }
 
+// Configuration details compiled in a structure used when setting up a simulated cluster
 struct SimulationConfig {
 	explicit SimulationConfig(const TestConfig& testConfig);
 	int extraDB;
