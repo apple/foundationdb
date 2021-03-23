@@ -363,6 +363,59 @@ TestWorkload* getWorkloadIface(WorkloadRequest work, Reference<AsyncVar<ServerDB
 	return compound;
 }
 
+void printSimulatedTopology() {
+	if (!g_network->isSimulated()) {
+		return;
+	}
+	auto processes = g_simulator.getAllProcesses();
+	std::sort(processes.begin(), processes.end(), [](ISimulator::ProcessInfo* lhs, ISimulator::ProcessInfo* rhs) {
+		auto l = lhs->locality;
+		auto r = rhs->locality;
+		if (l.dcId() != r.dcId()) {
+			return l.dcId() < r.dcId();
+		}
+		if (l.dataHallId() != r.dataHallId()) {
+			return l.dataHallId() < r.dataHallId();
+		}
+		if (l.zoneId() != r.zoneId()) {
+			return l.zoneId() < r.zoneId();
+		}
+		if (l.machineId() != r.zoneId()) {
+			return l.machineId() < r.machineId();
+		}
+		return lhs->address < rhs->address;
+	});
+	printf("Simulated Cluster Topology:\n");
+	printf("===========================\n");
+	Optional<Standalone<StringRef>> dcId, dataHallId, zoneId, machineId;
+	for (auto p : processes) {
+		std::string indent = "";
+		if (dcId != p->locality.dcId()) {
+			dcId = p->locality.dcId();
+			printf("%sdcId: %s\n", indent.c_str(), p->locality.describeDcId().c_str());
+		}
+		indent += "  ";
+		if (dataHallId != p->locality.dataHallId()) {
+			dataHallId = p->locality.dataHallId();
+			printf("%sdataHallId: %s\n", indent.c_str(), p->locality.describeDataHall().c_str());
+		}
+		indent += "  ";
+		if (zoneId != p->locality.zoneId()) {
+			zoneId = p->locality.zoneId();
+			printf("%szoneId: %s\n", indent.c_str(), p->locality.describeZone().c_str());
+		}
+		indent += "  ";
+		if (machineId != p->locality.machineId()) {
+			machineId = p->locality.machineId();
+			printf("%smachineId: %s\n", indent.c_str(), p->locality.describeMachineId().c_str());
+		}
+		indent += "  ";
+		printf("%sAddress: %s\n", indent.c_str(), p->address.toString().c_str(), p->name);
+		printf("%sClass: %s\n", indent.c_str(), p->startingClass.toString().c_str());
+		printf("%sName: %s\n", indent.c_str(), p->name);
+	}
+}
+
 ACTOR Future<Void> databaseWarmer(Database cx) {
 	loop {
 		state Transaction tr(cx);
@@ -1346,6 +1399,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 
 	// Change the configuration (and/or create the database) if necessary
 	printf("startingConfiguration:%s start\n", startingConfiguration.toString().c_str());
+	printSimulatedTopology();
 	if (useDB && startingConfiguration != StringRef()) {
 		try {
 			wait(timeoutError(changeConfiguration(cx, testers, startingConfiguration), 2000.0));
