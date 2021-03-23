@@ -264,7 +264,14 @@ std::string describe(std::set<T> const& items, int max_items = -1) {
 
 template <typename T>
 struct Traceable<std::set<T>> : std::true_type {
-	static TraceValue toTraceValue(const std::set<T>& value) { return describe(value); }
+	static TraceValue toTraceValue(const std::set<T>& value) {
+		auto result = TraceValue::create<TraceVector>();
+		auto &vec = result.get<TraceVector>();
+		for (const auto &v : value) {
+			vec.push_back(Traceable<T>::toTraceValue(v));
+		}
+		return result;
+	}
 };
 
 std::string printable(const StringRef& val);

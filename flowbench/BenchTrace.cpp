@@ -72,11 +72,15 @@ static void bench_trace(benchmark::State& state) {
 	std::string longString(100, 'x');
 	Standalone<VectorRef<int>> vec1;
 	std::vector<int> vec2;
+	std::set<int> s;
 	for (int i = 0; i < 10; ++i) {
 		vec1.push_back(vec1.arena(), i);
 	}
 	for (int i = 10; i < 20; ++i) {
 		vec2.push_back(i);
+	}
+	for (int i = 20; i < 30; ++i) {
+		s.insert(i);
 	}
 	while (state.KeepRunning()) {
 		SampleTrace te;
@@ -98,6 +102,7 @@ static void bench_trace(benchmark::State& state) {
 		te.detail(c);
 		te.detail(vec1);
 		te.detail(vec2);
+		te.detail(s);
 	}
 	state.SetItemsProcessed(static_cast<long>(state.iterations()));
 }
