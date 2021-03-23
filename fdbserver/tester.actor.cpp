@@ -363,6 +363,10 @@ TestWorkload* getWorkloadIface(WorkloadRequest work, Reference<AsyncVar<ServerDB
 	return compound;
 }
 
+/**
+ * Only works in simulation. This method prints all simulated processes in a human readable form to stdout. It groups
+ * processes by data center, data hall, zone, and machine (in this order).
+ */
 void printSimulatedTopology() {
 	if (!g_network->isSimulated()) {
 		return;
@@ -1344,6 +1348,24 @@ ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterContro
 	}
 }
 
+/**
+ * \brief Test orchestrator: sends test specification to testers in the right order and collects the results.
+ *
+ * There are multiple actors in this file with similar names (runTest, runTests) and slightly different signatures.
+ *
+ * This is the actual orchestrator. It reads the test specifications (from tests), prepares the cluster (by running the
+ * configure command given in startingConfiguration) and then runs the workload.
+ *
+ * \param cc The cluster controller interface
+ * \param ci Same as cc.clientInterface
+ * \param testers The interfaces of the testers that should run the actual workloads
+ * \param tests The test specifications to run
+ * \param startingConfiguration If non-empty, the orchestrator will attempt to set this configuration before starting
+ * the tests.
+ * \param locality client locality (it seems this is unused?)
+ *
+ * \returns A future which will be set after all tests finished.
+ */
 ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> cc,
                             Reference<AsyncVar<Optional<struct ClusterInterface>>> ci,
                             vector<TesterInterface> testers,
@@ -1456,6 +1478,24 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	return Void();
 }
 
+/**
+ * \brief Proxy function that waits until enough testers are available and then calls into the orchestrator.
+ *
+ * There are multiple actors in this file with similar names (runTest, runTests) and slightly different signatures.
+ *
+ * This actor wraps the actual orchestrator (also called runTests). But before calling that actor, it waits for enough
+ * testers to come up.
+ *
+ * \param cc The cluster controller interface
+ * \param ci Same as cc.clientInterface
+ * \param tests The test specifications to run
+ * \param minTestersExpected The number of testers to expect. This actor will block until it can find this many testers.
+ * \param startingConfiguration If non-empty, the orchestrator will attempt to set this configuration before starting
+ * the tests.
+ * \param locality client locality (it seems this is unused?)
+ *
+ * \returns A future which will be set after all tests finished.
+ */
 ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> cc,
                             Reference<AsyncVar<Optional<struct ClusterInterface>>> ci,
                             vector<TestSpec> tests,
@@ -1497,6 +1537,32 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	return Void();
 }
 
+/**
+ * \brief Set up testing environment and run the given tests on a cluster.
+ *
+ * There are multiple actors in this file with similar names (runTest, runTests) and slightly different signatures.
+ *
+ * This actor is usually the first entry point into the test environment. It itself doesn't implement too much
+ * functionality. Its main purpose is to generate the test specification from passed arguments and then call into the
+ * correct actor which will orchestrate the actual test.
+ *
+ * \param connFile A cluster connection file. Not all tests require a functional cluster but all tests require
+ * a cluster file.
+ * \param whatToRun TEST_TYPE_FROM_FILE to read the test description from a passed toml file or
+ * TEST_TYPE_CONSISTENCY_CHECK to generate a test spec for consistency checking
+ * \param at TEST_HERE: this process will act as a test client and execute the given workload. TEST_ON_SERVERS: Run a
+ * test client on every worker in the cluster. TEST_ON_TESTERS: Run a test client on all servers with class Test
+ * \param minTestersExpected In at is not TEST_HERE, this will instruct the orchestrator until it can find at least
+ * minTestersExpected test-clients. This is usually passed through from a command line argument. In simulation, the
+ * simulator will pass the number of testers that it started.
+ * \param fileName The path to the toml-file containing the test description. Is ignored if whatToRun !=
+ * TEST_TYPE_FROM_FILE
+ * \param startingConfiguration Can be used to configure a cluster before running the test. If this is an empty string,
+ * it will be ignored, otherwise it will be passed to changeConfiguration.
+ * \param locality The client locality to be used. This is only used if at == TEST_HERE
+ *
+ * \returns A future which will be set after all tests finished.
+ */
 ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
                             test_type_t whatToRun,
                             test_location_t at,
