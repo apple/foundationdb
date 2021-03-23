@@ -125,7 +125,7 @@ thread_local INetwork* thread_network = 0;
 class Net2 sealed : public INetwork, public INetworkConnections {
 
 private:
-	void updateStarvationTrackers(struct NetworkMetrics::PriorityStats& binStats,
+	void updateStarvationTracker(struct NetworkMetrics::PriorityStats& binStats,
 	                              TaskPriority priority,
 	                              TaskPriority lastPriority,
 	                              double now);
@@ -1401,7 +1401,7 @@ void Net2::run() {
 }
 
 // Updates the PriorityStats found in NetworkMetrics
-void Net2::updateStarvationTrackers(struct NetworkMetrics::PriorityStats& binStats,
+void Net2::updateStarvationTracker(struct NetworkMetrics::PriorityStats& binStats,
                                     TaskPriority priority,
                                     TaskPriority lastPriority,
                                     double now) {
@@ -1421,8 +1421,8 @@ void Net2::updateStarvationTrackers(struct NetworkMetrics::PriorityStats& binSta
 	}
 }
 
+// Update both vectors of starvation trackers (one that updates every 5s and the other every 1s)
 void Net2::trackAtPriority(TaskPriority priority, double now) {
-	// Update both vectors of starvation trackers (one that updates every 5s and the other every 1s)
 	if (lastPriorityStats == nullptr || priority != lastPriorityStats->priority) {
 		// Start tracking current priority
 		auto activeStatsItr = networkInfo.metrics.activeTrackers.try_emplace(priority, priority);
@@ -1441,11 +1441,11 @@ void Net2::trackAtPriority(TaskPriority priority, double now) {
 			if (binStats.priority > lastPriority && binStats.priority > priority) {
 				break;
 			}
-			updateStarvationTrackers(binStats, priority, lastPriority, now);
+			updateStarvationTracker(binStats, priority, lastPriority, now);
 		}
 
 		// Update starvation trackers for network busyness
-		updateStarvationTrackers(networkInfo.metrics.starvationTrackerNetworkBusyness, priority, lastPriority, now);
+		updateStarvationTracker(networkInfo.metrics.starvationTrackerNetworkBusyness, priority, lastPriority, now);
 
 		lastPriorityStats = &activeStatsItr.first->second;
 	}

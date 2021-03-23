@@ -69,8 +69,8 @@ void ThreadSafeDatabase::setOption(FDBDatabaseOptions::Option option, Optional<S
 	    &db->deferredError);
 }
 
+// Return the main network thread busyness
 double ThreadSafeDatabase::getMainThreadBusyness() {
-	// Return the main network thread busyness
 	ASSERT(g_network);
 	return g_network->networkInfo.metrics.networkBusyness;
 }
