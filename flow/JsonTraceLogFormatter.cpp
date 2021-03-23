@@ -23,7 +23,9 @@
 
 #include <sstream>
 
-static std::string escapeString(const std::string& source) {
+namespace {
+
+std::string escapeString(const std::string& source) {
 	std::string result;
 	for (auto c : source) {
 		if (c == '"') {
@@ -66,6 +68,8 @@ public:
 		return result;
 	}
 } jsonValueFormatter;
+
+} //namespace
 
 void JsonTraceLogFormatter::addref() {
 	ReferenceCounted<JsonTraceLogFormatter>::addref();
