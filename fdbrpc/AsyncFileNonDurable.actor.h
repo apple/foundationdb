@@ -622,11 +622,10 @@ private:
 			}
 			ASSERT(self->minSizeAfterPendingModificationsIsExact);
 			int64_t beginModifiedRange = std::min(size, self->minSizeAfterPendingModifications);
-			int64_t endModifiedRange = std::max(size, self->minSizeAfterPendingModifications);
 			self->minSizeAfterPendingModifications = size;
 
 			std::vector<Future<Void>> priorModifications =
-			    self->getModificationsAndInsert(beginModifiedRange, endModifiedRange, true, truncateEnded);
+			    self->getModificationsAndInsert(beginModifiedRange, /*through end of file*/ -1, true, truncateEnded);
 
 			if (BUGGIFY_WITH_PROB(0.001))
 				priorModifications.push_back(
