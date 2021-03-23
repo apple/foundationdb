@@ -446,7 +446,7 @@ private:
 			Future<Void> writeEnded = wait(ownFuture);
 			std::vector<Future<Void>> priorModifications =
 			    self->getModificationsAndInsert(offset, length, true, writeEnded);
-			self->minSizeAfterPendingModifications = offset + length;
+			self->minSizeAfterPendingModifications = std::max(self->minSizeAfterPendingModifications, offset + length);
 
 			if (BUGGIFY_WITH_PROB(0.001))
 				priorModifications.push_back(
