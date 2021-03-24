@@ -39,10 +39,6 @@ void TraceVector::truncate(int maxFieldLength) {
 	this->maxFieldLength = maxFieldLength;
 }
 
-void TraceVector::push_back(TraceValue&& tv) {
-	values.push_back(std::move(tv));
-}
-
 size_t TraceVector::size() const {
 	size_t result = 0;
 	for (const auto& v : values) {
@@ -60,7 +56,7 @@ std::string TraceVector::toString() const {
 		} else {
 			result.push_back(' ');
 		}
-		result += v.toString();
+		result += v;
 		if (maxFieldLength >= 0 && result.size() > maxFieldLength) {
 			result = result.substr(0, maxFieldLength) + "...";
 			return result;

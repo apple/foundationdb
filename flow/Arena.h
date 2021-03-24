@@ -1312,7 +1312,7 @@ struct Traceable<VectorRef<T>> {
 		auto result = TraceValue::create<TraceVector>();
 		auto& vec = result.get<TraceVector>();
 		for (const auto& v : value) {
-			vec.push_back(Traceable<T>::toTraceValue(v));
+			vec.emplace_back(Traceable<T>::toTraceValue(v).toString());
 		}
 		return result;
 	}

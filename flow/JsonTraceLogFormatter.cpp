@@ -62,7 +62,9 @@ public:
 			} else {
 				result.push_back(',');
 			}
-			result += tv.toString();
+			result.push_back('\"');
+			result += tv;
+			result.push_back('\"');
 		}
 		result.push_back(']');
 		return result;

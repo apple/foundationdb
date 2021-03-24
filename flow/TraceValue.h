@@ -102,19 +102,22 @@ struct TraceCounter {
 struct TraceVector {
 	constexpr static FileIdentifier file_identifier = 6925899;
 	int maxFieldLength{ -1 };
-	std::vector<struct TraceValue> values;
+	// TODO: Support serialization of recursive types in flatbuffers implementation
+	// so that this can be a std::vector<struct TraceValue>
+	std::vector<std::string> values;
 
 	TraceVector() = default;
-	void push_back(TraceValue&&);
+	template <class U>
+	auto emplace_back(U&& value) {
+		return values.emplace_back(std::forward<U>(value));
+	}
 	size_t size() const;
 	void truncate(int maxFieldLength);
 	std::string toString() const;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		// FIXME: Fix serialization once flatbuffers implementation supports
-		// recursive types
-		serializer(ar, maxFieldLength);
+		serializer(ar, maxFieldLength, values);
 	}
 };
 
