@@ -622,6 +622,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				std::make_pair(
 				    error_code_special_keys_no_module_found,
 				    ExceptionContract::possibleIf(specialKeys.contains(key) && !workload->specialKeysRelaxed)),
+				// Read the special key \xff\xff/status/json can throw timed_out
+				std::make_pair(error_code_timed_out,
+				               ExceptionContract::possibleIf(key == LiteralStringRef("\xff\xff/status/json")))
 			};
 		}
 
@@ -692,6 +695,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				               ExceptionContract::possibleIf(isSpecialKeyRange && !workload->specialKeysRelaxed)),
 				std::make_pair(error_code_special_keys_no_module_found,
 				               ExceptionContract::possibleIf(isSpecialKeyRange && !workload->specialKeysRelaxed)),
+				// Read the special key \xff\xff/status/json can throw timed_out
+				std::make_pair(error_code_timed_out, ExceptionContract::possibleIf(isSpecialKeyRange)),
 				std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible)
 			};
 		}
@@ -733,6 +738,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				               ExceptionContract::possibleIf(isSpecialKeyRange && !workload->specialKeysRelaxed)),
 				std::make_pair(error_code_special_keys_no_module_found,
 				               ExceptionContract::possibleIf(isSpecialKeyRange && !workload->specialKeysRelaxed)),
+				// Read the special key \xff\xff/status/json can throw timed_out
+				std::make_pair(error_code_timed_out, ExceptionContract::possibleIf(isSpecialKeyRange)),
 				std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible)
 			};
 		}
@@ -770,6 +777,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			}
 
 			bool isSpecialKeyRange = specialKeys.contains(key1) && specialKeys.begin <= key2 && key2 <= specialKeys.end;
+			// Read the special key \xff\xff/status/json can throw timed_out
+			Key statusJsonSpecialKey = LiteralStringRef("\xff\xff/status/json");
 
 			contract = {
 				std::make_pair(error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2)),
@@ -784,6 +793,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				               ExceptionContract::possibleIf(isSpecialKeyRange && !workload->specialKeysRelaxed)),
 				std::make_pair(error_code_special_keys_no_module_found,
 				               ExceptionContract::possibleIf(isSpecialKeyRange && !workload->specialKeysRelaxed)),
+				std::make_pair(error_code_timed_out, ExceptionContract::possibleIf(key1 <= statusJsonSpecialKey &&
+				                                                                   statusJsonSpecialKey < key2)),
 				std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible)
 			};
 		}
@@ -810,6 +821,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			limits = makeRangeLimits();
 
 			bool isSpecialKeyRange = specialKeys.contains(key1) && specialKeys.begin <= key2 && key2 <= specialKeys.end;
+			Key statusJsonSpecialKey = LiteralStringRef("\xff\xff/status/json");
 
 			contract = {
 				std::make_pair(error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2)),
@@ -825,6 +837,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				               ExceptionContract::possibleIf(isSpecialKeyRange && !workload->specialKeysRelaxed)),
 				std::make_pair(error_code_special_keys_no_module_found,
 				               ExceptionContract::possibleIf(isSpecialKeyRange && !workload->specialKeysRelaxed)),
+				// Read the special key \xff\xff/status/json can throw timed_out
+				std::make_pair(error_code_timed_out, ExceptionContract::possibleIf(key1 <= statusJsonSpecialKey &&
+				                                                                   statusJsonSpecialKey < key2)),
 				std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible)
 			};
 		}
