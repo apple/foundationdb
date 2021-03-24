@@ -269,6 +269,10 @@ public:
 			Future<Void> deleteFuture = deleteFile(this);
 			if (!deleteFuture.isReady())
 				filesBeingDeleted[filename] = deleteFuture;
+		} else if (isSoleOwner()) {
+			// isSoleOwner is a bit confusing here. What we mean is that the openFiles map is the sole owner. If we
+			// we remove the file from the map to make sure it gets closed.
+			g_simulator.getCurrentProcess()->machine->openFiles.erase(filename);
 		}
 	}
 
