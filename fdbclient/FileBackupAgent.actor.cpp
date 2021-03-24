@@ -3969,6 +3969,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		state RestoreConfig restore(task);
 		state Version restoreVersion;
 		state Reference<IBackupContainer> bc;
+		state std::vector<KeyRange> ranges;
 
 		loop {
 			try {
@@ -3976,8 +3977,11 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				wait(checkTaskVersion(tr->getDatabase(), task, name, version));
-				Version _restoreVersion = wait(restore.restoreVersion().getOrThrow(tr));
-				restoreVersion = _restoreVersion;
+
+				//Version _restoreVersion = wait(restore.restoreVersion().getOrThrow(tr));
+				wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
+				wait(store(ranges, restore.getRestoreRangesOrDefault(tr)));
+
 				wait(taskBucket->keepRunning(tr, task));
 
 				ERestoreState oldState = wait(restore.stateEnum().getD(tr));
@@ -4023,7 +4027,11 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			}
 		}
 
-		Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion));
+		state Standalone<VectorRef<KeyRangeRef>> keyRangesFilter;
+		for (auto const& r : ranges) {
+			keyRangesFilter.push_back_deep(keyRangesFilter.arena(), KeyRangeRef(r));
+		}
+		Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion, keyRangesFilter));
 
 		if (!restorable.present())
 			throw restore_missing_data();
