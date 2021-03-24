@@ -720,6 +720,13 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	~DDTeamCollection() {
 		TraceEvent("DDTeamCollectionDestructed", distributorId).detail("Primary", primary);
+
+		// Cancel the teamBuilder to avoid creating new teams after teams are cancelled.
+		teamBuilder.cancel();
+		// TraceEvent("DDTeamCollectionDestructed", distributorId)
+		//    .detail("Primary", primary)
+		//    .detail("TeamBuilderDestroyed", server_info.size());
+
 		// Other teamCollections also hold pointer to this teamCollection;
 		// TeamTracker may access the destructed DDTeamCollection if we do not reset the pointer
 		for (int i = 0; i < teamCollections.size(); i++) {
@@ -756,12 +763,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			info->collection = nullptr;
 		}
 		// TraceEvent("DDTeamCollectionDestructed", distributorId)
-		//     .detail("Primary", primary)
-		//     .detail("ServerTrackerDestroyed", server_info.size());
-		teamBuilder.cancel();
-		// TraceEvent("DDTeamCollectionDestructed", distributorId)
-		//     .detail("Primary", primary)
-		//     .detail("TeamBuilderDestroyed", server_info.size());
+		//    .detail("Primary", primary)
+		//    .detail("ServerTrackerDestroyed", server_info.size());
 	}
 
 	void addLaggingStorageServer(Key zoneId) {
