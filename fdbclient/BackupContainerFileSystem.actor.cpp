@@ -903,6 +903,10 @@ public:
 			return Optional<RestorableFileSet>();
 		}
 
+		for (const auto& range : keyRangesFilter) {
+			TraceEvent("BackupContainerGetRestoreSet").detail("RangeFilter", printable(range));
+		}
+
 		if (logsOnly) {
 			state RestorableFileSet restorableSet;
 			state std::vector<LogFile> logFiles;

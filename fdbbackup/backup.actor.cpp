@@ -2328,7 +2328,7 @@ ACTOR Future<Void> runRestore(Database db,
 				printf("Restored to version %" PRId64 "\n", restoredVersion);
 			}
 		} else {
-			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(targetVersion));
+			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(targetVersion, ranges));
 
 			if (!rset.present()) {
 				fprintf(stderr,

@@ -4010,6 +4010,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		state Version restoreVersion;
 		state Version beginVersion;
 		state Reference<IBackupContainer> bc;
+		state std::vector<KeyRange> ranges;
 
 		loop {
 			try {
@@ -4017,10 +4018,12 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				wait(checkTaskVersion(tr->getDatabase(), task, name, version));
-				Version _restoreVersion = wait(restore.restoreVersion().getOrThrow(tr));
-				restoreVersion = _restoreVersion;
 				Optional<Version> _beginVersion = wait(restore.beginVersion().get(tr));
 				beginVersion = _beginVersion.present() ? _beginVersion.get() : invalidVersion;
+
+				wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
+				wait(store(ranges, restore.getRestoreRangesOrDefault(tr)));
+
 				wait(taskBucket->keepRunning(tr, task));
 
 				ERestoreState oldState = wait(restore.stateEnum().getD(tr));
@@ -4065,13 +4068,18 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				wait(tr->onError(e));
 			}
 		}
+
 		Optional<bool> _incremental = wait(restore.incrementalBackupOnly().get(tr));
 		state bool incremental = _incremental.present() ? _incremental.get() : false;
 		if (beginVersion == invalidVersion) {
 			beginVersion = 0;
 		}
+		state Standalone<VectorRef<KeyRangeRef>> keyRangesFilter;
+		for (auto const& r : ranges) {
+			keyRangesFilter.push_back_deep(keyRangesFilter.arena(), KeyRangeRef(r));
+		}
 		Optional<RestorableFileSet> restorable =
-		    wait(bc->getRestoreSet(restoreVersion, VectorRef<KeyRangeRef>(), incremental, beginVersion));
+		    wait(bc->getRestoreSet(restoreVersion, keyRangesFilter, incremental, beginVersion));
 		if (!incremental) {
 			beginVersion = restorable.get().snapshot.beginVersion;
 		}
