@@ -191,7 +191,7 @@ TEST_CASE("/fileio/truncateAndRead") {
 	state std::array<char, 4096> data;
 	wait(f->sync());
 	wait(f->truncate(4096));
-	int length = wait(f->read(data.begin(), 4096, 0));
+	int length = wait(f->read(&data[0], 4096, 0));
 	ASSERT(length == 4096);
 	for (auto c : data) {
 		ASSERT(c == '\0');
