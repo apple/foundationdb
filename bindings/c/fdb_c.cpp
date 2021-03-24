@@ -357,6 +357,13 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_create_snapshot(FDBDatabase* db,
 	                        .extractPtr());
 }
 
+// Get network thread busyness (updated every 1s)
+// A value of 0 indicates that the client is more or less idle
+// A value of 1 (or more) indicates that the client is saturated
+extern "C" DLLEXPORT double fdb_database_get_main_thread_busyness(FDBDatabase* d) {
+	return DB(d)->getMainThreadBusyness();
+}
+
 extern "C" DLLEXPORT void fdb_transaction_destroy(FDBTransaction* tr) {
 	try {
 		TXN(tr)->delref();
