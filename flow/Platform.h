@@ -741,6 +741,8 @@ void registerCrashHandler();
 void setupRunLoopProfiler();
 EXTERNC void setProfilingEnabled(int enabled);
 
+void setupSamplingProfiler();
+
 // Use _exit() or criticalError(), not exit()
 #define exit static_assert(false, "Calls to exit() are forbidden by policy");
 

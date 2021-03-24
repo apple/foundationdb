@@ -48,6 +48,8 @@
 #include "flow/UnitTest.h"
 #include "flow/FaultInjection.h"
 
+#include "fdbrpc/IAsyncFile.h"
+
 #ifdef _WIN32
 #include <windows.h>
 #include <winioctl.h>
@@ -3671,6 +3673,31 @@ void setupRunLoopProfiler() {
 #else
 	// No slow task profiling for other platforms!
 #endif
+}
+
+void* sampleThread(void* arg) {
+	while (true) {
+		threadSleep(1.0); // TODO: Read sample rate from global config
+
+		// TODO: Copy actor lineage of currently running actor
+
+		auto diskAlps = IAsyncFileSystem::filesystem()->getActorLineageSet().copy();
+		printf("Disk ALPs: %d\n", diskAlps.size());
+
+		// TODO: Call collect on all actor lineages
+		for (auto actorLineage : diskAlps) {
+		}
+
+		// TODO: Serialize collected actor linage properties
+	}
+
+	return nullptr;
+}
+
+void setupSamplingProfiler() {
+	// TODO: Add knob
+	TraceEvent("StartingSamplingProfilerThread");
+	startThread(&sampleThread, nullptr);
 }
 
 // UnitTest for getMemoryInfo
