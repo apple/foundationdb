@@ -1406,22 +1406,26 @@ ACTOR Future<Void> rejoinRequestHandler(Reference<MasterData> self) {
 	}
 }
 
+// Keeps the coordinated state (cstate) updated as the set of recruited tlogs change through recovery.
 ACTOR Future<Void> trackTlogRecovery(Reference<MasterData> self,
                                      Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems,
                                      Future<Void> minRecoveryDuration) {
 	state Future<Void> rejoinRequests = Never();
 	state DBRecoveryCount recoverCount = self->cstate.myDBState.recoveryCount + 1;
+	state DatabaseConfiguration configuration =
+	    self->configuration; // self-configuration can be changed by configurationMonitor so we need a copy
 	loop {
 		state DBCoreState newState;
 		self->logSystem->toCoreState(newState);
 		newState.recoveryCount = recoverCount;
 		state Future<Void> changed = self->logSystem->onCoreStateChanged();
-		ASSERT(newState.tLogs[0].tLogWriteAntiQuorum == self->configuration.tLogWriteAntiQuorum &&
-		       newState.tLogs[0].tLogReplicationFactor == self->configuration.tLogReplicationFactor);
+
+		ASSERT(newState.tLogs[0].tLogWriteAntiQuorum == configuration.tLogWriteAntiQuorum &&
+		       newState.tLogs[0].tLogReplicationFactor == configuration.tLogReplicationFactor);
 
 		state bool allLogs =
 		    newState.tLogs.size() ==
-		    self->configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>());
+		    configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>());
 		state bool finalUpdate = !newState.oldTLogData.size() && allLogs;
 		wait(self->cstate.write(newState, finalUpdate));
 		wait(minRecoveryDuration);
@@ -1455,7 +1459,7 @@ ACTOR Future<Void> trackTlogRecovery(Reference<MasterData> self,
 			    .trackLatest("MasterRecoveryState");
 		}
 
-		if (newState.oldTLogData.size() && self->configuration.repopulateRegionAntiQuorum > 0 &&
+		if (newState.oldTLogData.size() && configuration.repopulateRegionAntiQuorum > 0 &&
 		    self->logSystem->remoteStorageRecovered()) {
 			TraceEvent(SevWarnAlways, "RecruitmentStalled_RemoteStorageRecovered", self->dbgid);
 			self->recruitmentStalled->set(true);
