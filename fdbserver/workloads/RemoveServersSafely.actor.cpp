@@ -502,6 +502,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return killProcArray;
 	}
 
+	// Attempts to exclude a set of processes, and once the exclusion is successful it kills them.
+	// If markExcludeAsFailed is true, then it is an error if we cannot complete the exclusion.
 	ACTOR static Future<Void> removeAndKill(RemoveServersSafelyWorkload* self,
 	                                        Database cx,
 	                                        std::set<AddressExclusion> toKill,
@@ -556,7 +558,11 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				    .detail("Step", "SafetyCheck")
 				    .detail("Exclusions", describe(toKillMarkFailedArray));
 				choose {
-					when(bool _safe = wait(checkSafeExclusions(cx, toKillMarkFailedArray))) { safe = _safe; }
+					when(bool _safe = wait(checkSafeExclusions(cx, toKillMarkFailedArray))) {
+						safe = _safe && self->protectServers(std::set<AddressExclusion>(toKillMarkFailedArray.begin(),
+						                                                                toKillMarkFailedArray.end()))
+						                        .size() == toKillMarkFailedArray.size();
+					}
 					when(wait(delay(5.0))) {
 						TraceEvent("RemoveAndKill", functionId)
 						    .detail("Step", "SafetyCheckTimedOut")

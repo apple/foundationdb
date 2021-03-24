@@ -64,6 +64,8 @@ struct ProxyStats {
 	LatencySample commitLatencySample;
 	LatencyBands commitLatencyBands;
 
+	LatencySample commitBatchingWindowSize;
+
 	Future<Void> logger;
 
 	int64_t maxComputeNS;
@@ -99,7 +101,11 @@ struct ProxyStats {
 	                        id,
 	                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-	    commitLatencyBands("CommitLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
+	    commitLatencyBands("CommitLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
+	    commitBatchingWindowSize("CommitBatchingWindowSize",
+	                             id,
+	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE) {
 		specialCounter(cc, "LastAssignedCommitVersion", [this]() { return this->lastCommitVersionAssigned; });
 		specialCounter(cc, "Version", [pVersion]() { return *pVersion; });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion]() { return pCommittedVersion->get(); });
@@ -132,7 +138,7 @@ struct ProxyCommitData {
 	uint64_t commitVersionRequestNumber;
 	uint64_t mostRecentProcessedRequestNumber;
 	KeyRangeMap<Deque<std::pair<Version, int>>> keyResolvers;
-	KeyRangeMap<ServerCacheInfo> keyInfo;
+	KeyRangeMap<ServerCacheInfo> keyInfo; // keyrange -> all storage servers in all DCs for the keyrange
 	KeyRangeMap<bool> cacheInfo;
 	std::map<Key, ApplyMutationsData> uid_applyMutationsData;
 	bool firstProxy;

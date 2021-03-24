@@ -681,8 +681,8 @@ private:
 			        opId.shortString().c_str(),
 			        size);
 
-		if (size == 0) {
-			// KAIO will return EINVAL, as len==0 is an error.
+		// KAIO will return EINVAL, as len==0 is an error.
+		if ((self->flags & IAsyncFile::OPEN_NO_AIO) == 0 && size == 0) {
 			throw io_error();
 		}
 
@@ -712,6 +712,7 @@ private:
 		return Void();
 	}
 
+	// Simulated sync does not actually do anything besides wait a random amount of time
 	ACTOR static Future<Void> sync_impl(SimpleFile* self) {
 		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)
@@ -737,7 +738,6 @@ private:
 				    .detail("FileCount", machineCache.count(self->filename));
 				renameFile(sourceFilename.c_str(), self->filename.c_str());
 
-				ASSERT(!machineCache.count(self->filename));
 				machineCache[self->filename] = machineCache[sourceFilename];
 				machineCache.erase(sourceFilename);
 				self->actualFilename = self->filename;
@@ -2436,19 +2436,19 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 	if (flags & IAsyncFile::OPEN_UNCACHED) {
 		auto& machineCache = g_simulator.getCurrentProcess()->machine->openFiles;
 		std::string actualFilename = filename;
-		if (machineCache.find(filename) == machineCache.end()) {
-			if (flags & IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE) {
-				actualFilename = filename + ".part";
-				auto partFile = machineCache.find(actualFilename);
-				if (partFile != machineCache.end()) {
-					Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open(partFile->second);
-					if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
-						f = map(f, [=](Reference<IAsyncFile> r) {
-							return Reference<IAsyncFile>(new AsyncFileWriteChecker(r));
-						});
-					return f;
-				}
+		if (flags & IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE) {
+			actualFilename = filename + ".part";
+			auto partFile = machineCache.find(actualFilename);
+			if (partFile != machineCache.end()) {
+				Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open(partFile->second);
+				if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
+					f = map(f, [=](Reference<IAsyncFile> r) {
+						return Reference<IAsyncFile>(new AsyncFileWriteChecker(r));
+					});
+				return f;
 			}
+		}
+		if (machineCache.find(actualFilename) == machineCache.end()) {
 			// Simulated disk parameters are shared by the AsyncFileNonDurable and the underlying SimpleFile.
 			// This way, they can both keep up with the time to start the next operation
 			auto diskParameters =
@@ -2457,7 +2457,8 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 			    AsyncFileNonDurable::open(filename,
 			                              actualFilename,
 			                              SimpleFile::open(filename, flags, mode, diskParameters, false),
-			                              diskParameters);
+			                              diskParameters,
+			                              (flags & IAsyncFile::OPEN_NO_AIO) == 0);
 		}
 		Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open(machineCache[actualFilename]);
 		if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)

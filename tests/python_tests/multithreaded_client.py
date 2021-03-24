@@ -40,7 +40,7 @@ fdb.options.set_trace_enable(args.client_log_dir)
 fdb.options.set_knob("min_trace_severity=5")
 
 if not args.skip_so_files:
-    print "Loading .so files"
+    print("Loading .so files")
     fdb.options.set_external_client_directory(args.build_dir + '/lib')
 
 if args.threads > 0:
