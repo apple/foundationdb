@@ -3192,6 +3192,8 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 StringRef RestoreRangeTaskFunc::name = LiteralStringRef("restore_range_data");
 REGISTER_TASKFUNC(RestoreRangeTaskFunc);
 
+// Decodes a mutation log key, which contains (hash, commitVersion, chunkNumber) and 
+// returns (commitVersion, chunkNumber)
 std::pair<Version, int32_t> decodeLogKey(const StringRef& key) {
 	ASSERT(key.size() == sizeof(uint8_t) + sizeof(Version) + sizeof(int32_t));
 
@@ -3254,6 +3256,9 @@ std::vector<MutationRef> decodeLogValue(const StringRef& value) {
 struct AccumulatedMutations {
 	AccumulatedMutations() : lastChunkNumber(-1) {}
 	
+	// Add a KV pair for this mutation chunk set
+	// It will be accumulated onto serializedMutations if the chunk number is
+	// the next expected value.
 	void addChunk(int chunkNumber, const KeyValueRef &kv) {
 		if(chunkNumber == lastChunkNumber + 1) {
 			lastChunkNumber = chunkNumber;
@@ -3266,6 +3271,10 @@ struct AccumulatedMutations {
 		kvs.push_back(kv);
 	}
 
+	// Returns true if both
+	//   - 1 or more chunks were added to this set
+	//   - The header of the first chunk contains a valid protocol version and a length
+	//     that matches the bytes after the header in the combined value in serializedMutations
 	bool isComplete() const {
 		if(lastChunkNumber >= 0) {
 			StringRefReader reader(serializedMutations, restore_corrupted_data());
@@ -3282,6 +3291,9 @@ struct AccumulatedMutations {
 		return false;
 	}
 
+	// Returns true if a complete chunk contains any MutationRefs which intersect with any
+	// range in ranges.
+	// It is undefined behavior to run this if isComplete() does not return true.
 	bool matchesAnyRange(const std::vector<KeyRange> &ranges) {
 		std::vector<MutationRef> mutations = decodeLogValue(serializedMutations);
 		for(auto &m : mutations) {
@@ -3384,6 +3396,9 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 		state Key mutationLogPrefix = restore.mutationLogPrefix();
 		state Reference<IAsyncFile> inFile = wait(bc->readFile(logFile.fileName));
 		state Standalone<VectorRef<KeyValueRef>> dataOriginal = wait(decodeLogFileBlock(inFile, readOffset, readLen));
+
+		// Filter the KV pairs extracted from the log file block to remove any records known to not be needed for this
+		// restore based on the restore range set.
 		state std::vector<KeyValueRef> dataFiltered = filterLogMutationKVPairs(dataOriginal, ranges);
 
 		state int start = 0;
