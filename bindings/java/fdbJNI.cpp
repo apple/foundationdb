@@ -508,6 +508,9 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1setOpti
 	}
 }
 
+// Get network thread busyness (updated every 1s)
+// A value of 0 indicates that the client is more or less idle
+// A value of 1 (or more) indicates that the client is saturated
 JNIEXPORT jdouble JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1getMainThreadBusyness(JNIEnv* jenv,
 																								  jobject,
 																								  jlong dbPtr) {
