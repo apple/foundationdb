@@ -99,6 +99,8 @@ struct WorkloadRequest {
 	}
 };
 
+// Configuration details specified in workload test files that change the simulation
+// environment details
 struct TestConfig {
 	int extraDB = 0;
 	int minimumReplication = 0;
