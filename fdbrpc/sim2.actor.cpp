@@ -536,7 +536,10 @@ public:
 
 	std::string getFilename() const override { return actualFilename; }
 
-	~SimpleFile() override { _close(h); }
+	~SimpleFile() override {
+		_close(h);
+		--openCount;
+	}
 
 private:
 	int h;
@@ -1933,10 +1936,7 @@ public:
 		TraceEvent("ClogInterface")
 		    .detail("IP", ip.toString())
 		    .detail("Delay", seconds)
-		    .detail("Queue",
-		            mode == ClogSend      ? "Send"
-		            : mode == ClogReceive ? "Receive"
-		                                  : "All");
+		    .detail("Queue", mode == ClogSend ? "Send" : mode == ClogReceive ? "Receive" : "All");
 
 		if (mode == ClogSend || mode == ClogAll)
 			g_clogging.clogSendFor(ip, seconds);
@@ -2408,9 +2408,9 @@ int sf_open(const char* filename, int flags, int convFlags, int mode) {
 	                       GENERIC_READ | ((flags & IAsyncFile::OPEN_READWRITE) ? GENERIC_WRITE : 0),
 	                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
 	                       nullptr,
-	                       (flags & IAsyncFile::OPEN_EXCLUSIVE) ? CREATE_NEW
-	                       : (flags & IAsyncFile::OPEN_CREATE)  ? OPEN_ALWAYS
-	                                                            : OPEN_EXISTING,
+	                       (flags & IAsyncFile::OPEN_EXCLUSIVE)
+	                           ? CREATE_NEW
+	                           : (flags & IAsyncFile::OPEN_CREATE) ? OPEN_ALWAYS : OPEN_EXISTING,
 	                       FILE_ATTRIBUTE_NORMAL,
 	                       nullptr);
 	int h = -1;
