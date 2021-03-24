@@ -365,13 +365,18 @@ if(NOT OPEN_FOR_IDE)
     get_property(integration_jar_path TARGET fdb-integration PROPERTY JAR_FILE)
 
 
-    add_test(NAME java-integration 
-                    COMMAND ${CMAKE_COMMAND} 
-                    -E env "FDB_CLUSTER_FILE=${PROJECT_BINARY_DIR}/fdb.cluster"
-                    ${Java_JAVA_EXECUTABLE}
+    add_fdbclient_test(NAME java-integration 
+                    COMMAND ${Java_JAVA_EXECUTABLE}
                       -classpath "${target_jar}:${integration_jar_path}:${JUNIT_CLASSPATH}"
                       -Djava.library.path=${CMAKE_BINARY_DIR}/lib
-                      org.junit.platform.console.ConsoleLauncher "--details=summary" "--class-path=${integration_jar_path}" "--scan-classpath" "--disable-banner"
+                      org.junit.platform.console.ConsoleLauncher "--details=summary" "--class-path=${integration_jar_path}" "--scan-classpath" "--disable-banner" "-T MultiClient"
+    )
+
+    add_multi_fdbclient_test(NAME java-multi-integration
+                    COMMAND ${Java_JAVA_EXECUTABLE}
+                    -classpath "${target_jar}:${integration_jar_path}:${JUNIT_CLASSPATH}"
+                    -Djava.library.path=${CMAKE_BINARY_DIR}/lib
+                    org.junit.platform.console.ConsoleLauncher "--details=summary" "--class-path=${integration_jar_path}" "--scan-classpath" "--disable-banner" "-t MultiClient"
     )
 
   endif()
