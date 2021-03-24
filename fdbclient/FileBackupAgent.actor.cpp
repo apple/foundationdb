@@ -3212,8 +3212,8 @@ std::pair<Version, int32_t> decodeLogKey(const StringRef& key) {
 // Decodes an encoded list of mutations in the format of:
 //   [includeVersion:uint64_t][val_length:uint32_t][mutation_1][mutation_2]...[mutation_k],
 // where a mutation is encoded as:
-//   [type:uint32_t][keyLength:uint32_t][valueLength:uint32_t][key][value]
-std::vector<MutationRef> decode_value(const StringRef& value) {
+//   [type:uint32_t][keyLength:uint32_t][valueLength:uint32_t][param1][param2]
+std::vector<MutationRef> decodeLogValue(const StringRef& value) {
 	StringRefReader reader(value, restore_corrupted_data());
 
 	Version protocolVersion = reader.consume<uint64_t>();
@@ -3266,7 +3266,7 @@ struct AccumulatedMutations {
 		kvs.push_back(kv);
 	}
 
-	bool complete() const {
+	bool isComplete() const {
 		if(lastChunkNumber >= 0) {
 			StringRefReader reader(serializedMutations, restore_corrupted_data());
 
@@ -3282,8 +3282,8 @@ struct AccumulatedMutations {
 		return false;
 	}
 
-	bool matchesAny(const std::vector<KeyRange> &ranges) {
-		std::vector<MutationRef> mutations = decode_value(serializedMutations);
+	bool matchesAnyRange(const std::vector<KeyRange> &ranges) {
+		std::vector<MutationRef> mutations = decodeLogValue(serializedMutations);
 		for(auto &m : mutations) {
 			for(auto &r : ranges) {
 				if(m.type == MutationRef::ClearRange) {
@@ -3322,7 +3322,7 @@ std::vector<KeyValueRef> filterLogMutationKVPairs(VectorRef<KeyValueRef> data, c
 		AccumulatedMutations &m = vb.second;
 
 		// If the mutations are incomplete or match one of the ranges, include in results.
-		if(!m.complete() || m.matchesAny(ranges)) {
+		if(!m.isComplete() || m.matchesAnyRange(ranges)) {
 			output.insert(output.end(), m.kvs.begin(), m.kvs.end());
 		}
 	}
