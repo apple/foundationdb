@@ -499,11 +499,6 @@ struct RolesInfo {
 				    maxTLogVersion - version - SERVER_KNOBS->STORAGE_LOGGING_DELAY * SERVER_KNOBS->VERSIONS_PER_SECOND);
 			}
 
-			TraceEventFields const& batchLatencyMetrics = metrics.at("BatchLatencyMetrics");
-			if(batchLatencyMetrics.size()) {
-				obj["grv_batch_latency_statistics"] = addLatencyStatistics(batchLatencyMetrics);
-			}
-
 			TraceEventFields const& readLatencyMetrics = metrics.at("ReadLatencyMetrics");
 			if (readLatencyMetrics.size()) {
 				obj["read_latency_statistics"] = addLatencyStatistics(readLatencyMetrics);
@@ -646,10 +641,13 @@ struct RolesInfo {
 			if (grvLatencyBands.size()) {
 				obj["grv_latency_bands"] = addLatencyBandInfo(grvLatencyBands);
 			}
-			TraceEventFields const& grvBatchMetrics = metrics.at("BatchLatencyMetrics");
+
+			TraceEventFields const& grvBatchMetrics = metrics.at("GRVBatchLatencyMetrics");
 			if(grvBatchMetrics.size()) {
-				obj["grv_batch_latency_statistics"] = addLatencyStatistics(grvBatchMetrics);
-			}						
+				JsonBuilderObject priorityStats;
+				priorityStats["batch"] = addLatencyStatistics(grvBatchMetrics);
+				obj["grv_batch_latency_statistics"] = priorityStats;
+			}
 		} catch (Error& e) {
 			if (e.code() != error_code_attribute_not_found) {
 				throw e;
@@ -1821,7 +1819,7 @@ ACTOR static Future<vector<std::pair<StorageServerInterface, EventMap>>> getStor
 	           getServerMetrics(servers,
 	                            address_workers,
 	                            std::vector<std::string>{
-	                                "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands", "BusiestReadTag", "BatchLatencyMetrics" })) &&
+	                                "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands", "BusiestReadTag" })) &&
 	     store(busiestWriteTags, getServerBusiestWriteTags(servers, address_workers, rkWorker)));
 
 	ASSERT(busiestWriteTags.size() == results.size());
@@ -1859,7 +1857,7 @@ ACTOR static Future<vector<std::pair<GrvProxyInterface, EventMap>>> getGrvProxie
 	vector<std::pair<GrvProxyInterface, EventMap>> results =
 	    wait(getServerMetrics(db->get().client.grvProxies,
 	                          address_workers,
-	                          std::vector<std::string>{ "GRVLatencyMetrics", "GRVLatencyBands", "BatchLatencyMetrics" }));
+	                          std::vector<std::string>{ "GRVLatencyMetrics", "GRVLatencyBands", "GRVBatchLatencyMetrics" }));
 	return results;
 }
 

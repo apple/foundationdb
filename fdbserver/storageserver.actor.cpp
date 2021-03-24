@@ -678,7 +678,6 @@ public:
 
 		LatencySample readLatencySample;
 		LatencyBands readLatencyBands;
-		LatencySample batchLatencySample;
 
 		Counters(StorageServer* self)
 		  : cc("StorageServer", self->thisServerID.toString()), getKeyQueries("GetKeyQueries", cc),
@@ -693,15 +692,10 @@ public:
 		    updateBatches("UpdateBatches", cc), updateVersions("UpdateVersions", cc), loops("Loops", cc),
 		    fetchWaitingMS("FetchWaitingMS", cc), fetchWaitingCount("FetchWaitingCount", cc),
 		    fetchExecutingMS("FetchExecutingMS", cc), fetchExecutingCount("FetchExecutingCount", cc),
-		    readsRejected("ReadsRejected", cc), 
-			batchLatencySample("BatchLatencyMetrics", 
-				self->thisServerID, 
-				SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, 
-				SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-			readLatencySample("ReadLatencyMetrics",
-				self->thisServerID,
-				SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-				SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    readsRejected("ReadsRejected", cc), readLatencySample("ReadLatencyMetrics",
+		                                                          self->thisServerID,
+		                                                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                                          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });

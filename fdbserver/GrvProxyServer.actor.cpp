@@ -47,7 +47,7 @@ struct GrvProxyStats {
 
 	LatencyBands grvLatencyBands;
 	LatencySample grvLatencySample;
-    LatencySample grvBatchLatencySample;
+	LatencySample grvBatchLatencySample;
 
 	Future<Void> logger;
 
@@ -102,8 +102,10 @@ struct GrvProxyStats {
 	                     id,
 	                     SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                     SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-	    grvBatchLatencySample("BatchLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                     SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    grvBatchLatencySample("GRVBatchLatencyMetrics",
+	                          id,
+	                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    grvLatencyBands("GRVLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 		// The rate at which the limit(budget) is allowed to grow.
 		specialCounter(cc, "SystemAndDefaultTxnRateAllowed", [this]() { return this->transactionRateAllowed; });
@@ -530,8 +532,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 
 		if (request.priority >= TransactionPriority::DEFAULT) {
 			stats->grvLatencyBands.addMeasurement(duration);
-		}
-		else {
+		} else {
 			stats->grvBatchLatencySample.addMeasurement(duration);
 		}
 

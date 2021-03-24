@@ -132,10 +132,8 @@
                          "p95":0.0,
                          "p99":0.0,
                          "p99.9":0.0
-                     }
-                  },
-                  "grv_batch_latency_statistics":{
-                     "default":{
+                     },
+                     "batch":{
                          "count":0,
                          "min":0.0,
                          "max":0.0,
@@ -147,7 +145,7 @@
                          "p99":0.0,
                          "p99.9":0.0
                      }
-                  },                  
+                  },
                   "read_latency_statistics":{
                      "count":0,
                      "min":0.0,
