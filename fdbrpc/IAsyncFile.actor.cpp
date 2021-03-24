@@ -182,3 +182,22 @@ TEST_CASE("/fileio/rename") {
 	wait(IAsyncFileSystem::filesystem()->deleteFile(renamedFile, true));
 	return Void();
 }
+
+// Truncating to extend size should zero the new data
+TEST_CASE("/fileio/truncateAndRead") {
+	state std::string filename = "/tmp/__JUNK__";
+	state Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
+	    filename, IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0));
+	state std::array<char, 4096> data;
+	wait(f->sync());
+	wait(f->truncate(4096));
+	int length = wait(f->read(data.begin(), 4096, 0));
+	ASSERT(length == 4096);
+	for (auto c : data) {
+		ASSERT(c == '\0');
+	}
+	// close the file by deleting the reference
+	f.clear();
+	wait(IAsyncFileSystem::filesystem()->incrementalDeleteFile(filename, true));
+	return Void();
+}
