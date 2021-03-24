@@ -1,7 +1,10 @@
 set(FDBCLI_SRCS
+  fdbcli.h
   fdbcli.actor.cpp
+  ConsistencycheckCommand.actor.cpp
   FlowLineNoise.actor.cpp
   FlowLineNoise.h
+  Util.cpp
   linenoise/linenoise.h)
 
 if(NOT WIN32)

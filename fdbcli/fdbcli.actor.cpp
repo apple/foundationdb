@@ -21,6 +21,8 @@
 #include "boost/lexical_cast.hpp"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/IClientApi.h"
+#include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/DatabaseContext.h"
@@ -34,12 +36,14 @@
 #include "fdbclient/TagThrottle.h"
 
 #include "flow/DeterministicRandom.h"
+#include "flow/FastRef.h"
 #include "flow/Platform.h"
 
 #include "flow/TLSConfig.actor.h"
 #include "flow/SimpleOpt.h"
 
 #include "fdbcli/FlowLineNoise.h"
+#include "fdbcli/fdbcli.h"
 
 #include <cinttypes>
 #include <type_traits>
@@ -54,6 +58,12 @@
 #include "fdbclient/BuildFlags.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+/*
+ * While we could just use the MultiVersionApi instance directly, this #define allows us to swap in any other IClientApi
+ * instance (e.g. from ThreadSafeApi)
+ */
+#define API ((IClientApi*)MultiVersionApi::api)
 
 extern const char* getSourceVersion();
 
@@ -319,12 +329,12 @@ static std::string formatStringRef(StringRef item, bool fullEscaping = false) {
 	return ret;
 }
 
-static bool tokencmp(StringRef token, const char* command) {
-	if (token.size() != strlen(command))
-		return false;
+// static bool tokencmp(StringRef token, const char* command) {
+// 	if (token.size() != strlen(command))
+// 		return false;
 
-	return !memcmp(token.begin(), command, token.size());
-}
+// 	return !memcmp(token.begin(), command, token.size());
+// }
 
 static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& err, bool& partial) {
 	err = false;
@@ -452,19 +462,12 @@ static void printProgramUsage(const char* name) {
 	       "  -h, --help     Display this help and exit.\n");
 }
 
-struct CommandHelp {
-	std::string usage;
-	std::string short_desc;
-	std::string long_desc;
-	CommandHelp() {}
-	CommandHelp(const char* u, const char* s, const char* l) : usage(u), short_desc(s), long_desc(l) {}
-};
-
-std::map<std::string, CommandHelp> helpMap;
-std::set<std::string> hiddenCommands;
-
 #define ESCAPINGK "\n\nFor information on escaping keys, type `help escaping'."
 #define ESCAPINGKV "\n\nFor information on escaping keys and values, type `help escaping'."
+
+using namespace FDBCLI;
+std::map<std::string, CommandHelp>& helpMap = FDBCLI::CommandFactory::commands();
+std::set<std::string>& hiddenCommands = FDBCLI::CommandFactory::hiddenCommands();
 
 void initHelp() {
 	helpMap["begin"] =
@@ -649,11 +652,6 @@ void initHelp() {
 	    "SECONDS have elapsed, or after a storage server with a different ZONEID fails. Only one ZONEID can be marked "
 	    "for maintenance. Calling this command with no arguments will display any ongoing maintenance. Calling this "
 	    "command with `off' will disable maintenance.\n");
-	helpMap["consistencycheck"] = CommandHelp(
-	    "consistencycheck [on|off]",
-	    "permits or prevents consistency checking",
-	    "Calling this command with `on' permits consistency check processes to run and `off' will halt their checking. "
-	    "Calling this command with no arguments will display if consistency checking is currently allowed.\n");
 	helpMap["throttle"] =
 	    CommandHelp("throttle <on|off|enable auto|disable auto|list> [ARGS]",
 	                "view and control throttled tags",
@@ -719,7 +717,7 @@ void printHelp(StringRef command) {
 		printf("I don't know anything about `%s'\n", formatStringRef(command).c_str());
 }
 
-void printUsage(StringRef command) {
+void FDBCLI::printUsage(StringRef command) {
 	auto i = helpMap.find(command.toString());
 	if (i != helpMap.end())
 		printf("Usage: %s\n", i->second.usage.c_str());
@@ -3140,6 +3138,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	state Database db;
 	state Reference<ReadYourWritesTransaction> tr;
+	// refactoring
+	state Reference<IDatabase> db2;
 
 	state bool writeMode = false;
 
@@ -3174,6 +3174,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	} catch (Error& e) {
 		fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code());
 		printf("Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
+		return 1;
+	}
+
+	try {
+		db2 = API->createDatabase(opt.clusterFile.c_str());
+	} catch (Error& e) {
+		fprintf(stderr, "(CAPI)ERROR: %s (%d)\n", e.what(), e.code());
+		printf("(CAPI): Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
 		return 1;
 	}
 
@@ -3795,29 +3803,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "consistencycheck")) {
-					getTransaction(db, tr, options, intrans);
-					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-					if (tokens.size() == 1) {
-						state Future<Optional<Standalone<StringRef>>> ccSuspendSettingFuture =
-						    tr->get(fdbShouldConsistencyCheckBeSuspended);
-						wait(makeInterruptable(success(ccSuspendSettingFuture)));
-						bool ccSuspendSetting =
-						    ccSuspendSettingFuture.get().present()
-						        ? BinaryReader::fromStringRef<bool>(ccSuspendSettingFuture.get().get(), Unversioned())
-						        : false;
-						printf("ConsistencyCheck is %s\n", ccSuspendSetting ? "off" : "on");
-					} else if (tokens.size() == 2 && tokencmp(tokens[1], "off")) {
-						tr->set(fdbShouldConsistencyCheckBeSuspended, BinaryWriter::toValue(true, Unversioned()));
-						wait(commitTransaction(tr));
-					} else if (tokens.size() == 2 && tokencmp(tokens[1], "on")) {
-						tr->set(fdbShouldConsistencyCheckBeSuspended, BinaryWriter::toValue(false, Unversioned()));
-						wait(commitTransaction(tr));
-					} else {
-						printUsage(tokens[0]);
-						is_error = true;
-					}
+					bool _result = wait(consistencycheckCommand(db2, tokens));
+					is_error = _result;
 					continue;
 				}
 
@@ -4909,7 +4896,10 @@ int main(int argc, char** argv) {
 	}
 
 	try {
-		setupNetwork();
+		// setupNetwork();
+		// refactoring fdbcli
+		API->selectApiVersion(700);
+		API->setupNetwork();
 		Future<int> cliFuture = runCli(opt);
 		Future<Void> timeoutFuture = opt.exit_timeout ? timeExit(opt.exit_timeout) : Never();
 		auto f = stopNetworkAfter(success(cliFuture) || timeoutFuture);
