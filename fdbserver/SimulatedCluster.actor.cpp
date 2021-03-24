@@ -655,8 +655,7 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
                                           Optional<ClusterConnectionString>* pConnString,
                                           Standalone<StringRef>* pStartingConfiguration,
                                           TestConfig testConfig,
-                                          std::string whitelistBinPaths,
-                                          ProtocolVersion protocolVersion) {
+                                          std::string whitelistBinPaths) {
 	CSimpleIni ini;
 	ini.SetUnicode();
 	ini.LoadFile(joinPath(baseFolder, "restartInfo.ini").c_str());
@@ -1219,8 +1218,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
                           Optional<ClusterConnectionString>* pConnString,
                           Standalone<StringRef>* pStartingConfiguration,
                           std::string whitelistBinPaths,
-                          TestConfig testConfig,
-                          ProtocolVersion protocolVersion) {
+                          TestConfig testConfig) {
 	// SOMEDAY: this does not test multi-interface configurations
 	SimulationConfig simconfig(testConfig);
 	if (testConfig.logAntiQuorum != -1) {
@@ -1634,14 +1632,6 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state TestConfig testConfig;
 	checkTestConf(testFile, &testConfig);
 
-	state ProtocolVersion protocolVersion = currentProtocolVersion;
-	if (testConfig.startIncompatibleProcess) {
-		// isolates right most 1 bit of compatibleProtocolVersionMask to make this protocolVersion incompatible
-		uint64_t minAddToMakeIncompatible =
-		    ProtocolVersion::compatibleProtocolVersionMask & ~(ProtocolVersion::compatibleProtocolVersionMask - 1);
-		protocolVersion = ProtocolVersion(currentProtocolVersion.version() + minAddToMakeIncompatible);
-	}
-
 	// TODO (IPv6) Use IPv6?
 	wait(g_simulator.onProcess(
 	    g_simulator.newProcess("TestSystem",
@@ -1670,8 +1660,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 			                                         &connFile,
 			                                         &startingConfiguration,
 			                                         testConfig,
-			                                         whitelistBinPaths,
-			                                         protocolVersion),
+			                                         whitelistBinPaths),
 			                  100.0));
 			// FIXME: snapshot restore does not support multi-region restore, hence restore it as single region always
 			if (restoring) {
@@ -1685,8 +1674,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 			                     &connFile,
 			                     &startingConfiguration,
 			                     whitelistBinPaths,
-			                     testConfig,
-			                     protocolVersion);
+			                     testConfig);
 			wait(delay(1.0)); // FIXME: WHY!!!  //wait for machines to boot
 		}
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());
