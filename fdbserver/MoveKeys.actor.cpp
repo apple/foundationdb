@@ -1212,6 +1212,8 @@ ACTOR Future<Void> moveKeys(Database cx,
 	return Void();
 }
 
+// Called by the master server to write the very first transaction to the database
+// establishing a set of shard servers and all invariants of the systemKeys.
 void seedShardServers(Arena& arena, CommitTransactionRef& tr, vector<StorageServerInterface> servers) {
 	std::map<Optional<Value>, Tag> dcId_locality;
 	std::map<UID, Tag> server_tag;
