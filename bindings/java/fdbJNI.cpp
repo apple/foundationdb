@@ -584,14 +584,14 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1setOpti
 // A value of 0 indicates that the client is more or less idle
 // A value of 1 (or more) indicates that the client is saturated
 JNIEXPORT jdouble JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1getMainThreadBusyness(JNIEnv* jenv,
-																								  jobject,
-																								  jlong dbPtr) {
+                                                                                                  jobject,
+                                                                                                  jlong dbPtr) {
 	if (!dbPtr) {
 		throwParamNotNull(jenv);
 		return 0;
 	}
 	FDBDatabase* database = (FDBDatabase*)dbPtr;
-	return (jdouble) fdb_database_get_main_thread_busyness(database);
+	return (jdouble)fdb_database_get_main_thread_busyness(database);
 }
 
 JNIEXPORT jboolean JNICALL Java_com_apple_foundationdb_FDB_Error_1predicate(JNIEnv* jenv,
