@@ -28,3 +28,5 @@ testTitle=Clogged
     testName=SaveAndKill
     restartInfoLocation=simfdb/restartInfo.ini
     testDuration=10.0
+
+storageEngineExcludeType=-1
