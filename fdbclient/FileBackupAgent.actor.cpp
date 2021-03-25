@@ -3229,7 +3229,7 @@ struct AccumulatedMutations {
 			lastChunkNumber = chunkNumber;
 			serializedMutations += kv.value.toString();
 		} else {
-			clear();
+			clear(false);
 		}
 		kvs.push_back(kv);
 	}
@@ -3278,9 +3278,13 @@ struct AccumulatedMutations {
 
 	// Free accumulated memory usage and set lastChunkNumber such that further chunks passed to addChunk
 	// will be ignored.
-	void clear() {
-		kvs.clear();
+	void clear(bool includeKVs = true) {
+		if (includeKVs) {
+			kvs.clear();
+			kvs.shrink_to_fit();
+		}
 		serializedMutations.clear();
+		serializedMutations.shrink_to_fit();
 		lastChunkNumber = -2;
 	}
 
