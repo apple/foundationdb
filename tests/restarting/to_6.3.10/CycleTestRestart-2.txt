@@ -1,3 +1,4 @@
+storageEngineExcludeType=-1
 testTitle=Clogged
     runSetup=false
     testName=Cycle
@@ -24,5 +25,3 @@ testTitle=Clogged
     machinesToLeave=3
     reboot=true
     testDuration=10.0
-
-storageEngineExcludeType=-1
