@@ -4047,7 +4047,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
 		}
 		for (const LogFile& f : restorable.get().logs) {
-			files.push_back({ f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion });
+			//files.push_back({ f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion });
 		}
 
 		state std::vector<RestoreConfig::RestoreFile>::iterator start = files.begin();
@@ -4246,7 +4246,7 @@ public:
 			    .detail("OverrideTargetVersion", targetVersion);
 		}
 
-		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
+/*		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
 
 		if (!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
@@ -4254,7 +4254,7 @@ public:
 			    .detail("TargetVersion", targetVersion);
 			throw restore_invalid_version();
 		}
-
+*/
 		TraceEvent("FastRestoreSubmitRestoreRequest")
 		    .detail("BackupDesc", desc.toString())
 		    .detail("TargetVersion", targetVersion);
