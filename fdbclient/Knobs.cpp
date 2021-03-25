@@ -122,6 +122,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( TASKBUCKET_MAX_TASK_KEYS,               1000 ); if( randomize && BUGGIFY ) TASKBUCKET_MAX_TASK_KEYS = 20;
 
 	//Backup
+	init( BACKUP_LOG_BLOCKS_PER_TASK,              200 );
 	init( BACKUP_LOCAL_FILE_WRITE_BLOCK,     1024*1024 );
 	init( BACKUP_CONCURRENT_DELETES,               100 );
 	init( BACKUP_SIMULATED_LIMIT_BYTES,		       1e6 ); if( randomize && BUGGIFY ) BACKUP_SIMULATED_LIMIT_BYTES = 1000;
