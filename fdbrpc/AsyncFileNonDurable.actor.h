@@ -269,27 +269,20 @@ public:
 		state std::string filename = self->filename;
 
 		wait(g_simulator.onMachine(currentProcess));
-		try {
-			Promise<bool> startSyncPromise = self->startSyncPromise;
-			self->startSyncPromise = Promise<bool>();
-			startSyncPromise.send(true);
+		Promise<bool> startSyncPromise = self->startSyncPromise;
+		self->startSyncPromise = Promise<bool>();
+		startSyncPromise.send(true);
 
-			std::vector<Future<Void>> outstandingModifications;
+		std::vector<Future<Void>> outstandingModifications;
 
-			for (auto itr = self->pendingModifications.ranges().begin();
-			     itr != self->pendingModifications.ranges().end();
-			     ++itr)
-				if (itr->value().isValid() && !itr->value().isReady())
-					outstandingModifications.push_back(itr->value());
+		for (auto itr = self->pendingModifications.ranges().begin(); itr != self->pendingModifications.ranges().end();
+		     ++itr)
+			if (itr->value().isValid() && !itr->value().isReady())
+				outstandingModifications.push_back(itr->value());
 
-			// Ignore errors here so that all modifications can finish
-			wait(waitForAllReady(outstandingModifications));
-			wait(g_simulator.onProcess(currentProcess, currentTaskID));
-		} catch (Error& e) {
-			state Error err = e;
-			wait(g_simulator.onProcess(currentProcess, currentTaskID));
-			throw err;
-		}
+		// Ignore errors here so that all modifications can finish
+		wait(waitForAllReady(outstandingModifications));
+		wait(g_simulator.onProcess(currentProcess, currentTaskID));
 	}
 
 	void addref() override { ReferenceCounted<AsyncFileNonDurable>::addref(); }
@@ -303,24 +296,6 @@ public:
 		} else if (isSoleOwner()) {
 			// isSoleOwner is a bit confusing here. What we mean is that the openFiles map is the sole owner. If we
 			// remove the file from the map to make sure it gets closed.
-			bool hasPendingModifications = false;
-			for (auto iter = pendingModifications.ranges().begin(); iter != pendingModifications.ranges().end();
-			     ++iter) {
-				if (iter->value().isValid() && !iter->value().isReady()) {
-					hasPendingModifications = true;
-					break;
-				}
-			}
-			if (hasPendingModifications) {
-				// If we still have pending references we won't close the file and instead wait for them. But while we
-				// wait for those to complete, another actor might open the file. So we call into an actor that will
-				// hold a refernce until all pending operations are complete. If someone opens this file before this
-				// completes, nothing will happen. Otherwise we will enter delref again but this time
-				// hasPendingModifications will evalualte to false.
-				addref();
-				waitOnOutstandingModifications(Reference<AsyncFileNonDurable>(this));
-				return;
-			}
 			auto& openFiles = g_simulator.getCurrentProcess()->machine->openFiles;
 			auto iter = openFiles.find(filename);
 			// the file could've been renamed (DiskQueue does that for example). In that case the file won't be in the
