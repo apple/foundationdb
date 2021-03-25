@@ -926,6 +926,9 @@ ACTOR Future<bool> runTest(Database cx,
 	return ok;
 }
 
+// Reads the test spec in order to decide what tests to run and what
+// type of configuration to run it with. If an attribute is in a test spec
+// but not handled properly in this function, the test may log an error.
 vector<TestSpec> readTests(ifstream& ifs) {
 	TestSpec spec;
 	vector<TestSpec> result;
