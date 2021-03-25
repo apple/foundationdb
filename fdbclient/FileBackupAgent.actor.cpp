@@ -3264,8 +3264,7 @@ struct AccumulatedMutations {
 			lastChunkNumber = chunkNumber;
 			serializedMutations += kv.value.toString();
 		} else {
-			lastChunkNumber = -2;
-			serializedMutations.clear();
+			clear();
 		}
 		kvs.push_back(kv);
 	}
@@ -3312,6 +3311,14 @@ struct AccumulatedMutations {
 		return false;
 	}
 
+	// Free accumulated memory usage and set lastChunkNumber such that further chunks passed to addChunk
+	// will be ignored.
+	void clear() {
+		kvs.clear();
+		serializedMutations.clear();
+		lastChunkNumber = -2;
+	}
+
 	std::vector<KeyValueRef> kvs;
 	std::string serializedMutations;
 	int lastChunkNumber;
@@ -3319,6 +3326,7 @@ struct AccumulatedMutations {
 
 // Returns a vector of filtered KV refs from data which are either part of incomplete mutation groups OR complete
 // and have data relevant to one of the KV ranges in ranges
+// Note that caller must keep data alive as the vector returns here contains KeyValueRefs which point to the same memory.
 std::vector<KeyValueRef> filterLogMutationKVPairs(VectorRef<KeyValueRef> data, const std::vector<KeyRange>& ranges) {
 	std::unordered_map<Version, AccumulatedMutations> mutationBlocksByVersion;
 
@@ -3336,6 +3344,8 @@ std::vector<KeyValueRef> filterLogMutationKVPairs(VectorRef<KeyValueRef> data, c
 		if (!m.isComplete() || m.matchesAnyRange(ranges)) {
 			output.insert(output.end(), m.kvs.begin(), m.kvs.end());
 		}
+		// Free memory in accumulator as output vector is built.
+		m.clear();
 	}
 
 	return output;
@@ -3414,7 +3424,8 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 		}
 
 		// Filter the KV pairs extracted from the log file block to remove any records known to not be needed for this
-		// restore based on the restore range set.
+		// restore based on the restore range set.  Memory for all KV pairs is still held in dataOriginal so it must
+		// remain in scope.
 		state std::vector<KeyValueRef> dataFiltered = filterLogMutationKVPairs(dataOriginal, ranges);
 
 		state int start = 0;
