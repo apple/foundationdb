@@ -3400,8 +3400,9 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 
 		state int64_t blockBegin;
 		state int64_t blockLen = 0;
-		for (blockBegin = readOffset; blockBegin < readLen; blockBegin += blockLen) {
-			blockLen = std::min<int64_t>(readOffset + readLen - blockBegin, logFile.blockSize);
+		state int64_t readEnd = readOffset + readLen;
+		for (blockBegin = readOffset; blockBegin < readEnd; blockBegin += blockLen) {
+			blockLen = std::min<int64_t>(readEnd - blockBegin, logFile.blockSize);
 
 			Standalone<VectorRef<KeyValueRef>> kvs = wait(decodeLogFileBlock(inFile, blockBegin, blockLen));
 
