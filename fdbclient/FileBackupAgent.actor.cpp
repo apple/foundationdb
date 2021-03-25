@@ -3326,7 +3326,8 @@ struct AccumulatedMutations {
 
 // Returns a vector of filtered KV refs from data which are either part of incomplete mutation groups OR complete
 // and have data relevant to one of the KV ranges in ranges
-// Note that caller must keep data alive as the vector returns here contains KeyValueRefs which point to the same memory.
+// Note that caller must keep data alive as the vector returns here contains KeyValueRefs which point to the same
+// memory.
 std::vector<KeyValueRef> filterLogMutationKVPairs(VectorRef<KeyValueRef> data, const std::vector<KeyRange>& ranges) {
 	std::unordered_map<Version, AccumulatedMutations> mutationBlocksByVersion;
 
