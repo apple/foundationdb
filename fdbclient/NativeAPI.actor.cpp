@@ -1743,6 +1743,30 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 	}
 }
 
+// update the network busyness on a 1s cadence
+ACTOR Future<Void> monitorNetworkBusyness() {
+	state double prevTime = now();
+	loop {
+		wait(delay(CLIENT_KNOBS->NETWORK_BUSYNESS_MONITOR_INTERVAL, TaskPriority::FlushTrace));
+		double elapsed = now() - prevTime; // get elapsed time from last execution
+		prevTime = now();
+		struct NetworkMetrics::PriorityStats& tracker = g_network->networkInfo.metrics.starvationTrackerNetworkBusyness;
+
+		if (tracker.active) { // update metrics
+			tracker.duration += now() - tracker.windowedTimer;
+			tracker.maxDuration = std::max(tracker.maxDuration, now() - tracker.timer);
+			tracker.windowedTimer = now();
+		}
+
+		g_network->networkInfo.metrics.networkBusyness =
+		    std::min(elapsed, tracker.duration) / elapsed; // average duration spent doing "work"
+
+		tracker.duration = 0;
+		tracker.maxDuration = 0;
+	}
+}
+
+// Setup g_network and start monitoring for network busyness
 void setupNetwork(uint64_t transportId, bool useMetrics) {
 	if (g_network)
 		throw network_already_setup();
@@ -1756,6 +1780,8 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	g_network->addStopCallback(TLS::DestroyOpenSSLGlobalState);
 	FlowTransport::createInstance(true, transportId);
 	Net2FileSystem::newFileSystem();
+
+	uncancellable(monitorNetworkBusyness());
 }
 
 void runNetwork() {

@@ -1321,6 +1321,9 @@ public:
 	}
 
 	// FIXME: determine when to fail the cluster controller when a primaryDC has not been set
+
+	// This function returns true when the cluster controller determines it is worth forcing
+	// a master recovery in order to change the recruited processes in the transaction subsystem.
 	bool betterMasterExists() {
 		const ServerDBInfo dbi = db.serverInfo->get();
 
@@ -1488,13 +1491,15 @@ public:
 
 		bool oldSatelliteFallback = false;
 
-		for (auto& logSet : dbi.logSystemConfig.tLogs) {
-			if (region.satelliteTLogPolicy.isValid() && logSet.isLocal && logSet.locality == tagLocalitySatellite) {
-				oldSatelliteFallback = logSet.tLogPolicy->info() != region.satelliteTLogPolicy->info();
-				ASSERT(!oldSatelliteFallback ||
-				       (region.satelliteTLogPolicyFallback.isValid() &&
-				        logSet.tLogPolicy->info() == region.satelliteTLogPolicyFallback->info()));
-				break;
+		if (region.satelliteTLogPolicyFallback.isValid()) {
+			for (auto& logSet : dbi.logSystemConfig.tLogs) {
+				if (region.satelliteTLogPolicy.isValid() && logSet.isLocal && logSet.locality == tagLocalitySatellite) {
+					oldSatelliteFallback = logSet.tLogPolicy->info() != region.satelliteTLogPolicy->info();
+					ASSERT(!oldSatelliteFallback ||
+					       (region.satelliteTLogPolicyFallback.isValid() &&
+					        logSet.tLogPolicy->info() == region.satelliteTLogPolicyFallback->info()));
+					break;
+				}
 			}
 		}
 
@@ -1629,12 +1634,26 @@ public:
 			return false;
 		}
 
+		// Because a configuration with fewer proxies or resolvers does not cause this function to fail,
+		// we need an extra check to determine if the total number of processes has been reduced.
+		// This is mainly helpful in avoiding situations where killing a degraded process
+		// would result in a configuration with less total processes than desired.
+		if (oldTLogFit.count + oldInFit.proxy.count + oldInFit.grvProxy.count + oldInFit.resolver.count >
+		    newTLogFit.count + newInFit.proxy.count + newInFit.grvProxy.count + newInFit.resolver.count) {
+			return false;
+		}
+
 		// Check backup worker fitness
 		RoleFitness oldBackupWorkersFit(backup_workers, ProcessClass::Backup);
 		const int nBackup = backup_addresses.size();
-		RoleFitness newBackupWorkersFit(
-		    getWorkersForRoleInDatacenter(clusterControllerDcId, ProcessClass::Backup, nBackup, db.config, id_used),
-		    ProcessClass::Backup);
+		RoleFitness newBackupWorkersFit(getWorkersForRoleInDatacenter(clusterControllerDcId,
+		                                                              ProcessClass::Backup,
+		                                                              nBackup,
+		                                                              db.config,
+		                                                              id_used,
+		                                                              Optional<WorkerFitnessInfo>(),
+		                                                              true),
+		                                ProcessClass::Backup);
 
 		if (oldTLogFit > newTLogFit || oldInFit > newInFit || oldSatelliteTLogFit > newSatelliteTLogFit ||
 		    oldRemoteTLogFit > newRemoteTLogFit || oldLogRoutersFit > newLogRoutersFit ||

@@ -10,6 +10,7 @@ RUN rpmkeys --import mono-project.com.rpmkey.pgp && \
         epel-release \
         scl-utils \
         yum-utils && \
+    yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo && \
     yum install -y \
         autoconf \
         automake \
@@ -20,6 +21,7 @@ RUN rpmkeys --import mono-project.com.rpmkey.pgp && \
         devtoolset-8-libubsan-devel \
         devtoolset-8-valgrind-devel \
         devtoolset-8-systemtap-sdt-devel \
+        docker-ce \
         dos2unix \
         dpkg \
         gettext-devel \
@@ -60,9 +62,10 @@ RUN source /opt/rh/devtoolset-8/enable && \
     tar --strip-components 1 --no-same-owner --directory git -xf git.tar.gz && \
     cd git && \
     make configure && \
-    ./configure \
-    && make && \
+    ./configure && \
+    make && \
     make install && \
+    cd ../ && \
     rm -rf /tmp/*
 
 # build/install ninja
