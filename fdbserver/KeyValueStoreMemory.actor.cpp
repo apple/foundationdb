@@ -241,7 +241,7 @@ public:
 			return result;
 		}
 
-		if (rowLimit > 0) {
+		if (rowLimit > 0) { // read rows ascending starting at the beginning of the key range
 			auto it = data.lower_bound(keys.begin);
 			while (it != data.end() && rowLimit && byteLimit > 0) {
 				StringRef tempKey = it.getKey(reserved_buffer);
@@ -256,7 +256,7 @@ public:
 		} else {
 			rowLimit = -rowLimit;
 			auto it = data.previous(data.lower_bound(keys.end));
-			while (it != data.end() && rowLimit && byteLimit > 0) {
+			while (it != data.end() && rowLimit && byteLimit > 0) { // read rows descending starting at the kend of the key range
 				StringRef tempKey = it.getKey(reserved_buffer);
 				if (tempKey < keys.begin)
 					break;

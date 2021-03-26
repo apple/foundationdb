@@ -1518,7 +1518,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 		//  runs into range
 		vCurrent = view.lastLessOrEqual(range.begin);
 		if (vCurrent && vCurrent->isClearTo() && vCurrent->getEndKey() > range.begin)
-			readBegin = vCurrent->getEndKey();
+			readBegin = vCurrent->getEndKey(); // if vCurrent (range.begin) is contained within a clear range then start searching at the end of the clear range
 		else
 			readBegin = range.begin;
 
@@ -1561,9 +1561,9 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			// 'more'
 			int prevSize = result.data.size();
 			merge(result.arena,
-			      result.data,
-			      resultCache,
-			      atStorageVersion,
+			      result.data, // container to store the merging of resultCache and atStorageVersion 
+			      resultCache, // results from the in memory PTree
+			      atStorageVersion, // results from the disk
 			      vCount,
 			      limit,
 			      atStorageVersion.more,
@@ -1582,7 +1582,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			// Setup for the next iteration
 			// If we hit our limits reading from disk but then combining with MVCC gave us back more room
 			if (atStorageVersion
-			        .more) { // if there might be more data, begin reading right after what we already found to find out
+			        .more) { // if there might be more data on disk, begin reading right after what we already found to find out
 				ASSERT(result.data.end()[-1].key == atStorageVersion.end()[-1].key);
 				readBegin = readBeginTemp = keyAfter(result.data.end()[-1].key);
 			} else if (vCurrent && vCurrent->isClearTo()) { // if vCurrent is a clear, skip it.
@@ -1599,7 +1599,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 
 		// A clear might extend all the way to range.end
 		if (vCurrent && vCurrent->isClearTo() && vCurrent->getEndKey() >= range.end) {
-			readEnd = vCurrent.key();
+			readEnd = vCurrent.key(); // if vCurrent (range.end) is contained within a clear range then start searching at the beginning of the range
 			--vCurrent;
 		} else {
 			readEnd = range.end;
@@ -1629,6 +1629,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 				}
 			}
 
+			// Read data on disk from readBegin to readEnd
 			readBegin = vCurrent ? std::max(vCurrent->isClearTo() ? vCurrent->getEndKey() : vCurrent.key(), range.begin)
 			                     : range.begin;
 			Standalone<RangeResultRef> atStorageVersion =
@@ -1639,9 +1640,9 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 				throw transaction_too_old();
 
 			int prevSize = result.data.size();
-			merge(result.arena,
-			      result.data,
-			      resultCache,
+			merge(result.arena, // container to store the merging of resultCache and atStorageVersion 
+			      result.data, // results from the in memory PTree
+			      resultCache, // results from the disk
 			      atStorageVersion,
 			      vCount,
 			      limit,
@@ -1658,10 +1659,10 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 				break;
 			}
 
-			if (atStorageVersion.more) {
+			if (atStorageVersion.more) { // if there is more data on disk begin reading one before the last (smallest) key we found
 				ASSERT(result.data.end()[-1].key == atStorageVersion.end()[-1].key);
 				readEnd = result.data.end()[-1].key;
-			} else if (vCurrent && vCurrent->isClearTo()) {
+			} else if (vCurrent && vCurrent->isClearTo()) { // if vCurrent is a clear range then skip to the beginning of it
 				ASSERT(vCurrent.key() < readEnd);
 				readEnd = vCurrent.key();
 				--vCurrent;

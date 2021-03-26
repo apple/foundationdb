@@ -1145,6 +1145,9 @@ struct RawCursor {
 		}
 		return Optional<Value>();
 	}
+
+	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
+	// The total size of the returned value (less the last entry) will be less than the byteLimit
 	Standalone<RangeResultRef> getRange(KeyRangeRef keys, int rowLimit, int byteLimit) {
 		Standalone<RangeResultRef> result;
 		int accumulatedBytes = 0;
@@ -1154,7 +1157,7 @@ struct RawCursor {
 		}
 
 		if (db.fragment_values) {
-			if (rowLimit > 0) {
+			if (rowLimit > 0) { // read rows ascending starting at the beginning of the key range
 				int r = moveTo(keys.begin);
 				if (r < 0)
 					moveNext();
@@ -1168,7 +1171,7 @@ struct RawCursor {
 					accumulatedBytes += sizeof(KeyValueRef) + kv.get().expectedSize();
 					nextKey = i.peek();
 				}
-			} else {
+			} else { // read rows descending starting at the kend of the key range
 				int r = moveTo(keys.end);
 				if (r >= 0)
 					movePrevious();
@@ -1183,7 +1186,7 @@ struct RawCursor {
 					nextKey = i.peek();
 				}
 			}
-		} else {
+		} else { // large kv pairs were split up during write so they must be merged during the read 
 			if (rowLimit > 0) {
 				int r = moveTo(keys.begin);
 				if (r < 0)
