@@ -76,18 +76,24 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	  KeyRangeRef(LiteralStringRef("failed/"), LiteralStringRef("failed0"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "lock", singleKeyRange(LiteralStringRef("db_locked")).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
-	{ "consistencycheck", singleKeyRange(LiteralStringRef("consistency_check_suspended"))
-	                          .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
-	{ "coordinators", KeyRangeRef(LiteralStringRef("coordinators/"), LiteralStringRef("coordinators0"))
-	                      .withPrefix(moduleToBoundary[MODULE::CONFIGURATION].begin) },
-	{ "advanceversion", singleKeyRange(LiteralStringRef("min_required_commit_version"))
-	                        .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
-	{ "profile", KeyRangeRef(LiteralStringRef("profiling/"), LiteralStringRef("profiling0"))
-	                 .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
-	{ "maintenance", KeyRangeRef(LiteralStringRef("maintenance/"), LiteralStringRef("maintenance0"))
-	                     .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
-	{ "datadistribution", KeyRangeRef(LiteralStringRef("data_distribution/"), LiteralStringRef("data_distribution0"))
-	                          .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
+	{ "consistencycheck",
+	  singleKeyRange(LiteralStringRef("consistency_check_suspended"))
+	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "coordinators",
+	  KeyRangeRef(LiteralStringRef("coordinators/"), LiteralStringRef("coordinators0"))
+	      .withPrefix(moduleToBoundary[MODULE::CONFIGURATION].begin) },
+	{ "advanceversion",
+	  singleKeyRange(LiteralStringRef("min_required_commit_version"))
+	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "profile",
+	  KeyRangeRef(LiteralStringRef("profiling/"), LiteralStringRef("profiling0"))
+	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "maintenance",
+	  KeyRangeRef(LiteralStringRef("maintenance/"), LiteralStringRef("maintenance0"))
+	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "datadistribution",
+	  KeyRangeRef(LiteralStringRef("data_distribution/"), LiteralStringRef("data_distribution0"))
+	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
 };
 
 std::set<std::string> SpecialKeySpace::options = { "excluded/force", "failed/force" };
@@ -1798,7 +1804,8 @@ void ClientProfilingImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& ke
 
 MaintenanceImpl::MaintenanceImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-ACTOR static Future<Standalone<RangeResultRef>> MaintenanceGetRangeActor(ReadYourWritesTransaction* ryw, KeyRef prefix,
+ACTOR static Future<Standalone<RangeResultRef>> MaintenanceGetRangeActor(ReadYourWritesTransaction* ryw,
+                                                                         KeyRef prefix,
                                                                          KeyRangeRef kr) {
 	state Standalone<RangeResultRef> result;
 	// zoneId
@@ -1844,7 +1851,8 @@ ACTOR static Future<Optional<std::string>> maintenanceCommitActor(ReadYourWrites
 	// if a transaction has more than one set operation on different zone keys,
 	// the commit will throw an error
 	for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
-		if (!iter->value().first) continue;
+		if (!iter->value().first)
+			continue;
 		if (iter->value().second.present()) {
 			if (isSet)
 				return Optional<std::string>(ManagementAPIError::toJsonString(
@@ -1867,8 +1875,9 @@ ACTOR static Future<Optional<std::string>> maintenanceCommitActor(ReadYourWrites
 		} else {
 			TraceEvent(SevDebug, "SKSMaintenanceSet").detail("ZoneId", zoneId.toString());
 			ryw->getTransaction().set(healthyZoneKey,
-			                          healthyZoneValue(zoneId, ryw->getTransaction().getReadVersion().get() +
-			                                                       (seconds * CLIENT_KNOBS->CORE_VERSIONSPERSECOND)));
+			                          healthyZoneValue(zoneId,
+			                                           ryw->getTransaction().getReadVersion().get() +
+			                                               (seconds * CLIENT_KNOBS->CORE_VERSIONSPERSECOND)));
 		}
 	}
 	return Optional<std::string>();
@@ -1881,7 +1890,8 @@ Future<Optional<std::string>> MaintenanceImpl::commit(ReadYourWritesTransaction*
 DataDistributionImpl::DataDistributionImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
 ACTOR static Future<Standalone<RangeResultRef>> DataDistributionGetRangeActor(ReadYourWritesTransaction* ryw,
-                                                                              KeyRef prefix, KeyRangeRef kr) {
+                                                                              KeyRef prefix,
+                                                                              KeyRangeRef kr) {
 	state Standalone<RangeResultRef> result;
 	// dataDistributionModeKey
 	state Key modeKey = LiteralStringRef("mode").withPrefix(prefix);
@@ -1925,7 +1935,8 @@ Future<Optional<std::string>> DataDistributionImpl::commit(ReadYourWritesTransac
 	Key rebalanceIgnoredKey = LiteralStringRef("rebalance_ignored").withPrefix(kr.begin);
 	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(kr);
 	for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
-		if (!iter->value().first) continue;
+		if (!iter->value().first)
+			continue;
 		if (iter->value().second.present()) {
 			if (iter->range() == singleKeyRange(modeKey)) {
 				try {
@@ -1934,25 +1945,29 @@ Future<Optional<std::string>> DataDistributionImpl::commit(ReadYourWritesTransac
 					if (mode == 0 || mode == 1)
 						ryw->getTransaction().set(dataDistributionModeKey, modeVal);
 					else
-						msg = ManagementAPIError::toJsonString(false, "datadistribution",
+						msg = ManagementAPIError::toJsonString(false,
+						                                       "datadistribution",
 						                                       "Please set the value of the data_distribution/mode to "
 						                                       "0(disable) or 1(enable), other values are not allowed");
 				} catch (boost::bad_lexical_cast& e) {
-					msg = ManagementAPIError::toJsonString(false, "datadistribution",
+					msg = ManagementAPIError::toJsonString(false,
+					                                       "datadistribution",
 					                                       "Invalid datadistribution mode(int): " +
 					                                           iter->value().second.get().toString());
 				}
 			} else if (iter->range() == singleKeyRange(rebalanceIgnoredKey)) {
 				if (iter->value().second.get().size())
 					msg =
-					    ManagementAPIError::toJsonString(false, "datadistribution",
+					    ManagementAPIError::toJsonString(false,
+					                                     "datadistribution",
 					                                     "Value is unused for the data_distribution/rebalance_ignored "
 					                                     "key, please set it to an empty value");
 				else
 					ryw->getTransaction().set(rebalanceDDIgnoreKey, LiteralStringRef("on"));
 			} else {
 				msg = ManagementAPIError::toJsonString(
-				    false, "datadistribution",
+				    false,
+				    "datadistribution",
 				    "Changing invalid keys, please read the documentation to check valid keys in the range");
 			}
 		} else {
