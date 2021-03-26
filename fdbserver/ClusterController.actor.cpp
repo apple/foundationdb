@@ -406,8 +406,8 @@ public:
 			}
 
 			// This worker is a candidate for TLog recruitment.
-			fitness_workers[std::make_tuple(fitness, 0 /* id_used[worker_process_id]*/, worker_details.degraded)]
-			    .push_back(worker_details);
+			fitness_workers[std::make_tuple(fitness, id_used[worker_process_id], worker_details.degraded)].push_back(
+			    worker_details);
 		}
 
 		//  FIXME: it's not clear whether this is necessary.
