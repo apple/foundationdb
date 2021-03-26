@@ -45,11 +45,31 @@ if(NOT WIN32)
   endif()
 endif()
 
-add_library(uring SHARED IMPORTED) # or STATIC instead of SHARED
-set_target_properties(uring PROPERTIES
-        IMPORTED_LOCATION "/foundationdb/liburing/src/liburing.so.2.0.0"
-        INTERFACE_INCLUDE_DIRECTORIES "/foundationdb/liburing/src/include"
-        )
+if (FALSE) #WITH_IO_URING)
+	message(STATUS "IO_URING ENABLED")
+	include(ExternalProject)
+	ExternalProject_Add(io_uring
+		URL https://github.com/axboe/liburing/archive/refs/tags/liburing-2.0.tar.gz
+		#PREFIX liburing
+		BUILD_ALWAYS 1
+		BUILD_IN_SOURCE 1
+		CONFIGURE_COMMAND "" #./configure --cc="gcc -fPIC"
+		#workaround
+		BUILD_COMMAND  make || echo OK 
+		INSTALL_COMMAND ""
+		#INSTALL_DIR=${CMAKE_CURRENT_SOURCE_DIR}/liburing
+		BUILD_BYPRODUCTS <BINARY_DIR>/src/liburing.a
+		)
+
+	ExternalProject_Get_Property(io_uring BINARY_DIR)
+	set(URING_LIBRARIES ${BINARY_DIR}/src/liburing.a)
+
+	ExternalProject_Get_Property(io_uring SOURCE_DIR)
+	set (URING_INCLUDE_DIR ${BINARY_DIR}/src/include)
+	
+else()
+	message(STATUS "RPC IO_URING DISABLED")
+endif()
 
 set(FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS
   ActorFuzz.actor.cpp
@@ -60,8 +80,8 @@ add_flow_target(STATIC_LIBRARY NAME fdbrpc
   SRCS ${FDBRPC_SRCS}
   DISABLE_ACTOR_DIAGNOSTICS ${FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS})
 target_include_directories(fdbrpc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
-target_link_libraries(fdbrpc PRIVATE uring)
-#target_link_libraries(fdbrpc PRIVATE thirdparty)
+#target_include_directories(fdbrpc PRIVATE ${URING_INCLUDE_DIR})
+#target_link_libraries(fdbrpc PRIVATE ${URING_LIBRARIES})
 target_link_libraries(fdbrpc PUBLIC flow)
 if(COMPILE_EIO)
   add_library(eio STATIC libeio/eio.c)

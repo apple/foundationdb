@@ -280,7 +280,36 @@ if (WITH_ROCKSDB_EXPERIMENTAL)
   target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
   target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES})
 else()
-  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
+if (WITH_IO_URING)
+	message(STATUS "SRV IO_URING ENABLED")
+	include(ExternalProject)
+	ExternalProject_Add(io_uring
+		URL https://github.com/axboe/liburing/archive/refs/tags/liburing-2.0.tar.gz
+		#PREFIX liburing
+		BUILD_ALWAYS 1
+		BUILD_IN_SOURCE 1
+		CONFIGURE_COMMAND "" #./configure --cc="gcc -fPIC"
+		#workaround
+		BUILD_COMMAND  make || echo OK 
+		INSTALL_COMMAND ""
+		#INSTALL_DIR=${CMAKE_CURRENT_SOURCE_DIR}/liburing
+
+		BUILD_BYPRODUCTS <BINARY_DIR>/src/liburing.a
+		)
+
+	ExternalProject_Get_Property(io_uring BINARY_DIR)
+	set(URING_LIBRARIES ${BINARY_DIR}/src/liburing.a)
+
+	ExternalProject_Get_Property(io_uring SOURCE_DIR)
+	set (URING_INCLUDE_DIR ${BINARY_DIR}/src/include)
+	
+else()
+	message(STATUS "IO_URING DISABLED")
+endif()
+	add_dependencies(fdbserver io_uring)
+	target_include_directories(fdbserver PRIVATE ${URING_INCLUDE_DIR})
+	target_link_libraries(fdbserver PRIVATE ${URING_LIBRARIES})
+	target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
 endif()
 
 target_link_libraries(fdbserver PRIVATE toml11_target jemalloc)
