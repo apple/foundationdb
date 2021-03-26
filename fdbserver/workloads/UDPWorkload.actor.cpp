@@ -63,7 +63,8 @@ struct UDPWorkload : TestWorkload {
 	std::string description() const override { return name; }
 	ACTOR static Future<Void> _setup(UDPWorkload* self, Database cx) {
 		state NetworkAddress localAddress(g_network->getLocalAddress().ip,
-		                                  deterministicRandom()->randomInt(self->minPort, self->maxPort + 1), true,
+		                                  deterministicRandom()->randomInt(self->minPort, self->maxPort + 1),
+		                                  true,
 		                                  false);
 		state Key key = self->keyPrefix.withSuffix(BinaryWriter::toValue(self->clientId, Unversioned()));
 		state Value serializedLocalAddress = BinaryWriter::toValue(localAddress, IncludeVersion());

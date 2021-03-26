@@ -29,7 +29,7 @@
 // boost context installed
 
 Coro *current_coro = 0, *main_coro = 0;
-Coro* swapCoro( Coro* n ) {
+Coro* swapCoro(Coro* n) {
 	Coro* t = current_coro;
 	current_coro = n;
 	return t;
@@ -37,15 +37,15 @@ Coro* swapCoro( Coro* n ) {
 
 /*struct IThreadlike {
 public:
-	virtual void start() = 0;     // Call at most once!  Causes run() to be called on the 'thread'.
-	virtual ~IThreadlike() {}     // Pre: start hasn't been called, or run() has returned
-	virtual void unblock() = 0;   // Pre: block() has been called by run().  Causes block() to return.
+    virtual void start() = 0;     // Call at most once!  Causes run() to be called on the 'thread'.
+    virtual ~IThreadlike() {}     // Pre: start hasn't been called, or run() has returned
+    virtual void unblock() = 0;   // Pre: block() has been called by run().  Causes block() to return.
 
 protected:
-	virtual void block() = 0;     // Call only from run().  Returns when unblock() is called elsewhere.
-	virtual void run() = 0;       // To be overridden by client.  Returning causes the thread to block until it is destroyed.
+    virtual void block() = 0;     // Call only from run().  Returns when unblock() is called elsewhere.
+    virtual void run() = 0;       // To be overridden by client.  Returning causes the thread to block until it is
+destroyed.
 };*/
-
 
 struct Coroutine /*: IThreadlike*/ {
 	Coroutine() {
@@ -54,28 +54,27 @@ struct Coroutine /*: IThreadlike*/ {
 			platform::outOfMemory();
 	}
 
-	~Coroutine() {
-		Coro_free(coro);
-	}
+	~Coroutine() { Coro_free(coro); }
 
 	void start() {
-		int result = Coro_startCoro_( swapCoro(coro), coro, this, &entry );
+		int result = Coro_startCoro_(swapCoro(coro), coro, this, &entry);
 		if (result == ENOMEM)
 			platform::outOfMemory();
 	}
 
 	void unblock() {
-		//Coro_switchTo_( swapCoro(coro), coro );
+		// Coro_switchTo_( swapCoro(coro), coro );
 		blocked.send(Void());
 	}
 
 protected:
 	void block() {
-		//Coro_switchTo_( swapCoro(main_coro), main_coro );
+		// Coro_switchTo_( swapCoro(main_coro), main_coro );
 		blocked = Promise<Void>();
 		double before = now();
-		CoroThreadPool::waitFor( blocked.getFuture() );
-		if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting) TraceEvent("CoroUnblocked").detail("After", now()-before);
+		CoroThreadPool::waitFor(blocked.getFuture());
+		if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting)
+			TraceEvent("CoroUnblocked").detail("After", now() - before);
 	}
 
 	virtual void run() = 0;
@@ -83,13 +82,11 @@ protected:
 private:
 	void wrapRun() {
 		run();
-		Coro_switchTo_( swapCoro(main_coro), main_coro );
-		//block();
+		Coro_switchTo_(swapCoro(main_coro), main_coro);
+		// block();
 	}
 
-	static void entry(void* _this) {
-		((Coroutine*)_this)->wrapRun();
-	}
+	static void entry(void* _this) { ((Coroutine*)_this)->wrapRun(); }
 
 	Coro* coro;
 	Promise<Void> blocked;
@@ -107,18 +104,16 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 		ActorCollection anyError, allStopped;
 		Future<Void> m_holdRefUntilStopped;
 
-		Pool() : anyError(false), allStopped(true) {
-			m_holdRefUntilStopped = holdRefUntilStopped(this);
-		}
+		Pool() : anyError(false), allStopped(true) { m_holdRefUntilStopped = holdRefUntilStopped(this); }
 
 		~Pool() {
-			for(int c=0; c<workers.size(); c++)
+			for (int c = 0; c < workers.size(); c++)
 				delete workers[c];
 		}
 
-		ACTOR Future<Void> holdRefUntilStopped( Pool* p ) {
+		ACTOR Future<Void> holdRefUntilStopped(Pool* p) {
 			p->addref();
-			wait( p->allStopped.getResult() );
+			wait(p->allStopped.getResult());
 			p->delref();
 			return Void();
 		}
@@ -131,18 +126,17 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 		ThreadReturnPromise<Void> stopped;
 		ThreadReturnPromise<Void> error;
 
-		Worker( Pool* pool,  IThreadPoolReceiver* userData ) : pool(pool), userData(userData), stop(false) {
-		}
+		Worker(Pool* pool, IThreadPoolReceiver* userData) : pool(pool), userData(userData), stop(false) {}
 
 		void run() override {
 			try {
-				if(!stop)
+				if (!stop)
 					userData->init();
 
 				while (!stop) {
 					pool->queueLock.enter();
 					if (pool->work.empty()) {
-						pool->idle.push_back( this );
+						pool->idle.push_back(this);
 						pool->queueLock.leave();
 						Threadlike::block();
 					} else {
@@ -150,7 +144,8 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 						pool->work.pop_front();
 						pool->queueLock.leave();
 						(*a)(userData);
-						if(IS_CORO) CoroThreadPool::waitFor(yield());
+						if (IS_CORO)
+							CoroThreadPool::waitFor(yield());
 					}
 				}
 
@@ -176,12 +171,12 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 	};
 
 	Reference<Pool> pool;
-	Future<Void> m_stopOnError;  // must be last, because its cancellation calls stop()!
+	Future<Void> m_stopOnError; // must be last, because its cancellation calls stop()!
 	Error error;
 
-	ACTOR Future<Void> stopOnError( WorkPool* w ) {
+	ACTOR Future<Void> stopOnError(WorkPool* w) {
 		try {
-			wait( w->getError() );
+			wait(w->getError());
 			ASSERT(false);
 		} catch (Error& e) {
 			w->stop(e);
@@ -191,15 +186,13 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 
 	void checkError() {
 		if (error.code() != invalid_error_code) {
-			ASSERT( error.code() != error_code_success );  // Calling post or addThread after stop is an error
+			ASSERT(error.code() != error_code_success); // Calling post or addThread after stop is an error
 			throw error;
 		}
 	}
 
 public:
-	WorkPool() : pool( new Pool ) {
-		m_stopOnError = stopOnError( this );
-	}
+	WorkPool() : pool(new Pool) { m_stopOnError = stopOnError(this); }
 
 	Future<Void> getError() const override { return pool->anyError.getResult(); }
 	void addThread(IThreadPoolReceiver* userData, const char*) override {
@@ -207,16 +200,16 @@ public:
 
 		auto w = new Worker(pool.getPtr(), userData);
 		pool->queueLock.enter();
-		pool->workers.push_back( w );
+		pool->workers.push_back(w);
 		pool->queueLock.leave();
-		pool->anyError.add( w->error.getFuture() );
-		pool->allStopped.add( w->stopped.getFuture() );
+		pool->anyError.add(w->error.getFuture());
+		pool->allStopped.add(w->stopped.getFuture());
 		startWorker(w);
 	}
-	ACTOR static void startWorker( Worker* w ) {
+	ACTOR static void startWorker(Worker* w) {
 		// We want to make sure that coroutines are always started after Net2::run() is called, so the main coroutine is
 		// initialized.
-		wait( delay(0, g_network->getCurrentTask() ));
+		wait(delay(0, g_network->getCurrentTask()));
 		w->start();
 	}
 	void post(PThreadAction action) override {
@@ -238,23 +231,26 @@ public:
 		}
 
 		pool->queueLock.enter();
-		TraceEvent("WorkPool_Stop").detail("Workers", pool->workers.size()).detail("Idle", pool->idle.size())
-			.detail("Work", pool->work.size()).error(e, true);
+		TraceEvent("WorkPool_Stop")
+		    .detail("Workers", pool->workers.size())
+		    .detail("Idle", pool->idle.size())
+		    .detail("Work", pool->work.size())
+		    .error(e, true);
 
-		for (uint32_t i=0; i<pool->work.size(); i++)
-			pool->work[i]->cancel();   // What if cancel() does something to this?
+		for (uint32_t i = 0; i < pool->work.size(); i++)
+			pool->work[i]->cancel(); // What if cancel() does something to this?
 		pool->work.clear();
-		for(int i=0; i<pool->workers.size(); i++)
+		for (int i = 0; i < pool->workers.size(); i++)
 			pool->workers[i]->stop = true;
 
 		std::vector<Worker*> idle;
 		std::swap(idle, pool->idle);
 		pool->queueLock.leave();
 
-		for(int i=0; i<idle.size(); i++)
+		for (int i = 0; i < idle.size(); i++)
 			idle[i]->unblock();
 
-		pool->allStopped.add( Void() );
+		pool->allStopped.add(Void());
 
 		return pool->allStopped.getResult();
 	}
@@ -265,46 +261,43 @@ public:
 
 typedef WorkPool<Coroutine, ThreadUnsafeSpinLock, true> CoroPool;
 
-
-
-ACTOR void coroSwitcher( Future<Void> what, TaskPriority taskID, Coro* coro ) {
+ACTOR void coroSwitcher(Future<Void> what, TaskPriority taskID, Coro* coro) {
 	try {
 		// state double t = now();
 		wait(what);
-		//if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting && now()!=t)
+		// if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting && now()!=t)
 		//	TraceEvent("NonzeroWaitDuringReboot").detail("TaskID", taskID).detail("Elapsed", now()-t).backtrace("Flow");
-	} catch (Error&) {}
-	wait( delay(0, taskID) );
-	Coro_switchTo_( swapCoro(coro), coro );
+	} catch (Error&) {
+	}
+	wait(delay(0, taskID));
+	Coro_switchTo_(swapCoro(coro), coro);
 }
 
-
-
-void CoroThreadPool::waitFor( Future<Void> what ) {
-	ASSERT (current_coro != main_coro);
-	if (what.isReady()) return;
+void CoroThreadPool::waitFor(Future<Void> what) {
+	ASSERT(current_coro != main_coro);
+	if (what.isReady())
+		return;
 	// double t = now();
 	coroSwitcher(what, g_network->getCurrentTask(), current_coro);
-	Coro_switchTo_( swapCoro(main_coro), main_coro );
-	//if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting && now()!=t)
-	//	TraceEvent("NonzeroWaitDuringReboot").detail("TaskID", currentTaskID).detail("Elapsed", now()-t).backtrace("Coro");
-	ASSERT( what.isReady() );
+	Coro_switchTo_(swapCoro(main_coro), main_coro);
+	// if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting && now()!=t)
+	//	TraceEvent("NonzeroWaitDuringReboot").detail("TaskID", currentTaskID).detail("Elapsed",
+	// now()-t).backtrace("Coro");
+	ASSERT(what.isReady());
 }
 
 // Right After INet2::run
-void CoroThreadPool::init()
-{
+void CoroThreadPool::init() {
 	if (!current_coro) {
 		current_coro = main_coro = Coro_new();
 		if (main_coro == nullptr)
 			platform::outOfMemory();
 
 		Coro_initializeMainCoro(main_coro);
-		//printf("Main thread: %d bytes stack presumed available\n", Coro_bytesLeftOnStack(current_coro));
+		// printf("Main thread: %d bytes stack presumed available\n", Coro_bytesLeftOnStack(current_coro));
 	}
 }
 
-
 Reference<IThreadPool> CoroThreadPool::createThreadPool() {
-	return Reference<IThreadPool>( new CoroPool );
+	return Reference<IThreadPool>(new CoroPool);
 }

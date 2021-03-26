@@ -79,10 +79,11 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		goodActorPerClient = getOption(options, LiteralStringRef("goodActorPerClient"), 1);
 		actorCount = goodActorPerClient + badActorPerClient;
 
-		keyCount = getOption(options, LiteralStringRef("keyCount"),
+		keyCount = getOption(options,
+		                     LiteralStringRef("keyCount"),
 		                     std::max(3000, clientCount * actorCount * 3)); // enough keys to avoid too many conflicts
 		trInterval = actorCount * 1.0 / getOption(options, LiteralStringRef("trPerSecond"), 1000);
-		if(badActorPerClient > 0) {
+		if (badActorPerClient > 0) {
 			rangeEachBadActor = keyCount / (clientCount * badActorPerClient);
 		}
 
@@ -95,17 +96,17 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	ACTOR static Future<Void> _setup(Database cx, WriteTagThrottlingWorkload* self) {
 		ASSERT(CLIENT_KNOBS->MAX_TAGS_PER_TRANSACTION >= MIN_TAGS_PER_TRANSACTION &&
 		       CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH >= MIN_TRANSACTION_TAG_LENGTH);
-		if(self->populateData) {
+		if (self->populateData) {
 			wait(bulkSetup(cx, self, self->keyCount, Promise<double>()));
 		}
-		if(self->clientId == 0) {
+		if (self->clientId == 0) {
 			wait(ThrottleApi::enableAuto(cx, true));
 		}
 		return Void();
 	}
 	Future<Void> setup(const Database& cx) override {
 		if (CLIENT_KNOBS->MAX_TAGS_PER_TRANSACTION < MIN_TAGS_PER_TRANSACTION ||
-		    CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH < MIN_TRANSACTION_TAG_LENGTH ) {
+		    CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH < MIN_TRANSACTION_TAG_LENGTH) {
 			fastSuccess = true;
 			return Void();
 		}
@@ -125,11 +126,13 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		return Void();
 	}
 	Future<Void> start(Database const& cx) override {
-		if(fastSuccess) return Void();
+		if (fastSuccess)
+			return Void();
 		return _start(cx, this);
 	}
 	Future<bool> check(Database const& cx) override {
-		if(fastSuccess) return true;
+		if (fastSuccess)
+			return true;
 		if (writeThrottle) {
 			if (!badActorThrottleRetries && !goodActorThrottleRetries) {
 				TraceEvent(SevWarn, "NoThrottleTriggered");
@@ -139,10 +142,10 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 				    .detail("BadActorThrottleRetries", badActorThrottleRetries)
 				    .detail("GoodActorThrottleRetries", goodActorThrottleRetries);
 			}
-			if(!throttledTags.empty() && throttledTags.count(badTag.toString()) == 0) {
+			if (!throttledTags.empty() && throttledTags.count(badTag.toString()) == 0) {
 				TraceEvent(SevWarnAlways, "IncorrectThrottle")
 				    .detail("ThrottledTagNumber", throttledTags.size())
-					.detail("ThrottledTags", setToString(throttledTags));
+				    .detail("ThrottledTags", setToString(throttledTags));
 				return false;
 			}
 			// NOTE also do eyeball check of Retries.throttle and Avg Latency
@@ -186,9 +189,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		m.push_back(PerfMetric("50% Commit Latency (ms, goodActor)", 1000 * goodActorCommitLatency.median(), true));
 	}
 
-	Standalone<KeyValueRef> operator()(uint64_t n) {
-		return KeyValueRef(keyForIndex(n), generateVal());
-	}
+	Standalone<KeyValueRef> operator()(uint64_t n) { return KeyValueRef(keyForIndex(n), generateVal()); }
 	// return a key based on useReadKey
 	Key generateKey(bool useReadKey, int startIdx, int availableRange) {
 		if (useReadKey) {
@@ -199,22 +200,26 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	// return a range based on useClearKey
 	KeyRange generateRange(bool useClearKey, int startIdx, int availableRange) {
 		int a, b;
-		if(useClearKey) {
+		if (useClearKey) {
 			a = deterministicRandom()->randomInt(startIdx, availableRange + startIdx);
 			b = deterministicRandom()->randomInt(startIdx, availableRange + startIdx);
-		}
-		else {
+		} else {
 			a = deterministicRandom()->randomInt(0, keyCount);
 			b = deterministicRandom()->randomInt(0, keyCount);
 		}
-		if (a > b) std::swap(a, b);
-		if (a == b) return singleKeyRange(keyForIndex(a, false));
+		if (a > b)
+			std::swap(a, b);
+		if (a == b)
+			return singleKeyRange(keyForIndex(a, false));
 		return KeyRange(KeyRangeRef(keyForIndex(a, false), keyForIndex(b, false)));
 	}
 	Value generateVal() { return Value(deterministicRandom()->randomAlphaNumeric(maxValueBytes)); }
 
 	// read and write value on particular/random Key
-	ACTOR static Future<Void> clientActor(bool isBadActor, int actorId, double badOpRate, Database cx,
+	ACTOR static Future<Void> clientActor(bool isBadActor,
+	                                      int actorId,
+	                                      double badOpRate,
+	                                      Database cx,
 	                                      WriteTagThrottlingWorkload* self) {
 		state int startIdx = (self->clientId * self->badActorPerClient + actorId) * self->rangeEachBadActor;
 		state int availableRange = std::max(int(self->rangeEachBadActor * self->hotRangeRate), 1);
@@ -295,7 +300,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	}
 
 	void recordThrottledTags(std::vector<TagThrottleInfo>& tags) {
-		for(auto& tag: tags) {
+		for (auto& tag : tags) {
 			throttledTags.insert(tag.tag.toString());
 		}
 	}
@@ -310,7 +315,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 
 	static std::string setToString(const std::set<std::string>& myset) {
 		std::string res;
-		for(auto& s: myset) {
+		for (auto& s : myset) {
 			res.append(s).push_back(' ');
 		}
 		return res;

@@ -148,13 +148,17 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 		FileProgress(Reference<IAsyncFile> f, int index) : fd(f), idx(index), offset(0), eof(false) {}
 
 		bool operator<(const FileProgress& rhs) const {
-			if (rhs.mutations.empty()) return true;
-			if (mutations.empty()) return false;
+			if (rhs.mutations.empty())
+				return true;
+			if (mutations.empty())
+				return false;
 			return mutations[0].version < rhs.mutations[0].version;
 		}
 		bool operator<=(const FileProgress& rhs) const {
-			if (rhs.mutations.empty()) return true;
-			if (mutations.empty()) return false;
+			if (rhs.mutations.empty())
+				return true;
+			if (mutations.empty())
+				return false;
 			return mutations[0].version <= rhs.mutations[0].version;
 		}
 		bool empty() { return eof && mutations.empty(); }
@@ -169,11 +173,13 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 
 			try {
 				// Read block header
-				if (reader.consume<int32_t>() != PARTITIONED_MLOG_VERSION) throw restore_unsupported_file_version();
+				if (reader.consume<int32_t>() != PARTITIONED_MLOG_VERSION)
+					throw restore_unsupported_file_version();
 
 				while (1) {
 					// If eof reached or first key len bytes is 0xFF then end of block was reached.
-					if (reader.eof() || *reader.rptr == 0xFF) break;
+					if (reader.eof() || *reader.rptr == 0xFF)
+						break;
 
 					// Deserialize messages written in saveMutationsToFile().
 					msgVersion = bigEndian64(reader.consume<Version>());
@@ -181,7 +187,8 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 					int msgSize = bigEndian32(reader.consume<int>());
 					const uint8_t* message = reader.consume(msgSize);
 
-					ArenaReader rd(buf.arena(), StringRef(message, msgSize), AssumeVersion(g_network->protocolVersion()));
+					ArenaReader rd(
+					    buf.arena(), StringRef(message, msgSize), AssumeVersion(g_network->protocolVersion()));
 					MutationRef m;
 					rd >> m;
 					count++;
@@ -194,8 +201,8 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 						break; // skip
 					}
 					if (msgVersion >= minVersion) {
-						mutations.emplace_back(LogMessageVersion(msgVersion, sub), StringRef(message, msgSize),
-						                       buf.arena());
+						mutations.emplace_back(
+						    LogMessageVersion(msgVersion, sub), StringRef(message, msgSize), buf.arena());
 						inserted++;
 					}
 				}
@@ -232,7 +239,8 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 
 	bool hasMutations() {
 		for (const auto& fp : fileProgress) {
-			if (!fp->empty()) return true;
+			if (!fp->empty())
+				return true;
 		}
 		return false;
 	}
@@ -252,7 +260,8 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 
 	// Sorts files according to their first mutation version and removes files without mutations.
 	void sortAndRemoveEmpty() {
-		std::sort(fileProgress.begin(), fileProgress.end(),
+		std::sort(fileProgress.begin(),
+		          fileProgress.end(),
 		          [](const Reference<FileProgress>& a, const Reference<FileProgress>& b) { return (*a) < (*b); });
 		while (!fileProgress.empty() && fileProgress.back()->empty()) {
 			fileProgress.pop_back();
@@ -319,11 +328,15 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 
 	// Decodes the file until EOF or an mutation >= minVersion and saves these mutations.
 	// Skip mutations >= maxVersion.
-	ACTOR static Future<Void> decodeToVersion(Reference<FileProgress> fp, Version minVersion, Version maxVersion,
+	ACTOR static Future<Void> decodeToVersion(Reference<FileProgress> fp,
+	                                          Version minVersion,
+	                                          Version maxVersion,
 	                                          LogFile file) {
-		if (fp->empty()) return Void();
+		if (fp->empty())
+			return Void();
 
-		if (!fp->mutations.empty() && fp->mutations.back().version.version >= minVersion) return Void();
+		if (!fp->mutations.empty() && fp->mutations.back().version.version >= minVersion)
+			return Void();
 
 		state int64_t len;
 		try {
@@ -337,13 +350,15 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 
 				state Standalone<StringRef> buf = makeString(len);
 				int rLen = wait(fp->fd->read(mutateString(buf), len, fp->offset));
-				if (len != rLen) throw restore_bad_read();
+				if (len != rLen)
+					throw restore_bad_read();
 
 				TraceEvent("ReadFile")
 				    .detail("Name", fp->fd->getFilename())
 				    .detail("Length", rLen)
 				    .detail("Offset", fp->offset);
-				if (fp->decodeBlock(buf, rLen, minVersion, maxVersion)) break;
+				if (fp->decodeBlock(buf, rLen, minVersion, maxVersion))
+					break;
 			}
 			return Void();
 		} catch (Error& e) {
@@ -402,7 +417,8 @@ struct LogFileWriter {
 		wait(self->file->appendStringRefWithLen(v));
 
 		// At this point we should be in whatever the current block is or the block size is too small
-		if (self->file->size() > self->blockEnd) throw backup_bad_block_size();
+		if (self->file->size() > self->blockEnd)
+			throw backup_bad_block_size();
 
 		return Void();
 	}
@@ -439,7 +455,8 @@ ACTOR Future<Void> convert(ConvertParams params) {
 	state BackupDescription desc = wait(container->describeBackup());
 	std::cout << "\n" << desc.toString() << "\n";
 
-	// std::cout << "Using Protocol Version: 0x" << std::hex << g_network->protocolVersion().version() << std::dec << "\n";
+	// std::cout << "Using Protocol Version: 0x" << std::hex << g_network->protocolVersion().version() << std::dec <<
+	// "\n";
 
 	std::vector<LogFile> logs = getRelevantLogFiles(listing.logs, params.begin, params.end);
 	printLogFiles("Range has", logs);
@@ -550,7 +567,7 @@ int parseCommandLine(ConvertParams* param, CSimpleOpt* args) {
 	return FDB_EXIT_SUCCESS;
 }
 
-}  // namespace file_converter
+} // namespace file_converter
 
 int main(int argc, char** argv) {
 	try {

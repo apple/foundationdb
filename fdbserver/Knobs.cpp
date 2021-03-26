@@ -25,7 +25,7 @@
 std::unique_ptr<ServerKnobs> globalServerKnobs = std::make_unique<ServerKnobs>();
 ServerKnobs const* SERVER_KNOBS = globalServerKnobs.get();
 
-#define init( knob, value ) initKnob( knob, value, #knob )
+#define init(knob, value) initKnob(knob, value, #knob)
 
 ServerKnobs::ServerKnobs() {
 	initialize();
@@ -44,6 +44,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 
 	// TLogs
 	init( TLOG_TIMEOUT,                                          0.4 ); //cannot buggify because of availability
+	init( TLOG_SLOW_REJOIN_WARN_TIMEOUT_SECS,                     60 ); if( randomize && BUGGIFY ) TLOG_SLOW_REJOIN_WARN_TIMEOUT_SECS = deterministicRandom()->randomInt(5,10);
 	init( RECOVERY_TLOG_SMART_QUORUM_DELAY,                     0.25 ); if( randomize && BUGGIFY ) RECOVERY_TLOG_SMART_QUORUM_DELAY = 0.0; // smaller might be better for bug amplification
 	init( TLOG_STORAGE_MIN_UPDATE_INTERVAL,                      0.5 );
 	init( BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL,               30 );
@@ -491,6 +492,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( MAX_REBOOT_TIME,                                       5.0 ); if( longReboots ) MAX_REBOOT_TIME = 20.0;
 	init( LOG_DIRECTORY,                                          ".");  // Will be set to the command line flag.
 	init( SERVER_MEM_LIMIT,                                8LL << 30 );
+	init( SYSTEM_MONITOR_FREQUENCY,                              5.0 );
 
 	//Ratekeeper
 	bool slowRatekeeper = randomize && BUGGIFY;

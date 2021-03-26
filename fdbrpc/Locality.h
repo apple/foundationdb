@@ -49,7 +49,15 @@ struct ProcessClass {
 		InvalidClass = -1
 	};
 
-	enum Fitness { BestFit, GoodFit, UnsetFit, OkayFit, WorstFit, ExcludeFit, NeverAssign }; //cannot be larger than 7 because of leader election mask
+	enum Fitness {
+		BestFit,
+		GoodFit,
+		UnsetFit,
+		OkayFit,
+		WorstFit,
+		ExcludeFit,
+		NeverAssign
+	}; // cannot be larger than 7 because of leader election mask
 	enum ClusterRole {
 		Storage,
 		TLog,
@@ -70,8 +78,8 @@ struct ProcessClass {
 	int16_t _source;
 
 public:
-	ProcessClass() : _class( UnsetClass ), _source( CommandLineSource ) {}
-	ProcessClass( ClassType type, ClassSource source ) : _class( type ), _source( source ) {}
+	ProcessClass() : _class(UnsetClass), _source(CommandLineSource) {}
+	ProcessClass(ClassType type, ClassSource source) : _class(type), _source(source) {}
 	// clang-format off
 	explicit ProcessClass( std::string s, ClassSource source ) : _source( source ) {
 		if (s=="storage") _class = StorageClass;
@@ -168,16 +176,21 @@ public:
 
 	std::string sourceString() const {
 		switch (_source) {
-			case CommandLineSource: return "command_line";
-			case AutoSource: return "configure_auto";
-			case DBSource: return "set_class";
-			default: return "invalid";
+		case CommandLineSource:
+			return "command_line";
+		case AutoSource:
+			return "configure_auto";
+		case DBSource:
+			return "set_class";
+		default:
+			return "invalid";
 		}
 	}
 
-	Fitness machineClassFitness( ClusterRole role ) const ;
+	Fitness machineClassFitness(ClusterRole role) const;
 
-	//To change this serialization, ProtocolVersion::ProcessClassValue must be updated, and downgrades need to be considered
+	// To change this serialization, ProtocolVersion::ProcessClassValue must be updated, and downgrades need to be
+	// considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, _class, _source);
@@ -185,41 +198,41 @@ public:
 };
 
 struct LocalityData {
-	std::map<Standalone<StringRef>, Optional<Standalone<StringRef>>>	_data;
+	std::map<Standalone<StringRef>, Optional<Standalone<StringRef>>> _data;
 
-	static const StringRef	keyProcessId;
-	static const StringRef	keyZoneId;
-	static const StringRef	keyDcId;
-	static const StringRef	keyMachineId;
-	static const StringRef	keyDataHallId;
+	static const StringRef keyProcessId;
+	static const StringRef keyZoneId;
+	static const StringRef keyDcId;
+	static const StringRef keyMachineId;
+	static const StringRef keyDataHallId;
 
 public:
 	LocalityData() {}
 
-	LocalityData(Optional<Standalone<StringRef>> processID, Optional<Standalone<StringRef>> zoneID, Optional<Standalone<StringRef>> MachineID, Optional<Standalone<StringRef>> dcID ) {
+	LocalityData(Optional<Standalone<StringRef>> processID,
+	             Optional<Standalone<StringRef>> zoneID,
+	             Optional<Standalone<StringRef>> MachineID,
+	             Optional<Standalone<StringRef>> dcID) {
 		_data[keyProcessId] = processID;
 		_data[keyZoneId] = zoneID;
 		_data[keyMachineId] = MachineID;
 		_data[keyDcId] = dcID;
 	}
 
-	bool operator == (LocalityData const& rhs) const {
-		return ((_data.size() == rhs._data.size())													&&
-					  (std::equal(_data.begin(), _data.end(), rhs._data.begin())));
+	bool operator==(LocalityData const& rhs) const {
+		return ((_data.size() == rhs._data.size()) && (std::equal(_data.begin(), _data.end(), rhs._data.begin())));
 	}
 	bool operator!=(LocalityData const& rhs) const { return !(*this == rhs); }
 
-	Optional<Standalone<StringRef>>	get(StringRef key) const {
+	Optional<Standalone<StringRef>> get(StringRef key) const {
 		auto pos = _data.find(key);
 		return (pos == _data.end()) ? Optional<Standalone<StringRef>>() : pos->second;
 	}
 
-	void set(StringRef key, Optional<Standalone<StringRef>> value) {
-		_data[key] = value;
-	}
+	void set(StringRef key, Optional<Standalone<StringRef>> value) { _data[key] = value; }
 
-	bool	isPresent(StringRef key) const { return (_data.find(key) != _data.end()); }
-	bool	isPresent(StringRef key, Optional<Standalone<StringRef>> value) const {
+	bool isPresent(StringRef key) const { return (_data.find(key) != _data.end()); }
+	bool isPresent(StringRef key, Optional<Standalone<StringRef>> value) const {
 		auto pos = _data.find(key);
 		return (pos != _data.end()) ? false : (pos->second == value);
 	}
@@ -242,9 +255,11 @@ public:
 	Optional<Standalone<StringRef>> dataHallId() const { return get(keyDataHallId); }
 
 	std::string toString() const {
-		std::string	infoString;
+		std::string infoString;
 		for (auto it = _data.rbegin(); !(it == _data.rend()); ++it) {
-			if (infoString.length()) { infoString += " "; }
+			if (infoString.length()) {
+				infoString += " ";
+			}
 			infoString += it->first.printable() + "=";
 			infoString += (it->second.present()) ? it->second.get().printable() : "[unset]";
 		}
@@ -296,27 +311,24 @@ public:
 	static const UID UNSET_ID;
 };
 
-static std::string describe(
-		std::vector<LocalityData> const& items,
-		StringRef const key,
-		int max_items = -1 )
-{
-	if(!items.size())
+static std::string describe(std::vector<LocalityData> const& items, StringRef const key, int max_items = -1) {
+	if (!items.size())
 		return "[no items]";
 	std::string s;
 	int count = 0;
-	for(auto const& item : items) {
-		if( ++count > max_items && max_items >= 0)
+	for (auto const& item : items) {
+		if (++count > max_items && max_items >= 0)
 			break;
-		if (count > 1) s += ",";
+		if (count > 1)
+			s += ",";
 		s += item.describeValue(key);
 	}
 	return s;
 }
-inline std::string describeZones( std::vector<LocalityData> const& items, int max_items = -1 ) {
+inline std::string describeZones(std::vector<LocalityData> const& items, int max_items = -1) {
 	return describe(items, LocalityData::keyZoneId, max_items);
 }
-inline std::string describeDataHalls( std::vector<LocalityData> const& items, int max_items = -1 ) {
+inline std::string describeDataHalls(std::vector<LocalityData> const& items, int max_items = -1) {
 	return describe(items, LocalityData::keyDataHallId, max_items);
 }
 
@@ -326,45 +338,45 @@ struct ProcessData {
 	NetworkAddress address;
 
 	ProcessData() {}
-	ProcessData( LocalityData locality, ProcessClass processClass, NetworkAddress address ) : locality(locality), processClass(processClass), address(address) {}
+	ProcessData(LocalityData locality, ProcessClass processClass, NetworkAddress address)
+	  : locality(locality), processClass(processClass), address(address) {}
 
-	//To change this serialization, ProtocolVersion::WorkerListValue must be updated, and downgrades need to be considered
+	// To change this serialization, ProtocolVersion::WorkerListValue must be updated, and downgrades need to be
+	// considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, locality, processClass, address);
 	}
 
 	struct sort_by_address {
-		bool operator ()(ProcessData const&a, ProcessData const& b) const { return a.address < b.address; }
+		bool operator()(ProcessData const& a, ProcessData const& b) const { return a.address < b.address; }
 	};
 };
 
 template <class Interface, class Enable = void>
 struct LBLocalityData {
 	enum { Present = 0 };
-	static LocalityData getLocality( Interface const& ) { return LocalityData(); }
-	static NetworkAddress getAddress( Interface const& ) { return NetworkAddress(); }
+	static LocalityData getLocality(Interface const&) { return LocalityData(); }
+	static NetworkAddress getAddress(Interface const&) { return NetworkAddress(); }
 	static bool alwaysFresh() { return true; }
 };
 
 // Template specialization that only works for interfaces with a .locality member.
 //   If an interface has a .locality it must also have a .address()
 template <class Interface>
-struct LBLocalityData<Interface, typename std::enable_if< Interface::LocationAwareLoadBalance >::type> {
+struct LBLocalityData<Interface, typename std::enable_if<Interface::LocationAwareLoadBalance>::type> {
 	enum { Present = 1 };
-	static LocalityData getLocality( Interface const& i ) { return i.locality; }
-	static NetworkAddress getAddress( Interface const& i ) { return i.address(); }
+	static LocalityData getLocality(Interface const& i) { return i.locality; }
+	static NetworkAddress getAddress(Interface const& i) { return i.address(); }
 	static bool alwaysFresh() { return Interface::AlwaysFresh; }
 };
 
 struct LBDistance {
-	enum Type {
-		SAME_MACHINE = 0,
-		SAME_DC = 1,
-		DISTANT = 2
-	};
+	enum Type { SAME_MACHINE = 0, SAME_DC = 1, DISTANT = 2 };
 };
 
-LBDistance::Type loadBalanceDistance( LocalityData const& localLoc, LocalityData const& otherLoc, NetworkAddress const& otherAddr );
+LBDistance::Type loadBalanceDistance(LocalityData const& localLoc,
+                                     LocalityData const& otherLoc,
+                                     NetworkAddress const& otherAddr);
 
 #endif

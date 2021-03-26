@@ -42,7 +42,8 @@ public:
 
 	// TLogs
 	double TLOG_TIMEOUT; // tlog OR commit proxy failure - master's reaction time
-	double RECOVERY_TLOG_SMART_QUORUM_DELAY;		// smaller might be better for bug amplification
+	double TLOG_SLOW_REJOIN_WARN_TIMEOUT_SECS; // Warns if a tlog takes too long to rejoin
+	double RECOVERY_TLOG_SMART_QUORUM_DELAY; // smaller might be better for bug amplification
 	double TLOG_STORAGE_MIN_UPDATE_INTERVAL;
 	double BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL;
 	int DESIRED_TOTAL_BYTES;
@@ -60,7 +61,9 @@ public:
 	int64_t REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT;
 	double TLOG_PEEK_DELAY;
 	int LEGACY_TLOG_UPGRADE_ENTRIES_PER_VERSION;
-	int VERSION_MESSAGES_OVERHEAD_FACTOR_1024THS; // Multiplicative factor to bound total space used to store a version message (measured in 1/1024ths, e.g. a value of 2048 yields a factor of 2).
+	int VERSION_MESSAGES_OVERHEAD_FACTOR_1024THS; // Multiplicative factor to bound total space used to store a version
+	                                              // message (measured in 1/1024ths, e.g. a value of 2048 yields a
+	                                              // factor of 2).
 	int64_t VERSION_MESSAGES_ENTRY_BYTES_WITH_OVERHEAD;
 	double TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
 	int64_t TLOG_MESSAGE_BLOCK_BYTES;
@@ -81,7 +84,7 @@ public:
 	int64_t TLOG_SPILL_REFERENCE_MAX_BYTES_PER_BATCH;
 	int64_t DISK_QUEUE_FILE_EXTENSION_BYTES; // When we grow the disk queue, by how many bytes should it grow?
 	int64_t DISK_QUEUE_FILE_SHRINK_BYTES; // When we shrink the disk queue, by how many bytes should it shrink?
-	int DISK_QUEUE_MAX_TRUNCATE_BYTES;  // A truncate larger than this will cause the file to be replaced instead.
+	int DISK_QUEUE_MAX_TRUNCATE_BYTES; // A truncate larger than this will cause the file to be replaced instead.
 	double TLOG_DEGRADED_DURATION;
 	int64_t MAX_CACHE_VERSIONS;
 	double TXS_POPPED_MAX_DELAY;
@@ -138,7 +141,7 @@ public:
 	int PRIORITY_TEAM_UNHEALTHY;
 	int PRIORITY_TEAM_2_LEFT;
 	int PRIORITY_TEAM_1_LEFT;
-	int PRIORITY_TEAM_FAILED;         // Priority when a server in the team is excluded as failed
+	int PRIORITY_TEAM_FAILED; // Priority when a server in the team is excluded as failed
 	int PRIORITY_TEAM_0_LEFT;
 	int PRIORITY_SPLIT_SHARD;
 
@@ -147,8 +150,8 @@ public:
 	double DATA_DISTRIBUTION_FAILURE_REACTION_TIME;
 	int MIN_SHARD_BYTES, SHARD_BYTES_RATIO, SHARD_BYTES_PER_SQRT_BYTES, MAX_SHARD_BYTES, KEY_SERVER_SHARD_BYTES;
 	int64_t SHARD_MAX_BYTES_PER_KSEC, // Shards with more than this bandwidth will be split immediately
-		SHARD_MIN_BYTES_PER_KSEC,     // Shards with more than this bandwidth will not be merged
-		SHARD_SPLIT_BYTES_PER_KSEC;   // When splitting a shard, it is split into pieces with less than this bandwidth
+	    SHARD_MIN_BYTES_PER_KSEC, // Shards with more than this bandwidth will not be merged
+	    SHARD_SPLIT_BYTES_PER_KSEC; // When splitting a shard, it is split into pieces with less than this bandwidth
 	double SHARD_MAX_READ_DENSITY_RATIO;
 	int64_t SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS;
 	double SHARD_MAX_BYTES_READ_PER_KSEC_JITTER;
@@ -189,9 +192,11 @@ public:
 	bool DD_VALIDATE_LOCALITY;
 	int DD_CHECK_INVALID_LOCALITY_DELAY;
 	bool DD_ENABLE_VERBOSE_TRACING;
-	int64_t DD_SS_FAILURE_VERSIONLAG; // Allowed SS version lag from the current read version before marking it as failed.
+	int64_t
+	    DD_SS_FAILURE_VERSIONLAG; // Allowed SS version lag from the current read version before marking it as failed.
 	int64_t DD_SS_ALLOWED_VERSIONLAG; // SS will be marked as healthy if it's version lag goes below this value.
-	double DD_SS_STUCK_TIME_LIMIT; // If a storage server is not getting new versions for this amount of time, then it becomes undesired.
+	double DD_SS_STUCK_TIME_LIMIT; // If a storage server is not getting new versions for this amount of time, then it
+	                               // becomes undesired.
 	int DD_TEAMS_INFO_PRINT_INTERVAL;
 	int DD_TEAMS_INFO_PRINT_YIELD_COUNT;
 	int DD_TEAM_ZERO_SERVER_LEFT_LOG_DELAY;
@@ -203,7 +208,8 @@ public:
 
 	bool TR_FLAG_DISABLE_SERVER_TEAM_REMOVER; // disable the serverTeamRemover actor
 	double TR_REMOVE_SERVER_TEAM_DELAY; // wait for the specified time before try to remove next server team
-	double TR_REMOVE_SERVER_TEAM_EXTRA_DELAY; // serverTeamRemover waits for the delay and check DD healthyness again to ensure it runs after machineTeamRemover
+	double TR_REMOVE_SERVER_TEAM_EXTRA_DELAY; // serverTeamRemover waits for the delay and check DD healthyness again to
+	                                          // ensure it runs after machineTeamRemover
 
 	// Remove wrong storage engines
 	double DD_REMOVE_STORE_ENGINE_DELAY; // wait for the specified time before remove the next batch
@@ -292,9 +298,9 @@ public:
 	double COMMIT_TRANSACTION_BATCH_INTERVAL_MAX;
 	double COMMIT_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION;
 	double COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA;
-	int    COMMIT_TRANSACTION_BATCH_COUNT_MAX;
-	int    COMMIT_TRANSACTION_BATCH_BYTES_MIN;
-	int    COMMIT_TRANSACTION_BATCH_BYTES_MAX;
+	int COMMIT_TRANSACTION_BATCH_COUNT_MAX;
+	int COMMIT_TRANSACTION_BATCH_BYTES_MIN;
+	int COMMIT_TRANSACTION_BATCH_BYTES_MAX;
 	double COMMIT_TRANSACTION_BATCH_BYTES_SCALE_BASE;
 	double COMMIT_TRANSACTION_BATCH_BYTES_SCALE_POWER;
 	int64_t COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT;
@@ -346,13 +352,13 @@ public:
 	int64_t RESOLVER_STATE_MEMORY_LIMIT;
 
 	// Backup Worker
-	double BACKUP_TIMEOUT;  // master's reaction time for backup failure
+	double BACKUP_TIMEOUT; // master's reaction time for backup failure
 	double BACKUP_NOOP_POP_DELAY;
 	int BACKUP_FILE_BLOCK_BYTES;
 	int64_t BACKUP_LOCK_BYTES;
 	double BACKUP_UPLOAD_DELAY;
 
-	//Cluster Controller
+	// Cluster Controller
 	double CLUSTER_CONTROLLER_LOGGING_DELAY;
 	double MASTER_FAILURE_REACTION_TIME;
 	double MASTER_FAILURE_SLOPE_DURING_RECOVERY;
@@ -380,8 +386,8 @@ public:
 	double CLIENT_REGISTER_INTERVAL;
 
 	// Knobs used to select the best policy (via monte carlo)
-	int POLICY_RATING_TESTS;	// number of tests per policy (in order to compare)
-	int POLICY_GENERATIONS;		// number of policies to generate
+	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)
+	int POLICY_GENERATIONS; // number of policies to generate
 
 	int EXPECTED_MASTER_FITNESS;
 	int EXPECTED_TLOG_FITNESS;
@@ -393,23 +399,26 @@ public:
 	int DBINFO_SEND_AMOUNT;
 	double DBINFO_BATCH_DELAY;
 
-	//Move Keys
+	// Move Keys
 	double SHARD_READY_DELAY;
 	double SERVER_READY_QUORUM_INTERVAL;
 	double SERVER_READY_QUORUM_TIMEOUT;
 	double REMOVE_RETRY_DELAY;
 	int MOVE_KEYS_KRM_LIMIT;
-	int MOVE_KEYS_KRM_LIMIT_BYTES; //This must be sufficiently larger than CLIENT_KNOBS->KEY_SIZE_LIMIT (fdbclient/Knobs.h) to ensure that at least two entries will be returned from an attempt to read a key range map
+	int MOVE_KEYS_KRM_LIMIT_BYTES; // This must be sufficiently larger than CLIENT_KNOBS->KEY_SIZE_LIMIT
+	                               // (fdbclient/Knobs.h) to ensure that at least two entries will be returned from an
+	                               // attempt to read a key range map
 	int MAX_SKIP_TAGS;
 	double MAX_ADDED_SOURCES_MULTIPLIER;
 
-	//FdbServer
+	// FdbServer
 	double MIN_REBOOT_TIME;
 	double MAX_REBOOT_TIME;
 	std::string LOG_DIRECTORY;
 	int64_t SERVER_MEM_LIMIT;
+	double SYSTEM_MONITOR_FREQUENCY;
 
-	//Ratekeeper
+	// Ratekeeper
 	double SMOOTHING_AMOUNT;
 	double SLOW_SMOOTHING_AMOUNT;
 	double METRIC_UPDATE_RATE;
@@ -425,7 +434,7 @@ public:
 	int64_t STORAGE_HARD_LIMIT_BYTES;
 	int64_t STORAGE_DURABILITY_LAG_HARD_MAX;
 	int64_t STORAGE_DURABILITY_LAG_SOFT_MAX;
-	
+
 	int64_t LOW_PRIORITY_STORAGE_QUEUE_BYTES;
 	int64_t LOW_PRIORITY_DURABILITY_LAG;
 
@@ -478,7 +487,7 @@ public:
 	int64_t MAX_FORKED_PROCESS_OUTPUT;
 	double SNAP_CREATE_MAX_TIMEOUT;
 
-	//Storage Metrics
+	// Storage Metrics
 	double STORAGE_METRICS_AVERAGE_INTERVAL;
 	double STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	double SPLIT_JITTER_AMOUNT;
@@ -489,7 +498,7 @@ public:
 	int64_t EMPTY_READ_PENALTY;
 	bool READ_SAMPLING_ENABLED;
 
-	//Storage Server
+	// Storage Server
 	double STORAGE_LOGGING_DELAY;
 	double STORAGE_SERVER_POLL_METRICS_DELAY;
 	double FUTURE_VERSION_DELAY;
@@ -527,11 +536,11 @@ public:
 	double FETCH_KEYS_TOO_LONG_TIME_CRITERIA;
 	double MAX_STORAGE_COMMIT_TIME;
 
-	//Wait Failure
+	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
 	double WAIT_FAILURE_DELAY_LIMIT;
 
-	//Worker
+	// Worker
 	double WORKER_LOGGING_INTERVAL;
 	double HEAP_PROFILER_INTERVAL;
 	double DEGRADED_RESET_INTERVAL;
@@ -539,7 +548,8 @@ public:
 	double DEGRADED_WARNING_RESET_DELAY;
 	int64_t TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS;
 	double TRACE_LOG_PING_TIMEOUT_SECONDS;
-	double MIN_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS;  // Listen for a leader for N seconds, and if not heard, then try to become the leader.
+	double MIN_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS; // Listen for a leader for N seconds, and if not heard, then try to
+	                                                 // become the leader.
 	double MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS;
 	double DBINFO_FAILED_DELAY;
 
@@ -598,7 +608,8 @@ public:
 	int64_t FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT; // threshold when pipelined actors should be delayed
 	int64_t FASTRESTORE_WAIT_FOR_MEMORY_LATENCY;
 	int64_t FASTRESTORE_HEARTBEAT_DELAY; // interval for master to ping loaders and appliers
-	int64_t FASTRESTORE_HEARTBEAT_MAX_DELAY; // master claim a node is down if no heart beat from the node for this delay
+	int64_t
+	    FASTRESTORE_HEARTBEAT_MAX_DELAY; // master claim a node is down if no heart beat from the node for this delay
 	int64_t FASTRESTORE_APPLIER_FETCH_KEYS_SIZE; // number of keys to fetch in a txn on applier
 	int64_t FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES; // desired size of mutation message sent from loader to appliers
 	bool FASTRESTORE_GET_RANGE_VERSIONS_EXPENSIVE; // parse each range file to get (range, version) it has?
@@ -624,15 +635,19 @@ public:
 	double FASTRESTORE_WRITE_BW_MB; // target aggregated write bandwidth from all appliers
 	double FASTRESTORE_RATE_UPDATE_SECONDS; // how long to update appliers target write rate
 
-	int REDWOOD_DEFAULT_PAGE_SIZE;  // Page size for new Redwood files
-	int REDWOOD_KVSTORE_CONCURRENT_READS;  // Max number of simultaneous point or range reads in progress.
-	int REDWOOD_COMMIT_CONCURRENT_READS;   // Max number of concurrent reads done to support commit operations
+	int REDWOOD_DEFAULT_PAGE_SIZE; // Page size for new Redwood files
+	int REDWOOD_KVSTORE_CONCURRENT_READS; // Max number of simultaneous point or range reads in progress.
+	int REDWOOD_COMMIT_CONCURRENT_READS; // Max number of concurrent reads done to support commit operations
 	double REDWOOD_PAGE_REBUILD_FILL_FACTOR; // When rebuilding pages, start a new page after this capacity
-	int REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES; // Number of pages to try to pop from the lazy delete queue and process at once
-	int REDWOOD_LAZY_CLEAR_MIN_PAGES;  // Minimum number of pages to free before ending a lazy clear cycle, unless the queue is empty
-	int REDWOOD_LAZY_CLEAR_MAX_PAGES;  // Maximum number of pages to free before ending a lazy clear cycle, unless the queue is empty
-	int64_t REDWOOD_REMAP_CLEANUP_WINDOW;  // Remap remover lag interval in which to coalesce page writes
-	double REDWOOD_REMAP_CLEANUP_LAG; // Maximum allowed remap remover lag behind the cleanup window as a multiple of the window size
+	int REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES; // Number of pages to try to pop from the lazy delete queue and process at
+	                                         // once
+	int REDWOOD_LAZY_CLEAR_MIN_PAGES; // Minimum number of pages to free before ending a lazy clear cycle, unless the
+	                                  // queue is empty
+	int REDWOOD_LAZY_CLEAR_MAX_PAGES; // Maximum number of pages to free before ending a lazy clear cycle, unless the
+	                                  // queue is empty
+	int64_t REDWOOD_REMAP_CLEANUP_WINDOW; // Remap remover lag interval in which to coalesce page writes
+	double REDWOOD_REMAP_CLEANUP_LAG; // Maximum allowed remap remover lag behind the cleanup window as a multiple of
+	                                  // the window size
 	double REDWOOD_LOGGING_INTERVAL;
 
 	// Server request latency measurement
