@@ -1035,7 +1035,9 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	      TraceEvent("TestParserTest").detail("ClientInfoLogging", value);
 	  } },
 	{ "startIncompatibleProcess",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedStartIncompatibleProcess", value); } }
+	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedStartIncompatibleProcess", value); } },
+	{ "storageEngineExcludeType",
+	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedStorageEngineExcludeType", ""); } }
 };
 
 std::map<std::string, std::function<void(const std::string& value, TestSpec* spec)>> testSpecTestKeys = {
