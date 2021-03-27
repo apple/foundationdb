@@ -58,7 +58,8 @@ public:
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const = 0;
 
 	// calling with a cache object to have consistent results if we need to call rpc
-	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr,
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw,
+	                                            KeyRangeRef kr,
 	                                            Optional<Standalone<RangeResultRef>>* cache) const {
 		return getRangeAsyncActor(this, ryw, kr, cache);
 	}
@@ -66,7 +67,8 @@ public:
 	bool isAsync() const override { return true; }
 
 	ACTOR static Future<Standalone<RangeResultRef>> getRangeAsyncActor(const SpecialKeyRangeBaseImpl* skrAyncImpl,
-	                                                                   ReadYourWritesTransaction* ryw, KeyRangeRef kr,
+	                                                                   ReadYourWritesTransaction* ryw,
+	                                                                   KeyRangeRef kr,
 	                                                                   Optional<Standalone<RangeResultRef>>* cache) {
 		ASSERT(skrAyncImpl->getKeyRange().contains(kr));
 		ASSERT(cache != nullptr);
@@ -79,8 +81,10 @@ public:
 		}
 		const auto& allResults = cache->get();
 		int start = 0, end = allResults.size();
-		while (start < allResults.size() && allResults[start].key < kr.begin) ++start;
-		while (end > 0 && allResults[end - 1].key >= kr.end) --end;
+		while (start < allResults.size() && allResults[start].key < kr.begin)
+			++start;
+		while (end > 0 && allResults[end - 1].key >= kr.end)
+			--end;
 		if (start < end) {
 			Standalone<RangeResultRef> result = RangeResultRef(allResults.slice(start, end), false);
 			result.arena().dependsOn(allResults.arena());
@@ -105,15 +109,19 @@ public:
 
 	Future<Optional<Value>> get(ReadYourWritesTransaction* ryw, const Key& key);
 
-	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end,
-	                                            GetRangeLimits limits, bool reverse = false);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw,
+	                                            KeySelector begin,
+	                                            KeySelector end,
+	                                            GetRangeLimits limits,
+	                                            bool reverse = false);
 
 	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool testOnly = true)
 	  : range(KeyRangeRef(spaceStartKey, spaceEndKey)), impls(nullptr, spaceEndKey),
 	    modules(testOnly ? SpecialKeySpace::MODULE::TESTONLY : SpecialKeySpace::MODULE::UNKNOWN, spaceEndKey) {
 		// Default begin of KeyRangeMap is Key(), insert the range to update start key if needed
 		impls.insert(range, nullptr);
-		if (!testOnly) modulesBoundaryInit(); // testOnly is used in the correctness workload
+		if (!testOnly)
+			modulesBoundaryInit(); // testOnly is used in the correctness workload
 	}
 	// Initialize module boundaries, used to handle cross_module_read
 	void modulesBoundaryInit() {
@@ -152,13 +160,17 @@ private:
 	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key);
 
 	ACTOR static Future<Standalone<RangeResultRef>> checkRYWValid(SpecialKeySpace* sks,
-	                                                                 ReadYourWritesTransaction* ryw, KeySelector begin,
-	                                                                 KeySelector end, GetRangeLimits limits,
-	                                                                 bool reverse);
+	                                                              ReadYourWritesTransaction* ryw,
+	                                                              KeySelector begin,
+	                                                              KeySelector end,
+	                                                              GetRangeLimits limits,
+	                                                              bool reverse);
 	ACTOR static Future<Standalone<RangeResultRef>> getRangeAggregationActor(SpecialKeySpace* sks,
 	                                                                         ReadYourWritesTransaction* ryw,
-	                                                                         KeySelector begin, KeySelector end,
-	                                                                         GetRangeLimits limits, bool reverse);
+	                                                                         KeySelector begin,
+	                                                                         KeySelector end,
+	                                                                         GetRangeLimits limits,
+	                                                                         bool reverse);
 	KeyRange range;
 	KeyRangeMap<SpecialKeyRangeBaseImpl*> impls;
 	KeyRangeMap<SpecialKeySpace::MODULE> modules;

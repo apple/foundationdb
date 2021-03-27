@@ -27,29 +27,38 @@
 
 class IClosable {
 public:
-	// IClosable is a base interface for any disk-backed data structure that needs to support asynchronous errors, shutdown and deletion
+	// IClosable is a base interface for any disk-backed data structure that needs to support asynchronous errors,
+	// shutdown and deletion
 
-	virtual Future<Void> getError() = 0;  // asynchronously throws an error if there is an internal error. Never set inside (on the stack of) a call to another API function on this object.
-	virtual Future<Void> onClosed() = 0;  // the future is set to Void when this is totally shut down after dispose() or close().  But this function cannot be called after dispose or close!
-	virtual void dispose() = 0;   // permanently delete the data AND invalidate this interface
-	virtual void close() = 0;     // invalidate this interface, but do not delete the data.  Outstanding operations may or may not take effect in the background.
+	virtual Future<Void> getError() = 0; // asynchronously throws an error if there is an internal error. Never set
+	                                     // inside (on the stack of) a call to another API function on this object.
+	virtual Future<Void> onClosed() = 0; // the future is set to Void when this is totally shut down after dispose() or
+	                                     // close().  But this function cannot be called after dispose or close!
+	virtual void dispose() = 0; // permanently delete the data AND invalidate this interface
+	virtual void close() = 0; // invalidate this interface, but do not delete the data.  Outstanding operations may or
+	                          // may not take effect in the background.
 };
 
 class IKeyValueStore : public IClosable {
 public:
 	virtual KeyValueStoreType getType() = 0;
-	virtual void set( KeyValueRef keyValue, const Arena* arena = NULL ) = 0;
-	virtual void clear( KeyRangeRef range, const Arena* arena = NULL ) = 0;
-	virtual Future<Void> commit(bool sequential = false) = 0;  // returns when prior sets and clears are (atomically) durable
+	virtual void set(KeyValueRef keyValue, const Arena* arena = NULL) = 0;
+	virtual void clear(KeyRangeRef range, const Arena* arena = NULL) = 0;
+	virtual Future<Void> commit(
+	    bool sequential = false) = 0; // returns when prior sets and clears are (atomically) durable
 
-	virtual Future<Optional<Value>> readValue( KeyRef key, Optional<UID> debugID = Optional<UID>() ) = 0;
+	virtual Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) = 0;
 
 	// Like readValue(), but returns only the first maxLength bytes of the value if it is longer
-	virtual Future<Optional<Value>> readValuePrefix( KeyRef key, int maxLength, Optional<UID> debugID = Optional<UID>() ) = 0;
+	virtual Future<Optional<Value>> readValuePrefix(KeyRef key,
+	                                                int maxLength,
+	                                                Optional<UID> debugID = Optional<UID>()) = 0;
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
-	virtual Future<Standalone<RangeResultRef>> readRange( KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30 ) = 0;
+	virtual Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys,
+	                                                     int rowLimit = 1 << 30,
+	                                                     int byteLimit = 1 << 30) = 0;
 
 	// To debug MEMORY_RADIXTREE type ONLY
 	// Returns (1) how many key & value pairs have been inserted (2) how many nodes have been created (3) how many
@@ -65,48 +74,74 @@ public:
 
 	/*
 	Concurrency contract
-		Causal consistency:
-			A read which begins after a commit ends sees the effects of the commit.
-			A read which ends before a commit begins does not see the effects of the commit.
+	    Causal consistency:
+	        A read which begins after a commit ends sees the effects of the commit.
+	        A read which ends before a commit begins does not see the effects of the commit.
 
-		Thus, a read returns a version as of a call to commit which began before the read ends such that no subsequent commit ended before the read begins:
+	    Thus, a read returns a version as of a call to commit which began before the read ends such that no subsequent
+	commit ended before the read begins:
 
-			commit()		// can't be this version (subsequent commit ends before read begins)
-				endcommit()
-			commit()		// could be this or any later version (no subsequent commit ends before read begins)
-				endcommit()
-			commit()
-			read()
+	        commit()		// can't be this version (subsequent commit ends before read begins)
+	            endcommit()
+	        commit()		// could be this or any later version (no subsequent commit ends before read begins)
+	            endcommit()
+	        commit()
+	        read()
 	*/
-	virtual Future<Void> init() {
-		return Void();
-	}
+	// `init()` MUST be idempotent as it will be called more than once on a KeyValueStore in case
+	// of a rollback.
+	virtual Future<Void> init() { return Void(); }
+
 protected:
 	virtual ~IKeyValueStore() {}
 };
 
-extern IKeyValueStore* keyValueStoreSQLite( std::string const& filename, UID logID, KeyValueStoreType storeType, bool checkChecksums=false, bool checkIntegrity=false );
-extern IKeyValueStore* keyValueStoreRedwoodV1( std::string const& filename, UID logID);
-extern IKeyValueStore* keyValueStoreRocksDB(std::string const& path, UID logID, KeyValueStoreType storeType, bool checkChecksums=false, bool checkIntegrity=false);
-extern IKeyValueStore* keyValueStoreMemory(std::string const& basename, UID logID, int64_t memoryLimit,
+extern IKeyValueStore* keyValueStoreSQLite(std::string const& filename,
+                                           UID logID,
+                                           KeyValueStoreType storeType,
+                                           bool checkChecksums = false,
+                                           bool checkIntegrity = false);
+extern IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename, UID logID);
+extern IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
+                                            UID logID,
+                                            KeyValueStoreType storeType,
+                                            bool checkChecksums = false,
+                                            bool checkIntegrity = false);
+extern IKeyValueStore* keyValueStoreMemory(std::string const& basename,
+                                           UID logID,
+                                           int64_t memoryLimit,
                                            std::string ext = "fdq",
                                            KeyValueStoreType storeType = KeyValueStoreType::MEMORY);
-extern IKeyValueStore* keyValueStoreLogSystem( class IDiskQueue* queue, UID logID, int64_t memoryLimit, bool disableSnapshot, bool replaceContent, bool exactRecovery );
+extern IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
+                                              UID logID,
+                                              int64_t memoryLimit,
+                                              bool disableSnapshot,
+                                              bool replaceContent,
+                                              bool exactRecovery);
 
-inline IKeyValueStore* openKVStore( KeyValueStoreType storeType, std::string const& filename, UID logID, int64_t memoryLimit, bool checkChecksums=false, bool checkIntegrity=false ) {
-	switch( storeType ) {
+inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
+                                   std::string const& filename,
+                                   UID logID,
+                                   int64_t memoryLimit,
+                                   bool checkChecksums = false,
+                                   bool checkIntegrity = false) {
+	switch (storeType) {
 	case KeyValueStoreType::SSD_BTREE_V1:
 		return keyValueStoreSQLite(filename, logID, KeyValueStoreType::SSD_BTREE_V1, false, checkIntegrity);
 	case KeyValueStoreType::SSD_BTREE_V2:
 		return keyValueStoreSQLite(filename, logID, KeyValueStoreType::SSD_BTREE_V2, checkChecksums, checkIntegrity);
 	case KeyValueStoreType::MEMORY:
-		return keyValueStoreMemory( filename, logID, memoryLimit );
+		return keyValueStoreMemory(filename, logID, memoryLimit);
 	case KeyValueStoreType::SSD_REDWOOD_V1:
-		return keyValueStoreRedwoodV1( filename, logID );
+		return keyValueStoreRedwoodV1(filename, logID);
 	case KeyValueStoreType::SSD_ROCKSDB_V1:
 		return keyValueStoreRocksDB(filename, logID, storeType);
 	case KeyValueStoreType::MEMORY_RADIXTREE:
-		return keyValueStoreMemory(filename, logID, memoryLimit, "fdr", KeyValueStoreType::MEMORY_RADIXTREE); // for radixTree type, set file ext to "fdr"
+		return keyValueStoreMemory(filename,
+		                           logID,
+		                           memoryLimit,
+		                           "fdr",
+		                           KeyValueStoreType::MEMORY_RADIXTREE); // for radixTree type, set file ext to "fdr"
 	default:
 		UNREACHABLE();
 	}
@@ -114,6 +149,6 @@ inline IKeyValueStore* openKVStore( KeyValueStoreType storeType, std::string con
 }
 
 void GenerateIOLogChecksumFile(std::string filename);
-Future<Void> KVFileCheck(std::string const & filename, bool const &integrity);
+Future<Void> KVFileCheck(std::string const& filename, bool const& integrity);
 
 #endif

@@ -22,6 +22,10 @@
 #define FDBSERVER_SIMULATEDCLUSTER_H
 #pragma once
 
-void setupAndRun(std::string const& dataFolder, const char* const& testFile, bool const& rebooting, bool const& restoring, std::string const& whitelistBinPath);
+void setupAndRun(std::string const& dataFolder,
+                 const char* const& testFile,
+                 bool const& rebooting,
+                 bool const& restoring,
+                 std::string const& whitelistBinPath);
 
 #endif

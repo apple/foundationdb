@@ -29,22 +29,24 @@
 
 struct ReliablePacket : FastAllocated<ReliablePacket> {
 	PacketBuffer* buffer;
-	ReliablePacket *cont;  // More bytes in the same packet
-	ReliablePacket *prev, *next;  // Linked list of reliable packets on the same connection (only for the first packet in the cont chain)
+	ReliablePacket* cont; // More bytes in the same packet
+	ReliablePacket *prev,
+	    *next; // Linked list of reliable packets on the same connection (only for the first packet in the cont chain)
 	int begin, end;
 
 	ReliablePacket() {}
 
 	void insertBefore(ReliablePacket* p);
-	void remove();  // Deletes this and cont chain, unlinks prev and next
+	void remove(); // Deletes this and cont chain, unlinks prev and next
 };
 
 class UnsentPacketQueue : NonCopyable {
 public:
 	UnsentPacketQueue()
 	  : unsent_first(0), unsent_last(0),
-	    sendQueueLatencyHistogram(Histogram::getHistogram(
-	        LiteralStringRef("UnsentPacketQueue"), LiteralStringRef("QueueWait"), Histogram::Unit::microseconds)) {}
+	    sendQueueLatencyHistogram(Histogram::getHistogram(LiteralStringRef("UnsentPacketQueue"),
+	                                                      LiteralStringRef("QueueWait"),
+	                                                      Histogram::Unit::microseconds)) {}
 
 	~UnsentPacketQueue() {
 		discardAll();
@@ -65,13 +67,18 @@ public:
 	void setWriteBuffer(PacketBuffer* pb) { unsent_last = pb; }
 
 	// Prepend the given range of packetBuffers to the beginning of the unsent queue
-	void prependWriteBuffer( PacketBuffer* first, PacketBuffer* last ) { last->next = unsent_first; unsent_first = first; if (!unsent_last) unsent_last = last; }
+	void prependWriteBuffer(PacketBuffer* first, PacketBuffer* last) {
+		last->next = unsent_first;
+		unsent_first = first;
+		if (!unsent_last)
+			unsent_last = last;
+	}
 
 	// false if there is anything unsent
 	bool empty() const { return !unsent_first || unsent_first->bytes_sent == unsent_first->bytes_written; }
 
 	// Get the next PacketBuffer to send data from
-	PacketBuffer *getUnsent() const { return unsent_first; }
+	PacketBuffer* getUnsent() const { return unsent_first; }
 	// Call after sending bytes from getUnsent()
 	void sent(int bytes);
 
@@ -79,7 +86,8 @@ public:
 	void discardAll();
 
 private:
-	PacketBuffer *unsent_first, *unsent_last;  // Both NULL, or inclusive range of PacketBuffers that haven't been sent.  The last one may have space for more packets to be written.
+	PacketBuffer *unsent_first, *unsent_last; // Both NULL, or inclusive range of PacketBuffers that haven't been sent.
+	                                          // The last one may have space for more packets to be written.
 	Reference<Histogram> sendQueueLatencyHistogram;
 };
 
@@ -90,15 +98,15 @@ public:
 		reliable.prev = reliable.next = &reliable;
 	}
 	bool empty() const { return reliable.next == &reliable; }
-	void insert( ReliablePacket* rp ) { rp->insertBefore(&reliable); }
+	void insert(ReliablePacket* rp) { rp->insertBefore(&reliable); }
 
 	// Concatenate those reliable packets which have already been sent (are not in the unsent range)
 	// into the given chain of packet buffers, and return the tail of that chain
 	PacketBuffer* compact(PacketBuffer* into, PacketBuffer* stopAt);
 
-	void discardAll();  // just for testing
+	void discardAll(); // just for testing
 private:
-	ReliablePacket reliable;  // Head/tail of a circularly linked list of reliable packets to be resent after a close
+	ReliablePacket reliable; // Head/tail of a circularly linked list of reliable packets to be resent after a close
 };
 
 #endif

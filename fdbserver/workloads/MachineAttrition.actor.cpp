@@ -25,13 +25,13 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 static std::set<int> const& normalAttritionErrors() {
 	static std::set<int> s;
 	if (s.empty()) {
-		s.insert( error_code_please_reboot );
-		s.insert( error_code_please_reboot_delete );
+		s.insert(error_code_please_reboot);
+		s.insert(error_code_please_reboot_delete);
 	}
 	return s;
 }
@@ -77,48 +77,47 @@ struct MachineAttritionWorkload : TestWorkload {
 	// This is set in setup from the list of workers when the cluster is started
 	std::vector<LocalityData> machines;
 
-	MachineAttritionWorkload( WorkloadContext const& wcx )
-		: TestWorkload(wcx)
-	{
-		enabled = !clientId && g_network->isSimulated(); // only do this on the "first" client, and only when in simulation
-		machinesToKill = getOption( options, LiteralStringRef("machinesToKill"), 2 );
-		machinesToLeave = getOption( options, LiteralStringRef("machinesToLeave"), 1 );
-		workersToKill = getOption( options, LiteralStringRef("workersToKill"), 2 );
-		workersToLeave = getOption( options, LiteralStringRef("workersToLeave"), 1 );
-		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
-		suspendDuration = getOption( options, LiteralStringRef("suspendDuration"), 1.0 );
-		liveDuration = getOption( options, LiteralStringRef("liveDuration"), 5.0);
-		reboot = getOption( options, LiteralStringRef("reboot"), false );
-		killDc = getOption(options, LiteralStringRef("killDc"),
-		                   g_network->isSimulated() && deterministicRandom()->random01() < 0.25);
+	MachineAttritionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+		enabled =
+		    !clientId && g_network->isSimulated(); // only do this on the "first" client, and only when in simulation
+		machinesToKill = getOption(options, LiteralStringRef("machinesToKill"), 2);
+		machinesToLeave = getOption(options, LiteralStringRef("machinesToLeave"), 1);
+		workersToKill = getOption(options, LiteralStringRef("workersToKill"), 2);
+		workersToLeave = getOption(options, LiteralStringRef("workersToLeave"), 1);
+		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
+		suspendDuration = getOption(options, LiteralStringRef("suspendDuration"), 1.0);
+		liveDuration = getOption(options, LiteralStringRef("liveDuration"), 5.0);
+		reboot = getOption(options, LiteralStringRef("reboot"), false);
+		killDc = getOption(
+		    options, LiteralStringRef("killDc"), g_network->isSimulated() && deterministicRandom()->random01() < 0.25);
 		killMachine = getOption(options, LiteralStringRef("killMachine"), false);
 		killDatahall = getOption(options, LiteralStringRef("killDatahall"), false);
 		killProcess = getOption(options, LiteralStringRef("killProcess"), false);
 		killZone = getOption(options, LiteralStringRef("killZone"), false);
 		killSelf = getOption(options, LiteralStringRef("killSelf"), false);
 		targetIds = getOption(options, LiteralStringRef("targetIds"), std::vector<std::string>());
-		replacement = getOption( options, LiteralStringRef("replacement"), reboot && deterministicRandom()->random01() < 0.5 );
-		waitForVersion = getOption( options, LiteralStringRef("waitForVersion"), false );
-		allowFaultInjection = getOption( options, LiteralStringRef("allowFaultInjection"), true );
+		replacement =
+		    getOption(options, LiteralStringRef("replacement"), reboot && deterministicRandom()->random01() < 0.5);
+		waitForVersion = getOption(options, LiteralStringRef("waitForVersion"), false);
+		allowFaultInjection = getOption(options, LiteralStringRef("allowFaultInjection"), true);
 		ignoreSSFailures = true;
 	}
 
 	static vector<ISimulator::ProcessInfo*> getServers() {
 		vector<ISimulator::ProcessInfo*> machines;
 		vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();
-		for(int i = 0; i < all.size(); i++)
-			if( !all[i]->failed && all[i]->name == std::string("Server") && all[i]->startingClass != ProcessClass::TesterClass)
-				machines.push_back( all[i] );
+		for (int i = 0; i < all.size(); i++)
+			if (!all[i]->failed && all[i]->name == std::string("Server") &&
+			    all[i]->startingClass != ProcessClass::TesterClass)
+				machines.push_back(all[i]);
 		return machines;
 	}
 
 	virtual std::string description() { return "MachineAttritionWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) {
-		return Void();
-	}
-	virtual Future<Void> start( Database const& cx ) {
+	virtual Future<Void> setup(Database const& cx) { return Void(); }
+	virtual Future<Void> start(Database const& cx) {
 		if (enabled) {
-			std::map<Optional<Standalone<StringRef>>,LocalityData> machineIDMap;
+			std::map<Optional<Standalone<StringRef>>, LocalityData> machineIDMap;
 			auto processes = getServers();
 			for (auto it = processes.begin(); it != processes.end(); ++it) {
 				machineIDMap[(*it)->locality.zoneId()] = (*it)->locality;
@@ -127,39 +126,44 @@ struct MachineAttritionWorkload : TestWorkload {
 			for (auto it = machineIDMap.begin(); it != machineIDMap.end(); ++it) {
 				machines.push_back(it->second);
 			}
-			deterministicRandom()->randomShuffle( machines );
+			deterministicRandom()->randomShuffle(machines);
 			double meanDelay = testDuration / machinesToKill;
 			TraceEvent("AttritionStarting")
-				.detail("KillDataCenters", killDc)
-				.detail("Reboot", reboot)
-				.detail("MachinesToLeave", machinesToLeave)
-				.detail("MachinesToKill", machinesToKill)
-				.detail("MeanDelay", meanDelay);
+			    .detail("KillDataCenters", killDc)
+			    .detail("Reboot", reboot)
+			    .detail("MachinesToLeave", machinesToLeave)
+			    .detail("MachinesToKill", machinesToKill)
+			    .detail("MeanDelay", meanDelay);
 
 			return timeout(
-				reportErrorsExcept( machineKillWorker( this, meanDelay, cx ), "machineKillWorkerError", UID(), &normalAttritionErrors()),
-				testDuration, Void() );
+			    reportErrorsExcept(
+			        machineKillWorker(this, meanDelay, cx), "machineKillWorkerError", UID(), &normalAttritionErrors()),
+			    testDuration,
+			    Void());
 		}
 		if (!clientId && !g_network->isSimulated()) {
 			return timeout(
-				reportErrorsExcept(noSimMachineKillWorker(this, cx), "noSimMachineKillWorkerError", UID(), &normalAttritionErrors()),
-			    testDuration, Void());
+			    reportErrorsExcept(
+			        noSimMachineKillWorker(this, cx), "noSimMachineKillWorkerError", UID(), &normalAttritionErrors()),
+			    testDuration,
+			    Void());
 		}
-		if(killSelf)
+		if (killSelf)
 			throw please_reboot();
 		return Void();
 	}
-	virtual Future<bool> check( Database const& cx ) { return ignoreSSFailures; }
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-	}
+	virtual Future<bool> check(Database const& cx) { return ignoreSSFailures; }
+	virtual void getMetrics(vector<PerfMetric>& m) {}
 
 	static bool noSimIsViableKill(WorkerDetails worker) {
 		return (worker.processClass != ProcessClass::ClassType::TesterClass);
 	}
 
 	template <typename Proc>
-	static void sendRebootRequests(std::vector<WorkerDetails> workers, std::vector<std::string> targets,
-	                               RebootRequest rbReq, Proc idAccess) {
+	static void sendRebootRequests(std::vector<WorkerDetails> workers,
+	                               std::vector<std::string> targets,
+	                               RebootRequest rbReq,
+	                               Proc idAccess) {
 		for (const auto& worker : workers) {
 			// kill all matching workers
 			if (idAccess(worker).present() &&
@@ -170,7 +174,7 @@ struct MachineAttritionWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> noSimMachineKillWorker(MachineAttritionWorkload *self, Database cx) {
+	ACTOR static Future<Void> noSimMachineKillWorker(MachineAttritionWorkload* self, Database cx) {
 		ASSERT(!g_network->isSimulated());
 		state int killedWorkers = 0;
 		state std::vector<WorkerDetails> allWorkers =
@@ -194,27 +198,37 @@ struct MachineAttritionWorkload : TestWorkload {
 		// if a specific kill is requested, it must be accompanied by a set of target IDs otherwise no kills will occur
 		if (self->killDc) {
 			TraceEvent("Assassination").detail("TargetDataCenterIds", describe(self->targetIds));
-			sendRebootRequests(workers, self->targetIds, rbReq,
+			sendRebootRequests(workers,
+			                   self->targetIds,
+			                   rbReq,
 			                   // idAccess lambda
 			                   [](WorkerDetails worker) { return worker.interf.locality.dcId(); });
 		} else if (self->killMachine) {
 			TraceEvent("Assassination").detail("TargetMachineIds", describe(self->targetIds));
-			sendRebootRequests(workers, self->targetIds, rbReq,
+			sendRebootRequests(workers,
+			                   self->targetIds,
+			                   rbReq,
 			                   // idAccess lambda
 			                   [](WorkerDetails worker) { return worker.interf.locality.machineId(); });
 		} else if (self->killDatahall) {
 			TraceEvent("Assassination").detail("TargetDatahallIds", describe(self->targetIds));
-			sendRebootRequests(workers, self->targetIds, rbReq,
+			sendRebootRequests(workers,
+			                   self->targetIds,
+			                   rbReq,
 			                   // idAccess lambda
 			                   [](WorkerDetails worker) { return worker.interf.locality.dataHallId(); });
 		} else if (self->killProcess) {
 			TraceEvent("Assassination").detail("TargetProcessIds", describe(self->targetIds));
-			sendRebootRequests(workers, self->targetIds, rbReq,
+			sendRebootRequests(workers,
+			                   self->targetIds,
+			                   rbReq,
 			                   // idAccess lambda
 			                   [](WorkerDetails worker) { return worker.interf.locality.processId(); });
 		} else if (self->killZone) {
 			TraceEvent("Assassination").detail("TargetZoneIds", describe(self->targetIds));
-			sendRebootRequests(workers, self->targetIds, rbReq,
+			sendRebootRequests(workers,
+			                   self->targetIds,
+			                   rbReq,
 			                   // idAccess lambda
 			                   [](WorkerDetails worker) { return worker.interf.locality.zoneId(); });
 		} else {
@@ -255,62 +269,67 @@ struct MachineAttritionWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> machineKillWorker( MachineAttritionWorkload *self, double meanDelay, Database cx ) {
+	ACTOR static Future<Void> machineKillWorker(MachineAttritionWorkload* self, double meanDelay, Database cx) {
 		state int killedMachines = 0;
 		state double delayBeforeKill = deterministicRandom()->random01() * meanDelay;
 
-		ASSERT( g_network->isSimulated() );
+		ASSERT(g_network->isSimulated());
 
-		if( self->killDc ) {
-			wait( delay( delayBeforeKill ) );
+		if (self->killDc) {
+			wait(delay(delayBeforeKill));
 
 			// decide on a machine to kill
-			ASSERT( self->machines.size() );
+			ASSERT(self->machines.size());
 			Optional<Standalone<StringRef>> target = self->machines.back().dcId();
 
 			ISimulator::KillType kt = ISimulator::Reboot;
-			if( !self->reboot ) {
-				int killType = deterministicRandom()->randomInt(0,3); //FIXME: enable disk stalls
-				if( killType == 0 )
+			if (!self->reboot) {
+				int killType = deterministicRandom()->randomInt(0, 3); // FIXME: enable disk stalls
+				if (killType == 0)
 					kt = ISimulator::KillInstantly;
-				else if( killType == 1 )
+				else if (killType == 1)
 					kt = ISimulator::InjectFaults;
-				else if( killType == 2 )
+				else if (killType == 2)
 					kt = ISimulator::RebootAndDelete;
 				else
 					kt = ISimulator::FailDisk;
 			}
-			TraceEvent("Assassination").detail("TargetDatacenter", target).detail("Reboot", self->reboot).detail("KillType", kt);
+			TraceEvent("Assassination")
+			    .detail("TargetDatacenter", target)
+			    .detail("Reboot", self->reboot)
+			    .detail("KillType", kt);
 
-			g_simulator.killDataCenter( target, kt );
+			g_simulator.killDataCenter(target, kt);
 		} else {
-			while ( killedMachines < self->machinesToKill && self->machines.size() > self->machinesToLeave) {
-				TraceEvent("WorkerKillBegin").detail("KilledMachines", killedMachines)
-					.detail("MachinesToKill", self->machinesToKill).detail("MachinesToLeave", self->machinesToLeave)
-					.detail("Machines", self->machines.size());
-				TEST(true);  // Killing a machine
+			while (killedMachines < self->machinesToKill && self->machines.size() > self->machinesToLeave) {
+				TraceEvent("WorkerKillBegin")
+				    .detail("KilledMachines", killedMachines)
+				    .detail("MachinesToKill", self->machinesToKill)
+				    .detail("MachinesToLeave", self->machinesToLeave)
+				    .detail("Machines", self->machines.size());
+				TEST(true); // Killing a machine
 
-				wait( delay( delayBeforeKill ) );
+				wait(delay(delayBeforeKill));
 				TraceEvent("WorkerKillAfterDelay");
 
-				if(self->waitForVersion) {
-					state Transaction tr( cx );
+				if (self->waitForVersion) {
+					state Transaction tr(cx);
 					loop {
 						try {
 							tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 							tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 							wait(success(tr.getReadVersion()));
 							break;
-						} catch( Error &e ) {
-							wait( tr.onError(e) );
+						} catch (Error& e) {
+							wait(tr.onError(e));
 						}
 					}
 				}
 
 				// decide on a machine to kill
 				state LocalityData targetMachine = self->machines.back();
-				if(BUGGIFY_WITH_PROB(0.01)) {
-					TEST(true); //Marked a zone for maintenance before killing it
+				if (BUGGIFY_WITH_PROB(0.01)) {
+					TEST(true); // Marked a zone for maintenance before killing it
 					wait(success(
 					    setHealthyZone(cx, targetMachine.zoneId().get(), deterministicRandom()->random01() * 20)));
 				} else if (BUGGIFY_WITH_PROB(0.005)) {
@@ -319,45 +338,51 @@ struct MachineAttritionWorkload : TestWorkload {
 					    uncancellable(ignoreSSFailuresForDuration(cx, deterministicRandom()->random01() * 5));
 				}
 
-				TraceEvent("Assassination").detail("TargetMachine", targetMachine.toString())
-					.detail("ZoneId", targetMachine.zoneId())
-					.detail("Reboot", self->reboot).detail("KilledMachines", killedMachines)
-					.detail("MachinesToKill", self->machinesToKill).detail("MachinesToLeave", self->machinesToLeave)
-					.detail("Machines", self->machines.size()).detail("Replace", self->replacement);
+				TraceEvent("Assassination")
+				    .detail("TargetMachine", targetMachine.toString())
+				    .detail("ZoneId", targetMachine.zoneId())
+				    .detail("Reboot", self->reboot)
+				    .detail("KilledMachines", killedMachines)
+				    .detail("MachinesToKill", self->machinesToKill)
+				    .detail("MachinesToLeave", self->machinesToLeave)
+				    .detail("Machines", self->machines.size())
+				    .detail("Replace", self->replacement);
 
 				if (self->reboot) {
-					if( deterministicRandom()->random01() > 0.5 ) {
-						g_simulator.rebootProcess( targetMachine.zoneId(), deterministicRandom()->random01() > 0.5 );
+					if (deterministicRandom()->random01() > 0.5) {
+						g_simulator.rebootProcess(targetMachine.zoneId(), deterministicRandom()->random01() > 0.5);
 					} else {
-						g_simulator.killZone( targetMachine.zoneId(), ISimulator::Reboot );
+						g_simulator.killZone(targetMachine.zoneId(), ISimulator::Reboot);
 					}
 				} else {
 					auto randomDouble = deterministicRandom()->random01();
-					TraceEvent("WorkerKill").detail("MachineCount", self->machines.size()).detail("RandomValue", randomDouble);
-					if (randomDouble < 0.33 ) {
+					TraceEvent("WorkerKill")
+					    .detail("MachineCount", self->machines.size())
+					    .detail("RandomValue", randomDouble);
+					if (randomDouble < 0.33) {
 						TraceEvent("RebootAndDelete").detail("TargetMachine", targetMachine.toString());
-						g_simulator.killZone( targetMachine.zoneId(), ISimulator::RebootAndDelete );
+						g_simulator.killZone(targetMachine.zoneId(), ISimulator::RebootAndDelete);
 					} else {
 						auto kt = ISimulator::KillInstantly;
-						if( self->allowFaultInjection ) {
-							if( randomDouble < 0.50 ) {
+						if (self->allowFaultInjection) {
+							if (randomDouble < 0.50) {
 								kt = ISimulator::InjectFaults;
 							}
-							//FIXME: enable disk stalls
+							// FIXME: enable disk stalls
 							/*
 							if( randomDouble < 0.56 ) {
-								kt = ISimulator::InjectFaults;
+							    kt = ISimulator::InjectFaults;
 							} else if( randomDouble < 0.66 ) {
-								kt = ISimulator::FailDisk;
+							    kt = ISimulator::FailDisk;
 							}
 							*/
 						}
-						g_simulator.killZone( targetMachine.zoneId(), kt );
+						g_simulator.killZone(targetMachine.zoneId(), kt);
 					}
 				}
 
 				killedMachines++;
-				if(!self->replacement)
+				if (!self->replacement)
 					self->machines.pop_back();
 
 				wait(delay(meanDelay - delayBeforeKill) && success(self->ignoreSSFailures));
@@ -367,7 +392,7 @@ struct MachineAttritionWorkload : TestWorkload {
 			}
 		}
 
-		if(self->killSelf)
+		if (self->killSelf)
 			throw please_reboot();
 		return Void();
 	}

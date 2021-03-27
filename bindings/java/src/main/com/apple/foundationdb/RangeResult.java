@@ -27,6 +27,12 @@ class RangeResult {
 	final List<KeyValue> values;
 	final boolean more;
 
+	//mostly present for testing purposes
+	RangeResult(List<KeyValue> values, boolean more) {
+		this.values = values;
+		this.more = more;
+	}
+
 	RangeResult(byte[] keyValues, int[] lengths, boolean more) {
 		if(lengths.length % 2 != 0) {
 			throw new IllegalArgumentException("There needs to be an even number of lenghts!");
