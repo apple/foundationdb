@@ -5231,6 +5231,7 @@ static std::set<int> const& normalDataDistributorErrors() {
 	return s;
 }
 
+// Validate that data the ServerDBInfo object is up-to-date
 ACTOR static Future<Void> ddSnapCreateValidateServerDBInfo(Database cx, ServerDBInfo db) {
 	state Transaction tr(cx);
 	loop {
@@ -5248,6 +5249,13 @@ ACTOR static Future<Void> ddSnapCreateValidateServerDBInfo(Database cx, ServerDB
 	return Void();
 }
 
+// Handles snapshot requests by:
+//  1. Disabling pops on tlogs
+//  2. Snapshotting storage workers
+//  3. Snapshotting tlog workers
+//  4. Reenabling pops on tlogs
+//  5. Snapshotting coordinator workers
+//  6. Validating that a recovery has not occured during the previous steps, so the correct workers were snapshotted
 ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, true, true);
 	TraceEvent("SnapDataDistributor_SnapReqEnter")
