@@ -122,6 +122,13 @@ else()
   set(WITH_ROCKSDB_EXPERIMENTAL OFF)
 endif()
 
+set(IO_URING_EXPERIMENTAL ON CACHE BOOL "Build with io_uring filesystem")
+if (IO_URING_EXPERIMENTAL)
+	set(WITH_IO_URING ON)
+else()
+	set(WITH_IO_URING OFF)
+endif()
+
 ################################################################################
 # TOML11
 ################################################################################

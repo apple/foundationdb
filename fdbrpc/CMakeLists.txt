@@ -45,7 +45,7 @@ if(NOT WIN32)
   endif()
 endif()
 
-if (FALSE) #WITH_IO_URING)
+if (WITH_IO_URING)
 	message(STATUS "IO_URING ENABLED")
 	include(ExternalProject)
 	ExternalProject_Add(io_uring
@@ -53,14 +53,14 @@ if (FALSE) #WITH_IO_URING)
 		#PREFIX liburing
 		BUILD_ALWAYS 1
 		BUILD_IN_SOURCE 1
-		CONFIGURE_COMMAND "" #./configure --cc="gcc -fPIC"
+		CONFIGURE_COMMAND ./configure 
 		#workaround
-		BUILD_COMMAND  make || echo OK 
+		BUILD_COMMAND  make CFLAGS=-fPIC || echo OK 
 		INSTALL_COMMAND ""
 		#INSTALL_DIR=${CMAKE_CURRENT_SOURCE_DIR}/liburing
 		BUILD_BYPRODUCTS <BINARY_DIR>/src/liburing.a
 		)
-
+	
 	ExternalProject_Get_Property(io_uring BINARY_DIR)
 	set(URING_LIBRARIES ${BINARY_DIR}/src/liburing.a)
 
@@ -80,8 +80,8 @@ add_flow_target(STATIC_LIBRARY NAME fdbrpc
   SRCS ${FDBRPC_SRCS}
   DISABLE_ACTOR_DIAGNOSTICS ${FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS})
 target_include_directories(fdbrpc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
-#target_include_directories(fdbrpc PRIVATE ${URING_INCLUDE_DIR})
-#target_link_libraries(fdbrpc PRIVATE ${URING_LIBRARIES})
+target_include_directories(fdbrpc PRIVATE ${URING_INCLUDE_DIR})
+target_link_libraries(fdbrpc PRIVATE ${URING_LIBRARIES})
 target_link_libraries(fdbrpc PUBLIC flow)
 if(COMPILE_EIO)
   add_library(eio STATIC libeio/eio.c)
