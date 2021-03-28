@@ -145,8 +145,17 @@ private:
 	// The maximum amount of time a write is delayed before being passed along to the underlying file
 	double maxWriteDelay;
 
-	// Modifications which haven't been pushed to file, mapped by the location in the file that is being modified
+	// Modifications which haven't been pushed to file, mapped by the location in the file that is being modified.
+	// Be sure to update minSizeAfterPendingModifications when modifying pendingModifications.
 	RangeMap<uint64_t, Future<Void>> pendingModifications;
+	// The size of the file after the set of pendingModifications completes,
+	// (the set pending at the time of reading this member). Must be updated in
+	// lockstep with any inserts into the pendingModifications map. Tracking
+	// this variable is necessary so that we can know the range of the file a
+	// truncate is modifying, so we can insert it into the pendingModifications
+	// map. Until minSizeAfterPendingModificationsIsExact is true, this is only a lower bound.
+	mutable int64_t minSizeAfterPendingModifications = 0;
+	mutable bool minSizeAfterPendingModificationsIsExact = false;
 
 	// Will be blocked whenever kill is running
 	Promise<Void> killed;
@@ -437,6 +446,7 @@ private:
 			Future<Void> writeEnded = wait(ownFuture);
 			std::vector<Future<Void>> priorModifications =
 			    self->getModificationsAndInsert(offset, length, true, writeEnded);
+			self->minSizeAfterPendingModifications = std::max(self->minSizeAfterPendingModifications, offset + length);
 
 			if (BUGGIFY_WITH_PROB(0.001))
 				priorModifications.push_back(
@@ -603,9 +613,19 @@ private:
 			//TraceEvent("AsyncFileNonDurable_Truncate", self->id).detail("Delay", delayDuration).detail("Filename", self->filename);
 			wait(checkKilled(self, "Truncate"));
 
-			Future<Void> truncateEnded = wait(ownFuture);
+			state Future<Void> truncateEnded = wait(ownFuture);
+
+			// Need to know the size of the file directly before this truncate
+			// takes effect to see what range it modifies.
+			if (!self->minSizeAfterPendingModificationsIsExact) {
+				wait(success(self->size()));
+			}
+			ASSERT(self->minSizeAfterPendingModificationsIsExact);
+			int64_t beginModifiedRange = std::min(size, self->minSizeAfterPendingModifications);
+			self->minSizeAfterPendingModifications = size;
+
 			std::vector<Future<Void>> priorModifications =
-			    self->getModificationsAndInsert(size, -1, true, truncateEnded);
+			    self->getModificationsAndInsert(beginModifiedRange, /*through end of file*/ -1, true, truncateEnded);
 
 			if (BUGGIFY_WITH_PROB(0.001))
 				priorModifications.push_back(
@@ -751,8 +771,9 @@ private:
 		wait(checkKilled(self, "SizeEnd"));
 
 		// Include any modifications which extend past the end of the file
-		uint64_t maxModification = self->pendingModifications.lastItem().begin();
-		self->approximateSize = std::max<int64_t>(sizeFuture.get(), maxModification);
+		self->approximateSize = self->minSizeAfterPendingModifications =
+		    std::max<int64_t>(sizeFuture.get(), self->minSizeAfterPendingModifications);
+		self->minSizeAfterPendingModificationsIsExact = true;
 		return self->approximateSize;
 	}
 

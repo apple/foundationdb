@@ -1,3 +1,4 @@
+storageEngineExcludeType=-1
 testTitle=Clogged
     runSetup=false
     testName=Cycle
