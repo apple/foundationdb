@@ -5229,7 +5229,7 @@ public:
 		}
 
 		Optional<RestorableFileSet> restoreSet =
-		    wait(bc->getRestoreSet(targetVersion, VectorRef<KeyRangeRef>(), incrementalBackupOnly, beginVersion));
+		    wait(bc->getRestoreSet(targetVersion, ranges, incrementalBackupOnly, beginVersion));
 
 		if (!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
