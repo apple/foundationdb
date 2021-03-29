@@ -25,7 +25,7 @@
 #include "fdbclient/IClientApi.h"
 #include "flow/Arena.h"
 
-namespace FDBCLI {
+namespace fdb_cli {
 
 struct CommandHelp {
 	std::string usage;
@@ -48,13 +48,17 @@ struct CommandFactory {
     }
 };
 
-// help functions
+// help functions (Copied from fdbcli.actor.cpp)
+
+// compare StringRef with the given c string
 bool tokencmp(StringRef token, const char* command);
+// print the usage of the specified command
 void printUsage(StringRef command);
 
+// All fdbcli commands (alphabetically)
 // consistency command
 Future<bool> consistencycheckCommand(Reference<IDatabase> db, std::vector<StringRef> tokens);
 
-} // namespace FDBCLI
+} // namespace fdb_cli
 
 #endif

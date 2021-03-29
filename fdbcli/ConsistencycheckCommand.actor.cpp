@@ -8,7 +8,7 @@
 #include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h"
 
-using namespace FDBCLI;
+using namespace fdb_cli;
 
 ACTOR static Future<bool> consistencycheckCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
     state Reference<ITransaction> tr = db->createTransaction();
@@ -30,7 +30,7 @@ ACTOR static Future<bool> consistencycheckCommandActor(Reference<IDatabase> db, 
     return true;
 }
 
-namespace FDBCLI {
+namespace fdb_cli {
 
 Future<bool> consistencycheckCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
     return consistencycheckCommandActor(db, tokens);
@@ -42,4 +42,4 @@ CommandFactory consistencycheckFactory("consistencycheck", CommandHelp(
 	    "Calling this command with `on' permits consistency check processes to run and `off' will halt their checking. "
 	    "Calling this command with no arguments will display if consistency checking is currently allowed.\n"));
 
-} // namespace FDBCLI
+} // namespace fdb_cli

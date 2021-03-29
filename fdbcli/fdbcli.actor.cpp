@@ -329,13 +329,6 @@ static std::string formatStringRef(StringRef item, bool fullEscaping = false) {
 	return ret;
 }
 
-// static bool tokencmp(StringRef token, const char* command) {
-// 	if (token.size() != strlen(command))
-// 		return false;
-
-// 	return !memcmp(token.begin(), command, token.size());
-// }
-
 static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& err, bool& partial) {
 	err = false;
 	partial = false;
@@ -465,9 +458,9 @@ static void printProgramUsage(const char* name) {
 #define ESCAPINGK "\n\nFor information on escaping keys, type `help escaping'."
 #define ESCAPINGKV "\n\nFor information on escaping keys and values, type `help escaping'."
 
-using namespace FDBCLI;
-std::map<std::string, CommandHelp>& helpMap = FDBCLI::CommandFactory::commands();
-std::set<std::string>& hiddenCommands = FDBCLI::CommandFactory::hiddenCommands();
+using namespace fdb_cli;
+std::map<std::string, CommandHelp>& helpMap = CommandFactory::commands();
+std::set<std::string>& hiddenCommands = CommandFactory::hiddenCommands();
 
 void initHelp() {
 	helpMap["begin"] =
@@ -715,14 +708,6 @@ void printHelp(StringRef command) {
 		printf("\n");
 	} else
 		printf("I don't know anything about `%s'\n", formatStringRef(command).c_str());
-}
-
-void FDBCLI::printUsage(StringRef command) {
-	auto i = helpMap.find(command.toString());
-	if (i != helpMap.end())
-		printf("Usage: %s\n", i->second.usage.c_str());
-	else
-		fprintf(stderr, "ERROR: Unknown command `%s'\n", command.toString().c_str());
 }
 
 std::string getCoordinatorsInfoString(StatusObjectReader statusObj) {
