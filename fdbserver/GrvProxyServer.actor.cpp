@@ -526,14 +526,16 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 	double end = g_network->timer();
 	for (GetReadVersionRequest const& request : requests) {
 		double duration = end - request.requestTime();
+		if (request.priority == TransactionPriority::BATCH) {
+			stats->grvBatchLatencySample.addMeasurement(duration);
+		}
+
 		if (request.priority == TransactionPriority::DEFAULT) {
 			stats->grvLatencySample.addMeasurement(duration);
 		}
 
 		if (request.priority >= TransactionPriority::DEFAULT) {
 			stats->grvLatencyBands.addMeasurement(duration);
-		} else {
-			stats->grvBatchLatencySample.addMeasurement(duration);
 		}
 
 		if (request.flags & GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION) {

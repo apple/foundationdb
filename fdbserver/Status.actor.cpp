@@ -629,24 +629,25 @@ struct RolesInfo {
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
 		try {
+			JsonBuilderObject priorityStats;
+
 			TraceEventFields const& grvLatencyMetrics = metrics.at("GRVLatencyMetrics");
 			if (grvLatencyMetrics.size()) {
-				JsonBuilderObject priorityStats;
-				// We only report default priority now, but this allows us to add other priorities if we want them
 				priorityStats["default"] = addLatencyStatistics(grvLatencyMetrics);
+			}
+
+			TraceEventFields const& grvBatchMetrics = metrics.at("GRVBatchLatencyMetrics");
+			if (grvBatchMetrics.size()) {
+				priorityStats["batch"] = addLatencyStatistics(grvBatchMetrics);
+			}
+
+			if (priorityStats.size()) {
 				obj["grv_latency_statistics"] = priorityStats;
 			}
 
 			TraceEventFields const& grvLatencyBands = metrics.at("GRVLatencyBands");
 			if (grvLatencyBands.size()) {
 				obj["grv_latency_bands"] = addLatencyBandInfo(grvLatencyBands);
-			}
-
-			TraceEventFields const& grvBatchMetrics = metrics.at("GRVBatchLatencyMetrics");
-			if(grvBatchMetrics.size()) {
-				JsonBuilderObject priorityStats;
-				priorityStats["batch"] = addLatencyStatistics(grvBatchMetrics);
-				obj["grv_batch_latency_statistics"] = priorityStats;
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_attribute_not_found) {
