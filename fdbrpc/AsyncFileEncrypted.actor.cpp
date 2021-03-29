@@ -26,6 +26,8 @@
 
 class AsyncFileEncryptedImpl {
 public:
+	// Determine the initialization for the first block of a file based on a hash of
+	// the filename.
 	static auto getFirstBlockIV(const std::string& filename) {
 		StreamCipher::IV iv;
 		auto hash = XXH3_128bits(filename.c_str(), filename.size());
@@ -37,6 +39,7 @@ public:
 		return iv;
 	}
 
+	// Read a single block of size ENCRYPTION_BLOCK_SIZE bytes, and decrypt.
 	ACTOR static Future<Standalone<StringRef>> readBlock(AsyncFileEncrypted* self, uint16_t block) {
 		state Arena arena;
 		state unsigned char* encrypted = new (arena) unsigned char[FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE];
@@ -228,6 +231,9 @@ Optional<Standalone<StringRef>> AsyncFileEncrypted::RandomCache::get(uint16_t bl
 	}
 }
 
+// This test writes random data into an encrypted file in random increments,
+// then reads this data back from the file in random increments, then confirms that
+// the bytes read match the bytes written.
 TEST_CASE("fdbrpc/AsyncFileEncrypted") {
 	state const int bytes = FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE * deterministicRandom()->randomInt(0, 1000);
 	state std::vector<unsigned char> writeBuffer(bytes, 0);

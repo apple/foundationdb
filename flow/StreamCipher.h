@@ -31,6 +31,8 @@
 #include <unordered_set>
 #include <vector>
 
+// Wrapper class for openssl implementation of AES-128-GCM
+// encryption/decryption
 class StreamCipher final : NonCopyable {
 	static std::unordered_set<EVP_CIPHER_CTX*> ctxs;
 	EVP_CIPHER_CTX* ctx;

@@ -108,6 +108,8 @@ StringRef DecryptionStreamCipher::finish(Arena& arena) {
 
 void forceLinkStreamCipherTests() {}
 
+// Tests both encryption and decryption of random data
+// using the StreamCipher class
 TEST_CASE("flow/StreamCipher") {
 	StreamCipher::Key::initializeRandomKey();
 	const auto& key = StreamCipher::Key::getKey();
