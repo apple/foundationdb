@@ -580,7 +580,7 @@ struct ReadWriteWorkload : KVWorkload {
 		}
 
 		loop {
-			if( delay ) wait( poisson( &lastTime, delay ) );
+			wait( poisson( &lastTime, delay ) );
 
 			if (self->rampUpConcurrency) {
 				if (now() - startTime >= self->testDuration/2 * (2 - (double(clientIndex) / self->actorCount + double(self->clientId) / self->clientCount / self->actorCount))) {
