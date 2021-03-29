@@ -2211,6 +2211,8 @@ Reference<IBackupContainer> openBackupContainer(const char* name, std::string de
 	return c;
 }
 
+// Submit the restore request to the database if "performRestore" is true. Otherwise,
+// check if the restore can be performed.
 ACTOR Future<Void> runRestore(Database db,
                               std::string originalClusterFile,
                               std::string tagName,
