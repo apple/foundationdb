@@ -3680,12 +3680,19 @@ void* sampleThread(void* arg) {
 		threadSleep(1.0); // TODO: Read sample rate from global config
 
 		// TODO: Copy actor lineage of currently running actor
+		// Read currentLineage
 
 		auto diskAlps = IAsyncFileSystem::filesystem()->getActorLineageSet().copy();
 		printf("Disk ALPs: %d\n", diskAlps.size());
 
 		// TODO: Call collect on all actor lineages
 		for (auto actorLineage : diskAlps) {
+			auto stack = actorLineage->stack(&StackLineage::actorName);
+			while (!stack.empty()) {
+				printf("%s ", stack.top());
+				stack.pop();
+			}
+			printf("\n");
 		}
 
 		// TODO: Serialize collected actor linage properties
