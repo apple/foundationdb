@@ -1812,7 +1812,6 @@ ACTOR static Future<Standalone<RangeResultRef>> MaintenanceGetRangeActor(ReadYou
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = wait(ryw->getTransaction().get(healthyZoneKey));
 	if (val.present()) {
-		TraceEvent(SevDebug, "MaintenanceDebug2").detail("KeyRange", kr.toString());
 		auto healthyZone = decodeHealthyZoneValue(val.get());
 		if ((healthyZone.first == ignoreSSFailuresZoneString) ||
 		    (healthyZone.second > ryw->getTransaction().getReadVersion().get())) {
