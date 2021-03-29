@@ -339,7 +339,7 @@ public:
 	                                              bool checkStable = false,
 	                                              std::set<Optional<Key>> dcIds = std::set<Optional<Key>>(),
 	                                              std::vector<UID> exclusionWorkerIds = {}) {
-		std::map<std::tuple<ProcessClass::Fitness, int, bool>, vector<WorkerDetails>> fitness_workers;
+		std::map<std::tuple<ProcessClass::Fitness, int, bool, bool>, vector<WorkerDetails>> fitness_workers;
 		std::vector<WorkerDetails> results;
 		std::vector<LocalityData> unavailableLocals;
 		Reference<LocalitySet> logServerSet;
@@ -406,15 +406,16 @@ public:
 			}
 
 			// This worker is a candidate for TLog recruitment.
-			fitness_workers[std::make_tuple(fitness, id_used[worker_process_id], worker_details.degraded)].push_back(
-			    worker_details);
+			bool inCCDC = worker_details.interf.locality.dcId() == clusterControllerDcId;
+			fitness_workers[std::make_tuple(fitness, id_used[worker_process_id], worker_details.degraded, inCCDC)]
+			    .push_back(worker_details);
 		}
 
 		//  FIXME: it's not clear whether this is necessary.
 		for (int fitness = ProcessClass::BestFit; fitness != ProcessClass::NeverAssign; fitness++) {
 			auto fitnessEnum = (ProcessClass::Fitness)fitness;
 			for (int addingDegraded = 0; addingDegraded < 2; addingDegraded++) {
-				fitness_workers[std::make_tuple(fitnessEnum, 0, addingDegraded)];
+				fitness_workers[std::make_tuple(fitnessEnum, 0, addingDegraded, false)];
 			}
 		}
 		results.reserve(results.size() + id_worker.size());
