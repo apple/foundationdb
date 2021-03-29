@@ -891,6 +891,13 @@ public:
 		return Optional<RestorableFileSet>();
 	}
 
+	// Get a set of files that can restore the given "keyRangesFilter" to the "targetVersion".
+	// If "keyRangesFilter" is empty, the restore will recover the whole database. It's generally
+	// a good idea to specify "keyRangesFilter" to reduce the number of files for restore times.
+	//
+	// If "logsOnly" is true, then only log files are returned and "keyRangesFilter" is ignored,
+	// because the log can contain mutations of the whole key space, unlike range files that each
+	// is limited to a smaller key range.
 	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet(Reference<BackupContainerFileSystem> bc,
 	                                                               Version targetVersion,
 	                                                               VectorRef<KeyRangeRef> keyRangesFilter,
