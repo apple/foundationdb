@@ -45,7 +45,7 @@ if(NOT WIN32)
   endif()
 endif()
 
-if (NOT APPLE AND NOT WIN32 AND WITH_IO_URING)
+if ((NOT APPLE) AND (NOT WIN32) AND (WITH_IO_URING))
 	message(STATUS "IO_URING ENABLED")
 	include(ExternalProject)
 	ExternalProject_Add(io_uring
