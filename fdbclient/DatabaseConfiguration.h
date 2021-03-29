@@ -160,7 +160,7 @@ struct DatabaseConfiguration {
 	}
 
 	// Retuns the maximum number of discrete failures a cluster can tolerate.
-	// In HA mode, `fullyReplicatedRegions` is set to 1 initially when data is being
+	// In HA mode, `fullyReplicatedRegions` is set to "1" initially when data is being
 	// replicated to remote, and will be incremented later. `forAvailablity` is set to true
 	// if we want to account the number for machines that can recruit new tLogs/SS after failures.
 	// Killing an entire datacenter counts as killing one zone in modes that support it.
