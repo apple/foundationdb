@@ -201,20 +201,20 @@ public:
 	CoordinatedState(ServerCoordinators const& c)
 	  : coordinators(c), stage(0), conflictGen(0), doomed(false), ac(false), initial(false) {}
 
-	Future<Value> read() { return read(this); }
 	// May only be called once.
 	// Returns the most recent state if there are no concurrent calls to setExclusive
 	// Otherwise might return the state passed to a concurrent call, even if that call ultimately fails.
 	// Don't count on the result of this read being part of the serialized history until a subsequent setExclusive has
 	// succeeded!
+	Future<Value> read() { return read(this); }
 
 	Future<Void> onConflict() { return onConflict(this); }
+
 	// May only be called once, and only after read returns.
 	// Eventually returns Void if a call to setExclusive would fail.
 	// May or may not return or throw an error after setExclusive is called.
 	// (Generally?) doesn't return unless there is some concurrent call to read or setExclusive.
 
-	Future<Void> setExclusive(Value v) { return setExclusive(this, v); }
 	// read() must have been called and returned first, and this may only be called once.
 	// Attempts to change the state value, provided that the value returned by read is still the
 	//   most recent.
@@ -223,6 +223,7 @@ public:
 	// If it throws coordinated_state_conflict, the state may or may not have been changed, and the value
 	//   returned from read may or may not ever have been a valid state.  Probably there was a
 	//   call to read() or setExclusive() concurrently with this pair.
+	Future<Void> setExclusive(Value v) { return setExclusive(this, v); }
 
 	uint64_t getConflict() const { return conflictGen; }
 };

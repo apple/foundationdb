@@ -37,11 +37,11 @@ public:
 
 	Future<Void> setExclusive(Value v);
 
-	Future<Void> move(class ClusterConnectionString const& nc);
 	// Call only after setExclusive returns.  Attempts to move the coordinated state
 	// permanently to the new ServerCoordinators, which must be uninitialized.  Returns when the process has
 	// reached the point where a leader elected by the new coordinators should be doing the rest of the work
 	// (and therefore the caller should die).
+	Future<Void> move(class ClusterConnectionString const& nc);
 
 private:
 	std::unique_ptr<struct MovableCoordinatedStateImpl> impl;
