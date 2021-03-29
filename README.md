@@ -2,6 +2,8 @@
 
 ![Build Status](https://codebuild.us-west-2.amazonaws.com/badges?uuid=eyJlbmNyeXB0ZWREYXRhIjoidTh3TTlZa2FQdkdPL1drZzJUQnA1NWg0MzQ3c1VnMXlaVWQ0MVUwcUJpRlltUExBYmRCc3h2c0p1TXZLdWhDQ3BoS0Jmc2ZZdG5yVmxGUHNJM0JtV0MwPSIsIml2UGFyYW1ldGVyU3BlYyI6InBrclM3R0J2d3hmRUFDTjgiLCJtYXRlcmlhbFNldFNlcmlhbCI6MX0%3D&branch=master)
 
+THIS IS TEST TEXT TO BE REMOVED
+
 FoundationDB is a distributed database designed to handle large volumes of structured data across clusters of commodity servers. It organizes data as an ordered key-value store and employs ACID transactions for all operations. It is especially well-suited for read/write workloads but also has excellent performance for write-intensive workloads. Users interact with the database using API language binding.
 
 To learn more about FoundationDB, visit [foundationdb.org](https://www.foundationdb.org/)
