@@ -18,3 +18,5 @@ testTitle=MoveKeysCycle
     machinesToLeave=3
     reboot=true
     testDuration=10.0
+
+storageEngineExcludeType=-1
