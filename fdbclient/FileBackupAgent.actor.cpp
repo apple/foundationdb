@@ -3980,7 +3980,6 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 				wait(checkTaskVersion(tr->getDatabase(), task, name, version));
 
-				//Version _restoreVersion = wait(restore.restoreVersion().getOrThrow(tr));
 				wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
 				wait(store(ranges, restore.getRestoreRangesOrDefault(tr)));
 
@@ -5136,7 +5135,7 @@ public:
 	//   cxOrig: if present, is used to resolve the restore timestamp into a version.
 	//   tagName: restore tag
 	//   url: the backup container's URL that contains all backup files
-	//   ranges: the restored key ranges; if empty, restore the whole database
+	//   ranges: the restored key ranges; if empty, restore all key ranges in the backup
 	//   waitForComplete: if set, wait until the restore is completed before returning; otherwise,
 	//                    return when the request is submitted to the database.
 	//   targetVersion: the version to be restored.
