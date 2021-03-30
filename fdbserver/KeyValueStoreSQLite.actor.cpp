@@ -1156,6 +1156,7 @@ struct RawCursor {
 			return result;
 		}
 
+		// large kv pairs were split up during write so they must be merged during the read 
 		if (db.fragment_values) {
 			if (rowLimit > 0) { // read rows ascending starting at the beginning of the key range
 				int r = moveTo(keys.begin);
@@ -1186,7 +1187,7 @@ struct RawCursor {
 					nextKey = i.peek();
 				}
 			}
-		} else { // large kv pairs were split up during write so they must be merged during the read 
+		} else {
 			if (rowLimit > 0) {
 				int r = moveTo(keys.begin);
 				if (r < 0)
