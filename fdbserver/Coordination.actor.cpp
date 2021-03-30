@@ -545,9 +545,15 @@ struct LeaderRegisterCollection {
 	}
 };
 
+StringRef getClusterName(Key key) {
+	StringRef str = key.contents();
+	return str.eat(":");
+}
+
 // leaderServer multiplexes multiple leaderRegisters onto a single LeaderElectionRegInterface,
 // creating and destroying them on demand.
-ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore* pStore, UID id) {
+ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore* pStore, UID id,
+								Reference<ClusterConnectionFile> ccf) {
 	state LeaderRegisterCollection regs(pStore);
 	state ActorCollection forwarders(false);
 
@@ -562,6 +568,16 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 				info.forward = forward.get().serializedInfo;
 				req.reply.send(CachedSerialization<ClientDBInfo>(info));
 			} else {
+				StringRef reqClusterName = getClusterName(req.clusterKey);
+				StringRef clusterName = getClusterName(ccf->getConnectionString().clusterKey());
+				if (reqClusterName.compare(clusterName) ||
+				     ccf->getConnectionString().coordinators() != req.coordinators) {
+					TraceEvent(SevWarnAlways, "CCFMismatch")
+					    .detail("RequestType", "OpenDatabaseCoordRequest")
+					    .detail("LocalCS", ccf->getConnectionString().toString())
+					    .detail("IncomingClusterKey", req.clusterKey)
+					    .detail("IncomingCoordinators", describeList(req.coordinators, req.coordinators.size()));
+				}
 				regs.getInterface(req.clusterKey, id).openDatabase.send(req);
 			}
 		}
@@ -570,6 +586,16 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 			if (forward.present()) {
 				req.reply.send(forward.get());
 			} else {
+				StringRef reqClusterName = getClusterName(req.key);
+				StringRef clusterName = getClusterName(ccf->getConnectionString().clusterKey());
+				if (reqClusterName.compare(clusterName) ||
+					ccf->getConnectionString().coordinators() != req.coordinators) {
+					TraceEvent(SevWarnAlways, "CCFMismatch")
+					    .detail("RequestType", "ElectionResultRequest")
+					    .detail("LocalCS", ccf->getConnectionString().toString())
+					    .detail("IncomingClusterKey", req.key)
+					    .detail("IncomingCoordinators", describeList(req.coordinators, req.coordinators.size()));
+				}
 				regs.getInterface(req.key, id).electionResult.send(req);
 			}
 		}
@@ -577,30 +603,66 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if (forward.present())
 				req.reply.send(forward.get());
-			else
+			else {
+				StringRef reqClusterName = getClusterName(req.key);
+				StringRef clusterName = getClusterName(ccf->getConnectionString().clusterKey());
+				if (reqClusterName.compare(clusterName)) {
+					TraceEvent(SevWarnAlways, "CCFMismatch")
+					    .detail("RequestType", "GetLeaderRequest")
+					    .detail("LocalCS", ccf->getConnectionString().toString())
+					    .detail("IncomingClusterKey", req.key)
+						.detail("Key", reqClusterName).detail("Key2",clusterName);
+				}
 				regs.getInterface(req.key, id).getLeader.send(req);
+			}
 		}
 		when(CandidacyRequest req = waitNext(interf.candidacy.getFuture())) {
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if (forward.present())
 				req.reply.send(forward.get());
-			else
+			else {
+				StringRef reqClusterName = getClusterName(req.key);
+				StringRef clusterName = getClusterName(ccf->getConnectionString().clusterKey());
+				if (reqClusterName.compare(clusterName)) {
+					TraceEvent(SevWarnAlways, "CCFMismatch")
+					    .detail("RequestType", "CandidacyRequest")
+					    .detail("LocalCS", ccf->getConnectionString().toString())
+					    .detail("IncomingClusterKey", req.key);
+				}
 				regs.getInterface(req.key, id).candidacy.send(req);
+			}
 		}
 		when(LeaderHeartbeatRequest req = waitNext(interf.leaderHeartbeat.getFuture())) {
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if (forward.present())
 				req.reply.send(LeaderHeartbeatReply{ false });
-			else
+			else {
+				StringRef reqClusterName = getClusterName(req.key);
+				StringRef clusterName = getClusterName(ccf->getConnectionString().clusterKey());
+				if (reqClusterName.compare(clusterName)) {
+					TraceEvent(SevWarnAlways, "CCFMismatch")
+					    .detail("RequestType", "LeaderHeartbeatRequest")
+					    .detail("LocalCS", ccf->getConnectionString().toString())
+					    .detail("IncomingClusterKey", req.key);
+				}
 				regs.getInterface(req.key, id).leaderHeartbeat.send(req);
+			}
 		}
 		when(ForwardRequest req = waitNext(interf.forward.getFuture())) {
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if (forward.present())
 				req.reply.send(Void());
 			else {
-				forwarders.add(
-				    LeaderRegisterCollection::setForward(&regs, req.key, ClusterConnectionString(req.conn.toString())));
+				StringRef reqClusterName = getClusterName(req.key);
+				StringRef clusterName = getClusterName(ccf->getConnectionString().clusterKey());
+				if (reqClusterName.compare(clusterName)) {
+					TraceEvent(SevWarnAlways, "CCFMismatch")
+					    .detail("RequestType", "ForwardRequest")
+					    .detail("LocalCS", ccf->getConnectionString().toString())
+					    .detail("IncomingClusterKey", req.key);
+				}
+				forwarders.add(LeaderRegisterCollection::setForward(&regs, req.key,
+																	ClusterConnectionString(req.conn.toString())));
 				regs.getInterface(req.key, id).forward.send(req);
 			}
 		}
@@ -611,7 +673,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 	}
 }
 
-ACTOR Future<Void> coordinationServer(std::string dataFolder) {
+ACTOR Future<Void> coordinationServer(std::string dataFolder, Reference<ClusterConnectionFile> ccf) {
 	state UID myID = deterministicRandom()->randomUniqueID();
 	state LeaderElectionRegInterface myLeaderInterface(g_network);
 	state GenerationRegInterface myInterface(g_network);
@@ -622,7 +684,7 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder) {
 	    .detail("Folder", dataFolder);
 
 	try {
-		wait(localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store, myID) ||
+		wait(localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store, myID, ccf) ||
 		     store.getError());
 		throw internal_error();
 	} catch (Error& e) {

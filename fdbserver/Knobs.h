@@ -559,6 +559,9 @@ public:
 
 	// Coordination
 	double COORDINATED_STATE_ONCONFLICT_POLL_INTERVAL;
+	double FORWARD_REQUEST_TOO_OLD;
+	bool ENABLE_CROSS_CLUSTER_SUPPORT; // Allow a coordinator to serve requests whose connection string does not match
+	                                   // the local copy
 
 	// Buggification
 	double BUGGIFIED_EVENTUAL_CONSISTENCY;
