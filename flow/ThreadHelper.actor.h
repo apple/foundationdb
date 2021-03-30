@@ -532,6 +532,46 @@ Future<T> unsafeThreadFutureToFuture(ThreadFuture<T> threadFuture) {
 	return callback->promise.getFuture();
 }
 
+// A callback waiting on a thread future and will delete itself once fired
+template <class T>
+struct UtilCallback : public ThreadCallback, ReferenceCounted<UtilCallback<T>> {
+public:
+	UtilCallback(ThreadFuture<T> f, void* userdata) : f(f), userdata(userdata) {}
+
+	bool canFire(int notMadeActive) const override { return true; }
+	void fire(const Void& unused, int& userParam) override {
+		g_network->onMainThread(Promise<Void>((SAV<Void>*)userdata), TaskPriority::DefaultOnMainThread);
+		delete this;
+	}
+	void error(const Error&, int& userParam) override {
+		g_network->onMainThread(Promise<Void>((SAV<Void>*)userdata), TaskPriority::DefaultOnMainThread);
+		delete this;
+	}
+
+private:
+	ThreadFuture<T> f;
+	void* userdata;
+};
+
+ACTOR template <class T>
+static Future<T> safeThreadFutureToFutureActor(ThreadFuture<T> threadFuture) {
+	Promise<Void> ready;
+	Future<Void> onReady = ready.getFuture();
+	UtilCallback<T>* callback = new UtilCallback<T>(threadFuture, ready.extractRawPointer());
+	int unused = 0;
+	threadFuture.callOrSetAsCallback(callback, unused, 0);
+	wait(onReady);
+	// threadFuture should be ready
+	if (threadFuture.isError())
+		throw threadFuture.getError();
+	return threadFuture.get();
+}
+
+template <class T>
+Future<T> safeThreadFutureToFuture(ThreadFuture<T> threadFuture) {
+	return safeThreadFutureToFutureActor(threadFuture);
+}
+
 ACTOR template <class R, class F>
 Future<Void> doOnMainThread(Future<Void> signal, F f, ThreadSingleAssignmentVar<R>* result) {
 	try {

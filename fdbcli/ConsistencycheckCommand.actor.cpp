@@ -15,15 +15,15 @@ ACTOR static Future<bool> consistencycheckCommandActor(Reference<IDatabase> db, 
     tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
     KeyRef k = LiteralStringRef("\xff\xff/management/consistency_check_suspended");
     if (tokens.size() == 1) {
-        Optional<Value> suspended = wait(unsafeThreadFutureToFuture(tr->get(k)));
-        printf("ConsistencyCheck is %s\n", suspended.present() ? "off" : "on");
+		Optional<Value> suspended = wait(safeThreadFutureToFuture(tr->get(k)));
+		printf("ConsistencyCheck is %s\n", suspended.present() ? "off" : "on");
     } else if (tokens.size() == 2 && tokencmp(tokens[1], "off")) {
         tr->set(k, Value());
-        wait(unsafeThreadFutureToFuture(tr->commit()));
-    } else if (tokens.size() == 2 && tokencmp(tokens[1], "on")) {
+		wait(safeThreadFutureToFuture(tr->commit()));
+	} else if (tokens.size() == 2 && tokencmp(tokens[1], "on")) {
         tr->clear(k);
-        wait(unsafeThreadFutureToFuture(tr->commit()));
-    } else {
+		wait(safeThreadFutureToFuture(tr->commit()));
+	} else {
         printUsage(tokens[0]);
         return false;
     }
