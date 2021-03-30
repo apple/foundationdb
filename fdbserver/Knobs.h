@@ -416,6 +416,7 @@ public:
 	double MAX_REBOOT_TIME;
 	std::string LOG_DIRECTORY;
 	int64_t SERVER_MEM_LIMIT;
+	double SYSTEM_MONITOR_FREQUENCY;
 
 	// Ratekeeper
 	double SMOOTHING_AMOUNT;
