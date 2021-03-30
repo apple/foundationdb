@@ -142,8 +142,9 @@ Version getVersionFromString(std::string const& value) {
 }
 
 // Transaction log data is stored by the FoundationDB core in the
-// \xff / bklog / keyspace in a funny order for performance reasons.
-// Return the ranges of keys that contain the data for the given range
+// "backupLogKeys" (i.e., \xff\x02/blog/) keyspace in a funny order for
+// performance reasons.
+// Returns the ranges of keys that contain the data for the given range
 // of versions.
 Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion,
                                                 Version endVersion,
