@@ -105,5 +105,12 @@ RUN rm -f /root/anaconda-ks.cfg && \
     'function jsd() {' \
     '   j start --tarball $(find ${HOME}/build_output/packages -name correctness\*.tar.gz) "${@}"' \
     '}' \
+    'function xmlformat() {' \
+    '    TEMPFILE=`mktemp`' \
+    '    xmllint --format $1 > $TEMPFILE' \
+    '    rm -f $1' \
+    '    mv $TEMPFILE $1' \
+    '    rm -f $TEMPFILE' \
+    '}' \
     '' \
     >> .bashrc
