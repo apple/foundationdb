@@ -184,6 +184,12 @@ Reference<IRandom> deterministicRandom();
 // non-deterministic contexts.
 Reference<IRandom> nondeterministicRandom();
 
+// This returns a deterministic random number generator initialized with the same seed as the one returned by
+// deterministicRandom. The main use-case for this is to generate deterministic random numbers without changing the
+// determinism of the simulator. This is useful for things like generating random UIDs for debug transactions.
+// WARNING: This is not thread safe and must not be called from any other thread than the network thread!
+Reference<IRandom> debugRandom();
+
 // Populates a buffer with a random sequence of bytes
 void generateRandomData(uint8_t* buffer, int length);
 

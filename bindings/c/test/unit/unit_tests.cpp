@@ -35,6 +35,7 @@
 #include <tuple>
 #include <vector>
 #include <random>
+#include <chrono>
 
 #define DOCTEST_CONFIG_IMPLEMENT
 #include "doctest.h"
@@ -2124,6 +2125,24 @@ TEST_CASE("block_from_callback") {
 	    },
 	    &context));
 	context.event.wait();
+}
+
+// monitors network busyness for 2 sec (40 readings)
+TEST_CASE("monitor_network_busyness") {
+	bool containsGreaterZero = false;
+	for (int i = 0; i < 40; i++) {
+		double busyness = fdb_database_get_main_thread_busyness(db);
+		// make sure the busyness is between 0 and 1
+		CHECK(busyness >= 0);
+		CHECK(busyness <= 1);
+		if (busyness > 0) {
+			containsGreaterZero = true;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+	}
+
+	// assert that at least one of the busyness readings was greater than 0
+	CHECK(containsGreaterZero);
 }
 
 int main(int argc, char** argv) {
