@@ -286,7 +286,8 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					                               stopDifferentialDelay ? false : true,
 					                               self->backupPrefix,
 					                               StringRef(),
-					                               self->locked));
+					                               self->locked,
+					                               DatabaseBackupAgent::PreBackupAction::CLEAR));
 					wait(tr2->commit());
 					break;
 				} catch (Error& e) {
@@ -600,7 +601,8 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					                                       true,
 					                                       self->extraPrefix,
 					                                       StringRef(),
-					                                       self->locked);
+					                                       self->locked,
+					                                       DatabaseBackupAgent::PreBackupAction::CLEAR);
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)
 					    .error(e)
@@ -648,8 +650,14 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				}
 
 				try {
-					wait(restoreTool.submitBackup(
-					    cx, self->restoreTag, restoreRange, true, StringRef(), self->backupPrefix, self->locked));
+					wait(restoreTool.submitBackup(cx,
+					                              self->restoreTag,
+					                              restoreRange,
+					                              true,
+					                              StringRef(),
+					                              self->backupPrefix,
+					                              self->locked,
+					                              DatabaseBackupAgent::PreBackupAction::CLEAR));
 				} catch (Error& e) {
 					TraceEvent("BARW_DoBackupSubmitBackupException", randomID)
 					    .error(e)
