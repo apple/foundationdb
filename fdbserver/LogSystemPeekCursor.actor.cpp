@@ -285,7 +285,7 @@ ACTOR Future<Void> serverPeekParallelGetMore(ILogSystem::ServerPeekCursor* self,
 				// and thus we've likely just wasted 10min.
 				// timed_out() is sent by cleanupPeekTrackers as value PEEK_TRACKER_EXPIRATION_TIME
 				ASSERT_WE_THINK(e.code() == error_code_operation_obsolete ||
-				                SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME < 120);
+				                SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME < 10);
 				self->interfaceChanged = self->interf->onChange();
 				self->randomID = deterministicRandom()->randomUniqueID();
 				self->sequence = 0;
