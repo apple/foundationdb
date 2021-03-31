@@ -404,9 +404,16 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 					nextNominee = *availableLeaders.begin();
 				}
 
+				// If the current leader's priority became worse, we still need to notified all clients because now one
+				// of them might be better than the leader. In addition, even though FitnessRemote is better than
+				// FitnessUnknown, we still need to notified clients so that monitorLeaderRemotely has a change to switch
+				// from passively monitoring the leader to actively attempting to become the leader.
 				if (!currentNominee.present() || !nextNominee.present() ||
 				    !currentNominee.get().equalInternalId(nextNominee.get()) ||
-				    nextNominee.get() > currentNominee.get()) {
+				    nextNominee.get() > currentNominee.get() ||
+				    (currentNominee.get().getPriorityInfo().dcFitness ==
+				         ClusterControllerPriorityInfo::FitnessUnknown &&
+				     nextNominee.get().getPriorityInfo().dcFitness == ClusterControllerPriorityInfo::FitnessRemote)) {
 					TraceEvent("NominatingLeader")
 					    .detail("NextNominee", nextNominee.present() ? nextNominee.get().changeID : UID())
 					    .detail("CurrentNominee", currentNominee.present() ? currentNominee.get().changeID : UID())
