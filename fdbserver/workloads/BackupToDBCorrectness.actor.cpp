@@ -145,6 +145,29 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 	void getMetrics(vector<PerfMetric>& m) override {}
 
+	// Reads a series of key ranges and returns the number of matching records.
+	ACTOR static Future<int> readRanges(Database cx,
+	                                    Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                    StringRef removePrefix) {
+		loop {
+			state Transaction tr(cx);
+			try {
+				state std::vector<Future<Standalone<RangeResultRef>>> results;
+				for (auto& range : ranges) {
+					results.push_back(tr.getRange(range.removePrefix(removePrefix), CLIENT_KNOBS->TOO_MANY));
+				}
+				wait(waitForAll(results));
+				int numResults = 0;
+				for (auto result : results) {
+					numResults += result.get().size();
+				}
+				return numResults;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	ACTOR static Future<Void> diffRanges(Standalone<VectorRef<KeyRangeRef>> ranges,
 	                                     StringRef backupPrefix,
 	                                     Database src,
@@ -639,7 +662,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					}
 				}
 
-				Standalone<VectorRef<KeyRangeRef>> restoreRange;
+				state Standalone<VectorRef<KeyRangeRef>> restoreRange;
 
 				for (auto r : self->backupRanges) {
 					restoreRange.push_back_deep(
@@ -660,6 +683,11 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 				wait(success(restoreTool.waitBackup(cx, self->restoreTag)));
 				wait(restoreTool.unlockBackup(cx, self->restoreTag));
+
+				state int res1 = wait(readRanges(cx, restoreRange, self->backupPrefix));
+				wait(delay(5));
+				state int res2 = wait(readRanges(cx, restoreRange, self->backupPrefix));
+				ASSERT(res1 == res2);
 			}
 
 			if (extraBackup.isValid()) {

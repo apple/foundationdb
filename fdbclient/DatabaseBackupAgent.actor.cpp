@@ -1072,7 +1072,7 @@ struct CopyLogsTaskFunc : TaskFuncBase {
 
 			wait(waitForAll(addTaskVector) && taskBucket->finish(tr, task));
 		} else {
-			if (appliedVersion <= stopVersionData) {
+			if (appliedVersion < applyVersion) {
 				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 				wait(success(CopyLogsTaskFunc::addTask(
 				    tr, taskBucket, task, prevBeginVersion, beginVersion, TaskCompletionKey::signal(onDone))));
