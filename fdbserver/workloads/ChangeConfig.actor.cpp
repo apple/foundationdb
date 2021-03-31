@@ -60,10 +60,10 @@ struct ChangeConfigWorkload : TestWorkload {
 
 			wait(delay(5 * deterministicRandom()->random01()));
 			if (self->configMode.size()) {
-				if (g_simulator.usableRegions == 2) {
+				if (g_simulator.startingDisabledConfiguration != "") {
 					// It is not safe to allow automatic failover to a region which is not fully replicated,
 					// so wait for both regions to be fully replicated before enabling failover
-					wait(success(changeConfig(extraDB, g_simulator.disableRemote, true)));
+					wait(success(changeConfig(extraDB, g_simulator.startingDisabledConfiguration, true)));
 					TraceEvent("WaitForReplicasExtra");
 					wait(waitForFullReplication(extraDB));
 					TraceEvent("WaitForReplicasExtraEnd");
@@ -95,10 +95,10 @@ struct ChangeConfigWorkload : TestWorkload {
 		}
 
 		if (self->configMode.size()) {
-			// It is not safe to allow automatic failover to a region which is not fully replicated,
-			// so wait for both regions to be fully replicated before enabling failover
-			if (g_network->isSimulated() && g_simulator.usableRegions == 2) {
-				wait(success(changeConfig(cx, g_simulator.disableRemote, true)));
+			if (g_network->isSimulated() && g_simulator.startingDisabledConfiguration != "") {
+				// It is not safe to allow automatic failover to a region which is not fully replicated,
+				// so wait for both regions to be fully replicated before enabling failover
+				wait(success(changeConfig(cx, g_simulator.startingDisabledConfiguration, true)));
 				TraceEvent("WaitForReplicas");
 				wait(waitForFullReplication(cx));
 				TraceEvent("WaitForReplicasEnd");
