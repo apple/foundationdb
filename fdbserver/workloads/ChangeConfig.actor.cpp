@@ -51,6 +51,8 @@ struct ChangeConfigWorkload : TestWorkload {
 
 	virtual void getMetrics(vector<PerfMetric>& m) {}
 
+	// When simulated two clusters for DR tests, this actor sets the starting configuration
+	// for the extra cluster.
 	ACTOR Future<Void> extraDatabaseConfigure(ChangeConfigWorkload* self) {
 		if (g_network->isSimulated() && g_simulator.extraDB) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
@@ -58,10 +60,15 @@ struct ChangeConfigWorkload : TestWorkload {
 
 			wait(delay(5 * deterministicRandom()->random01()));
 			if (self->configMode.size()) {
+				if (g_simulator.usableRegions == 2) {
+					// It is not safe to allow automatic failover to a region which is not fully replicated,
+					// so wait for both regions to be fully replicated before enabling failover
+					wait(success(changeConfig(extraDB, g_simulator.disableRemote, true)));
+					TraceEvent("WaitForReplicasExtra");
+					wait(waitForFullReplication(extraDB));
+					TraceEvent("WaitForReplicasExtraEnd");
+				}
 				wait(success(changeConfig(extraDB, self->configMode, true)));
-				TraceEvent("WaitForReplicasExtra");
-				wait(waitForFullReplication(extraDB));
-				TraceEvent("WaitForReplicasExtraEnd");
 			}
 			if (self->networkAddresses.size()) {
 				if (self->networkAddresses == "auto")
@@ -75,6 +82,8 @@ struct ChangeConfigWorkload : TestWorkload {
 		return Void();
 	}
 
+	// Either changes the database configuration, or changes the coordinators based on the parameters
+	// of the workload.
 	ACTOR Future<Void> ChangeConfigClient(Database cx, ChangeConfigWorkload* self) {
 		wait(delay(self->minDelayBeforeChange +
 		           deterministicRandom()->random01() * (self->maxDelayBeforeChange - self->minDelayBeforeChange)));
@@ -86,10 +95,15 @@ struct ChangeConfigWorkload : TestWorkload {
 		}
 
 		if (self->configMode.size()) {
+			// It is not safe to allow automatic failover to a region which is not fully replicated,
+			// so wait for both regions to be fully replicated before enabling failover
+			if (g_network->isSimulated() && g_simulator.usableRegions == 2) {
+				wait(success(changeConfig(cx, g_simulator.disableRemote, true)));
+				TraceEvent("WaitForReplicas");
+				wait(waitForFullReplication(cx));
+				TraceEvent("WaitForReplicasEnd");
+			}
 			wait(success(changeConfig(cx, self->configMode, true)));
-			TraceEvent("WaitForReplicas");
-			wait(waitForFullReplication(cx));
-			TraceEvent("WaitForReplicasEnd");
 		}
 		if (self->networkAddresses.size()) {
 			if (self->networkAddresses == "auto")
