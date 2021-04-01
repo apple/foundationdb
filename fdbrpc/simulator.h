@@ -391,6 +391,7 @@ public:
 	std::string disablePrimary;
 	std::string disableRemote;
 	std::string originalRegions;
+	std::string startingDisabledConfiguration;
 	bool allowLogSetKills;
 	Optional<Standalone<StringRef>> remoteDcId;
 	bool hasSatelliteReplication;
