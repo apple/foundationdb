@@ -145,8 +145,8 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 	void getMetrics(vector<PerfMetric>& m) override {}
 
-	// Reads a series of key ranges and returns the number of matching records.
-	ACTOR static Future<int> readRanges(Database cx,
+	// Reads a series of key ranges and returns each range.
+	ACTOR static Future<std::vector<Standalone<RangeResultRef>>> readRanges(Database cx,
 	                                    Standalone<VectorRef<KeyRangeRef>> ranges,
 	                                    StringRef removePrefix) {
 		loop {
@@ -154,14 +154,15 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			try {
 				state std::vector<Future<Standalone<RangeResultRef>>> results;
 				for (auto& range : ranges) {
-					results.push_back(tr.getRange(range.removePrefix(removePrefix), CLIENT_KNOBS->TOO_MANY));
+					results.push_back(tr.getRange(range.removePrefix(removePrefix), 1000));
 				}
 				wait(waitForAll(results));
-				int numResults = 0;
+
+				std::vector<Standalone<RangeResultRef>> ret;
 				for (auto result : results) {
-					numResults += result.get().size();
+					ret.push_back(result.get());
 				}
-				return numResults;
+				return ret;
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
@@ -684,10 +685,19 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				wait(success(restoreTool.waitBackup(cx, self->restoreTag)));
 				wait(restoreTool.unlockBackup(cx, self->restoreTag));
 
-				state int res1 = wait(readRanges(cx, restoreRange, self->backupPrefix));
+				state std::vector<Standalone<RangeResultRef>> res1 = wait(readRanges(cx, restoreRange, self->backupPrefix));
 				wait(delay(5));
-				state int res2 = wait(readRanges(cx, restoreRange, self->backupPrefix));
-				ASSERT(res1 == res2);
+				state std::vector<Standalone<RangeResultRef>> res2 = wait(readRanges(cx, restoreRange, self->backupPrefix));
+				ASSERT(res1.size() == res2.size());
+				for (int i = 0; i < res1.size(); ++i) {
+					auto range1 = res1.at(i);
+					auto range2 = res2.at(i);
+					ASSERT(range1.size() == range2.size());
+
+					for (int j = 0; i < range1.size(); ++j) {
+						ASSERT(range1[i].key == range2[i].key && range1[i].value == range2[i].value);
+					}
+				}
 			}
 
 			if (extraBackup.isValid()) {
