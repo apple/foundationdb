@@ -268,30 +268,6 @@ public:
 		//TraceEvent("AsyncFileNonDurable_Destroy", id).detail("Filename", filename);
 	}
 
-	// The purpose of this actor is to simply keep a reference to a non-durable file until all pending modifications
-	// have completed. When they return, this actor will die and therefore decrement the reference count by 1.
-	ACTOR void waitOnOutstandingModifications(Reference<AsyncFileNonDurable> self) {
-		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
-		state TaskPriority currentTaskID = g_network->getCurrentTask();
-		state std::string filename = self->filename;
-
-		wait(g_simulator.onMachine(currentProcess));
-		Promise<bool> startSyncPromise = self->startSyncPromise;
-		self->startSyncPromise = Promise<bool>();
-		startSyncPromise.send(true);
-
-		std::vector<Future<Void>> outstandingModifications;
-
-		for (auto itr = self->pendingModifications.ranges().begin(); itr != self->pendingModifications.ranges().end();
-		     ++itr)
-			if (itr->value().isValid() && !itr->value().isReady())
-				outstandingModifications.push_back(itr->value());
-
-		// Ignore errors here so that all modifications can finish
-		wait(waitForAllReady(outstandingModifications));
-		wait(g_simulator.onProcess(currentProcess, currentTaskID));
-	}
-
 	void addref() override { ReferenceCounted<AsyncFileNonDurable>::addref(); }
 	void delref() override {
 		if (delref_no_destroy()) {
