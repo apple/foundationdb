@@ -20,6 +20,8 @@
 
 #ifndef FDBSERVER_IKEYVALUESTORE_H
 #define FDBSERVER_IKEYVALUESTORE_H
+#include "flow/FastRef.h"
+#include <variant>
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -37,6 +39,11 @@ public:
 	virtual void dispose() = 0; // permanently delete the data AND invalidate this interface
 	virtual void close() = 0; // invalidate this interface, but do not delete the data.  Outstanding operations may or
 	                          // may not take effect in the background.
+};
+
+struct IReadRangeResultWriter : public ReferenceCounted<IReadRangeResultWriter> {
+	virtual std::variant<bool, KeyRef> operator()(Optional<KeyValueRef>) = 0;
+	virtual Arena& getArena() = 0;
 };
 
 class IKeyValueStore : public IClosable {
@@ -60,6 +67,10 @@ public:
 	                                                     int rowLimit = 1 << 30,
 	                                                     int byteLimit = 1 << 30) = 0;
 
+	virtual Future<Void> readRange(KeyRangeRef keys, Reference<IReadRangeResultWriter> resultWriter, int rowLimit) {
+		return Void();
+	};
+
 	// To debug MEMORY_RADIXTREE type ONLY
 	// Returns (1) how many key & value pairs have been inserted (2) how many nodes have been created (3) how many
 	// key size is less than 12 bytes
@@ -71,6 +82,12 @@ public:
 	virtual void resyncLog() {}
 
 	virtual void enableSnapshot() {}
+
+	/*
+	    If the key value store implements readRange with the IReadRangeResultWriter parameter this function should
+	   return true
+	*/
+	virtual bool usesReadRangeResultWriter() { return false; }
 
 	/*
 	Concurrency contract

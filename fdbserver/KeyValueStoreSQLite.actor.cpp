@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
+#include <variant>
 #define SQLITE_THREADSAFE 0 // also in sqlite3.amalgamation.c!
 #include "flow/crc32c.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -1026,6 +1028,15 @@ struct RawCursor {
 			return advance();
 		}
 
+		void moveTo(KeyRef key, bool ignore_fragment_mode = false) {
+			int r = cur.moveTo(key, ignore_fragment_mode);
+			if (forward && r < 0)
+				cur.moveNext();
+			else if (!forward && r >= 0)
+				cur.movePrevious();
+			parse();
+		}
+
 		Optional<KeyValueRef> getNext() {
 			if (!peek().present())
 				return Optional<KeyValueRef>();
@@ -1145,6 +1156,103 @@ struct RawCursor {
 		}
 		return Optional<Value>();
 	}
+
+	Void readRangeResultWriter(KeyRangeRef keys, Reference<IReadRangeResultWriter> resultWriter, int rowLimit) {
+		if (db.fragment_values) {
+			if (rowLimit > 0) {
+				TraceEvent("Nim_here 1");
+				DefragmentingReader i(*this, resultWriter->getArena(), true);
+				i.moveTo(keys.begin);
+				Optional<KeyRef> nextKey = i.peek();
+				while (nextKey.present() && nextKey.get() < keys.end) {
+					Optional<KeyValueRef> kv = i.getNext();
+					std::variant<bool, KeyRef> res = resultWriter->operator()(kv);
+					if (res.index() == 0) { // returned bool
+						auto f = std::get<bool>(res);
+						if (!f) { // we hit the limit so return
+							return Void();
+						}
+					} else { // returned KeyRef
+						i.moveTo(std::get<KeyRef>(res));
+					}
+					nextKey = i.peek();
+				}
+			} else {
+				TraceEvent("Nim_here 2");
+				int r = moveTo(keys.end);
+				if (r >= 0)
+					movePrevious();
+				DefragmentingReader i(*this, resultWriter->getArena(), false);
+				Optional<KeyRef> nextKey = i.peek();
+				while (nextKey.present() && nextKey.get() >= keys.begin) {
+					Optional<KeyValueRef> kv = i.getNext();
+					std::variant<bool, KeyRef> res = resultWriter->operator()(kv);
+					if (res.index() == 0) { // returned bool
+						auto f = std::get<bool>(res);
+						if (!f) { // we hit the limit so return
+							return Void();
+						}
+					} else { // returned KeyRef
+						r = moveTo(std::get<KeyRef>(res));
+						if (r >= 0)
+							movePrevious();
+					}
+					nextKey = i.peek();
+				}
+			}
+		} else {
+			if (rowLimit > 0) {
+				TraceEvent("Nim_here 3");
+				int r = moveTo(keys.begin);
+				if (r < 0)
+					moveNext();
+				while (this->valid) {
+					KeyValueRef kv = decodeKV(getEncodedRow(resultWriter->getArena()));
+					if (kv.key >= keys.end)
+						break;
+					std::variant<bool, KeyRef> res = resultWriter->operator()(kv);
+					if (res.index() == 0) {
+						auto f = std::get<bool>(res);
+						if (!f) { // we hit the limit so return
+							return Void();
+						} else {
+							moveNext();
+						}
+					} else { // returned KeyRef
+						r = moveTo(std::get<KeyRef>(res));
+						if (r < 0)
+							moveNext();
+					}
+				}
+			} else {
+				TraceEvent("Nim_here 4");
+				int r = moveTo(keys.end);
+				if (r >= 0)
+					movePrevious();
+				while (this->valid) {
+					KeyValueRef kv = decodeKV(getEncodedRow(resultWriter->getArena()));
+					if (kv.key < keys.begin)
+						break;
+					std::variant<bool, KeyRef> res = resultWriter->operator()(kv);
+					if (res.index() == 0) {
+						auto f = std::get<bool>(res);
+						if (!f) { // we hit the limit so return
+							return Void();
+						} else {
+							movePrevious();
+						}
+					} else { // returned KeyRef
+						r = moveTo(std::get<KeyRef>(res));
+						if (r >= 0)
+							movePrevious();
+					}
+				}
+			}
+		}
+		resultWriter->operator()(Optional<KeyValueRef>());
+		return Void();
+	}
+
 	Standalone<RangeResultRef> getRange(KeyRangeRef keys, int rowLimit, int byteLimit) {
 		Standalone<RangeResultRef> result;
 		int accumulatedBytes = 0;
@@ -1582,6 +1690,8 @@ public:
 	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys,
 	                                             int rowLimit = 1 << 30,
 	                                             int byteLimit = 1 << 30) override;
+	bool usesReadRangeResultWriter() override;
+	Future<Void> readRange(KeyRangeRef keys, Reference<IReadRangeResultWriter> resultWriter, int rowLimit) override;
 
 	KeyValueStoreSQLite(std::string const& filename,
 	                    UID logID,
@@ -1704,6 +1814,21 @@ private:
 		};
 		void action(ReadRangeAction& rr) {
 			rr.result.send(getCursor()->get().getRange(rr.keys, rr.rowLimit, rr.byteLimit));
+			++counter;
+		}
+
+		struct ReadRangeResultWriterAction : TypedAction<Reader, ReadRangeResultWriterAction>,
+		                                     FastAllocated<ReadRangeResultWriterAction> {
+			KeyRange keys;
+			Reference<IReadRangeResultWriter> resultWriter;
+			int rowLimit;
+			ThreadReturnPromise<Void> result;
+			ReadRangeResultWriterAction(KeyRange keys, Reference<IReadRangeResultWriter> resultWriter, int rowLimit)
+			  : keys(keys), resultWriter(resultWriter), rowLimit(rowLimit) {}
+			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
+		};
+		void action(ReadRangeResultWriterAction& rr) {
+			rr.result.send(getCursor()->get().readRangeResultWriter(rr.keys, rr.resultWriter, rr.rowLimit));
 			++counter;
 		}
 	};
@@ -2214,6 +2339,21 @@ Future<Standalone<RangeResultRef>> KeyValueStoreSQLite::readRange(KeyRangeRef ke
 	readThreads->post(p);
 	return f;
 }
+
+bool KeyValueStoreSQLite::usesReadRangeResultWriter() {
+	return true;
+}
+
+Future<Void> KeyValueStoreSQLite::readRange(KeyRangeRef keys,
+                                            Reference<IReadRangeResultWriter> resultWriter,
+                                            int rowLimit) {
+	++readsRequested;
+	auto p = new Reader::ReadRangeResultWriterAction(keys, resultWriter, rowLimit);
+	auto f = p->result.getFuture();
+	readThreads->post(p);
+	return f;
+}
+
 Future<KeyValueStoreSQLite::SpringCleaningWorkPerformed> KeyValueStoreSQLite::doClean() {
 	++writesRequested;
 	auto p = new Writer::SpringCleaningAction;

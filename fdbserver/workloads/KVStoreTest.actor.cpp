@@ -20,9 +20,13 @@
 
 #include <ctime>
 #include <cinttypes>
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
+#include "flow/Arena.h"
+#include "flow/FastRef.h"
+#include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 extern IKeyValueStore* makeDummyKeyValueStore();
@@ -97,6 +101,65 @@ private:
 	T sum;
 	T sumSQ;
 	uint64_t N;
+};
+
+struct PassThroughResultWriter : public IReadRangeResultWriter {
+	// Result writer used for testing the new rangeRead
+	int rowLimit, byteLimit;
+	Standalone<RangeResultRef> result;
+	PassThroughResultWriter(int rowLimit, int byteLimit) : rowLimit(rowLimit), byteLimit(byteLimit) {
+		if (this->rowLimit < 0)
+			this->rowLimit = -this->rowLimit;
+	}
+
+	std::variant<bool, KeyRef> operator()(Optional<KeyValueRef> kv) override {
+		// Pass through all keys given that we have not exceeded our limits
+		if (rowLimit <= 0 || byteLimit <= 0)
+			return false;
+		if (!kv.present())
+			return false;
+		result.push_back(result.arena(), kv.get());
+		rowLimit--;
+		byteLimit -= (sizeof(KeyValueRef) + kv.get().expectedSize());
+		return true;
+	}
+
+	Arena& getArena() override { return result.arena(); }
+};
+
+struct ClearRangeResultWriter : public IReadRangeResultWriter {
+	int rowLimit, byteLimit;
+	Standalone<RangeResultRef> result;
+	Key clearStart, clearEnd;
+
+	ClearRangeResultWriter(int rowLimit, int byteLimit) : rowLimit(rowLimit), byteLimit(byteLimit) {
+		if (this->rowLimit < 0)
+			this->rowLimit = -this->rowLimit;
+	}
+
+	void setClearRange(Key clearStart, Key clearEnd) {
+		this->clearStart = clearStart;
+		this->clearEnd = clearEnd;
+	}
+
+	std::variant<bool, KeyRef> operator()(Optional<KeyValueRef> kv) override {
+		if (rowLimit <= 0 || byteLimit <= 0)
+			return false;
+		if (!kv.present())
+			return false;
+		// TraceEvent("Nim_enter").detail("key", kv.get().key);
+		if (clearStart.toString() != "" && clearEnd.toString() != "" && kv.get().key >= clearStart &&
+		    kv.get().key < clearEnd) {
+			// TraceEvent("Nim_clearEnd").detail("end", clearEnd);
+			return clearEnd;
+		}
+		rowLimit--;
+		result.push_back(result.arena(), kv.get());
+		byteLimit -= (sizeof(KeyValueRef) + kv.get().expectedSize());
+		return true;
+	}
+
+	Arena& getArena() override { return result.arena(); }
 };
 
 struct KVTest {
@@ -199,7 +262,7 @@ struct KVStoreTestWorkload : TestWorkload {
 	double testDuration, operationsPerSecond;
 	double commitFraction, setFraction;
 	int nodeCount, keyBytes, valueBytes;
-	bool doSetup, doClear, doCount;
+	bool doSetup, doClear, doCount, doResultWriterRangeRead;
 	std::string filename;
 	PerfIntCounter reads, sets, commits;
 	TestHistogram<float> readLatency, commitLatency;
@@ -219,6 +282,7 @@ struct KVStoreTestWorkload : TestWorkload {
 		doSetup = getOption(options, LiteralStringRef("setup"), false);
 		doClear = getOption(options, LiteralStringRef("clear"), false);
 		doCount = getOption(options, LiteralStringRef("count"), false);
+		doResultWriterRangeRead = getOption(options, LiteralStringRef("resultWriterRangeRead"), false);
 		filename = getOption(options, LiteralStringRef("filename"), Value()).toString();
 		saturation = getOption(options, LiteralStringRef("saturation"), false);
 		storeType = getOption(options, LiteralStringRef("storeType"), LiteralStringRef("ssd")).toString();
@@ -251,6 +315,103 @@ struct KVStoreTestWorkload : TestWorkload {
 };
 
 WorkloadFactory<KVStoreTestWorkload> KVStoreTestWorkloadFactory("KVStoreTest");
+
+ACTOR Future<Void> testRangeReadClearRanges(KVStoreTestWorkload* workload, KVTest* ptest) {
+	state KVTest& test = *ptest;
+	state Key key;
+	state int byteLimt = 1 << 30;
+	state int rowLimit = 1000;
+	state int count = 0;
+
+	while (true) {
+		state KeyRangeRef range = KeyRangeRef(key, LiteralStringRef("\xff\xff\xff\xff"));
+		state Standalone<RangeResultRef> kv = wait(test.store->readRange(range, rowLimit, byteLimt));
+		state Reference<ClearRangeResultWriter> resultWriter =
+		    makeReference<ClearRangeResultWriter>(rowLimit, byteLimt);
+
+		if (kv.size() < rowLimit)
+			break;
+		int rand1 = deterministicRandom()->randomInt(0, kv.size()), rand2 = deterministicRandom()->randomInt(0, kv.size());
+		state int clearStartIdx = std::min(rand1, rand2);
+		state int clearEndIdx = std::max(rand1, rand2);
+		resultWriter->setClearRange(kv[clearStartIdx].key, kv[clearEndIdx].key);
+		wait(test.store->readRange(KeyRangeRef(kv[0].key, keyAfter(kv[kv.size() - 1].key)), resultWriter, rowLimit));
+		// TraceEvent("Nim_here clear").detail("size", resultWriter->result.size()).detail("start", clearStartIdx).detail("end", clearEndIdx).detail("sKey", kv[0].key);
+		ASSERT(resultWriter->result.size() == kv.size() - (clearEndIdx - clearStartIdx));
+		int curIdx = 0;
+		for (int i = 0; i < kv.size(); i++) {
+			if (i < clearStartIdx || i >= clearEndIdx) {
+				ASSERT(kv[i].key == resultWriter->result[curIdx].key);
+				ASSERT(kv[i].value == resultWriter->result[curIdx].value);
+				curIdx++;
+			}
+			// TraceEvent("Nim_print").detail("key", kv[i].key);
+		}
+		count += resultWriter->result.size();
+		// TraceEvent("Nim_here").detail("size", kv.size());
+		key = keyAfter(kv[kv.size() - 1].key);
+	}
+	TraceEvent("Nim_a_KVStoreRageReadClearCount").detail("Count", count);
+	return Void();
+}
+
+ACTOR Future<Void> testRangeReadResultWriterPassThrough(KVStoreTestWorkload* workload, KVTest* ptest) {
+	state KVTest& test = *ptest;
+	state Key key = LiteralStringRef("\xff\xff\xff\xff");
+	state int byteLimt = 1 << 30;
+	state int rowLimit = -1000;
+	state int count = 0;
+
+	// get the range in reverse alph order
+	while (true) {
+		Key start;
+		state KeyRangeRef range = KeyRangeRef(start, key);
+		// result of range read using exisitng API
+		state Standalone<RangeResultRef> kv = wait(test.store->readRange(range, rowLimit, byteLimt));
+		state Reference<PassThroughResultWriter> resultWriter =
+		    makeReference<PassThroughResultWriter>(rowLimit, byteLimt);
+		// result of range read using the resultWriter interface
+		wait(test.store->readRange(range, resultWriter, rowLimit));
+
+		// make sure the result from both API's are the same
+		ASSERT(resultWriter->result.size() == kv.size());
+		for (int i = 0; i < kv.size(); i++) {
+			ASSERT(kv[i].key == resultWriter->result[i].key);
+			ASSERT(kv[i].value == resultWriter->result[i].value);
+		}
+		count += resultWriter->result.size();
+		if (kv.size() < -rowLimit)
+			break;
+		key = kv[kv.size() - 1].key;
+	}
+	TraceEvent("Nim_a_KVStoreRageReadCount").detail("Count", count);
+	ASSERT(count > 0);
+
+	// get the range in alph order
+	count = 0;
+	rowLimit = 1000;
+	state Key start;
+	while (true) {
+		state KeyRangeRef range2 = KeyRangeRef(start, LiteralStringRef("\xff\xff\xff\xff"));
+		state Standalone<RangeResultRef> kv2 = wait(test.store->readRange(range2, rowLimit, byteLimt));
+		state Reference<PassThroughResultWriter> resultWriter2 =
+		    makeReference<PassThroughResultWriter>(rowLimit, byteLimt);
+		wait(test.store->readRange(range2, resultWriter2, rowLimit));
+		ASSERT(resultWriter2->result.size() == kv2.size());
+		for (int i = 0; i < kv2.size(); i++) {
+			ASSERT(kv2[i].key == resultWriter2->result[i].key);
+			ASSERT(kv2[i].value == resultWriter2->result[i].value);
+		}
+		count += resultWriter2->result.size();
+		if (kv2.size() < rowLimit)
+			break;
+		start = keyAfter(kv2[kv2.size() - 1].key);
+	}
+	TraceEvent("Nim_a_KVStoreRageReadCount2").detail("Count", count);
+	ASSERT(count > 0);
+
+	return Void();
+}
 
 ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest) {
 	state KVTest& test = *ptest;
@@ -300,6 +461,11 @@ ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest)
 		wait(lastCommit);
 		workload->setupTook = timer() - setupBegin;
 		TraceEvent("KVStoreSetup").detail("Count", workload->nodeCount).detail("Took", workload->setupTook);
+	}
+
+	if (workload->doResultWriterRangeRead && test.store->usesReadRangeResultWriter()) {
+		wait(testRangeReadResultWriterPassThrough(workload, ptest));
+		wait(testRangeReadClearRanges(workload, ptest));
 	}
 
 	state double t = now();

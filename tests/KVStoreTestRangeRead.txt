@@ -1,0 +1,16 @@
+testTitle=RangeRead
+useDB=false
+
+    testName=KVStoreTest
+    testDuration=10.0
+    saturation=false
+    commitFraction=0
+    setFraction=0
+    nodeCount=100000
+    keyBytes=16
+    valueBytes=96
+    filename=bttest
+    setup=true
+    clear=true
+    count=false
+    resultWriterRangeRead=true
