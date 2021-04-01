@@ -1028,6 +1028,7 @@ struct RawCursor {
 			return advance();
 		}
 
+		// Moves the cursor to a designated key and adjusts based on the read direction
 		void moveTo(KeyRef key, bool ignore_fragment_mode = false) {
 			int r = cur.moveTo(key, ignore_fragment_mode);
 			if (forward && r < 0)
@@ -1158,8 +1159,9 @@ struct RawCursor {
 	}
 
 	Void readRangeResultWriter(KeyRangeRef keys, Reference<IReadRangeResultWriter> resultWriter, int rowLimit) {
+		// Read range implementation using a result writer
 		if (db.fragment_values) {
-			if (rowLimit > 0) {
+			if (rowLimit > 0) { // return results in asc order
 				DefragmentingReader i(*this, resultWriter->getArena(), true);
 				i.moveTo(keys.begin);
 				Optional<KeyRef> nextKey = i.peek();
@@ -1171,12 +1173,12 @@ struct RawCursor {
 						if (!f) { // we hit the limit so return
 							return Void();
 						}
-					} else { // returned KeyRef
+					} else { // returned KeyRef for end of clear range
 						i.moveTo(std::get<KeyRef>(res));
 					}
 					nextKey = i.peek();
 				}
-			} else {
+			} else { // return results in desc order
 				DefragmentingReader i(*this, resultWriter->getArena(), false);
 				i.moveTo(keys.end);
 				Optional<KeyRef> nextKey = i.peek();
@@ -1188,7 +1190,7 @@ struct RawCursor {
 						if (!f) { // we hit the limit so return
 							return Void();
 						}
-					} else { // returned KeyRef
+					} else { // returned KeyRef to begining of clear range
 						i.moveTo(std::get<KeyRef>(res));
 					}
 					nextKey = i.peek();
@@ -1211,7 +1213,7 @@ struct RawCursor {
 						} else {
 							moveNext();
 						}
-					} else { // returned KeyRef
+					} else { // returned KeyRef for end of clear range
 						r = moveTo(std::get<KeyRef>(res));
 						if (r < 0)
 							moveNext();
@@ -1233,7 +1235,7 @@ struct RawCursor {
 						} else {
 							movePrevious();
 						}
-					} else { // returned KeyRef
+					} else { // returned KeyRef for beginning of clear range
 						r = moveTo(std::get<KeyRef>(res));
 						if (r >= 0)
 							movePrevious();
@@ -1811,6 +1813,7 @@ private:
 
 		struct ReadRangeResultWriterAction : TypedAction<Reader, ReadRangeResultWriterAction>,
 		                                     FastAllocated<ReadRangeResultWriterAction> {
+			// Wrapper around the call to the SQLite cursor readRange implementation
 			KeyRange keys;
 			Reference<IReadRangeResultWriter> resultWriter;
 			int rowLimit;
@@ -2339,6 +2342,7 @@ bool KeyValueStoreSQLite::usesReadRangeResultWriter() {
 Future<Void> KeyValueStoreSQLite::readRange(KeyRangeRef keys,
                                             Reference<IReadRangeResultWriter> resultWriter,
                                             int rowLimit) {
+	// Read range implementation which utilizes a result writer
 	++readsRequested;
 	auto p = new Reader::ReadRangeResultWriterAction(keys, resultWriter, rowLimit);
 	auto f = p->result.getFuture();

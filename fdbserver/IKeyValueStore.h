@@ -42,7 +42,18 @@ public:
 };
 
 struct IReadRangeResultWriter : public ReferenceCounted<IReadRangeResultWriter> {
-	virtual std::variant<bool, KeyRef> operator()(Optional<KeyValueRef>) = 0;
+	// This interface is used to define new read range implementations for KV stores
+	// Read range results should be managed by the client implementing this interface
+
+	/*
+	  - :param: kv is a key value pair which is passed by the storage engine during each iteration of the range read
+	  - :return: a boolean where false indicates to stop scanning the range in the KV store and true indicates finding
+	  the next KV pair in the range
+	  - :return: KeyRef is a key which the KV store will skip to (useful for skipping clear ranges)
+	*/
+	virtual std::variant<bool, KeyRef> operator()(Optional<KeyValueRef> kv) = 0;
+
+	// Returns the arena which allocates the memory for the results of the range read
 	virtual Arena& getArena() = 0;
 };
 
@@ -67,6 +78,7 @@ public:
 	                                                     int rowLimit = 1 << 30,
 	                                                     int byteLimit = 1 << 30) = 0;
 
+	// Range read implementation which utilizes a ResultWriter interface (defined above)
 	virtual Future<Void> readRange(KeyRangeRef keys, Reference<IReadRangeResultWriter> resultWriter, int rowLimit) {
 		return Void();
 	};
