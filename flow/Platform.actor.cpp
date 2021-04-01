@@ -3681,6 +3681,14 @@ void* sampleThread(void* arg) {
 
 		// TODO: Copy actor lineage of currently running actor
 		// Read currentLineage
+		auto actorLineage = currentLineageThreadSafe.get();
+		printf("Currently running actor lineage (%p):\n", actorLineage.getPtr());
+		auto stack = actorLineage->stack(&StackLineage::actorName);
+		while (!stack.empty()) {
+			printf("%s ", stack.top());
+			stack.pop();
+		}
+		printf("\n");
 
 		auto diskAlps = IAsyncFileSystem::filesystem()->getActorLineageSet().copy();
 		printf("Disk ALPs: %d\n", diskAlps.size());
