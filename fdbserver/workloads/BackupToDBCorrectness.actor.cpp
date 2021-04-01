@@ -694,8 +694,8 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					auto range2 = res2.at(i);
 					ASSERT(range1.size() == range2.size());
 
-					for (int j = 0; i < range1.size(); ++j) {
-						ASSERT(range1[i].key == range2[i].key && range1[i].value == range2[i].value);
+					for (int j = 0; j < range1.size(); ++j) {
+						ASSERT(range1[j].key == range2[j].key && range1[j].value == range2[j].value);
 					}
 				}
 			}
