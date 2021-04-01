@@ -131,10 +131,13 @@ struct ClearRangeResultWriter : public IReadRangeResultWriter {
 	int rowLimit, byteLimit;
 	Standalone<RangeResultRef> result;
 	Key clearStart, clearEnd;
+	bool forward = true;
 
 	ClearRangeResultWriter(int rowLimit, int byteLimit) : rowLimit(rowLimit), byteLimit(byteLimit) {
-		if (this->rowLimit < 0)
+		if (this->rowLimit < 0) {
+			forward = false;
 			this->rowLimit = -this->rowLimit;
+		}
 	}
 
 	void setClearRange(Key clearStart, Key clearEnd) {
@@ -147,11 +150,12 @@ struct ClearRangeResultWriter : public IReadRangeResultWriter {
 			return false;
 		if (!kv.present())
 			return false;
-		// TraceEvent("Nim_enter").detail("key", kv.get().key);
 		if (clearStart.toString() != "" && clearEnd.toString() != "" && kv.get().key >= clearStart &&
-		    kv.get().key < clearEnd) {
-			// TraceEvent("Nim_clearEnd").detail("end", clearEnd);
+		    kv.get().key < clearEnd && forward) {
 			return clearEnd;
+		} else if (clearStart.toString() != "" && clearEnd.toString() != "" && kv.get().key >= clearStart &&
+		           kv.get().key < clearEnd && !forward) {
+			return clearStart;
 		}
 		rowLimit--;
 		result.push_back(result.arena(), kv.get());
@@ -329,14 +333,14 @@ ACTOR Future<Void> testRangeReadClearRanges(KVStoreTestWorkload* workload, KVTes
 		state Reference<ClearRangeResultWriter> resultWriter =
 		    makeReference<ClearRangeResultWriter>(rowLimit, byteLimt);
 
-		if (kv.size() < rowLimit)
+		if (kv.size() == 0)
 			break;
-		int rand1 = deterministicRandom()->randomInt(0, kv.size()), rand2 = deterministicRandom()->randomInt(0, kv.size());
+		int rand1 = deterministicRandom()->randomInt(0, kv.size()),
+		    rand2 = deterministicRandom()->randomInt(0, kv.size());
 		state int clearStartIdx = std::min(rand1, rand2);
 		state int clearEndIdx = std::max(rand1, rand2);
 		resultWriter->setClearRange(kv[clearStartIdx].key, kv[clearEndIdx].key);
 		wait(test.store->readRange(KeyRangeRef(kv[0].key, keyAfter(kv[kv.size() - 1].key)), resultWriter, rowLimit));
-		// TraceEvent("Nim_here clear").detail("size", resultWriter->result.size()).detail("start", clearStartIdx).detail("end", clearEndIdx).detail("sKey", kv[0].key);
 		ASSERT(resultWriter->result.size() == kv.size() - (clearEndIdx - clearStartIdx));
 		int curIdx = 0;
 		for (int i = 0; i < kv.size(); i++) {
@@ -345,13 +349,52 @@ ACTOR Future<Void> testRangeReadClearRanges(KVStoreTestWorkload* workload, KVTes
 				ASSERT(kv[i].value == resultWriter->result[curIdx].value);
 				curIdx++;
 			}
-			// TraceEvent("Nim_print").detail("key", kv[i].key);
 		}
+		ASSERT(curIdx == resultWriter->result.size());
 		count += resultWriter->result.size();
-		// TraceEvent("Nim_here").detail("size", kv.size());
+		if (kv.size() < rowLimit)
+			break;
 		key = keyAfter(kv[kv.size() - 1].key);
 	}
 	TraceEvent("Nim_a_KVStoreRageReadClearCount").detail("Count", count);
+
+	rowLimit = -1000;
+	key = LiteralStringRef("\xff\xff\xff\xff");
+	count = 0;
+
+	while (true) {
+		Key start;
+		state KeyRangeRef range2 = KeyRangeRef(start, key);
+		state Standalone<RangeResultRef> kv2 = wait(test.store->readRange(range2, rowLimit, byteLimt));
+		state Reference<ClearRangeResultWriter> resultWriter2 =
+		    makeReference<ClearRangeResultWriter>(rowLimit, byteLimt);
+
+		if (kv2.size() == 0)
+			break;
+		int rand1 = deterministicRandom()->randomInt(0, kv2.size()),
+		    rand2 = deterministicRandom()->randomInt(0, kv2.size());
+		state int clearStartIdx2 = std::min(rand1, rand2);
+		state int clearEndIdx2 = std::max(rand1, rand2);
+		resultWriter2->setClearRange(kv2[clearEndIdx2].key, kv2[clearStartIdx2].key);
+		wait(
+		    test.store->readRange(KeyRangeRef(kv2[kv2.size() - 1].key, keyAfter(kv2[0].key)), resultWriter2, rowLimit));
+		int curIdx = 0;
+		ASSERT(resultWriter2->result.size() == kv2.size() - (clearEndIdx2 - clearStartIdx2));
+		for (int i = 0; i < kv2.size(); i++) {
+			if (i <= clearStartIdx2 || i > clearEndIdx2 ) {
+				ASSERT(kv2[i].key == resultWriter2->result[curIdx].key);
+				ASSERT(kv2[i].value == resultWriter2->result[curIdx].value);
+				curIdx++;
+			}
+		}
+		ASSERT(curIdx == resultWriter2->result.size());
+		count += resultWriter2->result.size();
+		if (kv2.size() < -rowLimit)
+			break;
+		key = kv2[kv2.size() - 1].key;
+	}
+	TraceEvent("Nim_a_KVStoreRageReadClearCount2").detail("Count", count);
+
 	return Void();
 }
 
@@ -385,7 +428,7 @@ ACTOR Future<Void> testRangeReadResultWriterPassThrough(KVStoreTestWorkload* wor
 		key = kv[kv.size() - 1].key;
 	}
 	TraceEvent("Nim_a_KVStoreRageReadCount").detail("Count", count);
-	ASSERT(count > 0);
+	ASSERT(count == 100000);
 
 	// get the range in alph order
 	count = 0;
@@ -408,7 +451,7 @@ ACTOR Future<Void> testRangeReadResultWriterPassThrough(KVStoreTestWorkload* wor
 		start = keyAfter(kv2[kv2.size() - 1].key);
 	}
 	TraceEvent("Nim_a_KVStoreRageReadCount2").detail("Count", count);
-	ASSERT(count > 0);
+	ASSERT(count == 100000);
 
 	return Void();
 }

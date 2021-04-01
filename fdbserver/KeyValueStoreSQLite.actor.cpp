@@ -1160,7 +1160,6 @@ struct RawCursor {
 	Void readRangeResultWriter(KeyRangeRef keys, Reference<IReadRangeResultWriter> resultWriter, int rowLimit) {
 		if (db.fragment_values) {
 			if (rowLimit > 0) {
-				TraceEvent("Nim_here 1");
 				DefragmentingReader i(*this, resultWriter->getArena(), true);
 				i.moveTo(keys.begin);
 				Optional<KeyRef> nextKey = i.peek();
@@ -1178,11 +1177,8 @@ struct RawCursor {
 					nextKey = i.peek();
 				}
 			} else {
-				TraceEvent("Nim_here 2");
-				int r = moveTo(keys.end);
-				if (r >= 0)
-					movePrevious();
 				DefragmentingReader i(*this, resultWriter->getArena(), false);
+				i.moveTo(keys.end);
 				Optional<KeyRef> nextKey = i.peek();
 				while (nextKey.present() && nextKey.get() >= keys.begin) {
 					Optional<KeyValueRef> kv = i.getNext();
@@ -1193,16 +1189,13 @@ struct RawCursor {
 							return Void();
 						}
 					} else { // returned KeyRef
-						r = moveTo(std::get<KeyRef>(res));
-						if (r >= 0)
-							movePrevious();
+						i.moveTo(std::get<KeyRef>(res));
 					}
 					nextKey = i.peek();
 				}
 			}
 		} else {
 			if (rowLimit > 0) {
-				TraceEvent("Nim_here 3");
 				int r = moveTo(keys.begin);
 				if (r < 0)
 					moveNext();
@@ -1225,7 +1218,6 @@ struct RawCursor {
 					}
 				}
 			} else {
-				TraceEvent("Nim_here 4");
 				int r = moveTo(keys.end);
 				if (r >= 0)
 					movePrevious();
