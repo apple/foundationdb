@@ -38,7 +38,8 @@ extern bool g_crashOnError;
 namespace file_converter {
 
 void printDecodeUsage() {
-	std::cout << "\n"
+	std::cout << "Decoder for FoundationDB backup mutation logs.\n"
+	             "Usage: fdbdecode    [OPTIONS]\n"
 	             "  -r, --container   Container URL.\n"
 	             "  -i, --input FILE  Log file filter, only matched files are decoded.\n"
 	             "  --log             Enables trace file logging for the CLI session.\n"
@@ -103,7 +104,6 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 		int optId = args->OptionId();
 		switch (optId) {
 		case OPT_HELP:
-			printDecodeUsage();
 			return FDB_EXIT_ERROR;
 
 		case OPT_CONTAINER:
