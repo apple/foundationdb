@@ -102,31 +102,6 @@ private:
 	T sumSQ;
 	uint64_t N;
 };
-
-struct PassThroughResultWriter : public IReadRangeResultWriter {
-	// Result writer used for testing the new rangeRead
-	int rowLimit, byteLimit;
-	Standalone<RangeResultRef> result;
-	PassThroughResultWriter(int rowLimit, int byteLimit) : rowLimit(rowLimit), byteLimit(byteLimit) {
-		if (this->rowLimit < 0)
-			this->rowLimit = -this->rowLimit;
-	}
-
-	std::variant<bool, KeyRef> operator()(Optional<KeyValueRef> kv) override {
-		// Pass through all keys given that we have not exceeded our limits
-		if (rowLimit <= 0 || byteLimit <= 0)
-			return false;
-		if (!kv.present())
-			return false;
-		result.push_back(result.arena(), kv.get());
-		rowLimit--;
-		byteLimit -= (sizeof(KeyValueRef) + kv.get().expectedSize());
-		return true;
-	}
-
-	Arena& getArena() override { return result.arena(); }
-};
-
 struct ClearRangeResultWriter : public IReadRangeResultWriter {
 	// Result writer used for testing range reads with clear ranges
 	int rowLimit, byteLimit;
@@ -146,9 +121,7 @@ struct ClearRangeResultWriter : public IReadRangeResultWriter {
 		this->clearEnd = clearEnd;
 	}
 
-	void clearResults() {
-		while(result.size() > 0) result.pop_back();
-	}
+	void clearResults() { result = Standalone<RangeResultRef>(); }
 
 	std::variant<bool, KeyRef> operator()(Optional<KeyValueRef> kv) override {
 		/*
@@ -377,7 +350,7 @@ ACTOR Future<Void> testRangeReadClearRanges(KVStoreTestWorkload* workload, KVTes
 			break;
 		key = keyAfter(kv[kv.size() - 1].key);
 	}
-	TraceEvent("KVStoreRageReadClearCount").detail("Count", count);
+	TraceEvent("KVStoreRangeReadClearCount").detail("Count", count);
 
 	rowLimit = -1000;
 	key = LiteralStringRef("\xff\xff\xff\xff");
@@ -415,7 +388,7 @@ ACTOR Future<Void> testRangeReadClearRanges(KVStoreTestWorkload* workload, KVTes
 			break;
 		key = kv2[kv2.size() - 1].key;
 	}
-	TraceEvent("KVStoreRageReadClearCountRev").detail("Count", count);
+	TraceEvent("KVStoreRangeReadClearCountRev").detail("Count", count);
 
 	return Void();
 }
@@ -483,8 +456,8 @@ ACTOR Future<Void> testRangeReadResultWriterPassThrough(KVStoreTestWorkload* wor
 		state KeyRangeRef range = KeyRangeRef(start, key);
 		// result of range read using exisitng API
 		state Standalone<RangeResultRef> kv = wait(test.store->readRange(range, rowLimit, byteLimt));
-		state Reference<PassThroughResultWriter> resultWriter =
-		    makeReference<PassThroughResultWriter>(rowLimit, byteLimt);
+		state Reference<ClearRangeResultWriter> resultWriter =
+		    makeReference<ClearRangeResultWriter>(rowLimit, byteLimt);
 		// result of range read using the resultWriter interface
 		wait(test.store->readRange(range, resultWriter, rowLimit));
 
@@ -499,7 +472,7 @@ ACTOR Future<Void> testRangeReadResultWriterPassThrough(KVStoreTestWorkload* wor
 			break;
 		key = kv[kv.size() - 1].key;
 	}
-	TraceEvent("KVStoreRageReadCount").detail("Count", count);
+	TraceEvent("KVStoreRangeReadCount").detail("Count", count);
 	ASSERT(count == 100000);
 
 	// same logic as above except we reverse the direction of the range read results (asc order)
@@ -509,8 +482,8 @@ ACTOR Future<Void> testRangeReadResultWriterPassThrough(KVStoreTestWorkload* wor
 	while (true) {
 		state KeyRangeRef range2 = KeyRangeRef(start, LiteralStringRef("\xff\xff\xff\xff"));
 		state Standalone<RangeResultRef> kv2 = wait(test.store->readRange(range2, rowLimit, byteLimt));
-		state Reference<PassThroughResultWriter> resultWriter2 =
-		    makeReference<PassThroughResultWriter>(rowLimit, byteLimt);
+		state Reference<ClearRangeResultWriter> resultWriter2 =
+		    makeReference<ClearRangeResultWriter>(rowLimit, byteLimt);
 		wait(test.store->readRange(range2, resultWriter2, rowLimit));
 		ASSERT(resultWriter2->result.size() == kv2.size());
 		for (int i = 0; i < kv2.size(); i++) {
@@ -522,7 +495,7 @@ ACTOR Future<Void> testRangeReadResultWriterPassThrough(KVStoreTestWorkload* wor
 			break;
 		start = keyAfter(kv2[kv2.size() - 1].key);
 	}
-	TraceEvent("KVStoreRageReadCountRev").detail("Count", count);
+	TraceEvent("KVStoreRangeReadCountRev").detail("Count", count);
 	ASSERT(count == 100000);
 
 	return Void();

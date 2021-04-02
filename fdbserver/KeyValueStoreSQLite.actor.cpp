@@ -1243,6 +1243,7 @@ struct RawCursor {
 				}
 			}
 		}
+		// let the result writer know the storage engine is done reading the range
 		resultWriter->operator()(Optional<KeyValueRef>());
 		return Void();
 	}
