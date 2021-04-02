@@ -40,7 +40,17 @@ namespace file_converter {
 void printDecodeUsage() {
 	std::cout << "\n"
 	             "  -r, --container   Container URL.\n"
-	             "  -i, --input FILE  Log file to be decoded.\n"
+	             "  -i, --input FILE  Log file filter, only matched files are decoded.\n"
+	             "  --log             Enables trace file logging for the CLI session.\n"
+	             "  --logdir PATH     Specifes the output directory for trace files. If\n"
+	             "                    unspecified, defaults to the current directory. Has\n"
+	             "                    no effect unless --log is specified.\n"
+	             "  --loggroup        LOG_GROUP\n"
+	             "                    Sets the LogGroup field with the specified value for all\n"
+	             "                    events in the trace output (defaults to `default').\n"
+	             "  --trace_format    FORMAT\n"
+	             "                    Select the format of the trace files. xml (the default) and json are supported.\n"
+	             "                    Has no effect unless --log is specified.\n"
 	             "  --crash           Crash on serious error.\n"
 	             "  --build_flags     Print build information and exit.\n"
 	             "\n";
@@ -48,12 +58,12 @@ void printDecodeUsage() {
 }
 
 void printBuildInformation() {
-	printf("%s", jsonBuildInformation().c_str());
+	printf("%s\n", jsonBuildInformation().c_str());
 }
 
 struct DecodeParams {
 	std::string container_url;
-	std::string file;
+	std::string fileFilter; // only files match the filter will be decoded
 	bool log_enabled = false;
 	std::string log_dir, trace_format, trace_log_group;
 
@@ -61,8 +71,8 @@ struct DecodeParams {
 		std::string s;
 		s.append("ContainerURL: ");
 		s.append(container_url);
-		s.append(", File: ");
-		s.append(file);
+		s.append(", FileFilter: ");
+		s.append(fileFilter);
 		if (log_enabled) {
 			if (!log_dir.empty()) {
 				s.append(" LogDir:").append(log_dir);
@@ -105,7 +115,7 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 			break;
 
 		case OPT_INPUT_FILE:
-			param->file = args->OptionArg();
+			param->fileFilter = args->OptionArg();
 			break;
 
 		case OPT_TRACE:
@@ -127,6 +137,7 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 		case OPT_TRACE_LOG_GROUP:
 			param->trace_log_group = args->OptionArg();
 			break;
+
 		case OPT_BUILD_FLAGS:
 			printBuildInformation();
 			return FDB_EXIT_ERROR;
@@ -147,7 +158,7 @@ void printLogFiles(std::string msg, const std::vector<LogFile>& files) {
 std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, const DecodeParams& params) {
 	std::vector<LogFile> filtered;
 	for (const auto& file : files) {
-		if (file.fileName.find(params.file) != std::string::npos) {
+		if (file.fileName.find(params.fileFilter) != std::string::npos) {
 			filtered.push_back(file);
 		}
 	}
