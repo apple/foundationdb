@@ -839,6 +839,7 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
 	return Void();
 }
 
+// Configuration details compiled in a structure used when setting up a simulated cluster
 struct SimulationConfig {
 	explicit SimulationConfig(const TestConfig& testConfig);
 	int extraDB;
@@ -857,7 +858,7 @@ private:
 	void generateNormalConfig(const TestConfig& testConfig);
 };
 
-SimulationConfig::SimulationConfig(const TestConfig& testConfig) {
+SimulationConfig::SimulationConfig(const TestConfig& testConfig) : extraDB(testConfig.extraDB) {
 	generateNormalConfig(testConfig);
 }
 
@@ -1179,9 +1180,6 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 			regionArr.push_back(remoteObj);
 		}
 
-		set_config("regions=" +
-		           json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none));
-
 		if (needsRemote) {
 			g_simulator.originalRegions = "regions=" + json_spirit::write_string(json_spirit::mValue(regionArr),
 			                                                                     json_spirit::Output_options::none);
@@ -1195,6 +1193,11 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 			disableRemote[1].get_obj()["datacenters"].get_array()[0].get_obj()["priority"] = -1;
 			g_simulator.disableRemote = "regions=" + json_spirit::write_string(json_spirit::mValue(disableRemote),
 			                                                                   json_spirit::Output_options::none);
+		} else {
+			// In order to generate a starting configuration with the remote disabled, do not apply the region
+			// configuration to the DatabaseConfiguration until after creating the starting conf string.
+			set_config("regions=" +
+			           json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none));
 		}
 	}
 
@@ -1274,6 +1277,12 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		} else {
 			ASSERT(false);
 		}
+	}
+
+	if (g_simulator.originalRegions != "") {
+		simconfig.set_config(g_simulator.originalRegions);
+		g_simulator.startingDisabledConfiguration = startingConfigString + " " + g_simulator.disableRemote;
+		startingConfigString += " " + g_simulator.originalRegions;
 	}
 
 	g_simulator.storagePolicy = simconfig.db.storagePolicy;

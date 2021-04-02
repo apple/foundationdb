@@ -30,7 +30,9 @@ import com.apple.foundationdb.async.AsyncIterator;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+
 
 /**
  * Basic test code for testing basic Transaction Timer logic.
@@ -41,6 +43,7 @@ import org.junit.jupiter.api.Test;
 class EventKeeperTest {
 
 	@Test
+	@Disabled("Ignored because ctest will actually add the library and cause this to segfault")
 	void testSetVersion() throws Exception {
 
 		EventKeeper timer = new MapEventKeeper();
@@ -57,6 +60,7 @@ class EventKeeperTest {
 	}
 
 	@Test
+	@Disabled("Ignored because ctest will actually add the library and cause this to segfault")
 	void testGetReadVersion() throws Exception {
 		EventKeeper timer = new MapEventKeeper();
 

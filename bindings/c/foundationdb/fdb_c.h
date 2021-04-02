@@ -187,6 +187,8 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_create_snapshot(FDBDatabase
                                                                      uint8_t const* snap_command,
                                                                      int snap_command_length);
 
+DLLEXPORT WARN_UNUSED_RESULT double fdb_database_get_main_thread_busyness(FDBDatabase* db);
+
 DLLEXPORT void fdb_transaction_destroy(FDBTransaction* tr);
 
 DLLEXPORT void fdb_transaction_cancel(FDBTransaction* tr);
