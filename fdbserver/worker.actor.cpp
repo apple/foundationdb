@@ -401,6 +401,8 @@ TLogFn tLogFnForOptions(TLogOptions options) {
 	case TLogVersion::V5:
 	case TLogVersion::V6:
 		return tLog;
+	case TLogVersion::V7:
+		return teamPartitionedTLog::tLog;
 	default:
 		ASSERT(false);
 	}

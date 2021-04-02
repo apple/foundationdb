@@ -226,12 +226,12 @@ struct OldTLogConf {
 	}
 };
 
-// LogSystemType is always 2 (tagPartitioned). There is no other tag partitioned system.
-// This type is supposed to be removed. However, because the serialized value of the type is stored in coordinators,
-// removing it is complex in order to support forward and backward compatibility.
 enum class LogSystemType {
 	empty = 0, // Never used.
-	tagPartitioned = 2,
+	tagPartitioned = 2, // each TLog is primary for a partition of tags and is secondary for any arbitrary tag.
+	teamPartitioned = 3, // TLogs are logically partitoned by TLogGroups while each TLogGroup is responsible for
+						 // a set of storage shard, e.e., key range. Each TLog is a bed of slots for TLogGroups, i.e.,
+						 // contains an arbitrary number of TLogGroup member.
 };
 
 struct LogSystemConfig {

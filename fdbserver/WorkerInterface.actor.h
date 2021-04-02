@@ -416,14 +416,21 @@ struct GetWorkersRequest {
 	}
 };
 
+struct InitializeTLogTeam {
+	UID teamId;
+	std::unordered_set<UID> shards;
+};
+
 struct InitializeTLogRequest {
 	constexpr static FileIdentifier file_identifier = 15604392;
 	UID recruitmentID;
 	LogSystemConfig recoverFrom;
-	Version recoverAt;
 	Version knownCommittedVersion;
+	Version startVersion;
+	Version recoverAt; // This log generation need to store [startVersion, recoverAt] either from old disk queue or
+					   // other TLogs.
 	LogEpoch epoch;
-	std::vector<Tag> recoverTags;
+	std::vector<Tag> recoverTags; // The tags we need to recover for the above version range.
 	std::vector<Tag> allTags;
 	TLogVersion logVersion;
 	KeyValueStoreType storeType;
@@ -431,9 +438,12 @@ struct InitializeTLogRequest {
 	Tag remoteTag;
 	int8_t locality;
 	bool isPrimary;
-	Version startVersion;
+
 	int logRouterTags;
 	int txsTags;
+
+	LogSystemType logSystemType; // can be team partitioned.
+	vector<InitializeTLogTeam> tLogTeams;
 
 	ReplyPromise<struct TLogInterface> reply;
 
@@ -458,7 +468,9 @@ struct InitializeTLogRequest {
 		           reply,
 		           logVersion,
 		           spillType,
-		           txsTags);
+		           txsTags,
+				   logSystemType,
+		           tLogTeams);
 	}
 };
 
@@ -926,6 +938,22 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         std::string folder,
                         Reference<AsyncVar<bool>> degraded,
                         Reference<AsyncVar<UID>> activeSharedTLog);
+}
+
+namespace teamPartitionedTLog {
+ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
+						IDiskQueue* persistentQueue,
+						Reference<AsyncVar<ServerDBInfo>> db,
+						LocalityData locality,
+						PromiseStream<InitializeTLogRequest> tlogRequests,
+						UID tlogId,
+						UID workerID,
+						bool restoreFromDisk,
+						Promise<Void> oldLog,
+						Promise<Void> recovered,
+						std::string folder,
+						Reference<AsyncVar<bool>> degraded,
+						Reference<AsyncVar<UID>> activeSharedTLog);
 }
 
 typedef decltype(&tLog) TLogFn;
