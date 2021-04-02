@@ -39,21 +39,26 @@ namespace file_converter {
 
 void printDecodeUsage() {
 	std::cout << "Decoder for FoundationDB backup mutation logs.\n"
-	             "Usage: fdbdecode    [OPTIONS]\n"
-	             "  -r, --container   Container URL.\n"
-	             "  -i, --input FILE  Log file filter, only matched files are decoded.\n"
-	             "  --log             Enables trace file logging for the CLI session.\n"
-	             "  --logdir PATH     Specifes the output directory for trace files. If\n"
-	             "                    unspecified, defaults to the current directory. Has\n"
-	             "                    no effect unless --log is specified.\n"
-	             "  --loggroup        LOG_GROUP\n"
-	             "                    Sets the LogGroup field with the specified value for all\n"
-	             "                    events in the trace output (defaults to `default').\n"
-	             "  --trace_format    FORMAT\n"
-	             "                    Select the format of the trace files. xml (the default) and json are supported.\n"
-	             "                    Has no effect unless --log is specified.\n"
-	             "  --crash           Crash on serious error.\n"
-	             "  --build_flags     Print build information and exit.\n"
+	             "Usage: fdbdecode  [OPTIONS]\n"
+	             "  -r, --container URL\n"
+				 "                 Backup container URL, e.g., file:///some/path/.\n"
+	             "  -i, --input    FILE\n"
+				 "                 Log file filter, only matched files are decoded.\n"
+	             "  --log          Enables trace file logging for the CLI session.\n"
+	             "  --logdir PATH  Specifes the output directory for trace files. If\n"
+	             "                 unspecified, defaults to the current directory. Has\n"
+	             "                 no effect unless --log is specified.\n"
+	             "  --loggroup     LOG_GROUP\n"
+	             "                 Sets the LogGroup field with the specified value for all\n"
+	             "                 events in the trace output (defaults to `default').\n"
+	             "  --trace_format FORMAT\n"
+	             "                 Select the format of the trace files. xml (the default) and json are supported.\n"
+	             "                 Has no effect unless --log is specified.\n"
+	             "  --crash        Crash on serious error.\n"
+#ifndef TLS_DISABLED
+	             TLS_HELP
+#endif
+	             "  --build_flags  Print build information and exit.\n"
 	             "\n";
 	return;
 }
@@ -67,6 +72,7 @@ struct DecodeParams {
 	std::string fileFilter; // only files match the filter will be decoded
 	bool log_enabled = false;
 	std::string log_dir, trace_format, trace_log_group;
+	std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword, tlsVerifyPeers;
 
 	std::string toString() {
 		std::string s;
@@ -86,6 +92,48 @@ struct DecodeParams {
 			}
 		}
 		return s;
+	}
+
+	// Returns if TLS setup is successful
+	bool setupTLS() {
+		if (tlsCertPath.size()) {
+			try {
+				setNetworkOption(FDBNetworkOptions::TLS_CERT_PATH, tlsCertPath);
+			} catch (Error& e) {
+				std::cerr << "ERROR: cannot set TLS certificate path to " << tlsCertPath << " (" << e.what() << ")\n";
+				return false;
+			}
+		}
+
+		if (tlsCAPath.size()) {
+			try {
+				setNetworkOption(FDBNetworkOptions::TLS_CA_PATH, tlsCAPath);
+			} catch (Error& e) {
+				std::cerr << "ERROR: cannot set TLS CA path to " << tlsCAPath << " (" << e.what() << ")\n";
+				return false;
+			}
+		}
+		if (tlsKeyPath.size()) {
+			try {
+				if (tlsPassword.size())
+					setNetworkOption(FDBNetworkOptions::TLS_PASSWORD, tlsPassword);
+
+				setNetworkOption(FDBNetworkOptions::TLS_KEY_PATH, tlsKeyPath);
+			} catch (Error& e) {
+				std::cerr << "ERROR: cannot set TLS key path to " << tlsKeyPath << " (" << e.what() << ")\n";
+				return false;
+			}
+		}
+		if (tlsVerifyPeers.size()) {
+			try {
+				setNetworkOption(FDBNetworkOptions::TLS_VERIFY_PEERS, tlsVerifyPeers);
+			} catch (Error& e) {
+				std::cerr << "ERROR: cannot set TLS peer verification to " << tlsVerifyPeers << " (" << e.what()
+				          << ")\n";
+				return false;
+			}
+		}
+		return true;
 	}
 };
 
@@ -137,6 +185,32 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 		case OPT_TRACE_LOG_GROUP:
 			param->trace_log_group = args->OptionArg();
 			break;
+
+#ifndef TLS_DISABLED
+		case TLSConfig::OPT_TLS_PLUGIN:
+			args->OptionArg();
+			break;
+
+		case TLSConfig::OPT_TLS_CERTIFICATES:
+			param->tlsCertPath = args->OptionArg();
+			break;
+
+		case TLSConfig::OPT_TLS_PASSWORD:
+			param->tlsPassword = args->OptionArg();
+			break;
+
+		case TLSConfig::OPT_TLS_CA_FILE:
+			param->tlsCAPath = args->OptionArg();
+			break;
+
+		case TLSConfig::OPT_TLS_KEY:
+			param->tlsKeyPath = args->OptionArg();
+			break;
+
+		case TLSConfig::OPT_TLS_VERIFY_PEERS:
+			param->tlsVerifyPeers = args->OptionArg();
+			break;
+#endif
 
 		case OPT_BUILD_FLAGS:
 			printBuildInformation();
@@ -525,6 +599,7 @@ int main(int argc, char** argv) {
 				setNetworkOption(FDBNetworkOptions::TRACE_LOG_GROUP, StringRef(param.trace_log_group));
 			}
 		}
+		param.setupTLS();
 
 		platformInit();
 		Error::init();
@@ -540,7 +615,7 @@ int main(int argc, char** argv) {
 		runNetwork();
 		return status;
 	} catch (Error& e) {
-		fprintf(stderr, "ERROR: %s\n", e.what());
+		std::cerr << "ERROR: " << e.what() << "\n";
 		return FDB_EXIT_ERROR;
 	} catch (std::exception& e) {
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());

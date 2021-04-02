@@ -24,6 +24,7 @@
 
 #include <cinttypes>
 #include "flow/SimpleOpt.h"
+#include "flow/TLSConfig.actor.h"
 
 namespace file_converter {
 
@@ -55,6 +56,9 @@ CSimpleOpt::SOption gConverterOptions[] = { { OPT_CONTAINER, "-r", SO_REQ_SEP },
 	                                        { OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	                                        { OPT_INPUT_FILE, "-i", SO_REQ_SEP },
 	                                        { OPT_INPUT_FILE, "--input", SO_REQ_SEP },
+#ifndef TLS_DISABLED
+	                                        TLS_OPTION_FLAGS
+#endif
 	                                        { OPT_BUILD_FLAGS, "--build_flags", SO_NONE },
 	                                        { OPT_HELP, "-?", SO_NONE },
 	                                        { OPT_HELP, "-h", SO_NONE },
