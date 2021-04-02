@@ -24,7 +24,9 @@
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// A workload which test the correctness of backup and restore process
+// A workload which test the correctness of backup and restore process. The
+// database must be idle after the restore completes, and this workload checks
+// that the restore range does not change post restore.
 struct BackupToDBCorrectnessWorkload : TestWorkload {
 	double backupAfter, abortAndRestartAfter, restoreAfter;
 	double backupStartAt, restoreStartAfterBackupFinished, stopDifferentialAfter;
