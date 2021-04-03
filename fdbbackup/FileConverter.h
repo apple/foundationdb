@@ -32,6 +32,7 @@ namespace file_converter {
 enum {
 	OPT_CONTAINER,
 	OPT_BEGIN_VERSION,
+	OPT_BLOB_CREDENTIALS,
 	OPT_CRASHONERROR,
 	OPT_END_VERSION,
 	OPT_TRACE,
@@ -56,6 +57,7 @@ CSimpleOpt::SOption gConverterOptions[] = { { OPT_CONTAINER, "-r", SO_REQ_SEP },
 	                                        { OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	                                        { OPT_INPUT_FILE, "-i", SO_REQ_SEP },
 	                                        { OPT_INPUT_FILE, "--input", SO_REQ_SEP },
+	                                        { OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	                                        TLS_OPTION_FLAGS
 #endif

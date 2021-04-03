@@ -26,6 +26,7 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbbackup/FileConverter.h"
 #include "fdbclient/MutationList.h"
+#include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
 #include "fdbclient/BuildFlags.h"
@@ -38,33 +39,37 @@ extern bool g_crashOnError;
 namespace file_converter {
 
 void printDecodeUsage() {
-	std::cout << "Decoder for FoundationDB backup mutation logs.\n"
-	             "Usage: fdbdecode  [OPTIONS]\n"
-	             "  -r, --container URL\n"
-				 "                 Backup container URL, e.g., file:///some/path/.\n"
-	             "  -i, --input    FILE\n"
-				 "                 Log file filter, only matched files are decoded.\n"
-	             "  --log          Enables trace file logging for the CLI session.\n"
-	             "  --logdir PATH  Specifes the output directory for trace files. If\n"
-	             "                 unspecified, defaults to the current directory. Has\n"
-	             "                 no effect unless --log is specified.\n"
-	             "  --loggroup     LOG_GROUP\n"
-	             "                 Sets the LogGroup field with the specified value for all\n"
-	             "                 events in the trace output (defaults to `default').\n"
-	             "  --trace_format FORMAT\n"
-	             "                 Select the format of the trace files. xml (the default) and json are supported.\n"
-	             "                 Has no effect unless --log is specified.\n"
-	             "  --crash        Crash on serious error.\n"
+	std::cout
+	    << "Decoder for FoundationDB backup mutation logs.\n"
+	       "Usage: fdbdecode  [OPTIONS]\n"
+	       "  -r, --container URL\n"
+	       "                 Backup container URL, e.g., file:///some/path/.\n"
+	       "  -i, --input    FILE\n"
+	       "                 Log file filter, only matched files are decoded.\n"
+	       "  --log          Enables trace file logging for the CLI session.\n"
+	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
+	       "                 unspecified, defaults to the current directory. Has\n"
+	       "                 no effect unless --log is specified.\n"
+	       "  --loggroup     LOG_GROUP\n"
+	       "                 Sets the LogGroup field with the specified value for all\n"
+	       "                 events in the trace output (defaults to `default').\n"
+	       "  --trace_format FORMAT\n"
+	       "                 Select the format of the trace files, xml (the default) or json.\n"
+	       "                 Has no effect unless --log is specified.\n"
+	       "  --crash        Crash on serious error.\n"
+	       "  --blob_credentials FILE\n"
+	       "                 File containing blob credentials in JSON format.\n"
+	       "                 The same credential format/file fdbbackup uses.\n"
 #ifndef TLS_DISABLED
-	             TLS_HELP
+	    TLS_HELP
 #endif
-	             "  --build_flags  Print build information and exit.\n"
-	             "\n";
+	       "  --build_flags  Print build information and exit.\n"
+	       "\n";
 	return;
 }
 
 void printBuildInformation() {
-	printf("%s\n", jsonBuildInformation().c_str());
+	std::cout << jsonBuildInformation() << "\n";
 }
 
 struct DecodeParams {
@@ -73,6 +78,7 @@ struct DecodeParams {
 	bool log_enabled = false;
 	std::string log_dir, trace_format, trace_log_group;
 	std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword, tlsVerifyPeers;
+	std::vector<std::string> blobCredentials;
 
 	std::string toString() {
 		std::string s;
@@ -92,6 +98,29 @@ struct DecodeParams {
 			}
 		}
 		return s;
+	}
+
+	// Sets up blob crentials. Add the file specified by FDB_BLOB_CREDENTIALS as well.
+	void setupBlobCredentials() {
+		// Add blob credentials files from the environment to the list collected from the command line.
+		const char* blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
+		if (blobCredsFromENV != nullptr) {
+			StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
+			do {
+				StringRef file = t.eat(":");
+				if (file.size() != 0)
+					blobCredentials.push_back(file.toString());
+			} while (t.size() != 0);
+		}
+
+		// Update the global blob credential files list
+		std::vector<std::string>* pFiles =
+		    (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
+		if (pFiles != nullptr) {
+			for (auto& f : blobCredentials) {
+				pFiles->push_back(f);
+			}
+		}
 	}
 
 	// Returns if TLS setup is successful
@@ -184,6 +213,10 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 
 		case OPT_TRACE_LOG_GROUP:
 			param->trace_log_group = args->OptionArg();
+			break;
+
+		case OPT_BLOB_CREDENTIALS:
+			param->blobCredentials.push_back(args->OptionArg());
 			break;
 
 #ifndef TLS_DISABLED
@@ -599,7 +632,11 @@ int main(int argc, char** argv) {
 				setNetworkOption(FDBNetworkOptions::TRACE_LOG_GROUP, StringRef(param.trace_log_group));
 			}
 		}
-		param.setupTLS();
+
+		if (!param.setupTLS()) {
+			TraceEvent(SevError, "TLSError");
+			throw tls_error();
+		}
 
 		platformInit();
 		Error::init();
@@ -609,6 +646,7 @@ int main(int argc, char** argv) {
 
 		TraceEvent::setNetworkThread();
 		openTraceFile(NetworkAddress(), 10 << 20, 10 << 20, param.log_dir, "decode", param.trace_log_group);
+		param.setupBlobCredentials();
 
 		auto f = stopAfter(decode_logs(param));
 
