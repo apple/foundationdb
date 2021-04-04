@@ -66,10 +66,10 @@ RUN rm -f /root/anaconda-ks.cfg && \
     'source /opt/rh/rh-ruby26/enable' \
     '' \
     'function cmk() {' \
-    '    cmake -S ${HOME}/src/foundationdb -B ${HOME}/build_output -D USE_CCACHE=1 -D RocksDB_ROOT=/opt/rocksdb-6.10.1 -G Ninja && ninja -C build_output -j 84' \
+    '    cmake -S ${HOME}/src/foundationdb -B ${HOME}/build_output -D USE_CCACHE=ON -D USE_WERROR=ON -D RocksDB_ROOT=/opt/rocksdb-6.10.1 -D RUN_JUNIT_TESTS=ON -D RUN_JAVA_INTEGRATION_TESTS=ON -G Ninja && ninja -C ${HOME}/build_output -j 84' \
     '}' \
     'function ct() {' \
-    '    cd ${HOME}/build_output && ctest -j 32 --output-on-failure' \
+    '    cd ${HOME}/build_output && ctest -j 32 --no-compress-output -T test --output-on-failure' \
     '}' \
     'function j() {' \
     '   python3 -m joshua.joshua "${@}"' \
