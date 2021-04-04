@@ -891,16 +891,21 @@ public:
 		return Optional<RestorableFileSet>();
 	}
 
+	// Get a set of files that can restore the given "keyRangesFilter" to the "targetVersion".
+	// If "keyRangesFilter" is empty, the file set will cover all key ranges present in the backup.
+	// It's generally a good idea to specify "keyRangesFilter" to reduce the number of files for
+	// restore times.
+	//
+	// If "logsOnly" is true, then only log files are returned and "keyRangesFilter" is ignored,
+	// because the log can contain mutations of the whole key space, unlike range files that each
+	// is limited to a smaller key range.
 	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet(Reference<BackupContainerFileSystem> bc,
 	                                                               Version targetVersion,
 	                                                               VectorRef<KeyRangeRef> keyRangesFilter,
 	                                                               bool logsOnly = false,
 	                                                               Version beginVersion = invalidVersion) {
-		// Does not support use keyRangesFilter for logsOnly yet
-		if (logsOnly && !keyRangesFilter.empty()) {
-			TraceEvent(SevError, "BackupContainerRestoreSetUnsupportedAPI")
-			    .detail("KeyRangesFilter", keyRangesFilter.size());
-			return Optional<RestorableFileSet>();
+		for (const auto& range : keyRangesFilter) {
+			TraceEvent("BackupContainerGetRestoreSet").detail("RangeFilter", printable(range));
 		}
 
 		if (logsOnly) {
@@ -1431,30 +1436,41 @@ BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::logType() 
 namespace backup_test {
 
 int chooseFileSize(std::vector<int>& sizes) {
-	int size = 1000;
 	if (!sizes.empty()) {
-		size = sizes.back();
+		int size = sizes.back();
 		sizes.pop_back();
+		return size;
 	}
-	return size;
+	return deterministicRandom()->randomInt(0, 2e6);
 }
 
-ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<IBackupFile> f, int size) {
-	state Standalone<StringRef> content;
-	if (size > 0) {
-		content = makeString(size);
-		for (int i = 0; i < content.size(); ++i)
-			mutateString(content)[i] = (uint8_t)deterministicRandom()->randomInt(0, 256);
+ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<IBackupFile> f, int size, FlowLock* lock) {
+	state Standalone<VectorRef<uint8_t>> content;
 
-		wait(f->append(content.begin(), content.size()));
+	wait(lock->take(TaskPriority::DefaultYield, size));
+ 	state FlowLock::Releaser releaser(*lock, size);
+
+ 	printf("writeAndVerify size=%d file=%s\n", size, f->getFileName().c_str());
+	content.resize(content.arena(), size);
+	for (int i = 0; i < content.size(); ++i) {
+		content[i] = (uint8_t)deterministicRandom()->randomInt(0, 256);
+	}
+
+	state VectorRef<uint8_t> sendBuf = content;
+	while (sendBuf.size() > 0) {
+		state int n = std::min(sendBuf.size(), deterministicRandom()->randomInt(1, 16384));
+		wait(f->append(sendBuf.begin(), n));
+		sendBuf.pop_front(n);
 	}
 	wait(f->finish());
+
 	state Reference<IAsyncFile> inputFile = wait(c->readFile(f->getFileName()));
 	int64_t fileSize = wait(inputFile->size());
 	ASSERT(size == fileSize);
 	if (size > 0) {
-		state Standalone<StringRef> buf = makeString(size);
-		int b = wait(inputFile->read(mutateString(buf), buf.size(), 0));
+		state Standalone<VectorRef<uint8_t>> buf;
+		buf.resize(buf.arena(), fileSize);
+		int b = wait(inputFile->read(buf.begin(), buf.size(), 0));
 		ASSERT(b == buf.size());
 		ASSERT(buf == content);
 	}
@@ -1491,6 +1507,8 @@ ACTOR static Future<Void> testWriteSnapshotFile(Reference<IBackupFile> file, Key
 }
 
 ACTOR static Future<Void> testBackupContainer(std::string url) {
+	state FlowLock lock(100e6);
+
 	printf("BackupContainerTest URL %s\n", url.c_str());
 
 	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url);
@@ -1514,7 +1532,11 @@ ACTOR static Future<Void> testBackupContainer(std::string url) {
 	state Version v = deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max() / 2);
 
 	// List of sizes to use to test edge cases on underlying file implementations
-	state std::vector<int> fileSizes = { 0, 10000000, 5000005 };
+	state std::vector<int> fileSizes = { 0 };
+	if (StringRef(url).startsWith(LiteralStringRef("blob"))) {
+ 		fileSizes.push_back(CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE);
+ 		fileSizes.push_back(CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE + 10);
+ 	}
 
 	loop {
 		state Version logStart = v;
@@ -1541,7 +1563,7 @@ ACTOR static Future<Void> testBackupContainer(std::string url) {
 			int size = chooseFileSize(fileSizes);
 			snapshotSizes.rbegin()->second += size;
 			// Write in actual range file format, instead of random data.
-			// writes.push_back(writeAndVerifyFile(c, range, size));
+			// writes.push_back(writeAndVerifyFile(c, range, size, &lock));
 			wait(testWriteSnapshotFile(range, begin, end, blockSize));
 
 			if (deterministicRandom()->random01() < .2) {
@@ -1562,7 +1584,7 @@ ACTOR static Future<Void> testBackupContainer(std::string url) {
 		state Reference<IBackupFile> log = wait(c->writeLogFile(logStart, v, 10));
 		logs[logStart] = log->getFileName();
 		int size = chooseFileSize(fileSizes);
-		writes.push_back(writeAndVerifyFile(c, log, size));
+		writes.push_back(writeAndVerifyFile(c, log, size, &lock));
 
 		// Randomly stop after a snapshot has finished and all manually seeded file sizes have been used.
 		if (fileSizes.empty() && !snapshots.empty() && snapshots.rbegin()->second.empty() &&

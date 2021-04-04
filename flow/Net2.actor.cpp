@@ -48,6 +48,10 @@
 #include "flow/genericactors.actor.h"
 #include "flow/Util.h"
 
+#ifdef ADDRESS_SANITIZER
+#include <sanitizer/lsan_interface.h>
+#endif
+
 // See the comment in TLSConfig.actor.h for the explanation of why this module breaking include was done.
 #include "fdbrpc/IAsyncFile.h"
 
@@ -130,6 +134,12 @@ public:
 thread_local INetwork* thread_network = 0;
 
 class Net2 final : public INetwork, public INetworkConnections {
+
+private:
+	void updateStarvationTracker(struct NetworkMetrics::PriorityStats& binStats,
+	                             TaskPriority priority,
+	                             TaskPriority lastPriority,
+	                             double now);
 
 public:
 	Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics);
@@ -217,7 +227,8 @@ public:
 	uint64_t tasksIssued;
 	TDMetricCollection tdmetrics;
 	double currentTime;
-	bool stopped;
+	// May be accessed off the network thread, e.g. by onMainThread
+	std::atomic<bool> stopped;
 	mutable std::map<IPAddress, bool> addressOnHostCache;
 
 	std::atomic<bool> started;
@@ -242,6 +253,10 @@ public:
 	void processThreadReady();
 	void trackAtPriority(TaskPriority priority, double now);
 	void stopImmediately() {
+#ifdef ADDRESS_SANITIZER
+		// Do leak check before intentionally leaking a bunch of memory
+		__lsan_do_leak_check();
+#endif
 		stopped = true;
 		decltype(ready) _1;
 		ready.swap(_1);
@@ -1573,6 +1588,28 @@ void Net2::run() {
 #endif
 }
 
+// Updates the PriorityStats found in NetworkMetrics
+void Net2::updateStarvationTracker(struct NetworkMetrics::PriorityStats& binStats,
+                                   TaskPriority priority,
+                                   TaskPriority lastPriority,
+                                   double now) {
+
+	// Busy -> idle at binStats.priority
+	if (binStats.priority > priority && binStats.priority <= lastPriority) {
+		binStats.active = false;
+		binStats.duration += now - binStats.windowedTimer;
+		binStats.maxDuration = std::max(binStats.maxDuration, now - binStats.timer);
+	}
+
+	// Idle -> busy at binStats.priority
+	else if (binStats.priority <= priority && binStats.priority > lastPriority) {
+		binStats.active = true;
+		binStats.timer = now;
+		binStats.windowedTimer = now;
+	}
+}
+
+// Update both vectors of starvation trackers (one that updates every 5s and the other every 1s)
 void Net2::trackAtPriority(TaskPriority priority, double now) {
 	if (lastPriorityStats == nullptr || priority != lastPriorityStats->priority) {
 		// Start tracking current priority
@@ -1592,21 +1629,11 @@ void Net2::trackAtPriority(TaskPriority priority, double now) {
 			if (binStats.priority > lastPriority && binStats.priority > priority) {
 				break;
 			}
-
-			// Busy -> idle at binStats.priority
-			if (binStats.priority > priority && binStats.priority <= lastPriority) {
-				binStats.active = false;
-				binStats.duration += now - binStats.windowedTimer;
-				binStats.maxDuration = std::max(binStats.maxDuration, now - binStats.timer);
-			}
-
-			// Idle -> busy at binStats.priority
-			else if (binStats.priority <= priority && binStats.priority > lastPriority) {
-				binStats.active = true;
-				binStats.timer = now;
-				binStats.windowedTimer = now;
-			}
+			updateStarvationTracker(binStats, priority, lastPriority, now);
 		}
+
+		// Update starvation trackers for network busyness
+		updateStarvationTracker(networkInfo.metrics.starvationTrackerNetworkBusyness, priority, lastPriority, now);
 
 		lastPriorityStats = &activeStatsItr.first->second;
 	}

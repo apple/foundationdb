@@ -1509,7 +1509,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 
 		state FileBackupAgent fba;
 		state std::vector<KeyBackedTag> backupTags = wait(getAllBackupTags(tr, snapshot));
-		state std::vector<Future<Version>> tagLastRestorableVersions;
+		state std::vector<Future<Optional<Version>>> tagLastRestorableVersions;
 		state std::vector<Future<EBackupState>> tagStates;
 		state std::vector<Future<Reference<IBackupContainer>>> tagContainers;
 		state std::vector<Future<int64_t>> tagRangeBytes;
@@ -1543,9 +1543,6 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 
 		int j = 0;
 		for (KeyBackedTag eachTag : backupTags) {
-			Version last_restorable_version = tagLastRestorableVersions[j].get();
-			double last_restorable_seconds_behind =
-			    ((double)readVer - last_restorable_version) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 			EBackupState status = tagStates[j].get();
 			const char* statusText = fba.getStateText(status);
 
@@ -1553,8 +1550,13 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			JSONDoc tagRoot = tagsRoot.subDoc(eachTag.tagName);
 			tagRoot.create("current_container") = tagContainers[j].get()->getURL();
 			tagRoot.create("current_status") = statusText;
-			tagRoot.create("last_restorable_version") = tagLastRestorableVersions[j].get();
-			tagRoot.create("last_restorable_seconds_behind") = last_restorable_seconds_behind;
+			if (tagLastRestorableVersions[j].get().present()) {
+				Version last_restorable_version = tagLastRestorableVersions[j].get().get();
+				double last_restorable_seconds_behind =
+				    ((double)readVer - last_restorable_version) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+				tagRoot.create("last_restorable_version") = last_restorable_version;
+				tagRoot.create("last_restorable_seconds_behind") = last_restorable_seconds_behind;
+			}
 			tagRoot.create("running_backup") =
 			    (status == EBackupState::STATE_RUNNING_DIFFERENTIAL || status == EBackupState::STATE_RUNNING);
 			tagRoot.create("running_backup_is_restorable") = (status == EBackupState::STATE_RUNNING_DIFFERENTIAL);
@@ -2234,6 +2236,8 @@ Reference<IBackupContainer> openBackupContainer(const char* name, std::string de
 	return c;
 }
 
+// Submit the restore request to the database if "performRestore" is true. Otherwise,
+// check if the restore can be performed.
 ACTOR Future<Void> runRestore(Database db,
                               std::string originalClusterFile,
                               std::string tagName,
@@ -2326,7 +2330,7 @@ ACTOR Future<Void> runRestore(Database db,
 				printf("Restored to version %" PRId64 "\n", restoredVersion);
 			}
 		} else {
-			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(targetVersion));
+			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(targetVersion, ranges));
 
 			if (!rset.present()) {
 				fprintf(stderr,

@@ -29,7 +29,7 @@
 	static constexpr ProtocolVersion with##x() { return ProtocolVersion(x ::protocolVersion); }
 
 // ProtocolVersion wraps a uint64_t to make it type safe. It will know about the current versions.
-// The default constuctor will initialize the version to 0 (which is an invalid
+// The default constructor will initialize the version to 0 (which is an invalid
 // version). ProtocolVersion objects should never be compared to version numbers
 // directly. Instead one should always use the type-safe version types from which
 // this class inherits all.

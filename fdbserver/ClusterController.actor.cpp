@@ -320,6 +320,17 @@ public:
 		return results;
 	}
 
+	// Selects workers as TLogs from available workers based on input parameters.
+	//   conf:        the database configuration.
+	//   required:    the required number of TLog workers to select.
+	//   desired:     the desired number of TLog workers to select.
+	//   policy:      the TLog replication policy the selection needs to satisfy.
+	//   id_used:     keep track of process IDs of selected workers.
+	//   checkStable: when true, only select from workers that are considered as stable worker (not rebooted more than
+	//                twice recently).
+	//   dcIds:       the target data centers the workers are in. The selected workers must all be from these
+	//                data centers:
+	//   exclusionWorkerIds: the workers to be excluded from the selection.
 	std::vector<WorkerDetails> getWorkersForTlogs(DatabaseConfiguration const& conf,
 	                                              int32_t required,
 	                                              int32_t desired,
@@ -328,98 +339,161 @@ public:
 	                                              bool checkStable = false,
 	                                              std::set<Optional<Key>> dcIds = std::set<Optional<Key>>(),
 	                                              std::vector<UID> exclusionWorkerIds = {}) {
-		std::map<std::pair<ProcessClass::Fitness, bool>, vector<WorkerDetails>> fitness_workers;
+		std::map<std::tuple<ProcessClass::Fitness, int, bool, bool>, vector<WorkerDetails>> fitness_workers;
 		std::vector<WorkerDetails> results;
 		std::vector<LocalityData> unavailableLocals;
 		Reference<LocalitySet> logServerSet;
 		LocalityMap<WorkerDetails>* logServerMap;
 		bool bCompleted = false;
 
-		logServerSet = Reference<LocalitySet>(new LocalityMap<WorkerDetails>());
-		logServerMap = (LocalityMap<WorkerDetails>*)logServerSet.getPtr();
-		for (auto& it : id_worker) {
-			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), it.second.details.interf.id()) ==
-			    exclusionWorkerIds.end()) {
-				auto fitness = it.second.details.processClass.machineClassFitness(ProcessClass::TLog);
-				if (workerAvailable(it.second, checkStable) &&
-				    !conf.isExcludedServer(it.second.details.interf.addresses()) &&
-				    fitness != ProcessClass::NeverAssign &&
-				    (!dcIds.size() || dcIds.count(it.second.details.interf.locality.dcId()))) {
-					fitness_workers[std::make_pair(fitness, it.second.details.degraded)].push_back(it.second.details);
-				} else {
-					unavailableLocals.push_back(it.second.details.interf.locality);
-				}
+		// Construct the list of DCs where the TLog recruitment is happening. This is mainly for logging purpose.
+		std::string dcList;
+		for (const auto& dc : dcIds) {
+			if (!dcList.empty()) {
+				dcList += ',';
 			}
+			dcList += printable(dc);
 		}
 
-		results.reserve(results.size() + id_worker.size());
-		for (int fitness = ProcessClass::BestFit; fitness != ProcessClass::NeverAssign && !bCompleted; fitness++) {
+		logServerSet = Reference<LocalitySet>(new LocalityMap<WorkerDetails>());
+		logServerMap = (LocalityMap<WorkerDetails>*)logServerSet.getPtr();
+
+		// Populate `unavailableLocals` and log the reason why the worker is considered as unavailable.
+		auto logWorkerUnavailable = [this, &unavailableLocals, &dcList](const std::string& reason,
+		                                                                const WorkerDetails& details,
+		                                                                ProcessClass::Fitness fitness) {
+			unavailableLocals.push_back(details.interf.locality);
+
+			// Note that the recruitment happens only during initial database creation and recovery. So these trace
+			// events should be sparse.
+			TraceEvent("GetTLogTeamWorkerUnavailable", id)
+			    .detail("Reason", reason)
+			    .detail("WorkerID", details.interf.id())
+			    .detail("WorkerDC", details.interf.locality.dcId())
+			    .detail("Address", details.interf.addresses().toString())
+			    .detail("Fitness", fitness)
+			    .detail("RecruitmentDcIds", dcList);
+		};
+
+		// Go through all the workers to list all the workers that can be recruited.
+		for (const auto& [worker_process_id, worker_info] : id_worker) {
+			const auto& worker_details = worker_info.details;
+			auto fitness = worker_details.processClass.machineClassFitness(ProcessClass::TLog);
+			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), worker_details.interf.id()) !=
+			    exclusionWorkerIds.end()) {
+				logWorkerUnavailable("Worker is excluded", worker_details, fitness);
+				continue;
+			}
+
+			if (!workerAvailable(worker_info, checkStable)) {
+				logWorkerUnavailable("Worker is not available", worker_details, fitness);
+				continue;
+			}
+
+			if (conf.isExcludedServer(worker_details.interf.addresses())) {
+				logWorkerUnavailable("Worker server is excluded from the cluster", worker_details, fitness);
+				continue;
+			}
+
+			if (fitness == ProcessClass::NeverAssign) {
+				logWorkerUnavailable("Worker's fitness is NeverAssign", worker_details, fitness);
+				continue;
+			}
+
+			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
+				logWorkerUnavailable("Worker is not in the target DC", worker_details, fitness);
+				continue;
+			}
+
+			// This worker is a candidate for TLog recruitment.
+			bool inCCDC = worker_details.interf.locality.dcId() == clusterControllerDcId;
+			fitness_workers[std::make_tuple(fitness, id_used[worker_process_id], worker_details.degraded, inCCDC)]
+			    .push_back(worker_details);
+		}
+
+		//  FIXME: it's not clear whether this is necessary.
+		for (int fitness = ProcessClass::BestFit; fitness != ProcessClass::NeverAssign; fitness++) {
 			auto fitnessEnum = (ProcessClass::Fitness)fitness;
 			for (int addingDegraded = 0; addingDegraded < 2; addingDegraded++) {
-				auto workerItr = fitness_workers.find(std::make_pair(fitnessEnum, (bool)addingDegraded));
-				if (workerItr != fitness_workers.end()) {
-					for (auto& worker : workerItr->second) {
-						logServerMap->add(worker.interf.locality, &worker);
-					}
-				}
+				fitness_workers[std::make_tuple(fitnessEnum, 0, addingDegraded, false)];
+			}
+		}
+		results.reserve(results.size() + id_worker.size());
+		for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
+			auto fitness = std::get<0>(workerIter->first);
+			auto used = std::get<1>(workerIter->first);
+			auto addingDegraded = std::get<2>(workerIter->first);
+			ASSERT(fitness < ProcessClass::NeverAssign);
+			if (bCompleted) {
+				break;
+			}
 
-				if (logServerSet->size() < (addingDegraded == 0 ? desired : required)) {
-				} else if (logServerSet->size() == required || logServerSet->size() <= desired) {
-					if (logServerSet->validate(policy)) {
-						for (auto& object : logServerMap->getObjects()) {
-							results.push_back(*object);
-						}
-						bCompleted = true;
-						break;
+			for (auto& worker : workerIter->second) {
+				logServerMap->add(worker.interf.locality, &worker);
+			}
+
+			if (logServerSet->size() < (std::get<2>(workerIter->first) ? required : desired)) {
+			} else if (logServerSet->size() == required || logServerSet->size() <= desired) {
+				if (logServerSet->validate(policy)) {
+					for (auto& object : logServerMap->getObjects()) {
+						results.push_back(*object);
 					}
-					TraceEvent(SevWarn, "GWFTADNotAcceptable", id)
+					bCompleted = true;
+					break;
+				}
+				TraceEvent(SevWarn, "GWFTADNotAcceptable", id)
+				    .detail("DcIds", dcList)
+				    .detail("Fitness", fitness)
+				    .detail("Processes", logServerSet->size())
+				    .detail("Required", required)
+				    .detail("TLogPolicy", policy->info())
+				    .detail("DesiredLogs", desired)
+				    .detail("Used", used)
+				    .detail("AddingDegraded", addingDegraded);
+			}
+			// Try to select the desired size, if larger
+			else {
+				std::vector<LocalityEntry> bestSet;
+				std::vector<LocalityData> tLocalities;
+
+				// Try to find the best team of servers to fulfill the policy
+				if (findBestPolicySet(bestSet,
+				                      logServerSet,
+				                      policy,
+				                      desired,
+				                      SERVER_KNOBS->POLICY_RATING_TESTS,
+				                      SERVER_KNOBS->POLICY_GENERATIONS)) {
+					results.reserve(results.size() + bestSet.size());
+					for (auto& entry : bestSet) {
+						auto object = logServerMap->getObject(entry);
+						ASSERT(object);
+						results.push_back(*object);
+						tLocalities.push_back(object->interf.locality);
+					}
+					TraceEvent("GWFTADBestResults", id)
+					    .detail("DcIds", dcList)
 					    .detail("Fitness", fitness)
+					    .detail("Used", used)
 					    .detail("Processes", logServerSet->size())
-					    .detail("Required", required)
+					    .detail("BestCount", bestSet.size())
+					    .detail("BestZones", ::describeZones(tLocalities))
+					    .detail("BestDataHalls", ::describeDataHalls(tLocalities))
 					    .detail("TLogPolicy", policy->info())
+					    .detail("TotalResults", results.size())
 					    .detail("DesiredLogs", desired)
 					    .detail("AddingDegraded", addingDegraded);
+					bCompleted = true;
+					break;
 				}
-				// Try to select the desired size, if larger
-				else {
-					std::vector<LocalityEntry> bestSet;
-					std::vector<LocalityData> tLocalities;
-
-					// Try to find the best team of servers to fulfill the policy
-					if (findBestPolicySet(bestSet,
-					                      logServerSet,
-					                      policy,
-					                      desired,
-					                      SERVER_KNOBS->POLICY_RATING_TESTS,
-					                      SERVER_KNOBS->POLICY_GENERATIONS)) {
-						results.reserve(results.size() + bestSet.size());
-						for (auto& entry : bestSet) {
-							auto object = logServerMap->getObject(entry);
-							ASSERT(object);
-							results.push_back(*object);
-							tLocalities.push_back(object->interf.locality);
-						}
-						TraceEvent("GWFTADBestResults", id)
-						    .detail("Fitness", fitness)
-						    .detail("Processes", logServerSet->size())
-						    .detail("BestCount", bestSet.size())
-						    .detail("BestZones", ::describeZones(tLocalities))
-						    .detail("BestDataHalls", ::describeDataHalls(tLocalities))
-						    .detail("TLogPolicy", policy->info())
-						    .detail("TotalResults", results.size())
-						    .detail("DesiredLogs", desired)
-						    .detail("AddingDegraded", addingDegraded);
-						bCompleted = true;
-						break;
-					}
-					TraceEvent(SevWarn, "GWFTADNoBest", id)
-					    .detail("Fitness", fitness)
-					    .detail("Processes", logServerSet->size())
-					    .detail("Required", required)
-					    .detail("TLogPolicy", policy->info())
-					    .detail("DesiredLogs", desired)
-					    .detail("AddingDegraded", addingDegraded);
-				}
+				TraceEvent(SevWarn, "GWFTADNoBest", id)
+				    .detail("DcIds", dcList)
+				    .detail("Fitness", fitness)
+				    .detail("Used", used)
+				    .detail("Processes", logServerSet->size())
+				    .detail("Required", required)
+				    .detail("TLogPolicy", policy->info())
+				    .detail("DesiredLogs", desired)
+				    .detail("AddingDegraded", addingDegraded);
 			}
 		}
 
@@ -431,6 +505,7 @@ public:
 			}
 
 			TraceEvent(SevWarn, "GetTLogTeamFailed")
+			    .detail("DcIds", dcList)
 			    .detail("Policy", policy->info())
 			    .detail("Processes", logServerSet->size())
 			    .detail("Workers", id_worker.size())
@@ -457,6 +532,7 @@ public:
 		}
 
 		TraceEvent("GetTLogTeamDone")
+		    .detail("DcIds", dcList)
 		    .detail("Completed", bCompleted)
 		    .detail("Policy", policy->info())
 		    .detail("Results", results.size())
@@ -1095,12 +1171,14 @@ public:
 					                                                    req.configuration,
 					                                                    used,
 					                                                    first_commit_proxy);
+
 					auto grv_proxies = getWorkersForRoleInDatacenter(dcId,
 					                                                 ProcessClass::GrvProxy,
 					                                                 req.configuration.getDesiredGrvProxies(),
 					                                                 req.configuration,
 					                                                 used,
 					                                                 first_grv_proxy);
+
 					auto resolvers = getWorkersForRoleInDatacenter(dcId,
 					                                               ProcessClass::Resolver,
 					                                               req.configuration.getDesiredResolvers(),
@@ -1154,6 +1232,7 @@ public:
 			}
 
 			if (bestDC != clusterControllerDcId) {
+				TraceEvent("BestDCIsNotClusterDC");
 				vector<Optional<Key>> dcPriority;
 				dcPriority.push_back(bestDC);
 				desiredDcIds.set(dcPriority);
@@ -1259,6 +1338,9 @@ public:
 	}
 
 	// FIXME: determine when to fail the cluster controller when a primaryDC has not been set
+
+	// This function returns true when the cluster controller determines it is worth forcing
+	// a master recovery in order to change the recruited processes in the transaction subsystem.
 	bool betterMasterExists() {
 		const ServerDBInfo dbi = db.serverInfo->get();
 
@@ -1426,13 +1508,15 @@ public:
 
 		bool oldSatelliteFallback = false;
 
-		for (auto& logSet : dbi.logSystemConfig.tLogs) {
-			if (region.satelliteTLogPolicy.isValid() && logSet.isLocal && logSet.locality == tagLocalitySatellite) {
-				oldSatelliteFallback = logSet.tLogPolicy->info() != region.satelliteTLogPolicy->info();
-				ASSERT(!oldSatelliteFallback ||
-				       (region.satelliteTLogPolicyFallback.isValid() &&
-				        logSet.tLogPolicy->info() == region.satelliteTLogPolicyFallback->info()));
-				break;
+		if (region.satelliteTLogPolicyFallback.isValid()) {
+			for (auto& logSet : dbi.logSystemConfig.tLogs) {
+				if (region.satelliteTLogPolicy.isValid() && logSet.isLocal && logSet.locality == tagLocalitySatellite) {
+					oldSatelliteFallback = logSet.tLogPolicy->info() != region.satelliteTLogPolicy->info();
+					ASSERT(!oldSatelliteFallback ||
+					       (region.satelliteTLogPolicyFallback.isValid() &&
+					        logSet.tLogPolicy->info() == region.satelliteTLogPolicyFallback->info()));
+					break;
+				}
 			}
 		}
 
@@ -1567,12 +1651,26 @@ public:
 			return false;
 		}
 
+		// Because a configuration with fewer proxies or resolvers does not cause this function to fail,
+		// we need an extra check to determine if the total number of processes has been reduced.
+		// This is mainly helpful in avoiding situations where killing a degraded process
+		// would result in a configuration with less total processes than desired.
+		if (oldTLogFit.count + oldInFit.proxy.count + oldInFit.grvProxy.count + oldInFit.resolver.count >
+		    newTLogFit.count + newInFit.proxy.count + newInFit.grvProxy.count + newInFit.resolver.count) {
+			return false;
+		}
+
 		// Check backup worker fitness
 		RoleFitness oldBackupWorkersFit(backup_workers, ProcessClass::Backup);
 		const int nBackup = backup_addresses.size();
-		RoleFitness newBackupWorkersFit(
-		    getWorkersForRoleInDatacenter(clusterControllerDcId, ProcessClass::Backup, nBackup, db.config, id_used),
-		    ProcessClass::Backup);
+		RoleFitness newBackupWorkersFit(getWorkersForRoleInDatacenter(clusterControllerDcId,
+		                                                              ProcessClass::Backup,
+		                                                              nBackup,
+		                                                              db.config,
+		                                                              id_used,
+		                                                              Optional<WorkerFitnessInfo>(),
+		                                                              true),
+		                                ProcessClass::Backup);
 
 		if (oldTLogFit > newTLogFit || oldInFit > newInFit || oldSatelliteTLogFit > newSatelliteTLogFit ||
 		    oldRemoteTLogFit > newRemoteTLogFit || oldLogRoutersFit > newLogRoutersFit ||

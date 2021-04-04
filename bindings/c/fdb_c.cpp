@@ -129,16 +129,7 @@ extern "C" DLLEXPORT fdb_error_t fdb_run_network() {
 	CATCH_AND_RETURN(API->runNetwork(););
 }
 
-#ifdef ADDRESS_SANITIZER
-extern "C" void __lsan_do_leak_check();
-#endif
-
 extern "C" DLLEXPORT fdb_error_t fdb_stop_network() {
-#ifdef ADDRESS_SANITIZER
-	// fdb_stop_network intentionally leaks a bunch of memory, so let's do the
-	// leak check before that so it's meaningful
-	__lsan_do_leak_check();
-#endif
 	CATCH_AND_RETURN(API->stopNetwork(););
 }
 
@@ -364,6 +355,13 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_create_snapshot(FDBDatabase* db,
 	return (FDBFuture*)(DB(db)
 	                        ->createSnapshot(StringRef(uid, uid_length), StringRef(snap_command, snap_command_length))
 	                        .extractPtr());
+}
+
+// Get network thread busyness (updated every 1s)
+// A value of 0 indicates that the client is more or less idle
+// A value of 1 (or more) indicates that the client is saturated
+extern "C" DLLEXPORT double fdb_database_get_main_thread_busyness(FDBDatabase* d) {
+	return DB(d)->getMainThreadBusyness();
 }
 
 extern "C" DLLEXPORT void fdb_transaction_destroy(FDBTransaction* tr) {

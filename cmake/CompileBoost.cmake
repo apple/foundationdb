@@ -10,7 +10,7 @@ function(compile_boost)
   set(BOOST_COMPILER_FLAGS -fvisibility=hidden -fPIC -std=c++14 -w)
   set(BOOST_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
   if(APPLE)
-    set(BOOST_TOOLSET "darwin")
+    set(BOOST_TOOLSET "clang-darwin")
     # this is to fix a weird macOS issue -- by default
     # cmake would otherwise pass a compiler that can't
     # compile boost

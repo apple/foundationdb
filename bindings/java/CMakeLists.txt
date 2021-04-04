@@ -259,6 +259,10 @@ if(NOT OPEN_FOR_IDE)
   set(TEST_CP ${tests_jar} ${target_jar})
 
   if(RUN_JUNIT_TESTS OR RUN_JAVA_INTEGRATION_TESTS)
+    if (USE_SANITIZER)
+      message(WARNING "Cannot run java tests with sanitizer builds")
+      return()
+    endif()
     # We use Junit libraries for both JUnit and integration testing structures, so download in either case
     # https://search.maven.org/remotecontent?filepath=org/junit/jupiter/junit-jupiter-engine/5.7.1/junit-jupiter-engine-5.7.1.jar
     file(DOWNLOAD "https://search.maven.org/remotecontent?filepath=org/junit/jupiter/junit-jupiter-engine/5.7.1/junit-jupiter-engine-5.7.1.jar"

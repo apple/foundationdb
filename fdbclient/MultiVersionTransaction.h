@@ -80,6 +80,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                     int uidLength,
 	                                     uint8_t const* snapshotCommmand,
 	                                     int snapshotCommandLength);
+	double (*databaseGetMainThreadBusyness)(FDBDatabase* database);
 
 	// Transaction
 	fdb_error_t (*transactionSetOption)(FDBTransaction* tr,
@@ -262,6 +263,7 @@ public:
 
 	Reference<ITransaction> createTransaction() override;
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
+	double getMainThreadBusyness() override;
 
 	void addref() override { ThreadSafeReferenceCounted<DLDatabase>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLDatabase>::delref(); }
@@ -422,6 +424,7 @@ public:
 
 	Reference<ITransaction> createTransaction() override;
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
+	double getMainThreadBusyness() override;
 
 	void addref() override { ThreadSafeReferenceCounted<MultiVersionDatabase>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<MultiVersionDatabase>::delref(); }

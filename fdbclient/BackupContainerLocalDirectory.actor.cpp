@@ -31,21 +31,29 @@ namespace {
 class BackupFile : public IBackupFile, ReferenceCounted<BackupFile> {
 public:
 	BackupFile(const std::string& fileName, Reference<IAsyncFile> file, const std::string& finalFullPath)
-	  : IBackupFile(fileName), m_file(file), m_finalFullPath(finalFullPath), m_writeOffset(0) {
-		m_buffer.reserve(m_buffer.arena(), CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK);
+	  : IBackupFile(fileName), m_file(file), m_finalFullPath(finalFullPath), m_writeOffset(0), m_blockSize(CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK) {
+		if (BUGGIFY) {
+			m_blockSize = deterministicRandom()->randomInt(100, 20000);
+		}
+		m_buffer.reserve(m_buffer.arena(), m_blockSize);
 	}
 
 	Future<Void> append(const void* data, int len) override {
 		m_buffer.append(m_buffer.arena(), (const uint8_t*)data, len);
 
-		if (m_buffer.size() >= CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK) {
-			return flush(CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK);
+		if (m_buffer.size() >= m_blockSize) {
+			return flush(m_blockSize);
 		}
 
 		return Void();
 	}
 
 	Future<Void> flush(int size) {
+		// Avoid empty write
+		if (size == 0) {
+			return Void();
+		}
+
 		ASSERT(size <= m_buffer.size());
 
 		// Keep a reference to the old buffer
@@ -66,7 +74,7 @@ public:
 		wait(f->m_file->sync());
 		std::string name = f->m_file->getFilename();
 		f->m_file.clear();
-		renameFile(name, f->m_finalFullPath);
+		wait(IAsyncFileSystem::filesystem()->renameFile(name, f->m_finalFullPath));
 		return Void();
 	}
 
@@ -82,6 +90,7 @@ private:
 	Standalone<VectorRef<uint8_t>> m_buffer;
 	int64_t m_writeOffset;
 	std::string m_finalFullPath;
+	int m_blockSize;
 };
 
 ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(std::string path, std::string m_path) {
@@ -249,7 +258,7 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 }
 
 Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const std::string& path) {
-	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
+	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
 	            IAsyncFile::OPEN_READWRITE;
 	std::string fullPath = joinPath(m_path, path);
 	platform::createDirectory(parentDirectory(fullPath));
