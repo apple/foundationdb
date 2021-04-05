@@ -461,7 +461,7 @@ ACTOR Future<Void> testRangeReadResultWriterPassThrough(KVStoreTestWorkload* wor
 		// result of range read using the resultWriter interface
 		wait(test.store->readRange(range, resultWriter, rowLimit));
 
-		// make sure the result from both API's are the same
+		// make sure the result from both range read functions are the same
 		ASSERT(resultWriter->result.size() == kv.size());
 		for (int i = 0; i < kv.size(); i++) {
 			ASSERT(kv[i].key == resultWriter->result[i].key);
