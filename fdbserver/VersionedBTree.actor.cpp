@@ -8045,21 +8045,23 @@ TEST_CASE("!/redwood/performance/set") {
 		deleteFile(pagerFile);
 	}
 
-	state int pageSize = SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
-	state int64_t pageCacheBytes = FLOW_KNOBS->PAGE_CACHE_4K;
-	state int nodeCount = 1e9;
-	state int maxRecordsPerCommit = 20000;
-	state int maxKVBytesPerCommit = 20e6;
-	state int64_t kvBytesTarget = 4e9;
-	state int minKeyPrefixBytes = 25;
-	state int maxKeyPrefixBytes = 25;
-	state int minValueSize = 100;
-	state int maxValueSize = 500;
-	state int minConsecutiveRun = 1;
-	state int maxConsecutiveRun = 100000;
-	state char firstKeyChar = 'a';
-	state char lastKeyChar = 'm';
-	state Version remapCleanupWindow = SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW;
+	state int pageSize = UnitTestCollection::getIntParam("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
+	state int64_t pageCacheBytes =
+	    UnitTestCollection::getIntParam("pageCacheBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
+	state int nodeCount = UnitTestCollection::getIntParam("nodeCount").orDefault(1e9);
+	state int maxRecordsPerCommit = UnitTestCollection::getIntParam("maxRecordsPerCommit").orDefault(20000);
+	state int maxKVBytesPerCommit = UnitTestCollection::getIntParam("maxKVBytesPerCommit").orDefault(20e6);
+	state int64_t kvBytesTarget = UnitTestCollection::getIntParam("kvBytesTarget").orDefault(4e9);
+	state int minKeyPrefixBytes = UnitTestCollection::getIntParam("minKeyPrefixBytes").orDefault(25);
+	state int maxKeyPrefixBytes = UnitTestCollection::getIntParam("maxKeyPrefixBytes").orDefault(25);
+	state int minValueSize = UnitTestCollection::getIntParam("minValueSize").orDefault(100);
+	state int maxValueSize = UnitTestCollection::getIntParam("maxValueSize").orDefault(500);
+	state int minConsecutiveRun = UnitTestCollection::getIntParam("minConsecutiveRun").orDefault(1);
+	state int maxConsecutiveRun = UnitTestCollection::getIntParam("maxConsecutiveRun").orDefault(100);
+	state char firstKeyChar = UnitTestCollection::getParam("firstKeyChar").orDefault("a")[0];
+	state char lastKeyChar = UnitTestCollection::getParam("lastKeyChar").orDefault("m")[0];
+	state Version remapCleanupWindow =
+	    UnitTestCollection::getIntParam("remapCleanupWindow").orDefault(SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW);
 
 	printf("pageSize: %d\n", pageSize);
 	printf("pageCacheBytes: %" PRId64 "\n", pageCacheBytes);
