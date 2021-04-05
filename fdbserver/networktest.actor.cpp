@@ -517,13 +517,6 @@ struct P2PNetworkTest {
 		       self->listeners.size(),
 		       self->remotes.size(),
 		       self->connectionsOut);
-		printf("Request size: %s\n", self->requestBytes.toString().c_str());
-		printf("Response size: %s\n", self->replyBytes.toString().c_str());
-		printf("Requests per outgoing session: %d\n", self->requests.toString().c_str());
-		printf("Delay before socket read: %s\n", self->waitReadMilliseconds.toString().c_str());
-		printf("Delay before socket write: %s\n", self->waitWriteMilliseconds.toString().c_str());
-		printf("Delay before session close: %s\n", self->idleMilliseconds.toString().c_str());
-		printf("Send/Recv size %d bytes\n", FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
 
 		for (auto n : self->remotes) {
 			printf("Remote: %s\n", n.toString().c_str());
@@ -532,6 +525,19 @@ struct P2PNetworkTest {
 		for (auto el : self->listeners) {
 			printf("Listener: %s\n", el->getListenAddress().toString().c_str());
 			actors.add(incoming(self, el));
+		}
+
+		printf("Request size: %s\n", self->requestBytes.toString().c_str());
+		printf("Response size: %s\n", self->replyBytes.toString().c_str());
+		printf("Requests per outgoing session: %s\n", self->requests.toString().c_str());
+		printf("Delay before socket read: %s\n", self->waitReadMilliseconds.toString().c_str());
+		printf("Delay before socket write: %s\n", self->waitWriteMilliseconds.toString().c_str());
+		printf("Delay before session close: %s\n", self->idleMilliseconds.toString().c_str());
+		printf("Send/Recv size %d bytes\n", FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
+
+		if ((self->remotes.empty() || self->connectionsOut == 0) && self->listeners.empty()) {
+			printf("No listeners and no remotes or connectionsOut, so there is nothing to do!\n");
+			ASSERT((!self->remotes.empty() && (self->connectionsOut > 0)) || !self->listeners.empty());
 		}
 
 		if (!self->remotes.empty()) {
@@ -549,27 +555,30 @@ struct P2PNetworkTest {
 	Future<Void> run() { return run_impl(this); }
 };
 
-int getEnvInt(const char* name, int defaultValue = 0) {
-	const char* val = getenv(name);
-	return val != nullptr ? atol(val) : defaultValue;
-}
-
-std::string getEnvStr(const char* name, std::string defaultValue = "") {
-	const char* val = getenv(name);
-	return val != nullptr ? val : defaultValue;
-}
-
-// TODO: Remove this hacky thing and make a "networkp2ptest" role in fdbserver
+// Peer-to-Peer network test.
+// One or more instances can be run and set to talk to each other.
+// Each instance
+//   - listens on 0 or more listenerAddresses
+//   - maintains 0 or more connectionsOut at a time, each to a random choice from remoteAddresses
+// Address lists are a string of comma-separated IP:port[:tls] strings.
+//
+// The other arguments can be specified as "fixedValue" or "minValue:maxValue".
+// Each outgoing connection will live for a random requests count.
+// Each request will
+//   - send a random requestBytes sized message
+//   - wait for a random replyBytes sized response.
+// The client will close the connection after a random idleMilliseconds.
+// Reads and writes can optionally preceded by random delays, waitReadMilliseconds and waitWriteMilliseconds.
 TEST_CASE("!p2ptest") {
-	state P2PNetworkTest p2p(getEnvStr("listenerAddresses", ""),
-	                         getEnvStr("remoteAddresses", ""),
-	                         getEnvInt("connectionsOut", 0),
-	                         getEnvStr("requestBytes", "0"),
-	                         getEnvStr("replyBytes", "0"),
-	                         getEnvStr("requests", "0"),
-	                         getEnvStr("idleMilliseconds", "0"),
-	                         getEnvStr("waitReadMilliseconds", "0"),
-	                         getEnvStr("waitWriteMilliseconds", "0"));
+	state P2PNetworkTest p2p(UnitTestCollection::getParam("listenerAddresses").orDefault(""),
+	                         UnitTestCollection::getParam("remoteAddresses").orDefault(""),
+	                         UnitTestCollection::getIntParam("connectionsOut").orDefault(1),
+	                         UnitTestCollection::getParam("requestBytes").orDefault("50:100"),
+	                         UnitTestCollection::getParam("replyBytes").orDefault("500:1000"),
+	                         UnitTestCollection::getParam("requests").orDefault("10:10000"),
+	                         UnitTestCollection::getParam("idleMilliseconds").orDefault("0"),
+	                         UnitTestCollection::getParam("waitReadMilliseconds").orDefault("0"),
+	                         UnitTestCollection::getParam("waitWriteMilliseconds").orDefault("0"));
 
 	wait(p2p.run());
 	return Void();
