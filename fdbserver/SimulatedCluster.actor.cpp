@@ -1691,7 +1691,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	} else if (testConfig.extraDB == 2) {
 		// The DR database is a new database
 		g_simulator.extraDB =
-		    new ClusterConnectionString(extraCoordinatorAddresses, LiteralStringRef("ExtraCluster:0"));		
+		    new ClusterConnectionString(extraCoordinatorAddresses, LiteralStringRef("ExtraCluster:0"));
 	} else if (testConfig.extraDB == 3) {
 		// The DR database is the same database
 		g_simulator.extraDB = new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("TestCluster:0"));
