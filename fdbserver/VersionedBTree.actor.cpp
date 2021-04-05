@@ -3733,6 +3733,7 @@ private:
 	Future<int> m_lazyClearActor;
 	bool m_lazyClearStop;
 
+	// Describes a range of a vector of records that should be built into a BTreePage
 	struct PageToBuild {
 		PageToBuild(int index, int blockSize)
 		  : startIndex(index), count(0), pageSize(blockSize),
@@ -3740,26 +3741,32 @@ private:
 		    largeDeltaTree(pageSize > BTreePage::BinaryTree::SmallSizeLimit), blockSize(blockSize), blockCount(1),
 		    kvBytes(0) {}
 
-		int startIndex;
-		int count;
-		int pageSize;
-		int bytesLeft;
-		bool largeDeltaTree;
-		int blockSize;
-		int blockCount;
-		int kvBytes;
+		int startIndex; // Index of the first record
+		int count; // Number of records added to the page
+		int pageSize; // Page size required to hold a BTreePage of the added records, which is a multiple of blockSize
+		int bytesLeft; // Bytes in pageSize that are unused by the BTreePage so far
+		bool largeDeltaTree; // Whether or not the DeltaTree in the generated page is in the 'large' size range
+		int blockSize; // Base block size by which pageSize can be incremented
+		int blockCount; // The number of blocks in pageSize
+		int kvBytes; // The amount of user key/value bytes added to the page
 
+		// Number of bytes used by the generated/serialized BTreePage
 		int size() const { return pageSize - bytesLeft; }
 
+		// Used fraction of pageSize bytes
 		double usedFraction() const { return (double)size() / pageSize; }
 
+		// Unused fraction of pageSize bytes
 		double slackFraction() const { return (double)bytesLeft / pageSize; }
 
+		// Fraction of PageSize in use by key or value string bytes, disregarding all overhead including string sizes
 		double kvFraction() const { return (double)kvBytes / pageSize; }
 
-		int endIndex() const { return startIndex + count; }
-
+		// Index of the last record to be included in this page
 		int lastIndex() const { return endIndex() - 1; }
+
+		// Index of the first record NOT included in this page
+		int endIndex() const { return startIndex + count; }
 
 		std::string toString() const {
 			return format(
@@ -3836,6 +3843,7 @@ private:
 		}
 	};
 
+	// Scans a vector of records and decides on page split points, returning a vector of 1+ pages to build
 	static std::vector<PageToBuild> splitPages(const RedwoodRecordRef* lowerBound,
 	                                           const RedwoodRecordRef* upperBound,
 	                                           int prefixLen,

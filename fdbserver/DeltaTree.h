@@ -230,7 +230,6 @@ struct DeltaTree {
 	inline Node& newNode() { return *(Node*)((uint8_t*)this + size()); }
 
 public:
-
 	struct DecodedNode {
 		DecodedNode() {}
 
