@@ -569,7 +569,7 @@ struct P2PNetworkTest {
 //   - wait for a random replyBytes sized response.
 // The client will close the connection after a random idleMilliseconds.
 // Reads and writes can optionally preceded by random delays, waitReadMilliseconds and waitWriteMilliseconds.
-TEST_CASE("!p2ptest") {
+TEST_CASE(":/network/p2ptest") {
 	state P2PNetworkTest p2p(UnitTestCollection::getParam("listenerAddresses").orDefault(""),
 	                         UnitTestCollection::getParam("remoteAddresses").orDefault(""),
 	                         UnitTestCollection::getIntParam("connectionsOut").orDefault(1),

@@ -6956,7 +6956,7 @@ RedwoodRecordRef randomRedwoodRecordRef(const std::string& keyBuffer, const std:
 	return rec;
 }
 
-TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
+TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 	ASSERT(RedwoodRecordRef::Delta::LengthFormatSizes[0] == 3);
 	ASSERT(RedwoodRecordRef::Delta::LengthFormatSizes[1] == 4);
 	ASSERT(RedwoodRecordRef::Delta::LengthFormatSizes[2] == 6);
@@ -7092,7 +7092,7 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 	return Void();
 }
 
-TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
+TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	// Sanity check on delta tree node format
 	ASSERT(DeltaTree<RedwoodRecordRef>::Node::headerSize(false) == 4);
 	ASSERT(DeltaTree<RedwoodRecordRef>::Node::headerSize(true) == 8);
@@ -7271,7 +7271,7 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	return Void();
 }
 
-TEST_CASE("!/redwood/correctness/unit/deltaTree/IntIntPair") {
+TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	const int N = 200;
 	IntIntPair prev = { 1, 0 };
 	IntIntPair next = { 10000, 10000 };
@@ -7615,7 +7615,7 @@ struct SimpleCounter {
 	std::string toString() { return format("%" PRId64 "/%.2f/%.2f", x, rate() / 1e6, avgRate() / 1e6); }
 };
 
-TEST_CASE("!/redwood/performance/mutationBuffer") {
+TEST_CASE(":/redwood/performance/mutationBuffer") {
 	// This test uses pregenerated short random keys
 	int count = 10e6;
 
@@ -7643,7 +7643,7 @@ TEST_CASE("!/redwood/performance/mutationBuffer") {
 	return Void();
 }
 
-TEST_CASE("!/redwood/correctness/btree") {
+TEST_CASE("/redwood/correctness/btree") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();
 
@@ -8003,7 +8003,7 @@ ACTOR Future<Void> randomScans(VersionedBTree* btree,
 	return Void();
 }
 
-TEST_CASE("!/redwood/correctness/pager/cow") {
+TEST_CASE(":/redwood/correctness/pager/cow") {
 	state std::string pagerFile = "unittest_pageFile.redwood";
 	printf("Deleting old test data\n");
 	deleteFile(pagerFile);
@@ -8030,7 +8030,7 @@ TEST_CASE("!/redwood/correctness/pager/cow") {
 	return Void();
 }
 
-TEST_CASE("!/redwood/performance/set") {
+TEST_CASE(":/redwood/performance/set") {
 	state SignalableActorCollection actors;
 
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
@@ -8543,7 +8543,7 @@ ACTOR Future<Void> doPrefixInsertComparison(int suffixSize,
 	return Void();
 }
 
-TEST_CASE("!/redwood/performance/prefixSizeComparison") {
+TEST_CASE(":/redwood/performance/prefixSizeComparison") {
 	state int suffixSize = 12;
 	state int valueSize = 100;
 	state int recordCountTarget = 100e6;
@@ -8564,7 +8564,7 @@ TEST_CASE("!/redwood/performance/prefixSizeComparison") {
 	return Void();
 }
 
-TEST_CASE("!/redwood/performance/sequentialInsert") {
+TEST_CASE(":/redwood/performance/sequentialInsert") {
 	state int prefixLen = 30;
 	state int valueSize = 100;
 	state int recordCountTarget = 100e6;
