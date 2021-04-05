@@ -68,6 +68,32 @@ bool WriteOnlySet<T, IndexType, CAPACITY>::erase(Index idx) {
 }
 
 template <class T, class IndexType, IndexType CAPACITY>
+bool WriteOnlySet<T, IndexType, CAPACITY>::replace(Index idx, const Reference<T>& lineage) {
+	auto lineagePtr = reinterpret_cast<uintptr_t>(lineage.getPtr());
+	ASSERT((lineagePtr % 2) == 0); // this needs to be at least 2-byte aligned
+
+	while (true) {
+		if (lineage.isValid()) {
+			lineage->addref();
+		}
+
+		auto ptr = _set[idx].load();
+		if (ptr & LOCK) {
+			_set[idx].store(lineagePtr);
+			return false;
+		} else {
+			if (_set[idx].compare_exchange_strong(ptr, lineagePtr)) {
+				if (ptr) {
+					reinterpret_cast<T*>(ptr)->delref();
+				}
+				_set[idx].store(lineagePtr);
+				return ptr != 0;
+			}
+		}
+	}
+}
+
+template <class T, class IndexType, IndexType CAPACITY>
 WriteOnlySet<T, IndexType, CAPACITY>::WriteOnlySet() : _set(CAPACITY) {
 	// insert the free indexes in reverse order
 	for (unsigned i = CAPACITY; i > 0; --i) {
@@ -103,8 +129,23 @@ std::vector<Reference<T>> WriteOnlySet<T, IndexType, CAPACITY>::copy() {
 	return result;
 }
 
+template <class T, class IndexType>
+WriteOnlyVariable<T, IndexType>::WriteOnlyVariable() : WriteOnlySet<T, IndexType, 1>() {}
+
+template <class T, class IndexType>
+Reference<T> WriteOnlyVariable<T, IndexType>::get() {
+	auto result = WriteOnlySet<T, IndexType, 1>::copy();
+	return result.size() ? result.at(0) : Reference<T>();
+}
+
+template <class T, class IndexType>
+bool WriteOnlyVariable<T, IndexType>::replace(const Reference<T>& element) {
+	return WriteOnlySet<T, IndexType, 1>::replace(0, element);
+}
+
 // Explicit instantiation
 template class WriteOnlySet<ActorLineage, unsigned, 1024>;
+template class WriteOnlyVariable<ActorLineage, unsigned>;
 
 // testing code
 namespace {

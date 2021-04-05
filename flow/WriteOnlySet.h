@@ -72,6 +72,17 @@ public:
 	 *      later. Note that at the time the return value is checked, \ref delref might already have been called.
 	 */
 	bool erase(Index idx);
+
+	/**
+	 * Replaces the object associated with \p idx with \p lineage.
+	 *
+	 * \ret Whether the reference count of the replaced object was decremented. Usually the return value is only
+	 *      interesting for testing and benchmarking purposes and will in most cases be ignored. If \ref delref
+	 *      wasn't called, it will be called later. Note that at the time the return value is checked, \ref delref
+	 *      might already have been called.
+	 */
+	bool replace(Index idx, const Reference<T>& lineage);
+
 	/**
 	 * Copies all elements that are stored in the set into a vector. This copy operation does NOT provide a snapshot of
 	 * the data structure. The contract is weak:
@@ -82,7 +93,7 @@ public:
 	 */
 	std::vector<Reference<T>> copy();
 
-private:
+protected:
 	// the implementation of erase -- the wrapper just makes the function a bit more readable.
 	bool eraseImpl(Index idx);
 
@@ -110,6 +121,39 @@ private:
 	// \ref copy will consume all elements from this freeList each time it runs and decrements the refcount for each
 	// element.
 	boost::lockfree::queue<T*, boost::lockfree::fixed_sized<true>, boost::lockfree::capacity<CAPACITY>> freeList;
+};
+
+/**
+ * Provides a thread safe, lock-free write only variable.
+ *
+ * Template parameters:
+ * \param T The type to store.
+ * \param IndexType The type used as an index
+ * \pre T implements `void addref() const` and `void delref() const`
+ * \pre IndexType must have a copy constructor
+ * \pre IndexType must have a trivial assignment operator
+ * \pre IndexType must have a trivial destructor
+ * \pre IndexType can be used as an index into a std::vector
+ */
+template <class T, class IndexType>
+class WriteOnlyVariable : private WriteOnlySet<T, IndexType, 1> {
+public:
+	explicit WriteOnlyVariable();
+
+	/**
+	 * Returns a copied reference to the stored variable.
+	 */
+	Reference<T> get();
+
+	/**
+	 * Replaces the variable with \p lineage. \p lineage is permitted to be an invalid pointer.
+	 *
+	 * \ret Whether the reference count of the replaced object was decremented. Note that if the reference being replaced
+	 *      is invalid, this function will always return false. If \ref delref wasn't called and the reference was valid,
+	 *      it will be called later. Note that at the time the return value is checked, \ref delref might already have
+	 *      been called.
+	 */
+	bool replace(const Reference<T>& element);
 };
 
 class ActorLineage;

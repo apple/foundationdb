@@ -2494,6 +2494,10 @@ Future<std::time_t> Sim2FileSystem::lastWriteTime(const std::string& filename) {
 	return fileWrites[filename];
 }
 
+ActorLineageSet& Sim2FileSystem::getActorLineageSet() {
+	return actorLineageSet;
+}
+
 void Sim2FileSystem::newFileSystem() {
 	g_network->setGlobal(INetwork::enFileSystem, (flowGlobalType) new Sim2FileSystem());
 }

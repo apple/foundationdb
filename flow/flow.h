@@ -50,6 +50,7 @@
 #include "flow/ThreadPrimitives.h"
 #include "flow/network.h"
 #include "flow/FileIdentifier.h"
+#include "flow/WriteOnlySet.h"
 
 #include <boost/version.hpp>
 
@@ -500,6 +501,7 @@ public:
 };
 
 extern thread_local Reference<ActorLineage> currentLineage;
+extern WriteOnlyVariable<ActorLineage, unsigned> currentLineageThreadSafe;
 
 // This class can be used in order to modify all lineage properties
 // of actors created within a (non-actor) scope
@@ -509,14 +511,21 @@ struct LocalLineage {
 	LocalLineage() {
 		oldLineage = currentLineage;
 		currentLineage = lineage;
+		currentLineageThreadSafe.replace(lineage);
 	}
-	~LocalLineage() { currentLineage = oldLineage; }
+	~LocalLineage() {
+		currentLineage = oldLineage;
+		currentLineageThreadSafe.replace(oldLineage);
+	}
 };
 
 struct restore_lineage {
 	Reference<ActorLineage> prev;
 	restore_lineage() : prev(currentLineage) {}
-	~restore_lineage() { currentLineage = prev; }
+	~restore_lineage() {
+		currentLineage = prev;
+		currentLineageThreadSafe.replace(prev);
+	}
 };
 
 struct StackLineage : LineageProperties<StackLineage> {
@@ -1108,12 +1117,14 @@ struct Actor : SAV<ReturnValue> {
 	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(0) {
 		/*++actorCount;*/
 		currentLineage = lineage;
+		currentLineageThreadSafe.replace(lineage);
 	}
 	//~Actor() { --actorCount; }
 
 	Reference<ActorLineage> setLineage() {
 		auto res = currentLineage;
 		currentLineage = lineage;
+		currentLineageThreadSafe.replace(lineage);
 		return res;
 	}
 };
@@ -1128,12 +1139,14 @@ struct Actor<void> {
 	Actor() : actor_wait_state(0) {
 		/*++actorCount;*/
 		currentLineage = lineage;
+		currentLineageThreadSafe.replace(lineage);
 	}
 	//~Actor() { --actorCount; }
 
 	Reference<ActorLineage> setLineage() {
 		auto res = currentLineage;
 		currentLineage = lineage;
+		currentLineageThreadSafe.replace(lineage);
 		return res;
 	}
 };
