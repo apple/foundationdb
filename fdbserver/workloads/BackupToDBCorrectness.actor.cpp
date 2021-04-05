@@ -687,6 +687,8 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				wait(success(restoreTool.waitBackup(cx, self->restoreTag)));
 				wait(restoreTool.unlockBackup(cx, self->restoreTag));
 
+				// Make sure no more data is written to the restored range
+				// after the restore completes.
 				state std::vector<Standalone<RangeResultRef>> res1 = wait(readRanges(cx, restoreRange, self->backupPrefix));
 				wait(delay(5));
 				state std::vector<Standalone<RangeResultRef>> res2 = wait(readRanges(cx, restoreRange, self->backupPrefix));
