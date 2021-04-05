@@ -763,7 +763,7 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<Tester
 		req.title = spec.title;
 		req.useDatabase = spec.useDB;
 		req.timeout = spec.timeout;
-		req.databasePingDelay = spec.databasePingDelay;
+		req.databasePingDelay = spec.useDB ? spec.databasePingDelay : 0.0;
 		req.options = spec.options;
 		req.clientId = i;
 		req.clientCount = testers.size();
@@ -1577,8 +1577,10 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 	auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
 	auto ci = makeReference<AsyncVar<Optional<ClusterInterface>>>();
 	vector<Future<Void>> actors;
-	actors.push_back(reportErrors(monitorLeader(connFile, cc), "MonitorLeader"));
-	actors.push_back(reportErrors(extractClusterInterface(cc, ci), "ExtractClusterInterface"));
+	if (connFile) {
+		actors.push_back(reportErrors(monitorLeader(connFile, cc), "MonitorLeader"));
+		actors.push_back(reportErrors(extractClusterInterface(cc, ci), "ExtractClusterInterface"));
+	}
 
 	if (whatToRun == TEST_TYPE_CONSISTENCY_CHECK) {
 		TestSpec spec;
@@ -1601,6 +1603,18 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 		options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("rateLimitMax"), StringRef(rateLimitMax)));
 		options.push_back_deep(options.arena(),
 		                       KeyValueRef(LiteralStringRef("shuffleShards"), LiteralStringRef("true")));
+		spec.options.push_back_deep(spec.options.arena(), options);
+		testSpecs.push_back(spec);
+	} else if (whatToRun == TEST_TYPE_UNIT_TESTS) {
+		TestSpec spec;
+		Standalone<VectorRef<KeyValueRef>> options;
+		spec.title = LiteralStringRef("UnitTests");
+		spec.startDelay = 0;
+		spec.useDB = false;
+		spec.timeout = 0;
+		options.push_back_deep(options.arena(),
+		                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("UnitTests")));
+		options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("testsMatching"), fileName));
 		spec.options.push_back_deep(spec.options.arena(), options);
 		testSpecs.push_back(spec);
 	} else {

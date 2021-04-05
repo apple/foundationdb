@@ -7053,7 +7053,7 @@ RedwoodRecordRef randomRedwoodRecordRef(const std::string& keyBuffer, const std:
 	return rec;
 }
 
-TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
+TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 	ASSERT(RedwoodRecordRef::Delta::LengthFormatSizes[0] == 3);
 	ASSERT(RedwoodRecordRef::Delta::LengthFormatSizes[1] == 4);
 	ASSERT(RedwoodRecordRef::Delta::LengthFormatSizes[2] == 6);
@@ -7189,7 +7189,7 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 	return Void();
 }
 
-TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
+TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	// Sanity check on delta tree node format
 	ASSERT(DeltaTree<RedwoodRecordRef>::Node::headerSize(false) == 4);
 	ASSERT(DeltaTree<RedwoodRecordRef>::Node::headerSize(true) == 8);
@@ -7368,7 +7368,7 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	return Void();
 }
 
-TEST_CASE("!/redwood/correctness/unit/deltaTree/IntIntPair") {
+TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	const int N = 200;
 	IntIntPair prev = { 1, 0 };
 	IntIntPair next = { 10000, 10000 };
@@ -7712,7 +7712,7 @@ struct SimpleCounter {
 	std::string toString() { return format("%" PRId64 "/%.2f/%.2f", x, rate() / 1e6, avgRate() / 1e6); }
 };
 
-TEST_CASE("!/redwood/performance/mutationBuffer") {
+TEST_CASE(":/redwood/performance/mutationBuffer") {
 	// This test uses pregenerated short random keys
 	int count = 10e6;
 
@@ -7740,7 +7740,7 @@ TEST_CASE("!/redwood/performance/mutationBuffer") {
 	return Void();
 }
 
-TEST_CASE("!/redwood/correctness/btree") {
+TEST_CASE("/redwood/correctness/btree") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();
 
@@ -8100,7 +8100,7 @@ ACTOR Future<Void> randomScans(VersionedBTree* btree,
 	return Void();
 }
 
-TEST_CASE("!/redwood/correctness/pager/cow") {
+TEST_CASE(":/redwood/correctness/pager/cow") {
 	state std::string pagerFile = "unittest_pageFile.redwood";
 	printf("Deleting old test data\n");
 	deleteFile(pagerFile);
@@ -8127,7 +8127,7 @@ TEST_CASE("!/redwood/correctness/pager/cow") {
 	return Void();
 }
 
-TEST_CASE("!/redwood/performance/set") {
+TEST_CASE(":/redwood/performance/set") {
 	state SignalableActorCollection actors;
 
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
@@ -8142,21 +8142,23 @@ TEST_CASE("!/redwood/performance/set") {
 		deleteFile(pagerFile);
 	}
 
-	state int pageSize = SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
-	state int64_t pageCacheBytes = FLOW_KNOBS->PAGE_CACHE_4K;
-	state int nodeCount = 1e9;
-	state int maxRecordsPerCommit = 20000;
-	state int maxKVBytesPerCommit = 20e6;
-	state int64_t kvBytesTarget = 4e9;
-	state int minKeyPrefixBytes = 25;
-	state int maxKeyPrefixBytes = 25;
-	state int minValueSize = 100;
-	state int maxValueSize = 500;
-	state int minConsecutiveRun = 1;
-	state int maxConsecutiveRun = 100000;
-	state char firstKeyChar = 'a';
-	state char lastKeyChar = 'm';
-	state Version remapCleanupWindow = SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW;
+	state int pageSize = UnitTestCollection::getIntParam("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
+	state int64_t pageCacheBytes =
+	    UnitTestCollection::getIntParam("pageCacheBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
+	state int nodeCount = UnitTestCollection::getIntParam("nodeCount").orDefault(1e9);
+	state int maxRecordsPerCommit = UnitTestCollection::getIntParam("maxRecordsPerCommit").orDefault(20000);
+	state int maxKVBytesPerCommit = UnitTestCollection::getIntParam("maxKVBytesPerCommit").orDefault(20e6);
+	state int64_t kvBytesTarget = UnitTestCollection::getIntParam("kvBytesTarget").orDefault(4e9);
+	state int minKeyPrefixBytes = UnitTestCollection::getIntParam("minKeyPrefixBytes").orDefault(25);
+	state int maxKeyPrefixBytes = UnitTestCollection::getIntParam("maxKeyPrefixBytes").orDefault(25);
+	state int minValueSize = UnitTestCollection::getIntParam("minValueSize").orDefault(100);
+	state int maxValueSize = UnitTestCollection::getIntParam("maxValueSize").orDefault(500);
+	state int minConsecutiveRun = UnitTestCollection::getIntParam("minConsecutiveRun").orDefault(1);
+	state int maxConsecutiveRun = UnitTestCollection::getIntParam("maxConsecutiveRun").orDefault(100);
+	state char firstKeyChar = UnitTestCollection::getParam("firstKeyChar").orDefault("a")[0];
+	state char lastKeyChar = UnitTestCollection::getParam("lastKeyChar").orDefault("m")[0];
+	state Version remapCleanupWindow =
+	    UnitTestCollection::getIntParam("remapCleanupWindow").orDefault(SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW);
 
 	printf("pageSize: %d\n", pageSize);
 	printf("pageCacheBytes: %" PRId64 "\n", pageCacheBytes);
@@ -8638,7 +8640,7 @@ ACTOR Future<Void> doPrefixInsertComparison(int suffixSize,
 	return Void();
 }
 
-TEST_CASE("!/redwood/performance/prefixSizeComparison") {
+TEST_CASE(":/redwood/performance/prefixSizeComparison") {
 	state int suffixSize = 12;
 	state int valueSize = 100;
 	state int recordCountTarget = 100e6;
@@ -8659,7 +8661,7 @@ TEST_CASE("!/redwood/performance/prefixSizeComparison") {
 	return Void();
 }
 
-TEST_CASE("!/redwood/performance/sequentialInsert") {
+TEST_CASE(":/redwood/performance/sequentialInsert") {
 	state int prefixLen = 30;
 	state int valueSize = 100;
 	state int recordCountTarget = 100e6;

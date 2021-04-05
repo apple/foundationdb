@@ -135,7 +135,7 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
                                     LocalityData locality);
 
 enum test_location_t { TEST_HERE, TEST_ON_SERVERS, TEST_ON_TESTERS };
-enum test_type_t { TEST_TYPE_FROM_FILE, TEST_TYPE_CONSISTENCY_CHECK };
+enum test_type_t { TEST_TYPE_FROM_FILE, TEST_TYPE_CONSISTENCY_CHECK, TEST_TYPE_UNIT_TESTS };
 
 ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
                             test_type_t whatToRun,

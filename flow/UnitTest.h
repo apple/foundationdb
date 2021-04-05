@@ -45,6 +45,9 @@
 
 #include "flow/flow.h"
 
+#include <cinttypes>
+
+// Unit test definition structured as a linked list item
 struct UnitTest {
 	typedef Future<Void> (*TestFunction)();
 
@@ -57,8 +60,25 @@ struct UnitTest {
 	UnitTest(const char* name, const char* file, int line, TestFunction func);
 };
 
+// Collection of unit tests in the form of a linked list
+typedef std::map<std::string, std::string> UnitTestParameters;
 struct UnitTestCollection {
 	UnitTest* tests;
+
+	// Map of named case-sensitive parameters available for all unit tests
+	static UnitTestParameters& params();
+
+	// Set a named parameter to a string value, replacing any existing value
+	static void setParam(const std::string& name, const std::string& value);
+
+	// Set a named parameter to an integer converted to a string value, replacing any existing value
+	static void setParam(const std::string& name, int64_t value);
+
+	// Get a parameter's value, will return !present() if parameter was not set
+	static Optional<std::string> getParam(const std::string& name);
+
+	// Get a parameter's value as an integer, will return !present() if parameter was not set
+	static Optional<int64_t> getIntParam(const std::string& name);
 };
 
 extern UnitTestCollection g_unittests;
