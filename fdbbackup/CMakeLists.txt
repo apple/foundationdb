@@ -1,5 +1,7 @@
 set(FDBBACKUP_SRCS
-  backup.actor.cpp)
+	BackupTLSConfig.h
+	BackupTLSConfig.cpp
+	backup.actor.cpp)
 
 add_flow_target(EXECUTABLE NAME fdbbackup SRCS ${FDBBACKUP_SRCS})
 target_link_libraries(fdbbackup PRIVATE fdbclient)
