@@ -22,6 +22,7 @@
 #include <iostream>
 #include <vector>
 
+#include "fdbbackup/BackupTLSConfig.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbbackup/FileConverter.h"
@@ -77,8 +78,7 @@ struct DecodeParams {
 	std::string fileFilter; // only files match the filter will be decoded
 	bool log_enabled = false;
 	std::string log_dir, trace_format, trace_log_group;
-	std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword, tlsVerifyPeers;
-	std::vector<std::string> blobCredentials;
+	BackupTLSConfig tlsConfig;
 
 	std::string toString() {
 		std::string s;
@@ -100,70 +100,7 @@ struct DecodeParams {
 		return s;
 	}
 
-	// Sets up blob crentials. Add the file specified by FDB_BLOB_CREDENTIALS as well.
-	void setupBlobCredentials() {
-		// Add blob credentials files from the environment to the list collected from the command line.
-		const char* blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
-		if (blobCredsFromENV != nullptr) {
-			StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
-			do {
-				StringRef file = t.eat(":");
-				if (file.size() != 0)
-					blobCredentials.push_back(file.toString());
-			} while (t.size() != 0);
-		}
 
-		// Update the global blob credential files list
-		std::vector<std::string>* pFiles =
-		    (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
-		if (pFiles != nullptr) {
-			for (auto& f : blobCredentials) {
-				pFiles->push_back(f);
-			}
-		}
-	}
-
-	// Returns if TLS setup is successful
-	bool setupTLS() {
-		if (tlsCertPath.size()) {
-			try {
-				setNetworkOption(FDBNetworkOptions::TLS_CERT_PATH, tlsCertPath);
-			} catch (Error& e) {
-				std::cerr << "ERROR: cannot set TLS certificate path to " << tlsCertPath << " (" << e.what() << ")\n";
-				return false;
-			}
-		}
-
-		if (tlsCAPath.size()) {
-			try {
-				setNetworkOption(FDBNetworkOptions::TLS_CA_PATH, tlsCAPath);
-			} catch (Error& e) {
-				std::cerr << "ERROR: cannot set TLS CA path to " << tlsCAPath << " (" << e.what() << ")\n";
-				return false;
-			}
-		}
-		if (tlsKeyPath.size()) {
-			try {
-				if (tlsPassword.size())
-					setNetworkOption(FDBNetworkOptions::TLS_PASSWORD, tlsPassword);
-
-				setNetworkOption(FDBNetworkOptions::TLS_KEY_PATH, tlsKeyPath);
-			} catch (Error& e) {
-				std::cerr << "ERROR: cannot set TLS key path to " << tlsKeyPath << " (" << e.what() << ")\n";
-				return false;
-			}
-		}
-		if (tlsVerifyPeers.size()) {
-			try {
-				setNetworkOption(FDBNetworkOptions::TLS_VERIFY_PEERS, tlsVerifyPeers);
-			} catch (Error& e) {
-				std::cerr << "ERROR: cannot set TLS peer verification to " << tlsVerifyPeers << " (" << e.what()
-				          << ")\n";
-				return false;
-			}
-		}
-		return true;
-	}
 };
 
 int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
@@ -216,7 +153,7 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 			break;
 
 		case OPT_BLOB_CREDENTIALS:
-			param->blobCredentials.push_back(args->OptionArg());
+			param->tlsConfig.blobCredentials.push_back(args->OptionArg());
 			break;
 
 #ifndef TLS_DISABLED
@@ -225,23 +162,23 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 			break;
 
 		case TLSConfig::OPT_TLS_CERTIFICATES:
-			param->tlsCertPath = args->OptionArg();
+			param->tlsConfig.tlsCertPath = args->OptionArg();
 			break;
 
 		case TLSConfig::OPT_TLS_PASSWORD:
-			param->tlsPassword = args->OptionArg();
+			param->tlsConfig.tlsPassword = args->OptionArg();
 			break;
 
 		case TLSConfig::OPT_TLS_CA_FILE:
-			param->tlsCAPath = args->OptionArg();
+			param->tlsConfig.tlsCAPath = args->OptionArg();
 			break;
 
 		case TLSConfig::OPT_TLS_KEY:
-			param->tlsKeyPath = args->OptionArg();
+			param->tlsConfig.tlsKeyPath = args->OptionArg();
 			break;
 
 		case TLSConfig::OPT_TLS_VERIFY_PEERS:
-			param->tlsVerifyPeers = args->OptionArg();
+			param->tlsConfig.tlsVerifyPeers = args->OptionArg();
 			break;
 #endif
 
@@ -633,7 +570,7 @@ int main(int argc, char** argv) {
 			}
 		}
 
-		if (!param.setupTLS()) {
+		if (!param.tlsConfig.setupTLS()) {
 			TraceEvent(SevError, "TLSError");
 			throw tls_error();
 		}
@@ -646,7 +583,7 @@ int main(int argc, char** argv) {
 
 		TraceEvent::setNetworkThread();
 		openTraceFile(NetworkAddress(), 10 << 20, 10 << 20, param.log_dir, "decode", param.trace_log_group);
-		param.setupBlobCredentials();
+		param.tlsConfig.setupBlobCredentials();
 
 		auto f = stopAfter(decode_logs(param));
 
