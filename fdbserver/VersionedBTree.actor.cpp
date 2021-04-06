@@ -8154,6 +8154,8 @@ TEST_CASE(":/redwood/performance/set") {
 	state bool insertRecords = !openExisting || params.getIntParam("insertRecords").orDefault(0);
 	state int concurrentSeeks = params.getIntParam("concurrentSeeks").orDefault(64);
 	state int concurrentScans = params.getIntParam("concurrentScans").orDefault(64);
+	state int seeks = params.getIntParam("seeks").orDefault(1000000);
+	state int scans = params.getIntParam("scans").orDefault(20000);
 
 	printf("pageSize: %d\n", pageSize);
 	printf("pageCacheBytes: %" PRId64 "\n", pageCacheBytes);
@@ -8169,9 +8171,11 @@ TEST_CASE(":/redwood/performance/set") {
 	printf("kvBytesTarget: %" PRId64 "\n", kvBytesTarget);
 	printf("KeyLexicon '%c' to '%c'\n", firstKeyChar, lastKeyChar);
 	printf("remapCleanupWindow: %" PRId64 "\n", remapCleanupWindow);
-	printf("fileName: %s\n", fileName.c_str());
 	printf("concurrentScans: %d\n", concurrentScans);
 	printf("concurrentSeeks: %d\n", concurrentSeeks);
+	printf("seeks: %d\n", seeks);
+	printf("scans: %d\n", scans);
+	printf("fileName: %s\n", fileName.c_str());
 	printf("openExisting: %d\n", openExisting);
 	printf("insertRecords: %d\n", insertRecords);
 
@@ -8269,56 +8273,53 @@ TEST_CASE(":/redwood/performance/set") {
 		       kvBytesTotal / (timer() - start) / 1e6);
 	}
 
-	int seeks = 1e6;
 	printf("Warming cache with seeks\n");
-	actors.add(randomSeeks(btree, seeks / 3, firstKeyChar, lastKeyChar));
-	actors.add(randomSeeks(btree, seeks / 3, firstKeyChar, lastKeyChar));
-	actors.add(randomSeeks(btree, seeks / 3, firstKeyChar, lastKeyChar));
+	for (int x = 0; x < concurrentSeeks; ++x) {
+		actors.add(randomSeeks(btree, seeks / concurrentSeeks, firstKeyChar, lastKeyChar));
+	}
 	wait(actors.signalAndReset());
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
-	state int ops = 10000;
-
 	printf("Serial scans with adaptive readAhead...\n");
-	actors.add(randomScans(btree, ops, 50, -1, firstKeyChar, lastKeyChar));
+	actors.add(randomScans(btree, scans, 50, -1, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Serial scans with readAhead 3 pages...\n");
-	actors.add(randomScans(btree, ops, 50, 12000, firstKeyChar, lastKeyChar));
+	actors.add(randomScans(btree, scans, 50, 12000, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Serial scans with readAhead 2 pages...\n");
-	actors.add(randomScans(btree, ops, 50, 8000, firstKeyChar, lastKeyChar));
+	actors.add(randomScans(btree, scans, 50, 8000, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Serial scans with readAhead 1 page...\n");
-	actors.add(randomScans(btree, ops, 50, 4000, firstKeyChar, lastKeyChar));
+	actors.add(randomScans(btree, scans, 50, 4000, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Serial scans...\n");
-	actors.add(randomScans(btree, ops, 50, 0, firstKeyChar, lastKeyChar));
+	actors.add(randomScans(btree, scans, 50, 0, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Parallel scans, concurrency=%d, no readAhead ...\n", concurrentScans);
 	for (int x = 0; x < concurrentScans; ++x) {
-		actors.add(randomScans(btree, ops, 50, 0, firstKeyChar, lastKeyChar));
+		actors.add(randomScans(btree, scans / concurrentScans, 50, 0, firstKeyChar, lastKeyChar));
 	}
 	wait(actors.signalAndReset());
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Serial seeks...\n");
-	actors.add(randomSeeks(btree, ops, firstKeyChar, lastKeyChar));
+	actors.add(randomSeeks(btree, seeks, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Parallel seeks, concurrency=%d ...\n", concurrentSeeks);
 	for (int x = 0; x < concurrentSeeks; ++x) {
-		actors.add(randomSeeks(btree, ops, firstKeyChar, lastKeyChar));
+		actors.add(randomSeeks(btree, seeks / concurrentSeeks, firstKeyChar, lastKeyChar));
 	}
 	wait(actors.signalAndReset());
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
