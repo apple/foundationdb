@@ -8135,8 +8135,7 @@ TEST_CASE(":/redwood/performance/set") {
 
 	state std::string fileName = params.getParam("fileName").orDefault("unittest.redwood");
 	state int pageSize = params.getIntParam("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
-	state int64_t pageCacheBytes =
-	    params.getIntParam("pageCacheBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
+	state int64_t pageCacheBytes = params.getIntParam("pageCacheBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
 	state int nodeCount = params.getIntParam("nodeCount").orDefault(1e9);
 	state int maxRecordsPerCommit = params.getIntParam("maxRecordsPerCommit").orDefault(20000);
 	state int maxKVBytesPerCommit = params.getIntParam("maxKVBytesPerCommit").orDefault(20e6);
@@ -8306,7 +8305,7 @@ TEST_CASE(":/redwood/performance/set") {
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Parallel scans, concurrency=%d, no readAhead ...\n", concurrentScans);
-	for(int x = 0; x < concurrentScans; ++x) {
+	for (int x = 0; x < concurrentScans; ++x) {
 		actors.add(randomScans(btree, ops, 50, 0, firstKeyChar, lastKeyChar));
 	}
 	wait(actors.signalAndReset());
@@ -8318,7 +8317,7 @@ TEST_CASE(":/redwood/performance/set") {
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Parallel seeks, concurrency=%d ...\n", concurrentSeeks);
-	for(int x = 0; x < concurrentSeeks; ++x) {
+	for (int x = 0; x < concurrentSeeks; ++x) {
 		actors.add(randomSeeks(btree, ops, firstKeyChar, lastKeyChar));
 	}
 	wait(actors.signalAndReset());
