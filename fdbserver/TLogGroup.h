@@ -58,6 +58,11 @@ public:
 	// and group size set in the parent class.
 	void recruitEverything();
 
+	// template <class Ar>
+	// void serialize(Ar& ar) {
+	//	serializer(ar);
+	// }
+
 private:
 	// Returns a LocalityMap of all the workers inside 'recruitMap', but ignore the workers
 	// given in 'ignoreServers'.
@@ -114,6 +119,9 @@ struct TLogWorkerData : public ReferenceCounted<TLogWorkerData> {
 	static TLogWorkerDataRef fromInterface(const WorkerInterface& interf) {
 		return makeReference<TLogWorkerData>(interf.id(), interf.address(), interf.locality);
 	}
+
+	// Returns user-readable string representation of this object.
+	std::string toString() const;
 
 	bool operator==(const TLogWorkerData& other) const {
 		// TODO: Is NetworkAddress enough?

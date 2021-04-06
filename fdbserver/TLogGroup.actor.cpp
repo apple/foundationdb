@@ -21,10 +21,12 @@
 #include "fdbrpc/Replication.h"
 #include "fdbserver/TLogGroup.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "flow/flow.h"
 #include "flow/Error.h"
-#include <algorithm>
-#include <flow/UnitTest.h>
+#include "flow/UnitTest.h"
+#include <iostream>
 #include <iterator>
+#include <string>
 #include <vector>
 
 TLogGroupCollection::TLogGroupCollection(const Reference<IReplicationPolicy>& policy, int groupSize)
@@ -32,6 +34,10 @@ TLogGroupCollection::TLogGroupCollection(const Reference<IReplicationPolicy>& po
 
 const std::vector<TLogGroupRef>& TLogGroupCollection::groups() const {
 	return recruitedGroups;
+}
+
+int TLogGroupCollection::groupSize() const {
+	return GROUP_SIZE;
 }
 
 void TLogGroupCollection::addWorkers(const std::vector<WorkerInterface>& logWorkers) {
@@ -107,6 +113,13 @@ std::vector<TLogWorkerDataRef> TLogGroup::servers() const {
 	return results;
 }
 
+std::string TLogWorkerData::toString() const {
+	return format("TLogWorkerData{id=%s, address=%s, locality=%s",
+	              id.toString().c_str(),
+	              address.toString().c_str(),
+	              locality.toString().c_str());
+}
+
 //-------------------------------------------------------------------------------------------------------------------
 // Unit Tests
 
@@ -139,6 +152,31 @@ std::vector<WorkerInterface> testTLogGroupRecruits(int processCount) {
 		recruits.push_back(interface);
 	}
 	return recruits;
+}
+
+void printTLogGroup(const TLogGroupRef& group) {
+	using std::cout;
+	using std::endl;
+
+	cout << format("  --> TLogGroup [id = %s]", group->id().toString().c_str()) << endl;
+	for (const auto& server : group->servers()) {
+		cout << "      - " << server->toString() << endl;
+	}
+}
+
+void printTLogGroupCollection(const TLogGroupCollection& collection) {
+	using std::cout;
+	using std::endl;
+
+	cout << format("-> TLogGroupCollection {GroupSize = %d [NumRecruits = %d, NumRecruitedGroups = %d]",
+	               collection.groupSize(),
+	               0, // TODO
+	               collection.groups().size())
+	     << endl;
+
+	for (const auto& group : collection.groups()) {
+		printTLogGroup(group);
+	}
 }
 
 // Checks if each TLog belongs to only one TLogGroup in 'collection', number of workers inside
@@ -178,6 +216,7 @@ TEST_CASE("/fdbserver/TLogGroup/basic") {
 	collection.addWorkers(recruits);
 	collection.recruitEverything();
 
+	printTLogGroupCollection(collection);
 	checkGroupMembersUnique(collection, GROUP_SIZE, TOTAL_PROCESSES);
 	return Void();
 }
