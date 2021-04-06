@@ -8133,17 +8133,10 @@ TEST_CASE(":/redwood/performance/set") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();
 
-	// If a test file is passed in by environment then don't write new data to it.
-	state bool reload = getenv("TESTFILE") == nullptr;
-	state std::string pagerFile = reload ? "unittest.redwood" : getenv("TESTFILE");
-
-	if (reload) {
-		printf("Deleting old test data\n");
-		deleteFile(pagerFile);
-	}
-
+	state std::string fileName = params.getParam("fileName").orDefault("unittest.redwood");
 	state int pageSize = params.getIntParam("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
-	state int64_t pageCacheBytes = params.getIntParam("pageCacheBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
+	state int64_t pageCacheBytes =
+	    params.getIntParam("pageCacheBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
 	state int nodeCount = params.getIntParam("nodeCount").orDefault(1e9);
 	state int maxRecordsPerCommit = params.getIntParam("maxRecordsPerCommit").orDefault(20000);
 	state int maxKVBytesPerCommit = params.getIntParam("maxKVBytesPerCommit").orDefault(20e6);
@@ -8158,6 +8151,10 @@ TEST_CASE(":/redwood/performance/set") {
 	state char lastKeyChar = params.getParam("lastKeyChar").orDefault("m")[0];
 	state Version remapCleanupWindow =
 	    params.getIntParam("remapCleanupWindow").orDefault(SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW);
+	state bool openExisting = params.getIntParam("openExisting").orDefault(0);
+	state bool insertRecords = !openExisting || params.getIntParam("insertRecords").orDefault(0);
+	state int concurrentSeeks = params.getIntParam("concurrentSeeks").orDefault(64);
+	state int concurrentScans = params.getIntParam("concurrentScans").orDefault(64);
 
 	printf("pageSize: %d\n", pageSize);
 	printf("pageCacheBytes: %" PRId64 "\n", pageCacheBytes);
@@ -8173,9 +8170,19 @@ TEST_CASE(":/redwood/performance/set") {
 	printf("kvBytesTarget: %" PRId64 "\n", kvBytesTarget);
 	printf("KeyLexicon '%c' to '%c'\n", firstKeyChar, lastKeyChar);
 	printf("remapCleanupWindow: %" PRId64 "\n", remapCleanupWindow);
+	printf("fileName: %s\n", fileName.c_str());
+	printf("concurrentScans: %d\n", concurrentScans);
+	printf("concurrentSeeks: %d\n", concurrentSeeks);
+	printf("openExisting: %d\n", openExisting);
+	printf("insertRecords: %d\n", insertRecords);
 
-	DWALPager* pager = new DWALPager(pageSize, pagerFile, pageCacheBytes, remapCleanupWindow);
-	state VersionedBTree* btree = new VersionedBTree(pager, pagerFile);
+	if (!openExisting) {
+		printf("Deleting old test data\n");
+		deleteFile(fileName);
+	}
+
+	DWALPager* pager = new DWALPager(pageSize, fileName, pageCacheBytes, remapCleanupWindow);
+	state VersionedBTree* btree = new VersionedBTree(pager, fileName);
 	wait(btree->init());
 
 	state int64_t kvBytesThisCommit = 0;
@@ -8188,7 +8195,7 @@ TEST_CASE(":/redwood/performance/set") {
 	state double intervalStart = timer();
 	state double start = intervalStart;
 
-	if (reload) {
+	if (insertRecords) {
 		while (kvBytesTotal < kvBytesTarget) {
 			wait(yield());
 
@@ -8298,15 +8305,22 @@ TEST_CASE(":/redwood/performance/set") {
 	wait(actors.signalAndReset());
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
+	printf("Parallel scans, concurrency=%d, no readAhead ...\n", concurrentScans);
+	for(int x = 0; x < concurrentScans; ++x) {
+		actors.add(randomScans(btree, ops, 50, 0, firstKeyChar, lastKeyChar));
+	}
+	wait(actors.signalAndReset());
+	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
+
 	printf("Serial seeks...\n");
 	actors.add(randomSeeks(btree, ops, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
-	printf("Parallel seeks...\n");
-	actors.add(randomSeeks(btree, ops, firstKeyChar, lastKeyChar));
-	actors.add(randomSeeks(btree, ops, firstKeyChar, lastKeyChar));
-	actors.add(randomSeeks(btree, ops, firstKeyChar, lastKeyChar));
+	printf("Parallel seeks, concurrency=%d ...\n", concurrentSeeks);
+	for(int x = 0; x < concurrentSeeks; ++x) {
+		actors.add(randomSeeks(btree, ops, firstKeyChar, lastKeyChar));
+	}
 	wait(actors.signalAndReset());
 	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
