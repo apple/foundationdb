@@ -133,10 +133,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( BACKUP_RANGE_TIMEOUT,   TASKBUCKET_TIMEOUT_VERSIONS/CORE_VERSIONSPERSECOND/2.0 );
 	init( BACKUP_RANGE_MINWAIT,   std::max(1.0, BACKUP_RANGE_TIMEOUT/2.0));
 	init( BACKUP_SNAPSHOT_DISPATCH_INTERVAL_SEC,  10 * 60 );  // 10 minutes
-	init( BACKUP_INIT_SNAPSHOT_INTERVAL_SEC,          0);  // The initial snapshot has a desired duration of 0, meaning go as fast as possible.
-	if (randomize && BUGGIFY) {
-		BACKUP_INIT_SNAPSHOT_INTERVAL_SEC = deterministicRandom()->randomInt(0, 60); // 0 - 60 seconds
-	}
+	init( BACKUP_INIT_SNAPSHOT_INTERVAL_SEC,          0); if( randomize && BUGGIFY ) BACKUP_INIT_SNAPSHOT_INTERVAL_SEC = deterministicRandom()->randomInt(0, 60); // The initial snapshot has a desired duration of 0, meaning go as fast as possible. In simulation, choose a random value between 0 - 60 seconds.
 	init( BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC,   3600 * 24 * 10); // 10 days
 	init( BACKUP_SHARD_TASK_LIMIT,                1000 ); if( randomize && BUGGIFY ) BACKUP_SHARD_TASK_LIMIT = 4;
 	init( BACKUP_AGGREGATE_POLL_RATE_UPDATE_INTERVAL, 60);
