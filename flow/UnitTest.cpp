@@ -27,29 +27,24 @@ UnitTest::UnitTest(const char* name, const char* file, int line, TestFunction fu
 	g_unittests.tests = this;
 }
 
-UnitTestParameters& UnitTestCollection::params() {
-	static UnitTestParameters p;
-	return p;
-}
-
-void UnitTestCollection::setParam(const std::string& name, const std::string& value) {
+void UnitTestParameters::setParam(const std::string& name, const std::string& value) {
 	printf("setting %s = %s\n", name.c_str(), value.c_str());
-	params()[name] = value;
+	params[name] = value;
 }
 
-Optional<std::string> UnitTestCollection::getParam(const std::string& name) {
-	auto it = params().find(name);
-	if (it != params().end()) {
+Optional<std::string> UnitTestParameters::getParam(const std::string& name) const {
+	auto it = params.find(name);
+	if (it != params.end()) {
 		return it->second;
 	}
 	return {};
 }
 
-void UnitTestCollection::setParam(const std::string& name, int64_t value) {
+void UnitTestParameters::setParam(const std::string& name, int64_t value) {
 	setParam(name, format("%" PRId64, value));
 };
 
-Optional<int64_t> UnitTestCollection::getIntParam(const std::string& name) {
+Optional<int64_t> UnitTestParameters::getIntParam(const std::string& name) const {
 	auto opt = getParam(name);
 	if (opt.present()) {
 		return atoll(opt.get().c_str());

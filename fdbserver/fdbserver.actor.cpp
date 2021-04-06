@@ -978,6 +978,7 @@ struct CLIOptions {
 
 	Reference<ClusterConnectionFile> connectionFile;
 	Standalone<StringRef> machineId;
+	UnitTestParameters testParams;
 
 	static CLIOptions parseArgs(int argc, char* argv[]) {
 		CLIOptions opts;
@@ -1058,7 +1059,7 @@ private:
 					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
-				UnitTestCollection::setParam(syn.substr(7), args.OptionArg());
+				testParams.setParam(syn.substr(7), args.OptionArg());
 				break;
 			}
 			case OPT_LOCALITY: {
@@ -2017,8 +2018,14 @@ int main(int argc, char* argv[]) {
 		} else if (role == ServerRole::UnitTests) {
 			setupRunLoopProfiler();
 			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
-			f = stopAfter(runTests(
-			    opts.connectionFile, TEST_TYPE_UNIT_TESTS, TEST_HERE, 1, opts.testFile, StringRef(), opts.localities));
+			f = stopAfter(runTests(opts.connectionFile,
+			                       TEST_TYPE_UNIT_TESTS,
+			                       TEST_HERE,
+			                       1,
+			                       opts.testFile,
+			                       StringRef(),
+			                       opts.localities,
+			                       opts.testParams));
 			g_network->run();
 		} else if (role == ServerRole::CreateTemplateDatabase) {
 			createTemplateDatabase();

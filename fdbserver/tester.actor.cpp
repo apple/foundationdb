@@ -1572,7 +1572,8 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
                             int minTestersExpected,
                             std::string fileName,
                             StringRef startingConfiguration,
-                            LocalityData locality) {
+                            LocalityData locality,
+                            UnitTestParameters testOptions) {
 	state vector<TestSpec> testSpecs;
 	auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
 	auto ci = makeReference<AsyncVar<Optional<ClusterInterface>>>();
@@ -1615,6 +1616,10 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 		options.push_back_deep(options.arena(),
 		                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("UnitTests")));
 		options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("testsMatching"), fileName));
+		// Add unit test options as test spec options
+		for (auto& kv : testOptions.params) {
+			options.push_back_deep(options.arena(), KeyValueRef(kv.first, kv.second));
+		}
 		spec.options.push_back_deep(spec.options.arena(), options);
 		testSpecs.push_back(spec);
 	} else {

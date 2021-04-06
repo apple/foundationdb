@@ -29,6 +29,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/PerfMetric.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 struct CheckReply {
 	constexpr static FileIdentifier file_identifier = 11;
@@ -143,7 +144,8 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
                             int minTestersExpected,
                             std::string fileName = std::string(),
                             StringRef startingConfiguration = StringRef(),
-                            LocalityData locality = LocalityData());
+                            LocalityData locality = LocalityData(),
+                            UnitTestParameters testOptions = UnitTestParameters());
 
 #include "flow/unactorcompiler.h"
 #endif
