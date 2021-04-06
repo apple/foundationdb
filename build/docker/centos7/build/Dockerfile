@@ -200,6 +200,14 @@ RUN source /opt/rh/devtoolset-8/enable && \
     cd .. && \
     rm -rf /tmp/*
 
+# download old fdbserver binaries
+ARG FDB_VERSION="6.2.29"
+RUN mkdir -p /opt/foundationdb/old && \
+    curl -Ls https://www.foundationdb.org/downloads/misc/fdbservers-${FDB_VERSION}.tar.gz | \
+        tar --no-same-owner --directory /opt/foundationdb/old -xz && \
+    chmod +x /opt/foundationdb/old/* && \
+    ln -sf /opt/foundationdb/old/fdbserver-${FDB_VERSION} /opt/foundationdb/old/fdbserver
+
 # build/install distcc
 RUN source /opt/rh/devtoolset-8/enable && \
     if [ "$(uname -p)" == "aarch64" ]; then \
