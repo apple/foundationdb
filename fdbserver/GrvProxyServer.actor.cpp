@@ -46,8 +46,8 @@ struct GrvProxyStats {
 	LatencySample batchTxnGRVTimeInQueue;
 
 	LatencyBands grvLatencyBands;
-	LatencySample grvLatencySample;
-	LatencySample grvBatchLatencySample;
+	LatencySample grvLatencySample; // GRV latency metric sample of default priority
+	LatencySample grvBatchLatencySample; // GRV latency metric sample of batched priority
 
 	Future<Void> logger;
 

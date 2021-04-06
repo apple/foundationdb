@@ -631,6 +631,8 @@ struct RolesInfo {
 		try {
 			JsonBuilderObject priorityStats;
 
+			// GRV Latency metrics are grouped according to priority (currently batch or default).
+			// Other priorities can be added in the future.
 			TraceEventFields const& grvLatencyMetrics = metrics.at("GRVLatencyMetrics");
 			if (grvLatencyMetrics.size()) {
 				priorityStats["default"] = addLatencyStatistics(grvLatencyMetrics);
@@ -641,6 +643,7 @@ struct RolesInfo {
 				priorityStats["batch"] = addLatencyStatistics(grvBatchMetrics);
 			}
 
+			// Add GRV Latency metrics (for all priorities) to parent node.
 			if (priorityStats.size()) {
 				obj["grv_latency_statistics"] = priorityStats;
 			}
