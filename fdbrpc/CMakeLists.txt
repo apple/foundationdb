@@ -63,6 +63,7 @@ if ((NOT APPLE) AND (NOT WIN32) AND (WITH_IO_URING))
 
 	ExternalProject_Get_Property(io_uring SOURCE_DIR)
 	set (URING_INCLUDE_DIR ${BINARY_DIR}/src/include)
+endif()
 	
 
 set(FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS
