@@ -41,6 +41,7 @@
 #include "fdbserver/ProxyCommitData.actor.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/TLogGroup.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
@@ -195,6 +196,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	ServerCoordinators coordinators;
 
 	Reference<ILogSystem> logSystem;
+	Reference<TLogGroupCollection> tLogGroupCollection;
 	Version version; // The last version assigned to a proxy by getVersion()
 	double lastVersionTime;
 	LogSystemDiskQueueAdapter* txnStateLogAdapter;
@@ -740,6 +742,12 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	    .detail("StorageServers", recruits.storageServers.size())
 	    .detail("BackupWorkers", self->backupWorkers.size())
 	    .trackLatest("MasterRecoveryState");
+
+	// Recruit TLog groups
+	self->tLogGroupCollection =
+	    makeReference<TLogGroupCollection>(self->configuration.tLogPolicy, self->configuration.tLogReplicationFactor);
+	self->tLogGroupCollection->addWorkers(recruits.tLogs);
+	self->tLogGroupCollection->recruitEverything();
 
 	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand
 	// new database we are sort of lying that we are past the recruitment phase.  In a perfect world we would split that

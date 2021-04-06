@@ -4,4 +4,4 @@ useDB=false
 
 testName=UnitTests
 maxTestCases=0
-testsMatching=/fdbserver/TLogGroup/test1
+testsMatching=/fdbserver/TLogGroup/
