@@ -46,18 +46,15 @@ if(NOT WIN32)
 endif()
 
 if ((NOT APPLE) AND (NOT WIN32) AND (WITH_IO_URING))
-	message(STATUS "IO_URING ENABLED")
 	include(ExternalProject)
 	ExternalProject_Add(io_uring
 		URL https://github.com/axboe/liburing/archive/refs/tags/liburing-2.0.tar.gz
-		#PREFIX liburing
 		BUILD_ALWAYS 1
 		BUILD_IN_SOURCE 1
 		CONFIGURE_COMMAND ./configure 
 		#workaround for failing uring tests 
 		BUILD_COMMAND  make CFLAGS=-fPIC || echo OK 
 		INSTALL_COMMAND ""
-		#INSTALL_DIR=${CMAKE_CURRENT_SOURCE_DIR}/liburing
 		BUILD_BYPRODUCTS <BINARY_DIR>/src/liburing.a
 		)
 	
@@ -67,9 +64,6 @@ if ((NOT APPLE) AND (NOT WIN32) AND (WITH_IO_URING))
 	ExternalProject_Get_Property(io_uring SOURCE_DIR)
 	set (URING_INCLUDE_DIR ${BINARY_DIR}/src/include)
 	
-else()
-	message(STATUS "RPC IO_URING DISABLED")
-endif()
 
 set(FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS
   ActorFuzz.actor.cpp
