@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_TEAM_TEST_FAKETLOG_ACTOR_G_H)
-#define FDBSERVER_TEAM_TEST_FAKETLOG_ACTOR_G_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_PTXN_TEST_FAKETLOG_ACTOR_G_H)
+#define FDBSERVER_PTXN_TEST_FAKETLOG_ACTOR_G_H
 #include "fdbserver/ptxn/test/FakeTLog.actor.g.h"
-#elif !defined(FDBSERVER_TEAM_TEST_FAKETLOG_ACTOR_H)
-#define FDBSERVER_TEAM_TEST_FAKETLOG_ACTOR_H
+#elif !defined(FDBSERVER_PTXN_TEST_FAKETLOG_ACTOR_H)
+#define FDBSERVER_PTXN_TEST_FAKETLOG_ACTOR_H
 
 #include <memory>
 #include <unordered_map>
@@ -52,4 +52,4 @@ Future<Void> getFakeTLogActor(const MessageTransferModel model, std::shared_ptr<
 } // namespace ptxn
 
 #include "flow/unactorcompiler.h"
-#endif // FDBSERVER_TEAM_TEST_FAKETLOG_ACTOR_H
+#endif // FDBSERVER_PTXN_TEST_FAKETLOG_ACTOR_H
