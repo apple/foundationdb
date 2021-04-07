@@ -172,7 +172,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( BACKUP_STATUS_DELAY,                    40.0 );
 	init( BACKUP_STATUS_JITTER,                   0.05 );
 	init( MIN_CLEANUP_SECONDS,                  3600.0 );
-	init( IGNORE_LOG_FILES,                      false );
+	init( RESTORE_IGNORE_LOG_FILES,              false ); // When set to true, the log files in restore will be ignored.
 
 	// Configuration
 	init( DEFAULT_AUTO_COMMIT_PROXIES,               3 );
