@@ -1,5 +1,5 @@
 /*
- * InstrumentRequest.h
+ * AnnotateActor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -25,10 +25,10 @@
 
 // Used to manually instrument waiting actors to collect samples for the
 // sampling profiler.
-struct InstrumentRequest {
+struct AnnotateActor {
 	unsigned index;
 
-	InstrumentRequest() {}
+	AnnotateActor() {}
 
 	// This API isn't great. Ideally, no cleanup call is needed. I ran into an
 	// issue around the destructor being called twice because an instance of

@@ -32,11 +32,11 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/MultiInterface.h"
 
+#include "fdbclient/AnnotateActor.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/InstrumentRequest.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
@@ -3053,8 +3053,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx,
 						throw deterministicRandom()->randomChoice(
 						    std::vector<Error>{ transaction_too_old(), future_version() });
 					}
-					state InstrumentRequest request;
-					request.start();
+					state AnnotateActor annotation;
+					annotation.start();
 					GetKeyValuesReply _rep =
 					    wait(loadBalance(cx.getPtr(),
 					                     beginServer.second,
@@ -3065,7 +3065,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx,
 					                     cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
 					rep = _rep;
 					++cx->transactionPhysicalReadsCompleted;
-					request.complete();
+					annotation.complete();
 				} catch (Error&) {
 					++cx->transactionPhysicalReadsCompleted;
 					throw;
