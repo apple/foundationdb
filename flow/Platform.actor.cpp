@@ -3679,8 +3679,7 @@ void* sampleThread(void* arg) {
 	while (true) {
 		threadSleep(1.0); // TODO: Read sample rate from global config
 
-		// TODO: Copy actor lineage of currently running actor
-		// Read currentLineage
+		// Get actor lineage of currently running actor.
 		auto actorLineage = currentLineageThreadSafe.get();
 		printf("Currently running actor lineage (%p):\n", actorLineage.getPtr());
 		auto stack = actorLineage->stack(&StackLineage::actorName);
@@ -3690,11 +3689,16 @@ void* sampleThread(void* arg) {
 		}
 		printf("\n");
 
+		// Get lineage of actors waiting on disk.
 		auto diskAlps = IAsyncFileSystem::filesystem()->getActorLineageSet().copy();
-		printf("Disk ALPs: %d\n", diskAlps.size());
+		// printf("Disk ALPs: %d\n", diskAlps.size());
+
+		// TODO: Get lineage of actors waiting on network
+		auto networkAlps = g_network->getActorLineageSet().copy();
+		printf("Network ALPs: %d\n", networkAlps.size());
 
 		// TODO: Call collect on all actor lineages
-		for (auto actorLineage : diskAlps) {
+		for (auto actorLineage : networkAlps) {
 			auto stack = actorLineage->stack(&StackLineage::actorName);
 			while (!stack.empty()) {
 				printf("%s ", stack.top());
