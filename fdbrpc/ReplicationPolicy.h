@@ -38,7 +38,8 @@ struct IReplicationPolicy : public ReferenceCounted<IReplicationPolicy> {
 	virtual void delref() { ReferenceCounted<IReplicationPolicy>::delref(); }
 	virtual int maxResults() const = 0;
 	virtual int depth() const = 0;
-	virtual bool selectReplicas(Reference<LocalitySet>& fromServers, std::vector<LocalityEntry> const& alsoServers,
+	virtual bool selectReplicas(Reference<LocalitySet>& fromServers,
+	                            std::vector<LocalityEntry> const& alsoServers,
 	                            std::vector<LocalityEntry>& results) = 0;
 	virtual void traceLocalityRecords(Reference<LocalitySet> const& fromServers);
 	virtual void traceOneLocalityRecord(Reference<LocalityRecord> record, Reference<LocalitySet> const& fromServers);
@@ -60,8 +61,10 @@ struct IReplicationPolicy : public ReferenceCounted<IReplicationPolicy> {
 	// Utility functions
 	bool selectReplicas(Reference<LocalitySet>& fromServers, std::vector<LocalityEntry>& results);
 	bool validate(Reference<LocalitySet> const& solutionSet) const;
-	bool validateFull(bool solved, std::vector<LocalityEntry> const& solutionSet,
-	                  std::vector<LocalityEntry> const& alsoServers, Reference<LocalitySet> const& fromServers);
+	bool validateFull(bool solved,
+	                  std::vector<LocalityEntry> const& solutionSet,
+	                  std::vector<LocalityEntry> const& alsoServers,
+	                  Reference<LocalitySet> const& fromServers);
 
 	// Returns a set of the attributes that this policy uses in selection and validation.
 	std::set<std::string> attributeKeys() const {
@@ -102,7 +105,8 @@ struct PolicyOne : IReplicationPolicy, public ReferenceCounted<PolicyOne> {
 	virtual int depth() const { return 1; }
 	virtual bool validate(std::vector<LocalityEntry> const& solutionSet,
 	                      Reference<LocalitySet> const& fromServers) const;
-	virtual bool selectReplicas(Reference<LocalitySet>& fromServers, std::vector<LocalityEntry> const& alsoServers,
+	virtual bool selectReplicas(Reference<LocalitySet>& fromServers,
+	                            std::vector<LocalityEntry> const& alsoServers,
 	                            std::vector<LocalityEntry>& results);
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -124,8 +128,10 @@ struct PolicyAcross : IReplicationPolicy, public ReferenceCounted<PolicyAcross> 
 	virtual std::string info() const { return format("%s^%d x ", _attribKey.c_str(), _count) + _policy->info(); }
 	virtual int maxResults() const { return _count * _policy->maxResults(); }
 	virtual int depth() const { return 1 + _policy->depth(); }
-	virtual bool validate(std::vector<LocalityEntry> const& solutionSet, Reference<LocalitySet> const& fromServers) const;
-	virtual bool selectReplicas(Reference<LocalitySet>& fromServers, std::vector<LocalityEntry> const& alsoServers,
+	virtual bool validate(std::vector<LocalityEntry> const& solutionSet,
+	                      Reference<LocalitySet> const& fromServers) const;
+	virtual bool selectReplicas(Reference<LocalitySet>& fromServers,
+	                            std::vector<LocalityEntry> const& alsoServers,
 	                            std::vector<LocalityEntry>& results);
 
 	template <class Ar>
@@ -174,7 +180,8 @@ struct PolicyAnd : IReplicationPolicy, public ReferenceCounted<PolicyAnd> {
 		for (auto& policy : _policies) {
 			infoText += ((infoText.length()) ? " & (" : "(") + policy->info() + ")";
 		}
-		if (_policies.size()) infoText = "(" + infoText + ")";
+		if (_policies.size())
+			infoText = "(" + infoText + ")";
 		return infoText;
 	}
 	virtual int maxResults() const {
@@ -197,7 +204,8 @@ struct PolicyAnd : IReplicationPolicy, public ReferenceCounted<PolicyAnd> {
 	virtual bool validate(std::vector<LocalityEntry> const& solutionSet,
 	                      Reference<LocalitySet> const& fromServers) const;
 
-	virtual bool selectReplicas(Reference<LocalitySet>& fromServers, std::vector<LocalityEntry> const& alsoServers,
+	virtual bool selectReplicas(Reference<LocalitySet>& fromServers,
+	                            std::vector<LocalityEntry> const& alsoServers,
 	                            std::vector<LocalityEntry>& results);
 
 	static bool comparePolicy(const Reference<IReplicationPolicy>& rhs, const Reference<IReplicationPolicy>& lhs) {

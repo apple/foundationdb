@@ -24,7 +24,7 @@
 
 ServerKnobs const* SERVER_KNOBS = new ServerKnobs();
 
-#define init( knob, value ) initKnob( knob, value, #knob )
+#define init(knob, value) initKnob(knob, value, #knob)
 
 ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimulated) {
 	// clang-format off
@@ -577,6 +577,9 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 
 	// clang-format on
 
-	if(clientKnobs)
-		clientKnobs->IS_ACCEPTABLE_DELAY = clientKnobs->IS_ACCEPTABLE_DELAY*std::min(MAX_READ_TRANSACTION_LIFE_VERSIONS, MAX_WRITE_TRANSACTION_LIFE_VERSIONS)/(5.0*VERSIONS_PER_SECOND);
+	if (clientKnobs)
+		clientKnobs->IS_ACCEPTABLE_DELAY =
+		    clientKnobs->IS_ACCEPTABLE_DELAY *
+		    std::min(MAX_READ_TRANSACTION_LIFE_VERSIONS, MAX_WRITE_TRANSACTION_LIFE_VERSIONS) /
+		    (5.0 * VERSIONS_PER_SECOND);
 }

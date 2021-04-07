@@ -55,13 +55,12 @@ struct ICounter {
 	virtual void remove() {}
 };
 
-template<>
+template <>
 struct Traceable<ICounter*> : std::true_type {
-	static std::string toString(ICounter const *counter) {
+	static std::string toString(ICounter const* counter) {
 		if (counter->hasRate() && counter->hasRoughness()) {
 			return format("%g %g %lld", counter->getRate(), counter->getRoughness(), (long long)counter->getValue());
-		}
-		else {
+		} else {
 			return format("%lld", (long long)counter->getValue());
 		}
 	}
@@ -70,7 +69,10 @@ struct Traceable<ICounter*> : std::true_type {
 struct CounterCollection {
 	CounterCollection(std::string name, std::string id = std::string()) : name(name), id(id) {}
 	std::vector<struct ICounter*> counters, counters_to_remove;
-	~CounterCollection() { for (auto c : counters_to_remove) c->remove(); }
+	~CounterCollection() {
+		for (auto c : counters_to_remove)
+			c->remove();
+	}
 	std::string name;
 	std::string id;
 
@@ -83,8 +85,8 @@ public:
 
 	Counter(std::string const& name, CounterCollection& collection);
 
-	void operator += (Value delta);
-	void operator ++ () { *this += 1; }
+	void operator+=(Value delta);
+	void operator++() { *this += 1; }
 	void clear();
 	void resetInterval();
 
@@ -92,8 +94,9 @@ public:
 
 	Value getIntervalDelta() const { return interval_delta; }
 	Value getValue() const { return interval_start_value + interval_delta; }
-	double getRate() const;				// dValue / dt
-	double getRoughness() const;			// value deltas come in "clumps" of this many ( 1 = periodic, 2 = poisson, 10 = periodic clumps of 10 (nearly) simultaneous delta )
+	double getRate() const; // dValue / dt
+	double getRoughness() const; // value deltas come in "clumps" of this many ( 1 = periodic, 2 = poisson, 10 =
+	                             // periodic clumps of 10 (nearly) simultaneous delta )
 	bool hasRate() const { return true; }
 	bool hasRoughness() const { return true; }
 
@@ -104,7 +107,7 @@ private:
 	Int64MetricHandle metric;
 };
 
-template<>
+template <>
 struct Traceable<Counter> : std::true_type {
 	static std::string toString(Counter const& counter) {
 		return Traceable<ICounter*>::toString((ICounter const*)&counter);
@@ -113,7 +116,10 @@ struct Traceable<Counter> : std::true_type {
 
 template <class F>
 struct SpecialCounter : ICounter, FastAllocated<SpecialCounter<F>>, NonCopyable {
-	SpecialCounter(CounterCollection& collection, std::string const& name, F && f) : name(name), f(f) { collection.counters.push_back(this); collection.counters_to_remove.push_back(this); }
+	SpecialCounter(CounterCollection& collection, std::string const& name, F&& f) : name(name), f(f) {
+		collection.counters.push_back(this);
+		collection.counters_to_remove.push_back(this);
+	}
 	virtual void remove() { delete this; }
 
 	virtual std::string const& getName() const { return name; }
@@ -130,19 +136,26 @@ struct SpecialCounter : ICounter, FastAllocated<SpecialCounter<F>>, NonCopyable 
 	F f;
 };
 template <class F>
-static void specialCounter(CounterCollection& collection, std::string const& name, F && f) { new SpecialCounter<F>(collection, name, std::move(f)); }
+static void specialCounter(CounterCollection& collection, std::string const& name, F&& f) {
+	new SpecialCounter<F>(collection, name, std::move(f));
+}
 
-Future<Void> traceCounters(std::string const& traceEventName, UID const& traceEventID, double const& interval,
-                           CounterCollection* const& counters, std::string const& trackLatestName = std::string(),
-                           std::function<void(TraceEvent&)> const& decorator = [](TraceEvent& te) {});
+Future<Void> traceCounters(
+    std::string const& traceEventName,
+    UID const& traceEventID,
+    double const& interval,
+    CounterCollection* const& counters,
+    std::string const& trackLatestName = std::string(),
+    std::function<void(TraceEvent&)> const& decorator = [](TraceEvent& te) {});
 
 class LatencyBands {
 public:
-	LatencyBands(std::string name, UID id, double loggingInterval) : name(name), id(id), loggingInterval(loggingInterval), cc(nullptr), filteredCount(nullptr) {}
+	LatencyBands(std::string name, UID id, double loggingInterval)
+	  : name(name), id(id), loggingInterval(loggingInterval), cc(nullptr), filteredCount(nullptr) {}
 
 	void addThreshold(double value) {
-		if(value > 0 && bands.count(value) == 0) {
-			if(bands.size() == 0) {
+		if (value > 0 && bands.count(value) == 0) {
+			if (bands.size() == 0) {
 				ASSERT(!cc && !filteredCount);
 				cc = new CounterCollection(name, id.toString());
 				logger = traceCounters(name, id, loggingInterval, cc, id.toString() + "/" + name);
@@ -154,11 +167,10 @@ public:
 		}
 	}
 
-	void addMeasurement(double measurement, bool filtered=false) {
-		if(filtered && filteredCount) {
+	void addMeasurement(double measurement, bool filtered = false) {
+		if (filtered && filteredCount) {
 			++(*filteredCount);
-		}
-		else if(bands.size() > 0) {
+		} else if (bands.size() > 0) {
 			auto itr = bands.upper_bound(measurement);
 			ASSERT(itr != bands.end());
 			++(*itr->second);
@@ -168,10 +180,10 @@ public:
 	void clearBands() {
 		logger = Void();
 
-		for(auto itr : bands) {
+		for (auto itr : bands) {
 			delete itr.second;
 		}
-		
+
 		bands.clear();
 
 		delete filteredCount;
@@ -181,35 +193,30 @@ public:
 		cc = nullptr;
 	}
 
-	~LatencyBands() {
-		clearBands();
-	}
+	~LatencyBands() { clearBands(); }
 
 private:
 	std::map<double, Counter*> bands;
-	Counter *filteredCount;
+	Counter* filteredCount;
 
 	std::string name;
 	UID id;
 	double loggingInterval;
 
-	CounterCollection *cc;
+	CounterCollection* cc;
 	Future<Void> logger;
 
-	void insertBand(double value) {
-		bands.insert(std::make_pair(value, new Counter(format("Band%f", value), *cc)));
-	}
+	void insertBand(double value) { bands.insert(std::make_pair(value, new Counter(format("Band%f", value), *cc))); }
 };
 
 class LatencySample {
 public:
-	LatencySample(std::string name, UID id, double loggingInterval, int sampleSize) : name(name), id(id), sample(sampleSize), sampleStart(now()) {
-		logger = recurring([this](){ logSample(); }, loggingInterval);
+	LatencySample(std::string name, UID id, double loggingInterval, int sampleSize)
+	  : name(name), id(id), sample(sampleSize), sampleStart(now()) {
+		logger = recurring([this]() { logSample(); }, loggingInterval);
 	}
 
-	void addMeasurement(double measurement) {
-		sample.addSample(measurement);
-	}
+	void addMeasurement(double measurement) { sample.addSample(measurement); }
 
 private:
 	std::string name;
@@ -221,18 +228,18 @@ private:
 
 	void logSample() {
 		TraceEvent(name.c_str(), id)
-			.detail("Count", sample.getPopulationSize())
-			.detail("Elapsed", now() - sampleStart)
-			.detail("Min", sample.min())
-			.detail("Max", sample.max())
-			.detail("Mean", sample.mean())
-			.detail("Median", sample.median())
-			.detail("P25", sample.percentile(0.25))
-			.detail("P90", sample.percentile(0.9))
-			.detail("P95", sample.percentile(0.95))
-			.detail("P99", sample.percentile(0.99))
-			.detail("P99.9", sample.percentile(0.999))
-			.trackLatest(id.toString() + "/" + name);
+		    .detail("Count", sample.getPopulationSize())
+		    .detail("Elapsed", now() - sampleStart)
+		    .detail("Min", sample.min())
+		    .detail("Max", sample.max())
+		    .detail("Mean", sample.mean())
+		    .detail("Median", sample.median())
+		    .detail("P25", sample.percentile(0.25))
+		    .detail("P90", sample.percentile(0.9))
+		    .detail("P95", sample.percentile(0.95))
+		    .detail("P99", sample.percentile(0.99))
+		    .detail("P99.9", sample.percentile(0.999))
+		    .trackLatest(id.toString() + "/" + name);
 
 		sample.clear();
 		sampleStart = now();

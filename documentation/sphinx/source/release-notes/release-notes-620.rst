@@ -4,6 +4,13 @@
 Release Notes
 #############
 
+6.2.33
+======
+* Fixed an issue where storage servers could shutdown with ``unknown_error``. `(PR #4437) <https://github.com/apple/foundationdb/pull/4437>`_
+* Fix backup agent stall when writing to local filesystem with slow metadata operations. `(PR #4428) <https://github.com/apple/foundationdb/pull/4428>`_
+* Backup agent no longer uses 4k block caching layer on local output files so that write operations are larger. `(PR #4428) <https://github.com/apple/foundationdb/pull/4428>`_
+* Fix accounting error that could cause commits to incorrectly fail with ``proxy_memory_limit_exceeded``. `(PR #4529) <https://github.com/apple/foundationdb/pull/4529>`_
+
 6.2.32
 ======
 * Fix an issue where symbolic links in cmake-built RPMs are broken if you unpack the RPM to a custom directory. `(PR #4380) <https://github.com/apple/foundationdb/pull/4380>`_

@@ -29,4 +29,4 @@ class INetwork;
 void startProfiling(INetwork* network, Optional<int> period = {}, Optional<StringRef> outputFile = {});
 void stopProfiling();
 
-#endif  // _FDB_FLOW_PROFILER_H_
+#endif // _FDB_FLOW_PROFILER_H_

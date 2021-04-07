@@ -18,17 +18,17 @@
  * limitations under the License.
  */
 
-
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
+// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
+// version.
 #if defined(NO_INTELLISENSE) && !defined(FDBRPC_NETWORKSENDER_ACTOR_G_H)
-	#define FDBRPC_NETWORKSENDER_ACTOR_G_H
-	#include "fdbrpc/networksender.actor.g.h"
+#define FDBRPC_NETWORKSENDER_ACTOR_G_H
+#include "fdbrpc/networksender.actor.g.h"
 #elif !defined(RPCNETWORKSENDER_ACTOR_H)
-	#define RPCNETWORKSENDER_ACTOR_H
+#define RPCNETWORKSENDER_ACTOR_H
 
 #include "fdbrpc/FlowTransport.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR template <class T>
 void networkSender(Future<T> input, Endpoint endpoint) {

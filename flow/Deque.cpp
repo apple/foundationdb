@@ -39,7 +39,7 @@ TEST_CASE("/flow/Deque/12345") {
 
 TEST_CASE("/flow/Deque/queue") {
 	std::queue<int, Deque<int>> q;
-	
+
 	int to_push = 0, to_pop = 0;
 	while (to_pop != 1000) {
 		if (to_push != 1000 && (q.empty() || deterministicRandom()->random01() < 0.55)) {
@@ -73,8 +73,8 @@ TEST_CASE("/flow/Deque/max_size") {
 	try {
 		q.push_back(1);
 		ASSERT(false);
+	} catch (std::bad_alloc&) {
 	}
-	catch (std::bad_alloc&) {}
 
 	return Void();
 }

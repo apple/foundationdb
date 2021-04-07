@@ -27,52 +27,51 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct TargetedKillWorkload : TestWorkload {
 	std::string machineToKill;
 	bool enabled, killAllMachineProcesses;
 	double killAt;
 
-	TargetedKillWorkload(WorkloadContext const& wcx)
-		: TestWorkload(wcx)
-	{
+	TargetedKillWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
-		killAt = getOption( options, LiteralStringRef("killAt"), 5.0 );
-		machineToKill = getOption( options, LiteralStringRef("machineToKill"), LiteralStringRef("master") ).toString();
-		killAllMachineProcesses = getOption( options, LiteralStringRef("killWholeMachine"), false );
+		killAt = getOption(options, LiteralStringRef("killAt"), 5.0);
+		machineToKill = getOption(options, LiteralStringRef("machineToKill"), LiteralStringRef("master")).toString();
+		killAllMachineProcesses = getOption(options, LiteralStringRef("killWholeMachine"), false);
 	}
 
 	virtual std::string description() { return "TargetedKillWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) { return Void(); }
-	virtual Future<Void> start( Database const& cx ) {
+	virtual Future<Void> setup(Database const& cx) { return Void(); }
+	virtual Future<Void> start(Database const& cx) {
 		TraceEvent("StartTargetedKill").detail("Enabled", enabled);
 		if (enabled)
-			return assassin( cx, this );
+			return assassin(cx, this);
 		return Void();
 	}
-	virtual Future<bool> check( Database const& cx ) { return true; }
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-	}
+	virtual Future<bool> check(Database const& cx) { return true; }
+	virtual void getMetrics(vector<PerfMetric>& m) {}
 
-	ACTOR Future<Void> killEndpoint( NetworkAddress address, Database cx, TargetedKillWorkload* self ) {
-		if( &g_simulator == g_network ) {
-			g_simulator.killInterface( address, ISimulator::KillInstantly );
+	ACTOR Future<Void> killEndpoint(NetworkAddress address, Database cx, TargetedKillWorkload* self) {
+		if (&g_simulator == g_network) {
+			g_simulator.killInterface(address, ISimulator::KillInstantly);
 			return Void();
 		}
 
-		state vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
+		state vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 
 		int killed = 0;
-		for( int i = 0; i < workers.size(); i++ ) {
-			if( workers[i].interf.master.getEndpoint().getPrimaryAddress() == address ||
-				( self->killAllMachineProcesses && workers[i].interf.master.getEndpoint().getPrimaryAddress().ip == address.ip && workers[i].processClass != ProcessClass::TesterClass ) ) {
+		for (int i = 0; i < workers.size(); i++) {
+			if (workers[i].interf.master.getEndpoint().getPrimaryAddress() == address ||
+			    (self->killAllMachineProcesses &&
+			     workers[i].interf.master.getEndpoint().getPrimaryAddress().ip == address.ip &&
+			     workers[i].processClass != ProcessClass::TesterClass)) {
 				TraceEvent("WorkerKill").detail("TargetedMachine", address).detail("Worker", workers[i].interf.id());
-				workers[i].interf.clientInterface.reboot.send( RebootRequest() );
+				workers[i].interf.clientInterface.reboot.send(RebootRequest());
 			}
 		}
 
-		if( !killed )
+		if (!killed)
 			TraceEvent(SevWarn, "WorkerNotFoundAtEndpoint").detail("Address", address);
 		else
 			TraceEvent("WorkersKilledAtEndpoint").detail("Address", address).detail("KilledProcesses", killed);
@@ -80,53 +79,50 @@ struct TargetedKillWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> assassin( Database cx, TargetedKillWorkload* self ) {
-		wait( delay( self->killAt ) );
-		state vector<StorageServerInterface> storageServers = wait( getStorageServers( cx ) );
+	ACTOR Future<Void> assassin(Database cx, TargetedKillWorkload* self) {
+		wait(delay(self->killAt));
+		state vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
 
 		NetworkAddress machine;
-		if( self->machineToKill == "master" ) {
+		if (self->machineToKill == "master") {
 			machine = self->dbInfo->get().master.address();
-		}
-		else if( self->machineToKill == "masterproxy" ) {
+		} else if (self->machineToKill == "masterproxy") {
 			auto proxies = cx->getMasterProxies(false);
 			int o = deterministicRandom()->randomInt(0, proxies->size());
-			for( int i = 0; i < proxies->size(); i++) {
+			for (int i = 0; i < proxies->size(); i++) {
 				MasterProxyInterface mpi = proxies->getInterface(o);
 				machine = mpi.address();
-				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
+				if (machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
 					break;
-				o = ++o%proxies->size();
+				o = ++o % proxies->size();
 			}
-		}
-		else if( self->machineToKill == "tlog" ) {
+		} else if (self->machineToKill == "tlog") {
 			auto tlogs = self->dbInfo->get().logSystemConfig.allPresentLogs();
 			int o = deterministicRandom()->randomInt(0, tlogs.size());
-			for( int i = 0; i < tlogs.size(); i++) {
+			for (int i = 0; i < tlogs.size(); i++) {
 				TLogInterface tli = tlogs[o];
 				machine = tli.address();
-				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
+				if (machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
 					break;
-				o = ++o%tlogs.size();
+				o = ++o % tlogs.size();
 			}
-		}
-		else if( self->machineToKill == "storage" || self->machineToKill == "ss"  || self->machineToKill == "storageserver" ) {
-			int o = deterministicRandom()->randomInt(0,storageServers.size());
-			for( int i = 0; i < storageServers.size(); i++) {
+		} else if (self->machineToKill == "storage" || self->machineToKill == "ss" ||
+		           self->machineToKill == "storageserver") {
+			int o = deterministicRandom()->randomInt(0, storageServers.size());
+			for (int i = 0; i < storageServers.size(); i++) {
 				StorageServerInterface ssi = storageServers[o];
 				machine = ssi.address();
-				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
+				if (machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
 					break;
-				o = ++o%storageServers.size();
+				o = ++o % storageServers.size();
 			}
-		}
-		else if( self->machineToKill == "clustercontroller" || self->machineToKill == "cc" ) {
+		} else if (self->machineToKill == "clustercontroller" || self->machineToKill == "cc") {
 			machine = self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress();
 		}
 
 		TraceEvent("IsolatedMark").detail("TargetedMachine", machine).detail("Role", self->machineToKill);
 
-		wait( self->killEndpoint( machine, cx, self ) );
+		wait(self->killEndpoint(machine, cx, self));
 
 		return Void();
 	}

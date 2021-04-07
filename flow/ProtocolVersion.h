@@ -25,7 +25,7 @@
 	struct x {                                                                                                         \
 		static constexpr uint64_t protocolVersion = v;                                                                 \
 	};                                                                                                                 \
-	constexpr bool has##x() const { return this->version() > x ::protocolVersion; }                                   \
+	constexpr bool has##x() const { return this->version() > x ::protocolVersion; }                                    \
 	static constexpr ProtocolVersion with##x() { return ProtocolVersion(x ::protocolVersion); }
 
 // ProtocolVersion wraps a uint64_t to make it type safe. It will know about the current versions.

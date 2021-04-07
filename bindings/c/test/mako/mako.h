@@ -69,34 +69,34 @@
 #define KEYPREFIXLEN 4
 
 typedef struct {
-  /* for each operation, it stores "count", "range" and "reverse" */
-  int ops[MAX_OP][3];
+	/* for each operation, it stores "count", "range" and "reverse" */
+	int ops[MAX_OP][3];
 } mako_txnspec_t;
 
 #define KNOB_MAX 256
 
 /* benchmark parameters */
 typedef struct {
-  int json;
-  int num_processes;
-  int num_threads;
-  int mode;
-  int rows; /* is 2 billion enough? */
-  int seconds;
-  int iteration;
-  int tps;
-  int sampling;
-  int key_length;
-  int value_length;
-  int zipf;
-  int commit_get;
-  int verbose;
-  mako_txnspec_t txnspec;
-  char cluster_file[PATH_MAX];
-  int trace;
-  char tracepath[PATH_MAX];
-  char knobs[KNOB_MAX];
-  uint8_t flatbuffers;
+	int json;
+	int num_processes;
+	int num_threads;
+	int mode;
+	int rows; /* is 2 billion enough? */
+	int seconds;
+	int iteration;
+	int tps;
+	int sampling;
+	int key_length;
+	int value_length;
+	int zipf;
+	int commit_get;
+	int verbose;
+	mako_txnspec_t txnspec;
+	char cluster_file[PATH_MAX];
+	int trace;
+	char tracepath[PATH_MAX];
+	char knobs[KNOB_MAX];
+	uint8_t flatbuffers;
 } mako_args_t;
 
 /* shared memory */
@@ -105,33 +105,33 @@ typedef struct {
 #define SIGNAL_OFF 2
 
 typedef struct {
-  int signal;
-  int readycount;
+	int signal;
+	int readycount;
 } mako_shmhdr_t;
 
 typedef struct {
-  uint64_t xacts;
-  uint64_t conflicts;
-  uint64_t ops[MAX_OP];
-  uint64_t errors[MAX_OP];
-  uint64_t latency_samples[MAX_OP];
-  uint64_t latency_us_total[MAX_OP];
-  uint64_t latency_us_min[MAX_OP];
-  uint64_t latency_us_max[MAX_OP];
+	uint64_t xacts;
+	uint64_t conflicts;
+	uint64_t ops[MAX_OP];
+	uint64_t errors[MAX_OP];
+	uint64_t latency_samples[MAX_OP];
+	uint64_t latency_us_total[MAX_OP];
+	uint64_t latency_us_min[MAX_OP];
+	uint64_t latency_us_max[MAX_OP];
 } mako_stats_t;
 
 /* per-process information */
 typedef struct {
-  int worker_id;
-  FDBDatabase *database;
-  mako_args_t *args;
-  mako_shmhdr_t *shm;
+	int worker_id;
+	FDBDatabase* database;
+	mako_args_t* args;
+	mako_shmhdr_t* shm;
 } process_info_t;
 
 /* args for threads */
 typedef struct {
-  int thread_id;
-  process_info_t *process;
+	int thread_id;
+	process_info_t* process;
 } thread_args_t;
 
 /* process type */

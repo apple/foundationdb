@@ -25,12 +25,14 @@
 #include "flow/Error.h"
 #include "flow/Platform.h"
 
-// ALLOC_INSTRUMENTATION_STDOUT enables non-sampled logging of all allocations and deallocations to stdout to be processed by scripts/alloc.pl
+// ALLOC_INSTRUMENTATION_STDOUT enables non-sampled logging of all allocations and deallocations to stdout to be
+// processed by scripts/alloc.pl
 //#define ALLOC_INSTRUMENTATION_STDOUT ENABLED(NOT_IN_CLEAN)
 
 //#define ALLOC_INSTRUMENTATION ENABLED(NOT_IN_CLEAN)
-// The form "(1==1)" in this context is used to satisfy both clang and vc++ with a single syntax.  Clang rejects "1" and vc++ rejects "true".
-#define FASTALLOC_THREAD_SAFE (FLOW_THREAD_SAFE || (1==1))
+// The form "(1==1)" in this context is used to satisfy both clang and vc++ with a single syntax.  Clang rejects "1" and
+// vc++ rejects "true".
+#define FASTALLOC_THREAD_SAFE (FLOW_THREAD_SAFE || (1 == 1))
 
 #if VALGRIND
 #include <drd.h>
@@ -61,19 +63,17 @@ struct AllocInstrInfo {
 	int64_t allocCount;
 	int64_t deallocCount;
 	int64_t maxAllocated;
-	inline void alloc(int64_t count=1) {
+	inline void alloc(int64_t count = 1) {
 		allocCount += count;
-		maxAllocated = std::max(allocCount-deallocCount,maxAllocated);
+		maxAllocated = std::max(allocCount - deallocCount, maxAllocated);
 	}
-	inline void dealloc(int64_t count=1) {
-		deallocCount += count;
-	}
+	inline void dealloc(int64_t count = 1) { deallocCount += count; }
 };
 extern std::map<const char*, AllocInstrInfo> allocInstr;
 #define INSTRUMENT_ALLOCATE(name) (allocInstr[(name)].alloc())
 #define INSTRUMENT_RELEASE(name) (allocInstr[(name)].dealloc())
 
-//extern std::map<uint32_t, uint64_t> stackAllocations;
+// extern std::map<uint32_t, uint64_t> stackAllocations;
 
 // maps from an address to the hash of the backtrace and the size of the alloction
 extern std::unordered_map<int64_t, std::pair<uint32_t, size_t>> memSample;
@@ -82,7 +82,7 @@ struct BackTraceAccount {
 	double count;
 	size_t sampleCount;
 	size_t totalSize;
-	std::vector<void*> *backTrace;
+	std::vector<void*>* backTrace;
 };
 // maps from a hash of a backtrace to a backtrace and the total size of data currently allocated from this stack
 extern std::unordered_map<uint32_t, BackTraceAccount> backTraceLookup;
@@ -97,8 +97,8 @@ extern const size_t SAMPLE_BYTES;
 #endif
 
 #if defined(ALLOC_INSTRUMENTATION) || defined(ALLOC_INSTRUMENTATION_STDOUT)
-void recordAllocation( void *ptr, size_t size );
-void recordDeallocation( void *ptr );
+void recordAllocation(void* ptr, size_t size);
+void recordDeallocation(void* ptr);
 #endif
 
 template <int Size>
@@ -106,7 +106,7 @@ class FastAllocator {
 public:
 	static void* allocate();
 	static void release(void* ptr);
-	static void check( void* ptr, bool alloc );
+	static void check(void* ptr, bool alloc);
 
 	static long long getTotalMemory();
 	static long long getApproximateMemoryUnused();
@@ -123,13 +123,13 @@ private:
 	static unsigned long vLock;
 #endif
 
-	static const int magazine_size = (128<<10) / Size;
+	static const int magazine_size = (128 << 10) / Size;
 	static const int PSize = Size / sizeof(void*);
 	struct GlobalData;
 	struct ThreadData {
 		void* freelist;
-		int count;		  // there are count items on freelist
-		void* alternate;  // alternate is either a full magazine, or an empty one
+		int count; // there are count items on freelist
+		void* alternate; // alternate is either a full magazine, or an empty one
 	};
 	static thread_local ThreadData threadData;
 	static thread_local bool threadInitialized;
@@ -137,7 +137,7 @@ private:
 #ifdef VALGRIND
 		ANNOTATE_RWLOCK_ACQUIRED(vLock, 1);
 #endif
-		static GlobalData *data = new GlobalData(); // This is thread-safe as of c++11 (VS 2015, gcc 4.8, clang 3.3)
+		static GlobalData* data = new GlobalData(); // This is thread-safe as of c++11 (VS 2015, gcc 4.8, clang 3.3)
 
 #ifdef VALGRIND
 		ANNOTATE_RWLOCK_RELEASED(vLock, 1);
@@ -147,9 +147,9 @@ private:
 	}
 	static void* freelist;
 
-	FastAllocator();  // not implemented
+	FastAllocator(); // not implemented
 	static void initThread();
-	static void getMagazine();   
+	static void getMagazine();
 	static void releaseMagazine(void*);
 };
 
@@ -157,7 +157,9 @@ extern std::atomic<int64_t> g_hugeArenaMemory;
 void hugeArenaSample(int size);
 void releaseAllThreadMagazines();
 int64_t getTotalUnusedAllocatedMemory();
-void setFastAllocatorThreadInitFunction( void (*)() );  // The given function will be called at least once in each thread that allocates from a FastAllocator.  Currently just one such function is tracked.
+void setFastAllocatorThreadInitFunction(
+    void (*)()); // The given function will be called at least once in each thread that allocates from a FastAllocator.
+                 // Currently just one such function is tracked.
 
 inline constexpr int nextFastAllocatedSize(int x) {
 	assert(x > 0 && x <= 8192);
@@ -189,7 +191,8 @@ template <class Object>
 class FastAllocated {
 public:
 	static void* operator new(size_t s) {
-		if (s != sizeof(Object)) abort();
+		if (s != sizeof(Object))
+			abort();
 		INSTRUMENT_ALLOCATE(typeid(Object).name());
 		void* p = FastAllocator < sizeof(Object) <= 64 ? 64 : nextFastAllocatedSize(sizeof(Object)) > ::allocate();
 		return p;
@@ -200,38 +203,60 @@ public:
 		FastAllocator<sizeof(Object) <= 64 ? 64 : nextFastAllocatedSize(sizeof(Object))>::release(s);
 	}
 	// Redefine placement new so you can still use it
-	static void* operator new( size_t, void* p ) { return p; }
-	static void operator delete( void*, void* ) { }
+	static void* operator new(size_t, void* p) { return p; }
+	static void operator delete(void*, void*) {}
 };
 
 static void* allocateFast(int size) {
-	if (size <= 16) return FastAllocator<16>::allocate();
-	if (size <= 32) return FastAllocator<32>::allocate();
-	if (size <= 64) return FastAllocator<64>::allocate();
-	if (size <= 96) return FastAllocator<96>::allocate();
-	if (size <= 128) return FastAllocator<128>::allocate();
-	if (size <= 256) return FastAllocator<256>::allocate();
-	if (size <= 512) return FastAllocator<512>::allocate();
-	if (size <= 1024) return FastAllocator<1024>::allocate();
-	if (size <= 2048) return FastAllocator<2048>::allocate();
-	if (size <= 4096) return FastAllocator<4096>::allocate();
-	if (size <= 8192) return FastAllocator<8192>::allocate();
+	if (size <= 16)
+		return FastAllocator<16>::allocate();
+	if (size <= 32)
+		return FastAllocator<32>::allocate();
+	if (size <= 64)
+		return FastAllocator<64>::allocate();
+	if (size <= 96)
+		return FastAllocator<96>::allocate();
+	if (size <= 128)
+		return FastAllocator<128>::allocate();
+	if (size <= 256)
+		return FastAllocator<256>::allocate();
+	if (size <= 512)
+		return FastAllocator<512>::allocate();
+	if (size <= 1024)
+		return FastAllocator<1024>::allocate();
+	if (size <= 2048)
+		return FastAllocator<2048>::allocate();
+	if (size <= 4096)
+		return FastAllocator<4096>::allocate();
+	if (size <= 8192)
+		return FastAllocator<8192>::allocate();
 	return new uint8_t[size];
 }
 
 static void freeFast(int size, void* ptr) {
-	if (size <= 16) return FastAllocator<16>::release(ptr);
-	if (size <= 32) return FastAllocator<32>::release(ptr);
-	if (size <= 64) return FastAllocator<64>::release(ptr);
-	if (size <= 96) return FastAllocator<96>::release(ptr);
-	if (size <= 128) return FastAllocator<128>::release(ptr);
-	if (size <= 256) return FastAllocator<256>::release(ptr);
-	if (size <= 512) return FastAllocator<512>::release(ptr);
-	if (size <= 1024) return FastAllocator<1024>::release(ptr);
-	if (size <= 2048) return FastAllocator<2048>::release(ptr);
-	if (size <= 4096) return FastAllocator<4096>::release(ptr);
-	if (size <= 8192) return FastAllocator<8192>::release(ptr);
-	delete[](uint8_t*)ptr;
+	if (size <= 16)
+		return FastAllocator<16>::release(ptr);
+	if (size <= 32)
+		return FastAllocator<32>::release(ptr);
+	if (size <= 64)
+		return FastAllocator<64>::release(ptr);
+	if (size <= 96)
+		return FastAllocator<96>::release(ptr);
+	if (size <= 128)
+		return FastAllocator<128>::release(ptr);
+	if (size <= 256)
+		return FastAllocator<256>::release(ptr);
+	if (size <= 512)
+		return FastAllocator<512>::release(ptr);
+	if (size <= 1024)
+		return FastAllocator<1024>::release(ptr);
+	if (size <= 2048)
+		return FastAllocator<2048>::release(ptr);
+	if (size <= 4096)
+		return FastAllocator<4096>::release(ptr);
+	if (size <= 8192)
+		return FastAllocator<8192>::release(ptr);
+	delete[](uint8_t*) ptr;
 }
 
 #endif
