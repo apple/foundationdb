@@ -4311,13 +4311,14 @@ public:
 			    .detail("OverrideTargetVersion", targetVersion);
 		}
 
-		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
-
-		if (!restoreSet.present()) {
-			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
-			    .detail("BackupContainer", bc->getURL())
-			    .detail("TargetVersion", targetVersion);
-			throw restore_invalid_version();
+		if (!CLIENT_KNOBS->IGNORE_LOG_FILES) {
+			Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
+			if (!restoreSet.present()) {
+				TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
+					.detail("BackupContainer", bc->getURL())
+					.detail("TargetVersion", targetVersion);
+				throw restore_invalid_version();
+			}
 		}
 
 		TraceEvent("FastRestoreSubmitRestoreRequest")
