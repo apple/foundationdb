@@ -36,6 +36,7 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/InstrumentRequest.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
@@ -1796,6 +1797,7 @@ void runNetwork() {
 	if (networkOptions.traceDirectory.present() && networkOptions.runLoopProfilingEnabled) {
 		setupRunLoopProfiler();
 	}
+	setupSamplingProfiler();
 
 	g_network->run();
 
@@ -3051,6 +3053,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx,
 						throw deterministicRandom()->randomChoice(
 						    std::vector<Error>{ transaction_too_old(), future_version() });
 					}
+					state InstrumentRequest request;
+					request.start();
 					GetKeyValuesReply _rep =
 					    wait(loadBalance(cx.getPtr(),
 					                     beginServer.second,
@@ -3061,6 +3065,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx,
 					                     cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
 					rep = _rep;
 					++cx->transactionPhysicalReadsCompleted;
+					request.complete();
 				} catch (Error&) {
 					++cx->transactionPhysicalReadsCompleted;
 					throw;
