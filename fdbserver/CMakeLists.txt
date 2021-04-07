@@ -100,6 +100,13 @@ set(FDBSERVER_SRCS
   TagPartitionedLogSystem.actor.cpp
   template_fdb.h
 
+  ptxn/Config.h
+  ptxn/ProxyTLogPushMessageSerializer.cpp
+  ptxn/ProxyTLogPushMessageSerializer.h
+  ptxn/StorageServerInterface.cpp
+  ptxn/StorageServerInterface.h
+  ptxn/TLogInterface.cpp
+  ptxn/TLogInterface.h
   ptxn/ProxyTLogPushMessageSerializer.cpp
   ptxn/ProxyTLogPushMessageSerializer.h
   ptxn/Serializer.h

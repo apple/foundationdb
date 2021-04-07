@@ -23,7 +23,7 @@
 
 #pragma once
 
-#include <cinttypes>
+#include <cstdint>
 #include <unordered_map>
 
 #include "fdbclient/CommitTransaction.h"
@@ -35,18 +35,19 @@ namespace ptxn {
 const uint8_t ProxyTLogMessageProtocolVersion = 1;
 
 /**
- * @class ProxyTLogMessageHeader
+ * When passing a series of mutations, or a commit, from Proxy to TLog, the ProxyTLogMessageHeader
+ * is prefixed to the mutations.
  */
 struct ProxyTLogMessageHeader {
 	static constexpr FileIdentifier file_identifier = 356918;
 
-	/// The version of the protocol
+	// The version of the protocol
 	uint8_t protocolVersion = ProxyTLogMessageProtocolVersion;
 
-	/// Number of items
+	// Number of items
 	size_t numItems;
 
-	/// The raw length, i.e. the number of bytes, in this message, excluding the header
+	// The raw length, i.e. the number of bytes, in this message, excluding the header
 	size_t length;
 
 	template <typename Reader>
@@ -61,7 +62,8 @@ struct ProxyTLogMessageHeader {
 };
 
 /**
- * @class SubsequenceMutationItem
+ * Stores the mutations and their subsequences, or the relative order of each mutations. The order
+ * is used in recovery.
  */
 struct SubsequenceMutationItem {
 	uint32_t subsequence;
@@ -78,34 +80,29 @@ struct SubsequenceMutationItem {
 	}
 };
 
-/**
- * @class ProxyTLogPushMessageSerializer
- * @brief Encode the mutations that commit proxy have received, for TLog's consumption
- */
+// Encodes the mutations that commit proxy have received, for TLog's consumption
 class ProxyTLogPushMessageSerializer {
-	/// Maps the TeamID to the list of BinaryWriters
+	// Maps the TeamID to the list of BinaryWriters
 	std::unordered_map<TeamID, HeaderedItemsSerializerBase<ProxyTLogMessageHeader, SubsequenceMutationItem>> writers;
 
-	/// Subsequence of the mutation
+	// Subsequence of the mutation
 	// NOTE: The subsequence is designed to sart at 1, as in the TagPartitionLogSystem
 	// the cursors requires this (see comments in LogSystem.h:LogPushData), we
 	// follow the custom.
 	uint32_t currentSubsequence = 1;
 
 public:
-	/// For a given TeamID, serialize a new mutation
+	// For a given TeamID, serialize a new mutation
 	void writeMessage(const MutationRef& mutation, const TeamID& teamID);
 
-	/// For a given TeamID, mark the serializer not accepting more mutations, and write the header.
+	// For a given TeamID, mark the serializer not accepting more mutations, and write the header.
 	void completeMessageWriting(const TeamID& teamID);
 
-	/// Get the serialized data for a given TeamID
+	// Get the serialized data for a given TeamID
 	Standalone<StringRef> getSerialized(const TeamID& teamID);
 };
 
-/**
- * @brief Deserialize the ProxyTLogPushMessage
- */
+// Deserialize the ProxyTLogPushMessage
 bool proxyTLogPushMessageDeserializer(const Arena& arena,
                                       StringRef serialized,
                                       ProxyTLogMessageHeader& header,
