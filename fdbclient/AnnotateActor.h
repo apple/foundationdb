@@ -27,24 +27,35 @@
 // sampling profiler.
 struct AnnotateActor {
 	unsigned index;
+	bool set;
 
-	AnnotateActor() {}
+	AnnotateActor() : set(false) {}
 
-	// This API isn't great. Ideally, no cleanup call is needed. I ran into an
-	// issue around the destructor being called twice because an instance of
-	// this class has to be stored as a class member (otherwise it goes away
-	// when wait is called), and due to how Flow does code generation the
-	// member will be default initialized and then initialized again when it is
-	// initially set. Then, the destructor will be called twice, causing issues
-	// when the WriteOnlySet tries to erase the same index twice. I'm working
-	// on this :)
+	AnnotateActor(Reference<ActorLineage> lineage) : set(true) {
+		index = g_network->getActorLineageSet().insert(lineage);
+	}
 
-	void start() {
-		index = g_network->getActorLineageSet().insert(currentLineage);
+	AnnotateActor(const AnnotateActor& other) = delete;
+	AnnotateActor(AnnotateActor&& other) = delete;
+	AnnotateActor& operator=(const AnnotateActor& other) = delete;
+
+	AnnotateActor& operator=(AnnotateActor&& other) {
+		if (this == &other) {
+			return *this;
+		}
+
+		this->index = other.index;
+		this->set = other.set;
+
+		other.set = false;
+
+		return *this;
 	}
 	
-	void complete() {
-		g_network->getActorLineageSet().erase(index);
+	~AnnotateActor() {
+		if (set) {
+			g_network->getActorLineageSet().erase(index);
+		}
 	}
 };
 

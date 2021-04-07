@@ -3027,8 +3027,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx,
 						throw deterministicRandom()->randomChoice(
 						    std::vector<Error>{ transaction_too_old(), future_version() });
 					}
-					state AnnotateActor annotation;
-					annotation.start();
+					state AnnotateActor annotation(currentLineage);
 					GetKeyValuesReply _rep =
 					    wait(loadBalance(cx.getPtr(),
 					                     beginServer.second,
@@ -3039,7 +3038,6 @@ ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx,
 					                     cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
 					rep = _rep;
 					++cx->transactionPhysicalReadsCompleted;
-					annotation.complete();
 				} catch (Error&) {
 					++cx->transactionPhysicalReadsCompleted;
 					throw;
