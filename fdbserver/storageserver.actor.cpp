@@ -23,10 +23,14 @@
 #include <type_traits>
 #include <unordered_map>
 
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
+#include "flow/Error.h"
+#include "flow/FastRef.h"
 #include "flow/Hash3.h"
 #include "flow/Histogram.h"
 #include "flow/IRandom.h"
@@ -187,6 +191,12 @@ struct StorageServerDisk {
 	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) {
 		return storage->readRange(keys, rowLimit, byteLimit);
 	}
+
+	Future<Void> readRange(KeyRangeRef keys, Reference<IReadRangeResultWriter> resultWriter, int rowLimit) {
+		return storage->readRange(keys, resultWriter, rowLimit);
+	}
+
+	bool usesReadRangeResultWriter() { return storage->usesReadRangeResultWriter(); }
 
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
@@ -365,6 +375,7 @@ public:
 	KeyRef setWatchMetadata(Reference<ServerWatchMetadata> metadata);
 	void deleteWatchMetadata(KeyRef key);
 	void clearWatchMetadata();
+	int rangeReadNum = 0; // TODO: remove this
 
 	class CurrentRunningFetchKeys {
 		std::unordered_map<UID, double> startTimeMap;
@@ -876,6 +887,226 @@ public:
 	}
 };
 
+class ReadRangeResultWriter : public IReadRangeResultWriter {
+
+	// Parameters passed to storage server read range function
+	KeyRange range;
+	int limit;
+	int* pLimitBytes;
+	StorageServer::VersionedData::iterator& vCurrent;
+	bool finishedDisk = false, forward = false, trace = false; // TODO: remove trace bool
+	int rangeReadNum; // TODO: remove this, currently only used for debugging
+
+	GetKeyValuesReply& result;
+
+	void decrementLimits(KeyValueRef& kv) {
+		if (forward)
+			limit--;
+		else
+			limit++;
+		*pLimitBytes -= sizeof(KeyValueRef) + kv.expectedSize();
+	}
+
+public:
+	ReadRangeResultWriter(StorageServer::VersionedData::ViewAtVersion& view,
+	                      StorageServer::VersionedData::iterator& vCurrent,
+	                      KeyRange range,
+	                      int limit,
+	                      int* pLimitBytes,
+	                      StorageServer* data,
+	                      Version version,
+	                      int rangeReadNum,
+	                      bool trace,
+						  GetKeyValuesReply& result)
+	  : vCurrent(vCurrent), range(range), limit(limit), pLimitBytes(pLimitBytes), rangeReadNum(rangeReadNum),
+	    trace(trace), result(result) {
+		auto containingRange = data->cachedRangeMap.rangeContaining(range.begin);
+		if (containingRange.value() && containingRange->range().end >= range.end) {
+			result.cached = true;
+		} else {
+			result.cached = false;
+		}
+		result.version = version;
+
+		forward = limit >= 0 ? true : false;
+	}
+
+	void setResult(bool assert = false) {
+		if (assert)
+			ASSERT(result.data.size() == 0 ||
+			       *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
+
+		result.more = limit == 0 || *pLimitBytes <= 0;
+	}
+
+	std::variant<bool, KeyRef> operator()(Optional<KeyValueRef> kvOpt) override {
+		if (forward) {
+			loop {
+				if (limit <= 0 || *pLimitBytes <= 0)
+					return false;
+				if (!vCurrent || vCurrent.key() >= range.end) {
+					if (trace)
+						TraceEvent("Nim_case 1").detail("rangeReadNum", rangeReadNum);
+					if (kvOpt.present()) {
+						if (trace)
+							TraceEvent("Nim_case 1 has")
+							    .detail("key", kvOpt.get())
+							    .detail("rangeReadNum", rangeReadNum);
+						result.data.push_back(result.arena, kvOpt.get());
+						decrementLimits(kvOpt.get());
+					}
+					return true;
+				}
+				if (!kvOpt.present()) {
+					finishedDisk = true;
+					if (vCurrent->isClearTo()) {
+						++vCurrent;
+						continue;
+					}
+					if (trace)
+						TraceEvent("Nim_case 2").detail("key", vCurrent.key()).detail("rangeReadNum", rangeReadNum);
+					KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
+					result.data.push_back(result.arena, kvRef);
+					decrementLimits(kvRef);
+					++vCurrent;
+					continue;
+				}
+
+				ASSERT(!finishedDisk);
+				KeyValueRef kv = kvOpt.get();
+				if (kv.key < vCurrent.key()) {
+					if (trace)
+						TraceEvent("Nim_case 3")
+						    .detail("key", kv.key)
+						    .detail("rangeReadNum", rangeReadNum)
+						    .detail("vCurrent", vCurrent.key())
+						    .detail("clearTo", vCurrent->isClearTo());
+					result.data.push_back(result.arena, kv);
+					decrementLimits(kv);
+					return true;
+				} else if (vCurrent->isClearTo()) {
+					KeyRef skipKey = vCurrent->getEndKey();
+					if (trace)
+						TraceEvent("Nim_case 4").detail("key", skipKey).detail("rangeReadNum", rangeReadNum);
+					++vCurrent;
+					if (!vCurrent || vCurrent.key() > kv.key)
+						return skipKey;
+				} else if (kv.key == vCurrent.key()) {
+					KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
+					if (trace)
+						TraceEvent("Nim_case 5").detail("key", kvRef).detail("rangeReadNum", rangeReadNum);
+					result.data.push_back(result.arena, kvRef);
+					decrementLimits(kvRef);
+					++vCurrent;
+					return true;
+				} else {
+					KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
+					if (trace)
+						TraceEvent("Nim_case 6")
+						    .detail("key", kvRef)
+						    .detail("key2", vCurrent->isClearTo())
+						    .detail("rangeReadNum", rangeReadNum);
+					result.data.push_back(result.arena, kvRef);
+					decrementLimits(kvRef);
+					++vCurrent;
+				}
+			}
+		} else {
+			if (trace)
+				TraceEvent("Nim_reverse").detail("rangeReadNum", rangeReadNum);
+			loop {
+				if (limit >= 0 || *pLimitBytes <= 0)
+					return false;
+				if (!vCurrent || (!vCurrent->isClearTo() && vCurrent.key() < range.begin) ||
+				    (vCurrent->isClearTo() && vCurrent->getEndKey() < range.begin)) {
+					if (trace)
+						TraceEvent("Nim_case 1").detail("rangeReadNum", rangeReadNum);
+					if (kvOpt.present()) {
+						if (trace)
+							TraceEvent("Nim_case 1 has")
+							    .detail("key", kvOpt.get())
+							    .detail("rangeReadNum", rangeReadNum);
+						result.data.push_back(result.arena, kvOpt.get());
+						decrementLimits(kvOpt.get());
+					}
+					return true;
+				}
+				if (!kvOpt.present()) {
+					finishedDisk = true;
+					if (vCurrent->isClearTo()) {
+						--vCurrent;
+						continue;
+					}
+					if (trace)
+						TraceEvent("Nim_case 2").detail("key", vCurrent.key()).detail("rangeReadNum", rangeReadNum);
+					KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
+					result.data.push_back(result.arena, kvRef);
+					decrementLimits(kvRef);
+					--vCurrent;
+					continue;
+				}
+
+				ASSERT(!finishedDisk);
+				KeyValueRef kv = kvOpt.get();
+				if ((vCurrent->isClearTo() && kv.key > vCurrent->getEndKey()) ||
+				    (!vCurrent->isClearTo() && kv.key > vCurrent.key())) {
+					if (trace)
+						TraceEvent("Nim_case 3")
+						    .detail("key", kv.key)
+						    .detail("rangeReadNum", rangeReadNum)
+						    .detail("vCurrent", vCurrent.key())
+						    .detail("clearTo", vCurrent->isClearTo());
+					result.data.push_back(result.arena, kv);
+					decrementLimits(kv);
+					return true;
+				} else if (vCurrent->isClearTo()) {
+					KeyRef skipKey = vCurrent.key();
+					if (kv.key == vCurrent->getEndKey()) {
+						// ++vCurrent;
+						// if(vCurrent && !vCurrent->isClearTo() && vCurrent.key() == kv.key) {
+						// 	if (trace)
+						// 		TraceEvent("Nim_case 4 inside1").detail("key", kv).detail("rangeReadNum", rangeReadNum);
+						// 	KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
+						// 	result.data.push_back(result.arena, kvRef);
+						// 	decrementLimits(kvRef);
+						// } else if (!(vCurrent && vCurrent->isClearTo() && vCurrent.key() == kv.key)) {
+						// 	if (trace)
+						// 		TraceEvent("Nim_case 4 inside2").detail("key", kv).detail("rangeReadNum", rangeReadNum);
+						// 	result.data.push_back(result.arena, kv);
+						// 	decrementLimits(kv);
+						// }
+						// --vCurrent;
+						result.data.push_back(result.arena, kv);
+						decrementLimits(kv);
+					}
+					if (trace)
+						TraceEvent("Nim_case 4").detail("key", skipKey).detail("rangeReadNum", rangeReadNum);
+					--vCurrent;
+					if (!vCurrent || vCurrent.key() < kv.key)
+						return skipKey;
+				} else if (kv.key == vCurrent.key()) {
+					KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
+					if (trace)
+						TraceEvent("Nim_case 5").detail("key", kvRef).detail("rangeReadNum", rangeReadNum);
+					result.data.push_back(result.arena, kvRef);
+					decrementLimits(kvRef);
+					--vCurrent;
+					return true;
+				} else {
+					KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
+					if (trace)
+						TraceEvent("Nim_case 6").detail("key", kvRef).detail("rangeReadNum", rangeReadNum);
+					result.data.push_back(result.arena, kvRef);
+					decrementLimits(kvRef);
+					--vCurrent;
+				}
+			}
+		}
+	}
+
+	Arena& getArena() override { return result.arena; }
+};
+
 const StringRef StorageServer::CurrentRunningFetchKeys::emptyString = LiteralStringRef("");
 const KeyRangeRef StorageServer::CurrentRunningFetchKeys::emptyKeyRange =
     KeyRangeRef(StorageServer::CurrentRunningFetchKeys::emptyString,
@@ -1157,13 +1388,12 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		DEBUG_MUTATION("ShardGetValue",
 		               version,
 		               MutationRef(MutationRef::DebugKey, req.key, v.present() ? v.get() : LiteralStringRef("<null>")));
-		DEBUG_MUTATION("ShardGetPath",
-		               version,
-		               MutationRef(MutationRef::DebugKey,
-		                           req.key,
-		                           path == 0   ? LiteralStringRef("0")
-		                           : path == 1 ? LiteralStringRef("1")
-		                                       : LiteralStringRef("2")));
+		DEBUG_MUTATION(
+		    "ShardGetPath",
+		    version,
+		    MutationRef(MutationRef::DebugKey,
+		                req.key,
+		                path == 0 ? LiteralStringRef("0") : path == 1 ? LiteralStringRef("1") : LiteralStringRef("2")));
 
 		/*
 		StorageMetrics m;
@@ -1488,21 +1718,12 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
                                           int limit,
                                           int* pLimitBytes,
                                           SpanID parentSpan) {
-	state GetKeyValuesReply result;
+	state Span span("SS:readRange"_loc, parentSpan);
 	state StorageServer::VersionedData::ViewAtVersion view = data->data().at(version);
 	state StorageServer::VersionedData::iterator vCurrent = view.end();
 	state KeyRef readBegin;
 	state KeyRef readEnd;
-	state Key readBeginTemp;
-	state int vCount = 0;
-	state Span span("SS:readRange"_loc, parentSpan);
-
-	// for caching the storage queue results during the first PTree traversal
-	state VectorRef<KeyValueRef> resultCache;
-
-	// for remembering the position in the resultCache
-	state int pos = 0;
-
+	state GetKeyValuesReply result;
 	// Check if the desired key-range is cached
 	auto containingRange = data->cachedRangeMap.rangeContaining(range.begin);
 	if (containingRange.value() && containingRange->range().end >= range.end) {
@@ -1511,6 +1732,78 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 		result.cached = true;
 	} else
 		result.cached = false;
+
+	if (data->storage.usesReadRangeResultWriter()) {
+		state int rNum = ++data->rangeReadNum;
+		state bool trace = false;
+		// TraceEvent("Nim_in here");
+		// if (range.end == range.begin)
+		// 	trace = true;
+		// TraceEvent("Nim_startRangeRead")
+		//     .detail("begin", range.begin)
+		//     .detail("end", range.end)
+		//     .detail("rangeReadNum", rNum)
+		//     .detail("readVersion", version);
+
+		if (limit >= 0) {
+			// if (range.begin == KeyRef("0000039a000000bd0000000500000004")) {
+			// 	trace = true;
+			// }
+			vCurrent = view.lastLessOrEqual(range.begin);
+			if (vCurrent && vCurrent->isClearTo() && vCurrent->getEndKey() > range.begin)
+				readBegin = vCurrent->getEndKey();
+			else
+				readBegin = range.begin;
+			readEnd = range.end;
+			vCurrent = view.lower_bound(readBegin);
+			if (readBegin > readEnd) {
+				ASSERT(result.data.size() == 0);
+				result.more = false;
+				return result;
+			}
+		} else {
+			vCurrent = view.lastLess(range.end);
+
+			// A clear might extend all the way to range.end
+			if (vCurrent && vCurrent->isClearTo() && vCurrent->getEndKey() >= range.end) {
+				readEnd = vCurrent.key();
+				--vCurrent;
+			} else {
+				readEnd = range.end;
+			}
+			readBegin = range.begin;
+			if (readBegin > readEnd) {
+				ASSERT(result.data.size() == 0);
+				result.more = false;
+				return result;
+			}
+		}
+		// TraceEvent("Nim_startRangeReadModified")
+		//     .detail("begin", readBegin)
+		//     .detail("end", readEnd)
+		//     .detail("trace", trace)
+		//     .detail("rangeReadNum", rNum)
+		//     .detail("readVersion", version);
+		state Reference<ReadRangeResultWriter> resultWriter =
+		    makeReference<ReadRangeResultWriter>(view, vCurrent, range, limit, pLimitBytes, data, version, rNum, trace, result);
+		wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), resultWriter, limit));
+		resultWriter->setResult(true);
+		// TraceEvent("Nim_doneRangeRead")
+		//     .detail("begin", range.begin)
+		//     .detail("end", range.end)
+		//     .detail("rangeReadNum", rNum)
+		//     .detail("size", result.data.size())
+		//     .detail("readVersion", version);
+		return result;
+	}
+	state Key readBeginTemp;
+	state int vCount = 0;
+
+	// for caching the storage queue results during the first PTree traversal
+	state VectorRef<KeyValueRef> resultCache;
+
+	// for remembering the position in the resultCache
+	state int pos = 0;
 
 	// if (limit >= 0) we are reading forward, else backward
 	if (limit >= 0) {

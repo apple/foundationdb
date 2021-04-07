@@ -149,7 +149,9 @@ bool ApiWorkload::compareResults(VectorRef<KeyValueRef> dbResults,
 			TraceEvent(SevError, format("%s_CompareValueMismatch", description().c_str()).c_str())
 			    .detail("ReadVer", readVersion)
 			    .detail("ResultSize", dbResults.size())
-			    .detail("DifferAt", i);
+			    .detail("DifferAt", i)
+				.detail("Memory", storeResults[i].key)
+				.detail("DB", dbResults[i].key);
 
 			return false;
 		}
@@ -180,7 +182,7 @@ ACTOR Future<bool> compareDatabaseToMemory(ApiWorkload* self) {
 				// Compare results of database and memory store
 				Version v = wait(transaction->getReadVersion());
 				if (!self->compareResults(dbResults, storeResults, v)) {
-					TraceEvent(SevError, "FailedComparisonToMemory").detail("StartTime", startTime);
+					TraceEvent(SevError, "FailedComparisonToMemory").detail("StartTime", startTime).detail("range", range);
 					return false;
 				}
 

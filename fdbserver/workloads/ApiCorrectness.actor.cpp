@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/QuietDatabase.h"
 
 #include "fdbserver/MutationTracking.h"
@@ -35,7 +36,7 @@ struct ApiCorrectnessWorkload : ApiWorkload {
 private:
 // Enable to track the activity on a particular key
 #if CENABLED(0, NOT_IN_CLEAN)
-#define targetKey LiteralStringRef( ??? )
+#define targetKey LiteralStringRef( "0000000002ripv" )
 
 	void debugKey(KeyRef key, std::string context) {
 		if (key == targetKey)
@@ -471,8 +472,10 @@ public:
 
 		// Compare the ranges
 		bool result = self->compareResults(dbResults, storeResults, readVersion);
-		if (!result)
+		if (!result) {
+			// TraceEvent("Nim_GetRangeError").detail("range", KeyRangeRef(start, end)).detail("db", dbResults).detail("store", storeResults);
 			self->testFailure("GetRange returned incorrect results");
+		}
 
 		return result;
 	}
@@ -571,8 +574,10 @@ public:
 		// Compare the results
 		bool result = self->compareResults(dbResults, storeResults, readVersion);
 
-		if (!result)
+		if (!result) {
+			// TraceEvent("Nim_GetRangeKeySelectorError").detail("range", KeyRangeRef(startKey, endKey)).detail("reverse", reverse).detail("db", dbResults).detail("store", storeResults);
 			self->testFailure("GetRange (KeySelector) returned incorrect results");
+		}
 
 		return result;
 	}
@@ -758,8 +763,10 @@ public:
 
 		// Check that the database and memory store are the same
 		bool result = wait(self->compareDatabaseToMemory());
-		if (!result)
+		if (!result){
+			TraceEvent("Nim_testClear").detail("start", start).detail("end", end);
 			self->testFailure("Clear (range) resulted in incorrect database");
+		}
 
 		return result;
 	}

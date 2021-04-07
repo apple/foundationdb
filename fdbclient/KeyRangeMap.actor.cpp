@@ -238,6 +238,11 @@ static Future<Void> krmSetRangeCoalescing_(Transaction* tr,
 
 	tr->clear(KeyRangeRef(beginKey, endKey));
 
+	// if (value == endValue && endKey != maxWithPrefix.end) {
+	// 	TraceEvent("Nim_error range 1").detail("start", lastLessThan(withPrefix.begin).getKey()).detail("end", firstGreaterOrEqual(withPrefix.begin).getKey());
+	// 	TraceEvent("Nim_error range 2").detail("start", lastLessOrEqual(withPrefix.end).getKey()).detail("end", (firstGreaterThan(withPrefix.end) + 1).getKey());
+	// }
+
 	ASSERT(value != endValue || endKey == maxWithPrefix.end);
 	tr->set(beginKey, value);
 	tr->set(endKey, endValue);

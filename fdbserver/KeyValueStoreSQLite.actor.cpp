@@ -1160,6 +1160,8 @@ struct RawCursor {
 
 	Void readRangeResultWriter(KeyRangeRef keys, Reference<IReadRangeResultWriter> resultWriter, int rowLimit) {
 		// Read range implementation using a result writer
+		if (rowLimit == 0)
+			return Void();
 		if (db.fragment_values) {
 			if (rowLimit > 0) { // return results in asc order
 				DefragmentingReader i(*this, resultWriter->getArena(), true);
@@ -1167,6 +1169,7 @@ struct RawCursor {
 				Optional<KeyRef> nextKey = i.peek();
 				while (nextKey.present() && nextKey.get() < keys.end) {
 					Optional<KeyValueRef> kv = i.getNext();
+					// TraceEvent("Nim_readRangeKVStore").detail("key", kv.get().key);
 					std::variant<bool, KeyRef> res = resultWriter->operator()(kv);
 					if (res.index() == 0) { // returned bool
 						auto f = std::get<bool>(res);
@@ -1185,6 +1188,7 @@ struct RawCursor {
 				while (nextKey.present() && nextKey.get() >= keys.begin) {
 					Optional<KeyValueRef> kv = i.getNext();
 					std::variant<bool, KeyRef> res = resultWriter->operator()(kv);
+					// TraceEvent("Nim_readRangeKVStore 2").detail("key", kv.get().key);
 					if (res.index() == 0) { // returned bool
 						auto f = std::get<bool>(res);
 						if (!f) { // we hit the limit so return
@@ -1205,6 +1209,7 @@ struct RawCursor {
 					KeyValueRef kv = decodeKV(getEncodedRow(resultWriter->getArena()));
 					if (kv.key >= keys.end)
 						break;
+					// TraceEvent("Nim_readRangeKVStore 3").detail("key", kv.key);
 					std::variant<bool, KeyRef> res = resultWriter->operator()(kv);
 					if (res.index() == 0) {
 						auto f = std::get<bool>(res);
@@ -1227,6 +1232,7 @@ struct RawCursor {
 					KeyValueRef kv = decodeKV(getEncodedRow(resultWriter->getArena()));
 					if (kv.key < keys.begin)
 						break;
+					// TraceEvent("Nim_readRangeKVStore 4").detail("key", kv.key);
 					std::variant<bool, KeyRef> res = resultWriter->operator()(kv);
 					if (res.index() == 0) {
 						auto f = std::get<bool>(res);

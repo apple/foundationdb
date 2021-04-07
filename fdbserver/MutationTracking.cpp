@@ -28,7 +28,7 @@
 #endif
 
 // Track up to 2 keys in simulation via enabling MUTATION_TRACKING_ENABLED and setting the keys here.
-StringRef debugKey = LiteralStringRef("");
+StringRef debugKey = LiteralStringRef("0000039a000000bd0000000500000004");
 StringRef debugKey2 = LiteralStringRef("\xff\xff\xff\xff");
 
 TraceEvent debugMutationEnabled(const char* context, Version version, MutationRef const& mutation) {
