@@ -764,7 +764,7 @@ public:
 		// Check that the database and memory store are the same
 		bool result = wait(self->compareDatabaseToMemory());
 		if (!result){
-			TraceEvent("Nim_testClear").detail("start", start).detail("end", end);
+			// TraceEvent("Nim_testClear").detail("start", start).detail("end", end);
 			self->testFailure("Clear (range) resulted in incorrect database");
 		}
 

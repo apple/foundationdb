@@ -894,6 +894,9 @@ class ReadRangeResultWriter : public IReadRangeResultWriter {
 	int limit;
 	int* pLimitBytes;
 	StorageServer::VersionedData::iterator& vCurrent;
+	StorageServer* data;
+	Promise<Void> errorPromise;
+	Version version;
 	bool finishedDisk = false, forward = false, trace = false; // TODO: remove trace bool
 	int rangeReadNum; // TODO: remove this, currently only used for debugging
 
@@ -908,26 +911,17 @@ class ReadRangeResultWriter : public IReadRangeResultWriter {
 	}
 
 public:
-	ReadRangeResultWriter(StorageServer::VersionedData::ViewAtVersion& view,
-	                      StorageServer::VersionedData::iterator& vCurrent,
+	ReadRangeResultWriter(StorageServer::VersionedData::iterator& vCurrent,
+	                      StorageServer* data,
+	                      Version version,
 	                      KeyRange range,
 	                      int limit,
 	                      int* pLimitBytes,
-	                      StorageServer* data,
-	                      Version version,
 	                      int rangeReadNum,
 	                      bool trace,
-						  GetKeyValuesReply& result)
-	  : vCurrent(vCurrent), range(range), limit(limit), pLimitBytes(pLimitBytes), rangeReadNum(rangeReadNum),
-	    trace(trace), result(result) {
-		auto containingRange = data->cachedRangeMap.rangeContaining(range.begin);
-		if (containingRange.value() && containingRange->range().end >= range.end) {
-			result.cached = true;
-		} else {
-			result.cached = false;
-		}
-		result.version = version;
-
+	                      GetKeyValuesReply& result)
+	  : vCurrent(vCurrent), data(data), version(version), range(range), limit(limit),
+	    pLimitBytes(pLimitBytes), rangeReadNum(rangeReadNum), trace(trace), result(result) {
 		forward = limit >= 0 ? true : false;
 	}
 
@@ -939,168 +933,181 @@ public:
 		result.more = limit == 0 || *pLimitBytes <= 0;
 	}
 
+	Future<Void> getErrorFuture() {
+		return errorPromise.getFuture();
+	}
+
 	std::variant<bool, KeyRef> operator()(Optional<KeyValueRef> kvOpt) override {
-		if (forward) {
-			loop {
-				if (limit <= 0 || *pLimitBytes <= 0)
-					return false;
-				if (!vCurrent || vCurrent.key() >= range.end) {
-					if (trace)
-						TraceEvent("Nim_case 1").detail("rangeReadNum", rangeReadNum);
-					if (kvOpt.present()) {
+		try {
+			if (forward) {
+				if (trace)
+					TraceEvent("Nim_forward").detail("rangeReadNum", rangeReadNum);
+				loop {
+					if (data->storageVersion() > version)
+						throw transaction_too_old();
+					if (limit <= 0 || *pLimitBytes <= 0)
+						return false;
+					if (!vCurrent || vCurrent.key() >= range.end) {
 						if (trace)
-							TraceEvent("Nim_case 1 has")
-							    .detail("key", kvOpt.get())
-							    .detail("rangeReadNum", rangeReadNum);
-						result.data.push_back(result.arena, kvOpt.get());
-						decrementLimits(kvOpt.get());
+							TraceEvent("Nim_case 1").detail("rangeReadNum", rangeReadNum);
+						if (kvOpt.present()) {
+							if (trace)
+								TraceEvent("Nim_case 1 has")
+								    .detail("key", kvOpt.get())
+								    .detail("rangeReadNum", rangeReadNum);
+							result.data.push_back(result.arena, kvOpt.get());
+							decrementLimits(kvOpt.get());
+						}
+						return true;
 					}
-					return true;
-				}
-				if (!kvOpt.present()) {
-					finishedDisk = true;
-					if (vCurrent->isClearTo()) {
+					if (!kvOpt.present()) {
+						finishedDisk = true;
+						if (vCurrent->isClearTo()) {
+							++vCurrent;
+							continue;
+						}
+						if (trace)
+							TraceEvent("Nim_case 2").detail("key", vCurrent.key()).detail("rangeReadNum", rangeReadNum);
+						KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
+						result.data.push_back(result.arena, kvRef);
+						decrementLimits(kvRef);
 						++vCurrent;
 						continue;
 					}
-					if (trace)
-						TraceEvent("Nim_case 2").detail("key", vCurrent.key()).detail("rangeReadNum", rangeReadNum);
-					KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
-					result.data.push_back(result.arena, kvRef);
-					decrementLimits(kvRef);
-					++vCurrent;
-					continue;
-				}
 
-				ASSERT(!finishedDisk);
-				KeyValueRef kv = kvOpt.get();
-				if (kv.key < vCurrent.key()) {
-					if (trace)
-						TraceEvent("Nim_case 3")
-						    .detail("key", kv.key)
-						    .detail("rangeReadNum", rangeReadNum)
-						    .detail("vCurrent", vCurrent.key())
-						    .detail("clearTo", vCurrent->isClearTo());
-					result.data.push_back(result.arena, kv);
-					decrementLimits(kv);
-					return true;
-				} else if (vCurrent->isClearTo()) {
-					KeyRef skipKey = vCurrent->getEndKey();
-					if (trace)
-						TraceEvent("Nim_case 4").detail("key", skipKey).detail("rangeReadNum", rangeReadNum);
-					++vCurrent;
-					if (!vCurrent || vCurrent.key() > kv.key)
-						return skipKey;
-				} else if (kv.key == vCurrent.key()) {
-					KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
-					if (trace)
-						TraceEvent("Nim_case 5").detail("key", kvRef).detail("rangeReadNum", rangeReadNum);
-					result.data.push_back(result.arena, kvRef);
-					decrementLimits(kvRef);
-					++vCurrent;
-					return true;
-				} else {
-					KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
-					if (trace)
-						TraceEvent("Nim_case 6")
-						    .detail("key", kvRef)
-						    .detail("key2", vCurrent->isClearTo())
-						    .detail("rangeReadNum", rangeReadNum);
-					result.data.push_back(result.arena, kvRef);
-					decrementLimits(kvRef);
-					++vCurrent;
-				}
-			}
-		} else {
-			if (trace)
-				TraceEvent("Nim_reverse").detail("rangeReadNum", rangeReadNum);
-			loop {
-				if (limit >= 0 || *pLimitBytes <= 0)
-					return false;
-				if (!vCurrent || (!vCurrent->isClearTo() && vCurrent.key() < range.begin) ||
-				    (vCurrent->isClearTo() && vCurrent->getEndKey() < range.begin)) {
-					if (trace)
-						TraceEvent("Nim_case 1").detail("rangeReadNum", rangeReadNum);
-					if (kvOpt.present()) {
+					ASSERT(!finishedDisk);
+					KeyValueRef kv = kvOpt.get();
+					if (kv.key < vCurrent.key()) {
 						if (trace)
-							TraceEvent("Nim_case 1 has")
-							    .detail("key", kvOpt.get())
+							TraceEvent("Nim_case 3")
+							    .detail("key", kv.key)
+							    .detail("rangeReadNum", rangeReadNum)
+							    .detail("vCurrent", vCurrent.key())
+							    .detail("clearTo", vCurrent->isClearTo());
+						result.data.push_back(result.arena, kv);
+						decrementLimits(kv);
+						return true;
+					} else if (vCurrent->isClearTo()) {
+						KeyRef skipKey = vCurrent->getEndKey();
+						if (trace)
+							TraceEvent("Nim_case 4 skipKey")
+							    .detail("curKey", vCurrent.key())
+							    .detail("key", skipKey)
+							    .detail("rangeReadNum", rangeReadNum)
+							    .detail("disk", kv.key);
+						++vCurrent;
+						if (!vCurrent || vCurrent.key() > kv.key)
+							return skipKey;
+						if (trace)
+							TraceEvent("Nim_case 4 vCurrent")
+							    .detail("key", vCurrent.key())
+							    .detail("rangeReadNum", rangeReadNum)
+							    .detail("clearTo", vCurrent->isClearTo())
+							    .detail("disk", kv.key);
+					} else if (kv.key == vCurrent.key()) {
+						KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
+						if (trace)
+							TraceEvent("Nim_case 5").detail("key", kvRef).detail("rangeReadNum", rangeReadNum);
+						result.data.push_back(result.arena, kvRef);
+						decrementLimits(kvRef);
+						++vCurrent;
+						return true;
+					} else {
+						KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
+						if (trace)
+							TraceEvent("Nim_case 6")
+							    .detail("key", kvRef)
+							    .detail("key2", vCurrent->isClearTo())
 							    .detail("rangeReadNum", rangeReadNum);
-						result.data.push_back(result.arena, kvOpt.get());
-						decrementLimits(kvOpt.get());
+						result.data.push_back(result.arena, kvRef);
+						decrementLimits(kvRef);
+						++vCurrent;
 					}
-					return true;
 				}
-				if (!kvOpt.present()) {
-					finishedDisk = true;
-					if (vCurrent->isClearTo()) {
+			} else {
+				if (trace)
+					TraceEvent("Nim_reverse").detail("rangeReadNum", rangeReadNum);
+				loop {
+					if (data->storageVersion() > version)
+						throw transaction_too_old();
+					if (limit >= 0 || *pLimitBytes <= 0)
+						return false;
+					if (!vCurrent || (!vCurrent->isClearTo() && vCurrent.key() < range.begin) ||
+					    (vCurrent->isClearTo() && vCurrent->getEndKey() < range.begin)) {
+						if (trace)
+							TraceEvent("Nim_case 1").detail("rangeReadNum", rangeReadNum);
+						if (kvOpt.present()) {
+							if (trace)
+								TraceEvent("Nim_case 1 has")
+								    .detail("key", kvOpt.get())
+								    .detail("rangeReadNum", rangeReadNum);
+							result.data.push_back(result.arena, kvOpt.get());
+							decrementLimits(kvOpt.get());
+						}
+						return true;
+					}
+					if (!kvOpt.present()) {
+						finishedDisk = true;
+						if (vCurrent->isClearTo()) {
+							--vCurrent;
+							continue;
+						}
+						if (trace)
+							TraceEvent("Nim_case 2").detail("key", vCurrent.key()).detail("rangeReadNum", rangeReadNum);
+						KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
+						result.data.push_back(result.arena, kvRef);
+						decrementLimits(kvRef);
 						--vCurrent;
 						continue;
 					}
-					if (trace)
-						TraceEvent("Nim_case 2").detail("key", vCurrent.key()).detail("rangeReadNum", rangeReadNum);
-					KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
-					result.data.push_back(result.arena, kvRef);
-					decrementLimits(kvRef);
-					--vCurrent;
-					continue;
-				}
 
-				ASSERT(!finishedDisk);
-				KeyValueRef kv = kvOpt.get();
-				if ((vCurrent->isClearTo() && kv.key > vCurrent->getEndKey()) ||
-				    (!vCurrent->isClearTo() && kv.key > vCurrent.key())) {
-					if (trace)
-						TraceEvent("Nim_case 3")
-						    .detail("key", kv.key)
-						    .detail("rangeReadNum", rangeReadNum)
-						    .detail("vCurrent", vCurrent.key())
-						    .detail("clearTo", vCurrent->isClearTo());
-					result.data.push_back(result.arena, kv);
-					decrementLimits(kv);
-					return true;
-				} else if (vCurrent->isClearTo()) {
-					KeyRef skipKey = vCurrent.key();
-					if (kv.key == vCurrent->getEndKey()) {
-						// ++vCurrent;
-						// if(vCurrent && !vCurrent->isClearTo() && vCurrent.key() == kv.key) {
-						// 	if (trace)
-						// 		TraceEvent("Nim_case 4 inside1").detail("key", kv).detail("rangeReadNum", rangeReadNum);
-						// 	KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
-						// 	result.data.push_back(result.arena, kvRef);
-						// 	decrementLimits(kvRef);
-						// } else if (!(vCurrent && vCurrent->isClearTo() && vCurrent.key() == kv.key)) {
-						// 	if (trace)
-						// 		TraceEvent("Nim_case 4 inside2").detail("key", kv).detail("rangeReadNum", rangeReadNum);
-						// 	result.data.push_back(result.arena, kv);
-						// 	decrementLimits(kv);
-						// }
-						// --vCurrent;
+					ASSERT(!finishedDisk);
+					KeyValueRef kv = kvOpt.get();
+					if ((vCurrent->isClearTo() && kv.key > vCurrent->getEndKey()) ||
+					    (!vCurrent->isClearTo() && kv.key > vCurrent.key())) {
+						if (trace)
+							TraceEvent("Nim_case 3")
+							    .detail("key", kv.key)
+							    .detail("rangeReadNum", rangeReadNum)
+							    .detail("vCurrent", vCurrent.key())
+							    .detail("clearTo", vCurrent->isClearTo());
 						result.data.push_back(result.arena, kv);
 						decrementLimits(kv);
+						return true;
+					} else if (vCurrent->isClearTo()) {
+						KeyRef skipKey = vCurrent.key();
+						if (kv.key == vCurrent->getEndKey()) {
+							result.data.push_back(result.arena, kv);
+							decrementLimits(kv);
+						}
+						if (trace)
+							TraceEvent("Nim_case 4").detail("key", skipKey).detail("rangeReadNum", rangeReadNum);
+						--vCurrent;
+						if (!vCurrent || vCurrent.key() < kv.key)
+							return skipKey;
+					} else if (kv.key == vCurrent.key()) {
+						KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
+						if (trace)
+							TraceEvent("Nim_case 5").detail("key", kvRef).detail("rangeReadNum", rangeReadNum);
+						result.data.push_back(result.arena, kvRef);
+						decrementLimits(kvRef);
+						--vCurrent;
+						return true;
+					} else {
+						KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
+						if (trace)
+							TraceEvent("Nim_case 6").detail("key", kvRef).detail("rangeReadNum", rangeReadNum);
+						result.data.push_back(result.arena, kvRef);
+						decrementLimits(kvRef);
+						--vCurrent;
 					}
-					if (trace)
-						TraceEvent("Nim_case 4").detail("key", skipKey).detail("rangeReadNum", rangeReadNum);
-					--vCurrent;
-					if (!vCurrent || vCurrent.key() < kv.key)
-						return skipKey;
-				} else if (kv.key == vCurrent.key()) {
-					KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
-					if (trace)
-						TraceEvent("Nim_case 5").detail("key", kvRef).detail("rangeReadNum", rangeReadNum);
-					result.data.push_back(result.arena, kvRef);
-					decrementLimits(kvRef);
-					--vCurrent;
-					return true;
-				} else {
-					KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
-					if (trace)
-						TraceEvent("Nim_case 6").detail("key", kvRef).detail("rangeReadNum", rangeReadNum);
-					result.data.push_back(result.arena, kvRef);
-					decrementLimits(kvRef);
-					--vCurrent;
 				}
 			}
+		} catch (Error& e) {
+			// TraceEvent("Nim_resultWriterError").detail("code", e.code()).detail("canBeSet", errorPromise.canBeSet());
+			if (errorPromise.canBeSet())
+				errorPromise.sendError(e);
+			return false;
 		}
 	}
 
@@ -1732,18 +1739,20 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 		result.cached = true;
 	} else
 		result.cached = false;
+	result.version = version;
 
 	if (data->storage.usesReadRangeResultWriter()) {
 		state int rNum = ++data->rangeReadNum;
 		state bool trace = false;
 		// TraceEvent("Nim_in here");
-		// if (range.end == range.begin)
+		// if (rNum == 29126)
 		// 	trace = true;
-		// TraceEvent("Nim_startRangeRead")
-		//     .detail("begin", range.begin)
-		//     .detail("end", range.end)
-		//     .detail("rangeReadNum", rNum)
-		//     .detail("readVersion", version);
+		// if (trace)
+		// 	TraceEvent("Nim_startRangeRead")
+		// 	    .detail("begin", range.begin)
+		// 	    .detail("end", range.end)
+		// 	    .detail("rangeReadNum", rNum)
+		// 	    .detail("readVersion", version);
 
 		if (limit >= 0) {
 			// if (range.begin == KeyRef("0000039a000000bd0000000500000004")) {
@@ -1778,23 +1787,40 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 				return result;
 			}
 		}
-		// TraceEvent("Nim_startRangeReadModified")
-		//     .detail("begin", readBegin)
-		//     .detail("end", readEnd)
-		//     .detail("trace", trace)
-		//     .detail("rangeReadNum", rNum)
-		//     .detail("readVersion", version);
-		state Reference<ReadRangeResultWriter> resultWriter =
-		    makeReference<ReadRangeResultWriter>(view, vCurrent, range, limit, pLimitBytes, data, version, rNum, trace, result);
-		wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), resultWriter, limit));
-		resultWriter->setResult(true);
-		// TraceEvent("Nim_doneRangeRead")
-		//     .detail("begin", range.begin)
-		//     .detail("end", range.end)
-		//     .detail("rangeReadNum", rNum)
-		//     .detail("size", result.data.size())
-		//     .detail("readVersion", version);
-		return result;
+		// if (trace)
+		// 	TraceEvent("Nim_startRangeReadModified")
+		// 	    .detail("begin", readBegin)
+		// 	    .detail("end", readEnd)
+		// 	    .detail("trace", trace)
+		// 	    .detail("rangeReadNum", rNum)
+		// 	    .detail("readVersion", version);
+		state Reference<ReadRangeResultWriter> resultWriter = makeReference<ReadRangeResultWriter>(
+		    vCurrent, data, version, range, limit, pLimitBytes, rNum, trace, result);
+		state Future<Void> readRange = data->storage.readRange(KeyRangeRef(readBegin, readEnd), resultWriter, limit);
+		try {
+			loop {
+				choose {
+					when(wait(readRange)) {
+						// if (trace)
+						// 	TraceEvent("Nim_doneRangeRead")
+						// 		.detail("begin", range.begin)
+						// 		.detail("end", range.end)
+						// 		.detail("rangeReadNum", rNum)
+						// 		.detail("size", result.data.size())
+						// 		.detail("readVersion", version);
+						resultWriter->setResult(true);
+						return result;
+					}
+					when(wait(resultWriter->getErrorFuture())) {
+						TraceEvent("Nim_wtf");
+						return result;
+					}
+				}
+			}
+		} catch (Error& e) {
+			// TraceEvent("Nim_SS caught error").detail("code", e.code());
+			throw e;
+		}
 	}
 	state Key readBeginTemp;
 	state int vCount = 0;
