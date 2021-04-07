@@ -54,6 +54,12 @@ inline bool isPseudoLocality(int8_t locality) {
 	return locality == tagLocalityLogRouterMapped || locality == tagLocalityBackup;
 }
 
+namespace ptxn {
+
+using TeamID = UID;
+
+}	// namespace ptxn
+
 #pragma pack(push, 1)
 struct Tag {
 	// if locality > 0,
