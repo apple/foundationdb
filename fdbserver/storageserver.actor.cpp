@@ -895,7 +895,6 @@ class ReadRangeResultWriter : public IReadRangeResultWriter {
 	int* pLimitBytes;
 	StorageServer::VersionedData::iterator& vCurrent;
 	StorageServer* data;
-	Promise<Void> errorPromise;
 	Version version;
 	bool finishedDisk = false, forward = false, trace = false; // TODO: remove trace bool
 	int rangeReadNum; // TODO: remove this, currently only used for debugging
@@ -920,8 +919,8 @@ public:
 	                      int rangeReadNum,
 	                      bool trace,
 	                      GetKeyValuesReply& result)
-	  : vCurrent(vCurrent), data(data), version(version), range(range), limit(limit),
-	    pLimitBytes(pLimitBytes), rangeReadNum(rangeReadNum), trace(trace), result(result) {
+	  : vCurrent(vCurrent), data(data), version(version), range(range), limit(limit), pLimitBytes(pLimitBytes),
+	    rangeReadNum(rangeReadNum), trace(trace), result(result) {
 		forward = limit >= 0 ? true : false;
 	}
 
@@ -931,10 +930,6 @@ public:
 			       *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
 
 		result.more = limit == 0 || *pLimitBytes <= 0;
-	}
-
-	Future<Void> getErrorFuture() {
-		return errorPromise.getFuture();
 	}
 
 	std::variant<bool, KeyRef> operator()(Optional<KeyValueRef> kvOpt) override {
@@ -1104,10 +1099,8 @@ public:
 				}
 			}
 		} catch (Error& e) {
-			// TraceEvent("Nim_resultWriterError").detail("code", e.code()).detail("canBeSet", errorPromise.canBeSet());
-			if (errorPromise.canBeSet())
-				errorPromise.sendError(e);
-			return false;
+			// TraceEvent("Nim_resultWriterError").detail("code", e.code());
+			throw e;
 		}
 	}
 
@@ -1796,27 +1789,10 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 		// 	    .detail("readVersion", version);
 		state Reference<ReadRangeResultWriter> resultWriter = makeReference<ReadRangeResultWriter>(
 		    vCurrent, data, version, range, limit, pLimitBytes, rNum, trace, result);
-		state Future<Void> readRange = data->storage.readRange(KeyRangeRef(readBegin, readEnd), resultWriter, limit);
 		try {
-			loop {
-				choose {
-					when(wait(readRange)) {
-						// if (trace)
-						// 	TraceEvent("Nim_doneRangeRead")
-						// 		.detail("begin", range.begin)
-						// 		.detail("end", range.end)
-						// 		.detail("rangeReadNum", rNum)
-						// 		.detail("size", result.data.size())
-						// 		.detail("readVersion", version);
-						resultWriter->setResult(true);
-						return result;
-					}
-					when(wait(resultWriter->getErrorFuture())) {
-						TraceEvent("Nim_wtf");
-						return result;
-					}
-				}
-			}
+			wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), resultWriter, limit));
+			resultWriter->setResult(true);
+			return result;
 		} catch (Error& e) {
 			// TraceEvent("Nim_SS caught error").detail("code", e.code());
 			throw e;

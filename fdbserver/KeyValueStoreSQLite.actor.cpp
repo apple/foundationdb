@@ -1830,7 +1830,11 @@ private:
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeResultWriterAction& rr) {
-			rr.result.send(getCursor()->get().readRangeResultWriter(rr.keys, rr.resultWriter, rr.rowLimit));
+			try {
+				rr.result.send(getCursor()->get().readRangeResultWriter(rr.keys, rr.resultWriter, rr.rowLimit));
+			} catch (Error& e) {
+				rr.result.sendError(e);
+			}
 			++counter;
 		}
 	};
