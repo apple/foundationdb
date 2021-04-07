@@ -59,3 +59,6 @@ struct AnnotateActor {
 	}
 };
 
+enum WaitState { Disk, Network };
+
+extern std::map<WaitState, std::function<std::vector<Reference<ActorLineage>>()>> samples;
