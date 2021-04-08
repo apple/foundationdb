@@ -25,8 +25,10 @@
 #include <cstdlib>
 #include <string>
 
-inline void updateBackupURL(std::string& backupURL, const std::string& accessKeyEnvVar,
-                            const std::string& accessKeyPlaceholder, const std::string& secretKeyEnvVar,
+inline void updateBackupURL(std::string& backupURL,
+                            const std::string& accessKeyEnvVar,
+                            const std::string& accessKeyPlaceholder,
+                            const std::string& secretKeyEnvVar,
                             const std::string& secretKeyPlaceholder) {
 	std::string accessKey, secretKey;
 	ASSERT(platform::getEnvironmentVar(accessKeyEnvVar.c_str(), accessKey));

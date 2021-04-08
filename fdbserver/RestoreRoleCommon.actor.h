@@ -69,13 +69,9 @@ class RoleVersionBatchState {
 public:
 	static const int INVALID = -1;
 
-	virtual int get() {
-		return vbState;
-	}
+	virtual int get() { return vbState; }
 
-	virtual void operator = (int newState) {
-		vbState = newState;
-	}
+	virtual void operator=(int newState) { vbState = newState; }
 
 	explicit RoleVersionBatchState() : vbState(INVALID) {}
 	explicit RoleVersionBatchState(int newState) : vbState(newState) {}

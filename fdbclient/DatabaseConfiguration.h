@@ -37,7 +37,7 @@ struct SatelliteInfo {
 	SatelliteInfo() : priority(0) {}
 
 	struct sort_by_priority {
-		bool operator ()(SatelliteInfo const&a, SatelliteInfo const& b) const { return a.priority > b.priority; }
+		bool operator()(SatelliteInfo const& a, SatelliteInfo const& b) const { return a.priority > b.priority; }
 	};
 
 	template <class Ar>
@@ -84,10 +84,19 @@ struct RegionInfo {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, dcId, priority, satelliteTLogPolicy, satelliteDesiredTLogCount, satelliteTLogReplicationFactor,
-		           satelliteTLogWriteAntiQuorum, satelliteTLogUsableDcs, satelliteTLogPolicyFallback,
-		           satelliteTLogReplicationFactorFallback, satelliteTLogWriteAntiQuorumFallback,
-		           satelliteTLogUsableDcsFallback, satellites);
+		serializer(ar,
+		           dcId,
+		           priority,
+		           satelliteTLogPolicy,
+		           satelliteDesiredTLogCount,
+		           satelliteTLogReplicationFactor,
+		           satelliteTLogWriteAntiQuorum,
+		           satelliteTLogUsableDcs,
+		           satelliteTLogPolicyFallback,
+		           satelliteTLogReplicationFactorFallback,
+		           satelliteTLogWriteAntiQuorumFallback,
+		           satelliteTLogUsableDcsFallback,
+		           satellites);
 	}
 };
 
@@ -151,33 +160,44 @@ struct DatabaseConfiguration {
 	}
 
 	// Retuns the maximum number of discrete failures a cluster can tolerate.
-	// In HA mode, `fullyReplicatedRegions` is set to false initially when data is being
-	// replicated to remote, and will be true later. `forAvailablity` is set to true
+	// In HA mode, `fullyReplicatedRegions` is set to "1" initially when data is being
+	// replicated to remote, and will be incremented later. `forAvailablity` is set to true
 	// if we want to account the number for machines that can recruit new tLogs/SS after failures.
-	// Killing an entire datacenter counts as killing one zone in modes that support it
+	// Killing an entire datacenter counts as killing one zone in modes that support it.
 	int32_t maxZoneFailuresTolerated(int fullyReplicatedRegions, bool forAvailability) const {
-		int worstSatellite = regions.size() ? std::numeric_limits<int>::max() : 0;
+		int worstSatelliteTLogReplicationFactor = regions.size() ? std::numeric_limits<int>::max() : 0;
 		int regionsWithNonNegativePriority = 0;
 		for (auto& r : regions) {
 			if (r.priority >= 0) {
 				regionsWithNonNegativePriority++;
 			}
-			worstSatellite =
-			    std::min(worstSatellite, r.satelliteTLogReplicationFactor - r.satelliteTLogWriteAntiQuorum);
+			worstSatelliteTLogReplicationFactor = std::min(
+			    worstSatelliteTLogReplicationFactor, r.satelliteTLogReplicationFactor - r.satelliteTLogWriteAntiQuorum);
 			if (r.satelliteTLogUsableDcsFallback > 0) {
-				worstSatellite = std::min(worstSatellite, r.satelliteTLogReplicationFactorFallback -
-				                                              r.satelliteTLogWriteAntiQuorumFallback);
+				worstSatelliteTLogReplicationFactor =
+				    std::min(worstSatelliteTLogReplicationFactor,
+				             r.satelliteTLogReplicationFactorFallback - r.satelliteTLogWriteAntiQuorumFallback);
 			}
 		}
-		if (usableRegions > 1 && fullyReplicatedRegions > 1 && worstSatellite > 0 &&
-		    (!forAvailability || regionsWithNonNegativePriority > 1)) {
-			return 1 + std::min(std::max(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, worstSatellite - 1),
-			                    storageTeamSize - 1);
-		} else if (worstSatellite > 0) {
-			// Primary and Satellite tLogs are synchronously replicated, hence we can lose all but 1.
-			return std::min(tLogReplicationFactor + worstSatellite - 1 - tLogWriteAntiQuorum, storageTeamSize - 1);
+
+		if (worstSatelliteTLogReplicationFactor <= 0) {
+			// HA is not enabled in this database. Return single cluster zone failures to tolerate.
+			return std::min(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, storageTeamSize - 1);
 		}
-		return std::min(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, storageTeamSize - 1);
+
+		// Compute HA enabled database zone failure tolerance.
+		auto isGeoReplicatedData = [this, &fullyReplicatedRegions]() {
+			return usableRegions > 1 && fullyReplicatedRegions > 1;
+		};
+
+		if (isGeoReplicatedData() && (!forAvailability || regionsWithNonNegativePriority > 1)) {
+			return 1 + std::min(std::max(tLogReplicationFactor - 1 - tLogWriteAntiQuorum,
+			                             worstSatelliteTLogReplicationFactor - 1),
+			                    storageTeamSize - 1);
+		}
+		// Primary and Satellite tLogs are synchronously replicated, hence we can lose all but 1.
+		return std::min(tLogReplicationFactor + worstSatelliteTLogReplicationFactor - 1 - tLogWriteAntiQuorum,
+		                storageTeamSize - 1);
 	}
 
 	// CommitProxy Servers
@@ -215,7 +235,7 @@ struct DatabaseConfiguration {
 	bool backupWorkerEnabled;
 
 	// Data centers
-	int32_t usableRegions;  // Number of regions which have a replica of the database.
+	int32_t usableRegions; // Number of regions which have a replica of the database.
 	int32_t repopulateRegionAntiQuorum;
 	std::vector<RegionInfo> regions;
 
@@ -224,36 +244,44 @@ struct DatabaseConfiguration {
 	std::set<AddressExclusion> getExcludedServers() const;
 
 	int32_t getDesiredCommitProxies() const {
-		if (commitProxyCount == -1) return autoCommitProxyCount;
+		if (commitProxyCount == -1)
+			return autoCommitProxyCount;
 		return commitProxyCount;
 	}
 	int32_t getDesiredGrvProxies() const {
-		if (grvProxyCount == -1) return autoGrvProxyCount;
+		if (grvProxyCount == -1)
+			return autoGrvProxyCount;
 		return grvProxyCount;
 	}
 	int32_t getDesiredResolvers() const {
-		if (resolverCount == -1) return autoResolverCount;
+		if (resolverCount == -1)
+			return autoResolverCount;
 		return resolverCount;
 	}
 	int32_t getDesiredLogs() const {
-		if (desiredTLogCount == -1) return autoDesiredTLogCount;
+		if (desiredTLogCount == -1)
+			return autoDesiredTLogCount;
 		return desiredTLogCount;
 	}
 	int32_t getDesiredRemoteLogs() const {
-		if (remoteDesiredTLogCount == -1) return getDesiredLogs();
+		if (remoteDesiredTLogCount == -1)
+			return getDesiredLogs();
 		return remoteDesiredTLogCount;
 	}
 	int32_t getDesiredSatelliteLogs(Optional<Key> dcId) const {
 		auto desired = getRegion(dcId).satelliteDesiredTLogCount;
-		if (desired == -1) return autoDesiredTLogCount;
+		if (desired == -1)
+			return autoDesiredTLogCount;
 		return desired;
 	}
 	int32_t getRemoteTLogReplicationFactor() const {
-		if (remoteTLogReplicationFactor == 0) return tLogReplicationFactor;
+		if (remoteTLogReplicationFactor == 0)
+			return tLogReplicationFactor;
 		return remoteTLogReplicationFactor;
 	}
 	Reference<IReplicationPolicy> getRemoteTLogPolicy() const {
-		if (remoteTLogReplicationFactor == 0) return tLogPolicy;
+		if (remoteTLogReplicationFactor == 0)
+			return tLogPolicy;
 		return remoteTLogPolicy;
 	}
 
@@ -266,10 +294,12 @@ struct DatabaseConfiguration {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		if (!ar.isDeserializing) makeConfigurationImmutable();
+		if (!ar.isDeserializing)
+			makeConfigurationImmutable();
 		serializer(ar, rawConfiguration);
 		if (ar.isDeserializing) {
-			for (auto c = rawConfiguration.begin(); c != rawConfiguration.end(); ++c) setInternal(c->key, c->value);
+			for (auto c = rawConfiguration.begin(); c != rawConfiguration.end(); ++c)
+				setInternal(c->key, c->value);
 			setDefaultReplicationPolicy();
 		}
 	}

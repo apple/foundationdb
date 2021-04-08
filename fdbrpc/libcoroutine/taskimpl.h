@@ -6,12 +6,12 @@
 /* Copyright (c) 2005-2006 Russ Cox, MIT; see COPYRIGHT */
 
 #if defined(__sun__)
-#	define __EXTENSIONS__ 1 /* SunOS */
-#	if defined(__SunOS5_6__) || defined(__SunOS5_7__) || defined(__SunOS5_8__)
-		/* NOT USING #define __MAKECONTEXT_V2_SOURCE 1 / * SunOS */
-#	else
-#		define __MAKECONTEXT_V2_SOURCE 1
-#	endif
+#define __EXTENSIONS__ 1 /* SunOS */
+#if defined(__SunOS5_6__) || defined(__SunOS5_7__) || defined(__SunOS5_8__)
+/* NOT USING #define __MAKECONTEXT_V2_SOURCE 1 / * SunOS */
+#else
+#define __MAKECONTEXT_V2_SOURCE 1
+#endif
 #endif
 
 //#define USE_UCONTEXT 1
@@ -48,7 +48,7 @@
 //#include "task.h"
 
 #define nil ((void*)0)
-#define nelem(x) (sizeof(x)/sizeof((x)[0]))
+#define nelem(x) (sizeof(x) / sizeof((x)[0]))
 
 /*
 #define ulong task_ulong
@@ -87,54 +87,54 @@ char *strecpy(char*, char*, char*);
 */
 
 #if defined(__FreeBSD__) && __FreeBSD__ < 5
-extern	int		getmcontext(mcontext_t*);
-extern	void		setmcontext(const mcontext_t*);
-#define	setcontext(u)	setmcontext(&(u)->uc_mcontext)
-#define	getcontext(u)	getmcontext(&(u)->uc_mcontext)
-extern	int		swapcontext(ucontext_t*, const ucontext_t*);
-extern	void		makecontext(ucontext_t*, void(*)(), int, ...);
+extern int getmcontext(mcontext_t*);
+extern void setmcontext(const mcontext_t*);
+#define setcontext(u) setmcontext(&(u)->uc_mcontext)
+#define getcontext(u) getmcontext(&(u)->uc_mcontext)
+extern int swapcontext(ucontext_t*, const ucontext_t*);
+extern void makecontext(ucontext_t*, void (*)(), int, ...);
 #endif
 
 #if defined(__APPLE__)
-#	define mcontext libthread_mcontext
-#	define mcontext_t libthread_mcontext_t
-#	define ucontext libthread_ucontext
-#	define ucontext_t libthread_ucontext_t
-#	if defined(__i386__)
-#		include "386-ucontext.h"
-#	elif defined(__x86_64__)
-#		include "amd64-ucontext.h"
-#	else
-#		include "power-ucontext.h"
-#	endif	
+#define mcontext libthread_mcontext
+#define mcontext_t libthread_mcontext_t
+#define ucontext libthread_ucontext
+#define ucontext_t libthread_ucontext_t
+#if defined(__i386__)
+#include "386-ucontext.h"
+#elif defined(__x86_64__)
+#include "amd64-ucontext.h"
+#else
+#include "power-ucontext.h"
+#endif
 #endif
 
 #if defined(__OpenBSD__)
-#	define mcontext libthread_mcontext
-#	define mcontext_t libthread_mcontext_t
-#	define ucontext libthread_ucontext
-#	define ucontext_t libthread_ucontext_t
-#	if defined __i386__
-#		include "386-ucontext.h"
-#	else
-#		include "power-ucontext.h"
-#	endif
-extern pid_t rfork_thread(int, void*, int(*)(void*), void*);
+#define mcontext libthread_mcontext
+#define mcontext_t libthread_mcontext_t
+#define ucontext libthread_ucontext
+#define ucontext_t libthread_ucontext_t
+#if defined __i386__
+#include "386-ucontext.h"
+#else
+#include "power-ucontext.h"
+#endif
+extern pid_t rfork_thread(int, void*, int (*)(void*), void*);
 #endif
 
-#if 0 &&  defined(__sun__)
-#	define mcontext libthread_mcontext
-#	define mcontext_t libthread_mcontext_t
-#	define ucontext libthread_ucontext
-#	define ucontext_t libthread_ucontext_t
-#	include "sparc-ucontext.h"
+#if 0 && defined(__sun__)
+#define mcontext libthread_mcontext
+#define mcontext_t libthread_mcontext_t
+#define ucontext libthread_ucontext
+#define ucontext_t libthread_ucontext_t
+#include "sparc-ucontext.h"
 #endif
 
 #if defined(__arm__)
 int getmcontext(mcontext_t*);
 void setmcontext(const mcontext_t*);
-#define	setcontext(u)	setmcontext(&(u)->uc_mcontext)
-#define	getcontext(u)	getmcontext(&(u)->uc_mcontext)
+#define setcontext(u) setmcontext(&(u)->uc_mcontext)
+#define getcontext(u) getmcontext(&(u)->uc_mcontext)
 #endif
 
 /*
@@ -142,34 +142,34 @@ typedef struct Context Context;
 
 enum
 {
-	STACK = 8192
+    STACK = 8192
 };
 
 struct Context
 {
-	ucontext_t	uc;
+    ucontext_t	uc;
 };
 
 struct Task
 {
-	char	name[256];	// offset known to acid
-	char	state[256];
-	Task	*next;
-	Task	*prev;
-	Task	*allnext;
-	Task	*allprev;
-	Context	context;
-	uvlong	alarmtime;
-	uint	id;
-	uchar	*stk;
-	uint	stksize;
-	int	exiting;
-	int	alltaskslot;
-	int	system;
-	int	ready;
-	void	(*startfn)(void*);
-	void	*startarg;
-	void	*udata;
+    char	name[256];	// offset known to acid
+    char	state[256];
+    Task	*next;
+    Task	*prev;
+    Task	*allnext;
+    Task	*allprev;
+    Context	context;
+    uvlong	alarmtime;
+    uint	id;
+    uchar	*stk;
+    uint	stksize;
+    int	exiting;
+    int	alltaskslot;
+    int	system;
+    int	ready;
+    void	(*startfn)(void*);
+    void	*startarg;
+    void	*udata;
 };
 
 void	taskready(Task*);

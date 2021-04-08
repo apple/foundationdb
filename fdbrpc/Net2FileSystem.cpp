@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-
 #include "fdbrpc/Net2FileSystem.h"
 
 // Define boost::asio::io_service
@@ -45,13 +44,16 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& file
 	if (checkFileSystem) {
 		dev_t fileDeviceId = getDeviceId(filename);
 		if (fileDeviceId != this->fileSystemDeviceId) {
-			TraceEvent(SevError, "DeviceIdMismatched").detail("FileSystemDeviceId", this->fileSystemDeviceId).detail("FileDeviceId", fileDeviceId);
+			TraceEvent(SevError, "DeviceIdMismatched")
+			    .detail("FileSystemDeviceId", this->fileSystemDeviceId)
+			    .detail("FileDeviceId", fileDeviceId);
 			throw io_error();
 		}
 	}
 #endif
 
-	if ( (flags & IAsyncFile::OPEN_EXCLUSIVE) ) ASSERT( flags & IAsyncFile::OPEN_CREATE );
+	if ((flags & IAsyncFile::OPEN_EXCLUSIVE))
+		ASSERT(flags & IAsyncFile::OPEN_CREATE);
 	if (!(flags & IAsyncFile::OPEN_UNCACHED))
 		return AsyncFileCached::open(filename, flags, mode);
 
@@ -67,19 +69,24 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& file
 		f = AsyncFileKAIO::open(filename, flags, mode, nullptr);
 	else
 #endif
-	f = Net2AsyncFile::open(filename, flags, mode, static_cast<boost::asio::io_service*> ((void*) g_network->global(INetwork::enASIOService)));
-	if(FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
+		f = Net2AsyncFile::open(
+		    filename,
+		    flags,
+		    mode,
+		    static_cast<boost::asio::io_service*>((void*)g_network->global(INetwork::enASIOService)));
+	if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
 		f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
 	return f;
 }
 
-// Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
+// Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power
+// failure.
 Future<Void> Net2FileSystem::deleteFile(const std::string& filename, bool mustBeDurable) {
 	return Net2AsyncFile::deleteFile(filename, mustBeDurable);
 }
 
 Future<std::time_t> Net2FileSystem::lastWriteTime(const std::string& filename) {
-	return Net2AsyncFile::lastWriteTime( filename );
+	return Net2AsyncFile::lastWriteTime(filename);
 }
 
 void Net2FileSystem::newFileSystem(double ioTimeout, const std::string& fileSystemPath) {
@@ -90,7 +97,7 @@ Net2FileSystem::Net2FileSystem(double ioTimeout, const std::string& fileSystemPa
 	Net2AsyncFile::init();
 #ifdef __linux__
 	if (!FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO)
-		AsyncFileKAIO::init( Reference<IEventFD>(N2::ASIOReactor::getEventFD()), ioTimeout );
+		AsyncFileKAIO::init(Reference<IEventFD>(N2::ASIOReactor::getEventFD()), ioTimeout);
 
 	if (fileSystemPath.empty()) {
 		checkFileSystem = false;
@@ -102,14 +109,22 @@ Net2FileSystem::Net2FileSystem(double ioTimeout, const std::string& fileSystemPa
 			if (fileSystemPath != "/") {
 				dev_t fileSystemParentDeviceId = getDeviceId(parentDirectory(fileSystemPath));
 				if (this->fileSystemDeviceId == fileSystemParentDeviceId) {
-					criticalError(FDB_EXIT_ERROR, "FileSystemError", format("`%s' is not a mount point", fileSystemPath.c_str()).c_str());
+					criticalError(FDB_EXIT_ERROR,
+					              "FileSystemError",
+					              format("`%s' is not a mount point", fileSystemPath.c_str()).c_str());
 				}
 			}
 		} catch (Error&) {
-			criticalError(FDB_EXIT_ERROR, "FileSystemError", format("Could not get device id from `%s'", fileSystemPath.c_str()).c_str());
+			criticalError(FDB_EXIT_ERROR,
+			              "FileSystemError",
+			              format("Could not get device id from `%s'", fileSystemPath.c_str()).c_str());
 		}
 	}
 #endif
+}
+
+Future<Void> Net2FileSystem::renameFile(const std::string& from, const std::string& to) {
+	return Net2AsyncFile::renameFile(from, to);
 }
 
 void Net2FileSystem::stop() {

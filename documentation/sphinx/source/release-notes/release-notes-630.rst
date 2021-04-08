@@ -2,8 +2,26 @@
 Release Notes
 #############
 
+6.3.12
+======
+* Change the default for --knob_tls_server_handshake_threads to 64. The previous was 1000. This avoids starting 1000 threads by default, but may adversely affect recovery time for large clusters using tls. Users with large tls clusters should consider explicitly setting this knob in their foundationdb.conf file. `(PR #4421) <https://github.com/apple/foundationdb/pull/4421>`_
+* Fix accounting error that could cause commits to incorrectly fail with ``proxy_memory_limit_exceeded``. `(PR #4526) <https://github.com/apple/foundationdb/pull/4526>`_
+* As an optimization, partial restore using target key ranges now filters backup log data prior to loading it into the database.  `(PR #4554) <https://github.com/apple/foundationdb/pull/4554>`_
+
+6.3.11
+======
+
+* Support multiple worker threads for each client version that is loaded. `(PR #4269) <https://github.com/apple/foundationdb/pull/4269>`_  
+* fdbcli: Output errors and warnings to stderr. `(PR #4332) <https://github.com/apple/foundationdb/pull/4332>`_  
+* Do not rely on shared memory to generate a machine id if it is set explicitly. `(Issue #4022) <https://github.com/apple/foundationdb/pull/4022>`_  
+* Added ``workload.transactions.rejected_for_queued_too_long`` to status to report the number of transaction commits that failed because they were queued too long and could no longer be checked for conflicts. `(PR #4353) <https://github.com/apple/foundationdb/pull/4353>`_
+* Add knobs for prefix bloom filters and larger block cache for RocksDB. `(PR #4201) <https://github.com/apple/foundationdb/pull/4201>`_ 
+* Add option to prevent synchronous file deletes on reads for RocksDB. `(PR #4270) <https://github.com/apple/foundationdb/pull/4270>`_  
+* Build on Windows using VS 2019 + LLVM/Clang. `(PR #4258) <https://github.com/apple/foundationdb/pull/4258>`_ 
+
 6.3.10
 ======
+
 * Make fault tolerance metric calculation in HA clusters consistent with 6.2 branch. `(PR #4175) <https://github.com/apple/foundationdb/pull/4175>`_
 * Bug fix, stack overflow in redwood storage engine. `(PR #4161) <https://github.com/apple/foundationdb/pull/4161>`_
 * Bug fix, getting certain special keys fail. `(PR #4128) <https://github.com/apple/foundationdb/pull/4128>`_ 
@@ -88,7 +106,7 @@ Status
 * Removed fields ``worst_version_lag_storage_server`` and ``limiting_version_lag_storage_server`` from the ``cluster.qos`` section. The ``worst_data_lag_storage_server`` and ``limiting_data_lag_storage_server`` objects can be used instead. `(PR #3196) <https://github.com/apple/foundationdb/pull/3196>`_
 * If a process is unable to flush trace logs to disk, the problem will now be reported via the output of ``status`` command inside ``fdbcli``. `(PR #2605) <https://github.com/apple/foundationdb/pull/2605>`_ `(PR #2820) <https://github.com/apple/foundationdb/pull/2820>`_
 * When a configuration key is changed, it will always be included in ``status json`` output, even the value is reverted back to the default value. [6.3.5] `(PR #3610) <https://github.com/apple/foundationdb/pull/3610>`_
-* Added transactions.rejected_for_queued_too_long for bookkeeping the number of transactions rejected by commit proxy because its queuing time exceeds MVCC window. `(PR #4353) <https://github.com/apple/foundationdb/pull/4353>`_
+* Added transactions.rejected_for_queued_too_long for bookkeeping the number of transactions rejected by commit proxy because its queuing time exceeds MVCC window.[6.3.11] `(PR #4353) <https://github.com/apple/foundationdb/pull/4353>`_
 
 Bindings
 --------
@@ -140,6 +158,7 @@ Fixes from previous versions
 * The 6.3.5 patch release includes all fixes from the patch releases 6.2.24 and 6.2.25. :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
 * The 6.3.9 patch release includes all fixes from the patch releases 6.2.26. :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
 * The 6.3.10 patch release includes all fixes from the patch releases 6.2.27-6.2.29 :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
+* The 6.3.11 patch release includes all fixes from the patch releases 6.2.30-6.2.32 :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
 
 Fixes only impacting 6.3.0+
 ---------------------------

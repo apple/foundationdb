@@ -23,10 +23,10 @@
 
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_RESTORE_WORKER_INTERFACE_ACTOR_G_H)
-	#define FDBCLIENT_RESTORE_WORKER_INTERFACE_ACTOR_G_H
-	#include "fdbclient/RestoreWorkerInterface.actor.g.h"
+#define FDBCLIENT_RESTORE_WORKER_INTERFACE_ACTOR_G_H
+#include "fdbclient/RestoreWorkerInterface.actor.g.h"
 #elif !defined(FDBCLIENT_RESTORE_WORKER_INTERFACE_ACTOR_H)
-	#define FDBCLIENT_RESTORE_WORKER_INTERFACE_ACTOR_H
+#define FDBCLIENT_RESTORE_WORKER_INTERFACE_ACTOR_H
 
 #include <sstream>
 #include <string>
@@ -39,7 +39,7 @@
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RestoreUtil.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 class RestoreConfigFR;
 
@@ -58,7 +58,8 @@ struct RestoreUpdateRateRequest;
 
 // RestoreSysInfo includes information each (type of) restore roles should know.
 // At this moment, it only include appliers. We keep the name for future extension.
-// TODO: If it turns out this struct only has appliers in the final version, we will rename it to a more specific name, e.g., AppliersMap
+// TODO: If it turns out this struct only has appliers in the final version, we will rename it to a more specific name,
+// e.g., AppliersMap
 struct RestoreSysInfo {
 	constexpr static FileIdentifier file_identifier = 68098739;
 	std::map<UID, RestoreApplierInterface> appliers;
@@ -95,7 +96,8 @@ struct RestoreWorkerInterface {
 		interfID = deterministicRandom()->randomUniqueID();
 	}
 
-	//To change this serialization, ProtocolVersion::RestoreWorkerInterfaceValue must be updated, and downgrades need to be considered
+	// To change this serialization, ProtocolVersion::RestoreWorkerInterfaceValue must be updated, and downgrades need
+	// to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, interfID, heartbeat, recruitRole, terminateWorker);
@@ -161,8 +163,16 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, *(RestoreRoleInterface*)this, heartbeat, updateRestoreSysInfo, loadFile, sendMutations,
-		           initVersionBatch, finishVersionBatch, collectRestoreRoleInterfaces, finishRestore);
+		serializer(ar,
+		           *(RestoreRoleInterface*)this,
+		           heartbeat,
+		           updateRestoreSysInfo,
+		           loadFile,
+		           sendMutations,
+		           initVersionBatch,
+		           finishVersionBatch,
+		           collectRestoreRoleInterfaces,
+		           finishRestore);
 	}
 };
 
@@ -200,8 +210,15 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, *(RestoreRoleInterface*)this, heartbeat, sendMutationVector, applyToDB, initVersionBatch,
-		           collectRestoreRoleInterfaces, finishRestore, updateRate);
+		serializer(ar,
+		           *(RestoreRoleInterface*)this,
+		           heartbeat,
+		           sendMutationVector,
+		           applyToDB,
+		           initVersionBatch,
+		           collectRestoreRoleInterfaces,
+		           finishRestore,
+		           updateRate);
 	}
 
 	std::string toString() const { return nodeID.toString(); }
@@ -263,20 +280,46 @@ struct RestoreAsset {
 		       range == r.range && fileIndex == r.fileIndex && partitionId == r.partitionId && filename == r.filename &&
 		       offset == r.offset && len == r.len && addPrefix == r.addPrefix && removePrefix == r.removePrefix;
 	}
-	bool operator!=(const RestoreAsset& r) const {
-		return !(*this == r);
-	}
+	bool operator!=(const RestoreAsset& r) const { return !(*this == r); }
 	bool operator<(const RestoreAsset& r) const {
-		return std::make_tuple(batchIndex, fileIndex, filename, offset, len, beginVersion, endVersion, range.begin,
-		                       range.end, addPrefix, removePrefix) <
-		       std::make_tuple(r.batchIndex, r.fileIndex, r.filename, r.offset, r.len, r.beginVersion, r.endVersion,
-		                       r.range.begin, r.range.end, r.addPrefix, r.removePrefix);
+		return std::make_tuple(batchIndex,
+		                       fileIndex,
+		                       filename,
+		                       offset,
+		                       len,
+		                       beginVersion,
+		                       endVersion,
+		                       range.begin,
+		                       range.end,
+		                       addPrefix,
+		                       removePrefix) < std::make_tuple(r.batchIndex,
+		                                                       r.fileIndex,
+		                                                       r.filename,
+		                                                       r.offset,
+		                                                       r.len,
+		                                                       r.beginVersion,
+		                                                       r.endVersion,
+		                                                       r.range.begin,
+		                                                       r.range.end,
+		                                                       r.addPrefix,
+		                                                       r.removePrefix);
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, uid, beginVersion, endVersion, range, filename, fileIndex, partitionId, offset, len, addPrefix,
-		           removePrefix, batchIndex);
+		serializer(ar,
+		           uid,
+		           beginVersion,
+		           endVersion,
+		           range,
+		           filename,
+		           fileIndex,
+		           partitionId,
+		           offset,
+		           len,
+		           addPrefix,
+		           removePrefix,
+		           batchIndex);
 	}
 
 	std::string toString() const {
@@ -339,9 +382,7 @@ struct LoadingParam {
 		return (isRangeFile < r.isRangeFile) || (isRangeFile == r.isRangeFile && asset < r.asset);
 	}
 
-	bool isPartitionedLog() const {
-		return !isRangeFile && asset.partitionId >= 0;
-	}
+	bool isPartitionedLog() const { return !isRangeFile && asset.partitionId >= 0; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -557,8 +598,11 @@ struct RestoreSendVersionedMutationsRequest : TimedRequest {
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSendVersionedMutationsRequest() = default;
-	explicit RestoreSendVersionedMutationsRequest(int batchIndex, const RestoreAsset& asset, Version msgIndex,
-	                                              bool isRangeFile, VersionedMutationsVec versionedMutations)
+	explicit RestoreSendVersionedMutationsRequest(int batchIndex,
+	                                              const RestoreAsset& asset,
+	                                              Version msgIndex,
+	                                              bool isRangeFile,
+	                                              VersionedMutationsVec versionedMutations)
 	  : batchIndex(batchIndex), asset(asset), msgIndex(msgIndex), isRangeFile(isRangeFile),
 	    versionedMutations(versionedMutations) {}
 
@@ -681,12 +725,19 @@ struct RestoreRequest {
 	ReplyPromise<struct RestoreCommonReply> reply;
 
 	RestoreRequest() = default;
-	explicit RestoreRequest(const int index, const Key& tagName, const Key& url, Version targetVersion,
-	                        const KeyRange& range, const UID& randomUid, Key& addPrefix, Key removePrefix)
+	explicit RestoreRequest(const int index,
+	                        const Key& tagName,
+	                        const Key& url,
+	                        Version targetVersion,
+	                        const KeyRange& range,
+	                        const UID& randomUid,
+	                        Key& addPrefix,
+	                        Key removePrefix)
 	  : index(index), tagName(tagName), url(url), targetVersion(targetVersion), range(range), randomUid(randomUid),
 	    addPrefix(addPrefix), removePrefix(removePrefix) {}
 
-	//To change this serialization, ProtocolVersion::RestoreRequestValue must be updated, and downgrades need to be considered
+	// To change this serialization, ProtocolVersion::RestoreRequestValue must be updated, and downgrades need to be
+	// considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, index, tagName, url, targetVersion, range, randomUid, addPrefix, removePrefix, reply);

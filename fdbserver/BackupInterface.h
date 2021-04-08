@@ -38,12 +38,8 @@ struct BackupInterface {
 	UID id() const { return getToken(); }
 	NetworkAddress address() const { return waitFailure.getEndpoint().getPrimaryAddress(); }
 	UID getToken() const { return waitFailure.getEndpoint().token; }
-	bool operator== (const BackupInterface& r) const {
-		return getToken() == r.getToken();
-	}
-	bool operator!= (const BackupInterface& r) const {
-		return !(*this == r);
-	}
+	bool operator==(const BackupInterface& r) const { return getToken() == r.getToken(); }
+	bool operator!=(const BackupInterface& r) const { return !(*this == r); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {
@@ -51,4 +47,4 @@ struct BackupInterface {
 	}
 };
 
-#endif //FDBSERVER_BACKUPINTERFACE_H
+#endif // FDBSERVER_BACKUPINTERFACE_H
