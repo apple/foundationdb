@@ -1062,9 +1062,15 @@ public:
 				std::swap(regions[0], regions[1]);
 			}
 
-			if (regions[1].dcId == clusterControllerDcId.get() && regions[1].priority >= 0 &&
+			if (regions[1].dcId == clusterControllerDcId.get() &&
 			    (!versionDifferenceUpdated || datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE)) {
-				std::swap(regions[0], regions[1]);
+				if (regions[1].priority >= 0) {
+					std::swap(regions[0], regions[1]);
+				} else {
+					TraceEvent(SevWarn, "DcPriorityNegative")
+					    .detail("DcId", regions[1].dcId)
+					    .detail("Priority", regions[1].priority);
+				}
 			}
 
 			bool setPrimaryDesired = false;
