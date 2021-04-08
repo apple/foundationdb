@@ -141,7 +141,7 @@ struct ClearRangeResultWriter : public IReadRangeResultWriter {
 				return clearStart;
 		}
 		rowLimit--;
-		result.push_back(result.arena(), kv.get());
+		result.push_back_deep(result.arena(), kv.get());
 		byteLimit -= (sizeof(KeyValueRef) + kv.get().expectedSize());
 		return true;
 	}

@@ -950,7 +950,7 @@ public:
 								TraceEvent("Nim_case 1 has")
 								    .detail("key", kvOpt.get())
 								    .detail("rangeReadNum", rangeReadNum);
-							result.data.push_back(result.arena, kvOpt.get());
+							result.data.push_back_deep(result.arena, kvOpt.get());
 							decrementLimits(kvOpt.get());
 						}
 						return true;
@@ -964,7 +964,7 @@ public:
 						if (trace)
 							TraceEvent("Nim_case 2").detail("key", vCurrent.key()).detail("rangeReadNum", rangeReadNum);
 						KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
-						result.data.push_back(result.arena, kvRef);
+						result.data.push_back_deep(result.arena, kvRef);
 						decrementLimits(kvRef);
 						++vCurrent;
 						continue;
@@ -979,7 +979,7 @@ public:
 							    .detail("rangeReadNum", rangeReadNum)
 							    .detail("vCurrent", vCurrent.key())
 							    .detail("clearTo", vCurrent->isClearTo());
-						result.data.push_back(result.arena, kv);
+						result.data.push_back_deep(result.arena, kv);
 						decrementLimits(kv);
 						return true;
 					} else if (vCurrent->isClearTo()) {
@@ -1003,7 +1003,7 @@ public:
 						KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
 						if (trace)
 							TraceEvent("Nim_case 5").detail("key", kvRef).detail("rangeReadNum", rangeReadNum);
-						result.data.push_back(result.arena, kvRef);
+						result.data.push_back_deep(result.arena, kvRef);
 						decrementLimits(kvRef);
 						++vCurrent;
 						return true;
@@ -1014,7 +1014,7 @@ public:
 							    .detail("key", kvRef)
 							    .detail("key2", vCurrent->isClearTo())
 							    .detail("rangeReadNum", rangeReadNum);
-						result.data.push_back(result.arena, kvRef);
+						result.data.push_back_deep(result.arena, kvRef);
 						decrementLimits(kvRef);
 						++vCurrent;
 					}
@@ -1036,7 +1036,7 @@ public:
 								TraceEvent("Nim_case 1 has")
 								    .detail("key", kvOpt.get())
 								    .detail("rangeReadNum", rangeReadNum);
-							result.data.push_back(result.arena, kvOpt.get());
+							result.data.push_back_deep(result.arena, kvOpt.get());
 							decrementLimits(kvOpt.get());
 						}
 						return true;
@@ -1050,7 +1050,7 @@ public:
 						if (trace)
 							TraceEvent("Nim_case 2").detail("key", vCurrent.key()).detail("rangeReadNum", rangeReadNum);
 						KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
-						result.data.push_back(result.arena, kvRef);
+						result.data.push_back_deep(result.arena, kvRef);
 						decrementLimits(kvRef);
 						--vCurrent;
 						continue;
@@ -1066,13 +1066,13 @@ public:
 							    .detail("rangeReadNum", rangeReadNum)
 							    .detail("vCurrent", vCurrent.key())
 							    .detail("clearTo", vCurrent->isClearTo());
-						result.data.push_back(result.arena, kv);
+						result.data.push_back_deep(result.arena, kv);
 						decrementLimits(kv);
 						return true;
 					} else if (vCurrent->isClearTo()) {
 						KeyRef skipKey = vCurrent.key();
 						if (kv.key == vCurrent->getEndKey()) {
-							result.data.push_back(result.arena, kv);
+							result.data.push_back_deep(result.arena, kv);
 							decrementLimits(kv);
 						}
 						if (trace)
@@ -1084,7 +1084,7 @@ public:
 						KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
 						if (trace)
 							TraceEvent("Nim_case 5").detail("key", kvRef).detail("rangeReadNum", rangeReadNum);
-						result.data.push_back(result.arena, kvRef);
+						result.data.push_back_deep(result.arena, kvRef);
 						decrementLimits(kvRef);
 						--vCurrent;
 						return true;
@@ -1092,7 +1092,7 @@ public:
 						KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
 						if (trace)
 							TraceEvent("Nim_case 6").detail("key", kvRef).detail("rangeReadNum", rangeReadNum);
-						result.data.push_back(result.arena, kvRef);
+						result.data.push_back_deep(result.arena, kvRef);
 						decrementLimits(kvRef);
 						--vCurrent;
 					}

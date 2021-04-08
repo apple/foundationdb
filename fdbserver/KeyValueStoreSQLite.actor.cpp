@@ -1160,11 +1160,12 @@ struct RawCursor {
 
 	Void readRangeResultWriter(KeyRangeRef keys, Reference<IReadRangeResultWriter> resultWriter, int rowLimit) {
 		// Read range implementation using a result writer
+		Arena arena;
 		if (rowLimit == 0)
 			return Void();
 		if (db.fragment_values) {
 			if (rowLimit > 0) { // return results in asc order
-				DefragmentingReader i(*this, resultWriter->getArena(), true);
+				DefragmentingReader i(*this, arena, true);
 				i.moveTo(keys.begin);
 				Optional<KeyRef> nextKey = i.peek();
 				while (nextKey.present() && nextKey.get() < keys.end) {
@@ -1182,7 +1183,7 @@ struct RawCursor {
 					nextKey = i.peek();
 				}
 			} else { // return results in desc order
-				DefragmentingReader i(*this, resultWriter->getArena(), false);
+				DefragmentingReader i(*this, arena, false);
 				i.moveTo(keys.end);
 				Optional<KeyRef> nextKey = i.peek();
 				while (nextKey.present() && nextKey.get() >= keys.begin) {
@@ -1206,7 +1207,7 @@ struct RawCursor {
 				if (r < 0)
 					moveNext();
 				while (this->valid) {
-					KeyValueRef kv = decodeKV(getEncodedRow(resultWriter->getArena()));
+					KeyValueRef kv = decodeKV(getEncodedRow(arena));
 					if (kv.key >= keys.end)
 						break;
 					// TraceEvent("Nim_readRangeKVStore 3").detail("key", kv.key);
@@ -1229,7 +1230,7 @@ struct RawCursor {
 				if (r >= 0)
 					movePrevious();
 				while (this->valid) {
-					KeyValueRef kv = decodeKV(getEncodedRow(resultWriter->getArena()));
+					KeyValueRef kv = decodeKV(getEncodedRow(arena));
 					if (kv.key < keys.begin)
 						break;
 					// TraceEvent("Nim_readRangeKVStore 4").detail("key", kv.key);
