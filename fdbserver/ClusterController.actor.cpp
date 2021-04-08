@@ -416,12 +416,12 @@ public:
 			    .push_back(worker_details);
 		}
 
-		int requiredProcesses = 0;
 		auto requiredFitness = ProcessClass::BestFit;
 		int requiredUsed = 0;
 		bool requiredDegraded = false;
 		bool requiredInCCDC = false;
 
+		// Determine the minimum fitness and used necessary to fulfill the policy
 		for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
 			auto fitness = std::get<0>(workerIter->first);
 			auto used = std::get<1>(workerIter->first);
@@ -429,7 +429,6 @@ public:
 				requiredFitness = fitness;
 				requiredUsed = used;
 				if (logServerSet->size() >= required && logServerSet->validate(policy)) {
-					requiredProcesses = logServerSet->size();
 					bCompleted = true;
 					break;
 				}
@@ -472,7 +471,8 @@ public:
 			throw no_more_servers();
 		}
 
-		if (requiredProcesses <= desired) {
+		// If we have less than the desired amount, return all of the processes we have
+		if (logServerSet->size() <= desired) {
 			for (auto& object : logServerMap->getObjects()) {
 				results.push_back(*object);
 			}
@@ -494,6 +494,8 @@ public:
 			return results;
 		}
 
+		// If we have added any degraded processes, try and remove them to see if we can still
+		// have the desired amount of processes
 		if (requiredDegraded) {
 			logServerMap->clear();
 			for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
@@ -515,6 +517,8 @@ public:
 			}
 		}
 
+		// If we have added any processes in the CC DC, try and remove them to see if we can still
+		// have the desired amount of processes
 		if (requiredInCCDC) {
 			logServerMap->clear();
 			for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
@@ -579,7 +583,8 @@ public:
 		std::vector<LocalityEntry> bestSet;
 		std::vector<LocalityData> tLocalities;
 
-		// Try to find the best team of servers to fulfill the policy
+		// We have more than the desired number of processes, so use the policy engine to
+		// pick a diverse subset of them
 		bCompleted = findBestPolicySet(bestSet,
 		                               logServerSet,
 		                               policy,
