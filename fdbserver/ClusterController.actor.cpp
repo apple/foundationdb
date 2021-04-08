@@ -415,91 +415,37 @@ public:
 			    .push_back(worker_details);
 		}
 
-		// Make sure we check for tlogs at the required size before adding processses from the next fitness level
-		for (int fitness = ProcessClass::GoodFit; fitness != ProcessClass::NeverAssign; fitness++) {
-			fitness_workers[std::make_tuple((ProcessClass::Fitness)fitness, 0, true, false)];
-		}
-		results.reserve(results.size() + id_worker.size());
+		int requiredProcesses = 0;
+		auto requiredFitness = ProcessClass::BestFit;
+		int requiredUsed = 0;
+		bool requiredDegraded = false;
+		bool requiredInCCDC = false;
+
 		for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
 			auto fitness = std::get<0>(workerIter->first);
 			auto used = std::get<1>(workerIter->first);
-			auto addingDegraded = std::get<2>(workerIter->first);
-			ASSERT(fitness < ProcessClass::NeverAssign);
-			if (bCompleted) {
-				break;
+			if (fitness > requiredFitness || used > requiredUsed) {
+				requiredFitness = fitness;
+				requiredUsed = used;
+				if (logServerSet->size() >= required && logServerSet->validate(policy)) {
+					requiredProcesses = logServerSet->size();
+					bCompleted = true;
+					break;
+				}
 			}
 
+			if (std::get<2>(workerIter->first)) {
+				requiredDegraded = true;
+			}
+			if (std::get<3>(workerIter->first)) {
+				requiredInCCDC = true;
+			}
 			for (auto& worker : workerIter->second) {
 				logServerMap->add(worker.interf.locality, &worker);
 			}
-
-			if (logServerSet->size() < (addingDegraded ? required : desired)) {
-			} else if (logServerSet->size() == required || logServerSet->size() <= desired) {
-				if (logServerSet->validate(policy)) {
-					for (auto& object : logServerMap->getObjects()) {
-						results.push_back(*object);
-					}
-					bCompleted = true;
-					break;
-				}
-				TraceEvent(SevWarn, "GWFTADNotAcceptable", id)
-				    .detail("DcIds", dcList)
-				    .detail("Fitness", fitness)
-				    .detail("Processes", logServerSet->size())
-				    .detail("Required", required)
-				    .detail("TLogPolicy", policy->info())
-				    .detail("DesiredLogs", desired)
-				    .detail("Used", used)
-				    .detail("AddingDegraded", addingDegraded);
-			}
-			// Try to select the desired size, if larger
-			else {
-				std::vector<LocalityEntry> bestSet;
-				std::vector<LocalityData> tLocalities;
-
-				// Try to find the best team of servers to fulfill the policy
-				if (findBestPolicySet(bestSet,
-				                      logServerSet,
-				                      policy,
-				                      desired,
-				                      SERVER_KNOBS->POLICY_RATING_TESTS,
-				                      SERVER_KNOBS->POLICY_GENERATIONS)) {
-					results.reserve(results.size() + bestSet.size());
-					for (auto& entry : bestSet) {
-						auto object = logServerMap->getObject(entry);
-						ASSERT(object);
-						results.push_back(*object);
-						tLocalities.push_back(object->interf.locality);
-					}
-					TraceEvent("GWFTADBestResults", id)
-					    .detail("DcIds", dcList)
-					    .detail("Fitness", fitness)
-					    .detail("Used", used)
-					    .detail("Processes", logServerSet->size())
-					    .detail("BestCount", bestSet.size())
-					    .detail("BestZones", ::describeZones(tLocalities))
-					    .detail("BestDataHalls", ::describeDataHalls(tLocalities))
-					    .detail("TLogPolicy", policy->info())
-					    .detail("TotalResults", results.size())
-					    .detail("DesiredLogs", desired)
-					    .detail("AddingDegraded", addingDegraded);
-					bCompleted = true;
-					break;
-				}
-				TraceEvent(SevWarn, "GWFTADNoBest", id)
-				    .detail("DcIds", dcList)
-				    .detail("Fitness", fitness)
-				    .detail("Used", used)
-				    .detail("Processes", logServerSet->size())
-				    .detail("Required", required)
-				    .detail("TLogPolicy", policy->info())
-				    .detail("DesiredLogs", desired)
-				    .detail("AddingDegraded", addingDegraded);
-			}
 		}
 
-		// If policy cannot be satisfied
-		if (!bCompleted) {
+		if (!bCompleted && !(logServerSet->size() >= required && logServerSet->validate(policy))) {
 			std::vector<LocalityData> tLocalities;
 			for (auto& object : logServerMap->getObjects()) {
 				tLocalities.push_back(object->interf.locality);
@@ -517,33 +463,154 @@ public:
 			    .detail("MissingDataHalls", ::describeDataHalls(unavailableLocals))
 			    .detail("Required", required)
 			    .detail("DesiredLogs", desired)
-			    .detail("RatingTests", SERVER_KNOBS->POLICY_RATING_TESTS)
 			    .detail("CheckStable", checkStable)
-			    .detail("NumExclusionWorkers", exclusionWorkerIds.size())
-			    .detail("PolicyGenerations", SERVER_KNOBS->POLICY_GENERATIONS)
-			    .backtrace();
+			    .detail("NumExclusionWorkers", exclusionWorkerIds.size());
 
 			logServerSet->clear();
 			logServerSet.clear();
 			throw no_more_servers();
 		}
 
+		if (requiredProcesses <= desired) {
+			for (auto& object : logServerMap->getObjects()) {
+				results.push_back(*object);
+			}
+			for (auto& result : results) {
+				id_used[result.interf.locality.processId()]++;
+			}
+			TraceEvent("GetTLogTeamDone")
+			    .detail("DcIds", dcList)
+			    .detail("Policy", policy->info())
+			    .detail("Results", results.size())
+			    .detail("Processes", logServerSet->size())
+			    .detail("Workers", id_worker.size())
+			    .detail("Required", required)
+			    .detail("Desired", desired)
+			    .detail("Fitness", requiredFitness)
+			    .detail("Used", requiredUsed)
+			    .detail("AddingDegraded", requiredDegraded)
+			    .detail("InCCDC", requiredInCCDC);
+			return results;
+		}
+
+		if (requiredDegraded) {
+			logServerMap->clear();
+			for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
+				auto fitness = std::get<0>(workerIter->first);
+				auto used = std::get<1>(workerIter->first);
+				auto addingDegraded = std::get<2>(workerIter->first);
+				if (addingDegraded) {
+					continue;
+				}
+				if (fitness > requiredFitness || (fitness == requiredFitness && used > requiredUsed)) {
+					break;
+				}
+				for (auto& worker : workerIter->second) {
+					logServerMap->add(worker.interf.locality, &worker);
+				}
+			}
+			if (logServerSet->size() >= desired && logServerSet->validate(policy)) {
+				requiredDegraded = false;
+			}
+		}
+
+		if (requiredInCCDC) {
+			logServerMap->clear();
+			for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
+				auto fitness = std::get<0>(workerIter->first);
+				auto used = std::get<1>(workerIter->first);
+				auto addingDegraded = std::get<2>(workerIter->first);
+				auto inCCDC = std::get<3>(workerIter->first);
+				if (inCCDC || (!requiredDegraded && addingDegraded)) {
+					continue;
+				}
+				if (fitness > requiredFitness || (fitness == requiredFitness && used > requiredUsed)) {
+					break;
+				}
+				for (auto& worker : workerIter->second) {
+					logServerMap->add(worker.interf.locality, &worker);
+				}
+			}
+			if (logServerSet->size() >= desired && logServerSet->validate(policy)) {
+				requiredInCCDC = false;
+			}
+		}
+
+		logServerMap->clear();
+		for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
+			auto fitness = std::get<0>(workerIter->first);
+			auto used = std::get<1>(workerIter->first);
+			auto addingDegraded = std::get<2>(workerIter->first);
+			auto inCCDC = std::get<3>(workerIter->first);
+			if ((!requiredInCCDC && inCCDC) || (!requiredDegraded && addingDegraded)) {
+				continue;
+			}
+			if (fitness > requiredFitness || (fitness == requiredFitness && used > requiredUsed)) {
+				break;
+			}
+			for (auto& worker : workerIter->second) {
+				logServerMap->add(worker.interf.locality, &worker);
+			}
+		}
+
+		if (logServerSet->size() == desired) {
+			for (auto& object : logServerMap->getObjects()) {
+				results.push_back(*object);
+			}
+			for (auto& result : results) {
+				id_used[result.interf.locality.processId()]++;
+			}
+			TraceEvent("GetTLogTeamDone")
+			    .detail("DcIds", dcList)
+			    .detail("Policy", policy->info())
+			    .detail("Results", results.size())
+			    .detail("Processes", logServerSet->size())
+			    .detail("Workers", id_worker.size())
+			    .detail("Required", required)
+			    .detail("Desired", desired)
+			    .detail("Fitness", requiredFitness)
+			    .detail("Used", requiredUsed)
+			    .detail("AddingDegraded", requiredDegraded)
+			    .detail("InCCDC", requiredInCCDC);
+			return results;
+		}
+
+		std::vector<LocalityEntry> bestSet;
+		std::vector<LocalityData> tLocalities;
+
+		// Try to find the best team of servers to fulfill the policy
+		bCompleted = findBestPolicySet(bestSet,
+		                               logServerSet,
+		                               policy,
+		                               desired,
+		                               SERVER_KNOBS->POLICY_RATING_TESTS,
+		                               SERVER_KNOBS->POLICY_GENERATIONS);
+		ASSERT(bCompleted);
+		results.reserve(results.size() + bestSet.size());
+		for (auto& entry : bestSet) {
+			auto object = logServerMap->getObject(entry);
+			ASSERT(object);
+			results.push_back(*object);
+			tLocalities.push_back(object->interf.locality);
+		}
 		for (auto& result : results) {
 			id_used[result.interf.locality.processId()]++;
 		}
-
 		TraceEvent("GetTLogTeamDone")
 		    .detail("DcIds", dcList)
-		    .detail("Completed", bCompleted)
 		    .detail("Policy", policy->info())
 		    .detail("Results", results.size())
 		    .detail("Processes", logServerSet->size())
 		    .detail("Workers", id_worker.size())
 		    .detail("Required", required)
 		    .detail("Desired", desired)
-		    .detail("RatingTests", SERVER_KNOBS->POLICY_RATING_TESTS)
-		    .detail("PolicyGenerations", SERVER_KNOBS->POLICY_GENERATIONS);
-
+		    .detail("Fitness", requiredFitness)
+		    .detail("Used", requiredUsed)
+		    .detail("AddingDegraded", requiredDegraded)
+		    .detail("InCCDC", requiredInCCDC)
+		    .detail("BestCount", bestSet.size())
+		    .detail("BestZones", ::describeZones(tLocalities))
+		    .detail("BestDataHalls", ::describeDataHalls(tLocalities));
 		return results;
 	}
 
@@ -751,41 +818,42 @@ public:
 		ProcessClass::Fitness worstFit;
 		ProcessClass::ClusterRole role;
 		int count;
-		int worstUsed;
-		bool worstIsDegraded;
-		bool inClusterControllerDC;
+		int worstUsed = 1;
+		bool degraded = false;
+		bool inClusterControllerDC = false;
 
 		RoleFitness(int bestFit, int worstFit, int count, ProcessClass::ClusterRole role)
 		  : bestFit((ProcessClass::Fitness)bestFit), worstFit((ProcessClass::Fitness)worstFit), count(count),
-		    role(role), worstUsed(1), worstIsDegraded(false), inClusterControllerDC(false) {}
+		    role(role) {}
 
 		RoleFitness(int fitness, int count, ProcessClass::ClusterRole role)
-		  : bestFit((ProcessClass::Fitness)fitness), worstFit((ProcessClass::Fitness)fitness), count(count), role(role),
-		    worstUsed(1), worstIsDegraded(false), inClusterControllerDC(false) {}
+		  : bestFit((ProcessClass::Fitness)fitness), worstFit((ProcessClass::Fitness)fitness), count(count),
+		    role(role) {}
 
 		RoleFitness()
 		  : bestFit(ProcessClass::NeverAssign), worstFit(ProcessClass::NeverAssign), role(ProcessClass::NoRole),
-		    count(0), worstUsed(1), worstIsDegraded(false), inClusterControllerDC(false) {}
+		    count(0) {}
 
 		RoleFitness(const vector<WorkerDetails>& workers,
 		            ProcessClass::ClusterRole role,
 		            const std::map<Optional<Standalone<StringRef>>, int>& id_used,
 		            Optional<Standalone<StringRef>> ccDcId)
 		  : role(role) {
-			worstFit = ProcessClass::BestFit;
-			worstIsDegraded = false;
+			// Every recruitment will attempt to recruit the preferred amount through GoodFit,
+			// So a recruitment which only has BestFit is not better than one that has a GoodFit process
+			worstFit = ProcessClass::GoodFit;
+
+			degraded = false;
 			inClusterControllerDC = false;
 			bestFit = ProcessClass::NeverAssign;
 			worstUsed = 1;
 			for (auto& it : workers) {
 				auto thisFit = it.processClass.machineClassFitness(role);
-				if (thisFit > worstFit) {
-					worstFit = thisFit;
-					worstIsDegraded = it.degraded;
-				} else if (thisFit == worstFit) {
-					worstIsDegraded = worstIsDegraded || it.degraded;
-				}
+				worstFit = std::max(worstFit, thisFit);
 				bestFit = std::min(bestFit, thisFit);
+				degraded |= it.degraded;
+				inClusterControllerDC |= (it.interf.locality.dcId() == ccDcId);
+
 				auto thisUsed = id_used.find(it.interf.locality.processId());
 				if (thisUsed == id_used.end()) {
 					TraceEvent(SevError, "UsedNotFound").detail("ProcessId", it.interf.locality.processId().get());
@@ -796,18 +864,15 @@ public:
 					ASSERT(false);
 				}
 				worstUsed = std::max(worstUsed, thisUsed->second);
-				// only tlogs avoid the cluster controller dc
-				if (role == ProcessClass::TLog && it.interf.locality.dcId() == ccDcId) {
-					inClusterControllerDC = true;
-				}
 			}
-			// Every recruitment will attempt to recruit the preferred amount through GoodFit,
-			// So a recruitment which only has BestFit is not better than one that has a GoodFit process
-			worstFit = std::max(worstFit, ProcessClass::GoodFit);
+
 			count = workers.size();
+
 			// degraded is only used for recruitment of tlogs
+			// only tlogs avoid the cluster controller dc
 			if (role != ProcessClass::TLog) {
-				worstIsDegraded = false;
+				degraded = false;
+				inClusterControllerDC = false;
 			}
 		}
 
@@ -818,8 +883,8 @@ public:
 				return worstUsed < r.worstUsed;
 			if (count != r.count)
 				return count > r.count;
-			if (worstIsDegraded != r.worstIsDegraded)
-				return r.worstIsDegraded;
+			if (degraded != r.degraded)
+				return r.degraded;
 			if (inClusterControllerDC != r.inClusterControllerDC)
 				return r.inClusterControllerDC;
 			// FIXME: TLog recruitment process does not guarantee the best fit is not worsened.
@@ -838,8 +903,8 @@ public:
 				return worstFit < r.worstFit;
 			if (worstUsed != r.worstUsed)
 				return worstUsed < r.worstUsed;
-			if (worstIsDegraded != r.worstIsDegraded)
-				return r.worstIsDegraded;
+			if (degraded != r.degraded)
+				return r.degraded;
 			if (inClusterControllerDC != r.inClusterControllerDC)
 				return r.inClusterControllerDC;
 			return false;
@@ -847,12 +912,11 @@ public:
 
 		bool operator==(RoleFitness const& r) const {
 			return worstFit == r.worstFit && worstUsed == r.worstUsed && bestFit == r.bestFit && count == r.count &&
-			       worstIsDegraded == r.worstIsDegraded && inClusterControllerDC == r.inClusterControllerDC;
+			       degraded == r.degraded && inClusterControllerDC == r.inClusterControllerDC;
 		}
 
 		std::string toString() const {
-			return format(
-			    "%d %d %d %d %d %d", worstFit, worstUsed, count, worstIsDegraded, inClusterControllerDC, bestFit);
+			return format("%d %d %d %d %d %d", worstFit, worstUsed, count, degraded, inClusterControllerDC, bestFit);
 		}
 	};
 
