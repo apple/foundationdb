@@ -570,15 +570,15 @@ struct P2PNetworkTest {
 // The client will close the connection after a random idleMilliseconds.
 // Reads and writes can optionally preceded by random delays, waitReadMilliseconds and waitWriteMilliseconds.
 TEST_CASE(":/network/p2ptest") {
-	state P2PNetworkTest p2p(params.getParam("listenerAddresses").orDefault(""),
-	                         params.getParam("remoteAddresses").orDefault(""),
-	                         params.getIntParam("connectionsOut").orDefault(1),
-	                         params.getParam("requestBytes").orDefault("50:100"),
-	                         params.getParam("replyBytes").orDefault("500:1000"),
-	                         params.getParam("requests").orDefault("10:10000"),
-	                         params.getParam("idleMilliseconds").orDefault("0"),
-	                         params.getParam("waitReadMilliseconds").orDefault("0"),
-	                         params.getParam("waitWriteMilliseconds").orDefault("0"));
+	state P2PNetworkTest p2p(params.get("listenerAddresses").orDefault(""),
+	                         params.get("remoteAddresses").orDefault(""),
+	                         params.getInt("connectionsOut").orDefault(1),
+	                         params.get("requestBytes").orDefault("50:100"),
+	                         params.get("replyBytes").orDefault("500:1000"),
+	                         params.get("requests").orDefault("10:10000"),
+	                         params.get("idleMilliseconds").orDefault("0"),
+	                         params.get("waitReadMilliseconds").orDefault("0"),
+	                         params.get("waitWriteMilliseconds").orDefault("0"));
 
 	wait(p2p.run());
 	return Void();

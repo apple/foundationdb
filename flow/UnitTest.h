@@ -52,16 +52,22 @@ struct UnitTestParameters {
 	std::map<std::string, std::string> params;
 
 	// Set a named parameter to a string value, replacing any existing value
-	void setParam(const std::string& name, const std::string& value);
+	void set(const std::string& name, const std::string& value);
 
 	// Set a named parameter to an integer converted to a string value, replacing any existing value
-	void setParam(const std::string& name, int64_t value);
+	void set(const std::string& name, int64_t value);
+
+	// Set a named parameter to a double converted to a string value, replacing any existing value
+	void set(const std::string& name, double value);
 
 	// Get a parameter's value, will return !present() if parameter was not set
-	Optional<std::string> getParam(const std::string& name) const;
+	Optional<std::string> get(const std::string& name) const;
 
 	// Get a parameter's value as an integer, will return !present() if parameter was not set
-	Optional<int64_t> getIntParam(const std::string& name) const;
+	Optional<int64_t> getInt(const std::string& name) const;
+
+	// Get a parameter's value parsed as a double, will return !present() if parameter was not set
+	Optional<double> getDouble(const std::string& name) const;
 };
 
 // Unit test definition structured as a linked list item

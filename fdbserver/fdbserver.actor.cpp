@@ -1059,7 +1059,7 @@ private:
 					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
-				testParams.setParam(syn.substr(7), args.OptionArg());
+				testParams.set(syn.substr(7), args.OptionArg());
 				break;
 			}
 			case OPT_LOCALITY: {
