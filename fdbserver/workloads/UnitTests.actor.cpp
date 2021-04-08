@@ -48,9 +48,9 @@ struct UnitTestWorkload : TestWorkload {
 		testRunLimit = getOption(options, LiteralStringRef("maxTestCases"), -1);
 
 		// Consume all remaining options as testParams which the unit test can access
-		for(auto &kv : options) {
-			if(kv.value.size() != 0) {
-				testParams.setParam(kv.key.toString(), getOption(options, kv.key, StringRef()).toString());
+		for (auto& kv : options) {
+			if (kv.value.size() != 0) {
+				testParams.set(kv.key.toString(), getOption(options, kv.key, StringRef()).toString());
 			}
 		}
 
