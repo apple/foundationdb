@@ -727,14 +727,15 @@ public:
 		return bestFitness;
 	}
 
-	WorkerFitnessInfo getWorkerForRoleInDatacenter(Optional<Standalone<StringRef>> const& dcId,
-	                                               ProcessClass::ClusterRole role,
-	                                               ProcessClass::Fitness unacceptableFitness,
-	                                               DatabaseConfiguration const& conf,
-	                                               std::map<Optional<Standalone<StringRef>>, int>& id_used,
-	                                               bool checkStable = false) {
-		std::map<std::pair<ProcessClass::Fitness, int>, std::pair<vector<WorkerDetails>, vector<WorkerDetails>>>
-		    fitness_workers;
+	WorkerFitnessInfo getWorkerForRoleInDatacenter(
+	    Optional<Standalone<StringRef>> const& dcId,
+	    ProcessClass::ClusterRole role,
+	    ProcessClass::Fitness unacceptableFitness,
+	    DatabaseConfiguration const& conf,
+	    std::map<Optional<Standalone<StringRef>>, int>& id_used,
+	    Optional<Standalone<StringRef>> preferredSharing = Optional<Standalone<StringRef>>(),
+	    bool checkStable = false) {
+		std::map<std::tuple<ProcessClass::Fitness, int, bool, bool>, vector<WorkerDetails>> fitness_workers;
 
 		for (auto& it : id_worker) {
 			auto fitness = it.second.details.processClass.machineClassFitness(role);
@@ -743,23 +744,20 @@ public:
 			}
 			if (workerAvailable(it.second, checkStable) && fitness < unacceptableFitness &&
 			    it.second.details.interf.locality.dcId() == dcId) {
-				if (isLongLivedStateless(it.first)) {
-					fitness_workers[std::make_pair(fitness, id_used[it.first])].second.push_back(it.second.details);
-				} else {
-					fitness_workers[std::make_pair(fitness, id_used[it.first])].first.push_back(it.second.details);
-				}
+				fitness_workers[std::make_tuple(fitness,
+				                                id_used[it.first],
+				                                isLongLivedStateless(it.first),
+				                                preferredSharing != it.first)]
+				    .push_back(it.second.details);
 			}
 		}
 
-		for (auto& it : fitness_workers) {
-			for (int j = 0; j < 2; j++) {
-				auto& w = j == 0 ? it.second.first : it.second.second;
-				deterministicRandom()->randomShuffle(w);
-				for (int i = 0; i < w.size(); i++) {
-					id_used[w[i].interf.locality.processId()]++;
-					return WorkerFitnessInfo(w[i], std::max(ProcessClass::GoodFit, it.first.first), it.first.second);
-				}
-			}
+		if (fitness_workers.size()) {
+			auto worker = deterministicRandom()->randomChoice(fitness_workers.begin()->second);
+			id_used[worker.interf.locality.processId()]++;
+			return WorkerFitnessInfo(worker,
+			                         std::max(ProcessClass::GoodFit, std::get<0>(fitness_workers.begin()->first)),
+			                         std::get<1>(fitness_workers.begin()->first));
 		}
 
 		throw no_more_servers();
@@ -1032,10 +1030,18 @@ public:
 
 		auto first_commit_proxy = getWorkerForRoleInDatacenter(
 		    dcId, ProcessClass::CommitProxy, ProcessClass::ExcludeFit, req.configuration, id_used);
-		auto first_grv_proxy = getWorkerForRoleInDatacenter(
-		    dcId, ProcessClass::GrvProxy, ProcessClass::ExcludeFit, req.configuration, id_used);
-		auto first_resolver = getWorkerForRoleInDatacenter(
-		    dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, req.configuration, id_used);
+		auto first_grv_proxy = getWorkerForRoleInDatacenter(dcId,
+		                                                    ProcessClass::GrvProxy,
+		                                                    ProcessClass::ExcludeFit,
+		                                                    req.configuration,
+		                                                    id_used,
+		                                                    first_commit_proxy.worker.interf.locality.processId());
+		auto first_resolver = getWorkerForRoleInDatacenter(dcId,
+		                                                   ProcessClass::Resolver,
+		                                                   ProcessClass::ExcludeFit,
+		                                                   req.configuration,
+		                                                   id_used,
+		                                                   first_commit_proxy.worker.interf.locality.processId());
 
 		// If one of the first process recruitments is forced to share a process, allow all of next recruitments
 		// to also share a process.
@@ -1224,10 +1230,20 @@ public:
 					auto used = id_used;
 					auto first_commit_proxy = getWorkerForRoleInDatacenter(
 					    dcId, ProcessClass::CommitProxy, ProcessClass::ExcludeFit, req.configuration, used);
-					auto first_grv_proxy = getWorkerForRoleInDatacenter(
-					    dcId, ProcessClass::GrvProxy, ProcessClass::ExcludeFit, req.configuration, used);
-					auto first_resolver = getWorkerForRoleInDatacenter(
-					    dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, req.configuration, used);
+					auto first_grv_proxy =
+					    getWorkerForRoleInDatacenter(dcId,
+					                                 ProcessClass::GrvProxy,
+					                                 ProcessClass::ExcludeFit,
+					                                 req.configuration,
+					                                 used,
+					                                 first_commit_proxy.worker.interf.locality.processId());
+					auto first_resolver =
+					    getWorkerForRoleInDatacenter(dcId,
+					                                 ProcessClass::Resolver,
+					                                 ProcessClass::ExcludeFit,
+					                                 req.configuration,
+					                                 used,
+					                                 first_commit_proxy.worker.interf.locality.processId());
 
 					// If one of the first process recruitments is forced to share a process, allow all of next
 					// recruitments to also share a process.
@@ -1356,10 +1372,20 @@ public:
 
 		try {
 			std::map<Optional<Standalone<StringRef>>, int> id_used;
-			getWorkerForRoleInDatacenter(
-			    regions[0].dcId, ProcessClass::ClusterController, ProcessClass::ExcludeFit, db.config, id_used, true);
-			getWorkerForRoleInDatacenter(
-			    regions[0].dcId, ProcessClass::Master, ProcessClass::ExcludeFit, db.config, id_used, true);
+			getWorkerForRoleInDatacenter(regions[0].dcId,
+			                             ProcessClass::ClusterController,
+			                             ProcessClass::ExcludeFit,
+			                             db.config,
+			                             id_used,
+			                             Optional<Standalone<StringRef>>(),
+			                             true);
+			getWorkerForRoleInDatacenter(regions[0].dcId,
+			                             ProcessClass::Master,
+			                             ProcessClass::ExcludeFit,
+			                             db.config,
+			                             id_used,
+			                             Optional<Standalone<StringRef>>(),
+			                             true);
 
 			std::set<Optional<Key>> primaryDC;
 			primaryDC.insert(regions[0].dcId);
@@ -1375,12 +1401,27 @@ public:
 				getWorkersForSatelliteLogs(db.config, regions[0], regions[1], id_used, satelliteFallback, true);
 			}
 
-			getWorkerForRoleInDatacenter(
-			    regions[0].dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, true);
-			getWorkerForRoleInDatacenter(
-			    regions[0].dcId, ProcessClass::CommitProxy, ProcessClass::ExcludeFit, db.config, id_used, true);
-			getWorkerForRoleInDatacenter(
-			    regions[0].dcId, ProcessClass::GrvProxy, ProcessClass::ExcludeFit, db.config, id_used, true);
+			getWorkerForRoleInDatacenter(regions[0].dcId,
+			                             ProcessClass::Resolver,
+			                             ProcessClass::ExcludeFit,
+			                             db.config,
+			                             id_used,
+			                             Optional<Standalone<StringRef>>(),
+			                             true);
+			getWorkerForRoleInDatacenter(regions[0].dcId,
+			                             ProcessClass::CommitProxy,
+			                             ProcessClass::ExcludeFit,
+			                             db.config,
+			                             id_used,
+			                             Optional<Standalone<StringRef>>(),
+			                             true);
+			getWorkerForRoleInDatacenter(regions[0].dcId,
+			                             ProcessClass::GrvProxy,
+			                             ProcessClass::ExcludeFit,
+			                             db.config,
+			                             id_used,
+			                             Optional<Standalone<StringRef>>(),
+			                             true);
 
 			vector<Optional<Key>> dcPriority;
 			dcPriority.push_back(regions[0].dcId);
@@ -1592,8 +1633,13 @@ public:
 		std::map<Optional<Standalone<StringRef>>, int> old_id_used;
 		id_used[clusterControllerProcessId]++;
 		old_id_used[clusterControllerProcessId]++;
-		WorkerFitnessInfo mworker = getWorkerForRoleInDatacenter(
-		    clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db.config, id_used, true);
+		WorkerFitnessInfo mworker = getWorkerForRoleInDatacenter(clusterControllerDcId,
+		                                                         ProcessClass::Master,
+		                                                         ProcessClass::NeverAssign,
+		                                                         db.config,
+		                                                         id_used,
+		                                                         Optional<Standalone<StringRef>>(),
+		                                                         true);
 		auto newMasterFit = mworker.worker.processClass.machineClassFitness(ProcessClass::Master);
 		if (db.config.isExcludedServer(mworker.worker.interf.addresses())) {
 			newMasterFit = std::max(newMasterFit, ProcessClass::ExcludeFit);
@@ -1781,12 +1827,27 @@ public:
 		RoleFitness oldGrvProxyFit(grvProxyClasses, ProcessClass::GrvProxy, old_id_used, clusterControllerDcId);
 		RoleFitness oldResolverFit(resolverClasses, ProcessClass::Resolver, old_id_used, clusterControllerDcId);
 
-		auto first_commit_proxy = getWorkerForRoleInDatacenter(
-		    clusterControllerDcId, ProcessClass::CommitProxy, ProcessClass::ExcludeFit, db.config, id_used, true);
-		auto first_grv_proxy = getWorkerForRoleInDatacenter(
-		    clusterControllerDcId, ProcessClass::GrvProxy, ProcessClass::ExcludeFit, db.config, id_used, true);
-		auto first_resolver = getWorkerForRoleInDatacenter(
-		    clusterControllerDcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, true);
+		auto first_commit_proxy = getWorkerForRoleInDatacenter(clusterControllerDcId,
+		                                                       ProcessClass::CommitProxy,
+		                                                       ProcessClass::ExcludeFit,
+		                                                       db.config,
+		                                                       id_used,
+		                                                       Optional<Standalone<StringRef>>(),
+		                                                       true);
+		auto first_grv_proxy = getWorkerForRoleInDatacenter(clusterControllerDcId,
+		                                                    ProcessClass::GrvProxy,
+		                                                    ProcessClass::ExcludeFit,
+		                                                    db.config,
+		                                                    id_used,
+		                                                    first_commit_proxy.worker.interf.locality.processId(),
+		                                                    true);
+		auto first_resolver = getWorkerForRoleInDatacenter(clusterControllerDcId,
+		                                                   ProcessClass::Resolver,
+		                                                   ProcessClass::ExcludeFit,
+		                                                   db.config,
+		                                                   id_used,
+		                                                   first_commit_proxy.worker.interf.locality.processId(),
+		                                                   true);
 		auto maxUsed = std::max({ first_commit_proxy.used, first_grv_proxy.used, first_resolver.used });
 		first_commit_proxy.used = maxUsed;
 		first_grv_proxy.used = maxUsed;
@@ -2266,6 +2327,7 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 	                                                               ProcessClass::NeverAssign,
 	                                                               self->db.config,
 	                                                               id_used,
+	                                                               Optional<Standalone<StringRef>>(),
 	                                                               true)
 	                                .worker;
 	if (self->onMasterIsBetter(newRKWorker, ProcessClass::Ratekeeper)) {
@@ -2281,6 +2343,7 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 	                                                               ProcessClass::NeverAssign,
 	                                                               self->db.config,
 	                                                               id_used,
+	                                                               Optional<Standalone<StringRef>>(),
 	                                                               true)
 	                                .worker;
 	if (self->onMasterIsBetter(newDDWorker, ProcessClass::DataDistributor)) {
