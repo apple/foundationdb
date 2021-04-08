@@ -19,9 +19,7 @@
  */
 
 #include <cinttypes>
-#include <deque>
 #include <memory>
-#include <vector>
 
 #include "fdbrpc/simulator.h"
 #define BOOST_SYSTEM_NO_LIB
@@ -50,7 +48,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 bool simulator_should_inject_fault(const char* context, const char* file, int line, int error_code) {
-	if (!g_network->isSimulated()) return false;
+	if (!g_network->isSimulated())
+		return false;
 
 	auto p = g_simulator.getCurrentProcess();
 
@@ -99,10 +98,14 @@ void ISimulator::displayWorkers() const {
 		printf("\n%s\n", machineRecord.first.c_str());
 		for (auto& processInfo : machineRecord.second) {
 			printf("                  %9s %-10s%-13s%-8s %-6s %-9s %-8s %-48s %-40s\n",
-			       processInfo->address.toString().c_str(), processInfo->name,
-			       processInfo->startingClass.toString().c_str(), (processInfo->isExcluded() ? "True" : "False"),
-			       (processInfo->failed ? "True" : "False"), (processInfo->rebooting ? "True" : "False"),
-			       (processInfo->isCleared() ? "True" : "False"), getRoles(processInfo->address).c_str(),
+			       processInfo->address.toString().c_str(),
+			       processInfo->name,
+			       processInfo->startingClass.toString().c_str(),
+			       (processInfo->isExcluded() ? "True" : "False"),
+			       (processInfo->failed ? "True" : "False"),
+			       (processInfo->rebooting ? "True" : "False"),
+			       (processInfo->isCleared() ? "True" : "False"),
+			       getRoles(processInfo->address).c_str(),
 			       processInfo->dataFolder);
 		}
 	}
@@ -120,11 +123,14 @@ struct SimClogging {
 
 		double tnow = now();
 		double t = tnow + halfLatency();
-		if (!g_simulator.speedUpSimulation) t += clogPairLatency[pair];
+		if (!g_simulator.speedUpSimulation)
+			t += clogPairLatency[pair];
 
-		if (!g_simulator.speedUpSimulation && clogPairUntil.count(pair)) t = std::max(t, clogPairUntil[pair]);
+		if (!g_simulator.speedUpSimulation && clogPairUntil.count(pair))
+			t = std::max(t, clogPairUntil[pair]);
 
-		if (!g_simulator.speedUpSimulation && clogRecvUntil.count(to.ip)) t = std::max(t, clogRecvUntil[to.ip]);
+		if (!g_simulator.speedUpSimulation && clogRecvUntil.count(to.ip))
+			t = std::max(t, clogRecvUntil[to.ip]);
 
 		return t - tnow;
 	}
@@ -143,7 +149,8 @@ struct SimClogging {
 	}
 	double setPairLatencyIfNotSet(const IPAddress& from, const IPAddress& to, double t) {
 		auto i = clogPairLatency.find(std::make_pair(from, to));
-		if (i == clogPairLatency.end()) i = clogPairLatency.insert(std::make_pair(std::make_pair(from, to), t)).first;
+		if (i == clogPairLatency.end())
+			i = clogPairLatency.insert(std::make_pair(std::make_pair(from, to), t)).first;
 		return i->second;
 	}
 
@@ -186,7 +193,8 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		// Every one-way connection gets a random permanent latency and a random send buffer for the duration of the
 		// connection
 		auto latency =
-		    g_clogging.setPairLatencyIfNotSet(peerProcess->address.ip, process->address.ip,
+		    g_clogging.setPairLatencyIfNotSet(peerProcess->address.ip,
+		                                      process->address.ip,
 		                                      FLOW_KNOBS->MAX_CLOGGING_LATENCY * deterministicRandom()->random01());
 		sendBufSize = std::max<double>(deterministicRandom()->randomInt(0, 5000000), 25e6 * (latency + .002));
 		TraceEvent("Sim2Connection").detail("SendBufSize", sendBufSize).detail("Latency", latency);
@@ -222,7 +230,8 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		int64_t avail = receivedBytes.get() - readBytes.get(); // SOMEDAY: random?
 		int toRead = std::min<int64_t>(end - begin, avail);
 		ASSERT(toRead >= 0 && toRead <= recvBuf.size() && toRead <= end - begin);
-		for (int i = 0; i < toRead; i++) begin[i] = recvBuf[i];
+		for (int i = 0; i < toRead; i++)
+			begin[i] = recvBuf[i];
 		recvBuf.erase(recvBuf.begin(), recvBuf.begin() + toRead);
 		readBytes.set(readBytes.get() + toRead);
 		return toRead;
@@ -241,15 +250,18 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 			for (auto p = buffer; p; p = p->next) {
 				toSend += p->bytes_written - p->bytes_sent;
 				if (toSend >= limit) {
-					if (toSend > limit) toSend = limit;
+					if (toSend > limit)
+						toSend = limit;
 					break;
 				}
 			}
 		}
 		ASSERT(toSend);
-		if (BUGGIFY) toSend = std::min(toSend, deterministicRandom()->randomInt(0, 1000));
+		if (BUGGIFY)
+			toSend = std::min(toSend, deterministicRandom()->randomInt(0, 1000));
 
-		if (!peer) return toSend;
+		if (!peer)
+			return toSend;
 		toSend = std::min(toSend, peer->availableSendBufferForPeer());
 		ASSERT(toSend >= 0);
 
@@ -310,8 +322,10 @@ private:
 	}
 	ACTOR static Future<Void> receiver(Sim2Conn* self) {
 		loop {
-			if (self->sentBytes.get() != self->receivedBytes.get()) wait(g_simulator.onProcess(self->peerProcess));
-			while (self->sentBytes.get() == self->receivedBytes.get()) wait(self->sentBytes.onChange());
+			if (self->sentBytes.get() != self->receivedBytes.get())
+				wait(g_simulator.onProcess(self->peerProcess));
+			while (self->sentBytes.get() == self->receivedBytes.get())
+				wait(self->sentBytes.onChange());
 			ASSERT(g_simulator.getCurrentProcess() == self->peerProcess);
 			state int64_t pos =
 			    deterministicRandom()->random01() < .5
@@ -348,7 +362,8 @@ private:
 	ACTOR static Future<Void> whenWritable(Sim2Conn* self) {
 		try {
 			loop {
-				if (!self->peer) return Void();
+				if (!self->peer)
+					return Void();
 				if (self->peer->availableSendBufferForPeer() > 0) {
 					ASSERT(g_simulator.getCurrentProcess() == self->process);
 					return Void();
@@ -357,7 +372,8 @@ private:
 					wait(self->peer->receivedBytes.onChange());
 					ASSERT(g_simulator.getCurrentProcess() == self->peerProcess);
 				} catch (Error& e) {
-					if (e.code() != error_code_broken_promise) throw;
+					if (e.code() != error_code_broken_promise)
+						throw;
 				}
 				wait(g_simulator.onProcess(self->process));
 			}
@@ -380,11 +396,14 @@ private:
 			    .detail("SendClosed", a > .33)
 			    .detail("RecvClosed", a < .66)
 			    .detail("Explicit", b < .3);
-			if (a < .66 && peer) peer->closeInternal();
-			if (a > .33) closeInternal();
+			if (a < .66 && peer)
+				peer->closeInternal();
+			if (a > .33)
+				closeInternal();
 			// At the moment, we occasionally notice the connection failed immediately.  In principle, this could happen
 			// but only after a delay.
-			if (b < .3) throw connection_failed();
+			if (b < .3)
+				throw connection_failed();
 		}
 	}
 
@@ -440,7 +459,9 @@ public:
 	static bool should_poll() { return false; }
 
 	ACTOR static Future<Reference<IAsyncFile>> open(
-	    std::string filename, int flags, int mode,
+	    std::string filename,
+	    int flags,
+	    int mode,
 	    Reference<DiskParameters> diskParameters = makeReference<DiskParameters>(25000, 150000000),
 	    bool delayOnWrite = true) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
@@ -531,32 +552,43 @@ private:
 	// This is to support AsyncFileNonDurable, which issues its own delays for writes and truncates
 	bool delayOnWrite;
 
-	SimpleFile(int h, Reference<DiskParameters> diskParameters, bool delayOnWrite, const std::string& filename,
-	           const std::string& actualFilename, int flags)
+	SimpleFile(int h,
+	           Reference<DiskParameters> diskParameters,
+	           bool delayOnWrite,
+	           const std::string& filename,
+	           const std::string& actualFilename,
+	           int flags)
 	  : h(h), diskParameters(diskParameters), delayOnWrite(delayOnWrite), filename(filename),
 	    actualFilename(actualFilename), dbgId(deterministicRandom()->randomUniqueID()), flags(flags) {}
 
 	static int flagConversion(int flags) {
 		int outFlags = O_BINARY | O_CLOEXEC;
-		if (flags & OPEN_READWRITE) outFlags |= O_RDWR;
-		if (flags & OPEN_CREATE) outFlags |= O_CREAT;
-		if (flags & OPEN_READONLY) outFlags |= O_RDONLY;
-		if (flags & OPEN_EXCLUSIVE) outFlags |= O_EXCL;
-		if (flags & OPEN_ATOMIC_WRITE_AND_CREATE) outFlags |= O_TRUNC;
+		if (flags & OPEN_READWRITE)
+			outFlags |= O_RDWR;
+		if (flags & OPEN_CREATE)
+			outFlags |= O_CREAT;
+		if (flags & OPEN_READONLY)
+			outFlags |= O_RDONLY;
+		if (flags & OPEN_EXCLUSIVE)
+			outFlags |= O_EXCL;
+		if (flags & OPEN_ATOMIC_WRITE_AND_CREATE)
+			outFlags |= O_TRUNC;
 
 		return outFlags;
 	}
 
 	ACTOR static Future<int> read_impl(SimpleFile* self, void* data, int length, int64_t offset) {
-		if ((uintptr_t)data % 4096 != 0 || length % 4096 != 0 || offset % 4096 != 0)
-			fprintf(stdout, "SFR1 %s %s %s %p %d %" PRId64 "\n", self->dbgId.shortString().c_str(),
-			        self->filename.c_str(), opId.shortString().c_str(), (uintptr_t)data, length, offset);
 		ASSERT((self->flags & IAsyncFile::OPEN_NO_AIO) != 0 ||
 		       ((uintptr_t)data % 4096 == 0 && length % 4096 == 0 && offset % 4096 == 0)); // Required by KAIO.
 		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)
-			fprintf(randLog, "SFR1 %s %s %s %d %" PRId64 "\n", self->dbgId.shortString().c_str(),
-			        self->filename.c_str(), opId.shortString().c_str(), length, offset);
+			fprintf(randLog,
+			        "SFR1 %s %s %s %d %" PRId64 "\n",
+			        self->dbgId.shortString().c_str(),
+			        self->filename.c_str(),
+			        opId.shortString().c_str(),
+			        length,
+			        offset);
 
 		wait(waitUntilDiskReady(self->diskParameters, length));
 
@@ -573,8 +605,13 @@ private:
 
 		if (randLog) {
 			uint32_t a = crc32c_append(0, (const uint8_t*)data, read_bytes);
-			fprintf(randLog, "SFR2 %s %s %s %d %d\n", self->dbgId.shortString().c_str(), self->filename.c_str(),
-			        opId.shortString().c_str(), read_bytes, a);
+			fprintf(randLog,
+			        "SFR2 %s %s %s %d %d\n",
+			        self->dbgId.shortString().c_str(),
+			        self->filename.c_str(),
+			        opId.shortString().c_str(),
+			        read_bytes,
+			        a);
 		}
 
 		debugFileCheck("SimpleFileRead", self->filename, data, offset, length);
@@ -589,11 +626,18 @@ private:
 		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog) {
 			uint32_t a = crc32c_append(0, data.begin(), data.size());
-			fprintf(randLog, "SFW1 %s %s %s %d %d %" PRId64 "\n", self->dbgId.shortString().c_str(),
-			        self->filename.c_str(), opId.shortString().c_str(), a, data.size(), offset);
+			fprintf(randLog,
+			        "SFW1 %s %s %s %d %d %" PRId64 "\n",
+			        self->dbgId.shortString().c_str(),
+			        self->filename.c_str(),
+			        opId.shortString().c_str(),
+			        a,
+			        data.size(),
+			        offset);
 		}
 
-		if (self->delayOnWrite) wait(waitUntilDiskReady(self->diskParameters, data.size()));
+		if (self->delayOnWrite)
+			wait(waitUntilDiskReady(self->diskParameters, data.size()));
 
 		if (_lseeki64(self->h, offset, SEEK_SET) == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 3);
@@ -612,7 +656,10 @@ private:
 		}
 
 		if (randLog) {
-			fprintf(randLog, "SFW2 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(),
+			fprintf(randLog,
+			        "SFW2 %s %s %s\n",
+			        self->dbgId.shortString().c_str(),
+			        self->filename.c_str(),
 			        opId.shortString().c_str());
 		}
 
@@ -627,15 +674,20 @@ private:
 	ACTOR static Future<Void> truncate_impl(SimpleFile* self, int64_t size) {
 		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)
-			fprintf(randLog, "SFT1 %s %s %s %" PRId64 "\n", self->dbgId.shortString().c_str(), self->filename.c_str(),
-			        opId.shortString().c_str(), size);
+			fprintf(randLog,
+			        "SFT1 %s %s %s %" PRId64 "\n",
+			        self->dbgId.shortString().c_str(),
+			        self->filename.c_str(),
+			        opId.shortString().c_str(),
+			        size);
 
-		if (size == 0) {
-			// KAIO will return EINVAL, as len==0 is an error.
+		// KAIO will return EINVAL, as len==0 is an error.
+		if ((self->flags & IAsyncFile::OPEN_NO_AIO) == 0 && size == 0) {
 			throw io_error();
 		}
 
-		if (self->delayOnWrite) wait(waitUntilDiskReady(self->diskParameters, 0));
+		if (self->delayOnWrite)
+			wait(waitUntilDiskReady(self->diskParameters, 0));
 
 		if (_chsize(self->h, (long)size) == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError")
@@ -648,7 +700,10 @@ private:
 		}
 
 		if (randLog)
-			fprintf(randLog, "SFT2 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(),
+			fprintf(randLog,
+			        "SFT2 %s %s %s\n",
+			        self->dbgId.shortString().c_str(),
+			        self->filename.c_str(),
 			        opId.shortString().c_str());
 
 		INJECT_FAULT(io_timeout, "SimpleFile::truncate"); // SimpleFile::truncate inject io_timeout
@@ -657,13 +712,18 @@ private:
 		return Void();
 	}
 
+	// Simulated sync does not actually do anything besides wait a random amount of time
 	ACTOR static Future<Void> sync_impl(SimpleFile* self) {
 		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)
-			fprintf(randLog, "SFC1 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(),
+			fprintf(randLog,
+			        "SFC1 %s %s %s\n",
+			        self->dbgId.shortString().c_str(),
+			        self->filename.c_str(),
 			        opId.shortString().c_str());
 
-		if (self->delayOnWrite) wait(waitUntilDiskReady(self->diskParameters, 0, true));
+		if (self->delayOnWrite)
+			wait(waitUntilDiskReady(self->diskParameters, 0, true));
 
 		if (self->flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
 			self->flags &= ~OPEN_ATOMIC_WRITE_AND_CREATE;
@@ -678,7 +738,6 @@ private:
 				    .detail("FileCount", machineCache.count(self->filename));
 				renameFile(sourceFilename.c_str(), self->filename.c_str());
 
-				ASSERT(!machineCache.count(self->filename));
 				machineCache[self->filename] = machineCache[sourceFilename];
 				machineCache.erase(sourceFilename);
 				self->actualFilename = self->filename;
@@ -686,7 +745,10 @@ private:
 		}
 
 		if (randLog)
-			fprintf(randLog, "SFC2 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(),
+			fprintf(randLog,
+			        "SFC2 %s %s %s\n",
+			        self->dbgId.shortString().c_str(),
+			        self->filename.c_str(),
 			        opId.shortString().c_str());
 
 		INJECT_FAULT(io_timeout, "SimpleFile::sync"); // SimpleFile::sync inject io_timeout
@@ -698,7 +760,10 @@ private:
 	ACTOR static Future<int64_t> size_impl(SimpleFile const* self) {
 		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)
-			fprintf(randLog, "SFS1 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(),
+			fprintf(randLog,
+			        "SFS1 %s %s %s\n",
+			        self->dbgId.shortString().c_str(),
+			        self->filename.c_str(),
 			        opId.shortString().c_str());
 
 		wait(waitUntilDiskReady(self->diskParameters, 0));
@@ -710,8 +775,12 @@ private:
 		}
 
 		if (randLog)
-			fprintf(randLog, "SFS2 %s %s %s %" PRId64 "\n", self->dbgId.shortString().c_str(), self->filename.c_str(),
-			        opId.shortString().c_str(), pos);
+			fprintf(randLog,
+			        "SFS2 %s %s %s %" PRId64 "\n",
+			        self->dbgId.shortString().c_str(),
+			        self->filename.c_str(),
+			        opId.shortString().c_str(),
+			        pos);
 		INJECT_FAULT(io_error, "SimpleFile::size"); // SimpleFile::size inject io_error
 
 		return pos;
@@ -748,7 +817,8 @@ private:
 	ACTOR static void incoming(Reference<Sim2Listener> self, double seconds, Reference<IConnection> conn) {
 		wait(g_simulator.onProcess(self->process));
 		wait(delay(seconds));
-		if (((Sim2Conn*)conn.getPtr())->isPeerGone() && deterministicRandom()->random01() < 0.5) return;
+		if (((Sim2Conn*)conn.getPtr())->isPeerGone() && deterministicRandom()->random01() < 0.5)
+			return;
 		TraceEvent("Sim2IncomingConn", conn->getDebugID())
 		    .detail("ListenAddress", self->getListenAddress())
 		    .detail("PeerAddress", conn->getPeerAddress());
@@ -807,7 +877,8 @@ public:
 		return Void();
 	}
 	Future<class Void> yield(TaskPriority taskID) override {
-		if (taskID == TaskPriority::DefaultYield) taskID = currentTaskID;
+		if (taskID == TaskPriority::DefaultYield)
+			taskID = currentTaskID;
 		if (check_yield(taskID)) {
 			// We want to check that yielders can handle actual time elapsing (it sometimes will outside simulation),
 			// but don't want to prevent instantaneous shutdown of "rebooted" machines.
@@ -817,7 +888,8 @@ public:
 		return Void();
 	}
 	bool check_yield(TaskPriority taskID) override {
-		if (yielded) return true;
+		if (yielded)
+			return true;
 		if (--yield_limit <= 0) {
 			yield_limit = deterministicRandom()->randomInt(
 			    1, 150); // If yield returns false *too* many times in a row, there could be a stack overflow, since we
@@ -984,6 +1056,7 @@ public:
 	bool isAddressOnThisHost(NetworkAddress const& addr) const override {
 		return addr.ip == getCurrentProcess()->address.ip;
 	}
+	virtual bool isAddressOnThisHost(NetworkAddress const& addr) { return addr.ip == getCurrentProcess()->address.ip; }
 
 	ACTOR static Future<Void> deleteFileImpl(Sim2* self, std::string filename, bool mustBeDurable) {
 		// This is a _rudimentary_ simulation of the untrustworthiness of non-durable deletes and the possibility of
@@ -1051,12 +1124,20 @@ public:
 		Future<Void> loopFuture = runLoop(this);
 		net2->run();
 	}
-	ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, bool sslEnabled, uint16_t listenPerProcess,
-	                        LocalityData locality, ProcessClass startingClass, const char* dataFolder,
-	                        const char* coordinationFolder, ProtocolVersion protocol) override {
+	ProcessInfo* newProcess(const char* name,
+	                        IPAddress ip,
+	                        uint16_t port,
+	                        bool sslEnabled,
+	                        uint16_t listenPerProcess,
+	                        LocalityData locality,
+	                        ProcessClass startingClass,
+	                        const char* dataFolder,
+	                        const char* coordinationFolder,
+	                        ProtocolVersion protocol) override {
 		ASSERT(locality.machineId().present());
 		MachineInfo& machine = machines[locality.machineId().get()];
-		if (!machine.machineId.present()) machine.machineId = locality.machineId();
+		if (!machine.machineId.present())
+			machine.machineId = locality.machineId();
 		for (int i = 0; i < machine.processes.size(); i++) {
 			if (machine.processes[i]->locality.machineId() !=
 			    locality.machineId()) { // SOMEDAY: compute ip from locality to avoid this check
@@ -1150,10 +1231,11 @@ public:
 		}
 
 		std::vector<LocalityData> badCombo;
-		bool primaryTLogsDead = tLogWriteAntiQuorum
-		                            ? !validateAllCombinations(badCombo, primaryProcessesDead, tLogPolicy,
-		                                                       primaryLocalitiesLeft, tLogWriteAntiQuorum, false)
-		                            : primaryProcessesDead.validate(tLogPolicy);
+		bool primaryTLogsDead =
+		    tLogWriteAntiQuorum
+		        ? !validateAllCombinations(
+		              badCombo, primaryProcessesDead, tLogPolicy, primaryLocalitiesLeft, tLogWriteAntiQuorum, false)
+		        : primaryProcessesDead.validate(tLogPolicy);
 		if (usableRegions > 1 && remoteTLogPolicy && !primaryTLogsDead) {
 			primaryTLogsDead = primaryProcessesDead.validate(remoteTLogPolicy);
 		}
@@ -1164,7 +1246,8 @@ public:
 	// The following function will determine if the specified configuration of available and dead processes can allow
 	// the cluster to survive
 	bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses,
-	                      std::vector<ProcessInfo*> const& deadProcesses, KillType kt,
+	                      std::vector<ProcessInfo*> const& deadProcesses,
+	                      KillType kt,
 	                      KillType* newKillType) const override {
 		bool canSurvive = true;
 		int nQuorum = ((desiredCoordinators + 1) / 2) * 2 - 1;
@@ -1204,11 +1287,13 @@ public:
 					} else if (processInfo->locality.dcId() == remoteDcId) {
 						remoteProcessesLeft.add(processInfo->locality);
 						remoteLocalitiesLeft.push_back(processInfo->locality);
-					} else if (std::find(primarySatelliteDcIds.begin(), primarySatelliteDcIds.end(),
+					} else if (std::find(primarySatelliteDcIds.begin(),
+					                     primarySatelliteDcIds.end(),
 					                     processInfo->locality.dcId()) != primarySatelliteDcIds.end()) {
 						primarySatelliteProcessesLeft.add(processInfo->locality);
 						primarySatelliteLocalitiesLeft.push_back(processInfo->locality);
-					} else if (std::find(remoteSatelliteDcIds.begin(), remoteSatelliteDcIds.end(),
+					} else if (std::find(remoteSatelliteDcIds.begin(),
+					                     remoteSatelliteDcIds.end(),
 					                     processInfo->locality.dcId()) != remoteSatelliteDcIds.end()) {
 						remoteSatelliteProcessesLeft.add(processInfo->locality);
 						remoteSatelliteLocalitiesLeft.push_back(processInfo->locality);
@@ -1221,11 +1306,13 @@ public:
 					} else if (processInfo->locality.dcId() == remoteDcId) {
 						remoteProcessesDead.add(processInfo->locality);
 						remoteLocalitiesDead.push_back(processInfo->locality);
-					} else if (std::find(primarySatelliteDcIds.begin(), primarySatelliteDcIds.end(),
+					} else if (std::find(primarySatelliteDcIds.begin(),
+					                     primarySatelliteDcIds.end(),
 					                     processInfo->locality.dcId()) != primarySatelliteDcIds.end()) {
 						primarySatelliteProcessesDead.add(processInfo->locality);
 						primarySatelliteLocalitiesDead.push_back(processInfo->locality);
-					} else if (std::find(remoteSatelliteDcIds.begin(), remoteSatelliteDcIds.end(),
+					} else if (std::find(remoteSatelliteDcIds.begin(),
+					                     remoteSatelliteDcIds.end(),
 					                     processInfo->locality.dcId()) != remoteSatelliteDcIds.end()) {
 						remoteSatelliteProcessesDead.add(processInfo->locality);
 						remoteSatelliteLocalitiesDead.push_back(processInfo->locality);
@@ -1235,10 +1322,11 @@ public:
 
 			bool tooManyDead = false;
 			bool notEnoughLeft = false;
-			bool primaryTLogsDead = tLogWriteAntiQuorum
-			                            ? !validateAllCombinations(badCombo, primaryProcessesDead, tLogPolicy,
-			                                                       primaryLocalitiesLeft, tLogWriteAntiQuorum, false)
-			                            : primaryProcessesDead.validate(tLogPolicy);
+			bool primaryTLogsDead =
+			    tLogWriteAntiQuorum
+			        ? !validateAllCombinations(
+			              badCombo, primaryProcessesDead, tLogPolicy, primaryLocalitiesLeft, tLogWriteAntiQuorum, false)
+			        : primaryProcessesDead.validate(tLogPolicy);
 			if (usableRegions > 1 && remoteTLogPolicy && !primaryTLogsDead) {
 				primaryTLogsDead = primaryProcessesDead.validate(remoteTLogPolicy);
 			}
@@ -1248,10 +1336,13 @@ public:
 				notEnoughLeft =
 				    !primaryProcessesLeft.validate(tLogPolicy) || !primaryProcessesLeft.validate(storagePolicy);
 			} else {
-				bool remoteTLogsDead = tLogWriteAntiQuorum
-				                           ? !validateAllCombinations(badCombo, remoteProcessesDead, tLogPolicy,
-				                                                      remoteLocalitiesLeft, tLogWriteAntiQuorum, false)
-				                           : remoteProcessesDead.validate(tLogPolicy);
+				bool remoteTLogsDead = tLogWriteAntiQuorum ? !validateAllCombinations(badCombo,
+				                                                                      remoteProcessesDead,
+				                                                                      tLogPolicy,
+				                                                                      remoteLocalitiesLeft,
+				                                                                      tLogWriteAntiQuorum,
+				                                                                      false)
+				                                           : remoteProcessesDead.validate(tLogPolicy);
 				if (usableRegions > 1 && remoteTLogPolicy && !remoteTLogsDead) {
 					remoteTLogsDead = remoteProcessesDead.validate(remoteTLogPolicy);
 				}
@@ -1279,15 +1370,21 @@ public:
 				} else {
 					bool primarySatelliteTLogsDead =
 					    satelliteTLogWriteAntiQuorumFallback
-					        ? !validateAllCombinations(badCombo, primarySatelliteProcessesDead,
-					                                   satelliteTLogPolicyFallback, primarySatelliteLocalitiesLeft,
-					                                   satelliteTLogWriteAntiQuorumFallback, false)
+					        ? !validateAllCombinations(badCombo,
+					                                   primarySatelliteProcessesDead,
+					                                   satelliteTLogPolicyFallback,
+					                                   primarySatelliteLocalitiesLeft,
+					                                   satelliteTLogWriteAntiQuorumFallback,
+					                                   false)
 					        : primarySatelliteProcessesDead.validate(satelliteTLogPolicyFallback);
 					bool remoteSatelliteTLogsDead =
 					    satelliteTLogWriteAntiQuorumFallback
-					        ? !validateAllCombinations(badCombo, remoteSatelliteProcessesDead,
-					                                   satelliteTLogPolicyFallback, remoteSatelliteLocalitiesLeft,
-					                                   satelliteTLogWriteAntiQuorumFallback, false)
+					        ? !validateAllCombinations(badCombo,
+					                                   remoteSatelliteProcessesDead,
+					                                   satelliteTLogPolicyFallback,
+					                                   remoteSatelliteLocalitiesLeft,
+					                                   satelliteTLogWriteAntiQuorumFallback,
+					                                   false)
 					        : remoteSatelliteProcessesDead.validate(satelliteTLogPolicyFallback);
 
 					if (usableRegions > 1) {
@@ -1360,7 +1457,8 @@ public:
 				    .detail("Machines", uniqueMachines.size());
 			}
 		}
-		if (newKillType) *newKillType = newKt;
+		if (newKillType)
+			*newKillType = newKt;
 		return canSurvive;
 	}
 
@@ -1448,7 +1546,8 @@ public:
 					swapAndPop(&processes, i--);
 				}
 			}
-			if (processes.size()) doReboot(deterministicRandom()->randomChoice(processes), RebootProcess);
+			if (processes.size())
+				doReboot(deterministicRandom()->randomChoice(processes), RebootProcess);
 		}
 	}
 	void killProcess(ProcessInfo* machine, KillType kt) override {
@@ -1460,7 +1559,8 @@ public:
 	void killInterface(NetworkAddress address, KillType kt) override {
 		if (kt < RebootAndDelete) {
 			std::vector<ProcessInfo*>& processes = machines[addressMap[address]->locality.machineId()].processes;
-			for (int i = 0; i < processes.size(); i++) killProcess_internal(processes[i], kt);
+			for (int i = 0; i < processes.size(); i++)
+				killProcess_internal(processes[i], kt);
 		}
 	}
 	bool killZone(Optional<Standalone<StringRef>> zoneId, KillType kt, bool forceKill, KillType* ktFinal) override {
@@ -1479,7 +1579,9 @@ public:
 		}
 		return result;
 	}
-	bool killMachine(Optional<Standalone<StringRef>> machineId, KillType kt, bool forceKill,
+	bool killMachine(Optional<Standalone<StringRef>> machineId,
+	                 KillType kt,
+	                 bool forceKill,
 	                 KillType* ktFinal) override {
 		auto ktOrig = kt;
 
@@ -1492,7 +1594,8 @@ public:
 			    .detail("MachineId", machineId)
 			    .detail("Reason", "Unforced kill within speedy simulation.")
 			    .backtrace();
-			if (ktFinal) *ktFinal = None;
+			if (ktFinal)
+				*ktFinal = None;
 			return false;
 		}
 
@@ -1501,8 +1604,10 @@ public:
 		KillType originalKt = kt;
 		// Reboot if any of the processes are protected and count the number of processes not rebooting
 		for (auto& process : machines[machineId].processes) {
-			if (protectedAddresses.count(process->address)) kt = Reboot;
-			if (!process->rebooting) processesOnMachine++;
+			if (protectedAddresses.count(process->address))
+				kt = Reboot;
+			if (!process->rebooting)
+				processesOnMachine++;
 		}
 
 		// Do nothing, if no processes to kill
@@ -1513,7 +1618,8 @@ public:
 			    .detail("Processes", processesOnMachine)
 			    .detail("ProcessesPerMachine", processesPerMachine)
 			    .backtrace();
-			if (ktFinal) *ktFinal = None;
+			if (ktFinal)
+				*ktFinal = None;
 			return false;
 		}
 
@@ -1627,7 +1733,8 @@ public:
 			    .detail("Processes", processesOnMachine)
 			    .detail("ProcessesPerMachine", processesPerMachine)
 			    .backtrace();
-			if (ktFinal) *ktFinal = None;
+			if (ktFinal)
+				*ktFinal = None;
 			return false;
 		}
 
@@ -1641,7 +1748,8 @@ public:
 			    .detail("Processes", processesOnMachine)
 			    .detail("ProcessesPerMachine", processesPerMachine)
 			    .backtrace();
-			if (ktFinal) *ktFinal = None;
+			if (ktFinal)
+				*ktFinal = None;
 			return false;
 		}
 
@@ -1664,7 +1772,8 @@ public:
 				    .detail("Excluded", process->excluded)
 				    .detail("Cleared", process->cleared)
 				    .detail("Rebooting", process->rebooting);
-				if (process->startingClass != ProcessClass::TesterClass) killProcess_internal(process, kt);
+				if (process->startingClass != ProcessClass::TesterClass)
+					killProcess_internal(process, kt);
 			}
 		} else if (kt == Reboot || kt == RebootAndDelete) {
 			for (auto& process : machines[machineId].processes) {
@@ -1676,7 +1785,8 @@ public:
 				    .detail("Excluded", process->excluded)
 				    .detail("Cleared", process->cleared)
 				    .detail("Rebooting", process->rebooting);
-				if (process->startingClass != ProcessClass::TesterClass) doReboot(process, kt);
+				if (process->startingClass != ProcessClass::TesterClass)
+					doReboot(process, kt);
 			}
 		}
 
@@ -1685,7 +1795,8 @@ public:
 		TEST(kt == KillInstantly); // Resulted in an instant kill
 		TEST(kt == InjectFaults); // Resulted in a kill by injecting faults
 
-		if (ktFinal) *ktFinal = kt;
+		if (ktFinal)
+			*ktFinal = kt;
 		return true;
 	}
 
@@ -1804,7 +1915,8 @@ public:
 		TEST((kt == ktMin) && (kt != ktOrig)); // Datacenter Kill request was downgraded
 		TEST((kt == ktMin) && (kt == ktOrig)); // Datacenter kill - Requested kill was done
 
-		if (ktFinal) *ktFinal = ktMin;
+		if (ktFinal)
+			*ktFinal = ktMin;
 
 		return (kt == ktMin);
 	}
@@ -1821,12 +1933,15 @@ public:
 		TraceEvent("ClogInterface")
 		    .detail("IP", ip.toString())
 		    .detail("Delay", seconds)
-		    .detail("Queue", mode == ClogSend      ? "Send"
-		                     : mode == ClogReceive ? "Receive"
-		                                           : "All");
+		    .detail("Queue",
+		            mode == ClogSend      ? "Send"
+		            : mode == ClogReceive ? "Receive"
+		                                  : "All");
 
-		if (mode == ClogSend || mode == ClogAll) g_clogging.clogSendFor(ip, seconds);
-		if (mode == ClogReceive || mode == ClogAll) g_clogging.clogRecvFor(ip, seconds);
+		if (mode == ClogSend || mode == ClogAll)
+			g_clogging.clogSendFor(ip, seconds);
+		if (mode == ClogReceive || mode == ClogAll)
+			g_clogging.clogRecvFor(ip, seconds);
 	}
 	void clogPair(const IPAddress& from, const IPAddress& to, double seconds) override {
 		g_clogging.clogPairFor(from, to, seconds);
@@ -1870,9 +1985,14 @@ public:
 	Sim2()
 	  : time(0.0), timerTime(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(TaskPriority::Zero) {
 		// Not letting currentProcess be nullptr eliminates some annoying special cases
-		currentProcess = new ProcessInfo(
-		    "NoMachine", LocalityData(Optional<Standalone<StringRef>>(), StringRef(), StringRef(), StringRef()),
-		    ProcessClass(), { NetworkAddress() }, this, "", "");
+		currentProcess =
+		    new ProcessInfo("NoMachine",
+		                    LocalityData(Optional<Standalone<StringRef>>(), StringRef(), StringRef(), StringRef()),
+		                    ProcessClass(),
+		                    { NetworkAddress() },
+		                    this,
+		                    "",
+		                    "");
 		g_network = net2 = newNet2(TLSConfig(), false, true);
 		g_network->addStopCallback(Net2FileSystem::stop);
 		Net2FileSystem::newFileSystem();
@@ -1914,7 +2034,8 @@ public:
 
 		bool operator<(Task const& rhs) const {
 			// Ordering is reversed for priority_queue
-			if (time != rhs.time) return time > rhs.time;
+			if (time != rhs.time)
+				return time > rhs.time;
 			return stable > rhs.stable;
 		}
 	};
@@ -1938,8 +2059,12 @@ public:
 			}
 
 			if (randLog)
-				fprintf(randLog, "T %f %d %s %" PRId64 "\n", this->time, int(deterministicRandom()->peek() % 10000),
-				        t.machine ? t.machine->name : "none", t.stable);
+				fprintf(randLog,
+				        "T %f %d %s %" PRId64 "\n",
+				        this->time,
+				        int(deterministicRandom()->peek() % 10000),
+				        t.machine ? t.machine->name : "none",
+				        t.stable);
 		}
 	}
 
@@ -1958,7 +2083,8 @@ public:
 		return delay(0, taskID, process);
 	}
 	Future<Void> onMachine(ISimulator::ProcessInfo* process, TaskPriority taskID) override {
-		if (process->machine == 0) return Void();
+		if (process->machine == 0)
+			return Void();
 		return delay(0, taskID, process->machine->machineProcess);
 	}
 
@@ -2020,7 +2146,9 @@ class UDPSimSocket : public IUDPSocket, ReferenceCounted<UDPSimSocket> {
 		return Void();
 	}
 
-	ACTOR static Future<Void> send(UDPSimSocket* self, Reference<UDPSimSocket> peerSocket, uint8_t const* begin,
+	ACTOR static Future<Void> send(UDPSimSocket* self,
+	                               Reference<UDPSimSocket> peerSocket,
+	                               uint8_t const* begin,
 	                               uint8_t const* end) {
 		state Packet packet(std::make_shared<std::vector<uint8_t>>());
 		packet->resize(end - begin);
@@ -2221,7 +2349,8 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 		    kt ==
 		    ISimulator::RebootProcessAndDelete); // Simulated process rebooted with data and coordination state deletion
 
-		if (p->rebooting || !p->isReliable()) return;
+		if (p->rebooting || !p->isReliable())
+			return;
 		TraceEvent("RebootingProcess")
 		    .detail("KillType", kt)
 		    .detail("Address", p->address)
@@ -2250,9 +2379,11 @@ Future<Void> waitUntilDiskReady(Reference<DiskParameters> diskParameters, int64_
 	if (g_simulator.getCurrentProcess()->failedDisk) {
 		return Never();
 	}
-	if (g_simulator.connectionFailuresDisableDuration > 1e4) return delay(0.0001);
+	if (g_simulator.connectionFailuresDisableDuration > 1e4)
+		return delay(0.0001);
 
-	if (diskParameters->nextOperation < now()) diskParameters->nextOperation = now();
+	if (diskParameters->nextOperation < now())
+		diskParameters->nextOperation = now();
 	diskParameters->nextOperation += (1.0 / diskParameters->iops) + (size / diskParameters->bandwidth);
 
 	double randomLatency;
@@ -2273,12 +2404,15 @@ Future<Void> waitUntilDiskReady(Reference<DiskParameters> diskParameters, int64_
 #include <Windows.h>
 
 int sf_open(const char* filename, int flags, int convFlags, int mode) {
-	HANDLE wh = CreateFile(filename, GENERIC_READ | ((flags & IAsyncFile::OPEN_READWRITE) ? GENERIC_WRITE : 0),
-	                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+	HANDLE wh = CreateFile(filename,
+	                       GENERIC_READ | ((flags & IAsyncFile::OPEN_READWRITE) ? GENERIC_WRITE : 0),
+	                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+	                       nullptr,
 	                       (flags & IAsyncFile::OPEN_EXCLUSIVE) ? CREATE_NEW
 	                       : (flags & IAsyncFile::OPEN_CREATE)  ? OPEN_ALWAYS
 	                                                            : OPEN_EXISTING,
-	                       FILE_ATTRIBUTE_NORMAL, nullptr);
+	                       FILE_ATTRIBUTE_NORMAL,
+	                       nullptr);
 	int h = -1;
 	if (wh != INVALID_HANDLE_VALUE)
 		h = _open_osfhandle((intptr_t)wh, convFlags);
@@ -2296,31 +2430,35 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 	           LiteralStringRef(".fdb-lock"))); // We don't use "ordinary" non-atomic file creation right now except for
 	                                            // folder locking, and we don't have code to simulate its unsafeness.
 
-	if ((flags & IAsyncFile::OPEN_EXCLUSIVE)) ASSERT(flags & IAsyncFile::OPEN_CREATE);
+	if ((flags & IAsyncFile::OPEN_EXCLUSIVE))
+		ASSERT(flags & IAsyncFile::OPEN_CREATE);
 
 	if (flags & IAsyncFile::OPEN_UNCACHED) {
 		auto& machineCache = g_simulator.getCurrentProcess()->machine->openFiles;
 		std::string actualFilename = filename;
-		if (machineCache.find(filename) == machineCache.end()) {
-			if (flags & IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE) {
-				actualFilename = filename + ".part";
-				auto partFile = machineCache.find(actualFilename);
-				if (partFile != machineCache.end()) {
-					Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open(partFile->second);
-					if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
-						f = map(f, [=](Reference<IAsyncFile> r) {
-							return Reference<IAsyncFile>(new AsyncFileWriteChecker(r));
-						});
-					return f;
-				}
+		if (flags & IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE) {
+			actualFilename = filename + ".part";
+			auto partFile = machineCache.find(actualFilename);
+			if (partFile != machineCache.end()) {
+				Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open(partFile->second);
+				if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
+					f = map(f, [=](Reference<IAsyncFile> r) {
+						return Reference<IAsyncFile>(new AsyncFileWriteChecker(r));
+					});
+				return f;
 			}
+		}
+		if (machineCache.find(actualFilename) == machineCache.end()) {
 			// Simulated disk parameters are shared by the AsyncFileNonDurable and the underlying SimpleFile.
 			// This way, they can both keep up with the time to start the next operation
 			auto diskParameters =
 			    makeReference<DiskParameters>(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH);
-			machineCache[actualFilename] = AsyncFileNonDurable::open(
-			    filename, actualFilename, SimpleFile::open(filename, flags, mode, diskParameters, false),
-			    diskParameters);
+			machineCache[actualFilename] =
+			    AsyncFileNonDurable::open(filename,
+			                              actualFilename,
+			                              SimpleFile::open(filename, flags, mode, diskParameters, false),
+			                              diskParameters,
+			                              (flags & IAsyncFile::OPEN_NO_AIO) == 0);
 		}
 		Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open(machineCache[actualFilename]);
 		if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
@@ -2334,6 +2472,17 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 // failure.
 Future<Void> Sim2FileSystem::deleteFile(const std::string& filename, bool mustBeDurable) {
 	return Sim2::deleteFileImpl(&g_sim2, filename, mustBeDurable);
+}
+
+ACTOR Future<Void> renameFileImpl(std::string from, std::string to) {
+	wait(delay(0.5 * deterministicRandom()->random01()));
+	::renameFile(from, to);
+	wait(delay(0.5 * deterministicRandom()->random01()));
+	return Void();
+}
+
+Future<Void> Sim2FileSystem::renameFile(std::string const& from, std::string const& to) {
+	return renameFileImpl(from, to);
 }
 
 Future<std::time_t> Sim2FileSystem::lastWriteTime(const std::string& filename) {
