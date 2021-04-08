@@ -1058,14 +1058,8 @@ public:
 	RecruitFromConfigurationReply findWorkersForConfiguration(RecruitFromConfigurationRequest const& req) {
 		if (req.configuration.regions.size() > 1) {
 			std::vector<RegionInfo> regions = req.configuration.regions;
-			if (regions[1].dcId == clusterControllerDcId.get()) {
-				if (regions[1].priority == regions[0].priority) {
-					std::swap(regions[0], regions[1]);
-				}
-			} else {
-				TraceEvent(SevWarn, "DcPriorityUnmatch")
-				    .detail("DcId", regions[1].dcId)
-				    .detail("Priority", regions[1].priority);
+			if (regions[0].priority == regions[1].priority && regions[1].dcId == clusterControllerDcId.get()) {
+				std::swap(regions[0], regions[1]);
 			}
 
 			if (regions[1].dcId == clusterControllerDcId.get() && regions[1].priority >= 0 &&
