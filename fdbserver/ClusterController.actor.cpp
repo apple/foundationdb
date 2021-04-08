@@ -1033,7 +1033,7 @@ public:
 
 		// If one of the first process recruitments is forced to share a process, allow all of next recruitments
 		// to also share a process.
-		auto maxUsed = std::max(std::max(first_commit_proxy.used, first_grv_proxy.used), first_resolver.used);
+		auto maxUsed = std::max({ first_commit_proxy.used, first_grv_proxy.used, first_resolver.used });
 		first_commit_proxy.used = maxUsed;
 		first_grv_proxy.used = maxUsed;
 		first_resolver.used = maxUsed;
@@ -1225,8 +1225,7 @@ public:
 
 					// If one of the first process recruitments is forced to share a process, allow all of next
 					// recruitments to also share a process.
-					auto maxUsed =
-					    std::max(std::max(first_commit_proxy.used, first_grv_proxy.used), first_resolver.used);
+					auto maxUsed = std::max({ first_commit_proxy.used, first_grv_proxy.used, first_resolver.used });
 					first_commit_proxy.used = maxUsed;
 					first_grv_proxy.used = maxUsed;
 					first_resolver.used = maxUsed;
@@ -1424,7 +1423,7 @@ public:
 		// Do not trigger better master exists if the cluster controller is excluded, since the master will change
 		// anyways once the cluster controller is moved
 		if (id_worker[clusterControllerProcessId].priorityInfo.isExcluded) {
-			TraceEvent("WorseMasterExists", id).detail("Reason", "ClusterControllerExcluded");
+			TraceEvent("NewRecruitmentIsWorse", id).detail("Reason", "ClusterControllerExcluded");
 			return false;
 		}
 
@@ -1437,7 +1436,7 @@ public:
 		// Get master process
 		auto masterWorker = id_worker.find(dbi.master.locality.processId());
 		if (masterWorker == id_worker.end()) {
-			TraceEvent("WorseMasterExists", id)
+			TraceEvent("NewRecruitmentIsWorse", id)
 			    .detail("Reason", "CannotFindMaster")
 			    .detail("ProcessID", dbi.master.locality.processId());
 			return false;
@@ -1456,7 +1455,7 @@ public:
 			for (auto& it : logSet.tLogs) {
 				auto tlogWorker = id_worker.find(it.interf().filteredLocality.processId());
 				if (tlogWorker == id_worker.end()) {
-					TraceEvent("WorseMasterExists", id)
+					TraceEvent("NewRecruitmentIsWorse", id)
 					    .detail("Reason", "CannotFindTLog")
 					    .detail("ProcessID", it.interf().filteredLocality.processId());
 					return false;
@@ -1480,7 +1479,7 @@ public:
 			for (auto& it : logSet.logRouters) {
 				auto tlogWorker = id_worker.find(it.interf().filteredLocality.processId());
 				if (tlogWorker == id_worker.end()) {
-					TraceEvent("WorseMasterExists", id)
+					TraceEvent("NewRecruitmentIsWorse", id)
 					    .detail("Reason", "CannotFindLogRouter")
 					    .detail("ProcessID", it.interf().filteredLocality.processId());
 					return false;
@@ -1500,7 +1499,7 @@ public:
 			for (const auto& worker : logSet.backupWorkers) {
 				auto workerIt = id_worker.find(worker.interf().locality.processId());
 				if (workerIt == id_worker.end()) {
-					TraceEvent("WorseMasterExists", id)
+					TraceEvent("NewRecruitmentIsWorse", id)
 					    .detail("Reason", "CannotFindBackupWorker")
 					    .detail("ProcessID", worker.interf().locality.processId());
 					return false;
@@ -1523,7 +1522,7 @@ public:
 		for (auto& it : dbi.client.commitProxies) {
 			auto commitProxyWorker = id_worker.find(it.processId);
 			if (commitProxyWorker == id_worker.end()) {
-				TraceEvent("WorseMasterExists", id)
+				TraceEvent("NewRecruitmentIsWorse", id)
 				    .detail("Reason", "CannotFindCommitProxy")
 				    .detail("ProcessID", it.processId);
 				return false;
@@ -1542,7 +1541,7 @@ public:
 		for (auto& it : dbi.client.grvProxies) {
 			auto grvProxyWorker = id_worker.find(it.processId);
 			if (grvProxyWorker == id_worker.end()) {
-				TraceEvent("WorseMasterExists", id)
+				TraceEvent("NewRecruitmentIsWorse", id)
 				    .detail("Reason", "CannotFindGrvProxy")
 				    .detail("ProcessID", it.processId);
 				return false;
@@ -1561,7 +1560,7 @@ public:
 		for (auto& it : dbi.resolvers) {
 			auto resolverWorker = id_worker.find(it.locality.processId());
 			if (resolverWorker == id_worker.end()) {
-				TraceEvent("WorseMasterExists", id)
+				TraceEvent("NewRecruitmentIsWorse", id)
 				    .detail("Reason", "CannotFindResolver")
 				    .detail("ProcessID", it.locality.processId());
 				return false;
@@ -1596,7 +1595,7 @@ public:
 
 		old_id_used[masterWorker->first]++;
 		if (oldMasterFit < newMasterFit) {
-			TraceEvent("WorseMasterExists", id)
+			TraceEvent("NewRecruitmentIsWorse", id)
 			    .detail("OldMasterFit", oldMasterFit)
 			    .detail("NewMasterFit", newMasterFit)
 			    .detail("OldIsCC", dbi.master.locality.processId() == clusterControllerProcessId)
@@ -1700,7 +1699,7 @@ public:
 			return true;
 		}
 		if (!oldSatelliteFallback && newSatelliteFallback) {
-			TraceEvent("WorseMasterExists", id)
+			TraceEvent("NewRecruitmentIsWorse", id)
 			    .detail("OldSatelliteFallback", oldSatelliteFallback)
 			    .detail("NewSatelliteFallback", newSatelliteFallback);
 			return false;
@@ -1713,7 +1712,7 @@ public:
 			return true;
 		}
 		if (oldSatelliteRegionFit > newSatelliteRegionFit) {
-			TraceEvent("WorseMasterExists", id)
+			TraceEvent("NewRecruitmentIsWorse", id)
 			    .detail("OldSatelliteRegionFit", oldSatelliteRegionFit)
 			    .detail("NewSatelliteRegionFit", newSatelliteRegionFit);
 			return false;
@@ -1782,7 +1781,7 @@ public:
 		    clusterControllerDcId, ProcessClass::GrvProxy, ProcessClass::ExcludeFit, db.config, id_used, true);
 		auto first_resolver = getWorkerForRoleInDatacenter(
 		    clusterControllerDcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, true);
-		auto maxUsed = std::max(std::max(first_commit_proxy.used, first_grv_proxy.used), first_resolver.used);
+		auto maxUsed = std::max({ first_commit_proxy.used, first_grv_proxy.used, first_resolver.used });
 		first_commit_proxy.used = maxUsed;
 		first_grv_proxy.used = maxUsed;
 		first_resolver.used = maxUsed;
@@ -1870,7 +1869,7 @@ public:
 		}
 
 		if (oldFit < newFit) {
-			TraceEvent("WorseMasterExists", id)
+			TraceEvent("NewRecruitmentIsWorse", id)
 			    .detail("OldMasterFit", oldMasterFit)
 			    .detail("NewMasterFit", newMasterFit)
 			    .detail("OldTLogFit", oldTLogFit.toString())
