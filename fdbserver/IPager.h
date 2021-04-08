@@ -58,6 +58,7 @@ public:
 
 	virtual void addref() const = 0;
 	virtual void delref() const = 0;
+	virtual void printrefcnt() const = 0;
 
 	mutable void* userData;
 	mutable void (*userDataDestructor)(void*);
@@ -86,10 +87,14 @@ public:
 	// For a given pager instance, separate calls to this function must return the same value.
 	// Only valid to call after recovery is complete.
 	virtual int getUsablePageSize() const = 0;
+	virtual int getPhysicalPageSize() const = 0;
+	virtual int getPhysicalExtentSize() const = 0;
 
 	// Allocate a new page ID for a subsequent write.  The page will be considered in-use after the next commit
 	// regardless of whether or not it was written to.
 	virtual Future<LogicalPageID> newPageID() = 0;
+
+	virtual Future<LogicalPageID> newExtentPageID() = 0;
 
 	// Replace the contents of a page with new data across *all* versions.
 	// Existing holders of a page reference for pageID, read from any version,
@@ -105,6 +110,8 @@ public:
 	// Free pageID to be used again after the commit that moves oldestVersion past v
 	virtual void freePage(LogicalPageID pageID, Version v) = 0;
 
+	virtual void freeExtent(LogicalPageID pageID) = 0;
+
 	// If id is remapped, delete the original as of version v and return the page it was remapped to.  The caller
 	// is then responsible for referencing and deleting the returned page ID.
 	virtual LogicalPageID detachRemappedPage(LogicalPageID id, Version v) = 0;
@@ -117,6 +124,7 @@ public:
 	// NoHit indicates that the read should not be considered a cache hit, such as when preloading pages that are
 	// considered likely to be needed soon.
 	virtual Future<Reference<IPage>> readPage(LogicalPageID pageID, bool cacheable = true, bool noHit = false) = 0;
+	virtual Future<Reference<IPage>> readExtent(LogicalPageID pageID) = 0;
 
 	// Get a snapshot of the metakey and all pages as of the version v which must be >= getOldestVersion()
 	// Note that snapshots at any version may still see the results of updatePage() calls.
@@ -136,6 +144,8 @@ public:
 	virtual void setCommitVersion(Version v) = 0;
 
 	virtual StorageBytes getStorageBytes() const = 0;
+
+	virtual int64_t getPageCount() = 0;
 
 	// Count of pages in use by the pager client (including retained old page versions)
 	virtual Future<int64_t> getUserPageCount() = 0;

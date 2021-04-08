@@ -527,6 +527,8 @@ private:
 	}
 
 	ACTOR static Future<int> read_impl( SimpleFile* self, void* data, int length, int64_t offset ) {
+		if( (uintptr_t)data % 4096 != 0 || length % 4096 != 0 || offset % 4096 != 0 )
+fprintf( stdout, "SFR1 %s %s %s %p %d %" PRId64 "\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), (uintptr_t)data, length, offset );
 		ASSERT( ( self->flags & IAsyncFile::OPEN_NO_AIO ) != 0 ||
 		        ( (uintptr_t)data % 4096 == 0 && length % 4096 == 0 && offset % 4096 == 0 ) );  // Required by KAIO.
 		state UID opId = deterministicRandom()->randomUniqueID();
