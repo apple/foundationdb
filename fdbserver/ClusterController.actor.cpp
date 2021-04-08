@@ -426,12 +426,12 @@ public:
 			auto fitness = std::get<0>(workerIter->first);
 			auto used = std::get<1>(workerIter->first);
 			if (fitness > requiredFitness || used > requiredUsed) {
-				requiredFitness = fitness;
-				requiredUsed = used;
 				if (logServerSet->size() >= required && logServerSet->validate(policy)) {
 					bCompleted = true;
 					break;
 				}
+				requiredFitness = fitness;
+				requiredUsed = used;
 			}
 
 			if (std::get<2>(workerIter->first)) {
@@ -501,12 +501,12 @@ public:
 			for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
 				auto fitness = std::get<0>(workerIter->first);
 				auto used = std::get<1>(workerIter->first);
+				if (fitness > requiredFitness || (fitness == requiredFitness && used > requiredUsed)) {
+					break;
+				}
 				auto addingDegraded = std::get<2>(workerIter->first);
 				if (addingDegraded) {
 					continue;
-				}
-				if (fitness > requiredFitness || (fitness == requiredFitness && used > requiredUsed)) {
-					break;
 				}
 				for (auto& worker : workerIter->second) {
 					logServerMap->add(worker.interf.locality, &worker);
@@ -524,13 +524,13 @@ public:
 			for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
 				auto fitness = std::get<0>(workerIter->first);
 				auto used = std::get<1>(workerIter->first);
+				if (fitness > requiredFitness || (fitness == requiredFitness && used > requiredUsed)) {
+					break;
+				}
 				auto addingDegraded = std::get<2>(workerIter->first);
 				auto inCCDC = std::get<3>(workerIter->first);
 				if (inCCDC || (!requiredDegraded && addingDegraded)) {
 					continue;
-				}
-				if (fitness > requiredFitness || (fitness == requiredFitness && used > requiredUsed)) {
-					break;
 				}
 				for (auto& worker : workerIter->second) {
 					logServerMap->add(worker.interf.locality, &worker);
@@ -545,13 +545,13 @@ public:
 		for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
 			auto fitness = std::get<0>(workerIter->first);
 			auto used = std::get<1>(workerIter->first);
+			if (fitness > requiredFitness || (fitness == requiredFitness && used > requiredUsed)) {
+				break;
+			}
 			auto addingDegraded = std::get<2>(workerIter->first);
 			auto inCCDC = std::get<3>(workerIter->first);
 			if ((!requiredInCCDC && inCCDC) || (!requiredDegraded && addingDegraded)) {
 				continue;
-			}
-			if (fitness > requiredFitness || (fitness == requiredFitness && used > requiredUsed)) {
-				break;
 			}
 			for (auto& worker : workerIter->second) {
 				logServerMap->add(worker.interf.locality, &worker);
