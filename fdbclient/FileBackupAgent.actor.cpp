@@ -3192,6 +3192,154 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 StringRef RestoreRangeTaskFunc::name = LiteralStringRef("restore_range_data");
 REGISTER_TASKFUNC(RestoreRangeTaskFunc);
 
+// Decodes a mutation log key, which contains (hash, commitVersion, chunkNumber) and
+// returns (commitVersion, chunkNumber)
+std::pair<Version, int32_t> decodeLogKey(const StringRef& key) {
+	ASSERT(key.size() == sizeof(uint8_t) + sizeof(Version) + sizeof(int32_t));
+
+	uint8_t hash;
+	Version version;
+	int32_t part;
+	BinaryReader rd(key, Unversioned());
+	rd >> hash >> version >> part;
+	version = bigEndian64(version);
+	part = bigEndian32(part);
+
+	int32_t v = version / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
+	ASSERT(((uint8_t)hashlittle(&v, sizeof(v), 0)) == hash);
+
+	return std::make_pair(version, part);
+}
+
+// Decodes an encoded list of mutations in the format of:
+//   [includeVersion:uint64_t][val_length:uint32_t][mutation_1][mutation_2]...[mutation_k],
+// where a mutation is encoded as:
+//   [type:uint32_t][keyLength:uint32_t][valueLength:uint32_t][param1][param2]
+std::vector<MutationRef> decodeLogValue(const StringRef& value) {
+	StringRefReader reader(value, restore_corrupted_data());
+
+	Version protocolVersion = reader.consume<uint64_t>();
+	if (protocolVersion <= 0x0FDB00A200090001) {
+		throw incompatible_protocol_version();
+	}
+
+	uint32_t val_length = reader.consume<uint32_t>();
+	if (val_length != value.size() - sizeof(uint64_t) - sizeof(uint32_t)) {
+		TraceEvent(SevError, "FileRestoreLogValueError")
+		    .detail("ValueLen", val_length)
+		    .detail("ValueSize", value.size())
+		    .detail("Value", printable(value));
+	}
+
+	std::vector<MutationRef> mutations;
+	while (1) {
+		if (reader.eof())
+			break;
+
+		// Deserialization of a MutationRef, which was packed by MutationListRef::push_back_deep()
+		uint32_t type, p1len, p2len;
+		type = reader.consume<uint32_t>();
+		p1len = reader.consume<uint32_t>();
+		p2len = reader.consume<uint32_t>();
+
+		const uint8_t* key = reader.consume(p1len);
+		const uint8_t* val = reader.consume(p2len);
+
+		mutations.emplace_back((MutationRef::Type)type, StringRef(key, p1len), StringRef(val, p2len));
+	}
+	return mutations;
+}
+
+// Accumulates mutation log value chunks, as both a vector of chunks and as a combined chunk,
+// in chunk order, and can check the chunk set for completion or intersection with a set
+// of ranges.
+struct AccumulatedMutations {
+	AccumulatedMutations() : lastChunkNumber(-1) {}
+
+	// Add a KV pair for this mutation chunk set
+	// It will be accumulated onto serializedMutations if the chunk number is
+	// the next expected value.
+	void addChunk(int chunkNumber, const KeyValueRef& kv) {
+		if (chunkNumber == lastChunkNumber + 1) {
+			lastChunkNumber = chunkNumber;
+			serializedMutations += kv.value.toString();
+		} else {
+			lastChunkNumber = -2;
+			serializedMutations.clear();
+		}
+		kvs.push_back(kv);
+	}
+
+	// Returns true if both
+	//   - 1 or more chunks were added to this set
+	//   - The header of the first chunk contains a valid protocol version and a length
+	//     that matches the bytes after the header in the combined value in serializedMutations
+	bool isComplete() const {
+		if (lastChunkNumber >= 0) {
+			StringRefReader reader(serializedMutations, restore_corrupted_data());
+
+			Version protocolVersion = reader.consume<uint64_t>();
+			if (protocolVersion <= 0x0FDB00A200090001) {
+				throw incompatible_protocol_version();
+			}
+
+			uint32_t vLen = reader.consume<uint32_t>();
+			return vLen == reader.remainder().size();
+		}
+
+		return false;
+	}
+
+	// Returns true if a complete chunk contains any MutationRefs which intersect with any
+	// range in ranges.
+	// It is undefined behavior to run this if isComplete() does not return true.
+	bool matchesAnyRange(const std::vector<KeyRange>& ranges) const {
+		std::vector<MutationRef> mutations = decodeLogValue(serializedMutations);
+		for (auto& m : mutations) {
+			for (auto& r : ranges) {
+				if (m.type == MutationRef::ClearRange) {
+					if (r.intersects(KeyRangeRef(m.param1, m.param2))) {
+						return true;
+					}
+				} else {
+					if (r.contains(m.param1)) {
+						return true;
+					}
+				}
+			}
+		}
+
+		return false;
+	}
+
+	std::vector<KeyValueRef> kvs;
+	std::string serializedMutations;
+	int lastChunkNumber;
+};
+
+// Returns a vector of filtered KV refs from data which are either part of incomplete mutation groups OR complete
+// and have data relevant to one of the KV ranges in ranges
+std::vector<KeyValueRef> filterLogMutationKVPairs(VectorRef<KeyValueRef> data, const std::vector<KeyRange>& ranges) {
+	std::unordered_map<Version, AccumulatedMutations> mutationBlocksByVersion;
+
+	for (auto& kv : data) {
+		auto versionAndChunkNumber = decodeLogKey(kv.key);
+		mutationBlocksByVersion[versionAndChunkNumber.first].addChunk(versionAndChunkNumber.second, kv);
+	}
+
+	std::vector<KeyValueRef> output;
+
+	for (auto& vb : mutationBlocksByVersion) {
+		AccumulatedMutations& m = vb.second;
+
+		// If the mutations are incomplete or match one of the ranges, include in results.
+		if (!m.isComplete() || m.matchesAnyRange(ranges)) {
+			output.insert(output.end(), m.kvs.begin(), m.kvs.end());
+		}
+	}
+
+	return output;
+}
 struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 	static StringRef name;
 	static constexpr uint32_t version = 1;
@@ -3223,6 +3371,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state Reference<IBackupContainer> bc;
+		state std::vector<KeyRange> ranges;
 
 		loop {
 			try {
@@ -3231,6 +3380,8 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 
 				Reference<IBackupContainer> _bc = wait(restore.sourceContainer().getOrThrow(tr));
 				bc = _bc;
+
+				wait(store(ranges, restore.getRestoreRangesOrDefault(tr)));
 
 				wait(checkTaskVersion(tr->getDatabase(), task, name, version));
 				wait(taskBucket->keepRunning(tr, task));
@@ -3243,10 +3394,14 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 
 		state Key mutationLogPrefix = restore.mutationLogPrefix();
 		state Reference<IAsyncFile> inFile = wait(bc->readFile(logFile.fileName));
-		state Standalone<VectorRef<KeyValueRef>> data = wait(decodeLogFileBlock(inFile, readOffset, readLen));
+		state Standalone<VectorRef<KeyValueRef>> dataOriginal = wait(decodeLogFileBlock(inFile, readOffset, readLen));
+
+		// Filter the KV pairs extracted from the log file block to remove any records known to not be needed for this
+		// restore based on the restore range set.
+		state std::vector<KeyValueRef> dataFiltered = filterLogMutationKVPairs(dataOriginal, ranges);
 
 		state int start = 0;
-		state int end = data.size();
+		state int end = dataFiltered.size();
 		state int dataSizeLimit =
 		    BUGGIFY ? deterministicRandom()->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
@@ -3262,8 +3417,8 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 				state int i = start;
 				state int txBytes = 0;
 				for (; i < end && txBytes < dataSizeLimit; ++i) {
-					Key k = data[i].key.withPrefix(mutationLogPrefix);
-					ValueRef v = data[i].value;
+					Key k = dataFiltered[i].key.withPrefix(mutationLogPrefix);
+					ValueRef v = dataFiltered[i].value;
 					tr->set(k, v);
 					txBytes += k.expectedSize();
 					txBytes += v.expectedSize();
@@ -3291,7 +3446,8 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 				    .detail("CommitVersion", tr->getCommittedVersion())
 				    .detail("StartIndex", start)
 				    .detail("EndIndex", i)
-				    .detail("DataSize", data.size())
+				    .detail("RecordCountOriginal", dataOriginal.size())
+				    .detail("RecordCountFiltered", dataFiltered.size())
 				    .detail("Bytes", txBytes)
 				    .detail("TaskInstance", THIS_ADDR);
 
@@ -3845,6 +4001,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		static TaskParam<Version> firstVersion() { return LiteralStringRef(__FUNCTION__); }
 	} Params;
 
+	// Find all files needed for the restore and save them in the RestoreConfig for the task.
+	// Update the total number of files and blocks and change state to starting.
 	ACTOR static Future<Void> _execute(Database cx,
 	                                   Reference<TaskBucket> taskBucket,
 	                                   Reference<FutureBucket> futureBucket,
@@ -3854,6 +4012,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		state Version restoreVersion;
 		state Version beginVersion;
 		state Reference<IBackupContainer> bc;
+		state std::vector<KeyRange> ranges;
 
 		loop {
 			try {
@@ -3861,10 +4020,12 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				wait(checkTaskVersion(tr->getDatabase(), task, name, version));
-				Version _restoreVersion = wait(restore.restoreVersion().getOrThrow(tr));
-				restoreVersion = _restoreVersion;
 				Optional<Version> _beginVersion = wait(restore.beginVersion().get(tr));
 				beginVersion = _beginVersion.present() ? _beginVersion.get() : invalidVersion;
+
+				wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
+				wait(store(ranges, restore.getRestoreRangesOrDefault(tr)));
+
 				wait(taskBucket->keepRunning(tr, task));
 
 				ERestoreState oldState = wait(restore.stateEnum().getD(tr));
@@ -3909,13 +4070,18 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				wait(tr->onError(e));
 			}
 		}
+
 		Optional<bool> _incremental = wait(restore.incrementalBackupOnly().get(tr));
 		state bool incremental = _incremental.present() ? _incremental.get() : false;
 		if (beginVersion == invalidVersion) {
 			beginVersion = 0;
 		}
+		state Standalone<VectorRef<KeyRangeRef>> keyRangesFilter;
+		for (auto const& r : ranges) {
+			keyRangesFilter.push_back_deep(keyRangesFilter.arena(), KeyRangeRef(r));
+		}
 		Optional<RestorableFileSet> restorable =
-		    wait(bc->getRestoreSet(restoreVersion, VectorRef<KeyRangeRef>(), incremental, beginVersion));
+		    wait(bc->getRestoreSet(restoreVersion, keyRangesFilter, incremental, beginVersion));
 		if (!incremental) {
 			beginVersion = restorable.get().snapshot.beginVersion;
 		}
@@ -3934,8 +4100,10 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
 		}
 
-		for (const LogFile& f : restorable.get().logs) {
-			files.push_back({ f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion });
+		if (!CLIENT_KNOBS->RESTORE_IGNORE_LOG_FILES) {
+			for (const LogFile& f : restorable.get().logs) {
+				files.push_back({ f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion });
+			}
 		}
 
 		state std::vector<RestoreConfig::RestoreFile>::iterator start = files.begin();
@@ -5034,6 +5202,24 @@ public:
 		return r;
 	}
 
+	// Submits the restore request to the database and throws "restore_invalid_version" error if
+	// restore is not possible. Parameters:
+	//   cx: the database to be restored to
+	//   cxOrig: if present, is used to resolve the restore timestamp into a version.
+	//   tagName: restore tag
+	//   url: the backup container's URL that contains all backup files
+	//   ranges: the restored key ranges; if empty, restore all key ranges in the backup
+	//   waitForComplete: if set, wait until the restore is completed before returning; otherwise,
+	//                    return when the request is submitted to the database.
+	//   targetVersion: the version to be restored.
+	//   verbose: print verbose information.
+	//   addPrefix: each key is added this prefix during restore.
+	//   removePrefix: for each key to be restored, remove this prefix first.
+	//   lockDB: if set lock the database with randomUid before performing restore;
+	//           otherwise, check database is locked with the randomUid
+	//   incrementalBackupOnly: only perform incremental backup
+	//   beginVersion: restore's begin version
+	//   randomUid: the UID for lock the database
 	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent,
 	                                     Database cx,
 	                                     Optional<Database> cxOrig,
@@ -5065,7 +5251,7 @@ public:
 		}
 
 		Optional<RestorableFileSet> restoreSet =
-		    wait(bc->getRestoreSet(targetVersion, VectorRef<KeyRangeRef>(), incrementalBackupOnly, beginVersion));
+		    wait(bc->getRestoreSet(targetVersion, ranges, incrementalBackupOnly, beginVersion));
 
 		if (!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
