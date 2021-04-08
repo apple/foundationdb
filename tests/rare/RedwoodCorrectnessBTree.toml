@@ -6,4 +6,5 @@ startDelay = 0
     [[test.workload]]
     testName = 'UnitTests'
     maxTestCases = 0
-    testsMatching = ':/redwood/correctness/btree'
+    testsMatching = '/redwood/correctness/btree'
+    remapCleanupWindow = 1000000000
