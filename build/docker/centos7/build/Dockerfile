@@ -19,7 +19,6 @@ RUN rpmkeys --import mono-project.com.rpmkey.pgp && \
         debbuild \
         devtoolset-8 \
         devtoolset-8-libubsan-devel \
-        devtoolset-8-valgrind-devel \
         devtoolset-8-systemtap-sdt-devel \
         docker-ce \
         dos2unix \
