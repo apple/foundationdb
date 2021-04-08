@@ -717,10 +717,6 @@ public:
 			specialCounter(cc, "ActiveWatches", [self]() { return self->numWatches; });
 			specialCounter(cc, "WatchBytes", [self]() { return self->watchBytes; });
 
-			specialCounter(cc, "KvstoreBytesUsed", [self]() { return self->storage.getStorageBytes().used; });
-			specialCounter(cc, "KvstoreBytesFree", [self]() { return self->storage.getStorageBytes().free; });
-			specialCounter(cc, "KvstoreBytesAvailable", [self]() { return self->storage.getStorageBytes().available; });
-			specialCounter(cc, "KvstoreBytesTotal", [self]() { return self->storage.getStorageBytes().total; });
 			specialCounter(cc, "KvstoreSizeTotal", [self]() { return std::get<0>(self->storage.getSize()); });
 			specialCounter(cc, "KvstoreNodeTotal", [self]() { return std::get<1>(self->storage.getSize()); });
 			specialCounter(cc, "KvstoreInlineKey", [self]() { return std::get<2>(self->storage.getSize()); });
@@ -4240,7 +4236,15 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 	                               SERVER_KNOBS->STORAGE_LOGGING_DELAY,
 	                               &self->counters.cc,
 	                               self->thisServerID.toString() + "/StorageMetrics",
-	                               [tag](TraceEvent& te) { te.detail("Tag", tag.toString()); }));
+	                               [tag, self=self](TraceEvent& te) {
+		                               te.detail("Tag", tag.toString());
+		                               StorageBytes sb = self->storage.getStorageBytes();
+		                               te.detail("KvstoreBytesUsed", sb.used);
+		                               te.detail("KvstoreBytesFree", sb.free);
+		                               te.detail("KvstoreBytesAvailable", sb.available);
+		                               te.detail("KvstoreBytesTotal", sb.total);
+		                               te.detail("KvstoreBytesTemp", sb.temp);
+	                               }));
 
 	loop {
 		choose {
