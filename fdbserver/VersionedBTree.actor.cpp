@@ -2111,8 +2111,9 @@ public:
 		// known, if each commit delayed entries that were freeable were shuffled from the delayed free queue to the
 		// free queue, but this doesn't seem necessary.
 		int64_t reusable = (freeList.numEntries + delayedFreeList.numEntries) * physicalPageSize;
+		int64_t temp = remapQueue.numEntries * physicalPageSize;
 
-		return StorageBytes(free, total, pagerSize - reusable, free + reusable);
+		return StorageBytes(free, total, pagerSize - reusable, free + reusable, temp);
 	}
 
 	ACTOR static Future<Void> getUserPageCount_cleanup(DWALPager* self) {
