@@ -19,6 +19,7 @@
  */
 
 #include <fstream>
+#include <sstream>
 #include "fdbrpc/simulator.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -846,6 +847,9 @@ StringRef StringRefOf(const char* s) {
 	return StringRef((uint8_t*)s, strlen(s));
 }
 
+// Generates and sets an appropriate configuration for the database according to
+// the provided testConfig. Some attributes are randomly generated for more coverage
+// of different combinations
 void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	set_config("new");
 	const bool simple = false; // Set true to simplify simulation configs for easier debugging
@@ -866,7 +870,9 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 		db.resolverCount = deterministicRandom()->randomInt(1, 7);
 	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
 	// Continuously re-pick the storage engine type if it's the one we want to exclude
-	while (storage_engine_type == testConfig.storageEngineExcludeType) {
+	while (std::find(testConfig.storageEngineExcludeTypes.begin(),
+	                 testConfig.storageEngineExcludeTypes.end(),
+	                 storage_engine_type) != testConfig.storageEngineExcludeTypes.end()) {
 		storage_engine_type = deterministicRandom()->randomInt(0, 4);
 	}
 	switch (storage_engine_type) {
@@ -957,11 +963,11 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	if (deterministicRandom()->random01() < 0.5) {
 		int logSpill = deterministicRandom()->randomInt(TLogSpillType::VALUE, TLogSpillType::END);
 		set_config(format("log_spill:=%d", logSpill));
-		int logVersion = deterministicRandom()->randomInt(TLogVersion::MIN_RECRUITABLE, TLogVersion::MAX_SUPPORTED + 1);
+		int logVersion = deterministicRandom()->randomInt(TLogVersion::MIN_RECRUITABLE, testConfig.maxTLogVersion + 1);
 		set_config(format("log_version:=%d", logVersion));
 	} else {
 		if (deterministicRandom()->random01() < 0.7)
-			set_config(format("log_version:=%d", TLogVersion::MAX_SUPPORTED));
+			set_config(format("log_version:=%d", testConfig.maxTLogVersion));
 		if (deterministicRandom()->random01() < 0.5)
 			set_config(format("log_spill:=%d", TLogSpillType::DEFAULT));
 	}
@@ -1620,8 +1626,17 @@ void checkTestConf(const char* testFile, TestConfig* testConfig) {
 			sscanf(value.c_str(), "%d", &testConfig->logAntiQuorum);
 		}
 
-		if (attrib == "storageEngineExcludeType") {
-			sscanf(value.c_str(), "%d", &testConfig->storageEngineExcludeType);
+		if (attrib == "storageEngineExcludeTypes") {
+			std::stringstream ss(value);
+			for (int i; ss >> i;) {
+				testConfig->storageEngineExcludeTypes.push_back(i);
+				if (ss.peek() == ',') {
+					ss.ignore();
+				}
+			}
+		}
+		if (attrib == "maxTLogVersion") {
+			sscanf(value.c_str(), "%d", &testConfig->maxTLogVersion);
 		}
 	}
 
