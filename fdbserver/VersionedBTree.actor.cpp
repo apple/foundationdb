@@ -7126,7 +7126,7 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 		bytes += deltaTest(a, b);
 	}
 	double elapsed = timer() - start;
-	printf("DeltaTest() on random large records %g M/s  %g MB/s\n", count / elapsed / 1e6, bytes / elapsed / 1e6);
+	printf("DeltaTest() on random large records %f M/s  %f MB/s\n", count / elapsed / 1e6, bytes / elapsed / 1e6);
 
 	keyBuffer.resize(30);
 	valueBuffer.resize(100);
@@ -7138,7 +7138,7 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 		RedwoodRecordRef b = randomRedwoodRecordRef(keyBuffer, valueBuffer);
 		bytes += deltaTest(a, b);
 	}
-	printf("DeltaTest() on random small records %g M/s  %g MB/s\n", count / elapsed / 1e6, bytes / elapsed / 1e6);
+	printf("DeltaTest() on random small records %f M/s  %f MB/s\n", count / elapsed / 1e6, bytes / elapsed / 1e6);
 
 	RedwoodRecordRef rec1;
 	RedwoodRecordRef rec2;
@@ -7155,7 +7155,7 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 	for (i = 0; i < count; ++i) {
 		total += rec1.getCommonPrefixLen(rec2, 50);
 	}
-	printf("%" PRId64 " getCommonPrefixLen(skip=50) %g M/s\n", total, count / (timer() - start) / 1e6);
+	printf("%" PRId64 " getCommonPrefixLen(skip=50) %f M/s\n", total, count / (timer() - start) / 1e6);
 
 	start = timer();
 	total = 0;
@@ -7163,7 +7163,7 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 	for (i = 0; i < count; ++i) {
 		total += rec1.getCommonPrefixLen(rec2, 0);
 	}
-	printf("%" PRId64 " getCommonPrefixLen(skip=0) %g M/s\n", total, count / (timer() - start) / 1e6);
+	printf("%" PRId64 " getCommonPrefixLen(skip=0) %f M/s\n", total, count / (timer() - start) / 1e6);
 
 	char buf[1000];
 	RedwoodRecordRef::Delta& d = *(RedwoodRecordRef::Delta*)buf;
@@ -7176,7 +7176,7 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 	for (i = 0; i < count; ++i) {
 		total += rec1.writeDelta(d, rec2, commonPrefix);
 	}
-	printf("%" PRId64 " writeDelta(commonPrefix=%d) %g M/s\n", total, commonPrefix, count / (timer() - start) / 1e6);
+	printf("%" PRId64 " writeDelta(commonPrefix=%d) %f M/s\n", total, commonPrefix, count / (timer() - start) / 1e6);
 
 	start = timer();
 	total = 0;
@@ -7184,7 +7184,7 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 	for (i = 0; i < count; ++i) {
 		total += rec1.writeDelta(d, rec2);
 	}
-	printf("%" PRId64 " writeDelta() %g M/s\n", total, count / (timer() - start) / 1e6);
+	printf("%" PRId64 " writeDelta() %f M/s\n", total, count / (timer() - start) / 1e6);
 
 	return Void();
 }
@@ -7744,30 +7744,43 @@ TEST_CASE("/redwood/correctness/btree") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();
 
-	state std::string pagerFile = "unittest_pageFile.redwood";
+	state std::string fileName = params.get("fileName").orDefault("unittest_pageFile.redwood");
 	IPager2* pager;
 
-	state bool serialTest = deterministicRandom()->coinflip();
-	state bool shortTest = deterministicRandom()->coinflip();
+	state bool serialTest = params.getInt("serialTest").orDefault(deterministicRandom()->coinflip());
+	state bool shortTest = params.getInt("shortTest").orDefault(deterministicRandom()->coinflip());
 
 	state int pageSize =
 	    shortTest ? 200 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(200, 400));
 
-	state int64_t targetPageOps = shortTest ? 50000 : 1000000;
-	state bool pagerMemoryOnly = shortTest && (deterministicRandom()->random01() < .001);
-	state int maxKeySize = deterministicRandom()->randomInt(1, pageSize * 2);
-	state int maxValueSize = randomSize(pageSize * 25);
-	state int maxCommitSize = shortTest ? 1000 : randomSize(std::min<int>((maxKeySize + maxValueSize) * 20000, 10e6));
-	state double clearProbability = deterministicRandom()->random01() * .1;
-	state double clearSingleKeyProbability = deterministicRandom()->random01();
-	state double clearPostSetProbability = deterministicRandom()->random01() * .1;
-	state double coldStartProbability = pagerMemoryOnly ? 0 : (deterministicRandom()->random01() * 0.3);
-	state double advanceOldVersionProbability = deterministicRandom()->random01();
+	state int64_t targetPageOps = params.getInt("targetPageOps").orDefault(shortTest ? 50000 : 1000000);
+	state bool pagerMemoryOnly =
+	    params.getInt("pagerMemoryOnly").orDefault(shortTest && (deterministicRandom()->random01() < .001));
+	state int maxKeySize = params.getInt("maxKeySize").orDefault(deterministicRandom()->randomInt(1, pageSize * 2));
+	state int maxValueSize = params.getInt("maxValueSize").orDefault(randomSize(pageSize * 25));
+	state int maxCommitSize =
+	    params.getInt("maxCommitSize")
+	        .orDefault(shortTest ? 1000 : randomSize(std::min<int>((maxKeySize + maxValueSize) * 20000, 10e6)));
+	state double clearProbability =
+	    params.getDouble("clearProbability").orDefault(deterministicRandom()->random01() * .1);
+	state double clearSingleKeyProbability =
+	    params.getDouble("clearSingleKeyProbability").orDefault(deterministicRandom()->random01());
+	state double clearPostSetProbability =
+	    params.getDouble("clearPostSetProbability").orDefault(deterministicRandom()->random01() * .1);
+	state double coldStartProbability = params.getDouble("coldStartProbability")
+	                                        .orDefault(pagerMemoryOnly ? 0 : (deterministicRandom()->random01() * 0.3));
+	state double advanceOldVersionProbability =
+	    params.getDouble("advanceOldVersionProbability").orDefault(deterministicRandom()->random01());
 	state int64_t cacheSizeBytes =
-	    pagerMemoryOnly ? 2e9 : (pageSize * deterministicRandom()->randomInt(1, (BUGGIFY ? 2 : 10000) + 1));
-	state Version versionIncrement = deterministicRandom()->randomInt64(1, 1e8);
-	state Version remapCleanupWindow = BUGGIFY ? 0 : deterministicRandom()->randomInt64(1, versionIncrement * 50);
-	state int maxVerificationMapEntries = 300e3;
+	    params.getInt("cacheSizeBytes")
+	        .orDefault(pagerMemoryOnly ? 2e9
+	                                   : (pageSize * deterministicRandom()->randomInt(1, (BUGGIFY ? 2 : 10000) + 1)));
+	state Version versionIncrement =
+	    params.getInt("versionIncrement").orDefault(deterministicRandom()->randomInt64(1, 1e8));
+	state Version remapCleanupWindow =
+	    params.getInt("remapCleanupWindow")
+	        .orDefault(BUGGIFY ? 0 : deterministicRandom()->randomInt64(1, versionIncrement * 50));
+	state int maxVerificationMapEntries = params.getInt("maxVerificationMapEntries").orDefault(300e3);
 
 	printf("\n");
 	printf("targetPageOps: %" PRId64 "\n", targetPageOps);
@@ -7790,11 +7803,11 @@ TEST_CASE("/redwood/correctness/btree") {
 	printf("\n");
 
 	printf("Deleting existing test data...\n");
-	deleteFile(pagerFile);
+	deleteFile(fileName);
 
 	printf("Initializing...\n");
-	pager = new DWALPager(pageSize, pagerFile, cacheSizeBytes, remapCleanupWindow, pagerMemoryOnly);
-	state VersionedBTree* btree = new VersionedBTree(pager, pagerFile);
+	pager = new DWALPager(pageSize, fileName, cacheSizeBytes, remapCleanupWindow, pagerMemoryOnly);
+	state VersionedBTree* btree = new VersionedBTree(pager, fileName);
 	wait(btree->init());
 
 	state std::map<std::pair<std::string, Version>, Optional<std::string>> written;
@@ -7997,8 +8010,8 @@ TEST_CASE("/redwood/correctness/btree") {
 				wait(closedFuture);
 
 				printf("Reopening btree from disk.\n");
-				IPager2* pager = new DWALPager(pageSize, pagerFile, cacheSizeBytes, remapCleanupWindow);
-				btree = new VersionedBTree(pager, pagerFile);
+				IPager2* pager = new DWALPager(pageSize, fileName, cacheSizeBytes, remapCleanupWindow);
+				btree = new VersionedBTree(pager, fileName);
 				wait(btree->init());
 
 				Version v = btree->getLatestVersion();
@@ -8034,7 +8047,7 @@ TEST_CASE("/redwood/correctness/btree") {
 	state Future<Void> closedFuture = btree->onClosed();
 	btree->close();
 	wait(closedFuture);
-	btree = new VersionedBTree(new DWALPager(pageSize, pagerFile, cacheSizeBytes, 0), pagerFile);
+	btree = new VersionedBTree(new DWALPager(pageSize, fileName, cacheSizeBytes, 0), fileName);
 	wait(btree->init());
 
 	wait(btree->clearAllAndCheckSanity());
@@ -8133,29 +8146,29 @@ TEST_CASE(":/redwood/performance/set") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();
 
-	state std::string fileName = params.getParam("fileName").orDefault("unittest.redwood");
-	state int pageSize = params.getIntParam("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
-	state int64_t pageCacheBytes = params.getIntParam("pageCacheBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
-	state int nodeCount = params.getIntParam("nodeCount").orDefault(1e9);
-	state int maxRecordsPerCommit = params.getIntParam("maxRecordsPerCommit").orDefault(20000);
-	state int maxKVBytesPerCommit = params.getIntParam("maxKVBytesPerCommit").orDefault(20e6);
-	state int64_t kvBytesTarget = params.getIntParam("kvBytesTarget").orDefault(4e9);
-	state int minKeyPrefixBytes = params.getIntParam("minKeyPrefixBytes").orDefault(25);
-	state int maxKeyPrefixBytes = params.getIntParam("maxKeyPrefixBytes").orDefault(25);
-	state int minValueSize = params.getIntParam("minValueSize").orDefault(100);
-	state int maxValueSize = params.getIntParam("maxValueSize").orDefault(500);
-	state int minConsecutiveRun = params.getIntParam("minConsecutiveRun").orDefault(1);
-	state int maxConsecutiveRun = params.getIntParam("maxConsecutiveRun").orDefault(100);
-	state char firstKeyChar = params.getParam("firstKeyChar").orDefault("a")[0];
-	state char lastKeyChar = params.getParam("lastKeyChar").orDefault("m")[0];
+	state std::string fileName = params.get("fileName").orDefault("unittest.redwood");
+	state int pageSize = params.getInt("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
+	state int64_t pageCacheBytes = params.getInt("pageCacheBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
+	state int nodeCount = params.getInt("nodeCount").orDefault(1e9);
+	state int maxRecordsPerCommit = params.getInt("maxRecordsPerCommit").orDefault(20000);
+	state int maxKVBytesPerCommit = params.getInt("maxKVBytesPerCommit").orDefault(20e6);
+	state int64_t kvBytesTarget = params.getInt("kvBytesTarget").orDefault(4e9);
+	state int minKeyPrefixBytes = params.getInt("minKeyPrefixBytes").orDefault(25);
+	state int maxKeyPrefixBytes = params.getInt("maxKeyPrefixBytes").orDefault(25);
+	state int minValueSize = params.getInt("minValueSize").orDefault(100);
+	state int maxValueSize = params.getInt("maxValueSize").orDefault(500);
+	state int minConsecutiveRun = params.getInt("minConsecutiveRun").orDefault(1);
+	state int maxConsecutiveRun = params.getInt("maxConsecutiveRun").orDefault(100);
+	state char firstKeyChar = params.get("firstKeyChar").orDefault("a")[0];
+	state char lastKeyChar = params.get("lastKeyChar").orDefault("m")[0];
 	state Version remapCleanupWindow =
-	    params.getIntParam("remapCleanupWindow").orDefault(SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW);
-	state bool openExisting = params.getIntParam("openExisting").orDefault(0);
-	state bool insertRecords = !openExisting || params.getIntParam("insertRecords").orDefault(0);
-	state int concurrentSeeks = params.getIntParam("concurrentSeeks").orDefault(64);
-	state int concurrentScans = params.getIntParam("concurrentScans").orDefault(64);
-	state int seeks = params.getIntParam("seeks").orDefault(1000000);
-	state int scans = params.getIntParam("scans").orDefault(20000);
+	    params.getInt("remapCleanupWindow").orDefault(SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW);
+	state bool openExisting = params.getInt("openExisting").orDefault(0);
+	state bool insertRecords = !openExisting || params.getInt("insertRecords").orDefault(0);
+	state int concurrentSeeks = params.getInt("concurrentSeeks").orDefault(64);
+	state int concurrentScans = params.getInt("concurrentScans").orDefault(64);
+	state int seeks = params.getInt("seeks").orDefault(1000000);
+	state int scans = params.getInt("scans").orDefault(20000);
 
 	printf("pageSize: %d\n", pageSize);
 	printf("pageCacheBytes: %" PRId64 "\n", pageCacheBytes);
@@ -8648,10 +8661,10 @@ ACTOR Future<Void> doPrefixInsertComparison(int suffixSize,
 }
 
 TEST_CASE(":/redwood/performance/prefixSizeComparison") {
-	state int suffixSize = 12;
-	state int valueSize = 100;
-	state int recordCountTarget = 100e6;
-	state int usePrefixesInOrder = false;
+	state int suffixSize = params.getInt("suffixSize").orDefault(12);
+	state int valueSize = params.getInt("valueSize").orDefault(100);
+	state int recordCountTarget = params.getInt("recordCountTarget").orDefault(100e6);
+	state bool usePrefixesInOrder = params.getInt("usePrefixesInOrder").orDefault(0);
 
 	wait(doPrefixInsertComparison(
 	    suffixSize, valueSize, recordCountTarget, usePrefixesInOrder, KVSource({ { 10, 100000 } })));
@@ -8669,9 +8682,9 @@ TEST_CASE(":/redwood/performance/prefixSizeComparison") {
 }
 
 TEST_CASE(":/redwood/performance/sequentialInsert") {
-	state int prefixLen = 30;
-	state int valueSize = 100;
-	state int recordCountTarget = 100e6;
+	state int prefixLen = params.getInt("prefixLen").orDefault(30);
+	state int valueSize = params.getInt("valueSize").orDefault(100);
+	state int recordCountTarget = params.getInt("recordCountTarget").orDefault(100e6);
 
 	deleteFile("test.redwood");
 	wait(delay(5));
