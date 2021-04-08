@@ -345,6 +345,7 @@ public:
 		Reference<LocalitySet> logServerSet;
 		LocalityMap<WorkerDetails>* logServerMap;
 		bool bCompleted = false;
+		desired = std::max(required, desired);
 
 		// Construct the list of DCs where the TLog recruitment is happening. This is mainly for logging purpose.
 		std::string dcList;
