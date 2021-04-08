@@ -880,8 +880,15 @@ struct StorageBytes {
 	void serialize(Ar& ar) {
 		serializer(ar, free, total, used, available);
 	}
-};
 
+	std::string toString() const {
+		return format("{%.2f MB total, %.2f MB free, %.2f MB available, %.2f MB used}",
+		              total / 1e6,
+		              free / 1e6,
+		              available / 1e6,
+		              used / 1e6);
+	}
+};
 struct LogMessageVersion {
 	// Each message pushed into the log system has a unique, totally ordered LogMessageVersion
 	// See ILogSystem::push() for how these are assigned

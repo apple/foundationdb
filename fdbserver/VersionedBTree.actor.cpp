@@ -8187,6 +8187,7 @@ TEST_CASE(":/redwood/performance/set") {
 	DWALPager* pager = new DWALPager(pageSize, fileName, pageCacheBytes, remapCleanupWindow);
 	state VersionedBTree* btree = new VersionedBTree(pager, fileName);
 	wait(btree->init());
+	printf("Initialized.  StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 
 	state int64_t kvBytesThisCommit = 0;
 	state int64_t kvBytesTotal = 0;
@@ -8271,6 +8272,7 @@ TEST_CASE(":/redwood/performance/set") {
 		printf("Cumulative %.2f MB keyValue bytes written at %.2f MB/s\n",
 		       kvBytesTotal / 1e6,
 		       kvBytesTotal / (timer() - start) / 1e6);
+		printf("StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 	}
 
 	printf("Warming cache with seeks\n");
@@ -8440,14 +8442,6 @@ struct KVSource {
 		return format("{prefixLen=%d prefixes=%d format=%s}", prefixLen, numPrefixes(), ::toString(desc).c_str());
 	}
 };
-
-std::string toString(const StorageBytes& sb) {
-	return format("{%.2f MB total, %.2f MB free, %.2f MB available, %.2f MB used}",
-	              sb.total / 1e6,
-	              sb.free / 1e6,
-	              sb.available / 1e6,
-	              sb.used / 1e6);
-}
 
 ACTOR Future<StorageBytes> getStableStorageBytes(IKeyValueStore* kvs) {
 	state StorageBytes sb = kvs->getStorageBytes();
