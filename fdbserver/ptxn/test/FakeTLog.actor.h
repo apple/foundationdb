@@ -39,9 +39,18 @@
 
 namespace ptxn {
 
+struct PersistedMutation {
+	TeamID teamID;
+	LogMessageVersion logMessageVersion;
+	MutationRef mutation;
+};
+
 struct FakeTLogContext {
 	std::shared_ptr<TestDriverContext> pTestDriverContext;
 	std::shared_ptr<TLogInterfaceBase> pTLogInterface;
+
+	Arena persistenceArena;
+	VectorRef<PersistedMutation> mutations;
 };
 
 ACTOR Future<Void> fakeTLog_ActivelyPush(std::shared_ptr<FakeTLogContext> pFakeTLogContext);

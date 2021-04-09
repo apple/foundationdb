@@ -40,8 +40,24 @@ void processTLogCommitRequest(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
 	               seqMutations.end(),
 	               std::back_inserter(mutations),
 	               [](const SubsequenceMutationItem& item) { return item.mutation; });
-	verifyMutationsInRecord(
-	    pFakeTLogContext->pTestDriverContext->commitRecord, commitRequest.version, commitRequest.teamID, mutations);
+	verifyMutationsInRecord(pFakeTLogContext->pTestDriverContext->commitRecord,
+	                        commitRequest.version,
+	                        commitRequest.teamID,
+	                        mutations,
+	                        [](CommitValidationRecord& record) { record.tLogValidated = true; });
+
+	// "Persist" the data into memory
+	for (auto& seqMutation: seqMutations) {
+		const auto& subsequence = seqMutation.subsequence;
+		const auto& mutation = seqMutation.mutation;
+		pFakeTLogContext->mutations.push_back(pFakeTLogContext->persistenceArena,
+		                                      { commitRequest.teamID,
+		                                        { commitRequest.version, subsequence },
+		                                        MutationRef(pFakeTLogContext->persistenceArena,
+		                                                    static_cast<MutationRef::Type>(mutation.type),
+		                                                    mutation.param1,
+		                                                    mutation.param2) });
+	}
 
 	commitRequest.reply.send(TLogCommitReply{ 0 });
 }

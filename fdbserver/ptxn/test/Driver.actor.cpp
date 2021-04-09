@@ -46,6 +46,8 @@ static const MessageTransferModel MESSAGE_TRANSFER_MODEL = MessageTransferModel:
 CommitRecord::CommitRecord(const Version& version_, const TeamID& teamID_, std::vector<MutationRef>&& mutations_)
   : version(version_), teamID(teamID_), mutations(std::move(mutations_)) {}
 
+bool CommitValidationRecord::validated() const { return tLogValidated && storageServerValidated; }
+
 std::shared_ptr<TestDriverContext> initTestDriverContext() {
 	std::shared_ptr<TestDriverContext> context(new TestDriverContext());
 
@@ -75,17 +77,19 @@ std::shared_ptr<TestDriverContext> initTestDriverContext() {
 	}
 
 	// Assign teams to interfaces
-	{
+	auto assignTeamToInterface = [&](auto& mapper, auto interface) {
+		int numInterfaces = interface.size();
 		int index = 0;
 		for (int i = 0; i < context->numTeamIDs; ++i) {
 			const TeamID& teamID = context->teamIDs[i];
-			context->teamIDTLogInterfaceMapper[teamID] = context->tLogInterfaces[index];
-			context->teamIDStorageServerInterfaceMapper[teamID] = context->storageServerInterfaces[index];
+			mapper[teamID] = interface[index];
 
 			++index;
-			index %= context->numTLogs;
+			index %= numInterfaces;
 		}
-	}
+	};
+	assignTeamToInterface(context->teamIDTLogInterfaceMapper, context->tLogInterfaces);
+	assignTeamToInterface(context->teamIDStorageServerInterfaceMapper, context->storageServerInterfaces);
 
 	return context;
 }
@@ -137,10 +141,38 @@ void printCommitRecord(const std::vector<CommitRecord>& records) {
 	}
 }
 
-void verifyMutationsInRecord(const std::vector<CommitRecord>& records,
+void printNotValidatedRecords(const std::vector<CommitRecord>& records) {
+	std::cout << "Unvalidated commits: \n\n";
+	for (const auto& record: records) {
+		if (record.validation.validated()) continue;
+		std::cout << "\tVersion: " << record.version << "\tTeam ID: " << record.teamID.toString() << std::endl;
+		for (const auto& mutation: record.mutations) {
+			std::cout << "\t\t\t" << mutation.toString() << std::endl;
+		}
+
+		if (!record.validation.tLogValidated) {
+			std::cout << "\tTLog has not validated the reception of this commit." << std::endl;
+		}
+		if (!record.validation.storageServerValidated) {
+			std::cout << "\tStorageServer has not validated the reception of this commit." << std::endl;
+		}
+	}
+}
+
+bool isAllRecordsValidated(const std::vector<CommitRecord>& records) {
+	for (auto& record: records) {
+		if (!record.validation.validated()) {
+			return false;
+		}
+	}
+	return true;
+}
+
+void verifyMutationsInRecord(std::vector<CommitRecord>& records,
                              const Version& version,
                              const TeamID& teamID,
-                             const std::vector<MutationRef>& mutations) {
+                             const std::vector<MutationRef>& mutations,
+                             std::function<void(CommitValidationRecord&)> validateUpdater) {
 	for (auto& record : records) {
 		if (record.version == version && record.teamID == teamID && record.mutations.size() == mutations.size()) {
 			bool isSame = true;
@@ -152,8 +184,10 @@ void verifyMutationsInRecord(const std::vector<CommitRecord>& records,
 					break;
 				}
 			}
-			if (isSame)
+			if (isSame) {
+				validateUpdater(record.validation);
 				return;
+			}
 		}
 	}
 

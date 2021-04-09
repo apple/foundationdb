@@ -21,6 +21,7 @@
 #ifndef FDBSERVER_PTXN_TEST_DRIVER_H
 #define FDBSERVER_PTXN_TEST_DRIVER_H
 
+#include <functional>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -32,27 +33,40 @@
 
 namespace ptxn {
 
+struct CommitValidationRecord {
+	bool tLogValidated = false;
+	bool storageServerValidated = false;
+
+	bool validated() const;
+};
+
 struct CommitRecord {
 	Version version;
 	TeamID teamID;
 	std::vector<MutationRef> mutations;
 
+	CommitValidationRecord validation;
+
 	CommitRecord(const Version& version, const TeamID& teamID, std::vector<MutationRef>&& mutationRef);
 };
 
 struct TestDriverContext {
+	// Teams
 	int numTeamIDs;
 	std::vector<TeamID> teamIDs;
 
 	MessageTransferModel messageTransferModel;
 
+	// Proxies
 	int numProxies;
 
+	// TLog
 	int numTLogs;
 	std::vector<std::shared_ptr<TLogInterfaceBase>> tLogInterfaces;
 	std::unordered_map<TeamID, std::shared_ptr<TLogInterfaceBase>> teamIDTLogInterfaceMapper;
 	std::shared_ptr<TLogInterfaceBase> getTLogInterface(const TeamID&);
 
+	// Storage Server
 	int numStorageServers;
 	std::vector<std::shared_ptr<StorageServerInterfaceBase>> storageServerInterfaces;
 	std::unordered_map<TeamID, std::shared_ptr<StorageServerInterfaceBase>> teamIDStorageServerInterfaceMapper;
@@ -63,11 +77,21 @@ struct TestDriverContext {
 	std::vector<CommitRecord> commitRecord;
 };
 
+// Print out *ALL* commits that has triggered.
 void printCommitRecord(const std::vector<CommitRecord>& records);
-void verifyMutationsInRecord(const std::vector<CommitRecord>& record,
+
+// Print out those commits are not being completed, i.e., persisted in TLogs and Storage Servers
+void printNotValidatedRecords(const std::vector<CommitRecord>& records);
+
+// Check if all records are validated
+bool isAllRecordsValidated(const std::vector<CommitRecord>& records);
+
+// Check if a set of mutations is coming from a previous know commit
+void verifyMutationsInRecord(std::vector<CommitRecord>& record,
                              const Version&,
                              const TeamID&,
-                             const std::vector<MutationRef>& mutations);
+                             const std::vector<MutationRef>& mutations,
+							 std::function<void(CommitValidationRecord&)> validateUpdater);
 
 } // namespace ptxn
 

@@ -34,6 +34,9 @@
 
 namespace ptxn {
 
+const double CHECK_PERSIST_INTERVAL = 0.1;
+const int MAX_CHECK_TIMES = 10;
+
 ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext) {
 	state std::shared_ptr<TestDriverContext> pTestDriverContext = pFakeProxyContext->pTestDriverContext;
 	state int numTeams = pFakeProxyContext->pTestDriverContext->numTeamIDs;
@@ -88,8 +91,15 @@ ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext
 		}
 	}
 
-	// Wait the other ACTORs complete
-	wait(delay(1.0));
+	// Wait for all commits being completed persisted/timeout
+	state int numChecks = 0;
+	loop {
+		if (isAllRecordsValidated(pTestDriverContext->commitRecord)) { break; }
+		if (++numChecks >= MAX_CHECK_TIMES) {
+			throw internal_error_msg("Timeout waiting persistence");
+		}
+		wait(delay(CHECK_PERSIST_INTERVAL));
+	}
 
 	return Void();
 }
