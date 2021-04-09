@@ -320,16 +320,16 @@ public:
 		int64_t numEntries;
 		bool isExtent = false; // Is this an extent based queue?
 		std::string toString() const {
-			return format("{head: %s:%d  tail: %s  numPages: %" PRId64 "  numEntries: %" PRId64 "}",
+			return format("{head: %s:%d  tail: %s  numPages: %" PRId64 "  numEntries: %" PRId64 "  extents:%d}",
 			              ::toString(headPageID).c_str(),
 			              (int)headOffset,
 			              ::toString(tailPageID).c_str(),
 			              numPages,
-			              numEntries);
+			              numEntries,
+			              isExtent);
 		}
 	};
-#pragma pack(pop)
-#pragma pack(push, 1)
+
 	struct RawPage {
 		LogicalPageID nextPageID;
 		uint16_t nextOffset;
@@ -339,7 +339,6 @@ public:
 		uint8_t* begin() { return (uint8_t*)(this + 1); }
 	};
 #pragma pack(pop)
-
 	struct Cursor {
 		enum Mode { NONE, POP, READONLY, WRITE };
 
@@ -441,17 +440,6 @@ public:
 			ASSERT(mode == NONE);
 			return format("{NullCursor=%p}", this);
 		}
-
-#pragma pack(push, 1)
-		struct RawPage {
-			LogicalPageID nextPageID;
-			uint16_t nextOffset;
-			uint16_t endOffset;
-			LogicalPageID extentCurPageID; // current page within the extent
-			LogicalPageID extentEndPageID; // end page within the extent
-			uint8_t* begin() { return (uint8_t*)(this + 1); }
-		};
-#pragma pack(pop)
 
 		Future<Void> notBusy() { return operation; }
 
@@ -864,7 +852,7 @@ public:
 		name = queueName;
 		numPages = 1;
 		numEntries = 0;
-		dataBytesPerPage = pager->getUsablePageSize() - sizeof(typename Cursor::RawPage);
+		dataBytesPerPage = pager->getUsablePageSize() - sizeof(RawPage);
 		isExtent = extent;
 		pagesPerExtent = pager->getPhysicalExtentSize() / pager->getPhysicalPageSize();
 		headReader.init(this, Cursor::POP, false, newPageID, 0, newPageID);
@@ -881,7 +869,7 @@ public:
 		name = queueName;
 		numPages = qs.numPages;
 		numEntries = qs.numEntries;
-		dataBytesPerPage = pager->getUsablePageSize() - sizeof(typename Cursor::RawPage);
+		dataBytesPerPage = pager->getUsablePageSize() - sizeof(RawPage);
 		isExtent = qs.isExtent;
 		pagesPerExtent = pager->getPhysicalExtentSize() / pager->getPhysicalPageSize();
 		headReader.init(this, Cursor::POP, false, qs.headPageID, qs.headOffset, qs.tailPageID);
