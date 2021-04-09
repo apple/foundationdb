@@ -20,4 +20,6 @@
 
 #include "fdbserver/RoleLineage.actor.h"
 
-StringRef RoleLineage::name = "RoleLineage"_sr;
+using namespace std::literals;
+
+std::string_view RoleLineage::name = "RoleLineage"sv;

@@ -21,30 +21,47 @@
 #pragma once
 #include "flow/flow.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_ROLE_LINEAGE_ACTOR_G_H)
-#  define FDBSERVER_ROLE_LINEAGE_ACTOR_G_H
-#  include "fdbserver/RoleLineage.actor.g.h"
+#define FDBSERVER_ROLE_LINEAGE_ACTOR_G_H
+#include "fdbserver/RoleLineage.actor.g.h"
 #elif !defined(FDBSERVER_ROLE_LINEAGE_ACTOR_H)
-#  define FDBSERVER_ROLE_LINEAGE_ACTOR_H
+#define FDBSERVER_ROLE_LINEAGE_ACTOR_H
 
+#include "flow/singleton.h"
 #include "fdbrpc/Locality.h"
+#include "fdbclient/ActorLineageProfiler.h"
+#include "fdbserver/WorkerInterface.actor.h"
+
+#include <string_view>
+#include <msgpack.hpp>
+#include <any>
 #include "flow/actorcompiler.h" // This must be the last include
 
 struct RoleLineage : LineageProperties<RoleLineage> {
-    static StringRef name;
-    ProcessClass::ClusterRole role = ProcessClass::NoRole;
+	static std::string_view name;
+	ProcessClass::ClusterRole role = ProcessClass::NoRole;
 
-    bool isSet(ProcessClass::ClusterRole RoleLineage::*member) const {
-        return this->*member != ProcessClass::NoRole;
-    }
+	bool isSet(ProcessClass::ClusterRole RoleLineage::*member) const { return this->*member != ProcessClass::NoRole; }
+};
+
+struct RoleLineageCollector : IALPCollector<RoleLineage> {
+	RoleLineageCollector() : IALPCollector() {}
+	std::optional<std::any> collect(ActorLineage* lineage) override {
+		auto res = lineage->get(&RoleLineage::role);
+		if (res.has_value()) {
+			return Role::get(res.value()).abbreviation;
+		} else {
+			return std::optional<std::any>();
+		}
+	}
 };
 
 // creates a new root and sets the role lineage
-ACTOR template<class Fun>
+ACTOR template <class Fun>
 Future<decltype(std::declval<Fun>()())> runInRole(Fun fun, ProcessClass::ClusterRole role) {
-    currentLineage->makeRoot();
-    currentLineage->modify(&RoleLineage::role) = role;
-    decltype(std::declval<Fun>()()) res = wait(fun());
-    return res;
+	currentLineage->makeRoot();
+	currentLineage->modify(&RoleLineage::role) = role;
+	decltype(std::declval<Fun>()()) res = wait(fun());
+	return res;
 }
 
 #endif

@@ -3685,8 +3685,8 @@ void* sampleThread(void* arg) {
 		printf("Currently running actor lineage (%p):\n", actorLineage.getPtr());
 		auto stack = actorLineage->stack(&StackLineage::actorName);
 		while (!stack.empty()) {
-			printf("%s ", stack.top());
-			stack.pop();
+			printf("%s ", stack.back());
+			stack.pop_back();
 		}
 		printf("\n");
 
@@ -3697,8 +3697,8 @@ void* sampleThread(void* arg) {
 		for (auto actorLineage : diskAlps) {
 			auto stack = actorLineage->stack(&StackLineage::actorName);
 			while (!stack.empty()) {
-				printf("%s ", stack.top());
-				stack.pop();
+				printf("%s ", stack.back());
+				stack.pop_back();
 			}
 			printf("\n");
 		}

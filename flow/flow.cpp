@@ -39,9 +39,11 @@ ActorLineage::~ActorLineage() {
 	}
 }
 
-StringRef StackLineage::name = "StackLineage"_sr;
+using namespace std::literals;
 
-std::stack<StringRef> getActorStackTrace() {
+std::string_view StackLineage::name = "StackLineage"sv;
+
+std::vector<StringRef> getActorStackTrace() {
 	return currentLineage->stack(&StackLineage::actorName);
 }
 

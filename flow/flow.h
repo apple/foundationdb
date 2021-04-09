@@ -38,6 +38,7 @@
 #include <functional>
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <algorithm>
 #include <memory>
@@ -450,7 +451,7 @@ struct ActorLineage : ReferenceCounted<ActorLineage> {
 	friend class LocalLineage;
 
 private:
-	std::unordered_map<StringRef, LineagePropertiesBase*> properties;
+	std::unordered_map<std::string_view, LineagePropertiesBase*> properties;
 	Reference<ActorLineage> parent;
 
 public:
@@ -483,15 +484,15 @@ public:
 		return std::optional<V>{};
 	}
 	template <class T, class V>
-	std::stack<V> stack(V T::*member) const {
+	std::vector<V> stack(V T::*member) const {
 		auto current = this;
-		std::stack<V> res;
+		std::vector<V> res;
 		while (current != nullptr) {
 			auto iter = current->properties.find(T::name);
 			if (iter != current->properties.end()) {
 				T const& map = static_cast<T const&>(*iter->second);
 				if (map.isSet(member)) {
-					res.push(map.*member);
+					res.push_back(map.*member);
 				}
 			}
 			current = current->parent.getPtr();
@@ -529,11 +530,11 @@ struct restore_lineage {
 };
 
 struct StackLineage : LineageProperties<StackLineage> {
-	static StringRef name;
+	static const std::string_view name;
 	StringRef actorName;
 };
 
-extern std::stack<StringRef> getActorStackTrace();
+extern std::vector<StringRef> getActorStackTrace();
 
 // SAV is short for Single Assignment Variable: It can be assigned for only once!
 template <class T>
