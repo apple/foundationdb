@@ -32,6 +32,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/MultiInterface.h"
 
+#include "fdbclient/AnnotateActor.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/CoordinationInterface.h"
@@ -1796,6 +1797,7 @@ void runNetwork() {
 	if (networkOptions.traceDirectory.present() && networkOptions.runLoopProfilingEnabled) {
 		setupRunLoopProfiler();
 	}
+	setupSamplingProfiler();
 
 	g_network->run();
 
@@ -3051,6 +3053,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx,
 						throw deterministicRandom()->randomChoice(
 						    std::vector<Error>{ transaction_too_old(), future_version() });
 					}
+					state AnnotateActor annotation(currentLineage);
 					GetKeyValuesReply _rep =
 					    wait(loadBalance(cx.getPtr(),
 					                     beginServer.second,

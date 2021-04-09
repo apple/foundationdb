@@ -204,6 +204,8 @@ public:
 
 	bool checkRunnable() override;
 
+	ActorLineageSet& getActorLineageSet() override;
+
 	bool useThreadPool;
 
 	// private:
@@ -230,6 +232,8 @@ public:
 	// May be accessed off the network thread, e.g. by onMainThread
 	std::atomic<bool> stopped;
 	mutable std::map<IPAddress, bool> addressOnHostCache;
+
+	ActorLineageSet actorLineageSet;
 
 	std::atomic<bool> started;
 
@@ -1381,6 +1385,10 @@ void Net2::initMetrics() {
 
 bool Net2::checkRunnable() {
 	return !started.exchange(true);
+}
+
+ActorLineageSet& Net2::getActorLineageSet() {
+	return actorLineageSet;
 }
 
 void Net2::run() {
