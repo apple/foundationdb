@@ -1776,7 +1776,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 		state int rNum = ++data->rangeReadNum;
 		state bool trace = false;
 		// TraceEvent("Nim_in here");
-		// if (rNum == 158)
+		// if (rNum == 6332)
 		// 	trace = true;
 		if (trace)
 			TraceEvent("Nim_startRangeRead")
@@ -1784,19 +1784,32 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			    .detail("end", range.end)
 			    .detail("limit", limit)
 			    .detail("rangeReadNum", rNum)
+				.detail("sVersion", data->storageVersion())
 			    .detail("readVersion", version);
+
+		if (data->storageVersion() > version) {
+			if (trace)
+				TraceEvent("Nim_SSTransactionTooOld");
+			throw transaction_too_old();
+		}
 
 		if (limit >= 0) {
 			// if (range.begin == KeyRef("0000039a000000bd0000000500000004")) {
 			// 	trace = true;
 			// }
+			if (trace)
+				TraceEvent("Nim_premodifiedRange").detail("begin", range.begin).detail("end", range.end).detail("sVersion", data->storageVersion());
 			vCurrent = view.lastLessOrEqual(range.begin);
+			if (trace)
+				TraceEvent("Nim_lastLessEqual").detail("begin", readBegin).detail("end", readEnd);
 			if (vCurrent && vCurrent->isClearTo() && vCurrent->getEndKey() > range.begin)
 				readBegin = vCurrent->getEndKey();
 			else
 				readBegin = range.begin;
 			readEnd = range.end;
 			vCurrent = view.lower_bound(readBegin);
+			if (trace)
+				TraceEvent("Nim_modifiedRange").detail("begin", readBegin).detail("end", readEnd);
 			if (readBegin > readEnd) {
 				ASSERT(result.data.size() == 0);
 				result.more = false;
