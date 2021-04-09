@@ -1,9 +1,9 @@
 /*
- * ActorLineageProfiler.h
+ * ActorLineageProfiler.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-20201 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -107,12 +107,12 @@ public:
 			this->pack(uint64_t(val));
 		} else if (val >= std::numeric_limits<uint8_t>::min()) {
 			pack_int8(int8_t(val));
-		} else if (val >= std::numeric_limits<uint16_t>::min()) {
-			pack_int8(int16_t(val));
-		} else if (val >= std::numeric_limits<uint32_t>::min()) {
-			pack_int8(int32_t(val));
-		} else if (val >= std::numeric_limits<uint64_t>::min()) {
-			pack_int8(int64_t(val));
+		} else if (val >= std::numeric_limits<int16_t>::min()) {
+			pack_int16(int16_t(val));
+		} else if (val >= std::numeric_limits<int32_t>::min()) {
+			pack_int32(int32_t(val));
+		} else if (val >= std::numeric_limits<int64_t>::min()) {
+			pack_int64(int64_t(val));
 		}
 	}
 
