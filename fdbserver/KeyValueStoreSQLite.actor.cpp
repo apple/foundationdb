@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/FDBTypes.h"
 #include <variant>
 #define SQLITE_THREADSAFE 0 // also in sqlite3.amalgamation.c!
 #include "flow/crc32c.h"
@@ -1879,11 +1878,8 @@ private:
 			try {
 				rr.result.send(getCursor()->get().readRangeResultWriter(rr.keys, rr.resultWriter, rr.rowLimit));
 				++counter;
-			} catch (Error& e) {
+			} catch (Error& e) { // TODO: remove catch clause
 				// TraceEvent("Nim_ReadRangeError").detail("code", e.code());
-				// if (e.code() == error_code_transaction_too_old)
-				// 	rr.result.sendError(e);
-				// else
 				throw e;
 			}
 		}

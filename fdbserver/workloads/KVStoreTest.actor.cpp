@@ -145,8 +145,6 @@ struct ClearRangeResultWriter : public IReadRangeResultWriter {
 		byteLimit -= (sizeof(KeyValueRef) + kv.get().expectedSize());
 		return true;
 	}
-
-	Arena& getArena() override { return result.arena(); }
 };
 
 struct KVTest {

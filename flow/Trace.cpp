@@ -882,16 +882,14 @@ bool TraceEvent::init() {
 
 	// Backstop to throttle very spammy trace events
 	if (enabled && g_network && !g_network->isSimulated() && severity > SevDebug && isNetworkThread()) {
-		// if (traceEventThrottlerCache->isAboveThreshold(StringRef((uint8_t*)type, strlen(type)))) {
-		// 	enabled = false;
-		// 	TraceEvent(SevWarnAlways, std::string(TRACE_EVENT_THROTTLE_STARTING_TYPE).append(type).c_str())
-		// 	    .suppressFor(5);
-		// } else {
-		// 	traceEventThrottlerCache->addAndExpire(
-		// 	    StringRef((uint8_t*)type, strlen(type)), 1, now() + FLOW_KNOBS->TRACE_EVENT_THROTTLER_SAMPLE_EXPIRY);
-		// }
-		traceEventThrottlerCache->addAndExpire(
+		if (traceEventThrottlerCache->isAboveThreshold(StringRef((uint8_t*)type, strlen(type)))) {
+			enabled = false;
+			TraceEvent(SevWarnAlways, std::string(TRACE_EVENT_THROTTLE_STARTING_TYPE).append(type).c_str())
+			    .suppressFor(5);
+		} else {
+			traceEventThrottlerCache->addAndExpire(
 			    StringRef((uint8_t*)type, strlen(type)), 1, now() + FLOW_KNOBS->TRACE_EVENT_THROTTLER_SAMPLE_EXPIRY);
+		}
 	}
 
 	if (enabled) {

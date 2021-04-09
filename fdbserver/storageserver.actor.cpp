@@ -23,8 +23,6 @@
 #include <type_traits>
 #include <unordered_map>
 
-// #include "fdbclient/FDBTypes.h"
-// #include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.h"
 #include "flow/ActorCollection.h"
@@ -922,7 +920,7 @@ public:
 	                      GetKeyValuesReply& result)
 	  : vCurrent(vCurrent), data(data), version(version), range(range), limit(limit), pLimitBytes(pLimitBytes),
 	    rangeReadNum(rangeReadNum), trace(trace), result(result) {
-		forward = limit >= 0 ? true : false;
+		forward = limit >= 0;
 	}
 
 	void setResult(bool assert = false) {
@@ -1133,8 +1131,6 @@ public:
 			return false;
 		}
 	}
-
-	Arena& getArena() override { return result.arena; }
 };
 
 const StringRef StorageServer::CurrentRunningFetchKeys::emptyString = LiteralStringRef("");
@@ -1784,7 +1780,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			    .detail("end", range.end)
 			    .detail("limit", limit)
 			    .detail("rangeReadNum", rNum)
-				.detail("sVersion", data->storageVersion())
+			    .detail("sVersion", data->storageVersion())
 			    .detail("readVersion", version);
 
 		if (data->storageVersion() > version) {
@@ -1795,7 +1791,10 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 
 		if (limit >= 0) {
 			if (trace)
-				TraceEvent("Nim_premodifiedRange").detail("begin", range.begin).detail("end", range.end).detail("sVersion", data->storageVersion());
+				TraceEvent("Nim_premodifiedRange")
+				    .detail("begin", range.begin)
+				    .detail("end", range.end)
+				    .detail("sVersion", data->storageVersion());
 			vCurrent = view.lastLessOrEqual(range.begin);
 			if (trace)
 				TraceEvent("Nim_lastLessEqual").detail("begin", readBegin).detail("end", readEnd);
