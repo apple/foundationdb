@@ -1165,15 +1165,33 @@ struct RawCursor {
 			return Void();
 		if (db.fragment_values) {
 			if (rowLimit > 0) { // return results in asc order
+				if (resultWriter->shouldTrace()) {
+					TraceEvent("Nim_Case1KVStore");
+				}
 				DefragmentingReader i(*this, arena, true);
 				i.moveTo(keys.begin);
 				Optional<KeyRef> nextKey = i.peek();
 				while (nextKey.present() && nextKey.get() < keys.end) {
 					Optional<KeyValueRef> kv = i.getNext();
+					if (resultWriter->shouldTrace()) {
+						TraceEvent("Nim_KVStore4")
+						    .detail("Key", kv)
+						    .detail("resWriter", resultWriter.isValid())
+						    .detail("trace", resultWriter->shouldTrace());
+					}
 					// TraceEvent("Nim_readRangeKVStore").detail("key", kv.get().key);
 					std::variant<bool, KeyRef> res = resultWriter->operator()(kv);
+					if (resultWriter->shouldTrace()) {
+						TraceEvent("Nim_KVStore")
+						    .detail("kv", kv)
+						    .detail("res", res.index())
+						    .detail("resWriter", resultWriter.isValid());
+					}
 					if (res.index() == 0) { // returned bool
 						auto f = std::get<bool>(res);
+						if (resultWriter->shouldTrace()) {
+							TraceEvent("Nim_KVStore2").detail("kv", kv).detail("res", f);
+						}
 						if (!f) { // we hit the limit so return
 							return Void();
 						}
@@ -1181,8 +1199,14 @@ struct RawCursor {
 						i.moveTo(std::get<KeyRef>(res));
 					}
 					nextKey = i.peek();
+					if (resultWriter->shouldTrace()) {
+						TraceEvent("Nim_KVStore3").detail("nextKey", nextKey);
+					}
 				}
 			} else { // return results in desc order
+				if (resultWriter->shouldTrace()) {
+					TraceEvent("Nim_Case2KVStore");
+				}
 				DefragmentingReader i(*this, arena, false);
 				i.moveTo(keys.end);
 				Optional<KeyRef> nextKey = i.peek();
@@ -1203,17 +1227,35 @@ struct RawCursor {
 			}
 		} else {
 			if (rowLimit > 0) {
+				if (resultWriter->shouldTrace()) {
+					TraceEvent("Nim_Case3KVStore");
+				}
 				int r = moveTo(keys.begin);
 				if (r < 0)
 					moveNext();
 				while (this->valid) {
 					KeyValueRef kv = decodeKV(getEncodedRow(arena));
+					if (resultWriter->shouldTrace()) {
+						TraceEvent("Nim_KVStore4")
+						    .detail("Key", kv)
+						    .detail("resWriter", resultWriter.isValid())
+						    .detail("trace", resultWriter->shouldTrace());
+					}
 					if (kv.key >= keys.end)
 						break;
 					// TraceEvent("Nim_readRangeKVStore 3").detail("key", kv.key);
 					std::variant<bool, KeyRef> res = resultWriter->operator()(kv);
+					if (resultWriter->shouldTrace()) {
+						TraceEvent("Nim_KVStore")
+						    .detail("kv", kv)
+						    .detail("res", res.index())
+						    .detail("resWriter", resultWriter.isValid());
+					}
 					if (res.index() == 0) {
 						auto f = std::get<bool>(res);
+						if (resultWriter->shouldTrace()) {
+							TraceEvent("Nim_KVStore2").detail("kv", kv).detail("res", f);
+						}
 						if (!f) { // we hit the limit so return
 							return Void();
 						} else {
@@ -1226,6 +1268,9 @@ struct RawCursor {
 					}
 				}
 			} else {
+				if (resultWriter->shouldTrace()) {
+					TraceEvent("Nim_Case4KVStore");
+				}
 				int r = moveTo(keys.end);
 				if (r >= 0)
 					movePrevious();
@@ -1833,10 +1878,14 @@ private:
 		void action(ReadRangeResultWriterAction& rr) {
 			try {
 				rr.result.send(getCursor()->get().readRangeResultWriter(rr.keys, rr.resultWriter, rr.rowLimit));
+				++counter;
 			} catch (Error& e) {
-				rr.result.sendError(e);
+				// TraceEvent("Nim_ReadRangeError").detail("code", e.code());
+				// if (e.code() == error_code_transaction_too_old)
+				// 	rr.result.sendError(e);
+				// else
+				throw e;
 			}
-			++counter;
 		}
 	};
 

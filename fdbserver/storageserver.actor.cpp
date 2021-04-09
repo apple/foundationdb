@@ -23,8 +23,8 @@
 #include <type_traits>
 #include <unordered_map>
 
-#include "fdbclient/FDBTypes.h"
-#include "fdbclient/StorageServerInterface.h"
+// #include "fdbclient/FDBTypes.h"
+// #include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.h"
 #include "flow/ActorCollection.h"
@@ -896,8 +896,9 @@ class ReadRangeResultWriter : public IReadRangeResultWriter {
 	StorageServer::VersionedData::iterator& vCurrent;
 	StorageServer* data;
 	Version version;
-	bool finishedDisk = false, forward = false, trace = false; // TODO: remove trace bool
+	bool finishedDisk = false, done = false, forward = false, trace = false; // TODO: remove trace bool
 	int rangeReadNum; // TODO: remove this, currently only used for debugging
+	Optional<Error> error;
 
 	GetKeyValuesReply& result;
 
@@ -929,17 +930,39 @@ public:
 			ASSERT(result.data.size() == 0 ||
 			       *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
 
+		result.version = version;
 		result.more = limit == 0 || *pLimitBytes <= 0;
 	}
 
+	bool shouldTrace() override { return trace; }
+
+	void setDone(bool d) { done = d; }
+
+	Optional<Error> getError() { return error; }
+
 	std::variant<bool, KeyRef> operator()(Optional<KeyValueRef> kvOpt) override {
 		try {
+			if (trace)
+				TraceEvent("Nim_enter()").detail("kv", kvOpt).detail("forward", forward);
 			if (forward) {
 				if (trace)
-					TraceEvent("Nim_forward").detail("rangeReadNum", rangeReadNum);
+					TraceEvent("Nim_forward")
+					    .detail("rangeReadNum", rangeReadNum)
+					    .detail("limit", limit)
+					    .detail("version", version)
+					    .detail("data", result.data.size())
+					    .detail("bytes", *pLimitBytes);
 				loop {
-					if (data->storageVersion() > version)
-						throw transaction_too_old();
+					if (done)
+						return false;
+					if (data->storageVersion() > version) {
+						if (trace)
+							TraceEvent("Nim_transactionOld").detail("rangeReadNum", rangeReadNum);
+						error = transaction_too_old();
+						return false;
+					}
+					if (trace)
+						TraceEvent("Nim_loop2");
 					if (limit <= 0 || *pLimitBytes <= 0)
 						return false;
 					if (!vCurrent || vCurrent.key() >= range.end) {
@@ -1023,8 +1046,14 @@ public:
 				if (trace)
 					TraceEvent("Nim_reverse").detail("rangeReadNum", rangeReadNum);
 				loop {
-					if (data->storageVersion() > version)
-						throw transaction_too_old();
+					if (done)
+						return false;
+					if (data->storageVersion() > version) {
+						if (trace)
+							TraceEvent("Nim_transactionOld").detail("rangeReadNum", rangeReadNum);
+						error = transaction_too_old();
+						return false;
+					}
 					if (limit >= 0 || *pLimitBytes <= 0)
 						return false;
 					if (!vCurrent || (!vCurrent->isClearTo() && vCurrent.key() < range.begin) ||
@@ -1099,8 +1128,9 @@ public:
 				}
 			}
 		} catch (Error& e) {
-			// TraceEvent("Nim_resultWriterError").detail("code", e.code());
-			throw e;
+			// TraceEvent("Nim_resultWriterError").detail("error", e.code());
+			error = e;
+			return false;
 		}
 	}
 
@@ -1718,12 +1748,21 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
                                           int limit,
                                           int* pLimitBytes,
                                           SpanID parentSpan) {
-	state Span span("SS:readRange"_loc, parentSpan);
+	state GetKeyValuesReply result;
 	state StorageServer::VersionedData::ViewAtVersion view = data->data().at(version);
 	state StorageServer::VersionedData::iterator vCurrent = view.end();
 	state KeyRef readBegin;
 	state KeyRef readEnd;
-	state GetKeyValuesReply result;
+	state Key readBeginTemp;
+	state int vCount = 0;
+	state Span span("SS:readRange"_loc, parentSpan);
+
+	// for caching the storage queue results during the first PTree traversal
+	state VectorRef<KeyValueRef> resultCache;
+
+	// for remembering the position in the resultCache
+	state int pos = 0;
+
 	// Check if the desired key-range is cached
 	auto containingRange = data->cachedRangeMap.rangeContaining(range.begin);
 	if (containingRange.value() && containingRange->range().end >= range.end) {
@@ -1732,20 +1771,20 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 		result.cached = true;
 	} else
 		result.cached = false;
-	result.version = version;
 
 	if (data->storage.usesReadRangeResultWriter()) {
 		state int rNum = ++data->rangeReadNum;
 		state bool trace = false;
 		// TraceEvent("Nim_in here");
-		// if (rNum == 29126)
+		// if (rNum == 158)
 		// 	trace = true;
-		// if (trace)
-		// 	TraceEvent("Nim_startRangeRead")
-		// 	    .detail("begin", range.begin)
-		// 	    .detail("end", range.end)
-		// 	    .detail("rangeReadNum", rNum)
-		// 	    .detail("readVersion", version);
+		if (trace)
+			TraceEvent("Nim_startRangeRead")
+			    .detail("begin", range.begin)
+			    .detail("end", range.end)
+			    .detail("limit", limit)
+			    .detail("rangeReadNum", rNum)
+			    .detail("readVersion", version);
 
 		if (limit >= 0) {
 			// if (range.begin == KeyRef("0000039a000000bd0000000500000004")) {
@@ -1780,32 +1819,36 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 				return result;
 			}
 		}
-		// if (trace)
-		// 	TraceEvent("Nim_startRangeReadModified")
-		// 	    .detail("begin", readBegin)
-		// 	    .detail("end", readEnd)
-		// 	    .detail("trace", trace)
-		// 	    .detail("rangeReadNum", rNum)
-		// 	    .detail("readVersion", version);
+		if (trace)
+			TraceEvent("Nim_startRangeReadModified")
+			    .detail("begin", readBegin)
+			    .detail("end", readEnd)
+			    .detail("trace", trace)
+			    .detail("rangeReadNum", rNum)
+			    .detail("readVersion", version);
 		state Reference<ReadRangeResultWriter> resultWriter = makeReference<ReadRangeResultWriter>(
 		    vCurrent, data, version, range, limit, pLimitBytes, rNum, trace, result);
 		try {
 			wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), resultWriter, limit));
+			if (resultWriter->getError().present()) {
+				throw resultWriter->getError().get();
+			}
 			resultWriter->setResult(true);
+			if (trace)
+				TraceEvent("Nim_doneRangeRead")
+				    .detail("begin", readBegin)
+				    .detail("end", readEnd)
+				    .detail("trace", trace)
+				    .detail("rangeReadNum", rNum)
+				    .detail("readVersion", version);
 			return result;
 		} catch (Error& e) {
-			// TraceEvent("Nim_SS caught error").detail("code", e.code());
+			// TraceEvent("Nim_SS caught error1").detail("code", e.code()).detail("rangeReadNum", rNum);
+			resultWriter->setDone(true);
+			// TraceEvent("Nim_SS caught error2").detail("code", e.code()).detail("rangeReadNum", rNum);
 			throw e;
 		}
 	}
-	state Key readBeginTemp;
-	state int vCount = 0;
-
-	// for caching the storage queue results during the first PTree traversal
-	state VectorRef<KeyValueRef> resultCache;
-
-	// for remembering the position in the resultCache
-	state int pos = 0;
 
 	// if (limit >= 0) we are reading forward, else backward
 	if (limit >= 0) {

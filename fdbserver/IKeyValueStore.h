@@ -55,6 +55,8 @@ struct IReadRangeResultWriter : public ReferenceCounted<IReadRangeResultWriter> 
 
 	// Returns the arena which allocates the memory for the results of the range read
 	virtual Arena& getArena() = 0;
+
+	virtual bool shouldTrace() { return false; } // TODO: remove
 };
 
 class IKeyValueStore : public IClosable {
