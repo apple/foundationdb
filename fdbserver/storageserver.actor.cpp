@@ -1794,9 +1794,6 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 		}
 
 		if (limit >= 0) {
-			// if (range.begin == KeyRef("0000039a000000bd0000000500000004")) {
-			// 	trace = true;
-			// }
 			if (trace)
 				TraceEvent("Nim_premodifiedRange").detail("begin", range.begin).detail("end", range.end).detail("sVersion", data->storageVersion());
 			vCurrent = view.lastLessOrEqual(range.begin);
