@@ -26,9 +26,18 @@
 
 using namespace std::literals;
 
+std::string_view to_string(WaitState w) {
+	switch (w) {
+	case WaitState::Running:
+		return "Running";
+	case WaitState::DiskIO:
+		return "DiskIO";
+	}
+}
+
 class Packer : public msgpack::packer<msgpack::sbuffer> {
 	struct visitor_t {
-		using VisitorMap = std::unordered_map<std::type_info, std::function<void(std::any const&, Packer& packer)>>;
+		using VisitorMap = std::unordered_map<std::type_index, std::function<void(std::any const&, Packer& packer)>>;
 		VisitorMap visitorMap;
 
 		template <class T>
@@ -42,7 +51,7 @@ class Packer : public msgpack::packer<msgpack::sbuffer> {
 		template <class Head, class... Tail>
 		struct populate_visitor_map<Head, Tail...> {
 			static void populate(VisitorMap& map) {
-				map.emplace(any_visitor<Head>);
+				map.emplace(std::type_index(typeid(Head)), any_visitor<Head>);
 				populate_visitor_map<Tail...>::populate(map);
 			}
 		};

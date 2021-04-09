@@ -45,14 +45,7 @@ struct IALPCollector : IALPCollectorBase {
 
 enum class WaitState { Running, DiskIO };
 
-std::string_view to_string(WaitState w) {
-	switch (w) {
-	case WaitState::Running:
-		return "Running";
-	case WaitState::DiskIO:
-		return "DiskIO";
-	}
-}
+std::string_view to_string(WaitState w);
 
 struct Sample : std::enable_shared_from_this<Sample> {
 	double time = 0.0;
@@ -63,7 +56,7 @@ struct Sample : std::enable_shared_from_this<Sample> {
 
 class SampleCollectorT {
 public: // Types
-	friend class crossbow::singleton<SampleCollectorT>;
+	friend struct crossbow::create_static<SampleCollectorT>;
 	using Getter = std::function<std::vector<Reference<ActorLineage>>()>;
 
 private:
