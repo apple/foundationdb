@@ -1,0 +1,66 @@
+title Get Read Version
+
+participantgroup **Client** (NativeAPI.actor.cpp)
+	participant "Transaction::getReadVersion" as gRV
+    participant "readVersionBatcher" as rVB
+    participant "getConsistentReadVersion" as gCRV
+end
+
+participantgroup **GRVProxy** (GrvProxyServer.actor.cpp)
+	participant "queueGetReadVersionRequests" as qGRVR
+    participant "transactionStarter" as tS
+    participant "getLiveCommittedVersion" as gLCV
+end
+
+participantgroup **Master** (masterserver.actor.cpp)
+	participant "serveLiveCommittedVersion" as sLCV
+end 
+
+autoactivation off
+
+gRV -> rVB: VersionRequest
+
+loop Batch requests
+	box over rVB:Batch read version requests
+end
+
+note right of rVB: <color:#green>//TransactionAttachID//</color>
+
+rVB -> gCRV:
+
+note right of gCRV: <color:#blue>Before</color>
+
+gCRV -> qGRVR: GetReadVersionRequest
+
+loop Batch requests
+	box over qGRVR: Batch read version requests
+end
+
+note right of qGRVR: <color:#lightblue>--GrvProxyServer.queueTransactionStartRequests.Before--</color>
+
+qGRVR -> tS:
+
+note right of tS: <color:#green>//TransactionAttachID//</color>
+
+note right of tS: <color:#blue>AskLiveCommittedVersionFromMaster</color>
+
+tS -> gLCV:
+
+note right of gLCV: <color:#blue>confirmEpochLive</color>
+
+gLCV -> sLCV: GetRawCommittedVersionRequest
+
+note right of sLCV: <color:#blue>GetRawCommittedVersion</color>
+
+sLCV --> gLCV: GetRawCommittedVersionReply
+
+note right of gLCV: <color:#blue>After</color>
+
+gLCV --> gCRV: GetReadVersionReply
+
+note right of gCRV: <color:#blue>After</color>
+
+gCRV --> rVB: GetReadVersionReply
+
+rVB --> gRV: GetReadVersionReply
+
