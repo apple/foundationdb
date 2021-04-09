@@ -1988,6 +1988,12 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 
 		Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
 
+		TraceEvent("FileBackupLogRangeStart")
+		    .detail("BeginVersion", beginVersion)
+		    .detail("EndVersion", endVersion)
+		    .detail("DestUIDValue", destUidValue)
+		    .detail("VersionBlockSize", CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE);
+
 		// Get the set of key ranges that hold mutations for (beginVersion, endVersion).  They will be queried in
 		// parallel below and there is a limit on how many we want to process in a single BackupLogRangeTask so if that
 		// limit is exceeded then set the addBackupLogRangeTasks boolean in Params and stop, signalling the finish()
@@ -2059,7 +2065,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 		    .detail("Size", outFile->size())
 		    .detail("BeginVersion", beginVersion)
 		    .detail("EndVersion", endVersion)
-		    .detail("LastReadVersion", latestVersion);
+		    .detail("LastReadVersion", lastVersion);
 
 		Params.fileSize().set(task, outFile->size());
 
@@ -5183,7 +5189,8 @@ public:
 	}
 
 	ACTOR static Future<Optional<Version>> getLastRestorable(FileBackupAgent* backupAgent,
-	                                                         Reference<ReadYourWritesTransaction> tr, Key tagName,
+	                                                         Reference<ReadYourWritesTransaction> tr,
+	                                                         Key tagName,
 	                                                         bool snapshot) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -5577,7 +5584,8 @@ Future<std::string> FileBackupAgent::getStatusJSON(Database cx, std::string tagN
 	return FileBackupAgentImpl::getStatusJSON(this, cx, tagName);
 }
 
-Future<Optional<Version>> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName,
+Future<Optional<Version>> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr,
+                                                             Key tagName,
                                                              bool snapshot) {
 	return FileBackupAgentImpl::getLastRestorable(this, tr, tagName, snapshot);
 }
