@@ -63,10 +63,10 @@ private:
 	std::vector<IALPCollectorBase*> collectors;
 	std::map<WaitState, Getter> getSamples;
 	SampleCollectorT() {}
+	std::map<std::string_view, std::any> collect(ActorLineage* lineage);
 
 public:
 	void addCollector(IALPCollectorBase* collector) { collectors.push_back(collector); }
-	std::map<std::string_view, std::any> collect(ActorLineage* lineage);
 	std::shared_ptr<Sample> collect();
 };
 
