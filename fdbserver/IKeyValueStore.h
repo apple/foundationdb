@@ -50,6 +50,7 @@ struct IReadRangeResultWriter : public ReferenceCounted<IReadRangeResultWriter> 
 	  - :return: a boolean where false indicates to stop scanning the range in the KV store and true indicates finding
 	  the next KV pair in the range
 	  - :return: KeyRef is a key which the KV store will skip to (useful for skipping clear ranges)
+	  - Note: kv should only be empty to indicate that there are no more results on disk
 	*/
 	virtual std::variant<bool, KeyRef> operator()(Optional<KeyValueRef> kv) = 0;
 

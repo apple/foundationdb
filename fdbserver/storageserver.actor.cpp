@@ -191,6 +191,7 @@ struct StorageServerDisk {
 	}
 
 	Future<Void> readRange(KeyRangeRef keys, Reference<IReadRangeResultWriter> resultWriter, int rowLimit) {
+		ASSERT(storage->usesReadRangeResultWriter());
 		return storage->readRange(keys, resultWriter, rowLimit);
 	}
 
@@ -888,18 +889,20 @@ public:
 class ReadRangeResultWriter : public IReadRangeResultWriter {
 
 	// Parameters passed to storage server read range function
-	KeyRange range;
-	int limit;
-	int* pLimitBytes;
-	StorageServer::VersionedData::iterator& vCurrent;
+	KeyRange range; // key range to be read
+	int limit; // number of results
+	int* pLimitBytes; // total bytes allowed in teh result
+	StorageServer::VersionedData::iterator& vCurrent; // iterator to the ptree
 	StorageServer* data;
 	Version version;
-	bool finishedDisk = false, done = false, forward = false, trace = false; // TODO: remove trace bool
+	bool finishedDisk = false, done = false, forward = false, trace = false; // TODO: remove trace
 	int rangeReadNum; // TODO: remove this, currently only used for debugging
 	Optional<Error> error;
 
 	GetKeyValuesReply& result;
 
+	// Helper function to decrement the result limit (total result size)
+	// and the byte limit (total result bytes) for a given a kv ref
 	void decrementLimits(KeyValueRef& kv) {
 		if (forward)
 			limit--;
@@ -920,9 +923,12 @@ public:
 	                      GetKeyValuesReply& result)
 	  : vCurrent(vCurrent), data(data), version(version), range(range), limit(limit), pLimitBytes(pLimitBytes),
 	    rangeReadNum(rangeReadNum), trace(trace), result(result) {
+		// set the direction of the range read
 		forward = limit >= 0;
 	}
 
+	// Sets some of the result metadata and optionally asserts the status of the result (that it fits the limit
+	// constraints)
 	void setResult(bool assert = false) {
 		if (assert)
 			ASSERT(result.data.size() == 0 ||
@@ -932,17 +938,25 @@ public:
 		result.more = limit == 0 || *pLimitBytes <= 0;
 	}
 
+	// TODO: remove
 	bool shouldTrace() override { return trace; }
 
+	// Indicates that the range read should be finished
 	void setDone(bool d) { done = d; }
 
+	// Any errors thrown by the function operator (below) will be stored in this error object
 	Optional<Error> getError() { return error; }
 
+	/*
+	    - :param: kvOpt is a kv pair that is passed from the storage engine which falls within the given range
+	    - This operator iterates through both the in memory ptree (vCurrent) and on disk data structure (through kvOpt)
+	    - in sequence and combines results (asc or desc depending on the sign of the limit) in the GetKeyValuesReply
+	*/
 	std::variant<bool, KeyRef> operator()(Optional<KeyValueRef> kvOpt) override {
 		try {
 			if (trace)
 				TraceEvent("Nim_enter()").detail("kv", kvOpt).detail("forward", forward);
-			if (forward) {
+			if (forward) { // limit >= 0 (results in asc order)
 				if (trace)
 					TraceEvent("Nim_forward")
 					    .detail("rangeReadNum", rangeReadNum)
@@ -951,9 +965,10 @@ public:
 					    .detail("data", result.data.size())
 					    .detail("bytes", *pLimitBytes);
 				loop {
-					if (done)
+					if (done) // If the storage server shuts down (or something related) then end the read range
 						return false;
-					if (data->storageVersion() > version) {
+					if (data->storageVersion() >
+					    version) { // The transaction is too old so we can no longer read from the ptree
 						if (trace)
 							TraceEvent("Nim_transactionOld").detail("rangeReadNum", rangeReadNum);
 						error = transaction_too_old();
@@ -961,9 +976,10 @@ public:
 					}
 					if (trace)
 						TraceEvent("Nim_loop2");
-					if (limit <= 0 || *pLimitBytes <= 0)
+					if (limit <= 0 || *pLimitBytes <= 0) // exceed limit constraints
 						return false;
 					if (!vCurrent || vCurrent.key() >= range.end) {
+						// If the ptree exceeds the range then only add kv pairs from the storage engine
 						if (trace)
 							TraceEvent("Nim_case 1").detail("rangeReadNum", rangeReadNum);
 						if (kvOpt.present()) {
@@ -976,9 +992,12 @@ public:
 						}
 						return true;
 					}
+
 					if (!kvOpt.present()) {
+						// If kvOpt is empty then there are no more results on disk so we continue iterate through only
+						// the ptree and adding relevant results
 						finishedDisk = true;
-						if (vCurrent->isClearTo()) {
+						if (vCurrent->isClearTo()) { // dont add the key if its part of a clear range
 							++vCurrent;
 							continue;
 						}
@@ -994,6 +1013,8 @@ public:
 					ASSERT(!finishedDisk);
 					KeyValueRef kv = kvOpt.get();
 					if (kv.key < vCurrent.key()) {
+						// If the key from the storage engine is smaller than the ptree key
+						// then add the storage engine key to the results
 						if (trace)
 							TraceEvent("Nim_case 3")
 							    .detail("key", kv.key)
@@ -1004,7 +1025,8 @@ public:
 						decrementLimits(kv);
 						return true;
 					} else if (vCurrent->isClearTo()) {
-						KeyRef skipKey = vCurrent->getEndKey();
+						// Encounter a clear range in the ptree
+						KeyRef skipKey = vCurrent->getEndKey(); // get the end of the clear range
 						if (trace)
 							TraceEvent("Nim_case 4 skipKey")
 							    .detail("curKey", vCurrent.key())
@@ -1012,6 +1034,8 @@ public:
 							    .detail("rangeReadNum", rangeReadNum)
 							    .detail("disk", kv.key);
 						++vCurrent;
+						// If the end of the clear range is greater than the key from disk then tell the storage engine
+						// to skip to the end of the clear range (otherwise keep iterating through the ptree)
 						if (!vCurrent || vCurrent.key() > kv.key)
 							return skipKey;
 						if (trace)
@@ -1021,6 +1045,8 @@ public:
 							    .detail("clearTo", vCurrent->isClearTo())
 							    .detail("disk", kv.key);
 					} else if (kv.key == vCurrent.key()) {
+						// If the key on disk equals the key in the ptree then use the one from the ptree (as its more
+						// recent)
 						KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
 						if (trace)
 							TraceEvent("Nim_case 5").detail("key", kvRef).detail("rangeReadNum", rangeReadNum);
@@ -1029,6 +1055,7 @@ public:
 						++vCurrent;
 						return true;
 					} else {
+						// Add the key from the ptree if its less than the one on disk
 						KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
 						if (trace)
 							TraceEvent("Nim_case 6")
@@ -1040,7 +1067,7 @@ public:
 						++vCurrent;
 					}
 				}
-			} else {
+			} else { // limit < 0 (results in desc order)
 				if (trace)
 					TraceEvent("Nim_reverse").detail("rangeReadNum", rangeReadNum);
 				loop {
@@ -1056,6 +1083,7 @@ public:
 						return false;
 					if (!vCurrent || (!vCurrent->isClearTo() && vCurrent.key() < range.begin) ||
 					    (vCurrent->isClearTo() && vCurrent->getEndKey() < range.begin)) {
+						// if the ptree key appears before the given range then only add results from disk
 						if (trace)
 							TraceEvent("Nim_case 1").detail("rangeReadNum", rangeReadNum);
 						if (kvOpt.present()) {
@@ -1068,7 +1096,10 @@ public:
 						}
 						return true;
 					}
+
 					if (!kvOpt.present()) {
+						// If kvOpt is empty then there are no more results on disk so we continue to iterate through
+						// only the ptree and adding relevant results
 						finishedDisk = true;
 						if (vCurrent->isClearTo()) {
 							--vCurrent;
@@ -1087,6 +1118,7 @@ public:
 					KeyValueRef kv = kvOpt.get();
 					if ((vCurrent->isClearTo() && kv.key > vCurrent->getEndKey()) ||
 					    (!vCurrent->isClearTo() && kv.key > vCurrent.key())) {
+						// the key on disk is larger than the one in the ptree so go with the key on disk
 						if (trace)
 							TraceEvent("Nim_case 3")
 							    .detail("key", kv.key)
@@ -1097,17 +1129,26 @@ public:
 						decrementLimits(kv);
 						return true;
 					} else if (vCurrent->isClearTo()) {
+						// reached a clear range in the ptree
 						KeyRef skipKey = vCurrent.key();
 						if (kv.key == vCurrent->getEndKey()) {
+							// When we reach this condition it must be true that kv.key <= end of clear range (otherwise
+							// caught by case above). Since a clear range is non inclusive of the last element, if
+							// kv.key
+							// == end of clear range then we must add it to the result set
 							result.data.push_back_deep(result.arena, kv);
 							decrementLimits(kv);
 						}
 						if (trace)
 							TraceEvent("Nim_case 4").detail("key", skipKey).detail("rangeReadNum", rangeReadNum);
 						--vCurrent;
+						// Only ask the disk to skip to the begining of the clear range if kv > begin of clear and <=
+						// end of clear
 						if (!vCurrent || vCurrent.key() < kv.key)
 							return skipKey;
 					} else if (kv.key == vCurrent.key()) {
+						// If the key on disk equals the key in the ptree then use the one from the ptree (as its more
+						// recent)
 						KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
 						if (trace)
 							TraceEvent("Nim_case 5").detail("key", kvRef).detail("rangeReadNum", rangeReadNum);
@@ -1116,6 +1157,7 @@ public:
 						--vCurrent;
 						return true;
 					} else {
+						// ptree key is larger than the on disk key so add it to the result set
 						KeyValueRef kvRef = KeyValueRef(vCurrent.key(), vCurrent->getValue());
 						if (trace)
 							TraceEvent("Nim_case 6").detail("key", kvRef).detail("rangeReadNum", rangeReadNum);
@@ -1769,6 +1811,9 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 		result.cached = false;
 
 	if (data->storage.usesReadRangeResultWriter()) {
+		// Utilize the range read function on disk with the result writer
+
+		// TODO: remove these variables (only used to assist in tracing)
 		state int rNum = ++data->rangeReadNum;
 		state bool trace = false;
 		// TraceEvent("Nim_in here");
@@ -1789,12 +1834,15 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			throw transaction_too_old();
 		}
 
+		// modify the range based on clears at the begining/end
 		if (limit >= 0) {
 			if (trace)
 				TraceEvent("Nim_premodifiedRange")
 				    .detail("begin", range.begin)
 				    .detail("end", range.end)
 				    .detail("sVersion", data->storageVersion());
+
+			// encounter a clear range at the begining so set range.begin to the end of the clear range
 			vCurrent = view.lastLessOrEqual(range.begin);
 			if (trace)
 				TraceEvent("Nim_lastLessEqual").detail("begin", readBegin).detail("end", readEnd);
@@ -1806,15 +1854,11 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			vCurrent = view.lower_bound(readBegin);
 			if (trace)
 				TraceEvent("Nim_modifiedRange").detail("begin", readBegin).detail("end", readEnd);
-			if (readBegin > readEnd) {
-				ASSERT(result.data.size() == 0);
-				result.more = false;
-				return result;
-			}
 		} else {
 			vCurrent = view.lastLess(range.end);
 
-			// A clear might extend all the way to range.end
+			// A clear might extend all the way to range.end so set the end of the range to the begining of the clear
+			// range
 			if (vCurrent && vCurrent->isClearTo() && vCurrent->getEndKey() >= range.end) {
 				readEnd = vCurrent.key();
 				--vCurrent;
@@ -1822,11 +1866,13 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 				readEnd = range.end;
 			}
 			readBegin = range.begin;
-			if (readBegin > readEnd) {
-				ASSERT(result.data.size() == 0);
-				result.more = false;
-				return result;
-			}
+		}
+
+		// After modification if range begin > range end then return that we have no results
+		if (readBegin > readEnd) {
+			ASSERT(result.data.size() == 0);
+			result.more = false;
+			return result;
 		}
 		if (trace)
 			TraceEvent("Nim_startRangeReadModified")
@@ -1838,7 +1884,9 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 		state Reference<ReadRangeResultWriter> resultWriter = makeReference<ReadRangeResultWriter>(
 		    vCurrent, data, version, range, limit, pLimitBytes, rNum, trace, result);
 		try {
+			// Send the range read to the storage engine
 			wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), resultWriter, limit));
+			// We may have encountered an error in the range read that we haven't thrown so check it here
 			if (resultWriter->getError().present()) {
 				throw resultWriter->getError().get();
 			}
@@ -1852,7 +1900,9 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 				    .detail("readVersion", version);
 			return result;
 		} catch (Error& e) {
-			// TraceEvent("Nim_SS caught error1").detail("code", e.code()).detail("rangeReadNum", rNum);
+			// We need to set done here because an actor cancelled exception can get thrown
+			// but our readRange function will still keep going and can result in a segfault if it
+			// tries to access the StorageServer* pointer
 			resultWriter->setDone(true);
 			// TraceEvent("Nim_SS caught error2").detail("code", e.code()).detail("rangeReadNum", rNum);
 			throw e;
