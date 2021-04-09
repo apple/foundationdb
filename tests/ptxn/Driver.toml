@@ -1,0 +1,9 @@
+[[test]]
+testTitle = 'Test Team-Partititon'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/driver'

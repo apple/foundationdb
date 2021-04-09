@@ -130,6 +130,39 @@ extern bool isAssertDisabled(int line);
 #define UNREACHABLE()                                                                                                  \
 	{ throw internal_error_impl("unreachable", __FILE__, __LINE__); }
 
+// Assert an specific exception is thrown when evaluating the expression
+#define ASSERT_THROW(expression, exception)                                                                            \
+	do {                                                                                                               \
+		bool _____exception_happened = false;                                                                          \
+		try { expression; }                                                                                            \
+		catch(exception& ex) { _____exception_happened = true; }                                                       \
+		if (!(_____exception_happened || isAssertDisabled(__LINE__))) {                                                \
+			throw internal_error_impl(#expression " - " #exception, __FILE__, __LINE__);                               \
+		}                                                                                                              \
+	} while (false)
+
+// Assert a FDB exception is thrown when evaluating the expression
+#define ASSERT_THROW_FDB_ERROR(expression, fdb_error)                                                                  \
+	do {                                                                                                               \
+		bool _____exception_happened = false;                                                                          \
+		try { expression; }                                                                                            \
+		catch(Error& ex) { _____exception_happened = ex.code() == fdb_error().code(); }                                \
+		if (!(_____exception_happened || isAssertDisabled(__LINE__))) {                                                \
+			throw internal_error_impl(#expression, __FILE__, __LINE__);                                                \
+		}                                                                                                              \
+	} while (false)
+
+// Assert an exception (could be any type) is thrown when evaluating the expression
+#define ASSERT_THROW_ANY_EXCEPTION(expression)                                                                         \
+	do {                                                                                                               \
+		bool _____exception_happened = false;                                                                          \
+		try { expression; }                                                                                            \
+		catch(...) { _____exception_happened = true; }                                                                 \
+		if (!(_____exception_happened || isAssertDisabled(__LINE__))) {                                                \
+			throw internal_error_impl(#expression, __FILE__, __LINE__);                                                \
+		}                                                                                                              \
+	} while (false)
+
 enum assert_op { EQ, NE, LT, GT, LE, GE };
 
 // TODO: magic so this works even if const-ness doesn not match.

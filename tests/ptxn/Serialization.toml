@@ -1,0 +1,19 @@
+[[test]]
+testTitle = 'Test HeaderedItemsSerializerBase'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/team/test/serialization'
+
+[[test]]
+testTitle = 'Test ProxyTLogPushMessageSerializer'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/team/test/ProxyTLogPushMessageSerializer'

@@ -22,14 +22,10 @@
 #include "flow/Trace.h"
 #include "flow/Knobs.h"
 #include "flow/UnitTest.h"
-#include <iostream>
-using std::cout;
-using std::endl;
+
 using std::make_pair;
 
 bool g_crashOnError = false;
-
-#include <iostream>
 
 Error Error::fromUnvalidatedCode(int code) {
 	if (code < 0 || code > 30000) {
@@ -94,7 +90,6 @@ Error internal_error_impl(const char* a_nm,
 Error::Error(int error_code) : error_code(error_code), flags(0) {
 	if (TRACE_SAMPLE())
 		TraceEvent(SevSample, "ErrorCreated").detail("ErrorCode", error_code);
-	// std::cout << "Error: " << error_code << std::endl;
 	if (error_code >= 3000 && error_code < 6000) {
 		{
 			TraceEvent te(SevError, "SystemError");
@@ -182,6 +177,13 @@ TEST_CASE("/flow/AssertTest") {
 	size_t ln = 43;
 	ASSERT(sz < ln);
 	ASSERT_EQ(0xFFFFFFFF, (int32_t)-1);
+
+	auto throwFDBErrorFunc = []() { throw serialization_failed(); };
+	ASSERT_THROW_FDB_ERROR(throwFDBErrorFunc(), serialization_failed);
+
+	auto throwAnyErrorFunc = []() { throw std::runtime_error("runtimeError"); };
+	ASSERT_THROW(throwAnyErrorFunc(), std::runtime_error);
+	ASSERT_THROW_ANY_EXCEPTION(throwAnyErrorFunc());
 
 	return Void();
 }
