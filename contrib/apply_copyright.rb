@@ -6,7 +6,7 @@ $copyright = <<EOF
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-YEAR Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ def main
 
     content = File.readlines(path)
     if content[0] != "/*\n"
-        content.unshift($copyright.gsub(/FILENAME/, file_name))
+        content.unshift($copyright.gsub(/FILENAME/, file_name).gsub(/YEAR/, Time.new.year.to_s))
         File.open(path, 'w') { |stream| stream.puts(content) }
     end
   end
