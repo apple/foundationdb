@@ -1,4 +1,5 @@
 set(FDBCLIENT_SRCS
+  AnnotateActor.cpp
   AsyncFileS3BlobStore.actor.cpp
   AsyncFileS3BlobStore.actor.h
   AsyncTaskThread.actor.cpp

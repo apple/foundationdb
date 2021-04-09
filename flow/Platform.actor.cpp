@@ -50,6 +50,8 @@
 
 #include "fdbrpc/IAsyncFile.h"
 
+#include "fdbclient/AnnotateActor.h"
+
 #ifdef _WIN32
 #include <windows.h>
 #include <winioctl.h>
@@ -3689,31 +3691,31 @@ void* sampleThread(void* arg) {
 		}
 		printf("\n");
 
-		// Get lineage of actors waiting on disk.
-		auto diskAlps = IAsyncFileSystem::filesystem()->getActorLineageSet().copy();
-		// printf("Disk ALPs: %d\n", diskAlps.size());
+		for (const auto& [waitState, lineageFn] : samples) {
+			auto alps = lineageFn();
 
-		// TODO: Get lineage of actors waiting on network
-		auto networkAlps = g_network->getActorLineageSet().copy();
-		printf("Network ALPs: %d\n", networkAlps.size());
+			// TODO: Serialize collected actor linage properties
 
-		// TODO: Call collect on all actor lineages
-		for (auto actorLineage : networkAlps) {
-			auto stack = actorLineage->stack(&StackLineage::actorName);
-			while (!stack.empty()) {
-				printf("%s ", stack.top());
-				stack.pop();
+			printf("Wait State #%d ALPs (%d):\n", waitState, alps.size());
+			for (auto actorLineage : alps) {
+				auto stack = actorLineage->stack(&StackLineage::actorName);
+				while (!stack.empty()) {
+					printf("%s ", stack.top());
+					stack.pop();
+				}
+				printf("\n");
 			}
-			printf("\n");
 		}
-
-		// TODO: Serialize collected actor linage properties
 	}
 
 	return nullptr;
 }
 
 void setupSamplingProfiler() {
+	samples[WaitState::Disk] = std::bind(&ActorLineageSet::copy, std::ref(g_network->getActorLineageSet()));
+	samples[WaitState::Network] =
+	    std::bind(&ActorLineageSet::copy, std::ref(IAsyncFileSystem::filesystem()->getActorLineageSet()));
+
 	// TODO: Add knob
 	TraceEvent("StartingSamplingProfilerThread");
 	startThread(&sampleThread, nullptr);
