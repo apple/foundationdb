@@ -15,7 +15,7 @@ set(TEST_EXCLUDE ".^" CACHE STRING "Exclude all tests matching the given regex")
 if(WITH_PYTHON)
   find_program(OLD_FDBSERVER_BINARY
     fdbserver
-    HINTS /usr/sbin /usr/libexec /usr/local/sbin /usr/local/libexec)
+    HINTS /opt/foundationdb/old /usr/sbin /usr/libexec /usr/local/sbin /usr/local/libexec)
   if(OLD_FDBSERVER_BINARY)
     message(STATUS "Use old fdb at ${OLD_FDBSERVER_BINARY}")
   else()

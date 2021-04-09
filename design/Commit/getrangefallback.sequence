@@ -1,0 +1,80 @@
+title GetRange Fallback
+
+participantgroup **Client** (NativeAPI.actor.cpp)
+	participant "getRangeFallback" as gRF
+    participant "getKey" as gK
+    participant "getExactRange" as gER
+    participant "getKeyRangeLocations" as gKRL
+end
+
+participantgroup **Storage Server** (storageserver.actor.cpp)
+    participant "serveGetKeyValuesRequests" as sGKVR
+    participant "serveGetKeyRequests" as sGKR
+end
+
+autoactivation off
+
+opt Key need resolve
+	gRF -> gK: KeySelector
+    
+    box over gK: Wait for the version
+    
+    note right of gK: <color:#green>//GetKeyAttachID//</color>
+    note right of gK: <color:#blue>AfterVersion</color>
+    
+    box over gK: See getKeyLocation in Get
+    
+    note right of gK: <color:#blue>Before</color>
+    
+    gK -> sGKR: GetKeyRequest
+    sGKR --> gK: GetKeyReply
+    
+    alt Success
+	    note right of gK: <color:#blue>After</color>
+        gK --> gRF: Key
+    else Error
+    	note right of gK: <color:#blue>Error</color>
+    end
+end
+
+box over gRF: Update read version if necessary
+
+gRF -> gER: Version, KeyRangeRef
+
+loop Loop over keys in the range
+	gER -> gKRL: KeyRange
+    
+    note right of gKRL: <color:#blue>Before</color>
+    box over gKRL: Get the locations
+    note right of gKRL: <color:#blue>After</color>
+    
+    gKRL --> gER: LocationInfo
+    
+    loop Loop over shards
+    	note right of gER: <color:#blue>Before</color>
+        
+        gER -> sGKVR: GetKeyValuesRequest
+    
+ 	    note right of sGKVR: <color:#lightblue>--storageserver.getKeyValues.Before--</color>
+    
+    	box over sGKVR: Wait the SS version
+    
+    	note right of sGKVR: <color:#lightblue>--storageserver.getKeyValues.AfterVersion--</color>
+    
+    	box over sGKVR: Realign the keys
+    
+    	note right of sGKVR: <color:#lightblue>--storageserver.getKeyValues.AfterKeys--</color>
+    
+    	alt No KV pair stored in this server
+    		note right of sGKVR: <color:#lightblue>--storageserver.getKeyValues.Send--</color>
+        	sGKVR --> gER: GetKeyValuesReply (empty)
+    	else KV pair found
+    		note right of sGKVR: <color:#lightblue>--storageserver.getKeyValues.AfterReadRange--</color>
+        	sGKVR --> gER: GetKeyValuesReply
+    	end
+        
+        note right of gER: <color:#blue>After</color>
+    end
+end
+
+gER --> gRF: RangeResultRef

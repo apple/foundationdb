@@ -1,0 +1,68 @@
+title Get
+
+participantgroup **Client** (NativeAPI.actor.cpp)
+	participant "Transaction::get" as get
+    participant "Transaction::getReadVersion" as gRV
+    participant "getValue" as gV
+    participant "getKeyLocation" as gKL
+end
+
+participantgroup **CommitProxy** (CommitProxyServer.actor.cpp)
+	participant "doKeyServerLocationRequest" as dKSLR
+end
+
+participantgroup **Storage Server** (storageserver.actor.cpp)
+	participant "serveGetValueRequests" as sGVR
+    participant "getValueQ" as gVQ
+end 
+
+participantgroup **KeyValueStoreSQLite** (KeyValueStoreSQLite.actor.cpp)
+	participant "KeyValueStoreSQLite::Reader::action" as axn
+end
+
+autoactivation off
+
+get -> gRV:
+box over gRV: //Consult Get Read Version section//
+gRV --> get: Version
+
+get -> gV: Version, Key
+gV -> gKL: Key
+note right of gKL: <color:#blue>Before</color>
+
+gKL -> dKSLR: GetKeyServerLocationsRequest
+dKSLR --> gKL: GetKeyServerLocationsReply
+
+note right of gKL: <color:#blue>After</color>
+
+gKL --> gV: LocationInfo
+
+note right of gV: <color:#green>//GetValueAttachID//</color>
+
+note right of gV: <color:#blue>Before</color>
+
+gV -> sGVR: GetValueRequest
+note right of sGVR: <color:#lightblue>--storageServer.received--</color>
+
+sGVR -> gVQ: GetValueRequest
+
+note right of gVQ: <color:#lightblue>--getValueQ.DoRead--</color>
+
+note right of gVQ: <color:#lightblue>--getValueQ.AfterVersion--</color>
+
+gVQ -> axn: Key
+
+note right of axn: <color:#lightblue>--Reader.Before--</color>
+note right of axn: <color:#lightblue>--Reader.After--</color>
+
+axn --> gVQ: Value
+note right of gVQ: <color:#lightblue>--getValueQ.AfterRead--</color>
+
+gVQ --> gV: GetValueReply
+alt Error
+  	note right of gV: <color:#blue>Error</color>
+	gV --> get: Error
+else Success
+	note right of gV: <color:#blue>After</color>
+	gV --> get: Value
+end

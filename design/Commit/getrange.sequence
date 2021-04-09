@@ -1,0 +1,60 @@
+title GetRange
+
+participantgroup **Client** (NativeAPI.actor.cpp)
+	participant "Transaction::getRange" as tGR
+    participant "Transaction::getReadVersion" as gRV
+    participant "getRange" as gR
+    participant "getKeyLocation" as gKL
+end
+
+participantgroup **Storage Server** (storageserver.actor.cpp)
+    participant "getKeyValuesQ" as gKVQ
+end
+
+autoactivation off
+
+tGR -> gRV:
+tGR -> gR: KeyRange
+gRV -->(2) gR: Version
+
+loop Keys in the range
+	gR -> gKL: Key
+    
+    box over gKL: //Consult Get section//
+    
+    gKL --> gR: LocationInfo
+
+	  note right of gR: <color:#blue>Before</color>
+    
+    gR -> gKVQ: GetKeyValuesRequest
+    
+    note right of gKVQ: <color:#lightblue>--storageserver.getKeyValues.Before--</color>
+    
+    box over gKVQ: Wait the SS version
+    
+    note right of gKVQ: <color:#lightblue>--storageserver.getKeyValues.AfterVersion--</color>
+    
+    box over gKVQ: Realign the keys
+    
+    note right of gKVQ: <color:#lightblue>--storageserver.getKeyValues.AfterKeys--</color>
+    
+    alt No KV pair stored in this server
+    	note right of gKVQ: <color:#lightblue>--storageserver.getKeyValues.Send--</color>
+        gKVQ --> gR: GetKeyValuesReply (empty)
+    else KV pair found
+    	note right of gKVQ: <color:#lightblue>--storageserver.getKeyValues.AfterReadRange--</color>
+        gKVQ --> gR: GetKeyValuesReply
+    end
+    
+    note right of gR: <color:#blue>After</color>
+    
+    box over gR: Combines the results
+end
+
+alt Error
+	note right of gR: <color:#blue>Error</color>
+    box over gR: Fallback
+	gR -> tGR: RangeResultRef or Error
+else Successful
+	gR -> tGR: RangeResultRef
+end
