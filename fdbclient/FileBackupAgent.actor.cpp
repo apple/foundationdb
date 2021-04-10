@@ -4047,10 +4047,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		for (const RangeFile& f : restorable.get().ranges) {
 			files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
 		}
-		if (!CLIENT_KNOBS->RESTORE_IGNORE_LOG_FILES) {
-			for (const LogFile& f : restorable.get().logs) {
-				files.push_back({ f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion });
-			}
+		for (const LogFile& f : restorable.get().logs) {
+			files.push_back({ f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion });
 		}
 
 		state std::vector<RestoreConfig::RestoreFile>::iterator start = files.begin();
