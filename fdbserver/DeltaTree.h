@@ -235,16 +235,19 @@ public:
 
 		// construct root node
 		DecodedNode(Node* raw, const T* prev, const T* next, Arena& arena, bool large)
-		  : raw(raw), parent(nullptr), leftChild(nullptr), rightChild(nullptr), prev(prev), next(next),
-		    item(raw->delta(large).apply(raw->delta(large).getPrefixSource() ? *prev : *next, arena)), large(large) {
+		  : raw(raw), parent(nullptr), otherAncestor(nullptr), leftChild(nullptr), rightChild(nullptr), prev(prev),
+		    next(next), item(raw->delta(large).apply(raw->delta(large).getPrefixSource() ? *prev : *next, arena)),
+		    large(large) {
 			// printf("DecodedNode1 raw=%p delta=%s\n", raw, raw->delta(large).toString().c_str());
 		}
 
 		// Construct non-root node
 		// wentLeft indicates that we've gone left to get to the raw node.
 		DecodedNode(Node* raw, DecodedNode* parent, bool wentLeft, Arena& arena)
-		  : parent(parent), large(parent->large), prev(wentLeft ? parent->prev : &parent->item),
-		    next(wentLeft ? &parent->item : parent->next), leftChild(nullptr), rightChild(nullptr), raw(raw),
+		  : parent(parent), large(parent->large),
+		    otherAncestor(wentLeft ? parent->getPrevAncestor() : parent->getNextAncestor()),
+		    prev(wentLeft ? parent->prev : &parent->item), next(wentLeft ? &parent->item : parent->next),
+		    leftChild(nullptr), rightChild(nullptr), raw(raw),
 		    item(raw->delta(large).apply(raw->delta(large).getPrefixSource() ? *prev : *next, arena)) {
 			// printf("DecodedNode2 raw=%p delta=%s\n", raw, raw->delta(large).toString().c_str());
 		}
@@ -255,34 +258,12 @@ public:
 		// Returns true if otherAncestor is the next ("least greator") ancestor
 		bool otherAncestorNext() const { return parent && parent->rightChild == this; }
 
-		// Gets the first ancestor to the left
-		DecodedNode* getPrevAncestor() const {
-			DecodedNode* p = parent;
-			const DecodedNode* child = this;
-			// While p is not null and p is not to the left of child (meaning child is p's right child)
-			while (p != nullptr && p->rightChild != child) {
-				// Otherwise, move up
-				child = p;
-				p = p->parent;
-			}
-			return p;
-		}
+		DecodedNode* getPrevAncestor() const { return otherAncestorPrev() ? otherAncestor : parent; }
 
-		DecodedNode* getNextAncestor() const {
-			DecodedNode* p = parent;
-			const DecodedNode* child = this;
-			// While p is not null and p is not to the right of child (meaning child is p's left child)
-			while (p != nullptr && p->leftChild != child) {
-				// Otherwise, move up
-				child = p;
-				p = p->parent;
-			}
-			return p;
-		}
+		DecodedNode* getNextAncestor() const { return otherAncestorNext() ? otherAncestor : parent; }
 
 		DecodedNode* jumpUpNext(DecodedNode* root, bool& othersChild) const {
 			if (parent != nullptr) {
-				DecodedNode* otherAncestor = otherAncestorPrev() ? getPrevAncestor() : getNextAncestor();
 				if (parent->rightChild == this) {
 					return otherAncestor;
 				}
@@ -296,7 +277,6 @@ public:
 
 		DecodedNode* jumpUpPrev(DecodedNode* root, bool& othersChild) const {
 			if (parent != nullptr) {
-				DecodedNode* otherAncestor = otherAncestorPrev() ? getPrevAncestor() : getNextAncestor();
 				if (parent->leftChild == this) {
 					return otherAncestor;
 				}
@@ -310,26 +290,22 @@ public:
 
 		DecodedNode* jumpNext(DecodedNode* root) const {
 			if (otherAncestorNext()) {
-				DecodedNode* otherAncestor = getNextAncestor();
 				return (otherAncestor != nullptr) ? otherAncestor : rightChild;
 			} else {
 				if (this == root) {
 					return rightChild;
 				}
-				DecodedNode* otherAncestor = getPrevAncestor();
 				return (otherAncestor != nullptr) ? otherAncestor->rightChild : root;
 			}
 		}
 
 		DecodedNode* jumpPrev(DecodedNode* root) const {
 			if (otherAncestorPrev()) {
-				DecodedNode* otherAncestor = getPrevAncestor();
 				return (otherAncestor != nullptr) ? otherAncestor : leftChild;
 			} else {
 				if (this == root) {
 					return leftChild;
 				}
-				DecodedNode* otherAncestor = getNextAncestor();
 				return (otherAncestor != nullptr) ? otherAncestor->leftChild : root;
 			}
 		}
@@ -341,6 +317,7 @@ public:
 		bool large; // Node size
 		Node* raw;
 		DecodedNode* parent;
+		DecodedNode* otherAncestor;
 		DecodedNode* leftChild;
 		DecodedNode* rightChild;
 		const T* prev; // greatest ancestor to the left, or tree lower bound
@@ -497,6 +474,7 @@ public:
 			newNode->leftChild = nullptr;
 			newNode->rightChild = nullptr;
 			newNode->raw = raw;
+			newNode->otherAncestor = addLeftChild ? n->getPrevAncestor() : n->getNextAncestor();
 			newNode->prev = prev;
 			newNode->next = next;
 
