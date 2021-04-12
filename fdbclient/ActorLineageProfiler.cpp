@@ -60,7 +60,19 @@ class Packer : public msgpack::packer<msgpack::sbuffer> {
 			static void populate(VisitorMap&) {}
 		};
 
-		visitor_t() { populate_visitor_map<int64_t, uint64_t, bool, float, double>::populate(visitorMap); }
+		visitor_t() {
+			populate_visitor_map<int64_t,
+			                     uint64_t,
+			                     bool,
+			                     float,
+			                     double,
+			                     std::string,
+			                     std::string_view,
+			                     std::vector<std::any>,
+			                     std::map<std::any, std::any>,
+			                     std::map<std::string_view, std::any>,
+			                     std::unordered_map<std::any, std::any>>::populate(visitorMap);
+		}
 
 		void visit(const std::any& val, Packer& packer) {
 			auto iter = visitorMap.find(val.type());
