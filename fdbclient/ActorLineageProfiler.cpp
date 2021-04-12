@@ -69,9 +69,8 @@ class Packer : public msgpack::packer<msgpack::sbuffer> {
 			                     std::string,
 			                     std::string_view,
 			                     std::vector<std::any>,
-			                     std::map<std::any, std::any>,
-			                     std::map<std::string_view, std::any>,
-			                     std::unordered_map<std::any, std::any>>::populate(visitorMap);
+			                     std::map<std::string, std::any>,
+			                     std::map<std::string_view, std::any>>::populate(visitorMap);
 		}
 
 		void visit(const std::any& val, Packer& packer) {
