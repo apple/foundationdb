@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # fdb_c_version.py
 #
@@ -30,9 +30,9 @@ def error(message):
 
 def get_version_string(library_path):
     try:
-        lib = ctypes.cdll.LoadLibrary(os.path.abspath(library_path))
+        lib = ctypes.cdll.LoadLibrary(library_path)
     except Exception as e:
-        error('Could not load library %r: %s' % (library_path, e.message))
+        error('Could not load library %r: %s' % (library_path, str(e)))
 
     lib.fdb_get_error.restype = ctypes.c_char_p
 
@@ -41,13 +41,13 @@ def get_version_string(library_path):
         if r != 0:
             error('Error setting API version: %s (%d)' % (lib.fdb_get_error(r), r))
     except Exception as e:
-        error('Error calling fdb_select_api_version_impl: %s' % e.message)
+        error('Error calling fdb_select_api_version_impl: %s' % str(e))
 
     try:
         lib.fdb_get_client_version.restype = ctypes.c_char_p
-        version_str = lib.fdb_get_client_version()
+        version_str = lib.fdb_get_client_version().decode('utf-8')
     except Exception as e:
-        error('Error getting version information from client library: %s' % e.message)
+        error('Error getting version information from client library: %s' % str(e))
 
     version_components = version_str.split(',')
     package_version = '.'.join(version_components[0].split('.')[0:2])
