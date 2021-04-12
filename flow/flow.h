@@ -42,6 +42,7 @@
 #include <utility>
 #include <algorithm>
 #include <memory>
+#include <mutex>
 
 #include "flow/Platform.h"
 #include "flow/FastAlloc.h"
@@ -453,14 +454,23 @@ struct ActorLineage : ReferenceCounted<ActorLineage> {
 private:
 	std::unordered_map<std::string_view, LineagePropertiesBase*> properties;
 	Reference<ActorLineage> parent;
+	mutable std::mutex mutex;
+	using Lock = std::unique_lock<std::mutex>;
 
 public:
 	ActorLineage();
 	~ActorLineage();
-	bool isRoot() const { return parent.getPtr() == nullptr; }
-	void makeRoot() { parent.clear(); }
+	bool isRoot() const {
+		Lock _{ mutex };
+		return parent.getPtr() == nullptr;
+	}
+	void makeRoot() {
+		Lock _{ mutex };
+		parent.clear();
+	}
 	template <class T, class V>
 	V& modify(V T::*member) {
+		Lock _{ mutex };
 		auto& res = properties[T::name];
 		if (!res) {
 			res = new T{};
@@ -470,6 +480,7 @@ public:
 	}
 	template <class T, class V>
 	std::optional<V> get(V T::*member) const {
+		Lock _{ mutex };
 		auto current = this;
 		while (current != nullptr) {
 			auto iter = current->properties.find(T::name);
@@ -485,6 +496,7 @@ public:
 	}
 	template <class T, class V>
 	std::vector<V> stack(V T::*member) const {
+		Lock _{ mutex };
 		auto current = this;
 		std::vector<V> res;
 		while (current != nullptr) {
