@@ -80,7 +80,7 @@ public:
 
 	// Range read implementation which utilizes a ResultWriter interface (defined above)
 	virtual Future<Void> readRange(KeyRangeRef keys, Reference<IReadRangeResultWriter> resultWriter, int rowLimit) {
-		return Void();
+		throw unsupported_operation();
 	};
 
 	// To debug MEMORY_RADIXTREE type ONLY

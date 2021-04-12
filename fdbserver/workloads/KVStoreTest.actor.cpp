@@ -28,6 +28,7 @@
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/flow.h"
 
 extern IKeyValueStore* makeDummyKeyValueStore();
 
@@ -102,43 +103,46 @@ private:
 	T sumSQ;
 	uint64_t N;
 };
+
+// Result writer used for testing range reads with clear ranges
 struct ClearRangeResultWriter : public IReadRangeResultWriter {
-	// Result writer used for testing range reads with clear ranges
-	int rowLimit, byteLimit;
+	int rowLimit, maxRowLimit, byteLimit, maxByteLimit;
 	Standalone<RangeResultRef> result;
-	Key clearStart, clearEnd;
+	Optional<Key> clearStart, clearEnd;
 	bool forward = true;
 
-	ClearRangeResultWriter(int rowLimit, int byteLimit) : rowLimit(rowLimit), byteLimit(byteLimit) {
+	ClearRangeResultWriter(int rowLimit, int byteLimit)
+	  : rowLimit(rowLimit), byteLimit(byteLimit), maxRowLimit(rowLimit), maxByteLimit(byteLimit) {
 		if (this->rowLimit < 0) {
 			forward = false;
 			this->rowLimit = -this->rowLimit;
 		}
 	}
 
-	void setClearRange(Key clearStart, Key clearEnd) {
+	void setClearRange(Optional<Key> clearStart, Optional<Key> clearEnd) {
 		this->clearStart = clearStart;
 		this->clearEnd = clearEnd;
 	}
 
-	void clearResults() { result = Standalone<RangeResultRef>(); }
+	void clearResults() {
+		result = Standalone<RangeResultRef>();
+		rowLimit = maxRowLimit;
+		byteLimit = maxByteLimit;
+	}
 
+	/*
+	    - What this writer does is pass through any values which are not part of a clear range
+	    - If we encounter a key that falls within a clear range then we pass either the begining or the end
+	        of the range (depending on the sign of the limit)
+	*/
 	std::variant<bool, KeyRef> operator()(Optional<KeyValueRef> kv) override {
-		/*
-		    - What this writer does is pass through any values which are not part of a clear range
-		    - If we encounter a key that falls within a clear range then we pass either the begining or the end
-		      of the range (depending on the sign of the limit)
-		*/
 		if (rowLimit <= 0 || byteLimit <= 0)
 			return false;
 		if (!kv.present())
 			return false;
-		if (clearStart.toString() != "" && clearEnd.toString() != "" && kv.get().key >= clearStart &&
-		    kv.get().key < clearEnd) {
-			if (forward)
-				return clearEnd;
-			else
-				return clearStart;
+		if (clearStart.present() && clearEnd.present() && kv.get().key >= clearStart.get() &&
+		    kv.get().key < clearEnd.get()) {
+			return forward ? clearEnd.get() : clearStart.get();
 		}
 		rowLimit--;
 		result.push_back_deep(result.arena(), kv.get());
@@ -301,14 +305,14 @@ struct KVStoreTestWorkload : TestWorkload {
 
 WorkloadFactory<KVStoreTestWorkload> KVStoreTestWorkloadFactory("KVStoreTest");
 
+/*
+    - This test attempts to simulate a range read with various clear ranges
+    - First we ask our old range read function to read a range of keys, lets say [a,m]
+    - Then we randomly pick a subset of these keys, lets say [d,i) and designate this as our "clear range"
+    - We then feed the range [a, m] to the new range read function and get the result
+    - We then assert if the result contains all the keys in the range [a, m] except for those in [d, i)
+*/
 ACTOR Future<Void> testRangeReadClearRanges(KVStoreTestWorkload* workload, KVTest* ptest) {
-	/*
-	    - This test attempts to simulate a range read with various clear ranges
-	    - First we ask our old range read function to read a range of keys, lets say [a,m]
-	    - Then we randomly pick a subset of these keys, lets say [d,i) and designate this as our "clear range"
-	    - We then feed the range [a, m] to the new range read function and get the result
-	    - We then assert if the result contains all the keys in the range [a, m] except for those in [d, i)
-	*/
 	state KVTest& test = *ptest;
 	state Key key;
 	state int byteLimt = 1 << 30;
@@ -391,10 +395,10 @@ ACTOR Future<Void> testRangeReadClearRanges(KVStoreTestWorkload* workload, KVTes
 	return Void();
 }
 
+/*
+    - Tests various edge cases with the new result writer range read interface
+*/
 ACTOR Future<Void> testReadRangeEdgeCases(KVStoreTestWorkload* workload, KVTest* ptest) {
-	/*
-	  - Tests various edge cases with the new result writer range read interface
-	*/
 	state KVTest& test = *ptest;
 	state Key key;
 	state int limit = 1000;
@@ -433,15 +437,22 @@ ACTOR Future<Void> testReadRangeEdgeCases(KVStoreTestWorkload* workload, KVTest*
 	ASSERT(resultWriter->result.size() > 0);
 	ASSERT(curIdx == resultWriter->result.size());
 
+	resultWriter->clearResults();
+
+	// Test a range read where the entire range is a clear
+	resultWriter->setClearRange(kv[0].key, keyAfter(kv[kv.size() - 1].key));
+	wait(test.store->readRange(KeyRangeRef(kv[0].key, keyAfter(kv[kv.size() - 1].key)), resultWriter, limit));
+	ASSERT(resultWriter->result.size() == 0);
+
 	return Void();
 }
 
+/*
+    - This test attempts to simulate a regular read range
+    - We enter a range of keys ["", "\XFF"] into both the old and new read range functions
+    - Once we get the results from the two we assert that they are identical
+*/
 ACTOR Future<Void> testRangeReadResultWriterPassThrough(KVStoreTestWorkload* workload, KVTest* ptest) {
-	/*
-	    - This test attempts to simulate a regular read range
-	    - We enter a range of keys ["", "\XFF"] into both the old and new read range functions
-	    - Once we get the results from the two we assert that they are identical
-	*/
 	state KVTest& test = *ptest;
 	state Key key = LiteralStringRef("\xff\xff\xff\xff");
 	state int byteLimt = 1 << 30;

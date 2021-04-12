@@ -18,8 +18,10 @@
  * limitations under the License.
  */
 
-#include <variant>
 #define SQLITE_THREADSAFE 0 // also in sqlite3.amalgamation.c!
+
+#include <variant>
+
 #include "flow/crc32c.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/CoroFlow.h"
