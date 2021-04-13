@@ -36,7 +36,6 @@
 #include "fdbclient/TagThrottle.h"
 
 #include "flow/DeterministicRandom.h"
-#include "flow/FastRef.h"
 #include "flow/Platform.h"
 
 #include "flow/TLSConfig.actor.h"
@@ -59,6 +58,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+#define FDB_API_VERSION 700
 /*
  * While we could just use the MultiVersionApi instance directly, this #define allows us to swap in any other IClientApi
  * instance (e.g. from ThreadSafeApi)
@@ -3123,7 +3123,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	state Database db;
 	state Reference<ReadYourWritesTransaction> tr;
-	// refactoring
+	// Note: refactoring work, will replace db when we have all commands through the general fdb interface
 	state Reference<IDatabase> db2;
 
 	state bool writeMode = false;
@@ -3162,11 +3162,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 		return 1;
 	}
 
+	// Note: refactoring work, will remove the above code finally
 	try {
 		db2 = API->createDatabase(opt.clusterFile.c_str());
 	} catch (Error& e) {
 		fprintf(stderr, "(CAPI)ERROR: %s (%d)\n", e.what(), e.code());
-		printf("(CAPI): Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
+		printf("(Refactoring): Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
 		return 1;
 	}
 
@@ -4881,9 +4882,8 @@ int main(int argc, char** argv) {
 	}
 
 	try {
-		// setupNetwork();
-		// refactoring fdbcli
-		API->selectApiVersion(700);
+		// Note: refactoring fdbcli, in progress
+		API->selectApiVersion(FDB_API_VERSION);
 		API->setupNetwork();
 		Future<int> cliFuture = runCli(opt);
 		Future<Void> timeoutFuture = opt.exit_timeout ? timeExit(opt.exit_timeout) : Never();
