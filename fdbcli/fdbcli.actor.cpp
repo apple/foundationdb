@@ -3789,7 +3789,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "consistencycheck")) {
 					bool _result = wait(consistencycheckCommand(db2, tokens));
-					is_error = _result;
+					is_error = !_result;
 					continue;
 				}
 

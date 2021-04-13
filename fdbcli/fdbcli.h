@@ -37,16 +37,21 @@ struct CommandHelp {
 
 struct CommandFactory {
 	CommandFactory(const char* name, CommandHelp help) { commands()[name] = help; }
-    CommandFactory(const char* name) { hiddenCommands().insert(name); }
-    static std::map<std::string, CommandHelp>& commands() {
+	CommandFactory(const char* name) { hiddenCommands().insert(name); }
+	static std::map<std::string, CommandHelp>& commands() {
 		static std::map<std::string, CommandHelp> helpMap;
 		return helpMap;
 	}
-    static std::set<std::string>& hiddenCommands() {
-        static std::set<std::string> commands;
-        return commands;
-    }
+	static std::set<std::string>& hiddenCommands() {
+		static std::set<std::string> commands;
+		return commands;
+	}
 };
+
+// Special keys used by fdbcli commands
+
+// consistencycheck
+extern const KeyRef consistencyCheckSpeicalKey;
 
 // help functions (Copied from fdbcli.actor.cpp)
 
