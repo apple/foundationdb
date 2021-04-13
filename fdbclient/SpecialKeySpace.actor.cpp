@@ -1377,8 +1377,7 @@ GlobalConfigImpl::GlobalConfigImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {
 // framework within the range specified. The special-key-space getrange
 // function should only be used for informational purposes. All values are
 // returned as strings regardless of their true type.
-Future<Standalone<RangeResultRef>> GlobalConfigImpl::getRange(ReadYourWritesTransaction* ryw,
-                                                              KeyRangeRef kr) const {
+Future<Standalone<RangeResultRef>> GlobalConfigImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
 	Standalone<RangeResultRef> result;
 
 	auto& globalConfig = GlobalConfig::globalConfig();
@@ -1417,7 +1416,8 @@ void GlobalConfigImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, co
 // Writes global configuration changes to durable memory. Also writes the
 // changes made in the transaction to a recent history set, and updates the
 // latest version which the global configuration was updated at.
-ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* globalConfig, ReadYourWritesTransaction* ryw) {
+ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* globalConfig,
+                                                            ReadYourWritesTransaction* ryw) {
 	state Transaction& tr = ryw->getTransaction();
 
 	// History should only contain three most recent updates. If it currently
@@ -1494,8 +1494,7 @@ void GlobalConfigImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) 
 
 TracingOptionsImpl::TracingOptionsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-Future<Standalone<RangeResultRef>> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw,
-                                                                KeyRangeRef kr) const {
+Future<Standalone<RangeResultRef>> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
 	Standalone<RangeResultRef> result;
 	for (const auto& option : SpecialKeySpace::getTracingOptions()) {
 		auto key = getKeyRange().begin.withSuffix(option);

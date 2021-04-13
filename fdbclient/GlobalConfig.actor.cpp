@@ -26,7 +26,7 @@
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 const KeyRef fdbClientInfoTxnSampleRate = LiteralStringRef("config/fdb_client_info/client_txn_sample_rate");
 const KeyRef fdbClientInfoTxnSizeLimit = LiteralStringRef("config/fdb_client_info/client_txn_size_limit");
@@ -117,6 +117,49 @@ void GlobalConfig::erase(KeyRangeRef range) {
 	}
 }
 
+// Older FDB versions used different keys for client profiling data. This
+// function performs a one-time migration of data in these keys to the new
+// global configuration key space.
+ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+	state Key migratedKey("\xff\x02/fdbClientInfo/migrated/"_sr);
+	state Optional<Value> migrated = wait(tr->get(migratedKey));
+	if (migrated.present()) {
+		// Already performed migration.
+		return Void();
+	}
+
+	state Optional<Value> sampleRate = wait(tr->get(Key("\xff\x02/fdbClientInfo/client_txn_sample_rate/"_sr)));
+	state Optional<Value> sizeLimit = wait(tr->get(Key("\xff\x02/fdbClientInfo/client_txn_size_limit/"_sr)));
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			// The value doesn't matter too much, as long as the key is set.
+			tr->set(migratedKey.contents(), "1"_sr);
+			if (sampleRate.present()) {
+				const double sampleRateDbl =
+				    BinaryReader::fromStringRef<double>(sampleRate.get().contents(), Unversioned());
+				Tuple rate = Tuple().appendDouble(sampleRateDbl);
+				tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate), rate.pack());
+			}
+			if (sizeLimit.present()) {
+				const int64_t sizeLimitInt =
+				    BinaryReader::fromStringRef<int64_t>(sizeLimit.get().contents(), Unversioned());
+				Tuple size = Tuple().append(sizeLimitInt);
+				tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit), size.pack());
+			}
+
+			wait(tr->commit());
+			return Void();
+		} catch (Error& e) {
+			throw;
+		}
+	}
+}
+
 // Updates local copy of global configuration by reading the entire key-range
 // from storage.
 ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
@@ -134,6 +177,8 @@ ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
 // Applies updates to the local copy of the global configuration when this
 // process receives an updated history.
 ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, Reference<AsyncVar<ClientDBInfo>> dbInfo) {
+	wait(self->migrate(self));
+
 	wait(self->refresh(self));
 	self->initialized.send(Void());
 

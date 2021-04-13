@@ -132,6 +132,7 @@ private:
 	// of the global configuration keyspace.
 	void erase(KeyRangeRef range);
 
+	ACTOR static Future<Void> migrate(GlobalConfig* self);
 	ACTOR static Future<Void> refresh(GlobalConfig* self);
 	ACTOR static Future<Void> updater(GlobalConfig* self, Reference<AsyncVar<ClientDBInfo>> dbInfo);
 
