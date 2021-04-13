@@ -103,7 +103,7 @@ It is important to remember that, if `wait`, or other `ACTOR` commands are used 
 
 #### Add $\lambda$ functions to `ACTOR`
 
-`ACTOR`s will be compiled into C++ classes; thus, a $\lambda$ function inside the `ACTOR` will also affected by the scoping of `ACTOR`s. Additionally, the variable capturing of the $\lambda$ function is usually unexpected. To allow $\lambda$ functions to access the `state` variables, it is necessary to explicitly let the $\lambda$ function capture `*this`. For example:
+`ACTOR`s will be compiled into C++ classes; thus, a $\lambda$ function inside the `ACTOR` will also be affected by the scoping of `ACTOR`s. Additionally, the variable capturing of the $\lambda$ function is usually unexpected. To allow $\lambda$ functions to access the `state` variables, it is necessary to explicitly let the $\lambda$ function capture `*this`. For example:
 
 ```c++
 ACTOR Future<Void> lambdaCapturing() {
