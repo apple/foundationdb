@@ -534,7 +534,7 @@ Future<T> unsafeThreadFutureToFuture(ThreadFuture<T> threadFuture) {
 
 // A callback waiting on a thread future and will delete itself once fired
 template <class T>
-struct UtilCallback : public ThreadCallback, ReferenceCounted<UtilCallback<T>> {
+struct UtilCallback : public ThreadCallback {
 public:
 	UtilCallback(ThreadFuture<T> f, void* userdata) : f(f), userdata(userdata) {}
 
@@ -547,29 +547,49 @@ public:
 		g_network->onMainThread(Promise<Void>((SAV<Void>*)userdata), TaskPriority::DefaultOnMainThread);
 		delete this;
 	}
+	void destroy() override {}
 
 private:
 	ThreadFuture<T> f;
 	void* userdata;
 };
 
+// The underlying actor that converts ThreadFuture from Future
+// Note: should be used from main thread
 ACTOR template <class T>
-static Future<T> safeThreadFutureToFutureActor(ThreadFuture<T> threadFuture) {
+static Future<Void> safeThreadFutureToFutureActor(Promise<T> result, ThreadFuture<T> threadFuture) {
 	Promise<Void> ready;
 	Future<Void> onReady = ready.getFuture();
-	UtilCallback<T>* callback = new UtilCallback<T>(threadFuture, ready.extractRawPointer());
+	auto savPtr = ready.extractRawPointer();
+	UtilCallback<T>* callback = new UtilCallback<T>(threadFuture, savPtr);
 	int unused = 0;
 	threadFuture.callOrSetAsCallback(callback, unused, 0);
 	wait(onReady);
 	// threadFuture should be ready
 	if (threadFuture.isError())
-		throw threadFuture.getError();
-	return threadFuture.get();
+		result.sendError(threadFuture.getError());
+	result.send(threadFuture.get());
+	return Void();
 }
 
+// A wrapper actor used for cancellation
+ACTOR template <class T>
+static Future<T> safeThreadFutureToFutureCancellableActor(ThreadFuture<T> threadFuture) {
+	state Promise<T> result;
+	Future<Void> cancellable = safeThreadFutureToFutureActor(result, threadFuture);
+	threadFuture.getPtr()->setCancel(Future<Void>(cancellable));
+	wait(cancellable);
+	Future<T> ready = result.getFuture();
+	if (ready.isError())
+		throw ready.getError();
+	return ready.get();
+}
+
+// Converts a ThreadFuture into a Future
+// Note: This is a thread-safe method when used from the main thread and supports cancellation
 template <class T>
 Future<T> safeThreadFutureToFuture(ThreadFuture<T> threadFuture) {
-	return safeThreadFutureToFutureActor(threadFuture);
+	return safeThreadFutureToFutureCancellableActor(threadFuture);
 }
 
 ACTOR template <class R, class F>
