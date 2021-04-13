@@ -855,8 +855,8 @@ public:
 				auto thisFit = it.processClass.machineClassFitness(role);
 				worstFit = std::max(worstFit, thisFit);
 				bestFit = std::min(bestFit, thisFit);
-				degraded |= it.degraded;
-				inClusterControllerDC |= (it.interf.locality.dcId() == ccDcId);
+				degraded = it.degraded || degraded;
+				inClusterControllerDC = (it.interf.locality.dcId() == ccDcId) || inClusterControllerDC;
 
 				auto thisUsed = id_used.find(it.interf.locality.processId());
 				if (thisUsed == id_used.end()) {
