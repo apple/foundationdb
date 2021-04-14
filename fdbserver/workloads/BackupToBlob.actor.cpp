@@ -60,8 +60,12 @@ struct BackupToBlobWorkload : TestWorkload {
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 
 		wait(delay(self->backupAfter));
-		wait(backupAgent.submitBackup(
-		    cx, self->backupURL, self->initSnapshotInterval, self->snapshotInterval, self->backupTag.toString(), backupRanges));
+		wait(backupAgent.submitBackup(cx,
+		                              self->backupURL,
+		                              self->initSnapshotInterval,
+		                              self->snapshotInterval,
+		                              self->backupTag.toString(),
+		                              backupRanges));
 		EBackupState backupStatus = wait(backupAgent.waitBackup(cx, self->backupTag.toString(), true));
 		TraceEvent("BackupToBlob_BackupStatus").detail("Status", BackupAgentBase::getStateText(backupStatus));
 		return Void();

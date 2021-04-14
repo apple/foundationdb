@@ -3216,7 +3216,8 @@ int main(int argc, char* argv[]) {
 		std::string destinationContainer;
 		bool describeDeep = false;
 		bool describeTimestamps = false;
-		int initialSnapshotIntervalSeconds = CLIENT_KNOBS->BACKUP_INIT_SNAPSHOT_INTERVAL_SEC;
+		int initialSnapshotIntervalSeconds =
+		    0; // The initial snapshot has a desired duration of 0, meaning go as fast as possible.
 		int snapshotIntervalSeconds = CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC;
 		std::string clusterFile;
 		std::string sourceClusterFile;

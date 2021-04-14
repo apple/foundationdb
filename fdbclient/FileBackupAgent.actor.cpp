@@ -2778,7 +2778,10 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		state Reference<TaskFuture> backupFinished = futureBucket->future(tr);
 
 		// Initialize the initial snapshot and create tasks to continually write logs and snapshots.
-		wait(config.initNewSnapshot(tr, config.initialSnapshotIntervalSeconds().get(tr).get().orDefault(0)));
+		state Future<Optional<int64_t>> initialSnapshotIntervalSeconds =
+		    config.initialSnapshotIntervalSeconds().get(tr);
+		wait(success(initialSnapshotIntervalSeconds) &&
+		     config.initNewSnapshot(tr, initialSnapshotIntervalSeconds.get().orDefault(-1)));
 
 		// Using priority 1 for both of these to at least start both tasks soon
 		// Do not add snapshot task if we only want the incremental backup
@@ -5182,7 +5185,8 @@ public:
 	}
 
 	ACTOR static Future<Optional<Version>> getLastRestorable(FileBackupAgent* backupAgent,
-	                                                         Reference<ReadYourWritesTransaction> tr, Key tagName,
+	                                                         Reference<ReadYourWritesTransaction> tr,
+	                                                         Key tagName,
 	                                                         bool snapshot) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -5578,7 +5582,8 @@ Future<std::string> FileBackupAgent::getStatusJSON(Database cx, std::string tagN
 	return FileBackupAgentImpl::getStatusJSON(this, cx, tagName);
 }
 
-Future<Optional<Version>> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName,
+Future<Optional<Version>> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr,
+                                                             Key tagName,
                                                              bool snapshot) {
 	return FileBackupAgentImpl::getLastRestorable(this, tr, tagName, snapshot);
 }
