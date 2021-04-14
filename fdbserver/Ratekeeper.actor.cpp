@@ -738,6 +738,7 @@ ACTOR Future<Void> monitorServerListChange(
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			TraceEvent("RatekeeperMonitorSSList", self->id).detail("CurrentTime", now());
 			vector<std::pair<StorageServerInterface, ProcessClass>> results = wait(getServerListAndProcessClasses(&tr));
 			self->lastSSListFetchedTimestamp = now();
 
