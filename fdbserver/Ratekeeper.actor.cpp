@@ -764,7 +764,7 @@ ACTOR Future<Void> monitorServerListChange(
 			tr = Transaction(self->db);
 			wait(delay(SERVER_KNOBS->SERVER_LIST_DELAY));
 		} catch (Error& e) {
-			TraceEvent("RatekeeperGetSSListError", self->id).error(e);
+			TraceEvent("RatekeeperGetSSListError", self->id).suppressFor(1.0).error(e);
 			wait(tr.onError(e));
 		}
 	}
