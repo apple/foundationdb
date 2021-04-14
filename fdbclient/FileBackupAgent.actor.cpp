@@ -2778,10 +2778,8 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		state Reference<TaskFuture> backupFinished = futureBucket->future(tr);
 
 		// Initialize the initial snapshot and create tasks to continually write logs and snapshots.
-		state Future<Optional<int64_t>> initialSnapshotIntervalSeconds =
-		    config.initialSnapshotIntervalSeconds().get(tr);
-		wait(success(initialSnapshotIntervalSeconds));
-		wait(config.initNewSnapshot(tr, initialSnapshotIntervalSeconds.get().orDefault(0)));
+		state Optional<int64_t> initialSnapshotIntervalSeconds = wait(config.initialSnapshotIntervalSeconds().get(tr));
+		wait(config.initNewSnapshot(tr, initialSnapshotIntervalSeconds.orDefault(0)));
 
 		// Using priority 1 for both of these to at least start both tasks soon
 		// Do not add snapshot task if we only want the incremental backup
