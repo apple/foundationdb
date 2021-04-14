@@ -1162,8 +1162,9 @@ struct RawCursor {
 	Void readRangeResultWriter(KeyRangeRef keys, Reference<IReadRangeResultWriter> resultWriter, int rowLimit) {
 		// Read range implementation using a result writer
 		Arena arena;
-		if (rowLimit == 0)
+		if (rowLimit == 0) {
 			return Void();
+		}
 		if (db.fragment_values) {
 			if (rowLimit > 0) { // return results in asc order
 				DefragmentingReader i(*this, arena, true);
@@ -1201,12 +1202,14 @@ struct RawCursor {
 		} else {
 			if (rowLimit > 0) {
 				int r = moveTo(keys.begin);
-				if (r < 0)
+				if (r < 0) {
 					moveNext();
+				}
 				while (this->valid) {
 					KeyValueRef kv = decodeKV(getEncodedRow(arena));
-					if (kv.key >= keys.end)
+					if (kv.key >= keys.end) {
 						break;
+					}
 					std::variant<bool, KeyRef> res = resultWriter->operator()(kv);
 					if (res.index() == 0) {
 						if (!std::get<bool>(res)) { // we hit the limit so return
@@ -1223,12 +1226,14 @@ struct RawCursor {
 				}
 			} else {
 				int r = moveTo(keys.end);
-				if (r >= 0)
+				if (r >= 0) {
 					movePrevious();
+				}
 				while (this->valid) {
 					KeyValueRef kv = decodeKV(getEncodedRow(arena));
-					if (kv.key < keys.begin)
+					if (kv.key < keys.begin) {
 						break;
+					}
 					std::variant<bool, KeyRef> res = resultWriter->operator()(kv);
 					if (res.index() == 0) {
 						if (!std::get<bool>(res)) { // we hit the limit so return
