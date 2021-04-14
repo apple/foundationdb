@@ -2059,7 +2059,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 		    .detail("Size", outFile->size())
 		    .detail("BeginVersion", beginVersion)
 		    .detail("EndVersion", endVersion)
-		    .detail("LastReadVersion", latestVersion);
+		    .detail("LastReadVersion", lastVersion);
 
 		Params.fileSize().set(task, outFile->size());
 
@@ -4100,8 +4100,10 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
 		}
 
-		for (const LogFile& f : restorable.get().logs) {
-			files.push_back({ f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion });
+		if (!CLIENT_KNOBS->RESTORE_IGNORE_LOG_FILES) {
+			for (const LogFile& f : restorable.get().logs) {
+				files.push_back({ f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion });
+			}
 		}
 
 		state std::vector<RestoreConfig::RestoreFile>::iterator start = files.begin();

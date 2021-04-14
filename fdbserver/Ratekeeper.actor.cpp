@@ -1496,7 +1496,8 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 					p.lastTagPushTime = now();
 
 					reply.throttledTags = self.throttledTags.getClientRates(self.autoThrottlingEnabled);
-					TEST(reply.throttledTags.present() && reply.throttledTags.get().size() > 0); // Returning tag throttles to a proxy
+					bool returningTagsToProxy = reply.throttledTags.present() && reply.throttledTags.get().size() > 0;
+					TEST(returningTagsToProxy); // Returning tag throttles to a proxy
 				}
 
 				reply.healthMetrics.update(self.healthMetrics, true, req.detailed);
