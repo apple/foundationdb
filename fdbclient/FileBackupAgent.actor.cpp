@@ -2781,7 +2781,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		state Future<Optional<int64_t>> initialSnapshotIntervalSeconds =
 		    config.initialSnapshotIntervalSeconds().get(tr);
 		wait(success(initialSnapshotIntervalSeconds) &&
-		     config.initNewSnapshot(tr, initialSnapshotIntervalSeconds.get().orDefault(-1)));
+		     config.initNewSnapshot(tr, initialSnapshotIntervalSeconds.get().orDefault(0)));
 
 		// Using priority 1 for both of these to at least start both tasks soon
 		// Do not add snapshot task if we only want the incremental backup
