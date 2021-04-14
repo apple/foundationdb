@@ -883,7 +883,9 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 	return Void();
 }
 
-ACTOR Future<Void> sendInitialCommitToResolvers(Reference<MasterData> self) {
+// Reads txnStateStore and broadcasts the data to all Commit Proxies. After
+// that, initializes Resolvers to allow recovery transaction goes through.
+ACTOR static Future<Void> sendInitialCommitToResolvers(Reference<MasterData> self) {
 	state KeyRange txnKeys = allKeys;
 	state Sequence txnSequence = 0;
 	ASSERT(self->recoveryTransactionVersion);
@@ -930,7 +932,10 @@ ACTOR Future<Void> sendInitialCommitToResolvers(Reference<MasterData> self) {
 	}
 	wait(waitForAll(txnReplies));
 
-	vector<Future<ResolveTransactionBatchReply>> replies;
+	// To avoid race of recovery transaction with the above broadcast,
+	// resolvers are initialized after the broadcast is done. This ensures
+	// recovery transaction is blocked at resolver during the broadcast.
+	std::vector<Future<ResolveTransactionBatchReply>> replies;
 	for (auto& r : self->resolvers) {
 		ResolveTransactionBatchRequest req;
 		req.prevVersion = -1;
