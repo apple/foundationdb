@@ -1,0 +1,148 @@
+title Commit
+
+participantgroup **Client** (NativeAPI.actor.cpp)
+	participant "Transaction::commit" as tC
+    participant "commitAndWatch" as cAW
+    participant "tryCommit" as Commit
+    participant "watchValue" as wV
+end
+
+participantgroup **CommitProxy** (CommitProxyServer.actor.cpp)
+	participant "commitBatcher" as cB
+    participant "commitBatch" as Batch
+    participant "TagPartitionedLogSystem" as TPLS
+end
+
+participantgroup **Master** 
+	participant "getVersion" as gV
+    participant "serveLiveCommittedVersion" as sLCV
+end
+
+participantgroup **Resolver** (Resolver.actor.cpp)
+	participant "resolveBatch" as rB
+end
+
+participantgroup **TLog** (TLogServer.actor.cpp)
+	participant "tLogCommit" as tLC
+end
+
+participantgroup **Storage Server** (storageserver.actor.cpp)
+	participant "serveWatchValueRequests" as sWVR
+end
+
+autoactivation off
+
+tC -> cAW:
+cAW -> Commit: CommitTransactionRequest
+
+note right of Commit: <color:#green>//CommitAttachID//</color>
+note right of Commit: <color:#lightblue>NativeAPI.commit.Before</color>
+
+Commit -> cB: CommitTransactionRequest
+loop Batch requests
+	box over cB: Batch commit requests
+end
+
+cB -> Batch: Batched CommitTransactionRequests
+
+note right of Batch: <color:#lightblue>--CommitProxyServer.batcher--</color>
+
+box over Batch: Preresolution
+
+note right of Batch: <color:#blue>GettingCommitVersion</color>
+
+Batch -> gV: GetCommitVersionRequest
+gV -> Batch: GetCommitVersionReply
+
+note right of Batch: <color:#blue>GotCommitVersion</color>
+
+box over Batch: Resolve
+
+Batch -> rB: ResolveTransactionBatchRequest
+
+note right of rB: <color:#blue>Before</color>
+
+box over rB: Wait for memory/needed version
+
+note right of rB: <color:#blue>AfterQueueSizeCheck</color>
+
+box over rB: Wait for resolver version
+
+note right of rB: <color:#blue>AfterOrderer</color>
+
+box over rB: Resolve the conflicts
+
+note right of rB: <color:#blue>After</color>
+
+rB --> Batch: ResolveTransactionBatchReply
+
+note right of Batch: <color:#blue>ProcessingMutations</color>
+
+box over Batch: Calculate the metadata
+
+box over Batch: Determine which transactions should be committed
+
+box over Batch: Assign storage server tags to mutations
+
+loop Wait txn commit version enter the MVCC window
+	Batch -> sLCV: GetRawCommittedVersionRequest
+    sLCV --> Batch: GetRawCommittedVersionReply
+end
+
+note right of Batch: <color:#blue>AfterStoreCommits</color>
+
+Batch -> TPLS: Version, LogPushData
+TPLS -> tLC: TLogCommitRequest
+
+note right of tLC: <color:#green>//CommitAttachID//</color>
+
+note right of tLC: <color:#blue>BeforeWaitForVersion</color>
+
+box over tLC: Wait for the version
+
+note right of tLC: <color:#blue>Before</color>
+
+box over tLC: Store the commit
+
+box over tLC: Put commit into persistent queue
+
+note right of tLC: <color:#blue>AfterTLogCommit</color>
+
+box over tLC: Wait all prior message being committed
+
+note right of tLC: <color:#blue>After</color>
+
+tLC --> TPLS: TLogCommitReply
+TPLS -> Batch: Version (min)
+
+note right of Batch: AfterLogPush
+
+Batch --> Commit: CommitID
+
+note right of Commit: <color:#lightblue>--NativeAPI.commit.After--</color>
+
+Commit --> cAW:
+
+cAW -> wV: Version
+
+note right of wV: <color:#green>//WatchValueAttachID//</color>
+note right of wV: <color:#blue>Before</color>
+
+wV -> sWVR: WatchValueRequest
+
+note right of sWVR: <color:#lightblue>--watchValueQ.Before--</color>
+
+box over sWVR: Ensure version is not too old
+
+note right of sWVR: <color:#lightblue>--watchValueQ.AfterVersion--</color>
+
+loop Value not change
+	box over sWVR: Check storageserver::getValueQ
+	note right of sWVR: <color:#lightblue>--watchValueQ.AfterRead--</color>
+end 
+
+sWVR --> wV: Version
+
+note right of wV: <color:#blue>After</color>
+
+cAW --> tC:
