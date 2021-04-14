@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Ruby API &#8212; FoundationDB 6.2</title>
+    <title>Ruby API &#8212; FoundationDB 6.3</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.28',
+        VERSION:     '6.3.12',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -231,7 +231,7 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <dl class="function">
 <dt id="FDB.api_version">
 <code class="descclassname">FDB.</code><code class="descname">api_version</code><span class="sig-paren">(</span><em>version</em><span class="sig-paren">)</span></dt>
-<dd><p>Specifies the version of the API that the application uses. This allows future versions of FoundationDB to make API changes without breaking existing programs.  The current version of the API is 620.</p>
+<dd><p>Specifies the version of the API that the application uses. This allows future versions of FoundationDB to make API changes without breaking existing programs.  The current version of the API is 630.</p>
 </dd></dl>
 
 <div class="admonition note">
@@ -246,13 +246,13 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <p class="first admonition-title">Warning</p>
 <p class="last">When using the <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a>, setting an API version that is not supported by a particular client library will prevent that client from being used to connect to the cluster. In particular, you should not advance the API version of your application after upgrading your client until the cluster has also been upgraded.</p>
 </div>
-<p>For API changes between version 14 and 620 (for the purpose of porting older programs), see <a class="reference internal" href="release-notes/release-notes-620.html#release-notes"><span class="std std-ref">Release Notes</span></a> and <a class="reference internal" href="api-version-upgrade-guide.html"><span class="doc">API Version Upgrade Guide</span></a>.</p>
+<p>For API changes between version 14 and 630 (for the purpose of porting older programs), see <a class="reference internal" href="release-notes/release-notes-630.html#release-notes"><span class="std std-ref">Release Notes</span></a> and <a class="reference internal" href="api-version-upgrade-guide.html"><span class="doc">API Version Upgrade Guide</span></a>.</p>
 </div>
 <div class="section" id="opening-a-database">
 <h2>Opening a database</h2>
 <p>After requiring the <code class="docutils literal"><span class="pre">FDB</span></code> gem and selecting an API version, you probably want to open a <a class="reference internal" href="#FDB::Database" title="FDB::Database"><code class="xref rb rb-class docutils literal"><span class="pre">Database</span></code></a> using <a class="reference internal" href="#FDB.open" title="FDB.open"><code class="xref rb rb-func docutils literal"><span class="pre">open</span></code></a>:</p>
 <div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="nb">require</span> <span class="s1">&#39;fdb&#39;</span>
-<span class="no">FDB</span><span class="o">.</span><span class="n">api_version</span> <span class="mi">620</span>
+<span class="no">FDB</span><span class="o">.</span><span class="n">api_version</span> <span class="mi">630</span>
 <span class="n">db</span> <span class="o">=</span> <span class="no">FDB</span><span class="o">.</span><span class="n">open</span>
 </pre></div>
 </div>
@@ -297,6 +297,12 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <dt id="FDB::FDB.options.set_trace_format">
 <code class="descclassname">FDB.options.</code><code class="descname">set_trace_format</code><span class="sig-paren">(</span><em>format</em><span class="sig-paren">)</span> &#x2192; nil</dt>
 <dd><p>Select the format of the trace files for this FoundationDB client. xml (the default) and json are supported.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::FDB.options.set_trace_clock_source">
+<code class="descclassname">FDB.options.</code><code class="descname">set_trace_clock_source</code><span class="sig-paren">(</span><em>source</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Select clock source for trace files. now (the default) or realtime are supported.</p>
 </dd></dl>
 
 <dl class="method">
@@ -669,12 +675,6 @@ value of the key is also retrieved, using network bandwidth.</p>
 </dd></dl>
 
 <dl class="method">
-<dt id="FDB::Database.options.set_transaction_include_port_in_address">
-<code class="descclassname">Database.options.</code><code class="descname">set_transaction_include_port_in_address</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
-<dd><p>Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 630, and this option will be deprecated. Enabling this option is equivalent to calling <a class="reference internal" href="#FDB::Transaction.options.set_include_port_in_address" title="FDB::Transaction.options.set_include_port_in_address"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.options.set_include_port_in_address</span></code></a> on each transaction created by this database.</p>
-</dd></dl>
-
-<dl class="method">
 <dt id="FDB::Database.options.set_transaction_logging_max_field_length">
 <code class="descclassname">Database.options.</code><code class="descname">set_transaction_logging_max_field_length</code><span class="sig-paren">(</span><em>size_limit</em><span class="sig-paren">)</span> &#x2192; nil</dt>
 <dd><p>Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option. This is equivalent to calling <a class="reference internal" href="#FDB::Transaction.options.set_transaction_logging_max_field_length" title="FDB::Transaction.options.set_transaction_logging_max_field_length"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.options.set_transaction_logging_max_field_length</span></code></a> on each transaction created by this database.</p>
@@ -828,7 +828,7 @@ both the caching and the increased network bandwidth.</p>
 
 <dl class="method">
 <dt id="FDB::Transaction.snapshot.get_read_version">
-<code class="descclassname">Transaction.snapshot.</code><code class="descname">get_read_version</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; Version</dt>
+<code class="descclassname">Transaction.snapshot.</code><code class="descname">get_read_version</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; Int64Future</dt>
 <dd><p>Identical to <a class="reference internal" href="#FDB::Transaction.get_read_version" title="FDB::Transaction.get_read_version"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.get_read_version</span></code></a> (since snapshot and strictly serializable reads use the same read version).</p>
 </dd></dl>
 
@@ -896,7 +896,7 @@ both the caching and the increased network bandwidth.</p>
 <dl class="method">
 <dt id="FDB::Transaction.add">
 <code class="descclassname">Transaction.</code><code class="descname">add</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span> &#x2192; nil</dt>
-<dd><p>Performs an addition of little-endian integers. If the existing value in the database is not present or shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes.  If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>.</p>
+<dd><p>Performs an addition of little-endian integers. If the existing value in the database is not present or shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes.  If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>. In case of overflow, the result is truncated to the width of <code class="docutils literal"><span class="pre">param</span></code>.</p>
 <p>The integers to be added must be stored in a little-endian representation. They can be signed in two&#8217;s complement representation or unsigned. You can add to an integer at a known offset in the value by prepending the appropriate number of zero bytes to <code class="docutils literal"><span class="pre">param</span></code> and padding with zero bytes to match the length of the value. However, this offset technique requires that you know the addition will not cause the integer field within the value to overflow.</p>
 </dd></dl>
 
@@ -954,9 +954,8 @@ both the caching and the increased network bandwidth.</p>
 <dt id="FDB::Transaction.set_versionstamped_key">
 <code class="descclassname">Transaction.</code><code class="descname">set_versionstamped_key</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span> &#x2192; nil</dt>
 <dd><p>Transforms <code class="docutils literal"><span class="pre">key</span></code> using a versionstamp for the transaction. This key must be at least 14 bytes long. The final 4 bytes will be interpreted as a 32-bit little-endian integer denoting an index into the key at which to perform the transformation, and then trimmed off the key. The 10 bytes in the key beginning at the index will be overwritten with the versionstamp. If the index plus 10 bytes points past the end of the key, the result will be an error. Sets the transformed key in the database to <code class="docutils literal"><span class="pre">param</span></code>.</p>
-<p>A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions.</p>
-<p>A transaction is not permitted to read any transformed key or value previously set within that transaction, and an attempt to do so will result in an error.</p>
-<p>This operation is not compatible with <a class="reference internal" href="#FDB::Transaction.options.set_read_your_writes_disable" title="FDB::Transaction.options.set_read_your_writes_disable"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.options.set_read_your_writes_disable</span></code></a> and will generate an error if used with it.</p>
+<p>A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-endian order). The last 2 bytes are monotonic in the serialization order for transactions (serialized in big-endian order).</p>
+<p>A transaction is not permitted to read any transformed key or value previously set within that transaction, and an attempt to do so will result in an <code class="docutils literal"><span class="pre">accessed_unreadable</span></code> error.  The range of keys marked unreadable when setting a versionstamped key begins at the transactions&#8217;s read version if it is known, otherwise a versionstamp of all <code class="docutils literal"><span class="pre">0x00</span></code> bytes is conservatively assumed.  The upper bound of the unreadable range is a versionstamp of all <code class="docutils literal"><span class="pre">0xFF</span></code> bytes.</p>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
 <p class="last">At this time, versionstamped keys are not compatible with the Tuple layer except in Java, Python, and Go. Note that this implies versionstamped keys may not be used with the Subspace and Directory layers except in those languages.</p>
@@ -967,8 +966,8 @@ both the caching and the increased network bandwidth.</p>
 <dt id="FDB::Transaction.set_versionstamped_value">
 <code class="descclassname">Transaction.</code><code class="descname">set_versionstamped_value</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span> &#x2192; nil</dt>
 <dd><p>Transforms <code class="docutils literal"><span class="pre">param</span></code> using a versionstamp for the transaction. This parameter must be at least 14 bytes long. The final 4 bytes will be interpreted as a 32-bit little-endian integer denoting an index into the parameter at which to perform the transformation, and then trimmed off the key. The 10 bytes in the parameter beginning at the index will be overwritten with the versionstamp. If the index plus 10 bytes points past the end of the parameter, the result will be an error. Sets <code class="docutils literal"><span class="pre">key</span></code> in the database to the transformed parameter.</p>
-<p>A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions.</p>
-<p>A transaction is not permitted to read any transformed key or value previously set within that transaction, and an attempt to do so will result in an error.</p>
+<p>A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-endian order). The last 2 bytes are monotonic in the serialization order for transactions (serialized in big-endian order).</p>
+<p>A transaction is not permitted to read any transformed key or value previously set within that transaction, and an attempt to do so will result in an <code class="docutils literal"><span class="pre">accessed_unreadable</span></code> error.  The range of keys marked unreadable when setting a versionstamped key begins at the transactions&#8217;s read version if it is known, otherwise a versionstamp of all <code class="docutils literal"><span class="pre">0x00</span></code> bytes is conservatively assumed.  The upper bound of the unreadable range is a versionstamp of all <code class="docutils literal"><span class="pre">0xFF</span></code> bytes.</p>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
 <p class="last">At this time, versionstamped values are not compatible with the Tuple layer except in Java, Python, and Go. Note that this implies versionstamped values may not be used with the Subspace and Directory layers except in those languages.</p>
@@ -1088,7 +1087,7 @@ both the caching and the increased network bandwidth.</p>
 
 <dl class="method">
 <dt id="FDB::Transaction.get_read_version">
-<code class="descclassname">Transaction.</code><code class="descname">get_read_version</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; Version</dt>
+<code class="descclassname">Transaction.</code><code class="descname">get_read_version</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; Int64Future</dt>
 <dd><p><em>Infrequently used</em>. Returns the transaction&#8217;s read version.</p>
 </dd></dl>
 
@@ -1108,9 +1107,16 @@ both the caching and the increased network bandwidth.</p>
 <div class="section" id="transaction-misc-functions">
 <h3>Transaction misc functions</h3>
 <dl class="method">
+<dt id="FDB::Transaction.get_estimated_range_size_bytes">
+<code class="descclassname">Transaction.</code><code class="descname">get_estimated_range_size_bytes</code><span class="sig-paren">(</span><em>begin_key</em>, <em>end_key</em><span class="sig-paren">)</span></dt>
+<dd><p>Get the estimated byte size of the given key range. Returns a <a class="reference internal" href="#FDB::Int64Future" title="FDB::Int64Future"><code class="xref rb rb-class docutils literal"><span class="pre">Int64Future</span></code></a>.
+.. note:: The estimated size is calculated based on the sampling done by FDB server. The sampling algorithm works roughly in this way: the larger the key-value pair is, the more likely it would be sampled and the more accurate its sampled size would be. And due to that reason it is recommended to use this API to query against large ranges for accuracy considerations. For a rough reference, if the returned size is larger than 3MB, one can consider the size to be accurate.</p>
+</dd></dl>
+
+<dl class="method">
 <dt id="FDB::Transaction.get_approximate_size">
 <code class="descclassname">Transaction.</code><code class="descname">get_approximate_size</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; Int64Future</dt>
-<dd><p>Gets the the approximate transaction size so far, which is the summation of the estimated size of mutations, read conflict ranges, and write conflict ranges.. Returns a <code class="xref rb rb-class docutils literal"><span class="pre">Int64Future</span></code>.</p>
+<dd><p>Gets the the approximate transaction size so far, which is the summation of the estimated size of mutations, read conflict ranges, and write conflict ranges.. Returns a <a class="reference internal" href="#FDB::Int64Future" title="FDB::Int64Future"><code class="xref rb rb-class docutils literal"><span class="pre">Int64Future</span></code></a>.</p>
 </dd></dl>
 
 </div>
@@ -1149,12 +1155,6 @@ both the caching and the increased network bandwidth.</p>
 <dt id="FDB::Transaction.options.set_causal_read_risky">
 <code class="descclassname">Transaction.options.</code><code class="descname">set_causal_read_risky</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
 <dd><p>This transaction does not require the strict causal consistency guarantee that FoundationDB provides by default.  The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock. One can set this for all transactions by calling <a class="reference internal" href="#FDB::Database.options.set_transaction_causal_read_risky" title="FDB::Database.options.set_transaction_causal_read_risky"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.options.set_transaction_causal_read_risky</span></code></a>.</p>
-</dd></dl>
-
-<dl class="method">
-<dt id="FDB::Transaction.options.set_include_port_in_address">
-<code class="descclassname">Transaction.options.</code><code class="descname">set_include_port_in_address</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
-<dd><p>Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 630, and this option will be deprecated. One can set this for all transactions by calling <a class="reference internal" href="#FDB::Database.options.set_transaction_include_port_in_address" title="FDB::Database.options.set_transaction_include_port_in_address"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.options.set_transaction_include_port_in_address</span></code></a>.</p>
 </dd></dl>
 
 <dl class="method">
@@ -1379,8 +1379,8 @@ both the caching and the increased network bandwidth.</p>
 </dd></dl>
 
 <dl class="class">
-<dt id="FDB::Version">
-<em class="property">class </em><code class="descclassname">FDB::</code><code class="descname">Version</code></dt>
+<dt id="FDB::Int64Future">
+<em class="property">class </em><code class="descclassname">FDB::</code><code class="descname">Int64Future</code></dt>
 <dd><p>This type is a future <code class="xref rb rb-class docutils literal"><span class="pre">Integer</span></code> object. Objects of this type respond to the same methods as objects of type <code class="xref rb rb-class docutils literal"><span class="pre">Integer</span></code>, and may be passed to any method that expects a <code class="xref rb rb-class docutils literal"><span class="pre">Integer</span></code>.</p>
 </dd></dl>
 
@@ -1876,7 +1876,7 @@ of the UUID bytes.</p>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 16, 2020.<br/>
+      Last updated on Apr 14, 2021.<br/>
     </p>
   </div>
 </footer>

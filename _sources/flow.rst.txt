@@ -99,13 +99,13 @@ To write the equivalent code directly in C++, a developer would have to implemen
 Caveats
 =======
 
-Even though flow-code looks a lot like C++, it is not. It has different rules and the files are preprocessed. It is always important to keep this in mind when programming flow.
+Even though Flow code looks a lot like C++, it is not. It has different rules and the files are preprocessed. It is always important to keep this in mind when programming flow.
 
 We still want to be able to use IDEs and modern editors (with language servers like cquery or clang-based completion engines like ycm). Because of this there is a header-file ``actorcompiler.h`` in flow which defines preprocessor definitions to make flow compile as normal C++ code. CMake even supports a special mode so that it doesn't preprocess flow files. This mode can be used by passing ``-DOPEN_FOR_IDE=ON`` to cmake. Additionally we generate a special ``compile_commands.json`` into the source-directory which will support opening the project in IDEs and editors that look for a compilation database.
 
-Some preprocessor definitions will not fix all issues though. When programming flow the following things have to be taken care of by the programmer:
+Some preprocessor definitions will not fix all issues though. When programming Flow the following things have to be taken care of by the programmer:
 
-- Local variables don't survive a call to ``wait``. So this would be legal flow-code, but NOT legal C++-code:
+- Local variables don't survive a call to ``wait``. So this would be legal Flow code, but NOT legal C++ code:
 
   .. code-block:: c
 
@@ -133,8 +133,8 @@ Some preprocessor definitions will not fix all issues though. When programming f
                     }
                 }
 
-- An ``ACTOR`` is compiled into a class internally. Which means that within an actor-function, ``this`` is a valid pointer to this class. But using them explicitely (or as described later implicitely) will break IDE support. One can use ``THIS`` and ``THIS_ADDR`` instead. But be careful as ``THIS`` will be of type ``nullptr_t`` in IDE-mode and of the actor-type in normal compilation mode.
-- Lambdas and state variables are weird in a sense. After actorcompilation a state variable is a member of the compiled actor class. In IDE mode it is considered a normal local variable. This can result in some surprising side-effects. So the following code will only compile if the method ``Foo::bar`` is defined as ``const``:
+- An ``ACTOR`` is compiled into a class internally. Which means that within an actor-function, ``this`` is a valid pointer to this class. But using them explicitly (or as described later implicitly) will break IDE support. One can use ``THIS`` and ``THIS_ADDR`` instead. But be careful as ``THIS`` will be of type ``nullptr_t`` in IDE-mode and of the actor-type in normal compilation mode.
+- Lambdas and state variables are weird in a sense. After actor compilation, a state variable is a member of the compiled actor class. In IDE mode it is considered a normal local variable. This can result in some surprising side-effects. So the following code will only compile if the method ``Foo::bar`` is defined as ``const``:
 
   .. code-block:: c
 
@@ -144,7 +144,7 @@ Some preprocessor definitions will not fix all issues though. When programming f
                 }
 
 
-  If it is not, one has to pass the member explictely as reference:
+  If it is not, one has to pass the member explicitly as a reference:
 
   .. code-block:: c
 
@@ -154,5 +154,5 @@ Some preprocessor definitions will not fix all issues though. When programming f
                     foo([x]() { x->bar(); })
                 }
 
-- state variables in flow don't follow the normal scoping rules. So in flow a state variable can be defined in a inner scope and later it can be used in the outer scope. In order to not break compilation in IDE-mode, always define state variables in the outermost scope they will be used.
+- state variables in Flow don't follow the normal scoping rules. So in Flow a state variable can be defined in an inner scope and later it can be used in the outer scope. In order to not break compilation in IDE-mode, always define state variables in the outermost scope they will be used.
 

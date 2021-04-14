@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Release Notes &#8212; FoundationDB 6.2</title>
+    <title>Release Notes &#8212; FoundationDB 6.3</title>
     
     <link rel="stylesheet" href="../_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    '../',
-        VERSION:     '6.2.28',
+        VERSION:     '6.3.12',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -31,6 +31,7 @@
     <script type="text/javascript" src="../_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
     <script type="text/javascript" src="../_static/bootstrap-sphinx.js"></script>
     <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Release Notes" href="release-notes-630.html" />
     <link rel="prev" title="Release Notes" href="release-notes-610.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
@@ -51,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="../index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -81,28 +82,33 @@
       role="menu"
       aria-labelledby="dLabelLocalToc"><ul>
 <li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id2">6.2.28</a></li>
-<li><a class="reference internal" href="#id3">6.2.27</a></li>
-<li><a class="reference internal" href="#id4">6.2.26</a></li>
-<li><a class="reference internal" href="#id5">6.2.25</a></li>
-<li><a class="reference internal" href="#id6">6.2.24</a></li>
-<li><a class="reference internal" href="#id7">6.2.23</a></li>
-<li><a class="reference internal" href="#id10">6.2.22</a></li>
-<li><a class="reference internal" href="#id11">6.2.21</a></li>
-<li><a class="reference internal" href="#id12">6.2.20</a></li>
-<li><a class="reference internal" href="#id13">6.2.19</a></li>
-<li><a class="reference internal" href="#id17">6.2.18</a></li>
-<li><a class="reference internal" href="#id19">6.2.17</a></li>
-<li><a class="reference internal" href="#id20">6.2.16</a></li>
-<li><a class="reference internal" href="#id21">6.2.15</a></li>
-<li><a class="reference internal" href="#id22">6.2.14</a></li>
-<li><a class="reference internal" href="#id25">6.2.13</a></li>
-<li><a class="reference internal" href="#id26">6.2.12</a></li>
-<li><a class="reference internal" href="#id27">6.2.11</a></li>
-<li><a class="reference internal" href="#id28">6.2.10</a></li>
-<li><a class="reference internal" href="#id29">6.2.9</a></li>
-<li><a class="reference internal" href="#id31">6.2.8</a></li>
-<li><a class="reference internal" href="#id32">6.2.7</a><ul>
+<li><a class="reference internal" href="#id1">6.2.33</a></li>
+<li><a class="reference internal" href="#id3">6.2.32</a></li>
+<li><a class="reference internal" href="#id4">6.2.31</a></li>
+<li><a class="reference internal" href="#id5">6.2.30</a></li>
+<li><a class="reference internal" href="#id8">6.2.29</a></li>
+<li><a class="reference internal" href="#id11">6.2.28</a></li>
+<li><a class="reference internal" href="#id12">6.2.27</a></li>
+<li><a class="reference internal" href="#id13">6.2.26</a></li>
+<li><a class="reference internal" href="#id14">6.2.25</a></li>
+<li><a class="reference internal" href="#id15">6.2.24</a></li>
+<li><a class="reference internal" href="#id16">6.2.23</a></li>
+<li><a class="reference internal" href="#id19">6.2.22</a></li>
+<li><a class="reference internal" href="#id20">6.2.21</a></li>
+<li><a class="reference internal" href="#id21">6.2.20</a></li>
+<li><a class="reference internal" href="#id22">6.2.19</a></li>
+<li><a class="reference internal" href="#id26">6.2.18</a></li>
+<li><a class="reference internal" href="#id28">6.2.17</a></li>
+<li><a class="reference internal" href="#id29">6.2.16</a></li>
+<li><a class="reference internal" href="#id30">6.2.15</a></li>
+<li><a class="reference internal" href="#id31">6.2.14</a></li>
+<li><a class="reference internal" href="#id34">6.2.13</a></li>
+<li><a class="reference internal" href="#id35">6.2.12</a></li>
+<li><a class="reference internal" href="#id36">6.2.11</a></li>
+<li><a class="reference internal" href="#id37">6.2.10</a></li>
+<li><a class="reference internal" href="#id38">6.2.9</a></li>
+<li><a class="reference internal" href="#id40">6.2.8</a></li>
+<li><a class="reference internal" href="#id41">6.2.7</a><ul>
 <li><a class="reference internal" href="#performance">Performance</a></li>
 <li><a class="reference internal" href="#fixes">Fixes</a></li>
 <li><a class="reference internal" href="#status">Status</a></li>
@@ -125,6 +131,10 @@
                 
   <li>
     <a href="release-notes-610.html" title="Previous Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Release Notes</span>
+    </a>
+  </li>
+  <li>
+    <a href="release-notes-630.html" title="Next Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Release Notes &raquo;</span>
     </a>
   </li>
               
@@ -153,28 +163,33 @@
       <div class="col-md-3">
         <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
 <li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id2">6.2.28</a></li>
-<li><a class="reference internal" href="#id3">6.2.27</a></li>
-<li><a class="reference internal" href="#id4">6.2.26</a></li>
-<li><a class="reference internal" href="#id5">6.2.25</a></li>
-<li><a class="reference internal" href="#id6">6.2.24</a></li>
-<li><a class="reference internal" href="#id7">6.2.23</a></li>
-<li><a class="reference internal" href="#id10">6.2.22</a></li>
-<li><a class="reference internal" href="#id11">6.2.21</a></li>
-<li><a class="reference internal" href="#id12">6.2.20</a></li>
-<li><a class="reference internal" href="#id13">6.2.19</a></li>
-<li><a class="reference internal" href="#id17">6.2.18</a></li>
-<li><a class="reference internal" href="#id19">6.2.17</a></li>
-<li><a class="reference internal" href="#id20">6.2.16</a></li>
-<li><a class="reference internal" href="#id21">6.2.15</a></li>
-<li><a class="reference internal" href="#id22">6.2.14</a></li>
-<li><a class="reference internal" href="#id25">6.2.13</a></li>
-<li><a class="reference internal" href="#id26">6.2.12</a></li>
-<li><a class="reference internal" href="#id27">6.2.11</a></li>
-<li><a class="reference internal" href="#id28">6.2.10</a></li>
-<li><a class="reference internal" href="#id29">6.2.9</a></li>
-<li><a class="reference internal" href="#id31">6.2.8</a></li>
-<li><a class="reference internal" href="#id32">6.2.7</a><ul>
+<li><a class="reference internal" href="#id1">6.2.33</a></li>
+<li><a class="reference internal" href="#id3">6.2.32</a></li>
+<li><a class="reference internal" href="#id4">6.2.31</a></li>
+<li><a class="reference internal" href="#id5">6.2.30</a></li>
+<li><a class="reference internal" href="#id8">6.2.29</a></li>
+<li><a class="reference internal" href="#id11">6.2.28</a></li>
+<li><a class="reference internal" href="#id12">6.2.27</a></li>
+<li><a class="reference internal" href="#id13">6.2.26</a></li>
+<li><a class="reference internal" href="#id14">6.2.25</a></li>
+<li><a class="reference internal" href="#id15">6.2.24</a></li>
+<li><a class="reference internal" href="#id16">6.2.23</a></li>
+<li><a class="reference internal" href="#id19">6.2.22</a></li>
+<li><a class="reference internal" href="#id20">6.2.21</a></li>
+<li><a class="reference internal" href="#id21">6.2.20</a></li>
+<li><a class="reference internal" href="#id22">6.2.19</a></li>
+<li><a class="reference internal" href="#id26">6.2.18</a></li>
+<li><a class="reference internal" href="#id28">6.2.17</a></li>
+<li><a class="reference internal" href="#id29">6.2.16</a></li>
+<li><a class="reference internal" href="#id30">6.2.15</a></li>
+<li><a class="reference internal" href="#id31">6.2.14</a></li>
+<li><a class="reference internal" href="#id34">6.2.13</a></li>
+<li><a class="reference internal" href="#id35">6.2.12</a></li>
+<li><a class="reference internal" href="#id36">6.2.11</a></li>
+<li><a class="reference internal" href="#id37">6.2.10</a></li>
+<li><a class="reference internal" href="#id38">6.2.9</a></li>
+<li><a class="reference internal" href="#id40">6.2.8</a></li>
+<li><a class="reference internal" href="#id41">6.2.7</a><ul>
 <li><a class="reference internal" href="#performance">Performance</a></li>
 <li><a class="reference internal" href="#fixes">Fixes</a></li>
 <li><a class="reference internal" href="#status">Status</a></li>
@@ -194,22 +209,67 @@
     <div class="col-md-9 content">
       
   <div class="section" id="release-notes">
-<span id="id1"></span><h1>Release Notes</h1>
-<div class="section" id="id2">
+<h1>Release Notes</h1>
+<div class="section" id="id1">
+<h2>6.2.33</h2>
+<ul class="simple">
+<li>Fixed an issue where storage servers could shutdown with <code class="docutils literal"><span class="pre">unknown_error</span></code>. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4437">(PR #4437)</a></li>
+<li>Fix backup agent stall when writing to local filesystem with slow metadata operations. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4428">(PR #4428)</a></li>
+<li>Backup agent no longer uses 4k block caching layer on local output files so that write operations are larger. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4428">(PR #4428)</a></li>
+</ul>
+</div>
+<div class="section" id="id3">
+<h2>6.2.32</h2>
+<ul class="simple">
+<li>Fix an issue where symbolic links in cmake-built RPMs are broken if you unpack the RPM to a custom directory. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4380">(PR #4380)</a></li>
+</ul>
+</div>
+<div class="section" id="id4">
+<h2>6.2.31</h2>
+<ul class="simple">
+<li>Fix a rare invalid memory access on data distributor when snapshotting large clusters. This is a follow up to <a class="reference external" href="https://github.com/apple/foundationdb/pull/4076">PR #4076</a>. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4317">(PR #4317)</a></li>
+</ul>
+</div>
+<div class="section" id="id5">
+<h2>6.2.30</h2>
+<ul class="simple">
+<li>A storage server which has fallen behind will deprioritize reads in order to catch up. This change causes some saturating workloads to experience high read latencies instead of high GRV latencies. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4218">(PR #4218)</a></li>
+<li>Added <code class="docutils literal"><span class="pre">low_priority_queries</span></code> to the <code class="docutils literal"><span class="pre">processes.roles</span></code> section of status to record the number of deprioritized reads on each storage server. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4218">(PR #4218)</a></li>
+<li>Added <code class="docutils literal"><span class="pre">low_priority_reads</span></code> to the <code class="docutils literal"><span class="pre">workload.operations</span></code> section of status to record the total number of deprioritized reads. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4218">(PR #4218)</a></li>
+<li>Backup to locally mounted filesystems now appends to files in large block writes, 1MB each by default. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4199">(PR #4199)</a></li>
+<li>Changed the default SSL implementation from OpenSSL to BoringSSL <a class="reference external" href="https://github.com/apple/foundationdb/pull/4153">(PR #4153)</a></li>
+<li>SQLite now supports configurable disk write rate limiting. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4259">(PR #4259)</a></li>
+<li>If a disk operation takes more than two minutes, the system will treat the disk as failed. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4243">(PR #4243)</a></li>
+</ul>
+</div>
+<div class="section" id="id8">
+<h2>6.2.29</h2>
+<ul class="simple">
+<li>Fix invalid memory access on data distributor when snapshotting large clusters. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4076">(PR #4076)</a></li>
+<li>Add human-readable DateTime to trace events <a class="reference external" href="https://github.com/apple/foundationdb/pull/4087">(PR #4087)</a></li>
+<li>Proxy rejects transaction batch that exceeds MVCC window <a class="reference external" href="https://github.com/apple/foundationdb/pull/4113">(PR #4113)</a></li>
+<li>Add a command in fdbcli to manually trigger the detailed teams information loggings in data distribution. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4060">(PR #4060)</a></li>
+<li>Add documentation on read and write Path. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4099">(PR #4099)</a></li>
+<li>Add a histogram to expose commit batching window on Proxies. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4166">(PR #4166)</a></li>
+<li>Fix double counting of range reads in TransactionMetrics. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4130">(PR #4130)</a></li>
+<li>Add a trace event that can be used as an indicator of the load on the proxy. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4166">(PR #4166)</a></li>
+</ul>
+</div>
+<div class="section" id="id11">
 <h2>6.2.28</h2>
 <ul class="simple">
 <li>Log detailed team collection information when median available space ratio of all teams is too low. <a class="reference external" href="https://github.com/apple/foundationdb/pull/3912">(PR #3912)</a></li>
 <li>Bug fix, blob client did not support authentication key sizes over 64 bytes.  <a class="reference external" href="https://github.com/apple/foundationdb/pull/3964">(PR #3964)</a></li>
 </ul>
 </div>
-<div class="section" id="id3">
+<div class="section" id="id12">
 <h2>6.2.27</h2>
 <ul class="simple">
 <li>For clusters with a large number of shards, avoid slow tasks in the data distributor by adding yields to the shard map destruction. <a class="reference external" href="https://github.com/apple/foundationdb/pull/3834">(PR #3834)</a></li>
 <li>Reset the network connection between a proxy and master or resolvers if the proxy is too far behind in processing transactions. <a class="reference external" href="https://github.com/apple/foundationdb/pull/3891">(PR #3891)</a></li>
 </ul>
 </div>
-<div class="section" id="id4">
+<div class="section" id="id13">
 <h2>6.2.26</h2>
 <ul class="simple">
 <li>Fixed undefined behavior in configuring supported FoundationDB versions while starting up a client. <a class="reference external" href="https://github.com/apple/foundationdb/pull/3849">(PR #3849)</a></li>
@@ -217,20 +277,20 @@
 <li>Attempt to detect when calling <code class="xref py py-func docutils literal"><span class="pre">fdb_future_block_until_ready()</span></code> would cause a deadlock, and throw <code class="docutils literal"><span class="pre">blocked_from_network_thread</span></code> if it would definitely cause a deadlock. <a class="reference external" href="https://github.com/apple/foundationdb/pull/3786">(PR #3786)</a></li>
 </ul>
 </div>
-<div class="section" id="id5">
+<div class="section" id="id14">
 <h2>6.2.25</h2>
 <ul class="simple">
 <li>Mitigate an issue where a non-lockaware transaction that changes certain <code class="docutils literal"><span class="pre">\xff</span></code> &#8220;metadata&#8221; keys, committed concurrently with locking the database, can cause corruption. If a non-lockaware transaction manually sets its read version to a version where the database is locked, and changes metadata keys, this can still cause corruption. <a class="reference external" href="https://github.com/apple/foundationdb/pull/3674">(PR #3674)</a></li>
 <li>Reset network connections between the proxies and satellite tlogs if the latencies are larger than 500ms. <a class="reference external" href="https://github.com/apple/foundationdb/pull/3686">(PR #3686)</a></li>
 </ul>
 </div>
-<div class="section" id="id6">
+<div class="section" id="id15">
 <h2>6.2.24</h2>
 <ul class="simple">
 <li>Added the <code class="docutils literal"><span class="pre">suspend</span></code> command to <code class="docutils literal"><span class="pre">fdbcli</span></code> which kills a process and prevents it from rejoining the cluster for a specified duration. <a class="reference external" href="https://github.com/apple/foundationdb/pull/3550">(PR #3550)</a></li>
 </ul>
 </div>
-<div class="section" id="id7">
+<div class="section" id="id16">
 <h2>6.2.23</h2>
 <ul class="simple">
 <li>When configured with <code class="docutils literal"><span class="pre">usable_regions=2</span></code> data distribution could temporarily lower the replication of a shard when moving it. <a class="reference external" href="https://github.com/apple/foundationdb/pull/3487">(PR #3487)</a></li>
@@ -240,14 +300,14 @@
 <li>Added <code class="docutils literal"><span class="pre">cluster.active_primary_dc</span></code> that indicates which datacenter is serving as the primary datacenter in multi-region setups. <a class="reference external" href="https://github.com/apple/foundationdb/pull/3320">(PR #3320)</a></li>
 </ul>
 </div>
-<div class="section" id="id10">
+<div class="section" id="id19">
 <h2>6.2.22</h2>
 <ul class="simple">
 <li>Coordinator class processes could be recruited as the cluster controller. <a class="reference external" href="https://github.com/apple/foundationdb/pull/3282">(PR #3282)</a></li>
 <li>HTTPS requests made by backup would fail (introduced in 6.2.21). <a class="reference external" href="https://github.com/apple/foundationdb/pull/3284">(PR #3284)</a></li>
 </ul>
 </div>
-<div class="section" id="id11">
+<div class="section" id="id20">
 <h2>6.2.21</h2>
 <ul class="simple">
 <li>HTTPS requests made by backup could hang indefinitely. <a class="reference external" href="https://github.com/apple/foundationdb/pull/3027">(PR #3027)</a></li>
@@ -260,7 +320,7 @@
 <li>Added the <code class="docutils literal"><span class="pre">lock</span></code> and <code class="docutils literal"><span class="pre">unlock</span></code> commands to <code class="docutils literal"><span class="pre">fdbcli</span></code> which lock or unlock a cluster. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2890">(PR #2890)</a></li>
 </ul>
 </div>
-<div class="section" id="id12">
+<div class="section" id="id21">
 <h2>6.2.20</h2>
 <ul class="simple">
 <li>In rare scenarios, clients could send corrupted data to the server. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2976">(PR #2976)</a></li>
@@ -268,7 +328,7 @@
 <li>Changed TLS error handling to match the behavior of 6.2.15. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2993">(PR #2993)</a> <a class="reference external" href="https://github.com/apple/foundationdb/pull/2977">(PR #2977)</a></li>
 </ul>
 </div>
-<div class="section" id="id13">
+<div class="section" id="id22">
 <h2>6.2.19</h2>
 <ul class="simple">
 <li>Protect the proxies from running out of memory when bombarded with requests from clients. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2812">(PR #2812)</a>.</li>
@@ -285,7 +345,7 @@
 <li>Added <code class="docutils literal"><span class="pre">--debug-tls</span></code> as a command line argument to <code class="docutils literal"><span class="pre">fdbcli</span></code> to help diagnose TLS issues. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2810">(PR #2810)</a>.</li>
 </ul>
 </div>
-<div class="section" id="id17">
+<div class="section" id="id26">
 <h2>6.2.18</h2>
 <ul class="simple">
 <li>When configuring a cluster to usable_regions=2, data distribution would not react to machine failures while copying data to the remote region. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2774">(PR #2774)</a>.</li>
@@ -298,13 +358,13 @@
 <li>Setting invalid knobs in backup and DR binaries is now a warning instead of an error and will not result in the application being terminated. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2773">(PR #2773)</a>.</li>
 </ul>
 </div>
-<div class="section" id="id19">
+<div class="section" id="id28">
 <h2>6.2.17</h2>
 <ul class="simple">
 <li>Restored the ability to set TLS configuration using environment variables (broken in 6.2.16). <a class="reference external" href="https://github.com/apple/foundationdb/pull/2755">(PR #2755)</a>.</li>
 </ul>
 </div>
-<div class="section" id="id20">
+<div class="section" id="id29">
 <h2>6.2.16</h2>
 <ul class="simple">
 <li>Reduced tail commit latencies by improving commit pipelining on the proxies. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2589">(PR #2589)</a>.</li>
@@ -321,13 +381,13 @@
 <li>Fetching status attempts to reuse its connection with the cluster controller. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2583">(PR #2583)</a>.</li>
 </ul>
 </div>
-<div class="section" id="id21">
+<div class="section" id="id30">
 <h2>6.2.15</h2>
 <ul class="simple">
 <li>TLS throttling could block legitimate connections. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2575">(PR #2575)</a>.</li>
 </ul>
 </div>
-<div class="section" id="id22">
+<div class="section" id="id31">
 <h2>6.2.14</h2>
 <ul class="simple">
 <li>Data distribution was prioritizing shard merges too highly. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2562">(PR #2562)</a>.</li>
@@ -335,14 +395,14 @@
 <li>A proxy could run out of memory if disconnected from the cluster for too long. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2562">(PR #2562)</a>.</li>
 </ul>
 </div>
-<div class="section" id="id25">
+<div class="section" id="id34">
 <h2>6.2.13</h2>
 <ul class="simple">
 <li>Optimized the commit path the proxies to significantly reduce commit latencies in large clusters. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2536">(PR #2536)</a>.</li>
 <li>Data distribution could create temporarily untrackable shards which could not be split if they became hot. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2546">(PR #2546)</a>.</li>
 </ul>
 </div>
-<div class="section" id="id26">
+<div class="section" id="id35">
 <h2>6.2.12</h2>
 <ul class="simple">
 <li>Throttle TLS connect attempts from misconfigured clients. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2529">(PR #2529)</a>.</li>
@@ -356,7 +416,7 @@
 <li>The slow task profiler used an unsafe call to get a timestamp in its signal handler that could lead to rare crashes. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2515">(PR #2515)</a>.</li>
 </ul>
 </div>
-<div class="section" id="id27">
+<div class="section" id="id36">
 <h2>6.2.11</h2>
 <ul class="simple">
 <li>Clients could hang indefinitely on reads if all storage servers holding a keyrange were removed from a cluster since the last time the client read a key in the range. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2377">(PR #2377)</a>.</li>
@@ -364,13 +424,13 @@
 <li>Latency band tracking could fail to configure correctly after a recovery or upon process startup. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2371">(PR #2371)</a>.</li>
 </ul>
 </div>
-<div class="section" id="id28">
+<div class="section" id="id37">
 <h2>6.2.10</h2>
 <ul class="simple">
 <li><code class="docutils literal"><span class="pre">backup_agent</span></code> crashed on startup. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2356">(PR #2356)</a>.</li>
 </ul>
 </div>
-<div class="section" id="id29">
+<div class="section" id="id38">
 <h2>6.2.9</h2>
 <ul class="simple">
 <li>Small clusters using specific sets of process classes could cause the data distributor to be continuously killed and re-recruited. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2344">(PR #2344)</a>.</li>
@@ -380,14 +440,14 @@
 <li>Transaction timeouts would use memory for the entire duration of the timeout, regardless of whether the transaction had been destroyed. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2353">(PR #2353)</a>.</li>
 </ul>
 </div>
-<div class="section" id="id31">
+<div class="section" id="id40">
 <h2>6.2.8</h2>
 <ul class="simple">
 <li>Significantly improved the rate at which the transaction logs in a remote region can pull data from the primary region. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2307">(PR #2307)</a> <a class="reference external" href="https://github.com/apple/foundationdb/pull/2323">(PR #2323)</a>.</li>
 <li>The <code class="docutils literal"><span class="pre">system_kv_size_bytes</span></code> status field could report a size much larger than the actual size of the system keyspace. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2305">(PR #2305)</a>.</li>
 </ul>
 </div>
-<div class="section" id="id32">
+<div class="section" id="id41">
 <h2>6.2.7</h2>
 <div class="section" id="performance">
 <h3>Performance</h3>
@@ -577,7 +637,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 16, 2020.<br/>
+      Last updated on Apr 14, 2021.<br/>
     </p>
   </div>
 </footer>

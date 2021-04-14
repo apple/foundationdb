@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Architecture &#8212; FoundationDB 6.2</title>
+    <title>Architecture &#8212; FoundationDB 6.3</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.28',
+        VERSION:     '6.3.12',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -81,7 +81,30 @@
   <ul class="dropdown-menu localtoc"
       role="menu"
       aria-labelledby="dLabelLocalToc"><ul>
-<li><a class="reference internal" href="#">Architecture</a></li>
+<li><a class="reference internal" href="#">Architecture</a><ul>
+<li><a class="reference internal" href="#detailed-foundationdb-architecture">Detailed FoundationDB Architecture</a><ul>
+<li><a class="reference internal" href="#coordinators">Coordinators</a></li>
+<li><a class="reference internal" href="#cluster-controller">Cluster Controller</a></li>
+<li><a class="reference internal" href="#master">Master</a></li>
+<li><a class="reference internal" href="#proxies">Proxies</a></li>
+<li><a class="reference internal" href="#transaction-logs">Transaction Logs</a></li>
+<li><a class="reference internal" href="#resolvers">Resolvers</a></li>
+<li><a class="reference internal" href="#storage-servers">Storage Servers</a></li>
+<li><a class="reference internal" href="#data-distributor">Data Distributor</a></li>
+<li><a class="reference internal" href="#ratekeeper">Ratekeeper</a></li>
+<li><a class="reference internal" href="#clients">Clients</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#transaction-processing">Transaction Processing</a><ul>
+<li><a class="reference internal" href="#determine-read-version">Determine Read Version</a></li>
+<li><a class="reference internal" href="#transaction-commit">Transaction Commit</a></li>
+<li><a class="reference internal" href="#background-work">Background Work</a></li>
+<li><a class="reference internal" href="#transaction-system-recovery">Transaction System Recovery</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#resources">Resources</a></li>
+</ul>
+</li>
 </ul>
 </ul>
 </li>
@@ -123,7 +146,30 @@
   <div class="row">
       <div class="col-md-3">
         <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
-<li><a class="reference internal" href="#">Architecture</a></li>
+<li><a class="reference internal" href="#">Architecture</a><ul>
+<li><a class="reference internal" href="#detailed-foundationdb-architecture">Detailed FoundationDB Architecture</a><ul>
+<li><a class="reference internal" href="#coordinators">Coordinators</a></li>
+<li><a class="reference internal" href="#cluster-controller">Cluster Controller</a></li>
+<li><a class="reference internal" href="#master">Master</a></li>
+<li><a class="reference internal" href="#proxies">Proxies</a></li>
+<li><a class="reference internal" href="#transaction-logs">Transaction Logs</a></li>
+<li><a class="reference internal" href="#resolvers">Resolvers</a></li>
+<li><a class="reference internal" href="#storage-servers">Storage Servers</a></li>
+<li><a class="reference internal" href="#data-distributor">Data Distributor</a></li>
+<li><a class="reference internal" href="#ratekeeper">Ratekeeper</a></li>
+<li><a class="reference internal" href="#clients">Clients</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#transaction-processing">Transaction Processing</a><ul>
+<li><a class="reference internal" href="#determine-read-version">Determine Read Version</a></li>
+<li><a class="reference internal" href="#transaction-commit">Transaction Commit</a></li>
+<li><a class="reference internal" href="#background-work">Background Work</a></li>
+<li><a class="reference internal" href="#transaction-system-recovery">Transaction System Recovery</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#resources">Resources</a></li>
+</ul>
+</li>
 </ul>
 
         </div>
@@ -135,6 +181,318 @@
 <p>FoundationDB makes your architecture flexible and easy to operate. Your applications can send their data directly to the FoundationDB or to a <a class="reference internal" href="layer-concept.html"><span class="doc">layer</span></a>, a user-written module that can provide a new data model, compatibility with existing systems, or even serve as an entire framework. In both cases, all data is stored in a single place via an ordered, transactional key-value API.</p>
 <p>The following diagram details the logical architecture.</p>
 <img alt="_images/Architecture.png" src="_images/Architecture.png" />
+<div class="section" id="detailed-foundationdb-architecture">
+<h2>Detailed FoundationDB Architecture</h2>
+<p>The FoundationDB architecture chooses a decoupled design, where
+processes are assigned different heterogeneous roles (e.g.,
+Coordinators, Storage Servers, Master). Scaling the database is achieved
+by horizontally expanding the number of processes for separate roles:</p>
+<div class="section" id="coordinators">
+<h3>Coordinators</h3>
+<p>All clients and servers connect to a FoundationDB cluster with a cluster
+file, which contains the IP:PORT of the coordinators. Both the clients
+and servers use the coordinators to connect with the cluster controller.
+The servers will attempt to become the cluster controller if one does
+not exist, and register with the cluster controller once one has been
+elected. Clients use the cluster controller to keep an up-to-date list
+of proxies.</p>
+</div>
+<div class="section" id="cluster-controller">
+<h3>Cluster Controller</h3>
+<p>The cluster controller is a singleton elected by a majority of
+coordinators. It is the entry point for all processes in the cluster. It
+is responsible for determining when a process has failed, telling
+processes which roles they should become, and passing system information
+between all of the processes.</p>
+</div>
+<div class="section" id="master">
+<h3>Master</h3>
+<p>The master is responsible for coordinating the transition of the write
+sub-system from one generation to the next. The write sub-system
+includes the master, proxies, resolvers, and transaction logs. The three
+roles are treated as a unit, and if any of them fail, we will recruit a
+replacement for all three roles. The master provides the commit versions
+for batches of the mutations to the proxies.</p>
+<p>Historically, Ratekeeper and Data Distributor are coupled with Master on
+the same process. Since 6.2, both have become a singleton in the
+cluster. The life time is no longer tied with Master.</p>
+<p><img alt="image1" src="_images/architecture-1.jpeg" /></p>
+</div>
+<div class="section" id="proxies">
+<h3>Proxies</h3>
+<p>The proxies are responsible for providing read versions, committing
+transactions, and tracking the storage servers responsible for each
+range of keys. To provide a read version, a proxy will ask all other
+proxies to see the largest committed version at this point in time,
+while simultaneously checking that the transaction logs have not been
+stopped. Ratekeeper will artificially slow down the rate at which the
+proxy provides read versions.</p>
+<p>Commits are accomplished by:</p>
+<ul class="simple">
+<li>Get a commit version from the master.</li>
+<li>Use the resolvers to determine if the transaction conflicts with
+previously committed transactions.</li>
+<li>Make the transaction durable on the transaction logs.</li>
+</ul>
+<p>The key space starting with the <code class="docutils literal"><span class="pre">\xff</span></code> byte is reserved for system
+metadata. All mutations committed into this key space are distributed to
+all of the proxies through the resolvers. This metadata includes a
+mapping between key ranges and the storage servers which have the data
+for that range of keys. The proxies provides this information to clients
+on-demand. The clients cache this mapping; if they ask a storage server
+for a key it does not have, they will clear their cache and get a more
+up-to-date list of servers from the proxies.</p>
+</div>
+<div class="section" id="transaction-logs">
+<h3>Transaction Logs</h3>
+<p>The transaction logs make mutations durable to disk for fast commit
+latencies. The logs receive commits from the proxy in version order, and
+only respond to the proxy once the data has been written and fsync’ed to
+an append only mutation log on disk. Before the data is even written to
+disk we forward it to the storage servers responsible for that mutation.
+Once the storage servers have made the mutation durable, they pop it
+from the log. This generally happens roughly 6 seconds after the
+mutation was originally committed to the log. We only read from the
+log’s disk when the process has been rebooted. If a storage server has
+failed, mutations bound for that storage server will build up on the
+logs. Once data distribution makes a different storage server
+responsible for all of the missing storage server’s data we will discard
+the log data bound for the failed server.</p>
+</div>
+<div class="section" id="resolvers">
+<h3>Resolvers</h3>
+<p>The resolvers are responsible determining conflicts between
+transactions. A transaction conflicts if it reads a key that has been
+written between the transaction’s read version and commit version. The
+resolver does this by holding the last 5 seconds of committed writes in
+memory, and comparing a new transaction’s reads against this set of
+commits.</p>
+</div>
+<div class="section" id="storage-servers">
+<h3>Storage Servers</h3>
+<p>The vast majority of processes in a cluster are storage servers. Storage
+servers are assigned ranges of key, and are responsible to storing all
+of the data for that range. They keep 5 seconds of mutations in memory,
+and an on disk copy of the data as of 5 second ago. Clients must read at
+a version within the last 5 seconds, or they will get a
+<code class="docutils literal"><span class="pre">transaction_too_old</span></code> error. The SSD storage engine stores the data in
+a B-tree based on SQLite. The memory storage engine store the data in
+memory with an append only log that is only read from disk if the
+process is rebooted. In the upcoming FoundationDB 7.0 release, the
+B-tree storage engine will be replaced with a brand new <em>Redwood</em>
+engine.</p>
+</div>
+<div class="section" id="data-distributor">
+<h3>Data Distributor</h3>
+<p>Data distributor manages the lifetime of storage servers, decides which
+storage server is responsible for which data range, and ensures data is
+evenly distributed across all storage servers (SS). Data distributor as
+a singleton in the cluster is recruited and monitored by Cluster
+Controller. See <a class="reference external" href="https://github.com/apple/foundationdb/blob/master/design/data-distributor-internals.md">internal
+documentation</a>.</p>
+</div>
+<div class="section" id="ratekeeper">
+<h3>Ratekeeper</h3>
+<p>Ratekeeper monitors system load and slows down client transaction rate
+when the cluster is close to saturation by lowering the rate at which
+the proxy provides read versions. Ratekeeper as a singleton in the
+cluster is recruited and monitored by Cluster Controller.</p>
+</div>
+<div class="section" id="clients">
+<h3>Clients</h3>
+<p>A client links with specific language bindings (i.e., client libraries)
+in order to communicate with a FoundationDB cluster. The language
+bindings support loading multiple versions of C libraries, allowing the
+client communicates with older version of the FoundationDB clusters.
+Currently, C, Go, Python, Java, Ruby bindings are officially supported.</p>
+</div>
+</div>
+<div class="section" id="transaction-processing">
+<h2>Transaction Processing</h2>
+<p>A database transaction in FoundationDB starts by a client contacting one
+of the Proxies to obtain a read version, which is guaranteed to be
+larger than any of commit version that client may know about (even
+through side channels outside the FoundationDB cluster). This is needed
+so that a client will see the result of previous commits that have
+happened.</p>
+<p>Then the client may issue multiple reads to storage servers and obtain
+values at that specific read version. Client writes are kept in local
+memory without contacting the cluster. By default, reading a key that
+was written in the same transaction will return the newly written value.</p>
+<p>At commit time, the client sends the transaction data (all reads and
+writes) to one of the Proxies and waits for commit or abort response
+from the proxy. If the transaction conflicts with another one and cannot
+commit, the client may choose to retry the transaction from the
+beginning again. If the transaction commits, the proxy also returns the
+commit version back to the client. Note this commit version is larger
+than the read version and is chosen by the master.</p>
+<p>The FoundationDB architecture separates the scaling of client reads and
+writes (i.e., transaction commits). Because clients directly issue reads
+to sharded storage servers, reads scale linearly to the number of
+storage servers. Similarly, writes are scaled by adding more processes
+to Proxies, Resolvers, and Log Servers in the transaction system.</p>
+<div class="section" id="determine-read-version">
+<h3>Determine Read Version</h3>
+<p>When a client requests a read version from a proxy, the proxy asks all
+other proxies for their last commit versions, and checks a set of
+transaction logs satisfying replication policy are live. Then the proxy
+returns the maximum commit version as the read version to the client.</p>
+<p><img alt="image2" src="_images/architecture-2.jpeg" /></p>
+<p>The reason for the proxy to contact all other proxies for commit
+versions is to ensure the read version is larger than any previously
+committed version. Consider that if proxy <code class="docutils literal"><span class="pre">A</span></code> commits a transaction,
+and then the client asks proxy <code class="docutils literal"><span class="pre">B</span></code> for a read version. The read
+version from proxy <code class="docutils literal"><span class="pre">B</span></code> must be larger than the version committed by
+proxy <code class="docutils literal"><span class="pre">A</span></code>. The only way to get this information is by asking proxy
+<code class="docutils literal"><span class="pre">A</span></code> for its largest committed version.</p>
+<p>The reason for checking a set of transaction logs satisfying replication
+policy are live is to ensure the proxy is not replaced with newer
+generation of proxies. This is because proxy is a stateless role
+recruited in each generation. If a recovery has happened and the old
+proxy is still live, this old proxy could still give out read versions.
+As a result, a <em>read-only</em> transaction may see stale results (a
+read-write transaction will be aborted). By checking a set of
+transaction logs satisfying replication policy are live, the proxy makes
+sure no recovery has happened, thus the <em>read-only</em> transaction sees the
+latest data.</p>
+<p>Note that the client cannot simply ask the master for read versions. The
+master gives out versions to proxies to be committed, but the master
+does not know when the versions it gives out are durable on the
+transaction logs. Therefore it is not safe to do reads at the largest
+version the master has provided because that version might be rolled
+back in the event of a failure, so the client could end up reading data
+that was never committed. In order for the client to use versions from
+the master, the client needs to wait until all in-flight
+transaction-batches (a write version is used for a batch of
+transactions) to commit. This can take a long time and thus is
+inefficient. Another drawback of this approach is putting more work
+towards the master, because the master role can’t be scaled. Even though
+giving out read-versions isn’t very expensive, it still requires the
+master to get a transaction budget from the Ratekeeper, batches
+requests, and potentially maintains thousands of network connections
+from clients.</p>
+<p><img alt="image3" src="_images/architecture-3.jpeg" /></p>
+</div>
+<div class="section" id="transaction-commit">
+<h3>Transaction Commit</h3>
+<p>A client transaction commits in the following steps:</p>
+<ol class="arabic simple">
+<li>A client sends a transaction to a proxy.</li>
+<li>The proxy asks the master for a commit version.</li>
+<li>The master sends back a commit version that is higher than any commit
+version seen before.</li>
+<li>The proxy sends the read and write conflict ranges to the resolver(s)
+with the commit version included.</li>
+<li>The resolver responds back with whether the transaction has any
+conflicts with previous transactions by sorting transactions
+according to their commit versions and computing if such a serial
+execution order is conflict-free.<ul>
+<li>If there are conflicts, the proxy responds back to the client with
+a not_committed error.</li>
+<li>If there are no conflicts, the proxy sends the mutations and
+commit version of this transaction to the transaction logs.</li>
+</ul>
+</li>
+<li>Once the mutations are durable on the logs, the proxy responds back
+success to the user.</li>
+</ol>
+<p>Note the proxy sends each resolver their respective key ranges, if any
+one of the resolvers detects a conflict then the transaction is not
+committed. This has the flaw that if only one of the resolvers detects a
+conflict, the other resolver will still think the transaction has
+succeeded and may fail future transactions with overlapping write
+conflict ranges, even though these future transaction can commit. In
+practice, a well designed workload will only have a very small
+percentage of conflicts, so this amplification will not affect
+performance. Additionally, each transaction has a five seconds window.
+After five seconds, resolvers will remove the conflict ranges of old
+transactions, which also limits the chance of this type of false
+conflict.</p>
+<p><img alt="image4" src="_images/architecture-4.jpeg" /></p>
+<p><img alt="image5" src="_images/architecture-5.jpeg" /></p>
+</div>
+<div class="section" id="background-work">
+<h3>Background Work</h3>
+<p>There are a number of background work happening besides the transaction
+processing:</p>
+<ul class="simple">
+<li><strong>Ratekeeper</strong> collects statistic information from proxies,
+transaction logs, and storage servers and compute the target
+transaction rate for the cluster.</li>
+<li><strong>Data distribution</strong> monitors all storage servers and perform load
+balancing operations to evenly distribute data among all storage
+servers.</li>
+<li><strong>Storage servers</strong> pull mutations from transaction logs, write them
+into storage engine to persist on disks.</li>
+<li><strong>Proxies</strong> periodically send empty commits to transaction logs to
+keep commit versions increasing, in case there is no client generated
+transactions.</li>
+</ul>
+<p><img alt="image6" src="_images/architecture-6.jpeg" /></p>
+</div>
+<div class="section" id="transaction-system-recovery">
+<h3>Transaction System Recovery</h3>
+<p>The transaction system implements the write pipeline of the FoundationDB
+cluster and its performance is critical to the transaction commit
+latency. A typical recovery takes about a few hundred milliseconds, but
+longer recovery time (usually a few seconds) can happen. Whenever there
+is a failure in the transaction system, a recovery process is performed
+to restore the transaction system to a new configuration, i.e., a clean
+state. Specifically, the Master process monitors the health of Proxies,
+Resolvers, and Transaction Logs. If any one of the monitored process
+failed, the Master process terminates. The Cluster Controller will
+detect this event, and then recruits a new Master, which coordinates the
+recovery and recruits a new transaction system instance. In this way,
+the transaction processing is divided into a number of epochs, where
+each epoch represents a generation of the transaction system with its
+unique Master process.</p>
+<p>For each epoch, the Master initiates recovery in several steps. First,
+the Master reads the previous transaction system states from
+Coordinators and lock the coordinated states to prevent another Master
+process from recovering at the same time. Then the Master recovers
+previous transaction system states, including all Log Servers’
+Information, stops these Log Servers from accepting transactions, and
+recruits a new set of Proxies, Resolvers, and Transaction Logs. After
+previous Log Servers are stopped and new transaction system is
+recruited, the Master writes the coordinated states with current
+transaction system information. Finally, the Master accepts new
+transaction commits. See details in this
+<a class="reference external" href="https://github.com/apple/foundationdb/blob/master/design/recovery-internals.md">documentation</a>.</p>
+<p>Because Proxies and Resolvers are stateless, their recoveries have no
+extra work. In contrast, Transaction Logs save the logs of committed
+transactions, and we need to ensure all previously committed
+transactions are durable and retrievable by storage servers. That is,
+for any transactions that the Proxies may have sent back commit
+response, their logs are persisted in multiple Log Servers (e.g., three
+servers if replication degree is 3).</p>
+<p>Finally, a recovery will <em>fast forward</em> time by 90 seconds, which would
+abort any in-progress client transactions with <code class="docutils literal"><span class="pre">transaction_too_old</span></code>
+error. During retry, these client transactions will find the new
+generation of transaction system and commit.</p>
+<p><strong>``commit_result_unknown`` error:</strong> If a recovery happened while a
+transaction is committing (i.e., a proxy has sent mutations to
+transaction logs). A client would have received
+<code class="docutils literal"><span class="pre">commit_result_unknown</span></code>, and then retried the transaction. It’s
+completely permissible for FDB to commit both the first attempt, and the
+second retry, as <code class="docutils literal"><span class="pre">commit_result_unknown</span></code> means the transaction may or
+may not have committed. This is why it’s strongly recommended that
+transactions should be idempotent, so that they handle
+<code class="docutils literal"><span class="pre">commit_result_unknown</span></code> correctly.</p>
+</div>
+</div>
+<div class="section" id="resources">
+<h2>Resources</h2>
+<p><a class="reference external" href="https://forums.foundationdb.org/t/technical-overview-of-the-database/135/26">Forum
+Post</a></p>
+<p><a class="reference external" href="https://github.com/apple/foundationdb/blob/master/documentation/sphinx/source/kv-architecture.rst">Existing Architecture
+Documentation</a></p>
+<p><a class="reference external" href="https://www.youtube.com/watch?list=PLbzoR-pLrL6q7uYN-94-p_-Q3hyAmpI7o&amp;v=EMwhsGsxfPU&amp;feature=emb_logo">Summit
+Presentation</a></p>
+<p><a class="reference external" href="https://github.com/apple/foundationdb/blob/master/design/data-distributor-internals.md">Data Distribution
+Documentation</a></p>
+<p><a class="reference external" href="https://github.com/apple/foundationdb/blob/master/design/recovery-internals.md">Recovery
+Documentation</a></p>
+</div>
 </div>
 
 
@@ -157,7 +515,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 16, 2020.<br/>
+      Last updated on Apr 14, 2021.<br/>
     </p>
   </div>
 </footer>

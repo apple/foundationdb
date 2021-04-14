@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Error Codes &#8212; FoundationDB 6.2</title>
+    <title>Error Codes &#8212; FoundationDB 6.3</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.28',
+        VERSION:     '6.3.12',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -214,13 +214,21 @@
 <td>1042</td>
 <td>Proxy commit memory limit exceeded</td>
 </tr>
-<tr class="row-odd"><td>operation_cancelled</td>
+<tr class="row-odd"><td>batch_transaction_throttled</td>
+<td>1051</td>
+<td>Batch GRV request rate limit exceeded</td>
+</tr>
+<tr class="row-even"><td>operation_cancelled</td>
 <td>1101</td>
 <td>Asynchronous operation cancelled</td>
 </tr>
-<tr class="row-even"><td>future_released</td>
+<tr class="row-odd"><td>future_released</td>
 <td>1102</td>
 <td>Future has been released</td>
+</tr>
+<tr class="row-even"><td>tag_throttled</td>
+<td>1213</td>
+<td>Transaction tag is being throttled</td>
 </tr>
 <tr class="row-odd"><td>platform_error</td>
 <td>1500</td>
@@ -354,45 +362,71 @@
 <td>2024</td>
 <td>Invalid cache eviction policy, only random and lru are supported</td>
 </tr>
-<tr class="row-even"><td>blocked_from_network_thread</td>
+<tr class="row-even"><td>network_cannot_be_restarted</td>
+<td>2025</td>
+<td>Network can only be started once</td>
+</tr>
+<tr class="row-odd"><td>blocked_from_network_thread</td>
 <td>2026</td>
 <td>Detected a deadlock in a callback called from the network thread</td>
 </tr>
-<tr class="row-odd"><td>incompatible_protocol_version</td>
+<tr class="row-even"><td>incompatible_protocol_version</td>
 <td>2100</td>
 <td>Incompatible protocol version</td>
 </tr>
-<tr class="row-even"><td>transaction_too_large</td>
+<tr class="row-odd"><td>transaction_too_large</td>
 <td>2101</td>
 <td>Transaction exceeds byte limit</td>
 </tr>
-<tr class="row-odd"><td>key_too_large</td>
+<tr class="row-even"><td>key_too_large</td>
 <td>2102</td>
 <td>Key length exceeds limit</td>
 </tr>
-<tr class="row-even"><td>value_too_large</td>
+<tr class="row-odd"><td>value_too_large</td>
 <td>2103</td>
 <td>Value length exceeds limit</td>
 </tr>
-<tr class="row-odd"><td>connection_string_invalid</td>
+<tr class="row-even"><td>connection_string_invalid</td>
 <td>2104</td>
 <td>Connection string invalid</td>
 </tr>
-<tr class="row-even"><td>address_in_use</td>
+<tr class="row-odd"><td>address_in_use</td>
 <td>2105</td>
 <td>Local address in use</td>
 </tr>
-<tr class="row-odd"><td>invalid_local_address</td>
+<tr class="row-even"><td>invalid_local_address</td>
 <td>2106</td>
 <td>Invalid local address</td>
 </tr>
-<tr class="row-even"><td>tls_error</td>
+<tr class="row-odd"><td>tls_error</td>
 <td>2107</td>
 <td>TLS error</td>
 </tr>
-<tr class="row-odd"><td>unsupported_operation</td>
+<tr class="row-even"><td>unsupported_operation</td>
 <td>2108</td>
 <td>Operation is not supported</td>
+</tr>
+<tr class="row-odd"><td>too_many_tags</td>
+<td>2109</td>
+<td>Too many tags set on transaction</td>
+</tr>
+<tr class="row-even"><td>tag_too_long</td>
+<td>2110</td>
+<td>Tag set on transaction is too long</td>
+</tr>
+<tr class="row-odd"><td>too_many_tag_throttles</td>
+<td>2111</td>
+<td>Too many tag throttles have been created</td>
+</tr>
+<tr class="row-even"><td>special_keys_cross_module_read</td>
+<td>2112</td>
+<td>Special key space range read crosses modules.
+Refer to the <code class="docutils literal"><span class="pre">SPECIAL_KEY_SPACE_RELAXED</span></code> transaction option for more details.</td>
+</tr>
+<tr class="row-odd"><td>special_keys_no_module_found</td>
+<td>2113</td>
+<td>Special key space range read does not intersect a module.
+Refer to the <code class="docutils literal"><span class="pre">SPECIAL_KEY_SPACE_RELAXED</span></code> transaction option for more details.</td>
 </tr>
 <tr class="row-even"><td>api_version_unset</td>
 <td>2200</td>
@@ -446,7 +480,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 16, 2020.<br/>
+      Last updated on Apr 14, 2021.<br/>
     </p>
   </div>
 </footer>

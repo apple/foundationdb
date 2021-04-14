@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>C API &#8212; FoundationDB 6.2</title>
+    <title>C API &#8212; FoundationDB 6.3</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.28',
+        VERSION:     '6.3.12',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -201,8 +201,8 @@
 </div>
 <div class="section" id="api-versioning">
 <h2>API versioning</h2>
-<p>Prior to including <code class="docutils literal"><span class="pre">fdb_c.h</span></code>, you must define the <code class="docutils literal"><span class="pre">FDB_API_VERSION</span></code> macro. This, together with the <a class="reference internal" href="#c.fdb_select_api_version" title="fdb_select_api_version"><code class="xref c c-func docutils literal"><span class="pre">fdb_select_api_version()</span></code></a> function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is 620.</p>
-<div class="highlight-c"><div class="highlight"><pre><span></span><span class="cp">#define FDB_API_VERSION 620</span>
+<p>Prior to including <code class="docutils literal"><span class="pre">fdb_c.h</span></code>, you must define the <code class="docutils literal"><span class="pre">FDB_API_VERSION</span></code> macro. This, together with the <a class="reference internal" href="#c.fdb_select_api_version" title="fdb_select_api_version"><code class="xref c c-func docutils literal"><span class="pre">fdb_select_api_version()</span></code></a> function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is 630.</p>
+<div class="highlight-c"><div class="highlight"><pre><span></span><span class="cp">#define FDB_API_VERSION 630</span>
 <span class="cp">#include</span> <span class="cpf">&lt;foundationdb/fdb_c.h&gt;</span><span class="cp"></span>
 </pre></div>
 </div>
@@ -234,7 +234,7 @@
 <p class="last">Language bindings which themselves expose API versioning will usually pass the version requested by the application.</p>
 </dd>
 <dt><code class="docutils literal"><span class="pre">header_version</span></code></dt>
-<dd>The version of the ABI (application binary interface) that the calling code expects to find in the shared library. If you are using an FFI, this <em>must</em> correspond to the version of the API you are using as a reference (currently 620). For example, the number of arguments that a function takes may be affected by this value, and an incorrect value is unlikely to yield success.</dd>
+<dd>The version of the ABI (application binary interface) that the calling code expects to find in the shared library. If you are using an FFI, this <em>must</em> correspond to the version of the API you are using as a reference (currently 630). For example, the number of arguments that a function takes may be affected by this value, and an incorrect value is unlikely to yield success.</dd>
 </dl>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
@@ -280,7 +280,7 @@ int <code class="descname">fdb_get_max_api_version</code><span class="sig-paren"
 <dt id="c.fdb_run_network">
 <a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_run_network</code><span class="sig-paren">(</span><span class="sig-paren">)</span></dt>
 <dd><p>Must be called after <a class="reference internal" href="#c.fdb_setup_network" title="fdb_setup_network"><code class="xref c c-func docutils literal"><span class="pre">fdb_setup_network()</span></code></a> before any asynchronous functions in this API can be expected to complete. Unless your program is entirely event-driven based on results of asynchronous functions in this API and has no event loop of its own, you will want to invoke this function on an auxiliary thread (which it is your responsibility to create).</p>
-<p>This function will not return until <a class="reference internal" href="#c.fdb_stop_network" title="fdb_stop_network"><code class="xref c c-func docutils literal"><span class="pre">fdb_stop_network()</span></code></a> is called by you or a serious error occurs. You must not invoke <a class="reference internal" href="#c.fdb_run_network" title="fdb_run_network"><code class="xref c c-func docutils literal"><span class="pre">fdb_run_network()</span></code></a> concurrently or reentrantly while it is already running.</p>
+<p>This function will not return until <a class="reference internal" href="#c.fdb_stop_network" title="fdb_stop_network"><code class="xref c c-func docutils literal"><span class="pre">fdb_stop_network()</span></code></a> is called by you or a serious error occurs. It is not possible to run more than one network thread, and the network thread cannot be restarted once it has been stopped. This means that once <code class="docutils literal"><span class="pre">fdb_run_network</span></code> has been called, it is not legal to call it again for the lifetime of the running program.</p>
 </dd></dl>
 
 <dl class="function">
@@ -602,6 +602,16 @@ void <code class="descname">fdb_transaction_set_read_version</code><span class="
 </dd></dl>
 
 <dl class="function">
+<dt id="c.fdb_transaction_get_estimated_range_size_bytes">
+<a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>* <code class="descname">fdb_transaction_get_estimated_range_size_bytes</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>*<em>&nbsp;tr</em>, uint8_t const*<em>&nbsp;begin_key_name</em>, int<em>&nbsp;begin_key_name_length</em>, uint8_t const*<em>&nbsp;end_key_name</em>, int<em>&nbsp;end_key_name_length</em><span class="sig-paren">)</span></dt>
+<dt id="c.range.">
+Returns an estimated byte size of the key <code class="descname">range.</code><span class="sig-paren">(</span><span class="sig-paren">)</span></dt>
+<dt id="c.accurate.">
+.. note:: The estimated size is calculated based on the sampling done by FDB server. The sampling algorithm works roughly in this way: the larger the key-value pair is, the more likely it would be sampled and the more accurate its sampled size would be. And due to that reason it is recommended to use this API to query against large ranges for accuracy considerations. For a rough reference, if the returned size is larger than 3MB, one can consider the size to be <code class="descname">accurate.</code><span class="sig-paren">(</span><span class="sig-paren">)</span></dt>
+<dd><p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> which will be set to the estimated size of the key range given. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_int64" title="fdb_future_get_int64"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_int64()</span></code></a> to extract the size, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
+</dd></dl>
+
+<dl class="function">
 <dt id="c.fdb_transaction_get_key">
 <a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>* <code class="descname">fdb_transaction_get_key</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>*<em>&nbsp;transaction</em>, uint8_t const*<em>&nbsp;key_name</em>, int<em>&nbsp;key_name_length</em>, <a class="reference internal" href="#c.fdb_bool_t" title="fdb_bool_t">fdb_bool_t</a><em>&nbsp;or_equal</em>, int<em>&nbsp;offset</em>, <a class="reference internal" href="#c.fdb_bool_t" title="fdb_bool_t">fdb_bool_t</a><em>&nbsp;snapshot</em><span class="sig-paren">)</span></dt>
 <dd><p>Resolves a <a class="reference internal" href="#key-selectors"><span class="std std-ref">key selector</span></a> against the keys in the database snapshot represented by <code class="docutils literal"><span class="pre">transaction</span></code>.</p>
@@ -751,7 +761,7 @@ void <code class="descname">fdb_transaction_atomic_op</code><span class="sig-par
 <code class="descname">FDBMutationType</code></dt>
 <dd><p>An enumeration of available opcodes to be passed to <a class="reference internal" href="#c.fdb_transaction_atomic_op" title="fdb_transaction_atomic_op"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_atomic_op()</span></code></a></p>
 <p><code class="docutils literal"><span class="pre">FDB_MUTATION_TYPE_ADD</span></code></p>
-<p>Performs an addition of little-endian integers. If the existing value in the database is not present or shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes.  If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>.</p>
+<p>Performs an addition of little-endian integers. If the existing value in the database is not present or shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes.  If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>. In case of overflow, the result is truncated to the width of <code class="docutils literal"><span class="pre">param</span></code>.</p>
 <p>The integers to be added must be stored in a little-endian representation. They can be signed in two&#8217;s complement representation or unsigned. You can add to an integer at a known offset in the value by prepending the appropriate number of zero bytes to <code class="docutils literal"><span class="pre">param</span></code> and padding with zero bytes to match the length of the value. However, this offset technique requires that you know the addition will not cause the integer field within the value to overflow.</p>
 <p><code class="docutils literal"><span class="pre">FDB_MUTATION_TYPE_AND</span></code></p>
 <p>Performs a bitwise &#8220;and&#8221; operation. If the existing value in the database is not present, then <code class="docutils literal"><span class="pre">param</span></code> is stored in the database. If the existing value in the database is  shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes. If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>.</p>
@@ -773,17 +783,16 @@ void <code class="descname">fdb_transaction_atomic_op</code><span class="sig-par
 <p>Performs lexicographic comparison of byte strings. If the existing value in the database is not present, then <code class="docutils literal"><span class="pre">param</span></code> is stored. Otherwise the smaller of the two values is then stored in the database.</p>
 <p><code class="docutils literal"><span class="pre">FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY</span></code></p>
 <p>Transforms <code class="docutils literal"><span class="pre">key</span></code> using a versionstamp for the transaction. This key must be at least 14 bytes long. The final 4 bytes will be interpreted as a 32-bit little-endian integer denoting an index into the key at which to perform the transformation, and then trimmed off the key. The 10 bytes in the key beginning at the index will be overwritten with the versionstamp. If the index plus 10 bytes points past the end of the key, the result will be an error. Sets the transformed key in the database to <code class="docutils literal"><span class="pre">param</span></code>.</p>
-<p>A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions.</p>
-<p>A transaction is not permitted to read any transformed key or value previously set within that transaction, and an attempt to do so will result in an error.</p>
-<p>This operation is not compatible with the READ_YOUR_WRITES_DISABLE <a class="reference internal" href="#c.fdb_transaction_set_option" title="fdb_transaction_set_option"><code class="xref c c-func docutils literal"><span class="pre">transaction</span> <span class="pre">option</span></code></a> and will generate an error if used with it.</p>
+<p>A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-endian order). The last 2 bytes are monotonic in the serialization order for transactions (serialized in big-endian order).</p>
+<p>A transaction is not permitted to read any transformed key or value previously set within that transaction, and an attempt to do so will result in an <code class="docutils literal"><span class="pre">accessed_unreadable</span></code> error.  The range of keys marked unreadable when setting a versionstamped key begins at the transactions&#8217;s read version if it is known, otherwise a versionstamp of all <code class="docutils literal"><span class="pre">0x00</span></code> bytes is conservatively assumed.  The upper bound of the unreadable range is a versionstamp of all <code class="docutils literal"><span class="pre">0xFF</span></code> bytes.</p>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
 <p class="last">At this time, versionstamped keys are not compatible with the Tuple layer except in Java, Python, and Go. Note that this implies versionstamped keys may not be used with the Subspace and Directory layers except in those languages.</p>
 </div>
 <p><code class="docutils literal"><span class="pre">FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE</span></code></p>
 <p>Transforms <code class="docutils literal"><span class="pre">param</span></code> using a versionstamp for the transaction. This parameter must be at least 14 bytes long. The final 4 bytes will be interpreted as a 32-bit little-endian integer denoting an index into the parameter at which to perform the transformation, and then trimmed off the key. The 10 bytes in the parameter beginning at the index will be overwritten with the versionstamp. If the index plus 10 bytes points past the end of the parameter, the result will be an error. Sets <code class="docutils literal"><span class="pre">key</span></code> in the database to the transformed parameter.</p>
-<p>A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions.</p>
-<p>A transaction is not permitted to read any transformed key or value previously set within that transaction, and an attempt to do so will result in an error.</p>
+<p>A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-endian order). The last 2 bytes are monotonic in the serialization order for transactions (serialized in big-endian order).</p>
+<p>A transaction is not permitted to read any transformed key or value previously set within that transaction, and an attempt to do so will result in an <code class="docutils literal"><span class="pre">accessed_unreadable</span></code> error.  The range of keys marked unreadable when setting a versionstamped key begins at the transactions&#8217;s read version if it is known, otherwise a versionstamp of all <code class="docutils literal"><span class="pre">0x00</span></code> bytes is conservatively assumed.  The upper bound of the unreadable range is a versionstamp of all <code class="docutils literal"><span class="pre">0xFF</span></code> bytes.</p>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
 <p class="last">At this time, versionstamped values are not compatible with the Tuple layer except in Java, Python, and Go. Note that this implies versionstamped values may not be used with the Subspace and Directory layers except in those languages.</p>
@@ -997,7 +1006,7 @@ const char* <code class="descname">fdb_get_error</code><span class="sig-paren">(
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 16, 2020.<br/>
+      Last updated on Apr 14, 2021.<br/>
     </p>
   </div>
 </footer>

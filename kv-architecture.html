@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>FoundationDB Architecture &#8212; FoundationDB 6.2</title>
+    <title>FoundationDB Architecture &#8212; FoundationDB 6.3</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.28',
+        VERSION:     '6.3.12',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -31,7 +31,7 @@
     <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
     <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="Client Design" href="client-design.html" />
+    <link rel="next" title="FDB Read and Write Path" href="read-write-path.html" />
     <link rel="prev" title="Simulation and Testing" href="testing.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -105,7 +105,7 @@
     </a>
   </li>
   <li>
-    <a href="client-design.html" title="Next Chapter: Client Design"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Client Design &raquo;</span>
+    <a href="read-write-path.html" title="Next Chapter: FDB Read and Write Path"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">FDB Read and ... &raquo;</span>
     </a>
   </li>
               
@@ -173,7 +173,7 @@
 <li>Use the resolvers to determine if the transaction conflicts with previously committed transactions.</li>
 <li>Make the transaction durable on the transaction logs.</li>
 </ul>
-<p>The key space starting with the &#8216;xff&#8217; byte is reserved for system metadata. All mutations committed into this key space are distributed to all of the proxies through the resolvers. This metadata includes a mapping between key ranges and the storage servers which have the data for that range of keys. The proxies provides this information to clients on-demand. The clients cache this mapping; if they ask a storage server for a key it does not have, they will clear their cache and get a more up-to-date list of servers from the proxies.</p>
+<p>The key space starting with the &#8216;xff&#8217; byte is reserved for system metadata. All mutations committed into this key space are distributed to all of the proxies through the resolvers. This metadata includes a mapping between key ranges and the storage servers which have the data for that range of keys. The proxies provide this information to clients on-demand. The clients cache this mapping; if they ask a storage server for a key it does not have, they will clear their cache and get a more up-to-date list of servers from the proxies.</p>
 </div>
 <div class="section" id="transaction-logs">
 <h2>Transaction Logs</h2>
@@ -181,11 +181,11 @@
 </div>
 <div class="section" id="resolvers">
 <h2>Resolvers</h2>
-<p>The resolvers are responsible determining conflicts between transactions. A transaction conflicts if it reads a key that has been written between the transaction&#8217;s read version and commit version. The resolver does this by holding the last 5 seconds of committed writes in memory, and comparing a new transaction&#8217;s reads against this set of commits.</p>
+<p>The resolvers are responsible determining conflicts between transactions. A read-write transaction conflicts if it reads a key that has been written between the transaction&#8217;s read version and commit version. The resolver does this by holding the last 5 seconds of committed writes in memory, and comparing a new transaction&#8217;s reads against this set of commits.</p>
 </div>
 <div class="section" id="storage-servers">
 <h2>Storage Servers</h2>
-<p>The vast majority of processes in a cluster are storage servers. Storage servers are assigned ranges of key, and are responsible to storing all of the data for that range. They keep 5 seconds of mutations in memory, and an on disk copy of the data as of 5 second ago. Clients must read at a version within the last 5 seconds, or they will get a transaction_too_old error. The ssd storage engine stores the data in a b-tree. The memory storage engine store the data in memory with an append only log that is only read from disk if the process is rebooted.</p>
+<p>The vast majority of processes in a cluster are storage servers. Storage servers are assigned ranges of keys, and are responsible for storing all of the data for that range. They keep 5 seconds of mutations in memory, and an on disk copy of the data as of 5 second ago. Clients must read at a version within the last 5 seconds, or they will get a transaction_too_old error. The ssd storage engine stores the data in a b-tree. The memory storage engine stores the data in memory with an append only log that is only read from disk if the process is rebooted.</p>
 </div>
 <div class="section" id="clients">
 <h2>Clients</h2>
@@ -213,7 +213,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 16, 2020.<br/>
+      Last updated on Apr 14, 2021.<br/>
     </p>
   </div>
 </footer>

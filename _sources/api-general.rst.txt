@@ -65,7 +65,7 @@ To install on **RHEL/CentOS** use the rpm command:
 
 To install on **macOS**, run the installer as in :doc:`getting-started-mac`, but deselect the "FoundationDB Server" feature.
 
-The client binaries include the ``fdbcli`` tool and language bindings for C and Python.  Other language bindings must be installed separately.
+The client binaries include the ``fdbcli`` tool and language bindings for C.  Other language bindings must be installed separately.
 
 Clients will also need a :ref:`cluster file <foundationdb-cluster-file>` to connect to a FoundationDB cluster.  You should copy the ``fdb.cluster`` file from the :ref:`default location <default-cluster-file>` on one of your FoundationDB servers to the default location on the client machine.
 
@@ -124,6 +124,17 @@ Performance
 Because it can have only a single network thread, a client process may become limited in its throughput by the amount of work that can be performed on that thread. A client with a saturated network thread may begin to experience increased latencies while it struggles to keep up. If a client application needs to support higher throughput than a single network thread can provide, then more network threads can be started by running additional client processes.
 
 If you suspect that a client process's workload may be saturating the network thread, this can be confirmed by checking whether the network thread is running with high CPU usage. In the :ref:`client trace logs <client-trace-logging>`, the ``ProcessMetrics`` trace event has a field for ``MainThreadCPUSeconds`` that indicates the number of seconds out of ``Elapsed`` that the network thread was busy. You can also attempt to identify a busy thread from any tool that reports the CPU activity of threads in your process.
+
+.. note:: FoundationDB 6.3 introduced :ref:`multi-threaded client <multi-threaded-client>`, and can alternatively be used to scale clients.
+
+.. _multi-threaded-client:
+
+Multi-threaded Client
+=====================
+
+FoundationDB client library can start multiple worker threads for each version of client that is loaded. Every single cluster will be serviced by one of the client threads. If the client is connected to only one cluster, exactly one thread would be active and the rest will remain idle. Hence, using this feature is useful when the client is actively using more than one cluster.
+
+Clients can be configured to use worker-threads by setting the ``FDBNetworkOptions::CLIENT_THREADS_PER_VERSION`` option.
 
 .. _client-trace-logging:
 

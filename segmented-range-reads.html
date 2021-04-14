@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Segmented Range Reads &#8212; FoundationDB 6.2</title>
+    <title>Segmented Range Reads &#8212; FoundationDB 6.3</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.28',
+        VERSION:     '6.3.12',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -185,8 +185,7 @@
 <div class="section" id="code">
 <h2>Code</h2>
 <p>Here’s a basic function that successively reads sub-ranges of a size determined by the value of <code class="docutils literal"><span class="pre">LIMIT</span></code>.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
-<span class="k">def</span> <span class="nf">get_range_limited</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">begin</span><span class="p">,</span> <span class="n">end</span><span class="p">):</span>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">get_range_limited</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">begin</span><span class="p">,</span> <span class="n">end</span><span class="p">):</span>
     <span class="n">keys_found</span> <span class="o">=</span> <span class="kc">True</span>
     <span class="k">while</span> <span class="n">keys_found</span><span class="p">:</span>
         <span class="n">keys_found</span> <span class="o">=</span> <span class="p">[]</span>
@@ -220,7 +219,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 16, 2020.<br/>
+      Last updated on Apr 14, 2021.<br/>
     </p>
   </div>
 </footer>

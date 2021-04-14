@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Client Design &#8212; FoundationDB 6.2</title>
+    <title>Client Design &#8212; FoundationDB 6.3</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.28',
+        VERSION:     '6.3.12',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -32,7 +32,7 @@
     <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Getting Started on macOS" href="getting-started-mac.html" />
-    <link rel="prev" title="FoundationDB Architecture" href="kv-architecture.html" />
+    <link rel="prev" title="FDB Read and Write Path" href="read-write-path.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -91,7 +91,7 @@
               
                 
   <li>
-    <a href="kv-architecture.html" title="Previous Chapter: FoundationDB Architecture"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; FoundationDB ...</span>
+    <a href="read-write-path.html" title="Previous Chapter: FDB Read and Write Path"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; FDB Read and ...</span>
     </a>
   </li>
   <li>
@@ -132,7 +132,7 @@
       
   <div class="section" id="client-design">
 <h1>Client Design</h1>
-<p>FoundationDB supports language bindings for application development using the ordered key-value store. The following documents cover use of the bindings, from getting started and design principles to best practices and data modeling. The latest changes are detailed in <a class="reference internal" href="release-notes/release-notes-620.html#release-notes"><span class="std std-ref">Release Notes</span></a>.</p>
+<p>FoundationDB supports language bindings for application development using the ordered key-value store. The following documents cover use of the bindings, from getting started and design principles to best practices and data modeling. The latest changes are detailed in <a class="reference internal" href="release-notes/release-notes-630.html#release-notes"><span class="std std-ref">Release Notes</span></a>.</p>
 <ul class="simple">
 <li><a class="reference internal" href="getting-started-mac.html"><span class="doc">Getting Started on macOS</span></a> explains how to install a local FoundationDB server suitable for development on macOS.</li>
 <li><a class="reference internal" href="getting-started-linux.html"><span class="doc">Getting Started on Linux</span></a> explains how to install a local FoundationDB server suitable for development on Linux.</li>
@@ -141,6 +141,7 @@
 <li><a class="reference internal" href="data-modeling.html"><span class="doc">Data Modeling</span></a> explains recommended techniques for representing application data in the key-value store.</li>
 <li><a class="reference internal" href="client-testing.html"><span class="doc">Client Testing</span></a> Explains how one can use workloads to test client code.</li>
 <li><a class="reference internal" href="api-general.html"><span class="doc">Using FoundationDB Clients</span></a> contains information on FoundationDB clients applicable across all language bindings.</li>
+<li><a class="reference internal" href="transaction-tagging.html"><span class="doc">Transaction Tagging</span></a> contains information about using transaction tags in your client code to enable targeted transaction throttling.</li>
 <li><a class="reference internal" href="api-version-upgrade-guide.html"><span class="doc">API Version Upgrade Guide</span></a> contains information about upgrading client code to a new API version.</li>
 <li><a class="reference internal" href="known-limitations.html"><span class="doc">Known Limitations</span></a> describes both long-term design limitations of FoundationDB and short-term limitations applicable to the current version.</li>
 </ul>
@@ -168,7 +169,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 16, 2020.<br/>
+      Last updated on Apr 14, 2021.<br/>
     </p>
   </div>
 </footer>

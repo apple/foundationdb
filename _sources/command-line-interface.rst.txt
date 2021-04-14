@@ -30,6 +30,11 @@ Commands within ``fdbcli``
 
 The following commands can be issued from within ``fdbcli`` at the internal ``fdb>`` prompt:
 
+advanceversion
+--------------
+
+Forces the cluster to recover at the specified version. If the specified version is larger than the current version of the cluster, the cluster version is advanced to the specified version via a forced recovery.
+
 begin
 -----
 
@@ -101,14 +106,12 @@ Set the process using ``configure [proxies|resolvers|logs]=<N>``, where ``<N>`` 
 
 For recommendations on appropriate values for process types in large clusters, see :ref:`guidelines-process-class-config`.
 
-fileconfigure
--------------
+consistencycheck
+----------------
 
-The ``fileconfigure`` command is alternative to the ``configure`` command which changes the configuration of the database based on a json document. The command loads a JSON document from the provided file, and change the database configuration to match the contents of the JSON document.
+The ``consistencycheck`` command enables or disables consistency checking. Its syntax is ``consistencycheck [on|off]``. Calling it with ``on`` enables consistency checking, and ``off`` disables it. Calling it with no arguments displays whether consistency checking is currently enabled.
 
-The format should be the same as the value of the ``configuration`` entry in status JSON without ``excluded_servers`` or ``coordinators_count``. Its syntax is ``fileconfigure [new] <FILENAME>``.
-
-"The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one.
+You must be running an ``fdbserver`` process with the ``consistencycheck`` role to perform consistency checking.
 
 coordinators
 ------------
@@ -128,9 +131,11 @@ For more information on setting the cluster description, see :ref:`configuration
 exclude
 -------
 
-The ``exclude`` command excludes servers from the database. Its syntax is ``exclude <ADDRESS...>``. If no addresses are specified, the command provides the set of excluded servers.
+The ``exclude`` command excludes servers from the database or marks them as failed. Its syntax is ``exclude [failed] <ADDRESS...>``. If no addresses are specified, the command provides the set of excluded and failed servers.
 
 For each IP address or IP:port pair in ``<ADDRESS...>``, the command adds the address to the set of excluded servers. It then waits until all database state has been safely moved off the specified servers.
+
+If the ``failed`` keyword is specified, the address is marked as failed and added to the set of failed servers. It will not wait for the database state to move off the specified servers.
 
 For more information on excluding servers, see :ref:`removing-machines-from-a-cluster`.
 
@@ -138,6 +143,22 @@ exit
 ----
 
 The ``exit`` command exits ``fdbcli``.
+
+fileconfigure
+-------------
+
+The ``fileconfigure`` command is alternative to the ``configure`` command which changes the configuration of the database based on a json document. The command loads a JSON document from the provided file, and change the database configuration to match the contents of the JSON document.
+
+The format should be the same as the value of the ``configuration`` entry in status JSON without ``excluded_servers`` or ``coordinators_count``. Its syntax is ``fileconfigure [new] <FILENAME>``.
+
+"The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one.
+
+force_recovery_with_data_loss
+-----------------------------
+
+The ``force_recovery_with_data_loss`` command will recover a multi-region database to the specified datacenter. Its syntax is ``force_recovery_with_data_loss <DCID>``. It will likely result in the loss of the most recently committed mutations and is intended to be used if the primary datacenter has been lost. 
+
+This command will change the :ref:`region configuration <configuration-configuring-regions>` to have a positive priority for the chosen ``DCID`` and a negative priority for all other ``DCIDs``. It will also set ``usable_regions`` to 1. If the database has already recovered, this command does nothing.
 
 get
 ---
@@ -164,11 +185,6 @@ getversion
 ----------
 
 The ``getversion`` command fetches the current read version of the cluster or currently running transaction.
-
-advanceversion
---------------
-
-Forces the cluster to recover at the specified version. If the specified version is larger than the current version of the cluster, the cluster version is advanced to the specified version via a forced recovery.
 
 help
 ----
@@ -222,18 +238,56 @@ The following options are available for use with the ``option`` command:
 include
 -------
 
-The ``include`` command permits previously excluded servers to rejoin the database. Its syntax is ``include all|<ADDRESS...>``.
+The ``include`` command permits previously excluded or failed servers to rejoin the database. Its syntax is ``include [failed] all|<ADDRESS...>``.
 
-If ``all`` is specified, the excluded servers list is cleared.
+The ``failed`` keyword is required if the servers were previously marked as failed rather than excluded.
+
+If ``all`` is specified, the excluded servers list is cleared. This will not clear the failed servers list.
+
+If ``failed all`` or ``all failed`` is specified, the failed servers list is cleared. This will not clear the excluded servers list.
 
 For each IP address or IP:port pair in ``<ADDRESS...>``, the command removes any matching exclusions from the excluded servers list. (A specified IP will match all ``IP:*`` exclusion entries).
 
 For information on adding machines to a cluster, see :ref:`adding-machines-to-a-cluster`.
 
+kill
+----
+
+The ``kill`` command attempts to kill one or more processes in the cluster.
+
+``kill``
+
+With no arguments, ``kill`` populates the list of processes that can be killed. This must be run prior to running any other ``kill`` commands.
+
+``kill list``
+
+Displays all known processes. This is only useful when the database is unresponsive.
+
+``kill <ADDRESS...>``
+
+Attempts to kill all specified processes. Each address should include the IP and port of the process being targeted.
+
+``kill all``
+
+Attempts to kill all known processes in the cluster.
+
 lock
 ----
 
 The ``lock`` command locks the database with a randomly generated lockUID.
+
+maintenance
+-----------
+
+The ``maintenance`` command marks a particular zone ID (i.e. fault domain) as being under maintenance. Its syntax is ``maintenance [on|off] [ZONEID] [SECONDS]``. 
+
+A zone that is under maintenance will not have data moved away from it even if processes in that zone fail. In particular, this means the cluster will not attempt to heal the replication factor as a result of failures in the maintenance zone. This is useful when the amount of time that the processes in a fault domain are expected to be absent is reasonably short and you don't want to move data to and from the affected processes. 
+
+Running this command with no arguments will display the state of any current maintenance.
+
+Running ``maintenance on <ZONEID> <SECONDS>`` will turn maintenance on for the specified zone. A duration must be specified for the length of maintenance mode.
+
+Running ``maintenance off`` will turn off maintenance mode.
 
 option
 ------
@@ -247,6 +301,39 @@ If there is no active transaction, then the option will be applied to all operat
 If there is an active transaction (one created with ``begin``), then enabled options apply only to that transaction. Options cannot be disabled on an active transaction.
 
 Calling the ``option`` command with no parameters prints a list of all enabled options.
+
+profile
+-------
+
+The ``profile`` command is used to control various profiling actions.
+
+client
+^^^^^^
+
+``profile client <get|set>``
+
+Reads or sets parameters of client transaction sampling. Use ``get`` to list the current parameters, and ``set <RATE|default> <SIZE|default>`` to set them. ``RATE`` is the fraction of transactions to be sampled, and ``SIZE`` is the amount (in bytes) of sampled data to store in the database.
+
+list
+^^^^
+
+``profile list``
+
+Lists the processes that can be profiled using the ``flow`` and ``heap`` subcommands.
+
+flow
+^^^^
+
+``profile flow run <DURATION> <FILENAME> <PROCESS...>``
+
+Enables flow profiling on the specifed processes for ``DURATION`` seconds. Profiling output will be stored at the specified filename relative to the fdbserver process's trace log directory. To profile all processes, use ``all`` for the ``PROCESS`` parameter.
+
+heap
+^^^^
+
+``profile heap <PROCESS>``
+
+Enables heap profiling for the specified process.
 
 reset
 -----
@@ -264,6 +351,18 @@ set
 The ``set`` command sets a value for a given key. Its syntax is ``set <KEY> <VALUE>``. If ``<KEY>`` is not already present in the database, it will be created.
 
 Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
+
+setclass
+--------
+
+The ``setclass`` command can be used to change the :ref:`process class <guidelines-process-class-config>` for a given process. Its syntax is ``setclass [<ADDRESS> <CLASS>]``. If no arguments are specified, then the process classes of all processes are listed. Setting the class to ``default`` to revert to the process class specified on the command line.
+
+The available process classes are ``unset``, ``storage``, ``transaction``, ``resolution``, ``proxy``, ``master``, ``test``, ``unset``, ``stateless``, ``log``, ``router``, ``cluster_controller``, ``fast_restore``, ``data_distributor``, ``coordinator``, ``ratekeeper``, ``storage_cache``, ``backup``, and ``default``.
+
+sleep
+-----
+
+The ``sleep`` command inserts a delay before running the next command. Its syntax is ``sleep <SECONDS>``. This command can be useful when ``fdbcli`` is run with the ``--exec`` flag to control the timing of commands.
 
 .. _cli-status:
 
@@ -294,7 +393,101 @@ status json
 
 ``status json`` will provide the cluster status in its JSON format. For a detailed description of this format, see :doc:`mr-status`.
 
+.. _cli-throttle:
+
+throttle
+--------
+
+The throttle command is used to inspect and modify the list of throttled transaction tags in the cluster. For more information, see :doc:`transaction-tagging`. The throttle command has the following subcommands:
+
+on
+^^
+
+``throttle on tag <TAG> [RATE] [DURATION] [PRIORITY]``
+
+Enables throttling for the specified transaction tag.
+
+``TAG`` - the tag being throttled. This argument is required.
+
+``RATE`` - the number of transactions that may be started per second. Defaults to 0.
+
+``DURATION`` - the duration that the throttle should remain in effect, which must include a time suffix (``s`` - seconds, ``m`` - minutes, ``h`` - hours, ``d`` - days). Defaults to ``1h``.
+
+``PRIORITY`` - the maximum priority that the throttle will apply to. Choices are ``default``, ``batch``, and ``immediate``. Defaults to ``default``.
+
+off
+^^^
+
+``throttle off [all|auto|manual] [tag <TAG>] [PRIORITY]``
+
+Disables throttling for all transaction tag throttles that match the specified filtering criteria. At least one filter must be specified, and filters can be given in any order.
+
+``all`` - affects all throttles (auto and manual).
+
+``auto`` - only throttles automatically created by the cluster will be affected.
+
+``manual`` - only throttles created manually will be affected (this is the default).
+
+``tag`` - only the specified tag will be affected.
+
+``PRIORITY`` - the priority of the throttle to disable. Choices are ``default``, ``batch``, and ``immediate``. Defaults to ``default``.
+
+For example, to disable all throttles, run::
+
+> throttle off all
+
+To disable all manually created batch priority throttles, run::
+
+> throttle off batch
+
+To disable auto throttles at batch priority on the tag ``foo``, run::
+
+> throttle off auto tag foo batch
+
+enable
+^^^^^^
+
+``throttle enable auto``
+
+Enables cluster auto-throttling for busy transaction tags.
+
+disable
+^^^^^^^
+
+``throttle disable auto``
+
+Disables cluster auto-throttling for busy transaction tags. This does not disable any currently active throttles. To do so, run the following command after disabling auto-throttling::
+
+> throttle off auto
+
+list
+^^^^
+
+``throttle list [LIMIT]``
+
+Prints a list of currently active transaction tag throttles.
+
+``LIMIT`` - The number of throttles to print. Defaults to 100.
+
+triggerddteaminfolog
+--------------------
+
+The ``triggerddteaminfolog`` command would trigger the data distributor to log very detailed teams information into trace event logs.
+
 unlock
 ------
 
 The ``unlock`` command unlocks the database with the specified lock UID. Because this is a potentially dangerous operation, users must copy a passphrase before the unlock command is executed.
+
+writemode
+---------
+
+Controls whether or not ``fdbcli`` can perform sets and clears.
+
+``writemode off``
+
+Disables writing from ``fdbcli`` (the default). In this mode, attempting to set or clear keys will result in an error.
+
+``writemode on``
+
+Enables writing from ``fdbcli``.

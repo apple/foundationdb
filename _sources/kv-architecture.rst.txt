@@ -20,7 +20,7 @@ The master is responsible for coordinating the transition of the write sub-syste
 Proxies
 =======
 
-The proxies are responsible for providing read versions, committing transactions, and tracking the storage servers responsible for each range of keys. To provide a read version, a proxy will ask all other proxies to see the largest committed version at this point in time, while simultaneously checking that the transaction logs have not been stopped. Ratekeeper will artificially slow down the rate at which the proxy provides read versions. 
+The proxies are responsible for providing read versions, committing transactions, and tracking the storage servers responsible for each range of keys. To provide a read version, a proxy will ask all other proxies to see the largest committed version at this point in time, while simultaneously checking that the transaction logs have not been stopped. Ratekeeper will artificially slow down the rate at which the proxy provides read versions.
 
 Commits are accomplished by:
 
@@ -28,7 +28,7 @@ Commits are accomplished by:
 * Use the resolvers to determine if the transaction conflicts with previously committed transactions.
 * Make the transaction durable on the transaction logs.
 
-The key space starting with the '\xff' byte is reserved for system metadata. All mutations committed into this key space are distributed to all of the proxies through the resolvers. This metadata includes a mapping between key ranges and the storage servers which have the data for that range of keys. The proxies provides this information to clients on-demand. The clients cache this mapping; if they ask a storage server for a key it does not have, they will clear their cache and get a more up-to-date list of servers from the proxies.
+The key space starting with the '\xff' byte is reserved for system metadata. All mutations committed into this key space are distributed to all of the proxies through the resolvers. This metadata includes a mapping between key ranges and the storage servers which have the data for that range of keys. The proxies provide this information to clients on-demand. The clients cache this mapping; if they ask a storage server for a key it does not have, they will clear their cache and get a more up-to-date list of servers from the proxies.
 
 Transaction Logs
 ================
@@ -38,12 +38,12 @@ The transaction logs make mutations durable to disk for fast commit latencies. T
 Resolvers
 =========
 
-The resolvers are responsible determining conflicts between transactions. A transaction conflicts if it reads a key that has been written between the transaction's read version and commit version. The resolver does this by holding the last 5 seconds of committed writes in memory, and comparing a new transaction's reads against this set of commits.
+The resolvers are responsible determining conflicts between transactions. A read-write transaction conflicts if it reads a key that has been written between the transaction's read version and commit version. The resolver does this by holding the last 5 seconds of committed writes in memory, and comparing a new transaction's reads against this set of commits.
 
 Storage Servers
 ===============
 
-The vast majority of processes in a cluster are storage servers. Storage servers are assigned ranges of key, and are responsible to storing all of the data for that range. They keep 5 seconds of mutations in memory, and an on disk copy of the data as of 5 second ago. Clients must read at a version within the last 5 seconds, or they will get a transaction_too_old error. The ssd storage engine stores the data in a b-tree. The memory storage engine store the data in memory with an append only log that is only read from disk if the process is rebooted.
+The vast majority of processes in a cluster are storage servers. Storage servers are assigned ranges of keys, and are responsible for storing all of the data for that range. They keep 5 seconds of mutations in memory, and an on disk copy of the data as of 5 second ago. Clients must read at a version within the last 5 seconds, or they will get a transaction_too_old error. The ssd storage engine stores the data in a b-tree. The memory storage engine stores the data in memory with an append only log that is only read from disk if the process is rebooted.
 
 Clients
 =======

@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Command Line Interface &#8212; FoundationDB 6.2</title>
+    <title>Command Line Interface &#8212; FoundationDB 6.3</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.28',
+        VERSION:     '6.3.12',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -50,7 +50,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -82,6 +82,7 @@
 <li><a class="reference internal" href="#">Command Line Interface</a><ul>
 <li><a class="reference internal" href="#invocation-at-the-command-line">Invocation at the Command Line</a></li>
 <li><a class="reference internal" href="#commands-within-fdbcli">Commands within <code class="docutils literal"><span class="pre">fdbcli</span></code></a><ul>
+<li><a class="reference internal" href="#advanceversion">advanceversion</a></li>
 <li><a class="reference internal" href="#begin">begin</a></li>
 <li><a class="reference internal" href="#clear">clear</a></li>
 <li><a class="reference internal" href="#clearrange">clearrange</a></li>
@@ -92,33 +93,55 @@
 <li><a class="reference internal" href="#process-types">process types</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#fileconfigure">fileconfigure</a></li>
+<li><a class="reference internal" href="#consistencycheck">consistencycheck</a></li>
 <li><a class="reference internal" href="#coordinators">coordinators</a></li>
 <li><a class="reference internal" href="#exclude">exclude</a></li>
 <li><a class="reference internal" href="#exit">exit</a></li>
+<li><a class="reference internal" href="#fileconfigure">fileconfigure</a></li>
+<li><a class="reference internal" href="#force-recovery-with-data-loss">force_recovery_with_data_loss</a></li>
 <li><a class="reference internal" href="#get">get</a></li>
 <li><a class="reference internal" href="#getrange">getrange</a></li>
 <li><a class="reference internal" href="#getrangekeys">getrangekeys</a></li>
 <li><a class="reference internal" href="#getversion">getversion</a></li>
-<li><a class="reference internal" href="#advanceversion">advanceversion</a></li>
 <li><a class="reference internal" href="#help">help</a><ul>
 <li><a class="reference internal" href="#help-escaping">help escaping</a></li>
 <li><a class="reference internal" href="#help-options">help options</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#include">include</a></li>
+<li><a class="reference internal" href="#kill">kill</a></li>
 <li><a class="reference internal" href="#lock">lock</a></li>
+<li><a class="reference internal" href="#maintenance">maintenance</a></li>
 <li><a class="reference internal" href="#option">option</a></li>
+<li><a class="reference internal" href="#profile">profile</a><ul>
+<li><a class="reference internal" href="#client">client</a></li>
+<li><a class="reference internal" href="#list">list</a></li>
+<li><a class="reference internal" href="#flow">flow</a></li>
+<li><a class="reference internal" href="#heap">heap</a></li>
+</ul>
+</li>
 <li><a class="reference internal" href="#reset">reset</a></li>
 <li><a class="reference internal" href="#rollback">rollback</a></li>
 <li><a class="reference internal" href="#set">set</a></li>
+<li><a class="reference internal" href="#setclass">setclass</a></li>
+<li><a class="reference internal" href="#sleep">sleep</a></li>
 <li><a class="reference internal" href="#status">status</a><ul>
 <li><a class="reference internal" href="#status-minimal">status minimal</a></li>
 <li><a class="reference internal" href="#status-details">status details</a></li>
 <li><a class="reference internal" href="#status-json">status json</a></li>
 </ul>
 </li>
+<li><a class="reference internal" href="#throttle">throttle</a><ul>
+<li><a class="reference internal" href="#on">on</a></li>
+<li><a class="reference internal" href="#off">off</a></li>
+<li><a class="reference internal" href="#enable">enable</a></li>
+<li><a class="reference internal" href="#disable">disable</a></li>
+<li><a class="reference internal" href="#id2">list</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#triggerddteaminfolog">triggerddteaminfolog</a></li>
 <li><a class="reference internal" href="#unlock">unlock</a></li>
+<li><a class="reference internal" href="#writemode">writemode</a></li>
 </ul>
 </li>
 </ul>
@@ -159,6 +182,7 @@
 <li><a class="reference internal" href="#">Command Line Interface</a><ul>
 <li><a class="reference internal" href="#invocation-at-the-command-line">Invocation at the Command Line</a></li>
 <li><a class="reference internal" href="#commands-within-fdbcli">Commands within <code class="docutils literal"><span class="pre">fdbcli</span></code></a><ul>
+<li><a class="reference internal" href="#advanceversion">advanceversion</a></li>
 <li><a class="reference internal" href="#begin">begin</a></li>
 <li><a class="reference internal" href="#clear">clear</a></li>
 <li><a class="reference internal" href="#clearrange">clearrange</a></li>
@@ -169,33 +193,55 @@
 <li><a class="reference internal" href="#process-types">process types</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#fileconfigure">fileconfigure</a></li>
+<li><a class="reference internal" href="#consistencycheck">consistencycheck</a></li>
 <li><a class="reference internal" href="#coordinators">coordinators</a></li>
 <li><a class="reference internal" href="#exclude">exclude</a></li>
 <li><a class="reference internal" href="#exit">exit</a></li>
+<li><a class="reference internal" href="#fileconfigure">fileconfigure</a></li>
+<li><a class="reference internal" href="#force-recovery-with-data-loss">force_recovery_with_data_loss</a></li>
 <li><a class="reference internal" href="#get">get</a></li>
 <li><a class="reference internal" href="#getrange">getrange</a></li>
 <li><a class="reference internal" href="#getrangekeys">getrangekeys</a></li>
 <li><a class="reference internal" href="#getversion">getversion</a></li>
-<li><a class="reference internal" href="#advanceversion">advanceversion</a></li>
 <li><a class="reference internal" href="#help">help</a><ul>
 <li><a class="reference internal" href="#help-escaping">help escaping</a></li>
 <li><a class="reference internal" href="#help-options">help options</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#include">include</a></li>
+<li><a class="reference internal" href="#kill">kill</a></li>
 <li><a class="reference internal" href="#lock">lock</a></li>
+<li><a class="reference internal" href="#maintenance">maintenance</a></li>
 <li><a class="reference internal" href="#option">option</a></li>
+<li><a class="reference internal" href="#profile">profile</a><ul>
+<li><a class="reference internal" href="#client">client</a></li>
+<li><a class="reference internal" href="#list">list</a></li>
+<li><a class="reference internal" href="#flow">flow</a></li>
+<li><a class="reference internal" href="#heap">heap</a></li>
+</ul>
+</li>
 <li><a class="reference internal" href="#reset">reset</a></li>
 <li><a class="reference internal" href="#rollback">rollback</a></li>
 <li><a class="reference internal" href="#set">set</a></li>
+<li><a class="reference internal" href="#setclass">setclass</a></li>
+<li><a class="reference internal" href="#sleep">sleep</a></li>
 <li><a class="reference internal" href="#status">status</a><ul>
 <li><a class="reference internal" href="#status-minimal">status minimal</a></li>
 <li><a class="reference internal" href="#status-details">status details</a></li>
 <li><a class="reference internal" href="#status-json">status json</a></li>
 </ul>
 </li>
+<li><a class="reference internal" href="#throttle">throttle</a><ul>
+<li><a class="reference internal" href="#on">on</a></li>
+<li><a class="reference internal" href="#off">off</a></li>
+<li><a class="reference internal" href="#enable">enable</a></li>
+<li><a class="reference internal" href="#disable">disable</a></li>
+<li><a class="reference internal" href="#id2">list</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#triggerddteaminfolog">triggerddteaminfolog</a></li>
 <li><a class="reference internal" href="#unlock">unlock</a></li>
+<li><a class="reference internal" href="#writemode">writemode</a></li>
 </ul>
 </li>
 </ul>
@@ -226,6 +272,10 @@ fdb&gt;
 <div class="section" id="commands-within-fdbcli">
 <h2>Commands within <code class="docutils literal"><span class="pre">fdbcli</span></code></h2>
 <p>The following commands can be issued from within <code class="docutils literal"><span class="pre">fdbcli</span></code> at the internal <code class="docutils literal"><span class="pre">fdb&gt;</span></code> prompt:</p>
+<div class="section" id="advanceversion">
+<h3>advanceversion</h3>
+<p>Forces the cluster to recover at the specified version. If the specified version is larger than the current version of the cluster, the cluster version is advanced to the specified version via a forced recovery.</p>
+</div>
 <div class="section" id="begin">
 <h3>begin</h3>
 <p>The <code class="docutils literal"><span class="pre">begin</span></code> command begins a new transaction. By default, <code class="docutils literal"><span class="pre">fdbcli</span></code> operates in autocommit mode. All operations are performed in their own transaction and are automatically committed. By explicitly beginning a transaction, successive operations are all performed as part of a single transaction.</p>
@@ -283,11 +333,10 @@ fdb&gt;
 <p>For recommendations on appropriate values for process types in large clusters, see <a class="reference internal" href="configuration.html#guidelines-process-class-config"><span class="std std-ref">Guidelines for setting process class</span></a>.</p>
 </div>
 </div>
-<div class="section" id="fileconfigure">
-<h3>fileconfigure</h3>
-<p>The <code class="docutils literal"><span class="pre">fileconfigure</span></code> command is alternative to the <code class="docutils literal"><span class="pre">configure</span></code> command which changes the configuration of the database based on a json document. The command loads a JSON document from the provided file, and change the database configuration to match the contents of the JSON document.</p>
-<p>The format should be the same as the value of the <code class="docutils literal"><span class="pre">configuration</span></code> entry in status JSON without <code class="docutils literal"><span class="pre">excluded_servers</span></code> or <code class="docutils literal"><span class="pre">coordinators_count</span></code>. Its syntax is <code class="docutils literal"><span class="pre">fileconfigure</span> <span class="pre">[new]</span> <span class="pre">&lt;FILENAME&gt;</span></code>.</p>
-<p>&#8220;The <code class="docutils literal"><span class="pre">new</span></code> option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one.</p>
+<div class="section" id="consistencycheck">
+<h3>consistencycheck</h3>
+<p>The <code class="docutils literal"><span class="pre">consistencycheck</span></code> command enables or disables consistency checking. Its syntax is <code class="docutils literal"><span class="pre">consistencycheck</span> <span class="pre">[on|off]</span></code>. Calling it with <code class="docutils literal"><span class="pre">on</span></code> enables consistency checking, and <code class="docutils literal"><span class="pre">off</span></code> disables it. Calling it with no arguments displays whether consistency checking is currently enabled.</p>
+<p>You must be running an <code class="docutils literal"><span class="pre">fdbserver</span></code> process with the <code class="docutils literal"><span class="pre">consistencycheck</span></code> role to perform consistency checking.</p>
 </div>
 <div class="section" id="coordinators">
 <h3>coordinators</h3>
@@ -300,13 +349,25 @@ fdb&gt;
 </div>
 <div class="section" id="exclude">
 <h3>exclude</h3>
-<p>The <code class="docutils literal"><span class="pre">exclude</span></code> command excludes servers from the database. Its syntax is <code class="docutils literal"><span class="pre">exclude</span> <span class="pre">&lt;ADDRESS...&gt;</span></code>. If no addresses are specified, the command provides the set of excluded servers.</p>
+<p>The <code class="docutils literal"><span class="pre">exclude</span></code> command excludes servers from the database or marks them as failed. Its syntax is <code class="docutils literal"><span class="pre">exclude</span> <span class="pre">[failed]</span> <span class="pre">&lt;ADDRESS...&gt;</span></code>. If no addresses are specified, the command provides the set of excluded and failed servers.</p>
 <p>For each IP address or IP:port pair in <code class="docutils literal"><span class="pre">&lt;ADDRESS...&gt;</span></code>, the command adds the address to the set of excluded servers. It then waits until all database state has been safely moved off the specified servers.</p>
+<p>If the <code class="docutils literal"><span class="pre">failed</span></code> keyword is specified, the address is marked as failed and added to the set of failed servers. It will not wait for the database state to move off the specified servers.</p>
 <p>For more information on excluding servers, see <a class="reference internal" href="administration.html#removing-machines-from-a-cluster"><span class="std std-ref">Removing machines from a cluster</span></a>.</p>
 </div>
 <div class="section" id="exit">
 <h3>exit</h3>
 <p>The <code class="docutils literal"><span class="pre">exit</span></code> command exits <code class="docutils literal"><span class="pre">fdbcli</span></code>.</p>
+</div>
+<div class="section" id="fileconfigure">
+<h3>fileconfigure</h3>
+<p>The <code class="docutils literal"><span class="pre">fileconfigure</span></code> command is alternative to the <code class="docutils literal"><span class="pre">configure</span></code> command which changes the configuration of the database based on a json document. The command loads a JSON document from the provided file, and change the database configuration to match the contents of the JSON document.</p>
+<p>The format should be the same as the value of the <code class="docutils literal"><span class="pre">configuration</span></code> entry in status JSON without <code class="docutils literal"><span class="pre">excluded_servers</span></code> or <code class="docutils literal"><span class="pre">coordinators_count</span></code>. Its syntax is <code class="docutils literal"><span class="pre">fileconfigure</span> <span class="pre">[new]</span> <span class="pre">&lt;FILENAME&gt;</span></code>.</p>
+<p>&#8220;The <code class="docutils literal"><span class="pre">new</span></code> option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one.</p>
+</div>
+<div class="section" id="force-recovery-with-data-loss">
+<h3>force_recovery_with_data_loss</h3>
+<p>The <code class="docutils literal"><span class="pre">force_recovery_with_data_loss</span></code> command will recover a multi-region database to the specified datacenter. Its syntax is <code class="docutils literal"><span class="pre">force_recovery_with_data_loss</span> <span class="pre">&lt;DCID&gt;</span></code>. It will likely result in the loss of the most recently committed mutations and is intended to be used if the primary datacenter has been lost.</p>
+<p>This command will change the <a class="reference internal" href="configuration.html#configuration-configuring-regions"><span class="std std-ref">region configuration</span></a> to have a positive priority for the chosen <code class="docutils literal"><span class="pre">DCID</span></code> and a negative priority for all other <code class="docutils literal"><span class="pre">DCIDs</span></code>. It will also set <code class="docutils literal"><span class="pre">usable_regions</span></code> to 1. If the database has already recovered, this command does nothing.</p>
 </div>
 <div class="section" id="get">
 <h3>get</h3>
@@ -326,10 +387,6 @@ fdb&gt;
 <div class="section" id="getversion">
 <h3>getversion</h3>
 <p>The <code class="docutils literal"><span class="pre">getversion</span></code> command fetches the current read version of the cluster or currently running transaction.</p>
-</div>
-<div class="section" id="advanceversion">
-<h3>advanceversion</h3>
-<p>Forces the cluster to recover at the specified version. If the specified version is larger than the current version of the cluster, the cluster version is advanced to the specified version via a forced recovery.</p>
 </div>
 <div class="section" id="help">
 <h3>help</h3>
@@ -360,14 +417,36 @@ fdb&gt;
 </div>
 <div class="section" id="include">
 <h3>include</h3>
-<p>The <code class="docutils literal"><span class="pre">include</span></code> command permits previously excluded servers to rejoin the database. Its syntax is <code class="docutils literal"><span class="pre">include</span> <span class="pre">all|&lt;ADDRESS...&gt;</span></code>.</p>
-<p>If <code class="docutils literal"><span class="pre">all</span></code> is specified, the excluded servers list is cleared.</p>
+<p>The <code class="docutils literal"><span class="pre">include</span></code> command permits previously excluded or failed servers to rejoin the database. Its syntax is <code class="docutils literal"><span class="pre">include</span> <span class="pre">[failed]</span> <span class="pre">all|&lt;ADDRESS...&gt;</span></code>.</p>
+<p>The <code class="docutils literal"><span class="pre">failed</span></code> keyword is required if the servers were previously marked as failed rather than excluded.</p>
+<p>If <code class="docutils literal"><span class="pre">all</span></code> is specified, the excluded servers list is cleared. This will not clear the failed servers list.</p>
+<p>If <code class="docutils literal"><span class="pre">failed</span> <span class="pre">all</span></code> or <code class="docutils literal"><span class="pre">all</span> <span class="pre">failed</span></code> is specified, the failed servers list is cleared. This will not clear the excluded servers list.</p>
 <p>For each IP address or IP:port pair in <code class="docutils literal"><span class="pre">&lt;ADDRESS...&gt;</span></code>, the command removes any matching exclusions from the excluded servers list. (A specified IP will match all <code class="docutils literal"><span class="pre">IP:*</span></code> exclusion entries).</p>
 <p>For information on adding machines to a cluster, see <a class="reference internal" href="administration.html#adding-machines-to-a-cluster"><span class="std std-ref">Adding machines to a cluster</span></a>.</p>
+</div>
+<div class="section" id="kill">
+<h3>kill</h3>
+<p>The <code class="docutils literal"><span class="pre">kill</span></code> command attempts to kill one or more processes in the cluster.</p>
+<p><code class="docutils literal"><span class="pre">kill</span></code></p>
+<p>With no arguments, <code class="docutils literal"><span class="pre">kill</span></code> populates the list of processes that can be killed. This must be run prior to running any other <code class="docutils literal"><span class="pre">kill</span></code> commands.</p>
+<p><code class="docutils literal"><span class="pre">kill</span> <span class="pre">list</span></code></p>
+<p>Displays all known processes. This is only useful when the database is unresponsive.</p>
+<p><code class="docutils literal"><span class="pre">kill</span> <span class="pre">&lt;ADDRESS...&gt;</span></code></p>
+<p>Attempts to kill all specified processes. Each address should include the IP and port of the process being targeted.</p>
+<p><code class="docutils literal"><span class="pre">kill</span> <span class="pre">all</span></code></p>
+<p>Attempts to kill all known processes in the cluster.</p>
 </div>
 <div class="section" id="lock">
 <h3>lock</h3>
 <p>The <code class="docutils literal"><span class="pre">lock</span></code> command locks the database with a randomly generated lockUID.</p>
+</div>
+<div class="section" id="maintenance">
+<h3>maintenance</h3>
+<p>The <code class="docutils literal"><span class="pre">maintenance</span></code> command marks a particular zone ID (i.e. fault domain) as being under maintenance. Its syntax is <code class="docutils literal"><span class="pre">maintenance</span> <span class="pre">[on|off]</span> <span class="pre">[ZONEID]</span> <span class="pre">[SECONDS]</span></code>.</p>
+<p>A zone that is under maintenance will not have data moved away from it even if processes in that zone fail. In particular, this means the cluster will not attempt to heal the replication factor as a result of failures in the maintenance zone. This is useful when the amount of time that the processes in a fault domain are expected to be absent is reasonably short and you don&#8217;t want to move data to and from the affected processes.</p>
+<p>Running this command with no arguments will display the state of any current maintenance.</p>
+<p>Running <code class="docutils literal"><span class="pre">maintenance</span> <span class="pre">on</span> <span class="pre">&lt;ZONEID&gt;</span> <span class="pre">&lt;SECONDS&gt;</span></code> will turn maintenance on for the specified zone. A duration must be specified for the length of maintenance mode.</p>
+<p>Running <code class="docutils literal"><span class="pre">maintenance</span> <span class="pre">off</span></code> will turn off maintenance mode.</p>
 </div>
 <div class="section" id="option">
 <h3>option</h3>
@@ -376,6 +455,30 @@ fdb&gt;
 <p>If there is no active transaction, then the option will be applied to all operations as well as all subsequently created transactions (using <code class="docutils literal"><span class="pre">begin</span></code>).</p>
 <p>If there is an active transaction (one created with <code class="docutils literal"><span class="pre">begin</span></code>), then enabled options apply only to that transaction. Options cannot be disabled on an active transaction.</p>
 <p>Calling the <code class="docutils literal"><span class="pre">option</span></code> command with no parameters prints a list of all enabled options.</p>
+</div>
+<div class="section" id="profile">
+<h3>profile</h3>
+<p>The <code class="docutils literal"><span class="pre">profile</span></code> command is used to control various profiling actions.</p>
+<div class="section" id="client">
+<h4>client</h4>
+<p><code class="docutils literal"><span class="pre">profile</span> <span class="pre">client</span> <span class="pre">&lt;get|set&gt;</span></code></p>
+<p>Reads or sets parameters of client transaction sampling. Use <code class="docutils literal"><span class="pre">get</span></code> to list the current parameters, and <code class="docutils literal"><span class="pre">set</span> <span class="pre">&lt;RATE|default&gt;</span> <span class="pre">&lt;SIZE|default&gt;</span></code> to set them. <code class="docutils literal"><span class="pre">RATE</span></code> is the fraction of transactions to be sampled, and <code class="docutils literal"><span class="pre">SIZE</span></code> is the amount (in bytes) of sampled data to store in the database.</p>
+</div>
+<div class="section" id="list">
+<h4>list</h4>
+<p><code class="docutils literal"><span class="pre">profile</span> <span class="pre">list</span></code></p>
+<p>Lists the processes that can be profiled using the <code class="docutils literal"><span class="pre">flow</span></code> and <code class="docutils literal"><span class="pre">heap</span></code> subcommands.</p>
+</div>
+<div class="section" id="flow">
+<h4>flow</h4>
+<p><code class="docutils literal"><span class="pre">profile</span> <span class="pre">flow</span> <span class="pre">run</span> <span class="pre">&lt;DURATION&gt;</span> <span class="pre">&lt;FILENAME&gt;</span> <span class="pre">&lt;PROCESS...&gt;</span></code></p>
+<p>Enables flow profiling on the specifed processes for <code class="docutils literal"><span class="pre">DURATION</span></code> seconds. Profiling output will be stored at the specified filename relative to the fdbserver process&#8217;s trace log directory. To profile all processes, use <code class="docutils literal"><span class="pre">all</span></code> for the <code class="docutils literal"><span class="pre">PROCESS</span></code> parameter.</p>
+</div>
+<div class="section" id="heap">
+<h4>heap</h4>
+<p><code class="docutils literal"><span class="pre">profile</span> <span class="pre">heap</span> <span class="pre">&lt;PROCESS&gt;</span></code></p>
+<p>Enables heap profiling for the specified process.</p>
+</div>
 </div>
 <div class="section" id="reset">
 <h3>reset</h3>
@@ -389,6 +492,15 @@ fdb&gt;
 <h3>set</h3>
 <p>The <code class="docutils literal"><span class="pre">set</span></code> command sets a value for a given key. Its syntax is <code class="docutils literal"><span class="pre">set</span> <span class="pre">&lt;KEY&gt;</span> <span class="pre">&lt;VALUE&gt;</span></code>. If <code class="docutils literal"><span class="pre">&lt;KEY&gt;</span></code> is not already present in the database, it will be created.</p>
 <p>Note that <a class="reference internal" href="#cli-escaping"><span class="std std-ref">characters can be escaped</span></a> when specifying keys (or values) in <code class="docutils literal"><span class="pre">fdbcli</span></code>.</p>
+</div>
+<div class="section" id="setclass">
+<h3>setclass</h3>
+<p>The <code class="docutils literal"><span class="pre">setclass</span></code> command can be used to change the <a class="reference internal" href="configuration.html#guidelines-process-class-config"><span class="std std-ref">process class</span></a> for a given process. Its syntax is <code class="docutils literal"><span class="pre">setclass</span> <span class="pre">[&lt;ADDRESS&gt;</span> <span class="pre">&lt;CLASS&gt;]</span></code>. If no arguments are specified, then the process classes of all processes are listed. Setting the class to <code class="docutils literal"><span class="pre">default</span></code> to revert to the process class specified on the command line.</p>
+<p>The available process classes are <code class="docutils literal"><span class="pre">unset</span></code>, <code class="docutils literal"><span class="pre">storage</span></code>, <code class="docutils literal"><span class="pre">transaction</span></code>, <code class="docutils literal"><span class="pre">resolution</span></code>, <code class="docutils literal"><span class="pre">proxy</span></code>, <code class="docutils literal"><span class="pre">master</span></code>, <code class="docutils literal"><span class="pre">test</span></code>, <code class="docutils literal"><span class="pre">unset</span></code>, <code class="docutils literal"><span class="pre">stateless</span></code>, <code class="docutils literal"><span class="pre">log</span></code>, <code class="docutils literal"><span class="pre">router</span></code>, <code class="docutils literal"><span class="pre">cluster_controller</span></code>, <code class="docutils literal"><span class="pre">fast_restore</span></code>, <code class="docutils literal"><span class="pre">data_distributor</span></code>, <code class="docutils literal"><span class="pre">coordinator</span></code>, <code class="docutils literal"><span class="pre">ratekeeper</span></code>, <code class="docutils literal"><span class="pre">storage_cache</span></code>, <code class="docutils literal"><span class="pre">backup</span></code>, and <code class="docutils literal"><span class="pre">default</span></code>.</p>
+</div>
+<div class="section" id="sleep">
+<h3>sleep</h3>
+<p>The <code class="docutils literal"><span class="pre">sleep</span></code> command inserts a delay before running the next command. Its syntax is <code class="docutils literal"><span class="pre">sleep</span> <span class="pre">&lt;SECONDS&gt;</span></code>. This command can be useful when <code class="docutils literal"><span class="pre">fdbcli</span></code> is run with the <code class="docutils literal"><span class="pre">--exec</span></code> flag to control the timing of commands.</p>
 </div>
 <div class="section" id="status">
 <span id="cli-status"></span><h3>status</h3>
@@ -410,9 +522,75 @@ print cluster statistics.</p>
 <p><code class="docutils literal"><span class="pre">status</span> <span class="pre">json</span></code> will provide the cluster status in its JSON format. For a detailed description of this format, see <a class="reference internal" href="mr-status.html"><span class="doc">Machine-Readable Status</span></a>.</p>
 </div>
 </div>
+<div class="section" id="throttle">
+<span id="cli-throttle"></span><h3>throttle</h3>
+<p>The throttle command is used to inspect and modify the list of throttled transaction tags in the cluster. For more information, see <a class="reference internal" href="transaction-tagging.html"><span class="doc">Transaction Tagging</span></a>. The throttle command has the following subcommands:</p>
+<div class="section" id="on">
+<h4>on</h4>
+<p><code class="docutils literal"><span class="pre">throttle</span> <span class="pre">on</span> <span class="pre">tag</span> <span class="pre">&lt;TAG&gt;</span> <span class="pre">[RATE]</span> <span class="pre">[DURATION]</span> <span class="pre">[PRIORITY]</span></code></p>
+<p>Enables throttling for the specified transaction tag.</p>
+<p><code class="docutils literal"><span class="pre">TAG</span></code> - the tag being throttled. This argument is required.</p>
+<p><code class="docutils literal"><span class="pre">RATE</span></code> - the number of transactions that may be started per second. Defaults to 0.</p>
+<p><code class="docutils literal"><span class="pre">DURATION</span></code> - the duration that the throttle should remain in effect, which must include a time suffix (<code class="docutils literal"><span class="pre">s</span></code> - seconds, <code class="docutils literal"><span class="pre">m</span></code> - minutes, <code class="docutils literal"><span class="pre">h</span></code> - hours, <code class="docutils literal"><span class="pre">d</span></code> - days). Defaults to <code class="docutils literal"><span class="pre">1h</span></code>.</p>
+<p><code class="docutils literal"><span class="pre">PRIORITY</span></code> - the maximum priority that the throttle will apply to. Choices are <code class="docutils literal"><span class="pre">default</span></code>, <code class="docutils literal"><span class="pre">batch</span></code>, and <code class="docutils literal"><span class="pre">immediate</span></code>. Defaults to <code class="docutils literal"><span class="pre">default</span></code>.</p>
+</div>
+<div class="section" id="off">
+<h4>off</h4>
+<p><code class="docutils literal"><span class="pre">throttle</span> <span class="pre">off</span> <span class="pre">[all|auto|manual]</span> <span class="pre">[tag</span> <span class="pre">&lt;TAG&gt;]</span> <span class="pre">[PRIORITY]</span></code></p>
+<p>Disables throttling for all transaction tag throttles that match the specified filtering criteria. At least one filter must be specified, and filters can be given in any order.</p>
+<p><code class="docutils literal"><span class="pre">all</span></code> - affects all throttles (auto and manual).</p>
+<p><code class="docutils literal"><span class="pre">auto</span></code> - only throttles automatically created by the cluster will be affected.</p>
+<p><code class="docutils literal"><span class="pre">manual</span></code> - only throttles created manually will be affected (this is the default).</p>
+<p><code class="docutils literal"><span class="pre">tag</span></code> - only the specified tag will be affected.</p>
+<p><code class="docutils literal"><span class="pre">PRIORITY</span></code> - the priority of the throttle to disable. Choices are <code class="docutils literal"><span class="pre">default</span></code>, <code class="docutils literal"><span class="pre">batch</span></code>, and <code class="docutils literal"><span class="pre">immediate</span></code>. Defaults to <code class="docutils literal"><span class="pre">default</span></code>.</p>
+<p>For example, to disable all throttles, run:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">&gt;</span> <span class="n">throttle</span> <span class="n">off</span> <span class="nb">all</span>
+</pre></div>
+</div>
+<p>To disable all manually created batch priority throttles, run:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">&gt;</span> <span class="n">throttle</span> <span class="n">off</span> <span class="n">batch</span>
+</pre></div>
+</div>
+<p>To disable auto throttles at batch priority on the tag <code class="docutils literal"><span class="pre">foo</span></code>, run:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">&gt;</span> <span class="n">throttle</span> <span class="n">off</span> <span class="n">auto</span> <span class="n">tag</span> <span class="n">foo</span> <span class="n">batch</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="enable">
+<h4>enable</h4>
+<p><code class="docutils literal"><span class="pre">throttle</span> <span class="pre">enable</span> <span class="pre">auto</span></code></p>
+<p>Enables cluster auto-throttling for busy transaction tags.</p>
+</div>
+<div class="section" id="disable">
+<h4>disable</h4>
+<p><code class="docutils literal"><span class="pre">throttle</span> <span class="pre">disable</span> <span class="pre">auto</span></code></p>
+<p>Disables cluster auto-throttling for busy transaction tags. This does not disable any currently active throttles. To do so, run the following command after disabling auto-throttling:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">&gt;</span> <span class="n">throttle</span> <span class="n">off</span> <span class="n">auto</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="id2">
+<h4>list</h4>
+<p><code class="docutils literal"><span class="pre">throttle</span> <span class="pre">list</span> <span class="pre">[LIMIT]</span></code></p>
+<p>Prints a list of currently active transaction tag throttles.</p>
+<p><code class="docutils literal"><span class="pre">LIMIT</span></code> - The number of throttles to print. Defaults to 100.</p>
+</div>
+</div>
+<div class="section" id="triggerddteaminfolog">
+<h3>triggerddteaminfolog</h3>
+<p>The <code class="docutils literal"><span class="pre">triggerddteaminfolog</span></code> command would trigger the data distributor to log very detailed teams information into trace event logs.</p>
+</div>
 <div class="section" id="unlock">
 <h3>unlock</h3>
 <p>The <code class="docutils literal"><span class="pre">unlock</span></code> command unlocks the database with the specified lock UID. Because this is a potentially dangerous operation, users must copy a passphrase before the unlock command is executed.</p>
+</div>
+<div class="section" id="writemode">
+<h3>writemode</h3>
+<p>Controls whether or not <code class="docutils literal"><span class="pre">fdbcli</span></code> can perform sets and clears.</p>
+<p><code class="docutils literal"><span class="pre">writemode</span> <span class="pre">off</span></code></p>
+<p>Disables writing from <code class="docutils literal"><span class="pre">fdbcli</span></code> (the default). In this mode, attempting to set or clear keys will result in an error.</p>
+<p><code class="docutils literal"><span class="pre">writemode</span> <span class="pre">on</span></code></p>
+<p>Enables writing from <code class="docutils literal"><span class="pre">fdbcli</span></code>.</p>
 </div>
 </div>
 </div>
@@ -437,7 +615,7 @@ print cluster statistics.</p>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 16, 2020.<br/>
+      Last updated on Apr 14, 2021.<br/>
     </p>
   </div>
 </footer>

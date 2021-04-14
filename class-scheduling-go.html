@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Class Scheduling in Go &#8212; FoundationDB 6.2</title>
+    <title>Class Scheduling in Go &#8212; FoundationDB 6.3</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.28',
+        VERSION:     '6.3.12',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -199,7 +199,7 @@
 </pre></div>
 </div>
 <p>Before using the API, we need to specify the API version. This allows programs to maintain compatibility even if the API is modified in future versions:</p>
-<div class="highlight-go"><div class="highlight"><pre><span></span><span class="nx">fdb</span><span class="p">.</span><span class="nx">MustAPIVersion</span><span class="p">(</span><span class="mi">620</span><span class="p">)</span>
+<div class="highlight-go"><div class="highlight"><pre><span></span><span class="nx">fdb</span><span class="p">.</span><span class="nx">MustAPIVersion</span><span class="p">(</span><span class="mi">630</span><span class="p">)</span>
 </pre></div>
 </div>
 <p>Next, we open a FoundationDB database.  The API will connect to the FoundationDB cluster indicated by the <a class="reference internal" href="administration.html#default-cluster-file"><span class="std std-ref">default cluster file</span></a>.</p>
@@ -240,7 +240,7 @@
 
 <span class="kd">func</span> <span class="nx">main</span><span class="p">()</span> <span class="p">{</span>
     <span class="c1">// Different API versions may expose different runtime behaviors.</span>
-    <span class="nx">fdb</span><span class="p">.</span><span class="nx">MustAPIVersion</span><span class="p">(</span><span class="mi">620</span><span class="p">)</span>
+    <span class="nx">fdb</span><span class="p">.</span><span class="nx">MustAPIVersion</span><span class="p">(</span><span class="mi">630</span><span class="p">)</span>
 
     <span class="c1">// Open the default database from the system cluster</span>
     <span class="nx">db</span> <span class="o">:=</span> <span class="nx">fdb</span><span class="p">.</span><span class="nx">MustOpenDefault</span><span class="p">()</span>
@@ -304,7 +304,7 @@
 </pre></div>
 </div>
 <p>The <code class="xref py py-mod docutils literal"><span class="pre">directory</span></code> module lets us open a <a class="reference internal" href="developer-guide.html#developer-guide-directories"><span class="std std-ref">directory</span></a> in the database:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">schedulingDir</span><span class="p">,</span> <span class="n">err</span> <span class="p">:</span><span class="o">=</span> <span class="n">directory</span><span class="o">.</span><span class="n">CreateOrOpen</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="p">[]</span><span class="n">string</span><span class="p">{</span><span class="s2">&quot;scheduling&quot;</span><span class="p">},</span> <span class="n">nil</span><span class="p">)</span>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">schedulingDir</span><span class="p">,</span> <span class="n">err</span> <span class="o">:=</span> <span class="n">directory</span><span class="o">.</span><span class="n">CreateOrOpen</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="p">[]</span><span class="n">string</span><span class="p">{</span><span class="s2">&quot;scheduling&quot;</span><span class="p">},</span> <span class="n">nil</span><span class="p">)</span>
 <span class="k">if</span> <span class="n">err</span> <span class="o">!=</span> <span class="n">nil</span> <span class="p">{</span>
   <span class="n">log</span><span class="o">.</span><span class="n">Fatal</span><span class="p">(</span><span class="n">err</span><span class="p">)</span>
 <span class="p">}</span>
@@ -770,7 +770,7 @@
 <span class="p">}</span>
 
 <span class="kd">func</span> <span class="nx">main</span><span class="p">()</span> <span class="p">{</span>
-  <span class="nx">fdb</span><span class="p">.</span><span class="nx">MustAPIVersion</span><span class="p">(</span><span class="mi">620</span><span class="p">)</span>
+  <span class="nx">fdb</span><span class="p">.</span><span class="nx">MustAPIVersion</span><span class="p">(</span><span class="mi">630</span><span class="p">)</span>
   <span class="nx">db</span> <span class="o">:=</span> <span class="nx">fdb</span><span class="p">.</span><span class="nx">MustOpenDefault</span><span class="p">()</span>
   <span class="nx">db</span><span class="p">.</span><span class="nx">Options</span><span class="p">().</span><span class="nx">SetTransactionTimeout</span><span class="p">(</span><span class="mi">60000</span><span class="p">)</span>  <span class="c1">// 60,000 ms = 1 minute</span>
   <span class="nx">db</span><span class="p">.</span><span class="nx">Options</span><span class="p">().</span><span class="nx">SetTransactionRetryLimit</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
@@ -912,7 +912,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 16, 2020.<br/>
+      Last updated on Apr 14, 2021.<br/>
     </p>
   </div>
 </footer>

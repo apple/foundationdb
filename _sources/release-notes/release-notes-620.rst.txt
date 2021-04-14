@@ -1,14 +1,46 @@
-.. _release-notes:
-
 #############
 Release Notes
 #############
+
+6.2.33
+======
+* Fixed an issue where storage servers could shutdown with ``unknown_error``. `(PR #4437) <https://github.com/apple/foundationdb/pull/4437>`_
+* Fix backup agent stall when writing to local filesystem with slow metadata operations. `(PR #4428) <https://github.com/apple/foundationdb/pull/4428>`_
+* Backup agent no longer uses 4k block caching layer on local output files so that write operations are larger. `(PR #4428) <https://github.com/apple/foundationdb/pull/4428>`_
+
+6.2.32
+======
+* Fix an issue where symbolic links in cmake-built RPMs are broken if you unpack the RPM to a custom directory. `(PR #4380) <https://github.com/apple/foundationdb/pull/4380>`_
+
+6.2.31
+======
+* Fix a rare invalid memory access on data distributor when snapshotting large clusters. This is a follow up to `PR #4076 <https://github.com/apple/foundationdb/pull/4076>`_. `(PR #4317) <https://github.com/apple/foundationdb/pull/4317>`_
+
+6.2.30
+======
+* A storage server which has fallen behind will deprioritize reads in order to catch up. This change causes some saturating workloads to experience high read latencies instead of high GRV latencies. `(PR #4218) <https://github.com/apple/foundationdb/pull/4218>`_
+* Added ``low_priority_queries`` to the ``processes.roles`` section of status to record the number of deprioritized reads on each storage server. `(PR #4218) <https://github.com/apple/foundationdb/pull/4218>`_
+* Added ``low_priority_reads`` to the ``workload.operations`` section of status to record the total number of deprioritized reads. `(PR #4218) <https://github.com/apple/foundationdb/pull/4218>`_
+* Backup to locally mounted filesystems now appends to files in large block writes, 1MB each by default. `(PR #4199) <https://github.com/apple/foundationdb/pull/4199>`_
+* Changed the default SSL implementation from OpenSSL to BoringSSL `(PR #4153) <https://github.com/apple/foundationdb/pull/4153>`_
+* SQLite now supports configurable disk write rate limiting. `(PR #4259) <https://github.com/apple/foundationdb/pull/4259>`_
+* If a disk operation takes more than two minutes, the system will treat the disk as failed. `(PR #4243) <https://github.com/apple/foundationdb/pull/4243>`_
+
+6.2.29
+======
+* Fix invalid memory access on data distributor when snapshotting large clusters. `(PR #4076) <https://github.com/apple/foundationdb/pull/4076>`_
+* Add human-readable DateTime to trace events `(PR #4087) <https://github.com/apple/foundationdb/pull/4087>`_
+* Proxy rejects transaction batch that exceeds MVCC window `(PR #4113) <https://github.com/apple/foundationdb/pull/4113>`_
+* Add a command in fdbcli to manually trigger the detailed teams information loggings in data distribution. `(PR #4060) <https://github.com/apple/foundationdb/pull/4060>`_
+* Add documentation on read and write Path. `(PR #4099) <https://github.com/apple/foundationdb/pull/4099>`_
+* Add a histogram to expose commit batching window on Proxies. `(PR #4166) <https://github.com/apple/foundationdb/pull/4166>`_
+* Fix double counting of range reads in TransactionMetrics. `(PR #4130) <https://github.com/apple/foundationdb/pull/4130>`_
+* Add a trace event that can be used as an indicator of the load on the proxy. `(PR #4166) <https://github.com/apple/foundationdb/pull/4166>`_
 
 6.2.28
 ======
 * Log detailed team collection information when median available space ratio of all teams is too low. `(PR #3912) <https://github.com/apple/foundationdb/pull/3912>`_
 * Bug fix, blob client did not support authentication key sizes over 64 bytes.  `(PR #3964) <https://github.com/apple/foundationdb/pull/3964>`_
-
 
 6.2.27
 ======

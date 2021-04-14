@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Transaction Tagging &#8212; FoundationDB 6.3</title>
+    
+    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '6.3.12',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Known Limitations" href="known-limitations.html" />
+    <link rel="prev" title="Using FoundationDB Clients" href="api-general.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Transaction Tagging</a><ul>
+<li><a class="reference internal" href="#adding-tags-to-transactions">Adding tags to transactions</a></li>
+<li><a class="reference internal" href="#tag-throttling-overview">Tag throttling overview</a></li>
+<li><a class="reference internal" href="#tag-throttled-error"><code class="docutils literal"><span class="pre">tag_throttled</span></code> error</a></li>
+<li><a class="reference internal" href="#automatic-transaction-tag-throttling">Automatic transaction tag throttling</a></li>
+<li><a class="reference internal" href="#manual-transaction-tag-throttling">Manual transaction tag throttling</a><ul>
+<li><a class="reference internal" href="#enabling-and-disabling">Enabling and disabling</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#viewing-active-throttles">Viewing active throttles</a></li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="api-general.html" title="Previous Chapter: Using FoundationDB Clients"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Using Foundat...</span>
+    </a>
+  </li>
+  <li>
+    <a href="known-limitations.html" title="Next Chapter: Known Limitations"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Known Limitations &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Transaction Tagging</a><ul>
+<li><a class="reference internal" href="#adding-tags-to-transactions">Adding tags to transactions</a></li>
+<li><a class="reference internal" href="#tag-throttling-overview">Tag throttling overview</a></li>
+<li><a class="reference internal" href="#tag-throttled-error"><code class="docutils literal"><span class="pre">tag_throttled</span></code> error</a></li>
+<li><a class="reference internal" href="#automatic-transaction-tag-throttling">Automatic transaction tag throttling</a></li>
+<li><a class="reference internal" href="#manual-transaction-tag-throttling">Manual transaction tag throttling</a><ul>
+<li><a class="reference internal" href="#enabling-and-disabling">Enabling and disabling</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#viewing-active-throttles">Viewing active throttles</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="transaction-tagging">
+<span id="id1"></span><h1>Transaction Tagging</h1>
+<p>FoundationDB provides the ability to add arbitrary byte-string tags to transactions. The cluster can be configured to limit the rate of transactions with certain tags, either automatically in response to tags that are very busy, or manually using the <a class="reference internal" href="command-line-interface.html#cli-throttle"><span class="std std-ref">throttle command</span></a> in <code class="docutils literal"><span class="pre">fdbcli</span></code>.</p>
+<p>This document describes how to configure and observe the behavior of transaction tagging and throttling.</p>
+<div class="section" id="adding-tags-to-transactions">
+<h2>Adding tags to transactions</h2>
+<p>Tags are added to transaction by using transaction options. Each transaction can include up to five tags, and each tag must not exceed 16 characters. There are two options that can be used to add tags:</p>
+<ul class="simple">
+<li><code class="docutils literal"><span class="pre">TAG</span></code> - Adds a tag to the transaction. This tag will not be used for auto-throttling and is not included with read requests. Tags set in this way can only be throttled manually.</li>
+<li><code class="docutils literal"><span class="pre">AUTO_THROTTLE_TAG</span></code> - Adds a tag to the transaction that can be both automatically and manually throttled. To support busy tag detection, these tags may be sent as part of read requests.</li>
+</ul>
+<p>See the documentation for your particular language binding for details about setting this option.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">If setting hierarchical tags, it is recommended that you not use auto-throttle tags at multiple levels of the hierarchy. Otherwise, the cluster will favor throttling those tags set at higher levels, as they will include more transactions.</p>
+</div>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">Tags must be included as part of all get read version requests, and a sample of read requests will include auto-throttled tags. Additionally, each tag imposes additional costs with those requests. It is therefore recommended that you not use excessive numbers or lengths of transaction tags.</p>
+</div>
+</div>
+<div class="section" id="tag-throttling-overview">
+<h2>Tag throttling overview</h2>
+<p>The cluster has the ability to enforce a transaction rate for particular tags. This rate can be set manually via the <a class="reference internal" href="command-line-interface.html#cli-throttle"><span class="std std-ref">throttle command</span></a> in <code class="docutils literal"><span class="pre">fdbcli</span></code> or automatically when a storage server gets busy and has a lot of traffic from a single tag.</p>
+<p>Tag throttles have the following attributes:</p>
+<ul class="simple">
+<li>tag - the tag being throttled.</li>
+<li>rate - the desired number of transactions to start per second for this tag.</li>
+<li>priority - the maximum priority to throttle. All lower priorities will also have this throttle applied.</li>
+<li>auto/manual - whether this tag was throttled automatically or manually.</li>
+<li>expiration - the time that the throttle will expire.</li>
+</ul>
+<p>It is possible for multiple throttles to apply to the same transaction. For example, the transaction could use a tag that is both automatically and manually throttled, there may be throttles set at multiple priorities greater than or equal to the priority of the transaction, or it may set multiple tags. In these cases, the lowest limit of any throttle affecting the transaction will be used.</p>
+<p>The limit set by the throttles is not a hard limit, meaning that it may be possible for clients to start more transactions in aggregate than allowed by the limit during a given window. The cluster should react to this condition by reducing the number of transactions that can be started on each client going forward.</p>
+</div>
+<div class="section" id="tag-throttled-error">
+<h2><code class="docutils literal"><span class="pre">tag_throttled</span></code> error</h2>
+<p>When a transaction tag is throttled, this information will be communicated to the client as part of the get read version request, which will then fail with a <code class="docutils literal"><span class="pre">tag_throttled</span></code> error. This error is retryable by <code class="docutils literal"><span class="pre">on_error</span></code> and the transaction retry loops provided in the language bindings. Subsequent requests from the same client that exceed the limit will be throttled without sending a request to the cluster at all, except for periodic requests intended to poll for updates to the throttles.</p>
+</div>
+<div class="section" id="automatic-transaction-tag-throttling">
+<h2>Automatic transaction tag throttling</h2>
+<p>When using the <code class="docutils literal"><span class="pre">AUTO_THROTTLE_TAG</span></code> transaction option, the cluster will monitor read activity for the chosen tags and may choose to reduce a tag&#8217;s transaction rate limit if a storage server gets busy enough and has a sufficient portion of its read traffic coming from that one tag.</p>
+<p>When a tag is auto-throttled, the default priority transaction rate will be decreased to reduce the percentage of traffic attributable to that tag to a reasonable amount of total traffic on the affected storage server(s), and batch priority transactions for that tag will be stopped completely.</p>
+<p>Auto-throttles are created with a duration of a few minutes, at the end of which the cluster will try to gradually lift the limit. If the cluster detects that it needs to continue throttling the tag, then the duration of the throttle will be extended.</p>
+</div>
+<div class="section" id="manual-transaction-tag-throttling">
+<h2>Manual transaction tag throttling</h2>
+<p>In addition to automatically throttling transaction tags, cluster operators have the ability to manually throttle and unthrottle tags using the <a class="reference internal" href="command-line-interface.html#cli-throttle"><span class="std std-ref">throttle command</span></a> in <code class="docutils literal"><span class="pre">fdbcli</span></code>. Manual tag throttles are created in addition to automatic ones, meaning that the same tag can be throttled internally by the cluster and manually by the operator, in which case the lower limit applies. All transaction tags can be manually throttled.</p>
+<p>There can be at most 40 tags throttled manually at one time.</p>
+<div class="section" id="enabling-and-disabling">
+<h3>Enabling and disabling</h3>
+<p>By default, automatic transaction tag throttling is enabled for any tags that are set using the <code class="docutils literal"><span class="pre">AUTO_THROTTLE_TAG</span></code> option. This feature can be enabled and disabled using <code class="docutils literal"><span class="pre">fdbcli</span></code>:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">&gt;</span> <span class="n">throttle</span> <span class="o">&lt;</span><span class="n">enable</span><span class="o">|</span><span class="n">disable</span><span class="o">&gt;</span> <span class="n">auto</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="section" id="viewing-active-throttles">
+<h2>Viewing active throttles</h2>
+<p>A list of active throttles and their parameters can be viewed using the <a class="reference internal" href="command-line-interface.html#cli-throttle"><span class="std std-ref">throttle list</span></a> command in <code class="docutils literal"><span class="pre">fdbcli</span></code>.</p>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/transaction-tagging.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 14, 2021.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

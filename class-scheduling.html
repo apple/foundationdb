@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Class Scheduling &#8212; FoundationDB 6.2</title>
+    <title>Class Scheduling &#8212; FoundationDB 6.3</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.28',
+        VERSION:     '6.3.12',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -201,7 +201,7 @@
 </pre></div>
 </div>
 <p>Before using the API, we need to specify the API version. This allows programs to maintain compatibility even if the API is modified in future versions:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">620</span><span class="p">)</span>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">630</span><span class="p">)</span>
 </pre></div>
 </div>
 <p>Next, we open a FoundationDB database.  The API will connect to the FoundationDB cluster indicated by the <a class="reference internal" href="administration.html#default-cluster-file"><span class="std std-ref">default cluster file</span></a>.</p>
@@ -219,7 +219,7 @@
 </div>
 <p>If this is all working, it looks like we are ready to start building a real application. For reference, here&#8217;s the full code for &#8220;hello world&#8221;:</p>
 <div class="highlight-default"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">fdb</span>
-<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">620</span><span class="p">)</span>
+<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">630</span><span class="p">)</span>
 <span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">open</span><span class="p">()</span>
 <span class="n">db</span><span class="p">[</span><span class="sa">b</span><span class="s1">&#39;hello&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">b</span><span class="s1">&#39;world&#39;</span>
 <span class="nb">print</span> <span class="s1">&#39;hello&#39;</span><span class="p">,</span> <span class="n">db</span><span class="p">[</span><span class="sa">b</span><span class="s1">&#39;hello&#39;</span><span class="p">]</span>
@@ -256,7 +256,7 @@
 <p>FoundationDB includes a few tools that make it easy to model data using this approach. Let&#8217;s begin by
 opening a <a class="reference internal" href="developer-guide.html#developer-guide-directories"><span class="std std-ref">directory</span></a> in the database:</p>
 <div class="highlight-default"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">fdb</span>
-<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">620</span><span class="p">)</span>
+<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">630</span><span class="p">)</span>
 
 <span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">open</span><span class="p">()</span>
 <span class="n">scheduling</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">directory</span><span class="o">.</span><span class="n">create_or_open</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="p">(</span><span class="s1">&#39;scheduling&#39;</span><span class="p">,))</span>
@@ -297,7 +297,7 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
 <p>If instead you pass a <code class="xref py py-class docutils literal"><span class="pre">Transaction</span></code> for the <code class="docutils literal"><span class="pre">tr</span></code> parameter, the transaction will be used directly, and it is assumed that the caller implements appropriate retry logic for errors. This permits transactionally decorated functions to be composed into larger transactions.</p>
 <p>Note that by default, the operation will be retried an infinite number of times and the transaction will never time out. It is therefore recommended that the client choose a default transaction retry limit or timeout value that is suitable for their application. This can be set either at the transaction level using the <code class="docutils literal"><span class="pre">set_retry_limit</span></code> or <code class="docutils literal"><span class="pre">set_timeout</span></code> transaction options or at the database level with the <code class="docutils literal"><span class="pre">set_transaction_retry_limit</span></code> or <code class="docutils literal"><span class="pre">set_transaction_timeout</span></code> database options. For example, one can set a one minute timeout on each transaction and a default retry limit of 100 by calling:</p>
 <div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">db</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">set_transaction_timeout</span><span class="p">(</span><span class="mi">60000</span><span class="p">)</span>  <span class="c1"># 60,000 ms = 1 minute</span>
-<span class="n">db</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">set_retry_limit</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
+<span class="n">db</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">set_transaction_retry_limit</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
@@ -469,7 +469,7 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
 <span class="kn">import</span> <span class="nn">fdb</span>
 <span class="kn">import</span> <span class="nn">fdb.tuple</span>
 
-<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">620</span><span class="p">)</span>
+<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">630</span><span class="p">)</span>
 
 
 <span class="c1">####################################</span>
@@ -482,7 +482,7 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
 
 <span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">open</span><span class="p">()</span>
 <span class="n">db</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">set_transaction_timeout</span><span class="p">(</span><span class="mi">60000</span><span class="p">)</span>  <span class="c1"># 60,000 ms = 1 minute</span>
-<span class="n">db</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">set_retry_limit</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
+<span class="n">db</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">set_transaction_retry_limit</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
 <span class="n">scheduling</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">directory</span><span class="o">.</span><span class="n">create_or_open</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="p">(</span><span class="s1">&#39;scheduling&#39;</span><span class="p">,))</span>
 <span class="n">course</span> <span class="o">=</span> <span class="n">scheduling</span><span class="p">[</span><span class="s1">&#39;class&#39;</span><span class="p">]</span>
 <span class="n">attends</span> <span class="o">=</span> <span class="n">scheduling</span><span class="p">[</span><span class="s1">&#39;attends&#39;</span><span class="p">]</span>
@@ -624,7 +624,7 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 16, 2020.<br/>
+      Last updated on Apr 14, 2021.<br/>
     </p>
   </div>
 </footer>

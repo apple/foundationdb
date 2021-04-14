@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Configuration &#8212; FoundationDB 6.2</title>
+    <title>Configuration &#8212; FoundationDB 6.3</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.28',
+        VERSION:     '6.3.12',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -526,7 +526,7 @@ Coordinators changed
 </div>
 <div class="section" id="choosing-a-redundancy-mode">
 <span id="configuration-choosing-redundancy-mode"></span><h2>Choosing a redundancy mode</h2>
-<p>FoundationDB supports a variety of redundancy modes. These modes define storage requirements, required cluster size, and resilience to failure. To change the redundancy mode, use the <code class="docutils literal"><span class="pre">configure</span></code> command <code class="docutils literal"><span class="pre">fdbcli</span></code>. For example:</p>
+<p>FoundationDB supports a variety of redundancy modes. These modes define storage requirements, required cluster size, and resilience to failure. To change the redundancy mode, use the <code class="docutils literal"><span class="pre">configure</span></code> command of <code class="docutils literal"><span class="pre">fdbcli</span></code>. For example:</p>
 <div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbcli
 Using cluster file `/etc/foundationdb/fdb.cluster&#39;.
 
@@ -794,7 +794,7 @@ Disk identifier: 0xe5169faa
 <p>An example configuration would be four total datacenters, two on the east coast, two on the west coast, with a preference for fast write latencies from the west coast. One datacenter on each coast would be sized to store a full copy of the data. The second datacenter on each coast would only have a few FoundationDB processes.</p>
 <p>While everything is healthy, writes need to be made durable in both west coast datacenters before a commit can succeed. The geographic proximity of the two datacenters minimizes the additional commit latency. Reads can be served from either region, and clients can get data from whichever region is closer. Getting a read version from east coast region will still require communicating with a west coast datacenter. Clients can cache read versions if they can tolerate reading stale data to avoid waiting on read versions.</p>
 <p>If either west coast datacenter fails, the last few mutations will be propagated from the remaining west coast datacenter to the east coast. At this point, FoundationDB will start accepting commits on the east coast. Once the west coast comes back online, the system will automatically start copying all the data that was committed to the east coast back to the west coast replica. Once the west coast has caught up, the system will automatically switch back to accepting writes from the west coast again.</p>
-<p>The west coast mutation logs will maintain their copies of all committed mutations until they have been applied by the east coast datacenter.  In the event that the east coast has failed for long enough that the west coast mutation logs no longer have enough disk space to continue storing the mutations, FoundationDB can be requested to drop the east coast replica completely. This decision is not automatic, and requires a manual change to the configuration. The west coast database will then act as a single datacenter database until the east coast comes back online. Because the east coast datacenter was completely dropped from the configuration, to bring the west coast back online FoundationDB will have to copy all the data between the regions.</p>
+<p>The west coast mutation logs will maintain their copies of all committed mutations until they have been applied by the east coast datacenter.  In the event that the east coast has failed for long enough that the west coast mutation logs no longer have enough disk space to continue storing the mutations, FoundationDB can be requested to drop the east coast replica completely. This decision is not automatic, and requires a manual change to the configuration. The west coast database will then act as a single datacenter database until the east coast comes back online. Because the east coast datacenter was completely dropped from the configuration, FoundationDB will have to copy all the data between the regions in order to bring it back online.</p>
 <p>If a region failover occurs, clients will generally only see a latency spike of a few seconds.</p>
 <div class="section" id="specifying-datacenters">
 <h3>Specifying datacenters</h3>
@@ -999,7 +999,7 @@ Configuration changed.
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 16, 2020.<br/>
+      Last updated on Apr 14, 2021.<br/>
     </p>
   </div>
 </footer>

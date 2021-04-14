@@ -28,6 +28,8 @@ These documents explain the engineering design of FoundationDB, with detailed in
 
 * :doc:`kv-architecture` provides a description of every major role a process in FoundationDB can fulfill.
 
+* :doc:`read-write-path` describes how FDB read and write path works.
+
 .. toctree::
    :maxdepth: 1
    :titlesonly:
@@ -45,3 +47,4 @@ These documents explain the engineering design of FoundationDB, with detailed in
    flow
    testing
    kv-architecture
+   read-write-path
