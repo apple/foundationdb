@@ -435,7 +435,7 @@ private:
 		wait(g_simulator.onMachine(currentProcess));
 
 		state double delayDuration =
-		    g_simulator.speedUpSimulation ? 0.0001 : deterministicRandom()->random01() * self->maxWriteDelay;
+		    g_simulator.speedUpSimulation ? 0.0001 : (deterministicRandom()->random01() * self->maxWriteDelay);
 		state Standalone<StringRef> dataCopy(StringRef((uint8_t*)data, length));
 
 		state Future<bool> startSyncFuture = self->startSyncPromise.getFuture();
@@ -608,7 +608,7 @@ private:
 		wait(g_simulator.onMachine(currentProcess));
 
 		state double delayDuration =
-		    g_simulator.speedUpSimulation ? 0.0001 : deterministicRandom()->random01() * self->maxWriteDelay;
+		    g_simulator.speedUpSimulation ? 0.0001 : (deterministicRandom()->random01() * self->maxWriteDelay);
 		state Future<bool> startSyncFuture = self->startSyncPromise.getFuture();
 
 		try {
