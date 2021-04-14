@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbbackup/BackupTLSConfig.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
@@ -3251,8 +3252,7 @@ int main(int argc, char* argv[]) {
 		LocalityData localities;
 		uint64_t memLimit = 8LL << 30;
 		Optional<uint64_t> ti;
-		std::vector<std::string> blobCredentials;
-		std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword, tlsVerifyPeers;
+		BackupTLSConfig tlsConfig;
 		Version dumpBegin = 0;
 		Version dumpEnd = std::numeric_limits<Version>::max();
 		std::string restoreClusterFileDest;
@@ -3578,26 +3578,26 @@ int main(int argc, char* argv[]) {
 				memLimit = ti.get();
 				break;
 			case OPT_BLOB_CREDENTIALS:
-				blobCredentials.push_back(args->OptionArg());
+				tlsConfig.blobCredentials.push_back(args->OptionArg());
 				break;
 #ifndef TLS_DISABLED
 			case TLSConfig::OPT_TLS_PLUGIN:
 				args->OptionArg();
 				break;
 			case TLSConfig::OPT_TLS_CERTIFICATES:
-				tlsCertPath = args->OptionArg();
+				tlsConfig.tlsCertPath = args->OptionArg();
 				break;
 			case TLSConfig::OPT_TLS_PASSWORD:
-				tlsPassword = args->OptionArg();
+				tlsConfig.tlsPassword = args->OptionArg();
 				break;
 			case TLSConfig::OPT_TLS_CA_FILE:
-				tlsCAPath = args->OptionArg();
+				tlsConfig.tlsCAPath = args->OptionArg();
 				break;
 			case TLSConfig::OPT_TLS_KEY:
-				tlsKeyPath = args->OptionArg();
+				tlsConfig.tlsKeyPath = args->OptionArg();
 				break;
 			case TLSConfig::OPT_TLS_VERIFY_PEERS:
-				tlsVerifyPeers = args->OptionArg();
+				tlsConfig.tlsVerifyPeers = args->OptionArg();
 				break;
 #endif
 			case OPT_DUMP_BEGIN:
@@ -3731,42 +3731,8 @@ int main(int argc, char* argv[]) {
 		setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
 
 		// deferred TLS options
-		if (tlsCertPath.size()) {
-			try {
-				setNetworkOption(FDBNetworkOptions::TLS_CERT_PATH, tlsCertPath);
-			} catch (Error& e) {
-				fprintf(stderr, "ERROR: cannot set TLS certificate path to `%s' (%s)\n", tlsCertPath.c_str(), e.what());
-				return 1;
-			}
-		}
-
-		if (tlsCAPath.size()) {
-			try {
-				setNetworkOption(FDBNetworkOptions::TLS_CA_PATH, tlsCAPath);
-			} catch (Error& e) {
-				fprintf(stderr, "ERROR: cannot set TLS CA path to `%s' (%s)\n", tlsCAPath.c_str(), e.what());
-				return 1;
-			}
-		}
-		if (tlsKeyPath.size()) {
-			try {
-				if (tlsPassword.size())
-					setNetworkOption(FDBNetworkOptions::TLS_PASSWORD, tlsPassword);
-
-				setNetworkOption(FDBNetworkOptions::TLS_KEY_PATH, tlsKeyPath);
-			} catch (Error& e) {
-				fprintf(stderr, "ERROR: cannot set TLS key path to `%s' (%s)\n", tlsKeyPath.c_str(), e.what());
-				return 1;
-			}
-		}
-		if (tlsVerifyPeers.size()) {
-			try {
-				setNetworkOption(FDBNetworkOptions::TLS_VERIFY_PEERS, tlsVerifyPeers);
-			} catch (Error& e) {
-				fprintf(
-				    stderr, "ERROR: cannot set TLS peer verification to `%s' (%s)\n", tlsVerifyPeers.c_str(), e.what());
-				return 1;
-			}
+		if (!tlsConfig.setupTLS()) {
+			return 1;
 		}
 
 		Error::init();
@@ -3806,25 +3772,8 @@ int main(int argc, char* argv[]) {
 		// are logged. This thread will eventually run the network, so call it now.
 		TraceEvent::setNetworkThread();
 
-		// Add blob credentials files from the environment to the list collected from the command line.
-		const char* blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
-		if (blobCredsFromENV != nullptr) {
-			StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
-			do {
-				StringRef file = t.eat(":");
-				if (file.size() != 0)
-					blobCredentials.push_back(file.toString());
-			} while (t.size() != 0);
-		}
-
-		// Update the global blob credential files list
-		std::vector<std::string>* pFiles =
-		    (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
-		if (pFiles != nullptr) {
-			for (auto& f : blobCredentials) {
-				pFiles->push_back(f);
-			}
-		}
+		// Sets up blob credentials, including one from the environment FDB_BLOB_CREDENTIALS.
+		tlsConfig.setupBlobCredentials();
 
 		// Opens a trace file if trace is set (and if a trace file isn't already open)
 		// For most modes, initCluster() will open a trace file, but some fdbbackup operations do not require
