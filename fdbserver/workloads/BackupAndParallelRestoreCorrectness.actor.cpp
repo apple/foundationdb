@@ -222,7 +222,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		try {
 			wait(backupAgent->submitBackup(cx,
 			                               StringRef(backupContainer),
-										   deterministicRandom()->randomInt(0, 60),
+			                               deterministicRandom()->randomInt(0, 60),
 			                               deterministicRandom()->randomInt(0, 100),
 			                               tag.toString(),
 			                               backupRanges,
@@ -478,7 +478,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					// the configuration to disable backup workers before restore.
 					extraBackup = backupAgent.submitBackup(cx,
 					                                       LiteralStringRef("file://simfdb/backups/"),
-														   deterministicRandom()->randomInt(0, 60),
+					                                       deterministicRandom()->randomInt(0, 60),
 					                                       deterministicRandom()->randomInt(0, 100),
 					                                       self->backupTag.toString(),
 					                                       self->backupRanges,
