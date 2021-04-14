@@ -29,6 +29,7 @@ struct BackupToBlobWorkload : TestWorkload {
 	double backupAfter;
 	Key backupTag;
 	Standalone<StringRef> backupURL;
+	int initSnapshotInterval = 0;
 	int snapshotInterval = 100000;
 
 	static constexpr const char* DESCRIPTION = "BackupToBlob";
@@ -60,7 +61,7 @@ struct BackupToBlobWorkload : TestWorkload {
 
 		wait(delay(self->backupAfter));
 		wait(backupAgent.submitBackup(
-		    cx, self->backupURL, self->snapshotInterval, self->backupTag.toString(), backupRanges));
+		    cx, self->backupURL, self->initSnapshotInterval, self->snapshotInterval, self->backupTag.toString(), backupRanges));
 		EBackupState backupStatus = wait(backupAgent.waitBackup(cx, self->backupTag.toString(), true));
 		TraceEvent("BackupToBlob_BackupStatus").detail("Status", BackupAgentBase::getStateText(backupStatus));
 		return Void();
