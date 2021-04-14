@@ -20,9 +20,9 @@
 
 #ifndef FDBSERVER_IKEYVALUESTORE_H
 #define FDBSERVER_IKEYVALUESTORE_H
+#pragma once
 #include "flow/FastRef.h"
 #include <variant>
-#pragma once
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
@@ -53,8 +53,6 @@ struct IReadRangeResultWriter : public ReferenceCounted<IReadRangeResultWriter> 
 	  - Note: kv should only be empty to indicate that there are no more results on disk
 	*/
 	virtual std::variant<bool, KeyRef> operator()(Optional<KeyValueRef> kv) = 0;
-
-	virtual bool shouldTrace() { return false; } // TODO: remove
 };
 
 class IKeyValueStore : public IClosable {

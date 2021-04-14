@@ -1166,58 +1166,30 @@ struct RawCursor {
 			return Void();
 		if (db.fragment_values) {
 			if (rowLimit > 0) { // return results in asc order
-				if (resultWriter->shouldTrace()) {
-					TraceEvent("Nim_Case1KVStore");
-				}
 				DefragmentingReader i(*this, arena, true);
 				i.moveTo(keys.begin);
 				Optional<KeyRef> nextKey = i.peek();
 				while (nextKey.present() && nextKey.get() < keys.end) {
 					Optional<KeyValueRef> kv = i.getNext();
-					if (resultWriter->shouldTrace()) {
-						TraceEvent("Nim_KVStore4")
-						    .detail("Key", kv)
-						    .detail("resWriter", resultWriter.isValid())
-						    .detail("trace", resultWriter->shouldTrace());
-					}
-					// TraceEvent("Nim_readRangeKVStore").detail("key", kv.get().key);
 					std::variant<bool, KeyRef> res = resultWriter->operator()(kv);
-					if (resultWriter->shouldTrace()) {
-						TraceEvent("Nim_KVStore")
-						    .detail("kv", kv)
-						    .detail("res", res.index())
-						    .detail("resWriter", resultWriter.isValid());
-					}
 					if (res.index() == 0) { // returned bool
-						auto f = std::get<bool>(res);
-						if (resultWriter->shouldTrace()) {
-							TraceEvent("Nim_KVStore2").detail("kv", kv).detail("res", f);
-						}
-						if (!f) { // we hit the limit so return
+						if (!std::get<bool>(res)) { // we hit the limit so return
 							return Void();
 						}
 					} else { // returned KeyRef for end of clear range
 						i.moveTo(std::get<KeyRef>(res));
 					}
 					nextKey = i.peek();
-					if (resultWriter->shouldTrace()) {
-						TraceEvent("Nim_KVStore3").detail("nextKey", nextKey);
-					}
 				}
 			} else { // return results in desc order
-				if (resultWriter->shouldTrace()) {
-					TraceEvent("Nim_Case2KVStore");
-				}
 				DefragmentingReader i(*this, arena, false);
 				i.moveTo(keys.end);
 				Optional<KeyRef> nextKey = i.peek();
 				while (nextKey.present() && nextKey.get() >= keys.begin) {
 					Optional<KeyValueRef> kv = i.getNext();
 					std::variant<bool, KeyRef> res = resultWriter->operator()(kv);
-					// TraceEvent("Nim_readRangeKVStore 2").detail("key", kv.get().key);
 					if (res.index() == 0) { // returned bool
-						auto f = std::get<bool>(res);
-						if (!f) { // we hit the limit so return
+						if (!std::get<bool>(res)) { // we hit the limit so return
 							return Void();
 						}
 					} else { // returned KeyRef to begining of clear range
@@ -1228,50 +1200,28 @@ struct RawCursor {
 			}
 		} else {
 			if (rowLimit > 0) {
-				if (resultWriter->shouldTrace()) {
-					TraceEvent("Nim_Case3KVStore");
-				}
 				int r = moveTo(keys.begin);
 				if (r < 0)
 					moveNext();
 				while (this->valid) {
 					KeyValueRef kv = decodeKV(getEncodedRow(arena));
-					if (resultWriter->shouldTrace()) {
-						TraceEvent("Nim_KVStore4")
-						    .detail("Key", kv)
-						    .detail("resWriter", resultWriter.isValid())
-						    .detail("trace", resultWriter->shouldTrace());
-					}
 					if (kv.key >= keys.end)
 						break;
-					// TraceEvent("Nim_readRangeKVStore 3").detail("key", kv.key);
 					std::variant<bool, KeyRef> res = resultWriter->operator()(kv);
-					if (resultWriter->shouldTrace()) {
-						TraceEvent("Nim_KVStore")
-						    .detail("kv", kv)
-						    .detail("res", res.index())
-						    .detail("resWriter", resultWriter.isValid());
-					}
 					if (res.index() == 0) {
-						auto f = std::get<bool>(res);
-						if (resultWriter->shouldTrace()) {
-							TraceEvent("Nim_KVStore2").detail("kv", kv).detail("res", f);
-						}
-						if (!f) { // we hit the limit so return
+						if (!std::get<bool>(res)) { // we hit the limit so return
 							return Void();
 						} else {
 							moveNext();
 						}
 					} else { // returned KeyRef for end of clear range
 						r = moveTo(std::get<KeyRef>(res));
-						if (r < 0)
+						if (r < 0) {
 							moveNext();
+						}
 					}
 				}
 			} else {
-				if (resultWriter->shouldTrace()) {
-					TraceEvent("Nim_Case4KVStore");
-				}
 				int r = moveTo(keys.end);
 				if (r >= 0)
 					movePrevious();
@@ -1279,19 +1229,18 @@ struct RawCursor {
 					KeyValueRef kv = decodeKV(getEncodedRow(arena));
 					if (kv.key < keys.begin)
 						break;
-					// TraceEvent("Nim_readRangeKVStore 4").detail("key", kv.key);
 					std::variant<bool, KeyRef> res = resultWriter->operator()(kv);
 					if (res.index() == 0) {
-						auto f = std::get<bool>(res);
-						if (!f) { // we hit the limit so return
+						if (!std::get<bool>(res)) { // we hit the limit so return
 							return Void();
 						} else {
 							movePrevious();
 						}
 					} else { // returned KeyRef for beginning of clear range
 						r = moveTo(std::get<KeyRef>(res));
-						if (r >= 0)
+						if (r >= 0) {
 							movePrevious();
+						}
 					}
 				}
 			}
@@ -1877,13 +1826,8 @@ private:
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeResultWriterAction& rr) {
-			try {
-				rr.result.send(getCursor()->get().readRangeResultWriter(rr.keys, rr.resultWriter, rr.rowLimit));
-				++counter;
-			} catch (Error& e) { // TODO: remove catch clause
-				// TraceEvent("Nim_ReadRangeError").detail("code", e.code());
-				throw e;
-			}
+			rr.result.send(getCursor()->get().readRangeResultWriter(rr.keys, rr.resultWriter, rr.rowLimit));
+			++counter;
 		}
 	};
 
@@ -2403,10 +2347,10 @@ Future<Void> KeyValueStoreSQLite::readRange(KeyRangeRef keys,
                                             int rowLimit) {
 	// Read range implementation which utilizes a result writer
 	++readsRequested;
-	auto p = new Reader::ReadRangeResultWriterAction(keys, resultWriter, rowLimit);
-	auto f = p->result.getFuture();
-	readThreads->post(p);
-	return f;
+	auto readRangeAction = new Reader::ReadRangeResultWriterAction(keys, resultWriter, rowLimit);
+	auto readRangeFuture = readRangeAction->result.getFuture();
+	readThreads->post(readRangeAction);
+	return readRangeFuture;
 }
 
 Future<KeyValueStoreSQLite::SpringCleaningWorkPerformed> KeyValueStoreSQLite::doClean() {
