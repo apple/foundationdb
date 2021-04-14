@@ -4900,9 +4900,18 @@ ACTOR Future<ProtocolVersion> coordinatorProtocolsFetcher(Reference<ClusterConne
 	return ProtocolVersion(majorityProtocol);
 }
 
-ACTOR Future<uint64_t> getCoordinatorProtocols(Reference<ClusterConnectionFile> f) {
-	ProtocolVersion protocolVersion = wait(coordinatorProtocolsFetcher(f));
-	return protocolVersion.version();
+// Returns the protocol version reported by a quorum of coordinators
+// If an expected version is given, the future won't return until the protocol version is different than expected
+ACTOR Future<ProtocolVersion> getClusterProtocol(Reference<ClusterConnectionFile> f,
+                                                 Optional<ProtocolVersion> expectedVersion) {
+	loop {
+		ProtocolVersion protocolVersion = wait(coordinatorProtocolsFetcher(f));
+		if (!expectedVersion.present() || protocolVersion != expectedVersion.get()) {
+			return protocolVersion;
+		} else {
+			wait(delay(2.0)); // TODO: this is temporary, so not making into a knob yet
+		}
+	}
 }
 
 uint32_t Transaction::getSize() {
