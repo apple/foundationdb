@@ -1523,7 +1523,7 @@ TEST_CASE("fdb_get_server_protocol") {
 	fdb_future_destroy(protocolFuture);
 
 	// "Default" cluster file version
-	protocolFuture = fdb_database_get_server_protocol(nullptr, 0x0FDB00A200090000LL);
+	protocolFuture = fdb_database_get_server_protocol(db, 0x0FDB00A200090000LL);
 	fdb_check(fdb_future_block_until_ready(protocolFuture));
 	fdb_check(fdb_future_get_uint64(protocolFuture, &out));
 	fdb_future_destroy(protocolFuture);
