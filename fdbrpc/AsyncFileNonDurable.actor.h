@@ -190,7 +190,7 @@ private:
 		this->file = file;
 		this->filename = filename;
 		this->diskParameters = diskParameters;
-		maxWriteDelay = 5.0;
+		maxWriteDelay = FLOW_KNOBS->NON_DURABLE_MAX_WRITE_DELAY;
 		hasBeenSynced = false;
 
 		killMode = (KillMode)deterministicRandom()->randomInt(1, 3);
@@ -427,7 +427,8 @@ private:
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 		wait(g_simulator.onMachine(currentProcess));
 
-		state double delayDuration = deterministicRandom()->random01() * self->maxWriteDelay;
+		state double delayDuration =
+		    g_simulator.speedUpSimulation ? 0.0001 : (deterministicRandom()->random01() * self->maxWriteDelay);
 		state Standalone<StringRef> dataCopy(StringRef((uint8_t*)data, length));
 
 		state Future<bool> startSyncFuture = self->startSyncPromise.getFuture();
@@ -598,7 +599,8 @@ private:
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 		wait(g_simulator.onMachine(currentProcess));
 
-		state double delayDuration = deterministicRandom()->random01() * self->maxWriteDelay;
+		state double delayDuration =
+		    g_simulator.speedUpSimulation ? 0.0001 : (deterministicRandom()->random01() * self->maxWriteDelay);
 		state Future<bool> startSyncFuture = self->startSyncPromise.getFuture();
 
 		try {
