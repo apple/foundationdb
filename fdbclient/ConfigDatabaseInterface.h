@@ -79,11 +79,11 @@ struct ConfigDatabaseGetRequest {
 struct ConfigDatabaseCommitRequest {
 	static constexpr FileIdentifier file_identifier = 103841;
 	Version version;
-	VectorRef<MutationRef> mutations;
+	Standalone<VectorRef<MutationRef>> mutations;
 	ReplyPromise<Void> reply;
 
 	ConfigDatabaseCommitRequest() = default;
-	ConfigDatabaseCommitRequest(Version version, VectorRef<MutationRef> mutations)
+	ConfigDatabaseCommitRequest(Version version, Standalone<VectorRef<MutationRef>> mutations)
 	  : version(version), mutations(mutations) {}
 
 	template <class Ar>
@@ -98,7 +98,9 @@ struct ConfigDatabaseInterface {
 	struct RequestStream<ConfigDatabaseGetRequest> get;
 	struct RequestStream<ConfigDatabaseCommitRequest> commit;
 
-	ConfigDatabaseInterface() {
+	ConfigDatabaseInterface() = default;
+
+	void setupWellKnownEndpoints() {
 		getVersion.makeWellKnownEndpoint(WLTOKEN_CONFIGDB_GETVERSION, TaskPriority::Coordination);
 		get.makeWellKnownEndpoint(WLTOKEN_CONFIGDB_GET, TaskPriority::Coordination);
 		commit.makeWellKnownEndpoint(WLTOKEN_CONFIGDB_COMMIT, TaskPriority::Coordination);
@@ -106,7 +108,7 @@ struct ConfigDatabaseInterface {
 
 	ConfigDatabaseInterface(NetworkAddress const& remote)
 	  : getVersion(Endpoint({ remote }, WLTOKEN_CONFIGDB_GETVERSION)), get(Endpoint({ remote }, WLTOKEN_CONFIGDB_GET)),
-	    commit(Endpoint({ remote }, WLTOKEN_CONFIGDB_GET)) {}
+	    commit(Endpoint({ remote }, WLTOKEN_CONFIGDB_COMMIT)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

@@ -35,6 +35,7 @@ public:
 	virtual Future<Optional<Value>> get(KeyRef) = 0;
 	virtual Future<Void> commit() = 0;
 	virtual Future<Void> onError(Error const&) = 0;
+	virtual void reset() = 0;
 };
 
 class SimpleConfigurationTransaction : public IConfigurationTransaction {
@@ -48,4 +49,5 @@ public:
 	Future<Optional<Value>> get(KeyRef) override;
 	Future<Void> commit() override;
 	Future<Void> onError(Error const&) override;
+	void reset() override;
 };

@@ -26,8 +26,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class SimpleConfigurationTransactionImpl {
-	Arena arena;
-	VectorRef<MutationRef> mutations;
+	Standalone<VectorRef<MutationRef>> mutations;
 	Future<Version> version;
 	ConfigDatabaseInterface cdbi;
 
@@ -62,17 +61,24 @@ public:
 		cdbi = ConfigDatabaseInterface(coordinators[0]);
 	}
 
-	void set(KeyRef key, ValueRef value) { mutations.emplace_back(arena, MutationRef::Type::SetValue, key, value); }
+	void set(KeyRef key, ValueRef value) {
+		mutations.emplace_back_deep(mutations.arena(), MutationRef::Type::SetValue, key, value);
+	}
 
 	void clearRange(KeyRef begin, KeyRef end) {
-		mutations.emplace_back(arena, MutationRef::Type::ClearRange, begin, end);
+		mutations.emplace_back_deep(mutations.arena(), MutationRef::Type::ClearRange, begin, end);
 	}
 
 	Future<Optional<Value>> get(KeyRef key) { return get(this, key); }
 
 	Future<Void> commit() { return commit(this); }
 
-	Future<Void> onError(Error const& e) { return Void(); }
+	Future<Void> onError(Error const& e) { throw e; }
+
+	void reset() {
+		version.cancel();
+		mutations = Standalone<VectorRef<MutationRef>>{};
+	}
 };
 
 void SimpleConfigurationTransaction::set(KeyRef key, ValueRef value) {
@@ -93,6 +99,10 @@ Future<Void> SimpleConfigurationTransaction::commit() {
 
 Future<Void> SimpleConfigurationTransaction::onError(Error const& e) {
 	return impl->onError(e);
+}
+
+void SimpleConfigurationTransaction::reset() {
+	return impl->reset();
 }
 
 SimpleConfigurationTransaction::SimpleConfigurationTransaction(ClusterConnectionString const& ccs)

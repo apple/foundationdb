@@ -20,6 +20,7 @@
 
 #include "fdbclient/ConfigDatabaseInterface.h"
 #include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/IConfigDatabaseNode.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -618,6 +619,8 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder) {
 	state GenerationRegInterface myInterface(g_network);
 	state OnDemandStore store(dataFolder, myID);
 	state ConfigDatabaseInterface configDatabaseInterface;
+	configDatabaseInterface.setupWellKnownEndpoints();
+	state Reference<IConfigDatabaseNode> configDatabaseNode = makeReference<SimpleConfigDatabaseNode>(dataFolder);
 
 	TraceEvent("CoordinationServer", myID)
 	    .detail("MyInterfaceAddr", myInterface.read.getEndpoint().getPrimaryAddress())
@@ -625,7 +628,7 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder) {
 
 	try {
 		wait(localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store, myID) ||
-		     store.getError());
+		     store.getError() || configDatabaseNode->serve(configDatabaseInterface));
 		throw internal_error();
 	} catch (Error& e) {
 		TraceEvent("CoordinationServerError", myID).error(e, true);

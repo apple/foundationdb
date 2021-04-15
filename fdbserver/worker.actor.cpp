@@ -275,6 +275,7 @@ StringRef fileStoragePrefix = LiteralStringRef("storage-");
 StringRef fileLogDataPrefix = LiteralStringRef("log-");
 StringRef fileVersionedLogDataPrefix = LiteralStringRef("log2-");
 StringRef fileLogQueuePrefix = LiteralStringRef("logqueue-");
+StringRef globalConfPrefix = LiteralStringRef("globalconf-");
 StringRef tlogQueueExtension = LiteralStringRef("fdq");
 
 enum class FilesystemCheck {

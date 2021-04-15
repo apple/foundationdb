@@ -75,8 +75,11 @@ class SimpleConfigDatabaseNodeImpl {
 		for (; index < req.mutations.size(); ++index) {
 			const auto& mutation = req.mutations[index];
 			if (mutation.type == MutationRef::SetValue) {
+				self->config[mutation.param1.toString()] = mutation.param2.toString();
 				self->kvStore->set(KeyValueRef(mutation.param1, mutation.param2));
 			} else if (mutation.type == MutationRef::ClearRange) {
+				self->config.erase(self->config.find(mutation.param1.toString()),
+				                   self->config.find(mutation.param2.toString()));
 				self->kvStore->clear(KeyRangeRef(mutation.param1, mutation.param2));
 			} else {
 				ASSERT(false);
@@ -89,8 +92,9 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 	ACTOR static Future<Void> readKVStoreIntoMemory(SimpleConfigDatabaseNodeImpl* self) {
+		wait(self->kvStore->init());
 		state Optional<Value> onDiskVersion = wait(self->kvStore->readValue(versionKey));
-		if (onDiskVersion.present()) {
+		if (!onDiskVersion.present()) {
 			// Brand new database
 			self->currentVersion = 0;
 			BinaryWriter wr(IncludeVersion());
@@ -109,7 +113,6 @@ class SimpleConfigDatabaseNodeImpl {
 		return Void();
 	}
 
-public:
 	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigDatabaseInterface* cdbi) {
 		wait(readKVStoreIntoMemory(self));
 		loop {
@@ -129,14 +132,17 @@ public:
 	}
 
 public:
-	SimpleConfigDatabaseNodeImpl(std::string const& fileName)
-	  : kvStore(keyValueStoreSQLite(fileName, UID{}, KeyValueStoreType::SSD_BTREE_V2, true, true)) {}
+	SimpleConfigDatabaseNodeImpl(std::string const& dataFolder) {
+		platform::createDirectory(dataFolder);
+		kvStore =
+		    keyValueStoreMemory(joinPath(dataFolder, "globalconf-"), deterministicRandom()->randomUniqueID(), 500e6);
+	}
 
 	Future<Void> serve(ConfigDatabaseInterface& cdbi) { return serve(this, &cdbi); }
 };
 
-SimpleConfigDatabaseNode::SimpleConfigDatabaseNode(std::string const& fileName)
-  : impl(std::make_unique<SimpleConfigDatabaseNodeImpl>(fileName)) {}
+SimpleConfigDatabaseNode::SimpleConfigDatabaseNode(std::string const& dataFolder)
+  : impl(std::make_unique<SimpleConfigDatabaseNodeImpl>(dataFolder)) {}
 
 SimpleConfigDatabaseNode::~SimpleConfigDatabaseNode() = default;
 

@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/IConfigurationDatabase.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -25,10 +26,33 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 class ConfigurationDatabaseWorkload : public TestWorkload {
+	ACTOR static Future<Void> start(ConfigurationDatabaseWorkload* self, Database cx) {
+		state SimpleConfigurationTransaction tr(cx->getConnectionFile()->getConnectionString());
+		state Key k = LiteralStringRef("config/x");
+		state Key v = LiteralStringRef("x");
+		{
+			Optional<Value> currentValue = wait(tr.get(k));
+			ASSERT(!currentValue.present());
+		}
+		wait(delay(1));
+		{
+			tr.reset();
+			tr.set(k, v);
+			wait(tr.commit());
+		}
+		wait(delay(1));
+		{
+			tr.reset();
+			Optional<Value> currentValue = wait(tr.get(k));
+			ASSERT(currentValue.get() == v);
+		}
+		return Void();
+	}
+
 public:
 	ConfigurationDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 	Future<Void> setup(Database const& cx) override { return Void(); }
-	Future<Void> start(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override { return clientId ? Void() : start(this, cx); }
 	Future<bool> check(Database const& cx) override { return true; }
 	std::string description() const override { return "ConfigurationDatabase"; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}

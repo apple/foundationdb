@@ -21,11 +21,12 @@
 #pragma once
 
 #include "fdbclient/ConfigDatabaseInterface.h"
+#include "flow/FastRef.h"
 #include "flow/flow.h"
 
 #include <memory>
 
-class IConfigDatabaseNode {
+class IConfigDatabaseNode : public ReferenceCounted<IConfigDatabaseNode> {
 public:
 	virtual Future<Void> serve(ConfigDatabaseInterface&) = 0;
 };
@@ -34,7 +35,7 @@ class SimpleConfigDatabaseNode : public IConfigDatabaseNode {
 	std::unique_ptr<class SimpleConfigDatabaseNodeImpl> impl;
 
 public:
-	SimpleConfigDatabaseNode(std::string const& fileName);
+	SimpleConfigDatabaseNode(std::string const& dataFolder);
 	~SimpleConfigDatabaseNode();
 	Future<Void> serve(ConfigDatabaseInterface&) override;
 };
