@@ -105,7 +105,7 @@ enum {
 	// Backup constants
 	OPT_DESTCONTAINER,
 	OPT_SNAPSHOTINTERVAL,
-	OPT_INIT_SNAPSHOT_INTERVAL,
+	OPT_INITIAL_SNAPSHOT_INTERVAL,
 	OPT_ERRORLIMIT,
 	OPT_NOSTOPWHENDONE,
 	OPT_EXPIRE_BEFORE_VERSION,
@@ -233,7 +233,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_USE_PARTITIONED_LOG, "--partitioned_log_experimental", SO_NONE },
 	{ OPT_SNAPSHOTINTERVAL, "-s", SO_REQ_SEP },
 	{ OPT_SNAPSHOTINTERVAL, "--snapshot_interval", SO_REQ_SEP },
-	{ OPT_INIT_SNAPSHOT_INTERVAL, "--init_snapshot_interval", SO_REQ_SEP },
+	{ OPT_INITIAL_SNAPSHOT_INTERVAL, "--initial_snapshot_interval", SO_REQ_SEP },
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
@@ -3473,7 +3473,7 @@ int main(int argc, char* argv[]) {
 				modifyOptions.destURL = destinationContainer;
 				break;
 			case OPT_SNAPSHOTINTERVAL:
-			case OPT_INIT_SNAPSHOT_INTERVAL:
+			case OPT_INITIAL_SNAPSHOT_INTERVAL:
 			case OPT_MOD_ACTIVE_INTERVAL: {
 				const char* a = args->OptionArg();
 				int seconds;
@@ -3485,7 +3485,7 @@ int main(int argc, char* argv[]) {
 				if (optId == OPT_SNAPSHOTINTERVAL) {
 					snapshotIntervalSeconds = seconds;
 					modifyOptions.snapshotIntervalSeconds = seconds;
-				} else if (optId == OPT_INIT_SNAPSHOT_INTERVAL) {
+				} else if (optId == OPT_INITIAL_SNAPSHOT_INTERVAL) {
 					initialSnapshotIntervalSeconds = seconds;
 				} else if (optId == OPT_MOD_ACTIVE_INTERVAL) {
 					modifyOptions.activeSnapshotIntervalSeconds = seconds;

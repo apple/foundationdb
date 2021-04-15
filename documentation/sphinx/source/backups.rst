@@ -244,7 +244,7 @@ The ``start`` subcommand is used to start a backup.  If there is already a backu
 ``-s <DURATION>`` or ``--snapshot_interval <DURATION>``  
   Specifies the duration, in seconds, of the inconsistent snapshots written to the backup in continuous mode.  The default is 864000 which is 10 days.
 
-``--init_snapshot_interval <DURATION>``  
+``--initial_snapshot_interval <DURATION>``  
   Specifies the duration, in seconds, of the first inconsistent snapshot written to the backup.  The default is 0, which means as fast as possible.
 
 ``--partitioned_log_experimental``
