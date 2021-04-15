@@ -66,6 +66,7 @@ public:
 class IPagerSnapshot {
 public:
 	virtual Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID, bool cacheable, bool nohit) = 0;
+	virtual bool tryEvictPage(LogicalPageID id) = 0;
 	virtual Version getVersion() const = 0;
 
 	virtual Key getMetaKey() const = 0;

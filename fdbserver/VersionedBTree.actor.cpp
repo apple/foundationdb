@@ -1030,6 +1030,22 @@ public:
 		return nullptr;
 	}
 
+	// Try to evict the item at index from cache
+	// Returns true if item is evicted or was not present in cache
+	bool tryEvict(const IndexType& index) {
+		auto i = cache.find(index);
+		if (i == cache.end() || !i->second.item.evictable()) {
+			return false;
+		}
+		Entry& toEvict = i->second;
+		if (toEvict.hits == 0) {
+			++g_redwoodMetrics.pagerEvictUnhit;
+		}
+		evictionOrder.erase(evictionOrder.iterator_to(toEvict));
+		cache.erase(toEvict.index);
+		return true;
+	}
+
 	// Get the object for i or create a new one.
 	// After a get(), the object for i is the last in evictionOrder.
 	// If noHit is set, do not consider this access to be cache hit if the object is present
@@ -1690,6 +1706,11 @@ public:
 		return readPhysicalPage(self, pageID, true);
 	}
 
+	bool tryEvictPage(LogicalPageID logicalID, Version v) {
+		PhysicalPageID physicalID = getPhysicalPageID(logicalID, v);
+		return pageCache.tryEvict(physicalID);
+	}
+
 	// Reads the most recent version of pageID, either previously committed or written using updatePage() in the current
 	// commit
 	Future<Reference<IPage>> readPage(LogicalPageID pageID, bool cacheable, bool noHit = false) override {
@@ -1725,14 +1746,14 @@ public:
 		return cacheEntry.readFuture;
 	}
 
-	Future<Reference<IPage>> readPageAtVersion(LogicalPageID pageID, Version v, bool cacheable, bool noHit) {
+	PhysicalPageID getPhysicalPageID(LogicalPageID pageID, Version v) {
 		auto i = remappedPages.find(pageID);
 
 		if (i != remappedPages.end()) {
 			auto j = i->second.upper_bound(v);
 			if (j != i->second.begin()) {
 				--j;
-				debug_printf("DWALPager(%s) op=readAtVersionRemapped %s @%" PRId64 " -> %s\n",
+				debug_printf("DWALPager(%s) op=lookupRemapped %s @%" PRId64 " -> %s\n",
 				             filename.c_str(),
 				             toString(pageID).c_str(),
 				             v,
@@ -1741,13 +1762,18 @@ public:
 				ASSERT(pageID != invalidLogicalPageID);
 			}
 		} else {
-			debug_printf("DWALPager(%s) op=readAtVersionNotRemapped %s @%" PRId64 " (not remapped)\n",
+			debug_printf("DWALPager(%s) op=lookupNotRemapped %s @%" PRId64 " (not remapped)\n",
 			             filename.c_str(),
 			             toString(pageID).c_str(),
 			             v);
 		}
 
-		return readPage(pageID, cacheable, noHit);
+		return (PhysicalPageID)pageID;
+	}
+
+	Future<Reference<IPage>> readPageAtVersion(LogicalPageID logicalID, Version v, bool cacheable, bool noHit) {
+		PhysicalPageID physicalID = getPhysicalPageID(logicalID, v);
+		return readPage(physicalID, cacheable, noHit);
 	}
 
 	// Get snapshot as of the most recent committed version of the pager
@@ -2281,8 +2307,10 @@ public:
 			throw expired.getError();
 		}
 		return map(pager->readPageAtVersion(pageID, version, cacheable, noHit),
-		           [=](Reference<IPage> p) { return Reference<const IPage>(p); });
+		           [=](Reference<IPage> p) { return Reference<const IPage>(std::move(p)); });
 	}
+
+	bool tryEvictPage(LogicalPageID id) override { return pager->tryEvictPage(id, version); }
 
 	Key getMetaKey() const override { return metaKey; }
 
@@ -4153,6 +4181,17 @@ private:
 		int m_size;
 	};
 
+	// Try to evict a BTree page from the pager cache.
+	// Returns true if, at the end of the call, the page is no longer in cache,
+	// so the caller can assume its IPage reference is the only one.
+	bool tryEvictPage(IPagerSnapshot* pager, BTreePageIDRef id) {
+		// If it's an oversized page, currently it cannot be in the cache
+		if (id.size() > 0) {
+			return true;
+		}
+		return pager->tryEvictPage(id.front());
+	}
+
 	ACTOR static Future<Reference<const IPage>> readPage(Reference<IPagerSnapshot> snapshot,
 	                                                     BTreePageIDRef id,
 	                                                     const RedwoodRecordRef* lowerBound,
@@ -4175,7 +4214,7 @@ private:
 
 		if (id.size() == 1) {
 			Reference<const IPage> p = wait(snapshot->getPhysicalPage(id.front(), !forLazyClear, false));
-			page = p;
+			page = std::move(p);
 		} else {
 			ASSERT(!id.empty());
 			std::vector<Future<Reference<const IPage>>> reads;
@@ -4208,7 +4247,7 @@ private:
 			             pTreePage->toString(false, id, snapshot->getVersion(), lowerBound, upperBound).c_str());
 		}
 
-		return page;
+		return std::move(page);
 	}
 
 	static void preLoadPage(IPagerSnapshot* snapshot, BTreePageIDRef id) {
@@ -5077,6 +5116,7 @@ private:
 			state bool detachChildren = (parentInfo->count > 2);
 			state bool forceUpdate = false;
 
+			// If no changes were made, but we should rewrite it to point directly to remapped child pages
 			if (!m.changesMade && detachChildren) {
 				debug_printf(
 				    "%s Internal page forced rewrite because at least %d children have been updated in-place.\n",
@@ -5107,7 +5147,7 @@ private:
 					if (m.updating) {
 						// Page was updated in place (or being forced to be updated in place to update child page ids)
 						debug_printf(
-						    "%s Internal page modified in-place tryUpdate=%d forceUpdate=%d detachChildren=%d\n",
+						    "%s Internal page modified in-place tryToUpdate=%d forceUpdate=%d detachChildren=%d\n",
 						    context.c_str(),
 						    tryToUpdate,
 						    forceUpdate,
