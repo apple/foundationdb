@@ -1036,8 +1036,10 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	  } },
 	{ "startIncompatibleProcess",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedStartIncompatibleProcess", value); } },
-	{ "storageEngineExcludeType",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedStorageEngineExcludeType", ""); } }
+	{ "storageEngineExcludeTypes",
+	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedStorageEngineExcludeTypes", ""); } },
+	{ "maxTLogVersion",
+	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedMaxTLogVersion", ""); } }
 };
 
 std::map<std::string, std::function<void(const std::string& value, TestSpec* spec)>> testSpecTestKeys = {
