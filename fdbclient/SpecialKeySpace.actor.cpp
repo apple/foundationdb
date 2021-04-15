@@ -71,7 +71,6 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_lineage/"), LiteralStringRef("\xff\xff/actor_lineage0")) }
 };
 
-// TODO: Similar for actor lineage?
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandToRange = {
 	{ "exclude",
 	  KeyRangeRef(LiteralStringRef("excluded/"), LiteralStringRef("excluded0"))
