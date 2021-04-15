@@ -4952,6 +4952,8 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 					if (!expectedVersion.present() || expectedVersion.get() != pv) {
 						return pv;
 					}
+
+					protocolVersion = Never();
 				}
 
 				// Older versions of FDB don't have an endpoint to return the protocol version, so we get this info from
