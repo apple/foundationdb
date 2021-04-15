@@ -364,7 +364,7 @@ extern "C" DLLEXPORT double fdb_database_get_main_thread_busyness(FDBDatabase* d
 	return DB(d)->getMainThreadBusyness();
 }
 
-// Returns the protocol version reported by a quorum of coordinators
+// Returns the protocol version reported by the coordinator this client is connected to
 // If an expected version is non-zero, the future won't return until the protocol version is different than expected
 extern "C" DLLEXPORT FDBFuture* fdb_database_get_server_protocol(FDBDatabase* db, uint64_t expected_version) {
 	Optional<ProtocolVersion> expected;

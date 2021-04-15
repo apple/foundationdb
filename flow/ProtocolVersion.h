@@ -20,6 +20,7 @@
 
 #pragma once
 #include <cstdint>
+#include "flow/Trace.h"
 
 #define PROTOCOL_VERSION_FEATURE(v, x)                                                                                 \
 	struct x {                                                                                                         \
@@ -50,6 +51,10 @@ public:
 		return (other.version() & compatibleProtocolVersionMask) == (version() & compatibleProtocolVersionMask);
 	}
 
+	// Returns a normalized protocol version that will be the same for all compatible versions
+	constexpr ProtocolVersion normalizedVersion() const {
+		return ProtocolVersion(_version & compatibleProtocolVersionMask);
+	}
 	constexpr bool isValid() const { return version() >= minValidProtocolVersion; }
 
 	constexpr uint64_t version() const { return _version & versionFlagMask; }
@@ -132,6 +137,13 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010000LL, StableInterfaces);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, TagThrottleValueReason);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, SpanContext);
+};
+
+template <>
+struct Traceable<ProtocolVersion> : std::true_type {
+	static std::string toString(const ProtocolVersion& protocolVersion) {
+		return format("0x%016lX", protocolVersion.version());
+	}
 };
 
 // These impact both communications and the deserialization of certain database and IKeyValueStore keys.

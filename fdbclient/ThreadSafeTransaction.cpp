@@ -97,13 +97,12 @@ double ThreadSafeDatabase::getMainThreadBusyness() {
 	return g_network->networkInfo.metrics.networkBusyness;
 }
 
-// Returns the protocol version reported by a quorum of coordinators
+// Returns the protocol version reported by the coordinator this client is connected to
 // If an expected version is given, the future won't return until the protocol version is different than expected
 ThreadFuture<ProtocolVersion> ThreadSafeDatabase::getServerProtocol(Optional<ProtocolVersion> expectedVersion) {
 	DatabaseContext* db = this->db;
-	return onMainThread([db, expectedVersion]() -> Future<ProtocolVersion> {
-		return getClusterProtocol(db->getConnectionFile(), expectedVersion);
-	});
+	return onMainThread(
+	    [db, expectedVersion]() -> Future<ProtocolVersion> { return db->getClusterProtocol(expectedVersion); });
 }
 
 ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {

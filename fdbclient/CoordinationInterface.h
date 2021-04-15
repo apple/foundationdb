@@ -35,6 +35,7 @@ constexpr UID WLTOKEN_CLIENTLEADERREG_OPENDATABASE(-1, 3);
 
 constexpr UID WLTOKEN_PROTOCOL_INFO(-1, 10);
 
+// The coordinator interface as exposed to clients
 struct ClientLeaderRegInterface {
 	RequestStream<struct GetLeaderRequest> getLeader;
 	RequestStream<struct OpenDatabaseCoordRequest> openDatabase;
@@ -42,6 +43,10 @@ struct ClientLeaderRegInterface {
 	ClientLeaderRegInterface() {}
 	ClientLeaderRegInterface(NetworkAddress remote);
 	ClientLeaderRegInterface(INetwork* local);
+
+	bool operator==(const ClientLeaderRegInterface& rhs) const {
+		return getLeader == rhs.getLeader && openDatabase == rhs.openDatabase;
+	}
 };
 
 class ClusterConnectionString {
