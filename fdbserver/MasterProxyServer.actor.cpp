@@ -1025,6 +1025,7 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 		++self->stats.commitBatchOut;
 		self->stats.txnCommitOut += trs.size();
 		self->stats.txnRejectedForQueuedTooLong += trs.size();
+		self->stats.txnConflicts += trs.size();
 		self->commitBatchesMemBytesCount -= currentBatchMemBytesCount;
 		return Void();
 	}

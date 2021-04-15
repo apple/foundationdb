@@ -393,7 +393,8 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 
 			state int64_t currentTeams =
 			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentServerTeams"));
-			state int64_t desiredTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredTeams"));
+			state int64_t desiredTeams =
+			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredTeams"));
 			state int64_t maxTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxTeams"));
 			state int64_t currentMachineTeams =
 			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentMachineTeams"));
