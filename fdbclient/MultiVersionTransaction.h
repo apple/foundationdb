@@ -28,6 +28,8 @@
 
 #include "flow/ThreadHelper.actor.h"
 
+// FdbCApi is used as a wrapper around the FoundationDB C API that gets loaded from an external client library.
+// All of the required functions loaded from that external library are stored in function pointers in this struct.
 struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	typedef struct future FDBFuture;
 	typedef struct cluster FDBCluster;
@@ -55,7 +57,6 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	// Network
 	fdb_error_t (*selectApiVersion)(int runtimeVersion, int headerVersion);
 	const char* (*getClientVersion)();
-	FDBFuture* (*getServerProtocol)(const char* clusterFilePath);
 	fdb_error_t (*setNetworkOption)(FDBNetworkOptions::Option option, uint8_t const* value, int valueLength);
 	fdb_error_t (*setupNetwork)();
 	fdb_error_t (*runNetwork)();
@@ -81,6 +82,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                     uint8_t const* snapshotCommmand,
 	                                     int snapshotCommandLength);
 	double (*databaseGetMainThreadBusyness)(FDBDatabase* database);
+	FDBFuture* (*databaseGetServerProtocol)(FDBDatabase* database, uint64_t expectedVersion);
 
 	// Transaction
 	fdb_error_t (*transactionSetOption)(FDBTransaction* tr,
@@ -185,6 +187,8 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*futureGetCluster)(FDBFuture* f, FDBCluster** outCluster);
 };
 
+// An implementation of ITransaction that wraps a transaction object created on an externally loaded client library.
+// All API calls to that transaction are routed through the external library.
 class DLTransaction : public ITransaction, ThreadSafeReferenceCounted<DLTransaction> {
 public:
 	DLTransaction(Reference<FdbCApi> api, FdbCApi::FDBTransaction* tr) : api(api), tr(tr) {}
@@ -249,6 +253,8 @@ private:
 	FdbCApi::FDBTransaction* const tr;
 };
 
+// An implementation of IDatabase that wraps a database object created on an externally loaded client library.
+// All API calls to that database are routed through the external library.
 class DLDatabase : public IDatabase, ThreadSafeReferenceCounted<DLDatabase> {
 public:
 	DLDatabase(Reference<FdbCApi> api, FdbCApi::FDBDatabase* db) : api(api), db(db), ready(Void()) {}
@@ -265,6 +271,11 @@ public:
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	double getMainThreadBusyness() override;
 
+	// Returns the protocol version reported by a quorum of coordinators
+	// If an expected version is given, the future won't return until the protocol version is different than expected
+	ThreadFuture<ProtocolVersion> getServerProtocol(
+	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) override;
+
 	void addref() override { ThreadSafeReferenceCounted<DLDatabase>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLDatabase>::delref(); }
 
@@ -279,13 +290,14 @@ private:
 	ThreadFuture<Void> ready;
 };
 
+// An implementation of IClientApi that re-issues API calls to the C API of an externally loaded client library.
+// The DL prefix stands for "dynamic library".
 class DLApi : public IClientApi {
 public:
 	DLApi(std::string fdbCPath, bool unlinkOnLoad = false);
 
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
-	ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath) override;
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	void setupNetwork() override;
@@ -312,6 +324,9 @@ private:
 
 class MultiVersionDatabase;
 
+// An implementation of ITransaction that wraps a transaction created either locally or through a dynamically loaded
+// external client. When needed (e.g on cluster version change), the MultiVersionTransaction can automatically replace
+// its wrapped transaction with one from another client.
 class MultiVersionTransaction : public ITransaction, ThreadSafeReferenceCounted<MultiVersionTransaction> {
 public:
 	MultiVersionTransaction(Reference<MultiVersionDatabase> db,
@@ -413,6 +428,9 @@ struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
 
 class MultiVersionApi;
 
+// An implementation of IDatabase that wraps a database created either locally or through a dynamically loaded
+// external client. The MultiVersionDatabase monitors the protocol version of the cluster and automatically
+// replaces the wrapped database when the protocol version changes.
 class MultiVersionDatabase final : public IDatabase, ThreadSafeReferenceCounted<MultiVersionDatabase> {
 public:
 	MultiVersionDatabase(MultiVersionApi* api,
@@ -425,6 +443,11 @@ public:
 	Reference<ITransaction> createTransaction() override;
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	double getMainThreadBusyness() override;
+
+	// Returns the protocol version reported by a quorum of coordinators
+	// If an expected version is given, the future won't return until the protocol version is different than expected
+	ThreadFuture<ProtocolVersion> getServerProtocol(
+	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) override;
 
 	void addref() override { ThreadSafeReferenceCounted<MultiVersionDatabase>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<MultiVersionDatabase>::delref(); }
@@ -487,15 +510,19 @@ private:
 		Mutex optionLock;
 	};
 
+	std::string clusterFilePath;
 	const Reference<DatabaseState> dbState;
 	friend class MultiVersionTransaction;
 };
 
+// An implementation of IClientApi that can choose between multiple different client implementations either provided
+// locally within the primary loaded fdb_c client or through any number of dynamically loaded clients.
+//
+// This functionality is used to provide support for multiple protocol versions simultaneously.
 class MultiVersionApi : public IClientApi {
 public:
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
-	ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath) override;
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	void setupNetwork() override;
