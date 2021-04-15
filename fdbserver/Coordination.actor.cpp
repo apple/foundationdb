@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ConfigDatabaseInterface.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
@@ -616,6 +617,7 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder) {
 	state LeaderElectionRegInterface myLeaderInterface(g_network);
 	state GenerationRegInterface myInterface(g_network);
 	state OnDemandStore store(dataFolder, myID);
+	state ConfigDatabaseInterface configDatabaseInterface;
 
 	TraceEvent("CoordinationServer", myID)
 	    .detail("MyInterfaceAddr", myInterface.read.getEndpoint().getPrimaryAddress())

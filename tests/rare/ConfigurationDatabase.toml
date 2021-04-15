@@ -1,0 +1,5 @@
+[[test]]
+testTitle='ConfigurationDatabase'
+
+    [[test.workload]]
+    testName='ConfigurationDatabase'

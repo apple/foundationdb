@@ -23,6 +23,7 @@ set(FDBSERVER_SRCS
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
   GrvProxyServer.actor.cpp
+  IConfigDatabaseNode.h
   IDiskQueue.h
   IKeyValueContainer.h
   IKeyValueStore.h
@@ -87,6 +88,7 @@ set(FDBSERVER_SRCS
   ResolverInterface.h
   ServerDBInfo.actor.h
   ServerDBInfo.h
+  SimpleConfigDatabaseNode.actor.cpp
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
   SkipList.cpp
@@ -136,6 +138,7 @@ set(FDBSERVER_SRCS
   workloads/Cache.actor.cpp
   workloads/ChangeConfig.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
+  workloads/ConfigurationDatabase.actor.cpp
   workloads/TriggerRecovery.actor.cpp
   workloads/SuspendProcesses.actor.cpp
   workloads/CommitBugCheck.actor.cpp

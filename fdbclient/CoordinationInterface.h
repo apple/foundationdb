@@ -35,6 +35,10 @@ constexpr UID WLTOKEN_CLIENTLEADERREG_OPENDATABASE(-1, 3);
 
 constexpr UID WLTOKEN_PROTOCOL_INFO(-1, 10);
 
+constexpr UID WLTOKEN_CONFIGDB_GETVERSION(-1, 11);
+constexpr UID WLTOKEN_CONFIGDB_GET(-1, 12);
+constexpr UID WLTOKEN_CONFIGDB_COMMIT(-1, 13);
+
 struct ClientLeaderRegInterface {
 	RequestStream<struct GetLeaderRequest> getLeader;
 	RequestStream<struct OpenDatabaseCoordRequest> openDatabase;
