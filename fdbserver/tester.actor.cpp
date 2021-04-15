@@ -1057,8 +1057,10 @@ vector<TestSpec> readTests(ifstream& ifs) {
 			}
 			// else { } It is enable by default for tester
 			TraceEvent("TestParserTest").detail("ClientInfoLogging", value);
-		} else if (attrib == "storageEngineExcludeType") {
-			TraceEvent("TestParserTest").detail("ParsedStorageEngineExcludeType", "");
+		} else if (attrib == "storageEngineExcludeTypes") {
+			TraceEvent("TestParserTest").detail("ParsedStorageEngineExcludeTypes", "");
+		} else if (attrib == "maxTLogVersion") {
+			TraceEvent("TestParserTest").detail("ParsedMaxTLogVersion", "");
 		} else {
 			if (attrib == "testName") {
 				if (workloadOptions.size()) {

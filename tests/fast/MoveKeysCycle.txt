@@ -19,4 +19,5 @@ testTitle=MoveKeysCycle
     reboot=true
     testDuration=10.0
 
-storageEngineExcludeType=-1
+storageEngineExcludeTypes=-1,-2
+maxTLogVersion=5
