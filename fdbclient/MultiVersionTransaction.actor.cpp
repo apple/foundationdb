@@ -894,22 +894,23 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 
 		if (itr != clients.end()) {
 			auto& client = itr->second;
-			TraceEvent("CreatingDatabaseOnExternalClient")
+			TraceEvent("CreatingDatabaseOnClient")
 			    .detail("LibraryPath", client->libPath)
-			    .detail("Failed", client->failed);
+			    .detail("Failed", client->failed)
+			    .detail("External", client->external);
 
 			Reference<IDatabase> newDb = client->api->createDatabase(clusterFilePath.c_str());
 
 			optionLock.enter();
 			for (auto option : options) {
 				try {
-					newDb->setOption(
-					    option.first,
-					    option.second.castTo<StringRef>()); // In practice, this will set a deferred error instead
-					                                        // of throwing. If that happens, the database will be
-					                                        // unusable (attempts to use it will throw errors).
+					// In practice, this will set a deferred error instead of throwing. If that happens, the database
+					// will be unusable (attempts to use it will throw errors).
+					newDb->setOption(option.first, option.second.castTo<StringRef>());
 				} catch (Error& e) {
 					optionLock.leave();
+
+					// If we can't set all of the options on a cluster, we abandon the client
 					TraceEvent(SevError, "ClusterVersionChangeOptionError")
 					    .error(e)
 					    .detail("Option", option.first)
@@ -917,8 +918,7 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 					    .detail("LibPath", client->libPath);
 					client->failed = true;
 					MultiVersionApi::api->updateSupportedVersions();
-					db = Reference<IDatabase>(); // If we can't set all of the options on a cluster, we abandon the
-					                             // client
+					newDb = Reference<IDatabase>();
 					break;
 				}
 			}
