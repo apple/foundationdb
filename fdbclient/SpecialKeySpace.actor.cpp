@@ -22,6 +22,7 @@
 #include "boost/algorithm/string.hpp"
 
 #include "fdbclient/Knobs.h"
+#include "fdbclient/ProcessInterface.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "flow/Arena.h"
 #include "flow/UnitTest.h"
@@ -65,7 +66,9 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	{ SpecialKeySpace::MODULE::CONFIGURATION,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/configuration/"), LiteralStringRef("\xff\xff/configuration0")) },
 	{ SpecialKeySpace::MODULE::TRACING,
-	  KeyRangeRef(LiteralStringRef("\xff\xff/tracing/"), LiteralStringRef("\xff\xff/tracing0")) }
+	  KeyRangeRef(LiteralStringRef("\xff\xff/tracing/"), LiteralStringRef("\xff\xff/tracing0")) },
+	{ SpecialKeySpace::MODULE::ACTORLINEAGE,
+	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_lineage/"), LiteralStringRef("\xff\xff/actor_lineage0")) }
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandToRange = {
@@ -1793,4 +1796,35 @@ void ClientProfilingImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& ke
 	    ryw,
 	    "profile",
 	    "Clear operation is forbidden for profile client. You can set it to default to disable profiling.");
+}
+
+ActorLineageImpl::ActorLineageImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
+
+ACTOR static Future<Standalone<RangeResultRef>> actorLineageGetRangeActor(ReadYourWritesTransaction* ryw,
+                                                                          KeyRef prefix,
+                                                                          KeyRangeRef kr) {
+	state Standalone<RangeResultRef> result;
+	Standalone<StringRef> addressString = kr.begin.removePrefix(prefix);
+
+	try {
+		auto address = NetworkAddress::parse(addressString.contents().toString());
+
+		state ProcessInterface process;
+		process.getInterface = RequestStream<GetProcessInterfaceRequest>(Endpoint({ address }, WLTOKEN_PROCESS));
+		ProcessInterface p = wait(retryBrokenPromise(process.getInterface, GetProcessInterfaceRequest{}));
+		process = p;
+
+		EchoRequest echoRequest;
+		echoRequest.message = "Hello";
+		std::string response = wait(process.echo.getReply(echoRequest));
+		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, response));
+	} catch (Error& e) {
+		TraceEvent(SevDebug, "SpecialKeysNetworkParseError").error(e);
+	}
+
+	return result;
+}
+
+Future<Standalone<RangeResultRef>> ActorLineageImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+	return actorLineageGetRangeActor(ryw, getKeyRange().begin, kr);
 }

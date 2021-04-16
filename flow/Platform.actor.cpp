@@ -3683,28 +3683,12 @@ void* sampleThread(void* arg) {
 
 		// Get actor lineage of currently running actor.
 		auto actorLineage = currentLineageThreadSafe.get();
-		printf("Currently running actor lineage (%p):\n", actorLineage.getPtr());
-		auto stack = actorLineage->stack(&StackLineage::actorName);
-		while (!stack.empty()) {
-			printf("%s ", stack.back());
-			stack.pop_back();
-		}
-		printf("\n");
+		// TODO: Use actorLineage
 
 		for (const auto& [waitState, lineageFn] : samples) {
 			auto alps = lineageFn();
 
 			// TODO: Serialize collected actor linage properties
-
-			printf("Wait State #%d ALPs (%d):\n", waitState, alps.size());
-			for (auto actorLineage : alps) {
-				auto stack = actorLineage->stack(&StackLineage::actorName);
-				while (!stack.empty()) {
-					printf("%s ", stack.back());
-					stack.pop_back();
-				}
-				printf("\n");
-			}
 		}
 	}
 
