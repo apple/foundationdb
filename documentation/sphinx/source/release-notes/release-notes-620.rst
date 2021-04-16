@@ -8,6 +8,11 @@ Release Notes
 * Fix backup agent stall when writing to local filesystem with slow metadata operations. `(PR #4428) <https://github.com/apple/foundationdb/pull/4428>`_
 * Backup agent no longer uses 4k block caching layer on local output files so that write operations are larger. `(PR #4428) <https://github.com/apple/foundationdb/pull/4428>`_
 * Fix accounting error that could cause commits to incorrectly fail with ``proxy_memory_limit_exceeded``. `(PR #4529) <https://github.com/apple/foundationdb/pull/4529>`_
+* Added support for downgrades from FDB version 6.3. `(PR #4673) <https://github.com/apple/foundationdb/pull/4673>`_
+* Restrictions added for 6.3 clusters to maintain compatibility with a 6.2 downgrade. `(PR #4469) <https://github.com/apple/foundationdb/pull/4469>`_
+   * Downgrades from 6.3 cannot have ``TLogVersion`` greater than V4 (6.2).
+   * Downgrades from 6.3 cannot use storage engine types that are not ``ssd-1``, ``ssd-2``, or ``memory``.
+   * Downgrades from 6.3 must not have any key servers serialized with tag encoding. ``TAG_ENCODE_KEY_SERVERS`` must not be set to true at any point in time.
 
 6.2.32
 ======
