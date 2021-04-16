@@ -36,9 +36,14 @@ public:
 
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 
-	ThreadFuture<Void>
-	onConnected(); // Returns after a majority of coordination servers are available and have reported a leader. The
-	               // cluster file therefore is valid, but the database might be unavailable.
+	// Returns after a majority of coordination servers are available and have reported a leader. The
+	// cluster file therefore is valid, but the database might be unavailable.
+	ThreadFuture<Void> onConnected();
+
+	// Returns the protocol version reported by the coordinator this client is connected to
+	// If an expected version is given, the future won't return until the protocol version is different than expected
+	ThreadFuture<ProtocolVersion> getServerProtocol(
+	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) override;
 
 	void addref() { ThreadSafeReferenceCounted<ThreadSafeDatabase>::addref(); }
 	void delref() { ThreadSafeReferenceCounted<ThreadSafeDatabase>::delref(); }
