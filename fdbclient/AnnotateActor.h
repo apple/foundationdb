@@ -23,6 +23,8 @@
 #include "flow/flow.h"
 #include "flow/network.h"
 
+#include <string_view>
+
 // Used to manually instrument waiting actors to collect samples for the
 // sampling profiler.
 struct AnnotateActor {
@@ -51,7 +53,7 @@ struct AnnotateActor {
 
 		return *this;
 	}
-	
+
 	~AnnotateActor() {
 		if (set) {
 			g_network->getActorLineageSet().erase(index);
@@ -59,6 +61,20 @@ struct AnnotateActor {
 	}
 };
 
-enum WaitState { Disk, Network };
+enum class WaitState { Disk, Network, Running };
+// usually we shouldn't use `using namespace` in a header file, but literals should be safe as user defined literals
+// need to be prefixed with `_`
+using namespace std::literals;
+
+constexpr std::string_view to_string(WaitState st) {
+	switch (st) {
+	case WaitState::Disk:
+		return "Disk"sv;
+	case WaitState::Network:
+		return "Network"sv;
+	case WaitState::Running:
+		return "Running"sv;
+	}
+}
 
 extern std::map<WaitState, std::function<std::vector<Reference<ActorLineage>>()>> samples;

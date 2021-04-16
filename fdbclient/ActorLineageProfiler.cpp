@@ -18,22 +18,15 @@
  * limitations under the License.
  */
 
+#include "flow/flow.h"
 #include "flow/singleton.h"
+#include "fdbrpc/IAsyncFile.h"
 #include "fdbclient/ActorLineageProfiler.h"
 #include <msgpack.hpp>
 #include <memory>
 #include <boost/endian/conversion.hpp>
 
 using namespace std::literals;
-
-std::string_view to_string(WaitState w) {
-	switch (w) {
-	case WaitState::Running:
-		return "Running";
-	case WaitState::DiskIO:
-		return "DiskIO";
-	}
-}
 
 class Packer : public msgpack::packer<msgpack::sbuffer> {
 	struct visitor_t {
@@ -200,4 +193,87 @@ std::shared_ptr<Sample> SampleCollectorT::collect() {
 	}
 	packer.pack(res);
 	return packer.done(time);
+}
+
+void SampleCollection_t::refresh() {
+	auto sample = _collector->collect();
+	auto min = sample->time - windowSize;
+	double oldest = 0.0;
+	while (oldest < min && !data.empty()) {
+		// we remove at most 10 elements at a time. This is so we don't block the main thread for too long.
+		{
+			Lock _{ mutex };
+			int i = 0;
+			do {
+				oldest = data.front()->time;
+				data.pop_front();
+				++i;
+			} while (i < 10 && oldest < min && !data.empty());
+		}
+	}
+	{
+		Lock _{ mutex };
+		data.push_back(sample);
+	}
+}
+
+std::vector<std::shared_ptr<Sample>> SampleCollection_t::get(double from /*= 0.0*/,
+                                                             double to /*= std::numeric_limits<double>::max()*/) const {
+	Lock _{ mutex };
+	std::vector<std::shared_ptr<Sample>> res;
+	for (const auto& sample : data) {
+		if (sample->time > to) {
+			break;
+		} else if (sample->time > from) {
+			res.emplace_back(sample);
+		}
+	}
+	return res;
+}
+
+ActorLineageProfilerT::ActorLineageProfilerT() {
+	collection->collector()->addGetter(WaitState::Network,
+	                                   std::bind(&ActorLineageSet::copy, std::ref(g_network->getActorLineageSet())));
+	collection->collector()->addGetter(
+	    WaitState::Disk,
+	    std::bind(&ActorLineageSet::copy, std::ref(IAsyncFileSystem::filesystem()->getActorLineageSet())));
+	collection->collector()->addGetter(WaitState::Running, []() {
+		auto res = currentLineageThreadSafe.get();
+		return std::vector<Reference<ActorLineage>>({ currentLineageThreadSafe.get() });
+	});
+}
+
+ActorLineageProfilerT::~ActorLineageProfilerT() {
+	stop();
+}
+
+void ActorLineageProfilerT::stop() {
+	setFrequency(0);
+}
+
+void ActorLineageProfilerT::setFrequency(unsigned frequency) {
+	bool change = this->frequency != frequency;
+	this->frequency = frequency;
+	if (frequency != 0 && !profilerThread.joinable()) {
+		profilerThread = std::thread(std::bind(&ActorLineageProfilerT::profile, this));
+	} else if (change) {
+		cond.notify_all();
+	}
+}
+
+void ActorLineageProfilerT::profile() {
+	for (;;) {
+		collection->refresh();
+		if (frequency == 0) {
+			return;
+		}
+		{
+			std::unique_lock<std::mutex> lock{ mutex };
+			cond.wait_for(lock, std::chrono::microseconds(1000000 / frequency));
+			// cond.wait_until(lock, lastSample + std::chrono::milliseconds)
+		}
+		if (frequency == 0) {
+			return;
+		}
+	}
 }
