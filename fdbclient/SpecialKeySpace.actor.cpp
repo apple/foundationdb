@@ -1430,7 +1430,7 @@ ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* gl
 		}
 	}
 
-	VersionHistory vh;
+	VersionHistory vh{ 0 };
 
 	// Transform writes from the special-key-space (\xff\xff/global_config/) to
 	// the system key space (\xff/globalConfig/), and writes mutations to
