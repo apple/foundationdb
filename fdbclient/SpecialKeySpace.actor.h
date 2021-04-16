@@ -142,6 +142,7 @@ public:
 class SpecialKeySpace {
 public:
 	enum class MODULE {
+		ACTORLINEAGE, // Sampling data
 		CLUSTERFILEPATH,
 		CONFIGURATION, // Configuration of the cluster
 		CONNECTIONSTRING,
@@ -375,6 +376,12 @@ public:
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+};
+
+class ActorLineageImpl : public SpecialKeyRangeReadImpl {
+public:
+	explicit ActorLineageImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 };
 
 #include "flow/unactorcompiler.h"

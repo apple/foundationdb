@@ -22,6 +22,7 @@
 #include <boost/lexical_cast.hpp>
 
 #include "fdbrpc/Locality.h"
+#include "fdbclient/ProcessInterface.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
@@ -2032,6 +2033,19 @@ ACTOR Future<Void> serveProtocolInfo() {
 	}
 }
 
+ACTOR Future<Void> serveProcess() {
+	state ProcessInterface process;
+	process.getInterface.makeWellKnownEndpoint(WLTOKEN_PROCESS, TaskPriority::DefaultEndpoint);
+	loop {
+		choose {
+			when(GetProcessInterfaceRequest req = waitNext(process.getInterface.getFuture())) {
+				req.reply.send(process);
+			}
+			when(EchoRequest req = waitNext(process.echo.getFuture())) { req.reply.send(req.message); }
+		}
+	}
+}
+
 ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
                         LocalityData localities,
                         ProcessClass processClass,
@@ -2048,6 +2062,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 	currentLineage->modify(&RoleLineage::role) = ProcessClass::Worker;
 
 	actors.push_back(serveProtocolInfo());
+	actors.push_back(serveProcess());
 
 	try {
 		ServerCoordinators coordinators(connFile);
