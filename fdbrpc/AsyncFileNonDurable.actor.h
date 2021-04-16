@@ -197,7 +197,7 @@ private:
 		this->file = file;
 		this->filename = filename;
 		this->diskParameters = diskParameters;
-		maxWriteDelay = deterministicRandom()->random01() * FLOW_KNOBS->NON_DURABLE_MAX_WRITE_DELAY;
+		maxWriteDelay = FLOW_KNOBS->NON_DURABLE_MAX_WRITE_DELAY;
 		hasBeenSynced = false;
 
 		killMode = (KillMode)deterministicRandom()->randomInt(1, 3);
