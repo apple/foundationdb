@@ -15,7 +15,8 @@ Features
 Performance
 -----------
 
-* Increased performance of dr_agent when copying the mutation log. The ``COPY_LOG_BLOCK_SIZE``, ``COPY_LOG_BLOCKS_PER_TASK``, ``COPY_LOG_PREFETCH_BLOCKS``, ``COPY_LOG_READ_AHEAD_BYTES`` and ``COPY_LOG_TASK_DURATION_NANOS`` knobs can be set. `(PR 3436) <https://github.com/apple/foundationdb/pull/3436>`_
+* Increased performance of dr_agent when copying the mutation log. The ``COPY_LOG_BLOCK_SIZE``, ``COPY_LOG_BLOCKS_PER_TASK``, ``COPY_LOG_PREFETCH_BLOCKS``, ``COPY_LOG_READ_AHEAD_BYTES`` and ``COPY_LOG_TASK_DURATION_NANOS`` knobs can be set. `(PR #3436) <https://github.com/apple/foundationdb/pull/3436>`_
+* Reduced the number of connections required by the multi-version client when loading external clients. When connection to 7.0 clusters, only one connection will be used. With older clusters, at most two connections will be used. `(PR #4667) <https://github.com/apple/foundationdb/pull/4667>`_
 
 Reliability
 -----------
