@@ -301,6 +301,7 @@ void DLDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef
 ThreadFuture<ProtocolVersion> DLDatabase::getServerProtocol(Optional<ProtocolVersion> expectedVersion) {
 	// Version 6.3 doesn't support getting the server protocol from an external client
 	ASSERT(false);
+	throw internal_error();
 }
 
 // DLApi
