@@ -770,6 +770,9 @@ ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId,
 	}
 }
 
+// Recovers transaction state store (TSS) and then sets critical metadata such
+// as recoveryTransactionVersion, database configuration, storage tags, and
+// localities.
 ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
                                               Reference<ILogSystem> oldLogSystem,
                                               Version txsPoppedVersion) {
@@ -1009,6 +1012,10 @@ void updateConfigForForcedRecovery(Reference<MasterData> self,
 	initialConfChanges->push_back(regionCommit);
 }
 
+// Recovers transaction system states from old log system and then waits for
+// either 1) successful recruitment; or 2) if recovery stalls for >1s, a
+// provisional master receives an "emergency transaction" from fdbcli for a new
+// recruitment with different database configurations.
 ACTOR Future<Void> recoverFrom(Reference<MasterData> self,
                                Reference<ILogSystem> oldLogSystem,
                                vector<StorageServerInterface>* seedServers,
