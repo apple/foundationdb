@@ -37,13 +37,13 @@ RUN sed -i -e '/enabled/d' /etc/yum.repos.d/CentOS-Base.repo && \
         lz4-devel \
         lz4-static \
         mono-devel \
-        rh-python36 \
-        rh-python36-python-devel \
-        rh-ruby24 \
         rpm-build \
         tcl-devel \
         unzip \
-        wget && \
+        wget \
+        rh-python36 \
+        rh-python36-python-devel \
+        rh-ruby24 && \
     yum clean all && \
     rm -rf /var/cache/yum
 
@@ -215,6 +215,14 @@ RUN source /opt/rh/devtoolset-8/enable && \
     cmake --build . --target install && \
     cd .. && \
     rm -rf /tmp/*
+
+# download old fdbserver binaries
+ARG FDB_VERSION="6.2.29"
+RUN mkdir -p /opt/foundationdb/old && \
+    curl -Ls https://www.foundationdb.org/downloads/misc/fdbservers-${FDB_VERSION}.tar.gz | \
+        tar --no-same-owner --directory /opt/foundationdb/old -xz && \
+    chmod +x /opt/foundationdb/old/* && \
+    ln -sf /opt/foundationdb/old/fdbserver-${FDB_VERSION} /opt/foundationdb/old/fdbserver
 
 # build/install distcc
 RUN source /opt/rh/devtoolset-8/enable && \

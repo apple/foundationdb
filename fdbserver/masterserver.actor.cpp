@@ -1110,7 +1110,6 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 		req.reply.send(itr->second);
 	} else if (req.requestNum <= proxyItr->second.latestRequestNum.get()) {
 		TEST(true); // Old request for previously acknowledged sequence - may be impossible with current FlowTransport
-		            // implementation
 		ASSERT(req.requestNum <
 		       proxyItr->second.latestRequestNum.get()); // The latest request can never be acknowledged
 		req.reply.send(Never());
@@ -1133,8 +1132,9 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 			                                        SERVER_KNOBS->VERSIONS_PER_SECOND * (t1 - self->lastVersionTime)));
 
 			TEST(self->version - rep.prevVersion == 1); // Minimum possible version gap
-			TEST(self->version - rep.prevVersion ==
-			     SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS); // Maximum possible version gap
+
+			bool maxVersionGap = self->version - rep.prevVersion == SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
+			TEST(maxVersionGap); // Maximum possible version gap
 			self->lastVersionTime = t1;
 
 			if (self->resolverNeedingChanges.count(req.requestingProxy)) {
@@ -1406,22 +1406,26 @@ ACTOR Future<Void> rejoinRequestHandler(Reference<MasterData> self) {
 	}
 }
 
+// Keeps the coordinated state (cstate) updated as the set of recruited tlogs change through recovery.
 ACTOR Future<Void> trackTlogRecovery(Reference<MasterData> self,
                                      Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems,
                                      Future<Void> minRecoveryDuration) {
 	state Future<Void> rejoinRequests = Never();
 	state DBRecoveryCount recoverCount = self->cstate.myDBState.recoveryCount + 1;
+	state DatabaseConfiguration configuration =
+	    self->configuration; // self-configuration can be changed by configurationMonitor so we need a copy
 	loop {
 		state DBCoreState newState;
 		self->logSystem->toCoreState(newState);
 		newState.recoveryCount = recoverCount;
 		state Future<Void> changed = self->logSystem->onCoreStateChanged();
-		ASSERT(newState.tLogs[0].tLogWriteAntiQuorum == self->configuration.tLogWriteAntiQuorum &&
-		       newState.tLogs[0].tLogReplicationFactor == self->configuration.tLogReplicationFactor);
+
+		ASSERT(newState.tLogs[0].tLogWriteAntiQuorum == configuration.tLogWriteAntiQuorum &&
+		       newState.tLogs[0].tLogReplicationFactor == configuration.tLogReplicationFactor);
 
 		state bool allLogs =
 		    newState.tLogs.size() ==
-		    self->configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>());
+		    configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>());
 		state bool finalUpdate = !newState.oldTLogData.size() && allLogs;
 		wait(self->cstate.write(newState, finalUpdate));
 		wait(minRecoveryDuration);
@@ -1455,7 +1459,7 @@ ACTOR Future<Void> trackTlogRecovery(Reference<MasterData> self,
 			    .trackLatest("MasterRecoveryState");
 		}
 
-		if (newState.oldTLogData.size() && self->configuration.repopulateRegionAntiQuorum > 0 &&
+		if (newState.oldTLogData.size() && configuration.repopulateRegionAntiQuorum > 0 &&
 		    self->logSystem->remoteStorageRecovered()) {
 			TraceEvent(SevWarnAlways, "RecruitmentStalled_RemoteStorageRecovered", self->dbgid);
 			self->recruitmentStalled->set(true);
@@ -1994,11 +1998,11 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 			self->addActor.getFuture().pop();
 		}
 
-		TEST(err.code() == error_code_master_tlog_failed); // Master: terminated because of a tLog failure
-		TEST(err.code() == error_code_commit_proxy_failed); // Master: terminated because of a commit proxy failure
-		TEST(err.code() == error_code_grv_proxy_failed); // Master: terminated because of a GRV proxy failure
-		TEST(err.code() == error_code_master_resolver_failed); // Master: terminated because of a resolver failure
-		TEST(err.code() == error_code_master_backup_worker_failed); // Master: terminated because of a backup worker failure
+		TEST(err.code() == error_code_master_tlog_failed); // Master: terminated due to tLog failure
+		TEST(err.code() == error_code_commit_proxy_failed); // Master: terminated due to commit proxy failure
+		TEST(err.code() == error_code_grv_proxy_failed); // Master: terminated due to GRV proxy failure
+		TEST(err.code() == error_code_master_resolver_failed); // Master: terminated due to resolver failure
+		TEST(err.code() == error_code_master_backup_worker_failed); // Master: terminated due to backup worker failure
 
 		if (normalMasterErrors().count(err.code())) {
 			TraceEvent("MasterTerminated", mi.id()).error(err);

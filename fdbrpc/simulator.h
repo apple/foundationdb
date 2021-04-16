@@ -105,7 +105,11 @@ public:
 
 		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
 
-		bool isReliable() const { return !failed && fault_injection_p1 == 0 && fault_injection_p2 == 0 && !failedDisk; }
+		bool isReliable() const {
+			return !failed && fault_injection_p1 == 0 && fault_injection_p2 == 0 && !failedDisk &&
+			       (!machine || (machine->machineProcess->fault_injection_p1 == 0 &&
+			                     machine->machineProcess->fault_injection_p2 == 0));
+		}
 		bool isAvailable() const { return !isExcluded() && isReliable(); }
 		bool isExcluded() const { return excluded; }
 		bool isCleared() const { return cleared; }
@@ -387,6 +391,7 @@ public:
 	std::string disablePrimary;
 	std::string disableRemote;
 	std::string originalRegions;
+	std::string startingDisabledConfiguration;
 	bool allowLogSetKills;
 	Optional<Standalone<StringRef>> remoteDcId;
 	bool hasSatelliteReplication;

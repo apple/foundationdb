@@ -30,6 +30,7 @@ public:
 	int TOO_MANY; // FIXME: this should really be split up so we can control these more specifically
 
 	double SYSTEM_MONITOR_INTERVAL;
+	double NETWORK_BUSYNESS_MONITOR_INTERVAL; // The interval in which we should update the network busyness metric
 
 	double FAILURE_MAX_DELAY;
 	double FAILURE_MIN_DELAY;
@@ -166,6 +167,7 @@ public:
 	double BACKUP_STATUS_DELAY;
 	double BACKUP_STATUS_JITTER;
 	double MIN_CLEANUP_SECONDS;
+	bool RESTORE_IGNORE_LOG_FILES;   // Default is false. When set to true, the log files will be ignored during the restore, which can produce inconsistent restored data.
 
 	// Configuration
 	int32_t DEFAULT_AUTO_COMMIT_PROXIES;

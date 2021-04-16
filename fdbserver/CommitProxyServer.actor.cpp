@@ -569,7 +569,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	if (self->localBatchNumber - self->pProxyCommitData->latestLocalCommitBatchResolving.get() >
 	        SERVER_KNOBS->RESET_MASTER_BATCHES &&
 	    now() - self->pProxyCommitData->lastMasterReset > SERVER_KNOBS->RESET_MASTER_DELAY) {
-		TraceEvent(SevWarnAlways, "ResetMasterNetwork")
+		TraceEvent(SevWarnAlways, "ResetMasterNetwork", self->pProxyCommitData->dbgid)
 		    .detail("CurrentBatch", self->localBatchNumber)
 		    .detail("InProcessBatch", self->pProxyCommitData->latestLocalCommitBatchResolving.get());
 		FlowTransport::transport().resetConnection(self->pProxyCommitData->master.address());
@@ -687,10 +687,11 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	if (self->localBatchNumber - self->pProxyCommitData->latestLocalCommitBatchLogging.get() >
 	        SERVER_KNOBS->RESET_RESOLVER_BATCHES &&
 	    now() - self->pProxyCommitData->lastResolverReset > SERVER_KNOBS->RESET_RESOLVER_DELAY) {
-		TraceEvent(SevWarnAlways, "ResetResolverNetwork")
-		    .detail("CurrentBatch", self->localBatchNumber)
-		    .detail("InProcessBatch", self->pProxyCommitData->latestLocalCommitBatchLogging.get());
 		for (int r = 0; r < self->pProxyCommitData->resolvers.size(); r++) {
+			TraceEvent(SevWarnAlways, "ResetResolverNetwork", self->pProxyCommitData->dbgid)
+			    .detail("PeerAddr", self->pProxyCommitData->resolvers[r].address())
+			    .detail("CurrentBatch", self->localBatchNumber)
+			    .detail("InProcessBatch", self->pProxyCommitData->latestLocalCommitBatchLogging.get());
 			FlowTransport::transport().resetConnection(self->pProxyCommitData->resolvers[r].address());
 		}
 		self->pProxyCommitData->lastResolverReset = now();
@@ -1061,7 +1062,8 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	state const Optional<UID>& debugID = self->debugID;
 	state Span span("MP:postResolution"_loc, self->span.context);
 
-	TEST(pProxyCommitData->latestLocalCommitBatchLogging.get() < localBatchNumber - 1); // Queuing post-resolution commit processing
+	bool queuedCommits = pProxyCommitData->latestLocalCommitBatchLogging.get() < localBatchNumber - 1;
+	TEST(queuedCommits); // Queuing post-resolution commit processing
 	wait(pProxyCommitData->latestLocalCommitBatchLogging.whenAtLeast(localBatchNumber - 1));
 	wait(yield(TaskPriority::ProxyCommitYield1));
 
@@ -1377,6 +1379,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	                          pProxyCommitData->commitBatchInterval *
 	                              (1 - SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA)));
 
+	pProxyCommitData->stats.commitBatchingWindowSize.addMeasurement(pProxyCommitData->commitBatchInterval);
 	pProxyCommitData->commitBatchesMemBytesCount -= self->currentBatchMemBytesCount;
 	ASSERT_ABORT(pProxyCommitData->commitBatchesMemBytesCount >= 0);
 	wait(self->releaseFuture);
@@ -1405,8 +1408,10 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 	/////// Phase 1: Pre-resolution processing (CPU bound except waiting for a version # which is separately pipelined
 	/// and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)
 	wait(CommitBatch::preresolutionProcessing(&context));
-	if (context.rejected)
+	if (context.rejected) {
+		self->commitBatchesMemBytesCount -= currentBatchMemBytesCount;
 		return Void();
+	}
 
 	/////// Phase 2: Resolution (waiting on the network; pipelined)
 	wait(CommitBatch::getResolution(&context));

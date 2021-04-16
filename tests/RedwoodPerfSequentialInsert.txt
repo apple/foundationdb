@@ -4,4 +4,4 @@ useDB=false
 
     testName=UnitTests
     maxTestCases=0
-    testsMatching=!/redwood/performance/sequentialInsert
+    testsMatching=:/redwood/performance/sequentialInsert

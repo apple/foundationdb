@@ -357,6 +357,24 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_create_snapshot(FDBDatabase* db,
 	                        .extractPtr());
 }
 
+// Get network thread busyness (updated every 1s)
+// A value of 0 indicates that the client is more or less idle
+// A value of 1 (or more) indicates that the client is saturated
+extern "C" DLLEXPORT double fdb_database_get_main_thread_busyness(FDBDatabase* d) {
+	return DB(d)->getMainThreadBusyness();
+}
+
+// Returns the protocol version reported by a quorum of coordinators
+// If an expected version is non-zero, the future won't return until the protocol version is different than expected
+extern "C" DLLEXPORT FDBFuture* fdb_database_get_server_protocol(FDBDatabase* db, uint64_t expected_version) {
+	Optional<ProtocolVersion> expected;
+	if (expected_version > 0) {
+		expected = ProtocolVersion(expected_version);
+	}
+
+	return (FDBFuture*)(DB(db)->getServerProtocol(expected).extractPtr());
+}
+
 extern "C" DLLEXPORT void fdb_transaction_destroy(FDBTransaction* tr) {
 	try {
 		TXN(tr)->delref();
@@ -574,10 +592,6 @@ extern "C" DLLEXPORT fdb_error_t fdb_transaction_get_committed_version(FDBTransa
 
 extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* tr) {
 	return (FDBFuture*)TXN(tr)->getApproximateSize().extractPtr();
-}
-
-extern "C" DLLEXPORT FDBFuture* fdb_get_server_protocol(const char* clusterFilePath) {
-	return (FDBFuture*)(API->getServerProtocol(clusterFilePath ? clusterFilePath : "").extractPtr());
 }
 
 extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_versionstamp(FDBTransaction* tr) {

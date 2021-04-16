@@ -419,6 +419,9 @@ public class ByteArrayUtil extends FastByteComparisons {
 		return ByteBuffer.wrap(src).order(ByteOrder.LITTLE_ENDIAN).getLong();
 	}
 
+	private static final char[] hexChars =
+	    new char[] { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
+
 	/**
 	 * Gets a human readable version of a byte array. The bytes that correspond with
 	 *  ASCII printable characters [32-127) are passed through. Other bytes are
@@ -437,7 +440,14 @@ public class ByteArrayUtil extends FastByteComparisons {
 			byte b = val[i];
 			if (b >= 32 && b < 127 && b != '\\') s.append((char)b);
 			else if (b == '\\') s.append("\\\\");
-			else s.append(String.format("\\x%02x", b));
+			else {
+				//use a lookup table here to avoid doing an expensive String.format() call
+				s.append("\\x");
+				int nib = (b & 0xF0) >> 4;
+				s.append(hexChars[nib]);
+				nib = b & 0x0F;
+				s.append(hexChars[nib]);
+			}
 		}
 		return s.toString();
 	}

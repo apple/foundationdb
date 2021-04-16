@@ -38,6 +38,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( TOO_MANY,                            1000000 );
 
 	init( SYSTEM_MONITOR_INTERVAL,                 5.0 );
+	init( NETWORK_BUSYNESS_MONITOR_INTERVAL,       1.0 );
 
 	init( FAILURE_MAX_DELAY,                       5.0 );
 	init( FAILURE_MIN_DELAY,                       4.0 ); if( randomize && BUGGIFY ) FAILURE_MIN_DELAY = 1.0;
@@ -171,6 +172,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( BACKUP_STATUS_DELAY,                    40.0 );
 	init( BACKUP_STATUS_JITTER,                   0.05 );
 	init( MIN_CLEANUP_SECONDS,                  3600.0 );
+	init( RESTORE_IGNORE_LOG_FILES,              false );
 
 	// Configuration
 	init( DEFAULT_AUTO_COMMIT_PROXIES,               3 );

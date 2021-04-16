@@ -27,6 +27,7 @@
 #include <string>
 #include <stdint.h>
 #include <variant>
+#include <atomic>
 #include "boost/asio.hpp"
 #ifndef TLS_DISABLED
 #include "boost/asio/ssl.hpp"
@@ -320,6 +321,7 @@ class Future;
 template <class T>
 class Promise;
 
+// Metrics which represent various network properties
 struct NetworkMetrics {
 	enum { SLOW_EVENT_BINS = 16 };
 	uint64_t countSlowEvents[SLOW_EVENT_BINS] = {};
@@ -340,15 +342,36 @@ struct NetworkMetrics {
 	};
 
 	std::unordered_map<TaskPriority, struct PriorityStats> activeTrackers;
-	double lastRunLoopBusyness;
+	double lastRunLoopBusyness; // network thread busyness (measured every 5s by default)
+	std::atomic<double> networkBusyness; // network thread busyness which is returned to the the client (measured every 1s by default)
+
+	// starvation trackers which keeps track of different task priorities
 	std::vector<struct PriorityStats> starvationTrackers;
+	struct PriorityStats starvationTrackerNetworkBusyness;
 
 	static const std::vector<int> starvationBins;
 
-	NetworkMetrics() : lastRunLoopBusyness(0) {
-		for (int priority : starvationBins) {
+	NetworkMetrics()
+	  : lastRunLoopBusyness(0), networkBusyness(0),
+	    starvationTrackerNetworkBusyness(PriorityStats(static_cast<TaskPriority>(starvationBins.at(0)))) {
+		for (int priority : starvationBins) { // initalize starvation trackers with given priorities
 			starvationTrackers.emplace_back(static_cast<TaskPriority>(priority));
 		}
+	}
+
+	// Since networkBusyness is atomic we need to redefine copy assignment operator
+	NetworkMetrics& operator=(const NetworkMetrics& rhs) {
+		for (int i = 0; i < SLOW_EVENT_BINS; i++) {
+			countSlowEvents[i] = rhs.countSlowEvents[i];
+		}
+		secSquaredSubmit = rhs.secSquaredSubmit;
+		secSquaredDiskStall = rhs.secSquaredDiskStall;
+		activeTrackers = rhs.activeTrackers;
+		lastRunLoopBusyness = rhs.lastRunLoopBusyness;
+		networkBusyness = rhs.networkBusyness.load();
+		starvationTrackers = rhs.starvationTrackers;
+		starvationTrackerNetworkBusyness = rhs.starvationTrackerNetworkBusyness;
+		return *this;
 	}
 };
 
@@ -458,7 +481,8 @@ public:
 		enBlobCredentialFiles = 10,
 		enNetworkAddressesFunc = 11,
 		enClientFailureMonitor = 12,
-		enSQLiteInjectedError = 13
+		enSQLiteInjectedError = 13,
+		enGlobalConfig = 14
 	};
 
 	virtual void longTaskCheck(const char* name) {}
