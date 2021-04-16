@@ -29,4 +29,5 @@ testTitle=Clogged
     restartInfoLocation=simfdb/restartInfo.ini
     testDuration=10.0
 
-storageEngineExcludeType=3
+storageEngineExcludeTypes=2,3
+maxTLogVersion=4
