@@ -43,7 +43,7 @@
 // Need to look into refactoring common code out for better code readability and to avoid duplication
 
 // TODO rename wrong_shard_server error to wrong_cache_server
-inline bool canReplyWith(Error e) {
+static inline bool canReplyWith(Error e) {
 	switch (e.code()) {
 	case error_code_transaction_too_old:
 	case error_code_future_version:

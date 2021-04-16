@@ -72,7 +72,7 @@
 
 #define SHORT_CIRCUT_ACTUAL_STORAGE 0
 
-inline bool canReplyWith(Error e) {
+static inline bool canReplyWith(Error e) {
 	switch (e.code()) {
 	case error_code_transaction_too_old:
 	case error_code_future_version:
