@@ -4,6 +4,10 @@
 Release Notes
 #############
 
+6.3.13
+======
+* The multi-version client now requires at most two connections to the cluster, regardless of how many external clients are configured. `(PR #4667) <https://github.com/apple/foundationdb/pull/4667>`_
+
 6.3.12
 ======
 * Change the default for --knob_tls_server_handshake_threads to 64. The previous was 1000. This avoids starting 1000 threads by default, but may adversely affect recovery time for large clusters using tls. Users with large tls clusters should consider explicitly setting this knob in their foundationdb.conf file. `(PR #4421) <https://github.com/apple/foundationdb/pull/4421>`_
