@@ -1517,9 +1517,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			return;
 		// Record all team collections IDs
 		for (int i = 0; i < teamCollections.size(); ++i) {
-			TraceEvent("TraceAllInfo", distributorId)
-			    .detail("TeamCollectionIndex", i)
-			    .detail("Primary", teamCollections[i]->primary);
+			if (teamCollections[i] != nullptr) {
+				TraceEvent("TraceAllInfo", distributorId)
+				    .detail("TeamCollectionIndex", i)
+				    .detail("Primary", teamCollections[i]->primary);
+			}
 		}
 
 		TraceEvent("TraceAllInfo", distributorId).detail("Primary", primary);

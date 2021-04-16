@@ -3961,6 +3961,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		static TaskParam<Version> firstVersion() { return LiteralStringRef(__FUNCTION__); }
 	} Params;
 
+	// Find all files needed for the restore and save them in the RestoreConfig for the task.
+	// Update the total number of files and blocks and change state to starting.
 	ACTOR static Future<Void> _execute(Database cx,
 	                                   Reference<TaskBucket> taskBucket,
 	                                   Reference<FutureBucket> futureBucket,
@@ -3969,6 +3971,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		state RestoreConfig restore(task);
 		state Version restoreVersion;
 		state Reference<IBackupContainer> bc;
+		state std::vector<KeyRange> ranges;
 
 		loop {
 			try {
@@ -3976,8 +3979,10 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				wait(checkTaskVersion(tr->getDatabase(), task, name, version));
-				Version _restoreVersion = wait(restore.restoreVersion().getOrThrow(tr));
-				restoreVersion = _restoreVersion;
+
+				wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
+				wait(store(ranges, restore.getRestoreRangesOrDefault(tr)));
+
 				wait(taskBucket->keepRunning(tr, task));
 
 				ERestoreState oldState = wait(restore.stateEnum().getD(tr));
@@ -4023,7 +4028,11 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			}
 		}
 
-		Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion));
+		state Standalone<VectorRef<KeyRangeRef>> keyRangesFilter;
+		for (auto const& r : ranges) {
+			keyRangesFilter.push_back_deep(keyRangesFilter.arena(), KeyRangeRef(r));
+		}
+		Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion, keyRangesFilter));
 
 		if (!restorable.present())
 			throw restore_missing_data();
@@ -5120,6 +5129,24 @@ public:
 		return r;
 	}
 
+	// Submits the restore request to the database and throws "restore_invalid_version" error if
+	// restore is not possible. Parameters:
+	//   cx: the database to be restored to
+	//   cxOrig: if present, is used to resolve the restore timestamp into a version.
+	//   tagName: restore tag
+	//   url: the backup container's URL that contains all backup files
+	//   ranges: the restored key ranges; if empty, restore all key ranges in the backup
+	//   waitForComplete: if set, wait until the restore is completed before returning; otherwise,
+	//                    return when the request is submitted to the database.
+	//   targetVersion: the version to be restored.
+	//   verbose: print verbose information.
+	//   addPrefix: each key is added this prefix during restore.
+	//   removePrefix: for each key to be restored, remove this prefix first.
+	//   lockDB: if set lock the database with randomUid before performing restore;
+	//           otherwise, check database is locked with the randomUid
+	//   incrementalBackupOnly: only perform incremental backup
+	//   beginVersion: restore's begin version
+	//   randomUid: the UID for lock the database
 	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent,
 	                                     Database cx,
 	                                     Optional<Database> cxOrig,

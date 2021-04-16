@@ -145,6 +145,7 @@ public:
 	int DISABLE_POSIX_KERNEL_AIO;
 
 	// AsyncFileNonDurable
+	double NON_DURABLE_MAX_WRITE_DELAY;
 	double MAX_PRIOR_MODIFICATION_DELAY;
 
 	// GenericActors
