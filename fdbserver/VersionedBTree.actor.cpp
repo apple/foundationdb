@@ -1711,14 +1711,24 @@ public:
 		return pageCache.tryEvict(physicalID);
 	}
 
-	// Reads the most recent version of pageID, either previously committed or written using updatePage() in the current
-	// commit
-	Future<Reference<IPage>> readPage(LogicalPageID pageID, bool cacheable, bool noHit = false) override {
+	// Reads the most recent version of pageID, either previously committed or written using updatePage()
+	// in the current commit
+	// If cacheable is false then if fromCache is valid it will be set to true if the page is from cache, otherwise
+	// false. If cacheable is true, fromCache is ignored as the result is automatically from cache by virtue of being
+	// cacheable.
+	Future<Reference<IPage>> readPage(LogicalPageID pageID,
+	                                  bool cacheable,
+	                                  bool noHit = false,
+	                                  bool* fromCache = nullptr) override {
 		// Use cached page if present, without triggering a cache hit.
 		// Otherwise, read the page and return it but don't add it to the cache
 		if (!cacheable) {
 			debug_printf("DWALPager(%s) op=readUncached %s\n", filename.c_str(), toString(pageID).c_str());
 			PageCacheEntry* pCacheEntry = pageCache.getIfExists(pageID);
+			if (fromCache != nullptr) {
+				*fromCache = pCacheEntry != nullptr;
+			}
+
 			if (pCacheEntry != nullptr) {
 				debug_printf("DWALPager(%s) op=readUncachedHit %s\n", filename.c_str(), toString(pageID).c_str());
 				return pCacheEntry->readFuture;
@@ -1771,9 +1781,13 @@ public:
 		return (PhysicalPageID)pageID;
 	}
 
-	Future<Reference<IPage>> readPageAtVersion(LogicalPageID logicalID, Version v, bool cacheable, bool noHit) {
+	Future<Reference<IPage>> readPageAtVersion(LogicalPageID logicalID,
+	                                           Version v,
+	                                           bool cacheable,
+	                                           bool noHit,
+	                                           bool* fromCache) {
 		PhysicalPageID physicalID = getPhysicalPageID(logicalID, v);
-		return readPage(physicalID, cacheable, noHit);
+		return readPage(physicalID, cacheable, noHit, fromCache);
 	}
 
 	// Get snapshot as of the most recent committed version of the pager
@@ -2302,11 +2316,14 @@ public:
 	  : pager(pager), metaKey(meta), version(version), expired(expiredFuture) {}
 	~DWALPagerSnapshot() override {}
 
-	Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID, bool cacheable, bool noHit) override {
+	Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID,
+	                                               bool cacheable,
+	                                               bool noHit,
+	                                               bool* fromCache) override {
 		if (expired.isError()) {
 			throw expired.getError();
 		}
-		return map(pager->readPageAtVersion(pageID, version, cacheable, noHit),
+		return map(pager->readPageAtVersion(pageID, version, cacheable, noHit, fromCache),
 		           [=](Reference<IPage> p) { return Reference<const IPage>(std::move(p)); });
 	}
 
@@ -3324,7 +3341,7 @@ public:
 				}
 				// Start reading the page, without caching
 				entries.push_back(
-				    std::make_pair(q.get(), self->readPage(snapshot, q.get().pageID, nullptr, nullptr, true)));
+				    std::make_pair(q.get(), self->readPage(snapshot, q.get().pageID, nullptr, nullptr, true, false)));
 
 				--toPop;
 			}
@@ -4196,7 +4213,11 @@ private:
 	                                                     BTreePageIDRef id,
 	                                                     const RedwoodRecordRef* lowerBound,
 	                                                     const RedwoodRecordRef* upperBound,
-	                                                     bool forLazyClear = false) {
+	                                                     bool forLazyClear = false,
+	                                                     bool cacheable = true,
+	                                                     bool* fromCache = nullptr)
+
+	{
 		if (!forLazyClear) {
 			debug_printf("readPage() op=read %s @%" PRId64 " lower=%s upper=%s\n",
 			             toString(id).c_str(),
@@ -4213,17 +4234,22 @@ private:
 		state Reference<const IPage> page;
 
 		if (id.size() == 1) {
-			Reference<const IPage> p = wait(snapshot->getPhysicalPage(id.front(), !forLazyClear, false));
+			Reference<const IPage> p = wait(snapshot->getPhysicalPage(id.front(), cacheable, false, fromCache));
 			page = std::move(p);
 		} else {
 			ASSERT(!id.empty());
 			std::vector<Future<Reference<const IPage>>> reads;
 			for (auto& pageID : id) {
-				reads.push_back(snapshot->getPhysicalPage(pageID, !forLazyClear, false));
+				reads.push_back(snapshot->getPhysicalPage(pageID, cacheable, false));
 			}
 			std::vector<Reference<const IPage>> pages = wait(getAll(reads));
 			// TODO:  Cache reconstituted super pages somehow, perhaps with help from the Pager.
 			page = Reference<const IPage>(new SuperPage(pages));
+
+			// In the current implementation, SuperPages are never present in the cache
+			if (fromCache != nullptr) {
+				*fromCache = false;
+			}
 		}
 
 		debug_printf("readPage() op=readComplete %s @%" PRId64 " \n", toString(id).c_str(), snapshot->getVersion());
@@ -4233,7 +4259,7 @@ private:
 		metrics.pageReadExt += (id.size() - 1);
 
 		if (!forLazyClear && page->userData == nullptr) {
-			debug_printf("readPage() Creating Reader for %s @%" PRId64 " lower=%s upper=%s\n",
+			debug_printf("readPage() Creating Mirror for %s @%" PRId64 " lower=%s upper=%s\n",
 			             toString(id).c_str(),
 			             snapshot->getVersion(),
 			             lowerBound->toString(false).c_str(),
@@ -4618,8 +4644,9 @@ private:
 		state Reference<FlowLock> commitReadLock = self->m_commitReadLock;
 		wait(commitReadLock->take());
 		state FlowLock::Releaser readLock(*commitReadLock);
-		state Reference<const IPage> page =
-		    wait(readPage(snapshot, rootID, update->decodeLowerBound, update->decodeUpperBound));
+		state bool fromCache = false;
+		state Reference<const IPage> page = wait(
+		    readPage(snapshot, rootID, update->decodeLowerBound, update->decodeUpperBound, false, false, &fromCache));
 		readLock.release();
 
 		state BTreePage* btPage = (BTreePage*)page->begin();
@@ -4631,11 +4658,13 @@ private:
 		// though it is awkward to reason about.
 		state bool tryToUpdate = btPage->tree().numItems > 0 && update->boundariesNormal();
 
-		// If trying to update the page, we need to clone it so we don't modify the original.
+		// If trying to update the page and the page reference points into the cache,
+		// we need to clone it so we don't modify the original version of the page.
 		// TODO: Refactor DeltaTree::Mirror so it can be shared between different versions of pages
-		if (tryToUpdate) {
+		if (tryToUpdate && fromCache) {
 			page = self->cloneForUpdate(page);
 			btPage = (BTreePage*)page->begin();
+			fromCache = false;
 		}
 
 		debug_printf(
@@ -5124,12 +5153,17 @@ private:
 				    parentInfo->count);
 				forceUpdate = true;
 				if (!m.updating) {
-					page = self->cloneForUpdate(page);
-					cursor = getCursor(page);
-					btPage = (BTreePage*)page->begin();
-					m.btPage = btPage;
-					m.m = cursor.mirror;
 					m.updating = true;
+
+					// Copy the page before modification if the page references the cache
+					if (fromCache) {
+						page = self->cloneForUpdate(page);
+						cursor = getCursor(page);
+						btPage = (BTreePage*)page->begin();
+						m.btPage = btPage;
+						m.m = cursor.mirror;
+						fromCache = false;
+					}
 				}
 				++g_redwoodMetrics.level(btPage->height).forceUpdate;
 			}
