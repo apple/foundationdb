@@ -39,7 +39,7 @@ struct ConfigFollowerGetVersionReply {
 
 struct ConfigFollowerGetVersionRequest {
 	static constexpr FileIdentifier file_identifier = 9840156;
-	ReplyPromise<ConfigFollowerGetVersionRequest> reply;
+	ReplyPromise<ConfigFollowerGetVersionReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

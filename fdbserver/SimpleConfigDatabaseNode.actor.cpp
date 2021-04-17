@@ -22,103 +22,139 @@
 
 #include "fdbserver/IConfigDatabaseNode.h"
 #include "fdbserver/IKeyValueStore.h"
+#include "flow/Arena.h"
 #include "flow/genericactors.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-static const KeyRef versionKey = LiteralStringRef("version");
-static const KeyRangeRef configKeys = KeyRangeRef(LiteralStringRef("config/"), LiteralStringRef("config0"));
+namespace {
+
+const KeyRef versionKey = LiteralStringRef("version");
+const KeyRangeRef kvKeys = KeyRangeRef(LiteralStringRef("kv/"), LiteralStringRef("kv0"));
+const KeyRangeRef mutationKeys = KeyRangeRef(LiteralStringRef("mutation/"), LiteralStringRef("mutation0"));
+
+struct VersionedMutationRef {
+	Version version;
+	MutationRef mutation;
+
+	VersionedMutationRef()=default; // FIXME Undefined memory?
+	explicit VersionedMutationRef(Arena &arena, Version version, MutationRef mutation) : version(version), mutation(arena, mutation) {}
+};
+
+Key versionedMutationKey(Version version, int index) {
+	BinaryWriter bw(IncludeVersion());
+	bw << version;
+	bw << index;
+	return bw.toValue().withPrefix(mutationKeys.begin);
+}
+
+} //namespace
 
 class SimpleConfigDatabaseNodeImpl {
 	IKeyValueStore* kvStore; // FIXME: Prevent leak
 	std::map<std::string, std::string> config;
-	Version currentVersion;
 	ActorCollection actors{ false };
 	FlowLock globalLock;
 
-	ACTOR static Future<Void> getVersion(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionGetVersionRequest req) {
+	ACTOR static Future<Version> getCurrentVersion(SimpleConfigDatabaseNodeImpl *self) {
+		Optional<Value> value = wait(self->kvStore->readValue(versionKey));
+		state Version version = 0;
+		if (value.present()) {
+			BinaryReader br(value.get(), IncludeVersion());
+			br >> version;
+		} else {
+			BinaryWriter bw(IncludeVersion());
+			bw << version;
+			self->kvStore->set(KeyValueRef(versionKey, bw.toValue()));
+			wait(self->kvStore->commit());
+		}
+		return version;
+	}
+
+	ACTOR static Future<Standalone<VectorRef<VersionedMutationRef>>> getMutations(SimpleConfigDatabaseNodeImpl *self, int startVersion, int endVersion) {
+		Value serializedStartVersion = BinaryWriter::toValue(startVersion, IncludeVersion());
+		KeyRangeRef keys(serializedStartVersion.withPrefix(mutationKeys.begin), mutationKeys.end);
+		Standalone<RangeResultRef> range = wait(self->kvStore->readRange(keys));
+		Standalone<VectorRef<VersionedMutationRef>> result;
+		for (const auto &kv : range) {
+			auto version = BinaryReader::fromStringRef<Version>(kv.key.removePrefix(mutationKeys.begin), IncludeVersion());
+			if (version > endVersion) {
+				break;
+			}
+			auto mutation = BinaryReader::fromStringRef<Standalone<MutationRef>>(kv.value, IncludeVersion());
+			result.emplace_back_deep(result.arena(), version, mutation);
+		}
+		return result;
+	}
+
+	ACTOR static Future<Void> getCurrentVersion(SimpleConfigDatabaseNodeImpl *self, ConfigFollowerGetVersionRequest req) {
+		Version version = wait(getCurrentVersion(self));
+		req.reply.send(ConfigFollowerGetVersionReply(version));
+		return Void();
+	}
+
+	ACTOR static Future<Void> getNewVersion(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionGetVersionRequest req) {
 		wait(self->globalLock.take());
 		state FlowLock::Releaser releaser(self->globalLock);
-		++self->currentVersion;
-		BinaryWriter bw(IncludeVersion());
-		bw << self->currentVersion;
-		self->kvStore->set(KeyValueRef(versionKey, bw.toValue()));
+		state Version currentVersion = wait(getCurrentVersion(self));
+		self->kvStore->set(KeyValueRef(versionKey, BinaryWriter::toValue(++currentVersion, IncludeVersion())));
 		wait(self->kvStore->commit());
-		req.reply.send(self->currentVersion);
+		req.reply.send(ConfigTransactionGetVersionReply(currentVersion));
 		return Void();
 	}
 
 	ACTOR static Future<Void> get(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionGetRequest req) {
 		wait(self->globalLock.take());
 		state FlowLock::Releaser releaser(self->globalLock);
-		if (req.version != self->currentVersion) {
+		Version currentVersion = wait(getCurrentVersion(self));
+		if (req.version != currentVersion) {
 			req.reply.sendError(transaction_too_old());
 			return Void();
 		}
-		auto it = self->config.find(req.key.toString());
-		if (it == self->config.end()) {
-			req.reply.send(ConfigTransactionGetReply());
-		} else {
-			req.reply.send(ConfigTransactionGetReply(Value(it->second)));
+		state Optional<Value> value = wait(self->kvStore->readValue(req.key.withPrefix(kvKeys.begin)));
+		Standalone<VectorRef<VersionedMutationRef>> versionedMutations = wait(getMutations(self, -1, req.version));
+		for (const auto &versionedMutation : versionedMutations) {
+			const auto &mutation = versionedMutation.mutation;
+			if (mutation.type == MutationRef::Type::SetValue) {
+				if (mutation.param1 == req.key) {
+					value = mutation.param2;
+				}
+			} else if (mutation.type == MutationRef::Type::ClearRange) {
+				if (mutation.param1 <= req.key && req.key <= mutation.param2) {
+					value = Optional<Value>{};
+				}
+			} else {
+				ASSERT(false);
+			}
 		}
+		req.reply.send(ConfigTransactionGetReply(value));
 		return Void();
 	}
 
 	ACTOR static Future<Void> commit(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionCommitRequest req) {
 		wait(self->globalLock.take());
 		state FlowLock::Releaser releaser(self->globalLock);
-		if (req.version != self->currentVersion) {
+		Version currentVersion = wait(getCurrentVersion(self));
+		if (req.version != currentVersion) {
 			req.reply.sendError(transaction_too_old());
 			return Void();
 		}
-		state int index = 0;
-		for (; index < req.mutations.size(); ++index) {
-			const auto& mutation = req.mutations[index];
-			if (mutation.type == MutationRef::SetValue) {
-				self->config[mutation.param1.toString()] = mutation.param2.toString();
-				self->kvStore->set(KeyValueRef(mutation.param1, mutation.param2));
-			} else if (mutation.type == MutationRef::ClearRange) {
-				self->config.erase(self->config.find(mutation.param1.toString()),
-				                   self->config.find(mutation.param2.toString()));
-				self->kvStore->clear(KeyRangeRef(mutation.param1, mutation.param2));
-			} else {
-				ASSERT(false);
-			}
-			++index;
+		int index = 0;
+		for (const auto &mutation : req.mutations) {
+			Key key = versionedMutationKey(req.version, index++);
+			Value value = BinaryWriter::toValue(mutation, IncludeVersion());
+			self->kvStore->set(KeyValueRef(key, value));
 		}
 		wait(self->kvStore->commit());
 		req.reply.send(Void());
 		return Void();
 	}
 
-	ACTOR static Future<Void> readKVStoreIntoMemory(SimpleConfigDatabaseNodeImpl* self) {
-		wait(self->kvStore->init());
-		state Optional<Value> onDiskVersion = wait(self->kvStore->readValue(versionKey));
-		if (!onDiskVersion.present()) {
-			// Brand new database
-			self->currentVersion = 0;
-			BinaryWriter wr(IncludeVersion());
-			wr << self->currentVersion;
-			self->kvStore->set(KeyValueRef(versionKey, wr.toValue()));
-			wait(self->kvStore->commit());
-			return Void();
-		}
-		BinaryReader br(onDiskVersion.get(), IncludeVersion());
-		br >> self->currentVersion;
-		Standalone<RangeResultRef> data = wait(self->kvStore->readRange(configKeys));
-		ASSERT(!data.more); // TODO: Support larger amounts of data?
-		for (auto const& kv : data) {
-			self->config[kv.key.toString()] = kv.value.toString();
-		}
-		return Void();
-	}
-
 	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionInterface* cti) {
-		wait(readKVStoreIntoMemory(self));
 		loop {
 			choose {
 				when(ConfigTransactionGetVersionRequest req = waitNext(cti->getVersion.getFuture())) {
-					self->actors.add(getVersion(self, req));
+					self->actors.add(getNewVersion(self, req));
 				}
 				when(ConfigTransactionGetRequest req = waitNext(cti->get.getFuture())) {
 					self->actors.add(get(self, req));
@@ -132,10 +168,22 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigFollowerInterface* cfi) {
-		// TODO: Implement
-		TraceEvent("HERE");
-		wait(Never());
-		return Void();
+		loop {
+			choose {
+				when(ConfigFollowerGetVersionRequest req = waitNext(cfi->getVersion.getFuture())) {
+					self->actors.add(getCurrentVersion(self, req));
+				}
+				when(ConfigFollowerGetFullDatabaseRequest req = waitNext(cfi->getFullDatabase.getFuture())) {
+					// TODO: Implement
+					continue;
+				}
+				when(ConfigFollowerGetChangesRequest req = waitNext(cfi->getChanges.getFuture())) {
+					// TODO: Implement
+					continue;
+				}
+				when(wait(self->actors.getResult())) { ASSERT(false); }
+			}
+		}
 	}
 
 public:

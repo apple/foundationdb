@@ -28,19 +28,17 @@
 class ConfigurationDatabaseWorkload : public TestWorkload {
 	ACTOR static Future<Void> start(ConfigurationDatabaseWorkload* self, Database cx) {
 		state SimpleConfigTransaction tr(cx->getConnectionFile()->getConnectionString());
-		state Key k = LiteralStringRef("config/x");
-		state Key v = LiteralStringRef("x");
+		state Key k = LiteralStringRef("k");
+		state Key v = LiteralStringRef("v");
 		{
 			Optional<Value> currentValue = wait(tr.get(k));
 			ASSERT(!currentValue.present());
 		}
-		wait(delay(1));
 		{
 			tr.reset();
 			tr.set(k, v);
 			wait(tr.commit());
 		}
-		wait(delay(1));
 		{
 			tr.reset();
 			Optional<Value> currentValue = wait(tr.get(k));

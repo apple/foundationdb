@@ -29,7 +29,7 @@
 struct ConfigTransactionGetVersionReply {
 	static constexpr FileIdentifier file_identifier = 2934851;
 	ConfigTransactionGetVersionReply() = default;
-	ConfigTransactionGetVersionReply(Version version) : version(version) {}
+	explicit ConfigTransactionGetVersionReply(Version version) : version(version) {}
 	Version version;
 
 	template <class Ar>
@@ -53,7 +53,7 @@ struct ConfigTransactionGetReply {
 	static constexpr FileIdentifier file_identifier = 2034110;
 	Optional<Value> value;
 	ConfigTransactionGetReply() = default;
-	explicit ConfigTransactionGetReply(Value const& value) : value(Optional<Value>(value)) {}
+	explicit ConfigTransactionGetReply(Optional<Value> const& value) : value(Optional<Value>(value)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
