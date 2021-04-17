@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/ConfigDatabaseInterface.h"
+#include "fdbclient/ConfigTransactionInterface.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/IConfigDatabaseNode.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -618,8 +618,10 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder) {
 	state LeaderElectionRegInterface myLeaderInterface(g_network);
 	state GenerationRegInterface myInterface(g_network);
 	state OnDemandStore store(dataFolder, myID);
-	state ConfigDatabaseInterface configDatabaseInterface;
-	configDatabaseInterface.setupWellKnownEndpoints();
+	state ConfigTransactionInterface configTransactionInterface;
+	configTransactionInterface.setupWellKnownEndpoints();
+	state ConfigFollowerInterface configFollowerInterface;
+	configFollowerInterface.setupWellKnownEndpoints();
 	state Reference<IConfigDatabaseNode> configDatabaseNode = makeReference<SimpleConfigDatabaseNode>(dataFolder);
 
 	TraceEvent("CoordinationServer", myID)
@@ -628,7 +630,8 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder) {
 
 	try {
 		wait(localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store, myID) ||
-		     store.getError() || configDatabaseNode->serve(configDatabaseInterface));
+		     store.getError() || configDatabaseNode->serve(configTransactionInterface) ||
+		     configDatabaseNode->serve(configFollowerInterface));
 		throw internal_error();
 	} catch (Error& e) {
 		TraceEvent("CoordinationServerError", myID).error(e, true);

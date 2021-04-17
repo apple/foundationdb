@@ -1,5 +1,5 @@
 /*
- * SimpleConfigurationDatabase.actor.cpp
+ * SimpleConfigTransaction.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,45 +20,46 @@
 
 #include <algorithm>
 
-#include "fdbclient/IConfigurationDatabase.h"
+#include "fdbclient/IConfigTransaction.h"
 #include "fdbclient/CommitTransaction.h"
 #include "flow/Arena.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-class SimpleConfigurationTransactionImpl {
+class SimpleConfigTransactionImpl {
 	Standalone<VectorRef<MutationRef>> mutations;
 	Future<Version> version;
-	ConfigDatabaseInterface cdbi;
+	ConfigTransactionInterface cti;
 
-	ACTOR static Future<Version> getVersion(SimpleConfigurationTransactionImpl* self) {
-		ConfigDatabaseGetVersionRequest req;
-		ConfigDatabaseGetVersionReply reply = wait(self->cdbi.getVersion.getReply(ConfigDatabaseGetVersionRequest{}));
+	ACTOR static Future<Version> getVersion(SimpleConfigTransactionImpl* self) {
+		ConfigTransactionGetVersionRequest req;
+		ConfigTransactionGetVersionReply reply =
+		    wait(self->cti.getVersion.getReply(ConfigTransactionGetVersionRequest{}));
 		return reply.version;
 	}
 
-	ACTOR static Future<Optional<Value>> get(SimpleConfigurationTransactionImpl* self, KeyRef key) {
+	ACTOR static Future<Optional<Value>> get(SimpleConfigTransactionImpl* self, KeyRef key) {
 		if (!self->version.isValid()) {
 			self->version = getVersion(self);
 		}
 		Version version = wait(self->version);
-		ConfigDatabaseGetReply result = wait(self->cdbi.get.getReply(ConfigDatabaseGetRequest(version, key)));
+		ConfigTransactionGetReply result = wait(self->cti.get.getReply(ConfigTransactionGetRequest(version, key)));
 		return result.value;
 	}
 
-	ACTOR static Future<Void> commit(SimpleConfigurationTransactionImpl* self) {
+	ACTOR static Future<Void> commit(SimpleConfigTransactionImpl* self) {
 		if (!self->version.isValid()) {
 			self->version = getVersion(self);
 		}
 		Version version = wait(self->version);
-		wait(self->cdbi.commit.getReply(ConfigDatabaseCommitRequest(version, self->mutations)));
+		wait(self->cti.commit.getReply(ConfigTransactionCommitRequest(version, self->mutations)));
 		return Void();
 	}
 
 public:
-	SimpleConfigurationTransactionImpl(ClusterConnectionString const& ccs) {
+	SimpleConfigTransactionImpl(ClusterConnectionString const& ccs) {
 		auto coordinators = ccs.coordinators();
 		std::sort(coordinators.begin(), coordinators.end());
-		cdbi = ConfigDatabaseInterface(coordinators[0]);
+		cti = ConfigTransactionInterface(coordinators[0]);
 	}
 
 	void set(KeyRef key, ValueRef value) {
@@ -81,31 +82,31 @@ public:
 	}
 };
 
-void SimpleConfigurationTransaction::set(KeyRef key, ValueRef value) {
+void SimpleConfigTransaction::set(KeyRef key, ValueRef value) {
 	impl->set(key, value);
 }
 
-void SimpleConfigurationTransaction::clearRange(KeyRef begin, KeyRef end) {
+void SimpleConfigTransaction::clearRange(KeyRef begin, KeyRef end) {
 	impl->clearRange(begin, end);
 }
 
-Future<Optional<Value>> SimpleConfigurationTransaction::get(KeyRef key) {
+Future<Optional<Value>> SimpleConfigTransaction::get(KeyRef key) {
 	return impl->get(key);
 }
 
-Future<Void> SimpleConfigurationTransaction::commit() {
+Future<Void> SimpleConfigTransaction::commit() {
 	return impl->commit();
 }
 
-Future<Void> SimpleConfigurationTransaction::onError(Error const& e) {
+Future<Void> SimpleConfigTransaction::onError(Error const& e) {
 	return impl->onError(e);
 }
 
-void SimpleConfigurationTransaction::reset() {
+void SimpleConfigTransaction::reset() {
 	return impl->reset();
 }
 
-SimpleConfigurationTransaction::SimpleConfigurationTransaction(ClusterConnectionString const& ccs)
-  : impl(std::make_unique<SimpleConfigurationTransactionImpl>(ccs)) {}
+SimpleConfigTransaction::SimpleConfigTransaction(ClusterConnectionString const& ccs)
+  : impl(std::make_unique<SimpleConfigTransactionImpl>(ccs)) {}
 
-SimpleConfigurationTransaction::~SimpleConfigurationTransaction() = default;
+SimpleConfigTransaction::~SimpleConfigTransaction() = default;

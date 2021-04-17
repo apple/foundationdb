@@ -1,5 +1,5 @@
 /*
- * IConfigDatabaseNode.h
+ * IConfigBroadcaster.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,25 +20,21 @@
 
 #pragma once
 
-#include "fdbclient/ConfigTransactionInterface.h"
+#include "fdbclient/CoordinationInterface.h"
 #include "fdbserver/ConfigFollowerInterface.h"
-#include "flow/FastRef.h"
 #include "flow/flow.h"
-
 #include <memory>
 
-class IConfigDatabaseNode : public ReferenceCounted<IConfigDatabaseNode> {
+class IConfigBroadcaster {
 public:
-	virtual Future<Void> serve(ConfigTransactionInterface&) = 0;
 	virtual Future<Void> serve(ConfigFollowerInterface&) = 0;
 };
 
-class SimpleConfigDatabaseNode : public IConfigDatabaseNode {
-	std::unique_ptr<class SimpleConfigDatabaseNodeImpl> impl;
+class SimpleConfigBroadcaster : public IConfigBroadcaster {
+	std::unique_ptr<class SimpleConfigBroadcasterImpl> impl;
 
 public:
-	SimpleConfigDatabaseNode(std::string const& dataFolder);
-	~SimpleConfigDatabaseNode();
-	Future<Void> serve(ConfigTransactionInterface&) override;
+	SimpleConfigBroadcaster(ClusterConnectionString const&);
+	~SimpleConfigBroadcaster();
 	Future<Void> serve(ConfigFollowerInterface&) override;
 };

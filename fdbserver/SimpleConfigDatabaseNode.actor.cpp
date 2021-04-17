@@ -36,7 +36,7 @@ class SimpleConfigDatabaseNodeImpl {
 	ActorCollection actors{ false };
 	FlowLock globalLock;
 
-	ACTOR static Future<Void> getVersion(SimpleConfigDatabaseNodeImpl* self, ConfigDatabaseGetVersionRequest req) {
+	ACTOR static Future<Void> getVersion(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionGetVersionRequest req) {
 		wait(self->globalLock.take());
 		state FlowLock::Releaser releaser(self->globalLock);
 		++self->currentVersion;
@@ -48,7 +48,7 @@ class SimpleConfigDatabaseNodeImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> get(SimpleConfigDatabaseNodeImpl* self, ConfigDatabaseGetRequest req) {
+	ACTOR static Future<Void> get(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionGetRequest req) {
 		wait(self->globalLock.take());
 		state FlowLock::Releaser releaser(self->globalLock);
 		if (req.version != self->currentVersion) {
@@ -57,14 +57,14 @@ class SimpleConfigDatabaseNodeImpl {
 		}
 		auto it = self->config.find(req.key.toString());
 		if (it == self->config.end()) {
-			req.reply.send(ConfigDatabaseGetReply());
+			req.reply.send(ConfigTransactionGetReply());
 		} else {
-			req.reply.send(ConfigDatabaseGetReply(Value(it->second)));
+			req.reply.send(ConfigTransactionGetReply(Value(it->second)));
 		}
 		return Void();
 	}
 
-	ACTOR static Future<Void> commit(SimpleConfigDatabaseNodeImpl* self, ConfigDatabaseCommitRequest req) {
+	ACTOR static Future<Void> commit(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionCommitRequest req) {
 		wait(self->globalLock.take());
 		state FlowLock::Releaser releaser(self->globalLock);
 		if (req.version != self->currentVersion) {
@@ -113,17 +113,17 @@ class SimpleConfigDatabaseNodeImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigDatabaseInterface* cdbi) {
+	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionInterface* cti) {
 		wait(readKVStoreIntoMemory(self));
 		loop {
 			choose {
-				when(ConfigDatabaseGetVersionRequest req = waitNext(cdbi->getVersion.getFuture())) {
+				when(ConfigTransactionGetVersionRequest req = waitNext(cti->getVersion.getFuture())) {
 					self->actors.add(getVersion(self, req));
 				}
-				when(ConfigDatabaseGetRequest req = waitNext(cdbi->get.getFuture())) {
+				when(ConfigTransactionGetRequest req = waitNext(cti->get.getFuture())) {
 					self->actors.add(get(self, req));
 				}
-				when(ConfigDatabaseCommitRequest req = waitNext(cdbi->commit.getFuture())) {
+				when(ConfigTransactionCommitRequest req = waitNext(cti->commit.getFuture())) {
 					self->actors.add(commit(self, req));
 				}
 				when(wait(self->actors.getResult())) { ASSERT(false); }
@@ -131,14 +131,22 @@ class SimpleConfigDatabaseNodeImpl {
 		}
 	}
 
+	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigFollowerInterface* cfi) {
+		// TODO: Implement
+		TraceEvent("HERE");
+		wait(Never());
+		return Void();
+	}
+
 public:
 	SimpleConfigDatabaseNodeImpl(std::string const& dataFolder) {
 		platform::createDirectory(dataFolder);
-		kvStore =
-		    keyValueStoreMemory(joinPath(dataFolder, "globalconf-"), deterministicRandom()->randomUniqueID(), 500e6);
+		kvStore = keyValueStoreMemory(joinPath(dataFolder, "globalconf-"), UID{}, 500e6);
 	}
 
-	Future<Void> serve(ConfigDatabaseInterface& cdbi) { return serve(this, &cdbi); }
+	Future<Void> serve(ConfigTransactionInterface& cti) { return serve(this, &cti); }
+
+	Future<Void> serve(ConfigFollowerInterface& cfi) { return serve(this, &cfi); }
 };
 
 SimpleConfigDatabaseNode::SimpleConfigDatabaseNode(std::string const& dataFolder)
@@ -146,6 +154,10 @@ SimpleConfigDatabaseNode::SimpleConfigDatabaseNode(std::string const& dataFolder
 
 SimpleConfigDatabaseNode::~SimpleConfigDatabaseNode() = default;
 
-Future<Void> SimpleConfigDatabaseNode::serve(ConfigDatabaseInterface& cdbi) {
-	return impl->serve(cdbi);
+Future<Void> SimpleConfigDatabaseNode::serve(ConfigTransactionInterface& cti) {
+	return impl->serve(cti);
+}
+
+Future<Void> SimpleConfigDatabaseNode::serve(ConfigFollowerInterface& cfi) {
+	return impl->serve(cfi);
 }

@@ -19,7 +19,7 @@ set(FDBCLIENT_SRCS
   ClientWorkerInterface.h
   ClusterInterface.h
   CommitTransaction.h
-  ConfigDatabaseInterface.h
+  ConfigTransactionInterface.h
   CoordinationInterface.h
   DatabaseBackupAgent.actor.cpp
   DatabaseConfiguration.cpp
@@ -32,7 +32,7 @@ set(FDBCLIENT_SRCS
   GrvProxyInterface.h
   HTTP.actor.cpp
   IClientApi.h
-  IConfigurationDatabase.h
+  IConfigTransaction.h
   JsonBuilder.cpp
   JsonBuilder.h
   KeyBackedTypes.h
@@ -52,7 +52,7 @@ set(FDBCLIENT_SRCS
   NativeAPI.actor.cpp
   NativeAPI.actor.h
   Notified.h
-  SimpleConfigurationDatabase.actor.cpp
+  SimpleConfigTransaction.actor.cpp
   SpecialKeySpace.actor.cpp
   SpecialKeySpace.actor.h
   ReadYourWrites.actor.cpp

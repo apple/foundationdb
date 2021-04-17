@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/IConfigurationDatabase.h"
+#include "fdbclient/IConfigTransaction.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -27,7 +27,7 @@
 
 class ConfigurationDatabaseWorkload : public TestWorkload {
 	ACTOR static Future<Void> start(ConfigurationDatabaseWorkload* self, Database cx) {
-		state SimpleConfigurationTransaction tr(cx->getConnectionFile()->getConnectionString());
+		state SimpleConfigTransaction tr(cx->getConnectionFile()->getConnectionString());
 		state Key k = LiteralStringRef("config/x");
 		state Key v = LiteralStringRef("x");
 		{

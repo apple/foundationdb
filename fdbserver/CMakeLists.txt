@@ -24,6 +24,7 @@ set(FDBSERVER_SRCS
   FDBExecHelper.actor.h
   GrvProxyServer.actor.cpp
   IConfigDatabaseNode.h
+  IConfigBroadcaster.h
   IDiskQueue.h
   IKeyValueContainer.h
   IKeyValueStore.h
@@ -39,6 +40,8 @@ set(FDBSERVER_SRCS
   LatencyBandConfig.h
   LeaderElection.actor.cpp
   LeaderElection.h
+  LocalConfiguration.actor.cpp
+  LocalConfiguration.h
   LogProtocolMessage.h
   LogRouter.actor.cpp
   LogSystem.h
@@ -88,6 +91,7 @@ set(FDBSERVER_SRCS
   ResolverInterface.h
   ServerDBInfo.actor.h
   ServerDBInfo.h
+  SimpleConfigBroadcaster.actor.cpp
   SimpleConfigDatabaseNode.actor.cpp
   SimulatedCluster.actor.cpp
   SimulatedCluster.h

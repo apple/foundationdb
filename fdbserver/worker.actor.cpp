@@ -42,6 +42,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/LocalConfiguration.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ClientWorkerInterface.h"
 #include "flow/Profiler.h"
@@ -275,7 +276,7 @@ StringRef fileStoragePrefix = LiteralStringRef("storage-");
 StringRef fileLogDataPrefix = LiteralStringRef("log-");
 StringRef fileVersionedLogDataPrefix = LiteralStringRef("log2-");
 StringRef fileLogQueuePrefix = LiteralStringRef("logqueue-");
-StringRef globalConfPrefix = LiteralStringRef("globalconf-");
+StringRef localConfPrefix = LiteralStringRef("globalconf-");
 StringRef tlogQueueExtension = LiteralStringRef("fdq");
 
 enum class FilesystemCheck {
@@ -409,7 +410,7 @@ TLogFn tLogFnForOptions(TLogOptions options) {
 }
 
 struct DiskStore {
-	enum COMPONENT { TLogData, Storage, UNSET };
+	enum COMPONENT { TLogData, Storage, LocalConf, UNSET };
 
 	UID storeID = UID();
 	std::string filename = ""; // For KVStoreMemory just the base filename to be passed to IDiskQueue
@@ -465,8 +466,12 @@ std::vector<DiskStore> getDiskStores(std::string folder,
 			store.tLogOptions.version = TLogVersion::V2;
 			store.tLogOptions.spillType = TLogSpillType::VALUE;
 			prefix = fileLogDataPrefix;
-		} else
+		} else if (filename.startsWith(localConfPrefix)) {
+			store.storedComponent = DiskStore::LocalConf;
+			prefix = localConfPrefix;
+		} else {
 			continue;
+		}
 
 		store.storeID = UID::fromString(files[idx].substr(prefix.size(), 32));
 		store.filename = filenameFromSample(type, folder, files[idx]);
@@ -2045,6 +2050,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		localities.set(LocalityData::keyProcessId, processIDUid.toString());
 		// Only one process can execute on a dataFolder from this point onwards
 
+		LocalConfiguration localConfig({ "test" }, dataFolder);
 		std::string fitnessFilePath = joinPath(dataFolder, "fitness");
 		auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
 		auto ci = makeReference<AsyncVar<Optional<ClusterInterface>>>();

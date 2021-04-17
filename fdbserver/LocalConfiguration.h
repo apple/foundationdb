@@ -1,5 +1,5 @@
 /*
- * IConfigDatabaseNode.h
+ * LocalConfiguration.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,25 +20,22 @@
 
 #pragma once
 
-#include "fdbclient/ConfigTransactionInterface.h"
-#include "fdbserver/ConfigFollowerInterface.h"
-#include "flow/FastRef.h"
-#include "flow/flow.h"
-
+#include <map>
 #include <memory>
+#include <vector>
 
-class IConfigDatabaseNode : public ReferenceCounted<IConfigDatabaseNode> {
+#include "fdbserver/IKeyValueStore.h"
+#include "flow/Arena.h"
+
+using ConfigPath = std::vector<std::string>;
+using KnobUpdates = std::map<std::string, std::string>;
+
+class LocalConfiguration {
+	std::unique_ptr<class LocalConfigurationImpl> impl;
+
 public:
-	virtual Future<Void> serve(ConfigTransactionInterface&) = 0;
-	virtual Future<Void> serve(ConfigFollowerInterface&) = 0;
-};
-
-class SimpleConfigDatabaseNode : public IConfigDatabaseNode {
-	std::unique_ptr<class SimpleConfigDatabaseNodeImpl> impl;
-
-public:
-	SimpleConfigDatabaseNode(std::string const& dataFolder);
-	~SimpleConfigDatabaseNode();
-	Future<Void> serve(ConfigTransactionInterface&) override;
-	Future<Void> serve(ConfigFollowerInterface&) override;
+	LocalConfiguration(ConfigPath const& path, std::string const& dataFolder);
+	~LocalConfiguration();
+	Future<Optional<KnobUpdates>> getUpdates();
+	Future<Void> saveUpdates(KnobUpdates const& updates);
 };

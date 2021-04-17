@@ -1765,21 +1765,6 @@ int main(int argc, char* argv[]) {
 		    .detail("MemoryLimit", opts.memLimit)
 		    .trackLatest("ProgramStart");
 
-		// Test for TraceEvent length limits
-		/*std::string foo(4096, 'x');
-		TraceEvent("TooLongDetail").detail("Contents", foo);
-
-		TraceEvent("TooLongEvent")
-		    .detail("Contents1", foo)
-		    .detail("Contents2", foo)
-		    .detail("Contents3", foo)
-		    .detail("Contents4", foo)
-		    .detail("Contents5", foo)
-		    .detail("Contents6", foo)
-		    .detail("Contents7", foo)
-		    .detail("Contents8", foo)
-		    .detail("ExtraTest", 1776);*/
-
 		Error::init();
 		std::set_new_handler(&platform::outOfMemory);
 		setMemoryQuota(opts.memLimit);

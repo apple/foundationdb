@@ -1,5 +1,5 @@
 /*
- * IConfigurationDatabase.h
+ * IConfigTransaction.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,12 +23,12 @@
 #include <memory>
 
 #include "fdbclient/CommitTransaction.h"
-#include "fdbclient/ConfigDatabaseInterface.h"
+#include "fdbclient/ConfigTransactionInterface.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "flow/flow.h"
 
-class IConfigurationTransaction {
+class IConfigTransaction {
 public:
 	virtual void set(KeyRef key, ValueRef value) = 0;
 	virtual void clearRange(KeyRef begin, KeyRef end) = 0;
@@ -38,12 +38,12 @@ public:
 	virtual void reset() = 0;
 };
 
-class SimpleConfigurationTransaction : public IConfigurationTransaction {
-	std::unique_ptr<class SimpleConfigurationTransactionImpl> impl;
+class SimpleConfigTransaction : public IConfigTransaction {
+	std::unique_ptr<class SimpleConfigTransactionImpl> impl;
 
 public:
-	SimpleConfigurationTransaction(ClusterConnectionString const&);
-	~SimpleConfigurationTransaction();
+	SimpleConfigTransaction(ClusterConnectionString const&);
+	~SimpleConfigTransaction();
 	void set(KeyRef begin, KeyRef end) override;
 	void clearRange(KeyRef begin, KeyRef end) override;
 	Future<Optional<Value>> get(KeyRef) override;

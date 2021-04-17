@@ -1,5 +1,5 @@
 /*
- * ConfigDatabaseInterface.h
+ * ConfigTransactionInterface.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,10 +26,10 @@
 #include "fdbrpc/fdbrpc.h"
 #include "flow/flow.h"
 
-struct ConfigDatabaseGetVersionReply {
+struct ConfigTransactionGetVersionReply {
 	static constexpr FileIdentifier file_identifier = 2934851;
-	ConfigDatabaseGetVersionReply() = default;
-	ConfigDatabaseGetVersionReply(Version version) : version(version) {}
+	ConfigTransactionGetVersionReply() = default;
+	ConfigTransactionGetVersionReply(Version version) : version(version) {}
 	Version version;
 
 	template <class Ar>
@@ -38,10 +38,10 @@ struct ConfigDatabaseGetVersionReply {
 	}
 };
 
-struct ConfigDatabaseGetVersionRequest {
+struct ConfigTransactionGetVersionRequest {
 	static constexpr FileIdentifier file_identifier = 138941;
-	ReplyPromise<ConfigDatabaseGetVersionReply> reply;
-	ConfigDatabaseGetVersionRequest() = default;
+	ReplyPromise<ConfigTransactionGetVersionReply> reply;
+	ConfigTransactionGetVersionRequest() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -49,11 +49,11 @@ struct ConfigDatabaseGetVersionRequest {
 	}
 };
 
-struct ConfigDatabaseGetReply {
+struct ConfigTransactionGetReply {
 	static constexpr FileIdentifier file_identifier = 2034110;
 	Optional<Value> value;
-	ConfigDatabaseGetReply() = default;
-	explicit ConfigDatabaseGetReply(Value const& value) : value(Optional<Value>(value)) {}
+	ConfigTransactionGetReply() = default;
+	explicit ConfigTransactionGetReply(Value const& value) : value(Optional<Value>(value)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -61,14 +61,14 @@ struct ConfigDatabaseGetReply {
 	}
 };
 
-struct ConfigDatabaseGetRequest {
+struct ConfigTransactionGetRequest {
 	static constexpr FileIdentifier file_identifier = 923040;
 	Version version;
 	KeyRef key;
-	ReplyPromise<ConfigDatabaseGetReply> reply;
+	ReplyPromise<ConfigTransactionGetReply> reply;
 
-	ConfigDatabaseGetRequest() = default;
-	explicit ConfigDatabaseGetRequest(Version version, KeyRef key) : version(version), key(key) {}
+	ConfigTransactionGetRequest() = default;
+	explicit ConfigTransactionGetRequest(Version version, KeyRef key) : version(version), key(key) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -76,14 +76,14 @@ struct ConfigDatabaseGetRequest {
 	}
 };
 
-struct ConfigDatabaseCommitRequest {
+struct ConfigTransactionCommitRequest {
 	static constexpr FileIdentifier file_identifier = 103841;
 	Version version;
 	Standalone<VectorRef<MutationRef>> mutations;
 	ReplyPromise<Void> reply;
 
-	ConfigDatabaseCommitRequest() = default;
-	ConfigDatabaseCommitRequest(Version version, Standalone<VectorRef<MutationRef>> mutations)
+	ConfigTransactionCommitRequest() = default;
+	ConfigTransactionCommitRequest(Version version, Standalone<VectorRef<MutationRef>> mutations)
 	  : version(version), mutations(mutations) {}
 
 	template <class Ar>
@@ -92,23 +92,23 @@ struct ConfigDatabaseCommitRequest {
 	}
 };
 
-struct ConfigDatabaseInterface {
+struct ConfigTransactionInterface {
 	static constexpr FileIdentifier file_identifier = 982485;
-	struct RequestStream<ConfigDatabaseGetVersionRequest> getVersion;
-	struct RequestStream<ConfigDatabaseGetRequest> get;
-	struct RequestStream<ConfigDatabaseCommitRequest> commit;
+	struct RequestStream<ConfigTransactionGetVersionRequest> getVersion;
+	struct RequestStream<ConfigTransactionGetRequest> get;
+	struct RequestStream<ConfigTransactionCommitRequest> commit;
 
-	ConfigDatabaseInterface() = default;
+	ConfigTransactionInterface() = default;
 
 	void setupWellKnownEndpoints() {
-		getVersion.makeWellKnownEndpoint(WLTOKEN_CONFIGDB_GETVERSION, TaskPriority::Coordination);
-		get.makeWellKnownEndpoint(WLTOKEN_CONFIGDB_GET, TaskPriority::Coordination);
-		commit.makeWellKnownEndpoint(WLTOKEN_CONFIGDB_COMMIT, TaskPriority::Coordination);
+		getVersion.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_GETVERSION, TaskPriority::Coordination);
+		get.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_GET, TaskPriority::Coordination);
+		commit.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_COMMIT, TaskPriority::Coordination);
 	}
 
-	ConfigDatabaseInterface(NetworkAddress const& remote)
-	  : getVersion(Endpoint({ remote }, WLTOKEN_CONFIGDB_GETVERSION)), get(Endpoint({ remote }, WLTOKEN_CONFIGDB_GET)),
-	    commit(Endpoint({ remote }, WLTOKEN_CONFIGDB_COMMIT)) {}
+	ConfigTransactionInterface(NetworkAddress const& remote)
+	  : getVersion(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GETVERSION)),
+	    get(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GET)), commit(Endpoint({ remote }, WLTOKEN_CONFIGTXN_COMMIT)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

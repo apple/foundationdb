@@ -31,6 +31,10 @@ constexpr UID WLTOKEN_LEADERELECTIONREG_FORWARD(-1, 7);
 constexpr UID WLTOKEN_GENERATIONREG_READ(-1, 8);
 constexpr UID WLTOKEN_GENERATIONREG_WRITE(-1, 9);
 
+constexpr UID WLTOKEN_CONFIGFOLLOWER_GETVERSION(-1, 14);
+constexpr UID WLTOKEN_CONFIGFOLLOWER_GETFULLDB(-1, 15);
+constexpr UID WLTOKEN_CONFIGFOLLOWER_GETCHANGES(-1, 16);
+
 struct GenerationRegInterface {
 	constexpr static FileIdentifier file_identifier = 16726744;
 	RequestStream<struct GenerationRegReadRequest> read;
