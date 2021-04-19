@@ -28,6 +28,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/ptxn/Config.h"
 #include "fdbserver/ptxn/test/FakeProxy.actor.h"
+#include "fdbserver/ptxn/test/FakeResolver.actor.h"
 #include "fdbserver/ptxn/test/FakeStorageServer.actor.h"
 #include "fdbserver/ptxn/test/FakeTLog.actor.h"
 #include "flow/UnitTest.h"
@@ -39,6 +40,7 @@ namespace ptxn {
 static const int NUM_COMMITS = 3;
 static const int NUM_TEAMS = 10;
 static const int NUM_PROXIES = 1;
+static const int NUM_RESOLVERS = 2;
 static const int NUM_TLOGS = 3;
 static const int NUM_STORAGE_SERVERS = 3;
 static const MessageTransferModel MESSAGE_TRANSFER_MODEL = MessageTransferModel::TLogActivelyPush;
@@ -61,6 +63,9 @@ std::shared_ptr<TestDriverContext> initTestDriverContext() {
 
 	// Prepare Proxies
 	context->numProxies = NUM_PROXIES;
+
+	// Prepare Resolvers
+	context->numResolvers = NUM_RESOLVERS;
 
 	// Prepare TLogInterfaces
 	context->numTLogs = NUM_TLOGS;
@@ -106,6 +111,24 @@ void startFakeProxy(std::vector<Future<Void>>& actors, std::shared_ptr<TestDrive
 	for (int i = 0; i < pTestDriverContext->numProxies; ++i) {
 		std::shared_ptr<FakeProxyContext> pFakeProxyContext(new FakeProxyContext{ NUM_COMMITS, pTestDriverContext });
 		actors.emplace_back(fakeProxy(pFakeProxyContext));
+	}
+}
+
+// Starts all fake resolvers. For now, use "resolverCore" to start the actor.
+// TODO: change to "resolver" after we have fake ServerDBInfo object.
+void startFakeResolver(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext) {
+	for (int i = 0; i < pTestDriverContext->numResolvers; ++i) {
+		ResolverInterface recruited;
+		// recruited.locality = locality;
+		recruited.initEndpoints();
+
+		InitializeResolverRequest req;
+		req.recoveryCount = 1;
+		req.commitProxyCount = pTestDriverContext->numProxies;
+		req.resolverCount = pTestDriverContext->numResolvers;
+
+		Future<Void> core = ::resolverCore(recruited, req);
+		actors.emplace_back(core);
 	}
 }
 
@@ -214,6 +237,20 @@ TEST_CASE("/fdbserver/ptxn/test/driver") {
 	startFakeStorageServer(actors, context);
 
 	wait(quorum(actors, 1));
+
+	return Void();
+}
+
+TEST_CASE("fdbserver/ptxn/test/resolver") {
+	using namespace ptxn;
+
+	std::vector<Future<Void>> actors;
+	std::shared_ptr<TestDriverContext> context = initTestDriverContext();
+
+	startFakeResolver(actors, context);
+	std::cout<<"Started " << context->numResolvers << " Resolvers\n";
+
+	wait(delay(10.0)); // Exits after 10s
 
 	return Void();
 }

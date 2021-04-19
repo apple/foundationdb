@@ -116,6 +116,7 @@ set(FDBSERVER_SRCS
   ptxn/test/Driver.h
   ptxn/test/FakeProxy.actor.cpp
   ptxn/test/FakeProxy.actor.h
+  ptxn/test/FakeResolver.actor.h
   ptxn/test/FakeStorageServer.actor.cpp
   ptxn/test/FakeStorageServer.actor.h
   ptxn/test/FakeTLog.actor.cpp
