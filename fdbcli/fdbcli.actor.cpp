@@ -24,6 +24,7 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ClusterInterface.h"
@@ -3841,25 +3842,16 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								is_error = true;
 								continue;
 							}
-							state Future<Optional<Standalone<StringRef>>> sampleRateFuture =
-							    tr->get(fdbClientInfoTxnSampleRate);
-							state Future<Optional<Standalone<StringRef>>> sizeLimitFuture =
-							    tr->get(fdbClientInfoTxnSizeLimit);
-							wait(makeInterruptable(success(sampleRateFuture) && success(sizeLimitFuture)));
+							const double sampleRateDbl = GlobalConfig::globalConfig().get<double>(
+							    fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
+							const int64_t sizeLimit =
+							    GlobalConfig::globalConfig().get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
 							std::string sampleRateStr = "default", sizeLimitStr = "default";
-							if (sampleRateFuture.get().present()) {
-								const double sampleRateDbl =
-								    BinaryReader::fromStringRef<double>(sampleRateFuture.get().get(), Unversioned());
-								if (!std::isinf(sampleRateDbl)) {
-									sampleRateStr = boost::lexical_cast<std::string>(sampleRateDbl);
-								}
+							if (!std::isinf(sampleRateDbl)) {
+								sampleRateStr = boost::lexical_cast<std::string>(sampleRateDbl);
 							}
-							if (sizeLimitFuture.get().present()) {
-								const int64_t sizeLimit =
-								    BinaryReader::fromStringRef<int64_t>(sizeLimitFuture.get().get(), Unversioned());
-								if (sizeLimit != -1) {
-									sizeLimitStr = boost::lexical_cast<std::string>(sizeLimit);
-								}
+							if (sizeLimit != -1) {
+								sizeLimitStr = boost::lexical_cast<std::string>(sizeLimit);
 							}
 							printf("Client profiling rate is set to %s and size limit is set to %s.\n",
 							       sampleRateStr.c_str(),
@@ -3897,8 +3889,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 									continue;
 								}
 							}
-							tr->set(fdbClientInfoTxnSampleRate, BinaryWriter::toValue(sampleRate, Unversioned()));
-							tr->set(fdbClientInfoTxnSizeLimit, BinaryWriter::toValue(sizeLimit, Unversioned()));
+
+							Tuple rate = Tuple().appendDouble(sampleRate);
+							Tuple size = Tuple().append(sizeLimit);
+							tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+							tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate), rate.pack());
+							tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit), size.pack());
 							if (!intrans) {
 								wait(commitTransaction(tr));
 							}

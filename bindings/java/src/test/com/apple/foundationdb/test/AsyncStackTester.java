@@ -510,6 +510,12 @@ public class AsyncStackTester {
 				db.options().setTransactionCausalReadRisky();
 				db.options().setTransactionIncludePortInAddress();
 
+				// Test network busyness
+				double busyness = db.getMainThreadBusyness();
+				if (busyness < 0) {
+					throw new IllegalStateException("Network busyness cannot be less than 0");
+				}
+
 				tr.options().setPrioritySystemImmediate();
 				tr.options().setPriorityBatch();
 				tr.options().setCausalReadRisky();
