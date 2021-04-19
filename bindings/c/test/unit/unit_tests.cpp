@@ -1513,17 +1513,17 @@ TEST_CASE("fdb_transaction_get_approximate_size") {
 	}
 }
 
-TEST_CASE("fdb_get_server_protocol") {
+TEST_CASE("fdb_database_get_server_protocol") {
 	// We don't really have any expectations other than "don't crash" here
-	FDBFuture* protocolFuture = fdb_get_server_protocol(clusterFilePath.c_str());
+	FDBFuture* protocolFuture = fdb_database_get_server_protocol(db, 0);
 	uint64_t out;
 
 	fdb_check(fdb_future_block_until_ready(protocolFuture));
 	fdb_check(fdb_future_get_uint64(protocolFuture, &out));
 	fdb_future_destroy(protocolFuture);
 
-	// "Default" cluster file version
-	protocolFuture = fdb_get_server_protocol(nullptr);
+	// Passing in an expected version that's different than the cluster version
+	protocolFuture = fdb_database_get_server_protocol(db, 0x0FDB00A200090000LL);
 	fdb_check(fdb_future_block_until_ready(protocolFuture));
 	fdb_check(fdb_future_get_uint64(protocolFuture, &out));
 	fdb_future_destroy(protocolFuture);
