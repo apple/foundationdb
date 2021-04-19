@@ -147,6 +147,7 @@ public:
 		CONFIGURATION, // Configuration of the cluster
 		CONNECTIONSTRING,
 		ERRORMSG, // A single key space contains a json string which describes the last error in special-key-space
+		GLOBALCONFIG, // Global configuration options synchronized to all nodes
 		MANAGEMENT, // Management-API
 		METRICS, // data-distribution metrics
 		TESTONLY, // only used by correctness tests
@@ -335,6 +336,16 @@ public:
 	explicit ConsistencyCheckImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
+class GlobalConfigImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit GlobalConfigImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
 };
 
 class TracingOptionsImpl : public SpecialKeyRangeRWImpl {
