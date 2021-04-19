@@ -97,6 +97,15 @@ double ThreadSafeDatabase::getMainThreadBusyness() {
 	return g_network->networkInfo.metrics.networkBusyness;
 }
 
+// Returns the protocol version reported by a quorum of coordinators
+// If an expected version is given, the future won't return until the protocol version is different than expected
+ThreadFuture<ProtocolVersion> ThreadSafeDatabase::getServerProtocol(Optional<ProtocolVersion> expectedVersion) {
+	DatabaseContext* db = this->db;
+	return onMainThread([db, expectedVersion]() -> Future<ProtocolVersion> {
+		return getClusterProtocol(db->getConnectionFile(), expectedVersion);
+	});
+}
+
 ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
 	ClusterConnectionFile* connFile =
 	    new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFilename).first);
@@ -405,16 +414,6 @@ void ThreadSafeApi::selectApiVersion(int apiVersion) {
 const char* ThreadSafeApi::getClientVersion() {
 	// There is only one copy of the ThreadSafeAPI, and it never gets deleted. Also, clientVersion is never modified.
 	return clientVersion.c_str();
-}
-
-// Wait until a quorum of coordinators with the same protocol version are available, and then return that protocol
-// version.
-ThreadFuture<uint64_t> ThreadSafeApi::getServerProtocol(const char* clusterFilePath) {
-	return onMainThread([clusterFilePath = std::string(clusterFilePath)]() -> Future<uint64_t> {
-		auto [clusterFile, isDefault] = ClusterConnectionFile::lookupClusterFileName(clusterFilePath);
-		Reference<ClusterConnectionFile> f = Reference<ClusterConnectionFile>(new ClusterConnectionFile(clusterFile));
-		return getCoordinatorProtocols(f);
-	});
 }
 
 void ThreadSafeApi::setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {
