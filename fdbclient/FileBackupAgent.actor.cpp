@@ -323,14 +323,13 @@ public:
 
 	ACTOR static Future<Version> getCurrentVersion_impl(RestoreConfig* self, Reference<ReadYourWritesTransaction> tr) {
 		state ERestoreState status = wait(self->stateEnum().getD(tr));
+		state Version version = -1;
 		if (status == ERestoreState::RUNNING) {
-			Version version = wait(self->getApplyBeginVersion(tr));
-			return version;
+			wait(store(version, self->getApplyBeginVersion(tr)));
 		} else if (status == ERestoreState::COMPLETED) {
-			Version version = wait(self->restoreVersion().getD(tr));
-			return version;
+			wait(store(version, self->restoreVersion().getD(tr)));
 		}
-		return -1;
+		return version;
 	}
 
 	Future<Version> getCurrentVersion(Reference<ReadYourWritesTransaction> tr) {
