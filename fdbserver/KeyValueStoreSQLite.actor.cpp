@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #define SQLITE_THREADSAFE 0 // also in sqlite3.amalgamation.c!
 
 #include <variant>
@@ -959,16 +960,16 @@ struct RawCursor {
 	// Once either method returns a non-present value, using the DefragmentingReader again is undefined behavior.
 	struct DefragmentingReader {
 		// Use this constructor for forward/backward range reads
-		DefragmentingReader(RawCursor& cur, Arena& m, bool forward)
-		  : cur(cur), arena(m), forward(forward), fragmentReadLimit(-1) {
+		DefragmentingReader(RawCursor& cur, Arena& m, bool forward, bool useArena)
+		  : cur(cur), arena(m), forward(forward), fragmentReadLimit(-1), useArena(useArena) {
 			parse();
 		}
 
 		// Use this constructor to read a SINGLE partial value from the current cursor position for an expected key.
 		// This exists to support IKeyValueStore::getPrefix().
 		// The reader will return exactly one KV pair if its key matches expectedKey, otherwise no KV pairs.
-		DefragmentingReader(RawCursor& cur, Arena& m, KeyRef expectedKey, int maxValueLen)
-		  : cur(cur), arena(m), forward(true), maxValueLen(maxValueLen) {
+		DefragmentingReader(RawCursor& cur, Arena& m, KeyRef expectedKey, int maxValueLen, bool useArena)
+		  : cur(cur), arena(m), forward(true), maxValueLen(maxValueLen), useArena(useArena) {
 			fragmentReadLimit = getEncodedKVFragmentSize(expectedKey.size(), maxValueLen);
 			parse();
 			// If a key was found but it wasn't the expected key then
@@ -984,7 +985,7 @@ struct RawCursor {
 		uint32_t index; // index of latest value fragment read
 		RawCursor& cur; // Cursor to read from
 		Arena& arena; // Arena to allocate key and value bytes in
-		bool forward; // true for forward iteration, false for reverse
+		bool forward, useArena; // true for forward iteration, false for reverse
 		int maxValueLen; // truncated value length to return
 		int fragmentReadLimit; // If >= 0, only read and *attempt* to decode this many fragment bytes
 
@@ -1050,9 +1051,12 @@ struct RawCursor {
 
 			// If index is 0 then this is an unfragmented key.  It is unnecessary to advance the cursor so
 			// we won't, but we will clear kv so that the next peek/getNext will have to advance.
-			if (index == 0)
+			if (index == 0) {
 				kv = Optional<KeyValueRef>();
-			else {
+				if (useArena) {
+					resultKV = KeyValueRef(arena, resultKV);
+				}
+			} else {
 				// First and last indexes in fragment group are size hints.
 				//   First index is ceil(total_value_size / 4)
 				//   Last  index is ceil(total_value_size / 2)
@@ -1121,7 +1125,7 @@ struct RawCursor {
 			if (r < 0)
 				moveNext();
 			Arena m;
-			DefragmentingReader i(*this, m, true);
+			DefragmentingReader i(*this, m, true, false);
 			if (i.peek() == key) {
 				Optional<KeyValueRef> kv = i.getNext();
 				return Value(kv.get().value, m);
@@ -1141,7 +1145,7 @@ struct RawCursor {
 			if (r < 0)
 				moveNext();
 			Arena m;
-			DefragmentingReader i(*this, m, getEncodedKVFragmentSize(key.size(), maxLength));
+			DefragmentingReader i(*this, m, getEncodedKVFragmentSize(key.size(), maxLength), false);
 			if (i.peek() == key) {
 				Optional<KeyValueRef> kv = i.getNext();
 				return Value(kv.get().value, m);
@@ -1161,13 +1165,12 @@ struct RawCursor {
 
 	Void readRangeResultWriter(KeyRangeRef keys, Reference<IReadRangeResultWriter> resultWriter, int rowLimit) {
 		// Read range implementation using a result writer
-		Arena arena;
 		if (rowLimit == 0) {
 			return Void();
 		}
 		if (db.fragment_values) {
 			if (rowLimit > 0) { // return results in asc order
-				DefragmentingReader i(*this, arena, true);
+				DefragmentingReader i(*this, resultWriter->getArena(), true, true);
 				i.moveTo(keys.begin);
 				Optional<KeyRef> nextKey = i.peek();
 				while (nextKey.present() && nextKey.get() < keys.end) {
@@ -1183,7 +1186,7 @@ struct RawCursor {
 					nextKey = i.peek();
 				}
 			} else { // return results in desc order
-				DefragmentingReader i(*this, arena, false);
+				DefragmentingReader i(*this, resultWriter->getArena(), false, true);
 				i.moveTo(keys.end);
 				Optional<KeyRef> nextKey = i.peek();
 				while (nextKey.present() && nextKey.get() >= keys.begin) {
@@ -1206,7 +1209,7 @@ struct RawCursor {
 					moveNext();
 				}
 				while (this->valid) {
-					KeyValueRef kv = decodeKV(getEncodedRow(arena));
+					KeyValueRef kv = decodeKV(getEncodedRow(resultWriter->getArena()));
 					if (kv.key >= keys.end) {
 						break;
 					}
@@ -1230,7 +1233,7 @@ struct RawCursor {
 					movePrevious();
 				}
 				while (this->valid) {
-					KeyValueRef kv = decodeKV(getEncodedRow(arena));
+					KeyValueRef kv = decodeKV(getEncodedRow(resultWriter->getArena()));
 					if (kv.key < keys.begin) {
 						break;
 					}
@@ -1269,7 +1272,7 @@ struct RawCursor {
 				if (r < 0)
 					moveNext();
 
-				DefragmentingReader i(*this, result.arena(), true);
+				DefragmentingReader i(*this, result.arena(), true, false);
 				Optional<KeyRef> nextKey = i.peek();
 				while (nextKey.present() && nextKey.get() < keys.end && rowLimit != 0 && accumulatedBytes < byteLimit) {
 					Optional<KeyValueRef> kv = i.getNext();
@@ -1282,7 +1285,7 @@ struct RawCursor {
 				int r = moveTo(keys.end);
 				if (r >= 0)
 					movePrevious();
-				DefragmentingReader i(*this, result.arena(), false);
+				DefragmentingReader i(*this, result.arena(), false, false);
 				Optional<KeyRef> nextKey = i.peek();
 				while (nextKey.present() && nextKey.get() >= keys.begin && rowLimit != 0 &&
 				       accumulatedBytes < byteLimit) {

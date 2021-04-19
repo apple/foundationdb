@@ -145,9 +145,13 @@ struct ClearRangeResultWriter : public IReadRangeResultWriter {
 			return forward ? clearEnd.get() : clearStart.get();
 		}
 		rowLimit--;
-		result.push_back_deep(result.arena(), kv.get());
+		result.push_back(result.arena(), kv.get());
 		byteLimit -= (sizeof(KeyValueRef) + kv.get().expectedSize());
 		return true;
+	}
+
+	Arena& getArena() override {
+		return result.arena();
 	}
 };
 

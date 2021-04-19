@@ -947,21 +947,21 @@ public:
 	*/
 	std::variant<bool, KeyRef> operator()(Optional<KeyValueRef> kvOpt) override {
 		try {
+			if (data->storageVersion() >
+			    version) { // The transaction is too old so we can no longer read from the ptree
+				error = transaction_too_old();
+				return false;
+			}
 			if (forward) { // limit >= 0 (results in asc order)
 				loop {
 					if (done) // If the storage server shuts down (or something related) then end the read range
 						return false;
-					if (data->storageVersion() >
-					    version) { // The transaction is too old so we can no longer read from the ptree
-						error = transaction_too_old();
-						return false;
-					}
 					if (limit <= 0 || *pLimitBytes <= 0) // exceed limit constraints
 						return false;
 					if (!vCurrent || vCurrent.key() >= range.end) {
 						// If the ptree exceeds the range then only add kv pairs from the storage engine
 						if (kvOpt.present()) {
-							result.data.push_back_deep(result.arena, kvOpt.get());
+							result.data.push_back(result.arena, kvOpt.get());
 							decrementLimits(kvOpt.get());
 						}
 						return true;
@@ -975,7 +975,7 @@ public:
 							++vCurrent;
 							continue;
 						}
-						result.data.emplace_back_deep(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
+						result.data.emplace_back(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
 						decrementLimits(result.data.back());
 						++vCurrent;
 						continue;
@@ -986,7 +986,7 @@ public:
 					if (kv.key < vCurrent.key()) {
 						// If the key from the storage engine is smaller than the ptree key
 						// then add the storage engine key to the results
-						result.data.push_back_deep(result.arena, kv);
+						result.data.push_back(result.arena, kv);
 						decrementLimits(kv);
 						return true;
 					} else if (vCurrent->isClearTo()) {
@@ -1000,13 +1000,13 @@ public:
 					} else if (kv.key == vCurrent.key()) {
 						// If the key on disk equals the key in the ptree then use the one from the ptree (as its more
 						// recent)
-						result.data.emplace_back_deep(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
+						result.data.emplace_back(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
 						decrementLimits(result.data.back());
 						++vCurrent;
 						return true;
 					} else {
 						// Add the key from the ptree if its less than the one on disk
-						result.data.emplace_back_deep(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
+						result.data.emplace_back(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
 						decrementLimits(result.data.back());
 						++vCurrent;
 					}
@@ -1015,18 +1015,13 @@ public:
 				loop {
 					if (done) // If the storage server shuts down (or something related) then end the read range
 						return false;
-					if (data->storageVersion() >
-					    version) { // The transaction is too old so we can no longer read from the ptree
-						error = transaction_too_old();
-						return false;
-					}
 					if (limit >= 0 || *pLimitBytes <= 0) // exceed limit constraints
 						return false;
 					if (!vCurrent || (!vCurrent->isClearTo() && vCurrent.key() < range.begin) ||
 					    (vCurrent->isClearTo() && vCurrent->getEndKey() < range.begin)) {
 						// if the ptree key appears before the given range then only add results from disk
 						if (kvOpt.present()) {
-							result.data.push_back_deep(result.arena, kvOpt.get());
+							result.data.push_back(result.arena, kvOpt.get());
 							decrementLimits(kvOpt.get());
 						}
 						return true;
@@ -1040,7 +1035,7 @@ public:
 							--vCurrent;
 							continue;
 						}
-						result.data.emplace_back_deep(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
+						result.data.emplace_back(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
 						decrementLimits(result.data.back());
 						--vCurrent;
 						continue;
@@ -1051,7 +1046,7 @@ public:
 					if ((vCurrent->isClearTo() && kv.key > vCurrent->getEndKey()) ||
 					    (!vCurrent->isClearTo() && kv.key > vCurrent.key())) {
 						// the key on disk is larger than the one in the ptree so go with the key on disk
-						result.data.push_back_deep(result.arena, kv);
+						result.data.push_back(result.arena, kv);
 						decrementLimits(kv);
 						return true;
 					} else if (vCurrent->isClearTo()) {
@@ -1062,7 +1057,7 @@ public:
 							// caught by case above). Since a clear range is non inclusive of the last element, if
 							// kv.key
 							// == end of clear range then we must add it to the result set
-							result.data.push_back_deep(result.arena, kv);
+							result.data.push_back(result.arena, kv);
 							decrementLimits(kv);
 						}
 						--vCurrent;
@@ -1073,13 +1068,13 @@ public:
 					} else if (kv.key == vCurrent.key()) {
 						// If the key on disk equals the key in the ptree then use the one from the ptree (as its more
 						// recent)
-						result.data.emplace_back_deep(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
+						result.data.emplace_back(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
 						decrementLimits(result.data.back());
 						--vCurrent;
 						return true;
 					} else {
 						// ptree key is larger than the on disk key so add it to the result set
-						result.data.emplace_back_deep(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
+						result.data.emplace_back(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
 						decrementLimits(result.data.back());
 						--vCurrent;
 					}
@@ -1089,6 +1084,10 @@ public:
 			error = e;
 			return false;
 		}
+	}
+
+	Arena& getArena() override {
+		return result.arena;
 	}
 };
 

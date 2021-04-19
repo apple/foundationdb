@@ -53,6 +53,8 @@ struct IReadRangeResultWriter : public ReferenceCounted<IReadRangeResultWriter> 
 	  - Note: kv should only be empty to indicate that there are no more results on disk
 	*/
 	virtual std::variant<bool, KeyRef> operator()(Optional<KeyValueRef> kv) = 0;
+
+	virtual Arena& getArena() = 0;
 };
 
 class IKeyValueStore : public IClosable {
