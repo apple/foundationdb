@@ -2614,6 +2614,8 @@ struct RedwoodRecordRef {
 		}
 	}
 
+	typedef KeyRef Partial;
+
 	KeyValueRef toKeyValueRef() const { return KeyValueRef(key, value.get()); }
 
 	// RedwoodRecordRefs are used for both internal and leaf pages of the BTree.
@@ -2922,6 +2924,10 @@ struct RedwoodRecordRef {
 
 		bool getDeleted() const { return flags & IS_DELETED; }
 
+		RedwoodRecordRef apply(const Partial& cache) {
+			return RedwoodRecordRef(cache, 0, hasValue() ? Optional<ValueRef>(getValue()) : Optional<ValueRef>());
+		}
+
 		RedwoodRecordRef apply(const RedwoodRecordRef& base, Arena& arena) const {
 			int keyPrefixLen = getKeyPrefixLength();
 			int keySuffixLen = getKeySuffixLength();
@@ -2952,6 +2958,13 @@ struct RedwoodRecordRef {
 			}
 
 			return RedwoodRecordRef(k, v, value);
+		}
+
+		RedwoodRecordRef apply(Arena& arena, const RedwoodRecordRef& base, Optional<Partial>& cache) {
+			RedwoodRecordRef rec = apply(base, arena);
+			cache = rec.key;
+
+			return rec;
 		}
 
 		int size() const {
@@ -3007,13 +3020,16 @@ struct RedwoodRecordRef {
 	// its values, so the Reader does not require the original prev/next ancestors.
 	struct DeltaValueOnly : Delta {
 		RedwoodRecordRef apply(const RedwoodRecordRef& base, Arena& arena) const {
-			Optional<ValueRef> value;
+			return RedwoodRecordRef(KeyRef(), 0, hasValue() ? Optional<ValueRef>(getValue()) : Optional<ValueRef>());
+		}
 
-			if (hasValue()) {
-				value = getValue();
-			}
+		RedwoodRecordRef apply(const Partial& cache) {
+			return RedwoodRecordRef(KeyRef(), 0, hasValue() ? Optional<ValueRef>(getValue()) : Optional<ValueRef>());
+		}
 
-			return RedwoodRecordRef(StringRef(), 0, value);
+		RedwoodRecordRef apply(Arena& arena, const RedwoodRecordRef& base, Optional<Partial>& cache) {
+			cache = KeyRef();
+			return RedwoodRecordRef(KeyRef(), 0, hasValue() ? Optional<ValueRef>(getValue()) : Optional<ValueRef>());
 		}
 	};
 #pragma pack(pop)
@@ -7561,6 +7577,187 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 		double elapsed = timer() - start;
 		printf("Elapsed %f\n", elapsed);
 	}
+
+	return Void();
+}
+
+TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
+	// Sanity check on delta tree node format
+	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(false) == 8);
+	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(true) == 16);
+
+	const int N = deterministicRandom()->randomInt(200, 1000);
+
+	RedwoodRecordRef prev;
+	RedwoodRecordRef next(LiteralStringRef("\xff\xff\xff\xff"));
+
+	Arena arena;
+	std::set<RedwoodRecordRef> uniqueItems;
+
+	// Add random items to uniqueItems until its size is N
+	while (uniqueItems.size() < N) {
+		std::string k = deterministicRandom()->randomAlphaNumeric(30);
+		std::string v = deterministicRandom()->randomAlphaNumeric(30);
+		RedwoodRecordRef rec;
+		rec.key = StringRef(arena, k);
+		rec.version = 0; // deterministicRandom()->coinflip()
+		                 // ? deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max())
+		                 // : invalidVersion;
+		if (deterministicRandom()->coinflip()) {
+			rec.value = StringRef(arena, v);
+		}
+		if (uniqueItems.count(rec) == 0) {
+			uniqueItems.insert(rec);
+		}
+	}
+	std::vector<RedwoodRecordRef> items(uniqueItems.begin(), uniqueItems.end());
+
+	int bufferSize = N * 100;
+	bool largeTree = bufferSize > DeltaTree2<RedwoodRecordRef>::SmallSizeLimit;
+	DeltaTree2<RedwoodRecordRef>* tree = (DeltaTree2<RedwoodRecordRef>*)new uint8_t[bufferSize];
+
+	tree->build(bufferSize, &items[0], &items[items.size()], &prev, &next);
+
+	printf("Count=%d  Size=%d  InitialHeight=%d  largeTree=%d\n",
+	       (int)items.size(),
+	       (int)tree->size(),
+	       (int)tree->initialHeight,
+	       largeTree);
+	debug_printf("Data(%p): %s\n", tree, StringRef((uint8_t*)tree, tree->size()).toHexString().c_str());
+
+	DeltaTree2<RedwoodRecordRef>::DecodeCache cache(prev, next);
+	DeltaTree2<RedwoodRecordRef>::Cursor c(&cache, tree);
+
+	// Test delete/insert behavior for each item, making no net changes
+	printf("Testing seek/delete/insert for existing keys with random values\n");
+	ASSERT(tree->numItems == items.size());
+	for (auto rec : items) {
+		// Insert existing should fail
+		ASSERT(!c.insert(rec));
+		ASSERT(tree->numItems == items.size());
+
+		// Erase existing should succeed
+		ASSERT(c.erase(rec));
+		ASSERT(tree->numItems == items.size() - 1);
+
+		// Erase deleted should fail
+		ASSERT(!c.erase(rec));
+		ASSERT(tree->numItems == items.size() - 1);
+
+		// Insert deleted should succeed
+		ASSERT(c.insert(rec));
+		ASSERT(tree->numItems == items.size());
+
+		// Insert existing should fail
+		ASSERT(!c.insert(rec));
+		ASSERT(tree->numItems == items.size());
+	}
+
+	DeltaTree2<RedwoodRecordRef>::Cursor fwd = c;
+	DeltaTree2<RedwoodRecordRef>::Cursor rev = c;
+
+	DeltaTree2<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly>::DecodeCache cacheValuesOnly(prev, next);
+	DeltaTree2<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly>::Cursor fwdValueOnly(
+	    &cacheValuesOnly, (DeltaTree2<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly>*)tree);
+
+	printf("Verifying tree contents using forward, reverse, and value-only iterators\n");
+	ASSERT(fwd.moveFirst());
+	ASSERT(fwdValueOnly.moveFirst());
+	ASSERT(rev.moveLast());
+
+	int i = 0;
+	while (1) {
+		if (fwd.get() != items[i]) {
+			printf("forward iterator i=%d\n  %s found\n  %s expected\n",
+			       i,
+			       fwd.get().toString().c_str(),
+			       items[i].toString().c_str());
+			printf("Cursor: %s\n", fwd.toString().c_str());
+			ASSERT(false);
+		}
+		if (rev.get() != items[items.size() - 1 - i]) {
+			printf("reverse iterator i=%d\n  %s found\n  %s expected\n",
+			       i,
+			       rev.get().toString().c_str(),
+			       items[items.size() - 1 - i].toString().c_str());
+			printf("Cursor: %s\n", rev.toString().c_str());
+			ASSERT(false);
+		}
+		if (fwdValueOnly.get().value != items[i].value) {
+			printf("forward values-only iterator i=%d\n  %s found\n  %s expected\n",
+			       i,
+			       fwdValueOnly.get().toString().c_str(),
+			       items[i].toString().c_str());
+			printf("Cursor: %s\n", fwdValueOnly.toString().c_str());
+			ASSERT(false);
+		}
+		++i;
+
+		bool more = fwd.moveNext();
+		ASSERT(fwdValueOnly.moveNext() == more);
+		ASSERT(rev.movePrev() == more);
+
+		ASSERT(fwd.valid() == more);
+		ASSERT(fwdValueOnly.valid() == more);
+		ASSERT(rev.valid() == more);
+
+		if (!fwd.valid()) {
+			break;
+		}
+	}
+	ASSERT(i == items.size());
+
+	{
+		DeltaTree2<RedwoodRecordRef>::DecodeCache cache(prev, next);
+		DeltaTree2<RedwoodRecordRef>::Cursor c(&cache, tree);
+
+		printf("Doing 20M random seeks using the same cursor from the same mirror.\n");
+		double start = timer();
+
+		for (int i = 0; i < 20000000; ++i) {
+			const RedwoodRecordRef& query = items[deterministicRandom()->randomInt(0, items.size())];
+			if (!c.seekLessThanOrEqual(query)) {
+				printf("Not found!  query=%s\n", query.toString().c_str());
+				ASSERT(false);
+			}
+			if (c.get() != query) {
+				printf("Found incorrect node!  query=%s  found=%s\n",
+				       query.toString().c_str(),
+				       c.get().toString().c_str());
+				ASSERT(false);
+			}
+		}
+		double elapsed = timer() - start;
+		printf("Elapsed %f\n", elapsed);
+	}
+
+	// {
+	// 	printf("Doing 5M random seeks using 10k random cursors, each from a different mirror.\n");
+	// 	double start = timer();
+	// 	std::vector<DeltaTree2<RedwoodRecordRef>::Mirror*> mirrors;
+	// 	std::vector<DeltaTree2<RedwoodRecordRef>::Cursor> cursors;
+	// 	for (int i = 0; i < 10000; ++i) {
+	// 		mirrors.push_back(new DeltaTree2<RedwoodRecordRef>::Mirror(tree, &prev, &next));
+	// 		cursors.push_back(mirrors.back()->getCursor());
+	// 	}
+
+	// 	for (int i = 0; i < 5000000; ++i) {
+	// 		const RedwoodRecordRef& query = items[deterministicRandom()->randomInt(0, items.size())];
+	// 		DeltaTree2<RedwoodRecordRef>::Cursor& c = cursors[deterministicRandom()->randomInt(0, cursors.size())];
+	// 		if (!c.seekLessThanOrEqual(query)) {
+	// 			printf("Not found!  query=%s\n", query.toString().c_str());
+	// 			ASSERT(false);
+	// 		}
+	// 		if (c.get() != query) {
+	// 			printf("Found incorrect node!  query=%s  found=%s\n",
+	// 			       query.toString().c_str(),
+	// 			       c.get().toString().c_str());
+	// 			ASSERT(false);
+	// 		}
+	// 	}
+	// 	double elapsed = timer() - start;
+	// 	printf("Elapsed %f\n", elapsed);
+	// }
 
 	return Void();
 }

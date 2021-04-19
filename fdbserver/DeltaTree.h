@@ -26,7 +26,8 @@
 #include "fdbserver/Knobs.h"
 #include <string.h>
 
-#define deltatree_printf(args...)
+#define deltatree_printf(...)
+//#define deltatree_printf(...) printf(__VA_ARGS__)
 
 typedef uint64_t Word;
 // Get the number of prefix bytes that are the same between a and b, up to their common length of cl
@@ -872,9 +873,9 @@ private:
 		int deltaSize = item.writeDelta(node.delta(largeNodes), *base, commonPrefix);
 		node.delta(largeNodes).setPrefixSource(prefixSourcePrev);
 		deltatree_printf("Serialized %s to offset %d data: %s\n",
-		       item.toString().c_str(),
-		       (uint8_t*)&node - (uint8_t*)this,
-		       StringRef((uint8_t*)&node.delta(largeNodes), deltaSize).toHexString().c_str());
+		                 item.toString().c_str(),
+		                 (uint8_t*)&node - (uint8_t*)this,
+		                 StringRef((uint8_t*)&node.delta(largeNodes), deltaSize).toHexString().c_str());
 
 		// Continue writing after the serialized Delta.
 		uint8_t* wptr = (uint8_t*)&node.delta(largeNodes) + deltaSize;
