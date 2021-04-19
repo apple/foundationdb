@@ -3677,34 +3677,6 @@ void setupRunLoopProfiler() {
 #endif
 }
 
-void* sampleThread(void* arg) {
-	while (true) {
-		threadSleep(1.0); // TODO: Read sample rate from global config
-
-		// Get actor lineage of currently running actor.
-		auto actorLineage = currentLineageThreadSafe.get();
-		// TODO: Use actorLineage
-
-		for (const auto& [waitState, lineageFn] : samples) {
-			auto alps = lineageFn();
-
-			// TODO: Serialize collected actor linage properties
-		}
-	}
-
-	return nullptr;
-}
-
-void setupSamplingProfiler() {
-	samples[WaitState::Disk] = std::bind(&ActorLineageSet::copy, std::ref(g_network->getActorLineageSet()));
-	samples[WaitState::Network] =
-	    std::bind(&ActorLineageSet::copy, std::ref(IAsyncFileSystem::filesystem()->getActorLineageSet()));
-
-	// TODO: Add knob
-	TraceEvent("StartingSamplingProfilerThread");
-	startThread(&sampleThread, nullptr);
-}
-
 // UnitTest for getMemoryInfo
 #ifdef __linux__
 TEST_CASE("/flow/Platform/getMemoryInfo") {

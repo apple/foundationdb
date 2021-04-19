@@ -1801,7 +1801,6 @@ void runNetwork() {
 	if (networkOptions.traceDirectory.present() && networkOptions.runLoopProfilingEnabled) {
 		setupRunLoopProfiler();
 	}
-	setupSamplingProfiler();
 
 	g_network->run();
 
@@ -2483,9 +2482,11 @@ ACTOR Future<Version> watchValue(Future<Version> version,
 				cx->invalidateCache(key);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 			} else if (e.code() == error_code_watch_cancelled || e.code() == error_code_process_behind) {
+				// clang-format off
 				TEST(e.code() == error_code_watch_cancelled); // Too many watches on the storage server, poll for changes instead
 				TEST(e.code() == error_code_watch_cancelled); // Too many watches on storage server, poll for changes
 				TEST(e.code() == error_code_process_behind); // The storage servers are all behind
+				// clang-format on
 				wait(delay(CLIENT_KNOBS->WATCH_POLLING_TIME, info.taskID));
 			} else if (e.code() == error_code_timed_out) { // The storage server occasionally times out watches in case
 				                                           // it was cancelled
