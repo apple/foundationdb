@@ -632,7 +632,18 @@ std::string encodeFailedServersKey(AddressExclusion const& addr) {
 	return failedServersPrefix.toString() + addr.toString();
 }
 
-const KeyRangeRef workerListKeys(LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0"));
+// const KeyRangeRef globalConfigKeys( LiteralStringRef("\xff/globalConfig/"), LiteralStringRef("\xff/globalConfig0") );
+// const KeyRef globalConfigPrefix = globalConfigKeys.begin;
+
+const KeyRangeRef globalConfigDataKeys( LiteralStringRef("\xff/globalConfig/k/"), LiteralStringRef("\xff/globalConfig/k0") );
+const KeyRef globalConfigKeysPrefix = globalConfigDataKeys.begin;
+
+const KeyRangeRef globalConfigHistoryKeys( LiteralStringRef("\xff/globalConfig/h/"), LiteralStringRef("\xff/globalConfig/h0") );
+const KeyRef globalConfigHistoryPrefix = globalConfigHistoryKeys.begin;
+
+const KeyRef globalConfigVersionKey = LiteralStringRef("\xff/globalConfig/v");
+
+const KeyRangeRef workerListKeys( LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0") );
 const KeyRef workerListPrefix = workerListKeys.begin;
 
 const Key workerListKeyFor(StringRef processID) {
@@ -748,8 +759,7 @@ const KeyRef tagThrottleCountKey = LiteralStringRef("\xff\x02/throttledTags/manu
 // Client status info prefix
 const KeyRangeRef fdbClientInfoPrefixRange(LiteralStringRef("\xff\x02/fdbClientInfo/"),
                                            LiteralStringRef("\xff\x02/fdbClientInfo0"));
-const KeyRef fdbClientInfoTxnSampleRate = LiteralStringRef("\xff\x02/fdbClientInfo/client_txn_sample_rate/");
-const KeyRef fdbClientInfoTxnSizeLimit = LiteralStringRef("\xff\x02/fdbClientInfo/client_txn_size_limit/");
+// See remaining fields in GlobalConfig.actor.h
 
 // ConsistencyCheck settings
 const KeyRef fdbShouldConsistencyCheckBeSuspended = LiteralStringRef("\xff\x02/ConsistencyCheck/Suspend");
