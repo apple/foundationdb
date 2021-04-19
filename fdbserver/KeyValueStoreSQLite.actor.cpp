@@ -1163,7 +1163,7 @@ struct RawCursor {
 		return Optional<Value>();
 	}
 
-	Void readRangeResultWriter(KeyRangeRef keys, Reference<IReadRangeResultWriter> resultWriter, int rowLimit) {
+	Void readRangeResultWriter(KeyRangeRef keys, Reference<ReadRangeResultWriter> resultWriter, int rowLimit) {
 		// Read range implementation using a result writer
 		if (rowLimit == 0) {
 			return Void();
@@ -1696,7 +1696,7 @@ public:
 	                                             int rowLimit = 1 << 30,
 	                                             int byteLimit = 1 << 30) override;
 	bool usesReadRangeResultWriter() override;
-	Future<Void> readRange(KeyRangeRef keys, Reference<IReadRangeResultWriter> resultWriter, int rowLimit) override;
+	Future<Void> readRange(KeyRangeRef keys, Reference<ReadRangeResultWriter> resultWriter, int rowLimit) override;
 
 	KeyValueStoreSQLite(std::string const& filename,
 	                    UID logID,
@@ -1826,10 +1826,10 @@ private:
 		                                     FastAllocated<ReadRangeResultWriterAction> {
 			// Wrapper around the call to the SQLite cursor readRange implementation
 			KeyRange keys;
-			Reference<IReadRangeResultWriter> resultWriter;
+			Reference<ReadRangeResultWriter> resultWriter;
 			int rowLimit;
 			ThreadReturnPromise<Void> result;
-			ReadRangeResultWriterAction(KeyRange keys, Reference<IReadRangeResultWriter> resultWriter, int rowLimit)
+			ReadRangeResultWriterAction(KeyRange keys, Reference<ReadRangeResultWriter> resultWriter, int rowLimit)
 			  : keys(keys), resultWriter(resultWriter), rowLimit(rowLimit) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
@@ -2351,7 +2351,7 @@ bool KeyValueStoreSQLite::usesReadRangeResultWriter() {
 }
 
 Future<Void> KeyValueStoreSQLite::readRange(KeyRangeRef keys,
-                                            Reference<IReadRangeResultWriter> resultWriter,
+                                            Reference<ReadRangeResultWriter> resultWriter,
                                             int rowLimit) {
 	// Read range implementation which utilizes a result writer
 	++readsRequested;

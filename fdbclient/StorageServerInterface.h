@@ -45,6 +45,8 @@ struct VersionReply {
 	}
 };
 
+struct StorageServer;
+
 struct StorageServerInterface {
 	constexpr static FileIdentifier file_identifier = 15302073;
 	enum { BUSY_ALLOWED = 0, BUSY_FORCE = 1, BUSY_LOCAL = 2 };

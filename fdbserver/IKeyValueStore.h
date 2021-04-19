@@ -25,6 +25,8 @@
 #include <variant>
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/VersionedMap.h"
 #include "fdbserver/Knobs.h"
 
 class IClosable {
@@ -41,9 +43,43 @@ public:
 	                          // may not take effect in the background.
 };
 
-struct IReadRangeResultWriter : public ReferenceCounted<IReadRangeResultWriter> {
-	// This interface is used to define new read range implementations for KV stores
-	// Read range results should be managed by the client implementing this interface
+class ReadRangeResultWriter: public ReferenceCounted<ReadRangeResultWriter> {
+	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
+
+	// Parameters passed to storage server read range function
+	KeyRange range; // key range to be read
+	int limit; // number of results
+	int* pLimitBytes; // total bytes allowed in teh result
+	VersionedData::iterator& vCurrent; // iterator to the ptree
+	StorageServer* data;
+	Version version;
+	bool finishedDisk = false, done = false, forward = false;
+	Optional<Error> error;
+
+	GetKeyValuesReply& result;
+
+	// Helper function to decrement the result limit (total result size)
+	// and the byte limit (total result bytes) for a given a kv ref
+	void decrementLimits(const KeyValueRef& kv);
+
+public:
+	ReadRangeResultWriter(VersionedData::iterator& vCurrent,
+	                      StorageServer* data,
+	                      Version version,
+	                      KeyRange range,
+	                      int limit,
+	                      int* pLimitBytes,
+	                      GetKeyValuesReply& result);
+
+	// Sets some of the result metadata and optionally asserts the status of the result (that it fits the limit
+	// constraints)
+	void setResult(bool assert = false);
+
+	// Indicates that the range read should be finished
+	void setDone(bool d);
+
+	// Any errors thrown by the function operator (below) will be stored in this error object
+	Optional<Error> getError();
 
 	/*
 	  - :param: kv is a key value pair which is passed by the storage engine during each iteration of the range read
@@ -52,9 +88,11 @@ struct IReadRangeResultWriter : public ReferenceCounted<IReadRangeResultWriter> 
 	  - :return: KeyRef is a key which the KV store will skip to (useful for skipping clear ranges)
 	  - Note: kv should only be empty to indicate that there are no more results on disk
 	*/
-	virtual std::variant<bool, KeyRef> operator()(Optional<KeyValueRef> kv) = 0;
+	std::variant<bool, KeyRef> operator()(Optional<KeyValueRef> kvOpt);
 
-	virtual Arena& getArena() = 0;
+	Arena& getArena();
+
+	void linkArena(Arena& arena);
 };
 
 class IKeyValueStore : public IClosable {
@@ -79,7 +117,7 @@ public:
 	                                                     int byteLimit = 1 << 30) = 0;
 
 	// Range read implementation which utilizes a ResultWriter interface (defined above)
-	virtual Future<Void> readRange(KeyRangeRef keys, Reference<IReadRangeResultWriter> resultWriter, int rowLimit) {
+	virtual Future<Void> readRange(KeyRangeRef keys, Reference<ReadRangeResultWriter> resultWriter, int rowLimit) {
 		throw unsupported_operation();
 	};
 
@@ -96,7 +134,7 @@ public:
 	virtual void enableSnapshot() {}
 
 	/*
-	    If the key value store implements readRange with the IReadRangeResultWriter parameter this function should
+	    If the key value store implements readRange with the ReadRangeResultWriter parameter this function should
 	   return true
 	*/
 	virtual bool usesReadRangeResultWriter() { return false; }
