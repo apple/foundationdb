@@ -41,6 +41,7 @@
 #include "fdbserver/Status.h"
 #include "fdbserver/LatencyBandConfig.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/GlobalConfig.actor.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/Replication.h"
@@ -1132,9 +1133,15 @@ public:
 				std::swap(regions[0], regions[1]);
 			}
 
-			if (regions[1].dcId == clusterControllerDcId.get() && regions[1].priority >= 0 &&
+			if (regions[1].dcId == clusterControllerDcId.get() &&
 			    (!versionDifferenceUpdated || datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE)) {
-				std::swap(regions[0], regions[1]);
+				if (regions[1].priority >= 0) {
+					std::swap(regions[0], regions[1]);
+				} else {
+					TraceEvent(SevWarnAlways, "CCDcPriorityNegative")
+					    .detail("DcId", regions[1].dcId)
+					    .detail("Priority", regions[1].priority);
+				}
 			}
 
 			bool setPrimaryDesired = false;
@@ -2715,8 +2722,6 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		clientInfo.id = deterministicRandom()->randomUniqueID();
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
-		clientInfo.clientTxnInfoSampleRate = db->clientInfo->get().clientTxnInfoSampleRate;
-		clientInfo.clientTxnInfoSizeLimit = db->clientInfo->get().clientTxnInfoSizeLimit;
 		db->clientInfo->set(clientInfo);
 		dbInfo.client = db->clientInfo->get();
 	}
@@ -3191,36 +3196,84 @@ ACTOR Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
 	}
 }
 
-ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db) {
+// Monitors the global configuration version key for changes. When changes are
+// made, the global configuration history is read and any updates are sent to
+// all processes in the system by updating the ClientDBInfo object. The
+// GlobalConfig actor class contains the functionality to read the latest
+// history and update the processes local view.
+ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 	loop {
 		state ReadYourWritesTransaction tr(db->db);
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				state Optional<Value> rateVal = wait(tr.get(fdbClientInfoTxnSampleRate));
-				state Optional<Value> limitVal = wait(tr.get(fdbClientInfoTxnSizeLimit));
-				ClientDBInfo clientInfo = db->clientInfo->get();
-				double sampleRate = rateVal.present()
-				                        ? BinaryReader::fromStringRef<double>(rateVal.get(), Unversioned())
-				                        : std::numeric_limits<double>::infinity();
-				int64_t sizeLimit =
-				    limitVal.present() ? BinaryReader::fromStringRef<int64_t>(limitVal.get(), Unversioned()) : -1;
-				if (sampleRate != clientInfo.clientTxnInfoSampleRate ||
-				    sizeLimit != clientInfo.clientTxnInfoSampleRate) {
+				state Optional<Value> globalConfigVersion = wait(tr.get(globalConfigVersionKey));
+				state ClientDBInfo clientInfo = db->clientInfo->get();
+
+				if (globalConfigVersion.present()) {
+					// Since the history keys end with versionstamps, they
+					// should be sorted correctly (versionstamps are stored in
+					// big-endian order).
+					Standalone<RangeResultRef> globalConfigHistory =
+					    wait(tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY));
+					// If the global configuration version key has been set,
+					// the history should contain at least one item.
+					ASSERT(globalConfigHistory.size() > 0);
+					clientInfo.history.clear();
+
+					for (const auto& kv : globalConfigHistory) {
+						ObjectReader reader(kv.value.begin(), IncludeVersion());
+						if (reader.protocolVersion() != g_network->protocolVersion()) {
+							// If the protocol version has changed, the
+							// GlobalConfig actor should refresh its view by
+							// reading the entire global configuration key
+							// range.  Setting the version to the max int64_t
+							// will always cause the global configuration
+							// updater to refresh its view of the configuration
+							// keyspace.
+							clientInfo.history.clear();
+							clientInfo.history.emplace_back(std::numeric_limits<Version>::max());
+							break;
+						}
+
+						VersionHistory vh;
+						reader.deserialize(vh);
+
+						// Read commit version out of versionstamp at end of key.
+						BinaryReader versionReader =
+						    BinaryReader(kv.key.removePrefix(globalConfigHistoryPrefix), Unversioned());
+						Version historyCommitVersion;
+						versionReader >> historyCommitVersion;
+						historyCommitVersion = bigEndian64(historyCommitVersion);
+						vh.version = historyCommitVersion;
+
+						clientInfo.history.push_back(std::move(vh));
+					}
+
+					if (clientInfo.history.size() > 0) {
+						// The first item in the historical list of mutations
+						// is only used to:
+						//   a) Recognize that some historical changes may have
+						//      been missed, and the entire global
+						//      configuration keyspace needs to be read, or..
+						//   b) Check which historical updates have already
+						//      been applied. If this is the case, the first
+						//      history item must have a version greater than
+						//      or equal to whatever version the global
+						//      configuration was last updated at, and
+						//      therefore won't need to be applied again.
+						clientInfo.history[0].mutations = Standalone<VectorRef<MutationRef>>();
+					}
+
 					clientInfo.id = deterministicRandom()->randomUniqueID();
-					clientInfo.clientTxnInfoSampleRate = sampleRate;
-					clientInfo.clientTxnInfoSizeLimit = sizeLimit;
 					db->clientInfo->set(clientInfo);
 				}
 
-				state Future<Void> watchRateFuture = tr.watch(fdbClientInfoTxnSampleRate);
-				state Future<Void> watchLimitFuture = tr.watch(fdbClientInfoTxnSizeLimit);
+				state Future<Void> globalConfigFuture = tr.watch(globalConfigVersionKey);
 				wait(tr.commit());
-				choose {
-					when(wait(watchRateFuture)) { break; }
-					when(wait(watchLimitFuture)) { break; }
-				}
+				wait(globalConfigFuture);
+				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
@@ -3686,7 +3739,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(timeKeeper(&self));
 	self.addActor.send(monitorProcessClasses(&self));
 	self.addActor.send(monitorServerInfoConfig(&self.db));
-	self.addActor.send(monitorClientTxnInfoConfigs(&self.db));
+	self.addActor.send(monitorGlobalConfig(&self.db));
 	self.addActor.send(updatedChangingDatacenters(&self));
 	self.addActor.send(updatedChangedDatacenters(&self));
 	self.addActor.send(updateDatacenterVersionDifference(&self));

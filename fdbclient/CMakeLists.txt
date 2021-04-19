@@ -28,6 +28,9 @@ set(FDBCLIENT_SRCS
   FDBOptions.h
   FDBTypes.h
   FileBackupAgent.actor.cpp
+  GlobalConfig.h
+  GlobalConfig.actor.h
+  GlobalConfig.actor.cpp
   GrvProxyInterface.h
   HTTP.actor.cpp
   IClientApi.h
