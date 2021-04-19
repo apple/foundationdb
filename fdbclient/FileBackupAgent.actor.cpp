@@ -244,20 +244,6 @@ public:
 
 	Key applyMutationsMapPrefix() { return uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid); }
 
-	ACTOR static Future<Version> getCurrentVersion_impl(Reference<ReadYourWritesTransaction> tr, UID uid) {
-		state Future<Optional<Value>> beginVal = tr->get(uidPrefixKey(applyMutationsBeginRange.begin, uid), true);
-		wait(success(beginVal));
-		if (!beginVal.get().present()) {
-			return -1;
-		}
-		Version currentVersion = BinaryReader::fromStringRef<Version>(beginVal.get().get(), Unversioned());
-		return currentVersion;
-	}
-
-	Future<Version> getCurrentVersion(Reference<ReadYourWritesTransaction> tr) {
-		return getCurrentVersion_impl(tr, uid);
-	}
-
 	ACTOR static Future<int64_t> getApplyVersionLag_impl(Reference<ReadYourWritesTransaction> tr, UID uid) {
 		// Both of these are snapshot reads
 		state Future<Optional<Value>> beginVal = tr->get(uidPrefixKey(applyMutationsBeginRange.begin, uid), true);
@@ -317,6 +303,13 @@ public:
 		tr->set(uidPrefixKey(applyMutationsBeginRange.begin, uid), BinaryWriter::toValue(ver, Unversioned()));
 	}
 
+	Future<Version> getApplyBeginVersion(Reference<ReadYourWritesTransaction> tr) {
+		return map(tr->get(uidPrefixKey(applyMutationsBeginRange.begin, uid)),
+		           [=](Optional<Value> const& value) -> Version {
+			           return value.present() ? BinaryReader::fromStringRef<Version>(value.get(), Unversioned()) : 0;
+		           });
+	}
+
 	void setApplyEndVersion(Reference<ReadYourWritesTransaction> tr, Version ver) {
 		tr->set(uidPrefixKey(applyMutationsEndRange.begin, uid), BinaryWriter::toValue(ver, Unversioned()));
 	}
@@ -326,6 +319,22 @@ public:
 		           [=](Optional<Value> const& value) -> Version {
 			           return value.present() ? BinaryReader::fromStringRef<Version>(value.get(), Unversioned()) : 0;
 		           });
+	}
+
+	ACTOR static Future<Version> getCurrentVersion_impl(RestoreConfig* self, Reference<ReadYourWritesTransaction> tr) {
+		state ERestoreState status = wait(self->stateEnum().getD(tr));
+		if (status == ERestoreState::RUNNING) {
+			Version version = wait(self->getApplyBeginVersion(tr));
+			return version;
+		} else if (status == ERestoreState::COMPLETED) {
+			Version version = wait(self->restoreVersion().getD(tr));
+			return version;
+		}
+		return -1;
+	}
+
+	Future<Version> getCurrentVersion(Reference<ReadYourWritesTransaction> tr) {
+		return getCurrentVersion_impl(this, tr);
 	}
 
 	ACTOR static Future<std::string> getProgress_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr);
@@ -5200,7 +5209,8 @@ public:
 	}
 
 	ACTOR static Future<Optional<Version>> getLastRestorable(FileBackupAgent* backupAgent,
-	                                                         Reference<ReadYourWritesTransaction> tr, Key tagName,
+	                                                         Reference<ReadYourWritesTransaction> tr,
+	                                                         Key tagName,
 	                                                         bool snapshot) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -5594,7 +5604,8 @@ Future<std::string> FileBackupAgent::getStatusJSON(Database cx, std::string tagN
 	return FileBackupAgentImpl::getStatusJSON(this, cx, tagName);
 }
 
-Future<Optional<Version>> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName,
+Future<Optional<Version>> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr,
+                                                             Key tagName,
                                                              bool snapshot) {
 	return FileBackupAgentImpl::getLastRestorable(this, tr, tagName, snapshot);
 }
