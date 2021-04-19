@@ -76,3 +76,15 @@ files you may want to copy are:
 *	`/var/fdb/scripts/create_cluster_file.bash`: A script for setting up the
 	cluster file based on an `FDB_COORDINATOR` environment variable.
 *	`/usr/bin/fdbcli`: The FoundationDB CLI.
+
+
+# Example Usages
+
+### Release Images
+
+cd src/foundationdb/packaging/docker
+
+docker build -f release/Dockerfile -t foundationDB:foundationDB:6.2.29 . --build-arg FDB_VERSION=6.2.29
+
+### Developer Images
+
