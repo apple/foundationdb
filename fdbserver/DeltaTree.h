@@ -871,7 +871,7 @@ private:
 
 		int deltaSize = item.writeDelta(node.delta(largeNodes), *base, commonPrefix);
 		node.delta(largeNodes).setPrefixSource(prefixSourcePrev);
-		printf("Serialized %s to offset %d data: %s\n",
+		deltatree_printf("Serialized %s to offset %d data: %s\n",
 		       item.toString().c_str(),
 		       (uint8_t*)&node - (uint8_t*)this,
 		       StringRef((uint8_t*)&node.delta(largeNodes), deltaSize).toHexString().c_str());
@@ -1053,7 +1053,8 @@ public:
 				return delta.apply(cache->arena, basePrev ? cache->lowerBound : cache->upperBound, c);
 			}
 
-			return delta.apply(cache->arena, get(tree->nodeAt(baseOffset)), c);
+			T base = get(tree->nodeAt(baseOffset));
+			return delta.apply(cache->arena, base, cache->get(tree->nodeOffset(n)));
 		}
 
 		const T get() const { return get(node); }
