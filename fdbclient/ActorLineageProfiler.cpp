@@ -197,23 +197,21 @@ std::shared_ptr<Sample> SampleCollectorT::collect() {
 
 void SampleCollection_t::refresh() {
 	auto sample = _collector->collect();
-	auto min = sample->time - windowSize;
-	double oldest = 0.0;
-	while (oldest < min && !data.empty()) {
-		// we remove at most 10 elements at a time. This is so we don't block the main thread for too long.
-		{
-			Lock _{ mutex };
-			int i = 0;
-			do {
-				oldest = data.front()->time;
-				data.pop_front();
-				++i;
-			} while (i < 10 && oldest < min && !data.empty());
-		}
-	}
+	auto min = std::max(sample->time - windowSize, sample->time);
 	{
 		Lock _{ mutex };
-		data.push_back(sample);
+		data.emplace_back(std::move(sample));
+	}
+	double oldest = data.front()->time;
+	// we don't need to check for data.empty() in this loop (or the inner loop) as we know that we will end
+	// up with at least one entry which is the most recent sample
+	while (oldest < min) {
+		Lock _{ mutex };
+		// we remove at most 10 elements at a time. This is so we don't block the main thread for too long.
+		for (int i = 0; i < 10 && oldest < min; ++i) {
+			data.pop_front();
+			oldest = data.front()->time;
+		}
 	}
 }
 
@@ -224,8 +222,8 @@ std::vector<std::shared_ptr<Sample>> SampleCollection_t::get(double from /*= 0.0
 	for (const auto& sample : data) {
 		if (sample->time > to) {
 			break;
-		} else if (sample->time > from) {
-			res.emplace_back(sample);
+		} else if (sample->time >= from) {
+			res.push_back(sample);
 		}
 	}
 	return res;

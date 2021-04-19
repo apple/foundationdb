@@ -1969,7 +1969,6 @@ int main(int argc, char* argv[]) {
 				ASSERT(opts.connectionFile);
 
 				setupRunLoopProfiler();
-				setupSamplingProfiler();
 
 				auto dataFolder = opts.dataFolder;
 				if (!dataFolder.size())
