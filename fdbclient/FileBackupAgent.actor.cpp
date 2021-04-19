@@ -2059,7 +2059,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 		    .detail("Size", outFile->size())
 		    .detail("BeginVersion", beginVersion)
 		    .detail("EndVersion", endVersion)
-		    .detail("LastReadVersion", latestVersion);
+		    .detail("LastReadVersion", lastVersion);
 
 		Params.fileSize().set(task, outFile->size());
 
@@ -4001,6 +4001,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		static TaskParam<Version> firstVersion() { return LiteralStringRef(__FUNCTION__); }
 	} Params;
 
+	// Find all files needed for the restore and save them in the RestoreConfig for the task.
+	// Update the total number of files and blocks and change state to starting.
 	ACTOR static Future<Void> _execute(Database cx,
 	                                   Reference<TaskBucket> taskBucket,
 	                                   Reference<FutureBucket> futureBucket,
@@ -4010,6 +4012,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		state Version restoreVersion;
 		state Version beginVersion;
 		state Reference<IBackupContainer> bc;
+		state std::vector<KeyRange> ranges;
 
 		loop {
 			try {
@@ -4017,10 +4020,12 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				wait(checkTaskVersion(tr->getDatabase(), task, name, version));
-				Version _restoreVersion = wait(restore.restoreVersion().getOrThrow(tr));
-				restoreVersion = _restoreVersion;
 				Optional<Version> _beginVersion = wait(restore.beginVersion().get(tr));
 				beginVersion = _beginVersion.present() ? _beginVersion.get() : invalidVersion;
+
+				wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
+				wait(store(ranges, restore.getRestoreRangesOrDefault(tr)));
+
 				wait(taskBucket->keepRunning(tr, task));
 
 				ERestoreState oldState = wait(restore.stateEnum().getD(tr));
@@ -4065,13 +4070,18 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				wait(tr->onError(e));
 			}
 		}
+
 		Optional<bool> _incremental = wait(restore.incrementalBackupOnly().get(tr));
 		state bool incremental = _incremental.present() ? _incremental.get() : false;
 		if (beginVersion == invalidVersion) {
 			beginVersion = 0;
 		}
+		state Standalone<VectorRef<KeyRangeRef>> keyRangesFilter;
+		for (auto const& r : ranges) {
+			keyRangesFilter.push_back_deep(keyRangesFilter.arena(), KeyRangeRef(r));
+		}
 		Optional<RestorableFileSet> restorable =
-		    wait(bc->getRestoreSet(restoreVersion, VectorRef<KeyRangeRef>(), incremental, beginVersion));
+		    wait(bc->getRestoreSet(restoreVersion, keyRangesFilter, incremental, beginVersion));
 		if (!incremental) {
 			beginVersion = restorable.get().snapshot.beginVersion;
 		}
@@ -4090,8 +4100,10 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
 		}
 
-		for (const LogFile& f : restorable.get().logs) {
-			files.push_back({ f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion });
+		if (!CLIENT_KNOBS->RESTORE_IGNORE_LOG_FILES) {
+			for (const LogFile& f : restorable.get().logs) {
+				files.push_back({ f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion });
+			}
 		}
 
 		state std::vector<RestoreConfig::RestoreFile>::iterator start = files.begin();
@@ -5190,6 +5202,24 @@ public:
 		return r;
 	}
 
+	// Submits the restore request to the database and throws "restore_invalid_version" error if
+	// restore is not possible. Parameters:
+	//   cx: the database to be restored to
+	//   cxOrig: if present, is used to resolve the restore timestamp into a version.
+	//   tagName: restore tag
+	//   url: the backup container's URL that contains all backup files
+	//   ranges: the restored key ranges; if empty, restore all key ranges in the backup
+	//   waitForComplete: if set, wait until the restore is completed before returning; otherwise,
+	//                    return when the request is submitted to the database.
+	//   targetVersion: the version to be restored.
+	//   verbose: print verbose information.
+	//   addPrefix: each key is added this prefix during restore.
+	//   removePrefix: for each key to be restored, remove this prefix first.
+	//   lockDB: if set lock the database with randomUid before performing restore;
+	//           otherwise, check database is locked with the randomUid
+	//   incrementalBackupOnly: only perform incremental backup
+	//   beginVersion: restore's begin version
+	//   randomUid: the UID for lock the database
 	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent,
 	                                     Database cx,
 	                                     Optional<Database> cxOrig,
@@ -5221,7 +5251,7 @@ public:
 		}
 
 		Optional<RestorableFileSet> restoreSet =
-		    wait(bc->getRestoreSet(targetVersion, VectorRef<KeyRangeRef>(), incrementalBackupOnly, beginVersion));
+		    wait(bc->getRestoreSet(targetVersion, ranges, incrementalBackupOnly, beginVersion));
 
 		if (!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
