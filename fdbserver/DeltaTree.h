@@ -26,6 +26,8 @@
 #include "fdbserver/Knobs.h"
 #include <string.h>
 
+#define deltatree_printf(args...)
+
 typedef uint64_t Word;
 // Get the number of prefix bytes that are the same between a and b, up to their common length of cl
 static inline int commonPrefixLength(uint8_t const* ap, uint8_t const* bp, int cl) {
@@ -198,10 +200,6 @@ struct DeltaTree {
 				smallOffsets.left = offset;
 			}
 		}
-
-		int size(bool large) const {
-			return delta(large).size() + (large ? sizeof(smallOffsets) : sizeof(largeOffsets));
-		}
 	};
 
 	static constexpr int SmallSizeLimit = std::numeric_limits<uint16_t>::max();
@@ -356,8 +354,6 @@ public:
 
 		Mirror(const void* treePtr = nullptr, const T* lowerBound = nullptr, const T* upperBound = nullptr)
 		  : tree((DeltaTree*)treePtr), lower(lowerBound), upper(upperBound) {
-			// TODO: Remove these copies into arena and require users of Mirror to keep prev and next alive during its
-			// lifetime
 			lower = new (arena) T(arena, *lower);
 			upper = new (arena) T(arena, *upper);
 
@@ -875,7 +871,10 @@ private:
 
 		int deltaSize = item.writeDelta(node.delta(largeNodes), *base, commonPrefix);
 		node.delta(largeNodes).setPrefixSource(prefixSourcePrev);
-		// printf("Serialized %s to %p\n", item.toString().c_str(), &root.delta(largeNodes));
+		printf("Serialized %s to offset %d data: %s\n",
+		       item.toString().c_str(),
+		       (uint8_t*)&node - (uint8_t*)this,
+		       StringRef((uint8_t*)&node.delta(largeNodes), deltaSize).toHexString().c_str());
 
 		// Continue writing after the serialized Delta.
 		uint8_t* wptr = (uint8_t*)&node.delta(largeNodes) + deltaSize;
@@ -895,6 +894,571 @@ private:
 		} else {
 			node.setRightChildOffset(largeNodes, 0);
 		}
+
+		return wptr - (uint8_t*)&node;
+	}
+};
+
+// ------------------------------------------------------------------
+#pragma pack(push, 1)
+template <typename T, typename DeltaT = typename T::Delta>
+struct DeltaTree2 {
+	typedef typename T::Partial Partial;
+
+	struct {
+		uint16_t numItems; // Number of items in the tree.
+		uint32_t nodeBytesUsed; // Bytes used by nodes (everything after the tree header)
+		uint32_t nodeBytesFree; // Bytes left at end of tree to expand into
+		uint32_t nodeBytesDeleted; // Delta bytes deleted from tree.  Note that some of these bytes could be borrowed by
+		                           // descendents.
+		uint8_t initialHeight; // Height of tree as originally built
+		uint8_t maxHeight; // Maximum height of tree after any insertion.  Value of 0 means no insertions done.
+		bool largeNodes; // Node size, can be calculated as capacity > SmallSizeLimit but it will be used a lot
+	};
+	struct Node {
+		// Offsets are relative to the start of the tree
+		union {
+			struct {
+				uint32_t leftChild;
+				uint32_t rightChild;
+				uint32_t leftParent;
+				uint32_t rightParent;
+
+			} largeOffsets;
+			struct {
+				uint16_t leftChild;
+				uint16_t rightChild;
+				uint16_t leftParent;
+				uint16_t rightParent;
+			} smallOffsets;
+		};
+
+		static int headerSize(bool large) { return large ? sizeof(largeOffsets) : sizeof(smallOffsets); }
+
+		// Delta is located after the offsets, which differs by node size
+		DeltaT& delta(bool large) { return large ? *(DeltaT*)(&largeOffsets + 1) : *(DeltaT*)(&smallOffsets + 1); };
+
+		// Delta is located after the offsets, which differs by node size
+		const DeltaT& delta(bool large) const {
+			return large ? *(DeltaT*)(&largeOffsets + 1) : *(DeltaT*)(&smallOffsets + 1);
+		};
+
+		std::string toString(DeltaTree2* tree) const {
+			return format("Node{offset=%d leftChild=%d rightChild=%d leftParent=%d rightParent=%d delta=%s}",
+			              tree->nodeOffset(this),
+			              getLeftChildOffset(tree->largeNodes),
+			              getRightChildOffset(tree->largeNodes),
+			              getLeftParentOffset(tree->largeNodes),
+			              getRightParentOffset(tree->largeNodes),
+			              delta(tree->largeNodes).toString().c_str());
+		}
+
+#define getMember(m) (large ? largeOffsets.m : smallOffsets.m)
+#define setMember(m, v)                                                                                                \
+	if (large) {                                                                                                       \
+		largeOffsets.m = v;                                                                                            \
+	} else {                                                                                                           \
+		smallOffsets.m = v;                                                                                            \
+	}
+
+		void setRightChildOffset(bool large, int offset) { setMember(rightChild, offset); }
+		void setLeftChildOffset(bool large, int offset) { setMember(leftChild, offset); }
+		void setRightParentOffset(bool large, int offset) { setMember(rightParent, offset); }
+		void setLeftParentOffset(bool large, int offset) { setMember(leftParent, offset); }
+
+		int getRightChildOffset(bool large) const { return getMember(rightChild); }
+		int getLeftChildOffset(bool large) const { return getMember(leftChild); }
+		int getRightParentOffset(bool large) const { return getMember(rightParent); }
+		int getLeftParentOffset(bool large) const { return getMember(leftParent); }
+
+		int size(bool large) const { return delta(large).size() + headerSize(large); }
+#undef getMember
+#undef setMember
+	};
+
+	static constexpr int SmallSizeLimit = std::numeric_limits<uint16_t>::max();
+	static constexpr int LargeTreePerNodeExtraOverhead = sizeof(Node::largeOffsets) - sizeof(Node::smallOffsets);
+
+#pragma pack(pop)
+
+	int nodeOffset(const Node* n) const { return (uint8_t*)n - (uint8_t*)this; }
+	Node* nodeAt(int offset) { return offset == 0 ? nullptr : (Node*)((uint8_t*)this + offset); }
+	Node* root() { return numItems == 0 ? nullptr : (Node*)(this + 1); }
+
+	int size() const { return sizeof(DeltaTree2) + nodeBytesUsed; }
+	int capacity() const { return size() + nodeBytesFree; }
+
+	Node& newNode() { return *(Node*)((uint8_t*)this + size()); }
+
+public:
+	struct DecodeCache : FastAllocated<DecodeCache> {
+		DecodeCache(const T& lowerBound = T(), const T& upperBound = T())
+		  : lowerBound(arena, lowerBound), upperBound(arena, upperBound) {}
+
+		Arena arena;
+		T lowerBound;
+		T upperBound;
+		std::unordered_map<int, Optional<typename T::Partial>> partials;
+		Optional<typename T::Partial>& get(int offset) { return partials[offset]; }
+
+		void clear() {
+			partials.clear();
+			Arena a;
+			lowerBound = T(a, lowerBound);
+			upperBound = T(a, upperBound);
+			arena = a;
+		}
+	};
+
+	// Cursor provides a way to seek into a DeltaTree and iterate over its contents
+	// The cursor needs a DeltaTree pointer and a DecodeCache, which can be shared
+	// with other DeltaTrees which were incrementally modified to produce the the
+	// tree that this cursor is referencing.
+	struct Cursor {
+		Cursor() : cache(nullptr), node(nullptr) {}
+
+		Cursor(DecodeCache* cache, DeltaTree2* tree) : cache(cache), tree(tree) { node = tree->root(); }
+
+		DeltaTree2* tree;
+		DecodeCache* cache;
+		Node* node;
+
+		std::string toString() const {
+			return format("Cursor{tree=%p cache=%p node=%s item=%s",
+			              tree,
+			              cache,
+			              node == nullptr ? "null" : node->toString(tree).c_str(),
+			              node == nullptr ? "" : get().toString().c_str());
+		}
+
+		bool valid() const { return node != nullptr; }
+
+		// Get T for Node n, and provide to n's delta the base and local decode cache entries to use/modify
+		const T get(Node* n) const {
+			DeltaT& delta = n->delta(tree->largeNodes);
+
+			// If this node's cache is populated, then the delta can create T from that alone
+			Optional<Partial>& c = cache->get(tree->nodeOffset(n));
+			if (c.present()) {
+				return delta.apply(c.get());
+			}
+
+			// Otherwise, get the base T
+			bool basePrev = delta.getPrefixSource();
+			int baseOffset =
+			    basePrev ? n->getLeftParentOffset(tree->largeNodes) : n->getRightParentOffset(tree->largeNodes);
+
+			// If baseOffset is 0, then base T is DecodeCache's lower or upper bound
+			if (baseOffset == 0) {
+				return delta.apply(cache->arena, basePrev ? cache->lowerBound : cache->upperBound, c);
+			}
+
+			return delta.apply(cache->arena, get(tree->nodeAt(baseOffset)), c);
+		}
+
+		const T get() const { return get(node); }
+
+		// const tT getOrUpperBound() const { return valid() ? node->item : *mirror->upperBound(); }
+
+		bool operator==(const Cursor& rhs) const { return node == rhs.node; }
+		bool operator!=(const Cursor& rhs) const { return node != rhs.node; }
+
+		// The seek methods, of the form seek[Less|Greater][orEqual](...) are very similar.
+		// They attempt move the cursor to the [Greatest|Least] item, based on the name of the function.
+		// Then will not "see" erased records.
+		// If successful, they return true, and if not then false a while making the cursor invalid.
+		// These methods forward arguments to the seek() overloads, see those for argument descriptions.
+		template <typename... Args>
+		bool seekLessThan(Args... args) {
+			int cmp = seek(args...);
+			if (cmp < 0 || (cmp == 0 && node != nullptr)) {
+				movePrev();
+			}
+			return _hideDeletedBackward();
+		}
+
+		template <typename... Args>
+		bool seekLessThanOrEqual(Args... args) {
+			int cmp = seek(args...);
+			if (cmp < 0) {
+				movePrev();
+			}
+			return _hideDeletedBackward();
+		}
+
+		template <typename... Args>
+		bool seekGreaterThan(Args... args) {
+			int cmp = seek(args...);
+			if (cmp > 0 || (cmp == 0 && node != nullptr)) {
+				moveNext();
+			}
+			return _hideDeletedForward();
+		}
+
+		template <typename... Args>
+		bool seekGreaterThanOrEqual(Args... args) {
+			int cmp = seek(args...);
+			if (cmp > 0) {
+				moveNext();
+			}
+			return _hideDeletedForward();
+		}
+
+		// seek() moves the cursor to a node containing s or the node that would be the parent of s if s were to be
+		// added to the tree. If the tree was empty, the cursor will be invalid and the return value will be 0.
+		// Otherwise, returns the result of s.compare(item at cursor position)
+		// Does not skip/avoid deleted nodes.
+		int seek(const T& s, int skipLen = 0) {
+			node = nullptr;
+			deltatree_printf("seek(%s) start %s\n", s.toString().c_str(), toString().c_str());
+			Node* n = tree->root();
+			int cmp = 0;
+
+			while (n != nullptr) {
+				node = n;
+				cmp = s.compare(get(), skipLen);
+				deltatree_printf("seek(%s) move %s cmp=%d\n", s.toString().c_str(), toString().c_str(), cmp);
+				if (cmp == 0) {
+					break;
+				}
+
+				n = (cmp > 0) ? tree->nodeAt(n->getRightChildOffset(tree->largeNodes))
+				              : tree->nodeAt(n->getLeftChildOffset(tree->largeNodes));
+			}
+
+			return cmp;
+		}
+
+		bool moveFirst() {
+			Node* n = tree->root();
+			node = n;
+			deltatree_printf("moveFirst start %s\n", toString().c_str());
+			while (n != nullptr) {
+				n = tree->nodeAt(n->getLeftChildOffset(tree->largeNodes));
+				if (n != nullptr) {
+					node = n;
+					deltatree_printf("moveFirst move %s\n", toString().c_str());
+				}
+			}
+			return _hideDeletedForward();
+		}
+
+		bool moveLast() {
+			Node* n = tree->root();
+			node = n;
+			deltatree_printf("moveLast start %s\n", toString().c_str());
+			while (n != nullptr) {
+				n = tree->nodeAt(n->getRightChildOffset(tree->largeNodes));
+				if (n != nullptr) {
+					node = n;
+					deltatree_printf("moveLast move %s\n", toString().c_str());
+				}
+			}
+			return _hideDeletedBackward();
+		}
+
+		// Try to move to next node, sees deleted nodes.
+		void _moveNext() {
+			deltatree_printf("_moveNext start %s\n", toString().c_str());
+			// Try to go right
+			Node* n = tree->nodeAt(node->getRightChildOffset(tree->largeNodes));
+
+			// If we couldn't go right, then the answer is our next ancestor
+			if (n == nullptr) {
+				node = tree->nodeAt(node->getRightParentOffset(tree->largeNodes));
+				deltatree_printf("_moveNext move1 %s\n", toString().c_str());
+			} else {
+				// Go left as far as possible
+				do {
+					node = n;
+					deltatree_printf("_moveNext move2 %s\n", toString().c_str());
+					n = tree->nodeAt(n->getLeftChildOffset(tree->largeNodes));
+				} while (n != nullptr);
+			}
+		}
+
+		// Try to move to previous node, sees deleted nodes.
+		void _movePrev() {
+			deltatree_printf("_movePrev start %s\n", toString().c_str());
+			// Try to go left
+			Node* n = tree->nodeAt(node->getLeftChildOffset(tree->largeNodes));
+			// If we couldn't go left, then the answer is our prev ancestor
+			if (n == nullptr) {
+				node = tree->nodeAt(node->getLeftParentOffset(tree->largeNodes));
+				deltatree_printf("_movePrev move1 %s\n", toString().c_str());
+			} else {
+				// Go right as far as possible
+				do {
+					node = n;
+					deltatree_printf("_movePrev move2 %s\n", toString().c_str());
+					n = tree->nodeAt(n->getRightChildOffset(tree->largeNodes));
+				} while (n != nullptr);
+			}
+		}
+
+		bool moveNext() {
+			_moveNext();
+			return _hideDeletedForward();
+		}
+
+		bool movePrev() {
+			_movePrev();
+			return _hideDeletedBackward();
+		}
+
+		bool isErased() const { return node->delta(tree->largeNodes).getDeleted(); }
+
+		// Erase current item by setting its deleted flag to true.
+		// Tree header is updated if a change is made.
+		void erase() {
+			auto& delta = node->delta(tree->largeNodes);
+			if (!delta.getDeleted()) {
+				delta.setDeleted(true);
+				--tree->numItems;
+				tree->nodeBytesDeleted += (delta.size() + Node::headerSize(tree->largeNodes));
+			}
+		}
+
+		// Un-erase current item by setting its deleted flag to false.
+		// Tree header is updated if a change is made.
+		void unErase() {
+			auto& delta = node->delta(tree->largeNodes);
+			if (delta.getDeleted()) {
+				delta.setDeleted(false);
+				++tree->numItems;
+				tree->nodeBytesDeleted -= (delta.size() + Node::headerSize(tree->largeNodes));
+			}
+		}
+
+		// Erase k by setting its deleted flag to true.  Returns true only if k existed
+		bool erase(const T& k, int skipLen = 0) {
+			Cursor c = *this;
+			if (c.seek(k, skipLen) == 0 && !c.isErased()) {
+				c.erase();
+				return true;
+			}
+			return false;
+		}
+
+		// Try to insert k into the DeltaTree, updating byte counts and initialHeight if they
+		// have changed (they won't if k already exists in the tree but was deleted).
+		// Returns true if successful, false if k does not fit in the space available
+		// or if k is already in the tree (and was not already deleted).
+		// Insertion on an empty tree returns false as well.
+		bool insert(const T& k, int skipLen = 0, int maxHeightAllowed = std::numeric_limits<int>::max()) {
+			deltatree_printf("insert %s\n", k.toString().c_str());
+
+			if (tree->numItems == 0) {
+				return false;
+			}
+
+			Cursor c = *this;
+			int height = 0;
+			// TODO:  Inline seek here to add height output
+
+			int cmp = c.seek(k, skipLen);
+			Node* parent = c.node;
+
+			// If the item is found, mark it erased if it isn't already
+			if (cmp == 0) {
+				if (c.isErased()) {
+					c.unErase();
+					return true;
+				}
+				return false;
+			}
+
+			if (height > maxHeightAllowed) {
+				return false;
+			}
+
+			Node& child = tree->newNode();
+			int childOffset = tree->nodeOffset(&child);
+
+			// If k > c then k becomes c's right child
+			bool addingRight = cmp > 0;
+			int leftParentOffset, rightParentOffset;
+
+			// Point either the right or left child of c to the new node
+			// Set parent pointers for n
+			if (addingRight) {
+				// parent is the new node's left parent since n is the right child of parent
+				leftParentOffset = tree->nodeOffset(parent);
+				rightParentOffset = parent->getRightParentOffset(tree->largeNodes);
+			} else {
+				// parent is the new node's right parent since n is the left child of parent
+				leftParentOffset = parent->getLeftParentOffset(tree->largeNodes);
+				rightParentOffset = tree->nodeOffset(parent);
+			}
+
+			T leftBase = leftParentOffset == 0 ? cache->lowerBound : get(tree->nodeAt(leftParentOffset));
+			T rightBase = rightParentOffset == 0 ? cache->upperBound : get(tree->nodeAt(rightParentOffset));
+
+			int common = leftBase.getCommonPrefixLen(rightBase, skipLen);
+			int commonWithLeftParent = k.getCommonPrefixLen(leftBase, common);
+			int commonWithRightParent = k.getCommonPrefixLen(rightBase, common);
+			bool borrowFromLeft = commonWithLeftParent >= commonWithRightParent;
+			const T& base = borrowFromLeft ? leftBase : rightBase;
+			int commonPrefix = borrowFromLeft ? commonWithLeftParent : commonWithRightParent;
+
+			int deltaSize = k.deltaSize(base, commonPrefix, false);
+			int nodeSpace = deltaSize + Node::headerSize(tree->largeNodes);
+
+			if (nodeSpace > tree->nodeBytesFree) {
+				return false;
+			}
+
+			if (addingRight) {
+				parent->setRightChildOffset(tree->largeNodes, childOffset);
+			} else {
+				parent->setLeftChildOffset(tree->largeNodes, childOffset);
+			}
+			child.setLeftParentOffset(tree->largeNodes, leftParentOffset);
+			child.setRightParentOffset(tree->largeNodes, rightParentOffset);
+			child.setRightChildOffset(tree->largeNodes, 0);
+			child.setLeftChildOffset(tree->largeNodes, 0);
+
+			DeltaT& childDelta = child.delta(tree->largeNodes);
+			int written = k.writeDelta(childDelta, base, commonPrefix);
+			ASSERT(deltaSize == written);
+			childDelta.setPrefixSource(borrowFromLeft);
+
+			tree->nodeBytesUsed += nodeSpace;
+			tree->nodeBytesFree -= nodeSpace;
+			++tree->numItems;
+
+			// Update max height of the tree if necessary
+			if (height > tree->maxHeight) {
+				tree->maxHeight = height;
+			}
+
+			return true;
+		}
+
+	private:
+		bool _hideDeletedBackward() {
+			while (node != nullptr && node->delta(tree->largeNodes).getDeleted()) {
+				_movePrev();
+			}
+			return node != nullptr;
+		}
+
+		bool _hideDeletedForward() {
+			while (node != nullptr && node->delta(tree->largeNodes).getDeleted()) {
+				_moveNext();
+			}
+			return node != nullptr;
+		}
+	};
+
+	// Returns number of bytes written
+	int build(int spaceAvailable, const T* begin, const T* end, const T* lowerBound, const T* upperBound) {
+		largeNodes = spaceAvailable > SmallSizeLimit;
+		int count = end - begin;
+		numItems = count;
+		nodeBytesDeleted = 0;
+		initialHeight = (uint8_t)log2(count) + 1;
+		maxHeight = 0;
+
+		// The boundary leading to the new page acts as the last time we branched right
+		if (count > 0) {
+			nodeBytesUsed = buildSubtree(
+			    *root(), begin, end, lowerBound, upperBound, 0, 0, lowerBound->getCommonPrefixLen(*upperBound, 0));
+		} else {
+			nodeBytesUsed = 0;
+		}
+		nodeBytesFree = spaceAvailable - size();
+		return size();
+	}
+
+private:
+	int buildSubtree(Node& node,
+	                 const T* begin,
+	                 const T* end,
+	                 const T* leftParent,
+	                 const T* rightParent,
+	                 int leftParentOffset,
+	                 int rightParentOffset,
+	                 int subtreeCommon) {
+
+		int count = end - begin;
+
+		// Find key to be stored in root
+		int mid = perfectSubtreeSplitPointCached(count);
+		const T& item = begin[mid];
+
+		int commonWithPrev = item.getCommonPrefixLen(*leftParent, subtreeCommon);
+		int commonWithNext = item.getCommonPrefixLen(*rightParent, subtreeCommon);
+
+		bool prefixSourcePrev;
+		int commonPrefix;
+		const T* base;
+		if (commonWithPrev >= commonWithNext) {
+			prefixSourcePrev = true;
+			commonPrefix = commonWithPrev;
+			base = leftParent;
+		} else {
+			prefixSourcePrev = false;
+			commonPrefix = commonWithNext;
+			base = rightParent;
+		}
+
+		int deltaSize = item.writeDelta(node.delta(largeNodes), *base, commonPrefix);
+		node.delta(largeNodes).setPrefixSource(prefixSourcePrev);
+
+		// Continue writing after the serialized Delta.
+		uint8_t* wptr = (uint8_t*)&node.delta(largeNodes) + deltaSize;
+
+		int leftChildOffset;
+		// Serialize left subtree
+		if (count > 1) {
+			leftChildOffset = wptr - (uint8_t*)this;
+			deltatree_printf("%p: offset=%d count=%d serialize left subtree leftChildOffset=%d\n",
+			                 this,
+			                 nodeOffset(&node),
+			                 count,
+			                 leftChildOffset);
+
+			wptr += buildSubtree(*(Node*)wptr,
+			                     begin,
+			                     begin + mid,
+			                     leftParent,
+			                     &item,
+			                     leftParentOffset,
+			                     nodeOffset(&node),
+			                     commonWithPrev);
+		} else {
+			leftChildOffset = 0;
+		}
+
+		int rightChildOffset;
+		// Serialize right subtree
+		if (count > 2) {
+			rightChildOffset = wptr - (uint8_t*)this;
+			deltatree_printf("%p: offset=%d count=%d serialize right subtree rightChildOffset=%d\n",
+			                 this,
+			                 nodeOffset(&node),
+			                 count,
+			                 rightChildOffset);
+
+			wptr += buildSubtree(*(Node*)wptr,
+			                     begin + mid + 1,
+			                     end,
+			                     &item,
+			                     rightParent,
+			                     nodeOffset(&node),
+			                     rightParentOffset,
+			                     commonWithNext);
+		} else {
+			rightChildOffset = 0;
+		}
+
+		node.setLeftChildOffset(largeNodes, leftChildOffset);
+		node.setRightChildOffset(largeNodes, rightChildOffset);
+		node.setLeftParentOffset(largeNodes, leftParentOffset);
+		node.setRightParentOffset(largeNodes, rightParentOffset);
+
+		deltatree_printf("%p: Serialized %s as %s\n", this, item.toString().c_str(), node.toString(this).c_str());
 
 		return wptr - (uint8_t*)&node;
 	}

@@ -7109,9 +7109,9 @@ ACTOR Future<Void> randomReader(VersionedBTree* btree) {
 struct IntIntPair {
 	IntIntPair() {}
 	IntIntPair(int k, int v) : k(k), v(v) {}
-
 	IntIntPair(Arena& arena, const IntIntPair& toCopy) { *this = toCopy; }
 
+	typedef IntIntPair Partial;
 	struct Delta {
 		bool prefixSource;
 		bool deleted;
@@ -7119,6 +7119,15 @@ struct IntIntPair {
 		int dv;
 
 		IntIntPair apply(const IntIntPair& base, Arena& arena) { return { base.k + dk, base.v + dv }; }
+
+		IntIntPair apply(const Partial& cache) { return cache; }
+
+		IntIntPair apply(Arena& arena, const IntIntPair& base, Optional<Partial>& cache) {
+			if (!cache.present()) {
+				cache = IntIntPair(base.k + dk, base.v + dv);
+			}
+			return cache.get();
+		}
 
 		void setPrefixSource(bool val) { prefixSource = val; }
 
@@ -7581,51 +7590,40 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 
 	// Build tree of items
 	std::vector<IntIntPair> items(uniqueItems.begin(), uniqueItems.end());
-	int bufferSize = N * 2 * 20;
+	int bufferSize = N * 2 * 30;
+
 	DeltaTree<IntIntPair>* tree = (DeltaTree<IntIntPair>*)new uint8_t[bufferSize];
 	int builtSize = tree->build(bufferSize, &items[0], &items[items.size()], &prev, &next);
 	ASSERT(builtSize <= bufferSize);
-
 	DeltaTree<IntIntPair>::Mirror r(tree, &prev, &next);
 
-	// Grow uniqueItems until tree is full, adding half of new items to toDelete
-	std::vector<IntIntPair> toDelete;
-	while (1) {
-		IntIntPair p = randomPair();
-		auto nextP = p; // also check if next highest/lowest key is not in the set
-		nextP.v++;
-		auto prevP = p;
-		prevP.v--;
-		if (uniqueItems.count(p) == 0 && uniqueItems.count(nextP) == 0 && uniqueItems.count(prevP) == 0) {
-			if (!r.insert(p)) {
-				break;
-			};
-			uniqueItems.insert(p);
-			if (deterministicRandom()->coinflip()) {
-				toDelete.push_back(p);
-			}
-			// printf("Inserted %s  size=%d\n", items.back().toString().c_str(), tree->size());
-		}
-	}
-
-	ASSERT(tree->numItems > 2 * N);
-	ASSERT(tree->size() <= bufferSize);
-
-	// Update items vector
-	items = std::vector<IntIntPair>(uniqueItems.begin(), uniqueItems.end());
+	DeltaTree2<IntIntPair>* tree2 = (DeltaTree2<IntIntPair>*)new uint8_t[bufferSize];
+	int builtSize2 = tree2->build(bufferSize, &items[0], &items[items.size()], &prev, &next);
+	ASSERT(builtSize2 <= bufferSize);
+	DeltaTree2<IntIntPair>::DecodeCache cache(prev, next);
+	DeltaTree2<IntIntPair>::Cursor cur2(&cache, tree2);
 
 	auto printItems = [&] {
 		for (int k = 0; k < items.size(); ++k) {
-			printf("%d %s\n", k, items[k].toString().c_str());
+			printf("%d/%d %s\n", k + 1, items.size(), items[k].toString().c_str());
 		}
 	};
 
-	printf("Count=%d  Size=%d  InitialHeight=%d  MaxHeight=%d\n",
-	       (int)items.size(),
-	       (int)tree->size(),
-	       (int)tree->initialHeight,
-	       (int)tree->maxHeight);
-	debug_printf("Data(%p): %s\n", tree, StringRef((uint8_t*)tree, tree->size()).toHexString().c_str());
+	auto printTrees = [&] {
+		printf("DeltaTree: Count=%d  Size=%d  InitialHeight=%d  MaxHeight=%d\n",
+		       (int)tree->numItems,
+		       (int)tree->size(),
+		       (int)tree->initialHeight,
+		       (int)tree->maxHeight);
+		debug_printf_always("Data(%p): %s\n", tree, StringRef((uint8_t*)tree, tree->size()).toHexString().c_str());
+
+		printf("DeltaTree2: Count=%d  Size=%d  InitialHeight=%d  MaxHeight=%d\n",
+		       (int)tree2->numItems,
+		       (int)tree2->size(),
+		       (int)tree2->initialHeight,
+		       (int)tree2->maxHeight);
+		debug_printf_always("Data(%p): %s\n", tree2, StringRef((uint8_t*)tree2, tree2->size()).toHexString().c_str());
+	};
 
 	// Iterate through items and tree forward and backward, verifying tree contents.
 	auto scanAndVerify = [&]() {
@@ -7669,56 +7667,148 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 		}
 	};
 
+	// Iterate through items and tree forward and backward, verifying tree contents.
+	auto scanAndVerify2 = [&]() {
+		printf("Verify tree contents.\n");
+
+		DeltaTree2<IntIntPair>::Cursor fwd(&cache, tree2);
+		DeltaTree2<IntIntPair>::Cursor rev(&cache, tree2);
+
+		ASSERT(fwd.moveFirst());
+		ASSERT(rev.moveLast());
+
+		for (int i = 0; i < items.size(); ++i) {
+			if (fwd.get() != items[i]) {
+				printItems();
+				printf("forward iterator i=%d\n  %s found\n  %s expected\n",
+				       i,
+				       fwd.get().toString().c_str(),
+				       items[i].toString().c_str());
+				ASSERT(false);
+			}
+			if (rev.get() != items[items.size() - 1 - i]) {
+				printItems();
+				printf("reverse iterator i=%d\n  %s found\n  %s expected\n",
+				       i,
+				       rev.get().toString().c_str(),
+				       items[items.size() - 1 - i].toString().c_str());
+				ASSERT(false);
+			}
+
+			// Advance iterator, check scanning cursors for correct validity state
+			int j = i + 1;
+			bool end = j == items.size();
+
+			ASSERT(fwd.moveNext() == !end);
+			ASSERT(rev.movePrev() == !end);
+			ASSERT(fwd.valid() == !end);
+			ASSERT(rev.valid() == !end);
+
+			if (end) {
+				break;
+			}
+		}
+	};
+
+	printItems();
+	printTrees();
+
 	// Verify tree contents
 	scanAndVerify();
+	scanAndVerify2();
+
+	// Grow uniqueItems until tree is full, adding half of new items to toDelete
+	std::vector<IntIntPair> toDelete;
+	while (1) {
+		IntIntPair p = randomPair();
+		auto nextP = p; // also check if next highest/lowest key is not in the set
+		nextP.v++;
+		auto prevP = p;
+		prevP.v--;
+		if (uniqueItems.count(p) == 0 && uniqueItems.count(nextP) == 0 && uniqueItems.count(prevP) == 0) {
+			if (!r.insert(p)) {
+				break;
+			};
+			uniqueItems.insert(p);
+			if (deterministicRandom()->coinflip()) {
+				toDelete.push_back(p);
+			}
+			// printf("Inserted %s  size=%d\n", items.back().toString().c_str(), tree->size());
+		}
+	}
+
+	ASSERT(tree->numItems > 2 * N);
+	ASSERT(tree->size() <= bufferSize);
+
+	// Update items vector
+	items = std::vector<IntIntPair>(uniqueItems.begin(), uniqueItems.end());
+
+	// Verify tree contents
+	scanAndVerify();
+	scanAndVerify2();
 
 	// Create a new mirror, decoding the tree from scratch since insert() modified both the tree and the mirror
 	r = DeltaTree<IntIntPair>::Mirror(tree, &prev, &next);
+	cache.clear();
 	scanAndVerify();
+	scanAndVerify2();
 
 	// For each randomly selected new item to be deleted, delete it from the DeltaTree and from uniqueItems
 	printf("Deleting some items\n");
 	for (auto p : toDelete) {
 		uniqueItems.erase(p);
+
 		DeltaTree<IntIntPair>::Cursor c = r.getCursor();
 		ASSERT(c.seekLessThanOrEqual(p));
 		c.erase();
+
+		ASSERT(cur2.seekLessThanOrEqual(p));
+		cur2.erase();
 	}
 	// Update items vector
 	items = std::vector<IntIntPair>(uniqueItems.begin(), uniqueItems.end());
 
 	// Verify tree contents after deletions
 	scanAndVerify();
+	scanAndVerify2();
 
 	printf("Verifying insert/erase behavior for existing items\n");
 	// Test delete/insert behavior for each item, making no net changes
 	for (auto p : items) {
 		// Insert existing should fail
 		ASSERT(!r.insert(p));
+		ASSERT(!cur2.insert(p));
 
 		// Erase existing should succeed
 		ASSERT(r.erase(p));
+		ASSERT(cur2.erase(p));
 
 		// Erase deleted should fail
 		ASSERT(!r.erase(p));
+		ASSERT(!cur2.erase(p));
 
 		// Insert deleted should succeed
 		ASSERT(r.insert(p));
+		ASSERT(cur2.insert(p));
 
 		// Insert existing should fail
 		ASSERT(!r.insert(p));
+		ASSERT(!cur2.insert(p));
 	}
 
 	// Tree contents should still match items vector
 	scanAndVerify();
+	scanAndVerify2();
 
 	printf("Verifying seek behaviors\n");
 	DeltaTree<IntIntPair>::Cursor s = r.getCursor();
+	DeltaTree2<IntIntPair>::Cursor s2(&cache, tree2);
 
 	// SeekLTE to each element
 	for (int i = 0; i < items.size(); ++i) {
 		IntIntPair p = items[i];
 		IntIntPair q = p;
+
 		ASSERT(s.seekLessThanOrEqual(q));
 		if (s.get() != p) {
 			printItems();
@@ -7728,18 +7818,39 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 			       p.toString().c_str());
 			ASSERT(false);
 		}
+
+		ASSERT(s2.seekLessThanOrEqual(q));
+		if (s2.get() != p) {
+			printItems();
+			printf("seekLessThanOrEqual(%s) found %s expected %s\n",
+			       q.toString().c_str(),
+			       s2.get().toString().c_str(),
+			       p.toString().c_str());
+			ASSERT(false);
+		}
 	}
 
 	// SeekGTE to each element
 	for (int i = 0; i < items.size(); ++i) {
 		IntIntPair p = items[i];
 		IntIntPair q = p;
+
 		ASSERT(s.seekGreaterThanOrEqual(q));
 		if (s.get() != p) {
 			printItems();
 			printf("seekGreaterThanOrEqual(%s) found %s expected %s\n",
 			       q.toString().c_str(),
 			       s.get().toString().c_str(),
+			       p.toString().c_str());
+			ASSERT(false);
+		}
+
+		ASSERT(s2.seekGreaterThanOrEqual(q));
+		if (s2.get() != p) {
+			printItems();
+			printf("seekGreaterThanOrEqual(%s) found %s expected %s\n",
+			       q.toString().c_str(),
+			       s2.get().toString().c_str(),
 			       p.toString().c_str());
 			ASSERT(false);
 		}
@@ -7751,12 +7862,23 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 		IntIntPair p = items[i];
 		IntIntPair q = p;
 		q.v++;
+
 		ASSERT(s.seekLessThanOrEqual(q));
 		if (s.get() != p) {
 			printItems();
 			printf("seekLessThanOrEqual(%s) found %s expected %s\n",
 			       q.toString().c_str(),
 			       s.get().toString().c_str(),
+			       p.toString().c_str());
+			ASSERT(false);
+		}
+
+		ASSERT(s2.seekLessThanOrEqual(q));
+		if (s2.get() != p) {
+			printItems();
+			printf("seekLessThanOrEqual(%s) found %s expected %s\n",
+			       q.toString().c_str(),
+			       s2.get().toString().c_str(),
 			       p.toString().c_str());
 			ASSERT(false);
 		}
@@ -7768,12 +7890,23 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 		IntIntPair p = items[i];
 		IntIntPair q = p;
 		q.v--;
+
 		ASSERT(s.seekGreaterThanOrEqual(q));
 		if (s.get() != p) {
 			printItems();
 			printf("seekGreaterThanOrEqual(%s) found %s expected %s\n",
 			       q.toString().c_str(),
 			       s.get().toString().c_str(),
+			       p.toString().c_str());
+			ASSERT(false);
+		}
+
+		ASSERT(s2.seekGreaterThanOrEqual(q));
+		if (s2.get() != p) {
+			printItems();
+			printf("seekGreaterThanOrEqual(%s) found %s expected %s\n",
+			       q.toString().c_str(),
+			       s2.get().toString().c_str(),
 			       p.toString().c_str());
 			ASSERT(false);
 		}
@@ -7858,11 +7991,56 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 		       double(count) / elapsed / 1e6);
 	};
 
+	auto skipSeekPerformance2 = [&](int jumpMax, bool old, bool useHint, int count) {
+		// Skip to a series of increasing items, jump by up to jumpMax units forward in the
+		// items, wrapping around to 0.
+		double start = timer();
+		s2.moveFirst();
+		auto first = s2;
+		int pos = 0;
+		for (int c = 0; c < count; ++c) {
+			int jump = deterministicRandom()->randomInt(0, jumpMax);
+			int newPos = pos + jump;
+			if (newPos >= items.size()) {
+				pos = 0;
+				newPos = jump;
+				s2 = first;
+			}
+			IntIntPair q = items[newPos];
+			++q.v;
+			if (old) {
+				if (useHint) {
+					// s.seekLessThanOrEqualOld(q, 0, &s, newPos - pos);
+				} else {
+					// s.seekLessThanOrEqualOld(q, 0, nullptr, 0);
+				}
+			} else {
+				if (useHint) {
+					// s.seekLessThanOrEqual(q, 0, &s, newPos - pos);
+				} else {
+					s2.seekLessThanOrEqual(q);
+				}
+			}
+			pos = newPos;
+		}
+		double elapsed = timer() - start;
+		printf("DeltaTree2 Seek/skip test, count=%d jumpMax=%d, items=%d, oldSeek=%d useHint=%d:  Elapsed %f seconds  "
+		       "%.2f M/s\n",
+		       count,
+		       jumpMax,
+		       items.size(),
+		       old,
+		       useHint,
+		       elapsed,
+		       double(count) / elapsed / 1e6);
+	};
+
 	// Compare seeking to nearby elements with and without hints, using the old and new SeekLessThanOrEqual methods.
 	// TODO:  Once seekLessThanOrEqual() with a hint is as fast as seekLessThanOrEqualOld, remove it.
+	skipSeekPerformance(8, false, false, 80e6);
+	skipSeekPerformance2(8, false, false, 80e6);
 	skipSeekPerformance(8, true, false, 80e6);
 	skipSeekPerformance(8, true, true, 80e6);
-	skipSeekPerformance(8, false, false, 80e6);
 	skipSeekPerformance(8, false, true, 80e6);
 
 	// Repeatedly seek for one of a set of pregenerated random pairs and time it.
