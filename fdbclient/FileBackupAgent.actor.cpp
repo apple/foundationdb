@@ -5229,6 +5229,11 @@ public:
 	                                     bool lockDB,
 	                                     bool inconsistentSnapshotOnly,
 	                                     UID randomUid) {
+		// The restore command line tool won't allow ranges to be empty, but correctness workloads somehow might.
+		if (ranges.empty()) {
+			throw restore_error();
+		}
+
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
 
 		state BackupDescription desc = wait(bc->describeBackup());
