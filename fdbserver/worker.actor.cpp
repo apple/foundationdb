@@ -569,11 +569,11 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 			when(RegisterWorkerReply reply = wait(registrationReply)) {
 				processClass = reply.processClass;
 				asyncPriorityInfo->set(reply.priorityInfo);
-				TraceEvent("WorkerJoiningCluster").detail("CCID", ccInterface->get().get().id());
+				TraceEvent("WorkerRegisterReply").detail("CCID", ccInterface->get().get().id());
 				break;
 			}
 			when(wait(delay(SERVER_KNOBS->JOIN_CLUSTER_WARNING_INTERVAL))) {
-				TraceEvent(SevWarn, "WorkerNotJoinedClusterForLongTime").detail("WaitTime", now() - startTime);
+				TraceEvent(SevWarn, "WorkerRegisterTimeout").detail("WaitTime", now() - startTime);
 			}
 			when(wait(ccInterface->onChange())) { break; }
 			when(wait(ddInterf->onChange())) { break; }
