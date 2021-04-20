@@ -30,6 +30,7 @@
 #include "fdbserver/ptxn/Config.h"
 #include "fdbserver/ptxn/StorageServerInterface.h"
 #include "fdbserver/ptxn/TLogInterface.h"
+#include "fdbserver/ResolverInterface.h"
 
 namespace ptxn {
 
@@ -59,6 +60,10 @@ struct TestDriverContext {
 
 	// Proxies
 	int numProxies;
+
+	// Resolvers
+	int numResolvers;
+	std::vector<std::shared_ptr<ResolverInterface>> resolverInterfaces;
 
 	// TLog
 	int numTLogs;
