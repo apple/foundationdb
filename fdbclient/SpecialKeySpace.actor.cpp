@@ -1937,10 +1937,10 @@ ACTOR static Future<Standalone<RangeResultRef>> MaintenanceGetRangeActor(ReadYou
 		if ((healthyZone.first == ignoreSSFailuresZoneString) ||
 		    (healthyZone.second > ryw->getTransaction().getReadVersion().get())) {
 			Key zone_key = healthyZone.first.withPrefix(prefix);
-			int64_t seconds = healthyZone.first == ignoreSSFailuresZoneString
-			                      ? 0
-			                      : (healthyZone.second - ryw->getTransaction().getReadVersion().get()) /
-			                            CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+			double seconds = healthyZone.first == ignoreSSFailuresZoneString
+			                     ? 0
+			                     : (healthyZone.second - ryw->getTransaction().getReadVersion().get()) /
+			                           CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 			if (kr.contains(zone_key)) {
 				result.push_back_deep(result.arena(),
 				                      KeyValueRef(zone_key, Value(boost::lexical_cast<std::string>(seconds))));
@@ -1965,7 +1965,7 @@ ACTOR static Future<Optional<std::string>> maintenanceCommitActor(ReadYourWrites
 	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
 	    ryw->getSpecialKeySpaceWriteMap().containedRanges(kr);
 	Key zoneId;
-	int64_t seconds;
+	double seconds;
 	bool isSet = false;
 	// Since maintenance only allows one zone at the same time,
 	// if a transaction has more than one set operation on different zone keys,
@@ -1979,7 +1979,7 @@ ACTOR static Future<Optional<std::string>> maintenanceCommitActor(ReadYourWrites
 				    false, "maintenance", "Multiple zones given for maintenance, only one allowed at the same time"));
 			isSet = true;
 			zoneId = iter->begin().removePrefix(kr.begin);
-			seconds = boost::lexical_cast<int64_t>(iter->value().second.get().toString());
+			seconds = boost::lexical_cast<double>(iter->value().second.get().toString());
 		} else {
 			// if we already have set operation, then all clear operations will be meaningless, thus skip
 			if (!isSet && healthyZone.present() && iter.range().contains(healthyZone.get().first.withPrefix(kr.begin)))
@@ -1991,6 +1991,10 @@ ACTOR static Future<Optional<std::string>> maintenanceCommitActor(ReadYourWrites
 		if (healthyZone.present() && healthyZone.get().first == ignoreSSFailuresZoneString) {
 			std::string msg = "Maintenance mode cannot be used while data distribution is disabled for storage "
 			                  "server failures.";
+			return Optional<std::string>(ManagementAPIError::toJsonString(false, "maintenance", msg));
+		} else if (seconds <= 0) {
+			std::string msg = "The specified maintenance time " + boost::lexical_cast<std::string>(seconds) +
+			                  " is not a positive value";
 			return Optional<std::string>(ManagementAPIError::toJsonString(false, "maintenance", msg));
 		} else {
 			TraceEvent(SevDebug, "SKSMaintenanceSet").detail("ZoneId", zoneId.toString());
