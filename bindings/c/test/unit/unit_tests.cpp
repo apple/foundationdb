@@ -1513,7 +1513,7 @@ TEST_CASE("fdb_transaction_get_approximate_size") {
 	}
 }
 
-TEST_CASE("fdb_get_server_protocol") {
+TEST_CASE("fdb_database_get_server_protocol") {
 	// We don't really have any expectations other than "don't crash" here
 	FDBFuture* protocolFuture = fdb_database_get_server_protocol(db, 0);
 	uint64_t out;
