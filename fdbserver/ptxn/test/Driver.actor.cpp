@@ -31,6 +31,7 @@
 #include "fdbserver/ptxn/test/FakeResolver.actor.h"
 #include "fdbserver/ptxn/test/FakeStorageServer.actor.h"
 #include "fdbserver/ptxn/test/FakeTLog.actor.h"
+#include "flow/genericactors.actor.h"
 #include "flow/UnitTest.h"
 
 namespace ptxn {
@@ -309,7 +310,23 @@ TEST_CASE("fdbserver/ptxn/test/resolver") {
 	startFakeResolver(actors, context);
 	std::cout << "Started " << context->numResolvers << " Resolvers\n";
 
-	wait(delay(10.0)); // Exits after 10s
+	const Version lastEpochEnd = 100;
+	state std::vector<Future<ResolveTransactionBatchReply>> replies;
+	// Imitates resolver initialization from the master server
+	for (auto& r : context->resolverInterfaces) {
+		ResolveTransactionBatchRequest req;
+		req.prevVersion = -1;
+		req.version = lastEpochEnd;
+		req.lastReceivedVersion = -1;
+
+		replies.push_back(brokenPromiseToNever(r->resolve.getReply(req)));
+	}
+
+	wait(waitForAll(replies));
+	for (auto& f : replies) {
+		ASSERT(f.isReady() && f.isValid());
+	}
+	std::cout<<"Initialized " << context->numResolvers << " Resolvers\n";
 
 	return Void();
 }
