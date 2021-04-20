@@ -799,3 +799,16 @@ Upgrading from Older Versions
 -----------------------------
 
 Upgrades from versions older than 5.0.0 are no longer supported.
+
+Version-specific notes on downgrading
+===================================
+
+In general, downgrades between patch releases (i.e. 6.2.x - 6.1.x) are not supported.
+
+Downgrading from 6.3.13 - 6.2.33
+--------------------------------
+After upgrading from 6.2 to 6.3, the option of rolling back and downgrading to return to 6.2 is still possible, given that the following conditions are met:
+
+* The 6.3 cluster cannot have ``TLogVersion`` greater than V4 (6.2).
+* The 6.3 cluster cannot use storage engine types that are not ``ssd-1``, ``ssd-2``, or ``memory``.
+* The 6.3 cluster must not have any key servers serialized with tag encoding. The ``TAG_ENCODE_KEY_SERVERS`` fdbclient knob must not be set to true at any point in time.
