@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbserver/ResolverInterface.h"
 #include "fdbserver/ptxn/test/Driver.h"
 
 #include <iostream>
@@ -31,6 +32,8 @@
 #include "fdbserver/ptxn/test/FakeResolver.actor.h"
 #include "fdbserver/ptxn/test/FakeStorageServer.actor.h"
 #include "fdbserver/ptxn/test/FakeTLog.actor.h"
+#include "flow/IRandom.h"
+#include "flow/Trace.h"
 #include "flow/genericactors.actor.h"
 #include "flow/UnitTest.h"
 
@@ -172,17 +175,18 @@ void startFakeProxy(std::vector<Future<Void>>& actors, std::shared_ptr<TestDrive
 // TODO: change to "resolver" after we have fake ServerDBInfo object.
 void startFakeResolver(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext) {
 	for (int i = 0; i < pTestDriverContext->numResolvers; ++i) {
-		ResolverInterface recruited;
+		std::shared_ptr<ResolverInterface> recruited(new ResolverInterface);
 		// recruited.locality = locality;
-		recruited.initEndpoints();
+		recruited->initEndpoints();
 
 		InitializeResolverRequest req;
 		req.recoveryCount = 1;
 		req.commitProxyCount = pTestDriverContext->numProxies;
 		req.resolverCount = pTestDriverContext->numResolvers;
 
-		Future<Void> core = ::resolverCore(recruited, req);
+		Future<Void> core = ::resolverCore(*recruited, req);
 		actors.emplace_back(core);
+		pTestDriverContext->resolverInterfaces.push_back(recruited);
 	}
 }
 
@@ -316,6 +320,8 @@ TEST_CASE("fdbserver/ptxn/test/resolver") {
 		req.prevVersion = -1;
 		req.version = lastEpochEnd;
 		req.lastReceivedVersion = -1;
+		// triggers debugging trace events at Resolvers
+		req.debugID = deterministicRandom()->randomUniqueID();
 
 		replies.push_back(brokenPromiseToNever(r->resolve.getReply(req)));
 	}
@@ -324,7 +330,7 @@ TEST_CASE("fdbserver/ptxn/test/resolver") {
 	for (auto& f : replies) {
 		ASSERT(f.isReady() && f.isValid());
 	}
-	std::cout<<"Initialized " << context->numResolvers << " Resolvers\n";
+	std::cout<<"Initialized " << replies.size() << " Resolvers\n";
 
 	return Void();
 }
