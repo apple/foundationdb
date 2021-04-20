@@ -4586,8 +4586,9 @@ public:
 				restoreRanges.push_back(KeyRange(KeyRangeRef(restoreRange.range().begin, restoreRange.range().end)));
 			}
 		}
-		for (auto& restoreRange : restoreRanges)
-			ASSERT(restoreRange.contains(removePrefix) || removePrefix.size() == 0);
+		for (auto& restoreRange : restoreRanges) {
+			ASSERT(restoreRange.begin.startsWith(removePrefix) && restoreRange.end.startsWith(removePrefix));
+		}
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
