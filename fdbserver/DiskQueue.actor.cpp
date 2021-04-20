@@ -385,6 +385,7 @@ public:
 						waitfor.push_back(self->files[1].f->truncate(self->fileExtensionBytes));
 						self->files[1].size = self->fileExtensionBytes;
 					} else {
+						TEST(true); // Truncating DiskQueue file
 						const int64_t startingSize = self->files[1].size;
 						self->files[1].size -= std::min(maxShrink, self->files[1].size);
 						self->files[1].size = std::max(self->files[1].size, self->fileExtensionBytes);
