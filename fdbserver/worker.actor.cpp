@@ -542,7 +542,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 			}
 		} else {
 			incorrectTime = Optional<double>();
-			if (connFile->canGetFilename()) {
+			if (connFile && connFile->canGetFilename()) {
 				TraceEvent("ClusterFileContents")
 				    .detail("Filename", connFile->getFilename())
 				    .detail("ConnectionStringFromFile", fileConnectionString.toString())
