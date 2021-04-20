@@ -1159,13 +1159,12 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		DEBUG_MUTATION("ShardGetValue",
 		               version,
 		               MutationRef(MutationRef::DebugKey, req.key, v.present() ? v.get() : LiteralStringRef("<null>")));
-		DEBUG_MUTATION("ShardGetPath",
-		               version,
-		               MutationRef(MutationRef::DebugKey,
-		                           req.key,
-		                           path == 0   ? LiteralStringRef("0")
-		                           : path == 1 ? LiteralStringRef("1")
-		                                       : LiteralStringRef("2")));
+		DEBUG_MUTATION(
+		    "ShardGetPath",
+		    version,
+		    MutationRef(MutationRef::DebugKey,
+		                req.key,
+		                path == 0 ? LiteralStringRef("0") : path == 1 ? LiteralStringRef("1") : LiteralStringRef("2")));
 
 		/*
 		StorageMetrics m;
@@ -1434,7 +1433,9 @@ ACTOR Future<Void> getShardStateQ(StorageServer* data, GetShardStateRequest req)
 	return Void();
 }
 
-void merge(Arena& arena,
+void merge(Arena& arenaOutput,
+           const Arena& arenaVm,
+           const Arena& arenaBase,
            VectorRef<KeyValueRef, VecSerStrategy::String>& output,
            VectorRef<KeyValueRef> const& vm_output,
            VectorRef<KeyValueRef> const& base,
@@ -1458,9 +1459,9 @@ void merge(Arena& arena,
 	KeyValueRef const* baseEnd = base.end();
 	while (baseStart != baseEnd && vCount > 0 && output.size() < adjustedLimit && accumulatedBytes < limitBytes) {
 		if (forward ? baseStart->key < vm_output[pos].key : baseStart->key > vm_output[pos].key) {
-			output.push_back_deep(arena, *baseStart++);
+			output.push_back(arenaOutput, *baseStart++);
 		} else {
-			output.push_back_deep(arena, vm_output[pos]);
+			output.push_back(arenaOutput, vm_output[pos]);
 			if (baseStart->key == vm_output[pos].key)
 				++baseStart;
 			++pos;
@@ -1469,16 +1470,22 @@ void merge(Arena& arena,
 		accumulatedBytes += sizeof(KeyValueRef) + output.end()[-1].expectedSize();
 	}
 	while (baseStart != baseEnd && output.size() < adjustedLimit && accumulatedBytes < limitBytes) {
-		output.push_back_deep(arena, *baseStart++);
+		output.push_back(arenaOutput, *baseStart++);
 		accumulatedBytes += sizeof(KeyValueRef) + output.end()[-1].expectedSize();
 	}
 	if (!stopAtEndOfBase) {
 		while (vCount > 0 && output.size() < adjustedLimit && accumulatedBytes < limitBytes) {
-			output.push_back_deep(arena, vm_output[pos]);
+			output.push_back(arenaOutput, vm_output[pos]);
 			accumulatedBytes += sizeof(KeyValueRef) + output.end()[-1].expectedSize();
 			++pos;
 			vCount--;
 		}
+	}
+	if (!arenaOutput.sameArena(arenaBase)) {
+		arenaOutput.dependsOn(arenaBase);
+	}
+	if (!arenaOutput.sameArena(arenaVm)) {
+		arenaOutput.dependsOn(arenaVm);
 	}
 }
 
@@ -1563,6 +1570,8 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			// 'more'
 			int prevSize = result.data.size();
 			merge(result.arena,
+			      result.arena,
+			      atStorageVersion.arena(),
 			      result.data,
 			      resultCache,
 			      atStorageVersion,
@@ -1642,6 +1651,8 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 
 			int prevSize = result.data.size();
 			merge(result.arena,
+			      result.arena,
+			      atStorageVersion.arena(),
 			      result.data,
 			      resultCache,
 			      atStorageVersion,
