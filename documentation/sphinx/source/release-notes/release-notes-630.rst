@@ -4,7 +4,7 @@ Release Notes
 
 6.3.13
 ======
-* The multi-version client now requires at most two connections to the cluster, regardless of how many external clients are configured. `(PR #4667) <https://github.com/apple/foundationdb/pull/4667>`_
+* The multi-version client now requires at most two client connections with version 6.2 or larger, regardless of how many external clients are configured. Clients older than 6.2 will continue to create an additional connection each. `(PR #4667) <https://github.com/apple/foundationdb/pull/4667>`_
 
 6.3.12
 ======

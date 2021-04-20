@@ -467,6 +467,9 @@ public:
 	struct DatabaseState : ThreadSafeReferenceCounted<DatabaseState> {
 		DatabaseState(std::string clusterFilePath, Reference<IDatabase> versionMonitorDb);
 
+		// Replaces the active database connection with a new one. Must be called from the main thread.
+		void updateDatabase(Reference<IDatabase> newDb, Reference<ClientInfo> client);
+
 		// Called when a change to the protocol version of the cluster has been detected. Must be called from the main
 		// thread.
 		void protocolVersionChanged(ProtocolVersion protocolVersion);
@@ -490,6 +493,7 @@ public:
 
 		bool cancelled;
 
+		ThreadFuture<Void> dbReady;
 		ThreadFuture<Void> protocolVersionMonitor;
 		Optional<ProtocolVersion> dbProtocolVersion;
 		std::map<ProtocolVersion, Reference<ClientInfo>> clients;
