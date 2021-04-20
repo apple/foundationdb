@@ -4590,8 +4590,9 @@ public:
 				restoreRanges.push_back(KeyRange(KeyRangeRef(restoreRange.range().begin, restoreRange.range().end)));
 			}
 		}
-		for (auto& restoreRange : restoreRanges)
-			ASSERT(restoreRange.contains(removePrefix) || removePrefix.size() == 0);
+		for (auto& restoreRange : restoreRanges) {
+			ASSERT(restoreRange.begin.startsWith(removePrefix) && restoreRange.end.startsWith(removePrefix));
+		}
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -5183,7 +5184,8 @@ public:
 	}
 
 	ACTOR static Future<Optional<Version>> getLastRestorable(FileBackupAgent* backupAgent,
-	                                                         Reference<ReadYourWritesTransaction> tr, Key tagName,
+	                                                         Reference<ReadYourWritesTransaction> tr,
+	                                                         Key tagName,
 	                                                         bool snapshot) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -5577,7 +5579,8 @@ Future<std::string> FileBackupAgent::getStatusJSON(Database cx, std::string tagN
 	return FileBackupAgentImpl::getStatusJSON(this, cx, tagName);
 }
 
-Future<Optional<Version>> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName,
+Future<Optional<Version>> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr,
+                                                             Key tagName,
                                                              bool snapshot) {
 	return FileBackupAgentImpl::getLastRestorable(this, tr, tagName, snapshot);
 }
