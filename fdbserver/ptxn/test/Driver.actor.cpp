@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbserver/ResolverInterface.h"
 #include "fdbserver/ptxn/test/Driver.h"
 
 #include <iostream>
@@ -32,6 +31,7 @@
 #include "fdbserver/ptxn/test/FakeResolver.actor.h"
 #include "fdbserver/ptxn/test/FakeStorageServer.actor.h"
 #include "fdbserver/ptxn/test/FakeTLog.actor.h"
+#include "fdbserver/ResolverInterface.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/genericactors.actor.h"
@@ -184,8 +184,7 @@ void startFakeResolver(std::vector<Future<Void>>& actors, std::shared_ptr<TestDr
 		req.commitProxyCount = pTestDriverContext->numProxies;
 		req.resolverCount = pTestDriverContext->numResolvers;
 
-		Future<Void> core = ::resolverCore(*recruited, req);
-		actors.emplace_back(core);
+		actors.emplace_back(::resolverCore(*recruited, req));
 		pTestDriverContext->resolverInterfaces.push_back(recruited);
 	}
 }
