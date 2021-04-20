@@ -33,7 +33,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	int backupRangesCount, backupRangeLengthMax;
 	bool differentialBackup, performRestore, agentRequest;
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
-	std::vector<std::string> prefixesAllowed;
+	std::vector<std::string> restorePrefixesToInclude;
 	std::vector<Standalone<KeyRangeRef>> skippedRestoreRanges;
 	Standalone<VectorRef<KeyRangeRef>> restoreRanges;
 	static int backupAgentRequests;
@@ -68,7 +68,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		agentRequest = getOption(options, LiteralStringRef("simBackupAgents"), true);
 		allowPauses = getOption(options, LiteralStringRef("allowPauses"), true);
 		shareLogRange = getOption(options, LiteralStringRef("shareLogRange"), false);
-		prefixesAllowed = getOption(options, LiteralStringRef("prefixesAllowed"), std::vector<std::string>());
+		restorePrefixesToInclude = getOption(options, LiteralStringRef("restorePrefixesToInclude"), std::vector<std::string>());
 		shouldSkipRestoreRanges = deterministicRandom()->random01() < 0.3 ? true : false;
 
 		TraceEvent("BARW_ClientId").detail("Id", wcx.clientId);
@@ -104,10 +104,10 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			}
 		}
 
-		if (performRestore && !prefixesAllowed.empty() && shouldSkipRestoreRanges) {
+		if (performRestore && !restorePrefixesToInclude.empty() && shouldSkipRestoreRanges) {
 			for (auto& range : backupRanges) {
 				bool intersection = false;
-				for (auto& prefix : prefixesAllowed) {
+				for (auto& prefix : restorePrefixesToInclude) {
 					KeyRange prefixRange(KeyRangeRef(prefix, strinc(prefix)));
 					if (range.intersects(prefixRange)) {
 						intersection = true;
@@ -117,7 +117,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					    .detail("BackupRange", printable(range))
 					    .detail("Intersection", intersection);
 				}
-				// If the backup range intersects with prefixesAllowed or a coin flip is true then use it as a restore
+				// If the backup range intersects with restorePrefixesToInclude or a coin flip is true then use it as a restore
 				// range as well, otherwise skip it.
 				if (intersection || deterministicRandom()->coinflip()) {
 					restoreRanges.push_back_deep(restoreRanges.arena(), range);
@@ -129,7 +129,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			restoreRanges = backupRanges;
 		}
 
-		// If no random backup ranges intersected with prefixesAllowed or won the coin flip then restoreRanges will be
+		// If no random backup ranges intersected with restorePrefixesToInclude or won the coin flip then restoreRanges will be
 		// empty, so move an item from skippedRestoreRanges to restoreRanges.
 		if (restoreRanges.empty()) {
 			ASSERT(!skippedRestoreRanges.empty());
