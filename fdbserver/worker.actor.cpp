@@ -79,6 +79,10 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 #define KV_STORE(filename, uid) keyValueStoreMemory(filename, uid)
 #endif
 
+namespace {
+RoleLineageCollector roleLineageCollector;
+}
+
 ACTOR Future<std::vector<Endpoint>> tryDBInfoBroadcast(RequestStream<UpdateServerDBInfoRequest> stream,
                                                        UpdateServerDBInfoRequest req) {
 	ErrorOr<std::vector<Endpoint>> rep =
