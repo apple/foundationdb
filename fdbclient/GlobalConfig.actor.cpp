@@ -34,7 +34,7 @@ const KeyRef fdbClientInfoTxnSizeLimit = LiteralStringRef("config/fdb_client_inf
 const KeyRef transactionTagSampleRate = LiteralStringRef("config/transaction_tag_sample_rate");
 const KeyRef transactionTagSampleCost = LiteralStringRef("config/transaction_tag_sample_cost");
 
-const KeyRef sampleFrequency = LiteralStringRef("visibility/sample_frequency");
+const KeyRef samplingFrequency = LiteralStringRef("visibility/sampling/frequency");
 
 GlobalConfig::GlobalConfig() : lastUpdate(0) {}
 
@@ -99,6 +99,8 @@ void GlobalConfig::insert(KeyRef key, ValueRef value) {
 			any = StringRef(arena, t.getString(0).contents());
 		} else if (t.getType(0) == Tuple::ElementType::INT) {
 			any = t.getInt(0);
+		} else if (t.getType(0) == Tuple::ElementType::BOOL) {
+			any = t.getBool(0);
 		} else if (t.getType(0) == Tuple::ElementType::FLOAT) {
 			any = t.getFloat(0);
 		} else if (t.getType(0) == Tuple::ElementType::DOUBLE) {

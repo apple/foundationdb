@@ -464,14 +464,13 @@ ACTOR Future<Void> dumpDatabase(Database cx, std::string outputFilename, KeyRang
 ACTOR Future<Void> actorLineageProfiler() {
 	wait(delay(1));
 	wait(GlobalConfig::globalConfig().onInitialized());
-	// TODO: Add flag to enable/disable
-	state unsigned frequency = GlobalConfig::globalConfig().get<double>(sampleFrequency, 0);
+	state unsigned frequency = GlobalConfig::globalConfig().get<double>(samplingFrequency, 0);
 	ActorLineageProfiler::instance().setFrequency(frequency);
 
 	loop {
 		wait(GlobalConfig::globalConfig().onChange());
 
-		unsigned latestFrequency = GlobalConfig::globalConfig().get<double>(sampleFrequency, 0);
+		unsigned latestFrequency = GlobalConfig::globalConfig().get<double>(samplingFrequency, 0);
 		if (latestFrequency != frequency) {
 			frequency = latestFrequency;
 			ActorLineageProfiler::instance().setFrequency(latestFrequency);

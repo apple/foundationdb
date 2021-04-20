@@ -257,6 +257,10 @@ void ActorLineageProfilerT::setFrequency(unsigned frequency) {
 	} else if (change) {
 		cond.notify_all();
 	}
+
+	if (frequency == 0) {
+		profilerThread.join();
+	}
 }
 
 void ActorLineageProfilerT::profile() {
