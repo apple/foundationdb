@@ -33,6 +33,7 @@ struct SubmitBackupWorkload final : TestWorkload {
 	Standalone<StringRef> backupDir;
 	Standalone<StringRef> tag;
 	double delayFor;
+	int initSnapshotInterval;
 	int snapshotInterval;
 	bool stopWhenDone;
 	bool incremental;
@@ -41,6 +42,7 @@ struct SubmitBackupWorkload final : TestWorkload {
 		backupDir = getOption(options, LiteralStringRef("backupDir"), LiteralStringRef("file://simfdb/backups/"));
 		tag = getOption(options, LiteralStringRef("tag"), LiteralStringRef("default"));
 		delayFor = getOption(options, LiteralStringRef("delayFor"), 10.0);
+		initSnapshotInterval = getOption(options, LiteralStringRef("initSnapshotInterval"), 0);
 		snapshotInterval = getOption(options, LiteralStringRef("snapshotInterval"), 1e8);
 		stopWhenDone = getOption(options, LiteralStringRef("stopWhenDone"), true);
 		incremental = getOption(options, LiteralStringRef("incremental"), false);
@@ -55,6 +57,7 @@ struct SubmitBackupWorkload final : TestWorkload {
 		try {
 			wait(self->backupAgent.submitBackup(cx,
 			                                    self->backupDir,
+			                                    self->initSnapshotInterval,
 			                                    self->snapshotInterval,
 			                                    self->tag.toString(),
 			                                    backupRanges,

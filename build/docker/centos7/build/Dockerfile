@@ -34,6 +34,7 @@ RUN rpmkeys --import mono-project.com.rpmkey.pgp && \
         lz4-devel \
         lz4-static \
         mono-devel \
+        redhat-lsb-core \
         rpm-build \
         tcl-devel \
         unzip \
