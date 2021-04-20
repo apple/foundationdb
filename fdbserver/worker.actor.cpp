@@ -572,7 +572,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 				TraceEvent("WorkerRegisterReply").detail("CCID", ccInterface->get().get().id());
 				break;
 			}
-			when(wait(delay(SERVER_KNOBS->JOIN_CLUSTER_WARNING_INTERVAL))) {
+			when(wait(delay(SERVER_KNOBS->REGISTER_WORKER_REQUEST_TIMEOUT))) {
 				TraceEvent(SevWarn, "WorkerRegisterTimeout").detail("WaitTime", now() - startTime);
 			}
 			when(wait(ccInterface->onChange())) { break; }
