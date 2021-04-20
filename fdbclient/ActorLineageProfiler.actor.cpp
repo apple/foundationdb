@@ -21,7 +21,8 @@
 #include "flow/flow.h"
 #include "flow/singleton.h"
 #include "fdbrpc/IAsyncFile.h"
-#include "fdbclient/ActorLineageProfiler.h"
+#include "fdbclient/ActorLineageProfiler.actor.h"
+#include "fdbclient/GlobalConfig.actor.h"
 #include <msgpack.hpp>
 #include <memory>
 #include <boost/endian/conversion.hpp>
@@ -276,6 +277,26 @@ void ActorLineageProfilerT::profile() {
 		}
 		if (frequency == 0) {
 			return;
+		}
+	}
+}
+
+// Handles running the sampling profiler, including responding to frequency
+// changes and other updates the client wishes to make through global
+// configuration.
+ACTOR Future<Void> runSamplingProfiler() {
+	wait(delay(1)); // A bit of a hack to get around GlobalConfig not being setup yet
+	wait(GlobalConfig::globalConfig().onInitialized());
+	state unsigned frequency = GlobalConfig::globalConfig().get<double>(samplingFrequency, 0);
+	ActorLineageProfiler::instance().setFrequency(frequency);
+
+	loop {
+		wait(GlobalConfig::globalConfig().onChange());
+
+		unsigned latestFrequency = GlobalConfig::globalConfig().get<double>(samplingFrequency, 0);
+		if (latestFrequency != frequency) {
+			frequency = latestFrequency;
+			ActorLineageProfiler::instance().setFrequency(latestFrequency);
 		}
 	}
 }

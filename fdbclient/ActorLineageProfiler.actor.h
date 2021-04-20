@@ -19,6 +19,13 @@
  */
 
 #pragma once
+
+#if defined(NO_INTELLISENSE) && !defined(FLOW_ACTORLINEAGEPROFILER_ACTOR_G_H)
+#define FLOW_ACTORLINEAGEPROFILER_ACTOR_G_H
+#include "fdbclient/ActorLineageProfiler.actor.g.h"
+#elif !defined(FLOW_ACTORLINEAGEPROFILER_ACTOR_H)
+#define FLOW_ACTORLINEAGEPROFILER_ACTOR_H
+
 #include "fdbclient/AnnotateActor.h"
 
 #include <optional>
@@ -30,7 +37,9 @@
 #include "flow/singleton.h"
 #include "flow/flow.h"
 
-void runSamplingProfiler();
+#include "flow/actorcompiler.h" // This must be the last #include.
+
+ACTOR Future<Void> runSamplingProfiler();
 
 struct IALPCollectorBase {
 	virtual std::optional<std::any> collect(ActorLineage*) = 0;
@@ -120,3 +129,5 @@ public:
 };
 
 using ActorLineageProfiler = crossbow::singleton<ActorLineageProfilerT>;
+
+#endif

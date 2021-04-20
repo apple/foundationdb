@@ -1,6 +1,6 @@
 set(FDBCLIENT_SRCS
-  ActorLineageProfiler.h
-  ActorLineageProfiler.cpp
+  ActorLineageProfiler.actor.h
+  ActorLineageProfiler.actor.cpp
   AnnotateActor.cpp
   AsyncFileS3BlobStore.actor.cpp
   AsyncFileS3BlobStore.actor.h

@@ -28,7 +28,7 @@
 
 #include "flow/singleton.h"
 #include "fdbrpc/Locality.h"
-#include "fdbclient/ActorLineageProfiler.h"
+#include "fdbclient/ActorLineageProfiler.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 
 #include <string_view>
