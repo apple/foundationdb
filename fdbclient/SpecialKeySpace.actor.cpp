@@ -1992,9 +1992,9 @@ ACTOR static Future<Optional<std::string>> maintenanceCommitActor(ReadYourWrites
 			std::string msg = "Maintenance mode cannot be used while data distribution is disabled for storage "
 			                  "server failures.";
 			return Optional<std::string>(ManagementAPIError::toJsonString(false, "maintenance", msg));
-		} else if (seconds <= 0) {
-			std::string msg = "The specified maintenance time " + boost::lexical_cast<std::string>(seconds) +
-			                  " is not a positive value";
+		} else if (seconds < 0) {
+			std::string msg =
+			    "The specified maintenance time " + boost::lexical_cast<std::string>(seconds) + " is a negative value";
 			return Optional<std::string>(ManagementAPIError::toJsonString(false, "maintenance", msg));
 		} else {
 			TraceEvent(SevDebug, "SKSMaintenanceSet").detail("ZoneId", zoneId.toString());
