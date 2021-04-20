@@ -743,6 +743,9 @@ ACTOR Future<Void> applyMutations(Database cx,
 			wait(coalesceKeyVersionCache(
 			    uid, newEndVersion, keyVersion, commit, committedVersion, addActor, &commitLock));
 			beginVersion = newEndVersion;
+			if (BUGGIFY) {
+				wait(delay(2.0));
+			}
 		}
 	} catch (Error& e) {
 		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarnAlways : SevError, "ApplyMutationsError")

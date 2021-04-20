@@ -24,7 +24,9 @@
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// A workload which test the correctness of backup and restore process
+// A workload which test the correctness of backup and restore process. The
+// database must be idle after the restore completes, and this workload checks
+// that the restore range does not change post restore.
 struct BackupToDBCorrectnessWorkload : TestWorkload {
 	double backupAfter, abortAndRestartAfter, restoreAfter;
 	double backupStartAt, restoreStartAfterBackupFinished, stopDifferentialAfter;
@@ -144,6 +146,30 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(vector<PerfMetric>& m) override {}
+
+	// Reads a series of key ranges and returns each range.
+	ACTOR static Future<std::vector<Standalone<RangeResultRef>>> readRanges(Database cx,
+	                                    Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                    StringRef removePrefix) {
+		loop {
+			state Transaction tr(cx);
+			try {
+				state std::vector<Future<Standalone<RangeResultRef>>> results;
+				for (auto& range : ranges) {
+					results.push_back(tr.getRange(range.removePrefix(removePrefix), 1000));
+				}
+				wait(waitForAll(results));
+
+				std::vector<Standalone<RangeResultRef>> ret;
+				for (auto result : results) {
+					ret.push_back(result.get());
+				}
+				return ret;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
 
 	ACTOR static Future<Void> diffRanges(Standalone<VectorRef<KeyRangeRef>> ranges,
 	                                     StringRef backupPrefix,
@@ -639,7 +665,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					}
 				}
 
-				Standalone<VectorRef<KeyRangeRef>> restoreRange;
+				state Standalone<VectorRef<KeyRangeRef>> restoreRange;
 
 				for (auto r : self->backupRanges) {
 					restoreRange.push_back_deep(
@@ -660,6 +686,22 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 				wait(success(restoreTool.waitBackup(cx, self->restoreTag)));
 				wait(restoreTool.unlockBackup(cx, self->restoreTag));
+
+				// Make sure no more data is written to the restored range
+				// after the restore completes.
+				state std::vector<Standalone<RangeResultRef>> res1 = wait(readRanges(cx, restoreRange, self->backupPrefix));
+				wait(delay(5));
+				state std::vector<Standalone<RangeResultRef>> res2 = wait(readRanges(cx, restoreRange, self->backupPrefix));
+				ASSERT(res1.size() == res2.size());
+				for (int i = 0; i < res1.size(); ++i) {
+					auto range1 = res1.at(i);
+					auto range2 = res2.at(i);
+					ASSERT(range1.size() == range2.size());
+
+					for (int j = 0; j < range1.size(); ++j) {
+						ASSERT(range1[j].key == range2[j].key && range1[j].value == range2[j].value);
+					}
+				}
 			}
 
 			if (extraBackup.isValid()) {
