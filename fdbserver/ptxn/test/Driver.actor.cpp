@@ -299,13 +299,11 @@ TEST_CASE("/fdbserver/ptxn/test/driver") {
 }
 
 TEST_CASE("fdbserver/ptxn/test/resolver") {
-	using namespace ptxn;
-
-	TestDriverOptions options(params);
+	ptxn::TestDriverOptions options(params);
 	std::cout << options << std::endl;
 
-	std::shared_ptr<TestDriverContext> context = initTestDriverContext(options);
-	std::vector<Future<Void>> actors;
+	state std::vector<Future<Void>> actors;
+	state std::shared_ptr<ptxn::TestDriverContext> context = ptxn::initTestDriverContext();
 
 	startFakeResolver(actors, context);
 	std::cout << "Started " << context->numResolvers << " Resolvers\n";
