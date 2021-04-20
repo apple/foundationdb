@@ -259,38 +259,33 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			wait(backupAgent->unlockBackup(cx, tag));
 		}
 
-		// The range clear and submitBackup is being done here in the SAME transaction (which does make SubmitBackup's
-		// range emptiness check pointless in this test) because separating them causes rare errors where the
-		// SubmitBackup commit result is indeterminite but the submission was in fact successful and the backup actually
-		// completes before the retry of SubmitBackup so this second call to submit fails because the destination range
-		// is no longer empty.
+		// In prior versions of submitBackup, we have seen a rare bug where
+		// submitBackup results in a commit_unknown_result, causing the backup
+		// to retry when in fact it had successfully completed. On the retry,
+		// the range being backed up into was checked to make sure it was
+		// empty, and this check was failing because the backup had succeeded
+		// the first time. The old solution for this was to clear the backup
+		// range in the same transaction as the backup, but now we have
+		// switched to passing a "pre-backup action" to either verify the range
+		// being backed up into is empty, or clearing it first.
 		TraceEvent("BARW_DoBackupClearAndSubmitBackup", randomID)
 		    .detail("Tag", printable(tag))
 		    .detail("StopWhenDone", stopDifferentialDelay ? "False" : "True");
 
 		try {
-			state Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(self->extraDB));
-			loop {
-				try {
-					for (auto r : self->backupRanges) {
-						if (!r.empty()) {
-							auto targetRange = r.withPrefix(self->backupPrefix);
-							printf("Clearing %s in destination\n", printable(targetRange).c_str());
-							tr2->addReadConflictRange(targetRange);
-							tr2->clear(targetRange);
-						}
-					}
-					wait(backupAgent->submitBackup(tr2,
-					                               tag,
-					                               backupRanges,
-					                               stopDifferentialDelay ? false : true,
-					                               self->backupPrefix,
-					                               StringRef(),
-					                               self->locked));
-					wait(tr2->commit());
-					break;
-				} catch (Error& e) {
-					wait(tr2->onError(e));
+			try {
+				wait(backupAgent->submitBackup(cx,
+				                               tag,
+				                               backupRanges,
+				                               stopDifferentialDelay ? false : true,
+				                               self->backupPrefix,
+				                               StringRef(),
+				                               self->locked,
+				                               DatabaseBackupAgent::PreBackupAction::CLEAR));
+			} catch (Error& e) {
+				TraceEvent("BARW_SubmitBackup1Exception", randomID).error(e);
+				if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate) {
+					throw;
 				}
 			}
 		} catch (Error& e) {
@@ -600,7 +595,8 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					                                       true,
 					                                       self->extraPrefix,
 					                                       StringRef(),
-					                                       self->locked);
+					                                       self->locked,
+					                                       DatabaseBackupAgent::PreBackupAction::CLEAR);
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)
 					    .error(e)
@@ -620,27 +616,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				    .detail("BackupTag", printable(self->restoreTag));
 				// wait(diffRanges(self->backupRanges, self->backupPrefix, cx, self->extraDB));
 
-				state Transaction tr3(cx);
-				loop {
-					try {
-						// Run on the first proxy to ensure data is cleared
-						// when submitting the backup request below.
-						tr3.setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
-						for (auto r : self->backupRanges) {
-							if (!r.empty()) {
-								tr3.addReadConflictRange(r);
-								tr3.clear(r);
-							}
-						}
-						wait(tr3.commit());
-						break;
-					} catch (Error& e) {
-						wait(tr3.onError(e));
-					}
-				}
-
-				Standalone<VectorRef<KeyRangeRef>> restoreRange;
-
+				state Standalone<VectorRef<KeyRangeRef>> restoreRange;
 				for (auto r : self->backupRanges) {
 					restoreRange.push_back_deep(
 					    restoreRange.arena(),
@@ -648,8 +624,14 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				}
 
 				try {
-					wait(restoreTool.submitBackup(
-					    cx, self->restoreTag, restoreRange, true, StringRef(), self->backupPrefix, self->locked));
+					wait(restoreTool.submitBackup(cx,
+					                              self->restoreTag,
+					                              restoreRange,
+					                              true,
+					                              StringRef(),
+					                              self->backupPrefix,
+					                              self->locked,
+					                              DatabaseBackupAgent::PreBackupAction::CLEAR));
 				} catch (Error& e) {
 					TraceEvent("BARW_DoBackupSubmitBackupException", randomID)
 					    .error(e)
