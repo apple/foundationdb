@@ -1483,6 +1483,11 @@ public:
 		// Find the most recent keyrange snapshot through which we can restore filtered key ranges into targetVersion.
 		state std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
 		state int i = snapshots.size() - 1;
+
+		for (const auto& range : keyRangesFilter) {
+			TraceEvent("BackupContainerGetRestoreSet").detail("RangeFilter", printable(range));
+		}
+
 		for (; i >= 0; i--) {
 			// The smallest version of filtered range files >= snapshot beginVersion > targetVersion
 			if (targetVersion >= 0 && snapshots[i].beginVersion > targetVersion) {

@@ -109,12 +109,15 @@ struct TestConfig {
 	bool startIncompatibleProcess = false;
 	int logAntiQuorum = -1;
 	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
-	//	-1 = None
 	//	0 = "ssd"
 	//	1 = "memory"
 	//	2 = "memory-radixtree-beta"
 	//	3 = "ssd-redwood-experimental"
-	int storageEngineExcludeType = -1;
+	// Requires a comma-separated list of numbers WITHOUT whitespaces
+	std::vector<int> storageEngineExcludeTypes;
+	// Set the maximum TLog version that can be selected for a test
+	// Refer to FDBTypes.h::TLogVersion. Defaults to the maximum supported version.
+	int maxTLogVersion = TLogVersion::MAX_SUPPORTED;
 };
 
 struct TesterInterface {
