@@ -357,6 +357,7 @@ public:
 
 	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr,
 	                          Key outContainer,
+	                          int initialSnapshotIntervalSeconds,
 	                          int snapshotIntervalSeconds,
 	                          std::string tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
@@ -365,6 +366,7 @@ public:
 	                          bool incrementalBackupOnly = false);
 	Future<Void> submitBackup(Database cx,
 	                          Key outContainer,
+	                          int initialSnapshotIntervalSeconds,
 	                          int snapshotIntervalSeconds,
 	                          std::string tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
@@ -374,6 +376,7 @@ public:
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(tr,
 			                    outContainer,
+			                    initialSnapshotIntervalSeconds,
 			                    snapshotIntervalSeconds,
 			                    tagName,
 			                    backupRanges,
@@ -404,7 +407,8 @@ public:
 	Future<std::string> getStatus(Database cx, bool showErrors, std::string tagName);
 	Future<std::string> getStatusJSON(Database cx, std::string tagName);
 
-	Future<Optional<Version>> getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName,
+	Future<Optional<Version>> getLastRestorable(Reference<ReadYourWritesTransaction> tr,
+	                                            Key tagName,
 	                                            bool snapshot = false);
 	void setLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName, Version version);
 
@@ -843,6 +847,11 @@ public:
 	typedef KeyBackedMap<Key, bool> RangeDispatchMapT;
 	RangeDispatchMapT snapshotRangeDispatchMap() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 
+	// Interval to use for the first (initial) snapshot.
+	KeyBackedProperty<int64_t> initialSnapshotIntervalSeconds() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
 	// Interval to use for determining the target end version for new snapshots
 	KeyBackedProperty<int64_t> snapshotIntervalSeconds() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 
@@ -872,8 +881,9 @@ public:
 
 		Future<Version> beginVersion = tr->getReadVersion();
 		Future<int64_t> defaultInterval = 0;
-		if (intervalSeconds < 0)
+		if (intervalSeconds < 0) {
 			defaultInterval = copy.snapshotIntervalSeconds().getOrThrow(tr);
+		}
 
 		// Make sure read version and possibly the snapshot interval value are ready, then clear/init the snapshot
 		// config members

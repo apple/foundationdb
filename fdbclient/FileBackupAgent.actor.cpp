@@ -2777,9 +2777,9 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 
 		state Reference<TaskFuture> backupFinished = futureBucket->future(tr);
 
-		// Initialize the initial snapshot and create tasks to continually write logs and snapshots
-		// The initial snapshot has a desired duration of 0, meaning go as fast as possible.
-		wait(config.initNewSnapshot(tr, 0));
+		// Initialize the initial snapshot and create tasks to continually write logs and snapshots.
+		state Optional<int64_t> initialSnapshotIntervalSeconds = wait(config.initialSnapshotIntervalSeconds().get(tr));
+		wait(config.initNewSnapshot(tr, initialSnapshotIntervalSeconds.orDefault(0)));
 
 		// Using priority 1 for both of these to at least start both tasks soon
 		// Do not add snapshot task if we only want the incremental backup
@@ -4442,6 +4442,7 @@ public:
 	ACTOR static Future<Void> submitBackup(FileBackupAgent* backupAgent,
 	                                       Reference<ReadYourWritesTransaction> tr,
 	                                       Key outContainer,
+	                                       int initialSnapshotIntervalSeconds,
 	                                       int snapshotIntervalSeconds,
 	                                       std::string tagName,
 	                                       Standalone<VectorRef<KeyRangeRef>> backupRanges,
@@ -4557,6 +4558,7 @@ public:
 		config.backupContainer().set(tr, bc);
 		config.stopWhenDone().set(tr, stopWhenDone);
 		config.backupRanges().set(tr, normalizedRanges);
+		config.initialSnapshotIntervalSeconds().set(tr, initialSnapshotIntervalSeconds);
 		config.snapshotIntervalSeconds().set(tr, snapshotIntervalSeconds);
 		config.partitionedLogEnabled().set(tr, partitionedLog);
 		config.incrementalBackupOnly().set(tr, incrementalBackupOnly);
@@ -4590,8 +4592,9 @@ public:
 				restoreRanges.push_back(KeyRange(KeyRangeRef(restoreRange.range().begin, restoreRange.range().end)));
 			}
 		}
-		for (auto& restoreRange : restoreRanges)
-			ASSERT(restoreRange.contains(removePrefix) || removePrefix.size() == 0);
+		for (auto& restoreRange : restoreRanges) {
+			ASSERT(restoreRange.begin.startsWith(removePrefix) && restoreRange.end.startsWith(removePrefix));
+		}
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -5183,7 +5186,8 @@ public:
 	}
 
 	ACTOR static Future<Optional<Version>> getLastRestorable(FileBackupAgent* backupAgent,
-	                                                         Reference<ReadYourWritesTransaction> tr, Key tagName,
+	                                                         Reference<ReadYourWritesTransaction> tr,
+	                                                         Key tagName,
 	                                                         bool snapshot) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -5235,6 +5239,11 @@ public:
 	                                     bool incrementalBackupOnly,
 	                                     Version beginVersion,
 	                                     UID randomUid) {
+		// The restore command line tool won't allow ranges to be empty, but correctness workloads somehow might.
+		if (ranges.empty()) {
+			throw restore_error();
+		}
+
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
 
 		state BackupDescription desc = wait(bc->describeBackup(true));
@@ -5544,6 +5553,7 @@ Future<ERestoreState> FileBackupAgent::waitRestore(Database cx, Key tagName, boo
 
 Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> tr,
                                            Key outContainer,
+                                           int initialSnapshotIntervalSeconds,
                                            int snapshotIntervalSeconds,
                                            std::string tagName,
                                            Standalone<VectorRef<KeyRangeRef>> backupRanges,
@@ -5553,6 +5563,7 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
 	return FileBackupAgentImpl::submitBackup(this,
 	                                         tr,
 	                                         outContainer,
+	                                         initialSnapshotIntervalSeconds,
 	                                         snapshotIntervalSeconds,
 	                                         tagName,
 	                                         backupRanges,
@@ -5577,7 +5588,8 @@ Future<std::string> FileBackupAgent::getStatusJSON(Database cx, std::string tagN
 	return FileBackupAgentImpl::getStatusJSON(this, cx, tagName);
 }
 
-Future<Optional<Version>> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName,
+Future<Optional<Version>> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr,
+                                                             Key tagName,
                                                              bool snapshot) {
 	return FileBackupAgentImpl::getLastRestorable(this, tr, tagName, snapshot);
 }
