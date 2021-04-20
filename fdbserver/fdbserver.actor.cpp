@@ -35,6 +35,8 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/interprocess/managed_shared_memory.hpp>
 
+#include "fdbclient/ActorLineageProfiler.h"
+#include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbclient/SystemData.h"
@@ -453,6 +455,27 @@ ACTOR Future<Void> dumpDatabase(Database cx, std::string outputFilename, KeyRang
 	} catch (Error& e) {
 		TraceEvent(SevError, "DumpDatabaseError").error(e).detail("Filename", outputFilename);
 		throw;
+	}
+}
+
+// Handles running the sampling profiler, including responding to frequency
+// changes and other updates the client wishes to make through global
+// configuration.
+ACTOR Future<Void> actorLineageProfiler() {
+	wait(delay(1));
+	wait(GlobalConfig::globalConfig().onInitialized());
+	// TODO: Add flag to enable/disable
+	state unsigned frequency = GlobalConfig::globalConfig().get<double>(sampleFrequency, 0);
+	ActorLineageProfiler::instance().setFrequency(frequency);
+
+	loop {
+		wait(GlobalConfig::globalConfig().onChange());
+
+		unsigned latestFrequency = GlobalConfig::globalConfig().get<double>(sampleFrequency, 0);
+		if (latestFrequency != frequency) {
+			frequency = latestFrequency;
+			ActorLineageProfiler::instance().setFrequency(latestFrequency);
+		}
 	}
 }
 
@@ -1987,6 +2010,7 @@ int main(int argc, char* argv[]) {
 				                      opts.whitelistBinPaths));
 				actors.push_back(histogramReport());
 				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
+				actors.push_back(actorLineageProfiler());
 
 				f = stopAfter(waitForAll(actors));
 				g_network->run();

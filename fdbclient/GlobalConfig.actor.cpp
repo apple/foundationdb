@@ -34,6 +34,8 @@ const KeyRef fdbClientInfoTxnSizeLimit = LiteralStringRef("config/fdb_client_inf
 const KeyRef transactionTagSampleRate = LiteralStringRef("config/transaction_tag_sample_rate");
 const KeyRef transactionTagSampleCost = LiteralStringRef("config/transaction_tag_sample_cost");
 
+const KeyRef sampleFrequency = LiteralStringRef("visibility/sample_frequency");
+
 GlobalConfig::GlobalConfig() : lastUpdate(0) {}
 
 void GlobalConfig::create(DatabaseContext* cx, Reference<AsyncVar<ClientDBInfo>> dbInfo) {
@@ -43,6 +45,10 @@ void GlobalConfig::create(DatabaseContext* cx, Reference<AsyncVar<ClientDBInfo>>
 		g_network->setGlobal(INetwork::enGlobalConfig, config);
 		config->_updater = updater(config, dbInfo);
 	}
+}
+
+void GlobalConfig::updateDBInfo(Reference<AsyncVar<ClientDBInfo>> dbInfo) {
+	_updater = updater(&GlobalConfig::globalConfig(), dbInfo);
 }
 
 GlobalConfig& GlobalConfig::globalConfig() {
@@ -75,6 +81,10 @@ const std::map<KeyRef, Reference<ConfigValue>> GlobalConfig::get(KeyRangeRef ran
 
 Future<Void> GlobalConfig::onInitialized() {
 	return initialized.getFuture();
+}
+
+Future<Void> GlobalConfig::onChange() {
+	return configChanged.onTrigger();
 }
 
 void GlobalConfig::insert(KeyRef key, ValueRef value) {
@@ -222,6 +232,8 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, Reference<AsyncVar<
 					self->lastUpdate = vh.version;
 				}
 			}
+
+			self->configChanged.trigger();
 		} catch (Error& e) {
 			throw;
 		}

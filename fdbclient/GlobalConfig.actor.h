@@ -49,6 +49,8 @@ extern const KeyRef fdbClientInfoTxnSizeLimit;
 extern const KeyRef transactionTagSampleRate;
 extern const KeyRef transactionTagSampleCost;
 
+extern const KeyRef sampleFrequency;
+
 // Structure used to hold the values stored by global configuration. The arena
 // is used as memory to store both the key and the value (the value is only
 // stored in the arena if it is an object; primitives are just copied).
@@ -77,6 +79,14 @@ public:
 	//
 	// For example, given "config/a", returns "\xff\xff/global_config/config/a".
 	static Key prefixedKey(KeyRef key);
+
+	// Update the ClientDBInfo object used internally to check for updates to
+	// global configuration. The ClientDBInfo reference must be the same one
+	// used in the cluster controller, but fdbserver requires initial creation
+	// of the GlobalConfig class before the cluster controller is initialized.
+	// This function allows the ClientDBInfo object to be updated after create
+	// was called.
+	void updateDBInfo(Reference<AsyncVar<ClientDBInfo>> dbInfo);
 
 	// Get a value from the framework. Values are returned as a ConfigValue
 	// reference which also contains the arena holding the object. As long as
@@ -114,6 +124,10 @@ public:
 	// been created and is ready.
 	Future<Void> onInitialized();
 
+	// Triggers the returned future when any key-value pair in the global
+	// configuration changes.
+	Future<Void> onChange();
+
 private:
 	GlobalConfig();
 
@@ -139,6 +153,7 @@ private:
 	Database cx;
 	Future<Void> _updater;
 	Promise<Void> initialized;
+	AsyncTrigger configChanged;
 	std::unordered_map<StringRef, Reference<ConfigValue>> data;
 	Version lastUpdate;
 };
