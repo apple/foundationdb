@@ -213,6 +213,7 @@ void SampleCollection_t::refresh() {
 			oldest = data.front()->time;
 		}
 	}
+	config->ingest(sample);
 }
 
 std::vector<std::shared_ptr<Sample>> SampleCollection_t::get(double from /*= 0.0*/,
@@ -275,3 +276,5 @@ void ActorLineageProfilerT::profile() {
 		}
 	}
 }
+
+SampleIngestor::~SampleIngestor() {}

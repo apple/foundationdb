@@ -30,8 +30,6 @@
 #include "flow/singleton.h"
 #include "flow/flow.h"
 
-void runSamplingProfiler();
-
 struct IALPCollectorBase {
 	virtual std::optional<std::any> collect(ActorLineage*) = 0;
 	virtual const std::string_view& name() = 0;
@@ -49,6 +47,53 @@ struct Sample : std::enable_shared_from_this<Sample> {
 	char* data = nullptr;
 	~Sample() { ::free(data); }
 };
+
+class SampleIngestor : std::enable_shared_from_this<SampleIngestor> {
+public:
+	virtual ~SampleIngestor();
+	virtual void ingest(std::shared_ptr<Sample> const& sample) = 0;
+};
+
+class NoneIngestor : public SampleIngestor {
+public:
+	void ingest(std::shared_ptr<Sample> const& sample) override {}
+};
+
+// The FluentD ingestor uses the pimp idiom. This is to make compilation less heavy weight as this implementation has
+// dependencies to boost::asio
+struct FluentDIngestorImpl;
+
+class FluentDIngestor : public SampleIngestor {
+public: // Public Types
+	enum class Protocol { TCP, UDP };
+
+private: // members
+	FluentDIngestorImpl* impl;
+
+public: // interface
+	void ingest(std::shared_ptr<Sample> const& sample) override;
+	FluentDIngestor(Protocol protocol, NetworkAddress& endpoint);
+	~FluentDIngestor();
+};
+
+class ProfilerConfigT {
+private: // private types
+	using Lock = std::unique_lock<std::mutex>;
+	friend class crossbow::create_static<ProfilerConfigT>;
+
+private: // members
+	std::shared_ptr<SampleIngestor> ingestor = std::make_shared<NoneIngestor>();
+
+private: // construction
+	ProfilerConfigT() {}
+	ProfilerConfigT(ProfilerConfigT const&) = delete;
+	ProfilerConfigT& operator=(ProfilerConfigT const&) = delete;
+
+public:
+	void setBackend(std::shared_ptr<SampleIngestor> ingestor) { this->ingestor = ingestor; }
+};
+
+using ProfilerConfig = crossbow::singleton<ProfilerConfigT>;
 
 class SampleCollectorT {
 public: // Types
@@ -78,6 +123,7 @@ class SampleCollection_t {
 	mutable std::mutex mutex;
 	std::atomic<double> windowSize = 0.0;
 	std::deque<std::shared_ptr<Sample>> data;
+	ProfilerConfig config;
 
 public:
 	/**

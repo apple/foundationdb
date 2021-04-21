@@ -30,6 +30,7 @@ set(FDBCLIENT_SRCS
   EventTypes.actor.h
   FDBOptions.h
   FDBTypes.h
+  FluentDSampleIngestor.cpp
   FileBackupAgent.actor.cpp
   GlobalConfig.h
   GlobalConfig.actor.h
