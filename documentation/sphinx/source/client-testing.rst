@@ -315,7 +315,7 @@ and pass the test with ``-f``:
 
 .. code-block:: sh
 
-   fdbserver -r simulator -f testfile.txt
+   fdbserver -r simulation -f testfile.txt
 
 
 Running a Workload on an actual Cluster
