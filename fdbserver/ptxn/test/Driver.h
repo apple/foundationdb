@@ -85,6 +85,12 @@ struct TestDriverContext {
 	std::vector<CommitRecord> commitRecord;
 };
 
+// Returns an initialized TestDriverContext with default values.
+std::shared_ptr<TestDriverContext> initTestDriverContext();
+
+// Starts all fake resolvers specified in the pTestDriverContext.
+void startFakeResolver(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext);
+
 // Print out *ALL* commits that has triggered.
 void printCommitRecord(const std::vector<CommitRecord>& records);
 

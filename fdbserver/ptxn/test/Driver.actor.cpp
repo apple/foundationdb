@@ -301,35 +301,3 @@ TEST_CASE("/fdbserver/ptxn/test/driver") {
 	return Void();
 }
 
-TEST_CASE("fdbserver/ptxn/test/resolver") {
-	ptxn::TestDriverOptions options(params);
-	std::cout << options << std::endl;
-
-	state std::vector<Future<Void>> actors;
-	state std::shared_ptr<ptxn::TestDriverContext> context = ptxn::initTestDriverContext();
-
-	startFakeResolver(actors, context);
-	std::cout << "Started " << context->numResolvers << " Resolvers\n";
-
-	const Version lastEpochEnd = 100;
-	state std::vector<Future<ResolveTransactionBatchReply>> replies;
-	// Imitates resolver initialization from the master server
-	for (auto& r : context->resolverInterfaces) {
-		ResolveTransactionBatchRequest req;
-		req.prevVersion = -1;
-		req.version = lastEpochEnd;
-		req.lastReceivedVersion = -1;
-		// triggers debugging trace events at Resolvers
-		req.debugID = deterministicRandom()->randomUniqueID();
-
-		replies.push_back(brokenPromiseToNever(r->resolve.getReply(req)));
-	}
-
-	wait(waitForAll(replies));
-	for (auto& f : replies) {
-		ASSERT(f.isReady() && f.isValid());
-	}
-	std::cout<<"Initialized " << replies.size() << " Resolvers\n";
-
-	return Void();
-}
