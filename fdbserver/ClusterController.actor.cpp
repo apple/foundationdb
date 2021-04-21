@@ -1063,7 +1063,6 @@ public:
 			}
 			return workers;
 		}
-		ASSERT(false);
 		return getWorkersForTlogsBackup(
 		    conf, required, desired, policy, id_used, checkStable, dcIds, exclusionWorkerIds);
 	}
