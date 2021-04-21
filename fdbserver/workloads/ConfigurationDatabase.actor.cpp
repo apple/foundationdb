@@ -26,23 +26,41 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 class ConfigurationDatabaseWorkload : public TestWorkload {
-	ACTOR static Future<Void> start(ConfigurationDatabaseWorkload* self, Database cx) {
+
+	ACTOR static Future<Optional<Value>> get(Database cx, Key key) {
 		state SimpleConfigTransaction tr(cx->getConnectionFile()->getConnectionString());
-		state Key k = LiteralStringRef("k");
-		state Key v = LiteralStringRef("v");
-		{
-			Optional<Value> currentValue = wait(tr.get(k));
-			ASSERT(!currentValue.present());
+		loop {
+			try {
+				Optional<Value> result = wait(tr.get(key));
+				return result;
+			} catch (Error &e) {
+				wait(tr.onError(e));
+			}
 		}
-		{
-			tr.reset();
-			tr.set(k, v);
-			wait(tr.commit());
+	}
+
+	ACTOR static Future<Void> set(Database cx, Key key, Value value) {
+		state SimpleConfigTransaction tr(cx->getConnectionFile()->getConnectionString());
+		loop {
+			try {
+				tr.set(key, value);
+				wait(tr.commit());
+				return Void();
+			} catch (Error &e) {
+				wait(tr.onError(e));
+			}
 		}
+	}
+
+	ACTOR static Future<Void> start(ConfigurationDatabaseWorkload* self, Database cx) {
+		state Key key = LiteralStringRef("key");
+		state Key value = LiteralStringRef("value");
+		Optional<Value> currentValue = wait(get(cx, key));
+		ASSERT(!currentValue.present());
+		wait(set(cx, key, value));
 		{
-			tr.reset();
-			Optional<Value> currentValue = wait(tr.get(k));
-			ASSERT(currentValue.get() == v);
+			Optional<Value> currentValue = wait(get(cx, key));
+			ASSERT(currentValue.get() == value);
 		}
 		return Void();
 	}
