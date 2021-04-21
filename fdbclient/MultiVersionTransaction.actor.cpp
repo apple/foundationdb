@@ -1569,7 +1569,7 @@ void MultiVersionApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* 
 	}
 }
 
-// Creates an IDatabase object that represents a connections to the cluster
+// Creates an IDatabase object that represents a connection to the cluster
 Reference<IDatabase> MultiVersionApi::createDatabase(const char* clusterFilePath) {
 	lock.enter();
 	if (!networkSetup) {
