@@ -130,6 +130,8 @@ struct WorkerDetails {
 	WorkerDetails(const WorkerInterface& interf, ProcessClass processClass, bool degraded)
 	  : interf(interf), processClass(processClass), degraded(degraded) {}
 
+	bool operator<(const WorkerDetails& r) const { return interf.id() < r.interf.id(); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, interf, processClass, degraded);
