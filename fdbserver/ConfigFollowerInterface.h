@@ -110,23 +110,37 @@ struct ConfigFollowerGetChangesRequest {
 	}
 };
 
+struct ConfigFollowerCompactRequest {
+	static constexpr FileIdentifier file_identifier = 568910;
+	Version lastTruncatedVersion;
+	ReplyPromise<Void> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, lastTruncatedVersion, reply);
+	}
+};
+
 struct ConfigFollowerInterface {
 	static constexpr FileIdentifier file_identifier = 7721102;
 	RequestStream<ConfigFollowerGetVersionRequest> getVersion;
 	RequestStream<ConfigFollowerGetFullDatabaseRequest> getFullDatabase;
 	RequestStream<ConfigFollowerGetChangesRequest> getChanges;
+	RequestStream<ConfigFollowerCompactRequest> compact;
 
 	ConfigFollowerInterface() = default;
 	void setupWellKnownEndpoints() {
 		getVersion.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_GETVERSION, TaskPriority::Coordination);
 		getFullDatabase.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_GETFULLDB, TaskPriority::Coordination);
 		getChanges.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_GETCHANGES, TaskPriority::Coordination);
+		compact.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_COMPACT, TaskPriority::Coordination);
 	}
 
 	ConfigFollowerInterface(NetworkAddress const& remote)
 	  : getVersion(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETVERSION)),
 	    getFullDatabase(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETFULLDB)),
-	    getChanges(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETCHANGES)) {}
+	    getChanges(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETCHANGES)),
+	    compact(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_COMPACT)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

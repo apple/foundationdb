@@ -34,6 +34,7 @@ constexpr UID WLTOKEN_GENERATIONREG_WRITE(-1, 9);
 constexpr UID WLTOKEN_CONFIGFOLLOWER_GETVERSION(-1, 14);
 constexpr UID WLTOKEN_CONFIGFOLLOWER_GETFULLDB(-1, 15);
 constexpr UID WLTOKEN_CONFIGFOLLOWER_GETCHANGES(-1, 16);
+constexpr UID WLTOKEN_CONFIGFOLLOWER_COMPACT(-1, 17);
 
 struct GenerationRegInterface {
 	constexpr static FileIdentifier file_identifier = 16726744;
