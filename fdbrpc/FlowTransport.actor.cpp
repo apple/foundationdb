@@ -1217,7 +1217,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 							if (!protocolVersion.hasMultiVersionClient()) {
 								// Older versions expected us to hang up. It may work even if we don't hang up here, but
 								// it's safer to keep the old behavior.
-								peer->protocolVersion->set(peerProtocolVersion);
+								peer->protocolVersion->set(protocolVersion);
 								throw incompatible_protocol_version();
 							}
 						} else {
