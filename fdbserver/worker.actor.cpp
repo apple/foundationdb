@@ -22,6 +22,7 @@
 #include <boost/lexical_cast.hpp>
 
 #include "fdbrpc/Locality.h"
+#include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/ProcessInterface.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/Knobs.h"
@@ -1038,6 +1039,8 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 			metricsLogger = runMetrics(openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, lockAware),
 			                           KeyRef(metricsPrefix));
 		}
+
+		GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 	}
 
 	errorForwarders.add(resetAfter(degraded,

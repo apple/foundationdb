@@ -1397,6 +1397,9 @@ Future<Standalone<RangeResultRef>> GlobalConfigImpl::getRange(ReadYourWritesTran
 			} else if (config->value.type() == typeid(int64_t)) {
 				result.push_back_deep(result.arena(),
 				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<int64_t>(config->value))));
+			} else if (config->value.type() == typeid(bool)) {
+				result.push_back_deep(result.arena(),
+				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<bool>(config->value))));
 			} else if (config->value.type() == typeid(float)) {
 				result.push_back_deep(result.arena(),
 				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<float>(config->value))));
