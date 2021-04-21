@@ -467,7 +467,7 @@ public:
 	void stopNetwork() override;
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
 
-	// Creates an IDatabase object that represents a connections to the cluster
+	// Creates an IDatabase object that represents a connection to the cluster
 	Reference<IDatabase> createDatabase(const char* clusterFilePath) override;
 	static MultiVersionApi* api;
 
