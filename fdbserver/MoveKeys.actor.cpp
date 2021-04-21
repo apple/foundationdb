@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/Knobs.h"
 #include "flow/Util.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/SystemData.h"
@@ -1190,6 +1191,8 @@ ACTOR Future<Void> moveKeys(Database cx,
 	return Void();
 }
 
+// Called by the master server to write the very first transaction to the database
+// establishing a set of shard servers and all invariants of the systemKeys.
 void seedShardServers(Arena& arena, CommitTransactionRef& tr, vector<StorageServerInterface> servers) {
 	std::map<Optional<Value>, Tag> dcId_locality;
 	std::map<UID, Tag> server_tag;
@@ -1210,22 +1213,27 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, vector<StorageServ
 	tr.read_snapshot = 0;
 	tr.read_conflict_ranges.push_back_deep(arena, allKeys);
 
-	for (int s = 0; s < servers.size(); s++) {
-		tr.set(arena, serverTagKeyFor(servers[s].id()), serverTagValue(server_tag[servers[s].id()]));
-		tr.set(arena, serverListKeyFor(servers[s].id()), serverListValue(servers[s]));
+	for (auto& s : servers) {
+		tr.set(arena, serverTagKeyFor(s.id()), serverTagValue(server_tag[s.id()]));
+		tr.set(arena, serverListKeyFor(s.id()), serverListValue(s));
 	}
 
 	std::vector<Tag> serverTags;
-	for (int i = 0; i < servers.size(); i++)
-		serverTags.push_back(server_tag[servers[i].id()]);
+	std::vector<UID> serverSrcUID;
+	for (auto& s : servers) {
+		serverTags.push_back(server_tag[s.id()]);
+		serverSrcUID.push_back(s.id());
+	}
+
+	auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS ? keyServersValue(serverTags)
+	                                                    : keyServersValue(Standalone<RangeResultRef>(), serverSrcUID);
 
 	// We have to set this range in two blocks, because the master tracking of "keyServersLocations" depends on a change
 	// to a specific
 	//   key (keyServersKeyServersKey)
-	krmSetPreviouslyEmptyRange(
-	    tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), keyServersValue(serverTags), Value());
+	krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, Value());
 
-	for (int s = 0; s < servers.size(); s++)
-		krmSetPreviouslyEmptyRange(
-		    tr, arena, serverKeysPrefixFor(servers[s].id()), allKeys, serverKeysTrue, serverKeysFalse);
+	for (auto& s : servers) {
+		krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(s.id()), allKeys, serverKeysTrue, serverKeysFalse);
+	}
 }
