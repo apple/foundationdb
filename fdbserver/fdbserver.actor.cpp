@@ -35,8 +35,6 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/interprocess/managed_shared_memory.hpp>
 
-#include "fdbclient/ActorLineageProfiler.h"
-#include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbclient/SystemData.h"

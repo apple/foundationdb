@@ -22,7 +22,6 @@
 #include "flow/singleton.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbclient/ActorLineageProfiler.h"
-#include "fdbclient/GlobalConfig.actor.h"
 #include <msgpack.hpp>
 #include <memory>
 #include <boost/endian/conversion.hpp>
