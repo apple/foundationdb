@@ -18,19 +18,27 @@
  * limitations under the License.
  */
 
+#include "fdbclient/CommitProxyInterface.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/SystemData.h"
 #include "fdbrpc/Replication.h"
+#include "fdbrpc/ReplicationPolicy.h"
 #include "fdbserver/TLogGroup.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "flow/Arena.h"
+#include "flow/FastRef.h"
 #include "flow/flow.h"
 #include "flow/Error.h"
 #include "flow/UnitTest.h"
+#include "flow/serialize.h"
 #include <iostream>
 #include <iterator>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
-TLogGroupCollection::TLogGroupCollection(const Reference<IReplicationPolicy>& policy, int groupSize)
-  : policy(policy), GROUP_SIZE(groupSize) {}
+TLogGroupCollection::TLogGroupCollection(const Reference<IReplicationPolicy>& policy, int numGroups, int groupSize)
+  : policy(policy), targetNumGroups(numGroups), GROUP_SIZE(groupSize) {}
 
 const std::vector<TLogGroupRef>& TLogGroupCollection::groups() const {
 	return recruitedGroups;
@@ -47,22 +55,20 @@ void TLogGroupCollection::addWorkers(const std::vector<WorkerInterface>& logWork
 }
 
 void TLogGroupCollection::recruitEverything() {
-	ASSERT_EQ(recruitMap.size() % GROUP_SIZE, 0); // FIXME
-	int numTeams = recruitMap.size() / GROUP_SIZE + (recruitMap.size() % GROUP_SIZE > 0);
-
-	std::vector<TLogGroupRef> newGroups;
 	std::unordered_set<UID> selectedServers;
 	std::vector<TLogWorkerData*> bestSet;
+	auto localityMap = buildLocalityMap(selectedServers);
 
-	printf("---> Going to recruit %d groups\n", numTeams);
-	while (newGroups.size() < numTeams) {
+	printf("---> Going to recruit %d groups out of %d servers\n", targetNumGroups, localityMap.size());
+	while (recruitedGroups.size() < targetNumGroups) {
 		bestSet.clear();
-		auto localityMap = buildLocalityMap(selectedServers);
 
+		// TODO: We are doing this randomly for now, but should make sure number of teams served by each
+		//   tLog server is approximately same.
 		if (localityMap.selectReplicas(policy, bestSet)) {
-			ASSERT_WE_THINK(bestSet.size() == GROUP_SIZE);
+			// ASSERT_WE_THINK(bestSet.size() == GROUP_SIZE);
 
-			printf("----> Recruiting Group:\n");
+			printf("----> Recruiting Group: %d\n", bestSet.size());
 			Reference<TLogGroup> group(new TLogGroup());
 			for (auto& entry : bestSet) {
 				printf("Recruited Group: %s\n", entry->locality.processId().get().toString().c_str());
@@ -72,21 +78,11 @@ void TLogGroupCollection::recruitEverything() {
 
 			newGroups.push_back(group);
 		} else {
-			printf("---> Error recruiting remaining %d logs\n", recruitMap.size() - selectedServers.size());
-			// TODO: Currently we add remaining workers to same group. Better way, should just ignore?
-			// TODO: What if there are workers less that GROUP_SIZE?
-			Reference<TLogGroup> group(new TLogGroup());
-			for (const auto& entry : localityMap.getObjects()) {
-				printf("Recruited Group: %s\n", entry->locality.processId().get().toString().c_str());
-				group->addServer(Reference<TLogWorkerData>((TLogWorkerData*)entry));
-				selectedServers.insert(entry->id);
-			}
-			newGroups.push_back(group);
+			// TODO: We may have scenarios (simulation), with recruits/zone's < RF. Handle that case.
 		}
 	}
 
-	ASSERT_EQ(newGroups.size(), numTeams);
-	recruitedGroups = newGroups;
+	// ASSERT_EQ(newGroups.size(), numTeams);
 }
 
 LocalityMap<TLogWorkerData> TLogGroupCollection::buildLocalityMap(const std::unordered_set<UID>& ignoreServers) {
@@ -101,6 +97,33 @@ LocalityMap<TLogWorkerData> TLogGroupCollection::buildLocalityMap(const std::uno
 	return localityMap;
 }
 
+void TLogGroupCollection::storeState(CommitTransactionRequest* recoveryCommitReq) {
+	CommitTransactionRef& tr = recoveryCommitReq->transaction;
+	const auto& serversPrefix = LiteralStringRef("/servers");
+
+	tr.clear(recoveryCommitReq->arena, tLogGroupKeys);
+	for (const auto& group : recruitedGroups) {
+		const auto& groupPrefix = tLogGroupKeyFor(group->id());
+		std::cout << "---> Storing " << group->toString() << std::endl;
+		tr.set(recoveryCommitReq->arena, groupPrefix.withSuffix(serversPrefix), group->toValue());
+	}
+}
+
+void TLogGroupCollection::loadState(const Standalone<RangeResultRef>& store,
+                                    const std::vector<WorkerInterface>& recruits) {
+
+	std::unordered_map<UID, WorkerInterface> idToInterfMap;
+	for (const auto& interf : recruits) {
+		idToInterfMap[interf.id()] = interf;
+	}
+
+	for (int ii = 0; ii < store.size(); ++ii) {
+		auto groupId = decodeTLogGroupKey(store[ii].key);
+		auto group = TLogGroup::fromValue(groupId, store[ii].value, idToInterfMap);
+		recruitedGroups.push_back(group);
+	}
+}
+
 void TLogGroup::addServer(const TLogWorkerDataRef& workerData) {
 	serverMap.emplace(workerData->id, workerData);
 }
@@ -111,6 +134,49 @@ std::vector<TLogWorkerDataRef> TLogGroup::servers() const {
 		results.push_back(worker);
 	}
 	return results;
+}
+
+Standalone<StringRef> TLogGroup::toValue() const {
+	BinaryWriter result(Unversioned()); // TODO: Add version
+	result << serverMap.size();
+	for (auto& [id, _] : serverMap) {
+		result << id;
+	}
+	return result.toValue();
+}
+
+TLogGroupRef TLogGroup::fromValue(UID groupId,
+                                  StringRef value,
+                                  const std::unordered_map<UID, WorkerInterface>& recruits) {
+	BinaryReader reader(value, Unversioned()); // TODO : Add version
+	int size;
+	reader >> size;
+
+	auto group = makeReference<TLogGroup>(groupId);
+	for (int ii = 0; ii < size; ++ii) {
+		UID id;
+		reader >> id;
+
+		auto interf = recruits.find(id);
+		if (interf == recruits.end()) {
+			// TODO: Can happen if the worker died since. Handle the case.
+		}
+		group->addServer(TLogWorkerData::fromInterface(interf->second));
+	}
+
+	return group;
+}
+
+std::vector<UID> TLogGroup::serverIds() const {
+	std::vector<UID> results;
+	for (auto& [id, _] : serverMap) {
+		results.push_back(id);
+	}
+	return results;
+}
+
+std::string TLogGroup::toString() const {
+	return format("TLogGroup[%s]{logs=%s}", groupId.toString().c_str(), describe(serverIds()).c_str());
 }
 
 std::string TLogWorkerData::toString() const {
@@ -207,12 +273,17 @@ TEST_CASE("/fdbserver/TLogGroup/basic") {
 
 	const int TOTAL_PROCESSES = 27;
 	const int GROUP_SIZE = 3;
+	const int NUM_GROUPS = 20;
 
 	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
 	    new PolicyAcross(GROUP_SIZE, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+	// Reference<IReplicationPolicy> policy = makeReference<PolicyAnd>({
+	//     makeReference<PolicyAcross>(GROUP_SIZE, "machineid", Reference<IReplicationPolicy>(new PolicyOne())),
+	//     makeReference<PolicyAcross>(GROUP_SIZE, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())),
+	// });
 	std::vector<WorkerInterface> recruits = testTLogGroupRecruits(TOTAL_PROCESSES);
 
-	TLogGroupCollection collection(policy, GROUP_SIZE);
+	TLogGroupCollection collection(policy, NUM_GROUPS, GROUP_SIZE);
 	collection.addWorkers(recruits);
 	collection.recruitEverything();
 

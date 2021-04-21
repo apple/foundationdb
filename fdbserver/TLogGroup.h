@@ -20,6 +20,9 @@
 
 #ifndef FDBSERVER_TLOGGROUP_H
 #define FDBSERVER_TLOGGROUP_H
+#include "fdbclient/CommitProxyInterface.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/IKeyValueStore.h"
 #pragma once
 
 #include "fdbrpc/Locality.h"
@@ -29,6 +32,10 @@
 #include "flow/network.h"
 #include <unordered_map>
 #include <vector>
+
+// TODO: Monitor the groups, and if new tLogs need to added/removed, as workers are removed/added.
+// TODO: Add unit-test for serialization.
+// TODO:
 
 struct TLogWorkerData;
 class TLogGroup;
@@ -43,7 +50,7 @@ class TLogGroupCollection : public ReferenceCounted<TLogGroupCollection> {
 public:
 	// Construct a TLogGroupCollection, where each group has 'groupSize' servers and satifies
 	// the contraints set by ReplicaitonPolicy 'policy'
-	explicit TLogGroupCollection(const Reference<IReplicationPolicy>& policy, int groupSize);
+	explicit TLogGroupCollection(const Reference<IReplicationPolicy>& policy, int numGroups, int groupSize);
 
 	// Returns list of groups recruited by this collection.
 	const std::vector<TLogGroupRef>& groups() const;
@@ -58,10 +65,12 @@ public:
 	// and group size set in the parent class.
 	void recruitEverything();
 
-	// template <class Ar>
-	// void serialize(Ar& ar) {
-	//	serializer(ar);
-	// }
+	// Add mutations to store state to given txnStoreState transaction request 'recoveryCommitReq'.
+	void storeState(CommitTransactionRequest* recoveryCommitReq);
+
+	// Loads TLogGroupCollection state from given IKeyValueStore, which will be txnStoreState passed
+	// by master.
+	void loadState(const Standalone<RangeResultRef>& store, const std::vector<WorkerInterface>& recruits);
 
 private:
 	// Returns a LocalityMap of all the workers inside 'recruitMap', but ignore the workers
@@ -75,6 +84,9 @@ private:
 	// Size of each group, set once during intialization.
 	const int GROUP_SIZE;
 
+	// Number of groups the collection is configured to recruit.
+	int targetNumGroups;
+
 	// List of TLogGroup's managed by this collection.
 	std::vector<TLogGroupRef> recruitedGroups;
 
@@ -87,6 +99,7 @@ private:
 class TLogGroup : public ReferenceCounted<TLogGroup> {
 public:
 	explicit TLogGroup() : groupId(deterministicRandom()->randomUniqueID()) {}
+	explicit TLogGroup(const UID& groupId) : groupId(groupId) {}
 
 	const UID& id() const { return groupId; }
 
@@ -96,12 +109,22 @@ public:
 	// Returns list of servers that are recruited for this group.
 	std::vector<TLogWorkerDataRef> servers() const;
 
+	Standalone<StringRef> toValue() const;
+
+	static TLogGroupRef fromValue(UID groupId,
+	                              StringRef value,
+	                              const std::unordered_map<UID, WorkerInterface>& recruits);
+
+	std::vector<UID> serverIds() const;
+
+	std::string toString() const;
+
 private:
-	const UID& groupId;
+	const UID groupId;
 
 	// Map from worker UID to TLogWorkerData
 	// TODO: Can be an unordered_set.
-	std::map<UID, TLogWorkerDataRef> serverMap;
+	std::unordered_map<UID, TLogWorkerDataRef> serverMap;
 };
 
 // Represents an individual TLogWorker in this collection. A TLogGroup is a set of TLogWorkerData.

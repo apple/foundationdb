@@ -347,6 +347,19 @@ uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key) {
 	return idx;
 }
 
+const KeyRangeRef tLogGroupKeys(LiteralStringRef("\xff/tLogGroup/"), LiteralStringRef("\xff/tLogGroup0"));
+const KeyRef tLogGroupPrefix = tLogGroupKeys.begin;
+const Key tLogGroupKeyFor(UID serverID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(tLogGroupPrefix);
+	wr << serverID;
+	return wr.toValue();
+}
+UID decodeTLogGroupKey(const KeyRef& key) {
+	return BinaryReader::fromStringRef<UID>(
+	    key.removePrefix(tLogGroupPrefix).removeSuffix(LiteralStringRef("/servers")), Unversioned());
+}
+
 const KeyRangeRef serverTagKeys(LiteralStringRef("\xff/serverTag/"), LiteralStringRef("\xff/serverTag0"));
 const KeyRef serverTagPrefix = serverTagKeys.begin;
 const KeyRangeRef serverTagConflictKeys(LiteralStringRef("\xff/serverTagConflict/"),
@@ -605,8 +618,9 @@ const AddressExclusion decodeExcludedServersKey(KeyRef const& key) {
 	ASSERT(key.startsWith(excludedServersPrefix));
 	// Returns an invalid NetworkAddress if given an invalid key (within the prefix)
 	// Excluded servers have IP in x.x.x.x format, port optional, and no SSL suffix
-	// Returns a valid, public NetworkAddress with a port of 0 if the key represents an IP address alone (meaning all
-	// ports) Returns a valid, public NetworkAddress with nonzero port if the key represents an IP:PORT combination
+	// Returns a valid, public NetworkAddress with a port of 0 if the key represents an IP address alone (meaning
+	// all ports) Returns a valid, public NetworkAddress with nonzero port if the key represents an IP:PORT
+	// combination
 
 	return AddressExclusion::parse(key.removePrefix(excludedServersPrefix));
 }
@@ -622,8 +636,9 @@ const AddressExclusion decodeFailedServersKey(KeyRef const& key) {
 	ASSERT(key.startsWith(failedServersPrefix));
 	// Returns an invalid NetworkAddress if given an invalid key (within the prefix)
 	// Excluded servers have IP in x.x.x.x format, port optional, and no SSL suffix
-	// Returns a valid, public NetworkAddress with a port of 0 if the key represents an IP address alone (meaning all
-	// ports) Returns a valid, public NetworkAddress with nonzero port if the key represents an IP:PORT combination
+	// Returns a valid, public NetworkAddress with a port of 0 if the key represents an IP address alone (meaning
+	// all ports) Returns a valid, public NetworkAddress with nonzero port if the key represents an IP:PORT
+	// combination
 
 	return AddressExclusion::parse(key.removePrefix(failedServersPrefix));
 }

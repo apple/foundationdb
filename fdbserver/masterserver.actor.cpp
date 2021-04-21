@@ -20,6 +20,7 @@
 
 #include <iterator>
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
@@ -197,6 +198,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	Reference<ILogSystem> logSystem;
 	Reference<TLogGroupCollection> tLogGroupCollection;
+	Optional<Standalone<RangeResultRef>> tLogGroupRecoveredState;
+
 	Version version; // The last version assigned to a proxy by getVersion()
 	double lastVersionTime;
 	LogSystemDiskQueueAdapter* txnStateLogAdapter;
@@ -744,8 +747,7 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	    .trackLatest("MasterRecoveryState");
 
 	// Recruit TLog groups
-	self->tLogGroupCollection =
-	    makeReference<TLogGroupCollection>(self->configuration.tLogPolicy, self->configuration.tLogReplicationFactor);
+	self->tLogGroupCollection->loadState(self->tLogGroupRecoveredState.get(), recruits.tLogs);
 	self->tLogGroupCollection->addWorkers(recruits.tLogs);
 	self->tLogGroupCollection->recruitEverything();
 
@@ -879,6 +881,13 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 	}
 
 	uniquify(self->allTags);
+
+	// Load TLogGroupCollection
+	Standalone<RangeResultRef> tLogGroupState = wait(self->txnStateStore->readRange(tLogGroupKeys));
+	self->tLogGroupCollection = makeReference<TLogGroupCollection>(self->configuration.tLogPolicy,
+	                                                               SERVER_KNOBS->TLOG_GROUP_COLLECTION_TARGET_SIZE,
+	                                                               self->configuration.tLogReplicationFactor);
+	self->tLogGroupRecoveredState = tLogGroupState;
 
 	// auto kvs = self->txnStateStore->readRange( systemKeys );
 	// for( auto & kv : kvs.get() )
@@ -1846,6 +1855,8 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 			tr.set(recoveryCommitRequest.arena, tLogDatacentersKeyFor(dc), StringRef());
 		}
 	}
+
+	self->tLogGroupCollection->storeState(&recoveryCommitRequest);
 
 	applyMetadataMutations(SpanID(),
 	                       self->dbgid,
