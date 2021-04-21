@@ -46,7 +46,8 @@ struct GrvProxyStats {
 	LatencySample batchTxnGRVTimeInQueue;
 
 	LatencyBands grvLatencyBands;
-	LatencySample grvLatencySample;
+	LatencySample grvLatencySample; // GRV latency metric sample of default priority
+	LatencySample grvBatchLatencySample; // GRV latency metric sample of batched priority
 
 	Future<Void> logger;
 
@@ -76,6 +77,7 @@ struct GrvProxyStats {
 		       (FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE - (lastBucketBegin + bucketInterval - now()));
 	}
 
+	// Current stats maintained for a given grv proxy server
 	explicit GrvProxyStats(UID id)
 	  : cc("GrvProxyStats", id.toString()), recentRequests(0), lastBucketBegin(now()),
 	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE / FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
@@ -101,6 +103,10 @@ struct GrvProxyStats {
 	                     id,
 	                     SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                     SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    grvBatchLatencySample("GRVBatchLatencyMetrics",
+	                          id,
+	                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    grvLatencyBands("GRVLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 		// The rate at which the limit(budget) is allowed to grow.
 		specialCounter(cc, "SystemAndDefaultTxnRateAllowed", [this]() { return this->transactionRateAllowed; });
@@ -508,6 +514,9 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	return rep;
 }
 
+// Returns the current read version (or minimum known committed verison if requested),
+// to each request in the provided list. Also check if the request should be throttled.
+// Update GRV statistics according to the request's priority.
 ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
                                   std::vector<GetReadVersionRequest> requests,
                                   GrvProxyStats* stats,
@@ -521,6 +530,10 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 	double end = g_network->timer();
 	for (GetReadVersionRequest const& request : requests) {
 		double duration = end - request.requestTime();
+		if (request.priority == TransactionPriority::BATCH) {
+			stats->grvBatchLatencySample.addMeasurement(duration);
+		}
+
 		if (request.priority == TransactionPriority::DEFAULT) {
 			stats->grvLatencySample.addMeasurement(duration);
 		}
