@@ -48,6 +48,13 @@ Key versionedMutationKey(Version version, int index) {
 	return bw.toValue().withPrefix(mutationKeys.begin);
 }
 
+Version getVersionFromVersionedMutationKey(KeyRef versionedMutationKey) {
+	Version result;
+	BinaryReader br(versionedMutationKey, IncludeVersion());
+	br >> result;
+	return result;
+}
+
 } //namespace
 
 class SimpleConfigDatabaseNodeImpl {
@@ -167,6 +174,27 @@ class SimpleConfigDatabaseNodeImpl {
 		}
 	}
 
+	ACTOR static Future<Void> getFullDatabase(SimpleConfigDatabaseNodeImpl* self,
+	                                          ConfigFollowerGetFullDatabaseRequest req) {
+		state ConfigFollowerGetFullDatabaseReply reply;
+		Standalone<RangeResultRef> data = wait(self->kvStore->readRange(kvKeys));
+		for (const auto& kv : data) {
+			reply.database[kv.key] = kv.value;
+		}
+		Standalone<VectorRef<VersionedMutationRef>> versionedMutations =
+		    wait(getMutations(self, ::invalidVersion, req.version));
+		for (const auto& versionedMutation : versionedMutations) {
+			const auto& mutation = versionedMutation.mutation;
+			if (mutation.type == MutationRef::SetValue) {
+				reply.database[mutation.param1] = mutation.param2;
+			} else if (mutation.type == MutationRef::ClearRange) {
+				reply.database.erase(reply.database.find(mutation.param1), reply.database.find(mutation.param2));
+			}
+		}
+		req.reply.send(reply);
+		return Void();
+	}
+
 	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigFollowerInterface* cfi) {
 		loop {
 			choose {
@@ -174,7 +202,7 @@ class SimpleConfigDatabaseNodeImpl {
 					self->actors.add(getCurrentVersion(self, req));
 				}
 				when(ConfigFollowerGetFullDatabaseRequest req = waitNext(cfi->getFullDatabase.getFuture())) {
-					// TODO: Implement
+					self->actors.add(getFullDatabase(self, req));
 					continue;
 				}
 				when(ConfigFollowerGetChangesRequest req = waitNext(cfi->getChanges.getFuture())) {
