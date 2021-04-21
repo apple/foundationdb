@@ -624,16 +624,29 @@ struct RolesInfo {
 
 		return roles.insert(std::make_pair(iface.address(), obj))->second;
 	}
+
+	// Returns a json object encoding a snapshot of grv proxy statistics
 	JsonBuilderObject& addRole(std::string const& role, GrvProxyInterface& iface, EventMap const& metrics) {
 		JsonBuilderObject obj;
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
 		try {
+			JsonBuilderObject priorityStats;
+
+			// GRV Latency metrics are grouped according to priority (currently batch or default).
+			// Other priorities can be added in the future.
 			TraceEventFields const& grvLatencyMetrics = metrics.at("GRVLatencyMetrics");
 			if (grvLatencyMetrics.size()) {
-				JsonBuilderObject priorityStats;
-				// We only report default priority now, but this allows us to add other priorities if we want them
 				priorityStats["default"] = addLatencyStatistics(grvLatencyMetrics);
+			}
+
+			TraceEventFields const& grvBatchMetrics = metrics.at("GRVBatchLatencyMetrics");
+			if (grvBatchMetrics.size()) {
+				priorityStats["batch"] = addLatencyStatistics(grvBatchMetrics);
+			}
+
+			// Add GRV Latency metrics (for all priorities) to parent node.
+			if (priorityStats.size()) {
 				obj["grv_latency_statistics"] = priorityStats;
 			}
 
@@ -1833,6 +1846,7 @@ ACTOR static Future<vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetri
 	return results;
 }
 
+// Returns list of tuples of grv proxy interfaces and their latency metrics
 ACTOR static Future<vector<std::pair<CommitProxyInterface, EventMap>>> getCommitProxiesAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
@@ -1850,7 +1864,7 @@ ACTOR static Future<vector<std::pair<GrvProxyInterface, EventMap>>> getGrvProxie
 	vector<std::pair<GrvProxyInterface, EventMap>> results =
 	    wait(getServerMetrics(db->get().client.grvProxies,
 	                          address_workers,
-	                          std::vector<std::string>{ "GRVLatencyMetrics", "GRVLatencyBands" }));
+	                          std::vector<std::string>{ "GRVLatencyMetrics", "GRVLatencyBands", "GRVBatchLatencyMetrics" }));
 	return results;
 }
 

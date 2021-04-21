@@ -27,6 +27,7 @@
 
 #include "flow/ThreadHelper.actor.h"
 
+// An interface that represents a transaction created by a client
 class ITransaction {
 public:
 	virtual ~ITransaction() {}
@@ -89,6 +90,7 @@ public:
 	virtual void delref() = 0;
 };
 
+// An interface that represents a connection to a cluster made by a client
 class IDatabase {
 public:
 	virtual ~IDatabase() {}
@@ -96,6 +98,11 @@ public:
 	virtual Reference<ITransaction> createTransaction() = 0;
 	virtual void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
 	virtual double getMainThreadBusyness() = 0;
+
+	// Returns the protocol version reported by a quorum of coordinators
+	// If an expected version is given, the future won't return until the protocol version is different than expected
+	virtual ThreadFuture<ProtocolVersion> getServerProtocol(
+	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) = 0;
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
@@ -109,13 +116,16 @@ public:
 	virtual ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) = 0;
 };
 
+// An interface that presents the top-level FDB client API as exposed through the C bindings
+//
+// This interface and its associated objects are intended to live outside the network thread, so its asynchronous
+// operations use ThreadFutures and implementations should be thread safe.
 class IClientApi {
 public:
 	virtual ~IClientApi() {}
 
 	virtual void selectApiVersion(int apiVersion) = 0;
 	virtual const char* getClientVersion() = 0;
-	virtual ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath) = 0;
 
 	virtual void setNetworkOption(FDBNetworkOptions::Option option,
 	                              Optional<StringRef> value = Optional<StringRef>()) = 0;
