@@ -19,6 +19,7 @@
  */
 
 #pragma once
+
 #include "fdbclient/AnnotateActor.h"
 
 #include <optional>
@@ -30,7 +31,7 @@
 #include "flow/singleton.h"
 #include "flow/flow.h"
 
-void runSamplingProfiler();
+void samplingProfilerUpdateFrequency(std::optional<std::any> freq);
 
 struct IALPCollectorBase {
 	virtual std::optional<std::any> collect(ActorLineage*) = 0;
@@ -64,7 +65,7 @@ private:
 public:
 	void addCollector(IALPCollectorBase* collector) { collectors.push_back(collector); }
 	std::shared_ptr<Sample> collect();
-	void addGetter(WaitState waitState, Getter const& getter);
+	void addGetter(WaitState waitState, Getter const& getter) { getSamples[waitState] = getter; };
 };
 
 using SampleCollector = crossbow::singleton<SampleCollectorT>;
@@ -118,3 +119,5 @@ public:
 	void setFrequency(unsigned frequency);
 	void stop();
 };
+
+using ActorLineageProfiler = crossbow::singleton<ActorLineageProfilerT>;
