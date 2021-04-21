@@ -624,6 +624,8 @@ struct RolesInfo {
 
 		return roles.insert(std::make_pair(iface.address(), obj))->second;
 	}
+
+	// Returns a json object encoding a snapshot of grv proxy statistics
 	JsonBuilderObject& addRole(std::string const& role, GrvProxyInterface& iface, EventMap const& metrics) {
 		JsonBuilderObject obj;
 		obj["id"] = iface.id().shortString();
@@ -1844,6 +1846,7 @@ ACTOR static Future<vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetri
 	return results;
 }
 
+// Returns list of tuples of grv proxy interfaces and their latency metrics
 ACTOR static Future<vector<std::pair<CommitProxyInterface, EventMap>>> getCommitProxiesAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {

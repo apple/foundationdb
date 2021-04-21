@@ -77,6 +77,7 @@ struct GrvProxyStats {
 		       (FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE - (lastBucketBegin + bucketInterval - now()));
 	}
 
+	// Current stats maintained for a given grv proxy server
 	explicit GrvProxyStats(UID id)
 	  : cc("GrvProxyStats", id.toString()), recentRequests(0), lastBucketBegin(now()),
 	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE / FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
@@ -513,6 +514,9 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	return rep;
 }
 
+// Returns the current read version (or minimum known committed verison if requested),
+// to each request in the provided list. Also check if the request should be throttled.
+// Update GRV statistics according to the request's priority.
 ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
                                   std::vector<GetReadVersionRequest> requests,
                                   GrvProxyStats* stats,
