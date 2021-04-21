@@ -250,23 +250,30 @@ void ActorLineageProfilerT::stop() {
 }
 
 void ActorLineageProfilerT::setFrequency(unsigned frequency) {
+	unsigned oldFrequency = this->frequency;
 	bool change = this->frequency != frequency;
 	this->frequency = frequency;
-	if (frequency != 0 && !profilerThread.joinable()) {
-		profilerThread = std::thread(std::bind(&ActorLineageProfilerT::profile, this));
-	} else if (change) {
-		cond.notify_all();
-	}
 
-	if (frequency == 0 && profilerThread.joinable()) {
-		profilerThread.join();
+	if (change) {
+		// Profiler thread will automatically switch to new frequency after
+		// being triggered by the the condition variable. Only need to start a
+		// new profiler thread if the old one has been stopped due to the
+		// profiler thread returning (frequency set to 0).
+		if (oldFrequency == 0 && frequency != 0) {
+			std::thread(&ActorLineageProfilerT::profile, this).detach();
+		}
+		cond.notify_all();
 	}
 }
 
 void ActorLineageProfilerT::profile() {
+	static std::atomic_int profileThreadCount = 0;
+	ASSERT(++profileThreadCount == 1);
+
 	for (;;) {
 		collection->refresh();
 		if (frequency == 0) {
+			profileThreadCount--;
 			return;
 		}
 		{
@@ -275,6 +282,7 @@ void ActorLineageProfilerT::profile() {
 			// cond.wait_until(lock, lastSample + std::chrono::milliseconds)
 		}
 		if (frequency == 0) {
+			profileThreadCount--;
 			return;
 		}
 	}
