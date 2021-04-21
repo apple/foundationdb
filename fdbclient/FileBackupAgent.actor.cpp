@@ -4125,7 +4125,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		// Order does not matter, they will be put in order when written to the restoreFileMap below.
 		state std::vector<RestoreConfig::RestoreFile> files;
 
-		Version firstConsistentVersion = std::numeric_limits<int64_t>::min();
+		state Version firstConsistentVersion = beginVersion;
 		for (const RangeFile& f : restorable.get().ranges) {
 			files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
 			firstConsistentVersion = std::max(firstConsistentVersion, f.version);
