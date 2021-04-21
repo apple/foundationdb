@@ -21,7 +21,7 @@
 #include "flow/flow.h"
 #include "flow/singleton.h"
 #include "fdbrpc/IAsyncFile.h"
-#include "fdbclient/ActorLineageProfiler.actor.h"
+#include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include <msgpack.hpp>
 #include <memory>
@@ -259,7 +259,7 @@ void ActorLineageProfilerT::setFrequency(unsigned frequency) {
 		cond.notify_all();
 	}
 
-	if (frequency == 0) {
+	if (frequency == 0 && profilerThread.joinable()) {
 		profilerThread.join();
 	}
 }
@@ -281,22 +281,13 @@ void ActorLineageProfilerT::profile() {
 	}
 }
 
-// Handles running the sampling profiler, including responding to frequency
-// changes and other updates the client wishes to make through global
-// configuration.
-ACTOR Future<Void> runSamplingProfiler() {
-	wait(delay(1)); // A bit of a hack to get around GlobalConfig not being setup yet
-	wait(GlobalConfig::globalConfig().onInitialized());
-	state unsigned frequency = GlobalConfig::globalConfig().get<double>(samplingFrequency, 0);
-	ActorLineageProfiler::instance().setFrequency(frequency);
-
-	loop {
-		wait(GlobalConfig::globalConfig().onChange());
-
-		unsigned latestFrequency = GlobalConfig::globalConfig().get<double>(samplingFrequency, 0);
-		if (latestFrequency != frequency) {
-			frequency = latestFrequency;
-			ActorLineageProfiler::instance().setFrequency(latestFrequency);
-		}
+// Callback used to update the sampling profilers run frequency whenever the
+// frequency changes.
+void samplingProfilerUpdateFrequency(std::optional<std::any> freq) {
+	double frequency = 0;
+	if (freq.has_value()) {
+		frequency = std::any_cast<double>(freq.value());
 	}
+	TraceEvent(SevInfo, "SamplingProfilerUpdateFrequency").detail("Frequency", frequency);
+	ActorLineageProfiler::instance().setFrequency(frequency);
 }

@@ -87,6 +87,10 @@ Future<Void> GlobalConfig::onChange() {
 	return configChanged.onTrigger();
 }
 
+void GlobalConfig::trigger(KeyRef key, std::function<void(std::optional<std::any>)> fn) {
+	callbacks.emplace(key, std::move(fn));
+}
+
 void GlobalConfig::insert(KeyRef key, ValueRef value) {
 	data.erase(key);
 
@@ -109,19 +113,26 @@ void GlobalConfig::insert(KeyRef key, ValueRef value) {
 			ASSERT(false);
 		}
 		data[stableKey] = makeReference<ConfigValue>(std::move(arena), std::move(any));
+
+		if (callbacks.find(stableKey) != callbacks.end()) {
+			callbacks[stableKey](data[stableKey]->value);
+		}
 	} catch (Error& e) {
 		TraceEvent("GlobalConfigTupleParseError").detail("What", e.what());
 	}
 }
 
 void GlobalConfig::erase(KeyRef key) {
-	data.erase(key);
+	erase(KeyRangeRef(key, keyAfter(key)));
 }
 
 void GlobalConfig::erase(KeyRangeRef range) {
 	auto it = data.begin();
 	while (it != data.end()) {
 		if (range.contains(it->first)) {
+			if (callbacks.find(it->first) != callbacks.end()) {
+				callbacks[it->first](std::nullopt);
+			}
 			it = data.erase(it);
 		} else {
 			++it;
@@ -175,7 +186,9 @@ ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
 // Updates local copy of global configuration by reading the entire key-range
 // from storage.
 ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
-	self->data.clear();
+	for (const auto& [key, _] : self->data) {
+		self->erase(key);
+	}
 
 	Transaction tr(self->cx);
 	Standalone<RangeResultRef> result = wait(tr.getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));

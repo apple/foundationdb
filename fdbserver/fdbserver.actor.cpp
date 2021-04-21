@@ -35,7 +35,7 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/interprocess/managed_shared_memory.hpp>
 
-#include "fdbclient/ActorLineageProfiler.actor.h"
+#include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/RestoreWorkerInterface.actor.h"
@@ -1989,7 +1989,6 @@ int main(int argc, char* argv[]) {
 				                      opts.whitelistBinPaths));
 				actors.push_back(histogramReport());
 				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
-				actors.push_back(runSamplingProfiler());
 
 				f = stopAfter(waitForAll(actors));
 				g_network->run();

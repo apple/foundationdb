@@ -27,7 +27,9 @@
 #define FDBCLIENT_GLOBALCONFIG_ACTOR_H
 
 #include <any>
+#include <functional>
 #include <map>
+#include <optional>
 #include <type_traits>
 #include <unordered_map>
 
@@ -128,6 +130,12 @@ public:
 	// configuration changes.
 	Future<Void> onChange();
 
+	// Calls \ref fn when the value associated with \ref key is changed. \ref
+	// fn is passed the updated value for the key, or an empty optional if the
+	// key has been cleared. If the value is an allocated object, its memory
+	// remains in the control of the global configuration.
+	void trigger(KeyRef key, std::function<void(std::optional<std::any>)> fn);
+
 private:
 	GlobalConfig();
 
@@ -156,6 +164,7 @@ private:
 	AsyncTrigger configChanged;
 	std::unordered_map<StringRef, Reference<ConfigValue>> data;
 	Version lastUpdate;
+	std::unordered_map<KeyRef, std::function<void(std::optional<std::any>)>> callbacks;
 };
 
 #endif
