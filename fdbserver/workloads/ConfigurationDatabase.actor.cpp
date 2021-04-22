@@ -29,11 +29,15 @@
 
 class ConfigurationDatabaseWorkload : public TestWorkload {
 
-	ACTOR static Future<Optional<Value>> get(Database cx, Key key) {
+	ACTOR static Future<int> getCurrentValue(Database cx, Key key) {
 		state SimpleConfigTransaction tr(cx->getConnectionFile()->getConnectionString());
+		state int result = 0;
 		loop {
 			try {
-				Optional<Value> result = wait(tr.get(key));
+				Optional<Value> value = wait(tr.get(key));
+				if (value.present()) {
+					result = BinaryReader::fromStringRef<int>(value.get(), IncludeVersion());
+				}
 				return result;
 			} catch (Error &e) {
 				wait(tr.onError(e));
@@ -41,11 +45,17 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> set(Database cx, Key key, Value value) {
+	ACTOR static Future<Void> increment(Database cx, Key key) {
 		state SimpleConfigTransaction tr(cx->getConnectionFile()->getConnectionString());
 		loop {
 			try {
-				tr.set(key, value);
+				state int currentValue = 0;
+				Optional<Value> value = wait(tr.get(key));
+				if (value.present()) {
+					currentValue = BinaryReader::fromStringRef<int>(value.get(), IncludeVersion());
+				}
+				++currentValue;
+				tr.set(key, BinaryWriter::toValue(currentValue, IncludeVersion()));
 				wait(tr.commit());
 				return Void();
 			} catch (Error &e) {
@@ -56,14 +66,11 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 
 	ACTOR static Future<Void> runClient(Database cx) {
 		state Key key = LiteralStringRef("key");
-		state Key value = LiteralStringRef("value");
-		Optional<Value> currentValue = wait(get(cx, key));
-		ASSERT(!currentValue.present());
-		wait(set(cx, key, value));
-		{
-			Optional<Value> currentValue = wait(get(cx, key));
-			ASSERT(currentValue.get() == value);
-		}
+		int currentValue = wait(getCurrentValue(cx, key));
+		ASSERT(currentValue == 0);
+		wait(increment(cx, key));
+		int newValue = wait(getCurrentValue(cx, key));
+		ASSERT(newValue == 1);
 		return Void();
 	}
 
