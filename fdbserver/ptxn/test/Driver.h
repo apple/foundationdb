@@ -52,6 +52,9 @@ struct CommitRecord {
 };
 
 struct TestDriverContext {
+	// Num commits to be created
+	int numCommits;
+
 	// Teams
 	int numTeamIDs;
 	std::vector<TeamID> teamIDs;
@@ -96,7 +99,7 @@ void verifyMutationsInRecord(std::vector<CommitRecord>& record,
                              const Version&,
                              const TeamID&,
                              const std::vector<MutationRef>& mutations,
-							 std::function<void(CommitValidationRecord&)> validateUpdater);
+                             std::function<void(CommitValidationRecord&)> validateUpdater);
 
 } // namespace ptxn
 
