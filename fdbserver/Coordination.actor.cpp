@@ -619,8 +619,8 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder) {
 	state GenerationRegInterface myInterface(g_network);
 	state OnDemandStore store(dataFolder, myID);
 	state ConfigTransactionInterface configTransactionInterface;
-	configTransactionInterface.setupWellKnownEndpoints();
 	state ConfigFollowerInterface configFollowerInterface;
+	configTransactionInterface.setupWellKnownEndpoints();
 	configFollowerInterface.setupWellKnownEndpoints();
 	state Reference<IConfigDatabaseNode> configDatabaseNode = makeReference<SimpleConfigDatabaseNode>(dataFolder);
 

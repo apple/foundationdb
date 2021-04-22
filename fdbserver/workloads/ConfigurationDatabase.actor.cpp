@@ -29,6 +29,13 @@
 
 class ConfigurationDatabaseWorkload : public TestWorkload {
 
+	Key key;
+	int numIncrements;
+	int numClients;
+	int numBroadcasters;
+	int numConsumersPerBroadcaster;
+	Promise<int> expectedTotal; // when clients finish, publish expected total value here
+
 	ACTOR static Future<int> getCurrentValue(Database cx, Key key) {
 		state SimpleConfigTransaction tr(cx->getConnectionFile()->getConnectionString());
 		state int result = 0;
@@ -45,17 +52,17 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> increment(Database cx, Key key) {
+	ACTOR static Future<Void> increment(ConfigurationDatabaseWorkload* self, Database cx) {
 		state SimpleConfigTransaction tr(cx->getConnectionFile()->getConnectionString());
 		loop {
 			try {
 				state int currentValue = 0;
-				Optional<Value> value = wait(tr.get(key));
+				Optional<Value> value = wait(tr.get(self->key));
 				if (value.present()) {
 					currentValue = BinaryReader::fromStringRef<int>(value.get(), IncludeVersion());
 				}
 				++currentValue;
-				tr.set(key, BinaryWriter::toValue(currentValue, IncludeVersion()));
+				tr.set(self->key, BinaryWriter::toValue(currentValue, IncludeVersion()));
 				wait(tr.commit());
 				return Void();
 			} catch (Error &e) {
@@ -64,53 +71,88 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> runClient(Database cx) {
-		state Key key = LiteralStringRef("key");
-		int currentValue = wait(getCurrentValue(cx, key));
-		ASSERT(currentValue == 0);
-		wait(increment(cx, key));
-		int newValue = wait(getCurrentValue(cx, key));
-		ASSERT(newValue == 1);
+	ACTOR static Future<Void> runClient(ConfigurationDatabaseWorkload* self, Database cx) {
+		state int i = 0;
+		for (; i < self->numIncrements; ++i) {
+			wait(increment(self, cx));
+		}
 		return Void();
 	}
 
-	ACTOR static Future<Void> runBroadcaster(Database cx, ConfigFollowerInterface cfi) {
-		state SimpleConfigBroadcaster broadcaster(cx->getConnectionFile()->getConnectionString());
-		wait(success(timeout(broadcaster.serve(cfi), 60.0)));
+	ACTOR static Future<Void> runClients(ConfigurationDatabaseWorkload* self, Database cx) {
+		std::vector<Future<Void>> clients;
+		for (int i = 0; i < self->numClients; ++i) {
+			clients.push_back(runClient(self, cx));
+		}
+		wait(waitForAll(clients));
+		int expectedTotal = wait(getCurrentValue(cx, self->key));
+		self->expectedTotal.send(expectedTotal);
 		return Void();
 	}
 
-	ACTOR static Future<Version> getCurrentVersion(ConfigFollowerInterface cfi) {
-		ConfigFollowerGetVersionReply versionReply = wait(cfi.getVersion.getReply(ConfigFollowerGetVersionRequest{}));
+	ACTOR static Future<Version> getCurrentVersion(Reference<ConfigFollowerInterface> cfi) {
+		ConfigFollowerGetVersionReply versionReply = wait(cfi->getVersion.getReply(ConfigFollowerGetVersionRequest{}));
 		return versionReply.version;
 	}
 
-	ACTOR static Future<Void> runConsumer(ConfigFollowerInterface cfi) {
+	ACTOR static Future<Void> runConsumer(ConfigurationDatabaseWorkload* self, Reference<ConfigFollowerInterface> cfi) {
+		state std::map<Key, Value> database;
 		state Version mostRecentVersion = wait(getCurrentVersion(cfi));
-		ConfigFollowerGetFullDatabaseReply fullDBReply = wait(cfi.getFullDatabase.getReply(ConfigFollowerGetFullDatabaseRequest{mostRecentVersion, {}}));
-		state std::map<Key, Value> database = fullDBReply.database;
-		state int runs = 0;
+		state Future<int> expectedTotal = self->expectedTotal.getFuture();
+		state int currentValue = 0;
 		loop {
-			state ConfigFollowerGetChangesReply changesReply = wait(cfi.getChanges.getReply(ConfigFollowerGetChangesRequest{mostRecentVersion, {}}));
-			wait(delay(1.0));
-			if (++runs > 5) {
+			state ConfigFollowerGetChangesReply reply =
+			    wait(cfi->getChanges.getReply(ConfigFollowerGetChangesRequest{ mostRecentVersion, {} }));
+			mostRecentVersion = reply.mostRecentVersion;
+			for (const auto& versionedMutation : reply.versionedMutations) {
+				const auto& mutation = versionedMutation.mutation;
+				if (mutation.type == MutationRef::SetValue) {
+					database[mutation.param1] = mutation.param2;
+				} else if (mutation.type == MutationRef::ClearRange) {
+					database.erase(database.find(mutation.param1), database.find(mutation.param2));
+				}
+			}
+			if (database.count(self->key)) {
+				currentValue = BinaryReader::fromStringRef<int>(database[self->key], IncludeVersion());
+			}
+			if (expectedTotal.isReady() && currentValue >= expectedTotal.get()) {
 				return Void();
 			}
+			wait(delayJittered(0.5));
 		}
+	}
+
+	ACTOR static Future<Void> runBroadcasterAndConsumers(ConfigurationDatabaseWorkload* self, Database cx) {
+		state SimpleConfigBroadcaster broadcaster(cx->getConnectionFile()->getConnectionString());
+		state std::vector<Future<Void>> consumers;
+		state Reference<ConfigFollowerInterface> cfi = makeReference<ConfigFollowerInterface>();
+		for (int i = 0; i < self->numConsumersPerBroadcaster; ++i) {
+			consumers.push_back(runConsumer(self, cfi));
+		}
+		choose {
+			when(wait(waitForAll(consumers))) {}
+			when(wait(broadcaster.serve(cfi))) { ASSERT(false); }
+		}
+		return Void();
 	}
 
 	ACTOR static Future<Void> start(ConfigurationDatabaseWorkload *self, Database cx) {
 		state std::vector<Future<Void>> futures;
-		state ConfigFollowerInterface cfi;
-		futures.push_back(runClient(cx));
-		futures.push_back(runBroadcaster(cx, cfi));
-		futures.push_back(runConsumer(cfi));
+		futures.push_back(runClients(self, cx));
+		for (int i = 0; i < self->numBroadcasters; ++i) {
+			futures.push_back(runBroadcasterAndConsumers(self, cx));
+		}
 		wait(waitForAll(futures));
 		return Void();
 	}
 
 public:
-	ConfigurationDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
+	ConfigurationDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+		numIncrements = getOption(options, "numIncrements"_sr, 1);
+		numClients = getOption(options, "numClients"_sr, 1);
+		numBroadcasters = getOption(options, "numBroadcasters"_sr, 1);
+		numConsumersPerBroadcaster = getOption(options, "numConsumersPerBroadcaster"_sr, 1);
+	}
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override { return clientId ? Void() : start(this, cx); }
 	Future<bool> check(Database const& cx) override { return true; }

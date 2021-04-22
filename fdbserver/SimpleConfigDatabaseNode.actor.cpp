@@ -238,7 +238,7 @@ class SimpleConfigDatabaseNodeImpl {
 				}
 				when(ConfigFollowerCompactRequest req = waitNext(cfi->compact.getFuture())) {
 					// TODO: Implement
-					continue;
+					req.reply.send(Void());
 				}
 				when(wait(self->actors.getResult())) { ASSERT(false); }
 			}

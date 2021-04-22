@@ -21,7 +21,7 @@
 #include "fdbserver/IConfigBroadcaster.h"
 
 class SimpleConfigBroadcasterImpl {
-	ConfigFollowerInterface subscriber;
+	Reference<ConfigFollowerInterface> subscriber;
 	std::map<Key, Value> fullDatabase;
 	Standalone<VectorRef<VersionedMutationRef>> versionedMutations;
 	Version lastCompactedVersion;
@@ -32,7 +32,8 @@ class SimpleConfigBroadcasterImpl {
 
 	ACTOR static Future<Void> fetchUpdates(SimpleConfigBroadcasterImpl *self) {
 		loop {
-			ConfigFollowerGetChangesReply reply = wait(self->subscriber.getChanges.getReply(ConfigFollowerGetChangesRequest{self->mostRecentVersion, {}}));
+			ConfigFollowerGetChangesReply reply = wait(
+			    self->subscriber->getChanges.getReply(ConfigFollowerGetChangesRequest{ self->mostRecentVersion, {} }));
 			for (const auto &versionedMutation : reply.versionedMutations) {
 				self->versionedMutations.push_back(self->versionedMutations.arena(), versionedMutation);
 			}
@@ -54,10 +55,12 @@ class SimpleConfigBroadcasterImpl {
 		}
 	}
 
-	ACTOR static Future<Void> serve(SimpleConfigBroadcasterImpl *self, ConfigFollowerInterface *publisher) {
-		ConfigFollowerGetVersionReply versionReply = wait(self->subscriber.getVersion.getReply(ConfigFollowerGetVersionRequest{}));
+	ACTOR static Future<Void> serve(SimpleConfigBroadcasterImpl* self, Reference<ConfigFollowerInterface> publisher) {
+		ConfigFollowerGetVersionReply versionReply =
+		    wait(self->subscriber->getVersion.getReply(ConfigFollowerGetVersionRequest{}));
 		self->mostRecentVersion = versionReply.version;
-		ConfigFollowerGetFullDatabaseReply reply = wait(self->subscriber.getFullDatabase.getReply(ConfigFollowerGetFullDatabaseRequest{self->mostRecentVersion, Optional<Value>{}}));
+		ConfigFollowerGetFullDatabaseReply reply = wait(self->subscriber->getFullDatabase.getReply(
+		    ConfigFollowerGetFullDatabaseRequest{ self->mostRecentVersion, Optional<Value>{} }));
 		self->fullDatabase = reply.database;
 		self->actors.add(fetchUpdates(self));
 		loop {
@@ -106,12 +109,10 @@ public:
 	SimpleConfigBroadcasterImpl(ClusterConnectionString const& ccs) : lastCompactedVersion(0), mostRecentVersion(0) {
 		auto coordinators = ccs.coordinators();
 		std::sort(coordinators.begin(), coordinators.end());
-		subscriber = ConfigFollowerInterface(coordinators[0]);
+		subscriber = makeReference<ConfigFollowerInterface>(coordinators[0]);
 	}
 
-	Future<Void> serve(ConfigFollowerInterface& publisher) {
-		return serve(this, &publisher);
-	}
+	Future<Void> serve(Reference<ConfigFollowerInterface> publisher) { return serve(this, publisher); }
 };
 
 const double SimpleConfigBroadcasterImpl::POLLING_INTERVAL = 0.5;
@@ -121,6 +122,6 @@ SimpleConfigBroadcaster::SimpleConfigBroadcaster(ClusterConnectionString const& 
 
 SimpleConfigBroadcaster::~SimpleConfigBroadcaster() = default;
 
-Future<Void> SimpleConfigBroadcaster::serve(ConfigFollowerInterface& publisher) {
+Future<Void> SimpleConfigBroadcaster::serve(Reference<ConfigFollowerInterface> publisher) {
 	return impl->serve(publisher);
 }
