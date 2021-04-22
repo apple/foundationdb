@@ -5269,7 +5269,8 @@ public:
 	//   lockDB: if set lock the database with randomUid before performing restore;
 	//           otherwise, check database is locked with the randomUid
 	//   incrementalBackupOnly: only perform incremental backup
-	//   inconsistentSnapshotOnly: ignore log files to get inconsistent snapshot only
+	//   inconsistentSnapshotOnly: Ignore mutation log files during the restore to speedup the process.
+	//                             When set to true, gives an inconsistent snapshot, thus not recommended
 	//   beginVersion: restore's begin version
 	//   randomUid: the UID for lock the database
 	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent,
