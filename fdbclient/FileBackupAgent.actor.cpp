@@ -4130,8 +4130,18 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
 			firstConsistentVersion = std::max(firstConsistentVersion, f.version);
 		}
-		restore.firstConsistentVersion().set(tr, firstConsistentVersion);
-		wait(tr->commit());
+		tr->reset();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				restore.firstConsistentVersion().set(tr, firstConsistentVersion);
+				wait(tr->commit());
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
 
 		if (!CLIENT_KNOBS->RESTORE_IGNORE_LOG_FILES) {
 			for (const LogFile& f : restorable.get().logs) {
