@@ -34,6 +34,8 @@ const KeyRef fdbClientInfoTxnSizeLimit = LiteralStringRef("config/fdb_client_inf
 const KeyRef transactionTagSampleRate = LiteralStringRef("config/transaction_tag_sample_rate");
 const KeyRef transactionTagSampleCost = LiteralStringRef("config/transaction_tag_sample_cost");
 
+const KeyRef samplingFrequency = LiteralStringRef("visibility/sampling/frequency");
+
 GlobalConfig::GlobalConfig() : lastUpdate(0) {}
 
 void GlobalConfig::create(DatabaseContext* cx, Reference<AsyncVar<ClientDBInfo>> dbInfo) {
@@ -43,6 +45,10 @@ void GlobalConfig::create(DatabaseContext* cx, Reference<AsyncVar<ClientDBInfo>>
 		g_network->setGlobal(INetwork::enGlobalConfig, config);
 		config->_updater = updater(config, dbInfo);
 	}
+}
+
+void GlobalConfig::updateDBInfo(Reference<AsyncVar<ClientDBInfo>> dbInfo) {
+	_updater = updater(&GlobalConfig::globalConfig(), dbInfo);
 }
 
 GlobalConfig& GlobalConfig::globalConfig() {
@@ -77,6 +83,14 @@ Future<Void> GlobalConfig::onInitialized() {
 	return initialized.getFuture();
 }
 
+Future<Void> GlobalConfig::onChange() {
+	return configChanged.onTrigger();
+}
+
+void GlobalConfig::trigger(KeyRef key, std::function<void(std::optional<std::any>)> fn) {
+	callbacks.emplace(key, std::move(fn));
+}
+
 void GlobalConfig::insert(KeyRef key, ValueRef value) {
 	data.erase(key);
 
@@ -89,6 +103,8 @@ void GlobalConfig::insert(KeyRef key, ValueRef value) {
 			any = StringRef(arena, t.getString(0).contents());
 		} else if (t.getType(0) == Tuple::ElementType::INT) {
 			any = t.getInt(0);
+		} else if (t.getType(0) == Tuple::ElementType::BOOL) {
+			any = t.getBool(0);
 		} else if (t.getType(0) == Tuple::ElementType::FLOAT) {
 			any = t.getFloat(0);
 		} else if (t.getType(0) == Tuple::ElementType::DOUBLE) {
@@ -97,19 +113,26 @@ void GlobalConfig::insert(KeyRef key, ValueRef value) {
 			ASSERT(false);
 		}
 		data[stableKey] = makeReference<ConfigValue>(std::move(arena), std::move(any));
+
+		if (callbacks.find(stableKey) != callbacks.end()) {
+			callbacks[stableKey](data[stableKey]->value);
+		}
 	} catch (Error& e) {
 		TraceEvent("GlobalConfigTupleParseError").detail("What", e.what());
 	}
 }
 
 void GlobalConfig::erase(KeyRef key) {
-	data.erase(key);
+	erase(KeyRangeRef(key, keyAfter(key)));
 }
 
 void GlobalConfig::erase(KeyRangeRef range) {
 	auto it = data.begin();
 	while (it != data.end()) {
 		if (range.contains(it->first)) {
+			if (callbacks.find(it->first) != callbacks.end()) {
+				callbacks[it->first](std::nullopt);
+			}
 			it = data.erase(it);
 		} else {
 			++it;
@@ -163,7 +186,9 @@ ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
 // Updates local copy of global configuration by reading the entire key-range
 // from storage.
 ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
-	self->data.clear();
+	for (const auto& [key, _] : self->data) {
+		self->erase(key);
+	}
 
 	Transaction tr(self->cx);
 	Standalone<RangeResultRef> result = wait(tr.getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
@@ -222,6 +247,8 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, Reference<AsyncVar<
 					self->lastUpdate = vh.version;
 				}
 			}
+
+			self->configChanged.trigger();
 		} catch (Error& e) {
 			throw;
 		}
