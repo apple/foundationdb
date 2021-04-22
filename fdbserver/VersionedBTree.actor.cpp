@@ -7139,9 +7139,7 @@ struct IntIntPair {
 		IntIntPair apply(const Partial& cache) { return cache; }
 
 		IntIntPair apply(Arena& arena, const IntIntPair& base, Optional<Partial>& cache) {
-			if (!cache.present()) {
-				cache = IntIntPair(base.k + dk, base.v + dv);
-			}
+			cache = IntIntPair(base.k + dk, base.v + dv);
 			return cache.get();
 		}
 
@@ -7802,7 +7800,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 
 	auto printItems = [&] {
 		for (int k = 0; k < items.size(); ++k) {
-			printf("%d/%d %s\n", k + 1, items.size(), items[k].toString().c_str());
+			debug_printf("%d/%d %s\n", k + 1, items.size(), items[k].toString().c_str());
 		}
 	};
 
@@ -7812,14 +7810,14 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 		       (int)tree->size(),
 		       (int)tree->initialHeight,
 		       (int)tree->maxHeight);
-		debug_printf_always("Data(%p): %s\n", tree, StringRef((uint8_t*)tree, tree->size()).toHexString().c_str());
+		debug_printf("Data(%p): %s\n", tree, StringRef((uint8_t*)tree, tree->size()).toHexString().c_str());
 
 		printf("DeltaTree2: Count=%d  Size=%d  InitialHeight=%d  MaxHeight=%d\n",
 		       (int)tree2->numItems,
 		       (int)tree2->size(),
 		       (int)tree2->initialHeight,
 		       (int)tree2->maxHeight);
-		debug_printf_always("Data(%p): %s\n", tree2, StringRef((uint8_t*)tree2, tree2->size()).toHexString().c_str());
+		debug_printf("Data(%p): %s\n", tree2, StringRef((uint8_t*)tree2, tree2->size()).toHexString().c_str());
 	};
 
 	// Iterate through items and tree forward and backward, verifying tree contents.
@@ -7940,6 +7938,9 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	// Update items vector
 	items = std::vector<IntIntPair>(uniqueItems.begin(), uniqueItems.end());
 
+	printItems();
+	printTrees();
+
 	// Verify tree contents
 	scanAndVerify();
 	scanAndVerify2();
@@ -7964,6 +7965,9 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	}
 	// Update items vector
 	items = std::vector<IntIntPair>(uniqueItems.begin(), uniqueItems.end());
+
+	printItems();
+	printTrees();
 
 	// Verify tree contents after deletions
 	scanAndVerify();
@@ -7992,6 +7996,9 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 		ASSERT(!r.insert(p));
 		ASSERT(!cur2.insert(p));
 	}
+
+	printItems();
+	printTrees();
 
 	// Tree contents should still match items vector
 	scanAndVerify();

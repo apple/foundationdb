@@ -994,7 +994,10 @@ struct DeltaTree2 {
 public:
 	struct DecodeCache : FastAllocated<DecodeCache> {
 		DecodeCache(const T& lowerBound = T(), const T& upperBound = T())
-		  : lowerBound(arena, lowerBound), upperBound(arena, upperBound) {}
+		  : lowerBound(arena, lowerBound), upperBound(arena, upperBound) {
+			partials.reserve(10);
+			printf("size: %d\n", sizeof(OffsetPartial));
+		}
 
 		Arena arena;
 		T lowerBound;
