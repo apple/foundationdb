@@ -152,20 +152,25 @@ public:
 
 using SampleCollection = crossbow::singleton<SampleCollection_t>;
 
+struct ProfilerImpl;
+
+namespace boost {
+namespace asio {
+// forward declare io_context because including boost asio is super expensive
+class io_context;
+} // namespace asio
+} // namespace boost
+
 class ActorLineageProfilerT {
 	friend struct crossbow::create_static<ActorLineageProfilerT>;
-	ActorLineageProfilerT();
+	ProfilerImpl* impl;
 	SampleCollection collection;
-	std::thread profilerThread;
-	std::atomic<unsigned> frequency = 0;
-	std::mutex mutex;
-	std::condition_variable cond;
-	void profile();
+	ActorLineageProfilerT();
 
 public:
 	~ActorLineageProfilerT();
 	void setFrequency(unsigned frequency);
-	void stop();
+	boost::asio::io_context& context();
 };
 
 using ActorLineageProfiler = crossbow::singleton<ActorLineageProfilerT>;

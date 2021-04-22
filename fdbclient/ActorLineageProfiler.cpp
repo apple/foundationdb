@@ -25,6 +25,7 @@
 #include <msgpack.hpp>
 #include <memory>
 #include <boost/endian/conversion.hpp>
+#include <boost/asio.hpp>
 
 using namespace std::literals;
 
@@ -230,7 +231,45 @@ std::vector<std::shared_ptr<Sample>> SampleCollection_t::get(double from /*= 0.0
 	return res;
 }
 
-ActorLineageProfilerT::ActorLineageProfilerT() {
+struct ProfilerImpl {
+	boost::asio::io_context context;
+	boost::asio::executor_work_guard<decltype(context.get_executor())> workGuard;
+	boost::asio::steady_timer timer;
+	std::thread mainThread;
+	unsigned frequency;
+
+	SampleCollection collection;
+
+	ProfilerImpl() : workGuard(context.get_executor()), timer(context) {
+		mainThread = std::thread([this]() { context.run(); });
+	}
+	~ProfilerImpl() {
+		setFrequency(0);
+		workGuard.reset();
+		mainThread.join();
+	}
+
+	void profileHandler(boost::system::error_code const& ec) {
+		if (ec) {
+			return;
+		}
+		collection->refresh();
+		timer = boost::asio::steady_timer(context, std::chrono::microseconds(1000000 / frequency));
+		timer.async_wait([this](auto const& ec) { profileHandler(ec); });
+	}
+
+	void setFrequency(unsigned frequency) {
+		boost::asio::post(context, [this, frequency]() {
+			this->frequency = frequency;
+			timer.cancel();
+			if (frequency > 0) {
+				profileHandler(boost::system::error_code{});
+			}
+		});
+	}
+};
+
+ActorLineageProfilerT::ActorLineageProfilerT() : impl(new ProfilerImpl()) {
 	collection->collector()->addGetter(WaitState::Network,
 	                                   std::bind(&ActorLineageSet::copy, std::ref(g_network->getActorLineageSet())));
 	collection->collector()->addGetter(
@@ -243,50 +282,15 @@ ActorLineageProfilerT::ActorLineageProfilerT() {
 }
 
 ActorLineageProfilerT::~ActorLineageProfilerT() {
-	stop();
-}
-
-void ActorLineageProfilerT::stop() {
-	setFrequency(0);
+	delete impl;
 }
 
 void ActorLineageProfilerT::setFrequency(unsigned frequency) {
-	unsigned oldFrequency = this->frequency;
-	bool change = this->frequency != frequency;
-	this->frequency = frequency;
-
-	if (change) {
-		// Profiler thread will automatically switch to new frequency after
-		// being triggered by the the condition variable. Only need to start a
-		// new profiler thread if the old one has been stopped due to the
-		// profiler thread returning (frequency set to 0).
-		if (oldFrequency == 0 && frequency != 0) {
-			std::thread(&ActorLineageProfilerT::profile, this).detach();
-		}
-		cond.notify_all();
-	}
+	impl->setFrequency(frequency);
 }
 
-void ActorLineageProfilerT::profile() {
-	static std::atomic_int profileThreadCount = 0;
-	ASSERT(++profileThreadCount == 1);
-
-	for (;;) {
-		collection->refresh();
-		if (frequency == 0) {
-			profileThreadCount--;
-			return;
-		}
-		{
-			std::unique_lock<std::mutex> lock{ mutex };
-			cond.wait_for(lock, std::chrono::microseconds(1000000 / frequency));
-			// cond.wait_until(lock, lastSample + std::chrono::milliseconds)
-		}
-		if (frequency == 0) {
-			profileThreadCount--;
-			return;
-		}
-	}
+boost::asio::io_context& ActorLineageProfilerT::context() {
+	return impl->context;
 }
 
 SampleIngestor::~SampleIngestor() {}
