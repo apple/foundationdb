@@ -229,6 +229,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			                                       Key(),
 			                                       true,
 			                                       true,
+												   false,
 			                                       beginVersion)));
 			TraceEvent("IBackupRestoreSuccess");
 		}
