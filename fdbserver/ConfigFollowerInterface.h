@@ -78,19 +78,32 @@ struct ConfigFollowerGetFullDatabaseRequest {
 	}
 };
 
+struct VersionedMutationRef {
+	Version version;
+	MutationRef mutation;
+
+	VersionedMutationRef()=default;
+	explicit VersionedMutationRef(Arena &arena, Version version, MutationRef mutation) : version(version), mutation(arena, mutation) {}
+
+	template<class Ar>
+	void serialize(Ar &ar) {
+		serializer(ar, version, mutation);
+	}
+};
+
 struct ConfigFollowerGetChangesReply {
 	static constexpr FileIdentifier file_identifier = 234859;
 	Version mostRecentVersion;
-	Standalone<VectorRef<MutationRef>> mutations;
+	Standalone<VectorRef<VersionedMutationRef>> versionedMutations;
 
 	ConfigFollowerGetChangesReply() : mostRecentVersion(-1) {}
 	explicit ConfigFollowerGetChangesReply(Version mostRecentVersion,
-	                                       Standalone<VectorRef<MutationRef>> const& mutations)
-	  : mostRecentVersion(mostRecentVersion), mutations(mutations) {}
+	                                       Standalone<VectorRef<VersionedMutationRef>> const& versionedMutations)
+	  : mostRecentVersion(mostRecentVersion), versionedMutations(versionedMutations) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, mostRecentVersion, mutations);
+		serializer(ar, mostRecentVersion, versionedMutations);
 	}
 };
 

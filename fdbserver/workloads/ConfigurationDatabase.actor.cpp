@@ -20,6 +20,8 @@
 
 #include "fdbclient/IConfigTransaction.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/ConfigFollowerInterface.h"
+#include "fdbserver/IConfigBroadcaster.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
@@ -52,7 +54,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> start(ConfigurationDatabaseWorkload* self, Database cx) {
+	ACTOR static Future<Void> runClient(Database cx) {
 		state Key key = LiteralStringRef("key");
 		state Key value = LiteralStringRef("value");
 		Optional<Value> currentValue = wait(get(cx, key));
@@ -62,6 +64,41 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 			Optional<Value> currentValue = wait(get(cx, key));
 			ASSERT(currentValue.get() == value);
 		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> runBroadcaster(Database cx, ConfigFollowerInterface cfi) {
+		state SimpleConfigBroadcaster broadcaster(cx->getConnectionFile()->getConnectionString());
+		wait(success(timeout(broadcaster.serve(cfi), 60.0)));
+		return Void();
+	}
+
+	ACTOR static Future<Version> getCurrentVersion(ConfigFollowerInterface cfi) {
+		ConfigFollowerGetVersionReply versionReply = wait(cfi.getVersion.getReply(ConfigFollowerGetVersionRequest{}));
+		return versionReply.version;
+	}
+
+	ACTOR static Future<Void> runConsumer(ConfigFollowerInterface cfi) {
+		state Version mostRecentVersion = wait(getCurrentVersion(cfi));
+		ConfigFollowerGetFullDatabaseReply fullDBReply = wait(cfi.getFullDatabase.getReply(ConfigFollowerGetFullDatabaseRequest{mostRecentVersion, {}}));
+		state std::map<Key, Value> database = fullDBReply.database;
+		state int runs = 0;
+		loop {
+			state ConfigFollowerGetChangesReply changesReply = wait(cfi.getChanges.getReply(ConfigFollowerGetChangesRequest{mostRecentVersion, {}}));
+			wait(delay(1.0));
+			if (++runs > 5) {
+				return Void();
+			}
+		}
+	}
+
+	ACTOR static Future<Void> start(ConfigurationDatabaseWorkload *self, Database cx) {
+		state std::vector<Future<Void>> futures;
+		state ConfigFollowerInterface cfi;
+		futures.push_back(runClient(cx));
+		futures.push_back(runBroadcaster(cx, cfi));
+		futures.push_back(runConsumer(cfi));
+		wait(waitForAll(futures));
 		return Void();
 	}
 
