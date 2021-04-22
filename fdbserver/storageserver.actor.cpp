@@ -522,7 +522,7 @@ public:
 	//   process of committing makeShardDurable)
 	//   == v              -> k is readable (from storage+versionedData) @ [storageVersion,v], and not being updated
 	//   when version increases
-	//   == latestVersion  -> k is readable (from stora	ge+versionedData) @ [storageVersion,version.get()], and thus
+	//   == latestVersion  -> k is readable (from storage+versionedData) @ [storageVersion,version.get()], and thus
 	//   stays available when version increases
 	CoalescedKeyRangeMap<Version> newestAvailableVersion;
 
@@ -875,7 +875,7 @@ public:
 		}
 		return fun(this, request);
 	}
-		    };
+};
 
 const StringRef StorageServer::CurrentRunningFetchKeys::emptyString = LiteralStringRef("");
 const KeyRangeRef StorageServer::CurrentRunningFetchKeys::emptyKeyRange =

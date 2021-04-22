@@ -94,7 +94,7 @@ class ScopedLineage {
 
 public:
 	ScopedLineage(V T::*member, V const& value) : member(member) {
-		auto val = currentLineage->modify(member);
+		auto& val = currentLineage->modify(member);
 		before = val;
 		val = value;
 	}
