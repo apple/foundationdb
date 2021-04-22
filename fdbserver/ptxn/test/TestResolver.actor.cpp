@@ -19,11 +19,11 @@
  */
 
 #include <algorithm>
+#include <cstdint>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <random>
-#include <stdint.h>
 #include <vector>
 
 #include "fdbclient/FDBTypes.h"
