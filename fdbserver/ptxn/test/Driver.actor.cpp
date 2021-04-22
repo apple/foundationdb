@@ -285,11 +285,6 @@ TEST_CASE("/fdbserver/ptxn/test/driver") {
 	TestDriverOptions options(params);
 	std::cout << options << std::endl;
 
-	/*
-	    for(auto iter = params.params.begin(); iter != params.params.end(); ++iter) {
-	        std::cout<< "key: " << iter->first << "\tvalue: " << iter->second <<std::endl;
-	    }*/
-
 	std::shared_ptr<TestDriverContext> context = initTestDriverContext(options);
 	std::vector<Future<Void>> actors;
 
