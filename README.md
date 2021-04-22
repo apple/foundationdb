@@ -48,6 +48,7 @@ Once you have your dependencies, you can run cmake and then build:
 1. `cd <PATH_TO_BUILD_DIRECTORY>`
 1. `cmake -G Ninja <PATH_TO_FOUNDATIONDB_DIRECTORY>`
 1. `ninja # If this crashes it probably ran out of memory. Try ninja -j1`
+1. [Optional] Run `ninja package_tests` to generate a package for correctness testing, which is performed by [Joshua testing framework](https://github.com/FoundationDB/fdb-joshua/). The package is a file at `<PATH_TO_BUILD_DIRECTORY>/packages/` directory, named as `correctness-<VERSION>.tar.gz`.
 
 ### Language Bindings
 
