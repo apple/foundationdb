@@ -43,7 +43,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 			try {
 				Optional<Value> value = wait(tr.get(key));
 				if (value.present()) {
-					result = BinaryReader::fromStringRef<int>(value.get(), IncludeVersion());
+					result = BinaryReader::fromStringRef<int>(value.get(), Unversioned());
 				}
 				return result;
 			} catch (Error &e) {
@@ -59,10 +59,10 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 				state int currentValue = 0;
 				Optional<Value> value = wait(tr.get(self->key));
 				if (value.present()) {
-					currentValue = BinaryReader::fromStringRef<int>(value.get(), IncludeVersion());
+					currentValue = BinaryReader::fromStringRef<int>(value.get(), Unversioned());
 				}
 				++currentValue;
-				tr.set(self->key, BinaryWriter::toValue(currentValue, IncludeVersion()));
+				tr.set(self->key, BinaryWriter::toValue(currentValue, Unversioned()));
 				wait(tr.commit());
 				return Void();
 			} catch (Error &e) {
@@ -113,7 +113,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 				}
 			}
 			if (database.count(self->key)) {
-				currentValue = BinaryReader::fromStringRef<int>(database[self->key], IncludeVersion());
+				currentValue = BinaryReader::fromStringRef<int>(database[self->key], Unversioned());
 			}
 			if (expectedTotal.isReady() && currentValue >= expectedTotal.get()) {
 				return Void();
@@ -148,16 +148,22 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 
 public:
 	ConfigurationDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		numIncrements = getOption(options, "numIncrements"_sr, 1);
+		numIncrements = getOption(options, "numIncrements"_sr, 100);
 		numClients = getOption(options, "numClients"_sr, 1);
-		numBroadcasters = getOption(options, "numBroadcasters"_sr, 1);
-		numConsumersPerBroadcaster = getOption(options, "numConsumersPerBroadcaster"_sr, 1);
+		numBroadcasters = getOption(options, "numBroadcasters"_sr, 2);
+		numConsumersPerBroadcaster = getOption(options, "numConsumersPerBroadcaster"_sr, 2);
 	}
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override { return clientId ? Void() : start(this, cx); }
-	Future<bool> check(Database const& cx) override { return true; }
+	Future<bool> check(Database const& cx) override {
+		return clientId ? true : (expectedTotal.getFuture().get() >= numClients * numIncrements);
+	}
 	std::string description() const override { return "ConfigurationDatabase"; }
-	void getMetrics(std::vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {
+		if (clientId == 0) {
+			m.push_back(PerfMetric("TotalWrites", expectedTotal.getFuture().get(), false));
+		}
+	}
 };
 
 WorkloadFactory<ConfigurationDatabaseWorkload> ConfigurationDatabaseWorkloadFactory("ConfigurationDatabase");

@@ -187,7 +187,7 @@ class SimpleConfigDatabaseNodeImpl {
 
 	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionInterface* cti) {
 		loop {
-			wait(traceQueuedMutations(self));
+			//wait(traceQueuedMutations(self));
 			choose {
 				when(ConfigTransactionGetVersionRequest req = waitNext(cti->getVersion.getFuture())) {
 					self->actors.add(getNewVersion(self, req));

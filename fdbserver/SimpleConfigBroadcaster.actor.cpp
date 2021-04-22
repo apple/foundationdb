@@ -64,7 +64,7 @@ class SimpleConfigBroadcasterImpl {
 		self->fullDatabase = reply.database;
 		self->actors.add(fetchUpdates(self));
 		loop {
-			self->traceQueuedMutations();
+			//self->traceQueuedMutations();
 			choose {
 				when(ConfigFollowerGetVersionRequest req = waitNext(publisher->getVersion.getFuture())) {
 					req.reply.send(self->mostRecentVersion);
