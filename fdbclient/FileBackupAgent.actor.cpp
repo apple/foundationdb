@@ -142,6 +142,7 @@ public:
 	KeyBackedProperty<Key> addPrefix() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 	KeyBackedProperty<Key> removePrefix() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 	KeyBackedProperty<bool> incrementalBackupOnly() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<bool> inconsistentSnapshotOnly() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 	// XXX: Remove restoreRange() once it is safe to remove. It has been changed to restoreRanges
 	KeyBackedProperty<KeyRange> restoreRange() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 	KeyBackedProperty<std::vector<KeyRange>> restoreRanges() {
@@ -4143,7 +4144,11 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			}
 		}
 
-		if (!CLIENT_KNOBS->RESTORE_IGNORE_LOG_FILES) {
+		tr->reset();
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		bool inconsistentSnapshotOnly = wait(restore.inconsistentSnapshotOnly().getD(tr, false, false));
+		if (!inconsistentSnapshotOnly) {
 			for (const LogFile& f : restorable.get().logs) {
 				files.push_back({ f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion });
 			}
@@ -4622,6 +4627,7 @@ public:
 	                                        Key removePrefix,
 	                                        bool lockDB,
 	                                        bool incrementalBackupOnly,
+	                                        bool inconsistentSnapshotOnly,
 	                                        Version beginVersion,
 	                                        UID uid) {
 		KeyRangeMap<int> restoreRangeSet;
@@ -4691,6 +4697,7 @@ public:
 		restore.stateEnum().set(tr, ERestoreState::QUEUED);
 		restore.restoreVersion().set(tr, restoreVersion);
 		restore.incrementalBackupOnly().set(tr, incrementalBackupOnly);
+		restore.inconsistentSnapshotOnly().set(tr, inconsistentSnapshotOnly);
 		restore.beginVersion().set(tr, beginVersion);
 		if (BUGGIFY && restoreRanges.size() == 1) {
 			restore.restoreRange().set(tr, restoreRanges[0]);
@@ -5264,7 +5271,9 @@ public:
 	//   removePrefix: for each key to be restored, remove this prefix first.
 	//   lockDB: if set lock the database with randomUid before performing restore;
 	//           otherwise, check database is locked with the randomUid
-	//   incrementalBackupOnly: only perform incremental backup
+	//   incrementalBackupOnly: only perform incremental restore, by only applying mutation logs
+	//   inconsistentSnapshotOnly: Ignore mutation log files during the restore to speedup the process.
+	//                             When set to true, gives an inconsistent snapshot, thus not recommended
 	//   beginVersion: restore's begin version
 	//   randomUid: the UID for lock the database
 	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent,
@@ -5280,6 +5289,7 @@ public:
 	                                     Key removePrefix,
 	                                     bool lockDB,
 	                                     bool incrementalBackupOnly,
+	                                     bool inconsistentSnapshotOnly,
 	                                     Version beginVersion,
 	                                     UID randomUid) {
 		// The restore command line tool won't allow ranges to be empty, but correctness workloads somehow might.
@@ -5336,6 +5346,7 @@ public:
 				                   removePrefix,
 				                   lockDB,
 				                   incrementalBackupOnly,
+				                   inconsistentSnapshotOnly,
 				                   beginVersion,
 				                   randomUid));
 				wait(tr->commit());
@@ -5491,6 +5502,7 @@ public:
 			                           removePrefix,
 			                           true,
 			                           false,
+			                           false,
 			                           invalidVersion,
 			                           randomUid));
 			return ver;
@@ -5552,6 +5564,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          Key removePrefix,
                                          bool lockDB,
                                          bool incrementalBackupOnly,
+                                         bool inconsistentSnapshotOnly,
                                          Version beginVersion) {
 	return FileBackupAgentImpl::restore(this,
 	                                    cx,
@@ -5566,6 +5579,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	                                    removePrefix,
 	                                    lockDB,
 	                                    incrementalBackupOnly,
+	                                    inconsistentSnapshotOnly,
 	                                    beginVersion,
 	                                    deterministicRandom()->randomUniqueID());
 }
