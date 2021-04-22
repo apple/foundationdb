@@ -31,6 +31,7 @@
 #include "fdbserver/ptxn/StorageServerInterface.h"
 #include "fdbserver/ptxn/TLogInterface.h"
 #include "fdbserver/ResolverInterface.h"
+#include "flow/UnitTest.h"
 
 namespace ptxn {
 
@@ -49,6 +50,39 @@ struct CommitRecord {
 	CommitValidationRecord validation;
 
 	CommitRecord(const Version& version, const TeamID& teamID, std::vector<MutationRef>&& mutationRef);
+};
+
+// Driver options for starting mock environment.
+struct TestDriverOptions {
+	static const int DEFAULT_NUM_COMMITS = 3;
+	static const int DEFAULT_NUM_TEAMS = 10;
+	static const int DEFAULT_NUM_PROXIES = 1;
+	static const int DEFAULT_NUM_TLOGS = 3;
+	static const int DEFAULT_NUM_STORAGE_SERVERS = 3;
+	static const int DEFAULT_NUM_RESOLVERS = 2;
+	static const MessageTransferModel DEFAULT_MESSAGE_TRANSFER_MODEL = MessageTransferModel::TLogActivelyPush;
+
+	int numCommits;
+	int numTeams;
+	int numProxies;
+	int numTLogs;
+	int numStorageServers;
+	int numResolvers;
+	MessageTransferModel transferModel = MessageTransferModel::TLogActivelyPush;
+
+	explicit TestDriverOptions(const UnitTestParameters& params) {
+		numCommits = params.getInt("numCommits").orDefault(DEFAULT_NUM_COMMITS);
+		numTeams = params.getInt("numTeams").orDefault(DEFAULT_NUM_TEAMS);
+		numProxies = params.getInt("numProxies").orDefault(DEFAULT_NUM_PROXIES);
+		numTLogs = params.getInt("numTLogs").orDefault(DEFAULT_NUM_TLOGS);
+		numStorageServers = params.getInt("numStorageServers").orDefault(DEFAULT_NUM_STORAGE_SERVERS);
+		numResolvers = params.getInt("numResolvers").orDefault(DEFAULT_NUM_RESOLVERS);
+		transferModel = static_cast<MessageTransferModel>(
+		    params.getInt("messageTransferModel").orDefault(static_cast<int>(DEFAULT_MESSAGE_TRANSFER_MODEL)),
+		    static_cast<int>(MessageTransferModel::TLogActivelyPush));
+	}
+
+	friend std::ostream& operator<<(std::ostream&, const TestDriverOptions&);
 };
 
 struct TestDriverContext {
@@ -84,6 +118,12 @@ struct TestDriverContext {
 	Arena mutationsArena;
 	std::vector<CommitRecord> commitRecord;
 };
+
+// Returns an initialized TestDriverContext with default values specified in "options".
+std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions& options);
+
+// Starts all fake resolvers specified in the pTestDriverContext.
+void startFakeResolver(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext);
 
 // Print out *ALL* commits that has triggered.
 void printCommitRecord(const std::vector<CommitRecord>& records);

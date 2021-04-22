@@ -31,41 +31,12 @@
 #include "fdbserver/ptxn/test/FakeResolver.actor.h"
 #include "fdbserver/ptxn/test/FakeStorageServer.actor.h"
 #include "fdbserver/ptxn/test/FakeTLog.actor.h"
-#include "flow/UnitTest.h"
+#include "fdbserver/ResolverInterface.h"
+#include "flow/IRandom.h"
+#include "flow/Trace.h"
+#include "flow/genericactors.actor.h"
 
 namespace ptxn {
-
-struct TestDriverOptions {
-	static const int DEFAULT_NUM_COMMITS = 3;
-	static const int DEFAULT_NUM_TEAMS = 10;
-	static const int DEFAULT_NUM_PROXIES = 1;
-	static const int DEFAULT_NUM_TLOGS = 3;
-	static const int DEFAULT_NUM_STORAGE_SERVERS = 3;
-	static const int DEFAULT_NUM_RESOLVERS = 2;
-	static const MessageTransferModel DEFAULT_MESSAGE_TRANSFER_MODEL = MessageTransferModel::TLogActivelyPush;
-
-	int numCommits;
-	int numTeams;
-	int numProxies;
-	int numTLogs;
-	int numStorageServers;
-	int numResolvers;
-	MessageTransferModel transferModel = MessageTransferModel::TLogActivelyPush;
-
-	explicit TestDriverOptions(const UnitTestParameters& params) {
-		numCommits = params.getInt("numCommits").orDefault(DEFAULT_NUM_COMMITS);
-		numTeams = params.getInt("numTeams").orDefault(DEFAULT_NUM_TEAMS);
-		numProxies = params.getInt("numProxies").orDefault(DEFAULT_NUM_PROXIES);
-		numTLogs = params.getInt("numTLogs").orDefault(DEFAULT_NUM_TLOGS);
-		numStorageServers = params.getInt("numStorageServers").orDefault(DEFAULT_NUM_STORAGE_SERVERS);
-		numResolvers = params.getInt("numResolvers").orDefault(DEFAULT_NUM_RESOLVERS);
-		transferModel = static_cast<MessageTransferModel>(
-		    params.getInt("messageTransferModel").orDefault(static_cast<int>(DEFAULT_MESSAGE_TRANSFER_MODEL)),
-		    static_cast<int>(MessageTransferModel::TLogActivelyPush));
-	}
-
-	friend std::ostream& operator<<(std::ostream&, const TestDriverOptions&);
-};
 
 std::ostream& operator<<(std::ostream& stream, const TestDriverOptions& option) {
 	stream << "Values for ptxn/Driver.actor.cpp:DriverTestOptions:" << std::endl;
@@ -171,17 +142,17 @@ void startFakeProxy(std::vector<Future<Void>>& actors, std::shared_ptr<TestDrive
 // TODO: change to "resolver" after we have fake ServerDBInfo object.
 void startFakeResolver(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext) {
 	for (int i = 0; i < pTestDriverContext->numResolvers; ++i) {
-		ResolverInterface recruited;
+		std::shared_ptr<ResolverInterface> recruited(new ResolverInterface);
 		// recruited.locality = locality;
-		recruited.initEndpoints();
+		recruited->initEndpoints();
 
 		InitializeResolverRequest req;
 		req.recoveryCount = 1;
 		req.commitProxyCount = pTestDriverContext->numProxies;
 		req.resolverCount = pTestDriverContext->numResolvers;
 
-		Future<Void> core = ::resolverCore(recruited, req);
-		actors.emplace_back(core);
+		actors.emplace_back(::resolverCore(*recruited, req));
+		pTestDriverContext->resolverInterfaces.push_back(recruited);
 	}
 }
 
@@ -297,19 +268,3 @@ TEST_CASE("/fdbserver/ptxn/test/driver") {
 	return Void();
 }
 
-TEST_CASE("fdbserver/ptxn/test/resolver") {
-	using namespace ptxn;
-
-	TestDriverOptions options(params);
-	std::cout << options << std::endl;
-
-	std::shared_ptr<TestDriverContext> context = initTestDriverContext(options);
-	std::vector<Future<Void>> actors;
-
-	startFakeResolver(actors, context);
-	std::cout << "Started " << context->numResolvers << " Resolvers\n";
-
-	wait(delay(10.0)); // Exits after 10s
-
-	return Void();
-}
