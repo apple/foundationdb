@@ -295,6 +295,7 @@ public:
 	                        Key removePrefix = Key(),
 	                        bool lockDB = true,
 	                        bool incrementalBackupOnly = false,
+							bool inconsistentSnapshotOnly = false,
 	                        Version beginVersion = -1);
 	Future<Version> restore(Database cx,
 	                        Optional<Database> cxOrig,
@@ -308,6 +309,7 @@ public:
 	                        Key removePrefix = Key(),
 	                        bool lockDB = true,
 	                        bool incrementalBackupOnly = false,
+							bool inconsistentSnapshotOnly = false,
 	                        Version beginVersion = -1) {
 		Standalone<VectorRef<KeyRangeRef>> rangeRef;
 		rangeRef.push_back_deep(rangeRef.arena(), range);
@@ -323,6 +325,7 @@ public:
 		               removePrefix,
 		               lockDB,
 		               incrementalBackupOnly,
+					   inconsistentSnapshotOnly,
 		               beginVersion);
 	}
 	Future<Version> atomicRestore(Database cx,

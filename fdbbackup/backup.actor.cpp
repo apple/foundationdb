@@ -146,6 +146,7 @@ enum {
 	OPT_RESTORE_CLUSTERFILE_DEST,
 	OPT_RESTORE_CLUSTERFILE_ORIG,
 	OPT_RESTORE_BEGIN_VERSION,
+	OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY,
 
 	// Shared constants
 	OPT_CLUSTERFILE,
@@ -694,6 +695,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
 	{ OPT_RESTORE_BEGIN_VERSION, "--begin_version", SO_REQ_SEP },
+	{ OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY, "--inconsistent_snapshot_only", SO_NONE },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -2256,7 +2258,8 @@ ACTOR Future<Void> runRestore(Database db,
                               bool waitForDone,
                               std::string addPrefix,
                               std::string removePrefix,
-                              bool incrementalBackupOnly) {
+                              bool incrementalBackupOnly,
+                              bool inconsistentSnapshotOnly) {
 	if (ranges.empty()) {
 		ranges.push_back_deep(ranges.arena(), normalKeys);
 	}
@@ -2328,6 +2331,7 @@ ACTOR Future<Void> runRestore(Database db,
 			                                                   KeyRef(removePrefix),
 			                                                   true,
 			                                                   incrementalBackupOnly,
+			                                                   inconsistentSnapshotOnly,
 			                                                   beginVersion));
 
 			if (waitForDone && verbose) {
@@ -3265,6 +3269,7 @@ int main(int argc, char* argv[]) {
 		std::string restoreClusterFileOrig;
 		bool jsonOutput = false;
 		bool deleteData = false;
+		bool inconsistentSnapshotOnly = false;
 
 		BackupModifyOptions modifyOptions;
 
@@ -3554,6 +3559,10 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_ERROR;
 				}
 				restoreVersion = ver;
+				break;
+			}
+			case OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY: {
+				inconsistentSnapshotOnly = true;
 				break;
 			}
 #ifdef _WIN32
@@ -4023,7 +4032,8 @@ int main(int argc, char* argv[]) {
 				                         waitForDone,
 				                         addPrefix,
 				                         removePrefix,
-				                         incrementalBackupOnly));
+				                         incrementalBackupOnly,
+				                         inconsistentSnapshotOnly));
 				break;
 			case RestoreType::WAIT:
 				f = stopAfter(success(ba.waitRestore(db, KeyRef(tagName), true)));

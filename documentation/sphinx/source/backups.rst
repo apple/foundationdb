@@ -490,6 +490,9 @@ The ``start`` command will start a new restore on the specified (or default) tag
 ``--orig_cluster_file <CONNFILE>``
   The cluster file for the original database from which the backup was created.  The original database is only needed to convert a --timestamp argument to a database version.
 
+``--inconsistent_snapshot_only``
+  Ignore log files to get inconsistent snapshot only.
+
 .. program:: fdbrestore abort
 
 ``abort``
