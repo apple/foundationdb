@@ -167,7 +167,6 @@ public:
 	double BACKUP_STATUS_DELAY;
 	double BACKUP_STATUS_JITTER;
 	double MIN_CLEANUP_SECONDS;
-	bool RESTORE_IGNORE_LOG_FILES;   // Default is false. When set to true, the log files will be ignored during the restore, which can produce inconsistent restored data.
 
 	// Configuration
 	int32_t DEFAULT_AUTO_COMMIT_PROXIES;
