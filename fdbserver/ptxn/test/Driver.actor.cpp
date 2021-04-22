@@ -35,41 +35,8 @@
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/genericactors.actor.h"
-#include "flow/UnitTest.h"
 
 namespace ptxn {
-
-struct TestDriverOptions {
-	static const int DEFAULT_NUM_COMMITS = 3;
-	static const int DEFAULT_NUM_TEAMS = 10;
-	static const int DEFAULT_NUM_PROXIES = 1;
-	static const int DEFAULT_NUM_TLOGS = 3;
-	static const int DEFAULT_NUM_STORAGE_SERVERS = 3;
-	static const int DEFAULT_NUM_RESOLVERS = 2;
-	static const MessageTransferModel DEFAULT_MESSAGE_TRANSFER_MODEL = MessageTransferModel::TLogActivelyPush;
-
-	int numCommits;
-	int numTeams;
-	int numProxies;
-	int numTLogs;
-	int numStorageServers;
-	int numResolvers;
-	MessageTransferModel transferModel = MessageTransferModel::TLogActivelyPush;
-
-	explicit TestDriverOptions(const UnitTestParameters& params) {
-		numCommits = params.getInt("numCommits").orDefault(DEFAULT_NUM_COMMITS);
-		numTeams = params.getInt("numTeams").orDefault(DEFAULT_NUM_TEAMS);
-		numProxies = params.getInt("numProxies").orDefault(DEFAULT_NUM_PROXIES);
-		numTLogs = params.getInt("numTLogs").orDefault(DEFAULT_NUM_TLOGS);
-		numStorageServers = params.getInt("numStorageServers").orDefault(DEFAULT_NUM_STORAGE_SERVERS);
-		numResolvers = params.getInt("numResolvers").orDefault(DEFAULT_NUM_RESOLVERS);
-		transferModel = static_cast<MessageTransferModel>(
-		    params.getInt("messageTransferModel").orDefault(static_cast<int>(DEFAULT_MESSAGE_TRANSFER_MODEL)),
-		    static_cast<int>(MessageTransferModel::TLogActivelyPush));
-	}
-
-	friend std::ostream& operator<<(std::ostream&, const TestDriverOptions&);
-};
 
 std::ostream& operator<<(std::ostream& stream, const TestDriverOptions& option) {
 	stream << "Values for ptxn/Driver.actor.cpp:DriverTestOptions:" << std::endl;

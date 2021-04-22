@@ -33,7 +33,6 @@
 #include "fdbserver/ResolverInterface.h"
 #include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"
-#include "flow/UnitTest.h"
 
 namespace {
 
@@ -59,15 +58,15 @@ std::vector<ResolveTransactionBatchRequest> makeTxnBatch(Version prevVersion, Ve
 } // anonymous namespace
 
 TEST_CASE("fdbserver/ptxn/test/resolver") {
+	state const Version lastEpochEnd = 100;
+	state const int totalRequests = 10;
+	state std::vector<Future<Void>> actors;
+	state std::shared_ptr<ptxn::TestDriverContext> context;
+
 	ptxn::TestDriverOptions options(params);
 	std::cout << options << std::endl;
 
-	state const Version lastEpochEnd = 100;
-	state const int totalRequests = 10;
->>>>>>> Test batches to a resolver
-	state std::vector<Future<Void>> actors;
-	state std::shared_ptr<ptxn::TestDriverContext> context = ptxn::initTestDriverContext();
-
+	context = ptxn::initTestDriverContext(options);
 	startFakeResolver(actors, context);
 	std::cout << "Started " << context->numResolvers << " Resolvers\n";
 
