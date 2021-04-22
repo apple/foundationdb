@@ -560,6 +560,10 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 	wait(LeaderRegisterCollection::init(&regs));
 
 	loop choose {
+		when(CheckClusterNameMutability req = waitNext(interf.checkClusterNameMutability.getFuture())) {
+			CheckClusterNameMutabilityReply rep(SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT ? true : false);
+			req.reply.send(rep);
+		}
 		when(OpenDatabaseCoordRequest req = waitNext(interf.openDatabase.getFuture())) {
 			Optional<LeaderInfo> forward = regs.getForward(req.clusterKey);
 			if (forward.present()) {

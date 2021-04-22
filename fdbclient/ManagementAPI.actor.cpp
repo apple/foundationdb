@@ -1105,6 +1105,7 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 
 	vector<Future<Optional<LeaderInfo>>> leaderServers;
 	ClientCoordinators coord(Reference<ClusterConnectionFile>(new ClusterConnectionFile(conn)));
+
 	leaderServers.reserve(coord.clientLeaderServers.size());
 	for (int i = 0; i < coord.clientLeaderServers.size(); i++)
 		leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
@@ -1188,14 +1189,20 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 			TEST(old.clusterKeyName() != conn.clusterKeyName()); // Quorum change with new name
 			TEST(old.clusterKeyName() == conn.clusterKeyName()); // Quorum change with unchanged name
 
-			vector<Future<Optional<LeaderInfo>>> leaderServers;
-			ClientCoordinators coord(Reference<ClusterConnectionFile>(new ClusterConnectionFile(conn)));
+			state vector<Future<Optional<LeaderInfo>>> leaderServers;
+			state ClientCoordinators coord(Reference<ClusterConnectionFile>(new ClusterConnectionFile(conn)));
+			if (! change->getDesiredClusterKeyName().empty()) {
+				CheckClusterNameMutabilityReply mutabilityReply = wait(coord.clientLeaderServers[0].checkClusterNameMutability.getReply(
+					CheckClusterNameMutability()));
+				if (! mutabilityReply.value) {
+					return CoordinatorsResult::BAD_DATABASE_STATE;
+				}
+			}
 			leaderServers.reserve(coord.clientLeaderServers.size());
 			for (int i = 0; i < coord.clientLeaderServers.size(); i++)
 				leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
 				                                           GetLeaderRequest(coord.clusterKey, UID()),
 				                                           TaskPriority::CoordinationReply));
-
 			choose {
 				when(wait(waitForAll(leaderServers))) {}
 				when(wait(delay(5.0))) { return CoordinatorsResult::COORDINATOR_UNREACHABLE; }
