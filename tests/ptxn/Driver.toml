@@ -7,3 +7,14 @@ startDelay = 0
     testName = 'UnitTests'
     maxTestCases = 1
     testsMatching = '/fdbserver/ptxn/test/driver'
+
+    numCommits = 20
+    numTeams = 20
+    numProxies = 1
+    numTLogs = 4
+    numStorageServers = 4
+    numResolvers = 10
+    # 0 stands for TLog --push--> StorageServer
+    # 1 stands for StorageServer --pull--> TLog
+    messageTransferModel = 0
+
