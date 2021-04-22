@@ -5342,8 +5342,8 @@ public:
 				                   removePrefix,
 				                   lockDB,
 				                   incrementalBackupOnly,
-				                   beginVersion,
 				                   inconsistentSnapshotOnly,
+				                   beginVersion,
 				                   randomUid));
 				wait(tr->commit());
 				break;
