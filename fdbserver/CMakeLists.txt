@@ -101,15 +101,19 @@ set(FDBSERVER_SRCS
   template_fdb.h
 
   ptxn/Config.h
+  ptxn/MessageTypes.cpp
+  ptxn/MessageTypes.h
   ptxn/ProxyTLogPushMessageSerializer.cpp
   ptxn/ProxyTLogPushMessageSerializer.h
+  ptxn/Serializer.h
   ptxn/StorageServerInterface.cpp
   ptxn/StorageServerInterface.h
   ptxn/TLogInterface.cpp
   ptxn/TLogInterface.h
-  ptxn/ProxyTLogPushMessageSerializer.cpp
-  ptxn/ProxyTLogPushMessageSerializer.h
-  ptxn/Serializer.h
+  ptxn/TLogPeekCursor.actor.cpp
+  ptxn/TLogPeekCursor.h
+  ptxn/TLogStorageServerPeekMessageSerializer.cpp
+  ptxn/TLogStorageServerPeekMessageSerializer.h
 
   ptxn/test/TestSerialization.cpp
   ptxn/test/Driver.actor.cpp

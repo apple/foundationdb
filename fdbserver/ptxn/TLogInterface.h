@@ -90,8 +90,59 @@ struct TLogCommitRequest {
 	}
 };
 
+struct TLogPeekReply {
+	static constexpr FileIdentifier file_identifier = 292724;
+
+	Optional<UID> debugID;
+
+	// Arena containing the serialized mutation data, see TLogStorageServerPeekSerializer
+	Arena arena;
+	// StringRef referring the serialized mutation data, see TLogStorageServerPeekSerializer
+	StringRef data;
+
+	template <typename Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, debugID, arena, data);
+	}
+};
+
+struct TLogPeekRequest {
+	static constexpr FileIdentifier file_identifier = 356070;
+
+	Optional<UID> debugID;
+
+	// We are interested in versions between [beginVersion, endVersion)
+	// Following the C++ custom, the endVersion is *EXCLUDED*.
+	Version beginVersion;
+	Version endVersion;
+	TeamID teamID;
+
+	ReplyPromise<TLogPeekReply> reply;
+
+	template <typename Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, debugID, beginVersion, endVersion, teamID, reply);
+	}
+};
+
+struct TLogPopRequest {
+	static constexpr FileIdentifier file_identifier = 288041;
+
+	Version version;
+	TeamID teamID;
+
+	ReplyPromise<Void> reply;
+
+	template <typename Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, teamID, reply);
+	}
+};
+
 struct TLogInterfaceBase {
 	RequestStream<TLogCommitRequest> commit;
+	RequestStream<TLogPeekRequest> peek;
+	RequestStream<TLogPopRequest> pop;
 
 	const UID id;
 

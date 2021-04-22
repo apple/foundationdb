@@ -38,7 +38,10 @@ namespace {
 
 // Makes a batch of "n" requests starting at "beginVersion", where each batch
 // increases by "increment" amount.
-std::vector<ResolveTransactionBatchRequest> makeTxnBatch(Version prevVersion, Version beginVersion, int n, int64_t increment) {
+std::vector<ResolveTransactionBatchRequest> makeTxnBatch(Version prevVersion,
+                                                         Version beginVersion,
+                                                         int n,
+                                                         int64_t increment) {
 	std::vector<ResolveTransactionBatchRequest> batch(n);
 
 	Version current = beginVersion;
@@ -61,12 +64,12 @@ TEST_CASE("fdbserver/ptxn/test/resolver") {
 	state const Version lastEpochEnd = 100;
 	state const int totalRequests = 10;
 	state std::vector<Future<Void>> actors;
-	state std::shared_ptr<ptxn::TestDriverContext> context;
+	state std::shared_ptr<ptxn::test::TestDriverContext> context;
 
-	ptxn::TestDriverOptions options(params);
+	ptxn::test::TestDriverOptions options(params);
 	std::cout << options << std::endl;
 
-	context = ptxn::initTestDriverContext(options);
+	context = ptxn::test::initTestDriverContext(options);
 	startFakeResolver(actors, context);
 	std::cout << "Started " << context->numResolvers << " Resolvers\n";
 
@@ -93,7 +96,8 @@ TEST_CASE("fdbserver/ptxn/test/resolver") {
 	state Version beginVersion = 200;
 	state int64_t increment = 7;
 
-	std::vector<ResolveTransactionBatchRequest> batch = makeTxnBatch(lastEpochEnd, beginVersion, totalRequests, increment);
+	std::vector<ResolveTransactionBatchRequest> batch =
+	    makeTxnBatch(lastEpochEnd, beginVersion, totalRequests, increment);
 	std::mt19937 g(deterministicRandom()->randomUInt32());
 	std::shuffle(batch.begin(), batch.end(), g);
 

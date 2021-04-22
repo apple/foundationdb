@@ -32,7 +32,7 @@
 
 #include "flow/actorcompiler.h"
 
-namespace ptxn {
+namespace ptxn::test {
 
 const double CHECK_PERSIST_INTERVAL = 0.1;
 const int MAX_CHECK_TIMES = 10;
@@ -94,7 +94,9 @@ ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext
 	// Wait for all commits being completed persisted/timeout
 	state int numChecks = 0;
 	loop {
-		if (isAllRecordsValidated(pTestDriverContext->commitRecord)) { break; }
+		if (isAllRecordsValidated(pTestDriverContext->commitRecord)) {
+			break;
+		}
 		if (++numChecks >= MAX_CHECK_TIMES) {
 			throw internal_error_msg("Timeout waiting persistence");
 		}
@@ -104,4 +106,4 @@ ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext
 	return Void();
 }
 
-} // namespace ptxn
+} // namespace ptxn::test

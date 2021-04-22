@@ -18,3 +18,22 @@ startDelay = 0
     # 1 stands for StorageServer --pull--> TLog
     messageTransferModel = 0
 
+[[test]]
+testTitle = 'Test FakeTLog serialize data to FakeStorageServer'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/tlogPeek/readFromSerialization'
+
+[[test]]
+testTitle = 'Test server team cursor'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/ServerTeamPeekCursor'

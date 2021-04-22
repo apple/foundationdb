@@ -20,14 +20,17 @@
 
 #include "fdbserver/ptxn/test/FakeTLog.actor.h"
 
+#include <iomanip>
+#include <iostream>
 #include <vector>
 
 #include "fdbserver/ptxn/ProxyTLogPushMessageSerializer.h"
+#include "fdbserver/ptxn/TLogStorageServerPeekMessageSerializer.h"
 #include "fdbserver/ptxn/StorageServerInterface.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
-namespace ptxn {
+namespace ptxn::test {
 
 void processTLogCommitRequest(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
                               const TLogCommitRequest& commitRequest,
@@ -47,19 +50,91 @@ void processTLogCommitRequest(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
 	                        [](CommitValidationRecord& record) { record.tLogValidated = true; });
 
 	// "Persist" the data into memory
-	for (auto& seqMutation: seqMutations) {
+	for (auto& seqMutation : seqMutations) {
 		const auto& subsequence = seqMutation.subsequence;
 		const auto& mutation = seqMutation.mutation;
-		pFakeTLogContext->mutations.push_back(pFakeTLogContext->persistenceArena,
-		                                      { commitRequest.teamID,
-		                                        { commitRequest.version, subsequence },
-		                                        MutationRef(pFakeTLogContext->persistenceArena,
-		                                                    static_cast<MutationRef::Type>(mutation.type),
-		                                                    mutation.param1,
-		                                                    mutation.param2) });
+		pFakeTLogContext->mutations[commitRequest.teamID].push_back(
+		    pFakeTLogContext->persistenceArena,
+		    { commitRequest.version,
+		      subsequence,
+		      MutationRef(pFakeTLogContext->persistenceArena,
+		                  static_cast<MutationRef::Type>(mutation.type),
+		                  mutation.param1,
+		                  mutation.param2) });
 	}
 
 	commitRequest.reply.send(TLogCommitReply{ 0 });
+}
+
+Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogContext> pFakeTLogContext) {
+	const TeamID teamID = request.teamID;
+	if (pFakeTLogContext->mutations.find(request.teamID) == pFakeTLogContext->mutations.end()) {
+		std::cout << std::endl << "Team ID " << request.teamID.toString() << " not found." << std::endl;
+		request.reply.sendError(teamid_not_found());
+		return Void();
+	}
+
+	const VectorRef<VersionSubsequenceMutation>& mutations = pFakeTLogContext->mutations[teamID];
+
+	std::cout << std::endl;
+	std::cout << "Requested peek: " << std::endl;
+	std::cout << std::setw(30)
+	          << "Debug ID: " << (request.debugID.present() ? request.debugID.get().toString() : "Not present")
+	          << std::endl;
+	std::cout << std::setw(30) << "Team ID: " << request.teamID.toString() << std::endl;
+	std::cout << std::setw(30) << "Version range: [" << request.beginVersion << ", " << request.endVersion << ")"
+	          << std::endl;
+	std::cout << std::endl;
+
+	Version lastVersion = invalidVersion;
+	bool haveUnclosedVersionSection = false;
+	TLogStorageServerMessageSerializer serializer(teamID);
+
+	for (const auto& mutation : mutations) {
+		const Version currentVersion = mutation.version;
+
+		// Have not reached the expected version
+		if (currentVersion < request.beginVersion) {
+			continue;
+		}
+
+		// The serialized data size is too big, cutoff here
+		if (serializer.getTotalBytes() >= pFakeTLogContext->maxBytesPerPeek && lastVersion != currentVersion) {
+			break;
+		}
+
+		// Finished the range
+		if (request.endVersion != invalidVersion && currentVersion >= request.endVersion) {
+			break;
+		}
+
+		if (currentVersion != lastVersion) {
+			if (haveUnclosedVersionSection) {
+				serializer.completeVersionWriting();
+				haveUnclosedVersionSection = false;
+			}
+			serializer.startVersionWriting(currentVersion);
+			haveUnclosedVersionSection = true;
+		}
+
+		const Subsequence subsequence = mutation.subsequence;
+		const MutationRef mutationRef = mutation.mutation;
+		serializer.writeSubsequenceMutationRef(subsequence, mutationRef);
+
+		lastVersion = currentVersion;
+	}
+
+	if (haveUnclosedVersionSection) {
+		serializer.completeVersionWriting();
+	}
+
+	serializer.completeMessageWriting();
+
+	Standalone<StringRef> serialized = serializer.getSerialized();
+	TLogPeekReply reply{ request.debugID, serialized.arena(), serialized };
+	request.reply.send(reply);
+
+	return Void();
 }
 
 ACTOR Future<Void> fakeTLog_ActivelyPush(std::shared_ptr<FakeTLogContext> pFakeTLogContext) {
@@ -94,6 +169,9 @@ ACTOR Future<Void> fakeTLog_ActivelyPush(std::shared_ptr<FakeTLogContext> pFakeT
 			        pTestDriverContext->getStorageServerInterface(commitRequest.teamID));
 			state StorageServerPushReply reply = wait(pStorageServerInterface->pushRequests.getReply(request));
 		}
+		when(TLogPeekRequest peekRequest = waitNext(pTLogInterface->peek.getFuture())) {
+			fakeTLogPeek(peekRequest, pFakeTLogContext);
+		}
 	}
 }
 
@@ -110,6 +188,9 @@ ACTOR Future<Void> fakeTLog_PassivelyProvide(std::shared_ptr<FakeTLogContext> pF
 			state std::vector<SubsequenceMutationItem> seqMutations;
 			processTLogCommitRequest(pFakeTLogContext, commitRequest, header, seqMutations);
 		}
+		when(TLogPeekRequest peekRequest = waitNext(pTLogInterface->peek.getFuture())) {
+			fakeTLogPeek(peekRequest, pFakeTLogContext);
+		}
 	}
 }
 
@@ -124,4 +205,4 @@ Future<Void> getFakeTLogActor(const MessageTransferModel model, std::shared_ptr<
 	}
 }
 
-} // namespace ptxn
+} // namespace ptxn::test

@@ -24,7 +24,6 @@
 #elif !defined(FDBSERVER_PTXN_TEST_FAKERESOLVER_ACTOR_H)
 #define FDBSERVER_PTXN_TEST_FAKERESOLVER_ACTOR_H
 
-
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"

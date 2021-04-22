@@ -6,7 +6,17 @@ startDelay = 0
     [[test.workload]]
     testName = 'UnitTests'
     maxTestCases = 1
-    testsMatching = '/fdbserver/team/test/serialization'
+    testsMatching = '/fdbserver/ptxn/test/headeredSerializer'
+
+[[test]]
+testTitle = 'Test TwoLevelHeaderedItemsSerializer'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/twoLevelHeaderedSerializer'
 
 [[test]]
 testTitle = 'Test ProxyTLogPushMessageSerializer'
@@ -16,4 +26,44 @@ startDelay = 0
     [[test.workload]]
     testName = 'UnitTests'
     maxTestCases = 1
-    testsMatching = '/fdbserver/team/test/ProxyTLogPushMessageSerializer'
+    testsMatching = '/fdbserver/ptxn/test/ProxyTLogPushMessageSerializer'
+
+[[test]]
+testTitle = 'Test TLogStorageServerPeekMessageSerializer -- General'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/basic'
+
+[[test]]
+testTitle = 'Test TLogStorageServerPeekMessageSerializer -- Version without mutation'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/emptyVersion'
+
+[[test]]
+testTitle = 'Test TLogStorageServerPeekMessageSerializer -- Empty input'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/empty'
+
+[[test]]
+testTitle = 'Test TLogStorageServerPeekMessageSerializer -- Reset'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/reset'
