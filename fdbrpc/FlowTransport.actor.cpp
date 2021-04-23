@@ -1214,7 +1214,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 								    now() + FLOW_KNOBS->CONNECTION_ID_TIMEOUT;
 							}
 							compatible = false;
-							if (!protocolVersion.hasMultiVersionClient()) {
+							if (!protocolVersion.hasInexpensiveMultiVersionClient()) {
 								// Older versions expected us to hang up. It may work even if we don't hang up here, but
 								// it's safer to keep the old behavior.
 								peer->protocolVersion->set(protocolVersion);

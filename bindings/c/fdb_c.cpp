@@ -23,6 +23,7 @@
 #define FDB_INCLUDE_LEGACY_TYPES
 
 #include "fdbclient/MultiVersionTransaction.h"
+#include "fdbclient/MultiVersionAssignmentVars.h"
 #include "foundationdb/fdb_c.h"
 
 int g_api_version = 0;
@@ -372,7 +373,11 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_get_server_protocol(FDBDatabase* db
 		expected = ProtocolVersion(expected_version);
 	}
 
-	return (FDBFuture*)(DB(db)->getServerProtocol(expected).extractPtr());
+	return (
+	    FDBFuture*)(mapThreadFuture<ProtocolVersion,
+	                                uint64_t>(DB(db)->getServerProtocol(expected), [](ErrorOr<ProtocolVersion> result) {
+		                return result.map<uint64_t>([](ProtocolVersion pv) { return pv.versionWithFlags(); });
+	                }).extractPtr());
 }
 
 extern "C" DLLEXPORT void fdb_transaction_destroy(FDBTransaction* tr) {

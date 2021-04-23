@@ -1024,13 +1024,13 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		        singleKeyRange(LiteralStringRef("consistency_check_suspended"))
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeySpaceModule(
-		    SpecialKeySpace::MODULE::GLOBALCONFIG, SpecialKeySpace::IMPLTYPE::READWRITE,
-		    std::make_unique<GlobalConfigImpl>(
-		        SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG)));
+		    SpecialKeySpace::MODULE::GLOBALCONFIG,
+		    SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<GlobalConfigImpl>(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG)));
 		registerSpecialKeySpaceModule(
-		    SpecialKeySpace::MODULE::TRACING, SpecialKeySpace::IMPLTYPE::READWRITE,
-		    std::make_unique<TracingOptionsImpl>(
-		        SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::TRACING)));
+		    SpecialKeySpace::MODULE::TRACING,
+		    SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<TracingOptionsImpl>(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::TRACING)));
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::CONFIGURATION,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
@@ -4916,8 +4916,7 @@ ACTOR Future<Optional<ProtocolVersion>> getCoordinatorProtocolFromConnectPacket(
 	    FlowTransport::transport().getPeerProtocolAsyncVar(coordinatorAddress);
 
 	loop {
-		if (protocolVersion->get().present() &&
-		    (!expectedVersion.present() || expectedVersion.get() != protocolVersion->get().get())) {
+		if (protocolVersion->get().present() && protocolVersion->get() != expectedVersion) {
 			return protocolVersion->get();
 		}
 

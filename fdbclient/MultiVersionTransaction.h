@@ -440,6 +440,8 @@ public:
 	                     Reference<IDatabase> versionMonitorDb,
 	                     bool openConnectors = true);
 
+	~MultiVersionDatabase() override;
+
 	Reference<ITransaction> createTransaction() override;
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	double getMainThreadBusyness() override;
@@ -462,6 +464,8 @@ public:
 
 	// private:
 
+	struct LegacyVersionMonitor;
+
 	// A struct that manages the current connection state of the MultiVersionDatabase. This wraps the underlying
 	// IDatabase object that is currently interacting with the cluster.
 	struct DatabaseState : ThreadSafeReferenceCounted<DatabaseState> {
@@ -470,23 +474,32 @@ public:
 		// Replaces the active database connection with a new one. Must be called from the main thread.
 		void updateDatabase(Reference<IDatabase> newDb, Reference<ClientInfo> client);
 
-		// Called when a change to the protocol version of the cluster has been detected. Must be called from the main
-		// thread.
+		// Called when a change to the protocol version of the cluster has been detected.
+		// Must be called from the main thread
 		void protocolVersionChanged(ProtocolVersion protocolVersion);
 
 		// Adds a client (local or externally loaded) that can be used to connect to the cluster
 		void addClient(Reference<ClientInfo> client);
 
-		// Watch the cluster protocol version for changes and update the database state when it does
+		// Watch the cluster protocol version for changes and update the database state when it does.
+		// Must be called from the main thread
 		ThreadFuture<Void> monitorProtocolVersion();
+
+		// Starts version monitors for old client versions that don't support connect packet monitoring (<= 5.0).
+		// Must be called from the main thread
+		void startLegacyVersionMonitors();
+
+		// Cleans up state for the legacy version monitors to break reference cycles
+		// Must be called from the main thread
+		void close();
 
 		Reference<IDatabase> db;
 		const Reference<ThreadSafeAsyncVar<Reference<IDatabase>>> dbVar;
 		std::string clusterFilePath;
 
 		// Used to monitor the cluster protocol version. Will be the same as db unless we have either not connected
-		// yet or if the client version associated with db does not support protocol monitoring. In those cases, this
-		// will be a specially created local db.
+		// yet or if the client version associated with db does not support protocol monitoring. In those cases,
+		// this will be a specially created local db.
 		Reference<IDatabase> versionMonitorDb;
 
 		ThreadFuture<Void> changed;
@@ -495,12 +508,35 @@ public:
 
 		ThreadFuture<Void> dbReady;
 		ThreadFuture<Void> protocolVersionMonitor;
+		std::list<LegacyVersionMonitor> legacyVersionMonitors;
 		Optional<ProtocolVersion> dbProtocolVersion;
 		std::map<ProtocolVersion, Reference<ClientInfo>> clients;
 
 		std::vector<std::pair<FDBDatabaseOptions::Option, Optional<Standalone<StringRef>>>> options;
 		UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaultOptions;
 		Mutex optionLock;
+	};
+
+	// A struct that enables monitoring whether the cluster is running an old version (<= 5.0) that doesn't support
+	// connect packet monitoring.
+	struct LegacyVersionMonitor {
+		LegacyVersionMonitor(Reference<ClientInfo> client) : client(client), monitorRunning(false) {}
+		~LegacyVersionMonitor() { TraceEvent("DestroyingVersionMonitor"); }
+
+		// Starts the connection monitor by creating a database object at an old version.
+		// Must be called from the main thread
+		void startConnectionMonitor(Reference<DatabaseState> dbState);
+
+		// Runs a GRV probe on the cluster to determine if the client version is compatible with the cluster.
+		// Must be called from main thread
+		void runGrvProbe(Reference<DatabaseState> dbState);
+
+		Reference<ClientInfo> client;
+		Reference<IDatabase> db;
+		Reference<ITransaction> tr;
+
+		ThreadFuture<Void> versionMonitor;
+		bool monitorRunning;
 	};
 
 	const Reference<DatabaseState> dbState;
