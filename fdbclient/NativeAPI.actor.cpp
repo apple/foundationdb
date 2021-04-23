@@ -4175,8 +4175,7 @@ ACTOR Future<ProtocolVersion> getCoordinatorProtocolFromConnectPacket(NetworkAdd
 	    FlowTransport::transport().getPeerProtocolAsyncVar(coordinatorAddress);
 
 	loop {
-		if (protocolVersion->get().present() &&
-		    (!expectedVersion.present() || expectedVersion.get() != protocolVersion->get().get())) {
+		if (protocolVersion->get().present() && protocolVersion->get() != expectedVersion) {
 			return protocolVersion->get().get();
 		}
 
