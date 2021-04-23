@@ -50,6 +50,7 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TransactionLineage.h"
 #include "fdbclient/versions.h"
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
@@ -86,6 +87,8 @@ using std::min;
 using std::pair;
 
 namespace {
+
+TransactionLineageCollector transactionLineageCollector;
 
 template <class Interface, class Request>
 Future<REPLY_TYPE(Request)> loadBalance(
