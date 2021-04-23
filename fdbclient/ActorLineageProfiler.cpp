@@ -305,3 +305,58 @@ void samplingProfilerUpdateFrequency(std::optional<std::any> freq) {
 	TraceEvent(SevInfo, "SamplingProfilerUpdateFrequency").detail("Frequency", frequency);
 	ActorLineageProfiler::instance().setFrequency(frequency);
 }
+
+void ProfilerConfigT::reset(std::map<std::string, std::string> const& config) {
+	bool expectNoMore = false, useFluentD = false, useTCP = false;
+	std::string endpoint;
+	ConfigError err;
+	for (auto& kv : config) {
+		if (expectNoMore) {
+			err.description = format("Unexpected option %s", kv.first.c_str());
+			throw err;
+		}
+		if (kv.first == "collector") {
+			std::string val = kv.second;
+			std::for_each(val.begin(), val.end(), [](auto c) { return std::tolower(c); });
+			if (val == "none") {
+				setBackend(std::make_shared<NoneIngestor>());
+			} else if (val == "fluentd") {
+				useFluentD = true;
+			} else {
+				err.description = format("Unsupported collector: %s", val.c_str());
+				throw err;
+			}
+		} else if (kv.first == "collector_endpoint") {
+			endpoint = kv.second;
+		} else if (kv.first == "collector_protocol") {
+			auto val = kv.second;
+			std::for_each(val.begin(), val.end(), [](auto c) { return std::tolower(c); });
+			if (val == "tcp") {
+				useTCP = true;
+			} else if (val == "udp") {
+				useTCP = false;
+			} else {
+				err.description = format("Unsupported protocol for fluentd: %s", kv.second.c_str());
+				throw err;
+			}
+		} else {
+			err.description = format("Unknown option %s", kv.first.c_str());
+			throw err;
+		}
+	}
+	if (useFluentD) {
+		if (endpoint.empty()) {
+			err.description = "Endpoint is required for fluentd ingestor";
+			throw err;
+		}
+		NetworkAddress address;
+		try {
+			address = NetworkAddress::parse(endpoint);
+		} catch (Error& e) {
+			err.description = format("Can't parse address %s", endpoint.c_str());
+			throw err;
+		}
+		setBackend(std::make_shared<FluentDIngestor>(
+		    useTCP ? FluentDIngestor::Protocol::TCP : FluentDIngestor::Protocol::TCP, address));
+	}
+}

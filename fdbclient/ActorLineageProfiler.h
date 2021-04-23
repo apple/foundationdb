@@ -79,6 +79,10 @@ public: // interface
 	~FluentDIngestor();
 };
 
+struct ConfigError {
+	std::string description;
+};
+
 class ProfilerConfigT {
 private: // private types
 	using Lock = std::unique_lock<std::mutex>;
@@ -91,9 +95,10 @@ private: // construction
 	ProfilerConfigT() {}
 	ProfilerConfigT(ProfilerConfigT const&) = delete;
 	ProfilerConfigT& operator=(ProfilerConfigT const&) = delete;
+	void setBackend(std::shared_ptr<SampleIngestor> ingestor) { this->ingestor = ingestor; }
 
 public:
-	void setBackend(std::shared_ptr<SampleIngestor> ingestor) { this->ingestor = ingestor; }
+	void reset(std::map<std::string, std::string> const& config);
 };
 
 using ProfilerConfig = crossbow::singleton<ProfilerConfigT>;
