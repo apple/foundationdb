@@ -22,45 +22,39 @@
 #define FLOW_FASTREF_H
 #pragma once
 
+#include <atomic>
 #include <cstdint>
-
-#include "flow/Platform.h"
-
-#if VALGRIND
-#include <drd.h>
-#endif
 
 template <class Subclass>
 class ThreadSafeReferenceCounted {
 public:
 	ThreadSafeReferenceCounted() : referenceCount(1) {}
 	// NO virtual destructor!  Subclass should have a virtual destructor if it is not sealed.
-	void addref() const { interlockedIncrement(&referenceCount); }
+	void addref() const { referenceCount.fetch_add(1); }
 	// If return value is true, caller is responsible for destruction of object
 	bool delref_no_destroy() const {
-		if (interlockedDecrement(&referenceCount) != 0) {
-#ifdef VALGRIND
-			ANNOTATE_HAPPENS_BEFORE(&referenceCount);
-#endif
-			return false;
+		// The performance of this seems comparable to a version with less strict memory ordering (see e.g.
+		// https://www.boost.org/doc/libs/1_57_0/doc/html/atomic/usage_examples.html#boost_atomic.usage_examples.example_reference_counters),
+		// on both x86 and ARM, with gcc8.
+		if (referenceCount.fetch_sub(1) == 1) {
+			return true;
 		}
-#ifdef VALGRIND
-		ANNOTATE_HAPPENS_AFTER(&referenceCount);
-#endif
-		return true;
+		return false;
 	}
 	void delref() const {
 		if (delref_no_destroy())
 			delete (Subclass*)this;
 	}
-	void setrefCountUnsafe(int32_t count) const { referenceCount = count; }
-	int32_t debugGetReferenceCount() const { return referenceCount; } // Never use in production code, only for tracing
-	bool isSoleOwnerUnsafe() const { return referenceCount == 1; }
+	void setrefCountUnsafe(int32_t count) const { referenceCount.store(count); }
+	int32_t debugGetReferenceCount() const {
+		return referenceCount.load();
+	} // Never use in production code, only for tracing
+	bool isSoleOwnerUnsafe() const { return referenceCount.load() == 1; }
 
 private:
 	ThreadSafeReferenceCounted(const ThreadSafeReferenceCounted&) /* = delete*/;
 	void operator=(const ThreadSafeReferenceCounted&) /* = delete*/;
-	mutable volatile int32_t referenceCount;
+	mutable std::atomic<int32_t> referenceCount;
 };
 
 template <class Subclass>
