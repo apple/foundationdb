@@ -75,6 +75,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 		state int i = 0;
 		for (; i < self->numIncrements; ++i) {
 			wait(increment(self, cx));
+			wait(delay(deterministicRandom()->random01()));
 		}
 		return Void();
 	}
