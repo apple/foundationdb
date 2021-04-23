@@ -24,6 +24,7 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/Arena.h"
 #include "flow/genericactors.actor.h"
+#include "flow/UnitTest.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -36,9 +37,10 @@ const KeyRangeRef mutationKeys = KeyRangeRef(LiteralStringRef("mutation/"), Lite
 
 // FIXME: negative versions break ordering
 Key versionedMutationKey(Version version, int index) {
+	ASSERT(version >= 0);
 	BinaryWriter bw(IncludeVersion());
-	bw << version;
-	bw << index;
+	bw << bigEndian64(version);
+	bw << bigEndian32(index);
 	return bw.toValue().withPrefix(mutationKeys.begin);
 }
 
@@ -50,6 +52,20 @@ Version getVersionFromVersionedMutationKey(KeyRef versionedMutationKey) {
 }
 
 } //namespace
+
+TEST_CASE("/fdbserver/SimpleConfigDatabaseNode/versionedMutationKeyOrdering") {
+	std::vector<Key> keys;
+	for (Version version = 0; version < 1000; ++version) {
+		for (int index = 0; index < 5; ++index) {
+			keys.push_back(versionedMutationKey(version, index));
+		}
+	}
+	for (int index = 0; index < 1000; ++index) {
+		keys.push_back(versionedMutationKey(1000, index));
+	}
+	ASSERT(std::is_sorted(keys.begin(), keys.end()));
+	return Void();
+}
 
 class SimpleConfigDatabaseNodeImpl {
 	IKeyValueStore* kvStore; // FIXME: Prevent leak
