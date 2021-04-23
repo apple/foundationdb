@@ -4698,14 +4698,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled)
 				fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code());
-			if (e.code() == error_code_special_keys_api_failure) {
-				auto f = tr->get(LiteralStringRef("\xff\xff/error_message"));
-				ASSERT(f.isReady());
-				if (f.get().present()) {
-					auto msg = f.get().get().toString();
-					printf("Special Key space error_message: %s\n", msg.c_str());
-				}
-			}
 			is_error = true;
 			if (intrans) {
 				printf("Rolling back current transaction\n");
