@@ -156,12 +156,12 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 
 public:
 	ConfigurationDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		numIncrements = getOption(options, "numIncrements"_sr, 10);
-		numClients = getOption(options, "numClients"_sr, 2);
+		numIncrements = getOption(options, "numIncrements"_sr, 100);
+		numClients = getOption(options, "numClients"_sr, 10);
 		numBroadcasters = getOption(options, "numBroadcasters"_sr, 2);
 		numConsumersPerBroadcaster = getOption(options, "numConsumersPerBroadcaster"_sr, 2);
-		meanSleepBetweenTransactions = getOption(options, "meanSleepBetweenIncrements"_sr, 0.5);
-		meanSleepWithinTransaction = getOption(options, "meanSleepWithinTransaction"_sr, 0.1);
+		meanSleepBetweenTransactions = getOption(options, "meanSleepBetweenIncrements"_sr, 0.1);
+		meanSleepWithinTransaction = getOption(options, "meanSleepWithinTransaction"_sr, 0.01);
 	}
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override { return clientId ? Void() : start(this, cx); }

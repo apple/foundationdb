@@ -580,10 +580,16 @@ inline static int64_t flowInterlockedAnd64(int64_t* p, int64_t a) {
 #define bigEndian16(value) uint16_t(_byteswap_ushort(value))
 #define bigEndian32(value) uint32_t(_byteswap_ulong(value))
 #define bigEndian64(value) uint64_t(_byteswap_uint64(value))
+#define fromBigEndian16(value) uint16_t(_byteswap_ushort(value))
+#define fromBigEndian32(value) uint32_t(_byteswap_ulong(value))
+#define fromBigEndian64(value) uint64_t(_byteswap_uint64(value))
 #elif __GNUG__
 #define bigEndian16(value) uint16_t((value >> 8) | (value << 8))
 #define bigEndian32(value) uint32_t(__builtin_bswap32(value))
 #define bigEndian64(value) uint64_t(__builtin_bswap64(value))
+#define fromBigEndian16(value) uint16_t((value >> 8) | (value << 8))
+#define fromBigEndian32(value) uint32_t(__builtin_bswap32(value))
+#define fromBigEndian64(value) uint64_t(__builtin_bswap64(value))
 #else
 #error Missing byte swap methods
 #endif

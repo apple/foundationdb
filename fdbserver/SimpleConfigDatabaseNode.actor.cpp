@@ -36,7 +36,7 @@ const KeyRangeRef kvKeys = KeyRangeRef(LiteralStringRef("kv/"), LiteralStringRef
 const KeyRangeRef mutationKeys = KeyRangeRef(LiteralStringRef("mutation/"), LiteralStringRef("mutation0"));
 
 // FIXME: negative versions break ordering
-Key versionedMutationKey(Version version, int index) {
+Key versionedMutationKey(Version version, uint32_t index) {
 	ASSERT(version >= 0);
 	BinaryWriter bw(IncludeVersion());
 	bw << bigEndian64(version);
@@ -45,23 +45,36 @@ Key versionedMutationKey(Version version, int index) {
 }
 
 Version getVersionFromVersionedMutationKey(KeyRef versionedMutationKey) {
-	Version result;
-	BinaryReader br(versionedMutationKey, IncludeVersion());
-	br >> result;
-	return result;
+	uint64_t bigEndianResult;
+	BinaryReader br(versionedMutationKey.removePrefix(mutationKeys.begin), IncludeVersion());
+	br >> bigEndianResult;
+	return fromBigEndian64(bigEndianResult);
 }
 
 } //namespace
 
-TEST_CASE("/fdbserver/SimpleConfigDatabaseNode/versionedMutationKeyOrdering") {
+TEST_CASE("/fdbserver/SimpleConfigDatabaseNode/versionedMutationKeys") {
 	std::vector<Key> keys;
 	for (Version version = 0; version < 1000; ++version) {
 		for (int index = 0; index < 5; ++index) {
 			keys.push_back(versionedMutationKey(version, index));
 		}
 	}
-	for (int index = 0; index < 1000; ++index) {
-		keys.push_back(versionedMutationKey(1000, index));
+	for (int i = 0; i < 5000; ++i) {
+		ASSERT(getVersionFromVersionedMutationKey(keys[i]) == i / 5);
+	}
+	return Void();
+}
+
+TEST_CASE("/fdbserver/SimpleConfigDatabaseNode/versionedMutationKeyOrdering") {
+	Standalone<VectorRef<KeyRef>> keys;
+	for (Version version = 0; version < 1000; ++version) {
+		for (auto index = 0; index < 5; ++index) {
+			keys.push_back_deep(keys.arena(), versionedMutationKey(version, index));
+		}
+	}
+	for (auto index = 0; index < 1000; ++index) {
+		keys.push_back_deep(keys.arena(), versionedMutationKey(1000, index));
 	}
 	ASSERT(std::is_sorted(keys.begin(), keys.end()));
 	return Void();
@@ -103,7 +116,7 @@ class SimpleConfigDatabaseNodeImpl {
 		Standalone<RangeResultRef> range = wait(self->kvStore->readRange(keys));
 		Standalone<VectorRef<VersionedMutationRef>> result;
 		for (const auto &kv : range) {
-			auto version = BinaryReader::fromStringRef<Version>(kv.key.removePrefix(mutationKeys.begin), IncludeVersion());
+			auto version = getVersionFromVersionedMutationKey(kv.key);
 			if (version > endVersion) {
 				break;
 			}
