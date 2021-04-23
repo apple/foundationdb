@@ -34,6 +34,9 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 	int numClients;
 	int numBroadcasters;
 	int numConsumersPerBroadcaster;
+	double meanSleepBetweenTransactions;
+	double meanSleepWithinTransaction;
+	double transactionTooOldErrors{ 0.0 };
 	Promise<int> expectedTotal; // when clients finish, publish expected total value here
 
 	ACTOR static Future<int> getCurrentValue(Database cx, Key key) {
@@ -63,9 +66,13 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 				}
 				++currentValue;
 				tr.set(self->key, BinaryWriter::toValue(currentValue, Unversioned()));
+				wait(delay(2 * self->meanSleepWithinTransaction * deterministicRandom()->random01()));
 				wait(tr.commit());
 				return Void();
 			} catch (Error &e) {
+				if (e.code() == error_code_transaction_too_old) {
+					++self->transactionTooOldErrors;
+				}
 				wait(tr.onError(e));
 			}
 		}
@@ -75,7 +82,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 		state int i = 0;
 		for (; i < self->numIncrements; ++i) {
 			wait(increment(self, cx));
-			wait(delay(deterministicRandom()->random01()));
+			wait(delay(2 * self->meanSleepBetweenTransactions * deterministicRandom()->random01()));
 		}
 		return Void();
 	}
@@ -153,6 +160,8 @@ public:
 		numClients = getOption(options, "numClients"_sr, 2);
 		numBroadcasters = getOption(options, "numBroadcasters"_sr, 2);
 		numConsumersPerBroadcaster = getOption(options, "numConsumersPerBroadcaster"_sr, 2);
+		meanSleepBetweenTransactions = getOption(options, "meanSleepBetweenIncrements"_sr, 0.5);
+		meanSleepWithinTransaction = getOption(options, "meanSleepWithinTransaction"_sr, 0.1);
 	}
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override { return clientId ? Void() : start(this, cx); }
@@ -163,6 +172,7 @@ public:
 	void getMetrics(std::vector<PerfMetric>& m) override {
 		if (clientId == 0) {
 			m.push_back(PerfMetric("TotalWrites", expectedTotal.getFuture().get(), false));
+			m.push_back(PerfMetric("TransactionTooOldErrors", transactionTooOldErrors, false));
 		}
 	}
 };
