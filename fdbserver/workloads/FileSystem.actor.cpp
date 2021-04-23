@@ -103,7 +103,7 @@ struct FileSystemWorkload : TestWorkload {
 
 		tr->set(key, path);
 		std::string keyStr(key.toString());
-		tr->set(keyStr + "/size", format("%d", deterministicRandom()->randomInt(0, 2 << 30)));
+		tr->set(keyStr + "/size", format("%d", deterministicRandom()->randomInt(0, std::numeric_limits<int>::max())));
 		tr->set(keyStr + "/server", format("%d", deterministicRandom()->randomInt(0, self->serverCount)));
 		tr->set(keyStr + "/deleted", deleted ? LiteralStringRef("1") : LiteralStringRef("0"));
 		tr->set(keyStr + "/server", format("%d", serverID));
@@ -236,7 +236,7 @@ struct FileSystemWorkload : TestWorkload {
 		loop {
 			state int fileID = deterministicRandom()->randomInt(0, self->fileCount);
 			state bool isDeleting = deterministicRandom()->random01() < 0.25;
-			state int size = isDeleting ? 0 : deterministicRandom()->randomInt(0, 2 << 30);
+			state int size = isDeleting ? 0 : deterministicRandom()->randomInt(0, std::numeric_limits<int>::max());
 			state std::string keyStr = self->keyForFileID(fileID).toString();
 			state double tstart = now();
 			state Transaction tr(cx);

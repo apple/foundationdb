@@ -142,6 +142,7 @@ public:
 	KeyBackedProperty<Key> addPrefix() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 	KeyBackedProperty<Key> removePrefix() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 	KeyBackedProperty<bool> incrementalBackupOnly() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<bool> inconsistentSnapshotOnly() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 	// XXX: Remove restoreRange() once it is safe to remove. It has been changed to restoreRanges
 	KeyBackedProperty<KeyRange> restoreRange() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 	KeyBackedProperty<std::vector<KeyRange>> restoreRanges() {
@@ -150,6 +151,7 @@ public:
 	KeyBackedProperty<Key> batchFuture() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 	KeyBackedProperty<Version> beginVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 	KeyBackedProperty<Version> restoreVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Version> firstConsistentVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 
 	KeyBackedProperty<Reference<IBackupContainer>> sourceContainer() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
@@ -358,6 +360,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 	state Future<StringRef> status = restore.stateText(tr);
 	state Future<Version> currentVersion = restore.getCurrentVersion(tr);
 	state Future<Version> lag = restore.getApplyVersionLag(tr);
+	state Future<Version> firstConsistentVersion = restore.firstConsistentVersion().getD(tr);
 	state Future<std::string> tag = restore.tag().getD(tr);
 	state Future<std::pair<std::string, Version>> lastError = restore.lastError().getD(tr);
 
@@ -365,7 +368,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 	state UID uid = restore.getUid();
 	wait(success(fileCount) && success(fileBlockCount) && success(fileBlocksDispatched) &&
 	     success(fileBlocksFinished) && success(bytesWritten) && success(status) && success(currentVersion) &&
-	     success(lag) && success(tag) && success(lastError));
+	     success(lag) && success(firstConsistentVersion) && success(tag) && success(lastError));
 
 	std::string errstr = "None";
 	if (lastError.get().second != 0)
@@ -383,11 +386,12 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 	    .detail("FileBlocksInProgress", fileBlocksDispatched.get() - fileBlocksFinished.get())
 	    .detail("BytesWritten", bytesWritten.get())
 	    .detail("CurrentVersion", currentVersion.get())
+	    .detail("FirstConsistentVersion", firstConsistentVersion.get())
 	    .detail("ApplyLag", lag.get())
 	    .detail("TaskInstance", THIS_ADDR);
 
 	return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  Files: %lld  BytesWritten: "
-	              "%lld  CurrentVersion: %lld  ApplyVersionLag: %lld  LastError: %s",
+	              "%lld  CurrentVersion: %lld FirstConsistentVersion: %lld  ApplyVersionLag: %lld  LastError: %s",
 	              tag.get().c_str(),
 	              uid.toString().c_str(),
 	              status.get().toString().c_str(),
@@ -397,6 +401,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 	              fileCount.get(),
 	              bytesWritten.get(),
 	              currentVersion.get(),
+	              firstConsistentVersion.get(),
 	              lag.get(),
 	              errstr.c_str());
 }
@@ -4105,7 +4110,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		for (auto const& r : ranges) {
 			keyRangesFilter.push_back_deep(keyRangesFilter.arena(), KeyRangeRef(r));
 		}
-		Optional<RestorableFileSet> restorable =
+		state Optional<RestorableFileSet> restorable =
 		    wait(bc->getRestoreSet(restoreVersion, keyRangesFilter, incremental, beginVersion));
 		if (!incremental) {
 			beginVersion = restorable.get().snapshot.beginVersion;
@@ -4121,11 +4126,29 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		// Order does not matter, they will be put in order when written to the restoreFileMap below.
 		state std::vector<RestoreConfig::RestoreFile> files;
 
+		state Version firstConsistentVersion = beginVersion;
 		for (const RangeFile& f : restorable.get().ranges) {
 			files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
+			firstConsistentVersion = std::max(firstConsistentVersion, f.version);
+		}
+		tr->reset();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				restore.firstConsistentVersion().set(tr, firstConsistentVersion);
+				wait(tr->commit());
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
 		}
 
-		if (!CLIENT_KNOBS->RESTORE_IGNORE_LOG_FILES) {
+		tr->reset();
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		bool inconsistentSnapshotOnly = wait(restore.inconsistentSnapshotOnly().getD(tr, false, false));
+		if (!inconsistentSnapshotOnly) {
 			for (const LogFile& f : restorable.get().logs) {
 				files.push_back({ f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion });
 			}
@@ -4604,6 +4627,7 @@ public:
 	                                        Key removePrefix,
 	                                        bool lockDB,
 	                                        bool incrementalBackupOnly,
+	                                        bool inconsistentSnapshotOnly,
 	                                        Version beginVersion,
 	                                        UID uid) {
 		KeyRangeMap<int> restoreRangeSet;
@@ -4673,6 +4697,7 @@ public:
 		restore.stateEnum().set(tr, ERestoreState::QUEUED);
 		restore.restoreVersion().set(tr, restoreVersion);
 		restore.incrementalBackupOnly().set(tr, incrementalBackupOnly);
+		restore.inconsistentSnapshotOnly().set(tr, inconsistentSnapshotOnly);
 		restore.beginVersion().set(tr, beginVersion);
 		if (BUGGIFY && restoreRanges.size() == 1) {
 			restore.restoreRange().set(tr, restoreRanges[0]);
@@ -5246,7 +5271,9 @@ public:
 	//   removePrefix: for each key to be restored, remove this prefix first.
 	//   lockDB: if set lock the database with randomUid before performing restore;
 	//           otherwise, check database is locked with the randomUid
-	//   incrementalBackupOnly: only perform incremental backup
+	//   incrementalBackupOnly: only perform incremental restore, by only applying mutation logs
+	//   inconsistentSnapshotOnly: Ignore mutation log files during the restore to speedup the process.
+	//                             When set to true, gives an inconsistent snapshot, thus not recommended
 	//   beginVersion: restore's begin version
 	//   randomUid: the UID for lock the database
 	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent,
@@ -5262,6 +5289,7 @@ public:
 	                                     Key removePrefix,
 	                                     bool lockDB,
 	                                     bool incrementalBackupOnly,
+	                                     bool inconsistentSnapshotOnly,
 	                                     Version beginVersion,
 	                                     UID randomUid) {
 		// The restore command line tool won't allow ranges to be empty, but correctness workloads somehow might.
@@ -5318,6 +5346,7 @@ public:
 				                   removePrefix,
 				                   lockDB,
 				                   incrementalBackupOnly,
+				                   inconsistentSnapshotOnly,
 				                   beginVersion,
 				                   randomUid));
 				wait(tr->commit());
@@ -5473,6 +5502,7 @@ public:
 			                           removePrefix,
 			                           true,
 			                           false,
+			                           false,
 			                           invalidVersion,
 			                           randomUid));
 			return ver;
@@ -5534,6 +5564,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          Key removePrefix,
                                          bool lockDB,
                                          bool incrementalBackupOnly,
+                                         bool inconsistentSnapshotOnly,
                                          Version beginVersion) {
 	return FileBackupAgentImpl::restore(this,
 	                                    cx,
@@ -5548,6 +5579,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	                                    removePrefix,
 	                                    lockDB,
 	                                    incrementalBackupOnly,
+	                                    inconsistentSnapshotOnly,
 	                                    beginVersion,
 	                                    deterministicRandom()->randomUniqueID());
 }
