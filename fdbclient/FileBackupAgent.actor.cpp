@@ -296,13 +296,6 @@ public:
 		tr->set(uidPrefixKey(applyMutationsBeginRange.begin, uid), BinaryWriter::toValue(ver, Unversioned()));
 	}
 
-	Future<Version> getApplyBeginVersion(Reference<ReadYourWritesTransaction> tr) {
-		return map(tr->get(uidPrefixKey(applyMutationsBeginRange.begin, uid)),
-		           [=](Optional<Value> const& value) -> Version {
-			           return value.present() ? BinaryReader::fromStringRef<Version>(value.get(), Unversioned()) : 0;
-		           });
-	}
-
 	void setApplyEndVersion(Reference<ReadYourWritesTransaction> tr, Version ver) {
 		tr->set(uidPrefixKey(applyMutationsEndRange.begin, uid), BinaryWriter::toValue(ver, Unversioned()));
 	}
@@ -312,21 +305,6 @@ public:
 		           [=](Optional<Value> const& value) -> Version {
 			           return value.present() ? BinaryReader::fromStringRef<Version>(value.get(), Unversioned()) : 0;
 		           });
-	}
-
-	ACTOR static Future<Version> getCurrentVersion_impl(RestoreConfig* self, Reference<ReadYourWritesTransaction> tr) {
-		state ERestoreState status = wait(self->stateEnum().getD(tr));
-		state Version version = -1;
-		if (status == ERestoreState::RUNNING) {
-			wait(store(version, self->getApplyBeginVersion(tr)));
-		} else if (status == ERestoreState::COMPLETED) {
-			wait(store(version, self->restoreVersion().getD(tr)));
-		}
-		return version;
-	}
-
-	Future<Version> getCurrentVersion(Reference<ReadYourWritesTransaction> tr) {
-		return getCurrentVersion_impl(this, tr);
 	}
 
 	ACTOR static Future<std::string> getProgress_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr);
@@ -349,7 +327,6 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 	state Future<int64_t> fileBlocksFinished = restore.fileBlocksFinished().getD(tr);
 	state Future<int64_t> bytesWritten = restore.bytesWritten().getD(tr);
 	state Future<StringRef> status = restore.stateText(tr);
-	state Future<Version> currentVersion = restore.getCurrentVersion(tr);
 	state Future<Version> lag = restore.getApplyVersionLag(tr);
 	state Future<std::string> tag = restore.tag().getD(tr);
 	state Future<std::pair<std::string, Version>> lastError = restore.lastError().getD(tr);
@@ -357,8 +334,8 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
 	state UID uid = restore.getUid();
 	wait(success(fileCount) && success(fileBlockCount) && success(fileBlocksDispatched) &&
-	     success(fileBlocksFinished) && success(bytesWritten) && success(status) && success(currentVersion) &&
-	     success(lag) && success(tag) && success(lastError));
+	     success(fileBlocksFinished) && success(bytesWritten) && success(status) && success(lag) && success(tag) &&
+	     success(lastError));
 
 	std::string errstr = "None";
 	if (lastError.get().second != 0)
@@ -375,12 +352,11 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 	    .detail("FileBlocksTotal", fileBlockCount.get())
 	    .detail("FileBlocksInProgress", fileBlocksDispatched.get() - fileBlocksFinished.get())
 	    .detail("BytesWritten", bytesWritten.get())
-	    .detail("CurrentVersion", currentVersion.get())
 	    .detail("ApplyLag", lag.get())
 	    .detail("TaskInstance", THIS_ADDR);
 
 	return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  Files: %lld  BytesWritten: "
-	              "%lld  CurrentVersion: %lld  ApplyVersionLag: %lld  LastError: %s",
+	              "%lld  ApplyVersionLag: %lld  LastError: %s",
 	              tag.get().c_str(),
 	              uid.toString().c_str(),
 	              status.get().toString().c_str(),
@@ -389,7 +365,6 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 	              fileBlocksDispatched.get() - fileBlocksFinished.get(),
 	              fileCount.get(),
 	              bytesWritten.get(),
-	              currentVersion.get(),
 	              lag.get(),
 	              errstr.c_str());
 }
