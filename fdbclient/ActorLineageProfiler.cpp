@@ -63,13 +63,14 @@ class Packer : public msgpack::packer<msgpack::sbuffer> {
 			                     std::string_view,
 			                     std::vector<std::any>,
 			                     std::map<std::string, std::any>,
-			                     std::map<std::string_view, std::any>>::populate(visitorMap);
+			                     std::map<std::string_view, std::any>,
+			                     std::vector<std::map<std::string_view, std::any>>>::populate(visitorMap);
 		}
 
 		void visit(const std::any& val, Packer& packer) {
 			auto iter = visitorMap.find(val.type());
 			if (iter == visitorMap.end()) {
-				// TODO: trace error
+				TraceEvent(SevError, "PackerTypeNotFound").detail("Type", val.type().name());
 			} else {
 				iter->second(val, packer);
 			}
@@ -197,7 +198,7 @@ std::shared_ptr<Sample> SampleCollectorT::collect() {
 
 void SampleCollection_t::refresh() {
 	auto sample = _collector->collect();
-	auto min = std::max(sample->time - windowSize, sample->time);
+	auto min = std::min(sample->time - windowSize, sample->time);
 	{
 		Lock _{ mutex };
 		data.emplace_back(std::move(sample));

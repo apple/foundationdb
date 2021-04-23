@@ -2040,6 +2040,8 @@ ACTOR Future<Void> serveProtocolInfo() {
 	}
 }
 
+// Handles requests from ProcessInterface, an interface meant for direct
+// communication between the client and FDB processes.
 ACTOR Future<Void> serveProcess() {
 	state ProcessInterface process;
 	process.getInterface.makeWellKnownEndpoint(WLTOKEN_PROCESS, TaskPriority::DefaultEndpoint);
@@ -2048,7 +2050,27 @@ ACTOR Future<Void> serveProcess() {
 			when(GetProcessInterfaceRequest req = waitNext(process.getInterface.getFuture())) {
 				req.reply.send(process);
 			}
-			when(EchoRequest req = waitNext(process.echo.getFuture())) { req.reply.send(req.message); }
+			when(ActorLineageRequest req = waitNext(process.actorLineage.getFuture())) {
+				state SampleCollection sampleCollector;
+				// TODO: Add filtering by wait state
+				auto samples = sampleCollector->get(req.timeStart, req.timeEnd);
+				// The size of samples should never approach 2 billion, so
+				// casting from 64 to 32 bits here should be okay.
+				ASSERT(samples.size() < std::numeric_limits<int>::max());
+				int maxSeq = std::min(req.seqEnd, static_cast<int>(samples.size()));
+
+				std::vector<SerializedSample> serializedSamples;
+				for (int i = req.seqStart; i < maxSeq; ++i) {
+					auto samplePtr = samples.at(i);
+					auto serialized = SerializedSample{ .waitState = WaitState::Network, // TODO: Currently unused
+						                                .time = samplePtr->time,
+						                                .seq = i,
+						                                .data = std::string(samplePtr->data, samplePtr->size) };
+					serializedSamples.push_back(std::move(serialized));
+				}
+				ActorLineageReply reply{ serializedSamples };
+				req.reply.send(reply);
+			}
 		}
 	}
 }

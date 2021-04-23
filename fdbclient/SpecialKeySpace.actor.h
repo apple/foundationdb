@@ -200,6 +200,12 @@ public:
 	static KeyRef getManagementApiCommandPrefix(const std::string& command) {
 		return managementApiCommandToRange.at(command).begin;
 	}
+	static KeyRangeRef getActorLineageApiCommandRange(const std::string& command) {
+		return actorLineageApiCommandToRange.at(command);
+	}
+	static KeyRef getActorLineageApiCommandPrefix(const std::string& command) {
+		return actorLineageApiCommandToRange.at(command).begin;
+	}
 	static Key getManagementApiCommandOptionSpecialKey(const std::string& command, const std::string& option);
 	static const std::set<std::string>& getManagementApiOptionsSet() { return options; }
 	static const std::set<std::string>& getTracingOptions() { return tracingOptions; }
@@ -228,6 +234,7 @@ private:
 	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> moduleToBoundary;
 	static std::unordered_map<std::string, KeyRange>
 	    managementApiCommandToRange; // management command to its special keys' range
+	static std::unordered_map<std::string, KeyRange> actorLineageApiCommandToRange;
 	static std::set<std::string> options; // "<command>/<option>"
 	static std::set<std::string> tracingOptions;
 
