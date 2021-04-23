@@ -136,6 +136,7 @@ public:
 	}
 	KeyBackedProperty<Key> addPrefix() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 	KeyBackedProperty<Key> removePrefix() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<bool> inconsistentSnapshotOnly() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 	// XXX: Remove restoreRange() once it is safe to remove. It has been changed to restoreRanges
 	KeyBackedProperty<KeyRange> restoreRange() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 	KeyBackedProperty<std::vector<KeyRange>> restoreRanges() {
@@ -4057,7 +4058,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		for (auto const& r : ranges) {
 			keyRangesFilter.push_back_deep(keyRangesFilter.arena(), KeyRangeRef(r));
 		}
-		Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion, keyRangesFilter));
+		state Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion, keyRangesFilter));
 
 		if (!restorable.present())
 			throw restore_missing_data();
@@ -4072,7 +4073,11 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		for (const RangeFile& f : restorable.get().ranges) {
 			files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
 		}
-		if (!CLIENT_KNOBS->RESTORE_IGNORE_LOG_FILES) {
+		tr->reset();
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		bool inconsistentSnapshotOnly = wait(restore.inconsistentSnapshotOnly().getD(tr, false, false));
+		if (!inconsistentSnapshotOnly) {
 			for (const LogFile& f : restorable.get().logs) {
 				files.push_back({ f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion });
 			}
@@ -4535,6 +4540,7 @@ public:
 	                                        Key addPrefix,
 	                                        Key removePrefix,
 	                                        bool lockDB,
+	                                        bool inconsistentSnapshotOnly,
 	                                        UID uid) {
 		KeyRangeMap<int> restoreRangeSet;
 		for (auto& range : ranges) {
@@ -4601,6 +4607,7 @@ public:
 		restore.sourceContainer().set(tr, bc);
 		restore.stateEnum().set(tr, ERestoreState::QUEUED);
 		restore.restoreVersion().set(tr, restoreVersion);
+		restore.inconsistentSnapshotOnly().set(tr, inconsistentSnapshotOnly);
 		if (BUGGIFY && restoreRanges.size() == 1) {
 			restore.restoreRange().set(tr, restoreRanges[0]);
 		} else {
@@ -5171,8 +5178,8 @@ public:
 	//   removePrefix: for each key to be restored, remove this prefix first.
 	//   lockDB: if set lock the database with randomUid before performing restore;
 	//           otherwise, check database is locked with the randomUid
-	//   incrementalBackupOnly: only perform incremental backup
-	//   beginVersion: restore's begin version
+	//   inconsistentSnapshotOnly: Ignore mutation log files during the restore to speedup the process.
+	//                             When set to true, gives an inconsistent snapshot, thus not recommended
 	//   randomUid: the UID for lock the database
 	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent,
 	                                     Database cx,
@@ -5186,6 +5193,7 @@ public:
 	                                     Key addPrefix,
 	                                     Key removePrefix,
 	                                     bool lockDB,
+	                                     bool inconsistentSnapshotOnly,
 	                                     UID randomUid) {
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
 
@@ -5220,8 +5228,17 @@ public:
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				wait(submitRestore(
-				    backupAgent, tr, tagName, url, ranges, targetVersion, addPrefix, removePrefix, lockDB, randomUid));
+				wait(submitRestore(backupAgent,
+				                   tr,
+				                   tagName,
+				                   url,
+				                   ranges,
+				                   targetVersion,
+				                   addPrefix,
+				                   removePrefix,
+				                   lockDB,
+				                   inconsistentSnapshotOnly,
+				                   randomUid));
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
@@ -5374,6 +5391,7 @@ public:
 			                           addPrefix,
 			                           removePrefix,
 			                           true,
+			                           false,
 			                           randomUid));
 			return ver;
 		}
@@ -5432,7 +5450,8 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          bool verbose,
                                          Key addPrefix,
                                          Key removePrefix,
-                                         bool lockDB) {
+                                         bool lockDB,
+                                         bool inconsistentSnapshotOnly) {
 	return FileBackupAgentImpl::restore(this,
 	                                    cx,
 	                                    cxOrig,
@@ -5445,6 +5464,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	                                    addPrefix,
 	                                    removePrefix,
 	                                    lockDB,
+	                                    inconsistentSnapshotOnly,
 	                                    deterministicRandom()->randomUniqueID());
 }
 

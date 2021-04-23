@@ -149,6 +149,7 @@ enum {
 	OPT_PREFIX_REMOVE,
 	OPT_RESTORE_CLUSTERFILE_DEST,
 	OPT_RESTORE_CLUSTERFILE_ORIG,
+	OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY,
 
 	// Shared constants
 	OPT_CLUSTERFILE,
@@ -707,6 +708,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
+	{ OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY, "--inconsistent_snapshot_only", SO_NONE },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -2224,7 +2226,8 @@ ACTOR Future<Void> runRestore(Database db,
                               bool verbose,
                               bool waitForDone,
                               std::string addPrefix,
-                              std::string removePrefix) {
+                              std::string removePrefix,
+                              bool inconsistentSnapshotOnly) {
 	if (ranges.empty()) {
 		ranges.push_back_deep(ranges.arena(), normalKeys);
 	}
@@ -2291,7 +2294,8 @@ ACTOR Future<Void> runRestore(Database db,
 			                                                   targetVersion,
 			                                                   verbose,
 			                                                   KeyRef(addPrefix),
-			                                                   KeyRef(removePrefix)));
+			                                                   KeyRef(removePrefix),
+			                                                   inconsistentSnapshotOnly));
 
 			if (waitForDone && verbose) {
 				// If restore is now complete then report version restored
@@ -3232,6 +3236,7 @@ int main(int argc, char* argv[]) {
 		bool waitForDone = false;
 		bool stopWhenDone = true;
 		bool usePartitionedLog = false; // Set to true to use new backup system
+		bool inconsistentSnapshotOnly = false;
 		bool forceAction = false;
 		bool trace = false;
 		bool quietDisplay = false;
@@ -3523,6 +3528,10 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_ERROR;
 				}
 				restoreVersion = ver;
+				break;
+			}
+			case OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY: {
+				inconsistentSnapshotOnly = true;
 				break;
 			}
 #ifdef _WIN32
@@ -4062,7 +4071,8 @@ int main(int argc, char* argv[]) {
 				                         !quietDisplay,
 				                         waitForDone,
 				                         addPrefix,
-				                         removePrefix));
+				                         removePrefix,
+				                         inconsistentSnapshotOnly));
 				break;
 			case RESTORE_WAIT:
 				f = stopAfter(success(ba.waitRestore(db, KeyRef(tagName), true)));
