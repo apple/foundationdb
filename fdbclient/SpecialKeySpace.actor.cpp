@@ -1925,6 +1925,11 @@ void ClientProfilingImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& ke
 
 MaintenanceImpl::MaintenanceImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
+// Used to read the healthZoneKey
+// If the key is persisted and the delayed read version is still larger than current read version,
+// we will calculate the remaining time(truncated to integer, the same as fdbcli) and return back as the value
+// If the zoneId is the special one `ignoreSSFailuresZoneString`,
+// value will be 0 (same as fdbcli)
 ACTOR static Future<Standalone<RangeResultRef>> MaintenanceGetRangeActor(ReadYourWritesTransaction* ryw,
                                                                          KeyRef prefix,
                                                                          KeyRangeRef kr) {
@@ -1954,6 +1959,11 @@ Future<Standalone<RangeResultRef>> MaintenanceImpl::getRange(ReadYourWritesTrans
 	return MaintenanceGetRangeActor(ryw, getKeyRange().begin, kr);
 }
 
+// Commit the change to healthZoneKey
+// We do not allow more than one zone to be set in maintenance in one transaction
+// In addition, if the zoneId now is 'ignoreSSFailuresZoneString',
+// which means the data distribution is disabled for storage failures.
+// Only clear this specific key is allowed, any other operations will throw error
 ACTOR static Future<Optional<std::string>> maintenanceCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	// read
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -2013,6 +2023,7 @@ Future<Optional<std::string>> MaintenanceImpl::commit(ReadYourWritesTransaction*
 
 DataDistributionImpl::DataDistributionImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
+// Read the system keys dataDistributionModeKey and rebalanceDDIgnoreKey
 ACTOR static Future<Standalone<RangeResultRef>> DataDistributionGetRangeActor(ReadYourWritesTransaction* ryw,
                                                                               KeyRef prefix,
                                                                               KeyRangeRef kr) {
