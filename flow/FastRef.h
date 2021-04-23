@@ -36,20 +36,14 @@ public:
 		// The performance of this seems comparable to a version with less strict memory ordering (see e.g.
 		// https://www.boost.org/doc/libs/1_57_0/doc/html/atomic/usage_examples.html#boost_atomic.usage_examples.example_reference_counters),
 		// on both x86 and ARM, with gcc8.
-		if (referenceCount.fetch_sub(1) == 1) {
-			return true;
-		}
-		return false;
+		return referenceCount.fetch_sub(1) == 1;
 	}
 	void delref() const {
 		if (delref_no_destroy())
 			delete (Subclass*)this;
 	}
 	void setrefCountUnsafe(int32_t count) const { referenceCount.store(count); }
-	int32_t debugGetReferenceCount() const {
-		return referenceCount.load();
-	} // Never use in production code, only for tracing
-	bool isSoleOwnerUnsafe() const { return referenceCount.load() == 1; }
+	int32_t debugGetReferenceCount() const { return referenceCount.load(); }
 
 private:
 	ThreadSafeReferenceCounted(const ThreadSafeReferenceCounted&) /* = delete*/;
