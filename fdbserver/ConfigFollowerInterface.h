@@ -84,6 +84,10 @@ struct VersionedMutationRef {
 
 	VersionedMutationRef()=default;
 	explicit VersionedMutationRef(Arena &arena, Version version, MutationRef mutation) : version(version), mutation(arena, mutation) {}
+	explicit VersionedMutationRef(Arena& arena, VersionedMutationRef const& rhs)
+	  : version(rhs.version), mutation(arena, rhs.mutation) {}
+
+	size_t expectedSize() const { return sizeof(Version) + mutation.expectedSize(); }
 
 	template<class Ar>
 	void serialize(Ar &ar) {
@@ -125,12 +129,12 @@ struct ConfigFollowerGetChangesRequest {
 
 struct ConfigFollowerCompactRequest {
 	static constexpr FileIdentifier file_identifier = 568910;
-	Version lastTruncatedVersion;
+	Version version;
 	ReplyPromise<Void> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, lastTruncatedVersion, reply);
+		serializer(ar, version, reply);
 	}
 };
 

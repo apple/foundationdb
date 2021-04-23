@@ -22,8 +22,9 @@
 
 class SimpleConfigBroadcasterImpl {
 	Reference<ConfigFollowerInterface> subscriber;
-	std::map<Key, Value> fullDatabase;
-	Standalone<VectorRef<VersionedMutationRef>> versionedMutations;
+	std::map<Key, Value> database;
+	// TODO: Should create fewer arenas
+	std::deque<Standalone<VersionedMutationRef>> versionedMutations;
 	Version lastCompactedVersion;
 	Version mostRecentVersion;
 	ActorCollection actors{ false };
@@ -35,7 +36,7 @@ class SimpleConfigBroadcasterImpl {
 			ConfigFollowerGetChangesReply reply = wait(
 			    self->subscriber->getChanges.getReply(ConfigFollowerGetChangesRequest{ self->mostRecentVersion, {} }));
 			for (const auto &versionedMutation : reply.versionedMutations) {
-				self->versionedMutations.push_back(self->versionedMutations.arena(), versionedMutation);
+				self->versionedMutations.push_back(versionedMutation);
 			}
 			self->mostRecentVersion = reply.mostRecentVersion;
 			wait(delay(POLLING_INTERVAL));
@@ -61,7 +62,7 @@ class SimpleConfigBroadcasterImpl {
 		self->mostRecentVersion = versionReply.version;
 		ConfigFollowerGetFullDatabaseReply reply = wait(self->subscriber->getFullDatabase.getReply(
 		    ConfigFollowerGetFullDatabaseRequest{ self->mostRecentVersion, Optional<Value>{} }));
-		self->fullDatabase = reply.database;
+		self->database = reply.database;
 		self->actors.add(fetchUpdates(self));
 		loop {
 			//self->traceQueuedMutations();
@@ -71,7 +72,7 @@ class SimpleConfigBroadcasterImpl {
 				}
 				when(ConfigFollowerGetFullDatabaseRequest req = waitNext(publisher->getFullDatabase.getFuture())) {
 					ConfigFollowerGetFullDatabaseReply reply;
-					reply.database = self->fullDatabase;
+					reply.database = self->database;
 					for (const auto &versionedMutation : self->versionedMutations) {
 						const auto &version = versionedMutation.version;
 						const auto &mutation = versionedMutation.mutation;
@@ -82,22 +83,41 @@ class SimpleConfigBroadcasterImpl {
 							reply.database[mutation.param1] = mutation.param2;
 						} else if (mutation.type == MutationRef::ClearRange) {
 							reply.database.erase(reply.database.find(mutation.param1), reply.database.find(mutation.param2));
+						} else {
+							ASSERT(false);
 						}
 					}
-					req.reply.send(ConfigFollowerGetFullDatabaseReply{self->fullDatabase});
+					req.reply.send(ConfigFollowerGetFullDatabaseReply{ self->database });
 				}
 				when(ConfigFollowerGetChangesRequest req = waitNext(publisher->getChanges.getFuture())) {
 					ConfigFollowerGetChangesReply reply;
 					reply.mostRecentVersion = self->mostRecentVersion;
 					for (const auto &versionedMutation : self->versionedMutations) {
 						if (versionedMutation.version > req.lastSeenVersion) {
-							reply.versionedMutations.push_back(reply.versionedMutations.arena(), versionedMutation);
+							reply.versionedMutations.push_back_deep(reply.versionedMutations.arena(),
+							                                        versionedMutation);
 						}
 					}
 					req.reply.send(reply);
 				}
 				when(ConfigFollowerCompactRequest req = waitNext(publisher->compact.getFuture())) {
-					// TODO: Implement
+					while (!self->versionedMutations.empty()) {
+						const auto& versionedMutation = self->versionedMutations.front();
+						const auto& version = versionedMutation.version;
+						const auto& mutation = versionedMutation.mutation;
+						if (version > req.version) {
+							break;
+						} else if (mutation.type == MutationRef::SetValue) {
+							self->database[mutation.param1] = mutation.param2;
+						} else if (mutation.type == MutationRef::ClearRange) {
+							self->database.erase(self->database.find(mutation.param1),
+							                     self->database.find(mutation.param2));
+						} else {
+							ASSERT(false);
+						}
+						self->lastCompactedVersion = version;
+						self->versionedMutations.pop_front();
+					}
 					req.reply.send(Void());
 				}
 				when(wait(self->actors.getResult())) { ASSERT(false); }

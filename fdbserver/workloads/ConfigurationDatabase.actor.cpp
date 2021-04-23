@@ -109,15 +109,18 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 		state Future<int> expectedTotal = self->expectedTotal.getFuture();
 		state int currentValue = 0;
 		loop {
-			state ConfigFollowerGetChangesReply reply =
+			state ConfigFollowerGetChangesReply changesReply =
 			    wait(cfi->getChanges.getReply(ConfigFollowerGetChangesRequest{ mostRecentVersion, {} }));
-			mostRecentVersion = reply.mostRecentVersion;
-			for (const auto& versionedMutation : reply.versionedMutations) {
+			mostRecentVersion = changesReply.mostRecentVersion;
+			// wait(cfi->compact.getReply(ConfigFollowerCompactRequest{ mostRecentVersion }));
+			for (const auto& versionedMutation : changesReply.versionedMutations) {
 				const auto& mutation = versionedMutation.mutation;
 				if (mutation.type == MutationRef::SetValue) {
 					database[mutation.param1] = mutation.param2;
 				} else if (mutation.type == MutationRef::ClearRange) {
 					database.erase(database.find(mutation.param1), database.find(mutation.param2));
+				} else {
+					ASSERT(false);
 				}
 			}
 			if (database.count(self->key)) {

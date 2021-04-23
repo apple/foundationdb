@@ -35,7 +35,6 @@ const KeyRef committedVersionKey = LiteralStringRef("committedVersion");
 const KeyRangeRef kvKeys = KeyRangeRef(LiteralStringRef("kv/"), LiteralStringRef("kv0"));
 const KeyRangeRef mutationKeys = KeyRangeRef(LiteralStringRef("mutation/"), LiteralStringRef("mutation0"));
 
-// FIXME: negative versions break ordering
 Key versionedMutationKey(Version version, uint32_t index) {
 	ASSERT(version >= 0);
 	BinaryWriter bw(IncludeVersion());
@@ -84,6 +83,7 @@ class SimpleConfigDatabaseNodeImpl {
 	IKeyValueStore* kvStore; // FIXME: Prevent leak
 	std::map<std::string, std::string> config;
 	ActorCollection actors{ false };
+	Version lastCompactedVersion{ 0 };
 	FlowLock globalLock;
 
 	ACTOR static Future<Version> getLiveTransactionVersion(SimpleConfigDatabaseNodeImpl *self) {
@@ -253,6 +253,31 @@ class SimpleConfigDatabaseNodeImpl {
 		return Void();
 	}
 
+	ACTOR static Future<Void> compact(SimpleConfigDatabaseNodeImpl* self, ConfigFollowerCompactRequest req) {
+		// TODO: Lock
+		Standalone<VectorRef<VersionedMutationRef>> versionedMutations = wait(getMutations(self, 0, req.version));
+		self->kvStore->clear(
+		    KeyRangeRef(mutationKeys.begin, versionedMutationKey(req.version, 100000))); // FIXME: This is a hack
+		for (const auto& versionedMutation : versionedMutations) {
+			const auto& version = versionedMutation.version;
+			const auto& mutation = versionedMutation.mutation;
+			if (version > req.version) {
+				req.reply.send(Void());
+				return Void();
+			} else if (mutation.type == MutationRef::SetValue) {
+				self->kvStore->set(KeyValueRef(mutation.param1, mutation.param2));
+			} else if (mutation.type == MutationRef::ClearRange) {
+				self->kvStore->clear(KeyRangeRef(mutation.param1, mutation.param2));
+			} else {
+				ASSERT(false);
+			}
+		}
+		wait(self->kvStore->commit());
+		req.reply.send(Void());
+		self->lastCompactedVersion = req.version;
+		return Void();
+	}
+
 	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigFollowerInterface* cfi) {
 		loop {
 			choose {
@@ -266,7 +291,7 @@ class SimpleConfigDatabaseNodeImpl {
 					self->actors.add(getChanges(self, req));
 				}
 				when(ConfigFollowerCompactRequest req = waitNext(cfi->compact.getFuture())) {
-					// TODO: Implement
+					self->actors.add(compact(self, req));
 					req.reply.send(Void());
 				}
 				when(wait(self->actors.getResult())) { ASSERT(false); }
