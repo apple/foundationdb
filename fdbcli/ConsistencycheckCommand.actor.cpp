@@ -10,7 +10,7 @@
 
 using namespace fdb_cli;
 
-ACTOR static Future<bool> consistencycheckCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens) {
+ACTOR static Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens) {
 	tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 	if (tokens.size() == 1) {
 		Optional<Value> suspended = wait(safeThreadFutureToFuture(tr->get(consistencyCheckSpeicalKey)));
@@ -32,11 +32,11 @@ namespace fdb_cli {
 
 const KeyRef consistencyCheckSpeicalKey = LiteralStringRef("\xff\xff/management/consistency_check_suspended");
 
-Future<bool> consistencycheckCommand(Reference<ITransaction> tr, std::vector<StringRef> tokens) {
-	return consistencycheckCommandActor(tr, tokens);
+Future<bool> consistencyCheckCommand(Reference<ITransaction> tr, std::vector<StringRef> tokens) {
+	return consistencyCheckCommandActor(tr, tokens);
 }
 
-CommandFactory consistencycheckFactory(
+CommandFactory consistencyCheckFactory(
     "consistencycheck",
     CommandHelp(
         "consistencycheck [on|off]",

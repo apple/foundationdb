@@ -3814,7 +3814,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "consistencycheck")) {
 					getTransaction(db, tr, tr2, options, intrans);
-					bool _result = wait(consistencycheckCommand(tr2, tokens));
+					bool _result = wait(consistencyCheckCommand(tr2, tokens));
 					is_error = !_result;
 					continue;
 				}

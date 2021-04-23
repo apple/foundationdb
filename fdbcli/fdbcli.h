@@ -62,7 +62,7 @@ void printUsage(StringRef command);
 
 // All fdbcli commands (alphabetically)
 // consistency command
-Future<bool> consistencycheckCommand(Reference<ITransaction> tr, std::vector<StringRef> tokens);
+Future<bool> consistencyCheckCommand(Reference<ITransaction> tr, std::vector<StringRef> tokens);
 
 } // namespace fdb_cli
 
