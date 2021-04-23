@@ -177,6 +177,41 @@ class SimpleConfigDatabaseNodeImpl {
 		return Void();
 	}
 
+	ACTOR static Future<Void> getRange(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionGetRangeRequest req) {
+		wait(self->globalLock.take());
+		state FlowLock::Releaser releaser(self->globalLock);
+		Version currentVersion = wait(getLiveTransactionVersion(self));
+		if (req.version != currentVersion) {
+			req.reply.sendError(transaction_too_old());
+			return Void();
+		}
+		state Standalone<RangeResultRef> range = wait(self->kvStore->readRange(req.keys));
+		Standalone<VectorRef<VersionedMutationRef>> versionedMutations = wait(getMutations(self, 0, req.version));
+		for (const auto& versionedMutation : versionedMutations) {
+			const auto& mutation = versionedMutation.mutation;
+			if (mutation.type == MutationRef::Type::SetValue) {
+				for (auto& kv : range) {
+					if (kv.key == mutation.param1) {
+						kv.value = mutation.param2;
+					}
+				}
+			} else if (mutation.type == MutationRef::Type::ClearRange) {
+				// FIXME: This is very inefficient
+				Standalone<RangeResultRef> newRange;
+				for (const auto& kv : range) {
+					if (kv.key < mutation.param1 || kv.key > mutation.param2) {
+						newRange.push_back_deep(newRange.arena(), kv);
+					}
+				}
+				range = std::move(newRange);
+			} else {
+				ASSERT(false);
+			}
+		}
+		req.reply.send(ConfigTransactionGetRangeReply(range));
+		return Void();
+	}
+
 	ACTOR static Future<Void> commit(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionCommitRequest req) {
 		wait(self->globalLock.take());
 		state FlowLock::Releaser releaser(self->globalLock);
@@ -226,6 +261,9 @@ class SimpleConfigDatabaseNodeImpl {
 				}
 				when(ConfigTransactionCommitRequest req = waitNext(cti->commit.getFuture())) {
 					self->actors.add(commit(self, req));
+				}
+				when(ConfigTransactionGetRangeRequest req = waitNext(cti->getRange.getFuture())) {
+					self->actors.add(getRange(self, req));
 				}
 				when(wait(self->actors.getResult())) { ASSERT(false); }
 			}

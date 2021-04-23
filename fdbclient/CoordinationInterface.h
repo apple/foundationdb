@@ -36,7 +36,8 @@ constexpr UID WLTOKEN_CLIENTLEADERREG_OPENDATABASE(-1, 3);
 constexpr UID WLTOKEN_PROTOCOL_INFO(-1, 10);
 constexpr UID WLTOKEN_CONFIGTXN_GETVERSION(-1, 11);
 constexpr UID WLTOKEN_CONFIGTXN_GET(-1, 12);
-constexpr UID WLTOKEN_CONFIGTXN_COMMIT(-1, 13);
+constexpr UID WLTOKEN_CONFIGTXN_GETRANGE(-1, 13);
+constexpr UID WLTOKEN_CONFIGTXN_COMMIT(-1, 14);
 
 struct ClientLeaderRegInterface {
 	RequestStream<struct GetLeaderRequest> getLeader;

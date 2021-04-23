@@ -33,6 +33,7 @@ public:
 	virtual void set(KeyRef key, ValueRef value) = 0;
 	virtual void clearRange(KeyRef begin, KeyRef end) = 0;
 	virtual Future<Optional<Value>> get(KeyRef) = 0;
+	virtual Future<Standalone<RangeResultRef>> getRange(KeyRangeRef) = 0;
 	virtual Future<Void> commit() = 0;
 	virtual Future<Void> onError(Error const&) = 0;
 	virtual Future<Version> getVersion() = 0;
@@ -49,6 +50,7 @@ public:
 	void set(KeyRef begin, KeyRef end) override;
 	void clearRange(KeyRef begin, KeyRef end) override;
 	Future<Optional<Value>> get(KeyRef) override;
+	Future<Standalone<RangeResultRef>> getRange(KeyRangeRef) override;
 	Future<Void> commit() override;
 	Future<Void> onError(Error const&) override;
 	Future<Version> getVersion() override;

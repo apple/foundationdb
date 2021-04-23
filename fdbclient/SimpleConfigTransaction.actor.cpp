@@ -47,6 +47,16 @@ class SimpleConfigTransactionImpl {
 		return result.value;
 	}
 
+	ACTOR static Future<Standalone<RangeResultRef>> getRange(SimpleConfigTransactionImpl* self, KeyRangeRef keys) {
+		if (!self->version.isValid()) {
+			self->version = getVersion(self);
+		}
+		Version version = wait(self->version);
+		ConfigTransactionGetRangeReply result =
+		    wait(self->cti.getRange.getReply(ConfigTransactionGetRangeRequest(version, keys)));
+		return result.range;
+	}
+
 	ACTOR static Future<Void> commit(SimpleConfigTransactionImpl* self) {
 		if (!self->version.isValid()) {
 			self->version = getVersion(self);
@@ -72,6 +82,8 @@ public:
 	}
 
 	Future<Optional<Value>> get(KeyRef key) { return get(this, key); }
+
+	Future<Standalone<RangeResultRef>> getRange(KeyRangeRef keys) { return getRange(this, keys); }
 
 	Future<Void> commit() { return commit(this); }
 
@@ -111,6 +123,10 @@ void SimpleConfigTransaction::clearRange(KeyRef begin, KeyRef end) {
 
 Future<Optional<Value>> SimpleConfigTransaction::get(KeyRef key) {
 	return impl->get(key);
+}
+
+Future<Standalone<RangeResultRef>> SimpleConfigTransaction::getRange(KeyRangeRef keys) {
+	return impl->getRange(keys);
 }
 
 Future<Void> SimpleConfigTransaction::commit() {

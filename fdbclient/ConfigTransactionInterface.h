@@ -92,10 +92,40 @@ struct ConfigTransactionCommitRequest {
 	}
 };
 
+struct ConfigTransactionGetRangeReply {
+	static constexpr FileIdentifier file_identifier = 430263;
+	Standalone<RangeResultRef> range;
+
+	ConfigTransactionGetRangeReply() = default;
+	explicit ConfigTransactionGetRangeReply(Standalone<RangeResultRef> range) : range(range) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, range);
+	}
+};
+
+struct ConfigTransactionGetRangeRequest {
+	static constexpr FileIdentifier file_identifier = 987410;
+	Version version;
+	Standalone<KeyRangeRef> keys;
+	ReplyPromise<ConfigTransactionGetRangeReply> reply;
+
+	ConfigTransactionGetRangeRequest() = default;
+	explicit ConfigTransactionGetRangeRequest(Version version, Standalone<KeyRangeRef> keys)
+	  : version(version), keys(keys) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, keys, reply);
+	}
+};
+
 struct ConfigTransactionInterface {
 	static constexpr FileIdentifier file_identifier = 982485;
 	struct RequestStream<ConfigTransactionGetVersionRequest> getVersion;
 	struct RequestStream<ConfigTransactionGetRequest> get;
+	struct RequestStream<ConfigTransactionGetRangeRequest> getRange;
 	struct RequestStream<ConfigTransactionCommitRequest> commit;
 
 	ConfigTransactionInterface() = default;
@@ -103,15 +133,17 @@ struct ConfigTransactionInterface {
 	void setupWellKnownEndpoints() {
 		getVersion.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_GETVERSION, TaskPriority::Coordination);
 		get.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_GET, TaskPriority::Coordination);
+		getRange.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_GETRANGE, TaskPriority::Coordination);
 		commit.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_COMMIT, TaskPriority::Coordination);
 	}
 
 	ConfigTransactionInterface(NetworkAddress const& remote)
 	  : getVersion(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GETVERSION)),
-	    get(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GET)), commit(Endpoint({ remote }, WLTOKEN_CONFIGTXN_COMMIT)) {}
+	    get(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GET)), getRange(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GETRANGE)),
+	    commit(Endpoint({ remote }, WLTOKEN_CONFIGTXN_COMMIT)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, getVersion, get, commit);
+		serializer(ar, getVersion, get, getRange, commit);
 	}
 };
