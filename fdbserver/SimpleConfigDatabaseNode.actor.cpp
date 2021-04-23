@@ -190,11 +190,23 @@ class SimpleConfigDatabaseNodeImpl {
 		for (const auto& versionedMutation : versionedMutations) {
 			const auto& mutation = versionedMutation.mutation;
 			if (mutation.type == MutationRef::Type::SetValue) {
+				// FIXME: This is very inefficient
+				Standalone<RangeResultRef> newRange;
+				bool added = false;
 				for (auto& kv : range) {
-					if (kv.key == mutation.param1) {
+					if (kv.key > mutation.param1 && !added) {
+						newRange.push_back_deep(newRange.arena(), KeyValueRef(mutation.param1, mutation.param2));
+						added = true;
+					} else if (kv.key == mutation.param1) {
 						kv.value = mutation.param2;
+						added = true;
 					}
+					newRange.push_back_deep(newRange.arena(), kv);
 				}
+				if (!added) {
+					newRange.push_back_deep(newRange.arena(), KeyValueRef(mutation.param1, mutation.param2));
+				}
+				range = std::move(newRange);
 			} else if (mutation.type == MutationRef::Type::ClearRange) {
 				// FIXME: This is very inefficient
 				Standalone<RangeResultRef> newRange;

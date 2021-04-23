@@ -28,7 +28,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "flow/flow.h"
 
-class IConfigTransaction {
+class IConfigTransaction : public ReferenceCounted<IConfigTransaction> {
 public:
 	virtual void set(KeyRef key, ValueRef value) = 0;
 	virtual void clearRange(KeyRef begin, KeyRef end) = 0;
@@ -41,7 +41,7 @@ public:
 	virtual void fullReset() = 0;
 };
 
-class SimpleConfigTransaction : public IConfigTransaction {
+class SimpleConfigTransaction final : public IConfigTransaction {
 	std::unique_ptr<class SimpleConfigTransactionImpl> impl;
 
 public:
