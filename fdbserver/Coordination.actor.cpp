@@ -545,7 +545,8 @@ struct LeaderRegisterCollection {
 	}
 };
 
-StringRef getClusterName(Key key) {
+// extract the prefix descriptor from cluster id
+StringRef getClusterDescriptor(Key key) {
 	StringRef str = key.contents();
 	return str.eat(":");
 }
@@ -558,10 +559,10 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 	state ActorCollection forwarders(false);
 
 	wait(LeaderRegisterCollection::init(&regs));
-
+ 
 	loop choose {
-		when(CheckClusterNameMutability req = waitNext(interf.checkClusterNameMutability.getFuture())) {
-			CheckClusterNameMutabilityReply rep(SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT ? true : false);
+		when(CheckDescriptorMutable req = waitNext(interf.checkDescriptorMutable.getFuture())) {
+			CheckDescriptorMutableReply rep(SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT ? true : false);
 			req.reply.send(rep);
 		}
 		when(OpenDatabaseCoordRequest req = waitNext(interf.openDatabase.getFuture())) {
@@ -574,7 +575,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 			} else {
 				StringRef clusterName = ccf->getConnectionString().clusterKeyName();
 				if (! SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT &&
-					getClusterName(req.clusterKey).compare(clusterName)) {
+					getClusterDescriptor(req.clusterKey).compare(clusterName)) {
 					TraceEvent(SevError, "CCFMismatch")
 					    .detail("RequestType", "OpenDatabaseCoordRequest")
 					    .detail("LocalCS", ccf->getConnectionString().toString())
@@ -593,7 +594,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 			} else {
 				StringRef clusterName = ccf->getConnectionString().clusterKeyName();
 				if (! SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT &&
-					getClusterName(req.key).compare(clusterName)) {
+					getClusterDescriptor(req.key).compare(clusterName)) {
 					TraceEvent(SevError, "CCFMismatch")
 					    .detail("RequestType", "ElectionResultRequest")
 					    .detail("LocalCS", ccf->getConnectionString().toString())
@@ -613,7 +614,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 			else {
 				StringRef clusterName = ccf->getConnectionString().clusterKeyName();
 				if (! SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT &&
-					getClusterName(req.key).compare(clusterName)) {
+					getClusterDescriptor(req.key).compare(clusterName)) {
 					TraceEvent(SevError, "CCFMismatch")
 					    .detail("RequestType", "GetLeaderRequest")
 					    .detail("LocalCS", ccf->getConnectionString().toString())
@@ -632,7 +633,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 			else {
 				StringRef clusterName = ccf->getConnectionString().clusterKeyName();
 				if (! SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT &&
-					getClusterName(req.key).compare(clusterName)) {
+					getClusterDescriptor(req.key).compare(clusterName)) {
 					TraceEvent(SevError, "CCFMismatch")
 					    .detail("RequestType", "CandidacyRequest")
 					    .detail("LocalCS", ccf->getConnectionString().toString())
@@ -650,7 +651,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 			else {
 				StringRef clusterName = ccf->getConnectionString().clusterKeyName();
 				if (! SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT &&
-					getClusterName(req.key).compare(clusterName)) {
+					getClusterDescriptor(req.key).compare(clusterName)) {
 					TraceEvent(SevError, "CCFMismatch")
 					    .detail("RequestType", "LeaderHeartbeatRequest")
 					    .detail("LocalCS", ccf->getConnectionString().toString())
@@ -668,7 +669,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 			else {
 				StringRef clusterName = ccf->getConnectionString().clusterKeyName();
 				if (! SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT &&
-					getClusterName(req.key).compare(clusterName)) {
+					getClusterDescriptor(req.key).compare(clusterName)) {
 					TraceEvent(SevError, "CCFMismatch")
 					    .detail("RequestType", "ForwardRequest")
 					    .detail("LocalCS", ccf->getConnectionString().toString())

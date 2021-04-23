@@ -381,12 +381,12 @@ ClientCoordinators::ClientCoordinators(Key clusterKey, std::vector<NetworkAddres
 ClientLeaderRegInterface::ClientLeaderRegInterface(NetworkAddress remote)
   : getLeader(Endpoint({ remote }, WLTOKEN_CLIENTLEADERREG_GETLEADER)),
     openDatabase(Endpoint({ remote }, WLTOKEN_CLIENTLEADERREG_OPENDATABASE)),
-    checkClusterNameMutability(Endpoint({ remote }, WLTOKEN_CLIENTLEADERREG_DESCRIPTOR_MUTABLE)) {}
+    checkDescriptorMutable(Endpoint({ remote }, WLTOKEN_CLIENTLEADERREG_DESCRIPTOR_MUTABLE)) {}
 
 ClientLeaderRegInterface::ClientLeaderRegInterface(INetwork* local) {
 	getLeader.makeWellKnownEndpoint(WLTOKEN_CLIENTLEADERREG_GETLEADER, TaskPriority::Coordination);
 	openDatabase.makeWellKnownEndpoint(WLTOKEN_CLIENTLEADERREG_OPENDATABASE, TaskPriority::Coordination);
-	checkClusterNameMutability.makeWellKnownEndpoint(WLTOKEN_CLIENTLEADERREG_DESCRIPTOR_MUTABLE, TaskPriority::Coordination);
+	checkDescriptorMutable.makeWellKnownEndpoint(WLTOKEN_CLIENTLEADERREG_DESCRIPTOR_MUTABLE, TaskPriority::Coordination);
 }
 
 // Nominee is the worker among all workers that are considered as leader by a coordinator
