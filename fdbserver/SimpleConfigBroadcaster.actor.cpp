@@ -82,6 +82,7 @@ class SimpleConfigBroadcasterImpl {
 						if (mutation.type == MutationRef::SetValue) {
 							reply.database[mutation.param1] = mutation.param2;
 						} else if (mutation.type == MutationRef::ClearRange) {
+							// FIXME: Should be inclusive of end bound
 							reply.database.erase(reply.database.find(mutation.param1), reply.database.find(mutation.param2));
 						} else {
 							ASSERT(false);
@@ -110,6 +111,7 @@ class SimpleConfigBroadcasterImpl {
 						} else if (mutation.type == MutationRef::SetValue) {
 							self->database[mutation.param1] = mutation.param2;
 						} else if (mutation.type == MutationRef::ClearRange) {
+							// FIXME: Should be inclusive of end bound
 							self->database.erase(self->database.find(mutation.param1),
 							                     self->database.find(mutation.param2));
 						} else {
