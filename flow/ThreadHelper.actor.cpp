@@ -22,6 +22,7 @@
 #include "flow/Error.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/flow.h"
 #include <string>
 
 ThreadCallback* ThreadCallback::addCallback(ThreadCallback* cb) {
@@ -36,7 +37,7 @@ struct ThreadFutureSendObj {
 
 // A simple thread object that cancels the threadFuture
 struct ThreadFutureCancelObj {
-	ThreadFutureCancelObj(ThreadSingleAssignmentVar<Void>* tsav) : f(tsav) {}
+	ThreadFutureCancelObj(ThreadFuture<Void> f) : f(f) {}
 	void operator()() { f.cancel(); }
 	ThreadFuture<Void> f;
 };
@@ -52,13 +53,12 @@ TEST_CASE("/safeThreadFutureSend") {
 	return Void();
 }
 
-// This unit test should be running with TSAN enabled binary
+// Test the case where the underlying threadFuture is cancelled
 TEST_CASE("/safeThreadFutureCancel") {
-	auto* tsav = new ThreadSingleAssignmentVar<Void>;
-	state std::thread thread = std::thread{ ThreadFutureCancelObj(tsav) };
+	ThreadFuture<Void> f = onMainThread([]() -> Future<Void> { return Never(); });
+	state std::thread thread = std::thread{ ThreadFutureCancelObj(f) };
 	try {
-		ThreadFuture<Void> f(tsav);
-		wait(safeThreadFutureToFuture(f)); // this actor should be thrown actor_cancelled
+		wait(safeThreadFutureToFuture(f)); // this actor should get actor_cancelled
 		ASSERT(false);
 	} catch (Error& e) {
 		ASSERT(e.code() == error_code_actor_cancelled);
