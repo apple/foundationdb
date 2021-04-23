@@ -29,6 +29,7 @@ class SimpleConfigTransactionImpl {
 	Standalone<VectorRef<MutationRef>> mutations;
 	Future<Version> version;
 	ConfigTransactionInterface cti;
+	int numRetries{ 0 };
 
 	ACTOR static Future<Version> getVersion(SimpleConfigTransactionImpl* self) {
 		ConfigTransactionGetVersionRequest req;
@@ -74,11 +75,29 @@ public:
 
 	Future<Void> commit() { return commit(this); }
 
-	Future<Void> onError(Error const& e) { throw e; }
+	Future<Void> onError(Error const& e) {
+		// TODO: Improve this:
+		if (e.code() == error_code_transaction_too_old) {
+			reset();
+			return delay((1 << numRetries++) * 0.01 * deterministicRandom()->random01());
+		}
+		throw e;
+	}
+
+	Future<Version> getVersion() {
+		if (!version.isValid())
+			version = getVersion(this);
+		return version;
+	}
 
 	void reset() {
-		version.cancel();
+		version = Future<Version>{};
 		mutations = Standalone<VectorRef<MutationRef>>{};
+	}
+
+	void fullReset() {
+		numRetries = 0;
+		reset();
 	}
 };
 
@@ -102,7 +121,15 @@ Future<Void> SimpleConfigTransaction::onError(Error const& e) {
 	return impl->onError(e);
 }
 
+Future<Version> SimpleConfigTransaction::getVersion() {
+	return impl->getVersion();
+}
+
 void SimpleConfigTransaction::reset() {
+	return impl->reset();
+}
+
+void SimpleConfigTransaction::fullReset() {
 	return impl->reset();
 }
 

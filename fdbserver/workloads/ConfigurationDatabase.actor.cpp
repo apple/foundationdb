@@ -148,8 +148,8 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 
 public:
 	ConfigurationDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		numIncrements = getOption(options, "numIncrements"_sr, 100);
-		numClients = getOption(options, "numClients"_sr, 1);
+		numIncrements = getOption(options, "numIncrements"_sr, 10);
+		numClients = getOption(options, "numClients"_sr, 2);
 		numBroadcasters = getOption(options, "numBroadcasters"_sr, 2);
 		numConsumersPerBroadcaster = getOption(options, "numConsumersPerBroadcaster"_sr, 2);
 	}
