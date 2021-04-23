@@ -88,7 +88,6 @@ struct ActorLineageRequest {
 	WaitState waitStateStart, waitStateEnd;
 	double timeStart, timeEnd;
 	int seqStart, seqEnd;
-	// TODO: Add end values
 	ReplyPromise<ActorLineageReply> reply;
 
 	template <class Ar>
