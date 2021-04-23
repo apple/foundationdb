@@ -3190,8 +3190,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	try {
 		db2 = API->createDatabase(opt.clusterFile.c_str());
 	} catch (Error& e) {
-		fprintf(stderr, "(CAPI)ERROR: %s (%d)\n", e.what(), e.code());
-		printf("(Refactoring): Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
+		fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code());
+		printf("Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
 		return 1;
 	}
 
