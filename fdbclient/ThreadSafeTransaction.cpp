@@ -152,6 +152,12 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx) {
 	    nullptr);
 }
 
+// This constructor is only used while refactoring fdbcli and only called from the main thread
+ThreadSafeTransaction::ThreadSafeTransaction(ReadYourWritesTransaction* ryw) : tr(ryw) {
+	if (tr)
+		tr->addref();
+}
+
 ThreadSafeTransaction::~ThreadSafeTransaction() {
 	ReadYourWritesTransaction* tr = this->tr;
 	if (tr)

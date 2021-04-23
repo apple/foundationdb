@@ -36,6 +36,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/TagThrottle.h"
 
+#include "fdbclient/ThreadSafeTransaction.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Platform.h"
 
@@ -178,6 +179,13 @@ public:
 
 	// Applies all enabled transaction options to the given transaction
 	void apply(Reference<ReadYourWritesTransaction> tr) {
+		for (const auto& [name, value] : transactionOptions.options) {
+			tr->setOption(name, value.castTo<StringRef>());
+		}
+	}
+
+	// TODO: replace the above function after we refactor all fdbcli code
+	void apply(Reference<ITransaction> tr) {
 		for (const auto& [name, value] : transactionOptions.options) {
 			tr->setOption(name, value.castTo<StringRef>());
 		}
@@ -2653,6 +2661,20 @@ Reference<ReadYourWritesTransaction> getTransaction(Database db,
 	return tr;
 }
 
+// TODO: Update this function to get rid of Database and ReadYourWritesTransaction after refactoring
+Reference<ITransaction> getTransaction(Database db,
+                                       Reference<ReadYourWritesTransaction>& tr,
+                                       Reference<ITransaction>& tr2,
+                                       FdbOptions* options,
+                                       bool intrans) {
+	if (!tr || !intrans) {
+		tr = makeReference<ReadYourWritesTransaction>(db);
+		options->apply(tr);
+	}
+	tr2 = Reference<ITransaction>(new ThreadSafeTransaction(tr.getPtr()));
+	return tr2;
+}
+
 std::string newCompletion(const char* base, const char* name) {
 	return format("%s%s ", base, name);
 }
@@ -3124,8 +3146,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	state Database db;
 	state Reference<ReadYourWritesTransaction> tr;
-	// Note: refactoring work, will replace db when we have all commands through the general fdb interface
+	// TODO: refactoring work, will replace db, tr when we have all commands through the general fdb interface
 	state Reference<IDatabase> db2;
+	state Reference<ITransaction> tr2;
 
 	state bool writeMode = false;
 
@@ -3790,7 +3813,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "consistencycheck")) {
-					bool _result = wait(consistencycheckCommand(db2, tokens));
+					getTransaction(db, tr, tr2, options, intrans);
+					bool _result = wait(consistencycheckCommand(tr2, tokens));
 					is_error = !_result;
 					continue;
 				}
