@@ -36,7 +36,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 	int numConsumersPerBroadcaster;
 	double meanSleepBetweenTransactions;
 	double meanSleepWithinTransaction;
-	double transactionTooOldErrors{ 0.0 };
+	int transactionTooOldErrors{ 0 };
 	Promise<int> expectedTotal; // when clients finish, publish expected total value here
 
 	ACTOR static Future<int> getCurrentValue(Database cx, Key key) {
