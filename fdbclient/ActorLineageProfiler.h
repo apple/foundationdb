@@ -78,7 +78,7 @@ class SampleCollection_t {
 
 	SampleCollector _collector;
 	mutable std::mutex mutex;
-	std::atomic<double> windowSize = 5.0;
+	std::atomic<double> windowSize = 0.0;
 	std::deque<std::shared_ptr<Sample>> data;
 
 public:
