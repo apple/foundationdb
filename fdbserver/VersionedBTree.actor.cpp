@@ -8787,6 +8787,7 @@ TEST_CASE(":/redwood/performance/set") {
 	state int concurrentScans = params.getInt("concurrentScans").orDefault(64);
 	state int seeks = params.getInt("seeks").orDefault(1000000);
 	state int scans = params.getInt("scans").orDefault(20000);
+	state bool pagerMemoryOnly = params.getInt("pagerMemoryOnly").orDefault(0);
 
 	printf("pageSize: %d\n", pageSize);
 	printf("pageCacheBytes: %" PRId64 "\n", pageCacheBytes);
@@ -8815,7 +8816,7 @@ TEST_CASE(":/redwood/performance/set") {
 		deleteFile(fileName);
 	}
 
-	DWALPager* pager = new DWALPager(pageSize, fileName, pageCacheBytes, remapCleanupWindow);
+	DWALPager* pager = new DWALPager(pageSize, fileName, pageCacheBytes, remapCleanupWindow, pagerMemoryOnly);
 	state VersionedBTree* btree = new VersionedBTree(pager, fileName);
 	wait(btree->init());
 	printf("Initialized.  StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
