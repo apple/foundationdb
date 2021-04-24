@@ -2616,6 +2616,8 @@ struct RedwoodRecordRef {
 
 	typedef KeyRef Partial;
 
+	void updateCache(Optional<Partial> cache, Arena& arena) const { cache = KeyRef(arena, key); }
+
 	KeyValueRef toKeyValueRef() const { return KeyValueRef(key, value.get()); }
 
 	// RedwoodRecordRefs are used for both internal and leaf pages of the BTree.
@@ -7128,6 +7130,8 @@ struct IntIntPair {
 	IntIntPair(Arena& arena, const IntIntPair& toCopy) { *this = toCopy; }
 
 	typedef IntIntPair Partial;
+
+	void updateCache(Optional<Partial> cache, Arena& arena) const {}
 	struct Delta {
 		bool prefixSource;
 		bool deleted;
@@ -7581,8 +7585,9 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 
 TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 	// Sanity check on delta tree node format
-	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(false) == 8);
-	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(true) == 16);
+	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(false) == 4);
+	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(true) == 8);
+	ASSERT(sizeof(DeltaTree2<RedwoodRecordRef>::DecodedNode) == 28);
 
 	const int N = deterministicRandom()->randomInt(200, 1000);
 
@@ -7822,7 +7827,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 
 	// Iterate through items and tree forward and backward, verifying tree contents.
 	auto scanAndVerify = [&]() {
-		printf("Verify tree contents.\n");
+		printf("Verify DeltaTree contents.\n");
 
 		DeltaTree<IntIntPair>::Cursor fwd = r.getCursor();
 		DeltaTree<IntIntPair>::Cursor rev = r.getCursor();
@@ -7864,7 +7869,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 
 	// Iterate through items and tree forward and backward, verifying tree contents.
 	auto scanAndVerify2 = [&]() {
-		printf("Verify tree contents.\n");
+		printf("Verify DeltaTree2 contents.\n");
 
 		DeltaTree2<IntIntPair>::Cursor fwd(&cache, tree2);
 		DeltaTree2<IntIntPair>::Cursor rev(&cache, tree2);
@@ -7914,16 +7919,19 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 
 	// Grow uniqueItems until tree is full, adding half of new items to toDelete
 	std::vector<IntIntPair> toDelete;
-	while (1) {
+	int maxInsert = 9999999;
+	bool shouldBeFull = false;
+	while (maxInsert-- > 0) {
 		IntIntPair p = randomPair();
-		auto nextP = p; // also check if next highest/lowest key is not in the set
-		nextP.v++;
-		auto prevP = p;
-		prevP.v--;
-		if (uniqueItems.count(p) == 0 && uniqueItems.count(nextP) == 0 && uniqueItems.count(prevP) == 0) {
-			if (!r.insert(p)) {
+		// Insert record if it, its predecessor, and its successor are not present.
+		// Test data is intentionally sparse to test finding each record with a directional
+		// seek from each adjacent possible but not present record.
+		if (uniqueItems.count(p) == 0 && uniqueItems.count(IntIntPair(p.k, p.v - 1)) == 0 && uniqueItems.count(IntIntPair(p.k, p.v + 1)) == 0) {
+			if (!cur2.insert(p)) {
+				shouldBeFull = true;
 				break;
 			};
+			ASSERT(r.insert(p));
 			uniqueItems.insert(p);
 			if (deterministicRandom()->coinflip()) {
 				toDelete.push_back(p);
@@ -7932,7 +7940,8 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 		}
 	}
 
-	ASSERT(tree->numItems > 2 * N);
+	// If the tree refused to insert an item, the count should be at least 2*N
+	ASSERT(!shouldBeFull || tree->numItems > 2 * N);
 	ASSERT(tree->size() <= bufferSize);
 
 	// Update items vector
