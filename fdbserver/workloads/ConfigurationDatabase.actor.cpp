@@ -38,11 +38,14 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 	int numConsumersPerBroadcaster;
 	double meanSleepBetweenTransactions;
 	double meanSleepWithinTransaction;
+	double meanCompactionInterval;
 	double changeSizeProbability;
 	int swapCount{ 0 };
 	int transactionTooOldCount{ 0 };
 	int growCount{ 0 };
 	int shrinkCount{ 0 };
+	int getChangesCount{ 0 };
+	int getFullDatabaseCount{ 0 };
 	Promise<std::map<uint32_t, uint32_t>> finalSnapshot; // when clients finish, publish final snapshot here
 
 	ACTOR static Future<std::map<uint32_t, uint32_t>> getSnapshot(ConfigurationDatabaseWorkload* self, Database cx) {
@@ -207,31 +210,57 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 		for (const auto& [k, v] : reply.database) {
 			database[self->fromKey(k)] = self->fromKey(v);
 		}
+		++self->getFullDatabaseCount;
 		state Future<std::map<uint32_t, uint32_t>> finalSnapshot = self->finalSnapshot.getFuture();
 		loop {
-			state ConfigFollowerGetChangesReply changesReply =
-			    wait(cfi->getChanges.getReply(ConfigFollowerGetChangesRequest{ mostRecentVersion, {} }));
-			mostRecentVersion = changesReply.mostRecentVersion;
-			// wait(cfi->compact.getReply(ConfigFollowerCompactRequest{ mostRecentVersion }));
-			for (const auto& versionedMutation : changesReply.versionedMutations) {
-				const auto& mutation = versionedMutation.mutation;
-				if (mutation.type == MutationRef::SetValue) {
-					database[self->fromKey(mutation.param1)] = self->fromKey(mutation.param2);
-				} else if (mutation.type == MutationRef::ClearRange) {
-					auto b = database.lower_bound(self->fromKey(mutation.param1));
-					auto e = database.lower_bound(self->fromKey(mutation.param2));
-					if (e != database.end() && e->first == self->fromKey(mutation.param2)) {
-						++e;
+			try {
+				state ConfigFollowerGetChangesReply changesReply =
+				    wait(cfi->getChanges.getReply(ConfigFollowerGetChangesRequest{ mostRecentVersion, {} }));
+				mostRecentVersion = changesReply.mostRecentVersion;
+				for (const auto& versionedMutation : changesReply.versionedMutations) {
+					const auto& mutation = versionedMutation.mutation;
+					if (mutation.type == MutationRef::SetValue) {
+						database[self->fromKey(mutation.param1)] = self->fromKey(mutation.param2);
+					} else if (mutation.type == MutationRef::ClearRange) {
+						auto b = database.lower_bound(self->fromKey(mutation.param1));
+						auto e = database.lower_bound(self->fromKey(mutation.param2));
+						if (e != database.end() && e->first == self->fromKey(mutation.param2)) {
+							++e;
+						}
+						database.erase(b, e);
+					} else {
+						ASSERT(false);
 					}
-					database.erase(b, e);
+				}
+				++self->getChangesCount;
+			} catch (Error& e) {
+				if (e.code() == error_code_version_already_compacted) {
+					Version version = wait(getCurrentVersion(cfi));
+					mostRecentVersion = version;
+					ConfigFollowerGetFullDatabaseReply reply = wait(
+					    cfi->getFullDatabase.getReply(ConfigFollowerGetFullDatabaseRequest{ mostRecentVersion, {} }));
+					database.clear();
+					for (const auto& [k, v] : reply.database) {
+						database[self->fromKey(k)] = self->fromKey(v);
+					}
+					++self->getFullDatabaseCount;
 				} else {
-					ASSERT(false);
+					throw e;
 				}
 			}
 			if (finalSnapshot.isReady() && database == finalSnapshot.get()) {
 				return Void();
 			}
 			wait(delayJittered(0.5));
+		}
+	}
+
+	ACTOR static Future<Void> runCompactor(ConfigurationDatabaseWorkload* self,
+	                                       Reference<ConfigFollowerInterface> cfi) {
+		loop {
+			wait(delay(2 * deterministicRandom()->random01() * self->meanCompactionInterval));
+			Version version = wait(getCurrentVersion(cfi));
+			wait(cfi->compact.getReply(ConfigFollowerCompactRequest{ version }));
 		}
 	}
 
@@ -244,6 +273,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 		}
 		choose {
 			when(wait(waitForAll(consumers))) {}
+			when(wait(runCompactor(self, cfi))) { ASSERT(false); }
 			when(wait(broadcaster.serve(cfi))) { ASSERT(false); }
 		}
 		return Void();
@@ -282,12 +312,13 @@ public:
 		minCycleSize = getOption(options, "minCycleSize"_sr, 5);
 		initialCycleSize = getOption(options, "initialCycleSize"_sr, 10);
 		maxCycleSize = getOption(options, "maxCycleSize"_sr, 15);
-		numTransactionsPerClient = getOption(options, "numTransactionsPerClient"_sr, 10);
+		numTransactionsPerClient = getOption(options, "numTransactionsPerClient"_sr, 100);
 		numClients = getOption(options, "numClients"_sr, 10);
-		numBroadcasters = getOption(options, "numBroadcasters"_sr, 1);
-		numConsumersPerBroadcaster = getOption(options, "numConsumersPerBroadcaster"_sr, 1);
+		numBroadcasters = getOption(options, "numBroadcasters"_sr, 2);
+		numConsumersPerBroadcaster = getOption(options, "numConsumersPerBroadcaster"_sr, 2);
 		meanSleepBetweenTransactions = getOption(options, "meanSleepBetweenTransactions"_sr, 0.1);
 		meanSleepWithinTransaction = getOption(options, "meanSleepWithinTransaction"_sr, 0.01);
+		meanCompactionInterval = getOption(options, "meanCompactionInterval"_sr, 1.0);
 		changeSizeProbability = getOption(options, "changeSizeProbability"_sr, 0.1);
 	}
 	Future<Void> setup(Database const& cx) override { return clientId ? Void() : setup(this, cx); }
@@ -314,6 +345,8 @@ public:
 			m.push_back(PerfMetric("GrowCount", growCount, false));
 			m.push_back(PerfMetric("ShrinkCount", shrinkCount, false));
 			m.push_back(PerfMetric("FinalSize", finalSnapshot.getFuture().get().size(), false));
+			m.push_back(PerfMetric("GetChangesCount", getChangesCount, false));
+			m.push_back(PerfMetric("GetFullDatabaseCount", getFullDatabaseCount, false));
 		}
 	}
 };

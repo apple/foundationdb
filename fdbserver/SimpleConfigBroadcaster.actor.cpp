@@ -101,6 +101,7 @@ class SimpleConfigBroadcasterImpl {
 				when(ConfigFollowerGetChangesRequest req = waitNext(publisher->getChanges.getFuture())) {
 					if (req.lastSeenVersion < self->lastCompactedVersion) {
 						req.reply.sendError(version_already_compacted());
+						continue;
 					}
 					ConfigFollowerGetChangesReply reply;
 					reply.mostRecentVersion = self->mostRecentVersion;
