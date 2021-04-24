@@ -218,8 +218,12 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 				if (mutation.type == MutationRef::SetValue) {
 					database[self->fromKey(mutation.param1)] = self->fromKey(mutation.param2);
 				} else if (mutation.type == MutationRef::ClearRange) {
-					database.erase(database.find(self->fromKey(mutation.param1)),
-					               database.find(self->fromKey(mutation.param2) + 1));
+					auto b = database.lower_bound(self->fromKey(mutation.param1));
+					auto e = database.lower_bound(self->fromKey(mutation.param2));
+					if (e != database.end() && e->first == self->fromKey(mutation.param2)) {
+						++e;
+					}
+					database.erase(b, e);
 				} else {
 					ASSERT(false);
 				}

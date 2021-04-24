@@ -127,6 +127,9 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 	ACTOR static Future<Void> getChanges(SimpleConfigDatabaseNodeImpl *self, ConfigFollowerGetChangesRequest req) {
+		if (req.lastSeenVersion < self->lastCompactedVersion) {
+			req.reply.sendError(version_already_compacted());
+		}
 		state Version committedVersion = wait(getCommittedVersion(self));
 		Standalone<VectorRef<VersionedMutationRef>> mutations = wait(getMutations(self, req.lastSeenVersion+1, committedVersion));
 		req.reply.send(ConfigFollowerGetChangesReply{committedVersion, mutations});

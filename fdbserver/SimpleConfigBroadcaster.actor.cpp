@@ -56,6 +56,15 @@ class SimpleConfigBroadcasterImpl {
 		}
 	}
 
+	static void removeRange(std::map<Key, Value> &database, KeyRef begin, KeyRef end) {
+		auto b = database.lower_bound(begin);
+		auto e = database.lower_bound(end);
+		if (e != database.end() && e->first == end) {
+			++e;
+		}
+		database.erase(b, e);
+	}
+
 	ACTOR static Future<Void> serve(SimpleConfigBroadcasterImpl* self, Reference<ConfigFollowerInterface> publisher) {
 		ConfigFollowerGetVersionReply versionReply =
 		    wait(self->subscriber->getVersion.getReply(ConfigFollowerGetVersionRequest{}));
@@ -82,8 +91,7 @@ class SimpleConfigBroadcasterImpl {
 						if (mutation.type == MutationRef::SetValue) {
 							reply.database[mutation.param1] = mutation.param2;
 						} else if (mutation.type == MutationRef::ClearRange) {
-							// FIXME: Should be inclusive of end bound
-							reply.database.erase(reply.database.find(mutation.param1), reply.database.find(mutation.param2));
+							removeRange(reply.database, mutation.param1, mutation.param2);
 						} else {
 							ASSERT(false);
 						}
@@ -91,6 +99,9 @@ class SimpleConfigBroadcasterImpl {
 					req.reply.send(ConfigFollowerGetFullDatabaseReply{ self->database });
 				}
 				when(ConfigFollowerGetChangesRequest req = waitNext(publisher->getChanges.getFuture())) {
+					if (req.lastSeenVersion < self->lastCompactedVersion) {
+						req.reply.sendError(version_already_compacted());
+					}
 					ConfigFollowerGetChangesReply reply;
 					reply.mostRecentVersion = self->mostRecentVersion;
 					for (const auto &versionedMutation : self->versionedMutations) {
@@ -111,9 +122,7 @@ class SimpleConfigBroadcasterImpl {
 						} else if (mutation.type == MutationRef::SetValue) {
 							self->database[mutation.param1] = mutation.param2;
 						} else if (mutation.type == MutationRef::ClearRange) {
-							// FIXME: Should be inclusive of end bound
-							self->database.erase(self->database.find(mutation.param1),
-							                     self->database.find(mutation.param2));
+							removeRange(self->database, mutation.param1, mutation.param2);
 						} else {
 							ASSERT(false);
 						}
