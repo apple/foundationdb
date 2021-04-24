@@ -46,6 +46,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 	int shrinkCount{ 0 };
 	int getChangesCount{ 0 };
 	int getFullDatabaseCount{ 0 };
+	int compactionCount{ 0 };
 	Promise<std::map<uint32_t, uint32_t>> finalSnapshot; // when clients finish, publish final snapshot here
 
 	ACTOR static Future<std::map<uint32_t, uint32_t>> getSnapshot(ConfigurationDatabaseWorkload* self, Database cx) {
@@ -70,6 +71,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 	}
 
 	uint32_t fromKey(KeyRef key) const {
+		ASSERT(key.startsWith(keys.begin));
 		return fromBigEndian32(BinaryReader::fromStringRef<uint32_t>(key.removePrefix(keys.begin), Unversioned()));
 	}
 
@@ -114,7 +116,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 		    makeReference<SimpleConfigTransaction>(cx->getConnectionFile()->getConnectionString());
 		loop {
 			try {
-				int length = wait(getCycleLength(self, tr));
+				state int length = wait(getCycleLength(self, tr));
 				if (length == self->maxCycleSize) {
 					return Void();
 				}
@@ -142,6 +144,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 		    makeReference<SimpleConfigTransaction>(cx->getConnectionFile()->getConnectionString());
 		loop {
 			try {
+				state Version currentVersion = wait(tr->getVersion());
 				state Standalone<RangeResultRef> range = wait(tr->getRange(self->keys));
 				if (range.size() == self->minCycleSize) {
 					return Void();
@@ -156,7 +159,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 						k2 = kv.value;
 					}
 				}
-				tr->clearRange(k1, k1);
+				tr->clear(k1);
 				tr->set(k0, k2);
 				wait(tr->commit());
 				++self->shrinkCount;
@@ -222,12 +225,10 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 					if (mutation.type == MutationRef::SetValue) {
 						database[self->fromKey(mutation.param1)] = self->fromKey(mutation.param2);
 					} else if (mutation.type == MutationRef::ClearRange) {
-						auto b = database.lower_bound(self->fromKey(mutation.param1));
-						auto e = database.lower_bound(self->fromKey(mutation.param2));
-						if (e != database.end() && e->first == self->fromKey(mutation.param2)) {
-							++e;
-						}
-						database.erase(b, e);
+						// FIXME: Here we're assuming all clears are point clears on existing keys
+						auto it = database.find(self->fromKey(mutation.param1));
+						ASSERT(it != database.end());
+						database.erase(it);
 					} else {
 						ASSERT(false);
 					}
@@ -261,6 +262,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 			wait(delay(2 * deterministicRandom()->random01() * self->meanCompactionInterval));
 			Version version = wait(getCurrentVersion(cfi));
 			wait(cfi->compact.getReply(ConfigFollowerCompactRequest{ version }));
+			++self->compactionCount;
 		}
 	}
 
@@ -329,7 +331,7 @@ public:
 		}
 		// Validate cycle invariant
 		auto snapshot = finalSnapshot.getFuture().get();
-		int current = 0;
+		uint32_t current = 0;
 		for (int i = 0; i < snapshot.size(); ++i) {
 			if (i > 0 && current == 0)
 				return false;
@@ -347,6 +349,7 @@ public:
 			m.push_back(PerfMetric("FinalSize", finalSnapshot.getFuture().get().size(), false));
 			m.push_back(PerfMetric("GetChangesCount", getChangesCount, false));
 			m.push_back(PerfMetric("GetFullDatabaseCount", getFullDatabaseCount, false));
+			m.push_back(PerfMetric("CompactionCount", compactionCount, false));
 		}
 	}
 };

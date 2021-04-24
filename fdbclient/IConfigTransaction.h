@@ -31,6 +31,7 @@
 class IConfigTransaction : public ReferenceCounted<IConfigTransaction> {
 public:
 	virtual void set(KeyRef key, ValueRef value) = 0;
+	virtual void clear(KeyRef) = 0;
 	virtual void clearRange(KeyRef begin, KeyRef end) = 0;
 	virtual Future<Optional<Value>> get(KeyRef) = 0;
 	virtual Future<Standalone<RangeResultRef>> getRange(KeyRangeRef) = 0;
@@ -48,6 +49,7 @@ public:
 	SimpleConfigTransaction(ClusterConnectionString const&);
 	~SimpleConfigTransaction();
 	void set(KeyRef begin, KeyRef end) override;
+	void clear(KeyRef) override;
 	void clearRange(KeyRef begin, KeyRef end) override;
 	Future<Optional<Value>> get(KeyRef) override;
 	Future<Standalone<RangeResultRef>> getRange(KeyRangeRef) override;

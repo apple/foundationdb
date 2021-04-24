@@ -30,6 +30,7 @@
 
 namespace {
 
+const KeyRef lastCompactedVersionKey = LiteralStringRef("lastCompactedVersion");
 const KeyRef liveTransactionVersionKey = LiteralStringRef("liveTransactionVersion");
 const KeyRef committedVersionKey = LiteralStringRef("committedVersion");
 const KeyRangeRef kvKeys = KeyRangeRef(LiteralStringRef("kv/"), LiteralStringRef("kv0"));
@@ -45,6 +46,7 @@ Key versionedMutationKey(Version version, uint32_t index) {
 
 Version getVersionFromVersionedMutationKey(KeyRef versionedMutationKey) {
 	uint64_t bigEndianResult;
+	ASSERT(versionedMutationKey.startsWith(mutationKeys.begin));
 	BinaryReader br(versionedMutationKey.removePrefix(mutationKeys.begin), IncludeVersion());
 	br >> bigEndianResult;
 	return fromBigEndian64(bigEndianResult);
@@ -83,7 +85,6 @@ class SimpleConfigDatabaseNodeImpl {
 	IKeyValueStore* kvStore; // FIXME: Prevent leak
 	std::map<std::string, std::string> config;
 	ActorCollection actors{ false };
-	Version lastCompactedVersion{ 0 };
 	FlowLock globalLock;
 
 	ACTOR static Future<Version> getLiveTransactionVersion(SimpleConfigDatabaseNodeImpl *self) {
@@ -110,6 +111,19 @@ class SimpleConfigDatabaseNodeImpl {
 		return committedVersion;
 	}
 
+	ACTOR static Future<Version> getLastCompactedVersion(SimpleConfigDatabaseNodeImpl* self) {
+		Optional<Value> value = wait(self->kvStore->readValue(lastCompactedVersionKey));
+		state Version lastCompactedVersion = 0;
+		if (value.present()) {
+			lastCompactedVersion = BinaryReader::fromStringRef<Version>(value.get(), IncludeVersion());
+		} else {
+			self->kvStore->set(
+			    KeyValueRef(lastCompactedVersionKey, BinaryWriter::toValue(lastCompactedVersion, IncludeVersion())));
+			wait(self->kvStore->commit());
+		}
+		return lastCompactedVersion;
+	}
+
 	ACTOR static Future<Standalone<VectorRef<VersionedMutationRef>>> getMutations(SimpleConfigDatabaseNodeImpl *self, Version startVersion, Version endVersion) {
 		Key startVersionKey = versionedMutationKey(startVersion, 0);
 		state KeyRangeRef keys(startVersionKey, mutationKeys.end);
@@ -127,13 +141,17 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 	ACTOR static Future<Void> getChanges(SimpleConfigDatabaseNodeImpl *self, ConfigFollowerGetChangesRequest req) {
-		if (req.lastSeenVersion < self->lastCompactedVersion) {
+		wait(self->globalLock.take());
+		state FlowLock::Releaser releaser(self->globalLock);
+		Version lastCompactedVersion = wait(getLastCompactedVersion(self));
+		if (req.lastSeenVersion < lastCompactedVersion) {
 			req.reply.sendError(version_already_compacted());
 			return Void();
 		}
 		state Version committedVersion = wait(getCommittedVersion(self));
-		Standalone<VectorRef<VersionedMutationRef>> mutations = wait(getMutations(self, req.lastSeenVersion+1, committedVersion));
-		req.reply.send(ConfigFollowerGetChangesReply{committedVersion, mutations});
+		Standalone<VectorRef<VersionedMutationRef>> versionedMutations =
+		    wait(getMutations(self, req.lastSeenVersion + 1, committedVersion));
+		req.reply.send(ConfigFollowerGetChangesReply{ committedVersion, versionedMutations });
 		return Void();
 	}
 
@@ -189,7 +207,12 @@ class SimpleConfigDatabaseNodeImpl {
 			req.reply.sendError(transaction_too_old());
 			return Void();
 		}
-		state Standalone<RangeResultRef> range = wait(self->kvStore->readRange(req.keys));
+		state Standalone<RangeResultRef> range = wait(self->kvStore->readRange(req.keys.withPrefix(kvKeys.begin)));
+		// FIXME: Inefficient
+		for (auto& kv : range) {
+			ASSERT(kv.key.startsWith(kvKeys.begin));
+			kv.key = kv.key.removePrefix(kvKeys.begin);
+		}
 		Standalone<VectorRef<VersionedMutationRef>> versionedMutations = wait(getMutations(self, 0, req.version));
 		for (const auto& versionedMutation : versionedMutations) {
 			const auto& mutation = versionedMutation.mutation;
@@ -249,6 +272,8 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 	ACTOR static Future<Void> traceQueuedMutations(SimpleConfigDatabaseNodeImpl *self) {
+		wait(self->globalLock.take());
+		state FlowLock::Releaser releaser(self->globalLock);
 		state Version currentVersion = wait(getCommittedVersion(self));
 		Standalone<VectorRef<VersionedMutationRef>> versionedMutations = wait(getMutations(self, 0, currentVersion));
 		TraceEvent te("SimpleConfigNodeQueuedMutations");
@@ -288,6 +313,8 @@ class SimpleConfigDatabaseNodeImpl {
 
 	ACTOR static Future<Void> getFullDatabase(SimpleConfigDatabaseNodeImpl* self,
 	                                          ConfigFollowerGetFullDatabaseRequest req) {
+		wait(self->globalLock.take());
+		state FlowLock::Releaser releaser(self->globalLock);
 		state ConfigFollowerGetFullDatabaseReply reply;
 		Standalone<RangeResultRef> data = wait(self->kvStore->readRange(kvKeys));
 		for (const auto& kv : data) {
@@ -308,10 +335,17 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 	ACTOR static Future<Void> compact(SimpleConfigDatabaseNodeImpl* self, ConfigFollowerCompactRequest req) {
-		// TODO: Lock
-		Standalone<VectorRef<VersionedMutationRef>> versionedMutations = wait(getMutations(self, 0, req.version));
+		wait(self->globalLock.take());
+		state FlowLock::Releaser releaser(self->globalLock);
+		state Version lastCompactedVersion = wait(getLastCompactedVersion(self));
+		if (req.version <= lastCompactedVersion) {
+			req.reply.send(Void());
+			return Void();
+		}
+		Standalone<VectorRef<VersionedMutationRef>> versionedMutations =
+		    wait(getMutations(self, lastCompactedVersion + 1, req.version));
 		self->kvStore->clear(
-		    KeyRangeRef(mutationKeys.begin, versionedMutationKey(req.version, 100000))); // FIXME: This is a hack
+		    KeyRangeRef(versionedMutationKey(lastCompactedVersion + 1, 0), versionedMutationKey(req.version + 1, 0)));
 		for (const auto& versionedMutation : versionedMutations) {
 			const auto& version = versionedMutation.version;
 			const auto& mutation = versionedMutation.mutation;
@@ -319,16 +353,18 @@ class SimpleConfigDatabaseNodeImpl {
 				req.reply.send(Void());
 				return Void();
 			} else if (mutation.type == MutationRef::SetValue) {
-				self->kvStore->set(KeyValueRef(mutation.param1, mutation.param2));
+				self->kvStore->set(KeyValueRef(mutation.param1.withPrefix(kvKeys.begin), mutation.param2));
 			} else if (mutation.type == MutationRef::ClearRange) {
-				self->kvStore->clear(KeyRangeRef(mutation.param1, mutation.param2));
+				self->kvStore->clear(
+				    KeyRangeRef(mutation.param1.withPrefix(kvKeys.begin), mutation.param2.withPrefix(kvKeys.begin)));
 			} else {
 				ASSERT(false);
 			}
 		}
+		self->kvStore->set(
+		    KeyValueRef(lastCompactedVersionKey, BinaryWriter::toValue(lastCompactedVersion, IncludeVersion())));
 		wait(self->kvStore->commit());
 		req.reply.send(Void());
-		self->lastCompactedVersion = req.version;
 		return Void();
 	}
 
@@ -346,7 +382,6 @@ class SimpleConfigDatabaseNodeImpl {
 				}
 				when(ConfigFollowerCompactRequest req = waitNext(cfi->compact.getFuture())) {
 					self->actors.add(compact(self, req));
-					req.reply.send(Void());
 				}
 				when(wait(self->actors.getResult())) { ASSERT(false); }
 			}

@@ -30,16 +30,34 @@ class SimpleConfigBroadcasterImpl {
 	ActorCollection actors{ false };
 
 	static const double POLLING_INTERVAL; // TODO: Make knob?
+	static const double COMPACTION_INTERVAL; // TODO: Make knob?
 
 	ACTOR static Future<Void> fetchUpdates(SimpleConfigBroadcasterImpl *self) {
 		loop {
-			ConfigFollowerGetChangesReply reply = wait(
-			    self->subscriber->getChanges.getReply(ConfigFollowerGetChangesRequest{ self->mostRecentVersion, {} }));
-			for (const auto &versionedMutation : reply.versionedMutations) {
-				self->versionedMutations.push_back(versionedMutation);
+			try {
+				ConfigFollowerGetChangesReply reply = wait(self->subscriber->getChanges.getReply(
+				    ConfigFollowerGetChangesRequest{ self->mostRecentVersion, {} }));
+				for (const auto& versionedMutation : reply.versionedMutations) {
+					self->versionedMutations.push_back(versionedMutation);
+				}
+				self->mostRecentVersion = reply.mostRecentVersion;
+				wait(delayJittered(POLLING_INTERVAL));
+			} catch (Error& e) {
+				if (e.code() == error_code_version_already_compacted) {
+					ConfigFollowerGetFullDatabaseReply reply = wait(self->subscriber->getFullDatabase.getReply(
+					    ConfigFollowerGetFullDatabaseRequest{ self->mostRecentVersion, Optional<Value>{} }));
+					self->database = reply.database;
+				} else {
+					throw e;
+				}
 			}
-			self->mostRecentVersion = reply.mostRecentVersion;
-			wait(delay(POLLING_INTERVAL));
+		}
+	}
+
+	ACTOR static Future<Void> compactor(SimpleConfigBroadcasterImpl* self) {
+		loop {
+			wait(delayJittered(COMPACTION_INTERVAL));
+			wait(self->subscriber->compact.getReply(ConfigFollowerCompactRequest{ self->mostRecentVersion }));
 		}
 	}
 
@@ -57,11 +75,9 @@ class SimpleConfigBroadcasterImpl {
 	}
 
 	static void removeRange(std::map<Key, Value> &database, KeyRef begin, KeyRef end) {
+		ASSERT(end >= begin);
 		auto b = database.lower_bound(begin);
 		auto e = database.lower_bound(end);
-		if (e != database.end() && e->first == end) {
-			++e;
-		}
 		database.erase(b, e);
 	}
 
@@ -73,6 +89,7 @@ class SimpleConfigBroadcasterImpl {
 		    ConfigFollowerGetFullDatabaseRequest{ self->mostRecentVersion, Optional<Value>{} }));
 		self->database = reply.database;
 		self->actors.add(fetchUpdates(self));
+		self->actors.add(compactor(self));
 		loop {
 			//self->traceQueuedMutations();
 			choose {
@@ -148,6 +165,7 @@ public:
 };
 
 const double SimpleConfigBroadcasterImpl::POLLING_INTERVAL = 0.5;
+const double SimpleConfigBroadcasterImpl::COMPACTION_INTERVAL = 5.0;
 
 SimpleConfigBroadcaster::SimpleConfigBroadcaster(ClusterConnectionString const& ccs)
   : impl(std::make_unique<SimpleConfigBroadcasterImpl>(ccs)) {}

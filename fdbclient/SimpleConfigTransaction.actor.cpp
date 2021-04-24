@@ -77,6 +77,11 @@ public:
 		mutations.emplace_back_deep(mutations.arena(), MutationRef::Type::SetValue, key, value);
 	}
 
+	void clear(KeyRef key) {
+		mutations.emplace_back_deep(mutations.arena(), MutationRef::Type::ClearRange, key, keyAfter(key));
+		ASSERT(keyAfter(key) > key);
+	}
+
 	void clearRange(KeyRef begin, KeyRef end) {
 		mutations.emplace_back_deep(mutations.arena(), MutationRef::Type::ClearRange, begin, end);
 	}
@@ -115,6 +120,10 @@ public:
 
 void SimpleConfigTransaction::set(KeyRef key, ValueRef value) {
 	impl->set(key, value);
+}
+
+void SimpleConfigTransaction::clear(KeyRef key) {
+	impl->clear(key);
 }
 
 void SimpleConfigTransaction::clearRange(KeyRef begin, KeyRef end) {
