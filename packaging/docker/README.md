@@ -80,11 +80,10 @@ files you may want to copy are:
 
 # Example Usages
 
-### Release Images
+```
+# optional; to build a release image (as in for public consumption, or deployment at apple) for 7.0.0, set TAG=7.0.0
+# defaults to <fdb version triple>-<okteto environment name>  e.g., 7.0.0-sears-dev
+#TAG=my-custom-tag
 
-cd src/foundationdb/packaging/docker
-
-docker build -f release/Dockerfile -t foundationDB:foundationDB:6.2.29 . --build-arg FDB_VERSION=6.2.29
-
-### Developer Images
-
+. build-release-docker.sh
+```
