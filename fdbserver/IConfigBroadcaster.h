@@ -23,12 +23,11 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbserver/ConfigFollowerInterface.h"
 #include "flow/flow.h"
-#include "flow/FastRef.h"
 #include <memory>
 
 class IConfigBroadcaster {
 public:
-	virtual Future<Void> serve(Reference<ConfigFollowerInterface>) = 0;
+	virtual Future<Void> serve(ConfigFollowerInterface&) = 0;
 };
 
 class SimpleConfigBroadcaster : public IConfigBroadcaster {
@@ -37,5 +36,5 @@ class SimpleConfigBroadcaster : public IConfigBroadcaster {
 public:
 	SimpleConfigBroadcaster(ClusterConnectionString const&);
 	~SimpleConfigBroadcaster();
-	Future<Void> serve(Reference<ConfigFollowerInterface>) override;
+	Future<Void> serve(ConfigFollowerInterface&) override;
 };

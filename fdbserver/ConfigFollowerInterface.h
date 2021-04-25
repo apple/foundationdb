@@ -138,7 +138,7 @@ struct ConfigFollowerCompactRequest {
 	}
 };
 
-struct ConfigFollowerInterface final : ReferenceCounted<ConfigFollowerInterface> {
+struct ConfigFollowerInterface {
 	static constexpr FileIdentifier file_identifier = 7721102;
 	RequestStream<ConfigFollowerGetVersionRequest> getVersion;
 	RequestStream<ConfigFollowerGetFullDatabaseRequest> getFullDatabase;

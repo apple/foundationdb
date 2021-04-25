@@ -21,7 +21,7 @@
 #include "fdbserver/IConfigBroadcaster.h"
 
 class SimpleConfigBroadcasterImpl {
-	Reference<ConfigFollowerInterface> subscriber;
+	ConfigFollowerInterface subscriber;
 	std::map<Key, Value> database;
 	// TODO: Should create fewer arenas
 	std::deque<Standalone<VersionedMutationRef>> versionedMutations;
@@ -46,7 +46,7 @@ class SimpleConfigBroadcasterImpl {
 	ACTOR static Future<Void> fetchUpdates(SimpleConfigBroadcasterImpl *self) {
 		loop {
 			try {
-				ConfigFollowerGetChangesReply reply = wait(self->subscriber->getChanges.getReply(
+				ConfigFollowerGetChangesReply reply = wait(self->subscriber.getChanges.getReply(
 				    ConfigFollowerGetChangesRequest{ self->mostRecentVersion, {} }));
 				++self->successfulChangeRequestOut;
 				for (const auto& versionedMutation : reply.versionedMutations) {
@@ -63,10 +63,10 @@ class SimpleConfigBroadcasterImpl {
 				++self->failedChangeRequestOut;
 				if (e.code() == error_code_version_already_compacted) {
 					ConfigFollowerGetVersionReply versionReply =
-					    wait(self->subscriber->getVersion.getReply(ConfigFollowerGetVersionRequest{}));
+					    wait(self->subscriber.getVersion.getReply(ConfigFollowerGetVersionRequest{}));
 					ASSERT(versionReply.version > self->mostRecentVersion);
 					self->mostRecentVersion = versionReply.version;
-					ConfigFollowerGetFullDatabaseReply dbReply = wait(self->subscriber->getFullDatabase.getReply(
+					ConfigFollowerGetFullDatabaseReply dbReply = wait(self->subscriber.getFullDatabase.getReply(
 					    ConfigFollowerGetFullDatabaseRequest{ self->mostRecentVersion, Optional<Value>{} }));
 					self->database = dbReply.database;
 					++self->fullDBRequestOut;
@@ -81,7 +81,7 @@ class SimpleConfigBroadcasterImpl {
 		loop {
 			wait(delayJittered(COMPACTION_INTERVAL));
 			// TODO: Enable compaction once bugs are fixed
-			// wait(self->subscriber->compact.getReply(ConfigFollowerCompactRequest{ self->mostRecentVersion }));
+			// wait(self->subscriber.compact.getReply(ConfigFollowerCompactRequest{ self->mostRecentVersion }));
 			//++self->compactRequestOut;
 		}
 	}
@@ -106,11 +106,11 @@ class SimpleConfigBroadcasterImpl {
 		database.erase(b, e);
 	}
 
-	ACTOR static Future<Void> serve(SimpleConfigBroadcasterImpl* self, Reference<ConfigFollowerInterface> publisher) {
+	ACTOR static Future<Void> serve(SimpleConfigBroadcasterImpl* self, ConfigFollowerInterface publisher) {
 		ConfigFollowerGetVersionReply versionReply =
-		    wait(self->subscriber->getVersion.getReply(ConfigFollowerGetVersionRequest{}));
+		    wait(self->subscriber.getVersion.getReply(ConfigFollowerGetVersionRequest{}));
 		self->mostRecentVersion = versionReply.version;
-		ConfigFollowerGetFullDatabaseReply reply = wait(self->subscriber->getFullDatabase.getReply(
+		ConfigFollowerGetFullDatabaseReply reply = wait(self->subscriber.getFullDatabase.getReply(
 		    ConfigFollowerGetFullDatabaseRequest{ self->mostRecentVersion, Optional<Value>{} }));
 		TraceEvent(SevDebug, "BroadcasterGotInitialFullDB").detail("Version", self->mostRecentVersion);
 		self->database = reply.database;
@@ -119,10 +119,10 @@ class SimpleConfigBroadcasterImpl {
 		loop {
 			//self->traceQueuedMutations();
 			choose {
-				when(ConfigFollowerGetVersionRequest req = waitNext(publisher->getVersion.getFuture())) {
+				when(ConfigFollowerGetVersionRequest req = waitNext(publisher.getVersion.getFuture())) {
 					req.reply.send(self->mostRecentVersion);
 				}
-				when(ConfigFollowerGetFullDatabaseRequest req = waitNext(publisher->getFullDatabase.getFuture())) {
+				when(ConfigFollowerGetFullDatabaseRequest req = waitNext(publisher.getFullDatabase.getFuture())) {
 					++self->fullDBRequestIn;
 					ConfigFollowerGetFullDatabaseReply reply;
 					reply.database = self->database;
@@ -148,7 +148,7 @@ class SimpleConfigBroadcasterImpl {
 					}
 					req.reply.send(reply);
 				}
-				when(ConfigFollowerGetChangesRequest req = waitNext(publisher->getChanges.getFuture())) {
+				when(ConfigFollowerGetChangesRequest req = waitNext(publisher.getChanges.getFuture())) {
 					if (req.lastSeenVersion < self->lastCompactedVersion) {
 						req.reply.sendError(version_already_compacted());
 						++self->failedChangeRequestIn;
@@ -171,7 +171,7 @@ class SimpleConfigBroadcasterImpl {
 					req.reply.send(reply);
 					++self->successfulChangeRequestIn;
 				}
-				when(ConfigFollowerCompactRequest req = waitNext(publisher->compact.getFuture())) {
+				when(ConfigFollowerCompactRequest req = waitNext(publisher.compact.getFuture())) {
 					++self->compactRequestIn;
 					while (!self->versionedMutations.empty()) {
 						const auto& versionedMutation = self->versionedMutations.front();
@@ -214,12 +214,12 @@ public:
 	    failedChangeRequestOut("FailedChangeRequestOut", cc), fullDBRequestOut("FullDBRequestOut", cc) {
 		auto coordinators = ccs.coordinators();
 		std::sort(coordinators.begin(), coordinators.end());
-		subscriber = makeReference<ConfigFollowerInterface>(coordinators[0]);
+		subscriber = ConfigFollowerInterface(coordinators[0]);
 		logger = traceCounters(
 		    "ConfigBroadcasterMetrics", UID{}, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigBroadcasterMetrics");
 	}
 
-	Future<Void> serve(Reference<ConfigFollowerInterface> publisher) { return serve(this, publisher); }
+	Future<Void> serve(ConfigFollowerInterface& publisher) { return serve(this, publisher); }
 };
 
 const double SimpleConfigBroadcasterImpl::POLLING_INTERVAL = 0.5;
@@ -230,6 +230,6 @@ SimpleConfigBroadcaster::SimpleConfigBroadcaster(ClusterConnectionString const& 
 
 SimpleConfigBroadcaster::~SimpleConfigBroadcaster() = default;
 
-Future<Void> SimpleConfigBroadcaster::serve(Reference<ConfigFollowerInterface> publisher) {
+Future<Void> SimpleConfigBroadcaster::serve(ConfigFollowerInterface& publisher) {
 	return impl->serve(publisher);
 }

@@ -48,6 +48,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 	int getFullDatabaseCount{ 0 };
 	int compactionCount{ 0 };
 	Promise<std::map<uint32_t, uint32_t>> finalSnapshot; // when clients finish, publish final snapshot here
+	std::vector<ConfigFollowerInterface> followerInterfaces;
 
 	ACTOR static Future<std::map<uint32_t, uint32_t>> getSnapshot(ConfigurationDatabaseWorkload* self, Database cx) {
 		state std::map<uint32_t, uint32_t> result;
@@ -214,17 +215,17 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Version> getCurrentVersion(Reference<ConfigFollowerInterface> cfi) {
-		ConfigFollowerGetVersionReply versionReply = wait(cfi->getVersion.getReply(ConfigFollowerGetVersionRequest{}));
+	ACTOR static Future<Version> getCurrentVersion(ConfigFollowerInterface cfi) {
+		ConfigFollowerGetVersionReply versionReply = wait(cfi.getVersion.getReply(ConfigFollowerGetVersionRequest{}));
 		return versionReply.version;
 	}
 
-	ACTOR static Future<Void> runConsumer(ConfigurationDatabaseWorkload* self, Reference<ConfigFollowerInterface> cfi) {
+	ACTOR static Future<Void> runConsumer(ConfigurationDatabaseWorkload* self, ConfigFollowerInterface cfi) {
 		state std::map<uint32_t, uint32_t> database;
 		state Version mostRecentVersion = wait(getCurrentVersion(cfi));
 		TraceEvent(SevDebug, "ConfigDatabaseConsumerGotInitialDB").detail("Version", mostRecentVersion);
 		ConfigFollowerGetFullDatabaseReply reply =
-		    wait(cfi->getFullDatabase.getReply(ConfigFollowerGetFullDatabaseRequest{ mostRecentVersion, {} }));
+		    wait(cfi.getFullDatabase.getReply(ConfigFollowerGetFullDatabaseRequest{ mostRecentVersion, {} }));
 		for (const auto& [k, v] : reply.database) {
 			database[self->fromKey(k)] = self->fromKey(v);
 		}
@@ -233,7 +234,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 		loop {
 			try {
 				state ConfigFollowerGetChangesReply changesReply =
-				    wait(cfi->getChanges.getReply(ConfigFollowerGetChangesRequest{ mostRecentVersion, {} }));
+				    wait(cfi.getChanges.getReply(ConfigFollowerGetChangesRequest{ mostRecentVersion, {} }));
 				mostRecentVersion = changesReply.mostRecentVersion;
 				for (const auto& versionedMutation : changesReply.versionedMutations) {
 					const auto& mutation = versionedMutation.mutation;
@@ -254,7 +255,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 					Version version = wait(getCurrentVersion(cfi));
 					mostRecentVersion = version;
 					ConfigFollowerGetFullDatabaseReply reply = wait(
-					    cfi->getFullDatabase.getReply(ConfigFollowerGetFullDatabaseRequest{ mostRecentVersion, {} }));
+					    cfi.getFullDatabase.getReply(ConfigFollowerGetFullDatabaseRequest{ mostRecentVersion, {} }));
 					TraceEvent(SevDebug, "ConfigDatabaseConsumerGotFullDB").detail("Version", mostRecentVersion);
 					database.clear();
 					for (const auto& [k, v] : reply.database) {
@@ -273,12 +274,11 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> runCompactor(ConfigurationDatabaseWorkload* self,
-	                                       Reference<ConfigFollowerInterface> cfi) {
+	ACTOR static Future<Void> runCompactor(ConfigurationDatabaseWorkload* self, ConfigFollowerInterface cfi) {
 		loop {
 			wait(delay(2 * deterministicRandom()->random01() * self->meanCompactionInterval));
 			Version version = wait(getCurrentVersion(cfi));
-			wait(cfi->compact.getReply(ConfigFollowerCompactRequest{ version }));
+			wait(cfi.compact.getReply(ConfigFollowerCompactRequest{ version }));
 			++self->compactionCount;
 		}
 	}
@@ -286,7 +286,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 	ACTOR static Future<Void> runBroadcasterAndConsumers(ConfigurationDatabaseWorkload* self, Database cx) {
 		state SimpleConfigBroadcaster broadcaster(cx->getConnectionFile()->getConnectionString());
 		state std::vector<Future<Void>> consumers;
-		state Reference<ConfigFollowerInterface> cfi = makeReference<ConfigFollowerInterface>();
+		state ConfigFollowerInterface cfi = self->followerInterfaces.emplace_back();
 		for (int i = 0; i < self->numConsumersPerBroadcaster; ++i) {
 			consumers.push_back(runConsumer(self, cfi));
 		}
