@@ -29,6 +29,17 @@ class SimpleConfigBroadcasterImpl {
 	Version mostRecentVersion;
 	ActorCollection actors{ false };
 
+	CounterCollection cc;
+	Counter compactRequestIn;
+	Counter successfulChangeRequestIn;
+	Counter failedChangeRequestIn;
+	Counter fullDBRequestIn;
+	Counter compactRequestOut;
+	Counter successfulChangeRequestOut;
+	Counter failedChangeRequestOut;
+	Counter fullDBRequestOut;
+	Future<Void> logger;
+
 	static const double POLLING_INTERVAL; // TODO: Make knob?
 	static const double COMPACTION_INTERVAL; // TODO: Make knob?
 
@@ -37,16 +48,19 @@ class SimpleConfigBroadcasterImpl {
 			try {
 				ConfigFollowerGetChangesReply reply = wait(self->subscriber->getChanges.getReply(
 				    ConfigFollowerGetChangesRequest{ self->mostRecentVersion, {} }));
+				++self->successfulChangeRequestOut;
 				for (const auto& versionedMutation : reply.versionedMutations) {
 					self->versionedMutations.push_back(versionedMutation);
 				}
 				self->mostRecentVersion = reply.mostRecentVersion;
 				wait(delayJittered(POLLING_INTERVAL));
 			} catch (Error& e) {
+				++self->failedChangeRequestOut;
 				if (e.code() == error_code_version_already_compacted) {
 					ConfigFollowerGetFullDatabaseReply reply = wait(self->subscriber->getFullDatabase.getReply(
 					    ConfigFollowerGetFullDatabaseRequest{ self->mostRecentVersion, Optional<Value>{} }));
 					self->database = reply.database;
+					++self->fullDBRequestOut;
 				} else {
 					throw e;
 				}
@@ -58,6 +72,7 @@ class SimpleConfigBroadcasterImpl {
 		loop {
 			wait(delayJittered(COMPACTION_INTERVAL));
 			wait(self->subscriber->compact.getReply(ConfigFollowerCompactRequest{ self->mostRecentVersion }));
+			++self->compactRequestOut;
 		}
 	}
 
@@ -97,6 +112,7 @@ class SimpleConfigBroadcasterImpl {
 					req.reply.send(self->mostRecentVersion);
 				}
 				when(ConfigFollowerGetFullDatabaseRequest req = waitNext(publisher->getFullDatabase.getFuture())) {
+					++self->fullDBRequestIn;
 					ConfigFollowerGetFullDatabaseReply reply;
 					reply.database = self->database;
 					for (const auto &versionedMutation : self->versionedMutations) {
@@ -118,6 +134,7 @@ class SimpleConfigBroadcasterImpl {
 				when(ConfigFollowerGetChangesRequest req = waitNext(publisher->getChanges.getFuture())) {
 					if (req.lastSeenVersion < self->lastCompactedVersion) {
 						req.reply.sendError(version_already_compacted());
+						++self->failedChangeRequestIn;
 						continue;
 					}
 					ConfigFollowerGetChangesReply reply;
@@ -129,8 +146,10 @@ class SimpleConfigBroadcasterImpl {
 						}
 					}
 					req.reply.send(reply);
+					++self->successfulChangeRequestIn;
 				}
 				when(ConfigFollowerCompactRequest req = waitNext(publisher->compact.getFuture())) {
+					++self->compactRequestIn;
 					while (!self->versionedMutations.empty()) {
 						const auto& versionedMutation = self->versionedMutations.front();
 						const auto& version = versionedMutation.version;
@@ -155,10 +174,17 @@ class SimpleConfigBroadcasterImpl {
 	}
 
 public:
-	SimpleConfigBroadcasterImpl(ClusterConnectionString const& ccs) : lastCompactedVersion(0), mostRecentVersion(0) {
+	SimpleConfigBroadcasterImpl(ClusterConnectionString const& ccs)
+	  : lastCompactedVersion(0), mostRecentVersion(0), cc("ConfigBroadcaster"),
+	    compactRequestIn("CompactRequestIn", cc), successfulChangeRequestIn("SuccessfulChangeRequestIn", cc),
+	    failedChangeRequestIn("FailedChangeRequestIn", cc), fullDBRequestIn("FullDBRequestIn", cc),
+	    compactRequestOut("CompactRequestOut", cc), successfulChangeRequestOut("SuccessfulChangeRequestOut", cc),
+	    failedChangeRequestOut("FailedChangeRequestOut", cc), fullDBRequestOut("FullDBRequestOut", cc) {
 		auto coordinators = ccs.coordinators();
 		std::sort(coordinators.begin(), coordinators.end());
 		subscriber = makeReference<ConfigFollowerInterface>(coordinators[0]);
+		logger = traceCounters(
+		    "ConfigBroadcasterMetrics", UID{}, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigBroadcasterMetrics");
 	}
 
 	Future<Void> serve(Reference<ConfigFollowerInterface> publisher) { return serve(this, publisher); }
