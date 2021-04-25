@@ -144,6 +144,7 @@ public:
 	}
 	KeyBackedProperty<Key> batchFuture() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 	KeyBackedProperty<Version> restoreVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Version> firstConsistentVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 
 	KeyBackedProperty<Reference<IBackupContainer>> sourceContainer() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
@@ -352,6 +353,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 	state Future<StringRef> status = restore.stateText(tr);
 	state Future<Version> currentVersion = restore.getCurrentVersion(tr);
 	state Future<Version> lag = restore.getApplyVersionLag(tr);
+	state Future<Version> firstConsistentVersion = restore.firstConsistentVersion().getD(tr);
 	state Future<std::string> tag = restore.tag().getD(tr);
 	state Future<std::pair<std::string, Version>> lastError = restore.lastError().getD(tr);
 
@@ -359,7 +361,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 	state UID uid = restore.getUid();
 	wait(success(fileCount) && success(fileBlockCount) && success(fileBlocksDispatched) &&
 	     success(fileBlocksFinished) && success(bytesWritten) && success(status) && success(currentVersion) &&
-	     success(lag) && success(tag) && success(lastError));
+	     success(lag) && success(firstConsistentVersion) && success(tag) && success(lastError));
 
 	std::string errstr = "None";
 	if (lastError.get().second != 0)
@@ -377,11 +379,12 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 	    .detail("FileBlocksInProgress", fileBlocksDispatched.get() - fileBlocksFinished.get())
 	    .detail("BytesWritten", bytesWritten.get())
 	    .detail("CurrentVersion", currentVersion.get())
+	    .detail("FirstConsistentVersion", firstConsistentVersion.get())
 	    .detail("ApplyLag", lag.get())
 	    .detail("TaskInstance", THIS_ADDR);
 
 	return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  Files: %lld  BytesWritten: "
-	              "%lld  CurrentVersion: %lld  ApplyVersionLag: %lld  LastError: %s",
+	              "%lld  CurrentVersion: %lld  FirstConsistentVersion: %lld  ApplyVersionLag: %lld  LastError: %s",
 	              tag.get().c_str(),
 	              uid.toString().c_str(),
 	              status.get().toString().c_str(),
@@ -4070,9 +4073,24 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		// Order does not matter, they will be put in order when written to the restoreFileMap below.
 		state std::vector<RestoreConfig::RestoreFile> files;
 
+		state Version firstConsistentVersion = -1;
 		for (const RangeFile& f : restorable.get().ranges) {
 			files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
+			firstConsistentVersion = std::max(firstConsistentVersion, f.version);
 		}
+		tr->reset();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				restore.firstConsistentVersion().set(tr, firstConsistentVersion);
+				wait(tr->commit());
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+
 		tr->reset();
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
