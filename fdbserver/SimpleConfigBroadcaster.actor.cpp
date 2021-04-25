@@ -50,6 +50,11 @@ class SimpleConfigBroadcasterImpl {
 				    ConfigFollowerGetChangesRequest{ self->mostRecentVersion, {} }));
 				++self->successfulChangeRequestOut;
 				for (const auto& versionedMutation : reply.versionedMutations) {
+					TraceEvent(SevDebug, "BroadcasterFetchedMutation")
+					    .detail("Version", versionedMutation.version)
+					    .detail("MutationType", versionedMutation.mutation.type)
+					    .detail("Param1", versionedMutation.mutation.param1)
+					    .detail("Param2", versionedMutation.mutation.param2);
 					self->versionedMutations.push_back(versionedMutation);
 				}
 				self->mostRecentVersion = reply.mostRecentVersion;
@@ -57,9 +62,13 @@ class SimpleConfigBroadcasterImpl {
 			} catch (Error& e) {
 				++self->failedChangeRequestOut;
 				if (e.code() == error_code_version_already_compacted) {
-					ConfigFollowerGetFullDatabaseReply reply = wait(self->subscriber->getFullDatabase.getReply(
+					ConfigFollowerGetVersionReply versionReply =
+					    wait(self->subscriber->getVersion.getReply(ConfigFollowerGetVersionRequest{}));
+					ASSERT(versionReply.version > self->mostRecentVersion);
+					self->mostRecentVersion = versionReply.version;
+					ConfigFollowerGetFullDatabaseReply dbReply = wait(self->subscriber->getFullDatabase.getReply(
 					    ConfigFollowerGetFullDatabaseRequest{ self->mostRecentVersion, Optional<Value>{} }));
-					self->database = reply.database;
+					self->database = dbReply.database;
 					++self->fullDBRequestOut;
 				} else {
 					throw e;
@@ -71,8 +80,9 @@ class SimpleConfigBroadcasterImpl {
 	ACTOR static Future<Void> compactor(SimpleConfigBroadcasterImpl* self) {
 		loop {
 			wait(delayJittered(COMPACTION_INTERVAL));
-			wait(self->subscriber->compact.getReply(ConfigFollowerCompactRequest{ self->mostRecentVersion }));
-			++self->compactRequestOut;
+			// TODO: Enable compaction once bugs are fixed
+			// wait(self->subscriber->compact.getReply(ConfigFollowerCompactRequest{ self->mostRecentVersion }));
+			//++self->compactRequestOut;
 		}
 	}
 
@@ -102,6 +112,7 @@ class SimpleConfigBroadcasterImpl {
 		self->mostRecentVersion = versionReply.version;
 		ConfigFollowerGetFullDatabaseReply reply = wait(self->subscriber->getFullDatabase.getReply(
 		    ConfigFollowerGetFullDatabaseRequest{ self->mostRecentVersion, Optional<Value>{} }));
+		TraceEvent(SevDebug, "BroadcasterGotInitialFullDB").detail("Version", self->mostRecentVersion);
 		self->database = reply.database;
 		self->actors.add(fetchUpdates(self));
 		self->actors.add(compactor(self));
@@ -121,6 +132,12 @@ class SimpleConfigBroadcasterImpl {
 						if (version > req.version) {
 							break;
 						}
+						TraceEvent(SevDebug, "BroadcasterAppendingMutationToFullDBOutput")
+						    .detail("ReqVersion", req.version)
+						    .detail("MutationVersion", version)
+						    .detail("MutationType", mutation.type)
+						    .detail("Param1", mutation.param1)
+						    .detail("Param2", mutation.param2);
 						if (mutation.type == MutationRef::SetValue) {
 							reply.database[mutation.param1] = mutation.param2;
 						} else if (mutation.type == MutationRef::ClearRange) {
@@ -129,7 +146,7 @@ class SimpleConfigBroadcasterImpl {
 							ASSERT(false);
 						}
 					}
-					req.reply.send(ConfigFollowerGetFullDatabaseReply{ self->database });
+					req.reply.send(reply);
 				}
 				when(ConfigFollowerGetChangesRequest req = waitNext(publisher->getChanges.getFuture())) {
 					if (req.lastSeenVersion < self->lastCompactedVersion) {
@@ -141,6 +158,12 @@ class SimpleConfigBroadcasterImpl {
 					reply.mostRecentVersion = self->mostRecentVersion;
 					for (const auto &versionedMutation : self->versionedMutations) {
 						if (versionedMutation.version > req.lastSeenVersion) {
+							TraceEvent(SevDebug, "BroadcasterSendingChangeMutation")
+							    .detail("Version", versionedMutation.version)
+							    .detail("ReqLastSeenVersion", req.lastSeenVersion)
+							    .detail("MutationType", versionedMutation.mutation.type)
+							    .detail("Param1", versionedMutation.mutation.param1)
+							    .detail("Param2", versionedMutation.mutation.param2);
 							reply.versionedMutations.push_back_deep(reply.versionedMutations.arena(),
 							                                        versionedMutation);
 						}
@@ -156,15 +179,24 @@ class SimpleConfigBroadcasterImpl {
 						const auto& mutation = versionedMutation.mutation;
 						if (version > req.version) {
 							break;
-						} else if (mutation.type == MutationRef::SetValue) {
-							self->database[mutation.param1] = mutation.param2;
-						} else if (mutation.type == MutationRef::ClearRange) {
-							removeRange(self->database, mutation.param1, mutation.param2);
 						} else {
-							ASSERT(false);
+							TraceEvent(SevDebug, "BroadcasterCompactingMutation")
+							    .detail("ReqVersion", req.version)
+							    .detail("MutationVersion", version)
+							    .detail("MutationType", mutation.type)
+							    .detail("Param1", mutation.param1)
+							    .detail("Param2", mutation.param2)
+							    .detail("LastCompactedVersion", self->lastCompactedVersion);
+							if (mutation.type == MutationRef::SetValue) {
+								self->database[mutation.param1] = mutation.param2;
+							} else if (mutation.type == MutationRef::ClearRange) {
+								removeRange(self->database, mutation.param1, mutation.param2);
+							} else {
+								ASSERT(false);
+							}
+							self->lastCompactedVersion = version;
+							self->versionedMutations.pop_front();
 						}
-						self->lastCompactedVersion = version;
-						self->versionedMutations.pop_front();
 					}
 					req.reply.send(Void());
 				}

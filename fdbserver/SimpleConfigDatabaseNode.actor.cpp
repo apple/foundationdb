@@ -151,6 +151,10 @@ class SimpleConfigDatabaseNodeImpl {
 		state Version committedVersion = wait(getCommittedVersion(self));
 		Standalone<VectorRef<VersionedMutationRef>> versionedMutations =
 		    wait(getMutations(self, req.lastSeenVersion + 1, committedVersion));
+		TraceEvent(SevDebug, "ConfigDatabaseNodeSendingChanges")
+		    .detail("ReqLastSeenVersion", req.lastSeenVersion)
+		    .detail("CommittedVersion", committedVersion)
+		    .detail("NumMutations", versionedMutations.size());
 		req.reply.send(ConfigFollowerGetChangesReply{ committedVersion, versionedMutations });
 		return Void();
 	}
@@ -320,8 +324,15 @@ class SimpleConfigDatabaseNodeImpl {
 		for (const auto& kv : data) {
 			reply.database[kv.key] = kv.value;
 		}
+		state Version lastCompactedVersion = wait(getLastCompactedVersion(self));
+		TraceEvent(SevDebug, "ConfigDatabaseNodeGettingFullDB")
+		    .detail("ReqVersion", req.version)
+		    .detail("LastCompactedVersion", lastCompactedVersion);
+		if (lastCompactedVersion > req.version) {
+			req.reply.sendError(version_already_compacted());
+		}
 		Standalone<VectorRef<VersionedMutationRef>> versionedMutations =
-		    wait(getMutations(self, 0, req.version));
+		    wait(getMutations(self, lastCompactedVersion + 1, req.version));
 		for (const auto& versionedMutation : versionedMutations) {
 			const auto& mutation = versionedMutation.mutation;
 			if (mutation.type == MutationRef::SetValue) {
@@ -338,6 +349,9 @@ class SimpleConfigDatabaseNodeImpl {
 		wait(self->globalLock.take());
 		state FlowLock::Releaser releaser(self->globalLock);
 		state Version lastCompactedVersion = wait(getLastCompactedVersion(self));
+		TraceEvent(SevDebug, "ConfigDatabaseNodeCompacting")
+		    .detail("Version", req.version)
+		    .detail("LastCompacted", lastCompactedVersion);
 		if (req.version <= lastCompactedVersion) {
 			req.reply.send(Void());
 			return Void();
@@ -350,15 +364,22 @@ class SimpleConfigDatabaseNodeImpl {
 			const auto& version = versionedMutation.version;
 			const auto& mutation = versionedMutation.mutation;
 			if (version > req.version) {
-				req.reply.send(Void());
-				return Void();
-			} else if (mutation.type == MutationRef::SetValue) {
-				self->kvStore->set(KeyValueRef(mutation.param1.withPrefix(kvKeys.begin), mutation.param2));
-			} else if (mutation.type == MutationRef::ClearRange) {
-				self->kvStore->clear(
-				    KeyRangeRef(mutation.param1.withPrefix(kvKeys.begin), mutation.param2.withPrefix(kvKeys.begin)));
+				break;
 			} else {
-				ASSERT(false);
+				TraceEvent(SevDebug, "ConfigDatabaseNodeCompactionApplyingMutation")
+				    .detail("MutationType", mutation.type)
+				    .detail("MutationVersion", version)
+				    .detail("LastCompactedVersion", lastCompactedVersion)
+				    .detail("ReqVersion", req.version);
+				if (mutation.type == MutationRef::SetValue) {
+					self->kvStore->set(KeyValueRef(mutation.param1.withPrefix(kvKeys.begin), mutation.param2));
+				} else if (mutation.type == MutationRef::ClearRange) {
+					self->kvStore->clear(KeyRangeRef(mutation.param1.withPrefix(kvKeys.begin),
+					                                 mutation.param2.withPrefix(kvKeys.begin)));
+				} else {
+					ASSERT(false);
+				}
+				lastCompactedVersion = version;
 			}
 		}
 		self->kvStore->set(

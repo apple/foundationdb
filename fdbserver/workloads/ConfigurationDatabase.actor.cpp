@@ -100,6 +100,10 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 				tr->set(k2, k1);
 				wait(delay(deterministicRandom()->random01() * self->meanSleepWithinTransaction));
 				wait(tr->commit());
+				Version v = wait(tr->getVersion());
+				TraceEvent(SevDebug, "ConfigDatabaseClientSwap")
+				    .detail("Version", v)
+				    .detail("PivotIndex", self->fromKey(k0));
 				++self->swapCount;
 				return Void();
 			} catch (Error &e) {
@@ -128,6 +132,11 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 				tr->set(k1, k2);
 				wait(delay(2 * deterministicRandom()->random01() * self->meanSleepWithinTransaction));
 				wait(tr->commit());
+				Version v = wait(tr->getVersion());
+				TraceEvent(SevDebug, "ConfigDatabaseClientGrow")
+				    .detail("InsertIndex", self->fromKey(k0))
+				    .detail("Version", v)
+				    .detail("NewSize", length + 1);
 				++self->growCount;
 				return Void();
 			} catch (Error& e) {
@@ -162,6 +171,10 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 				tr->clear(k1);
 				tr->set(k0, k2);
 				wait(tr->commit());
+				Version v = wait(tr->getVersion());
+				TraceEvent(SevDebug, "ConfigDatabaseClientShrink")
+				    .detail("Version", v)
+				    .detail("NewSize", range.size() - 1);
 				++self->shrinkCount;
 				return Void();
 			} catch (Error& e) {
@@ -197,6 +210,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 		wait(waitForAll(clients));
 		state std::map<uint32_t, uint32_t> finalSnapshot = wait(getSnapshot(self, cx));
 		self->finalSnapshot.send(finalSnapshot);
+		TraceEvent("ConfigDatabaseClientsDone").detail("FinalSnapshotSize", finalSnapshot.size());
 		return Void();
 	}
 
@@ -208,6 +222,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 	ACTOR static Future<Void> runConsumer(ConfigurationDatabaseWorkload* self, Reference<ConfigFollowerInterface> cfi) {
 		state std::map<uint32_t, uint32_t> database;
 		state Version mostRecentVersion = wait(getCurrentVersion(cfi));
+		TraceEvent(SevDebug, "ConfigDatabaseConsumerGotInitialDB").detail("Version", mostRecentVersion);
 		ConfigFollowerGetFullDatabaseReply reply =
 		    wait(cfi->getFullDatabase.getReply(ConfigFollowerGetFullDatabaseRequest{ mostRecentVersion, {} }));
 		for (const auto& [k, v] : reply.database) {
@@ -240,6 +255,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 					mostRecentVersion = version;
 					ConfigFollowerGetFullDatabaseReply reply = wait(
 					    cfi->getFullDatabase.getReply(ConfigFollowerGetFullDatabaseRequest{ mostRecentVersion, {} }));
+					TraceEvent(SevDebug, "ConfigDatabaseConsumerGotFullDB").detail("Version", mostRecentVersion);
 					database.clear();
 					for (const auto& [k, v] : reply.database) {
 						database[self->fromKey(k)] = self->fromKey(v);
@@ -250,6 +266,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 				}
 			}
 			if (finalSnapshot.isReady() && database == finalSnapshot.get()) {
+				TraceEvent("ConfigDatabaseConsumerFinshed");
 				return Void();
 			}
 			wait(delayJittered(0.5));
@@ -315,9 +332,9 @@ public:
 		initialCycleSize = getOption(options, "initialCycleSize"_sr, 10);
 		maxCycleSize = getOption(options, "maxCycleSize"_sr, 15);
 		numTransactionsPerClient = getOption(options, "numTransactionsPerClient"_sr, 100);
-		numClients = getOption(options, "numClients"_sr, 10);
+		numClients = getOption(options, "numClients"_sr, 2);
 		numBroadcasters = getOption(options, "numBroadcasters"_sr, 2);
-		numConsumersPerBroadcaster = getOption(options, "numConsumersPerBroadcaster"_sr, 2);
+		numConsumersPerBroadcaster = getOption(options, "numConsumersPerBroadcaster"_sr, 1);
 		meanSleepBetweenTransactions = getOption(options, "meanSleepBetweenTransactions"_sr, 0.1);
 		meanSleepWithinTransaction = getOption(options, "meanSleepWithinTransaction"_sr, 0.01);
 		meanCompactionInterval = getOption(options, "meanCompactionInterval"_sr, 1.0);
