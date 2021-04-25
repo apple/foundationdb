@@ -19,83 +19,108 @@
  */
 
 #include "fdbserver/ConfigFollowerInterface.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/LocalConfiguration.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-static const KeyRef pathKey = LiteralStringRef("path");
-static const KeyRef updatesKey = LiteralStringRef("updates");
+namespace {
+
+const KeyRef configClassesKey = "configClasses"_sr;
+const KeyRangeRef updateKeys = KeyRangeRef("updates/"_sr, "updates0"_sr);
+
+} // namespace
 
 class LocalConfigurationImpl {
 	IKeyValueStore* kvStore; // FIXME: fix leaks?
-	ConfigPath configPath;
-	Optional<KnobUpdates> updates;
-	Future<Void> init;
-	bool read{ false };
-	ConfigFollowerInterface consumer;
+	ConfigClassSet configClasses;
+	Future<Void> initFuture;
+	Reference<AsyncVar<ConfigFollowerInterface>> broadcaster;
+	TestKnobs testKnobs;
 
-	ACTOR static Future<Void> initialize(LocalConfigurationImpl* self) {
-		wait(self->kvStore->init());
-		Optional<Value> path = wait(self->kvStore->readValue(pathKey));
-		if (!path.present()) {
-			return Void();
-		}
-		ConfigPath durablePath;
-		BinaryReader br(path.get(), IncludeVersion());
-		br >> durablePath;
-		if (durablePath == self->configPath) {
-			Optional<Value> updatesValue = wait(self->kvStore->readValue(updatesKey));
-			ASSERT(updatesValue.present()); // FIXME: Possible race condition?
-			BinaryReader br(updatesValue.get(), IncludeVersion());
-			KnobUpdates updates;
-			br >> updates;
-			self->updates = updates;
-		}
-		return Void();
-	}
-
-	ACTOR static Future<Optional<KnobUpdates>> getUpdates(LocalConfigurationImpl* self) {
-		ASSERT(false);
-		wait(self->init);
-		self->read = true;
-		return self->updates;
-	}
-
-	ACTOR static Future<Void> saveUpdates(LocalConfigurationImpl* self, KnobUpdates updates) {
-		{
-			BinaryWriter bw(IncludeVersion());
-			bw << self->configPath;
-			self->kvStore->set(KeyValueRef(pathKey, bw.toValue()));
-		}
-		{
-			BinaryWriter bw(IncludeVersion());
-			bw << updates;
-			self->kvStore->set(KeyValueRef(updatesKey, bw.toValue()));
-		}
+	ACTOR static Future<Void> saveConfigClasses(LocalConfigurationImpl* self) {
+		self->kvStore->set(KeyValueRef(configClassesKey, BinaryWriter::toValue(self->configClasses, IncludeVersion())));
 		wait(self->kvStore->commit());
 		return Void();
 	}
 
-public:
-	LocalConfigurationImpl(ConfigPath const& configPath, std::string const& dataFolder) : configPath(configPath) {
-		platform::createDirectory(dataFolder);
-		kvStore = keyValueStoreMemory(joinPath(dataFolder, "localconf-"), UID{}, 500e6);
-		init = (initialize(this));
+	ACTOR static Future<Void> clearKVStore(LocalConfigurationImpl *self) {
+		self->kvStore->clear(singleKeyRange(configClassesKey));
+		self->kvStore->clear(updateKeys);
+		wait(self->kvStore->commit());
+		return Void();
 	}
 
-	Future<Optional<KnobUpdates>> getUpdates() { return getUpdates(this); }
+	ACTOR static Future<Void> init(LocalConfigurationImpl* self) {
+		self->testKnobs.initialize();
+		wait(self->kvStore->init());
+		state Optional<Value> storedConfigClassesValue = wait(self->kvStore->readValue(configClassesKey));
+		if (!storedConfigClassesValue.present()) {
+			wait(saveConfigClasses(self));
+			return Void();
+		}
+		state ConfigClassSet storedConfigClasses = BinaryReader::fromStringRef<ConfigClassSet>(storedConfigClassesValue.get(), IncludeVersion());
+		if (storedConfigClasses != self->configClasses) {
+			// All local information is outdated
+			wait(clearKVStore(self));
+			wait(saveConfigClasses(self));
+			return Void();
+		}
+		Standalone<RangeResultRef> range = wait(self->kvStore->readRange(updateKeys));
+		for (const auto &kv : range) {
+			// TODO: Fail gracefully
+			ASSERT(self->testKnobs.setKnob(kv.key.toString(), kv.value.toString()));
+		}
+		return Void();
+	}
 
-	Future<Void> saveUpdates(KnobUpdates const& updates) { return saveUpdates(this, updates); }
+	ACTOR static Future<Void> consume(LocalConfigurationImpl *self, Reference<AsyncVar<ConfigFollowerInterface>> broadcaster) {
+		wait(self->initFuture);
+		// TODO: Implement
+		wait(Never());
+		return Void();
+	}
+
+public:
+	LocalConfigurationImpl(ConfigClassSet const& configClasses, std::string const& dataFolder) : configClasses(configClasses) {
+		platform::createDirectory(dataFolder);
+		kvStore = keyValueStoreMemory(joinPath(dataFolder, "localconf-"), UID{}, 500e6);
+	}
+
+	Future<Void> init() {
+		ASSERT(!initFuture.isValid());
+		initFuture = init(this);
+		return initFuture;
+	}
+
+	TestKnobs const &getKnobs() const {
+		ASSERT(initFuture.isReady());
+		return testKnobs;
+	}
+
+	Future<Void> consume(Reference<AsyncVar<ConfigFollowerInterface>> broadcaster) {
+		return consume(this, broadcaster);
+	}
 };
 
-LocalConfiguration::LocalConfiguration(ConfigPath const& path, std::string const& dataFolder)
-  : impl(std::make_unique<LocalConfigurationImpl>(path, dataFolder)) {}
+LocalConfiguration::LocalConfiguration(ConfigClassSet const &configClasses, std::string const &dataFolder) :
+	impl(std::make_unique<LocalConfigurationImpl>(configClasses, dataFolder)) {}
 
 LocalConfiguration::~LocalConfiguration() = default;
 
-Future<Optional<KnobUpdates>> LocalConfiguration::getUpdates() {
-	return impl->getUpdates();
+Future<Void> LocalConfiguration::init() {
+	return impl->init();
 }
 
-Future<Void> LocalConfiguration::saveUpdates(KnobUpdates const& updates) {
-	return impl->saveUpdates(updates);
+TestKnobs const &LocalConfiguration::getKnobs() const {
+	return impl->getKnobs();
+}
+
+Future<Void> LocalConfiguration::consume(Reference<AsyncVar<ConfigFollowerInterface>> broadcaster) {
+	return impl->consume(broadcaster);
+}
+
+#define init(knob, value) initKnob(knob, value, #knob)
+
+void TestKnobs::initialize() {
+	init(TEST, 0);
 }

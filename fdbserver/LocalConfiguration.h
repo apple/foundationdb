@@ -20,22 +20,26 @@
 
 #pragma once
 
-#include <map>
-#include <memory>
-#include <vector>
+#include <string>
 
-#include "fdbserver/IKeyValueStore.h"
+#include "fdbclient/ConfigKnobs.h"
+#include "fdbserver/ConfigFollowerInterface.h"
 #include "flow/Arena.h"
+#include "flow/Knobs.h"
 
-using ConfigPath = std::vector<std::string>;
-using KnobUpdates = std::map<std::string, std::string>;
+class TestKnobs : public Knobs {
+public:
+	int64_t TEST;
+	void initialize();
+};
 
 class LocalConfiguration {
 	std::unique_ptr<class LocalConfigurationImpl> impl;
 
 public:
-	LocalConfiguration(ConfigPath const& path, std::string const& dataFolder);
+	LocalConfiguration(ConfigClassSet const& configClasses, std::string const& dataFolder);
 	~LocalConfiguration();
-	Future<Optional<KnobUpdates>> getUpdates();
-	Future<Void> saveUpdates(KnobUpdates const& updates);
+	Future<Void> init();
+	TestKnobs const &getKnobs() const;
+	Future<Void> consume(Reference<AsyncVar<ConfigFollowerInterface>> broadcaster);
 };

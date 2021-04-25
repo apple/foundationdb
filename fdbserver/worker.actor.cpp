@@ -2050,7 +2050,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		localities.set(LocalityData::keyProcessId, processIDUid.toString());
 		// Only one process can execute on a dataFolder from this point onwards
 
-		LocalConfiguration localConfig({ "test" }, dataFolder);
+		LocalConfiguration localConfig(ConfigClassSet{}, dataFolder);
 		std::string fitnessFilePath = joinPath(dataFolder, "fitness");
 		auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
 		auto ci = makeReference<AsyncVar<Optional<ClusterInterface>>>();
