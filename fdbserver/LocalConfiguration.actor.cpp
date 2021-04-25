@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbserver/ConfigFollowerInterface.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/LocalConfiguration.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -26,6 +25,7 @@
 namespace {
 
 const KeyRef configClassesKey = "configClasses"_sr;
+const KeyRef lastSeenVersionKey = "lastSeenVersion"_sr;
 const KeyRangeRef updateKeys = KeyRangeRef("updates/"_sr, "updates0"_sr);
 
 } // namespace
@@ -33,6 +33,7 @@ const KeyRangeRef updateKeys = KeyRangeRef("updates/"_sr, "updates0"_sr);
 class LocalConfigurationImpl {
 	IKeyValueStore* kvStore; // FIXME: fix leaks?
 	ConfigClassSet configClasses;
+	Version lastSeenVersion { 0 };
 	Future<Void> initFuture;
 	Reference<AsyncVar<ConfigFollowerInterface>> broadcaster;
 	TestKnobs testKnobs;
@@ -50,9 +51,22 @@ class LocalConfigurationImpl {
 		return Void();
 	}
 
+	ACTOR static Future<Void> getLastSeenVersion(LocalConfigurationImpl *self) {
+		state Optional<Value> lastSeenVersionValue = wait(self->kvStore->readValue(lastSeenVersionKey));
+		if (!lastSeenVersionValue.present()) {
+			self->lastSeenVersion = 0;
+			self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(self->lastSeenVersion, IncludeVersion())));
+			wait(self->kvStore->commit());
+			return Void();
+		}
+		self->lastSeenVersion = BinaryReader::fromStringRef<Version>(lastSeenVersionValue.get(), IncludeVersion());
+		return Void();
+	}
+
 	ACTOR static Future<Void> init(LocalConfigurationImpl* self) {
 		self->testKnobs.initialize();
 		wait(self->kvStore->init());
+		wait(getLastSeenVersion(self));
 		state Optional<Value> storedConfigClassesValue = wait(self->kvStore->readValue(configClassesKey));
 		if (!storedConfigClassesValue.present()) {
 			wait(saveConfigClasses(self));
@@ -75,9 +89,23 @@ class LocalConfigurationImpl {
 
 	ACTOR static Future<Void> consume(LocalConfigurationImpl *self, Reference<AsyncVar<ConfigFollowerInterface>> broadcaster) {
 		wait(self->initFuture);
-		// TODO: Implement
-		wait(Never());
-		return Void();
+		state Future<Void> timeout = Void();
+		state Future<ConfigFollowerGetChangesReply> getChangesReply;
+		loop {
+			choose {
+				when(wait(broadcaster->onChange())) {
+					timeout = Void();
+				}
+				when(wait(timeout)) {
+					getChangesReply = broadcaster->get().getChanges.getReply(ConfigFollowerGetChangesRequest{ self->lastSeenVersion, {}});
+					timeout = Future<Void>{};
+				}
+				when(ConfigFollowerGetChangesReply reply = wait(getChangesReply)) {
+					// TODO: Handle reply
+					timeout = delay(0.5); // TODO: Make knob?
+				}
+			}
+		}
 	}
 
 public:
