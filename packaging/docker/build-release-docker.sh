@@ -1,14 +1,12 @@
 #!/bin/bash
 set -euxo pipefail
 
-## This is designed to be run inside an environment with the following repos checked out under ~/src:
-#
-#     foundationdb
-#     fdb-kubernetes-operator
-#
+# This is designed to be run inside an environment with foundationdb checked out at ~/src/foundationdb.
 # The foundationdb build will write its output to ~/build_output
+FDB_SRC=${HOME}/src/foundationdb
+FDB_BUILD=${HOME}/build_output
 
-FDB_VERSION=$(grep '  VERSION ' ~/src/foundationdb/CMakeLists.txt | tr -s ' ' ' ' | cut -d ' ' -f 3)
+FDB_VERSION=$(grep '  VERSION ' ${FDB_SRC}/CMakeLists.txt | tr -s ' ' ' ' | cut -d ' ' -f 3)
 
 # Options (passed via environment variables)
 
@@ -20,23 +18,20 @@ ECR=${ECR:-112664522426.dkr.ecr.us-west-2.amazonaws.com}
 echo Building with tag ${TAG}
 
 # TODO: This is a copy of the commonly-used 'cmk' function.
-cmake -S ${HOME}/src/foundationdb -B ${HOME}/build_output \
+cmake -S ${FDB_SRC} -B ${FDB_BUILD} \
    -D USE_CCACHE=ON -D USE_WERROR=ON -D RocksDB_ROOT=/opt/rocksdb-6.10.1 -D RUN_JUNIT_TESTS=ON -D RUN_JAVA_INTEGRATION_TESTS=ON \
-   -G Ninja \
-      && ninja -C ${HOME}/build_output -j 84
+   -G Ninja
 
+ninja -C ${FDB_BUILD} -j 84
 
 # derived variables
 IMAGE=foundationdb/foundationdb:${TAG}
 SIDECAR_IMAGE=foundationdb/foundationdb-kubernetes-sidecar:${TAG}-1
 
+cd ${FDB_BUILD}/packages/docker
+
 WEBSITE_BIN_DIR=website/downloads/${FDB_VERSION}/linux/
 TARBALL=${WEBSITE_BIN_DIR}/fdb_${FDB_VERSION}.tar.gz
-
-# copy packaging scripts from operator repo into fdb build_output directory
-cp -an ~/src/fdb-kubernetes-operator/foundationdb-kubernetes-sidecar/* ~/build_output/packages/docker/
-
-cd ~/build_output/packages/docker
 
 mkdir -p ${WEBSITE_BIN_DIR}
 tar -C ~/build_output/packages/ -zcvf ${TARBALL} bin lib
@@ -59,7 +54,7 @@ docker build -t ${SIDECAR_IMAGE} \
    --build-arg FDB_WEBSITE=file:///mnt/website \
    --build-arg FDB_VERSION=$FDB_VERSION \
    --build-arg FDB_LIBRARY_VERSIONS=$FDB_VERSION \
-   -f Dockerfile .
+   -f sidecar/Dockerfile .
 
 docker tag ${SIDECAR_IMAGE} ${ECR}/${SIDECAR_IMAGE}
 
