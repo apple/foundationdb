@@ -21,7 +21,7 @@ FROM python:3.9-slim
 
 WORKDIR /var/fdb/tmp
 ARG FDB_VERSION=6.2.30
-ARG FDB_LIBRARY_VERSIONS="6.2.30 6.1.13"
+ARG FDB_ADDITIONAL_VERSIONS="6.2.30 6.1.13"
 ARG FDB_WEBSITE=https://www.foundationdb.org
 # Adding tini as PID 1 https://github.com/krallin/tini
 ARG TINI_VERSION=v0.19.0
@@ -35,7 +35,7 @@ RUN apt-get update && \
 	chmod u+x fdbbackup fdbcli fdbdr fdbmonitor fdbrestore fdbserver backup_agent dr_agent && \
 	mv fdbbackup fdbcli fdbdr fdbmonitor fdbrestore fdbserver backup_agent dr_agent /usr/bin && \
 	echo ${FDB_VERSION} > /var/fdb/version && mkdir -p /var/fdb/lib && \
-	for version in $FDB_LIBRARY_VERSIONS; do curl --fail $FDB_WEBSITE/downloads/$version/linux/libfdb_c_$version.so -o /var/fdb/lib/libfdb_c_${version%.*}.so; done && \
+	for version in $FDB_ADDITIONAL_VERSIONS; do curl --fail $FDB_WEBSITE/downloads/$version/linux/libfdb_c_$version.so -o /var/fdb/lib/libfdb_c_${version%.*}.so; done && \
 	curl -LO https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-amd64 && \
     curl -LO https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-amd64.sha256sum && \
 	sha256sum -c tini-amd64.sha256sum && \

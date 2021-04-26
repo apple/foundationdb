@@ -37,6 +37,10 @@ mkdir -p ${WEBSITE_BIN_DIR}
 tar -C ~/build_output/packages/ -zcvf ${TARBALL} bin lib
 cp ~/build_output/packages/lib/libfdb_c.so ${WEBSITE_BIN_DIR}/libfdb_c_${FDB_VERSION}.so
 
+# Login to ECR
+# TODO: Move this to a common place instead of repeatedly copy-pasting it.
+aws ecr get-login-password | docker login --username AWS --password-stdin ${ECR}
+
 docker pull ${ECR}/ubuntu:18.04
 docker tag ${ECR}/ubuntu:18.04 ubuntu:18.04
 docker pull ${ECR}/python:3.9-slim
@@ -53,14 +57,10 @@ docker tag ${IMAGE} ${ECR}/${IMAGE}
 docker build -t ${SIDECAR_IMAGE} \
    --build-arg FDB_WEBSITE=file:///mnt/website \
    --build-arg FDB_VERSION=$FDB_VERSION \
-   --build-arg FDB_LIBRARY_VERSIONS=$FDB_VERSION \
+   --build-arg FDB_ADDITIONAL_VERSIONS=$FDB_VERSION \
    -f sidecar/Dockerfile .
 
 docker tag ${SIDECAR_IMAGE} ${ECR}/${SIDECAR_IMAGE}
-
-# Login to ECR
-# TODO: Move this to a common place instead of repeatedly copy-pasting it.
-aws ecr get-login-password | docker login --username AWS --password-stdin ${ECR}
 
 docker push ${ECR}/${IMAGE}
 docker push ${ECR}/${SIDECAR_IMAGE}
