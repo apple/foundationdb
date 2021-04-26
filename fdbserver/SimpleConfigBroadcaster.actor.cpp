@@ -205,18 +205,25 @@ class SimpleConfigBroadcasterImpl {
 		}
 	}
 
-public:
-	SimpleConfigBroadcasterImpl(ClusterConnectionString const& ccs)
+	SimpleConfigBroadcasterImpl()
 	  : lastCompactedVersion(0), mostRecentVersion(0), cc("ConfigBroadcaster"),
 	    compactRequestIn("CompactRequestIn", cc), successfulChangeRequestIn("SuccessfulChangeRequestIn", cc),
 	    failedChangeRequestIn("FailedChangeRequestIn", cc), fullDBRequestIn("FullDBRequestIn", cc),
 	    compactRequestOut("CompactRequestOut", cc), successfulChangeRequestOut("SuccessfulChangeRequestOut", cc),
 	    failedChangeRequestOut("FailedChangeRequestOut", cc), fullDBRequestOut("FullDBRequestOut", cc) {
+		logger = traceCounters(
+		    "ConfigBroadcasterMetrics", UID{}, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigBroadcasterMetrics");
+	}
+
+public:
+	SimpleConfigBroadcasterImpl(ClusterConnectionString const& ccs) : SimpleConfigBroadcasterImpl() {
 		auto coordinators = ccs.coordinators();
 		std::sort(coordinators.begin(), coordinators.end());
 		subscriber = ConfigFollowerInterface(coordinators[0]);
-		logger = traceCounters(
-		    "ConfigBroadcasterMetrics", UID{}, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigBroadcasterMetrics");
+	}
+
+	SimpleConfigBroadcasterImpl(ServerCoordinators const& coordinators) : SimpleConfigBroadcasterImpl() {
+		subscriber = ConfigFollowerInterface(coordinators.configServers[0]);
 	}
 
 	Future<Void> serve(ConfigFollowerInterface& publisher) { return serve(this, publisher); }
@@ -227,6 +234,9 @@ const double SimpleConfigBroadcasterImpl::COMPACTION_INTERVAL = 5.0;
 
 SimpleConfigBroadcaster::SimpleConfigBroadcaster(ClusterConnectionString const& ccs)
   : impl(std::make_unique<SimpleConfigBroadcasterImpl>(ccs)) {}
+
+SimpleConfigBroadcaster::SimpleConfigBroadcaster(ServerCoordinators const& coordinators)
+  : impl(std::make_unique<SimpleConfigBroadcasterImpl>(coordinators)) {}
 
 SimpleConfigBroadcaster::~SimpleConfigBroadcaster() = default;
 

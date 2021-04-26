@@ -23,6 +23,7 @@
 #pragma once
 
 #include "fdbclient/CoordinationInterface.h"
+#include "fdbserver/ConfigFollowerInterface.h"
 
 constexpr UID WLTOKEN_LEADERELECTIONREG_CANDIDACY(-1, 4);
 constexpr UID WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT(-1, 5);
@@ -226,8 +227,9 @@ class ServerCoordinators : public ClientCoordinators {
 public:
 	explicit ServerCoordinators(Reference<ClusterConnectionFile>);
 
-	vector<LeaderElectionRegInterface> leaderElectionServers;
-	vector<GenerationRegInterface> stateServers;
+	std::vector<LeaderElectionRegInterface> leaderElectionServers;
+	std::vector<GenerationRegInterface> stateServers;
+	std::vector<ConfigFollowerInterface> configServers;
 };
 
 Future<Void> coordinationServer(std::string const& dataFolder);

@@ -23,7 +23,6 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
-#include "fdbserver/CoordinationInterface.h"
 
 struct ConfigFollowerGetVersionReply {
 	static constexpr FileIdentifier file_identifier = 1028349;
@@ -146,18 +145,8 @@ struct ConfigFollowerInterface {
 	RequestStream<ConfigFollowerCompactRequest> compact;
 
 	ConfigFollowerInterface() = default;
-	void setupWellKnownEndpoints() {
-		getVersion.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_GETVERSION, TaskPriority::Coordination);
-		getFullDatabase.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_GETFULLDB, TaskPriority::Coordination);
-		getChanges.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_GETCHANGES, TaskPriority::Coordination);
-		compact.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_COMPACT, TaskPriority::Coordination);
-	}
-
-	ConfigFollowerInterface(NetworkAddress const& remote)
-	  : getVersion(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETVERSION)),
-	    getFullDatabase(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETFULLDB)),
-	    getChanges(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETCHANGES)),
-	    compact(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_COMPACT)) {}
+	void setupWellKnownEndpoints();
+	ConfigFollowerInterface(NetworkAddress const& remote);
 
 	template <class Ar>
 	void serialize(Ar& ar) {

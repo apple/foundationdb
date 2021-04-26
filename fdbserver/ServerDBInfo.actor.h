@@ -62,6 +62,7 @@ struct ServerDBInfo {
 	                                           // which need to stay alive in case this recovery fails
 	Optional<LatencyBandConfig> latencyBandConfig;
 	int64_t infoGeneration;
+	Optional<ConfigFollowerInterface> configFollowerInterface;
 
 	ServerDBInfo()
 	  : recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED), logSystemConfig(0), infoGeneration(0) {}
@@ -85,7 +86,8 @@ struct ServerDBInfo {
 		           logSystemConfig,
 		           priorCommittedLogServers,
 		           latencyBandConfig,
-		           infoGeneration);
+		           infoGeneration,
+		           configFollowerInterface);
 	}
 };
 

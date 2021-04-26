@@ -31,6 +31,7 @@
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/IConfigBroadcaster.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/LeaderElection.h"
@@ -149,6 +150,14 @@ public:
 			newInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.infoGeneration = ++dbInfoCount;
 			newInfo.ratekeeper = interf;
+			serverInfo->set(newInfo);
+		}
+
+		void setConfigFollowerInterface(const ConfigFollowerInterface& interf) {
+			auto newInfo = serverInfo->get();
+			newInfo.id = deterministicRandom()->randomUniqueID();
+			newInfo.infoGeneration = ++dbInfoCount;
+			newInfo.configFollowerInterface = interf;
 			serverInfo->set(newInfo);
 		}
 
@@ -3410,6 +3419,14 @@ ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
 	}
 }
 
+ACTOR Future<Void> broadcastConfigDatabase(ClusterControllerData* self, ServerCoordinators coordinators) {
+	state SimpleConfigBroadcaster broadcaster(coordinators);
+	state ConfigFollowerInterface cfi;
+	self->db.setConfigFollowerInterface(cfi);
+	wait(broadcaster.serve(cfi));
+	return Void();
+}
+
 ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          Future<Void> leaderFail,
                                          ServerCoordinators coordinators,
@@ -3419,6 +3436,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	state uint64_t step = 0;
 	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
 
+	self.addActor.send(broadcastConfigDatabase(&self, coordinators));
 	self.addActor.send(clusterWatchDatabase(&self, &self.db)); // Start the master database
 	self.addActor.send(self.updateWorkerList.init(self.db.db));
 	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(), &self, coordinators));

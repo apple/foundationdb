@@ -21,6 +21,7 @@
 #pragma once
 
 #include "fdbclient/CoordinationInterface.h"
+#include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/ConfigFollowerInterface.h"
 #include "flow/flow.h"
 #include <memory>
@@ -34,7 +35,9 @@ class SimpleConfigBroadcaster : public IConfigBroadcaster {
 	std::unique_ptr<class SimpleConfigBroadcasterImpl> impl;
 
 public:
+	// TODO: Clean up constructors
 	SimpleConfigBroadcaster(ClusterConnectionString const&);
+	SimpleConfigBroadcaster(ServerCoordinators const&);
 	~SimpleConfigBroadcaster();
 	Future<Void> serve(ConfigFollowerInterface&) override;
 };

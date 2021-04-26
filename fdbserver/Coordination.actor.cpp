@@ -72,8 +72,9 @@ LeaderElectionRegInterface::LeaderElectionRegInterface(INetwork* local) : Client
 ServerCoordinators::ServerCoordinators(Reference<ClusterConnectionFile> cf) : ClientCoordinators(cf) {
 	ClusterConnectionString cs = ccf->getConnectionString();
 	for (auto s = cs.coordinators().begin(); s != cs.coordinators().end(); ++s) {
-		leaderElectionServers.push_back(LeaderElectionRegInterface(*s));
-		stateServers.push_back(GenerationRegInterface(*s));
+		leaderElectionServers.emplace_back(*s);
+		stateServers.emplace_back(*s);
+		configServers.emplace_back(*s);
 	}
 }
 
