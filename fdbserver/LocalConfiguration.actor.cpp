@@ -163,16 +163,12 @@ class LocalConfigurationImpl {
 		wait(self->initFuture);
 		state Future<ConfigFollowerGetChangesReply> getChangesReply = Never();
 		loop {
-			auto broadcaster = serverDBInfo->get().configFollowerInterface;
-			if (broadcaster.present()) {
-				choose {
-					when(wait(serverDBInfo->onChange())) {}
-					when(wait(fetchChanges(self, broadcaster.get()))) {
-						wait(delay(0.5)); // TODO: Make knob?
-					}
+			auto broadcaster = serverDBInfo->get().configBroadcaster;
+			choose {
+				when(wait(serverDBInfo->onChange())) {}
+				when(wait(fetchChanges(self, serverDBInfo->get().configBroadcaster))) {
+					wait(delay(0.5)); // TODO: Make knob?
 				}
-			} else {
-				wait(serverDBInfo->onChange());
 			}
 		}
 	}

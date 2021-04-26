@@ -153,14 +153,6 @@ public:
 			serverInfo->set(newInfo);
 		}
 
-		void setConfigFollowerInterface(const ConfigFollowerInterface& interf) {
-			auto newInfo = serverInfo->get();
-			newInfo.id = deterministicRandom()->randomUniqueID();
-			newInfo.infoGeneration = ++dbInfoCount;
-			newInfo.configFollowerInterface = interf;
-			serverInfo->set(newInfo);
-		}
-
 		void clearInterf(ProcessClass::ClassType t) {
 			auto newInfo = serverInfo->get();
 			newInfo.id = deterministicRandom()->randomUniqueID();
@@ -1825,7 +1817,9 @@ public:
 	Counter registerMasterRequests;
 	Counter statusRequests;
 
-	ClusterControllerData(ClusterControllerFullInterface const& ccInterface, LocalityData const& locality)
+	ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
+	                      LocalityData const& locality,
+	                      ServerCoordinators const& coordinators)
 	  : clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
 	    ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), gotProcessClasses(false),
 	    gotFullyRecoveredConfig(false), startTime(now()), goodRecruitmentTime(Never()),
@@ -3419,24 +3413,17 @@ ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
 	}
 }
 
-ACTOR Future<Void> broadcastConfigDatabase(ClusterControllerData* self, ServerCoordinators coordinators) {
-	state SimpleConfigBroadcaster broadcaster(coordinators);
-	state ConfigFollowerInterface cfi;
-	self->db.setConfigFollowerInterface(cfi);
-	wait(broadcaster.serve(cfi));
-	return Void();
-}
-
 ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          Future<Void> leaderFail,
                                          ServerCoordinators coordinators,
                                          LocalityData locality) {
-	state ClusterControllerData self(interf, locality);
+	state ClusterControllerData self(interf, locality, coordinators);
+	state SimpleConfigBroadcaster configBroadcaster(coordinators);
 	state Future<Void> coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
 	state uint64_t step = 0;
 	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
 
-	self.addActor.send(broadcastConfigDatabase(&self, coordinators));
+	self.addActor.send(configBroadcaster.serve(self.db.serverInfo->get().configBroadcaster));
 	self.addActor.send(clusterWatchDatabase(&self, &self.db)); // Start the master database
 	self.addActor.send(self.updateWorkerList.init(self.db.db));
 	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(), &self, coordinators));

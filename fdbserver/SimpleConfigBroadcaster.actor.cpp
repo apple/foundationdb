@@ -226,7 +226,7 @@ public:
 		subscriber = ConfigFollowerInterface(coordinators.configServers[0]);
 	}
 
-	Future<Void> serve(ConfigFollowerInterface& publisher) { return serve(this, publisher); }
+	Future<Void> serve(ConfigFollowerInterface const& publisher) { return serve(this, publisher); }
 };
 
 const double SimpleConfigBroadcasterImpl::POLLING_INTERVAL = 0.5;
@@ -240,6 +240,6 @@ SimpleConfigBroadcaster::SimpleConfigBroadcaster(ServerCoordinators const& coord
 
 SimpleConfigBroadcaster::~SimpleConfigBroadcaster() = default;
 
-Future<Void> SimpleConfigBroadcaster::serve(ConfigFollowerInterface& publisher) {
+Future<Void> SimpleConfigBroadcaster::serve(ConfigFollowerInterface const& publisher) {
 	return impl->serve(publisher);
 }

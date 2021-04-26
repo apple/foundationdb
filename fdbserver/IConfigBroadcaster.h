@@ -28,7 +28,7 @@
 
 class IConfigBroadcaster {
 public:
-	virtual Future<Void> serve(ConfigFollowerInterface&) = 0;
+	virtual Future<Void> serve(ConfigFollowerInterface const&) = 0;
 };
 
 class SimpleConfigBroadcaster : public IConfigBroadcaster {
@@ -39,5 +39,5 @@ public:
 	SimpleConfigBroadcaster(ClusterConnectionString const&);
 	SimpleConfigBroadcaster(ServerCoordinators const&);
 	~SimpleConfigBroadcaster();
-	Future<Void> serve(ConfigFollowerInterface&) override;
+	Future<Void> serve(ConfigFollowerInterface const&) override;
 };
