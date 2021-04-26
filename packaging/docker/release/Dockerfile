@@ -57,10 +57,9 @@ WORKDIR /var/fdb
 
 # Set Up Runtime Scripts and Directories
 
-COPY scripts /var/fdb/scripts
+COPY release/*.bash /var/fdb/scripts/
 
-RUN chmod u+x scripts/*.bash && \
-	mkdir -p logs
+RUN	mkdir -p logs
 
 # Install FoundationDB Client Libraries
 
