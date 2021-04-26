@@ -237,6 +237,7 @@ public:
 
 	// Returns the protocol version reported by the coordinator this client is connected to
 	// If an expected version is given, the future won't return until the protocol version is different than expected
+	// Note: this will never return if the server is running a protocol from FDB 5.0 or older
 	ThreadFuture<ProtocolVersion> getServerProtocol(
 	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) override;
 
@@ -397,6 +398,7 @@ public:
 
 	// Returns the protocol version reported by the coordinator this client is connected to
 	// If an expected version is given, the future won't return until the protocol version is different than expected
+	// Note: this will never return if the server is running a protocol from FDB 5.0 or older
 	ThreadFuture<ProtocolVersion> getServerProtocol(
 	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) override;
 
@@ -455,6 +457,9 @@ public:
 		ThreadFuture<Void> protocolVersionMonitor;
 		std::list<LegacyVersionMonitor> legacyVersionMonitors;
 		Optional<ProtocolVersion> dbProtocolVersion;
+
+		// This maps a normalized protocol version to the client associated with it. This prevents compatible
+		// differences in protocol version not matching each other.
 		std::map<ProtocolVersion, Reference<ClientInfo>> clients;
 
 		std::vector<std::pair<FDBDatabaseOptions::Option, Optional<Standalone<StringRef>>>> options;
@@ -465,7 +470,7 @@ public:
 	// A struct that enables monitoring whether the cluster is running an old version (<= 5.0) that doesn't support
 	// connect packet monitoring.
 	struct LegacyVersionMonitor {
-		LegacyVersionMonitor(Reference<ClientInfo> client) : client(client), monitorRunning(false) {}
+		LegacyVersionMonitor(Reference<ClientInfo> const& client) : client(client), monitorRunning(false) {}
 		~LegacyVersionMonitor() { TraceEvent("DestroyingVersionMonitor"); }
 
 		// Starts the connection monitor by creating a database object at an old version.

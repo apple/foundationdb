@@ -71,6 +71,7 @@ void ThreadSafeDatabase::setOption(FDBDatabaseOptions::Option option, Optional<S
 
 // Returns the protocol version reported by the coordinator this client is connected to
 // If an expected version is given, the future won't return until the protocol version is different than expected
+// Note: this will never return if the server is running a protocol from FDB 5.0 or older
 ThreadFuture<ProtocolVersion> ThreadSafeDatabase::getServerProtocol(Optional<ProtocolVersion> expectedVersion) {
 	DatabaseContext* db = this->db;
 	return onMainThread(

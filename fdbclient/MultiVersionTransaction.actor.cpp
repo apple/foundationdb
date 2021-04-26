@@ -301,6 +301,7 @@ void DLDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef
 
 // Returns the protocol version reported by the coordinator this client is connected to
 // If an expected version is given, the future won't return until the protocol version is different than expected
+// Note: this will never return if the server is running a protocol from FDB 5.0 or older
 ThreadFuture<ProtocolVersion> DLDatabase::getServerProtocol(Optional<ProtocolVersion> expectedVersion) {
 	// Version 6.3 doesn't support getting the server protocol from an external client
 	ASSERT(false);
@@ -838,13 +839,14 @@ void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional
 
 // Returns the protocol version reported by the coordinator this client is connected to
 // If an expected version is given, the future won't return until the protocol version is different than expected
+// Note: this will never return if the server is running a protocol from FDB 5.0 or older
 ThreadFuture<ProtocolVersion> MultiVersionDatabase::getServerProtocol(Optional<ProtocolVersion> expectedVersion) {
 	return dbState->versionMonitorDb->getServerProtocol(expectedVersion);
 }
 
 MultiVersionDatabase::DatabaseState::DatabaseState(std::string clusterFilePath, Reference<IDatabase> versionMonitorDb)
   : clusterFilePath(clusterFilePath), versionMonitorDb(versionMonitorDb),
-    dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(NULL))) {}
+    dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(nullptr))) {}
 
 // Adds a client (local or externally loaded) that can be used to connect to the cluster
 void MultiVersionDatabase::DatabaseState::addClient(Reference<ClientInfo> client) {
