@@ -64,11 +64,11 @@ struct ConfigFollowerGetFullDatabaseReply {
 struct ConfigFollowerGetFullDatabaseRequest {
 	static constexpr FileIdentifier file_identifier = 294811;
 	Version version;
-	Optional<Value> filter;
+	Standalone<VectorRef<KeyRef>> filter;
 	ReplyPromise<ConfigFollowerGetFullDatabaseReply> reply;
 
 	ConfigFollowerGetFullDatabaseRequest() : version(-1) {}
-	explicit ConfigFollowerGetFullDatabaseRequest(Version version, Optional<Value> filter)
+	explicit ConfigFollowerGetFullDatabaseRequest(Version version, Standalone<VectorRef<KeyRef>> filter)
 	  : version(version), filter(filter) {}
 
 	template <class Ar>
@@ -99,7 +99,7 @@ struct ConfigFollowerGetChangesReply {
 	Version mostRecentVersion;
 	Standalone<VectorRef<VersionedMutationRef>> versionedMutations;
 
-	ConfigFollowerGetChangesReply() : mostRecentVersion(-1) {}
+	ConfigFollowerGetChangesReply() : mostRecentVersion(0) {}
 	explicit ConfigFollowerGetChangesReply(Version mostRecentVersion,
 	                                       Standalone<VectorRef<VersionedMutationRef>> const& versionedMutations)
 	  : mostRecentVersion(mostRecentVersion), versionedMutations(versionedMutations) {}
@@ -113,16 +113,16 @@ struct ConfigFollowerGetChangesReply {
 struct ConfigFollowerGetChangesRequest {
 	static constexpr FileIdentifier file_identifier = 178935;
 	Version lastSeenVersion;
-	Optional<Value> filter;
+	Standalone<VectorRef<KeyRef>> filter;
 	ReplyPromise<ConfigFollowerGetChangesReply> reply;
 
 	ConfigFollowerGetChangesRequest() : lastSeenVersion(-1) {}
-	explicit ConfigFollowerGetChangesRequest(Version lastSeenVersion, Optional<Value> filter)
+	explicit ConfigFollowerGetChangesRequest(Version lastSeenVersion, Standalone<VectorRef<KeyRef>> filter)
 	  : lastSeenVersion(lastSeenVersion), filter(filter) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, lastSeenVersion, reply);
+		serializer(ar, lastSeenVersion, filter, reply);
 	}
 };
 

@@ -26,7 +26,7 @@ namespace {
 
 const KeyRef configClassesKey = "configClasses"_sr;
 const KeyRef lastSeenVersionKey = "lastSeenVersion"_sr;
-const KeyRangeRef updateKeys = KeyRangeRef("updates/"_sr, "updates0"_sr);
+const KeyRangeRef knobOverrideKeys = KeyRangeRef("knobOverride/"_sr, "knobOverride0"_sr);
 
 } // namespace
 
@@ -36,6 +36,7 @@ class LocalConfigurationImpl {
 	Version lastSeenVersion { 0 };
 	Future<Void> initFuture;
 	TestKnobs testKnobs;
+	std::map<Key, Value> overriddenKnobs;
 
 	ACTOR static Future<Void> saveConfigClasses(LocalConfigurationImpl* self) {
 		self->kvStore->set(KeyValueRef(configClassesKey, BinaryWriter::toValue(self->configClasses, IncludeVersion())));
@@ -45,7 +46,7 @@ class LocalConfigurationImpl {
 
 	ACTOR static Future<Void> clearKVStore(LocalConfigurationImpl *self) {
 		self->kvStore->clear(singleKeyRange(configClassesKey));
-		self->kvStore->clear(updateKeys);
+		self->kvStore->clear(knobOverrideKeys);
 		wait(self->kvStore->commit());
 		return Void();
 	}
@@ -78,7 +79,7 @@ class LocalConfigurationImpl {
 			wait(saveConfigClasses(self));
 			return Void();
 		}
-		Standalone<RangeResultRef> range = wait(self->kvStore->readRange(updateKeys));
+		Standalone<RangeResultRef> range = wait(self->kvStore->readRange(knobOverrideKeys));
 		for (const auto &kv : range) {
 			// TODO: Fail gracefully
 			ASSERT(self->testKnobs.setKnob(kv.key.toString(), kv.value.toString()));
@@ -86,35 +87,70 @@ class LocalConfigurationImpl {
 		return Void();
 	}
 
-	Future<ConfigFollowerGetChangesReply> getChanges(ServerDBInfo serverDBInfo) {
-		if (!serverDBInfo.configFollowerInterface.present()) {
-			return Never();
-		} else {
-			return serverDBInfo.configFollowerInterface.get().getChanges.getReply(
-			    ConfigFollowerGetChangesRequest{ lastSeenVersion, {} });
+	ACTOR static Future<Void> applyKnobUpdates(LocalConfigurationImpl *self, ConfigFollowerGetFullDatabaseReply reply) {
+		self->kvStore->clear(knobOverrideKeys);
+		for (const auto &[k, v] : reply.database) {
+			self->kvStore->set(KeyValueRef(k.withPrefix(knobOverrideKeys.begin), v));
+			self->overriddenKnobs[k] = v;
 		}
+		self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(self->lastSeenVersion, IncludeVersion())));
+		wait(self->kvStore->commit());
+		return Void();
+	}
+
+	ACTOR static Future<Void> applyKnobUpdates(LocalConfigurationImpl *self, ConfigFollowerGetChangesReply reply) {
+		for (const auto &versionedMutation : reply.versionedMutations) {
+			const auto &mutation = versionedMutation.mutation;
+			if (mutation.type == MutationRef::SetValue) {
+				self->kvStore->set(KeyValueRef(mutation.param1.withPrefix(knobOverrideKeys.begin), mutation.param2));
+				self->overriddenKnobs[mutation.param1] = mutation.param2;
+			} else if (mutation.type == MutationRef::ClearRange) {
+				self->kvStore->clear(KeyRangeRef(mutation.param1.withPrefix(knobOverrideKeys.begin), mutation.param2.withPrefix(knobOverrideKeys.begin)));
+				self->overriddenKnobs.erase(self->overriddenKnobs.lower_bound(mutation.param1), self->overriddenKnobs.lower_bound(mutation.param2));
+			} else {
+				ASSERT(false);
+			}
+		}
+		self->lastSeenVersion = reply.mostRecentVersion;
+		self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(reply.mostRecentVersion, IncludeVersion())));
+		wait(self->kvStore->commit());
+		return Void();
+	}
+
+	ACTOR static Future<Void> fetchChanges(LocalConfigurationImpl *self, ConfigFollowerInterface broadcaster) {
+		try {
+			ConfigFollowerGetChangesReply changesReply = wait(broadcaster.getChanges.getReply(ConfigFollowerGetChangesRequest{ self->lastSeenVersion, self->configClasses }));
+			// TODO: Avoid applying if there are no updates
+			wait(applyKnobUpdates(self, changesReply));
+		} catch (Error &e) {
+			if (e.code() == error_code_version_already_compacted) {
+				ConfigFollowerGetVersionReply versionReply = wait(broadcaster.getVersion.getReply(ConfigFollowerGetVersionRequest{}));
+				self->lastSeenVersion = versionReply.version;
+				ConfigFollowerGetFullDatabaseReply fullDBReply = wait(broadcaster.getFullDatabase.getReply(ConfigFollowerGetFullDatabaseRequest{ self->lastSeenVersion, self->configClasses}));
+				// TODO: Avoid applying if there are no updates
+				wait(applyKnobUpdates(self, fullDBReply));
+			} else {
+				throw e;
+			}
+		}
+		return Void();
 	}
 
 	ACTOR static Future<Void> consume(LocalConfigurationImpl* self,
 	                                  Reference<AsyncVar<ServerDBInfo> const> serverDBInfo) {
 		wait(self->initFuture);
-		state Future<Void> timeout = Void();
 		state Future<ConfigFollowerGetChangesReply> getChangesReply = Never();
 		loop {
-			choose {
-				when(wait(serverDBInfo->onChange())) {
-					getChangesReply = self->getChanges(serverDBInfo->get());
-					timeout = Never();
+			auto broadcaster = serverDBInfo->get().configFollowerInterface;
+			if (broadcaster.present()) {
+				choose {
+					when(wait(serverDBInfo->onChange())) {}
+					when(wait(fetchChanges(self, broadcaster.get()))) {
+						wait(delay(0.5)); // TODO: Make knob?
+					}
 				}
-				when(wait(timeout)) {
-					getChangesReply = self->getChanges(serverDBInfo->get());
-					timeout = Never();
-				}
-				when(ConfigFollowerGetChangesReply reply = wait(getChangesReply)) {
-					// TODO: Handle reply
-					getChangesReply = Never();
-					timeout = delay(0.5); // TODO: Make knob?
-				}
+			} else {
+				wait(serverDBInfo->onChange());
 			}
 		}
 	}

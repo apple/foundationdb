@@ -67,7 +67,7 @@ class SimpleConfigBroadcasterImpl {
 					ASSERT(versionReply.version > self->mostRecentVersion);
 					self->mostRecentVersion = versionReply.version;
 					ConfigFollowerGetFullDatabaseReply dbReply = wait(self->subscriber.getFullDatabase.getReply(
-					    ConfigFollowerGetFullDatabaseRequest{ self->mostRecentVersion, Optional<Value>{} }));
+					    ConfigFollowerGetFullDatabaseRequest{ self->mostRecentVersion, {} }));
 					self->database = dbReply.database;
 					++self->fullDBRequestOut;
 				} else {
@@ -111,7 +111,7 @@ class SimpleConfigBroadcasterImpl {
 		    wait(self->subscriber.getVersion.getReply(ConfigFollowerGetVersionRequest{}));
 		self->mostRecentVersion = versionReply.version;
 		ConfigFollowerGetFullDatabaseReply reply = wait(self->subscriber.getFullDatabase.getReply(
-		    ConfigFollowerGetFullDatabaseRequest{ self->mostRecentVersion, Optional<Value>{} }));
+		    ConfigFollowerGetFullDatabaseRequest{ self->mostRecentVersion, {} }));
 		TraceEvent(SevDebug, "BroadcasterGotInitialFullDB").detail("Version", self->mostRecentVersion);
 		self->database = reply.database;
 		self->actors.add(fetchUpdates(self));

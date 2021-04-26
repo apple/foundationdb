@@ -27,25 +27,34 @@
 using ConfigClassSetRef = VectorRef<KeyRef>;
 using ConfigClassSet = Standalone<ConfigClassSetRef>;
 
-class ConfigUpdate {
-  Arena arena;
-  KeyRef configKnobName;
-  KeyRef description;
-  ValueRef value;
-  double timestamp;
-  ConfigClassSetRef affectedClasses;
-public:
+class ConfigUpdateKeyRef {
+  KeyRef configClass;
+  KeyRef knobName;
 
-  ConfigUpdate()=default;
-  explicit ConfigUpdate(Arena &arena, KeyRef configKnobNode, KeyRef description, ValueRef value, double timestamp, ConfigClassSetRef affectedClasses)
-    : arena(arena), configKnobName(arena, configKnobNode), description(arena, description), value(arena, value), timestamp(timestamp) {
-    for (const auto &c : affectedClasses) {
-      this->affectedClasses.emplace_back_deep(arena, c);
-    }
-  }
+  ConfigUpdateKeyRef()=default;
+  explicit ConfigUpdateKeyRef(Arena &arena, KeyRef configClass, KeyRef knobName)
+    : configClass(arena, configClass), knobName(arena, knobName) {}
 
   template<class Ar>
   void serialize(Ar &ar) {
-    serializer(ar, arena, configKnobName, description, value, timestamp, affectedClasses);
+    serializer(ar, configClass, knobName);
   }
 };
+using ConfigUpdateKey = Standalone<ConfigUpdateKeyRef>;
+
+class ConfigUpdateValueRef {
+  KeyRef description;
+  ValueRef value;
+  double timestamp;
+public:
+
+  ConfigUpdateValueRef()=default;
+  explicit ConfigUpdateValueRef(Arena &arena, KeyRef description, ValueRef value, double timestamp)
+    : description(arena, description), value(arena, value), timestamp(timestamp) {}
+
+  template<class Ar>
+  void serialize(Ar &ar) {
+    serializer(ar, description, value, timestamp);
+  }
+};
+using ConfigUpdateValue = Standalone<ConfigUpdateValueRef>;
