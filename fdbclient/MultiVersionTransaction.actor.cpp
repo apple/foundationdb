@@ -1975,6 +1975,12 @@ ACTOR Future<Void> checkUndestroyedFutures(std::vector<ThreadSingleAssignmentVar
 	return Void();
 }
 
+// Common code for tests of single assignment vars. Tests both correctness and thread safety.
+// T should be a class that has a static method with the following signature:
+//
+//     static FutureInfo createThreadFuture(FutureInfo f);
+//
+// See AbortableTest for an example T type
 template <class T>
 THREAD_FUNC runSingleAssignmentVarTest(void* arg) {
 	noUnseed = true;

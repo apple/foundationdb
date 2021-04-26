@@ -25,6 +25,13 @@
 #include <atomic>
 #include <cstdint>
 
+// The thread safety this class provides is that it's safe to call addref and
+// delref on the same object concurrently in different threads. Subclass does
+// not get deleted until after all calls to delref complete.
+//
+// Importantly, this class does _not_ make accessing Subclass automatically
+// thread safe. Clients will need to provide their own external synchronization
+// for that.
 template <class Subclass>
 class ThreadSafeReferenceCounted {
 public:
