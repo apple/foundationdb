@@ -40,7 +40,7 @@ for i in `seq 1 $2` ; do
 		${FDB} -p auto:${PORT_PREFIX}${j} -d $DATA -L $LOG -C $CLUSTER &
 	done
 	
-	CLI="$ROOT/bin/fdbcli -C ${CLUSTER} --exec"
+	CLI="$BUILD/bin/fdbcli -C ${CLUSTER} --exec"
 	( sleep 2 ; $CLI "configure new ssd single" ) &
 done;
 

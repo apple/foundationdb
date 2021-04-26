@@ -151,7 +151,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			TraceEvent("IBackupSubmitAttempt");
 			try {
 				wait(self->backupAgent.submitBackup(
-				    cx, self->backupDir, 1e8, self->tag.toString(), backupRanges, false, false, true));
+				    cx, self->backupDir, 0, 1e8, self->tag.toString(), backupRanges, false, false, true));
 			} catch (Error& e) {
 				TraceEvent("IBackupSubmitError").error(e);
 				if (e.code() != error_code_backup_duplicate) {
@@ -229,6 +229,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			                                       Key(),
 			                                       true,
 			                                       true,
+			                                       false,
 			                                       beginVersion)));
 			TraceEvent("IBackupRestoreSuccess");
 		}

@@ -37,6 +37,7 @@ RUN sed -i -e '/enabled/d' /etc/yum.repos.d/CentOS-Base.repo && \
         lz4-devel \
         lz4-static \
         mono-devel \
+        redhat-lsb-core \
         rpm-build \
         tcl-devel \
         unzip \
