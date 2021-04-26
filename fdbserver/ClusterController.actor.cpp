@@ -997,15 +997,15 @@ public:
 
 						std::map<Optional<Standalone<StringRef>>, int> field_count;
 						std::set<Optional<Standalone<StringRef>>> zones;
-						bool foundDegraded = false;
 						for (auto& worker : testWorkers) {
 							if (!zones.count(worker.interf.locality.zoneId())) {
 								field_count[worker.interf.locality.get(pa1->attributeKey())]++;
 								zones.insert(worker.interf.locality.zoneId());
 							}
-							foundDegraded = foundDegraded || worker.degraded;
 						}
-						testFitness.worstDegraded = foundDegraded;
+						// backup recruitment is not required to use degraded processes that have better fitness
+						// so we cannot compare degraded between the two methods
+						testFitness.degraded = fitness.degraded;
 
 						int minField = 100;
 
@@ -1047,6 +1047,9 @@ public:
 				    conf, required, desired, policy, testUsed, checkStable, dcIds, exclusionWorkerIds);
 				RoleFitness testFitness(testWorkers, ProcessClass::TLog, testUsed);
 				RoleFitness fitness(workers, ProcessClass::TLog, id_used);
+				// backup recruitment is not required to use degraded processes that have better fitness
+				// so we cannot compare degraded between the two methods
+				testFitness.degraded = fitness.degraded;
 
 				if (fitness > testFitness) {
 					for (auto& w : testWorkers) {
@@ -1270,7 +1273,7 @@ public:
 		ProcessClass::ClusterRole role;
 		int count;
 		int worstUsed = 1;
-		bool worstDegraded = false;
+		bool degraded = false;
 
 		RoleFitness(int bestFit, int worstFit, int count, ProcessClass::ClusterRole role)
 		  : bestFit((ProcessClass::Fitness)bestFit), worstFit((ProcessClass::Fitness)worstFit), count(count),
@@ -1291,7 +1294,7 @@ public:
 			// Every recruitment will attempt to recruit the preferred amount through GoodFit,
 			// So a recruitment which only has BestFit is not better than one that has a GoodFit process
 			worstFit = ProcessClass::GoodFit;
-			worstDegraded = false;
+			degraded = false;
 			bestFit = ProcessClass::NeverAssign;
 			worstUsed = 1;
 			for (auto& it : workers) {
@@ -1312,22 +1315,17 @@ public:
 				if (thisFit > worstFit) {
 					worstFit = thisFit;
 					worstUsed = thisUsed->second;
-					worstDegraded = it.degraded;
 				} else if (thisFit == worstFit) {
-					if (thisUsed->second > worstUsed) {
-						worstUsed = thisUsed->second;
-						worstDegraded = it.degraded;
-					} else if (thisUsed->second == worstUsed) {
-						worstDegraded = it.degraded || worstDegraded;
-					}
+					worstUsed = std::max(worstUsed, thisUsed->second);
 				}
+				degraded = degraded || it.degraded;
 			}
 
 			count = workers.size();
 
 			// degraded is only used for recruitment of tlogs
 			if (role != ProcessClass::TLog) {
-				worstDegraded = false;
+				degraded = false;
 			}
 		}
 
@@ -1338,8 +1336,8 @@ public:
 				return worstUsed < r.worstUsed;
 			if (count != r.count)
 				return count > r.count;
-			if (worstDegraded != r.worstDegraded)
-				return r.worstDegraded;
+			if (degraded != r.degraded)
+				return r.degraded;
 			// FIXME: TLog recruitment process does not guarantee the best fit is not worsened.
 			if (role != ProcessClass::TLog && role != ProcessClass::LogRouter && bestFit != r.bestFit)
 				return bestFit < r.bestFit;
@@ -1356,19 +1354,17 @@ public:
 				return worstFit < r.worstFit;
 			if (worstUsed != r.worstUsed)
 				return worstUsed < r.worstUsed;
-			if (worstDegraded != r.worstDegraded)
-				return r.worstDegraded;
+			if (degraded != r.degraded)
+				return r.degraded;
 			return false;
 		}
 
 		bool operator==(RoleFitness const& r) const {
 			return worstFit == r.worstFit && worstUsed == r.worstUsed && bestFit == r.bestFit && count == r.count &&
-			       worstDegraded == r.worstDegraded;
+			       degraded == r.degraded;
 		}
 
-		std::string toString() const {
-			return format("%d %d %d %d %d", worstFit, worstUsed, count, worstDegraded, bestFit);
-		}
+		std::string toString() const { return format("%d %d %d %d %d", worstFit, worstUsed, count, degraded, bestFit); }
 	};
 
 	std::set<Optional<Standalone<StringRef>>> getDatacenters(DatabaseConfiguration const& conf,
