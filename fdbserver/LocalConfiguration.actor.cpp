@@ -35,7 +35,7 @@ class LocalConfigurationImpl {
 	ConfigClassSet configClasses;
 	Version lastSeenVersion { 0 };
 	Future<Void> initFuture;
-	Reference<AsyncVar<ConfigFollowerInterface>> broadcaster;
+	Reference<AsyncVar<ServerDBInfo> const> serverDBInfo;
 	TestKnobs testKnobs;
 
 	ACTOR static Future<Void> saveConfigClasses(LocalConfigurationImpl* self) {
@@ -87,17 +87,16 @@ class LocalConfigurationImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> consume(LocalConfigurationImpl *self, Reference<AsyncVar<ConfigFollowerInterface>> broadcaster) {
+	ACTOR static Future<Void> consume(LocalConfigurationImpl* self) {
 		wait(self->initFuture);
 		state Future<Void> timeout = Void();
 		state Future<ConfigFollowerGetChangesReply> getChangesReply;
 		loop {
 			choose {
-				when(wait(broadcaster->onChange())) {
-					timeout = Void();
-				}
+				when(wait(self->serverDBInfo->onChange())) { timeout = Void(); }
 				when(wait(timeout)) {
-					getChangesReply = broadcaster->get().getChanges.getReply(ConfigFollowerGetChangesRequest{ self->lastSeenVersion, {}});
+					getChangesReply = self->serverDBInfo->get().configFollowerInterface.get().getChanges.getReply(
+					    ConfigFollowerGetChangesRequest{ self->lastSeenVersion, {} });
 					timeout = Future<Void>{};
 				}
 				when(ConfigFollowerGetChangesReply reply = wait(getChangesReply)) {
@@ -109,7 +108,10 @@ class LocalConfigurationImpl {
 	}
 
 public:
-	LocalConfigurationImpl(ConfigClassSet const& configClasses, std::string const& dataFolder) : configClasses(configClasses) {
+	LocalConfigurationImpl(ConfigClassSet const& configClasses,
+	                       std::string const& dataFolder,
+	                       Reference<AsyncVar<ServerDBInfo> const> const& serverDBInfo)
+	  : configClasses(configClasses), serverDBInfo(serverDBInfo) {
 		platform::createDirectory(dataFolder);
 		kvStore = keyValueStoreMemory(joinPath(dataFolder, "localconf-"), UID{}, 500e6);
 	}
@@ -125,13 +127,13 @@ public:
 		return testKnobs;
 	}
 
-	Future<Void> consume(Reference<AsyncVar<ConfigFollowerInterface>> broadcaster) {
-		return consume(this, broadcaster);
-	}
+	Future<Void> consume() { return consume(this); }
 };
 
-LocalConfiguration::LocalConfiguration(ConfigClassSet const &configClasses, std::string const &dataFolder) :
-	impl(std::make_unique<LocalConfigurationImpl>(configClasses, dataFolder)) {}
+LocalConfiguration::LocalConfiguration(ConfigClassSet const& configClasses,
+                                       std::string const& dataFolder,
+                                       Reference<AsyncVar<ServerDBInfo> const> const& serverDBInfo)
+  : impl(std::make_unique<LocalConfigurationImpl>(configClasses, dataFolder, serverDBInfo)) {}
 
 LocalConfiguration::~LocalConfiguration() = default;
 
@@ -143,8 +145,8 @@ TestKnobs const &LocalConfiguration::getKnobs() const {
 	return impl->getKnobs();
 }
 
-Future<Void> LocalConfiguration::consume(Reference<AsyncVar<ConfigFollowerInterface>> broadcaster) {
-	return impl->consume(broadcaster);
+Future<Void> LocalConfiguration::consume() {
+	return impl->consume();
 }
 
 #define init(knob, value) initKnob(knob, value, #knob)

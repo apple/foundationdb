@@ -24,6 +24,7 @@
 
 #include "fdbclient/ConfigKnobs.h"
 #include "fdbserver/ConfigFollowerInterface.h"
+#include "fdbserver/ServerDBInfo.h"
 #include "flow/Arena.h"
 #include "flow/Knobs.h"
 
@@ -37,9 +38,11 @@ class LocalConfiguration {
 	std::unique_ptr<class LocalConfigurationImpl> impl;
 
 public:
-	LocalConfiguration(ConfigClassSet const& configClasses, std::string const& dataFolder);
+	LocalConfiguration(ConfigClassSet const& configClasses,
+	                   std::string const& dataFolder,
+	                   Reference<AsyncVar<ServerDBInfo> const> const&);
 	~LocalConfiguration();
 	Future<Void> init();
 	TestKnobs const &getKnobs() const;
-	Future<Void> consume(Reference<AsyncVar<ConfigFollowerInterface>> broadcaster);
+	Future<Void> consume();
 };
