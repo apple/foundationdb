@@ -1434,8 +1434,8 @@ public:
 		return result;
 	}
 
-	ErrorOr<RecruitFromConfigurationReply> findWorkersForConfiguration(RecruitFromConfigurationRequest const& req,
-	                                                                   Optional<Key> dcId) {
+	ErrorOr<RecruitFromConfigurationReply> findWorkersForConfigurationFromDC(RecruitFromConfigurationRequest const& req,
+	                                                                         Optional<Key> dcId) {
 		RecruitFromConfigurationReply result;
 		std::map<Optional<Standalone<StringRef>>, int> id_used;
 		updateKnownIds(&id_used);
@@ -1580,7 +1580,7 @@ public:
 		return result;
 	}
 
-	RecruitFromConfigurationReply findWorkersForConfiguration(RecruitFromConfigurationRequest const& req) {
+	RecruitFromConfigurationReply findWorkersForConfigurationDispatch(RecruitFromConfigurationRequest const& req) {
 		if (req.configuration.regions.size() > 1) {
 			std::vector<RegionInfo> regions = req.configuration.regions;
 			if (regions[0].priority == regions[1].priority && regions[1].dcId == clusterControllerDcId.get()) {
@@ -1600,7 +1600,7 @@ public:
 
 			bool setPrimaryDesired = false;
 			try {
-				auto reply = findWorkersForConfiguration(req, regions[0].dcId);
+				auto reply = findWorkersForConfigurationFromDC(req, regions[0].dcId);
 				setPrimaryDesired = true;
 				vector<Optional<Key>> dcPriority;
 				dcPriority.push_back(regions[0].dcId);
@@ -1621,7 +1621,7 @@ public:
 					throw;
 				}
 				TraceEvent(SevWarn, "AttemptingRecruitmentInRemoteDC", id).error(e);
-				auto reply = findWorkersForConfiguration(req, regions[1].dcId);
+				auto reply = findWorkersForConfigurationFromDC(req, regions[1].dcId);
 				if (!setPrimaryDesired) {
 					vector<Optional<Key>> dcPriority;
 					dcPriority.push_back(regions[1].dcId);
@@ -1639,7 +1639,7 @@ public:
 			vector<Optional<Key>> dcPriority;
 			dcPriority.push_back(req.configuration.regions[0].dcId);
 			desiredDcIds.set(dcPriority);
-			auto reply = findWorkersForConfiguration(req, req.configuration.regions[0].dcId);
+			auto reply = findWorkersForConfigurationFromDC(req, req.configuration.regions[0].dcId);
 			if (reply.isError()) {
 				throw reply.getError();
 			} else if (req.configuration.regions[0].dcId == clusterControllerDcId.get()) {
@@ -1829,6 +1829,116 @@ public:
 
 			return result;
 		}
+	}
+
+	void updateIdUsed(const std::vector<WorkerInterface>& workers,
+	                  std::map<Optional<Standalone<StringRef>>, int>& id_used) {
+		for (auto& it : workers) {
+			id_used[it.locality.processId()]++;
+		}
+	}
+
+	void compareWorkers(const DatabaseConfiguration& conf,
+	                    const std::vector<WorkerInterface>& first,
+	                    std::map<Optional<Standalone<StringRef>>, int>& firstUsed,
+	                    const std::vector<WorkerInterface>& second,
+	                    std::map<Optional<Standalone<StringRef>>, int>& secondUsed,
+	                    ProcessClass::ClusterRole role,
+	                    std::string description) {
+		std::vector<WorkerDetails> firstDetails;
+		for (auto& it : first) {
+			auto w = id_worker.find(it.locality.processId());
+			ASSERT(w != id_worker.end());
+			ASSERT(!conf.isExcludedServer(w->second.details.interf.addresses()));
+			firstDetails.push_back(w->second.details);
+			//TraceEvent("CompareAddressesFirst").detail(description.c_str(), w->second.details.interf.address());
+		}
+		RoleFitness firstFitness(firstDetails, role, firstUsed);
+
+		std::vector<WorkerDetails> secondDetails;
+		for (auto& it : second) {
+			auto w = id_worker.find(it.locality.processId());
+			ASSERT(w != id_worker.end());
+			ASSERT(!conf.isExcludedServer(w->second.details.interf.addresses()));
+			secondDetails.push_back(w->second.details);
+			//TraceEvent("CompareAddressesSecond").detail(description.c_str(), w->second.details.interf.address());
+		}
+		RoleFitness secondFitness(secondDetails, role, secondUsed);
+
+		if (!(firstFitness == secondFitness)) {
+			TraceEvent(SevError, "NonDeterministicRecruitment")
+			    .detail("FirstFitness", firstFitness.toString())
+			    .detail("SecondFitness", secondFitness.toString())
+			    .detail("ClusterRole", role);
+		}
+	}
+
+	RecruitFromConfigurationReply findWorkersForConfiguration(RecruitFromConfigurationRequest const& req) {
+		RecruitFromConfigurationReply rep = findWorkersForConfigurationDispatch(req);
+		if (g_network->isSimulated()) {
+			RecruitFromConfigurationReply compare = findWorkersForConfigurationDispatch(req);
+
+			std::map<Optional<Standalone<StringRef>>, int> firstUsed;
+			std::map<Optional<Standalone<StringRef>>, int> secondUsed;
+			updateKnownIds(&firstUsed);
+			updateKnownIds(&secondUsed);
+
+			auto mworker = id_worker.find(masterProcessId);
+			//TraceEvent("CompareAddressesMaster")
+			//    .detail("Master",
+			//            mworker != id_worker.end() ? mworker->second.details.interf.address() : NetworkAddress());
+
+			updateIdUsed(rep.tLogs, firstUsed);
+			updateIdUsed(compare.tLogs, secondUsed);
+			compareWorkers(
+			    req.configuration, rep.tLogs, firstUsed, compare.tLogs, secondUsed, ProcessClass::TLog, "TLog");
+			updateIdUsed(rep.satelliteTLogs, firstUsed);
+			updateIdUsed(compare.satelliteTLogs, secondUsed);
+			compareWorkers(req.configuration,
+			               rep.satelliteTLogs,
+			               firstUsed,
+			               compare.satelliteTLogs,
+			               secondUsed,
+			               ProcessClass::TLog,
+			               "Satellite");
+			updateIdUsed(rep.commitProxies, firstUsed);
+			updateIdUsed(compare.commitProxies, secondUsed);
+			updateIdUsed(rep.grvProxies, firstUsed);
+			updateIdUsed(compare.grvProxies, secondUsed);
+			updateIdUsed(rep.resolvers, firstUsed);
+			updateIdUsed(compare.resolvers, secondUsed);
+			compareWorkers(req.configuration,
+			               rep.commitProxies,
+			               firstUsed,
+			               compare.commitProxies,
+			               secondUsed,
+			               ProcessClass::CommitProxy,
+			               "CommitProxy");
+			compareWorkers(req.configuration,
+			               rep.grvProxies,
+			               firstUsed,
+			               compare.grvProxies,
+			               secondUsed,
+			               ProcessClass::GrvProxy,
+			               "GrvProxy");
+			compareWorkers(req.configuration,
+			               rep.resolvers,
+			               firstUsed,
+			               compare.resolvers,
+			               secondUsed,
+			               ProcessClass::Resolver,
+			               "Resolver");
+			updateIdUsed(rep.backupWorkers, firstUsed);
+			updateIdUsed(compare.backupWorkers, secondUsed);
+			compareWorkers(req.configuration,
+			               rep.backupWorkers,
+			               firstUsed,
+			               compare.backupWorkers,
+			               secondUsed,
+			               ProcessClass::Backup,
+			               "Backup");
+		}
+		return rep;
 	}
 
 	// Check if txn system is recruited successfully in each region
