@@ -2022,7 +2022,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
                         std::string whitelistBinPaths) {
 	state vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
-	state LocalConfiguration localConfig(ConfigClassSet{}, dataFolder);
+	state LocalConfiguration localConfig(ConfigClassSet{}, dataFolder, {});
 	wait(localConfig.init());
 
 	actors.push_back(serveProtocolInfo());

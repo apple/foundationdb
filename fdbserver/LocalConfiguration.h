@@ -38,7 +38,9 @@ class LocalConfiguration {
 	std::unique_ptr<class LocalConfigurationImpl> impl;
 
 public:
-	LocalConfiguration(ConfigClassSet const& configClasses, std::string const& dataFolder);
+	LocalConfiguration(ConfigClassSet const& configClasses,
+	                   std::string const& dataFolder,
+	                   std::map<Key, Value>&& manuallyOverriddenKnobs);
 	~LocalConfiguration();
 	Future<Void> init();
 	TestKnobs const &getKnobs() const;
