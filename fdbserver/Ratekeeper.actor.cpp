@@ -737,8 +737,11 @@ ACTOR Future<Void> monitorServerListChange(
 
 	loop {
 		try {
+			if (now() - self->lastSSListFetchedTimestamp > 2 * SERVER_KNOBS->SERVER_LIST_DELAY) {
+				TraceEvent(SevWarnAlways, "RatekeeperGetSSListLongLatency", self->id)
+				    .detail("latency", now() - self->lastSSListFetchedTimestamp);
+			}
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			TraceEvent("RatekeeperMonitorSSList", self->id).detail("CurrentTime", now());
 			vector<std::pair<StorageServerInterface, ProcessClass>> results = wait(getServerListAndProcessClasses(&tr));
 			self->lastSSListFetchedTimestamp = now();
 
@@ -1498,7 +1501,8 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 					p.lastTagPushTime = now();
 
 					reply.throttledTags = self.throttledTags.getClientRates(self.autoThrottlingEnabled);
-					TEST(reply.throttledTags.present() && reply.throttledTags.get().size() > 0); // Returning tag throttles to a proxy
+					TEST(reply.throttledTags.present() &&
+					     reply.throttledTags.get().size() > 0); // Returning tag throttles to a proxy
 				}
 
 				reply.healthMetrics.update(self.healthMetrics, true, req.detailed);
