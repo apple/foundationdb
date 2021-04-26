@@ -326,18 +326,18 @@ public:
 	// only add workers which have a field which is already in the result set
 	void addWorkersByLowestField(StringRef field,
 	                             int desired,
-	                             std::vector<WorkerDetails> workers,
+	                             const std::vector<WorkerDetails>& workers,
 	                             std::set<WorkerDetails>& resultSet) {
 		typedef Optional<Standalone<StringRef>> Field;
 		typedef Optional<Standalone<StringRef>> Zone;
-		typedef std::pair<int, Field> FieldCount;
+		typedef std::tuple<int, bool, Field> FieldCount;
 		typedef std::pair<int, Zone> ZoneCount;
 
 		std::priority_queue<FieldCount, std::vector<FieldCount>, std::greater<FieldCount>> fieldQueue;
 		std::map<Field, std::priority_queue<ZoneCount, std::vector<ZoneCount>, std::greater<ZoneCount>>>
 		    field_zoneQueue;
 
-		std::map<Field, std::pair<int, int>> field_count;
+		std::map<Field, std::pair<int, bool>> field_count;
 		std::map<Zone, std::pair<int, Field>> zone_count;
 		std::map<Zone, std::vector<WorkerDetails>> zone_workers;
 
@@ -347,29 +347,28 @@ public:
 			auto thisZone = worker.interf.locality.zoneId();
 			auto thisDc = worker.interf.locality.dcId();
 
-			auto& f = field_count[thisField];
-			f.first++;
-			if (thisDc == clusterControllerDcId) {
-				f.second = 1;
-			}
-			auto& z = zone_count[thisZone];
-			z.first++;
-			z.second = thisField;
+			auto& fitness = field_count[thisField];
+			fitness.first++;
+			fitness.second = thisDc == clusterControllerDcId;
+
+			auto& zc = zone_count[thisZone];
+			zc.first++;
+			zc.second = thisField;
 		}
 
 		for (auto& worker : workers) {
 			auto thisField = worker.interf.locality.get(field);
 			auto thisZone = worker.interf.locality.zoneId();
-			zone_workers[thisZone].push_back(worker);
 
 			if (field_count.count(thisField)) {
+				zone_workers[thisZone].push_back(worker);
 				zone_count[thisZone].second = thisField;
 			}
 		}
 
 		// try to avoid fields in the cluster controller datacenter if everything else is equal
 		for (auto& it : field_count) {
-			fieldQueue.push(std::make_pair(2 * it.second.first + it.second.second, it.first));
+			fieldQueue.push(std::make_tuple(it.second.first, it.second.second, it.first));
 		}
 
 		for (auto& it : zone_count) {
@@ -379,7 +378,7 @@ public:
 		// start with the least used field, and try to find a worker with that field
 		while (fieldQueue.size()) {
 			auto lowestField = fieldQueue.top();
-			auto& lowestZoneQueue = field_zoneQueue[lowestField.second];
+			auto& lowestZoneQueue = field_zoneQueue[std::get<2>(lowestField)];
 			bool added = false;
 			// start with the least used zoneId, and try and find a worker with that zone
 			while (lowestZoneQueue.size() && !added) {
@@ -389,7 +388,7 @@ public:
 				while (zoneWorkers.size() && !added) {
 					if (!resultSet.count(zoneWorkers.back())) {
 						resultSet.insert(zoneWorkers.back());
-						if (resultSet.size() >= desired) {
+						if (resultSet.size() == desired) {
 							return;
 						}
 						added = true;
@@ -398,18 +397,22 @@ public:
 				}
 				lowestZoneQueue.pop();
 				if (added && zoneWorkers.size()) {
-					lowestZoneQueue.push(std::make_pair(lowestZone.first + 1, lowestZone.second));
+					++lowestZone.first;
+					lowestZoneQueue.push(lowestZone);
 				}
 			}
 			fieldQueue.pop();
 			if (added) {
-				fieldQueue.push(std::make_pair(lowestField.first + 2, lowestField.second));
+				++std::get<0>(lowestField);
+				fieldQueue.push(lowestField);
 			}
 		}
 	}
 
 	// Adds workers to the result which minimize the reuse of zoneIds
-	void addWorkersByLowestZone(int desired, std::vector<WorkerDetails> workers, std::set<WorkerDetails>& resultSet) {
+	void addWorkersByLowestZone(int desired,
+	                            const std::vector<WorkerDetails>& workers,
+	                            std::set<WorkerDetails>& resultSet) {
 		typedef Optional<Standalone<StringRef>> Zone;
 		typedef std::pair<int, Zone> ZoneCount;
 
@@ -417,7 +420,7 @@ public:
 		std::map<Zone, std::vector<WorkerDetails>> zone_workers;
 		std::priority_queue<ZoneCount, std::vector<ZoneCount>, std::greater<ZoneCount>> zoneQueue;
 
-		for (auto& worker : workers) {
+		for (const auto& worker : workers) {
 			auto thisZone = worker.interf.locality.zoneId();
 			zone_count[thisZone] = 0;
 			zone_workers[thisZone].push_back(worker);
@@ -440,7 +443,7 @@ public:
 			while (zoneWorkers.size() && !added) {
 				if (!resultSet.count(zoneWorkers.back())) {
 					resultSet.insert(zoneWorkers.back());
-					if (resultSet.size() >= desired) {
+					if (resultSet.size() == desired) {
 						return;
 					}
 					added = true;
@@ -449,7 +452,8 @@ public:
 			}
 			zoneQueue.pop();
 			if (added && zoneWorkers.size()) {
-				zoneQueue.push(std::make_pair(lowestZone.first + 1, lowestZone.second));
+				++lowestZone.first;
+				zoneQueue.push(lowestZone);
 			}
 		}
 	}
@@ -517,15 +521,13 @@ public:
 					}
 				}
 				field_count[thisField]++;
-				field_fitness.insert({ thisField,
-				                       std::make_tuple(workerIter->first.first,
-				                                       workerIter->first.second,
-				                                       worker.interf.locality.dcId() == clusterControllerDcId) });
+				field_fitness.insert(
+				    { thisField,
+				      std::make_tuple(fitness, used, worker.interf.locality.dcId() == clusterControllerDcId) });
 			}
 			if (fieldsWithMin.size() >= minFields) {
-				requiredFitness = workerIter->first.first;
-				requiredUsed = workerIter->first.second;
-				break;
+				requiredFitness = fitness;
+				requiredUsed = used;
 			}
 		}
 
@@ -651,6 +653,7 @@ public:
 			                                                 dcIds,
 			                                                 exclusionWorkerIds);
 			RoleFitness withoutDegradedFitness(withoutDegraded, ProcessClass::TLog, withoutDegradedUsed);
+			ASSERT(withoutDegraded.size() <= desired);
 
 			if (withDegradedFitness < withoutDegradedFitness) {
 				id_used = withDegradedUsed;
@@ -720,12 +723,12 @@ public:
 				if (!zones.count(worker.interf.locality.zoneId())) {
 					zones.insert(worker.interf.locality.zoneId());
 					resultSet.insert(worker);
-					if (resultSet.size() >= required) {
+					if (resultSet.size() == required) {
 						break;
 					}
 				}
 			}
-			if (resultSet.size() >= required) {
+			if (resultSet.size() == required) {
 				requiredFitness = fitness;
 				requiredUsed = used;
 				break;
@@ -771,14 +774,15 @@ public:
 	//   dcIds:       the target data centers the workers are in. The selected workers must all be from these
 	//                data centers:
 	//   exclusionWorkerIds: the workers to be excluded from the selection.
-	std::vector<WorkerDetails> getWorkersForTlogsBackup(DatabaseConfiguration const& conf,
-	                                                    int32_t required,
-	                                                    int32_t desired,
-	                                                    Reference<IReplicationPolicy> const& policy,
-	                                                    std::map<Optional<Standalone<StringRef>>, int>& id_used,
-	                                                    bool checkStable = false,
-	                                                    std::set<Optional<Key>> dcIds = std::set<Optional<Key>>(),
-	                                                    std::vector<UID> exclusionWorkerIds = {}) {
+	std::vector<WorkerDetails> getWorkersForTlogsBackup(
+	    DatabaseConfiguration const& conf,
+	    int32_t required,
+	    int32_t desired,
+	    Reference<IReplicationPolicy> const& policy,
+	    std::map<Optional<Standalone<StringRef>>, int>& id_used,
+	    bool checkStable = false,
+	    const std::set<Optional<Key>>& dcIds = std::set<Optional<Key>>(),
+	    const std::vector<UID>& exclusionWorkerIds = {}) {
 		std::map<std::tuple<ProcessClass::Fitness, int, bool, bool>, vector<WorkerDetails>> fitness_workers;
 		std::vector<WorkerDetails> results;
 		Reference<LocalitySet> logServerSet = Reference<LocalitySet>(new LocalityMap<WorkerDetails>());
@@ -980,8 +984,8 @@ public:
 	                                              Reference<IReplicationPolicy> const& policy,
 	                                              std::map<Optional<Standalone<StringRef>>, int>& id_used,
 	                                              bool checkStable = false,
-	                                              std::set<Optional<Key>> dcIds = std::set<Optional<Key>>(),
-	                                              std::vector<UID> exclusionWorkerIds = {}) {
+	                                              const std::set<Optional<Key>>& dcIds = std::set<Optional<Key>>(),
+	                                              const std::vector<UID>& exclusionWorkerIds = {}) {
 		desired = std::max(required, desired);
 		bool useSimple = false;
 		if (policy->name() == "Across") {
@@ -1079,6 +1083,7 @@ public:
 			}
 			return workers;
 		}
+		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "PolicyEngineNotOptimized");
 		return getWorkersForTlogsBackup(
 		    conf, required, desired, policy, id_used, checkStable, dcIds, exclusionWorkerIds);
 	}
@@ -3352,6 +3357,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		self->goodRemoteRecruitmentTime = lowPriorityDelay(SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY);
 	} else {
 		TraceEvent("ClusterControllerWorkerAlreadyRegistered", self->id)
+		    .suppressFor(1.0)
 		    .detail("WorkerId", w.id())
 		    .detail("ProcessId", w.locality.processId())
 		    .detail("ZoneId", w.locality.zoneId())
