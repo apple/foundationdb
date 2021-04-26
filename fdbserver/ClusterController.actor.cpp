@@ -464,10 +464,9 @@ public:
 	                                                     int minPerField,
 	                                                     bool allowDegraded,
 	                                                     bool checkStable,
-	                                                     std::set<Optional<Key>> dcIds,
-	                                                     std::vector<UID> exclusionWorkerIds) {
-		std::map<std::pair<ProcessClass::Fitness, int>, vector<WorkerDetails>> fitness_workers;
-		desired = std::max(desired, minFields * minPerField);
+	                                                     const std::set<Optional<Key>>& dcIds,
+	                                                     const std::vector<UID>& exclusionWorkerIds) {
+		std::map<std::tuple<ProcessClass::Fitness, int, bool>, vector<WorkerDetails>> fitness_workers;
 
 		// Go through all the workers to list all the workers that can be recruited.
 		for (const auto& [worker_process_id, worker_info] : id_worker) {
@@ -483,11 +482,13 @@ public:
 				continue;
 			}
 
-			fitness_workers[std::make_pair(fitness, id_used[worker_process_id])].push_back(worker_details);
+			fitness_workers[std::make_tuple(
+			                    fitness, id_used[worker_process_id], isLongLivedStateless(worker_process_id))]
+			    .push_back(worker_details);
 		}
 
-		auto requiredFitness = ProcessClass::BestFit;
-		int requiredUsed = 0;
+		auto requiredFitness = ProcessClass::NeverAssign;
+		int requiredUsed = 1e6;
 
 		typedef Optional<Standalone<StringRef>> Field;
 		typedef Optional<Standalone<StringRef>> Zone;
@@ -499,6 +500,13 @@ public:
 		// Determine the best required workers by finding the workers with enough unique zoneIds per field
 		for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
 			deterministicRandom()->randomShuffle(workerIter->second);
+			auto fitness = std::get<0>(workerIter->first);
+			auto used = std::get<1>(workerIter->first);
+
+			if (fitness > requiredFitness || (fitness == requiredFitness && used > requiredUsed)) {
+				break;
+			}
+
 			for (auto& worker : workerIter->second) {
 				auto thisField = worker.interf.locality.get(field);
 				auto& zones = field_zones[thisField];
@@ -525,6 +533,7 @@ public:
 			throw no_more_servers();
 		}
 
+		std::set<Field> chosenFields;
 		// If we cannot use all of the fields, use the fields which allow the best workers to be chosen
 		if (fieldsWithMin.size() * minPerField > desired) {
 			std::vector<std::tuple<ProcessClass::Fitness, int, bool, int, Field>> orderedFields;
@@ -534,33 +543,29 @@ public:
 				    std::get<0>(fitness), std::get<1>(fitness), std::get<2>(fitness), field_count[it], it));
 			}
 			std::sort(orderedFields.begin(), orderedFields.end());
-			std::set<Field> newFieldsWithMin;
 			int totalFields = desired / minPerField;
 			int maxCount = 0;
-			for (int i = 0; i < orderedFields.size(); i++) {
-				if (newFieldsWithMin.size() == totalFields - 1 && maxCount + std::get<3>(orderedFields[i]) < desired) {
+			for (int i = 0; i < orderedFields.size() && chosenFields.size() < totalFields; i++) {
+				if (chosenFields.size() == totalFields - 1 && maxCount + std::get<3>(orderedFields[i]) < desired) {
 					for (int j = i + 1; j < orderedFields.size(); j++) {
 						if (maxCount + std::get<3>(orderedFields[j]) >= desired) {
-							newFieldsWithMin.insert(std::get<4>(orderedFields[j]));
+							chosenFields.insert(std::get<4>(orderedFields[j]));
 							break;
 						}
 					}
-					if (newFieldsWithMin.size() == totalFields) {
-						break;
-					}
 				}
-				maxCount += std::get<3>(orderedFields[i]);
-				newFieldsWithMin.insert(std::get<4>(orderedFields[i]));
-				if (newFieldsWithMin.size() == totalFields) {
-					break;
+				if (chosenFields.size() < totalFields) {
+					maxCount += std::get<3>(orderedFields[i]);
+					chosenFields.insert(std::get<4>(orderedFields[i]));
 				}
 			}
-			fieldsWithMin = newFieldsWithMin;
+		} else {
+			chosenFields = fieldsWithMin;
 		}
 
 		// Create a result set with fulfills the minField and minPerField requirements before adding more workers
 		std::set<WorkerDetails> resultSet;
-		for (auto& it : fieldsWithMin) {
+		for (auto& it : chosenFields) {
 			auto& w = field_zones[it].second;
 			for (int i = 0; i < minPerField; i++) {
 				resultSet.insert(w[i]);
@@ -568,22 +573,23 @@ public:
 		}
 
 		// Continue adding workers to the result set until we reach the desired number of workers
-		for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
-			if (workerIter->first.first > requiredFitness ||
-			    (workerIter->first.first == requiredFitness && workerIter->first.second > requiredUsed)) {
+		for (auto workerIter = fitness_workers.begin();
+		     workerIter != fitness_workers.end() && resultSet.size() < desired;
+		     ++workerIter) {
+			auto fitness = std::get<0>(workerIter->first);
+			auto used = std::get<1>(workerIter->first);
+
+			if (fitness > requiredFitness || (fitness == requiredFitness && used > requiredUsed)) {
 				break;
 			}
 			if (workerIter->second.size() + resultSet.size() <= desired) {
 				for (auto& worker : workerIter->second) {
-					if (fieldsWithMin.count(worker.interf.locality.get(field))) {
+					if (chosenFields.count(worker.interf.locality.get(field))) {
 						resultSet.insert(worker);
 					}
 				}
 			} else {
 				addWorkersByLowestField(field, desired, workerIter->second, resultSet);
-			}
-			if (resultSet.size() >= desired) {
-				break;
 			}
 		}
 
@@ -602,8 +608,9 @@ public:
 	                                                     int minFields,
 	                                                     int minPerField,
 	                                                     bool checkStable,
-	                                                     std::set<Optional<Key>> dcIds,
-	                                                     std::vector<UID> exclusionWorkerIds) {
+	                                                     const std::set<Optional<Key>>& dcIds,
+	                                                     const std::vector<UID>& exclusionWorkerIds) {
+		desired = std::max(desired, minFields * minPerField);
 		std::map<Optional<Standalone<StringRef>>, int> withDegradedUsed = id_used;
 		auto withDegraded = getWorkersForTlogsComplex(conf,
 		                                              desired,
@@ -616,6 +623,7 @@ public:
 		                                              dcIds,
 		                                              exclusionWorkerIds);
 		RoleFitness withDegradedFitness(withDegraded, ProcessClass::TLog, withDegradedUsed);
+		ASSERT(withDegraded.size() <= desired);
 
 		bool usedDegraded = false;
 		for (auto& it : withDegraded) {
@@ -666,9 +674,9 @@ public:
 	                                                    int32_t desired,
 	                                                    std::map<Optional<Standalone<StringRef>>, int>& id_used,
 	                                                    bool checkStable,
-	                                                    std::set<Optional<Key>> dcIds,
-	                                                    std::vector<UID> exclusionWorkerIds) {
-		std::map<std::tuple<ProcessClass::Fitness, int, bool, bool>, vector<WorkerDetails>> fitness_workers;
+	                                                    const std::set<Optional<Key>>& dcIds,
+	                                                    const std::vector<UID>& exclusionWorkerIds) {
+		std::map<std::tuple<ProcessClass::Fitness, int, bool, bool, bool>, vector<WorkerDetails>> fitness_workers;
 
 		// Go through all the workers to list all the workers that can be recruited.
 		for (const auto& [worker_process_id, worker_info] : id_worker) {
@@ -689,7 +697,11 @@ public:
 				fitness = std::max(fitness, ProcessClass::GoodFit);
 			}
 
-			fitness_workers[std::make_tuple(fitness, id_used[worker_process_id], worker_details.degraded, inCCDC)]
+			fitness_workers[std::make_tuple(fitness,
+			                                id_used[worker_process_id],
+			                                worker_details.degraded,
+			                                isLongLivedStateless(worker_process_id),
+			                                inCCDC)]
 			    .push_back(worker_details);
 		}
 
@@ -721,7 +733,9 @@ public:
 		}
 
 		// Continue adding workers to the result set until we reach the desired number of workers
-		for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
+		for (auto workerIter = fitness_workers.begin();
+		     workerIter != fitness_workers.end() && resultSet.size() < desired;
+		     ++workerIter) {
 			auto fitness = std::get<0>(workerIter->first);
 			auto used = std::get<1>(workerIter->first);
 			if (fitness > requiredFitness || (fitness == requiredFitness && used > requiredUsed)) {
@@ -734,10 +748,9 @@ public:
 			} else {
 				addWorkersByLowestZone(desired, workerIter->second, resultSet);
 			}
-			if (resultSet.size() >= desired) {
-				break;
-			}
 		}
+
+		ASSERT(resultSet.size() <= desired);
 
 		for (auto& result : resultSet) {
 			id_used[result.interf.locality.processId()]++;
