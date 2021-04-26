@@ -40,7 +40,7 @@ struct LowLatencyWorkload : TestWorkload {
 	  : TestWorkload(wcx), operations("Operations"), retries("Retries"), ok(true) {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 600.0);
 		maxGRVLatency = getOption(options, LiteralStringRef("maxGRVLatency"), 20.0);
-		maxCommitLatency = getOption(options, LiteralStringRef("maxCommitLatency"), 33.0);
+		maxCommitLatency = getOption(options, LiteralStringRef("maxCommitLatency"), 30.0);
 		checkDelay = getOption(options, LiteralStringRef("checkDelay"), 1.0);
 		testWrites = getOption(options, LiteralStringRef("testWrites"), true);
 		testKey = getOption(options, LiteralStringRef("testKey"), LiteralStringRef("testKey"));
