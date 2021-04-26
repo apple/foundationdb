@@ -2022,6 +2022,8 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
                         std::string whitelistBinPaths) {
 	state vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
+	state LocalConfiguration localConfig(ConfigClassSet{}, dataFolder);
+	wait(localConfig.init());
 
 	actors.push_back(serveProtocolInfo());
 
@@ -2056,8 +2058,8 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		auto asyncPriorityInfo =
 		    makeReference<AsyncVar<ClusterControllerPriorityInfo>>(getCCPriorityInfo(fitnessFilePath, processClass));
 		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>();
-		LocalConfiguration localConfig(ConfigClassSet{}, dataFolder, dbInfo);
 
+		actors.push_back(reportErrors(localConfig.consume(dbInfo), "LocalConfiguration"));
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo),
 		                              "MonitorAndWriteCCPriorityInfo"));
 		if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::NeverAssign) {

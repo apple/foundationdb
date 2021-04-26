@@ -38,11 +38,10 @@ class LocalConfiguration {
 	std::unique_ptr<class LocalConfigurationImpl> impl;
 
 public:
-	LocalConfiguration(ConfigClassSet const& configClasses,
-	                   std::string const& dataFolder,
-	                   Reference<AsyncVar<ServerDBInfo> const> const&);
+	LocalConfiguration(ConfigClassSet const& configClasses, std::string const& dataFolder);
 	~LocalConfiguration();
 	Future<Void> init();
 	TestKnobs const &getKnobs() const;
-	Future<Void> consume();
+	// TODO: Only one field of serverDBInfo is required, so improve encapsulation
+	Future<Void> consume(Reference<AsyncVar<ServerDBInfo> const> const&);
 };
