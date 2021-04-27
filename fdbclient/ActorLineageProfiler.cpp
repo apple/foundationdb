@@ -360,3 +360,11 @@ void ProfilerConfigT::reset(std::map<std::string, std::string> const& config) {
 		    useTCP ? FluentDIngestor::Protocol::TCP : FluentDIngestor::Protocol::TCP, address));
 	}
 }
+
+std::map<std::string, std::string> ProfilerConfigT::getConfig() const {
+	std::map<std::string, std::string> res;
+	if (ingestor) {
+		ingestor->getConfig(res);
+	}
+	return res;
+}

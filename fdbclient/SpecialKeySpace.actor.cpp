@@ -21,6 +21,7 @@
 #include "boost/lexical_cast.hpp"
 #include "boost/algorithm/string.hpp"
 
+#include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ProcessInterface.h"
 #include "fdbclient/GlobalConfig.actor.h"
@@ -71,7 +72,10 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	{ SpecialKeySpace::MODULE::TRACING,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/tracing/"), LiteralStringRef("\xff\xff/tracing0")) },
 	{ SpecialKeySpace::MODULE::ACTORLINEAGE,
-	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_lineage/"), LiteralStringRef("\xff\xff/actor_lineage0")) }
+	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_lineage/"), LiteralStringRef("\xff\xff/actor_lineage0")) },
+	{ SpecialKeySpace::MODULE::ACTOR_PROFILER_CONF,
+	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_profiler_conf/"),
+	              LiteralStringRef("\xff\xff/actor_profiler_conf0")) }
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandToRange = {
@@ -1952,4 +1956,65 @@ ACTOR static Future<Standalone<RangeResultRef>> actorLineageGetRangeActor(ReadYo
 
 Future<Standalone<RangeResultRef>> ActorLineageImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
 	return actorLineageGetRangeActor(ryw, getKeyRange().begin, kr);
+}
+
+namespace {
+std::string_view to_string_view(StringRef sr) {
+	return std::string_view(reinterpret_cast<const char*>(sr.begin()), sr.size());
+}
+} // namespace
+
+ActorProfilerConf::ActorProfilerConf(KeyRangeRef kr)
+  : SpecialKeyRangeRWImpl(kr), config(ProfilerConfig::instance().getConfig()) {}
+
+Future<Standalone<RangeResultRef>> ActorProfilerConf::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+	Standalone<RangeResultRef> res;
+	std::string_view begin(to_string_view(kr.begin.removePrefix(range.begin))),
+	    end(to_string_view(kr.end.removePrefix(range.begin)));
+	for (auto& p : config) {
+		if (p.first > end) {
+			break;
+		} else if (p.first > begin) {
+			KeyValueRef kv;
+			kv.key = StringRef(res.arena(), p.first);
+			kv.value = StringRef(res.arena(), p.second);
+			res.push_back(res.arena(), kv);
+		}
+	}
+	return res;
+}
+
+void ActorProfilerConf::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
+	config[key.removePrefix(range.begin).toString()] = value.toString();
+}
+
+void ActorProfilerConf::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& kr) {
+	std::string begin(kr.begin.removePrefix(range.begin).toString()), end(kr.end.removePrefix(range.begin).toString());
+	auto first = config.lower_bound(begin);
+	if (first == config.end()) {
+		// nothing to clear
+		return;
+	}
+	auto last = config.upper_bound(end);
+	config.erase(first, last);
+}
+
+void ActorProfilerConf::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
+	std::string k = key.removePrefix(range.begin).toString();
+	auto iter = config.find(k);
+	if (iter != config.end()) {
+		config.erase(iter);
+	}
+}
+
+Future<Optional<std::string>> ActorProfilerConf::commit(ReadYourWritesTransaction* ryw) {
+	Optional<std::string> res{};
+	try {
+		if (didWrite) {
+			ProfilerConfig::instance().reset(config);
+		}
+		return res;
+	} catch (ConfigError& err) {
+		return Optional<std::string>{ err.description };
+	}
 }

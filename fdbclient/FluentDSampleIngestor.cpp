@@ -170,3 +170,9 @@ void FluentDIngestor::ingest(const std::shared_ptr<Sample>& sample) {
 		impl->socket->send(sample);
 	}
 }
+
+void FluentDIngestor::getConfig(std::map<std::string, std::string>& res) const {
+	res["ingestor"] = "fluentd";
+	res["collector_endpoint"] = impl->endpoint.toString();
+	res["collector_protocol"] = impl->protocol == Protocol::TCP ? "tcp" : "udp";
+}

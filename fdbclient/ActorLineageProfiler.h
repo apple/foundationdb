@@ -55,11 +55,13 @@ class SampleIngestor : std::enable_shared_from_this<SampleIngestor> {
 public:
 	virtual ~SampleIngestor();
 	virtual void ingest(std::shared_ptr<Sample> const& sample) = 0;
+	virtual void getConfig(std::map<std::string, std::string>&) const = 0;
 };
 
 class NoneIngestor : public SampleIngestor {
 public:
 	void ingest(std::shared_ptr<Sample> const& sample) override {}
+	void getConfig(std::map<std::string, std::string>& res) const override { res["ingestor"] = "none"; }
 };
 
 // The FluentD ingestor uses the pimp idiom. This is to make compilation less heavy weight as this implementation has
@@ -76,6 +78,7 @@ private: // members
 public: // interface
 	void ingest(std::shared_ptr<Sample> const& sample) override;
 	FluentDIngestor(Protocol protocol, NetworkAddress& endpoint);
+	void getConfig(std::map<std::string, std::string>& res) const override;
 	~FluentDIngestor();
 };
 
@@ -99,6 +102,7 @@ private: // construction
 
 public:
 	void reset(std::map<std::string, std::string> const& config);
+	std::map<std::string, std::string> getConfig() const;
 };
 
 using ProfilerConfig = crossbow::singleton<ProfilerConfigT>;
