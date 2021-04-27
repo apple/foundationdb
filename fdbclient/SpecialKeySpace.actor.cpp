@@ -2095,15 +2095,37 @@ ACTOR static Future<Standalone<RangeResultRef>> actorLineageGetRangeActor(ReadYo
 	actorLineageRequest.seqEnd = seqEnd;
 	ActorLineageReply reply = wait(process.actorLineage.getReply(actorLineageRequest));
 
+	time_t dt = 0;
+	int seq = -1;
 	for (const auto& sample : reply.samples) {
-		msgpack::object_handle oh = msgpack::unpack(sample.data.data(), sample.data.size());
-		msgpack::object deserialized = oh.get();
+		for (const auto& [waitState, data] : sample.data) {
+			time_t datetime = (time_t)sample.time;
+			seq = dt == datetime ? seq + 1 : 0;
+			dt = datetime;
 
-		std::ostringstream stream;
-		stream << deserialized;
-		// TODO: Fix return value for ranges
-		Key returnKey = prefix.withSuffix(host.toString() + "/" + std::to_string(sample.seq));
-		result.push_back_deep(result.arena(), KeyValueRef(returnKey, stream.str()));
+			if (seq < seqStart) {
+				continue;
+			} else if (seq >= seqEnd) {
+				break;
+			}
+
+			char buf[200];
+			struct tm* tm;
+			tm = localtime(&datetime);
+			size_t size = strftime(buf, 200, "%FT%T%z", tm);
+			std::string date(buf, size);
+
+			msgpack::object_handle oh = msgpack::unpack(data.data(), data.size());
+			msgpack::object deserialized = oh.get();
+
+			std::ostringstream stream;
+			stream << deserialized;
+
+			// TODO: Fix return value for time range
+			Key returnKey = prefix.withSuffix(host.toString() + "/" + std::string(to_string(waitState)) + "/" + date +
+			                                  "/" + std::to_string(seq));
+			result.push_back_deep(result.arena(), KeyValueRef(returnKey, stream.str()));
+		}
 	}
 
 	return result;

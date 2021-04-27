@@ -62,14 +62,13 @@ struct EchoRequest {
 struct SerializedSample {
 	constexpr static FileIdentifier file_identifier = 15785634;
 
-	WaitState waitState;
 	double time;
 	int seq;
-	std::string data;
+	std::unordered_map<WaitState, std::string> data;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, waitState, time, seq, data);
+		serializer(ar, time, seq, data);
 	}
 };
 

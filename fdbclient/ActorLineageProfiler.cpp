@@ -150,12 +150,9 @@ public:
 		}
 	}
 
-	std::shared_ptr<Sample> done(double time) {
-		auto res = std::make_shared<Sample>();
-		res->time = time;
-		res->size = sbuffer.size();
-		res->data = sbuffer.release();
-		return res;
+	std::pair<char*, unsigned> getbuf() {
+		unsigned size = sbuffer.size();
+		return std::make_pair(sbuffer.release(), size);
 	}
 };
 
@@ -175,11 +172,11 @@ std::map<std::string_view, std::any> SampleCollectorT::collect(ActorLineage* lin
 }
 
 std::shared_ptr<Sample> SampleCollectorT::collect() {
-	Packer packer;
-	std::map<std::string_view, std::any> res;
+	auto sample = std::make_shared<Sample>();
 	double time = g_network->now();
-	res["time"sv] = time;
+	sample->time = time;
 	for (auto& p : getSamples) {
+		Packer packer;
 		std::vector<std::map<std::string_view, std::any>> samples;
 		auto sampleVec = p.second();
 		for (auto& val : sampleVec) {
@@ -189,11 +186,11 @@ std::shared_ptr<Sample> SampleCollectorT::collect() {
 			}
 		}
 		if (!samples.empty()) {
-			res[to_string(p.first)] = samples;
+			packer.pack(samples);
+			sample->data[p.first] = packer.getbuf();
 		}
 	}
-	packer.pack(res);
-	return packer.done(time);
+	return sample;
 }
 
 void SampleCollection_t::refresh() {

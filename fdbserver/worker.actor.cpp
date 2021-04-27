@@ -2060,13 +2060,18 @@ ACTOR Future<Void> serveProcess() {
 				int maxSeq = std::min(req.seqEnd, static_cast<int>(samples.size()));
 
 				std::vector<SerializedSample> serializedSamples;
-				for (int i = req.seqStart; i < maxSeq; ++i) {
-					auto samplePtr = samples.at(i);
-					auto serialized = SerializedSample{ .waitState = WaitState::Network, // TODO: Currently unused
-						                                .time = samplePtr->time,
-						                                .seq = i,
-						                                .data = std::string(samplePtr->data, samplePtr->size) };
+				for (const auto& samplePtr : samples) {
+					int seq = 0;
+					auto serialized = SerializedSample{ .time = samplePtr->time, .seq = seq };
+					for (const auto& [waitState, pair] : samplePtr->data) {
+						serialized.data[waitState] = std::string(pair.first, pair.second);
+					}
 					serializedSamples.push_back(std::move(serialized));
+
+					// TODO: Don't need to transmit seq over the network anymore
+					if (++seq >= maxSeq) {
+						continue;
+					};
 				}
 				ActorLineageReply reply{ serializedSamples };
 				req.reply.send(reply);
