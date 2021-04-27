@@ -20,15 +20,13 @@
 
 #ifndef FDBSERVER_RESOLVERINTERFACE_H
 #define FDBSERVER_RESOLVERINTERFACE_H
-#include "fdbclient/CommitTransaction.h"
-#include "fdbrpc/Locality.h"
-#include "fdbrpc/fdbrpc.h"
+
 #pragma once
 
-#include "fdbrpc/Locality.h"
-#include "fdbrpc/fdbrpc.h"
-#include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/Locality.h"
 
 struct ResolverInterface {
 	constexpr static FileIdentifier file_identifier = 1755944;
@@ -80,15 +78,24 @@ struct StateTransactionRef {
 struct ResolveTransactionBatchReply {
 	constexpr static FileIdentifier file_identifier = 15472264;
 	Arena arena;
+
+	// Commit status, one for each transaction in the request.
+	// Type is enum ConflictBatch::TransactionCommitResult.
 	VectorRef<uint8_t> committed;
 	Optional<UID> debugID;
-	VectorRef<VectorRef<StateTransactionRef>> stateMutations; // [version][transaction#] -> (committed, [mutation#])
-	std::map<int, VectorRef<int>>
-	    conflictingKeyRangeMap; // transaction index -> conflicting read_conflict_range ids given by the resolver
+
+	// [version][transaction#] -> (committed, [mutation#])
+	VectorRef<VectorRef<StateTransactionRef>> stateMutations;
+
+	// transaction index -> conflicting read_conflict_range ids given by the resolver
+	std::map<int, VectorRef<int>> conflictingKeyRangeMap;
+
+	// Each team's previous commit version
+	std::map<ptxn::TeamID, Version> previousCommitVersions;
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, committed, stateMutations, debugID, conflictingKeyRangeMap, arena);
+		serializer(ar, committed, stateMutations, debugID, conflictingKeyRangeMap, previousCommitVersions, arena);
 	}
 };
 
@@ -97,14 +104,15 @@ struct ResolveTransactionBatchRequest {
 	Arena arena;
 
 	SpanID spanContext;
-	Version prevVersion;
-	Version version; // FIXME: ?
+	Version prevVersion; // Previous commit version given out by the master.
+	Version version; // Commit version of the batch.
 	Version lastReceivedVersion;
 	VectorRef<struct CommitTransactionRef> transactions;
-	VectorRef<int>
-	    txnStateTransactions; // Offsets of elements of transactions that have (transaction subsystem state) mutations
+	// Offsets of elements of transactions that have (transaction subsystem state) mutations
+	VectorRef<int> txnStateTransactions;
 	ReplyPromise<ResolveTransactionBatchReply> reply;
 	Optional<UID> debugID;
+	std::vector<ptxn::TeamID> teams; // Teams updated in this batch
 
 	template <class Archive>
 	void serialize(Archive& ar) {
@@ -117,7 +125,8 @@ struct ResolveTransactionBatchRequest {
 		           reply,
 		           arena,
 		           debugID,
-		           spanContext);
+		           spanContext,
+		           teams);
 	}
 };
 

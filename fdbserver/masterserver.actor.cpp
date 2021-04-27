@@ -960,6 +960,7 @@ ACTOR static Future<Void> sendInitialCommitToResolvers(Reference<MasterData> sel
 		req.prevVersion = -1;
 		req.version = self->lastEpochEnd;
 		req.lastReceivedVersion = -1;
+		// TODO: add all team IDs to the request
 
 		replies.push_back(brokenPromiseToNever(r.resolve.getReply(req)));
 	}
