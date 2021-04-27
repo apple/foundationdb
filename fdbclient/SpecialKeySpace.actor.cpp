@@ -21,6 +21,7 @@
 #include "boost/lexical_cast.hpp"
 #include "boost/algorithm/string.hpp"
 
+#include <time.h>
 #include <msgpack.hpp>
 
 #include <exception>
@@ -1958,6 +1959,21 @@ void parse(StringRef& val, WaitState& w) {
 	}
 }
 
+void parse(StringRef& val, time_t& t) {
+	struct tm tm = { 0 };
+	if (strptime(val.toString().c_str(), "%FT%T%z", &tm) == nullptr) {
+			TraceEvent("LUKAS_FailedToParse");
+		throw std::invalid_argument("failed to parse ISO 8601 datetime");
+	}
+
+	long timezone = tm.tm_gmtoff;
+	t = timegm(&tm);
+	if (t == -1) {
+		throw std::runtime_error("failed to convert ISO 8601 datetime");
+	}
+	t -= timezone;
+}
+
 void parse(StringRef& val, NetworkAddress& a) {
 	auto address = NetworkAddress::parse(val.toString());
 	if (!address.isValid()) {
@@ -2016,8 +2032,8 @@ ACTOR static Future<Standalone<RangeResultRef>> actorLineageGetRangeActor(ReadYo
 	state NetworkAddress host;
 	state WaitState waitStateStart = WaitState{ 0 };
 	state WaitState waitStateEnd = WaitState{ 2 };
-	state double timeStart = 0;
-	state double timeEnd = std::numeric_limits<double>::max();
+	state time_t timeStart = 0;
+	state time_t timeEnd = std::numeric_limits<time_t>::max();
 	state int seqStart = 0;
 	state int seqEnd = std::numeric_limits<int>::max();
 

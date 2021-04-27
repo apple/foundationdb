@@ -86,7 +86,7 @@ struct ActorLineageReply {
 struct ActorLineageRequest {
 	constexpr static FileIdentifier file_identifier = 11654765;
 	WaitState waitStateStart, waitStateEnd;
-	double timeStart, timeEnd;
+	time_t timeStart, timeEnd;
 	int seqStart, seqEnd;
 	ReplyPromise<ActorLineageReply> reply;
 
