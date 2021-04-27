@@ -58,7 +58,6 @@ struct EchoRequest {
 };
 
 // This type is used to send serialized sample data over the network.
-// TODO: Possible to combine with `Sample`?
 struct SerializedSample {
 	constexpr static FileIdentifier file_identifier = 15785634;
 

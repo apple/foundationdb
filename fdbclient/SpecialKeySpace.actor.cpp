@@ -2111,7 +2111,14 @@ ACTOR static Future<Standalone<RangeResultRef>> actorLineageGetRangeActor(ReadYo
 			std::string date(buf, size);
 
 			std::ostringstream streamKey;
-			streamKey << prefix.toString() << host.toString() << "/" << to_string(waitState) << "/" << date << "/" << seq;
+			if (SpecialKeySpace::getActorLineageApiCommandRange("state").contains(kr)) {
+				streamKey << SpecialKeySpace::getActorLineageApiCommandPrefix("state").toString() << host.toString() << "/" << to_string(waitState) << "/" << date;
+			} else if (SpecialKeySpace::getActorLineageApiCommandRange("time").contains(kr)) {
+				streamKey << SpecialKeySpace::getActorLineageApiCommandPrefix("time").toString() << host.toString() << "/" << date << "/" << to_string(waitState);;
+			} else {
+				ASSERT(false);
+			}
+			streamKey <<  "/" << seq;
 
 			msgpack::object_handle oh = msgpack::unpack(data.data(), data.size());
 			msgpack::object deserialized = oh.get();
@@ -2119,7 +2126,6 @@ ACTOR static Future<Standalone<RangeResultRef>> actorLineageGetRangeActor(ReadYo
 			std::ostringstream stream;
 			stream << deserialized;
 
-			// TODO: Fix return value for time range
 			result.push_back_deep(result.arena(), KeyValueRef(streamKey.str(), stream.str()));
 		}
 	}
