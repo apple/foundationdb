@@ -526,9 +526,9 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 			request.issues.push_back_deep(request.issues.arena(), i);
 		}
 		ClusterConnectionString fileConnectionString;
-		std::string connectionString = connFile->getConnectionString().toString();
 		if (connFile && !connFile->fileContentsUpToDate(fileConnectionString)) {
 			request.issues.push_back_deep(request.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
+			std::string connectionString = connFile->getConnectionString().toString();
 			if (!incorrectTime.present()) {
 				incorrectTime = now();
 			}
