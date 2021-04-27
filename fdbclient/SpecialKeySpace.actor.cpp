@@ -2112,13 +2112,16 @@ ACTOR static Future<Standalone<RangeResultRef>> actorLineageGetRangeActor(ReadYo
 
 			std::ostringstream streamKey;
 			if (SpecialKeySpace::getActorLineageApiCommandRange("state").contains(kr)) {
-				streamKey << SpecialKeySpace::getActorLineageApiCommandPrefix("state").toString() << host.toString() << "/" << to_string(waitState) << "/" << date;
+				streamKey << SpecialKeySpace::getActorLineageApiCommandPrefix("state").toString() << host.toString()
+				          << "/" << to_string(waitState) << "/" << date;
 			} else if (SpecialKeySpace::getActorLineageApiCommandRange("time").contains(kr)) {
-				streamKey << SpecialKeySpace::getActorLineageApiCommandPrefix("time").toString() << host.toString() << "/" << date << "/" << to_string(waitState);;
+				streamKey << SpecialKeySpace::getActorLineageApiCommandPrefix("time").toString() << host.toString()
+				          << "/" << date << "/" << to_string(waitState);
+				;
 			} else {
 				ASSERT(false);
 			}
-			streamKey <<  "/" << seq;
+			streamKey << "/" << seq;
 
 			msgpack::object_handle oh = msgpack::unpack(data.data(), data.size());
 			msgpack::object deserialized = oh.get();
