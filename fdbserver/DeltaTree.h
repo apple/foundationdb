@@ -1003,11 +1003,11 @@ public:
 		}
 	};
 #pragma pack(pop)
-	struct DecodeCache : FastAllocated<DecodeCache> {
+	struct DecodeCache : FastAllocated<DecodeCache>, ReferenceCounted<DecodeCache> {
 		DecodeCache(const T& lowerBound = T(), const T& upperBound = T())
 		  : lowerBound(arena, lowerBound), upperBound(arena, upperBound) {
 			decodedNodes.reserve(10);
-			printf("DecodedNode size: %d\n", sizeof(DecodedNode));
+			deltatree_printf("DecodedNode size: %d\n", sizeof(DecodedNode));
 		}
 
 		Arena arena;
@@ -1100,7 +1100,7 @@ public:
 
 		const T get() const { return get(cache->get(nodeIndex)); }
 
-		// const T getOrUpperBound() const { return valid() ? node->item : *mirror->upperBound(); }
+		const T getOrUpperBound() const { return valid() ? get() : cache->upperBound; }
 
 		bool operator==(const Cursor& rhs) const { return nodeIndex == rhs.nodeIndex; }
 		bool operator!=(const Cursor& rhs) const { return nodeIndex != rhs.nodeIndex; }
@@ -1229,11 +1229,9 @@ public:
 			int nIndex = rootIndex();
 			deltatree_printf("moveFirst start %s\n", toString().c_str());
 			while (nIndex != -1) {
+				nodeIndex = nIndex;
+				deltatree_printf("moveFirst moved %s\n", toString().c_str());
 				nIndex = getLeftChildIndex(nIndex);
-				if (nIndex != -1) {
-					nodeIndex = nIndex;
-					deltatree_printf("moveFirst move %s\n", toString().c_str());
-				}
 			}
 			return _hideDeletedForward();
 		}
@@ -1243,11 +1241,9 @@ public:
 			int nIndex = rootIndex();
 			deltatree_printf("moveLast start %s\n", toString().c_str());
 			while (nIndex != -1) {
+				nodeIndex = nIndex;
+				deltatree_printf("moveLast moved %s\n", toString().c_str());
 				nIndex = getRightChildIndex(nIndex);
-				if (nIndex != -1) {
-					nodeIndex = nIndex;
-					deltatree_printf("moveLast move %s\n", toString().c_str());
-				}
 			}
 			return _hideDeletedBackward();
 		}
