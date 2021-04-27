@@ -64,7 +64,6 @@ void TLogGroupCollection::recruitEverything() {
 	std::vector<TLogWorkerData*> bestSet;
 	auto localityMap = buildLocalityMap(selectedServers);
 
-	printf("---> Going to recruit %d groups out of %d servers\n", targetNumGroups, localityMap.size());
 	while (recruitedGroups.size() < targetNumGroups) {
 		bestSet.clear();
 
@@ -73,21 +72,18 @@ void TLogGroupCollection::recruitEverything() {
 		if (localityMap.selectReplicas(policy, bestSet)) {
 			// ASSERT_WE_THINK(bestSet.size() == GROUP_SIZE);
 
-			printf("----> Recruiting Group: %d\n", bestSet.size());
 			Reference<TLogGroup> group(new TLogGroup());
 			for (auto& entry : bestSet) {
-				printf("Recruited Group: %s\n", entry->locality.processId().get().toString().c_str());
 				group->addServer(Reference<TLogWorkerData>(entry));
 				selectedServers.insert(entry->id);
 			}
 
 			recruitedGroups.push_back(group);
+			TraceEvent("TLogGroupAdd").detail("GroupID", group->id()).detail("Servers", describe(group->servers()));
 		} else {
 			// TODO: We may have scenarios (simulation), with recruits/zone's < RF. Handle that case.
 		}
 	}
-
-	// ASSERT_EQ(newGroups.size(), numTeams);
 }
 
 LocalityMap<TLogWorkerData> TLogGroupCollection::buildLocalityMap(const std::unordered_set<UID>& ignoreServers) {
