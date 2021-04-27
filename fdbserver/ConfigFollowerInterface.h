@@ -137,22 +137,25 @@ struct ConfigFollowerCompactRequest {
 	}
 };
 
-struct ConfigFollowerInterface {
+class ConfigFollowerInterface {
+	UID _id;
+
+public:
 	static constexpr FileIdentifier file_identifier = 7721102;
 	RequestStream<ConfigFollowerGetVersionRequest> getVersion;
 	RequestStream<ConfigFollowerGetFullDatabaseRequest> getFullDatabase;
 	RequestStream<ConfigFollowerGetChangesRequest> getChanges;
 	RequestStream<ConfigFollowerCompactRequest> compact;
-	UID id;
 
 	ConfigFollowerInterface();
 	void setupWellKnownEndpoints();
 	ConfigFollowerInterface(NetworkAddress const& remote);
 	bool operator==(ConfigFollowerInterface const& rhs) const;
 	bool operator!=(ConfigFollowerInterface const& rhs) const;
+	UID id() const { return _id; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, getVersion, getFullDatabase, getChanges, id);
+		serializer(ar, _id, getVersion, getFullDatabase, getChanges);
 	}
 };

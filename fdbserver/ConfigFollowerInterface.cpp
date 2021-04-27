@@ -29,16 +29,16 @@ void ConfigFollowerInterface::setupWellKnownEndpoints() {
 	compact.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_COMPACT, TaskPriority::Coordination);
 }
 
-ConfigFollowerInterface::ConfigFollowerInterface() : id(deterministicRandom()->randomUniqueID()) {}
+ConfigFollowerInterface::ConfigFollowerInterface() : _id(deterministicRandom()->randomUniqueID()) {}
 
 ConfigFollowerInterface::ConfigFollowerInterface(NetworkAddress const& remote)
-  : id(deterministicRandom()->randomUniqueID()), getVersion(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETVERSION)),
+  : _id(deterministicRandom()->randomUniqueID()), getVersion(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETVERSION)),
     getFullDatabase(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETFULLDB)),
     getChanges(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETCHANGES)),
     compact(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_COMPACT)) {}
 
 bool ConfigFollowerInterface::operator==(ConfigFollowerInterface const& rhs) const {
-	return id == rhs.id;
+	return _id == rhs._id;
 }
 
 bool ConfigFollowerInterface::operator!=(ConfigFollowerInterface const& rhs) const {

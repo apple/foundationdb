@@ -114,7 +114,7 @@ class SimpleConfigBroadcasterImpl {
 		    ConfigFollowerGetFullDatabaseRequest{ self->mostRecentVersion, {} }));
 		TraceEvent(SevDebug, "BroadcasterGotInitialFullDB")
 		    .detail("Version", self->mostRecentVersion)
-		    .detail("PublisherID", publisher.id);
+		    .detail("PublisherID", publisher.id());
 		self->database = reply.database;
 		self->actors.add(fetchUpdates(self));
 		self->actors.add(compactor(self));
