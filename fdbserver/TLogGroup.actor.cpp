@@ -285,10 +285,6 @@ TEST_CASE("/fdbserver/TLogGroup/basic") {
 
 	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
 	    new PolicyAcross(GROUP_SIZE, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-	// Reference<IReplicationPolicy> policy = makeReference<PolicyAnd>({
-	//     makeReference<PolicyAcross>(GROUP_SIZE, "machineid", Reference<IReplicationPolicy>(new PolicyOne())),
-	//     makeReference<PolicyAcross>(GROUP_SIZE, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())),
-	// });
 	std::vector<WorkerInterface> recruits = testTLogGroupRecruits(TOTAL_PROCESSES);
 
 	TLogGroupCollection collection(policy, NUM_GROUPS, GROUP_SIZE);

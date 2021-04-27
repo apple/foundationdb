@@ -46,6 +46,7 @@ typedef Reference<TLogGroup> TLogGroupRef;
 typedef Reference<TLogGroupCollection> TLogGroupCollectionRef;
 
 // `TLogGroupCollection` manages, recruits and tracks all the TLogGroups in the system.
+// TODO: TLogGroupCollection for HA (satellite and remote), either same class or separate.
 class TLogGroupCollection : public ReferenceCounted<TLogGroupCollection> {
 public:
 	// Construct a TLogGroupCollection, where each group has 'groupSize' servers and satifies
