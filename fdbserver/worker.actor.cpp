@@ -542,12 +542,6 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 			}
 		} else {
 			incorrectTime = Optional<double>();
-			if (connFile && connFile->canGetFilename()) {
-				TraceEvent("ClusterFileContents")
-				    .detail("Filename", connFile->getFilename())
-				    .detail("ConnectionStringFromFile", fileConnectionString.toString())
-				    .detail("CurrentConnectionString", connectionString);
-			}
 		}
 
 		auto peers = FlowTransport::transport().getIncompatiblePeers();
