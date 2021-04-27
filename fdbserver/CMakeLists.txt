@@ -108,6 +108,8 @@ set(FDBSERVER_SRCS
   ptxn/ProxyTLogPushMessageSerializer.h
   ptxn/StorageServerInterface.cpp
   ptxn/StorageServerInterface.h
+  ptxn/TeamVersionTracker.actor.cpp
+  ptxn/TeamVersionTracker.h
   ptxn/TLogInterface.cpp
   ptxn/TLogInterface.h
   ptxn/ProxyTLogPushMessageSerializer.cpp
