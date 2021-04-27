@@ -1,5 +1,5 @@
 /*
- * TeamVersionTracker.cpp
+ * TeamVersionTracker.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -70,21 +70,26 @@ std::pair<TeamID, Version> TeamVersionTracker::mostLaggingTeam() const {
 } // namespace ptxn
 
 TEST_CASE("fdbserver/ptxn/test/versiontracker") {
-	ptxn::TeamVersionTracker tracker;
+	std::vector<Version> beginVersions(3, -1);
+	beginVersions[1] = 0;
+	beginVersions[2] = 3;
 
-	std::vector<ptxn::TeamID> teams;
-	for (int i = 0; i < 5; i++) {
-		teams.emplace_back(0, i);
-	}
-	tracker.addTeams(teams, -1);
+	for (auto beginVersion : beginVersions) {
+		std::cout << "beginVersion: " << beginVersion << "\n";
 
-	{
-		ptxn::TeamID a(0, 0), b(0, 1), c(0, 2),d(0, 3), e(0, 4);
+		ptxn::TeamVersionTracker tracker;
+		std::vector<ptxn::TeamID> teams;
+		for (int i = 0; i < 5; i++) {
+			teams.emplace_back(0, i);
+		}
+		tracker.addTeams(teams, beginVersion);
+
+		ptxn::TeamID a(0, 0), b(0, 1), c(0, 2), d(0, 3), e(0, 4);
 		teams.clear();
 		teams.push_back(a);
 		const Version cv1 = 10;
 		auto results = tracker.updateTeams(teams, cv1);
-		ASSERT(results.size() == 1 && results[a] == -1);
+		ASSERT(results.size() == 1 && results[a] == beginVersion);
 		ASSERT_EQ(tracker.getCommitVersion(a), cv1);
 		ASSERT_EQ(tracker.getMaxCommitVersion(), cv1);
 
@@ -94,7 +99,7 @@ TEST_CASE("fdbserver/ptxn/test/versiontracker") {
 		const Version cv2 = 20;
 		results = tracker.updateTeams(teams, cv2);
 		ASSERT(results.size() == 2);
-		ASSERT(results[b] == -1 && results[c] == -1);
+		ASSERT(results[b] == beginVersion && results[c] == beginVersion);
 		ASSERT_EQ(tracker.getCommitVersion(b), cv2);
 		ASSERT_EQ(tracker.getCommitVersion(c), cv2);
 		ASSERT_EQ(tracker.getMaxCommitVersion(), cv2);
@@ -106,16 +111,17 @@ TEST_CASE("fdbserver/ptxn/test/versiontracker") {
 		const Version cv3 = 30;
 		results = tracker.updateTeams(teams, cv3);
 		ASSERT(results.size() == 3);
-		ASSERT(results[b] == cv2 && results[d] == -1 && results[e] == -1);
+		ASSERT(results[b] == cv2 && results[d] == beginVersion && results[e] == beginVersion);
 		ASSERT_EQ(tracker.getCommitVersion(b), cv3);
 		ASSERT_EQ(tracker.getCommitVersion(c), cv2);
 		ASSERT_EQ(tracker.getCommitVersion(d), cv3);
 		ASSERT_EQ(tracker.getMaxCommitVersion(), cv3);
 		auto teamVersion = tracker.mostLaggingTeam();
 		ASSERT(teamVersion.first == a && teamVersion.second == cv1);
+
+		// Non-existent team CV == -1
+		ASSERT_EQ(tracker.getCommitVersion(ptxn::TeamID(1, 0)), invalidVersion);
 	}
-	// Non-existent team CV == -1
-	ASSERT_EQ(tracker.getCommitVersion(TeamID(1, 0)), invalidVersion);
 
 	return Void();
 }
