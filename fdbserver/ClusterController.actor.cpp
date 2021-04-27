@@ -1200,8 +1200,7 @@ public:
 	                                               ProcessClass::Fitness unacceptableFitness,
 	                                               DatabaseConfiguration const& conf,
 	                                               std::map<Optional<Standalone<StringRef>>, int>& id_used,
-	                                               std::map<Optional<Standalone<StringRef>>, int> preferredSharing =
-	                                                   std::map<Optional<Standalone<StringRef>>, int>(),
+	                                               std::map<Optional<Standalone<StringRef>>, int> preferredSharing = {},
 	                                               bool checkStable = false) {
 		std::map<std::tuple<ProcessClass::Fitness, int, bool, int>, vector<WorkerDetails>> fitness_workers;
 
@@ -1238,8 +1237,7 @@ public:
 	    int amount,
 	    DatabaseConfiguration const& conf,
 	    std::map<Optional<Standalone<StringRef>>, int>& id_used,
-	    std::map<Optional<Standalone<StringRef>>, int> preferredSharing =
-	        std::map<Optional<Standalone<StringRef>>, int>(),
+	    std::map<Optional<Standalone<StringRef>>, int> preferredSharing = {},
 	    Optional<WorkerFitnessInfo> minWorker = Optional<WorkerFitnessInfo>(),
 	    bool checkStable = false) {
 		std::map<std::tuple<ProcessClass::Fitness, int, bool, int>, vector<WorkerDetails>> fitness_workers;
@@ -1961,15 +1959,10 @@ public:
 			                             ProcessClass::ExcludeFit,
 			                             db.config,
 			                             id_used,
-			                             std::map<Optional<Standalone<StringRef>>, int>(),
+			                             {},
 			                             true);
-			getWorkerForRoleInDatacenter(regions[0].dcId,
-			                             ProcessClass::Master,
-			                             ProcessClass::ExcludeFit,
-			                             db.config,
-			                             id_used,
-			                             std::map<Optional<Standalone<StringRef>>, int>(),
-			                             true);
+			getWorkerForRoleInDatacenter(
+			    regions[0].dcId, ProcessClass::Master, ProcessClass::ExcludeFit, db.config, id_used, {}, true);
 
 			std::set<Optional<Key>> primaryDC;
 			primaryDC.insert(regions[0].dcId);
@@ -1985,27 +1978,12 @@ public:
 				getWorkersForSatelliteLogs(db.config, regions[0], regions[1], id_used, satelliteFallback, true);
 			}
 
-			getWorkerForRoleInDatacenter(regions[0].dcId,
-			                             ProcessClass::Resolver,
-			                             ProcessClass::ExcludeFit,
-			                             db.config,
-			                             id_used,
-			                             std::map<Optional<Standalone<StringRef>>, int>(),
-			                             true);
-			getWorkerForRoleInDatacenter(regions[0].dcId,
-			                             ProcessClass::CommitProxy,
-			                             ProcessClass::ExcludeFit,
-			                             db.config,
-			                             id_used,
-			                             std::map<Optional<Standalone<StringRef>>, int>(),
-			                             true);
-			getWorkerForRoleInDatacenter(regions[0].dcId,
-			                             ProcessClass::GrvProxy,
-			                             ProcessClass::ExcludeFit,
-			                             db.config,
-			                             id_used,
-			                             std::map<Optional<Standalone<StringRef>>, int>(),
-			                             true);
+			getWorkerForRoleInDatacenter(
+			    regions[0].dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, {}, true);
+			getWorkerForRoleInDatacenter(
+			    regions[0].dcId, ProcessClass::CommitProxy, ProcessClass::ExcludeFit, db.config, id_used, {}, true);
+			getWorkerForRoleInDatacenter(
+			    regions[0].dcId, ProcessClass::GrvProxy, ProcessClass::ExcludeFit, db.config, id_used, {}, true);
 
 			vector<Optional<Key>> dcPriority;
 			dcPriority.push_back(regions[0].dcId);
@@ -2217,13 +2195,8 @@ public:
 		std::map<Optional<Standalone<StringRef>>, int> old_id_used;
 		id_used[clusterControllerProcessId]++;
 		old_id_used[clusterControllerProcessId]++;
-		WorkerFitnessInfo mworker = getWorkerForRoleInDatacenter(clusterControllerDcId,
-		                                                         ProcessClass::Master,
-		                                                         ProcessClass::NeverAssign,
-		                                                         db.config,
-		                                                         id_used,
-		                                                         std::map<Optional<Standalone<StringRef>>, int>(),
-		                                                         true);
+		WorkerFitnessInfo mworker = getWorkerForRoleInDatacenter(
+		    clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db.config, id_used, {}, true);
 		auto newMasterFit = mworker.worker.processClass.machineClassFitness(ProcessClass::Master);
 		if (db.config.isExcludedServer(mworker.worker.interf.addresses())) {
 			newMasterFit = std::max(newMasterFit, ProcessClass::ExcludeFit);
@@ -2382,17 +2355,16 @@ public:
 		RoleFitness oldLogRoutersFit(log_routers, ProcessClass::LogRouter, old_id_used);
 		RoleFitness newLogRoutersFit = oldLogRoutersFit;
 		if (db.config.usableRegions > 1 && dbi.recoveryState == RecoveryState::FULLY_RECOVERED) {
-			newLogRoutersFit =
-			    RoleFitness(getWorkersForRoleInDatacenter(*remoteDC.begin(),
-			                                              ProcessClass::LogRouter,
-			                                              newRouterCount,
-			                                              db.config,
-			                                              id_used,
-			                                              std::map<Optional<Standalone<StringRef>>, int>(),
-			                                              Optional<WorkerFitnessInfo>(),
-			                                              true),
-			                ProcessClass::LogRouter,
-			                id_used);
+			newLogRoutersFit = RoleFitness(getWorkersForRoleInDatacenter(*remoteDC.begin(),
+			                                                             ProcessClass::LogRouter,
+			                                                             newRouterCount,
+			                                                             db.config,
+			                                                             id_used,
+			                                                             {},
+			                                                             Optional<WorkerFitnessInfo>(),
+			                                                             true),
+			                               ProcessClass::LogRouter,
+			                               id_used);
 		}
 
 		if (oldLogRoutersFit.count < oldRouterCount) {
@@ -2477,7 +2449,7 @@ public:
 		                                                              nBackup,
 		                                                              db.config,
 		                                                              id_used,
-		                                                              std::map<Optional<Standalone<StringRef>>, int>(),
+		                                                              {},
 		                                                              Optional<WorkerFitnessInfo>(),
 		                                                              true),
 		                                ProcessClass::Backup,
@@ -2917,7 +2889,7 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 	                                                               ProcessClass::NeverAssign,
 	                                                               self->db.config,
 	                                                               id_used,
-	                                                               std::map<Optional<Standalone<StringRef>>, int>(),
+	                                                               {},
 	                                                               true)
 	                                .worker;
 	if (self->onMasterIsBetter(newRKWorker, ProcessClass::Ratekeeper)) {
@@ -2933,7 +2905,7 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 	                                                               ProcessClass::NeverAssign,
 	                                                               self->db.config,
 	                                                               id_used,
-	                                                               std::map<Optional<Standalone<StringRef>>, int>(),
+	                                                               {},
 	                                                               true)
 	                                .worker;
 	if (self->onMasterIsBetter(newDDWorker, ProcessClass::DataDistributor)) {
