@@ -733,7 +733,7 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
 			ProcessClass::ClassType cType =
 			    (ProcessClass::ClassType)(atoi(ini.GetValue(machineIdString.c_str(), "mClass")));
 			// using specialized class types can lead to nondeterministic recruitment
-			if (cType == ProcessClass::MasterClass || cType == ProcessClass::ResolutionClass) {
+			if (cType == ProcessClass::GrvProxyClass || cType == ProcessClass::ResolutionClass) {
 				cType = ProcessClass::StatelessClass;
 			}
 			ProcessClass processClass = ProcessClass(cType, ProcessClass::CommandLineSource);
