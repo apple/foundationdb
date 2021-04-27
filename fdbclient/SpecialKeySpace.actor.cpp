@@ -2103,17 +2103,17 @@ ACTOR static Future<Standalone<RangeResultRef>> actorLineageGetRangeActor(ReadYo
 			seq = dt == datetime ? seq + 1 : 0;
 			dt = datetime;
 
-			if (seq < seqStart) {
-				continue;
-			} else if (seq >= seqEnd) {
-				break;
-			}
+			if (seq < seqStart) { continue; }
+			else if (seq >= seqEnd) { break; }
 
-			char buf[200];
+			char buf[50];
 			struct tm* tm;
 			tm = localtime(&datetime);
-			size_t size = strftime(buf, 200, "%FT%T%z", tm);
+			size_t size = strftime(buf, 50, "%FT%T%z", tm);
 			std::string date(buf, size);
+
+			std::ostringstream streamKey;
+			streamKey << prefix.toString() << host.toString() << "/" << to_string(waitState) << "/" << date << "/" << seq;
 
 			msgpack::object_handle oh = msgpack::unpack(data.data(), data.size());
 			msgpack::object deserialized = oh.get();
@@ -2122,9 +2122,7 @@ ACTOR static Future<Standalone<RangeResultRef>> actorLineageGetRangeActor(ReadYo
 			stream << deserialized;
 
 			// TODO: Fix return value for time range
-			Key returnKey = prefix.withSuffix(host.toString() + "/" + std::string(to_string(waitState)) + "/" + date +
-			                                  "/" + std::to_string(seq));
-			result.push_back_deep(result.arena(), KeyValueRef(returnKey, stream.str()));
+			result.push_back_deep(result.arena(), KeyValueRef(streamKey.str(), stream.str()));
 		}
 	}
 
