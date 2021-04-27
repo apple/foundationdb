@@ -45,18 +45,6 @@ struct GetProcessInterfaceRequest {
 	}
 };
 
-// TODO: Used for demonstration purposes, remove in later PR
-struct EchoRequest {
-	constexpr static FileIdentifier file_identifier = 10624019;
-	std::string message;
-	ReplyPromise<std::string> reply;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, message, reply);
-	}
-};
-
 // This type is used to send serialized sample data over the network.
 struct SerializedSample {
 	constexpr static FileIdentifier file_identifier = 15785634;

@@ -1962,7 +1962,6 @@ void parse(StringRef& val, WaitState& w) {
 void parse(StringRef& val, time_t& t) {
 	struct tm tm = { 0 };
 	if (strptime(val.toString().c_str(), "%FT%T%z", &tm) == nullptr) {
-			TraceEvent("LUKAS_FailedToParse");
 		throw std::invalid_argument("failed to parse ISO 8601 datetime");
 	}
 
