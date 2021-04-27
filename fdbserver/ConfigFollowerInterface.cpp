@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/IRandom.h"
 #include "fdbserver/ConfigFollowerInterface.h"
 #include "fdbserver/CoordinationInterface.h"
 
@@ -28,8 +29,18 @@ void ConfigFollowerInterface::setupWellKnownEndpoints() {
 	compact.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_COMPACT, TaskPriority::Coordination);
 }
 
+ConfigFollowerInterface::ConfigFollowerInterface() : id(deterministicRandom()->randomUniqueID()) {}
+
 ConfigFollowerInterface::ConfigFollowerInterface(NetworkAddress const& remote)
-  : getVersion(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETVERSION)),
+  : id(deterministicRandom()->randomUniqueID()), getVersion(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETVERSION)),
     getFullDatabase(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETFULLDB)),
     getChanges(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETCHANGES)),
     compact(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_COMPACT)) {}
+
+bool ConfigFollowerInterface::operator==(ConfigFollowerInterface const& rhs) const {
+	return id == rhs.id;
+}
+
+bool ConfigFollowerInterface::operator!=(ConfigFollowerInterface const& rhs) const {
+	return !(*this == rhs);
+}

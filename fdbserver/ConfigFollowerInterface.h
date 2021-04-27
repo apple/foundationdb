@@ -143,13 +143,16 @@ struct ConfigFollowerInterface {
 	RequestStream<ConfigFollowerGetFullDatabaseRequest> getFullDatabase;
 	RequestStream<ConfigFollowerGetChangesRequest> getChanges;
 	RequestStream<ConfigFollowerCompactRequest> compact;
+	UID id;
 
-	ConfigFollowerInterface() = default;
+	ConfigFollowerInterface();
 	void setupWellKnownEndpoints();
 	ConfigFollowerInterface(NetworkAddress const& remote);
+	bool operator==(ConfigFollowerInterface const& rhs) const;
+	bool operator!=(ConfigFollowerInterface const& rhs) const;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, getVersion, getFullDatabase, getChanges);
+		serializer(ar, getVersion, getFullDatabase, getChanges, id);
 	}
 };

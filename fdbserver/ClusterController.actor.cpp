@@ -1907,6 +1907,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 				dbInfo.distributor = db->serverInfo->get().distributor;
 				dbInfo.ratekeeper = db->serverInfo->get().ratekeeper;
 				dbInfo.latencyBandConfig = db->serverInfo->get().latencyBandConfig;
+				dbInfo.configBroadcaster = db->serverInfo->get().configBroadcaster;
 
 				TraceEvent("CCWDB", cluster->id)
 				    .detail("Lifetime", dbInfo.masterLifetime.toString())

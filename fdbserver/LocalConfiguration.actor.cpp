@@ -158,17 +158,28 @@ class LocalConfigurationImpl {
 		return Void();
 	}
 
+	ACTOR static Future<Void> monitorBroadcaster(Reference<AsyncVar<ServerDBInfo> const> serverDBInfo,
+	                                             Reference<AsyncVar<ConfigFollowerInterface>> broadcaster) {
+		loop {
+			wait(serverDBInfo->onChange());
+			broadcaster->set(serverDBInfo->get().configBroadcaster);
+		}
+	}
+
 	ACTOR static Future<Void> consume(LocalConfigurationImpl* self,
 	                                  Reference<AsyncVar<ServerDBInfo> const> serverDBInfo) {
 		wait(self->initFuture);
 		state Future<ConfigFollowerGetChangesReply> getChangesReply = Never();
+		state Reference<AsyncVar<ConfigFollowerInterface>> broadcaster =
+		    makeReference<AsyncVar<ConfigFollowerInterface>>(serverDBInfo->get().configBroadcaster);
+		state Future<Void> monitor = monitorBroadcaster(serverDBInfo, broadcaster);
 		loop {
-			auto broadcaster = serverDBInfo->get().configBroadcaster;
 			choose {
-				when(wait(serverDBInfo->onChange())) {}
-				when(wait(fetchChanges(self, serverDBInfo->get().configBroadcaster))) {
+				when(wait(broadcaster->onChange())) {}
+				when(wait(brokenPromiseToNever(fetchChanges(self, broadcaster->get())))) {
 					wait(delay(0.5)); // TODO: Make knob?
 				}
+				when(wait(monitor)) { ASSERT(false); }
 			}
 		}
 	}
