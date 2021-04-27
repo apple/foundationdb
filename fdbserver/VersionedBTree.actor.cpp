@@ -276,7 +276,7 @@ public:
 				// If cursor is not pointed at the end page then start loading it.
 				// The end page will not have been written to disk yet.
 				pageID = initialPageID;
-				operation = (pageID == endPageID) ? Void() : loadPage();
+				operation = (pageID == endPageID) ? Void() : waitOrError(loadPage(), queue->pager->getError());
 			} else {
 				pageID = invalidLogicalPageID;
 				ASSERT(mode == WRITE ||
@@ -432,7 +432,7 @@ public:
 
 		void write(const T& item) {
 			Promise<Void> p;
-			operation = write_impl(this, item, p.getFuture());
+			operation = waitOrError(write_impl(this, item, p.getFuture()), queue->pager->getError());
 			p.send(Void());
 		}
 
@@ -515,7 +515,8 @@ public:
 				return Optional<T>();
 			}
 			Promise<Void> p;
-			Future<Optional<T>> read = readNext_impl(this, upperBound, p.getFuture());
+			Future<Optional<T>> read =
+			    waitOrError(readNext_impl(this, upperBound, p.getFuture()), queue->pager->getError());
 			operation = success(read);
 			p.send(Void());
 			return read;
