@@ -27,6 +27,7 @@
                   "storage",
                   "transaction",
                   "resolution",
+                  "stateless",
                   "commit_proxy",
                   "grv_proxy",
                   "master",
