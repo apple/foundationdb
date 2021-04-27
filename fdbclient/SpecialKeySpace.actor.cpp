@@ -2091,8 +2091,6 @@ ACTOR static Future<Standalone<RangeResultRef>> actorLineageGetRangeActor(ReadYo
 	actorLineageRequest.waitStateEnd = waitStateEnd;
 	actorLineageRequest.timeStart = timeStart;
 	actorLineageRequest.timeEnd = timeEnd;
-	actorLineageRequest.seqStart = seqStart;
-	actorLineageRequest.seqEnd = seqEnd;
 	ActorLineageReply reply = wait(process.actorLineage.getReply(actorLineageRequest));
 
 	time_t dt = 0;

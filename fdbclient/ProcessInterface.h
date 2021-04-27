@@ -63,12 +63,11 @@ struct SerializedSample {
 	constexpr static FileIdentifier file_identifier = 15785634;
 
 	double time;
-	int seq;
 	std::unordered_map<WaitState, std::string> data;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, time, seq, data);
+		serializer(ar, time, data);
 	}
 };
 
@@ -86,11 +85,10 @@ struct ActorLineageRequest {
 	constexpr static FileIdentifier file_identifier = 11654765;
 	WaitState waitStateStart, waitStateEnd;
 	time_t timeStart, timeEnd;
-	int seqStart, seqEnd;
 	ReplyPromise<ActorLineageReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, waitStateStart, waitStateEnd, timeStart, timeEnd, seqStart, seqEnd, reply);
+		serializer(ar, waitStateStart, waitStateEnd, timeStart, timeEnd, reply);
 	}
 };

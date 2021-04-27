@@ -2052,26 +2052,17 @@ ACTOR Future<Void> serveProcess() {
 			}
 			when(ActorLineageRequest req = waitNext(process.actorLineage.getFuture())) {
 				state SampleCollection sampleCollector;
-				// TODO: Add filtering by wait state
 				auto samples = sampleCollector->get(req.timeStart, req.timeEnd);
-				// The size of samples should never approach 2 billion, so
-				// casting from 64 to 32 bits here should be okay.
-				ASSERT(samples.size() < std::numeric_limits<int>::max());
-				int maxSeq = std::min(req.seqEnd, static_cast<int>(samples.size()));
 
 				std::vector<SerializedSample> serializedSamples;
 				for (const auto& samplePtr : samples) {
-					int seq = 0;
-					auto serialized = SerializedSample{ .time = samplePtr->time, .seq = seq };
+					auto serialized = SerializedSample{ .time = samplePtr->time };
 					for (const auto& [waitState, pair] : samplePtr->data) {
-						serialized.data[waitState] = std::string(pair.first, pair.second);
+						if (waitState >= req.waitStateStart && waitState <= req.waitStateEnd) {
+							serialized.data[waitState] = std::string(pair.first, pair.second);
+						}
 					}
 					serializedSamples.push_back(std::move(serialized));
-
-					// TODO: Don't need to transmit seq over the network anymore
-					if (++seq >= maxSeq) {
-						continue;
-					};
 				}
 				ActorLineageReply reply{ serializedSamples };
 				req.reply.send(reply);
