@@ -347,14 +347,19 @@ uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key) {
 	return idx;
 }
 
+// Key prefixes used by TLogGroup to store state in txnStateStore.
 const KeyRangeRef tLogGroupKeys(LiteralStringRef("\xff/tLogGroup/"), LiteralStringRef("\xff/tLogGroup0"));
 const KeyRef tLogGroupPrefix = tLogGroupKeys.begin;
-const Key tLogGroupKeyFor(UID serverID) {
+
+// Returns TLogGroup key prefix to for given `groupID`.
+const Key tLogGroupKeyFor(UID groupID) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(tLogGroupPrefix);
-	wr << serverID;
+	wr << groupID;
 	return wr.toValue();
 }
+
+// Returns TLogGroup ID extraced from given TLogGroup key.
 UID decodeTLogGroupKey(const KeyRef& key) {
 	return BinaryReader::fromStringRef<UID>(
 	    key.removePrefix(tLogGroupPrefix).removeSuffix(LiteralStringRef("/servers")), Unversioned());
@@ -650,15 +655,17 @@ std::string encodeFailedServersKey(AddressExclusion const& addr) {
 // const KeyRangeRef globalConfigKeys( LiteralStringRef("\xff/globalConfig/"), LiteralStringRef("\xff/globalConfig0") );
 // const KeyRef globalConfigPrefix = globalConfigKeys.begin;
 
-const KeyRangeRef globalConfigDataKeys( LiteralStringRef("\xff/globalConfig/k/"), LiteralStringRef("\xff/globalConfig/k0") );
+const KeyRangeRef globalConfigDataKeys(LiteralStringRef("\xff/globalConfig/k/"),
+                                       LiteralStringRef("\xff/globalConfig/k0"));
 const KeyRef globalConfigKeysPrefix = globalConfigDataKeys.begin;
 
-const KeyRangeRef globalConfigHistoryKeys( LiteralStringRef("\xff/globalConfig/h/"), LiteralStringRef("\xff/globalConfig/h0") );
+const KeyRangeRef globalConfigHistoryKeys(LiteralStringRef("\xff/globalConfig/h/"),
+                                          LiteralStringRef("\xff/globalConfig/h0"));
 const KeyRef globalConfigHistoryPrefix = globalConfigHistoryKeys.begin;
 
 const KeyRef globalConfigVersionKey = LiteralStringRef("\xff/globalConfig/v");
 
-const KeyRangeRef workerListKeys( LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0") );
+const KeyRangeRef workerListKeys(LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0"));
 const KeyRef workerListPrefix = workerListKeys.begin;
 
 const Key workerListKeyFor(StringRef processID) {

@@ -20,22 +20,22 @@
 
 #ifndef FDBSERVER_TLOGGROUP_H
 #define FDBSERVER_TLOGGROUP_H
+#pragma once
+
+#include <unordered_map>
+#include <vector>
+
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/IKeyValueStore.h"
-#pragma once
-
 #include "fdbrpc/Locality.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/network.h"
-#include <unordered_map>
-#include <vector>
 
 // TODO: Monitor the groups, and if new tLogs need to added/removed, as workers are removed/added.
 // TODO: Add unit-test for serialization.
-// TODO:
 
 struct TLogWorkerData;
 class TLogGroup;

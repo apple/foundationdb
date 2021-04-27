@@ -18,6 +18,12 @@
  * limitations under the License.
  */
 
+#include <iostream>
+#include <iterator>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
@@ -26,16 +32,11 @@
 #include "fdbserver/TLogGroup.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/Arena.h"
+#include "flow/Error.h"
 #include "flow/FastRef.h"
 #include "flow/flow.h"
-#include "flow/Error.h"
-#include "flow/UnitTest.h"
 #include "flow/serialize.h"
-#include <iostream>
-#include <iterator>
-#include <string>
-#include <unordered_map>
-#include <vector>
+#include "flow/UnitTest.h"
 
 TLogGroupCollection::TLogGroupCollection(const Reference<IReplicationPolicy>& policy, int numGroups, int groupSize)
   : policy(policy), targetNumGroups(numGroups), GROUP_SIZE(groupSize) {}
@@ -76,7 +77,7 @@ void TLogGroupCollection::recruitEverything() {
 				selectedServers.insert(entry->id);
 			}
 
-			newGroups.push_back(group);
+			recruitedGroups.push_back(group);
 		} else {
 			// TODO: We may have scenarios (simulation), with recruits/zone's < RF. Handle that case.
 		}
@@ -103,9 +104,9 @@ void TLogGroupCollection::storeState(CommitTransactionRequest* recoveryCommitReq
 
 	tr.clear(recoveryCommitReq->arena, tLogGroupKeys);
 	for (const auto& group : recruitedGroups) {
-		const auto& groupPrefix = tLogGroupKeyFor(group->id());
+		const auto& groupServerPrefix = tLogGroupKeyFor(group->id()).withSuffix(serversPrefix);
 		std::cout << "---> Storing " << group->toString() << std::endl;
-		tr.set(recoveryCommitReq->arena, groupPrefix.withSuffix(serversPrefix), group->toValue());
+		tr.set(recoveryCommitReq->arena, groupServerPrefix, group->toValue());
 	}
 }
 
