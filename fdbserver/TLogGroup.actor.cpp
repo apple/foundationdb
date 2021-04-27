@@ -49,6 +49,10 @@ int TLogGroupCollection::groupSize() const {
 	return GROUP_SIZE;
 }
 
+int TLogGroupCollection::targetGroupSize() const {
+	return targetNumGroups;
+}
+
 void TLogGroupCollection::addWorkers(const std::vector<WorkerInterface>& logWorkers) {
 	for (const auto& worker : logWorkers) {
 		recruitMap.emplace(worker.id(), TLogWorkerData::fromInterface(worker));
@@ -251,20 +255,23 @@ void printTLogGroupCollection(const TLogGroupCollection& collection) {
 // 'totalProcesses', or else will fail assertion.
 void checkGroupMembersUnique(const TLogGroupCollection& collection, int groupSize, int totalProcesses) {
 	const auto& groups = collection.groups();
-	std::unordered_set<UID> foundSoFar;
+	ASSERT_EQ(groups.size(), collection.targetGroupSize());
 
-	int total = 0;
+	std::unordered_map<UID, int> groupsPerServer;
+
 	for (const auto& group : groups) {
 		auto servers = group->servers();
 		ASSERT_EQ(servers.size(), groupSize);
 		for (const auto& s : servers) {
-			ASSERT(foundSoFar.find(s->id) == foundSoFar.end());
-			foundSoFar.insert(s->id);
-			++total;
+			groupsPerServer[s->id] += 1;
 		}
 	}
 
-	ASSERT_EQ(total, totalProcesses);
+	for (const auto [id, ngroups] : groupsPerServer) {
+		std::cout << format("Number of TLogGroups served by %s = %d", id.toString().c_str(), ngroups) << std::endl;
+	}
+
+	ASSERT_EQ(groupsPerServer.size(), totalProcesses);
 }
 
 } // namespace testTLogGroup
@@ -274,7 +281,7 @@ TEST_CASE("/fdbserver/TLogGroup/basic") {
 
 	const int TOTAL_PROCESSES = 27;
 	const int GROUP_SIZE = 3;
-	const int NUM_GROUPS = 20;
+	const int NUM_GROUPS = 100;
 
 	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
 	    new PolicyAcross(GROUP_SIZE, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));

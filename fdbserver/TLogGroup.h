@@ -58,6 +58,10 @@ public:
 	// Returns the size of each TLogGroup.
 	int groupSize() const;
 
+	// Returns the number of TLogGroups we want to keep in collection. May be not be
+	// equal to number of groups currently recruited/active.
+	int targetGroupSize() const;
+
 	// Add 'logWorkers' to current collection of workers that can be recruited into a TLogGroup.
 	void addWorkers(const std::vector<WorkerInterface>& logWorkers);
 
