@@ -892,15 +892,26 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
 			dbState->addClient(api->getLocalClient());
 		}
 
+		api->runOnExternalClients(threadIdx, [this](Reference<ClientInfo> client) { dbState->addClient(client); });
+
 		if (!externalClientsInitialized.test_and_set()) {
 			api->runOnExternalClientsAllThreads([&clusterFilePath](Reference<ClientInfo> client) {
-				// This creates a database to initialize some client state on the external library,
-				// but it gets deleted immediately so that we don't keep open connections
-				Reference<IDatabase> newDb = client->api->createDatabase(clusterFilePath.c_str());
+				// This creates a database to initialize some client state on the external library
+				// We only do this on 6.2+ clients to avoid some bugs associated with older versions
+				// This deletes the new database immediately to discard its connections
+				if (client->protocolVersion.hasCloseUnusedConnection()) {
+					Reference<IDatabase> newDb = client->api->createDatabase(clusterFilePath.c_str());
+				}
 			});
 		}
 
-		api->runOnExternalClients(threadIdx, [this](Reference<ClientInfo> client) { dbState->addClient(client); });
+		// For clients older than 6.2 we create and maintain our database connection
+		api->runOnExternalClients(threadIdx, [this, &clusterFilePath](Reference<ClientInfo> client) {
+			if (!client->protocolVersion.hasCloseUnusedConnection()) {
+				dbState->legacyDatabaseConnections[client->protocolVersion] =
+				    client->api->createDatabase(clusterFilePath.c_str());
+			}
+		});
 
 		onMainThreadVoid([this]() { dbState->protocolVersionMonitor = dbState->monitorProtocolVersion(); }, nullptr);
 	}
@@ -1158,7 +1169,10 @@ void MultiVersionDatabase::LegacyVersionMonitor::startConnectionMonitor(
 	if (!monitorRunning) {
 		monitorRunning = true;
 
-		db = client->api->createDatabase(dbState->clusterFilePath.c_str());
+		auto itr = dbState->legacyDatabaseConnections.find(client->protocolVersion);
+		ASSERT(itr != dbState->legacyDatabaseConnections.end());
+
+		db = itr->second;
 		tr = Reference<ITransaction>();
 
 		TraceEvent("StartingLegacyVersionMonitor").detail("ProtocolVersion", client->protocolVersion);

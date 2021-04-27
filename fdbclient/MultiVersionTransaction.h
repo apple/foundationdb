@@ -510,7 +510,16 @@ public:
 
 		ThreadFuture<Void> dbReady;
 		ThreadFuture<Void> protocolVersionMonitor;
+
+		// Versions older than 6.1 do not benefit from having their database connections closed. Additionally,
+		// there are various issues that result in negative behavior in some cases if the connections are closed.
+		// Therefore, we leave them open.
+		std::map<ProtocolVersion, Reference<IDatabase>> legacyDatabaseConnections;
+
+		// Versions 5.0 and older do not support connection packet monitoring and require alternate techniques to
+		// determine the cluster version.
 		std::list<LegacyVersionMonitor> legacyVersionMonitors;
+
 		Optional<ProtocolVersion> dbProtocolVersion;
 
 		// This maps a normalized protocol version to the client associated with it. This prevents compatible
