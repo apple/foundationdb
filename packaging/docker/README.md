@@ -93,24 +93,19 @@ If you are running FDB inside of a Kubernetes cluster, you should probably use
 the sidecar image instead.  It makes it easier to automatically copy a compatible
 `libfdb_c.so` and cluster file into application containers.
 
-TODO: Document the sidecar.
+TODO: Document sidecar.py
 
 # Example Usages
 
-### Build an Ubuntu-based image
-
-TAG is optional and defaults to <fdb version triple>-<okteto environment name>
-e.g., 7.0.0-username-dev
-
-```
-TAG=my-custom-tag ./build-release-docker.sh
-```
-### Build an Amazon Linux-based image
-From inside the developer Docker container:
+### Build an Ubuntu-based image with a custom tag and unstripped binaries
 ```
 # compile FDB, then:
 cd ~/build_output/packages/docker/
-STRIPPED=true TAG=my-custom-tag ./build-eks-docker.sh
+TAG=my-custom-tag ./build-release-docker.sh
 ```
-
-TODO: Unify the above, so they're invoked in the same way.
+### Build an Amazon Linux-based image with a default tag and stripped binaries
+```
+# compile FDB, then:
+cd ~/build_output/packages/docker/
+STRIPPED=true ./build-eks-docker.sh
+```

@@ -54,11 +54,10 @@ RUN curl $FDB_WEBSITE/downloads/$FDB_VERSION/linux/fdb_$FDB_VERSION.tar.gz -o fd
 
 WORKDIR /var/fdb
 
-
 # Set Up Runtime Scripts and Directories
 
 COPY release/*.bash /var/fdb/scripts/
-
+RUN chmod a+x /var/fdb/scripts/*.bash
 RUN	mkdir -p logs
 
 # Install FoundationDB Client Libraries

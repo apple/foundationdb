@@ -54,7 +54,7 @@ COPY sidecar/entrypoint.bash /
 COPY sidecar/requirements.txt /
 COPY sidecar/sidecar.py /
 
-RUN pip install -r /requirements.txt && rm /requirements.txt && chmod a+x /entrypoint.bash
+RUN pip install -r /requirements.txt && rm /requirements.txt && chmod a+x /entrypoint.bash /sidecar.py
 
 VOLUME /var/input-files
 VOLUME /var/output-files

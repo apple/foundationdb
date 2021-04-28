@@ -29,9 +29,17 @@ aws ecr get-login-password | docker login --username AWS --password-stdin ${ECR}
 docker pull ${ECR}/amazonlinux:2.0.20210326.0
 docker tag ${ECR}/amazonlinux:2.0.20210326.0 amazonlinux:2.0.20210326.0
 
+
+
+#derived variables
 IMAGE=foundationdb/foundationdb:${TAG}
 SIDECAR=foundationdb/foundationdb-kubernetes-sidecar:${TAG}-1
 STRIPPED=${STRIPPED:-false}
+
+
+
+
+
 if $STRIPPED; then
   rsync -av --delete --exclude=*.xml ${BUILD_OUTPUT}/packages/bin .
   rsync -av --delete --exclude=*.a --exclude=*.xml ${BUILD_OUTPUT}/packages/lib .
@@ -40,8 +48,10 @@ else
   rsync -av --delete --exclude=*.a --exclude=*.xml ${BUILD_OUTPUT}/lib .
 fi
 
-docker build --build-arg FDB_VERSION=$FDB_VERSION -t ${IMAGE}   --target foundationdb -f Dockerfile.eks .
-docker build --build-arg FDB_VERSION=$FDB_VERSION -t ${SIDECAR} --target sidecar      -f Dockerfile.eks .
+BUILD_ARGS="--build-arg FDB_VERSION=$FDB_VERSION"
+
+docker build ${BUILD_ARGS} -t ${IMAGE}   --target foundationdb -f Dockerfile.eks .
+docker build ${BUILD_ARGS} -t ${SIDECAR} --target sidecar      -f Dockerfile.eks .
 
 docker tag ${IMAGE} ${ECR}/${IMAGE}
 docker tag ${SIDECAR} ${ECR}/${SIDECAR}
