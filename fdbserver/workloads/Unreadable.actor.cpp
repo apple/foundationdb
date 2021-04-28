@@ -313,6 +313,10 @@ struct UnreadableWorkload : TestWorkload {
 			state bool snapshot;
 			state KeySelectorRef begin;
 			state KeySelectorRef end;
+			state bool bypassUnreadable = deterministicRandom()->coinflip();
+			if (readVerisonStampValues) {
+				tr.setOption(FDBTransactionOptions::BYPASS_UNREADABLE);
+			}
 
 			setMap[normalKeys.begin] = ValueRef();
 			setMap[normalKeys.end] = ValueRef();
@@ -377,6 +381,9 @@ struct UnreadableWorkload : TestWorkload {
 						setMap = std::map<KeyRef, ValueRef>();
 						unreadableMap = KeyRangeMap<bool>();
 						tr = ReadYourWritesTransaction(cx);
+						if (bypassUnreadable) {
+							tr.setOption(FDBTransactionOptions::BYPASS_UNREADABLE);
+						}
 						arena = Arena();
 
 						setMap[normalKeys.begin] = ValueRef();
@@ -422,6 +429,9 @@ struct UnreadableWorkload : TestWorkload {
 						setMap = std::map<KeyRef, ValueRef>();
 						unreadableMap = KeyRangeMap<bool>();
 						tr = ReadYourWritesTransaction(cx);
+						if (bypassUnreadable) {
+							tr.setOption(FDBTransactionOptions::BYPASS_UNREADABLE);
+						}
 						arena = Arena();
 
 						setMap[normalKeys.begin] = ValueRef();
@@ -441,7 +451,7 @@ struct UnreadableWorkload : TestWorkload {
 
 					if (!value.isError() || value.getError().code() == error_code_accessed_unreadable) {
 						//TraceEvent("RYWT_Get").detail("Key", printable(key)).detail("IsUnreadable", value.isError());
-						if (snapshot) {
+						if (snapshot || bypassUnreadable) {
 							ASSERT(!value.isError());
 						} else {
 							ASSERT(unreadableMap[key] == value.isError());
@@ -451,6 +461,9 @@ struct UnreadableWorkload : TestWorkload {
 						setMap = std::map<KeyRef, ValueRef>();
 						unreadableMap = KeyRangeMap<bool>();
 						tr = ReadYourWritesTransaction(cx);
+						if (bypassUnreadable) {
+							tr.setOption(FDBTransactionOptions::BYPASS_UNREADABLE);
+						}
 						arena = Arena();
 
 						setMap[normalKeys.begin] = ValueRef();
