@@ -314,7 +314,7 @@ struct UnreadableWorkload : TestWorkload {
 			state KeySelectorRef begin;
 			state KeySelectorRef end;
 			state bool bypassUnreadable = deterministicRandom()->coinflip();
-			if (readVerisonStampValues) {
+			if (bypassUnreadable) {
 				tr.setOption(FDBTransactionOptions::BYPASS_UNREADABLE);
 			}
 
