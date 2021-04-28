@@ -36,6 +36,7 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
@@ -505,12 +506,13 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 				}
 			}
 			cx->clientStatusUpdater.outStatusQ.clear();
-			double clientSamplingProbability = std::isinf(cx->clientInfo->get().clientTxnInfoSampleRate)
-			                                       ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY
-			                                       : cx->clientInfo->get().clientTxnInfoSampleRate;
-			int64_t clientTxnInfoSizeLimit = cx->clientInfo->get().clientTxnInfoSizeLimit == -1
-			                                     ? CLIENT_KNOBS->CSI_SIZE_LIMIT
-			                                     : cx->clientInfo->get().clientTxnInfoSizeLimit;
+			wait(GlobalConfig::globalConfig().onInitialized());
+			double sampleRate = GlobalConfig::globalConfig().get<double>(fdbClientInfoTxnSampleRate,
+			                                                             std::numeric_limits<double>::infinity());
+			double clientSamplingProbability =
+			    std::isinf(sampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : sampleRate;
+			int64_t sizeLimit = GlobalConfig::globalConfig().get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
+			int64_t clientTxnInfoSizeLimit = sizeLimit == -1 ? CLIENT_KNOBS->CSI_SIZE_LIMIT : sizeLimit;
 			if (!trChunksQ.empty() && deterministicRandom()->random01() < clientSamplingProbability)
 				wait(delExcessClntTxnEntriesActor(&tr, clientTxnInfoSizeLimit));
 
@@ -956,6 +958,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	getValueSubmitted.init(LiteralStringRef("NativeAPI.GetValueSubmitted"));
 	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
 
+	GlobalConfig::create(this, clientInfo);
+
 	monitorProxiesInfoChange = monitorProxiesChange(clientInfo, &proxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
@@ -1018,9 +1022,13 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		        singleKeyRange(LiteralStringRef("consistency_check_suspended"))
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeySpaceModule(
-		    SpecialKeySpace::MODULE::TRACING,
-		    SpecialKeySpace::IMPLTYPE::READWRITE,
-		    std::make_unique<TracingOptionsImpl>(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::TRACING)));
+		    SpecialKeySpace::MODULE::GLOBALCONFIG, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<GlobalConfigImpl>(
+		        SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG)));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::TRACING, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<TracingOptionsImpl>(
+		        SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::TRACING)));
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::CONFIGURATION,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
@@ -1044,6 +1052,16 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<ClientProfilingImpl>(
 		        KeyRangeRef(LiteralStringRef("profiling/"), LiteralStringRef("profiling0"))
+				.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<MaintenanceImpl>(
+		        KeyRangeRef(LiteralStringRef("maintenance/"), LiteralStringRef("maintenance0"))
+		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<DataDistributionImpl>(
+		        KeyRangeRef(LiteralStringRef("data_distribution/"), LiteralStringRef("data_distribution0"))
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 	}
 	if (apiVersionAtLeast(630)) {
@@ -1266,14 +1284,16 @@ Future<Void> DatabaseContext::onProxiesChanged() {
 }
 
 bool DatabaseContext::sampleReadTags() const {
-	return clientInfo->get().transactionTagSampleRate > 0 &&
-	       deterministicRandom()->random01() <= clientInfo->get().transactionTagSampleRate;
+	double sampleRate = GlobalConfig::globalConfig().get(transactionTagSampleRate, CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
+	return sampleRate > 0 && deterministicRandom()->random01() <= sampleRate;
 }
 
 bool DatabaseContext::sampleOnCost(uint64_t cost) const {
-	if (clientInfo->get().transactionTagSampleCost <= 0)
+	double sampleCost =
+	    GlobalConfig::globalConfig().get<double>(transactionTagSampleCost, CLIENT_KNOBS->COMMIT_SAMPLE_COST);
+	if (sampleCost <= 0)
 		return false;
-	return deterministicRandom()->random01() <= (double)cost / clientInfo->get().transactionTagSampleCost;
+	return deterministicRandom()->random01() <= (double)cost / sampleCost;
 }
 
 int64_t extractIntOption(Optional<StringRef> value, int64_t minValue, int64_t maxValue) {
@@ -2477,7 +2497,7 @@ ACTOR Future<Version> watchValue(Future<Version> version,
 				cx->invalidateCache(key);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 			} else if (e.code() == error_code_watch_cancelled || e.code() == error_code_process_behind) {
-				TEST(e.code() == error_code_watch_cancelled); // Too many watches on the storage server, poll for changes instead
+				TEST(e.code() == error_code_watch_cancelled); // Too many watches on storage server, poll for changes
 				TEST(e.code() == error_code_process_behind); // The storage servers are all behind
 				wait(delay(CLIENT_KNOBS->WATCH_POLLING_TIME, info.taskID));
 			} else if (e.code() == error_code_timed_out) { // The storage server occasionally times out watches in case
@@ -4900,9 +4920,18 @@ ACTOR Future<ProtocolVersion> coordinatorProtocolsFetcher(Reference<ClusterConne
 	return ProtocolVersion(majorityProtocol);
 }
 
-ACTOR Future<uint64_t> getCoordinatorProtocols(Reference<ClusterConnectionFile> f) {
-	ProtocolVersion protocolVersion = wait(coordinatorProtocolsFetcher(f));
-	return protocolVersion.version();
+// Returns the protocol version reported by a quorum of coordinators
+// If an expected version is given, the future won't return until the protocol version is different than expected
+ACTOR Future<ProtocolVersion> getClusterProtocol(Reference<ClusterConnectionFile> f,
+                                                 Optional<ProtocolVersion> expectedVersion) {
+	loop {
+		ProtocolVersion protocolVersion = wait(coordinatorProtocolsFetcher(f));
+		if (!expectedVersion.present() || protocolVersion != expectedVersion.get()) {
+			return protocolVersion;
+		} else {
+			wait(delay(2.0)); // TODO: this is temporary, so not making into a knob yet
+		}
+	}
 }
 
 uint32_t Transaction::getSize() {
@@ -5370,9 +5399,8 @@ void Transaction::checkDeferredError() {
 
 Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(const Database& cx) {
 	if (!cx->isError()) {
-		double clientSamplingProbability = std::isinf(cx->clientInfo->get().clientTxnInfoSampleRate)
-		                                       ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY
-		                                       : cx->clientInfo->get().clientTxnInfoSampleRate;
+		double clientSamplingProbability = GlobalConfig::globalConfig().get<double>(
+		    fdbClientInfoTxnSampleRate, CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY);
 		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) &&
 		    deterministicRandom()->random01() < clientSamplingProbability &&
 		    (!g_network->isSimulated() || !g_simulator.speedUpSimulation)) {

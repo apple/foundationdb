@@ -72,7 +72,8 @@
 
 #define SHORT_CIRCUT_ACTUAL_STORAGE 0
 
-inline bool canReplyWith(Error e) {
+namespace {
+bool canReplyWith(Error e) {
 	switch (e.code()) {
 	case error_code_transaction_too_old:
 	case error_code_future_version:
@@ -85,6 +86,7 @@ inline bool canReplyWith(Error e) {
 		return false;
 	};
 }
+} // namespace
 
 struct AddingShard : NonCopyable {
 	KeyRange keys;
@@ -1435,7 +1437,7 @@ ACTOR Future<Void> getShardStateQ(StorageServer* data, GetShardStateRequest req)
 void merge(Arena& arena,
            VectorRef<KeyValueRef, VecSerStrategy::String>& output,
            VectorRef<KeyValueRef> const& vm_output,
-           VectorRef<KeyValueRef> const& base,
+           Standalone<RangeResultRef> const& base,
            int& vCount,
            int limit,
            bool stopAtEndOfBase,
@@ -1446,6 +1448,9 @@ void merge(Arena& arena,
 // start is still inclusive and end is exclusive
 {
 	ASSERT(limit != 0);
+	// Add a dependency of the new arena on the result from the KVS so that we don't have to copy any of the KVS
+	// results.
+	arena.dependsOn(base.arena());
 
 	bool forward = limit > 0;
 	if (!forward)
@@ -1456,7 +1461,7 @@ void merge(Arena& arena,
 	KeyValueRef const* baseEnd = base.end();
 	while (baseStart != baseEnd && vCount > 0 && output.size() < adjustedLimit && accumulatedBytes < limitBytes) {
 		if (forward ? baseStart->key < vm_output[pos].key : baseStart->key > vm_output[pos].key) {
-			output.push_back_deep(arena, *baseStart++);
+			output.push_back(arena, *baseStart++);
 		} else {
 			output.push_back_deep(arena, vm_output[pos]);
 			if (baseStart->key == vm_output[pos].key)
@@ -1467,7 +1472,7 @@ void merge(Arena& arena,
 		accumulatedBytes += sizeof(KeyValueRef) + output.end()[-1].expectedSize();
 	}
 	while (baseStart != baseEnd && output.size() < adjustedLimit && accumulatedBytes < limitBytes) {
-		output.push_back_deep(arena, *baseStart++);
+		output.push_back(arena, *baseStart++);
 		accumulatedBytes += sizeof(KeyValueRef) + output.end()[-1].expectedSize();
 	}
 	if (!stopAtEndOfBase) {

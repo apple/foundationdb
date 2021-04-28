@@ -26,12 +26,14 @@
 #include <memory>
 
 struct Empty : public ReferenceCounted<Empty>, public FastAllocated<Empty> {};
+struct EmptyTSRC : public ThreadSafeReferenceCounted<EmptyTSRC>, public FastAllocated<EmptyTSRC> {};
 
 enum class RefType {
 	RawPointer,
 	UniquePointer,
 	SharedPointer,
 	FlowReference,
+	FlowReferenceThreadSafe,
 };
 
 template <RefType refType>
@@ -61,6 +63,12 @@ struct Factory<RefType::FlowReference> {
 	static void cleanup(const Reference<Empty>&) {}
 };
 
+template <>
+struct Factory<RefType::FlowReferenceThreadSafe> {
+	static Reference<EmptyTSRC> create() { return makeReference<EmptyTSRC>(); }
+	static void cleanup(const Reference<EmptyTSRC>&) {}
+};
+
 template <RefType refType>
 static void bench_ref_create_and_destroy(benchmark::State& state) {
 	while (state.KeepRunning()) {
@@ -86,7 +94,9 @@ BENCHMARK_TEMPLATE(bench_ref_create_and_destroy, RefType::RawPointer)->ReportAgg
 BENCHMARK_TEMPLATE(bench_ref_create_and_destroy, RefType::UniquePointer)->ReportAggregatesOnly(true);
 BENCHMARK_TEMPLATE(bench_ref_create_and_destroy, RefType::SharedPointer)->ReportAggregatesOnly(true);
 BENCHMARK_TEMPLATE(bench_ref_create_and_destroy, RefType::FlowReference)->ReportAggregatesOnly(true);
+BENCHMARK_TEMPLATE(bench_ref_create_and_destroy, RefType::FlowReferenceThreadSafe)->ReportAggregatesOnly(true);
 
 BENCHMARK_TEMPLATE(bench_ref_copy, RefType::RawPointer)->ReportAggregatesOnly(true);
 BENCHMARK_TEMPLATE(bench_ref_copy, RefType::SharedPointer)->ReportAggregatesOnly(true);
 BENCHMARK_TEMPLATE(bench_ref_copy, RefType::FlowReference)->ReportAggregatesOnly(true);
+BENCHMARK_TEMPLATE(bench_ref_copy, RefType::FlowReferenceThreadSafe)->ReportAggregatesOnly(true);

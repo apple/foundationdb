@@ -21,7 +21,7 @@
 #include "boost/lexical_cast.hpp"
 #include "boost/algorithm/string.hpp"
 
-#include "fdbclient/Knobs.h"
+#include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "flow/Arena.h"
 #include "flow/UnitTest.h"
@@ -64,6 +64,8 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	{ SpecialKeySpace::MODULE::ERRORMSG, singleKeyRange(LiteralStringRef("\xff\xff/error_message")) },
 	{ SpecialKeySpace::MODULE::CONFIGURATION,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/configuration/"), LiteralStringRef("\xff\xff/configuration0")) },
+	{ SpecialKeySpace::MODULE::GLOBALCONFIG,
+	  KeyRangeRef(LiteralStringRef("\xff\xff/global_config/"), LiteralStringRef("\xff\xff/global_config0")) },
 	{ SpecialKeySpace::MODULE::TRACING,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/tracing/"), LiteralStringRef("\xff\xff/tracing0")) }
 };
@@ -87,6 +89,12 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "profile",
 	  KeyRangeRef(LiteralStringRef("profiling/"), LiteralStringRef("profiling0"))
+	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "maintenance",
+	  KeyRangeRef(LiteralStringRef("maintenance/"), LiteralStringRef("maintenance0"))
+	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "datadistribution",
+	  KeyRangeRef(LiteralStringRef("data_distribution/"), LiteralStringRef("data_distribution0"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
 };
 
@@ -1369,9 +1377,128 @@ Future<Optional<std::string>> ConsistencyCheckImpl::commit(ReadYourWritesTransac
 	return Optional<std::string>();
 }
 
-TracingOptionsImpl::TracingOptionsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {
-	TraceEvent("TracingOptionsImpl::TracingOptionsImpl").detail("Range", kr);
+GlobalConfigImpl::GlobalConfigImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+// Returns key-value pairs for each value stored in the global configuration
+// framework within the range specified. The special-key-space getrange
+// function should only be used for informational purposes. All values are
+// returned as strings regardless of their true type.
+Future<Standalone<RangeResultRef>> GlobalConfigImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+	Standalone<RangeResultRef> result;
+
+	auto& globalConfig = GlobalConfig::globalConfig();
+	KeyRangeRef modified =
+	    KeyRangeRef(kr.begin.removePrefix(getKeyRange().begin), kr.end.removePrefix(getKeyRange().begin));
+	std::map<KeyRef, Reference<ConfigValue>> values = globalConfig.get(modified);
+	for (const auto& [key, config] : values) {
+		Key prefixedKey = key.withPrefix(getKeyRange().begin);
+		if (config.isValid() && config->value.has_value()) {
+			if (config->value.type() == typeid(StringRef)) {
+				result.push_back_deep(result.arena(),
+				                      KeyValueRef(prefixedKey, std::any_cast<StringRef>(config->value).toString()));
+			} else if (config->value.type() == typeid(int64_t)) {
+				result.push_back_deep(result.arena(),
+				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<int64_t>(config->value))));
+			} else if (config->value.type() == typeid(float)) {
+				result.push_back_deep(result.arena(),
+				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<float>(config->value))));
+			} else if (config->value.type() == typeid(double)) {
+				result.push_back_deep(result.arena(),
+				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<double>(config->value))));
+			} else {
+				ASSERT(false);
+			}
+		}
+	}
+
+	return result;
 }
+
+// Marks the key for insertion into global configuration.
+void GlobalConfigImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
+	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(value)));
+}
+
+// Writes global configuration changes to durable memory. Also writes the
+// changes made in the transaction to a recent history set, and updates the
+// latest version which the global configuration was updated at.
+ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* globalConfig,
+                                                            ReadYourWritesTransaction* ryw) {
+	state Transaction& tr = ryw->getTransaction();
+
+	// History should only contain three most recent updates. If it currently
+	// has three items, remove the oldest to make room for a new item.
+	Standalone<RangeResultRef> history = wait(tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY));
+	constexpr int kGlobalConfigMaxHistorySize = 3;
+	if (history.size() > kGlobalConfigMaxHistorySize - 1) {
+		for (int i = 0; i < history.size() - (kGlobalConfigMaxHistorySize - 1); ++i) {
+			tr.clear(history[i].key);
+		}
+	}
+
+	VersionHistory vh{ 0 };
+
+	// Transform writes from the special-key-space (\xff\xff/global_config/) to
+	// the system key space (\xff/globalConfig/), and writes mutations to
+	// latest version history.
+	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
+	    ryw->getSpecialKeySpaceWriteMap().containedRanges(specialKeys);
+	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::iterator iter = ranges.begin();
+	while (iter != ranges.end()) {
+		std::pair<bool, Optional<Value>> entry = iter->value();
+		if (entry.first) {
+			if (entry.second.present() && iter->begin().startsWith(globalConfig->getKeyRange().begin)) {
+				Key bareKey = iter->begin().removePrefix(globalConfig->getKeyRange().begin);
+				vh.mutations.emplace_back_deep(vh.mutations.arena(),
+				                               MutationRef(MutationRef::SetValue, bareKey, entry.second.get()));
+
+				Key systemKey = bareKey.withPrefix(globalConfigKeysPrefix);
+				tr.set(systemKey, entry.second.get());
+			} else if (!entry.second.present() && iter->range().begin.startsWith(globalConfig->getKeyRange().begin) &&
+			           iter->range().end.startsWith(globalConfig->getKeyRange().begin)) {
+				KeyRef bareRangeBegin = iter->range().begin.removePrefix(globalConfig->getKeyRange().begin);
+				KeyRef bareRangeEnd = iter->range().end.removePrefix(globalConfig->getKeyRange().begin);
+				vh.mutations.emplace_back_deep(vh.mutations.arena(),
+				                               MutationRef(MutationRef::ClearRange, bareRangeBegin, bareRangeEnd));
+
+				Key systemRangeBegin = bareRangeBegin.withPrefix(globalConfigKeysPrefix);
+				Key systemRangeEnd = bareRangeEnd.withPrefix(globalConfigKeysPrefix);
+				tr.clear(KeyRangeRef(systemRangeBegin, systemRangeEnd));
+			}
+		}
+		++iter;
+	}
+
+	// Record the mutations in this commit into the global configuration history.
+	Key historyKey = addVersionStampAtEnd(globalConfigHistoryPrefix);
+	ObjectWriter historyWriter(IncludeVersion());
+	historyWriter.serialize(vh);
+	tr.atomicOp(historyKey, historyWriter.toStringRef(), MutationRef::SetVersionstampedKey);
+
+	// Write version key to trigger update in cluster controller.
+	tr.atomicOp(globalConfigVersionKey,
+	            LiteralStringRef("0123456789\x00\x00\x00\x00"), // versionstamp
+	            MutationRef::SetVersionstampedValue);
+
+	return Optional<std::string>();
+}
+
+// Called when a transaction includes keys in the global configuration special-key-space range.
+Future<Optional<std::string>> GlobalConfigImpl::commit(ReadYourWritesTransaction* ryw) {
+	return globalConfigCommitActor(this, ryw);
+}
+
+// Marks the range for deletion from global configuration.
+void GlobalConfigImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
+	ryw->getSpecialKeySpaceWriteMap().insert(range, std::make_pair(true, Optional<Value>()));
+}
+
+// Marks the key for deletion from global configuration.
+void GlobalConfigImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
+	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
+}
+
+TracingOptionsImpl::TracingOptionsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
 Future<Standalone<RangeResultRef>> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
 	Standalone<RangeResultRef> result;
@@ -1738,6 +1865,7 @@ ACTOR static Future<Standalone<RangeResultRef>> ClientProfilingGetRangeActor(Rea
 	return result;
 }
 
+// TODO : add limitation on set operation
 Future<Standalone<RangeResultRef>> ClientProfilingImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
 	return ClientProfilingGetRangeActor(ryw, getKeyRange().begin, kr);
 }
@@ -1793,4 +1921,197 @@ void ClientProfilingImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& ke
 	    ryw,
 	    "profile",
 	    "Clear operation is forbidden for profile client. You can set it to default to disable profiling.");
+}
+
+MaintenanceImpl::MaintenanceImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+// Used to read the healthZoneKey
+// If the key is persisted and the delayed read version is still larger than current read version,
+// we will calculate the remaining time(truncated to integer, the same as fdbcli) and return back as the value
+// If the zoneId is the special one `ignoreSSFailuresZoneString`,
+// value will be 0 (same as fdbcli)
+ACTOR static Future<Standalone<RangeResultRef>> MaintenanceGetRangeActor(ReadYourWritesTransaction* ryw,
+                                                                         KeyRef prefix,
+                                                                         KeyRangeRef kr) {
+	state Standalone<RangeResultRef> result;
+	// zoneId
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+	Optional<Value> val = wait(ryw->getTransaction().get(healthyZoneKey));
+	if (val.present()) {
+		auto healthyZone = decodeHealthyZoneValue(val.get());
+		if ((healthyZone.first == ignoreSSFailuresZoneString) ||
+		    (healthyZone.second > ryw->getTransaction().getReadVersion().get())) {
+			Key zone_key = healthyZone.first.withPrefix(prefix);
+			double seconds = healthyZone.first == ignoreSSFailuresZoneString
+			                     ? 0
+			                     : (healthyZone.second - ryw->getTransaction().getReadVersion().get()) /
+			                           CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+			if (kr.contains(zone_key)) {
+				result.push_back_deep(result.arena(),
+				                      KeyValueRef(zone_key, Value(boost::lexical_cast<std::string>(seconds))));
+			}
+		}
+	}
+	return rywGetRange(ryw, kr, result);
+}
+
+Future<Standalone<RangeResultRef>> MaintenanceImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+	return MaintenanceGetRangeActor(ryw, getKeyRange().begin, kr);
+}
+
+// Commit the change to healthZoneKey
+// We do not allow more than one zone to be set in maintenance in one transaction
+// In addition, if the zoneId now is 'ignoreSSFailuresZoneString',
+// which means the data distribution is disabled for storage failures.
+// Only clear this specific key is allowed, any other operations will throw error
+ACTOR static Future<Optional<std::string>> maintenanceCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+	// read
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+	ryw->getTransaction().setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	Optional<Value> val = wait(ryw->getTransaction().get(healthyZoneKey));
+	Optional<std::pair<Key, Version>> healthyZone =
+	    val.present() ? decodeHealthyZoneValue(val.get()) : Optional<std::pair<Key, Version>>();
+
+	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
+	    ryw->getSpecialKeySpaceWriteMap().containedRanges(kr);
+	Key zoneId;
+	double seconds;
+	bool isSet = false;
+	// Since maintenance only allows one zone at the same time,
+	// if a transaction has more than one set operation on different zone keys,
+	// the commit will throw an error
+	for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
+		if (!iter->value().first)
+			continue;
+		if (iter->value().second.present()) {
+			if (isSet)
+				return Optional<std::string>(ManagementAPIError::toJsonString(
+				    false, "maintenance", "Multiple zones given for maintenance, only one allowed at the same time"));
+			isSet = true;
+			zoneId = iter->begin().removePrefix(kr.begin);
+			seconds = boost::lexical_cast<double>(iter->value().second.get().toString());
+		} else {
+			// if we already have set operation, then all clear operations will be meaningless, thus skip
+			if (!isSet && healthyZone.present() && iter.range().contains(healthyZone.get().first.withPrefix(kr.begin)))
+				ryw->getTransaction().clear(healthyZoneKey);
+		}
+	}
+
+	if (isSet) {
+		if (healthyZone.present() && healthyZone.get().first == ignoreSSFailuresZoneString) {
+			std::string msg = "Maintenance mode cannot be used while data distribution is disabled for storage "
+			                  "server failures.";
+			return Optional<std::string>(ManagementAPIError::toJsonString(false, "maintenance", msg));
+		} else if (seconds < 0) {
+			std::string msg =
+			    "The specified maintenance time " + boost::lexical_cast<std::string>(seconds) + " is a negative value";
+			return Optional<std::string>(ManagementAPIError::toJsonString(false, "maintenance", msg));
+		} else {
+			TraceEvent(SevDebug, "SKSMaintenanceSet").detail("ZoneId", zoneId.toString());
+			ryw->getTransaction().set(healthyZoneKey,
+			                          healthyZoneValue(zoneId,
+			                                           ryw->getTransaction().getReadVersion().get() +
+			                                               (seconds * CLIENT_KNOBS->CORE_VERSIONSPERSECOND)));
+		}
+	}
+	return Optional<std::string>();
+}
+
+Future<Optional<std::string>> MaintenanceImpl::commit(ReadYourWritesTransaction* ryw) {
+	return maintenanceCommitActor(ryw, getKeyRange());
+}
+
+DataDistributionImpl::DataDistributionImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+// Read the system keys dataDistributionModeKey and rebalanceDDIgnoreKey
+ACTOR static Future<Standalone<RangeResultRef>> DataDistributionGetRangeActor(ReadYourWritesTransaction* ryw,
+                                                                              KeyRef prefix,
+                                                                              KeyRangeRef kr) {
+	state Standalone<RangeResultRef> result;
+	// dataDistributionModeKey
+	state Key modeKey = LiteralStringRef("mode").withPrefix(prefix);
+	if (kr.contains(modeKey)) {
+		auto entry = ryw->getSpecialKeySpaceWriteMap()[modeKey];
+		if (ryw->readYourWritesDisabled() || !entry.first) {
+			Optional<Value> f = wait(ryw->getTransaction().get(dataDistributionModeKey));
+			int mode = -1;
+			if (f.present()) {
+				mode = BinaryReader::fromStringRef<int>(f.get(), Unversioned());
+			}
+			result.push_back_deep(result.arena(), KeyValueRef(modeKey, Value(boost::lexical_cast<std::string>(mode))));
+		}
+	}
+	// rebalanceDDIgnoreKey
+	state Key rebalanceIgnoredKey = LiteralStringRef("rebalance_ignored").withPrefix(prefix);
+	if (kr.contains(rebalanceIgnoredKey)) {
+		auto entry = ryw->getSpecialKeySpaceWriteMap()[rebalanceIgnoredKey];
+		if (ryw->readYourWritesDisabled() || !entry.first) {
+			Optional<Value> f = wait(ryw->getTransaction().get(rebalanceDDIgnoreKey));
+			if (f.present()) {
+				result.push_back_deep(result.arena(), KeyValueRef(rebalanceIgnoredKey, Value()));
+			}
+		}
+	}
+	return rywGetRange(ryw, kr, result);
+}
+
+Future<Standalone<RangeResultRef>> DataDistributionImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                                  KeyRangeRef kr) const {
+	return DataDistributionGetRangeActor(ryw, getKeyRange().begin, kr);
+}
+
+Future<Optional<std::string>> DataDistributionImpl::commit(ReadYourWritesTransaction* ryw) {
+	// there are two valid keys in the range
+	// <prefix>/mode -> dataDistributionModeKey, the value is only allowed to be set as "0"(disable) or "1"(enable)
+	// <prefix>/rebalance_ignored -> rebalanceDDIgnoreKey, value is unused thus empty
+	Optional<std::string> msg;
+	KeyRangeRef kr = getKeyRange();
+	Key modeKey = LiteralStringRef("mode").withPrefix(kr.begin);
+	Key rebalanceIgnoredKey = LiteralStringRef("rebalance_ignored").withPrefix(kr.begin);
+	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(kr);
+	for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
+		if (!iter->value().first)
+			continue;
+		if (iter->value().second.present()) {
+			if (iter->range() == singleKeyRange(modeKey)) {
+				try {
+					int mode = boost::lexical_cast<int>(iter->value().second.get().toString());
+					Value modeVal = BinaryWriter::toValue(mode, Unversioned());
+					if (mode == 0 || mode == 1)
+						ryw->getTransaction().set(dataDistributionModeKey, modeVal);
+					else
+						msg = ManagementAPIError::toJsonString(false,
+						                                       "datadistribution",
+						                                       "Please set the value of the data_distribution/mode to "
+						                                       "0(disable) or 1(enable), other values are not allowed");
+				} catch (boost::bad_lexical_cast& e) {
+					msg = ManagementAPIError::toJsonString(false,
+					                                       "datadistribution",
+					                                       "Invalid datadistribution mode(int): " +
+					                                           iter->value().second.get().toString());
+				}
+			} else if (iter->range() == singleKeyRange(rebalanceIgnoredKey)) {
+				if (iter->value().second.get().size())
+					msg =
+					    ManagementAPIError::toJsonString(false,
+					                                     "datadistribution",
+					                                     "Value is unused for the data_distribution/rebalance_ignored "
+					                                     "key, please set it to an empty value");
+				else
+					ryw->getTransaction().set(rebalanceDDIgnoreKey, LiteralStringRef("on"));
+			} else {
+				msg = ManagementAPIError::toJsonString(
+				    false,
+				    "datadistribution",
+				    "Changing invalid keys, please read the documentation to check valid keys in the range");
+			}
+		} else {
+			// clear
+			if (iter->range().contains(modeKey))
+				ryw->getTransaction().clear(dataDistributionModeKey);
+			else if (iter->range().contains(rebalanceIgnoredKey))
+				ryw->getTransaction().clear(rebalanceDDIgnoreKey);
+		}
+	}
+	return msg;
 }

@@ -2493,7 +2493,7 @@ struct RedwoodRecordRef {
 	// This is the same order that delta compression uses for prefix borrowing
 	int compare(const RedwoodRecordRef& rhs, int skip = 0) const {
 		int keySkip = std::min(skip, key.size());
-		int cmp = key.substr(keySkip).compare(rhs.key.substr(keySkip));
+		int cmp = key.compareSuffix(rhs.key, keySkip);
 
 		if (cmp == 0) {
 			cmp = version - rhs.version;
@@ -6062,9 +6062,13 @@ public:
 				// Read page contents without using waits
 				bool isRoot = cur.inRoot();
 				BTreePage::BinaryTree::Cursor leafCursor = cur.popPath();
+				// we can bypass the bounds check for each key in the leaf if the entire leaf is in range
+				// > because both query end and page upper bound are exclusive of the query results and page contents,
+				// respectively
+				bool boundsCheck = leafCursor.upperBound() > keys.end;
 				while (leafCursor.valid()) {
 					KeyValueRef kv = leafCursor.get().toKeyValueRef();
-					if (kv.key >= keys.end) {
+					if (boundsCheck && kv.key.compare(keys.end) >= 0) {
 						break;
 					}
 					accumulatedBytes += kv.expectedSize();
@@ -6087,9 +6091,13 @@ public:
 				// Read page contents without using waits
 				bool isRoot = cur.inRoot();
 				BTreePage::BinaryTree::Cursor leafCursor = cur.popPath();
+				// we can bypass the bounds check for each key in the leaf if the entire leaf is in range
+				// < because both query begin and page lower bound are inclusive of the query results and page contents,
+				// respectively
+				bool boundsCheck = leafCursor.lowerBound() < keys.begin;
 				while (leafCursor.valid()) {
 					KeyValueRef kv = leafCursor.get().toKeyValueRef();
-					if (kv.key < keys.begin) {
+					if (boundsCheck && kv.key.compare(keys.begin) < 0) {
 						break;
 					}
 					accumulatedBytes += kv.expectedSize();
@@ -6956,7 +6964,7 @@ RedwoodRecordRef randomRedwoodRecordRef(const std::string& keyBuffer, const std:
 	return rec;
 }
 
-TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
+TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 	ASSERT(RedwoodRecordRef::Delta::LengthFormatSizes[0] == 3);
 	ASSERT(RedwoodRecordRef::Delta::LengthFormatSizes[1] == 4);
 	ASSERT(RedwoodRecordRef::Delta::LengthFormatSizes[2] == 6);
@@ -7029,7 +7037,7 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 		bytes += deltaTest(a, b);
 	}
 	double elapsed = timer() - start;
-	printf("DeltaTest() on random large records %g M/s  %g MB/s\n", count / elapsed / 1e6, bytes / elapsed / 1e6);
+	printf("DeltaTest() on random large records %f M/s  %f MB/s\n", count / elapsed / 1e6, bytes / elapsed / 1e6);
 
 	keyBuffer.resize(30);
 	valueBuffer.resize(100);
@@ -7041,7 +7049,7 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 		RedwoodRecordRef b = randomRedwoodRecordRef(keyBuffer, valueBuffer);
 		bytes += deltaTest(a, b);
 	}
-	printf("DeltaTest() on random small records %g M/s  %g MB/s\n", count / elapsed / 1e6, bytes / elapsed / 1e6);
+	printf("DeltaTest() on random small records %f M/s  %f MB/s\n", count / elapsed / 1e6, bytes / elapsed / 1e6);
 
 	RedwoodRecordRef rec1;
 	RedwoodRecordRef rec2;
@@ -7058,7 +7066,7 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 	for (i = 0; i < count; ++i) {
 		total += rec1.getCommonPrefixLen(rec2, 50);
 	}
-	printf("%" PRId64 " getCommonPrefixLen(skip=50) %g M/s\n", total, count / (timer() - start) / 1e6);
+	printf("%" PRId64 " getCommonPrefixLen(skip=50) %f M/s\n", total, count / (timer() - start) / 1e6);
 
 	start = timer();
 	total = 0;
@@ -7066,7 +7074,7 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 	for (i = 0; i < count; ++i) {
 		total += rec1.getCommonPrefixLen(rec2, 0);
 	}
-	printf("%" PRId64 " getCommonPrefixLen(skip=0) %g M/s\n", total, count / (timer() - start) / 1e6);
+	printf("%" PRId64 " getCommonPrefixLen(skip=0) %f M/s\n", total, count / (timer() - start) / 1e6);
 
 	char buf[1000];
 	RedwoodRecordRef::Delta& d = *(RedwoodRecordRef::Delta*)buf;
@@ -7079,7 +7087,7 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 	for (i = 0; i < count; ++i) {
 		total += rec1.writeDelta(d, rec2, commonPrefix);
 	}
-	printf("%" PRId64 " writeDelta(commonPrefix=%d) %g M/s\n", total, commonPrefix, count / (timer() - start) / 1e6);
+	printf("%" PRId64 " writeDelta(commonPrefix=%d) %f M/s\n", total, commonPrefix, count / (timer() - start) / 1e6);
 
 	start = timer();
 	total = 0;
@@ -7087,12 +7095,28 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 	for (i = 0; i < count; ++i) {
 		total += rec1.writeDelta(d, rec2);
 	}
-	printf("%" PRId64 " writeDelta() %g M/s\n", total, count / (timer() - start) / 1e6);
+	printf("%" PRId64 " writeDelta() %f M/s\n", total, count / (timer() - start) / 1e6);
+
+	start = timer();
+	total = 0;
+	count = 10e6;
+	for (i = 0; i < count; ++i) {
+		total += rec1.compare(rec2, 0);
+	}
+	printf("%" PRId64 " compare(skip=0) %f M/s\n", total, count / (timer() - start) / 1e6);
+
+	start = timer();
+	total = 0;
+	count = 10e6;
+	for (i = 0; i < count; ++i) {
+		total += rec1.compare(rec2, 50);
+	}
+	printf("%" PRId64 " compare(skip=50) %f M/s\n", total, count / (timer() - start) / 1e6);
 
 	return Void();
 }
 
-TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
+TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	// Sanity check on delta tree node format
 	ASSERT(DeltaTree<RedwoodRecordRef>::Node::headerSize(false) == 4);
 	ASSERT(DeltaTree<RedwoodRecordRef>::Node::headerSize(true) == 8);
@@ -7271,7 +7295,7 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	return Void();
 }
 
-TEST_CASE("!/redwood/correctness/unit/deltaTree/IntIntPair") {
+TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	const int N = 200;
 	IntIntPair prev = { 1, 0 };
 	IntIntPair next = { 10000, 10000 };
@@ -7615,7 +7639,7 @@ struct SimpleCounter {
 	std::string toString() { return format("%" PRId64 "/%.2f/%.2f", x, rate() / 1e6, avgRate() / 1e6); }
 };
 
-TEST_CASE("!/redwood/performance/mutationBuffer") {
+TEST_CASE(":/redwood/performance/mutationBuffer") {
 	// This test uses pregenerated short random keys
 	int count = 10e6;
 
@@ -7643,34 +7667,47 @@ TEST_CASE("!/redwood/performance/mutationBuffer") {
 	return Void();
 }
 
-TEST_CASE("!/redwood/correctness/btree") {
+TEST_CASE("/redwood/correctness/btree") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();
 
-	state std::string pagerFile = "unittest_pageFile.redwood";
+	state std::string fileName = params.get("fileName").orDefault("unittest_pageFile.redwood");
 	IPager2* pager;
 
-	state bool serialTest = deterministicRandom()->coinflip();
-	state bool shortTest = deterministicRandom()->coinflip();
+	state bool serialTest = params.getInt("serialTest").orDefault(deterministicRandom()->coinflip());
+	state bool shortTest = params.getInt("shortTest").orDefault(deterministicRandom()->coinflip());
 
 	state int pageSize =
 	    shortTest ? 200 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(200, 400));
 
-	state int64_t targetPageOps = shortTest ? 50000 : 1000000;
-	state bool pagerMemoryOnly = shortTest && (deterministicRandom()->random01() < .001);
-	state int maxKeySize = deterministicRandom()->randomInt(1, pageSize * 2);
-	state int maxValueSize = randomSize(pageSize * 25);
-	state int maxCommitSize = shortTest ? 1000 : randomSize(std::min<int>((maxKeySize + maxValueSize) * 20000, 10e6));
-	state double clearProbability = deterministicRandom()->random01() * .1;
-	state double clearSingleKeyProbability = deterministicRandom()->random01();
-	state double clearPostSetProbability = deterministicRandom()->random01() * .1;
-	state double coldStartProbability = pagerMemoryOnly ? 0 : (deterministicRandom()->random01() * 0.3);
-	state double advanceOldVersionProbability = deterministicRandom()->random01();
+	state int64_t targetPageOps = params.getInt("targetPageOps").orDefault(shortTest ? 50000 : 1000000);
+	state bool pagerMemoryOnly =
+	    params.getInt("pagerMemoryOnly").orDefault(shortTest && (deterministicRandom()->random01() < .001));
+	state int maxKeySize = params.getInt("maxKeySize").orDefault(deterministicRandom()->randomInt(1, pageSize * 2));
+	state int maxValueSize = params.getInt("maxValueSize").orDefault(randomSize(pageSize * 25));
+	state int maxCommitSize =
+	    params.getInt("maxCommitSize")
+	        .orDefault(shortTest ? 1000 : randomSize(std::min<int>((maxKeySize + maxValueSize) * 20000, 10e6)));
+	state double clearProbability =
+	    params.getDouble("clearProbability").orDefault(deterministicRandom()->random01() * .1);
+	state double clearSingleKeyProbability =
+	    params.getDouble("clearSingleKeyProbability").orDefault(deterministicRandom()->random01());
+	state double clearPostSetProbability =
+	    params.getDouble("clearPostSetProbability").orDefault(deterministicRandom()->random01() * .1);
+	state double coldStartProbability = params.getDouble("coldStartProbability")
+	                                        .orDefault(pagerMemoryOnly ? 0 : (deterministicRandom()->random01() * 0.3));
+	state double advanceOldVersionProbability =
+	    params.getDouble("advanceOldVersionProbability").orDefault(deterministicRandom()->random01());
 	state int64_t cacheSizeBytes =
-	    pagerMemoryOnly ? 2e9 : (pageSize * deterministicRandom()->randomInt(1, (BUGGIFY ? 2 : 10000) + 1));
-	state Version versionIncrement = deterministicRandom()->randomInt64(1, 1e8);
-	state Version remapCleanupWindow = BUGGIFY ? 0 : deterministicRandom()->randomInt64(1, versionIncrement * 50);
-	state int maxVerificationMapEntries = 300e3;
+	    params.getInt("cacheSizeBytes")
+	        .orDefault(pagerMemoryOnly ? 2e9
+	                                   : (pageSize * deterministicRandom()->randomInt(1, (BUGGIFY ? 2 : 10000) + 1)));
+	state Version versionIncrement =
+	    params.getInt("versionIncrement").orDefault(deterministicRandom()->randomInt64(1, 1e8));
+	state Version remapCleanupWindow =
+	    params.getInt("remapCleanupWindow")
+	        .orDefault(BUGGIFY ? 0 : deterministicRandom()->randomInt64(1, versionIncrement * 50));
+	state int maxVerificationMapEntries = params.getInt("maxVerificationMapEntries").orDefault(300e3);
 
 	printf("\n");
 	printf("targetPageOps: %" PRId64 "\n", targetPageOps);
@@ -7693,11 +7730,11 @@ TEST_CASE("!/redwood/correctness/btree") {
 	printf("\n");
 
 	printf("Deleting existing test data...\n");
-	deleteFile(pagerFile);
+	deleteFile(fileName);
 
 	printf("Initializing...\n");
-	pager = new DWALPager(pageSize, pagerFile, cacheSizeBytes, remapCleanupWindow, pagerMemoryOnly);
-	state VersionedBTree* btree = new VersionedBTree(pager, pagerFile);
+	pager = new DWALPager(pageSize, fileName, cacheSizeBytes, remapCleanupWindow, pagerMemoryOnly);
+	state VersionedBTree* btree = new VersionedBTree(pager, fileName);
 	wait(btree->init());
 
 	state std::map<std::pair<std::string, Version>, Optional<std::string>> written;
@@ -7900,8 +7937,8 @@ TEST_CASE("!/redwood/correctness/btree") {
 				wait(closedFuture);
 
 				printf("Reopening btree from disk.\n");
-				IPager2* pager = new DWALPager(pageSize, pagerFile, cacheSizeBytes, remapCleanupWindow);
-				btree = new VersionedBTree(pager, pagerFile);
+				IPager2* pager = new DWALPager(pageSize, fileName, cacheSizeBytes, remapCleanupWindow);
+				btree = new VersionedBTree(pager, fileName);
 				wait(btree->init());
 
 				Version v = btree->getLatestVersion();
@@ -7937,7 +7974,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 	state Future<Void> closedFuture = btree->onClosed();
 	btree->close();
 	wait(closedFuture);
-	btree = new VersionedBTree(new DWALPager(pageSize, pagerFile, cacheSizeBytes, 0), pagerFile);
+	btree = new VersionedBTree(new DWALPager(pageSize, fileName, cacheSizeBytes, 0), fileName);
 	wait(btree->init());
 
 	wait(btree->clearAllAndCheckSanity());
@@ -8003,7 +8040,7 @@ ACTOR Future<Void> randomScans(VersionedBTree* btree,
 	return Void();
 }
 
-TEST_CASE("!/redwood/correctness/pager/cow") {
+TEST_CASE(":/redwood/correctness/pager/cow") {
 	state std::string pagerFile = "unittest_pageFile.redwood";
 	printf("Deleting old test data\n");
 	deleteFile(pagerFile);
@@ -8030,7 +8067,7 @@ TEST_CASE("!/redwood/correctness/pager/cow") {
 	return Void();
 }
 
-TEST_CASE("!/redwood/performance/set") {
+TEST_CASE(":/redwood/performance/set") {
 	state SignalableActorCollection actors;
 
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
@@ -8045,21 +8082,22 @@ TEST_CASE("!/redwood/performance/set") {
 		deleteFile(pagerFile);
 	}
 
-	state int pageSize = SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
-	state int64_t pageCacheBytes = FLOW_KNOBS->PAGE_CACHE_4K;
-	state int nodeCount = 1e9;
-	state int maxRecordsPerCommit = 20000;
-	state int maxKVBytesPerCommit = 20e6;
-	state int64_t kvBytesTarget = 4e9;
-	state int minKeyPrefixBytes = 25;
-	state int maxKeyPrefixBytes = 25;
-	state int minValueSize = 100;
-	state int maxValueSize = 500;
-	state int minConsecutiveRun = 1;
-	state int maxConsecutiveRun = 100000;
-	state char firstKeyChar = 'a';
-	state char lastKeyChar = 'm';
-	state Version remapCleanupWindow = SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW;
+	state int pageSize = params.getInt("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
+	state int64_t pageCacheBytes = params.getInt("pageCacheBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
+	state int nodeCount = params.getInt("nodeCount").orDefault(1e9);
+	state int maxRecordsPerCommit = params.getInt("maxRecordsPerCommit").orDefault(20000);
+	state int maxKVBytesPerCommit = params.getInt("maxKVBytesPerCommit").orDefault(20e6);
+	state int64_t kvBytesTarget = params.getInt("kvBytesTarget").orDefault(4e9);
+	state int minKeyPrefixBytes = params.getInt("minKeyPrefixBytes").orDefault(25);
+	state int maxKeyPrefixBytes = params.getInt("maxKeyPrefixBytes").orDefault(25);
+	state int minValueSize = params.getInt("minValueSize").orDefault(100);
+	state int maxValueSize = params.getInt("maxValueSize").orDefault(500);
+	state int minConsecutiveRun = params.getInt("minConsecutiveRun").orDefault(1);
+	state int maxConsecutiveRun = params.getInt("maxConsecutiveRun").orDefault(100);
+	state char firstKeyChar = params.get("firstKeyChar").orDefault("a")[0];
+	state char lastKeyChar = params.get("lastKeyChar").orDefault("m")[0];
+	state Version remapCleanupWindow =
+	    params.getInt("remapCleanupWindow").orDefault(SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW);
 
 	printf("pageSize: %d\n", pageSize);
 	printf("pageCacheBytes: %" PRId64 "\n", pageCacheBytes);
@@ -8241,6 +8279,8 @@ struct KVSource {
 	std::string valueData;
 	int prefixLen;
 	int lastIndex;
+	// TODO there is probably a better way to do this
+	Prefix extraRangePrefix;
 
 	KVSource(const std::vector<PrefixSegment>& desc, int numPrefixes = 0) : desc(desc) {
 		if (numPrefixes == 0) {
@@ -8289,6 +8329,32 @@ struct KVSource {
 		return makeKey(p, suffixLen);
 	}
 
+	// Like getKeyRef but gets a KeyRangeRef. If samePrefix, it returns a range from the same prefix,
+	// otherwise it returns a random range from the entire keyspace
+	// Can technically return an empty range with low probability
+	KeyRangeRef getKeyRangeRef(bool samePrefix, int suffixLen, bool sorted = false) {
+		KeyRef a, b;
+
+		a = getKeyRef(suffixLen);
+		// Copy a so that b's Prefix Arena allocation doesn't overwrite a if using the same prefix
+		extraRangePrefix.reserve(extraRangePrefix.arena(), a.size());
+		a.copyTo((uint8_t*)extraRangePrefix.begin());
+		a = KeyRef(extraRangePrefix.begin(), a.size());
+
+		if (samePrefix) {
+			b = getAnotherKeyRef(suffixLen, sorted);
+		} else {
+			b = getKeyRef(suffixLen);
+		}
+
+		if (a < b) {
+			return KeyRangeRef(a, b);
+		} else {
+			return KeyRangeRef(b, a);
+		}
+	}
+
+	// TODO unused, remove?
 	// Like getKeyRef but gets a KeyRangeRef for two keys covering the given number of sorted adjacent prefixes
 	KeyRangeRef getRangeRef(int prefixesCovered, int suffixLen) {
 		prefixesCovered = std::min<int>(prefixesCovered, prefixes.size());
@@ -8359,7 +8425,8 @@ ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore* kvs,
                                          int valueSize,
                                          KVSource source,
                                          int recordCountTarget,
-                                         bool usePrefixesInOrder) {
+                                         bool usePrefixesInOrder,
+                                         bool clearAfter) {
 	state int commitTarget = 5e6;
 
 	state int recordSize = source.prefixLen + suffixSize + valueSize;
@@ -8404,7 +8471,7 @@ ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore* kvs,
 
 		state int i;
 		for (i = 0; i < recordsPerPrefix; ++i) {
-			KeyValueRef kv(source.getAnotherKeyRef(4, usePrefixesInOrder), source.getValue(valueSize));
+			KeyValueRef kv(source.getAnotherKeyRef(suffixSize, usePrefixesInOrder), source.getValue(valueSize));
 			kvs->set(kv);
 			kvBytes += kv.expectedSize();
 			++records;
@@ -8426,6 +8493,8 @@ ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore* kvs,
 	}
 
 	wait(commit);
+	// TODO is it desired that not all records are committed? This could commit again to ensure any records set() since
+	// the last commit are persisted. For the purposes of how this is used currently, I don't think it matters though
 	stats();
 	printf("\n");
 
@@ -8433,13 +8502,15 @@ ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore* kvs,
 	StorageBytes sb = wait(getStableStorageBytes(kvs));
 	printf("storageBytes: %s (stable after %.2f seconds)\n", toString(sb).c_str(), timer() - intervalStart);
 
-	printf("Clearing all keys\n");
-	intervalStart = timer();
-	kvs->clear(KeyRangeRef(LiteralStringRef(""), LiteralStringRef("\xff")));
-	state StorageBytes sbClear = wait(getStableStorageBytes(kvs));
-	printf("Cleared all keys in %.2f seconds, final storageByte: %s\n",
-	       timer() - intervalStart,
-	       toString(sbClear).c_str());
+	if (clearAfter) {
+		printf("Clearing all keys\n");
+		intervalStart = timer();
+		kvs->clear(KeyRangeRef(LiteralStringRef(""), LiteralStringRef("\xff")));
+		state StorageBytes sbClear = wait(getStableStorageBytes(kvs));
+		printf("Cleared all keys in %.2f seconds, final storageByte: %s\n",
+		       timer() - intervalStart,
+		       toString(sbClear).c_str());
+	}
 
 	return Void();
 }
@@ -8526,7 +8597,7 @@ ACTOR Future<Void> doPrefixInsertComparison(int suffixSize,
 	deleteFile("test.redwood");
 	wait(delay(5));
 	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood", UID(), 0);
-	wait(prefixClusteredInsert(redwood, suffixSize, valueSize, source, recordCountTarget, usePrefixesInOrder));
+	wait(prefixClusteredInsert(redwood, suffixSize, valueSize, source, recordCountTarget, usePrefixesInOrder, true));
 	wait(closeKVS(redwood));
 	printf("\n");
 
@@ -8534,18 +8605,18 @@ ACTOR Future<Void> doPrefixInsertComparison(int suffixSize,
 	deleteFile("test.sqlite-wal");
 	wait(delay(5));
 	state IKeyValueStore* sqlite = openKVStore(KeyValueStoreType::SSD_BTREE_V2, "test.sqlite", UID(), 0);
-	wait(prefixClusteredInsert(sqlite, suffixSize, valueSize, source, recordCountTarget, usePrefixesInOrder));
+	wait(prefixClusteredInsert(sqlite, suffixSize, valueSize, source, recordCountTarget, usePrefixesInOrder, true));
 	wait(closeKVS(sqlite));
 	printf("\n");
 
 	return Void();
 }
 
-TEST_CASE("!/redwood/performance/prefixSizeComparison") {
-	state int suffixSize = 12;
-	state int valueSize = 100;
-	state int recordCountTarget = 100e6;
-	state int usePrefixesInOrder = false;
+TEST_CASE(":/redwood/performance/prefixSizeComparison") {
+	state int suffixSize = params.getInt("suffixSize").orDefault(12);
+	state int valueSize = params.getInt("valueSize").orDefault(100);
+	state int recordCountTarget = params.getInt("recordCountTarget").orDefault(100e6);
+	state bool usePrefixesInOrder = params.getInt("usePrefixesInOrder").orDefault(0);
 
 	wait(doPrefixInsertComparison(
 	    suffixSize, valueSize, recordCountTarget, usePrefixesInOrder, KVSource({ { 10, 100000 } })));
@@ -8562,15 +8633,103 @@ TEST_CASE("!/redwood/performance/prefixSizeComparison") {
 	return Void();
 }
 
-TEST_CASE("!/redwood/performance/sequentialInsert") {
-	state int prefixLen = 30;
-	state int valueSize = 100;
-	state int recordCountTarget = 100e6;
+TEST_CASE(":/redwood/performance/sequentialInsert") {
+	state int prefixLen = params.getInt("prefixLen").orDefault(30);
+	state int valueSize = params.getInt("valueSize").orDefault(100);
+	state int recordCountTarget = params.getInt("recordCountTarget").orDefault(100e6);
 
 	deleteFile("test.redwood");
 	wait(delay(5));
 	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood", UID(), 0);
 	wait(sequentialInsert(redwood, prefixLen, valueSize, recordCountTarget));
+	wait(closeKVS(redwood));
+	printf("\n");
+
+	return Void();
+}
+
+// singlePrefix forces the range read to have the start and end key with the same prefix
+ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
+                                    int suffixSize,
+                                    KVSource source,
+                                    int valueSize,
+                                    int recordCountTarget,
+                                    bool singlePrefix,
+                                    int rowLimit) {
+	printf("\nstoreType: %d\n", kvs->getType());
+	printf("prefixSource: %s\n", source.toString().c_str());
+	printf("suffixSize: %d\n", suffixSize);
+	printf("recordCountTarget: %d\n", recordCountTarget);
+	printf("singlePrefix: %d\n", singlePrefix);
+	printf("rowLimit: %d\n", rowLimit);
+
+	state int64_t recordSize = source.prefixLen + suffixSize + valueSize;
+	state int64_t bytesRead = 0;
+	state int64_t recordsRead = 0;
+	state int queries = 0;
+	state int64_t nextPrintRecords = 1e5;
+
+	state double start = timer();
+	state std::function<void()> stats = [&]() {
+		double elapsed = timer() - start;
+		printf("Cumulative stats: %.2f seconds  %d queries %.2f MB %d records  %.2f qps %.2f MB/s  %.2f rec/s\r\n",
+		       elapsed,
+		       queries,
+		       bytesRead / 1e6,
+		       recordsRead,
+		       queries / elapsed,
+		       bytesRead / elapsed / 1e6,
+		       recordsRead / elapsed);
+		fflush(stdout);
+	};
+
+	while (recordsRead < recordCountTarget) {
+		KeyRangeRef range = source.getKeyRangeRef(singlePrefix, suffixSize);
+		int rowLim = (deterministicRandom()->randomInt(0, 2) != 0) ? rowLimit : -rowLimit;
+
+		Standalone<RangeResultRef> result = wait(kvs->readRange(range, rowLim));
+
+		recordsRead += result.size();
+		bytesRead += result.size() * recordSize;
+		++queries;
+
+		// log stats with exponential backoff
+		if (recordsRead >= nextPrintRecords) {
+			stats();
+			nextPrintRecords *= 2;
+		}
+	}
+
+	stats();
+	printf("\n");
+
+	return Void();
+}
+
+TEST_CASE("!/redwood/performance/randomRangeScans") {
+	state int prefixLen = 30;
+	state int suffixSize = 12;
+	state int valueSize = 100;
+
+	// TODO change to 100e8 after figuring out no-disk redwood mode
+	state int writeRecordCountTarget = 1e6;
+	state int queryRecordTarget = 1e7;
+	state int writePrefixesInOrder = false;
+
+	state KVSource source({ { prefixLen, 1000 } });
+
+	deleteFile("test.redwood");
+	wait(delay(5));
+	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood", UID(), 0);
+	wait(prefixClusteredInsert(
+	    redwood, suffixSize, valueSize, source, writeRecordCountTarget, writePrefixesInOrder, false));
+
+	// divide targets for tiny queries by 10 because they are much slower
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget / 10, true, 10));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, true, 1000));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget / 10, false, 100));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 10000));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 1000000));
 	wait(closeKVS(redwood));
 	printf("\n");
 

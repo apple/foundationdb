@@ -1,0 +1,54 @@
+title Commit in FoundationDB
+
+participant "Client" as C
+participant "GetReadVersionProxy" as GRV
+participant "CommitProxy" as P
+participant "Master" as M
+participant "Resolver" as R
+participant "TLog" as T
+	
+C ->> GRV: Request read version
+GRV ->> M: Request committed version
+M ->> GRV: Respond committed version
+GRV ->> C: Respond read version
+	
+C ->> P: Commit a mutation with read version
+  
+box right of P: Pre-resolution
+P ->> M: Request a commit version
+alt New request
+	M ->> P: Commit version
+else Replied before with a commit version
+	M ->> P: Commit version
+else Replied before without commit version
+	M --x P: Never
+end
+  
+box right of P: Resolution
+P ->> R: Send the transaction to the resolver
+alt No conflict
+	R ->> P: TransactionCommitted
+else Conflict
+	R ->> P: TransactionConflict
+else Read snapshot older than oldest version
+	R ->> P: TransactionTooOld
+end
+  
+box right of P: Post-resolution
+P ->> T: Push the transaction data to TLog
+alt TLog not stopped
+	T ->> P: The version of the transactions that are already durable
+else TLog stopped
+	T ->> P: tlog_stopped
+end  
+  
+box right of P: Reply
+P ->> M: Report raw commit version
+M -->> P: Void
+alt Commit successful
+	P ->> C: Commit version
+else Conflict
+	P ->> C: Not committed: conflict
+else Transaction too old
+	P ->> C: Not committed: too old
+end
