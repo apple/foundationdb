@@ -47,6 +47,8 @@ struct IALPCollector : IALPCollectorBase {
 
 struct Sample : std::enable_shared_from_this<Sample> {
 	double time = 0.0;
+	Sample(Sample const&) = delete;
+	Sample& operator=(Sample const&) = delete;
 	std::unordered_map<WaitState, std::pair<char*, unsigned>> data;
 	~Sample() {
 		std::for_each(data.begin(), data.end(), [](std::pair<WaitState, std::pair<char*, unsigned>> entry) {
@@ -54,6 +56,62 @@ struct Sample : std::enable_shared_from_this<Sample> {
 		});
 	}
 };
+
+class SampleIngestor : std::enable_shared_from_this<SampleIngestor> {
+public:
+	virtual ~SampleIngestor();
+	virtual void ingest(std::shared_ptr<Sample> const& sample) = 0;
+	virtual void getConfig(std::map<std::string, std::string>&) const = 0;
+};
+
+class NoneIngestor : public SampleIngestor {
+public:
+	void ingest(std::shared_ptr<Sample> const& sample) override {}
+	void getConfig(std::map<std::string, std::string>& res) const override { res["ingestor"] = "none"; }
+};
+
+// The FluentD ingestor uses the pimpl idiom. This is to make compilation less heavy weight as this implementation has
+// dependencies to boost::asio
+struct FluentDIngestorImpl;
+
+class FluentDIngestor : public SampleIngestor {
+public: // Public Types
+	enum class Protocol { TCP, UDP };
+
+private: // members
+	FluentDIngestorImpl* impl;
+
+public: // interface
+	void ingest(std::shared_ptr<Sample> const& sample) override;
+	FluentDIngestor(Protocol protocol, NetworkAddress& endpoint);
+	void getConfig(std::map<std::string, std::string>& res) const override;
+	~FluentDIngestor();
+};
+
+struct ConfigError {
+	std::string description;
+};
+
+class ProfilerConfigT {
+private: // private types
+	using Lock = std::unique_lock<std::mutex>;
+	friend class crossbow::create_static<ProfilerConfigT>;
+
+private: // members
+	std::shared_ptr<SampleIngestor> ingestor = std::make_shared<NoneIngestor>();
+
+private: // construction
+	ProfilerConfigT() {}
+	ProfilerConfigT(ProfilerConfigT const&) = delete;
+	ProfilerConfigT& operator=(ProfilerConfigT const&) = delete;
+	void setBackend(std::shared_ptr<SampleIngestor> ingestor) { this->ingestor = ingestor; }
+
+public:
+	void reset(std::map<std::string, std::string> const& config);
+	std::map<std::string, std::string> getConfig() const;
+};
+
+using ProfilerConfig = crossbow::singleton<ProfilerConfigT>;
 
 class SampleCollectorT {
 public: // Types
@@ -83,6 +141,7 @@ class SampleCollection_t {
 	mutable std::mutex mutex;
 	std::atomic<double> windowSize = 0.0;
 	std::deque<std::shared_ptr<Sample>> data;
+	ProfilerConfig config;
 
 public:
 	/**
@@ -108,20 +167,25 @@ public:
 
 using SampleCollection = crossbow::singleton<SampleCollection_t>;
 
+struct ProfilerImpl;
+
+namespace boost {
+namespace asio {
+// forward declare io_context because including boost asio is super expensive
+class io_context;
+} // namespace asio
+} // namespace boost
+
 class ActorLineageProfilerT {
 	friend struct crossbow::create_static<ActorLineageProfilerT>;
-	ActorLineageProfilerT();
+	ProfilerImpl* impl;
 	SampleCollection collection;
-	std::thread profilerThread;
-	std::atomic<unsigned> frequency = 0;
-	std::mutex mutex;
-	std::condition_variable cond;
-	void profile();
+	ActorLineageProfilerT();
 
 public:
 	~ActorLineageProfilerT();
 	void setFrequency(unsigned frequency);
-	void stop();
+	boost::asio::io_context& context();
 };
 
 using ActorLineageProfiler = crossbow::singleton<ActorLineageProfilerT>;
