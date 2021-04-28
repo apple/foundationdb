@@ -50,6 +50,7 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TransactionLineage.h"
 #include "fdbclient/versions.h"
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
@@ -86,6 +87,8 @@ using std::min;
 using std::pair;
 
 namespace {
+
+TransactionLineageCollector transactionLineageCollector;
 
 template <class Interface, class Request>
 Future<REPLY_TYPE(Request)> loadBalance(
@@ -962,6 +965,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 
 	GlobalConfig::create(this, clientInfo);
 	GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
+	GlobalConfig::globalConfig().trigger(samplingWindow, samplingProfilerUpdateWindow);
 
 	monitorProxiesInfoChange = monitorProxiesChange(clientInfo, &proxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
@@ -1055,6 +1059,16 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<ClientProfilingImpl>(
 		        KeyRangeRef(LiteralStringRef("profiling/"), LiteralStringRef("profiling0"))
+				.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<MaintenanceImpl>(
+		        KeyRangeRef(LiteralStringRef("maintenance/"), LiteralStringRef("maintenance0"))
+		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<DataDistributionImpl>(
+		        KeyRangeRef(LiteralStringRef("data_distribution/"), LiteralStringRef("data_distribution0"))
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::ACTORLINEAGE,

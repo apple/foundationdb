@@ -35,6 +35,7 @@ const KeyRef transactionTagSampleRate = LiteralStringRef("config/transaction_tag
 const KeyRef transactionTagSampleCost = LiteralStringRef("config/transaction_tag_sample_cost");
 
 const KeyRef samplingFrequency = LiteralStringRef("visibility/sampling/frequency");
+const KeyRef samplingWindow = LiteralStringRef("visibility/sampling/window");
 
 GlobalConfig::GlobalConfig() : lastUpdate(0) {}
 

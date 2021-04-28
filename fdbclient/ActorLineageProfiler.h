@@ -32,6 +32,7 @@
 #include "flow/flow.h"
 
 void samplingProfilerUpdateFrequency(std::optional<std::any> freq);
+void samplingProfilerUpdateWindow(std::optional<std::any> window);
 
 struct IALPCollectorBase {
 	virtual std::optional<std::any> collect(ActorLineage*) = 0;

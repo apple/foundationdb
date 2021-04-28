@@ -368,3 +368,13 @@ std::map<std::string, std::string> ProfilerConfigT::getConfig() const {
 	}
 	return res;
 }
+
+// Callback used to update the sample collector window size.
+void samplingProfilerUpdateWindow(std::optional<std::any> window) {
+	double duration = 0;
+	if (window.has_value()) {
+		duration = std::any_cast<double>(window.value());
+	}
+	TraceEvent(SevInfo, "SamplingProfilerUpdateWindow").detail("Duration", duration);
+	SampleCollection::instance().setWindowSize(duration);
+}

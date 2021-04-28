@@ -34,7 +34,6 @@ struct ProcessClass {
 		ResolutionClass,
 		TesterClass,
 		CommitProxyClass,
-		GrvProxyClass,
 		MasterClass,
 		StatelessClass,
 		LogClass,
@@ -46,6 +45,7 @@ struct ProcessClass {
 		RatekeeperClass,
 		StorageCacheClass,
 		BackupClass,
+		GrvProxyClass,
 		InvalidClass = -1
 	};
 

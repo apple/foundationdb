@@ -42,6 +42,7 @@
 #include "fdbclient/Notified.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TransactionLineage.h"
 #include "fdbclient/VersionedMap.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -72,7 +73,8 @@
 
 #define SHORT_CIRCUT_ACTUAL_STORAGE 0
 
-inline bool canReplyWith(Error e) {
+namespace {
+bool canReplyWith(Error e) {
 	switch (e.code()) {
 	case error_code_transaction_too_old:
 	case error_code_future_version:
@@ -85,6 +87,7 @@ inline bool canReplyWith(Error e) {
 		return false;
 	};
 }
+} // namespace
 
 struct AddingShard : NonCopyable {
 	KeyRange keys;
@@ -1106,6 +1109,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	state int64_t resultSize = 0;
 	Span span("SS:getValue"_loc, { req.spanContext });
 	span.addTag("key"_sr, req.key);
+	currentLineage->modify(&TransactionLineage::txID) = req.spanContext.first();
 
 	try {
 		++data->counters.getValueQueries;
@@ -1435,7 +1439,7 @@ ACTOR Future<Void> getShardStateQ(StorageServer* data, GetShardStateRequest req)
 void merge(Arena& arena,
            VectorRef<KeyValueRef, VecSerStrategy::String>& output,
            VectorRef<KeyValueRef> const& vm_output,
-           VectorRef<KeyValueRef> const& base,
+           Standalone<RangeResultRef> const& base,
            int& vCount,
            int limit,
            bool stopAtEndOfBase,
@@ -1446,6 +1450,9 @@ void merge(Arena& arena,
 // start is still inclusive and end is exclusive
 {
 	ASSERT(limit != 0);
+	// Add a dependency of the new arena on the result from the KVS so that we don't have to copy any of the KVS
+	// results.
+	arena.dependsOn(base.arena());
 
 	bool forward = limit > 0;
 	if (!forward)
@@ -1456,7 +1463,7 @@ void merge(Arena& arena,
 	KeyValueRef const* baseEnd = base.end();
 	while (baseStart != baseEnd && vCount > 0 && output.size() < adjustedLimit && accumulatedBytes < limitBytes) {
 		if (forward ? baseStart->key < vm_output[pos].key : baseStart->key > vm_output[pos].key) {
-			output.push_back_deep(arena, *baseStart++);
+			output.push_back(arena, *baseStart++);
 		} else {
 			output.push_back_deep(arena, vm_output[pos]);
 			if (baseStart->key == vm_output[pos].key)
@@ -1467,7 +1474,7 @@ void merge(Arena& arena,
 		accumulatedBytes += sizeof(KeyValueRef) + output.end()[-1].expectedSize();
 	}
 	while (baseStart != baseEnd && output.size() < adjustedLimit && accumulatedBytes < limitBytes) {
-		output.push_back_deep(arena, *baseStart++);
+		output.push_back(arena, *baseStart++);
 		accumulatedBytes += sizeof(KeyValueRef) + output.end()[-1].expectedSize();
 	}
 	if (!stopAtEndOfBase) {
@@ -1799,6 +1806,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 {
 	state Span span("SS:getKeyValues"_loc, { req.spanContext });
 	state int64_t resultSize = 0;
+	currentLineage->modify(&TransactionLineage::txID) = req.spanContext.first();
 
 	++data->counters.getRangeQueries;
 	++data->counters.allQueries;
@@ -1959,6 +1967,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	state Span span("SS:getKey"_loc, { req.spanContext });
 	state int64_t resultSize = 0;
+	currentLineage->modify(&TransactionLineage::txID) = req.spanContext.first();
 
 	++data->counters.getKeyQueries;
 	++data->counters.allQueries;
@@ -4324,6 +4333,7 @@ ACTOR Future<Void> checkBehind(StorageServer* self) {
 }
 
 ACTOR Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetValueRequest> getValue) {
+	currentLineage->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetValue;
 	loop {
 		GetValueRequest req = waitNext(getValue);
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
@@ -4341,6 +4351,7 @@ ACTOR Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetVa
 }
 
 ACTOR Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<GetKeyValuesRequest> getKeyValues) {
+	currentLineage->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyValues;
 	loop {
 		GetKeyValuesRequest req = waitNext(getKeyValues);
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
@@ -4350,6 +4361,7 @@ ACTOR Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<G
 }
 
 ACTOR Future<Void> serveGetKeyRequests(StorageServer* self, FutureStream<GetKeyRequest> getKey) {
+	currentLineage->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKey;
 	loop {
 		GetKeyRequest req = waitNext(getKey);
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
@@ -4362,6 +4374,7 @@ ACTOR Future<Void> watchValueWaitForVersion(StorageServer* self,
                                             WatchValueRequest req,
                                             PromiseStream<WatchValueRequest> stream) {
 	state Span span("SS:watchValueWaitForVersion"_loc, { req.spanContext });
+	currentLineage->modify(&TransactionLineage::txID) = req.spanContext.first();
 	try {
 		wait(success(waitForVersionNoTooOld(self, req.version)));
 		stream.send(req);
@@ -4375,9 +4388,11 @@ ACTOR Future<Void> watchValueWaitForVersion(StorageServer* self,
 
 ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream<WatchValueRequest> stream) {
 	loop {
+		currentLineage->modify(&TransactionLineage::txID) = 0;
 		state WatchValueRequest req = waitNext(stream);
 		state Reference<ServerWatchMetadata> metadata = self->getWatchMetadata(req.key.contents());
 		state Span span("SS:serveWatchValueRequestsImpl"_loc, { req.spanContext });
+		currentLineage->modify(&TransactionLineage::txID) = req.spanContext.first();
 
 		if (!metadata.isValid()) { // case 1: no watch set for the current key
 			metadata = makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
@@ -4451,6 +4466,7 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 
 ACTOR Future<Void> serveWatchValueRequests(StorageServer* self, FutureStream<WatchValueRequest> watchValue) {
 	state PromiseStream<WatchValueRequest> stream;
+	currentLineage->modify(&TransactionLineage::operation) = TransactionLineage::Operation::WatchValue;
 	self->actors.add(serveWatchValueRequestsImpl(self, stream.getFuture()));
 
 	loop {
