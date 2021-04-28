@@ -106,6 +106,7 @@ enum {
 	// Backup constants
 	OPT_DESTCONTAINER,
 	OPT_SNAPSHOTINTERVAL,
+	OPT_INITIAL_SNAPSHOT_INTERVAL,
 	OPT_ERRORLIMIT,
 	OPT_NOSTOPWHENDONE,
 	OPT_EXPIRE_BEFORE_VERSION,
@@ -145,6 +146,7 @@ enum {
 	OPT_RESTORE_CLUSTERFILE_DEST,
 	OPT_RESTORE_CLUSTERFILE_ORIG,
 	OPT_RESTORE_BEGIN_VERSION,
+	OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY,
 
 	// Shared constants
 	OPT_CLUSTERFILE,
@@ -233,6 +235,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_USE_PARTITIONED_LOG, "--partitioned_log_experimental", SO_NONE },
 	{ OPT_SNAPSHOTINTERVAL, "-s", SO_REQ_SEP },
 	{ OPT_SNAPSHOTINTERVAL, "--snapshot_interval", SO_REQ_SEP },
+	{ OPT_INITIAL_SNAPSHOT_INTERVAL, "--initial_snapshot_interval", SO_REQ_SEP },
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
@@ -692,6 +695,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
 	{ OPT_RESTORE_BEGIN_VERSION, "--begin_version", SO_REQ_SEP },
+	{ OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY, "--inconsistent_snapshot_only", SO_NONE },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -1880,6 +1884,7 @@ ACTOR Future<Void> submitDBBackup(Database src,
 
 ACTOR Future<Void> submitBackup(Database db,
                                 std::string url,
+                                int initialSnapshotIntervalSeconds,
                                 int snapshotIntervalSeconds,
                                 Standalone<VectorRef<KeyRangeRef>> backupRanges,
                                 std::string tagName,
@@ -1936,6 +1941,7 @@ ACTOR Future<Void> submitBackup(Database db,
 		else {
 			wait(backupAgent.submitBackup(db,
 			                              KeyRef(url),
+			                              initialSnapshotIntervalSeconds,
 			                              snapshotIntervalSeconds,
 			                              tagName,
 			                              backupRanges,
@@ -2252,7 +2258,8 @@ ACTOR Future<Void> runRestore(Database db,
                               bool waitForDone,
                               std::string addPrefix,
                               std::string removePrefix,
-                              bool incrementalBackupOnly) {
+                              bool onlyAppyMutationLogs,
+                              bool inconsistentSnapshotOnly) {
 	if (ranges.empty()) {
 		ranges.push_back_deep(ranges.arena(), normalKeys);
 	}
@@ -2298,7 +2305,7 @@ ACTOR Future<Void> runRestore(Database db,
 
 			BackupDescription desc = wait(bc->describeBackup());
 
-			if (incrementalBackupOnly && desc.contiguousLogEnd.present()) {
+			if (onlyAppyMutationLogs && desc.contiguousLogEnd.present()) {
 				targetVersion = desc.contiguousLogEnd.get() - 1;
 			} else if (desc.maxRestorableVersion.present()) {
 				targetVersion = desc.maxRestorableVersion.get();
@@ -2323,7 +2330,8 @@ ACTOR Future<Void> runRestore(Database db,
 			                                                   KeyRef(addPrefix),
 			                                                   KeyRef(removePrefix),
 			                                                   true,
-			                                                   incrementalBackupOnly,
+			                                                   onlyAppyMutationLogs,
+			                                                   inconsistentSnapshotOnly,
 			                                                   beginVersion));
 
 			if (waitForDone && verbose) {
@@ -3213,6 +3221,8 @@ int main(int argc, char* argv[]) {
 		std::string destinationContainer;
 		bool describeDeep = false;
 		bool describeTimestamps = false;
+		int initialSnapshotIntervalSeconds =
+		    0; // The initial snapshot has a desired duration of 0, meaning go as fast as possible.
 		int snapshotIntervalSeconds = CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC;
 		std::string clusterFile;
 		std::string sourceClusterFile;
@@ -3237,6 +3247,8 @@ int main(int argc, char* argv[]) {
 		bool stopWhenDone = true;
 		bool usePartitionedLog = false; // Set to true to use new backup system
 		bool incrementalBackupOnly = false;
+		bool onlyAppyMutationLogs = false;
+		bool inconsistentSnapshotOnly = false;
 		bool forceAction = false;
 		bool trace = false;
 		bool quietDisplay = false;
@@ -3467,6 +3479,7 @@ int main(int argc, char* argv[]) {
 				modifyOptions.destURL = destinationContainer;
 				break;
 			case OPT_SNAPSHOTINTERVAL:
+			case OPT_INITIAL_SNAPSHOT_INTERVAL:
 			case OPT_MOD_ACTIVE_INTERVAL: {
 				const char* a = args->OptionArg();
 				int seconds;
@@ -3478,6 +3491,8 @@ int main(int argc, char* argv[]) {
 				if (optId == OPT_SNAPSHOTINTERVAL) {
 					snapshotIntervalSeconds = seconds;
 					modifyOptions.snapshotIntervalSeconds = seconds;
+				} else if (optId == OPT_INITIAL_SNAPSHOT_INTERVAL) {
+					initialSnapshotIntervalSeconds = seconds;
 				} else if (optId == OPT_MOD_ACTIVE_INTERVAL) {
 					modifyOptions.activeSnapshotIntervalSeconds = seconds;
 				}
@@ -3497,6 +3512,7 @@ int main(int argc, char* argv[]) {
 				break;
 			case OPT_INCREMENTALONLY:
 				incrementalBackupOnly = true;
+				onlyAppyMutationLogs = true;
 				break;
 			case OPT_RESTORECONTAINER:
 				restoreContainer = args->OptionArg();
@@ -3545,6 +3561,10 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_ERROR;
 				}
 				restoreVersion = ver;
+				break;
+			}
+			case OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY: {
+				inconsistentSnapshotOnly = true;
 				break;
 			}
 #ifdef _WIN32
@@ -3837,6 +3857,7 @@ int main(int argc, char* argv[]) {
 				openBackupContainer(argv[0], destinationContainer);
 				f = stopAfter(submitBackup(db,
 				                           destinationContainer,
+				                           initialSnapshotIntervalSeconds,
 				                           snapshotIntervalSeconds,
 				                           backupKeys,
 				                           tagName,
@@ -4013,7 +4034,8 @@ int main(int argc, char* argv[]) {
 				                         waitForDone,
 				                         addPrefix,
 				                         removePrefix,
-				                         incrementalBackupOnly));
+				                         onlyAppyMutationLogs,
+				                         inconsistentSnapshotOnly));
 				break;
 			case RestoreType::WAIT:
 				f = stopAfter(success(ba.waitRestore(db, KeyRef(tagName), true)));
