@@ -122,7 +122,7 @@ struct RequestData : NonCopyable {
 	// A return value of true means that the request completed successfully
 	// A return value of false means that the request failed but should be retried
 	// A return value with an error means that the error should be thrown back to original caller
-	static ErrorOr<bool> checkAndProcessResultImpl(Reply result,
+	static ErrorOr<bool> checkAndProcessResultImpl(Reply const& result,
 	                                               Reference<ModelHolder> modelHolder,
 	                                               bool atMostOnce,
 	                                               bool triedAllOptions) {
