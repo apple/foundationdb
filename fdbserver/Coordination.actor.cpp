@@ -559,11 +559,16 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 	state ActorCollection forwarders(false);
 
 	wait(LeaderRegisterCollection::init(&regs));
- 
+
 	loop choose {
 		when(CheckDescriptorMutable req = waitNext(interf.checkDescriptorMutable.getFuture())) {
-			CheckDescriptorMutableReply rep(SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT ? true : false);
-			req.reply.send(rep);
+			Optional<LeaderInfo> forward = regs.getForward(req.key);
+			if (forward.present()) {
+				req.reply.send(CheckDescriptorMutableReply{false});
+			} else {
+				CheckDescriptorMutableReply rep(SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT ? true : false);
+				req.reply.send(rep);
+			}
 		}
 		when(OpenDatabaseCoordRequest req = waitNext(interf.openDatabase.getFuture())) {
 			Optional<LeaderInfo> forward = regs.getForward(req.clusterKey);
