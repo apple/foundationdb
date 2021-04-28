@@ -623,7 +623,7 @@ static void printUsage(const char* name, bool devhelp) {
 	                 " resolution, grv_proxy, commit_proxy, master, test, unset, stateless, log, router,"
 	                 " and cluster_controller).");
 	printOptionUsage("--profiler_",
-	                 "Set a actor profiler option. Supported options are:\n"
+	                 "Set an actor profiler option. Supported options are:\n"
 	                 "  collector -- None or FluentD (FluentD requires collector_endpoint to be set)\n"
 	                 "  collector_endpoint -- IP:PORT of the fluentd server\n"
 	                 "  collector_protocol -- UDP or TCP (default is UDP)");
