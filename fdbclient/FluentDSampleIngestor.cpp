@@ -21,6 +21,7 @@
 #include "fdbclient/ActorLineageProfiler.h"
 #include <boost/asio.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <msgpack.hpp>
 
 namespace {
 
@@ -43,6 +44,90 @@ struct FluentDSocket {
 	virtual void send(std::shared_ptr<Sample> const& sample) = 0;
 	virtual const boost::system::error_code& failed() const = 0;
 };
+
+template <class Protocol, class Callback>
+class SampleSender : public std::enable_shared_from_this<SampleSender<Protocol, Callback>> {
+	using Socket = typename Protocol::socket;
+	using Iter = typename decltype(Sample::data)::iterator;
+	Socket& socket;
+	Callback callback;
+	Iter iter, end;
+
+	struct Buf {
+		const char* data;
+		const unsigned size;
+		Buf(const char* data, unsigned size) : data(data), size(size) {}
+		Buf(Buf const&) = delete;
+		Buf& operator=(Buf const&) = delete;
+		~Buf() { delete[] data; }
+	};
+
+	void sendCompletionHandler(boost::system::error_code const& ec) {
+		if (ec) {
+			callback(ec);
+		} else {
+			++iter;
+			sendNext();
+		}
+	}
+
+	void send(boost::asio::ip::tcp::socket& socket, std::shared_ptr<Buf> const& buf) {
+		boost::asio::async_write(
+		    socket,
+		    boost::asio::const_buffer(buf->data, buf->size),
+		    [buf, self = this->shared_from_this()](auto const& ec, size_t) { self->sendCompletionHandler(ec); });
+	}
+	void send(boost::asio::ip::udp::socket& socket, std::shared_ptr<Buf> const& buf) {
+		socket.async_send(
+		    boost::asio::const_buffer(buf->data, buf->size),
+		    [buf, self = this->shared_from_this()](auto const& ec, size_t) { self->sendCompletionHandler(ec); });
+	}
+
+	void sendNext() {
+		if (iter == end) {
+			callback(boost::system::error_code());
+		}
+		// 1. calculate size of buffer
+		unsigned size = 1; // 1 for fixmap identifier byte
+		auto waitState = to_string(iter->first);
+		if (waitState.size() < 32) {
+			size = waitState.size() + 1;
+		} else {
+			size = waitState.size() + 2;
+		}
+		size += iter->second.second;
+		// 2. allocate the buffer
+		std::unique_ptr<char[]> buf(new char[size]);
+		unsigned off = 0;
+		// 3. serialize fixmap
+		buf[off++] = 0x81; // map of size 1
+		// 3.1 serialize key
+		if (waitState.size() < 32) {
+			buf[off++] = 0xa0 + waitState.size(); // fixstr
+		} else {
+			buf[off++] = 0xd9;
+			buf[off++] = char(waitState.size());
+		}
+		memcpy(buf.get() + off, waitState.data(), waitState.size());
+		off += waitState.size();
+		// 3.2 append serialized value
+		memcpy(buf.get() + off, iter->second.first, iter->second.second);
+		// 4. send the result to fluentd
+		send(socket, std::make_shared<Buf>(buf.release(), size));
+	}
+
+public:
+	SampleSender(Socket& socket, Callback const& callback, std::shared_ptr<Sample> const& sample)
+	  : socket(socket), callback(callback), iter(sample->data.begin()), end(sample->data.end()) {
+			sendNext();
+		}
+};
+
+// Sample function to make instanciation of SampleSender easier
+template <class Protocol, class Callback>
+std::shared_ptr<SampleSender<Protocol, Callback>> makeSampleSender(typename Protocol::socket& socket, Callback const& callback, std::shared_ptr<Sample> const& sample) {
+	return std::make_shared<SampleSender<Protocol, Callback>>(socket, callback, sample);
+}
 
 template <class Protocol>
 struct FluentDSocketImpl : FluentDSocket, std::enable_shared_from_this<FluentDSocketImpl<Protocol>> {
@@ -67,23 +152,15 @@ struct FluentDSocketImpl : FluentDSocket, std::enable_shared_from_this<FluentDSo
 		} else {
 			auto sample = queue.front();
 			queue.pop_front();
-			sendImpl<Protocol>(sample);
+			sendImpl(sample);
 		}
 	}
 
-	template <class P>
-	std::enable_if_t<std::is_same_v<boost::asio::ip::tcp, P>> sendImpl(std::shared_ptr<Sample> const& sample) {
-		boost::asio::async_write(
-		    socket,
-		    boost::asio::const_buffer(sample->data, sample->size),
-		    [sample, self = this->shared_from_this()](auto const& ec, size_t) { self->sendCompletionHandler(ec); });
-	}
 
-	template <class P>
-	std::enable_if_t<std::is_same_v<boost::asio::ip::udp, P>> sendImpl(std::shared_ptr<Sample> const& sample) {
-		socket.async_send(
-		    boost::asio::const_buffer(sample->data, sample->size),
-		    [sample, self = this->shared_from_this()](auto const& ec, size_t) { self->sendCompletionHandler(ec); });
+	void sendImpl(std::shared_ptr<Sample> const& sample) {
+		makeSampleSender<Protocol>(socket, [self = this->shared_from_this()](boost::system::error_code const& ec){
+			self->sendCompletionHandler(ec);
+		}, sample);
 	}
 
 	void send(std::shared_ptr<Sample> const& sample) override {
@@ -92,7 +169,7 @@ struct FluentDSocketImpl : FluentDSocket, std::enable_shared_from_this<FluentDSo
 		}
 		if (ready) {
 			ready = false;
-			sendImpl<Protocol>(sample);
+			sendImpl(sample);
 		} else {
 			if (queue.size() < MAX_QUEUE_SIZE) {
 				queue.push_back(sample);
