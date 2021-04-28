@@ -1986,6 +1986,7 @@ Future<Standalone<RangeResultRef>> ActorProfilerConf::getRange(ReadYourWritesTra
 
 void ActorProfilerConf::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
 	config[key.removePrefix(range.begin).toString()] = value.toString();
+	didWrite = true;
 }
 
 void ActorProfilerConf::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& kr) {
@@ -1995,6 +1996,7 @@ void ActorProfilerConf::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef&
 		// nothing to clear
 		return;
 	}
+	didWrite = true;
 	auto last = config.upper_bound(end);
 	config.erase(first, last);
 }
@@ -2005,6 +2007,7 @@ void ActorProfilerConf::clear(ReadYourWritesTransaction* ryw, const KeyRef& key)
 	if (iter != config.end()) {
 		config.erase(iter);
 	}
+	didWrite = true;
 }
 
 Future<Optional<std::string>> ActorProfilerConf::commit(ReadYourWritesTransaction* ryw) {
