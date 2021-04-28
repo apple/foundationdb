@@ -449,7 +449,7 @@ private:
 			    self->getModificationsAndInsert(offset, length, true, writeEnded);
 			self->minSizeAfterPendingModifications = std::max(self->minSizeAfterPendingModifications, offset + length);
 
-			if (BUGGIFY_WITH_PROB(0.001))
+			if (BUGGIFY_WITH_PROB(0.001) && !g_simulator.speedUpSimulation)
 				priorModifications.push_back(
 				    delay(deterministicRandom()->random01() * FLOW_KNOBS->MAX_PRIOR_MODIFICATION_DELAY) ||
 				    self->killed.getFuture());
