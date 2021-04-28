@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/AnnotateActor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 
@@ -26,11 +27,11 @@ constexpr UID WLTOKEN_PROCESS(-1, 11);
 struct ProcessInterface {
 	constexpr static FileIdentifier file_identifier = 985636;
 	RequestStream<struct GetProcessInterfaceRequest> getInterface;
-	RequestStream<struct EchoRequest> echo;
+	RequestStream<struct ActorLineageRequest> actorLineage;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, echo);
+		serializer(ar, actorLineage);
 	}
 };
 
@@ -44,14 +45,37 @@ struct GetProcessInterfaceRequest {
 	}
 };
 
-// TODO: Used for demonstration purposes, remove in later PR
-struct EchoRequest {
-	constexpr static FileIdentifier file_identifier = 10624019;
-	std::string message;
-	ReplyPromise<std::string> reply;
+// This type is used to send serialized sample data over the network.
+struct SerializedSample {
+	constexpr static FileIdentifier file_identifier = 15785634;
+
+	double time;
+	std::unordered_map<WaitState, std::string> data;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, message, reply);
+		serializer(ar, time, data);
+	}
+};
+
+struct ActorLineageReply {
+	constexpr static FileIdentifier file_identifier = 1887656;
+	std::vector<SerializedSample> samples;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, samples);
+	}
+};
+
+struct ActorLineageRequest {
+	constexpr static FileIdentifier file_identifier = 11654765;
+	WaitState waitStateStart, waitStateEnd;
+	time_t timeStart, timeEnd;
+	ReplyPromise<ActorLineageReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, waitStateStart, waitStateEnd, timeStart, timeEnd, reply);
 	}
 };

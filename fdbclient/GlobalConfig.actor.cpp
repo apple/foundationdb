@@ -123,7 +123,7 @@ void GlobalConfig::insert(KeyRef key, ValueRef value) {
 	}
 }
 
-void GlobalConfig::erase(KeyRef key) {
+void GlobalConfig::erase(Key key) {
 	erase(KeyRangeRef(key, keyAfter(key)));
 }
 
@@ -187,9 +187,7 @@ ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
 // Updates local copy of global configuration by reading the entire key-range
 // from storage.
 ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
-	for (const auto& [key, _] : self->data) {
-		self->erase(key);
-	}
+	self->erase(KeyRangeRef(""_sr, "\xff"_sr));
 
 	Transaction tr(self->cx);
 	Standalone<RangeResultRef> result = wait(tr.getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));

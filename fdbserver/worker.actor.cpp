@@ -2040,6 +2040,8 @@ ACTOR Future<Void> serveProtocolInfo() {
 	}
 }
 
+// Handles requests from ProcessInterface, an interface meant for direct
+// communication between the client and FDB processes.
 ACTOR Future<Void> serveProcess() {
 	state ProcessInterface process;
 	process.getInterface.makeWellKnownEndpoint(WLTOKEN_PROCESS, TaskPriority::DefaultEndpoint);
@@ -2048,7 +2050,23 @@ ACTOR Future<Void> serveProcess() {
 			when(GetProcessInterfaceRequest req = waitNext(process.getInterface.getFuture())) {
 				req.reply.send(process);
 			}
-			when(EchoRequest req = waitNext(process.echo.getFuture())) { req.reply.send(req.message); }
+			when(ActorLineageRequest req = waitNext(process.actorLineage.getFuture())) {
+				state SampleCollection sampleCollector;
+				auto samples = sampleCollector->get(req.timeStart, req.timeEnd);
+
+				std::vector<SerializedSample> serializedSamples;
+				for (const auto& samplePtr : samples) {
+					auto serialized = SerializedSample{ .time = samplePtr->time };
+					for (const auto& [waitState, pair] : samplePtr->data) {
+						if (waitState >= req.waitStateStart && waitState <= req.waitStateEnd) {
+							serialized.data[waitState] = std::string(pair.first, pair.second);
+						}
+					}
+					serializedSamples.push_back(std::move(serialized));
+				}
+				ActorLineageReply reply{ serializedSamples };
+				req.reply.send(reply);
+			}
 		}
 	}
 }

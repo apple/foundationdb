@@ -63,13 +63,14 @@ class Packer : public msgpack::packer<msgpack::sbuffer> {
 			                     std::string_view,
 			                     std::vector<std::any>,
 			                     std::map<std::string, std::any>,
-			                     std::map<std::string_view, std::any>>::populate(visitorMap);
+			                     std::map<std::string_view, std::any>,
+			                     std::vector<std::map<std::string_view, std::any>>>::populate(visitorMap);
 		}
 
 		void visit(const std::any& val, Packer& packer) {
 			auto iter = visitorMap.find(val.type());
 			if (iter == visitorMap.end()) {
-				// TODO: trace error
+				TraceEvent(SevError, "PackerTypeNotFound").detail("Type", val.type().name());
 			} else {
 				iter->second(val, packer);
 			}
@@ -149,12 +150,9 @@ public:
 		}
 	}
 
-	std::shared_ptr<Sample> done(double time) {
-		auto res = std::make_shared<Sample>();
-		res->time = time;
-		res->size = sbuffer.size();
-		res->data = sbuffer.release();
-		return res;
+	std::pair<char*, unsigned> getbuf() {
+		unsigned size = sbuffer.size();
+		return std::make_pair(sbuffer.release(), size);
 	}
 };
 
@@ -174,11 +172,11 @@ std::map<std::string_view, std::any> SampleCollectorT::collect(ActorLineage* lin
 }
 
 std::shared_ptr<Sample> SampleCollectorT::collect() {
-	Packer packer;
-	std::map<std::string_view, std::any> res;
+	auto sample = std::make_shared<Sample>();
 	double time = g_network->now();
-	res["time"sv] = time;
+	sample->time = time;
 	for (auto& p : getSamples) {
+		Packer packer;
 		std::vector<std::map<std::string_view, std::any>> samples;
 		auto sampleVec = p.second();
 		for (auto& val : sampleVec) {
@@ -188,16 +186,16 @@ std::shared_ptr<Sample> SampleCollectorT::collect() {
 			}
 		}
 		if (!samples.empty()) {
-			res[to_string(p.first)] = samples;
+			packer.pack(samples);
+			sample->data[p.first] = packer.getbuf();
 		}
 	}
-	packer.pack(res);
-	return packer.done(time);
+	return sample;
 }
 
 void SampleCollection_t::refresh() {
 	auto sample = _collector->collect();
-	auto min = std::max(sample->time - windowSize, sample->time);
+	auto min = std::min(sample->time - windowSize, sample->time);
 	{
 		Lock _{ mutex };
 		data.emplace_back(std::move(sample));
@@ -237,7 +235,7 @@ ActorLineageProfilerT::ActorLineageProfilerT() {
 	    std::bind(&ActorLineageSet::copy, std::ref(IAsyncFileSystem::filesystem()->getActorLineageSet())));
 	collection->collector()->addGetter(WaitState::Running, []() {
 		auto res = currentLineageThreadSafe.get();
-		return std::vector<Reference<ActorLineage>>({ currentLineageThreadSafe.get() });
+		return std::vector<Reference<ActorLineage>>({ res });
 	});
 }
 
