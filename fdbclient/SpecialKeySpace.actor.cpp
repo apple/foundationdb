@@ -2055,8 +2055,8 @@ ACTOR static Future<Standalone<RangeResultRef>> actorLineageGetRangeActor(ReadYo
 		throw special_keys_api_failure();
 	}
 
+	state NetworkAddress endRangeHost;
 	try {
-		state NetworkAddress endRangeHost;
 		if (SpecialKeySpace::getActorLineageApiCommandRange("state").contains(kr)) {
 			// For the range \xff\xff/actor_lineage/state/ip:port/wait-state/time/seq
 			parse(beginValues.begin() + 1, beginValues.end(), host, waitStateStart, timeStart, seqStart);
