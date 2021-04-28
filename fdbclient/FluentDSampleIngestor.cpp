@@ -154,7 +154,9 @@ struct FluentDIngestorImpl {
 	}
 };
 
-FluentDIngestor::~FluentDIngestor() {}
+FluentDIngestor::~FluentDIngestor() {
+	delete impl;
+}
 
 FluentDIngestor::FluentDIngestor(Protocol protocol, NetworkAddress& endpoint)
   : impl(new FluentDIngestorImpl(protocol, endpoint)) {}
