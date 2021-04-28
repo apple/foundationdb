@@ -47,6 +47,7 @@ struct IALPCollector : IALPCollectorBase {
 
 struct Sample : std::enable_shared_from_this<Sample> {
 	double time = 0.0;
+	Sample() {}
 	Sample(Sample const&) = delete;
 	Sample& operator=(Sample const&) = delete;
 	std::unordered_map<WaitState, std::pair<char*, unsigned>> data;
