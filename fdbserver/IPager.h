@@ -58,7 +58,6 @@ public:
 
 	virtual void addref() const = 0;
 	virtual void delref() const = 0;
-	virtual void printrefcnt() const = 0;
 
 	mutable void* userData;
 	mutable void (*userDataDestructor)(void*);
