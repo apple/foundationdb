@@ -64,7 +64,7 @@ public:
 	void getConfig(std::map<std::string, std::string>& res) const override { res["ingestor"] = "none"; }
 };
 
-// The FluentD ingestor uses the pimp idiom. This is to make compilation less heavy weight as this implementation has
+// The FluentD ingestor uses the pimpl idiom. This is to make compilation less heavy weight as this implementation has
 // dependencies to boost::asio
 struct FluentDIngestorImpl;
 
