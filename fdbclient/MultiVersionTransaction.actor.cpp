@@ -1975,6 +1975,12 @@ ACTOR Future<Void> checkUndestroyedFutures(std::vector<ThreadSingleAssignmentVar
 	return Void();
 }
 
+// Common code for tests of single assignment vars. Tests both correctness and thread safety.
+// T should be a class that has a static method with the following signature:
+//
+//     static FutureInfo createThreadFuture(FutureInfo f);
+//
+// See AbortableTest for an example T type
 template <class T>
 THREAD_FUNC runSingleAssignmentVarTest(void* arg) {
 	noUnseed = true;
@@ -1987,6 +1993,9 @@ THREAD_FUNC runSingleAssignmentVarTest(void* arg) {
 			tf.validate();
 
 			tf.future.extractPtr(); // leaks
+			for (auto t : tf.threads) {
+				waitThread(t);
+			}
 		}
 
 		for (int numRuns = 0; numRuns < 25; ++numRuns) {
@@ -2057,11 +2066,13 @@ struct AbortableTest {
 
 TEST_CASE("/fdbclient/multiversionclient/AbortableSingleAssignmentVar") {
 	state volatile bool done = false;
-	g_network->startThread(runSingleAssignmentVarTest<AbortableTest>, (void*)&done);
+	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<AbortableTest>, (void*)&done);
 
 	while (!done) {
 		wait(delay(1.0));
 	}
+
+	waitThread(thread);
 
 	return Void();
 }
@@ -2134,19 +2145,23 @@ TEST_CASE("/fdbclient/multiversionclient/DLSingleAssignmentVar") {
 	state volatile bool done = false;
 
 	MultiVersionApi::api->callbackOnMainThread = true;
-	g_network->startThread(runSingleAssignmentVarTest<DLTest>, (void*)&done);
+	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<DLTest>, (void*)&done);
 
 	while (!done) {
 		wait(delay(1.0));
 	}
+
+	waitThread(thread);
 
 	done = false;
 	MultiVersionApi::api->callbackOnMainThread = false;
-	g_network->startThread(runSingleAssignmentVarTest<DLTest>, (void*)&done);
+	thread = g_network->startThread(runSingleAssignmentVarTest<DLTest>, (void*)&done);
 
 	while (!done) {
 		wait(delay(1.0));
 	}
+
+	waitThread(thread);
 
 	return Void();
 }
@@ -2172,11 +2187,13 @@ struct MapTest {
 
 TEST_CASE("/fdbclient/multiversionclient/MapSingleAssignmentVar") {
 	state volatile bool done = false;
-	g_network->startThread(runSingleAssignmentVarTest<MapTest>, (void*)&done);
+	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<MapTest>, (void*)&done);
 
 	while (!done) {
 		wait(delay(1.0));
 	}
+
+	waitThread(thread);
 
 	return Void();
 }
@@ -2209,11 +2226,13 @@ struct FlatMapTest {
 
 TEST_CASE("/fdbclient/multiversionclient/FlatMapSingleAssignmentVar") {
 	state volatile bool done = false;
-	g_network->startThread(runSingleAssignmentVarTest<FlatMapTest>, (void*)&done);
+	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<FlatMapTest>, (void*)&done);
 
 	while (!done) {
 		wait(delay(1.0));
 	}
+
+	waitThread(thread);
 
 	return Void();
 }
