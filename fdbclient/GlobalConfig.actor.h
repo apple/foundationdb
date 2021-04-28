@@ -150,7 +150,7 @@ private:
 	void insert(KeyRef key, ValueRef value);
 	// Removes the given key (and associated value) from the local copy of the
 	// global configuration keyspace.
-	void erase(KeyRef key);
+	void erase(Key key);
 	// Removes the given key range (and associated values) from the local copy
 	// of the global configuration keyspace.
 	void erase(KeyRangeRef range);

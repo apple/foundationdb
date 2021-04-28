@@ -21,6 +21,11 @@
 #include "boost/lexical_cast.hpp"
 #include "boost/algorithm/string.hpp"
 
+#include <time.h>
+#include <msgpack.hpp>
+
+#include <exception>
+
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ProcessInterface.h"
@@ -104,6 +109,15 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	{ "datadistribution",
 	  KeyRangeRef(LiteralStringRef("data_distribution/"), LiteralStringRef("data_distribution0"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
+};
+
+std::unordered_map<std::string, KeyRange> SpecialKeySpace::actorLineageApiCommandToRange = {
+	{ "state",
+	  KeyRangeRef(LiteralStringRef("state/"), LiteralStringRef("state0"))
+	      .withPrefix(moduleToBoundary[MODULE::ACTORLINEAGE].begin) },
+	{ "time",
+	  KeyRangeRef(LiteralStringRef("time/"), LiteralStringRef("time0"))
+	      .withPrefix(moduleToBoundary[MODULE::ACTORLINEAGE].begin) }
 };
 
 std::set<std::string> SpecialKeySpace::options = { "excluded/force", "failed/force" };
@@ -1936,26 +1950,197 @@ void ClientProfilingImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& ke
 
 ActorLineageImpl::ActorLineageImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 
+void parse(StringRef& val, int& i) {
+	i = std::stoi(val.toString());
+}
+
+void parse(StringRef& val, double& d) {
+	d = std::stod(val.toString());
+}
+
+void parse(StringRef& val, WaitState& w) {
+	if (val == LiteralStringRef("disk")) {
+		w = WaitState::Disk;
+	} else if (val == LiteralStringRef("network")) {
+		w = WaitState::Network;
+	} else if (val == LiteralStringRef("running")) {
+		w = WaitState::Running;
+	} else {
+		throw std::range_error("failed to parse run state");
+	}
+}
+
+void parse(StringRef& val, time_t& t) {
+	struct tm tm = { 0 };
+	if (strptime(val.toString().c_str(), "%FT%T%z", &tm) == nullptr) {
+		throw std::invalid_argument("failed to parse ISO 8601 datetime");
+	}
+
+	long timezone = tm.tm_gmtoff;
+	t = timegm(&tm);
+	if (t == -1) {
+		throw std::runtime_error("failed to convert ISO 8601 datetime");
+	}
+	t -= timezone;
+}
+
+void parse(StringRef& val, NetworkAddress& a) {
+	auto address = NetworkAddress::parse(val.toString());
+	if (!address.isValid()) {
+		throw std::invalid_argument("invalid host");
+	}
+	a = address;
+}
+
+// Base case function for parsing function below.
+template <typename T>
+void parse(std::vector<StringRef>::iterator it, std::vector<StringRef>::iterator end, T& t1) {
+	if (it == end) {
+		return;
+	}
+	parse(*it, t1);
+}
+
+// Given an iterator into a vector of string tokens, an iterator to the end of
+// the search space in the vector (exclusive), and a list of references to
+// types, parses each token in the vector into the associated type according to
+// the order of the arguments.
+//
+// For example, given the vector ["1", "1.5", "127.0.0.1:4000"] and the
+// argument list int a, double b, NetworkAddress c, after this function returns
+// each parameter passed in will hold the parsed value from the token list.
+//
+// The appropriate parsing function must be implemented for the type you wish
+// to parse. See the existing parsing functions above, and add your own if
+// necessary.
+template <typename T, typename... Types>
+void parse(std::vector<StringRef>::iterator it, std::vector<StringRef>::iterator end, T& t1, Types&... remaining) {
+	// Return as soon as all tokens have been parsed. This allows parameters
+	// passed at the end to act as optional parameters -- they will only be set
+	// if the value exists.
+	if (it == end) {
+		return;
+	}
+
+	try {
+		parse(*it, t1);
+		parse(++it, end, remaining...);
+	} catch (Error& e) {
+		throw e;
+	} catch (std::exception& e) {
+		throw e;
+	}
+}
+
 ACTOR static Future<Standalone<RangeResultRef>> actorLineageGetRangeActor(ReadYourWritesTransaction* ryw,
                                                                           KeyRef prefix,
                                                                           KeyRangeRef kr) {
 	state Standalone<RangeResultRef> result;
-	Standalone<StringRef> addressString = kr.begin.removePrefix(prefix);
+
+	// Set default values for all fields. The default will be used if the field
+	// is missing in the key.
+	state NetworkAddress host;
+	state WaitState waitStateStart = WaitState{ 0 };
+	state WaitState waitStateEnd = WaitState{ 2 };
+	state time_t timeStart = 0;
+	state time_t timeEnd = std::numeric_limits<time_t>::max();
+	state int seqStart = 0;
+	state int seqEnd = std::numeric_limits<int>::max();
+
+	state std::vector<StringRef> beginValues = kr.begin.removePrefix(prefix).splitAny("/"_sr);
+	state std::vector<StringRef> endValues = kr.end.removePrefix(prefix).splitAny("/"_sr);
+	// Require index (either "state" or "time") and address:port.
+	if (beginValues.size() < 2 || endValues.size() < 2) {
+		ryw->setSpecialKeySpaceErrorMsg("missing required parameters (index, host)");
+		throw special_keys_api_failure();
+	}
 
 	try {
-		auto address = NetworkAddress::parse(addressString.contents().toString());
-
-		state ProcessInterface process;
-		process.getInterface = RequestStream<GetProcessInterfaceRequest>(Endpoint({ address }, WLTOKEN_PROCESS));
-		ProcessInterface p = wait(retryBrokenPromise(process.getInterface, GetProcessInterfaceRequest{}));
-		process = p;
-
-		EchoRequest echoRequest;
-		echoRequest.message = "Hello";
-		std::string response = wait(process.echo.getReply(echoRequest));
-		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, response));
+		state NetworkAddress endRangeHost;
+		if (SpecialKeySpace::getActorLineageApiCommandRange("state").contains(kr)) {
+			// For the range \xff\xff/actor_lineage/state/ip:port/wait-state/time/seq
+			parse(beginValues.begin() + 1, beginValues.end(), host, waitStateStart, timeStart, seqStart);
+			if (kr.begin != kr.end) {
+				parse(endValues.begin() + 1, endValues.end(), endRangeHost, waitStateEnd, timeEnd, seqEnd);
+			}
+		} else if (SpecialKeySpace::getActorLineageApiCommandRange("time").contains(kr)) {
+			// For the range \xff\xff/actor_lineage/time/ip:port/time/wait-state/seq
+			parse(beginValues.begin() + 1, beginValues.end(), host, timeStart, waitStateStart, seqStart);
+			if (kr.begin != kr.end) {
+				parse(endValues.begin() + 1, endValues.end(), endRangeHost, timeEnd, waitStateEnd, seqEnd);
+			}
+		} else {
+			ryw->setSpecialKeySpaceErrorMsg("invalid index in actor_lineage");
+			throw special_keys_api_failure();
+		}
 	} catch (Error& e) {
-		TraceEvent(SevDebug, "SpecialKeysNetworkParseError").error(e);
+		if (e.code() != special_keys_api_failure().code()) {
+			ryw->setSpecialKeySpaceErrorMsg("failed to parse key");
+			throw special_keys_api_failure();
+		} else {
+			throw e;
+		}
+	}
+
+	if (kr.begin != kr.end && host != endRangeHost) {
+		// The client doesn't know about all the hosts, so a get range covering
+		// multiple hosts has no way of knowing which IP:port combos to use.
+		ryw->setSpecialKeySpaceErrorMsg("the host must remain the same on both ends of the range");
+		throw special_keys_api_failure();
+	}
+
+	// Open endpoint to target process on each call. This can be optimized at
+	// some point...
+	state ProcessInterface process;
+	process.getInterface = RequestStream<GetProcessInterfaceRequest>(Endpoint({ host }, WLTOKEN_PROCESS));
+	ProcessInterface p = wait(retryBrokenPromise(process.getInterface, GetProcessInterfaceRequest{}));
+	process = p;
+
+	ActorLineageRequest actorLineageRequest;
+	actorLineageRequest.waitStateStart = waitStateStart;
+	actorLineageRequest.waitStateEnd = waitStateEnd;
+	actorLineageRequest.timeStart = timeStart;
+	actorLineageRequest.timeEnd = timeEnd;
+	ActorLineageReply reply = wait(process.actorLineage.getReply(actorLineageRequest));
+
+	time_t dt = 0;
+	int seq = -1;
+	for (const auto& sample : reply.samples) {
+		for (const auto& [waitState, data] : sample.data) {
+			time_t datetime = (time_t)sample.time;
+			seq = dt == datetime ? seq + 1 : 0;
+			dt = datetime;
+
+			if (seq < seqStart) { continue; }
+			else if (seq >= seqEnd) { break; }
+
+			char buf[50];
+			struct tm* tm;
+			tm = localtime(&datetime);
+			size_t size = strftime(buf, 50, "%FT%T%z", tm);
+			std::string date(buf, size);
+
+			std::ostringstream streamKey;
+			if (SpecialKeySpace::getActorLineageApiCommandRange("state").contains(kr)) {
+				streamKey << SpecialKeySpace::getActorLineageApiCommandPrefix("state").toString() << host.toString()
+				          << "/" << to_string(waitState) << "/" << date;
+			} else if (SpecialKeySpace::getActorLineageApiCommandRange("time").contains(kr)) {
+				streamKey << SpecialKeySpace::getActorLineageApiCommandPrefix("time").toString() << host.toString()
+				          << "/" << date << "/" << to_string(waitState);
+				;
+			} else {
+				ASSERT(false);
+			}
+			streamKey << "/" << seq;
+
+			msgpack::object_handle oh = msgpack::unpack(data.data(), data.size());
+			msgpack::object deserialized = oh.get();
+
+			std::ostringstream stream;
+			stream << deserialized;
+
+			result.push_back_deep(result.arena(), KeyValueRef(streamKey.str(), stream.str()));
+		}
 	}
 
 	return result;
