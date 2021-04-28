@@ -275,7 +275,10 @@ ActorLineageProfilerT::ActorLineageProfilerT() : impl(new ProfilerImpl()) {
 	    std::bind(&ActorLineageSet::copy, std::ref(IAsyncFileSystem::filesystem()->getActorLineageSet())));
 	collection->collector()->addGetter(WaitState::Running, []() {
 		auto res = currentLineageThreadSafe.get();
-		return std::vector<Reference<ActorLineage>>({ res });
+		if (res.isValid()) {
+			return std::vector<Reference<ActorLineage>>({ res });
+		}
+		return std::vector<Reference<ActorLineage>>();
 	});
 }
 
