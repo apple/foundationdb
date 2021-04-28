@@ -29,7 +29,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationPolicy.h"
-#include "fdbserver/TLogGroup.h"
+#include "fdbserver/TLogGroup.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
