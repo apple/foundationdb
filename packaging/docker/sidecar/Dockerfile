@@ -19,42 +19,51 @@
 
 FROM python:3.9-slim
 
-WORKDIR /var/fdb/tmp
-ARG FDB_VERSION=6.2.30
-ARG FDB_ADDITIONAL_VERSIONS="6.2.30 6.1.13"
-ARG FDB_WEBSITE=https://www.foundationdb.org
-# Adding tini as PID 1 https://github.com/krallin/tini
-ARG TINI_VERSION=v0.19.0
-
-COPY website /mnt/website
 RUN apt-get update && \
 	apt-get install -y --no-install-recommends curl && \
-	curl --fail $FDB_WEBSITE/downloads/$FDB_VERSION/linux/fdb_$FDB_VERSION.tar.gz -o fdb_$FDB_VERSION.tar.gz && \
-	tar -xzf fdb_$FDB_VERSION.tar.gz --strip-components=1 && \
-	rm fdb_$FDB_VERSION.tar.gz && \
+	rm -rf /var/lub/apt/lists/*
+
+COPY misc/tini-amd64.sha256sum /tmp/
+# Adding tini as PID 1 https://github.com/krallin/tini
+ARG TINI_VERSION=v0.19.0
+RUN curl -sLO https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-amd64 && \
+  sha256sum -c /tmp/tini-amd64.sha256sum && \
+  chmod +x tini-amd64 && \
+  mv tini-amd64 /usr/bin/tini
+
+COPY sidecar/requirements.txt /tmp
+RUN pip install -r tmp/requirements.txt
+
+ARG FDB_VERSION=
+ARG FDB_ADDITIONAL_VERSIONS="6.2.30 6.1.13"
+ARG FDB_WEBSITE=https://www.foundationdb.org
+
+WORKDIR /var/fdb/tmp
+COPY website /mnt/website/
+
+# Install FoundationDB Binaries
+RUN curl $FDB_WEBSITE/downloads/$FDB_VERSION/linux/fdb_$FDB_VERSION.tar.gz | tar zxf - --strip-components=1 && \
 	chmod u+x fdbbackup fdbcli fdbdr fdbmonitor fdbrestore fdbserver backup_agent dr_agent && \
 	mv fdbbackup fdbcli fdbdr fdbmonitor fdbrestore fdbserver backup_agent dr_agent /usr/bin && \
-	echo ${FDB_VERSION} > /var/fdb/version && mkdir -p /var/fdb/lib && \
-	for version in $FDB_ADDITIONAL_VERSIONS; do curl --fail $FDB_WEBSITE/downloads/$version/linux/libfdb_c_$version.so -o /var/fdb/lib/libfdb_c_${version%.*}.so; done && \
-	curl -LO https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-amd64 && \
-    curl -LO https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-amd64.sha256sum && \
-	sha256sum -c tini-amd64.sha256sum && \
-	rm -f tini-amd64.sha256sum && \
-    chmod +x tini-amd64 && \
-	mv tini-amd64 /usr/bin/tini && \
-	rm -r /var/fdb/tmp && \
-	groupadd --gid 4059 fdb && \
-	useradd --gid 4059 --uid 4059 --no-create-home --shell /bin/bash fdb && \
-	apt-get remove -y curl && \
-	rm -rf /var/lib/apt/lists/*
+	rm -r /var/fdb/tmp
 
 WORKDIR /
 
-COPY sidecar/entrypoint.bash /
-COPY sidecar/requirements.txt /
-COPY sidecar/sidecar.py /
+# Set Up Runtime Scripts and Directories
+ADD sidecar/entrypoint.bash sidecar/sidecar.py /
+RUN chmod a+x /entrypoint.bash /sidecar.py
 
-RUN pip install -r /requirements.txt && rm /requirements.txt && chmod a+x /entrypoint.bash /sidecar.py
+# Install additional FoundationDB Client Libraries
+RUN mkdir -p /var/fdb/lib && \
+    for version in $FDB_ADDITIONAL_VERSIONS; do curl $FDB_WEBSITE/downloads/$version/linux/libfdb_c_$version.so -o /var/fdb/lib/libfdb_c_${version%.*}.so; done
+
+RUN	rm -rf /mnt/website
+
+RUN	echo ${FDB_VERSION} > /var/fdb/version && \
+	mkdir -p /var/fdb/lib && \
+	groupadd --gid 4059 fdb && \
+	useradd --gid 4059 --uid 4059 --no-create-home --shell /bin/bash fdb
+
 
 VOLUME /var/input-files
 VOLUME /var/output-files
