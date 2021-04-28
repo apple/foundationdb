@@ -989,19 +989,10 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 		}
 
 		db = newDb;
-
 		optionLock.leave();
-
-		if (dbProtocolVersion.get().hasStableInterfaces() && db) {
-			versionMonitorDb = db;
-		} else {
-			// For older clients that don't have an API to get the protocol version, we have to monitor it locally
-			versionMonitorDb = MultiVersionApi::api->getLocalClient()->api->createDatabase(clusterFilePath.c_str());
-		}
 	} else {
 		// We don't have a database connection, so use the local client to monitor the protocol version
 		db = Reference<IDatabase>();
-		versionMonitorDb = MultiVersionApi::api->getLocalClient()->api->createDatabase(clusterFilePath.c_str());
 	}
 
 	dbVar->set(db);
