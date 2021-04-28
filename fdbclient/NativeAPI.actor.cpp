@@ -32,6 +32,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/MultiInterface.h"
 
+#include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/AnnotateActor.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/ClusterInterface.h"
@@ -49,6 +50,7 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TransactionLineage.h"
 #include "fdbclient/versions.h"
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
@@ -85,6 +87,8 @@ using std::min;
 using std::pair;
 
 namespace {
+
+TransactionLineageCollector transactionLineageCollector;
 
 template <class Interface, class Request>
 Future<REPLY_TYPE(Request)> loadBalance(
@@ -960,6 +964,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
 
 	GlobalConfig::create(this, clientInfo);
+	GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
+	GlobalConfig::globalConfig().trigger(samplingWindow, samplingProfilerUpdateWindow);
 
 	monitorProxiesInfoChange = monitorProxiesChange(clientInfo, &proxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);

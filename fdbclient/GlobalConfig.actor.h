@@ -27,7 +27,9 @@
 #define FDBCLIENT_GLOBALCONFIG_ACTOR_H
 
 #include <any>
+#include <functional>
 #include <map>
+#include <optional>
 #include <type_traits>
 #include <unordered_map>
 
@@ -48,6 +50,9 @@ extern const KeyRef fdbClientInfoTxnSizeLimit;
 
 extern const KeyRef transactionTagSampleRate;
 extern const KeyRef transactionTagSampleCost;
+
+extern const KeyRef samplingFrequency;
+extern const KeyRef samplingWindow;
 
 // Structure used to hold the values stored by global configuration. The arena
 // is used as memory to store both the key and the value (the value is only
@@ -77,6 +82,14 @@ public:
 	//
 	// For example, given "config/a", returns "\xff\xff/global_config/config/a".
 	static Key prefixedKey(KeyRef key);
+
+	// Update the ClientDBInfo object used internally to check for updates to
+	// global configuration. The ClientDBInfo reference must be the same one
+	// used in the cluster controller, but fdbserver requires initial creation
+	// of the GlobalConfig class before the cluster controller is initialized.
+	// This function allows the ClientDBInfo object to be updated after create
+	// was called.
+	void updateDBInfo(Reference<AsyncVar<ClientDBInfo>> dbInfo);
 
 	// Get a value from the framework. Values are returned as a ConfigValue
 	// reference which also contains the arena holding the object. As long as
@@ -114,6 +127,16 @@ public:
 	// been created and is ready.
 	Future<Void> onInitialized();
 
+	// Triggers the returned future when any key-value pair in the global
+	// configuration changes.
+	Future<Void> onChange();
+
+	// Calls \ref fn when the value associated with \ref key is changed. \ref
+	// fn is passed the updated value for the key, or an empty optional if the
+	// key has been cleared. If the value is an allocated object, its memory
+	// remains in the control of the global configuration.
+	void trigger(KeyRef key, std::function<void(std::optional<std::any>)> fn);
+
 private:
 	GlobalConfig();
 
@@ -139,8 +162,10 @@ private:
 	Database cx;
 	Future<Void> _updater;
 	Promise<Void> initialized;
+	AsyncTrigger configChanged;
 	std::unordered_map<StringRef, Reference<ConfigValue>> data;
 	Version lastUpdate;
+	std::unordered_map<KeyRef, std::function<void(std::optional<std::any>)>> callbacks;
 };
 
 #endif

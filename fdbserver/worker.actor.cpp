@@ -22,6 +22,7 @@
 #include <boost/lexical_cast.hpp>
 
 #include "fdbrpc/Locality.h"
+#include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/ProcessInterface.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/Knobs.h"
@@ -78,6 +79,10 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 #else
 #define KV_STORE(filename, uid) keyValueStoreMemory(filename, uid)
 #endif
+
+namespace {
+RoleLineageCollector roleLineageCollector;
+}
 
 ACTOR Future<std::vector<Endpoint>> tryDBInfoBroadcast(RequestStream<UpdateServerDBInfoRequest> stream,
                                                        UpdateServerDBInfoRequest req) {
@@ -1038,6 +1043,8 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 			metricsLogger = runMetrics(openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, lockAware),
 			                           KeyRef(metricsPrefix));
 		}
+
+		GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 	}
 
 	errorForwarders.add(resetAfter(degraded,
