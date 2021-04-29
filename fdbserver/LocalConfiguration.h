@@ -32,6 +32,7 @@ class TestKnobs : public Knobs {
 public:
 	int64_t TEST;
 	void initialize();
+	void reset();
 };
 
 class LocalConfiguration {

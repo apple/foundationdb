@@ -38,7 +38,6 @@ class LocalConfigurationImpl {
 	TestKnobs knobs;
 	std::map<Key, Value> manuallyOverriddenKnobs;
 	std::map<Key, Value> configDatabaseOverriddenKnobs;
-	TestKnobs defaultKnobs;
 
 	ACTOR static Future<Void> saveConfigClasses(LocalConfigurationImpl* self) {
 		self->kvStore->set(KeyValueRef(configClassesKey, BinaryWriter::toValue(self->configClasses, IncludeVersion())));
@@ -66,7 +65,6 @@ class LocalConfigurationImpl {
 	}
 
 	ACTOR static Future<Void> init(LocalConfigurationImpl* self) {
-		self->defaultKnobs.initialize();
 		wait(self->kvStore->init());
 		wait(getLastSeenVersion(self));
 		state Optional<Value> storedConfigClassesValue = wait(self->kvStore->readValue(configClassesKey));
@@ -85,14 +83,14 @@ class LocalConfigurationImpl {
 		}
 		Standalone<RangeResultRef> range = wait(self->kvStore->readRange(knobOverrideKeys));
 		for (const auto &kv : range) {
-			self->configDatabaseOverriddenKnobs[kv.key] = kv.value;
+			self->configDatabaseOverriddenKnobs[kv.key.removePrefix(knobOverrideKeys.begin)] = kv.value;
 		}
 		self->updateInMemoryKnobs();
 		return Void();
 	}
 
 	void updateInMemoryKnobs() {
-		knobs = defaultKnobs;
+		knobs.reset();
 		for (const auto& [knobName, knobValue] : configDatabaseOverriddenKnobs) {
 			// TODO: Fail gracefully
 			ASSERT(knobs.setKnob(knobName.toString(), knobValue.toString()));
@@ -108,8 +106,10 @@ class LocalConfigurationImpl {
 	ACTOR static Future<Void> applyKnobUpdates(LocalConfigurationImpl *self, ConfigFollowerGetFullDatabaseReply reply) {
 		self->kvStore->clear(knobOverrideKeys);
 		for (const auto &[k, v] : reply.database) {
-			self->kvStore->set(KeyValueRef(k.withPrefix(knobOverrideKeys.begin), v));
-			self->configDatabaseOverriddenKnobs[k] = v;
+			Key knobName = BinaryReader::fromStringRef<ConfigUpdateKey>(k, IncludeVersion()).knobName;
+			Value knobValue = BinaryReader::fromStringRef<ConfigUpdateValue>(v, IncludeVersion()).value;
+			self->kvStore->set(KeyValueRef(knobName.withPrefix(knobOverrideKeys.begin), knobValue));
+			self->configDatabaseOverriddenKnobs[knobName] = knobValue;
 		}
 		self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(self->lastSeenVersion, IncludeVersion())));
 		wait(self->kvStore->commit());
@@ -121,13 +121,21 @@ class LocalConfigurationImpl {
 		for (const auto &versionedMutation : reply.versionedMutations) {
 			const auto &mutation = versionedMutation.mutation;
 			if (mutation.type == MutationRef::SetValue) {
-				self->kvStore->set(KeyValueRef(mutation.param1.withPrefix(knobOverrideKeys.begin), mutation.param2));
-				self->configDatabaseOverriddenKnobs[mutation.param1] = mutation.param2;
+				Key knobName = BinaryReader::fromStringRef<ConfigUpdateKey>(mutation.param1, IncludeVersion()).knobName;
+				Value knobValue =
+				    BinaryReader::fromStringRef<ConfigUpdateValue>(mutation.param2, IncludeVersion()).value;
+				self->kvStore->set(KeyValueRef(knobName.withPrefix(knobOverrideKeys.begin), knobValue));
+				self->configDatabaseOverriddenKnobs[knobName] = knobValue;
 			} else if (mutation.type == MutationRef::ClearRange) {
-				self->kvStore->clear(KeyRangeRef(mutation.param1.withPrefix(knobOverrideKeys.begin), mutation.param2.withPrefix(knobOverrideKeys.begin)));
+				Key beginKnobName =
+				    BinaryReader::fromStringRef<ConfigUpdateKey>(mutation.param1, IncludeVersion()).knobName;
+				Key endKnobName =
+				    BinaryReader::fromStringRef<ConfigUpdateKey>(mutation.param2, IncludeVersion()).knobName;
+				self->kvStore->clear(KeyRangeRef(beginKnobName.withPrefix(knobOverrideKeys.begin),
+				                                 endKnobName.withPrefix(knobOverrideKeys.begin)));
 				self->configDatabaseOverriddenKnobs.erase(
-				    self->configDatabaseOverriddenKnobs.lower_bound(mutation.param1),
-				    self->configDatabaseOverriddenKnobs.lower_bound(mutation.param2));
+				    self->configDatabaseOverriddenKnobs.lower_bound(beginKnobName),
+				    self->configDatabaseOverriddenKnobs.lower_bound(endKnobName));
 			} else {
 				ASSERT(false);
 			}
@@ -232,4 +240,9 @@ Future<Void> LocalConfiguration::consume(Reference<AsyncVar<ServerDBInfo> const>
 
 void TestKnobs::initialize() {
 	init(TEST, 0);
+}
+
+void TestKnobs::reset() {
+	explicitlySetKnobs.clear();
+	initialize();
 }

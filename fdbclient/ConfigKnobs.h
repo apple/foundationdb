@@ -27,34 +27,41 @@
 using ConfigClassSetRef = VectorRef<KeyRef>;
 using ConfigClassSet = Standalone<ConfigClassSetRef>;
 
-class ConfigUpdateKeyRef {
-  KeyRef configClass;
-  KeyRef knobName;
+struct ConfigUpdateKeyRef {
+	KeyRef configClass;
+	KeyRef knobName;
 
-  ConfigUpdateKeyRef()=default;
-  explicit ConfigUpdateKeyRef(Arena &arena, KeyRef configClass, KeyRef knobName)
-    : configClass(arena, configClass), knobName(arena, knobName) {}
+	ConfigUpdateKeyRef() = default;
+	ConfigUpdateKeyRef(Arena& arena, KeyRef configClass, KeyRef knobName)
+	  : configClass(arena, configClass), knobName(arena, knobName) {}
+	ConfigUpdateKeyRef(Arena& arena, ConfigUpdateKeyRef const& rhs)
+	  : ConfigUpdateKeyRef(arena, rhs.configClass, rhs.knobName) {}
 
-  template<class Ar>
-  void serialize(Ar &ar) {
-    serializer(ar, configClass, knobName);
-  }
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, configClass, knobName);
+	}
+
+	size_t expectedSize() const { return configClass.expectedSize() + knobName.expectedSize(); }
 };
 using ConfigUpdateKey = Standalone<ConfigUpdateKeyRef>;
 
-class ConfigUpdateValueRef {
-  KeyRef description;
-  ValueRef value;
-  double timestamp;
-public:
+struct ConfigUpdateValueRef {
+	KeyRef description;
+	ValueRef value;
+	double timestamp;
 
-  ConfigUpdateValueRef()=default;
-  explicit ConfigUpdateValueRef(Arena &arena, KeyRef description, ValueRef value, double timestamp)
-    : description(arena, description), value(arena, value), timestamp(timestamp) {}
+	ConfigUpdateValueRef() = default;
+	ConfigUpdateValueRef(Arena& arena, KeyRef description, ValueRef value, double timestamp)
+	  : description(arena, description), value(arena, value), timestamp(timestamp) {}
+	ConfigUpdateValueRef(Arena& arena, ConfigUpdateValueRef const& rhs)
+	  : ConfigUpdateValueRef(arena, rhs.description, rhs.value, rhs.timestamp) {}
 
-  template<class Ar>
-  void serialize(Ar &ar) {
-    serializer(ar, description, value, timestamp);
-  }
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, description, value, timestamp);
+	}
+
+	size_t expectedSize() const { return description.expectedSize() + value.expectedSize() + sizeof(double); }
 };
 using ConfigUpdateValue = Standalone<ConfigUpdateValueRef>;
