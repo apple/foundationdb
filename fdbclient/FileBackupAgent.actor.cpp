@@ -4101,6 +4101,9 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			}
 		}
 
+		tr->reset();
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state bool logsOnly = wait(restore.onlyAppyMutationLogs().getD(tr, false, false));
 		state bool inconsistentSnapshotOnly = wait(restore.inconsistentSnapshotOnly().getD(tr, false, false));
 		state Version firstConsistentVersion = invalidVersion;
