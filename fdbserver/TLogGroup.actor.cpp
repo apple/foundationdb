@@ -38,6 +38,8 @@
 #include "flow/serialize.h"
 #include "flow/UnitTest.h"
 
+#include "flow/actorcompiler.h" // has to be last include
+
 TLogGroupCollection::TLogGroupCollection(const Reference<IReplicationPolicy>& policy, int numGroups, int groupSize)
   : policy(policy), targetNumGroups(numGroups), GROUP_SIZE(groupSize) {}
 

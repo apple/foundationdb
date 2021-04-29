@@ -18,9 +18,15 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_TLOGGROUP_H
-#define FDBSERVER_TLOGGROUP_H
 #pragma once
+
+// When actually compiled (NO_INTELLISENSE), include the generated version of
+// this file. In intellisense use the source version.
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_TLOGROUP_ACTOR_G_H)
+#define FDBSERVER_TLOGROUP_ACTOR_G_H
+#include "fdbserver/TLogGroup.actor.g.h"
+#elif !defined(FDBSERVER_TLOGROUP_ACTOR_H)
+#define FDBSERVER_TLOGROUP_ACTOR_H
 
 #include <unordered_map>
 #include <vector>
@@ -33,6 +39,8 @@
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/network.h"
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 // TODO: Monitor the groups, and if new tLogs need to added/removed, as workers are removed/added.
 // TODO: Add unit-test for serialization.
@@ -170,4 +178,5 @@ struct hash<TLogGroup> {
 };
 } // namespace std
 
-#endif /* FDBSERVER_TLOGGROUP_H */
+#include "flow/unactorcompiler.h"
+#endif /* FDBSERVER_TLOGROUP_ACTOR_H */
