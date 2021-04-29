@@ -35,10 +35,10 @@ class ThreadSafeReferenceCounted {
 public:
 	ThreadSafeReferenceCounted() : referenceCount(1) {}
 	// NO virtual destructor!  Subclass should have a virtual destructor if it is not sealed.
-	void addref() const { interlockedIncrement(&referenceCount); }
+	void addref() const { ++referenceCount; }
 	// If return value is true, caller is responsible for destruction of object
 	bool delref_no_destroy() const {
-		if (interlockedDecrement(&referenceCount) != 0) {
+		if (--referenceCount != 0) {
 #ifdef VALGRIND
 			ANNOTATE_HAPPENS_BEFORE(&referenceCount);
 #endif
@@ -60,7 +60,7 @@ public:
 private:
 	ThreadSafeReferenceCounted(const ThreadSafeReferenceCounted&) /* = delete*/;
 	void operator=(const ThreadSafeReferenceCounted&) /* = delete*/;
-	mutable volatile int32_t referenceCount;
+	mutable std::atomic<int32_t> referenceCount;
 };
 
 template <class Subclass>
