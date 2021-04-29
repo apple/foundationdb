@@ -23,6 +23,7 @@
 #define FDB_INCLUDE_LEGACY_TYPES
 
 #include "fdbclient/MultiVersionTransaction.h"
+#include "fdbclient/MultiVersionAssignmentVars.h"
 #include "foundationdb/fdb_c.h"
 
 int g_api_version = 0;
@@ -364,15 +365,20 @@ extern "C" DLLEXPORT double fdb_database_get_main_thread_busyness(FDBDatabase* d
 	return DB(d)->getMainThreadBusyness();
 }
 
-// Returns the protocol version reported by a quorum of coordinators
+// Returns the protocol version reported by the coordinator this client is connected to
 // If an expected version is non-zero, the future won't return until the protocol version is different than expected
+// Note: this will never return if the server is running a protocol from FDB 5.0 or older
 extern "C" DLLEXPORT FDBFuture* fdb_database_get_server_protocol(FDBDatabase* db, uint64_t expected_version) {
 	Optional<ProtocolVersion> expected;
 	if (expected_version > 0) {
 		expected = ProtocolVersion(expected_version);
 	}
 
-	return (FDBFuture*)(DB(db)->getServerProtocol(expected).extractPtr());
+	return (
+	    FDBFuture*)(mapThreadFuture<ProtocolVersion,
+	                                uint64_t>(DB(db)->getServerProtocol(expected), [](ErrorOr<ProtocolVersion> result) {
+		                return result.map<uint64_t>([](ProtocolVersion pv) { return pv.versionWithFlags(); });
+	                }).extractPtr());
 }
 
 extern "C" DLLEXPORT void fdb_transaction_destroy(FDBTransaction* tr) {

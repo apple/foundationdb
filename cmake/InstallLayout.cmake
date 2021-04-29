@@ -227,6 +227,13 @@ set(LIB_DIR lib64)
 configure_file("${PROJECT_SOURCE_DIR}/packaging/multiversion/clients/postinst" "${script_dir}/clients/postinst-el7" @ONLY)
 configure_file("${PROJECT_SOURCE_DIR}/packaging/multiversion/clients/prerm" "${script_dir}/clients" @ONLY)
 
+
+################################################################################
+# Move Docker Setup
+################################################################################
+
+file(COPY "${PROJECT_SOURCE_DIR}/packaging/docker" DESTINATION "${PROJECT_BINARY_DIR}/packages/")
+
 ################################################################################
 # General CPack configuration
 ################################################################################

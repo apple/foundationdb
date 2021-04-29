@@ -76,6 +76,7 @@ Future<Void> monitorLeaderForProxies(Value const& key,
 Future<Void> monitorProxies(
     Reference<AsyncVar<Reference<ClusterConnectionFile>>> const& connFile,
     Reference<AsyncVar<ClientDBInfo>> const& clientInfo,
+    Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> const& coordinator,
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> const& supportedVersions,
     Key const& traceLogGroup);
 
