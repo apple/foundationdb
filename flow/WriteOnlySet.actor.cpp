@@ -70,16 +70,16 @@ bool WriteOnlySet<T, IndexType, CAPACITY>::erase(Index idx) {
 template <class T, class IndexType, IndexType CAPACITY>
 bool WriteOnlySet<T, IndexType, CAPACITY>::replace(Index idx, const Reference<T>& lineage) {
 	auto lineagePtr = reinterpret_cast<uintptr_t>(lineage.getPtr());
+	if (lineage.isValid()) {
+		lineage->addref();
+	}
 	ASSERT((lineagePtr % 2) == 0); // this needs to be at least 2-byte aligned
 
 	while (true) {
-		if (lineage.isValid()) {
-			lineage->addref();
-		}
-
 		auto ptr = _set[idx].load();
 		if (ptr & LOCK) {
 			_set[idx].store(lineagePtr);
+			ASSERT(freeList.push(reinterpret_cast<T*>(ptr ^ LOCK)));
 			return false;
 		} else {
 			if (_set[idx].compare_exchange_strong(ptr, lineagePtr)) {
