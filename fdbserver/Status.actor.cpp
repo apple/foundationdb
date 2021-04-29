@@ -615,6 +615,11 @@ struct RolesInfo {
 			TraceEventFields const& commitLatencyBands = metrics.at("CommitLatencyBands");
 			if (commitLatencyBands.size()) {
 				obj["commit_latency_bands"] = addLatencyBandInfo(commitLatencyBands);
+			} 
+
+			TraceEventFields const& commitBatchingWindowSize = metrics.at("CommitBatchingWindowSize");
+			if (commitBatchingWindowSize.size()) {
+				obj["commit_batching_window_size"] = addLatencyStatistics(commitBatchingWindowSize);
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_attribute_not_found) {
@@ -1839,7 +1844,7 @@ ACTOR static Future<vector<std::pair<CommitProxyInterface, EventMap>>> getCommit
 	vector<std::pair<CommitProxyInterface, EventMap>> results =
 	    wait(getServerMetrics(db->get().client.commitProxies,
 	                          address_workers,
-	                          std::vector<std::string>{ "CommitLatencyMetrics", "CommitLatencyBands" }));
+	                          std::vector<std::string>{ "CommitLatencyMetrics", "CommitLatencyBands", "CommitBatchingWindowSize"}));
 
 	return results;
 }
