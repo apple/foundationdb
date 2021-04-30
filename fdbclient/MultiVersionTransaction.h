@@ -535,7 +535,11 @@ public:
 	// connect packet monitoring.
 	struct LegacyVersionMonitor {
 		LegacyVersionMonitor(Reference<ClientInfo> const& client) : client(client), monitorRunning(false) {}
-		~LegacyVersionMonitor() { TraceEvent("DestroyingVersionMonitor"); }
+		~LegacyVersionMonitor() {
+			if (versionMonitor.isValid()) {
+				versionMonitor.cancel();
+			}
+		}
 
 		// Starts the connection monitor by creating a database object at an old version.
 		// Must be called from the main thread

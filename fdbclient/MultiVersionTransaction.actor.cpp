@@ -1035,6 +1035,10 @@ ThreadFuture<Void> MultiVersionDatabase::DatabaseState::monitorProtocolVersion()
 
 	return mapThreadFuture<ProtocolVersion, Void>(f, [this, expected](ErrorOr<ProtocolVersion> cv) {
 		if (cv.isError()) {
+			if (cv.getError().code() == error_code_operation_cancelled) {
+				return ErrorOr<Void>(cv.getError());
+			}
+
 			TraceEvent("ErrorGettingClusterProtocolVersion")
 			    .detail("ExpectedProtocolVersion", expected)
 			    .error(cv.getError());
@@ -1042,7 +1046,7 @@ ThreadFuture<Void> MultiVersionDatabase::DatabaseState::monitorProtocolVersion()
 
 		ProtocolVersion clusterVersion = !cv.isError() ? cv.get() : dbProtocolVersion.orDefault(currentProtocolVersion);
 		onMainThreadVoid([this, clusterVersion]() { protocolVersionChanged(clusterVersion); }, nullptr);
-		return Void();
+		return ErrorOr<Void>(Void());
 	});
 }
 
@@ -1053,6 +1057,8 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 	if (dbProtocolVersion.present() &&
 	    protocolVersion.normalizedVersion() == dbProtocolVersion.get().normalizedVersion()) {
 		dbProtocolVersion = protocolVersion;
+
+		protocolVersionMonitor.cancel();
 		protocolVersionMonitor = monitorProtocolVersion();
 	}
 
@@ -1139,6 +1145,8 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 	}
 
 	dbVar->set(db);
+
+	protocolVersionMonitor.cancel();
 	protocolVersionMonitor = monitorProtocolVersion();
 }
 
@@ -1181,12 +1189,14 @@ void MultiVersionDatabase::LegacyVersionMonitor::startConnectionMonitor(
 			    onMainThreadVoid(
 			        [this, ready, dbState]() {
 				        if (ready.isError()) {
-					        TraceEvent(SevError, "FailedToOpenDatabaseOnClient")
-					            .error(ready.getError())
-					            .detail("LibPath", client->libPath);
+					        if (ready.getError().code() != error_code_operation_cancelled) {
+						        TraceEvent(SevError, "FailedToOpenDatabaseOnClient")
+						            .error(ready.getError())
+						            .detail("LibPath", client->libPath);
 
-					        client->failed = true;
-					        MultiVersionApi::api->updateSupportedVersions();
+						        client->failed = true;
+						        MultiVersionApi::api->updateSupportedVersions();
+					        }
 				        } else {
 					        runGrvProbe(dbState);
 				        }
@@ -1209,14 +1219,7 @@ void MultiVersionDatabase::LegacyVersionMonitor::runGrvProbe(Reference<MultiVers
 
 			    // If the version attempt returns an error, we regard that as a connection (except
 			    // operation_cancelled)
-			    if (v.isError() && v.getError().code() == error_code_operation_cancelled) {
-				    TraceEvent(SevError, "FailedToOpenDatabaseOnClient")
-				        .error(v.getError())
-				        .detail("LibPath", client->libPath);
-
-				    client->failed = true;
-				    MultiVersionApi::api->updateSupportedVersions();
-			    } else {
+			    if (!v.isError() || v.getError().code() != error_code_operation_cancelled) {
 				    dbState->protocolVersionChanged(client->protocolVersion);
 			    }
 		    },
