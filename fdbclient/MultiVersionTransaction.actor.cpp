@@ -1022,7 +1022,7 @@ void MultiVersionDatabase::DatabaseState::addClient(Reference<ClientInfo> client
 		    .detail("LibPath", client->libPath)
 		    .detail("ProtocolVersion", client->protocolVersion);
 
-		legacyVersionMonitors.emplace_back(client);
+		legacyVersionMonitors.emplace_back(new LegacyVersionMonitor(client));
 	}
 }
 
@@ -1034,7 +1034,8 @@ ThreadFuture<Void> MultiVersionDatabase::DatabaseState::monitorProtocolVersion()
 	Optional<ProtocolVersion> expected = dbProtocolVersion;
 	ThreadFuture<ProtocolVersion> f = versionMonitorDb->getServerProtocol(dbProtocolVersion);
 
-	return mapThreadFuture<ProtocolVersion, Void>(f, [this, expected](ErrorOr<ProtocolVersion> cv) {
+	Reference<DatabaseState> self = Reference<DatabaseState>::addRef(this);
+	return mapThreadFuture<ProtocolVersion, Void>(f, [self, expected](ErrorOr<ProtocolVersion> cv) {
 		if (cv.isError()) {
 			if (cv.getError().code() == error_code_operation_cancelled) {
 				return ErrorOr<Void>(cv.getError());
@@ -1045,8 +1046,9 @@ ThreadFuture<Void> MultiVersionDatabase::DatabaseState::monitorProtocolVersion()
 			    .error(cv.getError());
 		}
 
-		ProtocolVersion clusterVersion = !cv.isError() ? cv.get() : dbProtocolVersion.orDefault(currentProtocolVersion);
-		onMainThreadVoid([this, clusterVersion]() { protocolVersionChanged(clusterVersion); }, nullptr);
+		ProtocolVersion clusterVersion =
+		    !cv.isError() ? cv.get() : self->dbProtocolVersion.orDefault(currentProtocolVersion);
+		onMainThreadVoid([self, clusterVersion]() { self->protocolVersionChanged(clusterVersion); }, nullptr);
 		return ErrorOr<Void>(Void());
 	});
 }
@@ -1083,12 +1085,13 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 
 			if (client->external && !MultiVersionApi::apiVersionAtLeast(610)) {
 				// Old API versions return a future when creating the database, so we need to wait for it
+				Reference<DatabaseState> self = Reference<DatabaseState>::addRef(this);
 				dbReady = mapThreadFuture<Void, Void>(
-				    newDb.castTo<DLDatabase>()->onReady(), [this, newDb, client](ErrorOr<Void> ready) {
+				    newDb.castTo<DLDatabase>()->onReady(), [self, newDb, client](ErrorOr<Void> ready) {
 					    if (!ready.isError()) {
-						    onMainThreadVoid([this, newDb, client]() { updateDatabase(newDb, client); }, nullptr);
+						    onMainThreadVoid([self, newDb, client]() { self->updateDatabase(newDb, client); }, nullptr);
 					    } else {
-						    onMainThreadVoid([this, client]() { updateDatabase(Reference<IDatabase>(), client); },
+						    onMainThreadVoid([self, client]() { self->updateDatabase(Reference<IDatabase>(), client); },
 						                     nullptr);
 					    }
 
@@ -1155,12 +1158,13 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 // Must be called from the main thread
 void MultiVersionDatabase::DatabaseState::startLegacyVersionMonitors() {
 	for (auto itr = legacyVersionMonitors.begin(); itr != legacyVersionMonitors.end(); ++itr) {
-		while (itr != legacyVersionMonitors.end() && itr->client->failed) {
+		while (itr != legacyVersionMonitors.end() && (*itr)->client->failed) {
+			(*itr)->close();
 			itr = legacyVersionMonitors.erase(itr);
 		}
 		if (itr != legacyVersionMonitors.end() &&
-		    (!dbProtocolVersion.present() || itr->client->protocolVersion != dbProtocolVersion.get())) {
-			itr->startConnectionMonitor(Reference<DatabaseState>::addRef(this));
+		    (!dbProtocolVersion.present() || (*itr)->client->protocolVersion != dbProtocolVersion.get())) {
+			(*itr)->startConnectionMonitor(Reference<DatabaseState>::addRef(this));
 		}
 	}
 }
@@ -1171,6 +1175,10 @@ void MultiVersionDatabase::DatabaseState::close() {
 	onMainThreadVoid(
 	    [this]() {
 		    protocolVersionMonitor.cancel();
+		    for (auto monitor : legacyVersionMonitors) {
+			    monitor->close();
+		    }
+
 		    legacyVersionMonitors.clear();
 		    delref();
 	    },
@@ -1191,21 +1199,22 @@ void MultiVersionDatabase::LegacyVersionMonitor::startConnectionMonitor(
 		tr = Reference<ITransaction>();
 
 		TraceEvent("StartingLegacyVersionMonitor").detail("ProtocolVersion", client->protocolVersion);
+		Reference<LegacyVersionMonitor> self = Reference<LegacyVersionMonitor>::addRef(this);
 		versionMonitor =
-		    mapThreadFuture<Void, Void>(db.castTo<DLDatabase>()->onReady(), [this, dbState](ErrorOr<Void> ready) {
+		    mapThreadFuture<Void, Void>(db.castTo<DLDatabase>()->onReady(), [self, dbState](ErrorOr<Void> ready) {
 			    onMainThreadVoid(
-			        [this, ready, dbState]() {
+			        [self, ready, dbState]() {
 				        if (ready.isError()) {
 					        if (ready.getError().code() != error_code_operation_cancelled) {
 						        TraceEvent(SevError, "FailedToOpenDatabaseOnClient")
 						            .error(ready.getError())
-						            .detail("LibPath", client->libPath);
+						            .detail("LibPath", self->client->libPath);
 
-						        client->failed = true;
+						        self->client->failed = true;
 						        MultiVersionApi::api->updateSupportedVersions();
 					        }
 				        } else {
-					        runGrvProbe(dbState);
+					        self->runGrvProbe(dbState);
 				        }
 			        },
 			        nullptr);
@@ -1219,20 +1228,26 @@ void MultiVersionDatabase::LegacyVersionMonitor::startConnectionMonitor(
 // Must be called from main thread
 void MultiVersionDatabase::LegacyVersionMonitor::runGrvProbe(Reference<MultiVersionDatabase::DatabaseState> dbState) {
 	tr = db->createTransaction();
-	versionMonitor = mapThreadFuture<Version, Void>(tr->getReadVersion(), [this, dbState](ErrorOr<Version> v) {
-		onMainThreadVoid(
-		    [this, v, dbState]() {
-			    // If the version attempt returns an error, we regard that as a connection (except
-			    // operation_cancelled)
-			    if (!v.isError() || v.getError().code() != error_code_operation_cancelled) {
-				    monitorRunning = false;
-				    dbState->protocolVersionChanged(client->protocolVersion);
-			    }
-		    },
-		    nullptr);
+	Reference<LegacyVersionMonitor> self = Reference<LegacyVersionMonitor>::addRef(this);
+	versionMonitor = mapThreadFuture<Version, Void>(tr->getReadVersion(), [self, dbState](ErrorOr<Version> v) {
+		// If the version attempt returns an error, we regard that as a connection (except operation_cancelled)
+		if (!v.isError() || v.getError().code() != error_code_operation_cancelled) {
+			onMainThreadVoid(
+			    [self, dbState]() {
+				    self->monitorRunning = false;
+				    dbState->protocolVersionChanged(self->client->protocolVersion);
+			    },
+			    nullptr);
+		}
 
 		return v.map<Void>([](Version v) { return Void(); });
 	});
+}
+
+void MultiVersionDatabase::LegacyVersionMonitor::close() {
+	if (versionMonitor.isValid()) {
+		versionMonitor.cancel();
+	}
 }
 
 std::atomic_flag MultiVersionDatabase::externalClientsInitialized = ATOMIC_FLAG_INIT;
