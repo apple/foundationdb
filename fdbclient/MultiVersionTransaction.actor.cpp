@@ -914,7 +914,8 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
 		});
 
 		Reference<DatabaseState> dbStateRef = dbState;
-		onMainThreadVoid([dbStateRef]() { dbStateRef->protocolVersionMonitor = dbStateRef->monitorProtocolVersion(); }, nullptr);
+		onMainThreadVoid([dbStateRef]() { dbStateRef->protocolVersionMonitor = dbStateRef->monitorProtocolVersion(); },
+		                 nullptr);
 	}
 }
 
@@ -1061,6 +1062,7 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 	    protocolVersion.normalizedVersion() == dbProtocolVersion.get().normalizedVersion()) {
 		dbProtocolVersion = protocolVersion;
 
+		ASSERT(protocolVersionMonitor.isValid());
 		protocolVersionMonitor.cancel();
 		protocolVersionMonitor = monitorProtocolVersion();
 	}
@@ -1150,6 +1152,7 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 
 	dbVar->set(db);
 
+	ASSERT(protocolVersionMonitor.isValid());
 	protocolVersionMonitor.cancel();
 	protocolVersionMonitor = monitorProtocolVersion();
 }
@@ -1171,16 +1174,17 @@ void MultiVersionDatabase::DatabaseState::startLegacyVersionMonitors() {
 
 // Cleans up state for the legacy version monitors to break reference cycles
 void MultiVersionDatabase::DatabaseState::close() {
-	addref();
+	Reference<DatabaseState> self = Reference<DatabaseState>::addRef(this);
 	onMainThreadVoid(
-	    [this]() {
-		    protocolVersionMonitor.cancel();
-		    for (auto monitor : legacyVersionMonitors) {
+	    [self]() {
+		    if (self->protocolVersionMonitor.isValid()) {
+			    self->protocolVersionMonitor.cancel();
+		    }
+		    for (auto monitor : self->legacyVersionMonitors) {
 			    monitor->close();
 		    }
 
-		    legacyVersionMonitors.clear();
-		    delref();
+		    self->legacyVersionMonitors.clear();
 	    },
 	    nullptr);
 }
