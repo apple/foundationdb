@@ -4043,6 +4043,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		state Version beginVersion;
 		state Reference<IBackupContainer> bc;
 		state std::vector<KeyRange> ranges;
+		state bool logsOnly;
+		state bool inconsistentSnapshotOnly;
 
 		loop {
 			try {
@@ -4050,11 +4052,12 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				wait(checkTaskVersion(tr->getDatabase(), task, name, version));
-				Optional<Version> _beginVersion = wait(restore.beginVersion().get(tr));
-				beginVersion = _beginVersion.present() ? _beginVersion.get() : invalidVersion;
+				wait(store(beginVersion, restore.beginVersion().getD(tr, false, invalidVersion)));
 
 				wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
 				wait(store(ranges, restore.getRestoreRangesOrDefault(tr)));
+				wait(store(logsOnly, restore.onlyAppyMutationLogs().getD(tr, false, false)));
+				wait(store(inconsistentSnapshotOnly, restore.inconsistentSnapshotOnly().getD(tr, false, false)));
 
 				wait(taskBucket->keepRunning(tr, task));
 
@@ -4101,11 +4104,6 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			}
 		}
 
-		tr->reset();
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		state bool logsOnly = wait(restore.onlyAppyMutationLogs().getD(tr, false, false));
-		state bool inconsistentSnapshotOnly = wait(restore.inconsistentSnapshotOnly().getD(tr, false, false));
 		state Version firstConsistentVersion = invalidVersion;
 		if (beginVersion == invalidVersion) {
 			beginVersion = 0;
