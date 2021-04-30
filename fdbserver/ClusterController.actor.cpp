@@ -3094,9 +3094,9 @@ ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
 				cluster->id_worker.erase(worker.locality.processId());
 				cluster->updateWorkerList.set(worker.locality.processId(), Optional<ProcessData>());
 				TraceEvent("ClusterControllerWorkerFailed", cluster->id)
-					.detail("WorkerProcessId", worker.locality.processId())
-					.detail("WorkerProcessClass", failedWorkerInfo.details.processClass.toString())
-					.detail("WorkerAddress", worker.address());
+					.detail("ProcessId", worker.locality.processId())
+					.detail("ProcessClass", failedWorkerInfo.details.processClass.toString())
+					.detail("Address", worker.address());
 				return Void();
 			}
 		}
