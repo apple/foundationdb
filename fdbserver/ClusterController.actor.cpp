@@ -1886,7 +1886,6 @@ public:
 			updateKnownIds(&firstUsed);
 			updateKnownIds(&secondUsed);
 
-			auto mworker = id_worker.find(masterProcessId);
 			//TraceEvent("CompareAddressesMaster")
 			//    .detail("Master",
 			//            mworker != id_worker.end() ? mworker->second.details.interf.address() : NetworkAddress());
