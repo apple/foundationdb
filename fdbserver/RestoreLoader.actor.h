@@ -50,9 +50,7 @@ public:
 	static const int SEND_MUTATIONS = 3;
 	static const int INVALID = 4;
 
-	explicit LoaderVersionBatchState(int newState) {
-		vbState = newState;
-	}
+	explicit LoaderVersionBatchState(int newState) { vbState = newState; }
 
 	~LoaderVersionBatchState() override = default;
 
@@ -95,8 +93,10 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 
 	explicit LoaderBatchData(UID nodeID, int batchIndex)
 	  : counters(this, nodeID, batchIndex), vbState(LoaderVersionBatchState::NOT_INIT), loadFileReqs(0) {
-		pollMetrics = traceCounters(format("FastRestoreLoaderMetrics%d", batchIndex), nodeID,
-		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY, &counters.cc,
+		pollMetrics = traceCounters(format("FastRestoreLoaderMetrics%d", batchIndex),
+		                            nodeID,
+		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
+		                            &counters.cc,
 		                            nodeID.toString() + "/RestoreLoaderMetrics/" + std::to_string(batchIndex));
 		TraceEvent("FastRestoreLoaderMetricsCreated").detail("Node", nodeID);
 	}
@@ -235,7 +235,9 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	}
 };
 
-ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int nodeIndex, Database cx,
+ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf,
+                                     int nodeIndex,
+                                     Database cx,
                                      RestoreControllerInterface ci);
 
 #include "flow/unactorcompiler.h"

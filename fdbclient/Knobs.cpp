@@ -26,7 +26,7 @@
 std::unique_ptr<ClientKnobs> globalClientKnobs = std::make_unique<ClientKnobs>();
 ClientKnobs const* CLIENT_KNOBS = globalClientKnobs.get();
 
-#define init( knob, value ) initKnob( knob, value, #knob )
+#define init(knob, value) initKnob(knob, value, #knob)
 
 ClientKnobs::ClientKnobs() {
 	initialize();
@@ -38,6 +38,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( TOO_MANY,                            1000000 );
 
 	init( SYSTEM_MONITOR_INTERVAL,                 5.0 );
+	init( NETWORK_BUSYNESS_MONITOR_INTERVAL,       1.0 );
 
 	init( FAILURE_MAX_DELAY,                       5.0 );
 	init( FAILURE_MIN_DELAY,                       4.0 ); if( randomize && BUGGIFY ) FAILURE_MIN_DELAY = 1.0;
@@ -124,7 +125,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( TASKBUCKET_MAX_TASK_KEYS,               1000 ); if( randomize && BUGGIFY ) TASKBUCKET_MAX_TASK_KEYS = 20;
 
 	//Backup
-	init( BACKUP_LOCAL_FILE_WRITE_BLOCK,     1024*1024 ); if( randomize && BUGGIFY ) BACKUP_LOCAL_FILE_WRITE_BLOCK = 100;
+	init( BACKUP_LOCAL_FILE_WRITE_BLOCK,     1024*1024 );
 	init( BACKUP_CONCURRENT_DELETES,               100 );
 	init( BACKUP_SIMULATED_LIMIT_BYTES,		       1e6 ); if( randomize && BUGGIFY ) BACKUP_SIMULATED_LIMIT_BYTES = 1000;
 	init( BACKUP_GET_RANGE_LIMIT_BYTES,		       1e6 );

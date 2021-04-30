@@ -47,9 +47,10 @@ public:
 	}
 
 	void choosePrimaryAddress() {
-		if(addresses.secondaryAddress.present() && 
-		((!g_network->getLocalAddresses().secondaryAddress.present() && (addresses.address.isTLS() != g_network->getLocalAddresses().address.isTLS())) ||
-		(g_network->getLocalAddresses().secondaryAddress.present() && !addresses.address.isTLS()))) {
+		if (addresses.secondaryAddress.present() &&
+		    ((!g_network->getLocalAddresses().secondaryAddress.present() &&
+		      (addresses.address.isTLS() != g_network->getLocalAddresses().address.isTLS())) ||
+		     (g_network->getLocalAddresses().secondaryAddress.present() && !addresses.address.isTLS()))) {
 			std::swap(addresses.address, addresses.secondaryAddress.get());
 		}
 	}
@@ -59,27 +60,23 @@ public:
 
 	// Return the primary network address, which is the first network address among
 	// all addresses this endpoint listens to.
-	const NetworkAddress& getPrimaryAddress() const {
-		return addresses.address;
-	}
+	const NetworkAddress& getPrimaryAddress() const { return addresses.address; }
 
-	NetworkAddress getStableAddress() const {
-		return addresses.getTLSAddress();
-	}
+	NetworkAddress getStableAddress() const { return addresses.getTLSAddress(); }
 
-	Endpoint getAdjustedEndpoint( uint32_t index ) {
+	Endpoint getAdjustedEndpoint(uint32_t index) {
 		uint32_t newIndex = token.second();
 		newIndex += index;
-		return Endpoint( addresses, UID(token.first()+(uint64_t(index)<<32), (token.second()&0xffffffff00000000LL) | newIndex) );
+		return Endpoint(
+		    addresses,
+		    UID(token.first() + (uint64_t(index) << 32), (token.second() & 0xffffffff00000000LL) | newIndex));
 	}
 
-	bool operator == (Endpoint const& r) const {
+	bool operator==(Endpoint const& r) const {
 		return token == r.token && getPrimaryAddress() == r.getPrimaryAddress();
 	}
-	bool operator != (Endpoint const& r) const {
-		return !(*this == r);
-	}
-	bool operator < (Endpoint const& r) const {
+	bool operator!=(Endpoint const& r) const { return !(*this == r); }
+	bool operator<(Endpoint const& r) const {
 		return addresses.address < r.addresses.address || (addresses.address == r.addresses.address && token < r.token);
 	}
 
@@ -105,17 +102,12 @@ public:
 };
 #pragma pack(pop)
 
-namespace std
-{
-	template <>
-	struct hash<Endpoint>
-	{
-		size_t operator()(const Endpoint& ep) const
-		{
-			return  ep.token.hash() + ep.addresses.address.hash();
-		}
-	};
-}
+namespace std {
+template <>
+struct hash<Endpoint> {
+	size_t operator()(const Endpoint& ep) const { return ep.token.hash() + ep.addresses.address.hash(); }
+};
+} // namespace std
 
 enum class RequirePeer { Exactly, AtLeast };
 
@@ -141,12 +133,13 @@ struct Peer : public ReferenceCounted<Peer> {
 	NetworkAddress destination;
 	UnsentPacketQueue unsent;
 	ReliablePacketList reliable;
-	AsyncTrigger dataToSend;  // Triggered when unsent.empty() becomes false
+	AsyncTrigger dataToSend; // Triggered when unsent.empty() becomes false
 	Future<Void> connect;
 	AsyncTrigger resetPing;
 	AsyncTrigger resetConnection;
 	bool compatible;
-	bool outgoingConnectionIdle;  // We don't actually have a connection open and aren't trying to open one because we don't have anything to send
+	bool outgoingConnectionIdle; // We don't actually have a connection open and aren't trying to open one because we
+	                             // don't have anything to send
 	double lastConnectTime;
 	double reconnectionDelay;
 	int peerReferences;
@@ -159,6 +152,9 @@ struct Peer : public ReferenceCounted<Peer> {
 	double lastLoggedTime;
 	int64_t lastLoggedBytesReceived;
 	int64_t lastLoggedBytesSent;
+
+	Reference<AsyncVar<Optional<ProtocolVersion>>> protocolVersion;
+
 	// Cleared every time stats are logged for this peer.
 	int connectOutgoingCount;
 	int connectIncomingCount;
@@ -173,7 +169,7 @@ struct Peer : public ReferenceCounted<Peer> {
 
 	void discardUnreliablePackets();
 
-	void onIncomingConnection( Reference<Peer> self, Reference<IConnection> conn, Future<Void> reader );
+	void onIncomingConnection(Reference<Peer> self, Reference<IConnection> conn, Future<Void> reader);
 };
 
 class FlowTransport {
@@ -181,69 +177,82 @@ public:
 	FlowTransport(uint64_t transportId);
 	~FlowTransport();
 
+	// Creates a new FlowTransport and makes FlowTransport::transport() return it.  This uses g_network->global()
+	// variables, so it will be private to a simulation.
 	static void createInstance(bool isClient, uint64_t transportId);
-	// Creates a new FlowTransport and makes FlowTransport::transport() return it.  This uses g_network->global() variables,
-	// so it will be private to a simulation.
 
 	static bool isClient() { return g_network->global(INetwork::enClientFailureMonitor) != nullptr; }
 
-	void initMetrics();
 	// Metrics must be initialized after FlowTransport::createInstance has been called
+	void initMetrics();
 
-	Future<Void> bind( NetworkAddress publicAddress, NetworkAddress listenAddress );
 	// Starts a server listening on the given listenAddress, and sets publicAddress to be the public
 	// address of this server.  Returns only errors.
+	Future<Void> bind(NetworkAddress publicAddress, NetworkAddress listenAddress);
 
-	NetworkAddress getLocalAddress() const;
 	// Returns first local NetworkAddress.
+	NetworkAddress getLocalAddress() const;
 
-	NetworkAddressList getLocalAddresses() const;
 	// Returns all local NetworkAddress.
+	NetworkAddressList getLocalAddresses() const;
 
-	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();
 	// Returns the same of all peers that have attempted to connect, but have incompatible protocol versions
+	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();
 
-	Future<Void> onIncompatibleChanged();
 	// Returns when getIncompatiblePeers has at least one peer which is incompatible.
+	Future<Void> onIncompatibleChanged();
 
-	void addPeerReference(const Endpoint&, bool isStream);
 	// Signal that a peer connection is being used, even if no messages are currently being sent to the peer
+	void addPeerReference(const Endpoint&, bool isStream);
 
-	void removePeerReference(const Endpoint&, bool isStream);
 	// Signal that a peer connection is no longer being used
+	void removePeerReference(const Endpoint&, bool isStream);
 
-	void addEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID );
 	// Sets endpoint to be a new local endpoint which delivers messages to the given receiver
+	void addEndpoint(Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID);
 
-	void addEndpoints( std::vector<std::pair<struct FlowReceiver*, TaskPriority>> const& streams );
+	void addEndpoints(std::vector<std::pair<struct FlowReceiver*, TaskPriority>> const& streams);
 
-	void removeEndpoint( const Endpoint&, NetworkMessageReceiver* );
 	// The given local endpoint no longer delivers messages to the given receiver or uses resources
+	void removeEndpoint(const Endpoint&, NetworkMessageReceiver*);
 
-	void addWellKnownEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID );
 	// Sets endpoint to a new local endpoint (without changing its token) which delivers messages to the given receiver
 	// Implementations may have limitations on when this function is called and what endpoint.token may be!
+	void addWellKnownEndpoint(Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID);
 
-	ReliablePacket* sendReliable( ISerializeSource const& what, const Endpoint& destination );
-	// sendReliable will keep trying to deliver the data to the destination until cancelReliable is
-	//   called.  It will retry sending if the connection is closed or the failure manager reports
-	//   the destination become available (edge triggered).
+	// sendReliable will keep trying to deliver the data to the destination until cancelReliable is called. It will
+	// retry sending if the connection is closed or the failure manager reports the destination become available (edge
+	// triggered).
+	ReliablePacket* sendReliable(ISerializeSource const& what, const Endpoint& destination);
 
-	void cancelReliable( ReliablePacket* );
-	// Makes Packet "unreliable" (either the data or a connection close event will be delivered
-	//   eventually).  It can still be used safely to send a reply to a "reliable" request.
+	// Makes Packet "unreliable" (either the data or a connection close event will be delivered eventually). It can
+	// still be used safely to send a reply to a "reliable" request.
+	void cancelReliable(ReliablePacket*);
 
+	// This async var will be set to true when the process cannot connect to a public network address that the failure
+	// monitor thinks is healthy.
 	Reference<AsyncVar<bool>> getDegraded();
-	// This async var will be set to true when the process cannot connect to a public network address that the failure monitor thinks is healthy.
 
-	void resetConnection( NetworkAddress address );
 	// Forces the connection with this address to be reset
+	void resetConnection(NetworkAddress address);
 
-	Reference<Peer> sendUnreliable( ISerializeSource const& what, const Endpoint& destination, bool openConnection );// { cancelReliable(sendReliable(what,destination)); }
+	Reference<Peer> sendUnreliable(ISerializeSource const& what,
+	                               const Endpoint& destination,
+	                               bool openConnection); // { cancelReliable(sendReliable(what,destination)); }
 
 	bool incompatibleOutgoingConnectionsPresent();
 
-	static FlowTransport& transport() { return *static_cast<FlowTransport*>((void*) g_network->global(INetwork::enFlowTransport)); }
+	// Returns the protocol version of the peer at the specified address. The result is returned as an AsyncVar that
+	// can be used to monitor for changes of a peer's protocol. The protocol version will be unset in the event that
+	// there is no connection established to the peer.
+	//
+	// Note that this function does not establish a connection to the peer. In order to obtain a peer's protocol
+	// version, some other mechanism should be used to connect to that peer.
+	Reference<AsyncVar<Optional<ProtocolVersion>>> getPeerProtocolAsyncVar(NetworkAddress addr);
+
+	static FlowTransport& transport() {
+		return *static_cast<FlowTransport*>((void*)g_network->global(INetwork::enFlowTransport));
+	}
 	static NetworkAddress getGlobalLocalAddress() { return transport().getLocalAddress(); }
 	static NetworkAddressList getGlobalLocalAddresses() { return transport().getLocalAddresses(); }
 
@@ -257,7 +266,8 @@ private:
 
 inline bool Endpoint::isLocal() const {
 	const auto& localAddrs = FlowTransport::transport().getLocalAddresses();
-	return addresses.address == localAddrs.address || (localAddrs.secondaryAddress.present() && addresses.address == localAddrs.secondaryAddress.get());
+	return addresses.address == localAddrs.address ||
+	       (localAddrs.secondaryAddress.present() && addresses.address == localAddrs.secondaryAddress.get());
 }
 
 #endif

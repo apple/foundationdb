@@ -20,10 +20,10 @@
 
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_MOVEKEYS_ACTOR_G_H)
-	#define FDBSERVER_MOVEKEYS_ACTOR_G_H
-	#include "fdbserver/MoveKeys.actor.g.h"
+#define FDBSERVER_MOVEKEYS_ACTOR_G_H
+#include "fdbserver/MoveKeys.actor.g.h"
 #elif !defined(FDBSERVER_MOVEKEYS_ACTOR_H)
-	#define FDBSERVER_MOVEKEYS_ACTOR_H
+#define FDBSERVER_MOVEKEYS_ACTOR_H
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/CommitTransaction.h"
@@ -34,7 +34,9 @@
 struct MoveKeysLock {
 	UID prevOwner, myOwner, prevWrite;
 	template <class Ar>
-	void serialize(Ar& ar) { serializer(ar, prevOwner, myOwner, prevWrite); }
+	void serialize(Ar& ar) {
+		serializer(ar, prevOwner, myOwner, prevWrite);
+	}
 };
 
 class DDEnabledState {
@@ -60,16 +62,18 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId);
 // This does not modify the moveKeysLock
 Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock, const DDEnabledState* ddEnabledState);
 
-void seedShardServers(
-	Arena& trArena,
-	CommitTransactionRef &tr,
-	vector<StorageServerInterface> servers );
+void seedShardServers(Arena& trArena, CommitTransactionRef& tr, vector<StorageServerInterface> servers);
 // Called by the master server to write the very first transaction to the database
 // establishing a set of shard servers and all invariants of the systemKeys.
 
-ACTOR Future<Void> moveKeys(Database occ, KeyRange keys, vector<UID> destinationTeam, vector<UID> healthyDestinations,
-                            MoveKeysLock lock, Promise<Void> dataMovementComplete,
-                            FlowLock* startMoveKeysParallelismLock, FlowLock* finishMoveKeysParallelismLock,
+ACTOR Future<Void> moveKeys(Database occ,
+                            KeyRange keys,
+                            vector<UID> destinationTeam,
+                            vector<UID> healthyDestinations,
+                            MoveKeysLock lock,
+                            Promise<Void> dataMovementComplete,
+                            FlowLock* startMoveKeysParallelismLock,
+                            FlowLock* finishMoveKeysParallelismLock,
                             bool hasRemote,
                             UID relocationIntervalId, // for logging only
                             const DDEnabledState* ddEnabledState);
@@ -83,7 +87,9 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 // Returns a Version in which the storage server is in the database
 // This doesn't need to be called for the "seed" storage servers (see seedShardServers above)
 
-ACTOR Future<Void> removeStorageServer(Database cx, UID serverID, MoveKeysLock lock,
+ACTOR Future<Void> removeStorageServer(Database cx,
+                                       UID serverID,
+                                       MoveKeysLock lock,
                                        const DDEnabledState* ddEnabledState);
 // Removes the given storage server permanently from the database.  It must already
 // have no shards assigned to it.  The storage server MUST NOT be added again after this
@@ -92,7 +98,9 @@ ACTOR Future<Void> removeStorageServer(Database cx, UID serverID, MoveKeysLock l
 ACTOR Future<bool> canRemoveStorageServer(Transaction* tr, UID serverID);
 // Returns true if the given storage server has no keys assigned to it and may be safely removed
 // Obviously that could change later!
-ACTOR Future<Void> removeKeysFromFailedServer(Database cx, UID serverID, MoveKeysLock lock,
+ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
+                                              UID serverID,
+                                              MoveKeysLock lock,
                                               const DDEnabledState* ddEnabledState);
 // Directly removes serverID from serverKeys and keyServers system keyspace.
 // Performed when a storage server is marked as permanently failed.

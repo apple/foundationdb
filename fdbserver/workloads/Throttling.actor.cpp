@@ -82,8 +82,7 @@ struct ThrottlingWorkload : KVWorkload {
 
 	static constexpr const char* NAME = "Throttling";
 
-	ThrottlingWorkload(WorkloadContext const& wcx)
-	  : KVWorkload(wcx), transactionsCommitted(0) {
+	ThrottlingWorkload(WorkloadContext const& wcx) : KVWorkload(wcx), transactionsCommitted(0) {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 60.0);
 		actorsPerClient = getOption(options, LiteralStringRef("actorsPerClient"), 10);
 		writesPerTransaction = getOption(options, LiteralStringRef("writesPerTransaction"), 10);
@@ -93,7 +92,9 @@ struct ThrottlingWorkload : KVWorkload {
 		tokenBucket.maxBurst = maxBurst;
 	}
 
-	static Value getRandomValue() { return Standalone<StringRef>(format("Value/%d", deterministicRandom()->randomInt(0, 10e6))); }
+	static Value getRandomValue() {
+		return Standalone<StringRef>(format("Value/%d", deterministicRandom()->randomInt(0, 10e6)));
+	}
 
 	ACTOR static Future<Void> clientActor(Database cx, ThrottlingWorkload* self) {
 		state ReadYourWritesTransaction tr(cx);
@@ -110,10 +111,12 @@ struct ThrottlingWorkload : KVWorkload {
 					tr.set(self->getRandomKey(), getRandomValue());
 				}
 				wait(tr.commit());
-				if (deterministicRandom()->randomInt(0, 1000) == 0) TraceEvent("TransactionCommittedx1000");
+				if (deterministicRandom()->randomInt(0, 1000) == 0)
+					TraceEvent("TransactionCommittedx1000");
 				++self->transactionsCommitted;
 			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) throw;
+				if (e.code() == error_code_actor_cancelled)
+					throw;
 				// ignore failing transactions
 			}
 		}

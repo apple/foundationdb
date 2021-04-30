@@ -66,7 +66,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 		return _start(cx, this);
 	}
 
-	 Future<bool> check(Database const& cx) override {
+	Future<bool> check(Database const& cx) override {
 		if (clientId) {
 			return true;
 		}
@@ -98,16 +98,17 @@ struct IncrementalBackupWorkload : TestWorkload {
 				if (!backupContainer.isValid()) {
 					TraceEvent("IBackupCheckListContainersAttempt");
 					state std::vector<std::string> containers =
-						wait(IBackupContainer::listContainers(self->backupDir.toString()));
+					    wait(IBackupContainer::listContainers(self->backupDir.toString()));
 					TraceEvent("IBackupCheckListContainersSuccess")
-						.detail("Size", containers.size())
-						.detail("First", containers.front());
+					    .detail("Size", containers.size())
+					    .detail("First", containers.front());
 					if (containers.size()) {
 						backupContainer = IBackupContainer::openContainer(containers.front());
 					}
 				}
 				state bool e = wait(backupContainer->exists());
-				if (e) break;
+				if (e)
+					break;
 				wait(delay(5.0));
 			}
 			state int tries = 0;
@@ -119,9 +120,12 @@ struct IncrementalBackupWorkload : TestWorkload {
 				    .detail("ContiguousLogEndVersion",
 				            desc.contiguousLogEnd.present() ? desc.contiguousLogEnd.get() : invalidVersion)
 				    .detail("TargetVersion", v);
-				if (!desc.contiguousLogEnd.present()) continue;
-				if (desc.contiguousLogEnd.get() >= v) break;
-				if (self->waitRetries != -1 && tries > self->waitRetries) break;
+				if (!desc.contiguousLogEnd.present())
+					continue;
+				if (desc.contiguousLogEnd.get() >= v)
+					break;
+				if (self->waitRetries != -1 && tries > self->waitRetries)
+					break;
 				// Avoid spamming requests with a delay
 				wait(delay(5.0));
 			}
@@ -146,8 +150,8 @@ struct IncrementalBackupWorkload : TestWorkload {
 			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 			TraceEvent("IBackupSubmitAttempt");
 			try {
-				wait(self->backupAgent.submitBackup(cx, self->backupDir, 1e8, self->tag.toString(), backupRanges, false,
-				                                    false, true));
+				wait(self->backupAgent.submitBackup(
+				    cx, self->backupDir, 0, 1e8, self->tag.toString(), backupRanges, false, false, true));
 			} catch (Error& e) {
 				TraceEvent("IBackupSubmitError").error(e);
 				if (e.code() != error_code_backup_duplicate) {
@@ -186,8 +190,8 @@ struct IncrementalBackupWorkload : TestWorkload {
 						state Optional<Value> writeFlag = wait(tr->get(writeRecoveryKey));
 						state Optional<Value> versionValue = wait(tr->get(snapshotEndVersionKey));
 						TraceEvent("IBackupCheckSpecialKeys")
-							.detail("WriteRecoveryValue", writeFlag.present() ? writeFlag.get().toString() : "N/A")
-							.detail("EndVersionValue", versionValue.present() ? versionValue.get().toString() : "N/A");
+						    .detail("WriteRecoveryValue", writeFlag.present() ? writeFlag.get().toString() : "N/A")
+						    .detail("EndVersionValue", versionValue.present() ? versionValue.get().toString() : "N/A");
 						if (!versionValue.present()) {
 							TraceEvent("IBackupCheckSpecialKeysFailure");
 							// Snapshot failed to write to special keys, possibly due to snapshot itself failing
@@ -212,10 +216,21 @@ struct IncrementalBackupWorkload : TestWorkload {
 			    .detail("Size", containers.size())
 			    .detail("First", containers.front());
 			state Key backupURL = Key(containers.front());
-			TraceEvent("IBackupRestoreAttempt")
-				.detail("BeginVersion", beginVersion);
-			wait(success(self->backupAgent.restore(cx, cx, Key(self->tag.toString()), backupURL, true, invalidVersion,
-			                                       true, normalKeys, Key(), Key(), true, true, beginVersion)));
+			TraceEvent("IBackupRestoreAttempt").detail("BeginVersion", beginVersion);
+			wait(success(self->backupAgent.restore(cx,
+			                                       cx,
+			                                       Key(self->tag.toString()),
+			                                       backupURL,
+			                                       true,
+			                                       invalidVersion,
+			                                       true,
+			                                       normalKeys,
+			                                       Key(),
+			                                       Key(),
+			                                       true,
+			                                       true,
+			                                       false,
+			                                       beginVersion)));
 			TraceEvent("IBackupRestoreSuccess");
 		}
 		return Void();

@@ -35,7 +35,8 @@ struct Notified {
 	explicit Notified(ValueType v = 0) { val = v; }
 
 	[[nodiscard]] Future<Void> whenAtLeast(const ValueType& limit) {
-		if (val >= limit) return Void();
+		if (val >= limit)
+			return Void();
 		Promise<Void> p;
 		waiting.push(std::make_pair(limit, p));
 		return p.getFuture();

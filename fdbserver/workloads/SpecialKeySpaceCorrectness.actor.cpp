@@ -18,8 +18,10 @@
  * limitations under the License.
  */
 
-#include <boost/algorithm/string.hpp>
+#include "boost/lexical_cast.hpp"
+#include "boost/algorithm/string.hpp"
 
+#include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -27,6 +29,7 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/IRandom.h"
 #include "flow/actorcompiler.h"
 
 struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
@@ -79,7 +82,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			self->impls.push_back(std::make_shared<SKSCTestImpl>(KeyRangeRef(startKey, endKey)));
 			// Although there are already ranges registered, the testing range will replace them
 			cx->specialKeySpace->registerKeyRange(SpecialKeySpace::MODULE::TESTONLY,
-			                                      SpecialKeySpace::IMPLTYPE::READWRITE, self->keys.back(),
+			                                      SpecialKeySpace::IMPLTYPE::READWRITE,
+			                                      self->keys.back(),
 			                                      self->impls.back().get());
 			// generate keys in each key range
 			int keysInRange = deterministicRandom()->randomInt(self->minKeysPerRange, self->maxKeysPerRange + 1);
@@ -95,9 +99,11 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		testRywLifetime(cx);
 		wait(timeout(self->testSpecialKeySpaceErrors(cx, self) && self->getRangeCallActor(cx, self) &&
 		                 testConflictRanges(cx, /*read*/ true, self) && testConflictRanges(cx, /*read*/ false, self),
-		             self->testDuration, Void()));
+		             self->testDuration,
+		             Void()));
 		// Only use one client to avoid potential conflicts on changing cluster configuration
-		if (self->clientId == 0) wait(self->managementApiCorrectnessActor(cx, self));
+		if (self->clientId == 0)
+			wait(self->managementApiCorrectnessActor(cx, self));
 		return Void();
 	}
 
@@ -288,7 +294,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			    CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_special_keys_cross_module_read);
 			tx->reset();
 		}
@@ -299,7 +306,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			    CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_special_keys_cross_module_read);
 			tx->reset();
 		}
@@ -310,7 +318,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			    CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_special_keys_cross_module_read);
 			tx->reset();
 		}
@@ -355,7 +364,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			                          CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_special_keys_no_module_found);
 			tx->reset();
 		}
@@ -366,7 +376,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			wait(success(tx->getRange(begin, end, CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_special_keys_no_module_found);
 			tx->reset();
 		}
@@ -397,7 +408,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		try {
 			tx->set(LiteralStringRef("\xff\xff/I_am_not_a_range_can_be_written"), ValueRef());
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_special_keys_write_disabled);
 			tx->reset();
 		}
@@ -407,7 +419,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			tx->set(LiteralStringRef("\xff\xff/I_am_not_a_range_can_be_written"), ValueRef());
 			ASSERT(false);
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_special_keys_no_write_module_found);
 			tx->reset();
 		}
@@ -418,7 +431,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			                      SpecialKeySpace::getManamentApiCommandRange("failed").end));
 			ASSERT(false);
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_special_keys_cross_module_clear);
 			tx->reset();
 		}
@@ -430,7 +444,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			    wait(tx->getRange(startKeySelector, endKeySelector, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_key_outside_legal_range);
 			tx->reset();
 		}
@@ -444,7 +459,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			if (result.size()) {
 				state KeyValueRef entry = deterministicRandom()->randomChoice(result);
 				Optional<Value> singleRes = wait(tx->get(entry.key));
-				if (singleRes.present()) ASSERT(singleRes.get() == entry.value);
+				if (singleRes.present())
+					ASSERT(singleRes.get() == entry.value);
 			}
 			tx->reset();
 		} catch (Error& e) {
@@ -507,7 +523,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			try {
 				wait(tx->commit());
 			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) throw;
+				if (e.code() == error_code_actor_cancelled)
+					throw;
 				return Void();
 			}
 			TEST(true); // Read write conflict range of committed transaction
@@ -516,7 +533,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			wait(success(tx->get(LiteralStringRef("\xff\xff/1314109/i_hope_this_isn't_registered"))));
 			ASSERT(false);
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_special_keys_no_module_found);
 		}
 		for (int i = 0; i < self->conflictRangeSizeFactor; ++i) {
@@ -526,7 +544,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			loop {
 				begin = firstGreaterOrEqual(deterministicRandom()->randomChoice(keys));
 				end = firstGreaterOrEqual(deterministicRandom()->randomChoice(keys));
-				if (begin.getKey() < end.getKey()) break;
+				if (begin.getKey() < end.getKey())
+					break;
 			}
 			bool reverse = deterministicRandom()->coinflip();
 
@@ -584,7 +603,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				had_error = true;
 				++self->wrongResults;
 			}
-			if (had_error) break;
+			if (had_error)
+				break;
 		}
 		return Void();
 	}
@@ -634,7 +654,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			wait(tx->commit());
 			ASSERT(false);
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			if (e.code() == error_code_special_keys_api_failure) {
 				Optional<Value> errorMsg =
 				    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
@@ -702,7 +723,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					TraceEvent(SevDebug, "EmptyWorkerListInSetClassTest");
 				}
 			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) throw;
+				if (e.code() == error_code_actor_cancelled)
+					throw;
 				if (e.code() == error_code_special_keys_api_failure) {
 					Optional<Value> errorMsg =
 					    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
@@ -768,7 +790,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					    .detail("Present", class_source.present())
 					    .detail("ClassSource", class_source.present() ? class_source.get().toString() : "__Nothing");
 					// Very rarely, we get an empty worker list, thus no class_source data
-					if (class_source.present()) ASSERT(class_source.get() == LiteralStringRef("set_class"));
+					if (class_source.present())
+						ASSERT(class_source.get() == LiteralStringRef("set_class"));
 					tx->reset();
 				} else {
 					// If no worker process returned, skip the test
@@ -814,7 +837,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			tx->reset();
 			Standalone<RangeResultRef> res = wait(tx->getRange(normalKeys, 1));
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			ASSERT(e.code() == error_code_database_locked);
 		}
 		// make sure we unlock the database
@@ -896,8 +920,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				                     .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"))));
 				ASSERT(coordinator_processes_key.present());
 				std::vector<std::string> process_addresses;
-				boost::split(process_addresses, coordinator_processes_key.get().toString(),
-				             [](char c) { return c == ','; });
+				boost::split(
+				    process_addresses, coordinator_processes_key.get().toString(), [](char c) { return c == ','; });
 				ASSERT(process_addresses.size() == cs.coordinators().size());
 				// compare the coordinator process network addresses one by one
 				for (const auto& network_address : cs.coordinators()) {
@@ -927,8 +951,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					    wait(tx->get(LiteralStringRef("processes")
 					                     .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"))));
 					ASSERT(processes_key.present());
-					boost::split(old_coordinators_processes, processes_key.get().toString(),
-					             [](char c) { return c == ','; });
+					boost::split(
+					    old_coordinators_processes, processes_key.get().toString(), [](char c) { return c == ','; });
 					// pick up one non-coordinator process if possible
 					vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
 					TraceEvent(SevDebug, "CoordinatorsManualChange")
@@ -938,7 +962,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 						loop {
 							auto worker = deterministicRandom()->randomChoice(workers);
 							new_coordinator_process = worker.address.toString();
-							if (std::find(old_coordinators_processes.begin(), old_coordinators_processes.end(),
+							if (std::find(old_coordinators_processes.begin(),
+							              old_coordinators_processes.end(),
 							              worker.address.toString()) == old_coordinators_processes.end()) {
 								break;
 							}
@@ -1014,7 +1039,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					// verify the coordinators' addresses
 					for (const auto& network_address : cs.coordinators()) {
 						std::string address_str = network_address.toString();
-						ASSERT(std::find(old_coordinators_processes.begin(), old_coordinators_processes.end(),
+						ASSERT(std::find(old_coordinators_processes.begin(),
+						                 old_coordinators_processes.end(),
 						                 address_str) != old_coordinators_processes.end() ||
 						       new_coordinator_process == address_str);
 					}
@@ -1069,6 +1095,335 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 						}
 						wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 					}
+				}
+			}
+		}
+		// advanceversion
+		try {
+			Version v1 = wait(tx->getReadVersion());
+			TraceEvent(SevDebug, "InitialReadVersion").detail("Version", v1);
+			state Version v2 = 2 * v1;
+			loop {
+				try {
+					// loop until the grv is larger than the set version
+					Version v3 = wait(tx->getReadVersion());
+					if (v3 > v2) {
+						TraceEvent(SevDebug, "AdvanceVersionSuccess").detail("Version", v3);
+						break;
+					}
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					// force the cluster to recover at v2
+					tx->set(SpecialKeySpace::getManagementApiCommandPrefix("advanceversion"), std::to_string(v2));
+					wait(tx->commit());
+					ASSERT(false); // Should fail with commit_unknown_result
+				} catch (Error& e) {
+					TraceEvent(SevDebug, "AdvanceVersionCommitFailure").error(e);
+					wait(tx->onError(e));
+				}
+			}
+			tx->reset();
+		} catch (Error& e) {
+			wait(tx->onError(e));
+		}
+		// profile client get
+		loop {
+			try {
+				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				// client_txn_sample_rate
+				state Optional<Value> txnSampleRate =
+				    wait(tx->get(LiteralStringRef("client_txn_sample_rate")
+				                     .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile"))));
+				ASSERT(txnSampleRate.present());
+				Optional<Value> txnSampleRateKey = wait(tx->get(fdbClientInfoTxnSampleRate));
+				if (txnSampleRateKey.present()) {
+					const double sampleRateDbl =
+					    BinaryReader::fromStringRef<double>(txnSampleRateKey.get(), Unversioned());
+					if (!std::isinf(sampleRateDbl)) {
+						ASSERT(txnSampleRate.get().toString() == boost::lexical_cast<std::string>(sampleRateDbl));
+					} else {
+						ASSERT(txnSampleRate.get().toString() == "default");
+					}
+				} else {
+					ASSERT(txnSampleRate.get().toString() == "default");
+				}
+				// client_txn_size_limit
+				state Optional<Value> txnSizeLimit =
+				    wait(tx->get(LiteralStringRef("client_txn_size_limit")
+				                     .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile"))));
+				ASSERT(txnSizeLimit.present());
+				Optional<Value> txnSizeLimitKey = wait(tx->get(fdbClientInfoTxnSizeLimit));
+				if (txnSizeLimitKey.present()) {
+					const int64_t sizeLimit =
+					    BinaryReader::fromStringRef<int64_t>(txnSizeLimitKey.get(), Unversioned());
+					if (sizeLimit != -1) {
+						ASSERT(txnSizeLimit.get().toString() == boost::lexical_cast<std::string>(sizeLimit));
+					} else {
+						ASSERT(txnSizeLimit.get().toString() == "default");
+					}
+				} else {
+					ASSERT(txnSizeLimit.get().toString() == "default");
+				}
+				tx->reset();
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevDebug, "ProfileClientGet").error(e);
+				wait(tx->onError(e));
+			}
+		}
+		{
+			state double r_sample_rate = deterministicRandom()->random01();
+			state int64_t r_size_limit = deterministicRandom()->randomInt64(1e3, 1e6);
+			// update the sample rate and size limit
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tx->set(LiteralStringRef("client_txn_sample_rate")
+					            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile")),
+					        Value(boost::lexical_cast<std::string>(r_sample_rate)));
+					tx->set(LiteralStringRef("client_txn_size_limit")
+					            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile")),
+					        Value(boost::lexical_cast<std::string>(r_size_limit)));
+					wait(tx->commit());
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					wait(tx->onError(e));
+				}
+			}
+			// commit successfully, verify the system key changed
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					Optional<Value> sampleRate = wait(tx->get(fdbClientInfoTxnSampleRate));
+					ASSERT(sampleRate.present());
+					ASSERT(r_sample_rate == BinaryReader::fromStringRef<double>(sampleRate.get(), Unversioned()));
+					Optional<Value> sizeLimit = wait(tx->get(fdbClientInfoTxnSizeLimit));
+					ASSERT(sizeLimit.present());
+					ASSERT(r_size_limit == BinaryReader::fromStringRef<int64_t>(sizeLimit.get(), Unversioned()));
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					wait(tx->onError(e));
+				}
+			}
+			// Change back to default
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tx->set(LiteralStringRef("client_txn_sample_rate")
+					            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile")),
+					        LiteralStringRef("default"));
+					tx->set(LiteralStringRef("client_txn_size_limit")
+					            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile")),
+					        LiteralStringRef("default"));
+					wait(tx->commit());
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					wait(tx->onError(e));
+				}
+			}
+			// Test invalid values
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tx->set((deterministicRandom()->coinflip() ? LiteralStringRef("client_txn_sample_rate")
+					                                           : LiteralStringRef("client_txn_size_limit"))
+					            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile")),
+					        LiteralStringRef("invalid_value"));
+					wait(tx->commit());
+					ASSERT(false);
+				} catch (Error& e) {
+					if (e.code() == error_code_special_keys_api_failure) {
+						Optional<Value> errorMsg =
+						    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
+						ASSERT(errorMsg.present());
+						std::string errorStr;
+						auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+						auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+						// special_key_space_management_api_error_msg schema validation
+						ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+						ASSERT(valueObj["command"].get_str() == "profile" && !valueObj["retriable"].get_bool());
+						tx->reset();
+						break;
+					} else {
+						wait(tx->onError(e));
+					}
+					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				}
+			}
+		}
+		// data_distribution & maintenance get
+		loop {
+			try {
+				// maintenance
+				Standalone<RangeResultRef> maintenanceKVs = wait(
+				    tx->getRange(SpecialKeySpace::getManamentApiCommandRange("maintenance"), CLIENT_KNOBS->TOO_MANY));
+				// By default, no maintenance is going on
+				ASSERT(!maintenanceKVs.more && !maintenanceKVs.size());
+				// datadistribution
+				Standalone<RangeResultRef> ddKVs = wait(tx->getRange(
+				    SpecialKeySpace::getManamentApiCommandRange("datadistribution"), CLIENT_KNOBS->TOO_MANY));
+				// By default, data_distribution/mode := "-1"
+				ASSERT(!ddKVs.more && ddKVs.size() == 1);
+				ASSERT(ddKVs[0].key == LiteralStringRef("mode").withPrefix(
+				                           SpecialKeySpace::getManagementApiCommandPrefix("datadistribution")));
+				ASSERT(ddKVs[0].value == Value(boost::lexical_cast<std::string>(-1)));
+				tx->reset();
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevDebug, "MaintenanceGet").error(e);
+				wait(tx->onError(e));
+			}
+		}
+		// maintenance set
+		{
+			// Make sure setting more than one zone as maintenance will fail
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tx->set(Key(deterministicRandom()->randomAlphaNumeric(8))
+					            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("maintenance")),
+					        Value(boost::lexical_cast<std::string>(deterministicRandom()->randomInt(1, 100))));
+					// make sure this is a different zone id
+					tx->set(Key(deterministicRandom()->randomAlphaNumeric(9))
+					            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("maintenance")),
+					        Value(boost::lexical_cast<std::string>(deterministicRandom()->randomInt(1, 100))));
+					wait(tx->commit());
+					ASSERT(false);
+				} catch (Error& e) {
+					TraceEvent(SevDebug, "MaintenanceSetMoreThanOneZone").error(e);
+					if (e.code() == error_code_special_keys_api_failure) {
+						Optional<Value> errorMsg =
+						    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
+						ASSERT(errorMsg.present());
+						std::string errorStr;
+						auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+						auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+						// special_key_space_management_api_error_msg schema validation
+						ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+						ASSERT(valueObj["command"].get_str() == "maintenance" && !valueObj["retriable"].get_bool());
+						TraceEvent(SevDebug, "MaintenanceSetMoreThanOneZone")
+						    .detail("ErrorMessage", valueObj["message"].get_str());
+						tx->reset();
+						break;
+					} else {
+						wait(tx->onError(e));
+					}
+					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				}
+			}
+			// Disable DD for SS failures
+			state int ignoreSSFailuresRetry = 0;
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tx->set(ignoreSSFailuresZoneString.withPrefix(
+					            SpecialKeySpace::getManagementApiCommandPrefix("maintenance")),
+					        Value(boost::lexical_cast<std::string>(0)));
+					wait(tx->commit());
+					tx->reset();
+					ignoreSSFailuresRetry++;
+					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				} catch (Error& e) {
+					TraceEvent(SevDebug, "MaintenanceDDIgnoreSSFailures").error(e);
+					// the second commit will fail since maintenance not allowed to use while DD disabled for SS
+					// failures
+					if (e.code() == error_code_special_keys_api_failure) {
+						Optional<Value> errorMsg =
+						    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
+						ASSERT(errorMsg.present());
+						std::string errorStr;
+						auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+						auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+						// special_key_space_management_api_error_msg schema validation
+						ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+						ASSERT(valueObj["command"].get_str() == "maintenance" && !valueObj["retriable"].get_bool());
+						ASSERT(ignoreSSFailuresRetry > 0);
+						TraceEvent(SevDebug, "MaintenanceDDIgnoreSSFailures")
+						    .detail("Retry", ignoreSSFailuresRetry)
+						    .detail("ErrorMessage", valueObj["message"].get_str());
+						tx->reset();
+						break;
+					} else {
+						wait(tx->onError(e));
+					}
+					ignoreSSFailuresRetry++;
+					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				}
+			}
+			// set dd mode to 0 and disable DD for rebalance
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					KeyRef ddPrefix = SpecialKeySpace::getManagementApiCommandPrefix("datadistribution");
+					tx->set(LiteralStringRef("mode").withPrefix(ddPrefix), LiteralStringRef("0"));
+					tx->set(LiteralStringRef("rebalance_ignored").withPrefix(ddPrefix), Value());
+					wait(tx->commit());
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					TraceEvent(SevDebug, "DataDistributionDisableModeAndRebalance").error(e);
+					wait(tx->onError(e));
+				}
+			}
+			// verify underlying system keys are consistent with the change
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					// check DD disabled for SS failures
+					Optional<Value> val1 = wait(tx->get(healthyZoneKey));
+					ASSERT(val1.present());
+					auto healthyZone = decodeHealthyZoneValue(val1.get());
+					ASSERT(healthyZone.first == ignoreSSFailuresZoneString);
+					// check DD mode
+					Optional<Value> val2 = wait(tx->get(dataDistributionModeKey));
+					ASSERT(val2.present());
+					// mode should be set to 0
+					ASSERT(BinaryReader::fromStringRef<int>(val2.get(), Unversioned()) == 0);
+					// check DD disabled for rebalance
+					Optional<Value> val3 = wait(tx->get(rebalanceDDIgnoreKey));
+					// default value "on"
+					ASSERT(val3.present() && val3.get() == LiteralStringRef("on"));
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					wait(tx->onError(e));
+				}
+			}
+			// then, clear all changes
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tx->clear(ignoreSSFailuresZoneString.withPrefix(
+					    SpecialKeySpace::getManagementApiCommandPrefix("maintenance")));
+					KeyRef ddPrefix = SpecialKeySpace::getManagementApiCommandPrefix("datadistribution");
+					tx->clear(LiteralStringRef("mode").withPrefix(ddPrefix));
+					tx->clear(LiteralStringRef("rebalance_ignored").withPrefix(ddPrefix));
+					wait(tx->commit());
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					wait(tx->onError(e));
+				}
+			}
+			// verify all changes are cleared
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					// check DD SSFailures key
+					Optional<Value> val1 = wait(tx->get(healthyZoneKey));
+					ASSERT(!val1.present());
+					// check DD mode
+					Optional<Value> val2 = wait(tx->get(dataDistributionModeKey));
+					ASSERT(!val2.present());
+					// check DD rebalance key
+					Optional<Value> val3 = wait(tx->get(rebalanceDDIgnoreKey));
+					ASSERT(!val3.present());
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					wait(tx->onError(e));
 				}
 			}
 		}

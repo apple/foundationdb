@@ -97,6 +97,10 @@ if(GO_EXECUTABLE AND NOT WIN32)
 else()
   set(WITH_GO OFF)
 endif()
+if (USE_SANITIZER)
+  # Disable building go for sanitizers, since _stacktester doesn't link properly
+  set(WITH_GO OFF)
+endif()
 
 ################################################################################
 # Ruby

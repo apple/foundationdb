@@ -24,6 +24,7 @@
 
 #include <cinttypes>
 #include "flow/SimpleOpt.h"
+#include "flow/TLSConfig.actor.h"
 
 namespace file_converter {
 
@@ -31,6 +32,7 @@ namespace file_converter {
 enum {
 	OPT_CONTAINER,
 	OPT_BEGIN_VERSION,
+	OPT_BLOB_CREDENTIALS,
 	OPT_CRASHONERROR,
 	OPT_END_VERSION,
 	OPT_TRACE,
@@ -55,12 +57,16 @@ CSimpleOpt::SOption gConverterOptions[] = { { OPT_CONTAINER, "-r", SO_REQ_SEP },
 	                                        { OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	                                        { OPT_INPUT_FILE, "-i", SO_REQ_SEP },
 	                                        { OPT_INPUT_FILE, "--input", SO_REQ_SEP },
+	                                        { OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
+#ifndef TLS_DISABLED
+	                                        TLS_OPTION_FLAGS
+#endif
 	                                        { OPT_BUILD_FLAGS, "--build_flags", SO_NONE },
 	                                        { OPT_HELP, "-?", SO_NONE },
 	                                        { OPT_HELP, "-h", SO_NONE },
 	                                        { OPT_HELP, "--help", SO_NONE },
 	                                        SO_END_OF_OPTIONS };
 
-}  // namespace file_converter
+} // namespace file_converter
 
-#endif  // FDBBACKUP_FILECONVERTER_H
+#endif // FDBBACKUP_FILECONVERTER_H

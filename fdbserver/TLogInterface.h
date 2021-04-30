@@ -37,27 +37,32 @@ struct TLogInterface {
 	UID uniqueID;
 	UID sharedTLogID;
 
-	RequestStream< struct TLogPeekRequest > peekMessages;
-	RequestStream< struct TLogPopRequest > popMessages;
+	RequestStream<struct TLogPeekRequest> peekMessages;
+	RequestStream<struct TLogPopRequest> popMessages;
 
-	RequestStream< struct TLogCommitRequest > commit;
-	RequestStream< ReplyPromise< struct TLogLockResult > > lock; // first stage of database recovery
-	RequestStream< struct TLogQueuingMetricsRequest > getQueuingMetrics;
-	RequestStream< struct TLogConfirmRunningRequest > confirmRunning; // used for getReadVersion requests from client
+	RequestStream<struct TLogCommitRequest> commit;
+	RequestStream<ReplyPromise<struct TLogLockResult>> lock; // first stage of database recovery
+	RequestStream<struct TLogQueuingMetricsRequest> getQueuingMetrics;
+	RequestStream<struct TLogConfirmRunningRequest> confirmRunning; // used for getReadVersion requests from client
 	RequestStream<ReplyPromise<Void>> waitFailure;
-	RequestStream< struct TLogRecoveryFinishedRequest > recoveryFinished;
-	RequestStream< struct TLogDisablePopRequest> disablePopRequest;
-	RequestStream< struct TLogEnablePopRequest> enablePopRequest;
-	RequestStream< struct TLogSnapRequest> snapRequest;
+	RequestStream<struct TLogRecoveryFinishedRequest> recoveryFinished;
+	RequestStream<struct TLogDisablePopRequest> disablePopRequest;
+	RequestStream<struct TLogEnablePopRequest> enablePopRequest;
+	RequestStream<struct TLogSnapRequest> snapRequest;
 
 	TLogInterface() {}
-	explicit TLogInterface(const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), filteredLocality(locality) { sharedTLogID = uniqueID; }
-	TLogInterface(UID sharedTLogID, const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), sharedTLogID(sharedTLogID), filteredLocality(locality) {}
-	TLogInterface(UID uniqueID, UID sharedTLogID, const LocalityData& locality) : uniqueID(uniqueID), sharedTLogID(sharedTLogID), filteredLocality(locality) {}
+	explicit TLogInterface(const LocalityData& locality)
+	  : uniqueID(deterministicRandom()->randomUniqueID()), filteredLocality(locality) {
+		sharedTLogID = uniqueID;
+	}
+	TLogInterface(UID sharedTLogID, const LocalityData& locality)
+	  : uniqueID(deterministicRandom()->randomUniqueID()), sharedTLogID(sharedTLogID), filteredLocality(locality) {}
+	TLogInterface(UID uniqueID, UID sharedTLogID, const LocalityData& locality)
+	  : uniqueID(uniqueID), sharedTLogID(sharedTLogID), filteredLocality(locality) {}
 	UID id() const { return uniqueID; }
 	UID getSharedTLogID() const { return sharedTLogID; }
 	std::string toString() const { return id().shortString(); }
-	bool operator == ( TLogInterface const& r ) const { return id() == r.id(); }
+	bool operator==(TLogInterface const& r) const { return id() == r.id(); }
 	NetworkAddress address() const { return peekMessages.getEndpoint().getPrimaryAddress(); }
 	Optional<NetworkAddress> secondaryAddress() const { return peekMessages.getEndpoint().addresses.secondaryAddress; }
 
@@ -77,23 +82,29 @@ struct TLogInterface {
 		FlowTransport::transport().addEndpoints(streams);
 	}
 
-	template <class Ar> 
-	void serialize( Ar& ar ) {
+	template <class Ar>
+	void serialize(Ar& ar) {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.isDeserializing || uniqueID != UID());
 		}
 		serializer(ar, uniqueID, sharedTLogID, filteredLocality, peekMessages);
-		if( Ar::isDeserializing ) {
-			popMessages = RequestStream< struct TLogPopRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(1) );
-			commit = RequestStream< struct TLogCommitRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(2) );
-			lock = RequestStream< ReplyPromise< struct TLogLockResult > >( peekMessages.getEndpoint().getAdjustedEndpoint(3) );
-			getQueuingMetrics = RequestStream< struct TLogQueuingMetricsRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(4) );
-			confirmRunning = RequestStream< struct TLogConfirmRunningRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(5) );
-			waitFailure = RequestStream< ReplyPromise<Void> >( peekMessages.getEndpoint().getAdjustedEndpoint(6) );
-			recoveryFinished = RequestStream< struct TLogRecoveryFinishedRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(7) );
-			disablePopRequest = RequestStream< struct TLogDisablePopRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(8) );
-			enablePopRequest = RequestStream< struct TLogEnablePopRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(9) );
-			snapRequest = RequestStream< struct TLogSnapRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(10) );
+		if (Ar::isDeserializing) {
+			popMessages = RequestStream<struct TLogPopRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(1));
+			commit = RequestStream<struct TLogCommitRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(2));
+			lock =
+			    RequestStream<ReplyPromise<struct TLogLockResult>>(peekMessages.getEndpoint().getAdjustedEndpoint(3));
+			getQueuingMetrics =
+			    RequestStream<struct TLogQueuingMetricsRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(4));
+			confirmRunning =
+			    RequestStream<struct TLogConfirmRunningRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(5));
+			waitFailure = RequestStream<ReplyPromise<Void>>(peekMessages.getEndpoint().getAdjustedEndpoint(6));
+			recoveryFinished =
+			    RequestStream<struct TLogRecoveryFinishedRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(7));
+			disablePopRequest =
+			    RequestStream<struct TLogDisablePopRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(8));
+			enablePopRequest =
+			    RequestStream<struct TLogEnablePopRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(9));
+			snapRequest = RequestStream<struct TLogSnapRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(10));
 		}
 	}
 };
@@ -104,8 +115,8 @@ struct TLogRecoveryFinishedRequest {
 
 	TLogRecoveryFinishedRequest() {}
 
-	template <class Ar> 
-	void serialize( Ar& ar ) {
+	template <class Ar>
+	void serialize(Ar& ar) {
 		serializer(ar, reply);
 	}
 };
@@ -116,7 +127,7 @@ struct TLogLockResult {
 	Version knownCommittedVersion;
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
+	void serialize(Ar& ar) {
 		serializer(ar, end, knownCommittedVersion);
 	}
 };
@@ -127,10 +138,10 @@ struct TLogConfirmRunningRequest {
 	ReplyPromise<Void> reply;
 
 	TLogConfirmRunningRequest() {}
-	TLogConfirmRunningRequest( Optional<UID> debugID ) : debugID(debugID) {}
+	TLogConfirmRunningRequest(Optional<UID> debugID) : debugID(debugID) {}
 
-	template <class Ar> 
-	void serialize( Ar& ar ) {
+	template <class Ar>
+	void serialize(Ar& ar) {
 		serializer(ar, debugID, reply);
 	}
 };
@@ -141,7 +152,8 @@ struct VerUpdateRef {
 	bool isPrivateData;
 
 	VerUpdateRef() : isPrivateData(false), version(invalidVersion) {}
-	VerUpdateRef( Arena& to, const VerUpdateRef& from ) : version(from.version), mutations( to, from.mutations ), isPrivateData( from.isPrivateData ) {}
+	VerUpdateRef(Arena& to, const VerUpdateRef& from)
+	  : version(from.version), mutations(to, from.mutations), isPrivateData(from.isPrivateData) {}
 	int expectedSize() const { return mutations.expectedSize(); }
 
 	MutationRef push_back_deep(Arena& arena, const MutationRef& m) {
@@ -150,7 +162,7 @@ struct VerUpdateRef {
 	}
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
+	void serialize(Ar& ar) {
 		serializer(ar, version, mutations, isPrivateData);
 	}
 };
@@ -182,7 +194,12 @@ struct TLogPeekRequest {
 	Optional<std::pair<UID, int>> sequence;
 	ReplyPromise<TLogPeekReply> reply;
 
-	TLogPeekRequest( Version begin, Tag tag, bool returnIfBlocked, bool onlySpilled, Optional<std::pair<UID, int>> sequence = Optional<std::pair<UID, int>>() ) : begin(begin), tag(tag), returnIfBlocked(returnIfBlocked), sequence(sequence), onlySpilled(onlySpilled) {}
+	TLogPeekRequest(Version begin,
+	                Tag tag,
+	                bool returnIfBlocked,
+	                bool onlySpilled,
+	                Optional<std::pair<UID, int>> sequence = Optional<std::pair<UID, int>>())
+	  : begin(begin), tag(tag), returnIfBlocked(returnIfBlocked), sequence(sequence), onlySpilled(onlySpilled) {}
 	TLogPeekRequest() {}
 
 	template <class Ar>
@@ -199,7 +216,8 @@ struct TLogPopRequest {
 	Tag tag;
 	ReplyPromise<Void> reply;
 
-	TLogPopRequest( Version to, Version durableKnownCommittedVersion, Tag tag ) : to(to), durableKnownCommittedVersion(durableKnownCommittedVersion), tag(tag) {}
+	TLogPopRequest(Version to, Version durableKnownCommittedVersion, Tag tag)
+	  : to(to), durableKnownCommittedVersion(durableKnownCommittedVersion), tag(tag) {}
 	TLogPopRequest() {}
 
 	template <class Ar>
@@ -213,11 +231,9 @@ struct TagMessagesRef {
 	VectorRef<int> messageOffsets;
 
 	TagMessagesRef() {}
-	TagMessagesRef(Arena &a, const TagMessagesRef &from) : tag(from.tag), messageOffsets(a, from.messageOffsets) {}
+	TagMessagesRef(Arena& a, const TagMessagesRef& from) : tag(from.tag), messageOffsets(a, from.messageOffsets) {}
 
-	size_t expectedSize() const {
-		return messageOffsets.expectedSize();
-	}
+	size_t expectedSize() const { return messageOffsets.expectedSize(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -244,25 +260,42 @@ struct TLogCommitRequest {
 	Arena arena;
 	Version prevVersion, version, knownCommittedVersion, minKnownCommittedVersion;
 
-	StringRef messages;// Each message prefixed by a 4-byte length
+	StringRef messages; // Each message prefixed by a 4-byte length
 
 	ReplyPromise<TLogCommitReply> reply;
 	Optional<UID> debugID;
 
 	TLogCommitRequest() {}
-	TLogCommitRequest( const SpanID& context, const Arena& a, Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, StringRef messages, Optional<UID> debugID )
-		: spanContext(context), arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion), messages(messages), debugID(debugID) {}
+	TLogCommitRequest(const SpanID& context,
+	                  const Arena& a,
+	                  Version prevVersion,
+	                  Version version,
+	                  Version knownCommittedVersion,
+	                  Version minKnownCommittedVersion,
+	                  StringRef messages,
+	                  Optional<UID> debugID)
+	  : spanContext(context), arena(a), prevVersion(prevVersion), version(version),
+	    knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion),
+	    messages(messages), debugID(debugID) {}
 	template <class Ar>
-	void serialize( Ar& ar ) {
-		serializer(ar, prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, messages, reply, arena, debugID, spanContext);
+	void serialize(Ar& ar) {
+		serializer(ar,
+		           prevVersion,
+		           version,
+		           knownCommittedVersion,
+		           minKnownCommittedVersion,
+		           messages,
+		           reply,
+		           arena,
+		           debugID,
+		           spanContext);
 	}
 };
-
 
 struct TLogQueuingMetricsReply {
 	constexpr static FileIdentifier file_identifier = 12206626;
 	double localTime;
-	int64_t instanceID;  // changes if bytesDurable and bytesInput reset
+	int64_t instanceID; // changes if bytesDurable and bytesInput reset
 	int64_t bytesDurable, bytesInput;
 	StorageBytes storageBytes;
 	Version v; // committed version
@@ -323,7 +356,8 @@ struct TLogSnapRequest {
 	UID snapUID;
 	StringRef role;
 
-	TLogSnapRequest(StringRef snapPayload, UID snapUID, StringRef role) : snapPayload(snapPayload), snapUID(snapUID), role(role) {}
+	TLogSnapRequest(StringRef snapPayload, UID snapUID, StringRef role)
+	  : snapPayload(snapPayload), snapUID(snapUID), role(role) {}
 	TLogSnapRequest() = default;
 
 	template <class Ar>

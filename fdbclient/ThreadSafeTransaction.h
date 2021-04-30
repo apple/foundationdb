@@ -27,6 +27,8 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/IClientApi.h"
 
+// An implementation of IDatabase that serializes operations onto the network thread and interacts with the lower-level
+// client APIs exposed by NativeAPI and ReadYourWrites.
 class ThreadSafeDatabase : public IDatabase, public ThreadSafeReferenceCounted<ThreadSafeDatabase> {
 public:
 	~ThreadSafeDatabase() override;
@@ -35,8 +37,17 @@ public:
 	Reference<ITransaction> createTransaction() override;
 
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
+	double getMainThreadBusyness() override;
 
-	ThreadFuture<Void> onConnected();  // Returns after a majority of coordination servers are available and have reported a leader. The cluster file therefore is valid, but the database might be unavailable.
+	// Returns the protocol version reported by the coordinator this client is connected to
+	// If an expected version is given, the future won't return until the protocol version is different than expected
+	// Note: this will never return if the server is running a protocol from FDB 5.0 or older
+	ThreadFuture<ProtocolVersion> getServerProtocol(
+	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) override;
+
+	// Returns after a majority of coordination servers are available and have reported a leader. The
+	// cluster file therefore is valid, but the database might be unavailable.
+	ThreadFuture<Void> onConnected();
 
 	void addref() override { ThreadSafeReferenceCounted<ThreadSafeDatabase>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<ThreadSafeDatabase>::delref(); }
@@ -48,30 +59,47 @@ public:
 private:
 	friend class ThreadSafeTransaction;
 	DatabaseContext* db;
-public:  // Internal use only
-	ThreadSafeDatabase( std::string connFilename, int apiVersion );
-	ThreadSafeDatabase( DatabaseContext* db ) : db(db) {}
+
+public: // Internal use only
+	ThreadSafeDatabase(std::string connFilename, int apiVersion);
+	ThreadSafeDatabase(DatabaseContext* db) : db(db) {}
 	DatabaseContext* unsafeGetPtr() const { return db; }
 };
 
+// An implementation of ITransaction that serializes operations onto the network thread and interacts with the
+// lower-level client APIs exposed by NativeAPI and ReadYourWrites.
 class ThreadSafeTransaction : public ITransaction, ThreadSafeReferenceCounted<ThreadSafeTransaction>, NonCopyable {
 public:
 	explicit ThreadSafeTransaction(DatabaseContext* cx);
 	~ThreadSafeTransaction() override;
 
 	void cancel() override;
-	void setVersion( Version v ) override;
+	void setVersion(Version v) override;
 	ThreadFuture<Version> getReadVersion() override;
 
-	ThreadFuture< Optional<Value> > get( const KeyRef& key, bool snapshot = false ) override;
-	ThreadFuture< Key > getKey( const KeySelectorRef& key, bool snapshot = false ) override;
-	ThreadFuture< Standalone<RangeResultRef> > getRange( const KeySelectorRef& begin, const KeySelectorRef& end, int limit, bool snapshot = false, bool reverse = false ) override;
-	ThreadFuture< Standalone<RangeResultRef> > getRange( const KeySelectorRef& begin, const KeySelectorRef& end, GetRangeLimits limits, bool snapshot = false, bool reverse = false ) override;
-	ThreadFuture< Standalone<RangeResultRef> > getRange( const KeyRangeRef& keys, int limit, bool snapshot = false, bool reverse = false ) override {
-		return getRange( firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limit, snapshot, reverse );
+	ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot = false) override;
+	ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false) override;
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin,
+	                                                  const KeySelectorRef& end,
+	                                                  int limit,
+	                                                  bool snapshot = false,
+	                                                  bool reverse = false) override;
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin,
+	                                                  const KeySelectorRef& end,
+	                                                  GetRangeLimits limits,
+	                                                  bool snapshot = false,
+	                                                  bool reverse = false) override;
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys,
+	                                                  int limit,
+	                                                  bool snapshot = false,
+	                                                  bool reverse = false) override {
+		return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limit, snapshot, reverse);
 	}
-	ThreadFuture< Standalone<RangeResultRef> > getRange( const KeyRangeRef& keys, GetRangeLimits limits, bool snapshot = false, bool reverse = false ) override {
-		return getRange( firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse );
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys,
+	                                                  GetRangeLimits limits,
+	                                                  bool snapshot = false,
+	                                                  bool reverse = false) override {
+		return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse);
 	}
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
@@ -79,18 +107,18 @@ public:
 	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
 	                                                                int64_t chunkSize) override;
 
-	void addReadConflictRange( const KeyRangeRef& keys ) override;
+	void addReadConflictRange(const KeyRangeRef& keys) override;
 	void makeSelfConflicting();
 
-	void atomicOp( const KeyRef& key, const ValueRef& value, uint32_t operationType ) override;
-	void set( const KeyRef& key, const ValueRef& value ) override;
-	void clear( const KeyRef& begin, const KeyRef& end) override;
-	void clear( const KeyRangeRef& range ) override;
-	void clear( const KeyRef& key ) override;
+	void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) override;
+	void set(const KeyRef& key, const ValueRef& value) override;
+	void clear(const KeyRef& begin, const KeyRef& end) override;
+	void clear(const KeyRangeRef& range) override;
+	void clear(const KeyRef& key) override;
 
-	ThreadFuture< Void > watch( const KeyRef& key ) override;
+	ThreadFuture<Void> watch(const KeyRef& key) override;
 
-	void addWriteConflictRange( const KeyRangeRef& keys ) override;
+	void addWriteConflictRange(const KeyRangeRef& keys) override;
 
 	ThreadFuture<Void> commit() override;
 	Version getCommittedVersion() override;
@@ -98,10 +126,10 @@ public:
 
 	ThreadFuture<uint64_t> getProtocolVersion();
 
-	void setOption( FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>() ) override;
+	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 
 	ThreadFuture<Void> checkDeferredError();
-	ThreadFuture<Void> onError( Error const& e ) override;
+	ThreadFuture<Void> onError(Error const& e) override;
 
 	// These are to permit use as state variables in actors:
 	ThreadSafeTransaction() : tr(nullptr) {}
@@ -114,14 +142,15 @@ public:
 	void delref() override { ThreadSafeReferenceCounted<ThreadSafeTransaction>::delref(); }
 
 private:
-	ReadYourWritesTransaction *tr;
+	ReadYourWritesTransaction* tr;
 };
 
+// An implementation of IClientApi that serializes operations onto the network thread and interacts with the lower-level
+// client APIs exposed by NativeAPI and ReadYourWrites.
 class ThreadSafeApi : public IClientApi, ThreadSafeReferenceCounted<ThreadSafeApi> {
 public:
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
-	ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath) override;
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	void setupNetwork() override;
@@ -140,7 +169,7 @@ private:
 	int apiVersion;
 	const std::string clientVersion;
 	uint64_t transportId;
-	
+
 	Mutex lock;
 	std::vector<std::pair<void (*)(void*), void*>> threadCompletionHooks;
 };

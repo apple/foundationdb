@@ -1,0 +1,89 @@
+FROM amazonlinux:2.0.20210326.0 as base
+
+RUN yum install -y \
+  bind-utils \
+  curl \
+  jq \
+  less \
+  lsof \
+  nc \
+  net-tools \
+  perf \
+  python38 \
+  python3-pip \
+  strace \
+  tar \
+  traceroute \
+  telnet \
+  tcpdump \
+  vim
+
+#todo: nload, iperf, numademo
+
+COPY misc/tini-amd64.sha256sum /tmp/
+# Adding tini as PID 1 https://github.com/krallin/tini
+ARG TINI_VERSION=v0.19.0
+RUN curl -sLO https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-amd64 && \
+	sha256sum -c /tmp/tini-amd64.sha256sum && \
+  chmod +x tini-amd64 && \
+	mv tini-amd64 /usr/bin/tini
+
+COPY sidecar/requirements.txt /tmp
+RUN pip3 install -r /tmp/requirements.txt
+
+# TODO: Only used by sidecar
+RUN groupadd --gid 4059 fdb && \
+	useradd --gid 4059 --uid 4059 --no-create-home --shell /bin/bash fdb
+
+ARG FDB_VERSION
+
+# These are the output of the current build (not stripped)
+COPY --chown=root bin /usr/bin/
+COPY --chown=root lib/libfdb_c.so /var/fdb/lib/
+RUN mv /var/fdb/lib/libfdb_c.so /var/fdb/lib/libfdb_c_${FDB_VERSION%.*}.so
+RUN ln -s /var/fdb/lib/libfdb_c_${FDB_VERSION%.*}.so /var/fdb/lib/libfdb_c.so
+# -------------------------------------------------
+
+FROM base as foundationdb
+
+COPY release/*.bash /var/fdb/scripts/
+RUN mkdir -p /var/fdb/logs
+
+# TODO: FDB_ADDITIONAL_VERSIONS
+RUN mkdir -p /usr/lib/fdb/multiversion
+
+VOLUME /var/fdb/data
+
+# Runtime Configuration Options
+ENV FDB_PORT 4500
+ENV FDB_CLUSTER_FILE /var/fdb/fdb.cluster
+ENV FDB_NETWORKING_MODE container
+ENV FDB_COORDINATOR ""
+ENV FDB_COORDINATOR_PORT 4500
+ENV FDB_CLUSTER_FILE_CONTENTS ""
+ENV FDB_PROCESS_CLASS unset
+
+ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
+CMD /var/fdb/scripts/fdb.bash
+
+# -------------------------------------------------
+
+FROM base AS sidecar
+
+COPY sidecar/entrypoint.bash /
+COPY sidecar/sidecar.py /
+RUN chmod a+x /sidecar.py /entrypoint.bash
+
+VOLUME /var/input-files
+VOLUME /var/output-files
+
+ARG FDB_VERSION
+
+RUN echo ${FDB_VERSION} ; echo ${FDB_VERSION}> /var/fdb/version
+RUN mkdir -p /var/fdb/lib
+
+ENV LISTEN_PORT 8080
+
+USER fdb
+
+ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/entrypoint.bash"]

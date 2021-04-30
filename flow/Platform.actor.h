@@ -20,12 +20,13 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
+// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
+// version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_PLATFORM_ACTOR_G_H)
-        #define FLOW_PLATFORM_ACTOR_G_H
-        #include "flow/Platform.actor.g.h"
+#define FLOW_PLATFORM_ACTOR_G_H
+#include "flow/Platform.actor.g.h"
 #elif !defined(FLOW_PLATFORM_ACTOR_H)
-        #define FLOW_PLATFORM_ACTOR_H
+#define FLOW_PLATFORM_ACTOR_H
 
 #include <stdlib.h>
 #include <string>
@@ -33,19 +34,19 @@
 
 #include "flow/flow.h"
 #include "flow/Platform.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
-                                 //
+#include "flow/actorcompiler.h" // This must be the last #include.
+//
 using std::vector;
 
 namespace platform {
 // e.g. extension==".fdb", returns filenames relative to directory
-Future<vector<std::string>> listFilesAsync( std::string const& directory, std::string const& extension = "");
+Future<vector<std::string>> listFilesAsync(std::string const& directory, std::string const& extension = "");
 
 // returns directory names relative to directory
-Future<vector<std::string>> listDirectoriesAsync( std::string const& directory );
+Future<vector<std::string>> listDirectoriesAsync(std::string const& directory);
 
-ACTOR Future<Void> findFilesRecursivelyAsync(std::string path, vector<std::string> *out);
-}
+ACTOR Future<Void> findFilesRecursivelyAsync(std::string path, vector<std::string>* out);
+} // namespace platform
 
 #include "flow/unactorcompiler.h"
 #endif

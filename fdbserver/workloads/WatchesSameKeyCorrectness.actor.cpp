@@ -24,52 +24,48 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WatchesSameKeyWorkload : TestWorkload {
 	int numWatches;
 	std::vector<Future<Void>> cases;
 
-	WatchesSameKeyWorkload(WorkloadContext const& wcx)
-		: TestWorkload(wcx)
-	{
-		numWatches = getOption( options, LiteralStringRef("numWatches"), 3 );
+	WatchesSameKeyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+		numWatches = getOption(options, LiteralStringRef("numWatches"), 3);
 	}
 
 	std::string description() const override { return "WatchesSameKeyCorrectness"; }
 
-	Future<Void> setup(Database const& cx) override { 
-		if ( clientId == 0 ) {
-			cases.push_back( case1(cx, LiteralStringRef("foo1"), this) );
-			cases.push_back( case2(cx, LiteralStringRef("foo2"), this) );
-			cases.push_back( case3(cx, LiteralStringRef("foo3"), this) );
-			cases.push_back( case4(cx, LiteralStringRef("foo4"), this) );
-			cases.push_back( case5(cx, LiteralStringRef("foo5"), this) );
-		}
+	Future<Void> setup(Database const& cx) override {
+		cases.push_back(case1(cx, LiteralStringRef("foo1"), this));
+		cases.push_back(case2(cx, LiteralStringRef("foo2"), this));
+		cases.push_back(case3(cx, LiteralStringRef("foo3"), this));
+		cases.push_back(case4(cx, LiteralStringRef("foo4"), this));
+		cases.push_back(case5(cx, LiteralStringRef("foo5"), this));
 		return Void();
 	}
 
-	Future<Void> start(Database const& cx) override { 
-		if (clientId == 0) return waitForAll( cases );
-		return Void();
-	}
+	Future<Void> start(Database const& cx) override { return waitForAll(cases); }
 
 	Future<bool> check(Database const& cx) override {
-		if ( clientId != 0 ) return true;
 		bool ok = true;
-		for( int i = 0; i < cases.size(); i++ ) {
-			if ( cases[i].isError() ) ok = false;
+		for (int i = 0; i < cases.size(); i++) {
+			if (cases[i].isError())
+				ok = false;
 		}
 		cases.clear();
 		return ok;
 	}
 
 	ACTOR static Future<Void> setKeyRandomValue(Database cx, Key key, Optional<Value> val) {
+		// set value at key to val if provided (random otherwise)
 		state ReadYourWritesTransaction tr(cx);
 		loop {
 			try {
-				if (!val.present()) val = Value(deterministicRandom()->randomUniqueID().toString());
-				tr.set(key, val.get());
+				Value valS;
+				if (!val.present()) valS = Value(deterministicRandom()->randomUniqueID().toString());
+				else valS = val.get();
+				tr.set(key, valS);
 				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
@@ -78,19 +74,8 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Optional<Value>> getValue(Database cx, Key key) {
-		state ReadYourWritesTransaction tr(cx);
-		loop {
-			try {
-				Optional<Value> val = wait(tr.get(key));
-				return val;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-
 	ACTOR static Future<Future<Void>> watchKey(Database cx, Key key) {
+		// sets a watch on a key and returns future
 		state ReadYourWritesTransaction tr(cx);
 		loop {
 			try {
@@ -106,7 +91,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 	ACTOR static Future<Void> case1(Database cx, Key key, WatchesSameKeyWorkload* self) {
 		/**
 		 * Tests case 2 in the design doc:
-		 *  - we get a watch that has the same value as a key in the watch map 
+		 *  - we get a watch that has the same value as a key in the watch map
 		 * */
 		state ReadYourWritesTransaction tr(cx);
 		loop {
@@ -114,14 +99,15 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				state std::vector<Future<Void>> watchFutures;
 				state int i;
 
-				for ( i = 0; i < self->numWatches; i++ ) {
+				tr.set(key, Value(deterministicRandom()->randomUniqueID().toString()));
+				for ( i = 0; i < self->numWatches; i++ ) { // set watches for a given k/v pair set above
 					watchFutures.push_back(tr.watch(key));
 				}
 				wait(tr.commit());
 
-				wait( setKeyRandomValue(cx, key, Optional<Value>()) );
-				for ( i = 0; i < watchFutures.size(); i++) {
-					wait( watchFutures[i] );
+				wait(setKeyRandomValue(cx, key, Optional<Value>())); // trigger all watches created above
+				for (i = 0; i < watchFutures.size(); i++) {
+					wait(watchFutures[i]);
 				}
 				return Void();
 			} catch (Error& e) {
@@ -142,16 +128,15 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				state Future<Void> watch1 = wait(watchKey(cx, key));
 				state int i;
 				
-				state Value val = Value( deterministicRandom()->randomUniqueID().toString() );
-				tr.set(key, val);
-				for ( i = 0; i < self->numWatches; i++ ) {
+				tr.set(key, Value( deterministicRandom()->randomUniqueID().toString() ));
+				for ( i = 0; i < self->numWatches; i++ ) { // set watches for a given k/v pair set above
 					watchFutures.push_back(tr.watch(key));
 				}
-				wait ( tr.commit() );
-				wait( watch1 );
-				wait( setKeyRandomValue(cx, key, Optional<Value>()) );
-				for ( i = 0; i < watchFutures.size(); i++) {
-					wait( watchFutures[i] );
+				wait(tr.commit());
+				wait(watch1);
+				wait(setKeyRandomValue(cx, key, Optional<Value>())); // trigger remaining watches
+				for (i = 0; i < watchFutures.size(); i++) {
+					wait(watchFutures[i]);
 				}
 				return Void();
 			} catch (Error& e) {
@@ -166,22 +151,24 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		 * 	- i.e ABA but when the storage server responds the future count == 1 so we do nothing (no refire)
 		 * */
 		state ReadYourWritesTransaction tr(cx);
+		state ReadYourWritesTransaction tr2(cx);
 		loop {
 			try {
-				wait ( setKeyRandomValue(cx, key, Optional<Value>()) );
-				state Optional<Value> val = wait( getValue(cx, key) );
-				state Future<Void> watch1 = wait(watchKey(cx, key));
+				state Value val = deterministicRandom()->randomUniqueID().toString();
+				tr2.set(key, val);
+				state Future<Void> watch1 = tr2.watch(key);
+				wait( tr2.commit() );
 				wait ( setKeyRandomValue(cx, key, Optional<Value>()) );
 				
-				tr.set(key, val.get());
+				tr.set(key, val);
 				state Future<Void> watch2 = tr.watch(key);
-				wait( tr.commit() );
-				
+				wait(tr.commit());
+
 				watch1.cancel();
 				watch2.cancel();
 				return Void();
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				wait(tr.onError(e) && tr2.onError(e));
 			}
 		}
 	}
@@ -192,23 +179,25 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		 * 	- i.e ABA but when the storage server responds the future count > 1 so we refire request to SS
 		 * */
 		state ReadYourWritesTransaction tr(cx);
+		state ReadYourWritesTransaction tr2(cx);
 		loop {
 			try {
+				// watch1 and watch2 are set on the same k/v pair
+				state Value val = deterministicRandom()->randomUniqueID().toString();
+				tr2.set(key, val);
+				state Future<Void> watch1 = tr2.watch(key);
+				wait( tr2.commit() );
 				wait ( setKeyRandomValue(cx, key, Optional<Value>()) );
-				state Optional<Value> val = wait( getValue(cx, key) );
-				state Future<Void> watch1 = wait(watchKey(cx, key));
-				wait ( setKeyRandomValue(cx, key, Optional<Value>()) );
-				
-				tr.set(key, val.get());
+				tr.set(key, val); // trigger ABA (line above changes value and this line changes it back)
 				state Future<Void> watch2 = tr.watch(key);
-				wait( tr.commit() );
+				wait(tr.commit());
 
-				wait( setKeyRandomValue(cx, key, Optional<Value>()) );
-				wait( watch1 );
-				wait( watch2 );
+				wait(setKeyRandomValue(cx, key, Optional<Value>())); // since ABA has occured we need to trigger the watches with a new value
+				wait(watch1);
+				wait(watch2);
 				return Void();
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				wait(tr.onError(e) && tr2.onError(e));
 			}
 		}
 	}
@@ -222,19 +211,18 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		state ReadYourWritesTransaction tr2(cx);
 		loop {
 			try {
-				state Value val1 = Value( deterministicRandom()->randomUniqueID().toString() );
-				state Value val2 = Value( deterministicRandom()->randomUniqueID().toString() );
 				tr1.setOption( FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE );
 				tr2.setOption( FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE );
-				tr1.set(key, val1);
-				tr2.set(key, val2);
+				tr1.set(key, Value( deterministicRandom()->randomUniqueID().toString() ));
+				tr2.set(key, Value( deterministicRandom()->randomUniqueID().toString() ));
 				state Future<Void> watch1 = tr1.watch(key);
 				state Future<Void> watch2 = tr2.watch(key);
-				wait( tr1.commit() && tr2.commit() );
+				// each watch commits with a different value but (hopefully) the same version since there is no write conflict range
+				wait(tr1.commit() && tr2.commit());
 
-				wait( watch1 || watch2 ); // since we enter case 5 at least one of the watches should be fired
-				wait( setKeyRandomValue(cx, key, Optional<Value>()) );
-				wait( watch1 && watch2 );
+				wait(watch1 || watch2); // since we enter case 5 at least one of the watches should be fired
+				wait(setKeyRandomValue(cx, key, Optional<Value>())); // fire the watch that possibly wasn't triggered
+				wait(watch1 && watch2);
 
 				return Void();
 			} catch (Error& e) {

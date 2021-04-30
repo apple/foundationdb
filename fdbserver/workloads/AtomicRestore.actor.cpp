@@ -24,9 +24,9 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
-//A workload which test the correctness of backup and restore process
+// A workload which test the correctness of backup and restore process
 struct AtomicRestoreWorkload : TestWorkload {
 	double startAfter, restoreAfter;
 	bool fastRestore; // true: use fast restore, false: use old style restore
@@ -35,15 +35,14 @@ struct AtomicRestoreWorkload : TestWorkload {
 	Key addPrefix, removePrefix; // Original key will be first applied removePrefix and then applied addPrefix
 	// CAVEAT: When removePrefix is used, we must ensure every key in backup have the removePrefix
 
-	AtomicRestoreWorkload(WorkloadContext const& wcx)
-		: TestWorkload(wcx) {
+	AtomicRestoreWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 
 		startAfter = getOption(options, LiteralStringRef("startAfter"), 10.0);
 		restoreAfter = getOption(options, LiteralStringRef("restoreAfter"), 20.0);
 		fastRestore = getOption(options, LiteralStringRef("fastRestore"), false);
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-		usePartitionedLogs = getOption(options, LiteralStringRef("usePartitionedLogs"),
-		                               deterministicRandom()->random01() < 0.5 ? true : false);
+		usePartitionedLogs = getOption(
+		    options, LiteralStringRef("usePartitionedLogs"), deterministicRandom()->random01() < 0.5 ? true : false);
 
 		addPrefix = getOption(options, LiteralStringRef("addPrefix"), LiteralStringRef(""));
 		removePrefix = getOption(options, LiteralStringRef("removePrefix"), LiteralStringRef(""));
@@ -87,13 +86,18 @@ struct AtomicRestoreWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(Database cx, AtomicRestoreWorkload* self) {
 		state FileBackupAgent backupAgent;
 
-		wait( delay(self->startAfter * deterministicRandom()->random01()) );
+		wait(delay(self->startAfter * deterministicRandom()->random01()));
 		TraceEvent("AtomicRestore_Start").detail("UsePartitionedLog", self->usePartitionedLogs);
 
 		state std::string backupContainer = "file://simfdb/backups/";
 		try {
-			wait(backupAgent.submitBackup(cx, StringRef(backupContainer), deterministicRandom()->randomInt(0, 100),
-			                              BackupAgentBase::getDefaultTagName(), self->backupRanges, false,
+			wait(backupAgent.submitBackup(cx,
+			                              StringRef(backupContainer),
+			                              deterministicRandom()->randomInt(0, 60),
+			                              deterministicRandom()->randomInt(0, 100),
+			                              BackupAgentBase::getDefaultTagName(),
+			                              self->backupRanges,
+			                              false,
 			                              self->usePartitionedLogs));
 		} catch (Error& e) {
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -101,31 +105,32 @@ struct AtomicRestoreWorkload : TestWorkload {
 		}
 
 		TraceEvent("AtomicRestore_Wait");
-		wait(success( backupAgent.waitBackup(cx, BackupAgentBase::getDefaultTagName(), false) ));
+		wait(success(backupAgent.waitBackup(cx, BackupAgentBase::getDefaultTagName(), false)));
 		TraceEvent("AtomicRestore_BackupStart");
-		wait( delay(self->restoreAfter * deterministicRandom()->random01()) );
+		wait(delay(self->restoreAfter * deterministicRandom()->random01()));
 		TraceEvent("AtomicRestore_RestoreStart");
 
 		if (self->fastRestore) { // New fast parallel restore
 			TraceEvent(SevInfo, "AtomicParallelRestore");
-			wait(backupAgent.atomicParallelRestore(cx, BackupAgentBase::getDefaultTag(), self->backupRanges,
-			                                       self->addPrefix, self->removePrefix));
+			wait(backupAgent.atomicParallelRestore(
+			    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, self->addPrefix, self->removePrefix));
 		} else { // Old style restore
 			loop {
 				std::vector<Future<Version>> restores;
 				if (deterministicRandom()->random01() < 0.5) {
 					for (auto& range : self->backupRanges)
-						restores.push_back(backupAgent.atomicRestore(cx, BackupAgentBase::getDefaultTag(), range,
-						                                             StringRef(), StringRef()));
+						restores.push_back(backupAgent.atomicRestore(
+						    cx, BackupAgentBase::getDefaultTag(), range, StringRef(), StringRef()));
 				} else {
-					restores.push_back(backupAgent.atomicRestore(cx, BackupAgentBase::getDefaultTag(),
-					                                             self->backupRanges, StringRef(), StringRef()));
+					restores.push_back(backupAgent.atomicRestore(
+					    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()));
 				}
 				try {
 					wait(waitForAll(restores));
 					break;
 				} catch (Error& e) {
-					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate) throw;
+					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
+						throw;
 				}
 				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 			}
