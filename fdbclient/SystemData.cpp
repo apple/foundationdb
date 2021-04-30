@@ -635,15 +635,17 @@ std::string encodeFailedServersKey(AddressExclusion const& addr) {
 // const KeyRangeRef globalConfigKeys( LiteralStringRef("\xff/globalConfig/"), LiteralStringRef("\xff/globalConfig0") );
 // const KeyRef globalConfigPrefix = globalConfigKeys.begin;
 
-const KeyRangeRef globalConfigDataKeys( LiteralStringRef("\xff/globalConfig/k/"), LiteralStringRef("\xff/globalConfig/k0") );
+const KeyRangeRef globalConfigDataKeys(LiteralStringRef("\xff/globalConfig/k/"),
+                                       LiteralStringRef("\xff/globalConfig/k0"));
 const KeyRef globalConfigKeysPrefix = globalConfigDataKeys.begin;
 
-const KeyRangeRef globalConfigHistoryKeys( LiteralStringRef("\xff/globalConfig/h/"), LiteralStringRef("\xff/globalConfig/h0") );
+const KeyRangeRef globalConfigHistoryKeys(LiteralStringRef("\xff/globalConfig/h/"),
+                                          LiteralStringRef("\xff/globalConfig/h0"));
 const KeyRef globalConfigHistoryPrefix = globalConfigHistoryKeys.begin;
 
 const KeyRef globalConfigVersionKey = LiteralStringRef("\xff/globalConfig/v");
 
-const KeyRangeRef workerListKeys( LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0") );
+const KeyRangeRef workerListKeys(LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0"));
 const KeyRef workerListPrefix = workerListKeys.begin;
 
 const Key workerListKeyFor(StringRef processID) {
@@ -1085,21 +1087,18 @@ const KeyRef writeRecoveryKey = LiteralStringRef("\xff/writeRecovery");
 const ValueRef writeRecoveryKeyTrue = LiteralStringRef("1");
 const KeyRef snapshotEndVersionKey = LiteralStringRef("\xff/snapshotEndVersion");
 
-const KeyRangeRef rangeFeedKeys(
-	LiteralStringRef("\xff\x02/feed/"),
-	LiteralStringRef("\xff\x02/feed0")
-);
+const KeyRangeRef rangeFeedKeys(LiteralStringRef("\xff\x02/feed/"), LiteralStringRef("\xff\x02/feed0"));
 const KeyRef rangeFeedPrefix = rangeFeedKeys.begin;
 const KeyRef rangeFeedPrivatePrefix = LiteralStringRef("\xff\xff\x02/feed/");
 
-const Value rangeFeedValue( KeyRangeRef const& range ) {
+const Value rangeFeedValue(KeyRangeRef const& range) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRangeFeed()));
 	wr << range;
 	return wr.toValue();
 }
-KeyRange decodeRangeFeedValue( ValueRef const& value ) {
+KeyRange decodeRangeFeedValue(ValueRef const& value) {
 	KeyRange range;
-	BinaryReader reader( value, IncludeVersion() );
+	BinaryReader reader(value, IncludeVersion());
 	reader >> range;
 	return range;
 }

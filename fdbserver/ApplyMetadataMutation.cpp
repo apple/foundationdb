@@ -353,8 +353,8 @@ void applyMetadataMutations(SpanID const& spanContext,
 					txnStateStore->set(KeyValueRef(m.param1, m.param2));
 				TEST(true); // Snapshot created, setting writeRecoveryKey in txnStateStore
 			} else if (m.param1.startsWith(rangeFeedPrefix)) {
-				if(toCommit && keyInfo) {
-					KeyRange r = decodeRangeFeedValue( m.param2 );
+				if (toCommit && keyInfo) {
+					KeyRange r = decodeRangeFeedValue(m.param2);
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 					auto ranges = keyInfo->intersectingRanges(r);
@@ -364,8 +364,7 @@ void applyMetadataMutations(SpanID const& spanContext,
 						ranges.begin().value().populateTags();
 						TraceEvent("RangeFeedTags1").detail("Tags", describe(ranges.begin().value().tags));
 						toCommit->addTags(ranges.begin().value().tags);
-					}
-					else {
+					} else {
 						std::set<Tag> allSources;
 						for (auto r : ranges) {
 							r.value().populateTags();

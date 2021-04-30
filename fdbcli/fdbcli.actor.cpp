@@ -678,10 +678,7 @@ void initHelp() {
 	    CommandHelp("triggerddteaminfolog",
 	                "trigger the data distributor teams logging",
 	                "Trigger the data distributor to log detailed information about its teams.");
-	helpMap["rangefeed"] = CommandHelp(
-		"rangefeed <register|get|pop> <RANGEID> <BEGINKEY> <ENDKEY>",
-		"",
-		"");
+	helpMap["rangefeed"] = CommandHelp("rangefeed <register|get|pop> <RANGEID> <BEGINKEY> <ENDKEY>", "", "");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -3398,13 +3395,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "rangefeed")) {
-					if(tokens.size() == 1) {
+					if (tokens.size() == 1) {
 						printUsage(tokens[0]);
 						is_error = true;
 						continue;
 					}
-					if(tokencmp(tokens[1], "register")) {
-						if(tokens.size() != 5) {
+					if (tokencmp(tokens[1], "register")) {
+						if (tokens.size() != 5) {
 							printUsage(tokens[0]);
 							is_error = true;
 							continue;
@@ -3415,22 +3412,22 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								wait(trx.registerRangeFeed(tokens[2], KeyRangeRef(tokens[3], tokens[4])));
 								wait(trx.commit());
 								break;
-							} catch( Error &e ) {
+							} catch (Error& e) {
 								wait(trx.onError(e));
 							}
 						}
-					} else if(tokencmp(tokens[1], "get")) {
-						if(tokens.size() != 3) {
+					} else if (tokencmp(tokens[1], "get")) {
+						if (tokens.size() != 3) {
 							printUsage(tokens[0]);
 							is_error = true;
 							continue;
 						}
 						Standalone<VectorRef<MutationRefAndVersion>> res = wait(db->getRangeFeedMutations(tokens[2]));
-						for(auto& it : res) {
+						for (auto& it : res) {
 							printf("%lld %s\n", it.version, it.mutation.toString().c_str());
 						}
-					} else if(tokencmp(tokens[1], "pop")) {
-						if(tokens.size() != 4) {
+					} else if (tokencmp(tokens[1], "pop")) {
+						if (tokens.size() != 4) {
 							printUsage(tokens[0]);
 							is_error = true;
 							continue;
