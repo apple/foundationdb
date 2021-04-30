@@ -4175,7 +4175,11 @@ ACTOR Future<ProtocolVersion> getCoordinatorProtocolFromConnectPacket(NetworkAdd
 	    FlowTransport::transport().getPeerProtocolAsyncVar(coordinatorAddress);
 
 	loop {
-		if (protocolVersion->get().present() && protocolVersion->get() != expectedVersion) {
+
+		if (!protocolVersion->get().present()) {
+			// Mark the endpoint as not failed to trigger communication via leader monitoring
+			IFailureMonitor::failureMonitor().setStatus(coordinatorAddress, FailureStatus(false));
+		} else if (protocolVersion->get() != expectedVersion) {
 			return protocolVersion->get().get();
 		}
 
