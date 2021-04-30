@@ -253,6 +253,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState* sta
 			    .detail("DCID", machineState.dcId)
 			    .detail("ZoneID", machineState.zoneId)
 			    .detail("MachineID", machineState.machineId)
+			    .detail("UptimeSeconds", now() - machineState.monitorStartTime)
 			    .trackLatest("MachineMetrics");
 		}
 	}

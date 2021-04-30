@@ -307,6 +307,7 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 			// If this machine ID does not already exist in the machineMap, add it
 			if (machineJsonMap.count(machineId) == 0) {
 				statusObj["machine_id"] = machineId;
+				statusObj["uptime_seconds"] = event.getValue("UptimeSeconds");
 
 				if (dcIds.count(it->first)) {
 					statusObj["datacenter_id"] = dcIds[it->first];
