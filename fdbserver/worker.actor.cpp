@@ -554,21 +554,27 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 			}
 		}
 
-		Future<RegisterWorkerReply> registrationReply =
+		state Future<RegisterWorkerReply> registrationReply =
 		    ccInterface->get().present()
 		        ? brokenPromiseToNever(ccInterface->get().get().registerWorker.getReply(request))
 		        : Never();
-		choose {
+		state double startTime = now();
+		loop choose {
 			when(RegisterWorkerReply reply = wait(registrationReply)) {
 				processClass = reply.processClass;
 				asyncPriorityInfo->set(reply.priorityInfo);
+				TraceEvent("WorkerRegisterReply").detail("CCID", ccInterface->get().get().id());
+				break;
 			}
-			when(wait(ccInterface->onChange())) {}
-			when(wait(ddInterf->onChange())) {}
-			when(wait(rkInterf->onChange())) {}
-			when(wait(degraded->onChange())) {}
-			when(wait(FlowTransport::transport().onIncompatibleChanged())) {}
-			when(wait(issues->onChange())) {}
+			when(wait(delay(SERVER_KNOBS->REGISTER_WORKER_REQUEST_TIMEOUT))) {
+				TraceEvent(SevWarn, "WorkerRegisterTimeout").detail("WaitTime", now() - startTime);
+			}
+			when(wait(ccInterface->onChange())) { break; }
+			when(wait(ddInterf->onChange())) { break; }
+			when(wait(rkInterf->onChange())) { break; }
+			when(wait(degraded->onChange())) { break; }
+			when(wait(FlowTransport::transport().onIncompatibleChanged())) { break; }
+			when(wait(issues->onChange())) { break; }
 		}
 	}
 }
