@@ -522,7 +522,7 @@ public:
 	uint64_t shardChangeCounter; // max( shards->changecounter )
 
 	KeyRangeMap<bool> cachedRangeMap; // indicates if a key-range is being cached
-	
+
 	KeyRangeMap<std::vector<Reference<RangeFeedInfo>>> keyRangeFeed;
 	std::map<Key, Reference<RangeFeedInfo>> uidRangeFeed;
 
@@ -1394,13 +1394,15 @@ ACTOR Future<Void> watchValueSendReply(StorageServer* data,
 	}
 }
 
-ACTOR Future<Void> rangeFeedQ( StorageServer* data, RangeFeedRequest req ) {
+ACTOR Future<Void> rangeFeedQ(StorageServer* data, RangeFeedRequest req) {
 	wait(delay(0));
 	RangeFeedReply reply;
-	for(auto& it : data->uidRangeFeed[req.rangeID]->mutations) {
+	for (auto& it : data->uidRangeFeed[req.rangeID]->mutations) {
 		reply.mutations.push_back(reply.arena, it);
 	}
-	TraceEvent("RangeFeedQuery", data->thisServerID).detail("RangeID", req.rangeID.printable()).detail("Mutations", reply.mutations.size());
+	TraceEvent("RangeFeedQuery", data->thisServerID)
+	    .detail("RangeID", req.rangeID.printable())
+	    .detail("Mutations", reply.mutations.size());
 	req.reply.send(reply);
 	return Void();
 }
@@ -2292,7 +2294,11 @@ bool expandMutation(MutationRef& m,
 	return true;
 }
 
-void applyMutation( StorageServer *self, MutationRef const& m, Arena& arena, StorageServer::VersionedData &data, Version version ) {
+void applyMutation(StorageServer* self,
+                   MutationRef const& m,
+                   Arena& arena,
+                   StorageServer::VersionedData& data,
+                   Version version) {
 	// m is expected to be in arena already
 	// Clear split keys are added to arena
 	StorageMetrics metrics;
@@ -2321,23 +2327,23 @@ void applyMutation( StorageServer *self, MutationRef const& m, Arena& arena, Sto
 				data.insert(nextKey, ValueOrClearToRef::clearTo(KeyRef(arena, end)));
 			}
 		}
-		data.insert( m.param1, ValueOrClearToRef::value(m.param2) );
-		self->watches.trigger( m.param1 );
+		data.insert(m.param1, ValueOrClearToRef::value(m.param2));
+		self->watches.trigger(m.param1);
 
-		for(auto& it : self->keyRangeFeed[m.param1]) {
-			it->mutations.push_back(MutationRefAndVersion(m,version));
+		for (auto& it : self->keyRangeFeed[m.param1]) {
+			it->mutations.push_back(MutationRefAndVersion(m, version));
 		}
 	} else if (m.type == MutationRef::ClearRange) {
-		data.erase( m.param1, m.param2 );
-		ASSERT( m.param2 > m.param1 );
-		ASSERT( !data.isClearContaining( data.atLatest(), m.param1 ) );
-		data.insert( m.param1, ValueOrClearToRef::clearTo(m.param2) );
-		self->watches.triggerRange( m.param1, m.param2 );
+		data.erase(m.param1, m.param2);
+		ASSERT(m.param2 > m.param1);
+		ASSERT(!data.isClearContaining(data.atLatest(), m.param1));
+		data.insert(m.param1, ValueOrClearToRef::clearTo(m.param2));
+		self->watches.triggerRange(m.param1, m.param2);
 
 		auto ranges = self->keyRangeFeed.intersectingRanges(KeyRangeRef(m.param1, m.param2));
-		for(auto &r : ranges) {
-			for(auto& it : r.value()) {
-				it->mutations.push_back(MutationRefAndVersion(m,version));
+		for (auto& r : ranges) {
+			for (auto& it : r.value()) {
+				it->mutations.push_back(MutationRefAndVersion(m, version));
 			}
 		}
 	}
@@ -3106,10 +3112,13 @@ void StorageServer::addMutation(Version version,
 		return;
 	}
 	expanded = addMutationToMutationLog(mLog, expanded);
-	DEBUG_MUTATION("applyMutation", version, expanded).detail("UID", thisServerID).detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
-	applyMutation( this, expanded, mLog.arena(), mutableData(), version );
-	//printf("\nSSUpdate: Printing versioned tree after applying mutation\n");
-	//mutableData().printTree(version);
+	DEBUG_MUTATION("applyMutation", version, expanded)
+	    .detail("UID", thisServerID)
+	    .detail("ShardBegin", shard.begin)
+	    .detail("ShardEnd", shard.end);
+	applyMutation(this, expanded, mLog.arena(), mutableData(), version);
+	// printf("\nSSUpdate: Printing versioned tree after applying mutation\n");
+	// mutableData().printTree(version);
 }
 
 struct OrderByVersion {
@@ -3256,21 +3265,23 @@ private:
 			    .detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
 		} else if (m.type == MutationRef::SetValue && m.param1 == primaryLocalityPrivateKey) {
 			data->primaryLocality = BinaryReader::fromStringRef<int8_t>(m.param2, Unversioned());
-			auto& mLV = data->addVersionToMutationLog( data->data().getLatestVersion() );
-			data->addMutationToMutationLog( mLV, MutationRef(MutationRef::SetValue, persistPrimaryLocality, m.param2) );
+			auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+			data->addMutationToMutationLog(mLV, MutationRef(MutationRef::SetValue, persistPrimaryLocality, m.param2));
 		} else if (m.type == MutationRef::SetValue && m.param1.startsWith(rangeFeedPrivatePrefix)) {
 			Key rangeFeedId = m.param1.removePrefix(rangeFeedPrivatePrefix);
-			KeyRange rangeFeedRange = decodeRangeFeedValue( m.param2 );
-			TraceEvent("AddingRangeFeed", data->thisServerID).detail("RangeID", rangeFeedId.printable()).detail("Range", rangeFeedRange.toString());
-			Reference<RangeFeedInfo> rangeFeedInfo( new RangeFeedInfo() );
+			KeyRange rangeFeedRange = decodeRangeFeedValue(m.param2);
+			TraceEvent("AddingRangeFeed", data->thisServerID)
+			    .detail("RangeID", rangeFeedId.printable())
+			    .detail("Range", rangeFeedRange.toString());
+			Reference<RangeFeedInfo> rangeFeedInfo(new RangeFeedInfo());
 			rangeFeedInfo->range = rangeFeedRange;
 			rangeFeedInfo->id = rangeFeedId;
 			data->uidRangeFeed[rangeFeedId] = rangeFeedInfo;
-			auto rs = data->keyRangeFeed.modify( rangeFeedRange );
-			for(auto r = rs.begin(); r != rs.end(); ++r) {
-				r->value().push_back( rangeFeedInfo );
+			auto rs = data->keyRangeFeed.modify(rangeFeedRange);
+			for (auto r = rs.begin(); r != rs.end(); ++r) {
+				r->value().push_back(rangeFeedInfo);
 			}
-			data->keyRangeFeed.coalesce( rangeFeedRange.contents() );
+			data->keyRangeFeed.coalesce(rangeFeedRange.contents());
 		} else {
 			ASSERT(false); // Unknown private mutation
 		}
@@ -4508,20 +4519,22 @@ ACTOR Future<Void> serveWatchValueRequests(StorageServer* self, FutureStream<Wat
 	}
 }
 
-ACTOR Future<Void> serveRangeFeedRequests( StorageServer* self, FutureStream<RangeFeedRequest> rangeFeed ) {
+ACTOR Future<Void> serveRangeFeedRequests(StorageServer* self, FutureStream<RangeFeedRequest> rangeFeed) {
 	loop {
 		RangeFeedRequest req = waitNext(rangeFeed);
 		self->actors.add(self->readGuard(req, rangeFeedQ));
 	}
 }
 
-ACTOR Future<Void> serveRangeFeedPopRequests( StorageServer* self, FutureStream<RangeFeedPopRequest> rangeFeedPops ) {
+ACTOR Future<Void> serveRangeFeedPopRequests(StorageServer* self, FutureStream<RangeFeedPopRequest> rangeFeedPops) {
 	loop {
 		RangeFeedPopRequest req = waitNext(rangeFeedPops);
-		while(self->uidRangeFeed[req.rangeID]->mutations.front().version < req.version) {
+		while (self->uidRangeFeed[req.rangeID]->mutations.front().version < req.version) {
 			self->uidRangeFeed[req.rangeID]->mutations.pop_front();
 		}
-		TraceEvent("RangeFeedPopQuery", self->thisServerID).detail("RangeID", req.rangeID.printable()).detail("Version", req.version);
+		TraceEvent("RangeFeedPopQuery", self->thisServerID)
+		    .detail("RangeID", req.rangeID.printable())
+		    .detail("Version", req.version);
 		req.reply.send(Void());
 	}
 }

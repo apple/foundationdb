@@ -112,7 +112,8 @@ struct StorageServerInterface {
 				getRangeSplitPoints =
 				    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
 				rangeFeed = RequestStream<struct RangeFeedRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
-				rangeFeedPop = RequestStream<struct RangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
+				rangeFeedPop =
+				    RequestStream<struct RangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -576,8 +577,10 @@ struct MutationRefAndVersion {
 
 	MutationRefAndVersion() {}
 	MutationRefAndVersion(MutationRef mutation, Version version) : mutation(mutation), version(version) {}
-	MutationRefAndVersion( Arena& to, MutationRef mutation, Version version ) : mutation(to, mutation), version(version) {}
-	MutationRefAndVersion( Arena& to, const MutationRefAndVersion& from ) : mutation(to, from.mutation), version(from.version) {}
+	MutationRefAndVersion(Arena& to, MutationRef mutation, Version version)
+	  : mutation(to, mutation), version(version) {}
+	MutationRefAndVersion(Arena& to, const MutationRefAndVersion& from)
+	  : mutation(to, from.mutation), version(from.version) {}
 	int expectedSize() const { return mutation.expectedSize(); }
 
 	template <class Ar>

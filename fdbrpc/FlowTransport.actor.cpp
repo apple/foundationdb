@@ -1215,7 +1215,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 							}
 							compatible = false;
 							if (!protocolVersion.hasInexpensiveMultiVersionClient()) {
-								if(peer) {
+								if (peer) {
 									peer->protocolVersion->set(protocolVersion);
 								}
 
