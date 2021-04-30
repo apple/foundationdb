@@ -110,6 +110,14 @@ public:
 		return version;
 	}
 
+	Optional<Version> getCachedReadVersion() {
+		if (version.isValid() && version.isReady() && !version.isError()) {
+			return version.get();
+		} else {
+			return {};
+		}
+	}
+
 	Version getCommittedVersion() const { return committed ? version.get() : ::invalidVersion; }
 
 	void reset() {
@@ -126,50 +134,16 @@ public:
 
 }; // SimpleConfigTransactionImpl
 
-void SimpleConfigTransaction::setVersion(Version) {
-	throw client_invalid_operation();
-}
-
 Future<Version> SimpleConfigTransaction::getReadVersion() {
 	return impl->getReadVersion();
 }
 
 Optional<Version> SimpleConfigTransaction::getCachedReadVersion() {
-	// TODO: Implement?
-	throw client_invalid_operation();
+	return impl->getCachedReadVersion();
 }
 
 Future<Optional<Value>> SimpleConfigTransaction::get(Key const& key, bool snapshot) {
 	return impl->get(key);
-}
-
-Future<Standalone<VectorRef<const char*>>> SimpleConfigTransaction::getAddressesForKey(Key const& key) {
-	throw client_invalid_operation();
-}
-
-Future<Standalone<VectorRef<KeyRef>>> SimpleConfigTransaction::getRangeSplitPoints(KeyRange const& range,
-                                                                                   int64_t chunkSize) {
-	throw client_invalid_operation();
-}
-
-void SimpleConfigTransaction::addReadConflictRange(KeyRangeRef const& keys) {
-	throw client_invalid_operation();
-}
-
-void SimpleConfigTransaction::makeSelfConflicting() {
-	throw client_invalid_operation();
-}
-
-void SimpleConfigTransaction::atomicOp(KeyRef const& key, ValueRef const& operand, uint32_t operationType) {
-	throw client_invalid_operation();
-}
-
-Future<int64_t> SimpleConfigTransaction::getEstimatedRangeSizeBytes(KeyRange const& keys) {
-	throw client_invalid_operation();
-}
-
-Future<Key> SimpleConfigTransaction::getKey(KeySelector const& key, bool snapshot) {
-	throw client_invalid_operation();
 }
 
 Future<Standalone<RangeResultRef>> SimpleConfigTransaction::getRange(KeySelector const& begin,
@@ -200,14 +174,6 @@ void SimpleConfigTransaction::clear(KeyRangeRef const& range) {
 	impl->clearRange(range.begin, range.end);
 }
 
-Future<Void> SimpleConfigTransaction::watch(Key const& key) {
-	throw client_invalid_operation();
-}
-
-void SimpleConfigTransaction::addWriteConflictRange(KeyRangeRef const& keys) {
-	throw client_invalid_operation();
-}
-
 Future<Void> SimpleConfigTransaction::commit() {
 	return impl->commit();
 }
@@ -219,10 +185,6 @@ Version SimpleConfigTransaction::getCommittedVersion() {
 int64_t SimpleConfigTransaction::getApproximateSize() {
 	// TODO: Implement
 	return 0;
-}
-
-Future<Standalone<StringRef>> SimpleConfigTransaction::getVersionstamp() {
-	throw client_invalid_operation();
 }
 
 void SimpleConfigTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {

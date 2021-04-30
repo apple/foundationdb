@@ -27,6 +27,7 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ISingleThreadTransaction.h"
+#include "flow/Error.h"
 #include "flow/flow.h"
 
 class SimpleConfigTransaction final : public ISingleThreadTransaction {
@@ -35,12 +36,12 @@ class SimpleConfigTransaction final : public ISingleThreadTransaction {
 public:
 	SimpleConfigTransaction(ClusterConnectionString const&);
 	~SimpleConfigTransaction();
-	void setVersion(Version) override;
+	void setVersion(Version) override { throw client_invalid_operation(); }
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() override;
 
 	Future<Optional<Value>> get(Key const& key, bool snapshot = false) override;
-	Future<Key> getKey(KeySelector const& key, bool snapshot = false) override;
+	Future<Key> getKey(KeySelector const& key, bool snapshot = false) override { throw client_invalid_operation(); }
 	Future<Standalone<RangeResultRef>> getRange(KeySelector const& begin,
 	                                            KeySelector const& end,
 	                                            int limit,
@@ -51,21 +52,27 @@ public:
 	                                            GetRangeLimits limits,
 	                                            bool snapshot = false,
 	                                            bool reverse = false) override;
-	Future<Standalone<VectorRef<const char*>>> getAddressesForKey(Key const& key) override;
-	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& range, int64_t chunkSize) override;
-	Future<int64_t> getEstimatedRangeSizeBytes(KeyRange const& keys) override;
-	void addReadConflictRange(KeyRangeRef const& keys) override;
-	void makeSelfConflicting() override;
-	void atomicOp(KeyRef const& key, ValueRef const& operand, uint32_t operationType) override;
+	Future<Standalone<VectorRef<const char*>>> getAddressesForKey(Key const& key) override {
+		throw client_invalid_operation();
+	}
+	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& range, int64_t chunkSize) override {
+		throw client_invalid_operation();
+	}
+	Future<int64_t> getEstimatedRangeSizeBytes(KeyRange const& keys) override { throw client_invalid_operation(); }
+	void addReadConflictRange(KeyRangeRef const& keys) override { throw client_invalid_operation(); }
+	void makeSelfConflicting() override { throw client_invalid_operation(); }
+	void atomicOp(KeyRef const& key, ValueRef const& operand, uint32_t operationType) override {
+		throw client_invalid_operation();
+	}
 	void set(KeyRef const& key, ValueRef const& value) override;
 	void clear(KeyRangeRef const& range) override;
 	void clear(KeyRef const& key) override;
-	Future<Void> watch(Key const& key) override;
-	void addWriteConflictRange(KeyRangeRef const& keys) override;
+	Future<Void> watch(Key const& key) override { throw client_invalid_operation(); }
+	void addWriteConflictRange(KeyRangeRef const& keys) override { throw client_invalid_operation(); }
 	Future<Void> commit() override;
 	Version getCommittedVersion() override;
 	int64_t getApproximateSize() override;
-	Future<Standalone<StringRef>> getVersionstamp() override;
+	Future<Standalone<StringRef>> getVersionstamp() override { throw client_invalid_operation(); }
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	Future<Void> onError(Error const& e) override;
 	void cancel() override;
