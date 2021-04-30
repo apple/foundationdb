@@ -195,10 +195,11 @@ class LocalConfigurationImpl {
 public:
 	LocalConfigurationImpl(ConfigClassSet const& configClasses,
 	                       std::string const& dataFolder,
-	                       std::map<Key, Value>&& manuallyOverriddenKnobs)
+	                       std::map<Key, Value>&& manuallyOverriddenKnobs,
+	                       UID id)
 	  : configClasses(configClasses), manuallyOverriddenKnobs(std::move(manuallyOverriddenKnobs)) {
 		platform::createDirectory(dataFolder);
-		kvStore = keyValueStoreMemory(joinPath(dataFolder, "localconf-"), UID{}, 500e6);
+		kvStore = keyValueStoreMemory(joinPath(dataFolder, "localconf-" + id.toString()), id, 500e6);
 	}
 
 	Future<Void> init() {
@@ -219,8 +220,9 @@ public:
 
 LocalConfiguration::LocalConfiguration(ConfigClassSet const& configClasses,
                                        std::string const& dataFolder,
-                                       std::map<Key, Value>&& manuallyOverriddenKnobs)
-  : impl(std::make_unique<LocalConfigurationImpl>(configClasses, dataFolder, std::move(manuallyOverriddenKnobs))) {}
+                                       std::map<Key, Value>&& manuallyOverriddenKnobs,
+                                       UID id)
+  : impl(std::make_unique<LocalConfigurationImpl>(configClasses, dataFolder, std::move(manuallyOverriddenKnobs), id)) {}
 
 LocalConfiguration::~LocalConfiguration() = default;
 

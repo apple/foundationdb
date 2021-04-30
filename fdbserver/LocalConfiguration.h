@@ -41,7 +41,8 @@ class LocalConfiguration {
 public:
 	LocalConfiguration(ConfigClassSet const& configClasses,
 	                   std::string const& dataFolder,
-	                   std::map<Key, Value>&& manuallyOverriddenKnobs);
+	                   std::map<Key, Value>&& manuallyOverriddenKnobs,
+	                   UID id);
 	~LocalConfiguration();
 	Future<Void> init();
 	TestKnobs const &getKnobs() const;

@@ -276,7 +276,7 @@ StringRef fileStoragePrefix = LiteralStringRef("storage-");
 StringRef fileLogDataPrefix = LiteralStringRef("log-");
 StringRef fileVersionedLogDataPrefix = LiteralStringRef("log2-");
 StringRef fileLogQueuePrefix = LiteralStringRef("logqueue-");
-StringRef localConfPrefix = LiteralStringRef("globalconf-");
+StringRef localConfPrefix = LiteralStringRef("localconf-");
 StringRef tlogQueueExtension = LiteralStringRef("fdq");
 
 enum class FilesystemCheck {
@@ -2022,7 +2022,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
                         std::string whitelistBinPaths) {
 	state vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
-	state LocalConfiguration localConfig(ConfigClassSet{}, dataFolder, {});
+	state LocalConfiguration localConfig(ConfigClassSet{}, dataFolder, {}, UID{});
 	wait(localConfig.init());
 
 	actors.push_back(serveProtocolInfo());
