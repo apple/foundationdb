@@ -316,7 +316,9 @@ public:
 
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 
-	Version getCommittedVersion() { return committedVersion; } // May be called only after commit() returns success
+	Version getCommittedVersion() const {
+		return committedVersion;
+	} // May be called only after commit() returns success
 	[[nodiscard]] Future<Standalone<StringRef>>
 	getVersionstamp(); // Will be fulfilled only after commit() returns success
 

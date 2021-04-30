@@ -127,8 +127,8 @@ public:
 	void addWriteConflictRange(KeyRangeRef const& keys) override;
 
 	[[nodiscard]] Future<Void> commit() override;
-	Version getCommittedVersion() override { return tr.getCommittedVersion(); }
-	int64_t getApproximateSize() override { return approximateSize; }
+	Version getCommittedVersion() const override { return tr.getCommittedVersion(); }
+	int64_t getApproximateSize() const override { return approximateSize; }
 	[[nodiscard]] Future<Standalone<StringRef>> getVersionstamp() override;
 
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;

@@ -178,11 +178,11 @@ Future<Void> SimpleConfigTransaction::commit() {
 	return impl->commit();
 }
 
-Version SimpleConfigTransaction::getCommittedVersion() {
+Version SimpleConfigTransaction::getCommittedVersion() const {
 	return impl->getCommittedVersion();
 }
 
-int64_t SimpleConfigTransaction::getApproximateSize() {
+int64_t SimpleConfigTransaction::getApproximateSize() const {
 	// TODO: Implement
 	return 0;
 }

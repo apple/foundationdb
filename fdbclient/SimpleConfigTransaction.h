@@ -70,8 +70,8 @@ public:
 	Future<Void> watch(Key const& key) override { throw client_invalid_operation(); }
 	void addWriteConflictRange(KeyRangeRef const& keys) override { throw client_invalid_operation(); }
 	Future<Void> commit() override;
-	Version getCommittedVersion() override;
-	int64_t getApproximateSize() override;
+	Version getCommittedVersion() const override;
+	int64_t getApproximateSize() const override;
 	Future<Standalone<StringRef>> getVersionstamp() override { throw client_invalid_operation(); }
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	Future<Void> onError(Error const& e) override;
