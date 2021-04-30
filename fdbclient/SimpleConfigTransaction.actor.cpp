@@ -31,6 +31,7 @@ class SimpleConfigTransactionImpl {
 	ConfigTransactionInterface cti;
 	int numRetries{ 0 };
 	Error deferredError{ success() };
+	bool committed{ false };
 
 	ACTOR static Future<Version> getReadVersion(SimpleConfigTransactionImpl* self) {
 		ConfigTransactionGetVersionRequest req;
@@ -64,6 +65,7 @@ class SimpleConfigTransactionImpl {
 		}
 		Version version = wait(self->version);
 		wait(self->cti.commit.getReply(ConfigTransactionCommitRequest(version, self->mutations)));
+		self->committed = true;
 		return Void();
 	}
 
@@ -107,6 +109,8 @@ public:
 			version = getReadVersion(this);
 		return version;
 	}
+
+	Version getCommittedVersion() const { return committed ? version.get() : ::invalidVersion; }
 
 	void reset() {
 		version = Future<Version>{};
@@ -209,8 +213,7 @@ Future<Void> SimpleConfigTransaction::commit() {
 }
 
 Version SimpleConfigTransaction::getCommittedVersion() {
-	// TODO: Implement
-	return ::invalidVersion;
+	return impl->getCommittedVersion();
 }
 
 int64_t SimpleConfigTransaction::getApproximateSize() {
