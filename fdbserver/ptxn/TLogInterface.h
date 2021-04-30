@@ -31,6 +31,8 @@
 #include "fdbserver/ptxn/Config.h"
 #include "flow/Arena.h"
 #include "flow/FileIdentifier.h"
+#include "fdbrpc/Locality.h"
+#include "fdbclient/CommitTransaction.h"
 
 namespace ptxn {
 
@@ -55,7 +57,7 @@ struct TLogCommitRequest {
 	SpanID spanID;
 
 	// Team ID
-	TeamID teamID;
+	StorageTeamID teamID;
 
 	// Arena
 	Arena arena;
@@ -66,6 +68,8 @@ struct TLogCommitRequest {
 	// Versions
 	Version prevVersion;
 	Version version;
+	Version knownCommittedVersion;
+	Version minKnownCommittedVersion;
 
 	// Debug ID
 	Optional<UID> debugID;
@@ -75,40 +79,98 @@ struct TLogCommitRequest {
 
 	TLogCommitRequest() {}
 	TLogCommitRequest(const SpanID& spanID_,
-	                  const TeamID& teamID_,
+	                  const StorageTeamID& teamID_,
 	                  const Arena arena_,
 	                  StringRef messages_,
 	                  const Version prevVersion_,
 	                  const Version version_,
+	                  const Version knownCommittedVersion_,
+	                  const Version minKnownCommittedVersion_,
 	                  const Optional<UID>& debugID_)
 	  : spanID(spanID_), teamID(teamID_), arena(arena_), messages(messages_), prevVersion(prevVersion_),
-	    version(version_), debugID(debugID_) {}
+	    version(version_), knownCommittedVersion(knownCommittedVersion_),
+	    minKnownCommittedVersion(minKnownCommittedVersion_), debugID(debugID_) {}
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, spanID, arena, messages, prevVersion, version, debugID, reply);
+		serializer(ar,
+		           spanID,
+		           arena,
+		           messages,
+		           prevVersion,
+		           version,
+		           knownCommittedVersion,
+		           minKnownCommittedVersion,
+		           debugID,
+		           reply);
 	}
 };
 
 struct TLogInterfaceBase {
-	RequestStream<TLogCommitRequest> commit;
 
-	const UID id;
+	constexpr static FileIdentifier file_identifier = 16308510;
+
+	RequestStream<struct TLogCommitRequest> commit;
+	RequestStream<ReplyPromise<struct TLogLockResult>> lock; // first stage of database recovery
+	RequestStream<struct TLogQueuingMetricsRequest> getQueuingMetrics;
+	RequestStream<struct TLogConfirmRunningRequest> confirmRunning; // used for getReadVersion requests from client
+	RequestStream<ReplyPromise<Void>> waitFailure;
+	RequestStream<struct TLogRecoveryFinishedRequest> recoveryFinished;
+	RequestStream<struct TLogSnapRequest> snapRequest;
+
+	UID id() const { return uniqueID; }
+	UID getSharedTLogID() const { return sharedTLogID; }
+	std::string toString() const { return id().shortString(); }
+	bool operator==(TLogInterfaceBase const& r) const { return id() == r.id(); }
+	NetworkAddress address() const { return commit.getEndpoint().getPrimaryAddress(); }
+	Optional<NetworkAddress> secondaryAddress() const { return commit.getEndpoint().addresses.secondaryAddress; }
 
 	MessageTransferModel getMessageTransferModel() const;
 
 	virtual void initEndpoints() = 0;
 
 protected:
+	UID uniqueID;
+	UID sharedTLogID;
 	MessageTransferModel messageTransferModel;
+	LocalityData filteredLocality;
 
-	explicit TLogInterfaceBase(const MessageTransferModel messageTransferModel_);
+	explicit TLogInterfaceBase(const MessageTransferModel& model_ = MessageTransferModel::StorageServerActivelyPull)
+	  : messageTransferModel(model_) {}
+	TLogInterfaceBase(const LocalityData& locality_,
+	                  const MessageTransferModel& model_ = MessageTransferModel::StorageServerActivelyPull)
+	  : uniqueID(deterministicRandom()->randomUniqueID()), filteredLocality(locality_), sharedTLogID(uniqueID),
+	    messageTransferModel(model_) {}
+	TLogInterfaceBase(UID sharedTLogID_,
+	                  const LocalityData& locality_,
+	                  const MessageTransferModel& model_ = MessageTransferModel::StorageServerActivelyPull)
+	  : uniqueID(deterministicRandom()->randomUniqueID()), sharedTLogID(sharedTLogID_), filteredLocality(locality_),
+	    messageTransferModel(model_) {}
+	TLogInterfaceBase(UID id_,
+	                  UID sharedTLogID_,
+	                  const LocalityData& locality_,
+	                  const MessageTransferModel& model_ = MessageTransferModel::StorageServerActivelyPull)
+	  : uniqueID(id_), sharedTLogID(sharedTLogID_), filteredLocality(locality_), messageTransferModel(model_) {}
 
 	void initEndpointsImpl(std::vector<ReceiverPriorityPair>&& receivers);
 
 	template <typename Ar>
 	void serializeImpl(Ar& ar) {
-		serializer(ar, messageTransferModel, commit);
+		if constexpr (!is_fb_function<Ar>) {
+			ASSERT(ar.isDeserializing || uniqueID != UID());
+		}
+		serializer(ar, uniqueID, sharedTLogID, filteredLocality, messageTransferModel, commit);
+		if (Ar::isDeserializing) {
+			lock = RequestStream<ReplyPromise<struct TLogLockResult>>(commit.getEndpoint().getAdjustedEndpoint(1));
+			getQueuingMetrics =
+			    RequestStream<struct TLogQueuingMetricsRequest>(commit.getEndpoint().getAdjustedEndpoint(2));
+			confirmRunning =
+			    RequestStream<struct TLogConfirmRunningRequest>(commit.getEndpoint().getAdjustedEndpoint(3));
+			waitFailure = RequestStream<ReplyPromise<Void>>(commit.getEndpoint().getAdjustedEndpoint(4));
+			recoveryFinished =
+			    RequestStream<struct TLogRecoveryFinishedRequest>(commit.getEndpoint().getAdjustedEndpoint(5));
+			snapRequest = RequestStream<struct TLogSnapRequest>(commit.getEndpoint().getAdjustedEndpoint(6));
+		}
 	}
 };
 
@@ -125,48 +187,256 @@ struct TLogInterface_ActivelyPush : public TLogInterfaceBase {
 	void initEndpoints() override;
 };
 
-struct TLogCursor {};
-
-struct TLogPullReply {
-	constexpr static FileIdentifier file_identifier = 395247;
-
-	TLogCursor cursor;
-
+struct TLogCursor {
 	template <typename Ar>
-	void serialize(Ar& ar) {
-		serializer(ar);
-	}
-};
-
-struct TLogPullRequest {
-	constexpr static FileIdentifier file_identifier = 3310823;
-
-	Version pullStartVersion;
-
-	ReplyPromise<TLogPullReply> reply;
-
-	template <typename Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, pullStartVersion, reply);
-	}
+	void serialize(Ar& ar) {}
 };
 
 struct TLogInterface_PassivelyPull : public TLogInterfaceBase {
 	constexpr static FileIdentifier file_identifier = 748550;
 
-	RequestStream<TLogPullRequest> pullRequests;
+	RequestStream<struct TLogPeekRequest> peekMessages;
+	RequestStream<struct TLogPopRequest> popMessages;
+	RequestStream<struct TLogDisablePopRequest> disablePopRequest;
+	RequestStream<struct TLogEnablePopRequest> enablePopRequest;
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
 		TLogInterfaceBase::serializeImpl(ar);
+		serializer(ar, peekMessages);
+		if (Ar::isDeserializing) {
+			popMessages = RequestStream<struct TLogPopRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(1));
+			disablePopRequest =
+			    RequestStream<struct TLogDisablePopRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(2));
+			enablePopRequest =
+			    RequestStream<struct TLogEnablePopRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(3));
+		}
 	}
 
-	TLogInterface_PassivelyPull() : TLogInterfaceBase(MessageTransferModel::StorageServerActivelyPull) {}
+	TLogInterface_PassivelyPull() : TLogInterfaceBase(UID(), UID(), LocalityData()) {}
+
+	TLogInterface_PassivelyPull(UID sharedLogId_, LocalityData& locality_)
+	  : TLogInterfaceBase(deterministicRandom()->randomUniqueID(), sharedLogId_, locality_) {}
+
+	TLogInterface_PassivelyPull(UID id_, UID sharedLogId_, LocalityData& locality_)
+	  : TLogInterfaceBase(id_, sharedLogId_, locality_) {}
 
 	void initEndpoints() override;
 };
 
-std::shared_ptr<TLogInterfaceBase> getNewTLogInterface(const MessageTransferModel model);
+struct TLogRecoveryFinishedRequest {
+	constexpr static FileIdentifier file_identifier = 8818668;
+	ReplyPromise<Void> reply;
+
+	TLogRecoveryFinishedRequest() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+struct TLogLockResult {
+	constexpr static FileIdentifier file_identifier = 11822027;
+	Version end;
+	Version knownCommittedVersion;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, end, knownCommittedVersion);
+	}
+};
+
+struct TLogConfirmRunningRequest {
+	constexpr static FileIdentifier file_identifier = 10929130;
+	Optional<UID> debugID;
+	ReplyPromise<Void> reply;
+
+	TLogConfirmRunningRequest() {}
+	TLogConfirmRunningRequest(Optional<UID> debugID) : debugID(debugID) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, debugID, reply);
+	}
+};
+
+struct VerUpdateRef {
+	Version version;
+	VectorRef<MutationRef> mutations;
+	bool isPrivateData;
+
+	VerUpdateRef() : isPrivateData(false), version(invalidVersion) {}
+	VerUpdateRef(Arena& to, const VerUpdateRef& from)
+	  : version(from.version), mutations(to, from.mutations), isPrivateData(from.isPrivateData) {}
+	int expectedSize() const { return mutations.expectedSize(); }
+
+	MutationRef push_back_deep(Arena& arena, const MutationRef& m) {
+		mutations.push_back_deep(arena, m);
+		return mutations.back();
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, mutations, isPrivateData);
+	}
+};
+
+struct TLogPeekReply {
+	constexpr static FileIdentifier file_identifier = 11365689;
+	Arena arena;
+	StringRef messages;
+	Version end;
+	Optional<Version> popped;
+	Version maxKnownVersion;
+	Version minKnownCommittedVersion;
+	Optional<Version> begin;
+	bool onlySpilled = false;
+
+	TLogCursor cursor;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(
+		    ar, arena, messages, end, popped, maxKnownVersion, minKnownCommittedVersion, begin, onlySpilled, cursor);
+	}
+};
+
+struct TLogPeekRequest {
+	constexpr static FileIdentifier file_identifier = 11001131;
+	Arena arena;
+	Version begin;
+	Tag tag;
+	bool returnIfBlocked;
+	bool onlySpilled;
+	Optional<std::pair<UID, int>> sequence;
+	ReplyPromise<TLogPeekReply> reply;
+
+	TLogPeekRequest(Version begin,
+	                Tag tag,
+	                bool returnIfBlocked,
+	                bool onlySpilled,
+	                Optional<std::pair<UID, int>> sequence = Optional<std::pair<UID, int>>())
+	  : begin(begin), tag(tag), returnIfBlocked(returnIfBlocked), sequence(sequence), onlySpilled(onlySpilled) {}
+	TLogPeekRequest() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, arena, begin, tag, returnIfBlocked, onlySpilled, sequence, reply);
+	}
+};
+
+struct TLogPopRequest {
+	constexpr static FileIdentifier file_identifier = 5556423;
+	Arena arena;
+	Version to;
+	Version durableKnownCommittedVersion;
+	Tag tag;
+	ReplyPromise<Void> reply;
+
+	TLogPopRequest(Version to, Version durableKnownCommittedVersion, Tag tag)
+	  : to(to), durableKnownCommittedVersion(durableKnownCommittedVersion), tag(tag) {}
+	TLogPopRequest() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, arena, to, durableKnownCommittedVersion, tag, reply);
+	}
+};
+
+struct TagMessagesRef {
+	Tag tag;
+	VectorRef<int> messageOffsets;
+
+	TagMessagesRef() {}
+	TagMessagesRef(Arena& a, const TagMessagesRef& from) : tag(from.tag), messageOffsets(a, from.messageOffsets) {}
+
+	size_t expectedSize() const { return messageOffsets.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, tag, messageOffsets);
+	}
+};
+
+struct TLogQueuingMetricsReply {
+	constexpr static FileIdentifier file_identifier = 12206626;
+	double localTime;
+	int64_t instanceID; // changes if bytesDurable and bytesInput reset
+	int64_t bytesDurable, bytesInput;
+	StorageBytes storageBytes;
+	Version v; // committed version
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, storageBytes, v);
+	}
+};
+
+struct TLogQueuingMetricsRequest {
+	constexpr static FileIdentifier file_identifier = 7798476;
+	ReplyPromise<struct TLogQueuingMetricsReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+struct TLogDisablePopRequest {
+	constexpr static FileIdentifier file_identifier = 4022806;
+	Arena arena;
+	UID snapUID;
+	ReplyPromise<Void> reply;
+	Optional<UID> debugID;
+
+	TLogDisablePopRequest() = default;
+	TLogDisablePopRequest(const UID uid) : snapUID(uid) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, snapUID, reply, arena, debugID);
+	}
+};
+
+struct TLogEnablePopRequest {
+	constexpr static FileIdentifier file_identifier = 4022809;
+	Arena arena;
+	UID snapUID;
+	ReplyPromise<Void> reply;
+	Optional<UID> debugID;
+
+	TLogEnablePopRequest() = default;
+	TLogEnablePopRequest(const UID uid) : snapUID(uid) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, snapUID, reply, arena, debugID);
+	}
+};
+
+struct TLogSnapRequest {
+	constexpr static FileIdentifier file_identifier = 8184128;
+	ReplyPromise<Void> reply;
+	Arena arena;
+	StringRef snapPayload;
+	UID snapUID;
+	StringRef role;
+
+	TLogSnapRequest(StringRef snapPayload, UID snapUID, StringRef role)
+	  : snapPayload(snapPayload), snapUID(snapUID), role(role) {}
+	TLogSnapRequest() = default;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply, snapPayload, snapUID, role, arena);
+	}
+};
+
+std::shared_ptr<TLogInterfaceBase> getNewTLogInterface(const MessageTransferModel model,
+                                                       UID id_,
+                                                       UID sharedTLogID_,
+                                                       LocalityData locality);
 
 } // namespace ptxn
 

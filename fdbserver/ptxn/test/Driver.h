@@ -25,6 +25,7 @@
 #include <memory>
 #include <unordered_map>
 #include <vector>
+#include <fdbserver/WorkerInterface.actor.h>
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/ptxn/Config.h"
@@ -42,35 +43,41 @@ struct CommitValidationRecord {
 
 struct CommitRecord {
 	Version version;
-	TeamID teamID;
+	StorageTeamID teamID;
 	std::vector<MutationRef> mutations;
 
 	CommitValidationRecord validation;
 
-	CommitRecord(const Version& version, const TeamID& teamID, std::vector<MutationRef>&& mutationRef);
+	CommitRecord(const Version& version, const StorageTeamID& teamID, std::vector<MutationRef>&& mutationRef);
 };
 
 struct TestDriverContext {
 	// Teams
 	int numTeamIDs;
-	std::vector<TeamID> teamIDs;
+	std::vector<StorageTeamID> teamIDs;
 
 	MessageTransferModel messageTransferModel;
 
 	// Proxies
+	bool useFakeProxy;
 	int numProxies;
 
 	// TLog
+	bool useFakeTLog;
 	int numTLogs;
+	int numTLogGroups;
+	std::vector<TLogGroup> tLogGroups;
+	std::unordered_map<TLogGroupID, std::shared_ptr<TLogInterfaceBase>> tLogGroupLeaders;
 	std::vector<std::shared_ptr<TLogInterfaceBase>> tLogInterfaces;
-	std::unordered_map<TeamID, std::shared_ptr<TLogInterfaceBase>> teamIDTLogInterfaceMapper;
-	std::shared_ptr<TLogInterfaceBase> getTLogInterface(const TeamID&);
+	std::unordered_map<StorageTeamID, std::shared_ptr<TLogInterfaceBase>> teamIDTLogInterfaceMapper;
+	std::shared_ptr<TLogInterfaceBase> getTLogInterface(const StorageTeamID&);
 
 	// Storage Server
+	bool useFakeStorageServer;
 	int numStorageServers;
 	std::vector<std::shared_ptr<StorageServerInterfaceBase>> storageServerInterfaces;
-	std::unordered_map<TeamID, std::shared_ptr<StorageServerInterfaceBase>> teamIDStorageServerInterfaceMapper;
-	std::shared_ptr<StorageServerInterfaceBase> getStorageServerInterface(const TeamID&);
+	std::unordered_map<StorageTeamID, std::shared_ptr<StorageServerInterfaceBase>> teamIDStorageServerInterfaceMapper;
+	std::shared_ptr<StorageServerInterfaceBase> getStorageServerInterface(const StorageTeamID&);
 
 	// Stores the generated commits
 	Arena mutationsArena;
@@ -89,9 +96,17 @@ bool isAllRecordsValidated(const std::vector<CommitRecord>& records);
 // Check if a set of mutations is coming from a previous know commit
 void verifyMutationsInRecord(std::vector<CommitRecord>& record,
                              const Version&,
-                             const TeamID&,
+                             const StorageTeamID&,
                              const std::vector<MutationRef>& mutations,
-							 std::function<void(CommitValidationRecord&)> validateUpdater);
+                             std::function<void(CommitValidationRecord&)> validateUpdater);
+
+std::shared_ptr<TestDriverContext> initTestDriverContext();
+
+void startFakeProxy(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext);
+
+void startFakeTLog(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext);
+
+void startFakeStorageServer(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext);
 
 } // namespace ptxn
 

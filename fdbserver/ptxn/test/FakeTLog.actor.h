@@ -40,7 +40,7 @@
 namespace ptxn {
 
 struct PersistedMutation {
-	TeamID teamID;
+	StorageTeamID teamID;
 	LogMessageVersion logMessageVersion;
 	MutationRef mutation;
 };

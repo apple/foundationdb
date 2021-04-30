@@ -40,10 +40,11 @@ static const int NUM_COMMITS = 3;
 static const int NUM_TEAMS = 10;
 static const int NUM_PROXIES = 1;
 static const int NUM_TLOGS = 3;
+static const int NUM_TLOGS_GROUPS = 4;
 static const int NUM_STORAGE_SERVERS = 3;
 static const MessageTransferModel MESSAGE_TRANSFER_MODEL = MessageTransferModel::TLogActivelyPush;
 
-CommitRecord::CommitRecord(const Version& version_, const TeamID& teamID_, std::vector<MutationRef>&& mutations_)
+CommitRecord::CommitRecord(const Version& version_, const StorageTeamID& teamID_, std::vector<MutationRef>&& mutations_)
   : version(version_), teamID(teamID_), mutations(std::move(mutations_)) {}
 
 bool CommitValidationRecord::validated() const { return tLogValidated && storageServerValidated; }
@@ -56,7 +57,7 @@ std::shared_ptr<TestDriverContext> initTestDriverContext() {
 
 	// FIXME use C++20 range
 	for (int i = 0; i < context->numTeamIDs; ++i) {
-		context->teamIDs.push_back(TeamID{ deterministicRandom()->randomUniqueID() });
+		context->teamIDs.push_back(StorageTeamID{ deterministicRandom()->randomUniqueID() });
 	}
 
 	// Prepare Proxies
@@ -64,9 +65,21 @@ std::shared_ptr<TestDriverContext> initTestDriverContext() {
 
 	// Prepare TLogInterfaces
 	context->numTLogs = NUM_TLOGS;
+	context->numTLogGroups = NUM_TLOGS_GROUPS;
+
+	// For now, each tlog group spans all the TLogs, i.e., number of group numbers == num of TLogs
 	for (int i = 0; i < context->numTLogs; ++i) {
-		context->tLogInterfaces.push_back(getNewTLogInterface(context->messageTransferModel));
+		context->tLogInterfaces.push_back(getNewTLogInterface(context->messageTransferModel,
+		                                                      deterministicRandom()->randomUniqueID(),
+		                                                      deterministicRandom()->randomUniqueID(),
+		                                                      LocalityData()));
 		context->tLogInterfaces.back()->initEndpoints();
+	}
+
+	for (int i = 0; i < context->numTLogGroups; ++i) {
+		context->tLogGroups.push_back(TLogGroup(deterministicRandom()->randomUniqueID()));
+		context->tLogGroupLeaders[context->tLogGroups.back().logGroupId] =
+		    context->tLogInterfaces[deterministicRandom()->randomInt(0, context->numTLogs)];
 	}
 
 	// Prepare StorageServerInterfaces
@@ -81,24 +94,32 @@ std::shared_ptr<TestDriverContext> initTestDriverContext() {
 		int numInterfaces = interface.size();
 		int index = 0;
 		for (int i = 0; i < context->numTeamIDs; ++i) {
-			const TeamID& teamID = context->teamIDs[i];
+			const StorageTeamID& teamID = context->teamIDs[i];
 			mapper[teamID] = interface[index];
 
 			++index;
 			index %= numInterfaces;
 		}
 	};
-	assignTeamToInterface(context->teamIDTLogInterfaceMapper, context->tLogInterfaces);
 	assignTeamToInterface(context->teamIDStorageServerInterfaceMapper, context->storageServerInterfaces);
 
+	for (int i = 0, index = 0; i < context->numTeamIDs; ++i) {
+		const StorageTeamID& teamID = context->teamIDs[i];
+		TLogGroup& tLogGroup = context->tLogGroups[index];
+		context->teamIDTLogInterfaceMapper[teamID] = context->tLogGroupLeaders[tLogGroup.logGroupId];
+		// Ignore tags for now.
+		tLogGroup.storageTeams[teamID] = {};
+		++index;
+		index %= context->tLogGroups.size();
+	}
 	return context;
 }
 
-std::shared_ptr<TLogInterfaceBase> TestDriverContext::getTLogInterface(const TeamID& teamID) {
+std::shared_ptr<TLogInterfaceBase> TestDriverContext::getTLogInterface(const StorageTeamID& teamID) {
 	return teamIDTLogInterfaceMapper.at(teamID);
 }
 
-std::shared_ptr<StorageServerInterfaceBase> TestDriverContext::getStorageServerInterface(const TeamID& teamID) {
+std::shared_ptr<StorageServerInterfaceBase> TestDriverContext::getStorageServerInterface(const StorageTeamID& teamID) {
 	return teamIDStorageServerInterfaceMapper.at(teamID);
 }
 
@@ -170,7 +191,7 @@ bool isAllRecordsValidated(const std::vector<CommitRecord>& records) {
 
 void verifyMutationsInRecord(std::vector<CommitRecord>& records,
                              const Version& version,
-                             const TeamID& teamID,
+                             const StorageTeamID& teamID,
                              const std::vector<MutationRef>& mutations,
                              std::function<void(CommitValidationRecord&)> validateUpdater) {
 	for (auto& record : records) {

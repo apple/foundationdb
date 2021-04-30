@@ -41,16 +41,17 @@ ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext
 	state std::shared_ptr<TestDriverContext> pTestDriverContext = pFakeProxyContext->pTestDriverContext;
 	state int numTeams = pFakeProxyContext->pTestDriverContext->numTeamIDs;
 	state std::vector<CommitRecord>& commitRecord = pFakeProxyContext->pTestDriverContext->commitRecord;
-	state Version version = 100;
+	state Version versionGap = 10000;
+	state Version version = versionGap;
 	state int i = 0;
 	loop {
 		std::cout << "Commit " << i << std::endl;
 
-		std::unordered_map<TeamID, std::vector<MutationRef>> fakeMutations;
+		std::unordered_map<StorageTeamID, std::vector<MutationRef>> fakeMutations;
 		ProxyTLogPushMessageSerializer serializer;
 
 		for (int _ = 0; _ < deterministicRandom()->randomInt(1, 12); ++_) {
-			TeamID teamID{ pTestDriverContext->teamIDs[deterministicRandom()->randomInt(0, numTeams)] };
+			StorageTeamID teamID{ pTestDriverContext->teamIDs[deterministicRandom()->randomInt(0, numTeams)] };
 			MutationRef mutation(pTestDriverContext->mutationsArena,
 			                     MutationRef::SetValue,
 			                     StringRef(format("Key%d", deterministicRandom()->randomInt(0, 100))),
@@ -62,7 +63,7 @@ ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext
 
 		state std::vector<Future<TLogCommitReply>> requests;
 		for (auto iter = fakeMutations.begin(); iter != fakeMutations.end(); ++iter) {
-			const TeamID teamID = iter->first;
+			const StorageTeamID teamID = iter->first;
 			auto& mutations = iter->second;
 
 			// Here we use move semantic in order to keep the mutations in arena
@@ -75,12 +76,14 @@ ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext
 			                          teamID,
 			                          encoded.arena(),
 			                          encoded,
-			                          version - 1,
+			                          version - versionGap,
 			                          version,
+			                          0,
+			                          0,
 			                          Optional<UID>());
 			requests.push_back(pTestDriverContext->getTLogInterface(teamID)->commit.getReply(request));
 		}
-		++version;
+		version += versionGap;
 
 		printCommitRecord(pTestDriverContext->commitRecord);
 

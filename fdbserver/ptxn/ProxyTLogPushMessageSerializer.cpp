@@ -22,11 +22,11 @@
 
 namespace ptxn {
 
-void ProxyTLogPushMessageSerializer::writeMessage(const MutationRef& mutation, const TeamID& teamID) {
+void ProxyTLogPushMessageSerializer::writeMessage(const MutationRef& mutation, const StorageTeamID& teamID) {
 	writers[teamID].writeItem(SubsequenceMutationItem{ currentSubsequence++, mutation });
 }
 
-void ProxyTLogPushMessageSerializer::completeMessageWriting(const TeamID& teamID) {
+void ProxyTLogPushMessageSerializer::completeMessageWriting(const StorageTeamID& teamID) {
 	writers[teamID].completeItemWriting();
 
 	ProxyTLogMessageHeader header;
@@ -36,7 +36,7 @@ void ProxyTLogPushMessageSerializer::completeMessageWriting(const TeamID& teamID
 	writers[teamID].writeHeader(header);
 }
 
-Standalone<StringRef> ProxyTLogPushMessageSerializer::getSerialized(const TeamID& teamID) {
+Standalone<StringRef> ProxyTLogPushMessageSerializer::getSerialized(const StorageTeamID& teamID) {
 	ASSERT(writers[teamID].isWritingCompleted());
 	return writers[teamID].getSerialized();
 }

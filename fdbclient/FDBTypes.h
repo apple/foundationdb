@@ -56,7 +56,10 @@ inline bool isPseudoLocality(int8_t locality) {
 
 namespace ptxn {
 
-using TeamID = UID;
+using TLogGroupID = UID;
+using StorageTeamID = UID;
+
+const StorageTeamID txsTeam = UID(1, 1);
 
 }	// namespace ptxn
 
@@ -786,7 +789,7 @@ struct TLogVersion {
 		V6 = 6, // 7.0
 		V7 = 7, // 7.1
 		MIN_SUPPORTED = V2,
-		MAX_SUPPORTED = V7,
+		MAX_SUPPORTED = V6,
 		MIN_RECRUITABLE = V5,
 		DEFAULT = V5,
 	} version;
