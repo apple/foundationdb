@@ -34,6 +34,7 @@ set(FDBCLIENT_SRCS
   HTTP.actor.cpp
   IClientApi.h
   IConfigTransaction.h
+  ISingleThreadTransaction.h
   JsonBuilder.cpp
   JsonBuilder.h
   KeyBackedTypes.h

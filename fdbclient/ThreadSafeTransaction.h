@@ -26,6 +26,7 @@
 #include "flow/ThreadHelper.actor.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/IClientApi.h"
+#include "fdbclient/ISingleThreadTransaction.h"
 
 class ThreadSafeDatabase : public IDatabase, public ThreadSafeReferenceCounted<ThreadSafeDatabase> {
 public:
@@ -132,7 +133,7 @@ public:
 	void delref() override { ThreadSafeReferenceCounted<ThreadSafeTransaction>::delref(); }
 
 private:
-	ReadYourWritesTransaction* tr;
+	ISingleThreadTransaction* tr;
 };
 
 class ThreadSafeApi : public IClientApi, ThreadSafeReferenceCounted<ThreadSafeApi> {
