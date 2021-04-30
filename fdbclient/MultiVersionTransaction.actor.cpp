@@ -805,7 +805,8 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
 			}
 		});
 
-		onMainThreadVoid([this]() { dbState->protocolVersionMonitor = dbState->monitorProtocolVersion(); }, nullptr);
+		Reference<DatabaseState> dbStateRef = dbState;
+		onMainThreadVoid([dbStateRef]() { dbStateRef->protocolVersionMonitor = dbStateRef->monitorProtocolVersion(); }, nullptr);
 	}
 }
 
@@ -1022,9 +1023,15 @@ void MultiVersionDatabase::DatabaseState::startLegacyVersionMonitors() {
 }
 
 // Cleans up state for the legacy version monitors to break reference cycles
-// Must be called from the main thread
 void MultiVersionDatabase::DatabaseState::close() {
-	legacyVersionMonitors.clear();
+	addref();
+	onMainThreadVoid(
+	    [this]() {
+		    protocolVersionMonitor.cancel();
+		    legacyVersionMonitors.clear();
+		    delref();
+	    },
+	    nullptr);
 }
 
 // Starts the connection monitor by creating a database object at an old version.
@@ -1072,11 +1079,10 @@ void MultiVersionDatabase::LegacyVersionMonitor::runGrvProbe(Reference<MultiVers
 	versionMonitor = mapThreadFuture<Version, Void>(tr->getReadVersion(), [this, dbState](ErrorOr<Version> v) {
 		onMainThreadVoid(
 		    [this, v, dbState]() {
-			    monitorRunning = false;
-
 			    // If the version attempt returns an error, we regard that as a connection (except
 			    // operation_cancelled)
 			    if (!v.isError() || v.getError().code() != error_code_operation_cancelled) {
+				    monitorRunning = false;
 				    dbState->protocolVersionChanged(client->protocolVersion);
 			    }
 		    },

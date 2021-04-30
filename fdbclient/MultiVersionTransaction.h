@@ -437,7 +437,6 @@ public:
 		void startLegacyVersionMonitors();
 
 		// Cleans up state for the legacy version monitors to break reference cycles
-		// Must be called from the main thread
 		void close();
 
 		Reference<IDatabase> db;
