@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/IConfigTransaction.h"
+#include "fdbclient/SimpleConfigTransaction.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/ConfigFollowerInterface.h"
 #include "fdbserver/IConfigBroadcaster.h"
@@ -52,17 +52,17 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 
 	ACTOR static Future<std::map<uint32_t, uint32_t>> getSnapshot(ConfigurationDatabaseWorkload* self, Database cx) {
 		state std::map<uint32_t, uint32_t> result;
-		state Reference<IConfigTransaction> tr =
-		    makeReference<SimpleConfigTransaction>(cx->getConnectionFile()->getConnectionString());
+		state SimpleConfigTransaction tr(cx->getConnectionFile()->getConnectionString());
 		loop {
 			try {
-				Standalone<RangeResultRef> range = wait(tr->getRange(self->keys));
+				Standalone<RangeResultRef> range =
+				    wait(tr.getRange(firstGreaterOrEqual(self->keys.begin), lastLessThan(self->keys.end), 1000));
 				for (const auto& kv : range) {
 					result[self->fromKey(kv.key)] = self->fromKey(kv.value);
 				}
 				return result;
 			} catch (Error &e) {
-				wait(tr->onError(e));
+				wait(tr.onError(e));
 			}
 		}
 	}
@@ -76,34 +76,32 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 		return fromBigEndian32(BinaryReader::fromStringRef<uint32_t>(key.removePrefix(keys.begin), Unversioned()));
 	}
 
-	ACTOR static Future<int> getCycleLength(ConfigurationDatabaseWorkload const* self,
-	                                        Reference<IConfigTransaction> tr) {
-		state Standalone<RangeResultRef> range = wait(tr->getRange(self->keys));
+	ACTOR static Future<int> getCycleLength(ConfigurationDatabaseWorkload const* self, SimpleConfigTransaction* tr) {
+		Standalone<RangeResultRef> range =
+		    wait(tr->getRange(firstGreaterOrEqual(self->keys.begin), lastLessThan(self->keys.end), 1000));
 		return range.size();
 	}
 
 	ACTOR static Future<Void> cycleSwap(ConfigurationDatabaseWorkload* self, Database cx) {
-		state Reference<IConfigTransaction> tr =
-		    makeReference<SimpleConfigTransaction>(cx->getConnectionFile()->getConnectionString());
+		state SimpleConfigTransaction tr(cx->getConnectionFile()->getConnectionString());
 		loop {
 			try {
-				int length = wait(getCycleLength(self, tr));
+				int length = wait(getCycleLength(self, &tr));
 				state Key k0 = self->toKey(deterministicRandom()->randomInt(0, length));
-				Optional<Value> _k1 = wait(tr->get(k0));
+				Optional<Value> _k1 = wait(tr.get(k0));
 				state Key k1 = _k1.get();
 				wait(delay(deterministicRandom()->random01() * self->meanSleepWithinTransaction));
-				Optional<Value> _k2 = wait(tr->get(k1));
+				Optional<Value> _k2 = wait(tr.get(k1));
 				state Key k2 = _k2.get();
-				Optional<Value> _k3 = wait(tr->get(k2));
+				Optional<Value> _k3 = wait(tr.get(k2));
 				state Key k3 = _k3.get();
-				tr->set(k0, k2);
-				tr->set(k1, k3);
-				tr->set(k2, k1);
+				tr.set(k0, k2);
+				tr.set(k1, k3);
+				tr.set(k2, k1);
 				wait(delay(deterministicRandom()->random01() * self->meanSleepWithinTransaction));
-				wait(tr->commit());
-				Version v = wait(tr->getVersion());
+				wait(tr.commit());
 				TraceEvent(SevDebug, "ConfigDatabaseClientSwap")
-				    .detail("Version", v)
+				    .detail("Version", tr.getCommittedVersion())
 				    .detail("PivotIndex", self->fromKey(k0));
 				++self->swapCount;
 				return Void();
@@ -111,32 +109,30 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 				if (e.code() == error_code_transaction_too_old) {
 					++self->transactionTooOldCount;
 				}
-				wait(tr->onError(e));
+				wait(tr.onError(e));
 			}
 		}
 	}
 
 	ACTOR static Future<Void> cycleGrow(ConfigurationDatabaseWorkload* self, Database cx) {
-		state Reference<IConfigTransaction> tr =
-		    makeReference<SimpleConfigTransaction>(cx->getConnectionFile()->getConnectionString());
+		state SimpleConfigTransaction tr(cx->getConnectionFile()->getConnectionString());
 		loop {
 			try {
-				state int length = wait(getCycleLength(self, tr));
+				state int length = wait(getCycleLength(self, &tr));
 				if (length == self->maxCycleSize) {
 					return Void();
 				}
 				state Key k0 = self->toKey(deterministicRandom()->randomInt(0, length));
 				state Key k1 = self->toKey(length);
-				Optional<Value> _k2 = wait(tr->get(k0));
+				Optional<Value> _k2 = wait(tr.get(k0));
 				state Key k2 = _k2.get();
-				tr->set(k0, k1);
-				tr->set(k1, k2);
+				tr.set(k0, k1);
+				tr.set(k1, k2);
 				wait(delay(2 * deterministicRandom()->random01() * self->meanSleepWithinTransaction));
-				wait(tr->commit());
-				Version v = wait(tr->getVersion());
+				wait(tr.commit());
 				TraceEvent(SevDebug, "ConfigDatabaseClientGrow")
 				    .detail("InsertIndex", self->fromKey(k0))
-				    .detail("Version", v)
+				    .detail("Version", tr.getCommittedVersion())
 				    .detail("NewSize", length + 1);
 				++self->growCount;
 				return Void();
@@ -144,18 +140,18 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 				if (e.code() == error_code_transaction_too_old) {
 					++self->transactionTooOldCount;
 				}
-				wait(tr->onError(e));
+				wait(tr.onError(e));
 			}
 		}
 	}
 
 	ACTOR static Future<Void> cycleShrink(ConfigurationDatabaseWorkload* self, Database cx) {
-		state Reference<IConfigTransaction> tr =
-		    makeReference<SimpleConfigTransaction>(cx->getConnectionFile()->getConnectionString());
+		state SimpleConfigTransaction tr(cx->getConnectionFile()->getConnectionString());
 		loop {
 			try {
-				state Version currentVersion = wait(tr->getVersion());
-				state Standalone<RangeResultRef> range = wait(tr->getRange(self->keys));
+				state Version currentVersion = wait(tr.getReadVersion());
+				state Standalone<RangeResultRef> range =
+				    wait(tr.getRange(firstGreaterOrEqual(self->keys.begin), lastLessThan(self->keys.end), 1000));
 				if (range.size() == self->minCycleSize) {
 					return Void();
 				}
@@ -169,12 +165,11 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 						k2 = kv.value;
 					}
 				}
-				tr->clear(k1);
-				tr->set(k0, k2);
-				wait(tr->commit());
-				Version v = wait(tr->getVersion());
+				tr.clear(k1);
+				tr.set(k0, k2);
+				wait(tr.commit());
 				TraceEvent(SevDebug, "ConfigDatabaseClientShrink")
-				    .detail("Version", v)
+				    .detail("Version", tr.getCommittedVersion())
 				    .detail("NewSize", range.size() - 1);
 				++self->shrinkCount;
 				return Void();
@@ -182,7 +177,7 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 				if (e.code() == error_code_transaction_too_old) {
 					++self->transactionTooOldCount;
 				}
-				wait(tr->onError(e));
+				wait(tr.onError(e));
 			}
 		}
 	}
@@ -299,17 +294,16 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 	}
 
 	ACTOR static Future<Void> setup(ConfigurationDatabaseWorkload* self, Database cx) {
-		state Reference<IConfigTransaction> tr =
-		    makeReference<SimpleConfigTransaction>(cx->getConnectionFile()->getConnectionString());
+		state SimpleConfigTransaction tr(cx->getConnectionFile()->getConnectionString());
 		loop {
 			try {
 				for (int i = 0; i < self->initialCycleSize; ++i) {
-					tr->set(self->toKey(i), self->toKey((i + 1) % self->initialCycleSize));
+					tr.set(self->toKey(i), self->toKey((i + 1) % self->initialCycleSize));
 				}
-				wait(tr->commit());
+				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
-				wait(tr->onError(e));
+				wait(tr.onError(e));
 			}
 		}
 	}

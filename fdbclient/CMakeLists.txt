@@ -33,7 +33,6 @@ set(FDBCLIENT_SRCS
   GrvProxyInterface.h
   HTTP.actor.cpp
   IClientApi.h
-  IConfigTransaction.h
   ISingleThreadTransaction.h
   JsonBuilder.cpp
   JsonBuilder.h
@@ -66,6 +65,7 @@ set(FDBCLIENT_SRCS
   S3BlobStore.actor.cpp
   Schemas.cpp
   Schemas.h
+  SimpleConfigTransaction.h
   SnapshotCache.h
   Status.h
   StatusClient.actor.cpp

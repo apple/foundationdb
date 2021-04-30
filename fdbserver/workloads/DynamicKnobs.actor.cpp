@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/ConfigKnobs.h"
-#include "fdbclient/IConfigTransaction.h"
+#include "fdbclient/SimpleConfigTransaction.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include
 
@@ -32,17 +32,16 @@ class DynamicKnobsWorkload : public TestWorkload {
 
 	ACTOR static Future<Void> start(DynamicKnobsWorkload* self, Database cx) {
 		state Arena arena;
-		state Reference<IConfigTransaction> tr =
-		    makeReference<SimpleConfigTransaction>(cx->getConnectionFile()->getConnectionString());
+		state SimpleConfigTransaction tr(cx->getConnectionFile()->getConnectionString());
 		loop {
 			try {
 				ConfigUpdateKey key = ConfigUpdateKeyRef(arena, testConfigClass, testKnobName);
 				ConfigUpdateValue value = ConfigUpdateValueRef(arena, testUpdateDescription, testKnobValue, now());
-				tr->set(BinaryWriter::toValue(key, IncludeVersion()), BinaryWriter::toValue(value, IncludeVersion()));
-				wait(tr->commit());
+				tr.set(BinaryWriter::toValue(key, IncludeVersion()), BinaryWriter::toValue(value, IncludeVersion()));
+				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
-				wait(tr->onError(e));
+				wait(tr.onError(e));
 			}
 		}
 	}
