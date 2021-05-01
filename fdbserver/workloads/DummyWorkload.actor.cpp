@@ -19,15 +19,14 @@
  */
 
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 // The workload that do nothing. It can be used for waiting for quiescence
 struct DummyWorkload : TestWorkload {
 	bool displayWorkers;
 	double displayDelay;
 
-	DummyWorkload(WorkloadContext const& wcx)
-	: TestWorkload(wcx) {
+	DummyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		displayWorkers = getOption(options, LiteralStringRef("displayWorkers"), true);
 		displayDelay = getOption(options, LiteralStringRef("displayDelay"), 0.0);
 	}
@@ -41,7 +40,7 @@ struct DummyWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> _start( DummyWorkload* self, Database cx) {
+	ACTOR static Future<Void> _start(DummyWorkload* self, Database cx) {
 		if (self->displayDelay > 0.0)
 			wait(delay(self->displayDelay));
 		g_simulator.displayWorkers();

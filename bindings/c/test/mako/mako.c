@@ -101,8 +101,13 @@ int commit_transaction(FDBTransaction* transaction) {
 	return FDB_SUCCESS;
 }
 
-void update_op_lat_stats(struct timespec* start, struct timespec* end, int op, mako_stats_t* stats,
-                         lat_block_t* block[], int* elem_size, bool* is_memory_allocated) {
+void update_op_lat_stats(struct timespec* start,
+                         struct timespec* end,
+                         int op,
+                         mako_stats_t* stats,
+                         lat_block_t* block[],
+                         int* elem_size,
+                         bool* is_memory_allocated) {
 	uint64_t latencyus;
 
 	latencyus = (((uint64_t)end->tv_sec * 1000000000 + end->tv_nsec) -
@@ -116,7 +121,8 @@ void update_op_lat_stats(struct timespec* start, struct timespec* end, int op, m
 	if (latencyus > stats->latency_us_max[op]) {
 		stats->latency_us_max[op] = latencyus;
 	}
-	if (!is_memory_allocated[op]) return;
+	if (!is_memory_allocated[op])
+		return;
 	if (elem_size[op] < stats->latency_samples[op]) {
 		elem_size[op] = elem_size[op] + LAT_BLOCK_SIZE;
 		lat_block_t* temp_block = (lat_block_t*)malloc(sizeof(lat_block_t));
@@ -157,11 +163,13 @@ int cleanup(FDBTransaction* transaction, mako_args_t* args) {
 	endstr[4] = 0xff;
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_start);
 	fdb_transaction_clear_range(transaction, (uint8_t*)beginstr, 5, (uint8_t*)endstr, 5);
-	if (commit_transaction(transaction) != FDB_SUCCESS) goto failExit;
+	if (commit_transaction(transaction) != FDB_SUCCESS)
+		goto failExit;
 
 	fdb_transaction_reset(transaction);
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_end);
-	fprintf(printme, "INFO: Clear range: %6.3f sec\n",
+	fprintf(printme,
+	        "INFO: Clear range: %6.3f sec\n",
 	        ((timer_end.tv_sec - timer_start.tv_sec) * 1000000000.0 + timer_end.tv_nsec - timer_start.tv_nsec) /
 	            1000000000);
 	return 0;
@@ -172,8 +180,15 @@ failExit:
 }
 
 /* populate database */
-int populate(FDBTransaction* transaction, mako_args_t* args, int worker_id, int thread_id, int thread_tps,
-             mako_stats_t* stats, lat_block_t* block[], int* elem_size, bool* is_memory_allocated) {
+int populate(FDBTransaction* transaction,
+             mako_args_t* args,
+             int worker_id,
+             int thread_id,
+             int thread_tps,
+             mako_stats_t* stats,
+             lat_block_t* block[],
+             int* elem_size,
+             bool* is_memory_allocated) {
 	int i;
 	struct timespec timer_start, timer_end;
 	struct timespec timer_prev, timer_now; /* for throttling */
@@ -188,7 +203,8 @@ int populate(FDBTransaction* transaction, mako_args_t* args, int worker_id, int 
 	int tracetimer = 0;
 
 	keystr = (char*)malloc(sizeof(char) * args->key_length + 1);
-	if (!keystr) return -1;
+	if (!keystr)
+		return -1;
 	valstr = (char*)malloc(sizeof(char) * args->value_length + 1);
 	if (!valstr) {
 		free(keystr);
@@ -226,8 +242,8 @@ int populate(FDBTransaction* transaction, mako_args_t* args, int worker_id, int 
 						fdb_error_t err;
 						tracetimer = 0;
 						fprintf(debugme, "DEBUG: txn tracing %s\n", keystr);
-						err = fdb_transaction_set_option(transaction, FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER,
-						                                 (uint8_t*)keystr, strlen(keystr));
+						err = fdb_transaction_set_option(
+						    transaction, FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER, (uint8_t*)keystr, strlen(keystr));
 						if (err) {
 							fprintf(
 							    stderr,
@@ -236,7 +252,8 @@ int populate(FDBTransaction* transaction, mako_args_t* args, int worker_id, int 
 						}
 						err = fdb_transaction_set_option(transaction, FDB_TR_OPTION_LOG_TRANSACTION, (uint8_t*)NULL, 0);
 						if (err) {
-							fprintf(stderr, "ERROR: fdb_transaction_set_option(FDB_TR_OPTION_LOG_TRANSACTION): %s\n",
+							fprintf(stderr,
+							        "ERROR: fdb_transaction_set_option(FDB_TR_OPTION_LOG_TRANSACTION): %s\n",
 							        fdb_get_error(err));
 						}
 					}
@@ -259,14 +276,20 @@ int populate(FDBTransaction* transaction, mako_args_t* args, int worker_id, int 
 			if (stats->xacts % args->sampling == 0) {
 				clock_gettime(CLOCK_MONOTONIC, &timer_start_commit);
 			}
-			if (commit_transaction(transaction) != FDB_SUCCESS) goto failExit;
+			if (commit_transaction(transaction) != FDB_SUCCESS)
+				goto failExit;
 
 			/* xact latency stats */
 			if (stats->xacts % args->sampling == 0) {
 				clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
-				update_op_lat_stats(&timer_start_commit, &timer_per_xact_end, OP_COMMIT, stats, block, elem_size,
-				                    is_memory_allocated);
-				update_op_lat_stats(&timer_per_xact_start, &timer_per_xact_end, OP_TRANSACTION, stats, block, elem_size,
+				update_op_lat_stats(
+				    &timer_start_commit, &timer_per_xact_end, OP_COMMIT, stats, block, elem_size, is_memory_allocated);
+				update_op_lat_stats(&timer_per_xact_start,
+				                    &timer_per_xact_end,
+				                    OP_TRANSACTION,
+				                    stats,
+				                    block,
+				                    elem_size,
 				                    is_memory_allocated);
 			}
 
@@ -283,21 +306,26 @@ int populate(FDBTransaction* transaction, mako_args_t* args, int worker_id, int 
 	if (stats->xacts % args->sampling == 0) {
 		clock_gettime(CLOCK_MONOTONIC, &timer_start_commit);
 	}
-	if (commit_transaction(transaction) != FDB_SUCCESS) goto failExit;
+	if (commit_transaction(transaction) != FDB_SUCCESS)
+		goto failExit;
 
 	/* xact latency stats */
 	if (stats->xacts % args->sampling == 0) {
 		clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
-		update_op_lat_stats(&timer_start_commit, &timer_per_xact_end, OP_COMMIT, stats, block, elem_size,
-		                    is_memory_allocated);
-		update_op_lat_stats(&timer_per_xact_start, &timer_per_xact_end, OP_TRANSACTION, stats, block, elem_size,
-		                    is_memory_allocated);
+		update_op_lat_stats(
+		    &timer_start_commit, &timer_per_xact_end, OP_COMMIT, stats, block, elem_size, is_memory_allocated);
+		update_op_lat_stats(
+		    &timer_per_xact_start, &timer_per_xact_end, OP_TRANSACTION, stats, block, elem_size, is_memory_allocated);
 	}
 
 	clock_gettime(CLOCK_MONOTONIC, &timer_end);
 	stats->xacts++;
 
-	fprintf(debugme, "DEBUG: Populated %d rows (%d-%d): %6.3f sec\n", end - begin, begin, end,
+	fprintf(debugme,
+	        "DEBUG: Populated %d rows (%d-%d): %6.3f sec\n",
+	        end - begin,
+	        begin,
+	        end,
 	        ((timer_end.tv_sec - timer_start.tv_sec) * 1000000000.0 + timer_end.tv_nsec - timer_start.tv_nsec) /
 	            1000000000);
 
@@ -306,8 +334,10 @@ int populate(FDBTransaction* transaction, mako_args_t* args, int worker_id, int 
 	return 0;
 
 failExit:
-	if (keystr) free(keystr);
-	if (valstr) free(valstr);
+	if (keystr)
+		free(keystr);
+	if (valstr)
+		free(valstr);
 	fprintf(stderr, "ERROR: FDB failure in populate()\n");
 	return -1;
 }
@@ -365,17 +395,28 @@ int run_op_get(FDBTransaction* transaction, char* keystr, char* valstr, int snap
 	return FDB_SUCCESS;
 }
 
-int run_op_getrange(FDBTransaction* transaction, char* keystr, char* keystr2, char* valstr, int snapshot, int reverse) {
+int run_op_getrange(FDBTransaction* transaction,
+                    char* keystr,
+                    char* keystr2,
+                    char* valstr,
+                    int snapshot,
+                    int reverse,
+                    FDBStreamingMode streaming_mode) {
 	FDBFuture* f;
 	fdb_error_t err;
 	FDBKeyValue const* out_kv;
 	int out_count;
 	int out_more;
 
-	f = fdb_transaction_get_range(transaction, FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((uint8_t*)keystr, strlen(keystr)),
-	                              FDB_KEYSEL_LAST_LESS_OR_EQUAL((uint8_t*)keystr2, strlen(keystr2)) + 1, 0 /* limit */,
-	                              0 /* target_bytes */, FDB_STREAMING_MODE_WANT_ALL /* FDBStreamingMode */,
-	                              0 /* iteration */, snapshot, reverse /* reverse */);
+	f = fdb_transaction_get_range(transaction,
+	                              FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((uint8_t*)keystr, strlen(keystr)),
+	                              FDB_KEYSEL_LAST_LESS_OR_EQUAL((uint8_t*)keystr2, strlen(keystr2)) + 1,
+	                              0 /* limit */,
+	                              0 /* target_bytes */,
+	                              streaming_mode /* FDBStreamingMode */,
+	                              0 /* iteration */,
+	                              snapshot,
+	                              reverse /* reverse */);
 	fdb_wait_and_handle_error(fdb_transaction_get_range, f, transaction);
 
 	err = fdb_future_get_keyvalue_array(f, &out_kv, &out_count, &out_more);
@@ -428,8 +469,15 @@ int run_op_clearrange(FDBTransaction* transaction, char* keystr, char* keystr2) 
 }
 
 /* run one transaction */
-int run_one_transaction(FDBTransaction* transaction, mako_args_t* args, mako_stats_t* stats, char* keystr,
-                        char* keystr2, char* valstr, lat_block_t* block[], int* elem_size, bool* is_memory_allocated) {
+int run_one_transaction(FDBTransaction* transaction,
+                        mako_args_t* args,
+                        mako_stats_t* stats,
+                        char* keystr,
+                        char* keystr2,
+                        char* valstr,
+                        lat_block_t* block[],
+                        int* elem_size,
+                        bool* is_memory_allocated) {
 	int i;
 	int count;
 	int rc;
@@ -488,13 +536,25 @@ retryTxn:
 					rc = run_op_get(transaction, keystr, valstr, 0);
 					break;
 				case OP_GETRANGE:
-					rc = run_op_getrange(transaction, keystr, keystr2, valstr, 0, args->txnspec.ops[i][OP_REVERSE]);
+					rc = run_op_getrange(transaction,
+					                     keystr,
+					                     keystr2,
+					                     valstr,
+					                     0,
+					                     args->txnspec.ops[i][OP_REVERSE],
+					                     args->streaming_mode);
 					break;
 				case OP_SGET:
 					rc = run_op_get(transaction, keystr, valstr, 1);
 					break;
 				case OP_SGETRANGE:
-					rc = run_op_getrange(transaction, keystr, keystr2, valstr, 1, args->txnspec.ops[i][OP_REVERSE]);
+					rc = run_op_getrange(transaction,
+					                     keystr,
+					                     keystr2,
+					                     valstr,
+					                     1,
+					                     args->txnspec.ops[i][OP_REVERSE],
+					                     args->streaming_mode);
 					break;
 				case OP_UPDATE:
 					randstr(valstr, args->value_length + 1);
@@ -512,10 +572,13 @@ retryTxn:
 					randstr(keystr + KEYPREFIXLEN, randstrlen + 1); /* make it (almost) unique */
 					randstr(valstr, args->value_length + 1);
 					for (rangei = 0; rangei < args->txnspec.ops[i][OP_RANGE]; rangei++) {
-						sprintf(keystr + KEYPREFIXLEN + randstrlen, "%0.*d", digits(args->txnspec.ops[i][OP_RANGE]),
+						sprintf(keystr + KEYPREFIXLEN + randstrlen,
+						        "%0.*d",
+						        digits(args->txnspec.ops[i][OP_RANGE]),
 						        rangei);
 						rc = run_op_insert(transaction, keystr, valstr);
-						if (rc != FDB_SUCCESS) break;
+						if (rc != FDB_SUCCESS)
+							break;
 					}
 					docommit = 1;
 					break;
@@ -539,10 +602,20 @@ retryTxn:
 							stats->ops[OP_TRANSACTION]++;
 							if (stats->xacts % args->sampling == 0) {
 								clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
-								update_op_lat_stats(&timer_start_commit, &timer_per_xact_end, OP_COMMIT, stats, block,
-								                    elem_size, is_memory_allocated);
-								update_op_lat_stats(&timer_per_xact_start, &timer_per_xact_end, OP_TRANSACTION, stats,
-								                    block, elem_size, is_memory_allocated);
+								update_op_lat_stats(&timer_start_commit,
+								                    &timer_per_xact_end,
+								                    OP_COMMIT,
+								                    stats,
+								                    block,
+								                    elem_size,
+								                    is_memory_allocated);
+								update_op_lat_stats(&timer_per_xact_start,
+								                    &timer_per_xact_end,
+								                    OP_TRANSACTION,
+								                    stats,
+								                    block,
+								                    elem_size,
+								                    is_memory_allocated);
 							}
 						} else {
 							/* error */
@@ -572,7 +645,9 @@ retryTxn:
 					randstr(keystr + KEYPREFIXLEN, randstrlen + 1); /* make it (almost) unique */
 					randstr(valstr, args->value_length + 1);
 					for (rangei = 0; rangei < args->txnspec.ops[i][OP_RANGE]; rangei++) {
-						sprintf(keystr + KEYPREFIXLEN + randstrlen, "%0.*d", digits(args->txnspec.ops[i][OP_RANGE]),
+						sprintf(keystr + KEYPREFIXLEN + randstrlen,
+						        "%0.*d",
+						        digits(args->txnspec.ops[i][OP_RANGE]),
 						        rangei);
 						if (rangei == 0) {
 							strcpy(keystr2, keystr);
@@ -598,10 +673,20 @@ retryTxn:
 						stats->ops[OP_TRANSACTION]++;
 						if (stats->xacts % args->sampling == 0) {
 							clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
-							update_op_lat_stats(&timer_start_commit, &timer_per_xact_end, OP_COMMIT, stats, block,
-							                    elem_size, is_memory_allocated);
-							update_op_lat_stats(&timer_per_xact_start, &timer_per_xact_end, OP_TRANSACTION, stats,
-							                    block, elem_size, is_memory_allocated);
+							update_op_lat_stats(&timer_start_commit,
+							                    &timer_per_xact_end,
+							                    OP_COMMIT,
+							                    stats,
+							                    block,
+							                    elem_size,
+							                    is_memory_allocated);
+							update_op_lat_stats(&timer_per_xact_start,
+							                    &timer_per_xact_end,
+							                    OP_TRANSACTION,
+							                    stats,
+							                    block,
+							                    elem_size,
+							                    is_memory_allocated);
 						}
 					} else {
 						/* error */
@@ -666,8 +751,8 @@ retryTxn:
 			stats->ops[OP_COMMIT]++;
 			if (stats->xacts % args->sampling == 0) {
 				clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
-				update_op_lat_stats(&timer_start_commit, &timer_per_xact_end, OP_COMMIT, stats, block, elem_size,
-				                    is_memory_allocated);
+				update_op_lat_stats(
+				    &timer_start_commit, &timer_per_xact_end, OP_COMMIT, stats, block, elem_size, is_memory_allocated);
 			}
 		} else {
 			/* error */
@@ -688,8 +773,8 @@ retryTxn:
 	stats->ops[OP_TRANSACTION]++;
 	if (stats->xacts % args->sampling == 0) {
 		clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
-		update_op_lat_stats(&timer_per_xact_start, &timer_per_xact_end, OP_TRANSACTION, stats, block, elem_size,
-		                    is_memory_allocated);
+		update_op_lat_stats(
+		    &timer_per_xact_start, &timer_per_xact_end, OP_TRANSACTION, stats, block, elem_size, is_memory_allocated);
 	}
 
 	stats->xacts++;
@@ -699,9 +784,18 @@ retryTxn:
 	return 0;
 }
 
-int run_workload(FDBTransaction* transaction, mako_args_t* args, int thread_tps, volatile double* throttle_factor,
-                 int thread_iters, volatile int* signal, mako_stats_t* stats, int dotrace, int dotagging, lat_block_t* block[],
-                 int* elem_size, bool* is_memory_allocated) {
+int run_workload(FDBTransaction* transaction,
+                 mako_args_t* args,
+                 int thread_tps,
+                 volatile double* throttle_factor,
+                 int thread_iters,
+                 volatile int* signal,
+                 mako_stats_t* stats,
+                 int dotrace,
+                 int dotagging,
+                 lat_block_t* block[],
+                 int* elem_size,
+                 bool* is_memory_allocated) {
 	int xacts = 0;
 	int64_t total_xacts = 0;
 	int rc = 0;
@@ -714,13 +808,14 @@ int run_workload(FDBTransaction* transaction, mako_args_t* args, int thread_tps,
 	int tracetimer = 0;
 	char* tagstr;
 
-	if (thread_tps < 0) return 0;
+	if (thread_tps < 0)
+		return 0;
 
 	if (dotrace) {
 		traceid = (char*)malloc(32);
 	}
 
-	if(dotagging) {
+	if (dotagging) {
 		tagstr = (char*)calloc(16, 1);
 		memcpy(tagstr, KEYPREFIX, KEYPREFIXLEN);
 		memcpy(tagstr + KEYPREFIXLEN, args->txntagging_prefix, TAGPREFIXLENGTH_MAX);
@@ -729,7 +824,8 @@ int run_workload(FDBTransaction* transaction, mako_args_t* args, int thread_tps,
 	current_tps = (int)((double)thread_tps * *throttle_factor);
 
 	keystr = (char*)malloc(sizeof(char) * args->key_length + 1);
-	if (!keystr) return -1;
+	if (!keystr)
+		return -1;
 	keystr2 = (char*)malloc(sizeof(char) * args->key_length + 1);
 	if (!keystr2) {
 		free(keystr);
@@ -770,11 +866,13 @@ int run_workload(FDBTransaction* transaction, mako_args_t* args, int thread_tps,
 						tracetimer = 0;
 						snprintf(traceid, 32, "makotrace%019lld", total_xacts);
 						fprintf(debugme, "DEBUG: txn tracing %s\n", traceid);
-						err = fdb_transaction_set_option(transaction, FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER,
-						                                 (uint8_t*)traceid, strlen(traceid));
+						err = fdb_transaction_set_option(transaction,
+						                                 FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER,
+						                                 (uint8_t*)traceid,
+						                                 strlen(traceid));
 						if (err) {
-							fprintf(stderr, "ERROR: FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: %s\n",
-							        fdb_get_error(err));
+							fprintf(
+							    stderr, "ERROR: FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: %s\n", fdb_get_error(err));
 						}
 						err = fdb_transaction_set_option(transaction, FDB_TR_OPTION_LOG_TRANSACTION, (uint8_t*)NULL, 0);
 						if (err) {
@@ -782,7 +880,6 @@ int run_workload(FDBTransaction* transaction, mako_args_t* args, int thread_tps,
 						}
 					}
 				}
-
 
 			} else {
 				if (thread_tps > 0) {
@@ -796,16 +893,15 @@ int run_workload(FDBTransaction* transaction, mako_args_t* args, int thread_tps,
 		/* enable transaction tagging */
 		if (dotagging > 0) {
 			sprintf(tagstr + KEYPREFIXLEN + TAGPREFIXLENGTH_MAX, "%03d", urand(0, args->txntagging - 1));
-			fdb_error_t err = fdb_transaction_set_option(transaction, FDB_TR_OPTION_AUTO_THROTTLE_TAG,
-			                                             (uint8_t*)tagstr, 16);
+			fdb_error_t err =
+			    fdb_transaction_set_option(transaction, FDB_TR_OPTION_AUTO_THROTTLE_TAG, (uint8_t*)tagstr, 16);
 			if (err) {
-				fprintf(stderr, "ERROR: FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: %s\n",
-				        fdb_get_error(err));
+				fprintf(stderr, "ERROR: FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: %s\n", fdb_get_error(err));
 			}
 		}
 
-		rc = run_one_transaction(transaction, args, stats, keystr, keystr2, valstr, block, elem_size,
-		                         is_memory_allocated);
+		rc = run_one_transaction(
+		    transaction, args, stats, keystr, keystr2, valstr, block, elem_size, is_memory_allocated);
 		if (rc) {
 			/* FIXME: run_one_transaction should return something meaningful */
 			fprintf(annoyme, "ERROR: run_one_transaction failed (%d)\n", rc);
@@ -829,7 +925,7 @@ int run_workload(FDBTransaction* transaction, mako_args_t* args, int thread_tps,
 	if (dotrace) {
 		free(traceid);
 	}
-	if(dotagging) {
+	if (dotagging) {
 		free(tagstr);
 	}
 
@@ -924,8 +1020,13 @@ void* worker_thread(void* thread_args) {
 		stats->latency_samples[op] = 0;
 	}
 
-	fprintf(debugme, "DEBUG: worker_id:%d (%d) thread_id:%d (%d) (tid:%d)\n", worker_id, args->num_processes, thread_id,
-	        args->num_threads, (unsigned int)pthread_self());
+	fprintf(debugme,
+	        "DEBUG: worker_id:%d (%d) thread_id:%d (%d) (tid:%d)\n",
+	        worker_id,
+	        args->num_processes,
+	        thread_id,
+	        args->num_threads,
+	        (unsigned int)pthread_self());
 
 	if (args->tpsmax) {
 		thread_tps = compute_thread_tps(args->tpsmax, worker_id, thread_id, args->num_processes, args->num_threads);
@@ -965,8 +1066,18 @@ void* worker_thread(void* thread_args) {
 
 	/* run the workload */
 	else if (args->mode == MODE_RUN) {
-		rc = run_workload(transaction, args, thread_tps, throttle_factor, thread_iters,
-				  signal, stats, dotrace, dotagging, block, elem_size, is_memory_allocated);
+		rc = run_workload(transaction,
+		                  args,
+		                  thread_tps,
+		                  throttle_factor,
+		                  thread_iters,
+		                  signal,
+		                  stats,
+		                  dotrace,
+		                  dotagging,
+		                  block,
+		                  elem_size,
+		                  is_memory_allocated);
 		if (rc < 0) {
 			fprintf(stderr, "ERROR: run_workload failed\n");
 		}
@@ -991,7 +1102,8 @@ void* worker_thread(void* thread_args) {
 						temp_block = temp_block->next_block;
 					}
 					size = stats->latency_samples[op] % LAT_BLOCK_SIZE;
-					if (size != 0) fwrite(&temp_block->data, sizeof(uint64_t) * size, 1, fp);
+					if (size != 0)
+						fwrite(&temp_block->data, sizeof(uint64_t) * size, 1, fp);
 				} else {
 					while (temp_block) {
 						fwrite(&temp_block->data, sizeof(uint64_t) * LAT_BLOCK_SIZE, 1, fp);
@@ -1047,7 +1159,6 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 		return -1;
 	}
 
-
 	/* enable flatbuffers if specified */
 	if (args->flatbuffers) {
 #ifdef FDB_NET_OPTION_USE_FLATBUFFERS
@@ -1063,7 +1174,9 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 
 	/* enable tracing if specified */
 	if (args->trace) {
-		fprintf(debugme, "DEBUG: Enable Tracing in %s (%s)\n", (args->traceformat == 0) ? "XML" : "JSON",
+		fprintf(debugme,
+		        "DEBUG: Enable Tracing in %s (%s)\n",
+		        (args->traceformat == 0) ? "XML" : "JSON",
 		        (args->tracepath[0] == '\0') ? "current directory" : args->tracepath);
 		err = fdb_network_set_option(FDB_NET_OPTION_TRACE_ENABLE, (uint8_t*)args->tracepath, strlen(args->tracepath));
 		if (err) {
@@ -1095,10 +1208,9 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 	fprintf(debugme, "DEBUG: fdb_setup_network\n");
 	err = fdb_setup_network();
 	if (err) {
-    	fprintf(stderr, "ERROR: Failed at %s:%d (%s)\n", __FILE__, __LINE__, fdb_get_error(err));
-    	return -1;
+		fprintf(stderr, "ERROR: Failed at %s:%d (%s)\n", __FILE__, __LINE__, fdb_get_error(err));
+		return -1;
 	}
-
 
 	/* Each worker process will have its own network thread */
 	fprintf(debugme, "DEBUG: creating network thread\n");
@@ -1181,8 +1293,10 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 	}
 
 failExit:
-	if (worker_threads) free(worker_threads);
-	if (thread_args) free(thread_args);
+	if (worker_threads)
+		free(worker_threads);
+	if (thread_args)
+		free(thread_args);
 
 	/* clean up database and cluster */
 	fdb_database_destroy(process.database);
@@ -1208,7 +1322,8 @@ failExit:
 /* initialize the parameters with default values */
 int init_args(mako_args_t* args) {
 	int i;
-	if (!args) return -1;
+	if (!args)
+		return -1;
 	memset(args, 0, sizeof(mako_args_t)); /* zero-out everything */
 	args->api_version = fdb_get_max_api_version();
 	args->json = 0;
@@ -1233,6 +1348,7 @@ int init_args(mako_args_t* args) {
 	args->trace = 0;
 	args->tracepath[0] = '\0';
 	args->traceformat = 0; /* default to client's default (XML) */
+	args->streaming_mode = FDB_STREAMING_MODE_WANT_ALL;
 	args->txntrace = 0;
 	args->txntagging = 0;
 	memset(args->txntagging_prefix, 0, TAGPREFIXLENGTH_MAX);
@@ -1393,10 +1509,14 @@ void usage() {
 	printf("%-24s %s\n", "    --tracepath=PATH", "Set trace file path");
 	printf("%-24s %s\n", "    --trace_format <xml|json>", "Set trace format (Default: json)");
 	printf("%-24s %s\n", "    --txntrace=sec", "Specify transaction tracing interval (Default: 0)");
-	printf("%-24s %s\n", "    --txntagging", "Specify the number of different transaction tag (Default: 0, max = 1000)");
-	printf("%-24s %s\n", "    --txntagging_prefix", "Specify the prefix of transaction tag - mako${txntagging_prefix} (Default: '')");
+	printf(
+	    "%-24s %s\n", "    --txntagging", "Specify the number of different transaction tag (Default: 0, max = 1000)");
+	printf("%-24s %s\n",
+	       "    --txntagging_prefix",
+	       "Specify the prefix of transaction tag - mako${txntagging_prefix} (Default: '')");
 	printf("%-24s %s\n", "    --knobs=KNOBS", "Set client knobs");
 	printf("%-24s %s\n", "    --flatbuffers", "Use flatbuffers");
+	printf("%-24s %s\n", "    --streaming", "Streaming mode: all (default), iterator, small, medium, large, serial");
 }
 
 /* parse benchmark paramters */
@@ -1428,6 +1548,7 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			                                    { "knobs", required_argument, NULL, ARG_KNOBS },
 			                                    { "tracepath", required_argument, NULL, ARG_TRACEPATH },
 			                                    { "trace_format", required_argument, NULL, ARG_TRACEFORMAT },
+			                                    { "streaming", required_argument, NULL, ARG_STREAMING_MODE },
 			                                    { "txntrace", required_argument, NULL, ARG_TXNTRACE },
 			                                    /* no args */
 			                                    { "help", no_argument, NULL, 'h' },
@@ -1437,13 +1558,14 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			                                    { "flatbuffers", no_argument, NULL, ARG_FLATBUFFERS },
 			                                    { "trace", no_argument, NULL, ARG_TRACE },
 			                                    { "txntagging", required_argument, NULL, ARG_TXNTAGGING },
-			                                    { "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX},
+			                                    { "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
 			                                    { "version", no_argument, NULL, ARG_VERSION },
 			                                    { NULL, 0, NULL, 0 }
 		};
 		idx = 0;
 		c = getopt_long(argc, argv, short_options, long_options, &idx);
-		if (c < 0) break;
+		if (c < 0)
+			break;
 		switch (c) {
 		case '?':
 		case 'h':
@@ -1472,7 +1594,8 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			break;
 		case 'x':
 			rc = parse_transaction(args, optarg);
-			if (rc < 0) return -1;
+			if (rc < 0)
+				return -1;
 			break;
 		case 'v':
 			args->verbose = atoi(optarg);
@@ -1547,7 +1670,25 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 				args->traceformat = 0;
 			} else {
 				fprintf(stderr, "Error: Invalid trace_format %s\n", optarg);
-				exit(0);
+				return -1;
+			}
+			break;
+		case ARG_STREAMING_MODE:
+			if (strncmp(optarg, "all", 3) == 0) {
+				args->streaming_mode = FDB_STREAMING_MODE_WANT_ALL;
+			} else if (strncmp(optarg, "iterator", 8) == 0) {
+				args->streaming_mode = FDB_STREAMING_MODE_ITERATOR;
+			} else if (strncmp(optarg, "small", 5) == 0) {
+				args->streaming_mode = FDB_STREAMING_MODE_SMALL;
+			} else if (strncmp(optarg, "medium", 6) == 0) {
+				args->streaming_mode = FDB_STREAMING_MODE_MEDIUM;
+			} else if (strncmp(optarg, "large", 5) == 0) {
+				args->streaming_mode = FDB_STREAMING_MODE_LARGE;
+			} else if (strncmp(optarg, "serial", 6) == 0) {
+				args->streaming_mode = FDB_STREAMING_MODE_SERIAL;
+			} else {
+				fprintf(stderr, "Error: Invalid streaming mode %s\n", optarg);
+				return -1;
 			}
 			break;
 		case ARG_TXNTRACE:
@@ -1556,19 +1697,18 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 
 		case ARG_TXNTAGGING:
 			args->txntagging = atoi(optarg);
-			if(args->txntagging > 1000) {
+			if (args->txntagging > 1000) {
 				args->txntagging = 1000;
 			}
 			break;
 		case ARG_TXNTAGGINGPREFIX: {
-			if(strlen(optarg) > TAGPREFIXLENGTH_MAX) {
+			if (strlen(optarg) > TAGPREFIXLENGTH_MAX) {
 				fprintf(stderr, "Error: the length of txntagging_prefix is larger than %d\n", TAGPREFIXLENGTH_MAX);
 				exit(0);
 			}
 			memcpy(args->txntagging_prefix, optarg, strlen(optarg));
 			break;
 		}
-
 		}
 	}
 
@@ -1628,9 +1768,9 @@ int validate_args(mako_args_t* args) {
 			fprintf(stderr, "ERROR: Must specify either seconds or iteration\n");
 			return -1;
 		}
-		if(args->txntagging < 0) {
-            fprintf(stderr, "ERROR: --txntagging must be a non-negative integer\n");
-            return -1;
+		if (args->txntagging < 0) {
+			fprintf(stderr, "ERROR: --txntagging must be a non-negative integer\n");
+			return -1;
 		}
 	}
 	return 0;
@@ -1703,7 +1843,8 @@ void print_stats_header(mako_args_t* args, bool show_commit, bool is_first_heade
 
 	/* header */
 	if (is_first_header_empty)
-		for (i = 0; i <= STATS_TITLE_WIDTH; i++) printf(" ");
+		for (i = 0; i <= STATS_TITLE_WIDTH; i++)
+			printf(" ");
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0) {
 			switch (op) {
@@ -1747,7 +1888,8 @@ void print_stats_header(mako_args_t* args, bool show_commit, bool is_first_heade
 		}
 	}
 
-	if (show_commit) printf("%" STR(STATS_FIELD_WIDTH) "s ", "COMMIT");
+	if (show_commit)
+		printf("%" STR(STATS_FIELD_WIDTH) "s ", "COMMIT");
 	if (show_op_stats) {
 		printf("%" STR(STATS_FIELD_WIDTH) "s\n", "TRANSACTION");
 	} else {
@@ -1755,37 +1897,46 @@ void print_stats_header(mako_args_t* args, bool show_commit, bool is_first_heade
 		printf("%" STR(STATS_FIELD_WIDTH) "s\n", "Conflicts/s");
 	}
 
-	for (i = 0; i < STATS_TITLE_WIDTH; i++) printf("=");
+	for (i = 0; i < STATS_TITLE_WIDTH; i++)
+		printf("=");
 	printf(" ");
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0) {
-			for (i = 0; i < STATS_FIELD_WIDTH; i++) printf("=");
+			for (i = 0; i < STATS_FIELD_WIDTH; i++)
+				printf("=");
 			printf(" ");
 		}
 	}
 
 	/* COMMIT */
 	if (show_commit) {
-		for (i = 0; i < STATS_FIELD_WIDTH; i++) printf("=");
+		for (i = 0; i < STATS_FIELD_WIDTH; i++)
+			printf("=");
 		printf(" ");
 	}
 
 	if (show_op_stats) {
 		/* TRANSACTION */
-		for (i = 0; i < STATS_FIELD_WIDTH; i++) printf("=");
+		for (i = 0; i < STATS_FIELD_WIDTH; i++)
+			printf("=");
 		printf(" ");
 	} else {
 		/* TPS */
-		for (i = 0; i < STATS_FIELD_WIDTH; i++) printf("=");
+		for (i = 0; i < STATS_FIELD_WIDTH; i++)
+			printf("=");
 		printf(" ");
 
 		/* Conflicts */
-		for (i = 0; i < STATS_FIELD_WIDTH; i++) printf("=");
+		for (i = 0; i < STATS_FIELD_WIDTH; i++)
+			printf("=");
 	}
 	printf("\n");
 }
 
-void print_report(mako_args_t* args, mako_stats_t* stats, struct timespec* timer_now, struct timespec* timer_start,
+void print_report(mako_args_t* args,
+                  mako_stats_t* stats,
+                  struct timespec* timer_now,
+                  struct timespec* timer_start,
                   pid_t* pid_main) {
 	int i, j, k, op, index;
 	uint64_t totalxacts = 0;
@@ -2048,13 +2199,18 @@ void print_report(mako_args_t* args, mako_stats_t* stats, struct timespec* timer
 
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION) {
-			if (lat_total[op]) free(dataPoints[op]);
+			if (lat_total[op])
+				free(dataPoints[op]);
 		}
 	}
 }
 
-int stats_process_main(mako_args_t* args, mako_stats_t* stats, volatile double* throttle_factor, volatile int* signal,
-                       volatile int* stopcount, pid_t* pid_main) {
+int stats_process_main(mako_args_t* args,
+                       mako_stats_t* stats,
+                       volatile double* throttle_factor,
+                       volatile int* signal,
+                       volatile int* stopcount,
+                       pid_t* pid_main) {
 	struct timespec timer_start, timer_prev, timer_now;
 	double sin_factor;
 
@@ -2063,7 +2219,8 @@ int stats_process_main(mako_args_t* args, mako_stats_t* stats, volatile double* 
 		usleep(10000); /* 10ms */
 	}
 
-	if (args->verbose >= VERBOSE_DEFAULT) print_stats_header(args, false, true, false);
+	if (args->verbose >= VERBOSE_DEFAULT)
+		print_stats_header(args, false, true, false);
 
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_start);
 	timer_prev.tv_sec = timer_start.tv_sec;
@@ -2105,7 +2262,8 @@ int stats_process_main(mako_args_t* args, mako_stats_t* stats, volatile double* 
 				}
 			}
 
-			if (args->verbose >= VERBOSE_DEFAULT) print_stats(args, stats, &timer_now, &timer_prev);
+			if (args->verbose >= VERBOSE_DEFAULT)
+				print_stats(args, stats, &timer_now, &timer_prev);
 			timer_prev.tv_sec = timer_now.tv_sec;
 			timer_prev.tv_nsec = timer_now.tv_nsec;
 		}
@@ -2151,7 +2309,8 @@ int main(int argc, char* argv[]) {
 	}
 
 	rc = validate_args(&args);
-	if (rc < 0) return -1;
+	if (rc < 0)
+		return -1;
 
 	if (args.mode == MODE_CLEAN) {
 		/* cleanup will be done from a single thread */
@@ -2317,9 +2476,11 @@ int main(int argc, char* argv[]) {
 
 failExit:
 
-	if (worker_pids) free(worker_pids);
+	if (worker_pids)
+		free(worker_pids);
 
-	if (shm != MAP_FAILED) munmap(shm, shmsize);
+	if (shm != MAP_FAILED)
+		munmap(shm, shmsize);
 
 	if (shmfd) {
 		close(shmfd);

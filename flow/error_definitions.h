@@ -95,6 +95,7 @@ ERROR( server_overloaded, 1211, "Server is under too much load and cannot respon
 ERROR( master_backup_worker_failed, 1212, "Master terminating because a backup worker failed")
 ERROR( tag_throttled, 1213, "Transaction tag is being throttled" )
 ERROR( grv_proxy_failed, 1214, "Master terminating because a GRV CommitProxy failed" )
+ERROR( dd_tracker_cancelled, 1215, "The data distribution tracker has been cancelled" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -235,6 +236,7 @@ ERROR( snap_path_not_whitelisted, 2505, "Snapshot create binary path not whiteli
 ERROR( snap_not_fully_recovered_unsupported, 2506, "Unsupported when the cluster is not fully recovered")
 ERROR( snap_log_anti_quorum_unsupported, 2507, "Unsupported when log anti quorum is configured")
 ERROR( snap_with_recovery_unsupported, 2508, "Cluster recovery during snapshot operation not supported")
+ERROR( snap_invalid_uid_string, 2509, "The given uid string is not a 32-length hex string")
 
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error

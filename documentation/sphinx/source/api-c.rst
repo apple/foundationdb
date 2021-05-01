@@ -426,6 +426,66 @@ An |database-blurb1| Modifications to a database are performed via transactions.
    ``*out_transaction``
       Set to point to the newly created :type:`FDBTransaction`.
 
+.. function:: FDBFuture* fdb_database_reboot_worker(FDBDatabase* database, uint8_t const* address, int address_length, fdb_bool_t check, int duration)
+
+   Reboot the specified process in the database.
+
+   |future-return0| a :type:`int64_t` which represents whether the reboot request is sent or not. In particular, 1 means request sent and 0 means failure (e.g. the process with the specified address does not exist). |future-return1| call :func:`fdb_future_get_int64()` to extract the result, |future-return2|
+
+   ``address``
+        A pointer to the network address of the process.
+
+   ``address_length``
+        |length-of| ``address``.
+   
+   ``check``
+        whether to perform a storage engine integrity check. In particular, the check-on-reboot is implemented by writing a check/validation file on disk as breadcrumb for the process to find after reboot, at which point it will eat the breadcrumb file and pass true to the integrityCheck parameter of the openKVStore() factory method.
+   
+   ``duration``
+        If positive, the process will be first suspended for ``duration`` seconds before being rebooted.
+
+.. function:: FDBFuture* fdb_database_force_recovery_with_data_loss(FDBDatabase* database, uint8_t const* dcId, int dcId_length)
+
+   Force the database to recover into the given datacenter.
+
+   This function is only useful in a fearless configuration where you want to recover your database even with losing recently committed mutations.
+   
+   In particular, the function will set usable_regions to 1 and the amount of mutations that will be lost depends on how far behind the remote datacenter is.
+   
+   The function will change the region configuration to have a positive priority for the chosen dcId, and a negative priority for all other dcIds.
+
+   In particular, no error will be thrown if the given dcId does not exist. It will just not attemp to force a recovery.
+   
+   If the database has already recovered, the function does nothing. Thus it's safe to call it multiple times.
+
+   |future-returnvoid|
+
+.. function:: FDBFuture* fdb_database_create_snapshot(FDBDatabase* database, uint8_t const* snapshot_command, int snapshot_command_length)
+
+   Create a snapshot of the database.
+
+   ``uid``
+         A UID used to create snapshot. A valid uid is a 32-length hex string, otherwise, it will fail with error_code_snap_invalid_uid_string.
+
+         It is the user's responsibility to make sure the given ``uid`` is unique.
+   
+   ``uid_length``
+         |length-of| ``uid``
+
+   ``snapshot_command``
+         A pointer to all the snapshot command arguments.
+
+         In particular, if the original ``fdbcli`` command is ``snapshot <arg1> <arg2> <argN>``, then the string ``snapshot_command`` points to is ``<arg1> <arg2> <argN>``.
+   
+   ``snapshot_command_length``
+         |length-of| ``snapshot_command``
+   
+   .. note:: The function is exposing the functionality of the fdbcli command ``snapshot``. Please take a look at the documentation before using (see :ref:`disk-snapshot-backups`).
+
+.. function:: double fdb_database_get_main_thread_busyness(FDBDatabase* database)
+
+   Returns a value where 0 indicates that the client is idle and 1 (or larger) indicates that the client is saturated. By default, this value is updated every second.
+
 Transaction
 ===========
 

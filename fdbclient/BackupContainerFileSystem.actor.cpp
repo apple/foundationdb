@@ -35,13 +35,15 @@ public:
 	// TODO:  Do this more efficiently, as the range file list for a snapshot could potentially be hundreds of
 	// megabytes.
 	ACTOR static Future<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>> readKeyspaceSnapshot(
-	    Reference<BackupContainerFileSystem> bc, KeyspaceSnapshotFile snapshot) {
+	    Reference<BackupContainerFileSystem> bc,
+	    KeyspaceSnapshotFile snapshot) {
 		// Read the range file list for the specified version range, and then index them by fileName.
 		// This is so we can verify that each of the files listed in the manifest file are also in the container at this
 		// time.
 		std::vector<RangeFile> files = wait(bc->listRangeFiles(snapshot.beginVersion, snapshot.endVersion));
 		state std::map<std::string, RangeFile> rangeIndex;
-		for (auto& f : files) rangeIndex[f.fileName] = std::move(f);
+		for (auto& f : files)
+			rangeIndex[f.fileName] = std::move(f);
 
 		// Read the snapshot file, verify the version range, then find each of the range files by name in the index and
 		// return them.
@@ -54,17 +56,21 @@ public:
 		JSONDoc doc(json);
 
 		Version v;
-		if (!doc.tryGet("beginVersion", v) || v != snapshot.beginVersion) throw restore_corrupted_data();
-		if (!doc.tryGet("endVersion", v) || v != snapshot.endVersion) throw restore_corrupted_data();
+		if (!doc.tryGet("beginVersion", v) || v != snapshot.beginVersion)
+			throw restore_corrupted_data();
+		if (!doc.tryGet("endVersion", v) || v != snapshot.endVersion)
+			throw restore_corrupted_data();
 
 		json_spirit::mValue& filesArray = doc.create("files");
-		if (filesArray.type() != json_spirit::array_type) throw restore_corrupted_data();
+		if (filesArray.type() != json_spirit::array_type)
+			throw restore_corrupted_data();
 
 		std::vector<RangeFile> results;
 		int missing = 0;
 
 		for (auto const& fileValue : filesArray.get_array()) {
-			if (fileValue.type() != json_spirit::str_type) throw restore_corrupted_data();
+			if (fileValue.type() != json_spirit::str_type)
+				throw restore_corrupted_data();
 
 			// If the file is not in the index then log the error but don't throw yet, keep checking the whole list.
 			auto i = rangeIndex.find(fileValue.get_str());
@@ -159,12 +165,13 @@ public:
 		state int i;
 
 		// Validate each filename, update version range
-		for (i = 0; i < fileNames.size(); ++i) {
-			auto const& f = fileNames[i];
+		for (const auto& f : fileNames) {
 			if (pathToRangeFile(rf, f, 0)) {
 				fileArray.push_back(f);
-				if (rf.version < minVer) minVer = rf.version;
-				if (rf.version > maxVer) maxVer = rf.version;
+				if (rf.version < minVer)
+					minVer = rf.version;
+				if (rf.version > maxVer)
+					maxVer = rf.version;
 			} else
 				throw restore_unknown_file_type();
 			wait(yield());
@@ -196,7 +203,8 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<BackupFileList> dumpFileList(Reference<BackupContainerFileSystem> bc, Version begin,
+	ACTOR static Future<BackupFileList> dumpFileList(Reference<BackupContainerFileSystem> bc,
+	                                                 Version begin,
 	                                                 Version end) {
 		state Future<std::vector<RangeFile>> fRanges = bc->listRangeFiles(begin, end);
 		state Future<std::vector<KeyspaceSnapshotFile>> fSnapshots = bc->listKeyspaceSnapshots(begin, end);
@@ -230,8 +238,11 @@ public:
 	// nullptr, then it will be populated with [begin, end] -> tags, where next
 	// pair's begin <= previous pair's end + 1. On return, the last pair's end
 	// version (inclusive) gives the continuous range from begin.
-	static bool isContinuous(const std::vector<LogFile>& files, const std::vector<int>& indices, Version begin,
-	                         Version end, std::map<std::pair<Version, Version>, int>* tags) {
+	static bool isContinuous(const std::vector<LogFile>& files,
+	                         const std::vector<int>& indices,
+	                         Version begin,
+	                         Version end,
+	                         std::map<std::pair<Version, Version>, int>* tags) {
 		Version lastBegin = invalidVersion;
 		Version lastEnd = invalidVersion;
 		int lastTags = -1;
@@ -240,7 +251,8 @@ public:
 		for (int idx : indices) {
 			const LogFile& file = files[idx];
 			if (lastEnd == invalidVersion) {
-				if (file.beginVersion > begin) return false;
+				if (file.beginVersion > begin)
+					return false;
 				if (file.endVersion > begin) {
 					lastBegin = begin;
 					lastTags = file.totalTags;
@@ -262,7 +274,8 @@ public:
 				lastTags = file.totalTags;
 			}
 			lastEnd = file.endVersion;
-			if (lastEnd > end) break;
+			if (lastEnd > end)
+				break;
 		}
 		if (tags != nullptr && lastBegin != invalidVersion) {
 			tags->emplace(std::make_pair(lastBegin, std::min(end, lastEnd - 1)), lastTags);
@@ -298,7 +311,8 @@ public:
 		// check partition 0 is continuous in [begin, end] and create a map of ranges to partitions
 		std::map<std::pair<Version, Version>, int> tags; // range [start, end] -> partitions
 		isContinuous(logs, tagIndices[0], begin, end, &tags);
-		if (tags.empty() || end <= begin) return 0;
+		if (tags.empty() || end <= begin)
+			return 0;
 		end = std::min(end, tags.rbegin()->first.second);
 		TraceEvent("ContinuousLogEnd").detail("Partition", 0).detail("EndVersion", end).detail("Begin", begin);
 
@@ -315,7 +329,8 @@ public:
 				    .detail("EndVersion", tagEnd)
 				    .detail("RangeBegin", beginEnd.first)
 				    .detail("RangeEnd", beginEnd.second);
-				if (tagEnd == 0) return lastEnd == begin ? 0 : lastEnd;
+				if (tagEnd == 0)
+					return lastEnd == begin ? 0 : lastEnd;
 			}
 			if (tagEnd < beginEnd.second) {
 				return tagEnd;
@@ -328,9 +343,12 @@ public:
 
 	// Analyze partitioned logs and set contiguousLogEnd for "desc" if larger
 	// than the "scanBegin" version.
-	static void updatePartitionedLogsContinuousEnd(BackupDescription* desc, const std::vector<LogFile>& logs,
-	                                               const Version scanBegin, const Version scanEnd) {
-		if (logs.empty()) return;
+	static void updatePartitionedLogsContinuousEnd(BackupDescription* desc,
+	                                               const std::vector<LogFile>& logs,
+	                                               const Version scanBegin,
+	                                               const Version scanEnd) {
+		if (logs.empty())
+			return;
 
 		Version snapshotBeginVersion = desc->snapshots.size() > 0 ? desc->snapshots[0].beginVersion : invalidVersion;
 		Version begin = std::max(scanBegin, desc->minLogBegin.get());
@@ -341,7 +359,8 @@ public:
 		    .detail("ContiguousLogEnd", desc->contiguousLogEnd.get());
 		for (const auto& file : logs) {
 			if (file.beginVersion > begin) {
-				if (scanBegin > 0) return;
+				if (scanBegin > 0)
+					return;
 
 				// scanBegin is 0
 				desc->minLogBegin = file.beginVersion;
@@ -353,7 +372,8 @@ public:
 				// contiguousLogEnd is not inclusive, so +1 here.
 				desc->contiguousLogEnd.get() = ver + 1;
 				TraceEvent("UpdateContinuousLogEnd").detail("Version", ver + 1);
-				if (ver > snapshotBeginVersion) return;
+				if (ver > snapshotBeginVersion)
+					return;
 			}
 		}
 	}
@@ -361,24 +381,30 @@ public:
 	// Computes the continuous end version for non-partitioned mutation logs up to
 	// the "targetVersion". If "outLogs" is not nullptr, it will be updated with
 	// continuous log files. "*end" is updated with the continuous end version.
-	static void computeRestoreEndVersion(const std::vector<LogFile>& logs, std::vector<LogFile>* outLogs, Version* end,
+	static void computeRestoreEndVersion(const std::vector<LogFile>& logs,
+	                                     std::vector<LogFile>* outLogs,
+	                                     Version* end,
 	                                     Version targetVersion) {
 		auto i = logs.begin();
-		if (outLogs != nullptr) outLogs->push_back(*i);
+		if (outLogs != nullptr)
+			outLogs->push_back(*i);
 
 		// Add logs to restorable logs set until continuity is broken OR we reach targetVersion
 		while (++i != logs.end()) {
-			if (i->beginVersion > *end || i->beginVersion > targetVersion) break;
+			if (i->beginVersion > *end || i->beginVersion > targetVersion)
+				break;
 
 			// If the next link in the log chain is found, update the end
 			if (i->beginVersion == *end) {
-				if (outLogs != nullptr) outLogs->push_back(*i);
+				if (outLogs != nullptr)
+					outLogs->push_back(*i);
 				*end = i->endVersion;
 			}
 		}
 	}
 
-	ACTOR static Future<BackupDescription> describeBackup(Reference<BackupContainerFileSystem> bc, bool deepScan,
+	ACTOR static Future<BackupDescription> describeBackup(Reference<BackupContainerFileSystem> bc,
+	                                                      bool deepScan,
 	                                                      Version logStartVersionOverride) {
 		state BackupDescription desc;
 		desc.url = bc->getURL();
@@ -398,8 +424,8 @@ public:
 		// This could be handled more efficiently without recursion but it's tricky, this will do for now.
 		if (logStartVersionOverride != invalidVersion && logStartVersionOverride < 0) {
 			BackupDescription tmp = wait(bc->describeBackup(false, invalidVersion));
-			logStartVersionOverride = resolveRelativeVersion(tmp.maxLogEnd, logStartVersionOverride,
-			                                                 "LogStartVersionOverride", invalid_option_value());
+			logStartVersionOverride = resolveRelativeVersion(
+			    tmp.maxLogEnd, logStartVersionOverride, "LogStartVersionOverride", invalid_option_value());
 		}
 
 		// Get metadata versions
@@ -563,7 +589,8 @@ public:
 
 				wait(updates);
 			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) throw;
+				if (e.code() == error_code_actor_cancelled)
+					throw;
 				TraceEvent(SevWarn, "BackupContainerMetadataUpdateFailure").error(e).detail("URL", bc->getURL());
 			}
 		}
@@ -573,7 +600,8 @@ public:
 			s.restorable = true;
 			// If this is not a single-version snapshot then see if the available contiguous logs cover its range
 			if (s.beginVersion != s.endVersion) {
-				if (!desc.minLogBegin.present() || desc.minLogBegin.get() > s.beginVersion) s.restorable = false;
+				if (!desc.minLogBegin.present() || desc.minLogBegin.get() > s.beginVersion)
+					s.restorable = false;
 				if (!desc.contiguousLogEnd.present() || desc.contiguousLogEnd.get() <= s.endVersion)
 					s.restorable = false;
 			}
@@ -605,8 +633,11 @@ public:
 		return desc;
 	}
 
-	ACTOR static Future<Void> expireData(Reference<BackupContainerFileSystem> bc, Version expireEndVersion, bool force,
-	                                     IBackupContainer::ExpireProgress* progress, Version restorableBeginVersion) {
+	ACTOR static Future<Void> expireData(Reference<BackupContainerFileSystem> bc,
+	                                     Version expireEndVersion,
+	                                     bool force,
+	                                     IBackupContainer::ExpireProgress* progress,
+	                                     Version restorableBeginVersion) {
 		if (progress != nullptr) {
 			progress->step = "Describing backup";
 			progress->total = 0;
@@ -623,11 +654,12 @@ public:
 		// Resolve relative versions using max log version
 		expireEndVersion =
 		    resolveRelativeVersion(desc.maxLogEnd, expireEndVersion, "ExpireEndVersion", invalid_option_value());
-		restorableBeginVersion = resolveRelativeVersion(desc.maxLogEnd, restorableBeginVersion,
-		                                                "RestorableBeginVersion", invalid_option_value());
+		restorableBeginVersion = resolveRelativeVersion(
+		    desc.maxLogEnd, restorableBeginVersion, "RestorableBeginVersion", invalid_option_value());
 
 		// It would be impossible to have restorability to any version < expireEndVersion after expiring to that version
-		if (restorableBeginVersion < expireEndVersion) throw backup_cannot_expire();
+		if (restorableBeginVersion < expireEndVersion)
+			throw backup_cannot_expire();
 
 		// If the expire request is to a version at or before the previous version to which data was already deleted
 		// then do nothing and just return
@@ -652,7 +684,8 @@ public:
 		// Note that it is possible for there to be no actual files in the backup prior to expireEndVersion,
 		// if they were externally deleted or an expire operation deleted them but was terminated before
 		// updating expireEndVersion
-		if (forceNeeded && !force) throw backup_cannot_expire();
+		if (forceNeeded && !force)
+			throw backup_cannot_expire();
 
 		// Start scan for files to delete at the last completed expire operation's end or 0.
 		state Version scanBegin = desc.expiredEndVersion.orDefault(0);
@@ -724,7 +757,8 @@ public:
 		ranges.clear();
 
 		for (auto const& f : desc.snapshots) {
-			if (f.endVersion < expireEndVersion) toDelete.push_back(std::move(f.fileName));
+			if (f.endVersion < expireEndVersion)
+				toDelete.push_back(std::move(f.fileName));
 		}
 		desc = BackupDescription();
 
@@ -839,11 +873,13 @@ public:
 			}
 			i = j;
 		}
-		if (i < logs.size()) filtered.push_back(logs[i]);
+		if (i < logs.size())
+			filtered.push_back(logs[i]);
 		return filtered;
 	}
 
-	static Optional<RestorableFileSet> getRestoreSetFromLogs(const std::vector<LogFile>& logs, Version targetVersion,
+	static Optional<RestorableFileSet> getRestoreSetFromLogs(const std::vector<LogFile>& logs,
+	                                                         Version targetVersion,
 	                                                         RestorableFileSet restorable) {
 		Version end = logs.begin()->endVersion;
 		computeRestoreEndVersion(logs, &restorable.logs, &end, targetVersion);
@@ -855,16 +891,21 @@ public:
 		return Optional<RestorableFileSet>();
 	}
 
+	// Get a set of files that can restore the given "keyRangesFilter" to the "targetVersion".
+	// If "keyRangesFilter" is empty, the file set will cover all key ranges present in the backup.
+	// It's generally a good idea to specify "keyRangesFilter" to reduce the number of files for
+	// restore times.
+	//
+	// If "logsOnly" is true, then only log files are returned and "keyRangesFilter" is ignored,
+	// because the log can contain mutations of the whole key space, unlike range files that each
+	// is limited to a smaller key range.
 	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet(Reference<BackupContainerFileSystem> bc,
 	                                                               Version targetVersion,
 	                                                               VectorRef<KeyRangeRef> keyRangesFilter,
 	                                                               bool logsOnly = false,
 	                                                               Version beginVersion = invalidVersion) {
-		// Does not support use keyRangesFilter for logsOnly yet
-		if (logsOnly && !keyRangesFilter.empty()) {
-			TraceEvent(SevError, "BackupContainerRestoreSetUnsupportedAPI")
-			    .detail("KeyRangesFilter", keyRangesFilter.size());
-			return Optional<RestorableFileSet>();
+		for (const auto& range : keyRangesFilter) {
+			TraceEvent("BackupContainerGetRestoreSet").detail("RangeFilter", printable(range));
 		}
 
 		if (logsOnly) {
@@ -924,7 +965,8 @@ public:
 			// 'latestVersion' represents using the minimum restorable version in a snapshot.
 			restorable.targetVersion = targetVersion == latestVersion ? maxKeyRangeVersion : targetVersion;
 			// Any version < maxKeyRangeVersion is not restorable.
-			if (restorable.targetVersion < maxKeyRangeVersion) continue;
+			if (restorable.targetVersion < maxKeyRangeVersion)
+				continue;
 
 			restorable.snapshot = snapshots[i];
 			// TODO: Reenable the sanity check after TooManyFiles error is resolved
@@ -932,7 +974,8 @@ public:
 				// Sanity check key ranges
 				state std::map<std::string, KeyRange>::iterator rit;
 				for (rit = restorable.keyRanges.begin(); rit != restorable.keyRanges.end(); rit++) {
-					auto it = std::find_if(restorable.ranges.begin(), restorable.ranges.end(),
+					auto it = std::find_if(restorable.ranges.begin(),
+					                       restorable.ranges.end(),
 					                       [file = rit->first](const RangeFile f) { return f.fileName == file; });
 					ASSERT(it != restorable.ranges.end());
 					KeyRange result = wait(bc->getSnapshotFileKeyRange(*it));
@@ -1041,13 +1084,23 @@ public:
 		f.fileName = path;
 		f.fileSize = size;
 		int len;
-		if (sscanf(name.c_str(), "log,%" SCNd64 ",%" SCNd64 ",%*[^,],%u%n", &f.beginVersion, &f.endVersion,
-		           &f.blockSize, &len) == 3 &&
+		if (sscanf(name.c_str(),
+		           "log,%" SCNd64 ",%" SCNd64 ",%*[^,],%u%n",
+		           &f.beginVersion,
+		           &f.endVersion,
+		           &f.blockSize,
+		           &len) == 3 &&
 		    len == name.size()) {
 			out = f;
 			return true;
-		} else if (sscanf(name.c_str(), "log,%" SCNd64 ",%" SCNd64 ",%*[^,],%d-of-%d,%u%n", &f.beginVersion,
-		                  &f.endVersion, &f.tagId, &f.totalTags, &f.blockSize, &len) == 5 &&
+		} else if (sscanf(name.c_str(),
+		                  "log,%" SCNd64 ",%" SCNd64 ",%*[^,],%d-of-%d,%u%n",
+		                  &f.beginVersion,
+		                  &f.endVersion,
+		                  &f.tagId,
+		                  &f.totalTags,
+		                  &f.blockSize,
+		                  &len) == 5 &&
 		           len == name.size() && f.tagId >= 0) {
 			out = f;
 			return true;
@@ -1060,8 +1113,12 @@ public:
 		KeyspaceSnapshotFile f;
 		f.fileName = path;
 		int len;
-		if (sscanf(name.c_str(), "snapshot,%" SCNd64 ",%" SCNd64 ",%" SCNd64 "%n", &f.beginVersion, &f.endVersion,
-		           &f.totalSize, &len) == 3 &&
+		if (sscanf(name.c_str(),
+		           "snapshot,%" SCNd64 ",%" SCNd64 ",%" SCNd64 "%n",
+		           &f.beginVersion,
+		           &f.endVersion,
+		           &f.totalSize,
+		           &len) == 3 &&
 		    len == name.size()) {
 			out = f;
 			return true;
@@ -1071,26 +1128,38 @@ public:
 
 }; // class BackupContainerFileSystemImpl
 
-Future<Reference<IBackupFile>> BackupContainerFileSystem::writeLogFile(Version beginVersion, Version endVersion,
+Future<Reference<IBackupFile>> BackupContainerFileSystem::writeLogFile(Version beginVersion,
+                                                                       Version endVersion,
                                                                        int blockSize) {
 	return writeFile(BackupContainerFileSystemImpl::logVersionFolderString(beginVersion, false) +
-	                 format("log,%lld,%lld,%s,%d", beginVersion, endVersion,
-	                        deterministicRandom()->randomUniqueID().toString().c_str(), blockSize));
+	                 format("log,%lld,%lld,%s,%d",
+	                        beginVersion,
+	                        endVersion,
+	                        deterministicRandom()->randomUniqueID().toString().c_str(),
+	                        blockSize));
 }
 
-Future<Reference<IBackupFile>> BackupContainerFileSystem::writeTaggedLogFile(Version beginVersion, Version endVersion,
-                                                                             int blockSize, uint16_t tagId,
+Future<Reference<IBackupFile>> BackupContainerFileSystem::writeTaggedLogFile(Version beginVersion,
+                                                                             Version endVersion,
+                                                                             int blockSize,
+                                                                             uint16_t tagId,
                                                                              int totalTags) {
 	return writeFile(BackupContainerFileSystemImpl::logVersionFolderString(beginVersion, true) +
-	                 format("log,%lld,%lld,%s,%d-of-%d,%d", beginVersion, endVersion,
-	                        deterministicRandom()->randomUniqueID().toString().c_str(), tagId, totalTags, blockSize));
+	                 format("log,%lld,%lld,%s,%d-of-%d,%d",
+	                        beginVersion,
+	                        endVersion,
+	                        deterministicRandom()->randomUniqueID().toString().c_str(),
+	                        tagId,
+	                        totalTags,
+	                        blockSize));
 }
 
 Future<Reference<IBackupFile>> BackupContainerFileSystem::writeRangeFile(Version snapshotBeginVersion,
-                                                                         int snapshotFileCount, Version fileVersion,
+                                                                         int snapshotFileCount,
+                                                                         Version fileVersion,
                                                                          int blockSize) {
-	std::string fileName = format("range,%" PRId64 ",%s,%d", fileVersion,
-	                              deterministicRandom()->randomUniqueID().toString().c_str(), blockSize);
+	std::string fileName = format(
+	    "range,%" PRId64 ",%s,%d", fileVersion, deterministicRandom()->randomUniqueID().toString().c_str(), blockSize);
 
 	// In order to test backward compatibility in simulation, sometimes write to the old path format
 	if (g_network->isSimulated() && deterministicRandom()->coinflip()) {
@@ -1110,11 +1179,12 @@ BackupContainerFileSystem::readKeyspaceSnapshot(KeyspaceSnapshotFile snapshot) {
 Future<Void> BackupContainerFileSystem::writeKeyspaceSnapshotFile(const std::vector<std::string>& fileNames,
                                                                   const std::vector<std::pair<Key, Key>>& beginEndKeys,
                                                                   int64_t totalBytes) {
-	return BackupContainerFileSystemImpl::writeKeyspaceSnapshotFile(Reference<BackupContainerFileSystem>::addRef(this),
-	                                                                fileNames, beginEndKeys, totalBytes);
+	return BackupContainerFileSystemImpl::writeKeyspaceSnapshotFile(
+	    Reference<BackupContainerFileSystem>::addRef(this), fileNames, beginEndKeys, totalBytes);
 };
 
-Future<std::vector<LogFile>> BackupContainerFileSystem::listLogFiles(Version beginVersion, Version targetVersion,
+Future<std::vector<LogFile>> BackupContainerFileSystem::listLogFiles(Version beginVersion,
+                                                                     Version targetVersion,
                                                                      bool partitioned) {
 	// The first relevant log file could have a begin version less than beginVersion based on the knobs which
 	// determine log file range size, so start at an earlier version adjusted by how many versions a file could
@@ -1202,8 +1272,8 @@ Future<std::vector<RangeFile>> BackupContainerFileSystem::listRangeFiles(Version
 	return map(success(oldFiles) && success(newFiles), [=](Void _) {
 		std::vector<RangeFile> results = std::move(newFiles.get());
 		std::vector<RangeFile> oldResults = std::move(oldFiles.get());
-		results.insert(results.end(), std::make_move_iterator(oldResults.begin()),
-		               std::make_move_iterator(oldResults.end()));
+		results.insert(
+		    results.end(), std::make_move_iterator(oldResults.begin()), std::make_move_iterator(oldResults.end()));
 		return results;
 	});
 }
@@ -1227,14 +1297,16 @@ Future<BackupFileList> BackupContainerFileSystem::dumpFileList(Version begin, Ve
 }
 
 Future<BackupDescription> BackupContainerFileSystem::describeBackup(bool deepScan, Version logStartVersionOverride) {
-	return BackupContainerFileSystemImpl::describeBackup(Reference<BackupContainerFileSystem>::addRef(this), deepScan,
-	                                                     logStartVersionOverride);
+	return BackupContainerFileSystemImpl::describeBackup(
+	    Reference<BackupContainerFileSystem>::addRef(this), deepScan, logStartVersionOverride);
 }
 
-Future<Void> BackupContainerFileSystem::expireData(Version expireEndVersion, bool force, ExpireProgress* progress,
+Future<Void> BackupContainerFileSystem::expireData(Version expireEndVersion,
+                                                   bool force,
+                                                   ExpireProgress* progress,
                                                    Version restorableBeginVersion) {
-	return BackupContainerFileSystemImpl::expireData(Reference<BackupContainerFileSystem>::addRef(this),
-	                                                 expireEndVersion, force, progress, restorableBeginVersion);
+	return BackupContainerFileSystemImpl::expireData(
+	    Reference<BackupContainerFileSystem>::addRef(this), expireEndVersion, force, progress, restorableBeginVersion);
 }
 
 ACTOR static Future<KeyRange> getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem> bc, RangeFile file) {
@@ -1303,13 +1375,15 @@ ACTOR static Future<Optional<Version>> readVersionProperty(Reference<BackupConta
 		int rs = wait(f->read((uint8_t*)s.data(), size, 0));
 		Version v;
 		int len;
-		if (rs == size && sscanf(s.c_str(), "%" SCNd64 "%n", &v, &len) == 1 && len == size) return v;
+		if (rs == size && sscanf(s.c_str(), "%" SCNd64 "%n", &v, &len) == 1 && len == size)
+			return v;
 
 		TraceEvent(SevWarn, "BackupContainerInvalidProperty").detail("URL", bc->getURL()).detail("Path", path);
 
 		throw backup_invalid_info();
 	} catch (Error& e) {
-		if (e.code() == error_code_file_not_found) return Optional<Version>();
+		if (e.code() == error_code_file_not_found)
+			return Optional<Version>();
 
 		TraceEvent(SevWarn, "BackupContainerReadPropertyFailed")
 		    .error(e)
@@ -1325,12 +1399,12 @@ Future<KeyRange> BackupContainerFileSystem::getSnapshotFileKeyRange(const RangeF
 	return getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem>::addRef(this), file);
 }
 
-
 Future<Optional<RestorableFileSet>> BackupContainerFileSystem::getRestoreSet(Version targetVersion,
                                                                              VectorRef<KeyRangeRef> keyRangesFilter,
-                                                                             bool logsOnly, Version beginVersion) {
-	return BackupContainerFileSystemImpl::getRestoreSet(Reference<BackupContainerFileSystem>::addRef(this),
-	                                                    targetVersion, keyRangesFilter, logsOnly, beginVersion);
+                                                                             bool logsOnly,
+                                                                             Version beginVersion) {
+	return BackupContainerFileSystemImpl::getRestoreSet(
+	    Reference<BackupContainerFileSystem>::addRef(this), targetVersion, keyRangesFilter, logsOnly, beginVersion);
 }
 
 Future<Optional<Version>> BackupContainerFileSystem::VersionProperty::get() {
@@ -1362,30 +1436,41 @@ BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::logType() 
 namespace backup_test {
 
 int chooseFileSize(std::vector<int>& sizes) {
-	int size = 1000;
 	if (!sizes.empty()) {
-		size = sizes.back();
+		int size = sizes.back();
 		sizes.pop_back();
+		return size;
 	}
-	return size;
+	return deterministicRandom()->randomInt(0, 2e6);
 }
 
-ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<IBackupFile> f, int size) {
-	state Standalone<StringRef> content;
-	if (size > 0) {
-		content = makeString(size);
-		for (int i = 0; i < content.size(); ++i)
-			mutateString(content)[i] = (uint8_t)deterministicRandom()->randomInt(0, 256);
+ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<IBackupFile> f, int size, FlowLock* lock) {
+	state Standalone<VectorRef<uint8_t>> content;
 
-		wait(f->append(content.begin(), content.size()));
+	wait(lock->take(TaskPriority::DefaultYield, size));
+ 	state FlowLock::Releaser releaser(*lock, size);
+
+ 	printf("writeAndVerify size=%d file=%s\n", size, f->getFileName().c_str());
+	content.resize(content.arena(), size);
+	for (int i = 0; i < content.size(); ++i) {
+		content[i] = (uint8_t)deterministicRandom()->randomInt(0, 256);
+	}
+
+	state VectorRef<uint8_t> sendBuf = content;
+	while (sendBuf.size() > 0) {
+		state int n = std::min(sendBuf.size(), deterministicRandom()->randomInt(1, 16384));
+		wait(f->append(sendBuf.begin(), n));
+		sendBuf.pop_front(n);
 	}
 	wait(f->finish());
+
 	state Reference<IAsyncFile> inputFile = wait(c->readFile(f->getFileName()));
 	int64_t fileSize = wait(inputFile->size());
 	ASSERT(size == fileSize);
 	if (size > 0) {
-		state Standalone<StringRef> buf = makeString(size);
-		int b = wait(inputFile->read(mutateString(buf), buf.size(), 0));
+		state Standalone<VectorRef<uint8_t>> buf;
+		buf.resize(buf.arena(), fileSize);
+		int b = wait(inputFile->read(buf.begin(), buf.size(), 0));
 		ASSERT(b == buf.size());
 		ASSERT(buf == content);
 	}
@@ -1422,6 +1507,8 @@ ACTOR static Future<Void> testWriteSnapshotFile(Reference<IBackupFile> file, Key
 }
 
 ACTOR static Future<Void> testBackupContainer(std::string url) {
+	state FlowLock lock(100e6);
+
 	printf("BackupContainerTest URL %s\n", url.c_str());
 
 	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url);
@@ -1430,7 +1517,8 @@ ACTOR static Future<Void> testBackupContainer(std::string url) {
 	try {
 		wait(c->deleteContainer());
 	} catch (Error& e) {
-		if (e.code() != error_code_backup_invalid_url && e.code() != error_code_backup_does_not_exist) throw;
+		if (e.code() != error_code_backup_invalid_url && e.code() != error_code_backup_does_not_exist)
+			throw;
 	}
 
 	wait(c->create());
@@ -1444,7 +1532,11 @@ ACTOR static Future<Void> testBackupContainer(std::string url) {
 	state Version v = deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max() / 2);
 
 	// List of sizes to use to test edge cases on underlying file implementations
-	state std::vector<int> fileSizes = { 0, 10000000, 5000005 };
+	state std::vector<int> fileSizes = { 0 };
+	if (StringRef(url).startsWith(LiteralStringRef("blob"))) {
+ 		fileSizes.push_back(CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE);
+ 		fileSizes.push_back(CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE + 10);
+ 	}
 
 	loop {
 		state Version logStart = v;
@@ -1471,7 +1563,7 @@ ACTOR static Future<Void> testBackupContainer(std::string url) {
 			int size = chooseFileSize(fileSizes);
 			snapshotSizes.rbegin()->second += size;
 			// Write in actual range file format, instead of random data.
-			// writes.push_back(writeAndVerifyFile(c, range, size));
+			// writes.push_back(writeAndVerifyFile(c, range, size, &lock));
 			wait(testWriteSnapshotFile(range, begin, end, blockSize));
 
 			if (deterministicRandom()->random01() < .2) {
@@ -1492,7 +1584,7 @@ ACTOR static Future<Void> testBackupContainer(std::string url) {
 		state Reference<IBackupFile> log = wait(c->writeLogFile(logStart, v, 10));
 		logs[logStart] = log->getFileName();
 		int size = chooseFileSize(fileSizes);
-		writes.push_back(writeAndVerifyFile(c, log, size));
+		writes.push_back(writeAndVerifyFile(c, log, size, &lock));
 
 		// Randomly stop after a snapshot has finished and all manually seeded file sizes have been used.
 		if (fileSizes.empty() && !snapshots.empty() && snapshots.rbegin()->second.empty() &&

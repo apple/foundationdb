@@ -15,7 +15,7 @@ set(TEST_EXCLUDE ".^" CACHE STRING "Exclude all tests matching the given regex")
 if(WITH_PYTHON)
   find_program(OLD_FDBSERVER_BINARY
     fdbserver
-    HINTS /usr/sbin /usr/libexec /usr/local/sbin /usr/local/libexec)
+    HINTS /opt/foundationdb/old /usr/sbin /usr/libexec /usr/local/sbin /usr/local/libexec)
   if(OLD_FDBSERVER_BINARY)
     message(STATUS "Use old fdb at ${OLD_FDBSERVER_BINARY}")
   else()
@@ -62,6 +62,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES PureNetwork.txt IGNORE)
   add_fdb_test(TEST_FILES RRW2500.txt IGNORE)
   add_fdb_test(TEST_FILES RandomRead.txt IGNORE)
+  add_fdb_test(TEST_FILES RandomRangeRead.txt IGNORE)
   add_fdb_test(TEST_FILES RandomReadWrite.txt IGNORE)
   add_fdb_test(TEST_FILES ReadAbsent.txt IGNORE)
   add_fdb_test(TEST_FILES ReadAfterWrite.txt IGNORE)
@@ -74,6 +75,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES RedwoodPerfSet.txt IGNORE)
   add_fdb_test(TEST_FILES RedwoodPerfPrefixCompression.txt IGNORE)
   add_fdb_test(TEST_FILES RedwoodPerfSequentialInsert.txt IGNORE)
+  add_fdb_test(TEST_FILES RedwoodPerfRandomRangeScans.txt IGNORE)
   add_fdb_test(TEST_FILES RocksDBTest.txt IGNORE)
   add_fdb_test(TEST_FILES S3BlobStore.txt IGNORE)
   add_fdb_test(TEST_FILES SampleNoSimAttrition.txt IGNORE)
@@ -106,7 +108,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/AtomicBackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/AtomicOps.toml)
   add_fdb_test(TEST_FILES fast/AtomicOpsApiCorrectness.toml)
-  add_fdb_test(TEST_FILES fast/BackupBlobCorrectness.toml IGNORE)
+  add_fdb_test(TEST_FILES fast/BackupAzureBlobCorrectness.toml IGNORE)
+  add_fdb_test(TEST_FILES fast/BackupS3BlobCorrectness.toml IGNORE)
   add_fdb_test(TEST_FILES fast/BackupCorrectness.toml)
   add_fdb_test(TEST_FILES fast/BackupCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectness.toml)
@@ -129,6 +132,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/LowLatency.toml)
   add_fdb_test(TEST_FILES fast/MemoryLifetime.toml)
   add_fdb_test(TEST_FILES fast/MoveKeysCycle.toml)
+  add_fdb_test(TEST_FILES fast/ProtocolVersion.toml)
   add_fdb_test(TEST_FILES fast/RandomSelector.toml)
   add_fdb_test(TEST_FILES fast/RandomUnitTests.toml)
   add_fdb_test(TEST_FILES fast/ReadHotDetectionCorrectness.toml IGNORE) # TODO re-enable once read hot detection is enabled.
@@ -182,17 +186,17 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_5.0.0/StorefrontTestRestart-1.txt
                restarting/from_5.0.0/StorefrontTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.0/SnapTestAttrition-1.txt
-               restarting/from_6.2.0/SnapTestAttrition-2.txt)
+    TEST_FILES restarting/from_6.2.29/SnapTestAttrition-1.txt
+               restarting/from_6.2.29/SnapTestAttrition-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.0/SnapTestSimpleRestart-1.txt
-               restarting/from_6.2.0/SnapTestSimpleRestart-2.txt)
+    TEST_FILES restarting/from_6.2.29/SnapTestSimpleRestart-1.txt
+               restarting/from_6.2.29/SnapTestSimpleRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.0/SnapTestRestart-1.txt
-               restarting/from_6.2.0/SnapTestRestart-2.txt)
+    TEST_FILES restarting/from_6.2.29/SnapTestRestart-1.txt
+               restarting/from_6.2.29/SnapTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.0/SnapCycleRestart-1.txt
-               restarting/from_6.2.0/SnapCycleRestart-2.txt)
+    TEST_FILES restarting/from_6.2.29/SnapCycleRestart-1.txt
+               restarting/from_6.2.29/SnapCycleRestart-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_5.1.7/DrUpgradeRestart-1.txt
                restarting/from_5.1.7/DrUpgradeRestart-2.txt)
@@ -203,8 +207,8 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.0.0/UpgradeAndBackupRestore-1.toml
                restarting/from_7.0.0/UpgradeAndBackupRestore-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/to_6.3.5/CycleTestRestart-1.txt
-               restarting/to_6.3.5/CycleTestRestart-2.txt IGNORE)
+    TEST_FILES restarting/to_6.3.10/CycleTestRestart-1.txt
+               restarting/to_6.3.10/CycleTestRestart-2.txt)
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessSwitchover.toml)
@@ -259,6 +263,10 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES status/separate_not_enough_servers.txt)
   add_fdb_test(TEST_FILES status/single_process_too_many_config_params.txt)
 
+  add_test(
+    NAME multiversion_client/unit_tests
+    COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /fdbclient/multiversionclient/
+  )
 
   verify_testing()
   if (NOT OPEN_FOR_IDE AND NOT WIN32)
@@ -267,4 +275,6 @@ if(WITH_PYTHON)
       create_valgrind_correctness_package()
     endif()
   endif()
+else()
+  message(WARNING "Python not found, won't configure ctest")
 endif()

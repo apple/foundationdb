@@ -22,9 +22,10 @@
 #include "fdbrpc/Locality.h"
 #include <cmath>
 
-ServerKnobs const* SERVER_KNOBS = new ServerKnobs();
+std::unique_ptr<ServerKnobs> globalServerKnobs = std::make_unique<ServerKnobs>();
+ServerKnobs const* SERVER_KNOBS = globalServerKnobs.get();
 
-#define init( knob, value ) initKnob( knob, value, #knob )
+#define init(knob, value) initKnob(knob, value, #knob)
 
 ServerKnobs::ServerKnobs() {
 	initialize();
@@ -43,6 +44,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 
 	// TLogs
 	init( TLOG_TIMEOUT,                                          0.4 ); //cannot buggify because of availability
+	init( TLOG_SLOW_REJOIN_WARN_TIMEOUT_SECS,                     60 ); if( randomize && BUGGIFY ) TLOG_SLOW_REJOIN_WARN_TIMEOUT_SECS = deterministicRandom()->randomInt(5,10);
 	init( RECOVERY_TLOG_SMART_QUORUM_DELAY,                     0.25 ); if( randomize && BUGGIFY ) RECOVERY_TLOG_SMART_QUORUM_DELAY = 0.0; // smaller might be better for bug amplification
 	init( TLOG_STORAGE_MIN_UPDATE_INTERVAL,                      0.5 );
 	init( BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL,               30 );
@@ -66,7 +68,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( MAX_MESSAGE_SIZE,            std::max<int>(LOG_SYSTEM_PUSHED_DATA_BLOCK_SIZE, 1e5 + 2e4 + 1) + 8 ); // VALUE_SIZE_LIMIT + SYSTEM_KEY_SIZE_LIMIT + 9 bytes (4 bytes for length, 4 bytes for sequence number, and 1 byte for mutation type)
 	init( TLOG_MESSAGE_BLOCK_BYTES,                             10e6 );
 	init( TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR,      double(TLOG_MESSAGE_BLOCK_BYTES) / (TLOG_MESSAGE_BLOCK_BYTES - MAX_MESSAGE_SIZE) ); //1.0121466709838096006362758832473
-	init( PEEK_TRACKER_EXPIRATION_TIME,                          600 ); if( randomize && BUGGIFY ) PEEK_TRACKER_EXPIRATION_TIME = deterministicRandom()->coinflip() ? 0.1 : 60;
+	init( PEEK_TRACKER_EXPIRATION_TIME,                          600 ); if( randomize && BUGGIFY ) PEEK_TRACKER_EXPIRATION_TIME = deterministicRandom()->coinflip() ? 0.1 : 120;
 	init( PARALLEL_GET_MORE_REQUESTS,                             32 ); if( randomize && BUGGIFY ) PARALLEL_GET_MORE_REQUESTS = 2;
 	init( MULTI_CURSOR_PRE_FETCH_LIMIT,                           10 );
 	init( MAX_QUEUE_COMMIT_BYTES,                               15e6 ); if( randomize && BUGGIFY ) MAX_QUEUE_COMMIT_BYTES = 5000;
@@ -81,7 +83,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( TLOG_SPILL_REFERENCE_MAX_BYTES_PER_BATCH,           16<<10 ); if ( randomize && BUGGIFY ) TLOG_SPILL_REFERENCE_MAX_BYTES_PER_BATCH = 500;
 	init( DISK_QUEUE_FILE_EXTENSION_BYTES,                    10<<20 ); // BUGGIFYd per file within the DiskQueue
 	init( DISK_QUEUE_FILE_SHRINK_BYTES,                      100<<20 ); // BUGGIFYd per file within the DiskQueue
-	init( DISK_QUEUE_MAX_TRUNCATE_BYTES,                       2<<30 ); if ( randomize && BUGGIFY ) DISK_QUEUE_MAX_TRUNCATE_BYTES = 0;
+	init( DISK_QUEUE_MAX_TRUNCATE_BYTES,                     2LL<<30 ); if ( randomize && BUGGIFY ) DISK_QUEUE_MAX_TRUNCATE_BYTES = 0;
 	init( TLOG_DEGRADED_DURATION,                                5.0 );
 	init( MAX_CACHE_VERSIONS,                                   10e6 );
 	init( TLOG_IGNORE_POP_AUTO_ENABLE_DELAY,                   300.0 );
@@ -97,11 +99,13 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( PEEK_STATS_SLOW_RATIO,                                 0.5 );
 	init( PUSH_RESET_INTERVAL,                                 300.0 ); if ( randomize && BUGGIFY ) PUSH_RESET_INTERVAL = 20.0;
 	init( PUSH_MAX_LATENCY,                                      0.5 ); if ( randomize && BUGGIFY ) PUSH_MAX_LATENCY = 0.0;
-	init( PUSH_STATS_INTERVAL,                                  10.0 ); 
+	init( PUSH_STATS_INTERVAL,                                  10.0 );
 	init( PUSH_STATS_SLOW_AMOUNT,                                  2 );
 	init( PUSH_STATS_SLOW_RATIO,                                 0.5 );
+	init( TLOG_POP_BATCH_SIZE,                                  1000 ); if ( randomize && BUGGIFY ) TLOG_POP_BATCH_SIZE = 10;
 
 	// disk snapshot max timeout, to be put in TLog, storage and coordinator nodes
+	init( MAX_FORKED_PROCESS_OUTPUT,                            1024 );
 	init( SNAP_CREATE_MAX_TIMEOUT,                             300.0 );
 
 	// Data distribution queue
@@ -276,6 +280,17 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( SQLITE_BTREE_PAGE_USABLE,                          4096 - 8);  // pageSize - reserveSize for page checksum
 	init( SQLITE_CHUNK_SIZE_PAGES,                             25600 );  // 100MB
 	init( SQLITE_CHUNK_SIZE_PAGES_SIM,                          1024 );  // 4MB
+	init( SQLITE_READER_THREADS,                                  64 );  // number of read threads
+	init( SQLITE_WRITE_WINDOW_SECONDS,                            -1 );
+	init( SQLITE_WRITE_WINDOW_LIMIT,                              -1 );
+	if( randomize && BUGGIFY ) {
+		// Choose an window between .01 and 1.01 seconds.
+		SQLITE_WRITE_WINDOW_SECONDS = 0.01 + deterministicRandom()->random01();
+		// Choose random operations per second
+		int opsPerSecond = deterministicRandom()->randomInt(1000, 5000);
+		// Set window limit to opsPerSecond scaled down to window size
+		SQLITE_WRITE_WINDOW_LIMIT = opsPerSecond * SQLITE_WRITE_WINDOW_SECONDS;
+	}
 
 	// Maximum and minimum cell payload bytes allowed on primary page as calculated in SQLite.
 	// These formulas are copied from SQLite, using its hardcoded constants, so if you are
@@ -317,7 +332,12 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 
 	// KeyValueStoreRocksDB
 	init( ROCKSDB_BACKGROUND_PARALLELISM,                          0 );
+	init( ROCKSDB_READ_PARALLELISM,                                4 );
 	init( ROCKSDB_MEMTABLE_BYTES,                  512 * 1024 * 1024 );
+	init( ROCKSDB_UNSAFE_AUTO_FSYNC,                           false );
+	init( ROCKSDB_PERIODIC_COMPACTION_SECONDS,                     0 );
+	init( ROCKSDB_PREFIX_LEN,                                      0 );
+	init( ROCKSDB_BLOCK_CACHE_SIZE,                                0 );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
@@ -377,6 +397,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( PROXY_COMPUTE_GROWTH_RATE,                             0.01 );
 	init( TXN_STATE_SEND_AMOUNT,                                    4 );
 	init( REPORT_TRANSACTION_COST_ESTIMATION_DELAY,               0.1 );
+	init( PROXY_REJECT_BATCH_QUEUED_TOO_LONG,                    true );
 
 	init( RESET_MASTER_BATCHES,                                   200 );
 	init( RESET_RESOLVER_BATCHES,                                 200 );
@@ -471,6 +492,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( MAX_REBOOT_TIME,                                       5.0 ); if( longReboots ) MAX_REBOOT_TIME = 20.0;
 	init( LOG_DIRECTORY,                                          ".");  // Will be set to the command line flag.
 	init( SERVER_MEM_LIMIT,                                8LL << 30 );
+	init( SYSTEM_MONITOR_FREQUENCY,                              5.0 );
 
 	//Ratekeeper
 	bool slowRatekeeper = randomize && BUGGIFY;
@@ -488,7 +510,11 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( SPRING_BYTES_STORAGE_SERVER_BATCH,                   100e6 ); if( smallStorageTarget ) SPRING_BYTES_STORAGE_SERVER_BATCH = 150e3;
 	init( STORAGE_HARD_LIMIT_BYTES,                           1500e6 ); if( smallStorageTarget ) STORAGE_HARD_LIMIT_BYTES = 4500e3;
 	init( STORAGE_DURABILITY_LAG_HARD_MAX,                    2000e6 ); if( smallStorageTarget ) STORAGE_DURABILITY_LAG_HARD_MAX = 100e6;
-	init( STORAGE_DURABILITY_LAG_SOFT_MAX,                     200e6 ); if( smallStorageTarget ) STORAGE_DURABILITY_LAG_SOFT_MAX = 10e6;
+	init( STORAGE_DURABILITY_LAG_SOFT_MAX,                     250e6 ); if( smallStorageTarget ) STORAGE_DURABILITY_LAG_SOFT_MAX = 10e6;
+
+	//FIXME: Low priority reads are disabled by assigning very high knob values, reduce knobs for 7.0
+	init( LOW_PRIORITY_STORAGE_QUEUE_BYTES,                    775e8 ); if( smallStorageTarget ) LOW_PRIORITY_STORAGE_QUEUE_BYTES = 1750e3;
+	init( LOW_PRIORITY_DURABILITY_LAG,                         200e6 ); if( smallStorageTarget ) LOW_PRIORITY_DURABILITY_LAG = 15e6;
 
 	bool smallTlogTarget = randomize && BUGGIFY;
 	init( TARGET_BYTES_PER_TLOG,                              2400e6 ); if( smallTlogTarget ) TARGET_BYTES_PER_TLOG = 2000e3;
@@ -515,7 +541,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( NEEDED_TPS_HISTORY_SAMPLES,                            200 );
 	init( TARGET_DURABILITY_LAG_VERSIONS,                      350e6 ); // Should be larger than STORAGE_DURABILITY_LAG_SOFT_MAX
 	init( AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS,           250e6 );
-	init( TARGET_DURABILITY_LAG_VERSIONS_BATCH,                250e6 ); // Should be larger than STORAGE_DURABILITY_LAG_SOFT_MAX
+	init( TARGET_DURABILITY_LAG_VERSIONS_BATCH,                150e6 ); // Should be larger than STORAGE_DURABILITY_LAG_SOFT_MAX
 	init( DURABILITY_LAG_UNLIMITED_THRESHOLD,                   50e6 );
 	init( INITIAL_DURABILITY_LAG_MULTIPLIER,                    1.02 );
 	init( DURABILITY_LAG_REDUCTION_RATE,                      0.9999 );
@@ -579,6 +605,10 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( TAG_MEASUREMENT_INTERVAL,                        30.0 ); if( randomize && BUGGIFY ) TAG_MEASUREMENT_INTERVAL = 1.0;
 	init( READ_COST_BYTE_FACTOR,                          16384 ); if( randomize && BUGGIFY ) READ_COST_BYTE_FACTOR = 4096;
 	init( PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS,                    true ); if( randomize && BUGGIFY ) PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS = false;
+	init( REPORT_DD_METRICS,                                    true );
+	init( DD_METRICS_REPORT_INTERVAL,                           30.0 );
+	init( FETCH_KEYS_TOO_LONG_TIME_CRITERIA,                   300.0 );
+	init( MAX_STORAGE_COMMIT_TIME,                             120.0 ); //The max fsync stall time on the storage server and tlog before marking a disk as failed
 
 	//Wait Failure
 	init( MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS,                 250 ); if( randomize && BUGGIFY ) MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS = 2;
@@ -587,6 +617,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	//Worker
 	init( WORKER_LOGGING_INTERVAL,                               5.0 );
 	init( HEAP_PROFILER_INTERVAL,                               30.0 );
+	init( REGISTER_WORKER_REQUEST_TIMEOUT,                     300.0 );
 	init( DEGRADED_RESET_INTERVAL,                          24*60*60 ); if ( randomize && BUGGIFY ) DEGRADED_RESET_INTERVAL = 10;
 	init( DEGRADED_WARNING_LIMIT,                                  1 );
 	init( DEGRADED_WARNING_RESET_DELAY,                   7*24*60*60 );
@@ -611,6 +642,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( MAX_STATUS_REQUESTS_PER_SECOND,                      256.0 );
 	init( CONFIGURATION_ROWS_TO_FETCH,                         20000 );
 	init( DISABLE_DUPLICATE_LOG_WARNING,                       false );
+	init( HISTOGRAM_REPORT_INTERVAL,                           300.0 );
 
 	// IPager
 	init( PAGER_RESERVED_PAGES,                                    1 );

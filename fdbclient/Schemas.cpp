@@ -47,6 +47,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "storage",
                   "transaction",
                   "resolution",
+                  "stateless",
                   "commit_proxy",
                   "grv_proxy",
                   "master",
@@ -118,6 +119,11 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      "counter":0,
                      "roughness":0.0
                   },
+                  "low_priority_queries":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
                   "bytes_queried":{
                      "hz":0.0,
                      "counter":0,
@@ -140,6 +146,18 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   },
                   "grv_latency_statistics":{
                      "default":{
+                        "count":0,
+                        "min":0.0,
+                        "max":0.0,
+                        "median":0.0,
+                        "mean":0.0,
+                        "p25":0.0,
+                        "p90":0.0,
+                        "p95":0.0,
+                        "p99":0.0,
+                        "p99.9":0.0
+                     },
+                     "batch":{
                         "count":0,
                         "min":0.0,
                         "max":0.0,
@@ -535,6 +553,11 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "counter":0,
                "roughness":0.0
             },
+            "low_priority_reads":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
             "location_requests":{
                "hz":0.0,
                "counter":0,
@@ -587,6 +610,11 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "roughness":0.0
             },
             "conflicted":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "rejected_for_queued_too_long":{
                "hz":0.0,
                "counter":0,
                "roughness":0.0
@@ -786,7 +814,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "coordinators":[
             {
                "reachable":true,
-               "address":"127.0.0.1:4701"
+               "address":"127.0.0.1:4701",
+               "protocol": "0fdb00b070010001"
             }
          ],
          "quorum_reachable":true

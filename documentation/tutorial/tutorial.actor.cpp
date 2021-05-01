@@ -486,6 +486,7 @@ std::unordered_map<std::string, std::function<Future<Void>()>> actors = {
 	{ "multipleClients", &multipleClients }, // ./tutorial -s 127.0.0.1:6666 multipleClients
 	{ "fdbClientStream", &fdbClientStream }, // ./tutorial -C $CLUSTER_FILE_PATH fdbClientStream
 	{ "fdbClientGetRange", &fdbClientGetRange }, // ./tutorial -C $CLUSTER_FILE_PATH fdbClientGetRange
+	{ "fdbClient", &fdbClient }, // ./tutorial -C $CLUSTER_FILE_PATH fdbClient
 	{ "fdbStatusStresser", &fdbStatusStresser }
 }; // ./tutorial -C $CLUSTER_FILE_PATH fdbStatusStresser
 
@@ -544,6 +545,7 @@ int main(int argc, char* argv[]) {
 	}
 	// now we start the actors
 	std::vector<Future<Void>> all;
+	all.reserve(toRun.size());
 	for (auto& f : toRun) {
 		all.emplace_back(f());
 	}

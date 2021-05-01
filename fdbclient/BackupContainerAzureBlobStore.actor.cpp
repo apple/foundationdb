@@ -33,18 +33,24 @@ public:
 		AzureClient* client;
 
 	public:
-		ReadFile(AsyncTaskThread& asyncTaskThread, const std::string& containerName, const std::string& blobName,
+		ReadFile(AsyncTaskThread& asyncTaskThread,
+		         const std::string& containerName,
+		         const std::string& blobName,
 		         AzureClient* client)
 		  : asyncTaskThread(asyncTaskThread), containerName(containerName), blobName(blobName), client(client) {}
 
 		void addref() override { ReferenceCounted<ReadFile>::addref(); }
 		void delref() override { ReferenceCounted<ReadFile>::delref(); }
 		Future<int> read(void* data, int length, int64_t offset) {
-			return asyncTaskThread.execAsync([client = this->client, containerName = this->containerName,
-			                                  blobName = this->blobName, data, length, offset] {
+			return asyncTaskThread.execAsync([client = this->client,
+			                                  containerName = this->containerName,
+			                                  blobName = this->blobName,
+			                                  data,
+			                                  length,
+			                                  offset] {
 				std::ostringstream oss(std::ios::out | std::ios::binary);
 				client->download_blob_to_stream(containerName, blobName, offset, length, oss);
-				auto str = oss.str();
+				auto str = std::move(oss).str();
 				memcpy(data, str.c_str(), str.size());
 				return static_cast<int>(str.size());
 			});
@@ -54,7 +60,8 @@ public:
 		Future<Void> truncate(int64_t size) override { throw file_not_writable(); }
 		Future<Void> sync() override { throw file_not_writable(); }
 		Future<int64_t> size() const override {
-			return asyncTaskThread.execAsync([client = this->client, containerName = this->containerName,
+			return asyncTaskThread.execAsync([client = this->client,
+			                                  containerName = this->containerName,
 			                                  blobName = this->blobName] {
 				return static_cast<int64_t>(client->get_blob_properties(containerName, blobName).get().response().size);
 			});
@@ -77,7 +84,9 @@ public:
 		static constexpr size_t bufferLimit = 1 << 20;
 
 	public:
-		WriteFile(AsyncTaskThread& asyncTaskThread, const std::string& containerName, const std::string& blobName,
+		WriteFile(AsyncTaskThread& asyncTaskThread,
+		          const std::string& containerName,
+		          const std::string& blobName,
 		          AzureClient* client)
 		  : asyncTaskThread(asyncTaskThread), containerName(containerName), blobName(blobName), client(client) {}
 
@@ -90,7 +99,7 @@ public:
 			}
 			m_cursor += length;
 			auto p = static_cast<char const*>(data);
-			buffer.insert(buffer.cend(), p, p + length);
+			buffer.append(p, length);
 			if (buffer.size() > bufferLimit) {
 				return sync();
 			} else {
@@ -106,8 +115,10 @@ public:
 		Future<Void> sync() override {
 			auto movedBuffer = std::move(buffer);
 			buffer.clear();
-			return asyncTaskThread.execAsync([client = this->client, containerName = this->containerName,
-			                                  blobName = this->blobName, buffer = std::move(movedBuffer)] {
+			return asyncTaskThread.execAsync([client = this->client,
+			                                  containerName = this->containerName,
+			                                  blobName = this->blobName,
+			                                  buffer = std::move(movedBuffer)] {
 				std::istringstream iss(std::move(buffer));
 				auto resp = client->append_block_from_stream(containerName, blobName, iss).get();
 				return Void();
@@ -127,9 +138,11 @@ public:
 
 	class BackupFile final : public IBackupFile, ReferenceCounted<BackupFile> {
 		Reference<IAsyncFile> m_file;
+		int64_t m_offset;
 
 	public:
-		BackupFile(const std::string& fileName, Reference<IAsyncFile> file) : IBackupFile(fileName), m_file(file) {}
+		BackupFile(const std::string& fileName, Reference<IAsyncFile> file)
+		  : IBackupFile(fileName), m_file(file), m_offset(0) {}
 		Future<Void> append(const void* data, int len) override {
 			Future<Void> r = m_file->write(data, len, m_offset);
 			m_offset += len;
@@ -142,6 +155,7 @@ public:
 				return Void();
 			});
 		}
+		int64_t size() const override { return m_offset; }
 		void addref() override { ReferenceCounted<BackupFile>::addref(); }
 		void delref() override { ReferenceCounted<BackupFile>::delref(); }
 	};
@@ -164,11 +178,14 @@ public:
 			    return Void();
 		    }));
 		return Reference<IBackupFile>(
-		    new BackupFile(fileName, Reference<IAsyncFile>(new WriteFile(self->asyncTaskThread, self->containerName,
-		                                                                 fileName, self->client.get()))));
+		    new BackupFile(fileName,
+		                   Reference<IAsyncFile>(new WriteFile(
+		                       self->asyncTaskThread, self->containerName, fileName, self->client.get()))));
 	}
 
-	static void listFiles(AzureClient* client, const std::string& containerName, const std::string& path,
+	static void listFiles(AzureClient* client,
+	                      const std::string& containerName,
+	                      const std::string& path,
 	                      std::function<bool(std::string const&)> folderPathFilter,
 	                      BackupContainerFileSystem::FilesAndSizesT& result) {
 		auto resp = client->list_blobs_segmented(containerName, "/", "", path).get().response();
@@ -248,8 +265,11 @@ Future<Reference<IBackupFile>> BackupContainerAzureBlobStore::writeFile(const st
 }
 
 Future<BackupContainerFileSystem::FilesAndSizesT> BackupContainerAzureBlobStore::listFiles(
-    const std::string& path, std::function<bool(std::string const&)> folderPathFilter) {
-	return asyncTaskThread.execAsync([client = this->client.get(), containerName = this->containerName, path = path,
+    const std::string& path,
+    std::function<bool(std::string const&)> folderPathFilter) {
+	return asyncTaskThread.execAsync([client = this->client.get(),
+	                                  containerName = this->containerName,
+	                                  path = path,
 	                                  folderPathFilter = folderPathFilter] {
 		FilesAndSizesT result;
 		BackupContainerAzureBlobStoreImpl::listFiles(client, containerName, path, folderPathFilter, result);

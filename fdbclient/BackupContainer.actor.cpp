@@ -58,7 +58,6 @@ ACTOR Future<Void> appendStringRefWithLen(Reference<IBackupFile> file, Standalon
 	wait(file->append(s.begin(), s.size()));
 	return Void();
 }
-
 } // namespace IBackupFile_impl
 
 Future<Void> IBackupFile::appendStringRefWithLen(Standalone<StringRef> s) {
@@ -67,31 +66,31 @@ Future<Void> IBackupFile::appendStringRefWithLen(Standalone<StringRef> s) {
 
 std::string IBackupContainer::ExpireProgress::toString() const {
 	std::string s = step + "...";
-	if(total > 0) {
+	if (total > 0) {
 		s += format("%d/%d (%.2f%%)", done, total, double(done) / total * 100);
 	}
 	return s;
 }
 
-void BackupFileList::toStream(FILE *fout) const {
-	for(const RangeFile &f : ranges) {
+void BackupFileList::toStream(FILE* fout) const {
+	for (const RangeFile& f : ranges) {
 		fprintf(fout, "range %" PRId64 " %s\n", f.fileSize, f.fileName.c_str());
 	}
-	for(const LogFile &f : logs) {
+	for (const LogFile& f : logs) {
 		fprintf(fout, "log %" PRId64 " %s\n", f.fileSize, f.fileName.c_str());
 	}
-	for(const KeyspaceSnapshotFile &f : snapshots) {
+	for (const KeyspaceSnapshotFile& f : snapshots) {
 		fprintf(fout, "snapshotManifest %" PRId64 " %s\n", f.totalSize, f.fileName.c_str());
 	}
 }
 
-Future<Void> fetchTimes(Reference<ReadYourWritesTransaction> tr,  std::map<Version, int64_t> *pVersionTimeMap) {
+Future<Void> fetchTimes(Reference<ReadYourWritesTransaction> tr, std::map<Version, int64_t>* pVersionTimeMap) {
 	std::vector<Future<Void>> futures;
 
 	// Resolve each version in the map,
-	for(auto &p : *pVersionTimeMap) {
+	for (auto& p : *pVersionTimeMap) {
 		futures.push_back(map(timeKeeperEpochsFromVersion(p.first, tr), [=](Optional<int64_t> t) {
-			if(t.present())
+			if (t.present())
 				pVersionTimeMap->at(p.first) = t.get();
 			else
 				pVersionTimeMap->erase(p.first);
@@ -106,22 +105,23 @@ Future<Void> BackupDescription::resolveVersionTimes(Database cx) {
 	// Populate map with versions needed
 	versionTimeMap.clear();
 
-	for(const KeyspaceSnapshotFile &m : snapshots) {
+	for (const KeyspaceSnapshotFile& m : snapshots) {
 		versionTimeMap[m.beginVersion];
 		versionTimeMap[m.endVersion];
 	}
-	if(minLogBegin.present())
+	if (minLogBegin.present())
 		versionTimeMap[minLogBegin.get()];
-	if(maxLogEnd.present())
+	if (maxLogEnd.present())
 		versionTimeMap[maxLogEnd.get()];
-	if(contiguousLogEnd.present())
+	if (contiguousLogEnd.present())
 		versionTimeMap[contiguousLogEnd.get()];
-	if(minRestorableVersion.present())
+	if (minRestorableVersion.present())
 		versionTimeMap[minRestorableVersion.get()];
-	if(maxRestorableVersion.present())
+	if (maxRestorableVersion.present())
 		versionTimeMap[maxRestorableVersion.get()];
 
-	return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) { return fetchTimes(tr, &versionTimeMap); });
+	return runRYWTransaction(cx,
+	                         [=](Reference<ReadYourWritesTransaction> tr) { return fetchTimes(tr, &versionTimeMap); });
 };
 
 std::string BackupDescription::toString() const {
@@ -133,46 +133,49 @@ std::string BackupDescription::toString() const {
 
 	auto formatVersion = [&](Version v) {
 		std::string s;
-		if(!versionTimeMap.empty()) {
+		if (!versionTimeMap.empty()) {
 			auto i = versionTimeMap.find(v);
-			if(i != versionTimeMap.end())
+			if (i != versionTimeMap.end())
 				s = format("%lld (%s)", v, BackupAgentBase::formatTime(i->second).c_str());
 			else
 				s = format("%lld (unknown)", v);
-		}
-		else if(maxLogEnd.present()) {
+		} else if (maxLogEnd.present()) {
 			double days = double(maxLogEnd.get() - v) / (CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 24 * 60 * 60);
 			s = format("%lld (maxLogEnd %s%.2f days)", v, days < 0 ? "+" : "-", days);
-		}
-		else {
+		} else {
 			s = format("%lld", v);
 		}
 		return s;
 	};
 
-	for(const KeyspaceSnapshotFile &m : snapshots) {
-		info.append(format("Snapshot:  startVersion=%s  endVersion=%s  totalBytes=%lld  restorable=%s  expiredPct=%.2f\n",
-			formatVersion(m.beginVersion).c_str(), formatVersion(m.endVersion).c_str(), m.totalSize, m.restorable.orDefault(false) ? "true" : "false", m.expiredPct(expiredEndVersion)));
+	for (const KeyspaceSnapshotFile& m : snapshots) {
+		info.append(
+		    format("Snapshot:  startVersion=%s  endVersion=%s  totalBytes=%lld  restorable=%s  expiredPct=%.2f\n",
+		           formatVersion(m.beginVersion).c_str(),
+		           formatVersion(m.endVersion).c_str(),
+		           m.totalSize,
+		           m.restorable.orDefault(false) ? "true" : "false",
+		           m.expiredPct(expiredEndVersion)));
 	}
 
 	info.append(format("SnapshotBytes: %lld\n", snapshotBytes));
 
-	if(expiredEndVersion.present())
+	if (expiredEndVersion.present())
 		info.append(format("ExpiredEndVersion:       %s\n", formatVersion(expiredEndVersion.get()).c_str()));
-	if(unreliableEndVersion.present())
+	if (unreliableEndVersion.present())
 		info.append(format("UnreliableEndVersion:    %s\n", formatVersion(unreliableEndVersion.get()).c_str()));
-	if(minLogBegin.present())
+	if (minLogBegin.present())
 		info.append(format("MinLogBeginVersion:      %s\n", formatVersion(minLogBegin.get()).c_str()));
-	if(contiguousLogEnd.present())
+	if (contiguousLogEnd.present())
 		info.append(format("ContiguousLogEndVersion: %s\n", formatVersion(contiguousLogEnd.get()).c_str()));
-	if(maxLogEnd.present())
+	if (maxLogEnd.present())
 		info.append(format("MaxLogEndVersion:        %s\n", formatVersion(maxLogEnd.get()).c_str()));
-	if(minRestorableVersion.present())
+	if (minRestorableVersion.present())
 		info.append(format("MinRestorableVersion:    %s\n", formatVersion(minRestorableVersion.get()).c_str()));
-	if(maxRestorableVersion.present())
+	if (maxRestorableVersion.present())
 		info.append(format("MaxRestorableVersion:    %s\n", formatVersion(maxRestorableVersion.get()).c_str()));
 
-	if(!extendedDetail.empty())
+	if (!extendedDetail.empty())
 		info.append("ExtendedDetail: ").append(extendedDetail);
 
 	return info;
@@ -189,14 +192,13 @@ std::string BackupDescription::toJSON() const {
 	auto formatVersion = [&](Version v) {
 		JsonBuilderObject doc;
 		doc.setKey("Version", v);
-		if(!versionTimeMap.empty()) {
+		if (!versionTimeMap.empty()) {
 			auto i = versionTimeMap.find(v);
-			if(i != versionTimeMap.end()) {
+			if (i != versionTimeMap.end()) {
 				doc.setKey("Timestamp", BackupAgentBase::formatTime(i->second));
 				doc.setKey("EpochSeconds", i->second);
 			}
-		}
-		else if(maxLogEnd.present()) {
+		} else if (maxLogEnd.present()) {
 			double days = double(v - maxLogEnd.get()) / (CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 24 * 60 * 60);
 			doc.setKey("RelativeDays", days);
 		}
@@ -204,7 +206,7 @@ std::string BackupDescription::toJSON() const {
 	};
 
 	JsonBuilderArray snapshotsArray;
-	for(const KeyspaceSnapshotFile &m : snapshots) {
+	for (const KeyspaceSnapshotFile& m : snapshots) {
 		JsonBuilderObject snapshotDoc;
 		snapshotDoc.setKey("Start", formatVersion(m.beginVersion));
 		snapshotDoc.setKey("End", formatVersion(m.endVersion));
@@ -217,22 +219,22 @@ std::string BackupDescription::toJSON() const {
 
 	doc.setKey("TotalSnapshotBytes", snapshotBytes);
 
-	if(expiredEndVersion.present())
+	if (expiredEndVersion.present())
 		doc.setKey("ExpiredEnd", formatVersion(expiredEndVersion.get()));
-	if(unreliableEndVersion.present())
+	if (unreliableEndVersion.present())
 		doc.setKey("UnreliableEnd", formatVersion(unreliableEndVersion.get()));
-	if(minLogBegin.present())
+	if (minLogBegin.present())
 		doc.setKey("MinLogBegin", formatVersion(minLogBegin.get()));
-	if(contiguousLogEnd.present())
+	if (contiguousLogEnd.present())
 		doc.setKey("ContiguousLogEnd", formatVersion(contiguousLogEnd.get()));
-	if(maxLogEnd.present())
+	if (maxLogEnd.present())
 		doc.setKey("MaxLogEnd", formatVersion(maxLogEnd.get()));
-	if(minRestorableVersion.present())
+	if (minRestorableVersion.present())
 		doc.setKey("MinRestorablePoint", formatVersion(minRestorableVersion.get()));
-	if(maxRestorableVersion.present())
+	if (maxRestorableVersion.present())
 		doc.setKey("MaxRestorablePoint", formatVersion(maxRestorableVersion.get()));
 
-	if(!extendedDetail.empty())
+	if (!extendedDetail.empty())
 		doc.setKey("ExtendedDetail", extendedDetail);
 
 	return doc.getJson();
@@ -255,7 +257,8 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 	static std::map<std::string, Reference<IBackupContainer>> m_cache;
 
 	Reference<IBackupContainer>& r = m_cache[url];
-	if (r) return r;
+	if (r)
+		return r;
 
 	try {
 		StringRef u(url);
@@ -269,9 +272,11 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			Reference<S3BlobStoreEndpoint> bstore =
 			    S3BlobStoreEndpoint::fromString(url, &resource, &lastOpenError, &backupParams);
 
-			if (resource.empty()) throw backup_invalid_url();
+			if (resource.empty())
+				throw backup_invalid_url();
 			for (auto c : resource)
-				if (!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/') throw backup_invalid_url();
+				if (!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/')
+					throw backup_invalid_url();
 			r = Reference<IBackupContainer>(new BackupContainerS3BlobStore(bstore, resource, backupParams));
 		}
 #ifdef BUILD_AZURE_BACKUP
@@ -291,13 +296,15 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 		r->URL = url;
 		return r;
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) throw;
+		if (e.code() == error_code_actor_cancelled)
+			throw;
 
 		TraceEvent m(SevWarn, "BackupContainer");
 		m.detail("Description", "Invalid container specification.  See help.");
 		m.detail("URL", url);
 		m.error(e);
-		if (e.code() == error_code_backup_invalid_url) m.detail("LastOpenError", lastOpenError);
+		if (e.code() == error_code_backup_invalid_url)
+			m.detail("LastOpenError", lastOpenError);
 
 		throw;
 	}
@@ -344,14 +351,16 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) 
 		}
 
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) throw;
+		if (e.code() == error_code_actor_cancelled)
+			throw;
 
 		TraceEvent m(SevWarn, "BackupContainer");
 
 		m.detail("Description", "Invalid backup container URL prefix.  See help.");
 		m.detail("URL", baseURL);
 		m.error(e);
-		if (e.code() == error_code_backup_invalid_url) m.detail("LastOpenError", IBackupContainer::lastOpenError);
+		if (e.code() == error_code_backup_invalid_url)
+			m.detail("LastOpenError", IBackupContainer::lastOpenError);
 
 		throw;
 	}
@@ -367,8 +376,8 @@ ACTOR Future<Version> timeKeeperVersionFromDatetime(std::string datetime, Databa
 
 	state int64_t time = BackupAgentBase::parseTime(datetime);
 	if (time < 0) {
-		fprintf(stderr, "ERROR: Incorrect date/time or format.  Format is %s.\n",
-		        BackupAgentBase::timeFormat().c_str());
+		fprintf(
+		    stderr, "ERROR: Incorrect date/time or format.  Format is %s.\n", BackupAgentBase::timeFormat().c_str());
 		throw backup_error();
 	}
 

@@ -27,10 +27,10 @@
 
 class ClientKnobs : public Knobs {
 public:
-
 	int TOO_MANY; // FIXME: this should really be split up so we can control these more specifically
 
 	double SYSTEM_MONITOR_INTERVAL;
+	double NETWORK_BUSYNESS_MONITOR_INTERVAL; // The interval in which we should update the network busyness metric
 
 	double FAILURE_MAX_DELAY;
 	double FAILURE_MIN_DELAY;
@@ -51,7 +51,8 @@ public:
 	double STATUS_IDLE_TIMEOUT;
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
-	double WRONG_SHARD_SERVER_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
+	double WRONG_SHARD_SERVER_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is
+	                                 // mostly wrong (e.g. dumping the database after a test)
 	double FUTURE_VERSION_RETRY_DELAY;
 	int REPLY_BYTE_LIMIT;
 	double DEFAULT_BACKOFF;
@@ -92,12 +93,13 @@ public:
 	int RANGESTREAM_CONCURRENT_FRAGMENTS;
 	int RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT;
 
-	//KeyRangeMap
+	// KeyRangeMap
 	int KRM_GET_RANGE_LIMIT;
-	int KRM_GET_RANGE_LIMIT_BYTES; //This must be sufficiently larger than KEY_SIZE_LIMIT to ensure that at least two entries will be returned from an attempt to read a key range map
+	int KRM_GET_RANGE_LIMIT_BYTES; // This must be sufficiently larger than KEY_SIZE_LIMIT to ensure that at least two
+	                               // entries will be returned from an attempt to read a key range map
 
 	int DEFAULT_MAX_OUTSTANDING_WATCHES;
-	int ABSOLUTE_MAX_WATCHES; //The client cannot set the max outstanding watches higher than this
+	int ABSOLUTE_MAX_WATCHES; // The client cannot set the max outstanding watches higher than this
 	double WATCH_POLLING_TIME;
 	double NO_RECENT_UPDATES_DURATION;
 	double FAST_WATCH_TIMEOUT;
@@ -105,9 +107,8 @@ public:
 
 	double IS_ACCEPTABLE_DELAY;
 
-
 	// Core
-	int64_t CORE_VERSIONSPERSECOND;  // This is defined within the server but used for knobs based on server value
+	int64_t CORE_VERSIONSPERSECOND; // This is defined within the server but used for knobs based on server value
 	int LOG_RANGE_BLOCK_SIZE;
 	int MUTATION_BLOCK_SIZE;
 
@@ -123,6 +124,7 @@ public:
 	int TASKBUCKET_MAX_TASK_KEYS;
 
 	// Backup
+	int BACKUP_LOCAL_FILE_WRITE_BLOCK;
 	int BACKUP_CONCURRENT_DELETES;
 	int BACKUP_SIMULATED_LIMIT_BYTES;
 	int BACKUP_GET_RANGE_LIMIT_BYTES;
@@ -234,6 +236,7 @@ public:
 	void initialize(bool randomize = false);
 };
 
+extern std::unique_ptr<ClientKnobs> globalClientKnobs;
 extern ClientKnobs const* CLIENT_KNOBS;
 
 #endif

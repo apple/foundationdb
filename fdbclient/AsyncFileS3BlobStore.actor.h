@@ -46,7 +46,8 @@ static Future<T> joinErrorGroup(Future<T> f, Promise<Void> p) {
 		wait(success(f) || p.getFuture());
 		return f.get();
 	} catch (Error& e) {
-		if (p.canBeSet()) p.sendError(e);
+		if (p.canBeSet())
+			p.sendError(e);
 		throw;
 	}
 }
@@ -54,10 +55,10 @@ static Future<T> joinErrorGroup(Future<T> f, Promise<Void> p) {
 // using multi-part upload and beginning to transfer each part as soon as it is large enough.
 // All write operations file operations must be sequential and contiguous.
 // Limits on part sizes, upload speed, and concurrent uploads are taken from the S3BlobStoreEndpoint being used.
-class AsyncFileS3BlobStoreWrite : public IAsyncFile, public ReferenceCounted<AsyncFileS3BlobStoreWrite> {
+class AsyncFileS3BlobStoreWrite final : public IAsyncFile, public ReferenceCounted<AsyncFileS3BlobStoreWrite> {
 public:
-	virtual void addref() { ReferenceCounted<AsyncFileS3BlobStoreWrite>::addref(); }
-	virtual void delref() { ReferenceCounted<AsyncFileS3BlobStoreWrite>::delref(); }
+	void addref() override { ReferenceCounted<AsyncFileS3BlobStoreWrite>::addref(); }
+	void delref() override { ReferenceCounted<AsyncFileS3BlobStoreWrite>::delref(); }
 
 	struct Part : ReferenceCounted<Part> {
 		Part(int n, int minSize)
@@ -117,7 +118,8 @@ public:
 	}
 
 	Future<Void> write(void const* data, int length, int64_t offset) override {
-		if (offset != m_cursor) throw non_sequential_op();
+		if (offset != m_cursor)
+			throw non_sequential_op();
 		m_cursor += length;
 
 		return m_error.getFuture() ||
@@ -125,15 +127,16 @@ public:
 	}
 
 	Future<Void> truncate(int64_t size) override {
-		if (size != m_cursor) return non_sequential_op();
+		if (size != m_cursor)
+			return non_sequential_op();
 		return Void();
 	}
 
 	ACTOR static Future<std::string> doPartUpload(AsyncFileS3BlobStoreWrite* f, Part* p) {
 		p->finalizeMD5();
 		std::string upload_id = wait(f->getUploadID());
-		std::string etag = wait(f->m_bstore->uploadPart(f->m_bucket, f->m_object, upload_id, p->number, &p->content,
-		                                                p->length, p->md5string));
+		std::string etag = wait(f->m_bstore->uploadPart(
+		    f->m_bucket, f->m_object, upload_id, p->number, &p->content, p->length, p->md5string));
 		return etag;
 	}
 
@@ -142,8 +145,8 @@ public:
 		if (f->m_parts.size() == 1) {
 			Reference<Part> part = f->m_parts.back();
 			part->finalizeMD5();
-			wait(f->m_bstore->writeEntireFileFromBuffer(f->m_bucket, f->m_object, &part->content, part->length,
-			                                            part->md5string));
+			wait(f->m_bstore->writeEntireFileFromBuffer(
+			    f->m_bucket, f->m_object, &part->content, part->length, part->md5string));
 			return Void();
 		}
 
@@ -221,7 +224,8 @@ private:
 
 	// End the current part and start uploading it, but also wait for a part to finish if too many are in transit.
 	ACTOR static Future<Void> endCurrentPart(AsyncFileS3BlobStoreWrite* f, bool startNew = false) {
-		if (f->m_parts.back()->length == 0) return Void();
+		if (f->m_parts.back()->length == 0)
+			return Void();
 
 		// Wait for an upload slot to be available
 		wait(f->m_concurrentUploads.take());
@@ -241,7 +245,8 @@ private:
 	}
 
 	Future<std::string> getUploadID() {
-		if (!m_upload_id.isValid()) m_upload_id = m_bstore->beginMultiPartUpload(m_bucket, m_object);
+		if (!m_upload_id.isValid())
+			m_upload_id = m_bstore->beginMultiPartUpload(m_bucket, m_object);
 		return m_upload_id;
 	}
 
@@ -256,10 +261,10 @@ public:
 };
 
 // This class represents a read-only file that lives in an S3-style blob store.  It reads using the REST API.
-class AsyncFileS3BlobStoreRead : public IAsyncFile, public ReferenceCounted<AsyncFileS3BlobStoreRead> {
+class AsyncFileS3BlobStoreRead final : public IAsyncFile, public ReferenceCounted<AsyncFileS3BlobStoreRead> {
 public:
-	virtual void addref() { ReferenceCounted<AsyncFileS3BlobStoreRead>::addref(); }
-	virtual void delref() { ReferenceCounted<AsyncFileS3BlobStoreRead>::delref(); }
+	void addref() override { ReferenceCounted<AsyncFileS3BlobStoreRead>::addref(); }
+	void delref() override { ReferenceCounted<AsyncFileS3BlobStoreRead>::delref(); }
 
 	Future<int> read(void* data, int length, int64_t offset) override;
 
@@ -281,7 +286,7 @@ public:
 
 	std::string getFilename() const override { return m_object; }
 
-	virtual ~AsyncFileS3BlobStoreRead() {}
+	~AsyncFileS3BlobStoreRead() override {}
 
 	Reference<S3BlobStoreEndpoint> m_bstore;
 	std::string m_bucket;

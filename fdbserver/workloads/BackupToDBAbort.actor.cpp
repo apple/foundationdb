@@ -22,7 +22,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct BackupToDBAbort : TestWorkload {
 	double abortDelay;
@@ -30,8 +30,7 @@ struct BackupToDBAbort : TestWorkload {
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	UID lockid;
 
-	explicit BackupToDBAbort(const WorkloadContext& wcx)
-	    : TestWorkload(wcx) {
+	explicit BackupToDBAbort(const WorkloadContext& wcx) : TestWorkload(wcx) {
 		abortDelay = getOption(options, LiteralStringRef("abortDelay"), 50.0);
 
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
@@ -45,7 +44,8 @@ struct BackupToDBAbort : TestWorkload {
 	std::string description() const override { return "BackupToDBAbort"; }
 
 	Future<Void> setup(const Database& cx) override {
-		if (clientId != 0) return Void();
+		if (clientId != 0)
+			return Void();
 		return _setup(this, cx);
 	}
 
@@ -53,17 +53,24 @@ struct BackupToDBAbort : TestWorkload {
 		state DatabaseBackupAgent backupAgent(cx);
 		try {
 			TraceEvent("BDBA_Submit1");
-			wait( backupAgent.submitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, false, StringRef(), StringRef(), true) );
+			wait(backupAgent.submitBackup(self->extraDB,
+			                              BackupAgentBase::getDefaultTag(),
+			                              self->backupRanges,
+			                              false,
+			                              StringRef(),
+			                              StringRef(),
+			                              true));
 			TraceEvent("BDBA_Submit2");
-		} catch( Error &e ) {
-			if( e.code() != error_code_backup_duplicate )
+		} catch (Error& e) {
+			if (e.code() != error_code_backup_duplicate)
 				throw;
 		}
 		return Void();
 	}
 
 	Future<Void> start(Database const& cx) override {
-		if (clientId != 0) return Void();
+		if (clientId != 0)
+			return Void();
 		return _start(this, cx);
 	}
 
@@ -73,7 +80,7 @@ struct BackupToDBAbort : TestWorkload {
 		TraceEvent("BDBA_Start").detail("Delay", self->abortDelay);
 		wait(delay(self->abortDelay));
 		TraceEvent("BDBA_Wait");
-		wait(success( backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false) ));
+		wait(success(backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false)));
 		TraceEvent("BDBA_Lock");
 		wait(lockDatabase(cx, self->lockid));
 		TraceEvent("BDBA_Abort");
@@ -83,8 +90,8 @@ struct BackupToDBAbort : TestWorkload {
 		TraceEvent("BDBA_End");
 
 		// SOMEDAY: Remove after backup agents can exist quiescently
-		if (g_simulator.drAgents == ISimulator::BackupToDB) {
-			g_simulator.drAgents = ISimulator::NoBackupAgents;
+		if (g_simulator.drAgents == ISimulator::BackupAgentType::BackupToDB) {
+			g_simulator.drAgents = ISimulator::BackupAgentType::NoBackupAgents;
 		}
 
 		return Void();

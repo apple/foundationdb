@@ -153,12 +153,14 @@ struct MakoWorkload : TestWorkload {
 	}
 
 	Future<Void> setup(Database const& cx) override {
-		if (doChecksumVerificationOnly) return Void();
+		if (doChecksumVerificationOnly)
+			return Void();
 		return _setup(cx, this);
 	}
 
 	Future<Void> start(Database const& cx) override {
-		if (doChecksumVerificationOnly) return Void();
+		if (doChecksumVerificationOnly)
+			return Void();
 		return _start(cx, this);
 	}
 
@@ -218,10 +220,10 @@ struct MakoWorkload : TestWorkload {
 					    .detail("Size", opLatencies[op].getPopulationSize());
 					m.push_back(
 					    PerfMetric("Mean " + opNames[op] + " Latency (us)", 1e6 * opLatencies[op].mean(), true));
-					m.push_back(PerfMetric("Max " + opNames[op] + " Latency (us, averaged)",
-					                       1e6 * opLatencies[op].max(), true));
-					m.push_back(PerfMetric("Min " + opNames[op] + " Latency (us, averaged)",
-					                       1e6 * opLatencies[op].min(), true));
+					m.push_back(PerfMetric(
+					    "Max " + opNames[op] + " Latency (us, averaged)", 1e6 * opLatencies[op].max(), true));
+					m.push_back(PerfMetric(
+					    "Min " + opNames[op] + " Latency (us, averaged)", 1e6 * opLatencies[op].min(), true));
 				}
 			}
 
@@ -253,7 +255,8 @@ struct MakoWorkload : TestWorkload {
 		Key result = makeString(keyBytes);
 		char* data = reinterpret_cast<char*>(mutateString(result));
 		format((keyPrefix + "%0*d").c_str(), seqNumLen, ind).copy(data, KEYPREFIXLEN + seqNumLen);
-		for (int i = KEYPREFIXLEN + seqNumLen; i < keyBytes; ++i) data[i] = 'x';
+		for (int i = KEYPREFIXLEN + seqNumLen; i < keyBytes; ++i)
+			data[i] = 'x';
 		return result;
 	}
 
@@ -279,7 +282,8 @@ struct MakoWorkload : TestWorkload {
 			endIdx = boundary;
 
 		// If all checksums need to be updated, just return
-		if (std::all_of(flags.begin(), flags.end(), [](bool flag) { return flag; })) return;
+		if (std::all_of(flags.begin(), flags.end(), [](bool flag) { return flag; }))
+			return;
 
 		if (startIdx + 1 == endIdx) {
 			// single key case
@@ -308,7 +312,8 @@ struct MakoWorkload : TestWorkload {
 				}
 				// All the left boundary of csStep should be updated
 				// Also, check the startIdx whether it is the left boundary of a csStep
-				if (startIdx == self->csStepSizeInPartition * startStepIdx) flags[startStepIdx] = true;
+				if (startIdx == self->csStepSizeInPartition * startStepIdx)
+					flags[startStepIdx] = true;
 				count = endStepIdx - startStepIdx;
 			}
 			for (int i = 1; i <= count; ++i) {
@@ -357,8 +362,15 @@ struct MakoWorkload : TestWorkload {
 			state Promise<double> loadTime;
 			state Promise<std::vector<std::pair<uint64_t, double>>> ratesAtKeyCounts;
 
-			wait(bulkSetup(cx, self, self->rowCount, loadTime, self->insertionCountsToMeasure.empty(),
-			               self->warmingDelay, self->maxInsertRate, self->insertionCountsToMeasure, ratesAtKeyCounts));
+			wait(bulkSetup(cx,
+			               self,
+			               self->rowCount,
+			               loadTime,
+			               self->insertionCountsToMeasure.empty(),
+			               self->warmingDelay,
+			               self->maxInsertRate,
+			               self->insertionCountsToMeasure,
+			               ratesAtKeyCounts));
 
 			// This is the setup time
 			self->loadTime = loadTime.getFuture().get();
@@ -386,11 +398,13 @@ struct MakoWorkload : TestWorkload {
 
 	ACTOR Future<Void> _runBenchmark(Database cx, MakoWorkload* self) {
 		std::vector<Future<Void>> clients;
+		clients.reserve(self->actorCountPerClient);
 		for (int c = 0; c < self->actorCountPerClient; ++c) {
 			clients.push_back(self->makoClient(cx, self, self->actorCountPerClient / self->transactionsPerSecond, c));
 		}
 
-		if (self->enableLogging) clients.push_back(tracePeriodically(self));
+		if (self->enableLogging)
+			clients.push_back(tracePeriodically(self));
 
 		wait(timeout(waitForAll(clients), self->testDuration, Void()));
 		return Void();
@@ -423,7 +437,8 @@ struct MakoWorkload : TestWorkload {
 				// user-defined value: whether commit read-only ops or not; default is false
 				doCommit = self->commitGet;
 				for (i = 0; i < MAX_OP; ++i) {
-					if (i == OP_COMMIT) continue;
+					if (i == OP_COMMIT)
+						continue;
 					for (count = 0; count < self->operations[i][0]; ++count) {
 						range = self->operations[i][1];
 						rangeLen = digits(range);
@@ -553,7 +568,8 @@ struct MakoWorkload : TestWorkload {
 								} else {
 									tr.set(rkey, self->randomValue());
 								}
-								if (range_i == 0) scr_start_key = rkey.toString();
+								if (range_i == 0)
+									scr_start_key = rkey.toString();
 							}
 							scr_end_key = rkey.toString();
 							scr_key_range_ref = KeyRangeRef(KeyRef(scr_start_key), KeyRef(scr_end_key));
@@ -831,9 +847,11 @@ struct MakoWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> updateCSBeforeCommit(ReadYourWritesTransaction* tr, MakoWorkload* self,
+	ACTOR static Future<Void> updateCSBeforeCommit(ReadYourWritesTransaction* tr,
+	                                               MakoWorkload* self,
 	                                               std::vector<bool>* flags) {
-		if (!self->checksumVerification) return Void();
+		if (!self->checksumVerification)
+			return Void();
 
 		state int csIdx;
 		for (csIdx = 0; csIdx < self->csCount; ++csIdx) {

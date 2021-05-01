@@ -310,7 +310,7 @@ namespace actorcompiler
                 first = toks.First(NonWhitespace);
             }
             // http://nongnu.org/hcb/#class-virt-specifier-seq
-            toks = toks.SkipWhile(t => Whitespace(t) || t.Value == "final" || t.Value == "explicit" || t.Value == "sealed");
+            toks = toks.SkipWhile(t => Whitespace(t) || t.Value == "final" || t.Value == "explicit");
 
             first = toks.First(NonWhitespace);
             if (first.Value == ":" || first.Value == "{") {
@@ -535,7 +535,13 @@ namespace actorcompiler
             actor.testCaseParameters = str(paramRange);
 
             actor.name = "flowTestCase" + toks.First().SourceLine;
-            actor.parameters = new VarDeclaration[] { };
+            actor.parameters = new VarDeclaration[] { new VarDeclaration {
+                    name = "params",
+                    type = "UnitTestParameters",
+                    initializer = "",
+                    initializerConstructorSyntax = false
+                }
+            };
             actor.returnType = "Void";
         }
 

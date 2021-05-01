@@ -1,0 +1,11 @@
+testTitle=RandomReadWriteTest
+testName=ReadWrite
+testDuration=10.0
+transactionsPerSecond=2500
+writesPerTransactionA=0
+readsPerTransactionA=10
+rangeReads=true
+alpha=0
+nodeCount=50000
+valueBytes=16
+discardEdgeMeasurements=false

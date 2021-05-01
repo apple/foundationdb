@@ -63,11 +63,31 @@ public interface Database extends AutoCloseable, TransactionContext {
 	Transaction createTransaction(Executor e);
 
 	/**
+	 * Creates a {@link Transaction} that operates on this {@code Database} with the given {@link Executor}
+	 * for asynchronous callbacks.
+	 *
+	 * @param e the {@link Executor} to use when executing asynchronous callbacks for the database
+	 * @param eventKeeper the {@link EventKeeper} to use when tracking instrumented calls for the transaction.
+	 *
+	 * @return a newly created {@code Transaction} that reads from and writes to this {@code Database}.
+	 */
+	Transaction createTransaction(Executor e, EventKeeper eventKeeper);
+
+	/**
 	 * Returns a set of options that can be set on a {@code Database}
 	 *
 	 * @return a set of database-specific options affecting this {@code Database}
 	 */
 	DatabaseOptions options();
+
+	/**
+	 * Returns a value which indicates the saturation of the client
+	 * <br>
+	 * <b>Note:</b> By default, this value is updated every second
+	 *
+	 * @return a value where 0 indicates that the client is idle and 1 (or larger) indicates that the client is saturated.
+	 */
+	double getMainThreadBusyness();
 
 	/**
 	 * Runs a read-only transactional function against this {@code Database} with retry logic.

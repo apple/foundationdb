@@ -50,15 +50,13 @@ public:
 	static const int SEND_MUTATIONS = 3;
 	static const int INVALID = 4;
 
-	explicit LoaderVersionBatchState(int newState) {
-		vbState = newState;
-	}
+	explicit LoaderVersionBatchState(int newState) { vbState = newState; }
 
-	virtual ~LoaderVersionBatchState() = default;
+	~LoaderVersionBatchState() override = default;
 
-	virtual void operator=(int newState) { vbState = newState; }
+	void operator=(int newState) override { vbState = newState; }
 
-	virtual int get() { return vbState; }
+	int get() override { return vbState; }
 };
 
 struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
@@ -95,8 +93,10 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 
 	explicit LoaderBatchData(UID nodeID, int batchIndex)
 	  : counters(this, nodeID, batchIndex), vbState(LoaderVersionBatchState::NOT_INIT), loadFileReqs(0) {
-		pollMetrics = traceCounters(format("FastRestoreLoaderMetrics%d", batchIndex), nodeID,
-		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY, &counters.cc,
+		pollMetrics = traceCounters(format("FastRestoreLoaderMetrics%d", batchIndex),
+		                            nodeID,
+		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
+		                            &counters.cc,
 		                            nodeID.toString() + "/RestoreLoaderMetrics/" + std::to_string(batchIndex));
 		TraceEvent("FastRestoreLoaderMetricsCreated").detail("Node", nodeID);
 	}
@@ -191,9 +191,9 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		hasPendingRequests = makeReference<AsyncVar<bool>>(false);
 	}
 
-	~RestoreLoaderData() = default;
+	~RestoreLoaderData() override = default;
 
-	std::string describeNode() {
+	std::string describeNode() override {
 		std::stringstream ss;
 		ss << "[Role: Loader] [NodeID:" << nodeID.toString().c_str() << "] [NodeIndex:" << std::to_string(nodeIndex)
 		   << "]";
@@ -214,13 +214,13 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		item->second->vbState = vbState;
 	}
 
-	void initVersionBatch(int batchIndex) {
+	void initVersionBatch(int batchIndex) override {
 		TraceEvent("FastRestoreLoaderInitVersionBatch", nodeID).detail("BatchIndex", batchIndex);
 		batch[batchIndex] = makeReference<LoaderBatchData>(nodeID, batchIndex);
 		status[batchIndex] = makeReference<LoaderBatchStatus>();
 	}
 
-	void resetPerRestoreRequest() {
+	void resetPerRestoreRequest() override {
 		batch.clear();
 		status.clear();
 		finishedBatch = NotifiedVersion(0);
@@ -235,7 +235,9 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	}
 };
 
-ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int nodeIndex, Database cx,
+ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf,
+                                     int nodeIndex,
+                                     Database cx,
                                      RestoreControllerInterface ci);
 
 #include "flow/unactorcompiler.h"

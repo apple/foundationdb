@@ -22,4 +22,3 @@ int zipfian_next();
 #endif
 
 #endif /* ZIPF_H */
-

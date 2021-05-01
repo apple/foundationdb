@@ -27,6 +27,7 @@
                   "storage",
                   "transaction",
                   "resolution",
+                  "stateless",
                   "commit_proxy",
                   "grv_proxy",
                   "master",
@@ -95,6 +96,11 @@
                      "counter":0,
                      "roughness":0.0
                   },
+                  "low_priority_queries":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
                   "bytes_queried":{
                      "hz":0.0,
                      "counter":0,
@@ -115,8 +121,20 @@
                      "counter":0,
                      "roughness":0.0
                   },
-                  "grv_latency_statistics":{
+                  "grv_latency_statistics":{ // GRV Latency metrics are grouped according to priority (currently batch or default).
                      "default":{
+                         "count":0,
+                         "min":0.0,
+                         "max":0.0,
+                         "median":0.0,
+                         "mean":0.0,
+                         "p25":0.0,
+                         "p90":0.0,
+                         "p95":0.0,
+                         "p99":0.0,
+                         "p99.9":0.0
+                     },
+                     "batch":{
                          "count":0,
                          "min":0.0,
                          "max":0.0,
@@ -490,6 +508,11 @@
                "hz":0.0,
                "counter":0,
                "roughness":0.0
+            }, 
+             "low_priority_reads":{ // measures number of incoming low priority read requests
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
             },
             "location_requests":{ // measures number of outgoing key server location responses
                "hz":0.0,
@@ -543,6 +566,11 @@
                "roughness":0.0
             },
             "conflicted":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "rejected_for_queued_too_long":{
                "hz":0.0,
                "counter":0,
                "roughness":0.0

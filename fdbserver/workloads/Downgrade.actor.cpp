@@ -33,7 +33,7 @@ struct DowngradeWorkload : TestWorkload {
 	DowngradeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		oldKey = getOption(options, LiteralStringRef("oldKey"), LiteralStringRef("oldKey"));
 		newKey = getOption(options, LiteralStringRef("newKey"), LiteralStringRef("newKey"));
-		numObjects = getOption(options, LiteralStringRef("numOptions"), deterministicRandom()->randomInt(0,100));
+		numObjects = getOption(options, LiteralStringRef("numOptions"), deterministicRandom()->randomInt(0, 100));
 	}
 
 	struct _Struct {
@@ -54,9 +54,7 @@ struct DowngradeWorkload : TestWorkload {
 	struct NewStruct : public _Struct {
 		int newField = 0;
 
-		bool isSet() const {
-			return oldField == 1 && newField == 2;
-		}
+		bool isSet() const { return oldField == 1 && newField == 2; }
 		void setFields() {
 			oldField = 1;
 			newField = 2;
@@ -69,7 +67,7 @@ struct DowngradeWorkload : TestWorkload {
 	};
 
 	ACTOR static Future<Void> writeOld(Database cx, int numObjects, Key key) {
-		BinaryWriter writer(IncludeVersion(currentProtocolVersion));
+		BinaryWriter writer(IncludeVersion(g_network->protocolVersion()));
 		std::vector<OldStruct> data(numObjects);
 		for (auto& oldObject : data) {
 			oldObject.setFields();
@@ -90,7 +88,7 @@ struct DowngradeWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> writeNew(Database cx, int numObjects, Key key) {
-		ProtocolVersion protocolVersion = currentProtocolVersion;
+		ProtocolVersion protocolVersion = g_network->protocolVersion();
 		protocolVersion.addObjectSerializerFlag();
 		ObjectWriter writer(IncludeVersion(protocolVersion));
 		std::vector<NewStruct> data(numObjects);

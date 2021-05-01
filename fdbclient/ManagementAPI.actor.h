@@ -20,10 +20,10 @@
 
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_MANAGEMENT_API_ACTOR_G_H)
-	#define FDBCLIENT_MANAGEMENT_API_ACTOR_G_H
-	#include "fdbclient/ManagementAPI.actor.g.h"
+#define FDBCLIENT_MANAGEMENT_API_ACTOR_G_H
+#include "fdbclient/ManagementAPI.actor.g.h"
 #elif !defined(FDBCLIENT_MANAGEMENT_API_ACTOR_H)
-	#define FDBCLIENT_MANAGEMENT_API_ACTOR_H
+#define FDBCLIENT_MANAGEMENT_API_ACTOR_H
 
 /* This file defines "management" interfaces for configuration, coordination changes, and
 the inclusion and exclusion of servers. It is used to implement fdbcli management commands
@@ -117,18 +117,22 @@ ConfigurationResult buildConfiguration(
     std::string const& modeString,
     std::map<std::string, std::string>& outConf); // Accepts tokens separated by spaces in a single string
 
-bool isCompleteConfiguration( std::map<std::string, std::string> const& options );
+bool isCompleteConfiguration(std::map<std::string, std::string> const& options);
 
-// All versions of changeConfig apply the given set of configuration tokens to the database, and return a ConfigurationResult (or error).
-Future<ConfigurationResult> changeConfig(Database const& cx, std::string const& configMode,
+// All versions of changeConfig apply the given set of configuration tokens to the database, and return a
+// ConfigurationResult (or error).
+Future<ConfigurationResult> changeConfig(Database const& cx,
+                                         std::string const& configMode,
                                          bool force); // Accepts tokens separated by spaces in a single string
 
-ConfigureAutoResult parseConfig( StatusObject const& status );
-Future<ConfigurationResult> changeConfig(Database const& cx, std::vector<StringRef> const& modes,
+ConfigureAutoResult parseConfig(StatusObject const& status);
+Future<ConfigurationResult> changeConfig(Database const& cx,
+                                         std::vector<StringRef> const& modes,
                                          Optional<ConfigureAutoResult> const& conf,
                                          bool force); // Accepts a vector of configuration tokens
 ACTOR Future<ConfigurationResult> changeConfig(
-    Database cx, std::map<std::string, std::string> m,
+    Database cx,
+    std::map<std::string, std::string> m,
     bool force); // Accepts a full configuration in key/value format (from buildConfiguration)
 
 ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx);
@@ -144,72 +148,84 @@ struct IQuorumChange : ReferenceCounted<IQuorumChange> {
 };
 
 // Change to use the given set of coordination servers
+ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
+                                                               Reference<IQuorumChange> change,
+                                                               std::vector<NetworkAddress>* desiredCoordinators);
 ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> change);
 Reference<IQuorumChange> autoQuorumChange(int desired = -1);
 Reference<IQuorumChange> noQuorumChange();
 Reference<IQuorumChange> specifiedQuorumChange(vector<NetworkAddress> const&);
 Reference<IQuorumChange> nameQuorumChange(std::string const& name, Reference<IQuorumChange> const& other);
 
-// Exclude the given set of servers from use as state servers.  Returns as soon as the change is durable, without necessarily waiting for
-// the servers to be evacuated.  A NetworkAddress with a port of 0 means all servers on the given IP.
-ACTOR Future<Void> excludeServers( Database  cx, vector<AddressExclusion>  servers, bool failed = false );
+// Exclude the given set of servers from use as state servers.  Returns as soon as the change is durable, without
+// necessarily waiting for the servers to be evacuated.  A NetworkAddress with a port of 0 means all servers on the
+// given IP.
+ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers, bool failed = false);
 void excludeServers(Transaction& tr, vector<AddressExclusion>& servers, bool failed = false);
 
-// Remove the given servers from the exclusion list.  A NetworkAddress with a port of 0 means all servers on the given IP.  A NetworkAddress() means
-// all servers (don't exclude anything)
+// Remove the given servers from the exclusion list.  A NetworkAddress with a port of 0 means all servers on the given
+// IP.  A NetworkAddress() means all servers (don't exclude anything)
 ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers, bool failed = false);
 
-// Set the process class of processes with the given address.  A NetworkAddress with a port of 0 means all servers on the given IP.
-ACTOR Future<Void> setClass( Database  cx, AddressExclusion  server, ProcessClass  processClass );
+// Set the process class of processes with the given address.  A NetworkAddress with a port of 0 means all servers on
+// the given IP.
+ACTOR Future<Void> setClass(Database cx, AddressExclusion server, ProcessClass processClass);
 
 // Get the current list of excluded servers
-ACTOR Future<vector<AddressExclusion>> getExcludedServers( Database  cx );
-ACTOR Future<vector<AddressExclusion>> getExcludedServers( Transaction* tr);
+ACTOR Future<vector<AddressExclusion>> getExcludedServers(Database cx);
+ACTOR Future<vector<AddressExclusion>> getExcludedServers(Transaction* tr);
 
 // Check for the given, previously excluded servers to be evacuated (no longer used for state).  If waitForExclusion is
 // true, this actor returns once it is safe to shut down all such machines without impacting fault tolerance, until and
 // unless any of them are explicitly included with includeServers()
-ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vector<AddressExclusion> servers,
+ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx,
+                                                                vector<AddressExclusion> servers,
                                                                 bool waitForAllExcluded);
 ACTOR Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr,
                                                    std::set<AddressExclusion>* exclusions,
                                                    std::set<NetworkAddress>* inProgressExclusion);
 
 // Gets a list of all workers in the cluster (excluding testers)
-ACTOR Future<vector<ProcessData>> getWorkers( Database  cx );
-ACTOR Future<vector<ProcessData>> getWorkers( Transaction*  tr );
+ACTOR Future<vector<ProcessData>> getWorkers(Database cx);
+ACTOR Future<vector<ProcessData>> getWorkers(Transaction* tr);
 
-ACTOR Future<Void> timeKeeperSetDisable(Database  cx);
+ACTOR Future<Void> timeKeeperSetDisable(Database cx);
 
-ACTOR Future<Void> lockDatabase( Transaction*  tr, UID  id );
-ACTOR Future<Void> lockDatabase( Reference<ReadYourWritesTransaction>  tr, UID  id );
-ACTOR Future<Void> lockDatabase( Database  cx, UID  id );
+ACTOR Future<Void> lockDatabase(Transaction* tr, UID id);
+ACTOR Future<Void> lockDatabase(Reference<ReadYourWritesTransaction> tr, UID id);
+ACTOR Future<Void> lockDatabase(Database cx, UID id);
 
-ACTOR Future<Void> unlockDatabase( Transaction*  tr, UID  id );
-ACTOR Future<Void> unlockDatabase( Reference<ReadYourWritesTransaction>  tr, UID  id );
-ACTOR Future<Void> unlockDatabase( Database  cx, UID  id );
+ACTOR Future<Void> unlockDatabase(Transaction* tr, UID id);
+ACTOR Future<Void> unlockDatabase(Reference<ReadYourWritesTransaction> tr, UID id);
+ACTOR Future<Void> unlockDatabase(Database cx, UID id);
 
-ACTOR Future<Void> checkDatabaseLock( Transaction*  tr, UID  id );
-ACTOR Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction>  tr, UID  id );
+ACTOR Future<Void> checkDatabaseLock(Transaction* tr, UID id);
+ACTOR Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UID id);
 
 ACTOR Future<Void> advanceVersion(Database cx, Version v);
 
-ACTOR Future<int> setDDMode( Database  cx, int  mode );
+ACTOR Future<int> setDDMode(Database cx, int mode);
 
-ACTOR Future<Void> forceRecovery( Reference<ClusterConnectionFile> clusterFile, Standalone<StringRef> dcId );
+ACTOR Future<Void> forceRecovery(Reference<ClusterConnectionFile> clusterFile, Standalone<StringRef> dcId);
 
-ACTOR Future<Void> printHealthyZone( Database cx );
+ACTOR Future<Void> printHealthyZone(Database cx);
 ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Database cx, bool ignoreRebalance);
 ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning = false, bool clearSSFailureZoneString = false);
 ACTOR Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds, bool printWarning = false);
 
-ACTOR Future<Void> waitForPrimaryDC( Database  cx, StringRef  dcId );
+ACTOR Future<Void> waitForPrimaryDC(Database cx, StringRef dcId);
 
 // Gets the cluster connection string
-ACTOR Future<std::vector<NetworkAddress>> getCoordinators( Database  cx );
+ACTOR Future<std::vector<NetworkAddress>> getCoordinators(Database cx);
 
-void schemaCoverage( std::string const& spath, bool covered=true );
-bool schemaMatch( json_spirit::mValue const& schema, json_spirit::mValue const& result, std::string& errorStr, Severity sev=SevError, bool checkCoverage=false, std::string path = std::string(), std::string schema_path = std::string() );
+void schemaCoverage(std::string const& spath, bool covered = true);
+bool schemaMatch(json_spirit::mValue const& schema,
+                 json_spirit::mValue const& result,
+                 std::string& errorStr,
+                 Severity sev = SevError,
+                 bool checkCoverage = false,
+                 std::string path = std::string(),
+                 std::string schema_path = std::string());
 
 // execute payload in 'snapCmd' on all the coordinators, TLogs and
 // storage nodes

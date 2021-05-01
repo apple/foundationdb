@@ -1,9 +1,9 @@
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_EXEC_HELPER_ACTOR_G_H)
-	#define FDBSERVER_EXEC_HELPER_ACTOR_G_H
-	#include "fdbserver/FDBExecHelper.actor.g.h"
+#define FDBSERVER_EXEC_HELPER_ACTOR_G_H
+#include "fdbserver/FDBExecHelper.actor.g.h"
 #elif !defined(FDBSERVER_EXEC_HELPER_ACTOR_H)
-	#define FDBSERVER_EXEC_HELPER_ACTOR_H
+#define FDBSERVER_EXEC_HELPER_ACTOR_H
 
 #include <string>
 #include <vector>
@@ -25,13 +25,13 @@ public: // ctor & dtor
 	explicit ExecCmdValueString(StringRef cmdValueString);
 
 public: // interfaces
-	StringRef getBinaryPath();
-	VectorRef<StringRef> getBinaryArgs();
+	StringRef getBinaryPath() const;
+	VectorRef<StringRef> getBinaryArgs() const;
 	void setCmdValueString(StringRef cmdValueString);
-	StringRef getCmdValueString(void);
+	StringRef getCmdValueString(void) const;
 
 public: // helper functions
-	void dbgPrint();
+	void dbgPrint() const;
 
 private: // functions
 	void parseCmdValue();
@@ -47,7 +47,11 @@ private: // data
 // if the process spawned takes more than `maxWaitTime` then it will be killed
 // if isSync is set to true then the process will be synchronously executed
 // if async and in simulator then delay spawning the process to max of maxSimDelayTime
-ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync, double maxSimDelayTime);
+ACTOR Future<int> spawnProcess(std::string binPath,
+                               std::vector<std::string> paramList,
+                               double maxWaitTime,
+                               bool isSync,
+                               double maxSimDelayTime);
 
 // helper to run all the work related to running the exec command
 ACTOR Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::string folder, std::string role);

@@ -20,7 +20,7 @@
 
 // Unit tests for API setup, network initialization functions from the FDB C API.
 
-#define FDB_API_VERSION 620
+#define FDB_API_VERSION 700
 #include <foundationdb/fdb_c.h>
 #include <iostream>
 #include <thread>
@@ -29,47 +29,47 @@
 #include "doctest.h"
 
 void fdb_check(fdb_error_t e) {
-  if (e) {
-    std::cerr << fdb_get_error(e) << std::endl;
-    std::abort();
-  }
+	if (e) {
+		std::cerr << fdb_get_error(e) << std::endl;
+		std::abort();
+	}
 }
 
 TEST_CASE("setup") {
-  fdb_error_t err;
-  // Version passed here must be <= FDB_API_VERSION
-  err = fdb_select_api_version(9000);
-  CHECK(err);
+	fdb_error_t err;
+	// Version passed here must be <= FDB_API_VERSION
+	err = fdb_select_api_version(9000);
+	CHECK(err);
 
-  // Select current API version
-  fdb_check(fdb_select_api_version(620));
+	// Select current API version
+	fdb_check(fdb_select_api_version(700));
 
-  // Error to call again after a successful return
-  err = fdb_select_api_version(620);
-  CHECK(err);
+	// Error to call again after a successful return
+	err = fdb_select_api_version(700);
+	CHECK(err);
 
-  CHECK(fdb_get_max_api_version() >= 620);
+	CHECK(fdb_get_max_api_version() >= 700);
 
-  fdb_check(fdb_setup_network());
-  // Calling a second time should fail
-  err = fdb_setup_network();
-  CHECK(err);
+	fdb_check(fdb_setup_network());
+	// Calling a second time should fail
+	err = fdb_setup_network();
+	CHECK(err);
 
-  struct Context {
-    bool called = false;
-  };
-  Context context;
-  fdb_check(fdb_add_network_thread_completion_hook(
-      [](void *param) {
-        auto *context = static_cast<Context *>(param);
-        context->called = true;
-      },
-      &context));
+	struct Context {
+		bool called = false;
+	};
+	Context context;
+	fdb_check(fdb_add_network_thread_completion_hook(
+	    [](void* param) {
+		    auto* context = static_cast<Context*>(param);
+		    context->called = true;
+	    },
+	    &context));
 
-  std::thread network_thread{&fdb_run_network};
+	std::thread network_thread{ &fdb_run_network };
 
-  CHECK(!context.called);
-  fdb_check(fdb_stop_network());
-  network_thread.join();
-  CHECK(context.called);
+	CHECK(!context.called);
+	fdb_check(fdb_stop_network());
+	network_thread.join();
+	CHECK(context.called);
 }

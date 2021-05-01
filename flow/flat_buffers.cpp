@@ -50,7 +50,8 @@ VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAlig
 			indexed.emplace_back(i, sizesAlignments[i]);
 		}
 	}
-	std::stable_sort(indexed.begin(), indexed.end(),
+	std::stable_sort(indexed.begin(),
+	                 indexed.end(),
 	                 [](const std::pair<unsigned, unsigned>& lhs, const std::pair<unsigned, unsigned>& rhs) {
 		                 return lhs.second > rhs.second;
 	                 });
@@ -170,7 +171,7 @@ struct Root {
 struct TestContextArena {
 	Arena& _arena;
 	Arena& arena() { return _arena; }
-	ProtocolVersion protocolVersion() const { return currentProtocolVersion; }
+	ProtocolVersion protocolVersion() const { return g_network->protocolVersion(); }
 	uint8_t* allocate(size_t size) { return new (_arena) uint8_t[size]; }
 };
 
@@ -228,7 +229,7 @@ struct Arena {
 struct TestContext {
 	Arena& _arena;
 	Arena& arena() { return _arena; }
-	ProtocolVersion protocolVersion() const { return currentProtocolVersion; }
+	ProtocolVersion protocolVersion() const { return g_network->protocolVersion(); }
 	uint8_t* allocate(size_t size) { return _arena(size); }
 	TestContext& context() { return *this; }
 };
@@ -271,7 +272,7 @@ TEST_CASE("flow/FlatBuffers/serializeDeserializeMembers") {
 		       { 3, "hello", { 6, { "abc", "def" }, 8 }, { 10, 11, 12 } } };
 	Root root2 = root;
 	Arena arena;
-	TestContext context{arena};
+	TestContext context{ arena };
 	const auto* out = save_members(context, FileIdentifier{}, root.a, root.b, root.c);
 
 	ASSERT(root.a == root2.a);
@@ -306,7 +307,7 @@ TEST_CASE("flow/FlatBuffers/variant") {
 	V v1;
 	V v2;
 	Arena arena;
-	TestContext context{arena};
+	TestContext context{ arena };
 	const uint8_t* out;
 
 	v1 = 1;
@@ -335,7 +336,7 @@ TEST_CASE("flow/FlatBuffers/vectorBool") {
 	std::vector<bool> x1 = { true, false, true, false, true };
 	std::vector<bool> x2;
 	Arena arena;
-	TestContext context{arena};
+	TestContext context{ arena };
 	const uint8_t* out;
 
 	out = save_members(context, FileIdentifier{}, x1);
@@ -394,7 +395,7 @@ TEST_CASE("/flow/FlatBuffers/nestedCompat") {
 	X<Y1> x1 = { 1, { 2 }, 3 };
 	X<Y2> x2;
 	Arena arena;
-	TestContext context{arena};
+	TestContext context{ arena };
 	const uint8_t* out;
 
 	out = save_members(context, FileIdentifier{}, x1);
@@ -418,7 +419,7 @@ TEST_CASE("/flow/FlatBuffers/struct") {
 	std::vector<std::tuple<int16_t, bool, int64_t>> x1 = { { 1, true, 2 }, { 3, false, 4 } };
 	decltype(x1) x2;
 	Arena arena;
-	TestContext context{arena };
+	TestContext context{ arena };
 	const uint8_t* out;
 
 	out = save_members(context, FileIdentifier{}, x1);
@@ -430,7 +431,7 @@ TEST_CASE("/flow/FlatBuffers/struct") {
 
 TEST_CASE("/flow/FlatBuffers/file_identifier") {
 	Arena arena;
-	TestContext context{arena};
+	TestContext context{ arena };
 	const uint8_t* out;
 	constexpr FileIdentifier file_identifier{ 1234 };
 	Y1 y1;

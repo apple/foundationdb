@@ -9,7 +9,7 @@
 #include "flow/flow.h"
 #include "fdbclient/versions.h"
 #include "fdbserver/Knobs.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 ExecCmdValueString::ExecCmdValueString(StringRef pCmdValueString) {
 	cmdValueString = pCmdValueString;
@@ -27,15 +27,15 @@ void ExecCmdValueString::setCmdValueString(StringRef pCmdValueString) {
 	parseCmdValue();
 }
 
-StringRef ExecCmdValueString::getCmdValueString() {
+StringRef ExecCmdValueString::getCmdValueString() const {
 	return cmdValueString.toString();
 }
 
-StringRef ExecCmdValueString::getBinaryPath() {
+StringRef ExecCmdValueString::getBinaryPath() const {
 	return binaryPath;
 }
 
-VectorRef<StringRef> ExecCmdValueString::getBinaryArgs() {
+VectorRef<StringRef> ExecCmdValueString::getBinaryArgs() const {
 	return binaryArgs;
 }
 
@@ -57,7 +57,7 @@ void ExecCmdValueString::parseCmdValue() {
 	return;
 }
 
-void ExecCmdValueString::dbgPrint() {
+void ExecCmdValueString::dbgPrint() const {
 	auto te = TraceEvent("ExecCmdValueString");
 
 	te.detail("CmdValueString", cmdValueString.toString());
@@ -71,74 +71,115 @@ void ExecCmdValueString::dbgPrint() {
 }
 
 #if defined(_WIN32) || defined(__APPLE__) || defined(__INTEL_COMPILER)
-ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync, double maxSimDelayTime)
-{
+ACTOR Future<int> spawnProcess(std::string binPath,
+                               std::vector<std::string> paramList,
+                               double maxWaitTime,
+                               bool isSync,
+                               double maxSimDelayTime) {
 	wait(delay(0.0));
 	return 0;
 }
 #else
 
-pid_t fork_child(const std::string& path,
-				 std::vector<char*>& paramList)
-{
+static auto fork_child(const std::string& path, std::vector<char*>& paramList) {
+	int pipefd[2];
+	pipe(pipefd);
+	auto readFD = pipefd[0];
+	auto writeFD = pipefd[1];
 	pid_t pid = fork();
 	if (pid == -1) {
-		return -1;
+		close(readFD);
+		close(writeFD);
+		return std::make_pair(-1, Optional<int>{});
 	}
 	if (pid == 0) {
-		execv(const_cast<char*>(path.c_str()), &paramList[0]);
+		close(readFD);
+		dup2(writeFD, 1); // stdout
+		dup2(writeFD, 2); // stderr
+		close(writeFD);
+		execv(&path[0], &paramList[0]);
 		_exit(EXIT_FAILURE);
 	}
-	return pid;
+	close(writeFD);
+	return std::make_pair(pid, Optional<int>{ readFD });
 }
 
-ACTOR Future<int> spawnProcess(std::string path, std::vector<std::string> args, double maxWaitTime, bool isSync, double maxSimDelayTime)
-{
+static void setupTraceWithOutput(TraceEvent& event, size_t bytesRead, char* outputBuffer) {
+	if (bytesRead == 0)
+		return;
+	ASSERT(bytesRead <= SERVER_KNOBS->MAX_FORKED_PROCESS_OUTPUT);
+	auto extraBytesNeeded = std::max<int>(bytesRead - event.getMaxFieldLength(), 0);
+	event.setMaxFieldLength(event.getMaxFieldLength() + extraBytesNeeded);
+	event.setMaxEventLength(event.getMaxEventLength() + extraBytesNeeded);
+	outputBuffer[bytesRead - 1] = '\0';
+	event.detail("Output", std::string(outputBuffer));
+}
+
+ACTOR Future<int> spawnProcess(std::string path,
+                               std::vector<std::string> args,
+                               double maxWaitTime,
+                               bool isSync,
+                               double maxSimDelayTime) {
 	// for async calls in simulator, always delay by a deterministic amount of time and then
 	// do the call synchronously, otherwise the predictability of the simulator breaks
 	if (!isSync && g_network->isSimulated()) {
 		double snapDelay = std::max(maxSimDelayTime - 1, 0.0);
 		// add some randomness
 		snapDelay += deterministicRandom()->random01();
-		TraceEvent("SnapDelaySpawnProcess")
-				.detail("SnapDelay", snapDelay);
+		TraceEvent("SnapDelaySpawnProcess").detail("SnapDelay", snapDelay);
 		wait(delay(snapDelay));
 	}
 
 	std::vector<char*> paramList;
+	paramList.reserve(args.size());
 	for (int i = 0; i < args.size(); i++) {
-		paramList.push_back(const_cast<char*>(args[i].c_str()));
+		paramList.push_back(&args[i][0]);
 	}
 	paramList.push_back(nullptr);
 
 	state std::string allArgs;
 	for (int i = 0; i < args.size(); i++) {
+		if (i > 0)
+			allArgs += " ";
 		allArgs += args[i];
 	}
 
-	state pid_t pid = fork_child(path, paramList);
+	state std::pair<pid_t, Optional<int>> pidAndReadFD = fork_child(path, paramList);
+	state pid_t pid = pidAndReadFD.first;
+	state Optional<int> readFD = pidAndReadFD.second;
 	if (pid == -1) {
-		TraceEvent(SevWarnAlways, "SpawnProcess: Command failed to spawn")
-			.detail("Cmd", path)
-			.detail("Args", allArgs);
+		TraceEvent(SevWarnAlways, "SpawnProcess: Command failed to spawn").detail("Cmd", path).detail("Args", allArgs);
 		return -1;
 	} else if (pid > 0) {
 		state int status = -1;
 		state double runTime = 0;
+		state Arena arena;
+		state char* outputBuffer = new (arena) char[SERVER_KNOBS->MAX_FORKED_PROCESS_OUTPUT];
+		state size_t bytesRead = 0;
 		while (true) {
 			if (runTime > maxWaitTime) {
 				// timing out
+
 				TraceEvent(SevWarnAlways, "SpawnProcess : Command failed, timeout")
-					.detail("Cmd", path)
-					.detail("Args", allArgs);
+				    .detail("Cmd", path)
+				    .detail("Args", allArgs);
 				return -1;
 			}
 			int err = waitpid(pid, &status, WNOHANG);
+			loop {
+				int bytes =
+				    read(readFD.get(), &outputBuffer[bytesRead], SERVER_KNOBS->MAX_FORKED_PROCESS_OUTPUT - bytesRead);
+				bytesRead += bytes;
+				if (bytes == 0)
+					break;
+			}
+
 			if (err < 0) {
-				TraceEvent(SevWarnAlways, "SpawnProcess : Command failed")
-					.detail("Cmd", path)
-					.detail("Args", allArgs)
-					.detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+				TraceEvent event(SevWarnAlways, "SpawnProcess : Command failed");
+				setupTraceWithOutput(event, bytesRead, outputBuffer);
+				event.detail("Cmd", path)
+				    .detail("Args", allArgs)
+				    .detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
 				return -1;
 			} else if (err == 0) {
 				// child process has not completed yet
@@ -153,22 +194,23 @@ ACTOR Future<int> spawnProcess(std::string path, std::vector<std::string> args, 
 			} else {
 				// child process completed
 				if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-					TraceEvent(SevWarnAlways, "SpawnProcess : Command failed")
-						.detail("Cmd", path)
-						.detail("Args", allArgs)
-						.detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+					TraceEvent event(SevWarnAlways, "SpawnProcess : Command failed");
+					setupTraceWithOutput(event, bytesRead, outputBuffer);
+					event.detail("Cmd", path)
+					    .detail("Args", allArgs)
+					    .detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
 					return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 				}
-				TraceEvent("SpawnProcess : Command status")
-					.detail("Cmd", path)
-					.detail("Args", allArgs)
-					.detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : 0);
+				TraceEvent event("SpawnProcess : Command status");
+				setupTraceWithOutput(event, bytesRead, outputBuffer);
+				event.detail("Cmd", path)
+				    .detail("Args", allArgs)
+				    .detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : 0);
 				return 0;
 			}
 		}
 	}
 	return -1;
-
 }
 #endif
 
@@ -253,8 +295,8 @@ void printStorageVersionInfo() {
 	NetworkAddress addr = g_network->getLocalAddress();
 	for (auto itr = workerStorageVersionInfo[addr].begin(); itr != workerStorageVersionInfo[addr].end(); itr++) {
 		TraceEvent("StorageVersionInfo")
-			.detail("UID", itr->first)
-			.detail("Version", itr->second.version)
-			.detail("DurableVersion", itr->second.durableVersion);
+		    .detail("UID", itr->first)
+		    .detail("Version", itr->second.version)
+		    .detail("DurableVersion", itr->second.durableVersion);
 	}
 }

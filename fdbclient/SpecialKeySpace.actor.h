@@ -93,17 +93,18 @@ public:
 
 	explicit SpecialKeyRangeRWImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 
-	virtual ~SpecialKeyRangeRWImpl() {}
+	~SpecialKeyRangeRWImpl() override {}
 };
 
 class SpecialKeyRangeAsyncImpl : public SpecialKeyRangeReadImpl {
 public:
 	explicit SpecialKeyRangeAsyncImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 
-	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const = 0;
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override = 0;
 
 	// calling with a cache object to have consistent results if we need to call rpc
-	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr,
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw,
+	                                            KeyRangeRef kr,
 	                                            Optional<Standalone<RangeResultRef>>* cache) const {
 		return getRangeAsyncActor(this, ryw, kr, cache);
 	}
@@ -111,7 +112,8 @@ public:
 	bool isAsync() const override { return true; }
 
 	ACTOR static Future<Standalone<RangeResultRef>> getRangeAsyncActor(const SpecialKeyRangeReadImpl* skrAyncImpl,
-	                                                                   ReadYourWritesTransaction* ryw, KeyRangeRef kr,
+	                                                                   ReadYourWritesTransaction* ryw,
+	                                                                   KeyRangeRef kr,
 	                                                                   Optional<Standalone<RangeResultRef>>* cache) {
 		ASSERT(skrAyncImpl->getKeyRange().contains(kr));
 		ASSERT(cache != nullptr);
@@ -124,8 +126,10 @@ public:
 		}
 		const auto& allResults = cache->get();
 		int start = 0, end = allResults.size();
-		while (start < allResults.size() && allResults[start].key < kr.begin) ++start;
-		while (end > 0 && allResults[end - 1].key >= kr.end) --end;
+		while (start < allResults.size() && allResults[start].key < kr.begin)
+			++start;
+		while (end > 0 && allResults[end - 1].key >= kr.end)
+			--end;
 		if (start < end) {
 			Standalone<RangeResultRef> result = RangeResultRef(allResults.slice(start, end), false);
 			result.arena().dependsOn(allResults.arena());
@@ -142,9 +146,11 @@ public:
 		CONFIGURATION, // Configuration of the cluster
 		CONNECTIONSTRING,
 		ERRORMSG, // A single key space contains a json string which describes the last error in special-key-space
+		GLOBALCONFIG, // Global configuration options synchronized to all nodes
 		MANAGEMENT, // Management-API
 		METRICS, // data-distribution metrics
 		TESTONLY, // only used by correctness tests
+		TRACING, // Distributed tracing options
 		TRANSACTION, // transaction related info, conflicting keys, read/write conflict range
 		STATUSJSON,
 		UNKNOWN, // default value for all unregistered range
@@ -160,8 +166,11 @@ public:
 
 	Future<Optional<Value>> get(ReadYourWritesTransaction* ryw, const Key& key);
 
-	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end,
-	                                            GetRangeLimits limits, bool reverse = false);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw,
+	                                            KeySelector begin,
+	                                            KeySelector end,
+	                                            GetRangeLimits limits,
+	                                            bool reverse = false);
 
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value);
 
@@ -171,7 +180,9 @@ public:
 
 	Future<Void> commit(ReadYourWritesTransaction* ryw);
 
-	void registerKeyRange(SpecialKeySpace::MODULE module, SpecialKeySpace::IMPLTYPE type, const KeyRangeRef& kr,
+	void registerKeyRange(SpecialKeySpace::MODULE module,
+	                      SpecialKeySpace::IMPLTYPE type,
+	                      const KeyRangeRef& kr,
 	                      SpecialKeyRangeReadImpl* impl);
 
 	Key decode(const KeyRef& key);
@@ -190,17 +201,23 @@ public:
 	}
 	static Key getManagementApiCommandOptionSpecialKey(const std::string& command, const std::string& option);
 	static const std::set<std::string>& getManagementApiOptionsSet() { return options; }
+	static const std::set<std::string>& getTracingOptions() { return tracingOptions; }
 
 private:
 	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key);
 
-	ACTOR static Future<Standalone<RangeResultRef>> checkRYWValid(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw,
-	                                                              KeySelector begin, KeySelector end,
-	                                                              GetRangeLimits limits, bool reverse);
+	ACTOR static Future<Standalone<RangeResultRef>> checkRYWValid(SpecialKeySpace* sks,
+	                                                              ReadYourWritesTransaction* ryw,
+	                                                              KeySelector begin,
+	                                                              KeySelector end,
+	                                                              GetRangeLimits limits,
+	                                                              bool reverse);
 	ACTOR static Future<Standalone<RangeResultRef>> getRangeAggregationActor(SpecialKeySpace* sks,
 	                                                                         ReadYourWritesTransaction* ryw,
-	                                                                         KeySelector begin, KeySelector end,
-	                                                                         GetRangeLimits limits, bool reverse);
+	                                                                         KeySelector begin,
+	                                                                         KeySelector end,
+	                                                                         GetRangeLimits limits,
+	                                                                         bool reverse);
 
 	KeyRangeMap<SpecialKeyRangeReadImpl*> readImpls;
 	KeyRangeMap<SpecialKeySpace::MODULE> modules;
@@ -211,6 +228,7 @@ private:
 	static std::unordered_map<std::string, KeyRange>
 	    managementApiCommandToRange; // management command to its special keys' range
 	static std::set<std::string> options; // "<command>/<option>"
+	static std::set<std::string> tracingOptions;
 
 	// Initialize module boundaries, used to handle cross_module_read
 	void modulesBoundaryInit();
@@ -315,6 +333,70 @@ public:
 class ConsistencyCheckImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit ConsistencyCheckImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
+class GlobalConfigImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit GlobalConfigImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+};
+
+class TracingOptionsImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit TracingOptionsImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+};
+
+class CoordinatorsImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit CoordinatorsImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+};
+
+class CoordinatorsAutoImpl : public SpecialKeyRangeReadImpl {
+public:
+	explicit CoordinatorsAutoImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+};
+
+class AdvanceVersionImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit AdvanceVersionImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
+class ClientProfilingImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit ClientProfilingImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+};
+
+class MaintenanceImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit MaintenanceImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+class DataDistributionImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit DataDistributionImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };

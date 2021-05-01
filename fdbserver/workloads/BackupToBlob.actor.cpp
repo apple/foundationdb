@@ -21,6 +21,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbserver/workloads/BlobStoreWorkload.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -28,6 +29,7 @@ struct BackupToBlobWorkload : TestWorkload {
 	double backupAfter;
 	Key backupTag;
 	Standalone<StringRef> backupURL;
+	int initSnapshotInterval = 0;
 	int snapshotInterval = 100000;
 
 	static constexpr const char* DESCRIPTION = "BackupToBlob";
@@ -35,7 +37,17 @@ struct BackupToBlobWorkload : TestWorkload {
 	BackupToBlobWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupAfter = getOption(options, LiteralStringRef("backupAfter"), 10.0);
 		backupTag = getOption(options, LiteralStringRef("backupTag"), BackupAgentBase::getDefaultTag());
-		backupURL = getOption(options, LiteralStringRef("backupURL"), LiteralStringRef("http://0.0.0.0:10000"));
+		auto backupURLString =
+		    getOption(options, LiteralStringRef("backupURL"), LiteralStringRef("http://0.0.0.0:10000")).toString();
+		auto accessKeyEnvVar =
+		    getOption(options, LiteralStringRef("accessKeyVar"), LiteralStringRef("BLOB_ACCESS_KEY")).toString();
+		auto secretKeyEnvVar =
+		    getOption(options, LiteralStringRef("secretKeyVar"), LiteralStringRef("BLOB_SECRET_KEY")).toString();
+		bool provideKeys = getOption(options, LiteralStringRef("provideKeys"), false);
+		if (provideKeys) {
+			updateBackupURL(backupURLString, accessKeyEnvVar, "<access_key>", secretKeyEnvVar, "<secret_key>");
+		}
+		backupURL = backupURLString;
 	}
 
 	std::string description() const override { return DESCRIPTION; }
@@ -48,7 +60,11 @@ struct BackupToBlobWorkload : TestWorkload {
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 
 		wait(delay(self->backupAfter));
-		wait(backupAgent.submitBackup(cx, self->backupURL, self->snapshotInterval, self->backupTag.toString(),
+		wait(backupAgent.submitBackup(cx,
+		                              self->backupURL,
+		                              self->initSnapshotInterval,
+		                              self->snapshotInterval,
+		                              self->backupTag.toString(),
 		                              backupRanges));
 		EBackupState backupStatus = wait(backupAgent.waitBackup(cx, self->backupTag.toString(), true));
 		TraceEvent("BackupToBlob_BackupStatus").detail("Status", BackupAgentBase::getStateText(backupStatus));

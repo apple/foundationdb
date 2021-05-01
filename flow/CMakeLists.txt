@@ -47,6 +47,7 @@ set(FLOW_SRCS
   Platform.h
   Profiler.actor.cpp
   Profiler.h
+  SendBufferIterator.h
   SignalSafeUnwind.cpp
   SignalSafeUnwind.h
   SimpleOpt.h
@@ -64,7 +65,7 @@ set(FLOW_SRCS
   Trace.cpp
   Trace.h
   Tracing.h
-  Tracing.cpp
+  Tracing.actor.cpp
   TreeBenchmark.h
   UnitTest.cpp
   UnitTest.h
@@ -86,7 +87,6 @@ set(FLOW_SRCS
   rte_memcpy.h
   serialize.cpp
   serialize.h
-  stacktrace.amalgamation.cpp
   stacktrace.h
   test_memcpy.cpp
   test_memcpy_perf.cpp
@@ -94,13 +94,26 @@ set(FLOW_SRCS
   xxhash.c
   xxhash.h)
 
+add_library(stacktrace stacktrace.amalgamation.cpp stacktrace.h)
+if (USE_ASAN)
+  target_compile_definitions(stacktrace PRIVATE ADDRESS_SANITIZER)
+elseif(USE_MSAN)
+  target_compile_definitions(stacktrace PRIVATE MEMORY_SANITIZER)
+elseif(USE_UBSAN)
+  target_compile_definitions(stacktrace PRIVATE UNDEFINED_BEHAVIOR_SANITIZER)
+elseif(USE_TSAN)
+  target_compile_definitions(stacktrace PRIVATE THREAD_SANITIZER DYNAMIC_ANNOTATIONS_EXTERNAL_IMPL=1)
+endif()
+
 if(UNIX AND NOT APPLE)
   list(APPEND FLOW_SRCS folly_memcpy.S)
 endif()
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/SourceVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config.h)
 
 add_flow_target(STATIC_LIBRARY NAME flow SRCS ${FLOW_SRCS})
+target_link_libraries(flow PRIVATE stacktrace)
 if (NOT APPLE AND NOT WIN32)
   set (FLOW_LIBS ${FLOW_LIBS} rt)
 elseif(WIN32)
@@ -124,7 +137,12 @@ if(NOT WITH_TLS OR OPEN_FOR_IDE)
 else()
   target_link_libraries(flow PUBLIC OpenSSL::SSL)
 endif()
-target_link_libraries(flow PUBLIC boost_target Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(flow PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+if(USE_SANITIZER)
+  target_link_libraries(flow PUBLIC boost_asan)
+else()
+  target_link_libraries(flow PUBLIC boost_target)
+endif()
 if(USE_VALGRIND)
   target_link_libraries(flow PUBLIC Valgrind)
 endif()

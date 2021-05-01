@@ -21,15 +21,15 @@
 #pragma once
 
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_TESTERINTERFACE_ACTOR_G_H)
-	#define FDBSERVER_TESTERINTERFACE_ACTOR_G_H
-	#include "fdbserver/TesterInterface.actor.g.h"
+#define FDBSERVER_TESTERINTERFACE_ACTOR_G_H
+#include "fdbserver/TesterInterface.actor.g.h"
 #elif !defined(FDBSERVER_TESTERINTERFACE_ACTOR_H)
-	#define FDBSERVER_TESTERINTERFACE_ACTOR_H
-
+#define FDBSERVER_TESTERINTERFACE_ACTOR_H
 
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/PerfMetric.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 struct CheckReply {
 	constexpr static FileIdentifier file_identifier = 11;
@@ -47,13 +47,13 @@ struct WorkloadInterface {
 	RequestStream<ReplyPromise<Void>> setup;
 	RequestStream<ReplyPromise<Void>> start;
 	RequestStream<ReplyPromise<CheckReply>> check;
-	RequestStream<ReplyPromise< std::vector<PerfMetric> > > metrics;
+	RequestStream<ReplyPromise<std::vector<PerfMetric>>> metrics;
 	RequestStream<ReplyPromise<Void>> stop;
 
 	UID id() const { return setup.getEndpoint().token; }
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
+	void serialize(Ar& ar) {
 		serializer(ar, setup, start, check, metrics, stop);
 	}
 };
@@ -74,20 +74,51 @@ struct WorkloadRequest {
 	//	 Parameter				Description
 	// - testName				the name of the test to run
 	// - testDuration			in seconds
-	// - transactionsPerSecond					
-	// - actorsPerClient						
+	// - transactionsPerSecond
+	// - actorsPerClient
 	// - nodeCount
 
-	VectorRef< VectorRef<KeyValueRef> > options;
+	VectorRef<VectorRef<KeyValueRef>> options;
 
-	int clientId;				// the "id" of the client receiving the request (0 indexed)
-	int clientCount;			// the total number of test clients participating in the workload
-	ReplyPromise< struct WorkloadInterface > reply;
+	int clientId; // the "id" of the client receiving the request (0 indexed)
+	int clientCount; // the total number of test clients participating in the workload
+	ReplyPromise<struct WorkloadInterface> reply;
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
-		serializer(ar, title, timeout, databasePingDelay, sharedRandomNumber, useDatabase, options, clientId, clientCount, reply, arena);
+	void serialize(Ar& ar) {
+		serializer(ar,
+		           title,
+		           timeout,
+		           databasePingDelay,
+		           sharedRandomNumber,
+		           useDatabase,
+		           options,
+		           clientId,
+		           clientCount,
+		           reply,
+		           arena);
 	}
+};
+
+// Configuration details specified in workload test files that change the simulation
+// environment details
+struct TestConfig {
+	int extraDB = 0;
+	int minimumReplication = 0;
+	int minimumRegions = 0;
+	int configureLocked = 0;
+	bool startIncompatibleProcess = false;
+	int logAntiQuorum = -1;
+	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
+	//	0 = "ssd"
+	//	1 = "memory"
+	//	2 = "memory-radixtree-beta"
+	//	3 = "ssd-redwood-experimental"
+	// Requires a comma-separated list of numbers WITHOUT whitespaces
+	std::vector<int> storageEngineExcludeTypes;
+	// Set the maximum TLog version that can be selected for a test
+	// Refer to FDBTypes.h::TLogVersion. Defaults to the maximum supported version.
+	int maxTLogVersion = TLogVersion::MAX_SUPPORTED;
 };
 
 struct TesterInterface {
@@ -102,15 +133,22 @@ struct TesterInterface {
 	}
 };
 
-ACTOR Future<Void> testerServerCore(TesterInterface interf, Reference<ClusterConnectionFile> ccf,
-                                    Reference<AsyncVar<struct ServerDBInfo>> serverDBInfo, LocalityData locality);
+ACTOR Future<Void> testerServerCore(TesterInterface interf,
+                                    Reference<ClusterConnectionFile> ccf,
+                                    Reference<AsyncVar<struct ServerDBInfo>> serverDBInfo,
+                                    LocalityData locality);
 
 enum test_location_t { TEST_HERE, TEST_ON_SERVERS, TEST_ON_TESTERS };
-enum test_type_t { TEST_TYPE_FROM_FILE, TEST_TYPE_CONSISTENCY_CHECK };
+enum test_type_t { TEST_TYPE_FROM_FILE, TEST_TYPE_CONSISTENCY_CHECK, TEST_TYPE_UNIT_TESTS };
 
-ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile, test_type_t whatToRun,
-                            test_location_t whereToRun, int minTestersExpected, std::string fileName = std::string(),
-                            StringRef startingConfiguration = StringRef(), LocalityData locality = LocalityData());
+ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
+                            test_type_t whatToRun,
+                            test_location_t whereToRun,
+                            int minTestersExpected,
+                            std::string fileName = std::string(),
+                            StringRef startingConfiguration = StringRef(),
+                            LocalityData locality = LocalityData(),
+                            UnitTestParameters testOptions = UnitTestParameters());
 
 #include "flow/unactorcompiler.h"
 #endif
