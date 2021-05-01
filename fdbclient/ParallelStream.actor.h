@@ -44,11 +44,12 @@ public:
 		PromiseStream<T> stream;
 		BoundedFlowLock::Releaser releaser;
 		friend class ParallelStream;
+
 	public:
 		Fragment(ParallelStream* parallelStream, int64_t permitNumber, FragmentConstructorTag)
 		  : parallelStream(parallelStream), releaser(&parallelStream->semaphore, permitNumber) {}
-		template<class U>
-		void send(U &&value) {
+		template <class U>
+		void send(U&& value) {
 			stream.send(std::forward<U>(value));
 		}
 		void sendError(Error e) { stream.sendError(e); }
@@ -60,7 +61,7 @@ public:
 
 private:
 	PromiseStream<Reference<Fragment>> fragments;
-	size_t fragmentsProcessed { 0 };
+	size_t fragmentsProcessed{ 0 };
 	PromiseStream<T> results;
 	Future<Void> flusher;
 

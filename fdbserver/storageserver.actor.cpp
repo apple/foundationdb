@@ -667,7 +667,8 @@ public:
 
 	struct Counters {
 		CounterCollection cc;
-		Counter allQueries, getKeyQueries, getValueQueries, getRangeQueries, getRangeStreamQueries, finishedQueries, lowPriorityQueries, rowsQueried, bytesQueried, watchQueries, emptyQueries;
+		Counter allQueries, getKeyQueries, getValueQueries, getRangeQueries, getRangeStreamQueries, finishedQueries,
+		    lowPriorityQueries, rowsQueried, bytesQueried, watchQueries, emptyQueries;
 		Counter bytesInput, bytesDurable, bytesFetched,
 		    mutationBytes; // Like bytesInput but without MVCC accounting
 		Counter sampledBytesCleared;
@@ -682,21 +683,22 @@ public:
 
 		Counters(StorageServer* self)
 		  : cc("StorageServer", self->thisServerID.toString()), getKeyQueries("GetKeyQueries", cc),
-		    getValueQueries("GetValueQueries", cc), getRangeQueries("GetRangeQueries", cc), getRangeStreamQueries("GetRangeStreamQueries", cc),
-		    allQueries("QueryQueue", cc), finishedQueries("FinishedQueries", cc),
-		    lowPriorityQueries("LowPriorityQueries", cc), rowsQueried("RowsQueried", cc),
-		    bytesQueried("BytesQueried", cc), watchQueries("WatchQueries", cc), emptyQueries("EmptyQueries", cc),
-		    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), bytesFetched("BytesFetched", cc),
-		    mutationBytes("MutationBytes", cc), sampledBytesCleared("SampledBytesCleared", cc),
-		    mutations("Mutations", cc), setMutations("SetMutations", cc),
-		    clearRangeMutations("ClearRangeMutations", cc), atomicMutations("AtomicMutations", cc),
-		    updateBatches("UpdateBatches", cc), updateVersions("UpdateVersions", cc), loops("Loops", cc),
-		    fetchWaitingMS("FetchWaitingMS", cc), fetchWaitingCount("FetchWaitingCount", cc),
-		    fetchExecutingMS("FetchExecutingMS", cc), fetchExecutingCount("FetchExecutingCount", cc),
-		    readsRejected("ReadsRejected", cc), readLatencySample("ReadLatencyMetrics",
-		                                                          self->thisServerID,
-		                                                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                                                          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    getValueQueries("GetValueQueries", cc), getRangeQueries("GetRangeQueries", cc),
+		    getRangeStreamQueries("GetRangeStreamQueries", cc), allQueries("QueryQueue", cc),
+		    finishedQueries("FinishedQueries", cc), lowPriorityQueries("LowPriorityQueries", cc),
+		    rowsQueried("RowsQueried", cc), bytesQueried("BytesQueried", cc), watchQueries("WatchQueries", cc),
+		    emptyQueries("EmptyQueries", cc), bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc),
+		    bytesFetched("BytesFetched", cc), mutationBytes("MutationBytes", cc),
+		    sampledBytesCleared("SampledBytesCleared", cc), mutations("Mutations", cc),
+		    setMutations("SetMutations", cc), clearRangeMutations("ClearRangeMutations", cc),
+		    atomicMutations("AtomicMutations", cc), updateBatches("UpdateBatches", cc),
+		    updateVersions("UpdateVersions", cc), loops("Loops", cc), fetchWaitingMS("FetchWaitingMS", cc),
+		    fetchWaitingCount("FetchWaitingCount", cc), fetchExecutingMS("FetchExecutingMS", cc),
+		    fetchExecutingCount("FetchExecutingCount", cc), readsRejected("ReadsRejected", cc),
+		    readLatencySample("ReadLatencyMetrics",
+		                      self->thisServerID,
+		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
@@ -1965,32 +1967,38 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	++data->counters.getRangeStreamQueries;
 	++data->counters.allQueries;
 	++data->readQueueSizeMetric;
-	data->maxQueryQueue = std::max<int>( data->maxQueryQueue, data->counters.allQueries.getValue() - data->counters.finishedQueries.getValue());
+	data->maxQueryQueue = std::max<int>(
+	    data->maxQueryQueue, data->counters.allQueries.getValue() - data->counters.finishedQueries.getValue());
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
 	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.isFetchKeys) {
-		wait( delay(0, TaskPriority::FetchKeys) );
+		wait(delay(0, TaskPriority::FetchKeys));
 	} else {
-		wait( delay(0, TaskPriority::DefaultEndpoint) );
+		wait(delay(0, TaskPriority::DefaultEndpoint));
 	}
-	
+
 	try {
-		if( req.debugID.present() )
+		if (req.debugID.present())
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.Before");
-		state Version version = wait( waitForVersion( data, req.version, span.context ) );
+		state Version version = wait(waitForVersion(data, req.version, span.context));
 
 		state uint64_t changeCounter = data->shardChangeCounter;
-//		try {
-		state KeyRange shard = getShardKeyRange( data, req.begin );
+		//		try {
+		state KeyRange shard = getShardKeyRange(data, req.begin);
 
-		if( req.debugID.present() )
-			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterVersion");
+		if (req.debugID.present())
+			g_traceBatch.addEvent(
+			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterVersion");
 		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
-		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard", "None").detail("In", "getKeyValues>getShardKeyRange"); throw e; }
+		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
+		//req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
+		//"None").detail("In", "getKeyValues>getShardKeyRange"); throw e; }
 
-		if ( !selectorInRange(req.end, shard) && !(req.end.isFirstGreaterOrEqual() && req.end.getKey() == shard.end) ) {
-//			TraceEvent("WrongShardServer1", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkShardExtents");
+		if (!selectorInRange(req.end, shard) && !(req.end.isFirstGreaterOrEqual() && req.end.getKey() == shard.end)) {
+			//			TraceEvent("WrongShardServer1", data->thisServerID).detail("Begin",
+			//req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin",
+			//shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkShardExtents");
 			throw wrong_shard_server();
 		}
 
@@ -2004,24 +2012,27 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 		                             : findKey(data, req.end, version, shard, &offset2, span.context);
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
-		if( req.debugID.present() )
-			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterKeys");
+		if (req.debugID.present())
+			g_traceBatch.addEvent(
+			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterKeys");
 		//.detail("Off1",offset1).detail("Off2",offset2).detail("ReqBegin",req.begin.getKey()).detail("ReqEnd",req.end.getKey());
 
 		// Offsets of zero indicate begin/end keys in this shard, which obviously means we can answer the query
-		// An end offset of 1 is also OK because the end key is exclusive, so if the first key of the next shard is the end the last actual key returned must be from this shard.
-		// A begin offset of 1 is also OK because then either begin is past end or equal to end (so the result is definitely empty)
-		if ((offset1 && offset1!=1) || (offset2 && offset2!=1)) {
-			TEST(true);  // wrong_shard_server due to offset in rangeStream
-			// We could detect when offset1 takes us off the beginning of the database or offset2 takes us off the end, and return a clipped range rather
-			// than an error (since that is what the NativeAPI.getRange will do anyway via its "slow path"), but we would have to add some flags to the response
-			// to encode whether we went off the beginning and the end, since it needs that information.
+		// An end offset of 1 is also OK because the end key is exclusive, so if the first key of the next shard is the
+		// end the last actual key returned must be from this shard. A begin offset of 1 is also OK because then either
+		// begin is past end or equal to end (so the result is definitely empty)
+		if ((offset1 && offset1 != 1) || (offset2 && offset2 != 1)) {
+			TEST(true); // wrong_shard_server due to offset in rangeStream
+			// We could detect when offset1 takes us off the beginning of the database or offset2 takes us off the end,
+			// and return a clipped range rather than an error (since that is what the NativeAPI.getRange will do anyway
+			// via its "slow path"), but we would have to add some flags to the response to encode whether we went off
+			// the beginning and the end, since it needs that information.
 			//TraceEvent("WrongShardServer2", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkOffsets").detail("BeginKey", begin).detail("EndKey", end).detail("BeginOffset", offset1).detail("EndOffset", offset2);
 			throw wrong_shard_server();
 		}
 
 		if (begin >= end) {
-			if( req.debugID.present() )
+			if (req.debugID.present())
 				g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.Send");
 			//.detail("Begin",begin).detail("End",end);
 
@@ -2029,20 +2040,27 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 			none.version = version;
 			none.more = false;
 
-			data->checkChangeCounter( changeCounter, KeyRangeRef( std::min<KeyRef>(req.begin.getKey(), req.end.getKey()), std::max<KeyRef>(req.begin.getKey(), req.end.getKey()) ) );
-			req.reply.send( none );
-			req.reply.sendError( end_of_stream() );
+			data->checkChangeCounter(changeCounter,
+			                         KeyRangeRef(std::min<KeyRef>(req.begin.getKey(), req.end.getKey()),
+			                                     std::max<KeyRef>(req.begin.getKey(), req.end.getKey())));
+			req.reply.send(none);
+			req.reply.sendError(end_of_stream());
 		} else {
 			loop {
 				wait(req.reply.onReady());
 				state int byteLimit = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
-				GetKeyValuesReply _r = wait( readRange(data, version, KeyRangeRef(begin, end), req.limit, &byteLimit, span.context) );
+				GetKeyValuesReply _r =
+				    wait(readRange(data, version, KeyRangeRef(begin, end), req.limit, &byteLimit, span.context));
 				GetKeyValuesStreamReply r(_r);
 
-				if( req.debugID.present() )
-					g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterReadRange");
+				if (req.debugID.present())
+					g_traceBatch.addEvent(
+					    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterReadRange");
 				//.detail("Begin",begin).detail("End",end).detail("SizeOf",r.data.size());
-				data->checkChangeCounter( changeCounter, KeyRangeRef( std::min<KeyRef>(begin, std::min<KeyRef>(req.begin.getKey(), req.end.getKey())), std::max<KeyRef>(end, std::max<KeyRef>(req.begin.getKey(), req.end.getKey())) ) );
+				data->checkChangeCounter(
+				    changeCounter,
+				    KeyRangeRef(std::min<KeyRef>(begin, std::min<KeyRef>(req.begin.getKey(), req.end.getKey())),
+				                std::max<KeyRef>(end, std::max<KeyRef>(req.begin.getKey(), req.end.getKey()))));
 				if (EXPENSIVE_VALIDATION) {
 					for (int i = 0; i < r.data.size(); i++)
 						ASSERT(r.data[i].key >= begin && r.data[i].key < end);
@@ -2056,7 +2074,8 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 					data->metrics.notify(r.data[i].key, m);
 				}*/
 
-				// For performance concerns, the cost of a range read is billed to the start key and end key of the range.
+				// For performance concerns, the cost of a range read is billed to the start key and end key of the
+				// range.
 				int64_t totalByteSize = 0;
 				for (int i = 0; i < r.data.size(); i++) {
 					totalByteSize += r.data[i].expectedSize();
@@ -2067,38 +2086,40 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 					data->metrics.notifyBytesReadPerKSecond(r.data[r.data.size() - 1].key, bytesReadPerKSecond);
 				}
 
-				req.reply.send( r );
+				req.reply.send(r);
 
 				data->counters.rowsQueried += r.data.size();
-				if(r.data.size() == 0) {
+				if (r.data.size() == 0) {
 					++data->counters.emptyQueries;
 				}
-				if(!r.more) {
+				if (!r.more) {
 					req.reply.sendError(end_of_stream());
 					break;
 				}
 				ASSERT(r.data.size());
 
-				if(req.limit >= 0) {
+				if (req.limit >= 0) {
 					begin = keyAfter(r.data.back().key);
 				} else {
 					end = r.data.back().key;
 				}
 
 				if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.isFetchKeys) {
-					wait( delay(0, TaskPriority::FetchKeys) );
+					wait(delay(0, TaskPriority::FetchKeys));
 				} else {
-					wait( delay(0, TaskPriority::DefaultEndpoint) );
+					wait(delay(0, TaskPriority::DefaultEndpoint));
 				}
-				
+
 				data->transactionTagCounter.addRequest(req.tags, resultSize);
 
-				//FIXME: figure out what to do with latency measurements
-				//double duration = g_network->timer() - req.requestTime();
-				//data->counters.readLatencySample.addMeasurement(duration);
-				//if(data->latencyBandConfig.present()) {
-				//	int maxReadBytes = data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
-				//	int maxSelectorOffset = data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
+				// FIXME: figure out what to do with latency measurements
+				// double duration = g_network->timer() - req.requestTime();
+				// data->counters.readLatencySample.addMeasurement(duration);
+				// if(data->latencyBandConfig.present()) {
+				//	int maxReadBytes =
+				//data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max()); 	int
+				//maxSelectorOffset =
+				//data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
 				//	data->counters.readLatencyBands.addMeasurement(
 				//		duration, resultSize > maxReadBytes || abs(req.begin.offset) > maxSelectorOffset ||
 				//										abs(req.end.offset) > maxSelectorOffset);
@@ -2106,8 +2127,8 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 			}
 		}
 	} catch (Error& e) {
-		if(e.code() != error_code_operation_obsolete) {
-			if(!canReplyWith(e))
+		if (e.code() != error_code_operation_obsolete) {
+			if (!canReplyWith(e))
 				throw;
 			req.reply.sendError(e);
 		}
@@ -2117,12 +2138,14 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
 
-	//FIXME: figure out what to do with latency measurements
-	//double duration = g_network->timer() - req.requestTime();
-	//data->counters.readLatencySample.addMeasurement(duration);
-	//if(data->latencyBandConfig.present()) {
-	//	int maxReadBytes = data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
-	//	int maxSelectorOffset = data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
+	// FIXME: figure out what to do with latency measurements
+	// double duration = g_network->timer() - req.requestTime();
+	// data->counters.readLatencySample.addMeasurement(duration);
+	// if(data->latencyBandConfig.present()) {
+	//	int maxReadBytes =
+	//data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max()); 	int
+	//maxSelectorOffset =
+	//data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
 	//	data->counters.readLatencyBands.addMeasurement(
 	//		duration, resultSize > maxReadBytes || abs(req.begin.offset) > maxSelectorOffset ||
 	//										abs(req.end.offset) > maxSelectorOffset);
@@ -2131,7 +2154,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	return Void();
 }
 
-ACTOR Future<Void> getKeyQ( StorageServer* data, GetKeyRequest req ) {
+ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	state Span span("SS:getKey"_loc, { req.spanContext });
 	state int64_t resultSize = 0;
 
@@ -2687,8 +2710,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		TraceEvent(SevDebug, "FetchKeysVersionSatisfied", data->thisServerID).detail("FKID", interval.pairID);
 
-		wait( data->fetchKeysParallelismLock.take( TaskPriority::DefaultYield ) );
-		state FlowLock::Releaser holdingFKPL( data->fetchKeysParallelismLock );
+		wait(data->fetchKeysParallelismLock.take(TaskPriority::DefaultYield));
+		state FlowLock::Releaser holdingFKPL(data->fetchKeysParallelismLock);
 
 		state double executeStart = now();
 		++data->counters.fetchWaitingCount;
@@ -2700,7 +2723,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		wait(data->durableVersionLock.take());
 
 		shard->phase = AddingShard::Fetching;
-		
+
 		data->durableVersionLock.release();
 
 		wait(delay(0));
@@ -2719,10 +2742,11 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		data->cx->invalidateCache(keys);
 
 		loop {
-			state Transaction tr( data->cx );
+			state Transaction tr(data->cx);
 			state Version fetchVersion = data->version.get();
-			while (!shard->updates.empty() && shard->updates[0].version <= fetchVersion) shard->updates.pop_front();
-			tr.setVersion( fetchVersion );
+			while (!shard->updates.empty() && shard->updates[0].version <= fetchVersion)
+				shard->updates.pop_front();
+			tr.setVersion(fetchVersion);
 			tr.info.taskID = TaskPriority::FetchKeys;
 			state PromiseStream<Standalone<RangeResultRef>> results;
 			state Future<Void> hold = tr.getRangeStream(results, keys, GetRangeLimits(), true);
@@ -2730,46 +2754,57 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 			try {
 				loop {
-					TEST(true);		// Fetching keys for transferred shard
-					state Standalone<RangeResultRef> this_block = waitNext( results.getFuture() );
+					TEST(true); // Fetching keys for transferred shard
+					state Standalone<RangeResultRef> this_block = waitNext(results.getFuture());
 
-					int expectedSize = (int)this_block.expectedSize() + (8-(int)sizeof(KeyValueRef))*this_block.size();
+					int expectedSize =
+					    (int)this_block.expectedSize() + (8 - (int)sizeof(KeyValueRef)) * this_block.size();
 
-					TraceEvent(SevDebug, "FetchKeysBlock", data->thisServerID).detail("FKID", interval.pairID)
-						.detail("BlockRows", this_block.size()).detail("BlockBytes", expectedSize)
-						.detail("KeyBegin", keys.begin).detail("KeyEnd", keys.end)
-						.detail("Last", this_block.size() ? this_block.end()[-1].key : std::string())
-						.detail("Version", fetchVersion).detail("More", this_block.more);
+					TraceEvent(SevDebug, "FetchKeysBlock", data->thisServerID)
+					    .detail("FKID", interval.pairID)
+					    .detail("BlockRows", this_block.size())
+					    .detail("BlockBytes", expectedSize)
+					    .detail("KeyBegin", keys.begin)
+					    .detail("KeyEnd", keys.end)
+					    .detail("Last", this_block.size() ? this_block.end()[-1].key : std::string())
+					    .detail("Version", fetchVersion)
+					    .detail("More", this_block.more);
 					DEBUG_KEY_RANGE("fetchRange", fetchVersion, keys);
-					for(auto k = this_block.begin(); k != this_block.end(); ++k) DEBUG_MUTATION("fetch", fetchVersion, MutationRef(MutationRef::SetValue, k->key, k->value));
+					for (auto k = this_block.begin(); k != this_block.end(); ++k)
+						DEBUG_MUTATION("fetch", fetchVersion, MutationRef(MutationRef::SetValue, k->key, k->value));
 
 					metricReporter.addFetchedBytes(expectedSize);
 					data->counters.bytesFetched += expectedSize;
 
 					// Write this_block to storage
-					state KeyValueRef *kvItr = this_block.begin();
-					for(; kvItr != this_block.end(); ++kvItr) {
-						data->storage.writeKeyValue( *kvItr );
+					state KeyValueRef* kvItr = this_block.begin();
+					for (; kvItr != this_block.end(); ++kvItr) {
+						data->storage.writeKeyValue(*kvItr);
 						wait(yield());
 					}
 
 					kvItr = this_block.begin();
-					for(; kvItr != this_block.end(); ++kvItr) {
-						data->byteSampleApplySet( *kvItr, invalidVersion );
+					for (; kvItr != this_block.end(); ++kvItr) {
+						data->byteSampleApplySet(*kvItr, invalidVersion);
 						wait(yield());
 					}
 
 					ASSERT(this_block.readThrough.present() || this_block.size());
-					nfk = this_block.readThrough.present() ? this_block.readThrough.get() : keyAfter( this_block.end()[-1].key );
+					nfk = this_block.readThrough.present() ? this_block.readThrough.get()
+					                                       : keyAfter(this_block.end()[-1].key);
 					this_block = Standalone<RangeResultRef>();
 				}
-			} catch( Error &e ) {
-				if(e.code() != error_code_end_of_stream && e.code() != error_code_connection_failed && e.code() != error_code_transaction_too_old &&
-					e.code() != error_code_future_version && e.code() != error_code_process_behind) {
+			} catch (Error& e) {
+				if (e.code() != error_code_end_of_stream && e.code() != error_code_connection_failed &&
+				    e.code() != error_code_transaction_too_old && e.code() != error_code_future_version &&
+				    e.code() != error_code_process_behind) {
 					throw;
 				}
-				if(nfk == keys.begin) {
-					TraceEvent("FKBlockFail", data->thisServerID).error(e,true).suppressFor(1.0).detail("FKID", interval.pairID);
+				if (nfk == keys.begin) {
+					TraceEvent("FKBlockFail", data->thisServerID)
+					    .error(e, true)
+					    .suppressFor(1.0)
+					    .detail("FKID", interval.pairID);
 
 					// FIXME: remove when we no longer support upgrades from 5.X
 					if (debug_getRangeRetries >= 100) {
@@ -2780,34 +2815,41 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					debug_getRangeRetries++;
 					if (debug_nextRetryToLog == debug_getRangeRetries) {
 						debug_nextRetryToLog += std::min(debug_nextRetryToLog, 1024);
-						TraceEvent(SevWarn, "FetchPast", data->thisServerID).detail("TotalAttempts", debug_getRangeRetries).detail("FKID", interval.pairID).detail("N", fetchVersion).detail("E", data->version.get());
+						TraceEvent(SevWarn, "FetchPast", data->thisServerID)
+						    .detail("TotalAttempts", debug_getRangeRetries)
+						    .detail("FKID", interval.pairID)
+						    .detail("N", fetchVersion)
+						    .detail("E", data->version.get());
 					}
-					wait( delayJittered( FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY ) );
+					wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 					continue;
 				}
-				if(nfk < keys.end) {
-					std::deque< Standalone<VerUpdateRef> > updatesToSplit = std::move( shard->updates );
+				if (nfk < keys.end) {
+					std::deque<Standalone<VerUpdateRef>> updatesToSplit = std::move(shard->updates);
 
 					// This actor finishes committing the keys [keys.begin,nfk) that we already fetched.
-					// The remaining unfetched keys [nfk,keys.end) will become a separate AddingShard with its own fetchKeys.
-					shard->server->addShard( ShardInfo::addingSplitLeft( KeyRangeRef(keys.begin, nfk), shard ) );
-					shard->server->addShard( ShardInfo::newAdding( data, KeyRangeRef(nfk, keys.end) ) );
-					shard = data->shards.rangeContaining( keys.begin ).value()->adding;
+					// The remaining unfetched keys [nfk,keys.end) will become a separate AddingShard with its own
+					// fetchKeys.
+					shard->server->addShard(ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, nfk), shard));
+					shard->server->addShard(ShardInfo::newAdding(data, KeyRangeRef(nfk, keys.end)));
+					shard = data->shards.rangeContaining(keys.begin).value()->adding;
 					warningLogger = logFetchKeysWarning(shard);
-					AddingShard* otherShard = data->shards.rangeContaining( nfk ).value()->adding;
+					AddingShard* otherShard = data->shards.rangeContaining(nfk).value()->adding;
 					keys = shard->keys;
 
-					// Split our prior updates.  The ones that apply to our new, restricted key range will go back into shard->updates,
-					// and the ones delivered to the new shard will be discarded because it is in WaitPrevious phase (hasn't chosen a fetchVersion yet).
-					// What we are doing here is expensive and could get more expensive if we started having many more blocks per shard. May need optimization in the future.
-					std::deque< Standalone<VerUpdateRef> >::iterator u = updatesToSplit.begin();
-					for(; u != updatesToSplit.end(); ++u) {
+					// Split our prior updates.  The ones that apply to our new, restricted key range will go back into
+					// shard->updates, and the ones delivered to the new shard will be discarded because it is in
+					// WaitPrevious phase (hasn't chosen a fetchVersion yet). What we are doing here is expensive and
+					// could get more expensive if we started having many more blocks per shard. May need optimization
+					// in the future.
+					std::deque<Standalone<VerUpdateRef>>::iterator u = updatesToSplit.begin();
+					for (; u != updatesToSplit.end(); ++u) {
 						splitMutations(data, data->shards, *u);
 					}
 
-					TEST( true );  // fetchkeys has more
-					TEST( shard->updates.size() ); // Shard has updates
-					ASSERT( otherShard->updates.empty() );
+					TEST(true); // fetchkeys has more
+					TEST(shard->updates.size()); // Shard has updates
+					ASSERT(otherShard->updates.empty());
 				}
 				break;
 			}
@@ -4422,16 +4464,18 @@ ACTOR Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<G
 	}
 }
 
-ACTOR Future<Void> serveGetKeyValuesStreamRequests( StorageServer* self, FutureStream<GetKeyValuesStreamRequest> getKeyValuesStream ) {
+ACTOR Future<Void> serveGetKeyValuesStreamRequests(StorageServer* self,
+                                                   FutureStream<GetKeyValuesStreamRequest> getKeyValuesStream) {
 	loop {
 		GetKeyValuesStreamRequest req = waitNext(getKeyValuesStream);
-		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade before doing real work
-		//FIXME: add readGuard again
+		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
+		// before doing real work
+		// FIXME: add readGuard again
 		self->actors.add(getKeyValuesStreamQ(self, req));
 	}
 }
 
-ACTOR Future<Void> serveGetKeyRequests( StorageServer* self, FutureStream<GetKeyRequest> getKey ) {
+ACTOR Future<Void> serveGetKeyRequests(StorageServer* self, FutureStream<GetKeyRequest> getKey) {
 	loop {
 		GetKeyRequest req = waitNext(getKey);
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade

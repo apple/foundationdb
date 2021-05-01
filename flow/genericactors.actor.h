@@ -1261,7 +1261,8 @@ Future<T> waitOrError(Future<T> f, Future<Void> errorSignal) {
 	}
 }
 
-ACTOR template <class T, class V> Future<T> forwardErrors(Future<T> f, PromiseStream<V> output) {
+ACTOR template <class T, class V>
+Future<T> forwardErrors(Future<T> f, PromiseStream<V> output) {
 	try {
 		T val = wait(f);
 		return val;

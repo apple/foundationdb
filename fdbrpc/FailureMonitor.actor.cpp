@@ -126,10 +126,9 @@ void SimpleFailureMonitor::endpointNotFound(Endpoint const& endpoint) {
 	    .suppressFor(1.0)
 	    .detail("Address", endpoint.getPrimaryAddress())
 	    .detail("Token", endpoint.token);
-	if(endpoint.getPrimaryAddress().isPublic()) {
-		if(failedEndpoints.size() > 100000) {
-			TraceEvent(SevWarnAlways, "TooManyFailedEndpoints")
-				.suppressFor(1.0);
+	if (endpoint.getPrimaryAddress().isPublic()) {
+		if (failedEndpoints.size() > 100000) {
+			TraceEvent(SevWarnAlways, "TooManyFailedEndpoints").suppressFor(1.0);
 			failedEndpoints.clear();
 		}
 		failedEndpoints.insert(endpoint);

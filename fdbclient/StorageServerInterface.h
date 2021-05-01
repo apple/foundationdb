@@ -109,7 +109,8 @@ struct StorageServerInterface {
 				    RequestStream<struct ReadHotSubRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(11));
 				getRangeSplitPoints =
 				    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
-				getKeyValuesStream = RequestStream<struct GetKeyValuesStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
+				getKeyValuesStream =
+				    RequestStream<struct GetKeyValuesStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -296,12 +297,13 @@ struct GetKeyValuesStreamReply : public ReplyPromiseStreamReply {
 	bool cached = false;
 
 	GetKeyValuesStreamReply() : version(invalidVersion), more(false), cached(false) {}
-	GetKeyValuesStreamReply(GetKeyValuesReply r) : arena(r.arena), data(r.data), version(r.version), more(r.more), cached(r.cached) {}
+	GetKeyValuesStreamReply(GetKeyValuesReply r)
+	  : arena(r.arena), data(r.data), version(r.version), more(r.more), cached(r.cached) {}
 
 	int expectedSize() const { return sizeof(GetKeyValuesStreamReply) + data.expectedSize(); }
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
+	void serialize(Ar& ar) {
 		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, data, version, more, cached, arena);
 	}
 };
@@ -311,7 +313,7 @@ struct GetKeyValuesStreamRequest {
 	SpanID spanContext;
 	Arena arena;
 	KeySelectorRef begin, end;
-	Version version;		// or latestVersion
+	Version version; // or latestVersion
 	int limit, limitBytes;
 	bool isFetchKeys;
 	Optional<TagSet> tags;
@@ -320,7 +322,7 @@ struct GetKeyValuesStreamRequest {
 
 	GetKeyValuesStreamRequest() : isFetchKeys(false) {}
 	template <class Ar>
-	void serialize( Ar& ar ) {
+	void serialize(Ar& ar) {
 		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, arena);
 	}
 };

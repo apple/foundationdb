@@ -79,9 +79,7 @@ struct FlowReceiver : public NetworkMessageReceiver {
 		FlowTransport::transport().addWellKnownEndpoint(endpoint, this, taskID);
 	}
 
-	const Endpoint& getRawEndpoint() {
-		return endpoint;
-	}
+	const Endpoint& getRawEndpoint() { return endpoint; }
 
 private:
 	Optional<PeerCompatibilityPolicy> peerCompatibilityPolicy_;
@@ -107,8 +105,8 @@ struct NetSAV final : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 		ErrorOr<EnsureTable<T>> message;
 		reader.deserialize(message);
 		if (message.isError()) {
-			if(message.getError().code() == error_code_broken_promise) {
-				IFailureMonitor::failureMonitor().endpointNotFound( getRawEndpoint() );
+			if (message.getError().code() == error_code_broken_promise) {
+				IFailureMonitor::failureMonitor().endpointNotFound(getRawEndpoint());
 			}
 			SAV<T>::sendErrorAndDelPromiseRef(message.getError());
 		} else {
@@ -271,7 +269,7 @@ struct AcknowledgementReply {
 	explicit AcknowledgementReply(int64_t bytes) : bytes(bytes) {}
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
+	void serialize(Ar& ar) {
 		serializer(ar, bytes);
 	}
 };
@@ -286,21 +284,22 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 	Future<Void> failures;
 
 	AcknowledgementReceiver() : bytesSent(0), bytesAcknowledged(0), ready(nullptr) {}
-	AcknowledgementReceiver(const Endpoint& remoteEndpoint) : FlowReceiver(remoteEndpoint, false),
-		bytesSent(0), bytesAcknowledged(0), ready(nullptr) {}
+	AcknowledgementReceiver(const Endpoint& remoteEndpoint)
+	  : FlowReceiver(remoteEndpoint, false), bytesSent(0), bytesAcknowledged(0), ready(nullptr) {}
 
 	void receive(ArenaObjectReader& reader) override {
 		ErrorOr<AcknowledgementReply> message;
 		reader.deserialize(message);
-		if(message.isError()) {
-			if(!ready.isValid() || ready.isSet()) {
+		if (message.isError()) {
+			if (!ready.isValid() || ready.isSet()) {
 				ready = Promise<Void>();
 			}
 			ready.sendError(message.getError());
 		} else {
 			ASSERT(message.get().bytes > bytesAcknowledged);
 			bytesAcknowledged = message.get().bytes;
-			if (bytesSent - bytesAcknowledged < FLOW_KNOBS->ACKNOWLEDGE_LIMIT_BYTES && ready.isValid() && ready.canBeSet()) {
+			if (bytesSent - bytesAcknowledged < FLOW_KNOBS->ACKNOWLEDGE_LIMIT_BYTES && ready.isValid() &&
+			    ready.canBeSet()) {
 				ready.send(Void());
 			}
 		}
@@ -316,9 +315,10 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 
 	NetNotifiedQueueWithErrors(int futures, int promises) : NotifiedQueue<T>(futures, promises) {}
 	NetNotifiedQueueWithErrors(int futures, int promises, const Endpoint& remoteEndpoint)
-	  :  NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true) {
-		  acknowledgements.failures = tagError<Void>(makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(remoteEndpoint), operation_obsolete());
-	  }
+	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true) {
+		acknowledgements.failures = tagError<Void>(
+		    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(remoteEndpoint), operation_obsolete());
+	}
 
 	void destroy() override { delete this; }
 	void receive(ArenaObjectReader& reader) override {
@@ -327,18 +327,23 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 		reader.deserialize(message);
 
 		if (message.isError()) {
-			if(message.getError().code() == error_code_broken_promise) {
-				IFailureMonitor::failureMonitor().endpointNotFound( getRawEndpoint() );
+			if (message.getError().code() == error_code_broken_promise) {
+				IFailureMonitor::failureMonitor().endpointNotFound(getRawEndpoint());
 			}
 			this->sendError(message.getError());
 		} else {
-			if(message.get().asUnderlyingType().acknowledgeToken.present()) {
-				acknowledgements = AcknowledgementReceiver(FlowTransport::transport().loadedEndpoint(message.get().asUnderlyingType().acknowledgeToken.get()));
+			if (message.get().asUnderlyingType().acknowledgeToken.present()) {
+				acknowledgements = AcknowledgementReceiver(
+				    FlowTransport::transport().loadedEndpoint(message.get().asUnderlyingType().acknowledgeToken.get()));
 			}
-			if(this->shouldFireImmediately()) {
-				if(acknowledgements.getRawEndpoint().isValid()) {
+			if (this->shouldFireImmediately()) {
+				if (acknowledgements.getRawEndpoint().isValid()) {
 					acknowledgements.bytesAcknowledged += message.get().asUnderlyingType().expectedSize();
-					FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<AcknowledgementReply>>(AcknowledgementReply(acknowledgements.bytesAcknowledged)), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint), false);
+					FlowTransport::transport().sendUnreliable(
+					    SerializeSource<ErrorOr<AcknowledgementReply>>(
+					        AcknowledgementReply(acknowledgements.bytesAcknowledged)),
+					    acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint),
+					    false);
 				}
 			}
 
@@ -349,16 +354,23 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 
 	T pop() override {
 		T res = this->popImpl();
-		if(acknowledgements.getRawEndpoint().isValid()) {
+		if (acknowledgements.getRawEndpoint().isValid()) {
 			acknowledgements.bytesAcknowledged += res.expectedSize();
-			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<AcknowledgementReply>>(AcknowledgementReply(acknowledgements.bytesAcknowledged)), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint), false);
+			FlowTransport::transport().sendUnreliable(
+			    SerializeSource<ErrorOr<AcknowledgementReply>>(
+			        AcknowledgementReply(acknowledgements.bytesAcknowledged)),
+			    acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint),
+			    false);
 		}
 		return res;
 	}
 
 	~NetNotifiedQueueWithErrors() {
-		if(acknowledgements.getRawEndpoint().isValid() && acknowledgements.isRemoteEndpoint() && !this->hasError()) {
-			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<AcknowledgementReply>>(operation_obsolete()), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint), false);
+		if (acknowledgements.getRawEndpoint().isValid() && acknowledgements.isRemoteEndpoint() && !this->hasError()) {
+			FlowTransport::transport().sendUnreliable(
+			    SerializeSource<ErrorOr<AcknowledgementReply>>(operation_obsolete()),
+			    acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint),
+			    false);
 		}
 	}
 
@@ -371,45 +383,56 @@ public:
 	// stream.send( request )
 	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
 
-	template<class U>
-	void send(U && value) const {
+	template <class U>
+	void send(U&& value) const {
 		if (queue->isRemoteEndpoint()) {
-			if(!queue->acknowledgements.getRawEndpoint().isValid()) {
+			if (!queue->acknowledgements.getRawEndpoint().isValid()) {
 				value.acknowledgeToken = queue->acknowledgements.getEndpoint(TaskPriority::DefaultEndpoint).token;
 			}
 			queue->acknowledgements.bytesSent += value.expectedSize();
-			if((!queue->acknowledgements.ready.isValid() || (queue->acknowledgements.ready.isSet() && !queue->acknowledgements.ready.getFuture().isError())) && queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged >= FLOW_KNOBS->ACKNOWLEDGE_LIMIT_BYTES) {
+			if ((!queue->acknowledgements.ready.isValid() ||
+			     (queue->acknowledgements.ready.isSet() && !queue->acknowledgements.ready.getFuture().isError())) &&
+			    queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged >=
+			        FLOW_KNOBS->ACKNOWLEDGE_LIMIT_BYTES) {
 				queue->acknowledgements.ready = Promise<Void>();
 			}
-			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(value), getEndpoint(), false);
-		}
-		else {
+			FlowTransport::transport().sendUnreliable(
+			    SerializeSource<ErrorOr<EnsureTable<T>>>(value), getEndpoint(), false);
+		} else {
 			queue->send(std::forward<U>(value));
 		}
 	}
 
 	template <class E>
-	void sendError(const E& exc) const { 
+	void sendError(const E& exc) const {
 		if (queue->isRemoteEndpoint()) {
-			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(exc), getEndpoint(), false);
+			FlowTransport::transport().sendUnreliable(
+			    SerializeSource<ErrorOr<EnsureTable<T>>>(exc), getEndpoint(), false);
 		} else {
 			queue->sendError(exc);
-			if(errors && errors->canBeSet()) {
+			if (errors && errors->canBeSet()) {
 				errors->sendError(exc);
 			}
 		}
 	}
 
-	FutureStream<T> getFuture() const { queue->addFutureRef(); return FutureStream<T>(queue); }
+	FutureStream<T> getFuture() const {
+		queue->addFutureRef();
+		return FutureStream<T>(queue);
+	}
 	ReplyPromiseStream() : queue(new NetNotifiedQueueWithErrors<T>(0, 1)), errors(new SAV<Void>(0, 1)) {}
-	ReplyPromiseStream(const ReplyPromiseStream& rhs) : queue(rhs.queue), errors(rhs.errors) { 
+	ReplyPromiseStream(const ReplyPromiseStream& rhs) : queue(rhs.queue), errors(rhs.errors) {
 		queue->addPromiseRef();
-		if(errors) {
+		if (errors) {
 			errors->addPromiseRef();
 		}
 	}
-	ReplyPromiseStream(ReplyPromiseStream&& rhs) noexcept : queue(rhs.queue), errors(rhs.errors) { rhs.queue = nullptr; rhs.errors = nullptr; }
-	explicit ReplyPromiseStream(const Endpoint& endpoint) : queue(new NetNotifiedQueueWithErrors<T>(0, 1, endpoint)), errors(nullptr) {}
+	ReplyPromiseStream(ReplyPromiseStream&& rhs) noexcept : queue(rhs.queue), errors(rhs.errors) {
+		rhs.queue = nullptr;
+		rhs.errors = nullptr;
+	}
+	explicit ReplyPromiseStream(const Endpoint& endpoint)
+	  : queue(new NetNotifiedQueueWithErrors<T>(0, 1, endpoint)), errors(nullptr) {}
 
 	Future<Void> getErrorFutureAndDelPromiseRef() {
 		ASSERT(errors && errors->getPromiseReferenceCount() > 1);
@@ -419,7 +442,7 @@ public:
 		errors = nullptr;
 		return res;
 	}
-	
+
 	~ReplyPromiseStream() {
 		if (queue)
 			queue->delPromiseRef();
@@ -428,21 +451,23 @@ public:
 	}
 
 	const Endpoint& getEndpoint(TaskPriority taskID = TaskPriority::DefaultEndpoint) const {
-		return queue->getEndpoint(taskID); 
+		return queue->getEndpoint(taskID);
 	}
-	
-	bool operator == (const ReplyPromiseStream<T>& rhs) const { return queue == rhs.queue; }
+
+	bool operator==(const ReplyPromiseStream<T>& rhs) const { return queue == rhs.queue; }
 	bool isEmpty() const { return !queue->isReady(); }
 	uint32_t size() const { return queue->size(); }
 
 	Future<Void> onReady() {
-		if(queue->acknowledgements.failures.isError()) {
+		if (queue->acknowledgements.failures.isError()) {
 			return queue->acknowledgements.failures.getError();
 		}
-		if(queue->acknowledgements.ready.isValid() && queue->acknowledgements.ready.isSet() && queue->acknowledgements.ready.getFuture().isError()) {
+		if (queue->acknowledgements.ready.isValid() && queue->acknowledgements.ready.isSet() &&
+		    queue->acknowledgements.ready.getFuture().isError()) {
 			return queue->acknowledgements.ready.getFuture().getError();
 		}
-		if(queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged < FLOW_KNOBS->ACKNOWLEDGE_LIMIT_BYTES) {
+		if (queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged <
+		    FLOW_KNOBS->ACKNOWLEDGE_LIMIT_BYTES) {
 			return Void();
 		}
 		return queue->acknowledgements.ready.getFuture() || queue->acknowledgements.failures;
@@ -450,20 +475,25 @@ public:
 
 	void operator=(const ReplyPromiseStream& rhs) {
 		rhs.queue->addPromiseRef();
-		if (queue) queue->delPromiseRef();
+		if (queue)
+			queue->delPromiseRef();
 		queue = rhs.queue;
-		if(rhs.errors) rhs.errors->addPromiseRef();
-		if (errors) errors->delPromiseRef();
+		if (rhs.errors)
+			rhs.errors->addPromiseRef();
+		if (errors)
+			errors->delPromiseRef();
 		errors = rhs.errors;
 	}
 	void operator=(ReplyPromiseStream&& rhs) noexcept {
 		if (queue != rhs.queue) {
-			if (queue) queue->delPromiseRef();
+			if (queue)
+				queue->delPromiseRef();
 			queue = rhs.queue;
 			rhs.queue = 0;
 		}
 		if (errors != rhs.errors) {
-			if (errors) errors->delPromiseRef();
+			if (errors)
+				errors->delPromiseRef();
 			errors = rhs.errors;
 			rhs.errors = 0;
 		}
@@ -490,7 +520,7 @@ void load(Ar& ar, ReplyPromiseStream<T>& value) {
 
 template <class T>
 struct serializable_traits<ReplyPromiseStream<T>> : std::true_type {
-	template<class Archiver>
+	template <class Archiver>
 	static void serialize(Archiver& ar, ReplyPromiseStream<T>& p) {
 		if constexpr (Archiver::isDeserializing) {
 			UID token;
@@ -620,10 +650,10 @@ public:
 	}
 
 	// stream.getReplyStream( request )
-	//   Unreliable at most once delivery. 
-	//   Registers the request with the remote endpoint which sends back a stream of replies, followed by an end_of_stream error.
-	//   If the connection is ever broken the remote endpoint will stop attempting to send replies.
-    //   The caller sends acknowledgements to the remote endpoint so that at most 2MB of replies is ever inflight.
+	//   Unreliable at most once delivery.
+	//   Registers the request with the remote endpoint which sends back a stream of replies, followed by an
+	//   end_of_stream error. If the connection is ever broken the remote endpoint will stop attempting to send replies.
+	//   The caller sends acknowledgements to the remote endpoint so that at most 2MB of replies is ever inflight.
 
 	template <class X>
 	ReplyPromiseStream<REPLYSTREAM_TYPE(X)> getReplyStream(const X& value, TaskPriority taskID) const {
@@ -631,8 +661,9 @@ public:
 		if (queue->isRemoteEndpoint()) {
 			Future<Void> disc = makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(getEndpoint(taskID));
 			auto& p = getReplyPromiseStream(value);
-			Reference<Peer> peer = FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(taskID), true);
-			//FIXME: defer sending the message until we know the connection is established
+			Reference<Peer> peer =
+			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(taskID), true);
+			// FIXME: defer sending the message until we know the connection is established
 			endStreamOnDisconnect(disc, p, peer);
 			return p;
 		}
@@ -646,12 +677,12 @@ public:
 		if (queue->isRemoteEndpoint()) {
 			Future<Void> disc = makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(getEndpoint());
 			auto& p = getReplyPromiseStream(value);
-			Reference<Peer> peer = FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
-			//FIXME: defer sending the message until we know the connection is established
+			Reference<Peer> peer =
+			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
+			// FIXME: defer sending the message until we know the connection is established
 			endStreamOnDisconnect(disc, p, peer);
 			return p;
-		}
-		else {
+		} else {
 			send(value);
 			auto& p = getReplyPromiseStream(value);
 			return p;
@@ -727,7 +758,9 @@ public:
 		// queue = (NetNotifiedQueue<T>*)0xdeadbeef;
 	}
 
-	const Endpoint& getEndpoint(TaskPriority taskID = TaskPriority::DefaultEndpoint) const { return queue->getEndpoint(taskID); }
+	const Endpoint& getEndpoint(TaskPriority taskID = TaskPriority::DefaultEndpoint) const {
+		return queue->getEndpoint(taskID);
+	}
 	void makeWellKnownEndpoint(Endpoint::Token token, TaskPriority taskID) {
 		queue->makeWellKnownEndpoint(token, taskID);
 	}

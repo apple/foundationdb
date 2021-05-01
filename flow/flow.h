@@ -23,7 +23,7 @@
 #pragma once
 
 #pragma warning(disable : 4244 4267) // SOMEDAY: Carefully check for integer overflow issues (e.g. size_t to int
-                                     // conversions like this suppresses)
+// conversions like this suppresses)
 #pragma warning(disable : 4345)
 #pragma warning(error : 4239)
 
@@ -595,9 +595,7 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 	bool isError() const { return queue.empty() && error.isValid(); } // the *next* thing queued is an error
 	uint32_t size() const { return queue.size(); }
 
-	virtual T pop() {
-		return popImpl();
-	}
+	virtual T pop() { return popImpl(); }
 
 	template <class U>
 	void send(U&& value) {
@@ -654,10 +652,11 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 	virtual void fire(T const&) override { ASSERT(false); }
 	virtual void fire(T&&) override { ASSERT(false); }
 
-	protected:
+protected:
 	T popImpl() {
 		if (queue.empty()) {
-			if (error.isValid()) throw error;
+			if (error.isValid())
+				throw error;
 			throw internal_error();
 		}
 		auto copy = std::move(queue.front());
@@ -665,13 +664,9 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		return copy;
 	}
 
-	bool shouldFireImmediately() {
-		return SingleCallback<T>::next != this;
-	}
+	bool shouldFireImmediately() { return SingleCallback<T>::next != this; }
 
-	bool hasError() {
-		return error.isValid();
-	}
+	bool hasError() { return error.isValid(); }
 };
 
 template <class T>
@@ -1010,7 +1005,8 @@ struct ReplyStreamType {
 	//   breaks IntelliSense in VS2010; this is a workaround.
 	typedef decltype(std::declval<T>().reply.getFuture().pop()) Type;
 };
-template <class T> class ReplyPromiseStream;
+template <class T>
+class ReplyPromiseStream;
 template <class T>
 struct ReplyStreamType<ReplyPromiseStream<T>> {
 	typedef T Type;
@@ -1018,7 +1014,7 @@ struct ReplyStreamType<ReplyPromiseStream<T>> {
 #define REPLYSTREAM_TYPE(RequestType) typename ReplyStreamType<RequestType>::Type
 #endif
 
-//extern int actorCount;
+// extern int actorCount;
 
 template <class T>
 static inline void destruct(T& t) {

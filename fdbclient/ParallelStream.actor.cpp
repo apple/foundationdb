@@ -52,9 +52,9 @@ ACTOR static Future<Void> consume(FutureStream<int> stream, int expected) {
 
 TEST_CASE("/fdbclient/ParallelStream") {
 	state PromiseStream<int> results;
-	state size_t concurrency = deterministicRandom()->randomInt(1,11);
+	state size_t concurrency = deterministicRandom()->randomInt(1, 11);
 	state size_t bufferLimit = concurrency + deterministicRandom()->randomInt(0, 11);
-	state size_t numProducers = deterministicRandom()->randomInt(1,1001);
+	state size_t numProducers = deterministicRandom()->randomInt(1, 1001);
 	state ParallelStream<int> parallelStream(results, concurrency, bufferLimit);
 	state Future<Void> consumer = ParallelStreamTest::consume(results.getFuture(), numProducers);
 	state std::vector<Future<Void>> producers;

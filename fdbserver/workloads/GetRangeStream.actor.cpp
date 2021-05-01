@@ -57,7 +57,8 @@ struct GetRangeStream : TestWorkload {
 			wait(delay(1));
 			state double after = g_network->now();
 			if (after > before) {
-				printf("throughput: %g bytes/s, next: %s\n", (self->bytesRead.getValue() - last) / (after - before),
+				printf("throughput: %g bytes/s, next: %s\n",
+				       (self->bytesRead.getValue() - last) / (after - before),
 				       printable(*next).c_str());
 			}
 		}
@@ -69,10 +70,11 @@ struct GetRangeStream : TestWorkload {
 		state Future<Void> logFuture = logThroughput(self, &next);
 		loop {
 			try {
-				Standalone<RangeResultRef> range = wait(tx.getRange(
-				    KeySelector(firstGreaterOrEqual(next), next.arena()), KeySelector(firstGreaterOrEqual(self->end)),
-				    GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, CLIENT_KNOBS->REPLY_BYTE_LIMIT)));
-				for (const auto & [ k, v ] : range) {
+				Standalone<RangeResultRef> range = wait(
+				    tx.getRange(KeySelector(firstGreaterOrEqual(next), next.arena()),
+				                KeySelector(firstGreaterOrEqual(self->end)),
+				                GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, CLIENT_KNOBS->REPLY_BYTE_LIMIT)));
+				for (const auto& [k, v] : range) {
 					if (self->printKVPairs) {
 						printf("%s -> %s\n", printable(k).c_str(), printable(v).c_str());
 					}
@@ -96,12 +98,13 @@ struct GetRangeStream : TestWorkload {
 		loop {
 			state PromiseStream<Standalone<RangeResultRef>> results;
 			try {
-				state Future<Void> stream =
-				    tx.getRangeStream(results, KeySelector(firstGreaterOrEqual(next), next.arena()),
-				                      KeySelector(firstGreaterOrEqual(self->end)), GetRangeLimits());
+				state Future<Void> stream = tx.getRangeStream(results,
+				                                              KeySelector(firstGreaterOrEqual(next), next.arena()),
+				                                              KeySelector(firstGreaterOrEqual(self->end)),
+				                                              GetRangeLimits());
 				loop {
 					Standalone<RangeResultRef> range = waitNext(results.getFuture());
-					for (const auto & [ k, v ] : range) {
+					for (const auto& [k, v] : range) {
 						if (self->printKVPairs) {
 							printf("%s -> %s\n", printable(k).c_str(), printable(v).c_str());
 						}

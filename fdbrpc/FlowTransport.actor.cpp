@@ -950,10 +950,16 @@ ACTOR static void deliver(TransportData* self,
 		// We don't have the (stream) endpoint 'token', notify the remote machine
 		if (destination.token.first() != -1) {
 			if (self->isLocalAddress(destination.getPrimaryAddress())) {
-				sendLocal(self, SerializeSource<UID>(destination.token), Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND));
+				sendLocal(self,
+				          SerializeSource<UID>(destination.token),
+				          Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND));
 			} else {
 				Reference<Peer> peer = self->getOrOpenPeer(destination.getPrimaryAddress());
-				sendPacket(self, peer, SerializeSource<UID>(destination.token), Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND), false);
+				sendPacket(self,
+				           peer,
+				           SerializeSource<UID>(destination.token),
+				           Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND),
+				           false);
 			}
 		}
 	}
@@ -1209,7 +1215,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 							}
 							compatible = false;
 							if (!protocolVersion.hasInexpensiveMultiVersionClient()) {
-								if(peer) {
+								if (peer) {
 									peer->protocolVersion->set(protocolVersion);
 								}
 
@@ -1472,7 +1478,8 @@ void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 }
 
 void FlowTransport::removePeerReference(const Endpoint& endpoint, bool isStream) {
-	if (!isStream || !endpoint.getPrimaryAddress().isValid() || !endpoint.getPrimaryAddress().isPublic()) return;
+	if (!isStream || !endpoint.getPrimaryAddress().isValid() || !endpoint.getPrimaryAddress().isPublic())
+		return;
 	Reference<Peer> peer = self->getPeer(endpoint.getPrimaryAddress());
 	if (peer) {
 		peer->peerReferences--;

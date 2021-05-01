@@ -1,23 +1,23 @@
 /*
- * tutorial.actor.cpp
+* tutorial.actor.cpp
 
- *
- * This source file is part of the FoundationDB open source project
- *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+*
+* This source file is part of the FoundationDB open source project
+*
+* Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+*
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+*     http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*/
 
 #include "flow/flow.h"
 #include "flow/Platform.h"
@@ -192,8 +192,8 @@ ACTOR Future<Void> echoServer() {
 					req.reply.sendError(end_of_stream());
 				}
 			}
-		} catch (Error &e) {
-			if(e.code() != error_code_operation_obsolete) {
+		} catch (Error& e) {
+			if (e.code() != error_code_operation_obsolete) {
 				fprintf(stderr, "Error: %s\n", e.what());
 				throw e;
 			}
@@ -418,9 +418,10 @@ ACTOR Future<Void> fdbClientStream() {
 	loop {
 		state PromiseStream<Standalone<RangeResultRef>> results;
 		try {
-			state Future<Void> stream =
-			    tx.getRangeStream(results, KeySelector(firstGreaterOrEqual(next), next.arena()),
-			                      KeySelector(firstGreaterOrEqual(normalKeys.end)), GetRangeLimits());
+			state Future<Void> stream = tx.getRangeStream(results,
+			                                              KeySelector(firstGreaterOrEqual(next), next.arena()),
+			                                              KeySelector(firstGreaterOrEqual(normalKeys.end)),
+			                                              GetRangeLimits());
 			loop {
 				Standalone<RangeResultRef> range = waitNext(results.getFuture());
 				if (range.size()) {
@@ -446,9 +447,10 @@ ACTOR Future<Void> fdbClientGetRange() {
 	state Future<Void> logFuture = logThroughput(&bytes, &next);
 	loop {
 		try {
-			Standalone<RangeResultRef> range = wait(tx.getRange(
-			    KeySelector(firstGreaterOrEqual(next), next.arena()), KeySelector(firstGreaterOrEqual(normalKeys.end)),
-			    GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, CLIENT_KNOBS->REPLY_BYTE_LIMIT)));
+			Standalone<RangeResultRef> range =
+			    wait(tx.getRange(KeySelector(firstGreaterOrEqual(next), next.arena()),
+			                     KeySelector(firstGreaterOrEqual(normalKeys.end)),
+			                     GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, CLIENT_KNOBS->REPLY_BYTE_LIMIT)));
 			bytes += range.expectedSize();
 			if (!range.more) {
 				break;

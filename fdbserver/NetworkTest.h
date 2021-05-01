@@ -27,7 +27,7 @@
 #include "flow/FileIdentifier.h"
 
 struct NetworkTestInterface {
-	RequestStream< struct NetworkTestRequest > test;
+	RequestStream<struct NetworkTestRequest> test;
 	RequestStream<struct NetworkTestStreamingRequest> testStream;
 	NetworkTestInterface() {}
 	NetworkTestInterface(NetworkAddress remote);
@@ -64,7 +64,7 @@ struct NetworkTestStreamingReply : ReplyPromiseStreamReply {
 	int index = 0;
 	NetworkTestStreamingReply() = default;
 	explicit NetworkTestStreamingReply(int index) : index(index) {}
-	size_t expectedSize() const { return 4e6;/*sizeof(*this);*/ }
+	size_t expectedSize() const { return 4e6; /*sizeof(*this);*/ }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

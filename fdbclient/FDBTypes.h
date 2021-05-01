@@ -709,7 +709,7 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 
 using RangeResult = Standalone<RangeResultRef>;
 
-template<>
+template <>
 struct Traceable<RangeResultRef> : std::true_type {
 	static std::string toString(const RangeResultRef& value) {
 		return Traceable<VectorRef<KeyValueRef>>::toString(value);
