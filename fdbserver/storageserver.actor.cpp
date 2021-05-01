@@ -27,6 +27,8 @@
 #include "fdbrpc/LoadBalance.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
+#include "flow/Error.h"
+#include "flow/FastRef.h"
 #include "flow/Hash3.h"
 #include "flow/Histogram.h"
 #include "flow/IRandom.h"
@@ -189,6 +191,13 @@ struct StorageServerDisk {
 	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) {
 		return storage->readRange(keys, rowLimit, byteLimit);
 	}
+
+	Future<Void> readRange(KeyRangeRef keys, Reference<ReadRangeResultWriter> resultWriter, int rowLimit) {
+		ASSERT(storage->usesReadRangeResultWriter());
+		return storage->readRange(keys, resultWriter, rowLimit);
+	}
+
+	bool usesReadRangeResultWriter() { return storage->usesReadRangeResultWriter(); }
 
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
@@ -878,6 +887,188 @@ public:
 	}
 };
 
+ReadRangeResultWriter::ReadRangeResultWriter(StorageServer::VersionedData::iterator& vCurrent,
+                                             StorageServer* data,
+                                             Version version,
+                                             KeyRange range,
+                                             int limit,
+                                             int* pLimitBytes,
+                                             GetKeyValuesReply& result)
+  : vCurrent(vCurrent), data(data), version(version), range(range), limit(limit), pLimitBytes(pLimitBytes),
+    result(result) {
+	// set the direction of the range read
+	forward = limit >= 0;
+}
+
+void ReadRangeResultWriter::decrementLimits(const KeyValueRef& kv) {
+	if (forward)
+		limit--;
+	else
+		limit++;
+	*pLimitBytes -= sizeof(KeyValueRef) + kv.expectedSize();
+}
+
+void ReadRangeResultWriter::setResult(bool assert) {
+	if (assert)
+		ASSERT(result.data.size() == 0 ||
+		       *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
+
+	result.version = version;
+	result.more = limit == 0 || *pLimitBytes <= 0;
+}
+
+void ReadRangeResultWriter::setDone(bool d) {
+	done = d;
+}
+
+Optional<Error> ReadRangeResultWriter::getError() {
+	return error;
+}
+
+Arena& ReadRangeResultWriter::getArena() {
+	return result.arena;
+}
+
+std::variant<bool, KeyRef> ReadRangeResultWriter::operator()(Optional<KeyValueRef> kvOpt) {
+	try {
+		if (data->storageVersion() > version) { // The transaction is too old so we can no longer read from the ptree
+			error = transaction_too_old();
+			return false;
+		}
+		if (forward) { // limit >= 0 (results in asc order)
+			loop {
+				if (done) // If the storage server shuts down (or something related) then end the read range
+					return false;
+				if (limit <= 0 || *pLimitBytes <= 0) // exceed limit constraints
+					return false;
+				if (!vCurrent || vCurrent.key() >= range.end) {
+					// If the ptree exceeds the range then only add kv pairs from the storage engine
+					if (kvOpt.present()) {
+						result.data.push_back(result.arena, kvOpt.get());
+						decrementLimits(kvOpt.get());
+					}
+					return true;
+				}
+
+				if (!kvOpt.present()) {
+					// If kvOpt is empty then there are no more results on disk so we continue iterate through only
+					// the ptree and adding relevant results
+					finishedDisk = true;
+					if (vCurrent->isClearTo()) { // dont add the key if its part of a clear range
+						++vCurrent;
+						continue;
+					}
+					result.data.emplace_back(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
+					decrementLimits(result.data.back());
+					++vCurrent;
+					continue;
+				}
+
+				ASSERT(!finishedDisk);
+				KeyValueRef& kv = kvOpt.get();
+				if (kv.key < vCurrent.key()) {
+					// If the key from the storage engine is smaller than the ptree key
+					// then add the storage engine key to the results
+					result.data.push_back(result.arena, kv);
+					decrementLimits(kv);
+					return true;
+				} else if (vCurrent->isClearTo()) {
+					// Encounter a clear range in the ptree
+					KeyRef skipKey = vCurrent->getEndKey(); // get the end of the clear range
+					++vCurrent;
+					// If the end of the clear range is greater than the key from disk then tell the storage engine
+					// to skip to the end of the clear range (otherwise keep iterating through the ptree)
+					if (!vCurrent || vCurrent.key() > kv.key)
+						return skipKey;
+				} else if (kv.key == vCurrent.key()) {
+					// If the key on disk equals the key in the ptree then use the one from the ptree (as its more
+					// recent)
+					result.data.emplace_back(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
+					decrementLimits(result.data.back());
+					++vCurrent;
+					return true;
+				} else {
+					// Add the key from the ptree if its less than the one on disk
+					result.data.emplace_back(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
+					decrementLimits(result.data.back());
+					++vCurrent;
+				}
+			}
+		} else { // limit < 0 (results in desc order)
+			loop {
+				if (done) // If the storage server shuts down (or something related) then end the read range
+					return false;
+				if (limit >= 0 || *pLimitBytes <= 0) // exceed limit constraints
+					return false;
+				if (!vCurrent || (!vCurrent->isClearTo() && vCurrent.key() < range.begin) ||
+				    (vCurrent->isClearTo() && vCurrent->getEndKey() < range.begin)) {
+					// if the ptree key appears before the given range then only add results from disk
+					if (kvOpt.present()) {
+						result.data.push_back(result.arena, kvOpt.get());
+						decrementLimits(kvOpt.get());
+					}
+					return true;
+				}
+
+				if (!kvOpt.present()) {
+					// If kvOpt is empty then there are no more results on disk so we continue to iterate through
+					// only the ptree and adding relevant results
+					finishedDisk = true;
+					if (vCurrent->isClearTo()) {
+						--vCurrent;
+						continue;
+					}
+					result.data.emplace_back(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
+					decrementLimits(result.data.back());
+					--vCurrent;
+					continue;
+				}
+
+				ASSERT(!finishedDisk);
+				KeyValueRef& kv = kvOpt.get();
+				if ((vCurrent->isClearTo() && kv.key > vCurrent->getEndKey()) ||
+				    (!vCurrent->isClearTo() && kv.key > vCurrent.key())) {
+					// the key on disk is larger than the one in the ptree so go with the key on disk
+					result.data.push_back(result.arena, kv);
+					decrementLimits(kv);
+					return true;
+				} else if (vCurrent->isClearTo()) {
+					// reached a clear range in the ptree
+					KeyRef skipKey = vCurrent.key();
+					if (kv.key == vCurrent->getEndKey()) {
+						// When we reach this condition it must be true that kv.key <= end of clear range (otherwise
+						// caught by case above). Since a clear range is non inclusive of the last element, if
+						// kv.key
+						// == end of clear range then we must add it to the result set
+						result.data.push_back(result.arena, kv);
+						decrementLimits(kv);
+					}
+					--vCurrent;
+					// Only ask the disk to skip to the begining of the clear range if kv > begin of clear and <=
+					// end of clear
+					if (!vCurrent || vCurrent.key() < kv.key)
+						return skipKey;
+				} else if (kv.key == vCurrent.key()) {
+					// If the key on disk equals the key in the ptree then use the one from the ptree (as its more
+					// recent)
+					result.data.emplace_back(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
+					decrementLimits(result.data.back());
+					--vCurrent;
+					return true;
+				} else {
+					// ptree key is larger than the on disk key so add it to the result set
+					result.data.emplace_back(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
+					decrementLimits(result.data.back());
+					--vCurrent;
+				}
+			}
+		}
+	} catch (Error& e) {
+		error = e;
+		return false;
+	}
+}
+
 const StringRef StorageServer::CurrentRunningFetchKeys::emptyString = LiteralStringRef("");
 const KeyRangeRef StorageServer::CurrentRunningFetchKeys::emptyKeyRange =
     KeyRangeRef(StorageServer::CurrentRunningFetchKeys::emptyString,
@@ -1159,13 +1350,12 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		DEBUG_MUTATION("ShardGetValue",
 		               version,
 		               MutationRef(MutationRef::DebugKey, req.key, v.present() ? v.get() : LiteralStringRef("<null>")));
-		DEBUG_MUTATION("ShardGetPath",
-		               version,
-		               MutationRef(MutationRef::DebugKey,
-		                           req.key,
-		                           path == 0   ? LiteralStringRef("0")
-		                           : path == 1 ? LiteralStringRef("1")
-		                                       : LiteralStringRef("2")));
+		DEBUG_MUTATION(
+		    "ShardGetPath",
+		    version,
+		    MutationRef(MutationRef::DebugKey,
+		                req.key,
+		                path == 0 ? LiteralStringRef("0") : path == 1 ? LiteralStringRef("1") : LiteralStringRef("2")));
 
 		/*
 		StorageMetrics m;
@@ -1517,6 +1707,63 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 	} else
 		result.cached = false;
 
+	if (data->storage.usesReadRangeResultWriter()) {
+		// Utilize the range read function on disk with the result writer
+
+		if (data->storageVersion() > version) {
+			throw transaction_too_old();
+		}
+
+		// modify the range based on clears at the begining/end
+		if (limit >= 0) {
+			// encounter a clear range at the begining so set range.begin to the end of the clear range
+			vCurrent = view.lastLessOrEqual(range.begin);
+			if (vCurrent && vCurrent->isClearTo() && vCurrent->getEndKey() > range.begin)
+				readBegin = vCurrent->getEndKey();
+			else
+				readBegin = range.begin;
+			readEnd = range.end;
+			vCurrent = view.lower_bound(readBegin);
+		} else {
+			vCurrent = view.lastLess(range.end);
+
+			// A clear might extend all the way to range.end so set the end of the range to the begining of the clear
+			// range
+			if (vCurrent && vCurrent->isClearTo() && vCurrent->getEndKey() >= range.end) {
+				readEnd = vCurrent.key();
+				--vCurrent;
+			} else {
+				readEnd = range.end;
+			}
+			readBegin = range.begin;
+		}
+
+		// After modification if range begin > range end then return that we have no results
+		if (readBegin > readEnd) {
+			ASSERT(result.data.size() == 0);
+			result.more = false;
+			return result;
+		}
+		state Reference<ReadRangeResultWriter> resultWriter =
+		    makeReference<ReadRangeResultWriter>(vCurrent, data, version, range, limit, pLimitBytes, result);
+		try {
+			// Send the range read to the storage engine
+			wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), resultWriter, limit));
+			// We may have encountered an error in the range read that we haven't thrown so check it here
+			if (resultWriter->getError().present()) {
+				throw resultWriter->getError().get();
+			}
+			resultWriter->setResult(true);
+			return result;
+		} catch (Error& e) {
+			// We need to set done here because an actor cancelled exception can get thrown
+			// but our readRange function will still keep going and can result in a segfault if it
+			// tries to access the StorageServer* pointer
+			resultWriter->setDone(true);
+			throw e;
+		}
+	}
+
 	// if (limit >= 0) we are reading forward, else backward
 	if (limit >= 0) {
 		// We might care about a clear beginning before start that
@@ -1682,6 +1929,10 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 	result.more = limit == 0 || *pLimitBytes <= 0; // FIXME: Does this have to be exact?
 	result.version = version;
 	return result;
+}
+
+void ReadRangeResultWriter::linkArena(Arena& arena) {
+	result.arena.dependsOn(arena);
 }
 
 // bool selectorInRange( KeySelectorRef const& sel, KeyRangeRef const& range ) {

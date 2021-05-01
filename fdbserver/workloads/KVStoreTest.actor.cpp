@@ -20,10 +20,15 @@
 
 #include <ctime>
 #include <cinttypes>
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
+#include "flow/Arena.h"
+#include "flow/FastRef.h"
+#include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/flow.h"
 
 extern IKeyValueStore* makeDummyKeyValueStore();
 
@@ -98,6 +103,57 @@ private:
 	T sumSQ;
 	uint64_t N;
 };
+
+// Result writer used for testing range reads with clear ranges
+// struct ClearRangeResultWriter : public IReadRangeResultWriter {
+// 	int rowLimit, maxRowLimit, byteLimit, maxByteLimit;
+// 	Standalone<RangeResultRef> result;
+// 	Optional<Key> clearStart, clearEnd;
+// 	bool forward = true;
+
+// 	ClearRangeResultWriter(int rowLimit, int byteLimit)
+// 	  : rowLimit(rowLimit), byteLimit(byteLimit), maxRowLimit(rowLimit), maxByteLimit(byteLimit) {
+// 		if (this->rowLimit < 0) {
+// 			forward = false;
+// 			this->rowLimit = -this->rowLimit;
+// 		}
+// 	}
+
+// 	void setClearRange(Optional<Key> clearStart, Optional<Key> clearEnd) {
+// 		this->clearStart = clearStart;
+// 		this->clearEnd = clearEnd;
+// 	}
+
+// 	void clearResults() {
+// 		result = Standalone<RangeResultRef>();
+// 		rowLimit = maxRowLimit;
+// 		byteLimit = maxByteLimit;
+// 	}
+
+// 	/*
+// 	    - What this writer does is pass through any values which are not part of a clear range
+// 	    - If we encounter a key that falls within a clear range then we pass either the begining or the end
+// 	        of the range (depending on the sign of the limit)
+// 	*/
+// 	std::variant<bool, KeyRef> operator()(Optional<KeyValueRef> kv) override {
+// 		if (rowLimit <= 0 || byteLimit <= 0)
+// 			return false;
+// 		if (!kv.present())
+// 			return false;
+// 		if (clearStart.present() && clearEnd.present() && kv.get().key >= clearStart.get() &&
+// 		    kv.get().key < clearEnd.get()) {
+// 			return forward ? clearEnd.get() : clearStart.get();
+// 		}
+// 		rowLimit--;
+// 		result.push_back(result.arena(), kv.get());
+// 		byteLimit -= (sizeof(KeyValueRef) + kv.get().expectedSize());
+// 		return true;
+// 	}
+
+// 	Arena& getArena() override {
+// 		return result.arena();
+// 	}
+// };
 
 struct KVTest {
 	IKeyValueStore* store;
@@ -199,7 +255,7 @@ struct KVStoreTestWorkload : TestWorkload {
 	double testDuration, operationsPerSecond;
 	double commitFraction, setFraction;
 	int nodeCount, keyBytes, valueBytes;
-	bool doSetup, doClear, doCount;
+	bool doSetup, doClear, doCount, doResultWriterRangeRead;
 	std::string filename;
 	PerfIntCounter reads, sets, commits;
 	TestHistogram<float> readLatency, commitLatency;
@@ -219,6 +275,7 @@ struct KVStoreTestWorkload : TestWorkload {
 		doSetup = getOption(options, LiteralStringRef("setup"), false);
 		doClear = getOption(options, LiteralStringRef("clear"), false);
 		doCount = getOption(options, LiteralStringRef("count"), false);
+		doResultWriterRangeRead = getOption(options, LiteralStringRef("resultWriterRangeRead"), false);
 		filename = getOption(options, LiteralStringRef("filename"), Value()).toString();
 		saturation = getOption(options, LiteralStringRef("saturation"), false);
 		storeType = getOption(options, LiteralStringRef("storeType"), LiteralStringRef("ssd")).toString();
@@ -252,6 +309,211 @@ struct KVStoreTestWorkload : TestWorkload {
 
 WorkloadFactory<KVStoreTestWorkload> KVStoreTestWorkloadFactory("KVStoreTest");
 
+/*
+    - This test attempts to simulate a range read with various clear ranges
+    - First we ask our old range read function to read a range of keys, lets say [a,m]
+    - Then we randomly pick a subset of these keys, lets say [d,i) and designate this as our "clear range"
+    - We then feed the range [a, m] to the new range read function and get the result
+    - We then assert if the result contains all the keys in the range [a, m] except for those in [d, i)
+*/
+// ACTOR Future<Void> testRangeReadClearRanges(KVStoreTestWorkload* workload, KVTest* ptest) {
+// 	state KVTest& test = *ptest;
+// 	state Key key;
+// 	state int byteLimt = 1 << 30;
+// 	state int rowLimit = 1000;
+// 	state int count = 0;
+
+// 	while (true) {
+// 		// get the inital range of keys from the old read range function
+// 		state KeyRangeRef range = KeyRangeRef(key, LiteralStringRef("\xff\xff\xff\xff"));
+// 		state Standalone<RangeResultRef> kv = wait(test.store->readRange(range, rowLimit, byteLimt));
+// 		state Reference<ClearRangeResultWriter> resultWriter =
+// 		    makeReference<ClearRangeResultWriter>(rowLimit, byteLimt);
+
+// 		if (kv.size() == 0)
+// 			break;
+// 		// pick a random range to designate as our clear range
+// 		int rand1 = deterministicRandom()->randomInt(0, kv.size()),
+// 		    rand2 = deterministicRandom()->randomInt(0, kv.size());
+// 		state int clearStartIdx = std::min(rand1, rand2);
+// 		state int clearEndIdx = std::max(rand1, rand2);
+// 		// get the results from our new range read function with the range above
+// 		resultWriter->setClearRange(kv[clearStartIdx].key, kv[clearEndIdx].key);
+// 		wait(test.store->readRange(KeyRangeRef(kv[0].key, keyAfter(kv[kv.size() - 1].key)), resultWriter, rowLimit));
+// 		ASSERT(resultWriter->result.size() == kv.size() - (clearEndIdx - clearStartIdx));
+// 		int curIdx = 0;
+// 		// assert our range read function contains only the keys which are not part of the selected clear range
+// 		for (int i = 0; i < kv.size(); i++) {
+// 			if (i < clearStartIdx || i >= clearEndIdx) {
+// 				ASSERT(kv[i].key == resultWriter->result[curIdx].key);
+// 				ASSERT(kv[i].value == resultWriter->result[curIdx].value);
+// 				curIdx++;
+// 			}
+// 		}
+// 		ASSERT(curIdx == resultWriter->result.size());
+// 		count += resultWriter->result.size();
+// 		if (kv.size() < rowLimit)
+// 			break;
+// 		key = keyAfter(kv[kv.size() - 1].key);
+// 	}
+// 	TraceEvent("KVStoreRangeReadClearCount").detail("Count", count);
+
+// 	rowLimit = -1000;
+// 	key = LiteralStringRef("\xff\xff\xff\xff");
+// 	count = 0;
+
+// 	// same logic as above except we reverse the direction of the range read results (desc order)
+// 	while (true) {
+// 		Key start;
+// 		state KeyRangeRef range2 = KeyRangeRef(start, key);
+// 		state Standalone<RangeResultRef> kv2 = wait(test.store->readRange(range2, rowLimit, byteLimt));
+// 		state Reference<ClearRangeResultWriter> resultWriter2 =
+// 		    makeReference<ClearRangeResultWriter>(rowLimit, byteLimt);
+
+// 		if (kv2.size() == 0)
+// 			break;
+// 		int rand1 = deterministicRandom()->randomInt(0, kv2.size()),
+// 		    rand2 = deterministicRandom()->randomInt(0, kv2.size());
+// 		state int clearStartIdx2 = std::min(rand1, rand2);
+// 		state int clearEndIdx2 = std::max(rand1, rand2);
+// 		resultWriter2->setClearRange(kv2[clearEndIdx2].key, kv2[clearStartIdx2].key);
+// 		wait(
+// 		    test.store->readRange(KeyRangeRef(kv2[kv2.size() - 1].key, keyAfter(kv2[0].key)), resultWriter2, rowLimit));
+// 		int curIdx = 0;
+// 		ASSERT(resultWriter2->result.size() == kv2.size() - (clearEndIdx2 - clearStartIdx2));
+// 		for (int i = 0; i < kv2.size(); i++) {
+// 			if (i <= clearStartIdx2 || i > clearEndIdx2) {
+// 				ASSERT(kv2[i].key == resultWriter2->result[curIdx].key);
+// 				ASSERT(kv2[i].value == resultWriter2->result[curIdx].value);
+// 				curIdx++;
+// 			}
+// 		}
+// 		ASSERT(curIdx == resultWriter2->result.size());
+// 		count += resultWriter2->result.size();
+// 		if (kv2.size() < -rowLimit)
+// 			break;
+// 		key = kv2[kv2.size() - 1].key;
+// 	}
+// 	TraceEvent("KVStoreRangeReadClearCountRev").detail("Count", count);
+
+// 	return Void();
+// }
+
+// /*
+//     - Tests various edge cases with the new result writer range read interface
+// */
+// ACTOR Future<Void> testReadRangeEdgeCases(KVStoreTestWorkload* workload, KVTest* ptest) {
+// 	state KVTest& test = *ptest;
+// 	state Key key;
+// 	state int limit = 1000;
+// 	state int byteLimt = 1 << 30;
+// 	state int curIdx = 0;
+// 	state KeyRangeRef range = KeyRangeRef(key, LiteralStringRef("\xff\xff\xff\xff"));
+// 	state Standalone<RangeResultRef> kv = wait(test.store->readRange(range, limit, byteLimt));
+// 	state Reference<ClearRangeResultWriter> resultWriter = makeReference<ClearRangeResultWriter>(limit, byteLimt);
+
+// 	// Tests with a clear range at the begining of the read range
+// 	resultWriter->setClearRange(kv[0].key, kv[kv.size() / 2 - 1].key);
+// 	wait(test.store->readRange(KeyRangeRef(kv[0].key, keyAfter(kv[kv.size() - 1].key)), resultWriter, limit));
+// 	for (int i = 0; i < kv.size(); i++) {
+// 		if (i >= kv.size() / 2 - 1) {
+// 			ASSERT(kv[i].key == resultWriter->result[curIdx].key);
+// 			ASSERT(kv[i].value == resultWriter->result[curIdx].value);
+// 			curIdx++;
+// 		}
+// 	}
+// 	ASSERT(resultWriter->result.size() > 0);
+// 	ASSERT(curIdx == resultWriter->result.size());
+
+// 	resultWriter->clearResults();
+
+// 	// Tests with a clear range at the end of the read range
+// 	resultWriter->setClearRange(kv[kv.size() / 2 - 1].key, keyAfter(kv[kv.size() - 1].key));
+// 	wait(test.store->readRange(KeyRangeRef(kv[0].key, keyAfter(kv[kv.size() - 1].key)), resultWriter, limit));
+// 	curIdx = 0;
+// 	for (int i = 0; i < kv.size(); i++) {
+// 		if (i < kv.size() / 2 - 1) {
+// 			ASSERT(kv[i].key == resultWriter->result[curIdx].key);
+// 			ASSERT(kv[i].value == resultWriter->result[curIdx].value);
+// 			curIdx++;
+// 		}
+// 	}
+// 	ASSERT(resultWriter->result.size() > 0);
+// 	ASSERT(curIdx == resultWriter->result.size());
+
+// 	resultWriter->clearResults();
+
+// 	// Test a range read where the entire range is a clear
+// 	resultWriter->setClearRange(kv[0].key, keyAfter(kv[kv.size() - 1].key));
+// 	wait(test.store->readRange(KeyRangeRef(kv[0].key, keyAfter(kv[kv.size() - 1].key)), resultWriter, limit));
+// 	ASSERT(resultWriter->result.size() == 0);
+
+// 	return Void();
+// }
+
+/*
+    - This test attempts to simulate a regular read range
+    - We enter a range of keys ["", "\XFF"] into both the old and new read range functions
+    - Once we get the results from the two we assert that they are identical
+*/
+// ACTOR Future<Void> testRangeReadResultWriterPassThrough(KVStoreTestWorkload* workload, KVTest* ptest) {
+// 	state KVTest& test = *ptest;
+// 	state Key key = LiteralStringRef("\xff\xff\xff\xff");
+// 	state int byteLimt = 1 << 30;
+// 	state int rowLimit = -1000;
+// 	state int count = 0;
+
+// 	// get the range in reverse alph order (desc)
+// 	while (true) {
+// 		Key start;
+// 		state KeyRangeRef range = KeyRangeRef(start, key);
+// 		// result of range read using exisitng API
+// 		state Standalone<RangeResultRef> kv = wait(test.store->readRange(range, rowLimit, byteLimt));
+// 		state Reference<ClearRangeResultWriter> resultWriter =
+// 		    makeReference<ClearRangeResultWriter>(rowLimit, byteLimt);
+// 		// result of range read using the resultWriter interface
+// 		wait(test.store->readRange(range, resultWriter, rowLimit));
+
+// 		// make sure the result from both range read functions are the same
+// 		ASSERT(resultWriter->result.size() == kv.size());
+// 		for (int i = 0; i < kv.size(); i++) {
+// 			ASSERT(kv[i].key == resultWriter->result[i].key);
+// 			ASSERT(kv[i].value == resultWriter->result[i].value);
+// 		}
+// 		count += resultWriter->result.size();
+// 		if (kv.size() < -rowLimit)
+// 			break;
+// 		key = kv[kv.size() - 1].key;
+// 	}
+// 	TraceEvent("KVStoreRangeReadCount").detail("Count", count);
+// 	ASSERT(count == 100000);
+
+// 	// same logic as above except we reverse the direction of the range read results (asc order)
+// 	count = 0;
+// 	rowLimit = 1000;
+// 	state Key start;
+// 	while (true) {
+// 		state KeyRangeRef range2 = KeyRangeRef(start, LiteralStringRef("\xff\xff\xff\xff"));
+// 		state Standalone<RangeResultRef> kv2 = wait(test.store->readRange(range2, rowLimit, byteLimt));
+// 		state Reference<ClearRangeResultWriter> resultWriter2 =
+// 		    makeReference<ClearRangeResultWriter>(rowLimit, byteLimt);
+// 		wait(test.store->readRange(range2, resultWriter2, rowLimit));
+// 		ASSERT(resultWriter2->result.size() == kv2.size());
+// 		for (int i = 0; i < kv2.size(); i++) {
+// 			ASSERT(kv2[i].key == resultWriter2->result[i].key);
+// 			ASSERT(kv2[i].value == resultWriter2->result[i].value);
+// 		}
+// 		count += resultWriter2->result.size();
+// 		if (kv2.size() < rowLimit)
+// 			break;
+// 		start = keyAfter(kv2[kv2.size() - 1].key);
+// 	}
+// 	TraceEvent("KVStoreRangeReadCountRev").detail("Count", count);
+// 	ASSERT(count == 100000);
+
+// 	return Void();
+// }
+
 ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest) {
 	state KVTest& test = *ptest;
 	state ActorCollectionNoErrors ac;
@@ -265,6 +527,7 @@ ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest)
 	state char* extraValue = new char[extraBytes];
 	memset(extraValue, '.', extraBytes);
 
+	// Basic read range
 	if (workload->doCount) {
 		state int64_t count = 0;
 		state Key k;
@@ -282,6 +545,7 @@ ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest)
 		printf("Counted: %" PRId64 " in %0.1fs\n", count, elapsed);
 	}
 
+	// Seed the storage engine
 	if (workload->doSetup) {
 		wr << Version(0);
 		wr.serializeBytes(extraValue, extraBytes);
@@ -302,8 +566,16 @@ ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest)
 		TraceEvent("KVStoreSetup").detail("Count", workload->nodeCount).detail("Took", workload->setupTook);
 	}
 
+	if (workload->doResultWriterRangeRead && test.store->usesReadRangeResultWriter()) {
+		// Only run these tests if the ResultWriter Interface has been implemented for the storage engines
+		// wait(testRangeReadResultWriterPassThrough(workload, ptest));
+		// wait(testRangeReadClearRanges(workload, ptest));
+		// wait(testReadRangeEdgeCases(workload, ptest));
+	}
+
 	state double t = now();
 	state double stopAt = t + workload->testDuration;
+	// Read Saturation
 	if (workload->saturation) {
 		if (workload->commitFraction) {
 			while (now() < stopAt) {
@@ -356,6 +628,7 @@ ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest)
 		}
 	}
 
+	// Remove all seeded data
 	if (workload->doClear) {
 		state int chunk = 1000000;
 		t = timer();

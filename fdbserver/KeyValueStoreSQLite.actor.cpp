@@ -18,7 +18,11 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #define SQLITE_THREADSAFE 0 // also in sqlite3.amalgamation.c!
+
+#include <variant>
+
 #include "flow/crc32c.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/CoroFlow.h"
@@ -956,16 +960,16 @@ struct RawCursor {
 	// Once either method returns a non-present value, using the DefragmentingReader again is undefined behavior.
 	struct DefragmentingReader {
 		// Use this constructor for forward/backward range reads
-		DefragmentingReader(RawCursor& cur, Arena& m, bool forward)
-		  : cur(cur), arena(m), forward(forward), fragmentReadLimit(-1) {
+		DefragmentingReader(RawCursor& cur, Arena& m, bool forward, bool useArena)
+		  : cur(cur), arena(m), forward(forward), fragmentReadLimit(-1), useArena(useArena) {
 			parse();
 		}
 
 		// Use this constructor to read a SINGLE partial value from the current cursor position for an expected key.
 		// This exists to support IKeyValueStore::getPrefix().
 		// The reader will return exactly one KV pair if its key matches expectedKey, otherwise no KV pairs.
-		DefragmentingReader(RawCursor& cur, Arena& m, KeyRef expectedKey, int maxValueLen)
-		  : cur(cur), arena(m), forward(true), maxValueLen(maxValueLen) {
+		DefragmentingReader(RawCursor& cur, Arena& m, KeyRef expectedKey, int maxValueLen, bool useArena)
+		  : cur(cur), arena(m), forward(true), maxValueLen(maxValueLen), useArena(useArena) {
 			fragmentReadLimit = getEncodedKVFragmentSize(expectedKey.size(), maxValueLen);
 			parse();
 			// If a key was found but it wasn't the expected key then
@@ -981,7 +985,7 @@ struct RawCursor {
 		uint32_t index; // index of latest value fragment read
 		RawCursor& cur; // Cursor to read from
 		Arena& arena; // Arena to allocate key and value bytes in
-		bool forward; // true for forward iteration, false for reverse
+		bool forward, useArena; // true for forward iteration, false for reverse
 		int maxValueLen; // truncated value length to return
 		int fragmentReadLimit; // If >= 0, only read and *attempt* to decode this many fragment bytes
 
@@ -1026,6 +1030,16 @@ struct RawCursor {
 			return advance();
 		}
 
+		// Moves the cursor to a designated key and adjusts based on the read direction
+		void moveTo(KeyRef key, bool ignore_fragment_mode = false) {
+			int r = cur.moveTo(key, ignore_fragment_mode);
+			if (forward && r < 0)
+				cur.moveNext();
+			else if (!forward && r >= 0)
+				cur.movePrevious();
+			parse();
+		}
+
 		Optional<KeyValueRef> getNext() {
 			if (!peek().present())
 				return Optional<KeyValueRef>();
@@ -1037,9 +1051,12 @@ struct RawCursor {
 
 			// If index is 0 then this is an unfragmented key.  It is unnecessary to advance the cursor so
 			// we won't, but we will clear kv so that the next peek/getNext will have to advance.
-			if (index == 0)
+			if (index == 0) {
 				kv = Optional<KeyValueRef>();
-			else {
+				if (useArena) {
+					resultKV = KeyValueRef(arena, resultKV);
+				}
+			} else {
 				// First and last indexes in fragment group are size hints.
 				//   First index is ceil(total_value_size / 4)
 				//   Last  index is ceil(total_value_size / 2)
@@ -1108,7 +1125,7 @@ struct RawCursor {
 			if (r < 0)
 				moveNext();
 			Arena m;
-			DefragmentingReader i(*this, m, true);
+			DefragmentingReader i(*this, m, true, false);
 			if (i.peek() == key) {
 				Optional<KeyValueRef> kv = i.getNext();
 				return Value(kv.get().value, m);
@@ -1128,7 +1145,7 @@ struct RawCursor {
 			if (r < 0)
 				moveNext();
 			Arena m;
-			DefragmentingReader i(*this, m, getEncodedKVFragmentSize(key.size(), maxLength));
+			DefragmentingReader i(*this, m, getEncodedKVFragmentSize(key.size(), maxLength), false);
 			if (i.peek() == key) {
 				Optional<KeyValueRef> kv = i.getNext();
 				return Value(kv.get().value, m);
@@ -1145,6 +1162,102 @@ struct RawCursor {
 		}
 		return Optional<Value>();
 	}
+
+	Void readRangeResultWriter(KeyRangeRef keys, Reference<ReadRangeResultWriter> resultWriter, int rowLimit) {
+		// Read range implementation using a result writer
+		if (rowLimit == 0) {
+			return Void();
+		}
+		if (db.fragment_values) {
+			if (rowLimit > 0) { // return results in asc order
+				DefragmentingReader i(*this, resultWriter->getArena(), true, true);
+				i.moveTo(keys.begin);
+				Optional<KeyRef> nextKey = i.peek();
+				while (nextKey.present() && nextKey.get() < keys.end) {
+					Optional<KeyValueRef> kv = i.getNext();
+					std::variant<bool, KeyRef> res = resultWriter->operator()(kv);
+					if (res.index() == 0) { // returned bool
+						if (!std::get<bool>(res)) { // we hit the limit so return
+							return Void();
+						}
+					} else { // returned KeyRef for end of clear range
+						i.moveTo(std::get<KeyRef>(res));
+					}
+					nextKey = i.peek();
+				}
+			} else { // return results in desc order
+				DefragmentingReader i(*this, resultWriter->getArena(), false, true);
+				i.moveTo(keys.end);
+				Optional<KeyRef> nextKey = i.peek();
+				while (nextKey.present() && nextKey.get() >= keys.begin) {
+					Optional<KeyValueRef> kv = i.getNext();
+					std::variant<bool, KeyRef> res = resultWriter->operator()(kv);
+					if (res.index() == 0) { // returned bool
+						if (!std::get<bool>(res)) { // we hit the limit so return
+							return Void();
+						}
+					} else { // returned KeyRef to begining of clear range
+						i.moveTo(std::get<KeyRef>(res));
+					}
+					nextKey = i.peek();
+				}
+			}
+		} else {
+			if (rowLimit > 0) {
+				int r = moveTo(keys.begin);
+				if (r < 0) {
+					moveNext();
+				}
+				while (this->valid) {
+					KeyValueRef kv = decodeKV(getEncodedRow(resultWriter->getArena()));
+					if (kv.key >= keys.end) {
+						break;
+					}
+					std::variant<bool, KeyRef> res = resultWriter->operator()(kv);
+					if (res.index() == 0) {
+						if (!std::get<bool>(res)) { // we hit the limit so return
+							return Void();
+						} else {
+							moveNext();
+						}
+					} else { // returned KeyRef for end of clear range
+						r = moveTo(std::get<KeyRef>(res));
+						if (r < 0) {
+							moveNext();
+						}
+					}
+				}
+			} else {
+				int r = moveTo(keys.end);
+				if (r >= 0) {
+					movePrevious();
+				}
+				while (this->valid) {
+					KeyValueRef kv = decodeKV(getEncodedRow(resultWriter->getArena()));
+					if (kv.key < keys.begin) {
+						break;
+					}
+					std::variant<bool, KeyRef> res = resultWriter->operator()(kv);
+					if (res.index() == 0) {
+						if (!std::get<bool>(res)) { // we hit the limit so return
+							return Void();
+						} else {
+							movePrevious();
+						}
+					} else { // returned KeyRef for beginning of clear range
+						r = moveTo(std::get<KeyRef>(res));
+						if (r >= 0) {
+							movePrevious();
+						}
+					}
+				}
+			}
+		}
+		// let the result writer know the storage engine is done reading the range
+		resultWriter->operator()(Optional<KeyValueRef>());
+		return Void();
+	}
+
 	Standalone<RangeResultRef> getRange(KeyRangeRef keys, int rowLimit, int byteLimit) {
 		Standalone<RangeResultRef> result;
 		int accumulatedBytes = 0;
@@ -1159,7 +1272,7 @@ struct RawCursor {
 				if (r < 0)
 					moveNext();
 
-				DefragmentingReader i(*this, result.arena(), true);
+				DefragmentingReader i(*this, result.arena(), true, false);
 				Optional<KeyRef> nextKey = i.peek();
 				while (nextKey.present() && nextKey.get() < keys.end && rowLimit != 0 && accumulatedBytes < byteLimit) {
 					Optional<KeyValueRef> kv = i.getNext();
@@ -1172,7 +1285,7 @@ struct RawCursor {
 				int r = moveTo(keys.end);
 				if (r >= 0)
 					movePrevious();
-				DefragmentingReader i(*this, result.arena(), false);
+				DefragmentingReader i(*this, result.arena(), false, false);
 				Optional<KeyRef> nextKey = i.peek();
 				while (nextKey.present() && nextKey.get() >= keys.begin && rowLimit != 0 &&
 				       accumulatedBytes < byteLimit) {
@@ -1582,6 +1695,8 @@ public:
 	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys,
 	                                             int rowLimit = 1 << 30,
 	                                             int byteLimit = 1 << 30) override;
+	bool usesReadRangeResultWriter() override;
+	Future<Void> readRange(KeyRangeRef keys, Reference<ReadRangeResultWriter> resultWriter, int rowLimit) override;
 
 	KeyValueStoreSQLite(std::string const& filename,
 	                    UID logID,
@@ -1704,6 +1819,22 @@ private:
 		};
 		void action(ReadRangeAction& rr) {
 			rr.result.send(getCursor()->get().getRange(rr.keys, rr.rowLimit, rr.byteLimit));
+			++counter;
+		}
+
+		struct ReadRangeResultWriterAction : TypedAction<Reader, ReadRangeResultWriterAction>,
+		                                     FastAllocated<ReadRangeResultWriterAction> {
+			// Wrapper around the call to the SQLite cursor readRange implementation
+			KeyRange keys;
+			Reference<ReadRangeResultWriter> resultWriter;
+			int rowLimit;
+			ThreadReturnPromise<Void> result;
+			ReadRangeResultWriterAction(KeyRange keys, Reference<ReadRangeResultWriter> resultWriter, int rowLimit)
+			  : keys(keys), resultWriter(resultWriter), rowLimit(rowLimit) {}
+			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
+		};
+		void action(ReadRangeResultWriterAction& rr) {
+			rr.result.send(getCursor()->get().readRangeResultWriter(rr.keys, rr.resultWriter, rr.rowLimit));
 			++counter;
 		}
 	};
@@ -2214,6 +2345,22 @@ Future<Standalone<RangeResultRef>> KeyValueStoreSQLite::readRange(KeyRangeRef ke
 	readThreads->post(p);
 	return f;
 }
+
+bool KeyValueStoreSQLite::usesReadRangeResultWriter() {
+	return true;
+}
+
+Future<Void> KeyValueStoreSQLite::readRange(KeyRangeRef keys,
+                                            Reference<ReadRangeResultWriter> resultWriter,
+                                            int rowLimit) {
+	// Read range implementation which utilizes a result writer
+	++readsRequested;
+	auto readRangeAction = new Reader::ReadRangeResultWriterAction(keys, resultWriter, rowLimit);
+	auto readRangeFuture = readRangeAction->result.getFuture();
+	readThreads->post(readRangeAction);
+	return readRangeFuture;
+}
+
 Future<KeyValueStoreSQLite::SpringCleaningWorkPerformed> KeyValueStoreSQLite::doClean() {
 	++writesRequested;
 	auto p = new Writer::SpringCleaningAction;
