@@ -430,7 +430,7 @@ struct RolesInfo {
 				continue;
 			}
 
-			latencyBands[band] = StatusCounter(itr->second).getCounter();
+			latencyBands[band] = StatusCounter(itr->second.toString()).getCounter();
 		}
 
 		return latencyBands;

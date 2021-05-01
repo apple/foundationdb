@@ -23,6 +23,8 @@
 #include <string>
 #include <set>
 
+#include "flow/TraceValue.h"
+
 class StringRef;
 
 struct ITraceLogWriter {
@@ -39,7 +41,8 @@ struct ITraceLogWriter {
 
 class TraceEventFields;
 
-struct ITraceLogFormatter {
+class ITraceLogFormatter {
+public:
 	virtual const char* getExtension() = 0;
 	virtual const char* getHeader() = 0; // Called when starting a new file
 	virtual const char* getFooter() = 0; // Called when ending a file

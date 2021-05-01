@@ -99,7 +99,7 @@ public:
 
 template <>
 struct Traceable<IDiskQueue::location> : std::true_type {
-	static std::string toString(const IDiskQueue::location& value) { return value; }
+	static TraceValue toTraceValue(const IDiskQueue::location& value) { return TraceValue(value); }
 };
 
 // FIXME: One should be able to use SFINAE to choose between serialize and serialize_unversioned.

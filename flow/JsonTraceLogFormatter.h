@@ -21,7 +21,8 @@
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 
-struct JsonTraceLogFormatter : public ITraceLogFormatter, ReferenceCounted<JsonTraceLogFormatter> {
+class JsonTraceLogFormatter : public ITraceLogFormatter, ReferenceCounted<JsonTraceLogFormatter> {
+public:
 	const char* getExtension() override;
 	const char* getHeader() override; // Called when starting a new file
 	const char* getFooter() override; // Called when ending a file

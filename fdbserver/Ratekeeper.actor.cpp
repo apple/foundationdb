@@ -1340,7 +1340,8 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		TraceEvent(name.c_str(), self->id)
 		    .detail("TPSLimit", limits->tpsLimit)
 		    .detail("Reason", limitReason)
-		    .detail("ReasonServerID", reasonID == UID() ? std::string() : Traceable<UID>::toString(reasonID))
+		    .detail("ReasonServerID",
+		            reasonID == UID() ? std::string() : Traceable<UID>::toTraceValue(reasonID).toString())
 		    .detail("ReleasedTPS", self->smoothReleasedTransactions.smoothRate())
 		    .detail("ReleasedBatchTPS", self->smoothBatchReleasedTransactions.smoothRate())
 		    .detail("TPSBasis", actualTps)

@@ -27,7 +27,8 @@
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 
-struct XmlTraceLogFormatter : public ITraceLogFormatter, ReferenceCounted<XmlTraceLogFormatter> {
+class XmlTraceLogFormatter : public ITraceLogFormatter, ReferenceCounted<XmlTraceLogFormatter> {
+public:
 	void addref() override;
 	void delref() override;
 
@@ -35,7 +36,6 @@ struct XmlTraceLogFormatter : public ITraceLogFormatter, ReferenceCounted<XmlTra
 	const char* getHeader() override;
 	const char* getFooter() override;
 
-	void escape(std::stringstream& ss, std::string source);
 	std::string formatEvent(const TraceEventFields& fields) override;
 };
 

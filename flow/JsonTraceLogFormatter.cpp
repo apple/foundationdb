@@ -23,6 +23,56 @@
 
 #include <sstream>
 
+namespace {
+
+std::string escapeString(const std::string& source) {
+	std::string result;
+	for (auto c : source) {
+		if (c == '"') {
+			result += "\\\"";
+		} else if (c == '\\') {
+			result += "\\\\";
+		} else if (c == '\n') {
+			result += "\\n";
+		} else if (c == '\r') {
+			result += "\\r";
+		} else if (isprint(c)) {
+			result += c;
+		} else {
+			constexpr char hex[] = "0123456789abcdef";
+			int x = int{ static_cast<uint8_t>(c) };
+			result += "\\x" + hex[x / 16] + hex[x % 16];
+		}
+	}
+	return result;
+}
+
+class FormatValue {
+public:
+	std::string operator()(TraceBool const& v) const { return v.value ? "true" : "false"; }
+	std::string operator()(TraceString const& v) const { return "\"" + escapeString(v.value) + "\""; }
+	std::string operator()(TraceCounter const& v) const { return format("[%g,%g,%lld]", v.rate, v.roughness, v.value); }
+	std::string operator()(TraceNumeric const& v) const { return v.value; }
+	std::string operator()(TraceVector const& v) const {
+		std::string result = "[";
+		bool first = true;
+		for (const auto& tv : v.values) {
+			if (first) {
+				first = false;
+			} else {
+				result.push_back(',');
+			}
+			result.push_back('\"');
+			result += tv;
+			result.push_back('\"');
+		}
+		result.push_back(']');
+		return result;
+	}
+} jsonValueFormatter;
+
+} //namespace
+
 void JsonTraceLogFormatter::addref() {
 	ReferenceCounted<JsonTraceLogFormatter>::addref();
 }
@@ -43,43 +93,16 @@ const char* JsonTraceLogFormatter::getFooter() {
 	return "";
 }
 
-namespace {
-
-void escapeString(std::stringstream& ss, const std::string& source) {
-	for (auto c : source) {
-		if (c == '"') {
-			ss << "\\\"";
-		} else if (c == '\\') {
-			ss << "\\\\";
-		} else if (c == '\n') {
-			ss << "\\n";
-		} else if (c == '\r') {
-			ss << "\\r";
-		} else if (isprint(c)) {
-			ss << c;
-		} else {
-			constexpr char hex[] = "0123456789abcdef";
-			int x = int{ static_cast<uint8_t>(c) };
-			ss << "\\x" << hex[x / 16] << hex[x % 16];
-		}
-	}
-}
-
-} // namespace
-
 std::string JsonTraceLogFormatter::formatEvent(const TraceEventFields& fields) {
-	std::stringstream ss;
-	ss << "{  ";
+	std::string result = "{  ";
 	for (auto iter = fields.begin(); iter != fields.end(); ++iter) {
 		if (iter != fields.begin()) {
-			ss << ", ";
+			result += ", ";
 		}
-		ss << "\"";
-		escapeString(ss, iter->first);
-		ss << "\": \"";
-		escapeString(ss, iter->second);
-		ss << "\"";
+		const auto& [key, value] = *iter;
+		result += "\"" + escapeString(key) + "\": ";
+		result += value.format(jsonValueFormatter);
 	}
-	ss << " }\r\n";
-	return ss.str();
+	result += " }\r\n";
+	return result;
 }

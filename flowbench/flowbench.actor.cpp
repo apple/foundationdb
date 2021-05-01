@@ -22,6 +22,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "flow/ThreadHelper.actor.h"
+#include "flow/TLSConfig.actor.h"
 #include <thread>
 
 ACTOR template <class T>
@@ -41,13 +42,15 @@ int main(int argc, char** argv) {
 	if (benchmark::ReportUnrecognizedArguments(argc, argv)) {
 		return 1;
 	}
-	setupNetwork();
+	platformInit();
+	g_network = newNet2(TLSConfig(), false, true);
+	selectTraceFormatter("json");
 	Promise<Void> benchmarksDone;
 	std::thread benchmarkThread([&]() {
 		benchmark::RunSpecifiedBenchmarks();
 		onMainThreadVoid([&]() { benchmarksDone.send(Void()); }, nullptr);
 	});
 	auto f = stopNetworkAfter(benchmarksDone.getFuture());
-	runNetwork();
+	g_network->run();
 	benchmarkThread.join();
 }

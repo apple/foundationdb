@@ -32,6 +32,7 @@
 #include "flow/IRandom.h"
 #include "flow/Error.h"
 #include "flow/ITrace.h"
+#include "flow/TraceValue.h"
 
 #define TRACE_DEFAULT_ROLL_SIZE (10 << 20)
 #define TRACE_DEFAULT_MAX_LOGS_SIZE (10 * TRACE_DEFAULT_ROLL_SIZE)
@@ -69,7 +70,7 @@ const int NUM_MAJOR_LEVELS_OF_EVENTS = SevMaxUsed / 10 + 1;
 class TraceEventFields {
 public:
 	constexpr static FileIdentifier file_identifier = 11262274;
-	typedef std::pair<std::string, std::string> Field;
+	typedef std::pair<std::string, TraceValue> Field;
 	typedef std::vector<Field> FieldContainer;
 	typedef FieldContainer::const_iterator FieldIterator;
 
@@ -82,15 +83,17 @@ public:
 	bool isAnnotated() const;
 	void setAnnotated();
 
-	void addField(const std::string& key, const std::string& value);
-	void addField(std::string&& key, std::string&& value);
+	void addField(const std::string& key, const TraceValue& value);
+	void addField(const std::string& key, TraceValue&& value);
+	void addField(std::string&& key, const TraceValue& value);
+	void addField(std::string&& key, TraceValue&& value);
 
 	const Field& operator[](int index) const;
-	bool tryGetValue(std::string key, std::string& outValue) const;
-	std::string getValue(std::string key) const;
-	int getInt(std::string key, bool permissive = false) const;
-	int64_t getInt64(std::string key, bool permissive = false) const;
-	double getDouble(std::string key, bool permissive = false) const;
+	bool tryGetValue(const std::string& key, std::string& outValue) const;
+	std::string getValue(const std::string& key) const;
+	int getInt(const std::string& key, bool permissive = false) const;
+	int64_t getInt64(const std::string& key, bool permissive = false) const;
+	double getDouble(const std::string& key, bool permissive = false) const;
 
 	Field& mutate(int index);
 
@@ -114,10 +117,10 @@ inline void load(Archive& ar, TraceEventFields& value) {
 	ar >> count;
 
 	std::string k;
-	std::string v;
+	TraceValue v;
 	for (uint32_t i = 0; i < count; ++i) {
 		ar >> k >> v;
-		value.addField(k, v);
+		value.addField(k, std::move(v));
 	}
 }
 template <class Archive>
@@ -207,34 +210,49 @@ std::string format(const char* form, ...);
 template <class T>
 struct Traceable : std::false_type {};
 
-#define FORMAT_TRACEABLE(type, fmt)                                                                                    \
+#define FORMAT_NUMERIC_TRACEABLE(type, fmt)                                                                            \
 	template <>                                                                                                        \
 	struct Traceable<type> : std::true_type {                                                                          \
-		static std::string toString(type value) { return format(fmt, value); }                                         \
+		static TraceValue toTraceValue(type const& value) {                                                            \
+			return TraceValue::create<TraceNumeric>(format(fmt, value));                                               \
+		}                                                                                                              \
 	}
 
-FORMAT_TRACEABLE(bool, "%d");
-FORMAT_TRACEABLE(signed char, "%d");
-FORMAT_TRACEABLE(unsigned char, "%d");
-FORMAT_TRACEABLE(short, "%d");
-FORMAT_TRACEABLE(unsigned short, "%d");
-FORMAT_TRACEABLE(int, "%d");
-FORMAT_TRACEABLE(unsigned, "%u");
-FORMAT_TRACEABLE(long int, "%ld");
-FORMAT_TRACEABLE(unsigned long int, "%lu");
-FORMAT_TRACEABLE(long long int, "%lld");
-FORMAT_TRACEABLE(unsigned long long int, "%llu");
-FORMAT_TRACEABLE(double, "%g");
-FORMAT_TRACEABLE(void*, "%p");
-FORMAT_TRACEABLE(volatile long, "%ld");
-FORMAT_TRACEABLE(volatile unsigned long, "%lu");
-FORMAT_TRACEABLE(volatile long long, "%lld");
-FORMAT_TRACEABLE(volatile unsigned long long, "%llu");
-FORMAT_TRACEABLE(volatile double, "%g");
+FORMAT_NUMERIC_TRACEABLE(signed char, "%d");
+FORMAT_NUMERIC_TRACEABLE(unsigned char, "%d");
+FORMAT_NUMERIC_TRACEABLE(short, "%d");
+FORMAT_NUMERIC_TRACEABLE(unsigned short, "%d");
+FORMAT_NUMERIC_TRACEABLE(int, "%d");
+FORMAT_NUMERIC_TRACEABLE(unsigned, "%u");
+FORMAT_NUMERIC_TRACEABLE(long int, "%ld");
+FORMAT_NUMERIC_TRACEABLE(unsigned long int, "%lu");
+FORMAT_NUMERIC_TRACEABLE(long long int, "%lld");
+FORMAT_NUMERIC_TRACEABLE(unsigned long long int, "%llu");
+FORMAT_NUMERIC_TRACEABLE(double, "%g");
+FORMAT_NUMERIC_TRACEABLE(volatile long, "%ld");
+FORMAT_NUMERIC_TRACEABLE(volatile unsigned long, "%lu");
+FORMAT_NUMERIC_TRACEABLE(volatile long long, "%lld");
+FORMAT_NUMERIC_TRACEABLE(volatile unsigned long long, "%llu");
+FORMAT_NUMERIC_TRACEABLE(volatile double, "%g");
+
+template <>
+struct Traceable<TraceValue> : std::true_type {
+	static TraceValue toTraceValue(TraceValue const& traceValue) { return traceValue; }
+};
+
+template <>
+struct Traceable<bool> : std::true_type {
+	static TraceValue toTraceValue(bool value) { return TraceValue::create<TraceBool>(value); }
+};
+
+template <>
+struct Traceable<void*> : std::true_type {
+	static TraceValue toTraceValue(void *value) { return format("%p", value); }
+};
 
 template <>
 struct Traceable<UID> : std::true_type {
-	static std::string toString(const UID& value) { return format("%016llx", value.first()); }
+	static TraceValue toTraceValue(const UID& value) { return TraceValue(format("%016llx", value.first())); }
 };
 
 template <class Str>
@@ -243,7 +261,7 @@ struct TraceableString {
 
 	static bool atEnd(const Str& value, decltype(value.begin()) iter) { return iter == value.end(); }
 
-	static std::string toString(const Str& value) { return value.toString(); }
+	static TraceValue toTraceValue(const Str& value) { return value.toString(); }
 };
 
 template <>
@@ -253,8 +271,8 @@ struct TraceableString<std::string> {
 	static bool atEnd(const std::string& value, decltype(value.begin()) iter) { return iter == value.end(); }
 
 	template <class S>
-	static std::string toString(S&& value) {
-		return std::forward<S>(value);
+	static TraceValue toTraceValue(S&& value) {
+		return TraceValue(std::forward<S>(value));
 	}
 };
 
@@ -264,7 +282,7 @@ struct TraceableString<const char*> {
 
 	static bool atEnd(const char* value, const char* iter) { return *iter == '\0'; }
 
-	static std::string toString(const char* value) { return std::string(value); }
+	static TraceValue toTraceValue(const char* value) { return TraceValue(value); }
 };
 
 std::string traceableStringToString(const char* value, size_t S);
@@ -278,7 +296,7 @@ struct TraceableString<char[S]> {
 		return iter - value == S - 1; // Exclude trailing \0 byte
 	}
 
-	static std::string toString(const char* value) { return traceableStringToString(value, S); }
+	static TraceValue toTraceValue(const char* value) { return traceableStringToString(value, S); }
 };
 
 template <>
@@ -287,7 +305,7 @@ struct TraceableString<char*> {
 
 	static bool atEnd(char* value, const char* iter) { return *iter == '\0'; }
 
-	static std::string toString(char* value) { return std::string(value); }
+	static TraceValue toTraceValue(char* value) { return TraceValue(value); }
 };
 
 template <class T>
@@ -295,7 +313,7 @@ struct TraceableStringImpl : std::true_type {
 	static constexpr bool isPrintable(char c) { return 32 <= c && c <= 126; }
 
 	template <class Str>
-	static std::string toString(Str&& value) {
+	static TraceValue toTraceValue(Str&& value) {
 		// if all characters are printable ascii, we simply return the string
 		int nonPrintables = 0;
 		int numBackslashes = 0;
@@ -309,22 +327,23 @@ struct TraceableStringImpl : std::true_type {
 			}
 		}
 		if (nonPrintables == 0 && numBackslashes == 0) {
-			return TraceableString<T>::toString(std::forward<Str>(value));
+			return TraceableString<T>::toTraceValue(std::forward<Str>(value));
 		}
-		std::string result;
-		result.reserve(size - nonPrintables + (nonPrintables * 4) + numBackslashes);
+		TraceValue result;
+		auto& resultString = result.get<TraceString>().value;
+		resultString.reserve(size - nonPrintables + (nonPrintables * 4) + numBackslashes);
 		for (auto iter = TraceableString<T>::begin(value); !TraceableString<T>::atEnd(value, iter); ++iter) {
 			if (isPrintable(*iter)) {
-				result.push_back(*iter);
+				resultString.push_back(*iter);
 			} else if (*iter == '\\') {
-				result.push_back('\\');
-				result.push_back('\\');
+				resultString.push_back('\\');
+				resultString.push_back('\\');
 			} else {
 				const uint8_t byte = *iter;
-				result.push_back('\\');
-				result.push_back('x');
-				result.push_back(base16Char(byte / 16));
-				result.push_back(base16Char(byte));
+				resultString.push_back('\\');
+				resultString.push_back('x');
+				resultString.push_back(base16Char(byte / 16));
+				resultString.push_back(base16Char(byte));
 			}
 		}
 		return result;
@@ -342,7 +361,7 @@ struct Traceable<std::string> : TraceableStringImpl<std::string> {};
 
 template <class T>
 struct SpecialTraceMetricType
-  : std::conditional<std::is_integral<T>::value || std::is_enum<T>::value, std::true_type, std::false_type>::type {
+  : std::conditional_t<std::is_integral_v<T> || std::is_enum_v<T>, std::true_type, std::false_type> {
 	static int64_t getValue(T v) { return v; }
 };
 
@@ -368,7 +387,6 @@ struct TraceEvent {
 	static bool isNetworkThread();
 
 	static double getCurrentTime();
-	static std::string printRealTime(double time);
 
 	// Must be called directly after constructing the trace event
 	TraceEvent& error(const class Error& e, bool includeCancelled = false) {
@@ -379,34 +397,33 @@ struct TraceEvent {
 	}
 
 	template <class T>
-	typename std::enable_if<Traceable<T>::value, TraceEvent&>::type detail(std::string&& key, const T& value) {
+	typename std::enable_if_t<Traceable<T>::value, TraceEvent&> detail(std::string&& key, const T& value) {
 		if (enabled && init()) {
-			auto s = Traceable<T>::toString(value);
-			addMetric(key.c_str(), value, s);
-			return detailImpl(std::move(key), std::move(s), false);
+			auto v = Traceable<T>::toTraceValue(value);
+			addMetric(key.c_str(), value, v.toString());
+			return detailImpl(std::move(key), std::move(v), false);
 		}
 		return *this;
 	}
 
 	template <class T>
-	typename std::enable_if<Traceable<T>::value, TraceEvent&>::type detail(const char* key, const T& value) {
+	typename std::enable_if_t<Traceable<T>::value, TraceEvent&> detail(const char* key, const T& value) {
 		if (enabled && init()) {
-			auto s = Traceable<T>::toString(value);
-			addMetric(key, value, s);
-			return detailImpl(std::string(key), std::move(s), false);
+			auto v = Traceable<T>::toTraceValue(value);
+			addMetric(key, value, v.toString());
+			return detailImpl(std::string(key), std::move(v), false);
 		}
 		return *this;
 	}
 	template <class T>
-	typename std::enable_if<std::is_enum<T>::value, TraceEvent&>::type detail(const char* key, T value) {
+	typename std::enable_if_t<std::is_enum<T>::value, TraceEvent&> detail(const char* key, T value) {
 		if (enabled && init()) {
 			setField(key, int64_t(value));
-			return detailImpl(std::string(key), format("%d", value), false);
+			return detailImpl(std::string(key), TraceValue::create<TraceNumeric>(format("%d", value)), false);
 		}
 		return *this;
 	}
 	TraceEvent& detailf(std::string key, const char* valueFormat, ...);
-
 private:
 	template <class T>
 	typename std::enable_if<SpecialTraceMetricType<T>::value, void>::type addMetric(const char* key,
@@ -430,7 +447,7 @@ private:
 	// Private version of detailf that does NOT write to the eventMetric.  This is to be used by other detail methods
 	// which can write field metrics of a more appropriate type than string but use detailf() to add to the TraceEvent.
 	TraceEvent& detailfNoMetric(std::string&& key, const char* valueFormat, ...);
-	TraceEvent& detailImpl(std::string&& key, std::string&& value, bool writeEventMetricField = true);
+	TraceEvent& detailImpl(std::string&& key, TraceValue&& value, bool writeEventMetricField = true);
 
 public:
 	TraceEvent& backtrace(const std::string& prefix = "");

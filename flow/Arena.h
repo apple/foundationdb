@@ -291,8 +291,8 @@ inline void save(Archive& ar, const Optional<T>& value) {
 
 template <class T>
 struct Traceable<Optional<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
-	static std::string toString(const Optional<T>& value) {
-		return value.present() ? Traceable<T>::toString(value.get()) : "[not set]";
+	static TraceValue toTraceValue(const Optional<T>& value) {
+		return value.present() ? Traceable<T>::toTraceValue(value.get()) : TraceValue("[not set]");
 	}
 };
 
@@ -619,19 +619,19 @@ struct TraceableString<StringRef> {
 		return iter == reinterpret_cast<const char*>(value.end());
 	}
 
-	static std::string toString(const StringRef& value) { return value.toString(); }
+	static TraceValue toTraceValue(const StringRef& value) { return TraceValue(value.toString()); }
 };
 
 template <>
 struct Traceable<StringRef> : TraceableStringImpl<StringRef> {};
 
 inline std::string StringRef::printable() const {
-	return Traceable<StringRef>::toString(*this);
+	return Traceable<StringRef>::toTraceValue(*this).toString();
 }
 
 template <class T>
 struct Traceable<Standalone<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
-	static std::string toString(const Standalone<T>& value) { return Traceable<T>::toString(value); }
+	static TraceValue toTraceValue(const Standalone<T>& value) { return Traceable<T>::toTraceValue(value); }
 };
 
 #define LiteralStringRef(str) StringRef((const uint8_t*)(str), sizeof((str)) - 1)
@@ -1319,18 +1319,13 @@ template <class T>
 struct Traceable<VectorRef<T>> {
 	constexpr static bool value = Traceable<T>::value;
 
-	static std::string toString(const VectorRef<T>& value) {
-		std::stringstream ss;
-		bool first = true;
+	static TraceValue toTraceValue(const VectorRef<T>& value) {
+		auto result = TraceValue::create<TraceVector>();
+		auto& vec = result.get<TraceVector>();
 		for (const auto& v : value) {
-			if (first) {
-				first = false;
-			} else {
-				ss << ' ';
-			}
-			ss << Traceable<T>::toString(v);
+			vec.emplace_back(Traceable<T>::toTraceValue(v).toString());
 		}
-		return ss.str();
+		return result;
 	}
 };
 
