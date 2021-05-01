@@ -244,6 +244,7 @@ public:
 
 		auto& actorLineageSet = IAsyncFileSystem::filesystem()->getActorLineageSet();
 		auto index = actorLineageSet.insert(currentLineage);
+		ASSERT(index != ActorLineageSet::npos);
 		Future<Void> res = success(result);
 		actorLineageSet.erase(index);
 		return res;

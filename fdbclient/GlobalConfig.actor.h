@@ -83,14 +83,6 @@ public:
 	// For example, given "config/a", returns "\xff\xff/global_config/config/a".
 	static Key prefixedKey(KeyRef key);
 
-	// Update the ClientDBInfo object used internally to check for updates to
-	// global configuration. The ClientDBInfo reference must be the same one
-	// used in the cluster controller, but fdbserver requires initial creation
-	// of the GlobalConfig class before the cluster controller is initialized.
-	// This function allows the ClientDBInfo object to be updated after create
-	// was called.
-	void updateDBInfo(Reference<AsyncVar<ClientDBInfo>> dbInfo);
-
 	// Get a value from the framework. Values are returned as a ConfigValue
 	// reference which also contains the arena holding the object. As long as
 	// the caller keeps the ConfigValue reference, the value is guaranteed to

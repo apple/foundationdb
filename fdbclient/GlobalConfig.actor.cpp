@@ -48,10 +48,6 @@ void GlobalConfig::create(DatabaseContext* cx, Reference<AsyncVar<ClientDBInfo>>
 	}
 }
 
-void GlobalConfig::updateDBInfo(Reference<AsyncVar<ClientDBInfo>> dbInfo) {
-	_updater = updater(&GlobalConfig::globalConfig(), dbInfo);
-}
-
 GlobalConfig& GlobalConfig::globalConfig() {
 	void* res = g_network->global(INetwork::enGlobalConfig);
 	ASSERT(res);
@@ -201,6 +197,7 @@ ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
 // Applies updates to the local copy of the global configuration when this
 // process receives an updated history.
 ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, Reference<AsyncVar<ClientDBInfo>> dbInfo) {
+	// wait(self->cx->onConnected());
 	wait(self->migrate(self));
 
 	wait(self->refresh(self));

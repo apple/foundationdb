@@ -62,6 +62,7 @@ bool WriteOnlySet<T, IndexType, CAPACITY>::eraseImpl(Index idx) {
 
 template <class T, class IndexType, IndexType CAPACITY>
 bool WriteOnlySet<T, IndexType, CAPACITY>::erase(Index idx) {
+	ASSERT(idx >= 0 && idx < CAPACITY);
 	auto res = eraseImpl(idx);
 	ASSERT(freeQueue.push(idx));
 	return res;
@@ -86,7 +87,6 @@ bool WriteOnlySet<T, IndexType, CAPACITY>::replace(Index idx, const Reference<T>
 				if (ptr) {
 					reinterpret_cast<T*>(ptr)->delref();
 				}
-				_set[idx].store(lineagePtr);
 				return ptr != 0;
 			}
 		}
@@ -98,7 +98,7 @@ WriteOnlySet<T, IndexType, CAPACITY>::WriteOnlySet() : _set(CAPACITY) {
 	// insert the free indexes in reverse order
 	for (unsigned i = CAPACITY; i > 0; --i) {
 		freeQueue.push(i - 1);
-		_set[i] = uintptr_t(0);
+		std::atomic_init(&_set[i - 1], uintptr_t(0));
 	}
 }
 
