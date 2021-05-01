@@ -394,6 +394,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 	              fileCount.get(),
 	              bytesWritten.get(),
 	              currentVersion.get(),
+	              firstConsistentVersion.get(),
 	              lag.get(),
 	              errstr.c_str());
 }
@@ -4001,6 +4002,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		state Version restoreVersion;
 		state Reference<IBackupContainer> bc;
 		state std::vector<KeyRange> ranges;
+		state bool inconsistentSnapshotOnly;
 
 		loop {
 			try {
@@ -4011,6 +4013,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 				wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
 				wait(store(ranges, restore.getRestoreRangesOrDefault(tr)));
+				wait(store(inconsistentSnapshotOnly, restore.inconsistentSnapshotOnly().getD(tr, false, false)));
 
 				wait(taskBucket->keepRunning(tr, task));
 
@@ -4057,6 +4060,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			}
 		}
 
+		state Version firstConsistentVersion = invalidVersion;
 		state Standalone<VectorRef<KeyRangeRef>> keyRangesFilter;
 		for (auto const& r : ranges) {
 			keyRangesFilter.push_back_deep(keyRangesFilter.arena(), KeyRangeRef(r));
@@ -4072,12 +4076,30 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		// Convert the two lists in restorable (logs and ranges) to a single list of RestoreFiles.
 		// Order does not matter, they will be put in order when written to the restoreFileMap below.
 		state std::vector<RestoreConfig::RestoreFile> files;
-
-		state Version firstConsistentVersion = -1;
-		for (const RangeFile& f : restorable.get().ranges) {
-			files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
-			firstConsistentVersion = std::max(firstConsistentVersion, f.version);
+		if (!inconsistentSnapshotOnly) {
+			for (const RangeFile& f : restorable.get().ranges) {
+				files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
+				// In a restore with both snapshots and logs, the firstConsistentVersion is the highest version of
+				// any range file.
+				firstConsistentVersion = std::max(firstConsistentVersion, f.version);
+			}
+			for (const LogFile& f : restorable.get().logs) {
+				files.push_back({ f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion });
+			}
+		} else {
+			for (int i = 0; i < restorable.get().ranges.size(); ++i) {
+				const RangeFile& f = restorable.get().ranges[i];
+				files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
+				// In inconsistentSnapshotOnly mode, if all range files have the same version, then it is the
+				// firstConsistentVersion, otherwise unknown (use -1).
+				if (i != 0 && f.version != firstConsistentVersion) {
+					firstConsistentVersion = invalidVersion;
+				} else {
+					firstConsistentVersion = f.version;
+				}
+			}
 		}
+
 		tr->reset();
 		loop {
 			try {
@@ -4088,16 +4110,6 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				break;
 			} catch (Error& e) {
 				wait(tr->onError(e));
-			}
-		}
-
-		tr->reset();
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		bool inconsistentSnapshotOnly = wait(restore.inconsistentSnapshotOnly().getD(tr, false, false));
-		if (!inconsistentSnapshotOnly) {
-			for (const LogFile& f : restorable.get().logs) {
-				files.push_back({ f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion });
 			}
 		}
 
