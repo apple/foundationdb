@@ -31,7 +31,7 @@ WriteOnlyVariable<ActorLineage, unsigned> currentLineageThreadSafe;
 
 LineagePropertiesBase::~LineagePropertiesBase() {}
 
-ActorLineage::ActorLineage() : parent(currentLineage) {}
+ActorLineage::ActorLineage() : properties(), parent(currentLineage) {}
 
 ActorLineage::~ActorLineage() {
 	for (auto ptr : properties) {

@@ -43,19 +43,20 @@ void GlobalConfig::create(DatabaseContext* cx, Reference<AsyncVar<ClientDBInfo>>
 	if (g_network->global(INetwork::enGlobalConfig) == nullptr) {
 		auto config = new GlobalConfig{};
 		config->cx = Database(cx);
+		config->dbInfo = dbInfo;
 		g_network->setGlobal(INetwork::enGlobalConfig, config);
-		config->_updater = updater(config, dbInfo);
+		config->_updater = updater(config);
 	}
-}
-
-void GlobalConfig::updateDBInfo(Reference<AsyncVar<ClientDBInfo>> dbInfo) {
-	_updater = updater(&GlobalConfig::globalConfig(), dbInfo);
 }
 
 GlobalConfig& GlobalConfig::globalConfig() {
 	void* res = g_network->global(INetwork::enGlobalConfig);
 	ASSERT(res);
 	return *reinterpret_cast<GlobalConfig*>(res);
+}
+
+void GlobalConfig::updateDBInfo(Reference<AsyncVar<ClientDBInfo>> dbInfo) {
+	// this->dbInfo = dbInfo;
 }
 
 Key GlobalConfig::prefixedKey(KeyRef key) {
@@ -200,7 +201,8 @@ ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
 
 // Applies updates to the local copy of the global configuration when this
 // process receives an updated history.
-ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, Reference<AsyncVar<ClientDBInfo>> dbInfo) {
+ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self) {
+	// wait(self->cx->onConnected());
 	wait(self->migrate(self));
 
 	wait(self->refresh(self));
@@ -208,9 +210,9 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, Reference<AsyncVar<
 
 	loop {
 		try {
-			wait(dbInfo->onChange());
+			wait(self->dbInfo->onChange());
 
-			auto& history = dbInfo->get().history;
+			auto& history = self->dbInfo->get().history;
 			if (history.size() == 0) {
 				continue;
 			}
@@ -220,8 +222,8 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, Reference<AsyncVar<
 				// history updates or the protocol version changed, so it
 				// must re-read the entire configuration range.
 				wait(self->refresh(self));
-				if (dbInfo->get().history.size() > 0) {
-					self->lastUpdate = dbInfo->get().history.back().version;
+				if (self->dbInfo->get().history.size() > 0) {
+					self->lastUpdate = self->dbInfo->get().history.back().version;
 				}
 			} else {
 				// Apply history in order, from lowest version to highest

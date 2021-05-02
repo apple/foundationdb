@@ -35,6 +35,9 @@ struct AnnotateActor {
 
 	AnnotateActor(Reference<ActorLineage> lineage) : set(true) {
 		index = g_network->getActorLineageSet().insert(lineage);
+		if (index == ActorLineageSet::npos) {
+			set = false;
+		}
 	}
 
 	AnnotateActor(const AnnotateActor& other) = delete;

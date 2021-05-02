@@ -77,19 +77,18 @@ public:
 	// configuration.
 	static GlobalConfig& globalConfig();
 
+	// Updates the ClientDBInfo object used by global configuration to read new
+	// data. For server processes, this value needs to be set by the cluster
+	// controller, but global config is initialized before the cluster
+	// controller is, so this function provides a mechanism to update the
+	// object after initialization.
+	void updateDBInfo(Reference<AsyncVar<ClientDBInfo>> dbInfo);
+
 	// Use this function to turn a global configuration key defined above into
 	// the full path needed to set the value in the database.
 	//
 	// For example, given "config/a", returns "\xff\xff/global_config/config/a".
 	static Key prefixedKey(KeyRef key);
-
-	// Update the ClientDBInfo object used internally to check for updates to
-	// global configuration. The ClientDBInfo reference must be the same one
-	// used in the cluster controller, but fdbserver requires initial creation
-	// of the GlobalConfig class before the cluster controller is initialized.
-	// This function allows the ClientDBInfo object to be updated after create
-	// was called.
-	void updateDBInfo(Reference<AsyncVar<ClientDBInfo>> dbInfo);
 
 	// Get a value from the framework. Values are returned as a ConfigValue
 	// reference which also contains the arena holding the object. As long as
@@ -157,9 +156,10 @@ private:
 
 	ACTOR static Future<Void> migrate(GlobalConfig* self);
 	ACTOR static Future<Void> refresh(GlobalConfig* self);
-	ACTOR static Future<Void> updater(GlobalConfig* self, Reference<AsyncVar<ClientDBInfo>> dbInfo);
+	ACTOR static Future<Void> updater(GlobalConfig* self);
 
 	Database cx;
+	Reference<AsyncVar<ClientDBInfo>> dbInfo;
 	Future<Void> _updater;
 	Promise<Void> initialized;
 	AsyncTrigger configChanged;
