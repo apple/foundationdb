@@ -56,7 +56,7 @@ GlobalConfig& GlobalConfig::globalConfig() {
 }
 
 void GlobalConfig::updateDBInfo(Reference<AsyncVar<ClientDBInfo>> dbInfo) {
-	this->dbInfo = dbInfo;
+	// this->dbInfo = dbInfo;
 }
 
 Key GlobalConfig::prefixedKey(KeyRef key) {
