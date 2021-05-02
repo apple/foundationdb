@@ -77,6 +77,13 @@ public:
 	// configuration.
 	static GlobalConfig& globalConfig();
 
+	// Updates the ClientDBInfo object used by global configuration to read new
+	// data. For server processes, this value needs to be set by the cluster
+	// controller, but global config is initialized before the cluster
+	// controller is, so this function provides a mechanism to update the
+	// object after initialization.
+	void updateDBInfo(Reference<AsyncVar<ClientDBInfo>> dbInfo);
+
 	// Use this function to turn a global configuration key defined above into
 	// the full path needed to set the value in the database.
 	//
@@ -149,9 +156,10 @@ private:
 
 	ACTOR static Future<Void> migrate(GlobalConfig* self);
 	ACTOR static Future<Void> refresh(GlobalConfig* self);
-	ACTOR static Future<Void> updater(GlobalConfig* self, Reference<AsyncVar<ClientDBInfo>> dbInfo);
+	ACTOR static Future<Void> updater(GlobalConfig* self);
 
 	Database cx;
+	Reference<AsyncVar<ClientDBInfo>> dbInfo;
 	Future<Void> _updater;
 	Promise<Void> initialized;
 	AsyncTrigger configChanged;
