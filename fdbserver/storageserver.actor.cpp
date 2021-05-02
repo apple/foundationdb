@@ -2832,9 +2832,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					// fetchKeys.
 					shard->server->addShard(ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, nfk), shard));
 					shard->server->addShard(ShardInfo::newAdding(data, KeyRangeRef(nfk, keys.end)));
-					shard = data->shards.rangeContaining(keys.begin).value()->adding;
+					shard = data->shards.rangeContaining(keys.begin).value()->adding.get();
 					warningLogger = logFetchKeysWarning(shard);
-					AddingShard* otherShard = data->shards.rangeContaining(nfk).value()->adding;
+					AddingShard* otherShard = data->shards.rangeContaining(nfk).value()->adding.get();
 					keys = shard->keys;
 
 					// Split our prior updates.  The ones that apply to our new, restricted key range will go back into
