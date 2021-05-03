@@ -27,7 +27,9 @@
 #define FDBCLIENT_GLOBALCONFIG_ACTOR_H
 
 #include <any>
+#include <functional>
 #include <map>
+#include <optional>
 #include <type_traits>
 #include <unordered_map>
 
@@ -48,6 +50,9 @@ extern const KeyRef fdbClientInfoTxnSizeLimit;
 
 extern const KeyRef transactionTagSampleRate;
 extern const KeyRef transactionTagSampleCost;
+
+extern const KeyRef samplingFrequency;
+extern const KeyRef samplingWindow;
 
 // Structure used to hold the values stored by global configuration. The arena
 // is used as memory to store both the key and the value (the value is only
@@ -71,6 +76,13 @@ public:
 	// call this function whenever they need to read a value out of the global
 	// configuration.
 	static GlobalConfig& globalConfig();
+
+	// Updates the ClientDBInfo object used by global configuration to read new
+	// data. For server processes, this value needs to be set by the cluster
+	// controller, but global config is initialized before the cluster
+	// controller is, so this function provides a mechanism to update the
+	// object after initialization.
+	void updateDBInfo(Reference<AsyncVar<ClientDBInfo>> dbInfo);
 
 	// Use this function to turn a global configuration key defined above into
 	// the full path needed to set the value in the database.
@@ -114,6 +126,16 @@ public:
 	// been created and is ready.
 	Future<Void> onInitialized();
 
+	// Triggers the returned future when any key-value pair in the global
+	// configuration changes.
+	Future<Void> onChange();
+
+	// Calls \ref fn when the value associated with \ref key is changed. \ref
+	// fn is passed the updated value for the key, or an empty optional if the
+	// key has been cleared. If the value is an allocated object, its memory
+	// remains in the control of the global configuration.
+	void trigger(KeyRef key, std::function<void(std::optional<std::any>)> fn);
+
 private:
 	GlobalConfig();
 
@@ -127,20 +149,23 @@ private:
 	void insert(KeyRef key, ValueRef value);
 	// Removes the given key (and associated value) from the local copy of the
 	// global configuration keyspace.
-	void erase(KeyRef key);
+	void erase(Key key);
 	// Removes the given key range (and associated values) from the local copy
 	// of the global configuration keyspace.
 	void erase(KeyRangeRef range);
 
 	ACTOR static Future<Void> migrate(GlobalConfig* self);
 	ACTOR static Future<Void> refresh(GlobalConfig* self);
-	ACTOR static Future<Void> updater(GlobalConfig* self, Reference<AsyncVar<ClientDBInfo>> dbInfo);
+	ACTOR static Future<Void> updater(GlobalConfig* self);
 
 	Database cx;
+	Reference<AsyncVar<ClientDBInfo>> dbInfo;
 	Future<Void> _updater;
 	Promise<Void> initialized;
+	AsyncTrigger configChanged;
 	std::unordered_map<StringRef, Reference<ConfigValue>> data;
 	Version lastUpdate;
+	std::unordered_map<KeyRef, std::function<void(std::optional<std::any>)>> callbacks;
 };
 
 #endif

@@ -2539,7 +2539,7 @@ struct RedwoodRecordRef {
 	// This is the same order that delta compression uses for prefix borrowing
 	int compare(const RedwoodRecordRef& rhs, int skip = 0) const {
 		int keySkip = std::min(skip, key.size());
-		int cmp = key.substr(keySkip).compare(rhs.key.substr(keySkip));
+		int cmp = key.compareSuffix(rhs.key, keySkip);
 
 		if (cmp == 0) {
 			cmp = version - rhs.version;
@@ -6234,9 +6234,13 @@ public:
 				// Read page contents without using waits
 				bool isRoot = cur.inRoot();
 				BTreePage::BinaryTree::Cursor leafCursor = cur.popPath();
+				// we can bypass the bounds check for each key in the leaf if the entire leaf is in range
+				// > because both query end and page upper bound are exclusive of the query results and page contents,
+				// respectively
+				bool boundsCheck = leafCursor.upperBound() > keys.end;
 				while (leafCursor.valid()) {
 					KeyValueRef kv = leafCursor.get().toKeyValueRef();
-					if (kv.key >= keys.end) {
+					if (boundsCheck && kv.key.compare(keys.end) >= 0) {
 						break;
 					}
 					accumulatedBytes += kv.expectedSize();
@@ -6259,9 +6263,13 @@ public:
 				// Read page contents without using waits
 				bool isRoot = cur.inRoot();
 				BTreePage::BinaryTree::Cursor leafCursor = cur.popPath();
+				// we can bypass the bounds check for each key in the leaf if the entire leaf is in range
+				// < because both query begin and page lower bound are inclusive of the query results and page contents,
+				// respectively
+				bool boundsCheck = leafCursor.lowerBound() < keys.begin;
 				while (leafCursor.valid()) {
 					KeyValueRef kv = leafCursor.get().toKeyValueRef();
-					if (kv.key < keys.begin) {
+					if (boundsCheck && kv.key.compare(keys.begin) < 0) {
 						break;
 					}
 					accumulatedBytes += kv.expectedSize();
@@ -7260,6 +7268,22 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 		total += rec1.writeDelta(d, rec2);
 	}
 	printf("%" PRId64 " writeDelta() %f M/s\n", total, count / (timer() - start) / 1e6);
+
+	start = timer();
+	total = 0;
+	count = 10e6;
+	for (i = 0; i < count; ++i) {
+		total += rec1.compare(rec2, 0);
+	}
+	printf("%" PRId64 " compare(skip=0) %f M/s\n", total, count / (timer() - start) / 1e6);
+
+	start = timer();
+	total = 0;
+	count = 10e6;
+	for (i = 0; i < count; ++i) {
+		total += rec1.compare(rec2, 50);
+	}
+	printf("%" PRId64 " compare(skip=50) %f M/s\n", total, count / (timer() - start) / 1e6);
 
 	return Void();
 }
@@ -8445,6 +8469,8 @@ struct KVSource {
 	std::string valueData;
 	int prefixLen;
 	int lastIndex;
+	// TODO there is probably a better way to do this
+	Prefix extraRangePrefix;
 
 	KVSource(const std::vector<PrefixSegment>& desc, int numPrefixes = 0) : desc(desc) {
 		if (numPrefixes == 0) {
@@ -8493,6 +8519,32 @@ struct KVSource {
 		return makeKey(p, suffixLen);
 	}
 
+	// Like getKeyRef but gets a KeyRangeRef. If samePrefix, it returns a range from the same prefix,
+	// otherwise it returns a random range from the entire keyspace
+	// Can technically return an empty range with low probability
+	KeyRangeRef getKeyRangeRef(bool samePrefix, int suffixLen, bool sorted = false) {
+		KeyRef a, b;
+
+		a = getKeyRef(suffixLen);
+		// Copy a so that b's Prefix Arena allocation doesn't overwrite a if using the same prefix
+		extraRangePrefix.reserve(extraRangePrefix.arena(), a.size());
+		a.copyTo((uint8_t*)extraRangePrefix.begin());
+		a = KeyRef(extraRangePrefix.begin(), a.size());
+
+		if (samePrefix) {
+			b = getAnotherKeyRef(suffixLen, sorted);
+		} else {
+			b = getKeyRef(suffixLen);
+		}
+
+		if (a < b) {
+			return KeyRangeRef(a, b);
+		} else {
+			return KeyRangeRef(b, a);
+		}
+	}
+
+	// TODO unused, remove?
 	// Like getKeyRef but gets a KeyRangeRef for two keys covering the given number of sorted adjacent prefixes
 	KeyRangeRef getRangeRef(int prefixesCovered, int suffixLen) {
 		prefixesCovered = std::min<int>(prefixesCovered, prefixes.size());
@@ -8555,7 +8607,8 @@ ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore* kvs,
                                          int valueSize,
                                          KVSource source,
                                          int recordCountTarget,
-                                         bool usePrefixesInOrder) {
+                                         bool usePrefixesInOrder,
+                                         bool clearAfter) {
 	state int commitTarget = 5e6;
 
 	state int recordSize = source.prefixLen + suffixSize + valueSize;
@@ -8600,7 +8653,7 @@ ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore* kvs,
 
 		state int i;
 		for (i = 0; i < recordsPerPrefix; ++i) {
-			KeyValueRef kv(source.getAnotherKeyRef(4, usePrefixesInOrder), source.getValue(valueSize));
+			KeyValueRef kv(source.getAnotherKeyRef(suffixSize, usePrefixesInOrder), source.getValue(valueSize));
 			kvs->set(kv);
 			kvBytes += kv.expectedSize();
 			++records;
@@ -8622,6 +8675,8 @@ ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore* kvs,
 	}
 
 	wait(commit);
+	// TODO is it desired that not all records are committed? This could commit again to ensure any records set() since
+	// the last commit are persisted. For the purposes of how this is used currently, I don't think it matters though
 	stats();
 	printf("\n");
 
@@ -8629,13 +8684,15 @@ ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore* kvs,
 	StorageBytes sb = wait(getStableStorageBytes(kvs));
 	printf("storageBytes: %s (stable after %.2f seconds)\n", toString(sb).c_str(), timer() - intervalStart);
 
-	printf("Clearing all keys\n");
-	intervalStart = timer();
-	kvs->clear(KeyRangeRef(LiteralStringRef(""), LiteralStringRef("\xff")));
-	state StorageBytes sbClear = wait(getStableStorageBytes(kvs));
-	printf("Cleared all keys in %.2f seconds, final storageByte: %s\n",
-	       timer() - intervalStart,
-	       toString(sbClear).c_str());
+	if (clearAfter) {
+		printf("Clearing all keys\n");
+		intervalStart = timer();
+		kvs->clear(KeyRangeRef(LiteralStringRef(""), LiteralStringRef("\xff")));
+		state StorageBytes sbClear = wait(getStableStorageBytes(kvs));
+		printf("Cleared all keys in %.2f seconds, final storageByte: %s\n",
+		       timer() - intervalStart,
+		       toString(sbClear).c_str());
+	}
 
 	return Void();
 }
@@ -8722,7 +8779,7 @@ ACTOR Future<Void> doPrefixInsertComparison(int suffixSize,
 	deleteFile("test.redwood");
 	wait(delay(5));
 	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood", UID(), 0);
-	wait(prefixClusteredInsert(redwood, suffixSize, valueSize, source, recordCountTarget, usePrefixesInOrder));
+	wait(prefixClusteredInsert(redwood, suffixSize, valueSize, source, recordCountTarget, usePrefixesInOrder, true));
 	wait(closeKVS(redwood));
 	printf("\n");
 
@@ -8730,7 +8787,7 @@ ACTOR Future<Void> doPrefixInsertComparison(int suffixSize,
 	deleteFile("test.sqlite-wal");
 	wait(delay(5));
 	state IKeyValueStore* sqlite = openKVStore(KeyValueStoreType::SSD_BTREE_V2, "test.sqlite", UID(), 0);
-	wait(prefixClusteredInsert(sqlite, suffixSize, valueSize, source, recordCountTarget, usePrefixesInOrder));
+	wait(prefixClusteredInsert(sqlite, suffixSize, valueSize, source, recordCountTarget, usePrefixesInOrder, true));
 	wait(closeKVS(sqlite));
 	printf("\n");
 
@@ -8767,6 +8824,94 @@ TEST_CASE(":/redwood/performance/sequentialInsert") {
 	wait(delay(5));
 	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood", UID(), 0);
 	wait(sequentialInsert(redwood, prefixLen, valueSize, recordCountTarget));
+	wait(closeKVS(redwood));
+	printf("\n");
+
+	return Void();
+}
+
+// singlePrefix forces the range read to have the start and end key with the same prefix
+ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
+                                    int suffixSize,
+                                    KVSource source,
+                                    int valueSize,
+                                    int recordCountTarget,
+                                    bool singlePrefix,
+                                    int rowLimit) {
+	printf("\nstoreType: %d\n", kvs->getType());
+	printf("prefixSource: %s\n", source.toString().c_str());
+	printf("suffixSize: %d\n", suffixSize);
+	printf("recordCountTarget: %d\n", recordCountTarget);
+	printf("singlePrefix: %d\n", singlePrefix);
+	printf("rowLimit: %d\n", rowLimit);
+
+	state int64_t recordSize = source.prefixLen + suffixSize + valueSize;
+	state int64_t bytesRead = 0;
+	state int64_t recordsRead = 0;
+	state int queries = 0;
+	state int64_t nextPrintRecords = 1e5;
+
+	state double start = timer();
+	state std::function<void()> stats = [&]() {
+		double elapsed = timer() - start;
+		printf("Cumulative stats: %.2f seconds  %d queries %.2f MB %d records  %.2f qps %.2f MB/s  %.2f rec/s\r\n",
+		       elapsed,
+		       queries,
+		       bytesRead / 1e6,
+		       recordsRead,
+		       queries / elapsed,
+		       bytesRead / elapsed / 1e6,
+		       recordsRead / elapsed);
+		fflush(stdout);
+	};
+
+	while (recordsRead < recordCountTarget) {
+		KeyRangeRef range = source.getKeyRangeRef(singlePrefix, suffixSize);
+		int rowLim = (deterministicRandom()->randomInt(0, 2) != 0) ? rowLimit : -rowLimit;
+
+		Standalone<RangeResultRef> result = wait(kvs->readRange(range, rowLim));
+
+		recordsRead += result.size();
+		bytesRead += result.size() * recordSize;
+		++queries;
+
+		// log stats with exponential backoff
+		if (recordsRead >= nextPrintRecords) {
+			stats();
+			nextPrintRecords *= 2;
+		}
+	}
+
+	stats();
+	printf("\n");
+
+	return Void();
+}
+
+TEST_CASE("!/redwood/performance/randomRangeScans") {
+	state int prefixLen = 30;
+	state int suffixSize = 12;
+	state int valueSize = 100;
+
+	// TODO change to 100e8 after figuring out no-disk redwood mode
+	state int writeRecordCountTarget = 1e6;
+	state int queryRecordTarget = 1e7;
+	state int writePrefixesInOrder = false;
+
+	state KVSource source({ { prefixLen, 1000 } });
+
+	deleteFile("test.redwood");
+	wait(delay(5));
+	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood", UID(), 0);
+	wait(prefixClusteredInsert(
+	    redwood, suffixSize, valueSize, source, writeRecordCountTarget, writePrefixesInOrder, false));
+
+	// divide targets for tiny queries by 10 because they are much slower
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget / 10, true, 10));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, true, 1000));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget / 10, false, 100));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 10000));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 1000000));
 	wait(closeKVS(redwood));
 	printf("\n");
 

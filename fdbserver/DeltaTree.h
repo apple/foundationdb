@@ -527,6 +527,10 @@ public:
 
 		const T& getOrUpperBound() const { return valid() ? node->item : *mirror->upperBound(); }
 
+		const T& lowerBound() const { return *mirror->lowerBound(); }
+
+		const T& upperBound() const { return *mirror->upperBound(); }
+
 		bool operator==(const Cursor& rhs) const { return node == rhs.node; }
 
 		bool operator!=(const Cursor& rhs) const { return node != rhs.node; }

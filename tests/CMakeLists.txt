@@ -62,6 +62,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES PureNetwork.txt IGNORE)
   add_fdb_test(TEST_FILES RRW2500.txt IGNORE)
   add_fdb_test(TEST_FILES RandomRead.txt IGNORE)
+  add_fdb_test(TEST_FILES RandomRangeRead.txt IGNORE)
   add_fdb_test(TEST_FILES RandomReadWrite.txt IGNORE)
   add_fdb_test(TEST_FILES ReadAbsent.txt IGNORE)
   add_fdb_test(TEST_FILES ReadAfterWrite.txt IGNORE)
@@ -74,6 +75,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES RedwoodPerfSet.txt IGNORE)
   add_fdb_test(TEST_FILES RedwoodPerfPrefixCompression.txt IGNORE)
   add_fdb_test(TEST_FILES RedwoodPerfSequentialInsert.txt IGNORE)
+  add_fdb_test(TEST_FILES RedwoodPerfRandomRangeScans.txt IGNORE)
   add_fdb_test(TEST_FILES RocksDBTest.txt IGNORE)
   add_fdb_test(TEST_FILES S3BlobStore.txt IGNORE)
   add_fdb_test(TEST_FILES SampleNoSimAttrition.txt IGNORE)
@@ -261,6 +263,10 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES status/separate_not_enough_servers.txt)
   add_fdb_test(TEST_FILES status/single_process_too_many_config_params.txt)
 
+  add_test(
+    NAME multiversion_client/unit_tests
+    COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /fdbclient/multiversionclient/
+  )
 
   verify_testing()
   if (NOT OPEN_FOR_IDE AND NOT WIN32)

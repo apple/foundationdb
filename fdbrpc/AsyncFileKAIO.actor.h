@@ -242,7 +242,12 @@ public:
 		// result = map(result, [=](int r) mutable { KAIOLogBlockEvent(io, OpLogEntry::READY, r); return r; });
 #endif
 
-		return success(result);
+		auto& actorLineageSet = IAsyncFileSystem::filesystem()->getActorLineageSet();
+		auto index = actorLineageSet.insert(currentLineage);
+		ASSERT(index != ActorLineageSet::npos);
+		Future<Void> res = success(result);
+		actorLineageSet.erase(index);
+		return res;
 	}
 // TODO(alexmiller): Remove when we upgrade the dev docker image to >14.10
 #ifndef FALLOC_FL_ZERO_RANGE

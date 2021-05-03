@@ -42,8 +42,9 @@
 // TODO storageCache server shares quite a bit of storageServer functionality, although simplified
 // Need to look into refactoring common code out for better code readability and to avoid duplication
 
+namespace {
 // TODO rename wrong_shard_server error to wrong_cache_server
-inline bool canReplyWith(Error e) {
+bool canReplyWith(Error e) {
 	switch (e.code()) {
 	case error_code_transaction_too_old:
 	case error_code_future_version:
@@ -56,6 +57,8 @@ inline bool canReplyWith(Error e) {
 		return false;
 	};
 }
+} // namespace
+
 class StorageCacheUpdater;
 
 struct AddingCacheRange : NonCopyable {

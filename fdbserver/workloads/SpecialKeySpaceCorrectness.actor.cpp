@@ -1253,6 +1253,180 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				}
 			}
 		}
+		// data_distribution & maintenance get
+		loop {
+			try {
+				// maintenance
+				Standalone<RangeResultRef> maintenanceKVs = wait(
+				    tx->getRange(SpecialKeySpace::getManamentApiCommandRange("maintenance"), CLIENT_KNOBS->TOO_MANY));
+				// By default, no maintenance is going on
+				ASSERT(!maintenanceKVs.more && !maintenanceKVs.size());
+				// datadistribution
+				Standalone<RangeResultRef> ddKVs = wait(tx->getRange(
+				    SpecialKeySpace::getManamentApiCommandRange("datadistribution"), CLIENT_KNOBS->TOO_MANY));
+				// By default, data_distribution/mode := "-1"
+				ASSERT(!ddKVs.more && ddKVs.size() == 1);
+				ASSERT(ddKVs[0].key == LiteralStringRef("mode").withPrefix(
+				                           SpecialKeySpace::getManagementApiCommandPrefix("datadistribution")));
+				ASSERT(ddKVs[0].value == Value(boost::lexical_cast<std::string>(-1)));
+				tx->reset();
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevDebug, "MaintenanceGet").error(e);
+				wait(tx->onError(e));
+			}
+		}
+		// maintenance set
+		{
+			// Make sure setting more than one zone as maintenance will fail
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tx->set(Key(deterministicRandom()->randomAlphaNumeric(8))
+					            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("maintenance")),
+					        Value(boost::lexical_cast<std::string>(deterministicRandom()->randomInt(1, 100))));
+					// make sure this is a different zone id
+					tx->set(Key(deterministicRandom()->randomAlphaNumeric(9))
+					            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("maintenance")),
+					        Value(boost::lexical_cast<std::string>(deterministicRandom()->randomInt(1, 100))));
+					wait(tx->commit());
+					ASSERT(false);
+				} catch (Error& e) {
+					TraceEvent(SevDebug, "MaintenanceSetMoreThanOneZone").error(e);
+					if (e.code() == error_code_special_keys_api_failure) {
+						Optional<Value> errorMsg =
+						    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
+						ASSERT(errorMsg.present());
+						std::string errorStr;
+						auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+						auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+						// special_key_space_management_api_error_msg schema validation
+						ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+						ASSERT(valueObj["command"].get_str() == "maintenance" && !valueObj["retriable"].get_bool());
+						TraceEvent(SevDebug, "MaintenanceSetMoreThanOneZone")
+						    .detail("ErrorMessage", valueObj["message"].get_str());
+						tx->reset();
+						break;
+					} else {
+						wait(tx->onError(e));
+					}
+					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				}
+			}
+			// Disable DD for SS failures
+			state int ignoreSSFailuresRetry = 0;
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tx->set(ignoreSSFailuresZoneString.withPrefix(
+					            SpecialKeySpace::getManagementApiCommandPrefix("maintenance")),
+					        Value(boost::lexical_cast<std::string>(0)));
+					wait(tx->commit());
+					tx->reset();
+					ignoreSSFailuresRetry++;
+					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				} catch (Error& e) {
+					TraceEvent(SevDebug, "MaintenanceDDIgnoreSSFailures").error(e);
+					// the second commit will fail since maintenance not allowed to use while DD disabled for SS
+					// failures
+					if (e.code() == error_code_special_keys_api_failure) {
+						Optional<Value> errorMsg =
+						    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
+						ASSERT(errorMsg.present());
+						std::string errorStr;
+						auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+						auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+						// special_key_space_management_api_error_msg schema validation
+						ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+						ASSERT(valueObj["command"].get_str() == "maintenance" && !valueObj["retriable"].get_bool());
+						ASSERT(ignoreSSFailuresRetry > 0);
+						TraceEvent(SevDebug, "MaintenanceDDIgnoreSSFailures")
+						    .detail("Retry", ignoreSSFailuresRetry)
+						    .detail("ErrorMessage", valueObj["message"].get_str());
+						tx->reset();
+						break;
+					} else {
+						wait(tx->onError(e));
+					}
+					ignoreSSFailuresRetry++;
+					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				}
+			}
+			// set dd mode to 0 and disable DD for rebalance
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					KeyRef ddPrefix = SpecialKeySpace::getManagementApiCommandPrefix("datadistribution");
+					tx->set(LiteralStringRef("mode").withPrefix(ddPrefix), LiteralStringRef("0"));
+					tx->set(LiteralStringRef("rebalance_ignored").withPrefix(ddPrefix), Value());
+					wait(tx->commit());
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					TraceEvent(SevDebug, "DataDistributionDisableModeAndRebalance").error(e);
+					wait(tx->onError(e));
+				}
+			}
+			// verify underlying system keys are consistent with the change
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					// check DD disabled for SS failures
+					Optional<Value> val1 = wait(tx->get(healthyZoneKey));
+					ASSERT(val1.present());
+					auto healthyZone = decodeHealthyZoneValue(val1.get());
+					ASSERT(healthyZone.first == ignoreSSFailuresZoneString);
+					// check DD mode
+					Optional<Value> val2 = wait(tx->get(dataDistributionModeKey));
+					ASSERT(val2.present());
+					// mode should be set to 0
+					ASSERT(BinaryReader::fromStringRef<int>(val2.get(), Unversioned()) == 0);
+					// check DD disabled for rebalance
+					Optional<Value> val3 = wait(tx->get(rebalanceDDIgnoreKey));
+					// default value "on"
+					ASSERT(val3.present() && val3.get() == LiteralStringRef("on"));
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					wait(tx->onError(e));
+				}
+			}
+			// then, clear all changes
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tx->clear(ignoreSSFailuresZoneString.withPrefix(
+					    SpecialKeySpace::getManagementApiCommandPrefix("maintenance")));
+					KeyRef ddPrefix = SpecialKeySpace::getManagementApiCommandPrefix("datadistribution");
+					tx->clear(LiteralStringRef("mode").withPrefix(ddPrefix));
+					tx->clear(LiteralStringRef("rebalance_ignored").withPrefix(ddPrefix));
+					wait(tx->commit());
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					wait(tx->onError(e));
+				}
+			}
+			// verify all changes are cleared
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					// check DD SSFailures key
+					Optional<Value> val1 = wait(tx->get(healthyZoneKey));
+					ASSERT(!val1.present());
+					// check DD mode
+					Optional<Value> val2 = wait(tx->get(dataDistributionModeKey));
+					ASSERT(!val2.present());
+					// check DD rebalance key
+					Optional<Value> val3 = wait(tx->get(rebalanceDDIgnoreKey));
+					ASSERT(!val3.present());
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					wait(tx->onError(e));
+				}
+			}
+		}
 		return Void();
 	}
 };
