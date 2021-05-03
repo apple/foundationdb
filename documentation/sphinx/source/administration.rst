@@ -813,4 +813,4 @@ After upgrading from 6.2 to 6.3, the option of rolling back and downgrading to 6
 
 * The 6.3 cluster cannot have ``TLogVersion`` greater than V4 (6.2).
 * The 6.3 cluster cannot use storage engine types that are not ``ssd-1``, ``ssd-2``, or ``memory``.
-* The 6.3 cluster must not have any key servers serialized with tag encoding. The ``TAG_ENCODE_KEY_SERVERS`` fdbclient knob must not be set to true at any point in time.
+* The 6.3 cluster must not have any key servers serialized with tag encoding. This condition can only be guaranteed if the ``TAG_ENCODE_KEY_SERVERS`` knob has never been changed to ``true`` on this cluster.
