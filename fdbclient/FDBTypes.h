@@ -468,11 +468,12 @@ struct Traceable<KeyValueRef> : std::true_type {
 	}
 };
 
-typedef Standalone<KeyRef> Key;
-typedef Standalone<ValueRef> Value;
-typedef Standalone<KeyRangeRef> KeyRange;
-typedef Standalone<KeyValueRef> KeyValue;
-typedef Standalone<struct KeySelectorRef> KeySelector;
+using Key = Standalone<KeyRef>;
+using Value = Standalone<ValueRef>;
+using KeyRange = Standalone<KeyRangeRef>;
+using KeyValue = Standalone<KeyValueRef>;
+using KeySelector = Standalone<struct KeySelectorRef>;
+using RangeResult = Standalone<struct RangeResultRef>;
 
 enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
 
