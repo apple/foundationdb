@@ -260,7 +260,7 @@ void printTLogGroupCollection(const TLogGroupCollection& collection) {
 }
 
 // Checks if each TLog belongs to only one TLogGroup in 'collection', number of workers inside
-// each group is equal to 'groupSize' and the total number of recruited workers iseequal to
+// each group is equal to 'groupSize' and the total number of recruited workers is equal to
 // 'totalProcesses', or else will fail assertion.
 void checkGroupMembersUnique(const TLogGroupCollection& collection, int groupSize, int totalProcesses) {
 	const auto& groups = collection.groups();
