@@ -49,8 +49,8 @@ class Packer : public msgpack::packer<msgpack::sbuffer> {
 				populate_visitor_map<Tail...>::populate(map);
 			}
 		};
-		template <>
-		struct populate_visitor_map<> {
+		template <class Head>
+		struct populate_visitor_map<Head> {
 			static void populate(VisitorMap&) {}
 		};
 
