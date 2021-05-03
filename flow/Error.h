@@ -50,6 +50,7 @@ public:
 		return flags & FLAG_INJECTED_FAULT;
 	} // Use as little as possible, so injected faults effectively test real faults!
 	bool isValid() const { return error_code != invalid_error_code; }
+	bool isDiskError() const;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
