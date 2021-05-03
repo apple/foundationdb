@@ -39,7 +39,10 @@ public:
     PeekCursorBase(const Version&);
 
     // Returns the begin verion for the cursor. The cursor will start from the begin version.
-    Version getBeginVersion() const;
+    const Version& getBeginVersion() const;
+
+    // Returns the last version being pulled
+    const Version& getLastVersion() const;
 
     // Check if there is any more messages in the remote TLog(s), if so, retrieve the
     // messages locally.

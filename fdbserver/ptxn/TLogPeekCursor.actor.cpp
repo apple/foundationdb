@@ -112,8 +112,12 @@ ACTOR Future<bool> peekRemote(PeekRemoteContext peekRemoteContext) {
 
 PeekCursorBase::PeekCursorBase(const Version& version_) : beginVersion(version_), lastVersion(version_ - 1) {}
 
-Version PeekCursorBase::getBeginVersion() const {
+const Version& PeekCursorBase::getBeginVersion() const {
 	return beginVersion;
+}
+
+const Version& PeekCursorBase::getLastVersion() const {
+	return lastVersion;
 }
 
 Future<bool> PeekCursorBase::remoteMoreAvailable() {

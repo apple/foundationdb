@@ -410,7 +410,7 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/ServerTeamPeekCursor") {
 	state std::shared_ptr<ptxn::ServerTeamPeekCursor> pCursor = std::make_shared<ptxn::ServerTeamPeekCursor>(ptxn::test::tlogPeek::INITIAL_VERSION, teamID, pContext->pTLogInterface.get());
 	state size_t index = 0;
 	loop {
-		std::cout << "Querying from version: " << pCursor->getBeginVersion() << std::endl;
+		std::cout << "Querying from version: " << pCursor->getLastVersion() << std::endl;
 		state bool remoteDataAvailable = wait(pCursor->remoteMoreAvailable());
 		if (!remoteDataAvailable) {
 			break;
