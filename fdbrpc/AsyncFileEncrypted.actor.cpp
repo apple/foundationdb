@@ -85,6 +85,7 @@ public:
 
 	ACTOR static Future<Void> write(AsyncFileEncrypted* self, void const* data, int length, int64_t offset) {
 		ASSERT(self->canWrite);
+		// All writes must append to the end of the file:
 		ASSERT(offset == self->currentBlock * FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE + self->offsetInBlock);
 		state unsigned char const* input = reinterpret_cast<unsigned char const*>(data);
 		while (length > 0) {
@@ -176,12 +177,12 @@ std::string AsyncFileEncrypted::getFilename() const {
 }
 
 Future<Void> AsyncFileEncrypted::readZeroCopy(void** data, int* length, int64_t offset) {
-	ASSERT(false); // Not implemented
+	throw io_error();
 	return Void();
 }
 
 void AsyncFileEncrypted::releaseZeroCopy(void* data, int length, int64_t offset) {
-	ASSERT(false); // Not implemented
+	throw io_error();
 }
 
 int64_t AsyncFileEncrypted::debugFD() const {
