@@ -805,6 +805,8 @@ Version-specific notes on downgrading
 
 In general, downgrades between patch releases (i.e. 6.2.x - 6.1.x) are not supported.
 
+.. _downgrade-specific-version:
+
 Downgrading from 6.3.13 - 6.2.33
 --------------------------------
 After upgrading from 6.2 to 6.3, the option of rolling back and downgrading to return to 6.2 is still possible, given that the following conditions are met:
