@@ -463,10 +463,7 @@ public:
 
 	bool isEnabled() const { return enabled; }
 
-	TraceEvent &setErrorKind(ErrorKind errorKind) {
-		this->errorKind = errorKind;
-		return *this;
-	}
+	TraceEvent &setErrorKind(ErrorKind errorKind);
 
 	explicit operator bool() const { return enabled; }
 
