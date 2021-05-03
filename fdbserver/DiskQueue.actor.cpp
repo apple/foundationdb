@@ -385,6 +385,7 @@ public:
 						waitfor.push_back(self->files[1].f->truncate(self->fileExtensionBytes));
 						self->files[1].size = self->fileExtensionBytes;
 					} else {
+						TEST(true); // Truncating DiskQueue file
 						const int64_t startingSize = self->files[1].size;
 						self->files[1].size -= std::min(maxShrink, self->files[1].size);
 						self->files[1].size = std::max(self->files[1].size, self->fileExtensionBytes);
@@ -884,7 +885,9 @@ public:
 		uint8_t const* begin = contents.begin();
 		uint8_t const* end = contents.end();
 		TEST(contents.size() && pushedPageCount()); // More than one push between commits
-		TEST(contents.size() >= 4 && pushedPageCount() && backPage().remainingCapacity() < 4); // Push right at the end of a page, possibly splitting size
+
+		bool pushAtEndOfPage = contents.size() >= 4 && pushedPageCount() && backPage().remainingCapacity() < 4;
+		TEST(pushAtEndOfPage); // Push right at the end of a page, possibly splitting size
 		while (begin != end) {
 			if (!pushedPageCount() || !backPage().remainingCapacity())
 				addEmptyPage();
@@ -1363,7 +1366,8 @@ private:
 		// The fully durable popped point is self->lastPoppedSeq; tell the raw queue that.
 		int f;
 		int64_t p;
-		TEST(self->lastPoppedSeq / sizeof(Page) != self->poppedSeq / sizeof(Page)); // DiskQueue: Recovery popped position not fully durable
+		bool poppedNotDurable = self->lastPoppedSeq / sizeof(Page) != self->poppedSeq / sizeof(Page);
+		TEST(poppedNotDurable); // DiskQueue: Recovery popped position not fully durable
 		self->findPhysicalLocation(self->lastPoppedSeq, &f, &p, "lastPoppedSeq");
 		wait(self->rawQueue->setPoppedPage(f, p, pageFloor(self->lastPoppedSeq)));
 

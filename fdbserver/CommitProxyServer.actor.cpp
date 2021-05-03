@@ -28,6 +28,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TransactionLineage.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/ConflictSet.h"
@@ -1062,7 +1063,8 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	state const Optional<UID>& debugID = self->debugID;
 	state Span span("MP:postResolution"_loc, self->span.context);
 
-	TEST(pProxyCommitData->latestLocalCommitBatchLogging.get() < localBatchNumber - 1); // Queuing post-resolution commit processing
+	bool queuedCommits = pProxyCommitData->latestLocalCommitBatchLogging.get() < localBatchNumber - 1;
+	TEST(queuedCommits); // Queuing post-resolution commit processing
 	wait(pProxyCommitData->latestLocalCommitBatchLogging.whenAtLeast(localBatchNumber - 1));
 	wait(yield(TaskPriority::ProxyCommitYield1));
 
@@ -1395,6 +1397,7 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 	// WARNING: this code is run at a high priority (until the first delay(0)), so it needs to do as little work as
 	// possible
 	state CommitBatch::CommitBatchContext context(self, trs, currentBatchMemBytesCount);
+	currentLineage->modify(&TransactionLineage::operation) = TransactionLineage::Operation::Commit;
 
 	// Active load balancing runs at a very high priority (to obtain accurate estimate of memory used by commit batches)
 	// so we need to downgrade here
@@ -1431,6 +1434,8 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 
 ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsRequest req, ProxyCommitData* commitData) {
 	// We can't respond to these requests until we have valid txnStateStore
+	currentLineage->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyServersLocations;
+	currentLineage->modify(&TransactionLineage::txID) = req.spanContext.first();
 	wait(commitData->validState.getFuture());
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
@@ -1937,7 +1942,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 					state KeyRange txnKeys = allKeys;
 					Standalone<RangeResultRef> UIDtoTagMap = commitData.txnStateStore->readRange(serverTagKeys).get();
 					state std::map<Tag, UID> tag_uid;
-					for (const KeyValueRef kv : UIDtoTagMap) {
+					for (const KeyValueRef& kv : UIDtoTagMap) {
 						tag_uid[decodeServerTagValue(kv.value)] = decodeServerTagKey(kv.key);
 					}
 					loop {

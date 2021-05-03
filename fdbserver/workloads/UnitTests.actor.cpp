@@ -37,6 +37,7 @@ struct UnitTestWorkload : TestWorkload {
 	bool enabled;
 	std::string testPattern;
 	int testRunLimit;
+	UnitTestParameters testParams;
 
 	PerfIntCounter testsAvailable, testsExecuted, testsFailed;
 	PerfDoubleCounter totalWallTime, totalSimTime;
@@ -48,6 +49,14 @@ struct UnitTestWorkload : TestWorkload {
 		enabled = !clientId; // only do this on the "first" client
 		testPattern = getOption(options, LiteralStringRef("testsMatching"), Value()).toString();
 		testRunLimit = getOption(options, LiteralStringRef("maxTestCases"), -1);
+
+		// Consume all remaining options as testParams which the unit test can access
+		for (auto& kv : options) {
+			if (kv.value.size() != 0) {
+				testParams.set(kv.key.toString(), getOption(options, kv.key, StringRef()).toString());
+			}
+		}
+
 		forceLinkIndexedSetTests();
 		forceLinkDequeTests();
 		forceLinkFlowTests();
@@ -100,7 +109,7 @@ struct UnitTestWorkload : TestWorkload {
 			state double start_timer = timer();
 
 			try {
-				wait(test->func());
+				wait(test->func(self->testParams));
 			} catch (Error& e) {
 				++self->testsFailed;
 				result = e;

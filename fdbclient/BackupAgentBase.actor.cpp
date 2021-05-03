@@ -142,8 +142,9 @@ Version getVersionFromString(std::string const& value) {
 }
 
 // Transaction log data is stored by the FoundationDB core in the
-// \xff / bklog / keyspace in a funny order for performance reasons.
-// Return the ranges of keys that contain the data for the given range
+// "backupLogKeys" (i.e., \xff\x02/blog/) keyspace in a funny order for
+// performance reasons.
+// Returns the ranges of keys that contain the data for the given range
 // of versions.
 // assert CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE % blocksize = 0. Otherwise calculation of hash will be incorrect
 Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion,
@@ -742,6 +743,9 @@ ACTOR Future<Void> applyMutations(Database cx,
 			wait(coalesceKeyVersionCache(
 			    uid, newEndVersion, keyVersion, commit, committedVersion, addActor, &commitLock));
 			beginVersion = newEndVersion;
+			if (BUGGIFY) {
+				wait(delay(2.0));
+			}
 		}
 	} catch (Error& e) {
 		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarnAlways : SevError, "ApplyMutationsError")

@@ -27,6 +27,8 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/IClientApi.h"
 
+// An implementation of IDatabase that serializes operations onto the network thread and interacts with the lower-level
+// client APIs exposed by NativeAPI and ReadYourWrites.
 class ThreadSafeDatabase : public IDatabase, public ThreadSafeReferenceCounted<ThreadSafeDatabase> {
 public:
 	~ThreadSafeDatabase() override;
@@ -37,9 +39,15 @@ public:
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	double getMainThreadBusyness() override;
 
-	ThreadFuture<Void>
-	onConnected(); // Returns after a majority of coordination servers are available and have reported a leader. The
-	               // cluster file therefore is valid, but the database might be unavailable.
+	// Returns the protocol version reported by the coordinator this client is connected to
+	// If an expected version is given, the future won't return until the protocol version is different than expected
+	// Note: this will never return if the server is running a protocol from FDB 5.0 or older
+	ThreadFuture<ProtocolVersion> getServerProtocol(
+	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) override;
+
+	// Returns after a majority of coordination servers are available and have reported a leader. The
+	// cluster file therefore is valid, but the database might be unavailable.
+	ThreadFuture<Void> onConnected();
 
 	void addref() override { ThreadSafeReferenceCounted<ThreadSafeDatabase>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<ThreadSafeDatabase>::delref(); }
@@ -58,6 +66,8 @@ public: // Internal use only
 	DatabaseContext* unsafeGetPtr() const { return db; }
 };
 
+// An implementation of ITransaction that serializes operations onto the network thread and interacts with the
+// lower-level client APIs exposed by NativeAPI and ReadYourWrites.
 class ThreadSafeTransaction : public ITransaction, ThreadSafeReferenceCounted<ThreadSafeTransaction>, NonCopyable {
 public:
 	explicit ThreadSafeTransaction(DatabaseContext* cx);
@@ -135,11 +145,12 @@ private:
 	ReadYourWritesTransaction* tr;
 };
 
+// An implementation of IClientApi that serializes operations onto the network thread and interacts with the lower-level
+// client APIs exposed by NativeAPI and ReadYourWrites.
 class ThreadSafeApi : public IClientApi, ThreadSafeReferenceCounted<ThreadSafeApi> {
 public:
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
-	ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath) override;
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	void setupNetwork() override;

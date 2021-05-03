@@ -31,6 +31,7 @@
 #include "flow/IThreadPool.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Util.h"
+#include "flow/WriteOnlySet.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
@@ -539,7 +540,10 @@ public:
 
 	std::string getFilename() const override { return actualFilename; }
 
-	~SimpleFile() override { _close(h); }
+	~SimpleFile() override {
+		_close(h);
+		--openCount;
+	}
 
 private:
 	int h;
@@ -977,6 +981,10 @@ public:
 	}
 
 	bool checkRunnable() override { return net2->checkRunnable(); }
+
+	ActorLineageSet& getActorLineageSet() override {
+		return actorLineageSet;
+	}
 
 	void stop() override { isStopped = true; }
 	void addStopCallback(std::function<void()> fn) override { stopCallbacks.emplace_back(std::move(fn)); }
@@ -1936,10 +1944,7 @@ public:
 		TraceEvent("ClogInterface")
 		    .detail("IP", ip.toString())
 		    .detail("Delay", seconds)
-		    .detail("Queue",
-		            mode == ClogSend      ? "Send"
-		            : mode == ClogReceive ? "Receive"
-		                                  : "All");
+		    .detail("Queue", mode == ClogSend ? "Send" : mode == ClogReceive ? "Receive" : "All");
 
 		if (mode == ClogSend || mode == ClogAll)
 			g_clogging.clogSendFor(ip, seconds);
@@ -2120,6 +2125,8 @@ public:
 	// Whether or not yield has returned true during the current iteration of the run loop
 	bool yielded;
 	int yield_limit; // how many more times yield may return false before next returning true
+
+	ActorLineageSet actorLineageSet;
 };
 
 class UDPSimSocket : public IUDPSocket, ReferenceCounted<UDPSimSocket> {
@@ -2411,9 +2418,9 @@ int sf_open(const char* filename, int flags, int convFlags, int mode) {
 	                       GENERIC_READ | ((flags & IAsyncFile::OPEN_READWRITE) ? GENERIC_WRITE : 0),
 	                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
 	                       nullptr,
-	                       (flags & IAsyncFile::OPEN_EXCLUSIVE) ? CREATE_NEW
-	                       : (flags & IAsyncFile::OPEN_CREATE)  ? OPEN_ALWAYS
-	                                                            : OPEN_EXISTING,
+	                       (flags & IAsyncFile::OPEN_EXCLUSIVE)
+	                           ? CREATE_NEW
+	                           : (flags & IAsyncFile::OPEN_CREATE) ? OPEN_ALWAYS : OPEN_EXISTING,
 	                       FILE_ATTRIBUTE_NORMAL,
 	                       nullptr);
 	int h = -1;
@@ -2501,6 +2508,10 @@ Future<std::time_t> Sim2FileSystem::lastWriteTime(const std::string& filename) {
 		fileWrites[filename] = now();
 	}
 	return fileWrites[filename];
+}
+
+ActorLineageSet& Sim2FileSystem::getActorLineageSet() {
+	return actorLineageSet;
 }
 
 void Sim2FileSystem::newFileSystem() {
