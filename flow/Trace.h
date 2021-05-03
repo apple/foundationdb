@@ -61,6 +61,12 @@ enum Severity {
 	SevMax = 1000000
 };
 
+enum class ErrorKind : uint8_t {
+	Unset,
+	DiskIssue,
+	BugDetected,
+};
+
 class TraceEventFields {
 public:
 	constexpr static FileIdentifier file_identifier = 11262274;
@@ -448,6 +454,11 @@ public:
 
 	bool isEnabled() const { return enabled; }
 
+	TraceEvent &setErrorKind(ErrorKind errorKind) {
+		this->errorKind = errorKind;
+		return *this;
+	}
+
 	void log();
 
 	~TraceEvent(); // Actually logs the event
@@ -464,6 +475,7 @@ private:
 	std::string trackingKey;
 	TraceEventFields fields;
 	Severity severity;
+	ErrorKind errorKind;
 	const char* type;
 	UID id;
 	Error err;
@@ -471,6 +483,7 @@ private:
 	int maxFieldLength;
 	int maxEventLength;
 	int timeIndex;
+	int errorKindIndex { -1 };
 
 	void setSizeLimits();
 
