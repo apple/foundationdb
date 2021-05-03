@@ -179,7 +179,7 @@ ACTOR Future<std::vector<TagThrottleInfo>> getThrottledTags(Database db, int lim
 			if (!containsRecommend) {
 				wait(store(reportAuto, getValidAutoEnabled(&tr, db)));
 			}
-			Standalone<RangeResultRef> throttles = wait(tr.getRange(
+			RangeResult throttles = wait(tr.getRange(
 			    reportAuto ? tagThrottleKeys : KeyRangeRef(tagThrottleKeysPrefix, tagThrottleAutoKeysPrefix), limit));
 			std::vector<TagThrottleInfo> results;
 			for (auto throttle : throttles) {
@@ -202,7 +202,7 @@ ACTOR Future<std::vector<TagThrottleInfo>> getRecommendedTags(Database db, int l
 				return std::vector<TagThrottleInfo>();
 			}
 
-			Standalone<RangeResultRef> throttles =
+			RangeResult throttles =
 			    wait(tr.getRange(KeyRangeRef(tagThrottleAutoKeysPrefix, tagThrottleKeys.end), limit));
 			std::vector<TagThrottleInfo> results;
 			for (auto throttle : throttles) {
@@ -339,7 +339,7 @@ ACTOR Future<bool> unthrottleMatchingThrottles(Database db,
 
 	loop {
 		try {
-			state Standalone<RangeResultRef> tags = wait(tr.getRange(begin, end, 1000));
+			state RangeResult tags = wait(tr.getRange(begin, end, 1000));
 			state uint64_t unthrottledTags = 0;
 			uint64_t manualUnthrottledTags = 0;
 			for (auto tag : tags) {

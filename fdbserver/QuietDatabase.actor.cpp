@@ -229,7 +229,7 @@ ACTOR Future<vector<StorageServerInterface>> getStorageServers(Database cx, bool
 		}
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
-			Standalone<RangeResultRef> serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 			vector<StorageServerInterface> servers;

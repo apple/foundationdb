@@ -56,9 +56,7 @@ public:
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
-	virtual Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys,
-	                                                     int rowLimit = 1 << 30,
-	                                                     int byteLimit = 1 << 30) = 0;
+	virtual Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) = 0;
 
 	// To debug MEMORY_RADIXTREE type ONLY
 	// Returns (1) how many key & value pairs have been inserted (2) how many nodes have been created (3) how many
