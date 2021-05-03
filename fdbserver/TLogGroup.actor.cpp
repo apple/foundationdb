@@ -108,8 +108,8 @@ void TLogGroupCollection::storeState(CommitTransactionRequest* recoveryCommitReq
 	for (const auto& group : recruitedGroups) {
 		const auto& groupServerPrefix = tLogGroupKeyFor(group->id()).withSuffix(serversPrefix);
 		TraceEvent("TLogGroupStore")
-		    .detail("GroupID", groupId)
-		    .detail("Size", serverIds.size())
+		    .detail("GroupID", group->id())
+		    .detail("Size", group->size())
 		    .detail("Group", group->toString());
 		tr.set(recoveryCommitReq->arena, groupServerPrefix, group->toValue());
 	}
