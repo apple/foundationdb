@@ -35,6 +35,7 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
+#include "flow/WriteOnlySet.h"
 
 enum class TaskPriority {
 	Max = 1000000,
@@ -558,6 +559,9 @@ public:
 	// If the network has not been run and this function has not been previously called, returns true. Otherwise,
 	// returns false.
 	virtual bool checkRunnable() = 0;
+
+	// Returns the shared memory data structure used to store actor lineages.
+	virtual ActorLineageSet& getActorLineageSet() = 0;
 
 	virtual ProtocolVersion protocolVersion() = 0;
 

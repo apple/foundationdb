@@ -26,6 +26,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/PerfMetric.h"
 #include "fdbrpc/sim_validation.h"
+#include "fdbrpc/simulator.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/BackupProgress.actor.h"
 #include "fdbserver/ConflictSet.h"
@@ -1691,6 +1692,11 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 			            "larger than OldGenerations to resume recovery once the underlying problem has been fixed.");
 			wait(delay(CLIENT_KNOBS->RECOVERY_DELAY_SECONDS_PER_GENERATION *
 			           (self->cstate.myDBState.oldTLogData.size() - CLIENT_KNOBS->RECOVERY_DELAY_START_GENERATION)));
+		}
+		if (g_network->isSimulated() && self->cstate.myDBState.oldTLogData.size() > CLIENT_KNOBS->MAX_GENERATIONS_SIM) {
+			g_simulator.connectionFailuresDisableDuration = 1e6;
+			g_simulator.speedUpSimulation = true;
+			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyGenerations");
 		}
 	}
 
