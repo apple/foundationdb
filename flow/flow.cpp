@@ -26,6 +26,27 @@
 #include <stdarg.h>
 #include <cinttypes>
 
+thread_local Reference<ActorLineage> currentLineage;
+WriteOnlyVariable<ActorLineage, unsigned> currentLineageThreadSafe;
+
+LineagePropertiesBase::~LineagePropertiesBase() {}
+
+ActorLineage::ActorLineage() : properties(), parent(currentLineage) {}
+
+ActorLineage::~ActorLineage() {
+	for (auto ptr : properties) {
+		delete ptr.second;
+	}
+}
+
+using namespace std::literals;
+
+const std::string_view StackLineage::name = "StackLineage"sv;
+
+std::vector<StringRef> getActorStackTrace() {
+	return currentLineage->stack(&StackLineage::actorName);
+}
+
 #if (defined(__linux__) || defined(__FreeBSD__)) && defined(__AVX__) && !defined(MEMORY_SANITIZER)
 // For benchmarking; need a version of rte_memcpy that doesn't live in the same compilation unit as the test.
 void* rte_memcpy_noinline(void* __restrict __dest, const void* __restrict __src, size_t __n) {

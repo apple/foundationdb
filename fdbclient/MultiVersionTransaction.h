@@ -492,7 +492,6 @@ public:
 		void startLegacyVersionMonitors();
 
 		// Cleans up state for the legacy version monitors to break reference cycles
-		// Must be called from the main thread
 		void close();
 
 		Reference<IDatabase> db;
@@ -518,7 +517,7 @@ public:
 
 		// Versions 5.0 and older do not support connection packet monitoring and require alternate techniques to
 		// determine the cluster version.
-		std::list<LegacyVersionMonitor> legacyVersionMonitors;
+		std::list<Reference<LegacyVersionMonitor>> legacyVersionMonitors;
 
 		Optional<ProtocolVersion> dbProtocolVersion;
 
@@ -533,9 +532,11 @@ public:
 
 	// A struct that enables monitoring whether the cluster is running an old version (<= 5.0) that doesn't support
 	// connect packet monitoring.
-	struct LegacyVersionMonitor {
+	struct LegacyVersionMonitor : ThreadSafeReferenceCounted<LegacyVersionMonitor> {
 		LegacyVersionMonitor(Reference<ClientInfo> const& client) : client(client), monitorRunning(false) {}
-		~LegacyVersionMonitor() { TraceEvent("DestroyingVersionMonitor"); }
+
+		// Terminates the version monitor to break reference cycles
+		void close();
 
 		// Starts the connection monitor by creating a database object at an old version.
 		// Must be called from the main thread

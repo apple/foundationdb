@@ -66,7 +66,9 @@
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
 #include "flow/Tracing.h"
+#include "flow/WriteOnlySet.h"
 #include "flow/UnitTest.h"
+#include "fdbclient/ActorLineageProfiler.h"
 
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
@@ -84,6 +86,8 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+using namespace std::literals;
+
 // clang-format off
 enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_TRACER, OPT_NEWCONSOLE,
@@ -91,7 +95,7 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_PROFILER
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -171,9 +175,10 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_METRICSPREFIX,         "--metrics_prefix",            SO_REQ_SEP },
 	{ OPT_IO_TRUST_SECONDS,      "--io_trust_seconds",          SO_REQ_SEP },
 	{ OPT_IO_TRUST_WARN_ONLY,    "--io_trust_warn_only",        SO_NONE },
-	{ OPT_TRACE_FORMAT      ,    "--trace_format",              SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,          "--trace_format",              SO_REQ_SEP },
 	{ OPT_WHITELIST_BINPATH,     "--whitelist_binpath",         SO_REQ_SEP },
 	{ OPT_BLOB_CREDENTIAL_FILE,  "--blob_credential_file",      SO_REQ_SEP },
+	{ OPT_PROFILER,	             "--profiler_",                 SO_REQ_SEP},
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -617,6 +622,11 @@ static void printUsage(const char* name, bool devhelp) {
 	                 " Machine class (valid options are storage, transaction,"
 	                 " resolution, grv_proxy, commit_proxy, master, test, unset, stateless, log, router,"
 	                 " and cluster_controller).");
+	printOptionUsage("--profiler_",
+	                 "Set an actor profiler option. Supported options are:\n"
+	                 "  collector -- None or FluentD (FluentD requires collector_endpoint to be set)\n"
+	                 "  collector_endpoint -- IP:PORT of the fluentd server\n"
+	                 "  collector_protocol -- UDP or TCP (default is UDP)");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -980,6 +990,8 @@ struct CLIOptions {
 	Standalone<StringRef> machineId;
 	UnitTestParameters testParams;
 
+	std::map<std::string, std::string> profilerConfig;
+
 	static CLIOptions parseArgs(int argc, char* argv[]) {
 		CLIOptions opts;
 		opts.parseArgsInternal(argc, argv);
@@ -1053,6 +1065,18 @@ private:
 				knobs.push_back(std::make_pair(syn, args.OptionArg()));
 				break;
 			}
+			case OPT_PROFILER: {
+				std::string syn = args.OptionSyntax();
+				std::string_view key = syn;
+				auto prefix = "--profiler_"sv;
+				if (key.find(prefix) != 0) {
+					fprintf(stderr, "ERROR: unable to parse profiler option '%s'\n", syn.c_str());
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				key.remove_prefix(prefix.size());
+				profilerConfig.emplace(key, args.OptionArg());
+				break;
+			};
 			case OPT_UNITTESTPARAM: {
 				std::string syn = args.OptionSyntax();
 				if (!StringRef(syn).startsWith(LiteralStringRef("--test_"))) {
@@ -1453,6 +1477,13 @@ private:
 			}
 		}
 
+		try {
+			ProfilerConfig::instance().reset(profilerConfig);
+		} catch (ConfigError& e) {
+			printf("Error seting up profiler: %s", e.description.c_str());
+			flushAndExit(FDB_EXIT_ERROR);
+		}
+
 		if (seedConnString.length() && seedConnFile.length()) {
 			fprintf(
 			    stderr, "%s\n", "--seed_cluster_file and --seed_connection_string may not both be specified at once.");
@@ -1593,6 +1624,9 @@ private:
 } // namespace
 
 int main(int argc, char* argv[]) {
+	// TODO: Remove later, this is just to force the statics to be initialized
+	// otherwise the unit test won't run
+	ActorLineageSet _;
 	try {
 		platformInit();
 
