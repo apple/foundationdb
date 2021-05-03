@@ -1157,6 +1157,11 @@ TraceEvent& TraceEvent::suppressFor(double duration, bool logSuppressedEventCoun
 	return *this;
 }
 
+TraceEvent &TraceEvent::setErrorKind(ErrorKind errorKind) {
+	this->errorKind = errorKind;
+	return *this;
+}
+
 TraceEvent& TraceEvent::setMaxFieldLength(int maxFieldLength) {
 	ASSERT(!logged);
 	if (maxFieldLength == 0) {
