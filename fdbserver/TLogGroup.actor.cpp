@@ -107,7 +107,10 @@ void TLogGroupCollection::storeState(CommitTransactionRequest* recoveryCommitReq
 	tr.clear(recoveryCommitReq->arena, tLogGroupKeys);
 	for (const auto& group : recruitedGroups) {
 		const auto& groupServerPrefix = tLogGroupKeyFor(group->id()).withSuffix(serversPrefix);
-		std::cout << "---> Storing " << group->toString() << std::endl;
+		TraceEvent("TLogGroupStore")
+		    .detail("GroupID", groupId)
+		    .detail("Size", serverIds.size())
+		    .detail("Group", group->toString());
 		tr.set(recoveryCommitReq->arena, groupServerPrefix, group->toValue());
 	}
 }
@@ -123,6 +126,10 @@ void TLogGroupCollection::loadState(const Standalone<RangeResultRef>& store,
 	for (int ii = 0; ii < store.size(); ++ii) {
 		auto groupId = decodeTLogGroupKey(store[ii].key);
 		auto group = TLogGroup::fromValue(groupId, store[ii].value, idToInterfMap);
+		TraceEvent("TLogGroupLoad")
+		    .detail("GroupID", group->id())
+		    .detail("Size", group->size())
+		    .detail("Group", group->toString());
 		recruitedGroups.push_back(group);
 	}
 }
@@ -137,6 +144,10 @@ std::vector<TLogWorkerDataRef> TLogGroup::servers() const {
 		results.push_back(worker);
 	}
 	return results;
+}
+
+int TLogGroup::size() const {
+	return serverMap.size();
 }
 
 Standalone<StringRef> TLogGroup::toValue() const {

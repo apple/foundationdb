@@ -122,6 +122,9 @@ public:
 	// Returns list of servers that are recruited for this group.
 	std::vector<TLogWorkerDataRef> servers() const;
 
+	// Returns the number of servers recruited in this group, including failed ones.
+	int size() const;
+
 	Standalone<StringRef> toValue() const;
 
 	static TLogGroupRef fromValue(UID groupId,
