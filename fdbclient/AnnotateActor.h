@@ -77,6 +77,8 @@ constexpr std::string_view to_string(WaitState st) {
 		return "Network"sv;
 	case WaitState::Running:
 		return "Running"sv;
+	default:
+		return ""sv;
 	}
 }
 

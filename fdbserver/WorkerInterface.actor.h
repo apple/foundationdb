@@ -818,6 +818,7 @@ struct Role {
 		case ProcessClass::Worker:
 			return WORKER;
 		case ProcessClass::NoRole:
+		default:
 			ASSERT(false);
 			throw internal_error();
 		}
