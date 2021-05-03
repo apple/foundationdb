@@ -28,7 +28,7 @@ RUN source /opt/rh/devtoolset-8/enable && \
         subprocess32 && \
     mkdir fdb-joshua && \
     cd fdb-joshua && \
-    git clone --branch code_pipeline https://github.com/FoundationDB/fdb-joshua . && \
+    git clone https://github.com/FoundationDB/fdb-joshua . && \
     pip3 install /tmp/fdb-joshua && \
     cd /tmp && \
     curl -Ls https://amazon-eks.s3.us-west-2.amazonaws.com/1.18.9/2020-11-02/bin/linux/amd64/kubectl -o kubectl && \
@@ -43,20 +43,13 @@ RUN source /opt/rh/devtoolset-8/enable && \
     ./aws/install && \
     rm -rf /tmp/*
 
-ARG OLD_FDB_BINARY_DIR=/app/deploy/global_data/oldBinaries/
-ARG OLD_TLS_LIBRARY_DIR=/app/deploy/runtime/.tls_5_1/
 ARG FDB_VERSION="6.2.29"
-RUN mkdir -p ${OLD_FDB_BINARY_DIR} \
-             ${OLD_TLS_LIBRARY_DIR} \
-             /usr/lib/foundationdb/plugins && \
-    curl -Ls https://www.foundationdb.org/downloads/misc/fdbservers-${FDB_VERSION}.tar.gz | tar -xz -C ${OLD_FDB_BINARY_DIR} && \
-    rm -f ${OLD_FDB_BINARY_DIR}/*.sha256 && \
-    chmod +x ${OLD_FDB_BINARY_DIR}/* && \
-    curl -Ls https://www.foundationdb.org/downloads/misc/joshua_tls_library.tar.gz | tar -xz -C ${OLD_TLS_LIBRARY_DIR} --strip-components=1 && \
+RUN mkdir -p /usr/lib/foundationdb/plugins && \
+    curl -Ls https://www.foundationdb.org/downloads/misc/joshua_tls_library.tar.gz | \
+        tar --strip-components=1 --no-same-owner --directory /usr/lib/foundationdb/plugins -xz && \
+    ln -sf /usr/lib/foundationdb/plugins/FDBGnuTLS.so /usr/lib/foundationdb/plugins/fdb-libressl-plugin.so && \
     curl -Ls https://www.foundationdb.org/downloads/${FDB_VERSION}/linux/libfdb_c_${FDB_VERSION}.so -o /usr/lib64/libfdb_c_${FDB_VERSION}.so && \
-    ln -s /usr/lib64/libfdb_c_${FDB_VERSION}.so /usr/lib64/libfdb_c.so && \
-    ln -s ${OLD_TLS_LIBRARY_DIR}/FDBGnuTLS.so /usr/lib/foundationdb/plugins/fdb-libressl-plugin.so && \
-    ln -s ${OLD_TLS_LIBRARY_DIR}/FDBGnuTLS.so /usr/lib/foundationdb/plugins/FDBGnuTLS.so
+    ln -sf /usr/lib64/libfdb_c_${FDB_VERSION}.so /usr/lib64/libfdb_c.so
 
 WORKDIR /root
 RUN rm -f /root/anaconda-ks.cfg && \
@@ -65,8 +58,13 @@ RUN rm -f /root/anaconda-ks.cfg && \
     'source /opt/rh/rh-python36/enable' \
     'source /opt/rh/rh-ruby26/enable' \
     '' \
+    'function cmk_ci() {' \
+    '    cmake -S ${HOME}/src/foundationdb -B ${HOME}/build_output -D USE_CCACHE=ON -D USE_WERROR=ON -D RocksDB_ROOT=/opt/rocksdb-6.10.1 -D RUN_JUNIT_TESTS=ON -D RUN_JAVA_INTEGRATION_TESTS=ON -G Ninja && \' \
+    '    ninja -v -C ${HOME}/build_output -j 84 all packages strip_targets' \
+    '}' \
     'function cmk() {' \
-    '    cmake -S ${HOME}/src/foundationdb -B ${HOME}/build_output -D USE_CCACHE=ON -D USE_WERROR=ON -D RocksDB_ROOT=/opt/rocksdb-6.10.1 -D RUN_JUNIT_TESTS=ON -D RUN_JAVA_INTEGRATION_TESTS=ON -G Ninja && ninja -C ${HOME}/build_output -j 84' \
+    '    cmake -S ${HOME}/src/foundationdb -B ${HOME}/build_output -D USE_CCACHE=ON -D USE_WERROR=ON -D RocksDB_ROOT=/opt/rocksdb-6.10.1 -D RUN_JUNIT_TESTS=ON -D RUN_JAVA_INTEGRATION_TESTS=ON -G Ninja && \' \
+    '    ninja -C ${HOME}/build_output -j 84' \
     '}' \
     'function ct() {' \
     '    cd ${HOME}/build_output && ctest -j 32 --no-compress-output -T test --output-on-failure' \
@@ -77,5 +75,10 @@ RUN rm -f /root/anaconda-ks.cfg && \
     'function jsd() {' \
     '   j start --tarball $(find ${HOME}/build_output/packages -name correctness\*.tar.gz) "${@}"' \
     '}' \
+    '' \
+    'USER_BASHRC="$HOME/src/.bashrc.local"' \
+    'if test -f "$USER_BASHRC"; then' \
+    '   source $USER_BASHRC' \
+    'fi' \
     '' \
     >> .bashrc

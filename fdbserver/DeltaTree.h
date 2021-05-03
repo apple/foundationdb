@@ -230,9 +230,6 @@ struct DeltaTree {
 	inline Node& newNode() { return *(Node*)((uint8_t*)this + size()); }
 
 public:
-	// Get count of total overhead bytes (everything but the user-formatted Delta) for a tree given size n
-	static int emptyTreeSize() { return sizeof(DeltaTree); }
-
 	struct DecodedNode {
 		DecodedNode() {}
 
@@ -529,6 +526,10 @@ public:
 		const T& get() const { return node->item; }
 
 		const T& getOrUpperBound() const { return valid() ? node->item : *mirror->upperBound(); }
+
+		const T& lowerBound() const { return *mirror->lowerBound(); }
+
+		const T& upperBound() const { return *mirror->upperBound(); }
 
 		bool operator==(const Cursor& rhs) const { return node == rhs.node; }
 

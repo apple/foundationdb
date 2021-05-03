@@ -24,6 +24,7 @@
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IThreadPool.h"
+#include "flow/WriteOnlySet.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/TLSConfig.actor.h"
@@ -282,6 +283,9 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 	const TLSConfig& getTLSConfig() const override {
 		static TLSConfig emptyConfig;
 		return emptyConfig;
+	}
+	ActorLineageSet& getActorLineageSet() override {
+		throw std::exception();
 	}
 	ProtocolVersion protocolVersion() override { return baseNetwork->protocolVersion(); }
 };

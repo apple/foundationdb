@@ -39,6 +39,8 @@ public:
 
 	Future<Void> renameFile(std::string const& from, std::string const& to) override;
 
+	ActorLineageSet& getActorLineageSet() override;
+
 	// void init();
 	static void stop();
 
@@ -52,6 +54,7 @@ public:
 	dev_t fileSystemDeviceId;
 	bool checkFileSystem;
 #endif
+	ActorLineageSet actorLineageSet;
 };
 
 #endif

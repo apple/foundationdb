@@ -34,7 +34,6 @@ struct ProcessClass {
 		ResolutionClass,
 		TesterClass,
 		CommitProxyClass,
-		GrvProxyClass,
 		MasterClass,
 		StatelessClass,
 		LogClass,
@@ -46,6 +45,7 @@ struct ProcessClass {
 		RatekeeperClass,
 		StorageCacheClass,
 		BackupClass,
+		GrvProxyClass,
 		InvalidClass = -1
 	};
 
@@ -71,6 +71,7 @@ struct ProcessClass {
 		Ratekeeper,
 		StorageCache,
 		Backup,
+		Worker, // used for actor lineage tracking
 		NoRole
 	};
 	enum ClassSource { CommandLineSource, AutoSource, DBSource, InvalidSource = -1 };

@@ -4,4 +4,4 @@ useDB=false
 
     testName=UnitTests
     maxTestCases=0
-    testsMatching=!/redwood/correctness/unit/
+    testsMatching=/redwood/correctness/unit/
