@@ -366,7 +366,7 @@ ACTOR Future<Void> fdbClient() {
 			// 3. write 10 values in [k, k+100]
 			beginIdx = deterministicRandom()->randomInt(0, 1e8 - 100);
 			startKey = keyPrefix + std::to_string(beginIdx);
-			Standalone<RangeResultRef> range = wait(tx.getRange(KeyRangeRef(startKey, endKey), 100));
+			RangeResult range = wait(tx.getRange(KeyRangeRef(startKey, endKey), 100));
 			for (int i = 0; i < 10; ++i) {
 				Key k = Key(keyPrefix + std::to_string(beginIdx + deterministicRandom()->randomInt(0, 100)));
 				tx.set(k, LiteralStringRef("foo"));

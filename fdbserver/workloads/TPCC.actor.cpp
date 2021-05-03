@@ -347,7 +347,7 @@ struct TPCC : TestWorkload {
 			memcpy(end, s.begin(), s.size());
 			begin[s.size()] = '/';
 			end[s.size()] = '0';
-			state Standalone<RangeResultRef> range =
+			state RangeResult range =
 			    wait(tr->getRange(KeyRangeRef(StringRef(begin, s.size() + 1), StringRef(end, s.size() + 1)), 1000));
 			ASSERT(range.size() > 0);
 
@@ -468,7 +468,7 @@ struct TPCC : TestWorkload {
 			order.o_w_id = customer.c_w_id;
 			order.o_d_id = customer.c_d_id;
 			order.o_c_id = customer.c_id;
-			Standalone<RangeResultRef> range = wait(tr.getRange(order.keyRange(1), 1, false, true));
+			RangeResult range = wait(tr.getRange(order.keyRange(1), 1, false, true));
 			ASSERT(range.size() > 0);
 			{
 				BinaryReader r(range[0].value, IncludeVersion());
@@ -506,7 +506,7 @@ struct TPCC : TestWorkload {
 			for (d_id = 0; d_id < 10; ++d_id) {
 				newOrder.no_w_id = w_id;
 				newOrder.no_d_id = d_id;
-				Standalone<RangeResultRef> range = wait(tr.getRange(newOrder.keyRange(1), 1));
+				RangeResult range = wait(tr.getRange(newOrder.keyRange(1), 1));
 				if (range.size() > 0) {
 					{
 						BinaryReader r(range[0].value, IncludeVersion());
@@ -588,8 +588,7 @@ struct TPCC : TestWorkload {
 				orderLine.ol_w_id = w_id;
 				orderLine.ol_d_id = d_id;
 				orderLine.ol_o_id = ol_o_id;
-				state Standalone<RangeResultRef> range =
-				    wait(tr.getRange(orderLine.keyRange(1), CLIENT_KNOBS->TOO_MANY));
+				state RangeResult range = wait(tr.getRange(orderLine.keyRange(1), CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!range.more);
 				ASSERT(range.size() > 0);
 				for (i = 0; i < range.size(); ++i) {

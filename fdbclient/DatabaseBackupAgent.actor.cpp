@@ -157,7 +157,7 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state Standalone<VectorRef<KeyRef>> results;
-		Standalone<RangeResultRef> values = wait(tr->getRange(
+		RangeResult values = wait(tr->getRange(
 		    KeyRangeRef(keyAfter(beginKey.withPrefix(keyServersPrefix)), endKey.withPrefix(keyServersPrefix)), limit));
 
 		for (auto& s : values) {
@@ -314,19 +314,18 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 					    applyMutationsKeyVersionMapRange.begin);
 					state Key rangeCountKey = task->params[BackupAgentBase::keyConfigLogUid].withPrefix(
 					    applyMutationsKeyVersionCountRange.begin);
-					state Future<Standalone<RangeResultRef>> backupVersions =
+					state Future<RangeResult> backupVersions =
 					    krmGetRanges(tr, prefix, KeyRangeRef(rangeBegin, rangeEnd), BUGGIFY ? 2 : 2000, 1e5);
 					state Future<Optional<Value>> logVersionValue = tr->get(
 					    task->params[BackupAgentBase::keyConfigLogUid].withPrefix(applyMutationsEndRange.begin), true);
 					state Future<Optional<Value>> rangeCountValue = tr->get(rangeCountKey, true);
-					state Future<Standalone<RangeResultRef>> prevRange = tr->getRange(
+					state Future<RangeResult> prevRange = tr->getRange(
 					    firstGreaterOrEqual(prefix), lastLessOrEqual(rangeBegin.withPrefix(prefix)), 1, true, true);
-					state Future<Standalone<RangeResultRef>> nextRange =
-					    tr->getRange(firstGreaterOrEqual(rangeEnd.withPrefix(prefix)),
-					                 firstGreaterOrEqual(strinc(prefix)),
-					                 1,
-					                 true,
-					                 false);
+					state Future<RangeResult> nextRange = tr->getRange(firstGreaterOrEqual(rangeEnd.withPrefix(prefix)),
+					                                                   firstGreaterOrEqual(strinc(prefix)),
+					                                                   1,
+					                                                   true,
+					                                                   false);
 					state Future<Void> verified = taskBucket->keepRunning(tr, task);
 
 					wait(checkDatabaseLock(tr,
@@ -725,7 +724,7 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 		state Subspace conf = Subspace(databaseBackupPrefixRange.begin)
 		                          .get(BackupAgentBase::keyConfig)
 		                          .get(task->params[BackupAgentBase::keyConfigLogUid]);
-		state std::vector<Standalone<RangeResultRef>> nextMutations;
+		state std::vector<RangeResult> nextMutations;
 		state bool isTimeoutOccured = false;
 		state Optional<KeyRef> lastKey;
 		state Version lastVersion;
@@ -736,9 +735,9 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 					return Optional<Version>();
 				}
 
-				state std::vector<Standalone<RangeResultRef>> mutations = std::move(nextMutations);
+				state std::vector<RangeResult> mutations = std::move(nextMutations);
 				state int64_t mutationSize = nextMutationSize;
-				nextMutations = std::vector<Standalone<RangeResultRef>>();
+				nextMutations = std::vector<RangeResult>();
 				nextMutationSize = 0;
 
 				if (!endOfStream) {
@@ -1470,7 +1469,7 @@ struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 		                          .get(BackupAgentBase::keyConfig)
 		                          .get(task->params[BackupAgentBase::keyConfigLogUid]);
 
-		state std::vector<Standalone<RangeResultRef>> nextMutations;
+		state std::vector<RangeResult> nextMutations;
 		state int64_t nextMutationSize = 0;
 		loop {
 			try {
@@ -1478,9 +1477,9 @@ struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 					return Void();
 				}
 
-				state std::vector<Standalone<RangeResultRef>> mutations = std::move(nextMutations);
+				state std::vector<RangeResult> mutations = std::move(nextMutations);
 				state int64_t mutationSize = nextMutationSize;
-				nextMutations = std::vector<Standalone<RangeResultRef>>();
+				nextMutations = std::vector<RangeResult>();
 				nextMutationSize = 0;
 
 				if (!endOfStream) {
@@ -1819,7 +1818,7 @@ struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 				}
 
 				if (backupRanges.size() == 1) {
-					Standalone<RangeResultRef> existingDestUidValues = wait(srcTr->getRange(
+					RangeResult existingDestUidValues = wait(srcTr->getRange(
 					    KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 					bool found = false;
 					for (auto it : existingDestUidValues) {
@@ -2063,7 +2062,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 
 				// Initialize destUid
 				if (backupRanges.size() == 1) {
-					Standalone<RangeResultRef> existingDestUidValues = wait(srcTr->getRange(
+					RangeResult existingDestUidValues = wait(srcTr->getRange(
 					    KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 					bool found = false;
 					for (auto it : existingDestUidValues) {
@@ -2561,7 +2560,7 @@ public:
 
 		if (backupAction == DatabaseBackupAgent::PreBackupAction::VERIFY) {
 			// Make sure all of the ranges are empty before we backup into them.
-			state std::vector<Future<Standalone<RangeResultRef>>> backupIntoResults;
+			state std::vector<Future<RangeResult>> backupIntoResults;
 			for (auto& backupRange : backupRanges) {
 				backupIntoResults.push_back(
 				    tr->getRange(backupRange.removePrefix(removePrefix).withPrefix(addPrefix), 1));
@@ -3060,13 +3059,13 @@ public:
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				state Future<Optional<Value>> fPaused = tr->get(backupAgent->taskBucket->getPauseKey());
-				state Future<Standalone<RangeResultRef>> fErrorValues =
+				state Future<RangeResult> fErrorValues =
 				    errorLimit > 0
 				        ? tr->getRange(backupAgent->errors.get(BinaryWriter::toValue(logUid, Unversioned())).range(),
 				                       errorLimit,
 				                       false,
 				                       true)
-				        : Future<Standalone<RangeResultRef>>();
+				        : Future<RangeResult>();
 				state Future<Optional<Value>> fBackupUid =
 				    tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
 				                .pack(DatabaseBackupAgent::keyFolderId));
@@ -3141,7 +3140,7 @@ public:
 
 				// Append the errors, if requested
 				if (errorLimit > 0) {
-					Standalone<RangeResultRef> values = wait(fErrorValues);
+					RangeResult values = wait(fErrorValues);
 
 					// Display the errors, if any
 					if (values.size() > 0) {

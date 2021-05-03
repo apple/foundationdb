@@ -252,30 +252,30 @@ public:
 	[[nodiscard]] Future<Void> watch(Reference<Watch> watch);
 	[[nodiscard]] Future<Key> getKey(const KeySelector& key, bool snapshot = false);
 	// Future< Optional<KeyValue> > get( const KeySelectorRef& key );
-	[[nodiscard]] Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin,
-	                                                          const KeySelector& end,
-	                                                          int limit,
-	                                                          bool snapshot = false,
-	                                                          bool reverse = false);
-	[[nodiscard]] Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin,
-	                                                          const KeySelector& end,
-	                                                          GetRangeLimits limits,
-	                                                          bool snapshot = false,
-	                                                          bool reverse = false);
-	[[nodiscard]] Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys,
-	                                                          int limit,
-	                                                          bool snapshot = false,
-	                                                          bool reverse = false) {
+	[[nodiscard]] Future<RangeResult> getRange(const KeySelector& begin,
+	                                           const KeySelector& end,
+	                                           int limit,
+	                                           bool snapshot = false,
+	                                           bool reverse = false);
+	[[nodiscard]] Future<RangeResult> getRange(const KeySelector& begin,
+	                                           const KeySelector& end,
+	                                           GetRangeLimits limits,
+	                                           bool snapshot = false,
+	                                           bool reverse = false);
+	[[nodiscard]] Future<RangeResult> getRange(const KeyRange& keys,
+	                                           int limit,
+	                                           bool snapshot = false,
+	                                           bool reverse = false) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
 		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
 		                limit,
 		                snapshot,
 		                reverse);
 	}
-	[[nodiscard]] Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys,
-	                                                          GetRangeLimits limits,
-	                                                          bool snapshot = false,
-	                                                          bool reverse = false) {
+	[[nodiscard]] Future<RangeResult> getRange(const KeyRange& keys,
+	                                           GetRangeLimits limits,
+	                                           bool snapshot = false,
+	                                           bool reverse = false) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
 		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
 		                limits,

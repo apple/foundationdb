@@ -6026,17 +6026,15 @@ public:
 		m_tree->set(keyValue);
 	}
 
-	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys,
-	                                             int rowLimit = 1 << 30,
-	                                             int byteLimit = 1 << 30) override {
+	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) override {
 		debug_printf("READRANGE %s\n", printable(keys).c_str());
 		return catchError(readRange_impl(this, keys, rowLimit, byteLimit));
 	}
 
-	ACTOR static Future<Standalone<RangeResultRef>> readRange_impl(KeyValueStoreRedwoodUnversioned* self,
-	                                                               KeyRange keys,
-	                                                               int rowLimit,
-	                                                               int byteLimit) {
+	ACTOR static Future<RangeResult> readRange_impl(KeyValueStoreRedwoodUnversioned* self,
+	                                                KeyRange keys,
+	                                                int rowLimit,
+	                                                int byteLimit) {
 		state VersionedBTree::BTreeCursor cur;
 		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion()));
 
@@ -6045,7 +6043,7 @@ public:
 		state FlowLock::Releaser releaser(*readLock);
 		++g_redwoodMetrics.opGetRange;
 
-		state Standalone<RangeResultRef> result;
+		state RangeResult result;
 		state int accumulatedBytes = 0;
 		ASSERT(byteLimit > 0);
 
@@ -8687,7 +8685,7 @@ ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
 		KeyRangeRef range = source.getKeyRangeRef(singlePrefix, suffixSize);
 		int rowLim = (deterministicRandom()->randomInt(0, 2) != 0) ? rowLimit : -rowLimit;
 
-		Standalone<RangeResultRef> result = wait(kvs->readRange(range, rowLim));
+		RangeResult result = wait(kvs->readRange(range, rowLim));
 
 		recordsRead += result.size();
 		bytesRead += result.size() * recordSize;

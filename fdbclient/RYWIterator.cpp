@@ -347,8 +347,9 @@ void testSnapshotCache() {
 }
 
 /*
-ACTOR Standalone<RangeResultRef> getRange( Transaction* tr, KeySelector begin, KeySelector end, SnapshotCache* cache,
-WriteMap* writes, GetRangeLimits limits ) { RYWIterator it(cache, writes); RYWIterator itEnd(cache, writes);
+ACTOR RangeResult getRange( Transaction* tr, KeySelector begin, KeySelector end, SnapshotCache* cache,
+WriteMap* writes, GetRangeLimits limits ) {
+    RYWIterator it(cache, writes); RYWIterator itEnd(cache, writes);
     resolveKeySelectorFromCache( begin, it );
     resolveKeySelectorFromCache( end, itEnd );
 
@@ -362,9 +363,8 @@ WriteMap* writes, GetRangeLimits limits ) { RYWIterator it(cache, writes); RYWIt
             ucEnd.skipUncached(itEnd);
 
             state KeySelector read_end = ucEnd==itEnd ? end :
-firstGreaterOrEqual(ucEnd.endKey().toStandaloneStringRef()); Standalone<RangeResultRef> snapshot_read = wait(
-tr->getRange( begin, read_end, limits, false, false ) ); cache->insert( getKnownKeyRange( snapshot_read, begin, read_end
-), snapshot_read );
+firstGreaterOrEqual(ucEnd.endKey().toStandaloneStringRef()); RangeResult snapshot_read = wait(tr->getRange( begin,
+read_end, limits, false, false ) ); cache->insert( getKnownKeyRange( snapshot_read, begin, read_end), snapshot_read );
 
             // TODO: Is there a more efficient way to deal with invalidation?
             it = itEnd = RYWIterator( cache, writes );

@@ -131,7 +131,7 @@ struct ThrottlingWorkload : KVWorkload {
 		state json_spirit::mValue logSchema = readJSONStrictly(JSONSchemas::logHealthSchema.toString()).get_obj();
 		loop {
 			try {
-				Standalone<RangeResultRef> result = wait(
+				RangeResult result = wait(
 				    tr.getRange(prefixRange(LiteralStringRef("\xff\xff/metrics/health/")), CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!result.more);
 				for (const auto& [k, v] : result) {

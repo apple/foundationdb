@@ -139,8 +139,8 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 	}
 
 	// Adds a single KV-pair to the list of results
-	void pushKVPair(std::vector<Standalone<RangeResultRef>>& results, Key const& key, Optional<Value> const& value) {
-		Standalone<RangeResultRef> result;
+	void pushKVPair(std::vector<RangeResult>& results, Key const& key, Optional<Value> const& value) {
+		RangeResult result;
 		if (!value.present())
 			result.push_back_deep(result.arena(), KeyValueRef(key, LiteralStringRef("VALUE_NOT_PRESENT")));
 		else
@@ -150,8 +150,8 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 	}
 
 	// Applies a sequence of operations to the memory store and returns the results
-	std::vector<Standalone<RangeResultRef>> applySequenceToStore(std::vector<Operation> sequence) {
-		std::vector<Standalone<RangeResultRef>> results;
+	std::vector<RangeResult> applySequenceToStore(std::vector<Operation> sequence) {
+		std::vector<RangeResult> results;
 		Key key;
 
 #if TRACE_TRANSACTION
@@ -222,12 +222,11 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 	}
 
 	// Applies a sequence of operations to the database and returns the results
-	ACTOR Future<std::vector<Standalone<RangeResultRef>>> applySequenceToDatabase(
-	    Reference<TransactionWrapper> transaction,
-	    std::vector<Operation> sequence,
-	    RyowCorrectnessWorkload* self) {
+	ACTOR Future<std::vector<RangeResult>> applySequenceToDatabase(Reference<TransactionWrapper> transaction,
+	                                                               std::vector<Operation> sequence,
+	                                                               RyowCorrectnessWorkload* self) {
 		state bool dontUpdateResults = false;
-		state std::vector<Standalone<RangeResultRef>> results;
+		state std::vector<RangeResult> results;
 		loop {
 			try {
 				state int i;
@@ -242,11 +241,11 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 							self->pushKVPair(results, op.beginKey, val);
 					} else if (op.type == Operation::GET_RANGE) {
 						KeyRangeRef range(op.beginKey, op.endKey);
-						Standalone<RangeResultRef> result = wait(transaction->getRange(range, op.limit, op.reverse));
+						RangeResult result = wait(transaction->getRange(range, op.limit, op.reverse));
 						if (!dontUpdateResults)
 							results.push_back((RangeResultRef)result);
 					} else if (op.type == Operation::GET_RANGE_SELECTOR) {
-						Standalone<RangeResultRef> result =
+						RangeResult result =
 						    wait(transaction->getRange(op.beginSelector, op.endSelector, op.limit, op.reverse));
 						if (!dontUpdateResults)
 							results.push_back((RangeResultRef)result);
@@ -278,8 +277,8 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 	}
 
 	// Compares a sequence of results from the database and the memory store
-	bool compareResults(std::vector<Standalone<RangeResultRef>> dbResults,
-	                    std::vector<Standalone<RangeResultRef>> storeResults,
+	bool compareResults(std::vector<RangeResult> dbResults,
+	                    std::vector<RangeResult> storeResults,
 	                    std::vector<Operation> sequence,
 	                    Version readVersion) {
 		ASSERT(storeResults.size() == dbResults.size());
@@ -334,9 +333,8 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 		loop {
 			state Reference<TransactionWrapper> transaction = self->createTransaction();
 			state std::vector<Operation> sequence = self->generateOperationSequence(data);
-			state std::vector<Standalone<RangeResultRef>> storeResults = self->applySequenceToStore(sequence);
-			state std::vector<Standalone<RangeResultRef>> dbResults =
-			    wait(self->applySequenceToDatabase(transaction, sequence, self));
+			state std::vector<RangeResult> storeResults = self->applySequenceToStore(sequence);
+			state std::vector<RangeResult> dbResults = wait(self->applySequenceToDatabase(transaction, sequence, self));
 
 			Version readVersion = wait(transaction->getReadVersion());
 

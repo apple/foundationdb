@@ -187,7 +187,7 @@ struct StorageServerDisk {
 	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID = Optional<UID>()) {
 		return storage->readValuePrefix(key, maxLength, debugID);
 	}
-	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) {
+	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) {
 		return storage->readRange(keys, rowLimit, byteLimit);
 	}
 
@@ -202,7 +202,7 @@ private:
 	void writeMutations(const VectorRef<MutationRef>& mutations, Version debugVersion, const char* debugContext);
 
 	ACTOR static Future<Key> readFirstKey(IKeyValueStore* storage, KeyRangeRef range) {
-		Standalone<RangeResultRef> r = wait(storage->readRange(range, 1));
+		RangeResult r = wait(storage->readRange(range, 1));
 		if (r.size())
 			return r[0].key;
 		else
@@ -1439,7 +1439,7 @@ ACTOR Future<Void> getShardStateQ(StorageServer* data, GetShardStateRequest req)
 void merge(Arena& arena,
            VectorRef<KeyValueRef, VecSerStrategy::String>& output,
            VectorRef<KeyValueRef> const& vm_output,
-           Standalone<RangeResultRef> const& base,
+           RangeResult const& base,
            int& vCount,
            int limit,
            bool stopAtEndOfBase,
@@ -1557,7 +1557,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 
 			// Read the data on disk up to vCurrent (or the end of the range)
 			readEnd = vCurrent ? std::min(vCurrent.key(), range.end) : range.end;
-			Standalone<RangeResultRef> atStorageVersion =
+			RangeResult atStorageVersion =
 			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes));
 
 			ASSERT(atStorageVersion.size() <= limit);
@@ -1638,7 +1638,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 
 			readBegin = vCurrent ? std::max(vCurrent->isClearTo() ? vCurrent->getEndKey() : vCurrent.key(), range.begin)
 			                     : range.begin;
-			Standalone<RangeResultRef> atStorageVersion =
+			RangeResult atStorageVersion =
 			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes));
 
 			ASSERT(atStorageVersion.size() <= -limit);
@@ -2392,13 +2392,13 @@ void coalesceShards(StorageServer* data, KeyRangeRef keys) {
 	}
 }
 
-ACTOR Future<Standalone<RangeResultRef>> tryGetRange(Database cx,
-                                                     Version version,
-                                                     KeyRangeRef keys,
-                                                     GetRangeLimits limits,
-                                                     bool* isTooOld) {
+ACTOR Future<RangeResult> tryGetRange(Database cx,
+                                      Version version,
+                                      KeyRangeRef keys,
+                                      GetRangeLimits limits,
+                                      bool* isTooOld) {
 	state Transaction tr(cx);
-	state Standalone<RangeResultRef> output;
+	state RangeResult output;
 	state KeySelectorRef begin = firstGreaterOrEqual(keys.begin);
 	state KeySelectorRef end = firstGreaterOrEqual(keys.end);
 
@@ -2412,7 +2412,7 @@ ACTOR Future<Standalone<RangeResultRef>> tryGetRange(Database cx,
 
 	try {
 		loop {
-			Standalone<RangeResultRef> rep = wait(tr.getRange(begin, end, limits, true));
+			RangeResult rep = wait(tr.getRange(begin, end, limits, true));
 			limits.decrement(rep);
 
 			if (limits.isReached() || !rep.more) {
@@ -2624,7 +2624,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			try {
 				TEST(true); // Fetching keys for transferred shard
 
-				state Standalone<RangeResultRef> this_block =
+				state RangeResult this_block =
 				    wait(tryGetRange(data->cx,
 				                     fetchVersion,
 				                     keys,
@@ -2701,7 +2701,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					}
 				}
 
-				this_block = Standalone<RangeResultRef>();
+				this_block = RangeResult();
 
 				if (BUGGIFY)
 					wait(delay(1));
@@ -3819,7 +3819,7 @@ ACTOR Future<Void> applyByteSampleResult(StorageServer* data,
 	state int totalKeys = 0;
 	state int totalBytes = 0;
 	loop {
-		Standalone<RangeResultRef> bs = wait(storage->readRange(
+		RangeResult bs = wait(storage->readRange(
 		    KeyRangeRef(begin, end), SERVER_KNOBS->STORAGE_LIMIT_BYTES, SERVER_KNOBS->STORAGE_LIMIT_BYTES));
 		if (results)
 			results->push_back(bs.castTo<VectorRef<KeyValueRef>>());
@@ -3922,8 +3922,8 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state Future<Optional<Value>> fVersion = storage->readValue(persistVersion);
 	state Future<Optional<Value>> fLogProtocol = storage->readValue(persistLogProtocol);
 	state Future<Optional<Value>> fPrimaryLocality = storage->readValue(persistPrimaryLocality);
-	state Future<Standalone<RangeResultRef>> fShardAssigned = storage->readRange(persistShardAssignedKeys);
-	state Future<Standalone<RangeResultRef>> fShardAvailable = storage->readRange(persistShardAvailableKeys);
+	state Future<RangeResult> fShardAssigned = storage->readRange(persistShardAssignedKeys);
+	state Future<RangeResult> fShardAvailable = storage->readRange(persistShardAvailableKeys);
 
 	state Promise<Void> byteSampleSampleRecovered;
 	state Promise<Void> startByteSampleRestore;
@@ -3963,7 +3963,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	debug_checkRestoredVersion(data->thisServerID, version, "StorageServer");
 	data->setInitialVersion(version);
 
-	state Standalone<RangeResultRef> available = fShardAvailable.get();
+	state RangeResult available = fShardAvailable.get();
 	state int availableLoc;
 	for (availableLoc = 0; availableLoc < available.size(); availableLoc++) {
 		KeyRangeRef keys(available[availableLoc].key.removePrefix(persistShardAvailableKeys.begin),
@@ -3978,7 +3978,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		wait(yield());
 	}
 
-	state Standalone<RangeResultRef> assigned = fShardAssigned.get();
+	state RangeResult assigned = fShardAssigned.get();
 	state int assignedLoc;
 	for (assignedLoc = 0; assignedLoc < assigned.size(); assignedLoc++) {
 		KeyRangeRef keys(assigned[assignedLoc].key.removePrefix(persistShardAssignedKeys.begin),

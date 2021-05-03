@@ -319,7 +319,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 			data.insert(format("task_%d", i));
 		}
 
-		Standalone<RangeResultRef> values = wait(tr->getRange(
+		RangeResult values = wait(tr->getRange(
 		    KeyRangeRef(LiteralStringRef("Hello_\x00"), LiteralStringRef("Hello_\xff")), CLIENT_KNOBS->TOO_MANY));
 		if (values.size() != data.size()) {
 			TraceEvent(SevError, "CheckSayHello")
