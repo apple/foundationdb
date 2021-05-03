@@ -151,6 +151,10 @@ struct PolicyAcross final : IReplicationPolicy, public ReferenceCounted<PolicyAc
 		_policy->attributeKeys(set);
 	}
 
+	Reference<IReplicationPolicy> embeddedPolicy() const { return _policy; }
+
+	const std::string& attributeKey() const { return _attribKey; }
+
 protected:
 	int _count;
 	std::string _attribKey;

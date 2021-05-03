@@ -276,6 +276,20 @@ public:
 			Future<Void> deleteFuture = deleteFile(this);
 			if (!deleteFuture.isReady())
 				filesBeingDeleted[filename] = deleteFuture;
+		} else if (isSoleOwner()) {
+			// isSoleOwner is a bit confusing here. What we mean is that the openFiles map is the sole owner. If we
+			// remove the file from the map to make sure it gets closed.
+			auto& openFiles = g_simulator.getCurrentProcess()->machine->openFiles;
+			auto iter = openFiles.find(filename);
+			// the file could've been renamed (DiskQueue does that for example). In that case the file won't be in the
+			// map anymore.
+			if (iter != openFiles.end()) {
+				// even if the filename exists, it doesn't mean that it references the same file. It could be that the
+				// file was renamed and later a file with the same name was opened.
+				if (iter->second.canGet() && iter->second.get().getPtr() == this) {
+					openFiles.erase(filename);
+				}
+			}
 		}
 	}
 
@@ -449,7 +463,7 @@ private:
 			    self->getModificationsAndInsert(offset, length, true, writeEnded);
 			self->minSizeAfterPendingModifications = std::max(self->minSizeAfterPendingModifications, offset + length);
 
-			if (BUGGIFY_WITH_PROB(0.001))
+			if (BUGGIFY_WITH_PROB(0.001) && !g_simulator.speedUpSimulation)
 				priorModifications.push_back(
 				    delay(deterministicRandom()->random01() * FLOW_KNOBS->MAX_PRIOR_MODIFICATION_DELAY) ||
 				    self->killed.getFuture());

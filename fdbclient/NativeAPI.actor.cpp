@@ -32,6 +32,8 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/MultiInterface.h"
 
+#include "fdbclient/ActorLineageProfiler.h"
+#include "fdbclient/AnnotateActor.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/CoordinationInterface.h"
@@ -48,6 +50,7 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TransactionLineage.h"
 #include "fdbclient/versions.h"
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
@@ -84,6 +87,8 @@ using std::min;
 using std::pair;
 
 namespace {
+
+TransactionLineageCollector transactionLineageCollector;
 
 template <class Interface, class Request>
 Future<REPLY_TYPE(Request)> loadBalance(
@@ -900,6 +905,7 @@ Future<Standalone<RangeResultRef>> HealthMetricsRangeImpl::getRange(ReadYourWrit
 
 DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
                                  Reference<AsyncVar<ClientDBInfo>> clientInfo,
+                                 Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
                                  Future<Void> clientInfoMonitor,
                                  TaskPriority taskID,
                                  LocalityData const& clientLocality,
@@ -908,9 +914,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
                                  bool internal,
                                  int apiVersion,
                                  bool switchable)
-  : connectionFile(connectionFile), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), taskID(taskID),
-    clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), lockAware(lockAware),
-    apiVersion(apiVersion), switchable(switchable), proxyProvisional(false), cc("TransactionMetrics"),
+  : connectionFile(connectionFile), clientInfo(clientInfo), coordinator(coordinator),
+    clientInfoMonitor(clientInfoMonitor), taskID(taskID), clientLocality(clientLocality),
+    enableLocalityLoadBalance(enableLocalityLoadBalance), lockAware(lockAware), apiVersion(apiVersion),
+    switchable(switchable), proxyProvisional(false), cc("TransactionMetrics"),
     transactionReadVersions("ReadVersions", cc), transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
     transactionReadVersionsCompleted("ReadVersionsCompleted", cc),
     transactionReadVersionBatches("ReadVersionBatches", cc),
@@ -959,6 +966,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
 
 	GlobalConfig::create(this, clientInfo);
+	GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
+	GlobalConfig::globalConfig().trigger(samplingWindow, samplingProfilerUpdateWindow);
 
 	monitorProxiesInfoChange = monitorProxiesChange(clientInfo, &proxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
@@ -1022,13 +1031,13 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		        singleKeyRange(LiteralStringRef("consistency_check_suspended"))
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeySpaceModule(
-		    SpecialKeySpace::MODULE::GLOBALCONFIG, SpecialKeySpace::IMPLTYPE::READWRITE,
-		    std::make_unique<GlobalConfigImpl>(
-		        SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG)));
+		    SpecialKeySpace::MODULE::GLOBALCONFIG,
+		    SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<GlobalConfigImpl>(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG)));
 		registerSpecialKeySpaceModule(
-		    SpecialKeySpace::MODULE::TRACING, SpecialKeySpace::IMPLTYPE::READWRITE,
-		    std::make_unique<TracingOptionsImpl>(
-		        SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::TRACING)));
+		    SpecialKeySpace::MODULE::TRACING,
+		    SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<TracingOptionsImpl>(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::TRACING)));
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::CONFIGURATION,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
@@ -1063,6 +1072,14 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		    std::make_unique<DataDistributionImpl>(
 		        KeyRangeRef(LiteralStringRef("data_distribution/"), LiteralStringRef("data_distribution0"))
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::ACTORLINEAGE,
+		    SpecialKeySpace::IMPLTYPE::READONLY,
+		    std::make_unique<ActorLineageImpl>(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ACTORLINEAGE)));
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::ACTOR_PROFILER_CONF,
+		                              SpecialKeySpace::IMPLTYPE::READWRITE,
+		                              std::make_unique<ActorProfilerConf>(SpecialKeySpace::getModuleRange(
+		                                  SpecialKeySpace::MODULE::ACTOR_PROFILER_CONF)));
 	}
 	if (apiVersionAtLeast(630)) {
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION,
@@ -1174,6 +1191,8 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false),
     transactionTracingEnabled(true) {}
 
+// Static constructor used by server processes to create a DatabaseContext
+// For internal (fdbserver) use only
 Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo,
                                  Future<Void> clientInfoMonitor,
                                  LocalityData clientLocality,
@@ -1184,6 +1203,7 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo,
                                  bool switchable) {
 	return Database(new DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>>(),
 	                                    clientInfo,
+	                                    makeReference<AsyncVar<Optional<ClientLeaderRegInterface>>>(),
 	                                    clientInfoMonitor,
 	                                    taskID,
 	                                    clientLocality,
@@ -1466,6 +1486,9 @@ void DatabaseContext::expireThrottles() {
 
 extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& ccs);
 
+// Creates a database object that represents a connection to a cluster
+// This constructor uses a preallocated DatabaseContext that may have been created
+// on another thread
 Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
                                   int apiVersion,
                                   bool internal,
@@ -1512,15 +1535,20 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 	g_network->initTLS();
 
 	auto clientInfo = makeReference<AsyncVar<ClientDBInfo>>();
+	auto coordinator = makeReference<AsyncVar<Optional<ClientLeaderRegInterface>>>();
 	auto connectionFile = makeReference<AsyncVar<Reference<ClusterConnectionFile>>>();
 	connectionFile->set(connFile);
-	Future<Void> clientInfoMonitor = monitorProxies(
-	    connectionFile, clientInfo, networkOptions.supportedVersions, StringRef(networkOptions.traceLogGroup));
+	Future<Void> clientInfoMonitor = monitorProxies(connectionFile,
+	                                                clientInfo,
+	                                                coordinator,
+	                                                networkOptions.supportedVersions,
+	                                                StringRef(networkOptions.traceLogGroup));
 
 	DatabaseContext* db;
 	if (preallocatedDb) {
 		db = new (preallocatedDb) DatabaseContext(connectionFile,
 		                                          clientInfo,
+		                                          coordinator,
 		                                          clientInfoMonitor,
 		                                          TaskPriority::DefaultEndpoint,
 		                                          clientLocality,
@@ -1532,6 +1560,7 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 	} else {
 		db = new DatabaseContext(connectionFile,
 		                         clientInfo,
+		                         coordinator,
 		                         clientInfoMonitor,
 		                         TaskPriority::DefaultEndpoint,
 		                         clientLocality,
@@ -2497,8 +2526,10 @@ ACTOR Future<Version> watchValue(Future<Version> version,
 				cx->invalidateCache(key);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 			} else if (e.code() == error_code_watch_cancelled || e.code() == error_code_process_behind) {
-				TEST(e.code() == error_code_watch_cancelled); // Too many watches on storage server, poll for changes
+				// clang-format off
+				TEST(e.code() == error_code_watch_cancelled); // Too many watches on the storage server, poll for changes instead
 				TEST(e.code() == error_code_process_behind); // The storage servers are all behind
+				// clang-format on
 				wait(delay(CLIENT_KNOBS->WATCH_POLLING_TIME, info.taskID));
 			} else if (e.code() == error_code_timed_out) { // The storage server occasionally times out watches in case
 				                                           // it was cancelled
@@ -3071,6 +3102,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx,
 						throw deterministicRandom()->randomChoice(
 						    std::vector<Error>{ transaction_too_old(), future_version() });
 					}
+					state AnnotateActor annotation(currentLineage);
 					GetKeyValuesReply _rep =
 					    wait(loadBalance(cx.getPtr(),
 					                     beginServer.second,
@@ -4892,46 +4924,95 @@ Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 	return versionstampPromise.getFuture();
 }
 
-ACTOR Future<ProtocolVersion> coordinatorProtocolsFetcher(Reference<ClusterConnectionFile> f) {
-	state ClientCoordinators coord(f);
+// Gets the protocol version reported by a coordinator via the protocol info interface
+ACTOR Future<ProtocolVersion> getCoordinatorProtocol(NetworkAddressList coordinatorAddresses) {
+	RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{ { coordinatorAddresses }, WLTOKEN_PROTOCOL_INFO } };
+	ProtocolInfoReply reply = wait(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
 
-	state vector<Future<ProtocolInfoReply>> coordProtocols;
-	coordProtocols.reserve(coord.clientLeaderServers.size());
-	for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
-		RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{
-			{ coord.clientLeaderServers[i].getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO } };
-		coordProtocols.push_back(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
-	}
-
-	wait(smartQuorum(coordProtocols, coordProtocols.size() / 2 + 1, 1.5));
-
-	std::unordered_map<uint64_t, int> protocolCount;
-	for (int i = 0; i < coordProtocols.size(); i++) {
-		if (coordProtocols[i].isReady()) {
-			protocolCount[coordProtocols[i].get().version.version()]++;
-		}
-	}
-
-	uint64_t majorityProtocol = std::max_element(protocolCount.begin(),
-	                                             protocolCount.end(),
-	                                             [](const std::pair<uint64_t, int>& l,
-	                                                const std::pair<uint64_t, int>& r) { return l.second < r.second; })
-	                                ->first;
-	return ProtocolVersion(majorityProtocol);
+	return reply.version;
 }
 
-// Returns the protocol version reported by a quorum of coordinators
-// If an expected version is given, the future won't return until the protocol version is different than expected
-ACTOR Future<ProtocolVersion> getClusterProtocol(Reference<ClusterConnectionFile> f,
-                                                 Optional<ProtocolVersion> expectedVersion) {
+// Gets the protocol version reported by a coordinator in its connect packet
+// If we are unable to get a version from the connect packet (e.g. because we lost connection with the peer), then this
+// function will return with an unset result.
+// If an expected version is given, this future won't return if the actual protocol version matches the expected version
+ACTOR Future<Optional<ProtocolVersion>> getCoordinatorProtocolFromConnectPacket(
+    NetworkAddress coordinatorAddress,
+    Optional<ProtocolVersion> expectedVersion) {
+
+	state Reference<AsyncVar<Optional<ProtocolVersion>>> protocolVersion =
+	    FlowTransport::transport().getPeerProtocolAsyncVar(coordinatorAddress);
+
 	loop {
-		ProtocolVersion protocolVersion = wait(coordinatorProtocolsFetcher(f));
-		if (!expectedVersion.present() || protocolVersion != expectedVersion.get()) {
-			return protocolVersion;
-		} else {
-			wait(delay(2.0)); // TODO: this is temporary, so not making into a knob yet
+		if (protocolVersion->get().present() && protocolVersion->get() != expectedVersion) {
+			return protocolVersion->get();
+		}
+
+		Future<Void> change = protocolVersion->onChange();
+		if (!protocolVersion->get().present()) {
+			// If we still don't have any connection info after a timeout, retry sending the protocol version request
+			change = timeout(change, FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT, Void());
+		}
+
+		wait(change);
+
+		if (!protocolVersion->get().present()) {
+			return protocolVersion->get();
 		}
 	}
+}
+
+// Returns the protocol version reported by the given coordinator
+// If an expected version is given, the future won't return until the protocol version is different than expected
+ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
+    Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
+    Optional<ProtocolVersion> expectedVersion) {
+
+	state bool needToConnect = true;
+	state Future<ProtocolVersion> protocolVersion = Never();
+
+	loop {
+		if (!coordinator->get().present()) {
+			wait(coordinator->onChange());
+		} else {
+			Endpoint coordinatorEndpoint = coordinator->get().get().getLeader.getEndpoint();
+			if (needToConnect) {
+				// Even though we typically rely on the connect packet to get the protocol version, we need to send some
+				// request in order to start a connection. This protocol version request serves that purpose.
+				protocolVersion = getCoordinatorProtocol(coordinatorEndpoint.addresses);
+				needToConnect = false;
+			}
+			choose {
+				when(wait(coordinator->onChange())) { needToConnect = true; }
+
+				when(ProtocolVersion pv = wait(protocolVersion)) {
+					if (!expectedVersion.present() || expectedVersion.get() != pv) {
+						return pv;
+					}
+
+					protocolVersion = Never();
+				}
+
+				// Older versions of FDB don't have an endpoint to return the protocol version, so we get this info from
+				// the connect packet
+				when(Optional<ProtocolVersion> pv = wait(getCoordinatorProtocolFromConnectPacket(
+				         coordinatorEndpoint.getPrimaryAddress(), expectedVersion))) {
+					if (pv.present()) {
+						return pv.get();
+					} else {
+						needToConnect = true;
+					}
+				}
+			}
+		}
+	}
+}
+
+// Returns the protocol version reported by the coordinator this client is currently connected to
+// If an expected version is given, the future won't return until the protocol version is different than expected
+// Note: this will never return if the server is running a protocol from FDB 5.0 or older
+Future<ProtocolVersion> DatabaseContext::getClusterProtocol(Optional<ProtocolVersion> expectedVersion) {
+	return getClusterProtocolImpl(coordinator, expectedVersion);
 }
 
 uint32_t Transaction::getSize() {
