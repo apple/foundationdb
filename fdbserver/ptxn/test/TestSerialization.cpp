@@ -64,7 +64,7 @@ TEST_CASE("/fdbserver/ptxn/test/headeredSerializer") {
 
 	// Before writing any items, the serializer should put a header placeholder.
 	ASSERT_EQ(serializer.getHeaderBytes(), ptxn::getSerializedBytes<TestSerializerHeader>());
-	ASSERT_EQ(serializer.getTotalBytes(), serializer.getHeaderBytes());
+	ASSERT_EQ(serializer.getTotalBytes(), ptxn::SerializerVersionOptionBytes + serializer.getHeaderBytes());
 	ASSERT_EQ(serializer.getItemsBytes(), 0);
 	ASSERT_EQ(serializer.getNumItems(), 0);
 
@@ -106,7 +106,8 @@ TEST_CASE("/fdbserver/ptxn/test/twoLevelHeaderedSerializer") {
 	TestSerializer serializer;
 
 	// Test the sanity of initial state
-	ASSERT_EQ(serializer.getTotalBytes(), ptxn::getSerializedBytes<TestSerializerHeader>());
+	ASSERT_EQ(serializer.getTotalBytes(),
+	          ptxn::SerializerVersionOptionBytes + ptxn::getSerializedBytes<TestSerializerHeader>());
 	ASSERT(serializer.isSectionCompleted());
 	ASSERT(!serializer.isAllItemsCompleted());
 	ASSERT_EQ(serializer.getNumItems(), 0);
@@ -119,7 +120,7 @@ TEST_CASE("/fdbserver/ptxn/test/twoLevelHeaderedSerializer") {
 	ASSERT_EQ(serializer.getNumSections(), 1);
 	ASSERT_EQ(serializer.getNumItemsCurrentSection(), 0);
 	ASSERT_EQ(serializer.getTotalBytes(),
-	          ptxn::getSerializedBytes<TestSerializerHeader>() +
+	          ptxn::SerializerVersionOptionBytes + ptxn::getSerializedBytes<TestSerializerHeader>() +
 	              ptxn::getSerializedBytes<TestSerializerSectionHeader>());
 
 	// Add new items in the current section
@@ -220,7 +221,8 @@ TEST_CASE("/fdbserver/ptxn/test/ProxyTLogPushMessageSerializer") {
 
 		ASSERT(header.protocolVersion == ProxyTLogMessageProtocolVersion);
 		ASSERT_EQ(header.numItems, 2);
-		ASSERT_EQ(header.length, serializedTeam1.size() - getSerializedBytes<ProxyTLogMessageHeader>());
+		ASSERT_EQ(header.length,
+		          serializedTeam1.size() - getSerializedBytes<ProxyTLogMessageHeader>() - SerializerVersionOptionBytes);
 
 		ASSERT_EQ(items[0].mutation.type, MutationRef::SetValue);
 		ASSERT(items[0].mutation.param1 == LiteralStringRef("Key1"));
@@ -459,7 +461,7 @@ TEST_CASE("/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/hugeData") {
 	serializeVersionedSubsequencedMutations(serializer, data);
 	serializer.completeMessageWriting();
 
-	std::cout << " Serialized " << numMutations << " mutations, the serialized data have " << serializer.getTotalBytes()
+	std::cout << " Serialized " << numMutations << " mutations, the serialized data used " << serializer.getTotalBytes()
 	          << " bytes." << std::endl;
 
 	Standalone<StringRef> serialized = serializer.getSerialized();

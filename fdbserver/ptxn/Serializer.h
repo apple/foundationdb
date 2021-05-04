@@ -33,13 +33,17 @@
 
 namespace ptxn {
 
+// Number of bytes of VersionOption, which is serialized when constructing the BinaryWriter
+const size_t SerializerVersionOptionBytes =
+    BinaryWriter(IncludeVersion(ProtocolVersion::withPartitionTransaction())).getLength();
+
 // Get the number of bytes of a serialized object. Does not work with any objects that has flexible size.
 template <typename T>
 size_t getSerializedBytes() {
-	// Due to padding, the serialized object may take less space, have to figure
-	// out by evaluating.
+	// Due to padding, the serialized object may take less space, have to figure out by doing real serialization.
 	static size_t value =
-	    BinaryWriter::toValue(T(), IncludeVersion(ProtocolVersion::withPartitionTransaction())).size();
+	    BinaryWriter::toValue(T(), IncludeVersion(ProtocolVersion::withPartitionTransaction())).size() -
+	    SerializerVersionOptionBytes;
 	return value;
 }
 
@@ -77,18 +81,25 @@ public:
 	void writeHeader(const header_t& header) {
 		ASSERT(isWritingCompleted());
 
-		// Note: Due to padding, we can NOT directly copy the header to writer.getData()
+		// Note: Due to padding, we cannot directly copy the header to writer.getData()
+		// Need to serialize it first
 		Standalone<StringRef> serialized =
 		    BinaryWriter::toValue(header, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
-		std::memcpy(reinterpret_cast<uint8_t*>(writer.getData()), serialized.begin(), getHeaderBytes());
+		std::memcpy(reinterpret_cast<uint8_t*>(writer.getData()) + SerializerVersionOptionBytes,
+		            serialized.begin() + SerializerVersionOptionBytes,
+		            getHeaderBytes());
 	}
 
+	// Returns the bytes used to serialize the header
 	size_t getHeaderBytes() const { return getSerializedBytes<header_t>(); }
 
-	size_t getItemsBytes() const { return writer.getLength() - getHeaderBytes(); }
+	// Returns the bytes used to serialize the items
+	size_t getItemsBytes() const { return writer.getLength() - SerializerVersionOptionBytes - getHeaderBytes(); }
 
+	// Returns the total bytes the serializer used
 	size_t getTotalBytes() const { return writer.getLength(); }
 
+	// Returns the number of items
 	size_t getNumItems() const { return numItems; }
 
 	uint32_t getItemsCRC32() const {
@@ -153,7 +164,7 @@ public:
 
 		Standalone<StringRef> serialized =
 		    BinaryWriter::toValue(header, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
-		std::memcpy(reinterpret_cast<uint8_t*>(writer.getData()), serialized.begin(), getMainHeaderBytes());
+		std::memcpy(reinterpret_cast<uint8_t*>(writer.getData()) + SerializerVersionOptionBytes, serialized.begin() + SerializerVersionOptionBytes, getMainHeaderBytes());
 	}
 
 	// Write the section header, call only after completeSectionWriting()
@@ -163,7 +174,7 @@ public:
 		Standalone<StringRef> serialized =
 		    BinaryWriter::toValue(header, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
 		std::memcpy(reinterpret_cast<uint8_t*>(writer.getData()) + bytesBeforeCurrentSection,
-		            serialized.begin(),
+		            serialized.begin() + SerializerVersionOptionBytes,
 		            getSectionHeaderBytes());
 	}
 

@@ -37,3 +37,5 @@ startDelay = 0
     testName = 'UnitTests'
     maxTestCases = 1
     testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/ServerTeamPeekCursor'
+
+    maxBytesPerPeek = 65536

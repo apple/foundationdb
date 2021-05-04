@@ -86,10 +86,15 @@ Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogConte
 	          << (request.endVersion.present() ? concatToString(request.endVersion.get()) : "-") << ")" << std::endl;
 	std::cout << std::endl;
 
+	Version firstVersion = invalidVersion;
 	Version lastVersion = invalidVersion;
-	Version endVersion = request.endVersion.present() ? request.endVersion.get() : MAX_VERSION;
+	Version endVersion = MAX_VERSION;
 	bool haveUnclosedVersionSection = false;
 	TLogStorageServerMessageSerializer serializer(teamID);
+
+	if (request.endVersion.present() && request.endVersion.get() != invalidVersion) {
+		endVersion = request.endVersion.get();
+	}
 
 	for (const auto& mutation : mutations) {
 		const Version currentVersion = mutation.version;
@@ -101,6 +106,8 @@ Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogConte
 
 		// The serialized data size is too big, cutoff here
 		if (serializer.getTotalBytes() >= pFakeTLogContext->maxBytesPerPeek && lastVersion != currentVersion) {
+			std::cout << "Stopped serializing due to the reply size limit: Serialized " << serializer.getTotalBytes()
+			          << " Limit " << pFakeTLogContext->maxBytesPerPeek << std::endl;
 			break;
 		}
 
@@ -114,8 +121,13 @@ Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogConte
 				serializer.completeVersionWriting();
 				haveUnclosedVersionSection = false;
 			}
+
 			serializer.startVersionWriting(currentVersion);
 			haveUnclosedVersionSection = true;
+
+			if (firstVersion == invalidVersion) {
+				firstVersion = currentVersion;
+			}
 		}
 
 		const Subsequence subsequence = mutation.subsequence;
@@ -134,6 +146,12 @@ Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogConte
 	Standalone<StringRef> serialized = serializer.getSerialized();
 	TLogPeekReply reply{ request.debugID, serialized.arena(), serialized };
 	request.reply.send(reply);
+
+	std::cout << std::endl;
+	std::cout << " Reply:" << std::endl;
+	std::cout << std::setw(30) << "Version range: "
+	          << "[" << firstVersion << ", " << lastVersion << "]" << std::endl;
+	std::cout << std::setw(30) << "Serialized data length: " << serializer.getTotalBytes() << std::endl;
 
 	return Void();
 }

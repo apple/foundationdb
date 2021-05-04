@@ -409,7 +409,7 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/ServerTeamPeekCursor") {
 
 	ptxn::test::tlogPeek::fillMutations(pContext, versions);
 	// Limit the size of reply, to force multiple peeks
-	pContext->maxBytesPerPeek = 1024 * 10;
+	pContext->maxBytesPerPeek = params.getInt("maxBytesPerPeek").orDefault(32 * 1024);
 	actors.push_back(
 	    ptxn::test::tlogPeek::initializeTLogForPeekTest(ptxn::MessageTransferModel::TLogActivelyPush, pContext));
 
@@ -417,9 +417,10 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/ServerTeamPeekCursor") {
 	    ptxn::test::tlogPeek::INITIAL_VERSION, teamID, pContext->pTLogInterface.get());
 	state size_t index = 0;
 	loop {
-		std::cout << "Querying from version: " << pCursor->getLastVersion() << std::endl;
+		std::cout << std::endl << "Querying team " << teamID.toString() << " from version: " << pCursor->getLastVersion() << std::endl;
 		state bool remoteDataAvailable = wait(pCursor->remoteMoreAvailable());
 		if (!remoteDataAvailable) {
+			std::cout << " TLog reported no more mutations available." << std::endl;
 			break;
 		}
 
@@ -428,6 +429,8 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/ServerTeamPeekCursor") {
 			pCursor->next();
 		}
 	}
+
+	ASSERT_EQ(index, pContext->mutations[teamID].size());
 
 	return Void();
 }
