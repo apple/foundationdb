@@ -143,7 +143,7 @@ extern bool isAssertDisabled(int line);
 	} while (false)
 
 // Assert a FDB exception is thrown when evaluating the expression
-// NOTE: it can *NOT* handle internal_error as it is treated differently in FDB
+// NOTE: it *CANNOT* handle internal_error as it is treated differently in FDB
 #define ASSERT_THROW_FDB_ERROR(expression, fdb_error)                                                                  \
 	do {                                                                                                               \
 		bool _____exception_happened = false;                                                                          \
