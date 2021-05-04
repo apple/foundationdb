@@ -2242,7 +2242,6 @@ void ReadYourWritesTransaction::setOptionImpl(FDBTransactionOptions::Option opti
 		break;
 	case FDBTransactionOptions::BYPASS_UNREADABLE:
 		validateOptionValue(value, false);
-		TraceEvent("ReadVersionStampValueOptionSet");
 		options.bypassUnreadable = true;
 		break;
 	default:

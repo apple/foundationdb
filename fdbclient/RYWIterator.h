@@ -74,7 +74,8 @@ private:
 	SnapshotCache::iterator cache;
 	WriteMap::iterator writes;
 	KeyValueRef temp;
-	bool bypassUnreadable;
+	bool bypassUnreadable; // When set, allows read from sections of keyspace that have become unreadable because of
+	                       // versionstamp operations
 
 	void updateCmp();
 };
