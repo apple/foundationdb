@@ -16,4 +16,5 @@ else()
 
   ExternalProject_Get_property(msgpackProject SOURCE_DIR)
   target_include_directories(msgpack SYSTEM INTERFACE "${SOURCE_DIR}/include")
+  add_dependencies(msgpack msgpackProject)
 endif()
