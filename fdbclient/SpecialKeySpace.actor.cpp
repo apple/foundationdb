@@ -573,11 +573,15 @@ ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* 
 	    ryw->getSpecialKeySpaceWriteMap().containedRanges(specialKeys);
 	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::iterator iter = ranges.begin();
 	state std::vector<SpecialKeyRangeRWImpl*> writeModulePtrs;
+	std::unordered_set<SpecialKeyRangeRWImpl*> deduplicate;
 	while (iter != ranges.end()) {
 		std::pair<bool, Optional<Value>> entry = iter->value();
 		if (entry.first) {
 			auto modulePtr = sks->getRWImpls().rangeContaining(iter->begin())->value();
-			writeModulePtrs.push_back(modulePtr);
+			auto [_, inserted] = deduplicate.insert(modulePtr);
+			if (inserted) {
+				writeModulePtrs.push_back(modulePtr);
+			}
 		}
 		++iter;
 	}
