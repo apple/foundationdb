@@ -92,7 +92,7 @@ public:
 		    0, reinterpret_cast<uint8_t*>(const_cast<void*>(writer.getData())) + getHeaderBytes(), getItemsBytes());
 	}
 
-	// Mark the serializer not accepting more items, and the header is ready for writing
+	// Marks the serializer not accepting more items, and the header is ready for writing
 	void completeItemWriting() { itemComplete = true; }
 
 	// Return true if the serializer is not accepting more items
