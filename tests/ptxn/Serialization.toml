@@ -67,3 +67,15 @@ startDelay = 0
     testName = 'UnitTests'
     maxTestCases = 1
     testsMatching = '/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/reset'
+
+[[test]]
+testTitle = 'Test TLogStorageServerPeekMessageSerializer -- Huge amount of data'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/hugeData'
+
+    numMutations = 32768

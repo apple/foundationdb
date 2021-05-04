@@ -114,7 +114,7 @@ struct TLogPeekRequest {
 	// We are interested in versions between [beginVersion, endVersion)
 	// Following the C++ custom, the endVersion is *EXCLUSIVE*.
 	Version beginVersion;
-	Version endVersion;
+	Optional<Version> endVersion;
 	TeamID teamID;
 
 	ReplyPromise<TLogPeekReply> reply;

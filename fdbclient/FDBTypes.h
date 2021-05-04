@@ -906,9 +906,9 @@ struct CursorIndex {
 
 	// TODO Replace the code with real spaceship operator when C++20 is allowed
 	bool operator>(const CursorIndex& another) { return operatorSpaceship(*this, another) == 1; }
-	bool operator>=(const CursorIndex& another) { return operatorSpaceship(*this, another) != -1; }
+	bool operator>=(const CursorIndex& another) { return operatorSpaceship(*this, another) >= 0; }
 	bool operator<(const CursorIndex& another) { return operatorSpaceship(*this, another) == -1; }
-	bool operator<=(const CursorIndex& another) { return operatorSpaceship(*this, another) == 1; }
+	bool operator<=(const CursorIndex& another) { return operatorSpaceship(*this, another) <= 0; }
 	bool operator!=(const CursorIndex& another) { return operatorSpaceship(*this, another) != 0; }
 	bool operator==(const CursorIndex& another) { return operatorSpaceship(*this, another) == 0; }
 
@@ -920,6 +920,10 @@ struct CursorIndex {
 	}
 };
 
+// Returns
+//   0 if  c1 == c2
+//   1 if  c1 >  c2
+//  -1 if  c1 <  c2
 inline constexpr int operatorSpaceship(const CursorIndex& c1, const CursorIndex& c2) {
 	if (c1.version > c2.version) {
 		return 1;

@@ -344,7 +344,8 @@ ACTOR Future<Void> peekAndCheck(std::shared_ptr<FakeTLogContext> pContext, std::
 		state Optional<UID> debugID(deterministicRandom()->randomUniqueID());
 		state TeamID teamID(getRandomTeamID());
 		state size_t beginVersionIndex(deterministicRandom()->randomInt(0, versions.size() - 1));
-		state size_t endVersionIndex(std::min(beginVersionIndex + deterministicRandom()->randomInt(1, 10), versions.size()));
+		state size_t endVersionIndex(
+		    std::min(beginVersionIndex + deterministicRandom()->randomInt(1, 10), versions.size()));
 		state Version beginVersion(versions[beginVersionIndex]);
 		state Version endVersion(endVersionIndex >= versions.size() ? -1 : versions[endVersionIndex]);
 		state TLogPeekRequest request;
@@ -355,7 +356,8 @@ ACTOR Future<Void> peekAndCheck(std::shared_ptr<FakeTLogContext> pContext, std::
 		request.endVersion = endVersion;
 
 		std::cout << std::endl;
-		std::cout << "Sending request with Debug ID " << debugID.get() << " with version range [" << beginVersion << ", " << endVersion << ")" << std::endl;
+		std::cout << "Sending request with Debug ID " << debugID.get() << " with version range [" << beginVersion
+		          << ", " << endVersion << ")" << std::endl;
 
 		TLogPeekReply reply = wait(pContext->pTLogInterface->peek.getReply(request));
 
@@ -366,10 +368,12 @@ ACTOR Future<Void> peekAndCheck(std::shared_ptr<FakeTLogContext> pContext, std::
 
 		// Verify if the deserialized data is the same
 		int index = 0;
-		while (pContext->mutations[teamID][index].version != beginVersion) ++index;
+		while (pContext->mutations[teamID][index].version != beginVersion)
+			++index;
 
 		TLogStorageServerMessageDeserializer deserializer(reply.arena, reply.data);
-		for(TLogStorageServerMessageDeserializer::iterator iter = deserializer.begin(); iter != deserializer.end(); ++iter, ++index) {
+		for (TLogStorageServerMessageDeserializer::iterator iter = deserializer.begin(); iter != deserializer.end();
+		     ++iter, ++index) {
 			ASSERT(pContext->mutations[teamID][index] == *iter);
 		}
 
@@ -389,7 +393,8 @@ TEST_CASE("/fdbserver/ptxn/test/tlogPeek/readFromSerialization") {
 	state std::vector<Future<Void>> actors;
 
 	ptxn::test::tlogPeek::fillMutations(pContext, versions);
-	actors.push_back(ptxn::test::tlogPeek::initializeTLogForPeekTest(ptxn::MessageTransferModel::TLogActivelyPush, pContext));
+	actors.push_back(
+	    ptxn::test::tlogPeek::initializeTLogForPeekTest(ptxn::MessageTransferModel::TLogActivelyPush, pContext));
 	wait(ptxn::test::tlogPeek::peekAndCheck(pContext, versions));
 
 	return Void();
@@ -405,9 +410,11 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/ServerTeamPeekCursor") {
 	ptxn::test::tlogPeek::fillMutations(pContext, versions);
 	// Limit the size of reply, to force multiple peeks
 	pContext->maxBytesPerPeek = 1024 * 10;
-	actors.push_back(ptxn::test::tlogPeek::initializeTLogForPeekTest(ptxn::MessageTransferModel::TLogActivelyPush, pContext));
+	actors.push_back(
+	    ptxn::test::tlogPeek::initializeTLogForPeekTest(ptxn::MessageTransferModel::TLogActivelyPush, pContext));
 
-	state std::shared_ptr<ptxn::ServerTeamPeekCursor> pCursor = std::make_shared<ptxn::ServerTeamPeekCursor>(ptxn::test::tlogPeek::INITIAL_VERSION, teamID, pContext->pTLogInterface.get());
+	state std::shared_ptr<ptxn::ServerTeamPeekCursor> pCursor = std::make_shared<ptxn::ServerTeamPeekCursor>(
+	    ptxn::test::tlogPeek::INITIAL_VERSION, teamID, pContext->pTLogInterface.get());
 	state size_t index = 0;
 	loop {
 		std::cout << "Querying from version: " << pCursor->getLastVersion() << std::endl;
@@ -416,7 +423,7 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/ServerTeamPeekCursor") {
 			break;
 		}
 
-		while(pCursor->hasRemaining()) {
+		while (pCursor->hasRemaining()) {
 			ASSERT(pCursor->get() == pContext->mutations[teamID][index++]);
 			pCursor->next();
 		}

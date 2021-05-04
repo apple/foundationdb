@@ -67,7 +67,7 @@ struct PeekRemoteContext {
 	                  Version* pLastVersion_,
 	                  TLogInterfaceBase* pInterface_,
 	                  TLogStorageServerMessageDeserializer* pDeserializer_,
-					  TLogStorageServerMessageDeserializer::iterator* pDeserializerIterator_,
+	                  TLogStorageServerMessageDeserializer::iterator* pDeserializerIterator_,
 	                  Arena* pAttachArena_ = nullptr)
 	  : debugID(debugID_), teamID(teamID_), pLastVersion(pLastVersion_), pTLogInterface(pInterface_),
 	    pDeserializer(pDeserializer_), pDeserializerIterator(pDeserializerIterator_), pAttachArena(pAttachArena_) {
@@ -78,7 +78,6 @@ struct PeekRemoteContext {
 
 ACTOR Future<bool> peekRemote(PeekRemoteContext peekRemoteContext) {
 	state TLogPeekRequest request;
-
 
 	request.debugID = peekRemoteContext.debugID;
 	request.beginVersion = *peekRemoteContext.pLastVersion + 1;
@@ -124,7 +123,7 @@ Future<bool> PeekCursorBase::remoteMoreAvailable() {
 	return remoteMoreAvailableImpl();
 }
 
-const VersionSubsequenceMutation& PeekCursorBase::get() const{
+const VersionSubsequenceMutation& PeekCursorBase::get() const {
 	return getImpl();
 }
 
@@ -152,13 +151,8 @@ const TeamID& ServerTeamPeekCursor::getTeamID() const {
 
 Future<bool> ServerTeamPeekCursor::remoteMoreAvailableImpl() {
 	// FIXME Put debugID if necessary
-	PeekRemoteContext context(Optional<UID>(),
-	                          getTeamID(),
-	                          &lastVersion,
-	                          pTLogInterface,
-	                          &deserializer,
-							  &deserializerIter,
-	                          pAttachArena);
+	PeekRemoteContext context(
+	    Optional<UID>(), getTeamID(), &lastVersion, pTLogInterface, &deserializer, &deserializerIter, pAttachArena);
 
 	return peekRemote(context);
 }

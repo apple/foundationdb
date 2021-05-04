@@ -53,7 +53,8 @@ void TLogStorageServerMessageSerializer::writeSubsequenceMutationRef(const Subse
 	header.lastSubsequence = item.subsequence;
 }
 
-void TLogStorageServerMessageSerializer::writeSubsequenceMutationRef(const Subsequence& subsequence, const MutationRef& mutationRef) {
+void TLogStorageServerMessageSerializer::writeSubsequenceMutationRef(const Subsequence& subsequence,
+                                                                     const MutationRef& mutationRef) {
 	writeSubsequenceMutationRef({ subsequence, mutationRef });
 }
 
@@ -96,11 +97,14 @@ size_t TLogStorageServerMessageSerializer::getTotalBytes() const {
 	return serializer.getTotalBytes();
 }
 
-TLogStorageServerMessageDeserializer::TLogStorageServerMessageDeserializer(const Standalone<StringRef>& serialized_) {
+TLogStorageServerMessageDeserializer::TLogStorageServerMessageDeserializer(const Standalone<StringRef>& serialized_)
+  : endIterator(serialized_.arena(), serialized_, true) {
 	reset(serialized_.arena(), serialized_);
 }
 
-TLogStorageServerMessageDeserializer::TLogStorageServerMessageDeserializer(const Arena& serializedArena_, const StringRef serialized_) {
+TLogStorageServerMessageDeserializer::TLogStorageServerMessageDeserializer(const Arena& serializedArena_,
+                                                                           const StringRef serialized_)
+  : endIterator(serializedArena_, serialized_, true) {
 	reset(serializedArena_, serialized_);
 }
 
@@ -112,6 +116,8 @@ void TLogStorageServerMessageDeserializer::reset(const Arena& serializedArena_, 
 
 	DeserializerImpl deserializer(serializedArena, serialized);
 	header = deserializer.deserializeAsMainHeader();
+
+	endIterator = iterator(serializedArena, serialized, true);
 }
 
 const TeamID& TLogStorageServerMessageDeserializer::getTeamID() const {
@@ -131,8 +137,8 @@ const Version& TLogStorageServerMessageDeserializer::getLastVersion() const {
 }
 
 TLogStorageServerMessageDeserializer::iterator::iterator(const Arena& serializedArena_,
-                                 StringRef serialized_,
-                                 bool isEndIterator)
+                                                         StringRef serialized_,
+                                                         bool isEndIterator)
   : deserializer(serializedArena_, serialized_), rawSerializedData(serialized_) {
 
 	header = deserializer.deserializeAsMainHeader();
@@ -158,11 +164,13 @@ bool TLogStorageServerMessageDeserializer::iterator::operator!=(const iterator& 
 	return !(*this == another);
 }
 
-TLogStorageServerMessageDeserializer::iterator::reference TLogStorageServerMessageDeserializer::iterator::operator*() const {
+TLogStorageServerMessageDeserializer::iterator::reference TLogStorageServerMessageDeserializer::iterator::operator*()
+    const {
 	return currentItem;
 }
 
-TLogStorageServerMessageDeserializer::iterator::pointer TLogStorageServerMessageDeserializer::iterator::operator->() const {
+TLogStorageServerMessageDeserializer::iterator::pointer TLogStorageServerMessageDeserializer::iterator::operator->()
+    const {
 	return &currentItem;
 }
 
@@ -210,15 +218,15 @@ TLogStorageServerMessageDeserializer::iterator TLogStorageServerMessageDeseriali
 	return ++iterator(serializedArena, serialized, false);
 }
 
-TLogStorageServerMessageDeserializer::iterator TLogStorageServerMessageDeserializer::end() const {
-	return iterator(serializedArena, serialized, true);
+const TLogStorageServerMessageDeserializer::iterator& TLogStorageServerMessageDeserializer::end() const {
+	return endIterator;
 }
 
 TLogStorageServerMessageDeserializer::const_iterator TLogStorageServerMessageDeserializer::cbegin() const {
 	return begin();
 }
 
-TLogStorageServerMessageDeserializer::const_iterator TLogStorageServerMessageDeserializer::cend() const {
+const TLogStorageServerMessageDeserializer::const_iterator& TLogStorageServerMessageDeserializer::cend() const {
 	return end();
 }
 

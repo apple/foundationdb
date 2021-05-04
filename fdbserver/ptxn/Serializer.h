@@ -38,11 +38,12 @@ template <typename T>
 size_t getSerializedBytes() {
 	// Due to padding, the serialized object may take less space, have to figure
 	// out by evaluating.
-	static size_t value = BinaryWriter::toValue(T(), AssumeVersion(g_network->protocolVersion())).size();
+	static size_t value =
+	    BinaryWriter::toValue(T(), IncludeVersion(ProtocolVersion::withPartitionTransaction())).size();
 	return value;
 }
 
-// Encode objects in the format
+// Encode objects in format
 //
 //  | Header | Item | Item | ... |
 //
@@ -61,7 +62,9 @@ public:
 	using header_t = Header;
 	using item_t = Item;
 
-	HeaderedItemsSerializer() : writer(AssumeVersion(g_network->protocolVersion())) { writer << header_t(); }
+	HeaderedItemsSerializer() : writer(IncludeVersion(ProtocolVersion::withPartitionTransaction())) {
+		writer << header_t();
+	}
 
 	// Write a new item into the serializer
 	void writeItem(const item_t& item) {
@@ -75,7 +78,8 @@ public:
 		ASSERT(isWritingCompleted());
 
 		// Note: Due to padding, we can NOT directly copy the header to writer.getData()
-		Standalone<StringRef> serialized = BinaryWriter::toValue(header, AssumeVersion(g_network->protocolVersion()));
+		Standalone<StringRef> serialized =
+		    BinaryWriter::toValue(header, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
 		std::memcpy(reinterpret_cast<uint8_t*>(writer.getData()), serialized.begin(), getHeaderBytes());
 	}
 
@@ -106,6 +110,11 @@ public:
 	}
 };
 
+// Encode objects in format
+//
+//   | Main Header | Section Header | Item | Item | ... | Section Header | Item | ... |
+//
+// Main Header and Section Header must have a fixed size.
 template <typename MainHeader, typename SectionHeader, typename Item>
 class TwoLevelHeaderedItemsSerializer {
 	BinaryWriter writer;
@@ -134,7 +143,7 @@ public:
 	using section_header_t = SectionHeader;
 	using item_t = Item;
 
-	TwoLevelHeaderedItemsSerializer() : writer(AssumeVersion(g_network->protocolVersion())) {
+	TwoLevelHeaderedItemsSerializer() : writer(IncludeVersion(ProtocolVersion::withPartitionTransaction())) {
 		writer << main_header_t();
 	}
 
@@ -142,7 +151,8 @@ public:
 	void writeHeader(const main_header_t& header) {
 		ASSERT(isAllItemsCompleted() && isSectionCompleted());
 
-		Standalone<StringRef> serialized = BinaryWriter::toValue(header, AssumeVersion(g_network->protocolVersion()));
+		Standalone<StringRef> serialized =
+		    BinaryWriter::toValue(header, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
 		std::memcpy(reinterpret_cast<uint8_t*>(writer.getData()), serialized.begin(), getMainHeaderBytes());
 	}
 
@@ -150,8 +160,11 @@ public:
 	void writeSectionHeader(const section_header_t& header) {
 		ASSERT(!isAllItemsCompleted() && isSectionCompleted());
 
-		Standalone<StringRef> serialized = BinaryWriter::toValue(header, AssumeVersion(g_network->protocolVersion()));
-		std::memcpy(reinterpret_cast<uint8_t*>(writer.getData()) + bytesBeforeCurrentSection, serialized.begin(), getSectionHeaderBytes());
+		Standalone<StringRef> serialized =
+		    BinaryWriter::toValue(header, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
+		std::memcpy(reinterpret_cast<uint8_t*>(writer.getData()) + bytesBeforeCurrentSection,
+		            serialized.begin(),
+		            getSectionHeaderBytes());
 	}
 
 	// Start a new section, must be called after the previous section is completed and the section header is written.
@@ -215,7 +228,7 @@ public:
 // Load the serialized data into header and items
 template <typename Header, typename Item>
 bool headeredItemDeserializerBase(const Arena& arena, StringRef serialized, Header& header, std::vector<Item>& items) {
-	ArenaReader reader(arena, serialized, AssumeVersion(g_network->protocolVersion()));
+	ArenaReader reader(arena, serialized, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
 
 	if (reader.empty()) {
 		return false;
@@ -243,7 +256,7 @@ public:
 	// arena is the arena that contains the serialized data
 	// serialized is the StringRef points to the serialied data
 	TwoLevelHeaderedItemsDeserializer(const Arena& arena, StringRef serialized)
-	  : reader(arena, serialized, AssumeVersion(g_network->protocolVersion())) {
+	  : reader(arena, serialized, IncludeVersion(ProtocolVersion::withPartitionTransaction())) {
 		// The serialized data *MUST* have a header
 		ASSERT(!allConsumed());
 	}

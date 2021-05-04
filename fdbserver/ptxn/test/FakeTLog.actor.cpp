@@ -82,11 +82,12 @@ Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogConte
 	          << "Debug ID: " << (request.debugID.present() ? request.debugID.get().toString() : "Not present")
 	          << std::endl;
 	std::cout << std::setw(30) << "Team ID: " << request.teamID.toString() << std::endl;
-	std::cout << std::setw(30) << "Version range: [" << request.beginVersion << ", " << request.endVersion << ")"
-	          << std::endl;
+	std::cout << std::setw(30) << "Version range: [" << request.beginVersion << ", "
+	          << (request.endVersion.present() ? concatToString(request.endVersion.get()) : "-") << ")" << std::endl;
 	std::cout << std::endl;
 
 	Version lastVersion = invalidVersion;
+	Version endVersion = request.endVersion.present() ? request.endVersion.get() : MAX_VERSION;
 	bool haveUnclosedVersionSection = false;
 	TLogStorageServerMessageSerializer serializer(teamID);
 
@@ -104,7 +105,7 @@ Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogConte
 		}
 
 		// Finished the range
-		if (request.endVersion != invalidVersion && currentVersion >= request.endVersion) {
+		if (currentVersion >= endVersion) {
 			break;
 		}
 

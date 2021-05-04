@@ -189,9 +189,7 @@ public:
 		// serialized_ refers to the serialized data
 		// If isEndIterator, then the iterator indicates the end of the serialized data. The behavior of dereferencing
 		// the iterator is undefined.
-		iterator(const Arena& serializedArena_,
-		         StringRef serialized_,
-		         bool isEndIterator = false);
+		iterator(const Arena& serializedArena_, StringRef serialized_, bool isEndIterator = false);
 
 	public:
 		bool operator==(const iterator& another) const;
@@ -207,6 +205,10 @@ public:
 		iterator operator++(int);
 	};
 
+private:
+	iterator endIterator;
+
+public:
 	using const_iterator = iterator;
 
 	TLogStorageServerMessageDeserializer(const Standalone<StringRef>& serialized_);
@@ -232,9 +234,13 @@ public:
 	const Version& getLastVersion() const;
 
 	iterator begin() const;
-	iterator end() const;
+	// end() is called multiple times in typeical for loop:
+	//    for(auto iter = deserializer.begin(); iter != deserializer.end(); ++iter)
+	// since creating an iterator is *NOT* trivial, the end iterator is cached.
+	const iterator& end() const;
+
 	const_iterator cbegin() const;
-	const_iterator cend() const;
+	const const_iterator& cend() const;
 };
 
 } // namespace ptxn

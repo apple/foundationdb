@@ -429,3 +429,45 @@ TEST_CASE("/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/reset") {
 
 	return Void();
 }
+
+// Test serialize huge amount of data
+// This test is inspired by that the fact that the internal Arena in the serializer might reallocate, and could make
+// overwriting serialized data leading to corrupted results.
+TEST_CASE("/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/hugeData") {
+	using namespace ptxn;
+
+	const int numMutations = params.getInt("numMutations").orDefault(32 * 1024);
+	TLogStorageServerMessageSerializer serializer(deterministicRandom()->randomUniqueID());
+	Arena mutationArena;
+	Version version = 1;
+	Subsequence subsequence = 1;
+	std::vector<VersionSubsequenceMutation> data;
+	data.reserve(numMutations);
+	std::cout << " Generating " << numMutations << " mutations" << std::endl;
+	for (auto _ = 0; _ < numMutations; ++_) {
+		if (deterministicRandom()->randomInt(0, 20) == 0) {
+			version += deterministicRandom()->randomInt(1, 5);
+			subsequence = 1;
+		}
+		data.emplace_back(version,
+		                  subsequence++,
+		                  MutationRef(mutationArena,
+		                              MutationRef::SetValue,
+		                              deterministicRandom()->randomAlphaNumeric(10),
+		                              deterministicRandom()->randomAlphaNumeric(100)));
+	}
+	serializeVersionedSubsequencedMutations(serializer, data);
+	serializer.completeMessageWriting();
+
+	std::cout << " Serialized " << numMutations << " mutations, the serialized data have " << serializer.getTotalBytes()
+	          << " bytes." << std::endl;
+
+	Standalone<StringRef> serialized = serializer.getSerialized();
+	TLogStorageServerMessageDeserializer deserializer(serialized);
+	int index = 0;
+	for (auto iter = deserializer.begin(); iter != deserializer.end(); ++index, ++iter) {
+		ASSERT(*iter == data[index]);
+	}
+
+	return Void();
+}
