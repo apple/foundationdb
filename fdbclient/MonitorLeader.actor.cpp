@@ -786,7 +786,8 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			if (rep.get().read().forward.present()) {
 				TraceEvent("MonitorProxiesForwarding")
 				    .detail("NewConnStr", rep.get().read().forward.get().toString())
-				    .detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString());
+				    .detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString())
+				    .trackLatest("MonitorLeaderForwarding");
 				info.intermediateConnFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(
 				    connFile->getFilename(), ClusterConnectionString(rep.get().read().forward.get().toString())));
 				return info;
