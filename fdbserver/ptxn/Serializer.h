@@ -95,7 +95,7 @@ public:
 	// Marks the serializer not accepting more items, and the header is ready for writing
 	void completeItemWriting() { itemComplete = true; }
 
-	// Return true if the serializer is not accepting more items
+	// Returns true if the serializer is not accepting more items
 	bool isWritingCompleted() const { return itemComplete; }
 
 	// Get the serialized data
