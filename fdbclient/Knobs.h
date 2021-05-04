@@ -160,6 +160,7 @@ public:
 	double BACKUP_STATUS_DELAY;
 	double BACKUP_STATUS_JITTER;
 	double MIN_CLEANUP_SECONDS;
+	bool RESTORE_IGNORE_LOG_FILES;
 
 	// Configuration
 	int32_t DEFAULT_AUTO_PROXIES;

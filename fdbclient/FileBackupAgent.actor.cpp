@@ -4013,7 +4013,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 				wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
 				wait(store(ranges, restore.getRestoreRangesOrDefault(tr)));
-				wait(store(inconsistentSnapshotOnly, restore.inconsistentSnapshotOnly().getD(tr, false, false)));
+				wait(store(inconsistentSnapshotOnly,
+				           restore.inconsistentSnapshotOnly().getD(tr, false, CLIENT_KNOBS->RESTORE_IGNORE_LOG_FILES)));
 
 				wait(taskBucket->keepRunning(tr, task));
 
