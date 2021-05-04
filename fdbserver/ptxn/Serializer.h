@@ -98,7 +98,7 @@ public:
 	// Returns true if the serializer is not accepting more items
 	bool isWritingCompleted() const { return itemComplete; }
 
-	// Get the serialized data
+	// Returns the serialized data
 	Standalone<StringRef> getSerialized() const {
 		ASSERT(itemComplete);
 
