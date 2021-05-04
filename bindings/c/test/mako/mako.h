@@ -64,6 +64,7 @@
 #define ARG_FLATBUFFERS 8
 #define ARG_TRACE 9
 #define ARG_TRACEPATH 10
+#define ARG_LOGGROUP 11
 
 #define KEYPREFIX "mako"
 #define KEYPREFIXLEN 4
@@ -73,6 +74,7 @@ typedef struct {
 	int ops[MAX_OP][3];
 } mako_txnspec_t;
 
+#define LOGGROUP_MAX 256
 #define KNOB_MAX 256
 
 /* benchmark parameters */
@@ -93,6 +95,7 @@ typedef struct {
 	int verbose;
 	mako_txnspec_t txnspec;
 	char cluster_file[PATH_MAX];
+	char log_group[LOGGROUP_MAX];
 	int trace;
 	char tracepath[PATH_MAX];
 	char knobs[KNOB_MAX];
