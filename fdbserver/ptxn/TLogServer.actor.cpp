@@ -270,8 +270,10 @@ struct TLogGroupData : NonCopyable, public ReferenceCounted<TLogGroupData> {
 	//  +--------+--------+--------+--------+--------+
 	//  | xxxxxx |  xxxx  | xxxxxx |  xxx   |  xx    |
 	//  +--------+--------+--------+--------+--------+
-	//    ^ popOrder         ^spillOrder         ^committing
+	//    ^popOrder          ^spillOrder         ^committing
 	//
+	// x means a commit in the history which corresponds to location in log queue.
+	// ^ points to a log queue location
 	// ^popOrder is the location where SS reads the to-be-read data from tlog.
 	// ^committing is the location where the active TLog accepts the pushed data.
 	Deque<UID> popOrder;
@@ -1404,67 +1406,65 @@ ACTOR Future<Void> tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> per
 		state Future<Void> activeSharedChange = Void();
 		state std::vector<Future<Void>> tlogGroupTerminated = { Never() };
 
-		loop {
-			choose {
-				// TODO: restore old tlog groups from disk and build overlapping tlog groups from the restore
-				when(state InitializeTLogRequest req = waitNext(tlogRequests.getFuture())) {
-					if (!self->tlogCache.exists(req.recruitmentID)) {
-						self->tlogCache.set(req.recruitmentID, req.ptxnReply.getFuture());
+		loop choose {
+			// TODO: restore old tlog groups from disk and build overlapping tlog groups from the restore
+			when(state InitializeTLogRequest req = waitNext(tlogRequests.getFuture())) {
+				if (!self->tlogCache.exists(req.recruitmentID)) {
+					self->tlogCache.set(req.recruitmentID, req.ptxnReply.getFuture());
 
-						std::vector<Future<Void>> tlogGroupRecoveries;
-						for (auto& group : req.tlogGroups) {
-							// memory managed by each tlog group
-							IKeyValueStore* persistentData =
-							    keyValueStoreMemory(joinPath(folder, "loggroup"), group.logGroupId, 500e6);
-							IDiskQueue* persistentQueue =
-							    openDiskQueue(joinPath(folder, "logqueue-" + group.logGroupId.toString() + "-"),
-							                  "fdq",
-							                  group.logGroupId,
-							                  DiskQueueVersion::V1);
+					std::vector<Future<Void>> tlogGroupRecoveries;
+					for (auto& group : req.tlogGroups) {
+						// memory managed by each tlog group
+						IKeyValueStore* persistentData =
+						    keyValueStoreMemory(joinPath(folder, "loggroup"), group.logGroupId, 500e6);
+						IDiskQueue* persistentQueue =
+						    openDiskQueue(joinPath(folder, "logqueue-" + group.logGroupId.toString() + "-"),
+						                  "fdq",
+						                  group.logGroupId,
+						                  DiskQueueVersion::V1);
 
-							Reference<TLogGroupData> tlogGroup = makeReference<TLogGroupData>(tlogId,
-							                                                                  group.logGroupId,
-							                                                                  workerID,
-							                                                                  persistentData,
-							                                                                  persistentQueue,
-							                                                                  db,
-							                                                                  degraded,
-							                                                                  folder,
-							                                                                  self);
-							tlogGroup->sharedActors.send(commitQueue(tlogGroup));
+						Reference<TLogGroupData> tlogGroup = makeReference<TLogGroupData>(tlogId,
+						                                                                  group.logGroupId,
+						                                                                  workerID,
+						                                                                  persistentData,
+						                                                                  persistentQueue,
+						                                                                  db,
+						                                                                  degraded,
+						                                                                  folder,
+						                                                                  self);
+						tlogGroup->sharedActors.send(commitQueue(tlogGroup));
 
-							//	TODO: add updateStorageLoop when implementing pop
-							//	tlogGroup->sharedActors.send(updateStorageLoop(tlogGroup));
+						//	TODO: add updateStorageLoop when implementing pop
+						//	tlogGroup->sharedActors.send(updateStorageLoop(tlogGroup));
 
-							TraceEvent("SharedTlogGroup").detail("LogId", tlogId).detail("GroupID", group.logGroupId);
-							self->tlogGroups[group.logGroupId] = tlogGroup;
+						TraceEvent("SharedTlogGroup").detail("LogId", tlogId).detail("GroupID", group.logGroupId);
+						self->tlogGroups[group.logGroupId] = tlogGroup;
 
-							Promise<Void> teamRecovered;
-							tlogGroupRecoveries.push_back(tlogGroupRecovery(tlogGroup, teamRecovered));
-							tlogGroupTerminated.push_back(tlogGroup->terminated.getFuture());
-						}
-
-						choose {
-							when(wait(waitForAny(tlogGroupTerminated))) { throw tlog_stopped(); }
-							when(wait(waitForAll(tlogGroupRecoveries))) {}
-						}
-
-						// start the new generation
-						self->sharedActors.send(tLogStart(self, req, locality));
-					} else {
-						forwardPromise(req.ptxnReply, self->tlogCache.get(req.recruitmentID));
+						Promise<Void> teamRecovered;
+						tlogGroupRecoveries.push_back(tlogGroupRecovery(tlogGroup, teamRecovered));
+						tlogGroupTerminated.push_back(tlogGroup->terminated.getFuture());
 					}
-				}
-				when(wait(error)) { throw internal_error(); }
-				when(wait(activeSharedChange)) {
-					if (activeSharedTLog->get() == tlogId) {
-						TraceEvent("SharedTLogNowActive", self->dbgid).detail("NowActive", activeSharedTLog->get());
-						self->targetVolatileBytes = SERVER_KNOBS->TLOG_SPILL_THRESHOLD;
-					} else {
-						stopAllTLogs(self, tlogId);
+
+					choose {
+						when(wait(waitForAny(tlogGroupTerminated))) { throw tlog_stopped(); }
+						when(wait(waitForAll(tlogGroupRecoveries))) {}
 					}
-					activeSharedChange = activeSharedTLog->onChange();
+
+					// start the new generation
+					self->sharedActors.send(tLogStart(self, req, locality));
+				} else {
+					forwardPromise(req.ptxnReply, self->tlogCache.get(req.recruitmentID));
 				}
+			}
+			when(wait(error)) { throw internal_error(); }
+			when(wait(activeSharedChange)) {
+				if (activeSharedTLog->get() == tlogId) {
+					TraceEvent("SharedTLogNowActive", self->dbgid).detail("NowActive", activeSharedTLog->get());
+					self->targetVolatileBytes = SERVER_KNOBS->TLOG_SPILL_THRESHOLD;
+				} else {
+					stopAllTLogs(self, tlogId);
+				}
+				activeSharedChange = activeSharedTLog->onChange();
 			}
 		}
 	} catch (Error& e) {
@@ -1521,8 +1521,9 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>> actors,
 }
 
 TEST_CASE("/fdbserver/ptxn/test/run_tlog_server") {
+	TestDriverOptions options(params);
 	state std::vector<Future<Void>> actors;
-	state std::shared_ptr<TestDriverContext> context = initTestDriverContext();
+	state std::shared_ptr<TestDriverContext> context = initTestDriverContext(options);
 
 	state std::string folder = "simdb/unittests";
 	platform::createDirectory(folder);

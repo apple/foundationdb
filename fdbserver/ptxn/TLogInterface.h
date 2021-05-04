@@ -108,7 +108,7 @@ struct TLogCommitRequest {
 
 struct TLogInterfaceBase {
 
-	constexpr static FileIdentifier file_identifier = 16308510;
+	constexpr static FileIdentifier file_identifier = 4121433;
 
 	RequestStream<struct TLogCommitRequest> commit;
 	RequestStream<ReplyPromise<struct TLogLockResult>> lock; // first stage of database recovery
@@ -225,7 +225,7 @@ struct TLogInterface_PassivelyPull : public TLogInterfaceBase {
 };
 
 struct TLogRecoveryFinishedRequest {
-	constexpr static FileIdentifier file_identifier = 8818668;
+	constexpr static FileIdentifier file_identifier = 6634364;
 	ReplyPromise<Void> reply;
 
 	TLogRecoveryFinishedRequest() {}
@@ -237,7 +237,7 @@ struct TLogRecoveryFinishedRequest {
 };
 
 struct TLogLockResult {
-	constexpr static FileIdentifier file_identifier = 11822027;
+	constexpr static FileIdentifier file_identifier = 5232634;
 	Version end;
 	Version knownCommittedVersion;
 
@@ -248,7 +248,7 @@ struct TLogLockResult {
 };
 
 struct TLogConfirmRunningRequest {
-	constexpr static FileIdentifier file_identifier = 10929130;
+	constexpr static FileIdentifier file_identifier = 8013123;
 	Optional<UID> debugID;
 	ReplyPromise<Void> reply;
 
@@ -283,7 +283,7 @@ struct VerUpdateRef {
 };
 
 struct TLogPeekReply {
-	constexpr static FileIdentifier file_identifier = 11365689;
+	constexpr static FileIdentifier file_identifier = 1214844;
 	Arena arena;
 	StringRef messages;
 	Version end;
@@ -303,7 +303,7 @@ struct TLogPeekReply {
 };
 
 struct TLogPeekRequest {
-	constexpr static FileIdentifier file_identifier = 11001131;
+	constexpr static FileIdentifier file_identifier = 7902423;
 	Arena arena;
 	Version begin;
 	Tag tag;
@@ -327,7 +327,7 @@ struct TLogPeekRequest {
 };
 
 struct TLogPopRequest {
-	constexpr static FileIdentifier file_identifier = 5556423;
+	constexpr static FileIdentifier file_identifier = 2435611;
 	Arena arena;
 	Version to;
 	Version durableKnownCommittedVersion;
@@ -360,7 +360,7 @@ struct TagMessagesRef {
 };
 
 struct TLogQueuingMetricsReply {
-	constexpr static FileIdentifier file_identifier = 12206626;
+	constexpr static FileIdentifier file_identifier = 3123450;
 	double localTime;
 	int64_t instanceID; // changes if bytesDurable and bytesInput reset
 	int64_t bytesDurable, bytesInput;
@@ -374,7 +374,7 @@ struct TLogQueuingMetricsReply {
 };
 
 struct TLogQueuingMetricsRequest {
-	constexpr static FileIdentifier file_identifier = 7798476;
+	constexpr static FileIdentifier file_identifier = 8756454;
 	ReplyPromise<struct TLogQueuingMetricsReply> reply;
 
 	template <class Ar>
@@ -384,7 +384,7 @@ struct TLogQueuingMetricsRequest {
 };
 
 struct TLogDisablePopRequest {
-	constexpr static FileIdentifier file_identifier = 4022806;
+	constexpr static FileIdentifier file_identifier = 4252331;
 	Arena arena;
 	UID snapUID;
 	ReplyPromise<Void> reply;
@@ -400,7 +400,7 @@ struct TLogDisablePopRequest {
 };
 
 struct TLogEnablePopRequest {
-	constexpr static FileIdentifier file_identifier = 4022809;
+	constexpr static FileIdentifier file_identifier = 9025233;
 	Arena arena;
 	UID snapUID;
 	ReplyPromise<Void> reply;
@@ -416,7 +416,7 @@ struct TLogEnablePopRequest {
 };
 
 struct TLogSnapRequest {
-	constexpr static FileIdentifier file_identifier = 8184128;
+	constexpr static FileIdentifier file_identifier = 6454632;
 	ReplyPromise<Void> reply;
 	Arena arena;
 	StringRef snapPayload;

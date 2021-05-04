@@ -461,7 +461,7 @@ struct InitializeTLogRequest {
 	ReplyPromise<struct TLogInterface> reply;
 
 	// ptxn related state
-	vector<ptxn::TLogGroup> tlogGroups;
+	std::vector<ptxn::TLogGroup> tlogGroups;
 	ReplyPromise<struct ptxn::TLogInterface_PassivelyPull> ptxnReply;
 
 	InitializeTLogRequest() : recoverFrom(0) {}
