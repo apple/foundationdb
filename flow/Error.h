@@ -155,7 +155,7 @@ extern bool isAssertDisabled(int line);
 	} while (false)
 
 // Assert an exception (could be any type) is thrown when evaluating the expression
-// NOTE: it can *NOT* handle internal_error as it is treated differently in FDB
+// NOTE: it *CANNOT* handle internal_error as it is treated differently in FDB
 #define ASSERT_THROW_ANY_EXCEPTION(expression)                                                                         \
 	do {                                                                                                               \
 		bool _____exception_happened = false;                                                                          \
