@@ -117,31 +117,31 @@ private:
 public:
 	TLogStorageServerMessageSerializer(const TeamID&);
 
-	// Start to write a new version of mutations.
+	// Starts to write a new version of mutations.
 	void startVersionWriting(const Version& version);
 
-	// Write a subsequence/MutationRef pair
+	// Writes a subsequence/MutationRef pair
 	void writeSubsequenceMutationRef(const SubsequenceMutationItem& item);
 
-	// Write a subseqeunce/MutationRef pair
+	// Writes a subseqeunce/MutationRef pair
 	void writeSubsequenceMutationRef(const Subsequence& subsequence, const MutationRef& mutationRef);
 
-	// Get the current version being written
+	// Gets the current version being written
 	const Version& getCurrentVersion() const;
 
-	// Get the current subsequence
+	// Gets the current subsequence
 	const Subsequence& getCurrentSubsequence() const;
 
-	// Complete writing a set of mutations of the current version
+	// Completes writing a set of mutations of the current version
 	void completeVersionWriting();
 
-	// Update the header and mark the serialization complete
+	// Updates the header and mark the serialization complete
 	void completeMessageWriting();
 
 	// Total bytes of serialized data
 	size_t getTotalBytes() const;
 
-	// Get the serialized data for a given TeamID
+	// Gets the serialized data for a given TeamID
 	Standalone<StringRef> getSerialized();
 };
 
@@ -217,20 +217,20 @@ public:
 	// serialized_ refers to the serialized data
 	TLogStorageServerMessageDeserializer(const Arena& serializedArena_, const StringRef serialized_);
 
-	// Reset the deserializer with new arena and StringRef, see comments in constructor
+	// Resets the deserializer with new arena and StringRef, see comments in constructor
 	// NOTE: All iterators will be invalidated after reset.
 	void reset(const Arena&, const StringRef);
 
-	// Get the team ID
+	// Gets the team ID
 	const TeamID& getTeamID() const;
 
-	// Get the number of different versions in this part
+	// Gets the number of different versions in this part
 	size_t getNumVersions() const;
 
-	// Get the first version in this serialized message
+	// Gets the first version in this serialized message
 	const Version& getFirstVersion() const;
 
-	// Get the last version in this serialized message
+	// Gets the last version in this serialized message
 	const Version& getLastVersion() const;
 
 	iterator begin() const;

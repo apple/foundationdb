@@ -158,7 +158,7 @@ public:
 		writer << main_header_t();
 	}
 
-	// Write the header of the serialized data, call only after completeAllItemsWriting()
+	// Writes the header of the serialized data, call only after completeAllItemsWriting()
 	void writeHeader(const main_header_t& header) {
 		ASSERT(isAllItemsCompleted() && isSectionCompleted());
 
@@ -167,7 +167,7 @@ public:
 		std::memcpy(reinterpret_cast<uint8_t*>(writer.getData()) + SerializerVersionOptionBytes, serialized.begin() + SerializerVersionOptionBytes, getMainHeaderBytes());
 	}
 
-	// Write the section header, call only after completeSectionWriting()
+	// Writes the section header, call only after completeSectionWriting()
 	void writeSectionHeader(const section_header_t& header) {
 		ASSERT(!isAllItemsCompleted() && isSectionCompleted());
 
@@ -178,7 +178,7 @@ public:
 		            getSectionHeaderBytes());
 	}
 
-	// Start a new section, must be called after the previous section is completed and the section header is written.
+	// Starts a new section, must be called after the previous section is completed and the section header is written.
 	void startNewSection() {
 		ASSERT(!isAllItemsCompleted() && isSectionCompleted());
 
@@ -189,7 +189,7 @@ public:
 		numItemsCurrentSection = 0;
 	}
 
-	// Write an item to the current section, the current section must be open
+	// Writes an item to the current section, the current section must be open
 	void writeItem(const Item& item) {
 		ASSERT(!isAllItemsCompleted() && !isSectionCompleted());
 
@@ -209,16 +209,16 @@ public:
 
 	size_t getNumItemsCurrentSection() const { return numItemsCurrentSection; }
 
-	// Get the number of items in *ALL* sections
+	// Gets the number of items in *ALL* sections
 	size_t getNumItems() const { return numItems; }
 
-	// Mark the current section not accepting new items, and the section header is ready to be written.
+	// Marks the current section not accepting new items, and the section header is ready to be written.
 	void completeSectionWriting() { sectionComplete = true; }
 
 	// True if the current section is closed.
 	bool isSectionCompleted() const { return sectionComplete; }
 
-	// Mark the current serializer is not accepting new items/sections, and the header is ready to be written.
+	// Marks the current serializer is not accepting new items/sections, and the header is ready to be written.
 	void completeAllItemsWriting() {
 		ASSERT(isSectionCompleted());
 
@@ -228,7 +228,7 @@ public:
 	// True if the serializer is closed.
 	bool isAllItemsCompleted() const { return allComplete; }
 
-	// Get the final serialized data
+	// Gets the final serialized data
 	Standalone<StringRef> getSerialized() const {
 		ASSERT(isAllItemsCompleted());
 
@@ -236,7 +236,7 @@ public:
 	}
 };
 
-// Load the serialized data into header and items
+// Loads the serialized data into header and items
 template <typename Header, typename Item>
 bool headeredItemDeserializerBase(const Arena& arena, StringRef serialized, Header& header, std::vector<Item>& items) {
 	ArenaReader reader(arena, serialized, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
@@ -254,7 +254,7 @@ bool headeredItemDeserializerBase(const Arena& arena, StringRef serialized, Head
 	return true;
 }
 
-// Deserialize the TwoLevelHeaderedItemsSerializer
+// Deserializes the TwoLevelHeaderedItemsSerializer
 template <typename MainHeader, typename SectionHeader, typename Item>
 class TwoLevelHeaderedItemsDeserializer {
 	ArenaReader reader;
@@ -272,7 +272,7 @@ public:
 		ASSERT(!allConsumed());
 	}
 
-	// Extract an element from serialized data in Main Header format
+	// Extracts an element from serialized data in Main Header format
 	// NOTE It is the caller's obligation to ensure the element is in main header format
 	main_header_t deserializeAsMainHeader() {
 		ASSERT(!allConsumed());
@@ -282,7 +282,7 @@ public:
 		return mainHeader;
 	}
 
-	// Extract an element from serialized data in Section Header format
+	// Extracts an element from serialized data in Section Header format
 	// NOTE It is the caller's obligation to ensure the element is in section header format
 	section_header_t deserializeAsSectionHeader() {
 		ASSERT(!allConsumed());
@@ -292,7 +292,7 @@ public:
 		return sectionHeader;
 	}
 
-	// Extract an element from serialized data in item format
+	// Extracts an element from serialized data in item format
 	// NOTE It is the caller's obligation to ensure the element is in item format
 	item_t deserializeItem() {
 		ASSERT(!allConsumed());

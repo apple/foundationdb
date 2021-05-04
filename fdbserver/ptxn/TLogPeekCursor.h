@@ -43,30 +43,30 @@ public:
 	// Returns the last version being pulled
 	const Version& getLastVersion() const;
 
-	// Check if there is any more messages in the remote TLog(s), if so, retrieve the
+	// Checks if there is any more messages in the remote TLog(s), if so, retrieve the
 	// messages locally.
 	Future<bool> remoteMoreAvailable();
 
-	// Get one mutation
+	// Gets one mutation
 	const VersionSubsequenceMutation& get() const;
 
-	// Move to the next mutation, return false if there is no more mutation
+	// Moves to the next mutation, return false if there is no more mutation
 	void next();
 
 	// Any remaining mutation *LOCALLY* available
 	bool hasRemaining() const;
 
 protected:
-	// Check if there is any mutations remotely
+	// Checks if there is any mutations remotely
 	virtual Future<bool> remoteMoreAvailableImpl() = 0;
 
-	// Step the local cursor
+	// Steps the local cursor
 	virtual void nextImpl() = 0;
 
-	// Get the message
+	// Gets the message
 	virtual const VersionSubsequenceMutation& getImpl() const = 0;
 
-	// Check if any remaining mutations
+	// Checks if any remaining mutations
 	virtual bool hasRemainingImpl() const = 0;
 
 	// Last version processed
