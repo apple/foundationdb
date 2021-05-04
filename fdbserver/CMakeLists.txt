@@ -85,8 +85,11 @@ set(FDBSERVER_SRCS
   RestoreWorker.actor.cpp
   Resolver.actor.cpp
   ResolverInterface.h
+  RoleLineage.actor.h
+  RoleLineage.actor.cpp
   ServerDBInfo.actor.h
   ServerDBInfo.h
+  SigStack.cpp
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
   SkipList.cpp
@@ -117,10 +120,12 @@ set(FDBSERVER_SRCS
   ptxn/test/Driver.h
   ptxn/test/FakeProxy.actor.cpp
   ptxn/test/FakeProxy.actor.h
+  ptxn/test/FakeResolver.actor.h
   ptxn/test/FakeStorageServer.actor.cpp
   ptxn/test/FakeStorageServer.actor.h
   ptxn/test/FakeTLog.actor.cpp
   ptxn/test/FakeTLog.actor.h
+  ptxn/test/TestResolver.actor.cpp
   ptxn/test/TestSerialization.cpp
 
   tester.actor.cpp

@@ -26,6 +26,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/PerfMetric.h"
 #include "fdbrpc/sim_validation.h"
+#include "fdbrpc/simulator.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/BackupProgress.actor.h"
 #include "fdbserver/ConflictSet.h"
@@ -770,6 +771,9 @@ ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId,
 	}
 }
 
+// Recovers transaction state store (TSS) and then sets critical metadata such
+// as recoveryTransactionVersion, database configuration, storage tags, and
+// localities.
 ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
                                               Reference<ILogSystem> oldLogSystem,
                                               Version txsPoppedVersion) {
@@ -1009,6 +1013,10 @@ void updateConfigForForcedRecovery(Reference<MasterData> self,
 	initialConfChanges->push_back(regionCommit);
 }
 
+// Recovers transaction system states from old log system and then waits for
+// either 1) successful recruitment; or 2) if recovery stalls for >1s, a
+// provisional master receives an "emergency transaction" from fdbcli for a new
+// recruitment with different database configurations.
 ACTOR Future<Void> recoverFrom(Reference<MasterData> self,
                                Reference<ILogSystem> oldLogSystem,
                                vector<StorageServerInterface>* seedServers,
@@ -1684,6 +1692,11 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 			            "larger than OldGenerations to resume recovery once the underlying problem has been fixed.");
 			wait(delay(CLIENT_KNOBS->RECOVERY_DELAY_SECONDS_PER_GENERATION *
 			           (self->cstate.myDBState.oldTLogData.size() - CLIENT_KNOBS->RECOVERY_DELAY_START_GENERATION)));
+		}
+		if (g_network->isSimulated() && self->cstate.myDBState.oldTLogData.size() > CLIENT_KNOBS->MAX_GENERATIONS_SIM) {
+			g_simulator.connectionFailuresDisableDuration = 1e6;
+			g_simulator.speedUpSimulation = true;
+			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyGenerations");
 		}
 	}
 

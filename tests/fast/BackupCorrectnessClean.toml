@@ -50,7 +50,7 @@ simBackupAgents = 'BackupToFile'
     restoreAfter = 60.0
     performRestore = true
     allowPauses = false
-    prefixesMandatory = 'a,A,m'
+    restorePrefixesToInclude = 'a,A,m'
 
     [[test.workload]]
     testName = 'BackupAndRestoreCorrectness'

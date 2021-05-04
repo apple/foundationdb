@@ -432,7 +432,8 @@ Optional<std::pair<LeaderInfo, bool>> getLeader(const vector<Optional<LeaderInfo
 	for (int i = 0; i < nominees.size(); i++) {
 		if (nominees[i].present()) {
 			maskedNominees.push_back(std::make_pair(
-			    UID(nominees[i].get().changeID.first() & LeaderInfo::mask, nominees[i].get().changeID.second()), i));
+			    UID(nominees[i].get().changeID.first() & LeaderInfo::changeIDMask, nominees[i].get().changeID.second()),
+			    i));
 		}
 	}
 
@@ -495,7 +496,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<ClusterConn
 			if (leader.get().first.forward) {
 				TraceEvent("MonitorLeaderForwarding")
 				    .detail("NewConnStr", leader.get().first.serializedInfo.toString())
-				    .detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString());
+				    .detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString()).trackLatest("MonitorLeaderForwarding");
 				info.intermediateConnFile = makeReference<ClusterConnectionFile>(
 				    connFile->getFilename(), ClusterConnectionString(leader.get().first.serializedInfo.toString()));
 				return info;
@@ -757,6 +758,7 @@ void shrinkProxyList(ClientDBInfo& ni,
 ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
     Reference<ClusterConnectionFile> connFile,
     Reference<AsyncVar<ClientDBInfo>> clientInfo,
+    Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
     MonitorLeaderInfo info,
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
     Key traceLogGroup) {
@@ -774,6 +776,9 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 	loop {
 		state ClientLeaderRegInterface clientLeaderServer(addrs[idx]);
 		state OpenDatabaseCoordRequest req;
+
+		coordinator->set(clientLeaderServer);
+
 		req.clusterKey = cs.clusterKey();
 		req.coordinators = cs.coordinators();
 		req.knownClientInfoID = clientInfo->get().id;
@@ -840,13 +845,14 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 ACTOR Future<Void> monitorProxies(
     Reference<AsyncVar<Reference<ClusterConnectionFile>>> connFile,
     Reference<AsyncVar<ClientDBInfo>> clientInfo,
+    Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
     Key traceLogGroup) {
 	state MonitorLeaderInfo info(connFile->get());
 	loop {
 		choose {
 			when(MonitorLeaderInfo _info = wait(monitorProxiesOneGeneration(
-			         connFile->get(), clientInfo, info, supportedVersions, traceLogGroup))) {
+			         connFile->get(), clientInfo, coordinator, info, supportedVersions, traceLogGroup))) {
 				info = _info;
 			}
 			when(wait(connFile->onChange())) {

@@ -28,32 +28,56 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/ptxn/Config.h"
 #include "fdbserver/ptxn/test/FakeProxy.actor.h"
+#include "fdbserver/ptxn/test/FakeResolver.actor.h"
 #include "fdbserver/ptxn/test/FakeStorageServer.actor.h"
 #include "fdbserver/ptxn/test/FakeTLog.actor.h"
-#include "flow/UnitTest.h"
+#include "fdbserver/ResolverInterface.h"
+#include "flow/IRandom.h"
+#include "flow/Trace.h"
+#include "flow/genericactors.actor.h"
 
 namespace ptxn {
 
-// FIXME Make this configuration flexible.
-// This can be done by modifying the UnitTest and tester part.
-static const int NUM_COMMITS = 3;
-static const int NUM_TEAMS = 10;
-static const int NUM_PROXIES = 1;
-static const int NUM_TLOGS = 3;
-static const int NUM_TLOGS_GROUPS = 4;
-static const int NUM_STORAGE_SERVERS = 3;
-static const MessageTransferModel MESSAGE_TRANSFER_MODEL = MessageTransferModel::TLogActivelyPush;
+std::ostream& operator<<(std::ostream& stream, const TestDriverOptions& option) {
+	stream << "Values for ptxn/Driver.actor.cpp:DriverTestOptions:" << std::endl;
+	stream << std::setw(30) << "numCommits: " << option.numCommits << std::endl;
+	stream << std::setw(30) << "numTeams: " << option.numTeams << std::endl;
+	stream << std::setw(30) << "numProxies: " << option.numProxies << std::endl;
+	stream << std::setw(30) << "numTLogs: " << option.numTLogs << std::endl;
+	stream << std::setw(30) << "numStorageServers: " << option.numStorageServers << std::endl;
+	stream << std::setw(30) << "numResolvers: " << option.numResolvers << std::endl;
+	stream << std::setw(30) << "Message Transfer Model: ";
+	switch (option.transferModel) {
+	case MessageTransferModel::TLogActivelyPush:
+		stream << "TLogs push to Storage Servers";
+		break;
+	case MessageTransferModel::StorageServerActivelyPull:
+		stream << "Storage Servers pull from TLogs";
+		break;
+	default:
+		throw internal_error_msg(
+		    format("Unexpected value for message transfer model: %" PRIu8, static_cast<uint8_t>(option.transferModel))
+		        .c_str());
+		break;
+	}
+	stream << std::endl;
+
+	return stream;
+}
 
 CommitRecord::CommitRecord(const Version& version_, const StorageTeamID& teamID_, std::vector<MutationRef>&& mutations_)
   : version(version_), teamID(teamID_), mutations(std::move(mutations_)) {}
 
-bool CommitValidationRecord::validated() const { return tLogValidated && storageServerValidated; }
+bool CommitValidationRecord::validated() const {
+	return tLogValidated && storageServerValidated;
+}
 
-std::shared_ptr<TestDriverContext> initTestDriverContext() {
+std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions& options) {
 	std::shared_ptr<TestDriverContext> context(new TestDriverContext());
 
-	context->numTeamIDs = NUM_TEAMS;
-	context->messageTransferModel = MESSAGE_TRANSFER_MODEL;
+	context->numCommits = options.numCommits;
+	context->numTeamIDs = options.numTeams;
+	context->messageTransferModel = options.transferModel;
 
 	// FIXME use C++20 range
 	for (int i = 0; i < context->numTeamIDs; ++i) {
@@ -61,12 +85,14 @@ std::shared_ptr<TestDriverContext> initTestDriverContext() {
 	}
 
 	// Prepare Proxies
-	context->numProxies = NUM_PROXIES;
+	context->numProxies = options.numProxies;
+
+	// Prepare Resolvers
+	context->numResolvers = options.numResolvers;
 
 	// Prepare TLogInterfaces
-	context->numTLogs = NUM_TLOGS;
-	context->numTLogGroups = NUM_TLOGS_GROUPS;
-
+	context->numTLogs = options.numTLogs;
+	context->numTLogGroups = options.numTLogGroups;
 	// For now, each tlog group spans all the TLogs, i.e., number of group numbers == num of TLogs
 	for (int i = 0; i < context->numTLogs; ++i) {
 		context->tLogInterfaces.push_back(getNewTLogInterface(context->messageTransferModel,
@@ -83,7 +109,7 @@ std::shared_ptr<TestDriverContext> initTestDriverContext() {
 	}
 
 	// Prepare StorageServerInterfaces
-	context->numStorageServers = NUM_STORAGE_SERVERS;
+	context->numStorageServers = options.numStorageServers;
 	for (int i = 0; i < context->numTLogs; ++i) {
 		context->storageServerInterfaces.push_back(getNewStorageServerInterface(context->messageTransferModel));
 		context->storageServerInterfaces.back()->initEndpoints();
@@ -125,8 +151,27 @@ std::shared_ptr<StorageServerInterfaceBase> TestDriverContext::getStorageServerI
 
 void startFakeProxy(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext) {
 	for (int i = 0; i < pTestDriverContext->numProxies; ++i) {
-		std::shared_ptr<FakeProxyContext> pFakeProxyContext(new FakeProxyContext{ NUM_COMMITS, pTestDriverContext });
+		std::shared_ptr<FakeProxyContext> pFakeProxyContext(
+		    new FakeProxyContext{ pTestDriverContext->numCommits, pTestDriverContext });
 		actors.emplace_back(fakeProxy(pFakeProxyContext));
+	}
+}
+
+// Starts all fake resolvers. For now, use "resolverCore" to start the actor.
+// TODO: change to "resolver" after we have fake ServerDBInfo object.
+void startFakeResolver(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext) {
+	for (int i = 0; i < pTestDriverContext->numResolvers; ++i) {
+		std::shared_ptr<ResolverInterface> recruited(new ResolverInterface);
+		// recruited.locality = locality;
+		recruited->initEndpoints();
+
+		InitializeResolverRequest req;
+		req.recoveryCount = 1;
+		req.commitProxyCount = pTestDriverContext->numProxies;
+		req.resolverCount = pTestDriverContext->numResolvers;
+
+		actors.emplace_back(::resolverCore(*recruited, req));
+		pTestDriverContext->resolverInterfaces.push_back(recruited);
 	}
 }
 
@@ -164,10 +209,11 @@ void printCommitRecord(const std::vector<CommitRecord>& records) {
 
 void printNotValidatedRecords(const std::vector<CommitRecord>& records) {
 	std::cout << "Unvalidated commits: \n\n";
-	for (const auto& record: records) {
-		if (record.validation.validated()) continue;
+	for (const auto& record : records) {
+		if (record.validation.validated())
+			continue;
 		std::cout << "\tVersion: " << record.version << "\tTeam ID: " << record.teamID.toString() << std::endl;
-		for (const auto& mutation: record.mutations) {
+		for (const auto& mutation : record.mutations) {
 			std::cout << "\t\t\t" << mutation.toString() << std::endl;
 		}
 
@@ -181,7 +227,7 @@ void printNotValidatedRecords(const std::vector<CommitRecord>& records) {
 }
 
 bool isAllRecordsValidated(const std::vector<CommitRecord>& records) {
-	for (auto& record: records) {
+	for (auto& record : records) {
 		if (!record.validation.validated()) {
 			return false;
 		}
@@ -226,9 +272,11 @@ void verifyMutationsInRecord(std::vector<CommitRecord>& records,
 TEST_CASE("/fdbserver/ptxn/test/driver") {
 	using namespace ptxn;
 
-	std::vector<Future<Void>> actors;
+	TestDriverOptions options(params);
+	std::cout << options << std::endl;
 
-	std::shared_ptr<TestDriverContext> context = initTestDriverContext();
+	std::shared_ptr<TestDriverContext> context = initTestDriverContext(options);
+	std::vector<Future<Void>> actors;
 
 	startFakeProxy(actors, context);
 	startFakeTLog(actors, context);
@@ -238,3 +286,4 @@ TEST_CASE("/fdbserver/ptxn/test/driver") {
 
 	return Void();
 }
+

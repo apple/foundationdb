@@ -472,6 +472,8 @@ public:
 
 	Future<std::time_t> lastWriteTime(const std::string& filename) override;
 
+	ActorLineageSet& getActorLineageSet() override;
+
 	Future<Void> renameFile(std::string const& from, std::string const& to) override;
 
 	Sim2FileSystem() {}
@@ -479,6 +481,8 @@ public:
 	~Sim2FileSystem() override {}
 
 	static void newFileSystem();
+
+	ActorLineageSet actorLineageSet;
 };
 
 #endif
