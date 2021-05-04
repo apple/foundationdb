@@ -801,7 +801,7 @@ Upgrading from Older Versions
 Upgrades from versions older than 5.0.0 are no longer supported.
 
 Version-specific notes on downgrading
-===================================
+=====================================
 
 In general, downgrades between non-patch releases (i.e. 6.2.x - 6.1.x) are not supported.
 
