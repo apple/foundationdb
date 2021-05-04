@@ -142,8 +142,9 @@ Version getVersionFromString(std::string const& value) {
 }
 
 // Transaction log data is stored by the FoundationDB core in the
-// \xff / bklog / keyspace in a funny order for performance reasons.
-// Return the ranges of keys that contain the data for the given range
+// "backupLogKeys" (i.e., \xff\x02/blog/) keyspace in a funny order for
+// performance reasons.
+// Returns the ranges of keys that contain the data for the given range
 // of versions.
 // assert CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE % blocksize = 0. Otherwise calculation of hash will be incorrect
 Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion,
@@ -400,7 +401,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 			releaser = FlowLock::Releaser(
 			    *lock, limits.bytes + CLIENT_KNOBS->VALUE_SIZE_LIMIT + CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
 
-			state Standalone<RangeResultRef> values = wait(tr.getRange(begin, end, limits));
+			state RangeResult values = wait(tr.getRange(begin, end, limits));
 
 			// When this buggify line is enabled, if there are more than 1 result then use half of the results
 			if (values.size() > 1 && BUGGIFY) {
@@ -466,7 +467,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 			if (lockAware)
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			state Standalone<RangeResultRef> rangevalue = wait(tr.getRange(nextKey, end, limits));
+			state RangeResult rangevalue = wait(tr.getRange(nextKey, end, limits));
 
 			// When this buggify line is enabled, if there are more than 1 result then use half of the results
 			if (rangevalue.size() > 1 && BUGGIFY) {
@@ -742,6 +743,9 @@ ACTOR Future<Void> applyMutations(Database cx,
 			wait(coalesceKeyVersionCache(
 			    uid, newEndVersion, keyVersion, commit, committedVersion, addActor, &commitLock));
 			beginVersion = newEndVersion;
+			if (BUGGIFY) {
+				wait(delay(2.0));
+			}
 		}
 	} catch (Error& e) {
 		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarnAlways : SevError, "ApplyMutationsError")
@@ -774,7 +778,7 @@ ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
 			return Void();
 	}
 
-	state Standalone<RangeResultRef> backupVersions = wait(
+	state RangeResult backupVersions = wait(
 	    tr->getRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath)), CLIENT_KNOBS->TOO_MANY));
 
 	// Make sure version history key does exist and lower the beginVersion if needed
@@ -866,7 +870,7 @@ ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
 	}
 
 	if (!endVersion.present() && backupVersions.size() == 1) {
-		Standalone<RangeResultRef> existingDestUidValues =
+		RangeResult existingDestUidValues =
 		    wait(tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 		for (auto it : existingDestUidValues) {
 			if (it.value == destUidValue) {
@@ -899,7 +903,7 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			state Standalone<RangeResultRef> backupVersions = wait(tr->getRange(
+			state RangeResult backupVersions = wait(tr->getRange(
 			    KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath)), CLIENT_KNOBS->TOO_MANY));
 			state Version readVer = tr->getReadVersion().get();
 
@@ -986,7 +990,7 @@ ACTOR Future<Void> cleanupBackup(Database cx, bool deleteData) {
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			state Standalone<RangeResultRef> destUids = wait(
+			state RangeResult destUids = wait(
 			    tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 
 			for (auto destUid : destUids) {

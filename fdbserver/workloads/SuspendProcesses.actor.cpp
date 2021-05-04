@@ -31,10 +31,9 @@ struct SuspendProcessesWorkload : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Standalone<RangeResultRef> kvs =
-				    wait(tr.getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
-				                                 LiteralStringRef("\xff\xff/worker_interfaces0")),
-				                     CLIENT_KNOBS->TOO_MANY));
+				RangeResult kvs = wait(tr.getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+				                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
+				                                   CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!kvs.more);
 				std::vector<Standalone<StringRef>> suspendProcessInterfaces;
 				for (auto it : kvs) {

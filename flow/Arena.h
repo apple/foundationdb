@@ -529,6 +529,17 @@ public:
 		return ::compare(size(), other.size());
 	}
 
+	int compareSuffix(StringRef const& other, int prefixLen) const {
+		// pre: prefixLen <= size() && prefixLen <= other.size()
+		size_t minSuffixSize = std::min(size(), other.size()) - prefixLen;
+		if (minSuffixSize != 0) {
+			int c = memcmp(begin() + prefixLen, other.begin() + prefixLen, minSuffixSize);
+			if (c != 0)
+				return c;
+		}
+		return ::compare(size(), other.size());
+	}
+
 	// Removes bytes from begin up to and including the sep string, returns StringRef of the part before sep
 	StringRef eat(StringRef sep) {
 		for (int i = 0, iend = size() - sep.size(); i <= iend; ++i) {

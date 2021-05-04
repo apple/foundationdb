@@ -20,7 +20,7 @@ Consequently, the special-key-space framework wants to integrate all client func
 If your feature is exposing information to clients and the results are easily formatted as key-value pairs, then you can use special-key-space to implement your client function.
 
 ## How
-If you choose to use, you need to implement a function class that inherits from `SpecialKeyRangeReadImpl`, which has an abstract method `Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr)`.
+If you choose to use, you need to implement a function class that inherits from `SpecialKeyRangeReadImpl`, which has an abstract method `Future<RangeResult> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr)`.
 This method can be treated as a callback, whose implementation details are determined by the developer.
 Once you fill out the method, register the function class to the corresponding key range.
 Below is a detailed example.
@@ -38,10 +38,10 @@ public:
         CountryToCapitalCity[LiteralStringRef("China")] = LiteralStringRef("Beijing");
     }
     // Implement the getRange interface
-    Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw,
+    Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
                                             KeyRangeRef kr) const override {
         
-        Standalone<RangeResultRef> result;
+        RangeResult result;
         for (auto const& country : CountryToCapitalCity) {
             // the registered range here: [\xff\xff/example/, \xff\xff/example/\xff]
             Key keyWithPrefix = country.first.withPrefix(range.begin);
@@ -71,7 +71,7 @@ ASSERT(res1.present() && res.getValue() == LiteralStringRef("Tokyo"));
 // getRange
 // Note: for getRange(key1, key2), both key1 and key2 should prefixed with \xff\xff
 // something like getRange("normal_key", "\xff\xff/...") is not supported yet
-Standalone<RangeResultRef> res2 = wait(tr.getRange(LiteralStringRef("\xff\xff/example/U"), LiteralStringRef("\xff\xff/example/U\xff")));
+RangeResult res2 = wait(tr.getRange(LiteralStringRef("\xff\xff/example/U"), LiteralStringRef("\xff\xff/example/U\xff")));
 // res2 should contain USA and UK
 ASSERT(
     res2.size() == 2 &&

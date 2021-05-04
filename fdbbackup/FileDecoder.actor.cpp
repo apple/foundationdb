@@ -22,10 +22,12 @@
 #include <iostream>
 #include <vector>
 
+#include "fdbbackup/BackupTLSConfig.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbbackup/FileConverter.h"
 #include "fdbclient/MutationList.h"
+#include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
 #include "fdbclient/BuildFlags.h"
@@ -38,31 +40,52 @@ extern bool g_crashOnError;
 namespace file_converter {
 
 void printDecodeUsage() {
-	std::cout << "\n"
-	             "  -r, --container   Container URL.\n"
-	             "  -i, --input FILE  Log file to be decoded.\n"
-	             "  --crash           Crash on serious error.\n"
-	             "  --build_flags     Print build information and exit.\n"
-	             "\n";
+	std::cout
+	    << "Decoder for FoundationDB backup mutation logs.\n"
+	       "Usage: fdbdecode  [OPTIONS]\n"
+	       "  -r, --container URL\n"
+	       "                 Backup container URL, e.g., file:///some/path/.\n"
+	       "  -i, --input    FILE\n"
+	       "                 Log file filter, only matched files are decoded.\n"
+	       "  --log          Enables trace file logging for the CLI session.\n"
+	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
+	       "                 unspecified, defaults to the current directory. Has\n"
+	       "                 no effect unless --log is specified.\n"
+	       "  --loggroup     LOG_GROUP\n"
+	       "                 Sets the LogGroup field with the specified value for all\n"
+	       "                 events in the trace output (defaults to `default').\n"
+	       "  --trace_format FORMAT\n"
+	       "                 Select the format of the trace files, xml (the default) or json.\n"
+	       "                 Has no effect unless --log is specified.\n"
+	       "  --crash        Crash on serious error.\n"
+	       "  --blob_credentials FILE\n"
+	       "                 File containing blob credentials in JSON format.\n"
+	       "                 The same credential format/file fdbbackup uses.\n"
+#ifndef TLS_DISABLED
+	    TLS_HELP
+#endif
+	       "  --build_flags  Print build information and exit.\n"
+	       "\n";
 	return;
 }
 
 void printBuildInformation() {
-	printf("%s", jsonBuildInformation().c_str());
+	std::cout << jsonBuildInformation() << "\n";
 }
 
 struct DecodeParams {
 	std::string container_url;
-	std::string file;
+	std::string fileFilter; // only files match the filter will be decoded
 	bool log_enabled = false;
 	std::string log_dir, trace_format, trace_log_group;
+	BackupTLSConfig tlsConfig;
 
 	std::string toString() {
 		std::string s;
 		s.append("ContainerURL: ");
 		s.append(container_url);
-		s.append(", File: ");
-		s.append(file);
+		s.append(", FileFilter: ");
+		s.append(fileFilter);
 		if (log_enabled) {
 			if (!log_dir.empty()) {
 				s.append(" LogDir:").append(log_dir);
@@ -76,6 +99,8 @@ struct DecodeParams {
 		}
 		return s;
 	}
+
+
 };
 
 int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
@@ -93,7 +118,6 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 		int optId = args->OptionId();
 		switch (optId) {
 		case OPT_HELP:
-			printDecodeUsage();
 			return FDB_EXIT_ERROR;
 
 		case OPT_CONTAINER:
@@ -105,7 +129,7 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 			break;
 
 		case OPT_INPUT_FILE:
-			param->file = args->OptionArg();
+			param->fileFilter = args->OptionArg();
 			break;
 
 		case OPT_TRACE:
@@ -127,6 +151,37 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 		case OPT_TRACE_LOG_GROUP:
 			param->trace_log_group = args->OptionArg();
 			break;
+
+		case OPT_BLOB_CREDENTIALS:
+			param->tlsConfig.blobCredentials.push_back(args->OptionArg());
+			break;
+
+#ifndef TLS_DISABLED
+		case TLSConfig::OPT_TLS_PLUGIN:
+			args->OptionArg();
+			break;
+
+		case TLSConfig::OPT_TLS_CERTIFICATES:
+			param->tlsConfig.tlsCertPath = args->OptionArg();
+			break;
+
+		case TLSConfig::OPT_TLS_PASSWORD:
+			param->tlsConfig.tlsPassword = args->OptionArg();
+			break;
+
+		case TLSConfig::OPT_TLS_CA_FILE:
+			param->tlsConfig.tlsCAPath = args->OptionArg();
+			break;
+
+		case TLSConfig::OPT_TLS_KEY:
+			param->tlsConfig.tlsKeyPath = args->OptionArg();
+			break;
+
+		case TLSConfig::OPT_TLS_VERIFY_PEERS:
+			param->tlsConfig.tlsVerifyPeers = args->OptionArg();
+			break;
+#endif
+
 		case OPT_BUILD_FLAGS:
 			printBuildInformation();
 			return FDB_EXIT_ERROR;
@@ -147,7 +202,7 @@ void printLogFiles(std::string msg, const std::vector<LogFile>& files) {
 std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, const DecodeParams& params) {
 	std::vector<LogFile> filtered;
 	for (const auto& file : files) {
-		if (file.fileName.find(params.file) != std::string::npos) {
+		if (file.fileName.find(params.fileFilter) != std::string::npos) {
 			filtered.push_back(file);
 		}
 	}
@@ -515,6 +570,11 @@ int main(int argc, char** argv) {
 			}
 		}
 
+		if (!param.tlsConfig.setupTLS()) {
+			TraceEvent(SevError, "TLSError");
+			throw tls_error();
+		}
+
 		platformInit();
 		Error::init();
 
@@ -523,13 +583,14 @@ int main(int argc, char** argv) {
 
 		TraceEvent::setNetworkThread();
 		openTraceFile(NetworkAddress(), 10 << 20, 10 << 20, param.log_dir, "decode", param.trace_log_group);
+		param.tlsConfig.setupBlobCredentials();
 
 		auto f = stopAfter(decode_logs(param));
 
 		runNetwork();
 		return status;
 	} catch (Error& e) {
-		fprintf(stderr, "ERROR: %s\n", e.what());
+		std::cerr << "ERROR: " << e.what() << "\n";
 		return FDB_EXIT_ERROR;
 	} catch (std::exception& e) {
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());

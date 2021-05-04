@@ -95,7 +95,6 @@ def api_version(ver):
         'transactional',
         'options',
         'StreamingMode',
-        'get_server_protocol'
     )
 
     _add_symbols(fdb.impl, list)

@@ -185,7 +185,7 @@ struct StorefrontWorkload : TestWorkload {
 		state KeySelectorRef begin = firstGreaterThan(keyRange.begin);
 		state KeySelectorRef end = lastLessThan(keyRange.end);
 		while (fetched == 10000) {
-			Standalone<RangeResultRef> values = wait(tr.getRange(begin, end, 10000));
+			RangeResult values = wait(tr.getRange(begin, end, 10000));
 			int orderIdx;
 			for (orderIdx = 0; orderIdx < values.size(); orderIdx++) {
 				vector<int> saved;
@@ -209,7 +209,7 @@ struct StorefrontWorkload : TestWorkload {
 			    cx, self, KeyRangeRef(Key(format("/orders/%x", c)), Key(format("/orders/%x", c + 1)))));
 
 		Transaction tr(cx);
-		state Future<Standalone<RangeResultRef>> values =
+		state Future<RangeResult> values =
 		    tr.getRange(KeyRangeRef(self->itemKey(0), self->itemKey(self->itemCount)), self->itemCount + 1);
 
 		wait(waitForAll(accumulators));
@@ -220,7 +220,7 @@ struct StorefrontWorkload : TestWorkload {
 				totals[i] += subTotals[i];
 		}
 
-		Standalone<RangeResultRef> inventory = wait(values);
+		RangeResult inventory = wait(values);
 		for (int c = 0; c < inventory.size(); c++) {
 			if (self->valueToInt(inventory[c].value) != totals[c]) {
 				TraceEvent(SevError, "TestFailure")

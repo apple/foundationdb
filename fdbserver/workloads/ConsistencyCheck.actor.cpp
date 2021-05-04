@@ -210,7 +210,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				loop {
 					try {
-						Standalone<RangeResultRef> res = wait(tr.getRange(configKeys, 1000));
+						RangeResult res = wait(tr.getRange(configKeys, 1000));
 						if (res.size() == 1000) {
 							TraceEvent("ConsistencyCheck_TooManyConfigOptions");
 							self->testFailure("Read too many configuration options");
@@ -984,7 +984,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					}
 
 					auto keyValueResponse = keyValueFutures[firstValidStorageServer].get().get();
-					Standalone<RangeResultRef> currentLocations = krmDecodeRanges(
+					RangeResult currentLocations = krmDecodeRanges(
 					    keyServersPrefix,
 					    KeyRangeRef(beginKey.removePrefix(keyServersPrefix),
 					                std::min<KeyRef>(shards[i].first.end, endKey).removePrefix(keyServersPrefix)),
@@ -1174,7 +1174,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			state int bytesReadInRange = 0;
 
-			Standalone<RangeResultRef> UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 			decodeKeyServersValue(
 			    UIDtoTagMap, keyLocations[shard].value, sourceStorageServers, destStorageServers, false);

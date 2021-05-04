@@ -176,7 +176,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 						    2;
 
 						if (self->testReadYourWrites) {
-							Standalone<RangeResultRef> getRangeTest =
+							RangeResult getRangeTest =
 							    wait(trRYOW.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
 							                         KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
 							                         2 * (self->maxKeySpace + self->maxOffset),
@@ -204,7 +204,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 								    .detail("DataSize", getRangeTest.size());
 							}
 						} else {
-							Standalone<RangeResultRef> getRangeTest =
+							RangeResult getRangeTest =
 							    wait(tr.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
 							                     KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
 							                     2 * (self->maxKeySpace + self->maxOffset),

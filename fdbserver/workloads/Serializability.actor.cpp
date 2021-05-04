@@ -232,7 +232,7 @@ struct SerializabilityWorkload : TestWorkload {
 	                                         std::vector<TransactionOperation> ops,
 	                                         std::vector<Future<Optional<Value>>>* getFutures,
 	                                         std::vector<Future<Key>>* getKeyFutures,
-	                                         std::vector<Future<Standalone<RangeResultRef>>>* getRangeFutures,
+	                                         std::vector<Future<RangeResult>>* getRangeFutures,
 	                                         std::vector<Future<Void>>* watchFutures,
 	                                         bool checkSnapshotReads) {
 		state int opNum = 0;
@@ -306,10 +306,10 @@ struct SerializabilityWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Standalone<RangeResultRef>> getDatabaseContents(Database cx, int nodes) {
+	ACTOR static Future<RangeResult> getDatabaseContents(Database cx, int nodes) {
 		state ReadYourWritesTransaction tr(cx);
 
-		Standalone<RangeResultRef> result = wait(tr.getRange(normalKeys, nodes + 1));
+		RangeResult result = wait(tr.getRange(normalKeys, nodes + 1));
 		ASSERT(result.size() <= nodes);
 		return result;
 	}
@@ -332,14 +332,14 @@ struct SerializabilityWorkload : TestWorkload {
 			state std::vector<ReadYourWritesTransaction> tr;
 			state std::vector<std::vector<Future<Optional<Value>>>> getFutures;
 			state std::vector<std::vector<Future<Key>>> getKeyFutures;
-			state std::vector<std::vector<Future<Standalone<RangeResultRef>>>> getRangeFutures;
+			state std::vector<std::vector<Future<RangeResult>>> getRangeFutures;
 			state std::vector<std::vector<Future<Void>>> watchFutures;
 
 			for (int i = 0; i < 5; i++) {
 				tr.push_back(ReadYourWritesTransaction(cx));
 				getFutures.push_back(std::vector<Future<Optional<Value>>>());
 				getKeyFutures.push_back(std::vector<Future<Key>>());
-				getRangeFutures.push_back(std::vector<Future<Standalone<RangeResultRef>>>());
+				getRangeFutures.push_back(std::vector<Future<RangeResult>>());
 				watchFutures.push_back(std::vector<Future<Void>>());
 			}
 
@@ -382,7 +382,7 @@ struct SerializabilityWorkload : TestWorkload {
 				wait(tr[2].commit());
 
 				// get contents of database
-				state Standalone<RangeResultRef> result1 = wait(getDatabaseContents(cx, self->nodes));
+				state RangeResult result1 = wait(getDatabaseContents(cx, self->nodes));
 
 				// reset database to known state
 				wait(resetDatabase(cx, initialData));
@@ -397,7 +397,7 @@ struct SerializabilityWorkload : TestWorkload {
 				wait(tr[4].commit());
 
 				// get contents of database
-				Standalone<RangeResultRef> result2 = wait(getDatabaseContents(cx, self->nodes));
+				RangeResult result2 = wait(getDatabaseContents(cx, self->nodes));
 
 				if (result1.size() != result2.size()) {
 					TraceEvent(SevError, "SRL_ResultMismatch")
