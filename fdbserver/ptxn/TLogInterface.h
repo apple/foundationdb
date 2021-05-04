@@ -112,7 +112,7 @@ struct TLogPeekRequest {
 	Optional<UID> debugID;
 
 	// We are interested in versions between [beginVersion, endVersion)
-	// Following the C++ custom, the endVersion is *EXCLUDED*.
+	// Following the C++ custom, the endVersion is *EXCLUSIVE*.
 	Version beginVersion;
 	Version endVersion;
 	TeamID teamID;
