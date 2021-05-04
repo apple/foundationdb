@@ -918,7 +918,7 @@ Caveats
 Read/write modules
 ------------------
 
-As of api version 700, some modules in the special key space allow writes as
+As of api version 710, some modules in the special key space allow writes as
 well as reads. In these modules, a user can expect that mutations (i.e. sets,
 clears, etc) do not have side-effects outside of the current transaction
 until commit is called (the same is true for writes to the normal key space).
