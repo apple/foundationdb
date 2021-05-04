@@ -355,6 +355,7 @@ public:
 
 	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr,
 	                          Key outContainer,
+	                          int initialSnapshotIntervalSeconds,
 	                          int snapshotIntervalSeconds,
 	                          std::string tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
@@ -362,14 +363,21 @@ public:
 	                          bool partitionedLog = false);
 	Future<Void> submitBackup(Database cx,
 	                          Key outContainer,
+	                          int initialSnapshotIntervalSeconds,
 	                          int snapshotIntervalSeconds,
 	                          std::string tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                          bool stopWhenDone = true,
 	                          bool partitionedLog = false) {
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
-			return submitBackup(
-			    tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone, partitionedLog);
+			return submitBackup(tr,
+			                    outContainer,
+			                    initialSnapshotIntervalSeconds,
+			                    snapshotIntervalSeconds,
+			                    tagName,
+			                    backupRanges,
+			                    stopWhenDone,
+			                    partitionedLog);
 		});
 	}
 
@@ -827,6 +835,11 @@ public:
 	// Coalesced set of ranges already dispatched for writing.
 	typedef KeyBackedMap<Key, bool> RangeDispatchMapT;
 	RangeDispatchMapT snapshotRangeDispatchMap() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+
+	// Interval to use for the first (initial) snapshot.
+	KeyBackedProperty<int64_t> initialSnapshotIntervalSeconds() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
 
 	// Interval to use for determining the target end version for new snapshots
 	KeyBackedProperty<int64_t> snapshotIntervalSeconds() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }

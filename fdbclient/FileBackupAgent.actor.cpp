@@ -2067,7 +2067,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 		    .detail("Size", outFile->size())
 		    .detail("BeginVersion", beginVersion)
 		    .detail("EndVersion", endVersion)
-		    .detail("LastReadVersion", latestVersion);
+		    .detail("LastReadVersion", lastVersion);
 
 		Params.fileSize().set(task, outFile->size());
 
@@ -2776,9 +2776,9 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 
 		state Reference<TaskFuture> backupFinished = futureBucket->future(tr);
 
-		// Initialize the initial snapshot and create tasks to continually write logs and snapshots
-		// The initial snapshot has a desired duration of 0, meaning go as fast as possible.
-		wait(config.initNewSnapshot(tr, 0));
+		// Initialize the initial snapshot and create tasks to continually write logs and snapshots.
+		state Optional<int64_t> initialSnapshotIntervalSeconds = wait(config.initialSnapshotIntervalSeconds().get(tr));
+		wait(config.initNewSnapshot(tr, initialSnapshotIntervalSeconds.orDefault(0)));
 
 		// Using priority 1 for both of these to at least start both tasks soon
 		wait(success(
@@ -4403,6 +4403,7 @@ public:
 	ACTOR static Future<Void> submitBackup(FileBackupAgent* backupAgent,
 	                                       Reference<ReadYourWritesTransaction> tr,
 	                                       Key outContainer,
+	                                       int initialSnapshotIntervalSeconds,
 	                                       int snapshotIntervalSeconds,
 	                                       std::string tagName,
 	                                       Standalone<VectorRef<KeyRangeRef>> backupRanges,
@@ -4517,6 +4518,7 @@ public:
 		config.backupContainer().set(tr, bc);
 		config.stopWhenDone().set(tr, stopWhenDone);
 		config.backupRanges().set(tr, normalizedRanges);
+		config.initialSnapshotIntervalSeconds().set(tr, initialSnapshotIntervalSeconds);
 		config.snapshotIntervalSeconds().set(tr, snapshotIntervalSeconds);
 		config.partitionedLogEnabled().set(tr, partitionedLog);
 
@@ -5474,13 +5476,21 @@ Future<ERestoreState> FileBackupAgent::waitRestore(Database cx, Key tagName, boo
 
 Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> tr,
                                            Key outContainer,
+                                           int initialSnapshotIntervalSeconds,
                                            int snapshotIntervalSeconds,
                                            std::string tagName,
                                            Standalone<VectorRef<KeyRangeRef>> backupRanges,
                                            bool stopWhenDone,
                                            bool partitionedLog) {
-	return FileBackupAgentImpl::submitBackup(
-	    this, tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone, partitionedLog);
+	return FileBackupAgentImpl::submitBackup(this,
+	                                         tr,
+	                                         outContainer,
+	                                         initialSnapshotIntervalSeconds,
+	                                         snapshotIntervalSeconds,
+	                                         tagName,
+	                                         backupRanges,
+	                                         stopWhenDone,
+	                                         partitionedLog);
 }
 
 Future<Void> FileBackupAgent::discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName) {
