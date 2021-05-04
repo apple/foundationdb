@@ -217,12 +217,12 @@ private:
 
 class LatencySample {
 public:
-	LatencySample(std::string name, UID id, double loggingInterval, int sampleSize)
-	  : name(name), id(id), sample(sampleSize), sampleStart(now()) {
+	LatencySample(std::string name, UID id, double loggingInterval, double accuracy)
+	  : name(name), id(id), sketch(accuracy), sampleStart(now()) {
 		logger = recurring([this]() { logSample(); }, loggingInterval);
 	}
 
-	void addMeasurement(double measurement) { sample.addSample(measurement); }
+	void addMeasurement(double measurement) { sketch.addSample(measurement); }
 
 private:
 	std::string name;

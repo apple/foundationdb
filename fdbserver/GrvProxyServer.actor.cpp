@@ -95,19 +95,19 @@ struct GrvProxyStats {
 	    defaultTxnGRVTimeInQueue("DefaultTxnGRVTimeInQueue",
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                             SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    batchTxnGRVTimeInQueue("BatchTxnGRVTimeInQueue",
 	                           id,
 	                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    grvLatencySample("GRVLatencyMetrics",
 	                     id,
 	                     SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                     SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                     SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    grvBatchLatencySample("GRVBatchLatencyMetrics",
 	                          id,
 	                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                          SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    grvLatencyBands("GRVLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 		// The rate at which the limit(budget) is allowed to grow.
 		specialCounter(cc, "SystemAndDefaultTxnRateAllowed", [this]() { return this->transactionRateAllowed; });

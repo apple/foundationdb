@@ -159,7 +159,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	int connectOutgoingCount;
 	int connectIncomingCount;
 	int connectFailedCount;
-	ContinuousSample<double> connectLatencies;
+	DDSketch<double> connectLatencies;
 
 	explicit Peer(TransportData* transport, NetworkAddress const& destination);
 

@@ -36,7 +36,7 @@
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/EventTypes.actor.h"
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbrpc/Smoother.h"
 
 class StorageServerInfo : public ReferencedInterface<StorageServerInterface> {

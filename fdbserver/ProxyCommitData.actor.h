@@ -100,12 +100,12 @@ struct ProxyStats {
 	    commitLatencySample("CommitLatencyMetrics",
 	                        id,
 	                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    commitLatencyBands("CommitLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
 	    commitBatchingWindowSize("CommitBatchingWindowSize",
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE) {
+	                             SERVER_KNOBS->LATENCY_SKETCH_ACCURACY) {
 		specialCounter(cc, "LastAssignedCommitVersion", [this]() { return this->lastCommitVersionAssigned; });
 		specialCounter(cc, "Version", [pVersion]() { return *pVersion; });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion]() { return pCommittedVersion->get(); });

@@ -460,7 +460,7 @@ struct ReadWriteWorkload : KVWorkload {
 	}
 
 	ACTOR static Future<Void> logLatency(Future<Optional<Value>> f,
-	                                     ContinuousSample<double>* latencies,
+	                                     DDSketch<double>* latencies,
 	                                     double* totalLatency,
 	                                     int* latencyCount,
 	                                     EventMetricHandle<ReadMetric> readMetric,
@@ -481,7 +481,7 @@ struct ReadWriteWorkload : KVWorkload {
 	}
 
 	ACTOR static Future<Void> logLatency(Future<RangeResult> f,
-	                                     ContinuousSample<double>* latencies,
+	                                     DDSketch<double>* latencies,
 	                                     double* totalLatency,
 	                                     int* latencyCount,
 	                                     EventMetricHandle<ReadMetric> readMetric,
