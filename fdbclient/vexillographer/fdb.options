@@ -288,7 +288,7 @@ description is not currently required but encouraged.
     <Option name="expensive_clear_cost_estimation_enable" code="1000"
                 description="Asks storage servers for how many bytes a clear key range contains. Otherwise uses the location cache to roughly estimate this." />
     <Option name="bypass_unreadable" code="1100"
-                description="Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. These reads will view versionstamp operations as if they were set operations." />            
+                description="Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. These reads will view versionstamp operations as if they were set operations that did not fill in the versionstamp." />            
   </Scope>
 
   <!-- The enumeration values matter - do not change them without
