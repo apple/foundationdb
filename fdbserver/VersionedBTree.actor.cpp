@@ -1030,6 +1030,22 @@ public:
 		return nullptr;
 	}
 
+	// Try to evict the item at index from cache
+	// Returns true if item is evicted or was not present in cache
+	bool tryEvict(const IndexType& index) {
+		auto i = cache.find(index);
+		if (i == cache.end() || !i->second.item.evictable()) {
+			return false;
+		}
+		Entry& toEvict = i->second;
+		if (toEvict.hits == 0) {
+			++g_redwoodMetrics.pagerEvictUnhit;
+		}
+		evictionOrder.erase(evictionOrder.iterator_to(toEvict));
+		cache.erase(toEvict.index);
+		return true;
+	}
+
 	// Get the object for i or create a new one.
 	// After a get(), the object for i is the last in evictionOrder.
 	// If noHit is set, do not consider this access to be cache hit if the object is present
@@ -1690,14 +1706,29 @@ public:
 		return readPhysicalPage(self, pageID, true);
 	}
 
-	// Reads the most recent version of pageID, either previously committed or written using updatePage() in the current
-	// commit
-	Future<Reference<IPage>> readPage(LogicalPageID pageID, bool cacheable, bool noHit = false) override {
+	bool tryEvictPage(LogicalPageID logicalID, Version v) {
+		PhysicalPageID physicalID = getPhysicalPageID(logicalID, v);
+		return pageCache.tryEvict(physicalID);
+	}
+
+	// Reads the most recent version of pageID, either previously committed or written using updatePage()
+	// in the current commit
+	// If cacheable is false then if fromCache is valid it will be set to true if the page is from cache, otherwise
+	// false. If cacheable is true, fromCache is ignored as the result is automatically from cache by virtue of being
+	// cacheable.
+	Future<Reference<IPage>> readPage(LogicalPageID pageID,
+	                                  bool cacheable,
+	                                  bool noHit = false,
+	                                  bool* fromCache = nullptr) override {
 		// Use cached page if present, without triggering a cache hit.
 		// Otherwise, read the page and return it but don't add it to the cache
 		if (!cacheable) {
 			debug_printf("DWALPager(%s) op=readUncached %s\n", filename.c_str(), toString(pageID).c_str());
 			PageCacheEntry* pCacheEntry = pageCache.getIfExists(pageID);
+			if (fromCache != nullptr) {
+				*fromCache = pCacheEntry != nullptr;
+			}
+
 			if (pCacheEntry != nullptr) {
 				debug_printf("DWALPager(%s) op=readUncachedHit %s\n", filename.c_str(), toString(pageID).c_str());
 				return pCacheEntry->readFuture;
@@ -1725,14 +1756,14 @@ public:
 		return cacheEntry.readFuture;
 	}
 
-	Future<Reference<IPage>> readPageAtVersion(LogicalPageID pageID, Version v, bool cacheable, bool noHit) {
+	PhysicalPageID getPhysicalPageID(LogicalPageID pageID, Version v) {
 		auto i = remappedPages.find(pageID);
 
 		if (i != remappedPages.end()) {
 			auto j = i->second.upper_bound(v);
 			if (j != i->second.begin()) {
 				--j;
-				debug_printf("DWALPager(%s) op=readAtVersionRemapped %s @%" PRId64 " -> %s\n",
+				debug_printf("DWALPager(%s) op=lookupRemapped %s @%" PRId64 " -> %s\n",
 				             filename.c_str(),
 				             toString(pageID).c_str(),
 				             v,
@@ -1741,13 +1772,22 @@ public:
 				ASSERT(pageID != invalidLogicalPageID);
 			}
 		} else {
-			debug_printf("DWALPager(%s) op=readAtVersionNotRemapped %s @%" PRId64 " (not remapped)\n",
+			debug_printf("DWALPager(%s) op=lookupNotRemapped %s @%" PRId64 " (not remapped)\n",
 			             filename.c_str(),
 			             toString(pageID).c_str(),
 			             v);
 		}
 
-		return readPage(pageID, cacheable, noHit);
+		return (PhysicalPageID)pageID;
+	}
+
+	Future<Reference<IPage>> readPageAtVersion(LogicalPageID logicalID,
+	                                           Version v,
+	                                           bool cacheable,
+	                                           bool noHit,
+	                                           bool* fromCache) {
+		PhysicalPageID physicalID = getPhysicalPageID(logicalID, v);
+		return readPage(physicalID, cacheable, noHit, fromCache);
 	}
 
 	// Get snapshot as of the most recent committed version of the pager
@@ -2276,13 +2316,18 @@ public:
 	  : pager(pager), metaKey(meta), version(version), expired(expiredFuture) {}
 	~DWALPagerSnapshot() override {}
 
-	Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID, bool cacheable, bool noHit) override {
+	Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID,
+	                                               bool cacheable,
+	                                               bool noHit,
+	                                               bool* fromCache) override {
 		if (expired.isError()) {
 			throw expired.getError();
 		}
-		return map(pager->readPageAtVersion(pageID, version, cacheable, noHit),
-		           [=](Reference<IPage> p) { return Reference<const IPage>(p); });
+		return map(pager->readPageAtVersion(pageID, version, cacheable, noHit, fromCache),
+		           [=](Reference<IPage> p) { return Reference<const IPage>(std::move(p)); });
 	}
+
+	bool tryEvictPage(LogicalPageID id) override { return pager->tryEvictPage(id, version); }
 
 	Key getMetaKey() const override { return metaKey; }
 
@@ -3296,7 +3341,7 @@ public:
 				}
 				// Start reading the page, without caching
 				entries.push_back(
-				    std::make_pair(q.get(), self->readPage(snapshot, q.get().pageID, nullptr, nullptr, true)));
+				    std::make_pair(q.get(), self->readPage(snapshot, q.get().pageID, nullptr, nullptr, true, false)));
 
 				--toPop;
 			}
@@ -4153,11 +4198,26 @@ private:
 		int m_size;
 	};
 
+	// Try to evict a BTree page from the pager cache.
+	// Returns true if, at the end of the call, the page is no longer in cache,
+	// so the caller can assume its IPage reference is the only one.
+	bool tryEvictPage(IPagerSnapshot* pager, BTreePageIDRef id) {
+		// If it's an oversized page, currently it cannot be in the cache
+		if (id.size() > 0) {
+			return true;
+		}
+		return pager->tryEvictPage(id.front());
+	}
+
 	ACTOR static Future<Reference<const IPage>> readPage(Reference<IPagerSnapshot> snapshot,
 	                                                     BTreePageIDRef id,
 	                                                     const RedwoodRecordRef* lowerBound,
 	                                                     const RedwoodRecordRef* upperBound,
-	                                                     bool forLazyClear = false) {
+	                                                     bool forLazyClear = false,
+	                                                     bool cacheable = true,
+	                                                     bool* fromCache = nullptr)
+
+	{
 		if (!forLazyClear) {
 			debug_printf("readPage() op=read %s @%" PRId64 " lower=%s upper=%s\n",
 			             toString(id).c_str(),
@@ -4174,17 +4234,22 @@ private:
 		state Reference<const IPage> page;
 
 		if (id.size() == 1) {
-			Reference<const IPage> p = wait(snapshot->getPhysicalPage(id.front(), !forLazyClear, false));
-			page = p;
+			Reference<const IPage> p = wait(snapshot->getPhysicalPage(id.front(), cacheable, false, fromCache));
+			page = std::move(p);
 		} else {
 			ASSERT(!id.empty());
 			std::vector<Future<Reference<const IPage>>> reads;
 			for (auto& pageID : id) {
-				reads.push_back(snapshot->getPhysicalPage(pageID, !forLazyClear, false));
+				reads.push_back(snapshot->getPhysicalPage(pageID, cacheable, false));
 			}
 			std::vector<Reference<const IPage>> pages = wait(getAll(reads));
 			// TODO:  Cache reconstituted super pages somehow, perhaps with help from the Pager.
 			page = Reference<const IPage>(new SuperPage(pages));
+
+			// In the current implementation, SuperPages are never present in the cache
+			if (fromCache != nullptr) {
+				*fromCache = false;
+			}
 		}
 
 		debug_printf("readPage() op=readComplete %s @%" PRId64 " \n", toString(id).c_str(), snapshot->getVersion());
@@ -4194,7 +4259,7 @@ private:
 		metrics.pageReadExt += (id.size() - 1);
 
 		if (!forLazyClear && page->userData == nullptr) {
-			debug_printf("readPage() Creating Reader for %s @%" PRId64 " lower=%s upper=%s\n",
+			debug_printf("readPage() Creating Mirror for %s @%" PRId64 " lower=%s upper=%s\n",
 			             toString(id).c_str(),
 			             snapshot->getVersion(),
 			             lowerBound->toString(false).c_str(),
@@ -4208,7 +4273,7 @@ private:
 			             pTreePage->toString(false, id, snapshot->getVersion(), lowerBound, upperBound).c_str());
 		}
 
-		return page;
+		return std::move(page);
 	}
 
 	static void preLoadPage(IPagerSnapshot* snapshot, BTreePageIDRef id) {
@@ -4579,8 +4644,9 @@ private:
 		state Reference<FlowLock> commitReadLock = self->m_commitReadLock;
 		wait(commitReadLock->take());
 		state FlowLock::Releaser readLock(*commitReadLock);
-		state Reference<const IPage> page =
-		    wait(readPage(snapshot, rootID, update->decodeLowerBound, update->decodeUpperBound));
+		state bool fromCache = false;
+		state Reference<const IPage> page = wait(
+		    readPage(snapshot, rootID, update->decodeLowerBound, update->decodeUpperBound, false, false, &fromCache));
 		readLock.release();
 
 		state BTreePage* btPage = (BTreePage*)page->begin();
@@ -4592,11 +4658,13 @@ private:
 		// though it is awkward to reason about.
 		state bool tryToUpdate = btPage->tree().numItems > 0 && update->boundariesNormal();
 
-		// If trying to update the page, we need to clone it so we don't modify the original.
+		// If trying to update the page and the page reference points into the cache,
+		// we need to clone it so we don't modify the original version of the page.
 		// TODO: Refactor DeltaTree::Mirror so it can be shared between different versions of pages
-		if (tryToUpdate) {
+		if (tryToUpdate && fromCache) {
 			page = self->cloneForUpdate(page);
 			btPage = (BTreePage*)page->begin();
+			fromCache = false;
 		}
 
 		debug_printf(
@@ -5077,6 +5145,7 @@ private:
 			state bool detachChildren = (parentInfo->count > 2);
 			state bool forceUpdate = false;
 
+			// If no changes were made, but we should rewrite it to point directly to remapped child pages
 			if (!m.changesMade && detachChildren) {
 				debug_printf(
 				    "%s Internal page forced rewrite because at least %d children have been updated in-place.\n",
@@ -5084,12 +5153,17 @@ private:
 				    parentInfo->count);
 				forceUpdate = true;
 				if (!m.updating) {
-					page = self->cloneForUpdate(page);
-					cursor = getCursor(page);
-					btPage = (BTreePage*)page->begin();
-					m.btPage = btPage;
-					m.m = cursor.mirror;
 					m.updating = true;
+
+					// Copy the page before modification if the page references the cache
+					if (fromCache) {
+						page = self->cloneForUpdate(page);
+						cursor = getCursor(page);
+						btPage = (BTreePage*)page->begin();
+						m.btPage = btPage;
+						m.m = cursor.mirror;
+						fromCache = false;
+					}
 				}
 				++g_redwoodMetrics.level(btPage->height).forceUpdate;
 			}
@@ -5107,7 +5181,7 @@ private:
 					if (m.updating) {
 						// Page was updated in place (or being forced to be updated in place to update child page ids)
 						debug_printf(
-						    "%s Internal page modified in-place tryUpdate=%d forceUpdate=%d detachChildren=%d\n",
+						    "%s Internal page modified in-place tryToUpdate=%d forceUpdate=%d detachChildren=%d\n",
 						    context.c_str(),
 						    tryToUpdate,
 						    forceUpdate,
@@ -7672,12 +7746,14 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 			pos = newPos;
 		}
 		double elapsed = timer() - start;
-		printf("Seek/skip test, jumpMax=%d, items=%d, oldSeek=%d useHint=%d:  Elapsed %f s\n",
+		printf("Seek/skip test, count=%d jumpMax=%d, items=%d, oldSeek=%d useHint=%d:  Elapsed %f seconds  %.2f M/s\n",
+		       count,
 		       jumpMax,
 		       items.size(),
 		       old,
 		       useHint,
-		       elapsed);
+		       elapsed,
+		       double(count) / elapsed / 1e6);
 	};
 
 	// Compare seeking to nearby elements with and without hints, using the old and new SeekLessThanOrEqual methods.
