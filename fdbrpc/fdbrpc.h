@@ -342,7 +342,7 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 					FlowTransport::transport().sendUnreliable(
 					    SerializeSource<ErrorOr<AcknowledgementReply>>(
 					        AcknowledgementReply(acknowledgements.bytesAcknowledged)),
-					    acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint),
+					    acknowledgements.getEndpoint(TaskPriority::ReadSocket),
 					    false);
 				}
 			}
@@ -356,11 +356,10 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 		T res = this->popImpl();
 		if (acknowledgements.getRawEndpoint().isValid()) {
 			acknowledgements.bytesAcknowledged += res.expectedSize();
-			FlowTransport::transport().sendUnreliable(
-			    SerializeSource<ErrorOr<AcknowledgementReply>>(
-			        AcknowledgementReply(acknowledgements.bytesAcknowledged)),
-			    acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint),
-			    false);
+			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<AcknowledgementReply>>(
+			                                              AcknowledgementReply(acknowledgements.bytesAcknowledged)),
+			                                          acknowledgements.getEndpoint(TaskPriority::ReadSocket),
+			                                          false);
 		}
 		return res;
 	}
@@ -369,7 +368,7 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 		if (acknowledgements.getRawEndpoint().isValid() && acknowledgements.isRemoteEndpoint() && !this->hasError()) {
 			FlowTransport::transport().sendUnreliable(
 			    SerializeSource<ErrorOr<AcknowledgementReply>>(operation_obsolete()),
-			    acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint),
+			    acknowledgements.getEndpoint(TaskPriority::ReadSocket),
 			    false);
 		}
 	}
@@ -387,7 +386,7 @@ public:
 	void send(U&& value) const {
 		if (queue->isRemoteEndpoint()) {
 			if (!queue->acknowledgements.getRawEndpoint().isValid()) {
-				value.acknowledgeToken = queue->acknowledgements.getEndpoint(TaskPriority::DefaultEndpoint).token;
+				value.acknowledgeToken = queue->acknowledgements.getEndpoint(TaskPriority::ReadSocket).token;
 			}
 			queue->acknowledgements.bytesSent += value.expectedSize();
 			if ((!queue->acknowledgements.ready.isValid() ||
@@ -450,9 +449,7 @@ public:
 			errors->delPromiseRef();
 	}
 
-	const Endpoint& getEndpoint(TaskPriority taskID = TaskPriority::DefaultEndpoint) const {
-		return queue->getEndpoint(taskID);
-	}
+	const Endpoint& getEndpoint() const { return queue->getEndpoint(TaskPriority::ReadSocket); }
 
 	bool operator==(const ReplyPromiseStream<T>& rhs) const { return queue == rhs.queue; }
 	bool isEmpty() const { return !queue->isReady(); }
@@ -506,7 +503,7 @@ private:
 
 template <class Ar, class T>
 void save(Ar& ar, const ReplyPromiseStream<T>& value) {
-	auto const& ep = value.getEndpoint(TaskPriority::ReadSocket).token;
+	auto const& ep = value.getEndpoint().token;
 	ar << ep;
 }
 
