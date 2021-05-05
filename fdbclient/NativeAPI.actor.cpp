@@ -3577,13 +3577,13 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results,
 }
 
 Future<RangeResult> getRange(Database const& cx,
-                                            Future<Version> const& fVersion,
-                                            KeySelector const& begin,
-                                            KeySelector const& end,
-                                            GetRangeLimits const& limits,
-                                            bool const& reverse,
-                                            TransactionInfo const& info,
-                                            TagSet const& tags) {
+                             Future<Version> const& fVersion,
+                             KeySelector const& begin,
+                             KeySelector const& end,
+                             GetRangeLimits const& limits,
+                             bool const& reverse,
+                             TransactionInfo const& info,
+                             TagSet const& tags) {
 	return getRange(cx,
 	                Reference<TransactionLogInfo>(),
 	                fVersion,

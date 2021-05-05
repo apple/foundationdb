@@ -4355,7 +4355,7 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 	                               SERVER_KNOBS->STORAGE_LOGGING_DELAY,
 	                               &self->counters.cc,
 	                               self->thisServerID.toString() + "/StorageMetrics",
-	                               [tag, self=self](TraceEvent& te) {
+	                               [tag, self = self](TraceEvent& te) {
 		                               te.detail("Tag", tag.toString());
 		                               StorageBytes sb = self->storage.getStorageBytes();
 		                               te.detail("KvstoreBytesUsed", sb.used);
