@@ -506,7 +506,7 @@ private:
 
 template <class Ar, class T>
 void save(Ar& ar, const ReplyPromiseStream<T>& value) {
-	auto const& ep = value.getEndpoint().token;
+	auto const& ep = value.getEndpoint(TaskPriority::ReadSocket).token;
 	ar << ep;
 }
 
