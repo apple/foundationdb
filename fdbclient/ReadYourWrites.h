@@ -41,6 +41,7 @@ struct ReadYourWritesTransactionOptions {
 	double timeoutInSeconds;
 	int maxRetries;
 	int snapshotRywEnabled;
+	bool bypassUnreadable : 1;
 
 	ReadYourWritesTransactionOptions() {}
 	explicit ReadYourWritesTransactionOptions(Transaction const& tr);

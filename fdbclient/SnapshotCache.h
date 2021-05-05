@@ -198,11 +198,12 @@ public:
 			return KV;
 		}
 
-		bool is_kv() { return type() == KV; }
-		bool is_unknown_range() { return type() == UNKNOWN_RANGE; }
-		bool is_empty_range() { return type() == EMPTY_RANGE; }
-		bool is_dependent() { return false; }
-		bool is_unreadable() { return false; }
+		bool is_kv() const { return type() == KV; }
+		bool is_unknown_range() const { return type() == UNKNOWN_RANGE; }
+		bool is_empty_range() const { return type() == EMPTY_RANGE; }
+		bool is_dependent() const { return false; }
+		bool is_unreadable() const { return false; }
+		void bypassUnreadableProtection() {}
 
 		ExtStringRef beginKey() {
 			if (offset == 0) {
