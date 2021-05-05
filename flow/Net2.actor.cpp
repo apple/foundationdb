@@ -124,6 +124,12 @@ thread_local INetwork* thread_network = 0;
 
 class Net2 sealed : public INetwork, public INetworkConnections {
 
+private:
+	void updateStarvationTracker(struct NetworkMetrics::PriorityStats& binStats,
+	                             TaskPriority priority,
+	                             TaskPriority lastPriority,
+	                             double now);
+
 public:
 	Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics);
 	void initTLS(ETLSInitState targetState);
@@ -1394,6 +1400,28 @@ void Net2::run() {
 #endif
 }
 
+// Updates the PriorityStats found in NetworkMetrics
+void Net2::updateStarvationTracker(struct NetworkMetrics::PriorityStats& binStats,
+                                   TaskPriority priority,
+                                   TaskPriority lastPriority,
+                                   double now) {
+
+	// Busy -> idle at binStats.priority
+	if (binStats.priority > priority && binStats.priority <= lastPriority) {
+		binStats.active = false;
+		binStats.duration += now - binStats.windowedTimer;
+		binStats.maxDuration = std::max(binStats.maxDuration, now - binStats.timer);
+	}
+
+	// Idle -> busy at binStats.priority
+	else if (binStats.priority <= priority && binStats.priority > lastPriority) {
+		binStats.active = true;
+		binStats.timer = now;
+		binStats.windowedTimer = now;
+	}
+}
+
+// Update both vectors of starvation trackers (one that updates every 5s and the other every 1s)
 void Net2::trackAtPriority(TaskPriority priority, double now) {
 	if (lastPriorityStats == nullptr || priority != lastPriorityStats->priority) {
 		// Start tracking current priority
@@ -1413,21 +1441,11 @@ void Net2::trackAtPriority(TaskPriority priority, double now) {
 			if (binStats.priority > lastPriority && binStats.priority > priority) {
 				break;
 			}
-
-			// Busy -> idle at binStats.priority
-			if (binStats.priority > priority && binStats.priority <= lastPriority) {
-				binStats.active = false;
-				binStats.duration += now - binStats.windowedTimer;
-				binStats.maxDuration = std::max(binStats.maxDuration, now - binStats.timer);
-			}
-
-			// Idle -> busy at binStats.priority
-			else if (binStats.priority <= priority && binStats.priority > lastPriority) {
-				binStats.active = true;
-				binStats.timer = now;
-				binStats.windowedTimer = now;
-			}
+			updateStarvationTracker(binStats, priority, lastPriority, now);
 		}
+
+		// Update starvation trackers for network busyness
+		updateStarvationTracker(networkInfo.metrics.starvationTrackerNetworkBusyness, priority, lastPriority, now);
 
 		lastPriorityStats = &activeStatsItr.first->second;
 	}

@@ -420,6 +420,10 @@ An |database-blurb1| Modifications to a database are performed via transactions.
    ``*out_transaction``
       Set to point to the newly created :type:`FDBTransaction`.
 
+.. function:: double fdb_database_get_main_thread_busyness(FDBDatabase* database)
+
+   Returns a value where 0 indicates that the client is idle and 1 (or larger) indicates that the client is saturated. By default, this value is updated every second.
+
 Transaction
 ===========
 

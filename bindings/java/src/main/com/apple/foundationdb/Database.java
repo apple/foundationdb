@@ -81,6 +81,15 @@ public interface Database extends AutoCloseable, TransactionContext {
 	DatabaseOptions options();
 
 	/**
+	 * Returns a value which indicates the saturation of the client
+	 * <br>
+	 * <b>Note:</b> By default, this value is updated every second
+	 *
+	 * @return a value where 0 indicates that the client is idle and 1 (or larger) indicates that the client is saturated.
+	 */
+	double getMainThreadBusyness();
+
+	/**
 	 * Runs a read-only transactional function against this {@code Database} with retry logic.
 	 *  {@link Function#apply(Object) apply(ReadTransaction)} will be called on the
 	 *  supplied {@link Function} until a non-retryable

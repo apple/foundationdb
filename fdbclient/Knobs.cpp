@@ -40,6 +40,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( TOO_MANY,                            1000000 );
 
 	init( SYSTEM_MONITOR_INTERVAL,                 5.0 );
+	init( NETWORK_BUSYNESS_MONITOR_INTERVAL,       1.0 );
 
 	init( FAILURE_MAX_DELAY,                       5.0 );
 	init( FAILURE_MIN_DELAY,                       4.0 ); if( randomize && BUGGIFY ) FAILURE_MIN_DELAY = 1.0;

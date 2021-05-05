@@ -296,6 +296,15 @@ void DLDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef
 	    db, option, value.present() ? value.get().begin() : NULL, value.present() ? value.get().size() : 0));
 }
 
+// Get network thread busyness
+double DLDatabase::getMainThreadBusyness() {
+	if (api->databaseGetMainThreadBusyness != nullptr) {
+		return api->databaseGetMainThreadBusyness(db);
+	}
+
+	return 0;
+}
+
 // DLApi
 template <class T>
 void loadClientFunction(T* fp, void* lib, std::string libPath, const char* functionName, bool requireFunction = true) {
@@ -309,6 +318,7 @@ void loadClientFunction(T* fp, void* lib, std::string libPath, const char* funct
 DLApi::DLApi(std::string fdbCPath, bool unlinkOnLoad)
   : api(new FdbCApi()), fdbCPath(fdbCPath), unlinkOnLoad(unlinkOnLoad), networkSetup(false) {}
 
+// Loads client API functions (definitions are in FdbCApi struct)
 void DLApi::init() {
 	if (isLibraryLoaded(fdbCPath.c_str())) {
 		throw external_client_already_loaded();
@@ -337,6 +347,11 @@ void DLApi::init() {
 
 	loadClientFunction(&api->databaseCreateTransaction, lib, fdbCPath, "fdb_database_create_transaction");
 	loadClientFunction(&api->databaseSetOption, lib, fdbCPath, "fdb_database_set_option");
+	loadClientFunction(&api->databaseGetMainThreadBusyness,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_database_get_main_thread_busyness",
+	                   headerVersion >= 700);
 	loadClientFunction(&api->databaseDestroy, lib, fdbCPath, "fdb_database_destroy");
 
 	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option");
@@ -819,6 +834,15 @@ void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional
 	if (dbState->db) {
 		dbState->db->setOption(option, value);
 	}
+}
+
+// Get network thread busyness
+double MultiVersionDatabase::getMainThreadBusyness() {
+	if (dbState->db) {
+		return dbState->db->getMainThreadBusyness();
+	}
+
+	return 0;
 }
 
 void MultiVersionDatabase::Connector::connect() {

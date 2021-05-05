@@ -159,6 +159,8 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_set_option(FDBDatabase* d,
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_create_transaction(FDBDatabase* d,
                                                                          FDBTransaction** out_transaction);
 
+DLLEXPORT WARN_UNUSED_RESULT double fdb_database_get_main_thread_busyness(FDBDatabase* db);
+
 DLLEXPORT void fdb_transaction_destroy(FDBTransaction* tr);
 
 DLLEXPORT void fdb_transaction_cancel(FDBTransaction* tr);
