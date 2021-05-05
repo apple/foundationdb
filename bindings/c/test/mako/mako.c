@@ -828,6 +828,14 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm) {
 #endif
 	}
 
+	/* Set client Log group */
+	if (strlen(args->log_group) != 0) {
+		err = fdb_network_set_option(FDB_NET_OPTION_TRACE_LOG_GROUP, (uint8_t*)args->log_group, strlen(args->log_group));
+		if (err) {
+			fprintf(stderr, "ERROR: fdb_network_set_option(FDB_NET_OPTION_TRACE_LOG_GROUP): %s\n", fdb_get_error(err));
+		}
+	}
+
 	/* enable tracing if specified */
 	if (args->trace) {
 		if (args->verbose >= VERBOSE_DEBUG) {
@@ -989,6 +997,7 @@ int init_args(mako_args_t* args) {
 	args->verbose = 1;
 	args->flatbuffers = 0;
 	args->knobs[0] = '\0';
+	args->log_group[0] = '\0';
 	args->trace = 0;
 	args->tracepath[0] = '\0';
 	for (i = 0; i < MAX_OP; i++) {
@@ -1138,6 +1147,7 @@ void usage() {
 	printf("%-24s%s\n", "-m, --mode=MODE", "Specify the mode (build, run, clean)");
 	printf("%-24s%s\n", "-z, --zipf", "Use zipfian distribution instead of uniform distribution");
 	printf("%-24s%s\n", "    --commitget", "Commit GETs");
+	printf("%-24s %s\n", "   --loggroup=LOGGROUP", "Set client log group");
 	printf("%-24s%s\n", "    --trace", "Enable tracing");
 	printf("%-24s%s\n", "    --tracepath=PATH", "Set trace file path");
 	printf("%-24s%s\n", "    --knobs=KNOBS", "Set client knobs");
@@ -1166,6 +1176,7 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			                                    { "verbose", required_argument, NULL, 'v' },
 			                                    { "mode", required_argument, NULL, 'm' },
 			                                    { "knobs", required_argument, NULL, ARG_KNOBS },
+			                                    { "loggroup", required_argument, NULL, ARG_LOGGROUP },
 			                                    { "tracepath", required_argument, NULL, ARG_TRACEPATH },
 			                                    /* no args */
 			                                    { "help", no_argument, NULL, 'h' },
@@ -1248,6 +1259,9 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			break;
 		case ARG_KNOBS:
 			memcpy(args->knobs, optarg, strlen(optarg) + 1);
+			break;
+		case ARG_LOGGROUP:
+			memcpy(args->log_group, optarg, strlen(optarg) + 1);
 			break;
 		case ARG_TRACE:
 			args->trace = 1;
