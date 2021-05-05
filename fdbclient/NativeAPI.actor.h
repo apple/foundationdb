@@ -74,11 +74,15 @@ class Database {
 public:
 	enum { API_VERSION_LATEST = -1 };
 
+	// Creates a database object that represents a connection to a cluster
+	// This constructor uses a preallocated DatabaseContext that may have been created
+	// on another thread
 	static Database createDatabase(Reference<ClusterConnectionFile> connFile,
 	                               int apiVersion,
 	                               bool internal = true,
 	                               LocalityData const& clientLocality = LocalityData(),
 	                               DatabaseContext* preallocatedDb = nullptr);
+
 	static Database createDatabase(std::string connFileName,
 	                               int apiVersion,
 	                               bool internal = true,

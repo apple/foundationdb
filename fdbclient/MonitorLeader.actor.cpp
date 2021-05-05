@@ -740,6 +740,7 @@ void shrinkProxyList(ClientDBInfo& ni,
 ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
     Reference<ClusterConnectionFile> connFile,
     Reference<AsyncVar<ClientDBInfo>> clientInfo,
+    Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
     MonitorLeaderInfo info,
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
     Key traceLogGroup) {
@@ -755,6 +756,9 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 	loop {
 		state ClientLeaderRegInterface clientLeaderServer(addrs[idx]);
 		state OpenDatabaseCoordRequest req;
+
+		coordinator->set(clientLeaderServer);
+
 		req.clusterKey = cs.clusterKey();
 		req.coordinators = cs.coordinators();
 		req.knownClientInfoID = clientInfo->get().id;
@@ -821,13 +825,14 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 ACTOR Future<Void> monitorProxies(
     Reference<AsyncVar<Reference<ClusterConnectionFile>>> connFile,
     Reference<AsyncVar<ClientDBInfo>> clientInfo,
+    Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
     Key traceLogGroup) {
 	state MonitorLeaderInfo info(connFile->get());
 	loop {
 		choose {
 			when(MonitorLeaderInfo _info = wait(monitorProxiesOneGeneration(
-			         connFile->get(), clientInfo, info, supportedVersions, traceLogGroup))) {
+			         connFile->get(), clientInfo, coordinator, info, supportedVersions, traceLogGroup))) {
 				info = _info;
 			}
 			when(wait(connFile->onChange())) {

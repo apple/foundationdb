@@ -30,6 +30,7 @@
 
 const int MAX_CLUSTER_FILE_BYTES = 60000;
 
+// The coordinator interface as exposed to clients
 struct ClientLeaderRegInterface {
 	RequestStream<struct GetLeaderRequest> getLeader;
 	RequestStream<struct OpenDatabaseCoordRequest> openDatabase;
@@ -37,6 +38,10 @@ struct ClientLeaderRegInterface {
 	ClientLeaderRegInterface() {}
 	ClientLeaderRegInterface(NetworkAddress remote);
 	ClientLeaderRegInterface(INetwork* local);
+
+	bool operator==(const ClientLeaderRegInterface& rhs) const {
+		return getLeader == rhs.getLeader && openDatabase == rhs.openDatabase;
+	}
 };
 
 class ClusterConnectionString {
