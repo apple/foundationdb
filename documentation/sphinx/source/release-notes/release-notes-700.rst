@@ -31,7 +31,7 @@ Fixes
 Status
 ------
 * Added ``commit_batching_window_size`` to the proxy roles section of status to record statistics about commit batching window size on each proxy. `(PR #4735) <https://github.com/apple/foundationdb/pull/4735>`_
-
+* Added ``seconds_since_fully_recovered`` to the recovery_state section of status to report the time, in seconds, since last full recovery. `(PR #4770) <https://github.com/apple/foundationdb/pull/4770>`_
 
 Bindings
 --------
