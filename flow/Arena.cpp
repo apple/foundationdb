@@ -101,6 +101,11 @@ void Arena::dependsOn(const Arena& p) {
 		}
 	}
 }
+
+void* Arena::allocateAlignedBuffer(size_t alignment, size_t size) {
+	return ArenaBlock::dependOnAlignedBuffer(impl, alignment, size);
+}
+
 size_t Arena::getSize() const {
 	if (impl) {
 		allowAccess(impl.getPtr());
@@ -172,9 +177,13 @@ size_t ArenaBlock::totalSize() {
 	while (o) {
 		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
 		makeDefined(r, sizeof(ArenaBlockRef));
-		allowAccess(r->next);
-		s += r->next->totalSize();
-		disallowAccess(r->next);
+		if (r->alignedBufferSize != 0) {
+			s += r->alignedBufferSize;
+		} else {
+			allowAccess(r->next);
+			s += r->next->totalSize();
+			disallowAccess(r->next);
+		}
 		o = r->nextBlockOffset;
 		makeNoAccess(r, sizeof(ArenaBlockRef));
 	}
@@ -190,7 +199,12 @@ void ArenaBlock::getUniqueBlocks(std::set<ArenaBlock*>& a) {
 	while (o) {
 		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
 		makeDefined(r, sizeof(ArenaBlockRef));
-		r->next->getUniqueBlocks(a);
+
+		// If next is valid recursively count its blocks
+		if (r->alignedBufferSize == 0) {
+			r->next->getUniqueBlocks(a);
+		}
+
 		o = r->nextBlockOffset;
 		makeNoAccess(r, sizeof(ArenaBlockRef));
 	}
@@ -212,11 +226,24 @@ int ArenaBlock::addUsed(int bytes) {
 void ArenaBlock::makeReference(ArenaBlock* next) {
 	ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + bigUsed);
 	makeDefined(r, sizeof(ArenaBlockRef));
+	r->alignedBufferSize = 0;
 	r->next = next;
 	r->nextBlockOffset = nextBlockOffset;
 	makeNoAccess(r, sizeof(ArenaBlockRef));
 	nextBlockOffset = bigUsed;
 	bigUsed += sizeof(ArenaBlockRef);
+}
+
+void* ArenaBlock::makeAlignedBuffer(size_t alignment, size_t size) {
+	ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + bigUsed);
+	makeDefined(r, sizeof(ArenaBlockRef));
+	r->alignedBufferSize = size;
+	r->alignedBuffer = aligned_alloc(alignment, size);
+	r->nextBlockOffset = nextBlockOffset;
+	makeNoAccess(r, sizeof(ArenaBlockRef));
+	nextBlockOffset = bigUsed;
+	bigUsed += sizeof(ArenaBlockRef);
+	return r->alignedBuffer;
 }
 
 void ArenaBlock::dependOn(Reference<ArenaBlock>& self, ArenaBlock* other) {
@@ -225,6 +252,14 @@ void ArenaBlock::dependOn(Reference<ArenaBlock>& self, ArenaBlock* other) {
 		create(SMALL, self)->makeReference(other);
 	else
 		self->makeReference(other);
+}
+
+void* ArenaBlock::dependOnAlignedBuffer(Reference<ArenaBlock>& self, size_t alignment, size_t size) {
+	if (!self || self->isTiny() || self->unused() < sizeof(ArenaBlockRef)) {
+		return create(SMALL, self)->makeAlignedBuffer(alignment, size);
+	} else {
+		return self->makeAlignedBuffer(alignment, size);
+	}
 }
 
 void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
@@ -359,10 +394,17 @@ void ArenaBlock::destroy() {
 			while (o) {
 				ArenaBlockRef* br = (ArenaBlockRef*)((char*)b->getData() + o);
 				makeDefined(br, sizeof(ArenaBlockRef));
-				allowAccess(br->next);
-				if (br->next->delref_no_destroy())
-					stack.push_back(stackArena, br->next);
-				disallowAccess(br->next);
+
+				// If alignedBuffer is valid, free it
+				if (br->alignedBufferSize != 0) {
+					aligned_free(br->alignedBuffer);
+				} else {
+					allowAccess(br->next);
+					if (br->next->delref_no_destroy())
+						stack.push_back(stackArena, br->next);
+					disallowAccess(br->next);
+				}
+
 				o = br->nextBlockOffset;
 			}
 		}

@@ -102,6 +102,7 @@ public:
 	Arena& operator=(Arena&&) noexcept;
 
 	void dependsOn(const Arena& p);
+	void* allocateAlignedBuffer(size_t alignment, size_t size);
 	size_t getSize() const;
 
 	bool hasFree(size_t size, const void* address);
@@ -129,7 +130,13 @@ struct scalar_traits<Arena> : std::true_type {
 };
 
 struct ArenaBlockRef {
-	ArenaBlock* next;
+	// If alignedBufferSize is not 0, alignedBuffer is valid and must be freed with aligned_free()
+	// Otherwise, next is valid
+	size_t alignedBufferSize;
+	union {
+		ArenaBlock* next;
+		void* alignedBuffer;
+	};
 	uint32_t nextBlockOffset;
 };
 
@@ -160,7 +167,9 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock> {
 	void getUniqueBlocks(std::set<ArenaBlock*>& a);
 	int addUsed(int bytes);
 	void makeReference(ArenaBlock* next);
+	void* makeAlignedBuffer(size_t alignment, size_t size);
 	static void dependOn(Reference<ArenaBlock>& self, ArenaBlock* other);
+	static void* dependOnAlignedBuffer(Reference<ArenaBlock>& self, size_t alignment, size_t size);
 	static void* allocate(Reference<ArenaBlock>& self, int bytes);
 	// Return an appropriately-sized ArenaBlock to store the given data
 	static ArenaBlock* create(int dataSize, Reference<ArenaBlock>& next);

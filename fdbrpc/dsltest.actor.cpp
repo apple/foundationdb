@@ -630,7 +630,14 @@ void showArena(ArenaBlock* a, ArenaBlock* parent) {
 		int o = a->nextBlockOffset;
 		while (o) {
 			ArenaBlockRef* r = (ArenaBlockRef*)((char*)a->getData() + o);
-			showArena(r->next, a);
+
+			// If alignedBuffer is valid then print its pointer and size, else recurse
+			if (r->alignedBufferSize != 0) {
+				printf("AlignedBuffer %p (<-%p) %u bytes\n", r->alignedBuffer, a, r->alignedBufferSize);
+			} else {
+				showArena(r->next, a);
+			}
+
 			o = r->nextBlockOffset;
 		}
 	}

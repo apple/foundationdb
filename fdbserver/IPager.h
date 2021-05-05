@@ -43,11 +43,7 @@ public:
 	// The page's logical size includes an opaque checksum, use size() to get usable size
 	ArenaPage(int logicalSize, int bufferSize) : logicalSize(logicalSize), bufferSize(bufferSize), userData(nullptr) {
 		if (bufferSize > 0) {
-			// Get an aligned pointer to bufferSize from an arena in a wasteful way
-			// TODO:  Use arena.allocateAlignedBuffer()
-			size_t space = bufferSize * 2;
-			void* pSpace = new (arena) uint8_t[space];
-			buffer = (uint8_t*)std::align(4096, bufferSize, pSpace, space);
+			buffer = (uint8_t*)arena.allocateAlignedBuffer(4096, bufferSize);
 
 			// Mark any unused page portion defined
 			VALGRIND_MAKE_MEM_DEFINED(buffer + logicalSize, bufferSize - logicalSize);
