@@ -34,6 +34,7 @@ constexpr UID WLTOKEN_CLIENTLEADERREG_GETLEADER(-1, 2);
 constexpr UID WLTOKEN_CLIENTLEADERREG_OPENDATABASE(-1, 3);
 constexpr UID WLTOKEN_CLIENTLEADERREG_DESCRIPTOR_MUTABLE(-1, 4);
 
+// the value of this endpoint should be stable and not change.
 constexpr UID WLTOKEN_PROTOCOL_INFO(-1, 11);
 
 // well known endpoints published to the client.
@@ -256,7 +257,7 @@ struct CheckDescriptorMutable {
 	Key key;
 	ReplyPromise<CheckDescriptorMutableReply> reply;
 	explicit CheckDescriptorMutable(Key key) : key(key) {}
-	CheckDescriptorMutable(){}
+	CheckDescriptorMutable() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
