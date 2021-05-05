@@ -1168,6 +1168,13 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
 			message["required_resolvers"] = requiredResolvers;
 		} else if (mStatusCode == RecoveryStatus::locking_old_transaction_servers) {
 			message["missing_logs"] = md.getValue("MissingIDs").c_str();
+		} else if (mStatusCode == RecoveryStatus::fully_recovered) {
+			if (!rv.isError()) {
+				int64_t fullyRecoveredAtVersion = md.getInt64("FullyRecoveredAtVersion");
+				double secondsSinceFulyRecovered = std::max((int64_t)0, (int64_t)(rv.get() - fullyRecoveredAtVersion)) /
+							                       (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+				message["seconds_since_fully_recovered"] = secondsSinceFulyRecovered;
+			}
 		}
 		// TODO:  time_in_recovery: 0.5
 		//        time_in_state: 0.1

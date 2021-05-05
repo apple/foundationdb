@@ -521,6 +521,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                                                           R"statusSchema(
       "recovery_state":{
          "seconds_since_last_recovered":1,
+         "seconds_since_fully_recovered":1,
          "required_resolvers":1,
          "required_commit_proxies":1,
          "required_grv_proxies":1,
