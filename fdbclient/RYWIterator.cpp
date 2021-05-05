@@ -41,7 +41,7 @@ const RYWIterator::SEGMENT_TYPE RYWIterator::typeMap[12] = {
 	RYWIterator::KV
 };
 
-RYWIterator::SEGMENT_TYPE RYWIterator::type() const {
+RYWIterator::SEGMENT_TYPE RYWIterator::type() {
 	if (is_unreadable() && !bypassUnreadable)
 		throw accessed_unreadable();
 
