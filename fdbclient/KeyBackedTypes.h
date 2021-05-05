@@ -280,7 +280,7 @@ public:
 		return map(
 		    tr->getRange(
 		        KeyRangeRef(s.pack(Codec<KeyType>::pack(begin)), endKey), GetRangeLimits(limit), snapshot, reverse),
-		    [s](Standalone<RangeResultRef> const& kvs) -> PairsType {
+		    [s](RangeResult const& kvs) -> PairsType {
 			    PairsType results;
 			    for (int i = 0; i < kvs.size(); ++i) {
 				    KeyType key = Codec<KeyType>::unpack(s.unpack(kvs[i].key));
@@ -344,7 +344,7 @@ public:
 		Key endKey = end.present() ? s.pack(Codec<ValueType>::pack(end.get())) : space.range().end;
 		return map(
 		    tr->getRange(KeyRangeRef(s.pack(Codec<ValueType>::pack(begin)), endKey), GetRangeLimits(limit), snapshot),
-		    [s](Standalone<RangeResultRef> const& kvs) -> Values {
+		    [s](RangeResult const& kvs) -> Values {
 			    Values results;
 			    for (int i = 0; i < kvs.size(); ++i) {
 				    results.push_back(Codec<ValueType>::unpack(s.unpack(kvs[i].key)));

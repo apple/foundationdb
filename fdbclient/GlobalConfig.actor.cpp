@@ -34,14 +34,18 @@ const KeyRef fdbClientInfoTxnSizeLimit = LiteralStringRef("config/fdb_client_inf
 const KeyRef transactionTagSampleRate = LiteralStringRef("config/transaction_tag_sample_rate");
 const KeyRef transactionTagSampleCost = LiteralStringRef("config/transaction_tag_sample_cost");
 
+const KeyRef samplingFrequency = LiteralStringRef("visibility/sampling/frequency");
+const KeyRef samplingWindow = LiteralStringRef("visibility/sampling/window");
+
 GlobalConfig::GlobalConfig() : lastUpdate(0) {}
 
 void GlobalConfig::create(DatabaseContext* cx, Reference<AsyncVar<ClientDBInfo>> dbInfo) {
 	if (g_network->global(INetwork::enGlobalConfig) == nullptr) {
 		auto config = new GlobalConfig{};
 		config->cx = Database(cx);
+		config->dbInfo = dbInfo;
 		g_network->setGlobal(INetwork::enGlobalConfig, config);
-		config->_updater = updater(config, dbInfo);
+		config->_updater = updater(config);
 	}
 }
 
@@ -49,6 +53,10 @@ GlobalConfig& GlobalConfig::globalConfig() {
 	void* res = g_network->global(INetwork::enGlobalConfig);
 	ASSERT(res);
 	return *reinterpret_cast<GlobalConfig*>(res);
+}
+
+void GlobalConfig::updateDBInfo(Reference<AsyncVar<ClientDBInfo>> dbInfo) {
+	// this->dbInfo = dbInfo;
 }
 
 Key GlobalConfig::prefixedKey(KeyRef key) {
@@ -77,6 +85,14 @@ Future<Void> GlobalConfig::onInitialized() {
 	return initialized.getFuture();
 }
 
+Future<Void> GlobalConfig::onChange() {
+	return configChanged.onTrigger();
+}
+
+void GlobalConfig::trigger(KeyRef key, std::function<void(std::optional<std::any>)> fn) {
+	callbacks.emplace(key, std::move(fn));
+}
+
 void GlobalConfig::insert(KeyRef key, ValueRef value) {
 	data.erase(key);
 
@@ -89,6 +105,8 @@ void GlobalConfig::insert(KeyRef key, ValueRef value) {
 			any = StringRef(arena, t.getString(0).contents());
 		} else if (t.getType(0) == Tuple::ElementType::INT) {
 			any = t.getInt(0);
+		} else if (t.getType(0) == Tuple::ElementType::BOOL) {
+			any = t.getBool(0);
 		} else if (t.getType(0) == Tuple::ElementType::FLOAT) {
 			any = t.getFloat(0);
 		} else if (t.getType(0) == Tuple::ElementType::DOUBLE) {
@@ -97,19 +115,26 @@ void GlobalConfig::insert(KeyRef key, ValueRef value) {
 			ASSERT(false);
 		}
 		data[stableKey] = makeReference<ConfigValue>(std::move(arena), std::move(any));
+
+		if (callbacks.find(stableKey) != callbacks.end()) {
+			callbacks[stableKey](data[stableKey]->value);
+		}
 	} catch (Error& e) {
 		TraceEvent("GlobalConfigTupleParseError").detail("What", e.what());
 	}
 }
 
-void GlobalConfig::erase(KeyRef key) {
-	data.erase(key);
+void GlobalConfig::erase(Key key) {
+	erase(KeyRangeRef(key, keyAfter(key)));
 }
 
 void GlobalConfig::erase(KeyRangeRef range) {
 	auto it = data.begin();
 	while (it != data.end()) {
 		if (range.contains(it->first)) {
+			if (callbacks.find(it->first) != callbacks.end()) {
+				callbacks[it->first](std::nullopt);
+			}
 			it = data.erase(it);
 		} else {
 			++it;
@@ -163,10 +188,10 @@ ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
 // Updates local copy of global configuration by reading the entire key-range
 // from storage.
 ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
-	self->data.clear();
+	self->erase(KeyRangeRef(""_sr, "\xff"_sr));
 
 	Transaction tr(self->cx);
-	Standalone<RangeResultRef> result = wait(tr.getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
+	RangeResult result = wait(tr.getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
 	for (const auto& kv : result) {
 		KeyRef systemKey = kv.key.removePrefix(globalConfigKeysPrefix);
 		self->insert(systemKey, kv.value);
@@ -176,7 +201,8 @@ ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
 
 // Applies updates to the local copy of the global configuration when this
 // process receives an updated history.
-ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, Reference<AsyncVar<ClientDBInfo>> dbInfo) {
+ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self) {
+	// wait(self->cx->onConnected());
 	wait(self->migrate(self));
 
 	wait(self->refresh(self));
@@ -184,9 +210,9 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, Reference<AsyncVar<
 
 	loop {
 		try {
-			wait(dbInfo->onChange());
+			wait(self->dbInfo->onChange());
 
-			auto& history = dbInfo->get().history;
+			auto& history = self->dbInfo->get().history;
 			if (history.size() == 0) {
 				continue;
 			}
@@ -196,8 +222,8 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, Reference<AsyncVar<
 				// history updates or the protocol version changed, so it
 				// must re-read the entire configuration range.
 				wait(self->refresh(self));
-				if (dbInfo->get().history.size() > 0) {
-					self->lastUpdate = dbInfo->get().history.back().version;
+				if (self->dbInfo->get().history.size() > 0) {
+					self->lastUpdate = self->dbInfo->get().history.back().version;
 				}
 			} else {
 				// Apply history in order, from lowest version to highest
@@ -222,6 +248,8 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, Reference<AsyncVar<
 					self->lastUpdate = vh.version;
 				}
 			}
+
+			self->configChanged.trigger();
 		} catch (Error& e) {
 			throw;
 		}

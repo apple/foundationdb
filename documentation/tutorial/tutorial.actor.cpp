@@ -463,6 +463,39 @@ ACTOR Future<Void> fdbClientGetRange() {
 	return Void();
 }
 
+ACTOR Future<Void> fdbClient() {
+	wait(delay(30));
+	state Database db = Database::createDatabase(clusterFile, 300);
+	state Transaction tx(db);
+	state std::string keyPrefix = "/tut/";
+	state Key startKey;
+	state KeyRef endKey = LiteralStringRef("/tut0");
+	state int beginIdx = 0;
+	loop {
+		try {
+			tx.reset();
+			// this workload is stupidly simple:
+			// 1. select a random key between 1
+			//    and 1e8
+			// 2. select this key plus the 100
+			//    next ones
+			// 3. write 10 values in [k, k+100]
+			beginIdx = deterministicRandom()->randomInt(0, 1e8 - 100);
+			startKey = keyPrefix + std::to_string(beginIdx);
+			RangeResult range = wait(tx.getRange(KeyRangeRef(startKey, endKey), 100));
+			for (int i = 0; i < 10; ++i) {
+				Key k = Key(keyPrefix + std::to_string(beginIdx + deterministicRandom()->randomInt(0, 100)));
+				tx.set(k, LiteralStringRef("foo"));
+			}
+			wait(tx.commit());
+			std::cout << "Committed\n";
+			wait(delay(2.0));
+		} catch (Error& e) {
+			wait(tx.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> fdbStatusStresser() {
 	state Database db = Database::createDatabase(clusterFile, 300);
 	state ReadYourWritesTransaction tx(db);
@@ -488,6 +521,7 @@ std::unordered_map<std::string, std::function<Future<Void>()>> actors = {
 	{ "multipleClients", &multipleClients }, // ./tutorial -s 127.0.0.1:6666 multipleClients
 	{ "fdbClientStream", &fdbClientStream }, // ./tutorial -C $CLUSTER_FILE_PATH fdbClientStream
 	{ "fdbClientGetRange", &fdbClientGetRange }, // ./tutorial -C $CLUSTER_FILE_PATH fdbClientGetRange
+	{ "fdbClient", &fdbClient }, // ./tutorial -C $CLUSTER_FILE_PATH fdbClient
 	{ "fdbStatusStresser", &fdbStatusStresser }
 }; // ./tutorial -C $CLUSTER_FILE_PATH fdbStatusStresser
 

@@ -26,6 +26,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/PerfMetric.h"
 #include "fdbrpc/sim_validation.h"
+#include "fdbrpc/simulator.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/BackupProgress.actor.h"
 #include "fdbserver/ConflictSet.h"
@@ -245,6 +246,15 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	std::vector<WorkerInterface> backupWorkers; // Recruited backup workers from cluster controller.
 
+	CounterCollection cc;
+	Counter changeCoordinatorsRequests;
+	Counter getCommitVersionRequests;
+	Counter backupWorkerDoneRequests;
+	Counter getLiveCommittedVersionRequests;
+	Counter reportLiveCommittedVersionRequests;
+
+	Future<Void> logger;
+
 	MasterData(Reference<AsyncVar<ServerDBInfo>> const& dbInfo,
 	           MasterInterface const& myInterface,
 	           ServerCoordinators const& coordinators,
@@ -258,7 +268,13 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    lastEpochEnd(invalidVersion), liveCommittedVersion(invalidVersion), databaseLocked(false),
 	    minKnownCommittedVersion(invalidVersion), recoveryTransactionVersion(invalidVersion), lastCommitTime(0),
 	    registrationCount(0), version(invalidVersion), lastVersionTime(0), txnStateStore(0), memoryLimit(2e9),
-	    addActor(addActor), hasConfiguration(false), recruitmentStalled(makeReference<AsyncVar<bool>>(false)) {
+	    addActor(addActor), hasConfiguration(false), recruitmentStalled(makeReference<AsyncVar<bool>>(false)),
+	    cc("Master", dbgid.toString()), changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
+	    getCommitVersionRequests("GetCommitVersionRequests", cc),
+	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
+	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
+	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc) {
+		logger = traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "MasterMetrics");
 		if (forceRecovery && !myInterface.locality.dcId().present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID");
 			forceRecovery = false;
@@ -825,7 +841,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 	    .detail("LastEpochEnd", self->lastEpochEnd)
 	    .detail("RecoveryTransactionVersion", self->recoveryTransactionVersion);
 
-	Standalone<RangeResultRef> rawConf = wait(self->txnStateStore->readRange(configKeys));
+	RangeResult rawConf = wait(self->txnStateStore->readRange(configKeys));
 	self->configuration.fromKeyValues(rawConf.castTo<VectorRef<KeyValueRef>>());
 	self->originalConfiguration = self->configuration;
 	self->hasConfiguration = true;
@@ -836,13 +852,13 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 	    .detail("Conf", self->configuration.toString())
 	    .trackLatest("RecoveredConfig");
 
-	Standalone<RangeResultRef> rawLocalities = wait(self->txnStateStore->readRange(tagLocalityListKeys));
+	RangeResult rawLocalities = wait(self->txnStateStore->readRange(tagLocalityListKeys));
 	self->dcId_locality.clear();
 	for (auto& kv : rawLocalities) {
 		self->dcId_locality[decodeTagLocalityListKey(kv.key)] = decodeTagLocalityListValue(kv.value);
 	}
 
-	Standalone<RangeResultRef> rawTags = wait(self->txnStateStore->readRange(serverTagKeys));
+	RangeResult rawTags = wait(self->txnStateStore->readRange(serverTagKeys));
 	self->allTags.clear();
 	if (self->lastEpochEnd > 0) {
 		self->allTags.push_back(cacheTag);
@@ -862,7 +878,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 		}
 	}
 
-	Standalone<RangeResultRef> rawHistoryTags = wait(self->txnStateStore->readRange(serverTagHistoryKeys));
+	RangeResult rawHistoryTags = wait(self->txnStateStore->readRange(serverTagHistoryKeys));
 	for (auto& kv : rawHistoryTags) {
 		self->allTags.push_back(decodeServerTagValue(kv.value));
 	}
@@ -888,7 +904,7 @@ ACTOR Future<Void> sendInitialCommitToResolvers(Reference<MasterData> self) {
 	state Sequence txnSequence = 0;
 	ASSERT(self->recoveryTransactionVersion);
 
-	state Standalone<RangeResultRef> data =
+	state RangeResult data =
 	    self->txnStateStore
 	        ->readRange(txnKeys, BUGGIFY ? 3 : SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES)
 	        .get();
@@ -904,7 +920,7 @@ ACTOR Future<Void> sendInitialCommitToResolvers(Reference<MasterData> self) {
 		if (!data.size())
 			break;
 		((KeyRangeRef&)txnKeys) = KeyRangeRef(keyAfter(data.back().key, txnKeys.arena()), txnKeys.end);
-		Standalone<RangeResultRef> nextData =
+		RangeResult nextData =
 		    self->txnStateStore
 		        ->readRange(txnKeys, BUGGIFY ? 3 : SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES)
 		        .get();
@@ -1095,6 +1111,8 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
 	    self->lastCommitProxyVersionReplies.find(req.requestingProxy); // lastCommitProxyVersionReplies never changes
 
+	++self->getCommitVersionRequests;
+
 	if (proxyItr == self->lastCommitProxyVersionReplies.end()) {
 		// Request from invalid proxy (e.g. from duplicate recruitment request)
 		req.reply.send(Never());
@@ -1191,6 +1209,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				if (self->liveCommittedVersion == invalidVersion) {
 					self->liveCommittedVersion = self->recoveryTransactionVersion;
 				}
+				++self->getLiveCommittedVersionRequests;
 				GetRawCommittedVersionReply reply;
 				reply.version = self->liveCommittedVersion;
 				reply.locked = self->databaseLocked;
@@ -1206,6 +1225,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 					self->databaseLocked = req.locked;
 					self->proxyMetadataVersion = req.metadataVersion;
 				}
+				++self->reportLiveCommittedVersionRequests;
 				req.reply.send(Void());
 			}
 		}
@@ -1374,6 +1394,7 @@ static std::set<int> const& normalMasterErrors() {
 ACTOR Future<Void> changeCoordinators(Reference<MasterData> self) {
 	loop {
 		ChangeCoordinatorsRequest req = waitNext(self->myInterface.changeCoordinators.getFuture());
+		++self->changeCoordinatorsRequests;
 		state ChangeCoordinatorsRequest changeCoordinatorsRequest = req;
 
 		while (!self->cstate.previousWrite.isReady()) {
@@ -1483,7 +1504,7 @@ ACTOR Future<Void> configurationMonitor(Reference<MasterData> self, Database cx)
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				Standalone<RangeResultRef> results = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeResult results = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
 
 				DatabaseConfiguration conf;
@@ -1679,6 +1700,11 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 			            "larger than OldGenerations to resume recovery once the underlying problem has been fixed.");
 			wait(delay(CLIENT_KNOBS->RECOVERY_DELAY_SECONDS_PER_GENERATION *
 			           (self->cstate.myDBState.oldTLogData.size() - CLIENT_KNOBS->RECOVERY_DELAY_START_GENERATION)));
+		}
+		if (g_network->isSimulated() && self->cstate.myDBState.oldTLogData.size() > CLIENT_KNOBS->MAX_GENERATIONS_SIM) {
+			g_simulator.connectionFailuresDisableDuration = 1e6;
+			g_simulator.speedUpSimulation = true;
+			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyGenerations");
 		}
 	}
 
@@ -1981,6 +2007,7 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 				if (self->logSystem.isValid() && self->logSystem->removeBackupWorker(req)) {
 					self->registrationTrigger.trigger();
 				}
+				++self->backupWorkerDoneRequests;
 				req.reply.send(Void());
 			}
 			when(wait(collection)) {

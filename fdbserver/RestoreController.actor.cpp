@@ -722,8 +722,7 @@ ACTOR static Future<std::vector<RestoreRequest>> collectRestoreRequests(Database
 			Optional<Value> numRequests = wait(tr.get(restoreRequestTriggerKey));
 			ASSERT(numRequests.present());
 
-			Standalone<RangeResultRef> restoreRequestValues =
-			    wait(tr.getRange(restoreRequestKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult restoreRequestValues = wait(tr.getRange(restoreRequestKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!restoreRequestValues.more);
 			if (restoreRequestValues.size()) {
 				for (auto& it : restoreRequestValues) {
