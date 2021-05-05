@@ -171,7 +171,7 @@ that Visual Studio is used to compile.
 
 1. Install Visual Studio 2017 (Community Edition is tested)
 1. Install cmake Version 3.12 or higher [CMake](https://cmake.org/)
-1. Download version 1.72 of [Boost](https://dl.bintray.com/boostorg/release/1.72.0/source/boost_1_72_0.tar.bz2)
+1. Download version 1.72 of [Boost](https://boostorg.jfrog.io/artifactory/main/release/1.72.0/source/boost_1_72_0.tar.bz2)
 1. Unpack boost (you don't need to compile it)
 1. Install [Mono](http://www.mono-project.com/download/stable/)
 1. (Optional) Install a [JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html). FoundationDB currently builds with Java 8
