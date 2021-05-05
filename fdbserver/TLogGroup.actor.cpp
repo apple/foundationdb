@@ -77,7 +77,6 @@ void TLogGroupCollection::recruitEverything() {
 			Reference<TLogGroup> group(new TLogGroup());
 			for (auto& entry : bestSet) {
 				group->addServer(Reference<TLogWorkerData>(entry));
-				selectedServers.insert(entry->id);
 			}
 
 			recruitedGroups.push_back(group);

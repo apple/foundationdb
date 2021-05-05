@@ -747,8 +747,8 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	    .trackLatest("MasterRecoveryState");
 
 	// Recruit TLog groups
-	self->tLogGroupCollection->loadState(self->tLogGroupRecoveredState.get(), recruits.tLogs);
 	self->tLogGroupCollection->addWorkers(recruits.tLogs);
+	self->tLogGroupCollection->loadState(self->tLogGroupRecoveredState.get(), recruits.tLogs);
 	self->tLogGroupCollection->recruitEverything();
 
 	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand
