@@ -116,16 +116,20 @@ ACTOR Future<Void> getTLogCreateActor(std::shared_ptr<TestDriverContext> pTestDr
 	// wait for either test completion or abnormal failure.
 	choose {
 		when(wait(tl)) {}
-		when(bool testCompleted = wait(pTLogContext->realTLogTestCompleted.getFuture())) {}
+		when(bool testCompleted = wait(pTLogContext->realTLogTestCompleted.getFuture())) {
+			ASSERT_EQ(testCompleted, true);
+		}
 	}
 
 	return Void();
 }
 
 // sent commits through TLog interface.
-ACTOR Future<Void> getTLogCommitActor(std::shared_ptr<TestDriverContext> pTestDriverContext,
-                                      std::shared_ptr<TLogDriverContext> pTLogDriverContext) {
+ACTOR Future<Void> TLogDriverContext::sendCommitMessages_impl(std::shared_ptr<TestDriverContext> pTestDriverContext,
+                                                              TLogDriverContext* pTLogDriverContext) {
 	bool tLogReady = wait(pTLogDriverContext->pTLogContext->TLogStarted.getFuture());
+	ASSERT_EQ(tLogReady, true);
+
 	state Version prev = 0;
 	state Version next = 1;
 	state int i = 0;
@@ -136,7 +140,7 @@ ACTOR Future<Void> getTLogCommitActor(std::shared_ptr<TestDriverContext> pTestDr
 		Tag tag(pTLogDriverContext->tagLocality, pTLogDriverContext->pTLogContext->tagProcessID);
 
 		// build commit request
-		LogPushData toCommit(pTLogDriverContext->ls, pTLogDriverContext->pTLogContext->realTLogInterface);
+		LogPushData toCommit(pTLogDriverContext->ls);
 		UID spanID = deterministicRandom()->randomUniqueID();
 		toCommit.addTransactionInfo(spanID);
 		vector<Tag> tags = { tag };
@@ -149,6 +153,7 @@ ACTOR Future<Void> getTLogCommitActor(std::shared_ptr<TestDriverContext> pTestDr
 		::TLogCommitRequest request(
 		    SpanID(), msg.arena(), prev, next, prev, prev, msg, deterministicRandom()->randomUniqueID());
 		::TLogCommitReply reply = wait(pTLogDriverContext->pTLogContext->realTLogInterface.commit.getReply(request));
+		ASSERT_LE(reply.version, next);
 		prev++;
 		next++;
 	}
@@ -157,9 +162,10 @@ ACTOR Future<Void> getTLogCommitActor(std::shared_ptr<TestDriverContext> pTestDr
 }
 
 // send peek/pop through TLog interface.
-ACTOR Future<Void> getTLogPeekActor(std::shared_ptr<TestDriverContext> pTestDriverContext,
-                                    std::shared_ptr<TLogDriverContext> pTLogDriverContext) {
+ACTOR Future<Void> TLogDriverContext::peekCommitMessages_impl(std::shared_ptr<TestDriverContext> pTestDriverContext,
+                                                              TLogDriverContext* pTLogDriverContext) {
 	bool tLogReady = wait(pTLogDriverContext->pTLogContext->TLogStarted.getFuture());
+	ASSERT_EQ(tLogReady, true);
 
 	state Tag tag(pTLogDriverContext->tagLocality, pTLogDriverContext->pTLogContext->tagProcessID);
 	state Version begin = 1;
@@ -220,8 +226,10 @@ ACTOR Future<Void> getTLogPeekActor(std::shared_ptr<TestDriverContext> pTestDriv
 // signal transactions can start.
 ACTOR Future<Void> getTLogGroupActor(std::shared_ptr<TestDriverContext> pTestDriverContext,
                                      std::shared_ptr<TLogDriverContext> pTLogDriverContext) {
+	// create tLog
 	state std::shared_ptr<TLogContext> pTLogContext = pTLogDriverContext->pTLogContext;
 	bool isCreated = wait(pTLogContext->TLogCreated.getFuture());
+	ASSERT_EQ(isCreated, true);
 
 	// setup log system and tlog group
 	pTLogDriverContext->tLogSet.tLogs.push_back(OptionalInterface<TLogInterface>(pTLogContext->realTLogInterface));
@@ -236,11 +244,9 @@ ACTOR Future<Void> getTLogGroupActor(std::shared_ptr<TestDriverContext> pTestDri
 
 	// start transactions
 	pTLogDriverContext->pTLogContext->TLogStarted.send(true);
-
-	std::vector<Future<Void>> actors;
-	actors.emplace_back(getTLogCommitActor(pTestDriverContext, pTLogDriverContext));
-	actors.emplace_back(getTLogPeekActor(pTestDriverContext, pTLogDriverContext));
-	wait(waitForAll(actors));
+	Future<Void> commit = pTLogDriverContext->sendCommitMessages(pTestDriverContext);
+	Future<Void> peek = pTLogDriverContext->peekCommitMessages(pTestDriverContext);
+	wait(commit && peek);
 
 	// tell tLog actor to initiate shutdown.
 	pTLogDriverContext->pTLogContext->realTLogTestCompleted.send(true);

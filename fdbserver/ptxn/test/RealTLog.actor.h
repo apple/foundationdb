@@ -72,6 +72,20 @@ struct TLogContext {
 // state maintained for all tlogs.
 struct TLogDriverContext {
 
+	Future<Void> sendCommitMessages(std::shared_ptr<TestDriverContext> pTestDriverContext) {
+		return sendCommitMessages_impl(pTestDriverContext, this);
+	}
+
+	ACTOR static Future<Void> sendCommitMessages_impl(std::shared_ptr<TestDriverContext> pTestDriverContext,
+	                                                  TLogDriverContext* pTLogDriverContext);
+
+	Future<Void> peekCommitMessages(std::shared_ptr<TestDriverContext> pTestDriverContext) {
+		return peekCommitMessages_impl(pTestDriverContext, this);
+	}
+
+	ACTOR static Future<Void> peekCommitMessages_impl(std::shared_ptr<TestDriverContext> pTestDriverContext,
+	                                                  TLogDriverContext* pTLogDriverContext);
+
 	UID logID;
 	UID workerID;
 
