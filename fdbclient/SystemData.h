@@ -230,6 +230,30 @@ extern const KeyRef failedServersVersionKey; // The value of this key shall be c
 const AddressExclusion decodeFailedServersKey(KeyRef const& key); // where key.startsWith(failedServersPrefix)
 std::string encodeFailedServersKey(AddressExclusion const&);
 
+//   "\xff/globalConfig/[[option]]" := "value"
+//	 An umbrella prefix for global configuration data synchronized to all nodes.
+// extern const KeyRangeRef globalConfigData;
+// extern const KeyRef globalConfigDataPrefix;
+
+//   "\xff/globalConfig/k/[[key]]" := "value"
+//	 Key-value pairs that have been set. The range this keyspace represents
+//	 contains all globally configured options.
+extern const KeyRangeRef globalConfigDataKeys;
+extern const KeyRef globalConfigKeysPrefix;
+
+//   "\xff/globalConfig/h/[[version]]" := "value"
+//   Maps a commit version to a list of mutations made to the global
+//   configuration at that commit. Shipped to nodes periodically. In general,
+//   clients should not write to keys in this keyspace; it will be written
+//   automatically when updating global configuration keys.
+extern const KeyRangeRef globalConfigHistoryKeys;
+extern const KeyRef globalConfigHistoryPrefix;
+
+//   "\xff/globalConfig/v" := "version"
+//   Read-only key which returns the commit version of the most recent mutation
+//   made to the global configuration keyspace.
+extern const KeyRef globalConfigVersionKey;
+
 //	"\xff/workers/[[processID]]" := ""
 //	Asynchronously updated by the cluster controller, this is a list of fdbserver processes that have joined the cluster
 //	and are currently (recently) available
@@ -355,8 +379,6 @@ extern const KeyRangeRef applyMutationsKeyVersionCountRange;
 
 // FdbClient Info prefix
 extern const KeyRangeRef fdbClientInfoPrefixRange;
-extern const KeyRef fdbClientInfoTxnSampleRate;
-extern const KeyRef fdbClientInfoTxnSizeLimit;
 
 // Consistency Check settings
 extern const KeyRef fdbShouldConsistencyCheckBeSuspended;

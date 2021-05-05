@@ -432,7 +432,8 @@ Optional<std::pair<LeaderInfo, bool>> getLeader(const vector<Optional<LeaderInfo
 	for (int i = 0; i < nominees.size(); i++) {
 		if (nominees[i].present()) {
 			maskedNominees.push_back(std::make_pair(
-			    UID(nominees[i].get().changeID.first() & LeaderInfo::mask, nominees[i].get().changeID.second()), i));
+			    UID(nominees[i].get().changeID.first() & LeaderInfo::changeIDMask, nominees[i].get().changeID.second()),
+			    i));
 		}
 	}
 

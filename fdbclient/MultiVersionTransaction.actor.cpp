@@ -356,7 +356,32 @@ double DLDatabase::getMainThreadBusyness() {
 	return 0;
 }
 
+// Returns the protocol version reported by a quorum of coordinators
+// If an expected version is given, the future won't return until the protocol version is different than expected
+ThreadFuture<ProtocolVersion> DLDatabase::getServerProtocol(Optional<ProtocolVersion> expectedVersion) {
+	ASSERT(api->databaseGetServerProtocol != nullptr);
+
+	uint64_t expected =
+	    expectedVersion.map<uint64_t>([](const ProtocolVersion& v) { return v.version(); }).orDefault(0);
+	FdbCApi::FDBFuture* f = api->databaseGetServerProtocol(db, expected);
+	return toThreadFuture<ProtocolVersion>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		uint64_t pv;
+		FdbCApi::fdb_error_t error = api->futureGetUInt64(f, &pv);
+		ASSERT(!error);
+		return ProtocolVersion(pv);
+	});
+}
+
 // DLApi
+
+// Loads the specified function from a dynamic library
+//
+// fp - The function pointer where the loaded function will be stored
+// lib - The dynamic library where the function is loaded from
+// libPath - The path of the dynamic library (used for logging)
+// functionName - The function to load
+// requireFunction - Determines the behavior if the function is not present. If true, an error is thrown. If false,
+//                   the function pointer will be set to nullptr.
 template <class T>
 void loadClientFunction(T* fp, void* lib, std::string libPath, const char* functionName, bool requireFunction = true) {
 	*(void**)(fp) = loadFunction(lib, functionName);
@@ -403,6 +428,8 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_database_get_main_thread_busyness",
 	                   headerVersion >= 700);
+	loadClientFunction(
+	    &api->databaseGetServerProtocol, lib, fdbCPath, "fdb_database_get_server_protocol", headerVersion >= 700);
 	loadClientFunction(&api->databaseDestroy, lib, fdbCPath, "fdb_database_destroy");
 	loadClientFunction(&api->databaseRebootWorker, lib, fdbCPath, "fdb_database_reboot_worker", headerVersion >= 700);
 	loadClientFunction(&api->databaseForceRecoveryWithDataLoss,
@@ -452,7 +479,7 @@ void DLApi::init() {
 
 	loadClientFunction(
 	    &api->futureGetInt64, lib, fdbCPath, headerVersion >= 620 ? "fdb_future_get_int64" : "fdb_future_get_version");
-	loadClientFunction(&api->futureGetUInt64, lib, fdbCPath, "fdb_future_get_uint64");
+	loadClientFunction(&api->futureGetUInt64, lib, fdbCPath, "fdb_future_get_uint64", headerVersion >= 700);
 	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error");
 	loadClientFunction(&api->futureGetKey, lib, fdbCPath, "fdb_future_get_key");
 	loadClientFunction(&api->futureGetValue, lib, fdbCPath, "fdb_future_get_value");
@@ -486,11 +513,6 @@ const char* DLApi::getClientVersion() {
 	}
 
 	return api->getClientVersion();
-}
-
-ThreadFuture<uint64_t> DLApi::getServerProtocol(const char* clusterFilePath) {
-	ASSERT(false);
-	return ThreadFuture<uint64_t>();
 }
 
 void DLApi::setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {
@@ -856,7 +878,7 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
                                            std::string clusterFilePath,
                                            Reference<IDatabase> db,
                                            bool openConnectors)
-  : dbState(new DatabaseState()) {
+  : dbState(new DatabaseState()), clusterFilePath(clusterFilePath) {
 	dbState->db = db;
 	dbState->dbVar->set(db);
 
@@ -939,6 +961,15 @@ double MultiVersionDatabase::getMainThreadBusyness() {
 	}
 
 	return 0;
+}
+
+// Returns the protocol version reported by a quorum of coordinators
+// If an expected version is given, the future won't return until the protocol version is different than expected
+ThreadFuture<ProtocolVersion> MultiVersionDatabase::getServerProtocol(Optional<ProtocolVersion> expectedVersion) {
+	// TODO: send this out through the active database
+	return MultiVersionApi::api->getLocalClient()
+	    ->api->createDatabase(clusterFilePath.c_str())
+	    ->getServerProtocol(expectedVersion);
 }
 
 void MultiVersionDatabase::Connector::connect() {
@@ -1179,10 +1210,6 @@ void MultiVersionApi::selectApiVersion(int apiVersion) {
 
 const char* MultiVersionApi::getClientVersion() {
 	return localClient->api->getClientVersion();
-}
-
-ThreadFuture<uint64_t> MultiVersionApi::getServerProtocol(const char* clusterFilePath) {
-	return api->localClient->api->getServerProtocol(clusterFilePath);
 }
 
 void validateOption(Optional<StringRef> value, bool canBePresent, bool canBeAbsent, bool canBeEmpty = true) {
@@ -1948,6 +1975,12 @@ ACTOR Future<Void> checkUndestroyedFutures(std::vector<ThreadSingleAssignmentVar
 	return Void();
 }
 
+// Common code for tests of single assignment vars. Tests both correctness and thread safety.
+// T should be a class that has a static method with the following signature:
+//
+//     static FutureInfo createThreadFuture(FutureInfo f);
+//
+// See AbortableTest for an example T type
 template <class T>
 THREAD_FUNC runSingleAssignmentVarTest(void* arg) {
 	noUnseed = true;
@@ -1960,6 +1993,9 @@ THREAD_FUNC runSingleAssignmentVarTest(void* arg) {
 			tf.validate();
 
 			tf.future.extractPtr(); // leaks
+			for (auto t : tf.threads) {
+				waitThread(t);
+			}
 		}
 
 		for (int numRuns = 0; numRuns < 25; ++numRuns) {
@@ -2030,11 +2066,13 @@ struct AbortableTest {
 
 TEST_CASE("/fdbclient/multiversionclient/AbortableSingleAssignmentVar") {
 	state volatile bool done = false;
-	g_network->startThread(runSingleAssignmentVarTest<AbortableTest>, (void*)&done);
+	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<AbortableTest>, (void*)&done);
 
 	while (!done) {
 		wait(delay(1.0));
 	}
+
+	waitThread(thread);
 
 	return Void();
 }
@@ -2107,19 +2145,23 @@ TEST_CASE("/fdbclient/multiversionclient/DLSingleAssignmentVar") {
 	state volatile bool done = false;
 
 	MultiVersionApi::api->callbackOnMainThread = true;
-	g_network->startThread(runSingleAssignmentVarTest<DLTest>, (void*)&done);
+	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<DLTest>, (void*)&done);
 
 	while (!done) {
 		wait(delay(1.0));
 	}
+
+	waitThread(thread);
 
 	done = false;
 	MultiVersionApi::api->callbackOnMainThread = false;
-	g_network->startThread(runSingleAssignmentVarTest<DLTest>, (void*)&done);
+	thread = g_network->startThread(runSingleAssignmentVarTest<DLTest>, (void*)&done);
 
 	while (!done) {
 		wait(delay(1.0));
 	}
+
+	waitThread(thread);
 
 	return Void();
 }
@@ -2145,11 +2187,13 @@ struct MapTest {
 
 TEST_CASE("/fdbclient/multiversionclient/MapSingleAssignmentVar") {
 	state volatile bool done = false;
-	g_network->startThread(runSingleAssignmentVarTest<MapTest>, (void*)&done);
+	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<MapTest>, (void*)&done);
 
 	while (!done) {
 		wait(delay(1.0));
 	}
+
+	waitThread(thread);
 
 	return Void();
 }
@@ -2182,11 +2226,13 @@ struct FlatMapTest {
 
 TEST_CASE("/fdbclient/multiversionclient/FlatMapSingleAssignmentVar") {
 	state volatile bool done = false;
-	g_network->startThread(runSingleAssignmentVarTest<FlatMapTest>, (void*)&done);
+	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<FlatMapTest>, (void*)&done);
 
 	while (!done) {
 		wait(delay(1.0));
 	}
+
+	waitThread(thread);
 
 	return Void();
 }

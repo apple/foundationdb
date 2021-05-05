@@ -535,7 +535,13 @@ namespace actorcompiler
             actor.testCaseParameters = str(paramRange);
 
             actor.name = "flowTestCase" + toks.First().SourceLine;
-            actor.parameters = new VarDeclaration[] { };
+            actor.parameters = new VarDeclaration[] { new VarDeclaration {
+                    name = "params",
+                    type = "UnitTestParameters",
+                    initializer = "",
+                    initializerConstructorSyntax = false
+                }
+            };
             actor.returnType = "Void";
         }
 

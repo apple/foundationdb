@@ -36,6 +36,9 @@ typedef uint32_t LogicalPageID;
 typedef uint32_t PhysicalPageID;
 #define invalidLogicalPageID std::numeric_limits<LogicalPageID>::max()
 
+typedef uint32_t QueueID;
+#define invalidQueueID std::numeric_limits<QueueID>::max()
+
 class IPage {
 public:
 	IPage() : userData(nullptr) {}
@@ -87,13 +90,14 @@ public:
 	// Only valid to call after recovery is complete.
 	virtual int getUsablePageSize() const = 0;
 	virtual int getPhysicalPageSize() const = 0;
-	virtual int getPhysicalExtentSize() const = 0;
+	virtual int getPagesPerExtent() const = 0;
 
 	// Allocate a new page ID for a subsequent write.  The page will be considered in-use after the next commit
 	// regardless of whether or not it was written to.
 	virtual Future<LogicalPageID> newPageID() = 0;
 
-	virtual Future<LogicalPageID> newExtentPageID() = 0;
+	virtual Future<LogicalPageID> newExtentPageID(QueueID queueID) = 0;
+	virtual QueueID newLastQueueID() = 0;
 
 	// Replace the contents of a page with new data across *all* versions.
 	// Existing holders of a page reference for pageID, read from any version,
@@ -124,6 +128,11 @@ public:
 	// considered likely to be needed soon.
 	virtual Future<Reference<IPage>> readPage(LogicalPageID pageID, bool cacheable = true, bool noHit = false) = 0;
 	virtual Future<Reference<IPage>> readExtent(LogicalPageID pageID) = 0;
+
+	// Temporary methods for testing
+	virtual Future<Standalone<VectorRef<LogicalPageID>>> getUsedExtents(QueueID queueID) = 0;
+	virtual void pushExtentUsedList(QueueID queueID, LogicalPageID extID) = 0;
+	virtual void extentCacheClear() = 0;
 
 	// Get a snapshot of the metakey and all pages as of the version v which must be >= getOldestVersion()
 	// Note that snapshots at any version may still see the results of updatePage() calls.
