@@ -33,7 +33,7 @@ public:
 	enum SEGMENT_TYPE { UNKNOWN_RANGE, EMPTY_RANGE, KV };
 	static const SEGMENT_TYPE typeMap[12];
 
-	SEGMENT_TYPE type() const;
+	SEGMENT_TYPE type();
 
 	bool is_kv();
 	bool is_unknown_range();
