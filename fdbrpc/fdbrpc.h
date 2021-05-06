@@ -105,9 +105,6 @@ struct NetSAV final : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 		ErrorOr<EnsureTable<T>> message;
 		reader.deserialize(message);
 		if (message.isError()) {
-			if (message.getError().code() == error_code_broken_promise) {
-				IFailureMonitor::failureMonitor().endpointNotFound(getRawEndpoint());
-			}
 			SAV<T>::sendErrorAndDelPromiseRef(message.getError());
 		} else {
 			SAV<T>::sendAndDelPromiseRef(message.get().asUnderlyingType());
@@ -327,9 +324,6 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 		reader.deserialize(message);
 
 		if (message.isError()) {
-			if (message.getError().code() == error_code_broken_promise) {
-				IFailureMonitor::failureMonitor().endpointNotFound(getRawEndpoint());
-			}
 			this->sendError(message.getError());
 		} else {
 			if (message.get().asUnderlyingType().acknowledgeToken.present()) {
@@ -661,7 +655,7 @@ public:
 			Reference<Peer> peer =
 			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(taskID), true);
 			// FIXME: defer sending the message until we know the connection is established
-			endStreamOnDisconnect(disc, p, peer);
+			endStreamOnDisconnect(disc, p, getEndpoint(taskID), peer);
 			return p;
 		}
 		send(value);
@@ -677,7 +671,7 @@ public:
 			Reference<Peer> peer =
 			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
 			// FIXME: defer sending the message until we know the connection is established
-			endStreamOnDisconnect(disc, p, peer);
+			endStreamOnDisconnect(disc, p, getEndpoint(), peer);
 			return p;
 		} else {
 			send(value);

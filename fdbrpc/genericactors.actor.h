@@ -206,11 +206,18 @@ struct PeerHolder {
 ACTOR template <class X>
 void endStreamOnDisconnect(Future<Void> signal,
                            ReplyPromiseStream<X> stream,
+                           Endpoint endpoint,
                            Reference<Peer> peer = Reference<Peer>()) {
 	state PeerHolder holder = PeerHolder(peer);
-	choose {
-		when(wait(signal)) { stream.sendError(connection_failed()); }
-		when(wait(stream.getErrorFutureAndDelPromiseRef())) {}
+	try {
+		choose {
+			when(wait(signal)) { stream.sendError(connection_failed()); }
+			when(wait(stream.getErrorFutureAndDelPromiseRef())) {}
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_broken_promise) {
+			IFailureMonitor::failureMonitor().endpointNotFound(endpoint);
+		}
 	}
 }
 
@@ -241,7 +248,7 @@ Future<ErrorOr<X>> waitValueOrSignal(Future<X> value,
 			// receiving the failure signal
 			if (e.code() != error_code_broken_promise || signal.isError())
 				return ErrorOr<X>(e);
-
+			IFailureMonitor::failureMonitor().endpointNotFound(endpoint);
 			value = Never();
 		}
 	}
