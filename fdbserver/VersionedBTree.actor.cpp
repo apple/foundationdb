@@ -7820,6 +7820,27 @@ TEST_CASE(":/redwood/performance/mutationBuffer") {
 	return Void();
 }
 
+// This test is only useful with Arena debug statements which show when aligned buffers are allocated and freed.
+TEST_CASE(":/redwood/pager/ArenaPage") {
+	Arena x;
+	printf("Making p\n");
+	Reference<ArenaPage> p(new ArenaPage(4096, 4096));
+	printf("Made p=%p\n", p->begin());
+	printf("Clearing p\n");
+	p.clear();
+	printf("Making p\n");
+	p = Reference<ArenaPage>(new ArenaPage(4096, 4096));
+	printf("Made p=%p\n", p->begin());
+	printf("Making x depend on p\n");
+	x.dependsOn(p->getArena());
+	printf("Clearing p\n");
+	p.clear();
+	printf("Clearing x\n");
+	x = Arena();
+	printf("Pointer should be freed\n");
+	return Void();
+}
+
 TEST_CASE("/redwood/correctness/btree") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();

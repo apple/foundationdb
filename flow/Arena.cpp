@@ -239,6 +239,7 @@ void* ArenaBlock::makeAlignedBuffer(size_t alignment, size_t size) {
 	makeDefined(r, sizeof(ArenaBlockRef));
 	r->alignedBufferSize = size;
 	r->alignedBuffer = aligned_alloc(alignment, size);
+	// printf("Arena::alignedBuffer alloc %p\n", r->alignedBuffer);
 	r->nextBlockOffset = nextBlockOffset;
 	makeNoAccess(r, sizeof(ArenaBlockRef));
 	nextBlockOffset = bigUsed;
@@ -397,6 +398,7 @@ void ArenaBlock::destroy() {
 
 				// If alignedBuffer is valid, free it
 				if (br->alignedBufferSize != 0) {
+					// printf("Arena::alignedBuffer free %p\n", br->alignedBuffer);
 					aligned_free(br->alignedBuffer);
 				} else {
 					allowAccess(br->next);
