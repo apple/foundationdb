@@ -956,11 +956,8 @@ that process, and wait for necessary data to be moved away.
    While the key is set, any commit that tries to set a key in the range will fail with the ``special_keys_api_failure`` error.
 #. ``\xff\xff/management/data_distribution/<mode|rebalance_ignored>`` Read/write. Changing these two keys will change the two corresponding system keys ``\xff/dataDistributionMode`` and ``\xff\x02/rebalanceDDIgnored``. The value of ``\xff\xff/management/data_distribution/mode`` is a literal text of ``0`` (disable) or ``1`` (enable). Transactions committed with invalid values will throw ``special_keys_api_failure`` . The value of ``\xff\xff/management/data_distribution/rebalance_ignored`` is empty. If present, it means data distribution is disabled for rebalance. Any transaction committed with non-empty value for this key will throw ``special_keys_api_failure``. For more details, see help text of ``fdbcli`` command ``datadistribution``.
 #. ``\xff\xff/management/consistency_check_suspended`` Read/write. Set or read this key will set or read the underlying system key ``\xff\x02/ConsistencyCheck/Suspend``. The value of this special key is unused thus if present, will be empty. In particular, if the key exists, then consistency is suspended. For more details, see help text of ``fdbcli`` command ``consistencycheck``.
-<<<<<<< HEAD
-=======
 #. ``\xff\xff/management/db_locked`` Read/write. A single key that can be read and modified. Set the key will lock the database and clear the key will unlock. If the database is already locked, then the commit will fail with the ``special_keys_api_failure`` error. For more details, see help text of ``fdbcli`` command ``lock`` and ``unlock``.
 #. ``\xff\xff/management/auto_coordinators`` Read-only. A single key, if read, will return a set of processes which is able to satisfy the current redundency level and serve as new coordinators. The return value is formatted as a comma delimited string of network addresses of coordinators, i.e. ``<ip:port>,<ip:port>,...,<ip:port>``.
->>>>>>> e9b07dc77c46c5cf94cc22149371c4d47499270e
 
 An exclusion is syntactically either an ip address (e.g. ``127.0.0.1``), or
 an ip address and port (e.g. ``127.0.0.1:4500``). If no port is specified,
