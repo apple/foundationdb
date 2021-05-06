@@ -28,6 +28,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TransactionLineage.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/ConflictSet.h"
@@ -1396,6 +1397,7 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 	// WARNING: this code is run at a high priority (until the first delay(0)), so it needs to do as little work as
 	// possible
 	state CommitBatch::CommitBatchContext context(self, trs, currentBatchMemBytesCount);
+	currentLineage->modify(&TransactionLineage::operation) = TransactionLineage::Operation::Commit;
 
 	// Active load balancing runs at a very high priority (to obtain accurate estimate of memory used by commit batches)
 	// so we need to downgrade here
@@ -1432,6 +1434,8 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 
 ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsRequest req, ProxyCommitData* commitData) {
 	// We can't respond to these requests until we have valid txnStateStore
+	currentLineage->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyServersLocations;
+	currentLineage->modify(&TransactionLineage::txID) = req.spanContext.first();
 	wait(commitData->validState.getFuture());
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
@@ -1511,8 +1515,7 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 			GetStorageServerRejoinInfoReply rep;
 			rep.version = commitData->version;
 			rep.tag = decodeServerTagValue(commitData->txnStateStore->readValue(serverTagKeyFor(req.id)).get().get());
-			Standalone<RangeResultRef> history =
-			    commitData->txnStateStore->readRange(serverTagHistoryRangeFor(req.id)).get();
+			RangeResult history = commitData->txnStateStore->readRange(serverTagHistoryRangeFor(req.id)).get();
 			for (int i = history.size() - 1; i >= 0; i--) {
 				rep.history.push_back(
 				    std::make_pair(decodeServerTagHistoryKey(history[i].key), decodeServerTagValue(history[i].value)));
@@ -1936,18 +1939,18 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 
 				if (txnSequences.size() == maxSequence) {
 					state KeyRange txnKeys = allKeys;
-					Standalone<RangeResultRef> UIDtoTagMap = commitData.txnStateStore->readRange(serverTagKeys).get();
+					RangeResult UIDtoTagMap = commitData.txnStateStore->readRange(serverTagKeys).get();
 					state std::map<Tag, UID> tag_uid;
-					for (const KeyValueRef kv : UIDtoTagMap) {
+					for (const KeyValueRef& kv : UIDtoTagMap) {
 						tag_uid[decodeServerTagValue(kv.value)] = decodeServerTagKey(kv.key);
 					}
 					loop {
 						wait(yield());
-						Standalone<RangeResultRef> data = commitData.txnStateStore
-						                                      ->readRange(txnKeys,
-						                                                  SERVER_KNOBS->BUGGIFIED_ROW_LIMIT,
-						                                                  SERVER_KNOBS->APPLY_MUTATION_BYTES)
-						                                      .get();
+						RangeResult data = commitData.txnStateStore
+						                       ->readRange(txnKeys,
+						                                   SERVER_KNOBS->BUGGIFIED_ROW_LIMIT,
+						                                   SERVER_KNOBS->APPLY_MUTATION_BYTES)
+						                       .get();
 						if (!data.size())
 							break;
 						((KeyRangeRef&)txnKeys) = KeyRangeRef(keyAfter(data.back().key, txnKeys.arena()), txnKeys.end);

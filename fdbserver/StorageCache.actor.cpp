@@ -1174,13 +1174,13 @@ void coalesceCacheRanges(StorageCacheData* data, KeyRangeRef keys) {
 	}
 }
 
-ACTOR Future<Standalone<RangeResultRef>> tryFetchRange(Database cx,
-                                                       Version version,
-                                                       KeyRangeRef keys,
-                                                       GetRangeLimits limits,
-                                                       bool* isTooOld) {
+ACTOR Future<RangeResult> tryFetchRange(Database cx,
+                                        Version version,
+                                        KeyRangeRef keys,
+                                        GetRangeLimits limits,
+                                        bool* isTooOld) {
 	state Transaction tr(cx);
-	state Standalone<RangeResultRef> output;
+	state RangeResult output;
 	state KeySelectorRef begin = firstGreaterOrEqual(keys.begin);
 	state KeySelectorRef end = firstGreaterOrEqual(keys.end);
 
@@ -1194,7 +1194,7 @@ ACTOR Future<Standalone<RangeResultRef>> tryFetchRange(Database cx,
 
 	try {
 		loop {
-			Standalone<RangeResultRef> rep = wait(tr.getRange(begin, end, limits, true));
+			RangeResult rep = wait(tr.getRange(begin, end, limits, true));
 			limits.decrement(rep);
 
 			if (limits.isReached() || !rep.more) {
@@ -1317,7 +1317,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 			try {
 				TEST(true); // Fetching keys for transferred cacheRange
 
-				state Standalone<RangeResultRef> this_block =
+				state RangeResult this_block =
 				    wait(tryFetchRange(data->cx,
 				                       fetchVersion,
 				                       keys,
@@ -1367,7 +1367,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 					throw please_reboot();
 				}
 
-				this_block = Standalone<RangeResultRef>();
+				this_block = RangeResult();
 
 				if (BUGGIFY)
 					wait(delay(1));
@@ -2099,7 +2099,7 @@ ACTOR Future<Void> storageCacheStartUpWarmup(StorageCacheData* self) {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			try {
-				Standalone<RangeResultRef> range = wait(tr.getRange(storageCacheKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeResult range = wait(tr.getRange(storageCacheKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!range.more);
 				readVersion = tr.getReadVersion().get();
 				bool currCached = false;

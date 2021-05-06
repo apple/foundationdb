@@ -595,12 +595,11 @@ struct DDQueueData {
 			servers.clear();
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			try {
-				state Standalone<RangeResultRef> UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-				Standalone<RangeResultRef> keyServersEntries =
-				    wait(tr.getRange(lastLessOrEqual(keyServersKey(input.keys.begin)),
-				                     firstGreaterOrEqual(keyServersKey(input.keys.end)),
-				                     SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS));
+				RangeResult keyServersEntries = wait(tr.getRange(lastLessOrEqual(keyServersKey(input.keys.begin)),
+				                                                 firstGreaterOrEqual(keyServersKey(input.keys.end)),
+				                                                 SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS));
 
 				if (keyServersEntries.size() < SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS) {
 					for (int shard = 0; shard < keyServersEntries.size(); shard++) {
@@ -629,7 +628,7 @@ struct DDQueueData {
 				// When a shard is inflight and DD crashes, some destination servers may have already got the data.
 				// The new DD will treat the destination servers as source servers. So the size can be large.
 				else {
-					Standalone<RangeResultRef> serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+					RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 					ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 					for (auto s = serverList.begin(); s != serverList.end(); ++s)

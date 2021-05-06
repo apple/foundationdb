@@ -25,6 +25,7 @@
 
 #include <ctime>
 #include "flow/flow.h"
+#include "flow/WriteOnlySet.h"
 #include "fdbrpc/IRateControl.h"
 
 // All outstanding operations must be cancelled before the destructor of IAsyncFile is called.
@@ -117,6 +118,9 @@ public:
 
 	// Returns the time of the last modification of the file.
 	virtual Future<std::time_t> lastWriteTime(const std::string& filename) = 0;
+
+	// Returns the shared memory data structure used to store actor lineages.
+	virtual ActorLineageSet& getActorLineageSet() = 0;
 
 	static IAsyncFileSystem* filesystem() { return filesystem(g_network); }
 	static runCycleFuncPtr runCycleFunc() {

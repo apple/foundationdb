@@ -593,10 +593,10 @@ public:
 	Reference<FutureBucket> futureBucket;
 };
 
-typedef std::pair<Standalone<RangeResultRef>, Version> RangeResultWithVersion;
+using RangeResultWithVersion = std::pair<RangeResult, Version>;
 
 struct RCGroup {
-	Standalone<RangeResultRef> items;
+	RangeResult items;
 	Version version;
 	uint64_t groupKey;
 

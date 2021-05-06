@@ -442,8 +442,8 @@ struct RandomSelectorWorkload : TestWorkload {
 
 						//TraceEvent("RYOWgetRange").detail("KeyA", myKeyA).detail("KeyB", myKeyB).detail("OnEqualA",onEqualA).detail("OnEqualB",onEqualB).detail("OffsetA",offsetA).detail("OffsetB",offsetB).detail("RandomLimit",randomLimit).detail("RandomByteLimit", randomByteLimit).detail("Reverse", reverse);
 
-						state Standalone<RangeResultRef> getRangeTest1;
-						Standalone<RangeResultRef> getRangeTest =
+						state RangeResult getRangeTest1;
+						RangeResult getRangeTest =
 						    wait(trRYOW.getRange(KeySelectorRef(StringRef(clientID + "b/" + myKeyA), onEqualA, offsetA),
 						                         KeySelectorRef(StringRef(clientID + "b/" + myKeyB), onEqualB, offsetB),
 						                         randomLimit,
@@ -453,7 +453,7 @@ struct RandomSelectorWorkload : TestWorkload {
 
 						loop {
 							try {
-								Standalone<RangeResultRef> getRangeTest2 = wait(
+								RangeResult getRangeTest2 = wait(
 								    tr.getRange(KeySelectorRef(StringRef(clientID + "d/" + myKeyA), onEqualA, offsetA),
 								                KeySelectorRef(StringRef(clientID + "d/" + myKeyB), onEqualB, offsetB),
 								                randomLimit,
@@ -524,9 +524,9 @@ struct RandomSelectorWorkload : TestWorkload {
 
 				loop {
 					try {
-						state Standalone<RangeResultRef> finalTest1 = wait(finalTransaction.getRange(
+						state RangeResult finalTest1 = wait(finalTransaction.getRange(
 						    KeyRangeRef(StringRef(clientID + "b/"), StringRef(clientID + "c/")), self->maxKeySpace));
-						Standalone<RangeResultRef> finalTest2 = wait(finalTransaction.getRange(
+						RangeResult finalTest2 = wait(finalTransaction.getRange(
 						    KeyRangeRef(StringRef(clientID + "d/"), StringRef(clientID + "e/")), self->maxKeySpace));
 
 						if (finalTest1.size() != finalTest2.size()) {

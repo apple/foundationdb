@@ -615,6 +615,11 @@ struct RolesInfo {
 			TraceEventFields const& commitLatencyBands = metrics.at("CommitLatencyBands");
 			if (commitLatencyBands.size()) {
 				obj["commit_latency_bands"] = addLatencyBandInfo(commitLatencyBands);
+			} 
+
+			TraceEventFields const& commitBatchingWindowSize = metrics.at("CommitBatchingWindowSize");
+			if (commitBatchingWindowSize.size()) {
+				obj["commit_batching_window_size"] = addLatencyStatistics(commitBatchingWindowSize);
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_attribute_not_found) {
@@ -1405,10 +1410,9 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx,
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-				state Future<Standalone<RangeResultRef>> existingDestUidValues =
+				state Future<RangeResult> existingDestUidValues =
 				    tr.getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY);
-				state Future<Standalone<RangeResultRef>> existingLogRanges =
-				    tr.getRange(logRangesRange, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeResult> existingLogRanges = tr.getRange(logRangesRange, CLIENT_KNOBS->TOO_MANY);
 				wait((success(existingDestUidValues) && success(existingLogRanges)) || timeoutFuture);
 
 				std::set<LogRangeAndUID> loggingRanges;
@@ -1489,8 +1493,7 @@ loadConfiguration(Database cx, JsonBuilderArray* messages, std::set<std::string>
 		tr.setOption(FDBTransactionOptions::CAUSAL_READ_RISKY);
 		try {
 			choose {
-				when(Standalone<RangeResultRef> res =
-				         wait(tr.getRange(configKeys, SERVER_KNOBS->CONFIGURATION_ROWS_TO_FETCH))) {
+				when(RangeResult res = wait(tr.getRange(configKeys, SERVER_KNOBS->CONFIGURATION_ROWS_TO_FETCH))) {
 					DatabaseConfiguration configuration;
 					if (res.size() == SERVER_KNOBS->CONFIGURATION_ROWS_TO_FETCH) {
 						status_incomplete_reasons->insert("Too many configuration parameters set.");
@@ -1853,7 +1856,7 @@ ACTOR static Future<vector<std::pair<CommitProxyInterface, EventMap>>> getCommit
 	vector<std::pair<CommitProxyInterface, EventMap>> results =
 	    wait(getServerMetrics(db->get().client.commitProxies,
 	                          address_workers,
-	                          std::vector<std::string>{ "CommitLatencyMetrics", "CommitLatencyBands" }));
+	                          std::vector<std::string>{ "CommitLatencyMetrics", "CommitLatencyBands", "CommitBatchingWindowSize"}));
 
 	return results;
 }
@@ -2517,11 +2520,10 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx,
 				tr.setOption(FDBTransactionOptions::TIMEOUT, StringRef((uint8_t*)&timeout_ms, sizeof(int64_t)));
 
 				std::string jsonPrefix = layerStatusMetaPrefixRange.begin.toString() + "json/";
-				Standalone<RangeResultRef> jsonLayers =
-				    wait(tr.getRange(KeyRangeRef(jsonPrefix, strinc(jsonPrefix)), 1000));
+				RangeResult jsonLayers = wait(tr.getRange(KeyRangeRef(jsonPrefix, strinc(jsonPrefix)), 1000));
 				// TODO:  Also fetch other linked subtrees of meta keys
 
-				state std::vector<Future<Standalone<RangeResultRef>>> docFutures;
+				state std::vector<Future<RangeResult>> docFutures;
 				state int i;
 				for (i = 0; i < jsonLayers.size(); ++i)
 					docFutures.push_back(
@@ -2531,7 +2533,7 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx,
 				JSONDoc::expires_reference_version = (uint64_t)tr.getReadVersion().get();
 
 				for (i = 0; i < docFutures.size(); ++i) {
-					state Standalone<RangeResultRef> docs = wait(docFutures[i]);
+					state RangeResult docs = wait(docFutures[i]);
 					state int j;
 					for (j = 0; j < docs.size(); ++j) {
 						state json_spirit::mValue doc;
@@ -2624,8 +2626,7 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicat
 			}
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			state Future<Standalone<RangeResultRef>> fReplicaKeys =
-			    tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY);
+			state Future<RangeResult> fReplicaKeys = tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY);
 			state Future<Optional<Value>> fPrimaryDatacenterKey = tr.get(primaryDatacenterKey);
 			wait(timeoutError(success(fPrimaryDatacenterKey) && success(fReplicaKeys), 5));
 

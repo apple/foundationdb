@@ -86,13 +86,13 @@ struct MemoryLifetime : KVWorkload {
 					//TraceEvent("MemoryLifetimeCheck").detail("IsReverse", getRange_isReverse).detail("StartKey", printable(getRange_startKey)).detail("RandomStart", getRange_randomStart).detail("NewValue", getRange_newValue.size()).detail("IsSnapshot", getRange_isSnapshot);
 					if (getRange_randomStart)
 						tr.set(getRange_startKey, getRange_newValue);
-					state Standalone<RangeResultRef> getRange_res1 = wait(tr.getRange(
+					state RangeResult getRange_res1 = wait(tr.getRange(
 					    getRange_queryRange, GetRangeLimits(4000), getRange_isSnapshot, getRange_isReverse));
 					tr = ReadYourWritesTransaction(cx);
 					wait(delay(0.01));
 					if (getRange_randomStart)
 						tr.set(getRange_startKey, getRange_newValue);
-					Standalone<RangeResultRef> getRange_res2 = wait(tr.getRange(
+					RangeResult getRange_res2 = wait(tr.getRange(
 					    getRange_queryRange, GetRangeLimits(4000), getRange_isSnapshot, getRange_isReverse));
 					ASSERT(getRange_res1.size() == getRange_res2.size());
 					for (int i = 0; i < getRange_res1.size(); i++) {
