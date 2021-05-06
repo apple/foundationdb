@@ -110,6 +110,8 @@ public:
 
 	bool verifyChecksum(LogicalPageID pageID) { return getChecksum() == calculateChecksum(pageID); }
 
+	const Arena& getArena() const { return arena; }
+
 private:
 	Arena arena;
 	int logicalSize;

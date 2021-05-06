@@ -5546,17 +5546,19 @@ public:
 	// Holds references to all pages touched.
 	// All record references returned from it are valid until the cursor is destroyed.
 	class BTreeCursor {
-		Arena arena;
-		Reference<IPagerSnapshot> pager;
-		std::unordered_map<LogicalPageID, Reference<const ArenaPage>> pages;
-		VersionedBTree* btree;
-		bool valid;
-
+	public:
 		struct PathEntry {
-			BTreePage* btPage;
+			Reference<const ArenaPage> page;
 			BTreePage::BinaryTree::Cursor cursor;
+
+			const BTreePage* btPage() const { return (BTreePage*)page->begin(); };
 		};
-		VectorRef<PathEntry> path;
+
+	private:
+		VersionedBTree* btree;
+		Reference<IPagerSnapshot> pager;
+		bool valid;
+		std::vector<PathEntry> path;
 
 	public:
 		BTreeCursor() {}
@@ -5569,7 +5571,7 @@ public:
 				r += format("[%d/%d: %s] ",
 				            i + 1,
 				            path.size(),
-				            path[i].cursor.valid() ? path[i].cursor.get().toString(path[i].btPage->isLeaf()).c_str()
+				            path[i].cursor.valid() ? path[i].cursor.get().toString(path[i].btPage()->isLeaf()).c_str()
 				                                   : "<invalid>");
 			}
 			if (!valid) {
@@ -5583,29 +5585,17 @@ public:
 
 		bool inRoot() const { return path.size() == 1; }
 
-		// Pop and return the page cursor at the end of the path.
-		// This is meant to enable range scans to consume the contents of a leaf page more efficiently.
-		// Can only be used when inRoot() is true.
-		BTreePage::BinaryTree::Cursor popPath() {
-			BTreePage::BinaryTree::Cursor c = path.back().cursor;
-			path.pop_back();
-			return c;
-		}
+		// To enable more efficient range scans, caller can read the lowest page
+		// of the cursor and pop it.
+		PathEntry& back() { return path.back(); }
+		void popPath() { path.pop_back(); }
 
 		Future<Void> pushPage(BTreePageIDRef id,
 		                      const RedwoodRecordRef& lowerBound,
 		                      const RedwoodRecordRef& upperBound) {
-			Reference<const ArenaPage>& page = pages[id.front()];
-			if (page.isValid()) {
-				// The pager won't see this access so count it as a cache hit
-				++g_redwoodMetrics.pagerCacheHit;
-				path.push_back(arena, { (BTreePage*)page->begin(), getCursor(page) });
-				return Void();
-			}
 
-			return map(readPage(pager, id, &lowerBound, &upperBound), [this, &page, id](Reference<const ArenaPage> p) {
-				page = p;
-				path.push_back(arena, { (BTreePage*)p->begin(), getCursor(p) });
+			return map(readPage(pager, id, &lowerBound, &upperBound), [this, id](Reference<const ArenaPage> p) {
+				path.push_back({ p, getCursor(p) });
 				return Void();
 			});
 		}
@@ -5621,7 +5611,7 @@ public:
 		Future<Void> init(VersionedBTree* btree_in, Reference<IPagerSnapshot> pager_in, BTreePageIDRef root) {
 			btree = btree_in;
 			pager = pager_in;
-			path.reserve(arena, 6);
+			path.reserve(6);
 			valid = false;
 			return pushPage(root, dbBegin, dbEnd);
 		}
@@ -5637,13 +5627,13 @@ public:
 		// to query.compare(cursor.get())
 		ACTOR Future<int> seek_impl(BTreeCursor* self, RedwoodRecordRef query, int prefetchBytes) {
 			state RedwoodRecordRef internalPageQuery = query.withMaxPageID();
-			self->path = self->path.slice(0, 1);
+			self->path.resize(1);
 			debug_printf(
 			    "seek(%s, %d) start cursor = %s\n", query.toString().c_str(), prefetchBytes, self->toString().c_str());
 
 			loop {
 				auto& entry = self->path.back();
-				if (entry.btPage->isLeaf()) {
+				if (entry.btPage()->isLeaf()) {
 					int cmp = entry.cursor.seek(query);
 					self->valid = entry.cursor.valid() && !entry.cursor.node->isDeleted();
 					debug_printf("seek(%s, %d) loop exit cmp=%d cursor=%s\n",
@@ -5667,7 +5657,7 @@ public:
 
 					// Prefetch siblings, at least prefetchBytes, at level 2 but without jumping to another level 2
 					// sibling
-					if (prefetchBytes != 0 && entry.btPage->height == 2) {
+					if (prefetchBytes != 0 && entry.btPage()->height == 2) {
 						auto c = entry.cursor;
 						bool fwd = prefetchBytes > 0;
 						prefetchBytes = abs(prefetchBytes);
@@ -5736,7 +5726,7 @@ public:
 				}
 
 				// Skip over internal page entries that do not link to child pages.  There should never be two in a row.
-				if (success && !entry.btPage->isLeaf() && !entry.cursor.get().value.present()) {
+				if (success && !entry.btPage()->isLeaf() && !entry.cursor.get().value.present()) {
 					success = forward ? entry.cursor.moveNext() : entry.cursor.movePrev();
 					ASSERT(!success || entry.cursor.get().value.present());
 				}
@@ -5752,14 +5742,14 @@ public:
 				}
 
 				// Move to parent
-				self->path = self->path.slice(0, self->path.size() - 1);
+				self->path.pop_back();
 			}
 
 			// While not on a leaf page, move down to get to one.
 			while (1) {
 				debug_printf("move%s() second loop cursor=%s\n", forward ? "Next" : "Prev", self->toString().c_str());
 				auto& entry = self->path.back();
-				if (entry.btPage->isLeaf()) {
+				if (entry.btPage()->isLeaf()) {
 					break;
 				}
 
@@ -6115,58 +6105,84 @@ public:
 			wait(cur.seekGTE(keys.begin, prefetchBytes));
 			while (cur.isValid()) {
 				// Read page contents without using waits
-				bool isRoot = cur.inRoot();
-				BTreePage::BinaryTree::Cursor leafCursor = cur.popPath();
+				BTreePage::BinaryTree::Cursor leafCursor = cur.back().cursor;
+
 				// we can bypass the bounds check for each key in the leaf if the entire leaf is in range
 				// > because both query end and page upper bound are exclusive of the query results and page contents,
 				// respectively
 				bool boundsCheck = leafCursor.upperBound() > keys.end;
+				// Whether or not any results from this page were added to results
+				bool usedPage = false;
+
 				while (leafCursor.valid()) {
 					KeyValueRef kv = leafCursor.get().toKeyValueRef();
 					if (boundsCheck && kv.key.compare(keys.end) >= 0) {
 						break;
 					}
 					accumulatedBytes += kv.expectedSize();
-					result.push_back_deep(result.arena(), kv);
+					result.push_back(result.arena(), kv);
+					usedPage = true;
 					if (--rowLimit == 0 || accumulatedBytes >= byteLimit) {
 						break;
 					}
 					leafCursor.moveNext();
 				}
+
+				// If the page was used, results must depend on the ArenaPage arena and the Mirror arena.
+				// This must be done after visiting all the results in case the Mirror arena changes.
+				if (usedPage) {
+					result.arena().dependsOn(leafCursor.mirror->arena);
+					result.arena().dependsOn(cur.back().page->getArena());
+				}
+
 				// Stop if the leaf cursor is still valid which means we hit a key or size limit or
-				// if we started in the root page
-				if (leafCursor.valid() || isRoot) {
+				// if the cursor is in the root page, in which case there are no more pages.
+				if (leafCursor.valid() || cur.inRoot()) {
 					break;
 				}
+				cur.popPath();
 				wait(cur.moveNext());
 			}
 		} else {
 			wait(cur.seekLT(keys.end, prefetchBytes));
 			while (cur.isValid()) {
 				// Read page contents without using waits
-				bool isRoot = cur.inRoot();
-				BTreePage::BinaryTree::Cursor leafCursor = cur.popPath();
+				BTreePage::BinaryTree::Cursor leafCursor = cur.back().cursor;
+
 				// we can bypass the bounds check for each key in the leaf if the entire leaf is in range
 				// < because both query begin and page lower bound are inclusive of the query results and page contents,
 				// respectively
 				bool boundsCheck = leafCursor.lowerBound() < keys.begin;
+				// Whether or not any results from this page were added to results
+				bool usedPage = false;
+
 				while (leafCursor.valid()) {
 					KeyValueRef kv = leafCursor.get().toKeyValueRef();
 					if (boundsCheck && kv.key.compare(keys.begin) < 0) {
 						break;
 					}
 					accumulatedBytes += kv.expectedSize();
-					result.push_back_deep(result.arena(), kv);
+					result.push_back(result.arena(), kv);
+					usedPage = true;
 					if (++rowLimit == 0 || accumulatedBytes >= byteLimit) {
 						break;
 					}
 					leafCursor.movePrev();
 				}
+
+				// If the page was used, results must depend on the ArenaPage arena and the Mirror arena.
+				// This must be done after visiting all the results in case the Mirror arena changes.
+				if (usedPage) {
+					result.arena().dependsOn(leafCursor.mirror->arena);
+					result.arena().dependsOn(cur.back().page->getArena());
+				}
+
 				// Stop if the leaf cursor is still valid which means we hit a key or size limit or
 				// if we started in the root page
-				if (leafCursor.valid() || isRoot) {
+				if (leafCursor.valid() || cur.inRoot()) {
 					break;
 				}
+				cur.popPath();
 				wait(cur.movePrev());
 			}
 		}
@@ -6192,8 +6208,10 @@ public:
 
 		wait(cur.seekGTE(key, 0));
 		if (cur.isValid() && cur.get().key == key) {
-			return cur.get().value.get();
+			// Return a Value whose arena is the source page's arena
+			return Value(cur.get().value.get(), cur.back().page->getArena());
 		}
+
 		return Optional<Value>();
 	}
 
@@ -6217,7 +6235,8 @@ public:
 		if (cur.isValid() && cur.get().key == key) {
 			Value v = cur.get().value.get();
 			int len = std::min(v.size(), maxLength);
-			return Value(v.substr(0, len));
+			// Return a Value prefix whose arena is the source page's arena
+			return Value(v.substr(0, len), cur.back().page->getArena());
 		}
 
 		return Optional<Value>();
@@ -6325,7 +6344,7 @@ ACTOR Future<int> verifyRangeBTreeCursor(VersionedBTree* btree,
 	    "VerifyRange(@%" PRId64 ", %s, %s): Actual seek\n", v, start.printable().c_str(), end.printable().c_str());
 	wait(cur.seekGTE(start, 0));
 
-	state std::vector<KeyValue> results;
+	state Standalone<VectorRef<KeyValueRef>> results;
 
 	while (cur.isValid() && cur.get().key < end) {
 		// Find the next written kv pair that would be present at this version
@@ -6383,7 +6402,10 @@ ACTOR Future<int> verifyRangeBTreeCursor(VersionedBTree* btree,
 
 		ASSERT(errors == 0);
 
-		results.push_back(KeyValue(KeyValueRef(cur.get().key, cur.get().value.get())));
+		results.push_back(results.arena(), cur.get().toKeyValueRef());
+		results.arena().dependsOn(cur.back().cursor.mirror->arena);
+		results.arena().dependsOn(cur.back().page->getArena());
+
 		wait(cur.moveNext());
 	}
 
@@ -6422,7 +6444,7 @@ ACTOR Future<int> verifyRangeBTreeCursor(VersionedBTree* btree,
 	// Now read the range from the tree in reverse order and compare to the saved results
 	wait(cur.seekLT(end, 0));
 
-	state std::vector<KeyValue>::const_reverse_iterator r = results.rbegin();
+	state std::reverse_iterator<const KeyValueRef*> r = results.rbegin();
 
 	while (cur.isValid() && cur.get().key >= start) {
 		if (r == results.rend()) {
