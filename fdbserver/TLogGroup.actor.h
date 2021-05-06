@@ -83,7 +83,7 @@ public:
 
 	// Loads TLogGroupCollection state from given IKeyValueStore, which will be txnStoreState passed
 	// by master.
-	void loadState(const Standalone<RangeResultRef>& store, const std::vector<WorkerInterface>& recruits);
+	void loadState(const Standalone<RangeResultRef>& store);
 
 private:
 	// Returns a LocalityMap of all the workers inside 'recruitMap', but ignore the workers
@@ -129,7 +129,7 @@ public:
 
 	static TLogGroupRef fromValue(UID groupId,
 	                              StringRef value,
-	                              const std::unordered_map<UID, WorkerInterface>& recruits);
+	                              const std::unordered_map<UID, TLogWorkerDataRef>& recruits);
 
 	std::vector<UID> serverIds() const;
 

@@ -114,17 +114,11 @@ void TLogGroupCollection::storeState(CommitTransactionRequest* recoveryCommitReq
 	}
 }
 
-void TLogGroupCollection::loadState(const Standalone<RangeResultRef>& store,
-                                    const std::vector<WorkerInterface>& recruits) {
-
-	std::unordered_map<UID, WorkerInterface> idToInterfMap;
-	for (const auto& interf : recruits) {
-		idToInterfMap[interf.id()] = interf;
-	}
-
+void TLogGroupCollection::loadState(const Standalone<RangeResultRef>& store) {
+	// ASSERT_WE_THINK(store.begin() != nullptr);
 	for (int ii = 0; ii < store.size(); ++ii) {
 		auto groupId = decodeTLogGroupKey(store[ii].key);
-		auto group = TLogGroup::fromValue(groupId, store[ii].value, idToInterfMap);
+		auto group = TLogGroup::fromValue(groupId, store[ii].value, recruitMap);
 		TraceEvent("TLogGroupLoad")
 		    .detail("GroupID", group->id())
 		    .detail("Size", group->size())
@@ -160,7 +154,7 @@ Standalone<StringRef> TLogGroup::toValue() const {
 
 TLogGroupRef TLogGroup::fromValue(UID groupId,
                                   StringRef value,
-                                  const std::unordered_map<UID, WorkerInterface>& recruits) {
+                                  const std::unordered_map<UID, TLogWorkerDataRef>& recruits) {
 	BinaryReader reader(value, Unversioned()); // TODO : Add version
 	int size;
 	reader >> size;
@@ -170,12 +164,12 @@ TLogGroupRef TLogGroup::fromValue(UID groupId,
 		UID id;
 		reader >> id;
 
-		auto interf = recruits.find(id);
-		if (interf == recruits.end()) {
+		auto workerData = recruits.find(id);
+		if (workerData == recruits.end()) {
 			// TODO: Can happen if the worker died since. Handle the case.
 			continue;
 		}
-		group->addServer(TLogWorkerData::fromInterface(interf->second));
+		group->addServer(workerData->second);
 	}
 
 	return group;
