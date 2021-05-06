@@ -6,6 +6,4 @@ startDelay = 0
     [[test.workload]]
     testName = 'UnitTests'
     maxTestCases = 1
-    testsMatching = ':/redwood/performance/extentQueue'
-    pagesPerExtent = 256
-    numEntries = 1000000
+    testsMatching = '/'
