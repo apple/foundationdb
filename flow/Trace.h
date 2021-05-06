@@ -483,7 +483,7 @@ private:
 	std::string trackingKey;
 	TraceEventFields fields;
 	Severity severity;
-	ErrorKind errorKind;
+	ErrorKind errorKind{ ErrorKind::Unset };
 	const char* type;
 	UID id;
 	Error err;
