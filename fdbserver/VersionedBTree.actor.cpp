@@ -8930,13 +8930,14 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 
 		state int v;
 		state ExtentQueueEntry<16> e;
+		generateRandomData(e.entry, 16);
 		for (v = 1; v <= numEntries; ++v) {
 			// Sometimes do a commit
 			if (deterministicRandom()->random01() < commitChance) {
 				wait(pager->commit());
 			} else {
 				// push a random entry into the queue
-				generateRandomData(e.entry, 16);
+				//generateRandomData(e.entry, 16);
 				m_extentQueue.pushBack(e);
 			}
 		}
