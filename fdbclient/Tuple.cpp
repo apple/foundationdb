@@ -71,6 +71,8 @@ Tuple::Tuple(StringRef const& str, bool exclude_incomplete) {
 			i += sizeof(float) + 1;
 		} else if (data[i] == 0x21) {
 			i += sizeof(double) + 1;
+		} else if (data[i] == 0x26 || data[i] == 0x27) {
+			i += 1;
 		} else if (data[i] == '\x00') {
 			i += 1;
 		} else {
@@ -144,6 +146,16 @@ Tuple& Tuple::append(int64_t value) {
 	return *this;
 }
 
+Tuple& Tuple::appendBool(bool value) {
+	offsets.push_back(data.size());
+	if (value) {
+		data.push_back(data.arena(), 0x27);
+	} else {
+		data.push_back(data.arena(), 0x26);
+	}
+	return *this;
+}
+
 Tuple& Tuple::appendFloat(float value) {
 	offsets.push_back(data.size());
 	float swap = bigEndianFloat(value);
@@ -192,6 +204,8 @@ Tuple::ElementType Tuple::getType(size_t index) const {
 		return ElementType::FLOAT;
 	} else if (code == 0x21) {
 		return ElementType::DOUBLE;
+	} else if (code == 0x26 || code == 0x27) {
+		return ElementType::BOOL;
 	} else {
 		throw invalid_tuple_data_type();
 	}
@@ -287,6 +301,21 @@ int64_t Tuple::getInt(size_t index, bool allow_incomplete) const {
 }
 
 // TODO: Combine with bindings/flow/Tuple.*. This code is copied from there.
+bool Tuple::getBool(size_t index) const {
+	if (index >= offsets.size()) {
+		throw invalid_tuple_index();
+	}
+	ASSERT_LT(offsets[index], data.size());
+	uint8_t code = data[offsets[index]];
+	if (code == 0x26) {
+		return false;
+	} else if (code == 0x27) {
+		return true;
+	} else {
+		throw invalid_tuple_data_type();
+	}
+}
+
 float Tuple::getFloat(size_t index) const {
 	if (index >= offsets.size()) {
 		throw invalid_tuple_index();

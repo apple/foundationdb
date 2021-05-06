@@ -135,7 +135,9 @@ public:
 		                                                                         true,
 		                                                                         TaskPriority::DefaultEndpoint,
 		                                                                         true)) // SOMEDAY: Locality!
-		{}
+		{
+			GlobalConfig::globalConfig().updateDBInfo(clientInfo);
+		}
 
 		void setDistributor(const DataDistributorInterface& interf) {
 			auto newInfo = serverInfo->get();
@@ -1886,7 +1888,7 @@ public:
 			updateKnownIds(&firstUsed);
 			updateKnownIds(&secondUsed);
 
-			auto mworker = id_worker.find(masterProcessId);
+			// auto mworker = id_worker.find(masterProcessId);
 			//TraceEvent("CompareAddressesMaster")
 			//    .detail("Master",
 			//            mworker != id_worker.end() ? mworker->second.details.interf.address() : NetworkAddress());
@@ -2593,7 +2595,7 @@ public:
 	std::map<Optional<Standalone<StringRef>>, WorkerInfo> id_worker;
 	std::map<Optional<Standalone<StringRef>>, ProcessClass>
 	    id_class; // contains the mapping from process id to process class from the database
-	Standalone<RangeResultRef> lastProcessClasses;
+	RangeResult lastProcessClasses;
 	bool gotProcessClasses;
 	bool gotFullyRecoveredConfig;
 	Optional<Standalone<StringRef>> masterProcessId;
@@ -3640,7 +3642,7 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData* self) {
 			if (val.present())
 				break;
 
-			Standalone<RangeResultRef> processClasses = wait(trVer.getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult processClasses = wait(trVer.getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!processClasses.more && processClasses.size() < CLIENT_KNOBS->TOO_MANY);
 
 			trVer.clear(processClassKeys);
@@ -3665,7 +3667,7 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData* self) {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				Standalone<RangeResultRef> processClasses = wait(tr.getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeResult processClasses = wait(tr.getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!processClasses.more && processClasses.size() < CLIENT_KNOBS->TOO_MANY);
 
 				if (processClasses != self->lastProcessClasses || !self->gotProcessClasses) {
@@ -3771,7 +3773,7 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 					// Since the history keys end with versionstamps, they
 					// should be sorted correctly (versionstamps are stored in
 					// big-endian order).
-					Standalone<RangeResultRef> globalConfigHistory =
+					RangeResult globalConfigHistory =
 					    wait(tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY));
 					// If the global configuration version key has been set,
 					// the history should contain at least one item.

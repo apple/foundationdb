@@ -1576,7 +1576,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		state Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(dest));
 		tr2->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr2->setOption(FDBTransactionOptions::LOCK_AWARE);
-		state Standalone<RangeResultRef> tagNames = wait(tr2->getRange(dba.tagNames.range(), 10000, snapshot));
+		state RangeResult tagNames = wait(tr2->getRange(dba.tagNames.range(), 10000, snapshot));
 		state std::vector<Future<Optional<Key>>> backupVersion;
 		state std::vector<Future<EBackupState>> backupStatus;
 		state std::vector<Future<int64_t>> tagRangeBytesDR;
@@ -1638,7 +1638,7 @@ ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr,
                                  std::string name,
                                  std::string id,
                                  int limit = 1) {
-	state Standalone<RangeResultRef> docs = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, true));
+	state RangeResult docs = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, true));
 	state bool readMore = false;
 	state int i;
 	for (i = 0; i < docs.size(); ++i) {
@@ -1667,7 +1667,7 @@ ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr,
 		}
 		if (readMore) {
 			limit = 10000;
-			Standalone<RangeResultRef> docs2 = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, true));
+			RangeResult docs2 = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, true));
 			docs = std::move(docs2);
 			readMore = false;
 		}
@@ -1684,7 +1684,7 @@ ACTOR Future<json_spirit::mObject> getLayerStatus(Database src, std::string root
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			state Standalone<RangeResultRef> kvPairs =
+			state RangeResult kvPairs =
 			    wait(tr.getRange(KeyRangeRef(rootKey, strinc(rootKey)), GetRangeLimits::ROW_LIMIT_UNLIMITED));
 			json_spirit::mObject statusDoc;
 			JSONDoc modifier(statusDoc);

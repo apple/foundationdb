@@ -41,7 +41,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
  */
 @ExtendWith(RequiresDatabase.class)
 class RangeQueryIntegrationTest {
-	private static final FDB fdb = FDB.selectAPIVersion(700);
+	private static final FDB fdb = FDB.selectAPIVersion(710);
 
 	@BeforeEach
 	@AfterEach

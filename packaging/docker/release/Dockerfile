@@ -19,8 +19,6 @@
 
 FROM ubuntu:18.04
 
-# Install dependencies
-
 RUN apt-get update && \
 	apt-get install -y curl>=7.58.0-2ubuntu3.6 \
 		dnsutils>=1:9.11.3+dfsg-1ubuntu1.7 \
@@ -34,46 +32,50 @@ RUN apt-get update && \
 		vim>=2:8.0.1453-1ubuntu1.4 \
 		net-tools>=1.60+git20161116.90da8a0-1ubuntu1 \
 		jq>=1.5+dfsg-2 && \
-	rm -r /var/lib/apt/lists/*
+	rm -rf /var/lib/apt/lists/*
 
-
-# Install FoundationDB Binaries
+COPY misc/tini-amd64.sha256sum /tmp/
+# Adding tini as PID 1 https://github.com/krallin/tini
+ARG TINI_VERSION=v0.19.0
+RUN curl -sLO https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-amd64 && \
+  sha256sum -c /tmp/tini-amd64.sha256sum && \
+  chmod +x tini-amd64 && \
+  mv tini-amd64 /usr/bin/tini
 
 ARG FDB_VERSION
+ARG FDB_ADDITIONAL_VERSIONS="5.1.7"
 ARG FDB_WEBSITE=https://www.foundationdb.org
 
 WORKDIR /var/fdb/tmp
-ADD website /mnt/website
-RUN ls -l /mnt/website
-RUN curl $FDB_WEBSITE/downloads/$FDB_VERSION/linux/fdb_$FDB_VERSION.tar.gz -o fdb_$FDB_VERSION.tar.gz && \
-	tar -xzf fdb_$FDB_VERSION.tar.gz --strip-components=1 && \
-	rm fdb_$FDB_VERSION.tar.gz && \
+COPY website /mnt/website/
+
+# Install FoundationDB Binaries
+RUN curl $FDB_WEBSITE/downloads/$FDB_VERSION/linux/fdb_$FDB_VERSION.tar.gz | tar zxf - --strip-components=1 && \
 	chmod u+x fdbbackup fdbcli fdbdr fdbmonitor fdbrestore fdbserver backup_agent dr_agent && \
 	mv fdbbackup fdbcli fdbdr fdbmonitor fdbrestore fdbserver backup_agent dr_agent /usr/bin && \
 	rm -r /var/fdb/tmp
 
-WORKDIR /var/fdb
+WORKDIR /
 
-# Install FoundationDB Client Libraries
+## TODO: Can unify everything above this line
+## TODO: we can almost unify the additional client library download,
+##       but sidecar.py expects them in a different location,
+##        with a different naming convention.
 
-ARG FDB_ADDITIONAL_VERSIONS="5.1.7"
-
-COPY download_multiversion_libraries.bash scripts/
-
-RUN curl $FDB_WEBSITE/downloads/$FDB_VERSION/linux/libfdb_c_$FDB_VERSION.so -o /usr/lib/libfdb_c.so && \
-	bash scripts/download_multiversion_libraries.bash $FDB_WEBSITE $FDB_ADDITIONAL_VERSIONS && \
-	rm -rf /mnt/website
+RUN curl $FDB_WEBSITE/downloads/$FDB_VERSION/linux/libfdb_c_$FDB_VERSION.so -o /usr/lib/libfdb_c.so
 
 # Set Up Runtime Scripts and Directories
+ADD release/*.bash /var/fdb/scripts/
+RUN chmod a+x /var/fdb/scripts/*.bash
 
-COPY fdb.bash scripts/
-COPY create_server_environment.bash scripts/
-COPY create_cluster_file.bash scripts/
-RUN chmod u+x scripts/*.bash && \
-	mkdir -p logs
+# Install additional FoundationDB Client Libraries
+RUN	/var/fdb/scripts/download_multiversion_libraries.bash $FDB_WEBSITE $FDB_ADDITIONAL_VERSIONS
+
+RUN	rm -rf /mnt/website
+
+RUN	mkdir -p logs
+
 VOLUME /var/fdb/data
-
-CMD /var/fdb/scripts/fdb.bash
 
 # Runtime Configuration Options
 
@@ -85,12 +87,5 @@ ENV FDB_COORDINATOR_PORT 4500
 ENV FDB_CLUSTER_FILE_CONTENTS ""
 ENV FDB_PROCESS_CLASS unset
 
-# Adding tini as PID 1 https://github.com/krallin/tini
-ARG TINI_VERSION=v0.19.0
-RUN curl -sLO https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-amd64 && \
-    curl -sLO https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-amd64.sha256sum && \
-	sha256sum -c tini-amd64.sha256sum && \
-	rm -f tini-amd64.sha256sum && \
-    chmod +x tini-amd64 && \
-	mv tini-amd64 /usr/bin/tini
 ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
+CMD /var/fdb/scripts/fdb.bash

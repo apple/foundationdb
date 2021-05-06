@@ -89,7 +89,7 @@ struct DiskDurabilityTest : TestWorkload {
 		state Transaction tr(db);
 		loop {
 			try {
-				state Standalone<RangeResultRef> r = wait(tr.getRange(self->range, GetRangeLimits(1000000)));
+				state RangeResult r = wait(tr.getRange(self->range, GetRangeLimits(1000000)));
 				verifyPages = r.size();
 				state int i;
 				for (i = 0; i < r.size(); i++) {

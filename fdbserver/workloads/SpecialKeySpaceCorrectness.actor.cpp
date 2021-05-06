@@ -193,7 +193,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	bool compareRangeResult(Standalone<RangeResultRef>& res1, Standalone<RangeResultRef>& res2) {
+	bool compareRangeResult(RangeResult const& res1, RangeResult const& res2) {
 		if ((res1.more != res2.more) || (res1.readToBegin != res2.readToBegin) ||
 		    (res1.readThroughEnd != res2.readThroughEnd)) {
 			TraceEvent(SevError, "TestFailure")
@@ -338,7 +338,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
 			const KeyRef startKey = LiteralStringRef("\xff\xff/transactio");
 			const KeyRef endKey = LiteralStringRef("\xff\xff/transaction1");
-			Standalone<RangeResultRef> result =
+			RangeResult result =
 			    wait(tx->getRange(KeyRangeRef(startKey, endKey), GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 			// The whole transaction module should be empty
 			ASSERT(!result.size());
@@ -386,7 +386,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			const KeyRef key = LiteralStringRef("\xff\xff/cluster_file_path");
 			KeySelector begin = KeySelectorRef(key, false, 0);
 			KeySelector end = KeySelectorRef(keyAfter(key), false, 2);
-			Standalone<RangeResultRef> result = wait(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
+			RangeResult result = wait(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(result.readToBegin && result.readThroughEnd);
 			tx->reset();
 		} catch (Error& e) {
@@ -397,7 +397,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			const KeyRef key = LiteralStringRef("\xff\xff/transaction/a_to_be_the_first");
 			KeySelector begin = KeySelectorRef(key, false, 0);
 			KeySelector end = KeySelectorRef(key, false, 2);
-			Standalone<RangeResultRef> result = wait(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
+			RangeResult result = wait(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(result.readToBegin && !result.readThroughEnd);
 			tx->reset();
 		} catch (Error& e) {
@@ -440,7 +440,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		try {
 			const KeySelector startKeySelector = KeySelectorRef(LiteralStringRef("\xff\xff/test"), true, -200);
 			const KeySelector endKeySelector = KeySelectorRef(LiteralStringRef("test"), true, -10);
-			Standalone<RangeResultRef> result =
+			RangeResult result =
 			    wait(tx->getRange(startKeySelector, endKeySelector, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
 		} catch (Error& e) {
@@ -451,10 +451,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		}
 		// test case when registered range is the same as the underlying module
 		try {
-			state Standalone<RangeResultRef> result =
-			    wait(tx->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
-			                                  LiteralStringRef("\xff\xff/worker_interfaces0")),
-			                      CLIENT_KNOBS->TOO_MANY));
+			state RangeResult result = wait(tx->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+			                                                         LiteralStringRef("\xff\xff/worker_interfaces0")),
+			                                             CLIENT_KNOBS->TOO_MANY));
 			// Note: there's possibility we get zero workers
 			if (result.size()) {
 				state KeyValueRef entry = deterministicRandom()->randomChoice(result);
@@ -609,7 +608,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
-	bool getRangeResultInOrder(const Standalone<RangeResultRef>& result) {
+	bool getRangeResultInOrder(const RangeResult& result) {
 		for (int i = 0; i < result.size() - 1; ++i) {
 			if (result[i].key >= result[i + 1].key) {
 				TraceEvent(SevError, "TestFailure")
@@ -636,7 +635,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				            .withSuffix(option),
 				        ValueRef());
 			}
-			Standalone<RangeResultRef> result = wait(tx->getRange(
+			RangeResult result = wait(tx->getRange(
 			    KeyRangeRef(LiteralStringRef("options/"), LiteralStringRef("options0"))
 			        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin),
 			    CLIENT_KNOBS->TOO_MANY));
@@ -677,7 +676,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			try {
 				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				// test getRange
-				state Standalone<RangeResultRef> result = wait(tx->getRange(
+				state RangeResult result = wait(tx->getRange(
 				    KeyRangeRef(LiteralStringRef("process/class_type/"), LiteralStringRef("process/class_type0"))
 				        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin),
 				    CLIENT_KNOBS->TOO_MANY));
@@ -746,7 +745,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		{
 			try {
 				// test getRange
-				state Standalone<RangeResultRef> class_source_result = wait(tx->getRange(
+				state RangeResult class_source_result = wait(tx->getRange(
 				    KeyRangeRef(LiteralStringRef("process/class_source/"), LiteralStringRef("process/class_source0"))
 				        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin),
 				    CLIENT_KNOBS->TOO_MANY));
@@ -835,7 +834,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// if database locked, fdb read should get database_locked error
 		try {
 			tx->reset();
-			Standalone<RangeResultRef> res = wait(tx->getRange(normalKeys, 1));
+			RangeResult res = wait(tx->getRange(normalKeys, 1));
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
 				throw;
@@ -853,7 +852,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				TraceEvent(SevDebug, "DatabaseUnlocked");
 				tx->reset();
 				// read should be successful
-				Standalone<RangeResultRef> res = wait(tx->getRange(normalKeys, 1));
+				RangeResult res = wait(tx->getRange(normalKeys, 1));
 				tx->reset();
 				break;
 			} catch (Error& e) {
@@ -1257,13 +1256,13 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		loop {
 			try {
 				// maintenance
-				Standalone<RangeResultRef> maintenanceKVs = wait(
+				RangeResult maintenanceKVs = wait(
 				    tx->getRange(SpecialKeySpace::getManamentApiCommandRange("maintenance"), CLIENT_KNOBS->TOO_MANY));
 				// By default, no maintenance is going on
 				ASSERT(!maintenanceKVs.more && !maintenanceKVs.size());
 				// datadistribution
-				Standalone<RangeResultRef> ddKVs = wait(tx->getRange(
-				    SpecialKeySpace::getManamentApiCommandRange("datadistribution"), CLIENT_KNOBS->TOO_MANY));
+				RangeResult ddKVs = wait(tx->getRange(SpecialKeySpace::getManamentApiCommandRange("datadistribution"),
+				                                      CLIENT_KNOBS->TOO_MANY));
 				// By default, data_distribution/mode := "-1"
 				ASSERT(!ddKVs.more && ddKVs.size() == 1);
 				ASSERT(ddKVs[0].key == LiteralStringRef("mode").withPrefix(

@@ -68,7 +68,11 @@ public:
 
 class IPagerSnapshot {
 public:
-	virtual Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID, bool cacheable, bool nohit) = 0;
+	virtual Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID,
+	                                                       bool cacheable,
+	                                                       bool nohit,
+	                                                       bool* fromCache = nullptr) = 0;
+	virtual bool tryEvictPage(LogicalPageID id) = 0;
 	virtual Version getVersion() const = 0;
 
 	virtual Key getMetaKey() const = 0;
@@ -79,7 +83,7 @@ public:
 	virtual void delref() = 0;
 };
 
-// This API is probably customized to the behavior of DWALPager and probably needs some changes to be more generic.
+// This API is probably too customized to the behavior of DWALPager and probably needs some changes to be more generic.
 class IPager2 : public IClosable {
 public:
 	// Returns an IPage that can be passed to writePage. The data in the returned IPage might not be zeroed.
@@ -126,7 +130,10 @@ public:
 	// Cacheable indicates that the page should be added to the page cache (if applicable?) as a result of this read.
 	// NoHit indicates that the read should not be considered a cache hit, such as when preloading pages that are
 	// considered likely to be needed soon.
-	virtual Future<Reference<IPage>> readPage(LogicalPageID pageID, bool cacheable = true, bool noHit = false) = 0;
+	virtual Future<Reference<IPage>> readPage(LogicalPageID pageID,
+	                                          bool cacheable = true,
+	                                          bool noHit = false,
+	                                          bool* fromCache = nullptr) = 0;
 	virtual Future<Reference<IPage>> readExtent(LogicalPageID pageID) = 0;
 
 	// Temporary methods for testing

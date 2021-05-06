@@ -784,8 +784,7 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData* self) {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-				state Future<Standalone<RangeResultRef>> throttledTagKeys =
-				    tr.getRange(tagThrottleKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeResult> throttledTagKeys = tr.getRange(tagThrottleKeys, CLIENT_KNOBS->TOO_MANY);
 				state Future<Optional<Value>> autoThrottlingEnabled = tr.get(tagThrottleAutoEnabledKey);
 
 				if (!committed) {
@@ -1388,7 +1387,7 @@ ACTOR Future<Void> configurationMonitor(RatekeeperData* self) {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				Standalone<RangeResultRef> results = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeResult results = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
 
 				self->configuration.fromKeyValues((VectorRef<KeyValueRef>)results);
