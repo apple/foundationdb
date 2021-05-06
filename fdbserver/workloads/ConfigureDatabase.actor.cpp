@@ -318,12 +318,13 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				//TraceEvent("ConfigureTestQuorumBegin").detail("NewQuorum", s);
 				auto ch = autoQuorumChange();
 				std::string desiredClusterName = "NewName%d";
-				if (! SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT) {
+				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT) {
 					// if configuration does not allow changing the descriptor, pass empty string (keep old descriptor)
 					desiredClusterName = "";
 				}
 				if (deterministicRandom()->randomInt(0, 2))
-					ch = nameQuorumChange(format(desiredClusterName.c_str(), deterministicRandom()->randomInt(0, 100)), ch);
+					ch = nameQuorumChange(format(desiredClusterName.c_str(), deterministicRandom()->randomInt(0, 100)),
+					                      ch);
 				wait(success(changeQuorum(cx, ch)));
 				//TraceEvent("ConfigureTestConfigureEnd").detail("NewQuorum", s);
 			} else if (randomChoice == 5) {

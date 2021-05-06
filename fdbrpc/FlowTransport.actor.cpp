@@ -51,7 +51,7 @@ constexpr UID WLTOKEN_PING_PACKET(-1, 1);
 constexpr int PACKET_LEN_WIDTH = sizeof(uint32_t);
 const uint64_t TOKEN_STREAM_FLAG = 1;
 
-const int WLTOKEN_COUNTS = 12;  // number of wellKnownEndpoints
+const int WLTOKEN_COUNTS = 13; // number of wellKnownEndpoints
 
 class EndpointMap : NonCopyable {
 public:
@@ -1218,7 +1218,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 							}
 							compatible = false;
 							if (!protocolVersion.hasInexpensiveMultiVersionClient()) {
-								if(peer) {
+								if (peer) {
 									peer->protocolVersion->set(protocolVersion);
 								}
 

@@ -1192,10 +1192,10 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 			state vector<Future<Optional<LeaderInfo>>> leaderServers;
 			state ClientCoordinators coord(Reference<ClusterConnectionFile>(new ClusterConnectionFile(conn)));
 			// check if allowed to modify the cluster descriptor
-			if (! change->getDesiredClusterKeyName().empty()) {
-				CheckDescriptorMutableReply mutabilityReply = wait(coord.clientLeaderServers[0].checkDescriptorMutable.getReply(
-					CheckDescriptorMutable()));
-				if (! mutabilityReply.value)
+			if (!change->getDesiredClusterKeyName().empty()) {
+				CheckDescriptorMutableReply mutabilityReply =
+				    wait(coord.clientLeaderServers[0].checkDescriptorMutable.getReply(CheckDescriptorMutable()));
+				if (!mutabilityReply.value)
 					return CoordinatorsResult::BAD_DATABASE_STATE;
 			}
 			leaderServers.reserve(coord.clientLeaderServers.size());
