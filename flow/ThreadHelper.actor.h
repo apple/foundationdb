@@ -22,7 +22,6 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated
 // version of this file.  In intellisense use the source version.
-#include "flow/Error.h"
 #if defined(NO_INTELLISENSE) && !defined(FLOW_THREADHELPER_ACTOR_G_H)
 #define FLOW_THREADHELPER_ACTOR_G_H
 #include "flow/ThreadHelper.actor.g.h"
