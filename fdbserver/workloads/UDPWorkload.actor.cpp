@@ -218,8 +218,7 @@ struct UDPWorkload : TestWorkload {
 		state std::vector<NetworkAddress> remotes;
 		loop {
 			try {
-				Standalone<RangeResultRef> range =
-				    wait(tr.getRange(prefixRange(self->keyPrefix), CLIENT_KNOBS->TOO_MANY));
+				RangeResult range = wait(tr.getRange(prefixRange(self->keyPrefix), CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!range.more);
 				for (auto const& p : range) {
 					auto cID = BinaryReader::fromStringRef<decltype(self->clientId)>(

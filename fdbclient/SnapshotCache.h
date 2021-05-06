@@ -203,6 +203,7 @@ public:
 		bool is_empty_range() const { return type() == EMPTY_RANGE; }
 		bool is_dependent() const { return false; }
 		bool is_unreadable() const { return false; }
+		void bypassUnreadableProtection() {}
 
 		ExtStringRef beginKey() const {
 			if (offset == 0) {

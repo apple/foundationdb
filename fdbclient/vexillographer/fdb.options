@@ -192,6 +192,9 @@ description is not currently required but encouraged.
             description="Enable tracing for all transactions. This is the default." />
     <Option name="distributed_transaction_trace_disable" code="601"
             description="Disable tracing for all transactions." />
+    <Option name="transaction_bypass_unreadable" code="700"
+            description="Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. This sets the ``bypass_unreadable`` option of each transaction created by this database. See the transaction option description for more information."
+            defaultFor="1100"/>
   </Scope>
   
   <Scope name="TransactionOption">
@@ -284,6 +287,8 @@ description is not currently required but encouraged.
             description="Adds a parent to the Span of this transaction. Used for transaction tracing. A span can be identified with any 16 bytes"/>
     <Option name="expensive_clear_cost_estimation_enable" code="1000"
                 description="Asks storage servers for how many bytes a clear key range contains. Otherwise uses the location cache to roughly estimate this." />
+    <Option name="bypass_unreadable" code="1100"
+                description="Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. These reads will view versionstamp operations as if they were set operations that did not fill in the versionstamp." />            
   </Scope>
 
   <!-- The enumeration values matter - do not change them without

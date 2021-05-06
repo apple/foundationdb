@@ -3633,7 +3633,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "kill")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
-						Standalone<RangeResultRef> kvs = wait(
+						RangeResult kvs = wait(
 						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
 						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
 						                                   CLIENT_KNOBS->TOO_MANY)));
@@ -3700,7 +3700,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "suspend")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
-						Standalone<RangeResultRef> kvs = wait(
+						RangeResult kvs = wait(
 						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
 						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
 						                                   CLIENT_KNOBS->TOO_MANY)));
@@ -3911,7 +3911,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							continue;
 						}
 						getTransaction(db, tr, options, intrans);
-						Standalone<RangeResultRef> kvs = wait(
+						RangeResult kvs = wait(
 						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
 						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
 						                                   CLIENT_KNOBS->TOO_MANY)));
@@ -3940,7 +3940,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								continue;
 							}
 							getTransaction(db, tr, options, intrans);
-							Standalone<RangeResultRef> kvs = wait(makeInterruptable(
+							RangeResult kvs = wait(makeInterruptable(
 							    tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
 							                             LiteralStringRef("\xff\xff/worker_interfaces0")),
 							                 CLIENT_KNOBS->TOO_MANY)));
@@ -4019,7 +4019,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							continue;
 						}
 						getTransaction(db, tr, options, intrans);
-						Standalone<RangeResultRef> kvs = wait(
+						RangeResult kvs = wait(
 						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
 						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
 						                                   CLIENT_KNOBS->TOO_MANY)));
@@ -4061,7 +4061,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "expensive_data_check")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
-						Standalone<RangeResultRef> kvs = wait(
+						RangeResult kvs = wait(
 						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
 						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
 						                                   CLIENT_KNOBS->TOO_MANY)));
@@ -4177,7 +4177,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							endKey = strinc(tokens[1]);
 						}
 
-						Standalone<RangeResultRef> kvs = wait(makeInterruptable(
+						RangeResult kvs = wait(makeInterruptable(
 						    getTransaction(db, tr, options, intrans)->getRange(KeyRangeRef(tokens[1], endKey), limit)));
 
 						printf("\nRange limited to %d keys\n", limit);

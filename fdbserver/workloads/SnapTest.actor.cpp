@@ -263,7 +263,7 @@ public: // workload functions
 			tr.reset();
 			loop {
 				try {
-					Standalone<RangeResultRef> kvRange = wait(tr.getRange(begin, end, 1000));
+					RangeResult kvRange = wait(tr.getRange(begin, end, 1000));
 					if (!kvRange.more && kvRange.size() == 0) {
 						TraceEvent("SnapTestNoMoreEntries");
 						break;
