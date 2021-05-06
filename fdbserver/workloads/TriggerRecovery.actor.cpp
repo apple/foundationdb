@@ -59,9 +59,11 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> changeResolverConfig(Database cx, TriggerRecoveryLoopWorkload* self, bool setToOriginal=false) {
+	ACTOR Future<Void> changeResolverConfig(Database cx,
+	                                        TriggerRecoveryLoopWorkload* self,
+	                                        bool setToOriginal = false) {
 		state int32_t numResolversToSet;
-		if(setToOriginal) {
+		if (setToOriginal) {
 			numResolversToSet = self->originalNumOfResolvers.get();
 		} else {
 			numResolversToSet = self->currentNumOfResolvers.get() == self->originalNumOfResolvers.get()
@@ -74,7 +76,8 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 			ConfigurationResult::Type r = wait(changeConfig(cx, { configStr }, conf, true));
 			if (r == ConfigurationResult::SUCCESS) {
 				self->currentNumOfResolvers = numResolversToSet;
-				TraceEvent(SevInfo, "TriggerRecoveryLoop_ChangeResolverConfigSuccess").detail("NumOfResolvers", self->currentNumOfResolvers.get());
+				TraceEvent(SevInfo, "TriggerRecoveryLoop_ChangeResolverConfigSuccess")
+				    .detail("NumOfResolvers", self->currentNumOfResolvers.get());
 				break;
 			}
 			TraceEvent(SevWarn, "TriggerRecoveryLoop_ChangeResolverConfigFailed").detail("Result", r);
@@ -127,7 +130,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 				wait(delay(self->delayBetweenRecoveries));
 				wait(self->returnIfClusterRecovered(cx));
 			}
-		} catch(Error &e) {
+		} catch (Error& e) {
 			// Dummy catch here to give a chance to reset number of resolvers to its original value
 		}
 		wait(self->changeResolverConfig(cx, self, true));
@@ -135,7 +138,8 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 	}
 
 	virtual Future<Void> start(Database const& cx) {
-		if (clientId != 0) return Void();
+		if (clientId != 0)
+			return Void();
 		return _start(cx, this);
 	}
 

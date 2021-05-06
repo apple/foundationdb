@@ -28,7 +28,7 @@
 #define state
 #undef max
 #undef min
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct SaveAndKillWorkload : TestWorkload {
 
@@ -36,26 +36,24 @@ struct SaveAndKillWorkload : TestWorkload {
 	double testDuration;
 	int isRestoring;
 
-	SaveAndKillWorkload(WorkloadContext const& wcx)
-		: TestWorkload(wcx)
-	{
-		restartInfo = getOption( options, LiteralStringRef("restartInfoLocation"), LiteralStringRef("simfdb/restartInfo.ini") ).toString();
-		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
-		isRestoring = getOption( options, LiteralStringRef("isRestoring"),  0 );
+	SaveAndKillWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+		restartInfo =
+		    getOption(options, LiteralStringRef("restartInfoLocation"), LiteralStringRef("simfdb/restartInfo.ini"))
+		        .toString();
+		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
+		isRestoring = getOption(options, LiteralStringRef("isRestoring"), 0);
 	}
 
 	virtual std::string description() { return "SaveAndKillWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) {
+	virtual Future<Void> setup(Database const& cx) {
 		g_simulator.disableSwapsToAll();
 		return Void();
 	}
-	virtual Future<Void> start( Database const& cx ) {
-		return _start(this);
-	}
+	virtual Future<Void> start(Database const& cx) { return _start(this); }
 
-	ACTOR Future<Void> _start( SaveAndKillWorkload* self) {
+	ACTOR Future<Void> _start(SaveAndKillWorkload* self) {
 		state int i;
-		wait(delay(deterministicRandom()->random01()*self->testDuration));
+		wait(delay(deterministicRandom()->random01() * self->testDuration));
 
 		CSimpleIni ini;
 		ini.SetUnicode();
@@ -65,25 +63,27 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.SetValue("META", "processesPerMachine", format("%d", g_simulator.processesPerMachine).c_str());
 		ini.SetValue("META", "listenersPerProcess", format("%d", g_simulator.listenersPerProcess).c_str());
 		ini.SetValue("META", "desiredCoordinators", format("%d", g_simulator.desiredCoordinators).c_str());
-		ini.SetValue("META", "connectionString",  g_simulator.connectionString.c_str());
+		ini.SetValue("META", "connectionString", g_simulator.connectionString.c_str());
 		ini.SetValue("META", "testerCount", format("%d", g_simulator.testerCount).c_str());
 
 		std::vector<ISimulator::ProcessInfo*> processes = g_simulator.getAllProcesses();
 		std::map<NetworkAddress, ISimulator::ProcessInfo*> rebootingProcesses = g_simulator.currentlyRebootingProcesses;
-		std::map<std::string, ISimulator::ProcessInfo*> allProcessesMap = std::map<std::string, ISimulator::ProcessInfo*>();
-		for(auto it = rebootingProcesses.begin(); it != rebootingProcesses.end(); it++) {
+		std::map<std::string, ISimulator::ProcessInfo*> allProcessesMap =
+		    std::map<std::string, ISimulator::ProcessInfo*>();
+		for (auto it = rebootingProcesses.begin(); it != rebootingProcesses.end(); it++) {
 			if (allProcessesMap.find(it->second->dataFolder) == allProcessesMap.end())
 				allProcessesMap[it->second->dataFolder] = it->second;
 		}
-		for(auto it = processes.begin(); it != processes.end(); it++) {
+		for (auto it = processes.begin(); it != processes.end(); it++) {
 			if (allProcessesMap.find((*it)->dataFolder) == allProcessesMap.end())
 				allProcessesMap[(*it)->dataFolder] = *it;
 		}
-		ini.SetValue("META", "processCount", format("%d", allProcessesMap.size()-1).c_str());
+		ini.SetValue("META", "processCount", format("%d", allProcessesMap.size() - 1).c_str());
 		std::map<std::string, int> machines;
 
 		int j = 0;
-		for(auto processIterator = allProcessesMap.begin(); processIterator != allProcessesMap.end(); processIterator++) {
+		for (auto processIterator = allProcessesMap.begin(); processIterator != allProcessesMap.end();
+		     processIterator++) {
 			ISimulator::ProcessInfo* process = processIterator->second;
 			std::string machineId = printable(process->locality.machineId());
 			const char* machineIdString = machineId.c_str();
@@ -91,38 +91,48 @@ struct SaveAndKillWorkload : TestWorkload {
 				if (machines.find(machineId) == machines.end()) {
 					machines.insert(std::pair<std::string, int>(machineId, 1));
 					ini.SetValue("META", format("%d", j).c_str(), machineIdString);
-					ini.SetValue(machineIdString, "dcUID", (process->locality.dcId().present()) ? process->locality.dcId().get().printable().c_str() : "");
-					ini.SetValue(machineIdString, "zoneId", (process->locality.zoneId().present()) ? process->locality.zoneId().get().printable().c_str() : "");
+					ini.SetValue(
+					    machineIdString,
+					    "dcUID",
+					    (process->locality.dcId().present()) ? process->locality.dcId().get().printable().c_str() : "");
+					ini.SetValue(machineIdString,
+					             "zoneId",
+					             (process->locality.zoneId().present())
+					                 ? process->locality.zoneId().get().printable().c_str()
+					                 : "");
 					ini.SetValue(machineIdString, "mClass", format("%d", process->startingClass.classType()).c_str());
-					ini.SetValue(machineIdString, format("ipAddr%d", process->address.port - 1).c_str(),
+					ini.SetValue(machineIdString,
+					             format("ipAddr%d", process->address.port - 1).c_str(),
 					             process->address.ip.toString().c_str());
-					ini.SetValue(machineIdString, format("%d", process->address.port-1).c_str(), process->dataFolder);
-					ini.SetValue(machineIdString, format("c%d", process->address.port-1).c_str(), process->coordinationFolder);
+					ini.SetValue(machineIdString, format("%d", process->address.port - 1).c_str(), process->dataFolder);
+					ini.SetValue(
+					    machineIdString, format("c%d", process->address.port - 1).c_str(), process->coordinationFolder);
 					j++;
-				}
-				else {
-					ini.SetValue(machineIdString, format("ipAddr%d", process->address.port - 1).c_str(),
+				} else {
+					ini.SetValue(machineIdString,
+					             format("ipAddr%d", process->address.port - 1).c_str(),
 					             process->address.ip.toString().c_str());
 					int oldValue = machines.find(machineId)->second;
-					ini.SetValue(machineIdString, format("%d", process->address.port-1).c_str(), process->dataFolder);
-					ini.SetValue(machineIdString, format("c%d", process->address.port-1).c_str(), process->coordinationFolder);
+					ini.SetValue(machineIdString, format("%d", process->address.port - 1).c_str(), process->dataFolder);
+					ini.SetValue(
+					    machineIdString, format("c%d", process->address.port - 1).c_str(), process->coordinationFolder);
 					machines.erase(machines.find(machineId));
-					machines.insert(std::pair<std::string, int>(machineId, oldValue+1));
+					machines.insert(std::pair<std::string, int>(machineId, oldValue + 1));
 				}
 			}
 		}
-		for(auto entry = machines.begin(); entry != machines.end(); entry++) {
+		for (auto entry = machines.begin(); entry != machines.end(); entry++) {
 			ini.SetValue((*entry).first.c_str(), "processes", format("%d", (*entry).second).c_str());
 		}
 
-	ini.SetValue("META", "machineCount", format("%d", machines.size()).c_str());
+		ini.SetValue("META", "machineCount", format("%d", machines.size()).c_str());
 		ini.SaveFile(self->restartInfo.c_str());
 
-		for(auto process = allProcessesMap.begin(); process != allProcessesMap.end(); process++) {
+		for (auto process = allProcessesMap.begin(); process != allProcessesMap.end(); process++) {
 			g_simulator.killProcess(process->second, ISimulator::Reboot);
 		}
 
-		for (i = 0; i<100; i++) {
+		for (i = 0; i < 100; i++) {
 			wait(delay(0.0));
 		}
 
@@ -131,11 +141,8 @@ struct SaveAndKillWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
-		return true;
-	}
-	virtual void getMetrics( std::vector<PerfMetric>& ) {
-	}
+	virtual Future<bool> check(Database const& cx) { return true; }
+	virtual void getMetrics(std::vector<PerfMetric>&) {}
 };
 
 WorkloadFactory<SaveAndKillWorkload> SaveAndKillWorkloadFactory("SaveAndKill");

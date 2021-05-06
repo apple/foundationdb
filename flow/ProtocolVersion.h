@@ -25,7 +25,7 @@
 	struct x {                                                                                                         \
 		static constexpr uint64_t protocolVersion = v;                                                                 \
 	};                                                                                                                 \
-	constexpr bool has##x() const { return this->version() > x ::protocolVersion; }                                   \
+	constexpr bool has##x() const { return this->version() > x ::protocolVersion; }                                    \
 	static constexpr ProtocolVersion with##x() { return ProtocolVersion(x ::protocolVersion); }
 
 // ProtocolVersion wraps a uint64_t to make it type safe. It will know about the current versions.
@@ -51,7 +51,7 @@ public:
 	}
 	constexpr bool isValid() const { return version() >= minValidProtocolVersion; }
 
-	constexpr uint64_t version() const { return _version & versionFlagMask; }
+	constexpr uint64_t version() const { return _version & versionFlagMask & compatibleProtocolVersionMask; }
 	constexpr uint64_t versionWithFlags() const { return _version; }
 
 	constexpr bool hasObjectSerializerFlag() const { return (_version & objectSerializerFlag) > 0; }
@@ -98,6 +98,7 @@ public: // introduced features
 //                                                         xyzdev
 //                                                         vvvv
 constexpr ProtocolVersion currentProtocolVersion(0x0FDB00B062010001LL);
+constexpr ProtocolVersion supportDowngradeProtocolVersion(0x0FDB00B063010001LL);
 // This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to
 // change when we reach version 10.
 static_assert(currentProtocolVersion.version() < 0x0FDB00B100000000LL, "Unexpected protocol version");

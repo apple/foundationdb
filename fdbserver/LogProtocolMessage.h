@@ -53,21 +53,20 @@ struct LogProtocolMessage {
 
 	LogProtocolMessage() {}
 
-	std::string toString() const {
-		return format("code: %d", MutationRef::Reserved_For_LogProtocolMessage);
-	}
+	std::string toString() const { return format("code: %d", MutationRef::Reserved_For_LogProtocolMessage); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		uint8_t poly = MutationRef::Reserved_For_LogProtocolMessage;
 		serializer(ar, poly);
-		applyVersionStartingHere(ar, IncludeVersion());
+		applyVersionStartingHere(ar, IncludeVersion(supportDowngradeProtocolVersion));
 	}
 
-	static bool startsLogProtocolMessage(uint8_t byte) {
-		return byte == MutationRef::Reserved_For_LogProtocolMessage;
+	static bool startsLogProtocolMessage(uint8_t byte) { return byte == MutationRef::Reserved_For_LogProtocolMessage; }
+	template <class Ar>
+	static bool isNextIn(Ar& ar) {
+		return startsLogProtocolMessage(*(const uint8_t*)ar.peekBytes(1));
 	}
-	template <class Ar> static bool isNextIn(Ar& ar) { return startsLogProtocolMessage(*(const uint8_t*)ar.peekBytes(1)); }
 };
 
 #endif

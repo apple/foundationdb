@@ -21,7 +21,7 @@
 #include "fdbserver/RestoreInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityData locality) {
 	state Database cx = Database::createDatabase(ccf->getFilename(), Database::API_VERSION_LATEST, true, locality);
@@ -33,27 +33,27 @@ ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityD
 	loop {
 		try {
 			Optional<Value> leader = wait(tr.get(restoreLeaderKey));
-			if(leader.present()) {
+			if (leader.present()) {
 				leaderInterf = BinaryReader::fromStringRef<RestoreInterface>(leader.get(), IncludeVersion());
 				break;
 			}
 			tr.set(restoreLeaderKey, BinaryWriter::toValue(interf, IncludeVersion()));
 			wait(tr.commit());
 			break;
-		} catch( Error &e ) {
-			wait( tr.onError(e) );
+		} catch (Error& e) {
+			wait(tr.onError(e));
 		}
 	}
 
-	//we are not the leader, so put our interface in the agent list
-	if(leaderInterf.present()) {
+	// we are not the leader, so put our interface in the agent list
+	if (leaderInterf.present()) {
 		loop {
 			try {
 				tr.set(restoreWorkerKeyFor(interf.id()), BinaryWriter::toValue(interf, IncludeVersion()));
 				wait(tr.commit());
 				break;
-			} catch( Error &e ) {
-				wait( tr.onError(e) );
+			} catch (Error& e) {
+				wait(tr.onError(e));
 			}
 		}
 
@@ -67,23 +67,23 @@ ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityD
 		}
 	}
 
-	//we are the leader
-	wait( delay(5.0) );
+	// we are the leader
+	wait(delay(5.0));
 
 	state vector<RestoreInterface> agents;
 	loop {
 		try {
 			Standalone<RangeResultRef> agentValues = wait(tr.getRange(restoreWorkersKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!agentValues.more);
-			if(agentValues.size()) {
-				for(auto& it : agentValues) {
+			if (agentValues.size()) {
+				for (auto& it : agentValues) {
 					agents.push_back(BinaryReader::fromStringRef<RestoreInterface>(it.value, IncludeVersion()));
 				}
 				break;
 			}
-			wait( delay(5.0) );
-		} catch( Error &e ) {
-			wait( tr.onError(e) );
+			wait(delay(5.0));
+		} catch (Error& e) {
+			wait(tr.onError(e));
 		}
 	}
 
@@ -94,10 +94,10 @@ ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityD
 		wait(delay(1.0));
 		printf("Sending Request: %d\n", testData);
 		std::vector<Future<TestReply>> replies;
-		for(auto& it : agents) {
-			replies.push_back( it.test.getReply(TestRequest(testData)) );
+		for (auto& it : agents) {
+			replies.push_back(it.test.getReply(TestRequest(testData)));
 		}
-		std::vector<TestReply> reps = wait( getAll(replies ));
+		std::vector<TestReply> reps = wait(getAll(replies));
 		testData = reps[0].replyData;
 	}
 }

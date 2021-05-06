@@ -46,47 +46,41 @@
 //
 // The template parameter enables TrackIt to be inherited multiple times in the ancestry
 // of a class without producing an "inaccessible due to ambiguity" error.
-template<class T>
+template <class T>
 struct TrackIt {
 	typedef TrackIt<T> TrackItType;
-	// Put TRACKIT_ASSIGN into any operator= functions for which you want assignments tracked
-	#define TRACKIT_ASSIGN(o) *(TrackItType *)this = *(TrackItType *)&(o)
+// Put TRACKIT_ASSIGN into any operator= functions for which you want assignments tracked
+#define TRACKIT_ASSIGN(o) *(TrackItType*)this = *(TrackItType*)&(o)
 
 	// The type name T is in the TrackIt output so that objects that inherit TrackIt multiple times
 	// can be tracked propertly, otherwise the create and delete addresses appear duplicative.
 	// This function returns just the string "T]" parsed from the __PRETTY_FUNCTION__ macro.  There
 	// doesn't seem to be a better portable way to do this.
-	static const char * __trackit__type() {
-		const char *s = __PRETTY_FUNCTION__ + sizeof(__PRETTY_FUNCTION__);
-		while(*--s != '=');
+	static const char* __trackit__type() {
+		const char* s = __PRETTY_FUNCTION__ + sizeof(__PRETTY_FUNCTION__);
+		while (*--s != '=')
+			;
 		return s + 2;
 	}
 
-	TrackIt() {
-		printf("TrackItCreate\t%s\t%p\t%s\n", __trackit__type(), this, platform::get_backtrace().c_str());
-	}
-	TrackIt(const TrackIt &o) : TrackIt() {}
-	TrackIt(const TrackIt &&o) : TrackIt() {}
-	TrackIt & operator=(const TrackIt &o) {
+	TrackIt() { printf("TrackItCreate\t%s\t%p\t%s\n", __trackit__type(), this, platform::get_backtrace().c_str()); }
+	TrackIt(const TrackIt& o) : TrackIt() {}
+	TrackIt(const TrackIt&& o) : TrackIt() {}
+	TrackIt& operator=(const TrackIt& o) {
 		printf("TrackItAssigned\t%s\t%p<%p\t%s\n", __trackit__type(), this, &o, platform::get_backtrace().c_str());
 		return *this;
 	}
-	TrackIt & operator=(const TrackIt &&o) {
-		return *this = (const TrackIt &)o;
-	}
-	~TrackIt() {
-		printf("TrackItDestroy\t%s\t%p\n", __trackit__type(), this);
-	}
+	TrackIt& operator=(const TrackIt&& o) { return *this = (const TrackIt&)o; }
+	~TrackIt() { printf("TrackItDestroy\t%s\t%p\n", __trackit__type(), this); }
 };
 
-class NonCopyable
-{
-  protected:
-	NonCopyable () {}
-	~NonCopyable () {} /// Protected non-virtual destructor
-  private:
-	NonCopyable (const NonCopyable &);
-	NonCopyable & operator = (const NonCopyable &);
+class NonCopyable {
+protected:
+	NonCopyable() {}
+	~NonCopyable() {} /// Protected non-virtual destructor
+private:
+	NonCopyable(const NonCopyable&);
+	NonCopyable& operator=(const NonCopyable&);
 };
 
 // An Arena is a custom allocator that consists of a set of ArenaBlocks.  Allocation is performed by bumping a pointer
@@ -99,7 +93,7 @@ public:
 	explicit Arena(size_t reservedSize);
 	//~Arena();
 	Arena(const Arena&);
-	Arena(Arena && r) BOOST_NOEXCEPT;
+	Arena(Arena&& r) BOOST_NOEXCEPT;
 	Arena& operator=(const Arena&);
 	Arena& operator=(Arena&&) BOOST_NOEXCEPT;
 
@@ -108,14 +102,14 @@ public:
 
 	bool hasFree(size_t size, const void* address);
 
-	friend void* operator new ( size_t size, Arena& p );
-	friend void* operator new[] ( size_t size, Arena& p );
+	friend void* operator new(size_t size, Arena& p);
+	friend void* operator new[](size_t size, Arena& p);
 
 private:
 	Reference<struct ArenaBlock> impl;
 };
 
-template<>
+template <>
 struct scalar_traits<Arena> : std::true_type {
 	constexpr static size_t size = 0;
 	template <class Context>
@@ -133,8 +127,7 @@ struct ArenaBlockRef {
 	uint32_t nextBlockOffset;
 };
 
-struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
-{
+struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock> {
 	enum {
 		SMALL = 64,
 		LARGE = 8193 // If size == used == LARGE, then use hugeSize, hugeUsed
@@ -143,9 +136,9 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 	enum { NOT_TINY = 255, TINY_HEADER = 6 };
 
 	// int32_t referenceCount;	  // 4 bytes (in ThreadSafeReferenceCounted)
-	uint8_t tinySize, tinyUsed;   // If these == NOT_TINY, use bigSize, bigUsed instead
+	uint8_t tinySize, tinyUsed; // If these == NOT_TINY, use bigSize, bigUsed instead
 	// if tinySize != NOT_TINY, following variables aren't used
-	uint32_t bigSize, bigUsed;	  // include block header
+	uint32_t bigSize, bigUsed; // include block header
 	uint32_t nextBlockOffset;
 
 	void addref();
@@ -172,23 +165,23 @@ private:
 	static void* operator new(size_t s); // not implemented
 };
 
-inline void* operator new ( size_t size, Arena& p ) {
-	UNSTOPPABLE_ASSERT( size < std::numeric_limits<int>::max() );
-	return ArenaBlock::allocate( p.impl, (int)size );
+inline void* operator new(size_t size, Arena& p) {
+	UNSTOPPABLE_ASSERT(size < std::numeric_limits<int>::max());
+	return ArenaBlock::allocate(p.impl, (int)size);
 }
-inline void operator delete( void*, Arena& p ) {}
-inline void* operator new[] ( size_t size, Arena& p ) {
-	UNSTOPPABLE_ASSERT( size < std::numeric_limits<int>::max() );
-	return ArenaBlock::allocate( p.impl, (int)size );
+inline void operator delete(void*, Arena& p) {}
+inline void* operator new[](size_t size, Arena& p) {
+	UNSTOPPABLE_ASSERT(size < std::numeric_limits<int>::max());
+	return ArenaBlock::allocate(p.impl, (int)size);
 }
-inline void operator delete[]( void*, Arena& p ) {}
+inline void operator delete[](void*, Arena& p) {}
 
 template <class Archive>
-inline void load( Archive& ar, Arena& p ) {
+inline void load(Archive& ar, Arena& p) {
 	p = ar.arena();
 }
 template <class Archive>
-inline void save( Archive& ar, const Arena& p ) {
+inline void save(Archive& ar, const Arena& p) {
 	// No action required
 }
 
@@ -197,40 +190,46 @@ class Optional : public ComposedIdentifier<T, 0x10> {
 public:
 	Optional() : valid(false) {}
 	Optional(const Optional<T>& o) : valid(o.valid) {
-		if (valid) new (&value) T(o.get());
+		if (valid)
+			new (&value) T(o.get());
 	}
 
 	template <class U>
-	Optional(const U& t) : valid(true) { new (&value) T(t); }
+	Optional(const U& t) : valid(true) {
+		new (&value) T(t);
+	}
 
-	/* This conversion constructor was nice, but combined with the prior constructor it means that Optional<int> can be converted to Optional<Optional<int>> in the wrong way
-	(a non-present Optional<int> converts to a non-present Optional<Optional<int>>).
-	Use .castTo<>() instead.
-	template <class S> Optional(const Optional<S>& o) : valid(o.present()) { if (valid) new (&value) T(o.get()); } */
+	/* This conversion constructor was nice, but combined with the prior constructor it means that Optional<int> can be
+	converted to Optional<Optional<int>> in the wrong way (a non-present Optional<int> converts to a non-present
+	Optional<Optional<int>>). Use .castTo<>() instead. template <class S> Optional(const Optional<S>& o) :
+	valid(o.present()) { if (valid) new (&value) T(o.get()); } */
 
 	Optional(Arena& a, const Optional<T>& o) : valid(o.valid) {
-		if (valid) new (&value) T(a, o.get());
+		if (valid)
+			new (&value) T(a, o.get());
 	}
 	int expectedSize() const { return valid ? get().expectedSize() : 0; }
 
-	template <class R> Optional<R> castTo() const {
-		return map<R>([](const T& v){ return (R)v; });
+	template <class R>
+	Optional<R> castTo() const {
+		return map<R>([](const T& v) { return (R)v; });
 	}
 
-	template <class R> Optional<R> map(std::function<R(T)> f) const {
+	template <class R>
+	Optional<R> map(std::function<R(T)> f) const {
 		if (present()) {
 			return Optional<R>(f(get()));
-		}
-		else {
+		} else {
 			return Optional<R>();
 		}
 	}
 
 	~Optional() {
-		if (valid) ((T*)&value)->~T();
+		if (valid)
+			((T*)&value)->~T();
 	}
 
-	Optional & operator=(Optional const& o) {
+	Optional& operator=(Optional const& o) {
 		if (valid) {
 			valid = false;
 			((T*)&value)->~T();
@@ -251,30 +250,34 @@ public:
 		UNSTOPPABLE_ASSERT(valid);
 		return *(T const*)&value;
 	}
-	T orDefault(T const& default_value) const { if (valid) return get(); else return default_value; }
+	T orDefault(T const& default_value) const {
+		if (valid)
+			return get();
+		else
+			return default_value;
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		// SOMEDAY: specialize for space efficiency?
 		if (valid && Ar::isDeserializing)
-			(*(T *)&value).~T();
+			(*(T*)&value).~T();
 		serializer(ar, valid);
 		if (valid) {
-			if (Ar::isDeserializing) new (&value) T();
+			if (Ar::isDeserializing)
+				new (&value) T();
 			serializer(ar, *(T*)&value);
 		}
 	}
 
-	bool operator == (Optional const& o) const {
-		return present() == o.present() && (!present() || get() == o.get());
-	}
-	bool operator != (Optional const& o) const {
-		return !(*this == o);
-	}
+	bool operator==(Optional const& o) const { return present() == o.present() && (!present() || get() == o.get()); }
+	bool operator!=(Optional const& o) const { return !(*this == o); }
 	// Ordering: If T is ordered, then Optional() < Optional(t) and (Optional(u)<Optional(v))==(u<v)
-	bool operator < (Optional const& o) const {
-		if (present() != o.present()) return o.present();
-		if (!present()) return false;
+	bool operator<(Optional const& o) const {
+		if (present() != o.present())
+			return o.present();
+		if (!present())
+			return false;
 		return get() < o.get();
 	}
 
@@ -284,27 +287,32 @@ public:
 			((T*)&value)->~T();
 		}
 	}
+
 private:
-	typename std::aligned_storage< sizeof(T), __alignof(T) >::type value;
+	typename std::aligned_storage<sizeof(T), __alignof(T)>::type value;
 	bool valid;
 };
 
-template<class T>
+template <class T>
 struct Traceable<Optional<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
 	static std::string toString(const Optional<T>& value) {
 		return value.present() ? Traceable<T>::toString(value.get()) : "[not set]";
 	}
 };
 
-template<class T>
+template <class T>
 struct union_like_traits<Optional<T>> : std::true_type {
 	using Member = Optional<T>;
 	using alternatives = pack<T>;
 
 	template <class Context>
-	static uint8_t index(const Member& variant, Context&) { return 0; }
+	static uint8_t index(const Member& variant, Context&) {
+		return 0;
+	}
 	template <class Context>
-	static bool empty(const Member& variant, Context&) { return !variant.present(); }
+	static bool empty(const Member& variant, Context&) {
+		return !variant.present();
+	}
 
 	template <int i, class Context>
 	static const T& get(const Member& variant, Context&) {
@@ -331,89 +339,96 @@ public:
 	T const& contents() const { return *(T const*)this; }
 
 	Standalone() {}
-	Standalone( const T& t ) : Arena( t.expectedSize() ), T( arena(), t ) {}
-	Standalone<T>& operator=( const T& t ) {
-		Arena old = std::move( arena() );	// We want to defer the destruction of the arena until after we have copied t, in case it cross-references our previous value
+	Standalone(const T& t) : Arena(t.expectedSize()), T(arena(), t) {}
+	Standalone<T>& operator=(const T& t) {
+		Arena old = std::move(arena()); // We want to defer the destruction of the arena until after we have copied t,
+		                                // in case it cross-references our previous value
 		*(Arena*)this = Arena(t.expectedSize());
-		*(T*)this = T( arena(), t );
+		*(T*)this = T(arena(), t);
 		return *this;
 	}
 
-// Always-copy mode was meant to make alloc instrumentation more useful by making allocations occur at the final resting place of objects leaked
-// It doesn't actually work because some uses of Standalone things assume the object's memory will not change on copy or assignment
+// Always-copy mode was meant to make alloc instrumentation more useful by making allocations occur at the final resting
+// place of objects leaked It doesn't actually work because some uses of Standalone things assume the object's memory
+// will not change on copy or assignment
 #ifdef STANDALONE_ALWAYS_COPY
 	// Treat Standalone<T>'s as T's in construction and assignment so the memory is copied
-	Standalone( const T& t, const Arena& arena ) : Standalone(t) {}
-	Standalone( const Standalone<T> & t ) : Standalone((T const&)t) {}
-	Standalone( const Standalone<T> && t ) : Standalone((T const&)t) {}
-	Standalone<T>& operator=( const Standalone<T> &&t ) {
+	Standalone(const T& t, const Arena& arena) : Standalone(t) {}
+	Standalone(const Standalone<T>& t) : Standalone((T const&)t) {}
+	Standalone(const Standalone<T>&& t) : Standalone((T const&)t) {}
+	Standalone<T>& operator=(const Standalone<T>&& t) {
 		*this = (T const&)t;
 		return *this;
 	}
-	Standalone<T>& operator=( const Standalone<T> &t ) {
+	Standalone<T>& operator=(const Standalone<T>& t) {
 		*this = (T const&)t;
 		return *this;
 	}
 #else
-	Standalone( const T& t, const Arena& arena ) : Arena( arena ), T( t ) {}
-	Standalone( const Standalone<T> & t ) : Arena((Arena const&)t), T((T const&)t) {}
-	Standalone<T>& operator=( const Standalone<T> & t ) {
+	Standalone(const T& t, const Arena& arena) : Arena(arena), T(t) {}
+	Standalone(const Standalone<T>& t) : Arena((Arena const&)t), T((T const&)t) {}
+	Standalone<T>& operator=(const Standalone<T>& t) {
 		*(Arena*)this = (Arena const&)t;
 		*(T*)this = (T const&)t;
 		return *this;
 	}
 #endif
 
-	template <class U> Standalone<U> castTo() const {
+	template <class U>
+	Standalone<U> castTo() const {
 		return Standalone<U>(*this, arena());
 	}
 
 	template <class Archive>
 	void serialize(Archive& ar) {
 		// FIXME: something like BinaryReader(ar) >> arena >> *(T*)this; to guarantee standalone arena???
-		//T tmp;
-		//ar >> tmp;
+		// T tmp;
+		// ar >> tmp;
 		//*this = tmp;
 		serializer(ar, (*(T*)this), arena());
 	}
 
 	/*static Standalone<T> fakeStandalone( const T& t ) {
-		Standalone<T> x;
-		*(T*)&x = t;
-		return x;
+	    Standalone<T> x;
+	    *(T*)&x = t;
+	    return x;
 	}*/
 private:
-	template <class U> Standalone( Standalone<U> const& );  // unimplemented
-	template <class U> Standalone<T> const& operator=( Standalone<U> const& );  // unimplemented
+	template <class U>
+	Standalone(Standalone<U> const&); // unimplemented
+	template <class U>
+	Standalone<T> const& operator=(Standalone<U> const&); // unimplemented
 };
 
 extern std::string format(const char* form, ...);
 
-#pragma pack( push, 4 )
+#pragma pack(push, 4)
 class StringRef {
 public:
 	constexpr static FileIdentifier file_identifier = 13300811;
 	StringRef() : data(0), length(0) {}
-	StringRef( Arena& p, const StringRef& toCopy ) : data( new (p) uint8_t[toCopy.size()] ), length( toCopy.size() ) {
+	StringRef(Arena& p, const StringRef& toCopy) : data(new (p) uint8_t[toCopy.size()]), length(toCopy.size()) {
 		if (length > 0) {
 			memcpy((void*)data, toCopy.data, length);
 		}
 	}
-	StringRef( Arena& p, const std::string& toCopy ) : length( (int)toCopy.size() ) {
-		UNSTOPPABLE_ASSERT( toCopy.size() <= std::numeric_limits<int>::max());
+	StringRef(Arena& p, const std::string& toCopy) : length((int)toCopy.size()) {
+		UNSTOPPABLE_ASSERT(toCopy.size() <= std::numeric_limits<int>::max());
 		data = new (p) uint8_t[toCopy.size()];
-		if (length) memcpy( (void*)data, &toCopy[0], length );
+		if (length)
+			memcpy((void*)data, &toCopy[0], length);
 	}
-	StringRef( Arena& p, const uint8_t* toCopy, int length ) : data( new (p) uint8_t[length] ), length(length) {
+	StringRef(Arena& p, const uint8_t* toCopy, int length) : data(new (p) uint8_t[length]), length(length) {
 		if (length > 0) {
 			memcpy((void*)data, toCopy, length);
 		}
 	}
-	StringRef( const uint8_t* data, int length ) : data(data), length(length) {}
-	StringRef( const std::string& s ) : data((const uint8_t*)s.c_str()), length((int)s.size()) {
-		if (s.size() > std::numeric_limits<int>::max()) abort();
+	StringRef(const uint8_t* data, int length) : data(data), length(length) {}
+	StringRef(const std::string& s) : data((const uint8_t*)s.c_str()), length((int)s.size()) {
+		if (s.size() > std::numeric_limits<int>::max())
+			abort();
 	}
-	//StringRef( const StringRef& p );
+	// StringRef( const StringRef& p );
 
 	const uint8_t* begin() const { return data; }
 	const uint8_t* end() const { return data + length; }
@@ -421,10 +436,12 @@ public:
 
 	uint8_t operator[](int i) const { return data[i]; }
 
-	StringRef substr(int start) const { return StringRef( data + start, length - start ); }
-	StringRef substr(int start, int size) const { return StringRef( data + start, size ); }
-	bool startsWith( const StringRef& s ) const { return size() >= s.size() && !memcmp(begin(), s.begin(), s.size()); }
-	bool endsWith( const StringRef& s ) const { return size() >= s.size() && !memcmp(end()-s.size(), s.begin(), s.size()); }
+	StringRef substr(int start) const { return StringRef(data + start, length - start); }
+	StringRef substr(int start, int size) const { return StringRef(data + start, size); }
+	bool startsWith(const StringRef& s) const { return size() >= s.size() && !memcmp(begin(), s.begin(), s.size()); }
+	bool endsWith(const StringRef& s) const {
+		return size() >= s.size() && !memcmp(end() - s.size(), s.begin(), s.size());
+	}
 
 	StringRef withPrefix(const StringRef& prefix, Arena& arena) const {
 		uint8_t* s = new (arena) uint8_t[prefix.size() + size()];
@@ -437,68 +454,70 @@ public:
 		return StringRef(s, prefix.size() + size());
 	}
 
-	StringRef withSuffix( const StringRef& suffix, Arena& arena ) const {
-		uint8_t* s = new (arena) uint8_t[ suffix.size() + size() ];
+	StringRef withSuffix(const StringRef& suffix, Arena& arena) const {
+		uint8_t* s = new (arena) uint8_t[suffix.size() + size()];
 		if (size() > 0) {
 			memcpy(s, begin(), size());
 		}
 		if (suffix.size() > 0) {
 			memcpy(s + size(), suffix.begin(), suffix.size());
 		}
-		return StringRef(s,suffix.size() + size());
+		return StringRef(s, suffix.size() + size());
 	}
 
-	Standalone<StringRef> withPrefix( const StringRef& prefix ) const {
+	Standalone<StringRef> withPrefix(const StringRef& prefix) const {
 		Standalone<StringRef> r;
 		r.contents() = withPrefix(prefix, r.arena());
 		return r;
 	}
 
-	Standalone<StringRef> withSuffix( const StringRef& suffix ) const {
+	Standalone<StringRef> withSuffix(const StringRef& suffix) const {
 		Standalone<StringRef> r;
 		r.contents() = withSuffix(suffix, r.arena());
 		return r;
 	}
 
-	StringRef removePrefix( const StringRef& s ) const {
+	StringRef removePrefix(const StringRef& s) const {
 		// pre: startsWith(s)
-		UNSTOPPABLE_ASSERT( s.size() <= size() );  //< In debug mode, we could check startsWith()
-		return substr( s.size() );
+		UNSTOPPABLE_ASSERT(s.size() <= size()); //< In debug mode, we could check startsWith()
+		return substr(s.size());
 	}
 
-	StringRef removeSuffix( const StringRef& s ) const {
+	StringRef removeSuffix(const StringRef& s) const {
 		// pre: endsWith(s)
-		UNSTOPPABLE_ASSERT( s.size() <= size() );  //< In debug mode, we could check endsWith()
-		return substr( 0, size() - s.size() );
+		UNSTOPPABLE_ASSERT(s.size() <= size()); //< In debug mode, we could check endsWith()
+		return substr(0, size() - s.size());
 	}
 
-	std::string toString() const { return std::string( (const char*)data, length ); }
+	std::string toString() const { return std::string((const char*)data, length); }
 
 	static bool isPrintable(char c) { return c > 32 && c < 127; }
 	inline std::string printable() const;
 
 	std::string toHexString(int limit = -1) const {
-		if(limit < 0)
+		if (limit < 0)
 			limit = length;
-		if(length > limit) {
-			// If limit is high enough split it so that 2/3 of limit is used to show prefix bytes and the rest is used for suffix bytes
-			if(limit >= 9) {
+		if (length > limit) {
+			// If limit is high enough split it so that 2/3 of limit is used to show prefix bytes and the rest is used
+			// for suffix bytes
+			if (limit >= 9) {
 				int suffix = limit / 3;
-				return substr(0, limit - suffix).toHexString() + "..." + substr(length - suffix, suffix).toHexString() + format(" [%d bytes]", length);
+				return substr(0, limit - suffix).toHexString() + "..." + substr(length - suffix, suffix).toHexString() +
+				       format(" [%d bytes]", length);
 			}
 			return substr(0, limit).toHexString() + format("...[%d]", length);
 		}
 
 		std::string s;
 		s.reserve(length * 7);
-		for (int i = 0; i<length; i++) {
+		for (int i = 0; i < length; i++) {
 			uint8_t b = (*this)[i];
-			if(isalnum(b))
+			if (isalnum(b))
 				s.append(format("%02x (%c) ", b, b));
 			else
 				s.append(format("%02x ", b));
 		}
-		if(s.size() > 0)
+		if (s.size() > 0)
 			s.resize(s.size() - 1);
 		return s;
 	}
@@ -508,15 +527,16 @@ public:
 	int compare(StringRef const& other) const {
 		if (std::min(size(), other.size()) > 0) {
 			int c = memcmp(begin(), other.begin(), std::min(size(), other.size()));
-			if (c != 0) return c;
+			if (c != 0)
+				return c;
 		}
 		return size() - other.size();
 	}
 
 	// Removes bytes from begin up to and including the sep string, returns StringRef of the part before sep
 	StringRef eat(StringRef sep) {
-		for(int i = 0, iend = size() - sep.size(); i <= iend; ++i) {
-			if(sep.compare(substr(i, sep.size())) == 0) {
+		for (int i = 0, iend = size() - sep.size(); i <= iend; ++i) {
+			if (sep.compare(substr(i, sep.size())) == 0) {
 				StringRef token = substr(0, i);
 				*this = substr(i + sep.size());
 				return token;
@@ -529,16 +549,14 @@ public:
 		*this = StringRef();
 		return r;
 	}
-	StringRef eat(const char *sep) {
-		return eat(StringRef((const uint8_t *)sep, (int)strlen(sep)));
-	}
+	StringRef eat(const char* sep) { return eat(StringRef((const uint8_t*)sep, (int)strlen(sep))); }
 	// Return StringRef of bytes from begin() up to but not including the first byte matching any byte in sep,
 	// and remove that sequence (including the sep byte) from *this
 	// Returns and removes all bytes from *this if no bytes within sep were found
-	StringRef eatAny(StringRef sep, uint8_t *foundSeparator) {
+	StringRef eatAny(StringRef sep, uint8_t* foundSeparator) {
 		auto iSep = std::find_first_of(begin(), end(), sep.begin(), sep.end());
-		if(iSep != end()) {
-			if(foundSeparator != nullptr) {
+		if (iSep != end()) {
+			if (foundSeparator != nullptr) {
 				*foundSeparator = *iSep;
 			}
 			const int i = iSep - begin();
@@ -548,8 +566,8 @@ public:
 		}
 		return eat();
 	}
-	StringRef eatAny(const char *sep, uint8_t *foundSeparator) {
-		return eatAny(StringRef((const uint8_t *)sep, strlen(sep)), foundSeparator);
+	StringRef eatAny(const char* sep, uint8_t* foundSeparator) {
+		return eatAny(StringRef((const uint8_t*)sep, strlen(sep)), foundSeparator);
 	}
 
 	std::vector<StringRef> splitAny(StringRef sep) const {
@@ -563,90 +581,90 @@ public:
 
 private:
 	// Unimplemented; blocks conversion through std::string
-	StringRef( char* );
+	StringRef(char*);
 
 	const uint8_t* data;
 	int length;
 };
-#pragma pack( pop )
+#pragma pack(pop)
 
-template<>
+template <>
 struct TraceableString<StringRef> {
-	static const char* begin(StringRef value) {
-		return reinterpret_cast<const char*>(value.begin());
-	}
+	static const char* begin(StringRef value) { return reinterpret_cast<const char*>(value.begin()); }
 
 	static bool atEnd(const StringRef& value, const char* iter) {
 		return iter == reinterpret_cast<const char*>(value.end());
 	}
 
-	static std::string toString(const StringRef& value) {
-		return value.toString();
-	}
+	static std::string toString(const StringRef& value) { return value.toString(); }
 };
 
-template<>
+template <>
 struct Traceable<StringRef> : TraceableStringImpl<StringRef> {};
 
 inline std::string StringRef::printable() const {
 	return Traceable<StringRef>::toString(*this);
 }
 
-template<class T>
+template <class T>
 struct Traceable<Standalone<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
-	static std::string toString(const Standalone<T>& value) {
-		return Traceable<T>::toString(value);
-	}
+	static std::string toString(const Standalone<T>& value) { return Traceable<T>::toString(value); }
 };
 
-#define LiteralStringRef( str ) StringRef( (const uint8_t*)(str), sizeof((str))-1 )
+#define LiteralStringRef(str) StringRef((const uint8_t*)(str), sizeof((str)) - 1)
 
 // makeString is used to allocate a Standalone<StringRef> of a known length for later
 // mutation (via mutateString).  If you need to append to a string of unknown length,
 // consider factoring StringBuffer from DiskQueue.actor.cpp.
-inline static Standalone<StringRef> makeString( int length ) {
+inline static Standalone<StringRef> makeString(int length) {
 	Standalone<StringRef> returnString;
-	uint8_t *outData = new (returnString.arena()) uint8_t[length];
+	uint8_t* outData = new (returnString.arena()) uint8_t[length];
 	((StringRef&)returnString) = StringRef(outData, length);
 	return returnString;
 }
 
-inline static Standalone<StringRef> makeAlignedString( int alignment, int length ) {
+inline static Standalone<StringRef> makeAlignedString(int alignment, int length) {
 	Standalone<StringRef> returnString;
-	uint8_t *outData = new (returnString.arena()) uint8_t[alignment + length];
+	uint8_t* outData = new (returnString.arena()) uint8_t[alignment + length];
 	outData = (uint8_t*)((((uintptr_t)outData + (alignment - 1)) / alignment) * alignment);
 	((StringRef&)returnString) = StringRef(outData, length);
 	return returnString;
 }
 
-inline static StringRef makeString( int length, Arena& arena ) {
-	uint8_t *outData = new (arena) uint8_t[length];
+inline static StringRef makeString(int length, Arena& arena) {
+	uint8_t* outData = new (arena) uint8_t[length];
 	return StringRef(outData, length);
 }
 
 // mutateString() simply casts away const and returns a pointer that can be used to mutate the
 // contents of the given StringRef (it will also accept Standalone<StringRef>).  Obviously this
 // is only legitimate if you know where the StringRef's memory came from and that it is not shared!
-inline static uint8_t* mutateString( StringRef& s ) { return const_cast<uint8_t*>(s.begin()); }
+inline static uint8_t* mutateString(StringRef& s) {
+	return const_cast<uint8_t*>(s.begin());
+}
 
 template <class Archive>
-inline void load( Archive& ar, StringRef& value ) {
+inline void load(Archive& ar, StringRef& value) {
 	uint32_t length;
 	ar >> length;
 	value = StringRef(ar.arenaRead(length), length);
 }
 template <class Archive>
-inline void save( Archive& ar, const StringRef& value ) {
+inline void save(Archive& ar, const StringRef& value) {
 	ar << (uint32_t)value.size();
-	ar.serializeBytes( value.begin(), value.size() );
+	ar.serializeBytes(value.begin(), value.size());
 }
 
 template <>
 struct dynamic_size_traits<StringRef> : std::true_type {
 	template <class Context>
-	static size_t size(const StringRef& t, Context&) { return t.size(); }
-	template<class Context>
-	static void save(uint8_t* out, const StringRef& t, Context&) { std::copy(t.begin(), t.end(), out); }
+	static size_t size(const StringRef& t, Context&) {
+		return t.size();
+	}
+	template <class Context>
+	static void save(uint8_t* out, const StringRef& t, Context&) {
+		std::copy(t.begin(), t.end(), out);
+	}
 
 	template <class Context>
 	static void load(const uint8_t* ptr, size_t sz, StringRef& str, Context& context) {
@@ -663,20 +681,28 @@ inline bool operator==(const StringRef& lhs, const StringRef& rhs) {
 inline bool operator<(const StringRef& lhs, const StringRef& rhs) {
 	if (std::min(lhs.size(), rhs.size()) > 0) {
 		int c = memcmp(lhs.begin(), rhs.begin(), std::min(lhs.size(), rhs.size()));
-		if (c != 0) return c < 0;
+		if (c != 0)
+			return c < 0;
 	}
 	return lhs.size() < rhs.size();
 }
 inline bool operator>(const StringRef& lhs, const StringRef& rhs) {
 	if (std::min(lhs.size(), rhs.size()) > 0) {
 		int c = memcmp(lhs.begin(), rhs.begin(), std::min(lhs.size(), rhs.size()));
-		if (c != 0) return c > 0;
+		if (c != 0)
+			return c > 0;
 	}
 	return lhs.size() > rhs.size();
 }
-inline bool operator != (const StringRef& lhs, const StringRef& rhs ) { return !(lhs==rhs); }
-inline bool operator <= ( const StringRef& lhs, const StringRef& rhs ) { return !(lhs>rhs); }
-inline bool operator >= ( const StringRef& lhs, const StringRef& rhs ) { return !(lhs<rhs); }
+inline bool operator!=(const StringRef& lhs, const StringRef& rhs) {
+	return !(lhs == rhs);
+}
+inline bool operator<=(const StringRef& lhs, const StringRef& rhs) {
+	return !(lhs > rhs);
+}
+inline bool operator>=(const StringRef& lhs, const StringRef& rhs) {
+	return !(lhs < rhs);
+}
 
 // This trait is used by VectorRef to determine if it should just memcpy the vector contents.
 // FIXME:  VectorRef really should use std::is_trivially_copyable for this BUT that is not implemented
@@ -688,15 +714,11 @@ struct memcpy_able : std::is_trivial<T> {};
 template <>
 struct memcpy_able<UID> : std::integral_constant<bool, true> {};
 
-template<class T>
+template <class T>
 struct string_serialized_traits : std::false_type {
-	int32_t getSize(const T& item) const {
-		return 0;
-	}
+	int32_t getSize(const T& item) const { return 0; }
 
-	uint32_t save(uint8_t* out, const T& t) const {
-		return 0;
-	}
+	uint32_t save(uint8_t* out, const T& t) const { return 0; }
 
 	template <class Context>
 	uint32_t load(const uint8_t* data, T& t, Context& context) {
@@ -704,9 +726,7 @@ struct string_serialized_traits : std::false_type {
 	}
 };
 
-enum class VecSerStrategy {
-	FlatBuffers, String
-};
+enum class VecSerStrategy { FlatBuffers, String };
 
 template <class T, VecSerStrategy>
 struct VectorRefPreserializer {
@@ -755,8 +775,9 @@ struct VectorRefPreserializer<T, VecSerStrategy::String> {
 template <class T, VecSerStrategy SerStrategy = VecSerStrategy::FlatBuffers>
 class VectorRef : public ComposedIdentifier<T, 0x8>, public VectorRefPreserializer<T, SerStrategy> {
 	using VPS = VectorRefPreserializer<T, SerStrategy>;
-	friend class VectorRef<T, SerStrategy == VecSerStrategy::FlatBuffers ? VecSerStrategy::String
-	                                                                     : VecSerStrategy::FlatBuffers>;
+	friend class VectorRef<T,
+	                       SerStrategy == VecSerStrategy::FlatBuffers ? VecSerStrategy::String
+	                                                                  : VecSerStrategy::FlatBuffers>;
 
 public:
 	using value_type = T;
@@ -834,9 +855,11 @@ public:
 
 	template <VecSerStrategy S>
 	bool operator==(VectorRef<T, S> const& rhs) const {
-		if (size() != rhs.size()) return false;
+		if (size() != rhs.size())
+			return false;
 		for (int i = 0; i < m_size; i++)
-			if ((*this)[i] != rhs[i]) return false;
+			if ((*this)[i] != rhs[i])
+				return false;
 		return true;
 	}
 
@@ -863,20 +886,23 @@ public:
 		return data[i];
 	}
 	void push_back(Arena& p, const T& value) {
-		if (m_size + 1 > m_capacity) reallocate(p, m_size + 1);
+		if (m_size + 1 > m_capacity)
+			reallocate(p, m_size + 1);
 		auto ptr = new (&data[m_size]) T(value);
 		VPS::add(*ptr);
 		m_size++;
 	}
 	// invokes the "Deep copy constructor" T(Arena&, const T&) moving T entirely into arena
 	void push_back_deep(Arena& p, const T& value) {
-		if (m_size + 1 > m_capacity) reallocate(p, m_size + 1);
+		if (m_size + 1 > m_capacity)
+			reallocate(p, m_size + 1);
 		auto ptr = new (&data[m_size]) T(p, value);
 		VPS::add(*ptr);
 		m_size++;
 	}
 	void append(Arena& p, const T* begin, int count) {
-		if (m_size + count > m_capacity) reallocate(p, m_size + count);
+		if (m_size + count > m_capacity)
+			reallocate(p, m_size + count);
 		VPS::invalidate();
 		if (count > 0) {
 			memcpy(data + m_size, begin, sizeof(T) * count);
@@ -885,7 +911,8 @@ public:
 	}
 	template <class It>
 	void append_deep(Arena& p, It begin, int count) {
-		if (m_size + count > m_capacity) reallocate(p, m_size + count);
+		if (m_size + count > m_capacity)
+			reallocate(p, m_size + count);
 		for (int i = 0; i < count; i++) {
 			auto ptr = new (&data[m_size + i]) T(p, *begin++);
 			VPS::add(*ptr);
@@ -907,7 +934,8 @@ public:
 	}
 
 	void resize(Arena& p, int size) {
-		if (size > m_capacity) reallocate(p, size);
+		if (size > m_capacity)
+			reallocate(p, size);
 		for (int i = m_size; i < size; i++) {
 			auto ptr = new (&data[i]) T();
 			VPS::add(*ptr);
@@ -916,7 +944,8 @@ public:
 	}
 
 	void reserve(Arena& p, int size) {
-		if (size > m_capacity) reallocate(p, size);
+		if (size > m_capacity)
+			reallocate(p, size);
 	}
 
 	// expectedSize() for non-Ref types, identified by memcpy_able
@@ -929,7 +958,8 @@ public:
 	template <class T2 = T>
 	typename std::enable_if<!memcpy_able<T2>::value, size_t>::type expectedSize() const {
 		size_t t = sizeof(T) * m_size;
-		for (int i = 0; i < m_size; i++) t += data[i].expectedSize();
+		for (int i = 0; i < m_size; i++)
+			t += data[i].expectedSize();
 		return t;
 	}
 
@@ -953,7 +983,7 @@ private:
 	}
 };
 
-template<class T>
+template <class T>
 struct Traceable<VectorRef<T>> {
 	constexpr static bool value = Traceable<T>::value;
 
@@ -973,21 +1003,21 @@ struct Traceable<VectorRef<T>> {
 };
 
 template <class Archive, class T, VecSerStrategy S>
-inline void load( Archive& ar, VectorRef<T, S>& value ) {
+inline void load(Archive& ar, VectorRef<T, S>& value) {
 	// FIXME: range checking for length, here and in other serialize code
 	uint32_t length;
 	ar >> length;
-	UNSTOPPABLE_ASSERT( length*sizeof(T) < (100<<20) );
+	UNSTOPPABLE_ASSERT(length * sizeof(T) < (100 << 20));
 	// SOMEDAY: Can we avoid running constructors for all the values?
 	value.resize(ar.arena(), length);
-	for(uint32_t i=0; i<length; i++)
+	for (uint32_t i = 0; i < length; i++)
 		ar >> value[i];
 }
 template <class Archive, class T, VecSerStrategy S>
-inline void save( Archive& ar, const VectorRef<T, S>& value ) {
+inline void save(Archive& ar, const VectorRef<T, S>& value) {
 	uint32_t length = value.size();
 	ar << length;
-	for(uint32_t i=0; i<length; i++)
+	for (uint32_t i = 0; i < length; i++)
 		ar << value[i];
 }
 
@@ -1008,9 +1038,13 @@ struct vector_like_traits<VectorRef<T, VecSerStrategy::FlatBuffers>> : std::true
 	}
 
 	template <class Context>
-	static insert_iterator insert(Vec& v, Context&) { return v.begin(); }
+	static insert_iterator insert(Vec& v, Context&) {
+		return v.begin();
+	}
 	template <class Context>
-	static iterator begin(const Vec& v, Context&) { return v.begin(); }
+	static iterator begin(const Vec& v, Context&) {
+		return v.begin();
+	}
 };
 
 template <class V>
@@ -1053,6 +1087,5 @@ struct dynamic_size_traits<VectorRef<V, VecSerStrategy::String>> : std::true_typ
 		t._cached_size = size - sizeof(uint32_t);
 	}
 };
-
 
 #endif

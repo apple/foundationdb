@@ -2,83 +2,6 @@
 # Helper Functions
 ################################################################################
 
-function(install_symlink_impl)
-  if (NOT WIN32)
-    set(options "")
-    set(one_value_options TO DESTINATION)
-    set(multi_value_options COMPONENTS)
-    cmake_parse_arguments(SYM "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
-
-    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/symlinks)
-    get_filename_component(fname ${SYM_DESTINATION} NAME)
-    get_filename_component(dest_dir ${SYM_DESTINATION} DIRECTORY)
-    set(sl ${CMAKE_CURRENT_BINARY_DIR}/symlinks/${fname})
-    execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${SYM_TO} ${sl})
-    foreach(component IN LISTS SYM_COMPONENTS)
-      install(FILES ${sl} DESTINATION ${dest_dir} COMPONENT ${component})
-    endforeach()
-  endif()
-endfunction()
-
-function(install_symlink)
-  if(NOT WIN32 AND NOT OPEN_FOR_IDE)
-    set(options "")
-    set(one_value_options COMPONENT LINK_DIR FILE_DIR LINK_NAME FILE_NAME)
-    set(multi_value_options "")
-    cmake_parse_arguments(IN "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
-
-    set(rel_path "")
-    string(REGEX MATCHALL "\\/" slashes "${IN_LINK_NAME}")
-    foreach(ignored IN LISTS slashes)
-      set(rel_path "../${rel_path}")
-    endforeach()
-    if("${IN_FILE_DIR}" MATCHES "bin")
-      if("${IN_LINK_DIR}" MATCHES "lib")
-        install_symlink_impl(
-          TO "../${rel_path}bin/${IN_FILE_NAME}"
-          DESTINATION "lib/${IN_LINK_NAME}"
-          COMPONENTS "${IN_COMPONENT}-tgz")
-        install_symlink_impl(
-          TO "../${rel_path}bin/${IN_FILE_NAME}"
-          DESTINATION "usr/lib64/${IN_LINK_NAME}"
-          COMPONENTS "${IN_COMPONENT}-el6"
-                     "${IN_COMPONENT}-el7"
-                     "${IN_COMPONENT}-deb")
-        install_symlink_impl(
-          TO "../${rel_path}bin/${IN_FILE_NAME}"
-          DESTINATION "usr/lib64/${IN_LINK_NAME}"
-          COMPONENTS "${IN_COMPONENT}-deb")
-      elseif("${IN_LINK_DIR}" MATCHES "bin")
-        install_symlink_impl(
-          TO "../${rel_path}bin/${IN_FILE_NAME}"
-          DESTINATION "bin/${IN_LINK_NAME}"
-          COMPONENTS "${IN_COMPONENT}-tgz")
-        install_symlink_impl(
-          TO "../${rel_path}bin/${IN_FILE_NAME}"
-          DESTINATION "usr/bin/${IN_LINK_NAME}"
-          COMPONENTS "${IN_COMPONENT}-el6"
-                     "${IN_COMPONENT}-el7"
-                     "${IN_COMPONENT}-deb")
-      elseif("${IN_LINK_DIR}" MATCHES "fdbmonitor")
-        install_symlink_impl(
-          TO "../../${rel_path}bin/${IN_FILE_NAME}"
-          DESTINATION "lib/foundationdb/${IN_LINK_NAME}"
-          COMPONENTS "${IN_COMPONENT}-tgz")
-        install_symlink_impl(
-          TO "../../${rel_path}bin/${IN_FILE_NAME}"
-          DESTINATION "usr/lib/foundationdb/${IN_LINK_NAME}"
-          COMPONENTS "${IN_COMPONENT}-el6"
-                     "${IN_COMPONENT}-el7"
-                     "${IN_COMPONENT}-deb")
-      else()
-        message(FATAL_ERROR "Unknown LINK_DIR ${IN_LINK_DIR}")
-      endif()
-    else()
-      message(FATAL_ERROR "Unknown FILE_DIR ${IN_FILE_DIR}")
-    endif()
-  endif()
-endfunction()
-
 function(symlink_files)
   if (NOT WIN32)
     set(options "")
@@ -159,7 +82,7 @@ endfunction()
 
 function(fdb_install)
   if(NOT WIN32 AND NOT OPEN_FOR_IDE)
-    set(one_value_options COMPONENT DESTINATION EXPORT DESTINATION_SUFFIX)
+    set(one_value_options COMPONENT DESTINATION EXPORT DESTINATION_SUFFIX RENAME)
     set(multi_value_options TARGETS FILES PROGRAMS DIRECTORY)
     cmake_parse_arguments(IN "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
 
@@ -180,6 +103,9 @@ function(fdb_install)
     foreach(package tgz deb el6 el7 pm)
       set(install_path "${install_destination_for_${IN_DESTINATION}_${package}}")
       if(install_export)
+        if(IN_RENAME)
+          message(FATAL_ERROR "RENAME for EXPORT target not implemented")
+        endif()
         install(
           EXPORT "${IN_EXPORT}-${package}"
           DESTINATION "${install_path}${IN_DESTINATION_SUFFIX}"
@@ -191,11 +117,20 @@ function(fdb_install)
           set(export_args EXPORT "${IN_EXPORT}-${package}")
         endif()
         if(NOT ${install_path} STREQUAL "")
-          install(
-            ${args}
-            ${export_args}
-            DESTINATION "${install_path}${IN_DESTINATION_SUFFIX}"
-            COMPONENT "${IN_COMPONENT}-${package}")
+          if(IN_RENAME)
+            install(
+              ${args}
+              ${export_args}
+              DESTINATION "${install_path}${IN_DESTINATION_SUFFIX}"
+              COMPONENT "${IN_COMPONENT}-${package}"
+              RENAME ${IN_RENAME})
+          else()
+            install(
+              ${args}
+              ${export_args}
+              DESTINATION "${install_path}${IN_DESTINATION_SUFFIX}"
+              COMPONENT "${IN_COMPONENT}-${package}")
+          endif()
         endif()
       endif()
     endforeach()

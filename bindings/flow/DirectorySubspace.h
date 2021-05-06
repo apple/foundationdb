@@ -28,39 +28,53 @@
 #include "Subspace.h"
 
 namespace FDB {
-	class DirectorySubspace : public IDirectory, public Subspace {
+class DirectorySubspace : public IDirectory, public Subspace {
 
-	public:
-		DirectorySubspace(Path const& path, StringRef const& prefix, Reference<DirectoryLayer> directorLayer, Standalone<StringRef> const& layer = Standalone<StringRef>());
-		virtual ~DirectorySubspace() {}
+public:
+	DirectorySubspace(Path const& path,
+	                  StringRef const& prefix,
+	                  Reference<DirectoryLayer> directorLayer,
+	                  Standalone<StringRef> const& layer = Standalone<StringRef>());
+	virtual ~DirectorySubspace() {}
 
-		virtual Future<Reference<DirectorySubspace>> create(Reference<Transaction> const& tr, Path const& path, Standalone<StringRef> const& layer = Standalone<StringRef>(),
-															Optional<Standalone<StringRef>> const& prefix = Optional<Standalone<StringRef>>());
+	virtual Future<Reference<DirectorySubspace>> create(
+	    Reference<Transaction> const& tr,
+	    Path const& path,
+	    Standalone<StringRef> const& layer = Standalone<StringRef>(),
+	    Optional<Standalone<StringRef>> const& prefix = Optional<Standalone<StringRef>>());
 
-		virtual Future<Reference<DirectorySubspace>> open(Reference<Transaction> const& tr, Path const& path, Standalone<StringRef> const& layer = Standalone<StringRef>());
-		virtual Future<Reference<DirectorySubspace>> createOrOpen(Reference<Transaction> const& tr, Path const& path, Standalone<StringRef> const& layer = Standalone<StringRef>());
+	virtual Future<Reference<DirectorySubspace>> open(Reference<Transaction> const& tr,
+	                                                  Path const& path,
+	                                                  Standalone<StringRef> const& layer = Standalone<StringRef>());
+	virtual Future<Reference<DirectorySubspace>> createOrOpen(
+	    Reference<Transaction> const& tr,
+	    Path const& path,
+	    Standalone<StringRef> const& layer = Standalone<StringRef>());
 
-		virtual Future<bool> exists(Reference<Transaction> const& tr, Path const& path = Path());
-		virtual Future<Standalone<VectorRef<StringRef>>> list(Reference<Transaction> const& tr, Path const& path = Path());
+	virtual Future<bool> exists(Reference<Transaction> const& tr, Path const& path = Path());
+	virtual Future<Standalone<VectorRef<StringRef>>> list(Reference<Transaction> const& tr, Path const& path = Path());
 
-		virtual Future<Reference<DirectorySubspace>> move(Reference<Transaction> const& tr, Path const& oldPath, Path const& newPath);
-		virtual Future<Reference<DirectorySubspace>> moveTo(Reference<Transaction> const& tr, Path const& newAbsolutePath);
+	virtual Future<Reference<DirectorySubspace>> move(Reference<Transaction> const& tr,
+	                                                  Path const& oldPath,
+	                                                  Path const& newPath);
+	virtual Future<Reference<DirectorySubspace>> moveTo(Reference<Transaction> const& tr, Path const& newAbsolutePath);
 
-		virtual Future<Void> remove(Reference<Transaction> const& tr, Path const& path = Path());
-		virtual Future<bool> removeIfExists(Reference<Transaction> const& tr, Path const& path = Path());
+	virtual Future<Void> remove(Reference<Transaction> const& tr, Path const& path = Path());
+	virtual Future<bool> removeIfExists(Reference<Transaction> const& tr, Path const& path = Path());
 
-		virtual Reference<DirectoryLayer> getDirectoryLayer();
-		virtual const Standalone<StringRef> getLayer() const;
-		virtual const Path getPath() const;
+	virtual Reference<DirectoryLayer> getDirectoryLayer();
+	virtual const Standalone<StringRef> getLayer() const;
+	virtual const Path getPath() const;
 
-	protected:
-		Reference<DirectoryLayer> directoryLayer;
-		Path path;
-		Standalone<StringRef> layer;
+protected:
+	Reference<DirectoryLayer> directoryLayer;
+	Path path;
+	Standalone<StringRef> layer;
 
-		virtual Path getPartitionSubpath(Path const& path, Reference<DirectoryLayer> directoryLayer = Reference<DirectoryLayer>()) const;
-		virtual Reference<DirectoryLayer> getDirectoryLayerForPath(Path const& path) const;
-	};
-}
+	virtual Path getPartitionSubpath(Path const& path,
+	                                 Reference<DirectoryLayer> directoryLayer = Reference<DirectoryLayer>()) const;
+	virtual Reference<DirectoryLayer> getDirectoryLayerForPath(Path const& path) const;
+};
+} // namespace FDB
 
 #endif

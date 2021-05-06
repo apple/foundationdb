@@ -80,7 +80,8 @@ struct struct_like_traits<std::tuple<Ts...>> : std::true_type {
 
 template <class T>
 struct scalar_traits<
-    T, std::enable_if_t<std::is_integral<T>::value || std::is_floating_point<T>::value || std::is_enum<T>::value>>
+    T,
+    std::enable_if_t<std::is_integral<T>::value || std::is_floating_point<T>::value || std::is_enum<T>::value>>
   : std::true_type {
 	constexpr static size_t size = sizeof(T);
 	template <class Context>
@@ -409,7 +410,10 @@ struct WriteToBuffer : Context {
 		current_buffer_size = std::max(current_buffer_size, offset);
 	}
 
-	WriteToBuffer(Context& context, int buffer_length, int vtable_start, uint8_t* buffer,
+	WriteToBuffer(Context& context,
+	              int buffer_length,
+	              int vtable_start,
+	              uint8_t* buffer,
 	              std::vector<int>::iterator writeToOffsetsIter)
 	  : Context(context), buffer_length(buffer_length), vtable_start(vtable_start), buffer(buffer),
 	    writeToOffsetsIter(writeToOffsetsIter) {}
@@ -610,7 +614,8 @@ VTableSet get_vtableset_impl(const Root& root, const Context& context) {
 	std::vector<std::pair<const VTable*, int>> offsets;
 	offsets.reserve(vtables.size());
 	for (const auto* vtable : vtables) {
-		memcpy(&packed_tables[i], reinterpret_cast<const uint8_t*>(&(*vtable)[0]),
+		memcpy(&packed_tables[i],
+		       reinterpret_cast<const uint8_t*>(&(*vtable)[0]),
 		       vec_bytes(vtable->begin(), vtable->end()));
 		offsets.push_back({ vtable, i });
 		i += vec_bytes(vtable->begin(), vtable->end());
@@ -627,8 +632,12 @@ const VTableSet* get_vtableset(const Root& root, const Context& context) {
 constexpr static std::array<uint8_t, 8> zeros{};
 
 template <class Root, class Writer, class Context>
-void save_with_vtables(const Root& root, const VTableSet* vtableset, Writer& writer, int* vtable_start,
-                       FileIdentifier file_identifier, const Context& context) {
+void save_with_vtables(const Root& root,
+                       const VTableSet* vtableset,
+                       Writer& writer,
+                       int* vtable_start,
+                       FileIdentifier file_identifier,
+                       const Context& context) {
 	auto vtable_writer = writer.getMessageWriter(vtableset->packed_tables.size());
 	vtable_writer.write(&vtableset->packed_tables[0], 0, vtableset->packed_tables.size());
 	RelativeOffset offset = save_helper(const_cast<Root&>(root), writer, vtableset, context);
@@ -661,7 +670,9 @@ private:
 		if constexpr (Alternative < pack_size(typename UnionTraits::alternatives{})) {
 			if (type_tag == Alternative) {
 				auto result = save_helper(UnionTraits::template get<Alternative, Context>(member, this->context()),
-				                          writer, vtables, this->context());
+				                          writer,
+				                          vtables,
+				                          this->context());
 				if constexpr (use_indirection<index_t<Alternative, typename UnionTraits::alternatives>>) {
 					return result;
 				}
@@ -984,7 +995,9 @@ struct LoadSaveHelper : Context {
 	}
 
 	template <class U, class Writer>
-	auto save(const U& message, Writer& writer, const VTableSet* vtables,
+	auto save(const U& message,
+	          Writer& writer,
+	          const VTableSet* vtables,
 	          std::enable_if_t<is_struct_like<U>, int> _ = 0) {
 		using StructTraits = struct_like_traits<U>;
 		using types = typename StructTraits::types;
@@ -992,22 +1005,26 @@ struct LoadSaveHelper : Context {
 		std::array<uint8_t, size> struct_bytes = {};
 		for_each_i<pack_size(types{})>([&](auto i_type) {
 			constexpr int i = decltype(i_type)::value;
-			auto result = save_helper(StructTraits::template get<i, Context>(message, this->context()), writer, vtables,
-			                          this->context());
+			auto result = save_helper(
+			    StructTraits::template get<i, Context>(message, this->context()), writer, vtables, this->context());
 			memcpy(&struct_bytes[struct_offset<i>(types{})], &result, sizeof(result));
 		});
 		return struct_bytes;
 	}
 
 	template <class U, class Writer, typename = std::enable_if_t<is_dynamic_size<U>>>
-	RelativeOffset save(const U& message, Writer& writer, const VTableSet*,
+	RelativeOffset save(const U& message,
+	                    Writer& writer,
+	                    const VTableSet*,
 	                    std::enable_if_t<is_dynamic_size<U>, int> _ = 0) {
 		writer.visitDynamicSize(message);
 		return RelativeOffset{ writer.current_buffer_size };
 	}
 
 	template <class Member, class Writer>
-	RelativeOffset save(const Member& member, Writer& writer, const VTableSet* vtables,
+	RelativeOffset save(const Member& member,
+	                    Writer& writer,
+	                    const VTableSet* vtables,
 	                    std::enable_if_t<expect_serialize_member<Member>, int> _ = 0) {
 		SaveVisitorLambda<Writer, Context> l{ *this, vtables, writer };
 		if constexpr (serializable_traits<Member>::value) {
@@ -1122,8 +1139,9 @@ uint8_t* save(Context& context, const Root& root, FileIdentifier file_identifier
 	int vtable_start;
 	save_with_vtables(root, vtableset, precompute_size, &vtable_start, file_identifier, context);
 	uint8_t* out = context.allocate(precompute_size.current_buffer_size);
-	WriteToBuffer writeToBuffer{ context, precompute_size.current_buffer_size, vtable_start, out,
-														precompute_size.writeToOffsets.begin() };
+	WriteToBuffer writeToBuffer{
+		context, precompute_size.current_buffer_size, vtable_start, out, precompute_size.writeToOffsets.begin()
+	};
 	save_with_vtables(root, vtableset, writeToBuffer, &vtable_start, file_identifier, context);
 	return out;
 }
@@ -1136,7 +1154,9 @@ void load(Root& root, const uint8_t* in, Context& context) {
 } // namespace detail
 
 template <class Context, class FirstMember, class... Members>
-uint8_t* save_members(Context& context, FileIdentifier file_identifier, const FirstMember& first,
+uint8_t* save_members(Context& context,
+                      FileIdentifier file_identifier,
+                      const FirstMember& first,
                       const Members&... members) {
 	if constexpr (serialize_raw<FirstMember>::value) {
 		return serialize_raw<FirstMember>::save_raw(context, first);
