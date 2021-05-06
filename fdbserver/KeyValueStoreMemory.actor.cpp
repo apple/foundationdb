@@ -304,8 +304,9 @@ private:
 		OpSnapshotItem,
 		OpSnapshotEnd,
 		OpSnapshotAbort, // terminate an in progress snapshot in order to start a full snapshot
-		OpCommit, // only in log, not in queue
-		OpRollback // only in log, not in queue
+		OpCommit,        // only in log, not in queue
+		OpRollback,       // only in log, not in queue
+		OpSnapshotItemDelta
 	};
 
 	struct OpRef {
@@ -481,6 +482,7 @@ private:
 
 			state OpQueue recoveryQueue;
 			state OpHeader h;
+			state Standalone<StringRef> lastSnapshotKey;
 
 			TraceEvent("KVSMemRecoveryStarted", self->id).detail("SnapshotEndLocation", uncommittedSnapshotEnd);
 
@@ -522,7 +524,7 @@ private:
 						StringRef p1 = data.substr(0, h.len1);
 						StringRef p2 = data.substr(h.len1, h.len2);
 
-						if (h.op == OpSnapshotItem) { // snapshot data item
+						if (h.op == OpSnapshotItem || h.op == OpSnapshotItemDelta) { // snapshot data item
 							/*if (p1 < uncommittedNextKey) {
 							    TraceEvent(SevError, "RecSnapshotBack", self->id)
 							        .detail("NextKey", uncommittedNextKey)
@@ -530,14 +532,31 @@ private:
 							        .detail("Nextlocation", self->log->getNextReadLocation());
 							}
 							ASSERT( p1 >= uncommittedNextKey );*/
-							if (p1 >= uncommittedNextKey)
+							if(h.op == OpSnapshotItemDelta) {
+								ASSERT(p1.size() > 1);
+								// Get number of bytes borrowed from previous item key
+								int borrowed = *(uint8_t *)p1.begin();
+								ASSERT(borrowed <= lastSnapshotKey.size());
+								// Trim p1 to just the suffix
+								StringRef suffix = p1.substr(1);
+								// Allocate a new string in data arena to hold prefix + suffix
+								Arena &dataArena = *(Arena *)&data.arena();
+								p1 = makeString(borrowed + suffix.size(), dataArena);
+								// Copy the prefix into the new reconstituted key
+								memcpy(mutateString(p1), lastSnapshotKey.begin(), borrowed);
+								// Copy the suffix into the new reconstituted key
+								memcpy(mutateString(p1) + borrowed, suffix.begin(), suffix.size());
+							}
+							if (p1 >= uncommittedNextKey) {
 								recoveryQueue.clear(
 								    KeyRangeRef(uncommittedNextKey, p1),
 								    &uncommittedNextKey
 								         .arena()); // FIXME: Not sure what this line is for, is it necessary?
+							}
 							recoveryQueue.set(KeyValueRef(p1, p2), &data.arena());
 							uncommittedNextKey = keyAfter(p1);
 							++dbgSnapshotItemCount;
+							lastSnapshotKey = Key(p1, data.arena());
 						} else if (h.op == OpSnapshotEnd || h.op == OpSnapshotAbort) { // snapshot complete
 							TraceEvent("RecSnapshotEnd", self->id)
 							    .detail("NextKey", uncommittedNextKey)
@@ -551,6 +570,7 @@ private:
 							}
 
 							uncommittedNextKey = Key();
+							lastSnapshotKey = Key();
 							++dbgSnapshotEndCount;
 						} else if (h.op == OpSet) { // set mutation
 							recoveryQueue.set(KeyValueRef(p1, p2), &data.arena());

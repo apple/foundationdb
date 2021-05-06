@@ -59,7 +59,7 @@ struct LogProtocolMessage {
 	void serialize(Ar& ar) {
 		uint8_t poly = MutationRef::Reserved_For_LogProtocolMessage;
 		serializer(ar, poly);
-		applyVersionStartingHere(ar, IncludeVersion());
+		applyVersionStartingHere(ar, IncludeVersion(supportDowngradeProtocolVersion));
 	}
 
 	static bool startsLogProtocolMessage(uint8_t byte) { return byte == MutationRef::Reserved_For_LogProtocolMessage; }

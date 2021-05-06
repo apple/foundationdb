@@ -77,44 +77,57 @@ struct StorageServerInterface {
 	NetworkAddress address() const { return getVersion.getEndpoint().getPrimaryAddress(); }
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }
-	template <class Ar>
-	void serialize(Ar& ar) {
-		// StorageServerInterface is persisted in the database and in the tLog's data structures, so changes here have
-		// to be versioned carefully!
-
-		if constexpr (!is_fb_function<Ar>) {
-			serializer(ar,
-			           uniqueID,
-			           locality,
-			           getVersion,
-			           getValue,
-			           getKey,
-			           getKeyValues,
-			           getShardState,
-			           waitMetrics,
-			           splitMetrics,
-			           getStorageMetrics,
-			           waitFailure,
-			           getQueuingMetrics,
-			           getKeyValueStoreType);
-			if (ar.protocolVersion().hasWatches())
-				serializer(ar, watchValue);
+	template <class Ar> 
+	void serialize( Ar& ar ) {
+		if ( ar.protocolVersion() == supportDowngradeProtocolVersion && ar.isDeserializing ) {
+			serializer(ar, uniqueID, locality, getValue);
+			getKey = RequestStream<struct GetKeyRequest>(getValue.getEndpoint());
+			getKeyValues = RequestStream<struct GetKeyValuesRequest>(getValue.getEndpoint());
+			getShardState = RequestStream<struct GetShardStateRequest>(getValue.getEndpoint());
+			waitMetrics = RequestStream<struct WaitMetricsRequest>(getValue.getEndpoint());
+			splitMetrics = RequestStream<struct SplitMetricsRequest>(getValue.getEndpoint());
+			getStorageMetrics = RequestStream<struct GetStorageMetricsRequest>(getValue.getEndpoint());
+			waitFailure = RequestStream<ReplyPromise<Void>>(getValue.getEndpoint());
+			getQueuingMetrics = RequestStream<struct StorageQueuingMetricsRequest>(getValue.getEndpoint());
+			getKeyValueStoreType = RequestStream<ReplyPromise<KeyValueStoreType>>(getValue.getEndpoint());
+			watchValue = RequestStream<struct WatchValueRequest>(getValue.getEndpoint());
 		} else {
-			serializer(ar,
-			           uniqueID,
-			           locality,
-			           getVersion,
-			           getValue,
-			           getKey,
-			           getKeyValues,
-			           getShardState,
-			           waitMetrics,
-			           splitMetrics,
-			           getStorageMetrics,
-			           waitFailure,
-			           getQueuingMetrics,
-			           getKeyValueStoreType,
-			           watchValue);
+			// StorageServerInterface is persisted in the database and in the tLog's data structures, so changes here
+			// have to be versioned carefully!
+			if constexpr (!is_fb_function<Ar>) {
+				serializer(ar,
+				           uniqueID,
+				           locality,
+				           getVersion,
+				           getValue,
+				           getKey,
+				           getKeyValues,
+				           getShardState,
+				           waitMetrics,
+				           splitMetrics,
+				           getStorageMetrics,
+				           waitFailure,
+				           getQueuingMetrics,
+				           getKeyValueStoreType);
+				if (ar.protocolVersion().hasWatches())
+					serializer(ar, watchValue);
+			} else {
+				serializer(ar,
+				           uniqueID,
+				           locality,
+				           getVersion,
+				           getValue,
+				           getKey,
+				           getKeyValues,
+				           getShardState,
+				           waitMetrics,
+				           splitMetrics,
+				           getStorageMetrics,
+				           waitFailure,
+				           getQueuingMetrics,
+				           getKeyValueStoreType,
+				           watchValue);
+			}
 		}
 	}
 	bool operator==(StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }

@@ -303,7 +303,7 @@ UID decodeServerListKey(KeyRef const& key) {
 }
 StorageServerInterface decodeServerListValue(ValueRef const& value) {
 	StorageServerInterface s;
-	BinaryReader reader(value, IncludeVersion());
+	BinaryReader reader(value, IncludeVersion(supportDowngradeProtocolVersion));
 	reader >> s;
 	return s;
 }

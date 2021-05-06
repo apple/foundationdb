@@ -277,7 +277,10 @@ static inline bool valgrindCheck(const void* data, int bytes, const char* contex
 
 struct _IncludeVersion {
 	ProtocolVersion v;
-	explicit _IncludeVersion(ProtocolVersion defaultVersion) : v(defaultVersion) { ASSERT(defaultVersion.isValid()); }
+	ProtocolVersion futureDowngradev;
+	explicit _IncludeVersion( ProtocolVersion defaultVersion ) : v(defaultVersion), futureDowngradev(defaultVersion) {
+		ASSERT(defaultVersion.isValid());
+	}
 	template <class Ar>
 	void write(Ar& ar) {
 		ar.setProtocolVersion(v);
@@ -291,7 +294,8 @@ struct _IncludeVersion {
 			TraceEvent(SevWarnAlways, "InvalidSerializationVersion").error(err).detailf("Version", "%llx", v);
 			throw err;
 		}
-		if (v > currentProtocolVersion) {
+		// Allow specification of a future version to allow downgrades from that version
+		if (v > futureDowngradev) {
 			// For now, no forward compatibility whatsoever is supported.  In the future, this check may be weakened for
 			// particular data structures (e.g. to support mismatches between client and server versions when the client
 			// must deserialize zookeeper and database structures)

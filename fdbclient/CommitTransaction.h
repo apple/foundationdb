@@ -98,6 +98,11 @@ struct MutationRef {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, type, param1, param2);
+		if (ar.isDeserializing && type == ClearRange && param2 == StringRef() && param1 != StringRef()) {
+			ASSERT(param1[param1.size() - 1] == '\x00');
+			param2 = param1;
+			param1 = param2.substr(0, param2.size() - 1);
+		}
 	}
 
 	// These masks define which mutation types have particular properties (they are used to implement
@@ -151,6 +156,11 @@ struct CommitTransactionRef {
 	template <class Ar>
 	force_inline void serialize(Ar& ar) {
 		serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot);
+		// 6.3 Specific fields
+		if( ar.protocolVersion() == supportDowngradeProtocolVersion && ar.isDeserializing ) {
+			bool report_conflicting_keys;
+			serializer(ar, report_conflicting_keys);
+		}
 	}
 
 	// Convenience for internal code required to manipulate these without the Native API
