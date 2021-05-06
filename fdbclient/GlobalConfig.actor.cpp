@@ -39,13 +39,12 @@ const KeyRef samplingWindow = LiteralStringRef("visibility/sampling/window");
 
 GlobalConfig::GlobalConfig() : lastUpdate(0) {}
 
-void GlobalConfig::create(DatabaseContext* cx, Reference<AsyncVar<ClientDBInfo>> dbInfo) {
+void GlobalConfig::create(DatabaseContext* cx, const ClientDBInfo* dbInfo, std::function<Future<Void>()> onChange) {
 	if (g_network->global(INetwork::enGlobalConfig) == nullptr) {
 		auto config = new GlobalConfig{};
 		config->cx = Database(cx);
-		config->dbInfo = dbInfo;
 		g_network->setGlobal(INetwork::enGlobalConfig, config);
-		config->_updater = updater(config);
+		config->_updater = updater(config, dbInfo, onChange);
 	}
 }
 
@@ -53,10 +52,6 @@ GlobalConfig& GlobalConfig::globalConfig() {
 	void* res = g_network->global(INetwork::enGlobalConfig);
 	ASSERT(res);
 	return *reinterpret_cast<GlobalConfig*>(res);
-}
-
-void GlobalConfig::updateDBInfo(Reference<AsyncVar<ClientDBInfo>> dbInfo) {
-	// this->dbInfo = dbInfo;
 }
 
 Key GlobalConfig::prefixedKey(KeyRef key) {
@@ -120,7 +115,7 @@ void GlobalConfig::insert(KeyRef key, ValueRef value) {
 			callbacks[stableKey](data[stableKey]->value);
 		}
 	} catch (Error& e) {
-		TraceEvent("GlobalConfigTupleParseError").detail("What", e.what());
+		TraceEvent(SevWarn, "GlobalConfigTupleParseError").detail("What", e.what());
 	}
 }
 
@@ -180,7 +175,14 @@ ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
 			wait(tr->commit());
 			return Void();
 		} catch (Error& e) {
-			throw;
+			TraceEvent(SevInfo, "GlobalConfigMigrationError").detail("What", e.what());
+			if (e.code() == error_code_not_committed) {
+				// If multiple fdbserver processes are started at once, they
+				// will all attempt this migration at the same time, sometimes
+				// resulting in aborts due to conflicts. To avoid continuous
+				// contention, just return if a conflict error occurs.
+				return Void();
+			}
 		}
 	}
 }
@@ -201,8 +203,10 @@ ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
 
 // Applies updates to the local copy of the global configuration when this
 // process receives an updated history.
-ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self) {
-	// wait(self->cx->onConnected());
+ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self,
+                                         const ClientDBInfo* dbInfo,
+                                         std::function<Future<Void>()> onChange) {
+	wait(self->cx->onConnected());
 	wait(self->migrate(self));
 
 	wait(self->refresh(self));
@@ -210,9 +214,9 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self) {
 
 	loop {
 		try {
-			wait(self->dbInfo->onChange());
+			wait(onChange());
 
-			auto& history = self->dbInfo->get().history;
+			auto& history = dbInfo->history;
 			if (history.size() == 0) {
 				continue;
 			}
@@ -222,8 +226,8 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self) {
 				// history updates or the protocol version changed, so it
 				// must re-read the entire configuration range.
 				wait(self->refresh(self));
-				if (self->dbInfo->get().history.size() > 0) {
-					self->lastUpdate = self->dbInfo->get().history.back().version;
+				if (dbInfo->history.size() > 0) {
+					self->lastUpdate = dbInfo->history.back().version;
 				}
 			} else {
 				// Apply history in order, from lowest version to highest

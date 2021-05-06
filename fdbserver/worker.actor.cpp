@@ -147,12 +147,17 @@ Database openDBOnServer(Reference<AsyncVar<ServerDBInfo>> const& db,
                         bool enableLocalityLoadBalance,
                         bool lockAware) {
 	auto info = makeReference<AsyncVar<ClientDBInfo>>();
-	return DatabaseContext::create(info,
-	                               extractClientInfo(db, info),
-	                               enableLocalityLoadBalance ? db->get().myLocality : LocalityData(),
-	                               enableLocalityLoadBalance,
-	                               taskID,
-	                               lockAware);
+	auto cx = DatabaseContext::create(info,
+	                                  extractClientInfo(db, info),
+	                                  enableLocalityLoadBalance ? db->get().myLocality : LocalityData(),
+	                                  enableLocalityLoadBalance,
+	                                  taskID,
+	                                  lockAware);
+	GlobalConfig::create(
+	    cx.getPtr(), std::addressof(db->get().client), std::bind(&AsyncVar<ServerDBInfo>::onChange, db));
+	GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
+	GlobalConfig::globalConfig().trigger(samplingWindow, samplingProfilerUpdateWindow);
+	return cx;
 }
 
 struct ErrorInfo {
@@ -1049,8 +1054,6 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 			metricsLogger = runMetrics(openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, lockAware),
 			                           KeyRef(metricsPrefix));
 		}
-
-		GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 	}
 
 	errorForwarders.add(resetAfter(degraded,
