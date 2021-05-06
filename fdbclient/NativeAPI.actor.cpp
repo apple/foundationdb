@@ -962,10 +962,6 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	getValueSubmitted.init(LiteralStringRef("NativeAPI.GetValueSubmitted"));
 	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
 
-	GlobalConfig::create(this, clientInfo);
-	GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
-	GlobalConfig::globalConfig().trigger(samplingWindow, samplingProfilerUpdateWindow);
-
 	monitorProxiesInfoChange = monitorProxiesChange(clientInfo, &proxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
@@ -1568,6 +1564,10 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 		                         /*switchable*/ true);
 	}
 
+	GlobalConfig::create(
+	    db, std::addressof(clientInfo->get()), std::bind(&AsyncVar<ClientDBInfo>::onChange, clientInfo));
+	GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
+	GlobalConfig::globalConfig().trigger(samplingWindow, samplingProfilerUpdateWindow);
 	return Database(db);
 }
 

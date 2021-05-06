@@ -68,21 +68,19 @@ struct ConfigValue : ReferenceCounted<ConfigValue> {
 class GlobalConfig : NonCopyable {
 public:
 	// Creates a GlobalConfig singleton, accessed by calling GlobalConfig().
-	// This function should only be called once by each process (however, it is
-	// idempotent and calling it multiple times will have no effect).
-	static void create(DatabaseContext* cx, Reference<AsyncVar<ClientDBInfo>> dbInfo);
+	// This function requires a database context object to allow global
+	// configuration to run transactions on the database, and a ClientDBInfo
+	// object to read the latest global configuration history. The
+	// std::function parameter should refer to a function that triggers when
+	// the ClientDBInfo object is changed. This function should only be called
+	// once by each process (however, it is idempotent and calling it multiple
+	// times will have no effect).
+	static void create(DatabaseContext* cx, const ClientDBInfo* dbInfo, std::function<Future<Void>()> onChange);
 
 	// Returns a reference to the global GlobalConfig object. Clients should
 	// call this function whenever they need to read a value out of the global
 	// configuration.
 	static GlobalConfig& globalConfig();
-
-	// Updates the ClientDBInfo object used by global configuration to read new
-	// data. For server processes, this value needs to be set by the cluster
-	// controller, but global config is initialized before the cluster
-	// controller is, so this function provides a mechanism to update the
-	// object after initialization.
-	void updateDBInfo(Reference<AsyncVar<ClientDBInfo>> dbInfo);
 
 	// Use this function to turn a global configuration key defined above into
 	// the full path needed to set the value in the database.
@@ -156,10 +154,11 @@ private:
 
 	ACTOR static Future<Void> migrate(GlobalConfig* self);
 	ACTOR static Future<Void> refresh(GlobalConfig* self);
-	ACTOR static Future<Void> updater(GlobalConfig* self);
+	ACTOR static Future<Void> updater(GlobalConfig* self,
+	                                  const ClientDBInfo* dbInfo,
+	                                  std::function<Future<Void>()> onChange);
 
 	Database cx;
-	Reference<AsyncVar<ClientDBInfo>> dbInfo;
 	Future<Void> _updater;
 	Promise<Void> initialized;
 	AsyncTrigger configChanged;
