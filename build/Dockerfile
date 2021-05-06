@@ -32,7 +32,7 @@ RUN adduser --comment '' fdb && chown fdb /opt
 # wget of bintray without forcing UTF-8 encoding results in 403 Forbidden
 # Old versions of FDB need boost 1.67
 RUN cd /opt/ &&\
-    curl -L https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.tar.bz2 -o boost_1_67_0.tar.bz2 &&\
+    curl -L https://boostorg.jfrog.io/artifactory/main/release/1.67.0/source/boost_1_67_0.tar.bz2 -o boost_1_67_0.tar.bz2 &&\
     echo "2684c972994ee57fc5632e03bf044746f6eb45d4920c343937a465fd67a5adba  boost_1_67_0.tar.bz2" > boost-sha-67.txt &&\
     sha256sum -c boost-sha-67.txt &&\
     tar -xjf boost_1_67_0.tar.bz2 &&\
@@ -41,7 +41,7 @@ RUN cd /opt/ &&\
 # install Boost 1.72
 # wget of bintray without forcing UTF-8 encoding results in 403 Forbidden
 RUN cd /tmp/ &&\
-    curl -L https://dl.bintray.com/boostorg/release/1.72.0/source/boost_1_72_0.tar.bz2 -o boost_1_72_0.tar.bz2 &&\
+    curl -L https://boostorg.jfrog.io/artifactory/main/release/1.72.0/source/boost_1_72_0.tar.bz2 -o boost_1_72_0.tar.bz2 &&\
     echo "59c9b274bc451cf91a9ba1dd2c7fdcaf5d60b1b3aa83f2c9fa143417cc660722  boost_1_72_0.tar.bz2" > boost-sha-72.txt &&\
     sha256sum -c boost-sha-72.txt &&\
     tar -xjf boost_1_72_0.tar.bz2 &&\
