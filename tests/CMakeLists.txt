@@ -268,6 +268,11 @@ if(WITH_PYTHON)
     COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /fdbclient/multiversionclient/
   )
 
+  add_test(
+    NAME threadsafe_threadfuture_to_future/unit_tests
+    COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /flow/safeThreadFutureToFuture/
+  )
+
   verify_testing()
   if (NOT OPEN_FOR_IDE AND NOT WIN32)
     create_correctness_package()

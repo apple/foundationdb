@@ -44,7 +44,7 @@ struct ThreadFutureCancelObj {
 };
 
 // This unit test should be running with TSAN enabled binary
-TEST_CASE("/safeThreadFutureSend") {
+TEST_CASE("/flow/safeThreadFutureToFuture/Send") {
 	// std::thread is not working in simulation at present, disable this in simulation
 	if (g_network->isSimulated())
 		return Void();
@@ -58,7 +58,7 @@ TEST_CASE("/safeThreadFutureSend") {
 }
 
 // Test the case where the underlying threadFuture is cancelled
-TEST_CASE("/safeThreadFutureCancel") {
+TEST_CASE("/flow/safeThreadFutureToFuture/Cancel") {
 	// std::thread is not working in simulation at present, disable this in simulation
 	if (g_network->isSimulated())
 		return Void();
