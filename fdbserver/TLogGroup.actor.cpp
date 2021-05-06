@@ -173,6 +173,7 @@ TLogGroupRef TLogGroup::fromValue(UID groupId,
 		auto interf = recruits.find(id);
 		if (interf == recruits.end()) {
 			// TODO: Can happen if the worker died since. Handle the case.
+			continue;
 		}
 		group->addServer(TLogWorkerData::fromInterface(interf->second));
 	}

@@ -747,6 +747,7 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	    .trackLatest("MasterRecoveryState");
 
 	// Recruit TLog groups
+	ASSERT(self->tLogGroupRecoveredState.present());
 	self->tLogGroupCollection->addWorkers(recruits.tLogs);
 	self->tLogGroupCollection->loadState(self->tLogGroupRecoveredState.get(), recruits.tLogs);
 	self->tLogGroupCollection->recruitEverything();
