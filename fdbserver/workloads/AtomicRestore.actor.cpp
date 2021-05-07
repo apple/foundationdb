@@ -93,6 +93,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 		try {
 			wait(backupAgent.submitBackup(cx,
 			                              StringRef(backupContainer),
+			                              deterministicRandom()->randomInt(0, 60),
 			                              deterministicRandom()->randomInt(0, 100),
 			                              BackupAgentBase::getDefaultTagName(),
 			                              self->backupRanges,

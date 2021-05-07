@@ -112,6 +112,7 @@ enum {
 	// Backup constants
 	OPT_DESTCONTAINER,
 	OPT_SNAPSHOTINTERVAL,
+	OPT_INITIAL_SNAPSHOT_INTERVAL,
 	OPT_ERRORLIMIT,
 	OPT_NOSTOPWHENDONE,
 	OPT_EXPIRE_BEFORE_VERSION,
@@ -149,6 +150,7 @@ enum {
 	OPT_PREFIX_REMOVE,
 	OPT_RESTORE_CLUSTERFILE_DEST,
 	OPT_RESTORE_CLUSTERFILE_ORIG,
+	OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY,
 
 	// Shared constants
 	OPT_CLUSTERFILE,
@@ -225,6 +227,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_USE_PARTITIONED_LOG, "--partitioned_log_experimental", SO_NONE },
 	{ OPT_SNAPSHOTINTERVAL, "-s", SO_REQ_SEP },
 	{ OPT_SNAPSHOTINTERVAL, "--snapshot_interval", SO_REQ_SEP },
+	{ OPT_INITIAL_SNAPSHOT_INTERVAL, "--initial_snapshot_interval", SO_REQ_SEP },
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
@@ -707,6 +710,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
+	{ OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY, "--inconsistent_snapshot_only", SO_NONE },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -1861,6 +1865,7 @@ ACTOR Future<Void> submitDBBackup(Database src,
 
 ACTOR Future<Void> submitBackup(Database db,
                                 std::string url,
+                                int initialSnapshotIntervalSeconds,
                                 int snapshotIntervalSeconds,
                                 Standalone<VectorRef<KeyRangeRef>> backupRanges,
                                 std::string tagName,
@@ -1914,8 +1919,14 @@ ACTOR Future<Void> submitBackup(Database db,
 		}
 
 		else {
-			wait(backupAgent.submitBackup(
-			    db, KeyRef(url), snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone, usePartitionedLog));
+			wait(backupAgent.submitBackup(db,
+			                              KeyRef(url),
+			                              initialSnapshotIntervalSeconds,
+			                              snapshotIntervalSeconds,
+			                              tagName,
+			                              backupRanges,
+			                              stopWhenDone,
+			                              usePartitionedLog));
 
 			// Wait for the backup to complete, if requested
 			if (waitForCompletion) {
@@ -2224,7 +2235,8 @@ ACTOR Future<Void> runRestore(Database db,
                               bool verbose,
                               bool waitForDone,
                               std::string addPrefix,
-                              std::string removePrefix) {
+                              std::string removePrefix,
+                              bool inconsistentSnapshotOnly) {
 	if (ranges.empty()) {
 		ranges.push_back_deep(ranges.arena(), normalKeys);
 	}
@@ -2291,7 +2303,8 @@ ACTOR Future<Void> runRestore(Database db,
 			                                                   targetVersion,
 			                                                   verbose,
 			                                                   KeyRef(addPrefix),
-			                                                   KeyRef(removePrefix)));
+			                                                   KeyRef(removePrefix),
+			                                                   inconsistentSnapshotOnly));
 
 			if (waitForDone && verbose) {
 				// If restore is now complete then report version restored
@@ -3211,6 +3224,8 @@ int main(int argc, char* argv[]) {
 		bool describeDeep = false;
 		bool describeTimestamps = false;
 		int snapshotIntervalSeconds = CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC;
+		int initialSnapshotIntervalSeconds =
+		    0; // The initial snapshot has a desired duration of 0, meaning go as fast as possible.
 		std::string clusterFile;
 		std::string sourceClusterFile;
 		std::string baseUrl;
@@ -3232,6 +3247,7 @@ int main(int argc, char* argv[]) {
 		bool waitForDone = false;
 		bool stopWhenDone = true;
 		bool usePartitionedLog = false; // Set to true to use new backup system
+		bool inconsistentSnapshotOnly = false;
 		bool forceAction = false;
 		bool trace = false;
 		bool quietDisplay = false;
@@ -3459,6 +3475,7 @@ int main(int argc, char* argv[]) {
 				modifyOptions.destURL = destinationContainer;
 				break;
 			case OPT_SNAPSHOTINTERVAL:
+			case OPT_INITIAL_SNAPSHOT_INTERVAL:
 			case OPT_MOD_ACTIVE_INTERVAL: {
 				const char* a = args->OptionArg();
 				int seconds;
@@ -3470,6 +3487,8 @@ int main(int argc, char* argv[]) {
 				if (optId == OPT_SNAPSHOTINTERVAL) {
 					snapshotIntervalSeconds = seconds;
 					modifyOptions.snapshotIntervalSeconds = seconds;
+				} else if (optId == OPT_INITIAL_SNAPSHOT_INTERVAL) {
+					initialSnapshotIntervalSeconds = seconds;
 				} else if (optId == OPT_MOD_ACTIVE_INTERVAL) {
 					modifyOptions.activeSnapshotIntervalSeconds = seconds;
 				}
@@ -3523,6 +3542,10 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_ERROR;
 				}
 				restoreVersion = ver;
+				break;
+			}
+			case OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY: {
+				inconsistentSnapshotOnly = true;
 				break;
 			}
 #ifdef _WIN32
@@ -3889,6 +3912,7 @@ int main(int argc, char* argv[]) {
 				openBackupContainer(argv[0], destinationContainer);
 				f = stopAfter(submitBackup(db,
 				                           destinationContainer,
+				                           initialSnapshotIntervalSeconds,
 				                           snapshotIntervalSeconds,
 				                           backupKeys,
 				                           tagName,
@@ -4062,7 +4086,8 @@ int main(int argc, char* argv[]) {
 				                         !quietDisplay,
 				                         waitForDone,
 				                         addPrefix,
-				                         removePrefix));
+				                         removePrefix,
+				                         inconsistentSnapshotOnly));
 				break;
 			case RESTORE_WAIT:
 				f = stopAfter(success(ba.waitRestore(db, KeyRef(tagName), true)));

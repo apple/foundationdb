@@ -366,6 +366,17 @@ public:
 		return results;
 	}
 
+	// Selects workers as TLogs from available workers based on input parameters.
+	//   conf:        the database configuration.
+	//   required:    the required number of TLog workers to select.
+	//   desired:     the desired number of TLog workers to select.
+	//   policy:      the TLog replication policy the selection needs to satisfy.
+	//   id_used:     keep track of process IDs of selected workers.
+	//   checkStable: when true, only select from workers that are considered as stable worker (not rebooted more than
+	//                twice recently).
+	//   dcIds:       the target data centers the workers are in. The selected workers must all be from these
+	//                data centers:
+	//   exclusionWorkerIds: the workers to be excluded from the selection.
 	std::vector<WorkerDetails> getWorkersForTlogs(DatabaseConfiguration const& conf,
 	                                              int32_t required,
 	                                              int32_t desired,
@@ -381,21 +392,67 @@ public:
 		LocalityMap<WorkerDetails>* logServerMap;
 		bool bCompleted = false;
 
+		// Construct the list of DCs where the TLog recruitment is happening. This is mainly for logging purpose.
+		std::string dcList;
+		for (const auto& dc : dcIds) {
+			if (!dcList.empty()) {
+				dcList += ',';
+			}
+			dcList += printable(dc);
+		}
+
 		logServerSet = Reference<LocalitySet>(new LocalityMap<WorkerDetails>());
 		logServerMap = (LocalityMap<WorkerDetails>*)logServerSet.getPtr();
-		for (auto& it : id_worker) {
-			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), it.second.details.interf.id()) ==
+
+		// Populate `unavailableLocals` and log the reason why the worker is considered as unavailable.
+		auto logWorkerUnavailable = [this, &unavailableLocals, &dcList](const std::string& reason,
+		                                                                const WorkerDetails& details,
+		                                                                ProcessClass::Fitness fitness) {
+			unavailableLocals.push_back(details.interf.locality);
+
+			// Note that the recruitment happens only during initial database creation and recovery. So these trace
+			// events should be sparse.
+			TraceEvent("GetTLogTeamWorkerUnavailable", id)
+			    .detail("Reason", reason)
+			    .detail("WorkerID", details.interf.id())
+			    .detail("WorkerDC", details.interf.locality.dcId())
+			    .detail("Address", details.interf.addresses().toString())
+			    .detail("Fitness", fitness)
+			    .detail("RecruitmentDcIds", dcList);
+		};
+
+		// Go through all the workers to list all the workers that can be recruited.
+		for (const auto& [worker_process_id, worker_info] : id_worker) {
+			const auto& worker_details = worker_info.details;
+			auto fitness = worker_details.processClass.machineClassFitness(ProcessClass::TLog);
+			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), worker_details.interf.id()) !=
 			    exclusionWorkerIds.end()) {
-				auto fitness = it.second.details.processClass.machineClassFitness(ProcessClass::TLog);
-				if (workerAvailable(it.second, checkStable) &&
-				    !conf.isExcludedServer(it.second.details.interf.addresses()) &&
-				    fitness != ProcessClass::NeverAssign &&
-				    (!dcIds.size() || dcIds.count(it.second.details.interf.locality.dcId()))) {
-					fitness_workers[std::make_pair(fitness, it.second.details.degraded)].push_back(it.second.details);
-				} else {
-					unavailableLocals.push_back(it.second.details.interf.locality);
-				}
+				logWorkerUnavailable("Worker is excluded", worker_details, fitness);
+				continue;
 			}
+
+			if (!workerAvailable(worker_info, checkStable)) {
+				logWorkerUnavailable("Worker is not available", worker_details, fitness);
+				continue;
+			}
+
+			if (conf.isExcludedServer(worker_details.interf.addresses())) {
+				logWorkerUnavailable("Worker server is excluded from the cluster", worker_details, fitness);
+				continue;
+			}
+
+			if (fitness == ProcessClass::NeverAssign) {
+				logWorkerUnavailable("Worker's fitness is NeverAssign", worker_details, fitness);
+				continue;
+			}
+
+			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
+				logWorkerUnavailable("Worker is not in the target DC", worker_details, fitness);
+				continue;
+			}
+
+			// This worker is a candidate for TLog recruitment.
+			fitness_workers[std::make_pair(fitness, worker_details.degraded)].push_back(worker_details);
 		}
 
 		results.reserve(results.size() + id_worker.size());
@@ -419,6 +476,7 @@ public:
 						break;
 					}
 					TraceEvent(SevWarn, "GWFTADNotAcceptable", id)
+					    .detail("DcIds", dcList)
 					    .detail("Fitness", fitness)
 					    .detail("Processes", logServerSet->size())
 					    .detail("Required", required)
@@ -446,6 +504,7 @@ public:
 							tLocalities.push_back(object->interf.locality);
 						}
 						TraceEvent("GWFTADBestResults", id)
+						    .detail("DcIds", dcList)
 						    .detail("Fitness", fitness)
 						    .detail("Processes", logServerSet->size())
 						    .detail("BestCount", bestSet.size())
@@ -459,6 +518,7 @@ public:
 						break;
 					}
 					TraceEvent(SevWarn, "GWFTADNoBest", id)
+					    .detail("DcIds", dcList)
 					    .detail("Fitness", fitness)
 					    .detail("Processes", logServerSet->size())
 					    .detail("Required", required)
@@ -477,6 +537,7 @@ public:
 			}
 
 			TraceEvent(SevWarn, "GetTLogTeamFailed")
+			    .detail("DcIds", dcList)
 			    .detail("Policy", policy->info())
 			    .detail("Processes", logServerSet->size())
 			    .detail("Workers", id_worker.size())
@@ -503,6 +564,7 @@ public:
 		}
 
 		TraceEvent("GetTLogTeamDone")
+		    .detail("DcIds", dcList)
 		    .detail("Completed", bCompleted)
 		    .detail("Policy", policy->info())
 		    .detail("Results", results.size())
@@ -995,9 +1057,15 @@ public:
 				std::swap(regions[0], regions[1]);
 			}
 
-			if (regions[1].dcId == clusterControllerDcId.get() && regions[1].priority >= 0 &&
+			if (regions[1].dcId == clusterControllerDcId.get() &&
 			    (!versionDifferenceUpdated || datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE)) {
-				std::swap(regions[0], regions[1]);
+				if (regions[1].priority >= 0) {
+					std::swap(regions[0], regions[1]);
+				} else {
+					TraceEvent(SevWarnAlways, "CCDcPriorityNegative")
+					    .detail("DcId", regions[1].dcId)
+					    .detail("Priority", regions[1].priority);
+				}
 			}
 
 			bool setPrimaryDesired = false;
@@ -1953,7 +2021,7 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 	}
 	//TraceEvent("CheckBetterDDorRKNewRecruits", self->id).detail("MasterProcessId", self->masterProcessId)
 	//.detail("NewRecruitRKProcessId", newRKWorker.interf.locality.processId()).detail("NewRecruiteDDProcessId",
-	//newDDWorker.interf.locality.processId());
+	// newDDWorker.interf.locality.processId());
 
 	Optional<Standalone<StringRef>> currentRKProcessId;
 	Optional<Standalone<StringRef>> currentDDProcessId;

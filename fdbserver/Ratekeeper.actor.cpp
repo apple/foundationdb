@@ -726,6 +726,10 @@ ACTOR Future<Void> monitorServerListChange(
 
 	loop {
 		try {
+			if (now() - self->lastSSListFetchedTimestamp > 2 * SERVER_KNOBS->SERVER_LIST_DELAY) {
+				TraceEvent(SevWarnAlways, "RatekeeperGetSSListLongLatency", self->id)
+				    .detail("Latency", now() - self->lastSSListFetchedTimestamp);
+			}
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			vector<std::pair<StorageServerInterface, ProcessClass>> results = wait(getServerListAndProcessClasses(&tr));
 			self->lastSSListFetchedTimestamp = now();
@@ -754,6 +758,7 @@ ACTOR Future<Void> monitorServerListChange(
 			tr = Transaction(self->db);
 			wait(delay(SERVER_KNOBS->SERVER_LIST_DELAY));
 		} catch (Error& e) {
+			TraceEvent("RatekeeperGetSSListError", self->id).error(e).suppressFor(1.0);
 			wait(tr.onError(e));
 		}
 	}

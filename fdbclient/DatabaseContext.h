@@ -117,6 +117,7 @@ public:
 		return (DatabaseContext*)DatabaseContext::operator new(sizeof(DatabaseContext));
 	}
 
+	// Static constructor used by server processes to create a DatabaseContext
 	// For internal (fdbserver) use only
 	static Database create(Reference<AsyncVar<ClientDBInfo>> clientInfo,
 	                       Future<Void> clientInfoMonitor,
@@ -129,9 +130,11 @@ public:
 
 	~DatabaseContext();
 
+	// Constructs a new copy of this DatabaseContext from the parameters of this DatabaseContext
 	Database clone() const {
 		return Database(new DatabaseContext(connectionFile,
 		                                    clientInfo,
+		                                    coordinator,
 		                                    clientInfoMonitor,
 		                                    taskID,
 		                                    clientLocality,
@@ -157,6 +160,11 @@ public:
 	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies, bool useGrvProxies = false);
 	Future<Void> onMasterProxiesChanged();
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
+
+	// Returns the protocol version reported by the coordinator this client is connected to
+	// If an expected version is given, the future won't return until the protocol version is different than expected
+	// Note: this will never return if the server is running a protocol from FDB 5.0 or older
+	Future<ProtocolVersion> getClusterProtocol(Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>());
 
 	// Update the watch counter for the database
 	void addWatch();
@@ -195,6 +203,7 @@ public:
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
 	                         Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
+	                         Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
 	                         Future<Void> clientInfoMonitor,
 	                         TaskPriority taskID,
 	                         LocalityData const& clientLocality,
@@ -323,6 +332,9 @@ public:
 	Reference<AsyncVar<ClientDBInfo>> clientInfo;
 	Future<Void> clientInfoMonitor;
 	Future<Void> connected;
+
+	// An AsyncVar that reports the coordinator this DatabaseContext is interacting with
+	Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator;
 
 	Reference<AsyncVar<Optional<ClusterInterface>>> statusClusterInterface;
 	Future<Void> statusLeaderMon;

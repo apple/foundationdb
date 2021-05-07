@@ -92,7 +92,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( STORAGE_METRICS_TOO_MANY_SHARDS_DELAY,  15.0 );
 	init( AGGREGATE_HEALTH_METRICS_MAX_STALENESS,  0.5 );
 	init( DETAILED_HEALTH_METRICS_MAX_STALENESS,   5.0 );
-	init( TAG_ENCODE_KEY_SERVERS,                false ); if( randomize && BUGGIFY ) TAG_ENCODE_KEY_SERVERS = true;
+	init( TAG_ENCODE_KEY_SERVERS,                false ); // Setting true will break 6.3->6.2 downgrade capability
 
 	//KeyRangeMap
 	init( KRM_GET_RANGE_LIMIT,                     1e5 ); if( randomize && BUGGIFY ) KRM_GET_RANGE_LIMIT = 10;
@@ -164,6 +164,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( BACKUP_STATUS_DELAY,                    40.0 );
 	init( BACKUP_STATUS_JITTER,                   0.05 );
 	init( MIN_CLEANUP_SECONDS,                  3600.0 );
+	init( RESTORE_IGNORE_LOG_FILES,              false );
 
 	// Configuration
 	init( DEFAULT_AUTO_PROXIES,                      3 );

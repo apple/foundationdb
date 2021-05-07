@@ -59,7 +59,7 @@ ACTOR Future<GenerationRegReadReply> nonemptyToNever(Future<GenerationRegReadRep
 	return r;
 }
 
-struct CoordinatedStateImpl {
+class CoordinatedState : NonCopyable {
 	ServerCoordinators coordinators;
 	int stage;
 	UniqueGeneration gen;
@@ -68,19 +68,13 @@ struct CoordinatedStateImpl {
 	ActorCollection ac; // Errors are not reported
 	bool initial;
 
-	CoordinatedStateImpl(ServerCoordinators const& c)
-	  : coordinators(c), stage(0), conflictGen(0), doomed(false), ac(false), initial(false) {}
-	uint64_t getConflict() { return conflictGen; }
-
-	bool isDoomed(GenerationRegReadReply const& rep) {
-		return rep.gen > gen // setExclusive is doomed, because there was a write at least started at a higher
-		                     // generation, which means a read completed at that higher generation
-		                     // || rep.rgen > gen // setExclusive isn't absolutely doomed, but it may/probably will fail
-		    ;
+	bool isDoomed(GenerationRegReadReply const& rep) const {
+		return rep.gen > gen; // setExclusive is doomed, because there was a write at least started at a higher generation, which means a read completed at that higher generation
+			// || rep.rgen > gen // setExclusive isn't absolutely doomed, but it may/probably will fail
 	}
 
-	ACTOR static Future<Value> read(CoordinatedStateImpl* self) {
-		ASSERT(self->stage == 0);
+	ACTOR static Future<Value> read(CoordinatedState* self) {
+		ASSERT( self->stage == 0 );
 
 		{
 			self->stage = 1;
@@ -104,10 +98,9 @@ struct CoordinatedStateImpl {
 			return rep.value.present() ? rep.value.get() : Value();
 		}
 	}
-	ACTOR static Future<Void> onConflict(CoordinatedStateImpl* self) {
-		ASSERT(self->stage == 4);
-		if (self->doomed)
-			return Void();
+	ACTOR static Future<Void> onConflict(CoordinatedState* self) {
+		ASSERT( self->stage == 4 );
+		if (self->doomed) return Void();
 		loop {
 			wait(delay(SERVER_KNOBS->COORDINATED_STATE_ONCONFLICT_POLL_INTERVAL));
 			GenerationRegReadReply rep = wait(self->replicatedRead(
@@ -121,8 +114,8 @@ struct CoordinatedStateImpl {
 		wait(Future<Void>(Never()));
 		return Void();
 	}
-	ACTOR static Future<Void> setExclusive(CoordinatedStateImpl* self, Value v) {
-		ASSERT(self->stage == 4);
+	ACTOR static Future<Void> setExclusive(CoordinatedState* self, Value v) {
+		ASSERT( self->stage == 4 );
 		self->stage = 5;
 
 		UniqueGeneration wgen = wait(self->replicatedWrite(
@@ -144,17 +137,15 @@ struct CoordinatedStateImpl {
 		}
 	}
 
-	ACTOR static Future<GenerationRegReadReply> replicatedRead(CoordinatedStateImpl* self,
-	                                                           GenerationRegReadRequest req) {
-		state std::vector<GenerationRegInterface>& replicas = self->coordinators.stateServers;
-		state vector<Future<GenerationRegReadReply>> rep_empty_reply;
-		state vector<Future<GenerationRegReadReply>> rep_reply;
-		for (int i = 0; i < replicas.size(); i++) {
-			Future<GenerationRegReadReply> reply =
-			    waitAndSendRead(replicas[i].read, GenerationRegReadRequest(req.key, req.gen));
-			rep_empty_reply.push_back(nonemptyToNever(reply));
-			rep_reply.push_back(emptyToNever(reply));
-			self->ac.add(success(reply));
+	ACTOR static Future<GenerationRegReadReply> replicatedRead(CoordinatedState* self, GenerationRegReadRequest req) {
+		state std::vector<GenerationRegInterface> &replicas = self->coordinators.stateServers;
+		state vector< Future<GenerationRegReadReply> > rep_empty_reply;
+		state vector< Future<GenerationRegReadReply> > rep_reply;
+		for(int i=0; i<replicas.size(); i++) {
+			Future<GenerationRegReadReply> reply = waitAndSendRead( replicas[i].read, GenerationRegReadRequest(req.key, req.gen) );
+			rep_empty_reply.push_back( nonemptyToNever( reply ) );
+			rep_reply.push_back( emptyToNever( reply ) );
+			self->ac.add( success( reply ) );
 		}
 
 		state Future<Void> majorityEmpty =
@@ -187,14 +178,13 @@ struct CoordinatedStateImpl {
 		}
 	}
 
-	ACTOR static Future<UniqueGeneration> replicatedWrite(CoordinatedStateImpl* self, GenerationRegWriteRequest req) {
-		state std::vector<GenerationRegInterface>& replicas = self->coordinators.stateServers;
-		state vector<Future<UniqueGeneration>> wrep_reply;
-		for (int i = 0; i < replicas.size(); i++) {
-			Future<UniqueGeneration> reply =
-			    waitAndSendWrite(replicas[i].write, GenerationRegWriteRequest(req.kv, req.gen));
-			wrep_reply.push_back(reply);
-			self->ac.add(success(reply));
+	ACTOR static Future<UniqueGeneration> replicatedWrite(CoordinatedState* self, GenerationRegWriteRequest req) {
+		state std::vector<GenerationRegInterface> &replicas = self->coordinators.stateServers;
+		state vector< Future<UniqueGeneration> > wrep_reply;
+		for(int i=0; i<replicas.size(); i++) {
+			Future<UniqueGeneration> reply = waitAndSendWrite( replicas[i].write, GenerationRegWriteRequest( req.kv, req.gen ) );
+			wrep_reply.push_back( reply );
+			self->ac.add( success( reply ) );
 		}
 
 		wait(quorum(wrep_reply, self->initial ? replicas.size() : replicas.size() / 2 + 1));
@@ -205,24 +195,38 @@ struct CoordinatedStateImpl {
 				maxGen = std::max(maxGen, wrep_reply[i].get());
 		return maxGen;
 	}
-};
 
-CoordinatedState::CoordinatedState(ServerCoordinators const& coord) : impl(new CoordinatedStateImpl(coord)) {}
-CoordinatedState::~CoordinatedState() {
-	delete impl;
-}
-Future<Value> CoordinatedState::read() {
-	return CoordinatedStateImpl::read(impl);
-}
-Future<Void> CoordinatedState::onConflict() {
-	return CoordinatedStateImpl::onConflict(impl);
-}
-Future<Void> CoordinatedState::setExclusive(Value v) {
-	return CoordinatedStateImpl::setExclusive(impl, v);
-}
-uint64_t CoordinatedState::getConflict() {
-	return impl->getConflict();
-}
+public:
+	// Callers must ensure that any outstanding operations have been cancelled before destructing *this!
+	CoordinatedState(ServerCoordinators const& c)
+	  : coordinators(c), stage(0), conflictGen(0), doomed(false), ac(false), initial(false) {}
+
+	// May only be called once.
+	// Returns the most recent state if there are no concurrent calls to setExclusive
+	// Otherwise might return the state passed to a concurrent call, even if that call ultimately fails.
+	// Don't count on the result of this read being part of the serialized history until a subsequent setExclusive has
+	// succeeded!
+	Future<Value> read() { return read(this); }
+
+	Future<Void> onConflict() { return onConflict(this); }
+
+	// May only be called once, and only after read returns.
+	// Eventually returns Void if a call to setExclusive would fail.
+	// May or may not return or throw an error after setExclusive is called.
+	// (Generally?) doesn't return unless there is some concurrent call to read or setExclusive.
+
+	// read() must have been called and returned first, and this may only be called once.
+	// Attempts to change the state value, provided that the value returned by read is still the
+	//   most recent.
+	// If it returns Void, the state was successfully changed and the state returned by read was
+	//   the most recent before the new state.
+	// If it throws coordinated_state_conflict, the state may or may not have been changed, and the value
+	//   returned from read may or may not ever have been a valid state.  Probably there was a
+	//   call to read() or setExclusive() concurrently with this pair.
+	Future<Void> setExclusive(Value v) { return setExclusive(this, v); }
+
+	uint64_t getConflict() const { return conflictGen; }
+};
 
 struct MovableValue {
 	enum MoveState { MaybeTo = 1, Active = 2, MovingFrom = 3 };
@@ -346,29 +350,14 @@ struct MovableCoordinatedStateImpl {
 	}
 };
 
-void MovableCoordinatedState::operator=(MovableCoordinatedState&& av) {
-	if (impl) {
-		delete impl;
-	}
-	impl = av.impl;
-	av.impl = 0;
-}
-MovableCoordinatedState::MovableCoordinatedState(class ServerCoordinators const& coord)
-  : impl(new MovableCoordinatedStateImpl(coord)) {}
-MovableCoordinatedState::~MovableCoordinatedState() {
-	if (impl) {
-		delete impl;
-	}
-}
+MovableCoordinatedState& MovableCoordinatedState::operator=(MovableCoordinatedState&& av) = default;
+MovableCoordinatedState::MovableCoordinatedState( class ServerCoordinators const& coord ) : impl( new MovableCoordinatedStateImpl(coord) ) {}
+MovableCoordinatedState::~MovableCoordinatedState() = default;
 Future<Value> MovableCoordinatedState::read() {
-	return MovableCoordinatedStateImpl::read(impl);
+	return MovableCoordinatedStateImpl::read(impl.get());
 }
-Future<Void> MovableCoordinatedState::onConflict() {
-	return impl->onConflict();
-}
-Future<Void> MovableCoordinatedState::setExclusive(Value v) {
-	return impl->setExclusive(v);
-}
+Future<Void> MovableCoordinatedState::onConflict() { return impl->onConflict(); }
+Future<Void> MovableCoordinatedState::setExclusive(Value v) { return impl->setExclusive(v); }
 Future<Void> MovableCoordinatedState::move(ClusterConnectionString const& nc) {
-	return MovableCoordinatedStateImpl::move(impl, nc);
+	return MovableCoordinatedStateImpl::move(impl.get(), nc);
 }

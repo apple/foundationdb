@@ -297,7 +297,8 @@ public:
 	                        bool verbose = true,
 	                        Key addPrefix = Key(),
 	                        Key removePrefix = Key(),
-	                        bool lockDB = true);
+	                        bool lockDB = true,
+	                        bool inconsistentSnapshotOnly = false);
 	Future<Version> restore(Database cx,
 	                        Optional<Database> cxOrig,
 	                        Key tagName,
@@ -308,7 +309,8 @@ public:
 	                        KeyRange range = normalKeys,
 	                        Key addPrefix = Key(),
 	                        Key removePrefix = Key(),
-	                        bool lockDB = true) {
+	                        bool lockDB = true,
+	                        bool inconsistentSnapshotOnly = false) {
 		Standalone<VectorRef<KeyRangeRef>> rangeRef;
 		rangeRef.push_back_deep(rangeRef.arena(), range);
 		return restore(cx,
@@ -321,7 +323,8 @@ public:
 		               verbose,
 		               addPrefix,
 		               removePrefix,
-		               lockDB);
+		               lockDB,
+		               inconsistentSnapshotOnly);
 	}
 	Future<Version> atomicRestore(Database cx,
 	                              Key tagName,
@@ -355,6 +358,7 @@ public:
 
 	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr,
 	                          Key outContainer,
+	                          int initialSnapshotIntervalSeconds,
 	                          int snapshotIntervalSeconds,
 	                          std::string tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
@@ -362,14 +366,21 @@ public:
 	                          bool partitionedLog = false);
 	Future<Void> submitBackup(Database cx,
 	                          Key outContainer,
+	                          int initialSnapshotIntervalSeconds,
 	                          int snapshotIntervalSeconds,
 	                          std::string tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                          bool stopWhenDone = true,
 	                          bool partitionedLog = false) {
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
-			return submitBackup(
-			    tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone, partitionedLog);
+			return submitBackup(tr,
+			                    outContainer,
+			                    initialSnapshotIntervalSeconds,
+			                    snapshotIntervalSeconds,
+			                    tagName,
+			                    backupRanges,
+			                    stopWhenDone,
+			                    partitionedLog);
 		});
 	}
 
@@ -827,6 +838,11 @@ public:
 	// Coalesced set of ranges already dispatched for writing.
 	typedef KeyBackedMap<Key, bool> RangeDispatchMapT;
 	RangeDispatchMapT snapshotRangeDispatchMap() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+
+	// Interval to use for the first (initial) snapshot.
+	KeyBackedProperty<int64_t> initialSnapshotIntervalSeconds() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
 
 	// Interval to use for determining the target end version for new snapshots
 	KeyBackedProperty<int64_t> snapshotIntervalSeconds() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }

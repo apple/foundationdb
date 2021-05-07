@@ -248,6 +248,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		try {
 			wait(backupAgent->submitBackup(cx,
 			                               StringRef(backupContainer),
+			                               deterministicRandom()->randomInt(0, 60),
 			                               deterministicRandom()->randomInt(0, 100),
 			                               tag.toString(),
 			                               backupRanges,
@@ -497,6 +498,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				try {
 					extraBackup = backupAgent.submitBackup(cx,
 					                                       LiteralStringRef("file://simfdb/backups/"),
+					                                       deterministicRandom()->randomInt(0, 60),
 					                                       deterministicRandom()->randomInt(0, 100),
 					                                       self->backupTag.toString(),
 					                                       self->backupRanges,

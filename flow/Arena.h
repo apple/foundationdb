@@ -77,11 +77,12 @@ struct TrackIt {
 
 class NonCopyable {
 protected:
-	NonCopyable() {}
-	~NonCopyable() {} /// Protected non-virtual destructor
-private:
-	NonCopyable(const NonCopyable&);
-	NonCopyable& operator=(const NonCopyable&);
+	NonCopyable() = default;
+	~NonCopyable() = default; /// Protected non-virtual destructor
+	NonCopyable(NonCopyable&&) = default;
+	NonCopyable& operator=(NonCopyable&&) = default;
+	NonCopyable(const NonCopyable&) = delete;
+	NonCopyable& operator=(const NonCopyable&) = delete;
 };
 
 // An Arena is a custom allocator that consists of a set of ArenaBlocks.  Allocation is performed by bumping a pointer
