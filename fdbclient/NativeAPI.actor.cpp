@@ -1564,8 +1564,7 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 		                         /*switchable*/ true);
 	}
 
-	GlobalConfig::create(
-	    db, std::addressof(clientInfo->get()), std::bind(&AsyncVar<ClientDBInfo>::onChange, clientInfo));
+	GlobalConfig::create(db, clientInfo, std::addressof(clientInfo->get()));
 	GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 	GlobalConfig::globalConfig().trigger(samplingWindow, samplingProfilerUpdateWindow);
 	return Database(db);
