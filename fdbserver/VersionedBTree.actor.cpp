@@ -900,6 +900,8 @@ public:
 				break;
 			}
 			results.push_back(results.arena(), x.get());
+
+			// yield periodically to avoid overflowing the stack
 			if (++sinceYield >= 100) {
 				sinceYield = 0;
 				wait(yield());
@@ -8910,8 +8912,10 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	state int64_t cacheSizeBytes = params.getInt("cacheSizeBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
 	// Choose a large remapCleanupWindow to avoid popping the queue
 	state Version remapCleanupWindow = params.getInt("remapCleanupWindow").orDefault(1e16);
-	state int numEntries = params.getInt("numEntries").orDefault(1000000);
-	state double commitChance = deterministicRandom()->random01() * .1;
+	state int numEntries = params.getInt("numEntries").orDefault(10e6);
+	state int targetCommitSize = deterministicRandom()->randomInt(1e6, 5e6);
+	state int currentCommitSize = 0;
+	state int commits = 0;
 
 	printf("pageSize: %d\n", pageSize);
 	printf("pagesPerExtent: %d\n", pagesPerExtent);
@@ -8931,18 +8935,31 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 		state int v;
 		state ExtentQueueEntry<16> e;
 		generateRandomData(e.entry, 16);
+		state int sinceYield = 0;
 		for (v = 1; v <= numEntries; ++v) {
 			// Sometimes do a commit
-			if (deterministicRandom()->random01() < commitChance) {
+			if (currentCommitSize >= targetCommitSize) {
+				printf("currentCommitSize: %d, commits: %d\n", currentCommitSize, commits);
+				wait(m_extentQueue.flush());
 				wait(pager->commit());
+				commits++;
+				targetCommitSize = deterministicRandom()->randomInt(1e6, 5e6);
+				currentCommitSize = 0;
 			} else {
 				// push a random entry into the queue
-				//generateRandomData(e.entry, 16);
 				m_extentQueue.pushBack(e);
+				currentCommitSize += 16;
+			}
+			// yield periodically to avoid overflowing the stack
+			if (++sinceYield >= 100) {
+				sinceYield = 0;
+				wait(yield());
 			}
 		}
+		printf("commits: %d\n", commits);
+		wait(m_extentQueue.flush());
 		extentQueueState = m_extentQueue.getState();
-		// printf("ExtentQueue getState(): %s\n", extentQueueState.toString().c_str());
+		printf("ExtentQueue getState(): %s\n", extentQueueState.toString().c_str());
 		pager->setMetaKey(extentQueueState.asKeyRef());
 		wait(pager->commit());
 
@@ -8965,6 +8982,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	extentQueueState.fromKeyRef(meta);
 	// printf("ExtentQueue getState(): %s\n", extentQueueState.toString().c_str());
 	m_extentQueue.recover(pager, extentQueueState, "ExtentQueueRecovered");
+
 	state Standalone<VectorRef<LogicalPageID>> extentIDs = wait(pager->getUsedExtents(m_extentQueue.queueID));
 
 	// fire read requests for all used extents
