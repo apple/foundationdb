@@ -297,6 +297,7 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 			bytesAcknowledged = message.get().bytes;
 			if (bytesSent - bytesAcknowledged < FLOW_KNOBS->ACKNOWLEDGE_LIMIT_BYTES && ready.isValid() &&
 			    ready.canBeSet()) {
+				Promise<Void> hold = ready;
 				ready.send(Void());
 			}
 		}
