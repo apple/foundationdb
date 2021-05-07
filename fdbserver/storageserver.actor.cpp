@@ -2047,6 +2047,11 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 		} else {
 			loop {
 				wait(req.reply.onReady());
+
+				if (version < data->oldestVersion.get()) {
+					throw transaction_too_old();
+				}
+
 				state int byteLimit = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 				GetKeyValuesReply _r =
 				    wait(readRange(data, version, KeyRangeRef(begin, end), req.limit, &byteLimit, span.context));
