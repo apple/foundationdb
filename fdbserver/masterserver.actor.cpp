@@ -20,6 +20,7 @@
 
 #include <iterator>
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
@@ -42,6 +43,7 @@
 #include "fdbserver/ProxyCommitData.actor.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/TLogGroup.actor.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
@@ -196,6 +198,9 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	ServerCoordinators coordinators;
 
 	Reference<ILogSystem> logSystem;
+	Reference<TLogGroupCollection> tLogGroupCollection;
+	Optional<Standalone<RangeResultRef>> tLogGroupRecoveredState;
+
 	Version version; // The last version assigned to a proxy by getVersion()
 	double lastVersionTime;
 	LogSystemDiskQueueAdapter* txnStateLogAdapter;
@@ -757,6 +762,12 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	    .detail("BackupWorkers", self->backupWorkers.size())
 	    .trackLatest("MasterRecoveryState");
 
+	// Recruit TLog groups
+	ASSERT(self->tLogGroupRecoveredState.present());
+	self->tLogGroupCollection->addWorkers(recruits.tLogs);
+	self->tLogGroupCollection->loadState(self->tLogGroupRecoveredState.get());
+	self->tLogGroupCollection->recruitEverything();
+
 	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand
 	// new database we are sort of lying that we are past the recruitment phase.  In a perfect world we would split that
 	// up so that the recruitment part happens above (in parallel with recruiting the transaction servers?).
@@ -887,6 +898,13 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 	}
 
 	uniquify(self->allTags);
+
+	// Load TLogGroupCollection
+	Standalone<RangeResultRef> tLogGroupState = wait(self->txnStateStore->readRange(tLogGroupKeys));
+	self->tLogGroupCollection = makeReference<TLogGroupCollection>(self->configuration.tLogPolicy,
+	                                                               SERVER_KNOBS->TLOG_GROUP_COLLECTION_TARGET_SIZE,
+	                                                               self->configuration.tLogReplicationFactor);
+	self->tLogGroupRecoveredState = tLogGroupState;
 
 	// auto kvs = self->txnStateStore->readRange( systemKeys );
 	// for( auto & kv : kvs.get() )
@@ -1864,6 +1882,8 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 			tr.set(recoveryCommitRequest.arena, tLogDatacentersKeyFor(dc), StringRef());
 		}
 	}
+
+	self->tLogGroupCollection->storeState(&recoveryCommitRequest);
 
 	applyMetadataMutations(SpanID(),
 	                       self->dbgid,

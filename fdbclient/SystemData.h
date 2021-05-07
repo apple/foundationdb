@@ -115,6 +115,11 @@ extern const KeyRef cacheChangePrefix;
 const Key cacheChangeKeyFor(uint16_t idx);
 uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key);
 
+extern const KeyRangeRef tLogGroupKeys;
+extern const KeyRef tLogGroupPrefix;
+const Key tLogGroupKeyFor(UID serverID);
+UID decodeTLogGroupKey(const KeyRef& key);
+
 // "\xff/serverTag/[[serverID]]" = "[[Tag]]"
 //	Provides the Tag for the given serverID. Used to access a
 //	storage server's corresponding TLog in order to apply mutations.
