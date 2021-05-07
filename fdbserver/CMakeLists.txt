@@ -96,7 +96,12 @@ set(FDBSERVER_SRCS
   StorageMetrics.actor.h
   StorageMetrics.h
   storageserver.actor.cpp
-  TagPartitionedLogSystem.actor.cpp
+  LogSystem.cpp
+  TagPartitionedLogSystem.actor.h
+  MockLogSystem.h
+  MockLogSystem.cpp
+  MockPeekCursor.h
+  MockPeekCursor.cpp
   template_fdb.h
 
   ptxn/Config.h
@@ -136,6 +141,7 @@ set(FDBSERVER_SRCS
   ptxn/test/TestTLogPeek.h
   ptxn/test/TestResolver.actor.cpp
   ptxn/test/TestSerialization.cpp
+  ptxn/test/RealStorageServer.actor.cpp
   ptxn/test/Utils.cpp
   ptxn/test/Utils.h
 

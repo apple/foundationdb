@@ -232,6 +232,7 @@ enum class LogSystemType {
 	teamPartitioned = 3, // TLogs are logically partitoned by TLogGroups while each TLogGroup is responsible for
 						 // a set of storage shard, e.e., key range. Each TLog is a bed of slots for TLogGroups, i.e.,
 						 // contains an arbitrary number of TLogGroup member.
+	mock = 4,
 };
 
 struct LogSystemConfig {
@@ -248,6 +249,9 @@ struct LogSystemConfig {
 	std::set<int8_t> pseudoLocalities;
 	LogEpoch epoch;
 	LogEpoch oldestBackupEpoch;
+	// Only applicable when logSystemType is mock. This is actually a pointer to MockLogSystem but we cannot specify it
+	// because ILogSystem already depends on LogSystemConfig.
+	void* mockLogSystem;
 
 	LogSystemConfig(LogEpoch e = 0)
 	  : logSystemType(LogSystemType::empty), logRouterTags(0), txsTags(0), expectedLogSets(0), stopped(false), epoch(e),

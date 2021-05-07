@@ -285,6 +285,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES ptxn/TLogServer.toml)
   add_fdb_Test(TEST_FILES ptxn/TLogPeekCursor.toml)
   add_fdb_test(TEST_FILES ptxn/TeamVersionTracker.toml)
+  add_fdb_test(TEST_FILES ptxn/StorageServer.toml)
 
   verify_testing()
   if (NOT OPEN_FOR_IDE AND NOT WIN32)
