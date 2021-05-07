@@ -39,15 +39,6 @@ const KeyRef samplingWindow = LiteralStringRef("visibility/sampling/window");
 
 GlobalConfig::GlobalConfig() : lastUpdate(0) {}
 
-void GlobalConfig::create(DatabaseContext* cx, const ClientDBInfo* dbInfo, std::function<Future<Void>()> onChange) {
-	if (g_network->global(INetwork::enGlobalConfig) == nullptr) {
-		auto config = new GlobalConfig{};
-		config->cx = Database(cx);
-		g_network->setGlobal(INetwork::enGlobalConfig, config);
-		config->_updater = updater(config, dbInfo, onChange);
-	}
-}
-
 GlobalConfig& GlobalConfig::globalConfig() {
 	void* res = g_network->global(INetwork::enGlobalConfig);
 	ASSERT(res);
@@ -203,9 +194,7 @@ ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
 
 // Applies updates to the local copy of the global configuration when this
 // process receives an updated history.
-ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self,
-                                         const ClientDBInfo* dbInfo,
-                                         std::function<Future<Void>()> onChange) {
+ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, const ClientDBInfo* dbInfo) {
 	wait(self->cx->onConnected());
 	wait(self->migrate(self));
 
@@ -214,7 +203,7 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self,
 
 	loop {
 		try {
-			wait(onChange());
+			wait(self->dbInfoChanged.onTrigger());
 
 			auto& history = dbInfo->history;
 			if (history.size() == 0) {

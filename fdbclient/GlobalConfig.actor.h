@@ -67,15 +67,25 @@ struct ConfigValue : ReferenceCounted<ConfigValue> {
 
 class GlobalConfig : NonCopyable {
 public:
-	// Creates a GlobalConfig singleton, accessed by calling GlobalConfig().
+	// Creates a GlobalConfig singleton, accessed by calling globalConfig().
 	// This function requires a database context object to allow global
-	// configuration to run transactions on the database, and a ClientDBInfo
-	// object to read the latest global configuration history. The
-	// std::function parameter should refer to a function that triggers when
-	// the ClientDBInfo object is changed. This function should only be called
-	// once by each process (however, it is idempotent and calling it multiple
-	// times will have no effect).
-	static void create(DatabaseContext* cx, const ClientDBInfo* dbInfo, std::function<Future<Void>()> onChange);
+	// configuration to run transactions on the database, and an AsyncVar
+	// object to watch for changes on. The ClientDBInfo pointer should point to
+	// a ClientDBInfo object which will contain the updated global
+	// configuration history when the given AsyncVar changes. This function
+	// should only be called once (however, it is idempotent and calling it
+	// multiple times will have no effect).
+	template <class T>
+	static void create(DatabaseContext* cx, Reference<AsyncVar<T>> db, const ClientDBInfo* dbInfo) {
+		if (g_network->global(INetwork::enGlobalConfig) == nullptr) {
+			auto config = new GlobalConfig{};
+			config->cx = Database(cx);
+			g_network->setGlobal(INetwork::enGlobalConfig, config);
+			config->_updater = updater(config, dbInfo);
+			// Bind changes in `db` to the `dbInfoChanged` AsyncTrigger.
+			forward(db, std::addressof(config->dbInfoChanged));
+		}
+	}
 
 	// Returns a reference to the global GlobalConfig object. Clients should
 	// call this function whenever they need to read a value out of the global
@@ -154,11 +164,10 @@ private:
 
 	ACTOR static Future<Void> migrate(GlobalConfig* self);
 	ACTOR static Future<Void> refresh(GlobalConfig* self);
-	ACTOR static Future<Void> updater(GlobalConfig* self,
-	                                  const ClientDBInfo* dbInfo,
-	                                  std::function<Future<Void>()> onChange);
+	ACTOR static Future<Void> updater(GlobalConfig* self, const ClientDBInfo* dbInfo);
 
 	Database cx;
+	AsyncTrigger dbInfoChanged;
 	Future<Void> _updater;
 	Promise<Void> initialized;
 	AsyncTrigger configChanged;
