@@ -1533,10 +1533,17 @@ arena_palloc(tsdn_t *tsdn, arena_t *arena, size_t usize, size_t alignment,
     bool zero, tcache_t *tcache) {
 	void *ret;
 
-	if (usize <= SC_SMALL_MAXCLASS
-	    && (alignment < PAGE
-	    || (alignment == PAGE && (usize & PAGE_MASK) == 0))) {
+	if (usize <= SC_SMALL_MAXCLASS) {
 		/* Small; alignment doesn't require special slab placement. */
+
+		/* usize should be a result of sz_sa2u() */
+		assert((usize & (alignment - 1)) == 0);
+
+		/*
+		 * Small usize can't come from an alignment larger than a page.
+		 */
+		assert(alignment <= PAGE);
+
 		ret = arena_malloc(tsdn, arena, usize, sz_size2index(usize),
 		    zero, tcache, true);
 	} else {

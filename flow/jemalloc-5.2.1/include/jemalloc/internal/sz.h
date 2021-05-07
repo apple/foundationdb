@@ -266,7 +266,7 @@ sz_sa2u(size_t size, size_t alignment) {
 	assert(alignment != 0 && ((alignment - 1) & alignment) == 0);
 
 	/* Try for a small size class. */
-	if (size <= SC_SMALL_MAXCLASS && alignment < PAGE) {
+	if (size <= SC_SMALL_MAXCLASS && alignment <= PAGE) {
 		/*
 		 * Round size up to the nearest multiple of alignment.
 		 *
