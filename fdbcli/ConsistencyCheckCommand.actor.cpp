@@ -33,13 +33,13 @@ using namespace fdb_cli;
 ACTOR static Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens) {
 	tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 	if (tokens.size() == 1) {
-		Optional<Value> suspended = wait(safeThreadFutureToFuture(tr->get(consistencyCheckSpeicalKey)));
+		Optional<Value> suspended = wait(safeThreadFutureToFuture(tr->get(consistencyCheckSpecialKey)));
 		printf("ConsistencyCheck is %s\n", suspended.present() ? "off" : "on");
 	} else if (tokens.size() == 2 && tokencmp(tokens[1], "off")) {
-		tr->set(consistencyCheckSpeicalKey, Value());
+		tr->set(consistencyCheckSpecialKey, Value());
 		wait(safeThreadFutureToFuture(tr->commit()));
 	} else if (tokens.size() == 2 && tokencmp(tokens[1], "on")) {
-		tr->clear(consistencyCheckSpeicalKey);
+		tr->clear(consistencyCheckSpecialKey);
 		wait(safeThreadFutureToFuture(tr->commit()));
 	} else {
 		printUsage(tokens[0]);
@@ -50,7 +50,7 @@ ACTOR static Future<bool> consistencyCheckCommandActor(Reference<ITransaction> t
 
 namespace fdb_cli {
 
-const KeyRef consistencyCheckSpeicalKey = LiteralStringRef("\xff\xff/management/consistency_check_suspended");
+const KeyRef consistencyCheckSpecialKey = LiteralStringRef("\xff\xff/management/consistency_check_suspended");
 
 Future<bool> consistencyCheckCommand(Reference<ITransaction> tr, std::vector<StringRef> tokens) {
 	return consistencyCheckCommandActor(tr, tokens);

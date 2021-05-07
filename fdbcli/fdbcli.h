@@ -51,7 +51,7 @@ struct CommandFactory {
 // Special keys used by fdbcli commands
 
 // consistencycheck
-extern const KeyRef consistencyCheckSpeicalKey;
+extern const KeyRef consistencyCheckSpecialKey;
 
 // help functions (Copied from fdbcli.actor.cpp)
 
