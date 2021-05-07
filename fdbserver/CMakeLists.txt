@@ -124,6 +124,8 @@ set(FDBSERVER_SRCS
   ptxn/test/FakeStorageServer.actor.h
   ptxn/test/FakeTLog.actor.cpp
   ptxn/test/FakeTLog.actor.h
+  ptxn/test/RealTLog.actor.cpp
+  ptxn/test/RealTLog.actor.h
   ptxn/test/TestResolver.actor.cpp
   ptxn/test/TestSerialization.cpp
 
