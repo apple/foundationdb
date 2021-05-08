@@ -47,7 +47,7 @@ std::map<TeamID, Version> TeamVersionTracker::updateTeams(const std::vector<Team
 		auto it = versions.find(team);
 		ASSERT_WE_THINK(it != versions.end() && it->second < commitVersion);
 		auto pair = results.emplace(it->first, it->second);
-		ASSERT(pair.second); // insertion happens
+		ASSERT_WE_THINK(pair.second); // insertion happens
 		it->second = commitVersion;
 	}
 	return results;
