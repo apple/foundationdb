@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 #
 # alloc_instrumentation.py
 #
@@ -29,7 +29,7 @@ import traceback
 
 LOG_FORMAT = '%(created)f [%(levelname)s] %(message)s'
 
-EXCLUDED_FILES = map(re.compile, [
+EXCLUDED_FILES = list(map(re.compile, [
     # Output directories
     r'\.git/.*', r'bin/.*', r'packages/.*', r'\.objs/.*', r'\.deps/.*', r'bindings/go/build/.*', r'documentation/sphinx/\.out/.*',
 
@@ -39,7 +39,8 @@ EXCLUDED_FILES = map(re.compile, [
 
     # Binary files
     r'.*\.class$', r'.*\.o$', r'.*\.a$', r'.*[\.-]debug', r'.*\.so$', r'.*\.dylib$', r'.*\.dll$', r'.*\.tar[^/]*$', r'.*\.jar$', r'.*pyc$', r'bindings/flow/bin/.*',
-    r'.*\.pdf$',
+    r'.*\.pdf$', r'.*\.jp[e]*g', r'.*\.png', r'.*\.ico',
+    r'packaging/msi/art/.*',
 
     # Project configuration files
     r'.*foundationdb\.VC\.db$', r'.*foundationdb\.VC\.VC\.opendb$', r'.*iml$',
@@ -47,6 +48,7 @@ EXCLUDED_FILES = map(re.compile, [
     # Source files from someone else
     r'(^|.*/)Hash3\..*', r'(^|.*/)sqlite.*',
     r'bindings/go/godoc-resources/.*',
+    r'bindings/go/src/fdb/tuple/testdata/tuples.golden',
     r'fdbcli/linenoise/.*',
     r'fdbrpc/rapidjson/.*', r'fdbrpc/rapidxml/.*', r'fdbrpc/zlib/.*', r'fdbrpc/sha1/.*',
     r'fdbrpc/xml2json.hpp$', r'fdbrpc/libcoroutine/.*', r'fdbrpc/libeio/.*', r'fdbrpc/lib64/.*',
@@ -54,7 +56,7 @@ EXCLUDED_FILES = map(re.compile, [
 
     # Miscellaneous
     r'bindings/nodejs/node_modules/.*', r'bindings/go/godoc/.*', r'.*trace.*xml$', r'.*log$', r'.*\.DS_Store$', r'simfdb/\.*', r'.*~$', r'.*.swp$'
-])
+]))
 
 SUSPECT_PHRASES = map(re.compile, [
     r'#define\s+FDB_API_VERSION\s+(\d+)',
@@ -98,16 +100,16 @@ def rewrite_lines(lines, version_re, new_version, suspect_only=True, print_diffs
                 offset += len(new_str) - (end - start)
 
         if (print_diffs or ask_confirm) and line != new_line:
-            print 'Rewrite:'
-            print '\n'.join(map(lambda (x, s): ' {:4d}: {}'.format(line_no - 1 + x, s), enumerate(lines[line_no - 2:line_no])))
-            print (DIM_CODE if grayscale else RED_COLOR) + '-{:4d}: {}'.format(line_no + 1, line) + END_COLOR
-            print (BOLD_CODE if grayscale else GREEN_COLOR) + '+{:4d}: {}'.format(line_no + 1, new_line) + END_COLOR
-            print '\n'.join(map(lambda (x, s): ' {:4d}: {}'.format(line_no + 2 + x, s), enumerate(lines[line_no + 1:line_no + 3])))
+            print('Rewrite:')
+            print('\n'.join(map(lambda pair: ' {:4d}: {}'.format(line_no - 1 + pair[0], pair[1]), enumerate(lines[line_no - 2:line_no]))))
+            print((DIM_CODE if grayscale else RED_COLOR) + '-{:4d}: {}'.format(line_no + 1, line) + END_COLOR)
+            print((BOLD_CODE if grayscale else GREEN_COLOR) + '+{:4d}: {}'.format(line_no + 1, new_line) + END_COLOR)
+            print('\n'.join(map(lambda pair: ' {:4d}: {}'.format(line_no + 2 + pair[0], pair[1]), enumerate(lines[line_no + 1:line_no + 3]))))
 
             if ask_confirm:
                 text = raw_input('Looks good (y/n)? ')
                 if not positive_response(text):
-                    print 'Okay, skipping.'
+                    print('Okay, skipping.')
                     new_line = line
 
         dirty = dirty or (new_line != line)
@@ -146,7 +148,7 @@ def address_file(base_path, file_path, version, new_version=None, suspect_only=F
                                                  ask_confirm=(rewrite and ask_confirm), grayscale=grayscale)
 
         else:
-            matching_lines = filter(lambda (_, x): version_re.search(x), enumerate(lines))
+            matching_lines = filter(lambda pair: version_re.search(pair[1]), enumerate(lines))
 
             # Look for lines with the version
             if matching_lines:
@@ -167,8 +169,8 @@ def address_file(base_path, file_path, version, new_version=None, suspect_only=F
                 fout.write('\n'.join(new_lines))
 
         return True
-    except OSError as e:
-        logging.exception('Unable to read file %s due to OSError')
+    except (OSError, UnicodeDecodeError) as e:
+        logging.exception('Unable to read file %s due to OSError', os.path.join(base_path, file_path))
         return False
 
 
