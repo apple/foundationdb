@@ -79,6 +79,8 @@ int findBatch(std::vector<ResolveTransactionBatchRequest> batches, Version v) {
 
 } // anonymous namespace
 
+// Creates a random set of teams, sends 10 batches in random order to Resolvers,
+// and verifies the correct previous commit version (PCV) is returned back.
 TEST_CASE("fdbserver/ptxn/test/resolver") {
 	state const Version lastEpochEnd = 100;
 	state const int totalRequests = 10;
@@ -139,7 +141,7 @@ TEST_CASE("fdbserver/ptxn/test/resolver") {
 		ASSERT(f.isReady() && f.isValid());
 	}
 
-	// Verify team's PCVs are correct.
+	// Verify team's previous commit versions (PCVs) are correct.
 	std::map<ptxn::TeamID, Version> pcv; // previous commit version
 	for (const auto& team : teams) {
 		pcv[team] = lastEpochEnd;
