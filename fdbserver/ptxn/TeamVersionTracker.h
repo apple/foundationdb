@@ -51,7 +51,7 @@ public:
 	Version getMaxCommitVersion() const { return maxCV; }
 
 	// Returns the CV of a team, or invalidVersion if not found.
-	Version getCommitVersion(TeamID tid) {
+	Version getCommitVersion(TeamID tid) const {
 		auto it = versions.find(tid);
 		return it == versions.end() ? invalidVersion : it->second;
 	}
