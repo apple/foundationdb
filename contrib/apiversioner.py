@@ -107,7 +107,7 @@ def rewrite_lines(lines, version_re, new_version, suspect_only=True, print_diffs
             print('\n'.join(map(lambda pair: ' {:4d}: {}'.format(line_no + 2 + pair[0], pair[1]), enumerate(lines[line_no + 1:line_no + 3]))))
 
             if ask_confirm:
-                text = raw_input('Looks good (y/n)? ')
+                text = input('Looks good (y/n)? ')
                 if not positive_response(text):
                     print('Okay, skipping.')
                     new_line = line
