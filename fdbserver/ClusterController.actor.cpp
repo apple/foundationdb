@@ -135,9 +135,7 @@ public:
 		                                                                         true,
 		                                                                         TaskPriority::DefaultEndpoint,
 		                                                                         true)) // SOMEDAY: Locality!
-		{
-			GlobalConfig::globalConfig().updateDBInfo(clientInfo);
-		}
+		{}
 
 		void setDistributor(const DataDistributorInterface& interf) {
 			auto newInfo = serverInfo->get();
@@ -3092,6 +3090,10 @@ ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
 				if (worker.locality.processId() == cluster->masterProcessId) {
 					cluster->masterProcessId = Optional<Key>();
 				}
+				TraceEvent("ClusterControllerWorkerFailed", cluster->id)
+					.detail("ProcessId", worker.locality.processId())
+					.detail("ProcessClass", failedWorkerInfo.details.processClass.toString())
+					.detail("Address", worker.address());
 				cluster->removedDBInfoEndpoints.insert(worker.updateServerDBInfo.getEndpoint());
 				cluster->id_worker.erase(worker.locality.processId());
 				cluster->updateWorkerList.set(worker.locality.processId(), Optional<ProcessData>());
@@ -3767,7 +3769,7 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				state Optional<Value> globalConfigVersion = wait(tr.get(globalConfigVersionKey));
-				state ClientDBInfo clientInfo = db->clientInfo->get();
+				state ClientDBInfo clientInfo = db->serverInfo->get().client;
 
 				if (globalConfigVersion.present()) {
 					// Since the history keys end with versionstamps, they
@@ -3825,6 +3827,15 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 					}
 
 					clientInfo.id = deterministicRandom()->randomUniqueID();
+
+					// Update ServerDBInfo so fdbserver processes receive updated history.
+					ServerDBInfo serverInfo = db->serverInfo->get();
+					serverInfo.id = deterministicRandom()->randomUniqueID();
+					serverInfo.infoGeneration = ++db->dbInfoCount;
+					serverInfo.client = clientInfo;
+					db->serverInfo->set(serverInfo);
+
+					// Update ClientDBInfo so client processes receive updated history.
 					db->clientInfo->set(clientInfo);
 				}
 
