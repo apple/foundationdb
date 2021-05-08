@@ -59,7 +59,6 @@ set(FDBSERVER_SRCS
   OldTLogServer_4_6.actor.cpp
   OldTLogServer_6_0.actor.cpp
   OldTLogServer_6_2.actor.cpp
-  Orderer.actor.h
   ProxyCommitData.actor.h
   pubsub.actor.cpp
   pubsub.h
@@ -108,6 +107,8 @@ set(FDBSERVER_SRCS
   ptxn/ProxyTLogPushMessageSerializer.h
   ptxn/StorageServerInterface.cpp
   ptxn/StorageServerInterface.h
+  ptxn/TeamVersionTracker.actor.cpp
+  ptxn/TeamVersionTracker.h
   ptxn/TLogInterface.cpp
   ptxn/TLogInterface.h
   ptxn/ProxyTLogPushMessageSerializer.cpp
