@@ -21,6 +21,7 @@ ExternalProject_add(Jemalloc_project
   CONFIGURE_COMMAND "${CMAKE_SOURCE_DIR}/flow/jemalloc-5.2.1/configure"
   --prefix=${JEMALLOC_DIR} --enable-static --disable-cxx --without-export
   --enable-stats --with-jemalloc-prefix=je_ --enable-prof
+  --disable-initial-exec-tls # https://github.com/jemalloc/jemalloc/issues/937
   BUILD_COMMAND make
   INSTALL_DIR "${JEMALLOC_DIR}"
   INSTALL_COMMAND make install)
