@@ -140,6 +140,8 @@ public:
 	virtual Future<Standalone<VectorRef<LogicalPageID>>> getUsedExtents(QueueID queueID) = 0;
 	virtual void pushExtentUsedList(QueueID queueID, LogicalPageID extID) = 0;
 	virtual void extentCacheClear() = 0;
+	virtual int64_t getPageCacheCount() = 0;
+	virtual int64_t getExtentCacheCount() = 0;
 
 	// Get a snapshot of the metakey and all pages as of the version v which must be >= getOldestVersion()
 	// Note that snapshots at any version may still see the results of updatePage() calls.
