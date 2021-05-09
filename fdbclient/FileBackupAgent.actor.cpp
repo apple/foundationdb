@@ -2326,6 +2326,13 @@ struct BackupLogsDispatchTask : BackupTaskFuncBase {
 		                                             beginVersion + (CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES - 1) *
 		                                                                CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE);
 
+		if (endVersion - beginVersion > CLIENT_KNOBS->BACKUP_MAX_VERSION_DIFF) {
+			TraceEvent(SevError, "BackupSawHugeVersionJump")
+			    .detail("Hint",
+			            "This may due to DR failover or user bumping up cluster's version. Try restarting the backup.");
+			return Void();
+		}
+
 		TraceEvent("FileBackupLogDispatch")
 		    .suppressFor(60)
 		    .detail("BeginVersion", beginVersion)
@@ -5310,6 +5317,41 @@ public:
 			throw restore_error();
 		}
 
+		state std::vector<KeyBackedTag> backupTags;
+		state std::vector<Future<EBackupState>> tagStates;
+		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				wait(store(backupTags, getAllBackupTags(tr, false)));
+				for (const auto& tag : backupTags) {
+					UidAndAbortedFlagT uidAndAbortedFlag = wait(tag.getOrThrow(tr, false));
+					BackupConfig config(uidAndAbortedFlag.first);
+					tagStates.push_back(config.stateEnum().getOrThrow(tr, false));
+				}
+				wait(waitForAll(tagStates));
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+		int i = 0;
+		for (const auto& tag : backupTags) {
+			EBackupState status = tagStates[i++].get();
+			if (status == EBackupState::STATE_RUNNING_DIFFERENTIAL || status == EBackupState::STATE_RUNNING) {
+				TraceEvent(SevError, "RestoreNotAllowedWhenActiveBackupExists")
+				    .detail("RestoreTag", tagName)
+				    .detail("ActiveBackupTag", tag.tagName);
+				fprintf(
+				    stderr,
+				    "A backup with tag '%s' is running. We do not support restore when there is any active backup.\n",
+				    tag.tagName.c_str());
+				throw restore_when_backup_is_active();
+			}
+		}
+
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
 
 		state BackupDescription desc = wait(bc->describeBackup(true));
@@ -5344,7 +5386,7 @@ public:
 			printf("Restoring backup to version: %lld\n", (long long)targetVersion);
 		}
 
-		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		tr->reset();
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
