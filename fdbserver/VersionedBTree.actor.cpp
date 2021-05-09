@@ -2769,7 +2769,9 @@ public:
 		return StorageBytes(free, total, pagerSize - reusable, free + reusable, temp);
 	}
 
+	int64_t getPageCacheCount() override { return (int64_t)pageCache.count(); }
 	int64_t getPageCount() override { return pHeader->pageCount; }
+	int64_t getExtentCacheCount() override { return (int64_t)extentCache.count(); }
 
 	ACTOR static Future<Void> getUserPageCount_cleanup(DWALPager* self) {
 		// Wait for the remap eraser to finish all of its work (not triggering stop)
@@ -8897,6 +8899,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	state ExtentQueueT m_extentQueue;
 	state ExtentQueueT::QueueState extentQueueState;
 
+	state DWALPager* pager;
 	// If a test file is passed in by environment then don't write new data to it.
 	state bool reload = getenv("TESTFILE") == nullptr;
 	state std::string fileName = reload ? "unittest.redwood" : getenv("TESTFILE");
@@ -8909,13 +8912,13 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	printf("Filename: %s\n", fileName.c_str());
 	state int pageSize = params.getInt("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
 	state int pagesPerExtent = params.getInt("pagesPerExtent").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_PAGES);
-	state int64_t cacheSizeBytes = params.getInt("cacheSizeBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
+	state int64_t cacheSizeBytes = 268435456;//params.getInt("cacheSizeBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
 	// Choose a large remapCleanupWindow to avoid popping the queue
 	state Version remapCleanupWindow = params.getInt("remapCleanupWindow").orDefault(1e16);
 	state int numEntries = params.getInt("numEntries").orDefault(10e6);
-	state int targetCommitSize = deterministicRandom()->randomInt(1e6, 5e6);
+	state int targetCommitSize = deterministicRandom()->randomInt(2e6, 30e6);
 	state int currentCommitSize = 0;
-	state int commits = 0;
+	state int cumulativeCommitSize = 0;
 
 	printf("pageSize: %d\n", pageSize);
 	printf("pagesPerExtent: %d\n", pagesPerExtent);
@@ -8924,7 +8927,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 
 	// Do random pushes into the queue and commit periodically
 	if (reload) {
-		state DWALPager* pager = new DWALPager(pageSize, pagesPerExtent, fileName, cacheSizeBytes, remapCleanupWindow);
+		pager = new DWALPager(pageSize, pagesPerExtent, fileName, cacheSizeBytes, remapCleanupWindow);
 
 		wait(success(pager->init()));
 
@@ -8939,24 +8942,31 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 		for (v = 1; v <= numEntries; ++v) {
 			// Sometimes do a commit
 			if (currentCommitSize >= targetCommitSize) {
-				printf("currentCommitSize: %d, commits: %d\n", currentCommitSize, commits);
+				printf("currentCommitSize: %d, cumulativeCommitSize: %d, pageCacheCount: %d\n",
+					   currentCommitSize,
+					   cumulativeCommitSize,
+					   pager->getPageCacheCount());
 				wait(m_extentQueue.flush());
 				wait(pager->commit());
-				commits++;
-				targetCommitSize = deterministicRandom()->randomInt(1e6, 5e6);
+				cumulativeCommitSize += currentCommitSize;
+				targetCommitSize = deterministicRandom()->randomInt(2e6, 30e6);
 				currentCommitSize = 0;
-			} else {
-				// push a random entry into the queue
-				m_extentQueue.pushBack(e);
-				currentCommitSize += 16;
 			}
+
+			// push a random entry into the queue
+			m_extentQueue.pushBack(e);
+			currentCommitSize += 16;
+
 			// yield periodically to avoid overflowing the stack
 			if (++sinceYield >= 100) {
 				sinceYield = 0;
 				wait(yield());
 			}
 		}
-		printf("commits: %d\n", commits);
+		printf("currentCommitSize: %d, cumulativeCommitSize: %d, pageCacheCount: %d\n",
+			   currentCommitSize,
+			   cumulativeCommitSize,
+			   pager->getPageCacheCount());
 		wait(m_extentQueue.flush());
 		extentQueueState = m_extentQueue.getState();
 		printf("ExtentQueue getState(): %s\n", extentQueueState.toString().c_str());
@@ -8969,10 +8979,10 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	}
 
 	printf("Reopening pager file from disk.\n");
-	IPager2* pager = new DWALPager(pageSize, pagesPerExtent, fileName, cacheSizeBytes, remapCleanupWindow);
+	pager = new DWALPager(pageSize, pagesPerExtent, fileName, cacheSizeBytes, remapCleanupWindow);
 	wait(success(pager->init()));
 
-	printf("Starting ExtentQueue FastPath Recovery from Disk.\n");
+	printf("Starting ExtentQueue SlowPath Recovery from Disk.\n");
 	state double intervalStart = timer();
 	state double start = intervalStart;
 
@@ -8980,15 +8990,33 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	state Key meta = pager->getMetaKey();
 	memcpy(&extentQueueState, meta.begin(), meta.size());
 	extentQueueState.fromKeyRef(meta);
-	// printf("ExtentQueue getState(): %s\n", extentQueueState.toString().c_str());
+	 printf("ExtentQueue getState(): %s\n", extentQueueState.toString().c_str());
 	m_extentQueue.recover(pager, extentQueueState, "ExtentQueueRecovered");
 
+	pager->extentCacheClear();
+
+	printf("pageCacheCount: %d extentCacheCount: %d\n",
+		   pager->getPageCacheCount(),
+		   pager->getExtentCacheCount());
+
+	// peekAll the queue using regular slow path
+	Standalone<VectorRef<ExtentQueueEntry<16>>> entries = wait(m_extentQueue.peekAll(true));
+
+	elapsed = timer() - start;
+	printf("Completed slowpath extent queue recovery: entriesRead=%d recoveryRate=%d/s\n",
+	       entries.size(),
+	       int(entries.size() / elapsed));
+
+	printf("Starting ExtentQueue FastPath Recovery from Disk.\n");
+	intervalStart = timer();
+	start = intervalStart;
+	m_extentQueue.recover(pager, extentQueueState, "ExtentQueueRecovered");
 	state Standalone<VectorRef<LogicalPageID>> extentIDs = wait(pager->getUsedExtents(m_extentQueue.queueID));
 
+	printf("DWALPager numExtents: %u\n", extentIDs.size());
 	// fire read requests for all used extents
 	for (int i = 1; i < extentIDs.size() - 1; i++) {
 		LogicalPageID extID = extentIDs[i];
-		// printf("DWALPager Extents: ID: %u\n", extID);
 		pager->readExtent(extID);
 	}
 	wait(m_extentQueue.headReader.operation);
@@ -8999,19 +9027,13 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	       entries.size(),
 	       int(entries.size() / elapsed));
 
-	// Now peekAll the same queue using regular slow path
-	printf("Starting ExtentQueue SlowPath Recovery from Disk.\n");
+	printf("currentCommitSize: %d, cumulativeCommitSize: %d, pageCacheCount: %d extentCacheCount: %d\n",
+		   currentCommitSize,
+		   cumulativeCommitSize,
+		   pager->getPageCacheCount(),
+		   pager->getExtentCacheCount());
+
 	pager->extentCacheClear();
-	intervalStart = timer();
-	start = intervalStart;
-
-	m_extentQueue.recover(pager, extentQueueState, "ExtentQueueRecovered");
-	Standalone<VectorRef<ExtentQueueEntry<16>>> entries = wait(m_extentQueue.peekAll(true));
-
-	elapsed = timer() - start;
-	printf("Completed slowpath extent queue recovery: entriesRead=%d recoveryRate=%d/s\n",
-	       entries.size(),
-	       int(entries.size() / elapsed));
 	return Void();
 }
 
