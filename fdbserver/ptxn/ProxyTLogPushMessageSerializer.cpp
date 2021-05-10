@@ -45,11 +45,7 @@ bool proxyTLogPushMessageDeserializer(const Arena& arena,
                                       StringRef serialized,
                                       ProxyTLogMessageHeader& header,
                                       std::vector<SubsequenceMutationItem>& messages) {
-	if (!headeredItemDeserializerBase(arena, serialized, header, messages)) {
-		return false;
-	}
-
-	return true;
+	return headeredItemDeserializerBase(arena, serialized, header, messages);
 }
 
 } // namespace ptxn

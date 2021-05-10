@@ -49,7 +49,10 @@ std::vector<ptxn::TeamID> getRandomTeams(const std::vector<ptxn::TeamID>& teams)
 
 // Makes a batch of "n" requests starting at "beginVersion", where each batch
 // increases by "increment" amount.
-std::vector<ResolveTransactionBatchRequest> makeTxnBatch(Version prevVersion, Version beginVersion, int n, int64_t increment, std::vector<ptxn::TeamID> teams) {
+std::vector<ResolveTransactionBatchRequest> makeTxnBatch(Version prevVersion,
+                                                         Version beginVersion,
+                                                         int n,
+                                                         int64_t increment) {
 	std::vector<ResolveTransactionBatchRequest> batch(n);
 
 	Version current = beginVersion;
@@ -85,18 +88,18 @@ TEST_CASE("fdbserver/ptxn/test/resolver") {
 	state const Version lastEpochEnd = 100;
 	state const int totalRequests = 10;
 	state std::vector<Future<Void>> actors;
-	state std::shared_ptr<ptxn::TestDriverContext> context;
+	state std::shared_ptr<ptxn::test::TestDriverContext> context;
 	state std::vector<ptxn::TeamID> teams;
 	state const int totalTeams = deterministicRandom()->randomInt(10, 1000);
 
-	ptxn::TestDriverOptions options(params);
+	ptxn::test::TestDriverOptions options(params);
 	std::cout << options << std::endl;
 
 	for (int i = 0; i < totalTeams; i++) {
 		teams.emplace_back(0, i);
 	}
 
-	context = ptxn::initTestDriverContext(options);
+	context = ptxn::test::initTestDriverContext(options);
 	startFakeResolver(actors, context);
 	std::cout << "Started " << context->numResolvers << " Resolvers with " << totalTeams << " teams\n";
 

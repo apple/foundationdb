@@ -37,7 +37,7 @@
 
 #pragma once
 
-namespace ptxn {
+namespace ptxn::test {
 
 struct FakeStorageServerContext {
 	std::shared_ptr<TestDriverContext> pTestDriverContext;
@@ -51,7 +51,7 @@ ACTOR Future<Void> fakeStorageServer_PassivelyReceive(
 Future<Void> getFakeStorageServerActor(const MessageTransferModel model,
                                        std::shared_ptr<FakeStorageServerContext> pFakeStorageServerContext);
 
-} // namespace ptxn
+} // namespace ptxn::test
 
 #include "flow/unactorcompiler.h"
 #endif // FDBSERVER_PTXN_TEST_FAKESTORAGESERVER_ACTOR_H

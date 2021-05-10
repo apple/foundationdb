@@ -20,6 +20,8 @@
 
 #include "fdbserver/ptxn/test/Driver.h"
 
+#include <array>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <unordered_map>
@@ -27,16 +29,25 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/ptxn/Config.h"
+#include "fdbserver/ptxn/MessageTypes.h"
 #include "fdbserver/ptxn/test/FakeProxy.actor.h"
 #include "fdbserver/ptxn/test/FakeResolver.actor.h"
 #include "fdbserver/ptxn/test/FakeStorageServer.actor.h"
 #include "fdbserver/ptxn/test/FakeTLog.actor.h"
+#include "fdbserver/ptxn/TLogPeekCursor.h"
 #include "fdbserver/ResolverInterface.h"
-#include "flow/IRandom.h"
-#include "flow/Trace.h"
 #include "flow/genericactors.actor.h"
+#include "flow/IRandom.h"
+#include "flow/String.h"
+#include "flow/Trace.h"
 
-namespace ptxn {
+#include "flow/actorcompiler.h" // This must be the last #include
+
+namespace ptxn::test {
+
+TeamID getNewTeamID() {
+	return TeamID{ deterministicRandom()->randomUniqueID() };
+}
 
 std::ostream& operator<<(std::ostream& stream, const TestDriverOptions& option) {
 	stream << "Values for ptxn/Driver.actor.cpp:DriverTestOptions:" << std::endl;
@@ -81,7 +92,7 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 
 	// FIXME use C++20 range
 	for (int i = 0; i < context->numTeamIDs; ++i) {
-		context->teamIDs.push_back(TeamID{ deterministicRandom()->randomUniqueID() });
+		context->teamIDs.push_back(getNewTeamID());
 	}
 
 	// Prepare Proxies
@@ -248,10 +259,10 @@ void verifyMutationsInRecord(std::vector<CommitRecord>& records,
 	throw internal_error_msg("Mutations does not match previous record");
 }
 
-} // namespace ptxn
+} // namespace ptxn::test
 
 TEST_CASE("/fdbserver/ptxn/test/driver") {
-	using namespace ptxn;
+	using namespace ptxn::test;
 
 	TestDriverOptions options(params);
 	std::cout << options << std::endl;
@@ -268,3 +279,158 @@ TEST_CASE("/fdbserver/ptxn/test/driver") {
 	return Void();
 }
 
+namespace ptxn::test::tlogPeek {
+
+const int NUM_VERSIONS = 1000;
+const int INITIAL_VERSION = 10000;
+const int NUM_MUTATIONS_PER_VERSION = 100;
+const int NUM_PEEK_TIMES = 1000;
+const std::array<TeamID, 3> TEAM_IDS = { getNewTeamID(), getNewTeamID(), getNewTeamID() };
+
+TeamID getRandomTeamID() {
+	return TEAM_IDS[deterministicRandom()->randomInt(0, TEAM_IDS.size())];
+}
+
+void fillMutations(std::shared_ptr<FakeTLogContext>& pContext, std::vector<Version>& versions) {
+	ASSERT(pContext != nullptr);
+
+	std::cout << std::endl
+	          << "Filling TLog: " << NUM_VERSIONS << " commits, total " << NUM_MUTATIONS_PER_VERSION * NUM_VERSIONS
+	          << " mutations." << std::endl;
+
+	Version version = INITIAL_VERSION;
+	for (int i = 0; i < NUM_VERSIONS; ++i) {
+		versions.push_back(version);
+
+		Subsequence subsequence = 1;
+		for (int j = 0; j < NUM_MUTATIONS_PER_VERSION; ++j) {
+			TeamID teamID = getRandomTeamID();
+			StringRef key = StringRef(pContext->persistenceArena, deterministicRandom()->randomAlphaNumeric(10));
+			StringRef value =
+			    StringRef(pContext->persistenceArena,
+			              deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(10, 1000)));
+			pContext->mutations[teamID].push_back(
+			    pContext->persistenceArena,
+			    VersionSubsequenceMutation(version, subsequence++, MutationRef(MutationRef::SetValue, key, value)));
+		}
+
+		version += deterministicRandom()->randomInt(1, 10);
+	}
+	versions.push_back(version);
+
+	std::cout << std::endl;
+	for (const auto& teamID : TEAM_IDS) {
+		std::cout << "Team " << teamID << " has " << pContext->mutations[teamID].size() << " mutations" << std::endl;
+	}
+
+	std::cout << std::endl;
+	std::cout << "Version range: [" << versions.front() << ", " << versions.back() << "]" << std::endl;
+}
+
+Future<Void> initializeTLogForPeekTest(MessageTransferModel transferModel, std::shared_ptr<FakeTLogContext>& pContext) {
+	pContext->pTLogInterface = getNewTLogInterface(transferModel);
+	pContext->pTLogInterface->initEndpoints();
+
+	return getFakeTLogActor(transferModel, pContext);
+}
+
+// Randomly peek data and verify if the data is consistent
+ACTOR Future<Void> peekAndCheck(std::shared_ptr<FakeTLogContext> pContext, std::vector<Version> versions) {
+	ASSERT(pContext != nullptr);
+
+	state int peekTime = 0;
+
+	loop {
+		state Optional<UID> debugID(deterministicRandom()->randomUniqueID());
+		state TeamID teamID(getRandomTeamID());
+		state size_t beginVersionIndex(deterministicRandom()->randomInt(0, versions.size() - 1));
+		state size_t endVersionIndex(
+		    std::min(beginVersionIndex + deterministicRandom()->randomInt(1, 10), versions.size()));
+		state Version beginVersion(versions[beginVersionIndex]);
+		state Version endVersion(endVersionIndex >= versions.size() ? -1 : versions[endVersionIndex]);
+		state TLogPeekRequest request;
+
+		request.debugID = debugID;
+		request.teamID = teamID;
+		request.beginVersion = beginVersion;
+		request.endVersion = endVersion;
+
+		std::cout << std::endl;
+		std::cout << "Sending request with Debug ID " << debugID.get() << " with version range [" << beginVersion
+		          << ", " << endVersion << ")" << std::endl;
+
+		TLogPeekReply reply = wait(pContext->pTLogInterface->peek.getReply(request));
+
+		std::cout << std::endl;
+		std::cout << "Reply:" << std::endl;
+		std::cout << std::setw(30) << "Debug ID: " << reply.debugID.get() << std::endl;
+		std::cout << std::setw(30) << "Content length: " << reply.data.size() << std::endl;
+
+		// Verify if the deserialized data is the same
+		int index = 0;
+		while (pContext->mutations[teamID][index].version != beginVersion)
+			++index;
+
+		TLogStorageServerMessageDeserializer deserializer(reply.arena, reply.data);
+		for (TLogStorageServerMessageDeserializer::iterator iter = deserializer.begin(); iter != deserializer.end();
+		     ++iter, ++index) {
+			ASSERT(pContext->mutations[teamID][index] == *iter);
+		}
+
+		if (++peekTime == NUM_PEEK_TIMES) {
+			break;
+		}
+	}
+
+	return Void();
+}
+
+} // namespace ptxn::test::tlogPeek
+
+TEST_CASE("/fdbserver/ptxn/test/tlogPeek/readFromSerialization") {
+	state std::vector<Version> versions;
+	state std::shared_ptr<ptxn::test::FakeTLogContext> pContext(std::make_shared<ptxn::test::FakeTLogContext>());
+	state std::vector<Future<Void>> actors;
+
+	ptxn::test::tlogPeek::fillMutations(pContext, versions);
+	actors.push_back(
+	    ptxn::test::tlogPeek::initializeTLogForPeekTest(ptxn::MessageTransferModel::TLogActivelyPush, pContext));
+	wait(ptxn::test::tlogPeek::peekAndCheck(pContext, versions));
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/ServerTeamPeekCursor") {
+	state std::vector<Version> versions;
+	state std::shared_ptr<ptxn::test::FakeTLogContext> pContext(std::make_shared<ptxn::test::FakeTLogContext>());
+	state std::vector<Future<Void>> actors;
+	state Arena arena;
+	state ptxn::TeamID teamID(ptxn::test::tlogPeek::TEAM_IDS[0]);
+
+	ptxn::test::tlogPeek::fillMutations(pContext, versions);
+	// Limit the size of reply, to force multiple peeks
+	pContext->maxBytesPerPeek = params.getInt("maxBytesPerPeek").orDefault(32 * 1024);
+	actors.push_back(
+	    ptxn::test::tlogPeek::initializeTLogForPeekTest(ptxn::MessageTransferModel::TLogActivelyPush, pContext));
+
+	state std::shared_ptr<ptxn::ServerTeamPeekCursor> pCursor = std::make_shared<ptxn::ServerTeamPeekCursor>(
+	    ptxn::test::tlogPeek::INITIAL_VERSION, teamID, pContext->pTLogInterface.get());
+	state size_t index = 0;
+	loop {
+		std::cout << std::endl << "Querying team " << teamID.toString() << " from version: " << pCursor->getLastVersion() << std::endl;
+		state bool remoteDataAvailable = wait(pCursor->remoteMoreAvailable());
+		if (!remoteDataAvailable) {
+			std::cout << " TLog reported no more mutations available." << std::endl;
+			break;
+		}
+
+		while (pCursor->hasRemaining()) {
+			ASSERT(pCursor->get() == pContext->mutations[teamID][index++]);
+			pCursor->next();
+		}
+	}
+
+	ASSERT_EQ(index, pContext->mutations[teamID].size());
+
+	return Void();
+}

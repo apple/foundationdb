@@ -33,7 +33,7 @@
 #include "fdbserver/ResolverInterface.h"
 #include "flow/UnitTest.h"
 
-namespace ptxn {
+namespace ptxn::test {
 
 struct CommitValidationRecord {
 	bool tLogValidated = false;
@@ -141,6 +141,9 @@ void verifyMutationsInRecord(std::vector<CommitRecord>& record,
                              const std::vector<MutationRef>& mutations,
                              std::function<void(CommitValidationRecord&)> validateUpdater);
 
-} // namespace ptxn
+// Get a TeamID, the TeamID is determinstic in the simulation environment
+TeamID getNewTeamID();
+
+} // namespace ptxn::test
 
 #endif // FDBSERVER_PTXN_TEST_DRIVER_H

@@ -37,7 +37,7 @@
 
 #pragma once
 
-namespace ptxn {
+namespace ptxn::test {
 
 struct FakeProxyContext {
 	int numCommits;
@@ -47,7 +47,7 @@ struct FakeProxyContext {
 
 ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext);
 
-} // namespace ptxn
+} // namespace ptxn::test
 
 #include "flow/unactorcompiler.h"
 #endif // FDBSERVER_PTXN_TEST_FAKEPROXY_ACTOR_H
