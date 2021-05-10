@@ -116,7 +116,8 @@ public:
 		const char* resource = "";
 		if (withResource)
 			resource = "<name>";
-		return format("blobstore://[<api_key>:<secret>]@<host>[:<port>]/%s[?<param>=<value>[&<param>=<value>]...]", resource);
+		return format("blobstore://[<api_key>:<secret>@]<host>[:<port>]/%s[?<param>=<value>[&<param>=<value>]...]",
+		              resource);
 	}
 
 	typedef std::map<std::string, std::string> ParametersT;
