@@ -52,7 +52,8 @@ std::vector<ptxn::TeamID> getRandomTeams(const std::vector<ptxn::TeamID>& teams)
 std::vector<ResolveTransactionBatchRequest> makeTxnBatch(Version prevVersion,
                                                          Version beginVersion,
                                                          int n,
-                                                         int64_t increment) {
+                                                         int64_t increment,
+                                                         const std::vector<ptxn::TeamID>& teams) {
 	std::vector<ResolveTransactionBatchRequest> batch(n);
 
 	Version current = beginVersion;
