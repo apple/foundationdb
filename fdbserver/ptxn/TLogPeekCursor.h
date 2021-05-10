@@ -40,7 +40,8 @@ namespace ptxn {
 class PeekCursorBase {
 public:
 	// Iterator for pulled mutations. This is not a standard input iterator as it is not duplicable, thus no postfix
-	// operator++ support. NOTE It will *NOT* trigger remoteMoreAvailable() as this is not an ACTOR. also this is
+	// operator++ support. NOTE It will *NOT* trigger remoteMoreAvailable(). It will only iterate over the serialized
+	// data that are already peeked from TLog.
 	class iterator : public ConstInputIteratorBase<VersionSubsequenceMutation> {
 		friend class PeekCursorBase;
 
