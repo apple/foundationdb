@@ -274,6 +274,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	private CompletableFuture<byte[]> get_internal(byte[] key, boolean isSnapshot) {
 		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
+			eventKeeper.increment(Events.GET_REQUESTS);
 		}
 		pointerReadLock.lock();
 		try {
@@ -294,6 +295,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	private CompletableFuture<byte[]> getKey_internal(KeySelector selector, boolean isSnapshot) {
 		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
+			eventKeeper.increment(Events.GET_KEY_REQUESTS);
 		}
 		pointerReadLock.lock();
 		try {
@@ -309,6 +311,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	public CompletableFuture<Long> getEstimatedRangeSizeBytes(byte[] begin, byte[] end) {
 		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
+			eventKeeper.increment(Events.ESTIMATED_RANGE_SIZE_REQUESTS);
 		}
 		pointerReadLock.lock();
 		try {
@@ -325,6 +328,10 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 	@Override
 	public CompletableFuture<KeyArrayResult> getRangeSplitPoints(byte[] begin, byte[] end, long chunkSize) {
+		if (eventKeeper != null) {
+			eventKeeper.increment(Events.JNI_CALL);
+			eventKeeper.increment(Events.GET_RANGE_SPLIT_POINT_REQUESTS);
+		}
 		pointerReadLock.lock();
 		try {
 			return new FutureKeyArray(Transaction_getRangeSplitPoints(getPtr(), begin, end, chunkSize), executor);
@@ -473,6 +480,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	private void addConflictRange(byte[] keyBegin, byte[] keyEnd, ConflictRangeType type) {
 		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
+			eventKeeper.increment(Events.ADD_CONFLICT_RANGES);
 		}
 		pointerReadLock.lock();
 		try {
@@ -506,10 +514,10 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 	@Override
 	public void set(byte[] key, byte[] value) {
-		if (key == null || value == null)
-			throw new IllegalArgumentException("Keys/Values must be non-null");
+		if (key == null || value == null) throw new IllegalArgumentException("Keys/Values must be non-null");
 		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
+			eventKeeper.increment(Events.SETS);
 		}
 		pointerReadLock.lock();
 		try {
@@ -521,10 +529,10 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 	@Override
 	public void clear(byte[] key) {
-		if (key == null)
-			throw new IllegalArgumentException("Key cannot be null");
+		if (key == null) throw new IllegalArgumentException("Key cannot be null");
 		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
+			eventKeeper.increment(Events.CLEAR_REQUESTS);
 		}
 		pointerReadLock.lock();
 		try {
@@ -536,10 +544,10 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 	@Override
 	public void clear(byte[] beginKey, byte[] endKey) {
-		if (beginKey == null || endKey == null)
-			throw new IllegalArgumentException("Keys cannot be null");
+		if (beginKey == null || endKey == null) throw new IllegalArgumentException("Keys cannot be null");
 		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
+			eventKeeper.increment(Events.CLEAR_REQUESTS);
 		}
 		pointerReadLock.lock();
 		try {
@@ -564,6 +572,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	public void mutate(MutationType optype, byte[] key, byte[] value) {
 		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
+			eventKeeper.increment(Events.MUTATIONS);
 		}
 		pointerReadLock.lock();
 		try {
@@ -577,6 +586,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	public void setOption(int code, byte[] param) {
 		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
+			eventKeeper.increment(Events.SET_TRANSACTION_OPTION);
 		}
 		pointerReadLock.lock();
 		try {
@@ -590,6 +600,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	public CompletableFuture<Void> commit() {
 		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
+			eventKeeper.increment(Events.COMMITS);
 		}
 		pointerReadLock.lock();
 		try {
@@ -603,6 +614,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	public Long getCommittedVersion() {
 		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
+			eventKeeper.increment(Events.GET_COMMITTED_VERSION_REQUESTS);
 		}
 		pointerReadLock.lock();
 		try {
@@ -616,6 +628,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	public CompletableFuture<byte[]> getVersionstamp() {
 		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
+			eventKeeper.increment(Events.GET_VERSIONSTAMP_REQUESTS);
 		}
 		pointerReadLock.lock();
 		try {
@@ -629,6 +642,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	public CompletableFuture<Long> getApproximateSize() {
 		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
+			eventKeeper.increment(Events.GET_APPROXIMATE_SIZE_REQUESTS);
 		}
 		pointerReadLock.lock();
 		try {
@@ -642,6 +656,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	public CompletableFuture<Void> watch(byte[] key) throws FDBException {
 		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
+			eventKeeper.increment(Events.WATCH_REQUESTS);
 		}
 		pointerReadLock.lock();
 		try {
@@ -684,8 +699,9 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 	@Override
 	public void cancel() {
-		if(eventKeeper!=null){
+		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
+			eventKeeper.increment(Events.CANCEL_REQUESTS);
 		}
 		pointerReadLock.lock();
 		try {
@@ -696,8 +712,9 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	}
 
 	public CompletableFuture<String[]> getAddressesForKey(byte[] key) {
-		if(eventKeeper!=null){
+		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
+			eventKeeper.increment(Events.ADDRESSES_FOR_KEY_REQUESTS);
 		}
 		pointerReadLock.lock();
 		try {
@@ -715,9 +732,8 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 			tr.options().setUsedDuringCommitProtectionDisable();
 			transactionOwner = false;
 			return tr;
-		}
-		catch(RuntimeException err) {
-			if(tr != null) {
+		} catch (RuntimeException err) {
+			if (tr != null) {
 				tr.close();
 			}
 
@@ -727,10 +743,9 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 	@Override
 	protected long getPtr() {
-		if(!transactionOwner) {
+		if (!transactionOwner) {
 			throw new IllegalStateException("Transaction has been invalidated by reset");
-		}
-		else {
+		} else {
 			return super.getPtr();
 		}
 	}
@@ -748,10 +763,10 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 	@Override
 	protected void closeInternal(long cPtr) {
-		if(eventKeeper!=null){
+		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
 		}
-		if(transactionOwner) {
+		if (transactionOwner) {
 			Transaction_dispose(cPtr);
 		}
 	}
