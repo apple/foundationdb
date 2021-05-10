@@ -39,7 +39,7 @@
 
 #pragma once
 
-namespace ptxn {
+namespace ptxn::test {
 
 struct TestTLogDriverOptions {
 	std::string diskQueueBasename;
@@ -105,7 +105,7 @@ struct TLogDriverContext {
 	int8_t tagLocality;
 };
 
-} // namespace ptxn
+} // namespace ptxn::test
 
 #include "flow/unactorcompiler.h"
 #endif // FDBSERVER_PTXN_TEST_REALTLOG_ACTOR_H

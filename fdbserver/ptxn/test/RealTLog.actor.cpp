@@ -38,7 +38,7 @@
 // In the future this could support multiple tlogs (single or multiple groups),
 // along with higher level components such as TagPartitionedLogSystem.
 
-namespace ptxn {
+namespace ptxn::test {
 
 // build test state.
 std::shared_ptr<TLogDriverContext> initTLogDriverContext(const TestDriverOptions& options,
@@ -264,10 +264,10 @@ void startActors(std::vector<Future<Void>>& actors,
 	actors.emplace_back(getTLogGroupActor(pTestDriverContext, pTLogDriverContext));
 }
 
-} // namespace ptxn
+} // namespace ptxn::test
 
 TEST_CASE("/fdbserver/ptxn/test/realtlogdriver") {
-	using namespace ptxn;
+	using namespace ptxn::test;
 
 	std::vector<Future<Void>> actors;
 	TestDriverOptions driverOptions(params);
