@@ -87,6 +87,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( TLOG_DEGRADED_DURATION,                                5.0 );
 	init( MAX_CACHE_VERSIONS,                                   10e6 );
 	init( TLOG_IGNORE_POP_AUTO_ENABLE_DELAY,                   300.0 );
+	init( TLOG_GROUP_COLLECTION_TARGET_SIZE,                      10 );
 	init( TXS_POPPED_MAX_DELAY,                                  1.0 ); if ( randomize && BUGGIFY ) TXS_POPPED_MAX_DELAY = deterministicRandom()->random01();
 	init( TLOG_MAX_CREATE_DURATION,                             10.0 );
 	init( PEEK_LOGGING_AMOUNT,                                     5 );
@@ -616,6 +617,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	//Worker
 	init( WORKER_LOGGING_INTERVAL,                               5.0 );
 	init( HEAP_PROFILER_INTERVAL,                               30.0 );
+	init( REGISTER_WORKER_REQUEST_TIMEOUT,                     300.0 );
 	init( DEGRADED_RESET_INTERVAL,                          24*60*60 ); if ( randomize && BUGGIFY ) DEGRADED_RESET_INTERVAL = 10;
 	init( DEGRADED_WARNING_LIMIT,                                  1 );
 	init( DEGRADED_WARNING_RESET_DELAY,                   7*24*60*60 );
@@ -705,7 +707,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( REDWOOD_DEFAULT_PAGE_SIZE,                            4096 );
 	init( REDWOOD_KVSTORE_CONCURRENT_READS,                       64 );
 	init( REDWOOD_COMMIT_CONCURRENT_READS,                        64 );
-	init( REDWOOD_PAGE_REBUILD_FILL_FACTOR,                     0.66 );
+	init( REDWOOD_PAGE_REBUILD_MAX_SLACK,                       0.33 );
 	init( REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES,                    10 );
 	init( REDWOOD_LAZY_CLEAR_MIN_PAGES,                            0 );
 	init( REDWOOD_LAZY_CLEAR_MAX_PAGES,                          1e6 );

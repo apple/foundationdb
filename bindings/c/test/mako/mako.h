@@ -68,6 +68,7 @@ enum Arguments {
 	ARG_VERSION,
 	ARG_KNOBS,
 	ARG_FLATBUFFERS,
+	ARG_LOGGROUP,
 	ARG_TRACE,
 	ARG_TRACEPATH,
 	ARG_TRACEFORMAT,
@@ -97,6 +98,7 @@ typedef struct {
 	int ops[MAX_OP][3];
 } mako_txnspec_t;
 
+#define LOGGROUP_MAX 256
 #define KNOB_MAX 256
 #define TAGPREFIXLENGTH_MAX 8
 
@@ -122,6 +124,7 @@ typedef struct {
 	int verbose;
 	mako_txnspec_t txnspec;
 	char cluster_file[PATH_MAX];
+	char log_group[LOGGROUP_MAX];
 	int trace;
 	char tracepath[PATH_MAX];
 	int traceformat; /* 0 - XML, 1 - JSON */

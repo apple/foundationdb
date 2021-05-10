@@ -103,54 +103,10 @@ function(symlink_files)
   endif()
 endfunction()
 
-# 'map' from (destination, package) to path
-# format vars like install_destination_for_${destination}_${package}
-set(install_destination_for_bin_tgz "bin")
-set(install_destination_for_bin_deb "usr/bin")
-set(install_destination_for_bin_el6 "usr/bin")
-set(install_destination_for_bin_el7 "usr/bin")
-set(install_destination_for_bin_pm "usr/local/bin")
-set(install_destination_for_sbin_tgz "sbin")
-set(install_destination_for_sbin_deb "usr/sbin")
-set(install_destination_for_sbin_el6 "usr/sbin")
-set(install_destination_for_sbin_el7 "usr/sbin")
-set(install_destination_for_sbin_pm "usr/local/libexec")
-set(install_destination_for_lib_tgz "lib")
-set(install_destination_for_lib_deb "usr/lib")
-set(install_destination_for_lib_el6 "usr/lib64")
-set(install_destination_for_lib_el7 "usr/lib64")
-set(install_destination_for_lib_pm "usr/local/lib")
-set(install_destination_for_fdbmonitor_tgz "sbin")
-set(install_destination_for_fdbmonitor_deb "usr/lib/foundationdb")
-set(install_destination_for_fdbmonitor_el6 "usr/lib/foundationdb")
-set(install_destination_for_fdbmonitor_el7 "usr/lib/foundationdb")
-set(install_destination_for_fdbmonitor_pm "usr/local/libexec")
-set(install_destination_for_include_tgz "include")
-set(install_destination_for_include_deb "usr/include")
-set(install_destination_for_include_el6 "usr/include")
-set(install_destination_for_include_el7 "usr/include")
-set(install_destination_for_include_pm "usr/local/include")
-set(install_destination_for_etc_tgz "etc/foundationdb")
-set(install_destination_for_etc_deb "etc/foundationdb")
-set(install_destination_for_etc_el6 "etc/foundationdb")
-set(install_destination_for_etc_el7 "etc/foundationdb")
-set(install_destination_for_etc_pm "usr/local/etc/foundationdb")
-set(install_destination_for_log_tgz "log/foundationdb")
-set(install_destination_for_log_deb "var/log/foundationdb")
-set(install_destination_for_log_el6 "var/log/foundationdb")
-set(install_destination_for_log_el7 "var/log/foundationdb")
-set(install_destination_for_log_pm "usr/local/foundationdb/logs")
-set(install_destination_for_data_tgz "lib/foundationdb")
-set(install_destination_for_data_deb "var/lib/foundationdb/data")
-set(install_destination_for_data_el6 "var/lib/foundationdb/data")
-set(install_destination_for_data_el7 "var/lib/foundationdb/data")
-set(install_destination_for_data_pm "usr/local/foundationdb/data")
 fdb_install_packages(TGZ DEB EL7 PM VERSIONED)
 fdb_install_dirs(BIN SBIN LIB FDBMONITOR INCLUDE ETC LOG DATA)
 message(STATUS "FDB_INSTALL_DIRS -> ${FDB_INSTALL_DIRS}")
 
-# 'map' from (destination, package) to path
-# format vars like install_destination_for_${destination}_${package}
 install_destinations(TGZ
   BIN bin
   SBIN sbin
@@ -169,7 +125,7 @@ install_destinations(DEB
   INCLUDE usr/include
   ETC etc/foundationdb
   LOG var/log/foundationdb
-  DATA var/lib/foundationdb)
+  DATA var/lib/foundationdb/data)
 copy_install_destinations(DEB EL7)
 install_destinations(EL7 LIB usr/lib64)
 install_destinations(PM
@@ -226,6 +182,13 @@ configure_file("${PROJECT_SOURCE_DIR}/packaging/multiversion/clients/postinst" "
 set(LIB_DIR lib64)
 configure_file("${PROJECT_SOURCE_DIR}/packaging/multiversion/clients/postinst" "${script_dir}/clients/postinst-el7" @ONLY)
 configure_file("${PROJECT_SOURCE_DIR}/packaging/multiversion/clients/prerm" "${script_dir}/clients" @ONLY)
+
+
+################################################################################
+# Move Docker Setup
+################################################################################
+
+file(COPY "${PROJECT_SOURCE_DIR}/packaging/docker" DESTINATION "${PROJECT_BINARY_DIR}/packages/")
 
 ################################################################################
 # General CPack configuration

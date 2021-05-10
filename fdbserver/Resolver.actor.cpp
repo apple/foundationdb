@@ -18,35 +18,37 @@
  * limitations under the License.
  */
 
-#include "flow/ActorCollection.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/ConflictSet.h"
-#include "fdbserver/ResolverInterface.h"
-#include "fdbserver/MasterInterface.h"
-#include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/WaitFailure.h"
-#include "fdbserver/Knobs.h"
-#include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/Orderer.actor.h"
-#include "fdbserver/StorageMetrics.h"
+#include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
+#include "fdbserver/ConflictSet.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/MasterInterface.h"
+#include "fdbserver/ptxn/TeamVersionTracker.h"
+#include "fdbserver/ResolverInterface.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/StorageMetrics.h"
+#include "fdbserver/WaitFailure.h"
+#include "fdbserver/WorkerInterface.actor.h"
+#include "flow/ActorCollection.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 struct ProxyRequestsInfo {
 	std::map<Version, ResolveTransactionBatchReply> outstandingBatches;
-	Version lastVersion;
+	Version lastVersion = invalidVersion;
 
-	ProxyRequestsInfo() : lastVersion(-1) {}
+	ProxyRequestsInfo() = default;
 };
-} // namespace
 
-namespace {
 struct Resolver : ReferenceCounted<Resolver> {
 	UID dbgid;
 	int commitProxyCount, resolverCount;
 	NotifiedVersion version;
 	AsyncVar<Version> neededVersion;
+	ptxn::TeamVersionTracker versionTracker; // tracks per team commit version
 
 	Map<Version, Standalone<VectorRef<StateTransactionRef>>> recentStateTransactions;
 	Deque<std::pair<Version, int64_t>> recentStateTransactionSizes;
@@ -108,6 +110,11 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 	state NetworkAddress proxyAddress =
 	    req.prevVersion >= 0 ? req.reply.getEndpoint().getPrimaryAddress() : NetworkAddress();
 	state ProxyRequestsInfo& proxyInfo = self->proxyInfoMap[proxyAddress];
+
+	if (req.prevVersion < 0) {
+		// The first request, set teams' beginVersion
+		self->versionTracker.addTeams(req.teams, req.version);
+	}
 
 	++self->resolveBatchIn;
 
@@ -173,8 +180,13 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 
 		ResolveTransactionBatchReply& reply = proxyInfo.outstandingBatches[req.version];
 
-		vector<int> commitList;
-		vector<int> tooOldList;
+		std::vector<int> commitList;
+		std::vector<int> tooOldList;
+
+		// Update team versions
+		if (req.prevVersion >= 0) { // Not first request
+			reply.previousCommitVersions = self->versionTracker.updateTeams(req.teams, req.version);
+		}
 
 		// Detect conflicts
 		double expire = now() + SERVER_KNOBS->SAMPLE_EXPIRATION_TIME;

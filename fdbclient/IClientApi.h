@@ -42,24 +42,24 @@ public:
 	// until the ThreadFuture's ThreadSingleAssignmentVar has its memory released or it is destroyed.
 	virtual ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot = false) = 0;
 	virtual ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false) = 0;
-	virtual ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin,
-	                                                          const KeySelectorRef& end,
-	                                                          int limit,
-	                                                          bool snapshot = false,
-	                                                          bool reverse = false) = 0;
-	virtual ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin,
-	                                                          const KeySelectorRef& end,
-	                                                          GetRangeLimits limits,
-	                                                          bool snapshot = false,
-	                                                          bool reverse = false) = 0;
-	virtual ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys,
-	                                                          int limit,
-	                                                          bool snapshot = false,
-	                                                          bool reverse = false) = 0;
-	virtual ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys,
-	                                                          GetRangeLimits limits,
-	                                                          bool snapshot = false,
-	                                                          bool reverse = false) = 0;
+	virtual ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
+	                                           const KeySelectorRef& end,
+	                                           int limit,
+	                                           bool snapshot = false,
+	                                           bool reverse = false) = 0;
+	virtual ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
+	                                           const KeySelectorRef& end,
+	                                           GetRangeLimits limits,
+	                                           bool snapshot = false,
+	                                           bool reverse = false) = 0;
+	virtual ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
+	                                           int limit,
+	                                           bool snapshot = false,
+	                                           bool reverse = false) = 0;
+	virtual ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
+	                                           GetRangeLimits limits,
+	                                           bool snapshot = false,
+	                                           bool reverse = false) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) = 0;
 	virtual ThreadFuture<Standalone<StringRef>> getVersionstamp() = 0;
 
@@ -100,8 +100,9 @@ public:
 	virtual void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
 	virtual double getMainThreadBusyness() = 0;
 
-	// Returns the protocol version reported by a quorum of coordinators
+	// Returns the protocol version reported by the coordinator this client is connected to
 	// If an expected version is given, the future won't return until the protocol version is different than expected
+	// Note: this will never return if the server is running a protocol from FDB 5.0 or older
 	virtual ThreadFuture<ProtocolVersion> getServerProtocol(
 	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) = 0;
 

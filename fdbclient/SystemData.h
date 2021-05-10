@@ -52,12 +52,12 @@ extern const KeyRangeRef keyServersKeys, keyServersKeyServersKeys;
 extern const KeyRef keyServersPrefix, keyServersEnd, keyServersKeyServersKey;
 const Key keyServersKey(const KeyRef& k);
 const KeyRef keyServersKey(const KeyRef& k, Arena& arena);
-const Value keyServersValue(Standalone<RangeResultRef> result,
+const Value keyServersValue(RangeResult result,
                             const std::vector<UID>& src,
                             const std::vector<UID>& dest = std::vector<UID>());
 const Value keyServersValue(const std::vector<Tag>& srcTag, const std::vector<Tag>& destTag = std::vector<Tag>());
 // `result` must be the full result of getting serverTagKeys
-void decodeKeyServersValue(Standalone<RangeResultRef> result,
+void decodeKeyServersValue(RangeResult result,
                            const ValueRef& value,
                            std::vector<UID>& src,
                            std::vector<UID>& dest,
@@ -114,6 +114,11 @@ extern const KeyRangeRef cacheChangeKeys;
 extern const KeyRef cacheChangePrefix;
 const Key cacheChangeKeyFor(uint16_t idx);
 uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key);
+
+extern const KeyRangeRef tLogGroupKeys;
+extern const KeyRef tLogGroupPrefix;
+const Key tLogGroupKeyFor(UID serverID);
+UID decodeTLogGroupKey(const KeyRef& key);
 
 // "\xff/serverTag/[[serverID]]" = "[[Tag]]"
 //	Provides the Tag for the given serverID. Used to access a

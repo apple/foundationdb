@@ -97,13 +97,13 @@ double ThreadSafeDatabase::getMainThreadBusyness() {
 	return g_network->networkInfo.metrics.networkBusyness;
 }
 
-// Returns the protocol version reported by a quorum of coordinators
+// Returns the protocol version reported by the coordinator this client is connected to
 // If an expected version is given, the future won't return until the protocol version is different than expected
+// Note: this will never return if the server is running a protocol from FDB 5.0 or older
 ThreadFuture<ProtocolVersion> ThreadSafeDatabase::getServerProtocol(Optional<ProtocolVersion> expectedVersion) {
 	DatabaseContext* db = this->db;
-	return onMainThread([db, expectedVersion]() -> Future<ProtocolVersion> {
-		return getClusterProtocol(db->getConnectionFile(), expectedVersion);
-	});
+	return onMainThread(
+	    [db, expectedVersion]() -> Future<ProtocolVersion> { return db->getClusterProtocol(expectedVersion); });
 }
 
 ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
@@ -217,31 +217,31 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> ThreadSafeTransaction::getRangeSplit
 	});
 }
 
-ThreadFuture<Standalone<RangeResultRef>> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
-                                                                         const KeySelectorRef& end,
-                                                                         int limit,
-                                                                         bool snapshot,
-                                                                         bool reverse) {
+ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
+                                                          const KeySelectorRef& end,
+                                                          int limit,
+                                                          bool snapshot,
+                                                          bool reverse) {
 	KeySelector b = begin;
 	KeySelector e = end;
 
 	ReadYourWritesTransaction* tr = this->tr;
-	return onMainThread([tr, b, e, limit, snapshot, reverse]() -> Future<Standalone<RangeResultRef>> {
+	return onMainThread([tr, b, e, limit, snapshot, reverse]() -> Future<RangeResult> {
 		tr->checkDeferredError();
 		return tr->getRange(b, e, limit, snapshot, reverse);
 	});
 }
 
-ThreadFuture<Standalone<RangeResultRef>> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
-                                                                         const KeySelectorRef& end,
-                                                                         GetRangeLimits limits,
-                                                                         bool snapshot,
-                                                                         bool reverse) {
+ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
+                                                          const KeySelectorRef& end,
+                                                          GetRangeLimits limits,
+                                                          bool snapshot,
+                                                          bool reverse) {
 	KeySelector b = begin;
 	KeySelector e = end;
 
 	ReadYourWritesTransaction* tr = this->tr;
-	return onMainThread([tr, b, e, limits, snapshot, reverse]() -> Future<Standalone<RangeResultRef>> {
+	return onMainThread([tr, b, e, limits, snapshot, reverse]() -> Future<RangeResult> {
 		tr->checkDeferredError();
 		return tr->getRange(b, e, limits, snapshot, reverse);
 	});

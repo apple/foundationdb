@@ -447,6 +447,10 @@ public:
 	int64_t TLOG_RECOVER_MEMORY_LIMIT;
 	double TLOG_IGNORE_POP_AUTO_ENABLE_DELAY;
 
+	// Number of TLogGroup to recruit in TLogGroupCollection.
+	// TODO: Should we function of number of storage teams avaialble?
+	int TLOG_GROUP_COLLECTION_TARGET_SIZE;
+
 	int64_t MAX_MANUAL_THROTTLED_TRANSACTION_TAGS;
 	int64_t MAX_AUTO_THROTTLED_TRANSACTION_TAGS;
 	double MIN_TAG_COST;
@@ -543,6 +547,7 @@ public:
 	// Worker
 	double WORKER_LOGGING_INTERVAL;
 	double HEAP_PROFILER_INTERVAL;
+	double REGISTER_WORKER_REQUEST_TIMEOUT;
 	double DEGRADED_RESET_INTERVAL;
 	double DEGRADED_WARNING_LIMIT;
 	double DEGRADED_WARNING_RESET_DELAY;
@@ -638,7 +643,7 @@ public:
 	int REDWOOD_DEFAULT_PAGE_SIZE; // Page size for new Redwood files
 	int REDWOOD_KVSTORE_CONCURRENT_READS; // Max number of simultaneous point or range reads in progress.
 	int REDWOOD_COMMIT_CONCURRENT_READS; // Max number of concurrent reads done to support commit operations
-	double REDWOOD_PAGE_REBUILD_FILL_FACTOR; // When rebuilding pages, start a new page after this capacity
+	double REDWOOD_PAGE_REBUILD_MAX_SLACK; // When rebuilding pages, max slack to allow in page
 	int REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES; // Number of pages to try to pop from the lazy delete queue and process at
 	                                         // once
 	int REDWOOD_LAZY_CLEAR_MIN_PAGES; // Minimum number of pages to free before ending a lazy clear cycle, unless the

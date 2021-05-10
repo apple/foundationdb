@@ -245,8 +245,8 @@ struct WriteDuringReadWorkload : TestWorkload {
 			    limit,
 			    reverse);
 			*memLimit -= memRes.expectedSize();
-			Standalone<RangeResultRef> _res = wait(tr->getRange(begin, end, limit, snapshot, reverse));
-			Standalone<RangeResultRef> res = _res;
+			RangeResult _res = wait(tr->getRange(begin, end, limit, snapshot, reverse));
+			RangeResult res = _res;
 			*memLimit += memRes.expectedSize();
 
 			int systemKeyCount = 0;

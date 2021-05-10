@@ -36,6 +36,17 @@
 
 namespace {
 
+// Returns a randomly picked subset of "teams".
+std::vector<ptxn::TeamID> getRandomTeams(const std::vector<ptxn::TeamID>& teams) {
+	std::vector<ptxn::TeamID> results;
+	for (const auto& team : teams) {
+		if (deterministicRandom()->coinflip()) {
+			results.push_back(team);
+		}
+	}
+	return results;
+}
+
 // Makes a batch of "n" requests starting at "beginVersion", where each batch
 // increases by "increment" amount.
 std::vector<ResolveTransactionBatchRequest> makeTxnBatch(Version prevVersion,
@@ -50,6 +61,7 @@ std::vector<ResolveTransactionBatchRequest> makeTxnBatch(Version prevVersion,
 		r.prevVersion = pv;
 		r.version = current;
 		r.lastReceivedVersion = prevVersion;
+		r.teams = getRandomTeams(teams);
 
 		pv = current;
 		current += increment;
@@ -58,20 +70,38 @@ std::vector<ResolveTransactionBatchRequest> makeTxnBatch(Version prevVersion,
 	return batch;
 }
 
+// Returns the index in "batches", that item's version is "v".
+int findBatch(std::vector<ResolveTransactionBatchRequest> batches, Version v) {
+	for (int i = 0; i < batches.size(); i++) {
+		if (batches[i].version == v)
+			return i;
+	}
+	ASSERT(false);
+	return -1;
+}
+
 } // anonymous namespace
 
+// Creates a random set of teams, sends 10 batches in random order to Resolvers,
+// and verifies the correct previous commit version (PCV) is returned back.
 TEST_CASE("fdbserver/ptxn/test/resolver") {
 	state const Version lastEpochEnd = 100;
 	state const int totalRequests = 10;
 	state std::vector<Future<Void>> actors;
 	state std::shared_ptr<ptxn::test::TestDriverContext> context;
+	state std::vector<ptxn::TeamID> teams;
+	state const int totalTeams = deterministicRandom()->randomInt(10, 1000);
 
 	ptxn::test::TestDriverOptions options(params);
 	std::cout << options << std::endl;
 
+	for (int i = 0; i < totalTeams; i++) {
+		teams.emplace_back(0, i);
+	}
+
 	context = ptxn::test::initTestDriverContext(options);
 	startFakeResolver(actors, context);
-	std::cout << "Started " << context->numResolvers << " Resolvers\n";
+	std::cout << "Started " << context->numResolvers << " Resolvers with " << totalTeams << " teams\n";
 
 	state std::vector<Future<ResolveTransactionBatchReply>> replies;
 	// Imitates resolver initialization from the master server
@@ -82,6 +112,7 @@ TEST_CASE("fdbserver/ptxn/test/resolver") {
 		req.lastReceivedVersion = -1;
 		// triggers debugging trace events at Resolvers
 		req.debugID = deterministicRandom()->randomUniqueID();
+		req.teams = teams;
 
 		replies.push_back(brokenPromiseToNever(r->resolve.getReply(req)));
 	}
@@ -96,13 +127,13 @@ TEST_CASE("fdbserver/ptxn/test/resolver") {
 	state Version beginVersion = 200;
 	state int64_t increment = 7;
 
-	std::vector<ResolveTransactionBatchRequest> batch =
-	    makeTxnBatch(lastEpochEnd, beginVersion, totalRequests, increment);
+	state std::vector<ResolveTransactionBatchRequest> batches =
+	    makeTxnBatch(lastEpochEnd, beginVersion, totalRequests, increment, teams);
 	std::mt19937 g(deterministicRandom()->randomUInt32());
-	std::shuffle(batch.begin(), batch.end(), g);
+	std::shuffle(batches.begin(), batches.end(), g);
 
 	replies.clear();
-	for (auto& req : batch) {
+	for (auto& req : batches) {
 		replies.push_back(brokenPromiseToNever(context->resolverInterfaces[0]->resolve.getReply(req)));
 	}
 
@@ -111,6 +142,25 @@ TEST_CASE("fdbserver/ptxn/test/resolver") {
 	wait(waitForAll(replies));
 	for (const auto& f : replies) {
 		ASSERT(f.isReady() && f.isValid());
+	}
+
+	// Verify team's previous commit versions (PCVs) are correct.
+	std::map<ptxn::TeamID, Version> pcv; // previous commit version
+	for (const auto& team : teams) {
+		pcv[team] = lastEpochEnd;
+	}
+	for (int i = 0; i < totalRequests; i++) {
+		Version v = beginVersion + i * increment;
+		int idx = findBatch(batches, v); // the i'th request
+
+		auto& pcvGot = replies[idx].get().previousCommitVersions;
+		ASSERT_EQ(batches[idx].teams.size(), pcvGot.size());
+		for (const auto& team : batches[idx].teams) {
+			auto it = pcvGot.find(team);
+			ASSERT(it != pcvGot.end());
+			ASSERT_EQ(pcv[team], it->second);
+			pcv[team] = batches[idx].version;
+		}
 	}
 
 	return Void();

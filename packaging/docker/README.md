@@ -1,21 +1,29 @@
 # Overview
 
-This directory provides a Docker image for running FoundationDB.
+This directory provides various Docker images for running FoundationDB.
 
-The image in this directory is based on Ubuntu 18.04, but the commands and
-scripts used to build it should be suitable for most other distros with small
-tweaks to the installation of dependencies.
-
-The image relies on the following dependencies:
-
-*	bash
-*	wget
-*	dig
-*	glibc
+This directory includes two sets of images.  The "release" images are based
+on Ubuntu 18.04.  The EKS images use Amazon Linux, which allows us to profile
+FoundationDB when it is running inside of Amazon EKS.
 
 # Build Configuration
 
-This image supports several build arguments for build-time configuration.
+The build scripts are configured using the following environment variables:
+
+`TAG` is the base docker tag for this build.  The sidecar tag will be this
+string, with a "-1" appended to it.  If you do not specify a tag, then the
+scripts attempt to provide a reasonable default.
+
+`ECR` is the name of the Docker registry the images should be published to.
+It defaults to a private registry, so it is likely you will need to override this.
+
+`STRIPPED` if true, the Docker images will contain stripped binaries without
+debugging symbols.  Debugging symbols add approximately 2GiB to the image size.
+
+# Release Dockerfile arguments.
+
+These arguments are set automatically by the build scripts, but are documented here
+in case you need to invoke the release Dockerfiles directly.
 
 ### FDB_VERSION
 
@@ -25,6 +33,10 @@ The version of FoundationDB to install in the container. This is required.
 
 The base URL for the FoundationDB website. The default is
 `https://www.foundationdb.org`.
+
+You can build the docker without talking to a webserver by using the URL
+`file:///mnt/website` and mirroring the directory tree of the webserver
+inside the `website` subdirectory.
 
 ### FDB_ADDITIONAL_VERSIONS
 
@@ -76,3 +88,24 @@ files you may want to copy are:
 *	`/var/fdb/scripts/create_cluster_file.bash`: A script for setting up the
 	cluster file based on an `FDB_COORDINATOR` environment variable.
 *	`/usr/bin/fdbcli`: The FoundationDB CLI.
+
+If you are running FDB inside of a Kubernetes cluster, you should probably use
+the sidecar image instead.  It makes it easier to automatically copy a compatible
+`libfdb_c.so` and cluster file into application containers.
+
+TODO: Document sidecar.py
+
+# Example Usages
+
+### Build an Ubuntu-based image with a custom tag and unstripped binaries
+```
+# compile FDB, then:
+cd ~/build_output/packages/docker/
+TAG=my-custom-tag ./build-release-docker.sh
+```
+### Build an Amazon Linux-based image with a default tag and stripped binaries
+```
+# compile FDB, then:
+cd ~/build_output/packages/docker/
+STRIPPED=true ./build-eks-docker.sh
+```
