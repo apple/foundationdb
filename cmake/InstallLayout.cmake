@@ -130,11 +130,13 @@ copy_install_destinations(DEB EL7)
 install_destinations(EL7 LIB usr/lib64)
 install_destinations(PM
   BIN usr/local/bin
-  SBIN usr/local/sbin
+  SBIN usr/local/libexec
   LIB lib
   FDBMONITOR usr/local/libexec
   INCLUDE usr/local/include
-  ETC usr/local/etc/foundationdb)
+  ETC usr/local/etc/foundationdb
+  LOG usr/local/foundationdb/logs
+  DATA usr/local/foundationdb/data)
 
 # This can be used for debugging in case above is behaving funky
 #print_install_destinations()
@@ -390,6 +392,11 @@ if(APPLE)
   install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/osx/uninstall-FoundationDB.sh
     DESTINATION "usr/local/foundationdb"
     COMPONENT clients-pm)
+  install(PROGRAMS
+    ${CMAKE_SOURCE_DIR}/packaging/osx/scripts-server/preinstall
+    ${CMAKE_SOURCE_DIR}/packaging/osx/scripts-server/postinstall
+    DESTINATION "Scripts"
+    COMPONENT server-pm)
   install(FILES ${CMAKE_SOURCE_DIR}/packaging/osx/com.foundationdb.fdbmonitor.plist
     DESTINATION "Library/LaunchDaemons"
     COMPONENT server-pm)
@@ -413,12 +420,15 @@ set(CLUSTER_DESCRIPTION1 ${description1} CACHE STRING "Cluster description")
 set(CLUSTER_DESCRIPTION2 ${description2} CACHE STRING "Cluster description")
 
 if(NOT WIN32)
-  install(FILES ${CMAKE_SOURCE_DIR}/packaging/osx/foundationdb.conf.new
-    DESTINATION "usr/local/etc"
-    COMPONENT server-pm)
-  fdb_install(FILES ${CMAKE_SOURCE_DIR}/packaging/foundationdb.conf
-    DESTINATION etc
-    COMPONENT server)
+  if (APPLE)
+    fdb_install(FILES ${CMAKE_SOURCE_DIR}/packaging/osx/foundationdb.conf.new
+      DESTINATION etc
+      COMPONENT server)
+  else()
+    fdb_install(FILES ${CMAKE_SOURCE_DIR}/packaging/foundationdb.conf
+      DESTINATION etc
+      COMPONENT server)
+  endif()
   install(FILES ${CMAKE_SOURCE_DIR}/packaging/make_public.py
     DESTINATION "usr/lib/foundationdb"
     COMPONENT server-deb)
