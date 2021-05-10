@@ -79,7 +79,6 @@ public:
 	virtual void debugTransaction(UID dID) = 0;
 	virtual void checkDeferredError() = 0;
 	virtual void getWriteConflicts(KeyRangeMap<bool>* result) = 0;
-	virtual void preinitializeOnForeignThread() = 0;
 
 	// Used by ThreadSafeTransaction for exceptions thrown in void methods
 	Error deferredError;

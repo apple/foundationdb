@@ -152,7 +152,7 @@ public:
 
 	void getWriteConflicts(KeyRangeMap<bool>* result) override;
 
-	void preinitializeOnForeignThread() override;
+	void preinitializeOnForeignThread();
 
 	Database getDatabase() const { return tr.getDatabase(); }
 

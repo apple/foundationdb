@@ -24,20 +24,17 @@
 #include "fdbclient/SimpleConfigTransaction.h"
 
 ISingleThreadTransaction* ISingleThreadTransaction::allocateOnForeignThread(Type type) {
-	ISingleThreadTransaction* tr;
-	switch (type) {
-	case Type::RYW:
-		tr = (ReadYourWritesTransaction*)(ReadYourWritesTransaction::operator new(sizeof(ReadYourWritesTransaction)));
-		break;
-	case Type::SIMPLE_CONFIG:
-		tr = (SimpleConfigTransaction*)(SimpleConfigTransaction::operator new(sizeof(SimpleConfigTransaction)));
-		break;
-	default:
-		ASSERT(false);
-		return nullptr;
+	if (type == Type::RYW) {
+		auto tr =
+		    (ReadYourWritesTransaction*)(ReadYourWritesTransaction::operator new(sizeof(ReadYourWritesTransaction)));
+		tr->preinitializeOnForeignThread();
+		return tr;
+	} else if (type == Type::SIMPLE_CONFIG) {
+		auto tr = (SimpleConfigTransaction*)(SimpleConfigTransaction::operator new(sizeof(SimpleConfigTransaction)));
+		return tr;
 	}
-	tr->preinitializeOnForeignThread();
-	return tr;
+	ASSERT(false);
+	return nullptr;
 }
 
 void ISingleThreadTransaction::create(ISingleThreadTransaction* tr, Type type, Database db) {

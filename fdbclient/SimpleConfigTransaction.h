@@ -80,6 +80,5 @@ public:
 	void debugTransaction(UID dID) override;
 	void checkDeferredError() override;
 	void getWriteConflicts(KeyRangeMap<bool>* result) override;
-	void preinitializeOnForeignThread() override;
 	void fullReset();
 };
