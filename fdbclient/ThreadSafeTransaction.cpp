@@ -468,7 +468,7 @@ void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* ho
 
 	MutexHolder holder(lock); // We could use the network thread to protect this action, but then we can't guarantee
 	                          // upon return that the hook is set.
-	threadCompletionHooks.push_back(std::make_pair(hook, hookParameter));
+	threadCompletionHooks.emplace_back(hook, hookParameter);
 }
 
 IClientApi* ThreadSafeApi::api = new ThreadSafeApi();

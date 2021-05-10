@@ -541,8 +541,8 @@ public:
 			std::vector<std::tuple<ProcessClass::Fitness, int, bool, int, Field>> orderedFields;
 			for (auto& it : fieldsWithMin) {
 				auto& fitness = field_fitness[it];
-				orderedFields.push_back(std::make_tuple(
-				    std::get<0>(fitness), std::get<1>(fitness), std::get<2>(fitness), field_count[it], it));
+				orderedFields.emplace_back(
+				    std::get<0>(fitness), std::get<1>(fitness), std::get<2>(fitness), field_count[it], it);
 			}
 			std::sort(orderedFields.begin(), orderedFields.end());
 			int totalFields = desired / minPerField;

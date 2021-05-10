@@ -447,7 +447,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 
 			for (int i = 0; i < serverList.get().size(); i++) {
 				auto ssi = decodeServerListValue(serverList.get()[i].value);
-				result->allServers.push_back(std::make_pair(ssi, id_data[ssi.locality.processId()].processClass));
+				result->allServers.emplace_back(ssi, id_data[ssi.locality.processId()].processClass);
 				server_dc[ssi.id()] = ssi.locality.dcId();
 			}
 
@@ -3729,7 +3729,7 @@ ACTOR Future<vector<std::pair<StorageServerInterface, ProcessClass>>> getServerL
 	vector<std::pair<StorageServerInterface, ProcessClass>> results;
 	for (int i = 0; i < serverList.get().size(); i++) {
 		auto ssi = decodeServerListValue(serverList.get()[i].value);
-		results.push_back(std::make_pair(ssi, id_data[ssi.locality.processId()].processClass));
+		results.emplace_back(ssi, id_data[ssi.locality.processId()].processClass);
 	}
 
 	return results;

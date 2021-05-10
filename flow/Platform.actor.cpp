@@ -3002,7 +3002,7 @@ void outOfMemory() {
 		else if (StringRef(s).startsWith(LiteralStringRef("struct ")))
 			s = s.substr(LiteralStringRef("struct ").size());
 #endif
-		typeNames.push_back(std::make_pair(s, i->first));
+		typeNames.emplace_back(s, i->first);
 	}
 	std::sort(typeNames.begin(), typeNames.end());
 	for (int i = 0; i < typeNames.size(); i++) {

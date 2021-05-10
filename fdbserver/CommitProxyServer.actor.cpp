@@ -1448,7 +1448,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 		for (auto& it : r.value().src_info) {
 			ssis.push_back(it->interf);
 		}
-		rep.results.push_back(std::make_pair(r.range(), ssis));
+		rep.results.emplace_back(r.range(), ssis);
 	} else if (!req.reverse) {
 		int count = 0;
 		for (auto r = commitData->keyInfo.rangeContaining(req.begin);
@@ -1459,7 +1459,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 			for (auto& it : r.value().src_info) {
 				ssis.push_back(it->interf);
 			}
-			rep.results.push_back(std::make_pair(r.range(), ssis));
+			rep.results.emplace_back(r.range(), ssis);
 			count++;
 		}
 	} else {
@@ -1471,7 +1471,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 			for (auto& it : r.value().src_info) {
 				ssis.push_back(it->interf);
 			}
-			rep.results.push_back(std::make_pair(r.range(), ssis));
+			rep.results.emplace_back(r.range(), ssis);
 			if (r == commitData->keyInfo.ranges().begin()) {
 				break;
 			}

@@ -3076,7 +3076,7 @@ struct CLIOptions {
 				return FDB_EXIT_ERROR;
 			}
 			syn = syn.substr(7);
-			knobs.push_back(std::make_pair(syn, args.OptionArg()));
+			knobs.emplace_back(syn, args.OptionArg());
 			break;
 		}
 		case OPT_DEBUG_TLS:
