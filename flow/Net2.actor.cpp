@@ -1389,11 +1389,29 @@ bool Net2::checkRunnable() {
 	return !started.exchange(true);
 }
 
+
+namespace {
+std::atomic<bool> runLoopActive = false;
+#ifndef WIN32
+// Try to get this to run _before_ other destructors
+__attribute__((destructor(1000))) void checkRunLoopActive() {
+	if (runLoopActive) {
+		fprintf(
+		    stderr,
+		    "Global destructors called while fdb network thread still running! This can lead to undefined behavior.\n");
+		fflush(stderr);
+	}
+}
+#endif
+} // namespace
+
 ActorLineageSet& Net2::getActorLineageSet() {
 	return actorLineageSet;
 }
 
+
 void Net2::run() {
+	runLoopActive = true;
 	TraceEvent::setNetworkThread();
 	TraceEvent("Net2Running");
 
@@ -1596,6 +1614,8 @@ void Net2::run() {
 #ifdef WIN32
 	timeEndPeriod(1);
 #endif
+
+	runLoopActive = false;
 }
 
 // Updates the PriorityStats found in NetworkMetrics
