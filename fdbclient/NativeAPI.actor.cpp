@@ -1354,6 +1354,10 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 			validateOptionValue(value, false);
 			transactionTracingEnabled--;
 			break;
+		case FDBDatabaseOptions::USE_CONFIG_DATABASE:
+			validateOptionValue(value, false);
+			useConfigDatabase = true;
+			break;
 		default:
 			break;
 		}

@@ -393,6 +393,7 @@ public:
 	double healthMetricsLastUpdated;
 	double detailedHealthMetricsLastUpdated;
 	Smoother smoothMidShardSize;
+	bool useConfigDatabase{ false };
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
 

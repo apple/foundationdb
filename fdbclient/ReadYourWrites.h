@@ -64,13 +64,6 @@ class ReadYourWritesTransaction final : NonCopyable,
                                         public ISingleThreadTransaction,
                                         public FastAllocated<ReadYourWritesTransaction> {
 public:
-	static ReadYourWritesTransaction* allocateOnForeignThread() {
-		ReadYourWritesTransaction* tr =
-		    (ReadYourWritesTransaction*)ReadYourWritesTransaction::operator new(sizeof(ReadYourWritesTransaction));
-		tr->tr.preinitializeOnForeignThread();
-		return tr;
-	}
-
 	explicit ReadYourWritesTransaction(Database const& cx);
 	~ReadYourWritesTransaction();
 
@@ -162,6 +155,8 @@ public:
 	Error& getMutableDeferredError() override { return deferredError; }
 
 	void getWriteConflicts(KeyRangeMap<bool>* result) override;
+
+	void preinitializeOnForeignThread() override;
 
 	Database getDatabase() const { return tr.getDatabase(); }
 

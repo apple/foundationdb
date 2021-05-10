@@ -33,6 +33,7 @@ set(FDBCLIENT_SRCS
   GrvProxyInterface.h
   HTTP.actor.cpp
   IClientApi.h
+  ISingleThreadTransaction.cpp
   ISingleThreadTransaction.h
   JsonBuilder.cpp
   JsonBuilder.h

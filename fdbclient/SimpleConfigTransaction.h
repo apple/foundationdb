@@ -30,7 +30,7 @@
 #include "flow/Error.h"
 #include "flow/flow.h"
 
-class SimpleConfigTransaction final : public ISingleThreadTransaction {
+class SimpleConfigTransaction final : public ISingleThreadTransaction, public FastAllocated<SimpleConfigTransaction> {
 	std::unique_ptr<class SimpleConfigTransactionImpl> impl;
 
 public:
@@ -80,6 +80,7 @@ public:
 	void debugTransaction(UID dID) override;
 	void checkDeferredError() override;
 	void getWriteConflicts(KeyRangeMap<bool>* result) override;
+	void preinitializeOnForeignThread() override;
 	void fullReset();
 
 	// Used by ThreadSafeTransaction for exceptions thrown in void methods

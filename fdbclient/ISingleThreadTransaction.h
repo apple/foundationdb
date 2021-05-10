@@ -30,6 +30,14 @@ class ISingleThreadTransaction : public ReferenceCounted<ISingleThreadTransactio
 public:
 	virtual ~ISingleThreadTransaction() = default;
 
+	enum class Type {
+		RYW,
+		SIMPLE_CONFIG,
+	};
+
+	static ISingleThreadTransaction* allocateOnForeignThread(Type type);
+	static void create(ISingleThreadTransaction* tr, Type type, Database db);
+
 	virtual void setVersion(Version v) = 0;
 	virtual Future<Version> getReadVersion() = 0;
 	virtual Optional<Version> getCachedReadVersion() = 0;
@@ -67,6 +75,7 @@ public:
 	virtual void debugTransaction(UID dID) = 0;
 	virtual void checkDeferredError() = 0;
 	virtual void getWriteConflicts(KeyRangeMap<bool>* result) = 0;
+	virtual void preinitializeOnForeignThread() = 0;
 
 	// Used by ThreadSafeTransaction for exceptions thrown in void methods
 	virtual Error& getMutableDeferredError() = 0;

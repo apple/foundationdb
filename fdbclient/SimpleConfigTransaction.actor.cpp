@@ -218,6 +218,8 @@ void SimpleConfigTransaction::checkDeferredError() {
 
 void SimpleConfigTransaction::getWriteConflicts(KeyRangeMap<bool>* result) {}
 
+void SimpleConfigTransaction::preinitializeOnForeignThread() {}
+
 Error& SimpleConfigTransaction::getMutableDeferredError() {
 	return impl->getMutableDeferredError();
 }

@@ -19,7 +19,6 @@
  */
 
 #include "fdbclient/ThreadSafeTransaction.h"
-#include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -133,12 +132,14 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx) {
 	// because the reference count of the DatabaseContext is solely managed from the main thread.  If cx is destructed
 	// immediately after this call, it will defer the DatabaseContext::delref (and onMainThread preserves the order of
 	// these operations).
-	this->tr = ReadYourWritesTransaction::allocateOnForeignThread();
+	auto type =
+	    cx->useConfigDatabase ? ISingleThreadTransaction::Type::SIMPLE_CONFIG : ISingleThreadTransaction::Type::RYW;
+	this->tr = ISingleThreadTransaction::allocateOnForeignThread(type);
 	// No deferred error -- if the construction of the RYW transaction fails, we have no where to put it
 	onMainThreadVoid(
-	    [tr = this->tr, cx]() {
+	    [tr = this->tr, type, cx]() {
 		    cx->addref();
-		    new (tr) ReadYourWritesTransaction(Database(cx));
+		    ISingleThreadTransaction::create(tr, type, Database(cx));
 	    },
 	    nullptr);
 }
