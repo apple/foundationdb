@@ -2661,12 +2661,19 @@ Reference<ReadYourWritesTransaction> getTransaction(Database db,
 	return tr;
 }
 
-// TODO: Update this function to get rid of Database and ReadYourWritesTransaction after refactoring
+// TODO: Update the function to get rid of Database and ReadYourWritesTransaction after refactoring
+// The original ReadYourWritesTransaciton handle "tr" is needed as some commands can be called inside a
+// transaction and "tr" holds the pointer to the ongoing transaction object. As it's not easy to get ride of "tr" in
+// one shot and we are refactoring the code to use Reference<ITransaction> (tr2), we need to let "tr2" point to the same
+// underlying transaction like "tr". Thus everytime we need to use "tr2",  we first update "tr" and let "tr2" points to
+// "tr1". "tr2" is always having the same lifetime as "tr1"
 Reference<ITransaction> getTransaction(Database db,
                                        Reference<ReadYourWritesTransaction>& tr,
                                        Reference<ITransaction>& tr2,
                                        FdbOptions* options,
                                        bool intrans) {
+	// Update "tr" to point to a brand new transaction object when it's not initialized or "intrans" flag is "false",
+	// which indicates we need a new transaction object
 	if (!tr || !intrans) {
 		tr = makeReference<ReadYourWritesTransaction>(db);
 		options->apply(tr);
