@@ -209,15 +209,10 @@ void endStreamOnDisconnect(Future<Void> signal,
                            Endpoint endpoint,
                            Reference<Peer> peer = Reference<Peer>()) {
 	state PeerHolder holder = PeerHolder(peer);
-	try {
-		choose {
-			when(wait(signal)) { stream.sendError(connection_failed()); }
-			when(wait(stream.getErrorFutureAndDelPromiseRef())) {}
-		}
-	} catch (Error& e) {
-		if (e.code() == error_code_broken_promise) {
-			IFailureMonitor::failureMonitor().endpointNotFound(endpoint);
-		}
+	stream.setRequestStreamEndpoint(endpoint);
+	choose {
+		when(wait(signal)) { stream.sendError(connection_failed()); }
+		when(wait(stream.getErrorFutureAndDelPromiseRef())) {}
 	}
 }
 

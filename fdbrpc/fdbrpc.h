@@ -310,6 +310,7 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 	using FastAllocated<NetNotifiedQueueWithErrors<T>>::operator delete;
 
 	AcknowledgementReceiver acknowledgements;
+	Endpoint requestStreamEndpoint;
 
 	NetNotifiedQueueWithErrors(int futures, int promises) : NotifiedQueue<T>(futures, promises) {}
 	NetNotifiedQueueWithErrors(int futures, int promises, const Endpoint& remoteEndpoint)
@@ -325,6 +326,10 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 		reader.deserialize(message);
 
 		if (message.isError()) {
+			if (message.getError().code() == error_code_broken_promise) {
+				ASSERT(requestStreamEndpoint.isValid());
+				IFailureMonitor::failureMonitor().endpointNotFound(requestStreamEndpoint);
+			}
 			this->sendError(message.getError());
 		} else {
 			if (message.get().asUnderlyingType().acknowledgeToken.present()) {
@@ -436,6 +441,8 @@ public:
 		errors = nullptr;
 		return res;
 	}
+
+	void setRequestStreamEndpoint(const Endpoint& endpoint) { queue->requestStreamEndpoint = endpoint; }
 
 	~ReplyPromiseStream() {
 		if (queue)
