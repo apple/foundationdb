@@ -28,6 +28,8 @@
 #include "flow/Error.h"
 #include "flow/UnitTest.h"
 
+namespace {
+
 struct TestSerializerHeader {
 	int item1;
 	uint64_t item2;
@@ -57,6 +59,8 @@ struct TestSerializerItem {
 		serializer(ar, item1);
 	}
 };
+
+} // anonymous namespace
 
 TEST_CASE("/fdbserver/ptxn/test/headeredSerializer") {
 	using TestSerializer = ptxn::HeaderedItemsSerializer<TestSerializerHeader, TestSerializerItem>;
@@ -274,9 +278,10 @@ void serializeVersionedSubsequencedMutations(
 	// Intended to leave the serializer open to new versions
 }
 
-} // anonymous namespace
+// Basic test for the TLogStorageServerMessageSerializer
+bool testTLogStorageServerMessageSerializer() {
+	std::cout << __FUNCTION__ << ">> Test started" << std::endl;
 
-TEST_CASE("/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/basic") {
 	using namespace ptxn;
 
 	const std::vector<VersionSubsequenceMutation> VERSIONED_SUBSEQUENCED_MUTATIONS{
@@ -336,11 +341,13 @@ TEST_CASE("/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/basic") {
 		ASSERT_EQ(index, static_cast<int>(VERSIONED_SUBSEQUENCED_MUTATIONS.size()));
 	}
 
-	return Void();
+	return true;
 }
 
 // Test for version that contains no mutations, also tests postfix operator++
-TEST_CASE("/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/emptyVersion") {
+bool testTLogStorageServerMessageSerializer_VersionWithNoMutation() {
+	std::cout << __FUNCTION__ << ">> Test started" << std::endl;
+
 	using namespace ptxn;
 
 	const std::vector<VersionSubsequenceMutation> PART1{
@@ -378,11 +385,13 @@ TEST_CASE("/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/emptyVersion"
 	ASSERT(*iter++ == PART2[0]);
 	ASSERT(iter == deserializer.end());
 
-	return Void();
+	return true;
 }
 
 // Test deserialize empty input
-TEST_CASE("/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/empty") {
+bool testTLogStorageServerMessageSerializer_EmptyInput() {
+	std::cout << __FUNCTION__ << ">> Test started" << std::endl;
+
 	using namespace ptxn;
 
 	TLogStorageServerMessageSerializer serializer(deterministicRandom()->randomUniqueID());
@@ -394,11 +403,13 @@ TEST_CASE("/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/empty") {
 	ASSERT_EQ(deserializer.getNumVersions(), 0);
 	ASSERT(deserializer.begin() == deserializer.end());
 
-	return Void();
+	return true;
 }
 
 // Test reset the TLogStorageServerMessageSerializer
-TEST_CASE("/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/reset") {
+bool testTLogStorageServerMessageSerializer_Reset() {
+	std::cout << __FUNCTION__ << ">> Test started" << std::endl;
+
 	using namespace ptxn;
 
 	TLogStorageServerMessageSerializer serializer1(deterministicRandom()->randomUniqueID());
@@ -428,6 +439,17 @@ TEST_CASE("/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/reset") {
 	auto iter2 = deserializer.begin();
 	ASSERT(*iter2++ == DATA2[0]);
 	ASSERT(iter2 == deserializer.end());
+
+	return true;
+}
+
+} // anonymous namespace
+
+TEST_CASE("/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/serialization") {
+	ASSERT(testTLogStorageServerMessageSerializer());
+	ASSERT(testTLogStorageServerMessageSerializer_VersionWithNoMutation());
+	ASSERT(testTLogStorageServerMessageSerializer_EmptyInput());
+	ASSERT(testTLogStorageServerMessageSerializer_Reset());
 
 	return Void();
 }

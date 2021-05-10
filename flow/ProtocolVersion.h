@@ -130,9 +130,9 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, SmallEndpoints);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, CacheRole);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010000LL, StableInterfaces);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010000LL, PartitionTransaction);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, TagThrottleValueReason);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, SpanContext);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, PartitionTransaction);
 };
 
 // These impact both communications and the deserialization of certain database and IKeyValueStore keys.

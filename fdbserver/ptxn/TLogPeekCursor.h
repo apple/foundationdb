@@ -23,7 +23,7 @@
 
 #pragma once
 
-#include <iterator>
+#include <vector>
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/ptxn/MessageTypes.h"
@@ -80,7 +80,7 @@ private:
 // Connect to a given TLog server and peeks for mutations with a given TeamID
 class ServerTeamPeekCursor : public PeekCursorBase {
 	const TeamID teamID;
-	TLogInterfaceBase* pTLogInterface;
+	std::vector<TLogInterfaceBase*> pTLogInterfaces;
 
 	// The arena used to store incoming serialized data, if not nullptr, TLogPeekReply arenas will be attached to this
 	// arena, enables the access of deserialized data even the cursor is destroyed.
@@ -92,11 +92,18 @@ public:
 	// version_ is the version the cursor starts with
 	// teamID_ is the teamID
 	// pTLogInterface_ is the interface to the specific TLog server
-	// pArena_ is used to
+	// pArena_ is used to store the serialized data for further use, e.g. making MutationRefs still available after the
+	// cursor is destroyed.
 	ServerTeamPeekCursor(const Version& version_,
 	                     const TeamID& teamID_,
 	                     TLogInterfaceBase* pTLogInterface_,
 	                     Arena* arena_ = nullptr);
+
+	ServerTeamPeekCursor(const Version& version_,
+	                     const TeamID& teamID_,
+	                     const std::vector<TLogInterfaceBase*>& pTLogInterfaces_,
+	                     Arena* arena_ = nullptr);
+
 
 	const TeamID& getTeamID() const;
 

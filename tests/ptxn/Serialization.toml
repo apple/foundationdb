@@ -29,44 +29,14 @@ startDelay = 0
     testsMatching = '/fdbserver/ptxn/test/ProxyTLogPushMessageSerializer'
 
 [[test]]
-testTitle = 'Test TLogStorageServerPeekMessageSerializer -- General'
+testTitle = 'Test TLogStorageServerPeekMessageSerializer'
 useDB = false
 startDelay = 0
 
     [[test.workload]]
     testName = 'UnitTests'
     maxTestCases = 1
-    testsMatching = '/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/basic'
-
-[[test]]
-testTitle = 'Test TLogStorageServerPeekMessageSerializer -- Version without mutation'
-useDB = false
-startDelay = 0
-
-    [[test.workload]]
-    testName = 'UnitTests'
-    maxTestCases = 1
-    testsMatching = '/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/emptyVersion'
-
-[[test]]
-testTitle = 'Test TLogStorageServerPeekMessageSerializer -- Empty input'
-useDB = false
-startDelay = 0
-
-    [[test.workload]]
-    testName = 'UnitTests'
-    maxTestCases = 1
-    testsMatching = '/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/empty'
-
-[[test]]
-testTitle = 'Test TLogStorageServerPeekMessageSerializer -- Reset'
-useDB = false
-startDelay = 0
-
-    [[test.workload]]
-    testName = 'UnitTests'
-    maxTestCases = 1
-    testsMatching = '/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/reset'
+    testsMatching = '/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/serialization'
 
 [[test]]
 testTitle = 'Test TLogStorageServerPeekMessageSerializer -- Huge amount of data'

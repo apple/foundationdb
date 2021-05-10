@@ -49,8 +49,8 @@ struct PeekRemoteContext {
 	// The last version being processed, the peek will request lastVersion + 1
 	Version* pLastVersion;
 
-	// THe interface to the remote TLog server
-	TLogInterfaceBase* pTLogInterface;
+	// The interface to the remote TLog server
+	const std::vector<TLogInterfaceBase*>& pTLogInterfaces;
 
 	// Deserializer
 	TLogStorageServerMessageDeserializer* pDeserializer;
@@ -65,19 +65,27 @@ struct PeekRemoteContext {
 	PeekRemoteContext(const Optional<UID>& debugID_,
 	                  const TeamID& teamID_,
 	                  Version* pLastVersion_,
-	                  TLogInterfaceBase* pInterface_,
+	                  const std::vector<TLogInterfaceBase*>& pInterfaces_,
 	                  TLogStorageServerMessageDeserializer* pDeserializer_,
 	                  TLogStorageServerMessageDeserializer::iterator* pDeserializerIterator_,
 	                  Arena* pAttachArena_ = nullptr)
-	  : debugID(debugID_), teamID(teamID_), pLastVersion(pLastVersion_), pTLogInterface(pInterface_),
+	  : debugID(debugID_), teamID(teamID_), pLastVersion(pLastVersion_), pTLogInterfaces(pInterfaces_),
 	    pDeserializer(pDeserializer_), pDeserializerIterator(pDeserializerIterator_), pAttachArena(pAttachArena_) {
 
-		ASSERT(pTLogInterface != nullptr && pDeserializer != nullptr && pDeserializerIterator != nullptr);
+		for (const auto pTLogInterface : pTLogInterfaces) {
+			ASSERT(pTLogInterface != nullptr);
+		}
+
+		ASSERT(pDeserializer != nullptr && pDeserializerIterator != nullptr);
 	}
 };
 
 ACTOR Future<bool> peekRemote(PeekRemoteContext peekRemoteContext) {
 	state TLogPeekRequest request;
+	// FIXME: use loadBalancer rather than picking up a random one
+	state TLogInterfaceBase* pTLogInterface =
+	    peekRemoteContext
+	        .pTLogInterfaces[deterministicRandom()->randomInt(0, peekRemoteContext.pTLogInterfaces.size())];
 
 	request.debugID = peekRemoteContext.debugID;
 	request.beginVersion = *peekRemoteContext.pLastVersion + 1;
@@ -85,7 +93,7 @@ ACTOR Future<bool> peekRemote(PeekRemoteContext peekRemoteContext) {
 	request.teamID = peekRemoteContext.teamID;
 
 	try {
-		state TLogPeekReply reply = wait(peekRemoteContext.pTLogInterface->peek.getReply(request));
+		state TLogPeekReply reply = wait(pTLogInterface->peek.getReply(request));
 
 		peekRemoteContext.pDeserializer->reset(reply.arena, reply.data);
 		*peekRemoteContext.pLastVersion = peekRemoteContext.pDeserializer->getLastVersion();
@@ -101,7 +109,7 @@ ACTOR Future<bool> peekRemote(PeekRemoteContext peekRemoteContext) {
 		}
 
 		return true;
-	} catch (...) {
+	} catch (Error& error) {
 		// FIXME deal with possible errors
 		return false;
 	}
@@ -138,11 +146,19 @@ bool PeekCursorBase::hasRemaining() const {
 ServerTeamPeekCursor::ServerTeamPeekCursor(const Version& beginVersion_,
                                            const TeamID& teamID_,
                                            TLogInterfaceBase* pTLogInterface_,
-                                           Arena* pArena)
-  : PeekCursorBase(beginVersion_), teamID(teamID_), pTLogInterface(pTLogInterface_), pAttachArena(pArena),
+                                           Arena* pArena_)
+  : ServerTeamPeekCursor(beginVersion_, teamID_, std::vector<TLogInterfaceBase*>{ pTLogInterface_ }, pArena_) {}
+
+ServerTeamPeekCursor::ServerTeamPeekCursor(const Version& beginVersion_,
+                                           const TeamID& teamID_,
+                                           const std::vector<TLogInterfaceBase*>& pTLogInterfaces_,
+                                           Arena* pArena_)
+  : PeekCursorBase(beginVersion_), teamID(teamID_), pTLogInterfaces(pTLogInterfaces_), pAttachArena(pArena_),
     deserializer(emptyCursorHeader()), deserializerIter(deserializer.begin()) {
 
-	ASSERT(pTLogInterface);
+	for (const auto pTLogInterface : pTLogInterfaces) {
+		ASSERT(pTLogInterface != nullptr);
+	}
 }
 
 const TeamID& ServerTeamPeekCursor::getTeamID() const {
@@ -152,7 +168,7 @@ const TeamID& ServerTeamPeekCursor::getTeamID() const {
 Future<bool> ServerTeamPeekCursor::remoteMoreAvailableImpl() {
 	// FIXME Put debugID if necessary
 	PeekRemoteContext context(
-	    Optional<UID>(), getTeamID(), &lastVersion, pTLogInterface, &deserializer, &deserializerIter, pAttachArena);
+	    Optional<UID>(), getTeamID(), &lastVersion, pTLogInterfaces, &deserializer, &deserializerIter, pAttachArena);
 
 	return peekRemote(context);
 }
