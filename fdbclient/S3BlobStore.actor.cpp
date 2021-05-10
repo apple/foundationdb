@@ -247,11 +247,10 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(std::string const
 			StringRef c(cred.get());
 			StringRef key = c.eat(":");
 			StringRef secret = c.eat();
-			creds = S3BlobStoreEndpoint::Credentials{key.toString(), secret.toString()};
+			creds = S3BlobStoreEndpoint::Credentials{ key.toString(), secret.toString() };
 		}
 
-		return makeReference<S3BlobStoreEndpoint>(
-		    host.toString(), service.toString(), creds, knobs, extraHeaders);
+		return makeReference<S3BlobStoreEndpoint>(host.toString(), service.toString(), creds, knobs, extraHeaders);
 
 	} catch (std::string& err) {
 		if (error != nullptr)
@@ -277,7 +276,7 @@ std::string S3BlobStoreEndpoint::getResourceURL(std::string resource, std::strin
 	if (credentials.present()) {
 		credsString = credentials.get().key;
 		if (!lookupSecret) {
-			credsString +=":" + credentials.get().secret;
+			credsString += ":" + credentials.get().secret;
 		}
 		credsString += "@";
 	}
@@ -527,7 +526,7 @@ ACTOR Future<Void> updateSecret_impl(Reference<S3BlobStoreEndpoint> b) {
 				std::string secret;
 				// Once we find a matching account, use it.
 				if (account.tryGet("secret", secret)) {
-					b->credentials = S3BlobStoreEndpoint::Credentials{accessKey, secret};
+					b->credentials = S3BlobStoreEndpoint::Credentials{ accessKey, secret };
 					return Void();
 				}
 			}
@@ -1060,7 +1059,7 @@ Future<std::vector<std::string>> S3BlobStoreEndpoint::listBuckets() {
 	return listBuckets_impl(Reference<S3BlobStoreEndpoint>::addRef(this));
 }
 
-std::string S3BlobStoreEndpoint::hmac_sha1(Credentials const &creds, std::string const& msg) {
+std::string S3BlobStoreEndpoint::hmac_sha1(Credentials const& creds, std::string const& msg) {
 	std::string key = creds.secret;
 
 	// Hash key to shorten it if it is longer than SHA1 block size

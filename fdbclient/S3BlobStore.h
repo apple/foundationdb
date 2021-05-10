@@ -95,20 +95,22 @@ public:
 		}
 	};
 
-	S3BlobStoreEndpoint(std::string const &host, std::string service, Optional<Credentials> const& creds, BlobKnobs const &knobs = BlobKnobs(), HTTP::Headers extraHeaders = HTTP::Headers())
-	  : host(host), service(service), credentials(creds), lookupSecret(creds.present() && creds.get().secret.empty()), knobs(knobs), extraHeaders(extraHeaders),
-		requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
-		requestRateList(new SpeedLimit(knobs.list_requests_per_second, 1)),
-		requestRateWrite(new SpeedLimit(knobs.write_requests_per_second, 1)),
-		requestRateRead(new SpeedLimit(knobs.read_requests_per_second, 1)),
-		requestRateDelete(new SpeedLimit(knobs.delete_requests_per_second, 1)),
-		sendRate(new SpeedLimit(knobs.max_send_bytes_per_second, 1)),
-		recvRate(new SpeedLimit(knobs.max_recv_bytes_per_second, 1)),
-		concurrentRequests(knobs.concurrent_requests),
-		concurrentUploads(knobs.concurrent_uploads),
-		concurrentLists(knobs.concurrent_lists) {
+	S3BlobStoreEndpoint(std::string const& host,
+	                    std::string service,
+	                    Optional<Credentials> const& creds,
+	                    BlobKnobs const& knobs = BlobKnobs(),
+	                    HTTP::Headers extraHeaders = HTTP::Headers())
+	  : host(host), service(service), credentials(creds), lookupSecret(creds.present() && creds.get().secret.empty()),
+	    knobs(knobs), extraHeaders(extraHeaders), requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
+	    requestRateList(new SpeedLimit(knobs.list_requests_per_second, 1)),
+	    requestRateWrite(new SpeedLimit(knobs.write_requests_per_second, 1)),
+	    requestRateRead(new SpeedLimit(knobs.read_requests_per_second, 1)),
+	    requestRateDelete(new SpeedLimit(knobs.delete_requests_per_second, 1)),
+	    sendRate(new SpeedLimit(knobs.max_send_bytes_per_second, 1)),
+	    recvRate(new SpeedLimit(knobs.max_recv_bytes_per_second, 1)), concurrentRequests(knobs.concurrent_requests),
+	    concurrentUploads(knobs.concurrent_uploads), concurrentLists(knobs.concurrent_lists) {
 
-		if(host.empty())
+		if (host.empty())
 			throw connection_string_invalid();
 	}
 
@@ -164,7 +166,7 @@ public:
 	Future<Void> updateSecret();
 
 	// Calculates the authentication string from the secret key
-	static std::string hmac_sha1(Credentials const &creds, std::string const &msg);
+	static std::string hmac_sha1(Credentials const& creds, std::string const& msg);
 
 	// Sets headers needed for Authorization (including Date which will be overwritten if present)
 	void setAuthHeaders(std::string const& verb, std::string const& resource, HTTP::Headers& headers);
