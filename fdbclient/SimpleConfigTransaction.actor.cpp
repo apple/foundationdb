@@ -30,7 +30,6 @@ class SimpleConfigTransactionImpl {
 	Future<Version> version;
 	ConfigTransactionInterface cti;
 	int numRetries{ 0 };
-	Error deferredError{ success() };
 	bool committed{ false };
 
 	ACTOR static Future<Version> getReadVersion(SimpleConfigTransactionImpl* self) {
@@ -130,8 +129,6 @@ public:
 		reset();
 	}
 
-	Error& getMutableDeferredError() { return deferredError; }
-
 }; // SimpleConfigTransactionImpl
 
 Future<Version> SimpleConfigTransaction::getReadVersion() {
@@ -219,10 +216,6 @@ void SimpleConfigTransaction::checkDeferredError() {
 void SimpleConfigTransaction::getWriteConflicts(KeyRangeMap<bool>* result) {}
 
 void SimpleConfigTransaction::preinitializeOnForeignThread() {}
-
-Error& SimpleConfigTransaction::getMutableDeferredError() {
-	return impl->getMutableDeferredError();
-}
 
 SimpleConfigTransaction::SimpleConfigTransaction(ClusterConnectionString const& ccs)
   : impl(std::make_unique<SimpleConfigTransactionImpl>(ccs)) {}

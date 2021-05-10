@@ -27,6 +27,10 @@
 #include "flow/FastRef.h"
 
 class ISingleThreadTransaction : public ReferenceCounted<ISingleThreadTransaction> {
+protected:
+	ISingleThreadTransaction() = default;
+	ISingleThreadTransaction(Error const& deferredError) : deferredError(deferredError) {}
+
 public:
 	virtual ~ISingleThreadTransaction() = default;
 
@@ -78,5 +82,5 @@ public:
 	virtual void preinitializeOnForeignThread() = 0;
 
 	// Used by ThreadSafeTransaction for exceptions thrown in void methods
-	virtual Error& getMutableDeferredError() = 0;
+	Error deferredError;
 };

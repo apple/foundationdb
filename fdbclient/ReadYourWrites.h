@@ -144,15 +144,11 @@ public:
 	// Throws before the lifetime of this transaction ends
 	Future<Void> resetFuture() { return resetPromise.getFuture(); }
 
-	Error deferredError;
-
 	void checkDeferredError() override {
 		tr.checkDeferredError();
 		if (deferredError.code() != invalid_error_code)
 			throw deferredError;
 	}
-
-	Error& getMutableDeferredError() override { return deferredError; }
 
 	void getWriteConflicts(KeyRangeMap<bool>* result) override;
 

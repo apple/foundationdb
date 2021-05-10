@@ -155,7 +155,7 @@ void ThreadSafeTransaction::cancel() {
 }
 
 void ThreadSafeTransaction::setVersion(Version v) {
-	onMainThreadVoid([tr = this->tr, v]() { tr->setVersion(v); }, &tr->getMutableDeferredError());
+	onMainThreadVoid([tr = this->tr, v]() { tr->setVersion(v); }, &tr->deferredError);
 }
 
 ThreadFuture<Version> ThreadSafeTransaction::getReadVersion() {
@@ -244,32 +244,31 @@ ThreadFuture<Standalone<VectorRef<const char*>>> ThreadSafeTransaction::getAddre
 void ThreadSafeTransaction::addReadConflictRange(const KeyRangeRef& keys) {
 	KeyRange r = keys;
 
-	onMainThreadVoid([tr = this->tr, r]() { tr->addReadConflictRange(r); }, &tr->getMutableDeferredError());
+	onMainThreadVoid([tr = this->tr, r]() { tr->addReadConflictRange(r); }, &tr->deferredError);
 }
 
 void ThreadSafeTransaction::makeSelfConflicting() {
-	onMainThreadVoid([tr = this->tr]() { tr->makeSelfConflicting(); }, &tr->getMutableDeferredError());
+	onMainThreadVoid([tr = this->tr]() { tr->makeSelfConflicting(); }, &tr->deferredError);
 }
 
 void ThreadSafeTransaction::atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) {
 	Key k = key;
 	Value v = value;
 
-	onMainThreadVoid([tr = this->tr, k, v, operationType]() { tr->atomicOp(k, v, operationType); },
-	                 &tr->getMutableDeferredError());
+	onMainThreadVoid([tr = this->tr, k, v, operationType]() { tr->atomicOp(k, v, operationType); }, &tr->deferredError);
 }
 
 void ThreadSafeTransaction::set(const KeyRef& key, const ValueRef& value) {
 	Key k = key;
 	Value v = value;
 
-	onMainThreadVoid([tr = this->tr, k, v]() { tr->set(k, v); }, &tr->getMutableDeferredError());
+	onMainThreadVoid([tr = this->tr, k, v]() { tr->set(k, v); }, &tr->deferredError);
 }
 
 void ThreadSafeTransaction::clear(const KeyRangeRef& range) {
 	KeyRange r = range;
 
-	onMainThreadVoid([tr = this->tr, r]() { tr->clear(r); }, &tr->getMutableDeferredError());
+	onMainThreadVoid([tr = this->tr, r]() { tr->clear(r); }, &tr->deferredError);
 }
 
 void ThreadSafeTransaction::clear(const KeyRef& begin, const KeyRef& end) {
@@ -283,13 +282,13 @@ void ThreadSafeTransaction::clear(const KeyRef& begin, const KeyRef& end) {
 
 		    tr->clear(KeyRangeRef(b, e));
 	    },
-	    &tr->getMutableDeferredError());
+	    &tr->deferredError);
 }
 
 void ThreadSafeTransaction::clear(const KeyRef& key) {
 	Key k = key;
 
-	onMainThreadVoid([tr = this->tr, k]() { tr->clear(k); }, &tr->getMutableDeferredError());
+	onMainThreadVoid([tr = this->tr, k]() { tr->clear(k); }, &tr->deferredError);
 }
 
 ThreadFuture<Void> ThreadSafeTransaction::watch(const KeyRef& key) {
@@ -304,7 +303,7 @@ ThreadFuture<Void> ThreadSafeTransaction::watch(const KeyRef& key) {
 void ThreadSafeTransaction::addWriteConflictRange(const KeyRangeRef& keys) {
 	KeyRange r = keys;
 
-	onMainThreadVoid([tr = this->tr, r]() { tr->addWriteConflictRange(r); }, &tr->getMutableDeferredError());
+	onMainThreadVoid([tr = this->tr, r]() { tr->addWriteConflictRange(r); }, &tr->deferredError);
 }
 
 ThreadFuture<Void> ThreadSafeTransaction::commit() {
@@ -337,7 +336,7 @@ void ThreadSafeTransaction::setOption(FDBTransactionOptions::Option option, Opti
 
 	// ThreadSafeTransaction is not allowed to do anything with options except pass them through to RYW.
 	onMainThreadVoid([tr = this->tr, option, passValue]() { tr->setOption(option, passValue.contents()); },
-	                 &tr->getMutableDeferredError());
+	                 &tr->deferredError);
 }
 
 ThreadFuture<Void> ThreadSafeTransaction::checkDeferredError() {
@@ -345,7 +344,7 @@ ThreadFuture<Void> ThreadSafeTransaction::checkDeferredError() {
 		try {
 			tr->checkDeferredError();
 		} catch (Error& e) {
-			tr->getMutableDeferredError() = Error();
+			tr->deferredError = Error();
 			return Future<Void>(e);
 		}
 		return Future<Void>(Void());

@@ -82,7 +82,4 @@ public:
 	void getWriteConflicts(KeyRangeMap<bool>* result) override;
 	void preinitializeOnForeignThread() override;
 	void fullReset();
-
-	// Used by ThreadSafeTransaction for exceptions thrown in void methods
-	Error& getMutableDeferredError() override;
 };
