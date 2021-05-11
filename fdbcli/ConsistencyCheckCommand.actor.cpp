@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbcli/fdbcli.h"
+#include "fdbcli/fdbcli.actor.h"
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
@@ -28,9 +28,11 @@
 #include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-using namespace fdb_cli;
+namespace fdb_cli {
 
-ACTOR static Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens) {
+const KeyRef consistencyCheckSpecialKey = LiteralStringRef("\xff\xff/management/consistency_check_suspended");
+
+ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens) {
 	// We do not add a try-catch loop here as the this transaction is always supposed to succeed
 	// If not, the outer loop catch block(fdbcli.actor.cpp) will handle the error and print out the error message
 	tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
@@ -48,14 +50,6 @@ ACTOR static Future<bool> consistencyCheckCommandActor(Reference<ITransaction> t
 		return false;
 	}
 	return true;
-}
-
-namespace fdb_cli {
-
-const KeyRef consistencyCheckSpecialKey = LiteralStringRef("\xff\xff/management/consistency_check_suspended");
-
-Future<bool> consistencyCheckCommand(Reference<ITransaction> tr, std::vector<StringRef> tokens) {
-	return consistencyCheckCommandActor(tr, tokens);
 }
 
 CommandFactory consistencyCheckFactory(

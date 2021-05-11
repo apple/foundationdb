@@ -1,6 +1,6 @@
 set(FDBCLI_SRCS
-  fdbcli.h
   fdbcli.actor.cpp
+  fdbcli.actor.h
   ConsistencyCheckCommand.actor.cpp
   FlowLineNoise.actor.cpp
   FlowLineNoise.h

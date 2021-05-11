@@ -18,12 +18,20 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLI_H
-#define FDBCLI_H
 #pragma once
+
+// When actually compiled (NO_INTELLISENSE), include the generated
+// version of this file.  In intellisense use the source version.
+#if defined(NO_INTELLISENSE) && !defined(FDBCLI_FDBCLI_ACTOR_G_H)
+#define FDBCLI_FDBCLI_ACTOR_G_H
+#include "fdbcli/fdbcli.actor.g.h"
+#elif !defined(FDBCLI_FDBCLI_ACTOR_H)
+#define FDBCLI_FDBCLI_ACTOR_H
 
 #include "fdbclient/IClientApi.h"
 #include "flow/Arena.h"
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
@@ -62,8 +70,9 @@ void printUsage(StringRef command);
 
 // All fdbcli commands (alphabetically)
 // consistency command
-Future<bool> consistencyCheckCommand(Reference<ITransaction> tr, std::vector<StringRef> tokens);
+ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens);
 
 } // namespace fdb_cli
 
+#include "flow/unactorcompiler.h"
 #endif

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbcli/fdbcli.h"
+#include "fdbcli/fdbcli.actor.h"
 
 #include "flow/Arena.h"
 

@@ -44,7 +44,7 @@
 #include "flow/SimpleOpt.h"
 
 #include "fdbcli/FlowLineNoise.h"
-#include "fdbcli/fdbcli.h"
+#include "fdbcli/fdbcli.actor.h"
 
 #include <cinttypes>
 #include <type_traits>
@@ -3821,7 +3821,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "consistencycheck")) {
 					getTransaction(db, tr, tr2, options, intrans);
-					bool _result = wait(consistencyCheckCommand(tr2, tokens));
+					bool _result = wait(consistencyCheckCommandActor(tr2, tokens));
 					is_error = !_result;
 					continue;
 				}
