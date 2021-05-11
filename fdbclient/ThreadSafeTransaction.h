@@ -51,6 +51,7 @@ public:
 
 private:
 	friend class ThreadSafeTransaction;
+	bool isConfigDB { false };
 	DatabaseContext* db;
 
 public: // Internal use only
@@ -61,7 +62,7 @@ public: // Internal use only
 
 class ThreadSafeTransaction : public ITransaction, ThreadSafeReferenceCounted<ThreadSafeTransaction>, NonCopyable {
 public:
-	explicit ThreadSafeTransaction(DatabaseContext* cx);
+	explicit ThreadSafeTransaction(DatabaseContext* cx, ISingleThreadTransaction::Type type);
 	~ThreadSafeTransaction() override;
 
 	void cancel() override;

@@ -45,7 +45,9 @@ ThreadFuture<Reference<IDatabase>> ThreadSafeDatabase::createFromExistingDatabas
 }
 
 Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
-	return Reference<ITransaction>(new ThreadSafeTransaction(db));
+	auto type =
+		isConfigDB ? ISingleThreadTransaction::Type::SIMPLE_CONFIG : ISingleThreadTransaction::Type::RYW;
+	return Reference<ITransaction>(new ThreadSafeTransaction(db, type));
 }
 
 void ThreadSafeDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
@@ -55,6 +57,9 @@ void ThreadSafeDatabase::setOption(FDBDatabaseOptions::Option option, Optional<S
 	} else {
 		TraceEvent("UnknownDatabaseOption").detail("Option", option);
 		throw invalid_option();
+	}
+	if (itr->first == FDBDatabaseOptions::USE_CONFIG_DATABASE) {
+		isConfigDB = true;
 	}
 
 	DatabaseContext* db = this->db;
@@ -124,7 +129,7 @@ ThreadSafeDatabase::~ThreadSafeDatabase() {
 	onMainThreadVoid([db]() { db->delref(); }, nullptr);
 }
 
-ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx) {
+ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx, ISingleThreadTransaction::Type type) {
 	// Allocate memory for the transaction from this thread (so the pointer is known for subsequent method calls)
 	// but run its constructor on the main thread
 
@@ -132,8 +137,6 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx) {
 	// because the reference count of the DatabaseContext is solely managed from the main thread.  If cx is destructed
 	// immediately after this call, it will defer the DatabaseContext::delref (and onMainThread preserves the order of
 	// these operations).
-	auto type =
-	    cx->useConfigDatabase ? ISingleThreadTransaction::Type::SIMPLE_CONFIG : ISingleThreadTransaction::Type::RYW;
 	auto tr = this->tr = ISingleThreadTransaction::allocateOnForeignThread(type);
 	// No deferred error -- if the construction of the RYW transaction fails, we have no where to put it
 	onMainThreadVoid(
