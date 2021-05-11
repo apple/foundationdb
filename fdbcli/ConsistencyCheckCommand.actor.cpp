@@ -31,6 +31,8 @@
 using namespace fdb_cli;
 
 ACTOR static Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens) {
+	// We do not add a try-catch loop here as the this transaction is always supposed to succeed
+	// If not, the outer loop catch block(fdbcli.actor.cpp) will handle the error and print out the error message
 	tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 	if (tokens.size() == 1) {
 		Optional<Value> suspended = wait(safeThreadFutureToFuture(tr->get(consistencyCheckSpecialKey)));
