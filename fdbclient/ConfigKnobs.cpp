@@ -24,7 +24,5 @@
 ConfigKey ConfigKeyRef::decodeKey(KeyRef const& key) {
 	auto tuple = Tuple::unpack(key);
 	ASSERT(tuple.size() == 2); // TODO: Fail gracefully
-	ASSERT(tuple.getType(0) == Tuple::BYTES);
-	ASSERT(tuple.getType(1) == Tuple::BYTES);
 	return ConfigKeyRef(tuple.getString(0), tuple.getString(1));
 }

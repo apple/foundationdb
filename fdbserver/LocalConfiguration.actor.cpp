@@ -172,7 +172,7 @@ class LocalConfigurationImpl {
 			choose {
 				when(wait(broadcaster->onChange())) {}
 				when(wait(brokenPromiseToNever(fetchChanges(self, broadcaster->get())))) {
-					wait(delay(0.5)); // TODO: Make knob?
+					wait(delay(5.0)); // TODO: Make knob?
 				}
 				when(wait(monitor)) { ASSERT(false); }
 			}

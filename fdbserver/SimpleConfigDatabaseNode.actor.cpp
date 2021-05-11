@@ -185,7 +185,7 @@ class SimpleConfigDatabaseNodeImpl {
 			return Void();
 		}
 		state Optional<Value> value =
-		    wait(self->kvStore->readValue(BinaryWriter::toValue(req.key, Unversioned()).withPrefix(kvKeys.begin)));
+		    wait(self->kvStore->readValue(BinaryWriter::toValue(req.key, IncludeVersion()).withPrefix(kvKeys.begin)));
 		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations = wait(getMutations(self, 0, req.version));
 		for (const auto &versionedMutation : versionedMutations) {
 			const auto &mutation = versionedMutation.mutation;
