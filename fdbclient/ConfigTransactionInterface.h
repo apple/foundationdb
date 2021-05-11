@@ -22,6 +22,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/ConfigKnobs.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbrpc/fdbrpc.h"
 #include "flow/flow.h"
@@ -64,11 +65,11 @@ struct ConfigTransactionGetReply {
 struct ConfigTransactionGetRequest {
 	static constexpr FileIdentifier file_identifier = 923040;
 	Version version;
-	KeyRef key;
+	ConfigKeyRef key;
 	ReplyPromise<ConfigTransactionGetReply> reply;
 
 	ConfigTransactionGetRequest() = default;
-	explicit ConfigTransactionGetRequest(Version version, KeyRef key) : version(version), key(key) {}
+	explicit ConfigTransactionGetRequest(Version version, ConfigKeyRef key) : version(version), key(key) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -79,11 +80,11 @@ struct ConfigTransactionGetRequest {
 struct ConfigTransactionCommitRequest {
 	static constexpr FileIdentifier file_identifier = 103841;
 	Version version;
-	Standalone<VectorRef<MutationRef>> mutations;
+	Standalone<VectorRef<ConfigMutationRef>> mutations;
 	ReplyPromise<Void> reply;
 
 	ConfigTransactionCommitRequest() = default;
-	ConfigTransactionCommitRequest(Version version, Standalone<VectorRef<MutationRef>> mutations)
+	ConfigTransactionCommitRequest(Version version, Standalone<VectorRef<ConfigMutationRef>> mutations)
 	  : version(version), mutations(mutations) {}
 
 	template <class Ar>
@@ -107,17 +108,22 @@ struct ConfigTransactionGetRangeReply {
 
 struct ConfigTransactionGetRangeRequest {
 	static constexpr FileIdentifier file_identifier = 987410;
+	Arena arena;
 	Version version;
-	Standalone<KeyRangeRef> keys;
+	KeyRef configClass;
+	KeyRangeRef knobNameRange;
 	ReplyPromise<ConfigTransactionGetRangeReply> reply;
 
 	ConfigTransactionGetRangeRequest() = default;
-	explicit ConfigTransactionGetRangeRequest(Version version, Standalone<KeyRangeRef> keys)
-	  : version(version), keys(keys) {}
+	explicit ConfigTransactionGetRangeRequest(Arena& arena,
+	                                          Version version,
+	                                          KeyRef configClass,
+	                                          KeyRangeRef knobNameRange)
+	  : arena(arena), version(version), configClass(arena, configClass), knobNameRange(arena, knobNameRange) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, keys, reply);
+		serializer(ar, arena, version, configClass, knobNameRange, reply);
 	}
 };
 

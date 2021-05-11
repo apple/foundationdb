@@ -71,9 +71,10 @@ class ConfigurationDatabaseWorkload : public TestWorkload {
 		return BinaryWriter::toValue(bigEndian32(index), Unversioned()).withPrefix(keys.begin);
 	}
 
-	uint32_t fromKey(KeyRef key) const {
-		ASSERT(key.startsWith(keys.begin));
-		return fromBigEndian32(BinaryReader::fromStringRef<uint32_t>(key.removePrefix(keys.begin), Unversioned()));
+	uint32_t fromKey(ConfigKeyRef key) const {
+		ASSERT(key.knobName.startsWith(keys.begin));
+		return fromBigEndian32(
+		    BinaryReader::fromStringRef<uint32_t>(key.knobName.removePrefix(keys.begin), Unversioned()));
 	}
 
 	ACTOR static Future<int> getCycleLength(ConfigurationDatabaseWorkload const* self, SimpleConfigTransaction* tr) {

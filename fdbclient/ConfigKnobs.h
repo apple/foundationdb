@@ -1,5 +1,5 @@
 /*
- * Knobs.h
+ * ConfigKnobs.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -27,41 +27,79 @@
 using ConfigClassSetRef = VectorRef<KeyRef>;
 using ConfigClassSet = Standalone<ConfigClassSetRef>;
 
-struct ConfigUpdateKeyRef {
+struct ConfigKeyRef {
 	KeyRef configClass;
 	KeyRef knobName;
 
-	ConfigUpdateKeyRef() = default;
-	ConfigUpdateKeyRef(Arena& arena, KeyRef configClass, KeyRef knobName)
+	ConfigKeyRef() = default;
+	ConfigKeyRef(KeyRef configClass, KeyRef knobName) : configClass(configClass), knobName(knobName) {}
+	ConfigKeyRef(Arena& arena, KeyRef configClass, KeyRef knobName)
 	  : configClass(arena, configClass), knobName(arena, knobName) {}
-	ConfigUpdateKeyRef(Arena& arena, ConfigUpdateKeyRef const& rhs)
-	  : ConfigUpdateKeyRef(arena, rhs.configClass, rhs.knobName) {}
+	ConfigKeyRef(Arena& arena, ConfigKeyRef const& rhs) : ConfigKeyRef(arena, rhs.configClass, rhs.knobName) {}
+
+	static Standalone<ConfigKeyRef> decodeKey(KeyRef const&);
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, configClass, knobName);
 	}
 
+	bool operator==(ConfigKeyRef const& rhs) const {
+		return (configClass == rhs.configClass) && (knobName == rhs.knobName);
+	}
+	bool operator!=(ConfigKeyRef const& rhs) const { return !(*this == rhs); }
 	size_t expectedSize() const { return configClass.expectedSize() + knobName.expectedSize(); }
 };
-using ConfigUpdateKey = Standalone<ConfigUpdateKeyRef>;
+using ConfigKey = Standalone<ConfigKeyRef>;
 
-struct ConfigUpdateValueRef {
-	KeyRef description;
-	ValueRef value;
-	double timestamp;
+inline bool operator<(ConfigKeyRef const& lhs, ConfigKeyRef const& rhs) {
+	if (lhs.configClass != rhs.configClass) {
+		return lhs.configClass < rhs.configClass;
+	} else {
+		return lhs.knobName < rhs.knobName;
+	}
+}
 
-	ConfigUpdateValueRef() = default;
-	ConfigUpdateValueRef(Arena& arena, KeyRef description, ValueRef value, double timestamp)
-	  : description(arena, description), value(arena, value), timestamp(timestamp) {}
-	ConfigUpdateValueRef(Arena& arena, ConfigUpdateValueRef const& rhs)
-	  : ConfigUpdateValueRef(arena, rhs.description, rhs.value, rhs.timestamp) {}
+class ConfigMutationRef {
+	ConfigKeyRef key;
+	Optional<ValueRef> value;
+	StringRef description{ ""_sr };
+	double timestamp{ 0.0 };
+
+	ConfigMutationRef(ConfigKeyRef key, Optional<ValueRef> value) : key(key), value(value) {}
+
+public:
+	static constexpr FileIdentifier file_identifier = 9198282;
+
+	ConfigMutationRef() = default;
+
+	ConfigKeyRef getKey() const { return key; }
+
+	KeyRef getConfigClass() const { return key.configClass; }
+
+	KeyRef getKnobName() const { return key.knobName; }
+
+	ValueRef getValue() const { return value.get(); }
+
+	ConfigMutationRef(Arena& arena, ConfigMutationRef const& rhs)
+	  : key(arena, rhs.key), value(arena, rhs.value), description(arena, rhs.description), timestamp(rhs.timestamp) {}
+
+	void setDescription(StringRef description) { this->description = description; }
+	void setTimestamp(double timestamp) { this->timestamp = timestamp; }
+	bool isSet() const { return value.present(); }
+
+	static Standalone<ConfigMutationRef> createConfigMutationRef(KeyRef encodedKey, Optional<ValueRef> value) {
+		auto key = ConfigKeyRef::decodeKey(encodedKey);
+		return ConfigMutationRef(key, value);
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, description, value, timestamp);
+		serializer(ar, key, value, description, timestamp);
 	}
 
-	size_t expectedSize() const { return description.expectedSize() + value.expectedSize() + sizeof(double); }
+	size_t expectedSize() const {
+		return key.expectedSize() + value.expectedSize() + description.expectedSize() + sizeof(decltype(timestamp));
+	}
 };
-using ConfigUpdateValue = Standalone<ConfigUpdateValueRef>;
+using ConfigMutation = Standalone<ConfigMutationRef>;

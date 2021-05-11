@@ -144,7 +144,8 @@ set(FDBSERVER_SRCS
   workloads/Cache.actor.cpp
   workloads/ChangeConfig.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
-  workloads/ConfigurationDatabase.actor.cpp
+  # TODO: Fix and reenable this workload
+  #workloads/ConfigurationDatabase.actor.cpp
   workloads/TriggerRecovery.actor.cpp
   workloads/SuspendProcesses.actor.cpp
   workloads/CommitBugCheck.actor.cpp

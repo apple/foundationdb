@@ -124,17 +124,18 @@ class SimpleConfigDatabaseNodeImpl {
 		return lastCompactedVersion;
 	}
 
-	ACTOR static Future<Standalone<VectorRef<VersionedMutationRef>>> getMutations(SimpleConfigDatabaseNodeImpl *self, Version startVersion, Version endVersion) {
+	ACTOR static Future<Standalone<VectorRef<VersionedConfigMutationRef>>>
+	getMutations(SimpleConfigDatabaseNodeImpl* self, Version startVersion, Version endVersion) {
 		Key startVersionKey = versionedMutationKey(startVersion, 0);
 		state KeyRangeRef keys(startVersionKey, mutationKeys.end);
 		Standalone<RangeResultRef> range = wait(self->kvStore->readRange(keys));
-		Standalone<VectorRef<VersionedMutationRef>> result;
+		Standalone<VectorRef<VersionedConfigMutationRef>> result;
 		for (const auto &kv : range) {
 			auto version = getVersionFromVersionedMutationKey(kv.key);
 			if (version > endVersion) {
 				break;
 			}
-			auto mutation = BinaryReader::fromStringRef<Standalone<MutationRef>>(kv.value, IncludeVersion());
+			auto mutation = BinaryReader::fromStringRef<Standalone<ConfigMutationRef>>(kv.value, IncludeVersion());
 			result.emplace_back_deep(result.arena(), version, mutation);
 		}
 		return result;
@@ -149,7 +150,7 @@ class SimpleConfigDatabaseNodeImpl {
 			return Void();
 		}
 		state Version committedVersion = wait(getCommittedVersion(self));
-		Standalone<VectorRef<VersionedMutationRef>> versionedMutations =
+		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
 		    wait(getMutations(self, req.lastSeenVersion + 1, committedVersion));
 		TraceEvent(SevDebug, "ConfigDatabaseNodeSendingChanges")
 		    .detail("ReqLastSeenVersion", req.lastSeenVersion)
@@ -183,77 +184,76 @@ class SimpleConfigDatabaseNodeImpl {
 			req.reply.sendError(transaction_too_old());
 			return Void();
 		}
-		state Optional<Value> value = wait(self->kvStore->readValue(req.key.withPrefix(kvKeys.begin)));
-		Standalone<VectorRef<VersionedMutationRef>> versionedMutations = wait(getMutations(self, 0, req.version));
+		state Optional<Value> value =
+		    wait(self->kvStore->readValue(BinaryWriter::toValue(req.key, Unversioned()).withPrefix(kvKeys.begin)));
+		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations = wait(getMutations(self, 0, req.version));
 		for (const auto &versionedMutation : versionedMutations) {
 			const auto &mutation = versionedMutation.mutation;
-			if (mutation.type == MutationRef::Type::SetValue) {
-				if (mutation.param1 == req.key) {
-					value = mutation.param2;
-				}
-			} else if (mutation.type == MutationRef::Type::ClearRange) {
-				if (mutation.param1 <= req.key && req.key <= mutation.param2) {
-					value = Optional<Value>{};
+			if (mutation.isSet()) {
+				if (mutation.getKey() == req.key) {
+					value = mutation.getValue();
 				}
 			} else {
-				ASSERT(false);
+				if (mutation.getKey() == req.key) {
+					value = Optional<Value>{};
+				}
 			}
 		}
 		req.reply.send(ConfigTransactionGetReply(value));
 		return Void();
 	}
 
+	/*
 	ACTOR static Future<Void> getRange(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionGetRangeRequest req) {
-		wait(self->globalLock.take());
-		state FlowLock::Releaser releaser(self->globalLock);
-		Version currentVersion = wait(getLiveTransactionVersion(self));
-		if (req.version != currentVersion) {
-			req.reply.sendError(transaction_too_old());
-			return Void();
-		}
-		state Standalone<RangeResultRef> range = wait(self->kvStore->readRange(req.keys.withPrefix(kvKeys.begin)));
-		// FIXME: Inefficient
-		for (auto& kv : range) {
-			ASSERT(kv.key.startsWith(kvKeys.begin));
-			kv.key = kv.key.removePrefix(kvKeys.begin);
-		}
-		Standalone<VectorRef<VersionedMutationRef>> versionedMutations = wait(getMutations(self, 0, req.version));
-		for (const auto& versionedMutation : versionedMutations) {
-			const auto& mutation = versionedMutation.mutation;
-			if (mutation.type == MutationRef::Type::SetValue) {
-				// FIXME: This is very inefficient
-				Standalone<RangeResultRef> newRange;
-				bool added = false;
-				for (auto& kv : range) {
-					if (kv.key > mutation.param1 && !added) {
-						newRange.push_back_deep(newRange.arena(), KeyValueRef(mutation.param1, mutation.param2));
-						added = true;
-					} else if (kv.key == mutation.param1) {
-						kv.value = mutation.param2;
-						added = true;
-					}
-					newRange.push_back_deep(newRange.arena(), kv);
-				}
-				if (!added) {
-					newRange.push_back_deep(newRange.arena(), KeyValueRef(mutation.param1, mutation.param2));
-				}
-				range = std::move(newRange);
-			} else if (mutation.type == MutationRef::Type::ClearRange) {
-				// FIXME: This is very inefficient
-				Standalone<RangeResultRef> newRange;
-				for (const auto& kv : range) {
-					if (kv.key < mutation.param1 || kv.key > mutation.param2) {
-						newRange.push_back_deep(newRange.arena(), kv);
-					}
-				}
-				range = std::move(newRange);
-			} else {
-				ASSERT(false);
-			}
-		}
-		req.reply.send(ConfigTransactionGetRangeReply(range));
-		return Void();
+	    wait(self->globalLock.take());
+	    state FlowLock::Releaser releaser(self->globalLock);
+	    Version currentVersion = wait(getLiveTransactionVersion(self));
+	    if (req.version != currentVersion) {
+	        req.reply.sendError(transaction_too_old());
+	        return Void();
+	    }
+	    state Standalone<RangeResultRef> range = wait(self->kvStore->readRange(req.keys.withPrefix(kvKeys.begin)));
+	    // FIXME: Inefficient
+	    for (auto& kv : range) {
+	        ASSERT(kv.key.startsWith(kvKeys.begin));
+	        kv.key = kv.key.removePrefix(kvKeys.begin);
+	    }
+	    Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations = wait(getMutations(self, 0, req.version));
+	    for (const auto& versionedMutation : versionedMutations) {
+	        const auto& mutation = versionedMutation.mutation;
+	        if (mutation.isSet()) {
+	            // FIXME: This is very inefficient
+	            Standalone<RangeResultRef> newRange;
+	            bool added = false;
+	            for (auto& kv : range) {
+	                if (kv.key > mutation.param1 && !added) {
+	                    newRange.push_back_deep(newRange.arena(), KeyValueRef(mutation.param1, mutation.param2));
+	                    added = true;
+	                } else if (kv.key == mutation.param1) {
+	                    kv.value = mutation.param2;
+	                    added = true;
+	                }
+	                newRange.push_back_deep(newRange.arena(), kv);
+	            }
+	            if (!added) {
+	                newRange.push_back_deep(newRange.arena(), KeyValueRef(mutation.param1, mutation.param2));
+	            }
+	            range = std::move(newRange);
+	        } else {
+	            // FIXME: This is very inefficient
+	            Standalone<RangeResultRef> newRange;
+	            for (const auto& kv : range) {
+	                if (kv.key == mutation.getKey()) {
+	                    newRange.push_back_deep(newRange.arena(), kv);
+	                }
+	            }
+	            range = std::move(newRange);
+	        }
+	    }
+	    req.reply.send(ConfigTransactionGetRangeReply(range));
+	    return Void();
 	}
+	*/
 
 	ACTOR static Future<Void> commit(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionCommitRequest req) {
 		wait(self->globalLock.take());
@@ -279,16 +279,18 @@ class SimpleConfigDatabaseNodeImpl {
 		wait(self->globalLock.take());
 		state FlowLock::Releaser releaser(self->globalLock);
 		state Version currentVersion = wait(getCommittedVersion(self));
-		Standalone<VectorRef<VersionedMutationRef>> versionedMutations = wait(getMutations(self, 0, currentVersion));
+		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
+		    wait(getMutations(self, 0, currentVersion));
 		TraceEvent te("SimpleConfigNodeQueuedMutations");
 		te.detail("Size", versionedMutations.size());
 		te.detail("CommittedVersion", currentVersion);
 		int index = 0;
 		for (const auto &versionedMutation : versionedMutations) {
 			te.detail(format("Version%d", index), versionedMutation.version);
-			te.detail(format("Mutation%d", index), versionedMutation.mutation.type);
-			te.detail(format("FirstParam%d", index), versionedMutation.mutation.param1);
-			te.detail(format("SecondParam%d", index), versionedMutation.mutation.param2);
+			te.detail(format("Mutation%d", index), versionedMutation.mutation.isSet());
+			te.detail(format("ConfigClass%d", index), versionedMutation.mutation.getConfigClass());
+			te.detail(format("KnobName%d", index), versionedMutation.mutation.getKnobName());
+			te.detail(format("KnobValue%d", index), versionedMutation.mutation.getValue());
 			++index;
 		}
 		return Void();
@@ -308,7 +310,8 @@ class SimpleConfigDatabaseNodeImpl {
 					self->actors.add(commit(self, req));
 				}
 				when(ConfigTransactionGetRangeRequest req = waitNext(cti->getRange.getFuture())) {
-					self->actors.add(getRange(self, req));
+					// FIXME: Fix and reenable
+					// self->actors.add(getRange(self, req));
 				}
 				when(wait(self->actors.getResult())) { ASSERT(false); }
 			}
@@ -322,7 +325,9 @@ class SimpleConfigDatabaseNodeImpl {
 		state ConfigFollowerGetFullDatabaseReply reply;
 		Standalone<RangeResultRef> data = wait(self->kvStore->readRange(kvKeys));
 		for (const auto& kv : data) {
-			reply.database[kv.key] = kv.value;
+			reply
+			    .database[BinaryReader::fromStringRef<ConfigKey>(kv.key.removePrefix(kvKeys.begin), IncludeVersion())] =
+			    kv.value;
 		}
 		state Version lastCompactedVersion = wait(getLastCompactedVersion(self));
 		TraceEvent(SevDebug, "ConfigDatabaseNodeGettingFullDB")
@@ -331,14 +336,14 @@ class SimpleConfigDatabaseNodeImpl {
 		if (lastCompactedVersion > req.version) {
 			req.reply.sendError(version_already_compacted());
 		}
-		Standalone<VectorRef<VersionedMutationRef>> versionedMutations =
+		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
 		    wait(getMutations(self, lastCompactedVersion + 1, req.version));
 		for (const auto& versionedMutation : versionedMutations) {
 			const auto& mutation = versionedMutation.mutation;
-			if (mutation.type == MutationRef::SetValue) {
-				reply.database[mutation.param1] = mutation.param2;
-			} else if (mutation.type == MutationRef::ClearRange) {
-				reply.database.erase(reply.database.find(mutation.param1), reply.database.find(mutation.param2));
+			if (mutation.isSet()) {
+				reply.database[mutation.getKey()] = mutation.getValue();
+			} else {
+				reply.database.erase(mutation.getKey());
 			}
 		}
 		req.reply.send(reply);
@@ -356,7 +361,7 @@ class SimpleConfigDatabaseNodeImpl {
 			req.reply.send(Void());
 			return Void();
 		}
-		Standalone<VectorRef<VersionedMutationRef>> versionedMutations =
+		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
 		    wait(getMutations(self, lastCompactedVersion + 1, req.version));
 		self->kvStore->clear(
 		    KeyRangeRef(versionedMutationKey(lastCompactedVersion + 1, 0), versionedMutationKey(req.version + 1, 0)));
@@ -367,17 +372,15 @@ class SimpleConfigDatabaseNodeImpl {
 				break;
 			} else {
 				TraceEvent(SevDebug, "ConfigDatabaseNodeCompactionApplyingMutation")
-				    .detail("MutationType", mutation.type)
+				    .detail("IsSet", mutation.isSet())
 				    .detail("MutationVersion", version)
 				    .detail("LastCompactedVersion", lastCompactedVersion)
 				    .detail("ReqVersion", req.version);
-				if (mutation.type == MutationRef::SetValue) {
-					self->kvStore->set(KeyValueRef(mutation.param1.withPrefix(kvKeys.begin), mutation.param2));
-				} else if (mutation.type == MutationRef::ClearRange) {
-					self->kvStore->clear(KeyRangeRef(mutation.param1.withPrefix(kvKeys.begin),
-					                                 mutation.param2.withPrefix(kvKeys.begin)));
+				auto serializedKey = BinaryWriter::toValue(mutation.getKey(), IncludeVersion());
+				if (mutation.isSet()) {
+					self->kvStore->set(KeyValueRef(serializedKey.withPrefix(kvKeys.begin), mutation.getValue()));
 				} else {
-					ASSERT(false);
+					self->kvStore->clear(singleKeyRange(serializedKey.withPrefix(kvKeys.begin)));
 				}
 				lastCompactedVersion = version;
 			}

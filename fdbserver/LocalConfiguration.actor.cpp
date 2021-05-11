@@ -37,7 +37,7 @@ class LocalConfigurationImpl {
 	Future<Void> initFuture;
 	TestKnobs knobs;
 	std::map<Key, Value> manuallyOverriddenKnobs;
-	std::map<Key, Value> configDatabaseOverriddenKnobs;
+	std::map<ConfigKey, Value> configDatabaseOverriddenKnobs;
 
 	ACTOR static Future<Void> saveConfigClasses(LocalConfigurationImpl* self) {
 		self->kvStore->set(KeyValueRef(configClassesKey, BinaryWriter::toValue(self->configClasses, IncludeVersion())));
@@ -83,7 +83,8 @@ class LocalConfigurationImpl {
 		}
 		Standalone<RangeResultRef> range = wait(self->kvStore->readRange(knobOverrideKeys));
 		for (const auto &kv : range) {
-			self->configDatabaseOverriddenKnobs[kv.key.removePrefix(knobOverrideKeys.begin)] = kv.value;
+			auto configKey = BinaryReader::fromStringRef<ConfigKey>(kv.key, IncludeVersion());
+			self->configDatabaseOverriddenKnobs[configKey] = kv.value;
 		}
 		self->updateInMemoryKnobs();
 		return Void();
@@ -91,9 +92,9 @@ class LocalConfigurationImpl {
 
 	void updateInMemoryKnobs() {
 		knobs.reset();
-		for (const auto& [knobName, knobValue] : configDatabaseOverriddenKnobs) {
+		for (const auto& [configKey, knobValue] : configDatabaseOverriddenKnobs) {
 			// TODO: Fail gracefully
-			ASSERT(knobs.setKnob(knobName.toString(), knobValue.toString()));
+			ASSERT(knobs.setKnob(configKey.knobName.toString(), knobValue.toString()));
 		}
 		for (const auto& [knobName, knobValue] : manuallyOverriddenKnobs) {
 			// TODO: Fail gracefully
@@ -105,11 +106,8 @@ class LocalConfigurationImpl {
 
 	ACTOR static Future<Void> applyKnobUpdates(LocalConfigurationImpl *self, ConfigFollowerGetFullDatabaseReply reply) {
 		self->kvStore->clear(knobOverrideKeys);
-		for (const auto &[k, v] : reply.database) {
-			Key knobName = BinaryReader::fromStringRef<ConfigUpdateKey>(k, IncludeVersion()).knobName;
-			Value knobValue = BinaryReader::fromStringRef<ConfigUpdateValue>(v, IncludeVersion()).value;
-			self->kvStore->set(KeyValueRef(knobName.withPrefix(knobOverrideKeys.begin), knobValue));
-			self->configDatabaseOverriddenKnobs[knobName] = knobValue;
+		for (const auto& [configKey, knobValue] : reply.database) {
+			self->configDatabaseOverriddenKnobs[configKey] = knobValue;
 		}
 		self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(self->lastSeenVersion, IncludeVersion())));
 		wait(self->kvStore->commit());
@@ -120,24 +118,13 @@ class LocalConfigurationImpl {
 	ACTOR static Future<Void> applyKnobUpdates(LocalConfigurationImpl *self, ConfigFollowerGetChangesReply reply) {
 		for (const auto &versionedMutation : reply.versionedMutations) {
 			const auto &mutation = versionedMutation.mutation;
-			if (mutation.type == MutationRef::SetValue) {
-				Key knobName = BinaryReader::fromStringRef<ConfigUpdateKey>(mutation.param1, IncludeVersion()).knobName;
-				Value knobValue =
-				    BinaryReader::fromStringRef<ConfigUpdateValue>(mutation.param2, IncludeVersion()).value;
-				self->kvStore->set(KeyValueRef(knobName.withPrefix(knobOverrideKeys.begin), knobValue));
-				self->configDatabaseOverriddenKnobs[knobName] = knobValue;
-			} else if (mutation.type == MutationRef::ClearRange) {
-				Key beginKnobName =
-				    BinaryReader::fromStringRef<ConfigUpdateKey>(mutation.param1, IncludeVersion()).knobName;
-				Key endKnobName =
-				    BinaryReader::fromStringRef<ConfigUpdateKey>(mutation.param2, IncludeVersion()).knobName;
-				self->kvStore->clear(KeyRangeRef(beginKnobName.withPrefix(knobOverrideKeys.begin),
-				                                 endKnobName.withPrefix(knobOverrideKeys.begin)));
-				self->configDatabaseOverriddenKnobs.erase(
-				    self->configDatabaseOverriddenKnobs.lower_bound(beginKnobName),
-				    self->configDatabaseOverriddenKnobs.lower_bound(endKnobName));
+			auto serializedKey = BinaryWriter::toValue(mutation.getKey(), IncludeVersion());
+			if (mutation.isSet()) {
+				self->kvStore->set(KeyValueRef(serializedKey.withPrefix(knobOverrideKeys.begin), mutation.getValue()));
+				self->configDatabaseOverriddenKnobs[mutation.getKey()] = mutation.getValue();
 			} else {
-				ASSERT(false);
+				self->kvStore->clear(singleKeyRange(serializedKey.withPrefix(knobOverrideKeys.begin)));
+				self->configDatabaseOverriddenKnobs.erase(mutation.getKey());
 			}
 		}
 		self->lastSeenVersion = reply.mostRecentVersion;

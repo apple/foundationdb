@@ -26,7 +26,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class SimpleConfigTransactionImpl {
-	Standalone<VectorRef<MutationRef>> mutations;
+	Standalone<VectorRef<ConfigMutationRef>> mutations;
 	Future<Version> version;
 	ConfigTransactionInterface cti;
 	int numRetries{ 0 };
@@ -44,18 +44,24 @@ class SimpleConfigTransactionImpl {
 			self->version = getReadVersion(self);
 		}
 		Version version = wait(self->version);
-		ConfigTransactionGetReply result = wait(self->cti.get.getReply(ConfigTransactionGetRequest(version, key)));
+		ConfigTransactionGetReply result =
+		    wait(self->cti.get.getReply(ConfigTransactionGetRequest(version, ConfigKeyRef::decodeKey(key))));
 		return result.value;
 	}
 
 	ACTOR static Future<Standalone<RangeResultRef>> getRange(SimpleConfigTransactionImpl* self, KeyRangeRef keys) {
+		// TODO: Implement
+		wait(delay(0));
+		return Standalone<RangeResultRef>{};
+		/*
 		if (!self->version.isValid()) {
-			self->version = getReadVersion(self);
+		    self->version = getReadVersion(self);
 		}
 		Version version = wait(self->version);
 		ConfigTransactionGetRangeReply result =
 		    wait(self->cti.getRange.getReply(ConfigTransactionGetRangeRequest(version, keys)));
 		return result.range;
+		*/
 	}
 
 	ACTOR static Future<Void> commit(SimpleConfigTransactionImpl* self) {
@@ -63,6 +69,11 @@ class SimpleConfigTransactionImpl {
 			self->version = getReadVersion(self);
 		}
 		Version version = wait(self->version);
+		auto commitTime = now();
+		for (auto& mutation : self->mutations) {
+			mutation.setTimestamp(commitTime);
+			// TODO: Update description
+		}
 		wait(self->cti.commit.getReply(ConfigTransactionCommitRequest(version, self->mutations)));
 		self->committed = true;
 		return Void();
@@ -76,16 +87,11 @@ public:
 	}
 
 	void set(KeyRef key, ValueRef value) {
-		mutations.emplace_back_deep(mutations.arena(), MutationRef::Type::SetValue, key, value);
+		mutations.push_back_deep(mutations.arena(), ConfigMutationRef::createConfigMutationRef(key, value));
 	}
 
 	void clear(KeyRef key) {
-		mutations.emplace_back_deep(mutations.arena(), MutationRef::Type::ClearRange, key, keyAfter(key));
-		ASSERT(keyAfter(key) > key);
-	}
-
-	void clearRange(KeyRef begin, KeyRef end) {
-		mutations.emplace_back_deep(mutations.arena(), MutationRef::Type::ClearRange, begin, end);
+		mutations.emplace_back_deep(mutations.arena(), ConfigMutationRef::createConfigMutationRef(key, {}));
 	}
 
 	Future<Optional<Value>> get(KeyRef key) { return get(this, key); }
@@ -121,7 +127,7 @@ public:
 
 	void reset() {
 		version = Future<Version>{};
-		mutations = Standalone<VectorRef<MutationRef>>{};
+		mutations = Standalone<VectorRef<ConfigMutationRef>>{};
 	}
 
 	void fullReset() {
@@ -165,10 +171,6 @@ void SimpleConfigTransaction::set(KeyRef const& key, ValueRef const& value) {
 
 void SimpleConfigTransaction::clear(KeyRef const& key) {
 	impl->clear(key);
-}
-
-void SimpleConfigTransaction::clear(KeyRangeRef const& range) {
-	impl->clearRange(range.begin, range.end);
 }
 
 Future<Void> SimpleConfigTransaction::commit() {

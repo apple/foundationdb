@@ -65,7 +65,7 @@ public:
 		throw client_invalid_operation();
 	}
 	void set(KeyRef const& key, ValueRef const& value) override;
-	void clear(KeyRangeRef const& range) override;
+	void clear(KeyRangeRef const& range) override { throw client_invalid_operation(); }
 	void clear(KeyRef const& key) override;
 	Future<Void> watch(Key const& key) override { throw client_invalid_operation(); }
 	void addWriteConflictRange(KeyRangeRef const& keys) override { throw client_invalid_operation(); }

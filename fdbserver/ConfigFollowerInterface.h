@@ -21,6 +21,7 @@
 #pragma once
 
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/ConfigKnobs.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 
@@ -48,10 +49,10 @@ struct ConfigFollowerGetVersionRequest {
 
 struct ConfigFollowerGetFullDatabaseReply {
 	static constexpr FileIdentifier file_identifier = 1734095;
-	std::map<Key, Value> database;
+	std::map<ConfigKey, Value> database;
 
 	ConfigFollowerGetFullDatabaseReply() = default;
-	explicit ConfigFollowerGetFullDatabaseReply(std::map<Key, Value> const& database) : database(database) {
+	explicit ConfigFollowerGetFullDatabaseReply(std::map<ConfigKey, Value> const& database) : database(database) {
 		// TODO: Support move constructor as well
 	}
 
@@ -77,13 +78,14 @@ struct ConfigFollowerGetFullDatabaseRequest {
 	}
 };
 
-struct VersionedMutationRef {
+struct VersionedConfigMutationRef {
 	Version version;
-	MutationRef mutation;
+	ConfigMutationRef mutation;
 
-	VersionedMutationRef()=default;
-	explicit VersionedMutationRef(Arena &arena, Version version, MutationRef mutation) : version(version), mutation(arena, mutation) {}
-	explicit VersionedMutationRef(Arena& arena, VersionedMutationRef const& rhs)
+	VersionedConfigMutationRef() = default;
+	explicit VersionedConfigMutationRef(Arena& arena, Version version, ConfigMutationRef mutation)
+	  : version(version), mutation(arena, mutation) {}
+	explicit VersionedConfigMutationRef(Arena& arena, VersionedConfigMutationRef const& rhs)
 	  : version(rhs.version), mutation(arena, rhs.mutation) {}
 
 	size_t expectedSize() const { return sizeof(Version) + mutation.expectedSize(); }
@@ -97,11 +99,11 @@ struct VersionedMutationRef {
 struct ConfigFollowerGetChangesReply {
 	static constexpr FileIdentifier file_identifier = 234859;
 	Version mostRecentVersion;
-	Standalone<VectorRef<VersionedMutationRef>> versionedMutations;
+	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
 
 	ConfigFollowerGetChangesReply() : mostRecentVersion(0) {}
 	explicit ConfigFollowerGetChangesReply(Version mostRecentVersion,
-	                                       Standalone<VectorRef<VersionedMutationRef>> const& versionedMutations)
+	                                       Standalone<VectorRef<VersionedConfigMutationRef>> const& versionedMutations)
 	  : mostRecentVersion(mostRecentVersion), versionedMutations(versionedMutations) {}
 
 	template <class Ar>
@@ -116,7 +118,7 @@ struct ConfigFollowerGetChangesRequest {
 	Standalone<VectorRef<KeyRef>> filter;
 	ReplyPromise<ConfigFollowerGetChangesReply> reply;
 
-	ConfigFollowerGetChangesRequest() : lastSeenVersion(-1) {}
+	ConfigFollowerGetChangesRequest() : lastSeenVersion(::invalidVersion) {}
 	explicit ConfigFollowerGetChangesRequest(Version lastSeenVersion, Standalone<VectorRef<KeyRef>> filter)
 	  : lastSeenVersion(lastSeenVersion), filter(filter) {}
 

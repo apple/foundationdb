@@ -35,9 +35,10 @@ class DynamicKnobsWorkload : public TestWorkload {
 		state SimpleConfigTransaction tr(cx->getConnectionFile()->getConnectionString());
 		loop {
 			try {
-				ConfigUpdateKey key = ConfigUpdateKeyRef(arena, testConfigClass, testKnobName);
-				ConfigUpdateValue value = ConfigUpdateValueRef(arena, testUpdateDescription, testKnobValue, now());
-				tr.set(BinaryWriter::toValue(key, IncludeVersion()), BinaryWriter::toValue(value, IncludeVersion()));
+				Tuple tuple;
+				tuple << testConfigClass;
+				tuple << testKnobName;
+				tr.set(tuple.pack(), testKnobValue);
 				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {

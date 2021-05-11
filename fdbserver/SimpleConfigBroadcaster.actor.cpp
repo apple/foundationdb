@@ -22,9 +22,9 @@
 
 class SimpleConfigBroadcasterImpl {
 	ConfigFollowerInterface subscriber;
-	std::map<Key, Value> database;
+	std::map<ConfigKey, Value> database;
 	// TODO: Should create fewer arenas
-	std::deque<Standalone<VersionedMutationRef>> versionedMutations;
+	std::deque<Standalone<VersionedConfigMutationRef>> versionedMutations;
 	Version lastCompactedVersion;
 	Version mostRecentVersion;
 	ActorCollection actors{ false };
@@ -52,9 +52,9 @@ class SimpleConfigBroadcasterImpl {
 				for (const auto& versionedMutation : reply.versionedMutations) {
 					TraceEvent(SevDebug, "BroadcasterFetchedMutation")
 					    .detail("Version", versionedMutation.version)
-					    .detail("MutationType", versionedMutation.mutation.type)
-					    .detail("Param1", versionedMutation.mutation.param1)
-					    .detail("Param2", versionedMutation.mutation.param2);
+					    .detail("ConfigClass", versionedMutation.mutation.getConfigClass())
+					    .detail("KnobName", versionedMutation.mutation.getKnobName())
+					    .detail("KnobValue", versionedMutation.mutation.getValue());
 					self->versionedMutations.push_back(versionedMutation);
 				}
 				self->mostRecentVersion = reply.mostRecentVersion;
@@ -92,9 +92,9 @@ class SimpleConfigBroadcasterImpl {
 		int index = 0;
 		for (const auto &versionedMutation : versionedMutations) {
 			te.detail(format("Version%d", index), versionedMutation.version);
-			te.detail(format("Mutation%d", index), versionedMutation.mutation.type);
-			te.detail(format("FirstParam%d", index), versionedMutation.mutation.param1);
-			te.detail(format("SecondParam%d", index), versionedMutation.mutation.param2);
+			te.detail(format("ConfigClass%d", index), versionedMutation.mutation.getConfigClass());
+			te.detail(format("KnobName%d", index), versionedMutation.mutation.getKnobName());
+			te.detail(format("KnobValue%d", index), versionedMutation.mutation.getValue());
 			++index;
 		}
 	}
@@ -137,15 +137,13 @@ class SimpleConfigBroadcasterImpl {
 						TraceEvent(SevDebug, "BroadcasterAppendingMutationToFullDBOutput")
 						    .detail("ReqVersion", req.version)
 						    .detail("MutationVersion", version)
-						    .detail("MutationType", mutation.type)
-						    .detail("Param1", mutation.param1)
-						    .detail("Param2", mutation.param2);
-						if (mutation.type == MutationRef::SetValue) {
-							reply.database[mutation.param1] = mutation.param2;
-						} else if (mutation.type == MutationRef::ClearRange) {
-							removeRange(reply.database, mutation.param1, mutation.param2);
+						    .detail("ConfigClass", mutation.getConfigClass())
+						    .detail("KnobName", mutation.getKnobName())
+						    .detail("KnobValue", mutation.getValue());
+						if (mutation.isSet()) {
+							reply.database[mutation.getKey()] = mutation.getValue();
 						} else {
-							ASSERT(false);
+							reply.database.erase(mutation.getKey());
 						}
 					}
 					req.reply.send(reply);
@@ -163,9 +161,9 @@ class SimpleConfigBroadcasterImpl {
 							TraceEvent(SevDebug, "BroadcasterSendingChangeMutation")
 							    .detail("Version", versionedMutation.version)
 							    .detail("ReqLastSeenVersion", req.lastSeenVersion)
-							    .detail("MutationType", versionedMutation.mutation.type)
-							    .detail("Param1", versionedMutation.mutation.param1)
-							    .detail("Param2", versionedMutation.mutation.param2);
+							    .detail("ConfigClass", versionedMutation.mutation.getConfigClass())
+							    .detail("KnobName", versionedMutation.mutation.getKnobName())
+							    .detail("KnobValue", versionedMutation.mutation.getValue());
 							reply.versionedMutations.push_back_deep(reply.versionedMutations.arena(),
 							                                        versionedMutation);
 						}
@@ -185,16 +183,14 @@ class SimpleConfigBroadcasterImpl {
 							TraceEvent(SevDebug, "BroadcasterCompactingMutation")
 							    .detail("ReqVersion", req.version)
 							    .detail("MutationVersion", version)
-							    .detail("MutationType", mutation.type)
-							    .detail("Param1", mutation.param1)
-							    .detail("Param2", mutation.param2)
+							    .detail("ConfigClass", mutation.getConfigClass())
+							    .detail("KnobName", mutation.getKnobName())
+							    .detail("KnobValue", mutation.getValue())
 							    .detail("LastCompactedVersion", self->lastCompactedVersion);
-							if (mutation.type == MutationRef::SetValue) {
-								self->database[mutation.param1] = mutation.param2;
-							} else if (mutation.type == MutationRef::ClearRange) {
-								removeRange(self->database, mutation.param1, mutation.param2);
+							if (mutation.isSet()) {
+								self->database[mutation.getKey()] = mutation.getValue();
 							} else {
-								ASSERT(false);
+								self->database.erase(mutation.getKey());
 							}
 							self->lastCompactedVersion = version;
 							self->versionedMutations.pop_front();

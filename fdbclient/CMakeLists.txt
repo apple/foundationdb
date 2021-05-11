@@ -19,6 +19,7 @@ set(FDBCLIENT_SRCS
   ClientWorkerInterface.h
   ClusterInterface.h
   CommitTransaction.h
+  ConfigKnobs.cpp
   ConfigKnobs.h
   ConfigTransactionInterface.h
   CoordinationInterface.h
