@@ -334,7 +334,7 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 }
 
 TransportData::TransportData(uint64_t transportId)
-  : endpoints(/*wellKnownTokenCount*/ 12), endpointNotFoundReceiver(endpoints), pingReceiver(endpoints),
+  : endpoints(/*wellKnownTokenCount*/ 11), endpointNotFoundReceiver(endpoints), pingReceiver(endpoints),
     warnAlwaysForLargePacket(true), lastIncompatibleMessage(0), transportId(transportId),
     numIncompatibleConnections(0) {
 	degraded = makeReference<AsyncVar<bool>>(false);
