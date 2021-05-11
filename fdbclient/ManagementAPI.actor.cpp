@@ -134,6 +134,14 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			    BinaryWriter::toValue(regionObj, IncludeVersion(ProtocolVersion::withRegionConfiguration())).toString();
 		}
 
+		if (key == "perpetual_storage_wiggle" && isInteger(value)) {
+			int ppWiggle = atoi(value.c_str());
+			if (ppWiggle >= 2 || ppWiggle < 0) {
+				printf("Error: Only 0 and 1 are valid values of perpetual_storage_wiggle at present.\n");
+				return out;
+			}
+			out[p + key] = value;
+		}
 		return out;
 	}
 
