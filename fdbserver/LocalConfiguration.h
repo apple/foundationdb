@@ -32,7 +32,6 @@ class TestKnobs : public Knobs {
 public:
 	int64_t TEST;
 	void initialize();
-	void reset();
 };
 
 class LocalConfiguration {
@@ -45,7 +44,10 @@ public:
 	                   UID id);
 	~LocalConfiguration();
 	Future<Void> init();
-	TestKnobs const &getKnobs() const;
+	FlowKnobs const& getFlowKnobs() const;
+	ClientKnobs const& getClientKnobs() const;
+	ServerKnobs const& getServerKnobs() const;
+	TestKnobs const& getTestKnobs() const;
 	// TODO: Only one field of serverDBInfo is required, so improve encapsulation
 	Future<Void> consume(Reference<AsyncVar<ServerDBInfo> const> const&);
 };

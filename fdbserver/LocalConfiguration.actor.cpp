@@ -18,8 +18,11 @@
  * limitations under the License.
  */
 
+#include "fdbclient/Knobs.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/LocalConfiguration.h"
+#include "flow/Knobs.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
@@ -35,7 +38,10 @@ class LocalConfigurationImpl {
 	ConfigClassSet configClasses;
 	Version lastSeenVersion { 0 };
 	Future<Void> initFuture;
-	TestKnobs knobs;
+	FlowKnobs flowKnobs;
+	ClientKnobs clientKnobs;
+	ServerKnobs serverKnobs;
+	TestKnobs testKnobs;
 	std::map<Key, Value> manuallyOverriddenKnobs;
 	std::map<ConfigKey, Value> configDatabaseOverriddenKnobs;
 
@@ -90,18 +96,42 @@ class LocalConfigurationImpl {
 		return Void();
 	}
 
+	bool updateKnob(Key knobName, Value knobValue) {
+		return (flowKnobs.setKnob(knobName.toString(), knobValue.toString()) ||
+		        clientKnobs.setKnob(knobName.toString(), knobValue.toString()) ||
+		        serverKnobs.setKnob(knobName.toString(), knobValue.toString()) ||
+		        testKnobs.setKnob(knobName.toString(), knobValue.toString()));
+	}
+
+	void initializeKnobs() {
+		flowKnobs.initialize();
+		clientKnobs.initialize();
+		serverKnobs.initialize();
+		testKnobs.initialize();
+	}
+
+	void resetKnobs() {
+		flowKnobs.reset();
+		clientKnobs.initialize();
+		serverKnobs.initialize();
+		testKnobs.initialize();
+	}
+
 	void updateInMemoryKnobs() {
-		knobs.reset();
+		resetKnobs();
 		for (const auto& [configKey, knobValue] : configDatabaseOverriddenKnobs) {
-			// TODO: Fail gracefully
-			ASSERT(knobs.setKnob(configKey.knobName.toString(), knobValue.toString()));
+			// TODO: Order updates by config class
+			// Assert here because we should be validating on the client
+			ASSERT(updateKnob(configKey.knobName, knobValue));
 		}
 		for (const auto& [knobName, knobValue] : manuallyOverriddenKnobs) {
-			// TODO: Fail gracefully
-			ASSERT(knobs.setKnob(knobName.toString(), knobValue.toString()));
+			if (!updateKnob(knobName, knobValue)) {
+				fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", knobName.toString().c_str());
+				TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(knobName));
+			}
 		}
 		// Must reinitialize in order to update dependent knobs
-		knobs.initialize();
+		initializeKnobs();
 	}
 
 	ACTOR static Future<Void> applyKnobUpdates(LocalConfigurationImpl *self, ConfigFollowerGetFullDatabaseReply reply) {
@@ -195,9 +225,24 @@ public:
 		return initFuture;
 	}
 
-	TestKnobs const &getKnobs() const {
+	FlowKnobs const& getFlowKnobs() const {
 		ASSERT(initFuture.isReady());
-		return knobs;
+		return flowKnobs;
+	}
+
+	ClientKnobs const& getClientKnobs() const {
+		ASSERT(initFuture.isReady());
+		return clientKnobs;
+	}
+
+	ServerKnobs const& getServerKnobs() const {
+		ASSERT(initFuture.isReady());
+		return serverKnobs;
+	}
+
+	TestKnobs const& getTestKnobs() const {
+		ASSERT(initFuture.isReady());
+		return testKnobs;
 	}
 
 	Future<Void> consume(Reference<AsyncVar<ServerDBInfo> const> const& serverDBInfo) {
@@ -217,8 +262,20 @@ Future<Void> LocalConfiguration::init() {
 	return impl->init();
 }
 
-TestKnobs const &LocalConfiguration::getKnobs() const {
-	return impl->getKnobs();
+FlowKnobs const& LocalConfiguration::getFlowKnobs() const {
+	return impl->getFlowKnobs();
+}
+
+ClientKnobs const& LocalConfiguration::getClientKnobs() const {
+	return impl->getClientKnobs();
+}
+
+ServerKnobs const& LocalConfiguration::getServerKnobs() const {
+	return impl->getServerKnobs();
+}
+
+TestKnobs const& LocalConfiguration::getTestKnobs() const {
+	return impl->getTestKnobs();
 }
 
 Future<Void> LocalConfiguration::consume(Reference<AsyncVar<ServerDBInfo> const> const& serverDBInfo) {
@@ -229,9 +286,4 @@ Future<Void> LocalConfiguration::consume(Reference<AsyncVar<ServerDBInfo> const>
 
 void TestKnobs::initialize() {
 	init(TEST, 0);
-}
-
-void TestKnobs::reset() {
-	explicitlySetKnobs.clear();
-	initialize();
 }

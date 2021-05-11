@@ -355,3 +355,8 @@ void Knobs::trace() const {
 	for (auto& k : bool_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
 }
+
+void FlowKnobs::reset() {
+	explicitlySetKnobs.clear();
+	initialize();
+}

@@ -232,6 +232,7 @@ public:
 
 	ClientKnobs();
 	void initialize(bool randomize = false);
+	void reset();
 };
 
 extern std::unique_ptr<ClientKnobs> globalClientKnobs;

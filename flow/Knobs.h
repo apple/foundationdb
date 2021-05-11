@@ -260,6 +260,7 @@ public:
 
 	FlowKnobs();
 	void initialize(bool randomize = false, bool isSimulated = false);
+	void reset();
 };
 
 extern std::unique_ptr<FlowKnobs> globalFlowKnobs;

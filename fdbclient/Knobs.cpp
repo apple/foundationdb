@@ -249,6 +249,11 @@ void ClientKnobs::initialize(bool randomize) {
 	// clang-format on
 }
 
+void ClientKnobs::reset() {
+	explicitlySetKnobs.clear();
+	initialize();
+}
+
 TEST_CASE("/fdbclient/knobs/initialize") {
 	// This test depends on TASKBUCKET_TIMEOUT_VERSIONS being defined as a constant multiple of CORE_VERSIONSPERSECOND
 	ClientKnobs clientKnobs;
