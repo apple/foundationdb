@@ -18,6 +18,8 @@ RUN rpmkeys --import mono-project.com.rpmkey.pgp && \
         curl \
         debbuild \
         devtoolset-8 \
+        devtoolset-8-libasan-devel \
+        devtoolset-8-libtsan-devel \
         devtoolset-8-libubsan-devel \
         devtoolset-8-systemtap-sdt-devel \
         docker-ce \
