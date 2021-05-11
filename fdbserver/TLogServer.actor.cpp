@@ -2022,6 +2022,7 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
                               TLogCommitRequest req,
                               Reference<LogData> logData,
                               PromiseStream<Void> warningCollectorInput) {
+	TraceEvent("DAN C");
 	state Span span("TLog:tLogCommit"_loc, req.spanContext);
 	state Optional<UID> tlogDebugID;
 	if (req.debugID.present()) {
@@ -2038,6 +2039,7 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 	if (g_network->check_yield(g_network->getCurrentTask())) {
 		wait(delay(0, g_network->getCurrentTask()));
 	}
+	TraceEvent("DAN C1");
 
 	state double waitStartT = 0;
 	while (self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES && !logData->stopped) {
@@ -2068,6 +2070,7 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		commitMessages(self, logData, req.version, req.arena, req.messages);
 
 		logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, req.knownCommittedVersion);
+	TraceEvent("DAN C2");
 
 		TLogQueueEntryRef qe;
 		// Log the changes to the persistent queue, to be committed by commitQueue()

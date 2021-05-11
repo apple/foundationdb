@@ -46,12 +46,16 @@ struct TestTLogDriverOptions {
 	std::string diskQueueExtension;
 	std::string kvStoreFilename;
 	int64_t kvMemoryLimit;
+	int numShardsPerGroup;
+	int numLogGroups;
 
 	explicit TestTLogDriverOptions(const UnitTestParameters& params) {
 		diskQueueBasename = params.get("diskQueueBasename").orDefault("folder");
 		diskQueueExtension = params.get("diskQueueFileExtension").orDefault("ext");
 		kvStoreFilename = params.get("kvStoreFilename").orDefault("kvstore");
 		kvMemoryLimit = params.getDouble("kvMemoryLimit").orDefault(0x500e6);
+		numShardsPerGroup = params.getInt("numShardsPerGroup").orDefault(2);
+		numLogGroups = params.getInt("numLogGroups").orDefault(1);
 	}
 };
 
@@ -67,24 +71,38 @@ struct TLogContext {
 	Promise<bool> TLogCreated;
 	Promise<bool> TLogStarted;
 	Promise<bool> realTLogTestCompleted;
+
+	TLogContext(int inProcessID) : tagProcessID(inProcessID){};
 };
 
 // state maintained for all tlogs.
 struct TLogDriverContext {
 
-	Future<Void> sendCommitMessages(std::shared_ptr<TestDriverContext> pTestDriverContext) {
-		return sendCommitMessages_impl(pTestDriverContext, this);
+	Future<Void> sendCommitMessages(std::shared_ptr<TestDriverContext> pTestDriverContext, uint16_t processID) {
+		return sendCommitMessages_impl(pTestDriverContext, this, processID);
+	}
+
+	Future<Void> sendPushMessages(std::shared_ptr<TestDriverContext> pTestDriverContext, uint16_t processID) {
+		return sendPushMessages_impl(pTestDriverContext, this, processID);
 	}
 
 	ACTOR static Future<Void> sendCommitMessages_impl(std::shared_ptr<TestDriverContext> pTestDriverContext,
-	                                                  TLogDriverContext* pTLogDriverContext);
+	                                                  TLogDriverContext* pTLogDriverContext,
+	                                                  uint16_t processID);
 
-	Future<Void> peekCommitMessages(std::shared_ptr<TestDriverContext> pTestDriverContext) {
-		return peekCommitMessages_impl(pTestDriverContext, this);
+	ACTOR static Future<Void> sendPushMessages_impl(std::shared_ptr<TestDriverContext> pTestDriverContext,
+	                                                TLogDriverContext* pTLogDriverContext,
+	                                                uint16_t processID);
+
+	Future<Void> peekCommitMessages(std::shared_ptr<TestDriverContext> pTestDriverContext, uint16_t processID, uint32_t tag) {
+		return peekCommitMessages_impl(pTestDriverContext, this, processID, tag);
 	}
 
 	ACTOR static Future<Void> peekCommitMessages_impl(std::shared_ptr<TestDriverContext> pTestDriverContext,
-	                                                  TLogDriverContext* pTLogDriverContext);
+	                                                  TLogDriverContext* pTLogDriverContext,
+	                                                  uint16_t processID,
+													uint32_t tag);
+
 
 	UID logID;
 	UID workerID;
@@ -92,9 +110,11 @@ struct TLogDriverContext {
 	// paramaters
 	std::string diskQueueBasename;
 	int numCommits;
+	int numShardsPerGroup;
+	int numLogGroups;
 
 	// test driver state
-	std::shared_ptr<TLogContext> pTLogContext;
+	std::vector<std::shared_ptr<TLogContext>> pTLogContextList;
 
 	// fdb state
 	Reference<ILogSystem> ls;
