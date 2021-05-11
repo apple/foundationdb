@@ -131,7 +131,7 @@ install_destinations(EL7 LIB usr/lib64)
 install_destinations(PM
   BIN usr/local/bin
   SBIN usr/local/libexec
-  LIB lib
+  LIB usr/local/lib
   FDBMONITOR usr/local/libexec
   INCLUDE usr/local/include
   ETC usr/local/etc/foundationdb
