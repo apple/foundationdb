@@ -448,7 +448,7 @@ struct LineageProperties : LineagePropertiesBase {
 	}
 };
 
-struct ActorLineage : ThreadSafeReferenceCounted<ActorLineage> {
+struct ActorLineage : ThreadSafeReferenceCounted<ActorLineage>, public FastAllocated<ActorLineage> {
 	friend class LocalLineage;
 
 private:
