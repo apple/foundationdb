@@ -118,16 +118,6 @@ install_destinations(DEB
   DATA var/lib/foundationdb/data)
 copy_install_destinations(DEB EL7)
 install_destinations(EL7 LIB usr/lib64)
-install_destinations(PM
-  BIN usr/local/bin
-  SBIN usr/local/libexec
-  LIB usr/local/lib
-  FDBMONITOR usr/local/libexec
-  BACKUPAGENT usr/local/foundationdb
-  INCLUDE usr/local/include
-  ETC usr/local/etc/foundationdb
-  LOG usr/local/foundationdb/logs
-  DATA usr/local/foundationdb/data)
 
 # This can be used for debugging in case above is behaving funky
 #print_install_destinations()
