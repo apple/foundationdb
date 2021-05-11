@@ -1,5 +1,5 @@
 /*
- * IConfigBroadcaster.h
+ * ConfigBroadcaster.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -21,23 +21,26 @@
 #pragma once
 
 #include "fdbclient/CoordinationInterface.h"
+#include "fdbserver/ConfigBroadcaster.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/ConfigFollowerInterface.h"
 #include "flow/flow.h"
 #include <memory>
 
-class IConfigBroadcaster {
+class IConfigConsumer {
 public:
-	virtual Future<Void> serve(ConfigFollowerInterface const&) = 0;
+	virtual ~IConfigConsumer() = default;
+	virtual Future<Void> getInitialSnapshot(ConfigBroadcaster& broadcaster) = 0;
+	virtual Future<Void> consume(ConfigBroadcaster& broadcaster) = 0;
 };
 
-class SimpleConfigBroadcaster : public IConfigBroadcaster {
-	std::unique_ptr<class SimpleConfigBroadcasterImpl> impl;
+class SimpleConfigConsumer : public IConfigConsumer {
+	std::unique_ptr<class SimpleConfigConsumerImpl> impl;
 
 public:
-	// TODO: Clean up constructors
-	SimpleConfigBroadcaster(ClusterConnectionString const&);
-	SimpleConfigBroadcaster(ServerCoordinators const&);
-	~SimpleConfigBroadcaster();
-	Future<Void> serve(ConfigFollowerInterface const&) override;
+	SimpleConfigConsumer(ClusterConnectionString const& ccs);
+	SimpleConfigConsumer(ServerCoordinators const& coordinators);
+	~SimpleConfigConsumer();
+	Future<Void> getInitialSnapshot(ConfigBroadcaster& broadcaster) override;
+	Future<Void> consume(ConfigBroadcaster& broadcaster) override;
 };

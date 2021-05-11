@@ -31,7 +31,7 @@
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/IConfigBroadcaster.h"
+#include "fdbserver/ConfigBroadcaster.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/LeaderElection.h"
@@ -3419,7 +3419,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          ServerCoordinators coordinators,
                                          LocalityData locality) {
 	state ClusterControllerData self(interf, locality, coordinators);
-	state SimpleConfigBroadcaster configBroadcaster(coordinators);
+	state ConfigBroadcaster configBroadcaster(coordinators);
 	state Future<Void> coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
 	state uint64_t step = 0;
 	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));

@@ -6,6 +6,8 @@ set(FDBSERVER_SRCS
   BackupProgress.actor.h
   BackupWorker.actor.cpp
   ClusterController.actor.cpp
+  ConfigBroadcaster.actor.cpp
+  ConfigBroadcaster.h
   ConfigFollowerInterface.cpp
   ConfigFollowerInterface.h
   ConflictSet.h
@@ -26,7 +28,7 @@ set(FDBSERVER_SRCS
   FDBExecHelper.actor.h
   GrvProxyServer.actor.cpp
   IConfigDatabaseNode.h
-  IConfigBroadcaster.h
+  IConfigConsumer.h
   IDiskQueue.h
   IKeyValueContainer.h
   IKeyValueStore.h
@@ -93,7 +95,7 @@ set(FDBSERVER_SRCS
   ResolverInterface.h
   ServerDBInfo.actor.h
   ServerDBInfo.h
-  SimpleConfigBroadcaster.actor.cpp
+  SimpleConfigConsumer.actor.cpp
   SimpleConfigDatabaseNode.actor.cpp
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
