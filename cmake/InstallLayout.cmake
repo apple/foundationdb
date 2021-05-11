@@ -147,7 +147,7 @@ install_destinations(PM
 set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
 if(APPLE)
-  set(CPACK_GENERATOR TGZ productbuild)
+  set(CPACK_GENERATOR TGZ)
 else()
   set(CPACK_GENERATOR RPM DEB TGZ)
 endif()
