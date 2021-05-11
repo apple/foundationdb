@@ -46,10 +46,6 @@ function(install_symlink)
           TO "../${rel_path}bin/${IN_FILE_NAME}"
           DESTINATION "usr/lib64/${IN_LINK_NAME}"
           COMPONENTS "${IN_COMPONENT}-deb")
-        install_symlink_impl(
-          TO "../${rel_path}local/bin/${IN_FILE_NAME}"
-          DESTINATION "usr/lib64/${IN_LINK_NAME}"
-          COMPONENTS "${IN_COMPONENT}-pm")
       elseif("${IN_LINK_DIR}" MATCHES "bin")
         install_symlink_impl(
           TO "../${rel_path}bin/${IN_FILE_NAME}"
@@ -61,10 +57,6 @@ function(install_symlink)
           COMPONENTS "${IN_COMPONENT}-el6"
                      "${IN_COMPONENT}-el7"
                      "${IN_COMPONENT}-deb")
-        install_symlink_impl(
-          TO "../${rel_path}/bin/${IN_FILE_NAME}"
-          DESTINATION "usr/local/bin/${IN_LINK_NAME}"
-          COMPONENTS "${IN_COMPONENT}-pm")
       elseif("${IN_LINK_DIR}" MATCHES "fdbmonitor")
         install_symlink_impl(
           TO "../../${rel_path}bin/${IN_FILE_NAME}"
@@ -76,10 +68,6 @@ function(install_symlink)
           COMPONENTS "${IN_COMPONENT}-el6"
                      "${IN_COMPONENT}-el7"
                      "${IN_COMPONENT}-deb")
-        install_symlink_impl(
-          TO "../../${rel_path}/bin/${IN_FILE_NAME}"
-          DESTINATION "usr/local/lib/foundationdb/${IN_LINK_NAME}"
-          COMPONENTS "${IN_COMPONENT}-pm")
       else()
         message(FATAL_ERROR "Unknown LINK_DIR ${IN_LINK_DIR}")
       endif()
@@ -217,19 +205,16 @@ set(CPACK_PACKAGE_CONTACT "The FoundationDB Community")
 set(CPACK_COMPONENT_SERVER-EL7_DEPENDS clients-el7)
 set(CPACK_COMPONENT_SERVER-DEB_DEPENDS clients-deb)
 set(CPACK_COMPONENT_SERVER-TGZ_DEPENDS clients-tgz)
-set(CPACK_COMPONENT_SERVER-PM_DEPENDS clients-pm)
 set(CPACK_COMPONENT_SERVER-VERSIONED_DEPENDS clients-versioned)
 
 set(CPACK_COMPONENT_SERVER-EL7_DISPLAY_NAME "foundationdb-server")
 set(CPACK_COMPONENT_SERVER-DEB_DISPLAY_NAME "foundationdb-server")
 set(CPACK_COMPONENT_SERVER-TGZ_DISPLAY_NAME "foundationdb-server")
-set(CPACK_COMPONENT_SERVER-PM_DISPLAY_NAME "foundationdb-server")
 set(CPACK_COMPONENT_SERVER-VERSIONED_DISPLAY_NAME "foundationdb-server-${PROJECT_VERSION}")
 
 set(CPACK_COMPONENT_CLIENTS-EL7_DISPLAY_NAME "foundationdb-clients")
 set(CPACK_COMPONENT_CLIENTS-DEB_DISPLAY_NAME "foundationdb-clients")
 set(CPACK_COMPONENT_CLIENTS-TGZ_DISPLAY_NAME "foundationdb-clients")
-set(CPACK_COMPONENT_CLIENTS-PM_DISPLAY_NAME "foundationdb-clients")
 set(CPACK_COMPONENT_CLIENTS-VERSIONED_DISPLAY_NAME "foundationdb-clients-${PROJECT_VERSION}")
 
 
@@ -388,24 +373,6 @@ set(CPACK_DEBIAN_SERVER-VERSIONED_PACKAGE_CONTROL_EXTRA
   ${CMAKE_BINARY_DIR}/packaging/multiversion/server/prerm)
 
 ################################################################################
-# MacOS configuration
-################################################################################
-
-if(APPLE)
-  install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/osx/uninstall-FoundationDB.sh
-    DESTINATION "usr/local/foundationdb"
-    COMPONENT clients-pm)
-  install(PROGRAMS
-    ${CMAKE_SOURCE_DIR}/packaging/osx/scripts-server/preinstall
-    ${CMAKE_SOURCE_DIR}/packaging/osx/scripts-server/postinstall
-    DESTINATION "Scripts"
-    COMPONENT server-pm)
-  install(FILES ${CMAKE_SOURCE_DIR}/packaging/osx/com.foundationdb.fdbmonitor.plist
-    DESTINATION "Library/LaunchDaemons"
-    COMPONENT server-pm)
-endif()
-
-################################################################################
 # Configuration for DEB
 ################################################################################
 
@@ -423,15 +390,9 @@ set(CLUSTER_DESCRIPTION1 ${description1} CACHE STRING "Cluster description")
 set(CLUSTER_DESCRIPTION2 ${description2} CACHE STRING "Cluster description")
 
 if(NOT WIN32)
-  if (APPLE)
-    fdb_install(FILES ${CMAKE_SOURCE_DIR}/packaging/osx/foundationdb.conf.new
-      DESTINATION etc
-      COMPONENT server)
-  else()
-    fdb_install(FILES ${CMAKE_SOURCE_DIR}/packaging/foundationdb.conf
-      DESTINATION etc
-      COMPONENT server)
-  endif()
+  fdb_install(FILES ${CMAKE_SOURCE_DIR}/packaging/foundationdb.conf
+    DESTINATION etc
+    COMPONENT server)
   install(FILES ${CMAKE_SOURCE_DIR}/packaging/make_public.py
     DESTINATION "usr/lib/foundationdb"
     COMPONENT server-deb)
