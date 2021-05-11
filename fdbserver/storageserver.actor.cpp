@@ -545,6 +545,10 @@ public:
 	int64_t versionLag; // An estimate for how many versions it takes for the data to move from the logs to this storage
 	                    // server
 
+	int64_t versionCount;
+	double duration;
+	Optional<UID> sourceTLogID;
+
 	ProtocolVersion logProtocol;
 
 	Reference<ILogSystem> logSystem;
@@ -732,7 +736,7 @@ public:
 	  : fetchKeysHistograms(), instanceID(deterministicRandom()->randomUniqueID().first()), storage(this, storage),
 	    db(db), actors(false), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
 	    rebootAfterDurableVersion(std::numeric_limits<Version>::max()), durableInProgress(Void()), versionLag(0),
-	    primaryLocality(tagLocalityInvalid), updateEagerReads(0), shardChangeCounter(0),
+	    versionCount(0), duration(0), primaryLocality(tagLocalityInvalid), updateEagerReads(0), shardChangeCounter(0),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES), shuttingDown(false),
 	    debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0), numWatches(0), logProtocol(0),
 	    counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
@@ -3523,9 +3527,20 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			if (data->otherError.getFuture().isReady())
 				data->otherError.getFuture().get();
 
+			auto curTime = now();
+			data->versionCount = ver - data->version.get();
+			data->duration = curTime - data->lastUpdate;
+			data->sourceTLogID = cursor->getCurrentPeekLocation();
+
+			TraceEvent("StorageServerCatchUpRate", data->thisServerID)
+		        .detail("VersionCount", data->versionCount)
+				.detail("Duration", data->duration)
+				.detail("SourceTLogId", data->sourceTLogID.present() ? data->sourceTLogID.get().toString() : "unknown");
+
 			data->noRecentUpdates.set(false);
-			data->lastUpdate = now();
+			data->lastUpdate = curTime;
 			data->version.set(ver); // Triggers replies to waiting gets for new version(s)
+
 			setDataVersion(data->thisServerID, data->version.get());
 			if (data->otherError.getFuture().isReady())
 				data->otherError.getFuture().get();
