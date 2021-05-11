@@ -12,7 +12,7 @@ fi
 BUILDDIR="$1"
 SRCDIR="$2"
 
-VERSION="$(grep 'CMAKE_PROJECT_VERSION[^_]' ""$BUILDDIR"/CMakeCache.txt" | sed -e 's/[^=]*=//')"
+VERSION="$(grep 'CMAKE_PROJECT_VERSION[^_]' "$BUILDDIR/CMakeCache.txt" | sed -e 's/[^=]*=//')"
 
 PKGFILE="$BUILDDIR/packages/FoundationDB-$VERSION.pkg"
 
