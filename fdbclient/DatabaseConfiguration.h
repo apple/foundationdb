@@ -243,6 +243,9 @@ struct DatabaseConfiguration {
 	int32_t repopulateRegionAntiQuorum;
 	std::vector<RegionInfo> regions;
 
+	// Perpetual Storage Setting
+	int32_t perpetualStorageWiggleSpeed;
+
 	// Excluded servers (no state should be here)
 	bool isExcludedServer(NetworkAddressList) const;
 	std::set<AddressExclusion> getExcludedServers() const;

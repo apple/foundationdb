@@ -7,7 +7,7 @@ bindings/java/foundationdb-client*.jar
 bindings/java/foundationdb-tests*.jar
 bindings/java/fdb-java-*-sources.jar
 packaging/msi/FDBInstaller.msi
-
+builds/
 # Generated source, build, and packaging files
 *.g.cpp
 *.g.h
