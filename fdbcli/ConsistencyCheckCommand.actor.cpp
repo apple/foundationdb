@@ -33,7 +33,7 @@ namespace fdb_cli {
 const KeyRef consistencyCheckSpecialKey = LiteralStringRef("\xff\xff/management/consistency_check_suspended");
 
 ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens) {
-	// We do not add a try-catch loop here as the this transaction is always supposed to succeed
+	// Here we do not proceed in a try-catch loop since the transaction is always supposed to succeed.
 	// If not, the outer loop catch block(fdbcli.actor.cpp) will handle the error and print out the error message
 	tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 	if (tokens.size() == 1) {
