@@ -18,13 +18,14 @@
  * limitations under the License.
  */
 
+#include <string>
+
+#include "flow/flow.h"
+#include "flow/network.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Error.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include "flow/flow.h"
-#include "flow/network.h"
-#include <string>
 
 ThreadCallback* ThreadCallback::addCallback(ThreadCallback* cb) {
 	return (new ThreadMultiCallback())->addCallback(this)->addCallback(cb);
