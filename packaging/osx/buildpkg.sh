@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -Eeuo pipefail
 
 umask 0022
 
@@ -9,6 +9,12 @@ if [ "$#" -ne 2 ] ; then
     exit 1
 fi
 
+# BUILDDIR is the path to the cmake build directory
+# SRCDIR is the path to the source directory
+#
+# e.g. If your current directory is the project root and the build directory is _build, then you want to do
+#     $ ./packaging/osx/buildpkg.sh _build .
+#
 BUILDDIR="$1"
 SRCDIR="$2"
 
