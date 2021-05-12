@@ -91,7 +91,7 @@ function(symlink_files)
   endif()
 endfunction()
 
-fdb_install_packages(TGZ DEB EL7 PM VERSIONED)
+fdb_install_packages(TGZ DEB EL7 VERSIONED)
 fdb_install_dirs(BIN SBIN LIB FDBMONITOR INCLUDE ETC LOG DATA BACKUPAGENT)
 message(STATUS "FDB_INSTALL_DIRS -> ${FDB_INSTALL_DIRS}")
 
