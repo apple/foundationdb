@@ -56,10 +56,7 @@ struct StorageServerInterface {
 
 	LocalityData locality;
 	UID uniqueID;
-	// TODO get rid of explicit mapping?
-	// Effectively implements Optional<UID> but serializer didn't like Optional
-	bool isTss;
-	UID tssPairID;
+	Optional<UID> tssPairID;
 
 	RequestStream<struct GetValueRequest> getValue;
 	RequestStream<struct GetKeyRequest> getKey;
@@ -80,12 +77,13 @@ struct StorageServerInterface {
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct SplitRangeRequest> getRangeSplitPoints;
 
-	explicit StorageServerInterface(UID uid) : uniqueID(uid), isTss(false) {}
-	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()), isTss(false) {}
+	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
+	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
 	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }
 	NetworkAddress stableAddress() const { return getValue.getEndpoint().getStableAddress(); }
 	Optional<NetworkAddress> secondaryAddress() const { return getValue.getEndpoint().addresses.secondaryAddress; }
 	UID id() const { return uniqueID; }
+	bool isTss() const { return tssPairID.present(); }
 	std::string toString() const { return id().shortString(); }
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -95,7 +93,7 @@ struct StorageServerInterface {
 
 		if (ar.protocolVersion().hasSmallEndpoints()) {
 			if (ar.protocolVersion().hasTSS()) {
-				serializer(ar, uniqueID, locality, getValue, isTss, tssPairID);
+				serializer(ar, uniqueID, locality, getValue, tssPairID);
 			} else {
 				serializer(ar, uniqueID, locality, getValue);
 			}

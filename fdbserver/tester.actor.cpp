@@ -979,8 +979,7 @@ ACTOR Future<bool> runTest(Database cx,
 				                                   testers,
 				                                   quiescent,
 				                                   spec.runConsistencyCheckOnCache,
-				                                   // spec.runConsistencyCheckOnTSS, // TODO override with true to test
-				                                   true,
+				                                   spec.runConsistencyCheckOnTSS,
 				                                   10000.0,
 				                                   18000,
 				                                   spec.databasePingDelay,
@@ -1443,18 +1442,13 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	if (useDB && startingConfiguration != StringRef()) {
 		try {
 			wait(timeoutError(changeConfiguration(cx, testers, startingConfiguration), 2000.0));
-			printf("starting config changed\n");
 			if (g_network->isSimulated() && enableDD) {
-				printf("waiting for DD\n");
 				wait(success(setDDMode(cx, 1)));
-				printf("done waiting for DD\n");
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to set starting configuration");
 		}
 	}
-
-	printf("starting configuration set, moving on\n");
 
 	if (useDB && waitForQuiescenceBegin) {
 		TraceEvent("TesterStartingPreTestChecks")
@@ -1470,8 +1464,6 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 			throw;
 		}
 	}
-
-	printf("database quiesced, starting tests.\n");
 
 	TraceEvent("TestsExpectedToPass").detail("Count", tests.size());
 	state int idx = 0;

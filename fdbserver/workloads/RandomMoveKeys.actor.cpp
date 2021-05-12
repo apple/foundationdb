@@ -168,7 +168,7 @@ struct MoveKeysWorkload : TestWorkload {
 			count[servers[s].address()]++;
 		int o = 0;
 		for (int s = 0; s < servers.size(); s++)
-			if (count[servers[s].address()] == 1 && !servers[s].isTss)
+			if (count[servers[s].address()] == 1 && !servers[s].isTss())
 				servers[o++] = servers[s];
 		servers.resize(o);
 	}

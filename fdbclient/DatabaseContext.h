@@ -425,7 +425,6 @@ public:
 	static const std::vector<std::string> debugTransactionTagChoices;
 	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;
 
-	// TODO should this be private?
 	void maybeAddTssMapping(StorageServerInterface const& ssi);
 	void addTssMapping(StorageServerInterface const& ssi, StorageServerInterface const& tssi);
 };

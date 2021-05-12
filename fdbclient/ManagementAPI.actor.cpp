@@ -350,7 +350,6 @@ ConfigurationResult buildConfiguration(std::vector<StringRef> const& modeTokens,
 		// A new tss setup must have count + storage engine. An adjustment must have at least one.
 		if ((isNew && (!count.present() || !storageEngine.present())) ||
 		    (!isNew && !count.present() && !storageEngine.present())) {
-			// TODO is this the right error type? And should we log something?
 			return ConfigurationResult::INCOMPLETE_CONFIGURATION;
 		}
 

@@ -523,10 +523,6 @@ public:
 			TraceEvent(SevWarnAlways, "TSSInjectFaultEnabled", thisServerID)
 			    .detail("Mode", g_simulator.tssMode)
 			    .detail("At", tssFaultInjectTime.get());
-			printf("ENABLING FAULT INJECTION FOR TSS %s at time %.4f in mode %d\n",
-			       thisServerID.toString().c_str(),
-			       tssFaultInjectTime.get(),
-			       g_simulator.tssMode);
 		}
 	}
 
@@ -1077,24 +1073,12 @@ void updateProcessStats(StorageServer* self) {
 
 ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, SpanID spanContext) {
 	state Span span("SS.WaitForVersion"_loc, { spanContext });
-	/*if (172218491 == version) {
-	    printf("%sSS %s starting waitForVersionActor @ %lld\n", data->tssPairID.present() ? "T" : "",
-	data->thisServerID.toString().c_str(), version);
-	}*/
 	choose {
 		when(wait(data->version.whenAtLeast(version))) {
 			// FIXME: A bunch of these can block with or without the following delay 0.
 			// wait( delay(0) );  // don't do a whole bunch of these at once
-			/*if (172218491 == version) {
-			    printf("%sSS %s waitForVersionActor @ %lld - at least version\n", data->tssPairID.present() ? "T" : "",
-			data->thisServerID.toString().c_str(), version);
-			}*/
 			if (version < data->oldestVersion.get())
 				throw transaction_too_old(); // just in case
-			/*if (172218491 == version) {
-			    printf("%sSS %s waitForVersionActor @ %lld - not too old\n", data->tssPairID.present() ? "T" : "",
-			data->thisServerID.toString().c_str(), version);
-			}*/
 			return version;
 		}
 		when(wait(delay(SERVER_KNOBS->FUTURE_VERSION_DELAY))) {
@@ -1103,39 +1087,23 @@ ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, 
 				    .detail("Version", version)
 				    .detail("MyVersion", data->version.get())
 				    .detail("ServerID", data->thisServerID);
-			/*if (172218491 == version) {
-			    printf("%sSS %s waitForVersionActor @ %lld - future version\n", data->tssPairID.present() ? "T" : "",
-			data->thisServerID.toString().c_str(), version);
-			}*/
 			throw future_version();
 		}
 	}
 }
 
 Future<Version> waitForVersion(StorageServer* data, Version version, SpanID spanContext) {
-	/*if (172218491 == version) {
-	    printf("%sSS %s started waitForVersion @ %lld\n", data->tssPairID.present() ? "T" : "",
-	data->thisServerID.toString().c_str(), version);
-	}*/
 	if (version == latestVersion) {
 		version = std::max(Version(1), data->version.get());
 	}
 
 	if (version < data->oldestVersion.get() || version <= 0) {
-		/*if (172218491 == version) {
-		    printf("%sSS %s waitForVersion @ %lld - transaction too old\n", data->tssPairID.present() ? "T" : "",
-		data->thisServerID.toString().c_str(), version);
-		}*/
 		return transaction_too_old();
 	} else if (version <= data->version.get()) {
 		return version;
 	}
 
 	if ((data->behind || data->versionBehind) && version > data->version.get()) {
-		/*if (172218491 == version) {
-		    printf("%sSS %s waitForVersion @ %lld - process_behind\n", data->tssPairID.present() ? "T" : "",
-		data->thisServerID.toString().c_str(), version);
-		}*/
 		return process_behind();
 	}
 
@@ -1169,11 +1137,6 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	Span span("SS:getValue"_loc, { req.spanContext });
 	span.addTag("key"_sr, req.key);
 
-	/*if ("000002ff000004c10000000100000002" == req.key.toString() && 172218491 == req.version) {
-	    printf("%sSS %s started getValueQ for %s @ %lld\n", data->tssPairID.present() ? "T" : "",
-	data->thisServerID.toString().c_str(), req.key.toString().c_str(), req.version);
-	}*/
-
 	try {
 		++data->counters.getValueQueries;
 		++data->counters.allQueries;
@@ -1184,11 +1147,6 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 		// so we need to downgrade here
 		wait(data->getQueryDelay());
-
-		/*if ("000002ff000004c10000000100000002" == req.key.toString() && 172218491 == req.version) {
-		    printf("%sSS %s  getValueQ for %s @ %lld - got query delay\n", data->tssPairID.present() ? "T" : "",
-		data->thisServerID.toString().c_str(), req.key.toString().c_str(), req.version);
-		}*/
 
 		if (req.debugID.present())
 			g_traceBatch.addEvent("GetValueDebug",
@@ -1204,17 +1162,8 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 
 		state uint64_t changeCounter = data->shardChangeCounter;
 
-		/*if ("000002ff000004c10000000100000002" == req.key.toString() && 172218491 == req.version) {
-		    printf("%sSS %s  getValueQ for %s @ %lld - waited for version\n", data->tssPairID.present() ? "T" : "",
-		data->thisServerID.toString().c_str(), req.key.toString().c_str(), req.version);
-		}*/
-
 		if (!data->shards[req.key]->isReadable()) {
 			//TraceEvent("WrongShardServer", data->thisServerID).detail("Key", req.key).detail("Version", version).detail("In", "getValueQ");
-			/*if ("000002ff000004c10000000100000002" == req.key.toString() && 172218491 == req.version) {
-			    printf("%sSS %s started getValueQ for %s @ %lld got wrong shard server\n", data->tssPairID.present() ?
-			"T" : "", data->thisServerID.toString().c_str(), req.key.toString().c_str(), req.version);
-			}*/
 			throw wrong_shard_server();
 		}
 
@@ -1223,10 +1172,6 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		if (i && i->isValue() && i.key() == req.key) {
 			v = (Value)i->getValue();
 			path = 1;
-			/*if ("000002ff000004c10000000100000002" == req.key.toString() && 172218491 == req.version) {
-			    printf("%sSS %s  getValueQ for %s @ %lld - got from memory\n", data->tssPairID.present() ? "T" : "",
-			data->thisServerID.toString().c_str(), req.key.toString().c_str(), req.version);
-			}*/
 		} else if (!i || !i->isClearTo() || i->getEndKey() <= req.key) {
 			path = 2;
 			Optional<Value> vv = wait(data->storage.readValue(req.key, req.debugID));
@@ -1237,10 +1182,6 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			}
 			data->checkChangeCounter(changeCounter, req.key);
 			v = vv;
-			/*if ("000002ff000004c10000000100000002" == req.key.toString() && 172218491 == req.version) {
-			    printf("%sSS %s  getValueQ for %s @ %lld - got from storage\n", data->tssPairID.present() ? "T" : "",
-			data->thisServerID.toString().c_str(), req.key.toString().c_str(), req.version);
-			}*/
 		}
 
 		DEBUG_MUTATION("ShardGetValue",
@@ -1268,12 +1209,6 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			++data->counters.emptyQueries;
 		}
 
-		/*if ("000002ff000004c10000000100000002" == req.key.toString() && 172218491 == req.version) {
-		    printf("%sSS %s getValueQ for %s @ %lld = %s\n", data->tssPairID.present() ? "T" : "",
-		data->thisServerID.toString().c_str(), req.key.toString().c_str(), req.version, v.present() ?
-		v.get().toString().c_str() : "");
-		}*/
-
 		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
 			// If the read yields no value, randomly sample the empty read.
 			int64_t bytesReadPerKSecond =
@@ -1296,16 +1231,8 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		reply.penalty = data->getPenalty();
 		req.reply.send(reply);
 	} catch (Error& e) {
-		/*if ("000002ff000004c10000000100000002" == req.key.toString() && 172218491 == req.version) {
-		    printf("%sSS %s getValueQ for %s @ %lld = ERROR: %d\n", data->tssPairID.present() ? "T" : "",
-		data->thisServerID.toString().c_str(), req.key.toString().c_str(), req.version, e.code());
-		}*/
 		if (!canReplyWith(e))
 			throw;
-		/*if ("000002ff000004c10000000100000002" == req.key.toString() && 172218491 == req.version) {
-		    printf("%sSS %s getValueQ for %s @ %lld = replying with error: %d\n", data->tssPairID.present() ? "T" : "",
-		data->thisServerID.toString().c_str(), req.key.toString().c_str(), req.version, e.code());
-		}*/
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
@@ -1816,12 +1743,6 @@ ACTOR Future<Key> findKey(StorageServer* data,
 	state int distance = forward ? sel.offset : 1 - sel.offset;
 	state Span span("SS.findKey"_loc, { parentSpan });
 
-	/*if (version == 166817893 && sel.offset == 80) {
-	    printf("%sSS %s FindKey request %s:<%s:%d @ %lld: with key range [%s - %s):\n", data->isTss() ? "t" : "",
-	data->thisServerID.toString().c_str(), sel.getKey().printable().c_str(), sel.orEqual ? "=" : "", sel.offset,
-	version, range.begin.toString().c_str(), range.end.toString().c_str());
-	}*/
-
 	// Don't limit the number of bytes if this is a trivial key selector (there will be at most two items returned from
 	// the read range in this case)
 	state int maxBytes;
@@ -1840,13 +1761,6 @@ ACTOR Future<Key> findKey(StorageServer* data,
 	              &maxBytes,
 	              span.context));
 	state bool more = rep.more && rep.data.size() != distance + skipEqualKey;
-
-	/*if (version == 166817893 && sel.offset == 80) {
-	    printf("%sSS %s FindKey request %s:<%s:%d @ %lld: readRange with limBytes=%d got %d:\n", data->isTss() ? "t" :
-	"", data->thisServerID.toString().c_str(), sel.getKey().printable().c_str(), sel.orEqual ? "=" : "", sel.offset,
-	version, maxBytes, rep.data.size()); for (auto& it : rep.data) { printf("    %s\n", it.key.toString().c_str());
-	    }
-	}*/
 
 	// If we get only one result in the reverse direction as a result of the data being too large, we could get stuck in
 	// a loop
@@ -1894,19 +1808,8 @@ ACTOR Future<Key> findKey(StorageServer* data,
 			// This is possible if key/value pairs are very large and only one result is returned on a last less than
 			// query SOMEDAY: graceful handling of exceptionally sized values
 			ASSERT(returnKey != sel.getKey());
-
-			/*if (version == 166817893 && sel.offset == 80) {
-			    printf("%sSS %s FindKey request %s:<%s:%d @ %lld: moving same shard\n", data->isTss() ? "t" : "",
-			data->thisServerID.toString().c_str(), sel.getKey().printable().c_str(), sel.orEqual ? "=" : "", sel.offset,
-			version);
-			}*/
 			return returnKey;
 		} else {
-			/*if (version == 166817893 && sel.offset == 80) {
-			    printf("%sSS %s FindKey request %s:<%s:%d @ %lld: moving shard boundary\n", data->isTss() ? "t" : "",
-			data->thisServerID.toString().c_str(), sel.getKey().printable().c_str(), sel.orEqual ? "=" : "", sel.offset,
-			version);
-			}*/
 			return forward ? range.end : range.begin;
 		}
 	}
@@ -1931,15 +1834,6 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	state Span span("SS:getKeyValues"_loc, { req.spanContext });
 	state int64_t resultSize = 0;
 
-	if (req.begin.getKey().toString() == "B" && req.end.getKey().toString() == "v" && req.version == 107157353) {
-		printf("%sSS %s starting query [%s - %s) @ %lld\n",
-		       data->isTss() ? "T" : "",
-		       data->thisServerID.toString().c_str(),
-		       req.begin.getKey().printable().c_str(),
-		       req.end.getKey().printable().c_str(),
-		       req.version);
-	}
-
 	++data->counters.getRangeQueries;
 	++data->counters.allQueries;
 	++data->readQueueSizeMetric;
@@ -1952,15 +1846,6 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		wait(delay(0, TaskPriority::FetchKeys));
 	} else {
 		wait(data->getQueryDelay());
-	}
-
-	if (req.begin.getKey().toString() == "B" && req.end.getKey().toString() == "v" && req.version == 107157353) {
-		printf("%sSS %s downgraded [%s - %s) @ %lld\n",
-		       data->isTss() ? "T" : "",
-		       data->thisServerID.toString().c_str(),
-		       req.begin.getKey().printable().c_str(),
-		       req.end.getKey().printable().c_str(),
-		       req.version);
 	}
 
 	try {
@@ -1985,15 +1870,6 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin",
 			// shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkShardExtents");
 			throw wrong_shard_server();
-		}
-
-		if (req.begin.getKey().toString() == "B" && req.end.getKey().toString() == "v" && req.version == 107157353) {
-			printf("%sSS %s validated shard [%s - %s) @ %lld\n",
-			       data->isTss() ? "T" : "",
-			       data->thisServerID.toString().c_str(),
-			       req.begin.getKey().printable().c_str(),
-			       req.end.getKey().printable().c_str(),
-			       req.version);
 		}
 
 		state int offset1;
@@ -2026,25 +1902,6 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			throw wrong_shard_server();
 		}
 
-		if (req.begin.getKey().toString() == "B" && req.end.getKey().toString() == "v" && req.version == 107157353) {
-			printf("%sSS %s resolved begin and end [%s - %s) @ %lld\n",
-			       data->isTss() ? "T" : "",
-			       data->thisServerID.toString().c_str(),
-			       req.begin.getKey().printable().c_str(),
-			       req.end.getKey().printable().c_str(),
-			       req.version);
-			printf("    %s:<%s:%d @ -> %s\n",
-			       req.begin.getKey().printable().c_str(),
-			       req.begin.orEqual ? "=" : "",
-			       req.begin.offset,
-			       req.begin.getKey().printable().c_str());
-			printf("    %s:<%s:%d @ -> %s\n",
-			       req.end.getKey().printable().c_str(),
-			       req.end.orEqual ? "=" : "",
-			       req.end.offset,
-			       req.end.getKey().printable().c_str());
-		}
-
 		if (begin >= end) {
 			if (req.debugID.present())
 				g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.Send");
@@ -2062,27 +1919,9 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		} else {
 			state int remainingLimitBytes = req.limitBytes;
 
-			/*if (req.begin.getKey().toString() == "m3fc7" && req.end.getKey().toString() == "s" && req.version ==
-			133421369) { printf("%sSS %s beginning readRange [%s - %s) @ %lld\n", data->isTss() ? "T" : "",
-			data->thisServerID.toString().c_str(), req.begin.getKey().printable().c_str(),
-			req.end.getKey().printable().c_str(), req.version);
-			}*/
-
 			GetKeyValuesReply _r =
 			    wait(readRange(data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes, span.context));
 			GetKeyValuesReply r = _r;
-
-			if (req.begin.getKey().toString() == "B" && req.end.getKey().toString() == "v" &&
-			    req.version == 107157353) {
-				printf("%sSS %s completed readRange (%d)%s: \n",
-				       data->isTss() ? "T" : "",
-				       data->thisServerID.toString().c_str(),
-				       r.data.size(),
-				       r.more ? "+" : "");
-				/*for (auto& it : r.data) {
-				    printf("    %s=%s\n", it.key.printable().c_str(), it.value.printable().c_str());
-				}*/
-			}
 
 			if (req.debugID.present())
 				g_traceBatch.addEvent(
@@ -2114,14 +1953,6 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 				int64_t bytesReadPerKSecond = std::max(totalByteSize, SERVER_KNOBS->EMPTY_READ_PENALTY) / 2;
 				data->metrics.notifyBytesReadPerKSecond(r.data[0].key, bytesReadPerKSecond);
 				data->metrics.notifyBytesReadPerKSecond(r.data[r.data.size() - 1].key, bytesReadPerKSecond);
-			}
-
-			if (req.begin.getKey().toString() == "B" && req.end.getKey().toString() == "v" &&
-			    req.version == 107157353) {
-				printf("%sSS %s replying to %s\n",
-				       data->isTss() ? "T" : "",
-				       data->thisServerID.toString().c_str(),
-				       req.reply.getEndpoint().token.toString().c_str());
 			}
 
 			r.penalty = data->getPenalty();
@@ -2174,32 +2005,14 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	// so we need to downgrade here
 	wait(data->getQueryDelay());
 
-	/*if (req.version == 166817893 && req.sel.offset == 80) {
-	    printf("%sSS %s GetKey request %s:<%s:%d @ %lld\n", data->isTss() ? "t" : "",
-	data->thisServerID.toString().c_str(), req.sel.getKey().printable().c_str(), req.sel.orEqual ? "=" : "",
-	req.sel.offset, req.version);
-	}*/
-
 	try {
 		state Version version = wait(waitForVersion(data, req.version, req.spanContext));
-
-		/*if (req.version == 166817893 && req.sel.offset == 80) {
-		    printf("%sSS %s GetKey request %s:<%s:%d @ %lld: waited for version\n", data->isTss() ? "t" : "",
-		data->thisServerID.toString().c_str(), req.sel.getKey().printable().c_str(), req.sel.orEqual ? "=" : "",
-		req.sel.offset, req.version);
-		}*/
 
 		state uint64_t changeCounter = data->shardChangeCounter;
 		state KeyRange shard = getShardKeyRange(data, req.sel);
 
 		state int offset;
 		Key k = wait(findKey(data, req.sel, version, shard, &offset, req.spanContext));
-
-		/*if (req.version == 166817893 && req.sel.offset == 80) {
-		    printf("%sSS %s GetKey request %s:<%s:%d @ %lld: found key: %s\n", data->isTss() ? "t" : "",
-		data->thisServerID.toString().c_str(), req.sel.getKey().printable().c_str(), req.sel.orEqual ? "=" : "",
-		req.sel.offset, req.version, k.toString().c_str());
-		}*/
 
 		data->checkChangeCounter(
 		    changeCounter, KeyRangeRef(std::min<KeyRef>(req.sel.getKey(), k), std::max<KeyRef>(req.sel.getKey(), k)));
@@ -2214,12 +2027,6 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 			    1; // first thing on next shard OR (large offset case) keyAfter largest key retrieved in range read
 		else
 			updated = KeySelectorRef(k, true, 0); // found
-
-		/*if (req.version == 166817893 && req.sel.offset == 80) {
-		    printf("%sSS %s GetKey request %s:<%s:%d @ %lld: updated: %s:<%s:%d\n", data->isTss() ? "t" : "",
-		data->thisServerID.toString().c_str(), req.sel.getKey().printable().c_str(), req.sel.orEqual ? "=" : "",
-		req.sel.offset, req.version, updated.getKey().printable().c_str(), updated.orEqual ? "=" : "", updated.offset);
-		}*/
 
 		resultSize = k.size();
 		data->counters.bytesQueried += resultSize;
@@ -2545,14 +2352,6 @@ void removeDataRange(StorageServer* ss,
 	// disk when this latest version becomes durable mLV is also modified if necessary to ensure that split clears can
 	// be forgotten
 
-	// TODO REMOVE print
-	printf("%sss %s removing data range [%s - %s) @ %lld\n",
-	       ss->isTss() ? "t" : "",
-	       ss->thisServerID.toString().c_str(),
-	       range.begin.toString().c_str(),
-	       range.end.toString().c_str(),
-	       mLV.version);
-
 	MutationRef clearRange(MutationRef::ClearRange, range.begin, range.end);
 	clearRange = ss->addMutationToMutationLog(mLV, clearRange);
 
@@ -2583,13 +2382,6 @@ void removeDataRange(StorageServer* ss,
 	}
 
 	data.erase(range.begin, range.end);
-
-	printf("%sss %s removed data range [%s - %s) @ %lld\n",
-	       ss->isTss() ? "t" : "",
-	       ss->thisServerID.toString().c_str(),
-	       range.begin.toString().c_str(),
-	       range.end.toString().c_str(),
-	       mLV.version);
 }
 
 void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available);
@@ -3170,12 +2962,12 @@ void changeServerKeys(StorageServer* data,
                       ChangeServerKeysContext context) {
 	ASSERT(!keys.empty());
 
-	TraceEvent("ChangeServerKeys", data->thisServerID)
-	    .detail("KeyBegin", keys.begin)
-	    .detail("KeyEnd", keys.end)
-	    .detail("NowAssigned", nowAssigned)
-	    .detail("Version", version)
-	    .detail("Context", changeServerKeysContextName[(int)context]);
+	// TraceEvent("ChangeServerKeys", data->thisServerID)
+	//     .detail("KeyBegin", keys.begin)
+	//     .detail("KeyEnd", keys.end)
+	//     .detail("NowAssigned", nowAssigned)
+	//     .detail("Version", version)
+	//     .detail("Context", changeServerKeysContextName[(int)context]);
 	validate(data);
 
 	// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
@@ -3193,7 +2985,7 @@ void changeServerKeys(StorageServer* data,
 		}
 	}
 	if (!isDifferent) {
-		TraceEvent("CSKShortCircuit", data->thisServerID).detail("KeyBegin", keys.begin).detail("KeyEnd", keys.end);
+		// TraceEvent("CSKShortCircuit", data->thisServerID).detail("KeyBegin", keys.begin).detail("KeyEnd", keys.end);
 		return;
 	}
 
@@ -3231,13 +3023,13 @@ void changeServerKeys(StorageServer* data,
 	for (auto r = vr.begin(); r != vr.end(); ++r) {
 		KeyRangeRef range = keys & r->range();
 		bool dataAvailable = r->value() == latestVersion || r->value() >= version;
-		TraceEvent("CSKRange", data->thisServerID)
-		    .detail("KeyBegin", range.begin)
-		    .detail("KeyEnd", range.end)
-		    .detail("Available", dataAvailable)
-		    .detail("NowAssigned", nowAssigned)
-		    .detail("NewestAvailable", r->value())
-		    .detail("ShardState0", data->shards[range.begin]->debugDescribeState());
+		// TraceEvent("CSKRange", data->thisServerID)
+		//     .detail("KeyBegin", range.begin)
+		//     .detail("KeyEnd", range.end)
+		//     .detail("Available", dataAvailable)
+		//     .detail("NowAssigned", nowAssigned)
+		//     .detail("NewestAvailable", r->value())
+		//     .detail("ShardState0", data->shards[range.begin]->debugDescribeState());
 		if (!nowAssigned) {
 			if (dataAvailable) {
 				ASSERT(r->value() ==
@@ -3279,14 +3071,8 @@ void changeServerKeys(StorageServer* data,
 	oldShards.clear();
 	ranges.clear();
 	for (auto r = removeRanges.begin(); r != removeRanges.end(); ++r) {
-		// TODO should we do this at the passed in version? (or the passed in version + 1?)
 		removeDataRange(data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->shards, *r);
 		setAvailableStatus(data, *r, false);
-		printf("%sss %s set data range unavailable [%s - %s)\n",
-		       data->isTss() ? "t" : "",
-		       data->thisServerID.toString().c_str(),
-		       keys.begin.toString().c_str(),
-		       keys.end.toString().c_str());
 	}
 	validate(data);
 }
@@ -3458,26 +3244,18 @@ private:
 
 			data->recoveryVersionSkips.emplace_back(rollbackVersion, currentVersion - rollbackVersion);
 		} else if (m.type == MutationRef::SetValue && m.param1 == killStoragePrivateKey) {
-			printf("worked removed kill storage: %s\n", data->thisServerID.toString().c_str());
 			throw worker_removed();
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) &&
 		           m.param1.substr(1).startsWith(serverTagPrefix)) {
 			UID serverTagKey = decodeServerTagKey(m.param1.substr(1));
-			// bool matchesThisServer = (!data->isTss() && serverTagKey == data->thisServerID) || (data->isTss() &&
-			// serverTagKey == data->tssPairID.get());
 			bool matchesThisServer = serverTagKey == data->thisServerID;
 			bool matchesTssPair = data->isTss() ? serverTagKey == data->tssPairID.get() : false;
 			if ((m.type == MutationRef::SetValue && !data->isTss() && !matchesThisServer) ||
 			    (m.type == MutationRef::ClearRange && (matchesThisServer || (data->isTss() && matchesTssPair)))) {
-				printf("%sSS %s removed b/c tag mutation: %s\n",
-				       data->isTss() ? "T" : "",
-				       data->thisServerID.toString().c_str(),
-				       m.toString().c_str());
 				throw worker_removed();
 			}
 		} else if (m.type == MutationRef::SetValue && m.param1 == rebootWhenDurablePrivateKey) {
 			data->rebootAfterDurableVersion = currentVersion;
-			printf("%s got reboot after durable @ %lld\n", data->thisServerID.toString().c_str(), currentVersion);
 			TraceEvent("RebootWhenDurableSet", data->thisServerID)
 			    .detail("DurableVersion", data->durableVersion.get())
 			    .detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
@@ -3542,12 +3320,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			wait(delayJittered(.005, TaskPriority::TLogPeekReply));
 		}
 
-		// TODO REMOVE!! just for testing what happens when TSS gets behind
 		if (g_network->isSimulated() && data->isTss() && g_simulator.tssMode == ISimulator::TSSMode::EnabledAddDelay &&
 		    data->tssFaultInjectTime.present() && data->tssFaultInjectTime.get() < now()) {
 			if (deterministicRandom()->random01() < 0.01) {
 				TraceEvent(SevWarnAlways, "TSSInjectDelayForever", data->thisServerID);
-				printf("TSS %s INJECTING DELAY FOREVER!!\n", data->thisServerID.toString().c_str());
 				// small random chance to just completely get stuck here, each tss should eventually hit this in this
 				// mode
 				wait(Never());
@@ -3555,7 +3331,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				// otherwise pause for part of a second
 				double delayTime = deterministicRandom()->random01();
 				TraceEvent(SevWarnAlways, "TSSInjectDelay", data->thisServerID).detail("Delay", delayTime);
-				printf("TSS %s INJECTING DELAY for %.4f!!\n", data->thisServerID.toString().c_str(), delayTime);
 				wait(delay(delayTime));
 			}
 		}
@@ -3573,8 +3348,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 		}
 		if (cursor->popped() > 0) {
-			printf(
-			    "Worker removed because of popped=%d: %s\n", cursor->popped(), data->thisServerID.toString().c_str());
 			throw worker_removed();
 		}
 
@@ -3982,9 +3755,6 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 #endif
 
 void StorageServerDisk::makeNewStorageServerDurable() {
-	// TODO REMOVE print
-	printf(
-	    "%sSS %s saving durable state\n", data->tssPairID.present() ? "T" : "", data->thisServerID.toString().c_str());
 	storage->set(persistFormat);
 	storage->set(KeyValueRef(persistID, BinaryWriter::toValue(data->thisServerID, Unversioned())));
 	if (data->tssPairID.present()) {
@@ -4267,17 +4037,6 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state Version version = BinaryReader::fromStringRef<Version>(fVersion.get().get(), Unversioned());
 	debug_checkRestoredVersion(data->thisServerID, version, "StorageServer");
 	data->setInitialVersion(version);
-
-	// TODO REMOVE print
-	printf("%sSS %s restored durable state @ %lld\n",
-	       data->tssPairID.present() ? "T" : "",
-	       data->thisServerID.toString().c_str(),
-	       version);
-	if (data->tssPairID.present()) {
-		printf("TSS %s recovered pairing to SS %s\n",
-		       data->thisServerID.toString().c_str(),
-		       data->tssPairID.get().toString().c_str());
-	}
 
 	state RangeResult available = fShardAvailable.get();
 	state int availableLoc;
@@ -4565,9 +4324,9 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 	                               SERVER_KNOBS->STORAGE_LOGGING_DELAY,
 	                               &self->counters.cc,
 	                               self->thisServerID.toString() + "/StorageMetrics",
-	                               [self=self](TraceEvent& te) {
+	                               [self = self](TraceEvent& te) {
 		                               te.detail("Tag", self->tag.toString());
-									   StorageBytes sb = self->storage.getStorageBytes();
+		                               StorageBytes sb = self->storage.getStorageBytes();
 		                               te.detail("KvstoreBytesUsed", sb.used);
 		                               te.detail("KvstoreBytesFree", sb.free);
 		                               te.detail("KvstoreBytesAvailable", sb.available);
@@ -4687,19 +4446,6 @@ ACTOR Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetVa
 ACTOR Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<GetKeyValuesRequest> getKeyValues) {
 	loop {
 		GetKeyValuesRequest req = waitNext(getKeyValues);
-
-		if (req.begin.getKey().toString() == "m3fc7" && req.end.getKey().toString() == "s" &&
-		    req.version == 133421369) {
-			printf("%sSS %s got range read [%s - %s) @ %lld\n",
-			       self->isTss() ? "T" : "",
-			       self->thisServerID.toString().c_str(),
-			       req.begin.getKey().printable().c_str(),
-			       req.end.getKey().printable().c_str(),
-			       req.version);
-		}
-
-		// A TSS should never be the source for fetch keys
-		ASSERT(!self->tssPairID.present() || !req.isFetchKeys);
 
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
 		// before doing real work
@@ -4939,18 +4685,8 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 					ClientDBInfo clientInfo = self->db->get().client;
 					Optional<StorageServerInterface> myTssPair = clientInfo.getTssPair(self->thisServerID);
 					if (myTssPair.present()) {
-						// TODO REMOVE print, just for debugging
-						if (!self->ssPairID.present()) {
-							printf("SS %s found tss pair %s\n",
-							       self->thisServerID.toString().c_str(),
-							       myTssPair.get().id().toString().c_str());
-						}
 						self->setSSWithTssPair(myTssPair.get().id());
 					} else {
-						// TODO REMOVE print, just for debugging
-						if (self->ssPairID.present()) {
-							printf("SS %s lost tss pair\n", self->thisServerID.toString().c_str());
-						}
 						self->clearSSWithTssPair();
 					}
 				}
@@ -5057,17 +4793,11 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Reference<AsyncVar<ServerDBInfo>> db,
                                  std::string folder) {
 	state StorageServer self(persistentData, db, ssi);
-	if (ssi.isTss) {
-		self.setTssPair(ssi.tssPairID);
+	if (ssi.isTss()) {
+		self.setTssPair(ssi.tssPairID.get());
 		ASSERT(self.isTss());
 	}
 
-	// TODO REMOVE
-	printf("initializing %sstorage %s with tag %s and tss pair=%s\n",
-	       ssi.isTss ? "testing " : "",
-	       ssi.id().toString().c_str(),
-	       seedTag.toString().c_str(),
-	       self.tssPairID.present() ? self.tssPairID.get().toString().c_str() : "");
 	self.sk = serverKeysPrefixFor(self.tssPairID.present() ? self.tssPairID.get() : self.thisServerID)
 	              .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
 	self.folder = folder;
@@ -5080,12 +4810,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			std::pair<Version, Tag> verAndTag = wait(addStorageServer(
 			    self.cx, ssi)); // Might throw recruitment_failed in case of simultaneous master failure
 			self.tag = verAndTag.second;
-			// self.setInitialVersion(ssi.isTss ? 0 : verAndTag.first - 1);
-			if (ssi.isTss) {
-				printf("TSS %s overriding initial version from %lld to %lld\n",
-				       ssi.id().toString().c_str(),
-				       verAndTag.first - 1,
-				       tssSeedVersion);
+			if (ssi.isTss()) {
 				self.setInitialVersion(tssSeedVersion);
 			} else {
 				self.setInitialVersion(verAndTag.first - 1);
@@ -5100,7 +4825,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		TraceEvent("StorageServerInit", ssi.id())
 		    .detail("Version", self.version.get())
 		    .detail("SeedTag", seedTag.toString())
-		    .detail("TssPair", ssi.isTss ? ssi.tssPairID.toString() : "");
+		    .detail("TssPair", ssi.isTss() ? ssi.tssPairID.get().toString() : "");
 		InitializeStorageReply rep;
 		rep.interf = ssi;
 		rep.addedVersion = self.version.get();
@@ -5121,10 +4846,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 }
 
 ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface ssi) {
-	printf("SS %s replacing interface\ngetValue=%s\n",
-	       ssi.id().toString().c_str(),
-	       ssi.getValue.getEndpoint().token.toString().c_str());
-	ASSERT(!ssi.isTss);
+	ASSERT(!ssi.isTss());
 	state Transaction tr(self->cx);
 
 	loop {
@@ -5140,16 +4862,8 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 			                  : Never())) {
 				state GetStorageServerRejoinInfoReply rep = _rep;
 
-				printf("SS %s got rejoin reply:\nversion: %" PRIu64 "\ntag: %s\nnewTag: %s\nnewLocality: %s\n",
-				       ssi.id().toString().c_str(),
-				       rep.version,
-				       rep.tag.toString().c_str(),
-				       rep.newTag.present() ? rep.newTag.get().toString().c_str() : "",
-				       rep.newLocality ? "true" : "false");
-
 				try {
 					tr.reset();
-					// TODO why doesn't this need ACCESS_SYSTEM_KEYS?
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 					tr.setVersion(rep.version);
 
@@ -5184,7 +4898,6 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 
 					choose {
 						when(wait(tr.commit())) {
-							printf("SS committed rejoin txn\n");
 							self->history = rep.history;
 
 							if (rep.newTag.present()) {
@@ -5213,7 +4926,6 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 						when(wait(infoChanged)) {}
 					}
 				} catch (Error& e) {
-					printf("rejoin txn got error: %d!!\n", e.code());
 					wait(tr.onError(e));
 				}
 			}
@@ -5229,20 +4941,14 @@ ACTOR Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterfa
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
 
-	ASSERT(ssi.isTss);
-
-	printf("TSS %s replacing interface:\ngetValue=%s\n",
-	       ssi.id().toString().c_str(),
-	       ssi.getValue.getEndpoint().token.toString().c_str());
-
-	// TODO should this loop until successful? it should never have conflicts, in theory
+	ASSERT(ssi.isTss());
 
 	loop {
 		try {
 			state Tag myTag;
 
 			tr->reset();
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS); // TODO is this needed?
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			Optional<Value> pairTagValue = wait(tr->get(serverTagKeyFor(self->tssPairID.get())));
@@ -5263,17 +4969,10 @@ ACTOR Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterfa
 			tr->set(tssMappingChangeKey, deterministicRandom()->randomUniqueID().toString());
 
 			wait(tr->commit());
-
-			// TODO trace event instead
-			printf("tss %s added itself back, got tag %s for partner %s\n",
-			       self->thisServerID.toString().c_str(),
-			       self->tag.toString().c_str(),
-			       self->tssPairID.get().toString().c_str());
 			self->tag = myTag;
 
 			break;
 		} catch (Error& e) {
-			printf("tss replace interface got error %d!!\n", e.code());
 			wait(tr->onError(e));
 		}
 	}
@@ -5317,7 +5016,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		// if this is a tss storage file, use that as source of truth for this server being a tss instead of the
 		// presence of the tss pair key in the storage engine
-		if (ssi.isTss) {
+		if (ssi.isTss()) {
 			ASSERT(self.isTss());
 			ssi.tssPairID = self.tssPairID.get();
 		} else {

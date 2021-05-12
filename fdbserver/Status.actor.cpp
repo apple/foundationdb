@@ -635,7 +635,7 @@ struct RolesInfo {
 			TraceEventFields const& commitLatencyBands = metrics.at("CommitLatencyBands");
 			if (commitLatencyBands.size()) {
 				obj["commit_latency_bands"] = addLatencyBandInfo(commitLatencyBands);
-			} 
+			}
 
 			TraceEventFields const& commitBatchingWindowSize = metrics.at("CommitBatchingWindowSize");
 			if (commitBatchingWindowSize.size()) {
@@ -1874,10 +1874,10 @@ ACTOR static Future<vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetri
 ACTOR static Future<vector<std::pair<CommitProxyInterface, EventMap>>> getCommitProxiesAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	vector<std::pair<CommitProxyInterface, EventMap>> results =
-	    wait(getServerMetrics(db->get().client.commitProxies,
-	                          address_workers,
-	                          std::vector<std::string>{ "CommitLatencyMetrics", "CommitLatencyBands", "CommitBatchingWindowSize"}));
+	vector<std::pair<CommitProxyInterface, EventMap>> results = wait(getServerMetrics(
+	    db->get().client.commitProxies,
+	    address_workers,
+	    std::vector<std::string>{ "CommitLatencyMetrics", "CommitLatencyBands", "CommitBatchingWindowSize" }));
 
 	return results;
 }
@@ -3012,7 +3012,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		int activeTSSCount = 0;
 		for (auto& it : storageServers) {
-			if (it.first.isTss) {
+			if (it.first.isTss()) {
 				activeTSSCount++;
 			}
 		}

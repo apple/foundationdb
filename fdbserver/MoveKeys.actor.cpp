@@ -101,7 +101,6 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
                                             bool isWrite = true) {
 	if (!ddEnabledState->isDDEnabled()) {
 		TraceEvent(SevDebug, "DDDisabledByInMemoryCheck");
-		printf("MK: DD disabled\n");
 		throw movekeys_conflict();
 	}
 	Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
@@ -113,7 +112,6 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 		UID lastWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 		if (lastWrite != lock.prevWrite) {
 			TEST(true); // checkMoveKeysLock: Conflict with previous owner
-			printf("MK: conflict with previous owner\n");
 			throw movekeys_conflict();
 		}
 
@@ -147,7 +145,6 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 		return Void();
 	} else {
 		TEST(true); // checkMoveKeysLock: Conflict with new owner
-		printf("MK: conflict %s with new owner %s\n", currentOwner.toString().c_str(), lock.myOwner.toString().c_str());
 		throw movekeys_conflict();
 	}
 }
@@ -330,12 +327,6 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 	state Future<Void> warningLogger = logWarningAfter("StartMoveKeysTooLong", 600, servers);
 	// state TraceInterval waitInterval("");
 
-	// TODO REMOVE
-	printf("starting move keys for [%s, %s): to %s\n",
-	       keys.begin.toString().c_str(),
-	       keys.end.toString().c_str(),
-	       servers[0].toString().c_str());
-
 	wait(startMoveKeysLock->take(TaskPriority::DataDistributionLaunch));
 	state FlowLock::Releaser releaser(*startMoveKeysLock);
 
@@ -395,10 +386,10 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					state KeyRange currentKeys = KeyRangeRef(begin, keys.end);
 
 					state RangeResult old = wait(krmGetRanges(tr,
-					                                                         keyServersPrefix,
-					                                                         currentKeys,
-					                                                         SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
-					                                                         SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
+					                                          keyServersPrefix,
+					                                          currentKeys,
+					                                          SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
+					                                          SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
 
 					// Determine the last processed key (which will be the beginning for the next iteration)
 					state Key endKey = old.end()[-1].key;
@@ -531,37 +522,15 @@ ACTOR Future<Void> waitForShardReady(StorageServerInterface server,
                                      KeyRange keys,
                                      Version minVersion,
                                      GetShardStateRequest::waitMode mode) {
-	// TODO REMOVE
-	printf("waiting for shard [%s, %s) in state %d from %sss %s @ %lld\n",
-	       keys.begin.toString().c_str(),
-	       keys.end.toString().c_str(),
-	       mode,
-	       server.isTss ? "t" : "",
-	       server.id().toString().c_str(),
-	       minVersion);
 	loop {
 		try {
 			GetShardStateReply rep =
 			    wait(server.getShardState.getReply(GetShardStateRequest(keys, mode), TaskPriority::MoveKeys));
 			if (rep.first >= minVersion) {
-				// TODO REMOVE
-				printf("shard [%s, %s) is in state %d from %sss %s @ %lld >= %lld\n",
-				       keys.begin.toString().c_str(),
-				       keys.end.toString().c_str(),
-				       mode,
-				       server.isTss ? "t" : "",
-				       server.id().toString().c_str(),
-				       rep.first,
-				       minVersion);
 				return Void();
 			}
 			wait(delayJittered(SERVER_KNOBS->SHARD_READY_DELAY, TaskPriority::MoveKeys));
 		} catch (Error& e) {
-			printf("Waiting for shard from %sss %s getValue=%s got error! %d\n",
-			       server.isTss ? "t" : "",
-			       server.id().toString().c_str(),
-			       server.getValue.getEndpoint().token.toString().c_str(),
-			       e.code());
 			if (e.code() != error_code_timed_out) {
 				if (e.code() != error_code_broken_promise)
 					throw e;
@@ -656,17 +625,15 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 	state Key endKey;
 	state int retries = 0;
 	state FlowLock::Releaser releaser;
-	state int waitForTSSCounter =
-	    2; // try waiting for tss for a 2 loops, give up if they're stuck to not affect the rest of the cluster
 
 	// for killing tss if any get stuck during movekeys
 	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
 	state std::vector<StorageServerInterface> tssToKill;
-	state std::set<UID> tssToIgnore;
+	state std::unordered_set<UID> tssToIgnore;
+	// try waiting for tss for a 2 loops, give up if they're stuck to not affect the rest of the cluster
+	state int waitForTSSCounter = 2;
 
 	ASSERT(!destinationTeam.empty());
-
-	printf("finishing move keys for [%s, %s)\n", keys.begin.toString().c_str(), keys.end.toString().c_str());
 
 	try {
 		TraceEvent(SevDebug, interval.begin(), relocationIntervalId)
@@ -680,21 +647,17 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 
 			state Transaction tr(occ);
 
-			// TODO re-comment and change back
-			printf("finishMoveKeys( '%s'-'%s' )\n", begin.toString().c_str(), keys.end.toString().c_str());
+			// printf("finishMoveKeys( '%s'-'%s' )\n", begin.toString().c_str(), keys.end.toString().c_str());
 			loop {
 				try {
 					if (tssToKill.size()) {
-						// TODO could move this to helper method?
-						// TODO add trace event
 						TEST(true); // killing TSS because they were unavailable for movekeys
-						printf("KILLING %d TSS BECAUSE THEY TIMED OUT IN MOVEKEYS\n", tssToKill.size());
 
-						// kill tss BEFORE committing main txn so that client requests don't make it to the tss when it
+						// Kill tss BEFORE committing main txn so that client requests don't make it to the tss when it
 						// has a different shard set than its pair use a different RYW transaction since i'm too lazy
-						// (and don't want to add bugs) by changing whole method to RYW. also using a different
+						// (and don't want to add bugs) by changing whole method to RYW. Also, using a different
 						// transaction makes it commit earlier which we may need to guarantee causality of tss getting
-						// removed before client sends a request to this key range on the new ss
+						// removed before client sends a request to this key range on the new SS
 						state Reference<ReadYourWritesTransaction> tssTr =
 						    makeReference<ReadYourWritesTransaction>(occ);
 						loop {
@@ -703,25 +666,22 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 								tssTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 								for (auto& tss : tssToKill) {
 									// DO NOT remove server list key - that'll break a bunch of stuff. DD will
-									// eventually call removeStorageServer tssTr->clear(serverListKeyFor(tss.id()));
+									// eventually call removeStorageServer
+
 									tssTr->clear(serverTagKeyFor(tss.id()));
-									// tssTr->clear(serverTagHistoryRangeFor(tss.id()));
-									tssMapDB.erase(tssTr, tss.tssPairID);
+									tssMapDB.erase(tssTr, tss.tssPairID.get());
 								}
 								tssTr->set(tssMappingChangeKey, deterministicRandom()->randomUniqueID().toString());
 								wait(tssTr->commit());
 
 								for (auto& tss : tssToKill) {
-									// TODO ADD trace event (sev30?)
-									printf("Successfully removed TSS %s in finishMoveKeys\n",
-									       tss.id().toString().c_str());
+									TraceEvent(SevWarnAlways, "TSS_KillMoveKeys").detail("TSSID", tss.id().toString());
 									tssToIgnore.insert(tss.id());
 								}
 								tssToKill.clear();
 
 								break;
 							} catch (Error& e) {
-								printf("MoveKeys TSS Removal Transaction got error %d\n", e.code());
 								wait(tssTr->onError(e));
 							}
 						}
@@ -950,9 +910,6 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 							for (auto& f : tssReady) {
 								if (!f.isReady() || f.isError()) {
 									anyTssNotDone = true;
-									printf("MK: [%s - %s) waiting on tss!\n",
-									       begin.toString().c_str(),
-									       keys.end.toString().c_str());
 									waitForTSSCounter--;
 									break;
 								}
@@ -961,9 +918,6 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 							if (anyTssNotDone && waitForTSSCounter == 0) {
 								for (int i = 0; i < tssReady.size(); i++) {
 									if (!tssReady[i].isReady() || tssReady[i].isError()) {
-										// TODO trace event!!
-										printf("TSS NOT DONE %s with move keys, killing!!\n",
-										       tssReadyInterfs[i].id().toString().c_str());
 										tssToKill.push_back(tssReadyInterfs[i]);
 									}
 								}
@@ -981,22 +935,21 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					for (int s = 0; s < tssReady.size(); s++)
 						tssCount += tssReady[s].isReady() && !tssReady[s].isError();
 
-					// TODO re-comment
-					if (tssReady.size()) {
-						printf("  fMK: [%s - %s) moved data to %d/%d servers and %d/%d tss\n",
-						       begin.toString().c_str(),
-						       keys.end.toString().c_str(),
-						       count,
-						       serverReady.size(),
-						       tssCount,
-						       tssReady.size());
+					/*if (tssReady.size()) {
+					    printf("  fMK: [%s - %s) moved data to %d/%d servers and %d/%d tss\n",
+					           begin.toString().c_str(),
+					           keys.end.toString().c_str(),
+					           count,
+					           serverReady.size(),
+					           tssCount,
+					           tssReady.size());
 					} else {
-						printf("  fMK: [%s - %s) moved data to %d/%d servers\n",
-						       begin.toString().c_str(),
-						       keys.end.toString().c_str(),
-						       count,
-						       serverReady.size());
-					}
+					    printf("  fMK: [%s - %s) moved data to %d/%d servers\n",
+					           begin.toString().c_str(),
+					           keys.end.toString().c_str(),
+					           count,
+					           serverReady.size());
+					}*/
 					TraceEvent(SevDebug, waitInterval.end(), relocationIntervalId).detail("ReadyServers", count);
 
 					if (count == dest.size()) {
@@ -1026,7 +979,6 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					}
 					tr.reset();
 				} catch (Error& error) {
-					printf("   fMK: error %d\n", error.code());
 					if (error.code() == error_code_actor_cancelled)
 						throw;
 					state Error err = error;
@@ -1059,13 +1011,11 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
 	state int maxSkipTags = 1;
 
-	printf("%sSS %s adding itself\n", server.isTss ? "T" : "", server.id().toString().c_str());
 	loop {
 		try {
-			// TODO should also set priority system immediate? also why is this needed?
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			// TODO don't fetch tag localities, all tags, and history tags if tss. Just fetch pair's tag
+			// FIXME: don't fetch tag localities, all tags, and history tags if tss. Just fetch pair's tag
 			state Future<RangeResult> fTagLocalities = tr->getRange(tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY);
 			state Future<Optional<Value>> fv = tr->get(serverListKeyFor(server.id()));
 
@@ -1108,9 +1058,6 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 			if (fExclProc.get().present() || fExclIP.get().present() || fFailProc.get().present() ||
 			    fFailIP.get().present() || fExclProc2.get().present() || fExclIP2.get().present() ||
 			    fFailProc2.get().present() || fFailIP2.get().present()) {
-				printf("%sSS %s failing to recruit because of exclusion\n",
-				       server.isTss ? "T" : "",
-				       server.id().toString().c_str());
 				throw recruitment_failed();
 			}
 
@@ -1118,11 +1065,11 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 				ASSERT(false);
 
 			state Tag tag;
-			if (server.isTss) {
+			if (server.isTss()) {
 				bool foundTag = false;
 				for (auto& it : fTags.get()) {
 					UID key = decodeServerTagKey(it.key);
-					if (key == server.tssPairID) {
+					if (key == server.tssPairID.get()) {
 						tag = decodeServerTagValue(it.value);
 						foundTag = true;
 						break;
@@ -1131,19 +1078,13 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 				if (!foundTag) {
 					throw recruitment_failed();
 				}
-				// ASSERT(foundTag); // TSS's pair was removed before TSS could register. Should never happen, since the
-				// SS shouldn't be tracked by DD until this completes.
-				printf("TSS %s found tag %s for pair %s\n",
-				       server.id().toString().c_str(),
-				       tag.toString().c_str(),
-				       server.tssPairID.toString().c_str());
-				tssMapDB.set(tr, server.tssPairID, server.id());
+
+				tssMapDB.set(tr, server.tssPairID.get(), server.id());
 				tr->set(tssMappingChangeKey, deterministicRandom()->randomUniqueID().toString());
 
 			} else {
 				int8_t maxTagLocality = 0;
 				state int8_t locality = -1;
-				// TODO i think tss can ignore this part?
 				for (auto& kv : fTagLocalities.get()) {
 					int8_t loc = decodeTagLocalityListValue(kv.value);
 					if (decodeTagLocalityListKey(kv.key) == server.locality.dcId()) {
@@ -1197,20 +1138,19 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 				KeyRange conflictRange = singleKeyRange(serverTagConflictKeyFor(tag));
 				tr->addReadConflictRange(conflictRange);
 				tr->addWriteConflictRange(conflictRange);
+
+				if (SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING) {
+					// THIS SHOULD NEVER BE ENABLED IN ANY NON-TESTING ENVIRONMENT
+					TraceEvent(SevError, "TSSIdentityMappingEnabled");
+					tssMapDB.set(tr, server.id(), server.id());
+					tr->set(tssMappingChangeKey, deterministicRandom()->randomUniqueID().toString());
+				}
 			}
 
 			tr->set(serverListKeyFor(server.id()), serverListValue(server));
 			wait(tr->commit());
-			printf("%sSS %s successfully added itself @ %lld\n",
-			       server.isTss ? "T" : "",
-			       server.id().toString().c_str(),
-			       tr->getCommittedVersion());
 			return std::make_pair(tr->getCommittedVersion(), tag);
 		} catch (Error& e) {
-			printf("%sSS %s got error adding itself: %d!!\n",
-			       server.isTss ? "T" : "",
-			       server.id().toString().c_str(),
-			       e.code());
 			if (e.code() == error_code_commit_unknown_result)
 				throw recruitment_failed(); // There is a remote possibility that we successfully added ourselves and
 				                            // then someone removed us, so we have to fail
@@ -1251,8 +1191,6 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 	state bool retry = false;
 	state int noCanRemoveCount = 0;
-
-	printf("Removing storage server %s\n", serverID.toString().c_str());
 
 	loop {
 		try {
@@ -1323,18 +1261,19 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 				}
 
 				tr->clear(serverListKeyFor(serverID));
-				tr->clear(serverTagKeyFor(serverID)); // the tss uses this to communicate shutdown but it never has a
+				tr->clear(serverTagKeyFor(serverID)); // A tss uses this to communicate shutdown but it never has a
 				                                      // server tag key set in the first place
 				tr->clear(serverTagHistoryRangeFor(serverID));
 
-				// TODO a small optimization would be to only erase and trigger tss mapping if this is a tss or an  ss
-				// with a tss pair, instead of always
-				if (tssPairID.present()) {
-					tssMapDB.erase(tr, tssPairID.get());
-				} else {
+				if (SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING) {
+					// THIS SHOULD NEVER BE ENABLED IN ANY NON-TESTING ENVIRONMENT
+					TraceEvent(SevError, "TSSIdentityMappingEnabled");
 					tssMapDB.erase(tr, serverID);
+					tr->set(tssMappingChangeKey, deterministicRandom()->randomUniqueID().toString());
+				} else if (tssPairID.present()) {
+					tssMapDB.erase(tr, tssPairID.get());
+					tr->set(tssMappingChangeKey, deterministicRandom()->randomUniqueID().toString());
 				}
-				tr->set(tssMappingChangeKey, deterministicRandom()->randomUniqueID().toString());
 
 				retry = true;
 				wait(tr->commit());
@@ -1354,7 +1293,6 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
                                               MoveKeysLock lock,
                                               const DDEnabledState* ddEnabledState) {
 	state Key begin = allKeys.begin;
-	printf("Removing keys from failed server %s\n", serverID.toString().c_str());
 	// Multi-transactional removal in case of large number of shards, concern in violating 5s transaction limit
 	while (begin < allKeys.end) {
 		state Transaction tr(cx);
@@ -1456,8 +1394,6 @@ ACTOR Future<Void> moveKeys(Database cx,
 	if (!dataMovementComplete.isSet())
 		dataMovementComplete.send(Void());
 
-	printf("move keys done for [%s, %s)\n", keys.begin.toString().c_str(), keys.end.toString().c_str());
-
 	return Void();
 }
 
@@ -1486,6 +1422,15 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, vector<StorageServ
 	for (auto& s : servers) {
 		tr.set(arena, serverTagKeyFor(s.id()), serverTagValue(server_tag[s.id()]));
 		tr.set(arena, serverListKeyFor(s.id()), serverListValue(s));
+		if (SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING) {
+			// THIS SHOULD NEVER BE ENABLED IN ANY NON-TESTING ENVIRONMENT
+			TraceEvent(SevError, "TSSIdentityMappingEnabled");
+			// hack key-backed map here since we can't really change CommitTransactionRef to a RYW transaction
+			Key uidRef = Codec<UID>::pack(s.id()).pack();
+			tr.set(arena, uidRef.withPrefix(tssMappingKeys.begin), uidRef);
+			// tssMapDB.set(tr, server.id(), server.id());
+			tr.set(arena, tssMappingChangeKey, deterministicRandom()->randomUniqueID().toString());
+		}
 	}
 
 	std::vector<Tag> serverTags;
