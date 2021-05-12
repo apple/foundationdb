@@ -73,6 +73,9 @@ public:
 	explicit ThreadSafeTransaction(DatabaseContext* cx);
 	~ThreadSafeTransaction() override;
 
+	// Note: used while refactoring fdbcli, need to be removed later
+	explicit ThreadSafeTransaction(ReadYourWritesTransaction* ryw);
+
 	void cancel() override;
 	void setVersion(Version v) override;
 	ThreadFuture<Version> getReadVersion() override;
