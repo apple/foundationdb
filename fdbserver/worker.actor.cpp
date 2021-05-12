@@ -2019,10 +2019,11 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
                         std::string metricsConnFile,
                         std::string metricsPrefix,
                         int64_t memoryProfileThreshold,
-                        std::string whitelistBinPaths) {
+                        std::string whitelistBinPaths,
+                        ConfigClassSet configClassSet) {
 	state vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
-	state LocalConfiguration localConfig(ConfigClassSet{}, dataFolder, {}, UID{});
+	state LocalConfiguration localConfig(configClassSet, dataFolder, {}, UID{});
 	wait(localConfig.init());
 
 	actors.push_back(serveProtocolInfo());

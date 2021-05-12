@@ -24,9 +24,6 @@
 
 #include "fdbclient/FDBTypes.h"
 
-using ConfigClassSetRef = VectorRef<KeyRef>;
-using ConfigClassSet = Standalone<ConfigClassSetRef>;
-
 struct ConfigKeyRef {
 	KeyRef configClass;
 	KeyRef knobName;

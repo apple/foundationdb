@@ -44,3 +44,8 @@ bool ConfigFollowerInterface::operator==(ConfigFollowerInterface const& rhs) con
 bool ConfigFollowerInterface::operator!=(ConfigFollowerInterface const& rhs) const {
 	return !(*this == rhs);
 }
+
+ConfigClassSet ConfigClassSet::fromParamString(std::string const& paramString) {
+	// TODO: Validate input and implement
+	return {};
+}

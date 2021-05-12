@@ -25,6 +25,23 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 
+class ConfigClassSet {
+	std::set<Key> classes;
+
+public:
+	static constexpr FileIdentifier file_identifier = 9854021;
+
+	bool operator==(ConfigClassSet const& rhs) const { return classes == rhs.classes; }
+	bool operator!=(ConfigClassSet const& rhs) const { return !(*this == rhs); }
+
+	static ConfigClassSet fromParamString(std::string const& paramString);
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, classes);
+	}
+};
+
 struct ConfigFollowerGetVersionReply {
 	static constexpr FileIdentifier file_identifier = 1028349;
 	Version version;
@@ -65,16 +82,16 @@ struct ConfigFollowerGetFullDatabaseReply {
 struct ConfigFollowerGetFullDatabaseRequest {
 	static constexpr FileIdentifier file_identifier = 294811;
 	Version version;
-	Standalone<VectorRef<KeyRef>> filter;
+	ConfigClassSet configClassSet;
 	ReplyPromise<ConfigFollowerGetFullDatabaseReply> reply;
 
 	ConfigFollowerGetFullDatabaseRequest() : version(-1) {}
-	explicit ConfigFollowerGetFullDatabaseRequest(Version version, Standalone<VectorRef<KeyRef>> filter)
-	  : version(version), filter(filter) {}
+	explicit ConfigFollowerGetFullDatabaseRequest(Version version, ConfigClassSet const& configClassSet)
+	  : version(version), configClassSet(configClassSet) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, filter, reply);
+		serializer(ar, version, configClassSet, reply);
 	}
 };
 
@@ -115,16 +132,16 @@ struct ConfigFollowerGetChangesReply {
 struct ConfigFollowerGetChangesRequest {
 	static constexpr FileIdentifier file_identifier = 178935;
 	Version lastSeenVersion;
-	Standalone<VectorRef<KeyRef>> filter;
+	ConfigClassSet configClassSet;
 	ReplyPromise<ConfigFollowerGetChangesReply> reply;
 
 	ConfigFollowerGetChangesRequest() : lastSeenVersion(::invalidVersion) {}
-	explicit ConfigFollowerGetChangesRequest(Version lastSeenVersion, Standalone<VectorRef<KeyRef>> filter)
-	  : lastSeenVersion(lastSeenVersion), filter(filter) {}
+	explicit ConfigFollowerGetChangesRequest(Version lastSeenVersion, ConfigClassSet const& configClassSet)
+	  : lastSeenVersion(lastSeenVersion), configClassSet(configClassSet) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, lastSeenVersion, filter, reply);
+		serializer(ar, lastSeenVersion, configClassSet, reply);
 	}
 };
 

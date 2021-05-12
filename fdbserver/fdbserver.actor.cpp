@@ -90,7 +90,7 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_CLASSES
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -172,6 +172,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_TRACE_FORMAT      ,    "--trace_format",              SO_REQ_SEP },
 	{ OPT_WHITELIST_BINPATH,     "--whitelist_binpath",         SO_REQ_SEP },
 	{ OPT_BLOB_CREDENTIAL_FILE,  "--blob_credential_file",      SO_REQ_SEP },
+	{ OPT_CONFIG_CLASSES,        "--config_classes",            SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -968,6 +969,8 @@ struct CLIOptions {
 	std::vector<std::string> blobCredentials; // used for fast restore workers & backup workers
 	const char* blobCredsFromENV = nullptr;
 
+	ConfigClassSet configClassSet;
+
 	Reference<ClusterConnectionFile> connectionFile;
 	Standalone<StringRef> machineId;
 
@@ -1408,6 +1411,9 @@ private:
 						}
 					} while (t.size() != 0);
 				}
+				break;
+			case OPT_CONFIG_CLASSES:
+				configClassSet = ConfigClassSet::fromParamString(args.OptionArg());
 				break;
 
 #ifndef TLS_DISABLED
@@ -1944,7 +1950,8 @@ int main(int argc, char* argv[]) {
 				                      opts.metricsConnFile,
 				                      opts.metricsPrefix,
 				                      opts.rsssize,
-				                      opts.whitelistBinPaths));
+				                      opts.whitelistBinPaths,
+				                      opts.configClassSet));
 				actors.push_back(histogramReport());
 				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 

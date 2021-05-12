@@ -140,7 +140,9 @@ public:
 
 	void addVersionedMutations(Standalone<VectorRef<VersionedConfigMutationRef>> const& versionedMutations,
 	                           Version mostRecentVersion) {
-		// TODO: Implement
+		this->versionedMutations.insert(
+		    this->versionedMutations.end(), versionedMutations.begin(), versionedMutations.end());
+		this->mostRecentVersion = mostRecentVersion;
 	}
 
 	void setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version lastCompactedVersion) {
