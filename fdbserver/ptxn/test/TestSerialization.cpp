@@ -19,6 +19,7 @@
  */
 
 #include <cstdint>
+#include <sys/time.h>
 #include <vector>
 
 #include "fdbserver/ptxn/MessageTypes.h"
@@ -443,6 +444,12 @@ bool testTLogStorageServerMessageSerializer_Reset() {
 	return true;
 }
 
+double getTime() {
+	static struct timeval tv;
+	gettimeofday(&tv, NULL);
+	return tv.tv_usec / 1000000.0 + tv.tv_sec;
+}
+
 } // anonymous namespace
 
 TEST_CASE("/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/serialization") {
@@ -467,6 +474,7 @@ TEST_CASE("/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/hugeData") {
 	Subsequence subsequence = 1;
 	std::vector<VersionSubsequenceMutation> data;
 	data.reserve(numMutations);
+	double startTime = getTime();
 	std::cout << " Generating " << numMutations << " mutations" << std::endl;
 	for (auto _ = 0; _ < numMutations; ++_) {
 		if (deterministicRandom()->randomInt(0, 20) == 0) {
@@ -480,8 +488,10 @@ TEST_CASE("/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/hugeData") {
 		                              deterministicRandom()->randomAlphaNumeric(10),
 		                              deterministicRandom()->randomAlphaNumeric(100)));
 	}
+	double generatingTime = getTime();
 	serializeVersionedSubsequencedMutations(serializer, data);
 	serializer.completeMessageWriting();
+	double serializerTime = getTime();
 
 	std::cout << " Serialized " << numMutations << " mutations, the serialized data used " << serializer.getTotalBytes()
 	          << " bytes." << std::endl;
@@ -492,6 +502,11 @@ TEST_CASE("/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/hugeData") {
 	for (auto iter = deserializer.begin(); iter != deserializer.end(); ++index, ++iter) {
 		ASSERT(*iter == data[index]);
 	}
+
+	double deserializeTime = getTime();
+	std::cout << "Generating time: " << generatingTime - startTime
+	          << ", Serialization time: " << serializerTime - generatingTime
+	          << ", Deserialization time: " << deserializeTime - serializerTime << "\n";
 
 	return Void();
 }
