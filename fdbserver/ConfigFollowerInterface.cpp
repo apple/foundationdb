@@ -47,5 +47,10 @@ bool ConfigFollowerInterface::operator!=(ConfigFollowerInterface const& rhs) con
 
 ConfigClassSet ConfigClassSet::fromParamString(std::string const& paramString) {
 	// TODO: Validate input and implement
-	return {};
+	ConfigClassSet result;
+	return result;
+}
+
+bool ConfigClassSet::contains(KeyRef configClass) const {
+	return classes.count(configClass);
 }

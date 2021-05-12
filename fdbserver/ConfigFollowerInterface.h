@@ -36,6 +36,8 @@ public:
 
 	static ConfigClassSet fromParamString(std::string const& paramString);
 
+	bool contains(KeyRef configClass) const;
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, classes);

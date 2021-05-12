@@ -66,16 +66,18 @@ class ConfigBroadcasterImpl {
 						if (version > req.version) {
 							break;
 						}
-						TraceEvent(SevDebug, "BroadcasterAppendingMutationToFullDBOutput")
-						    .detail("ReqVersion", req.version)
-						    .detail("MutationVersion", version)
-						    .detail("ConfigClass", mutation.getConfigClass())
-						    .detail("KnobName", mutation.getKnobName())
-						    .detail("KnobValue", mutation.getValue());
-						if (mutation.isSet()) {
-							reply.database[mutation.getKey()] = mutation.getValue();
-						} else {
-							reply.database.erase(mutation.getKey());
+						if (req.configClassSet.contains(mutation.getConfigClass())) {
+							TraceEvent(SevDebug, "BroadcasterAppendingMutationToFullDBOutput")
+							    .detail("ReqVersion", req.version)
+							    .detail("MutationVersion", version)
+							    .detail("ConfigClass", mutation.getConfigClass())
+							    .detail("KnobName", mutation.getKnobName())
+							    .detail("KnobValue", mutation.getValue());
+							if (mutation.isSet()) {
+								reply.database[mutation.getKey()] = mutation.getValue();
+							} else {
+								reply.database.erase(mutation.getKey());
+							}
 						}
 					}
 					req.reply.send(reply);
@@ -89,7 +91,8 @@ class ConfigBroadcasterImpl {
 					ConfigFollowerGetChangesReply reply;
 					reply.mostRecentVersion = impl->mostRecentVersion;
 					for (const auto& versionedMutation : impl->versionedMutations) {
-						if (versionedMutation.version > req.lastSeenVersion) {
+						if (versionedMutation.version > req.lastSeenVersion &&
+						    req.configClassSet.contains(versionedMutation.mutation.getConfigClass())) {
 							TraceEvent(SevDebug, "BroadcasterSendingChangeMutation")
 							    .detail("Version", versionedMutation.version)
 							    .detail("ReqLastSeenVersion", req.lastSeenVersion)
