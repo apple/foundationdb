@@ -37,13 +37,13 @@ class ConfigBroadcasterImpl {
 	Counter compactRequest;
 	Counter successfulChangeRequest;
 	Counter failedChangeRequest;
-	Counter fullDBRequest;
+	Counter snapshotRequest;
 	Future<Void> logger;
 
 	ConfigBroadcasterImpl()
 	  : lastCompactedVersion(0), mostRecentVersion(0), cc("ConfigBroadcaster"), compactRequest("CompactRequest", cc),
 	    successfulChangeRequest("SuccessfulChangeRequest", cc), failedChangeRequest("FailedChangeRequest", cc),
-	    fullDBRequest("FullDBRequest", cc) {
+	    snapshotRequest("SnapshotRequest", cc) {
 		logger = traceCounters(
 		    "ConfigBroadcasterMetrics", UID{}, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigBroadcasterMetrics");
 	}
@@ -56,10 +56,10 @@ class ConfigBroadcasterImpl {
 				when(ConfigFollowerGetVersionRequest req = waitNext(cfi.getVersion.getFuture())) {
 					req.reply.send(impl->mostRecentVersion);
 				}
-				when(ConfigFollowerGetFullDatabaseRequest req = waitNext(cfi.getFullDatabase.getFuture())) {
-					++impl->fullDBRequest;
-					ConfigFollowerGetFullDatabaseReply reply;
-					reply.database = impl->snapshot;
+				when(ConfigFollowerGetSnapshotRequest req = waitNext(cfi.getSnapshot.getFuture())) {
+					++impl->snapshotRequest;
+					ConfigFollowerGetSnapshotReply reply;
+					reply.snapshot = impl->snapshot;
 					for (const auto& versionedMutation : impl->versionedMutations) {
 						const auto& version = versionedMutation.version;
 						const auto& mutation = versionedMutation.mutation;
@@ -67,16 +67,16 @@ class ConfigBroadcasterImpl {
 							break;
 						}
 						if (req.configClassSet.contains(mutation.getConfigClass())) {
-							TraceEvent(SevDebug, "BroadcasterAppendingMutationToFullDBOutput")
+							TraceEvent(SevDebug, "BroadcasterAppendingMutationToSnapshotOutput")
 							    .detail("ReqVersion", req.version)
 							    .detail("MutationVersion", version)
 							    .detail("ConfigClass", mutation.getConfigClass())
 							    .detail("KnobName", mutation.getKnobName())
 							    .detail("KnobValue", mutation.getValue());
 							if (mutation.isSet()) {
-								reply.database[mutation.getKey()] = mutation.getValue();
+								reply.snapshot[mutation.getKey()] = mutation.getValue();
 							} else {
-								reply.database.erase(mutation.getKey());
+								reply.snapshot.erase(mutation.getKey());
 							}
 						}
 					}

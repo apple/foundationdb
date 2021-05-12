@@ -24,7 +24,7 @@
 
 void ConfigFollowerInterface::setupWellKnownEndpoints() {
 	getVersion.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_GETVERSION, TaskPriority::Coordination);
-	getFullDatabase.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_GETFULLDB, TaskPriority::Coordination);
+	getSnapshot.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_GETSNAPSHOT, TaskPriority::Coordination);
 	getChanges.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_GETCHANGES, TaskPriority::Coordination);
 	compact.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_COMPACT, TaskPriority::Coordination);
 }
@@ -33,7 +33,7 @@ ConfigFollowerInterface::ConfigFollowerInterface() : _id(deterministicRandom()->
 
 ConfigFollowerInterface::ConfigFollowerInterface(NetworkAddress const& remote)
   : _id(deterministicRandom()->randomUniqueID()), getVersion(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETVERSION)),
-    getFullDatabase(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETFULLDB)),
+    getSnapshot(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETSNAPSHOT)),
     getChanges(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETCHANGES)),
     compact(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_COMPACT)) {}
 

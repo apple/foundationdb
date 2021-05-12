@@ -30,6 +30,7 @@
 
 class TestKnobs : public Knobs {
 public:
+	TestKnobs();
 	int64_t TEST;
 	void initialize();
 	void reset();

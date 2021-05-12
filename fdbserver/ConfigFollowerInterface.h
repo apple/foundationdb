@@ -66,29 +66,29 @@ struct ConfigFollowerGetVersionRequest {
 	}
 };
 
-struct ConfigFollowerGetFullDatabaseReply {
+struct ConfigFollowerGetSnapshotReply {
 	static constexpr FileIdentifier file_identifier = 1734095;
-	std::map<ConfigKey, Value> database;
+	std::map<ConfigKey, Value> snapshot;
 
-	ConfigFollowerGetFullDatabaseReply() = default;
-	explicit ConfigFollowerGetFullDatabaseReply(std::map<ConfigKey, Value> const& database) : database(database) {
+	ConfigFollowerGetSnapshotReply() = default;
+	explicit ConfigFollowerGetSnapshotReply(std::map<ConfigKey, Value> const& snapshot) : snapshot(snapshot) {
 		// TODO: Support move constructor as well
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, database);
+		serializer(ar, snapshot);
 	}
 };
 
-struct ConfigFollowerGetFullDatabaseRequest {
+struct ConfigFollowerGetSnapshotRequest {
 	static constexpr FileIdentifier file_identifier = 294811;
 	Version version;
 	ConfigClassSet configClassSet;
-	ReplyPromise<ConfigFollowerGetFullDatabaseReply> reply;
+	ReplyPromise<ConfigFollowerGetSnapshotReply> reply;
 
-	ConfigFollowerGetFullDatabaseRequest() : version(-1) {}
-	explicit ConfigFollowerGetFullDatabaseRequest(Version version, ConfigClassSet const& configClassSet)
+	ConfigFollowerGetSnapshotRequest() : version(-1) {}
+	explicit ConfigFollowerGetSnapshotRequest(Version version, ConfigClassSet const& configClassSet)
 	  : version(version), configClassSet(configClassSet) {}
 
 	template <class Ar>
@@ -164,7 +164,7 @@ class ConfigFollowerInterface {
 public:
 	static constexpr FileIdentifier file_identifier = 7721102;
 	RequestStream<ConfigFollowerGetVersionRequest> getVersion;
-	RequestStream<ConfigFollowerGetFullDatabaseRequest> getFullDatabase;
+	RequestStream<ConfigFollowerGetSnapshotRequest> getSnapshot;
 	RequestStream<ConfigFollowerGetChangesRequest> getChanges;
 	RequestStream<ConfigFollowerCompactRequest> compact;
 
@@ -177,6 +177,6 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, _id, getVersion, getFullDatabase, getChanges);
+		serializer(ar, _id, getVersion, getSnapshot, getChanges);
 	}
 };

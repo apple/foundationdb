@@ -30,7 +30,7 @@ class SimpleConfigConsumerImpl {
 	Counter compactRequest;
 	Counter successfulChangeRequest;
 	Counter failedChangeRequest;
-	Counter fullDBRequest;
+	Counter snapshotRequest;
 	Future<Void> logger;
 
 	static const double POLLING_INTERVAL; // TODO: Make knob?
@@ -68,12 +68,12 @@ class SimpleConfigConsumerImpl {
 					    wait(self->cfi.getVersion.getReply(ConfigFollowerGetVersionRequest{}));
 					ASSERT(versionReply.version > self->mostRecentVersion);
 					self->mostRecentVersion = versionReply.version;
-					ConfigFollowerGetFullDatabaseReply dbReply = wait(self->cfi.getFullDatabase.getReply(
-					    ConfigFollowerGetFullDatabaseRequest{ self->mostRecentVersion, {} }));
+					ConfigFollowerGetSnapshotReply dbReply = wait(self->cfi.getSnapshot.getReply(
+					    ConfigFollowerGetSnapshotRequest{ self->mostRecentVersion, {} }));
 					// TODO: Remove unnecessary copy
-					auto snapshot = dbReply.database;
+					auto snapshot = dbReply.snapshot;
 					broadcaster->setSnapshot(std::move(snapshot), self->mostRecentVersion);
-					++self->fullDBRequest;
+					++self->snapshotRequest;
 				} else {
 					throw e;
 				}
@@ -85,11 +85,11 @@ class SimpleConfigConsumerImpl {
 		ConfigFollowerGetVersionReply versionReply =
 		    wait(self->cfi.getVersion.getReply(ConfigFollowerGetVersionRequest{}));
 		self->mostRecentVersion = versionReply.version;
-		ConfigFollowerGetFullDatabaseReply reply = wait(
-		    self->cfi.getFullDatabase.getReply(ConfigFollowerGetFullDatabaseRequest{ self->mostRecentVersion, {} }));
+		ConfigFollowerGetSnapshotReply reply =
+		    wait(self->cfi.getSnapshot.getReply(ConfigFollowerGetSnapshotRequest{ self->mostRecentVersion, {} }));
 		TraceEvent(SevDebug, "ConfigGotInitialSnapshot").detail("Version", self->mostRecentVersion);
 		// TODO: Remove unnecessary copy
-		auto snapshot = reply.database;
+		auto snapshot = reply.snapshot;
 		broadcaster->setSnapshot(std::move(snapshot), self->mostRecentVersion);
 		return Void();
 	}
@@ -97,7 +97,7 @@ class SimpleConfigConsumerImpl {
 	SimpleConfigConsumerImpl()
 	  : mostRecentVersion(0), cc("ConfigConsumer"), compactRequest("CompactRequest", cc),
 	    successfulChangeRequest("SuccessfulChangeRequest", cc), failedChangeRequest("FailedChangeRequest", cc),
-	    fullDBRequest("FullDBRequest", cc) {
+	    snapshotRequest("SnapshotRequest", cc) {
 		logger = traceCounters(
 		    "ConfigConsumerMetrics", UID{}, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigConsumerMetrics");
 	}

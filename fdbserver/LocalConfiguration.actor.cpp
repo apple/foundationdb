@@ -23,6 +23,8 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/LocalConfiguration.h"
 #include "flow/Knobs.h"
+#include "flow/UnitTest.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
@@ -50,19 +52,13 @@ class ConfigKnobOverrides {
 
 public:
 	ConfigKnobOverrides() = default;
-	ConfigKnobOverrides(std::string const& paramString) {
+	explicit ConfigKnobOverrides(std::string const& paramString) {
 		// TODO: Validate string
-		// FIXME: Fix this implementation
-		/*
-		auto b = paramString.begin();
-		while (b != paramString.end()) {
-		    auto e = std::find(b, paramString.end(), '/');
-		    configPath.emplace_back_deep(configPath.arena(), reinterpret_cast<uint8_t const *>(&(*b)), e-b);
-		    if (e != paramString.end()) {
-		        b = e+1;
-		    }
+		StringRef s(reinterpret_cast<uint8_t const*>(paramString.c_str()), paramString.size());
+		while (s.size()) {
+			configPath.push_back_deep(configPath.arena(), s.eat("/"_sr));
+			configClassToKnobToValue[configPath.back()] = {};
 		}
-		*/
 	}
 	ConfigClassSet getConfigClassSet() const { return ConfigClassSet(configPath); }
 	void set(KeyRef configClass, KeyRef knobName, ValueRef value) {
@@ -74,11 +70,10 @@ public:
 	void update(KS&... knobCollections) const {
 		for (const auto& configClass : configPath) {
 			const auto& knobToValue = configClassToKnobToValue.find(configClass);
-			if (knobToValue != configClassToKnobToValue.end()) {
-				for (const auto& [knobName, knobValue] : knobToValue->second) {
-					// Assert here because we should be validating on the client
-					ASSERT(updateSingleKnob(knobName, knobValue, knobCollections...));
-				}
+			ASSERT(knobToValue != configClassToKnobToValue.end());
+			for (const auto& [knobName, knobValue] : knobToValue->second) {
+				// Assert here because we should be validating on the client
+				ASSERT(updateSingleKnob(knobName, knobValue, knobCollections...));
 			}
 		}
 	}
@@ -95,7 +90,7 @@ class ManualKnobOverrides {
 	std::map<Key, Value> overrides;
 
 public:
-	ManualKnobOverrides(std::map<Key, Value>&& overrides) : overrides(std::move(overrides)) {}
+	explicit ManualKnobOverrides(std::map<Key, Value>&& overrides) : overrides(std::move(overrides)) {}
 
 	template <class... KS>
 	void update(KS&... knobCollections) const {
@@ -109,6 +104,36 @@ public:
 };
 
 } // namespace
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/updateSingleKnob") {
+	TestKnobs knobs;
+	updateSingleKnob("test"_sr, "5"_sr, knobs);
+	ASSERT(knobs.TEST == 5);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ManualKnobOverrides") {
+	TestKnobs knobs;
+	// TODO: Add more test knobs
+	std::map<Key, Value> m;
+	m["test"_sr] = "5"_sr;
+	ManualKnobOverrides manualKnobOverrides(std::move(m));
+	manualKnobOverrides.update(knobs);
+	ASSERT(knobs.TEST == 5);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ConfigKnobOverrides") {
+	TestKnobs knobs;
+	ConfigKnobOverrides configKnobOverrides("class-A/class-B");
+	configKnobOverrides.update(knobs);
+	ASSERT(knobs.TEST == 0);
+	configKnobOverrides.set("class-A"_sr, "test"_sr, "5"_sr);
+	ASSERT(knobs.TEST == 0);
+	configKnobOverrides.update(knobs);
+	ASSERT(knobs.TEST == 5);
+	return Void();
+}
 
 class LocalConfigurationImpl {
 	IKeyValueStore* kvStore; // FIXME: fix leaks?
@@ -174,17 +199,17 @@ class LocalConfigurationImpl {
 		return Void();
 	}
 
-	void initializeKnobs() {
-		flowKnobs.initialize();
-		clientKnobs.initialize();
-		serverKnobs.initialize();
+	void initializeKnobs(bool randomize = false, bool isSimulated = false) {
+		flowKnobs.initialize(randomize, isSimulated);
+		clientKnobs.initialize(randomize);
+		serverKnobs.initialize(randomize, &clientKnobs, isSimulated);
 		testKnobs.initialize();
 	}
 
 	void resetKnobs() {
 		flowKnobs.reset();
 		clientKnobs.reset();
-		serverKnobs.reset();
+		serverKnobs.reset(&clientKnobs);
 		testKnobs.reset();
 	}
 
@@ -196,9 +221,9 @@ class LocalConfigurationImpl {
 		initializeKnobs();
 	}
 
-	ACTOR static Future<Void> applyKnobUpdates(LocalConfigurationImpl *self, ConfigFollowerGetFullDatabaseReply reply) {
+	ACTOR static Future<Void> applyKnobUpdates(LocalConfigurationImpl* self, ConfigFollowerGetSnapshotReply reply) {
 		self->kvStore->clear(knobOverrideKeys);
-		for (const auto& [configKey, knobValue] : reply.database) {
+		for (const auto& [configKey, knobValue] : reply.snapshot) {
 			self->configKnobOverrides.set(configKey.configClass, configKey.knobName, knobValue);
 		}
 		self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(self->lastSeenVersion, IncludeVersion())));
@@ -237,11 +262,11 @@ class LocalConfigurationImpl {
 			if (e.code() == error_code_version_already_compacted) {
 				ConfigFollowerGetVersionReply versionReply = wait(broadcaster.getVersion.getReply(ConfigFollowerGetVersionRequest{}));
 				self->lastSeenVersion = versionReply.version;
-				ConfigFollowerGetFullDatabaseReply fullDBReply =
-				    wait(broadcaster.getFullDatabase.getReply(ConfigFollowerGetFullDatabaseRequest{
+				ConfigFollowerGetSnapshotReply snapshotReply =
+				    wait(broadcaster.getSnapshot.getReply(ConfigFollowerGetSnapshotRequest{
 				        self->lastSeenVersion, self->configKnobOverrides.getConfigClassSet() }));
 				// TODO: Avoid applying if there are no updates
-				wait(applyKnobUpdates(self, fullDBReply));
+				wait(applyKnobUpdates(self, snapshotReply));
 			} else {
 				throw e;
 			}
@@ -349,6 +374,10 @@ Future<Void> LocalConfiguration::consume(Reference<AsyncVar<ServerDBInfo> const>
 }
 
 #define init(knob, value) initKnob(knob, value, #knob)
+
+TestKnobs::TestKnobs() {
+	initialize();
+}
 
 void TestKnobs::initialize() {
 	init(TEST, 0);

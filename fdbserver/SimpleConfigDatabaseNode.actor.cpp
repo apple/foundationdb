@@ -54,7 +54,7 @@ Version getVersionFromVersionedMutationKey(KeyRef versionedMutationKey) {
 
 } //namespace
 
-TEST_CASE("/fdbserver/SimpleConfigDatabaseNode/versionedMutationKeys") {
+TEST_CASE("/fdbserver/ConfigDB/SimpleConfigDatabaseNode/versionedMutationKeys") {
 	std::vector<Key> keys;
 	for (Version version = 0; version < 1000; ++version) {
 		for (int index = 0; index < 5; ++index) {
@@ -67,7 +67,7 @@ TEST_CASE("/fdbserver/SimpleConfigDatabaseNode/versionedMutationKeys") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/SimpleConfigDatabaseNode/versionedMutationKeyOrdering") {
+TEST_CASE("/fdbserver/ConfigDB/SimpleConfigDatabaseNode/versionedMutationKeyOrdering") {
 	Standalone<VectorRef<KeyRef>> keys;
 	for (Version version = 0; version < 1000; ++version) {
 		for (auto index = 0; index < 5; ++index) {
@@ -318,19 +318,18 @@ class SimpleConfigDatabaseNodeImpl {
 		}
 	}
 
-	ACTOR static Future<Void> getFullDatabase(SimpleConfigDatabaseNodeImpl* self,
-	                                          ConfigFollowerGetFullDatabaseRequest req) {
+	ACTOR static Future<Void> getSnapshot(SimpleConfigDatabaseNodeImpl* self, ConfigFollowerGetSnapshotRequest req) {
 		wait(self->globalLock.take());
 		state FlowLock::Releaser releaser(self->globalLock);
-		state ConfigFollowerGetFullDatabaseReply reply;
+		state ConfigFollowerGetSnapshotReply reply;
 		Standalone<RangeResultRef> data = wait(self->kvStore->readRange(kvKeys));
 		for (const auto& kv : data) {
 			reply
-			    .database[BinaryReader::fromStringRef<ConfigKey>(kv.key.removePrefix(kvKeys.begin), IncludeVersion())] =
+			    .snapshot[BinaryReader::fromStringRef<ConfigKey>(kv.key.removePrefix(kvKeys.begin), IncludeVersion())] =
 			    kv.value;
 		}
 		state Version lastCompactedVersion = wait(getLastCompactedVersion(self));
-		TraceEvent(SevDebug, "ConfigDatabaseNodeGettingFullDB")
+		TraceEvent(SevDebug, "ConfigDatabaseNodeGettingSnapshot")
 		    .detail("ReqVersion", req.version)
 		    .detail("LastCompactedVersion", lastCompactedVersion);
 		if (lastCompactedVersion > req.version) {
@@ -341,9 +340,9 @@ class SimpleConfigDatabaseNodeImpl {
 		for (const auto& versionedMutation : versionedMutations) {
 			const auto& mutation = versionedMutation.mutation;
 			if (mutation.isSet()) {
-				reply.database[mutation.getKey()] = mutation.getValue();
+				reply.snapshot[mutation.getKey()] = mutation.getValue();
 			} else {
-				reply.database.erase(mutation.getKey());
+				reply.snapshot.erase(mutation.getKey());
 			}
 		}
 		req.reply.send(reply);
@@ -398,8 +397,8 @@ class SimpleConfigDatabaseNodeImpl {
 				when(ConfigFollowerGetVersionRequest req = waitNext(cfi->getVersion.getFuture())) {
 					self->actors.add(getCommittedVersion(self, req));
 				}
-				when(ConfigFollowerGetFullDatabaseRequest req = waitNext(cfi->getFullDatabase.getFuture())) {
-					self->actors.add(getFullDatabase(self, req));
+				when(ConfigFollowerGetSnapshotRequest req = waitNext(cfi->getSnapshot.getFuture())) {
+					self->actors.add(getSnapshot(self, req));
 				}
 				when(ConfigFollowerGetChangesRequest req = waitNext(cfi->getChanges.getFuture())) {
 					self->actors.add(getChanges(self, req));
