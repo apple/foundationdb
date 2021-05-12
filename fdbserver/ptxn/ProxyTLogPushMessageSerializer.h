@@ -46,6 +46,7 @@ struct ProxyTLogMessageHeader : MultipleItemHeaderBase {
 class ProxyTLogPushMessageSerializer {
 	// Maps the TeamID to the list of BinaryWriters
 	std::unordered_map<StorageTeamID, HeaderedItemsSerializer<ProxyTLogMessageHeader, SubsequenceMutationItem>> writers;
+	SpanID spanContext; // Transaction info. TODO: serialize this field
 
 	// Subsequence of the mutation
 	// NOTE: The subsequence is designed to start at 1. This allows a cursor,
@@ -62,14 +63,26 @@ class ProxyTLogPushMessageSerializer {
 	Subsequence currentSubsequence = 1;
 
 public:
-	// For a given TeamID, serialize a new mutation
+	// Writes a new mutation for a given TeamID.
 	void writeMessage(const MutationRef& mutation, const StorageTeamID& storageTeamID);
+
+	// Adds span context about transactions.
+	void addTransactionInfo(const SpanID& context) {
+		TEST(!spanContext.isValid()); // addTransactionInfo with invalid SpanID
+		spanContext = context;
+	}
+
+	// Writes the same (clear range) mutation to all "teams".
+	// void writeMessage(const MutationRef& mutation, const std::vector<TeamID>& teams);
 
 	// For a given TeamID, mark the serializer not accepting more mutations, and write the header.
 	void completeMessageWriting(const StorageTeamID& storageTeamID);
 
 	// Get the serialized data for a given TeamID
 	Standalone<StringRef> getSerialized(const StorageTeamID& storageTeamID);
+
+	// Completes all teams' message writing and returns the serialized data.
+	// std::unordered_map<StorageTeamID, Standalone<StringRef>> getAllSerialized();
 };
 
 // Deserialize the ProxyTLogPushMessage
