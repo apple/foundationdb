@@ -268,6 +268,10 @@ if(WITH_PYTHON)
       NAME multiversion_client/unit_tests
       COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /fdbclient/multiversionclient/
     )
+    add_test(
+      NAME threadsafe_threadfuture_to_future/unit_tests
+      COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /flow/safeThreadFutureToFuture/
+    )
   endif()
 
   verify_testing()

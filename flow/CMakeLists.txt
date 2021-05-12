@@ -58,7 +58,7 @@ set(FLOW_SRCS
   TLSConfig.actor.cpp
   TLSConfig.actor.h
   ThreadHelper.actor.h
-  ThreadHelper.cpp
+  ThreadHelper.actor.cpp
   ThreadPrimitives.cpp
   ThreadPrimitives.h
   ThreadSafeQueue.h

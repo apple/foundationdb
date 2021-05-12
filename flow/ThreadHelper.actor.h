@@ -532,6 +532,56 @@ Future<T> unsafeThreadFutureToFuture(ThreadFuture<T> threadFuture) {
 	return callback->promise.getFuture();
 }
 
+// A callback waiting on a thread future and will delete itself once fired
+template <class T>
+struct UtilCallback : public ThreadCallback {
+public:
+	UtilCallback(ThreadFuture<T> f, void* userdata) : f(f), userdata(userdata) {}
+
+	bool canFire(int notMadeActive) const override { return true; }
+	void fire(const Void& unused, int& userParam) override {
+		g_network->onMainThread(Promise<Void>((SAV<Void>*)userdata), TaskPriority::DefaultOnMainThread);
+		delete this;
+	}
+	void error(const Error&, int& userParam) override {
+		g_network->onMainThread(Promise<Void>((SAV<Void>*)userdata), TaskPriority::DefaultOnMainThread);
+		delete this;
+	}
+	void destroy() override {}
+
+private:
+	ThreadFuture<T> f;
+	void* userdata;
+};
+
+// The underlying actor that converts ThreadFuture from Future
+// Note: should be used from main thread
+// The cancellation here works both way
+// If the underlying "threadFuture" is cancelled, this actor will get actor_cancelled.
+// If instead, this actor is cancelled, we will also cancel the underlying "threadFuture"
+// Note: we are required to have unique ownership of the "threadFuture"
+ACTOR template <class T>
+Future<T> safeThreadFutureToFuture(ThreadFuture<T> threadFuture) {
+	Promise<Void> ready;
+	Future<Void> onReady = ready.getFuture();
+	UtilCallback<T>* callback = new UtilCallback<T>(threadFuture, ready.extractRawPointer());
+	int unused = 0;
+	threadFuture.callOrSetAsCallback(callback, unused, 0);
+	try {
+		wait(onReady);
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_actor_cancelled);
+		// prerequisite: we have exclusive ownership of the threadFuture
+		threadFuture.cancel();
+		throw e;
+	}
+	// threadFuture should be ready
+	ASSERT(threadFuture.isReady());
+	if (threadFuture.isError())
+		throw threadFuture.getError();
+	return threadFuture.get();
+}
+
 ACTOR template <class R, class F>
 Future<Void> doOnMainThread(Future<Void> signal, F f, ThreadSingleAssignmentVar<R>* result) {
 	try {
