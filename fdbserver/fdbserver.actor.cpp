@@ -1536,7 +1536,7 @@ private:
 					fprintf(stderr, "%s\n", ClusterConnectionString::getErrorString(connectionString, e).c_str());
 					throw;
 				}
-				auto connectionFile = makeReference<ClusterConnectionFile>(connFile, ccs);
+				connectionFile = makeReference<ClusterConnectionFile>(connFile, ccs);
 			} else {
 				std::pair<std::string, bool> resolvedClusterFile;
 				try {
