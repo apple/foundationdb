@@ -1547,10 +1547,6 @@ struct YieldedFutureActor : SAV<Void>, ActorCallback<YieldedFutureActor, 1, Void
 
 	void destroy() override { delete this; }
 
-	Reference<ActorLineage> setLineage() {
-		return currentLineage;
-	}
-
 	void a_callback_fire(ActorCallback<YieldedFutureActor, 1, Void>*, Void) {
 		if (int16_t(in_error_state.code()) == UNSET_ERROR_CODE) {
 			in_error_state = Error::fromCode(SET_ERROR_CODE);
