@@ -372,6 +372,7 @@ public:
 		*(T*)writeBytes(sizeof(T)) = t;
 	}
 	void* getData() { return data; }
+	const void* getData() const { return data; }
 	int getLength() const { return size; }
 	Standalone<StringRef> toValue() const { return Standalone<StringRef>(StringRef(data, size), arena); }
 	template <class VersionOptions>

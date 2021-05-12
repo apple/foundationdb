@@ -153,6 +153,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/Watches.toml)
   add_fdb_test(TEST_FILES fast/WriteDuringRead.toml)
   add_fdb_test(TEST_FILES fast/WriteDuringReadClean.toml)
+  add_fdb_test(TEST_FILES ptxn/UnitTestTLogGroup.toml IGNORE)
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
   add_fdb_test(TEST_FILES rare/ClogUnclog.toml)
   add_fdb_test(TEST_FILES rare/CloggedCycleWithKills.toml)
@@ -273,6 +274,12 @@ if(WITH_PYTHON)
       COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /flow/safeThreadFutureToFuture/
     )
   endif()
+
+  # Tests for partitioned transaction
+  add_fdb_test(TEST_FILES ptxn/Driver.toml)
+  add_fdb_test(TEST_FILES ptxn/Resolver.toml)
+  add_fdb_test(TEST_FILES ptxn/Serialization.toml)
+  add_fdb_test(TEST_FILES ptxn/TeamVersionTracker.toml)
 
   verify_testing()
   if (NOT OPEN_FOR_IDE AND NOT WIN32)

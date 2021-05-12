@@ -59,7 +59,6 @@ set(FDBSERVER_SRCS
   OldTLogServer_4_6.actor.cpp
   OldTLogServer_6_0.actor.cpp
   OldTLogServer_6_2.actor.cpp
-  Orderer.actor.h
   ProxyCommitData.actor.h
   pubsub.actor.cpp
   pubsub.h
@@ -99,10 +98,45 @@ set(FDBSERVER_SRCS
   storageserver.actor.cpp
   TagPartitionedLogSystem.actor.cpp
   template_fdb.h
+
+  ptxn/Config.h
+  ptxn/MessageTypes.cpp
+  ptxn/MessageTypes.h
+  ptxn/ProxyTLogPushMessageSerializer.cpp
+  ptxn/ProxyTLogPushMessageSerializer.h
+  ptxn/Serializer.h
+  ptxn/StorageServerInterface.cpp
+  ptxn/StorageServerInterface.h
+  ptxn/TeamVersionTracker.actor.cpp
+  ptxn/TeamVersionTracker.h
+  ptxn/TLogInterface.cpp
+  ptxn/TLogInterface.h
+  ptxn/TLogPeekCursor.actor.cpp
+  ptxn/TLogPeekCursor.h
+  ptxn/TLogStorageServerPeekMessageSerializer.cpp
+  ptxn/TLogStorageServerPeekMessageSerializer.h
+
+  ptxn/test/TestSerialization.cpp
+  ptxn/test/Driver.actor.cpp
+  ptxn/test/Driver.h
+  ptxn/test/FakeProxy.actor.cpp
+  ptxn/test/FakeProxy.actor.h
+  ptxn/test/FakeResolver.actor.h
+  ptxn/test/FakeStorageServer.actor.cpp
+  ptxn/test/FakeStorageServer.actor.h
+  ptxn/test/FakeTLog.actor.cpp
+  ptxn/test/FakeTLog.actor.h
+  ptxn/test/RealTLog.actor.cpp
+  ptxn/test/RealTLog.actor.h
+  ptxn/test/TestResolver.actor.cpp
+  ptxn/test/TestSerialization.cpp
+
   tester.actor.cpp
   TesterInterface.actor.h
   TLogInterface.h
   TLogServer.actor.cpp
+  TLogGroup.actor.h
+  TLogGroup.actor.cpp
   VersionedBTree.actor.cpp
   VFSAsync.h
   VFSAsync.cpp
