@@ -1,10 +1,10 @@
 #!/bin/bash
 
 if [ ! -f /usr/local/etc/foundationdb/fdb.cluster ]; then
-    description=`LC_CTYPE=C tr -dc A-Za-z0-9 < /dev/urandom | head -c 8`
-    random_str=`LC_CTYPE=C tr -dc A-Za-z0-9 < /dev/urandom | head -c 8`
+    description=`LC_CTYPE=C tr -dc '[:lower:][:upper:][:digit:]' < /dev/urandom | head -c 8`
+    random_str=`LC_CTYPE=C tr -dc '[:lower:][:upper:][:digit:]' < /dev/urandom | head -c 8`
     echo $description:$random_str@127.0.0.1:4689 > /usr/local/etc/foundationdb/fdb.cluster
-    chmod 0664 /etc/foundationdb/fdb.cluster
+    chmod 0664 /usr/local/etc/foundationdb/fdb.cluster
     NEWDB=1
 fi
 
