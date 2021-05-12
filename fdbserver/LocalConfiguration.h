@@ -31,7 +31,11 @@
 class TestKnobs : public Knobs {
 public:
 	TestKnobs();
-	int64_t TEST;
+	int64_t TEST_LONG;
+	int TEST_INT;
+	double TEST_DOUBLE;
+	bool TEST_BOOL;
+	std::string TEST_STRING;
 	void initialize();
 	void reset();
 };

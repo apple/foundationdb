@@ -105,36 +105,6 @@ public:
 
 } // namespace
 
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/updateSingleKnob") {
-	TestKnobs knobs;
-	updateSingleKnob("test"_sr, "5"_sr, knobs);
-	ASSERT(knobs.TEST == 5);
-	return Void();
-}
-
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ManualKnobOverrides") {
-	TestKnobs knobs;
-	// TODO: Add more test knobs
-	std::map<Key, Value> m;
-	m["test"_sr] = "5"_sr;
-	ManualKnobOverrides manualKnobOverrides(std::move(m));
-	manualKnobOverrides.update(knobs);
-	ASSERT(knobs.TEST == 5);
-	return Void();
-}
-
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ConfigKnobOverrides") {
-	TestKnobs knobs;
-	ConfigKnobOverrides configKnobOverrides("class-A/class-B");
-	configKnobOverrides.update(knobs);
-	ASSERT(knobs.TEST == 0);
-	configKnobOverrides.set("class-A"_sr, "test"_sr, "5"_sr);
-	ASSERT(knobs.TEST == 0);
-	configKnobOverrides.update(knobs);
-	ASSERT(knobs.TEST == 5);
-	return Void();
-}
-
 class LocalConfigurationImpl {
 	IKeyValueStore* kvStore; // FIXME: fix leaks?
 	Version lastSeenVersion { 0 };
@@ -380,10 +350,97 @@ TestKnobs::TestKnobs() {
 }
 
 void TestKnobs::initialize() {
-	init(TEST, 0);
+	init(TEST_LONG, 0);
+	init(TEST_INT, 0);
+	init(TEST_DOUBLE, 0.0);
+	init(TEST_BOOL, false);
+	init(TEST_STRING, "");
 }
 
 void TestKnobs::reset() {
 	explicitlySetKnobs.clear();
 	initialize();
+}
+
+namespace {
+
+class TestKnobs2 : public Knobs {
+public:
+	int64_t TEST2_LONG;
+	int TEST2_INT;
+	double TEST2_DOUBLE;
+	bool TEST2_BOOL;
+	std::string TEST2_STRING;
+
+	void initialize() {
+		init(TEST2_LONG, 0);
+		init(TEST2_INT, 0);
+		init(TEST2_DOUBLE, 0.0);
+		init(TEST2_BOOL, false);
+		init(TEST2_STRING, "");
+	}
+
+	TestKnobs2() { initialize(); }
+
+	void reset() {
+		explicitlySetKnobs.clear();
+		initialize();
+	}
+};
+
+} // namespace
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/updateSingleKnob") {
+	TestKnobs k1;
+	TestKnobs2 k2;
+	updateSingleKnob("test_long"_sr, "5"_sr, k1, k2);
+	updateSingleKnob("test_int"_sr, "5"_sr, k1, k2);
+	updateSingleKnob("test_double"_sr, "5.0"_sr, k1, k2);
+	updateSingleKnob("test_bool"_sr, "true"_sr, k1, k2);
+	updateSingleKnob("test_string"_sr, "5"_sr, k1, k2);
+	updateSingleKnob("test2_long"_sr, "10"_sr, k1, k2);
+	updateSingleKnob("test2_int"_sr, "10"_sr, k1, k2);
+	updateSingleKnob("test2_double"_sr, "10.0"_sr, k1, k2);
+	updateSingleKnob("test2_bool"_sr, "true"_sr, k1, k2);
+	updateSingleKnob("test2_string"_sr, "10"_sr, k1, k2);
+	ASSERT(k1.TEST_LONG == 5);
+	ASSERT(k1.TEST_INT == 5);
+	ASSERT(k1.TEST_DOUBLE == 5.0);
+	ASSERT(k1.TEST_BOOL);
+	ASSERT(k1.TEST_STRING == "5");
+	ASSERT(k2.TEST2_LONG == 10);
+	ASSERT(k2.TEST2_INT == 10);
+	ASSERT(k2.TEST2_DOUBLE == 10.0);
+	ASSERT(k2.TEST2_BOOL);
+	ASSERT(k2.TEST2_STRING == "10");
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ManualKnobOverrides") {
+	TestKnobs k1;
+	TestKnobs2 k2;
+	std::map<Key, Value> m;
+	m["test_int"_sr] = "5"_sr;
+	m["test2_int"_sr] = "10"_sr;
+	ManualKnobOverrides manualKnobOverrides(std::move(m));
+	manualKnobOverrides.update(k1, k2);
+	ASSERT(k1.TEST_INT == 5);
+	ASSERT(k2.TEST2_INT == 10);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ConfigKnobOverrides") {
+	TestKnobs k1;
+	TestKnobs2 k2;
+	ConfigKnobOverrides configKnobOverrides("class-A/class-B");
+	configKnobOverrides.update(k1, k2);
+	ASSERT(k1.TEST_INT == 0);
+	ASSERT(k2.TEST2_INT == 0);
+	configKnobOverrides.set("class-B"_sr, "test_int"_sr, "7"_sr);
+	configKnobOverrides.set("class-A"_sr, "test_int"_sr, "5"_sr);
+	configKnobOverrides.set("class-A"_sr, "test2_int"_sr, "10"_sr);
+	configKnobOverrides.update(k1, k2);
+	ASSERT(k1.TEST_INT == 7);
+	ASSERT(k2.TEST2_INT == 10);
+	return Void();
 }
