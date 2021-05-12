@@ -37,11 +37,6 @@ bool TSS_doCompare(const GetValueRequest& req,
                    Severity traceSeverity,
                    UID tssId) {
 	if (src.value.present() != tss.value.present() || (src.value.present() && src.value.get() != tss.value.get())) {
-		printf("GetValue %s @ %lld mismatch: src=%s, tss=%s\n",
-		       req.key.printable().c_str(),
-		       req.version,
-		       src.value.present() ? traceChecksumValue(src.value.get()).c_str() : "missing",
-		       tss.value.present() ? traceChecksumValue(tss.value.get()).c_str() : "missing");
 		TraceEvent(traceSeverity, "TSSMismatchGetValue")
 		    .suppressFor(1.0)
 		    .detail("TSSID", tssId)
@@ -52,8 +47,6 @@ bool TSS_doCompare(const GetValueRequest& req,
 
 		return false;
 	}
-	// printf("tss GetValueReply matched! src=%s, tss=%s\n", src.value.present() ? src.value.get().toString().c_str() :
-	// "missing", tss.value.present() ? tss.value.get().toString().c_str() : "missing");
 	return true;
 }
 
@@ -70,8 +63,6 @@ bool TSS_doCompare(const GetKeyRequest& req,
 	// check key selectors that start in a TSS shard and end in a non-TSS shard because the other read queries and the
 	// consistency check will eventually catch a misbehaving storage engine.
 	bool matches = true;
-	// printf("GetKey %s:<%s:%d @ %lld start:\n",
-	//		req.sel.getKey().toString().c_str(), req.sel.orEqual ? "=" : "", req.sel.offset, req.version);
 	if (src.sel.orEqual == tss.sel.orEqual && src.sel.offset == tss.sel.offset) {
 		// full matching case
 		if (src.sel.offset == 0 && src.sel.orEqual) {
@@ -99,23 +90,9 @@ bool TSS_doCompare(const GetKeyRequest& req,
 		// where one response has <=0 with the actual result and the other has <0 with the shard upper boundary.
 		// So whichever one has the actual result should have the lower key.
 		bool tssOffsetLarger = (src.sel.offset == tss.sel.offset) ? tss.sel.orEqual : src.sel.offset < tss.sel.offset;
-		// printf("  partial comparison: tssLarger=%s, tssOffsetLarger=%s, matches=%s\n", tssKeyLarger ? "T" : "F",
-		// tssOffsetLarger ? "T": "F", matches ? "T" : "F");
 		matches = tssKeyLarger != tssOffsetLarger;
 	}
 	if (!matches) {
-		// TODO REMOVE print
-		printf("GetKey %s:<%s:%d @ %lld mismatch: src=%s:<%s:%d, tss=%s:<%s:%d\n",
-		       req.sel.getKey().printable().c_str(),
-		       req.sel.orEqual ? "=" : "",
-		       req.sel.offset,
-		       req.version,
-		       src.sel.getKey().printable().c_str(),
-		       src.sel.orEqual ? "=" : "",
-		       src.sel.offset,
-		       tss.sel.getKey().printable().c_str(),
-		       tss.sel.orEqual ? "=" : "",
-		       tss.sel.offset);
 		TraceEvent(traceSeverity, "TSSMismatchGetKey")
 		    .suppressFor(1.0)
 		    .detail("TSSID", tssId)
@@ -138,32 +115,16 @@ bool TSS_doCompare(const GetKeyValuesRequest& req,
                    Severity traceSeverity,
                    UID tssId) {
 	if (src.more != tss.more || src.data != tss.data) {
-		// TODO REMOVE debugging prints
-		printf("GetKeyValues [%s:<%s:%d - %s:<%s:%d) @ %lld (lim=%d limB=%d) mismatch:\n",
-		       req.begin.getKey().printable().c_str(),
-		       req.begin.orEqual ? "=" : "",
-		       req.begin.offset,
-		       req.end.getKey().printable().c_str(),
-		       req.end.orEqual ? "=" : "",
-		       req.end.offset,
-		       req.version,
-		       req.limit,
-		       req.limitBytes);
 
 		std::string ssResultsString = format("(%d)%s:\n", src.data.size(), src.more ? "+" : "");
-		printf("src= (%d)%s:", src.data.size(), src.more ? "+" : "");
 		for (auto& it : src.data) {
-			printf("    %s=%s\n", it.key.printable().c_str(), it.value.printable().c_str());
 			ssResultsString += "\n" + it.key.printable() + "=" + traceChecksumValue(it.value);
 		}
 
 		std::string tssResultsString = format("(%d)%s:\n", tss.data.size(), tss.more ? "+" : "");
-		printf("tss= (%d)%s:", tss.data.size(), tss.more ? "+" : "");
 		for (auto& it : tss.data) {
-			printf("    %s=%s\n", it.key.printable().c_str(), it.value.printable().c_str());
 			tssResultsString += "\n" + it.key.printable() + "=" + traceChecksumValue(it.value);
 		}
-		printf("\n");
 
 		TraceEvent(traceSeverity, "TSSMismatchGetKeyValues")
 		    .suppressFor(1.0)
@@ -182,10 +143,6 @@ bool TSS_doCompare(const GetKeyValuesRequest& req,
 
 		return false;
 	}
-	/*printf("tss GetKeyValues [%s:<%s:%d - %s:<%s:%d) matched! %d=%d\n",
-	        req.begin.getKey().printable().c_str(), req.begin.orEqual ? "=" : "", req.begin.offset,
-	        req.end.getKey().printable().c_str(), req.end.orEqual ? "=" : "", req.end.offset,
-	        src.data.size(), tss.data.size());*/
 	return true;
 }
 
@@ -195,7 +152,7 @@ bool TSS_doCompare(const WatchValueRequest& req,
                    const WatchValueReply& tss,
                    Severity traceSeverity,
                    UID tssId) {
-	// TODO should this check that both returned the same version? We mainly want to duplicate watches just for load
+	// We duplicate watches just for load, no need to validte replies.
 	return true;
 }
 
@@ -233,51 +190,7 @@ bool TSS_doCompare(const SplitRangeRequest& req,
                    const SplitRangeReply& tss,
                    Severity traceSeverity,
                    UID tssId) {
-	// TODO in theory this should return the same response from both right?
 	return true;
-}
-
-// don't duplicate \xff reads or fetchKeys (avoid adding load to servers)
-template <>
-bool TSS_shouldDuplicateRequest(const GetValueRequest& req) {
-	return req.key.size() == 0 || req.key[0] != 0xff;
-}
-
-template <>
-bool TSS_shouldDuplicateRequest(const GetKeyRequest& req) {
-	return req.sel.getKey().size() == 0 || req.sel.getKey()[0] != 0xff;
-}
-
-template <>
-bool TSS_shouldDuplicateRequest(const GetKeyValuesRequest& req) {
-	return (req.begin.getKey().size() == 0 || req.begin.getKey()[0] != 0xff || req.end.getKey().size() == 0 ||
-	        req.end.getKey()[0] != 0xff) &&
-	       !req.isFetchKeys;
-}
-
-template <>
-bool TSS_shouldDuplicateRequest(const WatchValueRequest& req) {
-	return req.key.size() == 0 || req.key[0] != 0xff;
-}
-
-template <>
-bool TSS_shouldDuplicateRequest(const WaitMetricsRequest& req) {
-	return false;
-}
-
-template <>
-bool TSS_shouldDuplicateRequest(const SplitMetricsRequest& req) {
-	return false;
-}
-
-template <>
-bool TSS_shouldDuplicateRequest(const ReadHotSubRangeRequest& req) {
-	return false;
-}
-
-template <>
-bool TSS_shouldDuplicateRequest(const SplitRangeRequest& req) {
-	return false;
 }
 
 // only record metrics for data reads
@@ -317,20 +230,26 @@ void TSSMetrics::recordLatency(const SplitRangeRequest& req, double ssLatency, d
 
 // -------------------
 
-// TODO ADD UNIT TESTS for compare methods, especially GetKey!!
 TEST_CASE("/StorageServerInterface/TSSCompare/TestComparison") {
 	printf("testing tss comparisons\n");
 
+	// to avoid compiler issues that StringRef(char* is deprecated)
+	std::string s_a = "a";
+	std::string s_b = "b";
+	std::string s_c = "c";
+	std::string s_d = "d";
+	std::string s_e = "e";
+
 	// test getValue
 	GetValueRequest gvReq;
-	gvReq.key = StringRef("a");
+	gvReq.key = StringRef(s_a);
 	gvReq.version = 5;
 
 	UID tssId;
 
 	GetValueReply gvReplyMissing;
-	GetValueReply gvReplyA(Optional<Value>(StringRef("a")), false);
-	GetValueReply gvReplyB(Optional<Value>(StringRef("b")), false);
+	GetValueReply gvReplyA(Optional<Value>(StringRef(s_a)), false);
+	GetValueReply gvReplyB(Optional<Value>(StringRef(s_b)), false);
 	ASSERT(TSS_doCompare(gvReq, gvReplyMissing, gvReplyMissing, SevInfo, tssId));
 	ASSERT(TSS_doCompare(gvReq, gvReplyA, gvReplyA, SevInfo, tssId));
 	ASSERT(TSS_doCompare(gvReq, gvReplyB, gvReplyB, SevInfo, tssId));
@@ -341,15 +260,15 @@ TEST_CASE("/StorageServerInterface/TSSCompare/TestComparison") {
 	// test GetKeyValues
 	Arena a; // for all of the refs. ASAN complains if this isn't done. Could also make them all standalone i guess
 	GetKeyValuesRequest gkvReq;
-	gkvReq.begin = firstGreaterOrEqual(StringRef(a, "A"));
-	gkvReq.end = firstGreaterOrEqual(StringRef(a, "C"));
+	gkvReq.begin = firstGreaterOrEqual(StringRef(a, s_a));
+	gkvReq.end = firstGreaterOrEqual(StringRef(a, s_b));
 	gkvReq.version = 5;
 
 	GetKeyValuesReply gkvReplyEmpty;
 	GetKeyValuesReply gkvReplyOne;
 	KeyValueRef v;
-	v.key = StringRef(a, "a");
-	v.value = StringRef(a, "1");
+	v.key = StringRef(a, s_a);
+	v.value = StringRef(a, s_b);
 	gkvReplyOne.data.push_back_deep(gkvReplyOne.arena, v);
 	GetKeyValuesReply gkvReplyOneMore;
 	gkvReplyOneMore.data.push_back_deep(gkvReplyOneMore.arena, v);
@@ -363,14 +282,14 @@ TEST_CASE("/StorageServerInterface/TSSCompare/TestComparison") {
 
 	// test GetKey
 	GetKeyRequest gkReq;
-	gkReq.sel = KeySelectorRef(StringRef(a, "Z"), false, 1);
+	gkReq.sel = KeySelectorRef(StringRef(a, s_a), false, 1);
 	gkReq.version = 5;
 
-	GetKeyReply gkReplyA(KeySelectorRef(StringRef(a, "A"), false, 20), false);
-	GetKeyReply gkReplyB(KeySelectorRef(StringRef(a, "B"), false, 10), false);
-	GetKeyReply gkReplyC(KeySelectorRef(StringRef(a, "C"), true, 0), false);
-	GetKeyReply gkReplyD(KeySelectorRef(StringRef(a, "D"), false, -10), false);
-	GetKeyReply gkReplyE(KeySelectorRef(StringRef(a, "E"), false, -20), false);
+	GetKeyReply gkReplyA(KeySelectorRef(StringRef(a, s_a), false, 20), false);
+	GetKeyReply gkReplyB(KeySelectorRef(StringRef(a, s_b), false, 10), false);
+	GetKeyReply gkReplyC(KeySelectorRef(StringRef(a, s_c), true, 0), false);
+	GetKeyReply gkReplyD(KeySelectorRef(StringRef(a, s_d), false, -10), false);
+	GetKeyReply gkReplyE(KeySelectorRef(StringRef(a, s_e), false, -20), false);
 
 	// identical cases
 	ASSERT(TSS_doCompare(gkReq, gkReplyA, gkReplyA, SevInfo, tssId));
@@ -396,26 +315,26 @@ TEST_CASE("/StorageServerInterface/TSSCompare/TestComparison") {
 
 	// test same offset/orEqual wrong key
 	ASSERT(!TSS_doCompare(gkReq,
-	                      GetKeyReply(KeySelectorRef(StringRef(a, "A"), true, 0), false),
-	                      GetKeyReply(KeySelectorRef(StringRef("B"), true, 0), false),
+	                      GetKeyReply(KeySelectorRef(StringRef(a, s_a), true, 0), false),
+	                      GetKeyReply(KeySelectorRef(StringRef(a, s_b), true, 0), false),
 	                      SevInfo,
 	                      tssId));
 	// this could be from different shard boundaries, so don't say it's a mismatch
 	ASSERT(TSS_doCompare(gkReq,
-	                     GetKeyReply(KeySelectorRef(StringRef(a, "A"), false, 10), false),
-	                     GetKeyReply(KeySelectorRef(StringRef(a, "B"), false, 10), false),
+	                     GetKeyReply(KeySelectorRef(StringRef(a, s_a), false, 10), false),
+	                     GetKeyReply(KeySelectorRef(StringRef(a, s_b), false, 10), false),
 	                     SevInfo,
 	                     tssId));
 
 	// test offsets and key difference don't match
 	ASSERT(!TSS_doCompare(gkReq,
-	                      GetKeyReply(KeySelectorRef(StringRef(a, "A"), false, 0), false),
-	                      GetKeyReply(KeySelectorRef(StringRef("B"), false, 10), false),
+	                      GetKeyReply(KeySelectorRef(StringRef(a, s_a), false, 0), false),
+	                      GetKeyReply(KeySelectorRef(StringRef(a, s_b), false, 10), false),
 	                      SevInfo,
 	                      tssId));
 	ASSERT(!TSS_doCompare(gkReq,
-	                      GetKeyReply(KeySelectorRef(StringRef(a, "A"), false, -10), false),
-	                      GetKeyReply(KeySelectorRef(StringRef("B"), false, 0), false),
+	                      GetKeyReply(KeySelectorRef(StringRef(a, s_a), false, -10), false),
+	                      GetKeyReply(KeySelectorRef(StringRef(a, s_b), false, 0), false),
 	                      SevInfo,
 	                      tssId));
 
@@ -423,42 +342,41 @@ TEST_CASE("/StorageServerInterface/TSSCompare/TestComparison") {
 	// positive
 	// one that didn't find is +1
 	ASSERT(TSS_doCompare(gkReq,
-	                     GetKeyReply(KeySelectorRef(StringRef(a, "A"), false, 1), false),
-	                     GetKeyReply(KeySelectorRef(StringRef("B"), true, 0), false),
+	                     GetKeyReply(KeySelectorRef(StringRef(a, s_a), false, 1), false),
+	                     GetKeyReply(KeySelectorRef(StringRef(a, s_b), true, 0), false),
 	                     SevInfo,
 	                     tssId));
 	ASSERT(!TSS_doCompare(gkReq,
-	                      GetKeyReply(KeySelectorRef(StringRef(a, "A"), true, 0), false),
-	                      GetKeyReply(KeySelectorRef(StringRef("B"), false, 1), false),
+	                      GetKeyReply(KeySelectorRef(StringRef(a, s_a), true, 0), false),
+	                      GetKeyReply(KeySelectorRef(StringRef(a, s_b), false, 1), false),
 	                      SevInfo,
 	                      tssId));
 
 	// negative will have zero offset but not equal set
 	ASSERT(TSS_doCompare(gkReq,
-	                     GetKeyReply(KeySelectorRef(StringRef(a, "A"), true, 0), false),
-	                     GetKeyReply(KeySelectorRef(StringRef("B"), false, 0), false),
+	                     GetKeyReply(KeySelectorRef(StringRef(a, s_a), true, 0), false),
+	                     GetKeyReply(KeySelectorRef(StringRef(a, s_b), false, 0), false),
 	                     SevInfo,
 	                     tssId));
 	ASSERT(!TSS_doCompare(gkReq,
-	                      GetKeyReply(KeySelectorRef(StringRef(a, "A"), false, 0), false),
-	                      GetKeyReply(KeySelectorRef(StringRef("B"), true, 0), false),
+	                      GetKeyReply(KeySelectorRef(StringRef(a, s_a), false, 0), false),
+	                      GetKeyReply(KeySelectorRef(StringRef(a, s_b), true, 0), false),
 	                      SevInfo,
 	                      tssId));
 
 	// test shard boundary key returned by incomplete query is the same as the key found by the other (only possible in
 	// positive direction)
 	ASSERT(TSS_doCompare(gkReq,
-	                     GetKeyReply(KeySelectorRef(StringRef(a, "A"), true, 0), false),
-	                     GetKeyReply(KeySelectorRef(StringRef("A"), false, 1), false),
+	                     GetKeyReply(KeySelectorRef(StringRef(a, s_a), true, 0), false),
+	                     GetKeyReply(KeySelectorRef(StringRef(a, s_a), false, 1), false),
 	                     SevInfo,
 	                     tssId));
 
 	// explictly test checksum function
-	std::string s = "A";
 	std::string s12 = "ABCDEFGHIJKL";
 	std::string s13 = "ABCDEFGHIJKLO";
 	std::string checksumStart13 = "(13)";
-	ASSERT(s == traceChecksumValue(StringRef(s)));
+	ASSERT(s_a == traceChecksumValue(StringRef(s_a)));
 	ASSERT(s12 == traceChecksumValue(StringRef(s12)));
 	ASSERT(checksumStart13 == traceChecksumValue(StringRef(s13)).substr(0, 4));
 	return Void();

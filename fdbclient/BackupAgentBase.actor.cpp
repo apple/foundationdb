@@ -406,7 +406,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 			// When this buggify line is enabled, if there are more than 1 result then use half of the results
 			// Copy the data instead of messing with the results directly to avoid TSS issues.
 			if (values.size() > 1 && BUGGIFY) {
-				Standalone<RangeResultRef> copy;
+				RangeResult copy;
 				// only copy first half of values into copy
 				for (int i = 0; i < values.size() / 2; i++) {
 					copy.push_back_deep(copy.arena(), values[i]);
@@ -478,7 +478,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 			// When this buggify line is enabled, if there are more than 1 result then use half of the results.
 			// Copy the data instead of messing with the results directly to avoid TSS issues.
 			if (rangevalue.size() > 1 && BUGGIFY) {
-				Standalone<RangeResultRef> copy;
+				RangeResult copy;
 				// only copy first half of rangevalue into copy
 				for (int i = 0; i < rangevalue.size() / 2; i++) {
 					copy.push_back_deep(copy.arena(), rangevalue[i]);

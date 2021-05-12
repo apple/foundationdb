@@ -30,9 +30,6 @@
 // Track up to 2 keys in simulation via enabling MUTATION_TRACKING_ENABLED and setting the keys here.
 StringRef debugKey = LiteralStringRef("");
 StringRef debugKey2 = LiteralStringRef("\xff\xff\xff\xff");
-// StringRef debugKey = LiteralStringRef("\x00\x00\x02\xff\x00\x00\x04\xc1\x00\x00\x00\x01\x00\x00\x00\x02"); // missing
-// from ss StringRef debugKey2 = LiteralStringRef("\x00\x00\x02\xff\x00\x00\x01\x89\x00\x00\x00\x04\x00\x00\x00\x02");
-// // missing from tss
 
 TraceEvent debugMutationEnabled(const char* context, Version version, MutationRef const& mutation) {
 	if ((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) &&

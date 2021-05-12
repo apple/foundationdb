@@ -170,6 +170,9 @@ class TestConfig {
 			if (attrib == "maxTLogVersion") {
 				sscanf(value.c_str(), "%d", &maxTLogVersion);
 			}
+                        if (attrib == "restartInfoLocation") {
+				isFirstTestInRestart = true;
+			}
 		}
 
 		ifs.close();
@@ -183,6 +186,7 @@ public:
 	bool configureLocked = false;
 	bool startIncompatibleProcess = false;
 	int logAntiQuorum = -1;
+	bool firstTestInRestart = false;
 	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
 	//	0 = "ssd"
 	//	1 = "memory"
@@ -235,6 +239,8 @@ public:
 				for (const auto& [key, value] : conf) {
 					if (key == "ClientInfoLogging") {
 						setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
+					} else if (key == "restartInfoLocation") {
+						isFirstTestInRestart = true;
 					} else {
 						builder.set(key, value);
 					}
@@ -1165,13 +1171,9 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	}
 
 	int tssCount = 0;
-	// if (!testConfig.simpleConfig && deterministicRandom()->random01() < 0.25) {
-	if (true) {
-		// if (false) {
-		// tss
+	if (!testconfig.simpleConfig && deterministicRandom()->random01() < 0.25) {
 		// 1 or 2 tss
 		tssCount = deterministicRandom()->randomInt(1, 3);
-		printf("Initial tss count to %d\n", tssCount);
 	}
 
 	//	if (deterministicRandom()->random01() < 0.5) {
@@ -1510,7 +1512,6 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	// reduce tss to half of extra non-seed servers that can be recruited in usable regions.
 	tssCount =
 	    std::max(0, std::min(tssCount, (db.usableRegions * (machine_count / datacenters) - replication_type) / 2));
-	printf("Adjusted tss count to %d\n", tssCount);
 
 	if (tssCount > 0) {
 		std::string confStr = format("tss_count:=%d tss_storage_engine:=%d", tssCount, db.storageServerStoreType);
@@ -1519,13 +1520,13 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 		if (tssRandom > 0.5) {
 			// normal tss mode
 			g_simulator.tssMode = ISimulator::TSSMode::EnabledNormal;
-			printf("normal tss mode\n");
-		} else if (tssRandom < 0.25) {
+		} else if (tssRandom < 0.25 && !testConfig.isFirstTestInRestart) {
+			// fault injection - don't enable in first test in restart because second test won't know it intentionally
+			// lost data
+			g_simulator.tssMode = ISimulator::TSSMode::EnabledDropMutations;
+		} else {
 			// delay injection
 			g_simulator.tssMode = ISimulator::TSSMode::EnabledAddDelay;
-		} else {
-			// fault injection
-			g_simulator.tssMode = ISimulator::TSSMode::EnabledDropMutations;
 		}
 		printf("enabling tss for simulation in mode %d: %s\n", g_simulator.tssMode, confStr.c_str());
 	}

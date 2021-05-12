@@ -497,22 +497,14 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 		    .detail("MaxBytes", shardBounds.max.bytes)
 		    .detail("MetricsBytes", metrics.bytes)
 		    .detail("Bandwidth",
-		            bandwidthStatus == BandwidthStatusHigh
-		                ? "High"
-		                : bandwidthStatus == BandwidthStatusNormal ? "Normal" : "Low")
+		            bandwidthStatus == BandwidthStatusHigh     ? "High"
+		            : bandwidthStatus == BandwidthStatusNormal ? "Normal"
+		                                                       : "Low")
 		    .detail("BytesPerKSec", metrics.bytesPerKSecond)
 		    .detail("NumShards", numShards);
 	}
 
 	if (numShards > 1) {
-		// TODO REMOVE
-		printf("Splitting [%s - %s) into %d shards:\n",
-		       splitKeys[0].toString().c_str(),
-		       splitKeys[numShards].toString().c_str(),
-		       numShards);
-		for (int i = 0; i < numShards; i++) {
-			printf("    [%s - %s)\n", splitKeys[i].toString().c_str(), splitKeys[i + 1].toString().c_str());
-		}
 		int skipRange = deterministicRandom()->randomInt(0, numShards);
 		// The queue can't deal with RelocateShard requests which split an existing shard into three pieces, so
 		// we have to send the unskipped ranges in this order (nibbling in from the edges of the old range)

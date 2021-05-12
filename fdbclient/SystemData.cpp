@@ -556,7 +556,6 @@ StorageServerInterface decodeServerListValue(ValueRef const& value) {
 	return s;
 }
 
-// TODO merge this with above stuff or something
 const Value serverListValueFB(StorageServerInterface const& server) {
 	return ObjectWriter::toValue(server, IncludeVersion());
 }
@@ -1111,8 +1110,8 @@ void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {
 	printf("ssi=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\naddress=%s\ngetValue=%s\n\n\n",
 	       ssi.id().toString().c_str(),
 	       ssi.locality.toString().c_str(),
-	       ssi.isTss ? "true" : "false",
-	       ssi.isTss ? ssi.tssPairID.toString().c_str() : "",
+	       ssi.isTss() ? "true" : "false",
+	       ssi.isTss() ? ssi.tssPairID.get().toString().c_str() : "",
 	       ssi.address().toString().c_str(),
 	       ssi.getValue.getEndpoint().token.toString().c_str());
 
@@ -1122,16 +1121,16 @@ void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {
 	printf("ssi2=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\naddress=%s\ngetValue=%s\n\n\n",
 	       ssi2.id().toString().c_str(),
 	       ssi2.locality.toString().c_str(),
-	       ssi2.isTss ? "true" : "false",
-	       ssi2.isTss ? ssi2.tssPairID.toString().c_str() : "",
+	       ssi2.isTss() ? "true" : "false",
+	       ssi2.isTss() ? ssi2.tssPairID.get().toString().c_str() : "",
 	       ssi2.address().toString().c_str(),
 	       ssi2.getValue.getEndpoint().token.toString().c_str());
 
 	ASSERT(ssi.id() == ssi2.id());
 	ASSERT(ssi.locality == ssi2.locality);
-	ASSERT(ssi.isTss == ssi2.isTss);
-	if (ssi.isTss) {
-		ASSERT(ssi2.tssPairID == ssi2.tssPairID);
+	ASSERT(ssi.isTss() == ssi2.isTss());
+	if (ssi.isTss()) {
+		ASSERT(ssi2.tssPairID.get() == ssi2.tssPairID.get());
 	}
 	ASSERT(ssi.address() == ssi2.address());
 	ASSERT(ssi.getValue.getEndpoint().token == ssi2.getValue.getEndpoint().token);
@@ -1149,13 +1148,11 @@ TEST_CASE("/SystemData/SerDes/SSI") {
 	StorageServerInterface ssi;
 	ssi.uniqueID = UID(0x1234123412341234, 0x5678567856785678);
 	ssi.locality = localityData;
-	ssi.isTss = false;
 	ssi.initEndpoints();
 
 	testSSISerdes(ssi, false);
 	testSSISerdes(ssi, true);
 
-	ssi.isTss = true;
 	ssi.tssPairID = UID(0x2345234523452345, 0x1238123812381238);
 
 	testSSISerdes(ssi, false);

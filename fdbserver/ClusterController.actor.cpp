@@ -1,4 +1,3 @@
-
 /*
  * ClusterController.actor.cpp
  *
@@ -3186,9 +3185,9 @@ ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
 					checkOutstandingRequests(cluster);
 				}
 			}
-
 			when(wait(failed)) { // remove workers that have failed
 				WorkerInfo& failedWorkerInfo = cluster->id_worker[worker.locality.processId()];
+
 				if (!failedWorkerInfo.reply.isSet()) {
 					failedWorkerInfo.reply.send(
 					    RegisterWorkerReply(failedWorkerInfo.details.processClass, failedWorkerInfo.priorityInfo));
@@ -3378,12 +3377,6 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		dbInfo.priorCommittedLogServers = req.priorCommittedLogServers;
 		isChanged = true;
 	}
-
-	// TODO remove debugging
-	printf("CC:\ntss_count=%d\ntss_storage_engine=%d|%s\n",
-	       db->config.desiredTSSCount,
-	       db->config.testingStorageServerStoreType,
-	       db->config.testingStorageServerStoreType.toString().c_str());
 
 	// Construct the client information
 	if (db->clientInfo->get().commitProxies != req.commitProxies ||
@@ -3894,12 +3887,11 @@ ACTOR Future<Void> monitorTSSMapping(ClusterControllerData* self) {
 					tssIdMap[it.first] = it.second;
 					// ensure two storage servers don't map to same TSS
 					ASSERT(seenTssIds.insert(it.second).second);
+					// ensure a storage server doesn't accidentally map to itself (unless we're in HACK_IDENTITY_MAPPING
+					// mode)
+					ASSERT(SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING || it.first != it.second);
 				}
 
-				// TODO REMOVE print
-				printf("tss mapping of size %d\n", tssIdMap.size());
-
-				// TODO is copying storage server interfaces bad?
 				state std::vector<std::pair<UID, StorageServerInterface>> newMapping;
 				state std::map<UID, StorageServerInterface> oldMapping;
 				state bool mappingChanged = false;
@@ -3909,10 +3901,6 @@ ACTOR Future<Void> monitorTSSMapping(ClusterControllerData* self) {
 				for (auto& it : clientInfo.tssMapping) {
 					oldMapping[it.first] = it.second;
 					if (!tssIdMap.count(it.first)) {
-						// TODO add trace event
-						printf("tss mapping removed: %s=%s\n",
-						       it.first.toString().c_str(),
-						       it.second.id().toString().c_str());
 						TraceEvent("TSS_MappingRemoved", self->id)
 						    .detail("SSID", it.first)
 						    .detail("TSSID", it.second.id());
@@ -3936,22 +3924,16 @@ ACTOR Future<Void> monitorTSSMapping(ClusterControllerData* self) {
 							    .detail("SSID", it.first)
 							    .detail("TSSID", it.second)
 							    .detail("OldTSSID", interf.id());
-							printf("tss mapping updated: %s=%s\n",
-							       it.first.toString().c_str(),
-							       it.second.toString().c_str());
 							mappingChanged = true;
 						}
 					} else {
-						// TODO add trace event
 						TraceEvent("TSS_MappingAdded", self->id).detail("SSID", it.first).detail("TSSID", it.second);
-						printf("tss mapping added: %s=%s\n", it.first.toString().c_str(), it.second.toString().c_str());
 						mappingChanged = true;
 					}
 
 					state UID ssid = it.first;
 					state UID tssid = it.second;
 					// request storage server interface for tssid, add it to results
-					// TODO could issue all of these futures and then process then after as an optimization
 					Optional<Value> tssiVal = wait(tr->get(serverListKeyFor(it.second)));
 
 					// because we read the tss mapping in the same transaction, there can be no races with tss removal
@@ -3961,11 +3943,6 @@ ACTOR Future<Void> monitorTSSMapping(ClusterControllerData* self) {
 					StorageServerInterface tssi = decodeServerListValue(tssiVal.get());
 					if (oldTssId.present() && tssi.id() == oldTssId.get() && oldGetValueEndpoint.present() &&
 					    oldGetValueEndpoint.get() != tssi.getValue.getEndpoint().token) {
-						// TODO REMOVE print
-						printf("tss %s restarted, getValue %s -> %s\n",
-						       tssi.id().toString().c_str(),
-						       oldGetValueEndpoint.get().toString().c_str(),
-						       tssi.getValue.getEndpoint().token.toString().c_str());
 						mappingChanged = true;
 					}
 					newMapping.push_back(std::pair<UID, StorageServerInterface>(ssid, tssi));
@@ -3973,8 +3950,6 @@ ACTOR Future<Void> monitorTSSMapping(ClusterControllerData* self) {
 
 				// if nothing changed, skip updating
 				if (mappingChanged) {
-					// TODO REMOVE print
-					printf("CC updating tss client and server info\n");
 					clientInfo.id = deterministicRandom()->randomUniqueID();
 					clientInfo.tssMapping = newMapping;
 					self->db.clientInfo->set(clientInfo);
@@ -4592,7 +4567,6 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		when(GetWorkersRequest req = waitNext(interf.getWorkers.getFuture())) {
 			++self.getWorkersRequests;
 			vector<WorkerDetails> workers;
-			// printf("CC got GetWorkersRequest\n");
 
 			for (auto& it : self.id_worker) {
 				if ((req.flags & GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY) &&

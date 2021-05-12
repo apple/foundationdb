@@ -328,7 +328,7 @@ std::string filenameFromId(KeyValueStoreType storeType, std::string folder, std:
 	else if (storeType == KeyValueStoreType::SSD_ROCKSDB_V1)
 		return joinPath(folder, prefix + id.toString() + ".rocksdb");
 
-	printf("UNKNOWN storeType %s\n", storeType.toString().c_str());
+	TraceEvent(SevError, "UnknownStoreType").detail("StoreType", storeType.toString());
 	UNREACHABLE();
 }
 
@@ -763,7 +763,9 @@ ACTOR Future<Void> storageServerRollbackRebooter(Future<Void> prevStorageServer,
 		StorageServerInterface recruited;
 		recruited.uniqueID = id;
 		recruited.locality = locality;
-		recruited.isTss = isTss;
+		recruited.tssPairID =
+		    isTss ? Optional<UID>(UID()) : Optional<UID>(); // set this here since we use its presence to determine
+		                                                    // whether this server is a tss or not
 		recruited.initEndpoints();
 
 		DUMPTOKEN(recruited.getValue);
@@ -1110,14 +1112,15 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				// TODO might be more efficient to mark a boolean on DiskStore in getDiskStores, but that kind of breaks
 				// the abstraction since DiskStore also applies to storage cache + tlog
 				bool isTss = s.filename.find(tssPrefix) != std::string::npos;
-				// TODO REMOVE after test
-				printf("%s is%s tss filename\n", s.filename.c_str(), isTss ? "" : " not");
 				Role ssRole = isTss ? Role::TESTING_STORAGE_SERVER : Role::STORAGE_SERVER;
 
 				StorageServerInterface recruited;
 				recruited.uniqueID = s.storeID;
 				recruited.locality = locality;
-				recruited.isTss = isTss;
+				recruited.tssPairID =
+				    isTss ? Optional<UID>(UID())
+				          : Optional<UID>(); // presence of optional is used as source of truth for tss vs not. Value
+				                             // gets overridden later in restoreDurableState
 				recruited.initEndpoints();
 
 				std::map<std::string, std::string> details;
@@ -1509,27 +1512,17 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 			when(InitializeStorageRequest req = waitNext(interf.storage.getFuture())) {
 				if (!storageCache.exists(req.reqId)) {
 
-					printf("Got "
-					       "InitializeStorageRequest:seedTag=%s\nreqId=%s\ninterfaceId=%s\nstoreType=%s\nisTss=%"
-					       "s\ntssPairID=%s\ntssPairVersion=%lld\n\n",
-					       req.seedTag.toString().c_str(),
-					       req.reqId.toString().c_str(),
-					       req.interfaceId.toString().c_str(),
-					       req.storeType.toString().c_str(),
-					       req.isTss ? "true" : "false",
-					       req.isTss ? req.tssPairID.toString().c_str() : "",
-					       req.isTss ? req.tssPairVersion : 0);
+					bool isTss = req.tssPairIDAndVersion.present();
 
 					StorageServerInterface recruited(req.interfaceId);
 					recruited.locality = locality;
-					recruited.isTss = req.isTss;
-					recruited.tssPairID = req.tssPairID;
+					recruited.tssPairID = isTss ? req.tssPairIDAndVersion.get().first : Optional<UID>();
 					recruited.initEndpoints();
 
 					std::map<std::string, std::string> details;
 					details["StorageEngine"] = req.storeType.toString();
-					details["IsTSS"] = std::to_string(recruited.isTss);
-					Role ssRole = recruited.isTss ? Role::TESTING_STORAGE_SERVER : Role::STORAGE_SERVER;
+					details["IsTSS"] = std::to_string(isTss);
+					Role ssRole = isTss ? Role::TESTING_STORAGE_SERVER : Role::STORAGE_SERVER;
 					startRole(ssRole, recruited.id(), interf.id(), details);
 
 					DUMPTOKEN(recruited.getValue);
@@ -1545,21 +1538,25 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					DUMPTOKEN(recruited.getQueuingMetrics);
 					DUMPTOKEN(recruited.getKeyValueStoreType);
 					DUMPTOKEN(recruited.watchValue);
-					// TODO re-comment!
-					printf("Recruited as storageServer\n");
+					// printf("Recruited as storageServer\n");
 
 					std::string filename =
 					    filenameFromId(req.storeType,
 					                   folder,
-					                   recruited.isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
+					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
 					                   recruited.id());
 					IKeyValueStore* data = openKVStore(req.storeType, filename, recruited.id(), memoryLimit);
 					Future<Void> kvClosed = data->onClosed();
 					filesClosed.add(kvClosed);
 					ReplyPromise<InitializeStorageReply> storageReady = req.reply;
 					storageCache.set(req.reqId, storageReady.getFuture());
-					Future<Void> s =
-					    storageServer(data, recruited, req.seedTag, req.tssPairVersion, storageReady, dbInfo, folder);
+					Future<Void> s = storageServer(data,
+					                               recruited,
+					                               req.seedTag,
+					                               isTss ? req.tssPairIDAndVersion.get().second : 0,
+					                               storageReady,
+					                               dbInfo,
+					                               folder);
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady(req.reqId, s);
 					s = storageServerRollbackRebooter(s,
@@ -1567,7 +1564,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					                                  filename,
 					                                  recruited.id(),
 					                                  recruited.locality,
-					                                  req.isTss,
+					                                  isTss,
 					                                  dbInfo,
 					                                  folder,
 					                                  &filesClosed,

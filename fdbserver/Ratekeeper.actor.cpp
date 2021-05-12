@@ -719,7 +719,7 @@ ACTOR Future<Void> trackEachStorageServer(
 		when(state std::pair<UID, Optional<StorageServerInterface>> change = waitNext(serverChanges)) {
 			wait(delay(0)); // prevent storageServerTracker from getting cancelled while on the call stack
 			if (change.second.present()) {
-				if (!change.second.get().isTss) { // TODO is this all we need to do to get ratekeeper to ignore tss?
+				if (!change.second.get().isTss()) {
 					auto& a = actors[change.first];
 					a = Future<Void>();
 					a = splitError(trackStorageServerQueueInfo(self, change.second.get()), err);

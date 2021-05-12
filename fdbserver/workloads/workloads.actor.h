@@ -152,7 +152,7 @@ public:
 		databasePingDelay = g_network->isSimulated() ? 0.0 : 15.0;
 		runConsistencyCheck = g_network->isSimulated();
 		runConsistencyCheckOnCache = false;
-		runConsistencyCheckOnTSS = false;
+		runConsistencyCheckOnTSS = true;
 		waitForQuiescenceBegin = true;
 		waitForQuiescenceEnd = true;
 		simCheckRelocationDuration = false;

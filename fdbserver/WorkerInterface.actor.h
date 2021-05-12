@@ -614,18 +614,13 @@ struct InitializeStorageRequest {
 	UID reqId;
 	UID interfaceId;
 	KeyValueStoreType storeType;
-	bool isTss;
-	UID tssPairID;
-	Version tssPairVersion;
+	Optional<std::pair<UID, Version>>
+	    tssPairIDAndVersion; // Only set if recruiting a tss. Will be the UID and Version of its SS pair.
 	ReplyPromise<InitializeStorageReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		if (ar.protocolVersion().hasTSS()) {
-			serializer(ar, seedTag, reqId, interfaceId, storeType, reply, isTss, tssPairID, tssPairVersion);
-		} else {
-			serializer(ar, seedTag, reqId, interfaceId, storeType, reply);
-		}
+		serializer(ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion);
 	}
 };
 

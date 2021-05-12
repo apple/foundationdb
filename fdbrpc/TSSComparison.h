@@ -37,7 +37,7 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 	Counter tssTimeouts;
 	Counter mismatches;
 
-	// TODO we could probably just ignore getKey as it's seldom used?
+	// We could probably just ignore getKey as it's seldom used?
 	ContinuousSample<double> SSgetValueLatency;
 	ContinuousSample<double> SSgetKeyLatency;
 	ContinuousSample<double> SSgetKeyValuesLatency;
@@ -45,6 +45,19 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 	ContinuousSample<double> TSSgetValueLatency;
 	ContinuousSample<double> TSSgetKeyLatency;
 	ContinuousSample<double> TSSgetKeyValuesLatency;
+
+	std::unordered_map<int, uint64_t> ssErrorsByCode;
+	std::unordered_map<int, uint64_t> tssErrorsByCode;
+
+	void ssError(int code) {
+		++ssErrors;
+		ssErrorsByCode[code]++;
+	}
+
+	void tssError(int code) {
+		++tssErrors;
+		tssErrorsByCode[code]++;
+	}
 
 	template <class Req>
 	void recordLatency(const Req& req, double ssLatency, double tssLatency);
@@ -57,6 +70,9 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 		TSSgetValueLatency.clear();
 		TSSgetKeyLatency.clear();
 		TSSgetKeyValuesLatency.clear();
+
+		tssErrorsByCode.clear();
+		ssErrorsByCode.clear();
 	}
 
 	TSSMetrics()
@@ -64,11 +80,6 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 	    tssTimeouts("TSSTimeouts", cc), mismatches("Mismatches", cc), SSgetValueLatency(1000), SSgetKeyLatency(1000),
 	    SSgetKeyValuesLatency(1000), TSSgetValueLatency(1000), TSSgetKeyLatency(1000), TSSgetKeyValuesLatency(1000) {}
 };
-
-// global static functions
-
-template <class Req>
-bool TSS_shouldDuplicateRequest(const Req& req);
 
 // part of the contract of this function is that if there is a mismatch, the implementation needs to record a trace
 // event with the specified severity and tssId in the event.

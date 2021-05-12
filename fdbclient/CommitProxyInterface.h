@@ -125,7 +125,6 @@ struct ClientDBInfo {
 	bool operator!=(ClientDBInfo const& r) const { return id != r.id; }
 
 	// convenience method to treat tss mapping like a map
-	// TODO can serializer handle maps? could just change it
 	Optional<StorageServerInterface> getTssPair(UID storageServerID) const {
 		for (auto& it : tssMapping) {
 			if (it.first == storageServerID) {

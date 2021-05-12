@@ -1230,8 +1230,6 @@ Future<T> brokenPromiseToMaybeDelivered(Future<T> in) {
 		return t;
 	} catch (Error& e) {
 		if (e.code() == error_code_broken_promise) {
-			// TODO REMOVE!
-			printf("broken promise!!");
 			throw request_maybe_delivered();
 		}
 		throw;

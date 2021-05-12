@@ -31,9 +31,6 @@
 #include "flow/flow.h"
 #include "flow/Knobs.h"
 
-// TODO REMOVE?
-#include <cinttypes>
-
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
@@ -85,9 +82,8 @@ Future<Void> tssComparison(Req req,
                            Future<ErrorOr<Resp>> fSource,
                            Future<ErrorOr<Resp>> fTss,
                            TSSEndpointData tssData) {
-	// TODO add timeout and time requests
 	state double startTime = now();
-	state Future<Optional<ErrorOr<Resp>>> fTssWithTimeout = timeout(fTss, 5.0 /*TODO knob?*/);
+	state Future<Optional<ErrorOr<Resp>>> fTssWithTimeout = timeout(fTss, FLOW_KNOBS->LOAD_BALANCE_TSS_TIMEOUT);
 	state int finished = 0;
 	state double srcEndTime;
 	state double tssEndTime;
@@ -113,16 +109,21 @@ Future<Void> tssComparison(Req req,
 		}
 	}
 
+	// we want to record ss/tss errors to metrics
+	int srcErrorCode = error_code_success;
+	int tssErrorCode = error_code_success;
+
 	++tssData.metrics->requests;
 
 	if (src.isError()) {
-		++tssData.metrics->ssErrors;
+		srcErrorCode = src.getError().code();
+		tssData.metrics->ssError(srcErrorCode);
 	}
 	if (!tss.present()) {
 		++tssData.metrics->tssTimeouts;
 	} else if (tss.get().isError()) {
-		++tssData.metrics->tssErrors;
-		printf("Tss got error %d\n", tss.get().getError().code());
+		tssErrorCode = tss.get().getError().code();
+		tssData.metrics->tssError(tssErrorCode);
 	}
 	if (!src.isError() && tss.present() && !tss.get().isError()) {
 		Optional<LoadBalancedReply> srcLB = getLoadBalancedReply(&src.get());
@@ -146,11 +147,21 @@ Future<Void> tssComparison(Req req,
 				++tssData.metrics->mismatches;
 			}
 		} else if (tssLB.present() && tssLB.get().error.present()) {
-			++tssData.metrics->tssErrors;
-			printf("Tss got LB error %d\n", tssLB.get().error.get().code());
+			tssErrorCode = tssLB.get().error.get().code();
+			tssData.metrics->tssError(tssErrorCode);
 		} else if (srcLB.present() && srcLB.get().error.present()) {
-			++tssData.metrics->ssErrors;
+			srcErrorCode = srcLB.get().error.get().code();
+			tssData.metrics->ssError(srcErrorCode);
 		}
+	}
+
+	if (srcErrorCode != error_code_success && tssErrorCode != error_code_success && srcErrorCode != tssErrorCode) {
+		// if ss and tss both got different errors, record them
+		TraceEvent("TSSErrorMismatch")
+		    .suppressFor(1.0)
+		    .detail("TSSID", tssData.tssId)
+		    .detail("SSError", srcErrorCode)
+		    .detail("TSSError", tssErrorCode);
 	}
 
 	return Void();
@@ -172,22 +183,20 @@ struct RequestData : NonCopyable {
 	// This is true once setupRequest is called, even though at that point the response is Never().
 	bool isValid() { return response.isValid(); }
 
-	void maybeDuplicateTSSRequest(RequestStream<Request> const* stream,
-	                              Request const& request,
-	                              QueueModel* model,
-								  Future<Reply> ssResponse) {
+	static void maybeDuplicateTSSRequest(RequestStream<Request> const* stream,
+	                                     Request& request,
+	                                     QueueModel* model,
+	                                     Future<Reply> ssResponse) {
 		if (model) {
 			// Send parallel request to TSS pair, if it exists
 			Optional<TSSEndpointData> tssData = model->getTssData(stream->getEndpoint().token.first());
 
-			if (tssData.present() && TSS_shouldDuplicateRequest(request)) {
+			if (tssData.present()) {
 				resetReply(request);
-
-				// TODO add timeout from knob to tss request?
 				// FIXME: optimize to avoid creating new netNotifiedQueue for each message
 				RequestStream<Request> tssRequestStream(tssData.get().endpoint);
 				Future<ErrorOr<REPLY_TYPE(Request)>> fTssResult = tssRequestStream.tryGetReply(request);
-				model->addActor.send(tssComparison(request, fResult, fTssResult, tssData.get()));
+				model->addActor.send(tssComparison(request, ssResponse, fTssResult, tssData.get()));
 			}
 		}
 	}
@@ -196,7 +205,7 @@ struct RequestData : NonCopyable {
 	void startRequest(double backoff,
 	                  bool triedAllOptions,
 	                  RequestStream<Request> const* stream,
-	                  Request const& request,
+	                  Request& request,
 	                  QueueModel* model) {
 		modelHolder = Reference<ModelHolder>();
 		requestStarted = false;
@@ -207,8 +216,8 @@ struct RequestData : NonCopyable {
 				    requestStarted = true;
 				    modelHolder = Reference<ModelHolder>(new ModelHolder(model, stream->getEndpoint().token.first()));
 				    Future<Reply> resp = stream->tryGetReply(request);
-					maybeDuplicateTSSRequest(stream, request, model, resp);
-					return resp;
+				    maybeDuplicateTSSRequest(stream, request, model, resp);
+				    return resp;
 			    });
 		} else {
 			requestStarted = true;

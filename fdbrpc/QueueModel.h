@@ -33,8 +33,7 @@ struct TSSEndpointData {
 	UID tssId;
 	Endpoint endpoint;
 	Reference<TSSMetrics> metrics;
-	UID generation; // TODO this isn't exactly like a generation since it's not ordered, i'll try to think of a better
-	                // name
+	UID generation;
 
 	TSSEndpointData(UID tssId, Endpoint endpoint, Reference<TSSMetrics> metrics, UID generation)
 	  : tssId(tssId), endpoint(endpoint), metrics(metrics), generation(generation) {}
@@ -106,7 +105,10 @@ public:
 	double secondBudget;
 	PromiseStream<Future<Void>> addActor;
 	Future<Void> laggingRequests; // requests for which a different recipient already answered
+	PromiseStream<Future<Void>> addTSSActor;
+	Future<Void> tssComparisons; // requests for which a different recipient already answered
 	int laggingRequestCount;
+	int laggingTSSCompareCount;
 
 	void updateTssEndpoint(uint64_t endpointId, TSSEndpointData endpointData);
 	void removeOldTssData(UID currentGeneration);
@@ -114,9 +116,13 @@ public:
 
 	QueueModel() : secondMultiplier(1.0), secondBudget(0), laggingRequestCount(0), tssCount(0) {
 		laggingRequests = actorCollection(addActor.getFuture(), &laggingRequestCount);
+		tssComparisons = actorCollection(addTSSActor.getFuture(), &laggingTSSCompareCount);
 	}
 
-	~QueueModel() { laggingRequests.cancel(); }
+	~QueueModel() {
+		laggingRequests.cancel();
+		tssComparisons.cancel();
+	}
 
 private:
 	std::unordered_map<uint64_t, QueueData> data;
