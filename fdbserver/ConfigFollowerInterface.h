@@ -27,14 +27,14 @@
 
 class ConfigClassSet {
 	std::set<Key> classes;
-
 public:
 	static constexpr FileIdentifier file_identifier = 9854021;
 
 	bool operator==(ConfigClassSet const& rhs) const { return classes == rhs.classes; }
 	bool operator!=(ConfigClassSet const& rhs) const { return !(*this == rhs); }
 
-	static ConfigClassSet fromParamString(std::string const& paramString);
+	ConfigClassSet();
+	ConfigClassSet(VectorRef<KeyRef> configClasses);
 
 	bool contains(KeyRef configClass) const;
 

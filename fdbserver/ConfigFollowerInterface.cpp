@@ -45,10 +45,12 @@ bool ConfigFollowerInterface::operator!=(ConfigFollowerInterface const& rhs) con
 	return !(*this == rhs);
 }
 
-ConfigClassSet ConfigClassSet::fromParamString(std::string const& paramString) {
-	// TODO: Validate input and implement
-	ConfigClassSet result;
-	return result;
+ConfigClassSet::ConfigClassSet() = default;
+
+ConfigClassSet::ConfigClassSet(VectorRef<KeyRef> configClasses) {
+	for (const auto& configClass : configClasses) {
+		classes.insert(configClass);
+	}
 }
 
 bool ConfigClassSet::contains(KeyRef configClass) const {

@@ -32,15 +32,16 @@ class TestKnobs : public Knobs {
 public:
 	int64_t TEST;
 	void initialize();
+	void reset();
 };
 
 class LocalConfiguration {
 	std::unique_ptr<class LocalConfigurationImpl> impl;
 
 public:
-	LocalConfiguration(ConfigClassSet const& configClasses,
+	LocalConfiguration(std::string const& configPath,
 	                   std::string const& dataFolder,
-	                   std::map<Key, Value>&& manuallyOverriddenKnobs,
+	                   std::map<Key, Value>&& manualKnobOverrides,
 	                   UID id);
 	~LocalConfiguration();
 	Future<Void> init();

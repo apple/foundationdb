@@ -824,7 +824,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> ccf,
                         std::string metricsPrefix,
                         int64_t memoryProfilingThreshold,
                         std::string whitelistBinPaths,
-                        ConfigClassSet configClassSet);
+                        std::string configPath);
 
 ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> ccf,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
