@@ -22,18 +22,21 @@
 #define FLOW_IRANDOM_H
 #pragma once
 
-#include "flow/Platform.h"
-#include "flow/FileIdentifier.h"
-#include "flow/ObjectSerializerTraits.h"
-#include "flow/FastRef.h"
-#include <stdint.h>
+#include <cstdint>
+#include <functional>
+#include <ostream>
+#include <utility>
+
 #if (defined(__APPLE__))
 #include <ext/hash_map>
 #else
 #include <unordered_map>
 #endif
-#include <functional>
-#include <utility>
+
+#include "flow/FastRef.h"
+#include "flow/FileIdentifier.h"
+#include "flow/ObjectSerializerTraits.h"
+#include "flow/Platform.h"
 
 // Until we move to C++20, we'll need something to take the place of operator<=>.
 // This is as good a place as any, I guess.
@@ -97,6 +100,11 @@ public:
 		serializer(ar, part[0], part[1]);
 	}
 };
+
+inline std::ostream& operator<<(std::ostream& stream, const UID& uid) {
+	stream << uid.toString();
+	return stream;
+}
 
 template <class Ar>
 void load(Ar& ar, UID& uid) {

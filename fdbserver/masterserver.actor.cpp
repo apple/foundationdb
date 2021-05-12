@@ -20,6 +20,7 @@
 
 #include <iterator>
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
@@ -42,6 +43,7 @@
 #include "fdbserver/ProxyCommitData.actor.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/TLogGroup.actor.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
@@ -196,6 +198,9 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	ServerCoordinators coordinators;
 
 	Reference<ILogSystem> logSystem;
+	Reference<TLogGroupCollection> tLogGroupCollection;
+	Optional<Standalone<RangeResultRef>> tLogGroupRecoveredState;
+
 	Version version; // The last version assigned to a proxy by getVersion()
 	double lastVersionTime;
 	LogSystemDiskQueueAdapter* txnStateLogAdapter;
@@ -757,6 +762,12 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	    .detail("BackupWorkers", self->backupWorkers.size())
 	    .trackLatest("MasterRecoveryState");
 
+	// Recruit TLog groups
+	ASSERT(self->tLogGroupRecoveredState.present());
+	self->tLogGroupCollection->addWorkers(recruits.tLogs);
+	self->tLogGroupCollection->loadState(self->tLogGroupRecoveredState.get());
+	self->tLogGroupCollection->recruitEverything();
+
 	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand
 	// new database we are sort of lying that we are past the recruitment phase.  In a perfect world we would split that
 	// up so that the recruitment part happens above (in parallel with recruiting the transaction servers?).
@@ -786,6 +797,9 @@ ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId,
 	}
 }
 
+// Recovers transaction state store (TSS) and then sets critical metadata such
+// as recoveryTransactionVersion, database configuration, storage tags, and
+// localities.
 ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
                                               Reference<ILogSystem> oldLogSystem,
                                               Version txsPoppedVersion) {
@@ -885,6 +899,13 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 
 	uniquify(self->allTags);
 
+	// Load TLogGroupCollection
+	Standalone<RangeResultRef> tLogGroupState = wait(self->txnStateStore->readRange(tLogGroupKeys));
+	self->tLogGroupCollection = makeReference<TLogGroupCollection>(self->configuration.tLogPolicy,
+	                                                               SERVER_KNOBS->TLOG_GROUP_COLLECTION_TARGET_SIZE,
+	                                                               self->configuration.tLogReplicationFactor);
+	self->tLogGroupRecoveredState = tLogGroupState;
+
 	// auto kvs = self->txnStateStore->readRange( systemKeys );
 	// for( auto & kv : kvs.get() )
 	//	TraceEvent("MasterRecoveredTXS", self->dbgid).detail("K", kv.key).detail("V", kv.value);
@@ -899,7 +920,9 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 	return Void();
 }
 
-ACTOR Future<Void> sendInitialCommitToResolvers(Reference<MasterData> self) {
+// Reads txnStateStore and broadcasts the data to all Commit Proxies. After
+// that, initializes Resolvers to allow recovery transaction goes through.
+ACTOR static Future<Void> sendInitialCommitToResolvers(Reference<MasterData> self) {
 	state KeyRange txnKeys = allKeys;
 	state Sequence txnSequence = 0;
 	ASSERT(self->recoveryTransactionVersion);
@@ -946,12 +969,16 @@ ACTOR Future<Void> sendInitialCommitToResolvers(Reference<MasterData> self) {
 	}
 	wait(waitForAll(txnReplies));
 
-	vector<Future<ResolveTransactionBatchReply>> replies;
+	// To avoid race of recovery transaction with the above broadcast,
+	// resolvers are initialized after the broadcast is done. This ensures
+	// recovery transaction is blocked at resolver during the broadcast.
+	std::vector<Future<ResolveTransactionBatchReply>> replies;
 	for (auto& r : self->resolvers) {
 		ResolveTransactionBatchRequest req;
 		req.prevVersion = -1;
 		req.version = self->lastEpochEnd;
 		req.lastReceivedVersion = -1;
+		// TODO: add all team IDs to the request
 
 		replies.push_back(brokenPromiseToNever(r.resolve.getReply(req)));
 	}
@@ -1020,6 +1047,10 @@ void updateConfigForForcedRecovery(Reference<MasterData> self,
 	initialConfChanges->push_back(regionCommit);
 }
 
+// Recovers transaction system states from old log system and then waits for
+// either 1) successful recruitment; or 2) if recovery stalls for >1s, a
+// provisional master receives an "emergency transaction" from fdbcli for a new
+// recruitment with different database configurations.
 ACTOR Future<Void> recoverFrom(Reference<MasterData> self,
                                Reference<ILogSystem> oldLogSystem,
                                vector<StorageServerInterface>* seedServers,
@@ -1852,6 +1883,8 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 			tr.set(recoveryCommitRequest.arena, tLogDatacentersKeyFor(dc), StringRef());
 		}
 	}
+
+	self->tLogGroupCollection->storeState(&recoveryCommitRequest);
 
 	applyMetadataMutations(SpanID(),
 	                       self->dbgid,

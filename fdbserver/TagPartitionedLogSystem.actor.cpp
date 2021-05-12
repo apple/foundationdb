@@ -1485,6 +1485,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
+	// Returns the popped version for the "tag" at the given transaction "log" server.
 	ACTOR static Future<Version> getPoppedFromTLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> log, Tag tag) {
 		loop {
 			choose {
@@ -1500,6 +1501,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
+	// Returns the maximum popped transaction state store (txs) tag by querying
+	// all generations of tlogs.
 	ACTOR static Future<Version> getPoppedTxs(TagPartitionedLogSystem* self) {
 		state std::vector<std::vector<Future<Version>>> poppedFutures;
 		state std::vector<Future<Void>> poppedReady;

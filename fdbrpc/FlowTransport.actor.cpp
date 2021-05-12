@@ -53,12 +53,13 @@ const uint64_t TOKEN_STREAM_FLAG = 1;
 
 class EndpointMap : NonCopyable {
 public:
+
 	// Reserve space for this many wellKnownEndpoints
 	explicit EndpointMap(int wellKnownEndpointCount);
 	void insertWellKnown(NetworkMessageReceiver* r, const Endpoint::Token& token, TaskPriority priority);
 	void insert(NetworkMessageReceiver* r, Endpoint::Token& token, TaskPriority priority);
 	const Endpoint& insert(NetworkAddressList localAddresses,
-	                       std::vector<std::pair<FlowReceiver*, TaskPriority>> const& streams);
+	                       std::vector<ReceiverPriorityPair> const& streams);
 	NetworkMessageReceiver* get(Endpoint::Token const& token);
 	TaskPriority getPriority(Endpoint::Token const& token);
 	void remove(Endpoint::Token const& token, NetworkMessageReceiver* r);
@@ -1509,7 +1510,7 @@ void FlowTransport::addEndpoint(Endpoint& endpoint, NetworkMessageReceiver* rece
 	self->endpoints.insert(receiver, endpoint.token, taskID);
 }
 
-void FlowTransport::addEndpoints(std::vector<std::pair<FlowReceiver*, TaskPriority>> const& streams) {
+void FlowTransport::addEndpoints(std::vector<ReceiverPriorityPair> const& streams) {
 	self->endpoints.insert(self->localAddresses, streams);
 }
 
