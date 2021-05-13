@@ -61,7 +61,7 @@ class SimpleConfigConsumerImpl {
 					    .detail("KnobValue", versionedMutation.mutation.getValue());
 				}
 				self->mostRecentVersion = reply.mostRecentVersion;
-				configStore->addVersionedMutations(reply.versionedMutations, reply.mostRecentVersion);
+				wait(configStore->addVersionedMutations(reply.versionedMutations, reply.mostRecentVersion));
 				wait(delayJittered(POLLING_INTERVAL));
 			} catch (Error& e) {
 				++self->failedChangeRequest;
@@ -74,7 +74,7 @@ class SimpleConfigConsumerImpl {
 					    ConfigFollowerGetSnapshotRequest{ self->mostRecentVersion, {} }));
 					// TODO: Remove unnecessary copy
 					auto snapshot = dbReply.snapshot;
-					configStore->setSnapshot(std::move(snapshot), self->mostRecentVersion);
+					wait(configStore->setSnapshot(std::move(snapshot), self->mostRecentVersion));
 					++self->snapshotRequest;
 				} else {
 					throw e;
@@ -94,7 +94,7 @@ class SimpleConfigConsumerImpl {
 		TraceEvent(SevDebug, "ConfigGotInitialSnapshot").detail("Version", self->mostRecentVersion);
 		// TODO: Remove unnecessary copy
 		auto snapshot = reply.snapshot;
-		configStore->setSnapshot(std::move(snapshot), self->mostRecentVersion);
+		wait(configStore->setSnapshot(std::move(snapshot), self->mostRecentVersion));
 		return Void();
 	}
 

@@ -19,7 +19,6 @@
  */
 
 #include "fdbclient/Knobs.h"
-#include "fdbclient/Tuple.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LocalConfiguration.h"
@@ -273,16 +272,12 @@ public:
 	}
 
 	Future<Void> setSnapshot(std::map<ConfigKey, Value> const& snapshot, Version lastCompactedVersion) {
-		auto f = setSnapshot(this, snapshot, lastCompactedVersion);
-		actors.add(f);
-		return f;
+		return setSnapshot(this, snapshot, lastCompactedVersion);
 	}
 
 	Future<Void> addVersionedMutations(Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,
 	                                   Version mostRecentVersion) {
-		auto f = addVersionedMutations(this, versionedMutations, mostRecentVersion);
-		actors.add(f);
-		return f;
+		return addVersionedMutations(this, versionedMutations, mostRecentVersion);
 	}
 
 	FlowKnobs const& getFlowKnobs() const {
@@ -401,7 +396,7 @@ public:
 
 } // namespace
 
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/updateSingleKnob") {
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Internal/updateSingleKnob") {
 	TestKnobs k1;
 	TestKnobs2 k2;
 	updateSingleKnob("test_long"_sr, "5"_sr, k1, k2);
@@ -427,7 +422,7 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/updateSingleKnob") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ManualKnobOverrides") {
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Internal/ManualKnobOverrides") {
 	TestKnobs k1;
 	TestKnobs2 k2;
 	std::map<Key, Value> m;
@@ -440,7 +435,7 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ManualKnobOverrides") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ConfigKnobOverrides") {
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Internal/ConfigKnobOverrides") {
 	TestKnobs k1;
 	TestKnobs2 k2;
 	ConfigKnobOverrides configKnobOverrides("class-A/class-B");
@@ -453,100 +448,5 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ConfigKnobOverrides") {
 	configKnobOverrides.update(k1, k2);
 	ASSERT(k1.TEST_INT == 7);
 	ASSERT(k2.TEST2_INT == 10);
-	return Void();
-}
-
-namespace {
-
-ACTOR Future<Void> setTestSnapshot(LocalConfiguration* localConfiguration, Version* version) {
-	std::map<ConfigKey, Value> snapshot = {
-		{ ConfigKeyRef("class-A"_sr, "test_int"_sr), "1"_sr },
-		{ ConfigKeyRef("class-B"_sr, "test_int"_sr), "2"_sr },
-		{ ConfigKeyRef("class-C"_sr, "test_int"_sr), "3"_sr },
-		{ ConfigKeyRef("class-A"_sr, "test_string"_sr), "x"_sr },
-	};
-	wait(localConfiguration->setSnapshot(snapshot, ++(*version)));
-	return Void();
-}
-
-void appendVersionedMutation(Standalone<VectorRef<VersionedConfigMutationRef>>& versionedMutations,
-                             Version version,
-                             KeyRef configClass,
-                             KeyRef knobName,
-                             ValueRef knobValue) {
-	Tuple tuple;
-	tuple << configClass;
-	tuple << knobName;
-	auto mutation = ConfigMutationRef::createConfigMutation(tuple.pack(), knobValue);
-	versionedMutations.emplace_back_deep(versionedMutations.arena(), version, mutation);
-}
-
-ACTOR Future<Void> addTestUpdates(LocalConfiguration* localConfiguration, Version* version) {
-	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
-	++(*version);
-	appendVersionedMutation(versionedMutations, *version, "class-A"_sr, "test_bool"_sr, "true"_sr);
-	appendVersionedMutation(versionedMutations, *version, "class-B"_sr, "test_long"_sr, "100"_sr);
-	appendVersionedMutation(versionedMutations, *version, "class-C"_sr, "test_double"_sr, "1.0"_sr);
-	appendVersionedMutation(versionedMutations, *version, "class-A"_sr, "test_int"_sr, "10"_sr);
-	wait(localConfiguration->addVersionedMutations(versionedMutations, *version));
-	return Void();
-}
-
-ACTOR Future<Void> runTestUpdates(LocalConfiguration* localConfiguration, Version* version) {
-	wait(localConfiguration->initialize());
-	wait(setTestSnapshot(localConfiguration, version));
-	wait(addTestUpdates(localConfiguration, version));
-	// TODO: Clean up on-disk state
-	return Void();
-}
-
-ACTOR Future<Void> runFirstLocalConfiguration(std::string configPath, UID uid) {
-	state LocalConfiguration localConfiguration(configPath, "./", {}, uid);
-	state Version version = 1;
-	wait(runTestUpdates(&localConfiguration, &version));
-	ASSERT(localConfiguration.getTestKnobs().TEST_INT == 2);
-	ASSERT(localConfiguration.getTestKnobs().TEST_BOOL);
-	ASSERT(localConfiguration.getTestKnobs().TEST_STRING == "x");
-	return Void();
-}
-
-ACTOR template <class F>
-Future<Void> runSecondLocalConfiguration(std::string configPath, UID uid, F validate) {
-	state LocalConfiguration localConfiguration(configPath, "./", {}, uid);
-	wait(localConfiguration.initialize());
-	validate(localConfiguration.getTestKnobs());
-	return Void();
-}
-
-} // namespace
-
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Simple") {
-	wait(runFirstLocalConfiguration("class-A/class-B", deterministicRandom()->randomUniqueID()));
-	return Void();
-}
-
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Restart") {
-	state UID uid = deterministicRandom()->randomUniqueID();
-	wait(runFirstLocalConfiguration("class-A/class-B", uid));
-	wait(runSecondLocalConfiguration("class-A/class-B", uid, [](TestKnobs const& testKnobs) {
-		ASSERT(testKnobs.TEST_INT == 2);
-		ASSERT(testKnobs.TEST_BOOL);
-		ASSERT(testKnobs.TEST_STRING == "x");
-		ASSERT(testKnobs.TEST_DOUBLE == 0.0);
-		ASSERT(testKnobs.TEST_LONG == 100);
-	}));
-	return Void();
-}
-
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/FreshRestart") {
-	state UID uid = deterministicRandom()->randomUniqueID();
-	wait(runFirstLocalConfiguration("class-A/class-B", uid));
-	wait(runSecondLocalConfiguration("class-B/class-A", uid, [](TestKnobs const& testKnobs) {
-		ASSERT(testKnobs.TEST_INT == 0);
-		ASSERT(!testKnobs.TEST_BOOL);
-		ASSERT(testKnobs.TEST_STRING == "");
-		ASSERT(testKnobs.TEST_DOUBLE == 0.0);
-		ASSERT(testKnobs.TEST_LONG == 0);
-	}));
 	return Void();
 }

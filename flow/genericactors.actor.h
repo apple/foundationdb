@@ -1899,6 +1899,7 @@ public:
 	virtual Future<Void> onChange() const = 0;
 	template <class Input, class F>
 	static Reference<IDependentAsyncVar> create(Reference<AsyncVar<Input>> const& input, F const& f);
+	static Reference<IDependentAsyncVar> create(Reference<AsyncVar<Output>> const& output);
 };
 
 template <class Input, class Output, class F>
@@ -1924,6 +1925,12 @@ template <class Input, class F>
 Reference<IDependentAsyncVar<Output>> IDependentAsyncVar<Output>::create(Reference<AsyncVar<Input>> const& input,
                                                                          F const& f) {
 	return makeReference<DependentAsyncVar<Input, Output, F>>(input, f);
+}
+
+template <class Output>
+Reference<IDependentAsyncVar<Output>> IDependentAsyncVar<Output>::create(Reference<AsyncVar<Output>> const& input) {
+	auto identity = [](const auto& x) { return x; };
+	return makeReference<DependentAsyncVar<Output, Output, decltype(identity)>>(input, identity);
 }
 
 #include "flow/unactorcompiler.h"

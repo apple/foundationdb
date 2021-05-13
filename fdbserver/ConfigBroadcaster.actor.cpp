@@ -1,5 +1,5 @@
 /*
- * ConfigBroadcaster.h
+ * ConfigBroadcaster.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,7 +19,9 @@
  */
 
 #include "fdbserver/ConfigBroadcaster.h"
+#include "fdbserver/LocalConfiguration.h" // testing only
 #include "fdbserver/SimpleConfigConsumer.h"
+#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // must be last include
 
 class ConfigBroadcasterImpl {
@@ -141,16 +143,22 @@ class ConfigBroadcasterImpl {
 public:
 	Future<Void> serve(ConfigBroadcaster* self, ConfigFollowerInterface const& cfi) { return serve(self, this, cfi); }
 
-	void addVersionedMutations(Standalone<VectorRef<VersionedConfigMutationRef>> const& versionedMutations,
-	                           Version mostRecentVersion) {
+	Future<Void> addVersionedMutations(Standalone<VectorRef<VersionedConfigMutationRef>> const& versionedMutations,
+	                                   Version mostRecentVersion) {
 		this->versionedMutations.insert(
 		    this->versionedMutations.end(), versionedMutations.begin(), versionedMutations.end());
 		this->mostRecentVersion = mostRecentVersion;
+		return Void();
 	}
 
-	void setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version lastCompactedVersion) {
+	Future<Void> setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version lastCompactedVersion) {
 		this->snapshot = std::move(snapshot);
 		this->lastCompactedVersion = lastCompactedVersion;
+		return Void();
+	}
+
+	ConfigBroadcasterImpl(ConfigFollowerInterface const& cfi) : ConfigBroadcasterImpl() {
+		consumer = std::make_unique<SimpleConfigConsumer>(cfi);
 	}
 
 	ConfigBroadcasterImpl(ClusterConnectionString const& ccs) : ConfigBroadcasterImpl() {
@@ -161,6 +169,9 @@ public:
 		consumer = std::make_unique<SimpleConfigConsumer>(coordinators);
 	}
 };
+
+ConfigBroadcaster::ConfigBroadcaster(ConfigFollowerInterface const& cfi)
+  : impl(std::make_unique<ConfigBroadcasterImpl>(cfi)) {}
 
 ConfigBroadcaster::ConfigBroadcaster(ClusterConnectionString const& ccs)
   : impl(std::make_unique<ConfigBroadcasterImpl>(ccs)) {}
@@ -174,12 +185,12 @@ Future<Void> ConfigBroadcaster::serve(ConfigFollowerInterface const& cfi) {
 	return impl->serve(this, cfi);
 }
 
-void ConfigBroadcaster::addVersionedMutations(
+Future<Void> ConfigBroadcaster::addVersionedMutations(
     Standalone<VectorRef<VersionedConfigMutationRef>> const& versionedMutations,
     Version mostRecentVersion) {
-	impl->addVersionedMutations(versionedMutations, mostRecentVersion);
+	return impl->addVersionedMutations(versionedMutations, mostRecentVersion);
 }
 
-void ConfigBroadcaster::setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version lastCompactedVersion) {
-	impl->setSnapshot(std::move(snapshot), lastCompactedVersion);
+Future<Void> ConfigBroadcaster::setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version lastCompactedVersion) {
+	return impl->setSnapshot(std::move(snapshot), lastCompactedVersion);
 }

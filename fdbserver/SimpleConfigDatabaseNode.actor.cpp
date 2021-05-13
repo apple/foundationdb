@@ -54,7 +54,7 @@ Version getVersionFromVersionedMutationKey(KeyRef versionedMutationKey) {
 
 } //namespace
 
-TEST_CASE("/fdbserver/ConfigDB/SimpleConfigDatabaseNode/versionedMutationKeys") {
+TEST_CASE("/fdbserver/ConfigDB/SimpleConfigDatabaseNode/Internal/versionedMutationKeys") {
 	std::vector<Key> keys;
 	for (Version version = 0; version < 1000; ++version) {
 		for (int index = 0; index < 5; ++index) {
@@ -67,7 +67,7 @@ TEST_CASE("/fdbserver/ConfigDB/SimpleConfigDatabaseNode/versionedMutationKeys") 
 	return Void();
 }
 
-TEST_CASE("/fdbserver/ConfigDB/SimpleConfigDatabaseNode/versionedMutationKeyOrdering") {
+TEST_CASE("/fdbserver/ConfigDB/SimpleConfigDatabaseNode/Internal/versionedMutationKeyOrdering") {
 	Standalone<VectorRef<KeyRef>> keys;
 	for (Version version = 0; version < 1000; ++version) {
 		for (auto index = 0; index < 5; ++index) {
