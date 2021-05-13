@@ -232,17 +232,10 @@ class LocalConfigurationImpl : public NonCopyable {
 		return Void();
 	}
 
-	ACTOR static Future<Void> monitorBroadcaster(Reference<AsyncVar<ServerDBInfo> const> serverDBInfo,
-	                                             Reference<AsyncVar<ConfigFollowerInterface>> broadcaster) {
-		loop {
-			wait(serverDBInfo->onChange());
-			broadcaster->set(serverDBInfo->get().configBroadcaster);
-		}
-	}
-
-	ACTOR static Future<Void> consumeLoopIteration(LocalConfiguration* self,
-	                                               LocalConfigurationImpl* impl,
-	                                               Reference<AsyncVar<ConfigFollowerInterface>> broadcaster) {
+	ACTOR static Future<Void> consumeLoopIteration(
+	    LocalConfiguration* self,
+	    LocalConfigurationImpl* impl,
+	    Reference<IDependentAsyncVar<ConfigFollowerInterface> const> broadcaster) {
 		// TODO: Cache lastSeenVersion in memory
 		// state Version lastSeenVersion = wait(impl->getLastSeenVersion());
 		state SimpleConfigConsumer consumer(broadcaster->get());
@@ -256,11 +249,8 @@ class LocalConfigurationImpl : public NonCopyable {
 
 	ACTOR static Future<Void> consume(LocalConfiguration* self,
 	                                  LocalConfigurationImpl* impl,
-	                                  Reference<AsyncVar<ServerDBInfo> const> serverDBInfo) {
+	                                  Reference<IDependentAsyncVar<ConfigFollowerInterface> const> broadcaster) {
 		wait(impl->initFuture);
-		state Reference<AsyncVar<ConfigFollowerInterface>> broadcaster =
-		    makeReference<AsyncVar<ConfigFollowerInterface>>(serverDBInfo->get().configBroadcaster);
-		impl->actors.add(monitorBroadcaster(serverDBInfo, broadcaster));
 		loop { wait(consumeLoopIteration(self, impl, broadcaster)); }
 	}
 
@@ -282,9 +272,8 @@ public:
 		return initFuture;
 	}
 
-	Future<Void> setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version lastCompactedVersion) {
-		// TODO: Remove unnecessary copy
-		auto f = setSnapshot(this, std::move(snapshot), lastCompactedVersion);
+	Future<Void> setSnapshot(std::map<ConfigKey, Value> const& snapshot, Version lastCompactedVersion) {
+		auto f = setSnapshot(this, snapshot, lastCompactedVersion);
 		actors.add(f);
 		return f;
 	}
@@ -316,8 +305,9 @@ public:
 		return testKnobs;
 	}
 
-	Future<Void> consume(LocalConfiguration& self, Reference<AsyncVar<ServerDBInfo> const> const& serverDBInfo) {
-		return consume(&self, this, serverDBInfo);
+	Future<Void> consume(LocalConfiguration& self,
+	                     Reference<IDependentAsyncVar<ConfigFollowerInterface> const> const& broadcaster) {
+		return consume(&self, this, broadcaster);
 	}
 };
 
@@ -349,12 +339,13 @@ TestKnobs const& LocalConfiguration::getTestKnobs() const {
 	return impl->getTestKnobs();
 }
 
-Future<Void> LocalConfiguration::consume(Reference<AsyncVar<ServerDBInfo> const> const& serverDBInfo) {
-	return impl->consume(*this, serverDBInfo);
+Future<Void> LocalConfiguration::consume(
+    Reference<IDependentAsyncVar<ConfigFollowerInterface> const> const& broadcaster) {
+	return impl->consume(*this, broadcaster);
 }
 
-Future<Void> LocalConfiguration::setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version lastCompactedVersion) {
-	return impl->setSnapshot(std::move(snapshot), lastCompactedVersion);
+Future<Void> LocalConfiguration::setSnapshot(std::map<ConfigKey, Value> const& snapshot, Version lastCompactedVersion) {
+	return impl->setSnapshot(snapshot, lastCompactedVersion);
 }
 
 Future<Void> LocalConfiguration::addVersionedMutations(
@@ -474,7 +465,7 @@ ACTOR Future<Void> setTestSnapshot(LocalConfiguration* localConfiguration, Versi
 		{ ConfigKeyRef("class-C"_sr, "test_int"_sr), "3"_sr },
 		{ ConfigKeyRef("class-A"_sr, "test_string"_sr), "x"_sr },
 	};
-	wait(localConfiguration->setSnapshot(std::move(snapshot), ++(*version)));
+	wait(localConfiguration->setSnapshot(snapshot, ++(*version)));
 	return Void();
 }
 

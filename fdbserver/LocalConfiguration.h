@@ -24,7 +24,6 @@
 
 #include "fdbclient/ConfigKnobs.h"
 #include "fdbserver/ConfigFollowerInterface.h"
-#include "fdbserver/ServerDBInfo.h"
 #include "flow/Arena.h"
 #include "flow/Knobs.h"
 
@@ -55,8 +54,8 @@ public:
 	ServerKnobs const& getServerKnobs() const;
 	TestKnobs const& getTestKnobs() const;
 	// TODO: Only one field of serverDBInfo is required, so improve encapsulation
-	Future<Void> consume(Reference<AsyncVar<ServerDBInfo> const> const&);
-	Future<Void> setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version lastCompactedVersion);
+	Future<Void> consume(Reference<IDependentAsyncVar<ConfigFollowerInterface> const> const& broadcaster);
+	Future<Void> setSnapshot(std::map<ConfigKey, Value> const& snapshot, Version lastCompactedVersion);
 	Future<Void> addVersionedMutations(Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,
 	                                   Version mostRecentVersion);
 };

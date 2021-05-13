@@ -1891,6 +1891,41 @@ Future<U> operator>>(Future<T> const& lhs, Future<U> const& rhs) {
 	return runAfter(lhs, rhs);
 }
 
+template <class Output>
+class IDependentAsyncVar : public ReferenceCounted<IDependentAsyncVar<Output>> {
+public:
+	virtual ~IDependentAsyncVar() = default;
+	virtual Output const& get() const = 0;
+	virtual Future<Void> onChange() const = 0;
+	template <class Input, class F>
+	static Reference<IDependentAsyncVar> create(Reference<AsyncVar<Input>> const& input, F const& f);
+};
+
+template <class Input, class Output, class F>
+class DependentAsyncVar final : public IDependentAsyncVar<Output> {
+	Reference<AsyncVar<Output>> output;
+	Future<Void> monitorActor;
+	ACTOR static Future<Void> monitor(Reference<AsyncVar<Input>> input, Reference<AsyncVar<Output>> output, F f) {
+		loop {
+			wait(input->onChange());
+			output->set(f(input->get()));
+		}
+	}
+
+public:
+	DependentAsyncVar(Reference<AsyncVar<Input>> const& input, F const& f)
+	  : output(makeReference<AsyncVar<Output>>(f(input->get()))), monitorActor(monitor(input, output, f)) {}
+	Output const& get() const override { return output->get(); }
+	Future<Void> onChange() const override { return output->onChange(); }
+};
+
+template <class Output>
+template <class Input, class F>
+Reference<IDependentAsyncVar<Output>> IDependentAsyncVar<Output>::create(Reference<AsyncVar<Input>> const& input,
+                                                                         F const& f) {
+	return makeReference<DependentAsyncVar<Input, Output, F>>(input, f);
+}
+
 #include "flow/unactorcompiler.h"
 
 #endif
