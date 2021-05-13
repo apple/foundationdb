@@ -26,6 +26,14 @@ void ProxyTLogPushMessageSerializer::writeMessage(const MutationRef& mutation, c
 	writers[storageTeamID].writeItem(SubsequenceMutationItem{ currentSubsequence++, mutation });
 }
 
+void ProxyTLogPushMessageSerializer::writeMessage(const MutationRef& mutation, const std::set<StorageTeamID>& teams) {
+	for (const auto& team : teams) {
+		// this mutation shares the same subsequence number
+		writers[team].writeItem(SubsequenceMutationItem{ currentSubsequence, mutation });
+	}
+	currentSubsequence++;
+}
+
 void ProxyTLogPushMessageSerializer::completeMessageWriting(const StorageTeamID& storageTeamID) {
 	writers[storageTeamID].completeItemWriting();
 
@@ -39,6 +47,18 @@ void ProxyTLogPushMessageSerializer::completeMessageWriting(const StorageTeamID&
 Standalone<StringRef> ProxyTLogPushMessageSerializer::getSerialized(const StorageTeamID& storageTeamID) {
 	ASSERT(writers[storageTeamID].isWritingCompleted());
 	return writers[storageTeamID].getSerialized();
+}
+
+std::unordered_map<TeamID, Standalone<StringRef>> ProxyTLogPushMessageSerializer::getAllSerialized() {
+	std::unordered_map<TeamID, Standalone<StringRef>> results;
+	for (const auto& [teamID, writer] : writers) {
+		if (!writer.isWritingCompleted()) {
+			completeMessageWriting(teamID);
+		}
+		auto pair = results.emplace(teamID, writer.getSerialized());
+		ASSERT(pair.second);
+	}
+	return results;
 }
 
 bool proxyTLogPushMessageDeserializer(const Arena& arena,

@@ -1025,9 +1025,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					self->toCommit.addTag(cacheTag);
 				}
 				self->toCommit.writeTypedMessage(m);
-				for (const auto& team : teams) {
-					self->teamMessageBuilder.writeMessage(m, team);
-				}
+				self->teamMessageBuilder.writeMessage(m, teams);
 			} else {
 				UNREACHABLE();
 			}

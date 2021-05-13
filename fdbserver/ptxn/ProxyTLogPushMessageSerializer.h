@@ -73,7 +73,7 @@ public:
 	}
 
 	// Writes the same (clear range) mutation to all "teams".
-	// void writeMessage(const MutationRef& mutation, const std::vector<TeamID>& teams);
+	void writeMessage(const MutationRef& mutation, const std::set<TeamID>& teams);
 
 	// For a given TeamID, mark the serializer not accepting more mutations, and write the header.
 	void completeMessageWriting(const StorageTeamID& storageTeamID);
@@ -82,7 +82,7 @@ public:
 	Standalone<StringRef> getSerialized(const StorageTeamID& storageTeamID);
 
 	// Completes all teams' message writing and returns the serialized data.
-	// std::unordered_map<StorageTeamID, Standalone<StringRef>> getAllSerialized();
+	std::unordered_map<StorageTeamID, Standalone<StringRef>> getAllSerialized();
 };
 
 // Deserialize the ProxyTLogPushMessage
