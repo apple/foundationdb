@@ -198,12 +198,12 @@ ACTOR Future<Void> TLogDriverContext::peekCommitMessages_impl(std::shared_ptr<Te
 
 		// deserialize span id
 		if (FLOW_KNOBS->WRITE_TRACING_ENABLED) {
-			SpanContextMessage contextMessage;
-			rd >> contextMessage;
-
 			// deserialize mutation header
 			rd >> messageLength >> sub >> tagCount;
 			rd.readBytes(tagCount * sizeof(Tag));
+
+			SpanContextMessage contextMessage;
+			rd >> contextMessage;
 		}
 		// deserialize mutation
 		MutationRef m;
