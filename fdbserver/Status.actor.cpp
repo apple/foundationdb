@@ -387,6 +387,19 @@ JsonBuilderObject getLagObject(int64_t versions) {
 	return lag;
 }
 
+static JsonBuilderObject getBounceImpactInfo(int recoveryStatusCode) {
+	JsonBuilderObject bounceImpact;
+
+	if (recoveryStatusCode == RecoveryStatus::fully_recovered) {
+		bounceImpact["can_clean_bounce"] = true;
+	} else {
+		bounceImpact["can_clean_bounce"] = false;
+		bounceImpact["reason"] = "cluster hasn't fully recovered yet";
+	}
+
+	return bounceImpact;
+}
+
 struct MachineMemoryInfo {
 	double memoryUsage;
 	double aggregateLimit;
@@ -1168,14 +1181,10 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
 			message["required_resolvers"] = requiredResolvers;
 		} else if (mStatusCode == RecoveryStatus::locking_old_transaction_servers) {
 			message["missing_logs"] = md.getValue("MissingIDs").c_str();
-		} else if (mStatusCode == RecoveryStatus::fully_recovered) {
-			if (!rv.isError()) {
-				int64_t fullyRecoveredAtVersion = md.getInt64("FullyRecoveredAtVersion");
-				double secondsSinceFulyRecovered = std::max((int64_t)0, (int64_t)(rv.get() - fullyRecoveredAtVersion)) /
-							                       (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
-				message["seconds_since_fully_recovered"] = secondsSinceFulyRecovered;
-			}
 		}
+
+		message["bounce_impact"] = getBounceImpactInfo(mStatusCode);
+
 		// TODO:  time_in_recovery: 0.5
 		//        time_in_state: 0.1
 
