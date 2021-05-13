@@ -35,6 +35,8 @@ public:
 	double TEST_DOUBLE;
 	bool TEST_BOOL;
 	std::string TEST_STRING;
+	bool operator==(TestKnobs const&) const;
+	bool operator!=(TestKnobs const&) const;
 	void initialize();
 	void reset();
 };

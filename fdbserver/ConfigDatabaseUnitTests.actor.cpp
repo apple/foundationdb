@@ -27,6 +27,20 @@
 
 namespace {
 
+TestKnobs const emptyTestKnobs;
+
+TestKnobs const& getExpectedTestKnobs() {
+	static std::unique_ptr<TestKnobs> expectedTestKnobs;
+	if (!expectedTestKnobs) {
+		expectedTestKnobs = std::make_unique<TestKnobs>();
+		expectedTestKnobs->setKnob("test_long", "100");
+		expectedTestKnobs->setKnob("test_int", "2");
+		expectedTestKnobs->setKnob("test_bool", "true");
+		expectedTestKnobs->setKnob("test_string", "x");
+	}
+	return *expectedTestKnobs;
+}
+
 ACTOR template <class ConfigStore>
 Future<Void> setTestSnapshot(ConfigStore* configStore, Version* version) {
 	std::map<ConfigKey, Value> snapshot = {
@@ -82,12 +96,20 @@ ACTOR Future<Void> runFirstLocalConfiguration(std::string configPath, UID uid) {
 	return Void();
 }
 
-ACTOR template <class F>
-Future<Void> runSecondLocalConfiguration(std::string configPath, UID uid, F validate) {
+ACTOR Future<Void> runSecondLocalConfiguration(std::string configPath, UID uid, TestKnobs const* expectedTestKnobs) {
 	state LocalConfiguration localConfiguration(configPath, "./", {}, uid);
 	wait(localConfiguration.initialize());
-	validate(localConfiguration.getTestKnobs());
+	ASSERT(localConfiguration.getTestKnobs() == *expectedTestKnobs);
 	return Void();
+}
+
+ACTOR Future<Void> pollLocalConfiguration(LocalConfiguration* localConfiguration, TestKnobs const* expectedTestKnobs) {
+	loop {
+		if (localConfiguration->getTestKnobs() == *expectedTestKnobs) {
+			return Void();
+		}
+		wait(delay(1.0));
+	}
 }
 
 } // namespace
@@ -100,26 +122,14 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Simple") {
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Restart") {
 	state UID uid = deterministicRandom()->randomUniqueID();
 	wait(runFirstLocalConfiguration("class-A/class-B", uid));
-	wait(runSecondLocalConfiguration("class-A/class-B", uid, [](TestKnobs const& testKnobs) {
-		ASSERT(testKnobs.TEST_INT == 2);
-		ASSERT(testKnobs.TEST_BOOL);
-		ASSERT(testKnobs.TEST_STRING == "x");
-		ASSERT(testKnobs.TEST_DOUBLE == 0.0);
-		ASSERT(testKnobs.TEST_LONG == 100);
-	}));
+	wait(runSecondLocalConfiguration("class-A/class-B", uid, &getExpectedTestKnobs()));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/FreshRestart") {
 	state UID uid = deterministicRandom()->randomUniqueID();
 	wait(runFirstLocalConfiguration("class-A/class-B", uid));
-	wait(runSecondLocalConfiguration("class-B/class-A", uid, [](TestKnobs const& testKnobs) {
-		ASSERT(testKnobs.TEST_INT == 0);
-		ASSERT(!testKnobs.TEST_BOOL);
-		ASSERT(testKnobs.TEST_STRING == "");
-		ASSERT(testKnobs.TEST_DOUBLE == 0.0);
-		ASSERT(testKnobs.TEST_LONG == 0);
-	}));
+	wait(runSecondLocalConfiguration("class-B/class-A", uid, &emptyTestKnobs));
 	return Void();
 }
 
@@ -133,10 +143,12 @@ TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/Simple") {
 	wait(localConfiguration.initialize());
 	actors.add(broadcaster.serve(cfi->get()));
 	actors.add(localConfiguration.consume(cfi));
+	Future<Void> updater = runTestUpdates(&broadcaster, &version);
+	Future<Void> listener = pollLocalConfiguration(&localConfiguration, &getExpectedTestKnobs());
 	choose {
-		when(wait(runTestUpdates(&broadcaster, &version))) {}
+		// TODO: Fix listener
+		when(wait(updater /*&& listener*/)) {}
 		when(wait(actors.getResult())) { ASSERT(false); }
 	}
-	// TODO: Check that local configuration received updates
 	return Void();
 }

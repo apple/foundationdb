@@ -368,6 +368,15 @@ void TestKnobs::reset() {
 	initialize();
 }
 
+bool TestKnobs::operator==(TestKnobs const& rhs) const {
+	return (TEST_LONG == rhs.TEST_LONG) && (TEST_INT == rhs.TEST_INT) && (TEST_DOUBLE == rhs.TEST_DOUBLE) &&
+	       (TEST_BOOL == rhs.TEST_BOOL) && (TEST_STRING == rhs.TEST_STRING);
+}
+
+bool TestKnobs::operator!=(TestKnobs const& rhs) const {
+	return !(*this == rhs);
+}
+
 namespace {
 
 class TestKnobs2 : public Knobs {
