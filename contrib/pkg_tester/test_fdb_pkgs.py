@@ -24,7 +24,7 @@ import shlex
 import subprocess
 import uuid
 
-from typing import List, Optional, Union
+from typing import Iterator, List, Optional, Union
 
 
 def run(args: List[str]) -> str:
@@ -66,7 +66,7 @@ class Container:
             + ["/usr/sbin/init" for _ in range(1) if initd]
         ).rstrip()
 
-    def run(self, args: List[str]) -> bytes:
+    def run(self, args: List[str]) -> str:
         return run(["docker", "exec", self.uid] + args)
 
     def copy_to(self, src_path: str, dst_path: str) -> None:
@@ -82,15 +82,16 @@ class Container:
 
 
 @pytest.fixture(scope="session")
-def ubuntu_image_with_fdb() -> Image:
+def ubuntu_image_with_fdb() -> Iterator[Optional[Image]]:
     """
     Return an image which has just the fdb deb packages installed.
     """
+    builddir = os.environ.get("BUILDDIR")
+    if builddir is None:
+        assert False, "BUILDDIR environment variable not set"
     debs = [
         deb
-        for deb in glob.glob(
-            os.path.join(os.environ.get("BUILDDIR"), "packages", "*.deb")
-        )
+        for deb in glob.glob(os.path.join(builddir, "packages", "*.deb"))
         if "versioned" not in deb
     ]
     if not debs:
@@ -115,15 +116,16 @@ def ubuntu_image_with_fdb() -> Image:
 
 
 @pytest.fixture(scope="session")
-def centos_image_with_fdb() -> Image:
+def centos_image_with_fdb() -> Iterator[Optional[Image]]:
     """
     Return an image which has just the fdb rpm packages installed.
     """
+    builddir = os.environ.get("BUILDDIR")
+    if builddir is None:
+        assert False, "BUILDDIR environment variable not set"
     rpms = [
         rpm
-        for rpm in glob.glob(
-            os.path.join(os.environ.get("BUILDDIR"), "packages", "*.rpm")
-        )
+        for rpm in glob.glob(os.path.join(builddir, "packages", "*.rpm"))
         if "versioned" not in rpm
     ]
     if not rpms:
@@ -153,7 +155,12 @@ def pytest_generate_tests(metafunc):
 
 
 @pytest.fixture()
-def linux_container(request, ubuntu_image_with_fdb, centos_image_with_fdb) -> Container:
+def linux_container(
+    request, ubuntu_image_with_fdb, centos_image_with_fdb
+) -> Iterator[Container]:
+    """
+    Tests which accept this fixture will be run once for each supported platform.
+    """
     container: Optional[Container] = None
     try:
         if request.param == "ubuntu":
