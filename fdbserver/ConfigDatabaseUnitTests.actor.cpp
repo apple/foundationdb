@@ -27,18 +27,30 @@
 
 namespace {
 
-TestKnobs const emptyTestKnobs;
+std::map<Key, Value> const testManualKnobOverrides = {
+	{ "test_double"_sr, "1.0"_sr },
+};
 
-TestKnobs const& getExpectedTestKnobs() {
-	static std::unique_ptr<TestKnobs> expectedTestKnobs;
-	if (!expectedTestKnobs) {
-		expectedTestKnobs = std::make_unique<TestKnobs>();
-		expectedTestKnobs->setKnob("test_long", "100");
-		expectedTestKnobs->setKnob("test_int", "2");
-		expectedTestKnobs->setKnob("test_bool", "true");
-		expectedTestKnobs->setKnob("test_string", "x");
+TestKnobs const& getExpectedTestKnobsEmptyConfig() {
+	static std::unique_ptr<TestKnobs> knobs;
+	if (!knobs) {
+		knobs = std::make_unique<TestKnobs>();
+		knobs->setKnob("test_double", "1.0");
 	}
-	return *expectedTestKnobs;
+	return *knobs;
+}
+
+TestKnobs const& getExpectedTestKnobsFinal() {
+	static std::unique_ptr<TestKnobs> knobs;
+	if (!knobs) {
+		knobs = std::make_unique<TestKnobs>();
+		knobs->setKnob("test_long", "100");
+		knobs->setKnob("test_int", "2");
+		knobs->setKnob("test_bool", "true");
+		knobs->setKnob("test_string", "x");
+		knobs->setKnob("test_double", "1.0");
+	}
+	return *knobs;
 }
 
 ACTOR template <class ConfigStore>
@@ -47,6 +59,7 @@ Future<Void> setTestSnapshot(ConfigStore* configStore, Version* version) {
 		{ ConfigKeyRef("class-A"_sr, "test_int"_sr), "1"_sr },
 		{ ConfigKeyRef("class-B"_sr, "test_int"_sr), "2"_sr },
 		{ ConfigKeyRef("class-C"_sr, "test_int"_sr), "3"_sr },
+		{ ConfigKeyRef("class-B"_sr, "test_double"_sr), "4.0"_sr },
 		{ ConfigKeyRef("class-A"_sr, "test_string"_sr), "x"_sr },
 	};
 	wait(configStore->setSnapshot(std::move(snapshot), ++(*version)));
@@ -71,7 +84,7 @@ Future<Void> addTestUpdates(ConfigStore* configStore, Version* version) {
 	++(*version);
 	appendVersionedMutation(versionedMutations, *version, "class-A"_sr, "test_bool"_sr, "true"_sr);
 	appendVersionedMutation(versionedMutations, *version, "class-B"_sr, "test_long"_sr, "100"_sr);
-	appendVersionedMutation(versionedMutations, *version, "class-C"_sr, "test_double"_sr, "1.0"_sr);
+	appendVersionedMutation(versionedMutations, *version, "class-C"_sr, "test_double"_sr, "10.0"_sr);
 	appendVersionedMutation(versionedMutations, *version, "class-A"_sr, "test_int"_sr, "10"_sr);
 	wait(configStore->addVersionedMutations(versionedMutations, *version));
 	return Void();
@@ -86,18 +99,16 @@ Future<Void> runTestUpdates(ConfigStore* configStore, Version* version) {
 }
 
 ACTOR Future<Void> runFirstLocalConfiguration(std::string configPath, UID uid) {
-	state LocalConfiguration localConfiguration(configPath, "./", {}, uid);
+	state LocalConfiguration localConfiguration(configPath, "./", testManualKnobOverrides, uid);
 	state Version version = 1;
 	wait(localConfiguration.initialize());
 	wait(runTestUpdates(&localConfiguration, &version));
-	ASSERT(localConfiguration.getTestKnobs().TEST_INT == 2);
-	ASSERT(localConfiguration.getTestKnobs().TEST_BOOL);
-	ASSERT(localConfiguration.getTestKnobs().TEST_STRING == "x");
+	ASSERT(localConfiguration.getTestKnobs() == getExpectedTestKnobsFinal());
 	return Void();
 }
 
 ACTOR Future<Void> runSecondLocalConfiguration(std::string configPath, UID uid, TestKnobs const* expectedTestKnobs) {
-	state LocalConfiguration localConfiguration(configPath, "./", {}, uid);
+	state LocalConfiguration localConfiguration(configPath, "./", testManualKnobOverrides, uid);
 	wait(localConfiguration.initialize());
 	ASSERT(localConfiguration.getTestKnobs() == *expectedTestKnobs);
 	return Void();
@@ -122,14 +133,14 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Simple") {
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Restart") {
 	state UID uid = deterministicRandom()->randomUniqueID();
 	wait(runFirstLocalConfiguration("class-A/class-B", uid));
-	wait(runSecondLocalConfiguration("class-A/class-B", uid, &getExpectedTestKnobs()));
+	wait(runSecondLocalConfiguration("class-A/class-B", uid, &getExpectedTestKnobsFinal()));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/FreshRestart") {
 	state UID uid = deterministicRandom()->randomUniqueID();
 	wait(runFirstLocalConfiguration("class-A/class-B", uid));
-	wait(runSecondLocalConfiguration("class-B/class-A", uid, &emptyTestKnobs));
+	wait(runSecondLocalConfiguration("class-B/class-A", uid, &getExpectedTestKnobsEmptyConfig()));
 	return Void();
 }
 
@@ -144,7 +155,7 @@ TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/Simple") {
 	actors.add(broadcaster.serve(cfi->get()));
 	actors.add(localConfiguration.consume(cfi));
 	Future<Void> updater = runTestUpdates(&broadcaster, &version);
-	Future<Void> listener = pollLocalConfiguration(&localConfiguration, &getExpectedTestKnobs());
+	Future<Void> listener = pollLocalConfiguration(&localConfiguration, &getExpectedTestKnobsFinal());
 	choose {
 		// TODO: Fix listener
 		when(wait(updater /*&& listener*/)) {}

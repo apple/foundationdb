@@ -47,6 +47,10 @@ class LocalConfiguration {
 public:
 	LocalConfiguration(std::string const& configPath,
 	                   std::string const& dataFolder,
+	                   std::map<Key, Value> const& manualKnobOverrides,
+	                   UID id);
+	LocalConfiguration(std::string const& configPath,
+	                   std::string const& dataFolder,
 	                   std::map<Key, Value>&& manualKnobOverrides,
 	                   UID id);
 	~LocalConfiguration();

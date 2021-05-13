@@ -91,7 +91,8 @@ class ManualKnobOverrides {
 	std::map<Key, Value> overrides;
 
 public:
-	explicit ManualKnobOverrides(std::map<Key, Value>&& overrides) : overrides(std::move(overrides)) {}
+	template <class Overrides>
+	explicit ManualKnobOverrides(Overrides&& overrides) : overrides(std::forward<Overrides>(overrides)) {}
 
 	template <class... KS>
 	void update(KS&... knobCollections) const {
@@ -254,11 +255,12 @@ class LocalConfigurationImpl : public NonCopyable {
 	}
 
 public:
+	template <class ManualKnobOverrides>
 	LocalConfigurationImpl(std::string const& configPath,
 	                       std::string const& dataFolder,
-	                       std::map<Key, Value>&& manualKnobOverrides,
+	                       ManualKnobOverrides&& manualKnobOverrides,
 	                       UID id)
-	  : configKnobOverrides(configPath), manualKnobOverrides(std::move(manualKnobOverrides)) {
+	  : configKnobOverrides(configPath), manualKnobOverrides(std::forward<ManualKnobOverrides>(manualKnobOverrides)) {
 		platform::createDirectory(dataFolder);
 		kvStore = keyValueStoreMemory(joinPath(dataFolder, "localconf-" + id.toString()), id, 500e6);
 	}
@@ -311,6 +313,12 @@ LocalConfiguration::LocalConfiguration(std::string const& configPath,
                                        std::map<Key, Value>&& manualKnobOverrides,
                                        UID id)
   : impl(std::make_unique<LocalConfigurationImpl>(configPath, dataFolder, std::move(manualKnobOverrides), id)) {}
+
+LocalConfiguration::LocalConfiguration(std::string const& configPath,
+                                       std::string const& dataFolder,
+                                       std::map<Key, Value> const& manualKnobOverrides,
+                                       UID id)
+  : impl(std::make_unique<LocalConfigurationImpl>(configPath, dataFolder, manualKnobOverrides, id)) {}
 
 LocalConfiguration::~LocalConfiguration() = default;
 
