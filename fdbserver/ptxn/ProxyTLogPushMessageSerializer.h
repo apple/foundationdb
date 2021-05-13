@@ -21,8 +21,6 @@
 #ifndef FDBSERVER_PTXN_PROXYTLOGPUSHMESSAGESERIALIZER_H
 #define FDBSERVER_PTXN_PROXYTLOGPUSHMESSAGESERIALIZER_H
 
-#include "flow/Arena.h"
-#include <stdint.h>
 #pragma once
 
 #include <cstdint>
@@ -30,6 +28,7 @@
 
 #include "fdbserver/ptxn/MessageTypes.h"
 #include "fdbserver/ptxn/Serializer.h"
+#include "flow/Arena.h"
 #include "flow/Error.h"
 
 namespace ptxn {
