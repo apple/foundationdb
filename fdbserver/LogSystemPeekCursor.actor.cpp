@@ -393,7 +393,7 @@ Version ILogSystem::ServerPeekCursor::getMinKnownCommittedVersion() const {
 }
 
 Optional<UID> ILogSystem::ServerPeekCursor::getPrimaryPeekLocation() const {
-	if (interf->get().present()) {
+	if (interf && interf->get().present()) {
 		return interf->get().id();
 	}
 	return Optional<UID>();
