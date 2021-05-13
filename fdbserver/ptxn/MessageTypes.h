@@ -24,8 +24,10 @@
 #pragma once
 
 #include <ostream>
+#include <variant>
 
 #include "fdbclient/CommitTransaction.h"
+#include "flow/ObjectSerializerTraits.h"
 
 namespace ptxn {
 
@@ -51,16 +53,43 @@ struct VersionSubsequence {
 // is used in recovery.
 struct SubsequenceMutationItem {
 	Subsequence subsequence;
-	MutationRef mutation;
+	std::variant<MutationRef, StringRef> mutation_;
+
+	const MutationRef& mutation() const { return std::get<MutationRef>(mutation_); }
 
 	template <typename Reader>
 	void loadFromArena(Reader& reader) {
-		reader >> subsequence >> mutation;
+		MutationRef m;
+		reader >> subsequence >> m;
+		mutation_ = m;
 	}
 
-	template <typename Ar>
+	template <typename Ar, class Dummy=int>
 	void serialize(Ar& ar) {
-		serializer(ar, subsequence, mutation);
+		if (ar.isDeserializing) {
+			MutationRef m;
+			serializer(ar, subsequence, m);
+			mutation_ = m;
+		} else {
+			if (mutation_.index() == 0) {
+				serializer(ar, subsequence, std::get<MutationRef>(mutation_));
+			} else if (mutation_.index() == 1) {
+				serializer(ar, subsequence);
+				auto& bytes = std::get<StringRef>(mutation_);
+				ar.serializeBytes(bytes);
+			} else {
+				ASSERT(false);
+			}
+		}
+	}
+
+	// Specialize for ArenaReader. Dummy is needed to avoid
+	//   error: explicit specialization in non-namespace scope
+	template <class Dummy=int>
+	void serialize(ArenaReader& ar) {
+		MutationRef m;
+		serializer(ar, subsequence, m);
+		mutation_ = m;
 	}
 };
 

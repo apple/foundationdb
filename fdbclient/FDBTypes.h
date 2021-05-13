@@ -63,6 +63,9 @@ using StorageTeamID = UID;
 
 const StorageTeamID txsTeam = UID(1, 1);
 
+// Transaction subsystem state (txnState) team.
+const TeamID txsTeam = UID(1, 1);
+
 }	// namespace ptxn
 
 #pragma pack(push, 1)

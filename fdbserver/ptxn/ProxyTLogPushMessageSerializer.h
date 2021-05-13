@@ -21,6 +21,8 @@
 #ifndef FDBSERVER_PTXN_PROXYTLOGPUSHMESSAGESERIALIZER_H
 #define FDBSERVER_PTXN_PROXYTLOGPUSHMESSAGESERIALIZER_H
 
+#include "flow/Arena.h"
+#include <stdint.h>
 #pragma once
 
 #include <cstdint>
@@ -65,6 +67,9 @@ class ProxyTLogPushMessageSerializer {
 public:
 	// Writes a new mutation for a given TeamID.
 	void writeMessage(const MutationRef& mutation, const StorageTeamID& storageTeamID);
+
+	// Writes a new serialized mutation for a given TeamID.
+	void writeMessage(const StringRef& mutation, const TeamID& teamID);
 
 	// Adds span context about transactions.
 	void addTransactionInfo(const SpanID& context) {

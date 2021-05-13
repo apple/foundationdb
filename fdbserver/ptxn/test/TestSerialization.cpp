@@ -28,6 +28,7 @@
 #include "fdbserver/ptxn/TLogStorageServerPeekMessageSerializer.h"
 #include "flow/Error.h"
 #include "flow/UnitTest.h"
+#include "flow/serialize.h"
 
 namespace {
 
@@ -60,6 +61,34 @@ struct TestSerializerItem {
 		serializer(ar, item1);
 	}
 };
+
+bool testSubsequenceMutationItem() {
+	ptxn::ProxyTLogPushMessageSerializer serializer;
+
+	const ptxn::TeamID team1{ deterministicRandom()->randomUniqueID() };
+	const ptxn::TeamID team2{ deterministicRandom()->randomUniqueID() };
+
+	MutationRef mutation(MutationRef::SetValue, "KeyXX"_sr, "ValueYY"_sr);
+	serializer.writeMessage(mutation, team1);
+	serializer.completeMessageWriting(team1);
+	auto serializedTeam1 = serializer.getSerialized(team1);
+
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withPartitionTransaction()));
+	wr << mutation;
+	Standalone<StringRef> value = wr.toValue();
+	std::cout << "mutation: " << value.printable() << "\n";
+	serializer.writeMessage(value, team2);
+	serializer.completeMessageWriting(team2);
+	auto serializedTeam2 = serializer.getSerialized(team2);
+
+	std::cout << "Team1: " << serializedTeam1.size() << "\n"
+	          << serializedTeam1.printable() << "\n"
+	          << "Team2: " << serializedTeam2.size() << "\n"
+	          << serializedTeam2.printable() << "\n";
+	ASSERT(serializedTeam1 == serializedTeam2);
+
+	return true;
+}
 
 } // anonymous namespace
 
@@ -229,13 +258,15 @@ TEST_CASE("/fdbserver/ptxn/test/ProxyTLogPushMessageSerializer") {
 		ASSERT_EQ(header.length,
 		          serializedTeam1.size() - getSerializedBytes<ProxyTLogMessageHeader>() - SerializerVersionOptionBytes);
 
-		ASSERT_EQ(items[0].mutation.type, MutationRef::SetValue);
-		ASSERT(items[0].mutation.param1 == LiteralStringRef("Key1"));
-		ASSERT(items[0].mutation.param2 == LiteralStringRef("Value1"));
+		MutationRef m = items[0].mutation();
+		ASSERT_EQ(m.type, MutationRef::SetValue);
+		ASSERT(m.param1 == "Key1"_sr);
+		ASSERT(m.param2 == "Value1"_sr);
 
-		ASSERT_EQ(items[1].mutation.type, MutationRef::ClearRange);
-		ASSERT(items[1].mutation.param1 == LiteralStringRef("Begin"));
-		ASSERT(items[1].mutation.param2 == LiteralStringRef("End"));
+		m = items[1].mutation();
+		ASSERT_EQ(m.type, MutationRef::ClearRange);
+		ASSERT(m.param1 == "Begin"_sr);
+		ASSERT(m.param2 == "End"_sr);
 	}
 
 	{
@@ -246,10 +277,13 @@ TEST_CASE("/fdbserver/ptxn/test/ProxyTLogPushMessageSerializer") {
 		ASSERT(header.protocolVersion == ProxyTLogMessageProtocolVersion);
 		ASSERT_EQ(header.numItems, 1);
 
-		ASSERT_EQ(items[0].mutation.type, MutationRef::SetValue);
-		ASSERT(items[0].mutation.param1 == LiteralStringRef("Key2"));
-		ASSERT(items[0].mutation.param2 == LiteralStringRef("Value2"));
+		MutationRef m = items[0].mutation();
+		ASSERT_EQ(m.type, MutationRef::SetValue);
+		ASSERT(m.param1 == "Key2"_sr);
+		ASSERT(m.param2 == "Value2"_sr);
 	}
+
+	ASSERT(testSubsequenceMutationItem());
 
 	return Void();
 }

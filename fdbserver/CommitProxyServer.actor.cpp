@@ -1185,7 +1185,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			self->toCommit.addTxsTag();
 		}
 		self->toCommit.writeMessage(StringRef(m.begin(), m.size()), !firstMessage);
-		// self->teamMessageBuilder.writeMessage(m, teamID);
+		self->teamMessageBuilder.writeMessage(StringRef(m.begin(), m.size()), ptxn::txsTeam);
 		firstMessage = false;
 	}
 

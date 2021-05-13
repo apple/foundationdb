@@ -26,6 +26,10 @@ void ProxyTLogPushMessageSerializer::writeMessage(const MutationRef& mutation, c
 	writers[storageTeamID].writeItem(SubsequenceMutationItem{ currentSubsequence++, mutation });
 }
 
+void ProxyTLogPushMessageSerializer::writeMessage(const StringRef& mutation, const StorageTeamID& teamID) {
+	writers[teamID].writeItem(SubsequenceMutationItem{ currentSubsequence++, mutation });
+}
+
 void ProxyTLogPushMessageSerializer::writeMessage(const MutationRef& mutation, const std::set<StorageTeamID>& teams) {
 	for (const auto& team : teams) {
 		// this mutation shares the same subsequence number
