@@ -962,7 +962,9 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					self->toCommit.addTag(cacheTag);
 				}
 				self->toCommit.writeTypedMessage(m);
-				// self->teamMessageBuilder.writeMessage(m, teamID);
+
+				auto& teams = pProxyCommitData->keyInfo[m.param1].teams;
+				self->teamMessageBuilder.writeMessage(m, teams);
 			} else if (m.type == MutationRef::ClearRange) {
 				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
 				auto ranges = pProxyCommitData->keyInfo.intersectingRanges(clearRange);
