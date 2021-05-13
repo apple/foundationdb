@@ -1183,8 +1183,6 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
 			message["missing_logs"] = md.getValue("MissingIDs").c_str();
 		}
 
-		message["bounce_impact"] = getBounceImpactInfo(mStatusCode);
-
 		// TODO:  time_in_recovery: 0.5
 		//        time_in_state: 0.1
 
@@ -2791,6 +2789,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		statusObj["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
 		statusObj["connection_string"] = coordinators.ccf->getConnectionString().toString();
+		statusObj["bounce_impact"] = getBounceImpactInfo(statusCode);
 
 		state Optional<DatabaseConfiguration> configuration;
 		state Optional<LoadConfigurationResult> loadResult;

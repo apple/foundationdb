@@ -546,10 +546,6 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "required_logs":3,
          "missing_logs":"7f8d623d0cb9966e",
          "active_generations":1,
-         "bounce_impact":{
-            "can_clean_bounce":true,
-            "reason":""
-         },
          "description":"Recovery complete."
       },
       "workload":{
@@ -652,6 +648,10 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       "data_distribution_disabled_for_rebalance":true,
       "data_distribution_disabled":true,
       "active_primary_dc":"pv",
+      "bounce_impact":{
+         "can_clean_bounce":true,
+         "reason":""
+      },
       "configuration":{
          "log_anti_quorum":0,
          "log_replicas":2,
