@@ -152,8 +152,10 @@ ACTOR Future<Void> TLogDriverContext::sendCommitMessages_impl(std::shared_ptr<Te
 		// send commit and wait for reply.
 		::TLogCommitRequest request(
 		    SpanID(), msg.arena(), prev, next, prev, prev, msg, deterministicRandom()->randomUniqueID());
+
 		::TLogCommitReply reply = wait(pTLogDriverContext->pTLogContext->realTLogInterface.commit.getReply(request));
 		ASSERT_LE(reply.version, next);
+
 		prev++;
 		next++;
 	}
@@ -195,13 +197,14 @@ ACTOR Future<Void> TLogDriverContext::peekCommitMessages_impl(std::shared_ptr<Te
 		rd.readBytes(tagCount * sizeof(Tag));
 
 		// deserialize span id
-		SpanContextMessage contextMessage;
-		rd >> contextMessage;
+		if (FLOW_KNOBS->WRITE_TRACING_ENABLED) {
+			SpanContextMessage contextMessage;
+			rd >> contextMessage;
 
-		// deserialize mutation header
-		rd >> messageLength >> sub >> tagCount;
-		rd.readBytes(tagCount * sizeof(Tag));
-
+			// deserialize mutation header
+			rd >> messageLength >> sub >> tagCount;
+			rd.readBytes(tagCount * sizeof(Tag));
+		}
 		// deserialize mutation
 		MutationRef m;
 		rd >> m;
