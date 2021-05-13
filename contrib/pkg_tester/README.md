@@ -36,7 +36,11 @@ There's a small chance that this will leak an image (especially if you interrupt
 $ docker image prune
 ```
 
-after.
+after. If you `kill -9` the test, there might even be leaked containers. You can destroy all existing containers with
+
+```
+$ docker rm -f $(docker ps -a -q) # destroy all docker containers!
+```
 
 # Requirements
 
