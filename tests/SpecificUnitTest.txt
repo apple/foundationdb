@@ -3,5 +3,5 @@ startDelay=0
 useDB=false
 
     testName=UnitTests
-    maxTestCases=10
-    testsMatching=/fdbserver/ConfigDB/LocalConfiguration/Simple
+    maxTestCases=100
+    testsMatching=/fdbserver/ConfigDB/LocalConfiguration/

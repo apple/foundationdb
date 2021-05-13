@@ -107,8 +107,8 @@ public:
 
 } // namespace
 
-class LocalConfigurationImpl {
-	IKeyValueStore* kvStore; // FIXME: fix leaks?
+class LocalConfigurationImpl : public NonCopyable {
+	IKeyValueStore* kvStore;
 	Future<Void> initFuture;
 	FlowKnobs flowKnobs;
 	ClientKnobs clientKnobs;
@@ -144,7 +144,7 @@ class LocalConfigurationImpl {
 		return result;
 	}
 
-	ACTOR static Future<Void> init(LocalConfigurationImpl* self) {
+	ACTOR static Future<Void> initialize(LocalConfigurationImpl* self) {
 		wait(self->kvStore->init());
 		state Optional<Value> storedConfigPathValue = wait(self->kvStore->readValue(configPathKey));
 		if (!storedConfigPathValue.present()) {
@@ -273,9 +273,11 @@ public:
 		kvStore = keyValueStoreMemory(joinPath(dataFolder, "localconf-" + id.toString()), id, 500e6);
 	}
 
-	Future<Void> init() {
+	~LocalConfigurationImpl() { kvStore->close(); }
+
+	Future<Void> initialize() {
 		ASSERT(!initFuture.isValid());
-		initFuture = init(this);
+		initFuture = initialize(this);
 		return initFuture;
 	}
 
@@ -327,7 +329,7 @@ LocalConfiguration::LocalConfiguration(std::string const& configPath,
 LocalConfiguration::~LocalConfiguration() = default;
 
 Future<Void> LocalConfiguration::initialize() {
-	return impl->init();
+	return impl->initialize();
 }
 
 FlowKnobs const& LocalConfiguration::getFlowKnobs() const {
@@ -464,12 +466,11 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ConfigKnobOverrides") {
 
 namespace {
 
-ACTOR Future<Void> runLocalConfig(std::string configPath, std::string dataFolder) {
-	state LocalConfiguration localConfiguration(configPath, dataFolder, {}, UID{});
-	wait(localConfiguration.initialize());
+ACTOR Future<Void> runTestUpdates(LocalConfiguration* localConfiguration) {
+	wait(localConfiguration->initialize());
 	std::map<ConfigKey, Value> snapshot = { { ConfigKeyRef("class-A"_sr, "test_int"_sr), "5"_sr } };
-	wait(localConfiguration.setSnapshot(std::move(snapshot), 1));
-	ASSERT(localConfiguration.getTestKnobs().TEST_INT == 5);
+	wait(localConfiguration->setSnapshot(std::move(snapshot), 1));
+	ASSERT(localConfiguration->getTestKnobs().TEST_INT == 5);
 	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
 	{
 		Tuple tuple;
@@ -478,30 +479,42 @@ ACTOR Future<Void> runLocalConfig(std::string configPath, std::string dataFolder
 		auto mutation = ConfigMutationRef::createConfigMutation(tuple.pack(), "7"_sr);
 		versionedMutations.emplace_back_deep(versionedMutations.arena(), 2, mutation);
 	}
-	wait(localConfiguration.addVersionedMutations(versionedMutations, 2));
-	ASSERT(localConfiguration.getTestKnobs().TEST_INT == 7);
+	wait(localConfiguration->addVersionedMutations(versionedMutations, 2));
+	ASSERT(localConfiguration->getTestKnobs().TEST_INT == 7);
+	// TODO: Clean up on-disk state
+	return Void();
+}
+
+ACTOR Future<Void> runFirstLocalConfiguration(std::string configPath, UID uid) {
+	state LocalConfiguration localConfiguration(configPath, "./", {}, uid);
+	wait(runTestUpdates(&localConfiguration));
+	return Void();
+}
+
+ACTOR Future<Void> restartLocalConfiguration(std::string configPath, UID uid, int expected) {
+	state LocalConfiguration localConfiguration(configPath, "./", {}, uid);
+	wait(localConfiguration.initialize());
+	ASSERT(localConfiguration.getTestKnobs().TEST_INT == expected);
 	return Void();
 }
 
 } // namespace
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Simple") {
-	wait(runLocalConfig("class-A/class-B", "./"));
+	wait(runFirstLocalConfiguration("class-A/class-B", deterministicRandom()->randomUniqueID()));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Restart") {
+	state UID uid = deterministicRandom()->randomUniqueID();
+	wait(runFirstLocalConfiguration("class-A/class-B", uid));
+	wait(restartLocalConfiguration("class-A/class-B", uid, 7));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/FreshRestart") {
-	return Void();
-}
-
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ConflictingOverrides") {
-	return Void();
-}
-
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Consume") {
+	state UID uid = deterministicRandom()->randomUniqueID();
+	wait(runFirstLocalConfiguration("class-A/class-B", uid));
+	wait(restartLocalConfiguration("class-B/class-A", uid, 0));
 	return Void();
 }
