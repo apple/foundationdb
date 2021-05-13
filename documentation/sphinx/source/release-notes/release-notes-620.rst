@@ -7,6 +7,8 @@ Release Notes
 * Fixed an issue where storage servers could shutdown with ``unknown_error``. `(PR #4437) <https://github.com/apple/foundationdb/pull/4437>`_
 * Fix backup agent stall when writing to local filesystem with slow metadata operations. `(PR #4428) <https://github.com/apple/foundationdb/pull/4428>`_
 * Backup agent no longer uses 4k block caching layer on local output files so that write operations are larger. `(PR #4428) <https://github.com/apple/foundationdb/pull/4428>`_
+* Fix accounting error that could cause commits to incorrectly fail with ``proxy_memory_limit_exceeded``. `(PR #4529) <https://github.com/apple/foundationdb/pull/4529>`_
+* Added support for downgrades from FDB version 6.3. For more details, see the :ref:`administration notes <downgrade-specific-version>`. `(PR #4673) <https://github.com/apple/foundationdb/pull/4673>`_ `(PR #4469) <https://github.com/apple/foundationdb/pull/4469>`_
 
 6.2.32
 ======
