@@ -22,19 +22,15 @@ import pathlib
 import pytest
 import shlex
 import subprocess
+import uuid
 
-from typing import List, Union
-
-
-def pytest_generate_tests(metafunc):
-    if "linux_container" in metafunc.fixturenames:
-        metafunc.parametrize("linux_container", ["ubuntu", "centos"], indirect=True)
+from typing import List, Optional, Union
 
 
 def run(args: List[str]) -> str:
     print("$ {}".format(" ".join(map(shlex.quote, args))))
     result = subprocess.check_output(args).decode("utf-8")
-    print(result)
+    print(result, end="")
     return result
 
 
@@ -49,10 +45,10 @@ class Image:
 class Container:
     def __init__(self, image: Union[str, Image], initd=False):
         if isinstance(image, Image):
-            name = image.uid
+            image_name = image.uid
         else:
             assert isinstance(image, str)
-            name = image
+            image_name = image
 
         # minimal privilege required to run systemd
         # https://github.com/docker/for-linux/issues/106#issuecomment-330518243
@@ -60,11 +56,13 @@ class Container:
         if initd:
             extra_privilege = "--cap-add=SYS_ADMIN -e container=docker -v /sys/fs/cgroup:/sys/fs/cgroup".split()
 
-        self.uid = run(
+        self.uid = str(uuid.uuid4())
+
+        run(
             ["docker", "run"]
-            + ["-t", "-d"]
+            + ["-t", "-d", "--name", self.uid]
             + extra_privilege
-            + [name]
+            + [image_name]
             + ["/usr/sbin/init" for _ in range(1) if initd]
         ).rstrip()
 
@@ -99,15 +97,21 @@ def ubuntu_image_with_fdb() -> Image:
         yield None
         return
 
-    container = Container("ubuntu")
-    for deb in debs:
-        container.copy_to(deb, "/tmp")
-    container.run(["bash", "-c", "dpkg -i /tmp/*.deb"])
-    container.run(["bash", "-c", "rm /tmp/*.deb"])
-    image = container.commit()
-    yield image
-    container.dispose()
-    image.dispose()
+    container = None
+    image = None
+    try:
+        container = Container("ubuntu")
+        for deb in debs:
+            container.copy_to(deb, "/tmp")
+        container.run(["bash", "-c", "dpkg -i /tmp/*.deb"])
+        container.run(["bash", "-c", "rm /tmp/*.deb"])
+        image = container.commit()
+        yield image
+    finally:
+        if container is not None:
+            container.dispose()
+        if image is not None:
+            image.dispose()
 
 
 @pytest.fixture(scope="session")
@@ -126,34 +130,49 @@ def centos_image_with_fdb() -> Image:
         yield None
         return
 
-    container = Container("centos", initd=True)
-    for rpm in rpms:
-        container.copy_to(rpm, "/tmp")
-    container.run(["bash", "-c", "yum install -y /tmp/*.rpm"])
-    container.run(["bash", "-c", "rm /tmp/*.rpm"])
-    image = container.commit()
-    yield image
-    container.dispose()
-    image.dispose()
+    container = None
+    image = None
+    try:
+        container = Container("centos", initd=True)
+        for rpm in rpms:
+            container.copy_to(rpm, "/tmp")
+        container.run(["bash", "-c", "yum install -y /tmp/*.rpm"])
+        container.run(["bash", "-c", "rm /tmp/*.rpm"])
+        image = container.commit()
+        yield image
+    finally:
+        if container is not None:
+            container.dispose()
+        if image is not None:
+            image.dispose()
+
+
+def pytest_generate_tests(metafunc):
+    if "linux_container" in metafunc.fixturenames:
+        metafunc.parametrize("linux_container", ["ubuntu", "centos"], indirect=True)
 
 
 @pytest.fixture()
 def linux_container(request, ubuntu_image_with_fdb, centos_image_with_fdb) -> Container:
-    if request.param == "ubuntu":
-        if ubuntu_image_with_fdb is None:
-            pytest.skip("No debian packages available to test")
-        container = Container(ubuntu_image_with_fdb)
-        container.run(
-            ["service", "foundationdb", "start"]
-        )  # outside docker this shouldn't be necessary
-    elif request.param == "centos":
-        if centos_image_with_fdb is None:
-            pytest.skip("No rpm packages available to test")
-        container = Container(centos_image_with_fdb, initd=True)
-    else:
-        assert False
-    yield container
-    container.dispose()
+    container: Optional[Container] = None
+    try:
+        if request.param == "ubuntu":
+            if ubuntu_image_with_fdb is None:
+                pytest.skip("No debian packages available to test")
+            container = Container(ubuntu_image_with_fdb)
+            container.run(
+                ["service", "foundationdb", "start"]
+            )  # outside docker this shouldn't be necessary
+        elif request.param == "centos":
+            if centos_image_with_fdb is None:
+                pytest.skip("No rpm packages available to test")
+            container = Container(centos_image_with_fdb, initd=True)
+        else:
+            assert False
+        yield container
+    finally:
+        if container is not None:
+            container.dispose()
 
 
 #################### BEGIN ACTUAL TESTS ####################
