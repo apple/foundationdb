@@ -76,15 +76,14 @@ bool testSubsequenceMutationItem() {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withPartitionTransaction()));
 	wr << mutation;
 	Standalone<StringRef> value = wr.toValue();
-	std::cout << "mutation: " << value.printable() << "\n";
-	serializer.writeMessage(value, team2);
-	serializer.completeMessageWriting(team2);
-	auto serializedTeam2 = serializer.getSerialized(team2);
+	StringRef m = value.substr(sizeof(uint64_t)); // skip protocol version
 
-	std::cout << "Team1: " << serializedTeam1.size() << "\n"
-	          << serializedTeam1.printable() << "\n"
-	          << "Team2: " << serializedTeam2.size() << "\n"
-	          << serializedTeam2.printable() << "\n";
+	// Have to use a different serializer to make sure subsequence is the same.
+	ptxn::ProxyTLogPushMessageSerializer serializer2;
+	serializer2.writeMessage(m, team2);
+	serializer2.completeMessageWriting(team2);
+	auto serializedTeam2 = serializer2.getSerialized(team2);
+
 	ASSERT(serializedTeam1 == serializedTeam2);
 
 	return true;
