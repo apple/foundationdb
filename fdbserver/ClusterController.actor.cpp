@@ -3769,7 +3769,7 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				state Optional<Value> globalConfigVersion = wait(tr.get(globalConfigVersionKey));
-				state ClientDBInfo clientInfo = db->serverInfo->get().client;
+				state ClientDBInfo clientInfo = db->clientInfo->get();
 
 				if (globalConfigVersion.present()) {
 					// Since the history keys end with versionstamps, they
@@ -3827,15 +3827,6 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 					}
 
 					clientInfo.id = deterministicRandom()->randomUniqueID();
-
-					// Update ServerDBInfo so fdbserver processes receive updated history.
-					ServerDBInfo serverInfo = db->serverInfo->get();
-					serverInfo.id = deterministicRandom()->randomUniqueID();
-					serverInfo.infoGeneration = ++db->dbInfoCount;
-					serverInfo.client = clientInfo;
-					db->serverInfo->set(serverInfo);
-
-					// Update ClientDBInfo so client processes receive updated history.
 					db->clientInfo->set(clientInfo);
 				}
 

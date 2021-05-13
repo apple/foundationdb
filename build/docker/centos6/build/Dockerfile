@@ -22,6 +22,8 @@ RUN sed -i -e '/enabled/d' /etc/yum.repos.d/CentOS-Base.repo && \
         curl \
         debbuild \
         devtoolset-8 \
+        devtoolset-8-libasan-devel \
+        devtoolset-8-libtsan-devel \
         devtoolset-8-libubsan-devel \
         devtoolset-8-valgrind-devel \
         dos2unix \

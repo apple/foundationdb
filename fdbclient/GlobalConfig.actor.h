@@ -27,9 +27,7 @@
 #define FDBCLIENT_GLOBALCONFIG_ACTOR_H
 
 #include <any>
-#include <functional>
 #include <map>
-#include <optional>
 #include <type_traits>
 #include <unordered_map>
 
@@ -51,9 +49,6 @@ extern const KeyRef fdbClientInfoTxnSizeLimit;
 extern const KeyRef transactionTagSampleRate;
 extern const KeyRef transactionTagSampleCost;
 
-extern const KeyRef samplingFrequency;
-extern const KeyRef samplingWindow;
-
 // Structure used to hold the values stored by global configuration. The arena
 // is used as memory to store both the key and the value (the value is only
 // stored in the arena if it is an object; primitives are just copied).
@@ -67,25 +62,10 @@ struct ConfigValue : ReferenceCounted<ConfigValue> {
 
 class GlobalConfig : NonCopyable {
 public:
-	// Creates a GlobalConfig singleton, accessed by calling globalConfig().
-	// This function requires a database context object to allow global
-	// configuration to run transactions on the database, and an AsyncVar
-	// object to watch for changes on. The ClientDBInfo pointer should point to
-	// a ClientDBInfo object which will contain the updated global
-	// configuration history when the given AsyncVar changes. This function
-	// should only be called once (however, it is idempotent and calling it
-	// multiple times will have no effect).
-	template <class T>
-	static void create(DatabaseContext* cx, Reference<AsyncVar<T>> db, const ClientDBInfo* dbInfo) {
-		if (g_network->global(INetwork::enGlobalConfig) == nullptr) {
-			auto config = new GlobalConfig{};
-			config->cx = Database(cx);
-			g_network->setGlobal(INetwork::enGlobalConfig, config);
-			config->_updater = updater(config, dbInfo);
-			// Bind changes in `db` to the `dbInfoChanged` AsyncTrigger.
-			forward(db, std::addressof(config->dbInfoChanged));
-		}
-	}
+	// Creates a GlobalConfig singleton, accessed by calling GlobalConfig().
+	// This function should only be called once by each process (however, it is
+	// idempotent and calling it multiple times will have no effect).
+	static void create(DatabaseContext* cx, Reference<AsyncVar<ClientDBInfo>> dbInfo);
 
 	// Returns a reference to the global GlobalConfig object. Clients should
 	// call this function whenever they need to read a value out of the global
@@ -134,16 +114,6 @@ public:
 	// been created and is ready.
 	Future<Void> onInitialized();
 
-	// Triggers the returned future when any key-value pair in the global
-	// configuration changes.
-	Future<Void> onChange();
-
-	// Calls \ref fn when the value associated with \ref key is changed. \ref
-	// fn is passed the updated value for the key, or an empty optional if the
-	// key has been cleared. If the value is an allocated object, its memory
-	// remains in the control of the global configuration.
-	void trigger(KeyRef key, std::function<void(std::optional<std::any>)> fn);
-
 private:
 	GlobalConfig();
 
@@ -157,23 +127,20 @@ private:
 	void insert(KeyRef key, ValueRef value);
 	// Removes the given key (and associated value) from the local copy of the
 	// global configuration keyspace.
-	void erase(Key key);
+	void erase(KeyRef key);
 	// Removes the given key range (and associated values) from the local copy
 	// of the global configuration keyspace.
 	void erase(KeyRangeRef range);
 
 	ACTOR static Future<Void> migrate(GlobalConfig* self);
 	ACTOR static Future<Void> refresh(GlobalConfig* self);
-	ACTOR static Future<Void> updater(GlobalConfig* self, const ClientDBInfo* dbInfo);
+	ACTOR static Future<Void> updater(GlobalConfig* self, Reference<AsyncVar<ClientDBInfo>> dbInfo);
 
 	Database cx;
-	AsyncTrigger dbInfoChanged;
 	Future<Void> _updater;
 	Promise<Void> initialized;
-	AsyncTrigger configChanged;
 	std::unordered_map<StringRef, Reference<ConfigValue>> data;
 	Version lastUpdate;
-	std::unordered_map<KeyRef, std::function<void(std::optional<std::any>)>> callbacks;
 };
 
 #endif
