@@ -37,7 +37,7 @@ public class TupleTest {
 	public static void main(String[] args) throws NoSuchFieldException {
 		final int reps = 1000;
 		try {
-			FDB fdb = FDB.selectAPIVersion(700);
+			FDB fdb = FDB.selectAPIVersion(710);
 			try(Database db = fdb.open()) {
 				runTests(reps, db);
 			}

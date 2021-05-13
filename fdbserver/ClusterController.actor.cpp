@@ -135,9 +135,7 @@ public:
 		                                                                         true,
 		                                                                         TaskPriority::DefaultEndpoint,
 		                                                                         true)) // SOMEDAY: Locality!
-		{
-			GlobalConfig::globalConfig().updateDBInfo(clientInfo);
-		}
+		{}
 
 		void setDistributor(const DataDistributorInterface& interf) {
 			auto newInfo = serverInfo->get();
@@ -3092,6 +3090,10 @@ ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
 				if (worker.locality.processId() == cluster->masterProcessId) {
 					cluster->masterProcessId = Optional<Key>();
 				}
+				TraceEvent("ClusterControllerWorkerFailed", cluster->id)
+					.detail("ProcessId", worker.locality.processId())
+					.detail("ProcessClass", failedWorkerInfo.details.processClass.toString())
+					.detail("Address", worker.address());
 				cluster->removedDBInfoEndpoints.insert(worker.updateServerDBInfo.getEndpoint());
 				cluster->id_worker.erase(worker.locality.processId());
 				cluster->updateWorkerList.set(worker.locality.processId(), Optional<ProcessData>());

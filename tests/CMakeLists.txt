@@ -264,16 +264,22 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES status/separate_not_enough_servers.txt)
   add_fdb_test(TEST_FILES status/single_process_too_many_config_params.txt)
 
+  if(NOT OPEN_FOR_IDE)
+    add_test(
+      NAME multiversion_client/unit_tests
+      COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /fdbclient/multiversionclient/
+    )
+    add_test(
+      NAME threadsafe_threadfuture_to_future/unit_tests
+      COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /flow/safeThreadFutureToFuture/
+    )
+  endif()
+
   # Tests for partitioned transaction
   add_fdb_test(TEST_FILES ptxn/Driver.toml)
   add_fdb_test(TEST_FILES ptxn/Resolver.toml)
   add_fdb_test(TEST_FILES ptxn/Serialization.toml)
   add_fdb_test(TEST_FILES ptxn/TeamVersionTracker.toml)
-
-  add_test(
-    NAME multiversion_client/unit_tests
-    COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /fdbclient/multiversionclient/
-  )
 
   verify_testing()
   if (NOT OPEN_FOR_IDE AND NOT WIN32)
