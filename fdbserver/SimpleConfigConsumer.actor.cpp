@@ -102,8 +102,11 @@ class SimpleConfigConsumerImpl {
 	  : mostRecentVersion(0), cc("ConfigConsumer"), compactRequest("CompactRequest", cc),
 	    successfulChangeRequest("SuccessfulChangeRequest", cc), failedChangeRequest("FailedChangeRequest", cc),
 	    snapshotRequest("SnapshotRequest", cc) {
-		logger = traceCounters(
-		    "ConfigConsumerMetrics", UID{}, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigConsumerMetrics");
+		logger = traceCounters("ConfigConsumerMetrics",
+		                       deterministicRandom()->randomUniqueID(),
+		                       SERVER_KNOBS->WORKER_LOGGING_INTERVAL,
+		                       &cc,
+		                       "ConfigConsumerMetrics");
 	}
 
 public:

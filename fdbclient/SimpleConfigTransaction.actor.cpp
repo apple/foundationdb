@@ -31,6 +31,7 @@ class SimpleConfigTransactionImpl {
 	ConfigTransactionInterface cti;
 	int numRetries{ 0 };
 	bool committed{ false };
+	UID dID; // TODO: Use this
 
 	ACTOR static Future<Version> getReadVersion(SimpleConfigTransactionImpl* self) {
 		ConfigTransactionGetVersionRequest req;
@@ -135,6 +136,8 @@ public:
 		reset();
 	}
 
+	void debugTransaction(UID dID) { dID = dID; }
+
 }; // SimpleConfigTransactionImpl
 
 Future<Version> SimpleConfigTransaction::getReadVersion() {
@@ -208,7 +211,7 @@ void SimpleConfigTransaction::fullReset() {
 }
 
 void SimpleConfigTransaction::debugTransaction(UID dID) {
-	// TODO: Implement
+	impl->debugTransaction(dID);
 }
 
 void SimpleConfigTransaction::checkDeferredError() {

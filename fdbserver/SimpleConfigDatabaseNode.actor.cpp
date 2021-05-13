@@ -87,6 +87,25 @@ class SimpleConfigDatabaseNodeImpl {
 	ActorCollection actors{ false };
 	FlowLock globalLock;
 
+	UID id;
+	CounterCollection cc;
+
+	// Follower counters
+	Counter compactRequests;
+	Counter successfulChangeRequests;
+	Counter failedChangeRequests;
+	Counter snapshotRequests;
+	Counter committedVersionRequests;
+
+	// Transaction counters
+	Counter successfulCommits;
+	Counter failedCommits;
+	Counter setMutations;
+	Counter clearMutations;
+	Counter getValueRequests;
+	Counter newVersionRequests;
+	Future<Void> logger;
+
 	ACTOR static Future<Version> getLiveTransactionVersion(SimpleConfigDatabaseNodeImpl *self) {
 		Optional<Value> value = wait(self->kvStore->readValue(liveTransactionVersionKey));
 		state Version liveTransactionVersion = 0;
@@ -146,6 +165,7 @@ class SimpleConfigDatabaseNodeImpl {
 		state FlowLock::Releaser releaser(self->globalLock);
 		Version lastCompactedVersion = wait(getLastCompactedVersion(self));
 		if (req.lastSeenVersion < lastCompactedVersion) {
+			++self->failedChangeRequests;
 			req.reply.sendError(version_already_compacted());
 			return Void();
 		}
@@ -156,6 +176,7 @@ class SimpleConfigDatabaseNodeImpl {
 		    .detail("ReqLastSeenVersion", req.lastSeenVersion)
 		    .detail("CommittedVersion", committedVersion)
 		    .detail("NumMutations", versionedMutations.size());
+		++self->successfulChangeRequests;
 		req.reply.send(ConfigFollowerGetChangesReply{ committedVersion, versionedMutations });
 		return Void();
 	}
@@ -260,6 +281,7 @@ class SimpleConfigDatabaseNodeImpl {
 		state FlowLock::Releaser releaser(self->globalLock);
 		Version currentVersion = wait(getLiveTransactionVersion(self));
 		if (req.version != currentVersion) {
+			++self->failedCommits;
 			req.reply.sendError(transaction_too_old());
 			return Void();
 		}
@@ -267,10 +289,16 @@ class SimpleConfigDatabaseNodeImpl {
 		for (const auto &mutation : req.mutations) {
 			Key key = versionedMutationKey(req.version, index++);
 			Value value = BinaryWriter::toValue(mutation, IncludeVersion());
+			if (mutation.isSet()) {
+				++self->setMutations;
+			} else {
+				++self->clearMutations;
+			}
 			self->kvStore->set(KeyValueRef(key, value));
 		}
 		self->kvStore->set(KeyValueRef(committedVersionKey, BinaryWriter::toValue(req.version, IncludeVersion())));
 		wait(self->kvStore->commit());
+		++self->successfulCommits;
 		req.reply.send(Void());
 		return Void();
 	}
@@ -281,7 +309,7 @@ class SimpleConfigDatabaseNodeImpl {
 		state Version currentVersion = wait(getCommittedVersion(self));
 		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
 		    wait(getMutations(self, 0, currentVersion));
-		TraceEvent te("SimpleConfigNodeQueuedMutations");
+		TraceEvent te("SimpleConfigNodeQueuedMutations", self->id);
 		te.detail("Size", versionedMutations.size());
 		te.detail("CommittedVersion", currentVersion);
 		int index = 0;
@@ -301,9 +329,11 @@ class SimpleConfigDatabaseNodeImpl {
 			//wait(traceQueuedMutations(self));
 			choose {
 				when(ConfigTransactionGetVersionRequest req = waitNext(cti->getVersion.getFuture())) {
+					++self->newVersionRequests;
 					self->actors.add(getNewVersion(self, req));
 				}
 				when(ConfigTransactionGetRequest req = waitNext(cti->get.getFuture())) {
+					++self->getValueRequests;
 					self->actors.add(get(self, req));
 				}
 				when(ConfigTransactionCommitRequest req = waitNext(cti->commit.getFuture())) {
@@ -395,15 +425,18 @@ class SimpleConfigDatabaseNodeImpl {
 		loop {
 			choose {
 				when(ConfigFollowerGetVersionRequest req = waitNext(cfi->getVersion.getFuture())) {
+					++self->committedVersionRequests;
 					self->actors.add(getCommittedVersion(self, req));
 				}
 				when(ConfigFollowerGetSnapshotRequest req = waitNext(cfi->getSnapshot.getFuture())) {
+					++self->snapshotRequests;
 					self->actors.add(getSnapshot(self, req));
 				}
 				when(ConfigFollowerGetChangesRequest req = waitNext(cfi->getChanges.getFuture())) {
 					self->actors.add(getChanges(self, req));
 				}
 				when(ConfigFollowerCompactRequest req = waitNext(cfi->compact.getFuture())) {
+					++self->compactRequests;
 					self->actors.add(compact(self, req));
 				}
 				when(wait(self->actors.getResult())) { ASSERT(false); }
@@ -412,9 +445,17 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 public:
-	SimpleConfigDatabaseNodeImpl(std::string const& dataFolder) {
+	SimpleConfigDatabaseNodeImpl(std::string const& dataFolder)
+	  : id(deterministicRandom()->randomUniqueID()), cc("ConfigDatabaseNode"), compactRequests("CompactRequests", cc),
+	    successfulChangeRequests("SuccessfulChangeRequests", cc), failedChangeRequests("FailedChangeRequests", cc),
+	    snapshotRequests("SnapshotRequests", cc), committedVersionRequests("CommittedVersionRequests", cc),
+	    successfulCommits("SuccessfulCommits", cc), failedCommits("FailedCommits", cc),
+	    setMutations("SetMutations", cc), clearMutations("ClearMutations", cc),
+	    getValueRequests("GetValueRequests", cc), newVersionRequests("NewVersionRequests", cc) {
 		platform::createDirectory(dataFolder);
 		kvStore = keyValueStoreMemory(joinPath(dataFolder, "globalconf-"), UID{}, 500e6);
+		logger = traceCounters(
+		    "ConfigDatabaseNodeMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigDatabaseNode");
 	}
 
 	Future<Void> serve(ConfigTransactionInterface& cti) { return serve(this, &cti); }

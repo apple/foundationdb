@@ -35,6 +35,7 @@ class ConfigBroadcasterImpl {
 	std::unique_ptr<IConfigConsumer> consumer;
 	ActorCollection actors{ false };
 
+	UID id;
 	CounterCollection cc;
 	Counter compactRequest;
 	Counter successfulChangeRequest;
@@ -43,11 +44,12 @@ class ConfigBroadcasterImpl {
 	Future<Void> logger;
 
 	ConfigBroadcasterImpl()
-	  : lastCompactedVersion(0), mostRecentVersion(0), cc("ConfigBroadcaster"), compactRequest("CompactRequest", cc),
+	  : id(deterministicRandom()->randomUniqueID()), lastCompactedVersion(0), mostRecentVersion(0),
+	    cc("ConfigBroadcaster"), compactRequest("CompactRequest", cc),
 	    successfulChangeRequest("SuccessfulChangeRequest", cc), failedChangeRequest("FailedChangeRequest", cc),
 	    snapshotRequest("SnapshotRequest", cc) {
 		logger = traceCounters(
-		    "ConfigBroadcasterMetrics", UID{}, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigBroadcasterMetrics");
+		    "ConfigBroadcasterMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigBroadcasterMetrics");
 	}
 
 	ACTOR static Future<Void> serve(ConfigBroadcaster* self, ConfigBroadcasterImpl* impl, ConfigFollowerInterface cfi) {
@@ -69,7 +71,7 @@ class ConfigBroadcasterImpl {
 							break;
 						}
 						if (req.configClassSet.contains(mutation.getConfigClass())) {
-							TraceEvent(SevDebug, "BroadcasterAppendingMutationToSnapshotOutput")
+							TraceEvent(SevDebug, "BroadcasterAppendingMutationToSnapshotOutput", impl->id)
 							    .detail("ReqVersion", req.version)
 							    .detail("MutationVersion", version)
 							    .detail("ConfigClass", mutation.getConfigClass())
@@ -95,7 +97,7 @@ class ConfigBroadcasterImpl {
 					for (const auto& versionedMutation : impl->versionedMutations) {
 						if (versionedMutation.version > req.lastSeenVersion &&
 						    req.configClassSet.contains(versionedMutation.mutation.getConfigClass())) {
-							TraceEvent(SevDebug, "BroadcasterSendingChangeMutation")
+							TraceEvent(SevDebug, "BroadcasterSendingChangeMutation", impl->id)
 							    .detail("Version", versionedMutation.version)
 							    .detail("ReqLastSeenVersion", req.lastSeenVersion)
 							    .detail("ConfigClass", versionedMutation.mutation.getConfigClass())
@@ -117,7 +119,7 @@ class ConfigBroadcasterImpl {
 						if (version > req.version) {
 							break;
 						} else {
-							TraceEvent(SevDebug, "BroadcasterCompactingMutation")
+							TraceEvent(SevDebug, "BroadcasterCompactingMutation", impl->id)
 							    .detail("ReqVersion", req.version)
 							    .detail("MutationVersion", version)
 							    .detail("ConfigClass", mutation.getConfigClass())
