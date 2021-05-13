@@ -30,6 +30,14 @@ A helpful tip for debugging: if you run pytest with `--pdb`, then it will pause
 the tests at the first error which gives you a chance to run some `docker exec`
 commands to try and see what's wrong.
 
+There's a small chance that this will leak an image (especially if you interrupt the test with ctrl-c). Consider running
+
+```
+$ docker image prune
+```
+
+after.
+
 # Requirements
 
 docker, python
