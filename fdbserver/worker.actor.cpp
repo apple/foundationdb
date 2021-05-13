@@ -2023,8 +2023,8 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
                         std::string configPath) {
 	state vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
-	state LocalConfiguration localConfig(configPath, dataFolder, {}, UID{});
-	wait(localConfig.initialize());
+	state LocalConfiguration localConfig(configPath, {});
+	wait(localConfig.initialize(dataFolder, deterministicRandom()->randomUniqueID()));
 
 	actors.push_back(serveProtocolInfo());
 

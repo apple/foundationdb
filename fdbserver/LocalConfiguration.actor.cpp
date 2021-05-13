@@ -108,15 +108,23 @@ public:
 } // namespace
 
 class LocalConfigurationImpl : public NonCopyable {
-	IKeyValueStore* kvStore;
+	IKeyValueStore* kvStore{ nullptr };
 	Future<Void> initFuture;
 	FlowKnobs flowKnobs;
 	ClientKnobs clientKnobs;
 	ServerKnobs serverKnobs;
 	TestKnobs testKnobs;
+	Version mostRecentVersion{ 0 };
 	ManualKnobOverrides manualKnobOverrides;
 	ConfigKnobOverrides configKnobOverrides;
 	ActorCollection actors{ false };
+
+	CounterCollection cc;
+	Counter broadcasterChanges;
+	Counter snapshots;
+	Counter changeRequestsFetched;
+	Counter mutations;
+	Future<Void> logger;
 
 	ACTOR static Future<Void> saveConfigPath(LocalConfigurationImpl* self) {
 		self->kvStore->set(
@@ -144,7 +152,14 @@ class LocalConfigurationImpl : public NonCopyable {
 		return result;
 	}
 
-	ACTOR static Future<Void> initialize(LocalConfigurationImpl* self) {
+	ACTOR static Future<Void> initialize(LocalConfigurationImpl* self, std::string dataFolder, UID id) {
+		platform::createDirectory(dataFolder);
+		self->kvStore = keyValueStoreMemory(joinPath(dataFolder, "localconf-" + id.toString()), id, 500e6);
+		self->logger = traceCounters("LocalConfigurationMetrics",
+		                             id,
+		                             SERVER_KNOBS->WORKER_LOGGING_INTERVAL,
+		                             &self->cc,
+		                             "LocalConfigurationMetrics");
 		wait(self->kvStore->init());
 		state Optional<Value> storedConfigPathValue = wait(self->kvStore->readValue(configPathKey));
 		if (!storedConfigPathValue.present()) {
@@ -197,6 +212,7 @@ class LocalConfigurationImpl : public NonCopyable {
 	                                      std::map<ConfigKey, Value> snapshot,
 	                                      Version lastCompactedVersion) {
 		// TODO: Concurrency control?
+		++self->snapshots;
 		self->kvStore->clear(knobOverrideKeys);
 		for (const auto& [configKey, knobValue] : snapshot) {
 			self->configKnobOverrides.set(configKey.configClass, configKey.knobName, knobValue);
@@ -215,7 +231,9 @@ class LocalConfigurationImpl : public NonCopyable {
 	    Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,
 	    Version mostRecentVersion) {
 		// TODO: Concurrency control?
+		++self->changeRequestsFetched;
 		for (const auto& versionedMutation : versionedMutations) {
+			++self->mutations;
 			const auto &mutation = versionedMutation.mutation;
 			auto serializedKey = BinaryWriter::toValue(mutation.getKey(), IncludeVersion());
 			if (mutation.isSet()) {
@@ -240,7 +258,7 @@ class LocalConfigurationImpl : public NonCopyable {
 		// state Version lastSeenVersion = wait(impl->getLastSeenVersion());
 		state SimpleConfigConsumer consumer(broadcaster->get());
 		choose {
-			when(wait(broadcaster->onChange())) {}
+			when(wait(broadcaster->onChange())) { ++impl->broadcasterChanges; }
 			when(wait(brokenPromiseToNever(consumer.consume(*self)))) { ASSERT(false); }
 			when(wait(impl->actors.getResult())) { ASSERT(false); }
 		}
@@ -256,20 +274,20 @@ class LocalConfigurationImpl : public NonCopyable {
 
 public:
 	template <class ManualKnobOverrides>
-	LocalConfigurationImpl(std::string const& configPath,
-	                       std::string const& dataFolder,
-	                       ManualKnobOverrides&& manualKnobOverrides,
-	                       UID id)
-	  : configKnobOverrides(configPath), manualKnobOverrides(std::forward<ManualKnobOverrides>(manualKnobOverrides)) {
-		platform::createDirectory(dataFolder);
-		kvStore = keyValueStoreMemory(joinPath(dataFolder, "localconf-" + id.toString()), id, 500e6);
+	LocalConfigurationImpl(std::string const& configPath, ManualKnobOverrides&& manualKnobOverrides)
+	  : cc("LocalConfiguration"), broadcasterChanges("BroadcasterChanges", cc), snapshots("Snapshots", cc),
+	    changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc), configKnobOverrides(configPath),
+	    manualKnobOverrides(std::forward<ManualKnobOverrides>(manualKnobOverrides)) {}
+
+	~LocalConfigurationImpl() {
+		if (kvStore) {
+			kvStore->close();
+		}
 	}
 
-	~LocalConfigurationImpl() { kvStore->close(); }
-
-	Future<Void> initialize() {
+	Future<Void> initialize(std::string const& dataFolder, UID id) {
 		ASSERT(!initFuture.isValid());
-		initFuture = initialize(this);
+		initFuture = initialize(this, dataFolder, id);
 		return initFuture;
 	}
 
@@ -308,22 +326,16 @@ public:
 	}
 };
 
-LocalConfiguration::LocalConfiguration(std::string const& configPath,
-                                       std::string const& dataFolder,
-                                       std::map<Key, Value>&& manualKnobOverrides,
-                                       UID id)
-  : impl(std::make_unique<LocalConfigurationImpl>(configPath, dataFolder, std::move(manualKnobOverrides), id)) {}
+LocalConfiguration::LocalConfiguration(std::string const& configPath, std::map<Key, Value>&& manualKnobOverrides)
+  : impl(std::make_unique<LocalConfigurationImpl>(configPath, std::move(manualKnobOverrides))) {}
 
-LocalConfiguration::LocalConfiguration(std::string const& configPath,
-                                       std::string const& dataFolder,
-                                       std::map<Key, Value> const& manualKnobOverrides,
-                                       UID id)
-  : impl(std::make_unique<LocalConfigurationImpl>(configPath, dataFolder, manualKnobOverrides, id)) {}
+LocalConfiguration::LocalConfiguration(std::string const& configPath, std::map<Key, Value> const& manualKnobOverrides)
+  : impl(std::make_unique<LocalConfigurationImpl>(configPath, manualKnobOverrides)) {}
 
 LocalConfiguration::~LocalConfiguration() = default;
 
-Future<Void> LocalConfiguration::initialize() {
-	return impl->initialize();
+Future<Void> LocalConfiguration::initialize(std::string const& dataFolder, UID id) {
+	return impl->initialize(dataFolder, id);
 }
 
 FlowKnobs const& LocalConfiguration::getFlowKnobs() const {

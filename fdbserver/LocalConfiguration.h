@@ -45,16 +45,10 @@ class LocalConfiguration {
 	std::unique_ptr<class LocalConfigurationImpl> impl;
 
 public:
-	LocalConfiguration(std::string const& configPath,
-	                   std::string const& dataFolder,
-	                   std::map<Key, Value> const& manualKnobOverrides,
-	                   UID id);
-	LocalConfiguration(std::string const& configPath,
-	                   std::string const& dataFolder,
-	                   std::map<Key, Value>&& manualKnobOverrides,
-	                   UID id);
+	LocalConfiguration(std::string const& configPath, std::map<Key, Value> const& manualKnobOverrides);
+	LocalConfiguration(std::string const& configPath, std::map<Key, Value>&& manualKnobOverrides);
 	~LocalConfiguration();
-	Future<Void> initialize();
+	Future<Void> initialize(std::string const& dataFolder, UID id);
 	FlowKnobs const& getFlowKnobs() const;
 	ClientKnobs const& getClientKnobs() const;
 	ServerKnobs const& getServerKnobs() const;

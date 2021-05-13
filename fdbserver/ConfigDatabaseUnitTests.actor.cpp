@@ -98,18 +98,18 @@ Future<Void> runTestUpdates(ConfigStore* configStore, Version* version) {
 	return Void();
 }
 
-ACTOR Future<Void> runFirstLocalConfiguration(std::string configPath, UID uid) {
-	state LocalConfiguration localConfiguration(configPath, "./", testManualKnobOverrides, uid);
+ACTOR Future<Void> runFirstLocalConfiguration(std::string configPath, UID id) {
+	state LocalConfiguration localConfiguration(configPath, testManualKnobOverrides);
 	state Version version = 1;
-	wait(localConfiguration.initialize());
+	wait(localConfiguration.initialize("./", id));
 	wait(runTestUpdates(&localConfiguration, &version));
 	ASSERT(localConfiguration.getTestKnobs() == getExpectedTestKnobsFinal());
 	return Void();
 }
 
-ACTOR Future<Void> runSecondLocalConfiguration(std::string configPath, UID uid, TestKnobs const* expectedTestKnobs) {
-	state LocalConfiguration localConfiguration(configPath, "./", testManualKnobOverrides, uid);
-	wait(localConfiguration.initialize());
+ACTOR Future<Void> runSecondLocalConfiguration(std::string configPath, UID id, TestKnobs const* expectedTestKnobs) {
+	state LocalConfiguration localConfiguration(configPath, testManualKnobOverrides);
+	wait(localConfiguration.initialize("./", id));
 	ASSERT(localConfiguration.getTestKnobs() == *expectedTestKnobs);
 	return Void();
 }
@@ -131,16 +131,16 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Simple") {
 }
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Restart") {
-	state UID uid = deterministicRandom()->randomUniqueID();
-	wait(runFirstLocalConfiguration("class-A/class-B", uid));
-	wait(runSecondLocalConfiguration("class-A/class-B", uid, &getExpectedTestKnobsFinal()));
+	state UID id = deterministicRandom()->randomUniqueID();
+	wait(runFirstLocalConfiguration("class-A/class-B", id));
+	wait(runSecondLocalConfiguration("class-A/class-B", id, &getExpectedTestKnobsFinal()));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/FreshRestart") {
-	state UID uid = deterministicRandom()->randomUniqueID();
-	wait(runFirstLocalConfiguration("class-A/class-B", uid));
-	wait(runSecondLocalConfiguration("class-B/class-A", uid, &getExpectedTestKnobsEmptyConfig()));
+	state UID id = deterministicRandom()->randomUniqueID();
+	wait(runFirstLocalConfiguration("class-A/class-B", id));
+	wait(runSecondLocalConfiguration("class-B/class-A", id, &getExpectedTestKnobsEmptyConfig()));
 	return Void();
 }
 
@@ -148,10 +148,10 @@ TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/Simple") {
 	state ConfigBroadcaster broadcaster(ConfigFollowerInterface{});
 	state Reference<IDependentAsyncVar<ConfigFollowerInterface>> cfi =
 	    IDependentAsyncVar<ConfigFollowerInterface>::create(makeReference<AsyncVar<ConfigFollowerInterface>>());
-	state LocalConfiguration localConfiguration("class-A/class-B", "./", {}, deterministicRandom()->randomUniqueID());
+	state LocalConfiguration localConfiguration("class-A/class-B", testManualKnobOverrides);
 	state Version version = 1;
 	state ActorCollection actors(false);
-	wait(localConfiguration.initialize());
+	wait(localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
 	actors.add(broadcaster.serve(cfi->get()));
 	actors.add(localConfiguration.consume(cfi));
 	Future<Void> updater = runTestUpdates(&broadcaster, &version);
