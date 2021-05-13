@@ -31,7 +31,7 @@ Fixes
 Status
 ------
 * Added ``commit_batching_window_size`` to the proxy roles section of status to record statistics about commit batching window size on each proxy. `(PR #4735) <https://github.com/apple/foundationdb/pull/4735>`_
-* Added ``bounce_impact`` to the recovery_state section of status to report if the cluster is bounceable and if not, the reason for why it is not bounceable. `(PR #4770) <https://github.com/apple/foundationdb/pull/4770>`_
+* Added ``cluster.bounce_impact`` section to status to report if there will be any extra effects when bouncing the cluster, and if so, the reason for those effects. `(PR #4770) <https://github.com/apple/foundationdb/pull/4770>`_
 
 Bindings
 --------
