@@ -49,11 +49,14 @@ public:
 	                   std::map<Key, Value>&& manualKnobOverrides,
 	                   UID id);
 	~LocalConfiguration();
-	Future<Void> init();
+	Future<Void> initialize();
 	FlowKnobs const& getFlowKnobs() const;
 	ClientKnobs const& getClientKnobs() const;
 	ServerKnobs const& getServerKnobs() const;
 	TestKnobs const& getTestKnobs() const;
 	// TODO: Only one field of serverDBInfo is required, so improve encapsulation
 	Future<Void> consume(Reference<AsyncVar<ServerDBInfo> const> const&);
+	Future<Void> setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version lastCompactedVersion);
+	Future<Void> addVersionedMutations(Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,
+	                                   Version mostRecentVersion);
 };

@@ -2024,7 +2024,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 	state vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
 	state LocalConfiguration localConfig(configPath, dataFolder, {}, UID{});
-	wait(localConfig.init());
+	wait(localConfig.initialize());
 
 	actors.push_back(serveProtocolInfo());
 

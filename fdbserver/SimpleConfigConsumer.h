@@ -1,5 +1,5 @@
 /*
- * ConfigBroadcaster.h
+ * SimpleConfigConsumer.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,16 +20,20 @@
 
 #pragma once
 
-#include "fdbclient/CoordinationInterface.h"
-#include "fdbserver/ConfigBroadcaster.h"
-#include "fdbserver/CoordinationInterface.h"
-#include "fdbserver/ConfigFollowerInterface.h"
-#include "flow/flow.h"
+#include "fdbserver/IConfigConsumer.h"
+#include "fdbserver/LocalConfiguration.h"
 #include <memory>
 
-class IConfigConsumer {
+class SimpleConfigConsumer : public IConfigConsumer {
+	std::unique_ptr<class SimpleConfigConsumerImpl> impl;
+
 public:
-	virtual ~IConfigConsumer() = default;
-	virtual Future<Void> getInitialSnapshot(ConfigBroadcaster& broadcaster) = 0;
-	virtual Future<Void> consume(ConfigBroadcaster& broadcaster) = 0;
+	SimpleConfigConsumer(ConfigFollowerInterface const& cfi);
+	SimpleConfigConsumer(ClusterConnectionString const& ccs);
+	SimpleConfigConsumer(ServerCoordinators const& coordinators);
+	~SimpleConfigConsumer();
+	Future<Void> getInitialSnapshot(ConfigBroadcaster& broadcaster) override;
+	Future<Void> getInitialSnapshot(LocalConfiguration& localConfiguration);
+	Future<Void> consume(ConfigBroadcaster& broadcaster) override;
+	Future<Void> consume(LocalConfiguration& localConfiguration);
 };

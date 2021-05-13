@@ -19,7 +19,7 @@
  */
 
 #include "fdbserver/ConfigBroadcaster.h"
-#include "fdbserver/IConfigConsumer.h"
+#include "fdbserver/SimpleConfigConsumer.h"
 #include "flow/actorcompiler.h" // must be last include
 
 class ConfigBroadcasterImpl {

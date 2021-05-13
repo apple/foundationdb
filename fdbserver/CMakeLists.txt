@@ -96,6 +96,7 @@ set(FDBSERVER_SRCS
   ServerDBInfo.actor.h
   ServerDBInfo.h
   SimpleConfigConsumer.actor.cpp
+  SimpleConfigConsumer.h
   SimpleConfigDatabaseNode.actor.cpp
   SimulatedCluster.actor.cpp
   SimulatedCluster.h

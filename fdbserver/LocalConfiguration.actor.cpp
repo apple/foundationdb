@@ -19,9 +19,11 @@
  */
 
 #include "fdbclient/Knobs.h"
-#include "fdbserver/Knobs.h"
+#include "fdbclient/Tuple.h"
 #include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/LocalConfiguration.h"
+#include "fdbserver/SimpleConfigConsumer.h"
 #include "flow/Knobs.h"
 #include "flow/UnitTest.h"
 
@@ -107,7 +109,6 @@ public:
 
 class LocalConfigurationImpl {
 	IKeyValueStore* kvStore; // FIXME: fix leaks?
-	Version lastSeenVersion { 0 };
 	Future<Void> initFuture;
 	FlowKnobs flowKnobs;
 	ClientKnobs clientKnobs;
@@ -115,6 +116,7 @@ class LocalConfigurationImpl {
 	TestKnobs testKnobs;
 	ManualKnobOverrides manualKnobOverrides;
 	ConfigKnobOverrides configKnobOverrides;
+	ActorCollection actors{ false };
 
 	ACTOR static Future<Void> saveConfigPath(LocalConfigurationImpl* self) {
 		self->kvStore->set(
@@ -130,21 +132,20 @@ class LocalConfigurationImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> getLastSeenVersion(LocalConfigurationImpl *self) {
+	ACTOR static Future<Version> getLastSeenVersion(LocalConfigurationImpl* self) {
+		state Version result = 0;
 		state Optional<Value> lastSeenVersionValue = wait(self->kvStore->readValue(lastSeenVersionKey));
 		if (!lastSeenVersionValue.present()) {
-			self->lastSeenVersion = 0;
-			self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(self->lastSeenVersion, IncludeVersion())));
+			self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(result, IncludeVersion())));
 			wait(self->kvStore->commit());
-			return Void();
+		} else {
+			result = BinaryReader::fromStringRef<Version>(lastSeenVersionValue.get(), IncludeVersion());
 		}
-		self->lastSeenVersion = BinaryReader::fromStringRef<Version>(lastSeenVersionValue.get(), IncludeVersion());
-		return Void();
+		return result;
 	}
 
 	ACTOR static Future<Void> init(LocalConfigurationImpl* self) {
 		wait(self->kvStore->init());
-		wait(getLastSeenVersion(self));
 		state Optional<Value> storedConfigPathValue = wait(self->kvStore->readValue(configPathKey));
 		if (!storedConfigPathValue.present()) {
 			wait(saveConfigPath(self));
@@ -191,19 +192,27 @@ class LocalConfigurationImpl {
 		initializeKnobs();
 	}
 
-	ACTOR static Future<Void> applyKnobUpdates(LocalConfigurationImpl* self, ConfigFollowerGetSnapshotReply reply) {
+	ACTOR static Future<Void> setSnapshot(LocalConfigurationImpl* self,
+	                                      std::map<ConfigKey, Value> snapshot,
+	                                      Version lastCompactedVersion) {
+		// TODO: Concurrency control?
 		self->kvStore->clear(knobOverrideKeys);
-		for (const auto& [configKey, knobValue] : reply.snapshot) {
+		for (const auto& [configKey, knobValue] : snapshot) {
 			self->configKnobOverrides.set(configKey.configClass, configKey.knobName, knobValue);
 		}
-		self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(self->lastSeenVersion, IncludeVersion())));
+		self->kvStore->set(
+		    KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(lastCompactedVersion, IncludeVersion())));
 		wait(self->kvStore->commit());
 		self->updateInMemoryKnobs();
 		return Void();
 	}
 
-	ACTOR static Future<Void> applyKnobUpdates(LocalConfigurationImpl *self, ConfigFollowerGetChangesReply reply) {
-		for (const auto &versionedMutation : reply.versionedMutations) {
+	ACTOR static Future<Void> addVersionedMutations(
+	    LocalConfigurationImpl* self,
+	    Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,
+	    Version mostRecentVersion) {
+		// TODO: Concurrency control?
+		for (const auto& versionedMutation : versionedMutations) {
 			const auto &mutation = versionedMutation.mutation;
 			auto serializedKey = BinaryWriter::toValue(mutation.getKey(), IncludeVersion());
 			if (mutation.isSet()) {
@@ -214,33 +223,9 @@ class LocalConfigurationImpl {
 				self->configKnobOverrides.remove(mutation.getConfigClass(), mutation.getKnobName());
 			}
 		}
-		self->lastSeenVersion = reply.mostRecentVersion;
-		self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(reply.mostRecentVersion, IncludeVersion())));
+		self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(mostRecentVersion, IncludeVersion())));
 		wait(self->kvStore->commit());
 		self->updateInMemoryKnobs();
-		return Void();
-	}
-
-	ACTOR static Future<Void> fetchChanges(LocalConfigurationImpl *self, ConfigFollowerInterface broadcaster) {
-		try {
-			ConfigFollowerGetChangesReply changesReply =
-			    wait(broadcaster.getChanges.getReply(ConfigFollowerGetChangesRequest{
-			        self->lastSeenVersion, self->configKnobOverrides.getConfigClassSet() }));
-			// TODO: Avoid applying if there are no updates
-			wait(applyKnobUpdates(self, changesReply));
-		} catch (Error &e) {
-			if (e.code() == error_code_version_already_compacted) {
-				ConfigFollowerGetVersionReply versionReply = wait(broadcaster.getVersion.getReply(ConfigFollowerGetVersionRequest{}));
-				self->lastSeenVersion = versionReply.version;
-				ConfigFollowerGetSnapshotReply snapshotReply =
-				    wait(broadcaster.getSnapshot.getReply(ConfigFollowerGetSnapshotRequest{
-				        self->lastSeenVersion, self->configKnobOverrides.getConfigClassSet() }));
-				// TODO: Avoid applying if there are no updates
-				wait(applyKnobUpdates(self, snapshotReply));
-			} else {
-				throw e;
-			}
-		}
 		return Void();
 	}
 
@@ -252,22 +237,28 @@ class LocalConfigurationImpl {
 		}
 	}
 
-	ACTOR static Future<Void> consume(LocalConfigurationImpl* self,
+	ACTOR static Future<Void> consumeLoopIteration(LocalConfiguration* self,
+	                                               LocalConfigurationImpl* impl,
+	                                               Reference<AsyncVar<ConfigFollowerInterface>> broadcaster) {
+		// TODO: Cache lastSeenVersion in memory
+		// state Version lastSeenVersion = wait(impl->getLastSeenVersion());
+		state SimpleConfigConsumer consumer(broadcaster->get());
+		choose {
+			when(wait(broadcaster->onChange())) {}
+			when(wait(brokenPromiseToNever(consumer.consume(*self)))) { ASSERT(false); }
+			when(wait(impl->actors.getResult())) { ASSERT(false); }
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> consume(LocalConfiguration* self,
+	                                  LocalConfigurationImpl* impl,
 	                                  Reference<AsyncVar<ServerDBInfo> const> serverDBInfo) {
-		wait(self->initFuture);
-		state Future<ConfigFollowerGetChangesReply> getChangesReply = Never();
+		wait(impl->initFuture);
 		state Reference<AsyncVar<ConfigFollowerInterface>> broadcaster =
 		    makeReference<AsyncVar<ConfigFollowerInterface>>(serverDBInfo->get().configBroadcaster);
-		state Future<Void> monitor = monitorBroadcaster(serverDBInfo, broadcaster);
-		loop {
-			choose {
-				when(wait(broadcaster->onChange())) {}
-				when(wait(brokenPromiseToNever(fetchChanges(self, broadcaster->get())))) {
-					wait(delay(5.0)); // TODO: Make knob?
-				}
-				when(wait(monitor)) { ASSERT(false); }
-			}
-		}
+		impl->actors.add(monitorBroadcaster(serverDBInfo, broadcaster));
+		loop { wait(consumeLoopIteration(self, impl, broadcaster)); }
 	}
 
 public:
@@ -284,6 +275,20 @@ public:
 		ASSERT(!initFuture.isValid());
 		initFuture = init(this);
 		return initFuture;
+	}
+
+	Future<Void> setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version lastCompactedVersion) {
+		// TODO: Remove unnecessary copy
+		auto f = setSnapshot(this, std::move(snapshot), lastCompactedVersion);
+		actors.add(f);
+		return f;
+	}
+
+	Future<Void> addVersionedMutations(Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,
+	                                   Version mostRecentVersion) {
+		auto f = addVersionedMutations(this, versionedMutations, mostRecentVersion);
+		actors.add(f);
+		return f;
 	}
 
 	FlowKnobs const& getFlowKnobs() const {
@@ -306,8 +311,8 @@ public:
 		return testKnobs;
 	}
 
-	Future<Void> consume(Reference<AsyncVar<ServerDBInfo> const> const& serverDBInfo) {
-		return consume(this, serverDBInfo);
+	Future<Void> consume(LocalConfiguration& self, Reference<AsyncVar<ServerDBInfo> const> const& serverDBInfo) {
+		return consume(&self, this, serverDBInfo);
 	}
 };
 
@@ -319,7 +324,7 @@ LocalConfiguration::LocalConfiguration(std::string const& configPath,
 
 LocalConfiguration::~LocalConfiguration() = default;
 
-Future<Void> LocalConfiguration::init() {
+Future<Void> LocalConfiguration::initialize() {
 	return impl->init();
 }
 
@@ -340,7 +345,17 @@ TestKnobs const& LocalConfiguration::getTestKnobs() const {
 }
 
 Future<Void> LocalConfiguration::consume(Reference<AsyncVar<ServerDBInfo> const> const& serverDBInfo) {
-	return impl->consume(serverDBInfo);
+	return impl->consume(*this, serverDBInfo);
+}
+
+Future<Void> LocalConfiguration::setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version lastCompactedVersion) {
+	return impl->setSnapshot(std::move(snapshot), lastCompactedVersion);
+}
+
+Future<Void> LocalConfiguration::addVersionedMutations(
+    Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,
+    Version mostRecentVersion) {
+	return impl->addVersionedMutations(versionedMutations, mostRecentVersion);
 }
 
 #define init(knob, value) initKnob(knob, value, #knob)
@@ -442,5 +457,56 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ConfigKnobOverrides") {
 	configKnobOverrides.update(k1, k2);
 	ASSERT(k1.TEST_INT == 7);
 	ASSERT(k2.TEST2_INT == 10);
+	return Void();
+}
+
+namespace {
+
+std::map<ConfigKey, Value> startingTestSnapshot = {
+	{ ConfigKeyRef("class-A"_sr, "test_int"_sr), "1"_sr },
+	{ ConfigKeyRef("class-B"_sr, "test_int"_sr), "2"_sr },
+	{ ConfigKeyRef("class-C"_sr, "test_int"_sr), "3"_sr },
+};
+
+ACTOR Future<Void> runLocalConfig(std::string configPath, std::string dataFolder) {
+	state LocalConfiguration localConfiguration(configPath, dataFolder, {}, UID{});
+	wait(localConfiguration.initialize());
+	std::map<ConfigKey, Value> snapshot;
+	snapshot[ConfigKeyRef("class-A"_sr, "test_int"_sr)] = "5"_sr;
+	wait(localConfiguration.setSnapshot(std::move(snapshot), 1));
+	ASSERT(localConfiguration.getTestKnobs().TEST_INT == 5);
+	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
+	{
+		Tuple tuple;
+		tuple << "class-A"_sr;
+		tuple << "test_int"_sr;
+		auto mutation = ConfigMutationRef::createConfigMutation(tuple.pack(), "7"_sr);
+		versionedMutations.emplace_back_deep(versionedMutations.arena(), 2, mutation);
+	}
+	wait(localConfiguration.addVersionedMutations(versionedMutations, 2));
+	ASSERT(localConfiguration.getTestKnobs().TEST_INT == 7);
+	return Void();
+}
+
+} // namespace
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Simple") {
+	wait(runLocalConfig("class-A/class-B", "./"));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Restart") {
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/FreshRestart") {
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ConflictingOverrides") {
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Consume") {
 	return Void();
 }

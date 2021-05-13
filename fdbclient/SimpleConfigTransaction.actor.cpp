@@ -87,11 +87,11 @@ public:
 	}
 
 	void set(KeyRef key, ValueRef value) {
-		mutations.push_back_deep(mutations.arena(), ConfigMutationRef::createConfigMutationRef(key, value));
+		mutations.push_back_deep(mutations.arena(), ConfigMutationRef::createConfigMutation(key, value));
 	}
 
 	void clear(KeyRef key) {
-		mutations.emplace_back_deep(mutations.arena(), ConfigMutationRef::createConfigMutationRef(key, {}));
+		mutations.emplace_back_deep(mutations.arena(), ConfigMutationRef::createConfigMutation(key, {}));
 	}
 
 	Future<Optional<Value>> get(KeyRef key) { return get(this, key); }

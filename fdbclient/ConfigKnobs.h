@@ -85,7 +85,7 @@ public:
 	void setTimestamp(double timestamp) { this->timestamp = timestamp; }
 	bool isSet() const { return value.present(); }
 
-	static Standalone<ConfigMutationRef> createConfigMutationRef(KeyRef encodedKey, Optional<ValueRef> value) {
+	static Standalone<ConfigMutationRef> createConfigMutation(KeyRef encodedKey, Optional<ValueRef> value) {
 		auto key = ConfigKeyRef::decodeKey(encodedKey);
 		return ConfigMutationRef(key, value);
 	}
