@@ -33,9 +33,7 @@
 
 // This test starts a tLogs and runs commits, peeks, and pops. There is one test that calls
 // the tLog interface directly and another using the LogSystem's push interface.
-//
-// Multiple log groups are supported. In the future more than one shard could be supported
-// per log group, but right now tags are hardcoded to 0.
+// The push interface supports multiple log groups and multiple tags per log group.
 //
 // The test's purpose is to help with microbenchmarks and experimentation.
 // The storage server is assumed to run at infinite speed.
@@ -190,35 +188,39 @@ ACTOR Future<Void> TLogDriverContext::sendPushMessages_impl(std::shared_ptr<Test
 		UID spanID = deterministicRandom()->randomUniqueID();
 		toCommit.addTransactionInfo(spanID);
 
-		// just one shard
-		Tag tag(pTLogDriverContext->tagLocality, 1);
-		vector<Tag> tags = { tag };
-		toCommit.addTags(tags);
+		// for each shard
+		state uint32_t tagID = 0;
+		for (; tagID < pTLogDriverContext->numShardsPerGroup; tagID++) {
+			Tag tag(pTLogDriverContext->tagLocality, tagID);
+			vector<Tag> tags = { tag };
+			toCommit.addTags(tags);
 
-		toCommit.writeTypedMessage(m);
-
+			toCommit.writeTypedMessage(m);
+		}
 		Future<Version> loggingComplete =
-		    pTLogDriverContext->ls->push(prev, next, prev, prev, toCommit, deterministicRandom()->randomUniqueID());
+			pTLogDriverContext->ls->push(prev, next, prev, prev, toCommit, deterministicRandom()->randomUniqueID());
 		Version ver = wait(loggingComplete);
 		ASSERT_LE(ver, next);
 		prev++;
 		next++;
 	}
 
+	TraceEvent("RealTLogTest exit push", pTLogDriverContext->workerID);
+
 	return Void();
 }
 
-// send peek/pop through TLog interface for a given tag (shard).
+// send peek/pop through a given TLog interface (logGroupID) for a given tag (shardTag).
 ACTOR Future<Void> TLogDriverContext::peekCommitMessages_impl(std::shared_ptr<TestDriverContext> pTestDriverContext,
                                                               TLogDriverContext* pTLogDriverContext,
-                                                              uint16_t processID,
-															  uint32_t shardTag) {
-	state std::shared_ptr<TLogContext> pTLogContext = pTLogDriverContext->pTLogContextList[processID];
+                                                              uint16_t logGroupID,
+                                                              uint32_t shardTag) {
+	state std::shared_ptr<TLogContext> pTLogContext = pTLogDriverContext->pTLogContextList[logGroupID];
 	bool tLogReady = wait(pTLogContext->TLogStarted.getFuture());
 	ASSERT_EQ(tLogReady, true);
 
 	// peek from the same shard (tag)
-	state Tag tag(pTLogDriverContext->tagLocality, 1);
+	state Tag tag(pTLogDriverContext->tagLocality, shardTag);
 
 	state Version begin = 1;
 	state int i;
@@ -263,12 +265,16 @@ ACTOR Future<Void> TLogDriverContext::peekCommitMessages_impl(std::shared_ptr<Te
 		ASSERT_WE_THINK(m.param1 == expectedKey);
 		ASSERT_WE_THINK(m.param2 == expectedVal);
 
+		TraceEvent("RealTLogTest PeekResults", pTLogDriverContext->workerID).detail("LogGroupID", logGroupID).detail("Tag", tag);
+
 		// go directly to pop as there is no SS.
 		::TLogPopRequest requestPop(begin, begin, tag);
 		wait(pTLogContext->realTLogInterface.popMessages.getReply(requestPop));
 
 		begin++;
 	}
+
+	TraceEvent("RealTLogTest exit peek", pTLogDriverContext->workerID).detail("LogGroupID", logGroupID).detail("Tag", tag);
 
 	return Void();
 }
@@ -298,7 +304,7 @@ ACTOR Future<Void> getTLogGroupActor(std::shared_ptr<TestDriverContext> pTestDri
 	// start transactions
 	pTLogDriverContext->pTLogContextList[0]->TLogStarted.send(true);
 	Future<Void> commit = pTLogDriverContext->sendCommitMessages(pTestDriverContext, 0);
-	Future<Void> peek = pTLogDriverContext->peekCommitMessages(pTestDriverContext, 0, 1);
+	Future<Void> peek = pTLogDriverContext->peekCommitMessages(pTestDriverContext, 0, 0);
 	wait(commit && peek);
 
 	// tell tLog actor to initiate shutdown.
@@ -313,7 +319,7 @@ ACTOR Future<Void> getProxyActor(std::shared_ptr<TestDriverContext> pTestDriverC
                                  std::shared_ptr<TLogDriverContext> pTLogDriverContext) {
 	// create tLog
 	state uint16_t processID = 0;
-	for (; processID < pTLogDriverContext->numShardsPerGroup; processID++) {
+	for (; processID < pTLogDriverContext->numLogGroups; processID++) {
 		state std::shared_ptr<TLogContext> pTLogContext = pTLogDriverContext->pTLogContextList[processID];
 		bool isCreated = wait(pTLogContext->TLogCreated.getFuture());
 		ASSERT_EQ(isCreated, true);
@@ -339,14 +345,16 @@ ACTOR Future<Void> getProxyActor(std::shared_ptr<TestDriverContext> pTestDriverC
 	// start transactions
 	state std::vector<Future<Void>> actors;
 	actors.emplace_back(pTLogDriverContext->sendPushMessages(pTestDriverContext, processID));
-	for (processID = 0; processID < pTLogDriverContext->numShardsPerGroup; processID++) {
-		actors.emplace_back(pTLogDriverContext->peekCommitMessages(pTestDriverContext, processID, 1 /* tag */));
+	for (processID = 0; processID < pTLogDriverContext->numLogGroups; processID++) {
+		for (uint32_t tagID = 0; tagID < pTLogDriverContext->numShardsPerGroup; tagID++) {
+			actors.emplace_back(pTLogDriverContext->peekCommitMessages(pTestDriverContext, processID, tagID));
+		}
 	}
 
 	wait(waitForAll(actors));
 
 	// tell tLog actors to initiate shutdown.
-	for (processID = 0; processID < pTLogDriverContext->numShardsPerGroup; processID++) {
+	for (processID = 0; processID < pTLogDriverContext->numLogGroups; processID++) {
 		pTLogDriverContext->pTLogContextList[processID]->realTLogTestCompleted.send(true);
 	}
 
@@ -371,11 +379,11 @@ void startNewActors(std::vector<Future<Void>>& actors,
                     std::shared_ptr<TestDriverContext> pTestDriverContext,
                     std::shared_ptr<TLogDriverContext> pTLogDriverContext,
                     const TestTLogDriverOptions tLogOptions) {
-	for (int processID = 0; processID < pTLogDriverContext->numShardsPerGroup; processID++) {
+	for (int processID = 0; processID < pTLogDriverContext->numLogGroups; processID++) {
 		std::shared_ptr<TLogContext> pTLogContext(new TLogContext(processID));
 		pTLogDriverContext->pTLogContextList.push_back(pTLogContext);
 	}
-	for (int processID = 0; processID < pTLogDriverContext->numShardsPerGroup; processID++) {
+	for (int processID = 0; processID < pTLogDriverContext->numLogGroups; processID++) {
 		actors.emplace_back(getTLogCreateActor(pTestDriverContext, pTLogDriverContext, tLogOptions, processID));
 	}
 	actors.emplace_back(getProxyActor(pTestDriverContext, pTLogDriverContext));

@@ -54,8 +54,8 @@ struct TestTLogDriverOptions {
 		diskQueueExtension = params.get("diskQueueFileExtension").orDefault("ext");
 		kvStoreFilename = params.get("kvStoreFilename").orDefault("kvstore");
 		kvMemoryLimit = params.getDouble("kvMemoryLimit").orDefault(0x500e6);
-		numShardsPerGroup = params.getInt("numShardsPerGroup").orDefault(2);
-		numLogGroups = params.getInt("numLogGroups").orDefault(1);
+		numShardsPerGroup = params.getInt("numShardsPerGroup").orDefault(1);
+		numLogGroups = params.getInt("numLogGroups").orDefault(2);
 	}
 };
 
@@ -94,15 +94,16 @@ struct TLogDriverContext {
 	                                                TLogDriverContext* pTLogDriverContext,
 	                                                uint16_t processID);
 
-	Future<Void> peekCommitMessages(std::shared_ptr<TestDriverContext> pTestDriverContext, uint16_t processID, uint32_t tag) {
-		return peekCommitMessages_impl(pTestDriverContext, this, processID, tag);
+	Future<Void> peekCommitMessages(std::shared_ptr<TestDriverContext> pTestDriverContext,
+	                                uint16_t logGroupID,
+	                                uint32_t tag) {
+		return peekCommitMessages_impl(pTestDriverContext, this, logGroupID, tag);
 	}
 
 	ACTOR static Future<Void> peekCommitMessages_impl(std::shared_ptr<TestDriverContext> pTestDriverContext,
 	                                                  TLogDriverContext* pTLogDriverContext,
-	                                                  uint16_t processID,
-													uint32_t tag);
-
+	                                                  uint16_t logGroupID,
+	                                                  uint32_t tag);
 
 	UID logID;
 	UID workerID;
