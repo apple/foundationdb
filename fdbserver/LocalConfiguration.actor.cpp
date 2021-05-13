@@ -163,7 +163,8 @@ class LocalConfigurationImpl {
 		}
 		Standalone<RangeResultRef> range = wait(self->kvStore->readRange(knobOverrideKeys));
 		for (const auto &kv : range) {
-			auto configKey = BinaryReader::fromStringRef<ConfigKey>(kv.key, IncludeVersion());
+			auto configKey =
+			    BinaryReader::fromStringRef<ConfigKey>(kv.key.removePrefix(knobOverrideKeys.begin), IncludeVersion());
 			self->configKnobOverrides.set(configKey.configClass, configKey.knobName, kv.value);
 		}
 		self->updateInMemoryKnobs();
@@ -199,6 +200,7 @@ class LocalConfigurationImpl {
 		self->kvStore->clear(knobOverrideKeys);
 		for (const auto& [configKey, knobValue] : snapshot) {
 			self->configKnobOverrides.set(configKey.configClass, configKey.knobName, knobValue);
+			self->kvStore->set(KeyValueRef(BinaryWriter::toValue(configKey, IncludeVersion()), knobValue));
 		}
 		self->kvStore->set(
 		    KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(lastCompactedVersion, IncludeVersion())));
@@ -462,17 +464,10 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ConfigKnobOverrides") {
 
 namespace {
 
-std::map<ConfigKey, Value> startingTestSnapshot = {
-	{ ConfigKeyRef("class-A"_sr, "test_int"_sr), "1"_sr },
-	{ ConfigKeyRef("class-B"_sr, "test_int"_sr), "2"_sr },
-	{ ConfigKeyRef("class-C"_sr, "test_int"_sr), "3"_sr },
-};
-
 ACTOR Future<Void> runLocalConfig(std::string configPath, std::string dataFolder) {
 	state LocalConfiguration localConfiguration(configPath, dataFolder, {}, UID{});
 	wait(localConfiguration.initialize());
-	std::map<ConfigKey, Value> snapshot;
-	snapshot[ConfigKeyRef("class-A"_sr, "test_int"_sr)] = "5"_sr;
+	std::map<ConfigKey, Value> snapshot = { { ConfigKeyRef("class-A"_sr, "test_int"_sr), "5"_sr } };
 	wait(localConfiguration.setSnapshot(std::move(snapshot), 1));
 	ASSERT(localConfiguration.getTestKnobs().TEST_INT == 5);
 	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
