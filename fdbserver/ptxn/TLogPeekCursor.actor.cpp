@@ -119,7 +119,7 @@ ACTOR Future<bool> peekRemote(PeekRemoteContext peekRemoteContext) {
 	}
 }
 
-struct PeekMergedCursorContext {
+struct MergedPeekCursorContext {
 	MergedPeekCursor::CursorContainer* pCursorPtrs;
 	MergedPeekCursor::CursorHeap* pCursorHeap;
 };
@@ -132,7 +132,7 @@ void addCursorToCursorHeap(MergedPeekCursor::CursorContainer::iterator iter, Mer
 }
 
 // Peek remote for multiple cursors, if the cursor is not exhausted, remove it from the incoming cursor list.
-ACTOR Future<bool> peekRemoteForMergedCursor(PeekMergedCursorContext context) {
+ACTOR Future<bool> peekRemoteForMergedCursor(MergedPeekCursorContext context) {
 	state MergedPeekCursor::CursorContainer& cursorPtrs(*context.pCursorPtrs);
 	state MergedPeekCursor::CursorHeap& cursorHeap(*context.pCursorHeap);
 	state int numCursors(cursorPtrs.size());
@@ -171,13 +171,13 @@ ACTOR Future<bool> peekRemoteForMergedCursor(PeekMergedCursorContext context) {
 	return !cursorPtrs.empty();
 }
 
-struct PeekMergedServerTeamCursorContext : public PeekMergedCursorContext {
+struct MergedPeekServerTeamCursorContext : public MergedPeekCursorContext {
 	std::unordered_map<TeamID, CursorContainer::iterator>* pMapper;
 };
 
 // In addition to peekRemoteForMergedCursor, update the team ID/cursor mapping
-ACTOR Future<bool> peekRemoteForMergedServerTeamCursor(PeekMergedServerTeamCursorContext context) {
-	bool result = wait(peekRemoteForMergedCursor(static_cast<PeekMergedCursorContext>(context)));
+ACTOR Future<bool> peekRemoteForMergedServerTeamCursor(MergedPeekServerTeamCursorContext context) {
+	bool result = wait(peekRemoteForMergedCursor(static_cast<MergedPeekCursorContext>(context)));
 
 	// Since peekRemoteForMergedCursor will drop exhausted cursors, the team ID - cursor mapping should drop invalid
 	// references to those exhaustd cursors.
