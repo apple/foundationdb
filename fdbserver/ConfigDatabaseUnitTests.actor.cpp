@@ -91,6 +91,20 @@ Future<Void> addTestUpdates(ConfigStore* configStore, Version* lastWrittenVersio
 	return Void();
 }
 
+Value versionToValue(Version version) {
+	auto s = format("%ld", version);
+	return StringRef(reinterpret_cast<uint8_t const*>(s.c_str()), s.size());
+}
+
+template <class ConfigStore>
+Future<Void> addSequentialTestUpdates(ConfigStore &configStore, Version &lastWrittenVersion) {
+	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
+	++lastWrittenVersion;
+	appendVersionedMutation(versionedMutations, lastWrittenVersion, "class-A"_sr, "test_long"_sr, versionToValue(lastWrittenVersion));
+	appendVersionedMutation(versionedMutations, lastWrittenVersion, "class-B"_sr, "test_long"_sr, versionToValue(lastWrittenVersion * 10));
+	return configStore.addVersionedMutations(versionedMutations, lastWrittenVersion);
+}
+
 ACTOR template <class ConfigStore>
 Future<Void> runTestUpdates(ConfigStore* configStore, Version* lastWrittenVersion) {
 	wait(setTestSnapshot(configStore, lastWrittenVersion));
@@ -104,7 +118,12 @@ ACTOR Future<Void> runFirstLocalConfiguration(std::string configPath, UID id) {
 	state Version lastWrittenVersion = 0;
 	wait(localConfiguration.initialize("./", id));
 	wait(runTestUpdates(&localConfiguration, &lastWrittenVersion));
-	ASSERT(localConfiguration.getTestKnobs() == getExpectedTestKnobsFinal());
+	{
+		auto const *conf = &localConfiguration;
+		wait(waitUntil([conf] {
+			return conf->getTestKnobs() == getExpectedTestKnobsFinal();
+		}));
+	}
 	return Void();
 }
 
@@ -112,16 +131,14 @@ ACTOR Future<Void> runSecondLocalConfiguration(std::string configPath, UID id, T
 	state LocalConfiguration localConfiguration(configPath, testManualKnobOverrides);
 	wait(localConfiguration.initialize("./", id));
 	ASSERT(localConfiguration.getTestKnobs() == *expectedTestKnobs);
-	return Void();
-}
-
-ACTOR Future<Void> pollLocalConfiguration(LocalConfiguration* localConfiguration, TestKnobs const* expectedTestKnobs) {
-	loop {
-		if (localConfiguration->getTestKnobs() == *expectedTestKnobs) {
-			return Void();
-		}
-		wait(delay(1.0));
+	{
+		auto const *conf = &localConfiguration;
+		auto const *expected = expectedTestKnobs;
+		wait(waitUntil([conf, expected] {
+			return conf->getTestKnobs() == *expected;
+		}));
 	}
+	return Void();
 }
 
 } // namespace
@@ -167,9 +184,24 @@ public:
 	ConfigFollowerInterface const& getInterface() { return cfi; }
 };
 
-Value versionToValue(Version version) {
-	auto s = format("%ld", version);
-	return StringRef(reinterpret_cast<uint8_t const*>(s.c_str()), s.size());
+ACTOR template<class F>
+Future<Void> waitUntil(F isReady) {
+	loop {
+		if (isReady()) { return Void(); }
+		wait(delayJittered(0.1));
+	}
+}
+
+Future<Void> waitUntilConfigsMatch(LocalConfiguration const &fst, LocalConfiguration const &snd) {
+	return waitUntil([&fst, &snd] {
+		return fst.getTestKnobs() == snd.getTestKnobs();
+	});
+}
+
+Future<Void> waitUntilTestLongMatches(LocalConfiguration const &conf, int64_t expectedValue) {
+	return waitUntil([&conf, expectedValue]{
+		return conf.getTestKnobs().TEST_LONG == expectedValue;
+	});
 }
 
 } // namespace
@@ -181,7 +213,7 @@ TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/CheckpointedUpdates") {
 	state Reference<AsyncVar<ConfigFollowerInterface>> cfi = makeReference<AsyncVar<ConfigFollowerInterface>>();
 	state LocalConfiguration localConfigurationA("class-A", testManualKnobOverrides);
 	state LocalConfiguration localConfigurationB("class-B", testManualKnobOverrides);
-	state Version version = 1;
+	state Version version = 0;
 	state ActorCollection actors(false);
 	state Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
 	wait(localConfigurationA.initialize("./", deterministicRandom()->randomUniqueID()));
@@ -195,57 +227,28 @@ TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/CheckpointedUpdates") {
 	actors.add(broadcaster1.serve(cfi->get()));
 	actors.add(localConfigurationA.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(cfi)));
 	actors.add(localConfigurationB.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(cfi)));
-	while (version <= 10) {
+	while (version < 10) {
+		wait(addSequentialTestUpdates(broadcaster1, version));
 		versionedMutations = Standalone<VectorRef<VersionedConfigMutationRef>>{};
-		appendVersionedMutation(versionedMutations, version, "class-A"_sr, "test_long"_sr, versionToValue(version));
-		appendVersionedMutation(
-		    versionedMutations, version, "class-B"_sr, "test_long"_sr, versionToValue(version * 10));
-		wait(broadcaster1.addVersionedMutations(versionedMutations, version));
-		loop {
-			if (localConfigurationA.getTestKnobs().TEST_LONG == version &&
-			    localConfigurationB.getTestKnobs().TEST_LONG == (version * 10)) {
-				++version;
-				break;
-			}
-			wait(delayJittered(0.1));
-		}
+		wait(waitUntilTestLongMatches(localConfigurationA, version));
+		wait(waitUntilTestLongMatches(localConfigurationB, version * 10));
 	}
 
 	// Test changing broadcaster
 	cfi->set(ConfigFollowerInterface{});
 	actors.add(broadcaster2.serve(cfi->get()));
-	while (version <= 20) {
-		versionedMutations = Standalone<VectorRef<VersionedConfigMutationRef>>{};
-		appendVersionedMutation(versionedMutations, version, "class-A"_sr, "test_long"_sr, versionToValue(version));
-		appendVersionedMutation(
-		    versionedMutations, version, "class-B"_sr, "test_long"_sr, versionToValue(version * 10));
-		wait(broadcaster2.addVersionedMutations(versionedMutations, version));
-		loop {
-			if (localConfigurationA.getTestKnobs().TEST_LONG == version &&
-			    localConfigurationB.getTestKnobs().TEST_LONG == (version * 10)) {
-				++version;
-				break;
-			}
-			wait(delayJittered(0.1));
-		}
+	while (version < 20) {
+		wait(addSequentialTestUpdates(broadcaster2, version));
+		wait(waitUntilTestLongMatches(localConfigurationA, version));
+		wait(waitUntilTestLongMatches(localConfigurationB, version * 10));
 	}
 
 	// Test compaction
-	while (version <= 30) {
-		versionedMutations = Standalone<VectorRef<VersionedConfigMutationRef>>{};
-		appendVersionedMutation(versionedMutations, version, "class-A"_sr, "test_long"_sr, versionToValue(version));
-		appendVersionedMutation(
-		    versionedMutations, version, "class-B"_sr, "test_long"_sr, versionToValue(version * 10));
-		wait(broadcaster2.addVersionedMutations(versionedMutations, version));
-		++version;
+	while (version < 30) {
+		wait(addSequentialTestUpdates(broadcaster2, version));
 	}
 	wait(cfi->get().compact.getReply(ConfigFollowerCompactRequest{ version }));
-	loop {
-		if (localConfigurationA.getTestKnobs().TEST_LONG == 30 &&
-			localConfigurationB.getTestKnobs().TEST_LONG == 300) {
-			break;
-		}
-		wait(delayJittered(0.1));
-	}
+	wait(waitUntilTestLongMatches(localConfigurationA, 30));
+	wait(waitUntilTestLongMatches(localConfigurationB, 300));
 	return Void();
 }
