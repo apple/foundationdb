@@ -3352,16 +3352,29 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 					if (info.debugID.present())
 						g_traceBatch.addEvent(
 						    "TransactionDebug", info.debugID.get().first(), "NativeAPI.getExactRange.After");
-					RangeResult output(RangeResultRef(rep.data, true), rep.arena);
+					RangeResult output(RangeResultRef(rep.data, rep.more), rep.arena);
 
-					bool more = rep.more;
-					// If the reply says there is more but we know that we finished the shard, then fix rep.more
-					if (reverse && more && rep.data.size() > 0 &&
-					    output[output.size() - 1].key == locations[shard].first.begin) {
-						more = false;
+					int64_t bytes = 0;
+					for (const KeyValueRef& kv : output) {
+						bytes += kv.key.size() + kv.value.size();
 					}
 
-					if (more) {
+					cx->transactionBytesRead += bytes;
+					cx->transactionKeysRead += output.size();
+
+					// FIXME: figure out appropriate metrics for the client event log
+					// if( trLogInfo ) {
+					//	trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime,
+					// cx->clientLocality.dcId(), now()-startTime, bytes, begin.getKey(), end.getKey()));
+					//}
+
+					// If the reply says there is more but we know that we finished the shard, then fix rep.more
+					if (reverse && output.more && rep.data.size() > 0 &&
+					    output[output.size() - 1].key == locations[shard].first.begin) {
+						output.more = false;
+					}
+
+					if (output.more) {
 						if (!rep.data.size()) {
 							TraceEvent(SevError, "GetRangeStreamError")
 							    .detail("Reason", "More data indicated but no rows present")
@@ -3383,7 +3396,7 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 							    KeyRangeRef(keyAfter(output[output.size() - 1].key), locations[shard].first.end);
 					}
 
-					if (!more || locations[shard].first.empty()) {
+					if (!output.more || locations[shard].first.empty()) {
 						TEST(true); // getRangeStream (!more || locations[shard].first.empty())
 						const KeyRange& range = locations[shard].first;
 						if (shard == locations.size() - 1) {
@@ -3399,37 +3412,19 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 								}
 								output.arena().dependsOn(keys.arena());
 								output.readThrough = reverse ? keys.begin : keys.end;
-
-								int64_t bytes = 0;
-								for (const KeyValueRef& kv : output) {
-									bytes += kv.key.size() + kv.value.size();
-								}
-
-								cx->transactionBytesRead += bytes;
-								cx->transactionKeysRead += output.size();
-
-								// FIXME: figure out appropriate metrics for the client event log
-								// if( trLogInfo ) {
-								//	trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime,
-								//cx->clientLocality.dcId(), now()-startTime, bytes, begin.getKey(), end.getKey()));
-								//}
-
 								results->send(std::move(output));
 								results->finish();
 								return Void();
 							}
-
-							results->send(std::move(output));
 							keys = KeyRangeRef(begin, end);
 							breakAgain = true;
-							break;
 						} else {
-							output.arena().dependsOn(range.arena());
-							output.readThrough = reverse ? range.begin : range.end;
-							results->send(std::move(output));
 							++shard;
-							break;
 						}
+						output.arena().dependsOn(range.arena());
+						output.readThrough = reverse ? range.begin : range.end;
+						results->send(std::move(output));
+						break;
 					}
 
 					ASSERT(output.size());
@@ -3439,19 +3434,6 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 					if (keys.end == allKeys.end && reverse) {
 						output.readThroughEnd = true;
 					}
-					int64_t bytes = 0;
-					for (const KeyValueRef& kv : output) {
-						bytes += kv.key.size() + kv.value.size();
-					}
-
-					cx->transactionBytesRead += bytes;
-					cx->transactionKeysRead += output.size();
-
-					// FIXME: figure out appropriate metrics for the client event log
-					// if( trLogInfo ) {
-					//	trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, cx->clientLocality.dcId(),
-					// now()-startTime, bytes, begin.getKey(), end.getKey()));
-					//}
 					results->send(std::move(output));
 				}
 				if (breakAgain) {
