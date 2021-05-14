@@ -178,6 +178,12 @@ public:
 	ConfigFollowerInterface const& getInterface() { return cfi; }
 };
 
+Value versionToValue(Version version) {
+	auto s = format("%ld", version);
+	Value value = StringRef(reinterpret_cast<uint8_t const*>(s.c_str()), s.size());
+	return value;
+}
+
 } // namespace
 
 TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/Simple") {
@@ -203,6 +209,37 @@ TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/Simple") {
 		// TODO: Fix listener
 		when(wait(updater && listener)) {}
 		when(wait(actors.getResult())) { ASSERT(false); }
+	}
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/CheckpointedUpdates") {
+	state DummyConfigSource dummyConfigSource;
+	state ConfigBroadcaster broadcaster(dummyConfigSource.getInterface(), deterministicRandom()->randomUniqueID());
+	state Reference<IDependentAsyncVar<ConfigFollowerInterface>> cfi =
+	    IDependentAsyncVar<ConfigFollowerInterface>::create(makeReference<AsyncVar<ConfigFollowerInterface>>());
+	state LocalConfiguration localConfiguration("class-A/class-B", testManualKnobOverrides);
+	state Version version = 1;
+	state ActorCollection actors(false);
+	state Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
+	wait(localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
+	TraceEvent("StartedTestBroadcasterAndLocalConfig")
+	    .detail("Broadcaster", broadcaster.getID())
+	    .detail("LocalConfiguration", localConfiguration.getID());
+	actors.add(dummyConfigSource.serve());
+	actors.add(broadcaster.serve(cfi->get()));
+	actors.add(localConfiguration.consume(cfi));
+	while (version <= 100) {
+		versionedMutations = Standalone<VectorRef<VersionedConfigMutationRef>>{};
+		appendVersionedMutation(versionedMutations, version, "class-A"_sr, "test_int"_sr, versionToValue(version));
+		wait(broadcaster.addVersionedMutations(versionedMutations, version));
+		loop {
+			if (localConfiguration.getTestKnobs().TEST_INT == version) {
+				++version;
+				break;
+			}
+			wait(delayJittered(1.0));
+		}
 	}
 	return Void();
 }
