@@ -73,12 +73,12 @@ ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext
 
 		}
 
-		std::unordered_map<TeamID, Standalone<StringRef>> messages = serializer.getAllSerialized();
+		std::unordered_map<StorageTeamID, Standalone<StringRef>> messages = serializer.getAllSerialized();
 		for (const auto& [team, message] : messages) {
 			TLogCommitRequest request(deterministicRandom()->randomUniqueID(),
 			                          team,
-			                          encoded.arena(),
-			                          encoded,
+			                          message.arena(),
+			                          message,
 			                          version - versionGap,
 			                          version,
 			                          0,

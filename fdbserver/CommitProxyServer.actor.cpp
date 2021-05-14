@@ -970,7 +970,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				auto ranges = pProxyCommitData->keyInfo.intersectingRanges(clearRange);
 				auto firstRange = ranges.begin();
 				++firstRange;
-				std::set<ptxn::TeamID> teams; // write m to these teams
+				std::set<ptxn::StorageTeamID> teams; // write m to these teams
 				if (firstRange == ranges.end()) {
 					// Fast path
 					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m)

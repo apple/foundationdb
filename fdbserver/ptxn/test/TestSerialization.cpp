@@ -65,8 +65,8 @@ struct TestSerializerItem {
 bool testSubsequenceMutationItem() {
 	ptxn::ProxyTLogPushMessageSerializer serializer;
 
-	const ptxn::TeamID team1{ deterministicRandom()->randomUniqueID() };
-	const ptxn::TeamID team2{ deterministicRandom()->randomUniqueID() };
+	const ptxn::StorageTeamID team1{ deterministicRandom()->randomUniqueID() };
+	const ptxn::StorageTeamID team2{ deterministicRandom()->randomUniqueID() };
 
 	MutationRef mutation(MutationRef::SetValue, "KeyXX"_sr, "ValueYY"_sr);
 	serializer.writeMessage(mutation, team1);

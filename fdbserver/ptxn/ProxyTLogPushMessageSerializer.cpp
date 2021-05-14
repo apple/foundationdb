@@ -53,8 +53,8 @@ Standalone<StringRef> ProxyTLogPushMessageSerializer::getSerialized(const Storag
 	return writers[storageTeamID].getSerialized();
 }
 
-std::unordered_map<TeamID, Standalone<StringRef>> ProxyTLogPushMessageSerializer::getAllSerialized() {
-	std::unordered_map<TeamID, Standalone<StringRef>> results;
+std::unordered_map<StorageTeamID, Standalone<StringRef>> ProxyTLogPushMessageSerializer::getAllSerialized() {
+	std::unordered_map<StorageTeamID, Standalone<StringRef>> results;
 	for (const auto& [teamID, writer] : writers) {
 		if (!writer.isWritingCompleted()) {
 			completeMessageWriting(teamID);

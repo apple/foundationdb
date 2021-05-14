@@ -68,7 +68,7 @@ public:
 	void writeMessage(const MutationRef& mutation, const StorageTeamID& storageTeamID);
 
 	// Writes a new serialized mutation for a given TeamID.
-	void writeMessage(const StringRef& mutation, const TeamID& teamID);
+	void writeMessage(const StringRef& mutation, const StorageTeamID& teamID);
 
 	// Adds span context about transactions.
 	void addTransactionInfo(const SpanID& context) {
@@ -77,7 +77,7 @@ public:
 	}
 
 	// Writes the same (clear range) mutation to all "teams".
-	void writeMessage(const MutationRef& mutation, const std::set<TeamID>& teams);
+	void writeMessage(const MutationRef& mutation, const std::set<StorageTeamID>& teams);
 
 	// For a given TeamID, mark the serializer not accepting more mutations, and write the header.
 	void completeMessageWriting(const StorageTeamID& storageTeamID);
