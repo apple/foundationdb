@@ -90,7 +90,7 @@ ACTOR Future<Void> getTLogCreateActor(std::shared_ptr<TestDriverContext> pTestDr
 	Promise<Void> recovery;
 
 	// construct tLog.
-	state Future<Void> tl = ::ptxn::tLog({ { pTLogContext->persistentData, pTLogContext->persistentQueue } },
+	state Future<Void> tl = ::tLog({ { pTLogContext->persistentData, pTLogContext->persistentQueue } },
 	                                     dbInfoRef,
 	                                     localities,
 	                                     promiseStream,

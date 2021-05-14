@@ -26,13 +26,13 @@
 #include <memory>
 #include <vector>
 
+#include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbrpc/Locality.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbserver/ptxn/Config.h"
 #include "flow/Arena.h"
 #include "flow/FileIdentifier.h"
-#include "fdbrpc/Locality.h"
-#include "fdbclient/CommitTransaction.h"
 
 namespace ptxn {
 
