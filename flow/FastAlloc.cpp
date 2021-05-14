@@ -22,6 +22,7 @@
 #include "flow/Platform.h"
 #include "flow/flow.h"
 #include "flow/UnitTest.h"
+#include "flow/network.h"
 
 #ifdef VALGRIND
 // valgrindPrecise controls some extra instrumentation that causes valgrind to run more slowly but give better
@@ -95,8 +96,9 @@ void alignedFreeFast(void* ptr) noexcept {
 #include "jemalloc/jemalloc.h"
 const char* je_malloc_conf = "prof:true";
 void dumpHeapProfile(const char* file, const char* msg) {
+	double before = g_network->timer();
 	je_mallctl("prof.dump", nullptr, nullptr, &file, sizeof(file));
-	TraceEvent("HeapProfile").detail("FileName", file).detail("Msg", msg);
+	TraceEvent("HeapProfile").detail("FileName", file).detail("Msg", msg).detail("Delay", g_network->timer() - before);
 }
 void traceHeapMetrics() {
 	// Force cached stats to update
