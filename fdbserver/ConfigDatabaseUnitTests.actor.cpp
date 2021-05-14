@@ -207,7 +207,7 @@ TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/CheckpointedUpdates") {
 				++version;
 				break;
 			}
-			wait(delayJittered(1.0));
+			wait(delayJittered(0.1));
 		}
 	}
 
@@ -226,7 +226,7 @@ TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/CheckpointedUpdates") {
 				++version;
 				break;
 			}
-			wait(delayJittered(1.0));
+			wait(delayJittered(0.1));
 		}
 	}
 
@@ -245,7 +245,7 @@ TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/CheckpointedUpdates") {
 			localConfigurationB.getTestKnobs().TEST_LONG == 300) {
 			break;
 		}
-		wait(delayJittered(1.0));
+		wait(delayJittered(0.1));
 	}
 	return Void();
 }
