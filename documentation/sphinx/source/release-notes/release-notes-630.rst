@@ -4,10 +4,12 @@
 Release Notes
 #############
 
+
 6.3.13
 ======
 * Added ``commit_batching_window_size`` to the proxy roles section of status to record statistics about commit batching window size on each proxy. `(PR #4736) <https://github.com/apple/foundationdb/pull/4736>`_
 * The multi-version client now requires at most two client connections with version 6.2 or larger, regardless of how many external clients are configured. Clients older than 6.2 will continue to create an additional connection each. `(PR #4667) <https://github.com/apple/foundationdb/pull/4667>`_
+* Fix an accounting error that could potentially result in inaccuracies in priority busyness metrics. `(PR #4824) <https://github.com/apple/foundationdb/pull/4824>`_
 
 6.3.12
 ======
