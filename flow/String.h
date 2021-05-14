@@ -32,17 +32,17 @@ std::stringstream& _concatHelper(std::stringstream&& ss, const Arg& arg) {
 	return ss;
 }
 
-template <typename First, typename ...Args>
-std::stringstream& _concatHelper(std::stringstream&& ss, const First& first, const Args& ...args) {
+template <typename First, typename... Args>
+std::stringstream& _concatHelper(std::stringstream&& ss, const First& first, const Args&... args) {
 	ss << first;
 	return _concatHelper(std::move(ss), args...);
 }
 
-}   // anonymous namespace
+} // anonymous namespace
 
 // Concatencate a list of objects to string
-template <typename ...Args>
-std::string concatToString(const Args& ...args) {
+template <typename... Args>
+std::string concatToString(const Args&... args) {
 	return _concatHelper(std::stringstream(), args...).str();
 }
 

@@ -90,19 +90,18 @@ ACTOR Future<Void> getTLogCreateActor(std::shared_ptr<TestDriverContext> pTestDr
 	Promise<Void> recovery;
 
 	// construct tLog.
-	state Future<Void> tl = tLog(pTLogContext->persistentData,
-	                             pTLogContext->persistentQueue,
-	                             dbInfoRef,
-	                             localities,
-	                             promiseStream,
-	                             pTLogContext->tLogID,
-	                             pTLogDriverContext->workerID,
-	                             false, /* restoreFromDisk */
-	                             oldLog,
-	                             recovery,
-	                             pTLogDriverContext->diskQueueBasename,
-	                             isDegraded,
-	                             activeSharedTLog);
+	state Future<Void> tl = ::tLog({ { pTLogContext->persistentData, pTLogContext->persistentQueue } },
+	                                     dbInfoRef,
+	                                     localities,
+	                                     promiseStream,
+	                                     pTLogContext->tLogID,
+	                                     pTLogDriverContext->workerID,
+	                                     false, /* restoreFromDisk */
+	                                     oldLog,
+	                                     recovery,
+	                                     pTLogDriverContext->diskQueueBasename,
+	                                     isDegraded,
+	                                     activeSharedTLog);
 
 	// start tlog.
 	state InitializeTLogRequest initTlogReq = InitializeTLogRequest();

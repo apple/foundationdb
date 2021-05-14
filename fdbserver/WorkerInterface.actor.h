@@ -418,14 +418,33 @@ struct GetWorkersRequest {
 	}
 };
 
+namespace ptxn {
+
+struct TLogGroup {
+	TLogGroupID logGroupId;
+	std::unordered_map<StorageTeamID, std::vector<Tag>> storageTeams;
+
+	TLogGroup() {}
+	explicit TLogGroup(TLogGroupID logGroupId) : logGroupId(logGroupId) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, logGroupId, storageTeams);
+	}
+};
+
+} // namespace ptxn
+
 struct InitializeTLogRequest {
 	constexpr static FileIdentifier file_identifier = 15604392;
 	UID recruitmentID;
 	LogSystemConfig recoverFrom;
-	Version recoverAt;
 	Version knownCommittedVersion;
+	Version startVersion;
+	Version recoverAt; // This log generation need to store [startVersion, recoverAt] either from old disk queue or
+					   // other TLogs.
 	LogEpoch epoch;
-	std::vector<Tag> recoverTags;
+	std::vector<Tag> recoverTags; // The tags we need to recover for the above version range.
 	std::vector<Tag> allTags;
 	TLogVersion logVersion;
 	KeyValueStoreType storeType;
@@ -433,11 +452,17 @@ struct InitializeTLogRequest {
 	Tag remoteTag;
 	int8_t locality;
 	bool isPrimary;
-	Version startVersion;
+
 	int logRouterTags;
 	int txsTags;
 
+	LogSystemType logSystemType; // can be group partitioned.
+
 	ReplyPromise<struct TLogInterface> reply;
+
+	// ptxn related state
+	std::vector<ptxn::TLogGroup> tlogGroups;
+	ReplyPromise<struct ptxn::TLogInterface_PassivelyPull> ptxnReply;
 
 	InitializeTLogRequest() : recoverFrom(0) {}
 
@@ -460,7 +485,10 @@ struct InitializeTLogRequest {
 		           reply,
 		           logVersion,
 		           spillType,
-		           txsTags);
+		           txsTags,
+		           logSystemType,
+		           tlogGroups,
+		           ptxnReply);
 	}
 };
 
@@ -864,8 +892,7 @@ ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
 ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy,
                                   InitializeGrvProxyRequest req,
                                   Reference<AsyncVar<ServerDBInfo>> db);
-ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
-                        IDiskQueue* persistentQueue,
+ACTOR Future<Void> tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues,
                         Reference<AsyncVar<ServerDBInfo>> db,
                         LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests,
@@ -900,8 +927,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         UID workerID);
 }
 namespace oldTLog_6_0 {
-ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
-                        IDiskQueue* persistentQueue,
+ACTOR Future<Void> tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues,
                         Reference<AsyncVar<ServerDBInfo>> db,
                         LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests,
@@ -915,8 +941,22 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         Reference<AsyncVar<UID>> activeSharedTLog);
 }
 namespace oldTLog_6_2 {
-ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
-                        IDiskQueue* persistentQueue,
+ACTOR Future<Void> tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues,
+                        Reference<AsyncVar<ServerDBInfo>> db,
+                        LocalityData locality,
+                        PromiseStream<InitializeTLogRequest> tlogRequests,
+                        UID tlogId,
+                        UID workerID,
+                        bool restoreFromDisk,
+                        Promise<Void> oldLog,
+                        Promise<Void> recovered,
+                        std::string folder,
+                        Reference<AsyncVar<bool>> degraded,
+                        Reference<AsyncVar<UID>> activeSharedTLog);
+}
+
+namespace ptxn {
+ACTOR Future<Void> tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues,
                         Reference<AsyncVar<ServerDBInfo>> db,
                         LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests,

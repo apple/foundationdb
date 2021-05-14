@@ -45,9 +45,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   more recent packages (and thus receive various improvements) without having
  *   to change your code.<br><br>
  *  Warning: When using the multi-version client API, setting an API version that
- *   is not supported by a particular client library will prevent that client from 
+ *   is not supported by a particular client library will prevent that client from
  *   being used to connect to the cluster. In particular, you should not advance
- *   the API version of your application after upgrading your client until the 
+ *   the API version of your application after upgrading your client until the
  *   cluster has also been upgraded.<br>
  *  <h2>Getting a database</h2>
  *  Once the API version has been set, the easiest way to get a {@link Database} object to use is
@@ -183,8 +183,7 @@ public class FDB {
 		}
 		if(version < 510)
 			throw new IllegalArgumentException("API version not supported (minimum 510)");
-		if(version > 710)
-			throw new IllegalArgumentException("API version not supported (maximum 710)");
+		if (version > 710) throw new IllegalArgumentException("API version not supported (maximum 710)");
 
 		Select_API_version(version);
 		singleton = new FDB(version);

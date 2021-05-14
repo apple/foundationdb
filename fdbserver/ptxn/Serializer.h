@@ -164,7 +164,9 @@ public:
 
 		Standalone<StringRef> serialized =
 		    BinaryWriter::toValue(header, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
-		std::memcpy(reinterpret_cast<uint8_t*>(writer.getData()) + SerializerVersionOptionBytes, serialized.begin() + SerializerVersionOptionBytes, getMainHeaderBytes());
+		std::memcpy(reinterpret_cast<uint8_t*>(writer.getData()) + SerializerVersionOptionBytes,
+		            serialized.begin() + SerializerVersionOptionBytes,
+		            getMainHeaderBytes());
 	}
 
 	// Writes the section header, call only after completeSectionWriting()

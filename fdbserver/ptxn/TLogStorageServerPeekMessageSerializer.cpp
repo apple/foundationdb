@@ -28,7 +28,7 @@
 
 namespace ptxn {
 
-TLogStorageServerMessageSerializer::TLogStorageServerMessageSerializer(const TeamID& teamID) {
+TLogStorageServerMessageSerializer::TLogStorageServerMessageSerializer(const StorageTeamID& teamID) {
 	header.teamID = teamID;
 }
 
@@ -120,7 +120,7 @@ void TLogStorageServerMessageDeserializer::reset(const Arena& serializedArena_, 
 	endIterator = iterator(serializedArena, serialized, true);
 }
 
-const TeamID& TLogStorageServerMessageDeserializer::getTeamID() const {
+const StorageTeamID& TLogStorageServerMessageDeserializer::getTeamID() const {
 	return header.teamID;
 }
 

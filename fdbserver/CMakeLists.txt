@@ -111,6 +111,10 @@ set(FDBSERVER_SRCS
   ptxn/TeamVersionTracker.h
   ptxn/TLogInterface.cpp
   ptxn/TLogInterface.h
+  ptxn/TLogServer.actor.cpp
+  ptxn/ProxyTLogPushMessageSerializer.cpp
+  ptxn/ProxyTLogPushMessageSerializer.h
+  ptxn/Serializer.h
   ptxn/TLogPeekCursor.actor.cpp
   ptxn/TLogPeekCursor.h
   ptxn/TLogStorageServerPeekMessageSerializer.cpp

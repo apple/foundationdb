@@ -28,26 +28,35 @@ MessageTransferModel TLogInterfaceBase::getMessageTransferModel() const {
 
 void TLogInterfaceBase::initEndpointsImpl(std::vector<ReceiverPriorityPair>&& receivers) {
 	receivers.push_back(commit.getReceiver(TaskPriority::TLogCommit));
+	receivers.push_back(lock.getReceiver());
+	receivers.push_back(getQueuingMetrics.getReceiver(TaskPriority::TLogQueuingMetrics));
+	receivers.push_back(confirmRunning.getReceiver(TaskPriority::TLogConfirmRunning));
+	receivers.push_back(waitFailure.getReceiver());
+	receivers.push_back(recoveryFinished.getReceiver());
+	receivers.push_back(snapRequest.getReceiver());
 	FlowTransport::transport().addEndpoints(receivers);
 }
-
-TLogInterfaceBase::TLogInterfaceBase(const MessageTransferModel messageTransferModel_)
-  : id(deterministicRandom()->randomUniqueID()), messageTransferModel(messageTransferModel_) {}
 
 void TLogInterface_ActivelyPush::initEndpoints() {
 	TLogInterfaceBase::initEndpointsImpl({});
 }
 
 void TLogInterface_PassivelyPull::initEndpoints() {
-	TLogInterfaceBase::initEndpointsImpl({ pullRequests.getReceiver() });
+	TLogInterfaceBase::initEndpointsImpl({ peekMessages.getReceiver(TaskPriority::TLogPeek),
+	                                       popMessages.getReceiver(TaskPriority::TLogPop),
+	                                       disablePopRequest.getReceiver(),
+	                                       enablePopRequest.getReceiver() });
 }
 
-std::shared_ptr<TLogInterfaceBase> getNewTLogInterface(const MessageTransferModel model) {
+std::shared_ptr<TLogInterfaceBase> getNewTLogInterface(const MessageTransferModel model,
+                                                       UID id_,
+                                                       UID sharedTLogID_,
+                                                       LocalityData locality) {
 	switch (model) {
 	case MessageTransferModel::TLogActivelyPush:
 		return std::make_shared<TLogInterface_ActivelyPush>();
 	case MessageTransferModel::StorageServerActivelyPull:
-		return std::make_shared<TLogInterface_PassivelyPull>();
+		return std::make_shared<TLogInterface_PassivelyPull>(id_, sharedTLogID_, locality);
 	default:
 		throw internal_error_msg("Unsupported TLog Interface");
 	}

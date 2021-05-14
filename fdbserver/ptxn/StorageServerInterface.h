@@ -50,7 +50,7 @@ struct StorageServerPushRequest {
 	SpanID spanID;
 
 	// Team ID
-	TeamID teamID;
+	StorageTeamID teamID;
 
 	// Version of the mutations
 	Version version;
@@ -66,7 +66,7 @@ struct StorageServerPushRequest {
 
 	StorageServerPushRequest() {}
 	StorageServerPushRequest(const SpanID& spanID_,
-	                         const TeamID& teamID_,
+	                         const StorageTeamID& teamID_,
 	                         const Version version_,
 	                         Arena& arena_,
 	                         const VectorRef<MutationRef>& mutations_)

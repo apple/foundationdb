@@ -279,6 +279,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES ptxn/Driver.toml)
   add_fdb_test(TEST_FILES ptxn/Resolver.toml)
   add_fdb_test(TEST_FILES ptxn/Serialization.toml)
+  add_fdb_test(TEST_FILES ptxn/TLogServer.toml)
   add_fdb_test(TEST_FILES ptxn/TeamVersionTracker.toml)
 
   verify_testing()

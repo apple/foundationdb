@@ -37,8 +37,8 @@
 namespace {
 
 // Returns a randomly picked subset of "teams".
-std::vector<ptxn::TeamID> getRandomTeams(const std::vector<ptxn::TeamID>& teams) {
-	std::vector<ptxn::TeamID> results;
+std::vector<ptxn::StorageTeamID> getRandomTeams(const std::vector<ptxn::StorageTeamID>& teams) {
+	std::vector<ptxn::StorageTeamID> results;
 	for (const auto& team : teams) {
 		if (deterministicRandom()->coinflip()) {
 			results.push_back(team);
@@ -53,7 +53,7 @@ std::vector<ResolveTransactionBatchRequest> makeTxnBatch(Version prevVersion,
                                                          Version beginVersion,
                                                          int n,
                                                          int64_t increment,
-                                                         const std::vector<ptxn::TeamID>& teams) {
+                                                         const std::vector<ptxn::StorageTeamID>& teams) {
 	std::vector<ResolveTransactionBatchRequest> batch(n);
 
 	Version current = beginVersion;
@@ -90,7 +90,7 @@ TEST_CASE("fdbserver/ptxn/test/resolver") {
 	state const int totalRequests = 10;
 	state std::vector<Future<Void>> actors;
 	state std::shared_ptr<ptxn::test::TestDriverContext> context;
-	state std::vector<ptxn::TeamID> teams;
+	state std::vector<ptxn::StorageTeamID> teams;
 	state const int totalTeams = deterministicRandom()->randomInt(10, 1000);
 
 	ptxn::test::TestDriverOptions options(params);
@@ -146,7 +146,7 @@ TEST_CASE("fdbserver/ptxn/test/resolver") {
 	}
 
 	// Verify team's previous commit versions (PCVs) are correct.
-	std::map<ptxn::TeamID, Version> pcv; // previous commit version
+	std::map<ptxn::StorageTeamID, Version> pcv; // previous commit version
 	for (const auto& team : teams) {
 		pcv[team] = lastEpochEnd;
 	}

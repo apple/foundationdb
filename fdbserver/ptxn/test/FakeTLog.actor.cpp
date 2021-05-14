@@ -67,7 +67,7 @@ void processTLogCommitRequest(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
 }
 
 Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogContext> pFakeTLogContext) {
-	const TeamID teamID = request.teamID;
+	const StorageTeamID teamID = request.teamID;
 	if (pFakeTLogContext->mutations.find(request.teamID) == pFakeTLogContext->mutations.end()) {
 		std::cout << std::endl << "Team ID " << request.teamID.toString() << " not found." << std::endl;
 		request.reply.sendError(teamid_not_found());

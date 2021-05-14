@@ -378,6 +378,7 @@ struct TLogOptions {
 			break;
 		case TLogVersion::V5:
 		case TLogVersion::V6:
+		case TLogVersion::V7:
 			toReturn = "V_" + boost::lexical_cast<std::string>(version);
 			break;
 		}
@@ -401,6 +402,8 @@ TLogFn tLogFnForOptions(TLogOptions options) {
 	case TLogVersion::V5:
 	case TLogVersion::V6:
 		return tLog;
+	case TLogVersion::V7:
+		return ptxn::tLog;
 	default:
 		ASSERT(false);
 	}
@@ -1153,6 +1156,8 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				                                  diskQueueWarnSize);
 				filesClosed.add(kv->onClosed());
 				filesClosed.add(queue->onClosed());
+				std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues;
+				persistentDataAndQueues.emplace_back(kv, queue);
 
 				std::map<std::string, std::string> details;
 				details["StorageEngine"] = s.storeType.toString();
@@ -1165,8 +1170,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				// FIXME: Shouldn't if logData.first isValid && !isReady, shouldn't we
 				// be sending a fake InitializeTLogRequest rather than calling tLog() ?
 				Future<Void> tl =
-				    tLogFn(kv,
-				           queue,
+				    tLogFn(persistentDataAndQueues,
 				           dbInfo,
 				           locality,
 				           !logData.actor.isValid() || logData.actor.isReady() ? logData.requests
@@ -1444,6 +1448,8 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					// different role type for the shared actor
 					startRole(Role::SHARED_TRANSACTION_LOG, logId, interf.id(), details);
 
+					// TODO: create kv and disk queue per TLog group.
+					std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues;
 					const StringRef prefix =
 					    req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
 					std::string filename =
@@ -1460,8 +1466,8 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					filesClosed.add(data->onClosed());
 					filesClosed.add(queue->onClosed());
 
-					Future<Void> tLogCore = tLogFn(data,
-					                               queue,
+					persistentDataAndQueues.emplace_back(data, queue);
+					Future<Void> tLogCore = tLogFn(persistentDataAndQueues,
 					                               dbInfo,
 					                               locality,
 					                               logData.requests,

@@ -45,8 +45,8 @@
 
 namespace ptxn::test {
 
-TeamID getNewTeamID() {
-	return TeamID{ deterministicRandom()->randomUniqueID() };
+StorageTeamID getNewTeamID() {
+	return StorageTeamID{ deterministicRandom()->randomUniqueID() };
 }
 
 std::ostream& operator<<(std::ostream& stream, const TestDriverOptions& option) {
@@ -76,7 +76,7 @@ std::ostream& operator<<(std::ostream& stream, const TestDriverOptions& option) 
 	return stream;
 }
 
-CommitRecord::CommitRecord(const Version& version_, const TeamID& teamID_, std::vector<MutationRef>&& mutations_)
+CommitRecord::CommitRecord(const Version& version_, const StorageTeamID& teamID_, std::vector<MutationRef>&& mutations_)
   : version(version_), teamID(teamID_), mutations(std::move(mutations_)) {}
 
 bool CommitValidationRecord::validated() const {
@@ -103,9 +103,20 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 
 	// Prepare TLogInterfaces
 	context->numTLogs = options.numTLogs;
+	context->numTLogGroups = options.numTLogGroups;
+	// For now, each tlog group spans all the TLogs, i.e., number of group numbers == num of TLogs
 	for (int i = 0; i < context->numTLogs; ++i) {
-		context->tLogInterfaces.push_back(getNewTLogInterface(context->messageTransferModel));
+		context->tLogInterfaces.push_back(getNewTLogInterface(context->messageTransferModel,
+		                                                      deterministicRandom()->randomUniqueID(),
+		                                                      deterministicRandom()->randomUniqueID(),
+		                                                      LocalityData()));
 		context->tLogInterfaces.back()->initEndpoints();
+	}
+
+	for (int i = 0; i < context->numTLogGroups; ++i) {
+		context->tLogGroups.push_back(TLogGroup(deterministicRandom()->randomUniqueID()));
+		context->tLogGroupLeaders[context->tLogGroups.back().logGroupId] =
+		    context->tLogInterfaces[deterministicRandom()->randomInt(0, context->numTLogs)];
 	}
 
 	// Prepare StorageServerInterfaces
@@ -120,24 +131,32 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 		int numInterfaces = interface.size();
 		int index = 0;
 		for (int i = 0; i < context->numTeamIDs; ++i) {
-			const TeamID& teamID = context->teamIDs[i];
+			const StorageTeamID& teamID = context->teamIDs[i];
 			mapper[teamID] = interface[index];
 
 			++index;
 			index %= numInterfaces;
 		}
 	};
-	assignTeamToInterface(context->teamIDTLogInterfaceMapper, context->tLogInterfaces);
 	assignTeamToInterface(context->teamIDStorageServerInterfaceMapper, context->storageServerInterfaces);
 
+	for (int i = 0, index = 0; i < context->numTeamIDs; ++i) {
+		const StorageTeamID& teamID = context->teamIDs[i];
+		TLogGroup& tLogGroup = context->tLogGroups[index];
+		context->teamIDTLogInterfaceMapper[teamID] = context->tLogGroupLeaders[tLogGroup.logGroupId];
+		// Ignore tags for now.
+		tLogGroup.storageTeams[teamID] = {};
+		++index;
+		index %= context->tLogGroups.size();
+	}
 	return context;
 }
 
-std::shared_ptr<TLogInterfaceBase> TestDriverContext::getTLogInterface(const TeamID& teamID) {
+std::shared_ptr<TLogInterfaceBase> TestDriverContext::getTLogInterface(const StorageTeamID& teamID) {
 	return teamIDTLogInterfaceMapper.at(teamID);
 }
 
-std::shared_ptr<StorageServerInterfaceBase> TestDriverContext::getStorageServerInterface(const TeamID& teamID) {
+std::shared_ptr<StorageServerInterfaceBase> TestDriverContext::getStorageServerInterface(const StorageTeamID& teamID) {
 	return teamIDStorageServerInterfaceMapper.at(teamID);
 }
 
@@ -229,7 +248,7 @@ bool isAllRecordsValidated(const std::vector<CommitRecord>& records) {
 
 void verifyMutationsInRecord(std::vector<CommitRecord>& records,
                              const Version& version,
-                             const TeamID& teamID,
+                             const StorageTeamID& teamID,
                              const std::vector<MutationRef>& mutations,
                              std::function<void(CommitValidationRecord&)> validateUpdater) {
 	for (auto& record : records) {
@@ -285,9 +304,9 @@ const int NUM_VERSIONS = 1000;
 const int INITIAL_VERSION = 10000;
 const int NUM_MUTATIONS_PER_VERSION = 100;
 const int NUM_PEEK_TIMES = 1000;
-const std::array<TeamID, 3> TEAM_IDS = { getNewTeamID(), getNewTeamID(), getNewTeamID() };
+const std::array<StorageTeamID, 3> TEAM_IDS = { getNewTeamID(), getNewTeamID(), getNewTeamID() };
 
-TeamID getRandomTeamID() {
+StorageTeamID getRandomTeamID() {
 	return TEAM_IDS[deterministicRandom()->randomInt(0, TEAM_IDS.size())];
 }
 
@@ -304,7 +323,7 @@ void fillMutations(std::shared_ptr<FakeTLogContext>& pContext, std::vector<Versi
 
 		Subsequence subsequence = 1;
 		for (int j = 0; j < NUM_MUTATIONS_PER_VERSION; ++j) {
-			TeamID teamID = getRandomTeamID();
+			StorageTeamID teamID = getRandomTeamID();
 			StringRef key = StringRef(pContext->persistenceArena, deterministicRandom()->randomAlphaNumeric(10));
 			StringRef value =
 			    StringRef(pContext->persistenceArena,
@@ -328,7 +347,10 @@ void fillMutations(std::shared_ptr<FakeTLogContext>& pContext, std::vector<Versi
 }
 
 Future<Void> initializeTLogForPeekTest(MessageTransferModel transferModel, std::shared_ptr<FakeTLogContext>& pContext) {
-	pContext->pTLogInterface = getNewTLogInterface(transferModel);
+	pContext->pTLogInterface = getNewTLogInterface(transferModel,
+	                                               deterministicRandom()->randomUniqueID(),
+	                                               deterministicRandom()->randomUniqueID(),
+	                                               LocalityData());
 	pContext->pTLogInterface->initEndpoints();
 
 	return getFakeTLogActor(transferModel, pContext);
@@ -342,7 +364,7 @@ ACTOR Future<Void> peekAndCheck(std::shared_ptr<FakeTLogContext> pContext, std::
 
 	loop {
 		state Optional<UID> debugID(deterministicRandom()->randomUniqueID());
-		state TeamID teamID(getRandomTeamID());
+		state StorageTeamID teamID(getRandomTeamID());
 		state size_t beginVersionIndex(deterministicRandom()->randomInt(0, versions.size() - 1));
 		state size_t endVersionIndex(
 		    std::min(beginVersionIndex + deterministicRandom()->randomInt(1, 10), versions.size()));
@@ -405,7 +427,7 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/ServerTeamPeekCursor") {
 	state std::shared_ptr<ptxn::test::FakeTLogContext> pContext(std::make_shared<ptxn::test::FakeTLogContext>());
 	state std::vector<Future<Void>> actors;
 	state Arena arena;
-	state ptxn::TeamID teamID(ptxn::test::tlogPeek::TEAM_IDS[0]);
+	state ptxn::StorageTeamID teamID(ptxn::test::tlogPeek::TEAM_IDS[0]);
 
 	ptxn::test::tlogPeek::fillMutations(pContext, versions);
 	// Limit the size of reply, to force multiple peeks
@@ -417,7 +439,9 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/ServerTeamPeekCursor") {
 	    ptxn::test::tlogPeek::INITIAL_VERSION, teamID, pContext->pTLogInterface.get());
 	state size_t index = 0;
 	loop {
-		std::cout << std::endl << "Querying team " << teamID.toString() << " from version: " << pCursor->getLastVersion() << std::endl;
+		std::cout << std::endl
+		          << "Querying team " << teamID.toString() << " from version: " << pCursor->getLastVersion()
+		          << std::endl;
 		state bool remoteDataAvailable = wait(pCursor->remoteMoreAvailable());
 		if (!remoteDataAvailable) {
 			std::cout << " TLog reported no more mutations available." << std::endl;

@@ -48,7 +48,7 @@ struct FakeTLogContext {
 	size_t maxBytesPerPeek = 1024 * 1024;
 
 	Arena persistenceArena;
-	std::unordered_map<TeamID, VectorRef<VersionSubsequenceMutation>> mutations;
+	std::unordered_map<StorageTeamID, VectorRef<VersionSubsequenceMutation>> mutations;
 };
 
 ACTOR Future<Void> fakeTLog_ActivelyPush(std::shared_ptr<FakeTLogContext> pFakeTLogContext);

@@ -27,7 +27,7 @@ namespace ptxn {
 
 TeamVersionTracker::TeamVersionTracker() {}
 
-void TeamVersionTracker::addTeams(const std::vector<TeamID>& teams, Version beginVersion) {
+void TeamVersionTracker::addTeams(const std::vector<StorageTeamID>& teams, Version beginVersion) {
 	if (beginVersion > maxCV) {
 		maxCV = beginVersion;
 	}
@@ -37,12 +37,13 @@ void TeamVersionTracker::addTeams(const std::vector<TeamID>& teams, Version begi
 	}
 }
 
-std::map<TeamID, Version> TeamVersionTracker::updateTeams(const std::vector<TeamID>& teams, Version commitVersion) {
+std::map<StorageTeamID, Version> TeamVersionTracker::updateTeams(const std::vector<StorageTeamID>& teams,
+                                                                 Version commitVersion) {
 	if (commitVersion > maxCV) {
 		maxCV = commitVersion;
 	}
 
-	std::map<TeamID, Version> results;
+	std::map<StorageTeamID, Version> results;
 	for (const auto& team : teams) {
 		auto it = versions.find(team);
 		ASSERT_WE_THINK(it != versions.end() && it->second < commitVersion);
@@ -54,9 +55,9 @@ std::map<TeamID, Version> TeamVersionTracker::updateTeams(const std::vector<Team
 }
 
 // TODO: reduce O(N) to O(1).
-std::pair<TeamID, Version> TeamVersionTracker::mostLaggingTeam() const {
+std::pair<StorageTeamID, Version> TeamVersionTracker::mostLaggingTeam() const {
 	Version v = invalidVersion;
-	TeamID team;
+	StorageTeamID team;
 
 	for (const auto& [tid, cv] : versions) {
 		if (v == invalidVersion || v > cv) {
@@ -64,7 +65,7 @@ std::pair<TeamID, Version> TeamVersionTracker::mostLaggingTeam() const {
 			team = tid;
 		}
 	}
-	return {team, v};
+	return { team, v };
 }
 
 } // namespace ptxn
@@ -78,13 +79,13 @@ TEST_CASE("fdbserver/ptxn/test/versiontracker") {
 		std::cout << "beginVersion: " << beginVersion << "\n";
 
 		ptxn::TeamVersionTracker tracker;
-		std::vector<ptxn::TeamID> teams;
+		std::vector<ptxn::StorageTeamID> teams;
 		for (int i = 0; i < 5; i++) {
 			teams.emplace_back(0, i);
 		}
 		tracker.addTeams(teams, beginVersion);
 
-		ptxn::TeamID a(0, 0), b(0, 1), c(0, 2), d(0, 3), e(0, 4);
+		ptxn::StorageTeamID a(0, 0), b(0, 1), c(0, 2), d(0, 3), e(0, 4);
 		teams.clear();
 		teams.push_back(a);
 		const Version cv1 = 10;
@@ -120,7 +121,7 @@ TEST_CASE("fdbserver/ptxn/test/versiontracker") {
 		ASSERT(teamVersion.first == a && teamVersion.second == cv1);
 
 		// Non-existent team CV == -1
-		ASSERT_EQ(tracker.getCommitVersion(ptxn::TeamID(1, 0)), invalidVersion);
+		ASSERT_EQ(tracker.getCommitVersion(ptxn::StorageTeamID(1, 0)), invalidVersion);
 	}
 
 	return Void();

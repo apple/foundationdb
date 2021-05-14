@@ -34,7 +34,7 @@ namespace {
 const Standalone<StringRef>& emptyCursorHeader() {
 	static Standalone<StringRef> empty;
 	if (empty.size() == 0) {
-		TeamID teamID;
+		StorageTeamID teamID;
 		ptxn::TLogStorageServerMessageSerializer serializer(teamID);
 		serializer.completeMessageWriting();
 		empty = serializer.getSerialized();
@@ -44,7 +44,7 @@ const Standalone<StringRef>& emptyCursorHeader() {
 
 struct PeekRemoteContext {
 	const Optional<UID> debugID;
-	const TeamID teamID;
+	const StorageTeamID teamID;
 
 	// The last version being processed, the peek will request lastVersion + 1
 	Version* pLastVersion;
@@ -63,7 +63,7 @@ struct PeekRemoteContext {
 	Arena* pAttachArena;
 
 	PeekRemoteContext(const Optional<UID>& debugID_,
-	                  const TeamID& teamID_,
+	                  const StorageTeamID& teamID_,
 	                  Version* pLastVersion_,
 	                  const std::vector<TLogInterfaceBase*>& pInterfaces_,
 	                  TLogStorageServerMessageDeserializer* pDeserializer_,
@@ -144,13 +144,13 @@ bool PeekCursorBase::hasRemaining() const {
 }
 
 ServerTeamPeekCursor::ServerTeamPeekCursor(const Version& beginVersion_,
-                                           const TeamID& teamID_,
+                                           const StorageTeamID& teamID_,
                                            TLogInterfaceBase* pTLogInterface_,
                                            Arena* pArena_)
   : ServerTeamPeekCursor(beginVersion_, teamID_, std::vector<TLogInterfaceBase*>{ pTLogInterface_ }, pArena_) {}
 
 ServerTeamPeekCursor::ServerTeamPeekCursor(const Version& beginVersion_,
-                                           const TeamID& teamID_,
+                                           const StorageTeamID& teamID_,
                                            const std::vector<TLogInterfaceBase*>& pTLogInterfaces_,
                                            Arena* pArena_)
   : PeekCursorBase(beginVersion_), teamID(teamID_), pTLogInterfaces(pTLogInterfaces_), pAttachArena(pArena_),
@@ -161,7 +161,7 @@ ServerTeamPeekCursor::ServerTeamPeekCursor(const Version& beginVersion_,
 	}
 }
 
-const TeamID& ServerTeamPeekCursor::getTeamID() const {
+const StorageTeamID& ServerTeamPeekCursor::getTeamID() const {
 	return teamID;
 }
 

@@ -39,25 +39,25 @@ public:
 	TeamVersionTracker();
 
 	// Adds "teams" to the tracker with their "beginVersion", i.e., first PCV.
-	void addTeams(const std::vector<TeamID>& teams, Version beginVersion);
+	void addTeams(const std::vector<StorageTeamID>& teams, Version beginVersion);
 
 	// Updates "teams" with new commitVersion. Returns each team's PCV in a map.
-	std::map<TeamID, Version> updateTeams(const std::vector<TeamID>& teams, Version commitVersion);
+	std::map<StorageTeamID, Version> updateTeams(const std::vector<StorageTeamID>& teams, Version commitVersion);
 
 	// Returns the most lagging team and its CV.
-	std::pair<TeamID, Version> mostLaggingTeam() const;
+	std::pair<StorageTeamID, Version> mostLaggingTeam() const;
 
 	// Returns the maximum commit version of all teams
 	Version getMaxCommitVersion() const { return maxCV; }
 
 	// Returns the CV of a team, or invalidVersion if not found.
-	Version getCommitVersion(TeamID tid) const {
+	Version getCommitVersion(StorageTeamID tid) const {
 		auto it = versions.find(tid);
 		return it == versions.end() ? invalidVersion : it->second;
 	}
 
 private:
-	std::map<TeamID, Version> versions; // a map of TeamID -> CV
+	std::map<StorageTeamID, Version> versions; // a map of StorageTeamID -> CV
 	Version maxCV = invalidVersion; // the maximum commit version of all teams
 };
 

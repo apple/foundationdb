@@ -203,8 +203,8 @@ TEST_CASE("/fdbserver/ptxn/test/ProxyTLogPushMessageSerializer") {
 
 	ProxyTLogPushMessageSerializer serializer;
 
-	const TeamID teamID1{ deterministicRandom()->randomUniqueID() };
-	const TeamID teamID2{ deterministicRandom()->randomUniqueID() };
+	const StorageTeamID teamID1{ deterministicRandom()->randomUniqueID() };
+	const StorageTeamID teamID2{ deterministicRandom()->randomUniqueID() };
 
 	MutationRef mutation1(MutationRef::SetValue, LiteralStringRef("Key1"), LiteralStringRef("Value1"));
 	serializer.writeMessage(mutation1, teamID1);
@@ -294,7 +294,7 @@ bool testTLogStorageServerMessageSerializer() {
 		{ 3, 7, MutationRef(MutationRef::SetValue, LiteralStringRef("Key6"), LiteralStringRef("Value6")) },
 	};
 
-	TeamID teamID = deterministicRandom()->randomUniqueID();
+	StorageTeamID teamID = deterministicRandom()->randomUniqueID();
 	TLogStorageServerMessageSerializer serializer(teamID);
 	Arena arena;
 

@@ -45,7 +45,7 @@ struct ProxyTLogMessageHeader : MultipleItemHeaderBase {
 // Encodes the mutations that commit proxy have received, for TLog's consumption
 class ProxyTLogPushMessageSerializer {
 	// Maps the TeamID to the list of BinaryWriters
-	std::unordered_map<TeamID, HeaderedItemsSerializer<ProxyTLogMessageHeader, SubsequenceMutationItem>> writers;
+	std::unordered_map<StorageTeamID, HeaderedItemsSerializer<ProxyTLogMessageHeader, SubsequenceMutationItem>> writers;
 
 	// Subsequence of the mutation
 	// NOTE: The subsequence is designed to start at 1. This allows a cursor,
@@ -63,13 +63,13 @@ class ProxyTLogPushMessageSerializer {
 
 public:
 	// For a given TeamID, serialize a new mutation
-	void writeMessage(const MutationRef& mutation, const TeamID& teamID);
+	void writeMessage(const MutationRef& mutation, const StorageTeamID& teamID);
 
 	// For a given TeamID, mark the serializer not accepting more mutations, and write the header.
-	void completeMessageWriting(const TeamID& teamID);
+	void completeMessageWriting(const StorageTeamID& teamID);
 
 	// Get the serialized data for a given TeamID
-	Standalone<StringRef> getSerialized(const TeamID& teamID);
+	Standalone<StringRef> getSerialized(const StorageTeamID& teamID);
 };
 
 // Deserialize the ProxyTLogPushMessage

@@ -91,7 +91,7 @@ struct ResolveTransactionBatchReply {
 	std::map<int, VectorRef<int>> conflictingKeyRangeMap;
 
 	// Each team's previous commit version
-	std::map<ptxn::TeamID, Version> previousCommitVersions;
+	std::map<ptxn::StorageTeamID, Version> previousCommitVersions;
 
 	template <class Archive>
 	void serialize(Archive& ar) {
@@ -112,7 +112,7 @@ struct ResolveTransactionBatchRequest {
 	VectorRef<int> txnStateTransactions;
 	ReplyPromise<ResolveTransactionBatchReply> reply;
 	Optional<UID> debugID;
-	std::vector<ptxn::TeamID> teams; // Teams updated in this batch
+	std::vector<ptxn::StorageTeamID> teams; // Teams updated in this batch
 
 	template <class Archive>
 	void serialize(Archive& ar) {

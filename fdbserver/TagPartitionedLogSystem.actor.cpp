@@ -47,7 +47,7 @@ struct OldLogData {
 	std::vector<Reference<LogSet>> tLogs;
 	int32_t logRouterTags;
 	int32_t txsTags; // The number of txsTags, which may change across generations.
-	Version epochBegin, epochEnd;
+	Version epochBegin, epochEnd; // inclusive, exclusive
 	std::set<int8_t> pseudoLocalities;
 	LogEpoch epoch;
 
@@ -1856,6 +1856,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
+	// Get a durable version range from a log set:
+	// [max of knownCommittedVersion, min of end version] from live TLogs.
 	Optional<std::pair<Version, Version>> static getDurableVersion(
 	    UID dbgid,
 	    LogLockInfo lockInfo,
@@ -2671,6 +2673,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		state double startTime = now();
 		state Reference<TagPartitionedLogSystem> logSystem(
 		    new TagPartitionedLogSystem(oldLogSystem->getDebugID(), oldLogSystem->locality, recoveryCount));
+		// TODO: configure it to teamPartitioned for V7
 		logSystem->logSystemType = LogSystemType::tagPartitioned;
 		logSystem->expectedLogSets = 1;
 		logSystem->recoveredAt = oldLogSystem->recoverAt;

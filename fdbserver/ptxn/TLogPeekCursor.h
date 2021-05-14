@@ -79,7 +79,7 @@ private:
 
 // Connect to a given TLog server and peeks for mutations with a given TeamID
 class ServerTeamPeekCursor : public PeekCursorBase {
-	const TeamID teamID;
+	const StorageTeamID teamID;
 	std::vector<TLogInterfaceBase*> pTLogInterfaces;
 
 	// The arena used to store incoming serialized data, if not nullptr, TLogPeekReply arenas will be attached to this
@@ -95,17 +95,16 @@ public:
 	// pArena_ is used to store the serialized data for further use, e.g. making MutationRefs still available after the
 	// cursor is destroyed.
 	ServerTeamPeekCursor(const Version& version_,
-	                     const TeamID& teamID_,
+	                     const StorageTeamID& teamID_,
 	                     TLogInterfaceBase* pTLogInterface_,
 	                     Arena* arena_ = nullptr);
 
 	ServerTeamPeekCursor(const Version& version_,
-	                     const TeamID& teamID_,
+	                     const StorageTeamID& teamID_,
 	                     const std::vector<TLogInterfaceBase*>& pTLogInterfaces_,
 	                     Arena* arena_ = nullptr);
 
-
-	const TeamID& getTeamID() const;
+	const StorageTeamID& getTeamID() const;
 
 protected:
 	virtual Future<bool> remoteMoreAvailableImpl() override;

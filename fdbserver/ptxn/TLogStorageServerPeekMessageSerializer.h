@@ -41,7 +41,7 @@ struct TLogStorageServerMessageHeader : MultipleItemHeaderBase {
 	static constexpr FileIdentifier file_identifier = 617401;
 
 	// TeamID
-	TeamID teamID;
+	StorageTeamID teamID;
 
 	// The first version that being serialized
 	Version firstVersion = invalidVersion;
@@ -115,7 +115,7 @@ private:
 	TLogStorageServerMessageHeader header;
 
 public:
-	TLogStorageServerMessageSerializer(const TeamID&);
+	TLogStorageServerMessageSerializer(const StorageTeamID&);
 
 	// Starts to write a new version of mutations.
 	void startVersionWriting(const Version& version);
@@ -222,7 +222,7 @@ public:
 	void reset(const Arena&, const StringRef);
 
 	// Gets the team ID
-	const TeamID& getTeamID() const;
+	const StorageTeamID& getTeamID() const;
 
 	// Gets the number of different versions in this part
 	size_t getNumVersions() const;

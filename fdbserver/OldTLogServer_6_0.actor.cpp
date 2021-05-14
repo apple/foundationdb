@@ -2714,8 +2714,7 @@ ACTOR Future<Void> startSpillingInTenSeconds(TLogData* self, UID tlogId, Referen
 }
 
 // New tLog (if !recoverFrom.size()) or restore from network
-ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
-                        IDiskQueue* persistentQueue,
+ACTOR Future<Void> tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues,
                         Reference<AsyncVar<ServerDBInfo>> db,
                         LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests,
@@ -2727,10 +2726,13 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         std::string folder,
                         Reference<AsyncVar<bool>> degraded,
                         Reference<AsyncVar<UID>> activeSharedTLog) {
+	state IKeyValueStore* persistentData = persistentDataAndQueues[0].first;
+	state IDiskQueue* persistentQueue = persistentDataAndQueues[0].second;
+
 	state TLogData self(tlogId, workerID, persistentData, persistentQueue, db, degraded, folder);
 	state Future<Void> error = actorCollection(self.sharedActors.getFuture());
 
-	TraceEvent("SharedTlog", tlogId);
+	TraceEvent("SharedTLog", tlogId);
 	try {
 		if (restoreFromDisk) {
 			wait(restorePersistentState(&self, locality, oldLog, recovered, tlogRequests));

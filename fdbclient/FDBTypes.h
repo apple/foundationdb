@@ -58,7 +58,10 @@ inline bool isPseudoLocality(int8_t locality) {
 
 namespace ptxn {
 
-using TeamID = UID;
+using TLogGroupID = UID;
+using StorageTeamID = UID;
+
+const StorageTeamID txsTeam = UID(1, 1);
 
 }	// namespace ptxn
 
@@ -780,13 +783,15 @@ struct TLogVersion {
 		// V3 was the introduction of spill by reference;
 		// V4 changed how data gets written to satellite TLogs so that we can peek from them;
 		// V5 merged reference and value spilling
-		// V6 added span context to list of serialized mutations sent from proxy to tlogs
+		// V6 added span context to list of serialized mutations sent from proxy to TLogs
+		// V7 added support for team-based partition into TLogs
 		// V1 = 1,  // 4.6 is dispatched to via 6.0
 		V2 = 2, // 6.0
 		V3 = 3, // 6.1
 		V4 = 4, // 6.2
 		V5 = 5, // 6.3
 		V6 = 6, // 7.0
+		V7 = 7, // 7.1
 		MIN_SUPPORTED = V2,
 		MAX_SUPPORTED = V6,
 		MIN_RECRUITABLE = V5,
@@ -816,6 +821,8 @@ struct TLogVersion {
 			return V5;
 		if (s == LiteralStringRef("6"))
 			return V6;
+		if (s == LiteralStringRef("7"))
+			return V7;
 		return default_error_or();
 	}
 };
@@ -897,7 +904,7 @@ struct StorageBytes {
 		serializer(ar, free, total, used, available);
 	}
 
-  std::string toString() const {
+	std::string toString() const {
 		return format("{%.2f MB total, %.2f MB free, %.2f MB available, %.2f MB used, %.2f MB temp}",
 		              total / 1e6,
 		              free / 1e6,
@@ -909,14 +916,16 @@ struct StorageBytes {
 
 namespace ptxn {
 
-// This class defines the index of a cursor. For a given mutation, it has an unique cursor index. The index is totally ordered.
+// This class defines the index of a cursor. For a given mutation, it has an unique cursor index. The index is totally
+// ordered.
 struct CursorIndex {
 	static constexpr FileIdentifier file_identifier = 181323;
 
 	Version version;
 	Subsequence subsequence;
 
-	explicit CursorIndex(const Version& version_, const Subsequence& subsequence_ = 0) : version(version_), subsequence(subsequence_) {}
+	explicit CursorIndex(const Version& version_, const Subsequence& subsequence_ = 0)
+	  : version(version_), subsequence(subsequence_) {}
 
 	// TODO the return type should be std::strong_ordering
 	friend constexpr int operatorSpaceship(const CursorIndex&, const CursorIndex&);
@@ -957,7 +966,7 @@ inline constexpr int operatorSpaceship(const CursorIndex& c1, const CursorIndex&
 	}
 }
 
-}	// namespace ptxn
+} // namespace ptxn
 
 struct LogMessageVersion {
 	// Each message pushed into the log system has a unique, totally ordered LogMessageVersion
