@@ -1,6 +1,7 @@
 add_library(jemalloc INTERFACE)
 
 set(USE_JEMALLOC ON)
+
 # We don't want to use jemalloc on Windows
 # Nor on FreeBSD, where jemalloc is the default system allocator
 if(USE_SANITIZER OR WIN32 OR (CMAKE_SYSTEM_NAME STREQUAL "FreeBSD") OR APPLE)

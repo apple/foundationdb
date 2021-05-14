@@ -4938,7 +4938,7 @@ void versionedMapTest() {
 	const int NSIZE = sizeof(VersionedMap<int, int>::PTreeT);
 	const int ASIZE = NSIZE <= 64 ? 64 : nextFastAllocatedSize(NSIZE);
 
-	auto before = FastAllocator<ASIZE>::getTotalMemory();
+	// auto before = FastAllocator< ASIZE >::getTotalMemory();
 
 	for (int v = 1; v <= 1000; ++v) {
 		vm.createNewVersion(v);
@@ -4952,7 +4952,7 @@ void versionedMapTest() {
 		}
 	}
 
-	auto after = FastAllocator<ASIZE>::getTotalMemory();
+	// auto after = FastAllocator< ASIZE >::getTotalMemory();
 
 	int count = 0;
 	for (auto i = vm.atLatest().begin(); i != vm.atLatest().end(); ++i)
@@ -4960,5 +4960,6 @@ void versionedMapTest() {
 
 	printf("PTree node is %d bytes, allocated as %d bytes\n", NSIZE, ASIZE);
 	printf("%d distinct after %d insertions\n", count, 1000 * 1000);
-	printf("Memory used: %f MB\n", (after - before) / 1e6);
+	// printf("Memory used: %f MB\n",
+	// 	 (after - before)/ 1e6);
 }

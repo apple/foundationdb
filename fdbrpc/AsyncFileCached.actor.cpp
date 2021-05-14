@@ -29,10 +29,7 @@ static std::map<NetworkAddress, std::pair<Reference<EvictablePageCache>, Referen
 
 EvictablePage::~EvictablePage() {
 	if (data) {
-		if (pageCache->pageSize == 4096)
-			FastAllocator<4096>::release(data);
-		else
-			aligned_free(data);
+		alignedFreeFast(data);
 	}
 	if (EvictablePageCache::RANDOM == pageCache->cacheEvictionType) {
 		if (index > -1) {
@@ -168,10 +165,7 @@ void AsyncFileCached::releaseZeroCopy(void* data, int length, int64_t offset) {
 		if (o != orphanedPages.end()) {
 			if (o->second == 1) {
 				if (data) {
-					if (length == 4096)
-						FastAllocator<4096>::release(data);
-					else
-						aligned_free(data);
+					alignedFreeFast(data);
 				}
 			} else {
 				--o->second;

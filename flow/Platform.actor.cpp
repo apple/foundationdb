@@ -2920,14 +2920,23 @@ int setEnvironmentVar(const char* name, const char* value, int overwrite) {
 #define getcwd(buf, maxlen) _getcwd(buf, maxlen)
 #endif
 std::string getWorkingDirectory() {
-	char* buf;
-	if ((buf = getcwd(nullptr, 0)) == nullptr) {
-		TraceEvent(SevWarnAlways, "GetWorkingDirectoryError").GetLastError();
-		throw platform_error();
+	size_t size = 100;
+	// If we use the variant of getcwd which internally calls malloc, it might not call the right malloc when we replace
+	// malloc.
+	for (;;) {
+		char* buffer = (char*)malloc(size);
+		if (getcwd(buffer, size) == buffer) {
+			std::string result{ buffer };
+			free(buffer);
+			return result;
+		}
+		free(buffer);
+		if (errno != ERANGE) {
+			TraceEvent(SevWarnAlways, "GetWorkingDirectoryError").GetLastError();
+			throw platform_error();
+		}
+		size *= 2;
 	}
-	std::string result(buf);
-	free(buf);
-	return result;
 }
 
 } // namespace platform
@@ -2958,120 +2967,9 @@ std::string getDefaultClusterFilePath() {
 }
 } // namespace platform
 
-#ifdef ALLOC_INSTRUMENTATION
-#define TRACEALLOCATOR(size)                                                                                           \
-	TraceEvent("MemSample")                                                                                            \
-	    .detail("Count", FastAllocator<size>::getApproximateMemoryUnused() / size)                                     \
-	    .detail("TotalSize", FastAllocator<size>::getApproximateMemoryUnused())                                        \
-	    .detail("SampleCount", 1)                                                                                      \
-	    .detail("Hash", "FastAllocatedUnused" #size)                                                                   \
-	    .detail("Bt", "na")
-#ifdef __linux__
-#include <cxxabi.h>
-#endif
-uint8_t* g_extra_memory;
-#endif
-
 namespace platform {
 
 void outOfMemory() {
-#ifdef ALLOC_INSTRUMENTATION
-	delete[] g_extra_memory;
-	std::vector<std::pair<std::string, const char*>> typeNames;
-	for (auto i = allocInstr.begin(); i != allocInstr.end(); ++i) {
-		std::string s;
-#ifdef __linux__
-		char* demangled = abi::__cxa_demangle(i->first, nullptr, nullptr, nullptr);
-		if (demangled) {
-			s = demangled;
-			if (StringRef(s).startsWith(LiteralStringRef("(anonymous namespace)::")))
-				s = s.substr(LiteralStringRef("(anonymous namespace)::").size());
-			free(demangled);
-		} else
-			s = i->first;
-#else
-		s = i->first;
-		if (StringRef(s).startsWith(LiteralStringRef("class `anonymous namespace'::")))
-			s = s.substr(LiteralStringRef("class `anonymous namespace'::").size());
-		else if (StringRef(s).startsWith(LiteralStringRef("class ")))
-			s = s.substr(LiteralStringRef("class ").size());
-		else if (StringRef(s).startsWith(LiteralStringRef("struct ")))
-			s = s.substr(LiteralStringRef("struct ").size());
-#endif
-		typeNames.push_back(std::make_pair(s, i->first));
-	}
-	std::sort(typeNames.begin(), typeNames.end());
-	for (int i = 0; i < typeNames.size(); i++) {
-		const char* n = typeNames[i].second;
-		auto& f = allocInstr[n];
-		if (f.maxAllocated > 10000)
-			TraceEvent("AllocInstrument")
-			    .detail("CurrentAlloc", f.allocCount - f.deallocCount)
-			    .detail("Name", typeNames[i].first.c_str());
-	}
-
-	std::unordered_map<uint32_t, BackTraceAccount> traceCounts;
-	size_t memSampleSize;
-	memSample_entered = true;
-	{
-		ThreadSpinLockHolder holder(memLock);
-		traceCounts = backTraceLookup;
-		memSampleSize = memSample.size();
-	}
-	memSample_entered = false;
-
-	TraceEvent("MemSampleSummary")
-	    .detail("InverseByteSampleRatio", SAMPLE_BYTES)
-	    .detail("MemorySamples", memSampleSize)
-	    .detail("BackTraces", traceCounts.size());
-
-	for (auto i = traceCounts.begin(); i != traceCounts.end(); ++i) {
-		char buf[1024];
-		std::vector<void*>* frames = i->second.backTrace;
-		std::string backTraceStr;
-#if defined(_WIN32)
-		for (int j = 1; j < frames->size(); j++) {
-			_snprintf(buf, 1024, "%p ", frames->at(j));
-			backTraceStr += buf;
-		}
-#else
-		backTraceStr = format_backtrace(&(*frames)[0], frames->size());
-#endif
-		TraceEvent("MemSample")
-		    .detail("Count", (int64_t)i->second.count)
-		    .detail("TotalSize", i->second.totalSize)
-		    .detail("SampleCount", i->second.sampleCount)
-		    .detail("Hash", format("%lld", i->first))
-		    .detail("Bt", backTraceStr);
-	}
-
-	TraceEvent("MemSample")
-	    .detail("Count", traceCounts.size())
-	    .detail("TotalSize", traceCounts.size() * ((int)(sizeof(uint32_t) + sizeof(size_t) + sizeof(size_t))))
-	    .detail("SampleCount", traceCounts.size())
-	    .detail("Hash", "backTraces")
-	    .detail("Bt", "na");
-
-	TraceEvent("MemSample")
-	    .detail("Count", memSampleSize)
-	    .detail("TotalSize", memSampleSize * ((int)(sizeof(void*) + sizeof(uint32_t) + sizeof(size_t))))
-	    .detail("SapmleCount", memSampleSize)
-	    .detail("Hash", "memSamples")
-	    .detail("Bt", "na");
-	TRACEALLOCATOR(16);
-	TRACEALLOCATOR(32);
-	TRACEALLOCATOR(64);
-	TRACEALLOCATOR(96);
-	TRACEALLOCATOR(128);
-	TRACEALLOCATOR(256);
-	TRACEALLOCATOR(512);
-	TRACEALLOCATOR(1024);
-	TRACEALLOCATOR(2048);
-	TRACEALLOCATOR(4096);
-	TRACEALLOCATOR(8192);
-	g_traceBatch.dump();
-#endif
-
 	criticalError(FDB_EXIT_NO_MEM, "OutOfMemory", "Out of memory");
 }
 

@@ -42,8 +42,9 @@
 #include "flow/Arena.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/serialize.h"
+#include "flow/Hash3.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 class TCTeamInfo;
 struct TCMachineInfo;

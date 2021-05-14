@@ -49,6 +49,7 @@
 #include "flow/Knobs.h"
 #include "flow/Trace.h"
 #include "flow/Tracing.h"
+#include "flow/Hash3.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 

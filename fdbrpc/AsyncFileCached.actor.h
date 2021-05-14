@@ -79,7 +79,7 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 	void allocate(EvictablePage* page) {
 		try_evict();
 		try_evict();
-		page->data = pageSize == 4096 ? FastAllocator<4096>::allocate() : aligned_alloc(4096, pageSize);
+		page->data = alignedAllocateFast(4096, pageSize);
 		if (RANDOM == cacheEvictionType) {
 			page->index = pages.size();
 			pages.push_back(page);
@@ -394,7 +394,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 		owner->orphanedPages[data] = zeroCopyRefCount;
 		zeroCopyRefCount = 0;
 		notReading = Void();
-		data = pageCache->pageSize == 4096 ? FastAllocator<4096>::allocate() : aligned_alloc(4096, pageCache->pageSize);
+		data = alignedAllocateFast(4096, pageCache->pageSize);
 	}
 
 	Future<Void> write(void const* data, int length, int offset) {

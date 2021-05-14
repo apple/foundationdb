@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdlib.h>
 
+#include "flow/FastAlloc.h"
 #include "flow/rte_memcpy.h"
 #include "flow/IRandom.h"
 #include "flow/UnitTest.h"
@@ -72,12 +73,12 @@ static size_t round_up(size_t sz, size_t alignment) {
 }
 
 static uint8_t* rte_malloc(char const* ignored, size_t sz, size_t align) {
-	return (uint8_t*)aligned_alloc(align, round_up(sz, align));
+	return (uint8_t*)alignedAllocateFast(align, round_up(sz, align));
 }
 
 static void rte_free(void* ptr) {
 	if (!!ptr) {
-		free(ptr);
+		alignedFreeFast(ptr);
 	}
 }
 

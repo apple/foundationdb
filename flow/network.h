@@ -28,6 +28,7 @@
 #include <stdint.h>
 #include <variant>
 #include <atomic>
+#include <unordered_map>
 #include "boost/asio.hpp"
 #ifndef TLS_DISABLED
 #include "boost/asio/ssl.hpp"

@@ -259,18 +259,7 @@ private:
 		static Node* create(const StringRef& value, int level) {
 			int nodeSize = sizeof(Node) + value.size() + (level + 1) * (sizeof(Node*) + sizeof(Version));
 
-			Node* n;
-			if (nodeSize <= 64) {
-				n = (Node*)FastAllocator<64>::allocate();
-				INSTRUMENT_ALLOCATE("SkipListNode64");
-			} else if (nodeSize <= 128) {
-				n = (Node*)FastAllocator<128>::allocate();
-				INSTRUMENT_ALLOCATE("SkipListNode128");
-			} else {
-				n = (Node*)new char[nodeSize];
-				INSTRUMENT_ALLOCATE("SkipListNodeLarge");
-			}
-
+			Node* n = reinterpret_cast<Node*>(allocateFast(nodeSize));
 			n->nPointers = level + 1;
 
 			n->valueLength = value.size();
@@ -289,19 +278,7 @@ private:
 			setMaxVersion(level, v);
 		}
 
-		void destroy() {
-			int nodeSize = getNodeSize();
-			if (nodeSize <= 64) {
-				FastAllocator<64>::release(this);
-				INSTRUMENT_RELEASE("SkipListNode64");
-			} else if (nodeSize <= 128) {
-				FastAllocator<128>::release(this);
-				INSTRUMENT_RELEASE("SkipListNode128");
-			} else {
-				delete[](char*) this;
-				INSTRUMENT_RELEASE("SkipListNodeLarge");
-			}
-		}
+		void destroy() { freeFast(this, getNodeSize()); }
 
 	private:
 		int getNodeSize() const { return sizeof(Node) + valueLength + nPointers * (sizeof(Node*) + sizeof(Version)); }

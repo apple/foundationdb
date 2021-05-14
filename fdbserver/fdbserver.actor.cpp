@@ -71,9 +71,6 @@
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
 #include <signal.h>
-#ifdef ALLOC_INSTRUMENTATION
-#include <cxxabi.h>
-#endif
 #endif
 
 #ifdef WIN32
@@ -198,10 +195,6 @@ extern void flushTraceFileVoid();
 
 extern bool noUnseed;
 extern const int MAX_CLUSTER_FILE_BYTES;
-
-#ifdef ALLOC_INSTRUMENTATION
-extern uint8_t* g_extra_memory;
-#endif
 
 bool enableFailures = true;
 
@@ -694,55 +687,6 @@ static void printUsage(const char* name, bool devhelp) {
 }
 
 extern bool g_crashOnError;
-
-#if defined(ALLOC_INSTRUMENTATION) || defined(ALLOC_INSTRUMENTATION_STDOUT)
-void* operator new(std::size_t size) {
-	void* p = malloc(size);
-	if (!p)
-		throw std::bad_alloc();
-	recordAllocation(p, size);
-	return p;
-}
-void operator delete(void* ptr) throw() {
-	recordDeallocation(ptr);
-	free(ptr);
-}
-
-// scalar, nothrow new and it matching delete
-void* operator new(std::size_t size, const std::nothrow_t&) throw() {
-	void* p = malloc(size);
-	recordAllocation(p, size);
-	return p;
-}
-void operator delete(void* ptr, const std::nothrow_t&) throw() {
-	recordDeallocation(ptr);
-	free(ptr);
-}
-
-// array throwing new and matching delete[]
-void* operator new[](std::size_t size) {
-	void* p = malloc(size);
-	if (!p)
-		throw std::bad_alloc();
-	recordAllocation(p, size);
-	return p;
-}
-void operator delete[](void* ptr) throw() {
-	recordDeallocation(ptr);
-	free(ptr);
-}
-
-// array, nothrow new and matching delete[]
-void* operator new[](std::size_t size, const std::nothrow_t&) throw() {
-	void* p = malloc(size);
-	recordAllocation(p, size);
-	return p;
-}
-void operator delete[](void* ptr, const std::nothrow_t&) throw() {
-	recordDeallocation(ptr);
-	free(ptr);
-}
-#endif
 
 Optional<bool> checkBuggifyOverride(const char* testFile) {
 	std::ifstream ifs;
@@ -1596,9 +1540,6 @@ int main(int argc, char* argv[]) {
 	try {
 		platformInit();
 
-#ifdef ALLOC_INSTRUMENTATION
-		g_extra_memory = new uint8_t[1000000];
-#endif
 		registerCrashHandler();
 
 		// Set default of line buffering standard out and error
@@ -2111,56 +2052,6 @@ int main(int argc, char* argv[]) {
 
 		// g_simulator.run();
 
-#ifdef ALLOC_INSTRUMENTATION
-		{
-			std::cout << "Page Counts: " << FastAllocator<16>::pageCount << " " << FastAllocator<32>::pageCount << " "
-			          << FastAllocator<64>::pageCount << " " << FastAllocator<128>::pageCount << " "
-			          << FastAllocator<256>::pageCount << " " << FastAllocator<512>::pageCount << " "
-			          << FastAllocator<1024>::pageCount << " " << FastAllocator<2048>::pageCount << " "
-			          << FastAllocator<4096>::pageCount << " " << FastAllocator<8192>::pageCount << " "
-			          << FastAllocator<16384>::pageCount << std::endl;
-
-			vector<std::pair<std::string, const char*>> typeNames;
-			for (auto i = allocInstr.begin(); i != allocInstr.end(); ++i) {
-				std::string s;
-
-#ifdef __linux__
-				char* demangled = abi::__cxa_demangle(i->first, nullptr, nullptr, nullptr);
-				if (demangled) {
-					s = demangled;
-					if (StringRef(s).startsWith(LiteralStringRef("(anonymous namespace)::")))
-						s = s.substr(LiteralStringRef("(anonymous namespace)::").size());
-					free(demangled);
-				} else
-					s = i->first;
-#else
-				s = i->first;
-				if (StringRef(s).startsWith(LiteralStringRef("class `anonymous namespace'::")))
-					s = s.substr(LiteralStringRef("class `anonymous namespace'::").size());
-				else if (StringRef(s).startsWith(LiteralStringRef("class ")))
-					s = s.substr(LiteralStringRef("class ").size());
-				else if (StringRef(s).startsWith(LiteralStringRef("struct ")))
-					s = s.substr(LiteralStringRef("struct ").size());
-#endif
-
-				typeNames.push_back(std::make_pair(s, i->first));
-			}
-			std::sort(typeNames.begin(), typeNames.end());
-			for (int i = 0; i < typeNames.size(); i++) {
-				const char* n = typeNames[i].second;
-				auto& f = allocInstr[n];
-				printf("%+d\t%+d\t%d\t%d\t%s\n",
-				       f.allocCount,
-				       -f.deallocCount,
-				       f.allocCount - f.deallocCount,
-				       f.maxAllocated,
-				       typeNames[i].first.c_str());
-			}
-
-			// We're about to exit and clean up data structures, this will wreak havoc on allocation recording
-			memSample_entered = true;
-		}
-#endif
 		// printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(rc);
 	} catch (Error& e) {

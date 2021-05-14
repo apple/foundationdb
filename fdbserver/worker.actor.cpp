@@ -25,6 +25,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
+#include "flow/FastAlloc.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.actor.h"
@@ -661,21 +662,9 @@ ACTOR Future<Void> runCpuProfiler(ProfilerRequest req) {
 	}
 }
 
-void runHeapProfiler(const char* msg) {
-#if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
-	if (IsHeapProfilerRunning()) {
-		HeapProfilerDump(msg);
-	} else {
-		TraceEvent("ProfilerError").detail("Message", "HeapProfiler not running");
-	}
-#else
-	TraceEvent("ProfilerError").detail("Message", "HeapProfiler Unsupported");
-#endif
-}
-
 ACTOR Future<Void> runProfiler(ProfilerRequest req) {
 	if (req.type == ProfilerRequest::Type::GPROF_HEAP) {
-		runHeapProfiler("User triggered heap dump");
+		dumpHeapProfile(req.outputFile.toString().c_str(), "User-requested heap dump");
 	} else {
 		wait(runCpuProfiler(req));
 	}
@@ -727,8 +716,10 @@ ACTOR Future<Void> monitorHighMemory(int64_t threshold) {
 		if (err)
 			break;
 
-		if (highmem)
-			runHeapProfiler("Highmem heap dump");
+		if (highmem) {
+			// TODO: Enable heap profiling by default
+			// 	runHeapProfiler("Highmem heap dump");
+		}
 		wait(delay(SERVER_KNOBS->HEAP_PROFILER_INTERVAL));
 	}
 	return Void();

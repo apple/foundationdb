@@ -112,6 +112,10 @@ endif()
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/SourceVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config.h)
 
+# jemalloc doesn't export __libc_memalign, so we make our own target for replacing malloc
+add_library(replace_malloc ReplaceMalloc.cpp)
+target_link_libraries(replace_malloc PRIVATE jemalloc)
+
 add_flow_target(STATIC_LIBRARY NAME flow SRCS ${FLOW_SRCS})
 target_link_libraries(flow PRIVATE stacktrace)
 if (NOT APPLE AND NOT WIN32)
@@ -128,6 +132,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
   endif()
 endif()
 target_link_libraries(flow PRIVATE ${FLOW_LIBS})
+target_link_libraries(flow PUBLIC jemalloc)
 if(USE_VALGRIND)
   target_link_libraries(flow PUBLIC Valgrind)
 endif()
