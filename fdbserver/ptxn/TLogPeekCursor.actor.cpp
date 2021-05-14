@@ -385,6 +385,7 @@ std::unique_ptr<PeekCursorBase> MergedServerTeamPeekCursor::removeCursor(const T
 
 	// Remove from heap, there is no simple way of removing a specific item from a std::priority_queue, so we
 	// re-construct it.
+	// TODO: improve the O(nlogn) complexity
 	std::vector<IndexedCursor> itemsInHeap;
 	while (!cursorHeap.empty()) {
 		itemsInHeap.emplace_back(cursorHeap.top());
@@ -433,9 +434,9 @@ ACTOR Future<Void> advanceTo(PeekCursorBase* cursor, Version version, Subsequenc
 			if (iter->version > version) {
 				return Void();
 			}
-			// Is iter current at the given version
+			// Is iter current at the given version?
 			if (iter->version == version) {
-				while (iter != cursor->end() && iter->subsequence < subsequence)
+				while (iter != cursor->end() && iter->version == version && iter->subsequence < subsequence)
 					++iter;
 				if (iter->version > version || iter->subsequence >= subsequence) {
 					return Void();

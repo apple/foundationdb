@@ -77,7 +77,7 @@ struct TLogCommitRequest {
 	// Response
 	ReplyPromise<TLogCommitReply> reply;
 
-	TLogCommitRequest() {}
+	TLogCommitRequest() = default;
 	TLogCommitRequest(const SpanID& spanID_,
 	                  const StorageTeamID& teamID_,
 	                  const Arena arena_,

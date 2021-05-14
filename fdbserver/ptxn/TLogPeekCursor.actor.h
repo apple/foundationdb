@@ -73,6 +73,7 @@ public:
 		void operator++();
 
 		// Postfix incremental is disabled since duplication is prohibited.
+		iterator& operator++(int) = delete;
 	};
 
 	PeekCursorBase();
@@ -114,7 +115,7 @@ private:
 	const iterator endIterator;
 };
 
-// Connect to a given TLog server and peeks for mutations with a given TeamID
+// Connect to given TLog server(s) and peeks for mutations with a given TeamID
 class ServerTeamPeekCursor : public PeekCursorBase {
 	const StorageTeamID teamID;
 	std::vector<TLogInterfaceBase*> pTLogInterfaces;
@@ -139,11 +140,12 @@ public:
 	// teamID_ is the teamID
 	// pTLogInterface_ is the interface to the specific TLog server
 	// pArena_ is used to store the serialized data for further use, e.g. making MutationRefs still available after the
-	// cursor is destroyed.
+	// cursor is destroyed. If pArena_ is nullptr, any reference to the peeked data will be invalidated after the cursor
+	// is destructed.
 	ServerTeamPeekCursor(const Version& version_,
 	                     const StorageTeamID& teamID_,
 	                     TLogInterfaceBase* pTLogInterface_,
-	                     Arena* arena_ = nullptr);
+	                     Arena* pArena_ = nullptr);
 
 	ServerTeamPeekCursor(const Version& version_,
 	                     const StorageTeamID& teamID_,
