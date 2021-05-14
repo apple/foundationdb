@@ -77,7 +77,7 @@ public:
 
 	PeekCursorBase();
 
-	// Checks if there is any more messages in the remote TLog(s), if so, retrieve the messages to local. Will
+	// Checks if there are any more messages in the remote TLog(s), if so, retrieve the messages to local. Will
 	// invalidate the iterator, if exists.
 	Future<bool> remoteMoreAvailable();
 
