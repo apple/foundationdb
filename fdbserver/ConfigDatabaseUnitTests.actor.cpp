@@ -147,17 +147,6 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/FreshRestart") {
 
 namespace {
 
-ACTOR Future<Void> dummyConfigSource(ConfigFollowerInterface cfi) {
-	loop {
-		choose {
-			when(ConfigFollowerGetVersionRequest req = waitNext(cfi.getVersion.getFuture())) { req.reply.send(0); }
-			when(ConfigFollowerGetSnapshotRequest req = waitNext(cfi.getSnapshot.getFuture())) {
-				req.reply.send(ConfigFollowerGetSnapshotReply{});
-			}
-		}
-	}
-}
-
 class DummyConfigSource {
 	ConfigFollowerInterface cfi;
 	ACTOR static Future<Void> serve(DummyConfigSource* self) {
@@ -187,9 +176,9 @@ Value versionToValue(Version version) {
 
 TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/CheckpointedUpdates") {
 	state DummyConfigSource dummyConfigSource;
-	state ConfigBroadcaster broadcaster(dummyConfigSource.getInterface(), deterministicRandom()->randomUniqueID());
-	state Reference<IDependentAsyncVar<ConfigFollowerInterface>> cfi =
-	    IDependentAsyncVar<ConfigFollowerInterface>::create(makeReference<AsyncVar<ConfigFollowerInterface>>());
+	state ConfigBroadcaster broadcaster1(dummyConfigSource.getInterface(), deterministicRandom()->randomUniqueID());
+	state ConfigBroadcaster broadcaster2(dummyConfigSource.getInterface(), deterministicRandom()->randomUniqueID());
+	state Reference<AsyncVar<ConfigFollowerInterface>> cfi = makeReference<AsyncVar<ConfigFollowerInterface>>();
 	state LocalConfiguration localConfigurationA("class-A", testManualKnobOverrides);
 	state LocalConfiguration localConfigurationB("class-B", testManualKnobOverrides);
 	state Version version = 1;
@@ -198,19 +187,20 @@ TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/CheckpointedUpdates") {
 	wait(localConfigurationA.initialize("./", deterministicRandom()->randomUniqueID()));
 	wait(localConfigurationB.initialize("./", deterministicRandom()->randomUniqueID()));
 	TraceEvent("StartedTestBroadcasterAndLocalConfigs")
-	    .detail("Broadcaster", broadcaster.getID())
+	    .detail("Broadcaster1", broadcaster1.getID())
+		.detail("Broadcaster2", broadcaster2.getID())
 	    .detail("LocalConfigurationA", localConfigurationA.getID())
 	    .detail("LocalConfigurationB", localConfigurationB.getID());
 	actors.add(dummyConfigSource.serve());
-	actors.add(broadcaster.serve(cfi->get()));
-	actors.add(localConfigurationA.consume(cfi));
-	actors.add(localConfigurationB.consume(cfi));
+	actors.add(broadcaster1.serve(cfi->get()));
+	actors.add(localConfigurationA.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(cfi)));
+	actors.add(localConfigurationB.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(cfi)));
 	while (version <= 10) {
 		versionedMutations = Standalone<VectorRef<VersionedConfigMutationRef>>{};
 		appendVersionedMutation(versionedMutations, version, "class-A"_sr, "test_long"_sr, versionToValue(version));
 		appendVersionedMutation(
 		    versionedMutations, version, "class-B"_sr, "test_long"_sr, versionToValue(version * 10));
-		wait(broadcaster.addVersionedMutations(versionedMutations, version));
+		wait(broadcaster1.addVersionedMutations(versionedMutations, version));
 		loop {
 			if (localConfigurationA.getTestKnobs().TEST_LONG == version &&
 			    localConfigurationB.getTestKnobs().TEST_LONG == (version * 10)) {
@@ -220,36 +210,42 @@ TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/CheckpointedUpdates") {
 			wait(delayJittered(1.0));
 		}
 	}
-	return Void();
-}
 
-TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/Compact") {
-	state DummyConfigSource dummyConfigSource;
-	state ConfigBroadcaster broadcaster(dummyConfigSource.getInterface(), deterministicRandom()->randomUniqueID());
-	state Reference<IDependentAsyncVar<ConfigFollowerInterface>> cfi =
-	    IDependentAsyncVar<ConfigFollowerInterface>::create(makeReference<AsyncVar<ConfigFollowerInterface>>());
-	state LocalConfiguration localConfiguration("class-A", testManualKnobOverrides);
-	state Version version = 1;
-	state ActorCollection actors(false);
-	state Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
-	wait(localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
-	TraceEvent("StartedTestBroadcasterAndLocalConfigs")
-	    .detail("Broadcaster", broadcaster.getID())
-	    .detail("LocalConfiguration", localConfiguration.getID());
-	actors.add(dummyConfigSource.serve());
-	actors.add(broadcaster.serve(cfi->get()));
-	while (version <= 10) {
+	// Test changing broadcaster
+	cfi->set(ConfigFollowerInterface{});
+	actors.add(broadcaster2.serve(cfi->get()));
+	while (version <= 20) {
 		versionedMutations = Standalone<VectorRef<VersionedConfigMutationRef>>{};
 		appendVersionedMutation(versionedMutations, version, "class-A"_sr, "test_long"_sr, versionToValue(version));
-		wait(broadcaster.addVersionedMutations(versionedMutations, version));
+		appendVersionedMutation(
+		    versionedMutations, version, "class-B"_sr, "test_long"_sr, versionToValue(version * 10));
+		wait(broadcaster2.addVersionedMutations(versionedMutations, version));
+		loop {
+			if (localConfigurationA.getTestKnobs().TEST_LONG == version &&
+			    localConfigurationB.getTestKnobs().TEST_LONG == (version * 10)) {
+				++version;
+				break;
+			}
+			wait(delayJittered(1.0));
+		}
+	}
+
+	// Test compaction
+	while (version <= 30) {
+		versionedMutations = Standalone<VectorRef<VersionedConfigMutationRef>>{};
+		appendVersionedMutation(versionedMutations, version, "class-A"_sr, "test_long"_sr, versionToValue(version));
+		appendVersionedMutation(
+		    versionedMutations, version, "class-B"_sr, "test_long"_sr, versionToValue(version * 10));
+		wait(broadcaster2.addVersionedMutations(versionedMutations, version));
 		++version;
 	}
 	wait(cfi->get().compact.getReply(ConfigFollowerCompactRequest{ version }));
-	actors.add(localConfiguration.consume(cfi));
 	loop {
-		if (localConfiguration.getTestKnobs().TEST_LONG == 10) {
-			return Void();
+		if (localConfigurationA.getTestKnobs().TEST_LONG == 30 &&
+			localConfigurationB.getTestKnobs().TEST_LONG == 300) {
+			break;
 		}
 		wait(delayJittered(1.0));
 	}
+	return Void();
 }

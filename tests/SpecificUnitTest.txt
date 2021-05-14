@@ -4,4 +4,4 @@ useDB=false
 
     testName=UnitTests
     maxTestCases=100
-    testsMatching=/fdbserver/ConfigDB/
+    testsMatching=/fdbserver/ConfigDB/ConfigBroadcaster/CheckpointedUpdates
