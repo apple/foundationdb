@@ -151,7 +151,7 @@ struct TLogPeekRequest {
 	Optional<std::pair<UID, int>> sequence;
 	ReplyPromise<TLogPeekReply> reply;
 
-	TLogPeekRequest() {}
+	TLogPeekRequest() = default;
 	TLogPeekRequest(const Optional<UID>& debugID_,
 	                const Version& beginVersion_,
 	                const Version& endVersion_,
