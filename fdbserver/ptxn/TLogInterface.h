@@ -106,11 +106,79 @@ struct TLogCommitRequest {
 	}
 };
 
+struct TLogPeekReply {
+	static constexpr FileIdentifier file_identifier = 292724;
+
+	Optional<UID> debugID;
+
+	// Arena containing the serialized mutation data, see TLogStorageServerPeekSerializer
+	Arena arena;
+	// StringRef referring the serialized mutation data, see TLogStorageServerPeekSerializer
+	StringRef data;
+
+	Version end;
+	Optional<Version> popped;
+	Version maxKnownVersion;
+	Version minKnownCommittedVersion;
+	Optional<Version> begin;
+	bool onlySpilled = false;
+
+	template <typename Ar>
+	void serialize(Ar& ar) {
+		serializer(
+		    ar, debugID, arena, data, end, popped, maxKnownVersion, minKnownCommittedVersion, begin, onlySpilled);
+	}
+};
+
+struct TLogPeekRequest {
+	static constexpr FileIdentifier file_identifier = 356070;
+
+	Optional<UID> debugID;
+
+	Arena arena;
+	// We are interested in versions between [beginVersion, endVersion)
+	// Following the C++ custom, the endVersion is *EXCLUSIVE*.
+	Version beginVersion;
+	Optional<Version> endVersion;
+	StorageTeamID teamID;
+
+	Tag tag;
+	bool returnIfBlocked;
+	bool onlySpilled;
+	Optional<std::pair<UID, int>> sequence;
+	ReplyPromise<TLogPeekReply> reply;
+
+	template <typename Ar>
+	void serialize(Ar& ar) {
+		serializer(
+		    ar, debugID, arena, beginVersion, endVersion, teamID, tag, returnIfBlocked, onlySpilled, sequence, reply);
+	}
+};
+
+struct TLogPopRequest {
+	static constexpr FileIdentifier file_identifier = 288041;
+
+	Arena arena;
+	Version version;
+	Version durableKnownCommittedVersion;
+	Tag tag;
+	StorageTeamID teamID;
+
+	ReplyPromise<Void> reply;
+
+	template <typename Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, arena, version, durableKnownCommittedVersion, tag, teamID, reply);
+	}
+};
+
 struct TLogInterfaceBase {
 
 	constexpr static FileIdentifier file_identifier = 4121433;
 
 	RequestStream<struct TLogCommitRequest> commit;
+	RequestStream<TLogPeekRequest> peek;
+	RequestStream<TLogPopRequest> pop;
 	RequestStream<ReplyPromise<struct TLogLockResult>> lock; // first stage of database recovery
 	RequestStream<struct TLogQueuingMetricsRequest> getQueuingMetrics;
 	RequestStream<struct TLogConfirmRunningRequest> confirmRunning; // used for getReadVersion requests from client
@@ -161,15 +229,17 @@ protected:
 		}
 		serializer(ar, uniqueID, sharedTLogID, filteredLocality, messageTransferModel, commit);
 		if (Ar::isDeserializing) {
-			lock = RequestStream<ReplyPromise<struct TLogLockResult>>(commit.getEndpoint().getAdjustedEndpoint(1));
+			peek = RequestStream<TLogPeekRequest>(commit.getEndpoint().getAdjustedEndpoint(1));
+			pop = RequestStream<TLogPopRequest>(commit.getEndpoint().getAdjustedEndpoint(2));
+			lock = RequestStream<ReplyPromise<struct TLogLockResult>>(commit.getEndpoint().getAdjustedEndpoint(3));
 			getQueuingMetrics =
-			    RequestStream<struct TLogQueuingMetricsRequest>(commit.getEndpoint().getAdjustedEndpoint(2));
+			    RequestStream<struct TLogQueuingMetricsRequest>(commit.getEndpoint().getAdjustedEndpoint(4));
 			confirmRunning =
-			    RequestStream<struct TLogConfirmRunningRequest>(commit.getEndpoint().getAdjustedEndpoint(3));
-			waitFailure = RequestStream<ReplyPromise<Void>>(commit.getEndpoint().getAdjustedEndpoint(4));
+			    RequestStream<struct TLogConfirmRunningRequest>(commit.getEndpoint().getAdjustedEndpoint(5));
+			waitFailure = RequestStream<ReplyPromise<Void>>(commit.getEndpoint().getAdjustedEndpoint(6));
 			recoveryFinished =
-			    RequestStream<struct TLogRecoveryFinishedRequest>(commit.getEndpoint().getAdjustedEndpoint(5));
-			snapRequest = RequestStream<struct TLogSnapRequest>(commit.getEndpoint().getAdjustedEndpoint(6));
+			    RequestStream<struct TLogRecoveryFinishedRequest>(commit.getEndpoint().getAdjustedEndpoint(7));
+			snapRequest = RequestStream<struct TLogSnapRequest>(commit.getEndpoint().getAdjustedEndpoint(8));
 		}
 	}
 };
@@ -279,68 +349,6 @@ struct VerUpdateRef {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, version, mutations, isPrivateData);
-	}
-};
-
-struct TLogPeekReply {
-	constexpr static FileIdentifier file_identifier = 1214844;
-	Arena arena;
-	StringRef messages;
-	Version end;
-	Optional<Version> popped;
-	Version maxKnownVersion;
-	Version minKnownCommittedVersion;
-	Optional<Version> begin;
-	bool onlySpilled = false;
-
-	TLogCursor cursor;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(
-		    ar, arena, messages, end, popped, maxKnownVersion, minKnownCommittedVersion, begin, onlySpilled, cursor);
-	}
-};
-
-struct TLogPeekRequest {
-	constexpr static FileIdentifier file_identifier = 7902423;
-	Arena arena;
-	Version begin;
-	Tag tag;
-	bool returnIfBlocked;
-	bool onlySpilled;
-	Optional<std::pair<UID, int>> sequence;
-	ReplyPromise<TLogPeekReply> reply;
-
-	TLogPeekRequest(Version begin,
-	                Tag tag,
-	                bool returnIfBlocked,
-	                bool onlySpilled,
-	                Optional<std::pair<UID, int>> sequence = Optional<std::pair<UID, int>>())
-	  : begin(begin), tag(tag), returnIfBlocked(returnIfBlocked), sequence(sequence), onlySpilled(onlySpilled) {}
-	TLogPeekRequest() {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, arena, begin, tag, returnIfBlocked, onlySpilled, sequence, reply);
-	}
-};
-
-struct TLogPopRequest {
-	constexpr static FileIdentifier file_identifier = 2435611;
-	Arena arena;
-	Version to;
-	Version durableKnownCommittedVersion;
-	Tag tag;
-	ReplyPromise<Void> reply;
-
-	TLogPopRequest(Version to, Version durableKnownCommittedVersion, Tag tag)
-	  : to(to), durableKnownCommittedVersion(durableKnownCommittedVersion), tag(tag) {}
-	TLogPopRequest() {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, arena, to, durableKnownCommittedVersion, tag, reply);
 	}
 };
 

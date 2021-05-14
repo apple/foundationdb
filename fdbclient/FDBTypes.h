@@ -26,17 +26,19 @@
 #include <string>
 #include <vector>
 
+#include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
 #include "flow/flow.h"
-#include "fdbclient/Knobs.h"
+#include "flow/String.h"
 
-typedef int64_t Version;
-typedef uint64_t LogEpoch;
-typedef uint64_t Sequence;
-typedef StringRef KeyRef;
-typedef StringRef ValueRef;
-typedef int64_t Generation;
-typedef UID SpanID;
+using Version = int64_t;
+using LogEpoch = uint64_t;
+using Sequence = uint64_t;
+using Subsequence = uint32_t;
+using KeyRef = StringRef;
+using ValueRef = StringRef;
+using Generation = uint64_t;
+using SpanID = UID;
 
 enum {
 	tagLocalitySpecial = -1, // tag with this locality means it is invalidTag (id=0), txsTag (id=1), or cacheTag (id=2)
@@ -477,11 +479,12 @@ struct Traceable<KeyValueRef> : std::true_type {
 	}
 };
 
-typedef Standalone<KeyRef> Key;
-typedef Standalone<ValueRef> Value;
-typedef Standalone<KeyRangeRef> KeyRange;
-typedef Standalone<KeyValueRef> KeyValue;
-typedef Standalone<struct KeySelectorRef> KeySelector;
+using Key = Standalone<KeyRef>;
+using Value = Standalone<ValueRef>;
+using KeyRange = Standalone<KeyRangeRef>;
+using KeyValue = Standalone<KeyValueRef>;
+using KeySelector = Standalone<struct KeySelectorRef>;
+using RangeResult = Standalone<struct RangeResultRef>;
 
 enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
 
@@ -715,6 +718,7 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 		       " readToBegin:" + std::to_string(readToBegin) + " readThroughEnd:" + std::to_string(readThroughEnd);
 	}
 };
+using RangeResult = Standalone<RangeResultRef>;
 
 template <>
 struct Traceable<RangeResultRef> : std::true_type {
@@ -909,6 +913,61 @@ struct StorageBytes {
 		              temp / 1e6);
 	}
 };
+
+namespace ptxn {
+
+// This class defines the index of a cursor. For a given mutation, it has an unique cursor index. The index is totally
+// ordered.
+struct CursorIndex {
+	static constexpr FileIdentifier file_identifier = 181323;
+
+	Version version;
+	Subsequence subsequence;
+
+	explicit CursorIndex(const Version& version_, const Subsequence& subsequence_ = 0)
+	  : version(version_), subsequence(subsequence_) {}
+
+	// TODO the return type should be std::strong_ordering
+	friend constexpr int operatorSpaceship(const CursorIndex&, const CursorIndex&);
+
+	// TODO Replace the code with real spaceship operator when C++20 is allowed
+	bool operator>(const CursorIndex& another) { return operatorSpaceship(*this, another) == 1; }
+	bool operator>=(const CursorIndex& another) { return operatorSpaceship(*this, another) >= 0; }
+	bool operator<(const CursorIndex& another) { return operatorSpaceship(*this, another) == -1; }
+	bool operator<=(const CursorIndex& another) { return operatorSpaceship(*this, another) <= 0; }
+	bool operator!=(const CursorIndex& another) { return operatorSpaceship(*this, another) != 0; }
+	bool operator==(const CursorIndex& another) { return operatorSpaceship(*this, another) == 0; }
+
+	std::string toString() const { return concatToString(version, '.', subsequence); }
+
+	template <typename Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, subsequence);
+	}
+};
+
+// Returns
+//   0 if  c1 == c2
+//   1 if  c1 >  c2
+//  -1 if  c1 <  c2
+inline constexpr int operatorSpaceship(const CursorIndex& c1, const CursorIndex& c2) {
+	if (c1.version > c2.version) {
+		return 1;
+	} else if (c1.version < c2.version) {
+		return -1;
+	} else {
+		if (c1.subsequence > c2.subsequence) {
+			return 1;
+		} else if (c1.subsequence > c2.subsequence) {
+			return -1;
+		}
+
+		return 0;
+	}
+}
+
+} // namespace ptxn
+
 struct LogMessageVersion {
 	// Each message pushed into the log system has a unique, totally ordered LogMessageVersion
 	// See ILogSystem::push() for how these are assigned

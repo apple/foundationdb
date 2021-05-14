@@ -1487,7 +1487,7 @@ ACTOR Future<Void> tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> per
 }
 
 ACTOR Future<Void> startTLogServers(std::vector<Future<Void>> actors,
-                                    std::shared_ptr<TestDriverContext> context,
+                                    std::shared_ptr<test::TestDriverContext> context,
                                     std::string folder) {
 	state std::vector<InitializeTLogRequest> tLogInitializations;
 	state int i = 0;
@@ -1521,9 +1521,9 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>> actors,
 }
 
 TEST_CASE("/fdbserver/ptxn/test/run_tlog_server") {
-	TestDriverOptions options(params);
+	test::TestDriverOptions options(params);
 	state std::vector<Future<Void>> actors;
-	state std::shared_ptr<TestDriverContext> context = initTestDriverContext(options);
+	state std::shared_ptr<test::TestDriverContext> context = test::initTestDriverContext(options);
 
 	state std::string folder = "simdb/unittests";
 	platform::createDirectory(folder);

@@ -448,6 +448,10 @@ public:
 	int64_t TLOG_RECOVER_MEMORY_LIMIT;
 	double TLOG_IGNORE_POP_AUTO_ENABLE_DELAY;
 
+	// Number of TLogGroup to recruit in TLogGroupCollection.
+	// TODO: Should we function of number of storage teams avaialble?
+	int TLOG_GROUP_COLLECTION_TARGET_SIZE;
+
 	int64_t MAX_MANUAL_THROTTLED_TRANSACTION_TAGS;
 	int64_t MAX_AUTO_THROTTLED_TRANSACTION_TAGS;
 	double MIN_TAG_COST;

@@ -204,8 +204,6 @@ public:
 
 	bool checkRunnable() override;
 
-	ActorLineageSet& getActorLineageSet() override;
-
 	bool useThreadPool;
 
 	// private:
@@ -228,14 +226,10 @@ public:
 	TaskPriority currentTaskID;
 	uint64_t tasksIssued;
 	TDMetricCollection tdmetrics;
-	// we read now() from a different thread. On Intel, reading a double is atomic anyways, but on other platforms it's
-	// not. For portability this should be atomic
-	std::atomic<double> currentTime;
+	double currentTime;
 	// May be accessed off the network thread, e.g. by onMainThread
 	std::atomic<bool> stopped;
 	mutable std::map<IPAddress, bool> addressOnHostCache;
-
-	ActorLineageSet actorLineageSet;
 
 	std::atomic<bool> started;
 
@@ -1387,10 +1381,6 @@ void Net2::initMetrics() {
 
 bool Net2::checkRunnable() {
 	return !started.exchange(true);
-}
-
-ActorLineageSet& Net2::getActorLineageSet() {
-	return actorLineageSet;
 }
 
 void Net2::run() {

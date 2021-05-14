@@ -48,9 +48,7 @@ const Key keyServersKey(const KeyRef& k) {
 const KeyRef keyServersKey(const KeyRef& k, Arena& arena) {
 	return k.withPrefix(keyServersPrefix, arena);
 }
-const Value keyServersValue(Standalone<RangeResultRef> result,
-                            const std::vector<UID>& src,
-                            const std::vector<UID>& dest) {
+const Value keyServersValue(RangeResult result, const std::vector<UID>& src, const std::vector<UID>& dest) {
 	if (!CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS) {
 		BinaryWriter wr(IncludeVersion(ProtocolVersion::withKeyServerValue()));
 		wr << src << dest;
@@ -95,7 +93,7 @@ const Value keyServersValue(const std::vector<Tag>& srcTag, const std::vector<Ta
 	return wr.toValue();
 }
 
-void decodeKeyServersValue(Standalone<RangeResultRef> result,
+void decodeKeyServersValue(RangeResult result,
                            const ValueRef& value,
                            std::vector<UID>& src,
                            std::vector<UID>& dest,
@@ -345,6 +343,24 @@ uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key) {
 	BinaryReader rd(key.removePrefix(cacheChangePrefix), Unversioned());
 	rd >> idx;
 	return idx;
+}
+
+// Key prefixes used by TLogGroup to store state in txnStateStore.
+const KeyRangeRef tLogGroupKeys(LiteralStringRef("\xff/tLogGroup/"), LiteralStringRef("\xff/tLogGroup0"));
+const KeyRef tLogGroupPrefix = tLogGroupKeys.begin;
+
+// Returns TLogGroup key prefix to for given `groupID`.
+const Key tLogGroupKeyFor(UID groupID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(tLogGroupPrefix);
+	wr << groupID;
+	return wr.toValue();
+}
+
+// Returns TLogGroup ID extraced from given TLogGroup key.
+UID decodeTLogGroupKey(const KeyRef& key) {
+	return BinaryReader::fromStringRef<UID>(
+	    key.removePrefix(tLogGroupPrefix).removeSuffix(LiteralStringRef("/servers")), Unversioned());
 }
 
 const KeyRangeRef serverTagKeys(LiteralStringRef("\xff/serverTag/"), LiteralStringRef("\xff/serverTag0"));
@@ -605,8 +621,9 @@ const AddressExclusion decodeExcludedServersKey(KeyRef const& key) {
 	ASSERT(key.startsWith(excludedServersPrefix));
 	// Returns an invalid NetworkAddress if given an invalid key (within the prefix)
 	// Excluded servers have IP in x.x.x.x format, port optional, and no SSL suffix
-	// Returns a valid, public NetworkAddress with a port of 0 if the key represents an IP address alone (meaning all
-	// ports) Returns a valid, public NetworkAddress with nonzero port if the key represents an IP:PORT combination
+	// Returns a valid, public NetworkAddress with a port of 0 if the key represents an IP address alone (meaning
+	// all ports) Returns a valid, public NetworkAddress with nonzero port if the key represents an IP:PORT
+	// combination
 
 	return AddressExclusion::parse(key.removePrefix(excludedServersPrefix));
 }
@@ -622,8 +639,9 @@ const AddressExclusion decodeFailedServersKey(KeyRef const& key) {
 	ASSERT(key.startsWith(failedServersPrefix));
 	// Returns an invalid NetworkAddress if given an invalid key (within the prefix)
 	// Excluded servers have IP in x.x.x.x format, port optional, and no SSL suffix
-	// Returns a valid, public NetworkAddress with a port of 0 if the key represents an IP address alone (meaning all
-	// ports) Returns a valid, public NetworkAddress with nonzero port if the key represents an IP:PORT combination
+	// Returns a valid, public NetworkAddress with a port of 0 if the key represents an IP address alone (meaning
+	// all ports) Returns a valid, public NetworkAddress with nonzero port if the key represents an IP:PORT
+	// combination
 
 	return AddressExclusion::parse(key.removePrefix(failedServersPrefix));
 }
@@ -635,15 +653,17 @@ std::string encodeFailedServersKey(AddressExclusion const& addr) {
 // const KeyRangeRef globalConfigKeys( LiteralStringRef("\xff/globalConfig/"), LiteralStringRef("\xff/globalConfig0") );
 // const KeyRef globalConfigPrefix = globalConfigKeys.begin;
 
-const KeyRangeRef globalConfigDataKeys( LiteralStringRef("\xff/globalConfig/k/"), LiteralStringRef("\xff/globalConfig/k0") );
+const KeyRangeRef globalConfigDataKeys(LiteralStringRef("\xff/globalConfig/k/"),
+                                       LiteralStringRef("\xff/globalConfig/k0"));
 const KeyRef globalConfigKeysPrefix = globalConfigDataKeys.begin;
 
-const KeyRangeRef globalConfigHistoryKeys( LiteralStringRef("\xff/globalConfig/h/"), LiteralStringRef("\xff/globalConfig/h0") );
+const KeyRangeRef globalConfigHistoryKeys(LiteralStringRef("\xff/globalConfig/h/"),
+                                          LiteralStringRef("\xff/globalConfig/h0"));
 const KeyRef globalConfigHistoryPrefix = globalConfigHistoryKeys.begin;
 
 const KeyRef globalConfigVersionKey = LiteralStringRef("\xff/globalConfig/v");
 
-const KeyRangeRef workerListKeys( LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0") );
+const KeyRangeRef workerListKeys(LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0"));
 const KeyRef workerListPrefix = workerListKeys.begin;
 
 const Key workerListKeyFor(StringRef processID) {

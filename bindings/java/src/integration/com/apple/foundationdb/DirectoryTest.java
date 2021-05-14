@@ -42,7 +42,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
  */
 @ExtendWith(RequiresDatabase.class)
 class DirectoryTest {
-	private static final FDB fdb = FDB.selectAPIVersion(700);
+	private static final FDB fdb = FDB.selectAPIVersion(710);
 
 	@Test
 	void testCanCreateDirectory() throws Exception {

@@ -84,7 +84,7 @@ void applyMetadataMutations(SpanID const& spanContext,
 						vector<UID> src, dest;
 						// txnStateStore is always an in-memory KVS, and must always be recovered before
 						// applyMetadataMutations is called, so a wait here should never be needed.
-						Future<Standalone<RangeResultRef>> fResult = txnStateStore->readRange(serverTagKeys);
+						Future<RangeResult> fResult = txnStateStore->readRange(serverTagKeys);
 						decodeKeyServersValue(fResult.get(), m.param2, src, dest);
 
 						ASSERT(storageCache);
@@ -164,6 +164,15 @@ void applyMetadataMutations(SpanID const& spanContext,
 							}
 						}
 					}
+				}
+			} else if (m.param1.startsWith(tLogGroupPrefix)) {
+				// Create a private mutation for storage servers
+				// This is done to make the storage servers aware of changed tLogGroup
+				if (toCommit) {
+					// TODO: Don't know how it works?
+				}
+				if (!initialCommit) {
+					txnStateStore->set(KeyValueRef(m.param1, m.param2));
 				}
 			} else if (m.param1.startsWith(storageCachePrefix)) {
 				if (cacheInfo) {

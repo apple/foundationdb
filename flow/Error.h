@@ -132,6 +132,7 @@ extern bool isAssertDisabled(int line);
 	{ throw internal_error_impl("unreachable", __FILE__, __LINE__); }
 
 // Assert an specific exception is thrown when evaluating the expression
+// NOTE: it *CANNOT* handle internal_error as it is treated differently in FDB
 #define ASSERT_THROW(expression, exception)                                                                            \
 	do {                                                                                                               \
 		bool _____exception_happened = false;                                                                          \
@@ -143,6 +144,7 @@ extern bool isAssertDisabled(int line);
 	} while (false)
 
 // Assert a FDB exception is thrown when evaluating the expression
+// NOTE: it *CANNOT* handle internal_error as it is treated differently in FDB
 #define ASSERT_THROW_FDB_ERROR(expression, fdb_error)                                                                  \
 	do {                                                                                                               \
 		bool _____exception_happened = false;                                                                          \
@@ -154,6 +156,7 @@ extern bool isAssertDisabled(int line);
 	} while (false)
 
 // Assert an exception (could be any type) is thrown when evaluating the expression
+// NOTE: it *CANNOT* handle internal_error as it is treated differently in FDB
 #define ASSERT_THROW_ANY_EXCEPTION(expression)                                                                         \
 	do {                                                                                                               \
 		bool _____exception_happened = false;                                                                          \

@@ -30,7 +30,7 @@ Fixes
 
 Status
 ------
-
+* Added ``commit_batching_window_size`` to the proxy roles section of status to record statistics about commit batching window size on each proxy. `(PR #4735) <https://github.com/apple/foundationdb/pull/4735>`_
 
 
 Bindings

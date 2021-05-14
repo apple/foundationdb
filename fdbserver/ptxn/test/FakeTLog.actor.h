@@ -28,8 +28,10 @@
 #include <unordered_map>
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbserver/ptxn/MessageTypes.h"
 #include "fdbserver/ptxn/test/Driver.h"
 #include "fdbserver/ptxn/TLogInterface.h"
+#include "fdbserver/ptxn/TLogStorageServerPeekMessageSerializer.h"
 #include "fdbserver/ptxn/StorageServerInterface.h"
 #include "flow/flow.h"
 
@@ -37,20 +39,16 @@
 
 #pragma once
 
-namespace ptxn {
-
-struct PersistedMutation {
-	StorageTeamID teamID;
-	LogMessageVersion logMessageVersion;
-	MutationRef mutation;
-};
+namespace ptxn::test {
 
 struct FakeTLogContext {
 	std::shared_ptr<TestDriverContext> pTestDriverContext;
 	std::shared_ptr<TLogInterfaceBase> pTLogInterface;
 
+	size_t maxBytesPerPeek = 1024 * 1024;
+
 	Arena persistenceArena;
-	VectorRef<PersistedMutation> mutations;
+	std::unordered_map<StorageTeamID, VectorRef<VersionSubsequenceMutation>> mutations;
 };
 
 ACTOR Future<Void> fakeTLog_ActivelyPush(std::shared_ptr<FakeTLogContext> pFakeTLogContext);
@@ -58,7 +56,7 @@ ACTOR Future<Void> fakeTLog_PassivelyProvide(std::shared_ptr<FakeTLogContext> pF
 
 Future<Void> getFakeTLogActor(const MessageTransferModel model, std::shared_ptr<FakeTLogContext> pFakeTLogContext);
 
-} // namespace ptxn
+} // namespace ptxn::test
 
 #include "flow/unactorcompiler.h"
 #endif // FDBSERVER_PTXN_TEST_FAKETLOG_ACTOR_H

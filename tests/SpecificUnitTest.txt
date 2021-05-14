@@ -2,6 +2,6 @@ testTitle=UnitTests
 startDelay=0
 useDB=false
 
-    testName=UnitTests
-    maxTestCases=0
-    testsMatching=/status/json/builder
+testName=UnitTests
+maxTestCases=0
+testsMatching=/status/json/builder

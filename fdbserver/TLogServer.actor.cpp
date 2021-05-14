@@ -849,7 +849,7 @@ ACTOR Future<Void> updatePoppedLocation(TLogData* self, Reference<LogData> logDa
 	// us to remove data that still is pointed to by SpilledData in the btree.
 	if (data->persistentPopped <= logData->persistentDataVersion) {
 		// Recover the next needed location in the Disk Queue from the index.
-		Standalone<RangeResultRef> kvrefs = wait(self->persistentData->readRange(
+		RangeResult kvrefs = wait(self->persistentData->readRange(
 		    KeyRangeRef(persistTagMessageRefsKey(logData->logId, data->tag, data->persistentPopped),
 		                persistTagMessageRefsKey(logData->logId, data->tag, logData->persistentDataVersion + 1)),
 		    1));
@@ -1723,7 +1723,7 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 		}
 
 		if (logData->shouldSpillByValue(req.tag)) {
-			Standalone<RangeResultRef> kvs = wait(self->persistentData->readRange(
+			RangeResult kvs = wait(self->persistentData->readRange(
 			    KeyRangeRef(persistTagMessagesKey(logData->logId, req.tag, req.begin),
 			                persistTagMessagesKey(logData->logId, req.tag, logData->persistentDataDurableVersion + 1)),
 			    SERVER_KNOBS->DESIRED_TOTAL_BYTES,
@@ -1743,7 +1743,7 @@ ACTOR Future<Void> tLogPeekMessages(TLogData* self, TLogPeekRequest req, Referen
 			}
 		} else {
 			// FIXME: Limit to approximately DESIRED_TOTATL_BYTES somehow.
-			Standalone<RangeResultRef> kvrefs = wait(self->persistentData->readRange(
+			RangeResult kvrefs = wait(self->persistentData->readRange(
 			    KeyRangeRef(
 			        persistTagMessageRefsKey(logData->logId, req.tag, req.begin),
 			        persistTagMessageRefsKey(logData->logId, req.tag, logData->persistentDataDurableVersion + 1)),
@@ -2739,14 +2739,14 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	wait(storage->init());
 	state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
 	state Future<Optional<Value>> fRecoveryLocation = storage->readValue(persistRecoveryLocationKey);
-	state Future<Standalone<RangeResultRef>> fVers = storage->readRange(persistCurrentVersionKeys);
-	state Future<Standalone<RangeResultRef>> fKnownCommitted = storage->readRange(persistKnownCommittedVersionKeys);
-	state Future<Standalone<RangeResultRef>> fLocality = storage->readRange(persistLocalityKeys);
-	state Future<Standalone<RangeResultRef>> fLogRouterTags = storage->readRange(persistLogRouterTagsKeys);
-	state Future<Standalone<RangeResultRef>> fTxsTags = storage->readRange(persistTxsTagsKeys);
-	state Future<Standalone<RangeResultRef>> fRecoverCounts = storage->readRange(persistRecoveryCountKeys);
-	state Future<Standalone<RangeResultRef>> fProtocolVersions = storage->readRange(persistProtocolVersionKeys);
-	state Future<Standalone<RangeResultRef>> fTLogSpillTypes = storage->readRange(persistTLogSpillTypeKeys);
+	state Future<RangeResult> fVers = storage->readRange(persistCurrentVersionKeys);
+	state Future<RangeResult> fKnownCommitted = storage->readRange(persistKnownCommittedVersionKeys);
+	state Future<RangeResult> fLocality = storage->readRange(persistLocalityKeys);
+	state Future<RangeResult> fLogRouterTags = storage->readRange(persistLogRouterTagsKeys);
+	state Future<RangeResult> fTxsTags = storage->readRange(persistTxsTagsKeys);
+	state Future<RangeResult> fRecoverCounts = storage->readRange(persistRecoveryCountKeys);
+	state Future<RangeResult> fProtocolVersions = storage->readRange(persistProtocolVersionKeys);
+	state Future<RangeResult> fTLogSpillTypes = storage->readRange(persistTLogSpillTypeKeys);
 
 	// FIXME: metadata in queue?
 
@@ -2774,8 +2774,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	}
 
 	if (!fFormat.get().present()) {
-		Standalone<RangeResultRef> v =
-		    wait(self->persistentData->readRange(KeyRangeRef(StringRef(), LiteralStringRef("\xff")), 1));
+		RangeResult v = wait(self->persistentData->readRange(KeyRangeRef(StringRef(), LiteralStringRef("\xff")), 1));
 		if (!v.size()) {
 			TEST(true); // The DB is completely empty, so it was never initialized.  Delete it.
 			throw worker_removed();
@@ -2892,8 +2891,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		loop {
 			if (logData->removed.isReady())
 				break;
-			Standalone<RangeResultRef> data =
-			    wait(self->persistentData->readRange(tagKeys, BUGGIFY ? 3 : 1 << 30, 1 << 20));
+			RangeResult data = wait(self->persistentData->readRange(tagKeys, BUGGIFY ? 3 : 1 << 30, 1 << 20));
 			if (!data.size())
 				break;
 			((KeyRangeRef&)tagKeys) = KeyRangeRef(keyAfter(data.back().key, tagKeys.arena()), tagKeys.end);

@@ -20,7 +20,6 @@
 
 #ifndef FDBCLIENT_ICLIENTAPI_H
 #define FDBCLIENT_ICLIENTAPI_H
-#include "fdbclient/ManagementAPI.actor.h"
 #pragma once
 
 #include "fdbclient/FDBOptions.g.h"
@@ -42,24 +41,24 @@ public:
 	// until the ThreadFuture's ThreadSingleAssignmentVar has its memory released or it is destroyed.
 	virtual ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot = false) = 0;
 	virtual ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false) = 0;
-	virtual ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin,
-	                                                          const KeySelectorRef& end,
-	                                                          int limit,
-	                                                          bool snapshot = false,
-	                                                          bool reverse = false) = 0;
-	virtual ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin,
-	                                                          const KeySelectorRef& end,
-	                                                          GetRangeLimits limits,
-	                                                          bool snapshot = false,
-	                                                          bool reverse = false) = 0;
-	virtual ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys,
-	                                                          int limit,
-	                                                          bool snapshot = false,
-	                                                          bool reverse = false) = 0;
-	virtual ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys,
-	                                                          GetRangeLimits limits,
-	                                                          bool snapshot = false,
-	                                                          bool reverse = false) = 0;
+	virtual ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
+	                                           const KeySelectorRef& end,
+	                                           int limit,
+	                                           bool snapshot = false,
+	                                           bool reverse = false) = 0;
+	virtual ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
+	                                           const KeySelectorRef& end,
+	                                           GetRangeLimits limits,
+	                                           bool snapshot = false,
+	                                           bool reverse = false) = 0;
+	virtual ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
+	                                           int limit,
+	                                           bool snapshot = false,
+	                                           bool reverse = false) = 0;
+	virtual ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
+	                                           GetRangeLimits limits,
+	                                           bool snapshot = false,
+	                                           bool reverse = false) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) = 0;
 	virtual ThreadFuture<Standalone<StringRef>> getVersionstamp() = 0;
 

@@ -1,5 +1,5 @@
 /*
- * AnnotateActor.cpp
+ * String.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,6 +18,32 @@
  * limitations under the License.
  */
 
-#include "fdbclient/AnnotateActor.h"
+#ifndef FLOW_STRING_H
+#define FLOW_STRING_H
 
-std::map<WaitState, std::function<std::vector<Reference<ActorLineage>>()>> samples;
+#include <sstream>
+#include <string>
+
+namespace {
+
+template <typename Arg>
+std::stringstream& _concatHelper(std::stringstream&& ss, const Arg& arg) {
+	ss << arg;
+	return ss;
+}
+
+template <typename First, typename... Args>
+std::stringstream& _concatHelper(std::stringstream&& ss, const First& first, const Args&... args) {
+	ss << first;
+	return _concatHelper(std::move(ss), args...);
+}
+
+} // anonymous namespace
+
+// Concatencate a list of objects to string
+template <typename... Args>
+std::string concatToString(const Args&... args) {
+	return _concatHelper(std::stringstream(), args...).str();
+}
+
+#endif // FLOW_STRING_H

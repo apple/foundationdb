@@ -27,7 +27,7 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-namespace ptxn {
+namespace ptxn::test {
 
 ACTOR Future<Void> fakeStorageServer_PassivelyReceive(
     std::shared_ptr<FakeStorageServerContext> pFakeStorageServerContext) {
@@ -74,4 +74,4 @@ Future<Void> getFakeStorageServerActor(const MessageTransferModel model,
 	}
 }
 
-} // namespace ptxn
+} // namespace ptxn::test

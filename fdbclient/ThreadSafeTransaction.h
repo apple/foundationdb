@@ -73,32 +73,35 @@ public:
 	explicit ThreadSafeTransaction(DatabaseContext* cx);
 	~ThreadSafeTransaction() override;
 
+	// Note: used while refactoring fdbcli, need to be removed later
+	explicit ThreadSafeTransaction(ReadYourWritesTransaction* ryw);
+
 	void cancel() override;
 	void setVersion(Version v) override;
 	ThreadFuture<Version> getReadVersion() override;
 
 	ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot = false) override;
 	ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false) override;
-	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin,
-	                                                  const KeySelectorRef& end,
-	                                                  int limit,
-	                                                  bool snapshot = false,
-	                                                  bool reverse = false) override;
-	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin,
-	                                                  const KeySelectorRef& end,
-	                                                  GetRangeLimits limits,
-	                                                  bool snapshot = false,
-	                                                  bool reverse = false) override;
-	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys,
-	                                                  int limit,
-	                                                  bool snapshot = false,
-	                                                  bool reverse = false) override {
+	ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
+	                                   const KeySelectorRef& end,
+	                                   int limit,
+	                                   bool snapshot = false,
+	                                   bool reverse = false) override;
+	ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
+	                                   const KeySelectorRef& end,
+	                                   GetRangeLimits limits,
+	                                   bool snapshot = false,
+	                                   bool reverse = false) override;
+	ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
+	                                   int limit,
+	                                   bool snapshot = false,
+	                                   bool reverse = false) override {
 		return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limit, snapshot, reverse);
 	}
-	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys,
-	                                                  GetRangeLimits limits,
-	                                                  bool snapshot = false,
-	                                                  bool reverse = false) override {
+	ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
+	                                   GetRangeLimits limits,
+	                                   bool snapshot = false,
+	                                   bool reverse = false) override {
 		return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse);
 	}
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;

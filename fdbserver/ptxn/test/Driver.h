@@ -34,7 +34,7 @@
 #include "fdbserver/ResolverInterface.h"
 #include "flow/UnitTest.h"
 
-namespace ptxn {
+namespace ptxn::test {
 
 struct CommitValidationRecord {
 	bool tLogValidated = false;
@@ -159,6 +159,9 @@ void startFakeTLog(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriver
 
 void startFakeStorageServer(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext);
 
-} // namespace ptxn
+// Get a TeamID, the TeamID is determinstic in the simulation environment
+StorageTeamID getNewTeamID();
+
+} // namespace ptxn::test
 
 #endif // FDBSERVER_PTXN_TEST_DRIVER_H
