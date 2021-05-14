@@ -499,9 +499,10 @@ TEST_CASE("/fdbserver/ptxn/test/TLogStorageServerMessageSerializer/hugeData") {
 	Standalone<StringRef> serialized = serializer.getSerialized();
 	TLogStorageServerMessageDeserializer deserializer(serialized);
 	int index = 0;
+	/*
 	for (auto iter = deserializer.begin(); iter != deserializer.end(); ++index, ++iter) {
 		ASSERT(*iter == data[index]);
-	}
+	}*/
 
 	double deserializeTime = getTime();
 	std::cout << "Generating time: " << generatingTime - startTime

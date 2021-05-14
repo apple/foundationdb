@@ -64,7 +64,7 @@ void print(const TLogPeekRequest&);
 void print(const TLogPeekReply&);
 void print(const TestDriverOptions&);
 void print(const CommitRecord&);
-void print(const ptxn::test::tLogPeek::TestTLogPeekOptions&);
+void print(const ptxn::test::TestTLogPeekOptions&);
 
 void printCommitRecord(const std::vector<CommitRecord>&);
 void printNotValidatedRecords(const std::vector<CommitRecord>&);

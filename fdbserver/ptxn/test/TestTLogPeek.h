@@ -26,26 +26,25 @@
 #include "fdbserver/ptxn/test/Driver.h"
 #include "flow/UnitTest.h"
 
-namespace ptxn::test::tLogPeek {
-
+namespace ptxn::test {
 struct TestTLogPeekOptions {
-    static const int DEFAULT_NUM_MUTATIONS = 10000;
-    static const int DEFAULT_NUM_TEAMS = 3;
-    static const int DEFAULT_INITIAL_VERSION = 1000;
-    static const int DEFAULT_PEEK_TIMES = 1000;
+	static const int DEFAULT_NUM_MUTATIONS = 10000;
+	static const int DEFAULT_NUM_TEAMS = 3;
+	static const int DEFAULT_INITIAL_VERSION = 1000;
+	static const int DEFAULT_PEEK_TIMES = 1000;
 
-    // The number of mutations stored in the TLog before peek
-    int numMutations;
-    // The number of teams in the TLog. Mutations are randomly distributed into teams.
-    int numTeams;
-    // The initial version
-    int initialVersion;
-    // Number of peek times
-    int peekTimes;
+	// The number of mutations stored in the TLog before peek
+	int numMutations;
+	// The number of teams in the TLog. Mutations are randomly distributed into teams.
+	int numTeams;
+	// The initial version
+	int initialVersion;
+	// Number of peek times
+	int peekTimes;
 
-    explicit TestTLogPeekOptions(const UnitTestParameters&);
+	explicit TestTLogPeekOptions(const UnitTestParameters&);
 };
 
-}   // namespace ptxn::test::tLogPeek
+} // namespace ptxn::test
 
 #endif // FDBSERVER_PTEXN_TEST_TESTTLOGPEEK_H

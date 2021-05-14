@@ -50,10 +50,40 @@ startDelay = 0
     [[test.workload]]
     testName = 'UnitTests'
     maxTestCases = 1
-    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/MergedPeekCursor'
+    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/MergedPeekCursor/base'
 
     maxBytesPerPeek = 4096
 
     numMutations = 100000
     numTeams = 3
     initialVersion = 1000
+
+[[test]]
+testTitle = 'Test merged peek cursor -- add cursors on the fly'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/MergedPeekCursor/addCursorOnTheFly'
+
+[[test]]
+testTitle = 'Test merged peek cursor -- remove cursors on the fly'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/MergedServerTeamPeekCursor/removeCursorOnTheFly' 
+
+[[test]]
+testTitle = 'Test cursor advanceTo'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/advanceTo'

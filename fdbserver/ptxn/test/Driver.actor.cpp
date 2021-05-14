@@ -36,7 +36,6 @@
 #include "fdbserver/ptxn/test/FakeStorageServer.actor.h"
 #include "fdbserver/ptxn/test/FakeTLog.actor.h"
 #include "fdbserver/ptxn/test/Utils.h"
-#include "fdbserver/ptxn/TLogPeekCursor.h"
 #include "fdbserver/ResolverInterface.h"
 #include "flow/genericactors.actor.h"
 #include "flow/IRandom.h"

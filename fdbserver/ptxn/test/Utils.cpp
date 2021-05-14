@@ -137,7 +137,7 @@ void print(const CommitRecord& record) {
 	}
 }
 
-void print(const ptxn::test::tLogPeek::TestTLogPeekOptions& option) {
+void print(const ptxn::test::TestTLogPeekOptions& option) {
 	std::cout << std::endl << ">> ptxn/test//Driver.actor.cpp:DriverTestOptions:" << std::endl;
 
 	std::cout << formatKVPair("Mutations", option.numMutations) << std::endl

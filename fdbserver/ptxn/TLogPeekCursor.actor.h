@@ -1,5 +1,5 @@
 /*
- * TLogPeekCursor.h
+ * TLogPeekCursor.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,15 +18,17 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_PTXN_TLOGPEEKCURSOR_H
-#define FDBSERVER_PTXN_TLOGPEEKCURSOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_PTXN_TLOGPEEKCURSOR_ACTOR_G_H)
+#define FDBSERVER_PTXN_TLOGPEEKCURSOR_ACTOR_G_H
+#include "fdbserver/ptxn/TLogPeekCursor.actor.g.h"
+#elif !defined(FDBSERVER_PTXN_TLOGPEEKCURSOR_ACTOR_H)
+#define FDBSERVER_PTXN_TLOGPEEKCURSOR_ACTOR_H
 
-#pragma once
-
-#include <initializer_list>
 #include <functional>
 #include <list>
+#include <memory>
 #include <queue>
+#include <unordered_map>
 #include <vector>
 
 #include "fdbclient/FDBTypes.h"
@@ -35,6 +37,8 @@
 #include "fdbserver/ptxn/TLogStorageServerPeekMessageSerializer.h"
 #include "flow/Arena.h"
 
+#include "flow/actorcompiler.h" // has to be the last file included
+
 namespace ptxn {
 
 class PeekCursorBase {
@@ -42,18 +46,23 @@ public:
 	// Iterator for pulled mutations. This is not a standard input iterator as it is not duplicable, thus no postfix
 	// operator++ support. NOTE It will *NOT* trigger remoteMoreAvailable(). It will only iterate over the serialized
 	// data that are already peeked from TLog.
+	// NOTE: Duplicating the iterator may led to unexpected behavior, i.e. step one iterator causes the other iterators
+	// being stepped. It is discouraged to explicitly duplicate the iterator.
 	class iterator : public ConstInputIteratorBase<VersionSubsequenceMutation> {
 		friend class PeekCursorBase;
 
 		PeekCursorBase* pCursor;
 		bool isEndIterator = false;
 
-		iterator(PeekCursorBase*, bool);
+		// pCursor_ is the pointer to the PeekCursorBase
+		// isEndIterator_ is used to determine if the iterator is served as the end of the stream. We never know where
+		// the end is when we iterate over the mutations, until we reached the end, thus we check if we are at the end
+		// of the stream when we compare the iterator with a special iterator pointing to nothing but having the flag
+		// isEndIterator on, and during the comparision we determine if the current iterator is reaching the end. See
+		// iterator::operator== for implementation details.
+		iterator(PeekCursorBase* pCursor_, bool isEndIterator_);
 
 	public:
-		// Since the iterator will change the interanl state of the cursor, duplication is prohibited.
-		iterator& operator=(const iterator&) = delete;
-
 		bool operator==(const iterator&) const;
 		bool operator!=(const iterator&) const;
 
@@ -66,13 +75,7 @@ public:
 		// Postfix incremental is disabled since duplication is prohibited.
 	};
 
-	PeekCursorBase(const Version&);
-
-	// Returns the begin verion for the cursor. The cursor will start from the begin version.
-	const Version& getBeginVersion() const;
-
-	// Returns the last version being pulled
-	const Version& getLastVersion() const;
+	PeekCursorBase();
 
 	// Checks if there is any more messages in the remote TLog(s), if so, retrieve the messages to local. Will
 	// invalidate the iterator, if exists.
@@ -106,13 +109,7 @@ protected:
 	// Checks if any remaining mutations
 	virtual bool hasRemainingImpl() const = 0;
 
-	// Last version processed
-	Version lastVersion;
-
 private:
-	// The version the cursor starts
-	const Version beginVersion;
-
 	// The iterator that represents the end of the unserialized data
 	const iterator endIterator;
 };
@@ -127,6 +124,15 @@ class ServerTeamPeekCursor : public PeekCursorBase {
 	Arena* pAttachArena;
 	TLogStorageServerMessageDeserializer deserializer;
 	TLogStorageServerMessageDeserializer::iterator deserializerIter;
+
+	// Returns the begin verion for the cursor. The cursor will start from the begin version.
+	const Version& getBeginVersion() const;
+
+	// The version the cursor starts
+	const Version beginVersion;
+
+	// Last version processed
+	Version lastVersion;
 
 public:
 	// version_ is the version the cursor starts with
@@ -146,6 +152,9 @@ public:
 
 	const StorageTeamID& getTeamID() const;
 
+	// Returns the last version being pulled
+	const Version& getLastVersion() const;
+
 protected:
 	virtual Future<bool> remoteMoreAvailableImpl() override;
 	virtual void nextImpl() override;
@@ -153,14 +162,16 @@ protected:
 	virtual bool hasRemainingImpl() const override;
 };
 
+using CursorContainer = std::list<std::unique_ptr<PeekCursorBase>>;
+
 // This class defines the index of a cursor. For a given mutation, it has an unique cursor index. The index is totally
 // ordered.
 struct IndexedCursor {
 	Version version;
 	Subsequence subsequence;
-	PeekCursorBase* pCursor;
+	CursorContainer::iterator pCursorPtr;
 
-	IndexedCursor(const Version&, const Subsequence&, PeekCursorBase*);
+	IndexedCursor(const Version&, const Subsequence&, CursorContainer::iterator);
 
 	// TODO the return type should be std::strong_ordering
 	friend constexpr int operatorSpaceship(const IndexedCursor&, const IndexedCursor&);
@@ -194,55 +205,110 @@ inline constexpr int operatorSpaceship(const IndexedCursor& c1, const IndexedCur
 	}
 }
 
-// TODO Use Reference or std::shared_ptr
-using PeekCursorBasePtr = PeekCursorBase*;
-
-namespace {
-
-template <typename Iterator>
-Version getMinimalVersionInCursors(const Iterator& begin, const Iterator& end) {
-	Version min = MAX_VERSION;
-	for (Iterator iter = begin; iter != end; ++iter) {
-		min = std::min(min, (*iter)->getBeginVersion());
-	}
-	return min;
-}
-
-} // anonymous namespace
-
-// Merge several cursors, return a single cursor
+// Merges multiple cursors, return a single cursor, and reorder the mutations by version/subsequence, in an ascending
+// order.
+// When peeking for mutations, it is usually acrossing multiple teams, e.g. when StorageServer peeks for
+// mutations, it will peek for mutations over all teams it is assigned. MergedPeekCursor will extract the mutations from
+// multiple cursors, reorder them by version/subsequence using a heap, and output the result.
 class MergedPeekCursor : public PeekCursorBase {
 public:
-	// NOTE std::priority_queue is a max-heap by default. We need to use std::greater to turn it to a min-heap.
-	using Heap = std::priority_queue<IndexedCursor, std::vector<IndexedCursor>, std::greater<IndexedCursor>>;
-private:
+	// NOTE std::priority_queue is a max-heap by default. We need to use std::greater to turn it into a min-heap.
+	using CursorHeap = std::priority_queue<IndexedCursor, std::vector<IndexedCursor>, std::greater<IndexedCursor>>;
+	using CursorContainer = ptxn::CursorContainer;
+
+protected:
 	// In cursorPtrs, we maintain a list of cursors that are still not exhausted. Any cursor that is exhausted will be
 	// removed from this list. Exhaust means the cursor have no extra data to be deserialized, nor it could receive
 	// more data from TLog.
-	std::list<PeekCursorBasePtr> cursorPtrs;
+	CursorContainer cursorPtrs;
 	// The cursorHeap also maintains non-exhausting cursors only.
-	Heap cursorHeap;
+	CursorHeap cursorHeap;
+
+	// Add a cursor to the heap. The cursor must hasRemaining
+	void addCursorToCursorHeap(CursorContainer::iterator iter);
+
+private:
+	template <typename Iterator>
+	void moveUniquePtrsInConstructor(Iterator& begin, Iterator& end) {
+		auto iter = begin;
+		while (iter != end) {
+			cursorPtrs.emplace_back(std::move(*iter));
+			++iter;
+		}
+	}
 
 public:
-	// With MergedPeekCursor, it joins multiple cursors, merge the mutations, and allowing iteratively accesing them. To
-	// ensure the merge cursor works properly, all cursors must be in "local exhausted" state, i.e.
-	//   pCursor->begin() == pCursor->end()
-	MergedPeekCursor(std::initializer_list<PeekCursorBasePtr>);
-	// Dereferencing the iterator should result a PeekCursorBasePtr object.
+	// Constructs a MergedPeekCursor holding no cursors. This is also valid and being used by subclasses.
+	MergedPeekCursor();
+
+	// Constructs a MergedPeekCursor using a range of std::unique_ptr<PeekCursorBase> objects.
+	// Dereferencing the iterator should result a std::unique_ptr<PeekCursorBase> object. The MergedPeekCursor will take
+	// over the ownership of the object. All cursors in the container will be taken by MergedPeekCursor.
 	template <typename Iterator>
-	MergedPeekCursor(const Iterator& begin_, const Iterator& end_)
-	  : PeekCursorBase(getMinimalVersionInCursors(begin_, end_)), cursorPtrs(begin_, end_) {}
+	MergedPeekCursor(Iterator&& begin_, Iterator&& end_) : PeekCursorBase() {
+		moveUniquePtrsInConstructor(begin_, end_);
+	}
 
 	// Get the number of cursors that are still not exhausted
-	size_t getNumActiveCursor() const;
+	size_t getNumActiveCursors() const;
+
+	// Add a new cusror to the merged cursor list
+	template <typename T>
+	void addCursor(std::unique_ptr<T>&& pCursor) {
+		// NOTE: since ASSERT is a macro, it interprets
+		//   std::is_base_of<PeekCursorBase, T>::value
+		// as two parameters, one is "std:is_base_of<PeekCursorBase" and the other is "T>". Thus additional
+		// parenthesises must be used.
+		ASSERT((std::is_base_of<PeekCursorBase, T>::value));
+		addCursorImpl(std::unique_ptr<PeekCursorBase>(std::move(pCursor)));
+	}
 
 protected:
+	virtual CursorContainer::iterator addCursorImpl(std::unique_ptr<PeekCursorBase>&&);
+
 	virtual Future<bool> remoteMoreAvailableImpl() override;
 	virtual void nextImpl() override;
 	virtual const VersionSubsequenceMutation& getImpl() const override;
 	virtual bool hasRemainingImpl() const override;
 };
 
+// Merges multiple ServerTeamPeekCursor, allowing adding/removing by TeamID.
+class MergedServerTeamPeekCursor : public MergedPeekCursor {
+private:
+	std::unordered_map<StorageTeamID, CursorContainer::iterator> teamIDCursorMapper;
+
+public:
+	// Construct a MergedServerTeamPeekCursor holding no cursors.
+	MergedServerTeamPeekCursor();
+
+	// Construct a MergedServerTeamPeekCursor using a range of std::unique_ptr<PeekCursorBase> objects.
+	template <typename Iterator>
+	MergedServerTeamPeekCursor(Iterator&& begin, Iterator&& end) : MergedPeekCursor(begin, end) {
+		for (auto iter = std::begin(cursorPtrs); iter != std::end(cursorPtrs); ++iter) {
+			const auto* pCursor = dynamic_cast<ServerTeamPeekCursor*>((*iter).get());
+			ASSERT(pCursor != nullptr);
+			// NOTE std::dynamic_pointer_cast is not supporting std::unique_ptr.
+			const auto& teamID = pCursor->getTeamID();
+			teamIDCursorMapper[teamID] = iter;
+		}
+	}
+
+	// Remove an existing ServerTeamPeekCursor by its TeamID
+	std::unique_ptr<PeekCursorBase> removeCursor(const StorageTeamID&);
+
+	// Get all TeamIDs for currently active cursors
+	std::vector<StorageTeamID> getCursorTeamIDs();
+
+protected:
+	virtual CursorContainer::iterator addCursorImpl(std::unique_ptr<PeekCursorBase>&&) override;
+
+	virtual Future<bool> remoteMoreAvailableImpl() override;
+};
+
+// Advances the cursor to the given version/subsequence
+ACTOR Future<Void> advanceTo(PeekCursorBase* cursor, Version version, Subsequence subsequence = 0);
+
 } // namespace ptxn
 
-#endif // FDBSERVER_PTXN_TLOGPEEKCURSOR_H
+#include "flow/unactorcompiler.h"
+#endif // FDBSERVER_PTXN_TLOGPEEKCURSOR_ACTOR_H

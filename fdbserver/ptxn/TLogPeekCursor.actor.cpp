@@ -18,9 +18,10 @@
  * limitations under the License.
  */
 
-#include "fdbserver/ptxn/TLogPeekCursor.h"
+#include "fdbserver/ptxn/TLogPeekCursor.actor.h"
 
 #include <iterator>
+#include <unordered_set>
 #include <vector>
 
 #include "fdbserver/ptxn/TLogInterface.h"
@@ -119,21 +120,30 @@ ACTOR Future<bool> peekRemote(PeekRemoteContext peekRemoteContext) {
 }
 
 struct PeekMergedCursorContext {
-	std::list<PeekCursorBasePtr>* pCursorPtrs;
-	MergedPeekCursor::Heap* pCursorHeap;
+	MergedPeekCursor::CursorContainer* pCursorPtrs;
+	MergedPeekCursor::CursorHeap* pCursorHeap;
 };
+
+// Add a cursor to the CursorHeap, the cursor must hasRemaining()
+void addCursorToCursorHeap(MergedPeekCursor::CursorContainer::iterator iter, MergedPeekCursor::CursorHeap& heap) {
+	ASSERT((*iter)->hasRemaining());
+	const VersionSubsequenceMutation& mutation = (*iter)->get();
+	heap.emplace(mutation.version, mutation.subsequence, iter);
+}
 
 // Peek remote for multiple cursors, if the cursor is not exhausted, remove it from the incoming cursor list.
 ACTOR Future<bool> peekRemoteForMergedCursor(PeekMergedCursorContext context) {
-	state std::list<PeekCursorBasePtr>& cursorPtrs(*context.pCursorPtrs);
-	state MergedPeekCursor::Heap& cursorHeap(*context.pCursorHeap);
+	state MergedPeekCursor::CursorContainer& cursorPtrs(*context.pCursorPtrs);
+	state MergedPeekCursor::CursorHeap& cursorHeap(*context.pCursorHeap);
 	state int numCursors(cursorPtrs.size());
-	state std::vector<std::list<PeekCursorBasePtr>::iterator> peekedCursorIter;
+	state std::vector<MergedPeekCursor::CursorContainer::iterator> peekedCursorIter;
 	state std::vector<Future<bool>> peekResult;
 	state int numPeeks(0);
 
 	// Only peek for those locally-exhausted cursors
-	for (std::list<PeekCursorBasePtr>::iterator iter = std::begin(cursorPtrs); iter != std::end(cursorPtrs); ++iter) {
+	for (std::list<std::unique_ptr<PeekCursorBase>>::iterator iter = std::begin(cursorPtrs);
+	     iter != std::end(cursorPtrs);
+	     ++iter) {
 
 		if (!(*iter)->hasRemaining()) {
 			// Only if the cursor has exhausted its local mutations, it needs to peek data from remote.
@@ -152,9 +162,7 @@ ACTOR Future<bool> peekRemoteForMergedCursor(PeekMergedCursorContext context) {
 			// The cursor is exhausted, drop from the list
 			cursorPtrs.erase(peekedCursorIter[i]);
 		} else {
-			PeekCursorBasePtr pCursor = *peekedCursorIter[i];
-			IndexedCursor indexedCursor(pCursor->get().version, pCursor->get().subsequence, pCursor);
-			cursorHeap.push(indexedCursor);
+			addCursorToCursorHeap(peekedCursorIter[i], cursorHeap);
 		}
 	}
 
@@ -163,12 +171,42 @@ ACTOR Future<bool> peekRemoteForMergedCursor(PeekMergedCursorContext context) {
 	return !cursorPtrs.empty();
 }
 
+struct PeekMergedServerTeamCursorContext : public PeekMergedCursorContext {
+	std::unordered_map<TeamID, CursorContainer::iterator>* pMapper;
+};
+
+// In addition to peekRemoteForMergedCursor, update the team ID/cursor mapping
+ACTOR Future<bool> peekRemoteForMergedServerTeamCursor(PeekMergedServerTeamCursorContext context) {
+	bool result = wait(peekRemoteForMergedCursor(static_cast<PeekMergedCursorContext>(context)));
+
+	// Since peekRemoteForMergedCursor will drop exhausted cursors, the team ID - cursor mapping should drop invalid
+	// references to those exhaustd cursors.
+	std::unordered_set<TeamID> inactiveTeamIDs;
+	for (std::unordered_map<TeamID, CursorContainer::iterator>::iterator iter = std::begin(*context.pMapper);
+	     iter != std::end(*context.pMapper);
+	     ++iter) {
+		inactiveTeamIDs.insert(iter->first);
+	}
+	for (CursorContainer::iterator iter = std::begin(*context.pCursorPtrs); iter != std::end(*context.pCursorPtrs);
+	     ++iter) {
+		inactiveTeamIDs.erase(dynamic_cast<ServerTeamPeekCursor*>((*iter).get())->getTeamID());
+	}
+	for (std::unordered_set<TeamID>::iterator iter = std::begin(inactiveTeamIDs); iter != std::end(inactiveTeamIDs);
+	     ++iter) {
+		context.pMapper->erase(*iter);
+	}
+
+	return result;
+}
+
 } // anonymous namespace
 
 PeekCursorBase::iterator::iterator(PeekCursorBase* pCursor_, bool isEndIterator_)
   : pCursor(pCursor_), isEndIterator(isEndIterator_) {}
 
 bool PeekCursorBase::iterator::operator==(const PeekCursorBase::iterator& another) const {
+	// Since the iterator is not duplicable, no two iterators equal. This is a a hack to help determining if the
+	// iterator is reaching the end of the data. See documents of the constructor.
 	return (!pCursor->hasRemaining() && another.isEndIterator && pCursor == another.pCursor);
 }
 
@@ -188,16 +226,7 @@ void PeekCursorBase::iterator::operator++() {
 	pCursor->next();
 }
 
-PeekCursorBase::PeekCursorBase(const Version& version_)
-  : beginVersion(version_), lastVersion(version_ - 1), endIterator(this, true) {}
-
-const Version& PeekCursorBase::getBeginVersion() const {
-	return beginVersion;
-}
-
-const Version& PeekCursorBase::getLastVersion() const {
-	return lastVersion;
-}
+PeekCursorBase::PeekCursorBase() : endIterator(this, true) {}
 
 Future<bool> PeekCursorBase::remoteMoreAvailable() {
 	return remoteMoreAvailableImpl();
@@ -225,8 +254,8 @@ ServerTeamPeekCursor::ServerTeamPeekCursor(const Version& beginVersion_,
                                            const StorageTeamID& teamID_,
                                            const std::vector<TLogInterfaceBase*>& pTLogInterfaces_,
                                            Arena* pArena_)
-  : PeekCursorBase(beginVersion_), teamID(teamID_), pTLogInterfaces(pTLogInterfaces_), pAttachArena(pArena_),
-    deserializer(emptyCursorHeader()), deserializerIter(deserializer.begin()) {
+  : teamID(teamID_), pTLogInterfaces(pTLogInterfaces_), pAttachArena(pArena_), deserializer(emptyCursorHeader()),
+    deserializerIter(deserializer.begin()), beginVersion(beginVersion_), lastVersion(beginVersion_ - 1) {
 
 	for (const auto pTLogInterface : pTLogInterfaces) {
 		ASSERT(pTLogInterface != nullptr);
@@ -235,6 +264,14 @@ ServerTeamPeekCursor::ServerTeamPeekCursor(const Version& beginVersion_,
 
 const StorageTeamID& ServerTeamPeekCursor::getTeamID() const {
 	return teamID;
+}
+
+const Version& ServerTeamPeekCursor::getLastVersion() const {
+	return lastVersion;
+}
+
+const Version& ServerTeamPeekCursor::getBeginVersion() const {
+	return beginVersion;
 }
 
 Future<bool> ServerTeamPeekCursor::remoteMoreAvailableImpl() {
@@ -257,32 +294,24 @@ bool ServerTeamPeekCursor::hasRemainingImpl() const {
 	return deserializerIter != deserializer.end();
 }
 
-IndexedCursor::IndexedCursor(const Version& version_, const Subsequence& subsequence_, PeekCursorBase* pCursor_)
-  : version(version_), subsequence(subsequence_), pCursor(pCursor_) {}
+IndexedCursor::IndexedCursor(const Version& version_,
+                             const Subsequence& subsequence_,
+                             CursorContainer::iterator pCursorPtr_)
+  : version(version_), subsequence(subsequence_), pCursorPtr(pCursorPtr_) {}
 
-namespace {
+MergedPeekCursor::MergedPeekCursor() : PeekCursorBase() {}
 
-Version getMinimalVersionInCursors(std::initializer_list<PeekCursorBase*> pCursors) {
-	Version min = MAX_VERSION;
-	for (const auto pCursor : pCursors) {
-		min = std::min(pCursor->getBeginVersion(), min);
-	}
-	return min;
+void MergedPeekCursor::addCursorToCursorHeap(CursorContainer::iterator iter) {
+	ptxn::addCursorToCursorHeap(iter, cursorHeap);
 }
 
-
-} // anonymous namespace
-
-MergedPeekCursor::MergedPeekCursor(std::initializer_list<PeekCursorBase*> cursorPtrs_)
-  : PeekCursorBase(getMinimalVersionInCursors(cursorPtrs_)), cursorPtrs(cursorPtrs_) {}
-
-size_t MergedPeekCursor::getNumActiveCursor() const {
+size_t MergedPeekCursor::getNumActiveCursors() const {
 	return cursorPtrs.size();
 }
 
 Future<bool> MergedPeekCursor::remoteMoreAvailableImpl() {
-	// No cursors are currently active
 	if (cursorPtrs.empty()) {
+		// No cursors are currently active
 		return false;
 	}
 
@@ -292,14 +321,15 @@ Future<bool> MergedPeekCursor::remoteMoreAvailableImpl() {
 void MergedPeekCursor::nextImpl() {
 	auto top = cursorHeap.top();
 	cursorHeap.pop();
-	top.pCursor->next();
-	if (top.pCursor->hasRemaining()) {
-		cursorHeap.push(IndexedCursor(top.pCursor->get().version, top.pCursor->get().subsequence, top.pCursor));
+	(*top.pCursorPtr)->next();
+	if ((*top.pCursorPtr)->hasRemaining()) {
+		cursorHeap.push(
+		    IndexedCursor((*top.pCursorPtr)->get().version, (*top.pCursorPtr)->get().subsequence, top.pCursorPtr));
 	}
 }
 
 const VersionSubsequenceMutation& MergedPeekCursor::getImpl() const {
-	return cursorHeap.top().pCursor->get();
+	return (*cursorHeap.top().pCursorPtr)->get();
 }
 
 bool MergedPeekCursor::hasRemainingImpl() const {
@@ -308,12 +338,120 @@ bool MergedPeekCursor::hasRemainingImpl() const {
 	}
 	// Since cursorPtrs only have non-exhausted cursors, *ANY* of locally exhausted cursors must trigger a
 	// remoteMoreAvailable test. If there are no remote data, then it needs to be dropped.
-	for (auto pCursor : cursorPtrs) {
+	for (const auto& pCursor : cursorPtrs) {
 		if (!pCursor->hasRemaining()) {
 			return false;
 		}
 	}
 	return true;
+}
+
+MergedPeekCursor::CursorContainer::iterator MergedPeekCursor::addCursorImpl(std::unique_ptr<PeekCursorBase>&& pCursor) {
+	cursorPtrs.emplace_back(std::move(pCursor));
+	auto iter = std::prev(std::end(cursorPtrs));
+	if ((*iter)->hasRemaining()) {
+		addCursorToCursorHeap(iter);
+	}
+	return iter;
+}
+
+MergedServerTeamPeekCursor::MergedServerTeamPeekCursor() : MergedPeekCursor() {}
+
+MergedPeekCursor::CursorContainer::iterator MergedServerTeamPeekCursor::addCursorImpl(
+    std::unique_ptr<PeekCursorBase>&& cursor) {
+
+	ASSERT(dynamic_cast<ServerTeamPeekCursor*>(cursor.get()) != nullptr);
+
+	auto iter = MergedPeekCursor::addCursorImpl(std::move(cursor));
+
+	const TeamID& teamID = dynamic_cast<ServerTeamPeekCursor*>((*iter).get())->getTeamID();
+	ASSERT(teamIDCursorMapper.find(teamID) == teamIDCursorMapper.end());
+	teamIDCursorMapper[teamID] = iter;
+
+	return iter;
+}
+
+std::unique_ptr<PeekCursorBase> MergedServerTeamPeekCursor::removeCursor(const TeamID& teamID) {
+	auto mapperIter = teamIDCursorMapper.find(teamID);
+	if (mapperIter == teamIDCursorMapper.end()) {
+		return nullptr;
+	}
+
+	// The iterator to the cursor in CursorContainer
+	auto iter = mapperIter->second;
+
+	// Remove from mapper
+	teamIDCursorMapper.erase(mapperIter);
+
+	// Remove from heap, there is no simple way of removing a specific item from a std::priority_queue, so we
+	// re-construct it.
+	std::vector<IndexedCursor> itemsInHeap;
+	while (!cursorHeap.empty()) {
+		itemsInHeap.emplace_back(cursorHeap.top());
+		cursorHeap.pop();
+	}
+	for (const auto& item : itemsInHeap) {
+		if (item.pCursorPtr == iter) {
+			continue;
+		}
+		cursorHeap.emplace(item);
+	}
+
+	std::unique_ptr<PeekCursorBase> pCursor(std::move(*iter));
+	cursorPtrs.erase(iter);
+
+	return pCursor;
+}
+
+Future<bool> MergedServerTeamPeekCursor::remoteMoreAvailableImpl() {
+	if (cursorPtrs.empty()) {
+		// No cursors are currently active
+		return false;
+	}
+
+	return peekRemoteForMergedServerTeamCursor({ &cursorPtrs, &cursorHeap, &teamIDCursorMapper });
+}
+
+std::vector<TeamID> MergedServerTeamPeekCursor::getCursorTeamIDs() {
+	std::vector<TeamID> result;
+	result.reserve(teamIDCursorMapper.size());
+	for (const auto& [teamID, _] : teamIDCursorMapper) {
+		result.push_back(teamID);
+	}
+	return result;
+}
+
+// Moves the cursor so it locates to the given version/subsequence. If the version/subsequence does not exist, moves the
+// cursor to the closest next mutation. If the version/subsequence is earlier than the current version/subsequence the
+// cursor is located, then the code will do nothing.
+ACTOR Future<Void> advanceTo(PeekCursorBase* cursor, Version version, Subsequence subsequence) {
+	state PeekCursorBase::iterator iter = cursor->begin();
+
+	loop {
+		while (iter != cursor->end()) {
+			// Is iter already past the version?
+			if (iter->version > version) {
+				return Void();
+			}
+			// Is iter current at the given version
+			if (iter->version == version) {
+				while (iter != cursor->end() && iter->subsequence < subsequence)
+					++iter;
+				if (iter->version > version || iter->subsequence >= subsequence) {
+					return Void();
+				}
+			}
+			++iter;
+		}
+
+		// Consumed local data, need to check remote TLog
+		bool remoteAvailable = wait(cursor->remoteMoreAvailable());
+		if (!remoteAvailable) {
+			// The version/subsequence should be in the future
+			// Throw error?
+			return Void();
+		}
+	}
 }
 
 } // namespace ptxn
