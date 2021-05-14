@@ -71,22 +71,9 @@ struct TestDriverOptions {
 	int numTLogGroups;
 	int numStorageServers;
 	int numResolvers;
-	MessageTransferModel transferModel = MessageTransferModel::TLogActivelyPush;
+	MessageTransferModel transferModel;
 
-	explicit TestDriverOptions(const UnitTestParameters& params) {
-		numCommits = params.getInt("numCommits").orDefault(DEFAULT_NUM_COMMITS);
-		numTeams = params.getInt("numTeams").orDefault(DEFAULT_NUM_TEAMS);
-		numProxies = params.getInt("numProxies").orDefault(DEFAULT_NUM_PROXIES);
-		numTLogs = params.getInt("numTLogs").orDefault(DEFAULT_NUM_TLOGS);
-		numTLogGroups = params.getInt("numTLogGroups").orDefault(DEFAULT_NUM_TLOG_GROUPS);
-		numStorageServers = params.getInt("numStorageServers").orDefault(DEFAULT_NUM_STORAGE_SERVERS);
-		numResolvers = params.getInt("numResolvers").orDefault(DEFAULT_NUM_RESOLVERS);
-		transferModel = static_cast<MessageTransferModel>(
-		    params.getInt("messageTransferModel").orDefault(static_cast<int>(DEFAULT_MESSAGE_TRANSFER_MODEL)),
-		    static_cast<int>(MessageTransferModel::TLogActivelyPush));
-	}
-
-	friend std::ostream& operator<<(std::ostream&, const TestDriverOptions&);
+	explicit TestDriverOptions(const UnitTestParameters&);
 };
 
 struct TestDriverContext {
@@ -134,12 +121,6 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 
 // Starts all fake resolvers specified in the pTestDriverContext.
 void startFakeResolver(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext);
-
-// Print out *ALL* commits that has triggered.
-void printCommitRecord(const std::vector<CommitRecord>& records);
-
-// Print out those commits are not being completed, i.e., persisted in TLogs and Storage Servers
-void printNotValidatedRecords(const std::vector<CommitRecord>& records);
 
 // Check if all records are validated
 bool isAllRecordsValidated(const std::vector<CommitRecord>& records);

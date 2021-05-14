@@ -20,6 +20,9 @@
 
 #include "fdbserver/ptxn/TLogPeekCursor.h"
 
+#include <iterator>
+#include <vector>
+
 #include "fdbserver/ptxn/TLogInterface.h"
 #include "flow/Error.h"
 
@@ -115,9 +118,78 @@ ACTOR Future<bool> peekRemote(PeekRemoteContext peekRemoteContext) {
 	}
 }
 
+struct PeekMergedCursorContext {
+	std::list<PeekCursorBasePtr>* pCursorPtrs;
+	MergedPeekCursor::Heap* pCursorHeap;
+};
+
+// Peek remote for multiple cursors, if the cursor is not exhausted, remove it from the incoming cursor list.
+ACTOR Future<bool> peekRemoteForMergedCursor(PeekMergedCursorContext context) {
+	state std::list<PeekCursorBasePtr>& cursorPtrs(*context.pCursorPtrs);
+	state MergedPeekCursor::Heap& cursorHeap(*context.pCursorHeap);
+	state int numCursors(cursorPtrs.size());
+	state std::vector<std::list<PeekCursorBasePtr>::iterator> peekedCursorIter;
+	state std::vector<Future<bool>> peekResult;
+	state int numPeeks(0);
+
+	// Only peek for those locally-exhausted cursors
+	for (std::list<PeekCursorBasePtr>::iterator iter = std::begin(cursorPtrs); iter != std::end(cursorPtrs); ++iter) {
+
+		if (!(*iter)->hasRemaining()) {
+			// Only if the cursor has exhausted its local mutations, it needs to peek data from remote.
+			peekedCursorIter.push_back(iter);
+			peekResult.push_back((*iter)->remoteMoreAvailable());
+			++numPeeks;
+		}
+	}
+
+	// TODO what would be the proper behavior if *ONE* or a few of the cursors failed? I suppose we could fail the
+	// MergedPeekCursor as a whole but is there a better way? e.g. replace it by a new cursor?
+	wait(waitForAll(peekResult));
+
+	for (int i = 0; i < numPeeks; ++i) {
+		if (!peekResult[i].get()) {
+			// The cursor is exhausted, drop from the list
+			cursorPtrs.erase(peekedCursorIter[i]);
+		} else {
+			PeekCursorBasePtr pCursor = *peekedCursorIter[i];
+			IndexedCursor indexedCursor(pCursor->get().version, pCursor->get().subsequence, pCursor);
+			cursorHeap.push(indexedCursor);
+		}
+	}
+
+	// If there are *ANY* remaining cursors in the list, it means they still have remaining mutations to be consumed, so
+	// the return value is *NOT* related with the peek result.
+	return !cursorPtrs.empty();
+}
+
 } // anonymous namespace
 
-PeekCursorBase::PeekCursorBase(const Version& version_) : beginVersion(version_), lastVersion(version_ - 1) {}
+PeekCursorBase::iterator::iterator(PeekCursorBase* pCursor_, bool isEndIterator_)
+  : pCursor(pCursor_), isEndIterator(isEndIterator_) {}
+
+bool PeekCursorBase::iterator::operator==(const PeekCursorBase::iterator& another) const {
+	return (!pCursor->hasRemaining() && another.isEndIterator && pCursor == another.pCursor);
+}
+
+bool PeekCursorBase::iterator::operator!=(const PeekCursorBase::iterator& another) const {
+	return !this->operator==(another);
+}
+
+PeekCursorBase::iterator::reference PeekCursorBase::iterator::operator*() const {
+	return pCursor->get();
+}
+
+PeekCursorBase::iterator::pointer PeekCursorBase::iterator::operator->() const {
+	return &pCursor->get();
+}
+
+void PeekCursorBase::iterator::operator++() {
+	pCursor->next();
+}
+
+PeekCursorBase::PeekCursorBase(const Version& version_)
+  : beginVersion(version_), lastVersion(version_ - 1), endIterator(this, true) {}
 
 const Version& PeekCursorBase::getBeginVersion() const {
 	return beginVersion;
@@ -183,6 +255,65 @@ const VersionSubsequenceMutation& ServerTeamPeekCursor::getImpl() const {
 
 bool ServerTeamPeekCursor::hasRemainingImpl() const {
 	return deserializerIter != deserializer.end();
+}
+
+IndexedCursor::IndexedCursor(const Version& version_, const Subsequence& subsequence_, PeekCursorBase* pCursor_)
+  : version(version_), subsequence(subsequence_), pCursor(pCursor_) {}
+
+namespace {
+
+Version getMinimalVersionInCursors(std::initializer_list<PeekCursorBase*> pCursors) {
+	Version min = MAX_VERSION;
+	for (const auto pCursor : pCursors) {
+		min = std::min(pCursor->getBeginVersion(), min);
+	}
+	return min;
+}
+
+
+} // anonymous namespace
+
+MergedPeekCursor::MergedPeekCursor(std::initializer_list<PeekCursorBase*> cursorPtrs_)
+  : PeekCursorBase(getMinimalVersionInCursors(cursorPtrs_)), cursorPtrs(cursorPtrs_) {}
+
+size_t MergedPeekCursor::getNumActiveCursor() const {
+	return cursorPtrs.size();
+}
+
+Future<bool> MergedPeekCursor::remoteMoreAvailableImpl() {
+	// No cursors are currently active
+	if (cursorPtrs.empty()) {
+		return false;
+	}
+
+	return peekRemoteForMergedCursor({ &cursorPtrs, &cursorHeap });
+}
+
+void MergedPeekCursor::nextImpl() {
+	auto top = cursorHeap.top();
+	cursorHeap.pop();
+	top.pCursor->next();
+	if (top.pCursor->hasRemaining()) {
+		cursorHeap.push(IndexedCursor(top.pCursor->get().version, top.pCursor->get().subsequence, top.pCursor));
+	}
+}
+
+const VersionSubsequenceMutation& MergedPeekCursor::getImpl() const {
+	return cursorHeap.top().pCursor->get();
+}
+
+bool MergedPeekCursor::hasRemainingImpl() const {
+	if (cursorPtrs.empty()) {
+		return false;
+	}
+	// Since cursorPtrs only have non-exhausted cursors, *ANY* of locally exhausted cursors must trigger a
+	// remoteMoreAvailable test. If there are no remote data, then it needs to be dropped.
+	for (auto pCursor : cursorPtrs) {
+		if (!pCursor->hasRemaining()) {
+			return false;
+		}
+	}
+	return true;
 }
 
 } // namespace ptxn

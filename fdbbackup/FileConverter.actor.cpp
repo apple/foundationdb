@@ -108,7 +108,7 @@ struct ConvertParams {
 
 	bool isValid() { return begin != invalidVersion && end != invalidVersion && !container_url.empty(); }
 
-	std::string toString() {
+	std::string toString() const {
 		std::string s;
 		s.append("ContainerURL:");
 		s.append(container_url);

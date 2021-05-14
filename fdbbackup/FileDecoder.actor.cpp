@@ -80,7 +80,7 @@ struct DecodeParams {
 	std::string log_dir, trace_format, trace_log_group;
 	BackupTLSConfig tlsConfig;
 
-	std::string toString() {
+	std::string toString() const {
 		std::string s;
 		s.append("ContainerURL: ");
 		s.append(container_url);

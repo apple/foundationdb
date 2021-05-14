@@ -47,9 +47,27 @@ struct FakeTLogContext {
 
 	size_t maxBytesPerPeek = 1024 * 1024;
 
+	// Team IDs
+	std::vector<TeamID> teamIDs;
+
+	// Stores the unique versions the mutations have been used, in ascending order
+	std::vector<Version> versions;
+
 	Arena persistenceArena;
+
+	// All mutations stored in the TLog
+	VectorRef<VersionSubsequenceMutation> allMutations;
+
+	// Mutations grouped by teams
 	std::unordered_map<StorageTeamID, VectorRef<VersionSubsequenceMutation>> mutations;
 };
+
+// Fill the FakeTLog server with random mutations
+// If numTeams is 0, the exiting teamIDs will be used.
+void fillTLogWithRandomMutations(std::shared_ptr<FakeTLogContext> pContext,
+                                 const Version& initialVersion,
+                                 const int numMutations,
+                                 const int numTeams = 0);
 
 ACTOR Future<Void> fakeTLog_ActivelyPush(std::shared_ptr<FakeTLogContext> pFakeTLogContext);
 ACTOR Future<Void> fakeTLog_PassivelyProvide(std::shared_ptr<FakeTLogContext> pFakeTLogContext);

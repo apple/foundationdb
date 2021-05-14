@@ -23,6 +23,10 @@
 
 #pragma once
 
+#include <initializer_list>
+#include <functional>
+#include <list>
+#include <queue>
 #include <vector>
 
 #include "fdbclient/FDBTypes.h"
@@ -35,6 +39,32 @@ namespace ptxn {
 
 class PeekCursorBase {
 public:
+	// Iterator for pulled mutations. This is not a standard input iterator as it is not duplicable, thus no postfix
+	// operator++ support. NOTE It will *NOT* trigger remoteMoreAvailable() as this is not an ACTOR. also this is
+	class iterator : public ConstInputIteratorBase<VersionSubsequenceMutation> {
+		friend class PeekCursorBase;
+
+		PeekCursorBase* pCursor;
+		bool isEndIterator = false;
+
+		iterator(PeekCursorBase*, bool);
+
+	public:
+		// Since the iterator will change the interanl state of the cursor, duplication is prohibited.
+		iterator& operator=(const iterator&) = delete;
+
+		bool operator==(const iterator&) const;
+		bool operator!=(const iterator&) const;
+
+		reference operator*() const;
+		pointer operator->() const;
+
+		// Prefix incremental
+		void operator++();
+
+		// Postfix incremental is disabled since duplication is prohibited.
+	};
+
 	PeekCursorBase(const Version&);
 
 	// Returns the begin verion for the cursor. The cursor will start from the begin version.
@@ -43,8 +73,8 @@ public:
 	// Returns the last version being pulled
 	const Version& getLastVersion() const;
 
-	// Checks if there is any more messages in the remote TLog(s), if so, retrieve the
-	// messages locally.
+	// Checks if there is any more messages in the remote TLog(s), if so, retrieve the messages to local. Will
+	// invalidate the iterator, if exists.
 	Future<bool> remoteMoreAvailable();
 
 	// Gets one mutation
@@ -55,6 +85,12 @@ public:
 
 	// Any remaining mutation *LOCALLY* available
 	bool hasRemaining() const;
+
+	// Returns an iterator that represents the begin of the data still undeserialized.
+	iterator begin() { return iterator(this, false); }
+
+	// Returns an iterator that represents the end of the data
+	const iterator& end() const { return endIterator; }
 
 protected:
 	// Checks if there is any mutations remotely
@@ -75,6 +111,9 @@ protected:
 private:
 	// The version the cursor starts
 	const Version beginVersion;
+
+	// The iterator that represents the end of the unserialized data
+	const iterator endIterator;
 };
 
 // Connect to a given TLog server and peeks for mutations with a given TeamID
@@ -105,6 +144,96 @@ public:
 	                     Arena* arena_ = nullptr);
 
 	const StorageTeamID& getTeamID() const;
+
+protected:
+	virtual Future<bool> remoteMoreAvailableImpl() override;
+	virtual void nextImpl() override;
+	virtual const VersionSubsequenceMutation& getImpl() const override;
+	virtual bool hasRemainingImpl() const override;
+};
+
+// This class defines the index of a cursor. For a given mutation, it has an unique cursor index. The index is totally
+// ordered.
+struct IndexedCursor {
+	Version version;
+	Subsequence subsequence;
+	PeekCursorBase* pCursor;
+
+	IndexedCursor(const Version&, const Subsequence&, PeekCursorBase*);
+
+	// TODO the return type should be std::strong_ordering
+	friend constexpr int operatorSpaceship(const IndexedCursor&, const IndexedCursor&);
+
+	// TODO Replace the code with real spaceship operator when C++20 is allowed
+	bool operator>(const IndexedCursor& another) const { return operatorSpaceship(*this, another) == 1; }
+	bool operator>=(const IndexedCursor& another) const { return operatorSpaceship(*this, another) >= 0; }
+	bool operator<(const IndexedCursor& another) const { return operatorSpaceship(*this, another) == -1; }
+	bool operator<=(const IndexedCursor& another) const { return operatorSpaceship(*this, another) <= 0; }
+	bool operator!=(const IndexedCursor& another) const { return operatorSpaceship(*this, another) != 0; }
+	bool operator==(const IndexedCursor& another) const { return operatorSpaceship(*this, another) == 0; }
+};
+
+// Returns
+//   0 if  c1 == c2
+//   1 if  c1 >  c2
+//  -1 if  c1 <  c2
+inline constexpr int operatorSpaceship(const IndexedCursor& c1, const IndexedCursor& c2) {
+	if (c1.version > c2.version) {
+		return 1;
+	} else if (c1.version < c2.version) {
+		return -1;
+	} else {
+		if (c1.subsequence > c2.subsequence) {
+			return 1;
+		} else if (c1.subsequence < c2.subsequence) {
+			return -1;
+		}
+
+		return 0;
+	}
+}
+
+// TODO Use Reference or std::shared_ptr
+using PeekCursorBasePtr = PeekCursorBase*;
+
+namespace {
+
+template <typename Iterator>
+Version getMinimalVersionInCursors(const Iterator& begin, const Iterator& end) {
+	Version min = MAX_VERSION;
+	for (Iterator iter = begin; iter != end; ++iter) {
+		min = std::min(min, (*iter)->getBeginVersion());
+	}
+	return min;
+}
+
+} // anonymous namespace
+
+// Merge several cursors, return a single cursor
+class MergedPeekCursor : public PeekCursorBase {
+public:
+	// NOTE std::priority_queue is a max-heap by default. We need to use std::greater to turn it to a min-heap.
+	using Heap = std::priority_queue<IndexedCursor, std::vector<IndexedCursor>, std::greater<IndexedCursor>>;
+private:
+	// In cursorPtrs, we maintain a list of cursors that are still not exhausted. Any cursor that is exhausted will be
+	// removed from this list. Exhaust means the cursor have no extra data to be deserialized, nor it could receive
+	// more data from TLog.
+	std::list<PeekCursorBasePtr> cursorPtrs;
+	// The cursorHeap also maintains non-exhausting cursors only.
+	Heap cursorHeap;
+
+public:
+	// With MergedPeekCursor, it joins multiple cursors, merge the mutations, and allowing iteratively accesing them. To
+	// ensure the merge cursor works properly, all cursors must be in "local exhausted" state, i.e.
+	//   pCursor->begin() == pCursor->end()
+	MergedPeekCursor(std::initializer_list<PeekCursorBasePtr>);
+	// Dereferencing the iterator should result a PeekCursorBasePtr object.
+	template <typename Iterator>
+	MergedPeekCursor(const Iterator& begin_, const Iterator& end_)
+	  : PeekCursorBase(getMinimalVersionInCursors(begin_, end_)), cursorPtrs(begin_, end_) {}
+
+	// Get the number of cursors that are still not exhausted
+	size_t getNumActiveCursor() const;
 
 protected:
 	virtual Future<bool> remoteMoreAvailableImpl() override;

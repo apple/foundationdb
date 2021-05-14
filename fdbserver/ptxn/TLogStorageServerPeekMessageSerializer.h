@@ -234,7 +234,7 @@ public:
 	const Version& getLastVersion() const;
 
 	iterator begin() const;
-	// end() is called multiple times in typeical for loop:
+	// end() is called multiple times in typical for loop:
 	//    for(auto iter = deserializer.begin(); iter != deserializer.end(); ++iter)
 	// since creating an iterator is *NOT* trivial, the end iterator is cached.
 	const iterator& end() const;

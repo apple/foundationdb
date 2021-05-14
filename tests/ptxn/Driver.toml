@@ -28,6 +28,8 @@ startDelay = 0
     maxTestCases = 1
     testsMatching = '/fdbserver/ptxn/test/tlogPeek/readFromSerialization'
 
+    peekTimes = 10
+
 [[test]]
 testTitle = 'Test server team cursor'
 useDB = false
@@ -39,3 +41,19 @@ startDelay = 0
     testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/ServerTeamPeekCursor'
 
     maxBytesPerPeek = 65536
+
+[[test]]
+testTitle = 'Test merged peek cursor'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/MergedPeekCursor'
+
+    maxBytesPerPeek = 4096
+
+    numMutations = 100000
+    numTeams = 3
+    initialVersion = 1000

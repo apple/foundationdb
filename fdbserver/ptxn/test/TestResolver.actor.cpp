@@ -30,6 +30,7 @@
 #include "fdbserver/ptxn/Config.h"
 #include "fdbserver/ptxn/test/Driver.h"
 #include "fdbserver/ptxn/test/FakeResolver.actor.h"
+#include "fdbserver/ptxn/test/Utils.h"
 #include "fdbserver/ResolverInterface.h"
 #include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"
@@ -94,7 +95,7 @@ TEST_CASE("fdbserver/ptxn/test/resolver") {
 	state const int totalTeams = deterministicRandom()->randomInt(10, 1000);
 
 	ptxn::test::TestDriverOptions options(params);
-	std::cout << options << std::endl;
+	ptxn::test::print::print(options);
 
 	for (int i = 0; i < totalTeams; i++) {
 		teams.emplace_back(0, i);
