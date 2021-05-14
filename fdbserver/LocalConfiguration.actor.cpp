@@ -261,6 +261,8 @@ class LocalConfigurationImpl : public NonCopyable {
 		state SimpleConfigConsumer consumer(broadcaster->get(),
 		                                    impl->configKnobOverrides.getConfigClassSet(),
 		                                    impl->lastSeenVersion,
+		                                    Optional<double>{},
+		                                    Optional<double>{},
 		                                    deterministicRandom()->randomUniqueID());
 		TraceEvent(SevDebug, "LocalConfigurationStartingConsumer", impl->id)
 		    .detail("Consumer", consumer.getID())

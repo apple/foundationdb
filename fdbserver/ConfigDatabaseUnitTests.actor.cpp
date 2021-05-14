@@ -229,12 +229,12 @@ TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/CheckpointedUpdates") {
 	actors.add(dummyConfigSource.serve());
 	actors.add(broadcaster.serve(cfi->get()));
 	actors.add(localConfiguration.consume(cfi));
-	while (version <= 100) {
+	while (version <= 10) {
 		versionedMutations = Standalone<VectorRef<VersionedConfigMutationRef>>{};
-		appendVersionedMutation(versionedMutations, version, "class-A"_sr, "test_int"_sr, versionToValue(version));
+		appendVersionedMutation(versionedMutations, version, "class-A"_sr, "test_long"_sr, versionToValue(version));
 		wait(broadcaster.addVersionedMutations(versionedMutations, version));
 		loop {
-			if (localConfiguration.getTestKnobs().TEST_INT == version) {
+			if (localConfiguration.getTestKnobs().TEST_LONG == version) {
 				++version;
 				break;
 			}

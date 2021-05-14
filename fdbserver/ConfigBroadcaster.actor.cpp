@@ -166,7 +166,8 @@ public:
 		    "ConfigBroadcasterMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigBroadcasterMetrics");
 		auto consumerID = deterministicRandom()->randomUniqueID();
 		TraceEvent(SevDebug, "BroadcasterStartingConsumer", id).detail("Consumer", consumerID);
-		consumer = std::make_unique<SimpleConfigConsumer>(configSource, Optional<ConfigClassSet>{}, 0, consumerID);
+		consumer = std::make_unique<SimpleConfigConsumer>(
+		    configSource, Optional<ConfigClassSet>{}, 0, 0.5, Optional<double>{}, consumerID);
 	}
 
 	UID getID() const { return id; }

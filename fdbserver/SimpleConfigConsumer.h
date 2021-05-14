@@ -31,14 +31,20 @@ public:
 	SimpleConfigConsumer(ConfigFollowerInterface const& cfi,
 	                     Optional<ConfigClassSet> const& configClassSet,
 	                     Version lastSeenVersion,
+	                     Optional<double> const& pollingInterval,
+	                     Optional<double> const& compactionInterval,
 	                     UID id);
 	SimpleConfigConsumer(ClusterConnectionString const& ccs,
 	                     Optional<ConfigClassSet> const& configClassSet,
 	                     Version lastSeenVersion,
+	                     Optional<double> const& pollingInterval,
+	                     Optional<double> const& compactionInterval,
 	                     UID id);
 	SimpleConfigConsumer(ServerCoordinators const& coordinators,
 	                     Optional<ConfigClassSet> const& configClassSet,
 	                     Version lastSeenVersion,
+	                     Optional<double> const& pollingInterval,
+	                     Optional<double> const& compactionInterval,
 	                     UID id);
 	~SimpleConfigConsumer();
 	Future<Void> getInitialSnapshot(ConfigBroadcaster& broadcaster) override;
