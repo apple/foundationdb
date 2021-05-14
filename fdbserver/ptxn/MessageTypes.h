@@ -49,12 +49,15 @@ struct VersionSubsequence {
 	}
 };
 
-// Stores the mutations and their subsequences, or the relative order of each mutations. The order
-// is used in recovery.
+// Stores the mutations and their subsequences, or the relative order of each mutations.
+// The order is used in recovery and restoring from backups.
 struct SubsequenceMutationItem {
 	Subsequence subsequence;
+	// The mutation either in MutationRef form or in a serialized StringRef.
+	// When deserialized, we always store in MutationRef format.
 	std::variant<MutationRef, StringRef> mutation_;
 
+	// Returns mutation in MutationRef format after deserialization.
 	const MutationRef& mutation() const { return std::get<MutationRef>(mutation_); }
 
 	template <typename Reader>
