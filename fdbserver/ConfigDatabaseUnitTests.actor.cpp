@@ -206,6 +206,7 @@ TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/CheckpointedUpdates") {
 	actors.add(localConfigurationA.consume(cfi));
 	actors.add(localConfigurationB.consume(cfi));
 	while (version <= 10) {
+		versionedMutations = Standalone<VectorRef<VersionedConfigMutationRef>>{};
 		appendVersionedMutation(versionedMutations, version, "class-A"_sr, "test_long"_sr, versionToValue(version));
 		appendVersionedMutation(
 		    versionedMutations, version, "class-B"_sr, "test_long"_sr, versionToValue(version * 10));
@@ -220,4 +221,35 @@ TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/CheckpointedUpdates") {
 		}
 	}
 	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/Compact") {
+	state DummyConfigSource dummyConfigSource;
+	state ConfigBroadcaster broadcaster(dummyConfigSource.getInterface(), deterministicRandom()->randomUniqueID());
+	state Reference<IDependentAsyncVar<ConfigFollowerInterface>> cfi =
+	    IDependentAsyncVar<ConfigFollowerInterface>::create(makeReference<AsyncVar<ConfigFollowerInterface>>());
+	state LocalConfiguration localConfiguration("class-A", testManualKnobOverrides);
+	state Version version = 1;
+	state ActorCollection actors(false);
+	state Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
+	wait(localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
+	TraceEvent("StartedTestBroadcasterAndLocalConfigs")
+	    .detail("Broadcaster", broadcaster.getID())
+	    .detail("LocalConfiguration", localConfiguration.getID());
+	actors.add(dummyConfigSource.serve());
+	actors.add(broadcaster.serve(cfi->get()));
+	while (version <= 10) {
+		versionedMutations = Standalone<VectorRef<VersionedConfigMutationRef>>{};
+		appendVersionedMutation(versionedMutations, version, "class-A"_sr, "test_long"_sr, versionToValue(version));
+		wait(broadcaster.addVersionedMutations(versionedMutations, version));
+		++version;
+	}
+	wait(cfi->get().compact.getReply(ConfigFollowerCompactRequest{ version }));
+	actors.add(localConfiguration.consume(cfi));
+	loop {
+		if (localConfiguration.getTestKnobs().TEST_LONG == 10) {
+			return Void();
+		}
+		wait(delayJittered(1.0));
+	}
 }

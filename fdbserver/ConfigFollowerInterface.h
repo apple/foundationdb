@@ -149,8 +149,11 @@ struct ConfigFollowerGetChangesRequest {
 
 struct ConfigFollowerCompactRequest {
 	static constexpr FileIdentifier file_identifier = 568910;
-	Version version;
+	Version version{ 0 };
 	ReplyPromise<Void> reply;
+
+	ConfigFollowerCompactRequest() = default;
+	explicit ConfigFollowerCompactRequest(Version version) : version(version) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
