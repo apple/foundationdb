@@ -122,6 +122,7 @@ struct TLogPeekReply {
 	Version minKnownCommittedVersion;
 	Optional<Version> begin;
 	bool onlySpilled = false;
+
 	TLogPeekReply() = default;
 	TLogPeekReply(const Optional<UID>& debugID_, Arena& arena_, StringRef data_)
 	  : debugID(debugID_), arena(arena_), data(data_) {}
