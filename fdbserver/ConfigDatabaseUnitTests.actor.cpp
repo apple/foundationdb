@@ -71,7 +71,7 @@ void appendVersionedMutation(Standalone<VectorRef<VersionedConfigMutationRef>>& 
                              Version version,
                              KeyRef configClass,
                              KeyRef knobName,
-                             ValueRef knobValue) {
+                             Optional<ValueRef> knobValue) {
 	Tuple tuple;
 	tuple << configClass;
 	tuple << knobName;
@@ -105,6 +105,14 @@ Future<Void> addSequentialTestUpdates(ConfigStore &configStore, Version &lastWri
 	return configStore.addVersionedMutations(versionedMutations, lastWrittenVersion);
 }
 
+template <class ConfigStore>
+Future<Void> addClearTestUpdate(ConfigStore& configStore, Version& lastWrittenVersion) {
+	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
+	++lastWrittenVersion;
+	appendVersionedMutation(versionedMutations, lastWrittenVersion, "class-A"_sr, "test_long"_sr, {});
+	return configStore.addVersionedMutations(versionedMutations, lastWrittenVersion);
+}
+
 ACTOR template <class ConfigStore>
 Future<Void> runTestUpdates(ConfigStore* configStore, Version* lastWrittenVersion) {
 	wait(setTestSnapshot(configStore, lastWrittenVersion));
@@ -118,12 +126,7 @@ ACTOR Future<Void> runFirstLocalConfiguration(std::string configPath, UID id) {
 	state Version lastWrittenVersion = 0;
 	wait(localConfiguration.initialize("./", id));
 	wait(runTestUpdates(&localConfiguration, &lastWrittenVersion));
-	{
-		auto const *conf = &localConfiguration;
-		wait(waitUntil([conf] {
-			return conf->getTestKnobs() == getExpectedTestKnobsFinal();
-		}));
-	}
+	ASSERT(localConfiguration.getTestKnobs() == getExpectedTestKnobsFinal());
 	return Void();
 }
 
@@ -131,13 +134,6 @@ ACTOR Future<Void> runSecondLocalConfiguration(std::string configPath, UID id, T
 	state LocalConfiguration localConfiguration(configPath, testManualKnobOverrides);
 	wait(localConfiguration.initialize("./", id));
 	ASSERT(localConfiguration.getTestKnobs() == *expectedTestKnobs);
-	{
-		auto const *conf = &localConfiguration;
-		auto const *expected = expectedTestKnobs;
-		wait(waitUntil([conf, expected] {
-			return conf->getTestKnobs() == *expected;
-		}));
-	}
 	return Void();
 }
 
@@ -159,6 +155,34 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/FreshRestart") {
 	state UID id = deterministicRandom()->randomUniqueID();
 	wait(runFirstLocalConfiguration("class-A/class-B", id));
 	wait(runSecondLocalConfiguration("class-B/class-A", id, &getExpectedTestKnobsEmptyConfig()));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Manual") {
+	state LocalConfiguration localConfiguration("class-A/class-B", { { "test_long"_sr, "1000"_sr } });
+	state Version lastWrittenVersion = 0;
+	wait(localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
+	wait(addSequentialTestUpdates(localConfiguration, lastWrittenVersion));
+	ASSERT(localConfiguration.getTestKnobs().TEST_LONG == 1000);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Conflicting") {
+	state LocalConfiguration localConfiguration("class-A/class-B", {});
+	state Version lastWrittenVersion = 0;
+	wait(localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
+	wait(addSequentialTestUpdates(localConfiguration, lastWrittenVersion));
+	ASSERT(localConfiguration.getTestKnobs().TEST_LONG == 10);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Clear") {
+	state LocalConfiguration localConfiguration("class-A", {});
+	state Version lastWrittenVersion = 0;
+	wait(localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
+	wait(addSequentialTestUpdates(localConfiguration, lastWrittenVersion));
+	wait(addClearTestUpdate(localConfiguration, lastWrittenVersion));
+	ASSERT(localConfiguration.getTestKnobs().TEST_LONG == 0);
 	return Void();
 }
 
@@ -190,12 +214,6 @@ Future<Void> waitUntil(F isReady) {
 		if (isReady()) { return Void(); }
 		wait(delayJittered(0.1));
 	}
-}
-
-Future<Void> waitUntilConfigsMatch(LocalConfiguration const &fst, LocalConfiguration const &snd) {
-	return waitUntil([&fst, &snd] {
-		return fst.getTestKnobs() == snd.getTestKnobs();
-	});
 }
 
 Future<Void> waitUntilTestLongMatches(LocalConfiguration const &conf, int64_t expectedValue) {
