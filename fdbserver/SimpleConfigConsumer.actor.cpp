@@ -23,9 +23,10 @@
 
 class SimpleConfigConsumerImpl {
 	ConfigFollowerInterface cfi;
+	Version lastSeenVersion;
+	Optional<ConfigClassSet> configClassSet;
 
-	Version mostRecentVersion{ 0 };
-
+	UID id;
 	CounterCollection cc;
 	Counter compactRequest;
 	Counter successfulChangeRequest;
@@ -40,7 +41,7 @@ class SimpleConfigConsumerImpl {
 		loop {
 			wait(delayJittered(COMPACTION_INTERVAL));
 			// TODO: Enable compaction once bugs are fixed
-			// wait(self->cfi.compact.getReply(ConfigFollowerCompactRequest{ self->mostRecentVersion }));
+			// wait(self->cfi.compact.getReply(ConfigFollowerCompactRequest{ self->lastSeenVersion }));
 			//++self->compactRequest;
 		}
 	}
@@ -50,17 +51,17 @@ class SimpleConfigConsumerImpl {
 	Future<Void> fetchChanges(SimpleConfigConsumerImpl* self, ConfigStore* configStore) {
 		loop {
 			try {
-				ConfigFollowerGetChangesReply reply =
-				    wait(self->cfi.getChanges.getReply(ConfigFollowerGetChangesRequest{ self->mostRecentVersion, {} }));
+				ConfigFollowerGetChangesReply reply = wait(self->cfi.getChanges.getReply(
+				    ConfigFollowerGetChangesRequest{ self->lastSeenVersion, self->configClassSet }));
 				++self->successfulChangeRequest;
 				for (const auto& versionedMutation : reply.versionedMutations) {
-					TraceEvent(SevDebug, "ConsumerFetchedMutation")
+					TraceEvent(SevDebug, "ConsumerFetchedMutation", self->id)
 					    .detail("Version", versionedMutation.version)
 					    .detail("ConfigClass", versionedMutation.mutation.getConfigClass())
 					    .detail("KnobName", versionedMutation.mutation.getKnobName())
 					    .detail("KnobValue", versionedMutation.mutation.getValue());
 				}
-				self->mostRecentVersion = reply.mostRecentVersion;
+				self->lastSeenVersion = reply.mostRecentVersion;
 				wait(configStore->addVersionedMutations(reply.versionedMutations, reply.mostRecentVersion));
 				wait(delayJittered(POLLING_INTERVAL));
 			} catch (Error& e) {
@@ -68,13 +69,13 @@ class SimpleConfigConsumerImpl {
 				if (e.code() == error_code_version_already_compacted) {
 					ConfigFollowerGetVersionReply versionReply =
 					    wait(self->cfi.getVersion.getReply(ConfigFollowerGetVersionRequest{}));
-					ASSERT(versionReply.version > self->mostRecentVersion);
-					self->mostRecentVersion = versionReply.version;
+					ASSERT(versionReply.version > self->lastSeenVersion);
+					self->lastSeenVersion = versionReply.version;
 					ConfigFollowerGetSnapshotReply dbReply = wait(self->cfi.getSnapshot.getReply(
-					    ConfigFollowerGetSnapshotRequest{ self->mostRecentVersion, {} }));
+					    ConfigFollowerGetSnapshotRequest{ self->lastSeenVersion, self->configClassSet }));
 					// TODO: Remove unnecessary copy
 					auto snapshot = dbReply.snapshot;
-					wait(configStore->setSnapshot(std::move(snapshot), self->mostRecentVersion));
+					wait(configStore->setSnapshot(std::move(snapshot), self->lastSeenVersion));
 					++self->snapshotRequest;
 				} else {
 					throw e;
@@ -88,38 +89,48 @@ class SimpleConfigConsumerImpl {
 	Future<Void> getInitialSnapshot(SimpleConfigConsumerImpl* self, ConfigStore* configStore) {
 		ConfigFollowerGetVersionReply versionReply =
 		    wait(self->cfi.getVersion.getReply(ConfigFollowerGetVersionRequest{}));
-		self->mostRecentVersion = versionReply.version;
-		ConfigFollowerGetSnapshotReply reply =
-		    wait(self->cfi.getSnapshot.getReply(ConfigFollowerGetSnapshotRequest{ self->mostRecentVersion, {} }));
-		TraceEvent(SevDebug, "ConfigGotInitialSnapshot").detail("Version", self->mostRecentVersion);
+		self->lastSeenVersion = versionReply.version;
+		ConfigFollowerGetSnapshotReply reply = wait(self->cfi.getSnapshot.getReply(
+		    ConfigFollowerGetSnapshotRequest{ self->lastSeenVersion, self->configClassSet }));
+		TraceEvent(SevDebug, "ConfigGotInitialSnapshot").detail("Version", self->lastSeenVersion);
 		// TODO: Remove unnecessary copy
 		auto snapshot = reply.snapshot;
-		wait(configStore->setSnapshot(std::move(snapshot), self->mostRecentVersion));
+		wait(configStore->setSnapshot(std::move(snapshot), self->lastSeenVersion));
 		return Void();
 	}
 
-	SimpleConfigConsumerImpl()
-	  : mostRecentVersion(0), cc("ConfigConsumer"), compactRequest("CompactRequest", cc),
+	SimpleConfigConsumerImpl(Optional<ConfigClassSet> const& configClassSet, UID id)
+	  : configClassSet(configClassSet), id(id), cc("ConfigConsumer"), compactRequest("CompactRequest", cc),
 	    successfulChangeRequest("SuccessfulChangeRequest", cc), failedChangeRequest("FailedChangeRequest", cc),
 	    snapshotRequest("SnapshotRequest", cc) {
-		logger = traceCounters("ConfigConsumerMetrics",
-		                       deterministicRandom()->randomUniqueID(),
-		                       SERVER_KNOBS->WORKER_LOGGING_INTERVAL,
-		                       &cc,
-		                       "ConfigConsumerMetrics");
+		logger = traceCounters(
+		    "ConfigConsumerMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigConsumerMetrics");
+	}
+
+	static ConfigFollowerInterface getConfigFollowerInterface(ConfigFollowerInterface const& cfi) { return cfi; }
+
+	static ConfigFollowerInterface getConfigFollowerInterface(ClusterConnectionString const& ccs) {
+		auto coordinators = ccs.coordinators();
+		std::sort(coordinators.begin(), coordinators.end());
+		return ConfigFollowerInterface(coordinators[0]);
+	}
+
+	static ConfigFollowerInterface getConfigFollowerInterface(ServerCoordinators const& coordinators) {
+		return ConfigFollowerInterface(coordinators.configServers[0]);
 	}
 
 public:
-	SimpleConfigConsumerImpl(ConfigFollowerInterface const& cfi) : SimpleConfigConsumerImpl() { this->cfi = cfi; }
-
-	SimpleConfigConsumerImpl(ClusterConnectionString const& ccs) : SimpleConfigConsumerImpl() {
-		auto coordinators = ccs.coordinators();
-		std::sort(coordinators.begin(), coordinators.end());
-		cfi = ConfigFollowerInterface(coordinators[0]);
-	}
-
-	SimpleConfigConsumerImpl(ServerCoordinators const& coordinators) : SimpleConfigConsumerImpl() {
-		cfi = ConfigFollowerInterface(coordinators.configServers[0]);
+	template <class InterfaceSource>
+	SimpleConfigConsumerImpl(InterfaceSource const& interfaceSource,
+	                         Optional<ConfigClassSet> const& configClassSet,
+	                         Version lastSeenVersion,
+	                         UID id)
+	  : lastSeenVersion(lastSeenVersion), configClassSet(configClassSet), id(id), cc("ConfigConsumer"),
+	    compactRequest("CompactRequest", cc), successfulChangeRequest("SuccessfulChangeRequest", cc),
+	    failedChangeRequest("FailedChangeRequest", cc), snapshotRequest("SnapshotRequest", cc) {
+		cfi = getConfigFollowerInterface(interfaceSource);
+		logger = traceCounters(
+		    "ConfigConsumerMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigConsumerMetrics");
 	}
 
 	template <class ConfigStore>
@@ -129,21 +140,33 @@ public:
 
 	template <class ConfigStore>
 	Future<Void> consume(ConfigStore& configStore) {
-		return fetchChanges(this, &configStore) || compactor(this);
+		// TODO: Reenable compaction
+		return fetchChanges(this, &configStore); /* ||compactor(this); */
 	}
+
+	UID getID() const { return id; }
 };
 
 const double SimpleConfigConsumerImpl::POLLING_INTERVAL = 0.5;
 const double SimpleConfigConsumerImpl::COMPACTION_INTERVAL = 5.0;
 
-SimpleConfigConsumer::SimpleConfigConsumer(ConfigFollowerInterface const& cfi)
-  : impl(std::make_unique<SimpleConfigConsumerImpl>(cfi)) {}
+SimpleConfigConsumer::SimpleConfigConsumer(ConfigFollowerInterface const& cfi,
+                                           Optional<ConfigClassSet> const& configClassSet,
+                                           Version lastSeenVersion,
+                                           UID id)
+  : impl(std::make_unique<SimpleConfigConsumerImpl>(cfi, configClassSet, lastSeenVersion, id)) {}
 
-SimpleConfigConsumer::SimpleConfigConsumer(ClusterConnectionString const& ccs)
-  : impl(std::make_unique<SimpleConfigConsumerImpl>(ccs)) {}
+SimpleConfigConsumer::SimpleConfigConsumer(ClusterConnectionString const& ccs,
+                                           Optional<ConfigClassSet> const& configClassSet,
+                                           Version lastSeenVersion,
+                                           UID id)
+  : impl(std::make_unique<SimpleConfigConsumerImpl>(ccs, configClassSet, lastSeenVersion, id)) {}
 
-SimpleConfigConsumer::SimpleConfigConsumer(ServerCoordinators const& coordinators)
-  : impl(std::make_unique<SimpleConfigConsumerImpl>(coordinators)) {}
+SimpleConfigConsumer::SimpleConfigConsumer(ServerCoordinators const& coordinators,
+                                           Optional<ConfigClassSet> const& configClassSet,
+                                           Version lastSeenVersion,
+                                           UID id)
+  : impl(std::make_unique<SimpleConfigConsumerImpl>(coordinators, configClassSet, lastSeenVersion, id)) {}
 
 Future<Void> SimpleConfigConsumer::getInitialSnapshot(ConfigBroadcaster& broadcaster) {
 	return impl->getInitialSnapshot(broadcaster);
@@ -162,3 +185,7 @@ Future<Void> SimpleConfigConsumer::consume(LocalConfiguration& localConfiguratio
 }
 
 SimpleConfigConsumer::~SimpleConfigConsumer() = default;
+
+UID SimpleConfigConsumer::getID() const {
+	return impl->getID();
+}

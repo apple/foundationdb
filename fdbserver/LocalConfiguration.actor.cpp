@@ -114,7 +114,7 @@ class LocalConfigurationImpl : public NonCopyable {
 	ClientKnobs clientKnobs;
 	ServerKnobs serverKnobs;
 	TestKnobs testKnobs;
-	Version mostRecentVersion{ 0 };
+	Version lastSeenVersion{ 0 };
 	ManualKnobOverrides manualKnobOverrides;
 	ConfigKnobOverrides configKnobOverrides;
 	ActorCollection actors{ false };
@@ -125,6 +125,7 @@ class LocalConfigurationImpl : public NonCopyable {
 	Counter changeRequestsFetched;
 	Counter mutations;
 	Future<Void> logger;
+	UID id;
 
 	ACTOR static Future<Void> saveConfigPath(LocalConfigurationImpl* self) {
 		self->kvStore->set(
@@ -154,6 +155,7 @@ class LocalConfigurationImpl : public NonCopyable {
 
 	ACTOR static Future<Void> initialize(LocalConfigurationImpl* self, std::string dataFolder, UID id) {
 		platform::createDirectory(dataFolder);
+		self->id = id;
 		self->kvStore = keyValueStoreMemory(joinPath(dataFolder, "localconf-" + id.toString()), id, 500e6);
 		self->logger = traceCounters("LocalConfigurationMetrics",
 		                             id,
@@ -161,10 +163,11 @@ class LocalConfigurationImpl : public NonCopyable {
 		                             &self->cc,
 		                             "LocalConfigurationMetrics");
 		wait(self->kvStore->init());
+		state Version lastSeenVersion = wait(getLastSeenVersion(self));
 		state Optional<Value> storedConfigPathValue = wait(self->kvStore->readValue(configPathKey));
 		if (!storedConfigPathValue.present()) {
 			wait(saveConfigPath(self));
-			self->updateInMemoryKnobs();
+			self->updateInMemoryState(lastSeenVersion);
 			return Void();
 		}
 		state ConfigKnobOverrides storedConfigPath =
@@ -173,7 +176,7 @@ class LocalConfigurationImpl : public NonCopyable {
 			// All local information is outdated
 			wait(clearKVStore(self));
 			wait(saveConfigPath(self));
-			self->updateInMemoryKnobs();
+			self->updateInMemoryState(lastSeenVersion);
 			return Void();
 		}
 		Standalone<RangeResultRef> range = wait(self->kvStore->readRange(knobOverrideKeys));
@@ -182,7 +185,7 @@ class LocalConfigurationImpl : public NonCopyable {
 			    BinaryReader::fromStringRef<ConfigKey>(kv.key.removePrefix(knobOverrideKeys.begin), IncludeVersion());
 			self->configKnobOverrides.set(configKey.configClass, configKey.knobName, kv.value);
 		}
-		self->updateInMemoryKnobs();
+		self->updateInMemoryState(lastSeenVersion);
 		return Void();
 	}
 
@@ -200,7 +203,8 @@ class LocalConfigurationImpl : public NonCopyable {
 		testKnobs.reset();
 	}
 
-	void updateInMemoryKnobs() {
+	void updateInMemoryState(Version lastSeenVersion) {
+		this->lastSeenVersion = lastSeenVersion;
 		resetKnobs();
 		configKnobOverrides.update(flowKnobs, clientKnobs, serverKnobs, testKnobs);
 		manualKnobOverrides.update(flowKnobs, clientKnobs, serverKnobs, testKnobs);
@@ -210,7 +214,7 @@ class LocalConfigurationImpl : public NonCopyable {
 
 	ACTOR static Future<Void> setSnapshot(LocalConfigurationImpl* self,
 	                                      std::map<ConfigKey, Value> snapshot,
-	                                      Version lastCompactedVersion) {
+	                                      Version snapshotVersion) {
 		// TODO: Concurrency control?
 		++self->snapshots;
 		self->kvStore->clear(knobOverrideKeys);
@@ -219,10 +223,10 @@ class LocalConfigurationImpl : public NonCopyable {
 			self->kvStore->set(KeyValueRef(
 			    BinaryWriter::toValue(configKey, IncludeVersion()).withPrefix(knobOverrideKeys.begin), knobValue));
 		}
-		self->kvStore->set(
-		    KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(lastCompactedVersion, IncludeVersion())));
+		ASSERT_GE(snapshotVersion, self->lastSeenVersion);
+		self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(snapshotVersion, IncludeVersion())));
 		wait(self->kvStore->commit());
-		self->updateInMemoryKnobs();
+		self->updateInMemoryState(snapshotVersion);
 		return Void();
 	}
 
@@ -246,7 +250,7 @@ class LocalConfigurationImpl : public NonCopyable {
 		}
 		self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(mostRecentVersion, IncludeVersion())));
 		wait(self->kvStore->commit());
-		self->updateInMemoryKnobs();
+		self->updateInMemoryState(mostRecentVersion);
 		return Void();
 	}
 
@@ -254,9 +258,13 @@ class LocalConfigurationImpl : public NonCopyable {
 	    LocalConfiguration* self,
 	    LocalConfigurationImpl* impl,
 	    Reference<IDependentAsyncVar<ConfigFollowerInterface> const> broadcaster) {
-		// TODO: Cache lastSeenVersion in memory
-		// state Version lastSeenVersion = wait(impl->getLastSeenVersion());
-		state SimpleConfigConsumer consumer(broadcaster->get());
+		state SimpleConfigConsumer consumer(broadcaster->get(),
+		                                    impl->configKnobOverrides.getConfigClassSet(),
+		                                    impl->lastSeenVersion,
+		                                    deterministicRandom()->randomUniqueID());
+		TraceEvent(SevDebug, "LocalConfigurationStartingConsumer", impl->id)
+		    .detail("Consumer", consumer.getID())
+		    .detail("Broadcaster", broadcaster->get().id());
 		choose {
 			when(wait(broadcaster->onChange())) { ++impl->broadcasterChanges; }
 			when(wait(brokenPromiseToNever(consumer.consume(*self)))) { ASSERT(false); }
@@ -324,6 +332,8 @@ public:
 	                     Reference<IDependentAsyncVar<ConfigFollowerInterface> const> const& broadcaster) {
 		return consume(&self, this, broadcaster);
 	}
+
+	UID getID() const { return id; }
 };
 
 LocalConfiguration::LocalConfiguration(std::string const& configPath, std::map<Key, Value>&& manualKnobOverrides)
@@ -367,6 +377,10 @@ Future<Void> LocalConfiguration::addVersionedMutations(
     Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,
     Version mostRecentVersion) {
 	return impl->addVersionedMutations(versionedMutations, mostRecentVersion);
+}
+
+UID LocalConfiguration::getID() const {
+	return impl->getID();
 }
 
 #define init(knob, value) initKnob(knob, value, #knob)

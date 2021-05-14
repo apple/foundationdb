@@ -28,12 +28,22 @@ class SimpleConfigConsumer : public IConfigConsumer {
 	std::unique_ptr<class SimpleConfigConsumerImpl> impl;
 
 public:
-	SimpleConfigConsumer(ConfigFollowerInterface const& cfi);
-	SimpleConfigConsumer(ClusterConnectionString const& ccs);
-	SimpleConfigConsumer(ServerCoordinators const& coordinators);
+	SimpleConfigConsumer(ConfigFollowerInterface const& cfi,
+	                     Optional<ConfigClassSet> const& configClassSet,
+	                     Version lastSeenVersion,
+	                     UID id);
+	SimpleConfigConsumer(ClusterConnectionString const& ccs,
+	                     Optional<ConfigClassSet> const& configClassSet,
+	                     Version lastSeenVersion,
+	                     UID id);
+	SimpleConfigConsumer(ServerCoordinators const& coordinators,
+	                     Optional<ConfigClassSet> const& configClassSet,
+	                     Version lastSeenVersion,
+	                     UID id);
 	~SimpleConfigConsumer();
 	Future<Void> getInitialSnapshot(ConfigBroadcaster& broadcaster) override;
 	Future<Void> getInitialSnapshot(LocalConfiguration& localConfiguration);
 	Future<Void> consume(ConfigBroadcaster& broadcaster) override;
 	Future<Void> consume(LocalConfiguration& localConfiguration);
+	UID getID() const;
 };

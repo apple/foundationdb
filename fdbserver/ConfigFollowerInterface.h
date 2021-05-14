@@ -84,11 +84,11 @@ struct ConfigFollowerGetSnapshotReply {
 struct ConfigFollowerGetSnapshotRequest {
 	static constexpr FileIdentifier file_identifier = 294811;
 	Version version;
-	ConfigClassSet configClassSet;
+	Optional<ConfigClassSet> configClassSet;
 	ReplyPromise<ConfigFollowerGetSnapshotReply> reply;
 
 	ConfigFollowerGetSnapshotRequest() : version(-1) {}
-	explicit ConfigFollowerGetSnapshotRequest(Version version, ConfigClassSet const& configClassSet)
+	explicit ConfigFollowerGetSnapshotRequest(Version version, Optional<ConfigClassSet> const& configClassSet)
 	  : version(version), configClassSet(configClassSet) {}
 
 	template <class Ar>
@@ -134,11 +134,11 @@ struct ConfigFollowerGetChangesReply {
 struct ConfigFollowerGetChangesRequest {
 	static constexpr FileIdentifier file_identifier = 178935;
 	Version lastSeenVersion;
-	ConfigClassSet configClassSet;
+	Optional<ConfigClassSet> configClassSet;
 	ReplyPromise<ConfigFollowerGetChangesReply> reply;
 
 	ConfigFollowerGetChangesRequest() : lastSeenVersion(::invalidVersion) {}
-	explicit ConfigFollowerGetChangesRequest(Version lastSeenVersion, ConfigClassSet const& configClassSet)
+	explicit ConfigFollowerGetChangesRequest(Version lastSeenVersion, Optional<ConfigClassSet> const& configClassSet)
 	  : lastSeenVersion(lastSeenVersion), configClassSet(configClassSet) {}
 
 	template <class Ar>

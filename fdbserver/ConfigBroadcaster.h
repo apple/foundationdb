@@ -30,12 +30,13 @@ class ConfigBroadcaster {
 	std::unique_ptr<class ConfigBroadcasterImpl> impl;
 
 public:
-	ConfigBroadcaster(ConfigFollowerInterface const&);
-	ConfigBroadcaster(ClusterConnectionString const&);
-	ConfigBroadcaster(ServerCoordinators const&);
+	ConfigBroadcaster(ConfigFollowerInterface const&, UID id);
+	ConfigBroadcaster(ClusterConnectionString const&, UID id);
+	ConfigBroadcaster(ServerCoordinators const&, UID id);
 	~ConfigBroadcaster();
 	Future<Void> serve(ConfigFollowerInterface const&);
 	Future<Void> addVersionedMutations(Standalone<VectorRef<VersionedConfigMutationRef>> const&,
 	                                   Version mostRecentVersion);
-	Future<Void> setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version lastCompectedVersion);
+	Future<Void> setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version snapshotVersion);
+	UID getID() const;
 };

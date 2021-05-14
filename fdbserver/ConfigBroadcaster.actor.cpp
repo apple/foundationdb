@@ -21,8 +21,15 @@
 #include "fdbserver/ConfigBroadcaster.h"
 #include "fdbserver/LocalConfiguration.h" // testing only
 #include "fdbserver/SimpleConfigConsumer.h"
-#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // must be last include
+
+namespace {
+
+bool matchesConfigClass(Optional<ConfigClassSet> const& configClassSet, KeyRef configClass) {
+	return (!configClassSet.present() || configClassSet.get().contains(configClass));
+}
+
+} // namespace
 
 class ConfigBroadcasterImpl {
 	std::map<Key, Endpoint::Token> configClassToToken;
@@ -43,15 +50,6 @@ class ConfigBroadcasterImpl {
 	Counter snapshotRequest;
 	Future<Void> logger;
 
-	ConfigBroadcasterImpl()
-	  : id(deterministicRandom()->randomUniqueID()), lastCompactedVersion(0), mostRecentVersion(0),
-	    cc("ConfigBroadcaster"), compactRequest("CompactRequest", cc),
-	    successfulChangeRequest("SuccessfulChangeRequest", cc), failedChangeRequest("FailedChangeRequest", cc),
-	    snapshotRequest("SnapshotRequest", cc) {
-		logger = traceCounters(
-		    "ConfigBroadcasterMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigBroadcasterMetrics");
-	}
-
 	ACTOR static Future<Void> serve(ConfigBroadcaster* self, ConfigBroadcasterImpl* impl, ConfigFollowerInterface cfi) {
 		wait(impl->consumer->getInitialSnapshot(*self));
 		impl->actors.add(impl->consumer->consume(*self));
@@ -70,8 +68,8 @@ class ConfigBroadcasterImpl {
 						if (version > req.version) {
 							break;
 						}
-						if (req.configClassSet.contains(mutation.getConfigClass())) {
-							TraceEvent(SevDebug, "BroadcasterAppendingMutationToSnapshotOutput", impl->id)
+						if (matchesConfigClass(req.configClassSet, mutation.getConfigClass())) {
+							TraceEvent(SevDebug, "ConfigBroadcasterAppendingMutationToSnapshotOutput", impl->id)
 							    .detail("ReqVersion", req.version)
 							    .detail("MutationVersion", version)
 							    .detail("ConfigClass", mutation.getConfigClass())
@@ -96,8 +94,8 @@ class ConfigBroadcasterImpl {
 					reply.mostRecentVersion = impl->mostRecentVersion;
 					for (const auto& versionedMutation : impl->versionedMutations) {
 						if (versionedMutation.version > req.lastSeenVersion &&
-						    req.configClassSet.contains(versionedMutation.mutation.getConfigClass())) {
-							TraceEvent(SevDebug, "BroadcasterSendingChangeMutation", impl->id)
+						    matchesConfigClass(req.configClassSet, versionedMutation.mutation.getConfigClass())) {
+							TraceEvent(SevDebug, "ConfigBroadcasterSendingChangeMutation", impl->id)
 							    .detail("Version", versionedMutation.version)
 							    .detail("ReqLastSeenVersion", req.lastSeenVersion)
 							    .detail("ConfigClass", versionedMutation.mutation.getConfigClass())
@@ -119,7 +117,7 @@ class ConfigBroadcasterImpl {
 						if (version > req.version) {
 							break;
 						} else {
-							TraceEvent(SevDebug, "BroadcasterCompactingMutation", impl->id)
+							TraceEvent(SevDebug, "ConfigBroadcasterCompactingMutation", impl->id)
 							    .detail("ReqVersion", req.version)
 							    .detail("MutationVersion", version)
 							    .detail("ConfigClass", mutation.getConfigClass())
@@ -153,33 +151,35 @@ public:
 		return Void();
 	}
 
-	Future<Void> setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version lastCompactedVersion) {
+	Future<Void> setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version snapshotVersion) {
 		this->snapshot = std::move(snapshot);
-		this->lastCompactedVersion = lastCompactedVersion;
+		this->lastCompactedVersion = snapshotVersion;
 		return Void();
 	}
 
-	ConfigBroadcasterImpl(ConfigFollowerInterface const& cfi) : ConfigBroadcasterImpl() {
-		consumer = std::make_unique<SimpleConfigConsumer>(cfi);
+	template <class ConfigSource>
+	ConfigBroadcasterImpl(ConfigSource const& configSource, UID id)
+	  : id(id), lastCompactedVersion(0), mostRecentVersion(0), cc("ConfigBroadcaster"),
+	    compactRequest("CompactRequest", cc), successfulChangeRequest("SuccessfulChangeRequest", cc),
+	    failedChangeRequest("FailedChangeRequest", cc), snapshotRequest("SnapshotRequest", cc) {
+		logger = traceCounters(
+		    "ConfigBroadcasterMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigBroadcasterMetrics");
+		auto consumerID = deterministicRandom()->randomUniqueID();
+		TraceEvent(SevDebug, "BroadcasterStartingConsumer", id).detail("Consumer", consumerID);
+		consumer = std::make_unique<SimpleConfigConsumer>(configSource, Optional<ConfigClassSet>{}, 0, consumerID);
 	}
 
-	ConfigBroadcasterImpl(ClusterConnectionString const& ccs) : ConfigBroadcasterImpl() {
-		consumer = std::make_unique<SimpleConfigConsumer>(ccs);
-	}
-
-	ConfigBroadcasterImpl(ServerCoordinators const& coordinators) : ConfigBroadcasterImpl() {
-		consumer = std::make_unique<SimpleConfigConsumer>(coordinators);
-	}
+	UID getID() const { return id; }
 };
 
-ConfigBroadcaster::ConfigBroadcaster(ConfigFollowerInterface const& cfi)
-  : impl(std::make_unique<ConfigBroadcasterImpl>(cfi)) {}
+ConfigBroadcaster::ConfigBroadcaster(ConfigFollowerInterface const& cfi, UID id)
+  : impl(std::make_unique<ConfigBroadcasterImpl>(cfi, id)) {}
 
-ConfigBroadcaster::ConfigBroadcaster(ClusterConnectionString const& ccs)
-  : impl(std::make_unique<ConfigBroadcasterImpl>(ccs)) {}
+ConfigBroadcaster::ConfigBroadcaster(ClusterConnectionString const& ccs, UID id)
+  : impl(std::make_unique<ConfigBroadcasterImpl>(ccs, id)) {}
 
-ConfigBroadcaster::ConfigBroadcaster(ServerCoordinators const& coordinators)
-  : impl(std::make_unique<ConfigBroadcasterImpl>(coordinators)) {}
+ConfigBroadcaster::ConfigBroadcaster(ServerCoordinators const& coordinators, UID id)
+  : impl(std::make_unique<ConfigBroadcasterImpl>(coordinators, id)) {}
 
 ConfigBroadcaster::~ConfigBroadcaster() = default;
 
@@ -193,6 +193,10 @@ Future<Void> ConfigBroadcaster::addVersionedMutations(
 	return impl->addVersionedMutations(versionedMutations, mostRecentVersion);
 }
 
-Future<Void> ConfigBroadcaster::setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version lastCompactedVersion) {
-	return impl->setSnapshot(std::move(snapshot), lastCompactedVersion);
+Future<Void> ConfigBroadcaster::setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version snapshotVersion) {
+	return impl->setSnapshot(std::move(snapshot), snapshotVersion);
+}
+
+UID ConfigBroadcaster::getID() const {
+	return impl->getID();
 }

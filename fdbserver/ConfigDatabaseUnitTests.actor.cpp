@@ -54,7 +54,8 @@ TestKnobs const& getExpectedTestKnobsFinal() {
 }
 
 ACTOR template <class ConfigStore>
-Future<Void> setTestSnapshot(ConfigStore* configStore, Version* version) {
+Future<Void> setTestSnapshot(ConfigStore* configStore, Version* lastWrittenVersion) {
+	TraceEvent("WritingTestSnapshot").detail("LastWrittenVersion", *lastWrittenVersion);
 	std::map<ConfigKey, Value> snapshot = {
 		{ ConfigKeyRef("class-A"_sr, "test_int"_sr), "1"_sr },
 		{ ConfigKeyRef("class-B"_sr, "test_int"_sr), "2"_sr },
@@ -62,7 +63,7 @@ Future<Void> setTestSnapshot(ConfigStore* configStore, Version* version) {
 		{ ConfigKeyRef("class-B"_sr, "test_double"_sr), "4.0"_sr },
 		{ ConfigKeyRef("class-A"_sr, "test_string"_sr), "x"_sr },
 	};
-	wait(configStore->setSnapshot(std::move(snapshot), ++(*version)));
+	wait(configStore->setSnapshot(std::move(snapshot), ++(*lastWrittenVersion)));
 	return Void();
 }
 
@@ -79,30 +80,30 @@ void appendVersionedMutation(Standalone<VectorRef<VersionedConfigMutationRef>>& 
 }
 
 ACTOR template <class ConfigStore>
-Future<Void> addTestUpdates(ConfigStore* configStore, Version* version) {
+Future<Void> addTestUpdates(ConfigStore* configStore, Version* lastWrittenVersion) {
 	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
-	++(*version);
-	appendVersionedMutation(versionedMutations, *version, "class-A"_sr, "test_bool"_sr, "true"_sr);
-	appendVersionedMutation(versionedMutations, *version, "class-B"_sr, "test_long"_sr, "100"_sr);
-	appendVersionedMutation(versionedMutations, *version, "class-C"_sr, "test_double"_sr, "10.0"_sr);
-	appendVersionedMutation(versionedMutations, *version, "class-A"_sr, "test_int"_sr, "10"_sr);
-	wait(configStore->addVersionedMutations(versionedMutations, *version));
+	++(*lastWrittenVersion);
+	appendVersionedMutation(versionedMutations, *lastWrittenVersion, "class-A"_sr, "test_bool"_sr, "true"_sr);
+	appendVersionedMutation(versionedMutations, *lastWrittenVersion, "class-B"_sr, "test_long"_sr, "100"_sr);
+	appendVersionedMutation(versionedMutations, *lastWrittenVersion, "class-C"_sr, "test_double"_sr, "10.0"_sr);
+	appendVersionedMutation(versionedMutations, *lastWrittenVersion, "class-A"_sr, "test_int"_sr, "10"_sr);
+	wait(configStore->addVersionedMutations(versionedMutations, *lastWrittenVersion));
 	return Void();
 }
 
 ACTOR template <class ConfigStore>
-Future<Void> runTestUpdates(ConfigStore* configStore, Version* version) {
-	wait(setTestSnapshot(configStore, version));
-	wait(addTestUpdates(configStore, version));
+Future<Void> runTestUpdates(ConfigStore* configStore, Version* lastWrittenVersion) {
+	wait(setTestSnapshot(configStore, lastWrittenVersion));
+	wait(addTestUpdates(configStore, lastWrittenVersion));
 	// TODO: Clean up on-disk state
 	return Void();
 }
 
 ACTOR Future<Void> runFirstLocalConfiguration(std::string configPath, UID id) {
 	state LocalConfiguration localConfiguration(configPath, testManualKnobOverrides);
-	state Version version = 1;
+	state Version lastWrittenVersion = 0;
 	wait(localConfiguration.initialize("./", id));
-	wait(runTestUpdates(&localConfiguration, &version));
+	wait(runTestUpdates(&localConfiguration, &lastWrittenVersion));
 	ASSERT(localConfiguration.getTestKnobs() == getExpectedTestKnobsFinal());
 	return Void();
 }
@@ -144,21 +145,63 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/FreshRestart") {
 	return Void();
 }
 
+namespace {
+
+ACTOR Future<Void> dummyConfigSource(ConfigFollowerInterface cfi) {
+	loop {
+		choose {
+			when(ConfigFollowerGetVersionRequest req = waitNext(cfi.getVersion.getFuture())) { req.reply.send(0); }
+			when(ConfigFollowerGetSnapshotRequest req = waitNext(cfi.getSnapshot.getFuture())) {
+				req.reply.send(ConfigFollowerGetSnapshotReply{});
+			}
+		}
+	}
+}
+
+class DummyConfigSource {
+	ConfigFollowerInterface cfi;
+	ACTOR static Future<Void> serve(DummyConfigSource* self) {
+		loop {
+			choose {
+				when(ConfigFollowerGetVersionRequest req = waitNext(self->cfi.getVersion.getFuture())) {
+					req.reply.send(0);
+				}
+				when(ConfigFollowerGetSnapshotRequest req = waitNext(self->cfi.getSnapshot.getFuture())) {
+					req.reply.send(ConfigFollowerGetSnapshotReply{});
+				}
+			}
+		}
+	}
+
+public:
+	Future<Void> serve() { return serve(this); }
+	ConfigFollowerInterface const& getInterface() { return cfi; }
+};
+
+} // namespace
+
 TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/Simple") {
-	state ConfigBroadcaster broadcaster(ConfigFollowerInterface{});
+	state DummyConfigSource dummyConfigSource;
+	state ConfigBroadcaster broadcaster(dummyConfigSource.getInterface(), deterministicRandom()->randomUniqueID());
 	state Reference<IDependentAsyncVar<ConfigFollowerInterface>> cfi =
 	    IDependentAsyncVar<ConfigFollowerInterface>::create(makeReference<AsyncVar<ConfigFollowerInterface>>());
 	state LocalConfiguration localConfiguration("class-A/class-B", testManualKnobOverrides);
 	state Version version = 1;
 	state ActorCollection actors(false);
+	state Future<Void> updater;
+	state Future<Void> listener;
 	wait(localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
+	TraceEvent("StartedTestBroadcasterAndLocalConfig")
+	    .detail("Broadcaster", broadcaster.getID())
+	    .detail("LocalConfiguration", localConfiguration.getID());
+	actors.add(dummyConfigSource.serve());
 	actors.add(broadcaster.serve(cfi->get()));
 	actors.add(localConfiguration.consume(cfi));
-	Future<Void> updater = runTestUpdates(&broadcaster, &version);
-	Future<Void> listener = pollLocalConfiguration(&localConfiguration, &getExpectedTestKnobsFinal());
+	updater = runTestUpdates(&broadcaster, &version);
+	listener = pollLocalConfiguration(&localConfiguration, &getExpectedTestKnobsFinal());
 	choose {
 		// TODO: Fix listener
-		when(wait(updater /*&& listener*/)) {}
+		when(wait(updater && listener)) {}
 		when(wait(actors.getResult())) { ASSERT(false); }
 	}
 	return Void();

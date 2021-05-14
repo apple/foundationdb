@@ -55,7 +55,8 @@ public:
 	TestKnobs const& getTestKnobs() const;
 	// TODO: Only one field of serverDBInfo is required, so improve encapsulation
 	Future<Void> consume(Reference<IDependentAsyncVar<ConfigFollowerInterface> const> const& broadcaster);
-	Future<Void> setSnapshot(std::map<ConfigKey, Value> const& snapshot, Version lastCompactedVersion);
+	Future<Void> setSnapshot(std::map<ConfigKey, Value> const& snapshot, Version snapshotVersion);
 	Future<Void> addVersionedMutations(Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,
 	                                   Version mostRecentVersion);
+	UID getID() const;
 };
