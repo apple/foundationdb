@@ -108,11 +108,11 @@ TEST_CASE("/fdbserver/ptxn/test/tlogPeek/readFromSerialization") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/ServerTeamPeekCursor") {
+TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/TLogGroupPeekCursor") {
 	state ptxn::test::TestTLogPeekOptions options(params);
 	state std::shared_ptr<ptxn::test::FakeTLogContext> pContext = std::make_shared<ptxn::test::FakeTLogContext>();
 	state Future<Void> tLog;
-	state std::shared_ptr<ptxn::ServerTeamPeekCursor> pCursor;
+	state std::shared_ptr<ptxn::TLogGroupPeekCursor> pCursor;
 	state ptxn::TeamID teamID;
 
 	// Limit the size of reply, to force multiple peeks
@@ -122,7 +122,7 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/ServerTeamPeekCursor") {
 
 	teamID = ptxn::test::randomlyPick(pContext->teamIDs);
 	pCursor =
-	    std::make_shared<ptxn::ServerTeamPeekCursor>(options.initialVersion, teamID, pContext->pTLogInterface.get());
+	    std::make_shared<ptxn::TLogGroupPeekCursor>(options.initialVersion, teamID, pContext->pTLogInterface.get());
 	state size_t index = 0;
 	loop {
 		std::cout << "TestServerTeamPeekCursor"
@@ -174,7 +174,7 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/MergedPeekCursor/base") {
 
 	for (auto teamID : pContext->teamIDs) {
 		cursorPtrs.emplace_back(
-		    new ptxn::ServerTeamPeekCursor(options.initialVersion, teamID, pContext->pTLogInterface.get()));
+		    new ptxn::TLogGroupPeekCursor(options.initialVersion, teamID, pContext->pTLogInterface.get()));
 	}
 
 	state std::shared_ptr<ptxn::MergedPeekCursor> pMergedCursor =
@@ -309,20 +309,20 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/MergedPeekCursor/addCursorOnTheF
 	state Future<Void> tLog = ptxn::test::initializeTLogForCursorTest(pContext);
 	state std::shared_ptr<ptxn::MergedPeekCursor> pCursor = std::make_shared<ptxn::MergedPeekCursor>();
 
-	pCursor->addCursor(std::make_unique<ptxn::ServerTeamPeekCursor>(
+	pCursor->addCursor(std::make_unique<ptxn::TLogGroupPeekCursor>(
 	    ptxn::test::TEST_INITIAL_VERSION, teamIDs[0], pContext->pTLogInterface.get()));
-	pCursor->addCursor(std::make_unique<ptxn::ServerTeamPeekCursor>(
+	pCursor->addCursor(std::make_unique<ptxn::TLogGroupPeekCursor>(
 	    ptxn::test::TEST_INITIAL_VERSION, teamIDs[1], pContext->pTLogInterface.get()));
 	ASSERT_EQ(pCursor->getNumActiveCursors(), 2);
 	wait(ptxn::test::verifyCursorDataMatchTLogData(pContext, pCursor, { { 0, 0 }, { 1, 0 }, { 0, 1 }, { 1, 1 } }));
 
-	pCursor->addCursor(std::make_unique<ptxn::ServerTeamPeekCursor>(
+	pCursor->addCursor(std::make_unique<ptxn::TLogGroupPeekCursor>(
 	    ptxn::test::TEST_INITIAL_VERSION, teamIDs[2], pContext->pTLogInterface.get()));
 	ASSERT_EQ(pCursor->getNumActiveCursors(), 3);
 	wait(ptxn::test::verifyCursorDataMatchTLogData(
 	    pContext, pCursor, { { 2, 0 }, { 2, 1 }, { 0, 2 }, { 1, 2 }, { 2, 2 } }));
 
-	pCursor->addCursor(std::make_unique<ptxn::ServerTeamPeekCursor>(
+	pCursor->addCursor(std::make_unique<ptxn::TLogGroupPeekCursor>(
 	    ptxn::test::TEST_INITIAL_VERSION + ptxn::test::STEP_VERSION * 2, teamIDs[3], pContext->pTLogInterface.get()));
 	ASSERT_EQ(pCursor->getNumActiveCursors(), 4);
 	wait(ptxn::test::verifyCursorDataMatchTLogData(
@@ -338,14 +338,14 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/MergedServerTeamPeekCursor/remov
 	state std::shared_ptr<ptxn::MergedServerTeamPeekCursor> pCursor =
 	    std::make_shared<ptxn::MergedServerTeamPeekCursor>();
 
-	pCursor->addCursor(std::make_unique<ptxn::ServerTeamPeekCursor>(
+	pCursor->addCursor(std::make_unique<ptxn::TLogGroupPeekCursor>(
 	    ptxn::test::TEST_INITIAL_VERSION, teamIDs[0], pContext->pTLogInterface.get()));
-	pCursor->addCursor(std::make_unique<ptxn::ServerTeamPeekCursor>(
+	pCursor->addCursor(std::make_unique<ptxn::TLogGroupPeekCursor>(
 	    ptxn::test::TEST_INITIAL_VERSION, teamIDs[1], pContext->pTLogInterface.get()));
 	ASSERT_EQ(pCursor->getNumActiveCursors(), 2);
 	wait(ptxn::test::verifyCursorDataMatchTLogData(pContext, pCursor, { { 0, 0 }, { 1, 0 }, { 0, 1 }, { 1, 1 } }));
 
-	pCursor->addCursor(std::make_unique<ptxn::ServerTeamPeekCursor>(
+	pCursor->addCursor(std::make_unique<ptxn::TLogGroupPeekCursor>(
 	    ptxn::test::TEST_INITIAL_VERSION, teamIDs[2], pContext->pTLogInterface.get()));
 	ASSERT_EQ(pCursor->getNumActiveCursors(), 3);
 	pCursor->removeCursor(teamIDs[1]);
@@ -367,7 +367,7 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/advanceTo") {
 	    std::make_shared<ptxn::MergedServerTeamPeekCursor>();
 
 	for (int i = 0; i < ptxn::test::NUM_TEAMS; ++i) {
-		pCursor->addCursor(std::make_unique<ptxn::ServerTeamPeekCursor>(
+		pCursor->addCursor(std::make_unique<ptxn::TLogGroupPeekCursor>(
 		    ptxn::test::TEST_INITIAL_VERSION, teamIDs[i], pContext->pTLogInterface.get()));
 	}
 	bool hasMore = wait(pCursor->remoteMoreAvailable());

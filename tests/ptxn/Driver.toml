@@ -31,14 +31,14 @@ startDelay = 0
     peekTimes = 10
 
 [[test]]
-testTitle = 'Test server team cursor'
+testTitle = 'Test TLog group peek cursor'
 useDB = false
 startDelay = 0
 
     [[test.workload]]
     testName = 'UnitTests'
     maxTestCases = 1
-    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/ServerTeamPeekCursor'
+    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/TLogGroupPeekCursor'
 
     maxBytesPerPeek = 65536
 

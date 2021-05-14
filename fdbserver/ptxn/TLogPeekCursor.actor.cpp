@@ -189,7 +189,7 @@ ACTOR Future<bool> peekRemoteForMergedServerTeamCursor(MergedPeekServerTeamCurso
 	}
 	for (CursorContainer::iterator iter = std::begin(*context.pCursorPtrs); iter != std::end(*context.pCursorPtrs);
 	     ++iter) {
-		inactiveTeamIDs.erase(dynamic_cast<ServerTeamPeekCursor*>((*iter).get())->getTeamID());
+		inactiveTeamIDs.erase(dynamic_cast<TLogGroupPeekCursor*>((*iter).get())->getTeamID());
 	}
 	for (std::unordered_set<TeamID>::iterator iter = std::begin(inactiveTeamIDs); iter != std::end(inactiveTeamIDs);
 	     ++iter) {
@@ -244,14 +244,24 @@ bool PeekCursorBase::hasRemaining() const {
 	return hasRemainingImpl();
 }
 
+<<<<<<< HEAD
 ServerTeamPeekCursor::ServerTeamPeekCursor(const Version& beginVersion_,
                                            const StorageTeamID& teamID_,
+=======
+TLogGroupPeekCursor::TLogGroupPeekCursor(const Version& beginVersion_,
+                                           const TeamID& teamID_,
+>>>>>>> 372c2c7d4 (fixup! Rename ServerTeamPeekCursor to TLogGroupPeekCursor)
                                            TLogInterfaceBase* pTLogInterface_,
                                            Arena* pArena_)
-  : ServerTeamPeekCursor(beginVersion_, teamID_, std::vector<TLogInterfaceBase*>{ pTLogInterface_ }, pArena_) {}
+  : TLogGroupPeekCursor(beginVersion_, teamID_, std::vector<TLogInterfaceBase*>{ pTLogInterface_ }, pArena_) {}
 
+<<<<<<< HEAD
 ServerTeamPeekCursor::ServerTeamPeekCursor(const Version& beginVersion_,
                                            const StorageTeamID& teamID_,
+=======
+TLogGroupPeekCursor::TLogGroupPeekCursor(const Version& beginVersion_,
+                                           const TeamID& teamID_,
+>>>>>>> 372c2c7d4 (fixup! Rename ServerTeamPeekCursor to TLogGroupPeekCursor)
                                            const std::vector<TLogInterfaceBase*>& pTLogInterfaces_,
                                            Arena* pArena_)
   : teamID(teamID_), pTLogInterfaces(pTLogInterfaces_), pAttachArena(pArena_), deserializer(emptyCursorHeader()),
@@ -262,19 +272,23 @@ ServerTeamPeekCursor::ServerTeamPeekCursor(const Version& beginVersion_,
 	}
 }
 
+<<<<<<< HEAD
 const StorageTeamID& ServerTeamPeekCursor::getTeamID() const {
+=======
+const TeamID& TLogGroupPeekCursor::getTeamID() const {
+>>>>>>> 372c2c7d4 (fixup! Rename ServerTeamPeekCursor to TLogGroupPeekCursor)
 	return teamID;
 }
 
-const Version& ServerTeamPeekCursor::getLastVersion() const {
+const Version& TLogGroupPeekCursor::getLastVersion() const {
 	return lastVersion;
 }
 
-const Version& ServerTeamPeekCursor::getBeginVersion() const {
+const Version& TLogGroupPeekCursor::getBeginVersion() const {
 	return beginVersion;
 }
 
-Future<bool> ServerTeamPeekCursor::remoteMoreAvailableImpl() {
+Future<bool> TLogGroupPeekCursor::remoteMoreAvailableImpl() {
 	// FIXME Put debugID if necessary
 	PeekRemoteContext context(
 	    Optional<UID>(), getTeamID(), &lastVersion, pTLogInterfaces, &deserializer, &deserializerIter, pAttachArena);
@@ -282,15 +296,15 @@ Future<bool> ServerTeamPeekCursor::remoteMoreAvailableImpl() {
 	return peekRemote(context);
 }
 
-void ServerTeamPeekCursor::nextImpl() {
+void TLogGroupPeekCursor::nextImpl() {
 	++deserializerIter;
 }
 
-const VersionSubsequenceMutation& ServerTeamPeekCursor::getImpl() const {
+const VersionSubsequenceMutation& TLogGroupPeekCursor::getImpl() const {
 	return *deserializerIter;
 }
 
-bool ServerTeamPeekCursor::hasRemainingImpl() const {
+bool TLogGroupPeekCursor::hasRemainingImpl() const {
 	return deserializerIter != deserializer.end();
 }
 
@@ -360,11 +374,11 @@ MergedServerTeamPeekCursor::MergedServerTeamPeekCursor() : MergedPeekCursor() {}
 MergedPeekCursor::CursorContainer::iterator MergedServerTeamPeekCursor::addCursorImpl(
     std::unique_ptr<PeekCursorBase>&& cursor) {
 
-	ASSERT(dynamic_cast<ServerTeamPeekCursor*>(cursor.get()) != nullptr);
+	ASSERT(dynamic_cast<TLogGroupPeekCursor*>(cursor.get()) != nullptr);
 
 	auto iter = MergedPeekCursor::addCursorImpl(std::move(cursor));
 
-	const TeamID& teamID = dynamic_cast<ServerTeamPeekCursor*>((*iter).get())->getTeamID();
+	const TeamID& teamID = dynamic_cast<TLogGroupPeekCursor*>((*iter).get())->getTeamID();
 	ASSERT(teamIDCursorMapper.find(teamID) == teamIDCursorMapper.end());
 	teamIDCursorMapper[teamID] = iter;
 
