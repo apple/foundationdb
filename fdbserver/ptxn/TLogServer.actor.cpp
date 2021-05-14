@@ -1486,6 +1486,7 @@ ACTOR Future<Void> tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> per
 	}
 }
 
+namespace {
 ACTOR Future<Void> startTLogServers(std::vector<Future<Void>> actors,
                                     std::shared_ptr<test::TestDriverContext> context,
                                     std::string folder) {
@@ -1513,12 +1514,17 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>> actors,
 	}
 
 	// replace fake TLogInterface with recruited interface
+	std::vector<Future<TLogInterface_PassivelyPull>> interfaceFutures(context->numTLogs);
 	for (i = 0; i < context->numTLogs; i++) {
-		TLogInterface_PassivelyPull interface = wait(tLogInitializations[i].ptxnReply.getFuture());
-		*(context->tLogInterfaces[i]) = interface;
+		interfaceFutures[i] = tLogInitializations[i].ptxnReply.getFuture();
+	}
+	std::vector<TLogInterface_PassivelyPull> interfaces = wait(getAll(interfaceFutures));
+	for (i = 0; i < context->numTLogs; i++) {
+		*(context->tLogInterfaces[i]) = interfaces[i];
 	}
 	return Void();
 }
+} // namespace
 
 TEST_CASE("/fdbserver/ptxn/test/run_tlog_server") {
 	test::TestDriverOptions options(params);

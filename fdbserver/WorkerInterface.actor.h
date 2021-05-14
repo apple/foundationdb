@@ -486,7 +486,9 @@ struct InitializeTLogRequest {
 		           logVersion,
 		           spillType,
 		           txsTags,
-		           logSystemType);
+		           logSystemType,
+		           tlogGroups,
+		           ptxnReply);
 	}
 };
 
