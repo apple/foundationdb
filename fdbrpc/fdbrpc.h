@@ -379,6 +379,9 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 template <class T>
 class ReplyPromiseStream {
 public:
+	// The endpoints of a ReplyPromiseStream must be initialized at Task::ReadSocket, because with lower priorities a
+	// delay(0) in FlowTransport deliver can cause out of order delivery.
+
 	// stream.send( request )
 	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
 
@@ -653,23 +656,6 @@ public:
 	//   Registers the request with the remote endpoint which sends back a stream of replies, followed by an
 	//   end_of_stream error. If the connection is ever broken the remote endpoint will stop attempting to send replies.
 	//   The caller sends acknowledgements to the remote endpoint so that at most 2MB of replies is ever inflight.
-
-	template <class X>
-	ReplyPromiseStream<REPLYSTREAM_TYPE(X)> getReplyStream(const X& value, TaskPriority taskID) const {
-		setReplyPriority(value, taskID);
-		if (queue->isRemoteEndpoint()) {
-			Future<Void> disc = makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(getEndpoint(taskID));
-			auto& p = getReplyPromiseStream(value);
-			Reference<Peer> peer =
-			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(taskID), true);
-			// FIXME: defer sending the message until we know the connection is established
-			endStreamOnDisconnect(disc, p, getEndpoint(taskID), peer);
-			return p;
-		}
-		send(value);
-		auto& p = getReplyPromiseStream(value);
-		return p;
-	}
 
 	template <class X>
 	ReplyPromiseStream<REPLYSTREAM_TYPE(X)> getReplyStream(const X& value) const {
