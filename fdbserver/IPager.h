@@ -43,7 +43,7 @@ public:
 	// The page's logical size includes an opaque checksum, use size() to get usable size
 	ArenaPage(int logicalSize, int bufferSize) : logicalSize(logicalSize), bufferSize(bufferSize), userData(nullptr) {
 		if (bufferSize > 0) {
-			buffer = (uint8_t*)arena.allocateAlignedBuffer(4096, bufferSize);
+			buffer = (uint8_t*)arena.allocate4kAlignedBuffer(bufferSize);
 
 			// Mark any unused page portion defined
 			VALGRIND_MAKE_MEM_DEFINED(buffer + logicalSize, bufferSize - logicalSize);
@@ -55,6 +55,9 @@ public:
 	~ArenaPage() {
 		if (userData != nullptr && userDataDestructor != nullptr) {
 			userDataDestructor(userData);
+		}
+		if(buffer != 0) {
+			VALGRIND_MAKE_MEM_UNDEFINED(buffer, bufferSize);
 		}
 	}
 
