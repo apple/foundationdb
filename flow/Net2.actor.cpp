@@ -1513,6 +1513,7 @@ void Net2::run() {
 			double newTaskBegin = timer_monotonic();
 			if (check_yield(TaskPriority::Max, tscNow)) {
 				checkForSlowTask(tscBegin, tscNow, newTaskBegin - taskBegin, currentTaskID);
+				taskBegin = newTaskBegin;	
 				FDB_TRACE_PROBE(run_loop_yield);
 				++countYields;
 				break;
