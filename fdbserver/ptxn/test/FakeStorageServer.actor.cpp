@@ -43,7 +43,7 @@ ACTOR Future<Void> fakeStorageServer_PassivelyReceive(
 			std::vector<MutationRef> mutations(request.mutations.begin(), request.mutations.end());
 			verifyMutationsInRecord(pTestDriverContext->commitRecord,
 			                        request.version,
-			                        request.teamID,
+			                        request.storageTeamID,
 			                        mutations,
 			                        [](CommitValidationRecord& record) { record.storageServerValidated = true; });
 			request.reply.send(StorageServerPushReply());

@@ -93,12 +93,11 @@ public:
 	// TLogQueue is a durable queue of TLogQueueEntry objects with an interface similar to IDiskQueue
 
 	// TLogQueue pushes (but not commits) are atomic - after commit fails to return, a prefix of entire calls to push
-	// are durable.  This is
-	//    implemented on top of the weaker guarantee of IDiskQueue::commit (that a prefix of bytes is durable) using
-	//    validFlag and by padding any incomplete packet with zeros after recovery.
+	// are durable.  This is implemented on top of the weaker guarantee of IDiskQueue::commit (that a prefix of bytes is
+	// durable) using validFlag and by padding any incomplete packet with zeros after recovery.
 
-	// Before calling push, pop, or commit, the user must call readNext() until it throws
-	//    end_of_stream(). It may not be called again thereafter.
+	// Before calling push, pop, or commit, the user must call readNext() until it throws end_of_stream(). It may not be
+	// called again thereafter.
 	Future<TLogQueueEntry> readNext(TLogGroupData* tLog) { return readNext(this, tLog); }
 
 	Future<bool> initializeRecovery(IDiskQueue::location recoverAt) { return queue->initializeRecovery(recoverAt); }
@@ -934,7 +933,7 @@ ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.Before");
 
 		//TraceEvent("TLogCommit", logData->logId).detail("Version", req.version);
-		commitMessages(self, logData, req.version, req.messages, req.teamID);
+		commitMessages(self, logData, req.version, req.messages, req.storageTeamID);
 
 		logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, req.knownCommittedVersion);
 
@@ -944,7 +943,7 @@ ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
 		qe.knownCommittedVersion = logData->knownCommittedVersion;
 		qe.messages = req.messages;
 		qe.id = logData->logId;
-		qe.storageTeamId = req.teamID;
+		qe.storageTeamId = req.storageTeamID;
 		self->persistentQueue->push(qe, logData);
 
 		self->diskQueueCommitBytes += qe.expectedSize();
@@ -1104,7 +1103,7 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 		}
 		when(state TLogCommitRequest req = waitNext(tli.commit.getFuture())) {
 			//TraceEvent("TLogCommitReq", logData->logId).detail("Ver", req.version).detail("PrevVer", req.prevVersion).detail("LogVer", logData->version.get());
-			auto tlogGroup = activeGeneration.find(req.teamID);
+			auto tlogGroup = activeGeneration.find(req.storageTeamID);
 			TEST(tlogGroup == activeGeneration.end()); // TLog group not found
 			if (tlogGroup == activeGeneration.end()) {
 				req.reply.sendError(tlog_group_not_found());
@@ -1368,7 +1367,7 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializeTLogReque
 	wait(waitForAll(tlogGroupStarts));
 	req.ptxnReply.send(recruited);
 
-	// should start tlog inerface and wair server here
+	// should start tlog inerface and wait server here
 	self->sharedActors.send(serveTLogInterface_PassivelyPull(self, recruited, activeGeneration));
 	self->sharedActors.send(waitFailureServer(recruited.waitFailure.getFuture()));
 	TraceEvent("TLogStart", recruited.id());

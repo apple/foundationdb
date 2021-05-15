@@ -50,7 +50,7 @@ struct StorageServerPushRequest {
 	SpanID spanID;
 
 	// Team ID
-	StorageTeamID teamID;
+	StorageTeamID storageTeamID;
 
 	// Version of the mutations
 	Version version;
@@ -66,15 +66,15 @@ struct StorageServerPushRequest {
 
 	StorageServerPushRequest() {}
 	StorageServerPushRequest(const SpanID& spanID_,
-	                         const StorageTeamID& teamID_,
+	                         const StorageTeamID& storageTeamID_,
 	                         const Version version_,
 	                         Arena& arena_,
 	                         const VectorRef<MutationRef>& mutations_)
-	  : spanID(spanID_), teamID(teamID_), version(version_), arena(arena_), mutations(mutations_) {}
+	  : spanID(spanID_), storageTeamID(storageTeamID_), version(version_), arena(arena_), mutations(mutations_) {}
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, spanID, teamID, version, mutations, reply);
+		serializer(ar, spanID, storageTeamID, version, mutations, reply);
 	}
 };
 

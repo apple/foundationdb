@@ -28,8 +28,8 @@
 
 namespace ptxn {
 
-TLogStorageServerMessageSerializer::TLogStorageServerMessageSerializer(const StorageTeamID& teamID) {
-	header.teamID = teamID;
+TLogStorageServerMessageSerializer::TLogStorageServerMessageSerializer(const StorageTeamID& storageTeamID) {
+	header.storageTeamID = storageTeamID;
 }
 
 void TLogStorageServerMessageSerializer::startVersionWriting(const Version& version) {
@@ -121,7 +121,7 @@ void TLogStorageServerMessageDeserializer::reset(const Arena& serializedArena_, 
 }
 
 const StorageTeamID& TLogStorageServerMessageDeserializer::getTeamID() const {
-	return header.teamID;
+	return header.storageTeamID;
 }
 
 size_t TLogStorageServerMessageDeserializer::getNumVersions() const {

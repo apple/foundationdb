@@ -22,23 +22,23 @@
 
 namespace ptxn {
 
-void ProxyTLogPushMessageSerializer::writeMessage(const MutationRef& mutation, const StorageTeamID& teamID) {
-	writers[teamID].writeItem(SubsequenceMutationItem{ currentSubsequence++, mutation });
+void ProxyTLogPushMessageSerializer::writeMessage(const MutationRef& mutation, const StorageTeamID& storageTeamID) {
+	writers[storageTeamID].writeItem(SubsequenceMutationItem{ currentSubsequence++, mutation });
 }
 
-void ProxyTLogPushMessageSerializer::completeMessageWriting(const StorageTeamID& teamID) {
-	writers[teamID].completeItemWriting();
+void ProxyTLogPushMessageSerializer::completeMessageWriting(const StorageTeamID& storageTeamID) {
+	writers[storageTeamID].completeItemWriting();
 
 	ProxyTLogMessageHeader header;
-	header.numItems = writers[teamID].getNumItems();
-	header.length = writers[teamID].getItemsBytes();
+	header.numItems = writers[storageTeamID].getNumItems();
+	header.length = writers[storageTeamID].getItemsBytes();
 
-	writers[teamID].writeHeader(header);
+	writers[storageTeamID].writeHeader(header);
 }
 
-Standalone<StringRef> ProxyTLogPushMessageSerializer::getSerialized(const StorageTeamID& teamID) {
-	ASSERT(writers[teamID].isWritingCompleted());
-	return writers[teamID].getSerialized();
+Standalone<StringRef> ProxyTLogPushMessageSerializer::getSerialized(const StorageTeamID& storageTeamID) {
+	ASSERT(writers[storageTeamID].isWritingCompleted());
+	return writers[storageTeamID].getSerialized();
 }
 
 bool proxyTLogPushMessageDeserializer(const Arena& arena,

@@ -27,7 +27,7 @@
 namespace {
 
 template <typename Arg>
-std::stringstream& _concatHelper(std::stringstream&& ss, Arg&& arg) {
+std::stringstream& _concatHelper(std::stringstream&& ss, const Arg& arg) {
 	ss << arg;
 	return ss;
 }
@@ -35,7 +35,7 @@ std::stringstream& _concatHelper(std::stringstream&& ss, Arg&& arg) {
 template <typename First, typename... Args>
 std::stringstream& _concatHelper(std::stringstream&& ss, const First& first, const Args&... args) {
 	ss << first;
-	return _concatHelper(std::move(ss), std::forward<Args>(args)...);
+	return _concatHelper(std::move(ss), std::forward<const Args&>(args)...);
 }
 
 } // anonymous namespace

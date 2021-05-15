@@ -40,7 +40,7 @@ const int MAX_CHECK_TIMES = 10;
 
 ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext) {
 	state std::shared_ptr<TestDriverContext> pTestDriverContext = pFakeProxyContext->pTestDriverContext;
-	state int numTeams = pFakeProxyContext->pTestDriverContext->numTeamIDs;
+	state int numStorageTeams = pFakeProxyContext->pTestDriverContext->numStorageTeamIDs;
 	state std::vector<CommitRecord>& commitRecord = pFakeProxyContext->pTestDriverContext->commitRecord;
 	state Version versionGap = 10000;
 	state Version version = versionGap;
@@ -52,29 +52,29 @@ ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext
 		ProxyTLogPushMessageSerializer serializer;
 
 		for (int _ = 0; _ < deterministicRandom()->randomInt(1, 12); ++_) {
-			StorageTeamID teamID{ pTestDriverContext->teamIDs[deterministicRandom()->randomInt(0, numTeams)] };
+			StorageTeamID storageTeamID{ pTestDriverContext->storageTeamIDs[deterministicRandom()->randomInt(0, numStorageTeams)] };
 			MutationRef mutation(pTestDriverContext->mutationsArena,
 			                     MutationRef::SetValue,
 			                     StringRef(format("Key%d", deterministicRandom()->randomInt(0, 100))),
 			                     StringRef(format("Value%d", deterministicRandom()->randomInt(0, 100))));
-			serializer.writeMessage(mutation, teamID);
+			serializer.writeMessage(mutation, storageTeamID);
 
-			fakeMutations[teamID].push_back(mutation);
+			fakeMutations[storageTeamID].push_back(mutation);
 		}
 
 		state std::vector<Future<TLogCommitReply>> requests;
 		for (auto iter = fakeMutations.begin(); iter != fakeMutations.end(); ++iter) {
-			const StorageTeamID teamID = iter->first;
+			const StorageTeamID storageTeamID = iter->first;
 			auto& mutations = iter->second;
 
 			// Here we use move semantic in order to keep the mutations in arena
 			// 	pTestDriverContext->mutationsArena
-			commitRecord.emplace_back(version, teamID, std::move(mutations));
+			commitRecord.emplace_back(version, storageTeamID, std::move(mutations));
 
-			serializer.completeMessageWriting(teamID);
-			Standalone<StringRef> encoded = serializer.getSerialized(teamID);
+			serializer.completeMessageWriting(storageTeamID);
+			Standalone<StringRef> encoded = serializer.getSerialized(storageTeamID);
 			TLogCommitRequest request(deterministicRandom()->randomUniqueID(),
-			                          teamID,
+			                          storageTeamID,
 			                          encoded.arena(),
 			                          encoded,
 			                          version - versionGap,
@@ -82,7 +82,7 @@ ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext
 			                          0,
 			                          0,
 			                          Optional<UID>());
-			requests.push_back(pTestDriverContext->getTLogInterface(teamID)->commit.getReply(request));
+			requests.push_back(pTestDriverContext->getTLogInterface(storageTeamID)->commit.getReply(request));
 		}
 		version += versionGap;
 

@@ -34,11 +34,11 @@ namespace ptxn::test {
 // Shortcut for deterministicRanodm()->randomUniqueID();
 UID randomUID();
 
-// Constructs a random TeamID
-TeamID getNewTeamID();
+// Constructs a random StorageTeamID
+StorageTeamID getNewStorageTeamID();
 
-// Construct numTeams TeamIDs
-std::vector<TeamID> generateRandomTeamIDs(const int numTeams);
+// Construct numStorageTeams TeamIDs
+std::vector<StorageTeamID> generateRandomStorageTeamIDs(const int numStorageTeams);
 
 // Pick one element from a container, randomly
 // The container should support the concept of

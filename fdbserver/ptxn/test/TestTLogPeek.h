@@ -36,7 +36,7 @@ struct TestTLogPeekOptions {
 	// The number of mutations stored in the TLog before peek
 	int numMutations;
 	// The number of teams in the TLog. Mutations are randomly distributed into teams.
-	int numTeams;
+	int numStorageTeams;
 	// The initial version
 	int initialVersion;
 	// Number of peek times

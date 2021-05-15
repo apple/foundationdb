@@ -38,8 +38,8 @@ namespace {
 const Standalone<StringRef>& emptyCursorHeader() {
 	static Standalone<StringRef> empty;
 	if (empty.size() == 0) {
-		StorageTeamID teamID;
-		ptxn::TLogStorageServerMessageSerializer serializer(teamID);
+		StorageTeamID storageTeamID;
+		ptxn::TLogStorageServerMessageSerializer serializer(storageTeamID);
 		serializer.completeMessageWriting();
 		empty = serializer.getSerialized();
 	}
@@ -48,7 +48,7 @@ const Standalone<StringRef>& emptyCursorHeader() {
 
 struct PeekRemoteContext {
 	const Optional<UID> debugID;
-	const StorageTeamID teamID;
+	const StorageTeamID storageTeamID;
 
 	// The last version being processed, the peek will request lastVersion + 1
 	Version* pLastVersion;
@@ -67,13 +67,13 @@ struct PeekRemoteContext {
 	Arena* pAttachArena;
 
 	PeekRemoteContext(const Optional<UID>& debugID_,
-	                  const StorageTeamID& teamID_,
+	                  const StorageTeamID& storageTeamID_,
 	                  Version* pLastVersion_,
 	                  const std::vector<TLogInterfaceBase*>& pInterfaces_,
 	                  TLogStorageServerMessageDeserializer* pDeserializer_,
 	                  TLogStorageServerMessageDeserializer::iterator* pDeserializerIterator_,
 	                  Arena* pAttachArena_ = nullptr)
-	  : debugID(debugID_), teamID(teamID_), pLastVersion(pLastVersion_), pTLogInterfaces(pInterfaces_),
+	  : debugID(debugID_), storageTeamID(storageTeamID_), pLastVersion(pLastVersion_), pTLogInterfaces(pInterfaces_),
 	    pDeserializer(pDeserializer_), pDeserializerIterator(pDeserializerIterator_), pAttachArena(pAttachArena_) {
 
 		for (const auto pTLogInterface : pTLogInterfaces) {
@@ -94,7 +94,7 @@ ACTOR Future<bool> peekRemote(PeekRemoteContext peekRemoteContext) {
 	request.debugID = peekRemoteContext.debugID;
 	request.beginVersion = *peekRemoteContext.pLastVersion + 1;
 	request.endVersion = -1; // we *ALWAYS* try to extract *ALL* data
-	request.teamID = peekRemoteContext.teamID;
+	request.storageTeamID = peekRemoteContext.storageTeamID;
 
 	try {
 		state TLogPeekReply reply = wait(pTLogInterface->peek.getReply(request));
@@ -172,7 +172,7 @@ ACTOR Future<bool> peekRemoteForMergedCursor(MergedPeekCursorContext context) {
 }
 
 struct MergedPeekServerTeamCursorContext : public MergedPeekCursorContext {
-	std::unordered_map<TeamID, CursorContainer::iterator>* pMapper;
+	std::unordered_map<StorageTeamID, CursorContainer::iterator>* pMapper;
 };
 
 // In addition to peekRemoteForMergedCursor, update the team ID/cursor mapping
@@ -181,17 +181,18 @@ ACTOR Future<bool> peekRemoteForMergedServerTeamCursor(MergedPeekServerTeamCurso
 
 	// Since peekRemoteForMergedCursor will drop exhausted cursors, the team ID - cursor mapping should drop invalid
 	// references to those exhaustd cursors.
-	std::unordered_set<TeamID> inactiveTeamIDs;
-	for (std::unordered_map<TeamID, CursorContainer::iterator>::iterator iter = std::begin(*context.pMapper);
+	std::unordered_set<StorageTeamID> inactiveTeamIDs;
+	for (std::unordered_map<StorageTeamID, CursorContainer::iterator>::iterator iter = std::begin(*context.pMapper);
 	     iter != std::end(*context.pMapper);
 	     ++iter) {
 		inactiveTeamIDs.insert(iter->first);
 	}
 	for (CursorContainer::iterator iter = std::begin(*context.pCursorPtrs); iter != std::end(*context.pCursorPtrs);
 	     ++iter) {
-		inactiveTeamIDs.erase(dynamic_cast<TLogGroupPeekCursor*>((*iter).get())->getTeamID());
+		inactiveTeamIDs.erase(dynamic_cast<StorageTeamPeekCursor*>((*iter).get())->getTeamID());
 	}
-	for (std::unordered_set<TeamID>::iterator iter = std::begin(inactiveTeamIDs); iter != std::end(inactiveTeamIDs);
+	for (std::unordered_set<StorageTeamID>::iterator iter = std::begin(inactiveTeamIDs);
+	     iter != std::end(inactiveTeamIDs);
 	     ++iter) {
 		context.pMapper->erase(*iter);
 	}
@@ -244,27 +245,17 @@ bool PeekCursorBase::hasRemaining() const {
 	return hasRemainingImpl();
 }
 
-<<<<<<< HEAD
-ServerTeamPeekCursor::ServerTeamPeekCursor(const Version& beginVersion_,
-                                           const StorageTeamID& teamID_,
-=======
-TLogGroupPeekCursor::TLogGroupPeekCursor(const Version& beginVersion_,
-                                           const TeamID& teamID_,
->>>>>>> 372c2c7d4 (fixup! Rename ServerTeamPeekCursor to TLogGroupPeekCursor)
-                                           TLogInterfaceBase* pTLogInterface_,
-                                           Arena* pArena_)
-  : TLogGroupPeekCursor(beginVersion_, teamID_, std::vector<TLogInterfaceBase*>{ pTLogInterface_ }, pArena_) {}
+StorageTeamPeekCursor::StorageTeamPeekCursor(const Version& beginVersion_,
+                                         const StorageTeamID& storageTeamID_,
+                                         TLogInterfaceBase* pTLogInterface_,
+                                         Arena* pArena_)
+  : StorageTeamPeekCursor(beginVersion_, storageTeamID_, std::vector<TLogInterfaceBase*>{ pTLogInterface_ }, pArena_) {}
 
-<<<<<<< HEAD
-ServerTeamPeekCursor::ServerTeamPeekCursor(const Version& beginVersion_,
-                                           const StorageTeamID& teamID_,
-=======
-TLogGroupPeekCursor::TLogGroupPeekCursor(const Version& beginVersion_,
-                                           const TeamID& teamID_,
->>>>>>> 372c2c7d4 (fixup! Rename ServerTeamPeekCursor to TLogGroupPeekCursor)
-                                           const std::vector<TLogInterfaceBase*>& pTLogInterfaces_,
-                                           Arena* pArena_)
-  : teamID(teamID_), pTLogInterfaces(pTLogInterfaces_), pAttachArena(pArena_), deserializer(emptyCursorHeader()),
+StorageTeamPeekCursor::StorageTeamPeekCursor(const Version& beginVersion_,
+                                         const StorageTeamID& storageTeamID_,
+                                         const std::vector<TLogInterfaceBase*>& pTLogInterfaces_,
+                                         Arena* pArena_)
+  : storageTeamID(storageTeamID_), pTLogInterfaces(pTLogInterfaces_), pAttachArena(pArena_), deserializer(emptyCursorHeader()),
     deserializerIter(deserializer.begin()), beginVersion(beginVersion_), lastVersion(beginVersion_ - 1) {
 
 	for (const auto pTLogInterface : pTLogInterfaces) {
@@ -272,23 +263,19 @@ TLogGroupPeekCursor::TLogGroupPeekCursor(const Version& beginVersion_,
 	}
 }
 
-<<<<<<< HEAD
-const StorageTeamID& ServerTeamPeekCursor::getTeamID() const {
-=======
-const TeamID& TLogGroupPeekCursor::getTeamID() const {
->>>>>>> 372c2c7d4 (fixup! Rename ServerTeamPeekCursor to TLogGroupPeekCursor)
-	return teamID;
+const StorageTeamID& StorageTeamPeekCursor::getTeamID() const {
+	return storageTeamID;
 }
 
-const Version& TLogGroupPeekCursor::getLastVersion() const {
+const Version& StorageTeamPeekCursor::getLastVersion() const {
 	return lastVersion;
 }
 
-const Version& TLogGroupPeekCursor::getBeginVersion() const {
+const Version& StorageTeamPeekCursor::getBeginVersion() const {
 	return beginVersion;
 }
 
-Future<bool> TLogGroupPeekCursor::remoteMoreAvailableImpl() {
+Future<bool> StorageTeamPeekCursor::remoteMoreAvailableImpl() {
 	// FIXME Put debugID if necessary
 	PeekRemoteContext context(
 	    Optional<UID>(), getTeamID(), &lastVersion, pTLogInterfaces, &deserializer, &deserializerIter, pAttachArena);
@@ -296,15 +283,15 @@ Future<bool> TLogGroupPeekCursor::remoteMoreAvailableImpl() {
 	return peekRemote(context);
 }
 
-void TLogGroupPeekCursor::nextImpl() {
+void StorageTeamPeekCursor::nextImpl() {
 	++deserializerIter;
 }
 
-const VersionSubsequenceMutation& TLogGroupPeekCursor::getImpl() const {
+const VersionSubsequenceMutation& StorageTeamPeekCursor::getImpl() const {
 	return *deserializerIter;
 }
 
-bool TLogGroupPeekCursor::hasRemainingImpl() const {
+bool StorageTeamPeekCursor::hasRemainingImpl() const {
 	return deserializerIter != deserializer.end();
 }
 
@@ -374,20 +361,20 @@ MergedServerTeamPeekCursor::MergedServerTeamPeekCursor() : MergedPeekCursor() {}
 MergedPeekCursor::CursorContainer::iterator MergedServerTeamPeekCursor::addCursorImpl(
     std::unique_ptr<PeekCursorBase>&& cursor) {
 
-	ASSERT(dynamic_cast<TLogGroupPeekCursor*>(cursor.get()) != nullptr);
+	ASSERT(dynamic_cast<StorageTeamPeekCursor*>(cursor.get()) != nullptr);
 
 	auto iter = MergedPeekCursor::addCursorImpl(std::move(cursor));
 
-	const TeamID& teamID = dynamic_cast<TLogGroupPeekCursor*>((*iter).get())->getTeamID();
-	ASSERT(teamIDCursorMapper.find(teamID) == teamIDCursorMapper.end());
-	teamIDCursorMapper[teamID] = iter;
+	const StorageTeamID& storageTeamID = dynamic_cast<StorageTeamPeekCursor*>((*iter).get())->getTeamID();
+	ASSERT(storageTeamIDCursorMapper.find(storageTeamID) == storageTeamIDCursorMapper.end());
+	storageTeamIDCursorMapper[storageTeamID] = iter;
 
 	return iter;
 }
 
-std::unique_ptr<PeekCursorBase> MergedServerTeamPeekCursor::removeCursor(const TeamID& teamID) {
-	auto mapperIter = teamIDCursorMapper.find(teamID);
-	if (mapperIter == teamIDCursorMapper.end()) {
+std::unique_ptr<PeekCursorBase> MergedServerTeamPeekCursor::removeCursor(const StorageTeamID& storageTeamID) {
+	auto mapperIter = storageTeamIDCursorMapper.find(storageTeamID);
+	if (mapperIter == storageTeamIDCursorMapper.end()) {
 		return nullptr;
 	}
 
@@ -395,7 +382,7 @@ std::unique_ptr<PeekCursorBase> MergedServerTeamPeekCursor::removeCursor(const T
 	auto iter = mapperIter->second;
 
 	// Remove from mapper
-	teamIDCursorMapper.erase(mapperIter);
+	storageTeamIDCursorMapper.erase(mapperIter);
 
 	// Remove from heap, there is no simple way of removing a specific item from a std::priority_queue, so we
 	// re-construct it.
@@ -424,14 +411,14 @@ Future<bool> MergedServerTeamPeekCursor::remoteMoreAvailableImpl() {
 		return false;
 	}
 
-	return peekRemoteForMergedServerTeamCursor({ &cursorPtrs, &cursorHeap, &teamIDCursorMapper });
+	return peekRemoteForMergedServerTeamCursor({ &cursorPtrs, &cursorHeap, &storageTeamIDCursorMapper });
 }
 
-std::vector<TeamID> MergedServerTeamPeekCursor::getCursorTeamIDs() {
-	std::vector<TeamID> result;
-	result.reserve(teamIDCursorMapper.size());
-	for (const auto& [teamID, _] : teamIDCursorMapper) {
-		result.push_back(teamID);
+std::vector<StorageTeamID> MergedServerTeamPeekCursor::getCursorTeamIDs() {
+	std::vector<StorageTeamID> result;
+	result.reserve(storageTeamIDCursorMapper.size());
+	for (const auto& [storageTeamID, _] : storageTeamIDCursorMapper) {
+		result.push_back(storageTeamID);
 	}
 	return result;
 }

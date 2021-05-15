@@ -38,14 +38,14 @@ UID randomUID() {
 	return deterministicRandom()->randomUniqueID();
 }
 
-TeamID getNewTeamID() {
+StorageTeamID getNewStorageTeamID() {
 	return randomUID();
 }
 
-std::vector<TeamID> generateRandomTeamIDs(const int numTeams) {
-	std::vector<TeamID> result(numTeams);
+std::vector<StorageTeamID> generateRandomStorageTeamIDs(const int numStorageTeams) {
+	std::vector<StorageTeamID> result(numStorageTeams);
 	for (auto& item : result) {
-		item = getNewTeamID();
+		item = getNewStorageTeamID();
 	}
 	return result;
 }
@@ -92,7 +92,7 @@ void print(const TLogCommitRequest& request) {
 	std::cout << std::endl << ">>> TLogCommitRequest" << std::endl;
 
 	std::cout << formatKVPair("Span ID", request.spanID) << std::endl
-	          << formatKVPair("Team ID", request.teamID) << std::endl
+	          << formatKVPair("Team ID", request.storageTeamID) << std::endl
 	          << formatKVPair("Debug ID", request.debugID) << std::endl
 	          << formatKVPair("Message data length", request.messages.size()) << std::endl
 	          << formatKVPair("Previous version", request.prevVersion) << std::endl
@@ -105,7 +105,7 @@ void print(const TLogPeekRequest& request) {
 	std::cout << formatKVPair("Debug ID", request.debugID) << std::endl
 	          << formatKVPair("Begin version", request.beginVersion) << std::endl
 	          << formatKVPair("End version", request.endVersion) << std::endl
-	          << formatKVPair("Team ID", request.teamID) << std::endl;
+	          << formatKVPair("Team ID", request.storageTeamID) << std::endl;
 }
 
 void print(const TLogPeekReply& reply) {
@@ -119,7 +119,7 @@ void print(const TestDriverOptions& option) {
 	std::cout << std::endl << ">> ptxn/test//Driver.actor.cpp:DriverTestOptions:" << std::endl;
 
 	std::cout << formatKVPair("numCommits", option.numCommits) << std::endl
-	          << formatKVPair("numTeams", option.numTeams) << std::endl
+	          << formatKVPair("numStorageTeams", option.numStorageTeams) << std::endl
 	          << formatKVPair("numProxies", option.numProxies) << std::endl
 	          << formatKVPair("numTLogs", option.numTLogs) << std::endl
 	          << formatKVPair("Message Transfer Model", option.transferModel) << std::endl;
@@ -129,7 +129,7 @@ void print(const CommitRecord& record) {
 	std::cout << std::endl << ">> ptxn/test/Driver.h:CommitRecord;" << std::endl;
 
 	std::cout << formatKVPair("Verson", record.version) << std::endl
-	          << formatKVPair("teamID", record.teamID) << std::endl;
+	          << formatKVPair("storageTeamID", record.storageTeamID) << std::endl;
 
 	std::cout << formatKVPair("Muations", record.mutations.size()) << std::endl;
 	for (const auto& mutation : record.mutations) {
@@ -141,7 +141,7 @@ void print(const ptxn::test::TestTLogPeekOptions& option) {
 	std::cout << std::endl << ">> ptxn/test//Driver.actor.cpp:DriverTestOptions:" << std::endl;
 
 	std::cout << formatKVPair("Mutations", option.numMutations) << std::endl
-	          << formatKVPair("Teams", option.numTeams) << std::endl
+	          << formatKVPair("Teams", option.numStorageTeams) << std::endl
 	          << formatKVPair("Intial version", option.initialVersion) << std::endl;
 }
 
@@ -153,7 +153,7 @@ void printCommitRecord(const std::vector<CommitRecord>& records) {
 			std::cout << "\n\tVersion: " << record.version << "\n\n";
 			currentVersion = record.version;
 		}
-		std::cout << "\t\tTeam ID: " << record.teamID.toString() << std::endl;
+		std::cout << "\t\tTeam ID: " << record.storageTeamID.toString() << std::endl;
 		for (const auto& mutation : record.mutations) {
 			std::cout << "\t\t\t" << mutation.toString() << std::endl;
 		}
@@ -165,7 +165,7 @@ void printNotValidatedRecords(const std::vector<CommitRecord>& records) {
 	for (const auto& record : records) {
 		if (record.validation.validated())
 			continue;
-		std::cout << "\tVersion: " << record.version << "\tTeam ID: " << record.teamID.toString() << std::endl;
+		std::cout << "\tVersion: " << record.version << "\tTeam ID: " << record.storageTeamID.toString() << std::endl;
 		for (const auto& mutation : record.mutations) {
 			std::cout << "\t\t\t" << mutation.toString() << std::endl;
 		}

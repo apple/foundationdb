@@ -63,13 +63,13 @@ class ProxyTLogPushMessageSerializer {
 
 public:
 	// For a given TeamID, serialize a new mutation
-	void writeMessage(const MutationRef& mutation, const StorageTeamID& teamID);
+	void writeMessage(const MutationRef& mutation, const StorageTeamID& storageTeamID);
 
 	// For a given TeamID, mark the serializer not accepting more mutations, and write the header.
-	void completeMessageWriting(const StorageTeamID& teamID);
+	void completeMessageWriting(const StorageTeamID& storageTeamID);
 
 	// Get the serialized data for a given TeamID
-	Standalone<StringRef> getSerialized(const StorageTeamID& teamID);
+	Standalone<StringRef> getSerialized(const StorageTeamID& storageTeamID);
 };
 
 // Deserialize the ProxyTLogPushMessage

@@ -116,8 +116,8 @@ private:
 };
 
 // Connect to given TLog server(s) and peeks for mutations with a given TeamID
-class TLogGroupPeekCursor : public PeekCursorBase {
-	const StorageTeamID teamID;
+class StorageTeamPeekCursor : public PeekCursorBase {
+	const StorageTeamID storageTeamID;
 	std::vector<TLogInterfaceBase*> pTLogInterfaces;
 
 	// The arena used to store incoming serialized data, if not nullptr, TLogPeekReply arenas will be attached to this
@@ -137,18 +137,18 @@ class TLogGroupPeekCursor : public PeekCursorBase {
 
 public:
 	// version_ is the version the cursor starts with
-	// teamID_ is the teamID
+	// storageTeamID_ is the storageTeamID
 	// pTLogInterface_ is the interface to the specific TLog server
 	// pArena_ is used to store the serialized data for further use, e.g. making MutationRefs still available after the
 	// cursor is destroyed. If pArena_ is nullptr, any reference to the peeked data will be invalidated after the cursor
 	// is destructed.
-	ServerTeamPeekCursor(const Version& version_,
-	                     const StorageTeamID& teamID_,
+	StorageTeamPeekCursor(const Version& version_,
+	                     const StorageTeamID& storageTeamID_,
 	                     TLogInterfaceBase* pTLogInterface_,
 	                     Arena* pArena_ = nullptr);
 
-	ServerTeamPeekCursor(const Version& version_,
-	                     const StorageTeamID& teamID_,
+	StorageTeamPeekCursor(const Version& version_,
+	                     const StorageTeamID& storageTeamID_,
 	                     const std::vector<TLogInterfaceBase*>& pTLogInterfaces_,
 	                     Arena* arena_ = nullptr);
 
@@ -274,10 +274,10 @@ protected:
 	virtual bool hasRemainingImpl() const override;
 };
 
-// Merges multiple TLogGroupPeekCursor, allowing adding/removing by TeamID.
+// Merges multiple StorageTeamPeekCursor, allowing adding/removing by TeamID.
 class MergedServerTeamPeekCursor : public MergedPeekCursor {
 private:
-	std::unordered_map<StorageTeamID, CursorContainer::iterator> teamIDCursorMapper;
+	std::unordered_map<StorageTeamID, CursorContainer::iterator> storageTeamIDCursorMapper;
 
 public:
 	// Construct a MergedServerTeamPeekCursor holding no cursors.
@@ -287,21 +287,16 @@ public:
 	template <typename Iterator>
 	MergedServerTeamPeekCursor(Iterator&& begin, Iterator&& end) : MergedPeekCursor(begin, end) {
 		for (auto iter = std::begin(cursorPtrs); iter != std::end(cursorPtrs); ++iter) {
-			const auto* pCursor = dynamic_cast<TLogGroupPeekCursor*>((*iter).get());
+			const auto* pCursor = dynamic_cast<StorageTeamPeekCursor*>((*iter).get());
 			ASSERT(pCursor != nullptr);
 			// NOTE std::dynamic_pointer_cast is not supporting std::unique_ptr.
-			const auto& teamID = pCursor->getTeamID();
-			teamIDCursorMapper[teamID] = iter;
+			const auto& storageTeamID = pCursor->getTeamID();
+			storageTeamIDCursorMapper[storageTeamID] = iter;
 		}
 	}
 
-<<<<<<< HEAD
 	// Remove an existing ServerTeamPeekCursor by its TeamID
 	std::unique_ptr<PeekCursorBase> removeCursor(const StorageTeamID&);
-=======
-	// Remove an existing TLogGroupPeekCursor by its TeamID
-	std::unique_ptr<PeekCursorBase> removeCursor(const TeamID&);
->>>>>>> 372c2c7d4 (fixup! Rename ServerTeamPeekCursor to TLogGroupPeekCursor)
 
 	// Get all TeamIDs for currently active cursors
 	std::vector<StorageTeamID> getCursorTeamIDs();

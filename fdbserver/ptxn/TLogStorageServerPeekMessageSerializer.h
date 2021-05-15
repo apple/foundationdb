@@ -41,7 +41,7 @@ struct TLogStorageServerMessageHeader : MultipleItemHeaderBase {
 	static constexpr FileIdentifier file_identifier = 617401;
 
 	// TeamID
-	StorageTeamID teamID;
+	StorageTeamID storageTeamID;
 
 	// The first version that being serialized
 	Version firstVersion = invalidVersion;
@@ -57,13 +57,13 @@ struct TLogStorageServerMessageHeader : MultipleItemHeaderBase {
 	template <typename Reader>
 	void loadFromArena(Reader& reader) {
 		MultipleItemHeaderBase::loadFromArena(reader);
-		reader >> teamID >> firstVersion >> lastVersion >> lastSubsequence;
+		reader >> storageTeamID >> firstVersion >> lastVersion >> lastSubsequence;
 	}
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
 		MultipleItemHeaderBase::serialize(ar);
-		serializer(ar, teamID, firstVersion, lastVersion, lastSubsequence);
+		serializer(ar, storageTeamID, firstVersion, lastVersion, lastSubsequence);
 	}
 };
 

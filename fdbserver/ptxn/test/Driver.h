@@ -45,12 +45,12 @@ struct CommitValidationRecord {
 
 struct CommitRecord {
 	Version version;
-	StorageTeamID teamID;
+	StorageTeamID storageTeamID;
 	std::vector<MutationRef> mutations;
 
 	CommitValidationRecord validation;
 
-	CommitRecord(const Version& version, const StorageTeamID& teamID, std::vector<MutationRef>&& mutationRef);
+	CommitRecord(const Version& version, const StorageTeamID& storageTeamID, std::vector<MutationRef>&& mutationRef);
 };
 
 // Driver options for starting mock environment.
@@ -65,7 +65,7 @@ struct TestDriverOptions {
 	static const MessageTransferModel DEFAULT_MESSAGE_TRANSFER_MODEL = MessageTransferModel::TLogActivelyPush;
 
 	int numCommits;
-	int numTeams;
+	int numStorageTeams;
 	int numProxies;
 	int numTLogs;
 	int numTLogGroups;
@@ -81,8 +81,8 @@ struct TestDriverContext {
 	int numCommits;
 
 	// Teams
-	int numTeamIDs;
-	std::vector<StorageTeamID> teamIDs;
+	int numStorageTeamIDs;
+	std::vector<StorageTeamID> storageTeamIDs;
 
 	MessageTransferModel messageTransferModel;
 
@@ -101,14 +101,14 @@ struct TestDriverContext {
 	std::vector<TLogGroup> tLogGroups;
 	std::unordered_map<TLogGroupID, std::shared_ptr<TLogInterfaceBase>> tLogGroupLeaders;
 	std::vector<std::shared_ptr<TLogInterfaceBase>> tLogInterfaces;
-	std::unordered_map<StorageTeamID, std::shared_ptr<TLogInterfaceBase>> teamIDTLogInterfaceMapper;
+	std::unordered_map<StorageTeamID, std::shared_ptr<TLogInterfaceBase>> storageTeamIDTLogInterfaceMapper;
 	std::shared_ptr<TLogInterfaceBase> getTLogInterface(const StorageTeamID&);
 
 	// Storage Server
 	bool useFakeStorageServer;
 	int numStorageServers;
 	std::vector<std::shared_ptr<StorageServerInterfaceBase>> storageServerInterfaces;
-	std::unordered_map<StorageTeamID, std::shared_ptr<StorageServerInterfaceBase>> teamIDStorageServerInterfaceMapper;
+	std::unordered_map<StorageTeamID, std::shared_ptr<StorageServerInterfaceBase>> storageTeamIDStorageServerInterfaceMapper;
 	std::shared_ptr<StorageServerInterfaceBase> getStorageServerInterface(const StorageTeamID&);
 
 	// Stores the generated commits
@@ -141,7 +141,7 @@ void startFakeTLog(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriver
 void startFakeStorageServer(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext);
 
 // Get a TeamID, the TeamID is determinstic in the simulation environment
-StorageTeamID getNewTeamID();
+StorageTeamID getNewStorageTeamID();
 
 } // namespace ptxn::test
 

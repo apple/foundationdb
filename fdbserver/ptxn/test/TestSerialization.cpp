@@ -203,21 +203,21 @@ TEST_CASE("/fdbserver/ptxn/test/ProxyTLogPushMessageSerializer") {
 
 	ProxyTLogPushMessageSerializer serializer;
 
-	const StorageTeamID teamID1{ deterministicRandom()->randomUniqueID() };
-	const StorageTeamID teamID2{ deterministicRandom()->randomUniqueID() };
+	const StorageTeamID storageTeamID1{ deterministicRandom()->randomUniqueID() };
+	const StorageTeamID storageTeamID2{ deterministicRandom()->randomUniqueID() };
 
 	MutationRef mutation1(MutationRef::SetValue, LiteralStringRef("Key1"), LiteralStringRef("Value1"));
-	serializer.writeMessage(mutation1, teamID1);
+	serializer.writeMessage(mutation1, storageTeamID1);
 	MutationRef mutation2(MutationRef::ClearRange, LiteralStringRef("Begin"), LiteralStringRef("End"));
-	serializer.writeMessage(mutation2, teamID1);
+	serializer.writeMessage(mutation2, storageTeamID1);
 	MutationRef mutation3(MutationRef::SetValue, LiteralStringRef("Key2"), LiteralStringRef("Value2"));
-	serializer.writeMessage(mutation3, teamID2);
+	serializer.writeMessage(mutation3, storageTeamID2);
 
-	serializer.completeMessageWriting(teamID1);
-	serializer.completeMessageWriting(teamID2);
+	serializer.completeMessageWriting(storageTeamID1);
+	serializer.completeMessageWriting(storageTeamID2);
 
-	auto serializedTeam1 = serializer.getSerialized(teamID1);
-	auto serializedTeam2 = serializer.getSerialized(teamID2);
+	auto serializedTeam1 = serializer.getSerialized(storageTeamID1);
+	auto serializedTeam2 = serializer.getSerialized(storageTeamID2);
 
 	{
 		ProxyTLogMessageHeader header;
@@ -294,8 +294,8 @@ bool testTLogStorageServerMessageSerializer() {
 		{ 3, 7, MutationRef(MutationRef::SetValue, LiteralStringRef("Key6"), LiteralStringRef("Value6")) },
 	};
 
-	StorageTeamID teamID = deterministicRandom()->randomUniqueID();
-	TLogStorageServerMessageSerializer serializer(teamID);
+	StorageTeamID storageTeamID = deterministicRandom()->randomUniqueID();
+	TLogStorageServerMessageSerializer serializer(storageTeamID);
 	Arena arena;
 
 	serializeVersionedSubsequencedMutations(serializer, VERSIONED_SUBSEQUENCED_MUTATIONS);
@@ -305,7 +305,7 @@ bool testTLogStorageServerMessageSerializer() {
 
 	TLogStorageServerMessageDeserializer deserializer(serialized.arena(), serialized);
 
-	ASSERT(deserializer.getTeamID() == teamID);
+	ASSERT(deserializer.getTeamID() == storageTeamID);
 	ASSERT_EQ(deserializer.getNumVersions(), 3);
 	ASSERT_EQ(deserializer.getFirstVersion(), 1);
 	ASSERT_EQ(deserializer.getLastVersion(), 3);

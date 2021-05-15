@@ -1,9 +1,9 @@
- [[test]]
- testTitle = 'TLog Server Test'
- useDB = false
- startDelay = 0
+[[test]]
+testTitle = 'TLog Server Test'
+useDB = false
+startDelay = 0
 
-     [[test.workload]]
-     testName = 'UnitTests'
-     maxTestCases = 1
-     testsMatching = '/fdbserver/ptxn/test/run_tlog_server'
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/run_tlog_server'
