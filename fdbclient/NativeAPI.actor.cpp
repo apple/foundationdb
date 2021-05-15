@@ -3458,8 +3458,11 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 							    KeyRangeRef(keyAfter(output[output.size() - 1].key), locations[shard].first.end);
 					}
 
-					if (!output.more || locations[shard].first.empty()) {
-						TEST(true); // getRangeStream (!more || locations[shard].first.empty())
+					if (locations[shard].first.empty()) {
+						output.more = false;
+					}
+
+					if (!output.more) {
 						const KeyRange& range = locations[shard].first;
 						if (shard == locations.size() - 1) {
 							KeyRef begin = reverse ? keys.begin : range.end;
