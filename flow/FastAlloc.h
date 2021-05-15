@@ -105,9 +105,6 @@ inline constexpr int nextFastAllocatedSize(int x) {
 }
 
 void traceHeapMetrics();
-// Write a heap profile to |file| that can be visualized with jeprof:
-// https://github.com/jemalloc/jemalloc/wiki/Use-Case%3A-Leak-Checking
-void dumpHeapProfile(const char* file, const char* msg);
 
 // allocate, free, and sized free
 

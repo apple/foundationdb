@@ -38,6 +38,10 @@
 #include "flow/TDMetric.actor.h"
 #include "flow/MetricSample.h"
 
+#ifdef USE_JEMALLOC
+#include "jemalloc/jemalloc.h"
+#endif
+
 #ifdef _WIN32
 #include <windows.h>
 #undef max
@@ -271,6 +275,27 @@ public:
 				ping.ack.send(Void());
 			} catch (Error& e) {
 				TraceEvent(SevError, "CrashDebugPingActionFailed").error(e);
+				throw;
+			}
+		}
+
+		struct HeapDump final : TypedAction<WriterThread, HeapDump> {
+			ThreadReturnPromise<Void> ack;
+			StringRef file;
+
+			explicit HeapDump(StringRef file) : file(file) {}
+			double getTimeEstimate() const override { return 0.005; }
+		};
+		void action(HeapDump& heapDump) {
+			try {
+				auto fileString = heapDump.file.toString();
+				const char* file = fileString.c_str();
+#ifdef USE_JEMALLOC
+				je_mallctl("prof.dump", nullptr, nullptr, &file, sizeof(file));
+#endif
+				heapDump.ack.send(Void());
+			} catch (Error& e) {
+				TraceEvent(SevError, "CrashHeapDumpFailed").error(e);
 				throw;
 			}
 		}
@@ -532,6 +557,13 @@ public:
 
 	Future<Void> pingWriterThread() {
 		auto ping = new WriterThread::Ping;
+		auto f = ping->ack.getFuture();
+		writer->post(ping);
+		return f;
+	}
+
+	Future<Void> heapDump(StringRef file) {
+		auto ping = new WriterThread::HeapDump(file);
 		auto f = ping->ack.getFuture();
 		writer->post(ping);
 		return f;
@@ -832,6 +864,10 @@ void retrieveTraceLogIssues(std::set<std::string>& out) {
 
 Future<Void> pingTraceLogWriterThread() {
 	return g_traceLog.pingWriterThread();
+}
+
+Future<Void> dumpHeapProfile(StringRef file) {
+	return g_traceLog.heapDump(file);
 }
 
 TraceEvent::TraceEvent(const char* type, UID id)

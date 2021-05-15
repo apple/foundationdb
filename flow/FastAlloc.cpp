@@ -51,9 +51,6 @@ bool valgrindPrecise() {
 
 #ifndef USE_JEMALLOC
 
-void dumpHeapProfile(const char* file, const char* msg) {
-	TraceEvent("HeapProfileNotSupported");
-}
 void traceHeapMetrics() {}
 [[nodiscard]] void* allocateFast(int size) noexcept {
 	return malloc(size);
@@ -95,11 +92,6 @@ void alignedFreeFast(void* ptr) noexcept {
 
 #include "jemalloc/jemalloc.h"
 const char* je_malloc_conf = "prof:true";
-void dumpHeapProfile(const char* file, const char* msg) {
-	double before = g_network->timer();
-	je_mallctl("prof.dump", nullptr, nullptr, &file, sizeof(file));
-	TraceEvent("HeapProfile").detail("FileName", file).detail("Msg", msg).detail("Delay", g_network->timer() - before);
-}
 void traceHeapMetrics() {
 	// Force cached stats to update
 	je_mallctl("thread.tcache.flush", nullptr, nullptr, nullptr, 0);

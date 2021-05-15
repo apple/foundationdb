@@ -664,7 +664,8 @@ ACTOR Future<Void> runCpuProfiler(ProfilerRequest req) {
 
 ACTOR Future<Void> runProfiler(ProfilerRequest req) {
 	if (req.type == ProfilerRequest::Type::GPROF_HEAP) {
-		dumpHeapProfile(req.outputFile.toString().c_str(), "User-requested heap dump");
+		wait(dumpHeapProfile(req.outputFile));
+		TraceEvent("HeapProfile").detail("File", req.outputFile).detail("Msg", "User-requested heap dump");
 	} else {
 		wait(runCpuProfiler(req));
 	}
