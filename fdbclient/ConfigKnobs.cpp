@@ -20,6 +20,7 @@
 
 #include "fdbclient/ConfigKnobs.h"
 #include "fdbclient/Tuple.h"
+#include "flow/UnitTest.h"
 
 ConfigKey ConfigKeyRef::decodeKey(KeyRef const& key) {
 	auto tuple = Tuple::unpack(key);
@@ -29,4 +30,15 @@ ConfigKey ConfigKeyRef::decodeKey(KeyRef const& key) {
 	} else {
 		return ConfigKeyRef(tuple.getString(0), tuple.getString(1));
 	}
+}
+
+TEST_CASE("/fdbclient/ConfigDB/ConfigKey/EncodeDecode") {
+	Tuple tuple;
+	tuple << "class-A"_sr
+	      << "test_long"_sr;
+	auto packed = tuple.pack();
+	auto unpacked = ConfigKeyRef::decodeKey(packed);
+	ASSERT(unpacked.configClass.get() == "class-A"_sr);
+	ASSERT(unpacked.knobName == "test_long"_sr);
+	return Void();
 }

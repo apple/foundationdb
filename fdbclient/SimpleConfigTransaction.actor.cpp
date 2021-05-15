@@ -53,8 +53,17 @@ class SimpleConfigTransactionImpl {
 			self->version = getReadVersion(self);
 		}
 		Version version = wait(self->version);
+		auto configKey = ConfigKey::decodeKey(key);
+		if (self->dID.present()) {
+			TraceEvent("SimpleConfigTransactionGettingValue", self->dID.get())
+			    .detail("ConfigClass", configKey.configClass)
+			    .detail("KnobName", configKey.knobName);
+		}
 		ConfigTransactionGetReply result =
-		    wait(self->cti.get.getReply(ConfigTransactionGetRequest(version, ConfigKeyRef::decodeKey(key))));
+		    wait(self->cti.get.getReply(ConfigTransactionGetRequest(version, configKey)));
+		if (self->dID.present()) {
+			TraceEvent("SimpleConfigTransactionGotValue", self->dID.get()).detail("Value", result.value);
+		}
 		return result.value;
 	}
 
@@ -142,16 +151,21 @@ public:
 	void reset() {
 		version = Future<Version>{};
 		mutations = Standalone<VectorRef<ConfigMutationRef>>{};
+		committed = false;
 	}
 
 	void fullReset() {
 		numRetries = 0;
+		dID = {};
 		reset();
 	}
 
 	size_t getApproximateSize() const { return mutations.expectedSize(); }
 
-	void debugTransaction(UID dID) { dID = dID; }
+	void debugTransaction(UID dID) {
+		printf("HERE_ImplSetDebugTransaction\n");
+		this->dID = dID;
+	}
 
 }; // SimpleConfigTransactionImpl
 

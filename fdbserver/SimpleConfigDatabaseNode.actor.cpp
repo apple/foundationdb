@@ -86,6 +86,7 @@ class SimpleConfigDatabaseNodeImpl {
 	std::map<std::string, std::string> config;
 	ActorCollection actors{ false };
 	FlowLock globalLock;
+	Future<Void> initFuture;
 
 	UID id;
 	CounterCollection cc;
@@ -416,6 +417,7 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigFollowerInterface* cfi) {
+		ASSERT(self->initFuture.isReady());
 		loop {
 			choose {
 				when(ConfigFollowerGetVersionRequest req = waitNext(cfi->getVersion.getFuture())) {
@@ -439,26 +441,30 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 public:
-	SimpleConfigDatabaseNodeImpl(std::string const& dataFolder)
-	  : id(deterministicRandom()->randomUniqueID()), cc("ConfigDatabaseNode"), compactRequests("CompactRequests", cc),
+	SimpleConfigDatabaseNodeImpl()
+	  : cc("ConfigDatabaseNode"), compactRequests("CompactRequests", cc),
 	    successfulChangeRequests("SuccessfulChangeRequests", cc), failedChangeRequests("FailedChangeRequests", cc),
 	    snapshotRequests("SnapshotRequests", cc), committedVersionRequests("CommittedVersionRequests", cc),
 	    successfulCommits("SuccessfulCommits", cc), failedCommits("FailedCommits", cc),
 	    setMutations("SetMutations", cc), clearMutations("ClearMutations", cc),
-	    getValueRequests("GetValueRequests", cc), newVersionRequests("NewVersionRequests", cc) {
-		platform::createDirectory(dataFolder);
-		kvStore = keyValueStoreMemory(joinPath(dataFolder, "globalconf-"), UID{}, 500e6);
-		logger = traceCounters(
-		    "ConfigDatabaseNodeMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigDatabaseNode");
-	}
+	    getValueRequests("GetValueRequests", cc), newVersionRequests("NewVersionRequests", cc) {}
 
 	Future<Void> serve(ConfigTransactionInterface& cti) { return serve(this, &cti); }
 
 	Future<Void> serve(ConfigFollowerInterface& cfi) { return serve(this, &cfi); }
+
+	Future<Void> initialize(std::string const& dataFolder, UID id) {
+		platform::createDirectory(dataFolder);
+		this->id = id;
+		kvStore = keyValueStoreMemory(joinPath(dataFolder, "globalconf-"), id, 500e6);
+		logger = traceCounters(
+		    "ConfigDatabaseNodeMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigDatabaseNode");
+		initFuture = kvStore->init();
+		return initFuture;
+	}
 };
 
-SimpleConfigDatabaseNode::SimpleConfigDatabaseNode(std::string const& dataFolder)
-  : impl(std::make_unique<SimpleConfigDatabaseNodeImpl>(dataFolder)) {}
+SimpleConfigDatabaseNode::SimpleConfigDatabaseNode() : impl(std::make_unique<SimpleConfigDatabaseNodeImpl>()) {}
 
 SimpleConfigDatabaseNode::~SimpleConfigDatabaseNode() = default;
 
@@ -468,4 +474,8 @@ Future<Void> SimpleConfigDatabaseNode::serve(ConfigTransactionInterface& cti) {
 
 Future<Void> SimpleConfigDatabaseNode::serve(ConfigFollowerInterface& cfi) {
 	return impl->serve(cfi);
+}
+
+Future<Void> SimpleConfigDatabaseNode::initialize(std::string const& dataFolder, UID id) {
+	return impl->initialize(dataFolder, id);
 }

@@ -65,11 +65,11 @@ struct ConfigTransactionGetReply {
 struct ConfigTransactionGetRequest {
 	static constexpr FileIdentifier file_identifier = 923040;
 	Version version;
-	ConfigKeyRef key;
+	ConfigKey key;
 	ReplyPromise<ConfigTransactionGetReply> reply;
 
 	ConfigTransactionGetRequest() = default;
-	explicit ConfigTransactionGetRequest(Version version, ConfigKeyRef key) : version(version), key(key) {}
+	explicit ConfigTransactionGetRequest(Version version, ConfigKey key) : version(version), key(key) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

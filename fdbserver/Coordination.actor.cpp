@@ -623,7 +623,8 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder) {
 	state ConfigFollowerInterface configFollowerInterface;
 	configTransactionInterface.setupWellKnownEndpoints();
 	configFollowerInterface.setupWellKnownEndpoints();
-	state Reference<IConfigDatabaseNode> configDatabaseNode = makeReference<SimpleConfigDatabaseNode>(dataFolder);
+	state Reference<IConfigDatabaseNode> configDatabaseNode = makeReference<SimpleConfigDatabaseNode>();
+	wait(configDatabaseNode->initialize(dataFolder, deterministicRandom()->randomUniqueID()));
 
 	TraceEvent("CoordinationServer", myID)
 	    .detail("MyInterfaceAddr", myInterface.read.getEndpoint().getPrimaryAddress())

@@ -297,15 +297,25 @@ TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/CheckpointedUpdates") {
 
 TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/Transaction/Set") {
 	state ConfigTransactionInterface cti;
-	state SimpleConfigTransaction tr1(cti);
-	state SimpleConfigTransaction tr2(cti);
-	state SimpleConfigDatabaseNode node("./");
+	state SimpleConfigTransaction tr(cti);
+	state SimpleConfigDatabaseNode node;
 	state ActorCollection actors(false);
+	state Tuple configKeyTuple;
+	wait(node.initialize("./", deterministicRandom()->randomUniqueID()));
 	actors.add(node.serve(cti));
-	Tuple tuple;
-	tuple << "class-A"_sr
-	      << "test_long"_sr;
-	tr1.set(tuple.pack(), "100"_sr);
-	wait(tr1.commit());
+	Version readVersion = wait(tr.getReadVersion());
+	ASSERT_EQ(readVersion, 1);
+	configKeyTuple << "class-A"_sr
+	               << "test_long"_sr;
+	state Key configKey = configKeyTuple.pack();
+	tr.set(configKey, "100"_sr);
+	wait(tr.commit());
+	ASSERT_EQ(tr.getCommittedVersion(), 1);
+	tr.fullReset();
+	tr.debugTransaction(UID{});
+	ASSERT_EQ(tr.getCommittedVersion(), ::invalidVersion);
+	Optional<Value> value = wait(tr.get(configKey));
+	ASSERT(tr.getCachedReadVersion() == 2);
+	ASSERT(value.get() == "100"_sr);
 	return Void();
 }

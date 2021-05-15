@@ -31,14 +31,16 @@ class IConfigDatabaseNode : public ReferenceCounted<IConfigDatabaseNode> {
 public:
 	virtual Future<Void> serve(ConfigTransactionInterface&) = 0;
 	virtual Future<Void> serve(ConfigFollowerInterface&) = 0;
+	virtual Future<Void> initialize(std::string const& dataFolder, UID id) = 0;
 };
 
 class SimpleConfigDatabaseNode : public IConfigDatabaseNode {
 	std::unique_ptr<class SimpleConfigDatabaseNodeImpl> impl;
 
 public:
-	SimpleConfigDatabaseNode(std::string const& dataFolder);
+	SimpleConfigDatabaseNode();
 	~SimpleConfigDatabaseNode();
 	Future<Void> serve(ConfigTransactionInterface&) override;
 	Future<Void> serve(ConfigFollowerInterface&) override;
+	Future<Void> initialize(std::string const& dataFolder, UID id) override;
 };
