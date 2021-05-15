@@ -3324,11 +3324,73 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 					return Void();
 				}
 
-				// FIXME: add load balancing
+				state int useIdx = -1;
+
+				loop {
+					int count = 0;
+					for (int i = 0; i < locations[shard].second->size(); i++) {
+						if (!IFailureMonitor::failureMonitor()
+						         .getState(locations[shard]
+						                       .second->get(i, &StorageServerInterface::getKeyValuesStream)
+						                       .getEndpoint())
+						         .failed) {
+							if (deterministicRandom()->random01() <= 1.0 / ++count) {
+								useIdx = i;
+							}
+						}
+					}
+
+					if (useIdx >= 0) {
+						break;
+					}
+
+					vector<Future<Void>> ok(locations[shard].second->size());
+					for (int i = 0; i < ok.size(); i++) {
+						ok[i] = IFailureMonitor::failureMonitor().onStateEqual(
+						    locations[shard].second->get(i, &StorageServerInterface::getKeyValuesStream).getEndpoint(),
+						    FailureStatus(false));
+					}
+
+					if (now() - g_network->networkInfo.newestAlternativesFailure >
+					    FLOW_KNOBS->ALTERNATIVES_FAILURE_RESET_TIME) {
+						g_network->networkInfo.oldestAlternativesFailure = now();
+					}
+
+					double delay = FLOW_KNOBS->ALTERNATIVES_FAILURE_MIN_DELAY;
+					if (now() - g_network->networkInfo.lastAlternativesFailureSkipDelay >
+					    FLOW_KNOBS->ALTERNATIVES_FAILURE_SKIP_DELAY) {
+						g_network->networkInfo.lastAlternativesFailureSkipDelay = now();
+					} else {
+						double elapsed = now() - g_network->networkInfo.oldestAlternativesFailure;
+						delay = std::max(delay,
+						                 std::min(elapsed * FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO,
+						                          FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY));
+						delay = std::max(delay,
+						                 std::min(elapsed * FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_DELAY_RATIO,
+						                          FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_MAX_DELAY));
+					}
+
+					// Making this SevWarn means a lot of clutter
+					if (now() - g_network->networkInfo.newestAlternativesFailure > 1 ||
+					    deterministicRandom()->random01() < 0.01) {
+						TraceEvent("AllAlternativesFailed")
+						    .detail("Interval", FLOW_KNOBS->CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED)
+						    .detail("Alternatives", locations[shard].second->description())
+						    .detail("Delay", delay);
+					}
+
+					g_network->networkInfo.newestAlternativesFailure = now();
+
+					choose {
+						when(wait(quorum(ok, 1))) {}
+						when(wait(::delayJittered(delay))) { throw all_alternatives_failed(); }
+					}
+				}
+
 				state ReplyPromiseStream<GetKeyValuesStreamReply> replyStream =
 				    locations[shard]
-				        .second->getInterface(deterministicRandom()->randomInt(0, locations[shard].second->size()))
-				        .getKeyValuesStream.getReplyStream(req);
+				        .second->get(useIdx, &StorageServerInterface::getKeyValuesStream)
+				        .getReplyStream(req);
 				state bool breakAgain = false;
 				loop {
 					try {
