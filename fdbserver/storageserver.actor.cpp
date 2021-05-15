@@ -577,6 +577,8 @@ public:
 
 	FlowLock durableVersionLock;
 	FlowLock fetchKeysParallelismLock;
+	int64_t fetchKeysBytesBudget;
+	AsyncVar<bool> fetchKeysBudgetUsed;
 	vector<Promise<FetchInjectionInfo*>> readyFetchKeys;
 
 	int64_t instanceID;
@@ -729,7 +731,8 @@ public:
 	    db(db), actors(false), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
 	    rebootAfterDurableVersion(std::numeric_limits<Version>::max()), durableInProgress(Void()), versionLag(0),
 	    primaryLocality(tagLocalityInvalid), updateEagerReads(0), shardChangeCounter(0),
-	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES), shuttingDown(false),
+	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
+	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false), shuttingDown(false),
 	    debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0), numWatches(0), logProtocol(0),
 	    counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
 	    readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")), behind(false), versionBehind(false),
@@ -2760,15 +2763,18 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			try {
 				loop {
 					TEST(true); // Fetching keys for transferred shard
+					while (data->fetchKeysBudgetUsed.get()) {
+						wait(data->fetchKeysBudgetUsed.onChange());
+					}
 					state RangeResult this_block = waitNext(results.getFuture());
 
-					int expectedSize =
+					state int expectedBlockSize =
 					    (int)this_block.expectedSize() + (8 - (int)sizeof(KeyValueRef)) * this_block.size();
 
 					TraceEvent(SevDebug, "FetchKeysBlock", data->thisServerID)
 					    .detail("FKID", interval.pairID)
 					    .detail("BlockRows", this_block.size())
-					    .detail("BlockBytes", expectedSize)
+					    .detail("BlockBytes", expectedBlockSize)
 					    .detail("KeyBegin", keys.begin)
 					    .detail("KeyEnd", keys.end)
 					    .detail("Last", this_block.size() ? this_block.end()[-1].key : std::string())
@@ -2778,8 +2784,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					for (auto k = this_block.begin(); k != this_block.end(); ++k)
 						DEBUG_MUTATION("fetch", fetchVersion, MutationRef(MutationRef::SetValue, k->key, k->value));
 
-					metricReporter.addFetchedBytes(expectedSize);
-					data->counters.bytesFetched += expectedSize;
+					metricReporter.addFetchedBytes(expectedBlockSize);
+					data->counters.bytesFetched += expectedBlockSize;
 
 					// Write this_block to storage
 					state KeyValueRef* kvItr = this_block.begin();
@@ -2798,6 +2804,11 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					nfk = this_block.readThrough.present() ? this_block.readThrough.get()
 					                                       : keyAfter(this_block.end()[-1].key);
 					this_block = RangeResult();
+
+					data->fetchKeysBytesBudget -= expectedBlockSize;
+					if (data->fetchKeysBytesBudget <= 0) {
+						data->fetchKeysBudgetUsed.set(true);
+					}
 				}
 			} catch (Error& e) {
 				if (e.code() != error_code_end_of_stream && e.code() != error_code_connection_failed &&
@@ -2876,8 +2887,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// being recovered. Instead we wait for the updateStorage loop to commit something (and consequently also what
 		// we have written)
 
-		wait(data->durableVersion.whenAtLeast(data->storageVersion() + 1));
 		holdingFKPL.release();
+		wait(data->durableVersion.whenAtLeast(data->storageVersion() + 1));
 
 		TraceEvent(SevDebug, "FKAfterFinalCommit", data->thisServerID)
 		    .detail("FKID", interval.pairID)
@@ -3785,8 +3796,11 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		data->durableVersionLock.release();
 
 		//TraceEvent("StorageServerDurable", data->thisServerID).detail("Version", newOldestVersion);
-
-		wait(durableDelay);
+		data->fetchKeysBytesBudget = SERVER_KNOBS->STORAGE_FETCH_BYTES;
+		data->fetchKeysBudgetUsed.set(false);
+		if (!data->fetchKeysBudgetUsed.get()) {
+			wait(durableDelay || data->fetchKeysBudgetUsed.onChange());
+		}
 	}
 }
 
