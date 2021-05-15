@@ -25,8 +25,8 @@
 
 namespace {
 
-bool matchesConfigClass(Optional<ConfigClassSet> const& configClassSet, KeyRef configClass) {
-	return (!configClassSet.present() || configClassSet.get().contains(configClass));
+bool matchesConfigClass(Optional<ConfigClassSet> const& configClassSet, Optional<KeyRef> configClass) {
+	return !configClassSet.present() || !configClass.present() || configClassSet.get().contains(configClass.get());
 }
 
 } // namespace
@@ -61,7 +61,11 @@ class ConfigBroadcasterImpl {
 				when(ConfigFollowerGetSnapshotRequest req = waitNext(cfi.getSnapshot.getFuture())) {
 					++impl->snapshotRequest;
 					ConfigFollowerGetSnapshotReply reply;
-					reply.snapshot = impl->snapshot;
+					for (const auto& [key, value] : impl->snapshot) {
+						if (matchesConfigClass(req.configClassSet, key.configClass)) {
+							reply.snapshot[key] = value;
+						}
+					}
 					for (const auto& versionedMutation : impl->versionedMutations) {
 						const auto& version = versionedMutation.version;
 						const auto& mutation = versionedMutation.mutation;
@@ -76,7 +80,7 @@ class ConfigBroadcasterImpl {
 							    .detail("KnobName", mutation.getKnobName())
 							    .detail("KnobValue", mutation.getValue());
 							if (mutation.isSet()) {
-								reply.snapshot[mutation.getKey()] = mutation.getValue();
+								reply.snapshot[mutation.getKey()] = mutation.getValue().get();
 							} else {
 								reply.snapshot.erase(mutation.getKey());
 							}
@@ -125,7 +129,7 @@ class ConfigBroadcasterImpl {
 							    .detail("KnobValue", mutation.getValue())
 							    .detail("LastCompactedVersion", impl->lastCompactedVersion);
 							if (mutation.isSet()) {
-								impl->snapshot[mutation.getKey()] = mutation.getValue();
+								impl->snapshot[mutation.getKey()] = mutation.getValue().get();
 							} else {
 								impl->snapshot.erase(mutation.getKey());
 							}

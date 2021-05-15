@@ -25,14 +25,16 @@
 #include "fdbclient/FDBTypes.h"
 
 struct ConfigKeyRef {
-	KeyRef configClass;
+	// Empty config class means the update is global
+	Optional<KeyRef> configClass;
 	KeyRef knobName;
 
 	ConfigKeyRef() = default;
-	ConfigKeyRef(KeyRef configClass, KeyRef knobName) : configClass(configClass), knobName(knobName) {}
-	ConfigKeyRef(Arena& arena, KeyRef configClass, KeyRef knobName)
+	explicit ConfigKeyRef(Optional<KeyRef> configClass, KeyRef knobName)
+	  : configClass(configClass), knobName(knobName) {}
+	explicit ConfigKeyRef(Arena& arena, Optional<KeyRef> configClass, KeyRef knobName)
 	  : configClass(arena, configClass), knobName(arena, knobName) {}
-	ConfigKeyRef(Arena& arena, ConfigKeyRef const& rhs) : ConfigKeyRef(arena, rhs.configClass, rhs.knobName) {}
+	explicit ConfigKeyRef(Arena& arena, ConfigKeyRef const& rhs) : ConfigKeyRef(arena, rhs.configClass, rhs.knobName) {}
 
 	static Standalone<ConfigKeyRef> decodeKey(KeyRef const&);
 
@@ -72,11 +74,11 @@ public:
 
 	ConfigKeyRef getKey() const { return key; }
 
-	KeyRef getConfigClass() const { return key.configClass; }
+	Optional<KeyRef> getConfigClass() const { return key.configClass; }
 
 	KeyRef getKnobName() const { return key.knobName; }
 
-	ValueRef getValue() const { return value.get(); }
+	Optional<ValueRef> getValue() const { return value; }
 
 	ConfigMutationRef(Arena& arena, ConfigMutationRef const& rhs)
 	  : key(arena, rhs.key), value(arena, rhs.value), description(arena, rhs.description), timestamp(rhs.timestamp) {}

@@ -210,14 +210,8 @@ class SimpleConfigDatabaseNodeImpl {
 		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations = wait(getMutations(self, 0, req.version));
 		for (const auto &versionedMutation : versionedMutations) {
 			const auto &mutation = versionedMutation.mutation;
-			if (mutation.isSet()) {
-				if (mutation.getKey() == req.key) {
-					value = mutation.getValue();
-				}
-			} else {
-				if (mutation.getKey() == req.key) {
-					value = Optional<Value>{};
-				}
+			if (mutation.getKey() == req.key) {
+				value = mutation.getValue().castTo<Value>();
 			}
 		}
 		req.reply.send(ConfigTransactionGetReply(value));
@@ -370,7 +364,7 @@ class SimpleConfigDatabaseNodeImpl {
 		for (const auto& versionedMutation : versionedMutations) {
 			const auto& mutation = versionedMutation.mutation;
 			if (mutation.isSet()) {
-				reply.snapshot[mutation.getKey()] = mutation.getValue();
+				reply.snapshot[mutation.getKey()] = mutation.getValue().get();
 			} else {
 				reply.snapshot.erase(mutation.getKey());
 			}
@@ -407,7 +401,7 @@ class SimpleConfigDatabaseNodeImpl {
 				    .detail("ReqVersion", req.version);
 				auto serializedKey = BinaryWriter::toValue(mutation.getKey(), IncludeVersion());
 				if (mutation.isSet()) {
-					self->kvStore->set(KeyValueRef(serializedKey.withPrefix(kvKeys.begin), mutation.getValue()));
+					self->kvStore->set(KeyValueRef(serializedKey.withPrefix(kvKeys.begin), mutation.getValue().get()));
 				} else {
 					self->kvStore->clear(singleKeyRange(serializedKey.withPrefix(kvKeys.begin)));
 				}

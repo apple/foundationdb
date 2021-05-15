@@ -24,5 +24,9 @@
 ConfigKey ConfigKeyRef::decodeKey(KeyRef const& key) {
 	auto tuple = Tuple::unpack(key);
 	ASSERT(tuple.size() == 2); // TODO: Fail gracefully
-	return ConfigKeyRef(tuple.getString(0), tuple.getString(1));
+	if (tuple.getType(0) == Tuple::NULL_TYPE) {
+		return ConfigKeyRef({}, tuple.getString(1));
+	} else {
+		return ConfigKeyRef(tuple.getString(0), tuple.getString(1));
+	}
 }

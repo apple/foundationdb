@@ -69,11 +69,15 @@ Future<Void> setTestSnapshot(ConfigStore* configStore, Version* lastWrittenVersi
 
 void appendVersionedMutation(Standalone<VectorRef<VersionedConfigMutationRef>>& versionedMutations,
                              Version version,
-                             KeyRef configClass,
+                             Optional<KeyRef> configClass,
                              KeyRef knobName,
                              Optional<ValueRef> knobValue) {
 	Tuple tuple;
-	tuple << configClass;
+	if (configClass.present()) {
+		tuple.append(configClass.get());
+	} else {
+		tuple.appendNull();
+	}
 	tuple << knobName;
 	auto mutation = ConfigMutationRef::createConfigMutation(tuple.pack(), knobValue);
 	versionedMutations.emplace_back_deep(versionedMutations.arena(), version, mutation);
@@ -110,6 +114,14 @@ Future<Void> addClearTestUpdate(ConfigStore& configStore, Version& lastWrittenVe
 	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
 	++lastWrittenVersion;
 	appendVersionedMutation(versionedMutations, lastWrittenVersion, "class-A"_sr, "test_long"_sr, {});
+	return configStore.addVersionedMutations(versionedMutations, lastWrittenVersion);
+}
+
+template <class ConfigStore>
+Future<Void> addGlobalTestUpdate(ConfigStore& configStore, Version& lastWrittenVersion, ValueRef value) {
+	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
+	++lastWrittenVersion;
+	appendVersionedMutation(versionedMutations, lastWrittenVersion, {}, "test_long"_sr, value);
 	return configStore.addVersionedMutations(versionedMutations, lastWrittenVersion);
 }
 
@@ -158,7 +170,7 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/FreshRestart") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Manual") {
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ManualOverride") {
 	state LocalConfiguration localConfiguration("class-A/class-B", { { "test_long"_sr, "1000"_sr } });
 	state Version lastWrittenVersion = 0;
 	wait(localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
@@ -167,12 +179,22 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Manual") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Conflicting") {
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ConfigClassOverride") {
 	state LocalConfiguration localConfiguration("class-A/class-B", {});
 	state Version lastWrittenVersion = 0;
 	wait(localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
 	wait(addSequentialTestUpdates(localConfiguration, lastWrittenVersion));
 	ASSERT(localConfiguration.getTestKnobs().TEST_LONG == 10);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/GlobalConfigClassOverride") {
+	state LocalConfiguration localConfiguration("class-A/class-B", {});
+	state Version lastWrittenVersion = 0;
+	wait(localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
+	wait(addSequentialTestUpdates(localConfiguration, lastWrittenVersion));
+	wait(addGlobalTestUpdate(localConfiguration, lastWrittenVersion, "100"_sr));
+	ASSERT(localConfiguration.getTestKnobs().TEST_LONG == 100);
 	return Void();
 }
 

@@ -71,9 +71,8 @@ struct ConfigFollowerGetSnapshotReply {
 	std::map<ConfigKey, Value> snapshot;
 
 	ConfigFollowerGetSnapshotReply() = default;
-	explicit ConfigFollowerGetSnapshotReply(std::map<ConfigKey, Value> const& snapshot) : snapshot(snapshot) {
-		// TODO: Support move constructor as well
-	}
+	explicit ConfigFollowerGetSnapshotReply(std::map<ConfigKey, Value>&& snapshot) : snapshot(std::move(snapshot)) {}
+	explicit ConfigFollowerGetSnapshotReply(std::map<ConfigKey, Value> const& snapshot) : snapshot(snapshot) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -133,11 +132,11 @@ struct ConfigFollowerGetChangesReply {
 
 struct ConfigFollowerGetChangesRequest {
 	static constexpr FileIdentifier file_identifier = 178935;
-	Version lastSeenVersion;
+	Version lastSeenVersion{ 0 };
 	Optional<ConfigClassSet> configClassSet;
 	ReplyPromise<ConfigFollowerGetChangesReply> reply;
 
-	ConfigFollowerGetChangesRequest() : lastSeenVersion(::invalidVersion) {}
+	ConfigFollowerGetChangesRequest() = default;
 	explicit ConfigFollowerGetChangesRequest(Version lastSeenVersion, Optional<ConfigClassSet> const& configClassSet)
 	  : lastSeenVersion(lastSeenVersion), configClassSet(configClassSet) {}
 

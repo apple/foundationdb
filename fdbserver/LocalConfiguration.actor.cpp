@@ -49,7 +49,7 @@ bool updateSingleKnob(Key knobName, Value knobValue, K& k, Rest&... rest) {
 
 class ConfigKnobOverrides {
 	Standalone<VectorRef<KeyRef>> configPath;
-	std::map<Key, std::map<Key, Value>> configClassToKnobToValue;
+	std::map<Optional<Key>, std::map<Key, Value>> configClassToKnobToValue;
 
 public:
 	ConfigKnobOverrides() = default;
@@ -60,22 +60,29 @@ public:
 			configPath.push_back_deep(configPath.arena(), s.eat("/"_sr));
 			configClassToKnobToValue[configPath.back()] = {};
 		}
+		configClassToKnobToValue[{}] = {};
 	}
 	ConfigClassSet getConfigClassSet() const { return ConfigClassSet(configPath); }
-	void set(KeyRef configClass, KeyRef knobName, ValueRef value) {
-		configClassToKnobToValue[configClass][knobName] = value;
+	void set(Optional<KeyRef> configClass, KeyRef knobName, ValueRef value) {
+		configClassToKnobToValue[configClass.castTo<Key>()][knobName] = value;
 	}
-	void remove(KeyRef configClass, KeyRef knobName) { configClassToKnobToValue[configClass].erase(knobName); }
+	void remove(Optional<KeyRef> configClass, KeyRef knobName) {
+		configClassToKnobToValue[configClass.castTo<Key>()].erase(knobName);
+	}
 
 	template <class... KS>
 	void update(KS&... knobCollections) const {
 		for (const auto& configClass : configPath) {
-			const auto& knobToValue = configClassToKnobToValue.find(configClass);
-			ASSERT(knobToValue != configClassToKnobToValue.end());
-			for (const auto& [knobName, knobValue] : knobToValue->second) {
+			const auto& knobToValue = configClassToKnobToValue.at(configClass);
+			for (const auto& [knobName, knobValue] : knobToValue) {
 				// Assert here because we should be validating on the client
 				ASSERT(updateSingleKnob(knobName, knobValue, knobCollections...));
 			}
+		}
+		// TODO: Test this
+		const auto& knobToValue = configClassToKnobToValue.at({});
+		for (const auto& [knobName, knobValue] : knobToValue) {
+			ASSERT(updateSingleKnob(knobName, knobValue, knobCollections...));
 		}
 	}
 
@@ -104,6 +111,11 @@ public:
 		}
 	}
 };
+
+ACTOR template <class F>
+Future<Void> forever(F f) {
+	loop { wait(f()); }
+}
 
 } // namespace
 
@@ -241,8 +253,10 @@ class LocalConfigurationImpl : public NonCopyable {
 			const auto &mutation = versionedMutation.mutation;
 			auto serializedKey = BinaryWriter::toValue(mutation.getKey(), IncludeVersion());
 			if (mutation.isSet()) {
-				self->kvStore->set(KeyValueRef(serializedKey.withPrefix(knobOverrideKeys.begin), mutation.getValue()));
-				self->configKnobOverrides.set(mutation.getConfigClass(), mutation.getKnobName(), mutation.getValue());
+				self->kvStore->set(
+				    KeyValueRef(serializedKey.withPrefix(knobOverrideKeys.begin), mutation.getValue().get()));
+				self->configKnobOverrides.set(
+				    mutation.getConfigClass(), mutation.getKnobName(), mutation.getValue().get());
 			} else {
 				self->kvStore->clear(singleKeyRange(serializedKey.withPrefix(knobOverrideKeys.begin)));
 				self->configKnobOverrides.remove(mutation.getConfigClass(), mutation.getKnobName());
@@ -278,7 +292,7 @@ class LocalConfigurationImpl : public NonCopyable {
 	ACTOR static Future<Void> consume(LocalConfiguration* self,
 	                                  LocalConfigurationImpl* impl,
 	                                  Reference<IDependentAsyncVar<ConfigFollowerInterface> const> broadcaster) {
-		wait(impl->initFuture);
+		ASSERT(impl->initFuture.isReady());
 		loop { wait(consumeLoopIteration(self, impl, broadcaster)); }
 	}
 
