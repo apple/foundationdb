@@ -27,7 +27,7 @@
 #include "flow/Arena.h"
 #include "flow/Knobs.h"
 
-class TestKnobs : public Knobs {
+class TestKnobs : public Knobs<TestKnobs> {
 public:
 	TestKnobs();
 	int64_t TEST_LONG;
@@ -38,7 +38,6 @@ public:
 	bool operator==(TestKnobs const&) const;
 	bool operator!=(TestKnobs const&) const;
 	void initialize();
-	void reset();
 };
 
 class LocalConfiguration {

@@ -19,7 +19,9 @@
  */
 
 #include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/SimpleConfigTransaction.h"
 #include "fdbserver/ConfigBroadcaster.h"
+#include "fdbserver/IConfigDatabaseNode.h"
 #include "fdbserver/LocalConfiguration.h"
 #include "fdbclient/Tuple.h"
 #include "flow/UnitTest.h"
@@ -290,5 +292,20 @@ TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/CheckpointedUpdates") {
 	wait(cfi->get().compact.getReply(ConfigFollowerCompactRequest{ version }));
 	wait(waitUntilTestLongMatches(localConfigurationA, 30));
 	wait(waitUntilTestLongMatches(localConfigurationB, 300));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/Transaction/Set") {
+	state ConfigTransactionInterface cti;
+	state SimpleConfigTransaction tr1(cti);
+	state SimpleConfigTransaction tr2(cti);
+	state SimpleConfigDatabaseNode node("./");
+	state ActorCollection actors(false);
+	actors.add(node.serve(cti));
+	Tuple tuple;
+	tuple << "class-A"_sr
+	      << "test_long"_sr;
+	tr1.set(tuple.pack(), "100"_sr);
+	wait(tr1.commit());
 	return Void();
 }

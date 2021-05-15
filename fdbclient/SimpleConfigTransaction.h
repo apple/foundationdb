@@ -34,6 +34,7 @@ class SimpleConfigTransaction final : public ISingleThreadTransaction, public Fa
 	std::unique_ptr<class SimpleConfigTransactionImpl> impl;
 
 public:
+	SimpleConfigTransaction(ConfigTransactionInterface const&);
 	SimpleConfigTransaction(ClusterConnectionString const&);
 	~SimpleConfigTransaction();
 	void setVersion(Version) override { throw client_invalid_operation(); }

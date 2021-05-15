@@ -28,6 +28,7 @@
 class SimpleConfigTransactionImpl {
 	Standalone<VectorRef<ConfigMutationRef>> mutations;
 	Future<Version> version;
+	Key description;
 	ConfigTransactionInterface cti;
 	int numRetries{ 0 };
 	bool committed{ false };
@@ -73,7 +74,7 @@ class SimpleConfigTransactionImpl {
 		auto commitTime = now();
 		for (auto& mutation : self->mutations) {
 			mutation.setTimestamp(commitTime);
-			// TODO: Update description
+			mutation.setDescription(self->description);
 		}
 		wait(self->cti.commit.getReply(ConfigTransactionCommitRequest(version, self->mutations)));
 		self->committed = true;
@@ -87,7 +88,12 @@ public:
 		cti = ConfigTransactionInterface(coordinators[0]);
 	}
 
+	SimpleConfigTransactionImpl(ConfigTransactionInterface const& cti) : cti(cti) {}
+
 	void set(KeyRef key, ValueRef value) {
+		if (key == "\xff\xff/description"_sr) {
+			description = value;
+		}
 		mutations.push_back_deep(mutations.arena(), ConfigMutationRef::createConfigMutation(key, value));
 	}
 
@@ -222,5 +228,8 @@ void SimpleConfigTransaction::getWriteConflicts(KeyRangeMap<bool>* result) {}
 
 SimpleConfigTransaction::SimpleConfigTransaction(ClusterConnectionString const& ccs)
   : impl(std::make_unique<SimpleConfigTransactionImpl>(ccs)) {}
+
+SimpleConfigTransaction::SimpleConfigTransaction(ConfigTransactionInterface const& cti)
+  : impl(std::make_unique<SimpleConfigTransactionImpl>(cti)) {}
 
 SimpleConfigTransaction::~SimpleConfigTransaction() = default;

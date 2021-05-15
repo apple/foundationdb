@@ -25,7 +25,7 @@
 #include "flow/Knobs.h"
 #include "flow/flow.h"
 
-class ClientKnobs : public Knobs {
+class ClientKnobs : public Knobs<ClientKnobs> {
 public:
 	int TOO_MANY; // FIXME: this should really be split up so we can control these more specifically
 
@@ -232,7 +232,6 @@ public:
 
 	ClientKnobs();
 	void initialize(bool randomize = false);
-	void reset();
 };
 
 extern std::unique_ptr<ClientKnobs> globalClientKnobs;

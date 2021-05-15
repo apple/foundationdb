@@ -29,16 +29,11 @@
 #include <string>
 #include <stdint.h>
 
-class Knobs {
-public:
-	bool setKnob(std::string const& name,
-	             std::string const& value); // Returns true if the knob name is known, false if it is unknown
-	void trace() const;
-
+class KnobsCollection {
 protected:
-	Knobs() = default;
-	Knobs(Knobs const&) = delete;
-	Knobs& operator=(Knobs const&) = delete;
+	KnobsCollection() = default;
+	KnobsCollection(KnobsCollection const&) = delete;
+	KnobsCollection& operator=(KnobsCollection const&) = delete;
 	void initKnob(double& knob, double value, std::string const& name);
 	void initKnob(int64_t& knob, int64_t value, std::string const& name);
 	void initKnob(int& knob, int value, std::string const& name);
@@ -51,9 +46,24 @@ protected:
 	std::map<std::string, std::string*> string_knobs;
 	std::map<std::string, bool*> bool_knobs;
 	std::set<std::string> explicitlySetKnobs;
+
+public:
+	bool setKnob(std::string const& name,
+	             std::string const& value); // Returns true if the knob name is known, false if it is unknown
+	void trace() const;
 };
 
-class FlowKnobs : public Knobs {
+template <class T>
+class Knobs : public KnobsCollection {
+public:
+	template <class... Args>
+	void reset(Args&&... args) {
+		explicitlySetKnobs.clear();
+		static_cast<T*>(this)->initialize(std::forward<Args>(args)...);
+	}
+};
+
+class FlowKnobs : public Knobs<FlowKnobs> {
 public:
 	int AUTOMATIC_TRACE_DUMP;
 	double PREVENT_FAST_SPIN_DELAY;
@@ -260,7 +270,6 @@ public:
 
 	FlowKnobs();
 	void initialize(bool randomize = false, bool isSimulated = false);
-	void reset();
 };
 
 extern std::unique_ptr<FlowKnobs> globalFlowKnobs;

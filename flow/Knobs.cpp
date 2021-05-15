@@ -252,7 +252,7 @@ static std::string toLower(std::string const& name) {
 	return lower_name;
 }
 
-bool Knobs::setKnob(std::string const& knob, std::string const& value) {
+bool KnobsCollection::setKnob(std::string const& knob, std::string const& value) {
 	explicitlySetKnobs.insert(toLower(knob));
 	if (double_knobs.count(knob)) {
 		double v;
@@ -308,42 +308,42 @@ bool Knobs::setKnob(std::string const& knob, std::string const& value) {
 	return false;
 }
 
-void Knobs::initKnob(double& knob, double value, std::string const& name) {
+void KnobsCollection::initKnob(double& knob, double value, std::string const& name) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
 		double_knobs[toLower(name)] = &knob;
 	}
 }
 
-void Knobs::initKnob(int64_t& knob, int64_t value, std::string const& name) {
+void KnobsCollection::initKnob(int64_t& knob, int64_t value, std::string const& name) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
 		int64_knobs[toLower(name)] = &knob;
 	}
 }
 
-void Knobs::initKnob(int& knob, int value, std::string const& name) {
+void KnobsCollection::initKnob(int& knob, int value, std::string const& name) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
 		int_knobs[toLower(name)] = &knob;
 	}
 }
 
-void Knobs::initKnob(std::string& knob, const std::string& value, const std::string& name) {
+void KnobsCollection::initKnob(std::string& knob, const std::string& value, const std::string& name) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
 		string_knobs[toLower(name)] = &knob;
 	}
 }
 
-void Knobs::initKnob(bool& knob, bool value, std::string const& name) {
+void KnobsCollection::initKnob(bool& knob, bool value, std::string const& name) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
 		bool_knobs[toLower(name)] = &knob;
 	}
 }
 
-void Knobs::trace() const {
+void KnobsCollection::trace() const {
 	for (auto& k : double_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
 	for (auto& k : int_knobs)
@@ -354,9 +354,4 @@ void Knobs::trace() const {
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
 	for (auto& k : bool_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
-}
-
-void FlowKnobs::reset() {
-	explicitlySetKnobs.clear();
-	initialize();
 }

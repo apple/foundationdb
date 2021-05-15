@@ -727,8 +727,3 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 		clientKnobs->INIT_MID_SHARD_BYTES = MIN_SHARD_BYTES;
 	}
 }
-
-void ServerKnobs::reset(ClientKnobs* clientKnobs) {
-	explicitlySetKnobs.clear();
-	initialize(false, clientKnobs);
-}

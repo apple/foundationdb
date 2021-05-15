@@ -29,7 +29,7 @@
 // Disk queue
 static const int _PAGE_SIZE = 4096;
 
-class ServerKnobs : public Knobs {
+class ServerKnobs : public Knobs<ServerKnobs> {
 public:
 	// Versions
 	int64_t VERSIONS_PER_SECOND;
@@ -656,7 +656,6 @@ public:
 
 	ServerKnobs();
 	void initialize(bool randomize = false, ClientKnobs* clientKnobs = nullptr, bool isSimulated = false);
-	void reset(ClientKnobs* clientKnobs = nullptr);
 };
 
 extern std::unique_ptr<ServerKnobs> globalServerKnobs;

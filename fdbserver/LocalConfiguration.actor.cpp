@@ -208,10 +208,10 @@ class LocalConfigurationImpl : public NonCopyable {
 		testKnobs.initialize();
 	}
 
-	void resetKnobs() {
-		flowKnobs.reset();
-		clientKnobs.reset();
-		serverKnobs.reset(&clientKnobs);
+	void resetKnobs(bool randomize = false, bool isSimulated = false) {
+		flowKnobs.reset(randomize, isSimulated);
+		clientKnobs.reset(randomize);
+		serverKnobs.reset(randomize, &clientKnobs, isSimulated);
 		testKnobs.reset();
 	}
 
@@ -413,11 +413,6 @@ void TestKnobs::initialize() {
 	init(TEST_STRING, "");
 }
 
-void TestKnobs::reset() {
-	explicitlySetKnobs.clear();
-	initialize();
-}
-
 bool TestKnobs::operator==(TestKnobs const& rhs) const {
 	return (TEST_LONG == rhs.TEST_LONG) && (TEST_INT == rhs.TEST_INT) && (TEST_DOUBLE == rhs.TEST_DOUBLE) &&
 	       (TEST_BOOL == rhs.TEST_BOOL) && (TEST_STRING == rhs.TEST_STRING);
@@ -429,7 +424,7 @@ bool TestKnobs::operator!=(TestKnobs const& rhs) const {
 
 namespace {
 
-class TestKnobs2 : public Knobs {
+class TestKnobs2 : public Knobs<TestKnobs2> {
 public:
 	int64_t TEST2_LONG;
 	int TEST2_INT;
@@ -446,11 +441,6 @@ public:
 	}
 
 	TestKnobs2() { initialize(); }
-
-	void reset() {
-		explicitlySetKnobs.clear();
-		initialize();
-	}
 };
 
 } // namespace
