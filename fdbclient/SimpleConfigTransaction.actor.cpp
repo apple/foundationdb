@@ -32,12 +32,19 @@ class SimpleConfigTransactionImpl {
 	ConfigTransactionInterface cti;
 	int numRetries{ 0 };
 	bool committed{ false };
-	UID dID; // TODO: Use this
+	Optional<UID> dID;
+	Promise<Void> resetPromise; // TODO: Make this a field of ISingleThreadTransaction?
 
 	ACTOR static Future<Version> getReadVersion(SimpleConfigTransactionImpl* self) {
+		if (self->dID.present()) {
+			TraceEvent("SimpleConfigTransactionGettingReadVersion", self->dID.get());
+		}
 		ConfigTransactionGetVersionRequest req;
 		ConfigTransactionGetVersionReply reply =
 		    wait(self->cti.getVersion.getReply(ConfigTransactionGetVersionRequest{}));
+		if (self->dID.present()) {
+			TraceEvent("SimpleConfigTransactionGotReadVersion", self->dID.get()).detail("Version", reply.version);
+		}
 		return reply.version;
 	}
 
@@ -142,6 +149,8 @@ public:
 		reset();
 	}
 
+	size_t getApproximateSize() const { return mutations.expectedSize(); }
+
 	void debugTransaction(UID dID) { dID = dID; }
 
 }; // SimpleConfigTransactionImpl
@@ -150,7 +159,7 @@ Future<Version> SimpleConfigTransaction::getReadVersion() {
 	return impl->getReadVersion();
 }
 
-Optional<Version> SimpleConfigTransaction::getCachedReadVersion() {
+Optional<Version> SimpleConfigTransaction::getCachedReadVersion() const {
 	return impl->getCachedReadVersion();
 }
 
@@ -191,8 +200,7 @@ Version SimpleConfigTransaction::getCommittedVersion() const {
 }
 
 int64_t SimpleConfigTransaction::getApproximateSize() const {
-	// TODO: Implement
-	return 0;
+	return impl->getApproximateSize();
 }
 
 void SimpleConfigTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
@@ -204,7 +212,7 @@ Future<Void> SimpleConfigTransaction::onError(Error const& e) {
 }
 
 void SimpleConfigTransaction::cancel() {
-	// TODO: Implement
+	// TODO: Implement someday
 	throw client_invalid_operation();
 }
 
@@ -213,15 +221,18 @@ void SimpleConfigTransaction::reset() {
 }
 
 void SimpleConfigTransaction::fullReset() {
-	return impl->reset();
+	return impl->fullReset();
 }
 
 void SimpleConfigTransaction::debugTransaction(UID dID) {
 	impl->debugTransaction(dID);
 }
 
-void SimpleConfigTransaction::checkDeferredError() {
-	// TODO: Implement
+void SimpleConfigTransaction::checkDeferredError() const {
+	// TODO: Also check for deferred error in database?
+	if (deferredError.code() != invalid_error_code) {
+		throw deferredError;
+	}
 }
 
 void SimpleConfigTransaction::getWriteConflicts(KeyRangeMap<bool>* result) {}

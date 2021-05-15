@@ -44,7 +44,7 @@ public:
 
 	virtual void setVersion(Version v) = 0;
 	virtual Future<Version> getReadVersion() = 0;
-	virtual Optional<Version> getCachedReadVersion() = 0;
+	virtual Optional<Version> getCachedReadVersion() const = 0;
 	virtual Future<Optional<Value>> get(const Key& key, bool snapshot = false) = 0;
 	virtual Future<Key> getKey(const KeySelector& key, bool snapshot = false) = 0;
 	virtual Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin,
@@ -77,7 +77,7 @@ public:
 	virtual void cancel() = 0;
 	virtual void reset() = 0;
 	virtual void debugTransaction(UID dID) = 0;
-	virtual void checkDeferredError() = 0;
+	virtual void checkDeferredError() const = 0;
 	virtual void getWriteConflicts(KeyRangeMap<bool>* result) = 0;
 
 	// Used by ThreadSafeTransaction for exceptions thrown in void methods

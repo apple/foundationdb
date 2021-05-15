@@ -39,7 +39,7 @@ public:
 	~SimpleConfigTransaction();
 	void setVersion(Version) override { throw client_invalid_operation(); }
 	Future<Version> getReadVersion() override;
-	Optional<Version> getCachedReadVersion() override;
+	Optional<Version> getCachedReadVersion() const override;
 
 	Future<Optional<Value>> get(Key const& key, bool snapshot = false) override;
 	Future<Key> getKey(KeySelector const& key, bool snapshot = false) override { throw client_invalid_operation(); }
@@ -79,7 +79,7 @@ public:
 	void cancel() override;
 	void reset() override;
 	void debugTransaction(UID dID) override;
-	void checkDeferredError() override;
+	void checkDeferredError() const override;
 	void getWriteConflicts(KeyRangeMap<bool>* result) override;
 	void fullReset();
 };

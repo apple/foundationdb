@@ -242,7 +242,7 @@ public:
 	void setVersion(Version v);
 	Future<Version> getReadVersion() { return getReadVersion(0); }
 	Future<Version> getRawReadVersion();
-	Optional<Version> getCachedReadVersion();
+	Optional<Version> getCachedReadVersion() const;
 
 	[[nodiscard]] Future<Optional<Value>> get(const Key& key, bool snapshot = false);
 	[[nodiscard]] Future<Void> watch(Reference<Watch> watch);
@@ -350,7 +350,7 @@ public:
 
 	int apiVersionAtLeast(int minVersion) const;
 
-	void checkDeferredError();
+	void checkDeferredError() const;
 
 	Database getDatabase() const { return cx; }
 	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(const Database& cx);

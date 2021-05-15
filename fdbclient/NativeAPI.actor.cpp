@@ -4862,7 +4862,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	return readVersion;
 }
 
-Optional<Version> Transaction::getCachedReadVersion() {
+Optional<Version> Transaction::getCachedReadVersion() const {
 	if (readVersion.isValid() && readVersion.isReady() && !readVersion.isError()) {
 		return readVersion.get();
 	} else {
@@ -5369,7 +5369,7 @@ Future<Standalone<VectorRef<KeyRef>>> Transaction::splitStorageMetrics(KeyRange 
 	return ::splitStorageMetrics(cx, keys, limit, estimated);
 }
 
-void Transaction::checkDeferredError() {
+void Transaction::checkDeferredError() const {
 	cx->checkDeferredError();
 }
 

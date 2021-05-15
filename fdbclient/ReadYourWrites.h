@@ -69,7 +69,7 @@ public:
 
 	void setVersion(Version v) override { tr.setVersion(v); }
 	Future<Version> getReadVersion() override;
-	Optional<Version> getCachedReadVersion() override { return tr.getCachedReadVersion(); }
+	Optional<Version> getCachedReadVersion() const override { return tr.getCachedReadVersion(); }
 	Future<Optional<Value>> get(const Key& key, bool snapshot = false) override;
 	Future<Key> getKey(const KeySelector& key, bool snapshot = false) override;
 	Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin,
@@ -144,7 +144,7 @@ public:
 	// Throws before the lifetime of this transaction ends
 	Future<Void> resetFuture() { return resetPromise.getFuture(); }
 
-	void checkDeferredError() override {
+	void checkDeferredError() const override {
 		tr.checkDeferredError();
 		if (deferredError.code() != invalid_error_code)
 			throw deferredError;
