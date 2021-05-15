@@ -1982,7 +1982,8 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 	try {
 		if (req.debugID.present())
-			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.Before");
+			g_traceBatch.addEvent(
+			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesStream.Before");
 		state Version version = wait(waitForVersion(data, req.version, span.context));
 
 		state uint64_t changeCounter = data->shardChangeCounter;
@@ -1991,7 +1992,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 		if (req.debugID.present())
 			g_traceBatch.addEvent(
-			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterVersion");
+			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesStream.AfterVersion");
 		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
 		//req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
@@ -2016,7 +2017,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 		state Key end = wait(fEnd);
 		if (req.debugID.present())
 			g_traceBatch.addEvent(
-			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterKeys");
+			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesStream.AfterKeys");
 		//.detail("Off1",offset1).detail("Off2",offset2).detail("ReqBegin",req.begin.getKey()).detail("ReqEnd",req.end.getKey());
 
 		// Offsets of zero indicate begin/end keys in this shard, which obviously means we can answer the query
@@ -2035,7 +2036,8 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 		if (begin >= end) {
 			if (req.debugID.present())
-				g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.Send");
+				g_traceBatch.addEvent(
+				    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesStream.Send");
 			//.detail("Begin",begin).detail("End",end);
 
 			GetKeyValuesStreamReply none;
@@ -2061,8 +2063,9 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 				GetKeyValuesStreamReply r(_r);
 
 				if (req.debugID.present())
-					g_traceBatch.addEvent(
-					    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterReadRange");
+					g_traceBatch.addEvent("TransactionDebug",
+					                      req.debugID.get().first(),
+					                      "storageserver.getKeyValuesStream.AfterReadRange");
 				//.detail("Begin",begin).detail("End",end).detail("SizeOf",r.data.size());
 				data->checkChangeCounter(
 				    changeCounter,
@@ -2118,19 +2121,6 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 				}
 
 				data->transactionTagCounter.addRequest(req.tags, resultSize);
-
-				// FIXME: figure out what to do with latency measurements
-				// double duration = g_network->timer() - req.requestTime();
-				// data->counters.readLatencySample.addMeasurement(duration);
-				// if(data->latencyBandConfig.present()) {
-				//	int maxReadBytes =
-				//data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max()); 	int
-				//maxSelectorOffset =
-				//data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
-				//	data->counters.readLatencyBands.addMeasurement(
-				//		duration, resultSize > maxReadBytes || abs(req.begin.offset) > maxSelectorOffset ||
-				//										abs(req.end.offset) > maxSelectorOffset);
-				//}
 			}
 		}
 	} catch (Error& e) {
@@ -2144,19 +2134,6 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
-
-	// FIXME: figure out what to do with latency measurements
-	// double duration = g_network->timer() - req.requestTime();
-	// data->counters.readLatencySample.addMeasurement(duration);
-	// if(data->latencyBandConfig.present()) {
-	//	int maxReadBytes =
-	//data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max()); 	int
-	//maxSelectorOffset =
-	//data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
-	//	data->counters.readLatencyBands.addMeasurement(
-	//		duration, resultSize > maxReadBytes || abs(req.begin.offset) > maxSelectorOffset ||
-	//										abs(req.end.offset) > maxSelectorOffset);
-	//}
 
 	return Void();
 }
