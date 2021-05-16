@@ -122,17 +122,9 @@ ACTOR Future<Void> readConfigState(SimpleConfigTransaction* tr,
 	return Void();
 }
 
-ACTOR template <class F>
-Future<Void> waitUntil(F isReady) {
-	loop {
-		if (isReady()) {
-			return Void();
-		}
-		wait(delayJittered(0.1));
-	}
-}
-
-Future<Void> readConfigState(LocalConfiguration const* localConfiguration, Optional<int64_t> expected, bool immediate) {
+ACTOR Future<Void> readConfigState(LocalConfiguration const* localConfiguration,
+                                   Optional<int64_t> expected,
+                                   bool immediate) {
 	if (immediate) {
 		if (expected.present()) {
 			ASSERT_EQ(localConfiguration->getTestKnobs().TEST_LONG, expected.get());
@@ -141,9 +133,12 @@ Future<Void> readConfigState(LocalConfiguration const* localConfiguration, Optio
 		}
 		return Void();
 	} else {
-		return waitUntil([localConfiguration, expected] {
-			return localConfiguration->getTestKnobs().TEST_LONG == (expected.present() ? expected.get() : 0);
-		});
+		loop {
+			if (localConfiguration->getTestKnobs().TEST_LONG == (expected.present() ? expected.get() : 0)) {
+				return Void();
+			}
+			wait(delayJittered(0.1));
+		}
 	}
 }
 
