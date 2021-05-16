@@ -264,6 +264,7 @@ public:
 		Future<Void> writeOperations;
 
 		FlowLock mutex;
+		Future<Void> killMutex;
 
 		Cursor() : mode(NONE) {}
 
@@ -274,6 +275,14 @@ public:
 		          int readOffset = 0,
 		          LogicalPageID endPage = invalidLogicalPageID) {
 			queue = q;
+
+			// If the pager gets an error, which includes shutdown, kill the mutex so any waiters can no longer run.
+			// This avoids having every mutex wait also wait on pagerError.
+			killMutex = map(ready(queue->pagerError), [=](Void e) {
+				mutex.kill();
+				return Void();
+			});
+
 			mode = m;
 			firstPageIDWritten = invalidLogicalPageID;
 			offset = readOffset;
