@@ -54,7 +54,7 @@ Value longToValue(int64_t v) {
 	return StringRef(reinterpret_cast<uint8_t const*>(s.c_str()), s.size());
 }
 
-Future<Void> addTestClearMutations(SimpleConfigTransaction& tr) {
+Future<Void> addTestClearMutations(SimpleConfigTransaction& tr, Version version /* TODO: shouldn't need this */) {
 	tr.fullReset();
 	auto configKeyA = encodeConfigKey("class-A"_sr, "test_long"_sr);
 	auto configKeyB = encodeConfigKey("class-B"_sr, "test_long"_sr);
@@ -104,7 +104,9 @@ Future<Void> addTestSetMutations(WriteTo& writeTo, int64_t value) {
 	return writeTo.addVersionedMutations(versionedMutations, version);
 }
 
-ACTOR Future<Void> readConfigState(SimpleConfigTransaction* tr, Optional<int64_t> expected) {
+ACTOR Future<Void> readConfigState(SimpleConfigTransaction* tr,
+                                   Optional<int64_t> expected,
+                                   bool immediate /* TODO : remove this */) {
 	tr->fullReset();
 	state Key configKeyA = encodeConfigKey("class-A"_sr, "test_long"_sr);
 	state Key configKeyB = encodeConfigKey("class-B"_sr, "test_long"_sr);
@@ -120,14 +122,28 @@ ACTOR Future<Void> readConfigState(SimpleConfigTransaction* tr, Optional<int64_t
 	return Void();
 }
 
-template <bool immediate>
-Future<Void> readConfigState(LocalConfiguration const* localConfiguration, int64_t expected) {
-	if constexpr (immediate) {
-		ASSERT_EQ(localConfiguration->getTestKnobs().TEST_LONG, expected);
+ACTOR template <class F>
+Future<Void> waitUntil(F isReady) {
+	loop {
+		if (isReady()) {
+			return Void();
+		}
+		wait(delayJittered(0.1));
+	}
+}
+
+Future<Void> readConfigState(LocalConfiguration const* localConfiguration, Optional<int64_t> expected, bool immediate) {
+	if (immediate) {
+		if (expected.present()) {
+			ASSERT_EQ(localConfiguration->getTestKnobs().TEST_LONG, expected.get());
+		} else {
+			ASSERT_EQ(localConfiguration->getTestKnobs().TEST_LONG, 0);
+		}
 		return Void();
 	} else {
-		return waitUntil(
-		    [localConfiguration, expected] { return localConfiguration->getTestKnobs().TEST_LONG == expected; });
+		return waitUntil([localConfiguration, expected] {
+			return localConfiguration->getTestKnobs().TEST_LONG == (expected.present() ? expected.get() : 0);
+		});
 	}
 }
 
@@ -139,200 +155,243 @@ Future<Void> addTestGlobalSetMutation(ConfigStore& configStore, Version& lastWri
 	return configStore.addVersionedMutations(versionedMutations, lastWrittenVersion);
 }
 
-class DummyConfigSource {
-	ConfigFollowerInterface cfi;
-	ACTOR static Future<Void> serve(DummyConfigSource* self) {
-		loop {
-			choose {
-				when(ConfigFollowerGetVersionRequest req = waitNext(self->cfi.getVersion.getFuture())) {
-					req.reply.send(0);
-				}
-				when(ConfigFollowerGetSnapshotRequest req = waitNext(self->cfi.getSnapshot.getFuture())) {
-					req.reply.send(ConfigFollowerGetSnapshotReply{});
+class LocalConfigEnvironment {
+	LocalConfiguration localConfiguration;
+
+public:
+	LocalConfigEnvironment(std::string const& configPath, std::map<Key, Value> const& manualKnobOverrides)
+	  : localConfiguration(configPath, manualKnobOverrides) {}
+
+	Future<Void> setup() { return localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()); }
+
+	template <class TestType, class... Args>
+	Future<Void> run(Args&&... args) {
+		return TestType::run(localConfiguration, localConfiguration, std::forward<Args>(args)...);
+	}
+};
+
+class BroadcasterToLocalConfigEnvironment {
+	class DummyConfigSource {
+		ConfigFollowerInterface cfi;
+		ACTOR static Future<Void> serve(DummyConfigSource* self) {
+			loop {
+				choose {
+					when(ConfigFollowerGetVersionRequest req = waitNext(self->cfi.getVersion.getFuture())) {
+						req.reply.send(0);
+					}
+					when(ConfigFollowerGetSnapshotRequest req = waitNext(self->cfi.getSnapshot.getFuture())) {
+						req.reply.send(ConfigFollowerGetSnapshotReply{});
+					}
 				}
 			}
 		}
+
+	public:
+		Future<Void> serve() { return serve(this); }
+		ConfigFollowerInterface const& getInterface() { return cfi; }
+	} dummyConfigSource;
+	ConfigBroadcaster broadcaster;
+	Reference<AsyncVar<ConfigFollowerInterface>> cfi;
+	LocalConfiguration localConfiguration;
+	ActorCollection actors{ false };
+
+	ACTOR static Future<Void> setup(BroadcasterToLocalConfigEnvironment* self) {
+		wait(self->localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
+		self->actors.add(self->dummyConfigSource.serve());
+		self->actors.add(self->broadcaster.serve(self->cfi->get()));
+		self->actors.add(
+		    self->localConfiguration.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(self->cfi)));
+		return Void();
 	}
 
 public:
-	Future<Void> serve() { return serve(this); }
-	ConfigFollowerInterface const& getInterface() { return cfi; }
+	BroadcasterToLocalConfigEnvironment()
+	  : broadcaster(dummyConfigSource.getInterface(), deterministicRandom()->randomUniqueID()),
+	    cfi(makeReference<AsyncVar<ConfigFollowerInterface>>()), localConfiguration("class-A", {}) {}
+
+	Future<Void> setup() { return setup(this); }
+
+	template <class TestType, class... Args>
+	Future<Void> run(Args&&... args) {
+		return waitOrError(TestType::run(broadcaster, localConfiguration, std::forward<Args>(args)...),
+		                   actors.getResult());
+	}
 };
 
-ACTOR template <class F>
-Future<Void> runLocalConfigEnvironment(std::string configPath, std::map<Key, Value> manualKnobOverrides, F f) {
-	state LocalConfiguration localConfiguration(configPath, manualKnobOverrides);
-	state Version lastWrittenVersion = 0;
-	wait(localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
-	wait(f(localConfiguration));
-	return Void();
-}
+class TransactionEnvironment {
+	ConfigTransactionInterface cti;
+	SimpleConfigTransaction tr;
+	SimpleConfigDatabaseNode node;
+	ActorCollection actors{ false };
 
-ACTOR template <class F>
-Future<Void> runBroadcasterToLocalConfigEnvironment(F f) {
-	state DummyConfigSource dummyConfigSource;
-	state ConfigBroadcaster broadcaster(dummyConfigSource.getInterface(), deterministicRandom()->randomUniqueID());
-	state Reference<AsyncVar<ConfigFollowerInterface>> cfi = makeReference<AsyncVar<ConfigFollowerInterface>>();
-	state LocalConfiguration localConfigurationA("class-A", {});
-	state LocalConfiguration localConfigurationB("class-B", {});
-	state ActorCollection actors(false);
-	wait(localConfigurationA.initialize("./", deterministicRandom()->randomUniqueID()));
-	wait(localConfigurationB.initialize("./", deterministicRandom()->randomUniqueID()));
-	actors.add(dummyConfigSource.serve());
-	actors.add(broadcaster.serve(cfi->get()));
-	actors.add(localConfigurationA.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(cfi)));
-	actors.add(localConfigurationB.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(cfi)));
-	wait(waitOrError(f(broadcaster, localConfigurationA, localConfigurationB), actors.getResult()));
-	return Void();
-}
-
-ACTOR template <class F>
-Future<Void> runTransactionToLocalConfigEnvironment(F f) {
-	state ConfigTransactionInterface cti;
-	state Reference<AsyncVar<ConfigFollowerInterface>> cfi = makeReference<AsyncVar<ConfigFollowerInterface>>();
-	state SimpleConfigTransaction tr(cti);
-	state SimpleConfigDatabaseNode node;
-	state ActorCollection actors(false);
-	state LocalConfiguration localConfigurationA("class-A", {});
-	state LocalConfiguration localConfigurationB("class-B", {});
-	wait(localConfigurationA.initialize("./", deterministicRandom()->randomUniqueID()));
-	wait(localConfigurationB.initialize("./", deterministicRandom()->randomUniqueID()));
-	wait(node.initialize("./", deterministicRandom()->randomUniqueID()));
-	actors.add(node.serve(cti));
-	actors.add(node.serve(cfi->get()));
-	actors.add(localConfigurationA.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(cfi)));
-	actors.add(localConfigurationB.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(cfi)));
-	wait(waitOrError(f(tr, localConfigurationA, localConfigurationB), actors.getResult()));
-	return Void();
-}
-
-ACTOR template <class F>
-Future<Void> runTransactionEnvironment(F f) {
-	state ConfigTransactionInterface cti;
-	state SimpleConfigTransaction tr(cti);
-	state SimpleConfigDatabaseNode node;
-	state ActorCollection actors(false);
-	wait(node.initialize("./", deterministicRandom()->randomUniqueID()));
-	actors.add(node.serve(cti));
-	wait(waitOrError(f(tr), actors.getResult()));
-	return Void();
-}
-
-ACTOR template <class F>
-Future<Void> waitUntil(F isReady) {
-	loop {
-		if (isReady()) {
-			return Void();
-		}
-		wait(delayJittered(0.1));
+	ACTOR static Future<Void> setup(TransactionEnvironment* self) {
+		wait(self->node.initialize("./", deterministicRandom()->randomUniqueID()));
+		self->actors.add(self->node.serve(self->cti));
+		return Void();
 	}
-}
+
+public:
+	TransactionEnvironment() : tr(cti) {}
+
+	Future<Void> setup() { return setup(this); }
+
+	template <class TestType, class... Args>
+	Future<Void> run(Args&&... args) {
+		return waitOrError(TestType::run(tr, tr, std::forward<Args>(args)...), actors.getResult());
+	}
+};
+
+class TransactionToLocalConfigEnvironment {
+	ConfigTransactionInterface cti;
+	Reference<AsyncVar<ConfigFollowerInterface>> cfi;
+	SimpleConfigTransaction tr;
+	SimpleConfigDatabaseNode node;
+	LocalConfiguration localConfiguration;
+	ActorCollection actors{ false };
+
+	ACTOR Future<Void> setup(TransactionToLocalConfigEnvironment* self) {
+		wait(self->localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
+		wait(self->node.initialize("./", deterministicRandom()->randomUniqueID()));
+		self->actors.add(self->node.serve(self->cti));
+		self->actors.add(self->node.serve(self->cfi->get()));
+		self->actors.add(
+		    self->localConfiguration.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(self->cfi)));
+		return Void();
+	}
+
+public:
+	TransactionToLocalConfigEnvironment()
+	  : cfi(makeReference<AsyncVar<ConfigFollowerInterface>>()), tr(cti), localConfiguration("class-A", {}) {}
+
+	Future<Void> setup() { return setup(this); }
+
+	template <class TestType, class... Args>
+	Future<Void> run(Args&&... args) {
+		return waitOrError(TestType::run(tr, localConfiguration, std::forward<Args>(args)...), actors.getResult());
+	}
+};
+
+class TestSet {
+public:
+	template <class WriteTo, class ReadFrom>
+	static Future<Void> run(WriteTo& writeTo, ReadFrom& readFrom, int64_t expected, bool immediate) {
+		std::function<Future<Void>(Void const&)> check = [&readFrom, expected, immediate](Void const&) {
+			return readConfigState(&readFrom, expected, immediate);
+		};
+		return addTestSetMutations(writeTo, 1) >>= check;
+	}
+};
+
+class TestClear {
+public:
+	template <class WriteTo, class ReadFrom>
+	static Future<Void> run(WriteTo& writeTo, ReadFrom& readFrom, bool immediate) {
+		std::function<Future<Void>(Void const&)> clear = [&writeTo](Void const&) {
+			return addTestClearMutations(writeTo, 2);
+		};
+		std::function<Future<Void>(Void const&)> check = [&readFrom, immediate](Void const&) {
+			return readConfigState(&readFrom, {}, immediate);
+		};
+		return (addTestSetMutations(writeTo, 1) >>= clear) >>= check;
+	}
+};
+
+class TestGlobal {
+public:
+	template <class WriteTo>
+	static Future<Void> run(WriteTo& writeTo, LocalConfiguration const& readFrom, bool immediate) {
+		std::function<Future<Void>(Void const&)> globalWrite = [&writeTo](Void const&) {
+			return addTestGlobalSetMutation(writeTo, 2);
+		};
+		std::function<Future<Void>(Void const&)> check = [&readFrom, immediate](Void const&) {
+			return readConfigState(&readFrom, 2, immediate);
+		};
+		return (addTestSetMutations(writeTo, 1) >>= globalWrite) >>= check;
+	}
+};
 
 } // namespace
 
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ManualOverride") {
-	wait(runLocalConfigEnvironment("class-A", { { "test_long"_sr, "1000"_sr } }, [](auto& conf) {
-		std::function<Future<Void>(Void const&)> check = [&conf](Void const&) {
-			return readConfigState<true>(&conf, 1000);
-		};
-		return addTestSetMutations(conf, 1) >>= check;
-	}));
-	return Void();
-}
-
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ConflictingOverride") {
-	wait(runLocalConfigEnvironment("class-A/class-B", {}, [](auto& conf) {
-		std::function<Future<Void>(Void const&)> check = [&conf](Void const&) {
-			return readConfigState<true>(&conf, 10);
-		};
-		return addTestSetMutations(conf, 1) >>= check;
-	}));
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Set") {
+	state LocalConfigEnvironment environment("class-A", std::map<Key, Value>{});
+	wait(environment.setup());
+	wait(environment.run<TestSet>(1, true));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Clear") {
-	wait(runLocalConfigEnvironment("class-A/class-B", {}, [](auto& conf) {
-		std::function<Future<Void>(Void const&)> clear = [&conf](Void const&) {
-			return addTestClearMutations(conf, 2);
-		};
-		std::function<Future<Void>(Void const&)> check = [&conf](Void const&) {
-			return readConfigState<true>(&conf, 0);
-		};
-		return (addTestSetMutations(conf, 1) >>= clear) >>= check;
-	}));
+	state LocalConfigEnvironment environment("class-A", std::map<Key, Value>{});
+	wait(environment.setup());
+	wait(environment.run<TestClear>(true));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ManualOverride") {
+	state LocalConfigEnvironment environment("class-A", std::map<Key, Value>{ { "test_long"_sr, "1000"_sr } });
+	wait(environment.setup());
+	wait(environment.run<TestSet>(1000, true));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ConflictingOverride") {
+	state LocalConfigEnvironment environment("class-A/class-B", std::map<Key, Value>{});
+	wait(environment.setup());
+	wait(environment.run<TestSet>(10, true));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Global") {
-	wait(runLocalConfigEnvironment("class-A", {}, [](auto& conf) {
-		std::function<Future<Void>(Void const&)> setGlobal = [&conf](Void const&) {
-			return addTestGlobalSetMutation(conf, 2);
-		};
-		std::function<Future<Void>(Void const&)> check = [&conf](Void const&) {
-			return readConfigState<true>(&conf, 2);
-		};
-		return (addTestSetMutations(conf, 1) >>= setGlobal) >>= check;
-	}));
+	state LocalConfigEnvironment environment("class-A", std::map<Key, Value>{});
+	wait(environment.setup());
+	wait(environment.run<TestGlobal>(true));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/Set") {
-	wait(runBroadcasterToLocalConfigEnvironment([](auto& broadcaster, auto& confA, auto& confB) {
-		std::function<Future<Void>(Void const&)> check = [&confA, &confB](Void const&) {
-			return readConfigState<false>(&confA, 1) && readConfigState<false>(&confB, 10);
-		};
-		return addTestSetMutations(broadcaster, 1) >>= check;
-	}));
+	state BroadcasterToLocalConfigEnvironment environment;
+	wait(environment.setup());
+	wait(environment.run<TestSet>(1, false));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/Clear") {
-	wait(runBroadcasterToLocalConfigEnvironment([](auto& broadcaster, auto& confA, auto& confB) {
-		std::function<Future<Void>(Void const&)> clear = [&broadcaster](Void const&) {
-			return addTestClearMutations(broadcaster, 2);
-		};
-		std::function<Future<Void>(Void const&)> check = [&confA, &confB](Void const&) {
-			return readConfigState<false>(&confA, 0) && readConfigState<false>(&confB, 0);
-		};
-		return (addTestSetMutations(broadcaster, 1) >>= clear) >>= check;
-	}));
+	state BroadcasterToLocalConfigEnvironment environment;
+	wait(environment.setup());
+	wait(environment.run<TestClear>(false));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/Global") {
+	state BroadcasterToLocalConfigEnvironment environment;
+	wait(environment.setup());
+	wait(environment.run<TestGlobal>(false));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/Transaction/Set") {
-	wait(runTransactionEnvironment([](auto& tr) {
-		std::function<Future<Void>(Void const&)> check = [&tr](Void const&) { return readConfigState(&tr, 1); };
-		return addTestSetMutations(tr, 1) >>= check;
-	}));
+	state TransactionEnvironment environment;
+	wait(environment.setup());
+	wait(environment.run<TestSet>(1, true));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/Transaction/Clear") {
-	wait(runTransactionEnvironment([](auto& tr) {
-		std::function<Future<Void>(Void const&)> clear = [&tr](Void const&) { return addTestClearMutations(tr); };
-		std::function<Future<Void>(Void const&)> check = [&tr](Void const&) { return readConfigState(&tr, {}); };
-		return (addTestSetMutations(tr, 1) >>= clear) >>= check;
-	}));
+	state TransactionEnvironment environment;
+	wait(environment.setup());
+	wait(environment.run<TestClear>(true));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/Set") {
-	wait(runTransactionToLocalConfigEnvironment([](auto& tr, auto const& confA, auto const& confB) {
-		std::function<Future<Void>(Void const&)> check = [&confA, &confB](Void const&) {
-			return readConfigState<false>(&confA, 1) && readConfigState<false>(&confB, 10);
-		};
-		return addTestSetMutations(tr, 1) >>= check;
-	}));
+	state TransactionToLocalConfigEnvironment environment;
+	wait(environment.setup());
+	wait(environment.run<TestSet>(1, false));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/Clear") {
-	wait(runTransactionToLocalConfigEnvironment([](auto& tr, auto const& confA, auto const& confB) {
-		std::function<Future<Void>(Void const&)> clear = [&tr](Void const&) { return addTestClearMutations(tr); };
-		std::function<Future<Void>(Void const&)> check = [&confA, &confB](Void const&) {
-			return readConfigState<false>(&confA, 0) && readConfigState<false>(&confB, 0);
-		};
-		return (addTestSetMutations(tr, 1) >>= clear) >>= check;
-	}));
+	state TransactionToLocalConfigEnvironment environment;
+	wait(environment.setup());
+	wait(environment.run<TestClear>(false));
 	return Void();
 }
