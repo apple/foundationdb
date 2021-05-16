@@ -480,7 +480,7 @@ struct LeaderRegisterCollection {
 		if (!self->pStore->exists())
 			return Void();
 		OnDemandStore& store = *self->pStore;
-		Standalone<RangeResultRef> forwardingInfo = wait(store->readRange(fwdKeys));
+		RangeResult forwardingInfo = wait(store->readRange(fwdKeys));
 		for (int i = 0; i < forwardingInfo.size(); i++) {
 			LeaderInfo forwardInfo;
 			forwardInfo.forward = true;

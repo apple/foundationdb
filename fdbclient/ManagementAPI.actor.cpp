@@ -357,7 +357,7 @@ ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx) {
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Standalone<RangeResultRef> res = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult res = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(res.size() < CLIENT_KNOBS->TOO_MANY);
 			DatabaseConfiguration config;
 			config.fromKeyValues((VectorRef<KeyValueRef>)res);
@@ -407,7 +407,7 @@ ACTOR Future<ConfigurationResult> changeConfig(Database cx, std::map<std::string
 			tr.setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
 
 			if (!creating && !force) {
-				state Future<Standalone<RangeResultRef>> fConfig = tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeResult> fConfig = tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY);
 				state Future<vector<ProcessData>> fWorkers = getWorkers(&tr);
 				wait(success(fConfig) || tooLong);
 
@@ -458,19 +458,19 @@ ACTOR Future<ConfigurationResult> changeConfig(Database cx, std::map<std::string
 						}
 					}
 
-					state Future<Standalone<RangeResultRef>> fServerList =
-					    (newConfig.regions.size()) ? tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY)
-					                               : Future<Standalone<RangeResultRef>>();
+					state Future<RangeResult> fServerList = (newConfig.regions.size())
+					                                            ? tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY)
+					                                            : Future<RangeResult>();
 
 					if (newConfig.usableRegions == 2) {
 						if (oldReplicationUsesDcId) {
-							state Future<Standalone<RangeResultRef>> fLocalityList =
+							state Future<RangeResult> fLocalityList =
 							    tr.getRange(tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY);
 							wait(success(fLocalityList) || tooLong);
 							if (!fLocalityList.isReady()) {
 								return ConfigurationResult::DATABASE_UNAVAILABLE;
 							}
-							Standalone<RangeResultRef> localityList = fLocalityList.get();
+							RangeResult localityList = fLocalityList.get();
 							ASSERT(!localityList.more && localityList.size() < CLIENT_KNOBS->TOO_MANY);
 
 							std::set<Key> localityDcIds;
@@ -513,7 +513,7 @@ ACTOR Future<ConfigurationResult> changeConfig(Database cx, std::map<std::string
 						if (!fServerList.isReady()) {
 							return ConfigurationResult::DATABASE_UNAVAILABLE;
 						}
-						Standalone<RangeResultRef> serverList = fServerList.get();
+						RangeResult serverList = fServerList.get();
 						ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 						std::set<Key> newDcIds;
@@ -988,8 +988,8 @@ Future<ConfigurationResult> changeConfig(Database const& cx, std::string const& 
 }
 
 ACTOR Future<vector<ProcessData>> getWorkers(Transaction* tr) {
-	state Future<Standalone<RangeResultRef>> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
-	state Future<Standalone<RangeResultRef>> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
+	state Future<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
+	state Future<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
 
 	wait(success(processClasses) && success(processData));
 	ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
@@ -1679,9 +1679,9 @@ ACTOR Future<Void> setClass(Database cx, AddressExclusion server, ProcessClass p
 }
 
 ACTOR Future<vector<AddressExclusion>> getExcludedServers(Transaction* tr) {
-	state Standalone<RangeResultRef> r = wait(tr->getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY));
+	state RangeResult r = wait(tr->getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
-	state Standalone<RangeResultRef> r2 = wait(tr->getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY));
+	state RangeResult r2 = wait(tr->getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!r2.more && r2.size() < CLIENT_KNOBS->TOO_MANY);
 
 	vector<AddressExclusion> exclusions;
@@ -1867,7 +1867,7 @@ ACTOR Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr
 	// recovery
 
 	// Check that there aren't any storage servers with addresses violating the exclusions
-	Standalone<RangeResultRef> serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+	RangeResult serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 	state bool ok = true;
@@ -1948,7 +1948,7 @@ ACTOR Future<Void> waitForFullReplication(Database cx) {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			Standalone<RangeResultRef> confResults = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult confResults = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!confResults.more && confResults.size() < CLIENT_KNOBS->TOO_MANY);
 			state DatabaseConfiguration config;
 			config.fromKeyValues((VectorRef<KeyValueRef>)confResults);
@@ -2203,8 +2203,7 @@ ACTOR Future<Void> changeCachedRange(Database cx, KeyRangeRef range, bool add) {
 			tr.clear(sysRangeClear);
 			tr.clear(privateRange);
 			tr.addReadConflictRange(privateRange);
-			Standalone<RangeResultRef> previous =
-			    wait(tr.getRange(KeyRangeRef(storageCachePrefix, sysRange.begin), 1, true));
+			RangeResult previous = wait(tr.getRange(KeyRangeRef(storageCachePrefix, sysRange.begin), 1, true));
 			bool prevIsCached = false;
 			if (!previous.empty()) {
 				std::vector<uint16_t> prevVal;
@@ -2220,8 +2219,7 @@ ACTOR Future<Void> changeCachedRange(Database cx, KeyRangeRef range, bool add) {
 				tr.set(sysRange.begin, trueValue);
 				tr.set(privateRange.begin, serverKeysTrue);
 			}
-			Standalone<RangeResultRef> after =
-			    wait(tr.getRange(KeyRangeRef(sysRange.end, storageCacheKeys.end), 1, false));
+			RangeResult after = wait(tr.getRange(KeyRangeRef(sysRange.end, storageCacheKeys.end), 1, false));
 			bool afterIsCached = false;
 			if (!after.empty()) {
 				std::vector<uint16_t> afterVal;

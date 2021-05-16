@@ -50,12 +50,12 @@ struct LockDatabaseWorkload : TestWorkload {
 
 	void getMetrics(vector<PerfMetric>& m) override {}
 
-	ACTOR static Future<Standalone<RangeResultRef>> lockAndSave(Database cx, LockDatabaseWorkload* self, UID lockID) {
+	ACTOR static Future<RangeResult> lockAndSave(Database cx, LockDatabaseWorkload* self, UID lockID) {
 		state Transaction tr(cx);
 		loop {
 			try {
 				wait(lockDatabase(&tr, lockID));
-				state Standalone<RangeResultRef> data = wait(tr.getRange(normalKeys, 50000));
+				state RangeResult data = wait(tr.getRange(normalKeys, 50000));
 				ASSERT(!data.more);
 				wait(tr.commit());
 				return data;
@@ -65,10 +65,7 @@ struct LockDatabaseWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> unlockAndCheck(Database cx,
-	                                         LockDatabaseWorkload* self,
-	                                         UID lockID,
-	                                         Standalone<RangeResultRef> data) {
+	ACTOR static Future<Void> unlockAndCheck(Database cx, LockDatabaseWorkload* self, UID lockID, RangeResult data) {
 		state Transaction tr(cx);
 		loop {
 			try {
@@ -78,7 +75,7 @@ struct LockDatabaseWorkload : TestWorkload {
 					return Void();
 
 				wait(unlockDatabase(&tr, lockID));
-				state Standalone<RangeResultRef> data2 = wait(tr.getRange(normalKeys, 50000));
+				state RangeResult data2 = wait(tr.getRange(normalKeys, 50000));
 				if (data.size() != data2.size()) {
 					TraceEvent(SevError, "DataChangedWhileLocked")
 					    .detail("BeforeSize", data.size())
@@ -122,7 +119,7 @@ struct LockDatabaseWorkload : TestWorkload {
 	ACTOR static Future<Void> lockWorker(Database cx, LockDatabaseWorkload* self) {
 		state UID lockID = deterministicRandom()->randomUniqueID();
 		wait(delay(self->lockAfter));
-		state Standalone<RangeResultRef> data = wait(lockAndSave(cx, self, lockID));
+		state RangeResult data = wait(lockAndSave(cx, self, lockID));
 		state Future<Void> checker = checkLocked(cx, self);
 		wait(delay(self->unlockAfter - self->lockAfter));
 		checker.cancel();

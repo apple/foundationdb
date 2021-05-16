@@ -143,7 +143,7 @@ public:
 	virtual void delref() = 0;
 };
 
-// This API is probably customized to the behavior of DWALPager and probably needs some changes to be more generic.
+// This API is probably too customized to the behavior of DWALPager and probably needs some changes to be more generic.
 class IPager2 : public IClosable {
 public:
 	// Returns an ArenaPage that can be passed to writePage. The data in the returned ArenaPage might not be zeroed.

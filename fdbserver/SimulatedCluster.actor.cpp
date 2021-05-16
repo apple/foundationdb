@@ -730,9 +730,14 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
 				zoneId = StringRef(zoneIDini);
 			}
 
-			ProcessClass processClass =
-			    ProcessClass((ProcessClass::ClassType)atoi(ini.GetValue(machineIdString.c_str(), "mClass")),
-			                 ProcessClass::CommandLineSource);
+			ProcessClass::ClassType cType =
+			    (ProcessClass::ClassType)(atoi(ini.GetValue(machineIdString.c_str(), "mClass")));
+			// using specialized class types can lead to nondeterministic recruitment
+			if (cType == ProcessClass::MasterClass || cType == ProcessClass::ResolutionClass) {
+				cType = ProcessClass::StatelessClass;
+			}
+			ProcessClass processClass = ProcessClass(cType, ProcessClass::CommandLineSource);
+
 			if (processClass != ProcessClass::TesterClass) {
 				dcIds.push_back(dcUIDini);
 			}
@@ -1450,8 +1455,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	bool requiresExtraDBMachines = testConfig.extraDB && g_simulator.extraDB->toString() != conn.toString();
 	int assignedMachines = 0, nonVersatileMachines = 0;
 	std::vector<ProcessClass::ClassType> processClassesSubSet = { ProcessClass::UnsetClass,
-		                                                          ProcessClass::ResolutionClass,
-		                                                          ProcessClass::MasterClass };
+		                                                          ProcessClass::StatelessClass };
 	for (int dc = 0; dc < dataCenters; dc++) {
 		// FIXME: test unset dcID
 		Optional<Standalone<StringRef>> dcUID = StringRef(format("%d", dc));
@@ -1493,12 +1497,12 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 				else if (assignedMachines == 4 && !simconfig.db.regions.size())
 					processClass = ProcessClass(
 					    processClassesSubSet[deterministicRandom()->randomInt(0, processClassesSubSet.size())],
-					    ProcessClass::CommandLineSource); // Unset or Resolution or Master
+					    ProcessClass::CommandLineSource); // Unset or Stateless
 				else
 					processClass = ProcessClass((ProcessClass::ClassType)deterministicRandom()->randomInt(0, 3),
 					                            ProcessClass::CommandLineSource); // Unset, Storage, or Transaction
 				if (processClass ==
-				    ProcessClass::ResolutionClass) // *can't* be assigned to other roles, even in an emergency
+				    ProcessClass::StatelessClass) // *can't* be assigned to other roles, even in an emergency
 					nonVersatileMachines++;
 			}
 

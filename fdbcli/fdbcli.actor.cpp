@@ -21,6 +21,8 @@
 #include "boost/lexical_cast.hpp"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/IClientApi.h"
+#include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/DatabaseContext.h"
@@ -34,6 +36,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/TagThrottle.h"
 
+#include "fdbclient/ThreadSafeTransaction.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Platform.h"
 
@@ -41,6 +44,7 @@
 #include "flow/SimpleOpt.h"
 
 #include "fdbcli/FlowLineNoise.h"
+#include "fdbcli/fdbcli.actor.h"
 
 #include <cinttypes>
 #include <type_traits>
@@ -55,6 +59,13 @@
 #include "fdbclient/BuildFlags.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+#define FDB_API_VERSION 710
+/*
+ * While we could just use the MultiVersionApi instance directly, this #define allows us to swap in any other IClientApi
+ * instance (e.g. from ThreadSafeApi)
+ */
+#define API ((IClientApi*)MultiVersionApi::api)
 
 extern const char* getSourceVersion();
 
@@ -168,6 +179,13 @@ public:
 
 	// Applies all enabled transaction options to the given transaction
 	void apply(Reference<ReadYourWritesTransaction> tr) {
+		for (const auto& [name, value] : transactionOptions.options) {
+			tr->setOption(name, value.castTo<StringRef>());
+		}
+	}
+
+	// TODO: replace the above function after we refactor all fdbcli code
+	void apply(Reference<ITransaction> tr) {
 		for (const auto& [name, value] : transactionOptions.options) {
 			tr->setOption(name, value.castTo<StringRef>());
 		}
@@ -320,13 +338,6 @@ static std::string formatStringRef(StringRef item, bool fullEscaping = false) {
 	return ret;
 }
 
-static bool tokencmp(StringRef token, const char* command) {
-	if (token.size() != strlen(command))
-		return false;
-
-	return !memcmp(token.begin(), command, token.size());
-}
-
 static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& err, bool& partial) {
 	err = false;
 	partial = false;
@@ -453,19 +464,12 @@ static void printProgramUsage(const char* name) {
 	       "  -h, --help     Display this help and exit.\n");
 }
 
-struct CommandHelp {
-	std::string usage;
-	std::string short_desc;
-	std::string long_desc;
-	CommandHelp() {}
-	CommandHelp(const char* u, const char* s, const char* l) : usage(u), short_desc(s), long_desc(l) {}
-};
-
-std::map<std::string, CommandHelp> helpMap;
-std::set<std::string> hiddenCommands;
-
 #define ESCAPINGK "\n\nFor information on escaping keys, type `help escaping'."
 #define ESCAPINGKV "\n\nFor information on escaping keys and values, type `help escaping'."
+
+using namespace fdb_cli;
+std::map<std::string, CommandHelp>& helpMap = CommandFactory::commands();
+std::set<std::string>& hiddenCommands = CommandFactory::hiddenCommands();
 
 void initHelp() {
 	helpMap["begin"] =
@@ -650,11 +654,6 @@ void initHelp() {
 	    "SECONDS have elapsed, or after a storage server with a different ZONEID fails. Only one ZONEID can be marked "
 	    "for maintenance. Calling this command with no arguments will display any ongoing maintenance. Calling this "
 	    "command with `off' will disable maintenance.\n");
-	helpMap["consistencycheck"] = CommandHelp(
-	    "consistencycheck [on|off]",
-	    "permits or prevents consistency checking",
-	    "Calling this command with `on' permits consistency check processes to run and `off' will halt their checking. "
-	    "Calling this command with no arguments will display if consistency checking is currently allowed.\n");
 	helpMap["throttle"] =
 	    CommandHelp("throttle <on|off|enable auto|disable auto|list> [ARGS]",
 	                "view and control throttled tags",
@@ -718,14 +717,6 @@ void printHelp(StringRef command) {
 		printf("\n");
 	} else
 		printf("I don't know anything about `%s'\n", formatStringRef(command).c_str());
-}
-
-void printUsage(StringRef command) {
-	auto i = helpMap.find(command.toString());
-	if (i != helpMap.end())
-		printf("Usage: %s\n", i->second.usage.c_str());
-	else
-		fprintf(stderr, "ERROR: Unknown command `%s'\n", command.toString().c_str());
 }
 
 std::string getCoordinatorsInfoString(StatusObjectReader statusObj) {
@@ -2670,6 +2661,27 @@ Reference<ReadYourWritesTransaction> getTransaction(Database db,
 	return tr;
 }
 
+// TODO: Update the function to get rid of Database and ReadYourWritesTransaction after refactoring
+// The original ReadYourWritesTransaciton handle "tr" is needed as some commands can be called inside a
+// transaction and "tr" holds the pointer to the ongoing transaction object. As it's not easy to get ride of "tr" in
+// one shot and we are refactoring the code to use Reference<ITransaction> (tr2), we need to let "tr2" point to the same
+// underlying transaction like "tr". Thus everytime we need to use "tr2",  we first update "tr" and let "tr2" points to
+// "tr1". "tr2" is always having the same lifetime as "tr1"
+Reference<ITransaction> getTransaction(Database db,
+                                       Reference<ReadYourWritesTransaction>& tr,
+                                       Reference<ITransaction>& tr2,
+                                       FdbOptions* options,
+                                       bool intrans) {
+	// Update "tr" to point to a brand new transaction object when it's not initialized or "intrans" flag is "false",
+	// which indicates we need a new transaction object
+	if (!tr || !intrans) {
+		tr = makeReference<ReadYourWritesTransaction>(db);
+		options->apply(tr);
+	}
+	tr2 = Reference<ITransaction>(new ThreadSafeTransaction(tr.getPtr()));
+	return tr2;
+}
+
 std::string newCompletion(const char* base, const char* name) {
 	return format("%s%s ", base, name);
 }
@@ -3141,6 +3153,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	state Database db;
 	state Reference<ReadYourWritesTransaction> tr;
+	// TODO: refactoring work, will replace db, tr when we have all commands through the general fdb interface
+	state Reference<IDatabase> db2;
+	state Reference<ITransaction> tr2;
 
 	state bool writeMode = false;
 
@@ -3172,6 +3187,15 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 		if (!opt.exec.present()) {
 			printf("Using cluster file `%s'.\n", ccf->getFilename().c_str());
 		}
+	} catch (Error& e) {
+		fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code());
+		printf("Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
+		return 1;
+	}
+
+	// Note: refactoring work, will remove the above code finally
+	try {
+		db2 = API->createDatabase(opt.clusterFile.c_str());
 	} catch (Error& e) {
 		fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code());
 		printf("Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
@@ -3633,7 +3657,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "kill")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
-						Standalone<RangeResultRef> kvs = wait(
+						RangeResult kvs = wait(
 						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
 						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
 						                                   CLIENT_KNOBS->TOO_MANY)));
@@ -3700,7 +3724,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "suspend")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
-						Standalone<RangeResultRef> kvs = wait(
+						RangeResult kvs = wait(
 						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
 						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
 						                                   CLIENT_KNOBS->TOO_MANY)));
@@ -3796,29 +3820,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "consistencycheck")) {
-					getTransaction(db, tr, options, intrans);
-					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-					if (tokens.size() == 1) {
-						state Future<Optional<Standalone<StringRef>>> ccSuspendSettingFuture =
-						    tr->get(fdbShouldConsistencyCheckBeSuspended);
-						wait(makeInterruptable(success(ccSuspendSettingFuture)));
-						bool ccSuspendSetting =
-						    ccSuspendSettingFuture.get().present()
-						        ? BinaryReader::fromStringRef<bool>(ccSuspendSettingFuture.get().get(), Unversioned())
-						        : false;
-						printf("ConsistencyCheck is %s\n", ccSuspendSetting ? "off" : "on");
-					} else if (tokens.size() == 2 && tokencmp(tokens[1], "off")) {
-						tr->set(fdbShouldConsistencyCheckBeSuspended, BinaryWriter::toValue(true, Unversioned()));
-						wait(commitTransaction(tr));
-					} else if (tokens.size() == 2 && tokencmp(tokens[1], "on")) {
-						tr->set(fdbShouldConsistencyCheckBeSuspended, BinaryWriter::toValue(false, Unversioned()));
-						wait(commitTransaction(tr));
-					} else {
-						printUsage(tokens[0]);
-						is_error = true;
-					}
+					getTransaction(db, tr, tr2, options, intrans);
+					bool _result = wait(consistencyCheckCommandActor(tr2, tokens));
+					is_error = !_result;
 					continue;
 				}
 
@@ -3911,7 +3915,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							continue;
 						}
 						getTransaction(db, tr, options, intrans);
-						Standalone<RangeResultRef> kvs = wait(
+						RangeResult kvs = wait(
 						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
 						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
 						                                   CLIENT_KNOBS->TOO_MANY)));
@@ -3940,7 +3944,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								continue;
 							}
 							getTransaction(db, tr, options, intrans);
-							Standalone<RangeResultRef> kvs = wait(makeInterruptable(
+							RangeResult kvs = wait(makeInterruptable(
 							    tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
 							                             LiteralStringRef("\xff\xff/worker_interfaces0")),
 							                 CLIENT_KNOBS->TOO_MANY)));
@@ -4019,7 +4023,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							continue;
 						}
 						getTransaction(db, tr, options, intrans);
-						Standalone<RangeResultRef> kvs = wait(
+						RangeResult kvs = wait(
 						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
 						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
 						                                   CLIENT_KNOBS->TOO_MANY)));
@@ -4061,7 +4065,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "expensive_data_check")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
-						Standalone<RangeResultRef> kvs = wait(
+						RangeResult kvs = wait(
 						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
 						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
 						                                   CLIENT_KNOBS->TOO_MANY)));
@@ -4177,7 +4181,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							endKey = strinc(tokens[1]);
 						}
 
-						Standalone<RangeResultRef> kvs = wait(makeInterruptable(
+						RangeResult kvs = wait(makeInterruptable(
 						    getTransaction(db, tr, options, intrans)->getRange(KeyRangeRef(tokens[1], endKey), limit)));
 
 						printf("\nRange limited to %d keys\n", limit);
@@ -4905,7 +4909,9 @@ int main(int argc, char** argv) {
 	}
 
 	try {
-		setupNetwork();
+		// Note: refactoring fdbcli, in progress
+		API->selectApiVersion(FDB_API_VERSION);
+		API->setupNetwork();
 		Future<int> cliFuture = runCli(opt);
 		Future<Void> timeoutFuture = opt.exit_timeout ? timeExit(opt.exit_timeout) : Never();
 		auto f = stopNetworkAfter(success(cliFuture) || timeoutFuture);

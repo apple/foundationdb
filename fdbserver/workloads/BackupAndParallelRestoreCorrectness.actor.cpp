@@ -360,7 +360,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		state int rowCount = 0;
 		loop {
 			try {
-				Standalone<RangeResultRef> existingRows = wait(tr.getRange(normalKeys, 1));
+				RangeResult existingRows = wait(tr.getRange(normalKeys, 1));
 				rowCount = existingRows.size();
 				break;
 			} catch (Error& e) {
@@ -696,7 +696,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						printf("BackupCorrectnessLeftOverLogTasks: %ld\n", (long)taskCount);
 					}
 
-					Standalone<RangeResultRef> agentValues =
+					RangeResult agentValues =
 					    wait(tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100));
 
 					// Error if the system keyspace for the backup tag is not empty
@@ -731,10 +731,10 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						printf("No left over backup version key\n");
 					}
 
-					Standalone<RangeResultRef> versions = wait(tr->getRange(
+					RangeResult versions = wait(tr->getRange(
 					    KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1));
 					if (!self->shareLogRange || !versions.size()) {
-						Standalone<RangeResultRef> logValues = wait(
+						RangeResult logValues = wait(
 						    tr->getRange(KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100));
 
 						// Error if the log/mutation keyspace for the backup tag  is not empty

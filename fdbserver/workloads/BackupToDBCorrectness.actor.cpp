@@ -148,19 +148,19 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 	void getMetrics(vector<PerfMetric>& m) override {}
 
 	// Reads a series of key ranges and returns each range.
-	ACTOR static Future<std::vector<Standalone<RangeResultRef>>> readRanges(Database cx,
-	                                    Standalone<VectorRef<KeyRangeRef>> ranges,
-	                                    StringRef removePrefix) {
+	ACTOR static Future<std::vector<RangeResult>> readRanges(Database cx,
+	                                                         Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                                         StringRef removePrefix) {
 		loop {
 			state Transaction tr(cx);
 			try {
-				state std::vector<Future<Standalone<RangeResultRef>>> results;
+				state std::vector<Future<RangeResult>> results;
 				for (auto& range : ranges) {
 					results.push_back(tr.getRange(range.removePrefix(removePrefix), 1000));
 				}
 				wait(waitForAll(results));
 
-				std::vector<Standalone<RangeResultRef>> ret;
+				std::vector<RangeResult> ret;
 				for (auto result : results) {
 					ret.push_back(result.get());
 				}
@@ -184,9 +184,8 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				state Transaction tr2(dest);
 				try {
 					loop {
-						state Future<Standalone<RangeResultRef>> srcFuture =
-						    tr.getRange(KeyRangeRef(begin, range.end), 1000);
-						state Future<Standalone<RangeResultRef>> bkpFuture =
+						state Future<RangeResult> srcFuture = tr.getRange(KeyRangeRef(begin, range.end), 1000);
+						state Future<RangeResult> bkpFuture =
 						    tr2.getRange(KeyRangeRef(begin, range.end).withPrefix(backupPrefix), 1000);
 						wait(success(srcFuture) && success(bkpFuture));
 
@@ -472,7 +471,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					printf("BackupCorrectnessLeftoverLogTasks: %ld\n", (long)taskCount);
 				}
 
-				Standalone<RangeResultRef> agentValues =
+				RangeResult agentValues =
 				    wait(tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100));
 
 				// Error if the system keyspace for the backup tag is not empty
@@ -507,10 +506,10 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					printf("No left over backup version key\n");
 				}
 
-				Standalone<RangeResultRef> versions = wait(
+				RangeResult versions = wait(
 				    tr->getRange(KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1));
 				if (!shareLogRange || !versions.size()) {
-					Standalone<RangeResultRef> logValues =
+					RangeResult logValues =
 					    wait(tr->getRange(KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100));
 
 					// Error if the log/mutation keyspace for the backup tag is not empty
@@ -671,9 +670,9 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 				// Make sure no more data is written to the restored range
 				// after the restore completes.
-				state std::vector<Standalone<RangeResultRef>> res1 = wait(readRanges(cx, restoreRange, self->backupPrefix));
+				state std::vector<RangeResult> res1 = wait(readRanges(cx, restoreRange, self->backupPrefix));
 				wait(delay(5));
-				state std::vector<Standalone<RangeResultRef>> res2 = wait(readRanges(cx, restoreRange, self->backupPrefix));
+				state std::vector<RangeResult> res2 = wait(readRanges(cx, restoreRange, self->backupPrefix));
 				ASSERT(res1.size() == res2.size());
 				for (int i = 0; i < res1.size(); ++i) {
 					auto range1 = res1.at(i);

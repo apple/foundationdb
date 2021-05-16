@@ -88,8 +88,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 				// the range. If we didn't read through the end of the range, then the second last key
 				// in the result will be the last key less than endKey. (Condition #2)
 				state KeySelector end = KeySelectorRef(endKey.withPrefix(ddStatsRange.begin, endKey.arena()), false, 2);
-				Standalone<RangeResultRef> result =
-				    wait(tr->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->SHARD_COUNT_LIMIT)));
+				RangeResult result = wait(tr->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->SHARD_COUNT_LIMIT)));
 				// Condition #1 and #2 can be broken if multiple rpc calls happened in one getRange
 				if (result.size() > 1) {
 					if (result[0].key > begin.getKey() || result[1].key <= begin.getKey()) {
@@ -141,7 +140,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 		// wait(quietDatabase(cx, self->dbInfo, "PopulateTPCC"));
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		try {
-			state Standalone<RangeResultRef> result = wait(tr->getRange(ddStatsRange, CLIENT_KNOBS->SHARD_COUNT_LIMIT));
+			state RangeResult result = wait(tr->getRange(ddStatsRange, CLIENT_KNOBS->SHARD_COUNT_LIMIT));
 			ASSERT(!result.more);
 			self->numShards = result.size();
 			if (self->numShards < 1)
@@ -165,7 +164,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 			// fetch data-distribution stats for a smaller range
 			ASSERT(result.size());
 			state int idx = deterministicRandom()->randomInt(0, result.size());
-			Standalone<RangeResultRef> res = wait(tr->getRange(
+			RangeResult res = wait(tr->getRange(
 			    KeyRangeRef(result[idx].key, idx + 1 < result.size() ? result[idx + 1].key : ddStatsRange.end), 100));
 			ASSERT_WE_THINK(res.size() == 1 && res[0] == result[idx]); // It works good now. However, not sure in any
 			                                                           // case of data-distribution, the number changes

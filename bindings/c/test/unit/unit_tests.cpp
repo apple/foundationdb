@@ -20,7 +20,7 @@
 
 // Unit tests for the FoundationDB C API.
 
-#define FDB_API_VERSION 700
+#define FDB_API_VERSION 710
 #include <foundationdb/fdb_c.h>
 #include <assert.h>
 #include <string.h>
@@ -2151,7 +2151,7 @@ int main(int argc, char** argv) {
 		          << "Usage: fdb_c_unit_tests /path/to/cluster_file key_prefix [externalClient]" << std::endl;
 		return 1;
 	}
-	fdb_check(fdb_select_api_version(700));
+	fdb_check(fdb_select_api_version(710));
 	if (argc == 4) {
 		std::string externalClientLibrary = argv[3];
 		fdb_check(fdb_network_set_option(

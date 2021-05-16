@@ -166,7 +166,7 @@ ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
 	self->data.clear();
 
 	Transaction tr(self->cx);
-	Standalone<RangeResultRef> result = wait(tr.getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
+	RangeResult result = wait(tr.getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
 	for (const auto& kv : result) {
 		KeyRef systemKey = kv.key.removePrefix(globalConfigKeysPrefix);
 		self->insert(systemKey, kv.value);

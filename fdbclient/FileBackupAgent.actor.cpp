@@ -1025,7 +1025,7 @@ ACTOR static Future<Standalone<VectorRef<KeyRef>>> getBlockOfShards(Reference<Re
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	state Standalone<VectorRef<KeyRef>> results;
-	Standalone<RangeResultRef> values = wait(tr->getRange(
+	RangeResult values = wait(tr->getRange(
 	    KeyRangeRef(keyAfter(beginKey.withPrefix(keyServersPrefix)), endKey.withPrefix(keyServersPrefix)), limit));
 
 	for (auto& s : values) {
@@ -4043,6 +4043,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		state Version beginVersion;
 		state Reference<IBackupContainer> bc;
 		state std::vector<KeyRange> ranges;
+		state bool logsOnly;
+		state bool inconsistentSnapshotOnly;
 
 		loop {
 			try {
@@ -4050,11 +4052,12 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				wait(checkTaskVersion(tr->getDatabase(), task, name, version));
-				Optional<Version> _beginVersion = wait(restore.beginVersion().get(tr));
-				beginVersion = _beginVersion.present() ? _beginVersion.get() : invalidVersion;
+				wait(store(beginVersion, restore.beginVersion().getD(tr, false, invalidVersion)));
 
 				wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
 				wait(store(ranges, restore.getRestoreRangesOrDefault(tr)));
+				wait(store(logsOnly, restore.onlyAppyMutationLogs().getD(tr, false, false)));
+				wait(store(inconsistentSnapshotOnly, restore.inconsistentSnapshotOnly().getD(tr, false, false)));
 
 				wait(taskBucket->keepRunning(tr, task));
 
@@ -4101,7 +4104,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			}
 		}
 
-		state bool logsOnly = wait(restore.onlyAppyMutationLogs().getD(tr, false, false));
+		state Version firstConsistentVersion = invalidVersion;
 		if (beginVersion == invalidVersion) {
 			beginVersion = 0;
 		}
@@ -4111,25 +4114,46 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		}
 		state Optional<RestorableFileSet> restorable =
 		    wait(bc->getRestoreSet(restoreVersion, keyRangesFilter, logsOnly, beginVersion));
-		if (!logsOnly) {
-			beginVersion = restorable.get().snapshot.beginVersion;
-		}
-
 		if (!restorable.present())
 			throw restore_missing_data();
-
-		// First version for which log data should be applied
-		Params.firstVersion().set(task, beginVersion);
 
 		// Convert the two lists in restorable (logs and ranges) to a single list of RestoreFiles.
 		// Order does not matter, they will be put in order when written to the restoreFileMap below.
 		state std::vector<RestoreConfig::RestoreFile> files;
-
-		state Version firstConsistentVersion = beginVersion;
-		for (const RangeFile& f : restorable.get().ranges) {
-			files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
-			firstConsistentVersion = std::max(firstConsistentVersion, f.version);
+		if (!logsOnly) {
+			beginVersion = restorable.get().snapshot.beginVersion;
+			if (!inconsistentSnapshotOnly) {
+				for (const RangeFile& f : restorable.get().ranges) {
+					files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
+					// In a restore with both snapshots and logs, the firstConsistentVersion is the highest version of
+					// any range file.
+					firstConsistentVersion = std::max(firstConsistentVersion, f.version);
+				}
+			} else {
+				for (int i = 0; i < restorable.get().ranges.size(); ++i) {
+					const RangeFile& f = restorable.get().ranges[i];
+					files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
+					// In inconsistentSnapshotOnly mode, if all range files have the same version, then it is the
+					// firstConsistentVersion, otherwise unknown (use -1).
+					if (i != 0 && f.version != firstConsistentVersion) {
+						firstConsistentVersion = invalidVersion;
+					} else {
+						firstConsistentVersion = f.version;
+					}
+				}
+			}
+		} else {
+			// In logs-only (incremental) mode, the firstConsistentVersion should just be restore.beginVersion().
+			firstConsistentVersion = beginVersion;
 		}
+		if (!inconsistentSnapshotOnly) {
+			for (const LogFile& f : restorable.get().logs) {
+				files.push_back({ f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion });
+			}
+		}
+		// First version for which log data should be applied
+		Params.firstVersion().set(task, beginVersion);
+
 		tr->reset();
 		loop {
 			try {
@@ -4140,16 +4164,6 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				break;
 			} catch (Error& e) {
 				wait(tr->onError(e));
-			}
-		}
-
-		tr->reset();
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		bool inconsistentSnapshotOnly = wait(restore.inconsistentSnapshotOnly().getD(tr, false, false));
-		if (!inconsistentSnapshotOnly) {
-			for (const LogFile& f : restorable.get().logs) {
-				files.push_back({ f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion });
 			}
 		}
 
@@ -4570,7 +4584,7 @@ public:
 
 		state Key destUidValue(BinaryWriter::toValue(uid, Unversioned()));
 		if (normalizedRanges.size() == 1) {
-			Standalone<RangeResultRef> existingDestUidValues = wait(
+			RangeResult existingDestUidValues = wait(
 			    tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 			bool found = false;
 			for (auto it : existingDestUidValues) {
@@ -4677,7 +4691,7 @@ public:
 			KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end)
 			                                .removePrefix(removePrefix)
 			                                .withPrefix(addPrefix);
-			Standalone<RangeResultRef> existingRows = wait(tr->getRange(restoreIntoRange, 1));
+			RangeResult existingRows = wait(tr->getRange(restoreIntoRange, 1));
 			if (existingRows.size() > 0 && !onlyAppyMutationLogs) {
 				throw restore_destination_not_empty();
 			}
@@ -5727,7 +5741,7 @@ ACTOR static Future<Void> writeKVs(Database cx, Standalone<VectorRef<KeyValueRef
 			    .detail("Range", KeyRangeRef(k1, k2))
 			    .detail("Begin", begin)
 			    .detail("End", end);
-			Standalone<RangeResultRef> readKVs = wait(tr.getRange(KeyRangeRef(k1, k2), CLIENT_KNOBS->TOO_MANY));
+			RangeResult readKVs = wait(tr.getRange(KeyRangeRef(k1, k2), CLIENT_KNOBS->TOO_MANY));
 			ASSERT(readKVs.size() > 0 || begin == end);
 			break;
 		} catch (Error& e) {
@@ -5759,7 +5773,7 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx,
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			for (i = 0; i < restoreRanges.size(); ++i) {
-				Standalone<RangeResultRef> kvs = wait(tr.getRange(restoreRanges[i], CLIENT_KNOBS->TOO_MANY));
+				RangeResult kvs = wait(tr.getRange(restoreRanges[i], CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!kvs.more);
 				for (auto kv : kvs) {
 					oldData.push_back_deep(oldData.arena(), KeyValueRef(kv.key, kv.value));
@@ -5826,7 +5840,7 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx,
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Standalone<RangeResultRef> emptyData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult emptyData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
 			for (int i = 0; i < emptyData.size(); ++i) {
 				TraceEvent(SevError, "ExpectEmptyData")
 				    .detail("Index", i)
@@ -5864,7 +5878,7 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx,
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Standalone<RangeResultRef> allData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult allData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
 			TraceEvent(SevFRTestInfo, "SanityCheckData").detail("Size", allData.size());
 			for (int i = 0; i < allData.size(); ++i) {
 				std::pair<bool, bool> backupRestoreValid = insideValidRange(allData[i], restoreRanges, backupRanges);

@@ -230,9 +230,6 @@ struct DeltaTree {
 	inline Node& newNode() { return *(Node*)((uint8_t*)this + size()); }
 
 public:
-	// Get count of total overhead bytes (everything but the user-formatted Delta) for a tree given size n
-	static int emptyTreeSize() { return sizeof(DeltaTree); }
-
 	struct DecodedNode {
 		DecodedNode() {}
 

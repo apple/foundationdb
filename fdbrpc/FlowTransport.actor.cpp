@@ -760,6 +760,13 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 
 				conn->close();
 				conn = Reference<IConnection>();
+
+				// Old versions will throw this error, and we don't want to forget their protocol versions.
+				// This means we can't tell the difference between an old protocol version and one we
+				// can no longer connect to.
+				if (e.code() != error_code_incompatible_protocol_version) {
+					self->protocolVersion->set(Optional<ProtocolVersion>());
+				}
 			}
 
 			// Clients might send more packets in response, which needs to go out on the next connection
@@ -787,7 +794,8 @@ Peer::Peer(TransportData* transport, NetworkAddress const& destination)
     incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()),
     pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SAMPLE_AMOUNT : 1), lastLoggedBytesReceived(0),
     bytesSent(0), lastLoggedBytesSent(0), lastLoggedTime(0.0), connectOutgoingCount(0), connectIncomingCount(0),
-    connectFailedCount(0), connectLatencies(destination.isPublic() ? FLOW_KNOBS->NETWORK_CONNECT_SAMPLE_AMOUNT : 1) {
+    connectFailedCount(0), connectLatencies(destination.isPublic() ? FLOW_KNOBS->NETWORK_CONNECT_SAMPLE_AMOUNT : 1),
+    protocolVersion(Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>())) {
 	IFailureMonitor::failureMonitor().setStatus(destination, FailureStatus(false));
 }
 
@@ -1103,12 +1111,12 @@ static int getNewBufferSize(const uint8_t* begin,
 	                          packetLen + sizeof(uint32_t) * (peerAddress.isTLS() ? 2 : 3));
 }
 
+// This actor exists whenever there is an open or opening connection, whether incoming or outgoing
+// For incoming connections conn is set and peer is initially nullptr; for outgoing connections it is the reverse
 ACTOR static Future<Void> connectionReader(TransportData* transport,
                                            Reference<IConnection> conn,
                                            Reference<Peer> peer,
                                            Promise<Reference<Peer>> onConnected) {
-	// This actor exists whenever there is an open or opening connection, whether incoming or outgoing
-	// For incoming connections conn is set and peer is initially nullptr; for outgoing connections it is the reverse
 
 	state Arena arena;
 	state uint8_t* unprocessed_begin = nullptr;
@@ -1206,7 +1214,11 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 								    now() + FLOW_KNOBS->CONNECTION_ID_TIMEOUT;
 							}
 							compatible = false;
-							if (!protocolVersion.hasMultiVersionClient()) {
+							if (!protocolVersion.hasInexpensiveMultiVersionClient()) {
+								if(peer) {
+									peer->protocolVersion->set(protocolVersion);
+								}
+
 								// Older versions expected us to hang up. It may work even if we don't hang up here, but
 								// it's safer to keep the old behavior.
 								throw incompatible_protocol_version();
@@ -1256,6 +1268,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 							onConnected.send(peer);
 							wait(delay(0)); // Check for cancellation
 						}
+						peer->protocolVersion->set(peerProtocolVersion);
 					}
 				}
 
@@ -1667,6 +1680,16 @@ Reference<Peer> FlowTransport::sendUnreliable(ISerializeSource const& what,
 
 Reference<AsyncVar<bool>> FlowTransport::getDegraded() {
 	return self->degraded;
+}
+
+// Returns the protocol version of the peer at the specified address. The result is returned as an AsyncVar that
+// can be used to monitor for changes of a peer's protocol. The protocol version will be unset in the event that
+// there is no connection established to the peer.
+//
+// Note that this function does not establish a connection to the peer. In order to obtain a peer's protocol
+// version, some other mechanism should be used to connect to that peer.
+Reference<AsyncVar<Optional<ProtocolVersion>>> FlowTransport::getPeerProtocolAsyncVar(NetworkAddress addr) {
+	return self->peers.at(addr)->protocolVersion;
 }
 
 void FlowTransport::resetConnection(NetworkAddress address) {

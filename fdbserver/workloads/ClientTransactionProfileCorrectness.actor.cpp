@@ -217,7 +217,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 
 	std::string getTrId(KeyRef key) const { return key.substr(trIdStartIndex, trIdFormatSize).toString(); }
 
-	bool checkTxInfoEntriesFormat(const Standalone<RangeResultRef>& txInfoEntries) {
+	bool checkTxInfoEntriesFormat(const RangeResult& txInfoEntries) {
 		std::string val;
 		std::map<std::string, std::vector<ValueRef>> trInfoChunks;
 		for (auto kv : txInfoEntries) {
@@ -288,7 +288,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 
 		state Key clientLatencyAtomicCtr = CLIENT_LATENCY_INFO_CTR_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
 		state int64_t counter;
-		state Standalone<RangeResultRef> txInfoEntries;
+		state RangeResult txInfoEntries;
 		Optional<Value> ctrValue =
 		    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
 			    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -307,7 +307,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				state Standalone<RangeResultRef> kvRange = wait(tr.getRange(begin, end, keysLimit));
+				state RangeResult kvRange = wait(tr.getRange(begin, end, keysLimit));
 				if (kvRange.empty())
 					break;
 				txInfoEntries.arena().dependsOn(kvRange.arena());
