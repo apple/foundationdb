@@ -6316,7 +6316,7 @@ public:
 
 		wait(cur.seekGTE(key, 0));
 		if (cur.isValid() && cur.get().key == key) {
-			Value v = cur.get().value.get();
+			ValueRef v = cur.get().value.get();
 			int len = std::min(v.size(), maxLength);
 			// Return a Value prefix whose arena is the source page's arena
 			return Value(v.substr(0, len), cur.back().page->getArena());
