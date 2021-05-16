@@ -6292,7 +6292,10 @@ public:
 		wait(cur.seekGTE(key, 0));
 		if (cur.isValid() && cur.get().key == key) {
 			// Return a Value whose arena is the source page's arena
-			return Value(cur.get().value.get(), cur.back().page->getArena());
+			Value v;
+			v.arena().dependsOn(cur.back().page->getArena());
+			v.contents() = cur.get().value.get();
+			return v;
 		}
 
 		return Optional<Value>();
@@ -6316,10 +6319,14 @@ public:
 
 		wait(cur.seekGTE(key, 0));
 		if (cur.isValid() && cur.get().key == key) {
-			ValueRef v = cur.get().value.get();
-			int len = std::min(v.size(), maxLength);
-			// Return a Value prefix whose arena is the source page's arena
-			return Value(v.substr(0, len), cur.back().page->getArena());
+			// Return a Value whose arena is the source page's arena
+			Value v;
+			v.arena().dependsOn(cur.back().page->getArena());
+			v.contents() = cur.get().value.get();
+			if (v.size() > maxLength) {
+				v.contents() = v.substr(0, maxLength);
+			}
+			return v;
 		}
 
 		return Optional<Value>();
