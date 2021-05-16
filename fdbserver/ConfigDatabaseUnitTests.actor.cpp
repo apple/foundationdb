@@ -193,12 +193,16 @@ Future<Void> runTransactionToLocalConfigEnvironment(F f) {
 	state SimpleConfigTransaction tr(cti);
 	state SimpleConfigDatabaseNode node;
 	state ActorCollection actors(false);
-	state LocalConfiguration localConfiguration("class-A/class-B", {});
-	wait(localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
+	state LocalConfiguration localConfigurationA("class-A", {});
+	state LocalConfiguration localConfigurationB("class-B", {});
+	wait(localConfigurationA.initialize("./", deterministicRandom()->randomUniqueID()));
+	wait(localConfigurationB.initialize("./", deterministicRandom()->randomUniqueID()));
+	wait(node.initialize("./", deterministicRandom()->randomUniqueID()));
+	actors.add(node.serve(cti));
 	actors.add(node.serve(cfi->get()));
-	actors.add(localConfiguration.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(cfi)));
-	wait(waitOrError(f(node, localConfiguration), actors.getResult()));
-	wait(delay(0));
+	actors.add(localConfigurationA.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(cfi)));
+	actors.add(localConfigurationB.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(cfi)));
+	wait(waitOrError(f(tr, localConfigurationA, localConfigurationB), actors.getResult()));
 	return Void();
 }
 
@@ -222,11 +226,6 @@ Future<Void> waitUntil(F isReady) {
 		}
 		wait(delayJittered(0.1));
 	}
-}
-
-ACTOR Future<Void> doNothing() {
-	wait(delay(0));
-	return Void();
 }
 
 } // namespace
@@ -312,6 +311,27 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/Clear") {
 	wait(runTransactionEnvironment([](auto& tr) {
 		std::function<Future<Void>(Void const&)> clear = [&tr](Void const&) { return addTestClearMutations(tr); };
 		std::function<Future<Void>(Void const&)> check = [&tr](Void const&) { return readConfigState(&tr, {}); };
+		return (addTestSetMutations(tr, 1) >>= clear) >>= check;
+	}));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/Set") {
+	wait(runTransactionToLocalConfigEnvironment([](auto& tr, auto const& confA, auto const& confB) {
+		std::function<Future<Void>(Void const&)> check = [&confA, &confB](Void const&) {
+			return readConfigState<false>(&confA, 1) && readConfigState<false>(&confB, 10);
+		};
+		return addTestSetMutations(tr, 1) >>= check;
+	}));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/Clear") {
+	wait(runTransactionToLocalConfigEnvironment([](auto& tr, auto const& confA, auto const& confB) {
+		std::function<Future<Void>(Void const&)> clear = [&tr](Void const&) { return addTestClearMutations(tr); };
+		std::function<Future<Void>(Void const&)> check = [&confA, &confB](Void const&) {
+			return readConfigState<false>(&confA, 0) && readConfigState<false>(&confB, 0);
+		};
 		return (addTestSetMutations(tr, 1) >>= clear) >>= check;
 	}));
 	return Void();

@@ -228,7 +228,7 @@ class LocalConfigurationImpl : public NonCopyable {
 	                                      std::map<ConfigKey, Value> snapshot,
 	                                      Version snapshotVersion) {
 		// TODO: Concurrency control?
-		ASSERT(self->initFuture.isReady());
+		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
 		++self->snapshots;
 		self->kvStore->clear(knobOverrideKeys);
 		for (const auto& [configKey, knobValue] : snapshot) {
@@ -248,7 +248,7 @@ class LocalConfigurationImpl : public NonCopyable {
 	    Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,
 	    Version mostRecentVersion) {
 		// TODO: Concurrency control?
-		ASSERT(self->initFuture.isReady());
+		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
 		++self->changeRequestsFetched;
 		for (const auto& versionedMutation : versionedMutations) {
 			++self->mutations;
@@ -294,7 +294,7 @@ class LocalConfigurationImpl : public NonCopyable {
 	ACTOR static Future<Void> consume(LocalConfiguration* self,
 	                                  LocalConfigurationImpl* impl,
 	                                  Reference<IDependentAsyncVar<ConfigFollowerInterface> const> broadcaster) {
-		ASSERT(impl->initFuture.isReady());
+		ASSERT(impl->initFuture.isValid() && impl->initFuture.isReady());
 		loop { wait(consumeLoopIteration(self, impl, broadcaster)); }
 	}
 
@@ -327,22 +327,22 @@ public:
 	}
 
 	FlowKnobs const& getFlowKnobs() const {
-		ASSERT(initFuture.isReady());
+		ASSERT(initFuture.isValid() && initFuture.isReady());
 		return flowKnobs;
 	}
 
 	ClientKnobs const& getClientKnobs() const {
-		ASSERT(initFuture.isReady());
+		ASSERT(initFuture.isValid() && initFuture.isReady());
 		return clientKnobs;
 	}
 
 	ServerKnobs const& getServerKnobs() const {
-		ASSERT(initFuture.isReady());
+		ASSERT(initFuture.isValid() && initFuture.isReady());
 		return serverKnobs;
 	}
 
 	TestKnobs const& getTestKnobs() const {
-		ASSERT(initFuture.isReady());
+		ASSERT(initFuture.isValid() && initFuture.isReady());
 		return testKnobs;
 	}
 
@@ -460,14 +460,14 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Internal/updateSingleKnob") {
 	updateSingleKnob("test2_double"_sr, "10.0"_sr, k1, k2);
 	updateSingleKnob("test2_bool"_sr, "true"_sr, k1, k2);
 	updateSingleKnob("test2_string"_sr, "10"_sr, k1, k2);
-	ASSERT(k1.TEST_LONG == 5);
-	ASSERT(k1.TEST_INT == 5);
-	ASSERT(k1.TEST_DOUBLE == 5.0);
+	ASSERT_EQ(k1.TEST_LONG, 5);
+	ASSERT_EQ(k1.TEST_INT, 5);
+	ASSERT_EQ(k1.TEST_DOUBLE, 5.0);
 	ASSERT(k1.TEST_BOOL);
 	ASSERT(k1.TEST_STRING == "5");
-	ASSERT(k2.TEST2_LONG == 10);
-	ASSERT(k2.TEST2_INT == 10);
-	ASSERT(k2.TEST2_DOUBLE == 10.0);
+	ASSERT_EQ(k2.TEST2_LONG, 10);
+	ASSERT_EQ(k2.TEST2_INT, 10);
+	ASSERT_EQ(k2.TEST2_DOUBLE, 10.0);
 	ASSERT(k2.TEST2_BOOL);
 	ASSERT(k2.TEST2_STRING == "10");
 	return Void();

@@ -320,6 +320,7 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionInterface const* cti) {
+		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
 		loop {
 			//wait(traceQueuedMutations(self));
 			choose {
@@ -417,7 +418,7 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigFollowerInterface const* cfi) {
-		ASSERT(self->initFuture.isReady());
+		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
 		loop {
 			choose {
 				when(ConfigFollowerGetVersionRequest req = waitNext(cfi->getVersion.getFuture())) {
