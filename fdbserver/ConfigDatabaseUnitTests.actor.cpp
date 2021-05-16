@@ -29,51 +29,7 @@
 
 namespace {
 
-std::map<Key, Value> const testManualKnobOverrides = {
-	{ "test_double"_sr, "1.0"_sr },
-};
-
-TestKnobs const& getExpectedTestKnobsEmptyConfig() {
-	static std::unique_ptr<TestKnobs> knobs;
-	if (!knobs) {
-		knobs = std::make_unique<TestKnobs>();
-		knobs->setKnob("test_double", "1.0");
-	}
-	return *knobs;
-}
-
-TestKnobs const& getExpectedTestKnobsFinal() {
-	static std::unique_ptr<TestKnobs> knobs;
-	if (!knobs) {
-		knobs = std::make_unique<TestKnobs>();
-		knobs->setKnob("test_long", "100");
-		knobs->setKnob("test_int", "2");
-		knobs->setKnob("test_bool", "true");
-		knobs->setKnob("test_string", "x");
-		knobs->setKnob("test_double", "1.0");
-	}
-	return *knobs;
-}
-
-ACTOR template <class ConfigStore>
-Future<Void> setTestSnapshot(ConfigStore* configStore, Version* lastWrittenVersion) {
-	TraceEvent("WritingTestSnapshot").detail("LastWrittenVersion", *lastWrittenVersion);
-	std::map<ConfigKey, Value> snapshot = {
-		{ ConfigKeyRef("class-A"_sr, "test_int"_sr), "1"_sr },
-		{ ConfigKeyRef("class-B"_sr, "test_int"_sr), "2"_sr },
-		{ ConfigKeyRef("class-C"_sr, "test_int"_sr), "3"_sr },
-		{ ConfigKeyRef("class-B"_sr, "test_double"_sr), "4.0"_sr },
-		{ ConfigKeyRef("class-A"_sr, "test_string"_sr), "x"_sr },
-	};
-	wait(configStore->setSnapshot(std::move(snapshot), ++(*lastWrittenVersion)));
-	return Void();
-}
-
-void appendVersionedMutation(Standalone<VectorRef<VersionedConfigMutationRef>>& versionedMutations,
-                             Version version,
-                             Optional<KeyRef> configClass,
-                             KeyRef knobName,
-                             Optional<ValueRef> knobValue) {
+Key encodeConfigKey(Optional<KeyRef> configClass, KeyRef knobName) {
 	Tuple tuple;
 	if (configClass.present()) {
 		tuple.append(configClass.get());
@@ -81,136 +37,107 @@ void appendVersionedMutation(Standalone<VectorRef<VersionedConfigMutationRef>>& 
 		tuple.appendNull();
 	}
 	tuple << knobName;
-	auto mutation = ConfigMutationRef::createConfigMutation(tuple.pack(), knobValue);
+	return tuple.pack();
+}
+
+void appendVersionedMutation(Standalone<VectorRef<VersionedConfigMutationRef>>& versionedMutations,
+                             Version version,
+                             Optional<KeyRef> configClass,
+                             KeyRef knobName,
+                             Optional<ValueRef> knobValue) {
+	auto mutation = ConfigMutationRef::createConfigMutation(encodeConfigKey(configClass, knobName), knobValue);
 	versionedMutations.emplace_back_deep(versionedMutations.arena(), version, mutation);
 }
 
-ACTOR template <class ConfigStore>
-Future<Void> addTestUpdates(ConfigStore* configStore, Version* lastWrittenVersion) {
-	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
-	++(*lastWrittenVersion);
-	appendVersionedMutation(versionedMutations, *lastWrittenVersion, "class-A"_sr, "test_bool"_sr, "true"_sr);
-	appendVersionedMutation(versionedMutations, *lastWrittenVersion, "class-B"_sr, "test_long"_sr, "100"_sr);
-	appendVersionedMutation(versionedMutations, *lastWrittenVersion, "class-C"_sr, "test_double"_sr, "10.0"_sr);
-	appendVersionedMutation(versionedMutations, *lastWrittenVersion, "class-A"_sr, "test_int"_sr, "10"_sr);
-	wait(configStore->addVersionedMutations(versionedMutations, *lastWrittenVersion));
-	return Void();
-}
-
-Value versionToValue(Version version) {
-	auto s = format("%ld", version);
+Value longToValue(int64_t v) {
+	auto s = format("%ld", v);
 	return StringRef(reinterpret_cast<uint8_t const*>(s.c_str()), s.size());
 }
 
-template <class ConfigStore>
-Future<Void> addSequentialTestUpdates(ConfigStore &configStore, Version &lastWrittenVersion) {
+Future<Void> addTestClearMutations(SimpleConfigTransaction& tr) {
+	tr.fullReset();
+	auto configKeyA = encodeConfigKey("class-A"_sr, "test_long"_sr);
+	auto configKeyB = encodeConfigKey("class-B"_sr, "test_long"_sr);
+	tr.clear(configKeyA);
+	tr.clear(configKeyB);
+	return tr.commit();
+}
+
+Future<Void> addTestGlobalSetMutation(SimpleConfigTransaction& tr, int64_t value) {
+	tr.fullReset();
+	auto configKey = encodeConfigKey({}, "test_long"_sr);
+	tr.set(configKey, longToValue(value));
+	return tr.commit();
+}
+
+Future<Void> addTestSetMutations(SimpleConfigTransaction& tr, int64_t value) {
+	tr.fullReset();
+	auto configKeyA = encodeConfigKey("class-A"_sr, "test_long"_sr);
+	auto configKeyB = encodeConfigKey("class-B"_sr, "test_long"_sr);
+	tr.set(configKeyA, longToValue(value));
+	tr.set(configKeyB, longToValue(value * 10));
+	return tr.commit();
+}
+
+template <class WriteTo>
+Future<Void> addTestClearMutations(WriteTo& writeTo, Version version) {
 	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
-	++lastWrittenVersion;
-	appendVersionedMutation(versionedMutations, lastWrittenVersion, "class-A"_sr, "test_long"_sr, versionToValue(lastWrittenVersion));
-	appendVersionedMutation(versionedMutations, lastWrittenVersion, "class-B"_sr, "test_long"_sr, versionToValue(lastWrittenVersion * 10));
-	return configStore.addVersionedMutations(versionedMutations, lastWrittenVersion);
+	appendVersionedMutation(versionedMutations, version, "class-A"_sr, "test_long"_sr, {});
+	appendVersionedMutation(versionedMutations, version, "class-B"_sr, "test_long"_sr, {});
+	return writeTo.addVersionedMutations(versionedMutations, version);
+}
+
+template <class WriteTo>
+Future<Void> addTestGlobalSetMutation(WriteTo& writeTo, int64_t value) {
+	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
+	Version version = value;
+	appendVersionedMutation(versionedMutations, version, "class-A"_sr, "test_long"_sr, longToValue(value));
+	return writeTo.addVersionedMutations(versionedMutations, version);
+}
+
+template <class WriteTo>
+Future<Void> addTestSetMutations(WriteTo& writeTo, int64_t value) {
+	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
+	Version version = value;
+	appendVersionedMutation(versionedMutations, version, "class-A"_sr, "test_long"_sr, longToValue(value));
+	appendVersionedMutation(versionedMutations, version, "class-B"_sr, "test_long"_sr, longToValue(value * 10));
+	return writeTo.addVersionedMutations(versionedMutations, version);
+}
+
+ACTOR Future<Void> readConfigState(SimpleConfigTransaction* tr, Optional<int64_t> expected) {
+	tr->fullReset();
+	state Key configKeyA = encodeConfigKey("class-A"_sr, "test_long"_sr);
+	state Key configKeyB = encodeConfigKey("class-B"_sr, "test_long"_sr);
+	state Optional<Value> valueA = wait(tr->get(configKeyA));
+	state Optional<Value> valueB = wait(tr->get(configKeyB));
+	if (expected.present()) {
+		ASSERT(valueA.get() == longToValue(expected.get()));
+		ASSERT(valueB.get() == longToValue(expected.get() * 10));
+	} else {
+		ASSERT(!valueA.present());
+		ASSERT(!valueB.present());
+	}
+	return Void();
+}
+
+template <bool immediate>
+Future<Void> readConfigState(LocalConfiguration const* localConfiguration, int64_t expected) {
+	if constexpr (immediate) {
+		ASSERT_EQ(localConfiguration->getTestKnobs().TEST_LONG, expected);
+		return Void();
+	} else {
+		return waitUntil(
+		    [localConfiguration, expected] { return localConfiguration->getTestKnobs().TEST_LONG == expected; });
+	}
 }
 
 template <class ConfigStore>
-Future<Void> addClearTestUpdate(ConfigStore& configStore, Version& lastWrittenVersion) {
-	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
-	++lastWrittenVersion;
-	appendVersionedMutation(versionedMutations, lastWrittenVersion, "class-A"_sr, "test_long"_sr, {});
-	return configStore.addVersionedMutations(versionedMutations, lastWrittenVersion);
-}
-
-template <class ConfigStore>
-Future<Void> addGlobalTestUpdate(ConfigStore& configStore, Version& lastWrittenVersion, ValueRef value) {
+Future<Void> addTestGlobalSetMutation(ConfigStore& configStore, Version& lastWrittenVersion, ValueRef value) {
 	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
 	++lastWrittenVersion;
 	appendVersionedMutation(versionedMutations, lastWrittenVersion, {}, "test_long"_sr, value);
 	return configStore.addVersionedMutations(versionedMutations, lastWrittenVersion);
 }
-
-ACTOR template <class ConfigStore>
-Future<Void> runTestUpdates(ConfigStore* configStore, Version* lastWrittenVersion) {
-	wait(setTestSnapshot(configStore, lastWrittenVersion));
-	wait(addTestUpdates(configStore, lastWrittenVersion));
-	// TODO: Clean up on-disk state
-	return Void();
-}
-
-ACTOR Future<Void> runFirstLocalConfiguration(std::string configPath, UID id) {
-	state LocalConfiguration localConfiguration(configPath, testManualKnobOverrides);
-	state Version lastWrittenVersion = 0;
-	wait(localConfiguration.initialize("./", id));
-	wait(runTestUpdates(&localConfiguration, &lastWrittenVersion));
-	ASSERT(localConfiguration.getTestKnobs() == getExpectedTestKnobsFinal());
-	return Void();
-}
-
-ACTOR Future<Void> runSecondLocalConfiguration(std::string configPath, UID id, TestKnobs const* expectedTestKnobs) {
-	state LocalConfiguration localConfiguration(configPath, testManualKnobOverrides);
-	wait(localConfiguration.initialize("./", id));
-	ASSERT(localConfiguration.getTestKnobs() == *expectedTestKnobs);
-	return Void();
-}
-
-} // namespace
-
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Simple") {
-	wait(runFirstLocalConfiguration("class-A/class-B", deterministicRandom()->randomUniqueID()));
-	return Void();
-}
-
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Restart") {
-	state UID id = deterministicRandom()->randomUniqueID();
-	wait(runFirstLocalConfiguration("class-A/class-B", id));
-	wait(runSecondLocalConfiguration("class-A/class-B", id, &getExpectedTestKnobsFinal()));
-	return Void();
-}
-
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/FreshRestart") {
-	state UID id = deterministicRandom()->randomUniqueID();
-	wait(runFirstLocalConfiguration("class-A/class-B", id));
-	wait(runSecondLocalConfiguration("class-B/class-A", id, &getExpectedTestKnobsEmptyConfig()));
-	return Void();
-}
-
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ManualOverride") {
-	state LocalConfiguration localConfiguration("class-A/class-B", { { "test_long"_sr, "1000"_sr } });
-	state Version lastWrittenVersion = 0;
-	wait(localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
-	wait(addSequentialTestUpdates(localConfiguration, lastWrittenVersion));
-	ASSERT(localConfiguration.getTestKnobs().TEST_LONG == 1000);
-	return Void();
-}
-
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ConfigClassOverride") {
-	state LocalConfiguration localConfiguration("class-A/class-B", {});
-	state Version lastWrittenVersion = 0;
-	wait(localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
-	wait(addSequentialTestUpdates(localConfiguration, lastWrittenVersion));
-	ASSERT(localConfiguration.getTestKnobs().TEST_LONG == 10);
-	return Void();
-}
-
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/GlobalConfigClassOverride") {
-	state LocalConfiguration localConfiguration("class-A/class-B", {});
-	state Version lastWrittenVersion = 0;
-	wait(localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
-	wait(addSequentialTestUpdates(localConfiguration, lastWrittenVersion));
-	wait(addGlobalTestUpdate(localConfiguration, lastWrittenVersion, "100"_sr));
-	ASSERT(localConfiguration.getTestKnobs().TEST_LONG == 100);
-	return Void();
-}
-
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Clear") {
-	state LocalConfiguration localConfiguration("class-A", {});
-	state Version lastWrittenVersion = 0;
-	wait(localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
-	wait(addSequentialTestUpdates(localConfiguration, lastWrittenVersion));
-	wait(addClearTestUpdate(localConfiguration, lastWrittenVersion));
-	ASSERT(localConfiguration.getTestKnobs().TEST_LONG == 0);
-	return Void();
-}
-
-namespace {
 
 class DummyConfigSource {
 	ConfigFollowerInterface cfi;
@@ -232,90 +159,160 @@ public:
 	ConfigFollowerInterface const& getInterface() { return cfi; }
 };
 
-ACTOR template<class F>
-Future<Void> waitUntil(F isReady) {
-	loop {
-		if (isReady()) { return Void(); }
-		wait(delayJittered(0.1));
-	}
-}
-
-Future<Void> waitUntilTestLongMatches(LocalConfiguration const &conf, int64_t expectedValue) {
-	return waitUntil([&conf, expectedValue]{
-		return conf.getTestKnobs().TEST_LONG == expectedValue;
-	});
-}
-
-} // namespace
-
-TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/CheckpointedUpdates") {
-	state DummyConfigSource dummyConfigSource;
-	state ConfigBroadcaster broadcaster1(dummyConfigSource.getInterface(), deterministicRandom()->randomUniqueID());
-	state ConfigBroadcaster broadcaster2(dummyConfigSource.getInterface(), deterministicRandom()->randomUniqueID());
-	state Reference<AsyncVar<ConfigFollowerInterface>> cfi = makeReference<AsyncVar<ConfigFollowerInterface>>();
-	state LocalConfiguration localConfigurationA("class-A", testManualKnobOverrides);
-	state LocalConfiguration localConfigurationB("class-B", testManualKnobOverrides);
-	state Version version = 0;
-	state ActorCollection actors(false);
-	state Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
-	wait(localConfigurationA.initialize("./", deterministicRandom()->randomUniqueID()));
-	wait(localConfigurationB.initialize("./", deterministicRandom()->randomUniqueID()));
-	TraceEvent("StartedTestBroadcasterAndLocalConfigs")
-	    .detail("Broadcaster1", broadcaster1.getID())
-		.detail("Broadcaster2", broadcaster2.getID())
-	    .detail("LocalConfigurationA", localConfigurationA.getID())
-	    .detail("LocalConfigurationB", localConfigurationB.getID());
-	actors.add(dummyConfigSource.serve());
-	actors.add(broadcaster1.serve(cfi->get()));
-	actors.add(localConfigurationA.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(cfi)));
-	actors.add(localConfigurationB.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(cfi)));
-	while (version < 10) {
-		wait(addSequentialTestUpdates(broadcaster1, version));
-		versionedMutations = Standalone<VectorRef<VersionedConfigMutationRef>>{};
-		wait(waitUntilTestLongMatches(localConfigurationA, version));
-		wait(waitUntilTestLongMatches(localConfigurationB, version * 10));
-	}
-
-	// Test changing broadcaster
-	cfi->set(ConfigFollowerInterface{});
-	actors.add(broadcaster2.serve(cfi->get()));
-	while (version < 20) {
-		wait(addSequentialTestUpdates(broadcaster2, version));
-		wait(waitUntilTestLongMatches(localConfigurationA, version));
-		wait(waitUntilTestLongMatches(localConfigurationB, version * 10));
-	}
-
-	// Test compaction
-	while (version < 30) {
-		wait(addSequentialTestUpdates(broadcaster2, version));
-	}
-	wait(cfi->get().compact.getReply(ConfigFollowerCompactRequest{ version }));
-	wait(waitUntilTestLongMatches(localConfigurationA, 30));
-	wait(waitUntilTestLongMatches(localConfigurationB, 300));
+ACTOR template <class F>
+Future<Void> runLocalConfigEnvironment(std::string configPath, std::map<Key, Value> manualKnobOverrides, F f) {
+	state LocalConfiguration localConfiguration(configPath, manualKnobOverrides);
+	state Version lastWrittenVersion = 0;
+	wait(localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
+	wait(f(localConfiguration));
 	return Void();
 }
 
-TEST_CASE("/fdbserver/ConfigDB/ConfigBroadcaster/Transaction/Set") {
+ACTOR template <class F>
+Future<Void> runBroadcasterToLocalConfigEnvironment(F f) {
+	state DummyConfigSource dummyConfigSource;
+	state ConfigBroadcaster broadcaster(dummyConfigSource.getInterface(), deterministicRandom()->randomUniqueID());
+	state Reference<AsyncVar<ConfigFollowerInterface>> cfi = makeReference<AsyncVar<ConfigFollowerInterface>>();
+	state LocalConfiguration localConfigurationA("class-A", {});
+	state LocalConfiguration localConfigurationB("class-B", {});
+	state ActorCollection actors(false);
+	wait(localConfigurationA.initialize("./", deterministicRandom()->randomUniqueID()));
+	wait(localConfigurationB.initialize("./", deterministicRandom()->randomUniqueID()));
+	actors.add(dummyConfigSource.serve());
+	actors.add(broadcaster.serve(cfi->get()));
+	actors.add(localConfigurationA.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(cfi)));
+	actors.add(localConfigurationB.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(cfi)));
+	wait(waitOrError(f(broadcaster, localConfigurationA, localConfigurationB), actors.getResult()));
+	return Void();
+}
+
+ACTOR template <class F>
+Future<Void> runTransactionToLocalConfigEnvironment(F f) {
+	state ConfigTransactionInterface cti;
+	state Reference<AsyncVar<ConfigFollowerInterface>> cfi = makeReference<AsyncVar<ConfigFollowerInterface>>();
+	state SimpleConfigTransaction tr(cti);
+	state SimpleConfigDatabaseNode node;
+	state ActorCollection actors(false);
+	state LocalConfiguration localConfiguration("class-A/class-B", {});
+	wait(localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
+	actors.add(node.serve(cfi->get()));
+	actors.add(localConfiguration.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(cfi)));
+	wait(waitOrError(f(node, localConfiguration), actors.getResult()));
+	wait(delay(0));
+	return Void();
+}
+
+ACTOR template <class F>
+Future<Void> runTransactionEnvironment(F f) {
 	state ConfigTransactionInterface cti;
 	state SimpleConfigTransaction tr(cti);
 	state SimpleConfigDatabaseNode node;
 	state ActorCollection actors(false);
-	state Tuple configKeyTuple;
 	wait(node.initialize("./", deterministicRandom()->randomUniqueID()));
 	actors.add(node.serve(cti));
-	Version readVersion = wait(tr.getReadVersion());
-	ASSERT_EQ(readVersion, 1);
-	configKeyTuple << "class-A"_sr
-	               << "test_long"_sr;
-	state Key configKey = configKeyTuple.pack();
-	tr.set(configKey, "100"_sr);
-	wait(tr.commit());
-	ASSERT_EQ(tr.getCommittedVersion(), 1);
-	tr.fullReset();
-	tr.debugTransaction(UID{});
-	ASSERT_EQ(tr.getCommittedVersion(), ::invalidVersion);
-	Optional<Value> value = wait(tr.get(configKey));
-	ASSERT(tr.getCachedReadVersion() == 2);
-	ASSERT(value.get() == "100"_sr);
+	wait(waitOrError(f(tr), actors.getResult()));
+	return Void();
+}
+
+ACTOR template <class F>
+Future<Void> waitUntil(F isReady) {
+	loop {
+		if (isReady()) {
+			return Void();
+		}
+		wait(delayJittered(0.1));
+	}
+}
+
+ACTOR Future<Void> doNothing() {
+	wait(delay(0));
+	return Void();
+}
+
+} // namespace
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ManualOverride") {
+	wait(runLocalConfigEnvironment("class-A", { { "test_long"_sr, "1000"_sr } }, [](auto& conf) {
+		std::function<Future<Void>(Void const&)> check = [&conf](Void const&) {
+			return readConfigState<true>(&conf, 1000);
+		};
+		return addTestSetMutations(conf, 1) >>= check;
+	}));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ConflictingOverride") {
+	wait(runLocalConfigEnvironment("class-A/class-B", {}, [](auto& conf) {
+		std::function<Future<Void>(Void const&)> check = [&conf](Void const&) {
+			return readConfigState<true>(&conf, 10);
+		};
+		return addTestSetMutations(conf, 1) >>= check;
+	}));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Clear") {
+	wait(runLocalConfigEnvironment("class-A/class-B", {}, [](auto& conf) {
+		std::function<Future<Void>(Void const&)> clear = [&conf](Void const&) {
+			return addTestClearMutations(conf, 2);
+		};
+		std::function<Future<Void>(Void const&)> check = [&conf](Void const&) {
+			return readConfigState<true>(&conf, 0);
+		};
+		return (addTestSetMutations(conf, 1) >>= clear) >>= check;
+	}));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Global") {
+	wait(runLocalConfigEnvironment("class-A", {}, [](auto& conf) {
+		std::function<Future<Void>(Void const&)> setGlobal = [&conf](Void const&) {
+			return addTestGlobalSetMutation(conf, 2);
+		};
+		std::function<Future<Void>(Void const&)> check = [&conf](Void const&) {
+			return readConfigState<true>(&conf, 2);
+		};
+		return (addTestSetMutations(conf, 1) >>= setGlobal) >>= check;
+	}));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/Set") {
+	wait(runBroadcasterToLocalConfigEnvironment([](auto& broadcaster, auto& confA, auto& confB) {
+		std::function<Future<Void>(Void const&)> check = [&confA, &confB](Void const&) {
+			return readConfigState<false>(&confA, 1) && readConfigState<false>(&confB, 10);
+		};
+		return addTestSetMutations(broadcaster, 1) >>= check;
+	}));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/Clear") {
+	wait(runBroadcasterToLocalConfigEnvironment([](auto& broadcaster, auto& confA, auto& confB) {
+		std::function<Future<Void>(Void const&)> clear = [&broadcaster](Void const&) {
+			return addTestClearMutations(broadcaster, 2);
+		};
+		std::function<Future<Void>(Void const&)> check = [&confA, &confB](Void const&) {
+			return readConfigState<false>(&confA, 0) && readConfigState<false>(&confB, 0);
+		};
+		return (addTestSetMutations(broadcaster, 1) >>= clear) >>= check;
+	}));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/Set") {
+	wait(runTransactionEnvironment([](auto& tr) {
+		std::function<Future<Void>(Void const&)> check = [&tr](Void const&) { return readConfigState(&tr, 1); };
+		return addTestSetMutations(tr, 1) >>= check;
+	}));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/Clear") {
+	wait(runTransactionEnvironment([](auto& tr) {
+		std::function<Future<Void>(Void const&)> clear = [&tr](Void const&) { return addTestClearMutations(tr); };
+		std::function<Future<Void>(Void const&)> check = [&tr](Void const&) { return readConfigState(&tr, {}); };
+		return (addTestSetMutations(tr, 1) >>= clear) >>= check;
+	}));
 	return Void();
 }

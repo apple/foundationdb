@@ -228,6 +228,7 @@ class LocalConfigurationImpl : public NonCopyable {
 	                                      std::map<ConfigKey, Value> snapshot,
 	                                      Version snapshotVersion) {
 		// TODO: Concurrency control?
+		ASSERT(self->initFuture.isReady());
 		++self->snapshots;
 		self->kvStore->clear(knobOverrideKeys);
 		for (const auto& [configKey, knobValue] : snapshot) {
@@ -247,6 +248,7 @@ class LocalConfigurationImpl : public NonCopyable {
 	    Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,
 	    Version mostRecentVersion) {
 		// TODO: Concurrency control?
+		ASSERT(self->initFuture.isReady());
 		++self->changeRequestsFetched;
 		for (const auto& versionedMutation : versionedMutations) {
 			++self->mutations;

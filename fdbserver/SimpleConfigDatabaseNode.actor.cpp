@@ -319,7 +319,7 @@ class SimpleConfigDatabaseNodeImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionInterface* cti) {
+	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionInterface const* cti) {
 		loop {
 			//wait(traceQueuedMutations(self));
 			choose {
@@ -416,7 +416,7 @@ class SimpleConfigDatabaseNodeImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigFollowerInterface* cfi) {
+	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigFollowerInterface const* cfi) {
 		ASSERT(self->initFuture.isReady());
 		loop {
 			choose {
@@ -449,9 +449,9 @@ public:
 	    setMutations("SetMutations", cc), clearMutations("ClearMutations", cc),
 	    getValueRequests("GetValueRequests", cc), newVersionRequests("NewVersionRequests", cc) {}
 
-	Future<Void> serve(ConfigTransactionInterface& cti) { return serve(this, &cti); }
+	Future<Void> serve(ConfigTransactionInterface const& cti) { return serve(this, &cti); }
 
-	Future<Void> serve(ConfigFollowerInterface& cfi) { return serve(this, &cfi); }
+	Future<Void> serve(ConfigFollowerInterface const& cfi) { return serve(this, &cfi); }
 
 	Future<Void> initialize(std::string const& dataFolder, UID id) {
 		platform::createDirectory(dataFolder);
@@ -468,11 +468,11 @@ SimpleConfigDatabaseNode::SimpleConfigDatabaseNode() : impl(std::make_unique<Sim
 
 SimpleConfigDatabaseNode::~SimpleConfigDatabaseNode() = default;
 
-Future<Void> SimpleConfigDatabaseNode::serve(ConfigTransactionInterface& cti) {
+Future<Void> SimpleConfigDatabaseNode::serve(ConfigTransactionInterface const& cti) {
 	return impl->serve(cti);
 }
 
-Future<Void> SimpleConfigDatabaseNode::serve(ConfigFollowerInterface& cfi) {
+Future<Void> SimpleConfigDatabaseNode::serve(ConfigFollowerInterface const& cfi) {
 	return impl->serve(cfi);
 }
 
