@@ -93,16 +93,16 @@ public:
 		int usableSize = pages.front()->size();
 		int totalUsableSize = pages.size() * usableSize;
 		int totalBufferSize = pages.front()->bufferSize * pages.size();
-		ArenaPage* p = new ArenaPage(totalUsableSize + sizeof(Checksum), totalBufferSize);
+		ArenaPage* superpage = new ArenaPage(totalUsableSize + sizeof(Checksum), totalBufferSize);
 
-		uint8_t* wptr = p->mutate();
+		uint8_t* wptr = superpage->mutate();
 		for (auto& p : pages) {
 			ASSERT(p->size() == usableSize);
 			memcpy(wptr, p->begin(), usableSize);
 			wptr += usableSize;
 		}
 
-		return Reference<ArenaPage>(p);
+		return Reference<ArenaPage>(superpage);
 	}
 
 	Checksum& getChecksum() { return *(Checksum*)(buffer + size()); }
