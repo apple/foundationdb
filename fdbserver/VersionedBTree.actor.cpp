@@ -4279,8 +4279,7 @@ private:
 	                                                         const RedwoodRecordRef* upperBound,
 	                                                         bool forLazyClear = false,
 	                                                         bool cacheable = true,
-	                                                         bool* fromCache = nullptr)
-	{
+	                                                         bool* fromCache = nullptr) {
 		if (!forLazyClear) {
 			debug_printf("readPage() op=read %s @%" PRId64 " lower=%s upper=%s\n",
 			             toString(id).c_str(),
