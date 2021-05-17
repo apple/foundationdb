@@ -171,6 +171,13 @@ class BroadcasterToLocalConfigEnvironment {
 		return Void();
 	}
 
+	ACTOR static Future<Void> compact(BroadcasterToLocalConfigEnvironment* self) {
+		ConfigFollowerGetVersionReply reply =
+		    wait(self->cfi->get().getVersion.getReply(ConfigFollowerGetVersionRequest{}));
+		wait(self->cfi->get().compact.getReply(ConfigFollowerCompactRequest{ reply.version }));
+		return Void();
+	}
+
 public:
 	BroadcasterToLocalConfigEnvironment(std::string const& configPath)
 	  : broadcaster(dummyConfigSource.getInterface(), deterministicRandom()->randomUniqueID()),
@@ -190,6 +197,7 @@ public:
 		broadcaster = ConfigBroadcaster(dummyConfigSource.getInterface(), deterministicRandom()->randomUniqueID());
 		broadcastServer = broadcaster.serve(cfi->get());
 	}
+	Future<Void> compact() { return compact(this); }
 
 	Future<Void> getError() const { return actors.getResult() || broadcastServer; }
 };
@@ -197,59 +205,82 @@ public:
 class TransactionEnvironment {
 	ConfigTransactionInterface cti;
 	SimpleConfigTransaction tr;
-	SimpleConfigDatabaseNode node;
-	ActorCollection actors{ false };
+	Reference<IConfigDatabaseNode> node;
+	Future<Void> server;
+	UID id;
 
 	ACTOR static Future<Void> setup(TransactionEnvironment* self) {
-		wait(self->node.initialize("./", deterministicRandom()->randomUniqueID()));
-		self->actors.add(self->node.serve(self->cti));
+		wait(self->node->initialize("./", self->id));
+		self->server = self->node->serve(self->cti);
 		return Void();
 	}
 
 public:
-	TransactionEnvironment() : tr(cti) {}
+	TransactionEnvironment()
+	  : tr(cti), node(makeReference<SimpleConfigDatabaseNode>()), id(deterministicRandom()->randomUniqueID()) {}
 
 	Future<Void> setup() { return setup(this); }
+
+	Future<Void> restart() {
+		node = makeReference<SimpleConfigDatabaseNode>();
+		return setup();
+	}
 
 	Future<Void> set(Optional<KeyRef> configClass, int64_t value) { return addTestSetMutation(tr, configClass, value); }
 	Future<Void> clear(Optional<KeyRef> configClass) { return addTestClearMutation(tr, configClass); }
 	Future<Void> check(Optional<KeyRef> configClass, Optional<int64_t> expected) {
 		return checkImmediate(&tr, configClass, expected);
 	}
-	Future<Void> getError() const { return actors.getResult(); }
+	Future<Void> getError() const { return server; }
 };
 
 class TransactionToLocalConfigEnvironment {
 	ConfigTransactionInterface cti;
 	Reference<AsyncVar<ConfigFollowerInterface>> cfi;
 	SimpleConfigTransaction tr;
-	SimpleConfigDatabaseNode node;
+	Reference<IConfigDatabaseNode> node;
+	UID nodeID;
+	Future<Void> ctiServer;
+	Future<Void> cfiServer;
 	LocalConfiguration localConfiguration;
-	ActorCollection actors{ false };
+	Future<Void> consumer;
 
-	ACTOR Future<Void> setup(TransactionToLocalConfigEnvironment* self) {
+	ACTOR static Future<Void> setup(TransactionToLocalConfigEnvironment* self) {
 		wait(self->localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
-		wait(self->node.initialize("./", deterministicRandom()->randomUniqueID()));
-		self->actors.add(self->node.serve(self->cti));
-		self->actors.add(self->node.serve(self->cfi->get()));
-		self->actors.add(
-		    self->localConfiguration.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(self->cfi)));
+		wait(setupNode(self));
+		self->consumer =
+		    self->localConfiguration.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(self->cfi));
+		return Void();
+	}
+
+	ACTOR static Future<Void> setupNode(TransactionToLocalConfigEnvironment* self) {
+		wait(self->node->initialize("./", self->nodeID));
+		self->ctiServer = self->node->serve(self->cti);
+		self->cfiServer = self->node->serve(self->cfi->get());
 		return Void();
 	}
 
 public:
 	TransactionToLocalConfigEnvironment(std::string const& configPath)
-	  : cfi(makeReference<AsyncVar<ConfigFollowerInterface>>()), tr(cti), localConfiguration(configPath, {}) {}
+	  : cfi(makeReference<AsyncVar<ConfigFollowerInterface>>()), tr(cti),
+	    node(makeReference<SimpleConfigDatabaseNode>()), nodeID(deterministicRandom()->randomUniqueID()),
+	    localConfiguration(configPath, {}) {}
 
 	Future<Void> setup() { return setup(this); }
+
+	Future<Void> restartNode() {
+		cfiServer.cancel();
+		ctiServer.cancel();
+		node = makeReference<SimpleConfigDatabaseNode>();
+		return setupNode(this);
+	}
 
 	Future<Void> set(Optional<KeyRef> configClass, int64_t value) { return addTestSetMutation(tr, configClass, value); }
 	Future<Void> clear(Optional<KeyRef> configClass) { return addTestClearMutation(tr, configClass); }
 	Future<Void> check(Optional<int64_t> value) { return checkEventually(&localConfiguration, value); }
-	Future<Void> getError() const { return actors.getResult(); }
+	Future<Void> getError() const { return ctiServer || cfiServer || consumer; }
 };
 
-// TODO: Wait on error
 template <class Env, class... Args>
 Future<Void> set(Env& env, Args&&... args) {
 	return waitOrError(env.set(std::forward<Args>(args)...), env.getError());
@@ -374,6 +405,15 @@ TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/ChangeBroadcaster") {
 	return Void();
 }
 
+TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/Compact") {
+	state BroadcasterToLocalConfigEnvironment env("class-A");
+	wait(env.setup());
+	wait(set(env, "class-A"_sr, 1));
+	wait(env.compact());
+	wait(check(env, 1));
+	return Void();
+}
+
 TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/Set") {
 	state TransactionToLocalConfigEnvironment env("class-A");
 	wait(env.setup());
@@ -400,6 +440,15 @@ TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/GlobalSet") {
 	return Void();
 }
 
+TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/RestartNode") {
+	state TransactionToLocalConfigEnvironment env("class-A");
+	wait(env.setup());
+	wait(set(env, "class-A"_sr, 1));
+	wait(env.restartNode());
+	wait(check(env, 1));
+	return Void();
+}
+
 TEST_CASE("/fdbserver/ConfigDB/Transaction/Set") {
 	state TransactionEnvironment env;
 	wait(env.setup());
@@ -414,5 +463,14 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/Clear") {
 	wait(set(env, "class-A"_sr, 1));
 	wait(clear(env, "class-A"_sr));
 	wait(check(env, "class-A"_sr, Optional<int64_t>{}));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/Restart") {
+	state TransactionEnvironment env;
+	wait(env.setup());
+	wait(set(env, "class-A"_sr, 1));
+	wait(env.restart());
+	wait(check(env, "class-A"_sr, 1));
 	return Void();
 }
