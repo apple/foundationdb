@@ -3491,7 +3491,7 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 					throw;
 				}
 				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
-				    e.code() == error_code_connection_failed) {
+				    e.code() == error_code_connection_failed || e.code() == error_code_broken_promise) {
 					const KeyRangeRef& range = locations[shard].first;
 
 					if (reverse)

@@ -311,6 +311,7 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 
 	AcknowledgementReceiver acknowledgements;
 	Endpoint requestStreamEndpoint;
+	bool sentError = false;
 
 	NetNotifiedQueueWithErrors(int futures, int promises) : NotifiedQueue<T>(futures, promises) {}
 	NetNotifiedQueueWithErrors(int futures, int promises, const Endpoint& remoteEndpoint)
@@ -371,6 +372,11 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 			    acknowledgements.getEndpoint(TaskPriority::ReadSocket),
 			    false);
 		}
+		if (isRemoteEndpoint() && !sentError) {
+			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(broken_promise()),
+			                                          getEndpoint(TaskPriority::ReadSocket),
+			                                          false);
+		}
 	}
 
 	bool isStream() const override { return true; }
@@ -407,7 +413,8 @@ public:
 
 	template <class E>
 	void sendError(const E& exc) const {
-		if (queue->isRemoteEndpoint()) {
+		if (queue->isRemoteEndpoint() && !queue->sentError) {
+			queue->sentError = true;
 			FlowTransport::transport().sendUnreliable(
 			    SerializeSource<ErrorOr<EnsureTable<T>>>(exc), getEndpoint(), false);
 		} else {
