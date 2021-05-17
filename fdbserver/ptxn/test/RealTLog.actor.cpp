@@ -31,9 +31,10 @@
 #include "fdbserver/LogSystem.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-// This test starts a tLogs and runs commits, peeks, and pops. There is one test that calls
-// the tLog interface directly and another using the LogSystem's push interface.
-// The push interface supports multiple log groups and multiple tags per log group.
+// These tests start TLogs and drive transactions through them. There is one test that calls
+// the TLog commit interface directly and another using the LogSystem's push interface.
+// The later supports a single log group made up of "numLogServers" servers and
+// "numTagsPerServer" tags per log server.
 //
 // The test's purpose is to help with microbenchmarks and experimentation.
 // The storage server is assumed to run at infinite speed.
@@ -41,15 +42,14 @@
 namespace ptxn::test {
 
 // build test state.
-std::shared_ptr<TLogDriverContext> initTLogDriverContext(const TestDriverOptions& options,
-                                                         const TestTLogDriverOptions tLogOptions) {
-	std::shared_ptr<TLogDriverContext> context(new TLogDriverContext());
+std::shared_ptr<TLogDriverContext> initTLogDriverContext(TestTLogDriverOptions tLogOptions) {
+	std::shared_ptr<TLogDriverContext> context(new TLogDriverContext(tLogOptions));
 	context->logID = deterministicRandom()->randomUniqueID();
 	context->workerID = deterministicRandom()->randomUniqueID();
 	context->diskQueueBasename = tLogOptions.diskQueueBasename;
-	context->numCommits = options.numCommits;
-	context->numShardsPerGroup = tLogOptions.numShardsPerGroup;
-	context->numLogGroups = tLogOptions.numLogGroups;
+	context->numCommits = tLogOptions.numCommits;
+	context->numTagsPerServer = tLogOptions.numTagsPerServer;
+	context->numLogServers = tLogOptions.numLogServers;
 	context->dcID = LiteralStringRef("test");
 	context->tagLocality = 0; // one data center.
 	context->dbInfo = ServerDBInfo();
@@ -59,8 +59,7 @@ std::shared_ptr<TLogDriverContext> initTLogDriverContext(const TestDriverOptions
 }
 
 // run a single tLog.
-ACTOR Future<Void> getTLogCreateActor(std::shared_ptr<TestDriverContext> pTestDriverContext,
-                                      std::shared_ptr<TLogDriverContext> pTLogDriverContext,
+ACTOR Future<Void> getTLogCreateActor(std::shared_ptr<TLogDriverContext> pTLogDriverContext,
                                       TestTLogDriverOptions tLogOptions,
                                       uint16_t processID) {
 
@@ -69,15 +68,19 @@ ACTOR Future<Void> getTLogCreateActor(std::shared_ptr<TestDriverContext> pTestDr
 	pTLogContext->tagProcessID = processID;
 	pTLogContext->tLogID = deterministicRandom()->randomUniqueID();
 
-	// delete old disk queue files, then create persistent storage
+	// create persistent storage
 	std::string diskQueueBasename = pTLogDriverContext->diskQueueBasename + "." + std::to_string(processID) + ".";
-	deleteFile(diskQueueBasename + "0." + tLogOptions.diskQueueExtension);
-	deleteFile(diskQueueBasename + "1." + tLogOptions.diskQueueExtension);
+	state std::string diskQueueFilename = tLogOptions.dataFolder + "/" + diskQueueBasename;
 	pTLogContext->persistentQueue =
-	    openDiskQueue(diskQueueBasename, tLogOptions.diskQueueExtension, pTLogContext->tLogID, DiskQueueVersion::V1);
-	std::string kvStoreFilename = tLogOptions.kvStoreFilename + "." + std::to_string(processID) + ".";
-	pTLogContext->persistentData = keyValueStoreMemory(
-	    kvStoreFilename, pTLogContext->tLogID, tLogOptions.kvMemoryLimit, "fdr", KeyValueStoreType::MEMORY_RADIXTREE);
+	    openDiskQueue(diskQueueFilename, tLogOptions.diskQueueExtension, pTLogContext->tLogID, DiskQueueVersion::V1);
+
+	state std::string kvStoreFilename =
+	    tLogOptions.dataFolder + "/" + tLogOptions.kvStoreFilename + "." + std::to_string(processID) + ".";
+	pTLogContext->persistentData = keyValueStoreMemory(kvStoreFilename,
+	                                                   pTLogContext->tLogID,
+	                                                   tLogOptions.kvMemoryLimit,
+	                                                   tLogOptions.kvStoreExtension,
+	                                                   KeyValueStoreType::MEMORY_RADIXTREE);
 
 	// prepare tLog construction.
 	Standalone<StringRef> machineID = LiteralStringRef("machine");
@@ -107,13 +110,22 @@ ACTOR Future<Void> getTLogCreateActor(std::shared_ptr<TestDriverContext> pTestDr
 	                             activeSharedTLog);
 
 	// start tlog.
-	state InitializeTLogRequest initTlogReq = InitializeTLogRequest();
-	initTlogReq.isPrimary = true;
-	TLogInterface interface = wait(promiseStream.getReply(initTlogReq));
+	state InitializeTLogRequest initTLogReq = InitializeTLogRequest();
+	std::vector<Tag> tags;
+	for (uint32_t tagID = 0; tagID < pTLogDriverContext->numTagsPerServer; tagID++) {
+		Tag tag(pTLogDriverContext->tagLocality, tagID);
+		tags.push_back(tag);
+	}
+	initTLogReq.allTags = tags;
+	initTLogReq.isPrimary = true;
+	initTLogReq.locality = 0;
+	TLogInterface interface = wait(promiseStream.getReply(initTLogReq));
 	pTLogContext->realTLogInterface = interface;
 
 	// inform other actors tLog is ready.
 	pTLogContext->TLogCreated.send(true);
+
+	TraceEvent("RealTLogTest initialized tlog", pTLogContext->tLogID);
 
 	// wait for either test completion or abnormal failure.
 	choose {
@@ -123,12 +135,16 @@ ACTOR Future<Void> getTLogCreateActor(std::shared_ptr<TestDriverContext> pTestDr
 		}
 	}
 
+	// delete old disk queue files
+	deleteFile(diskQueueFilename + "0." + tLogOptions.diskQueueExtension);
+	deleteFile(diskQueueFilename + "1." + tLogOptions.diskQueueExtension);
+	deleteFile(kvStoreFilename + "0." + tLogOptions.kvStoreExtension);
+	deleteFile(kvStoreFilename + "1." + tLogOptions.kvStoreExtension);
 	return Void();
 }
 
 // sent commits through TLog interface.
-ACTOR Future<Void> TLogDriverContext::sendCommitMessages_impl(std::shared_ptr<TestDriverContext> pTestDriverContext,
-                                                              TLogDriverContext* pTLogDriverContext,
+ACTOR Future<Void> TLogDriverContext::sendCommitMessages_impl(TLogDriverContext* pTLogDriverContext,
                                                               uint16_t processID) {
 	state std::shared_ptr<TLogContext> pTLogContext = pTLogDriverContext->pTLogContextList[processID];
 	bool tLogReady = wait(pTLogContext->TLogStarted.getFuture());
@@ -141,13 +157,16 @@ ACTOR Future<Void> TLogDriverContext::sendCommitMessages_impl(std::shared_ptr<Te
 		Standalone<StringRef> key = StringRef(format("key %d", i));
 		Standalone<StringRef> val = StringRef(format("value %d", i));
 		MutationRef m(MutationRef::Type::SetValue, key, val);
-		Tag tag(pTLogDriverContext->tagLocality, 1 /* tag */);
 
 		// build commit request
 		LogPushData toCommit(pTLogDriverContext->ls);
 		UID spanID = deterministicRandom()->randomUniqueID();
 		toCommit.addTransactionInfo(spanID);
-		vector<Tag> tags = { tag };
+		vector<Tag> tags;
+		for (uint32_t tagID = 0; tagID < pTLogDriverContext->numTagsPerServer; tagID++) {
+			Tag tag(pTLogDriverContext->tagLocality, tagID);
+			tags.push_back(tag);
+		}
 		toCommit.addTags(tags);
 		toCommit.writeTypedMessage(m);
 		int location = 0;
@@ -165,12 +184,14 @@ ACTOR Future<Void> TLogDriverContext::sendCommitMessages_impl(std::shared_ptr<Te
 	return Void();
 }
 
-// sent commits through TLog interface.
-ACTOR Future<Void> TLogDriverContext::sendPushMessages_impl(std::shared_ptr<TestDriverContext> pTestDriverContext,
-                                                            TLogDriverContext* pTLogDriverContext,
-                                                            uint16_t processID) {
-	for (processID = 0; i < pTLogDriverContext->numShardsPerGroup; i++) {
-		state std::shared_ptr<TLogContext> pTLogContext = pTLogDriverContext->pTLogContextList[processID];
+// Send pushes through the LogSystem interface. There is one of these actors for each log server.
+ACTOR Future<Void> TLogDriverContext::sendPushMessages_impl(TLogDriverContext* pTLogDriverContext) {
+
+	TraceEvent("RealTLogTest enter push", pTLogDriverContext->workerID);
+
+	state uint16_t logID = 0;
+	for (logID = 0; logID < pTLogDriverContext->numLogServers; logID++) {
+		state std::shared_ptr<TLogContext> pTLogContext = pTLogDriverContext->pTLogContextList[logID];
 		bool tLogReady = wait(pTLogContext->TLogStarted.getFuture());
 		ASSERT_EQ(tLogReady, true);
 	}
@@ -188,39 +209,38 @@ ACTOR Future<Void> TLogDriverContext::sendPushMessages_impl(std::shared_ptr<Test
 		UID spanID = deterministicRandom()->randomUniqueID();
 		toCommit.addTransactionInfo(spanID);
 
-		// for each shard
-		state uint32_t tagID = 0;
-		for (; tagID < pTLogDriverContext->numShardsPerGroup; tagID++) {
+		// for each tag
+		for (uint32_t tagID = 0; tagID < pTLogDriverContext->numTagsPerServer; tagID++) {
 			Tag tag(pTLogDriverContext->tagLocality, tagID);
 			vector<Tag> tags = { tag };
 			toCommit.addTags(tags);
-
 			toCommit.writeTypedMessage(m);
 		}
 		Future<Version> loggingComplete =
-			pTLogDriverContext->ls->push(prev, next, prev, prev, toCommit, deterministicRandom()->randomUniqueID());
+		    pTLogDriverContext->ls->push(prev, next, prev, prev, toCommit, deterministicRandom()->randomUniqueID());
 		Version ver = wait(loggingComplete);
 		ASSERT_LE(ver, next);
 		prev++;
 		next++;
 	}
 
-	TraceEvent("RealTLogTest exit push", pTLogDriverContext->workerID);
+	TraceEvent("RealTLogTest exit push", pTLogDriverContext->workerID).detail("LogID", logID);
 
 	return Void();
 }
 
 // send peek/pop through a given TLog interface (logGroupID) for a given tag (shardTag).
-ACTOR Future<Void> TLogDriverContext::peekCommitMessages_impl(std::shared_ptr<TestDriverContext> pTestDriverContext,
-                                                              TLogDriverContext* pTLogDriverContext,
-                                                              uint16_t logGroupID,
-                                                              uint32_t shardTag) {
-	state std::shared_ptr<TLogContext> pTLogContext = pTLogDriverContext->pTLogContextList[logGroupID];
+ACTOR Future<Void> TLogDriverContext::peekCommitMessages_impl(TLogDriverContext* pTLogDriverContext,
+                                                              uint16_t logID,
+                                                              uint32_t tagID) {
+	state std::shared_ptr<TLogContext> pTLogContext = pTLogDriverContext->pTLogContextList[logID];
 	bool tLogReady = wait(pTLogContext->TLogStarted.getFuture());
 	ASSERT_EQ(tLogReady, true);
 
-	// peek from the same shard (tag)
-	state Tag tag(pTLogDriverContext->tagLocality, shardTag);
+	// peek from the same tag
+	state Tag tag(pTLogDriverContext->tagLocality, tagID);
+
+	TraceEvent("RealTLogTest enter peek", pTLogDriverContext->workerID).detail("LogID", logID).detail("Tag", tag);
 
 	state Version begin = 1;
 	state int i;
@@ -235,7 +255,6 @@ ACTOR Future<Void> TLogDriverContext::peekCommitMessages_impl(std::shared_ptr<Te
 		// deserialize package, first the version header
 		ArenaReader rd = ArenaReader(reply.arena, reply.messages, AssumeVersion(g_network->protocolVersion()));
 		ASSERT_EQ(*(int32_t*)rd.peekBytes(4), VERSION_HEADER);
-		TagsAndMessage messageAndTags = TagsAndMessage();
 		int32_t dummy; // skip past VERSION_HEADER
 		Version ver;
 		rd >> dummy >> ver;
@@ -243,18 +262,23 @@ ACTOR Future<Void> TLogDriverContext::peekCommitMessages_impl(std::shared_ptr<Te
 		// deserialize transaction header
 		int32_t messageLength;
 		uint16_t tagCount;
-		uint32_t sub;
-		rd >> messageLength >> sub >> tagCount;
-		rd.readBytes(tagCount * sizeof(Tag));
+		uint32_t sub = 1;
+		if (FLOW_KNOBS->WRITE_TRACING_ENABLED) {
+			rd >> messageLength >> sub >> tagCount;
+			rd.readBytes(tagCount * sizeof(Tag));
 
-		// deserialize span id
-		SpanContextMessage contextMessage;
-		rd >> contextMessage;
+			// deserialize span id
+			if (sub == 1) {
+				SpanContextMessage contextMessage;
+				rd >> contextMessage;
+			}
+		}
 
 		// deserialize mutation header
-		rd >> messageLength >> sub >> tagCount;
-		rd.readBytes(tagCount * sizeof(Tag));
-
+		if (sub == 1) {
+			rd >> messageLength >> sub >> tagCount;
+			rd.readBytes(tagCount * sizeof(Tag));
+		}
 		// deserialize mutation
 		MutationRef m;
 		rd >> m;
@@ -265,7 +289,10 @@ ACTOR Future<Void> TLogDriverContext::peekCommitMessages_impl(std::shared_ptr<Te
 		ASSERT_WE_THINK(m.param1 == expectedKey);
 		ASSERT_WE_THINK(m.param2 == expectedVal);
 
-		TraceEvent("RealTLogTest PeekResults", pTLogDriverContext->workerID).detail("LogGroupID", logGroupID).detail("Tag", tag);
+		TraceEvent("RealTLogTest: data validated on peek", pTLogDriverContext->workerID)
+		    .detail("Commit count", i)
+		    .detail("LogID", logID)
+		    .detail("TagID", tag);
 
 		// go directly to pop as there is no SS.
 		::TLogPopRequest requestPop(begin, begin, tag);
@@ -274,15 +301,14 @@ ACTOR Future<Void> TLogDriverContext::peekCommitMessages_impl(std::shared_ptr<Te
 		begin++;
 	}
 
-	TraceEvent("RealTLogTest exit peek", pTLogDriverContext->workerID).detail("LogGroupID", logGroupID).detail("Tag", tag);
+	TraceEvent("RealTLogTest exit peek", pTLogDriverContext->workerID).detail("LogID", logID).detail("TagID", tag);
 
 	return Void();
 }
 
-// wait for all tLogs to be created. Then build tLog group, then
+// wait for all tLogs to be created. Then build a single tLog server, then
 // signal transactions can start.
-ACTOR Future<Void> getTLogGroupActor(std::shared_ptr<TestDriverContext> pTestDriverContext,
-                                     std::shared_ptr<TLogDriverContext> pTLogDriverContext) {
+ACTOR Future<Void> getTLogGroupActor(std::shared_ptr<TLogDriverContext> pTLogDriverContext) {
 	// create tLog
 	state std::shared_ptr<TLogContext> pTLogContext = pTLogDriverContext->pTLogContextList[0];
 	bool isCreated = wait(pTLogContext->TLogCreated.getFuture());
@@ -303,8 +329,8 @@ ACTOR Future<Void> getTLogGroupActor(std::shared_ptr<TestDriverContext> pTestDri
 
 	// start transactions
 	pTLogDriverContext->pTLogContextList[0]->TLogStarted.send(true);
-	Future<Void> commit = pTLogDriverContext->sendCommitMessages(pTestDriverContext, 0);
-	Future<Void> peek = pTLogDriverContext->peekCommitMessages(pTestDriverContext, 0, 0);
+	Future<Void> commit = pTLogDriverContext->sendCommitMessages();
+	Future<Void> peek = pTLogDriverContext->peekCommitMessages();
 	wait(commit && peek);
 
 	// tell tLog actor to initiate shutdown.
@@ -313,13 +339,12 @@ ACTOR Future<Void> getTLogGroupActor(std::shared_ptr<TestDriverContext> pTestDri
 	return Void();
 }
 
-// wait for all tLogs to be created. Then build tLog group, then
-// signal transactions can start.
-ACTOR Future<Void> getProxyActor(std::shared_ptr<TestDriverContext> pTestDriverContext,
-                                 std::shared_ptr<TLogDriverContext> pTLogDriverContext) {
+// wait for all tLogs to be created. Then start actor to do push, then
+// start actors to do peeks, then signal transactions can start.
+ACTOR Future<Void> getProxyActor(std::shared_ptr<TLogDriverContext> pTLogDriverContext) {
 	// create tLog
 	state uint16_t processID = 0;
-	for (; processID < pTLogDriverContext->numLogGroups; processID++) {
+	for (; processID < pTLogDriverContext->numLogServers; processID++) {
 		state std::shared_ptr<TLogContext> pTLogContext = pTLogDriverContext->pTLogContextList[processID];
 		bool isCreated = wait(pTLogContext->TLogCreated.getFuture());
 		ASSERT_EQ(isCreated, true);
@@ -342,19 +367,22 @@ ACTOR Future<Void> getProxyActor(std::shared_ptr<TestDriverContext> pTestDriverC
 	pTLogDriverContext->ls =
 	    ILogSystem::fromServerDBInfo(pTLogDriverContext->logID, pTLogDriverContext->dbInfo, false, promises);
 
-	// start transactions
 	state std::vector<Future<Void>> actors;
-	actors.emplace_back(pTLogDriverContext->sendPushMessages(pTestDriverContext, processID));
-	for (processID = 0; processID < pTLogDriverContext->numLogGroups; processID++) {
-		for (uint32_t tagID = 0; tagID < pTLogDriverContext->numShardsPerGroup; tagID++) {
-			actors.emplace_back(pTLogDriverContext->peekCommitMessages(pTestDriverContext, processID, tagID));
+
+	// start push actor
+	actors.emplace_back(pTLogDriverContext->sendPushMessages());
+
+	// start peek actors
+	for (processID = 0; processID < pTLogDriverContext->numLogServers; processID++) {
+		for (uint32_t tagID = 0; tagID < pTLogDriverContext->numTagsPerServer; tagID++) {
+			actors.emplace_back(pTLogDriverContext->peekCommitMessages(processID, tagID));
 		}
 	}
 
 	wait(waitForAll(actors));
 
 	// tell tLog actors to initiate shutdown.
-	for (processID = 0; processID < pTLogDriverContext->numLogGroups; processID++) {
+	for (processID = 0; processID < pTLogDriverContext->numLogServers; processID++) {
 		pTLogDriverContext->pTLogContextList[processID]->realTLogTestCompleted.send(true);
 	}
 
@@ -362,59 +390,51 @@ ACTOR Future<Void> getProxyActor(std::shared_ptr<TestDriverContext> pTestDriverC
 }
 
 // create actors and return them in a list.
-void startActors(std::vector<Future<Void>>& actors,
-                 std::shared_ptr<TestDriverContext> pTestDriverContext,
-                 std::shared_ptr<TLogDriverContext> pTLogDriverContext,
-                 const TestTLogDriverOptions tLogOptions) {
-	int processID = 0;
-	std::shared_ptr<TLogContext> pTLogContext(new TLogContext(processID));
+std::vector<Future<Void>> startTLogTestActors(const UnitTestParameters& params) {
+	std::vector<Future<Void>> actors;
+	std::shared_ptr<TLogDriverContext> pTLogDriverContext = initTLogDriverContext(TestTLogDriverOptions(params));
+	const TestTLogDriverOptions& tLogOptions = pTLogDriverContext->tLogOptions;
+	std::shared_ptr<TLogContext> pTLogContext(new TLogContext());
 	pTLogDriverContext->pTLogContextList.push_back(pTLogContext);
-	actors.emplace_back(
-	    getTLogCreateActor(pTestDriverContext, pTLogDriverContext, tLogOptions, 0 /* processID used in tag */));
-	actors.emplace_back(getTLogGroupActor(pTestDriverContext, pTLogDriverContext));
+	actors.emplace_back(getTLogCreateActor(pTLogDriverContext, tLogOptions, 0 /* processID */));
+	actors.emplace_back(getTLogGroupActor(pTLogDriverContext));
+	return actors;
 }
 
 // create actors and return them in a list.
-void startNewActors(std::vector<Future<Void>>& actors,
-                    std::shared_ptr<TestDriverContext> pTestDriverContext,
-                    std::shared_ptr<TLogDriverContext> pTLogDriverContext,
-                    const TestTLogDriverOptions tLogOptions) {
-	for (int processID = 0; processID < pTLogDriverContext->numLogGroups; processID++) {
+std::vector<Future<Void>> startTLogGroupActors(const UnitTestParameters& params) {
+	std::vector<Future<Void>> actors;
+	std::shared_ptr<TLogDriverContext> pTLogDriverContext = initTLogDriverContext(TestTLogDriverOptions(params));
+	const TestTLogDriverOptions& tLogOptions = pTLogDriverContext->tLogOptions;
+
+	// Create one TLog for each log server. Only a single group of log servers is supported.
+	for (int processID = 0; processID < pTLogDriverContext->numLogServers; processID++) {
 		std::shared_ptr<TLogContext> pTLogContext(new TLogContext(processID));
 		pTLogDriverContext->pTLogContextList.push_back(pTLogContext);
 	}
-	for (int processID = 0; processID < pTLogDriverContext->numLogGroups; processID++) {
-		actors.emplace_back(getTLogCreateActor(pTestDriverContext, pTLogDriverContext, tLogOptions, processID));
+	for (int processID = 0; processID < pTLogDriverContext->numLogServers; processID++) {
+		actors.emplace_back(getTLogCreateActor(pTLogDriverContext, tLogOptions, processID));
 	}
-	actors.emplace_back(getProxyActor(pTestDriverContext, pTLogDriverContext));
+
+	// start fake proxy, which will create peek and commit actors.
+	actors.emplace_back(getProxyActor(pTLogDriverContext));
+	return actors;
 }
 
 } // namespace ptxn::test
 
-// single tLog test
+// test a single tLog
 TEST_CASE("/fdbserver/ptxn/test/realtlogdriver") {
 	using namespace ptxn::test;
 
-	std::vector<Future<Void>> actors;
-	TestDriverOptions driverOptions(params);
-	TestTLogDriverOptions tLogOptions(params);
-	std::shared_ptr<TestDriverContext> context = initTestDriverContext(driverOptions);
-	std::shared_ptr<TLogDriverContext> realTLogContext = initTLogDriverContext(driverOptions, tLogOptions);
-	startActors(actors, context, realTLogContext, tLogOptions);
-	wait(waitForAll(actors));
+	wait(waitForAll(startTLogTestActors(params)));
 	return Void();
 }
 
-// multiple tLog test
-TEST_CASE("/fdbserver/ptxn/test/realtlogsdriver") {
+// test a group of tLogs
+TEST_CASE("/fdbserver/ptxn/test/realtloggroupdriver") {
 	using namespace ptxn::test;
 
-	std::vector<Future<Void>> actors;
-	TestDriverOptions driverOptions(params);
-	TestTLogDriverOptions tLogOptions(params);
-	std::shared_ptr<TestDriverContext> context = initTestDriverContext(driverOptions);
-	std::shared_ptr<TLogDriverContext> realTLogContext = initTLogDriverContext(driverOptions, tLogOptions);
-	startNewActors(actors, context, realTLogContext, tLogOptions);
-	wait(waitForAll(actors));
+	wait(waitForAll(startTLogGroupActors(params)));
 	return Void();
 }
