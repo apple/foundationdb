@@ -19,6 +19,7 @@
  */
 
 #include "flow/FastAlloc.h"
+#include "flow/Error.h"
 #include "flow/Platform.h"
 #include "flow/flow.h"
 #include "flow/UnitTest.h"
@@ -147,6 +148,13 @@ TEST_CASE("/FastAlloc/4096-aligned-allocation-no-internal-fragmentation") {
 	p = alignedAllocateFast(4096, 4096 * 4);
 	ASSERT(je_sallocx(p, /*flags*/ 0) == 4096 * 4);
 	alignedFreeFast(p);
+	return Void();
+}
+
+TEST_CASE("/FastAlloc/nextFastAllocatedSize") {
+	for (int i = 1; i < 8192; ++i) {
+		ASSERT_EQ(nextFastAllocatedSize(i), je_nallocx(i, /*flags*/ 0));
+	}
 	return Void();
 }
 
