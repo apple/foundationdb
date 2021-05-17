@@ -222,7 +222,7 @@ public:
 	void reset(const Arena&, const StringRef);
 
 	// Gets the team ID
-	const StorageTeamID& getTeamID() const;
+	const StorageTeamID& getStorageTeamID() const;
 
 	// Gets the number of different versions in this part
 	size_t getNumVersions() const;

@@ -305,7 +305,7 @@ bool testTLogStorageServerMessageSerializer() {
 
 	TLogStorageServerMessageDeserializer deserializer(serialized.arena(), serialized);
 
-	ASSERT(deserializer.getTeamID() == storageTeamID);
+	ASSERT(deserializer.getStorageTeamID() == storageTeamID);
 	ASSERT_EQ(deserializer.getNumVersions(), 3);
 	ASSERT_EQ(deserializer.getFirstVersion(), 1);
 	ASSERT_EQ(deserializer.getLastVersion(), 3);

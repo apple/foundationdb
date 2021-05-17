@@ -120,7 +120,7 @@ void TLogStorageServerMessageDeserializer::reset(const Arena& serializedArena_, 
 	endIterator = iterator(serializedArena, serialized, true);
 }
 
-const StorageTeamID& TLogStorageServerMessageDeserializer::getTeamID() const {
+const StorageTeamID& TLogStorageServerMessageDeserializer::getStorageTeamID() const {
 	return header.storageTeamID;
 }
 

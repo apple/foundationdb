@@ -172,24 +172,23 @@ ACTOR Future<bool> peekRemoteForMergedCursor(MergedPeekCursorContext context) {
 }
 
 struct MergedPeekServerTeamCursorContext : public MergedPeekCursorContext {
-	std::unordered_map<StorageTeamID, CursorContainer::iterator>* pMapper;
+	std::unordered_map<StorageTeamID, MergedPeekCursor::CursorContainer::iterator>* pMapper;
 };
 
 // In addition to peekRemoteForMergedCursor, update the team ID/cursor mapping
-ACTOR Future<bool> peekRemoteForMergedServerTeamCursor(MergedPeekServerTeamCursorContext context) {
+ACTOR Future<bool> peekRemoteForMergedStorageTeamCursor(MergedPeekServerTeamCursorContext context) {
 	bool result = wait(peekRemoteForMergedCursor(static_cast<MergedPeekCursorContext>(context)));
 
 	// Since peekRemoteForMergedCursor will drop exhausted cursors, the team ID - cursor mapping should drop invalid
 	// references to those exhaustd cursors.
 	std::unordered_set<StorageTeamID> inactiveTeamIDs;
-	for (std::unordered_map<StorageTeamID, CursorContainer::iterator>::iterator iter = std::begin(*context.pMapper);
-	     iter != std::end(*context.pMapper);
-	     ++iter) {
-		inactiveTeamIDs.insert(iter->first);
+	for (const auto& [storageTeamID, _] : *context.pMapper) {
+		inactiveTeamIDs.insert(storageTeamID); // iter->first);
 	}
-	for (CursorContainer::iterator iter = std::begin(*context.pCursorPtrs); iter != std::end(*context.pCursorPtrs);
+	for (MergedPeekCursor::CursorContainer::iterator iter = std::begin(*context.pCursorPtrs);
+	     iter != std::end(*context.pCursorPtrs);
 	     ++iter) {
-		inactiveTeamIDs.erase(dynamic_cast<StorageTeamPeekCursor*>((*iter).get())->getTeamID());
+		inactiveTeamIDs.erase(dynamic_cast<StorageTeamPeekCursor*>((*iter).get())->getStorageTeamID());
 	}
 	for (std::unordered_set<StorageTeamID>::iterator iter = std::begin(inactiveTeamIDs);
 	     iter != std::end(inactiveTeamIDs);
@@ -207,7 +206,7 @@ PeekCursorBase::iterator::iterator(PeekCursorBase* pCursor_, bool isEndIterator_
 
 bool PeekCursorBase::iterator::operator==(const PeekCursorBase::iterator& another) const {
 	// Since the iterator is not duplicable, no two iterators equal. This is a a hack to help determining if the
-	// iterator is reaching the end of the data. See documents of the constructor.
+	// iterator is reaching the end of the data. See the comments of the constructor.
 	return (!pCursor->hasRemaining() && another.isEndIterator && pCursor == another.pCursor);
 }
 
@@ -246,24 +245,25 @@ bool PeekCursorBase::hasRemaining() const {
 }
 
 StorageTeamPeekCursor::StorageTeamPeekCursor(const Version& beginVersion_,
-                                         const StorageTeamID& storageTeamID_,
-                                         TLogInterfaceBase* pTLogInterface_,
-                                         Arena* pArena_)
+                                             const StorageTeamID& storageTeamID_,
+                                             TLogInterfaceBase* pTLogInterface_,
+                                             Arena* pArena_)
   : StorageTeamPeekCursor(beginVersion_, storageTeamID_, std::vector<TLogInterfaceBase*>{ pTLogInterface_ }, pArena_) {}
 
 StorageTeamPeekCursor::StorageTeamPeekCursor(const Version& beginVersion_,
-                                         const StorageTeamID& storageTeamID_,
-                                         const std::vector<TLogInterfaceBase*>& pTLogInterfaces_,
-                                         Arena* pArena_)
-  : storageTeamID(storageTeamID_), pTLogInterfaces(pTLogInterfaces_), pAttachArena(pArena_), deserializer(emptyCursorHeader()),
-    deserializerIter(deserializer.begin()), beginVersion(beginVersion_), lastVersion(beginVersion_ - 1) {
+                                             const StorageTeamID& storageTeamID_,
+                                             const std::vector<TLogInterfaceBase*>& pTLogInterfaces_,
+                                             Arena* pArena_)
+  : storageTeamID(storageTeamID_), pTLogInterfaces(pTLogInterfaces_), pAttachArena(pArena_),
+    deserializer(emptyCursorHeader()), deserializerIter(deserializer.begin()), beginVersion(beginVersion_),
+    lastVersion(beginVersion_ - 1) {
 
 	for (const auto pTLogInterface : pTLogInterfaces) {
 		ASSERT(pTLogInterface != nullptr);
 	}
 }
 
-const StorageTeamID& StorageTeamPeekCursor::getTeamID() const {
+const StorageTeamID& StorageTeamPeekCursor::getStorageTeamID() const {
 	return storageTeamID;
 }
 
@@ -277,8 +277,13 @@ const Version& StorageTeamPeekCursor::getBeginVersion() const {
 
 Future<bool> StorageTeamPeekCursor::remoteMoreAvailableImpl() {
 	// FIXME Put debugID if necessary
-	PeekRemoteContext context(
-	    Optional<UID>(), getTeamID(), &lastVersion, pTLogInterfaces, &deserializer, &deserializerIter, pAttachArena);
+	PeekRemoteContext context(Optional<UID>(),
+	                          getStorageTeamID(),
+	                          &lastVersion,
+	                          pTLogInterfaces,
+	                          &deserializer,
+	                          &deserializerIter,
+	                          pAttachArena);
 
 	return peekRemote(context);
 }
@@ -295,14 +300,14 @@ bool StorageTeamPeekCursor::hasRemainingImpl() const {
 	return deserializerIter != deserializer.end();
 }
 
-IndexedCursor::IndexedCursor(const Version& version_,
+MergedPeekCursor::IndexedCursor::IndexedCursor(const Version& version_,
                              const Subsequence& subsequence_,
-                             CursorContainer::iterator pCursorPtr_)
+                             MergedPeekCursor::CursorContainer::iterator pCursorPtr_)
   : version(version_), subsequence(subsequence_), pCursorPtr(pCursorPtr_) {}
 
 MergedPeekCursor::MergedPeekCursor() : PeekCursorBase() {}
 
-void MergedPeekCursor::addCursorToCursorHeap(CursorContainer::iterator iter) {
+void MergedPeekCursor::addCursorToCursorHeap(MergedPeekCursor::CursorContainer::iterator iter) {
 	ptxn::addCursorToCursorHeap(iter, cursorHeap);
 }
 
@@ -356,23 +361,23 @@ MergedPeekCursor::CursorContainer::iterator MergedPeekCursor::addCursorImpl(std:
 	return iter;
 }
 
-MergedServerTeamPeekCursor::MergedServerTeamPeekCursor() : MergedPeekCursor() {}
+MergedStorageTeamPeekCursor::MergedStorageTeamPeekCursor() : MergedPeekCursor() {}
 
-MergedPeekCursor::CursorContainer::iterator MergedServerTeamPeekCursor::addCursorImpl(
+MergedPeekCursor::CursorContainer::iterator MergedStorageTeamPeekCursor::addCursorImpl(
     std::unique_ptr<PeekCursorBase>&& cursor) {
 
 	ASSERT(dynamic_cast<StorageTeamPeekCursor*>(cursor.get()) != nullptr);
 
 	auto iter = MergedPeekCursor::addCursorImpl(std::move(cursor));
 
-	const StorageTeamID& storageTeamID = dynamic_cast<StorageTeamPeekCursor*>((*iter).get())->getTeamID();
+	const StorageTeamID& storageTeamID = dynamic_cast<StorageTeamPeekCursor*>((*iter).get())->getStorageTeamID();
 	ASSERT(storageTeamIDCursorMapper.find(storageTeamID) == storageTeamIDCursorMapper.end());
 	storageTeamIDCursorMapper[storageTeamID] = iter;
 
 	return iter;
 }
 
-std::unique_ptr<PeekCursorBase> MergedServerTeamPeekCursor::removeCursor(const StorageTeamID& storageTeamID) {
+std::unique_ptr<PeekCursorBase> MergedStorageTeamPeekCursor::removeCursor(const StorageTeamID& storageTeamID) {
 	auto mapperIter = storageTeamIDCursorMapper.find(storageTeamID);
 	if (mapperIter == storageTeamIDCursorMapper.end()) {
 		return nullptr;
@@ -405,16 +410,16 @@ std::unique_ptr<PeekCursorBase> MergedServerTeamPeekCursor::removeCursor(const S
 	return pCursor;
 }
 
-Future<bool> MergedServerTeamPeekCursor::remoteMoreAvailableImpl() {
+Future<bool> MergedStorageTeamPeekCursor::remoteMoreAvailableImpl() {
 	if (cursorPtrs.empty()) {
 		// No cursors are currently active
 		return false;
 	}
 
-	return peekRemoteForMergedServerTeamCursor({ &cursorPtrs, &cursorHeap, &storageTeamIDCursorMapper });
+	return peekRemoteForMergedStorageTeamCursor({ &cursorPtrs, &cursorHeap, &storageTeamIDCursorMapper });
 }
 
-std::vector<StorageTeamID> MergedServerTeamPeekCursor::getCursorTeamIDs() {
+std::vector<StorageTeamID> MergedStorageTeamPeekCursor::getCursorTeamIDs() {
 	std::vector<StorageTeamID> result;
 	result.reserve(storageTeamIDCursorMapper.size());
 	for (const auto& [storageTeamID, _] : storageTeamIDCursorMapper) {

@@ -143,16 +143,16 @@ public:
 	// cursor is destroyed. If pArena_ is nullptr, any reference to the peeked data will be invalidated after the cursor
 	// is destructed.
 	StorageTeamPeekCursor(const Version& version_,
-	                     const StorageTeamID& storageTeamID_,
-	                     TLogInterfaceBase* pTLogInterface_,
-	                     Arena* pArena_ = nullptr);
+	                      const StorageTeamID& storageTeamID_,
+	                      TLogInterfaceBase* pTLogInterface_,
+	                      Arena* pArena_ = nullptr);
 
 	StorageTeamPeekCursor(const Version& version_,
-	                     const StorageTeamID& storageTeamID_,
-	                     const std::vector<TLogInterfaceBase*>& pTLogInterfaces_,
-	                     Arena* arena_ = nullptr);
+	                      const StorageTeamID& storageTeamID_,
+	                      const std::vector<TLogInterfaceBase*>& pTLogInterfaces_,
+	                      Arena* arena_ = nullptr);
 
-	const StorageTeamID& getTeamID() const;
+	const StorageTeamID& getStorageTeamID() const;
 
 	// Returns the last version being pulled
 	const Version& getLastVersion() const;
@@ -164,49 +164,6 @@ protected:
 	virtual bool hasRemainingImpl() const override;
 };
 
-using CursorContainer = std::list<std::unique_ptr<PeekCursorBase>>;
-
-// This class defines the index of a cursor. For a given mutation, it has an unique cursor index. The index is totally
-// ordered.
-struct IndexedCursor {
-	Version version;
-	Subsequence subsequence;
-	CursorContainer::iterator pCursorPtr;
-
-	IndexedCursor(const Version&, const Subsequence&, CursorContainer::iterator);
-
-	// TODO the return type should be std::strong_ordering
-	friend constexpr int operatorSpaceship(const IndexedCursor&, const IndexedCursor&);
-
-	// TODO Replace the code with real spaceship operator when C++20 is allowed
-	bool operator>(const IndexedCursor& another) const { return operatorSpaceship(*this, another) == 1; }
-	bool operator>=(const IndexedCursor& another) const { return operatorSpaceship(*this, another) >= 0; }
-	bool operator<(const IndexedCursor& another) const { return operatorSpaceship(*this, another) == -1; }
-	bool operator<=(const IndexedCursor& another) const { return operatorSpaceship(*this, another) <= 0; }
-	bool operator!=(const IndexedCursor& another) const { return operatorSpaceship(*this, another) != 0; }
-	bool operator==(const IndexedCursor& another) const { return operatorSpaceship(*this, another) == 0; }
-};
-
-// Returns
-//   0 if  c1 == c2
-//   1 if  c1 >  c2
-//  -1 if  c1 <  c2
-inline constexpr int operatorSpaceship(const IndexedCursor& c1, const IndexedCursor& c2) {
-	if (c1.version > c2.version) {
-		return 1;
-	} else if (c1.version < c2.version) {
-		return -1;
-	} else {
-		if (c1.subsequence > c2.subsequence) {
-			return 1;
-		} else if (c1.subsequence < c2.subsequence) {
-			return -1;
-		}
-
-		return 0;
-	}
-}
-
 // Merges multiple cursors, return a single cursor, and reorder the mutations by version/subsequence, in an ascending
 // order.
 // When peeking for mutations, it is usually acrossing multiple teams, e.g. when StorageServer peeks for
@@ -214,9 +171,32 @@ inline constexpr int operatorSpaceship(const IndexedCursor& c1, const IndexedCur
 // multiple cursors, reorder them by version/subsequence using a heap, and output the result.
 class MergedPeekCursor : public PeekCursorBase {
 public:
+	// The container stores the cursors
+	using CursorContainer = std::list<std::unique_ptr<PeekCursorBase>>;
+
+	// This class defines the index of a cursor. For a given mutation, it has an unique cursor index. The index is totally
+	// ordered.
+	struct IndexedCursor {
+		Version version;
+		Subsequence subsequence;
+		CursorContainer::iterator pCursorPtr;
+
+		IndexedCursor(const Version&, const Subsequence&, CursorContainer::iterator);
+
+		// TODO the return type should be std::strong_ordering
+		friend constexpr int operatorSpaceship(const IndexedCursor&, const IndexedCursor&);
+
+		// TODO Replace the code with real spaceship operator when C++20 is allowed
+		bool operator>(const IndexedCursor& another) const { return operatorSpaceship(*this, another) == 1; }
+		bool operator>=(const IndexedCursor& another) const { return operatorSpaceship(*this, another) >= 0; }
+		bool operator<(const IndexedCursor& another) const { return operatorSpaceship(*this, another) == -1; }
+		bool operator<=(const IndexedCursor& another) const { return operatorSpaceship(*this, another) <= 0; }
+		bool operator!=(const IndexedCursor& another) const { return operatorSpaceship(*this, another) != 0; }
+		bool operator==(const IndexedCursor& another) const { return operatorSpaceship(*this, another) == 0; }
+	};
+
 	// NOTE std::priority_queue is a max-heap by default. We need to use std::greater to turn it into a min-heap.
 	using CursorHeap = std::priority_queue<IndexedCursor, std::vector<IndexedCursor>, std::greater<IndexedCursor>>;
-	using CursorContainer = ptxn::CursorContainer;
 
 protected:
 	// In cursorPtrs, we maintain a list of cursors that are still not exhausted. Any cursor that is exhausted will be
@@ -274,23 +254,44 @@ protected:
 	virtual bool hasRemainingImpl() const override;
 };
 
+// Compares two MergedPeekCursor::IndexedCursor
+// Returns
+//   0 if  c1 == c2
+//   1 if  c1 >  c2
+//  -1 if  c1 <  c2
+inline constexpr int operatorSpaceship(const MergedPeekCursor::IndexedCursor& c1, const MergedPeekCursor::IndexedCursor& c2) {
+	if (c1.version > c2.version) {
+		return 1;
+	} else if (c1.version < c2.version) {
+		return -1;
+	} else {
+		if (c1.subsequence > c2.subsequence) {
+			return 1;
+		} else if (c1.subsequence < c2.subsequence) {
+			return -1;
+		}
+
+		return 0;
+	}
+}
+
 // Merges multiple StorageTeamPeekCursor, allowing adding/removing by TeamID.
-class MergedServerTeamPeekCursor : public MergedPeekCursor {
+class MergedStorageTeamPeekCursor : public MergedPeekCursor {
 private:
 	std::unordered_map<StorageTeamID, CursorContainer::iterator> storageTeamIDCursorMapper;
 
 public:
-	// Construct a MergedServerTeamPeekCursor holding no cursors.
-	MergedServerTeamPeekCursor();
+	// Construct a MergedStorageTeamPeekCursor holding no cursors.
+	MergedStorageTeamPeekCursor();
 
-	// Construct a MergedServerTeamPeekCursor using a range of std::unique_ptr<PeekCursorBase> objects.
+	// Construct a MergedStorageTeamPeekCursor using a range of std::unique_ptr<PeekCursorBase> objects.
 	template <typename Iterator>
-	MergedServerTeamPeekCursor(Iterator&& begin, Iterator&& end) : MergedPeekCursor(begin, end) {
+	MergedStorageTeamPeekCursor(Iterator&& begin, Iterator&& end) : MergedPeekCursor(begin, end) {
 		for (auto iter = std::begin(cursorPtrs); iter != std::end(cursorPtrs); ++iter) {
 			const auto* pCursor = dynamic_cast<StorageTeamPeekCursor*>((*iter).get());
 			ASSERT(pCursor != nullptr);
 			// NOTE std::dynamic_pointer_cast is not supporting std::unique_ptr.
-			const auto& storageTeamID = pCursor->getTeamID();
+			const auto& storageTeamID = pCursor->getStorageTeamID();
 			storageTeamIDCursorMapper[storageTeamID] = iter;
 		}
 	}

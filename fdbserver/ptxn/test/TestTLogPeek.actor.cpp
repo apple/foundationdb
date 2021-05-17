@@ -88,7 +88,7 @@ ACTOR Future<Void> peekAndCheck(std::shared_ptr<FakeTLogContext> pContext) {
 
 } // namespace ptxn::test
 
-TEST_CASE("/fdbserver/ptxn/test/tlogPeek/readFromSerialization") {
+TEST_CASE("/fdbserver/ptxn/test/tLogPeek/readFromSerialization") {
 	state ptxn::test::TestTLogPeekOptions options(params);
 	state std::shared_ptr<ptxn::test::FakeTLogContext> pContext = std::make_shared<ptxn::test::FakeTLogContext>();
 	state int numPeeks = 0;
@@ -331,12 +331,12 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/MergedPeekCursor/addCursorOnTheF
 	return Void();
 }
 
-TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/MergedServerTeamPeekCursor/removeCursorOnTheFly") {
+TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/MergedStorageTeamPeekCursor/removeCursorOnTheFly") {
 	state std::shared_ptr<ptxn::test::FakeTLogContext> pContext = std::make_shared<ptxn::test::FakeTLogContext>();
 	state const std::vector<ptxn::StorageTeamID>& storageTeamIDs = pContext->storageTeamIDs;
 	state Future<Void> tLog = ptxn::test::initializeTLogForCursorTest(pContext);
-	state std::shared_ptr<ptxn::MergedServerTeamPeekCursor> pCursor =
-	    std::make_shared<ptxn::MergedServerTeamPeekCursor>();
+	state std::shared_ptr<ptxn::MergedStorageTeamPeekCursor> pCursor =
+	    std::make_shared<ptxn::MergedStorageTeamPeekCursor>();
 
 	pCursor->addCursor(std::make_unique<ptxn::StorageTeamPeekCursor>(
 	    ptxn::test::TEST_INITIAL_VERSION, storageTeamIDs[0], pContext->pTLogInterface.get()));
@@ -363,8 +363,8 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/advanceTo") {
 	state std::shared_ptr<ptxn::test::FakeTLogContext> pContext = std::make_shared<ptxn::test::FakeTLogContext>();
 	state const std::vector<ptxn::StorageTeamID>& storageTeamIDs = pContext->storageTeamIDs;
 	state Future<Void> tLog = ptxn::test::initializeTLogForCursorTest(pContext);
-	state std::shared_ptr<ptxn::MergedServerTeamPeekCursor> pCursor =
-	    std::make_shared<ptxn::MergedServerTeamPeekCursor>();
+	state std::shared_ptr<ptxn::MergedStorageTeamPeekCursor> pCursor =
+	    std::make_shared<ptxn::MergedStorageTeamPeekCursor>();
 
 	for (int i = 0; i < ptxn::test::NUM_TEAMS; ++i) {
 		pCursor->addCursor(std::make_unique<ptxn::StorageTeamPeekCursor>(
