@@ -1194,8 +1194,8 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 			// check if allowed to modify the cluster descriptor
 			if (!change->getDesiredClusterKeyName().empty()) {
 				CheckDescriptorMutableReply mutabilityReply =
-				    wait(coord.clientLeaderServers[0].checkDescriptorMutable.getReply(CheckDescriptorMutable()));
-				if (!mutabilityReply.value)
+				    wait(coord.clientLeaderServers[0].checkDescriptorMutable.getReply(CheckDescriptorMutableRequest()));
+				if (!mutabilityReply.isMutable)
 					return CoordinatorsResult::BAD_DATABASE_STATE;
 			}
 			leaderServers.reserve(coord.clientLeaderServers.size());

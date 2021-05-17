@@ -32,16 +32,16 @@ const int MAX_CLUSTER_FILE_BYTES = 60000;
 
 constexpr UID WLTOKEN_CLIENTLEADERREG_GETLEADER(-1, 2);
 constexpr UID WLTOKEN_CLIENTLEADERREG_OPENDATABASE(-1, 3);
-constexpr UID WLTOKEN_CLIENTLEADERREG_DESCRIPTOR_MUTABLE(-1, 4);
 
 // the value of this endpoint should be stable and not change.
-constexpr UID WLTOKEN_PROTOCOL_INFO(-1, 11);
+constexpr UID WLTOKEN_PROTOCOL_INFO(-1, 10);
+constexpr UID WLTOKEN_CLIENTLEADERREG_DESCRIPTOR_MUTABLE(-1, 11);
 
 // well known endpoints published to the client.
 struct ClientLeaderRegInterface {
 	RequestStream<struct GetLeaderRequest> getLeader;
 	RequestStream<struct OpenDatabaseCoordRequest> openDatabase;
-	RequestStream<struct CheckDescriptorMutable> checkDescriptorMutable;
+	RequestStream<struct CheckDescriptorMutableRequest> checkDescriptorMutable;
 
 	ClientLeaderRegInterface() {}
 	ClientLeaderRegInterface(NetworkAddress remote);
@@ -243,21 +243,20 @@ struct ProtocolInfoRequest {
 struct CheckDescriptorMutableReply {
 	constexpr static FileIdentifier file_identifier = 7784299;
 	CheckDescriptorMutableReply() = default;
-	explicit CheckDescriptorMutableReply(bool value) : value(value) {}
-	bool value;
+	explicit CheckDescriptorMutableReply(bool isMutable) : isMutable(isMutable) {}
+	bool isMutable;
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, value);
+		serializer(ar, isMutable);
 	}
 };
 
 // Allows client to check if allowed to change the cluster descriptor.
-struct CheckDescriptorMutable {
+struct CheckDescriptorMutableRequest {
 	constexpr static FileIdentifier file_identifier = 214729;
 	Key key;
 	ReplyPromise<CheckDescriptorMutableReply> reply;
-	explicit CheckDescriptorMutable(Key key) : key(key) {}
-	CheckDescriptorMutable() {}
+	CheckDescriptorMutableRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

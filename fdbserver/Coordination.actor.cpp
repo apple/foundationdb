@@ -563,12 +563,14 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 	wait(LeaderRegisterCollection::init(&regs));
 
 	loop choose {
-		when(CheckDescriptorMutable req = waitNext(interf.checkDescriptorMutable.getFuture())) {
+		when(CheckDescriptorMutableRequest req = waitNext(interf.checkDescriptorMutable.getFuture())) {
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
+			// Note the response returns the value of a knob enforced by checking only one coordinator. It is not
+			// quorum based.
 			if (forward.present()) {
-				req.reply.send(CheckDescriptorMutableReply{ false });
+				req.reply.sendError(coordinators_changed());
 			} else {
-				CheckDescriptorMutableReply rep(SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT ? true : false);
+				CheckDescriptorMutableReply rep(SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT);
 				req.reply.send(rep);
 			}
 		}
