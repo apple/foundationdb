@@ -28,6 +28,7 @@ set(FDBSERVER_SRCS
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
   GrvProxyServer.actor.cpp
+  IConfigDatabaseNode.cpp
   IConfigDatabaseNode.h
   IConfigConsumer.h
   IDiskQueue.h
@@ -71,6 +72,8 @@ set(FDBSERVER_SRCS
   Orderer.actor.h
   PaxosConfigConsumer.actor.cpp
   PaxosConfigConsumer.h
+  PaxosConfigDatabaseNode.actor.cpp
+  PaxosConfigDatabaseNode.h
   ProxyCommitData.actor.h
   pubsub.actor.cpp
   pubsub.h

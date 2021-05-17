@@ -217,13 +217,13 @@ class TransactionEnvironment {
 
 public:
 	TransactionEnvironment()
-	  : tr(cti), node(makeReference<SimpleConfigDatabaseNode>()), id(deterministicRandom()->randomUniqueID()) {}
+	  : tr(cti), node(IConfigDatabaseNode::createSimple()), id(deterministicRandom()->randomUniqueID()) {}
 
 	Future<Void> setup() { return setup(this); }
 
 	Future<Void> restart() {
 		server.cancel();
-		node = makeReference<SimpleConfigDatabaseNode>();
+		node = IConfigDatabaseNode::createSimple();
 		return setup();
 	}
 
@@ -263,16 +263,15 @@ class TransactionToLocalConfigEnvironment {
 
 public:
 	TransactionToLocalConfigEnvironment(std::string const& configPath)
-	  : cfi(makeReference<AsyncVar<ConfigFollowerInterface>>()), tr(cti),
-	    node(makeReference<SimpleConfigDatabaseNode>()), nodeID(deterministicRandom()->randomUniqueID()),
-	    localConfiguration(configPath, {}) {}
+	  : cfi(makeReference<AsyncVar<ConfigFollowerInterface>>()), tr(cti), node(IConfigDatabaseNode::createSimple()),
+	    nodeID(deterministicRandom()->randomUniqueID()), localConfiguration(configPath, {}) {}
 
 	Future<Void> setup() { return setup(this); }
 
 	Future<Void> restartNode() {
 		cfiServer.cancel();
 		ctiServer.cancel();
-		node = makeReference<SimpleConfigDatabaseNode>();
+		node = IConfigDatabaseNode::createSimple();
 		return setupNode(this);
 	}
 

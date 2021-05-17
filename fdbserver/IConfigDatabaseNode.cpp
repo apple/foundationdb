@@ -1,5 +1,5 @@
 /*
- * IConfigDatabaseNode.h
+ * IConfigDatabaseNode.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,21 +18,14 @@
  * limitations under the License.
  */
 
-#pragma once
+#include "fdbserver/IConfigDatabaseNode.h"
+#include "fdbserver/PaxosConfigDatabaseNode.h"
+#include "fdbserver/SimpleConfigDatabaseNode.h"
 
-#include "fdbclient/ConfigTransactionInterface.h"
-#include "fdbserver/ConfigFollowerInterface.h"
-#include "flow/FastRef.h"
-#include "flow/flow.h"
+Reference<IConfigDatabaseNode> IConfigDatabaseNode::createSimple() {
+	return makeReference<SimpleConfigDatabaseNode>();
+}
 
-#include <memory>
-
-class IConfigDatabaseNode : public ReferenceCounted<IConfigDatabaseNode> {
-public:
-	virtual Future<Void> serve(ConfigTransactionInterface const&) = 0;
-	virtual Future<Void> serve(ConfigFollowerInterface const&) = 0;
-	virtual Future<Void> initialize(std::string const& dataFolder, UID id) = 0;
-
-	static Reference<IConfigDatabaseNode> createSimple();
-	static Reference<IConfigDatabaseNode> createPaxos();
-};
+Reference<IConfigDatabaseNode> IConfigDatabaseNode::createPaxos() {
+	return makeReference<PaxosConfigDatabaseNode>();
+}

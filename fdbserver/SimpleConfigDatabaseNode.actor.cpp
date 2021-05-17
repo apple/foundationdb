@@ -20,7 +20,7 @@
 
 #include <map>
 
-#include "fdbserver/IConfigDatabaseNode.h"
+#include "fdbserver/SimpleConfigDatabaseNode.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/Arena.h"
 #include "flow/genericactors.actor.h"

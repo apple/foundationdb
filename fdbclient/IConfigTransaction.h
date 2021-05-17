@@ -32,6 +32,7 @@ protected:
 public:
 	virtual ~IConfigTransaction() = default;
 
+	// Not implemented:
 	void setVersion(Version) override { throw client_invalid_operation(); }
 	Future<Key> getKey(KeySelector const& key, bool snapshot = false) override { throw client_invalid_operation(); }
 	Future<Standalone<VectorRef<const char*>>> getAddressesForKey(Key const& key) override {
@@ -49,4 +50,7 @@ public:
 	Future<Void> watch(Key const& key) override { throw client_invalid_operation(); }
 	void addWriteConflictRange(KeyRangeRef const& keys) override { throw client_invalid_operation(); }
 	Future<Standalone<StringRef>> getVersionstamp() override { throw client_invalid_operation(); }
+
+	// Implemented:
+	void getWriteConflicts(KeyRangeMap<bool>* result) override{};
 };

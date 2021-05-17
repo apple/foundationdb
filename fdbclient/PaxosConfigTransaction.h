@@ -56,5 +56,4 @@ public:
 	void reset() override;
 	void debugTransaction(UID dID) override;
 	void checkDeferredError() const override;
-	void getWriteConflicts(KeyRangeMap<bool>* result) override;
 };
