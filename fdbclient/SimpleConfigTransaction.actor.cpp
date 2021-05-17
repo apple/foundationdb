@@ -259,8 +259,6 @@ void SimpleConfigTransaction::checkDeferredError() const {
 	}
 }
 
-void SimpleConfigTransaction::getWriteConflicts(KeyRangeMap<bool>* result) {}
-
 SimpleConfigTransaction::SimpleConfigTransaction(ClusterConnectionString const& ccs)
   : impl(std::make_unique<SimpleConfigTransactionImpl>(ccs)) {}
 

@@ -23,6 +23,7 @@
 #include <memory>
 
 #include "fdbclient/ConfigKnobs.h"
+#include "fdbclient/ConfigTransactionInterface.h"
 #include "fdbclient/ISingleThreadTransaction.h"
 
 class IConfigTransaction : public ISingleThreadTransaction {
@@ -31,6 +32,11 @@ protected:
 
 public:
 	virtual ~IConfigTransaction() = default;
+	virtual void fullReset() = 0;
+
+	static Reference<IConfigTransaction> createSimple(ConfigTransactionInterface const&);
+	static Reference<IConfigTransaction> createSimple(ClusterConnectionString const&);
+	static Reference<IConfigTransaction> createPaxos(ClusterConnectionString const&);
 
 	// Not implemented:
 	void setVersion(Version) override { throw client_invalid_operation(); }

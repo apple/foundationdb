@@ -32,4 +32,15 @@ public:
 	virtual ~IConfigConsumer() = default;
 	virtual Future<Void> getInitialSnapshot(ConfigBroadcaster& broadcaster) = 0;
 	virtual Future<Void> consume(ConfigBroadcaster& broadcaster) = 0;
+	virtual UID getID() const = 0;
+
+	static std::unique_ptr<IConfigConsumer> createSimple(ConfigFollowerInterface const& cfi,
+	                                                     Optional<double> pollingInterval,
+	                                                     Optional<double> compactionInterval);
+	static std::unique_ptr<IConfigConsumer> createSimple(ServerCoordinators const& coordinators,
+	                                                     Optional<double> pollingInterval,
+	                                                     Optional<double> compactionInterval);
+	static std::unique_ptr<IConfigConsumer> createPaxos(ServerCoordinators const& coordinators,
+	                                                    Optional<double> pollingInterval,
+	                                                    Optional<double> compactionInterval);
 };

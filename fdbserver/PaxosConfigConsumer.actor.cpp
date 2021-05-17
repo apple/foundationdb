@@ -22,10 +22,9 @@
 
 class PaxosConfigConsumerImpl {};
 
-PaxosConfigConsumer::PaxosConfigConsumer(ConfigFollowerInterface const& cfi,
-                                         Optional<double> const& pollingInterval,
-                                         Optional<double> const& compactionInterval,
-                                         UID id) {
+PaxosConfigConsumer::PaxosConfigConsumer(ServerCoordinators const& cfi,
+                                         Optional<double> pollingInterval,
+                                         Optional<double> compactionInterval) {
 	// TODO: Implement
 	ASSERT(false);
 }
@@ -42,4 +41,10 @@ Future<Void> PaxosConfigConsumer::consume(ConfigBroadcaster& broadcaster) {
 	// TODO: Implement
 	ASSERT(false);
 	return Void();
+}
+
+UID PaxosConfigConsumer::getID() const {
+	// TODO: Implement
+	ASSERT(false);
+	return {};
 }

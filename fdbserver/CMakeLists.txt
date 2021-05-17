@@ -30,6 +30,7 @@ set(FDBSERVER_SRCS
   GrvProxyServer.actor.cpp
   IConfigDatabaseNode.cpp
   IConfigDatabaseNode.h
+  IConfigConsumer.cpp
   IConfigConsumer.h
   IDiskQueue.h
   IKeyValueContainer.h

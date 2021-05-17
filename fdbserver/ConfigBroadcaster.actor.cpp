@@ -19,8 +19,7 @@
  */
 
 #include "fdbserver/ConfigBroadcaster.h"
-#include "fdbserver/LocalConfiguration.h" // testing only
-#include "fdbserver/SimpleConfigConsumer.h"
+#include "fdbserver/IConfigConsumer.h"
 #include "flow/actorcompiler.h" // must be last include
 
 namespace {
@@ -162,29 +161,25 @@ public:
 	}
 
 	template <class ConfigSource>
-	ConfigBroadcasterImpl(ConfigSource const& configSource, UID id)
-	  : id(id), lastCompactedVersion(0), mostRecentVersion(0), cc("ConfigBroadcaster"),
-	    compactRequest("CompactRequest", cc), successfulChangeRequest("SuccessfulChangeRequest", cc),
-	    failedChangeRequest("FailedChangeRequest", cc), snapshotRequest("SnapshotRequest", cc) {
+	ConfigBroadcasterImpl(ConfigSource const& configSource)
+	  : id(deterministicRandom()->randomUniqueID()), lastCompactedVersion(0), mostRecentVersion(0),
+	    cc("ConfigBroadcaster"), compactRequest("CompactRequest", cc),
+	    successfulChangeRequest("SuccessfulChangeRequest", cc), failedChangeRequest("FailedChangeRequest", cc),
+	    snapshotRequest("SnapshotRequest", cc) {
 		logger = traceCounters(
 		    "ConfigBroadcasterMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigBroadcasterMetrics");
-		auto consumerID = deterministicRandom()->randomUniqueID();
-		TraceEvent(SevDebug, "BroadcasterStartingConsumer", id).detail("Consumer", consumerID);
-		consumer = std::make_unique<SimpleConfigConsumer>(
-		    configSource, Optional<ConfigClassSet>{}, 0, 0.5, Optional<double>{}, consumerID);
+		consumer = IConfigConsumer::createSimple(configSource, 0.5, Optional<double>{});
+		TraceEvent(SevDebug, "BroadcasterStartingConsumer", id).detail("Consumer", consumer->getID());
 	}
 
 	UID getID() const { return id; }
 };
 
-ConfigBroadcaster::ConfigBroadcaster(ConfigFollowerInterface const& cfi, UID id)
-  : impl(std::make_unique<ConfigBroadcasterImpl>(cfi, id)) {}
+ConfigBroadcaster::ConfigBroadcaster(ConfigFollowerInterface const& cfi)
+  : impl(std::make_unique<ConfigBroadcasterImpl>(cfi)) {}
 
-ConfigBroadcaster::ConfigBroadcaster(ClusterConnectionString const& ccs, UID id)
-  : impl(std::make_unique<ConfigBroadcasterImpl>(ccs, id)) {}
-
-ConfigBroadcaster::ConfigBroadcaster(ServerCoordinators const& coordinators, UID id)
-  : impl(std::make_unique<ConfigBroadcasterImpl>(coordinators, id)) {}
+ConfigBroadcaster::ConfigBroadcaster(ServerCoordinators const& coordinators)
+  : impl(std::make_unique<ConfigBroadcasterImpl>(coordinators)) {}
 
 ConfigBroadcaster::ConfigBroadcaster(ConfigBroadcaster&&) = default;
 

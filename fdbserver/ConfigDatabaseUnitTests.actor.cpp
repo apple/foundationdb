@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/CoordinationInterface.h"
-#include "fdbclient/SimpleConfigTransaction.h"
+#include "fdbclient/IConfigTransaction.h"
 #include "fdbserver/ConfigBroadcaster.h"
 #include "fdbserver/IConfigDatabaseNode.h"
 #include "fdbserver/LocalConfiguration.h"
@@ -54,14 +54,14 @@ Value longToValue(int64_t v) {
 	return StringRef(reinterpret_cast<uint8_t const*>(s.c_str()), s.size());
 }
 
-Future<Void> addTestClearMutation(SimpleConfigTransaction& tr, Optional<KeyRef> configClass) {
+Future<Void> addTestClearMutation(IConfigTransaction& tr, Optional<KeyRef> configClass) {
 	tr.fullReset();
 	auto configKey = encodeConfigKey(configClass, "test_long"_sr);
 	tr.clear(configKey);
 	return tr.commit();
 }
 
-Future<Void> addTestSetMutation(SimpleConfigTransaction& tr, Optional<KeyRef> configClass, int64_t value) {
+Future<Void> addTestSetMutation(IConfigTransaction& tr, Optional<KeyRef> configClass, int64_t value) {
 	tr.fullReset();
 	auto configKey = encodeConfigKey(configClass, "test_long"_sr);
 	tr.set(configKey, longToValue(value));
@@ -82,9 +82,7 @@ Future<Void> addTestSetMutation(WriteTo& writeTo, Optional<KeyRef> configClass, 
 	return writeTo.addVersionedMutations(versionedMutations, version);
 }
 
-ACTOR Future<Void> checkImmediate(SimpleConfigTransaction* tr,
-                                  Optional<KeyRef> configClass,
-                                  Optional<int64_t> expected) {
+ACTOR Future<Void> checkImmediate(IConfigTransaction* tr, Optional<KeyRef> configClass, Optional<int64_t> expected) {
 	tr->fullReset();
 	state Key configKey = encodeConfigKey(configClass, "test_long"_sr);
 	state Optional<Value> value = wait(tr->get(configKey));
@@ -94,6 +92,10 @@ ACTOR Future<Void> checkImmediate(SimpleConfigTransaction* tr,
 		ASSERT(!value.present());
 	}
 	return Void();
+}
+
+Future<Void> checkImmediate(IConfigTransaction& tr, Optional<KeyRef> configClass, Optional<int64_t> expected) {
+	return checkImmediate(&tr, configClass, expected);
 }
 
 void checkImmediate(LocalConfiguration const& localConfiguration, Optional<int64_t> expected) {
@@ -180,8 +182,8 @@ class BroadcasterToLocalConfigEnvironment {
 
 public:
 	BroadcasterToLocalConfigEnvironment(std::string const& configPath)
-	  : broadcaster(dummyConfigSource.getInterface(), deterministicRandom()->randomUniqueID()),
-	    cfi(makeReference<AsyncVar<ConfigFollowerInterface>>()), localConfiguration(configPath, {}) {}
+	  : broadcaster(dummyConfigSource.getInterface()), cfi(makeReference<AsyncVar<ConfigFollowerInterface>>()),
+	    localConfiguration(configPath, {}) {}
 
 	Future<Void> setup() { return setup(this); }
 
@@ -194,7 +196,7 @@ public:
 	Future<Void> check(Optional<int64_t> value) const { return checkEventually(&localConfiguration, value); }
 	void changeBroadcaster() {
 		cfi->set(ConfigFollowerInterface());
-		broadcaster = ConfigBroadcaster(dummyConfigSource.getInterface(), deterministicRandom()->randomUniqueID());
+		broadcaster = ConfigBroadcaster(dummyConfigSource.getInterface());
 		broadcastServer = broadcaster.serve(cfi->get());
 	}
 	Future<Void> compact() { return compact(this); }
@@ -204,7 +206,7 @@ public:
 
 class TransactionEnvironment {
 	ConfigTransactionInterface cti;
-	SimpleConfigTransaction tr;
+	Reference<IConfigTransaction> tr;
 	Reference<IConfigDatabaseNode> node;
 	Future<Void> server;
 	UID id;
@@ -217,7 +219,8 @@ class TransactionEnvironment {
 
 public:
 	TransactionEnvironment()
-	  : tr(cti), node(IConfigDatabaseNode::createSimple()), id(deterministicRandom()->randomUniqueID()) {}
+	  : tr(IConfigTransaction::createSimple(cti)), node(IConfigDatabaseNode::createSimple()),
+	    id(deterministicRandom()->randomUniqueID()) {}
 
 	Future<Void> setup() { return setup(this); }
 
@@ -227,10 +230,12 @@ public:
 		return setup();
 	}
 
-	Future<Void> set(Optional<KeyRef> configClass, int64_t value) { return addTestSetMutation(tr, configClass, value); }
-	Future<Void> clear(Optional<KeyRef> configClass) { return addTestClearMutation(tr, configClass); }
+	Future<Void> set(Optional<KeyRef> configClass, int64_t value) {
+		return addTestSetMutation(*tr, configClass, value);
+	}
+	Future<Void> clear(Optional<KeyRef> configClass) { return addTestClearMutation(*tr, configClass); }
 	Future<Void> check(Optional<KeyRef> configClass, Optional<int64_t> expected) {
-		return checkImmediate(&tr, configClass, expected);
+		return checkImmediate(*tr, configClass, expected);
 	}
 	Future<Void> getError() const { return server; }
 };
@@ -238,7 +243,7 @@ public:
 class TransactionToLocalConfigEnvironment {
 	ConfigTransactionInterface cti;
 	Reference<AsyncVar<ConfigFollowerInterface>> cfi;
-	SimpleConfigTransaction tr;
+	Reference<IConfigTransaction> tr;
 	Reference<IConfigDatabaseNode> node;
 	UID nodeID;
 	Future<Void> ctiServer;
@@ -263,8 +268,9 @@ class TransactionToLocalConfigEnvironment {
 
 public:
 	TransactionToLocalConfigEnvironment(std::string const& configPath)
-	  : cfi(makeReference<AsyncVar<ConfigFollowerInterface>>()), tr(cti), node(IConfigDatabaseNode::createSimple()),
-	    nodeID(deterministicRandom()->randomUniqueID()), localConfiguration(configPath, {}) {}
+	  : cfi(makeReference<AsyncVar<ConfigFollowerInterface>>()), tr(IConfigTransaction::createSimple(cti)),
+	    node(IConfigDatabaseNode::createSimple()), nodeID(deterministicRandom()->randomUniqueID()),
+	    localConfiguration(configPath, {}) {}
 
 	Future<Void> setup() { return setup(this); }
 
@@ -275,8 +281,10 @@ public:
 		return setupNode(this);
 	}
 
-	Future<Void> set(Optional<KeyRef> configClass, int64_t value) { return addTestSetMutation(tr, configClass, value); }
-	Future<Void> clear(Optional<KeyRef> configClass) { return addTestClearMutation(tr, configClass); }
+	Future<Void> set(Optional<KeyRef> configClass, int64_t value) {
+		return addTestSetMutation(*tr, configClass, value);
+	}
+	Future<Void> clear(Optional<KeyRef> configClass) { return addTestClearMutation(*tr, configClass); }
 	Future<Void> check(Optional<int64_t> value) { return checkEventually(&localConfiguration, value); }
 	Future<Void> getError() const { return ctiServer || cfiServer || consumer; }
 };

@@ -49,9 +49,8 @@ class SimpleConfigConsumerImpl {
 		}
 	}
 
-	// TODO: Make static
 	ACTOR template <class ConfigStore>
-	Future<Void> fetchChanges(SimpleConfigConsumerImpl* self, ConfigStore* configStore) {
+	static Future<Void> fetchChanges(SimpleConfigConsumerImpl* self, ConfigStore* configStore) {
 		loop {
 			try {
 				ConfigFollowerGetChangesReply reply = wait(self->cfi.getChanges.getReply(
@@ -89,9 +88,8 @@ class SimpleConfigConsumerImpl {
 		}
 	}
 
-	// TODO: Make static
 	ACTOR template <class ConfigStore>
-	Future<Void> getInitialSnapshot(SimpleConfigConsumerImpl* self, ConfigStore* configStore) {
+	static Future<Void> getInitialSnapshot(SimpleConfigConsumerImpl* self, ConfigStore* configStore) {
 		ConfigFollowerGetVersionReply versionReply =
 		    wait(self->cfi.getVersion.getReply(ConfigFollowerGetVersionRequest{}));
 		self->lastSeenVersion = versionReply.version;
@@ -130,12 +128,11 @@ public:
 	                         Optional<ConfigClassSet> const& configClassSet,
 	                         Version lastSeenVersion,
 	                         Optional<double> const& pollingInterval,
-	                         Optional<double> const& compactionInterval,
-	                         UID id)
+	                         Optional<double> const& compactionInterval)
 	  : configClassSet(configClassSet), lastSeenVersion(lastSeenVersion), pollingInterval(pollingInterval),
-	    compactionInterval(compactionInterval), id(id), cc("ConfigConsumer"), compactRequest("CompactRequest", cc),
-	    successfulChangeRequest("SuccessfulChangeRequest", cc), failedChangeRequest("FailedChangeRequest", cc),
-	    snapshotRequest("SnapshotRequest", cc) {
+	    compactionInterval(compactionInterval), id(deterministicRandom()->randomUniqueID()), cc("ConfigConsumer"),
+	    compactRequest("CompactRequest", cc), successfulChangeRequest("SuccessfulChangeRequest", cc),
+	    failedChangeRequest("FailedChangeRequest", cc), snapshotRequest("SnapshotRequest", cc) {
 		cfi = getConfigFollowerInterface(interfaceSource);
 		logger = traceCounters(
 		    "ConfigConsumerMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigConsumerMetrics");
@@ -158,41 +155,24 @@ public:
 SimpleConfigConsumer::SimpleConfigConsumer(ConfigFollowerInterface const& cfi,
                                            Optional<ConfigClassSet> const& configClassSet,
                                            Version lastSeenVersion,
-                                           Optional<double> const& pollingInterval,
-                                           Optional<double> const& compactionInterval,
-                                           UID id)
+                                           Optional<double> pollingInterval,
+                                           Optional<double> compactionInterval)
   : impl(std::make_unique<SimpleConfigConsumerImpl>(cfi,
                                                     configClassSet,
                                                     lastSeenVersion,
                                                     pollingInterval,
-                                                    compactionInterval,
-                                                    id)) {}
-
-SimpleConfigConsumer::SimpleConfigConsumer(ClusterConnectionString const& ccs,
-                                           Optional<ConfigClassSet> const& configClassSet,
-                                           Version lastSeenVersion,
-                                           Optional<double> const& pollingInterval,
-                                           Optional<double> const& compactionInterval,
-                                           UID id)
-  : impl(std::make_unique<SimpleConfigConsumerImpl>(ccs,
-                                                    configClassSet,
-                                                    lastSeenVersion,
-                                                    pollingInterval,
-                                                    compactionInterval,
-                                                    id)) {}
+                                                    compactionInterval)) {}
 
 SimpleConfigConsumer::SimpleConfigConsumer(ServerCoordinators const& coordinators,
                                            Optional<ConfigClassSet> const& configClassSet,
                                            Version lastSeenVersion,
-                                           Optional<double> const& pollingInterval,
-                                           Optional<double> const& compactionInterval,
-                                           UID id)
+                                           Optional<double> pollingInterval,
+                                           Optional<double> compactionInterval)
   : impl(std::make_unique<SimpleConfigConsumerImpl>(coordinators,
                                                     configClassSet,
                                                     lastSeenVersion,
                                                     pollingInterval,
-                                                    compactionInterval,
-                                                    id)) {}
+                                                    compactionInterval)) {}
 
 Future<Void> SimpleConfigConsumer::getInitialSnapshot(ConfigBroadcaster& broadcaster) {
 	return impl->getInitialSnapshot(broadcaster);

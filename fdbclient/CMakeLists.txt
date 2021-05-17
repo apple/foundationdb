@@ -35,6 +35,7 @@ set(FDBCLIENT_SRCS
   GrvProxyInterface.h
   HTTP.actor.cpp
   IClientApi.h
+  IConfigTransaction.cpp
   IConfigTransaction.h
   ISingleThreadTransaction.cpp
   ISingleThreadTransaction.h

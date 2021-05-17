@@ -1,5 +1,5 @@
 /*
- * PaxosConfigConsumer.h
+ * IConfigTransaction.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,19 +18,18 @@
  * limitations under the License.
  */
 
-#pragma once
+#include "fdbclient/IConfigTransaction.h"
+#include "fdbclient/SimpleConfigTransaction.h"
+#include "fdbclient/PaxosConfigTransaction.h"
 
-#include "fdbserver/IConfigConsumer.h"
+Reference<IConfigTransaction> IConfigTransaction::createSimple(ConfigTransactionInterface const& cti) {
+	return makeReference<SimpleConfigTransaction>(cti);
+}
 
-class PaxosConfigConsumer : public IConfigConsumer {
-	std::unique_ptr<class PaxosConfigConsumer> impl;
+Reference<IConfigTransaction> IConfigTransaction::createSimple(ClusterConnectionString const& ccs) {
+	return makeReference<SimpleConfigTransaction>(ccs);
+}
 
-public:
-	PaxosConfigConsumer(ServerCoordinators const& cfi,
-	                    Optional<double> pollingInterval,
-	                    Optional<double> compactionInterval);
-	~PaxosConfigConsumer();
-	Future<Void> getInitialSnapshot(ConfigBroadcaster& broadcaster) override;
-	Future<Void> consume(ConfigBroadcaster& broadcaster) override;
-	UID getID() const override;
-};
+Reference<IConfigTransaction> IConfigTransaction::createPaxos(ClusterConnectionString const& ccs) {
+	return makeReference<PaxosConfigTransaction>(ccs);
+}

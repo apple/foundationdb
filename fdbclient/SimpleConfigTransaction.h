@@ -59,8 +59,7 @@ public:
 	void reset() override;
 	void debugTransaction(UID dID) override;
 	void checkDeferredError() const override;
-	void getWriteConflicts(KeyRangeMap<bool>* result) override;
-	void fullReset();
+	void fullReset() override;
 	int64_t getApproximateSize() const override;
 	void set(KeyRef const&, ValueRef const&) override;
 	void clear(KeyRangeRef const&) override;

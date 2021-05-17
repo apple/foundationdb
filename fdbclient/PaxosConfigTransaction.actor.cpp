@@ -112,6 +112,11 @@ void PaxosConfigTransaction::reset() {
 	ASSERT(false);
 }
 
+void PaxosConfigTransaction::fullReset() {
+	// TODO: Implement
+	ASSERT(false);
+}
+
 void PaxosConfigTransaction::debugTransaction(UID dID) {
 	// TODO: Implement
 	ASSERT(false);

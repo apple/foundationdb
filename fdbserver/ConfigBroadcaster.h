@@ -30,9 +30,8 @@ class ConfigBroadcaster {
 	std::unique_ptr<class ConfigBroadcasterImpl> impl;
 
 public:
-	ConfigBroadcaster(ConfigFollowerInterface const&, UID id);
-	ConfigBroadcaster(ClusterConnectionString const&, UID id);
-	ConfigBroadcaster(ServerCoordinators const&, UID id);
+	explicit ConfigBroadcaster(ConfigFollowerInterface const&);
+	explicit ConfigBroadcaster(ServerCoordinators const&);
 	ConfigBroadcaster(ConfigBroadcaster&&);
 	ConfigBroadcaster& operator=(ConfigBroadcaster&&);
 	~ConfigBroadcaster();
