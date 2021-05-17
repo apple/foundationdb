@@ -235,6 +235,13 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	std::vector<WorkerInterface> backupWorkers; // Recruited backup workers from cluster controller.
 
+	CounterCollection cc;
+	Counter changeCoordinatorsRequests;
+	Counter getCommitVersionRequests;
+	Counter backupWorkerDoneRequests;
+
+	Future<Void> logger;
+
 	MasterData(Reference<AsyncVar<ServerDBInfo>> const& dbInfo,
 	           MasterInterface const& myInterface,
 	           ServerCoordinators const& coordinators,
@@ -248,7 +255,11 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    lastEpochEnd(invalidVersion), recoveryTransactionVersion(invalidVersion), lastCommitTime(0),
 	    registrationCount(0), version(invalidVersion), lastVersionTime(0), txnStateStore(0), memoryLimit(2e9),
 	    addActor(addActor), hasConfiguration(false),
-	    recruitmentStalled(Reference<AsyncVar<bool>>(new AsyncVar<bool>())) {
+	    recruitmentStalled(Reference<AsyncVar<bool>>(new AsyncVar<bool>())), cc("Master", dbgid.toString()),
+	    changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
+	    getCommitVersionRequests("GetCommitVersionRequests", cc),
+	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc) {
+		logger = traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "MasterMetrics");
 		if (forceRecovery && !myInterface.locality.dcId().present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID");
 			forceRecovery = false;
@@ -582,7 +593,7 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Maste
 			req.reply.send(Never()); // don't reply (clients always get commit_unknown_result)
 			auto t = &req.transaction;
 			if (t->read_snapshot == parent->lastEpochEnd && //< So no transactions can fall between the read snapshot
-			                                                //and the recovery transaction this (might) be merged with
+			                                                // and the recovery transaction this (might) be merged with
 			                                                // vvv and also the changes we will make in the recovery
 			                                                // transaction (most notably to lastEpochEndKey) BEFORE we
 			                                                // merge initialConfChanges won't conflict
@@ -818,8 +829,8 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 
 	self->txnStateLogAdapter->setNextVersion(
 	    oldLogSystem->getEnd()); //< FIXME: (1) the log adapter should do this automatically after recovery; (2) if we
-	                             //make KeyValueStoreMemory guarantee immediate reads, we should be able to get rid of
-	                             //the discardCommit() below and not need a writable log adapter
+	                             // make KeyValueStoreMemory guarantee immediate reads, we should be able to get rid of
+	                             // the discardCommit() below and not need a writable log adapter
 
 	TraceEvent("RTSSComplete", self->dbgid);
 
@@ -1036,6 +1047,8 @@ ACTOR Future<Void> recoverFrom(Reference<MasterData> self,
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
 	state std::map<UID, ProxyVersionReplies>::iterator proxyItr =
 	    self->lastProxyVersionReplies.find(req.requestingProxy); // lastProxyVersionReplies never changes
+
+	++self->getCommitVersionRequests;
 
 	if (proxyItr == self->lastProxyVersionReplies.end()) {
 		// Request from invalid proxy (e.g. from duplicate recruitment request)
@@ -1282,6 +1295,7 @@ static std::set<int> const& normalMasterErrors() {
 ACTOR Future<Void> changeCoordinators(Reference<MasterData> self) {
 	loop {
 		ChangeCoordinatorsRequest req = waitNext(self->myInterface.changeCoordinators.getFuture());
+		++self->changeCoordinatorsRequests;
 		state ChangeCoordinatorsRequest changeCoordinatorsRequest = req;
 
 		while (!self->cstate.previousWrite.isReady()) {
@@ -1706,8 +1720,9 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	// tr.set(recoveryCommitRequest.arena, cacheKeysKey(0, normalKeys.begin), serverKeysTrue);
 	// tr.set(recoveryCommitRequest.arena, cacheKeysKey(0, normalKeys.end), serverKeysFalse);
 	// tr.set(recoveryCommitRequest.arena, cacheChangeKeyFor(0),
-	// BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned())); tr.set(recoveryCommitRequest.arena,
-	// cacheChangeKey, BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned()));
+	// BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned()));
+	// tr.set(recoveryCommitRequest.arena, cacheChangeKey,
+	// BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned()));
 
 	tr.clear(recoveryCommitRequest.arena, tLogDatacentersKeys);
 	for (auto& dc : self->primaryDcId) {
@@ -1868,6 +1883,7 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 				if (self->logSystem.isValid() && self->logSystem->removeBackupWorker(req)) {
 					self->registrationTrigger.trigger();
 				}
+				++self->backupWorkerDoneRequests;
 				req.reply.send(Void());
 			}
 			when(wait(collection)) {
