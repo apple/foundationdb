@@ -116,7 +116,7 @@ set(FDBSERVER_SRCS
   ptxn/ProxyTLogPushMessageSerializer.h
   ptxn/Serializer.h
   ptxn/TLogPeekCursor.actor.cpp
-  ptxn/TLogPeekCursor.h
+  ptxn/TLogPeekCursor.actor.h
   ptxn/TLogStorageServerPeekMessageSerializer.cpp
   ptxn/TLogStorageServerPeekMessageSerializer.h
 
@@ -132,8 +132,12 @@ set(FDBSERVER_SRCS
   ptxn/test/FakeTLog.actor.h
   ptxn/test/RealTLog.actor.cpp
   ptxn/test/RealTLog.actor.h
+  ptxn/test/TestTLogPeek.actor.cpp
+  ptxn/test/TestTLogPeek.h
   ptxn/test/TestResolver.actor.cpp
   ptxn/test/TestSerialization.cpp
+  ptxn/test/Utils.cpp
+  ptxn/test/Utils.h
 
   tester.actor.cpp
   TesterInterface.actor.h

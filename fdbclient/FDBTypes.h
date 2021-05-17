@@ -914,60 +914,6 @@ struct StorageBytes {
 	}
 };
 
-namespace ptxn {
-
-// This class defines the index of a cursor. For a given mutation, it has an unique cursor index. The index is totally
-// ordered.
-struct CursorIndex {
-	static constexpr FileIdentifier file_identifier = 181323;
-
-	Version version;
-	Subsequence subsequence;
-
-	explicit CursorIndex(const Version& version_, const Subsequence& subsequence_ = 0)
-	  : version(version_), subsequence(subsequence_) {}
-
-	// TODO the return type should be std::strong_ordering
-	friend constexpr int operatorSpaceship(const CursorIndex&, const CursorIndex&);
-
-	// TODO Replace the code with real spaceship operator when C++20 is allowed
-	bool operator>(const CursorIndex& another) { return operatorSpaceship(*this, another) == 1; }
-	bool operator>=(const CursorIndex& another) { return operatorSpaceship(*this, another) >= 0; }
-	bool operator<(const CursorIndex& another) { return operatorSpaceship(*this, another) == -1; }
-	bool operator<=(const CursorIndex& another) { return operatorSpaceship(*this, another) <= 0; }
-	bool operator!=(const CursorIndex& another) { return operatorSpaceship(*this, another) != 0; }
-	bool operator==(const CursorIndex& another) { return operatorSpaceship(*this, another) == 0; }
-
-	std::string toString() const { return concatToString(version, '.', subsequence); }
-
-	template <typename Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, version, subsequence);
-	}
-};
-
-// Returns
-//   0 if  c1 == c2
-//   1 if  c1 >  c2
-//  -1 if  c1 <  c2
-inline constexpr int operatorSpaceship(const CursorIndex& c1, const CursorIndex& c2) {
-	if (c1.version > c2.version) {
-		return 1;
-	} else if (c1.version < c2.version) {
-		return -1;
-	} else {
-		if (c1.subsequence > c2.subsequence) {
-			return 1;
-		} else if (c1.subsequence > c2.subsequence) {
-			return -1;
-		}
-
-		return 0;
-	}
-}
-
-} // namespace ptxn
-
 struct LogMessageVersion {
 	// Each message pushed into the log system has a unique, totally ordered LogMessageVersion
 	// See ILogSystem::push() for how these are assigned

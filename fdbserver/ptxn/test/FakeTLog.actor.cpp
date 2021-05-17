@@ -20,17 +20,93 @@
 
 #include "fdbserver/ptxn/test/FakeTLog.actor.h"
 
-#include <iomanip>
+#include <algorithm>
 #include <iostream>
 #include <vector>
 
 #include "fdbserver/ptxn/ProxyTLogPushMessageSerializer.h"
+#include "fdbserver/ptxn/test/Utils.h"
 #include "fdbserver/ptxn/TLogStorageServerPeekMessageSerializer.h"
 #include "fdbserver/ptxn/StorageServerInterface.h"
 
-#include "flow/actorcompiler.h" // has to be last include
+#include "flow/actorcompiler.h" // has to be the last file included
 
 namespace ptxn::test {
+
+// Generates numMutations random mutations, store them in mutations.
+void generateRandomMutations(const Version& initialVersion,
+                             const int numMutations,
+                             Arena& mutationRefArena,
+                             VectorRef<VersionSubsequenceMutation>& mutations) {
+	Version currentVersion = initialVersion;
+	Subsequence currentSubsequence = 1;
+	for (int i = 0; i < numMutations; ++i) {
+		// Create a new version
+		if (deterministicRandom()->randomInt(0, 10) == 0) {
+			currentVersion += deterministicRandom()->randomInt(1, 5);
+			currentSubsequence = 1;
+		}
+
+		StringRef key = StringRef(mutationRefArena, deterministicRandom()->randomAlphaNumeric(10));
+		StringRef value = StringRef(
+		    mutationRefArena, deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(10, 1000)));
+
+		mutations.emplace_back(
+		    mutationRefArena, currentVersion, currentSubsequence++, MutationRef(MutationRef::SetValue, key, value));
+	}
+
+	std::cout << __FUNCTION__ << ">> Generated " << numMutations << " random mutations, version range ["
+	          << mutations.front().version << "," << mutations.back().version << " ]." << std::endl;
+}
+
+// Randomly distributes the mutations to teams in the same TLog server
+void distributeMutations(Arena& mutationRefArena,
+                         std::unordered_map<StorageTeamID, VectorRef<VersionSubsequenceMutation>>& teamedMutations,
+                         const std::vector<StorageTeamID>& storageTeamIDs,
+                         const VectorRef<VersionSubsequenceMutation>& mutations) {
+	std::cout << __FUNCTION__ << ">> Distributing " << mutations.size() << " mutations to " << storageTeamIDs.size()
+	          << "teams." << std::endl;
+
+	for (const auto& mutation : mutations) {
+		const StorageTeamID& storageTeamID = randomlyPick(storageTeamIDs);
+		teamedMutations[storageTeamID].push_back(mutationRefArena, mutation);
+	}
+
+	for (const auto& storageTeamID : storageTeamIDs) {
+		std::cout << __FUNCTION__ << ">> Team " << storageTeamID.toString() << " has " << teamedMutations[storageTeamID].size()
+		          << " mutations." << std::endl;
+	}
+}
+
+void fillTLogWithRandomMutations(std::shared_ptr<FakeTLogContext> pContext,
+                                 const Version& initialVersion,
+                                 const int numMutations,
+                                 const int numStorageTeams) {
+	// Set up teams
+	if (numStorageTeams != 0) {
+		pContext->storageTeamIDs.resize(numStorageTeams);
+		for (auto& storageTeamID : pContext->storageTeamIDs) {
+			storageTeamID = getNewStorageTeamID();
+		}
+	}
+
+	// Generate mutations
+	pContext->persistenceArena = Arena();
+	pContext->mutations.clear();
+	pContext->allMutations.resize(pContext->persistenceArena, 0);
+
+	generateRandomMutations(initialVersion, numMutations, pContext->persistenceArena, pContext->allMutations);
+	distributeMutations(pContext->persistenceArena, pContext->mutations, pContext->storageTeamIDs, pContext->allMutations);
+
+	// Update versions
+	pContext->versions.clear();
+	for (const auto& item : pContext->allMutations) {
+		pContext->versions.push_back(item.version);
+	}
+	std::sort(std::begin(pContext->versions), std::end(pContext->versions));
+	auto last = std::unique(std::begin(pContext->versions), std::end(pContext->versions));
+	pContext->versions.erase(last, std::end(pContext->versions));
+}
 
 void processTLogCommitRequest(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
                               const TLogCommitRequest& commitRequest,
@@ -45,7 +121,7 @@ void processTLogCommitRequest(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
 	               [](const SubsequenceMutationItem& item) { return item.mutation; });
 	verifyMutationsInRecord(pFakeTLogContext->pTestDriverContext->commitRecord,
 	                        commitRequest.version,
-	                        commitRequest.teamID,
+	                        commitRequest.storageTeamID,
 	                        mutations,
 	                        [](CommitValidationRecord& record) { record.tLogValidated = true; });
 
@@ -53,7 +129,7 @@ void processTLogCommitRequest(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
 	for (auto& seqMutation : seqMutations) {
 		const auto& subsequence = seqMutation.subsequence;
 		const auto& mutation = seqMutation.mutation;
-		pFakeTLogContext->mutations[commitRequest.teamID].push_back(
+		pFakeTLogContext->mutations[commitRequest.storageTeamID].push_back(
 		    pFakeTLogContext->persistenceArena,
 		    { commitRequest.version,
 		      subsequence,
@@ -67,30 +143,20 @@ void processTLogCommitRequest(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
 }
 
 Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogContext> pFakeTLogContext) {
-	const StorageTeamID teamID = request.teamID;
-	if (pFakeTLogContext->mutations.find(request.teamID) == pFakeTLogContext->mutations.end()) {
-		std::cout << std::endl << "Team ID " << request.teamID.toString() << " not found." << std::endl;
+	const StorageTeamID storageTeamID = request.storageTeamID;
+	if (pFakeTLogContext->mutations.find(request.storageTeamID) == pFakeTLogContext->mutations.end()) {
+		std::cout << __FUNCTION__ << ">> Team ID " << request.storageTeamID.toString() << " not found." << std::endl;
 		request.reply.sendError(teamid_not_found());
 		return Void();
 	}
 
-	const VectorRef<VersionSubsequenceMutation>& mutations = pFakeTLogContext->mutations[teamID];
-
-	std::cout << std::endl;
-	std::cout << "Requested peek: " << std::endl;
-	std::cout << std::setw(30)
-	          << "Debug ID: " << (request.debugID.present() ? request.debugID.get().toString() : "Not present")
-	          << std::endl;
-	std::cout << std::setw(30) << "Team ID: " << request.teamID.toString() << std::endl;
-	std::cout << std::setw(30) << "Version range: [" << request.beginVersion << ", "
-	          << (request.endVersion.present() ? concatToString(request.endVersion.get()) : "-") << ")" << std::endl;
-	std::cout << std::endl;
+	const VectorRef<VersionSubsequenceMutation>& mutations = pFakeTLogContext->mutations[storageTeamID];
 
 	Version firstVersion = invalidVersion;
 	Version lastVersion = invalidVersion;
 	Version endVersion = MAX_VERSION;
 	bool haveUnclosedVersionSection = false;
-	TLogStorageServerMessageSerializer serializer(teamID);
+	TLogStorageServerMessageSerializer serializer(storageTeamID);
 
 	if (request.endVersion.present() && request.endVersion.get() != invalidVersion) {
 		endVersion = request.endVersion.get();
@@ -106,8 +172,8 @@ Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogConte
 
 		// The serialized data size is too big, cutoff here
 		if (serializer.getTotalBytes() >= pFakeTLogContext->maxBytesPerPeek && lastVersion != currentVersion) {
-			std::cout << "Stopped serializing due to the reply size limit: Serialized " << serializer.getTotalBytes()
-			          << " Limit " << pFakeTLogContext->maxBytesPerPeek << std::endl;
+			std::cout << __FUNCTION__ << ">> Stopped serializing due to the reply size limit: Serialized "
+			          << serializer.getTotalBytes() << " Limit " << pFakeTLogContext->maxBytesPerPeek << std::endl;
 			break;
 		}
 
@@ -147,12 +213,6 @@ Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogConte
 	TLogPeekReply reply{ request.debugID, serialized.arena(), serialized };
 	request.reply.send(reply);
 
-	std::cout << std::endl;
-	std::cout << " Reply:" << std::endl;
-	std::cout << std::setw(30) << "Version range: "
-	          << "[" << firstVersion << ", " << lastVersion << "]" << std::endl;
-	std::cout << std::setw(30) << "Serialized data length: " << serializer.getTotalBytes() << std::endl;
-
 	return Void();
 }
 
@@ -171,7 +231,7 @@ ACTOR Future<Void> fakeTLog_ActivelyPush(std::shared_ptr<FakeTLogContext> pFakeT
 
 			StorageServerPushRequest request;
 			request.spanID = commitRequest.spanID;
-			request.teamID = commitRequest.teamID;
+			request.storageTeamID = commitRequest.storageTeamID;
 			request.arena = Arena();
 			for (auto iter = std::begin(seqMutations); iter != std::end(seqMutations); ++iter) {
 				const auto& mutation = iter->mutation;
@@ -185,7 +245,7 @@ ACTOR Future<Void> fakeTLog_ActivelyPush(std::shared_ptr<FakeTLogContext> pFakeT
 
 			std::shared_ptr<StorageServerInterface_PassivelyReceive> pStorageServerInterface =
 			    std::dynamic_pointer_cast<StorageServerInterface_PassivelyReceive>(
-			        pTestDriverContext->getStorageServerInterface(commitRequest.teamID));
+			        pTestDriverContext->getStorageServerInterface(commitRequest.storageTeamID));
 			state StorageServerPushReply reply = wait(pStorageServerInterface->pushRequests.getReply(request));
 		}
 		when(TLogPeekRequest peekRequest = waitNext(pTLogInterface->peek.getFuture())) {

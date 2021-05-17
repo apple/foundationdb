@@ -20,10 +20,11 @@
 
 #include "fdbserver/ptxn/test/Driver.h"
 
-#include <array>
+#include <algorithm>
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <functional>
 #include <unordered_map>
 #include <utility>
 
@@ -34,7 +35,7 @@
 #include "fdbserver/ptxn/test/FakeResolver.actor.h"
 #include "fdbserver/ptxn/test/FakeStorageServer.actor.h"
 #include "fdbserver/ptxn/test/FakeTLog.actor.h"
-#include "fdbserver/ptxn/TLogPeekCursor.h"
+#include "fdbserver/ptxn/test/Utils.h"
 #include "fdbserver/ResolverInterface.h"
 #include "flow/genericactors.actor.h"
 #include "flow/IRandom.h"
@@ -45,54 +46,36 @@
 
 namespace ptxn::test {
 
-StorageTeamID getNewTeamID() {
-	return StorageTeamID{ deterministicRandom()->randomUniqueID() };
-}
-
-std::ostream& operator<<(std::ostream& stream, const TestDriverOptions& option) {
-	stream << "Values for ptxn/Driver.actor.cpp:DriverTestOptions:" << std::endl;
-	stream << std::setw(30) << "numCommits: " << option.numCommits << std::endl;
-	stream << std::setw(30) << "numTeams: " << option.numTeams << std::endl;
-	stream << std::setw(30) << "numProxies: " << option.numProxies << std::endl;
-	stream << std::setw(30) << "numTLogs: " << option.numTLogs << std::endl;
-	stream << std::setw(30) << "numStorageServers: " << option.numStorageServers << std::endl;
-	stream << std::setw(30) << "numResolvers: " << option.numResolvers << std::endl;
-	stream << std::setw(30) << "Message Transfer Model: ";
-	switch (option.transferModel) {
-	case MessageTransferModel::TLogActivelyPush:
-		stream << "TLogs push to Storage Servers";
-		break;
-	case MessageTransferModel::StorageServerActivelyPull:
-		stream << "Storage Servers pull from TLogs";
-		break;
-	default:
-		throw internal_error_msg(
-		    format("Unexpected value for message transfer model: %" PRIu8, static_cast<uint8_t>(option.transferModel))
-		        .c_str());
-		break;
-	}
-	stream << std::endl;
-
-	return stream;
-}
-
-CommitRecord::CommitRecord(const Version& version_, const StorageTeamID& teamID_, std::vector<MutationRef>&& mutations_)
-  : version(version_), teamID(teamID_), mutations(std::move(mutations_)) {}
+CommitRecord::CommitRecord(const Version& version_, const StorageTeamID& storageTeamID_, std::vector<MutationRef>&& mutations_)
+  : version(version_), storageTeamID(storageTeamID_), mutations(std::move(mutations_)) {}
 
 bool CommitValidationRecord::validated() const {
 	return tLogValidated && storageServerValidated;
 }
 
+TestDriverOptions::TestDriverOptions(const UnitTestParameters& params)
+  : numCommits(params.getInt("numCommits").orDefault(DEFAULT_NUM_COMMITS)),
+    numStorageTeams(params.getInt("numStorageTeams").orDefault(DEFAULT_NUM_TEAMS)),
+    numProxies(params.getInt("numProxies").orDefault(DEFAULT_NUM_PROXIES)),
+    numTLogs(params.getInt("numTLogs").orDefault(DEFAULT_NUM_TLOGS)),
+	numTLogGroups(params.getInt("numTLogGroups").orDefault(DEFAULT_NUM_TLOG_GROUPS)),
+    numStorageServers(params.getInt("numStorageServers").orDefault(DEFAULT_NUM_STORAGE_SERVERS)),
+    numResolvers(params.getInt("numResolvers").orDefault(DEFAULT_NUM_RESOLVERS)),
+    transferModel(static_cast<MessageTransferModel>(
+        params.getInt("messageTransferModel").orDefault(static_cast<int>(DEFAULT_MESSAGE_TRANSFER_MODEL)))) {}
+
 std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions& options) {
+	print::print(options);
+
 	std::shared_ptr<TestDriverContext> context(new TestDriverContext());
 
 	context->numCommits = options.numCommits;
-	context->numTeamIDs = options.numTeams;
+	context->numStorageTeamIDs = options.numStorageTeams;
 	context->messageTransferModel = options.transferModel;
 
 	// FIXME use C++20 range
-	for (int i = 0; i < context->numTeamIDs; ++i) {
-		context->teamIDs.push_back(getNewTeamID());
+	for (int i = 0; i < context->numStorageTeamIDs; ++i) {
+		context->storageTeamIDs.push_back(getNewStorageTeamID());
 	}
 
 	// Prepare Proxies
@@ -102,9 +85,9 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 	context->numResolvers = options.numResolvers;
 
 	// Prepare TLogInterfaces
-	context->numTLogs = options.numTLogs;
-	context->numTLogGroups = options.numTLogGroups;
 	// For now, each tlog group spans all the TLogs, i.e., number of group numbers == num of TLogs
+
+	context->numTLogs = options.numTLogs;
 	for (int i = 0; i < context->numTLogs; ++i) {
 		context->tLogInterfaces.push_back(getNewTLogInterface(context->messageTransferModel,
 		                                                      deterministicRandom()->randomUniqueID(),
@@ -113,6 +96,7 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 		context->tLogInterfaces.back()->initEndpoints();
 	}
 
+	context->numTLogGroups = options.numTLogGroups;
 	for (int i = 0; i < context->numTLogGroups; ++i) {
 		context->tLogGroups.push_back(TLogGroup(deterministicRandom()->randomUniqueID()));
 		context->tLogGroupLeaders[context->tLogGroups.back().logGroupId] =
@@ -130,34 +114,34 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 	auto assignTeamToInterface = [&](auto& mapper, auto interface) {
 		int numInterfaces = interface.size();
 		int index = 0;
-		for (int i = 0; i < context->numTeamIDs; ++i) {
-			const StorageTeamID& teamID = context->teamIDs[i];
-			mapper[teamID] = interface[index];
+		for (int i = 0; i < context->numStorageTeamIDs; ++i) {
+			const StorageTeamID& storageTeamID = context->storageTeamIDs[i];
+			mapper[storageTeamID] = interface[index];
 
 			++index;
 			index %= numInterfaces;
 		}
 	};
-	assignTeamToInterface(context->teamIDStorageServerInterfaceMapper, context->storageServerInterfaces);
+	assignTeamToInterface(context->storageTeamIDStorageServerInterfaceMapper, context->storageServerInterfaces);
 
-	for (int i = 0, index = 0; i < context->numTeamIDs; ++i) {
-		const StorageTeamID& teamID = context->teamIDs[i];
+	for (int i = 0, index = 0; i < context->numStorageTeamIDs; ++i) {
+		const StorageTeamID& storageTeamID = context->storageTeamIDs[i];
 		TLogGroup& tLogGroup = context->tLogGroups[index];
-		context->teamIDTLogInterfaceMapper[teamID] = context->tLogGroupLeaders[tLogGroup.logGroupId];
+		context->storageTeamIDTLogInterfaceMapper[storageTeamID] = context->tLogGroupLeaders[tLogGroup.logGroupId];
 		// Ignore tags for now.
-		tLogGroup.storageTeams[teamID] = {};
+		tLogGroup.storageTeams[storageTeamID] = {};
 		++index;
 		index %= context->tLogGroups.size();
 	}
 	return context;
 }
 
-std::shared_ptr<TLogInterfaceBase> TestDriverContext::getTLogInterface(const StorageTeamID& teamID) {
-	return teamIDTLogInterfaceMapper.at(teamID);
+std::shared_ptr<TLogInterfaceBase> TestDriverContext::getTLogInterface(const StorageTeamID& storageTeamID) {
+	return storageTeamIDTLogInterfaceMapper.at(storageTeamID);
 }
 
-std::shared_ptr<StorageServerInterfaceBase> TestDriverContext::getStorageServerInterface(const StorageTeamID& teamID) {
-	return teamIDStorageServerInterfaceMapper.at(teamID);
+std::shared_ptr<StorageServerInterfaceBase> TestDriverContext::getStorageServerInterface(const StorageTeamID& storageTeamID) {
+	return storageTeamIDStorageServerInterfaceMapper.at(storageTeamID);
 }
 
 void startFakeProxy(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext) {
@@ -203,40 +187,6 @@ void startFakeStorageServer(std::vector<Future<Void>>& actors, std::shared_ptr<T
 	}
 }
 
-void printCommitRecord(const std::vector<CommitRecord>& records) {
-	std::cout << "Commits from Proxy: \n\n";
-	Version currentVersion = 0;
-	for (const auto& record : records) {
-		if (record.version != currentVersion) {
-			std::cout << "\n\tVersion: " << record.version << "\n\n";
-			currentVersion = record.version;
-		}
-		std::cout << "\t\tTeam ID: " << record.teamID.toString() << std::endl;
-		for (const auto& mutation : record.mutations) {
-			std::cout << "\t\t\t" << mutation.toString() << std::endl;
-		}
-	}
-}
-
-void printNotValidatedRecords(const std::vector<CommitRecord>& records) {
-	std::cout << "Unvalidated commits: \n\n";
-	for (const auto& record : records) {
-		if (record.validation.validated())
-			continue;
-		std::cout << "\tVersion: " << record.version << "\tTeam ID: " << record.teamID.toString() << std::endl;
-		for (const auto& mutation : record.mutations) {
-			std::cout << "\t\t\t" << mutation.toString() << std::endl;
-		}
-
-		if (!record.validation.tLogValidated) {
-			std::cout << "\tTLog has not validated the reception of this commit." << std::endl;
-		}
-		if (!record.validation.storageServerValidated) {
-			std::cout << "\tStorageServer has not validated the reception of this commit." << std::endl;
-		}
-	}
-}
-
 bool isAllRecordsValidated(const std::vector<CommitRecord>& records) {
 	for (auto& record : records) {
 		if (!record.validation.validated()) {
@@ -248,11 +198,11 @@ bool isAllRecordsValidated(const std::vector<CommitRecord>& records) {
 
 void verifyMutationsInRecord(std::vector<CommitRecord>& records,
                              const Version& version,
-                             const StorageTeamID& teamID,
+                             const StorageTeamID& storageTeamID,
                              const std::vector<MutationRef>& mutations,
                              std::function<void(CommitValidationRecord&)> validateUpdater) {
 	for (auto& record : records) {
-		if (record.version == version && record.teamID == teamID && record.mutations.size() == mutations.size()) {
+		if (record.version == version && record.storageTeamID == storageTeamID && record.mutations.size() == mutations.size()) {
 			bool isSame = true;
 			for (size_t i = 0; i < mutations.size(); ++i) {
 				if (!(record.mutations[i].type == mutations[i].type &&
@@ -269,8 +219,8 @@ void verifyMutationsInRecord(std::vector<CommitRecord>& records,
 		}
 	}
 
-	printCommitRecord(records);
-	std::cout << "\n\nLooking for: Version " << version << "\tTeam ID: " << teamID.toString() << "\n";
+	print::printCommitRecord(records);
+	std::cout << "\n\nLooking for: Version " << version << "\tTeam ID: " << storageTeamID.toString() << "\n";
 	for (const auto& mutation : mutations) {
 		std::cout << "\t\t\t" << mutation.toString() << std::endl;
 	}
@@ -284,177 +234,17 @@ TEST_CASE("/fdbserver/ptxn/test/driver") {
 	using namespace ptxn::test;
 
 	TestDriverOptions options(params);
-	std::cout << options << std::endl;
 
 	std::shared_ptr<TestDriverContext> context = initTestDriverContext(options);
+	std::cout << 1 << std::endl;
 	std::vector<Future<Void>> actors;
+	std::cout << 2 << std::endl;
 
 	startFakeProxy(actors, context);
 	startFakeTLog(actors, context);
 	startFakeStorageServer(actors, context);
 
 	wait(quorum(actors, 1));
-
-	return Void();
-}
-
-namespace ptxn::test::tlogPeek {
-
-const int NUM_VERSIONS = 1000;
-const int INITIAL_VERSION = 10000;
-const int NUM_MUTATIONS_PER_VERSION = 100;
-const int NUM_PEEK_TIMES = 1000;
-const std::array<StorageTeamID, 3> TEAM_IDS = { getNewTeamID(), getNewTeamID(), getNewTeamID() };
-
-StorageTeamID getRandomTeamID() {
-	return TEAM_IDS[deterministicRandom()->randomInt(0, TEAM_IDS.size())];
-}
-
-void fillMutations(std::shared_ptr<FakeTLogContext>& pContext, std::vector<Version>& versions) {
-	ASSERT(pContext != nullptr);
-
-	std::cout << std::endl
-	          << "Filling TLog: " << NUM_VERSIONS << " commits, total " << NUM_MUTATIONS_PER_VERSION * NUM_VERSIONS
-	          << " mutations." << std::endl;
-
-	Version version = INITIAL_VERSION;
-	for (int i = 0; i < NUM_VERSIONS; ++i) {
-		versions.push_back(version);
-
-		Subsequence subsequence = 1;
-		for (int j = 0; j < NUM_MUTATIONS_PER_VERSION; ++j) {
-			StorageTeamID teamID = getRandomTeamID();
-			StringRef key = StringRef(pContext->persistenceArena, deterministicRandom()->randomAlphaNumeric(10));
-			StringRef value =
-			    StringRef(pContext->persistenceArena,
-			              deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(10, 1000)));
-			pContext->mutations[teamID].push_back(
-			    pContext->persistenceArena,
-			    VersionSubsequenceMutation(version, subsequence++, MutationRef(MutationRef::SetValue, key, value)));
-		}
-
-		version += deterministicRandom()->randomInt(1, 10);
-	}
-	versions.push_back(version);
-
-	std::cout << std::endl;
-	for (const auto& teamID : TEAM_IDS) {
-		std::cout << "Team " << teamID << " has " << pContext->mutations[teamID].size() << " mutations" << std::endl;
-	}
-
-	std::cout << std::endl;
-	std::cout << "Version range: [" << versions.front() << ", " << versions.back() << "]" << std::endl;
-}
-
-Future<Void> initializeTLogForPeekTest(MessageTransferModel transferModel, std::shared_ptr<FakeTLogContext>& pContext) {
-	pContext->pTLogInterface = getNewTLogInterface(transferModel,
-	                                               deterministicRandom()->randomUniqueID(),
-	                                               deterministicRandom()->randomUniqueID(),
-	                                               LocalityData());
-	pContext->pTLogInterface->initEndpoints();
-
-	return getFakeTLogActor(transferModel, pContext);
-}
-
-// Randomly peek data and verify if the data is consistent
-ACTOR Future<Void> peekAndCheck(std::shared_ptr<FakeTLogContext> pContext, std::vector<Version> versions) {
-	ASSERT(pContext != nullptr);
-
-	state int peekTime = 0;
-
-	loop {
-		state Optional<UID> debugID(deterministicRandom()->randomUniqueID());
-		state StorageTeamID teamID(getRandomTeamID());
-		state size_t beginVersionIndex(deterministicRandom()->randomInt(0, versions.size() - 1));
-		state size_t endVersionIndex(
-		    std::min(beginVersionIndex + deterministicRandom()->randomInt(1, 10), versions.size()));
-		state Version beginVersion(versions[beginVersionIndex]);
-		state Version endVersion(endVersionIndex >= versions.size() ? -1 : versions[endVersionIndex]);
-		state TLogPeekRequest request;
-
-		request.debugID = debugID;
-		request.teamID = teamID;
-		request.beginVersion = beginVersion;
-		request.endVersion = endVersion;
-
-		std::cout << std::endl;
-		std::cout << "Sending request with Debug ID " << debugID.get() << " with version range [" << beginVersion
-		          << ", " << endVersion << ")" << std::endl;
-
-		TLogPeekReply reply = wait(pContext->pTLogInterface->peek.getReply(request));
-
-		std::cout << std::endl;
-		std::cout << "Reply:" << std::endl;
-		std::cout << std::setw(30) << "Debug ID: " << reply.debugID.get() << std::endl;
-		std::cout << std::setw(30) << "Content length: " << reply.data.size() << std::endl;
-
-		// Verify if the deserialized data is the same
-		int index = 0;
-		while (pContext->mutations[teamID][index].version != beginVersion)
-			++index;
-
-		TLogStorageServerMessageDeserializer deserializer(reply.arena, reply.data);
-		for (TLogStorageServerMessageDeserializer::iterator iter = deserializer.begin(); iter != deserializer.end();
-		     ++iter, ++index) {
-			ASSERT(pContext->mutations[teamID][index] == *iter);
-		}
-
-		if (++peekTime == NUM_PEEK_TIMES) {
-			break;
-		}
-	}
-
-	return Void();
-}
-
-} // namespace ptxn::test::tlogPeek
-
-TEST_CASE("/fdbserver/ptxn/test/tlogPeek/readFromSerialization") {
-	state std::vector<Version> versions;
-	state std::shared_ptr<ptxn::test::FakeTLogContext> pContext(std::make_shared<ptxn::test::FakeTLogContext>());
-	state std::vector<Future<Void>> actors;
-
-	ptxn::test::tlogPeek::fillMutations(pContext, versions);
-	actors.push_back(
-	    ptxn::test::tlogPeek::initializeTLogForPeekTest(ptxn::MessageTransferModel::TLogActivelyPush, pContext));
-	wait(ptxn::test::tlogPeek::peekAndCheck(pContext, versions));
-
-	return Void();
-}
-
-TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/ServerTeamPeekCursor") {
-	state std::vector<Version> versions;
-	state std::shared_ptr<ptxn::test::FakeTLogContext> pContext(std::make_shared<ptxn::test::FakeTLogContext>());
-	state std::vector<Future<Void>> actors;
-	state Arena arena;
-	state ptxn::StorageTeamID teamID(ptxn::test::tlogPeek::TEAM_IDS[0]);
-
-	ptxn::test::tlogPeek::fillMutations(pContext, versions);
-	// Limit the size of reply, to force multiple peeks
-	pContext->maxBytesPerPeek = params.getInt("maxBytesPerPeek").orDefault(32 * 1024);
-	actors.push_back(
-	    ptxn::test::tlogPeek::initializeTLogForPeekTest(ptxn::MessageTransferModel::TLogActivelyPush, pContext));
-
-	state std::shared_ptr<ptxn::ServerTeamPeekCursor> pCursor = std::make_shared<ptxn::ServerTeamPeekCursor>(
-	    ptxn::test::tlogPeek::INITIAL_VERSION, teamID, pContext->pTLogInterface.get());
-	state size_t index = 0;
-	loop {
-		std::cout << std::endl
-		          << "Querying team " << teamID.toString() << " from version: " << pCursor->getLastVersion()
-		          << std::endl;
-		state bool remoteDataAvailable = wait(pCursor->remoteMoreAvailable());
-		if (!remoteDataAvailable) {
-			std::cout << " TLog reported no more mutations available." << std::endl;
-			break;
-		}
-
-		while (pCursor->hasRemaining()) {
-			ASSERT(pCursor->get() == pContext->mutations[teamID][index++]);
-			pCursor->next();
-		}
-	}
-
-	ASSERT_EQ(index, pContext->mutations[teamID].size());
 
 	return Void();
 }

@@ -41,7 +41,7 @@ struct TLogStorageServerMessageHeader : MultipleItemHeaderBase {
 	static constexpr FileIdentifier file_identifier = 617401;
 
 	// TeamID
-	StorageTeamID teamID;
+	StorageTeamID storageTeamID;
 
 	// The first version that being serialized
 	Version firstVersion = invalidVersion;
@@ -57,13 +57,13 @@ struct TLogStorageServerMessageHeader : MultipleItemHeaderBase {
 	template <typename Reader>
 	void loadFromArena(Reader& reader) {
 		MultipleItemHeaderBase::loadFromArena(reader);
-		reader >> teamID >> firstVersion >> lastVersion >> lastSubsequence;
+		reader >> storageTeamID >> firstVersion >> lastVersion >> lastSubsequence;
 	}
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
 		MultipleItemHeaderBase::serialize(ar);
-		serializer(ar, teamID, firstVersion, lastVersion, lastSubsequence);
+		serializer(ar, storageTeamID, firstVersion, lastVersion, lastSubsequence);
 	}
 };
 
@@ -222,7 +222,7 @@ public:
 	void reset(const Arena&, const StringRef);
 
 	// Gets the team ID
-	const StorageTeamID& getTeamID() const;
+	const StorageTeamID& getStorageTeamID() const;
 
 	// Gets the number of different versions in this part
 	size_t getNumVersions() const;
@@ -234,7 +234,7 @@ public:
 	const Version& getLastVersion() const;
 
 	iterator begin() const;
-	// end() is called multiple times in typeical for loop:
+	// end() is called multiple times in typical for loop:
 	//    for(auto iter = deserializer.begin(); iter != deserializer.end(); ++iter)
 	// since creating an iterator is *NOT* trivial, the end iterator is cached.
 	const iterator& end() const;

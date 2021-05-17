@@ -9,7 +9,7 @@ startDelay = 0
     testsMatching = '/fdbserver/ptxn/test/driver'
 
     numCommits = 20
-    numTeams = 20
+    numStorageTeams = 20
     numProxies = 1
     numTLogs = 4
     numStorageServers = 4
@@ -17,25 +17,3 @@ startDelay = 0
     # 0 stands for TLog --push--> StorageServer
     # 1 stands for StorageServer --pull--> TLog
     messageTransferModel = 0
-
-[[test]]
-testTitle = 'Test FakeTLog serialize data to FakeStorageServer'
-useDB = false
-startDelay = 0
-
-    [[test.workload]]
-    testName = 'UnitTests'
-    maxTestCases = 1
-    testsMatching = '/fdbserver/ptxn/test/tlogPeek/readFromSerialization'
-
-[[test]]
-testTitle = 'Test server team cursor'
-useDB = false
-startDelay = 0
-
-    [[test.workload]]
-    testName = 'UnitTests'
-    maxTestCases = 1
-    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/ServerTeamPeekCursor'
-
-    maxBytesPerPeek = 65536

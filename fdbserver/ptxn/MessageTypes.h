@@ -29,6 +29,24 @@
 
 namespace ptxn {
 
+struct VersionSubsequence {
+	Version version = 0;
+	Subsequence subsequence = 0;
+
+	explicit VersionSubsequence(const Version& version_, const Subsequence& subsequence_)
+	  : version(version_), subsequence(subsequence_) {}
+
+	template <typename Reader>
+	void loadFromArena(Reader& reader) {
+		reader >> version >> subsequence;
+	}
+
+	template <typename Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, subsequence);
+	}
+};
+
 // Stores the mutations and their subsequences, or the relative order of each mutations. The order
 // is used in recovery.
 struct SubsequenceMutationItem {

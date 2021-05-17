@@ -45,12 +45,12 @@ struct CommitValidationRecord {
 
 struct CommitRecord {
 	Version version;
-	StorageTeamID teamID;
+	StorageTeamID storageTeamID;
 	std::vector<MutationRef> mutations;
 
 	CommitValidationRecord validation;
 
-	CommitRecord(const Version& version, const StorageTeamID& teamID, std::vector<MutationRef>&& mutationRef);
+	CommitRecord(const Version& version, const StorageTeamID& storageTeamID, std::vector<MutationRef>&& mutationRef);
 };
 
 // Driver options for starting mock environment.
@@ -65,28 +65,15 @@ struct TestDriverOptions {
 	static const MessageTransferModel DEFAULT_MESSAGE_TRANSFER_MODEL = MessageTransferModel::TLogActivelyPush;
 
 	int numCommits;
-	int numTeams;
+	int numStorageTeams;
 	int numProxies;
 	int numTLogs;
 	int numTLogGroups;
 	int numStorageServers;
 	int numResolvers;
-	MessageTransferModel transferModel = MessageTransferModel::TLogActivelyPush;
+	MessageTransferModel transferModel;
 
-	explicit TestDriverOptions(const UnitTestParameters& params) {
-		numCommits = params.getInt("numCommits").orDefault(DEFAULT_NUM_COMMITS);
-		numTeams = params.getInt("numTeams").orDefault(DEFAULT_NUM_TEAMS);
-		numProxies = params.getInt("numProxies").orDefault(DEFAULT_NUM_PROXIES);
-		numTLogs = params.getInt("numTLogs").orDefault(DEFAULT_NUM_TLOGS);
-		numTLogGroups = params.getInt("numTLogGroups").orDefault(DEFAULT_NUM_TLOG_GROUPS);
-		numStorageServers = params.getInt("numStorageServers").orDefault(DEFAULT_NUM_STORAGE_SERVERS);
-		numResolvers = params.getInt("numResolvers").orDefault(DEFAULT_NUM_RESOLVERS);
-		transferModel = static_cast<MessageTransferModel>(
-		    params.getInt("messageTransferModel").orDefault(static_cast<int>(DEFAULT_MESSAGE_TRANSFER_MODEL)),
-		    static_cast<int>(MessageTransferModel::TLogActivelyPush));
-	}
-
-	friend std::ostream& operator<<(std::ostream&, const TestDriverOptions&);
+	explicit TestDriverOptions(const UnitTestParameters&);
 };
 
 struct TestDriverContext {
@@ -94,8 +81,8 @@ struct TestDriverContext {
 	int numCommits;
 
 	// Teams
-	int numTeamIDs;
-	std::vector<StorageTeamID> teamIDs;
+	int numStorageTeamIDs;
+	std::vector<StorageTeamID> storageTeamIDs;
 
 	MessageTransferModel messageTransferModel;
 
@@ -114,14 +101,14 @@ struct TestDriverContext {
 	std::vector<TLogGroup> tLogGroups;
 	std::unordered_map<TLogGroupID, std::shared_ptr<TLogInterfaceBase>> tLogGroupLeaders;
 	std::vector<std::shared_ptr<TLogInterfaceBase>> tLogInterfaces;
-	std::unordered_map<StorageTeamID, std::shared_ptr<TLogInterfaceBase>> teamIDTLogInterfaceMapper;
+	std::unordered_map<StorageTeamID, std::shared_ptr<TLogInterfaceBase>> storageTeamIDTLogInterfaceMapper;
 	std::shared_ptr<TLogInterfaceBase> getTLogInterface(const StorageTeamID&);
 
 	// Storage Server
 	bool useFakeStorageServer;
 	int numStorageServers;
 	std::vector<std::shared_ptr<StorageServerInterfaceBase>> storageServerInterfaces;
-	std::unordered_map<StorageTeamID, std::shared_ptr<StorageServerInterfaceBase>> teamIDStorageServerInterfaceMapper;
+	std::unordered_map<StorageTeamID, std::shared_ptr<StorageServerInterfaceBase>> storageTeamIDStorageServerInterfaceMapper;
 	std::shared_ptr<StorageServerInterfaceBase> getStorageServerInterface(const StorageTeamID&);
 
 	// Stores the generated commits
@@ -134,12 +121,6 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 
 // Starts all fake resolvers specified in the pTestDriverContext.
 void startFakeResolver(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext);
-
-// Print out *ALL* commits that has triggered.
-void printCommitRecord(const std::vector<CommitRecord>& records);
-
-// Print out those commits are not being completed, i.e., persisted in TLogs and Storage Servers
-void printNotValidatedRecords(const std::vector<CommitRecord>& records);
 
 // Check if all records are validated
 bool isAllRecordsValidated(const std::vector<CommitRecord>& records);
@@ -160,7 +141,7 @@ void startFakeTLog(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriver
 void startFakeStorageServer(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext);
 
 // Get a TeamID, the TeamID is determinstic in the simulation environment
-StorageTeamID getNewTeamID();
+StorageTeamID getNewStorageTeamID();
 
 } // namespace ptxn::test
 

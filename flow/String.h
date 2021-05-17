@@ -35,7 +35,7 @@ std::stringstream& _concatHelper(std::stringstream&& ss, const Arg& arg) {
 template <typename First, typename... Args>
 std::stringstream& _concatHelper(std::stringstream&& ss, const First& first, const Args&... args) {
 	ss << first;
-	return _concatHelper(std::move(ss), args...);
+	return _concatHelper(std::move(ss), std::forward<const Args&>(args)...);
 }
 
 } // anonymous namespace
