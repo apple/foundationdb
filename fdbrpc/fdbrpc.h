@@ -372,7 +372,7 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 			    acknowledgements.getEndpoint(TaskPriority::ReadSocket),
 			    false);
 		}
-		if (isRemoteEndpoint() && !sentError) {
+		if (isRemoteEndpoint() && !sentError && !acknowledgements.failures.isReady()) {
 			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(broken_promise()),
 			                                          getEndpoint(TaskPriority::ReadSocket),
 			                                          false);
