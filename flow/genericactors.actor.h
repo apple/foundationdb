@@ -1881,9 +1881,9 @@ Future<U> runAfter(Future<T> lhs, Future<U> rhs) {
 	return res;
 }
 
-template <class T, class Res>
-Future<Res> operator>>=(Future<T> lhs, std::function<Future<Res>(T const&)> rhs) {
-	return runAfter(lhs, rhs);
+template <class T, class Fun>
+auto operator>>=(Future<T> lhs, Fun&& rhs) -> Future<decltype(rhs(std::declval<T>()))> {
+	return runAfter(lhs, std::forward<Fun>(rhs));
 }
 
 template <class T, class U>

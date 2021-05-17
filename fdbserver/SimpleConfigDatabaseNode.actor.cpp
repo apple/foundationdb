@@ -84,8 +84,6 @@ TEST_CASE("/fdbserver/ConfigDB/SimpleConfigDatabaseNode/Internal/versionedMutati
 class SimpleConfigDatabaseNodeImpl {
 	IKeyValueStore* kvStore; // FIXME: Prevent leak
 	std::map<std::string, std::string> config;
-	ActorCollection actors{ false };
-	FlowLock globalLock;
 	Future<Void> initFuture;
 
 	UID id;
@@ -162,8 +160,6 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 	ACTOR static Future<Void> getChanges(SimpleConfigDatabaseNodeImpl *self, ConfigFollowerGetChangesRequest req) {
-		wait(self->globalLock.take());
-		state FlowLock::Releaser releaser(self->globalLock);
 		Version lastCompactedVersion = wait(getLastCompactedVersion(self));
 		if (req.lastSeenVersion < lastCompactedVersion) {
 			++self->failedChangeRequests;
@@ -189,8 +185,6 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 	ACTOR static Future<Void> getNewVersion(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionGetVersionRequest req) {
-		wait(self->globalLock.take());
-		state FlowLock::Releaser releaser(self->globalLock);
 		state Version currentVersion = wait(getLiveTransactionVersion(self));
 		self->kvStore->set(KeyValueRef(liveTransactionVersionKey, BinaryWriter::toValue(++currentVersion, IncludeVersion())));
 		wait(self->kvStore->commit());
@@ -199,8 +193,6 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 	ACTOR static Future<Void> get(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionGetRequest req) {
-		wait(self->globalLock.take());
-		state FlowLock::Releaser releaser(self->globalLock);
 		Version currentVersion = wait(getLiveTransactionVersion(self));
 		if (req.version != currentVersion) {
 			req.reply.sendError(transaction_too_old());
@@ -272,8 +264,6 @@ class SimpleConfigDatabaseNodeImpl {
 	*/
 
 	ACTOR static Future<Void> commit(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionCommitRequest req) {
-		wait(self->globalLock.take());
-		state FlowLock::Releaser releaser(self->globalLock);
 		Version currentVersion = wait(getLiveTransactionVersion(self));
 		if (req.version != currentVersion) {
 			++self->failedCommits;
@@ -299,8 +289,6 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 	ACTOR static Future<Void> traceQueuedMutations(SimpleConfigDatabaseNodeImpl *self) {
-		wait(self->globalLock.take());
-		state FlowLock::Releaser releaser(self->globalLock);
 		state Version currentVersion = wait(getCommittedVersion(self));
 		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
 		    wait(getMutations(self, 0, currentVersion));
@@ -326,27 +314,24 @@ class SimpleConfigDatabaseNodeImpl {
 			choose {
 				when(ConfigTransactionGetVersionRequest req = waitNext(cti->getVersion.getFuture())) {
 					++self->newVersionRequests;
-					self->actors.add(getNewVersion(self, req));
+					wait(getNewVersion(self, req));
 				}
 				when(ConfigTransactionGetRequest req = waitNext(cti->get.getFuture())) {
 					++self->getValueRequests;
-					self->actors.add(get(self, req));
+					wait(get(self, req));
 				}
 				when(ConfigTransactionCommitRequest req = waitNext(cti->commit.getFuture())) {
-					self->actors.add(commit(self, req));
+					wait(commit(self, req));
 				}
 				when(ConfigTransactionGetRangeRequest req = waitNext(cti->getRange.getFuture())) {
 					// FIXME: Fix and reenable
-					// self->actors.add(getRange(self, req));
+					// wait(getRange(self, req));
 				}
-				when(wait(self->actors.getResult())) { ASSERT(false); }
 			}
 		}
 	}
 
 	ACTOR static Future<Void> getSnapshot(SimpleConfigDatabaseNodeImpl* self, ConfigFollowerGetSnapshotRequest req) {
-		wait(self->globalLock.take());
-		state FlowLock::Releaser releaser(self->globalLock);
 		state ConfigFollowerGetSnapshotReply reply;
 		Standalone<RangeResultRef> data = wait(self->kvStore->readRange(kvKeys));
 		for (const auto& kv : data) {
@@ -376,8 +361,6 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 	ACTOR static Future<Void> compact(SimpleConfigDatabaseNodeImpl* self, ConfigFollowerCompactRequest req) {
-		wait(self->globalLock.take());
-		state FlowLock::Releaser releaser(self->globalLock);
 		state Version lastCompactedVersion = wait(getLastCompactedVersion(self));
 		TraceEvent(SevDebug, "ConfigDatabaseNodeCompacting")
 		    .detail("Version", req.version)
@@ -423,20 +406,19 @@ class SimpleConfigDatabaseNodeImpl {
 			choose {
 				when(ConfigFollowerGetVersionRequest req = waitNext(cfi->getVersion.getFuture())) {
 					++self->committedVersionRequests;
-					self->actors.add(getCommittedVersion(self, req));
+					wait(getCommittedVersion(self, req));
 				}
 				when(ConfigFollowerGetSnapshotRequest req = waitNext(cfi->getSnapshot.getFuture())) {
 					++self->snapshotRequests;
-					self->actors.add(getSnapshot(self, req));
+					wait(getSnapshot(self, req));
 				}
 				when(ConfigFollowerGetChangesRequest req = waitNext(cfi->getChanges.getFuture())) {
-					self->actors.add(getChanges(self, req));
+					wait(getChanges(self, req));
 				}
 				when(ConfigFollowerCompactRequest req = waitNext(cfi->compact.getFuture())) {
 					++self->compactRequests;
-					self->actors.add(compact(self, req));
+					wait(compact(self, req));
 				}
-				when(wait(self->actors.getResult())) { ASSERT(false); }
 			}
 		}
 	}
@@ -450,6 +432,12 @@ public:
 	    setMutations("SetMutations", cc), clearMutations("ClearMutations", cc),
 	    getValueRequests("GetValueRequests", cc), newVersionRequests("NewVersionRequests", cc) {}
 
+	~SimpleConfigDatabaseNodeImpl() {
+		if (kvStore) {
+			kvStore->close();
+		}
+	}
+
 	Future<Void> serve(ConfigTransactionInterface const& cti) { return serve(this, &cti); }
 
 	Future<Void> serve(ConfigFollowerInterface const& cfi) { return serve(this, &cfi); }
@@ -457,7 +445,7 @@ public:
 	Future<Void> initialize(std::string const& dataFolder, UID id) {
 		platform::createDirectory(dataFolder);
 		this->id = id;
-		kvStore = keyValueStoreMemory(joinPath(dataFolder, "globalconf-"), id, 500e6);
+		kvStore = keyValueStoreMemory(joinPath(dataFolder, "globalconf-" + id.toString()), id, 500e6);
 		logger = traceCounters(
 		    "ConfigDatabaseNodeMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigDatabaseNode");
 		initFuture = kvStore->init();

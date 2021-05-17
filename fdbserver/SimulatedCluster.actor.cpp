@@ -227,7 +227,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 					                       "",
 					                       -1,
 					                       whitelistBinPaths,
-					                       {}));
+					                       ""));
 				}
 				if (runBackupAgents != AgentNone) {
 					futures.push_back(runBackup(connFile));

@@ -33,6 +33,8 @@ public:
 	ConfigBroadcaster(ConfigFollowerInterface const&, UID id);
 	ConfigBroadcaster(ClusterConnectionString const&, UID id);
 	ConfigBroadcaster(ServerCoordinators const&, UID id);
+	ConfigBroadcaster(ConfigBroadcaster&&);
+	ConfigBroadcaster& operator=(ConfigBroadcaster&&);
 	~ConfigBroadcaster();
 	Future<Void> serve(ConfigFollowerInterface const&);
 	Future<Void> addVersionedMutations(Standalone<VectorRef<VersionedConfigMutationRef>> const&,

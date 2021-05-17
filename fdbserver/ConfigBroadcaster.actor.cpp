@@ -186,6 +186,10 @@ ConfigBroadcaster::ConfigBroadcaster(ClusterConnectionString const& ccs, UID id)
 ConfigBroadcaster::ConfigBroadcaster(ServerCoordinators const& coordinators, UID id)
   : impl(std::make_unique<ConfigBroadcasterImpl>(coordinators, id)) {}
 
+ConfigBroadcaster::ConfigBroadcaster(ConfigBroadcaster&&) = default;
+
+ConfigBroadcaster& ConfigBroadcaster::operator=(ConfigBroadcaster&&) = default;
+
 ConfigBroadcaster::~ConfigBroadcaster() = default;
 
 Future<Void> ConfigBroadcaster::serve(ConfigFollowerInterface const& cfi) {
