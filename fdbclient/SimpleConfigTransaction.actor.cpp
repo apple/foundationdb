@@ -109,12 +109,17 @@ public:
 	void set(KeyRef key, ValueRef value) {
 		if (key == "\xff\xff/description"_sr) {
 			description = value;
+		} else {
+			mutations.push_back_deep(mutations.arena(), ConfigMutationRef::createConfigMutation(key, value));
 		}
-		mutations.push_back_deep(mutations.arena(), ConfigMutationRef::createConfigMutation(key, value));
 	}
 
 	void clear(KeyRef key) {
-		mutations.emplace_back_deep(mutations.arena(), ConfigMutationRef::createConfigMutation(key, {}));
+		if (key == "\xff\xff/description"_sr) {
+			description = ""_sr;
+		} else {
+			mutations.emplace_back_deep(mutations.arena(), ConfigMutationRef::createConfigMutation(key, {}));
+		}
 	}
 
 	Future<Optional<Value>> get(KeyRef key) { return get(this, key); }
@@ -203,6 +208,11 @@ void SimpleConfigTransaction::set(KeyRef const& key, ValueRef const& value) {
 
 void SimpleConfigTransaction::clear(KeyRef const& key) {
 	impl->clear(key);
+}
+
+void SimpleConfigTransaction::clear(KeyRangeRef const& keys) {
+	// TODO: Implement
+	ASSERT(false);
 }
 
 Future<Void> SimpleConfigTransaction::commit() {

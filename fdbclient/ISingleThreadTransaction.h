@@ -57,16 +57,16 @@ public:
 	                                                    GetRangeLimits limits,
 	                                                    bool snapshot = false,
 	                                                    bool reverse = false) = 0;
-	virtual Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key) = 0;
-	virtual Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRange& range, int64_t chunkSize) = 0;
-	virtual Future<int64_t> getEstimatedRangeSizeBytes(const KeyRange& keys) = 0;
+	virtual Future<Standalone<VectorRef<const char*>>> getAddressesForKey(Key const& key) = 0;
+	virtual Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& range, int64_t chunkSize) = 0;
+	virtual Future<int64_t> getEstimatedRangeSizeBytes(KeyRange const& keys) = 0;
 	virtual void addReadConflictRange(KeyRangeRef const& keys) = 0;
 	virtual void makeSelfConflicting() = 0;
-	virtual void atomicOp(const KeyRef& key, const ValueRef& operand, uint32_t operationType) = 0;
-	virtual void set(const KeyRef& key, const ValueRef& value) = 0;
+	virtual void atomicOp(KeyRef const& key, ValueRef const& operand, uint32_t operationType) = 0;
+	virtual void set(KeyRef const& key, ValueRef const& value) = 0;
 	virtual void clear(const KeyRangeRef& range) = 0;
-	virtual void clear(const KeyRef& key) = 0;
-	virtual Future<Void> watch(const Key& key) = 0;
+	virtual void clear(KeyRef const& key) = 0;
+	virtual Future<Void> watch(Key const& key) = 0;
 	virtual void addWriteConflictRange(KeyRangeRef const& keys) = 0;
 	virtual Future<Void> commit() = 0;
 	virtual Version getCommittedVersion() const = 0;

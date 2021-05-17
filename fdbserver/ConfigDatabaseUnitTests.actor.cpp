@@ -222,6 +222,7 @@ public:
 	Future<Void> setup() { return setup(this); }
 
 	Future<Void> restart() {
+		server.cancel();
 		node = makeReference<SimpleConfigDatabaseNode>();
 		return setup();
 	}

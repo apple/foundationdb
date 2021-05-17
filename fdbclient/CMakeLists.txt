@@ -35,6 +35,7 @@ set(FDBCLIENT_SRCS
   GrvProxyInterface.h
   HTTP.actor.cpp
   IClientApi.h
+  IConfigTransaction.h
   ISingleThreadTransaction.cpp
   ISingleThreadTransaction.h
   JsonBuilder.cpp
@@ -56,6 +57,8 @@ set(FDBCLIENT_SRCS
   NativeAPI.actor.cpp
   NativeAPI.actor.h
   Notified.h
+  PaxosConfigTransaction.actor.cpp
+  PaxosConfigTransaction.h
   SimpleConfigTransaction.actor.cpp
   SpecialKeySpace.actor.cpp
   SpecialKeySpace.actor.h

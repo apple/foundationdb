@@ -22,21 +22,14 @@
 
 #include <memory>
 
-#include "fdbclient/CommitTransaction.h"
-#include "fdbclient/ConfigTransactionInterface.h"
-#include "fdbclient/CoordinationInterface.h"
-#include "fdbclient/FDBTypes.h"
 #include "fdbclient/IConfigTransaction.h"
-#include "flow/Error.h"
-#include "flow/flow.h"
 
-class SimpleConfigTransaction final : public IConfigTransaction, public FastAllocated<SimpleConfigTransaction> {
-	std::unique_ptr<class SimpleConfigTransactionImpl> impl;
+class PaxosConfigTransaction final : public IConfigTransaction, public FastAllocated<PaxosConfigTransaction> {
+	std::unique_ptr<class PaxosConfigTransactionImpl> impl;
 
 public:
-	SimpleConfigTransaction(ConfigTransactionInterface const&);
-	SimpleConfigTransaction(ClusterConnectionString const&);
-	~SimpleConfigTransaction();
+	PaxosConfigTransaction(ClusterConnectionString const&);
+	~PaxosConfigTransaction();
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override;
 
@@ -51,8 +44,12 @@ public:
 	                                            GetRangeLimits limits,
 	                                            bool snapshot = false,
 	                                            bool reverse = false) override;
+	void set(KeyRef const& key, ValueRef const& value) override;
+	void clear(KeyRangeRef const&) override;
+	void clear(KeyRef const&) override;
 	Future<Void> commit() override;
 	Version getCommittedVersion() const override;
+	int64_t getApproximateSize() const override;
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	Future<Void> onError(Error const& e) override;
 	void cancel() override;
@@ -60,9 +57,4 @@ public:
 	void debugTransaction(UID dID) override;
 	void checkDeferredError() const override;
 	void getWriteConflicts(KeyRangeMap<bool>* result) override;
-	void fullReset();
-	int64_t getApproximateSize() const override;
-	void set(KeyRef const&, ValueRef const&) override;
-	void clear(KeyRangeRef const&) override;
-	void clear(KeyRef const&) override;
 };
