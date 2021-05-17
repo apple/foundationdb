@@ -1,0 +1,69 @@
+[[test]]
+testTitle = 'Test FakeTLog serialize data to FakeStorageServer'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/tlogPeek/readFromSerialization'
+
+    peekTimes = 10
+
+[[test]]
+testTitle = 'Test TLog group peek cursor'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/TLogGroupPeekCursor'
+
+    maxBytesPerPeek = 65536
+
+[[test]]
+testTitle = 'Test merged peek cursor'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/MergedPeekCursor/base'
+
+    maxBytesPerPeek = 4096
+
+    numMutations = 100000
+    numStorageTeams = 3
+    initialVersion = 1000
+
+[[test]]
+testTitle = 'Test merged peek cursor -- add cursors on the fly'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/MergedPeekCursor/addCursorOnTheFly'
+
+[[test]]
+testTitle = 'Test merged peek cursor -- remove cursors on the fly'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/MergedServerTeamPeekCursor/removeCursorOnTheFly' 
+
+[[test]]
+testTitle = 'Test cursor advanceTo'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/advanceTo'
