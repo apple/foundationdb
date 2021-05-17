@@ -104,9 +104,14 @@ ACTOR Future<Void> getTLogCreateActor(std::shared_ptr<TestDriverContext> pTestDr
 	                                     activeSharedTLog);
 
 	// start tlog.
-	state InitializeTLogRequest initTlogReq = InitializeTLogRequest();
-	initTlogReq.isPrimary = true;
-	TLogInterface interface = wait(promiseStream.getReply(initTlogReq));
+	state InitializeTLogRequest initTLogReq = InitializeTLogRequest();
+	Tag tag(pTLogDriverContext->tagLocality, 0 /* tag */);
+	std::vector<Tag> tags = { tag };
+	initTLogReq.allTags = tags;
+	initTLogReq.locality = 0;
+	initTLogReq.isPrimary = true;
+
+	TLogInterface interface = wait(promiseStream.getReply(initTLogReq));
 	pTLogContext->realTLogInterface = interface;
 
 	// inform other actors tLog is ready.
@@ -132,6 +137,7 @@ ACTOR Future<Void> TLogDriverContext::sendCommitMessages_impl(std::shared_ptr<Te
 	state Version prev = 0;
 	state Version next = 1;
 	state int i = 0;
+
 	for (; i < pTLogDriverContext->numCommits; i++) {
 		Standalone<StringRef> key = StringRef(format("key %d", i));
 		Standalone<StringRef> val = StringRef(format("value %d", i));
@@ -151,6 +157,7 @@ ACTOR Future<Void> TLogDriverContext::sendCommitMessages_impl(std::shared_ptr<Te
 		// send commit and wait for reply.
 		::TLogCommitRequest request(
 		    SpanID(), msg.arena(), prev, next, prev, prev, msg, deterministicRandom()->randomUniqueID());
+
 		::TLogCommitReply reply = wait(pTLogDriverContext->pTLogContext->realTLogInterface.commit.getReply(request));
 		ASSERT_LE(reply.version, next);
 		prev++;
@@ -169,8 +176,10 @@ ACTOR Future<Void> TLogDriverContext::peekCommitMessages_impl(std::shared_ptr<Te
 	state Tag tag(pTLogDriverContext->tagLocality, pTLogDriverContext->pTLogContext->tagProcessID);
 	state Version begin = 1;
 	state int i;
+
 	for (i = 0; i < pTLogDriverContext->numCommits; i++) {
 		// wait for next message commit
+
 		::TLogPeekRequest request(begin, tag, false, false);
 		::TLogPeekReply reply =
 		    wait(pTLogDriverContext->pTLogContext->realTLogInterface.peekMessages.getReply(request));
@@ -186,17 +195,18 @@ ACTOR Future<Void> TLogDriverContext::peekCommitMessages_impl(std::shared_ptr<Te
 		Version ver;
 		rd >> dummy >> ver;
 
-		// deserialize transaction header
 		int32_t messageLength;
 		uint16_t tagCount;
 		uint32_t sub;
-		rd >> messageLength >> sub >> tagCount;
-		rd.readBytes(tagCount * sizeof(Tag));
-
+		// deserialize transaction header
 		// deserialize span id
-		SpanContextMessage contextMessage;
-		rd >> contextMessage;
+		if (FLOW_KNOBS->WRITE_TRACING_ENABLED) {
+			rd >> messageLength >> sub >> tagCount;
+			rd.readBytes(tagCount * sizeof(Tag));
 
+			SpanContextMessage contextMessage;
+			rd >> contextMessage;
+		}
 		// deserialize mutation header
 		rd >> messageLength >> sub >> tagCount;
 		rd.readBytes(tagCount * sizeof(Tag));
