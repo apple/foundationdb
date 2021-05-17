@@ -128,25 +128,22 @@ struct ConfigTransactionGetRangeRequest {
 };
 
 struct ConfigTransactionInterface {
+	UID _id;
+
+public:
 	static constexpr FileIdentifier file_identifier = 982485;
 	struct RequestStream<ConfigTransactionGetVersionRequest> getVersion;
 	struct RequestStream<ConfigTransactionGetRequest> get;
 	struct RequestStream<ConfigTransactionGetRangeRequest> getRange;
 	struct RequestStream<ConfigTransactionCommitRequest> commit;
 
-	ConfigTransactionInterface() = default;
+	ConfigTransactionInterface();
+	void setupWellKnownEndpoints();
+	ConfigTransactionInterface(NetworkAddress const& remote);
 
-	void setupWellKnownEndpoints() {
-		getVersion.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_GETVERSION, TaskPriority::Coordination);
-		get.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_GET, TaskPriority::Coordination);
-		getRange.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_GETRANGE, TaskPriority::Coordination);
-		commit.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_COMMIT, TaskPriority::Coordination);
-	}
-
-	ConfigTransactionInterface(NetworkAddress const& remote)
-	  : getVersion(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GETVERSION)),
-	    get(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GET)), getRange(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GETRANGE)),
-	    commit(Endpoint({ remote }, WLTOKEN_CONFIGTXN_COMMIT)) {}
+	bool operator==(ConfigTransactionInterface const& rhs) const;
+	bool operator!=(ConfigTransactionInterface const& rhs) const;
+	UID id() const { return _id; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

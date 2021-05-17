@@ -152,12 +152,18 @@ Future<Void> addTestGlobalSetMutation(ConfigStore& configStore, Version& lastWri
 
 class LocalConfigEnvironment {
 	LocalConfiguration localConfiguration;
+	UID id;
 
 public:
 	LocalConfigEnvironment(std::string const& configPath, std::map<Key, Value> const& manualKnobOverrides)
-	  : localConfiguration(configPath, manualKnobOverrides) {}
+	  : localConfiguration(configPath, manualKnobOverrides), id(deterministicRandom()->randomUniqueID()) {}
 
-	Future<Void> setup() { return localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()); }
+	Future<Void> setup() { return localConfiguration.initialize("./", id); }
+
+	Future<Void> restart(std::string const& newConfigPath) {
+		localConfiguration = LocalConfiguration(newConfigPath, {});
+		return setup();
+	}
 
 	template <class TestType, class... Args>
 	Future<Void> run(Args&&... args) {

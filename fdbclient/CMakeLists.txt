@@ -21,6 +21,7 @@ set(FDBCLIENT_SRCS
   CommitTransaction.h
   ConfigKnobs.cpp
   ConfigKnobs.h
+  ConfigTransactionInterface.cpp
   ConfigTransactionInterface.h
   CoordinationInterface.h
   DatabaseBackupAgent.actor.cpp

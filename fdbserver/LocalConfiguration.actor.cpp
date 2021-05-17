@@ -360,6 +360,10 @@ LocalConfiguration::LocalConfiguration(std::string const& configPath, std::map<K
 LocalConfiguration::LocalConfiguration(std::string const& configPath, std::map<Key, Value> const& manualKnobOverrides)
   : impl(std::make_unique<LocalConfigurationImpl>(configPath, manualKnobOverrides)) {}
 
+LocalConfiguration::LocalConfiguration(LocalConfiguration&&) = default;
+
+LocalConfiguration& LocalConfiguration::operator=(LocalConfiguration&&) = default;
+
 LocalConfiguration::~LocalConfiguration() = default;
 
 Future<Void> LocalConfiguration::initialize(std::string const& dataFolder, UID id) {
