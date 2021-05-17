@@ -3018,7 +3018,7 @@ struct RedwoodRecordRef {
 		}
 	};
 
-	// Using this class as an alternative for Delta enables reading a DeltaTree<RecordRef> while only decoding
+	// Using this class as an alternative for Delta enables reading a DeltaTree2<RecordRef> while only decoding
 	// its values, so the Reader does not require the original prev/next ancestors.
 	struct DeltaValueOnly : Delta {
 		RedwoodRecordRef apply(const RedwoodRecordRef& base, Arena& arena) const {
@@ -3152,8 +3152,8 @@ struct RedwoodRecordRef {
 };
 
 struct BTreePage {
-	typedef DeltaTree<RedwoodRecordRef> BinaryTree;
-	typedef DeltaTree<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly> ValueTree;
+	typedef DeltaTree2<RedwoodRecordRef> BinaryTree;
+	typedef DeltaTree2<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly> ValueTree;
 
 #pragma pack(push, 1)
 	struct {
@@ -3171,11 +3171,10 @@ struct BTreePage {
 
 	BinaryTree& tree() { return *(BinaryTree*)(this + 1); }
 
-	const BinaryTree& tree() const { return *(const BinaryTree*)(this + 1); }
+	BinaryTree& tree() const { return *(BinaryTree*)(this + 1); }
 
-	const ValueTree& valueTree() const { return *(const ValueTree*)(this + 1); }
+	ValueTree& valueTree() const { return *(ValueTree*)(this + 1); }
 
-	// TODO:  boundaries are for decoding, but upper
 	std::string toString(bool write,
 	                     BTreePageIDRef id,
 	                     Version ver,
@@ -3197,8 +3196,8 @@ struct BTreePage {
 			if (tree().numItems > 0) {
 				// This doesn't use the cached reader for the page because it is only for debugging purposes,
 				// a cached reader may not exist
-				BinaryTree::Mirror reader(&tree(), lowerBound, upperBound);
-				BinaryTree::Cursor c = reader.getCursor();
+				BinaryTree::DecodeCache cache(*lowerBound, *upperBound);
+				BinaryTree::Cursor c(&cache, &tree());
 
 				c.moveFirst();
 				ASSERT(c.valid());
@@ -3226,7 +3225,7 @@ struct BTreePage {
 				// Out of range entries are actually okay now and the result of subtree deletion followed by
 				// incremental insertions of records in the deleted range being added to an adjacent subtree
 				// which is logically expanded encompass the deleted range but still is using the original
-				// subtree boundaries as DeltaTree boundaries.
+				// subtree boundaries as DeltaTree2 boundaries.
 				// ASSERT(!anyOutOfRange);
 			}
 		} catch (Error& e) {
@@ -3249,7 +3248,8 @@ static void makeEmptyRoot(Reference<ArenaPage> page) {
 }
 
 BTreePage::BinaryTree::Cursor getCursor(const Reference<const ArenaPage>& page) {
-	return ((BTreePage::BinaryTree::Mirror*)page->userData)->getCursor();
+	return BTreePage::BinaryTree::Cursor((BTreePage::BinaryTree::DecodeCache*)page->userData,
+	                                     &((BTreePage*)page->begin())->tree());
 }
 
 struct BoundaryRefAndPage {
@@ -3498,8 +3498,8 @@ public:
 
 				// Iterate over page entries, skipping key decoding using BTreePage::ValueTree which uses
 				// RedwoodRecordRef::DeltaValueOnly as the delta type type to skip key decoding
-				BTreePage::ValueTree::Mirror reader(&btPage.valueTree(), &dbBegin, &dbEnd);
-				auto c = reader.getCursor();
+				BTreePage::ValueTree::DecodeCache cache(dbBegin, dbEnd);
+				BTreePage::ValueTree::Cursor c(&cache, &btPage.valueTree());
 				ASSERT(c.moveFirst());
 				Version v = entry.version;
 				while (1) {
@@ -3930,7 +3930,7 @@ private:
 		int count; // Number of records added to the page
 		int pageSize; // Page size required to hold a BTreePage of the added records, which is a multiple of blockSize
 		int bytesLeft; // Bytes in pageSize that are unused by the BTreePage so far
-		bool largeDeltaTree; // Whether or not the DeltaTree in the generated page is in the 'large' size range
+		bool largeDeltaTree; // Whether or not the tree in the generated page is in the 'large' size range
 		int blockSize; // Base block size by which pageSize can be incremented
 		int blockCount; // The number of blocks in pageSize
 		int kvBytes; // The amount of user key/value bytes added to the page
@@ -4361,13 +4361,17 @@ private:
 		metrics.pageReadExt += (id.size() - 1);
 
 		if (!forLazyClear && page->userData == nullptr) {
-			debug_printf("readPage() Creating Mirror for %s @%" PRId64 " lower=%s upper=%s\n",
+			debug_printf("readPage() Creating DecodeCache for %s @%" PRId64 " lower=%s upper=%s\n",
 			             toString(id).c_str(),
 			             snapshot->getVersion(),
 			             lowerBound->toString(false).c_str(),
 			             upperBound->toString(false).c_str());
-			page->userData = new BTreePage::BinaryTree::Mirror(&pTreePage->tree(), lowerBound, upperBound);
-			page->userDataDestructor = [](void* ptr) { delete (BTreePage::BinaryTree::Mirror*)ptr; };
+
+			BTreePage::BinaryTree::DecodeCache* cache =
+			    new BTreePage::BinaryTree::DecodeCache(*lowerBound, *upperBound);
+			cache->addref();
+			page->userData = cache;
+			page->userDataDestructor = [](void* cache) { ((BTreePage::BinaryTree::DecodeCache*)cache)->delref(); };
 		}
 
 		if (!forLazyClear) {
@@ -4432,16 +4436,15 @@ private:
 		return newID;
 	}
 
-	// Copy page and initialize a Mirror for reading it.
+	// Copy page to a new page which shares the same DecodeCache with the old page
 	Reference<ArenaPage> cloneForUpdate(Reference<const ArenaPage> page) {
 		Reference<ArenaPage> newPage = page->cloneContents();
 
-		auto oldMirror = (const BTreePage::BinaryTree::Mirror*)page->userData;
-		auto newBTPage = (BTreePage*)newPage->mutate();
+		BTreePage::BinaryTree::DecodeCache* cache = (BTreePage::BinaryTree::DecodeCache*)page->userData;
+		cache->addref();
+		newPage->userData = cache;
+		newPage->userDataDestructor = [](void* cache) { ((BTreePage::BinaryTree::DecodeCache*)cache)->delref(); };
 
-		newPage->userData =
-		    new BTreePage::BinaryTree::Mirror(&newBTPage->tree(), oldMirror->lowerBound(), oldMirror->upperBound());
-		newPage->userDataDestructor = [](void* ptr) { delete (BTreePage::BinaryTree::Mirror*)ptr; };
 		return newPage;
 	}
 
@@ -4453,12 +4456,12 @@ private:
 		// Subtree clears can cause the boundaries for decoding the page to be more restrictive than the subtree's
 		// logical boundaries.  When a subtree is fully cleared, the link to it is replaced with a null link, but
 		// the key boundary remains in tact to support decoding of the previous subtree.
-		const RedwoodRecordRef* subtreeLowerBound;
-		const RedwoodRecordRef* subtreeUpperBound;
+		RedwoodRecordRef subtreeLowerBound;
+		RedwoodRecordRef subtreeUpperBound;
 
 		// The lower/upper bound for decoding the root of the subtree
-		const RedwoodRecordRef* decodeLowerBound;
-		const RedwoodRecordRef* decodeUpperBound;
+		RedwoodRecordRef decodeLowerBound;
+		RedwoodRecordRef decodeUpperBound;
 
 		bool boundariesNormal() const {
 			// If the decode upper boundary is the subtree upper boundary the pointers will be the same
@@ -4466,7 +4469,7 @@ private:
 			// that the keys are the same.  This happens for the first remaining subtree of an internal page
 			// after the prior subtree(s) were cleared.
 			return (decodeUpperBound == subtreeUpperBound) &&
-			       (decodeLowerBound == subtreeLowerBound || decodeLowerBound->sameExceptValue(*subtreeLowerBound));
+			       (decodeLowerBound == subtreeLowerBound || decodeLowerBound.sameExceptValue(subtreeLowerBound));
 		}
 
 		// The record range of the subtree slice is cBegin to cEnd
@@ -4495,7 +4498,7 @@ private:
 
 		// The upper boundary expected, if any, by the last child in either [cBegin, cEnd) or newLinks
 		// If the last record in the range has a null link then this will be null.
-		const RedwoodRecordRef* expectedUpperBound;
+		Optional<RedwoodRecordRef> expectedUpperBound;
 
 		bool inPlaceUpdate;
 
@@ -4505,7 +4508,7 @@ private:
 		void cleared() {
 			inPlaceUpdate = false;
 			childrenChanged = true;
-			expectedUpperBound = nullptr;
+			expectedUpperBound.reset();
 		}
 
 		// Page was updated in-place through edits and written to maybeNewID
@@ -4519,9 +4522,9 @@ private:
 			metrics.modifyItemCount += btPage->tree().numItems;
 
 			// The boundaries can't have changed, but the child page link may have.
-			if (maybeNewID != decodeLowerBound->getChildPage()) {
+			if (maybeNewID != decodeLowerBound.getChildPage()) {
 				// Add page's decode lower bound to newLinks set without its child page, intially
-				newLinks.push_back_deep(newLinks.arena(), decodeLowerBound->withoutValue());
+				newLinks.push_back_deep(newLinks.arena(), decodeLowerBound.withoutValue());
 
 				// Set the child page ID, which has already been allocated in result.arena()
 				newLinks.back().setChildPage(maybeNewID);
@@ -4542,7 +4545,7 @@ private:
 			// If the replacement records ended on a non-null child page, then the expect upper bound is
 			// the subtree upper bound since that is what would have been used for the page(s) rebuild,
 			// otherwise it is null.
-			expectedUpperBound = newLinks.back().value.present() ? subtreeUpperBound : nullptr;
+			expectedUpperBound = newLinks.back().value.present() ? subtreeUpperBound : Optional<RedwoodRecordRef>();
 		}
 
 		// Get the first record for this range AFTER applying whatever changes were made
@@ -4553,7 +4556,7 @@ private:
 				}
 				return &newLinks.front();
 			}
-			return decodeLowerBound;
+			return &decodeLowerBound;
 		}
 
 		std::string toString() const {
@@ -4564,12 +4567,12 @@ private:
 			            childrenChanged && newLinks.empty(),
 			            childrenChanged,
 			            inPlaceUpdate);
-			s += format("SubtreeLower: %s\n", subtreeLowerBound->toString(false).c_str());
-			s += format(" DecodeLower: %s\n", decodeLowerBound->toString(false).c_str());
-			s += format(" DecodeUpper: %s\n", decodeUpperBound->toString(false).c_str());
-			s += format("SubtreeUpper: %s\n", subtreeUpperBound->toString(false).c_str());
+			s += format("SubtreeLower: %s\n", subtreeLowerBound.toString(false).c_str());
+			s += format(" DecodeLower: %s\n", decodeLowerBound.toString(false).c_str());
+			s += format(" DecodeUpper: %s\n", decodeUpperBound.toString(false).c_str());
+			s += format("SubtreeUpper: %s\n", subtreeUpperBound.toString(false).c_str());
 			s += format("expectedUpperBound: %s\n",
-			            expectedUpperBound ? expectedUpperBound->toString(false).c_str() : "(null)");
+			            expectedUpperBound.present() ? expectedUpperBound.get().toString(false).c_str() : "(null)");
 			for (int i = 0; i < newLinks.size(); ++i) {
 				s += format("  %i: %s\n", i, newLinks[i].toString(false).c_str());
 			}
@@ -4580,19 +4583,19 @@ private:
 
 	struct InternalPageModifier {
 		InternalPageModifier() {}
-		InternalPageModifier(BTreePage* p, BTreePage::BinaryTree::Mirror* m, bool updating, ParentInfo* parentInfo)
-		  : btPage(p), m(m), updating(updating), changesMade(false), parentInfo(parentInfo) {}
+		InternalPageModifier(BTreePage* p, BTreePage::BinaryTree::Cursor& c, bool updating, ParentInfo* parentInfo)
+		  : btPage(p), c(c), updating(updating), changesMade(false), parentInfo(parentInfo) {}
 
 		bool updating;
 		BTreePage* btPage;
-		BTreePage::BinaryTree::Mirror* m;
+		BTreePage::BinaryTree::Cursor c;
 		Standalone<VectorRef<RedwoodRecordRef>> rebuild;
 		bool changesMade;
 		ParentInfo* parentInfo;
 
 		bool empty() const {
 			if (updating) {
-				return m->tree->numItems == 0;
+				return c.tree->numItems == 0;
 			} else {
 				return rebuild.empty();
 			}
@@ -4608,14 +4611,14 @@ private:
 					const RedwoodRecordRef& rec = recs[i];
 					debug_printf("internal page (updating) insert: %s\n", rec.toString(false).c_str());
 
-					if (!m->insert(rec)) {
+					if (!c.insert(rec)) {
 						debug_printf("internal page: failed to insert %s, switching to rebuild\n",
 						             rec.toString(false).c_str());
 						// Update failed, so populate rebuild vector with everything up to but not including end, which
 						// may include items from recs that were already added.
 						auto c = end;
 						if (c.moveFirst()) {
-							rebuild.reserve(rebuild.arena(), c.mirror->tree->numItems);
+							rebuild.reserve(rebuild.arena(), c.tree->numItems);
 							while (c != end) {
 								debug_printf("  internal page rebuild: add %s\n", c.get().toString(false).c_str());
 								rebuild.push_back(rebuild.arena(), c.get());
@@ -4688,7 +4691,7 @@ private:
 			} else {
 
 				if (u.inPlaceUpdate) {
-					for (auto id : u.decodeLowerBound->getChildPage()) {
+					for (auto id : u.decodeLowerBound.getChildPage()) {
 						parentInfo->pageUpdated(id);
 					}
 				}
@@ -4697,11 +4700,11 @@ private:
 			}
 
 			// If there is an expected upper boundary for the next range after u
-			if (u.expectedUpperBound != nullptr) {
+			if (u.expectedUpperBound.present()) {
 				// Then if it does not match the next boundary then insert a dummy record
-				if (nextBoundary == nullptr ||
-				    (nextBoundary != u.expectedUpperBound && !nextBoundary->sameExceptValue(*u.expectedUpperBound))) {
-					RedwoodRecordRef rec = u.expectedUpperBound->withoutValue();
+				if (nextBoundary == nullptr || (nextBoundary != &u.expectedUpperBound.get() &&
+				                                !nextBoundary->sameExceptValue(u.expectedUpperBound.get()))) {
+					RedwoodRecordRef rec = u.expectedUpperBound.get().withoutValue();
 					debug_printf("applyUpdate adding dummy record %s\n", rec.toString(false).c_str());
 					insert(u.cEnd, { &rec, 1 });
 					changesMade = true;
@@ -4748,7 +4751,7 @@ private:
 		state FlowLock::Releaser readLock(*commitReadLock);
 		state bool fromCache = false;
 		state Reference<const ArenaPage> page = wait(
-		    readPage(snapshot, rootID, update->decodeLowerBound, update->decodeUpperBound, false, false, &fromCache));
+		    readPage(snapshot, rootID, &update->decodeLowerBound, &update->decodeUpperBound, false, false, &fromCache));
 		readLock.release();
 
 		state BTreePage* btPage = (BTreePage*)page->begin();
@@ -4762,7 +4765,6 @@ private:
 
 		// If trying to update the page and the page reference points into the cache,
 		// we need to clone it so we don't modify the original version of the page.
-		// TODO: Refactor DeltaTree::Mirror so it can be shared between different versions of pages
 		if (tryToUpdate && fromCache) {
 			page = self->cloneForUpdate(page);
 			btPage = (BTreePage*)page->begin();
@@ -4772,7 +4774,8 @@ private:
 		debug_printf(
 		    "%s commitSubtree(): %s\n",
 		    context.c_str(),
-		    btPage->toString(false, rootID, snapshot->getVersion(), update->decodeLowerBound, update->decodeUpperBound)
+		    btPage
+		        ->toString(false, rootID, snapshot->getVersion(), &update->decodeLowerBound, &update->decodeUpperBound)
 		        .c_str());
 
 		state BTreePage::BinaryTree::Cursor cursor = getCursor(page);
@@ -4829,7 +4832,7 @@ private:
 				//   - there actually is a change (whether a set or a clear, old records are to be removed)
 				//   - either this is not the first boundary or it is but its key matches our lower bound key
 				bool applyBoundaryChange = mBegin.mutation().boundaryChanged &&
-				                           (!firstMutationBoundary || mBegin.key() == update->subtreeLowerBound->key);
+				                           (!firstMutationBoundary || mBegin.key() == update->subtreeLowerBound.key);
 				firstMutationBoundary = false;
 
 				// Iterate over records for the mutation boundary key, keep them unless the boundary key was changed or
@@ -4875,7 +4878,7 @@ private:
 
 					// If updating, add to the page, else add to the output set
 					if (updating) {
-						if (cursor.mirror->insert(rec, update->skipLen, maxHeightAllowed)) {
+						if (cursor.insert(rec, update->skipLen, maxHeightAllowed)) {
 							btPage->kvBytes += rec.kvBytes();
 							debug_printf(
 							    "%s Inserted %s [mutation, boundary start]\n", context.c_str(), rec.toString().c_str());
@@ -4996,9 +4999,9 @@ private:
 			writeVersion = self->getLastCommittedVersion() + 1;
 
 			if (updating) {
-				const BTreePage::BinaryTree& deltaTree = btPage->tree();
+				const BTreePage::BinaryTree& DeltaTree2 = btPage->tree();
 				// If the tree is now empty, delete the page
-				if (deltaTree.numItems == 0) {
+				if (DeltaTree2.numItems == 0) {
 					update->cleared();
 					self->freeBTreePage(rootID, writeVersion);
 					debug_printf("%s Page updates cleared all entries, returning %s\n",
@@ -5029,8 +5032,8 @@ private:
 
 			// Rebuild new page(s).
 			state Standalone<VectorRef<RedwoodRecordRef>> entries = wait(writePages(self,
-			                                                                        update->subtreeLowerBound,
-			                                                                        update->subtreeUpperBound,
+			                                                                        &update->subtreeLowerBound,
+			                                                                        &update->subtreeUpperBound,
 			                                                                        merged,
 			                                                                        btPage->height,
 			                                                                        writeVersion,
@@ -5061,7 +5064,7 @@ private:
 
 				// Subtree lower boundary is this page's subtree lower bound or cursor
 				u.cBegin = cursor;
-				u.decodeLowerBound = &cursor.get();
+				u.decodeLowerBound = cursor.get();
 				if (first) {
 					u.subtreeLowerBound = update->subtreeLowerBound;
 					first = false;
@@ -5072,7 +5075,7 @@ private:
 					// mBegin is either at or greater than subtreeLowerBound->key, which was the subtreeUpperBound->key
 					// for the previous subtree slice.  But we need it to be at or *before* subtreeLowerBound->key
 					// so if mBegin.key() is not exactly the subtree lower bound key then decrement it.
-					if (mBegin.key() != u.subtreeLowerBound->key) {
+					if (mBegin.key() != u.subtreeLowerBound.key) {
 						--mBegin;
 					}
 				}
@@ -5083,14 +5086,14 @@ private:
 				// The decode upper bound is always the next key after the child link, or the decode upper bound for
 				// this page
 				if (cursor.moveNext()) {
-					u.decodeUpperBound = &cursor.get();
+					u.decodeUpperBound = cursor.get();
 					// If cursor record has a null child page then it exists only to preserve a previous
 					// subtree boundary that is now needed for reading the subtree at cBegin.
 					if (!cursor.get().value.present()) {
 						// If the upper bound is provided by a dummy record in [cBegin, cEnd) then there is no
 						// requirement on the next subtree range or the parent page to have a specific upper boundary
 						// for decoding the subtree.
-						u.expectedUpperBound = nullptr;
+						u.expectedUpperBound.reset();
 						cursor.moveNext();
 						// If there is another record after the null child record, it must have a child page value
 						ASSERT(!cursor.valid() || cursor.get().value.present());
@@ -5101,12 +5104,12 @@ private:
 					u.decodeUpperBound = update->decodeUpperBound;
 					u.expectedUpperBound = update->decodeUpperBound;
 				}
-				u.subtreeUpperBound = cursor.valid() ? &cursor.get() : update->subtreeUpperBound;
+				u.subtreeUpperBound = cursor.valid() ? cursor.get() : update->subtreeUpperBound;
 				u.cEnd = cursor;
 				u.skipLen = 0; // TODO: set this
 
 				// Find the mutation buffer range that includes all changes to the range described by u
-				mEnd = mutationBuffer->lower_bound(u.subtreeUpperBound->key);
+				mEnd = mutationBuffer->lower_bound(u.subtreeUpperBound.key);
 
 				// If the mutation range described by mBegin extends to mEnd, then see if the part of that range
 				// that overlaps with u's subtree range is being fully cleared or fully unchanged.
@@ -5121,12 +5124,12 @@ private:
 					if (range.clearAfterBoundary) {
 						// If the mutation range after the boundary key is cleared, then the mutation boundary key must
 						// be cleared or must be different than the subtree lower bound key so that it doesn't matter
-						uniform = range.boundaryCleared() || mutationBoundaryKey != u.subtreeLowerBound->key;
+						uniform = range.boundaryCleared() || mutationBoundaryKey != u.subtreeLowerBound.key;
 					} else {
 						// If the mutation range after the boundary key is unchanged, then the mutation boundary key
 						// must be also unchanged or must be different than the subtree lower bound key so that it
 						// doesn't matter
-						uniform = !range.boundaryChanged || mutationBoundaryKey != u.subtreeLowerBound->key;
+						uniform = !range.boundaryChanged || mutationBoundaryKey != u.subtreeLowerBound.key;
 					}
 
 					// If u's subtree is either all cleared or all unchanged
@@ -5135,8 +5138,9 @@ private:
 						// include sibling subtrees also covered by (mBegin, mEnd) so we can not recurse to those, too.
 						// If the cursor is valid, u.subtreeUpperBound is the cursor's position, which is >= mEnd.key().
 						// If equal, no range expansion is possible.
-						if (cursor.valid() && mEnd.key() != u.subtreeUpperBound->key) {
-							cursor.seekLessThanOrEqual(mEnd.key(), update->skipLen, &cursor, 1);
+						if (cursor.valid() && mEnd.key() != u.subtreeUpperBound.key) {
+							// TODO:  If cursor hints are available, use (cursor, 1)
+							cursor.seekLessThanOrEqual(mEnd.key(), update->skipLen);
 
 							// If this seek moved us ahead, to something other than cEnd, then update subtree range
 							// boundaries
@@ -5149,7 +5153,7 @@ private:
 								}
 
 								u.cEnd = cursor;
-								u.subtreeUpperBound = &cursor.get();
+								u.subtreeUpperBound = cursor.get();
 								u.skipLen = 0; // TODO: set this
 
 								// The new decode upper bound is either cEnd or the record before it if it has no child
@@ -5158,8 +5162,8 @@ private:
 								c.movePrev();
 								ASSERT(c.valid());
 								if (!c.get().value.present()) {
-									u.decodeUpperBound = &c.get();
-									u.expectedUpperBound = nullptr;
+									u.decodeUpperBound = c.get();
+									u.expectedUpperBound.reset();
 								} else {
 									u.decodeUpperBound = u.subtreeUpperBound;
 									u.expectedUpperBound = u.subtreeUpperBound;
@@ -5173,7 +5177,7 @@ private:
 							u.cleared();
 							auto c = u.cBegin;
 							while (c != u.cEnd) {
-								const RedwoodRecordRef& rec = c.get();
+								RedwoodRecordRef rec = c.get();
 								if (rec.value.present()) {
 									if (btPage->height == 2) {
 										debug_printf("%s: freeing child page in cleared subtree range: %s\n",
@@ -5224,7 +5228,7 @@ private:
 			// Note:  parentInfo could be invalid after a wait and must be re-initialized.
 			// All uses below occur before waits so no reinitialization is done.
 			state ParentInfo* parentInfo = &self->childUpdateTracker[rootID.front()];
-			state InternalPageModifier m(btPage, cursor.mirror, tryToUpdate, parentInfo);
+			state InternalPageModifier m(btPage, cursor, tryToUpdate, parentInfo);
 
 			// Apply the possible changes for each subtree range recursed to, except the last one.
 			// For each range, the expected next record, if any, is checked against the first boundary
@@ -5242,7 +5246,7 @@ private:
 			             context.c_str(),
 			             m.changesMade,
 			             update->toString().c_str());
-			m.applyUpdate(*slices.back(), m.changesMade ? update->subtreeUpperBound : update->decodeUpperBound);
+			m.applyUpdate(*slices.back(), m.changesMade ? &update->subtreeUpperBound : &update->decodeUpperBound);
 
 			state bool detachChildren = (parentInfo->count > 2);
 			state bool forceUpdate = false;
@@ -5260,10 +5264,10 @@ private:
 					// Copy the page before modification if the page references the cache
 					if (fromCache) {
 						page = self->cloneForUpdate(page);
-						cursor = getCursor(page);
 						btPage = (BTreePage*)page->begin();
 						m.btPage = btPage;
-						m.m = cursor.mirror;
+						cursor.tree = &btPage->tree();
+						m.c.tree = cursor.tree;
 						fromCache = false;
 					}
 				}
@@ -5328,8 +5332,8 @@ private:
 						        ->toString(false,
 						                   newID,
 						                   snapshot->getVersion(),
-						                   update->decodeLowerBound,
-						                   update->decodeUpperBound)
+						                   &update->decodeLowerBound,
+						                   &update->decodeUpperBound)
 						        .c_str());
 
 						update->updatedInPlace(newID, btPage, newID.size() * self->m_blockSize);
@@ -5370,8 +5374,8 @@ private:
 
 						Standalone<VectorRef<RedwoodRecordRef>> newChildEntries =
 						    wait(writePages(self,
-						                    update->subtreeLowerBound,
-						                    update->subtreeUpperBound,
+						                    &update->subtreeLowerBound,
+						                    &update->subtreeUpperBound,
 						                    m.rebuild,
 						                    btPage->height,
 						                    writeVersion,
@@ -5421,15 +5425,15 @@ private:
 		state Standalone<BTreePageIDRef> rootPageID = self->m_header.root.get();
 		state InternalPageSliceUpdate all;
 		state RedwoodRecordRef rootLink = dbBegin.withPageID(rootPageID);
-		all.subtreeLowerBound = &rootLink;
-		all.decodeLowerBound = &rootLink;
-		all.subtreeUpperBound = &dbEnd;
-		all.decodeUpperBound = &dbEnd;
+		all.subtreeLowerBound = rootLink;
+		all.decodeLowerBound = rootLink;
+		all.subtreeUpperBound = dbEnd;
+		all.decodeUpperBound = dbEnd;
 		all.skipLen = 0;
 
-		MutationBuffer::const_iterator mBegin = mutations->upper_bound(all.subtreeLowerBound->key);
+		MutationBuffer::const_iterator mBegin = mutations->upper_bound(all.subtreeLowerBound.key);
 		--mBegin;
-		MutationBuffer::const_iterator mEnd = mutations->lower_bound(all.subtreeUpperBound->key);
+		MutationBuffer::const_iterator mEnd = mutations->lower_bound(all.subtreeUpperBound.key);
 
 		wait(commitSubtree(self,
 		                   self->m_pager->getReadSnapshot(latestVersion),
@@ -5528,9 +5532,11 @@ public:
 				ASSERT(!isLeaf());
 				BTreePage::BinaryTree::Cursor next = cursor;
 				next.moveNext();
-				const RedwoodRecordRef& rec = cursor.get();
+				// TODO this should fail!!!
+				RedwoodRecordRef rec = cursor.get();
 				BTreePageIDRef id = rec.getChildPage();
-				Future<Reference<const ArenaPage>> child = readPage(pager, id, &rec, &next.getOrUpperBound());
+				const RedwoodRecordRef upper = next.getOrUpperBound();
+				Future<Reference<const ArenaPage>> child = readPage(pager, id, &rec, &upper);
 
 				// Read ahead siblings at level 2
 				// TODO:  Application of readAheadBytes is not taking into account the size of the current page or any
@@ -5605,7 +5611,7 @@ public:
 		// Returns true if cursor position is present() and has an effective version <= v
 		bool validAtVersion(Version v) { return valid() && pageCursor->cursor.get().version <= v; }
 
-		const RedwoodRecordRef& get() const { return pageCursor->cursor.get(); }
+		const RedwoodRecordRef get() const { return pageCursor->cursor.get(); }
 
 		// Ensure that pageCursor is not shared with other cursors so we can modify it
 		void ensureUnshared() {
@@ -5800,7 +5806,7 @@ public:
 			return r;
 		}
 
-		const RedwoodRecordRef& get() { return path.back().cursor.get(); }
+		const RedwoodRecordRef get() { return path.back().cursor.get(); }
 
 		bool inRoot() const { return path.size() == 1; }
 
@@ -5809,6 +5815,7 @@ public:
 		PathEntry& back() { return path.back(); }
 		void popPath() { path.pop_back(); }
 
+#error These can't be references anymore
 		Future<Void> pushPage(BTreePageIDRef id,
 		                      const RedwoodRecordRef& lowerBound,
 		                      const RedwoodRecordRef& upperBound) {
@@ -5820,7 +5827,7 @@ public:
 		}
 
 		Future<Void> pushPage(BTreePage::BinaryTree::Cursor c) {
-			const RedwoodRecordRef& rec = c.get();
+			RedwoodRecordRef rec = c.get();
 			auto next = c;
 			next.moveNext();
 			BTreePageIDRef id = rec.getChildPage();
@@ -5854,7 +5861,7 @@ public:
 				auto& entry = self->path.back();
 				if (entry.btPage()->isLeaf()) {
 					int cmp = entry.cursor.seek(query);
-					self->valid = entry.cursor.valid() && !entry.cursor.node->isDeleted();
+					self->valid = entry.cursor.valid() && !entry.cursor.isErased();
 					debug_printf("seek(%s, %d) loop exit cmp=%d cursor=%s\n",
 					             query.toString().c_str(),
 					             prefetchBytes,
@@ -7047,7 +7054,7 @@ ACTOR Future<Void> verify(VersionedBTree* btree,
 			state Reference<IStoreCursor> cur = btree->readAtVersion(v);
 
 			debug_printf("Verifying entire key range at version %" PRId64 "\n", v);
-			if (deterministicRandom()->coinflip()) {
+			if (false) {
 				fRangeAll =
 				    verifyRange(btree, LiteralStringRef(""), LiteralStringRef("\xff\xff"), v, written, pErrorCount);
 			} else {
@@ -7062,7 +7069,7 @@ ACTOR Future<Void> verify(VersionedBTree* btree,
 			Key end = randomKV().key;
 			debug_printf(
 			    "Verifying range (%s, %s) at version %" PRId64 "\n", toString(begin).c_str(), toString(end).c_str(), v);
-			if (deterministicRandom()->coinflip()) {
+			if (false) {
 				fRangeRandom = verifyRange(btree, begin, end, v, written, pErrorCount);
 			} else {
 				fRangeRandom = verifyRangeBTreeCursor(btree, begin, end, v, written, pErrorCount);
@@ -7072,7 +7079,7 @@ ACTOR Future<Void> verify(VersionedBTree* btree,
 			}
 
 			debug_printf("Verifying seeks to each changed key at version %" PRId64 "\n", v);
-			if (deterministicRandom()->coinflip()) {
+			if (false) {
 				fSeekAll = seekAll(btree, v, written, pErrorCount);
 			} else {
 				fSeekAll = seekAllBTreeCursor(btree, v, written, pErrorCount);
@@ -7406,8 +7413,8 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 
 TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	// Sanity check on delta tree node format
-	ASSERT(DeltaTree<RedwoodRecordRef>::Node::headerSize(false) == 4);
-	ASSERT(DeltaTree<RedwoodRecordRef>::Node::headerSize(true) == 8);
+	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(false) == 4);
+	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(true) == 8);
 
 	const int N = deterministicRandom()->randomInt(200, 1000);
 
@@ -7436,8 +7443,8 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	std::vector<RedwoodRecordRef> items(uniqueItems.begin(), uniqueItems.end());
 
 	int bufferSize = N * 100;
-	bool largeTree = bufferSize > DeltaTree<RedwoodRecordRef>::SmallSizeLimit;
-	DeltaTree<RedwoodRecordRef>* tree = (DeltaTree<RedwoodRecordRef>*)new uint8_t[bufferSize];
+	bool largeTree = bufferSize > DeltaTree2<RedwoodRecordRef>::SmallSizeLimit;
+	DeltaTree2<RedwoodRecordRef>* tree = (DeltaTree2<RedwoodRecordRef>*)new uint8_t[bufferSize];
 
 	tree->build(bufferSize, &items[0], &items[items.size()], &prev, &next);
 
@@ -7792,7 +7799,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	std::vector<IntIntPair> items(uniqueItems.begin(), uniqueItems.end());
 	int bufferSize = N * 2 * 30;
 
-	DeltaTree<IntIntPair>* tree = (DeltaTree<IntIntPair>*)new uint8_t[bufferSize];
+	DeltaTree2<IntIntPair>* tree = (DeltaTree2<IntIntPair>*)new uint8_t[bufferSize];
 	int builtSize = tree->build(bufferSize, &items[0], &items[items.size()], &prev, &next);
 	ASSERT(builtSize <= bufferSize);
 	DeltaTree<IntIntPair>::Mirror r(tree, &prev, &next);
@@ -7960,7 +7967,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	scanAndVerify();
 	scanAndVerify2();
 
-	// For each randomly selected new item to be deleted, delete it from the DeltaTree and from uniqueItems
+	// For each randomly selected new item to be deleted, delete it from the DeltaTree2 and from uniqueItems
 	printf("Deleting some items\n");
 	for (auto p : toDelete) {
 		uniqueItems.erase(p);
@@ -8639,7 +8646,9 @@ TEST_CASE("/redwood/correctness/btree") {
 				// Create new promise stream and start the verifier again
 				committedVersions = PromiseStream<Version>();
 				verifyTask = verify(btree, committedVersions.getFuture(), &written, &errorCount, serialTest);
-				randomTask = randomReader(btree) || btree->getError();
+				if(!serialTest) {
+					randomTask = randomReader(btree) || btree->getError();
+				}
 				committedVersions.send(v);
 			}
 
