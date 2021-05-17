@@ -37,6 +37,7 @@ public:
 	enum class Type {
 		RYW,
 		SIMPLE_CONFIG,
+		PAXOS_CONFIG,
 	};
 
 	static ISingleThreadTransaction* allocateOnForeignThread(Type type);

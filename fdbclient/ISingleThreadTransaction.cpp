@@ -20,6 +20,7 @@
 
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ISingleThreadTransaction.h"
+#include "fdbclient/PaxosConfigTransaction.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SimpleConfigTransaction.h"
 
@@ -31,6 +32,9 @@ ISingleThreadTransaction* ISingleThreadTransaction::allocateOnForeignThread(Type
 		return tr;
 	} else if (type == Type::SIMPLE_CONFIG) {
 		auto tr = (SimpleConfigTransaction*)(SimpleConfigTransaction::operator new(sizeof(SimpleConfigTransaction)));
+		return tr;
+	} else if (type == Type::PAXOS_CONFIG) {
+		auto tr = (PaxosConfigTransaction*)(PaxosConfigTransaction::operator new(sizeof(PaxosConfigTransaction)));
 		return tr;
 	}
 	ASSERT(false);
@@ -44,6 +48,9 @@ void ISingleThreadTransaction::create(ISingleThreadTransaction* tr, Type type, D
 		break;
 	case Type::SIMPLE_CONFIG:
 		new (tr) SimpleConfigTransaction(db->getConnectionFile()->getConnectionString());
+		break;
+	case Type::PAXOS_CONFIG:
+		new (tr) PaxosConfigTransaction(db->getConnectionFile()->getConnectionString());
 		break;
 	default:
 		ASSERT(false);
