@@ -17,6 +17,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+#include "flow/config.h"
+
 #if defined(USE_JEMALLOC)
 
 #include <cstdlib>
@@ -36,16 +39,16 @@ void* operator new[](std::size_t sz) {
 	throw std::bad_alloc{};
 }
 void* operator new(std::size_t sz, std::align_val_t align) {
-	if (void* ptr = je_aligned_alloc(align, sz))
+	if (void* ptr = je_aligned_alloc(static_cast<std::size_t>(align), sz))
 		return ptr;
 	throw std::bad_alloc{};
 }
 void* operator new[](std::size_t sz, std::align_val_t align) {
-	if (void* ptr = je_aligned_alloc(align, sz))
+	if (void* ptr = je_aligned_alloc(static_cast<std::size_t>(align), sz))
 		return ptr;
 	throw std::bad_alloc{};
 }
-void* operator new(std::size_t sz, std::no_throw_t const&) {
+void* operator new(std::size_t sz, std::nothrow_t const&) noexcept {
 	return je_malloc(sz);
 }
 void operator delete(void* ptr) noexcept {
