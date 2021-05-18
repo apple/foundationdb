@@ -199,7 +199,6 @@ extern const char* getSourceVersion();
 
 extern void flushTraceFileVoid();
 
-extern bool noUnseed;
 extern const int MAX_CLUSTER_FILE_BYTES;
 
 #ifdef ALLOC_INSTRUMENTATION
