@@ -1103,9 +1103,15 @@ public:
 		inline void updateItem() { item = get(cache->get(nodeIndex)); }
 
 	public:
+		// Get the item at the cursor
+		// Behavior is undefined if the cursor is not valid.
+		// If the cursor is moved, the reference object returned will be modified to
+		// the cursor's new current item.
 		const T& get() const { return item; }
 
-		const T getOrUpperBound() const { return valid() ? get() : cache->upperBound; }
+		// If the cursor is valid, return a reference to the cursor's internal T.
+		// Otherwise, returns a reference to the cache's upper boundary.
+		const T& getOrUpperBound() const { return valid() ? get() : cache->upperBound; }
 
 		bool operator==(const Cursor& rhs) const { return nodeIndex == rhs.nodeIndex; }
 		bool operator!=(const Cursor& rhs) const { return nodeIndex != rhs.nodeIndex; }
