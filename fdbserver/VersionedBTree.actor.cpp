@@ -7024,12 +7024,19 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 
 TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	const int N = 200;
-	IntIntPair prev = { 1, 0 };
-	IntIntPair next = { 10000, 10000 };
+	IntIntPair lowerBound = { 0, 0 };
+	IntIntPair upperBound = { 1000, 1000 };
 
 	state std::function<IntIntPair()> randomPair = [&]() {
-		return IntIntPair(
-		    { deterministicRandom()->randomInt(prev.k, next.k), deterministicRandom()->randomInt(prev.v, next.v) });
+		// Generate a pair >= lowerBound and < upperBound
+		int k = deterministicRandom()->randomInt(lowerBound.k, upperBound.k + 1);
+		int v = deterministicRandom()->randomInt(lowerBound.v, upperBound.v);
+
+		// Only generate even values so the tests below can approach and find each
+		// key with a directional seek of the adjacent absent value on either side.
+		v -= v % 2;
+
+		return IntIntPair(k, v);
 	};
 
 	// Build a set of N unique items, where no consecutive items are in the set, a requirement of the seek behavior tests.
@@ -7050,14 +7057,14 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	int bufferSize = N * 2 * 30;
 
 	DeltaTree<IntIntPair>* tree = (DeltaTree<IntIntPair>*)new uint8_t[bufferSize];
-	int builtSize = tree->build(bufferSize, &items[0], &items[items.size()], &prev, &next);
+	int builtSize = tree->build(bufferSize, &items[0], &items[items.size()], &lowerBound, &upperBound);
 	ASSERT(builtSize <= bufferSize);
-	DeltaTree<IntIntPair>::Mirror r(tree, &prev, &next);
+	DeltaTree<IntIntPair>::Mirror r(tree, &lowerBound, &upperBound);
 
 	DeltaTree2<IntIntPair>* tree2 = (DeltaTree2<IntIntPair>*)new uint8_t[bufferSize];
-	int builtSize2 = tree2->build(bufferSize, &items[0], &items[items.size()], &prev, &next);
+	int builtSize2 = tree2->build(bufferSize, &items[0], &items[items.size()], &lowerBound, &upperBound);
 	ASSERT(builtSize2 <= bufferSize);
-	DeltaTree2<IntIntPair>::DecodeCache cache(prev, next);
+	DeltaTree2<IntIntPair>::DecodeCache cache(lowerBound, upperBound);
 	DeltaTree2<IntIntPair>::Cursor cur2(&cache, tree2);
 
 	auto printItems = [&] {
@@ -7212,7 +7219,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	scanAndVerify2();
 
 	// Create a new mirror, decoding the tree from scratch since insert() modified both the tree and the mirror
-	r = DeltaTree<IntIntPair>::Mirror(tree, &prev, &next);
+	r = DeltaTree<IntIntPair>::Mirror(tree, &lowerBound, &upperBound);
 	cache.clear();
 	scanAndVerify();
 	scanAndVerify2();
