@@ -3638,19 +3638,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "advanceversion")) {
-					if (tokens.size() != 2) {
-						printUsage(tokens[0]);
+					bool _result = wait(makeInterruptable(advanceVersionCommandActor(db2, tokens)));
+					if (!_result)
 						is_error = true;
-					} else {
-						Version v;
-						int n = 0;
-						if (sscanf(tokens[1].toString().c_str(), "%ld%n", &v, &n) != 1 || n != tokens[1].size()) {
-							printUsage(tokens[0]);
-							is_error = true;
-						} else {
-							wait(makeInterruptable(advanceVersion(db, v)));
-						}
-					}
 					continue;
 				}
 

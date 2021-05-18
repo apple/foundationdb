@@ -57,7 +57,8 @@ struct CommandFactory {
 };
 
 // Special keys used by fdbcli commands
-
+// advanceversion
+extern const KeyRef advanceVersionSpecialKey;
 // consistencycheck
 extern const KeyRef consistencyCheckSpecialKey;
 
@@ -69,6 +70,8 @@ bool tokencmp(StringRef token, const char* command);
 void printUsage(StringRef command);
 
 // All fdbcli commands (alphabetically)
+// advanceversion command
+ACTOR Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // consistency command
 ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens);
 
