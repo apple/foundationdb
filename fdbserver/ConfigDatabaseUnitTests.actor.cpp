@@ -121,7 +121,7 @@ class LocalConfigEnvironment {
 	Version lastWrittenVersion{ 0 };
 
 public:
-	LocalConfigEnvironment(std::string const& configPath, std::map<Key, Value> const& manualKnobOverrides)
+	LocalConfigEnvironment(std::string const& configPath, std::map<std::string, std::string> const& manualKnobOverrides)
 	  : localConfiguration(configPath, manualKnobOverrides), id(deterministicRandom()->randomUniqueID()) {}
 	Future<Void> setup() { return localConfiguration.initialize("./", id); }
 	Future<Void> restart(std::string const& newConfigPath) {
@@ -358,7 +358,7 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ConflictingOverrides") {
 }
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Manual") {
-	state LocalConfigEnvironment env("class-A", { { "test_long"_sr, "1000"_sr } });
+	state LocalConfigEnvironment env("class-A", { { "test_long", "1000" } });
 	wait(env.setup());
 	wait(set(env, "class-A"_sr, 1));
 	env.check(1000);

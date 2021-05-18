@@ -47,6 +47,10 @@ bool updateSingleKnob(Key knobName, Value knobValue, K& k, Rest&... rest) {
 	}
 }
 
+KeyRef stringToKeyRef(std::string const& s) {
+	return StringRef(reinterpret_cast<uint8_t const*>(s.c_str()), s.size());
+}
+
 class ConfigKnobOverrides {
 	Standalone<VectorRef<KeyRef>> configPath;
 	std::map<Optional<Key>, std::map<Key, Value>> configClassToKnobToValue;
@@ -55,7 +59,7 @@ public:
 	ConfigKnobOverrides() = default;
 	explicit ConfigKnobOverrides(std::string const& paramString) {
 		// TODO: Validate string
-		StringRef s(reinterpret_cast<uint8_t const*>(paramString.c_str()), paramString.size());
+		StringRef s = stringToKeyRef(paramString);
 		while (s.size()) {
 			configPath.push_back_deep(configPath.arena(), s.eat("/"_sr));
 			configClassToKnobToValue[configPath.back()] = {};
@@ -98,8 +102,11 @@ class ManualKnobOverrides {
 	std::map<Key, Value> overrides;
 
 public:
-	template <class Overrides>
-	explicit ManualKnobOverrides(Overrides&& overrides) : overrides(std::forward<Overrides>(overrides)) {}
+	explicit ManualKnobOverrides(std::map<std::string, std::string> const& overrides) {
+		for (const auto& [knobName, knobValue] : overrides) {
+			this->overrides[stringToKeyRef(knobName)] = stringToKeyRef(knobValue);
+		}
+	}
 
 	template <class... KS>
 	void update(KS&... knobCollections) const {
@@ -298,11 +305,10 @@ class LocalConfigurationImpl : public NonCopyable {
 	}
 
 public:
-	template <class ManualKnobOverrides>
-	LocalConfigurationImpl(std::string const& configPath, ManualKnobOverrides&& manualKnobOverrides)
+	LocalConfigurationImpl(std::string const& configPath, std::map<std::string, std::string> const& manualKnobOverrides)
 	  : cc("LocalConfiguration"), broadcasterChanges("BroadcasterChanges", cc), snapshots("Snapshots", cc),
 	    changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc), configKnobOverrides(configPath),
-	    manualKnobOverrides(std::forward<ManualKnobOverrides>(manualKnobOverrides)) {}
+	    manualKnobOverrides(manualKnobOverrides) {}
 
 	~LocalConfigurationImpl() {
 		if (kvStore) {
@@ -353,10 +359,8 @@ public:
 	UID getID() const { return id; }
 };
 
-LocalConfiguration::LocalConfiguration(std::string const& configPath, std::map<Key, Value>&& manualKnobOverrides)
-  : impl(std::make_unique<LocalConfigurationImpl>(configPath, std::move(manualKnobOverrides))) {}
-
-LocalConfiguration::LocalConfiguration(std::string const& configPath, std::map<Key, Value> const& manualKnobOverrides)
+LocalConfiguration::LocalConfiguration(std::string const& configPath,
+                                       std::map<std::string, std::string> const& manualKnobOverrides)
   : impl(std::make_unique<LocalConfigurationImpl>(configPath, manualKnobOverrides)) {}
 
 LocalConfiguration::LocalConfiguration(LocalConfiguration&&) = default;
@@ -479,9 +483,7 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Internal/updateSingleKnob") {
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Internal/ManualKnobOverrides") {
 	TestKnobs k1;
 	TestKnobs2 k2;
-	std::map<Key, Value> m;
-	m["test_int"_sr] = "5"_sr;
-	m["test2_int"_sr] = "10"_sr;
+	std::map<std::string, std::string> m = { { "test_int", "5" }, { "test2_int", "10" } };
 	ManualKnobOverrides manualKnobOverrides(std::move(m));
 	manualKnobOverrides.update(k1, k2);
 	ASSERT(k1.TEST_INT == 5);

@@ -91,7 +91,7 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_IGNORE_CONFIG_DB, OPT_USE_TEST_CONFIG_DB
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -174,6 +174,8 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_WHITELIST_BINPATH,     "--whitelist_binpath",         SO_REQ_SEP },
 	{ OPT_BLOB_CREDENTIAL_FILE,  "--blob_credential_file",      SO_REQ_SEP },
 	{ OPT_CONFIG_PATH,           "--config_path",               SO_REQ_SEP },
+	{ OPT_IGNORE_CONFIG_DB,      "--ignore_config_db",          SO_REQ_SEP },
+	{ OPT_USE_TEST_CONFIG_DB,    "--use_test_config_db",        SO_NONE },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -959,6 +961,7 @@ struct CLIOptions {
 	bool useNet2 = true;
 	bool useThreadPool = false;
 	std::vector<std::pair<std::string, std::string>> knobs;
+	std::map<std::string, std::string> manualKnobOverrides;
 	LocalityData localities;
 	int minTesterCount = 1;
 	bool testOnServers = false;
@@ -971,6 +974,7 @@ struct CLIOptions {
 	const char* blobCredsFromENV = nullptr;
 
 	std::string configPath;
+	Optional<bool> useTestConfigDB{ false };
 
 	Reference<ClusterConnectionFile> connectionFile;
 	Standalone<StringRef> machineId;
@@ -1046,6 +1050,7 @@ private:
 				}
 				syn = syn.substr(7);
 				knobs.push_back(std::make_pair(syn, args.OptionArg()));
+				manualKnobOverrides[syn] = args.OptionArg();
 				break;
 			}
 			case OPT_LOCALITY: {
@@ -1415,6 +1420,14 @@ private:
 				break;
 			case OPT_CONFIG_PATH:
 				configPath = args.OptionArg();
+				break;
+			case OPT_IGNORE_CONFIG_DB:
+				useTestConfigDB = {};
+				break;
+			case OPT_USE_TEST_CONFIG_DB:
+				if (useTestConfigDB.present()) {
+					useTestConfigDB = true;
+				}
 				break;
 
 #ifndef TLS_DISABLED
@@ -1952,7 +1965,9 @@ int main(int argc, char* argv[]) {
 				                      opts.metricsPrefix,
 				                      opts.rsssize,
 				                      opts.whitelistBinPaths,
-				                      opts.configPath));
+				                      opts.configPath,
+				                      opts.manualKnobOverrides,
+				                      opts.useTestConfigDB));
 				actors.push_back(histogramReport());
 				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 

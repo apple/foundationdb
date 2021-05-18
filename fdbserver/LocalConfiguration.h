@@ -44,8 +44,7 @@ class LocalConfiguration {
 	std::unique_ptr<class LocalConfigurationImpl> impl;
 
 public:
-	LocalConfiguration(std::string const& configPath, std::map<Key, Value> const& manualKnobOverrides);
-	LocalConfiguration(std::string const& configPath, std::map<Key, Value>&& manualKnobOverrides);
+	LocalConfiguration(std::string const& configPath, std::map<std::string, std::string> const& manualKnobOverrides);
 	LocalConfiguration(LocalConfiguration&&);
 	LocalConfiguration& operator=(LocalConfiguration&&);
 	~LocalConfiguration();

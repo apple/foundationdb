@@ -2020,10 +2020,12 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
                         std::string metricsPrefix,
                         int64_t memoryProfileThreshold,
                         std::string whitelistBinPaths,
-                        std::string configPath) {
+                        std::string configPath,
+                        std::map<std::string, std::string> manualKnobOverrides,
+                        Optional<bool> useTestConfigDB) {
 	state vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
-	state LocalConfiguration localConfig(configPath, {});
+	state LocalConfiguration localConfig(configPath, manualKnobOverrides);
 	wait(localConfig.initialize(dataFolder, deterministicRandom()->randomUniqueID()));
 
 	actors.push_back(serveProtocolInfo());
@@ -2060,9 +2062,11 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		    makeReference<AsyncVar<ClusterControllerPriorityInfo>>(getCCPriorityInfo(fitnessFilePath, processClass));
 		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>();
 
-		actors.push_back(reportErrors(localConfig.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(
-		                                  dbInfo, [](auto const& info) { return info.configBroadcaster; })),
-		                              "LocalConfiguration"));
+		if (useTestConfigDB.present()) {
+			actors.push_back(reportErrors(localConfig.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(
+			                                  dbInfo, [](auto const& info) { return info.configBroadcaster; })),
+			                              "LocalConfiguration"));
+		}
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo),
 		                              "MonitorAndWriteCCPriorityInfo"));
 		if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::NeverAssign) {
