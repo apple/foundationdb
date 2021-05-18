@@ -21,12 +21,15 @@
 #ifndef FDBSERVER_PTXN_MESSAGETYPES_H
 #define FDBSERVER_PTXN_MESSAGETYPES_H
 
+#include "flow/serialize.h"
+#include <typeindex>
 #pragma once
 
 #include <ostream>
 #include <variant>
 
 #include "fdbclient/CommitTransaction.h"
+#include "fdbserver/SpanContextMessage.h"
 #include "flow/ObjectSerializerTraits.h"
 
 namespace ptxn {
@@ -53,36 +56,68 @@ struct VersionSubsequence {
 // The order is used in recovery and restoring from backups.
 struct SubsequenceMutationItem {
 	Subsequence subsequence;
-	// The mutation either in MutationRef form or in a serialized StringRef.
-	// When deserialized, we always store in MutationRef format.
-	std::variant<MutationRef, StringRef> mutation_;
+
+	// The item can be a mutation in MutationRef or a serialized StringRef.
+	// However, the item can also be a SpanContextMessage.
+	// When deserialized, we always use the MutationRef format for mutations.
+	std::variant<MutationRef, StringRef, struct SpanContextMessage> item_;
 
 	// Returns mutation in MutationRef format after deserialization.
-	const MutationRef& mutation() const { return std::get<MutationRef>(mutation_); }
+	const MutationRef& mutation() const { return std::get<MutationRef>(item_); }
+
+	// Returns SpanContextMessage after deserialization.
+	const struct SpanContextMessage& span() const { return std::get<struct SpanContextMessage>(item_); }
+
+	// Returns if the item is a mutation (MutationRef or StringRef)
+	bool isMutation() const { return item_.index() <= 1; }
 
 	template <typename Reader>
 	void loadFromArena(Reader& reader) {
-		MutationRef m;
-		reader >> subsequence >> m;
-		mutation_ = m;
+		reader >> subsequence;
+		if (SpanContextMessage::isNextIn(reader)) {
+			struct SpanContextMessage span;
+			reader >> span;
+			item_ = span;
+		} else {
+			MutationRef m;
+			reader >> m;
+			item_ = m;
+		}
+	}
+
+	// Ideally, this should be the default one. However, we want to deserialize
+	// to either MutationRef or SpanContextMessage. So it's handled by specialized
+	// serialize() templates.
+	template <typename Ar>
+	void serializeImpl(Ar& ar) {
+		if (item_.index() == 0) {
+			serializer(ar, subsequence, std::get<MutationRef>(item_));
+		} else if (item_.index() == 1) {
+			serializer(ar, subsequence);
+			auto& bytes = std::get<StringRef>(item_);
+			ar.serializeBytes(bytes);
+		} else if (item_.index() == 2) {
+			serializer(ar, subsequence, std::get<struct SpanContextMessage>(item_));
+		} else {
+			ASSERT(false);
+		}
 	}
 
 	template <typename Ar, class Dummy=int>
 	void serialize(Ar& ar) {
 		if (ar.isDeserializing) {
-			MutationRef m;
-			serializer(ar, subsequence, m);
-			mutation_ = m;
-		} else {
-			if (mutation_.index() == 0) {
-				serializer(ar, subsequence, std::get<MutationRef>(mutation_));
-			} else if (mutation_.index() == 1) {
-				serializer(ar, subsequence);
-				auto& bytes = std::get<StringRef>(mutation_);
-				ar.serializeBytes(bytes);
+			serializer(ar, subsequence);
+			if (SpanContextMessage::isNextIn(ar)) {
+				struct SpanContextMessage span;
+				serializer(ar, span);
+				item_ = span;
 			} else {
-				ASSERT(false);
+				MutationRef m;
+				serializer(ar, m);
+				item_ = m;
 			}
+		} else {
+			serializeImpl(ar);
 		}
 	}
 
@@ -90,9 +125,13 @@ struct SubsequenceMutationItem {
 	//   error: explicit specialization in non-namespace scope
 	template <class Dummy=int>
 	void serialize(ArenaReader& ar) {
-		MutationRef m;
-		serializer(ar, subsequence, m);
-		mutation_ = m;
+		loadFromArena(ar);
+	}
+
+	// Specialize for BinaryWriter.
+	template <class Dummy=int>
+	void serialize(BinaryWriter& ar) {
+		serializeImpl(ar);
 	}
 };
 

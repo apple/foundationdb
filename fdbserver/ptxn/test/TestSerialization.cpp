@@ -22,11 +22,15 @@
 #include <sys/time.h>
 #include <vector>
 
+#include "fdbclient/CommitTransaction.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/ptxn/MessageTypes.h"
 #include "fdbserver/ptxn/Serializer.h"
 #include "fdbserver/ptxn/ProxyTLogPushMessageSerializer.h"
 #include "fdbserver/ptxn/TLogStorageServerPeekMessageSerializer.h"
 #include "flow/Error.h"
+#include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 #include "flow/serialize.h"
 
@@ -86,6 +90,90 @@ bool testSubsequenceMutationItem() {
 
 	ASSERT(serializedTeam1 == serializedTeam2);
 
+	std::cout << __FUNCTION__ << " passed.\n";
+	return true;
+}
+
+// Verify transaction info (span IDs) are properly added to serialized data and
+// later can be deserialized.
+bool testTransactionInfo() {
+	ptxn::ProxyTLogPushMessageSerializer serializer;
+
+	const ptxn::StorageTeamID team1{ deterministicRandom()->randomUniqueID() };
+	const ptxn::StorageTeamID team2{ deterministicRandom()->randomUniqueID() };
+	const ptxn::StorageTeamID team3{ deterministicRandom()->randomUniqueID() };
+	std::vector<ptxn::StorageTeamID> teams = { team1, team2, team3 };
+
+	// Mutations for each team before serialization, i.e., ground truth
+	Arena arena;
+	std::vector<VectorRef<MutationRef>> mutations(3);
+
+	SpanID spanId;
+	std::vector<SpanID> written(3, spanId); // last written SpanID
+	MutationRef transactionInfo;
+	transactionInfo.type = MutationRef::Reserved_For_SpanContextMessage;
+
+	const int totalMutations = 1000;
+	for (int i = 0; i < totalMutations; i++) {
+		if (deterministicRandom()->random01() < 0.1) {
+			// Add transaction info
+			spanId = deterministicRandom()->randomUniqueID();
+			serializer.addTransactionInfo(spanId);
+			transactionInfo.param1 = StringRef(arena, BinaryWriter::toValue(spanId, Unversioned()));
+		} else {
+			// Add a real mutation
+			StringRef key = StringRef(arena, deterministicRandom()->randomAlphaNumeric(10));
+			StringRef value = StringRef(arena, deterministicRandom()->randomAlphaNumeric(32));
+			MutationRef m(MutationRef::SetValue, key, value);
+
+			// Randomly add this mutation to teams
+			for (int team = 0; team < 3; team++) {
+				if (deterministicRandom()->random01() < 0.5) {
+					if (written[team] != spanId) {
+						// Add Transaction Info for this team in ground truth
+						mutations[team].push_back(arena, transactionInfo);
+						written[team] = spanId;
+					}
+					serializer.writeMessage(m, teams[team]);
+					mutations[team].push_back(arena, m);
+				}
+			}
+		}
+	}
+
+	auto results = serializer.getAllSerialized();
+	for (const auto& [team, messages] : results) {
+		VectorRef<MutationRef> teamMutations;
+		if (team == team1) {
+			teamMutations = mutations[0];
+		} else if (team == team2) {
+			teamMutations = mutations[1];
+		} else if (team == team3) {
+			teamMutations = mutations[2];
+		} else {
+			ASSERT(false);
+		}
+
+		// deserialize message
+		ptxn::ProxyTLogMessageHeader header;
+		std::vector<ptxn::SubsequenceMutationItem> seqMutations;
+		proxyTLogPushMessageDeserializer(arena, messages, header, seqMutations);
+		ASSERT_EQ(teamMutations.size(), seqMutations.size());
+		for (int i = 0; i < teamMutations.size(); i++) {
+			const MutationRef& a = teamMutations[i];
+			if (seqMutations[i].isMutation()) {
+				const MutationRef& b = seqMutations[i].mutation();
+				ASSERT(a == b);
+			} else {
+				ASSERT(a.type == MutationRef::Reserved_For_SpanContextMessage);
+				const SpanContextMessage& span = seqMutations[i].span();
+				StringRef str(arena, BinaryWriter::toValue(span.spanContext, Unversioned()));
+				ASSERT(a.param1 == str);
+			}
+		}
+	}
+
+	std::cout << __FUNCTION__ << " passed.\n";
 	return true;
 }
 
@@ -283,6 +371,7 @@ TEST_CASE("/fdbserver/ptxn/test/ProxyTLogPushMessageSerializer") {
 	}
 
 	ASSERT(testSubsequenceMutationItem());
+	ASSERT(testTransactionInfo());
 
 	return Void();
 }

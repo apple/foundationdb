@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <unordered_map>
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/ptxn/MessageTypes.h"
 #include "fdbserver/ptxn/Serializer.h"
 #include "flow/Arena.h"
@@ -47,7 +48,10 @@ struct ProxyTLogMessageHeader : MultipleItemHeaderBase {
 class ProxyTLogPushMessageSerializer {
 	// Maps the TeamID to the list of BinaryWriters
 	std::unordered_map<StorageTeamID, HeaderedItemsSerializer<ProxyTLogMessageHeader, SubsequenceMutationItem>> writers;
-	SpanID spanContext; // Transaction info. TODO: serialize this field
+
+	// Transaction info. Note different teams have different subsequence numbers.
+	SpanID spanContext;
+	std::set<StorageTeamID> writtenTeams; // Transaction info has been written to.
 
 	// Subsequence of the mutation
 	// NOTE: The subsequence is designed to start at 1. This allows a cursor,
@@ -59,8 +63,8 @@ class ProxyTLogPushMessageSerializer {
 	//  while(pCursor->hasMessage()) pCursor->getMessage();
 	// If the currentSubsequence starts at 0, we have to verify if the initial
 	// cursor is located at a mutation, or located at end-of-subsequences,
-	// brings extra complexity.
-	// This is the sequential of using unsigned integer as the subsequence.
+	// bringing extra complexity.
+	// This is the sequence by using unsigned integer.
 	Subsequence currentSubsequence = 1;
 
 public:
@@ -71,10 +75,7 @@ public:
 	void writeMessage(const StringRef& mutation, const StorageTeamID& teamID);
 
 	// Adds span context about transactions.
-	void addTransactionInfo(const SpanID& context) {
-		TEST(!spanContext.isValid()); // addTransactionInfo with invalid SpanID
-		spanContext = context;
-	}
+	void addTransactionInfo(const SpanID& context);
 
 	// Writes the same (clear range) mutation to all "teams".
 	void writeMessage(const MutationRef& mutation, const std::set<StorageTeamID>& teams);
@@ -87,6 +88,9 @@ public:
 
 	// Completes all teams' message writing and returns the serialized data.
 	std::unordered_map<StorageTeamID, Standalone<StringRef>> getAllSerialized();
+
+private:
+	bool writeTransactionInfo(StorageTeamID team);
 };
 
 // Deserialize the ProxyTLogPushMessage

@@ -20,17 +20,49 @@
 
 #include "fdbserver/ptxn/ProxyTLogPushMessageSerializer.h"
 
+#include "fdbclient/FDBTypes.h"
+#include "fdbserver/SpanContextMessage.h"
+#include "fdbserver/ptxn/MessageTypes.h"
+#include "flow/Knobs.h"
+#include "flow/serialize.h"
+
 namespace ptxn {
 
-void ProxyTLogPushMessageSerializer::writeMessage(const MutationRef& mutation, const StorageTeamID& storageTeamID) {
-	writers[storageTeamID].writeItem(SubsequenceMutationItem{ currentSubsequence++, mutation });
+void ProxyTLogPushMessageSerializer::writeMessage(const MutationRef& mutation, const StorageTeamID& team) {
+	writeTransactionInfo(team);
+	writers[team].writeItem(SubsequenceMutationItem{ currentSubsequence++, mutation });
 }
 
-void ProxyTLogPushMessageSerializer::writeMessage(const StringRef& mutation, const StorageTeamID& teamID) {
-	writers[teamID].writeItem(SubsequenceMutationItem{ currentSubsequence++, mutation });
+void ProxyTLogPushMessageSerializer::writeMessage(const StringRef& mutation, const StorageTeamID& team) {
+	writeTransactionInfo(team);
+	writers[team].writeItem(SubsequenceMutationItem{ currentSubsequence++, mutation });
+}
+
+void ProxyTLogPushMessageSerializer::addTransactionInfo(const SpanID& context) {
+	TEST(!spanContext.isValid()); // addTransactionInfo with invalid SpanID
+	spanContext = context;
+	writtenTeams.clear();
+}
+
+bool ProxyTLogPushMessageSerializer::writeTransactionInfo(StorageTeamID team) {
+	if (!FLOW_KNOBS->WRITE_TRACING_ENABLED || writtenTeams.count(team) != 0 || !spanContext.isValid()) {
+		// TODO: add (logSystem->getTLogVersion() < TLogVersion::V6) as condition here
+		return false;
+	}
+
+	TEST(true); // Wrote SpanContextMessage to a tlog group
+	writtenTeams.insert(team);
+	writers[team].writeItem(SubsequenceMutationItem{ currentSubsequence++, SpanContextMessage(spanContext) });
+	return true;
 }
 
 void ProxyTLogPushMessageSerializer::writeMessage(const MutationRef& mutation, const std::set<StorageTeamID>& teams) {
+	// Write transaction info first for all teams
+	for (const auto& team : teams) {
+		// Note the increasing subsequence numbers.
+		writeTransactionInfo(team);
+	}
+
 	for (const auto& team : teams) {
 		// this mutation shares the same subsequence number
 		writers[team].writeItem(SubsequenceMutationItem{ currentSubsequence, mutation });

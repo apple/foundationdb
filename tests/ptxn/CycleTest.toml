@@ -5,4 +5,4 @@ testTitle = 'Cycle'
     testName = 'Cycle'
     transactionsPerSecond = 250.0
     testDuration = 10.0
-    expectedRate = 0.80
+    expectedRate = 0.60
