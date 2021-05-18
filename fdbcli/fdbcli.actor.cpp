@@ -591,12 +591,6 @@ void initHelp() {
 	    CommandHelp("getversion",
 	                "Fetch the current read version",
 	                "Displays the current read version of the database or currently running transaction.");
-	helpMap["advanceversion"] = CommandHelp(
-	    "advanceversion <VERSION>",
-	    "Force the cluster to recover at the specified version",
-	    "Forces the cluster to recover at the specified version. If the specified version is larger than the current "
-	    "version of the cluster, the cluster version is advanced "
-	    "to the specified version via a forced recovery.");
 	helpMap["reset"] =
 	    CommandHelp("reset",
 	                "reset the current transaction",
