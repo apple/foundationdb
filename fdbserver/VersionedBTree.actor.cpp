@@ -6695,8 +6695,8 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	std::vector<RedwoodRecordRef> items(uniqueItems.begin(), uniqueItems.end());
 
 	int bufferSize = N * 100;
-	bool largeTree = bufferSize > DeltaTree2<RedwoodRecordRef>::SmallSizeLimit;
-	DeltaTree2<RedwoodRecordRef>* tree = (DeltaTree2<RedwoodRecordRef>*)new uint8_t[bufferSize];
+	bool largeTree = bufferSize > DeltaTree<RedwoodRecordRef>::SmallSizeLimit;
+	DeltaTree<RedwoodRecordRef>* tree = (DeltaTree<RedwoodRecordRef>*)new uint8_t[bufferSize];
 
 	tree->build(bufferSize, &items[0], &items[items.size()], &prev, &next);
 
@@ -7051,7 +7051,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	std::vector<IntIntPair> items(uniqueItems.begin(), uniqueItems.end());
 	int bufferSize = N * 2 * 30;
 
-	DeltaTree2<IntIntPair>* tree = (DeltaTree2<IntIntPair>*)new uint8_t[bufferSize];
+	DeltaTree<IntIntPair>* tree = (DeltaTree<IntIntPair>*)new uint8_t[bufferSize];
 	int builtSize = tree->build(bufferSize, &items[0], &items[items.size()], &prev, &next);
 	ASSERT(builtSize <= bufferSize);
 	DeltaTree<IntIntPair>::Mirror r(tree, &prev, &next);

@@ -1044,8 +1044,7 @@ public:
 	struct Cursor {
 		Cursor() : cache(nullptr), nodeIndex(-1) {}
 
-		Cursor(DecodeCache* cache, DeltaTree2* tree, int nodeIndex = -1)
-		  : cache(cache), tree(tree), nodeIndex(nodeIndex) {}
+		Cursor(DecodeCache* cache, DeltaTree2* tree) : cache(cache), tree(tree), nodeIndex(-1) {}
 
 		int rootIndex() {
 			if (!cache->empty()) {
@@ -1059,6 +1058,7 @@ public:
 		DeltaTree2* tree;
 		DecodeCache* cache;
 		int nodeIndex;
+		T item;
 
 		Node* node() const { return tree->nodeAt(cache->get(nodeIndex).nodeOffset); }
 
@@ -1066,8 +1066,9 @@ public:
 			if (nodeIndex == -1) {
 				return format("Cursor{nodeIndex=-1}");
 			}
-			return format("Cursor{item=%s nodeIndex=%d decodedNode=%s node=%s ",
-			              get().toString().c_str(),
+			return format("Cursor{item=%s indexItem=%s nodeIndex=%d decodedNode=%s node=%s ",
+			              item.toString().c_str(),
+			              get(cache->get(nodeIndex)).toString().c_str(),
 			              nodeIndex,
 			              cache->get(nodeIndex).toString().c_str(),
 			              node()->toString(tree).c_str());
@@ -1098,7 +1099,11 @@ public:
 			return delta.apply(cache->arena, base, decoded.partial);
 		}
 
-		const T get() const { return get(cache->get(nodeIndex)); }
+	private:
+		inline void updateItem() { item = get(cache->get(nodeIndex)); }
+
+	public:
+		const T& get() const { return item; }
 
 		const T getOrUpperBound() const { return valid() ? get() : cache->upperBound; }
 
@@ -1208,6 +1213,7 @@ public:
 
 			while (nIndex != -1) {
 				nodeIndex = nIndex;
+				updateItem();
 				cmp = s.compare(get(), skipLen);
 				deltatree_printf("seek(%s) loop cmp=%d %s\n", s.toString().c_str(), cmp, toString().c_str());
 				if (cmp == 0) {
@@ -1230,6 +1236,7 @@ public:
 			deltatree_printf("moveFirst start %s\n", toString().c_str());
 			while (nIndex != -1) {
 				nodeIndex = nIndex;
+				updateItem();
 				deltatree_printf("moveFirst moved %s\n", toString().c_str());
 				nIndex = getLeftChildIndex(nIndex);
 			}
@@ -1242,6 +1249,7 @@ public:
 			deltatree_printf("moveLast start %s\n", toString().c_str());
 			while (nIndex != -1) {
 				nodeIndex = nIndex;
+				updateItem();
 				deltatree_printf("moveLast moved %s\n", toString().c_str());
 				nIndex = getRightChildIndex(nIndex);
 			}
@@ -1257,11 +1265,15 @@ public:
 			// If we couldn't go right, then the answer is our next ancestor
 			if (nIndex == -1) {
 				nodeIndex = cache->get(nodeIndex).rightParentIndex;
+				if (nodeIndex != -1) {
+					updateItem();
+				}
 				deltatree_printf("_moveNext move1 %s\n", toString().c_str());
 			} else {
 				// Go left as far as possible
 				do {
 					nodeIndex = nIndex;
+					updateItem();
 					deltatree_printf("_moveNext move2 %s\n", toString().c_str());
 					nIndex = getLeftChildIndex(nodeIndex);
 				} while (nIndex != -1);
@@ -1276,11 +1288,15 @@ public:
 			// If we couldn't go left, then the answer is our prev ancestor
 			if (nIndex == -1) {
 				nodeIndex = cache->get(nodeIndex).leftParentIndex;
+				if (nodeIndex != -1) {
+					updateItem();
+				}
 				deltatree_printf("_movePrev move1 %s\n", toString().c_str());
 			} else {
 				// Go right as far as possible
 				do {
 					nodeIndex = nIndex;
+					updateItem();
 					deltatree_printf("_movePrev move2 %s\n", toString().c_str());
 					nIndex = getRightChildIndex(nodeIndex);
 				} while (nIndex != -1);
@@ -1303,7 +1319,7 @@ public:
 
 		// Erase current item by setting its deleted flag to true.
 		// Tree header is updated if a change is made.
-		// Cursor is not moved, so now points to a node marked as deletd.
+		// Cursor is then moved forward to the next non-deleted node.
 		void erase() {
 			auto& delta = getDelta();
 			if (!delta.getDeleted()) {
@@ -1311,11 +1327,12 @@ public:
 				--tree->numItems;
 				tree->nodeBytesDeleted += (delta.size() + Node::headerSize(tree->largeNodes));
 			}
+			moveNext();
 		}
 
 		// Erase k by setting its deleted flag to true.  Returns true only if k existed
 		bool erase(const T& k, int skipLen = 0) {
-			Cursor c(cache, tree, -1);
+			Cursor c(cache, tree);
 			if (c.seek(k, skipLen) == 0 && !c.isErased()) {
 				c.erase();
 				return true;
