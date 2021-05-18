@@ -142,6 +142,7 @@ bool testTransactionInfo() {
 	}
 
 	auto results = serializer.getAllSerialized();
+	int spanCount = 0;
 	for (const auto& [team, messages] : results) {
 		VectorRef<MutationRef> teamMutations;
 		if (team == team1) {
@@ -169,11 +170,13 @@ bool testTransactionInfo() {
 				const SpanContextMessage& span = seqMutations[i].span();
 				StringRef str(arena, BinaryWriter::toValue(span.spanContext, Unversioned()));
 				ASSERT(a.param1 == str);
+				spanCount++;
 			}
 		}
 	}
+	ASSERT(spanCount > 0);
 
-	std::cout << __FUNCTION__ << " passed.\n";
+	std::cout << __FUNCTION__ << " passed (" << spanCount << " SpanIDs).\n";
 	return true;
 }
 

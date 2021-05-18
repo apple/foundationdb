@@ -63,10 +63,16 @@ struct SubsequenceMutationItem {
 	std::variant<MutationRef, StringRef, struct SpanContextMessage> item_;
 
 	// Returns mutation in MutationRef format after deserialization.
-	const MutationRef& mutation() const { return std::get<MutationRef>(item_); }
+	const MutationRef& mutation() const {
+		ASSERT(isMutation());
+		return std::get<MutationRef>(item_);
+	}
 
 	// Returns SpanContextMessage after deserialization.
-	const struct SpanContextMessage& span() const { return std::get<struct SpanContextMessage>(item_); }
+	const struct SpanContextMessage& span() const {
+		ASSERT(item_.index() == 2);
+		return std::get<struct SpanContextMessage>(item_);
+	}
 
 	// Returns if the item is a mutation (MutationRef or StringRef)
 	bool isMutation() const { return item_.index() <= 1; }
