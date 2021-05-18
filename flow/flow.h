@@ -1028,6 +1028,7 @@ public:
 	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
 
 	void send(const T& value) const {
+		ASSERT(queue->bytesSent - queue->bytesAcknowledged < queue->bytesLimit);
 		if (!queue->shouldFireImmediately()) {
 			queue->bytesSent += value.expectedSize();
 			if ((!queue->ready.isValid() || (queue->ready.isSet() && !queue->ready.getFuture().isError())) &&
@@ -1038,6 +1039,7 @@ public:
 		queue->send(value);
 	}
 	void send(T&& value) const {
+		ASSERT(queue->bytesSent - queue->bytesAcknowledged < queue->bytesLimit);
 		if (!queue->shouldFireImmediately()) {
 			queue->bytesSent += value.expectedSize();
 			if ((!queue->ready.isValid() || (queue->ready.isSet() && !queue->ready.getFuture().isError())) &&
