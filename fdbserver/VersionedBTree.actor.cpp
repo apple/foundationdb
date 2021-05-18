@@ -6372,33 +6372,6 @@ public:
 		return result;
 	}
 
-	ACTOR static Future<Optional<Value>> readValue_impl(KeyValueStoreRedwoodUnversioned* self,
-	                                                    Key key,
-	                                                    Optional<UID> debugID) {
-		state VersionedBTree::BTreeCursor cur;
-		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion()));
-
-		state Reference<FlowLock> readLock = self->m_concurrentReads;
-		wait(readLock->take());
-		state FlowLock::Releaser releaser(*readLock);
-		++g_redwoodMetrics.opGet;
-
-		wait(cur.seekGTE(key, 0));
-		if (cur.isValid() && cur.get().key == key) {
-			// Return a Value whose arena is the source page's arena
-			Value v;
-			v.arena().dependsOn(cur.back().page->getArena());
-			v.contents() = cur.get().value.get();
-			return v;
-		}
-
-		return Optional<Value>();
-	}
-
-	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) override {
-		return catchError(readValue_impl(this, key, debugID));
-	}
-
 	ACTOR static Future<Optional<Value>> readValuePrefix_impl(KeyValueStoreRedwoodUnversioned* self,
 	                                                          Key key,
 	                                                          int maxLength,
@@ -6413,7 +6386,7 @@ public:
 
 		wait(cur.seekGTE(key, 0));
 		if (cur.isValid() && cur.get().key == key) {
-			// Return a Value whose arena is the source page's arena
+			// Return a Value whose arena depends on the source page arena
 			Value v;
 			v.arena().dependsOn(cur.back().page->getArena());
 			v.contents() = cur.get().value.get();
@@ -6430,6 +6403,10 @@ public:
 	                                        int maxLength,
 	                                        Optional<UID> debugID = Optional<UID>()) override {
 		return catchError(readValuePrefix_impl(this, key, maxLength, debugID));
+	}
+
+	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) override {
+		return catchError(readValuePrefix_impl(this, key, std::numeric_limits<int>::max(), debugID));
 	}
 
 	~KeyValueStoreRedwoodUnversioned() override{};

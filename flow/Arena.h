@@ -130,13 +130,15 @@ struct scalar_traits<Arena> : std::true_type {
 };
 
 struct ArenaBlockRef {
-	// Only one of (next, aligned4kBuffer) are valid at any one time, as they occupy the same space.
-	// If aligned4kBufferSize is not 0, aligned4kBuffer is valid, otherwise next is valid.
-	uint32_t aligned4kBufferSize;
 	union {
 		ArenaBlock* next;
 		void* aligned4kBuffer;
 	};
+
+	// Only one of (next, aligned4kBuffer) is valid at any one time, as they occupy the same space.
+	// If aligned4kBufferSize is not 0, aligned4kBuffer is valid, otherwise next is valid.
+	uint32_t aligned4kBufferSize;
+
 	uint32_t nextBlockOffset;
 };
 
