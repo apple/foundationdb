@@ -489,6 +489,9 @@ IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
 namespace {
 
 TEST_CASE("/fdbserver/KeyValueStoreRocksDB/Reopen") {
+	// This test is non-deterministic, so don't check the RNG seed at the end.
+	noUnseed = true;
+
 	state const std::string rocksDBTestDir = "rocksdb-kvstore-reopen-test-db";
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
