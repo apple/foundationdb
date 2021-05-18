@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/JsonBuilder.h"
 #include "fdbserver/ConfigBroadcaster.h"
 #include "fdbserver/IConfigConsumer.h"
 #include "flow/actorcompiler.h" // must be last include
@@ -27,15 +26,6 @@ namespace {
 
 bool matchesConfigClass(Optional<ConfigClassSet> const& configClassSet, Optional<KeyRef> configClass) {
 	return !configClassSet.present() || !configClass.present() || configClassSet.get().contains(configClass.get());
-}
-
-template <class T>
-std::string configClassToString(Optional<T> const& configClass) {
-	if (configClass.present()) {
-		return configClass.get().toString();
-	} else {
-		return "<global>";
-	}
 }
 
 } // namespace
@@ -120,6 +110,15 @@ class ConfigBroadcasterImpl {
 		}
 	}
 
+	ConfigBroadcasterImpl()
+	  : id(deterministicRandom()->randomUniqueID()), lastCompactedVersion(0), mostRecentVersion(0),
+	    cc("ConfigBroadcaster"), compactRequest("CompactRequest", cc),
+	    successfulChangeRequest("SuccessfulChangeRequest", cc), failedChangeRequest("FailedChangeRequest", cc),
+	    snapshotRequest("SnapshotRequest", cc) {
+		logger = traceCounters(
+		    "ConfigBroadcasterMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigBroadcasterMetrics");
+	}
+
 public:
 	Future<Void> serve(ConfigBroadcaster* self, ConfigFollowerInterface const& cfi) { return serve(self, this, cfi); }
 
@@ -145,16 +144,23 @@ public:
 		return Void();
 	}
 
-	template <class ConfigSource>
-	ConfigBroadcasterImpl(ConfigSource const& configSource)
-	  : id(deterministicRandom()->randomUniqueID()), lastCompactedVersion(0), mostRecentVersion(0),
-	    cc("ConfigBroadcaster"), compactRequest("CompactRequest", cc),
-	    successfulChangeRequest("SuccessfulChangeRequest", cc), failedChangeRequest("FailedChangeRequest", cc),
-	    snapshotRequest("SnapshotRequest", cc) {
-		logger = traceCounters(
-		    "ConfigBroadcasterMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigBroadcasterMetrics");
+	ConfigBroadcasterImpl(ConfigFollowerInterface const& configSource) : ConfigBroadcasterImpl() {
 		consumer = IConfigConsumer::createSimple(configSource, 0.5, Optional<double>{});
 		TraceEvent(SevDebug, "BroadcasterStartingConsumer", id).detail("Consumer", consumer->getID());
+	}
+
+	ConfigBroadcasterImpl(ServerCoordinators const& configSource, Optional<bool> useTestConfigDB)
+	  : ConfigBroadcasterImpl() {
+		if (useTestConfigDB.present()) {
+			if (useTestConfigDB.get()) {
+				consumer = IConfigConsumer::createSimple(configSource, 0.5, Optional<double>{});
+			} else {
+				consumer = IConfigConsumer::createPaxos(configSource, 0.5, Optional<double>{});
+			}
+			TraceEvent(SevDebug, "BroadcasterStartingConsumer", id)
+			    .detail("Consumer", consumer->getID())
+			    .detail("UsingSimpleConsumer", useTestConfigDB.get());
+		}
 	}
 
 	JsonBuilderObject getStatus() const {
@@ -165,10 +171,9 @@ public:
 			mutationObject["version"] = versionedMutation.version;
 			const auto& mutation = versionedMutation.mutation;
 			mutationObject["description"] = mutation.getDescription();
-			mutationObject["config_class"] = configClassToString(mutation.getConfigClass());
+			mutationObject["config_class"] = mutation.getConfigClass().orDefault("<global>"_sr);
 			mutationObject["knob_name"] = mutation.getKnobName();
-			mutationObject["knob_value"] =
-			    mutation.getValue().present() ? mutation.getValue().get().toString() : "<cleared>";
+			mutationObject["knob_value"] = mutation.getValue().orDefault("<cleared>"_sr);
 			mutationObject["timestamp"] = mutation.getTimestamp();
 			mutationsArray.push_back(std::move(mutationObject));
 		}
@@ -183,7 +188,7 @@ public:
 			for (const auto& [knobName, knobValue] : kvs) {
 				kvsObject[knobName] = knobValue;
 			}
-			snapshotObject[configClassToString(configClass)] = std::move(kvsObject);
+			snapshotObject[configClass.orDefault("<global>"_sr)] = std::move(kvsObject);
 		}
 		result["snapshot"] = std::move(snapshotObject);
 		result["last_compacted_version"] = lastCompactedVersion;
@@ -197,8 +202,8 @@ public:
 ConfigBroadcaster::ConfigBroadcaster(ConfigFollowerInterface const& cfi)
   : impl(std::make_unique<ConfigBroadcasterImpl>(cfi)) {}
 
-ConfigBroadcaster::ConfigBroadcaster(ServerCoordinators const& coordinators)
-  : impl(std::make_unique<ConfigBroadcasterImpl>(coordinators)) {}
+ConfigBroadcaster::ConfigBroadcaster(ServerCoordinators const& coordinators, Optional<bool> useTestConfigDB)
+  : impl(std::make_unique<ConfigBroadcasterImpl>(coordinators, useTestConfigDB)) {}
 
 ConfigBroadcaster::ConfigBroadcaster(ConfigBroadcaster&&) = default;
 
@@ -222,4 +227,8 @@ Future<Void> ConfigBroadcaster::setSnapshot(std::map<ConfigKey, Value>&& snapsho
 
 UID ConfigBroadcaster::getID() const {
 	return impl->getID();
+}
+
+JsonBuilderObject ConfigBroadcaster::getStatus() const {
+	return impl->getStatus();
 }

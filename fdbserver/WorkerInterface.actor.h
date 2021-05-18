@@ -832,7 +832,8 @@ ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> ccf,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      Future<Void> recoveredDiskFiles,
-                                     LocalityData locality);
+                                     LocalityData locality,
+                                     Optional<bool> useTestConfigDB);
 
 // These servers are started by workerServer
 class IKeyValueStore;

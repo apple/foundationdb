@@ -21,6 +21,7 @@
 #pragma once
 
 #include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/JsonBuilder.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/ConfigFollowerInterface.h"
 #include "flow/flow.h"
@@ -31,7 +32,7 @@ class ConfigBroadcaster {
 
 public:
 	explicit ConfigBroadcaster(ConfigFollowerInterface const&);
-	explicit ConfigBroadcaster(ServerCoordinators const&);
+	explicit ConfigBroadcaster(ServerCoordinators const&, Optional<bool> useTestConfigDB);
 	ConfigBroadcaster(ConfigBroadcaster&&);
 	ConfigBroadcaster& operator=(ConfigBroadcaster&&);
 	~ConfigBroadcaster();
@@ -40,4 +41,5 @@ public:
 	                                   Version mostRecentVersion);
 	Future<Void> setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version snapshotVersion);
 	UID getID() const;
+	JsonBuilderObject getStatus() const;
 };

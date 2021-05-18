@@ -2718,7 +2718,8 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 
 ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
                                 ClusterControllerData* self,
-                                ServerCoordinators coordinators) {
+                                ServerCoordinators coordinators,
+                                ConfigBroadcaster const* configBroadcaster) {
 	// Seconds since the END of the last GetStatus executed
 	state double last_request_time = 0.0;
 
@@ -2785,7 +2786,8 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 			                                                                  &self->db.clientStatus,
 			                                                                  coordinators,
 			                                                                  incompatibleConnections,
-			                                                                  self->datacenterVersionDifference)));
+			                                                                  self->datacenterVersionDifference,
+			                                                                  configBroadcaster)));
 
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();
@@ -3417,17 +3419,21 @@ ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
 ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          Future<Void> leaderFail,
                                          ServerCoordinators coordinators,
-                                         LocalityData locality) {
+                                         LocalityData locality,
+                                         Optional<bool> useTestConfigDB) {
 	state ClusterControllerData self(interf, locality, coordinators);
-	state ConfigBroadcaster configBroadcaster(coordinators);
+	state ConfigBroadcaster configBroadcaster(coordinators, useTestConfigDB);
 	state Future<Void> coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
 	state uint64_t step = 0;
 	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
 
-	self.addActor.send(configBroadcaster.serve(self.db.serverInfo->get().configBroadcaster));
+	if (useTestConfigDB.present()) {
+		self.addActor.send(configBroadcaster.serve(self.db.serverInfo->get().configBroadcaster));
+	}
 	self.addActor.send(clusterWatchDatabase(&self, &self.db)); // Start the master database
 	self.addActor.send(self.updateWorkerList.init(self.db.db));
-	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(), &self, coordinators));
+	self.addActor.send(
+	    statusServer(interf.clientInterface.databaseStatus.getFuture(), &self, coordinators, &configBroadcaster));
 	self.addActor.send(timeKeeper(&self));
 	self.addActor.send(monitorProcessClasses(&self));
 	self.addActor.send(monitorServerInfoConfig(&self.db));
@@ -3544,7 +3550,8 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      bool hasConnected,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-                                     LocalityData locality) {
+                                     LocalityData locality,
+                                     Optional<bool> useTestConfigDB) {
 	loop {
 		state ClusterControllerFullInterface cci;
 		state bool inRole = false;
@@ -3571,7 +3578,7 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 				startRole(Role::CLUSTER_CONTROLLER, cci.id(), UID());
 				inRole = true;
 
-				wait(clusterControllerCore(cci, leaderFail, coordinators, locality));
+				wait(clusterControllerCore(cci, leaderFail, coordinators, locality, useTestConfigDB));
 			}
 		} catch (Error& e) {
 			if (inRole)
@@ -3594,13 +3601,15 @@ ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> connFile,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      Future<Void> recoveredDiskFiles,
-                                     LocalityData locality) {
+                                     LocalityData locality,
+                                     Optional<bool> useTestConfigDB) {
 	wait(recoveredDiskFiles);
 	state bool hasConnected = false;
 	loop {
 		try {
 			ServerCoordinators coordinators(connFile);
-			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality));
+			wait(
+			    clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, useTestConfigDB));
 		} catch (Error& e) {
 			if (e.code() != error_code_coordinators_changed)
 				throw; // Expected to terminate fdbserver

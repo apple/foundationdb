@@ -973,7 +973,7 @@ struct CLIOptions {
 	const char* blobCredsFromENV = nullptr;
 
 	std::string configPath;
-	Optional<bool> useTestConfigDB{ false };
+	Optional<bool> useTestConfigDB{ true };
 
 	Reference<ClusterConnectionFile> connectionFile;
 	Standalone<StringRef> machineId;

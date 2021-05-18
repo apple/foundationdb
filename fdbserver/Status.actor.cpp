@@ -2643,7 +2643,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
     std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatus,
     ServerCoordinators coordinators,
     std::vector<NetworkAddress> incompatibleConnections,
-    Version datacenterVersionDifference) {
+    Version datacenterVersionDifference,
+    ConfigBroadcaster const* configBroadcaster) {
 	state double tStart = timer();
 
 	state JsonBuilderArray messages;
@@ -2874,6 +2875,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				statusObj["workload"] = workerStatuses[1];
 
 			statusObj["layers"] = workerStatuses[2];
+			// TODO: Read from coordinators for more up-to-date config database status?
+			statusObj["configuration_database"] = configBroadcaster->getStatus();
 
 			// Add qos section if it was populated
 			if (!qos.empty())
