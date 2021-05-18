@@ -129,7 +129,7 @@ bool testTransactionInfo() {
 			// Randomly add this mutation to teams
 			for (int team = 0; team < 3; team++) {
 				if (deterministicRandom()->random01() < 0.5) {
-					if (written[team] != spanId) {
+					if (written[team] != spanId && FLOW_KNOBS->WRITE_TRACING_ENABLED) {
 						// Add Transaction Info for this team in ground truth
 						mutations[team].push_back(arena, transactionInfo);
 						written[team] = spanId;
@@ -174,7 +174,7 @@ bool testTransactionInfo() {
 			}
 		}
 	}
-	ASSERT(spanCount > 0);
+	ASSERT(spanCount > 0 || !FLOW_KNOBS->WRITE_TRACING_ENABLED);
 
 	std::cout << __FUNCTION__ << " passed (" << spanCount << " SpanIDs).\n";
 	return true;
