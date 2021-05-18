@@ -120,6 +120,7 @@ struct ProxyStats {
 	Reference<Histogram> grvRawDist;
 	Reference<Histogram> commitBatchQueuingDist;
 	Reference<Histogram> getCommitVersionDist;
+	std::vector<Reference<Histogram>> resolverDist;
 	Reference<Histogram> resolutionDist;
 	Reference<Histogram> postResolutionDist;
 	Reference<Histogram> processingMutationDist;
@@ -970,6 +971,14 @@ bool canReject(const std::vector<CommitTransactionRequest>& trs) {
 	return true;
 }
 
+ACTOR static Future<ResolveTransactionBatchReply> trackResolutionMetrics(Reference<Histogram> dist,
+                                                                         Future<ResolveTransactionBatchReply> in) {
+	state double startTime = now();
+	ResolveTransactionBatchReply reply = wait(in);
+	dist->sampleSeconds(now() - startTime);
+	return reply;
+}
+
 // Commit one batch of transactions trs
 ACTOR Future<Void> commitBatch(ProxyCommitData* self,
                                vector<CommitTransactionRequest> trs,
@@ -1124,8 +1133,9 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 	vector<Future<ResolveTransactionBatchReply>> replies;
 	for (int r = 0; r < self->resolvers.size(); r++) {
 		requests.requests[r].debugID = debugID;
-		replies.push_back(brokenPromiseToNever(
-		    self->resolvers[r].resolve.getReply(requests.requests[r], TaskPriority::ProxyResolverReply)));
+		replies.push_back(trackResolutionMetrics(self->stats.resolverDist[r],
+		                                         brokenPromiseToNever(self->resolvers[r].resolve.getReply(
+		                                             requests.requests[r], TaskPriority::ProxyResolverReply))));
 	}
 
 	state vector<vector<int>> transactionResolverMap = std::move(requests.transactionResolverMap);
@@ -2469,6 +2479,10 @@ ACTOR Future<Void> masterProxyServerCore(MasterProxyInterface proxy,
 
 	commitData.resolvers = commitData.db->get().resolvers;
 	ASSERT(commitData.resolvers.size() != 0);
+	for (int i = 0; i < commitData.resolvers.size(); ++i) {
+		commitData.stats.resolverDist.push_back(Histogram::getHistogram(
+		    LiteralStringRef("MasterProxy"), format("ToResolver_%d", i), Histogram::Unit::microseconds));
+	}
 
 	auto rs = commitData.keyResolvers.modify(allKeys);
 	for (auto r = rs.begin(); r != rs.end(); ++r)
