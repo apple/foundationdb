@@ -93,7 +93,7 @@ public:
 		return store;
 	}
 
-	bool exists() {
+	bool exists() const {
 		if (store)
 			return true;
 		return fileExists(joinPath(folder, "coordination-0.fdq")) ||
@@ -102,7 +102,7 @@ public:
 
 	IKeyValueStore* operator->() { return get(); }
 
-	Future<Void> getError() { return onErr(err.getFuture()); }
+	Future<Void> getError() const { return onErr(err.getFuture()); }
 
 private:
 	std::string folder;
@@ -614,26 +614,35 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 	}
 }
 
-ACTOR Future<Void> coordinationServer(std::string dataFolder) {
+ACTOR Future<Void> coordinationServer(std::string dataFolder, Optional<bool> useTestConfigDB) {
 	state UID myID = deterministicRandom()->randomUniqueID();
 	state LeaderElectionRegInterface myLeaderInterface(g_network);
 	state GenerationRegInterface myInterface(g_network);
 	state OnDemandStore store(dataFolder, myID);
 	state ConfigTransactionInterface configTransactionInterface;
 	state ConfigFollowerInterface configFollowerInterface;
-	configTransactionInterface.setupWellKnownEndpoints();
-	configFollowerInterface.setupWellKnownEndpoints();
-	state Reference<IConfigDatabaseNode> configDatabaseNode = IConfigDatabaseNode::createSimple();
-	wait(configDatabaseNode->initialize(dataFolder, deterministicRandom()->randomUniqueID()));
-
+	state Reference<IConfigDatabaseNode> configDatabaseNode;
+	state Future<Void> configDatabaseServer = Never();
 	TraceEvent("CoordinationServer", myID)
 	    .detail("MyInterfaceAddr", myInterface.read.getEndpoint().getPrimaryAddress())
 	    .detail("Folder", dataFolder);
 
+	if (useTestConfigDB.present()) {
+		configTransactionInterface.setupWellKnownEndpoints();
+		configFollowerInterface.setupWellKnownEndpoints();
+		if (useTestConfigDB.get()) {
+			configDatabaseNode = IConfigDatabaseNode::createSimple();
+		} else {
+			configDatabaseNode = IConfigDatabaseNode::createPaxos();
+		}
+		wait(configDatabaseNode->initialize(dataFolder, deterministicRandom()->randomUniqueID()));
+		configDatabaseServer =
+		    configDatabaseNode->serve(configTransactionInterface) || configDatabaseNode->serve(configFollowerInterface);
+	}
+
 	try {
 		wait(localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store, myID) ||
-		     store.getError() || configDatabaseNode->serve(configTransactionInterface) ||
-		     configDatabaseNode->serve(configFollowerInterface));
+		     store.getError() || configDatabaseServer);
 		throw internal_error();
 	} catch (Error& e) {
 		TraceEvent("CoordinationServerError", myID).error(e, true);

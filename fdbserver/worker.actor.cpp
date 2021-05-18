@@ -276,7 +276,6 @@ StringRef fileStoragePrefix = LiteralStringRef("storage-");
 StringRef fileLogDataPrefix = LiteralStringRef("log-");
 StringRef fileVersionedLogDataPrefix = LiteralStringRef("log2-");
 StringRef fileLogQueuePrefix = LiteralStringRef("logqueue-");
-StringRef localConfPrefix = LiteralStringRef("localconf-");
 StringRef tlogQueueExtension = LiteralStringRef("fdq");
 
 enum class FilesystemCheck {
@@ -410,7 +409,7 @@ TLogFn tLogFnForOptions(TLogOptions options) {
 }
 
 struct DiskStore {
-	enum COMPONENT { TLogData, Storage, LocalConf, UNSET };
+	enum COMPONENT { TLogData, Storage, UNSET };
 
 	UID storeID = UID();
 	std::string filename = ""; // For KVStoreMemory just the base filename to be passed to IDiskQueue
@@ -466,9 +465,6 @@ std::vector<DiskStore> getDiskStores(std::string folder,
 			store.tLogOptions.version = TLogVersion::V2;
 			store.tLogOptions.spillType = TLogSpillType::VALUE;
 			prefix = fileLogDataPrefix;
-		} else if (filename.startsWith(localConfPrefix)) {
-			store.storedComponent = DiskStore::LocalConf;
-			prefix = localConfPrefix;
 		} else {
 			continue;
 		}
@@ -2048,7 +2044,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		if (coordFolder.size()) {
 			// SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up
 			// their files
-			actors.push_back(fileNotFoundToNever(coordinationServer(coordFolder)));
+			actors.push_back(fileNotFoundToNever(coordinationServer(coordFolder, useTestConfigDB)));
 		}
 
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));

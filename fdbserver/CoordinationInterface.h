@@ -232,6 +232,6 @@ public:
 	std::vector<ConfigFollowerInterface> configServers;
 };
 
-Future<Void> coordinationServer(std::string const& dataFolder);
+Future<Void> coordinationServer(std::string const& dataFolder, Optional<bool> const& useTestConfigDB);
 
 #endif

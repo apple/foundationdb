@@ -50,7 +50,6 @@
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/LocalConfiguration.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/NetworkTest.h"
 #include "fdbserver/ServerDBInfo.h"
