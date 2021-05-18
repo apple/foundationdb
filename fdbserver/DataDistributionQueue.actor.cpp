@@ -941,8 +941,6 @@ struct DDQueueData {
 	}
 };
 
-extern bool noUnseed;
-
 // This actor relocates the specified keys to a good place.
 // The inFlightActor key range map stores the actor for each RelocateData
 ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd, const DDEnabledState* ddEnabledState) {
