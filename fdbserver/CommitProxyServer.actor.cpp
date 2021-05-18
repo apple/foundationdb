@@ -970,7 +970,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				auto ranges = pProxyCommitData->keyInfo.intersectingRanges(clearRange);
 				auto firstRange = ranges.begin();
 				++firstRange;
-				std::set<ptxn::StorageTeamID> teams; // write m to these teams
+				std::set<ptxn::StorageTeamID> storageTeams; // write m to these teams
 				if (firstRange == ranges.end()) {
 					// Fast path
 					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m)
@@ -981,7 +981,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					ranges.begin().value().populateTags();
 					self->toCommit.addTags(ranges.begin().value().tags);
 					auto& dstTeams = ranges.begin().value().teams;
-					teams.insert(dstTeams.begin(), dstTeams.end());
+					storageTeams.insert(dstTeams.begin(), dstTeams.end());
 
 					// check whether clear is sampled
 					if (checkSample && !trCost->get().clearIdxCosts.empty() &&
@@ -1000,7 +1000,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 						r.value().populateTags();
 						allSources.insert(r.value().tags.begin(), r.value().tags.end());
 						auto& dstTeams = r.value().teams;
-						teams.insert(dstTeams.begin(), dstTeams.end());
+						storageTeams.insert(dstTeams.begin(), dstTeams.end());
 
 						// check whether clear is sampled
 						if (checkSample && !trCost->get().clearIdxCosts.empty() &&
@@ -1027,7 +1027,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					self->toCommit.addTag(cacheTag);
 				}
 				self->toCommit.writeTypedMessage(m);
-				self->teamMessageBuilder.writeMessage(m, teams);
+				self->teamMessageBuilder.writeMessage(m, storageTeams);
 			} else {
 				UNREACHABLE();
 			}

@@ -29,6 +29,7 @@
 #include "fdbserver/ptxn/Serializer.h"
 #include "fdbserver/ptxn/ProxyTLogPushMessageSerializer.h"
 #include "fdbserver/ptxn/TLogStorageServerPeekMessageSerializer.h"
+#include "fdbserver/ptxn/test/Utils.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/UnitTest.h"
@@ -69,8 +70,8 @@ struct TestSerializerItem {
 bool testSubsequenceMutationItem() {
 	ptxn::ProxyTLogPushMessageSerializer serializer;
 
-	const ptxn::StorageTeamID team1{ deterministicRandom()->randomUniqueID() };
-	const ptxn::StorageTeamID team2{ deterministicRandom()->randomUniqueID() };
+	const ptxn::StorageTeamID team1{ ptxn::test::getNewStorageTeamID() };
+	const ptxn::StorageTeamID team2{ ptxn::test::getNewStorageTeamID() };
 
 	MutationRef mutation(MutationRef::SetValue, "KeyXX"_sr, "ValueYY"_sr);
 	serializer.writeMessage(mutation, team1);
@@ -99,9 +100,9 @@ bool testSubsequenceMutationItem() {
 bool testTransactionInfo() {
 	ptxn::ProxyTLogPushMessageSerializer serializer;
 
-	const ptxn::StorageTeamID team1{ deterministicRandom()->randomUniqueID() };
-	const ptxn::StorageTeamID team2{ deterministicRandom()->randomUniqueID() };
-	const ptxn::StorageTeamID team3{ deterministicRandom()->randomUniqueID() };
+	const ptxn::StorageTeamID team1{ ptxn::test::getNewStorageTeamID() };
+	const ptxn::StorageTeamID team2{ ptxn::test::getNewStorageTeamID() };
+	const ptxn::StorageTeamID team3{ ptxn::test::getNewStorageTeamID() };
 	std::vector<ptxn::StorageTeamID> teams = { team1, team2, team3 };
 
 	// Mutations for each team before serialization, i.e., ground truth
