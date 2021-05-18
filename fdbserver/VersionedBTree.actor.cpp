@@ -6372,10 +6372,9 @@ public:
 		return result;
 	}
 
-	ACTOR static Future<Optional<Value>> readValuePrefix_impl(KeyValueStoreRedwoodUnversioned* self,
-	                                                          Key key,
-	                                                          int maxLength,
-	                                                          Optional<UID> debugID) {
+	ACTOR static Future<Optional<Value>> readValue_impl(KeyValueStoreRedwoodUnversioned* self,
+	                                                    Key key,
+	                                                    Optional<UID> debugID) {
 		state VersionedBTree::BTreeCursor cur;
 		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion()));
 
@@ -6390,23 +6389,25 @@ public:
 			Value v;
 			v.arena().dependsOn(cur.back().page->getArena());
 			v.contents() = cur.get().value.get();
-			if (v.size() > maxLength) {
-				v.contents() = v.substr(0, maxLength);
-			}
 			return v;
 		}
 
 		return Optional<Value>();
 	}
 
+	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) override {
+		return catchError(readValue_impl(this, key, debugID));
+	}
+
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                        int maxLength,
 	                                        Optional<UID> debugID = Optional<UID>()) override {
-		return catchError(readValuePrefix_impl(this, key, maxLength, debugID));
-	}
-
-	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) override {
-		return catchError(readValuePrefix_impl(this, key, std::numeric_limits<int>::max(), debugID));
+		return catchError(map(readValue_impl(this, key, debugID), [maxLength](Optional<Value> v) {
+			if (v.present() && v.get().size() > maxLength) {
+				v.get().contents() = v.get().substr(0, maxLength);
+			}
+			return v;
+		}));
 	}
 
 	~KeyValueStoreRedwoodUnversioned() override{};

@@ -56,7 +56,7 @@ public:
 		if (userData != nullptr && userDataDestructor != nullptr) {
 			userDataDestructor(userData);
 		}
-		if(buffer != nullptr) {
+		if (buffer != nullptr) {
 			VALGRIND_MAKE_MEM_UNDEFINED(buffer, bufferSize);
 		}
 	}
