@@ -275,6 +275,10 @@ template <class Env, class... Args>
 Future<Void> check(Env& env, Args&&... args) {
 	return waitOrError(env.check(std::forward<Args>(args)...), env.getError());
 }
+template <class Env, class... Args>
+Future<Void> compact(Env& env, Args&&... args) {
+	return waitOrError(env.compact(std::forward<Args>(args)...), env.getError());
+}
 
 } // namespace
 
@@ -391,7 +395,7 @@ TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/Compact") {
 	state BroadcasterToLocalConfigEnvironment env("class-A");
 	wait(env.setup());
 	wait(set(env, "class-A"_sr, 1));
-	wait(env.compact());
+	wait(compact(env));
 	wait(check(env, 1));
 	return Void();
 }
