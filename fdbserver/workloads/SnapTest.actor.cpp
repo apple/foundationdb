@@ -3,7 +3,6 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbmonitor/SimpleIni.h"
 #include "fdbserver/Status.h"
 #include "fdbserver/TesterInterface.actor.h"

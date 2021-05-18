@@ -715,7 +715,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( REDWOOD_LOGGING_INTERVAL,                              5.0 );
 
 	// Server request latency measurement
-	init( LATENCY_SAMPLE_SIZE,                                100000 );
+	init( LATENCY_SKETCH_ACCURACY,                               0.1 );
 	init( LATENCY_METRICS_LOGGING_INTERVAL,                     60.0 );
 
 	// clang-format on

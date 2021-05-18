@@ -36,7 +36,7 @@
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/EventTypes.actor.h"
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbrpc/Smoother.h"
 
 class StorageServerInfo : public ReferencedInterface<StorageServerInterface> {
@@ -367,7 +367,7 @@ public:
 	Counter transactionsThrottled;
 	Counter transactionsExpensiveClearCostEstCount;
 
-	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
+	DDSketch<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
 	    bytesPerCommit;
 
 	int outstandingWatches;

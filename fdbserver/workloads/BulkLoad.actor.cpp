@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -33,11 +33,11 @@ struct BulkLoadWorkload : TestWorkload {
 
 	vector<Future<Void>> clients;
 	PerfIntCounter transactions, retries;
-	ContinuousSample<double> latencies;
+	DDSketch<double> latencies;
 
 	BulkLoadWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), clientCount(wcx.clientCount), transactions("Transactions"), retries("Retries"),
-	    latencies(2000) {
+	    latencies() {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
 		actorCount = getOption(options, LiteralStringRef("actorCount"), 20);
 		writesPerTransaction = getOption(options, LiteralStringRef("writesPerTransaction"), 10);
