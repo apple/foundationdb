@@ -30,7 +30,6 @@
 class IConfigConsumer {
 public:
 	virtual ~IConfigConsumer() = default;
-	virtual Future<Void> getInitialSnapshot(ConfigBroadcaster& broadcaster) = 0;
 	virtual Future<Void> consume(ConfigBroadcaster& broadcaster) = 0;
 	virtual UID getID() const = 0;
 

@@ -50,21 +50,18 @@ class ConfigBroadcasterImpl {
 	Future<Void> logger;
 
 	ACTOR static Future<Void> serve(ConfigBroadcaster* self, ConfigBroadcasterImpl* impl, ConfigFollowerInterface cfi) {
-		wait(impl->consumer->getInitialSnapshot(*self));
 		impl->actors.add(impl->consumer->consume(*self));
 		loop {
 			choose {
-				when(ConfigFollowerGetVersionRequest req = waitNext(cfi.getVersion.getFuture())) {
-					req.reply.send(impl->mostRecentVersion);
-				}
-				when(ConfigFollowerGetSnapshotRequest req = waitNext(cfi.getSnapshot.getFuture())) {
+				when(ConfigFollowerGetSnapshotAndChangesRequest req = waitNext(cfi.getSnapshotAndChanges.getFuture())) {
 					++impl->snapshotRequest;
-					ConfigFollowerGetSnapshotReply reply;
+					ConfigFollowerGetSnapshotAndChangesReply reply;
 					for (const auto& [key, value] : impl->snapshot) {
 						if (matchesConfigClass(req.configClassSet, key.configClass)) {
 							reply.snapshot[key] = value;
 						}
 					}
+					reply.snapshotVersion = reply.changesVersion = impl->mostRecentVersion;
 					req.reply.send(reply);
 				}
 				when(ConfigFollowerGetChangesRequest req = waitNext(cfi.getChanges.getFuture())) {
@@ -73,6 +70,8 @@ class ConfigBroadcasterImpl {
 						++impl->failedChangeRequest;
 						continue;
 					}
+					// TODO: If there are no new changes, register the request and push
+					// changes when ready
 					ConfigFollowerGetChangesReply reply;
 					reply.mostRecentVersion = impl->mostRecentVersion;
 					for (const auto& versionedMutation : impl->versionedMutations) {
@@ -138,8 +137,9 @@ public:
 		return Void();
 	}
 
-	Future<Void> setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version snapshotVersion) {
-		this->snapshot = std::move(snapshot);
+	template <class Snapshot>
+	Future<Void> setSnapshot(Snapshot&& snapshot, Version snapshotVersion) {
+		this->snapshot = std::move(std::forward<Snapshot>(snapshot));
 		this->lastCompactedVersion = snapshotVersion;
 		return Void();
 	}
@@ -219,6 +219,10 @@ Future<Void> ConfigBroadcaster::addVersionedMutations(
     Standalone<VectorRef<VersionedConfigMutationRef>> const& versionedMutations,
     Version mostRecentVersion) {
 	return impl->addVersionedMutations(versionedMutations, mostRecentVersion);
+}
+
+Future<Void> ConfigBroadcaster::setSnapshot(std::map<ConfigKey, Value> const& snapshot, Version snapshotVersion) {
+	return impl->setSnapshot(snapshot, snapshotVersion);
 }
 
 Future<Void> ConfigBroadcaster::setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version snapshotVersion) {

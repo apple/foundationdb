@@ -139,24 +139,6 @@ public:
 };
 
 class BroadcasterToLocalConfigEnvironment {
-	class DummyConfigSource {
-		ConfigFollowerInterface cfi;
-		ACTOR static Future<Void> serve(DummyConfigSource* self) {
-			loop {
-				choose {
-					when(ConfigFollowerGetVersionRequest req = waitNext(self->cfi.getVersion.getFuture())) {
-						req.reply.send(0);
-					}
-					when(ConfigFollowerGetSnapshotRequest req = waitNext(self->cfi.getSnapshot.getFuture())) {
-						req.reply.send(ConfigFollowerGetSnapshotReply{});
-					}
-				}
-			}
-		}
-	public:
-		Future<Void> serve() { return serve(this); }
-		ConfigFollowerInterface const& getInterface() { return cfi; }
-	} dummyConfigSource;
 	ConfigBroadcaster broadcaster;
 	Reference<AsyncVar<ConfigFollowerInterface>> cfi;
 	LocalConfiguration localConfiguration;
@@ -166,40 +148,32 @@ class BroadcasterToLocalConfigEnvironment {
 
 	ACTOR static Future<Void> setup(BroadcasterToLocalConfigEnvironment* self) {
 		wait(self->localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
-		self->actors.add(self->dummyConfigSource.serve());
 		self->broadcastServer = self->broadcaster.serve(self->cfi->get());
 		self->actors.add(
 		    self->localConfiguration.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(self->cfi)));
 		return Void();
 	}
 
-	ACTOR static Future<Void> compact(BroadcasterToLocalConfigEnvironment* self) {
-		ConfigFollowerGetVersionReply reply =
-		    wait(self->cfi->get().getVersion.getReply(ConfigFollowerGetVersionRequest{}));
-		wait(self->cfi->get().compact.getReply(ConfigFollowerCompactRequest{ reply.version }));
-		return Void();
-	}
-
 public:
 	BroadcasterToLocalConfigEnvironment(std::string const& configPath)
-	  : broadcaster(dummyConfigSource.getInterface()), cfi(makeReference<AsyncVar<ConfigFollowerInterface>>()),
+	  : broadcaster(ConfigFollowerInterface{}), cfi(makeReference<AsyncVar<ConfigFollowerInterface>>()),
 	    localConfiguration(configPath, {}) {}
 
 	Future<Void> setup() { return setup(this); }
 
 	Future<Void> set(Optional<KeyRef> configClass, int64_t value) {
-		return addTestSetMutation(localConfiguration, configClass, value, ++lastWrittenVersion);
+		return addTestSetMutation(broadcaster, configClass, value, ++lastWrittenVersion);
 	}
 	Future<Void> clear(Optional<KeyRef> configClass) {
-		return addTestClearMutation(localConfiguration, configClass, ++lastWrittenVersion);
+		return addTestClearMutation(broadcaster, configClass, ++lastWrittenVersion);
 	}
 	Future<Void> check(Optional<int64_t> value) const { return checkEventually(&localConfiguration, value); }
 	void changeBroadcaster() {
-		cfi->set(ConfigFollowerInterface());
-		broadcaster = ConfigBroadcaster(dummyConfigSource.getInterface());
+		broadcastServer.cancel();
+		cfi->set(ConfigFollowerInterface{});
 		broadcastServer = broadcaster.serve(cfi->get());
 	}
-	Future<Void> compact() { return compact(this); }
+	Future<Void> compact() { return cfi->get().compact.getReply(ConfigFollowerCompactRequest{ lastWrittenVersion }); }
 
 	Future<Void> getError() const { return actors.getResult() || broadcastServer; }
 };

@@ -39,8 +39,6 @@ public:
 	                     Optional<double> pollingInterval,
 	                     Optional<double> compactionInterval);
 	~SimpleConfigConsumer();
-	Future<Void> getInitialSnapshot(ConfigBroadcaster& broadcaster) override;
-	Future<Void> getInitialSnapshot(LocalConfiguration& localConfiguration);
 	Future<Void> consume(ConfigBroadcaster& broadcaster) override;
 	Future<Void> consume(LocalConfiguration& localConfiguration);
 	UID getID() const override;

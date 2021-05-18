@@ -30,7 +30,6 @@ public:
 	                    Optional<double> pollingInterval,
 	                    Optional<double> compactionInterval);
 	~PaxosConfigConsumer();
-	Future<Void> getInitialSnapshot(ConfigBroadcaster& broadcaster) override;
 	Future<Void> consume(ConfigBroadcaster& broadcaster) override;
 	UID getID() const override;
 };

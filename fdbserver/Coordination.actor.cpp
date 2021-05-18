@@ -635,7 +635,7 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder, Optional<bool> use
 		} else {
 			configDatabaseNode = IConfigDatabaseNode::createPaxos();
 		}
-		wait(configDatabaseNode->initialize(dataFolder, deterministicRandom()->randomUniqueID()));
+		wait(configDatabaseNode->initialize(dataFolder, UID{}));
 		configDatabaseServer =
 		    configDatabaseNode->serve(configTransactionInterface) || configDatabaseNode->serve(configFollowerInterface);
 	}

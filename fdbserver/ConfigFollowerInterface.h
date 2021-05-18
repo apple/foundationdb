@@ -44,58 +44,6 @@ public:
 	}
 };
 
-struct ConfigFollowerGetVersionReply {
-	static constexpr FileIdentifier file_identifier = 1028349;
-	Version version;
-
-	explicit ConfigFollowerGetVersionReply(Version version = -1) : version(version) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, version);
-	}
-};
-
-struct ConfigFollowerGetVersionRequest {
-	static constexpr FileIdentifier file_identifier = 9840156;
-	ReplyPromise<ConfigFollowerGetVersionReply> reply;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reply);
-	}
-};
-
-struct ConfigFollowerGetSnapshotReply {
-	static constexpr FileIdentifier file_identifier = 1734095;
-	std::map<ConfigKey, Value> snapshot;
-
-	ConfigFollowerGetSnapshotReply() = default;
-	explicit ConfigFollowerGetSnapshotReply(std::map<ConfigKey, Value>&& snapshot) : snapshot(std::move(snapshot)) {}
-	explicit ConfigFollowerGetSnapshotReply(std::map<ConfigKey, Value> const& snapshot) : snapshot(snapshot) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, snapshot);
-	}
-};
-
-struct ConfigFollowerGetSnapshotRequest {
-	static constexpr FileIdentifier file_identifier = 294811;
-	Version version;
-	Optional<ConfigClassSet> configClassSet;
-	ReplyPromise<ConfigFollowerGetSnapshotReply> reply;
-
-	ConfigFollowerGetSnapshotRequest() : version(-1) {}
-	explicit ConfigFollowerGetSnapshotRequest(Version version, Optional<ConfigClassSet> const& configClassSet)
-	  : version(version), configClassSet(configClassSet) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, version, configClassSet, reply);
-	}
-};
-
 struct VersionedConfigMutationRef {
 	Version version;
 	ConfigMutationRef mutation;
@@ -108,9 +56,48 @@ struct VersionedConfigMutationRef {
 
 	size_t expectedSize() const { return sizeof(Version) + mutation.expectedSize(); }
 
-	template<class Ar>
-	void serialize(Ar &ar) {
+	template <class Ar>
+	void serialize(Ar& ar) {
 		serializer(ar, version, mutation);
+	}
+};
+
+struct ConfigFollowerGetSnapshotAndChangesReply {
+	static constexpr FileIdentifier file_identifier = 1734095;
+	Version snapshotVersion;
+	Version changesVersion;
+	std::map<ConfigKey, Value> snapshot;
+	Standalone<VectorRef<VersionedConfigMutationRef>> changes;
+
+	ConfigFollowerGetSnapshotAndChangesReply() = default;
+	template <class Snapshot>
+	explicit ConfigFollowerGetSnapshotAndChangesReply(Version snapshotVersion,
+	                                                  Version changesVersion,
+	                                                  Snapshot&& snapshot,
+	                                                  Standalone<VectorRef<VersionedConfigMutationRef>> changes)
+	  : snapshotVersion(snapshotVersion), changesVersion(changesVersion), snapshot(std::forward<Snapshot>(snapshot)),
+	    changes(changes) {
+		ASSERT(changesVersion >= snapshotVersion);
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, snapshotVersion, changesVersion, snapshot, changes);
+	}
+};
+
+struct ConfigFollowerGetSnapshotAndChangesRequest {
+	static constexpr FileIdentifier file_identifier = 294811;
+	Optional<ConfigClassSet> configClassSet;
+	ReplyPromise<ConfigFollowerGetSnapshotAndChangesReply> reply;
+
+	ConfigFollowerGetSnapshotAndChangesRequest() = default;
+	explicit ConfigFollowerGetSnapshotAndChangesRequest(Optional<ConfigClassSet> const& configClassSet)
+	  : configClassSet(configClassSet) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, configClassSet, reply);
 	}
 };
 
@@ -165,8 +152,7 @@ class ConfigFollowerInterface {
 
 public:
 	static constexpr FileIdentifier file_identifier = 7721102;
-	RequestStream<ConfigFollowerGetVersionRequest> getVersion;
-	RequestStream<ConfigFollowerGetSnapshotRequest> getSnapshot;
+	RequestStream<ConfigFollowerGetSnapshotAndChangesRequest> getSnapshotAndChanges;
 	RequestStream<ConfigFollowerGetChangesRequest> getChanges;
 	RequestStream<ConfigFollowerCompactRequest> compact;
 
@@ -179,6 +165,6 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, _id, getVersion, getSnapshot, getChanges);
+		serializer(ar, _id, getSnapshotAndChanges, getChanges, compact);
 	}
 };

@@ -39,6 +39,7 @@ public:
 	Future<Void> serve(ConfigFollowerInterface const&);
 	Future<Void> addVersionedMutations(Standalone<VectorRef<VersionedConfigMutationRef>> const&,
 	                                   Version mostRecentVersion);
+	Future<Void> setSnapshot(std::map<ConfigKey, Value> const& snapshot, Version snapshotVersion);
 	Future<Void> setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version snapshotVersion);
 	UID getID() const;
 	JsonBuilderObject getStatus() const;

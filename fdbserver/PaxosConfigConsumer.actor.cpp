@@ -31,12 +31,6 @@ PaxosConfigConsumer::PaxosConfigConsumer(ServerCoordinators const& cfi,
 
 PaxosConfigConsumer::~PaxosConfigConsumer() = default;
 
-Future<Void> PaxosConfigConsumer::getInitialSnapshot(ConfigBroadcaster& broadcaster) {
-	// TODO: Implement
-	ASSERT(false);
-	return Void();
-}
-
 Future<Void> PaxosConfigConsumer::consume(ConfigBroadcaster& broadcaster) {
 	// TODO: Implement
 	ASSERT(false);

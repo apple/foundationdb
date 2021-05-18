@@ -94,7 +94,6 @@ class SimpleConfigDatabaseNodeImpl {
 	Counter successfulChangeRequests;
 	Counter failedChangeRequests;
 	Counter snapshotRequests;
-	Counter committedVersionRequests;
 
 	// Transaction counters
 	Counter successfulCommits;
@@ -175,12 +174,6 @@ class SimpleConfigDatabaseNodeImpl {
 		    .detail("NumMutations", versionedMutations.size());
 		++self->successfulChangeRequests;
 		req.reply.send(ConfigFollowerGetChangesReply{ committedVersion, versionedMutations });
-		return Void();
-	}
-
-	ACTOR static Future<Void> getCommittedVersion(SimpleConfigDatabaseNodeImpl *self, ConfigFollowerGetVersionRequest req) {
-		Version committedVersion = wait(getCommittedVersion(self));
-		req.reply.send(ConfigFollowerGetVersionReply(committedVersion));
 		return Void();
 	}
 
@@ -288,25 +281,6 @@ class SimpleConfigDatabaseNodeImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> traceQueuedMutations(SimpleConfigDatabaseNodeImpl *self) {
-		state Version currentVersion = wait(getCommittedVersion(self));
-		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
-		    wait(getMutations(self, 0, currentVersion));
-		TraceEvent te("SimpleConfigNodeQueuedMutations", self->id);
-		te.detail("Size", versionedMutations.size());
-		te.detail("CommittedVersion", currentVersion);
-		int index = 0;
-		for (const auto &versionedMutation : versionedMutations) {
-			te.detail(format("Version%d", index), versionedMutation.version);
-			te.detail(format("Mutation%d", index), versionedMutation.mutation.isSet());
-			te.detail(format("ConfigClass%d", index), versionedMutation.mutation.getConfigClass());
-			te.detail(format("KnobName%d", index), versionedMutation.mutation.getKnobName());
-			te.detail(format("KnobValue%d", index), versionedMutation.mutation.getValue());
-			++index;
-		}
-		return Void();
-	}
-
 	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionInterface const* cti) {
 		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
 		loop {
@@ -331,31 +305,23 @@ class SimpleConfigDatabaseNodeImpl {
 		}
 	}
 
-	ACTOR static Future<Void> getSnapshot(SimpleConfigDatabaseNodeImpl* self, ConfigFollowerGetSnapshotRequest req) {
-		state ConfigFollowerGetSnapshotReply reply;
+	ACTOR static Future<Void> getSnapshotAndChanges(SimpleConfigDatabaseNodeImpl* self,
+	                                                ConfigFollowerGetSnapshotAndChangesRequest req) {
+		state ConfigFollowerGetSnapshotAndChangesReply reply;
 		Standalone<RangeResultRef> data = wait(self->kvStore->readRange(kvKeys));
 		for (const auto& kv : data) {
 			reply
 			    .snapshot[BinaryReader::fromStringRef<ConfigKey>(kv.key.removePrefix(kvKeys.begin), IncludeVersion())] =
 			    kv.value;
 		}
-		state Version lastCompactedVersion = wait(getLastCompactedVersion(self));
+		wait(store(reply.snapshotVersion, getLastCompactedVersion(self)));
+		wait(store(reply.changesVersion, getCommittedVersion(self)));
+		wait(store(reply.changes, getMutations(self, reply.snapshotVersion + 1, reply.changesVersion)));
 		TraceEvent(SevDebug, "ConfigDatabaseNodeGettingSnapshot")
-		    .detail("ReqVersion", req.version)
-		    .detail("LastCompactedVersion", lastCompactedVersion);
-		if (lastCompactedVersion > req.version) {
-			req.reply.sendError(version_already_compacted());
-		}
-		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
-		    wait(getMutations(self, lastCompactedVersion + 1, req.version));
-		for (const auto& versionedMutation : versionedMutations) {
-			const auto& mutation = versionedMutation.mutation;
-			if (mutation.isSet()) {
-				reply.snapshot[mutation.getKey()] = mutation.getValue().get();
-			} else {
-				reply.snapshot.erase(mutation.getKey());
-			}
-		}
+		    .detail("SnapshotVersion", reply.snapshotVersion)
+		    .detail("ChangesVersion", reply.changesVersion)
+		    .detail("SnapshotSize", reply.snapshot.size())
+		    .detail("ChangesSize", reply.changes.size());
 		req.reply.send(reply);
 		return Void();
 	}
@@ -404,13 +370,10 @@ class SimpleConfigDatabaseNodeImpl {
 		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
 		loop {
 			choose {
-				when(ConfigFollowerGetVersionRequest req = waitNext(cfi->getVersion.getFuture())) {
-					++self->committedVersionRequests;
-					wait(getCommittedVersion(self, req));
-				}
-				when(ConfigFollowerGetSnapshotRequest req = waitNext(cfi->getSnapshot.getFuture())) {
+				when(ConfigFollowerGetSnapshotAndChangesRequest req =
+				         waitNext(cfi->getSnapshotAndChanges.getFuture())) {
 					++self->snapshotRequests;
-					wait(getSnapshot(self, req));
+					wait(getSnapshotAndChanges(self, req));
 				}
 				when(ConfigFollowerGetChangesRequest req = waitNext(cfi->getChanges.getFuture())) {
 					wait(getChanges(self, req));
@@ -427,9 +390,8 @@ public:
 	SimpleConfigDatabaseNodeImpl()
 	  : cc("ConfigDatabaseNode"), compactRequests("CompactRequests", cc),
 	    successfulChangeRequests("SuccessfulChangeRequests", cc), failedChangeRequests("FailedChangeRequests", cc),
-	    snapshotRequests("SnapshotRequests", cc), committedVersionRequests("CommittedVersionRequests", cc),
-	    successfulCommits("SuccessfulCommits", cc), failedCommits("FailedCommits", cc),
-	    setMutations("SetMutations", cc), clearMutations("ClearMutations", cc),
+	    snapshotRequests("SnapshotRequests", cc), successfulCommits("SuccessfulCommits", cc),
+	    failedCommits("FailedCommits", cc), setMutations("SetMutations", cc), clearMutations("ClearMutations", cc),
 	    getValueRequests("GetValueRequests", cc), newVersionRequests("NewVersionRequests", cc) {}
 
 	~SimpleConfigDatabaseNodeImpl() {

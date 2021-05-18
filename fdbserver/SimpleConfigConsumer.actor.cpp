@@ -51,6 +51,7 @@ class SimpleConfigConsumerImpl {
 
 	ACTOR template <class ConfigStore>
 	static Future<Void> fetchChanges(SimpleConfigConsumerImpl* self, ConfigStore* configStore) {
+		wait(getInitialSnapshot(self, configStore));
 		loop {
 			try {
 				ConfigFollowerGetChangesReply reply = wait(self->cfi.getChanges.getReply(
@@ -71,15 +72,7 @@ class SimpleConfigConsumerImpl {
 			} catch (Error& e) {
 				++self->failedChangeRequest;
 				if (e.code() == error_code_version_already_compacted) {
-					ConfigFollowerGetVersionReply versionReply =
-					    wait(self->cfi.getVersion.getReply(ConfigFollowerGetVersionRequest{}));
-					ASSERT(versionReply.version > self->lastSeenVersion);
-					self->lastSeenVersion = versionReply.version;
-					ConfigFollowerGetSnapshotReply dbReply = wait(self->cfi.getSnapshot.getReply(
-					    ConfigFollowerGetSnapshotRequest{ self->lastSeenVersion, self->configClassSet }));
-					// TODO: Remove unnecessary copy
-					auto snapshot = dbReply.snapshot;
-					wait(configStore->setSnapshot(std::move(snapshot), self->lastSeenVersion));
+					wait(getInitialSnapshot(self, configStore));
 					++self->snapshotRequest;
 				} else {
 					throw e;
@@ -88,17 +81,30 @@ class SimpleConfigConsumerImpl {
 		}
 	}
 
-	ACTOR template <class ConfigStore>
-	static Future<Void> getInitialSnapshot(SimpleConfigConsumerImpl* self, ConfigStore* configStore) {
-		ConfigFollowerGetVersionReply versionReply =
-		    wait(self->cfi.getVersion.getReply(ConfigFollowerGetVersionRequest{}));
-		self->lastSeenVersion = versionReply.version;
-		ConfigFollowerGetSnapshotReply reply = wait(self->cfi.getSnapshot.getReply(
-		    ConfigFollowerGetSnapshotRequest{ self->lastSeenVersion, self->configClassSet }));
-		TraceEvent(SevDebug, "ConfigGotInitialSnapshot").detail("Version", self->lastSeenVersion);
-		// TODO: Remove unnecessary copy
-		auto snapshot = reply.snapshot;
-		wait(configStore->setSnapshot(std::move(snapshot), self->lastSeenVersion));
+	ACTOR static Future<Void> getInitialSnapshot(SimpleConfigConsumerImpl* self,
+	                                             LocalConfiguration* localConfiguration) {
+		ConfigFollowerGetSnapshotAndChangesReply reply = wait(self->cfi.getSnapshotAndChanges.getReply(
+		    ConfigFollowerGetSnapshotAndChangesRequest{ self->configClassSet }));
+		ASSERT(reply.changes.empty() && reply.changesVersion == reply.snapshotVersion);
+		TraceEvent(SevDebug, "ConfigGotInitialSnapshot")
+		    .detail("Version", reply.snapshotVersion)
+		    .detail("SnapshotSize", reply.snapshot.size());
+		self->lastSeenVersion = reply.snapshotVersion;
+		wait(localConfiguration->setSnapshot(std::move(reply.snapshot), self->lastSeenVersion));
+		return Void();
+	}
+
+	ACTOR static Future<Void> getInitialSnapshot(SimpleConfigConsumerImpl* self, ConfigBroadcaster* broadcaster) {
+		ConfigFollowerGetSnapshotAndChangesReply reply = wait(self->cfi.getSnapshotAndChanges.getReply(
+		    ConfigFollowerGetSnapshotAndChangesRequest{ self->configClassSet }));
+		TraceEvent(SevDebug, "BroadcasterGotInitialSnapshot", self->id)
+		    .detail("SnapshotVersion", reply.snapshotVersion)
+		    .detail("SnapshotSize", reply.snapshot.size())
+		    .detail("ChangesVersion", reply.changesVersion)
+		    .detail("ChangesSize", reply.changes.size());
+		broadcaster->setSnapshot(std::move(reply.snapshot), reply.snapshotVersion);
+		broadcaster->addVersionedMutations(reply.changes, reply.changesVersion);
+		self->lastSeenVersion = reply.changesVersion;
 		return Void();
 	}
 
@@ -139,11 +145,6 @@ public:
 	}
 
 	template <class ConfigStore>
-	Future<Void> getInitialSnapshot(ConfigStore& configStore) {
-		return getInitialSnapshot(this, &configStore);
-	}
-
-	template <class ConfigStore>
 	Future<Void> consume(ConfigStore& configStore) {
 		// TODO: Reenable compaction
 		return fetchChanges(this, &configStore); /* ||compactor(this); */
@@ -173,14 +174,6 @@ SimpleConfigConsumer::SimpleConfigConsumer(ServerCoordinators const& coordinator
                                                     lastSeenVersion,
                                                     pollingInterval,
                                                     compactionInterval)) {}
-
-Future<Void> SimpleConfigConsumer::getInitialSnapshot(ConfigBroadcaster& broadcaster) {
-	return impl->getInitialSnapshot(broadcaster);
-}
-
-Future<Void> SimpleConfigConsumer::getInitialSnapshot(LocalConfiguration& localConfiguration) {
-	return impl->getInitialSnapshot(localConfiguration);
-}
 
 Future<Void> SimpleConfigConsumer::consume(ConfigBroadcaster& broadcaster) {
 	return impl->consume(broadcaster);

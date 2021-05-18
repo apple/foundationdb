@@ -23,8 +23,8 @@
 #include "fdbserver/CoordinationInterface.h"
 
 void ConfigFollowerInterface::setupWellKnownEndpoints() {
-	getVersion.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_GETVERSION, TaskPriority::Coordination);
-	getSnapshot.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_GETSNAPSHOT, TaskPriority::Coordination);
+	getSnapshotAndChanges.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_GETSNAPSHOTANDCHANGES,
+	                                            TaskPriority::Coordination);
 	getChanges.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_GETCHANGES, TaskPriority::Coordination);
 	compact.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_COMPACT, TaskPriority::Coordination);
 }
@@ -32,8 +32,8 @@ void ConfigFollowerInterface::setupWellKnownEndpoints() {
 ConfigFollowerInterface::ConfigFollowerInterface() : _id(deterministicRandom()->randomUniqueID()) {}
 
 ConfigFollowerInterface::ConfigFollowerInterface(NetworkAddress const& remote)
-  : _id(deterministicRandom()->randomUniqueID()), getVersion(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETVERSION)),
-    getSnapshot(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETSNAPSHOT)),
+  : _id(deterministicRandom()->randomUniqueID()),
+    getSnapshotAndChanges(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETSNAPSHOTANDCHANGES)),
     getChanges(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETCHANGES)),
     compact(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_COMPACT)) {}
 

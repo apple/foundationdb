@@ -2027,7 +2027,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 
 	if (useTestConfigDB.present()) {
 		// TODO: Shouldn't block here
-		wait(localConfig.initialize(dataFolder, deterministicRandom()->randomUniqueID()));
+		wait(localConfig.initialize(dataFolder, UID{}));
 	}
 
 	actors.push_back(serveProtocolInfo());
