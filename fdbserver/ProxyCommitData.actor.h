@@ -170,7 +170,7 @@ struct ProxyCommitData {
 	int updateCommitRequests = 0;
 	NotifiedDouble lastCommitTime;
 
-	vector<double> commitComputePerOperation;
+	std::vector<double> commitComputePerOperation;
 	UIDTransactionTagMap<TransactionCommitCostEstimation> ssTrTagCommitCost;
 	double lastMasterReset;
 	double lastResolverReset;
@@ -178,7 +178,7 @@ struct ProxyCommitData {
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to
 	// signify they must be repopulated. We do not repopulate them immediately to avoid a slow task.
-	const vector<Tag>& tagsForKey(StringRef key) {
+	const std::vector<Tag>& tagsForKey(StringRef key) {
 		auto& tags = keyInfo[key].tags;
 		if (!tags.size()) {
 			auto& r = keyInfo.rangeContaining(key).value();

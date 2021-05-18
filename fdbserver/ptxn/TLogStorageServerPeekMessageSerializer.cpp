@@ -201,7 +201,7 @@ TLogStorageServerMessageDeserializer::iterator& TLogStorageServerMessageDeserial
 
 	SubsequenceMutationItem item = deserializer.deserializeItem();
 	currentItem.subsequence = item.subsequence;
-	currentItem.mutation = item.mutation;
+	currentItem.mutation = item.mutation();
 
 	return *this;
 }
