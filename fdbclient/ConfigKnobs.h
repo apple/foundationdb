@@ -83,7 +83,9 @@ public:
 	ConfigMutationRef(Arena& arena, ConfigMutationRef const& rhs)
 	  : key(arena, rhs.key), value(arena, rhs.value), description(arena, rhs.description), timestamp(rhs.timestamp) {}
 
+	StringRef getDescription() const { return description; }
 	void setDescription(StringRef description) { this->description = description; }
+	double getTimestamp() const { return timestamp; }
 	void setTimestamp(double timestamp) { this->timestamp = timestamp; }
 	bool isSet() const { return value.present(); }
 

@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/JsonBuilder.h"
 #include "fdbserver/ConfigBroadcaster.h"
 #include "fdbserver/IConfigConsumer.h"
 #include "flow/actorcompiler.h" // must be last include
@@ -26,6 +27,15 @@ namespace {
 
 bool matchesConfigClass(Optional<ConfigClassSet> const& configClassSet, Optional<KeyRef> configClass) {
 	return !configClassSet.present() || !configClass.present() || configClassSet.get().contains(configClass.get());
+}
+
+template <class T>
+std::string configClassToString(Optional<T> const& configClass) {
+	if (configClass.present()) {
+		return configClass.get().toString();
+	} else {
+		return "<global>";
+	}
 }
 
 } // namespace
@@ -65,26 +75,6 @@ class ConfigBroadcasterImpl {
 							reply.snapshot[key] = value;
 						}
 					}
-					for (const auto& versionedMutation : impl->versionedMutations) {
-						const auto& version = versionedMutation.version;
-						const auto& mutation = versionedMutation.mutation;
-						if (version > req.version) {
-							break;
-						}
-						if (matchesConfigClass(req.configClassSet, mutation.getConfigClass())) {
-							TraceEvent(SevDebug, "ConfigBroadcasterAppendingMutationToSnapshotOutput", impl->id)
-							    .detail("ReqVersion", req.version)
-							    .detail("MutationVersion", version)
-							    .detail("ConfigClass", mutation.getConfigClass())
-							    .detail("KnobName", mutation.getKnobName())
-							    .detail("KnobValue", mutation.getValue());
-							if (mutation.isSet()) {
-								reply.snapshot[mutation.getKey()] = mutation.getValue().get();
-							} else {
-								reply.snapshot.erase(mutation.getKey());
-							}
-						}
-					}
 					req.reply.send(reply);
 				}
 				when(ConfigFollowerGetChangesRequest req = waitNext(cfi.getChanges.getFuture())) {
@@ -113,29 +103,16 @@ class ConfigBroadcasterImpl {
 				}
 				when(ConfigFollowerCompactRequest req = waitNext(cfi.compact.getFuture())) {
 					++impl->compactRequest;
+					// TODO: Use std::algorithm here
 					while (!impl->versionedMutations.empty()) {
-						const auto& versionedMutation = impl->versionedMutations.front();
-						const auto& version = versionedMutation.version;
-						const auto& mutation = versionedMutation.mutation;
+						const auto& version = impl->versionedMutations.front().version;
 						if (version > req.version) {
 							break;
 						} else {
-							TraceEvent(SevDebug, "ConfigBroadcasterCompactingMutation", impl->id)
-							    .detail("ReqVersion", req.version)
-							    .detail("MutationVersion", version)
-							    .detail("ConfigClass", mutation.getConfigClass())
-							    .detail("KnobName", mutation.getKnobName())
-							    .detail("KnobValue", mutation.getValue())
-							    .detail("LastCompactedVersion", impl->lastCompactedVersion);
-							if (mutation.isSet()) {
-								impl->snapshot[mutation.getKey()] = mutation.getValue().get();
-							} else {
-								impl->snapshot.erase(mutation.getKey());
-							}
-							impl->lastCompactedVersion = version;
 							impl->versionedMutations.pop_front();
 						}
 					}
+					impl->lastCompactedVersion = req.version;
 					req.reply.send(Void());
 				}
 				when(wait(impl->actors.getResult())) { ASSERT(false); }
@@ -150,6 +127,14 @@ public:
 	                                   Version mostRecentVersion) {
 		this->versionedMutations.insert(
 		    this->versionedMutations.end(), versionedMutations.begin(), versionedMutations.end());
+		for (const auto& versionedMutation : versionedMutations) {
+			const auto& mutation = versionedMutation.mutation;
+			if (mutation.isSet()) {
+				snapshot[mutation.getKey()] = mutation.getValue().get();
+			} else {
+				snapshot.erase(mutation.getKey());
+			}
+		}
 		this->mostRecentVersion = mostRecentVersion;
 		return Void();
 	}
@@ -170,6 +155,40 @@ public:
 		    "ConfigBroadcasterMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigBroadcasterMetrics");
 		consumer = IConfigConsumer::createSimple(configSource, 0.5, Optional<double>{});
 		TraceEvent(SevDebug, "BroadcasterStartingConsumer", id).detail("Consumer", consumer->getID());
+	}
+
+	JsonBuilderObject getStatus() const {
+		JsonBuilderObject result;
+		JsonBuilderArray mutationsArray;
+		for (const auto& versionedMutation : versionedMutations) {
+			JsonBuilderObject mutationObject;
+			mutationObject["version"] = versionedMutation.version;
+			const auto& mutation = versionedMutation.mutation;
+			mutationObject["description"] = mutation.getDescription();
+			mutationObject["config_class"] = configClassToString(mutation.getConfigClass());
+			mutationObject["knob_name"] = mutation.getKnobName();
+			mutationObject["knob_value"] =
+			    mutation.getValue().present() ? mutation.getValue().get().toString() : "<cleared>";
+			mutationObject["timestamp"] = mutation.getTimestamp();
+			mutationsArray.push_back(std::move(mutationObject));
+		}
+		result["mutations"] = std::move(mutationsArray);
+		JsonBuilderObject snapshotObject;
+		std::map<Optional<Key>, std::vector<std::pair<Key, Value>>> snapshotMap;
+		for (const auto& [configKey, value] : snapshot) {
+			snapshotMap[configKey.configClass.castTo<Key>()].emplace_back(configKey.knobName, value);
+		}
+		for (const auto& [configClass, kvs] : snapshotMap) {
+			JsonBuilderObject kvsObject;
+			for (const auto& [knobName, knobValue] : kvs) {
+				kvsObject[knobName] = knobValue;
+			}
+			snapshotObject[configClassToString(configClass)] = std::move(kvsObject);
+		}
+		result["snapshot"] = std::move(snapshotObject);
+		result["last_compacted_version"] = lastCompactedVersion;
+		result["most_recent_version"] = mostRecentVersion;
+		return result;
 	}
 
 	UID getID() const { return id; }
