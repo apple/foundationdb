@@ -2729,7 +2729,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				shard->updates.pop_front();
 			tr.setVersion(fetchVersion);
 			tr.info.taskID = TaskPriority::FetchKeys;
-			state PromiseStream<RangeResult> results;
+			state BoundedPromiseStream<RangeResult> results;
 			state Future<Void> hold = tr.getRangeStream(results, keys, GetRangeLimits(), true);
 			state Key nfk = keys.begin;
 

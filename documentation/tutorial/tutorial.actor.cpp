@@ -416,7 +416,7 @@ ACTOR Future<Void> fdbClientStream() {
 	state int64_t bytes = 0;
 	state Future<Void> logFuture = logThroughput(&bytes, &next);
 	loop {
-		state PromiseStream<Standalone<RangeResultRef>> results;
+		state BoundedPromiseStream<Standalone<RangeResultRef>> results;
 		try {
 			state Future<Void> stream = tx.getRangeStream(results,
 			                                              KeySelector(firstGreaterOrEqual(next), next.arena()),

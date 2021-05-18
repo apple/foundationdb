@@ -270,4 +270,6 @@ inline bool Endpoint::isLocal() const {
 	       (localAddrs.secondaryAddress.present() && addresses.address == localAddrs.secondaryAddress.get());
 }
 
+Future<Void> allAlternativesFailedDelay(Future<Void> const& okFuture);
+
 #endif

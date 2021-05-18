@@ -96,7 +96,7 @@ struct GetRangeStream : TestWorkload {
 		state Key next = self->begin;
 		state Future<Void> logFuture = logThroughput(self, &next);
 		loop {
-			state PromiseStream<Standalone<RangeResultRef>> results;
+			state BoundedPromiseStream<Standalone<RangeResultRef>> results;
 			try {
 				state Future<Void> stream = tx.getRangeStream(results,
 				                                              KeySelector(firstGreaterOrEqual(next), next.arena()),

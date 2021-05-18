@@ -653,6 +653,8 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 	virtual void fire(T const&) override { ASSERT(false); }
 	virtual void fire(T&&) override { ASSERT(false); }
 
+	bool shouldFireImmediately() { return SingleCallback<T>::next != this; }
+
 protected:
 	T popImpl() {
 		if (queue.empty()) {
@@ -664,8 +666,6 @@ protected:
 		queue.pop();
 		return copy;
 	}
-
-	bool shouldFireImmediately() { return SingleCallback<T>::next != this; }
 
 	bool hasError() { return error.isValid(); }
 };
@@ -994,6 +994,133 @@ public:
 
 private:
 	NotifiedQueue<T>* queue;
+};
+
+template <class T>
+struct BoundedNotifiedQueue final : NotifiedQueue<T>, FastAllocated<BoundedNotifiedQueue<T>> {
+	using FastAllocated<BoundedNotifiedQueue<T>>::operator new;
+	using FastAllocated<BoundedNotifiedQueue<T>>::operator delete;
+
+	int64_t bytesSent = 0;
+	int64_t bytesAcknowledged = 0;
+	int64_t bytesLimit = 1;
+	Promise<Void> ready;
+
+	BoundedNotifiedQueue(int futures, int promises) : NotifiedQueue<T>(futures, promises), ready(nullptr) {}
+
+	void destroy() override { delete this; }
+
+	T pop() override {
+		T res = this->popImpl();
+		bytesAcknowledged += res.expectedSize();
+		if (bytesSent - bytesAcknowledged < bytesLimit && ready.isValid() && ready.canBeSet()) {
+			Promise<Void> hold = ready;
+			ready.send(Void());
+		}
+		return res;
+	}
+};
+
+template <class T>
+class BoundedPromiseStream {
+public:
+	// stream.send( request )
+	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
+
+	void send(const T& value) const {
+		if (!queue->shouldFireImmediately()) {
+			queue->bytesSent += value.expectedSize();
+			if ((!queue->ready.isValid() || (queue->ready.isSet() && !queue->ready.getFuture().isError())) &&
+			    queue->bytesSent - queue->bytesAcknowledged >= queue->bytesLimit) {
+				queue->ready = Promise<Void>();
+			}
+		}
+		queue->send(value);
+	}
+	void send(T&& value) const {
+		if (!queue->shouldFireImmediately()) {
+			queue->bytesSent += value.expectedSize();
+			if ((!queue->ready.isValid() || (queue->ready.isSet() && !queue->ready.getFuture().isError())) &&
+			    queue->bytesSent - queue->bytesAcknowledged >= queue->bytesLimit) {
+				queue->ready = Promise<Void>();
+			}
+		}
+		queue->send(std::move(value));
+	}
+	void sendError(const Error& error) const { queue->sendError(error); }
+
+	// stream.getReply( request )
+	//   Reliable at least once delivery: Eventually delivers request at least once and returns one of the replies if
+	//   communication is possible.  Might deliver request
+	//      more than once.
+	//   If a reply is returned, request was or will be delivered one or more times.
+	//   If cancelled, request was or will be delivered zero or more times.
+	template <class X>
+	Future<REPLY_TYPE(X)> getReply(const X& value) const {
+		send(value);
+		return getReplyPromise(value).getFuture();
+	}
+	template <class X>
+	Future<REPLY_TYPE(X)> getReply(const X& value, TaskPriority taskID) const {
+		setReplyPriority(value, taskID);
+		return getReplyPromise(value).getFuture();
+	}
+
+	template <class X>
+	Future<X> getReply() const {
+		return getReply(Promise<X>());
+	}
+	template <class X>
+	Future<X> getReplyWithTaskID(TaskPriority taskID) const {
+		Promise<X> reply;
+		reply.getEndpoint(taskID);
+		return getReply(reply);
+	}
+
+	FutureStream<T> getFuture() const {
+		queue->addFutureRef();
+		return FutureStream<T>(queue);
+	}
+	BoundedPromiseStream() : queue(new BoundedNotifiedQueue<T>(0, 1)) {}
+	BoundedPromiseStream(const BoundedPromiseStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
+	BoundedPromiseStream(BoundedPromiseStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
+	void operator=(const BoundedPromiseStream& rhs) {
+		rhs.queue->addPromiseRef();
+		if (queue)
+			queue->delPromiseRef();
+		queue = rhs.queue;
+	}
+	void operator=(BoundedPromiseStream&& rhs) noexcept {
+		if (queue != rhs.queue) {
+			if (queue)
+				queue->delPromiseRef();
+			queue = rhs.queue;
+			rhs.queue = 0;
+		}
+	}
+	~BoundedPromiseStream() {
+		if (queue)
+			queue->delPromiseRef();
+		// queue = (NotifiedQueue<T>*)0xdeadbeef;
+	}
+
+	bool operator==(const BoundedPromiseStream<T>& rhs) const { return queue == rhs.queue; }
+	bool isEmpty() const { return !queue->isReady(); }
+
+	Future<Void> onReady() {
+		if (queue->ready.isValid() && queue->ready.isSet() && queue->ready.getFuture().isError()) {
+			return queue->ready.getFuture().getError();
+		}
+		if (queue->bytesSent - queue->bytesAcknowledged < queue->bytesLimit) {
+			return Void();
+		}
+		return queue->ready.getFuture();
+	}
+
+	void setByteLimit(int64_t limit) { queue->bytesLimit = limit; }
+
+private:
+	BoundedNotifiedQueue<T>* queue;
 };
 
 // Neither of these implementations of REPLY_TYPE() works on both MSVC and g++, so...

@@ -26,7 +26,14 @@
 
 namespace ParallelStreamTest {
 
-ACTOR static Future<Void> produce(ParallelStream<int>::Fragment* fragment, int value) {
+struct TestValue {
+	int x;
+	TestValue(int x) : x(x) {}
+	int expectedSize() const { return sizeof(int); }
+};
+
+ACTOR static Future<Void> produce(ParallelStream<ParallelStreamTest::TestValue>::Fragment* fragment,
+                                  ParallelStreamTest::TestValue value) {
 	wait(delay(deterministicRandom()->random01()));
 	fragment->send(value);
 	wait(delay(deterministicRandom()->random01()));
@@ -34,12 +41,12 @@ ACTOR static Future<Void> produce(ParallelStream<int>::Fragment* fragment, int v
 	return Void();
 }
 
-ACTOR static Future<Void> consume(FutureStream<int> stream, int expected) {
+ACTOR static Future<Void> consume(FutureStream<ParallelStreamTest::TestValue> stream, int expected) {
 	state int next;
 	try {
 		loop {
-			int value = waitNext(stream);
-			ASSERT(value == next++);
+			ParallelStreamTest::TestValue value = waitNext(stream);
+			ASSERT(value.x == next++);
 		}
 	} catch (Error& e) {
 		ASSERT(e.code() == error_code_end_of_stream);
@@ -51,11 +58,11 @@ ACTOR static Future<Void> consume(FutureStream<int> stream, int expected) {
 } // namespace ParallelStreamTest
 
 TEST_CASE("/fdbclient/ParallelStream") {
-	state PromiseStream<int> results;
+	state BoundedPromiseStream<ParallelStreamTest::TestValue> results;
 	state size_t concurrency = deterministicRandom()->randomInt(1, 11);
 	state size_t bufferLimit = concurrency + deterministicRandom()->randomInt(0, 11);
 	state size_t numProducers = deterministicRandom()->randomInt(1, 1001);
-	state ParallelStream<int> parallelStream(results, concurrency, bufferLimit);
+	state ParallelStream<ParallelStreamTest::TestValue> parallelStream(results, concurrency, bufferLimit);
 	state Future<Void> consumer = ParallelStreamTest::consume(results.getFuture(), numProducers);
 	state std::vector<Future<Void>> producers;
 	TraceEvent("StartingParallelStreamTest")
@@ -64,8 +71,8 @@ TEST_CASE("/fdbclient/ParallelStream") {
 	    .detail("NumProducers", numProducers);
 	state int i = 0;
 	for (; i < numProducers; ++i) {
-		ParallelStream<int>::Fragment* fragment = wait(parallelStream.createFragment());
-		producers.push_back(ParallelStreamTest::produce(fragment, i));
+		ParallelStream<ParallelStreamTest::TestValue>::Fragment* fragment = wait(parallelStream.createFragment());
+		producers.push_back(ParallelStreamTest::produce(fragment, ParallelStreamTest::TestValue(i)));
 	}
 	wait(parallelStream.finish());
 	wait(consumer);
