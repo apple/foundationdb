@@ -31,6 +31,8 @@
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h" // must be last include
 
+// ParallelStream is used to fetch data from multiple streams in parallel and then merge them back into a single stream
+// in order.
 template <class T>
 class ParallelStream {
 	BoundedFlowLock semaphore;
@@ -39,6 +41,7 @@ class ParallelStream {
 	};
 
 public:
+	// A Fragment is a single stream that will get results to be merged back into the main output stream
 	class Fragment : public ReferenceCounted<Fragment> {
 		ParallelStream* parallelStream;
 		PromiseStream<T> stream;
@@ -67,6 +70,7 @@ private:
 	Future<Void> flusher;
 
 public:
+	// A background actor which take results from the oldest fragment and sends them to the main output stream
 	ACTOR static Future<Void> flushToClient(ParallelStream<T>* self) {
 		state const int messagesBetweenYields = 1000;
 		state int messagesSinceYield = 0;
@@ -105,6 +109,7 @@ public:
 		flusher = flushToClient(this);
 	}
 
+	// Creates a fragment to get merged into the main output stream
 	ACTOR static Future<Fragment*> createFragmentImpl(ParallelStream<T>* self) {
 		int64_t permitNumber = wait(self->semaphore.take());
 		auto fragment = makeReference<Fragment>(self, permitNumber, FragmentConstructorTag());

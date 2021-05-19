@@ -21,6 +21,9 @@
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// Throwing all_alternatives_failed will cause the client to issue a GetKeyLocationRequest to the proxy, so this actor
+// attempts to limit the number of these errors thrown by a single client to prevent it from saturating the proxies with
+// these requests
 ACTOR Future<Void> allAlternativesFailedDelay(Future<Void> okFuture) {
 	if (now() - g_network->networkInfo.newestAlternativesFailure > FLOW_KNOBS->ALTERNATIVES_FAILURE_RESET_TIME) {
 		g_network->networkInfo.oldestAlternativesFailure = now();

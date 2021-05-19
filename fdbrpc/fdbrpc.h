@@ -271,6 +271,8 @@ struct AcknowledgementReply {
 	}
 };
 
+// Registered on the server to recieve acknowledgements that the client has received stream data. This prevents the
+// server from sending too much data to the client if the client is not consuming it.
 struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<AcknowledgementReceiver> {
 	using FastAllocated<AcknowledgementReceiver>::operator new;
 	using FastAllocated<AcknowledgementReceiver>::operator delete;
@@ -289,6 +291,8 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 		ErrorOr<AcknowledgementReply> message;
 		reader.deserialize(message);
 		if (message.isError()) {
+			// The client will send an operation_obsolete error on the acknowledgement stream when it cancels the
+			// ReplyPromiseStream
 			if (!ready.isValid()) {
 				ready = Promise<Void>();
 			}
@@ -299,12 +303,14 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 			if (ready.isValid() && bytesSent - bytesAcknowledged < bytesLimit) {
 				Promise<Void> hold = ready;
 				ready = Promise<Void>(nullptr);
+				// Sending to this promise could cause the ready to be replaced, so we need to hold a local copy
 				hold.send(Void());
 			}
 		}
 	}
 };
 
+// A version of NetNotifiedQueue which adds support for acknowledgments.
 template <class T>
 struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
                                                     FlowReceiver,
@@ -319,6 +325,7 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 	NetNotifiedQueueWithAcknowledgements(int futures, int promises) : NotifiedQueue<T>(futures, promises) {}
 	NetNotifiedQueueWithAcknowledgements(int futures, int promises, const Endpoint& remoteEndpoint)
 	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true) {
+		// A ReplyPromiseStream will be terminated on the server side if the network connection with the client breaks
 		acknowledgements.failures = tagError<Void>(
 		    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(remoteEndpoint), operation_obsolete());
 	}
@@ -332,6 +339,9 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 		if (message.isError()) {
 			if (message.getError().code() == error_code_broken_promise) {
 				ASSERT(requestStreamEndpoint.isValid());
+				// We will get a broken_promise on the client side only if the ReplyPromiseStream was cancelled without
+				// sending an error. In this case the storage server actor must have been cancelled so future
+				// GetKeyValuesStream requests on the same endpoint will fail
 				IFailureMonitor::failureMonitor().endpointNotFound(requestStreamEndpoint);
 			}
 			this->sendError(message.getError());
@@ -341,6 +351,8 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 				    FlowTransport::transport().loadedEndpoint(message.get().asUnderlyingType().acknowledgeToken.get()));
 			}
 			if (this->shouldFireImmediately()) {
+				// This message is going to be consumed by the client immediately (and therefore will not call pop()) so
+				// send an ack immediately
 				if (acknowledgements.getRawEndpoint().isValid()) {
 					acknowledgements.bytesAcknowledged += message.get().asUnderlyingType().expectedSize();
 					FlowTransport::transport().sendUnreliable(
@@ -358,6 +370,7 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 
 	T pop() override {
 		T res = this->popImpl();
+		// A reply that has been queued up is being consumed, so send an ack to the server
 		if (acknowledgements.getRawEndpoint().isValid()) {
 			acknowledgements.bytesAcknowledged += res.expectedSize();
 			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<AcknowledgementReply>>(
@@ -370,12 +383,14 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 
 	~NetNotifiedQueueWithAcknowledgements() {
 		if (acknowledgements.getRawEndpoint().isValid() && acknowledgements.isRemoteEndpoint() && !this->hasError()) {
+			// Notify the server that a client is not using this ReplyPromiseStream anymore
 			FlowTransport::transport().sendUnreliable(
 			    SerializeSource<ErrorOr<AcknowledgementReply>>(operation_obsolete()),
 			    acknowledgements.getEndpoint(TaskPriority::ReadSocket),
 			    false);
 		}
 		if (isRemoteEndpoint() && !sentError && !acknowledgements.failures.isReady()) {
+			// The ReplyPromiseStream was cancelled before sending an error, so the storage server must have died
 			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(broken_promise()),
 			                                          getEndpoint(TaskPriority::ReadSocket),
 			                                          false);
@@ -440,6 +455,7 @@ public:
 	explicit ReplyPromiseStream(const Endpoint& endpoint)
 	  : queue(new NetNotifiedQueueWithAcknowledgements<T>(0, 1, endpoint)), errors(nullptr) {}
 
+	// Used by endStreamOnDisconnect to detect when all references to the ReplyPromiseStream have been dropped
 	Future<Void> getErrorFutureAndDelPromiseRef() {
 		ASSERT(errors && errors->getPromiseReferenceCount() > 1);
 		errors->addFutureRef();
@@ -464,6 +480,8 @@ public:
 	bool isEmpty() const { return !queue->isReady(); }
 	uint32_t size() const { return queue->size(); }
 
+	// Must be called on the server before sending results on the stream to ratelimit the amount of data outstanding to
+	// the client
 	Future<Void> onReady() {
 		ASSERT(queue->acknowledgements.bytesLimit > 0);
 		if (queue->acknowledgements.failures.isError()) {
@@ -482,6 +500,8 @@ public:
 		return queue->acknowledgements.ready.getFuture() || queue->acknowledgements.failures;
 	}
 
+	// Must be called on the server before using a ReplyPromiseStream to limit the amount of outstanding bytes to the
+	// client
 	void setByteLimit(int64_t byteLimit) { queue->acknowledgements.bytesLimit = byteLimit; }
 
 	void operator=(const ReplyPromiseStream& rhs) {
