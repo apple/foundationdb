@@ -24,6 +24,11 @@
 
 #include "flow/flow.h"
 
+const StringRef ExcludeLocalityKeyDcIdPrefix = LiteralStringRef("dcid:");
+const StringRef ExcludeLocalityKeyMachineIdPrefix = LiteralStringRef("machineid:");
+const StringRef ExcludeLocalityKeyProcessIdPrefix = LiteralStringRef("processid:");
+const StringRef ExcludeLocalityKeyZoneIdPrefix = LiteralStringRef("zoneid:");
+
 struct ProcessClass {
 	constexpr static FileIdentifier file_identifier = 6697257;
 	// This enum is stored in restartInfo.ini for upgrade tests, so be very careful about changing the existing items!

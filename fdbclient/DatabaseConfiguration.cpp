@@ -632,6 +632,44 @@ std::set<AddressExclusion> DatabaseConfiguration::getExcludedServers() const {
 	return addrs;
 }
 
+bool DatabaseConfiguration::isExcludedLocality(const LocalityData& locality) const {
+	return (locality.dcId().present() ? get(encodeExcludedLocalityKey(ExcludeLocalityKeyDcIdPrefix.toString() + locality.dcId().get().toString())).present() : false) ||
+		   (locality.dcId().present() ? get(encodeFailedLocalityKey(ExcludeLocalityKeyDcIdPrefix.toString() + locality.dcId().get().toString())).present() : false) ||
+		   (locality.machineId().present() ? get(encodeExcludedLocalityKey(ExcludeLocalityKeyMachineIdPrefix.toString() + locality.machineId().get().toString())).present() : false) ||
+		   (locality.machineId().present() ? get(encodeFailedLocalityKey(ExcludeLocalityKeyMachineIdPrefix.toString() + locality.machineId().get().toString())).present() : false) ||
+		   (locality.processId().present() ? get(encodeExcludedLocalityKey(ExcludeLocalityKeyProcessIdPrefix.toString() + locality.processId().get().toString())).present() : false) ||
+		   (locality.processId().present() ? get(encodeFailedLocalityKey(ExcludeLocalityKeyProcessIdPrefix.toString() + locality.processId().get().toString())).present() : false) ||
+		   (locality.zoneId().present() ? get(encodeExcludedLocalityKey(ExcludeLocalityKeyZoneIdPrefix.toString() + locality.zoneId().get().toString())).present() : false) ||
+		   (locality.zoneId().present() ? get(encodeFailedLocalityKey(ExcludeLocalityKeyZoneIdPrefix.toString() + locality.zoneId().get().toString())).present() : false);
+}
+
+bool DatabaseConfiguration::isMachineExcluded(const LocalityData& locality) const {
+	return (locality.dcId().present() ? get(encodeExcludedLocalityKey(ExcludeLocalityKeyDcIdPrefix.toString() + locality.dcId().get().toString())).present() : false) ||
+		   (locality.dcId().present() ? get(encodeFailedLocalityKey(ExcludeLocalityKeyDcIdPrefix.toString() + locality.dcId().get().toString())).present() : false) ||
+		   (locality.machineId().present() ? get(encodeExcludedLocalityKey(ExcludeLocalityKeyMachineIdPrefix.toString() + locality.machineId().get().toString())).present() : false) ||
+		   (locality.machineId().present() ? get(encodeFailedLocalityKey(ExcludeLocalityKeyMachineIdPrefix.toString() + locality.machineId().get().toString())).present() : false) ||
+		   (locality.zoneId().present() ? get(encodeExcludedLocalityKey(ExcludeLocalityKeyZoneIdPrefix.toString() + locality.zoneId().get().toString())).present() : false) ||
+		   (locality.zoneId().present() ? get(encodeFailedLocalityKey(ExcludeLocalityKeyZoneIdPrefix.toString() + locality.zoneId().get().toString())).present() : false);
+}
+
+std::set<std::string> DatabaseConfiguration::getExcludedLocalities() const {
+	const_cast<DatabaseConfiguration*>(this)->makeConfigurationImmutable();
+	std::set<std::string> localities;
+	for (auto i = lower_bound(rawConfiguration, excludedLocalityKeys.begin);
+	     i != rawConfiguration.end() && i->key < excludedLocalityKeys.end;
+	     ++i) {
+		std::string l = decodeExcludedLocalityKey(i->key);
+		localities.insert(l);
+	}
+	for (auto i = lower_bound(rawConfiguration, failedLocalityKeys.begin);
+	     i != rawConfiguration.end() && i->key < failedLocalityKeys.end;
+	     ++i) {
+		std::string l = decodeFailedLocalityKey(i->key);
+		localities.insert(l);
+	}
+	return localities;
+}
+
 void DatabaseConfiguration::makeConfigurationMutable() {
 	if (mutableConfiguration.present())
 		return;

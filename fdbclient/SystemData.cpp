@@ -648,6 +648,18 @@ std::string encodeExcludedServersKey(AddressExclusion const& addr) {
 	return excludedServersPrefix.toString() + addr.toString();
 }
 
+const KeyRangeRef excludedLocalityKeys(LiteralStringRef("\xff/conf/excludedlocality/"), LiteralStringRef("\xff/conf/excludedlocality0"));
+const KeyRef excludedLocalityPrefix = excludedLocalityKeys.begin;
+const KeyRef excludedLocalityVersionKey = LiteralStringRef("\xff/conf/excludedlocality");
+const std::string decodeExcludedLocalityKey(KeyRef const& key) {
+	ASSERT(key.startsWith(excludedLocalityPrefix));
+	return key.removePrefix(excludedLocalityPrefix).toString();
+}
+std::string encodeExcludedLocalityKey(std::string const& locality) {
+	// FIXME: make sure what's persisted here is not affected by innocent changes elsewhere
+	return excludedLocalityPrefix.toString() + locality;
+}
+
 const KeyRangeRef failedServersKeys(LiteralStringRef("\xff/conf/failed/"), LiteralStringRef("\xff/conf/failed0"));
 const KeyRef failedServersPrefix = failedServersKeys.begin;
 const KeyRef failedServersVersionKey = LiteralStringRef("\xff/conf/failed");
@@ -663,6 +675,18 @@ const AddressExclusion decodeFailedServersKey(KeyRef const& key) {
 std::string encodeFailedServersKey(AddressExclusion const& addr) {
 	// FIXME: make sure what's persisted here is not affected by innocent changes elsewhere
 	return failedServersPrefix.toString() + addr.toString();
+}
+
+const KeyRangeRef failedLocalityKeys(LiteralStringRef("\xff/conf/failedlocality/"), LiteralStringRef("\xff/conf/failedlocality0"));
+const KeyRef failedLocalityPrefix = failedLocalityKeys.begin;
+const KeyRef failedLocalityVersionKey = LiteralStringRef("\xff/conf/failedlocality");
+const std::string decodeFailedLocalityKey(KeyRef const& key) {
+	ASSERT(key.startsWith(failedLocalityPrefix));
+	return key.removePrefix(failedLocalityPrefix).toString();
+}
+std::string encodeFailedLocalityKey(std::string const& locality) {
+	// FIXME: make sure what's persisted here is not affected by innocent changes elsewhere
+	return failedLocalityPrefix.toString() + locality;
 }
 
 // const KeyRangeRef globalConfigKeys( LiteralStringRef("\xff/globalConfig/"), LiteralStringRef("\xff/globalConfig0") );

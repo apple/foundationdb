@@ -280,6 +280,26 @@ public:
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
+class ExcludedLocalitiesRangeImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit ExcludedLocalitiesRangeImpl(KeyRangeRef kr);
+	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
+	Key decode(const KeyRef& key) const override;
+	Key encode(const KeyRef& key) const override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
+class FailedLocalitiesRangeImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit FailedLocalitiesRangeImpl(KeyRangeRef kr);
+	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
+	Key decode(const KeyRef& key) const override;
+	Key encode(const KeyRef& key) const override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
 class ExcludeServersRangeImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit ExcludeServersRangeImpl(KeyRangeRef kr);
