@@ -37,6 +37,7 @@ public:
 	ConfigClassSet(VectorRef<KeyRef> configClasses);
 
 	bool contains(KeyRef configClass) const;
+	std::set<Key> const& getClasses() const;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

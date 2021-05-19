@@ -146,8 +146,7 @@ public:
 
 	template <class ConfigStore>
 	Future<Void> consume(ConfigStore& configStore) {
-		// TODO: Reenable compaction
-		return fetchChanges(this, &configStore); /* ||compactor(this); */
+		return fetchChanges(this, &configStore) || compactor(this);
 	}
 
 	UID getID() const { return id; }

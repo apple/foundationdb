@@ -31,9 +31,8 @@ bool matchesConfigClass(Optional<ConfigClassSet> const& configClassSet, Optional
 } // namespace
 
 class ConfigBroadcasterImpl {
-	std::map<Key, Endpoint::Token> configClassToToken;
-	std::map<Endpoint::Token, ReplyPromise<ConfigFollowerGetChangesRequest>> tokenToReply;
-	std::map<Endpoint::Token, std::vector<Key>> tokenToConfigClasses;
+	std::map<Key, std::vector<Endpoint::Token>> configClassToTokens;
+	std::map<Endpoint::Token, ConfigFollowerGetChangesRequest> tokenToRequest;
 	std::map<ConfigKey, Value> snapshot;
 	std::deque<Standalone<VersionedConfigMutationRef>> versionedMutations;
 	Version lastCompactedVersion;
@@ -44,10 +43,31 @@ class ConfigBroadcasterImpl {
 	UID id;
 	CounterCollection cc;
 	Counter compactRequest;
-	Counter successfulChangeRequest;
+	mutable Counter successfulChangeRequest;
 	Counter failedChangeRequest;
 	Counter snapshotRequest;
 	Future<Void> logger;
+
+	template <class Changes>
+	void sendChangesReply(ConfigFollowerGetChangesRequest const& req, Changes const& changes) const {
+		ASSERT_LT(req.lastSeenVersion, mostRecentVersion);
+		ConfigFollowerGetChangesReply reply;
+		reply.mostRecentVersion = mostRecentVersion;
+		for (const auto& versionedMutation : changes) {
+			if (versionedMutation.version > req.lastSeenVersion &&
+			    matchesConfigClass(req.configClassSet, versionedMutation.mutation.getConfigClass())) {
+				TraceEvent(SevDebug, "ConfigBroadcasterSendingChangeMutation", id)
+				    .detail("Version", versionedMutation.version)
+				    .detail("ReqLastSeenVersion", req.lastSeenVersion)
+				    .detail("ConfigClass", versionedMutation.mutation.getConfigClass())
+				    .detail("KnobName", versionedMutation.mutation.getKnobName())
+				    .detail("KnobValue", versionedMutation.mutation.getValue());
+				reply.versionedMutations.push_back_deep(reply.versionedMutations.arena(), versionedMutation);
+			}
+		}
+		req.reply.send(reply);
+		++successfulChangeRequest;
+	}
 
 	ACTOR static Future<Void> serve(ConfigBroadcaster* self, ConfigBroadcasterImpl* impl, ConfigFollowerInterface cfi) {
 		impl->actors.add(impl->consumer->consume(*self));
@@ -70,29 +90,19 @@ class ConfigBroadcasterImpl {
 						++impl->failedChangeRequest;
 						continue;
 					}
-					// TODO: If there are no new changes, register the request and push
-					// changes when ready
-					ConfigFollowerGetChangesReply reply;
-					reply.mostRecentVersion = impl->mostRecentVersion;
-					for (const auto& versionedMutation : impl->versionedMutations) {
-						if (versionedMutation.version > req.lastSeenVersion &&
-						    matchesConfigClass(req.configClassSet, versionedMutation.mutation.getConfigClass())) {
-							TraceEvent(SevDebug, "ConfigBroadcasterSendingChangeMutation", impl->id)
-							    .detail("Version", versionedMutation.version)
-							    .detail("ReqLastSeenVersion", req.lastSeenVersion)
-							    .detail("ConfigClass", versionedMutation.mutation.getConfigClass())
-							    .detail("KnobName", versionedMutation.mutation.getKnobName())
-							    .detail("KnobValue", versionedMutation.mutation.getValue());
-							reply.versionedMutations.push_back_deep(reply.versionedMutations.arena(),
-							                                        versionedMutation);
+					if (req.lastSeenVersion < impl->mostRecentVersion) {
+						impl->sendChangesReply(req, impl->versionedMutations);
+					} else {
+						auto token = req.reply.getEndpoint().token;
+						impl->tokenToRequest[token] = req;
+						ASSERT(req.configClassSet.present());
+						for (const auto& configClass : req.configClassSet.get().getClasses()) {
+							impl->configClassToTokens[configClass].push_back(token);
 						}
 					}
-					req.reply.send(reply);
-					++impl->successfulChangeRequest;
 				}
 				when(ConfigFollowerCompactRequest req = waitNext(cfi.compact.getFuture())) {
 					++impl->compactRequest;
-					// TODO: Use std::algorithm here
 					while (!impl->versionedMutations.empty()) {
 						const auto& version = impl->versionedMutations.front().version;
 						if (version > req.version) {
@@ -121,19 +131,35 @@ class ConfigBroadcasterImpl {
 public:
 	Future<Void> serve(ConfigBroadcaster* self, ConfigFollowerInterface const& cfi) { return serve(self, this, cfi); }
 
-	Future<Void> addVersionedMutations(Standalone<VectorRef<VersionedConfigMutationRef>> const& versionedMutations,
+	Future<Void> addVersionedMutations(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
 	                                   Version mostRecentVersion) {
-		this->versionedMutations.insert(
-		    this->versionedMutations.end(), versionedMutations.begin(), versionedMutations.end());
-		for (const auto& versionedMutation : versionedMutations) {
+		this->mostRecentVersion = mostRecentVersion;
+		versionedMutations.insert(versionedMutations.end(), changes.begin(), changes.end());
+		std::set<Endpoint::Token> toNotify;
+		for (const auto& versionedMutation : changes) {
 			const auto& mutation = versionedMutation.mutation;
+			if (!mutation.getConfigClass().present()) {
+				// Update everything
+				for (const auto& [token, req] : tokenToRequest) {
+					toNotify.insert(token);
+				}
+			} else {
+				for (const auto& token : configClassToTokens[mutation.getConfigClass().get()]) {
+					toNotify.insert(token);
+				}
+				configClassToTokens.clear();
+			}
 			if (mutation.isSet()) {
 				snapshot[mutation.getKey()] = mutation.getValue().get();
 			} else {
 				snapshot.erase(mutation.getKey());
 			}
 		}
-		this->mostRecentVersion = mostRecentVersion;
+		for (const auto& token : toNotify) {
+			// TODO: What if this reply gets lost?
+			sendChangesReply(tokenToRequest[token], changes);
+			tokenToRequest.erase(token);
+		}
 		return Void();
 	}
 

@@ -56,3 +56,7 @@ ConfigClassSet::ConfigClassSet(VectorRef<KeyRef> configClasses) {
 bool ConfigClassSet::contains(KeyRef configClass) const {
 	return classes.count(configClass);
 }
+
+std::set<Key> const& ConfigClassSet::getClasses() const {
+	return classes;
+}

@@ -30,11 +30,11 @@
 
 namespace {
 
-const KeyRef lastCompactedVersionKey = LiteralStringRef("lastCompactedVersion");
-const KeyRef liveTransactionVersionKey = LiteralStringRef("liveTransactionVersion");
-const KeyRef committedVersionKey = LiteralStringRef("committedVersion");
-const KeyRangeRef kvKeys = KeyRangeRef(LiteralStringRef("kv/"), LiteralStringRef("kv0"));
-const KeyRangeRef mutationKeys = KeyRangeRef(LiteralStringRef("mutation/"), LiteralStringRef("mutation0"));
+const KeyRef lastCompactedVersionKey = "lastCompactedVersion"_sr;
+const KeyRef liveTransactionVersionKey = "liveTransactionVersion"_sr;
+const KeyRef committedVersionKey = "committedVersion"_sr;
+const KeyRangeRef kvKeys = KeyRangeRef("kv/"_sr, "kv0"_sr);
+const KeyRangeRef mutationKeys = KeyRangeRef("mutation/"_sr, "mutation0"_sr);
 
 Key versionedMutationKey(Version version, uint32_t index) {
 	ASSERT(version >= 0);
