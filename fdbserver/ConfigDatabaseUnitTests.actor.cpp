@@ -121,10 +121,11 @@ class LocalConfigEnvironment {
 	Version lastWrittenVersion{ 0 };
 
 public:
-	LocalConfigEnvironment(std::string const& configPath, std::map<std::string, std::string> const& manualKnobOverrides)
+	LocalConfigEnvironment(std::string const& configPath,
+	                       std::map<std::string, std::string> const& manualKnobOverrides = {})
 	  : localConfiguration(configPath, manualKnobOverrides), id(deterministicRandom()->randomUniqueID()) {}
 	Future<Void> setup() { return localConfiguration.initialize("./", id); }
-	Future<Void> restart(std::string const& newConfigPath) {
+	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
 		localConfiguration = LocalConfiguration(newConfigPath, {});
 		return setup();
 	}
@@ -148,15 +149,12 @@ class BroadcasterToLocalConfigEnvironment {
 	UID localConfigID;
 
 	ACTOR static Future<Void> setup(BroadcasterToLocalConfigEnvironment* self) {
-		wait(self->localConfiguration.initialize("./", self->localConfigID));
 		self->broadcastServer = self->broadcaster.serve(self->cfi->get());
-		self->configConsumer =
-		    self->localConfiguration.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(self->cfi));
+		wait(setupLocalConfig(self));
 		return Void();
 	}
 
-	ACTOR static Future<Void> restartLocalConfig(BroadcasterToLocalConfigEnvironment* self, std::string configPath) {
-		self->localConfiguration = LocalConfiguration(configPath, {});
+	ACTOR static Future<Void> setupLocalConfig(BroadcasterToLocalConfigEnvironment* self) {
 		wait(self->localConfiguration.initialize("./", self->localConfigID));
 		self->configConsumer =
 		    self->localConfiguration.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(self->cfi));
@@ -186,7 +184,10 @@ public:
 		broadcastServer = broadcaster.serve(cfi->get());
 	}
 
-	Future<Void> restartLocalConfig(std::string const& configPath) { return restartLocalConfig(this, configPath); }
+	Future<Void> restartLocalConfig(std::string const& configPath) {
+		localConfiguration = LocalConfiguration(configPath, {});
+		return setupLocalConfig(this);
+	}
 
 	Future<Void> compact() { return cfi->get().compact.getReply(ConfigFollowerCompactRequest{ lastWrittenVersion }); }
 
@@ -213,7 +214,7 @@ public:
 
 	Future<Void> setup() { return setup(this); }
 
-	Future<Void> restart() {
+	Future<Void> restartNode() {
 		server.cancel();
 		node = IConfigDatabaseNode::createSimple();
 		return setup();
@@ -231,35 +232,46 @@ public:
 
 class TransactionToLocalConfigEnvironment {
 	ConfigTransactionInterface cti;
-	Reference<AsyncVar<ConfigFollowerInterface>> cfi;
+	ConfigFollowerInterface nodeToBroadcaster;
 	Reference<IConfigTransaction> tr;
+	Reference<AsyncVar<ConfigFollowerInterface>> broadcasterToLocalConfig;
 	Reference<IConfigDatabaseNode> node;
 	UID nodeID;
+	UID localConfigID;
 	Future<Void> ctiServer;
 	Future<Void> cfiServer;
 	LocalConfiguration localConfiguration;
-	Future<Void> consumer;
+	ConfigBroadcaster broadcaster;
+	Future<Void> broadcastServer;
+	Future<Void> localConfigConsumer;
 
 	ACTOR static Future<Void> setup(TransactionToLocalConfigEnvironment* self) {
-		wait(self->localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
 		wait(setupNode(self));
-		self->consumer =
-		    self->localConfiguration.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(self->cfi));
+		wait(setupLocalConfig(self));
+		self->broadcastServer = self->broadcaster.serve(self->broadcasterToLocalConfig->get());
+		return Void();
+	}
+
+	ACTOR static Future<Void> setupLocalConfig(TransactionToLocalConfigEnvironment* self) {
+		wait(self->localConfiguration.initialize("./", self->localConfigID));
+		self->localConfigConsumer = self->localConfiguration.consume(
+		    IDependentAsyncVar<ConfigFollowerInterface>::create(self->broadcasterToLocalConfig));
 		return Void();
 	}
 
 	ACTOR static Future<Void> setupNode(TransactionToLocalConfigEnvironment* self) {
 		wait(self->node->initialize("./", self->nodeID));
 		self->ctiServer = self->node->serve(self->cti);
-		self->cfiServer = self->node->serve(self->cfi->get());
+		self->cfiServer = self->node->serve(self->nodeToBroadcaster);
 		return Void();
 	}
 
 public:
 	TransactionToLocalConfigEnvironment(std::string const& configPath)
-	  : cfi(makeReference<AsyncVar<ConfigFollowerInterface>>()), tr(IConfigTransaction::createSimple(cti)),
-	    node(IConfigDatabaseNode::createSimple()), nodeID(deterministicRandom()->randomUniqueID()),
-	    localConfiguration(configPath, {}) {}
+	  : broadcasterToLocalConfig(makeReference<AsyncVar<ConfigFollowerInterface>>()),
+	    node(IConfigDatabaseNode::createSimple()), tr(IConfigTransaction::createSimple(cti)),
+	    nodeID(deterministicRandom()->randomUniqueID()), localConfigID(deterministicRandom()->randomUniqueID()),
+	    localConfiguration(configPath, {}), broadcaster(nodeToBroadcaster) {}
 
 	Future<Void> setup() { return setup(this); }
 
@@ -270,12 +282,23 @@ public:
 		return setupNode(this);
 	}
 
+	void changeBroadcaster() {
+		broadcastServer.cancel();
+		broadcasterToLocalConfig->set(ConfigFollowerInterface{});
+		broadcastServer = broadcaster.serve(broadcasterToLocalConfig->get());
+	}
+
+	Future<Void> restartLocalConfig(std::string const& configPath) {
+		localConfiguration = LocalConfiguration(configPath, {});
+		return setupLocalConfig(this);
+	}
+
 	Future<Void> set(Optional<KeyRef> configClass, int64_t value) {
 		return addTestSetMutation(*tr, configClass, value);
 	}
 	Future<Void> clear(Optional<KeyRef> configClass) { return addTestClearMutation(*tr, configClass); }
 	Future<Void> check(Optional<int64_t> value) { return checkEventually(&localConfiguration, value); }
-	Future<Void> getError() const { return ctiServer || cfiServer || consumer; }
+	Future<Void> getError() const { return ctiServer || cfiServer || localConfigConsumer || broadcastServer; }
 };
 
 template <class Env, class... Args>
@@ -290,54 +313,129 @@ template <class Env, class... Args>
 Future<Void> check(Env& env, Args&&... args) {
 	return waitOrError(env.check(std::forward<Args>(args)...), env.getError());
 }
+template <class... Args>
+Future<Void> check(LocalConfigEnvironment& env, Args&&... args) {
+	env.check(std::forward<Args>(args)...);
+	return Void();
+}
 template <class Env, class... Args>
 Future<Void> compact(Env& env, Args&&... args) {
 	return waitOrError(env.compact(std::forward<Args>(args)...), env.getError());
 }
 
-} // namespace
+ACTOR template <class Env>
+Future<Void> testRestartLocalConfig() {
+	state Env env("class-A");
+	wait(env.setup());
+	wait(set(env, "class-A"_sr, 1));
+	wait(check(env, 1));
+	wait(env.restartLocalConfig("class-A"));
+	wait(check(env, 1));
+	wait(set(env, "class-A"_sr, 2));
+	wait(check(env, 2));
+	return Void();
+}
 
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Set") {
+ACTOR template <class Env>
+Future<Void> testRestartLocalConfigAndChangeClass() {
+	state Env env("class-A");
+	wait(env.setup());
+	wait(set(env, "class-A"_sr, 1));
+	wait(check(env, 1));
+	wait(env.restartLocalConfig("class-B"));
+	wait(check(env, 0));
+	wait(set(env, "class-B"_sr, 2));
+	wait(check(env, 2));
+	return Void();
+}
+
+ACTOR template <class Env>
+Future<Void> testSet() {
 	state LocalConfigEnvironment env("class-A", {});
 	wait(env.setup());
 	wait(set(env, "class-A"_sr, 1));
-	env.check(1);
+	wait(check(env, 1));
 	return Void();
 }
 
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Restart") {
-	state LocalConfigEnvironment env("class-A/class-B", {});
-	wait(env.setup());
-	wait(set(env, "class-A"_sr, 1));
-	wait(env.restart("class-A/class-B"));
-	env.check(1);
-	return Void();
-}
-
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/RestartFresh") {
-	state LocalConfigEnvironment env("class-A/class-B", {});
-	wait(env.setup());
-	wait(set(env, "class-A"_sr, 1));
-	wait(env.restart("class-B/class-A"));
-	env.check(Optional<int64_t>{});
-	return Void();
-}
-
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Clear") {
+ACTOR template <class Env>
+Future<Void> testClear() {
 	state LocalConfigEnvironment env("class-A", {});
 	wait(env.setup());
 	wait(set(env, "class-A"_sr, 1));
 	wait(clear(env, "class-A"_sr));
-	env.check(Optional<int64_t>{});
+	wait(check(env, Optional<int64_t>{}));
 	return Void();
 }
 
-TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/GlobalSet") {
-	state LocalConfigEnvironment env("class-A", {});
+ACTOR template <class Env>
+Future<Void> testGlobalSet() {
+	state Env env("class-A");
 	wait(env.setup());
 	wait(set(env, "class-A"_sr, 1));
 	wait(set(env, Optional<KeyRef>{}, 10));
 	env.check(10);
+	return Void();
+}
+
+ACTOR template <class Env>
+Future<Void> testIgnore() {
+	state Env env("class-A");
+	wait(env.setup());
+	wait(set(env, "class-B"_sr, 1));
+	choose {
+		when(wait(delay(5))) {}
+		when(wait(check(env, 1))) { ASSERT(false); }
+	}
+	return Void();
+}
+
+ACTOR template <class Env>
+Future<Void> testCompact() {
+	state Env env("class-A");
+	wait(env.setup());
+	wait(set(env, "class-A"_sr, 1));
+	wait(compact(env));
+	wait(check(env, 1));
+	return Void();
+}
+
+ACTOR template <class Env>
+Future<Void> testChangeBroadcaster() {
+	state Env env("class-A");
+	wait(env.setup());
+	wait(set(env, "class-A"_sr, 1));
+	wait(check(env, 1));
+	env.changeBroadcaster();
+	wait(set(env, "class-A"_sr, 2));
+	wait(check(env, 2));
+	return Void();
+}
+
+} // namespace
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Set") {
+	wait(testSet<LocalConfigEnvironment>());
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Restart") {
+	wait(testRestartLocalConfig<LocalConfigEnvironment>());
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/RestartFresh") {
+	wait(testRestartLocalConfigAndChangeClass<LocalConfigEnvironment>());
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Clear") {
+	wait(testClear<LocalConfigEnvironment>());
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/GlobalSet") {
+	wait(testGlobalSet<LocalConfigEnvironment>());
 	return Void();
 }
 
@@ -359,109 +457,57 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Manual") {
 }
 
 TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/Set") {
-	state BroadcasterToLocalConfigEnvironment env("class-A");
-	wait(env.setup());
-	wait(set(env, "class-A"_sr, 1));
-	wait(check(env, 1));
+	wait(testSet<BroadcasterToLocalConfigEnvironment>());
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/Clear") {
-	state BroadcasterToLocalConfigEnvironment env("class-A");
-	wait(env.setup());
-	wait(set(env, "class-A"_sr, 1));
-	wait(clear(env, "class-A"_sr));
-	wait(check(env, Optional<int64_t>{}));
+	wait(testClear<BroadcasterToLocalConfigEnvironment>());
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/Ignore") {
-	state BroadcasterToLocalConfigEnvironment env("class-A");
-	wait(env.setup());
-	wait(set(env, "class-B"_sr, 1));
-	choose {
-		when(wait(delay(5))) {}
-		when(wait(check(env, 1))) { ASSERT(false); }
-	}
+	wait(testIgnore<BroadcasterToLocalConfigEnvironment>());
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/GlobalSet") {
-	state BroadcasterToLocalConfigEnvironment env("class-A");
-	wait(env.setup());
-	wait(set(env, "class-A"_sr, 1));
-	wait(set(env, Optional<KeyRef>{}, 10));
-	wait(check(env, 10));
+	wait(testGlobalSet<BroadcasterToLocalConfigEnvironment>());
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/ChangeBroadcaster") {
-	state BroadcasterToLocalConfigEnvironment env("class-A");
-	wait(env.setup());
-	wait(set(env, "class-A"_sr, 1));
-	wait(check(env, 1));
-	env.changeBroadcaster();
-	wait(set(env, "class-A"_sr, 2));
-	wait(check(env, 2));
+	wait(testChangeBroadcaster<BroadcasterToLocalConfigEnvironment>());
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/RestartLocalConfig") {
-	state BroadcasterToLocalConfigEnvironment env("class-A");
-	wait(env.setup());
-	wait(set(env, "class-A"_sr, 1));
-	wait(check(env, 1));
-	wait(env.restartLocalConfig("class-A"));
-	wait(check(env, 1));
-	wait(set(env, "class-A"_sr, 2));
-	wait(check(env, 2));
+	wait(testRestartLocalConfig<BroadcasterToLocalConfigEnvironment>());
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/RestartLocalConfigAndChangeClass") {
-	state BroadcasterToLocalConfigEnvironment env("class-A/class-B");
-	wait(env.setup());
-	wait(set(env, "class-A"_sr, 1));
-	wait(check(env, 1));
-	wait(env.restartLocalConfig("class-B"));
-	wait(check(env, 0));
-	wait(set(env, "class-B"_sr, 2));
-	wait(check(env, 2));
+	wait(testRestartLocalConfigAndChangeClass<BroadcasterToLocalConfigEnvironment>());
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/Compact") {
-	state BroadcasterToLocalConfigEnvironment env("class-A");
-	wait(env.setup());
-	wait(set(env, "class-A"_sr, 1));
-	wait(compact(env));
-	wait(check(env, 1));
+	wait(testCompact<BroadcasterToLocalConfigEnvironment>());
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/Set") {
-	state TransactionToLocalConfigEnvironment env("class-A");
-	wait(env.setup());
-	wait(set(env, "class-A"_sr, 1));
-	wait(check(env, 1));
+	wait(testSet<TransactionToLocalConfigEnvironment>());
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/Clear") {
-	state TransactionToLocalConfigEnvironment env("class-A");
-	wait(env.setup());
-	wait(set(env, "class-A"_sr, 1));
-	wait(clear(env, "class-A"_sr));
-	wait(check(env, Optional<int64_t>{}));
+	wait(testClear<TransactionToLocalConfigEnvironment>());
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/GlobalSet") {
-	state TransactionToLocalConfigEnvironment env("class-A");
-	wait(env.setup());
-	wait(set(env, "class-A"_sr, 1));
-	wait(set(env, Optional<KeyRef>{}, 10));
-	wait(check(env, 10));
+	wait(testGlobalSet<TransactionToLocalConfigEnvironment>());
 	return Void();
 }
 
@@ -474,20 +520,28 @@ TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/RestartNode") {
 	return Void();
 }
 
+TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/ChangeBroadcaster") {
+	wait(testChangeBroadcaster<TransactionToLocalConfigEnvironment>());
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/RestartLocalConfig") {
+	wait(testRestartLocalConfig<TransactionToLocalConfigEnvironment>());
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/RestartLocalConfigAndChangeClass") {
+	wait(testRestartLocalConfigAndChangeClass<TransactionToLocalConfigEnvironment>());
+	return Void();
+}
+
 TEST_CASE("/fdbserver/ConfigDB/Transaction/Set") {
-	state TransactionEnvironment env;
-	wait(env.setup());
-	wait(set(env, "class-A"_sr, 1));
-	wait(check(env, "class-A"_sr, 1));
+	wait(testSet<TransactionEnvironment>());
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/Transaction/Clear") {
-	state TransactionEnvironment env;
-	wait(env.setup());
-	wait(set(env, "class-A"_sr, 1));
-	wait(clear(env, "class-A"_sr));
-	wait(check(env, "class-A"_sr, Optional<int64_t>{}));
+	wait(testClear<TransactionEnvironment>());
 	return Void();
 }
 
@@ -495,7 +549,7 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/Restart") {
 	state TransactionEnvironment env;
 	wait(env.setup());
 	wait(set(env, "class-A"_sr, 1));
-	wait(env.restart());
+	wait(env.restartNode());
 	wait(check(env, "class-A"_sr, 1));
 	return Void();
 }
