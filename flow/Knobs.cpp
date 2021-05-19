@@ -63,7 +63,6 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( HUGE_ARENA_LOGGING_INTERVAL,                         5.0 );
 
 	init( WRITE_TRACING_ENABLED,                              true ); if( randomize && BUGGIFY ) WRITE_TRACING_ENABLED = false;
-	init( ACKNOWLEDGE_LIMIT_BYTES,                             2e6 ); if( randomize && BUGGIFY ) ACKNOWLEDGE_LIMIT_BYTES = 1;
 	init( TRACING_UDP_LISTENER_PORT,                          8889 ); // Only applicable if TracerType is set to a network option.
 
 	//connectionMonitor

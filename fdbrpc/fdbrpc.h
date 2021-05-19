@@ -277,44 +277,47 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 
 	int64_t bytesSent;
 	int64_t bytesAcknowledged;
+	int64_t bytesLimit;
 	Promise<Void> ready;
 	Future<Void> failures;
 
-	AcknowledgementReceiver() : bytesSent(0), bytesAcknowledged(0), ready(nullptr) {}
+	AcknowledgementReceiver() : bytesSent(0), bytesAcknowledged(0), bytesLimit(0), ready(nullptr) {}
 	AcknowledgementReceiver(const Endpoint& remoteEndpoint)
-	  : FlowReceiver(remoteEndpoint, false), bytesSent(0), bytesAcknowledged(0), ready(nullptr) {}
+	  : FlowReceiver(remoteEndpoint, false), bytesSent(0), bytesAcknowledged(0), bytesLimit(0), ready(nullptr) {}
 
 	void receive(ArenaObjectReader& reader) override {
 		ErrorOr<AcknowledgementReply> message;
 		reader.deserialize(message);
 		if (message.isError()) {
-			if (!ready.isValid() || ready.isSet()) {
+			if (!ready.isValid()) {
 				ready = Promise<Void>();
 			}
 			ready.sendError(message.getError());
 		} else {
 			ASSERT(message.get().bytes > bytesAcknowledged);
 			bytesAcknowledged = message.get().bytes;
-			if (bytesSent - bytesAcknowledged < FLOW_KNOBS->ACKNOWLEDGE_LIMIT_BYTES && ready.isValid() &&
-			    ready.canBeSet()) {
+			if (ready.isValid() && bytesSent - bytesAcknowledged < bytesLimit) {
 				Promise<Void> hold = ready;
-				ready.send(Void());
+				ready = Promise<Void>(nullptr);
+				hold.send(Void());
 			}
 		}
 	}
 };
 
 template <class T>
-struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotifiedQueueWithErrors<T>> {
-	using FastAllocated<NetNotifiedQueueWithErrors<T>>::operator new;
-	using FastAllocated<NetNotifiedQueueWithErrors<T>>::operator delete;
+struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
+                                                    FlowReceiver,
+                                                    FastAllocated<NetNotifiedQueueWithAcknowledgements<T>> {
+	using FastAllocated<NetNotifiedQueueWithAcknowledgements<T>>::operator new;
+	using FastAllocated<NetNotifiedQueueWithAcknowledgements<T>>::operator delete;
 
 	AcknowledgementReceiver acknowledgements;
 	Endpoint requestStreamEndpoint;
 	bool sentError = false;
 
-	NetNotifiedQueueWithErrors(int futures, int promises) : NotifiedQueue<T>(futures, promises) {}
-	NetNotifiedQueueWithErrors(int futures, int promises, const Endpoint& remoteEndpoint)
+	NetNotifiedQueueWithAcknowledgements(int futures, int promises) : NotifiedQueue<T>(futures, promises) {}
+	NetNotifiedQueueWithAcknowledgements(int futures, int promises, const Endpoint& remoteEndpoint)
 	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true) {
 		acknowledgements.failures = tagError<Void>(
 		    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(remoteEndpoint), operation_obsolete());
@@ -365,7 +368,7 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 		return res;
 	}
 
-	~NetNotifiedQueueWithErrors() {
+	~NetNotifiedQueueWithAcknowledgements() {
 		if (acknowledgements.getRawEndpoint().isValid() && acknowledgements.isRemoteEndpoint() && !this->hasError()) {
 			FlowTransport::transport().sendUnreliable(
 			    SerializeSource<ErrorOr<AcknowledgementReply>>(operation_obsolete()),
@@ -398,12 +401,6 @@ public:
 				value.acknowledgeToken = queue->acknowledgements.getEndpoint(TaskPriority::ReadSocket).token;
 			}
 			queue->acknowledgements.bytesSent += value.expectedSize();
-			if ((!queue->acknowledgements.ready.isValid() ||
-			     (queue->acknowledgements.ready.isSet() && !queue->acknowledgements.ready.getFuture().isError())) &&
-			    queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged >=
-			        FLOW_KNOBS->ACKNOWLEDGE_LIMIT_BYTES) {
-				queue->acknowledgements.ready = Promise<Void>();
-			}
 			FlowTransport::transport().sendUnreliable(
 			    SerializeSource<ErrorOr<EnsureTable<T>>>(value), getEndpoint(), false);
 		} else {
@@ -429,7 +426,7 @@ public:
 		queue->addFutureRef();
 		return FutureStream<T>(queue);
 	}
-	ReplyPromiseStream() : queue(new NetNotifiedQueueWithErrors<T>(0, 1)), errors(new SAV<Void>(0, 1)) {}
+	ReplyPromiseStream() : queue(new NetNotifiedQueueWithAcknowledgements<T>(0, 1)), errors(new SAV<Void>(0, 1)) {}
 	ReplyPromiseStream(const ReplyPromiseStream& rhs) : queue(rhs.queue), errors(rhs.errors) {
 		queue->addPromiseRef();
 		if (errors) {
@@ -441,7 +438,7 @@ public:
 		rhs.errors = nullptr;
 	}
 	explicit ReplyPromiseStream(const Endpoint& endpoint)
-	  : queue(new NetNotifiedQueueWithErrors<T>(0, 1, endpoint)), errors(nullptr) {}
+	  : queue(new NetNotifiedQueueWithAcknowledgements<T>(0, 1, endpoint)), errors(nullptr) {}
 
 	Future<Void> getErrorFutureAndDelPromiseRef() {
 		ASSERT(errors && errors->getPromiseReferenceCount() > 1);
@@ -468,19 +465,24 @@ public:
 	uint32_t size() const { return queue->size(); }
 
 	Future<Void> onReady() {
+		ASSERT(queue->acknowledgements.bytesLimit > 0);
 		if (queue->acknowledgements.failures.isError()) {
 			return queue->acknowledgements.failures.getError();
 		}
-		if (queue->acknowledgements.ready.isValid() && queue->acknowledgements.ready.isSet() &&
-		    queue->acknowledgements.ready.getFuture().isError()) {
+		if (queue->acknowledgements.ready.isValid() && queue->acknowledgements.ready.isSet()) {
 			return queue->acknowledgements.ready.getFuture().getError();
 		}
 		if (queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged <
-		    FLOW_KNOBS->ACKNOWLEDGE_LIMIT_BYTES) {
+		    queue->acknowledgements.bytesLimit) {
 			return Void();
+		}
+		if (!queue->acknowledgements.ready.isValid()) {
+			queue->acknowledgements.ready = Promise<Void>();
 		}
 		return queue->acknowledgements.ready.getFuture() || queue->acknowledgements.failures;
 	}
+
+	void setByteLimit(int64_t byteLimit) { queue->acknowledgements.bytesLimit = byteLimit; }
 
 	void operator=(const ReplyPromiseStream& rhs) {
 		rhs.queue->addPromiseRef();
@@ -509,7 +511,7 @@ public:
 	}
 
 private:
-	NetNotifiedQueueWithErrors<T>* queue;
+	NetNotifiedQueueWithAcknowledgements<T>* queue;
 	SAV<Void>* errors;
 };
 
