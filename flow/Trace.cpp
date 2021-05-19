@@ -288,9 +288,9 @@ public:
 		};
 		void action(HeapDump& heapDump) {
 			try {
+#ifdef USE_JEMALLOC
 				auto fileString = heapDump.file.toString();
 				const char* file = fileString.c_str();
-#ifdef USE_JEMALLOC
 				je_mallctl("prof.dump", nullptr, nullptr, &file, sizeof(file));
 #endif
 				heapDump.ack.send(Void());
