@@ -283,6 +283,8 @@ public:
 		                reverse);
 	}
 
+	// A method for streaming data from the storage server that is more efficient than getRange when reading large
+	// amounts of data
 	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,
 	                                          const KeySelector& begin,
 	                                          const KeySelector& end,

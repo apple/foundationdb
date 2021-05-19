@@ -3259,6 +3259,7 @@ ACTOR Future<RangeResult> getRange(Database cx,
 	}
 }
 
+// Streams all of the KV pairs in a target key range into a ParallelStream fragment
 ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment* results,
                                           Database cx,
                                           Reference<TransactionLogInfo> trLogInfo,
@@ -3309,6 +3310,8 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 				state int useIdx = -1;
 
 				loop {
+					// FIXME: create a load balance function for this code so future users of reply streams do not have
+					// to duplicate this code
 					int count = 0;
 					for (int i = 0; i < locations[shard].second->size(); i++) {
 						if (!IFailureMonitor::failureMonitor()
@@ -3380,12 +3383,6 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 
 					cx->transactionBytesRead += bytes;
 					cx->transactionKeysRead += output.size();
-
-					// FIXME: figure out appropriate metrics for the client event log
-					// if( trLogInfo ) {
-					//	trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime,
-					// cx->clientLocality.dcId(), now()-startTime, bytes, begin.getKey(), end.getKey()));
-					//}
 
 					// If the reply says there is more but we know that we finished the shard, then fix rep.more
 					if (reverse && output.more && rep.data.size() > 0 &&
@@ -3492,6 +3489,8 @@ static KeyRange intersect(KeyRangeRef lhs, KeyRangeRef rhs) {
 	return KeyRange(KeyRangeRef(std::max(lhs.begin, rhs.begin), std::min(lhs.end, rhs.end)));
 }
 
+// Divides the requested key range into 1MB fragments, create range streams for each fragment, and merges the results so
+// the client get them in order
 ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results,
                                   Database cx,
                                   Reference<TransactionLogInfo> trLogInfo,
@@ -3505,8 +3504,7 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results,
                                   TransactionInfo info,
                                   TagSet tags) {
 
-	state ParallelStream<RangeResult> results(
-	    _results, CLIENT_KNOBS->RANGESTREAM_CONCURRENT_FRAGMENTS, CLIENT_KNOBS->RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT);
+	state ParallelStream<RangeResult> results(_results, CLIENT_KNOBS->RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT);
 
 	// FIXME: better handling to disable row limits
 	ASSERT(!limits.hasRowLimit());
@@ -3932,6 +3930,8 @@ Future<RangeResult> Transaction::getRange(const KeySelector& begin,
 	return getRange(begin, end, GetRangeLimits(limit), snapshot, reverse);
 }
 
+// A method for streaming data from the storage server that is more efficient than getRange when reading large amounts
+// of data
 Future<Void> Transaction::getRangeStream(const PromiseStream<RangeResult>& results,
                                          const KeySelector& begin,
                                          const KeySelector& end,
