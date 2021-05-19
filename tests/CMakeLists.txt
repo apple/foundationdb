@@ -79,7 +79,12 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES RocksDBTest.txt IGNORE)
   add_fdb_test(TEST_FILES S3BlobStore.txt IGNORE)
   add_fdb_test(TEST_FILES SampleNoSimAttrition.txt IGNORE)
-  if (NOT USE_UBSAN) # TODO re-enable in UBSAN after https://github.com/apple/foundationdb/issues/2410 is resolved
+  # TODO re-enable in UBSAN after https://github.com/apple/foundationdb/issues/2410 is resolved
+  #
+  # Disable with USE_JEMALLOC because overriding operator new in fdbserver
+  # breaks loading external workloads. It seems the external workloads use libc
+  # malloc and fdbserver uses jemalloc free.
+  if (NOT USE_UBSAN AND NOT USE_JEMALLOC)
     add_fdb_test(TEST_FILES SimpleExternalTest.txt)
   else()
     add_fdb_test(TEST_FILES SimpleExternalTest.txt IGNORE)
