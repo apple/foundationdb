@@ -545,10 +545,7 @@ public:
 	int64_t versionLag; // An estimate for how many versions it takes for the data to move from the logs to this storage
 	                    // server
 
-	// Metrics about the latest batch of versions fetched by this StorageServer
-	int64_t fetchedVersions; // how many versions were fetched
-	double duration; // how long (in seconds) it took to fetch the versions
-	Optional<UID> sourceTLogID; // the tLog from which the versions were fetched
+	Optional<UID> sourceTLogID; // the tLog from which the latest batch of versions were fetched
 
 	ProtocolVersion logProtocol;
 
@@ -683,6 +680,8 @@ public:
 		Counter loops;
 		Counter fetchWaitingMS, fetchWaitingCount, fetchExecutingMS, fetchExecutingCount;
 		Counter readsRejected;
+		Counter fetchedVersions;
+		Counter fetchFrequency;
 
 		LatencySample readLatencySample;
 		LatencyBands readLatencyBands;
@@ -700,10 +699,11 @@ public:
 		    updateBatches("UpdateBatches", cc), updateVersions("UpdateVersions", cc), loops("Loops", cc),
 		    fetchWaitingMS("FetchWaitingMS", cc), fetchWaitingCount("FetchWaitingCount", cc),
 		    fetchExecutingMS("FetchExecutingMS", cc), fetchExecutingCount("FetchExecutingCount", cc),
-		    readsRejected("ReadsRejected", cc), readLatencySample("ReadLatencyMetrics",
-		                                                          self->thisServerID,
-		                                                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                                                          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    readsRejected("ReadsRejected", cc), fetchedVersions("FetchedVersions", cc),
+		    fetchFrequency("FetchFrequency", cc), readLatencySample("ReadLatencyMetrics",
+                                                                    self->thisServerID,
+                                                                    SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+                                                                    SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
@@ -711,8 +711,6 @@ public:
 			specialCounter(cc, "DurableVersion", [self]() { return self->durableVersion.get(); });
 			specialCounter(cc, "DesiredOldestVersion", [self]() { return self->desiredOldestVersion.get(); });
 			specialCounter(cc, "VersionLag", [self]() { return self->versionLag; });
-			specialCounter(cc, "FetchedVersions", [self]() { return self->fetchedVersions; });
-			specialCounter(cc, "Duration", [self]() { return self->duration; });
 			specialCounter(cc, "LocalRate", [self] { return self->currentRate() * 100; });
 
 			specialCounter(cc, "BytesReadSampleCount", [self]() { return self->metrics.bytesReadSample.queue.size(); });
@@ -739,7 +737,7 @@ public:
 	  : fetchKeysHistograms(), instanceID(deterministicRandom()->randomUniqueID().first()), storage(this, storage),
 	    db(db), actors(false), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
 	    rebootAfterDurableVersion(std::numeric_limits<Version>::max()), durableInProgress(Void()), versionLag(0),
-	    fetchedVersions(0), duration(0.0), primaryLocality(tagLocalityInvalid), updateEagerReads(0), shardChangeCounter(0),
+	    primaryLocality(tagLocalityInvalid), updateEagerReads(0), shardChangeCounter(0),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES), shuttingDown(false),
 	    debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0), numWatches(0), logProtocol(0),
 	    counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
@@ -3530,8 +3528,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			if (data->otherError.getFuture().isReady())
 				data->otherError.getFuture().get();
 
-			data->fetchedVersions = ver - data->version.get();
-			data->duration = now() - data->lastUpdate;
+			data->counters.fetchedVersions += (ver - data->version.get());
+			++data->counters.fetchFrequency;
 			Optional<UID> curSourceTLogID = cursor->getCurrentPeekLocation();
 
 			if (curSourceTLogID != data->sourceTLogID) {
