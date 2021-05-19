@@ -757,6 +757,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "grv_proxies":1,
          "backup_worker_enabled":1,
          "proxies":6
+         "perpetual_storage_wiggle":0
       },
       "data":{
          "least_operating_space_bytes_log_server":0,
