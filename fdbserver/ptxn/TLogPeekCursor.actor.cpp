@@ -416,7 +416,7 @@ Future<bool> MergedStorageTeamPeekCursor::remoteMoreAvailableImpl() {
 		return false;
 	}
 
-	return peekRemoteForMergedStorageTeamCursor({ &cursorPtrs, &cursorHeap, &storageTeamIDCursorMapper });
+	return peekRemoteForMergedStorageTeamCursor({ { &cursorPtrs, &cursorHeap }, &storageTeamIDCursorMapper });
 }
 
 std::vector<StorageTeamID> MergedStorageTeamPeekCursor::getCursorTeamIDs() {

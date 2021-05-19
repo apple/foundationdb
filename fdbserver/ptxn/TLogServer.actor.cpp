@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -41,17 +42,18 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/ptxn/ProxyTLogPushMessageSerializer.h"
+#include "fdbserver/ptxn/TLogInterface.h"
+#include "fdbserver/ptxn/TLogStorageServerPeekMessageSerializer.h"
 #include "fdbserver/ptxn/test/Driver.h"
+#include "fdbserver/ptxn/test/Utils.h"
 #include "flow/ActorCollection.h"
 #include "flow/Hash3.h"
 #include "flow/Histogram.h"
+#include "flow/IRandom.h"
+#include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-using std::make_pair;
-using std::max;
-using std::min;
-using std::pair;
 
 namespace ptxn {
 
@@ -950,6 +952,29 @@ ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
 	return Void();
 }
 
+ACTOR Future<Void> tLogPeekMessages(Reference<TLogGroupData> self,
+                                    TLogPeekRequest req,
+                                    Reference<LogGenerationData> logData) {
+	std::cout << __FUNCTION__ << "\n";
+
+	TLogPeekReply reply;
+	reply.end = invalidVersion;
+	reply.maxKnownVersion = logData->version.get();
+	reply.minKnownCommittedVersion = logData->minKnownCommittedVersion;
+	// reply.arena = 
+	// reply.data = messages.toValue();
+	// reply.begin =
+	// reply.onlySpilled = false;
+
+	Reference<LogGenerationData::StorageTeamData> storageTeamData = logData->getStorageTeamData(req.storageTeamID);
+	if (storageTeamData) {
+		// reply.data = storageTeamData->
+	}
+
+	req.reply.send(reply);
+	return Void();
+}
+
 ACTOR Future<Void> initPersistentState(Reference<TLogGroupData> self, Reference<LogGenerationData> logData) {
 	wait(self->persistentDataCommitLock.take());
 	state FlowLock::Releaser commitLockReleaser(self->persistentDataCommitLock);
@@ -1087,6 +1112,20 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 				self->addActors.send(tLogCommit(logData->tlogGroupData, req, logData));
 			}
 		}
+		when(TLogPeekRequest req = waitNext(tli.peek.getFuture())) {
+			TraceEvent("TLogPeekReq")
+			    .detail("BeginVersion", req.beginVersion)
+			    .detail("StorageTeam", req.storageTeamID)
+			    .detail("Tag", req.tag.toString());
+			auto tlogGroup = activeGeneration.find(req.storageTeamID);
+			TEST(tlogGroup == activeGeneration.end()); // TLog peek: group not found
+			if (tlogGroup == activeGeneration.end()) {
+				req.reply.sendError(tlog_group_not_found());
+				continue;
+			}
+			Reference<LogGenerationData> logData = tlogGroup->second;
+			logData->addActor.send(tLogPeekMessages(logData->tlogGroupData, req, logData));
+		}
 	}
 }
 
@@ -1130,7 +1169,11 @@ ACTOR Future<Void> tLogCore(
 		return Void();
 	}
 
+	TraceEvent("TLogGroupCore", self->dbgid)
+	    .detail("GroupID", self->tlogGroupID)
+	    .detail("RecoveryCount", logData->recoveryCount);
 	self->addActors.send(self->removed);
+
 	// FIXME: update tlogMetrics to include new information, or possibly only have one copy for the shared instance
 	for (auto& logGroup : *activeGeneration) {
 		self->sharedActors.send(traceCounters("TLogMetrics",
@@ -1468,19 +1511,23 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 		tLogInitializations.emplace_back();
 		tLogInitializations.back().isPrimary = true;
 		tLogInitializations.back().tlogGroups = context->tLogGroups;
+		UID tlogId = test::randomUID();
+		UID workerId = test::randomUID();
 		actors->push_back(ptxn::tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>>(),
 		                             makeReference<AsyncVar<ServerDBInfo>>(),
 		                             LocalityData(),
 		                             initializeTLog,
-		                             UID(0, 1),
-		                             UID(0, 2),
+		                             tlogId,
+		                             workerId,
 		                             false,
 		                             Promise<Void>(),
 		                             Promise<Void>(),
 		                             folder,
 		                             makeReference<AsyncVar<bool>>(false),
-		                             makeReference<AsyncVar<UID>>(UID(0, 1))));
+		                             makeReference<AsyncVar<UID>>(tlogId)));
 		initializeTLog.send(tLogInitializations.back());
+		std::cout << "Recruit tlog " << i << " : " << tlogId.shortString() << ", workerID: " << workerId.shortString()
+		          << "\n";
 	}
 
 	// replace fake TLogInterface with recruited interface
@@ -1494,6 +1541,55 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 	}
 	return Void();
 }
+
+// Randomly commit to a tlog, then peek data, and verify if the data is consistent.
+ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<test::TestDriverContext> pContext) {
+	const TLogGroup& group = pContext->tLogGroups[0];
+	ASSERT(!group.storageTeams.empty());
+	state StorageTeamID storageTeamID = group.storageTeams.begin()->first;
+
+	state std::shared_ptr<TLogInterfaceBase> tli = pContext->getTLogInterface(storageTeamID);
+	state Version prevVersion = 100;
+	state Version beginVersion = 150;
+	state Version endVersion(beginVersion + deterministicRandom()->randomInt(5, 20));
+
+	// Commit
+	ProxyTLogPushMessageSerializer serializer;
+	state std::vector<MutationRef> mutations;
+	const int numMutations = 10;
+	for (int i = 0; i < numMutations; i++) {
+		MutationRef m(pContext->mutationsArena,
+		              MutationRef::SetValue,
+		              deterministicRandom()->randomAlphaNumeric(10),
+		              deterministicRandom()->randomAlphaNumeric(16));
+		serializer.writeMessage(m, storageTeamID);
+		mutations.push_back(m);
+	}
+	serializer.completeMessageWriting(storageTeamID);
+	Standalone<StringRef> message = serializer.getSerialized(storageTeamID);
+	TLogCommitRequest commitRequest(
+	    test::randomUID(), storageTeamID, message.arena(), message, prevVersion, beginVersion, 0, 0, Optional<UID>());
+	TLogCommitReply reply = wait(tli->commit.getReply(commitRequest));
+	test::print::print(reply);
+
+	// Peek
+	Optional<UID> debugID(test::randomUID());
+	TLogPeekRequest request(debugID, beginVersion, endVersion, storageTeamID);
+	test::print::print(request);
+
+	state TLogPeekReply reply = wait(tli->peek.getReply(request));
+	test::print::print(reply);
+
+	// Verify
+	TLogStorageServerMessageDeserializer deserializer(reply.arena, reply.data);
+	for (auto iter = deserializer.begin(); iter != deserializer.end(); ++iter) {
+		// const VersionSubsequenceMutation& m = *iter;
+		std::cout << *iter << "\n";
+	}
+
+	return Void();
+}
+
 } // namespace
 
 TEST_CASE("/fdbserver/ptxn/test/run_tlog_server") {
@@ -1510,6 +1606,30 @@ TEST_CASE("/fdbserver/ptxn/test/run_tlog_server") {
 	// TODO: start fake proxy to talk to real TLog servers.
 	startFakeProxy(actors, context);
 	wait(quorum(actors, 1));
+	platform::eraseDirectoryRecursive(folder);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ptxn/test/peek_tlog_server") {
+	state test::TestDriverOptions options(params);
+	state std::vector<Future<Void>> actors;
+	state std::shared_ptr<test::TestDriverContext> context = test::initTestDriverContext(options);
+
+	for (const auto& group : context->tLogGroups) {
+		std::cout << "TLog Group " << group.logGroupId;
+		for (const auto& [storageTeamId, tags] : group.storageTeams) {
+			std::cout << ", SS team " << storageTeamId;
+		}
+		std::cout << "\n";
+	}
+
+	state std::string folder = "simdb/unittests";
+	platform::createDirectory(folder);
+	// start a real TLog server
+	wait(startTLogServers(actors, context, folder));
+
+	wait(commitPeekAndCheck(context));
+
 	platform::eraseDirectoryRecursive(folder);
 	return Void();
 }
