@@ -773,13 +773,19 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 	uint32_t size() const { return queue.size(); }
 
 	virtual T pop() {
-		T res = popImpl();
+		if (queue.empty()) {
+			if (error.isValid())
+				throw error;
+			throw internal_error();
+		}
+		auto copy = std::move(queue.front());
+		queue.pop();
 		if (onEmpty.isValid() && queue.empty()) {
 			Promise<Void> hold = onEmpty;
 			onEmpty = Promise<Void>(nullptr);
 			hold.send(Void());
 		}
-		return res;
+		return copy;
 	}
 
 	template <class U>
@@ -838,8 +844,6 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 	virtual void fire(T const&) override { ASSERT(false); }
 	virtual void fire(T&&) override { ASSERT(false); }
 
-	bool shouldFireImmediately() { return SingleCallback<T>::next != this; }
-
 protected:
 	T popImpl() {
 		if (queue.empty()) {
@@ -853,6 +857,8 @@ protected:
 	}
 
 	bool hasError() { return error.isValid(); }
+
+	bool shouldFireImmediately() { return SingleCallback<T>::next != this; }
 };
 
 template <class T>
