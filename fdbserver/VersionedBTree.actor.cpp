@@ -4780,10 +4780,9 @@ private:
 			bool updating = tryToUpdate;
 			bool changesMade = false;
 
-			// Couldn't make changes in place, so now do a linear merge and build new pages.
 			state Standalone<VectorRef<RedwoodRecordRef>> merged;
-
 			auto switchToLinearMerge = [&]() {
+				// Couldn't make changes in place, so now do a linear merge and build new pages.
 				updating = false;
 				auto c = cursor;
 				c.moveFirst();
@@ -5486,6 +5485,9 @@ public:
 		struct PathEntry {
 			Reference<const ArenaPage> page;
 			BTreePage::BinaryTree::Cursor cursor;
+#if REDWOOD_DEBUG
+			Standalone<BTreePageIDRef> id;
+#endif
 
 			const BTreePage* btPage() const { return (BTreePage*)page->begin(); };
 		};
@@ -5505,9 +5507,14 @@ public:
 		std::string toString() const {
 			std::string r = format("{ptr=%p %s ", this, ::toString(pager->getVersion()).c_str());
 			for (int i = 0; i < path.size(); ++i) {
-				r += format("[%d/%d: %s] ",
-				            i + 1,
-				            path.size(),
+				std::string id = "<debugOnly>";
+#if REDWOOD_DEBUG
+				id = ::toString(path[i].id);
+#endif
+				r += format("[Level=%d ID=%s ptr=%p Cursor=%s]   ",
+				            path[i].btPage()->height,
+				            id.c_str(),
+				            path[i].page->begin(),
 				            path[i].cursor.valid() ? path[i].cursor.get().toString(path[i].btPage()->isLeaf()).c_str()
 				                                   : "<invalid>");
 			}
@@ -5533,8 +5540,13 @@ public:
 			// The boundary RedwoodRecordRefs are shallow copied to readPage()'s argument / actor state variables,
 			// and the arenas for them must be kept alive by the higher path entries which contain ArenaPage
 			// references.
-			return map(readPage(pager, id, lowerBound, upperBound), [this, id](Reference<const ArenaPage> p) {
+			debug_printf("pushPage(%s) first cursor=%s\n", ::toString(id).c_str(), toString().c_str());
+			return map(readPage(pager, id, lowerBound, upperBound), [=](Reference<const ArenaPage> p) {
+#if REDWOOD_DEBUG
+				path.push_back({ p, getCursor(p), id });
+#else
 				path.push_back({ p, getCursor(p) });
+#endif
 				return Void();
 			});
 		}
@@ -5546,9 +5558,11 @@ public:
 			return pushPage(id, c.get(), next.getOrUpperBound());
 		}
 
+		// Initialize or reinitialize cursor
 		Future<Void> init(VersionedBTree* btree_in, Reference<IPagerSnapshot> pager_in, BTreePageIDRef root) {
 			btree = btree_in;
 			pager = pager_in;
+			path.clear();
 			path.reserve(6);
 			valid = false;
 			return pushPage(root, dbBegin, dbEnd);
@@ -5676,6 +5690,7 @@ public:
 
 				if (self->path.size() == 1) {
 					self->valid = false;
+					debug_printf("move%s() exit cursor=%s\n", forward ? "Next" : "Prev", self->toString().c_str());
 					return Void();
 				}
 
