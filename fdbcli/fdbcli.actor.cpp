@@ -2420,17 +2420,23 @@ ACTOR Future<bool> coordinators(Database db, std::vector<StringRef> tokens, bool
 
 ACTOR Future<bool> include(Database db, std::vector<StringRef> tokens) {
 	std::vector<AddressExclusion> addresses;
-	bool failed = false;
-	bool all = false;
+	state std::vector<std::string> localities;
+	state bool failed = false;
+	state bool all = false;
 	for (auto t = tokens.begin() + 1; t != tokens.end(); ++t) {
 		if (*t == LiteralStringRef("all")) {
 			all = true;
 		} else if (*t == LiteralStringRef("failed")) {
 			failed = true;
+		} else if (t->startsWith(ExcludeLocalityKeyDcIdPrefix)
+			|| t->startsWith(ExcludeLocalityKeyMachineIdPrefix)
+			|| t->startsWith(ExcludeLocalityKeyProcessIdPrefix)
+			|| t->startsWith(ExcludeLocalityKeyZoneIdPrefix)) {
+			localities.push_back(t->toString());
 		} else {
 			auto a = AddressExclusion::parse(*t);
 			if (!a.isValid()) {
-				fprintf(stderr, "ERROR: '%s' is not a valid network endpoint address\n", t->toString().c_str());
+				fprintf(stderr, "ERROR: '%s' is neither a valid network endpoint address nor a locality\n", t->toString().c_str());
 				if (t->toString().find(":tls") != std::string::npos)
 					printf("        Do not include the `:tls' suffix when naming a process\n");
 				return true;
@@ -2442,8 +2448,14 @@ ACTOR Future<bool> include(Database db, std::vector<StringRef> tokens) {
 		std::vector<AddressExclusion> includeAll;
 		includeAll.push_back(AddressExclusion());
 		wait(makeInterruptable(includeServers(db, includeAll, failed)));
+		wait(makeInterruptable(includeLocalities(db, localities, failed, all)));
 	} else {
-		wait(makeInterruptable(includeServers(db, addresses, failed)));
+		if (!addresses.empty()) {
+			wait(makeInterruptable(includeServers(db, addresses, failed)));
+		}
+		if (!localities.empty()) {
+			wait(makeInterruptable(includeLocalities(db, localities, failed, all)));
+		}
 	}
 	return false;
 };
@@ -2453,16 +2465,24 @@ ACTOR Future<bool> exclude(Database db,
                            Reference<ClusterConnectionFile> ccf,
                            Future<Void> warn) {
 	if (tokens.size() <= 1) {
-		vector<AddressExclusion> excl = wait(makeInterruptable(getExcludedServers(db)));
-		if (!excl.size()) {
-			printf("There are currently no servers excluded from the database.\n"
+		state Future<vector<AddressExclusion>> fexclAddresses = makeInterruptable(getExcludedServers(db));
+		state Future<vector<std::string>> fexclLocalities = makeInterruptable(getExcludedLocalities(db));
+
+		wait(success(fexclAddresses) && success(fexclLocalities));
+		vector<AddressExclusion> exclAddresses = fexclAddresses.get();
+		vector<std::string> exclLocalities = fexclLocalities.get();
+
+		if (!exclAddresses.size() && !exclLocalities.size()) {
+			printf("There are currently no servers or localities excluded from the database.\n"
 			       "To learn how to exclude a server, type `help exclude'.\n");
 			return false;
 		}
 
-		printf("There are currently %zu servers or processes being excluded from the database:\n", excl.size());
-		for (const auto& e : excl)
+		printf("There are currently %zu servers or localities being excluded from the database:\n", exclAddresses.size() + exclLocalities.size());
+		for (const auto& e : exclAddresses)
 			printf("  %s\n", e.toString().c_str());
+		for (const auto& e : exclLocalities)
+			printf("  %s\n", e.c_str());
 
 		printf("To find out whether it is safe to remove one or more of these\n"
 		       "servers from the cluster, type `exclude <addresses>'.\n"
@@ -2472,9 +2492,13 @@ ACTOR Future<bool> exclude(Database db,
 	} else {
 		state std::vector<AddressExclusion> exclusionVector;
 		state std::set<AddressExclusion> exclusionSet;
-		bool force = false;
+		state std::vector<AddressExclusion> exclusionAddresses;
+		state std::unordered_set<std::string> exclusionLocalities;
+		state std::vector<std::string> noMatchLocalities;
+		state bool force = false;
 		state bool waitForAllExcluded = true;
 		state bool markFailed = false;
+		state std::vector<ProcessData> workers = wait(makeInterruptable(getWorkers(db)));
 		for (auto t = tokens.begin() + 1; t != tokens.end(); ++t) {
 			if (*t == LiteralStringRef("FORCE")) {
 				force = true;
@@ -2482,17 +2506,35 @@ ACTOR Future<bool> exclude(Database db,
 				waitForAllExcluded = false;
 			} else if (*t == LiteralStringRef("failed")) {
 				markFailed = true;
+			} else if (t->startsWith(ExcludeLocalityKeyDcIdPrefix)
+					   || t->startsWith(ExcludeLocalityKeyMachineIdPrefix)
+					   || t->startsWith(ExcludeLocalityKeyProcessIdPrefix)
+					   || t->startsWith(ExcludeLocalityKeyZoneIdPrefix)) {
+				std::set<AddressExclusion> localityAddresses = getAddressesByLocality(workers, t->toString());
+				if(localityAddresses.empty()) {
+					noMatchLocalities.push_back(t->toString());
+				} else {
+					std::copy(localityAddresses.begin(), localityAddresses.end(), back_inserter(exclusionVector));
+					exclusionSet.insert(localityAddresses.begin(), localityAddresses.end());
+				}
+				exclusionLocalities.insert(t->toString());
 			} else {
 				auto a = AddressExclusion::parse(*t);
 				if (!a.isValid()) {
-					fprintf(stderr, "ERROR: '%s' is not a valid network endpoint address\n", t->toString().c_str());
+					fprintf(stderr, "ERROR: '%s' is neither a valid network endpoint address nor a locality\n", t->toString().c_str());
 					if (t->toString().find(":tls") != std::string::npos)
 						printf("        Do not include the `:tls' suffix when naming a process\n");
 					return true;
 				}
 				exclusionVector.push_back(a);
 				exclusionSet.insert(a);
+				exclusionAddresses.push_back(a);
 			}
+		}
+
+		if (exclusionAddresses.empty() && exclusionLocalities.empty()) {
+			fprintf(stderr, "ERROR: Atleast one valid network endpoint address or a locality is not provided\n");
+			return true;
 		}
 
 		if (!force) {
@@ -2606,7 +2648,12 @@ ACTOR Future<bool> exclude(Database db,
 			}
 		}
 
-		wait(makeInterruptable(excludeServers(db, exclusionVector, markFailed)));
+		if (!exclusionAddresses.empty()) {
+			wait(makeInterruptable(excludeServers(db, exclusionAddresses, markFailed)));
+		}
+		if (!exclusionLocalities.empty()) {
+			wait(makeInterruptable(excludeLocalities(db, exclusionLocalities, markFailed)));
+		}
 
 		if (waitForAllExcluded) {
 			printf("Waiting for state to be removed from all excluded servers. This may take a while.\n");
@@ -2618,7 +2665,6 @@ ACTOR Future<bool> exclude(Database db,
 
 		state std::set<NetworkAddress> notExcludedServers =
 		    wait(makeInterruptable(checkForExcludingServers(db, exclusionVector, waitForAllExcluded)));
-		std::vector<ProcessData> workers = wait(makeInterruptable(getWorkers(db)));
 		std::map<IPAddress, std::set<uint16_t>> workerPorts;
 		for (auto addr : workers)
 			workerPorts[addr.address.ip].insert(addr.address.port);
@@ -2671,6 +2717,13 @@ ACTOR Future<bool> exclude(Database db,
 					    exclusion.toString().c_str());
 				}
 			}
+		}
+
+		for(const auto& locality : noMatchLocalities) {
+			fprintf(stderr,
+					"  %s  ---- WARNING: Currently no servers found with this locality match! Be sure that you excluded "
+					"the correct locality.\n",
+					locality.c_str());
 		}
 
 		bool foundCoordinator = false;
