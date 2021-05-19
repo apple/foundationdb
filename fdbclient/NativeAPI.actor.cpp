@@ -3365,11 +3365,13 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 						++cx->transactionPhysicalReadsCompleted;
 					} catch (Error& e) {
 						++cx->transactionPhysicalReadsCompleted;
-						if (e.code() == error_code_end_of_stream) {
-							rep = GetKeyValuesStreamReply();
-						} else {
+						if (e.code() == error_code_broken_promise) {
+							throw connection_failed();
+						}
+						if (e.code() != error_code_end_of_stream) {
 							throw;
 						}
+						rep = GetKeyValuesStreamReply();
 					}
 					if (info.debugID.present())
 						g_traceBatch.addEvent(
