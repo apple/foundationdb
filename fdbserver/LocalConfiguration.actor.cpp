@@ -58,14 +58,17 @@ class ConfigKnobOverrides {
 public:
 	ConfigKnobOverrides() = default;
 	explicit ConfigKnobOverrides(std::string const& paramString) {
-		ASSERT(std::all_of(
-		    paramString.begin(), paramString.end(), [](char c) { return isalpha(c) || c == '/' || c == '-'; }));
-		StringRef s = stringToKeyRef(paramString);
-		while (s.size()) {
-			configPath.push_back_deep(configPath.arena(), s.eat("/"_sr));
-			configClassToKnobToValue[configPath.back()] = {};
-		}
 		configClassToKnobToValue[{}] = {};
+		if (std::all_of(
+		        paramString.begin(), paramString.end(), [](char c) { return isalpha(c) || c == '/' || c == '-'; })) {
+			StringRef s = stringToKeyRef(paramString);
+			while (s.size()) {
+				configPath.push_back_deep(configPath.arena(), s.eat("/"_sr));
+				configClassToKnobToValue[configPath.back()] = {};
+			}
+		} else {
+			fprintf(stderr, "WARNING: Invalid configuration path: `%s'\n", paramString.c_str());
+		}
 	}
 	ConfigClassSet getConfigClassSet() const { return ConfigClassSet(configPath); }
 	void set(Optional<KeyRef> configClass, KeyRef knobName, ValueRef value) {
@@ -80,14 +83,12 @@ public:
 		for (const auto& configClass : configPath) {
 			const auto& knobToValue = configClassToKnobToValue.at(configClass);
 			for (const auto& [knobName, knobValue] : knobToValue) {
-				// Assert here because we should be validating on the client
-				ASSERT(updateSingleKnob(knobName, knobValue, knobCollections...));
+				updateSingleKnob(knobName, knobValue, knobCollections...);
 			}
 		}
-		// TODO: Test this
 		const auto& knobToValue = configClassToKnobToValue.at({});
 		for (const auto& [knobName, knobValue] : knobToValue) {
-			ASSERT(updateSingleKnob(knobName, knobValue, knobCollections...));
+			updateSingleKnob(knobName, knobValue, knobCollections...);
 		}
 	}
 
@@ -492,6 +493,15 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Internal/ManualKnobOverrides")
 	return Void();
 }
 
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Internal/GlobalKnobOverride") {
+	TestKnobs k1;
+	ConfigKnobOverrides configKnobOverrides("class-A");
+	configKnobOverrides.set({}, "test_int"_sr, "5"_sr);
+	configKnobOverrides.update(k1);
+	ASSERT_EQ(k1.TEST_INT, 5);
+	return Void();
+}
+
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Internal/ConfigKnobOverrides") {
 	TestKnobs k1;
 	TestKnobs2 k2;
@@ -505,5 +515,14 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Internal/ConfigKnobOverrides")
 	configKnobOverrides.update(k1, k2);
 	ASSERT(k1.TEST_INT == 7);
 	ASSERT(k2.TEST2_INT == 10);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Internal/InvalidKnobName") {
+	TestKnobs k1;
+	ConfigKnobOverrides configKnobOverrides("class-A");
+	// Noop with a SevWarnAlways trace
+	configKnobOverrides.set("class-A", "thisknobdoesnotexist"_sr, "5"_sr);
+	configKnobOverrides.update(k1);
 	return Void();
 }

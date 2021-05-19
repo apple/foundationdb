@@ -144,38 +144,53 @@ class BroadcasterToLocalConfigEnvironment {
 	LocalConfiguration localConfiguration;
 	Version lastWrittenVersion{ 0 };
 	Future<Void> broadcastServer;
-	ActorCollection actors{ false };
+	Future<Void> configConsumer;
+	UID localConfigID;
 
 	ACTOR static Future<Void> setup(BroadcasterToLocalConfigEnvironment* self) {
-		wait(self->localConfiguration.initialize("./", deterministicRandom()->randomUniqueID()));
+		wait(self->localConfiguration.initialize("./", self->localConfigID));
 		self->broadcastServer = self->broadcaster.serve(self->cfi->get());
-		self->actors.add(
-		    self->localConfiguration.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(self->cfi)));
+		self->configConsumer =
+		    self->localConfiguration.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(self->cfi));
+		return Void();
+	}
+
+	ACTOR static Future<Void> restartLocalConfig(BroadcasterToLocalConfigEnvironment* self, std::string configPath) {
+		self->localConfiguration = LocalConfiguration(configPath, {});
+		wait(self->localConfiguration.initialize("./", self->localConfigID));
+		self->configConsumer =
+		    self->localConfiguration.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(self->cfi));
 		return Void();
 	}
 
 public:
 	BroadcasterToLocalConfigEnvironment(std::string const& configPath)
 	  : broadcaster(ConfigFollowerInterface{}), cfi(makeReference<AsyncVar<ConfigFollowerInterface>>()),
-	    localConfiguration(configPath, {}) {}
+	    localConfigID(deterministicRandom()->randomUniqueID()), localConfiguration(configPath, {}) {}
 
 	Future<Void> setup() { return setup(this); }
 
 	Future<Void> set(Optional<KeyRef> configClass, int64_t value) {
 		return addTestSetMutation(broadcaster, configClass, value, ++lastWrittenVersion);
 	}
+
 	Future<Void> clear(Optional<KeyRef> configClass) {
 		return addTestClearMutation(broadcaster, configClass, ++lastWrittenVersion);
 	}
+
 	Future<Void> check(Optional<int64_t> value) const { return checkEventually(&localConfiguration, value); }
+
 	void changeBroadcaster() {
 		broadcastServer.cancel();
 		cfi->set(ConfigFollowerInterface{});
 		broadcastServer = broadcaster.serve(cfi->get());
 	}
+
+	Future<Void> restartLocalConfig(std::string const& configPath) { return restartLocalConfig(this, configPath); }
+
 	Future<Void> compact() { return cfi->get().compact.getReply(ConfigFollowerCompactRequest{ lastWrittenVersion }); }
 
-	Future<Void> getError() const { return actors.getResult() || broadcastServer; }
+	Future<Void> getError() const { return configConsumer || broadcastServer; }
 };
 
 class TransactionEnvironment {
@@ -387,6 +402,30 @@ TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/ChangeBroadcaster") {
 	wait(check(env, 1));
 	env.changeBroadcaster();
 	wait(set(env, "class-A"_sr, 2));
+	wait(check(env, 2));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/RestartLocalConfig") {
+	state BroadcasterToLocalConfigEnvironment env("class-A");
+	wait(env.setup());
+	wait(set(env, "class-A"_sr, 1));
+	wait(check(env, 1));
+	wait(env.restartLocalConfig("class-A"));
+	wait(check(env, 1));
+	wait(set(env, "class-A"_sr, 2));
+	wait(check(env, 2));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/RestartLocalConfigAndChangeClass") {
+	state BroadcasterToLocalConfigEnvironment env("class-A/class-B");
+	wait(env.setup());
+	wait(set(env, "class-A"_sr, 1));
+	wait(check(env, 1));
+	wait(env.restartLocalConfig("class-B"));
+	wait(check(env, 0));
+	wait(set(env, "class-B"_sr, 2));
 	wait(check(env, 2));
 	return Void();
 }
