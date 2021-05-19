@@ -58,8 +58,8 @@ typename Container::const_reference randomlyPick(const Container& container) {
 
 namespace print {
 
+void print(const TLogCommitRequest&);
 void print(const TLogCommitReply&);
-void print(const TLogPeekRequest&);
 void print(const TLogPeekRequest&);
 void print(const TLogPeekReply&);
 void print(const TestDriverOptions&);
