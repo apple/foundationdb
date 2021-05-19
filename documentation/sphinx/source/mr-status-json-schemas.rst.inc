@@ -121,6 +121,16 @@
                      "counter":0,
                      "roughness":0.0
                   },
+                  "fetched_versions":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "fetch_frequency":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
                   "grv_latency_statistics":{ // GRV Latency metrics are grouped according to priority (currently batch or default).
                      "default":{
                          "count":0,
