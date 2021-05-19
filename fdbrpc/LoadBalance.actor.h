@@ -40,6 +40,8 @@
 
 using std::vector;
 
+ACTOR Future<Void> allAlternativesFailedDelay(Future<Void> okFuture);
+
 struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 	QueueModel* model;
 	bool released;

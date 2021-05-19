@@ -14,6 +14,7 @@ set(FDBRPC_SRCS
   genericactors.actor.cpp
   HealthMonitor.actor.cpp
   IAsyncFile.actor.cpp
+  LoadBalance.actor.cpp
   LoadBalance.actor.h
   Locality.cpp
   Net2FileSystem.cpp

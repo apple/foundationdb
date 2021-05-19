@@ -1714,30 +1714,3 @@ void FlowTransport::createInstance(bool isClient, uint64_t transportId) {
 HealthMonitor* FlowTransport::healthMonitor() {
 	return &self->healthMonitor;
 }
-
-ACTOR Future<Void> allAlternativesFailedDelay(Future<Void> okFuture) {
-	if (now() - g_network->networkInfo.newestAlternativesFailure > FLOW_KNOBS->ALTERNATIVES_FAILURE_RESET_TIME) {
-		g_network->networkInfo.oldestAlternativesFailure = now();
-	}
-
-	double delay = FLOW_KNOBS->ALTERNATIVES_FAILURE_MIN_DELAY;
-	if (now() - g_network->networkInfo.lastAlternativesFailureSkipDelay > FLOW_KNOBS->ALTERNATIVES_FAILURE_SKIP_DELAY) {
-		g_network->networkInfo.lastAlternativesFailureSkipDelay = now();
-	} else {
-		double elapsed = now() - g_network->networkInfo.oldestAlternativesFailure;
-		delay = std::max(delay,
-		                 std::min(elapsed * FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO,
-		                          FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY));
-		delay = std::max(delay,
-		                 std::min(elapsed * FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_DELAY_RATIO,
-		                          FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_MAX_DELAY));
-	}
-
-	g_network->networkInfo.newestAlternativesFailure = now();
-
-	choose {
-		when(wait(okFuture)) {}
-		when(wait(::delayJittered(delay))) { throw all_alternatives_failed(); }
-	}
-	return Void();
-}
