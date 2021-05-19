@@ -126,7 +126,7 @@
                      "counter":0,
                      "roughness":0.0
                   },
-                  "fetch_frequency":{
+                  "fetches_from_logs":{
                      "hz":0.0,
                      "counter":0,
                      "roughness":0.0

@@ -681,7 +681,7 @@ public:
 		Counter fetchWaitingMS, fetchWaitingCount, fetchExecutingMS, fetchExecutingCount;
 		Counter readsRejected;
 		Counter fetchedVersions;
-		Counter fetchFrequency;
+		Counter fetchesFromLogs;
 
 		LatencySample readLatencySample;
 		LatencyBands readLatencyBands;
@@ -700,10 +700,10 @@ public:
 		    fetchWaitingMS("FetchWaitingMS", cc), fetchWaitingCount("FetchWaitingCount", cc),
 		    fetchExecutingMS("FetchExecutingMS", cc), fetchExecutingCount("FetchExecutingCount", cc),
 		    readsRejected("ReadsRejected", cc), fetchedVersions("FetchedVersions", cc),
-		    fetchFrequency("FetchFrequency", cc), readLatencySample("ReadLatencyMetrics",
-                                                                    self->thisServerID,
-                                                                    SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-                                                                    SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    fetchesFromLogs("FetchesFromLogs", cc), readLatencySample("ReadLatencyMetrics",
+                                                                      self->thisServerID,
+                                                                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+                                                                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
@@ -3529,7 +3529,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				data->otherError.getFuture().get();
 
 			data->counters.fetchedVersions += (ver - data->version.get());
-			++data->counters.fetchFrequency;
+			++data->counters.fetchesFromLogs;
 			Optional<UID> curSourceTLogID = cursor->getCurrentPeekLocation();
 
 			if (curSourceTLogID != data->sourceTLogID) {

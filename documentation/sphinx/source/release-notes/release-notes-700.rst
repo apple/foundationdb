@@ -33,7 +33,7 @@ Status
 * Added ``commit_batching_window_size`` to the proxy roles section of status to record statistics about commit batching window size on each proxy. `(PR #4735) <https://github.com/apple/foundationdb/pull/4735>`_
 * Added ``cluster.bounce_impact`` section to status to report if there will be any extra effects when bouncing the cluster, and if so, the reason for those effects. `(PR #4770) <https://github.com/apple/foundationdb/pull/4770>`_
 * Added ``fetched_versions`` to the storage metrics section of status to report how fast a storage server is catching up in versions. `(PR #4770) <https://github.com/apple/foundationdb/pull/4770>`_
-* Added ``fetch_frequency`` to the storage metrics section of status to report the version fetching frequency of a storage server. `(PR #4770) <https://github.com/apple/foundationdb/pull/4770>`_
+* Added ``fetch_frequency`` to the storage metrics section of status to report how frequently a storage server fetches updates from transaction logs. `(PR #4770) <https://github.com/apple/foundationdb/pull/4770>`_
 
 Bindings
 --------

@@ -492,7 +492,7 @@ struct RolesInfo {
 			obj["mutations"] = StatusCounter(storageMetrics.getValue("Mutations")).getStatus();
 			obj.setKeyRawNumber("local_rate", storageMetrics.getValue("LocalRate"));
 			obj["fetched_versions"] = StatusCounter(storageMetrics.getValue("FetchedVersions")).getStatus();
-			obj["fetch_frequency"] = StatusCounter(storageMetrics.getValue("FetchFrequency")).getStatus();
+			obj["fetches_from_logs"] = StatusCounter(storageMetrics.getValue("FetchesFromLogs")).getStatus();
 
 			Version version = storageMetrics.getInt64("Version");
 			Version durableVersion = storageMetrics.getInt64("DurableVersion");
