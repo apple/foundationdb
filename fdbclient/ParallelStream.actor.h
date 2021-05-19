@@ -41,7 +41,7 @@ class ParallelStream {
 public:
 	class Fragment : public ReferenceCounted<Fragment> {
 		ParallelStream* parallelStream;
-		BoundedPromiseStream<T> stream;
+		PromiseStream<T> stream;
 		BoundedFlowLock::Releaser releaser;
 		friend class ParallelStream;
 
@@ -57,13 +57,13 @@ public:
 			releaser.release(); // Release before destruction to free up pending fragments
 			stream.sendError(end_of_stream());
 		}
-		Future<Void> onReady() { return stream.onReady(); }
+		Future<Void> onEmpty() { return stream.onEmpty(); }
 	};
 
 private:
 	PromiseStream<Reference<Fragment>> fragments;
 	size_t fragmentsProcessed{ 0 };
-	BoundedPromiseStream<T> results;
+	PromiseStream<T> results;
 	Future<Void> flusher;
 
 public:
@@ -75,7 +75,7 @@ public:
 				state Reference<Fragment> fragment = waitNext(self->fragments.getFuture());
 				loop {
 					try {
-						wait(self->results.onReady());
+						wait(self->results.onEmpty());
 						T value = waitNext(fragment->stream.getFuture());
 						self->results.send(value);
 						if (++messagesSinceYield == messagesBetweenYields) {
@@ -101,7 +101,7 @@ public:
 		}
 	}
 
-	ParallelStream(BoundedPromiseStream<T> results, size_t concurrency, size_t bufferLimit)
+	ParallelStream(PromiseStream<T> results, size_t concurrency, size_t bufferLimit)
 	  : results(results), semaphore(concurrency, bufferLimit) {
 		flusher = flushToClient(this);
 	}

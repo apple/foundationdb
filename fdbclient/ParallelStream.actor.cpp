@@ -58,7 +58,7 @@ ACTOR static Future<Void> consume(FutureStream<ParallelStreamTest::TestValue> st
 } // namespace ParallelStreamTest
 
 TEST_CASE("/fdbclient/ParallelStream") {
-	state BoundedPromiseStream<ParallelStreamTest::TestValue> results;
+	state PromiseStream<ParallelStreamTest::TestValue> results;
 	state size_t concurrency = deterministicRandom()->randomInt(1, 11);
 	state size_t bufferLimit = concurrency + deterministicRandom()->randomInt(0, 11);
 	state size_t numProducers = deterministicRandom()->randomInt(1, 1001);

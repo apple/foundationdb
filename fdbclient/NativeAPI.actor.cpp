@@ -3349,7 +3349,7 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 				        .getReplyStream(req);
 				state bool breakAgain = false;
 				loop {
-					wait(results->onReady());
+					wait(results->onEmpty());
 					try {
 						choose {
 							when(wait(cx->connectionFileChanged())) {
@@ -3492,7 +3492,7 @@ static KeyRange intersect(KeyRangeRef lhs, KeyRangeRef rhs) {
 	return KeyRange(KeyRangeRef(std::max(lhs.begin, rhs.begin), std::min(lhs.end, rhs.end)));
 }
 
-ACTOR Future<Void> getRangeStream(BoundedPromiseStream<RangeResult> _results,
+ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results,
                                   Database cx,
                                   Reference<TransactionLogInfo> trLogInfo,
                                   Future<Version> fVersion,
@@ -3537,7 +3537,7 @@ ACTOR Future<Void> getRangeStream(BoundedPromiseStream<RangeResult> _results,
 	// or allKeys.begin exists in the database and will be part of the conflict range anyways
 
 	state std::vector<Future<Void>> outstandingRequests;
-	loop {
+	while (b < e) {
 		state pair<KeyRange, Reference<LocationInfo>> ssi =
 		    wait(getKeyLocation(cx, reverse ? e : b, &StorageServerInterface::getKeyValuesStream, info, reverse));
 		state KeyRange shardIntersection = intersect(ssi.first, KeyRangeRef(b, e));
@@ -3571,9 +3571,6 @@ ACTOR Future<Void> getRangeStream(BoundedPromiseStream<RangeResult> _results,
 			e = shardIntersection.begin;
 		} else {
 			b = shardIntersection.end;
-		}
-		if (b >= e) {
-			break;
 		}
 	}
 	wait(waitForAll(outstandingRequests) && results.finish());
@@ -3935,7 +3932,7 @@ Future<RangeResult> Transaction::getRange(const KeySelector& begin,
 	return getRange(begin, end, GetRangeLimits(limit), snapshot, reverse);
 }
 
-Future<Void> Transaction::getRangeStream(const BoundedPromiseStream<RangeResult>& results,
+Future<Void> Transaction::getRangeStream(const PromiseStream<RangeResult>& results,
                                          const KeySelector& begin,
                                          const KeySelector& end,
                                          GetRangeLimits limits,
@@ -3944,17 +3941,8 @@ Future<Void> Transaction::getRangeStream(const BoundedPromiseStream<RangeResult>
 	++cx->transactionLogicalReads;
 	++cx->transactionGetRangeStreamRequests;
 
-	if (limits.isReached()) {
-		results.sendError(end_of_stream());
-		return Void();
-	}
-
-	if (!limits.isValid()) {
-		results.sendError(range_limits_invalid());
-		return Void();
-	}
-
-	ASSERT(limits.rows != 0);
+	// FIXME: limits are not implemented yet, and this code has not be tested with reverse=true
+	ASSERT(!limits.hasByteLimit() && !limits.hasRowLimit() && !reverse);
 
 	KeySelector b = begin;
 	if (b.orEqual) {
@@ -3994,7 +3982,7 @@ Future<Void> Transaction::getRangeStream(const BoundedPromiseStream<RangeResult>
 	                     results);
 }
 
-Future<Void> Transaction::getRangeStream(const BoundedPromiseStream<RangeResult>& results,
+Future<Void> Transaction::getRangeStream(const PromiseStream<RangeResult>& results,
                                          const KeySelector& begin,
                                          const KeySelector& end,
                                          int limit,

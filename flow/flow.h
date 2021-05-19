@@ -581,96 +581,6 @@ public:
 };
 
 template <class T>
-struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>> {
-	int promises; // one for each promise (and one for an active actor if this is an actor)
-	int futures; // one for each future and one more if there are any callbacks
-
-	// Invariant: SingleCallback<T>::next==this || (queue.empty() && !error.isValid())
-	std::queue<T, Deque<T>> queue;
-	Error error;
-
-	NotifiedQueue(int futures, int promises) : futures(futures), promises(promises) { SingleCallback<T>::next = this; }
-
-	bool isReady() const { return !queue.empty() || error.isValid(); }
-	bool isError() const { return queue.empty() && error.isValid(); } // the *next* thing queued is an error
-	uint32_t size() const { return queue.size(); }
-
-	virtual T pop() { return popImpl(); }
-
-	template <class U>
-	void send(U&& value) {
-		if (error.isValid())
-			return;
-
-		if (SingleCallback<T>::next != this) {
-			SingleCallback<T>::next->fire(std::forward<U>(value));
-		} else {
-			queue.emplace(std::forward<U>(value));
-		}
-	}
-
-	void sendError(Error err) {
-		if (error.isValid())
-			return;
-
-		this->error = err;
-		if (shouldFireImmediately()) {
-			SingleCallback<T>::next->error(err);
-		}
-	}
-
-	void addPromiseRef() { promises++; }
-	void addFutureRef() { futures++; }
-
-	void delPromiseRef() {
-		if (!--promises) {
-			if (futures) {
-				sendError(broken_promise());
-			} else
-				destroy();
-		}
-	}
-	void delFutureRef() {
-		if (!--futures) {
-			if (promises)
-				cancel();
-			else
-				destroy();
-		}
-	}
-
-	int getFutureReferenceCount() const { return futures; }
-	int getPromiseReferenceCount() const { return promises; }
-
-	virtual void destroy() { delete this; }
-	virtual void cancel() {}
-
-	void addCallbackAndDelFutureRef(SingleCallback<T>* cb) {
-		ASSERT(SingleCallback<T>::next == this);
-		cb->insert(this);
-	}
-	virtual void unwait() override { delFutureRef(); }
-	virtual void fire(T const&) override { ASSERT(false); }
-	virtual void fire(T&&) override { ASSERT(false); }
-
-	bool shouldFireImmediately() { return SingleCallback<T>::next != this; }
-
-protected:
-	T popImpl() {
-		if (queue.empty()) {
-			if (error.isValid())
-				throw error;
-			throw internal_error();
-		}
-		auto copy = std::move(queue.front());
-		queue.pop();
-		return copy;
-	}
-
-	bool hasError() { return error.isValid(); }
-};
-
-template <class T>
 class Promise;
 
 template <class T>
@@ -845,6 +755,107 @@ private:
 };
 
 template <class T>
+struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>> {
+	int promises; // one for each promise (and one for an active actor if this is an actor)
+	int futures; // one for each future and one more if there are any callbacks
+
+	// Invariant: SingleCallback<T>::next==this || (queue.empty() && !error.isValid())
+	std::queue<T, Deque<T>> queue;
+	Promise<Void> onEmpty;
+	Error error;
+
+	NotifiedQueue(int futures, int promises) : futures(futures), promises(promises), onEmpty(nullptr) {
+		SingleCallback<T>::next = this;
+	}
+
+	bool isReady() const { return !queue.empty() || error.isValid(); }
+	bool isError() const { return queue.empty() && error.isValid(); } // the *next* thing queued is an error
+	uint32_t size() const { return queue.size(); }
+
+	virtual T pop() {
+		T res = popImpl();
+		if (onEmpty.isValid() && queue.empty()) {
+			Promise<Void> hold = onEmpty;
+			onEmpty = Promise<Void>(nullptr);
+			hold.send(Void());
+		}
+		return res;
+	}
+
+	template <class U>
+	void send(U&& value) {
+		if (error.isValid())
+			return;
+
+		if (SingleCallback<T>::next != this) {
+			SingleCallback<T>::next->fire(std::forward<U>(value));
+		} else {
+			queue.emplace(std::forward<U>(value));
+		}
+	}
+
+	void sendError(Error err) {
+		if (error.isValid())
+			return;
+
+		this->error = err;
+		if (shouldFireImmediately()) {
+			SingleCallback<T>::next->error(err);
+		}
+	}
+
+	void addPromiseRef() { promises++; }
+	void addFutureRef() { futures++; }
+
+	void delPromiseRef() {
+		if (!--promises) {
+			if (futures) {
+				sendError(broken_promise());
+			} else
+				destroy();
+		}
+	}
+	void delFutureRef() {
+		if (!--futures) {
+			if (promises)
+				cancel();
+			else
+				destroy();
+		}
+	}
+
+	int getFutureReferenceCount() const { return futures; }
+	int getPromiseReferenceCount() const { return promises; }
+
+	virtual void destroy() { delete this; }
+	virtual void cancel() {}
+
+	void addCallbackAndDelFutureRef(SingleCallback<T>* cb) {
+		ASSERT(SingleCallback<T>::next == this);
+		cb->insert(this);
+	}
+	virtual void unwait() override { delFutureRef(); }
+	virtual void fire(T const&) override { ASSERT(false); }
+	virtual void fire(T&&) override { ASSERT(false); }
+
+	bool shouldFireImmediately() { return SingleCallback<T>::next != this; }
+
+protected:
+	T popImpl() {
+		if (queue.empty()) {
+			if (error.isValid())
+				throw error;
+			throw internal_error();
+		}
+		auto copy = std::move(queue.front());
+		queue.pop();
+		return copy;
+	}
+
+	bool hasError() { return error.isValid(); }
+};
+
+template <class T>
 class FutureStream {
 public:
 	bool isValid() const { return queue != 0; }
@@ -992,137 +1003,18 @@ public:
 	bool operator==(const PromiseStream<T>& rhs) const { return queue == rhs.queue; }
 	bool isEmpty() const { return !queue->isReady(); }
 
-private:
-	NotifiedQueue<T>* queue;
-};
-
-template <class T>
-struct BoundedNotifiedQueue final : NotifiedQueue<T>, FastAllocated<BoundedNotifiedQueue<T>> {
-	using FastAllocated<BoundedNotifiedQueue<T>>::operator new;
-	using FastAllocated<BoundedNotifiedQueue<T>>::operator delete;
-
-	int64_t bytesSent = 0;
-	int64_t bytesAcknowledged = 0;
-	int64_t bytesLimit = 1;
-	Promise<Void> ready;
-
-	BoundedNotifiedQueue(int futures, int promises) : NotifiedQueue<T>(futures, promises), ready(nullptr) {}
-
-	void destroy() override { delete this; }
-
-	T pop() override {
-		T res = this->popImpl();
-		bytesAcknowledged += res.expectedSize();
-		if (bytesSent - bytesAcknowledged < bytesLimit && ready.isValid() && ready.canBeSet()) {
-			Promise<Void> hold = ready;
-			ready.send(Void());
-		}
-		return res;
-	}
-};
-
-template <class T>
-class BoundedPromiseStream {
-public:
-	// stream.send( request )
-	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
-
-	void send(const T& value) const {
-		ASSERT(queue->bytesSent - queue->bytesAcknowledged < queue->bytesLimit);
-		if (!queue->shouldFireImmediately()) {
-			queue->bytesSent += value.expectedSize();
-			if ((!queue->ready.isValid() || (queue->ready.isSet() && !queue->ready.getFuture().isError())) &&
-			    queue->bytesSent - queue->bytesAcknowledged >= queue->bytesLimit) {
-				queue->ready = Promise<Void>();
-			}
-		}
-		queue->send(value);
-	}
-	void send(T&& value) const {
-		ASSERT(queue->bytesSent - queue->bytesAcknowledged < queue->bytesLimit);
-		if (!queue->shouldFireImmediately()) {
-			queue->bytesSent += value.expectedSize();
-			if ((!queue->ready.isValid() || (queue->ready.isSet() && !queue->ready.getFuture().isError())) &&
-			    queue->bytesSent - queue->bytesAcknowledged >= queue->bytesLimit) {
-				queue->ready = Promise<Void>();
-			}
-		}
-		queue->send(std::move(value));
-	}
-	void sendError(const Error& error) const { queue->sendError(error); }
-
-	// stream.getReply( request )
-	//   Reliable at least once delivery: Eventually delivers request at least once and returns one of the replies if
-	//   communication is possible.  Might deliver request
-	//      more than once.
-	//   If a reply is returned, request was or will be delivered one or more times.
-	//   If cancelled, request was or will be delivered zero or more times.
-	template <class X>
-	Future<REPLY_TYPE(X)> getReply(const X& value) const {
-		send(value);
-		return getReplyPromise(value).getFuture();
-	}
-	template <class X>
-	Future<REPLY_TYPE(X)> getReply(const X& value, TaskPriority taskID) const {
-		setReplyPriority(value, taskID);
-		return getReplyPromise(value).getFuture();
-	}
-
-	template <class X>
-	Future<X> getReply() const {
-		return getReply(Promise<X>());
-	}
-	template <class X>
-	Future<X> getReplyWithTaskID(TaskPriority taskID) const {
-		Promise<X> reply;
-		reply.getEndpoint(taskID);
-		return getReply(reply);
-	}
-
-	FutureStream<T> getFuture() const {
-		queue->addFutureRef();
-		return FutureStream<T>(queue);
-	}
-	BoundedPromiseStream() : queue(new BoundedNotifiedQueue<T>(0, 1)) {}
-	BoundedPromiseStream(const BoundedPromiseStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
-	BoundedPromiseStream(BoundedPromiseStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
-	void operator=(const BoundedPromiseStream& rhs) {
-		rhs.queue->addPromiseRef();
-		if (queue)
-			queue->delPromiseRef();
-		queue = rhs.queue;
-	}
-	void operator=(BoundedPromiseStream&& rhs) noexcept {
-		if (queue != rhs.queue) {
-			if (queue)
-				queue->delPromiseRef();
-			queue = rhs.queue;
-			rhs.queue = 0;
-		}
-	}
-	~BoundedPromiseStream() {
-		if (queue)
-			queue->delPromiseRef();
-		// queue = (NotifiedQueue<T>*)0xdeadbeef;
-	}
-
-	bool operator==(const BoundedPromiseStream<T>& rhs) const { return queue == rhs.queue; }
-	bool isEmpty() const { return !queue->isReady(); }
-
-	Future<Void> onReady() {
-		if (queue->ready.isValid() && queue->ready.isSet() && queue->ready.getFuture().isError()) {
-			return queue->ready.getFuture().getError();
-		}
-		if (queue->bytesSent - queue->bytesAcknowledged < queue->bytesLimit) {
+	Future<Void> onEmpty() {
+		if (isEmpty()) {
 			return Void();
 		}
-		return queue->ready.getFuture();
+		if (!queue->onEmpty.isValid()) {
+			queue->onEmpty = Promise<Void>();
+		}
+		return queue->onEmpty.getFuture();
 	}
 
-	void setByteLimit(int64_t limit) { queue->bytesLimit = limit; }
-
 private:
-	BoundedNotifiedQueue<T>* queue;
+	NotifiedQueue<T>* queue;
 };
 
 // Neither of these implementations of REPLY_TYPE() works on both MSVC and g++, so...

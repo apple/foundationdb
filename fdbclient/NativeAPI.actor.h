@@ -283,19 +283,19 @@ public:
 		                reverse);
 	}
 
-	[[nodiscard]] Future<Void> getRangeStream(const BoundedPromiseStream<Standalone<RangeResultRef>>& results,
+	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,
 	                                          const KeySelector& begin,
 	                                          const KeySelector& end,
 	                                          int limit,
 	                                          bool snapshot = false,
 	                                          bool reverse = false);
-	[[nodiscard]] Future<Void> getRangeStream(const BoundedPromiseStream<Standalone<RangeResultRef>>& results,
+	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,
 	                                          const KeySelector& begin,
 	                                          const KeySelector& end,
 	                                          GetRangeLimits limits,
 	                                          bool snapshot = false,
 	                                          bool reverse = false);
-	[[nodiscard]] Future<Void> getRangeStream(const BoundedPromiseStream<Standalone<RangeResultRef>>& results,
+	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,
 	                                          const KeyRange& keys,
 	                                          int limit,
 	                                          bool snapshot = false,
@@ -307,7 +307,7 @@ public:
 		                      snapshot,
 		                      reverse);
 	}
-	[[nodiscard]] Future<Void> getRangeStream(const BoundedPromiseStream<Standalone<RangeResultRef>>& results,
+	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,
 	                                          const KeyRange& keys,
 	                                          GetRangeLimits limits,
 	                                          bool snapshot = false,

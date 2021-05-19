@@ -1262,7 +1262,7 @@ Future<T> waitOrError(Future<T> f, Future<Void> errorSignal) {
 }
 
 ACTOR template <class T, class V>
-Future<T> forwardErrors(Future<T> f, BoundedPromiseStream<V> output) {
+Future<T> forwardErrors(Future<T> f, PromiseStream<V> output) {
 	try {
 		T val = wait(f);
 		return val;
