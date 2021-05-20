@@ -101,8 +101,8 @@ public:
 	// Returns when onFailed(endpoint) || transport().onDisconnect( endpoint.getPrimaryAddress() )
 	virtual Future<Void> onDisconnectOrFailure(Endpoint const& endpoint) = 0;
 
-	// Returns when transport().onDisconnect( endpoint.getPrimaryAddress() ) or the endpoint is permanently failed
-	virtual Future<Void> onDisconnect(Endpoint const& endpoint) = 0;
+	// Returns when transport().onDisconnect( address )
+	virtual Future<Void> onDisconnect(NetworkAddress const& address) = 0;
 
 	// Returns true if the endpoint is failed but the address of the endpoint is not failed.
 	virtual bool onlyEndpointFailed(Endpoint const& endpoint) const = 0;
@@ -150,7 +150,7 @@ public:
 	FailureStatus getState(Endpoint const& endpoint) const override;
 	FailureStatus getState(NetworkAddress const& address) const override;
 	Future<Void> onDisconnectOrFailure(Endpoint const& endpoint) override;
-	Future<Void> onDisconnect(Endpoint const& endpoint) override;
+	Future<Void> onDisconnect(NetworkAddress const& address) override;
 	bool onlyEndpointFailed(Endpoint const& endpoint) const override;
 	bool permanentlyFailed(Endpoint const& endpoint) const override;
 
@@ -159,6 +159,7 @@ public:
 private:
 	std::unordered_map<NetworkAddress, FailureStatus> addressStatus;
 	YieldedAsyncMap<Endpoint, bool> endpointKnownFailed;
+	YieldedAsyncMap<NetworkAddress, bool> disconnectTriggers;
 	std::unordered_set<Endpoint> failedEndpoints;
 
 	friend class OnStateChangedActorActor;

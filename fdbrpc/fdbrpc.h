@@ -327,7 +327,8 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true) {
 		// A ReplyPromiseStream will be terminated on the server side if the network connection with the client breaks
 		acknowledgements.failures = tagError<Void>(
-		    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(remoteEndpoint), operation_obsolete());
+		    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(remoteEndpoint.getPrimaryAddress()),
+		    operation_obsolete());
 	}
 
 	void destroy() override { delete this; }
@@ -689,7 +690,8 @@ public:
 	template <class X>
 	ReplyPromiseStream<REPLYSTREAM_TYPE(X)> getReplyStream(const X& value) const {
 		if (queue->isRemoteEndpoint()) {
-			Future<Void> disc = makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(getEndpoint());
+			Future<Void> disc =
+			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(getEndpoint().getPrimaryAddress());
 			auto& p = getReplyPromiseStream(value);
 			Reference<Peer> peer =
 			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
