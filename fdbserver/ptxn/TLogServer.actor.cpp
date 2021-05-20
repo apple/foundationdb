@@ -1156,9 +1156,9 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 			//    .detail("BeginVersion", req.beginVersion)
 			//    .detail("StorageTeam", req.storageTeamID)
 			//    .detail("Tag", req.tag.toString());
-			auto tlogGroup = activeGeneration.find(req.storageTeamID);
-			TEST(tlogGroup == activeGeneration.end()); // TLog peek: group not found
-			if (tlogGroup == activeGeneration.end()) {
+			auto tlogGroup = activeGeneration->find(req.storageTeamID);
+			TEST(tlogGroup == activeGeneration->end()); // TLog peek: group not found
+			if (tlogGroup == activeGeneration->end()) {
 				req.reply.sendError(tlog_group_not_found());
 				continue;
 			}
