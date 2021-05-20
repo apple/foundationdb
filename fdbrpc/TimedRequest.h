@@ -25,11 +25,9 @@
 #include <fdbrpc/fdbrpc.h>
 
 class TimedRequest {
-
-public:
-	// Visible for unit tests.
 	double _requestTime;
 
+public:
 	double requestTime() const {
 		ASSERT(_requestTime > 0.0);
 		return _requestTime;

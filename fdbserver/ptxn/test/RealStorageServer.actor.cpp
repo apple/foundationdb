@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbrpc/simulator.h"
 #include "fdbserver/MockPeekCursor.h"
 #include "fdbserver/MockLogSystem.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -32,81 +33,50 @@
 
 namespace ptxn {
 
-ACTOR Future<Void> driverRunStorageServer(StorageServerInterface* ssi,
-                                          std::vector<Future<Void>>* actors,
-                                          Tag tag,
-                                          Reference<MockPeekCursor> mockPeekCursor) {
+struct ServerTestDriver {
+	ISimulator::ProcessInfo* previousProcess;
+	TaskPriority previousTask;
 
-	KeyValueStoreType storeType = KeyValueStoreType::SSD_BTREE_V2;
-	state std::string folder = ".";
-	std::string fileName = joinPath(folder, "storage-" + ssi->id().toString() + "." + storeType.toString());
-	std::cout << "new Storage Server file name: " << fileName << std::endl;
-	deleteFile(fileName);
-	state IKeyValueStore* data = openKVStore(storeType, fileName, ssi->id(), 0);
+	ACTOR static Future<Void> switchToServerProcess(ServerTestDriver* self) {
+		self->previousProcess = g_simulator.getCurrentProcess();
+		self->previousTask = g_pSimulator->getCurrentTask();
+		wait(g_simulator.onProcess(
+		    g_simulator.newProcess(
+		        "TestSystem",
+		        IPAddress(0x01010101),
+		        1,
+		        false,
+		        1,
+		        LocalityData(Optional<Standalone<StringRef>>(),
+		                     Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
+		                     Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
+		                     Optional<Standalone<StringRef>>()),
+		        ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
+		        "",
+		        "",
+		        currentProtocolVersion),
+		    TaskPriority::DefaultYield));
+		Sim2FileSystem::newFileSystem();
+		FlowTransport::createInstance(false, 1);
+		return Void();
+	}
 
-	state ReplyPromise<InitializeStorageReply> storageReady;
+	ACTOR static Future<Void> switchBack(ServerTestDriver* self) {
+		wait(g_simulator.onProcess(self->previousProcess, self->previousTask));
+		return Void();
+	}
+};
 
-	// Initialize dbInfo with mocked cursor and mocked loy system.
-
-	// TODO: Use Reference API?
-	// TODO: delete mockLogSystem eventually.
-	state MockLogSystem* mockLogSystem = new MockLogSystem();
-	mockLogSystem->cursor = mockPeekCursor.castTo<ILogSystem::IPeekCursor>();
-
-	LogSystemConfig logSystemConfig;
-	logSystemConfig.logSystemType = LogSystemType::mock;
-	logSystemConfig.mockLogSystem = mockLogSystem;
-
-	ServerDBInfo dbInfoBuilder;
-	dbInfoBuilder.recoveryState = RecoveryState::ACCEPTING_COMMITS;
-	dbInfoBuilder.logSystemConfig = logSystemConfig;
-	state Reference<AsyncVar<ServerDBInfo>> dbInfo = makeReference<AsyncVar<ServerDBInfo>>(dbInfoBuilder);
-	// Initialize dbInfo done.
-
-	std::cout << "Starting Storage Server" << std::endl;
-	state Future<Void> ss = storageServer(data, *ssi, tag, storageReady, dbInfo, folder);
-	actors->emplace_back(ss);
-
-	// Delay 0.1 seconds to wait storage server processing the mutations.
-	// TODO: Wait until certain desired version is reached rather than predefined delay time.
-	wait(delay(0.1));
-	std::cout << "After waiting for 0.1 seconds" << std::endl;
-
-	return Void();
-}
-
-ACTOR Future<Void> driverVerifyGetValue(StorageServerInterface* ssi,
-                                        KeyRef key,
-                                        Version version,
-                                        ValueRef expectedValue) {
-	GetValueRequest getValueRequest(UID(), // spanContext
-	                                key,
-	                                version,
-	                                Optional<TagSet>(), // tags
-	                                Optional<UID>()); // debugID
-	getValueRequest._requestTime = timer();
-
-	ssi->getValue.send(getValueRequest);
-
-	GetValueReply getValueReply = wait(getValueRequest.reply.getFuture());
-
-	const Value& value = getValueReply.value.get();
-	std::cout << "Get value: " << value.toString() << std::endl;
-	ASSERT(value == expectedValue);
-
-	return Void();
-}
-
-struct StorageServerTestDriver {
+struct StorageServerTestDriver : ServerTestDriver {
 	Reference<MockPeekCursor> mockPeekCursor;
 
 	// Default tag.
 	Tag tag = Tag(1, 1);
 	// Set by initEndpoints()
 	StorageServerInterface ssi;
-	std::vector<Future<Void>> actors;
+	ActorCollection actors = ActorCollection(false);
 
-	StorageServerTestDriver() { initEndpoints(); }
+	StorageServerTestDriver() : ServerTestDriver() { initEndpoints(); }
 
 	void initEndpoints() {
 		UID uid = nondeterministicRandom()->randomUniqueID();
@@ -115,10 +85,67 @@ struct StorageServerTestDriver {
 		ssi.initEndpoints();
 	}
 
-	Future<Void> runStorageServer() { return driverRunStorageServer(&ssi, &actors, tag, mockPeekCursor); }
+	ACTOR static Future<Void> runStorageServer(StorageServerTestDriver* self) {
+		wait(delay(1));
 
-	Future<Void> verifyGetValue(KeyRef key, Version version, ValueRef expectedValue) {
-		return driverVerifyGetValue(&ssi, key, version, expectedValue);
+		StorageServerInterface& ssi = self->ssi;
+
+		KeyValueStoreType storeType = KeyValueStoreType::SSD_BTREE_V2;
+		state std::string folder = ".";
+		std::string fileName = joinPath(folder, "storage-" + ssi.id().toString() + "." + storeType.toString());
+		std::cout << "new Storage Server file name: " << fileName << std::endl;
+		deleteFile(fileName);
+		state IKeyValueStore* data = openKVStore(storeType, fileName, ssi.id(), 0);
+
+		state ReplyPromise<InitializeStorageReply> storageReady;
+
+		// Initialize dbInfo with mocked cursor and mocked loy system.
+
+		// TODO: Use Reference API?
+		// TODO: delete mockLogSystem eventually.
+		state MockLogSystem* mockLogSystem = new MockLogSystem();
+		mockLogSystem->cursor = self->mockPeekCursor.castTo<ILogSystem::IPeekCursor>();
+
+		LogSystemConfig logSystemConfig;
+		logSystemConfig.logSystemType = LogSystemType::mock;
+		logSystemConfig.mockLogSystem = mockLogSystem;
+
+		ServerDBInfo dbInfoBuilder;
+		dbInfoBuilder.recoveryState = RecoveryState::ACCEPTING_COMMITS;
+		dbInfoBuilder.logSystemConfig = logSystemConfig;
+		state Reference<AsyncVar<ServerDBInfo>> dbInfo = makeReference<AsyncVar<ServerDBInfo>>(dbInfoBuilder);
+		// Initialize dbInfo done.
+
+		std::cout << "Starting Storage Server." << std::endl;
+		state Future<Void> ss = storageServer(data, ssi, self->tag, storageReady, dbInfo, folder);
+		std::cout << "Storage Server started." << std::endl;
+
+		self->actors.add(ss);
+		wait(ss);
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> verifyGetValue(StorageServerTestDriver* self,
+	                                         KeyRef key,
+	                                         Version version,
+	                                         ValueRef expectedValue) {
+		wait(switchToServerProcess(self));
+
+		GetValueRequest getValueRequest = GetValueRequest(UID(), // spanContext
+		                                                  key,
+		                                                  version,
+		                                                  Optional<TagSet>(), // tags
+		                                                  Optional<UID>()); // debugID
+		self->ssi.getValue.send(getValueRequest);
+
+		GetValueReply getValueReply = wait(getValueRequest.reply.getFuture());
+		const Value& value = getValueReply.value.get();
+		std::cout << "Get value: " << value.toString() << std::endl;
+		ASSERT(value == expectedValue);
+
+		wait(switchBack(self));
+		return Void();
 	}
 };
 } // namespace ptxn
@@ -138,9 +165,16 @@ TEST_CASE("fdbserver/ptxn/test/storageserver") {
 		{ MockPeekCursor::MessageAndTags(message, tags) }) };
 	driver.mockPeekCursor = makeReference<MockPeekCursor>(allVersionMessages, arena);
 
-	wait(driver.runStorageServer());
+	loop choose{
+		when(wait(ptxn::StorageServerTestDriver::runStorageServer(&driver))){
+		    std::cout << "Storage serves exists unexpectedly" << std::endl;
+	        ASSERT(false);
+        }
+        when(wait(ptxn::StorageServerTestDriver::verifyGetValue(&driver, "Hello"_sr, 8, "World"_sr))) {
+	        break;
+        }
+        when(wait(driver.actors.getResult())) {}
+    };
 
-	driver.verifyGetValue("Hello"_sr, 8, "World"_sr);
-
-	return Void();
+    return Void();
 }
