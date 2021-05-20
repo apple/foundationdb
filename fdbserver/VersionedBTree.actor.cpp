@@ -3162,17 +3162,17 @@ struct BTreePage {
 #pragma pack(pop)
 
 	int size() const {
-		auto& t = tree();
-		return (uint8_t*)&t - (uint8_t*)this + t.size();
+		const BinaryTree* t = tree();
+		return (uint8_t*)t - (uint8_t*)this + t->size();
 	}
 
 	bool isLeaf() const { return height == 1; }
 
-	BinaryTree& tree() { return *(BinaryTree*)(this + 1); }
+	BinaryTree* tree() { return (BinaryTree*)(this + 1); }
 
-	BinaryTree& tree() const { return *(BinaryTree*)(this + 1); }
+	BinaryTree* tree() const { return (BinaryTree*)(this + 1); }
 
-	ValueTree& valueTree() const { return *(ValueTree*)(this + 1); }
+	ValueTree* valueTree() const { return (ValueTree*)(this + 1); }
 
 	std::string toString(bool write,
 	                     BTreePageIDRef id,
@@ -3187,16 +3187,16 @@ struct BTreePage {
 		            ver,
 		            this,
 		            height,
-		            (int)tree().numItems,
+		            (int)tree()->numItems,
 		            (int)kvBytes,
 		            lowerBound.toString(false).c_str(),
 		            upperBound.toString(false).c_str());
 		try {
-			if (tree().numItems > 0) {
+			if (tree()->numItems > 0) {
 				// This doesn't use the cached reader for the page because it is only for debugging purposes,
 				// a cached reader may not exist
 				BinaryTree::DecodeCache cache(lowerBound, upperBound);
-				BinaryTree::Cursor c(&cache, &tree());
+				BinaryTree::Cursor c(&cache, tree());
 
 				c.moveFirst();
 				ASSERT(c.valid());
@@ -3243,12 +3243,12 @@ static void makeEmptyRoot(Reference<ArenaPage> page) {
 	BTreePage* btpage = (BTreePage*)page->begin();
 	btpage->height = 1;
 	btpage->kvBytes = 0;
-	btpage->tree().build(page->size(), nullptr, nullptr, nullptr, nullptr);
+	btpage->tree()->build(page->size(), nullptr, nullptr, nullptr, nullptr);
 }
 
 BTreePage::BinaryTree::Cursor getCursor(const Reference<const ArenaPage>& page) {
 	return BTreePage::BinaryTree::Cursor((BTreePage::BinaryTree::DecodeCache*)page->userData,
-	                                     &((BTreePage*)page->begin())->tree());
+	                                     ((BTreePage*)page->begin())->tree());
 }
 
 struct BoundaryRefAndPage {
@@ -3492,7 +3492,7 @@ public:
 				// Iterate over page entries, skipping key decoding using BTreePage::ValueTree which uses
 				// RedwoodRecordRef::DeltaValueOnly as the delta type type to skip key decoding
 				BTreePage::ValueTree::DecodeCache cache(dbBegin, dbEnd);
-				BTreePage::ValueTree::Cursor c(&cache, &btPage.valueTree());
+				BTreePage::ValueTree::Cursor c(&cache, btPage.valueTree());
 				ASSERT(c.moveFirst());
 				Version v = entry.version;
 				while (1) {
@@ -4173,7 +4173,7 @@ private:
 			             pageUpperBound.toString(false).c_str());
 
 			int deltaTreeSpace = p.pageSize - sizeof(BTreePage);
-			state int written = btPage->tree().build(
+			state int written = btPage->tree()->build(
 			    deltaTreeSpace, &entries[p.startIndex], &entries[endIndex], &pageLowerBound, &pageUpperBound);
 
 			if (written > deltaTreeSpace) {
@@ -4512,7 +4512,7 @@ private:
 			metrics.pageModifyExt += (maybeNewID.size() - 1);
 			metrics.modifyFillPct += (double)btPage->size() / capacity;
 			metrics.modifyStoredPct += (double)btPage->kvBytes / capacity;
-			metrics.modifyItemCount += btPage->tree().numItems;
+			metrics.modifyItemCount += btPage->tree()->numItems;
 
 			// The boundaries can't have changed, but the child page link may have.
 			if (maybeNewID != decodeLowerBound.getChildPage()) {
@@ -4576,11 +4576,8 @@ private:
 
 	struct InternalPageModifier {
 		InternalPageModifier() {}
-		InternalPageModifier(Reference<const ArenaPage> p,
-		                     BTreePage::BinaryTree::Cursor& c,
-		                     bool updating,
-		                     ParentInfo* parentInfo)
-		  : page(p), clonedPage(false), cursor(c), updating(updating), changesMade(false), parentInfo(parentInfo) {}
+		InternalPageModifier(Reference<const ArenaPage> p, bool updating, ParentInfo* parentInfo)
+		  : page(p), clonedPage(false), updating(updating), changesMade(false), parentInfo(parentInfo) {}
 
 		// Whether updating the existing page is allowed
 		bool updating;
@@ -4589,18 +4586,17 @@ private:
 		// Whether or not page has been cloned for update
 		bool clonedPage;
 
-		BTreePage::BinaryTree::Cursor cursor;
 		Standalone<VectorRef<RedwoodRecordRef>> rebuild;
 
 		// Whether there are any changes to the page, either made in place or staged in rebuild
 		bool changesMade;
 		ParentInfo* parentInfo;
 
-		BTreePage* btPage() { return (BTreePage*)page->begin(); }
+		BTreePage* btPage() const { return (BTreePage*)page->begin(); }
 
 		bool empty() const {
 			if (updating) {
-				return cursor.tree->numItems == 0;
+				return btPage()->tree()->numItems == 0;
 			} else {
 				return rebuild.empty();
 			}
@@ -4609,7 +4605,6 @@ private:
 		void cloneForUpdate() {
 			if (!clonedPage) {
 				page = clonePageForUpdate(page);
-				cursor.switchTree(&btPage()->tree());
 				clonedPage = true;
 			}
 		}
@@ -4620,15 +4615,15 @@ private:
 			int i = 0;
 			if (updating) {
 				// Update must be done in the new tree, not the original tree where the end cursor will be from
-				end.tree = cursor.tree;
-				end.switchTree(cursor.tree);
+				end.tree = btPage()->tree();
+				end.switchTree(btPage()->tree());
 
 				// TODO: insert recs in a random order to avoid new subtree being entirely right child links
 				while (i != recs.size()) {
 					const RedwoodRecordRef& rec = recs[i];
 					debug_printf("internal page (updating) insert: %s\n", rec.toString(false).c_str());
 
-					if (!cursor.insert(rec)) {
+					if (!end.insert(rec)) {
 						debug_printf("internal page: failed to insert %s, switching to rebuild\n",
 						             rec.toString(false).c_str());
 
@@ -4693,8 +4688,8 @@ private:
 					if (c != u.cEnd) {
 						cloneForUpdate();
 						// must point c to the tree to erase from
-						c.tree = cursor.tree;
-						c.switchTree(cursor.tree);
+						c.tree = btPage()->tree();
+						c.switchTree(btPage()->tree());
 					}
 
 					while (c != u.cEnd) {
@@ -4798,7 +4793,7 @@ private:
 		// records in a DeltaTree being outside its decode boundary range, which isn't actually invalid
 		// though it is awkward to reason about.
 		// TryToUpdate indicates insert and erase operations should be tried on the existing page first
-		state bool tryToUpdate = btPage->tree().numItems > 0 && update->boundariesNormal();
+		state bool tryToUpdate = btPage->tree()->numItems > 0 && update->boundariesNormal();
 
 		debug_printf(
 		    "%s commitSubtree(): %s\n",
@@ -4888,8 +4883,8 @@ private:
 							if (!pageCopy.isValid()) {
 								pageCopy = clonePageForUpdate(page);
 								btPage = (BTreePage*)pageCopy->begin();
-								cursor.tree = &btPage->tree();
-								cursor.switchTree(&btPage->tree());
+								cursor.tree = btPage->tree();
+								cursor.switchTree(btPage->tree());
 							}
 
 							btPage->kvBytes -= cursor.get().kvBytes();
@@ -4918,8 +4913,8 @@ private:
 						if (!pageCopy.isValid()) {
 							pageCopy = clonePageForUpdate(page);
 							btPage = (BTreePage*)pageCopy->begin();
-							cursor.tree = &btPage->tree();
-							cursor.switchTree(&btPage->tree());
+							cursor.tree = btPage->tree();
+							cursor.switchTree(btPage->tree());
 						}
 
 						if (cursor.insert(rec, update->skipLen, maxHeightAllowed)) {
@@ -4982,8 +4977,8 @@ private:
 							if (!pageCopy.isValid()) {
 								pageCopy = clonePageForUpdate(page);
 								btPage = (BTreePage*)pageCopy->begin();
-								cursor.tree = &btPage->tree();
-								cursor.switchTree(&btPage->tree());
+								cursor.tree = btPage->tree();
+								cursor.switchTree(btPage->tree());
 							}
 
 							btPage->kvBytes -= cursor.get().kvBytes();
@@ -5027,8 +5022,8 @@ private:
 							if (!pageCopy.isValid()) {
 								pageCopy = clonePageForUpdate(page);
 								btPage = (BTreePage*)pageCopy->begin();
-								cursor.tree = &btPage->tree();
-								cursor.switchTree(&btPage->tree());
+								cursor.tree = btPage->tree();
+								cursor.switchTree(btPage->tree());
 							}
 
 							btPage->kvBytes -= cursor.get().kvBytes();
@@ -5061,9 +5056,8 @@ private:
 			writeVersion = self->getLastCommittedVersion() + 1;
 
 			if (updating) {
-				const BTreePage::BinaryTree& DeltaTree2 = btPage->tree();
 				// If the tree is now empty, delete the page
-				if (DeltaTree2.numItems == 0) {
+				if (cursor.tree->numItems == 0) {
 					update->cleared();
 					self->freeBTreePage(rootID, writeVersion);
 					debug_printf("%s Page updates cleared all entries, returning %s\n",
@@ -5280,7 +5274,7 @@ private:
 			    context.c_str(),
 			    btPage->size(),
 			    btPage->height,
-			    btPage->tree().numItems,
+			    btPage->tree()->numItems,
 			    slices.size(),
 			    recursions.size());
 
@@ -5290,7 +5284,7 @@ private:
 			// Note:  parentInfo could be invalid after a wait and must be re-initialized.
 			// All uses below occur before waits so no reinitialization is done.
 			state ParentInfo* parentInfo = &self->childUpdateTracker[rootID.front()];
-			state InternalPageModifier modifier(page, cursor, tryToUpdate, parentInfo);
+			state InternalPageModifier modifier(page, tryToUpdate, parentInfo);
 
 			// Apply the possible changes for each subtree range recursed to, except the last one.
 			// For each range, the expected next record, if any, is checked against the first boundary
@@ -5334,8 +5328,8 @@ private:
 			if (modifier.clonedPage) {
 				pageCopy = modifier.page;
 				btPage = modifier.btPage();
-				cursor.tree = modifier.cursor.tree;
-				cursor.switchTree(modifier.cursor.tree);
+				cursor.tree = btPage->tree();
+				cursor.switchTree(btPage->tree());
 			}
 
 			// If page contents have changed
