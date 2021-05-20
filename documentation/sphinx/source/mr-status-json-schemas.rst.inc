@@ -27,6 +27,7 @@
                   "storage",
                   "transaction",
                   "resolution",
+                  "stateless",
                   "commit_proxy",
                   "grv_proxy",
                   "master",
@@ -120,8 +121,20 @@
                      "counter":0,
                      "roughness":0.0
                   },
-                  "grv_latency_statistics":{
+                  "grv_latency_statistics":{ // GRV Latency metrics are grouped according to priority (currently batch or default).
                      "default":{
+                         "count":0,
+                         "min":0.0,
+                         "max":0.0,
+                         "median":0.0,
+                         "mean":0.0,
+                         "p25":0.0,
+                         "p90":0.0,
+                         "p95":0.0,
+                         "p99":0.0,
+                         "p99.9":0.0
+                     },
+                     "batch":{
                          "count":0,
                          "min":0.0,
                          "max":0.0,
@@ -147,6 +160,18 @@
                      "p99.9":0.0
                   },
                   "commit_latency_statistics":{
+                     "count":0,
+                     "min":0.0,
+                     "max":0.0,
+                     "median":0.0,
+                     "mean":0.0,
+                     "p25":0.0,
+                     "p90":0.0,
+                     "p95":0.0,
+                     "p99":0.0,
+                     "p99.9":0.0
+                  },
+                  "commit_batching_window_size":{
                      "count":0,
                      "min":0.0,
                      "max":0.0,

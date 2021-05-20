@@ -435,7 +435,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 			}
 
 			state Future<vector<ProcessData>> workers = getWorkers(&tr);
-			state Future<Standalone<RangeResultRef>> serverList = tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+			state Future<RangeResult> serverList = tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
 			wait(success(workers) && success(serverList));
 			ASSERT(!serverList.get().more && serverList.get().size() < CLIENT_KNOBS->TOO_MANY);
 
@@ -469,13 +469,13 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 			try {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				wait(checkMoveKeysLockReadOnly(&tr, moveKeysLock, ddEnabledState));
-				state Standalone<RangeResultRef> UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-				Standalone<RangeResultRef> keyServers = wait(krmGetRanges(&tr,
-				                                                          keyServersPrefix,
-				                                                          KeyRangeRef(beginKey, allKeys.end),
-				                                                          SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
-				                                                          SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
+				RangeResult keyServers = wait(krmGetRanges(&tr,
+				                                           keyServersPrefix,
+				                                           KeyRangeRef(beginKey, allKeys.end),
+				                                           SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
+				                                           SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
 				succeeded = true;
 
 				vector<UID> src, dest, last;
@@ -659,6 +659,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	AsyncTrigger printDetailedTeamsInfo;
 	PromiseStream<GetMetricsRequest> getShardMetrics;
 	bool shuttingDown;
+	Promise<UID> removeFailedServer;
 
 	void resetLocalitySet() {
 		storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
@@ -696,7 +697,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 Reference<AsyncVar<bool>> zeroHealthyTeams,
 	                 bool primary,
 	                 Reference<AsyncVar<bool>> processingUnhealthy,
-	                 PromiseStream<GetMetricsRequest> getShardMetrics)
+	                 PromiseStream<GetMetricsRequest> getShardMetrics,
+	                 Promise<UID> removeFailedServer)
 	  : cx(cx), distributorId(distributorId), lock(lock), output(output),
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), lastBuildTeamsFailed(false),
 	    teamBuilder(Void()), badTeamRemover(Void()), checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()),
@@ -711,7 +713,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	    zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary),
 	    medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastMedianAvailableSpaceUpdate(0),
 	    processingUnhealthy(processingUnhealthy), lowestUtilizationTeam(0), highestUtilizationTeam(0),
-	    getShardMetrics(getShardMetrics), shuttingDown(false) {
+	    getShardMetrics(getShardMetrics), shuttingDown(false), removeFailedServer(removeFailedServer) {
 		if (!primary || configuration.usableRegions == 1) {
 			TraceEvent("DDTrackerStarting", distributorId).detail("State", "Inactive").trackLatest("DDTrackerStarting");
 		}
@@ -720,6 +722,13 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	~DDTeamCollection() {
 		shuttingDown = true;
 		TraceEvent("DDTeamCollectionDestructed", distributorId).detail("Primary", primary);
+
+		// Cancel the teamBuilder to avoid creating new teams after teams are cancelled.
+		teamBuilder.cancel();
+		// TraceEvent("DDTeamCollectionDestructed", distributorId)
+		//    .detail("Primary", primary)
+		//    .detail("TeamBuilderDestroyed", server_info.size());
+
 		// Other teamCollections also hold pointer to this teamCollection;
 		// TeamTracker may access the destructed DDTeamCollection if we do not reset the pointer
 		for (int i = 0; i < teamCollections.size(); i++) {
@@ -756,12 +765,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			info->collection = nullptr;
 		}
 		// TraceEvent("DDTeamCollectionDestructed", distributorId)
-		//     .detail("Primary", primary)
-		//     .detail("ServerTrackerDestroyed", server_info.size());
-		teamBuilder.cancel();
-		// TraceEvent("DDTeamCollectionDestructed", distributorId)
-		//     .detail("Primary", primary)
-		//     .detail("TeamBuilderDestroyed", server_info.size());
+		//    .detail("Primary", primary)
+		//    .detail("ServerTrackerDestroyed", server_info.size());
 	}
 
 	void addLaggingStorageServer(Key zoneId) {
@@ -3657,16 +3662,14 @@ ACTOR Future<Void> trackExcludedServers(DDTeamCollection* self) {
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			state Future<Standalone<RangeResultRef>> fresultsExclude =
-			    tr.getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY);
-			state Future<Standalone<RangeResultRef>> fresultsFailed =
-			    tr.getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY);
+			state Future<RangeResult> fresultsExclude = tr.getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY);
+			state Future<RangeResult> fresultsFailed = tr.getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY);
 			wait(success(fresultsExclude) && success(fresultsFailed));
 
-			Standalone<RangeResultRef> excludedResults = fresultsExclude.get();
+			RangeResult excludedResults = fresultsExclude.get();
 			ASSERT(!excludedResults.more && excludedResults.size() < CLIENT_KNOBS->TOO_MANY);
 
-			Standalone<RangeResultRef> failedResults = fresultsFailed.get();
+			RangeResult failedResults = fresultsFailed.get();
 			ASSERT(!failedResults.more && failedResults.size() < CLIENT_KNOBS->TOO_MANY);
 
 			std::set<AddressExclusion> excluded;
@@ -3720,7 +3723,7 @@ ACTOR Future<Void> trackExcludedServers(DDTeamCollection* self) {
 
 ACTOR Future<vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(Transaction* tr) {
 	state Future<vector<ProcessData>> workers = getWorkers(tr);
-	state Future<Standalone<RangeResultRef>> serverList = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+	state Future<RangeResult> serverList = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
 	wait(success(workers) && success(serverList));
 	ASSERT(!serverList.get().more && serverList.get().size() < CLIENT_KNOBS->TOO_MANY);
 
@@ -4150,10 +4153,14 @@ ACTOR Future<Void> storageServerTracker(
 					TraceEvent(SevWarn, "FailedServerRemoveKeys", self->distributorId)
 					    .detail("Server", server->id)
 					    .detail("Excluded", worstAddr.toString());
-					wait(removeKeysFromFailedServer(cx, server->id, self->lock, ddEnabledState));
-					if (BUGGIFY)
-						wait(delay(5.0));
-					self->shardsAffectedByTeamFailure->eraseServer(server->id);
+					wait(delay(0.0)); //Do not throw an error while still inside trackExcludedServers
+					while (!ddEnabledState->isDDEnabled()) {
+						wait(delay(1.0));
+					}
+					if (self->removeFailedServer.canBeSet()) {
+						self->removeFailedServer.send(server->id);
+					}
+					throw movekeys_conflict();
 				}
 			}
 
@@ -4869,13 +4876,13 @@ ACTOR Future<Void> debugCheckCoalescing(Database cx) {
 	state Transaction tr(cx);
 	loop {
 		try {
-			state Standalone<RangeResultRef> serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+			state RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 			state int i;
 			for (i = 0; i < serverList.size(); i++) {
 				state UID id = decodeServerListValue(serverList[i].value).id();
-				Standalone<RangeResultRef> ranges = wait(krmGetRanges(&tr, serverKeysPrefixFor(id), allKeys));
+				RangeResult ranges = wait(krmGetRanges(&tr, serverKeysPrefixFor(id), allKeys));
 				ASSERT(ranges.end()[-1].key == allKeys.end);
 
 				for (int j = 0; j < ranges.size() - 2; j++)
@@ -4949,6 +4956,7 @@ ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo>> db,
 	}
 }
 
+// Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList,
                                     const DDEnabledState* ddEnabledState) {
@@ -4978,7 +4986,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 		// Stored outside of data distribution tracker to avoid slow tasks
 		// when tracker is cancelled
 		state KeyRangeMap<ShardTrackedData> shards;
-
+		state Promise<UID> removeFailedServer;
 		try {
 			loop {
 				TraceEvent("DDInitTakingMoveKeysLock", self->ddId);
@@ -5006,8 +5014,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-						Standalone<RangeResultRef> replicaKeys =
-						    wait(tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY));
+						RangeResult replicaKeys = wait(tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY));
 
 						for (auto& kv : replicaKeys) {
 							auto dcId = decodeDatacenterReplicasKey(kv.key);
@@ -5209,7 +5216,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			    zeroHealthyTeams[0],
 			    true,
 			    processingUnhealthy,
-			    getShardMetrics);
+			    getShardMetrics,
+			    removeFailedServer);
 			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
 			if (configuration.usableRegions > 1) {
 				remoteTeamCollection =
@@ -5225,7 +5233,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				                                    zeroHealthyTeams[1],
 				                                    false,
 				                                    processingUnhealthy,
-				                                    getShardMetrics);
+				                                    getShardMetrics,
+				                                    removeFailedServer);
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back(
@@ -5257,12 +5266,21 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			primaryTeamCollection = Reference<DDTeamCollection>();
 			remoteTeamCollection = Reference<DDTeamCollection>();
 			wait(shards.clearAsync());
-			if (err.code() != error_code_movekeys_conflict)
-				throw err;
-			bool ddEnabled = wait(isDataDistributionEnabled(cx, ddEnabledState));
-			TraceEvent("DataDistributionMoveKeysConflict").detail("DataDistributionEnabled", ddEnabled).error(err);
-			if (ddEnabled)
-				throw err;
+			TraceEvent("DataDistributorTeamCollectionsDestroyed").error(err);
+			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
+				TraceEvent("RemoveFailedServer", removeFailedServer.getFuture().get()).error(err);
+				wait(removeKeysFromFailedServer(cx, removeFailedServer.getFuture().get(), lock, ddEnabledState));
+				wait(removeStorageServer(cx, removeFailedServer.getFuture().get(), lock, ddEnabledState));
+			} else {
+				if (err.code() != error_code_movekeys_conflict) {
+					throw err;
+				}
+				bool ddEnabled = wait(isDataDistributionEnabled(cx, ddEnabledState));
+				TraceEvent("DataDistributionMoveKeysConflict").detail("DataDistributionEnabled", ddEnabled).error(err);
+				if (ddEnabled) {
+					throw err;
+				}
+			}
 		}
 	}
 }
@@ -5554,7 +5572,7 @@ ACTOR Future<Void> cacheServerWatcher(Database* db) {
 	loop {
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
-			Standalone<RangeResultRef> range = wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult range = wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!range.more);
 			std::set<UID> caches;
 			for (auto& kv : range) {
@@ -5687,7 +5705,8 @@ std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize,
 	                                                           makeReference<AsyncVar<bool>>(true),
 	                                                           true,
 	                                                           makeReference<AsyncVar<bool>>(false),
-	                                                           PromiseStream<GetMetricsRequest>()));
+	                                                           PromiseStream<GetMetricsRequest>(),
+	                                                           Promise<UID>()));
 
 	for (int id = 1; id <= processCount; ++id) {
 		UID uid(id, 0);
@@ -5728,7 +5747,8 @@ std::unique_ptr<DDTeamCollection> testMachineTeamCollection(int teamSize,
 	                                                           makeReference<AsyncVar<bool>>(true),
 	                                                           true,
 	                                                           makeReference<AsyncVar<bool>>(false),
-	                                                           PromiseStream<GetMetricsRequest>()));
+	                                                           PromiseStream<GetMetricsRequest>(),
+	                                                           Promise<UID>()));
 
 	for (int id = 1; id <= processCount; id++) {
 		UID uid(id, 0);

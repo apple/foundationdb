@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <fstream>
 #include <ostream>
+#include <sstream>
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/DatabaseContext.h"
@@ -674,12 +675,15 @@ IPAddress makeIPAddressForSim(bool isIPv6, std::array<int, 4> parts) {
 
 #include "fdbclient/MonitorLeader.h"
 
+// Configures the system according to the given specifications in order to run
+// simulation, but with the additional consideration that it is meant to act
+// like a "rebooted" machine, mostly used for restarting tests.
 ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
                                           std::string baseFolder,
                                           int* pTesterCount,
                                           Optional<ClusterConnectionString>* pConnString,
                                           Standalone<StringRef>* pStartingConfiguration,
-                                          int extraDB,
+                                          TestConfig testConfig,
                                           std::string whitelistBinPaths,
                                           ProtocolVersion protocolVersion) {
 	CSimpleIni ini;
@@ -699,7 +703,7 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
 		}
 		int desiredCoordinators = atoi(ini.GetValue("META", "desiredCoordinators"));
 		int testerCount = atoi(ini.GetValue("META", "testerCount"));
-		bool enableExtraDB = (extraDB == 3);
+		bool enableExtraDB = (testConfig.extraDB == 3);
 		ClusterConnectionString conn(ini.GetValue("META", "connectionString"));
 		if (enableExtraDB) {
 			g_simulator.extraDB = new ClusterConnectionString(ini.GetValue("META", "connectionString"));
@@ -727,9 +731,14 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
 				zoneId = StringRef(zoneIDini);
 			}
 
-			ProcessClass processClass =
-			    ProcessClass((ProcessClass::ClassType)atoi(ini.GetValue(machineIdString.c_str(), "mClass")),
-			                 ProcessClass::CommandLineSource);
+			ProcessClass::ClassType cType =
+			    (ProcessClass::ClassType)(atoi(ini.GetValue(machineIdString.c_str(), "mClass")));
+			// using specialized class types can lead to nondeterministic recruitment
+			if (cType == ProcessClass::MasterClass || cType == ProcessClass::ResolutionClass) {
+				cType = ProcessClass::StatelessClass;
+			}
+			ProcessClass processClass = ProcessClass(cType, ProcessClass::CommandLineSource);
+
 			if (processClass != ProcessClass::TesterClass) {
 				dcIds.push_back(dcUIDini);
 			}
@@ -837,8 +846,9 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
 	return Void();
 }
 
+// Configuration details compiled in a structure used when setting up a simulated cluster
 struct SimulationConfig {
-	explicit SimulationConfig(int extraDB, int minimumReplication, int minimumRegions);
+	explicit SimulationConfig(const TestConfig& testConfig);
 	int extraDB;
 
 	DatabaseConfiguration db;
@@ -852,11 +862,11 @@ struct SimulationConfig {
 	int coordinators;
 
 private:
-	void generateNormalConfig(int minimumReplication, int minimumRegions);
+	void generateNormalConfig(const TestConfig& testConfig);
 };
 
-SimulationConfig::SimulationConfig(int extraDB, int minimumReplication, int minimumRegions) : extraDB(extraDB) {
-	generateNormalConfig(minimumReplication, minimumRegions);
+SimulationConfig::SimulationConfig(const TestConfig& testConfig) : extraDB(testConfig.extraDB) {
+	generateNormalConfig(testConfig);
 }
 
 void SimulationConfig::set_config(std::string config) {
@@ -871,19 +881,21 @@ void SimulationConfig::set_config(std::string config) {
 StringRef StringRefOf(const char* s) {
 	return StringRef((uint8_t*)s, strlen(s));
 }
-
-void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumRegions) {
+// Generates and sets an appropriate configuration for the database according to
+// the provided testConfig. Some attributes are randomly generated for more coverage
+// of different combinations
+void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	set_config("new");
 	const bool simple = false; // Set true to simplify simulation configs for easier debugging
 	// generateMachineTeamTestConfig set up the number of servers per machine and the number of machines such that
 	// if we do not remove the surplus server and machine teams, the simulation test will report error.
 	// This is needed to make sure the number of server (and machine) teams is no larger than the desired number.
 	bool generateMachineTeamTestConfig = BUGGIFY_WITH_PROB(0.1) ? true : false;
-	bool generateFearless = simple ? false : (minimumRegions > 1 || deterministicRandom()->random01() < 0.5);
-	datacenters = simple
-	                  ? 1
-	                  : (generateFearless ? (minimumReplication > 0 || deterministicRandom()->random01() < 0.5 ? 4 : 6)
-	                                      : deterministicRandom()->randomInt(1, 4));
+	bool generateFearless = simple ? false : (testConfig.minimumRegions > 1 || deterministicRandom()->random01() < 0.5);
+	datacenters = simple ? 1
+	                     : (generateFearless
+	                            ? (testConfig.minimumReplication > 0 || deterministicRandom()->random01() < 0.5 ? 4 : 6)
+	                            : deterministicRandom()->randomInt(1, 4));
 	if (deterministicRandom()->random01() < 0.25)
 		db.desiredTLogCount = deterministicRandom()->randomInt(1, 7);
 	if (deterministicRandom()->random01() < 0.25)
@@ -893,6 +905,12 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	if (deterministicRandom()->random01() < 0.25)
 		db.resolverCount = deterministicRandom()->randomInt(1, 7);
 	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
+	// Continuously re-pick the storage engine type if it's the one we want to exclude
+	while (std::find(testConfig.storageEngineExcludeTypes.begin(),
+	                 testConfig.storageEngineExcludeTypes.end(),
+	                 storage_engine_type) != testConfig.storageEngineExcludeTypes.end()) {
+		storage_engine_type = deterministicRandom()->randomInt(0, 4);
+	}
 	switch (storage_engine_type) {
 	case 0: {
 		TEST(true); // Simulated cluster using ssd storage engine
@@ -931,7 +949,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 		db.resolverCount = 1;
 	}
 	int replication_type = simple ? 1
-	                              : (std::max(minimumReplication,
+	                              : (std::max(testConfig.minimumReplication,
 	                                          datacenters > 4 ? deterministicRandom()->randomInt(1, 3)
 	                                                          : std::min(deterministicRandom()->randomInt(0, 6), 3)));
 	switch (replication_type) {
@@ -982,11 +1000,11 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	if (deterministicRandom()->random01() < 0.5) {
 		int logSpill = deterministicRandom()->randomInt(TLogSpillType::VALUE, TLogSpillType::END);
 		set_config(format("log_spill:=%d", logSpill));
-		int logVersion = deterministicRandom()->randomInt(TLogVersion::MIN_RECRUITABLE, TLogVersion::MAX_SUPPORTED + 1);
+		int logVersion = deterministicRandom()->randomInt(TLogVersion::MIN_RECRUITABLE, testConfig.maxTLogVersion + 1);
 		set_config(format("log_version:=%d", logVersion));
 	} else {
 		if (deterministicRandom()->random01() < 0.7)
-			set_config(format("log_version:=%d", TLogVersion::MAX_SUPPORTED));
+			set_config(format("log_version:=%d", testConfig.maxTLogVersion));
 		if (deterministicRandom()->random01() < 0.5)
 			set_config(format("log_spill:=%d", TLogSpillType::DEFAULT));
 	}
@@ -1079,7 +1097,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 
 			// We cannot run with a remote DC when MAX_READ_TRANSACTION_LIFE_VERSIONS is too small, because the log
 			// routers will not be able to keep up.
-			if (minimumRegions <= 1 &&
+			if (testConfig.minimumRegions <= 1 &&
 			    (deterministicRandom()->random01() < 0.25 ||
 			     SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS < SERVER_KNOBS->VERSIONS_PER_SECOND)) {
 				TEST(true); // Simulated cluster using one region
@@ -1125,7 +1143,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 				db.remoteDesiredTLogCount = deterministicRandom()->randomInt(1, 7);
 
 			bool useNormalDCsAsSatellites =
-			    datacenters > 4 && minimumRegions < 2 && deterministicRandom()->random01() < 0.3;
+			    datacenters > 4 && testConfig.minimumRegions < 2 && deterministicRandom()->random01() < 0.3;
 			StatusObject primarySatelliteObj;
 			primarySatelliteObj["id"] = useNormalDCsAsSatellites ? "1" : "2";
 			primarySatelliteObj["priority"] = 1;
@@ -1173,9 +1191,6 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 			regionArr.push_back(remoteObj);
 		}
 
-		set_config("regions=" +
-		           json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none));
-
 		if (needsRemote) {
 			g_simulator.originalRegions = "regions=" + json_spirit::write_string(json_spirit::mValue(regionArr),
 			                                                                     json_spirit::Output_options::none);
@@ -1189,10 +1204,15 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 			disableRemote[1].get_obj()["datacenters"].get_array()[0].get_obj()["priority"] = -1;
 			g_simulator.disableRemote = "regions=" + json_spirit::write_string(json_spirit::mValue(disableRemote),
 			                                                                   json_spirit::Output_options::none);
+		} else {
+			// In order to generate a starting configuration with the remote disabled, do not apply the region
+			// configuration to the DatabaseConfiguration until after creating the starting conf string.
+			set_config("regions=" +
+			           json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none));
 		}
 	}
 
-	if (generateFearless && minimumReplication > 1) {
+	if (generateFearless && testConfig.minimumReplication > 1) {
 		// low latency tests in fearless configurations need 4 machines per datacenter (3 for triple replication, 1 that
 		// is down during failures).
 		machine_count = 16;
@@ -1217,10 +1237,11 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 
 	// because we protect a majority of coordinators from being killed, it is better to run with low numbers of
 	// coordinators to prevent too many processes from being protected
-	coordinators =
-	    (minimumRegions <= 1 && BUGGIFY) ? deterministicRandom()->randomInt(1, std::max(machine_count, 2)) : 1;
+	coordinators = (testConfig.minimumRegions <= 1 && BUGGIFY)
+	                   ? deterministicRandom()->randomInt(1, std::max(machine_count, 2))
+	                   : 1;
 
-	if (minimumReplication > 1 && datacenters == 3) {
+	if (testConfig.minimumReplication > 1 && datacenters == 3) {
 		// low latency tests in 3 data hall mode need 2 other data centers with 2 machines each to avoid waiting for
 		// logs to recover.
 		machine_count = std::max(machine_count, 6);
@@ -1234,26 +1255,24 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	}
 }
 
+// Configures the system according to the given specifications in order to run
+// simulation under the correct conditions
 void setupSimulatedSystem(vector<Future<Void>>* systemActors,
                           std::string baseFolder,
                           int* pTesterCount,
                           Optional<ClusterConnectionString>* pConnString,
                           Standalone<StringRef>* pStartingConfiguration,
-                          int extraDB,
-                          int minimumReplication,
-                          int minimumRegions,
                           std::string whitelistBinPaths,
-                          bool configureLocked,
-                          int logAntiQuorum,
+                          TestConfig testConfig,
                           ProtocolVersion protocolVersion) {
 	// SOMEDAY: this does not test multi-interface configurations
-	SimulationConfig simconfig(extraDB, minimumReplication, minimumRegions);
-	if (logAntiQuorum != -1) {
-		simconfig.db.tLogWriteAntiQuorum = logAntiQuorum;
+	SimulationConfig simconfig(testConfig);
+	if (testConfig.logAntiQuorum != -1) {
+		simconfig.db.tLogWriteAntiQuorum = testConfig.logAntiQuorum;
 	}
 	StatusObject startingConfigJSON = simconfig.db.toJSON(true);
 	std::string startingConfigString = "new";
-	if (configureLocked) {
+	if (testConfig.configureLocked) {
 		startingConfigString += " locked";
 	}
 	for (auto kv : startingConfigJSON) {
@@ -1269,6 +1288,12 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		} else {
 			ASSERT(false);
 		}
+	}
+
+	if (g_simulator.originalRegions != "") {
+		simconfig.set_config(g_simulator.originalRegions);
+		g_simulator.startingDisabledConfiguration = startingConfigString + " " + g_simulator.disableRemote;
+		startingConfigString += " " + g_simulator.originalRegions;
 	}
 
 	g_simulator.storagePolicy = simconfig.db.storagePolicy;
@@ -1339,7 +1364,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	TEST(!useIPv6); // Use IPv4
 
 	vector<NetworkAddress> coordinatorAddresses;
-	if (minimumRegions > 1) {
+	if (testConfig.minimumRegions > 1) {
 		// do not put coordinators in the primary region so that we can kill that region safely
 		int nonPrimaryDcs = dataCenters / 2;
 		for (int dc = 1; dc < dataCenters; dc += 2) {
@@ -1410,14 +1435,14 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	ClusterConnectionString conn(coordinatorAddresses, LiteralStringRef("TestCluster:0"));
 
 	// If extraDB==0, leave g_simulator.extraDB as null because the test does not use DR.
-	if (extraDB == 1) {
+	if (testConfig.extraDB == 1) {
 		// The DR database can be either a new database or itself
 		g_simulator.extraDB = new ClusterConnectionString(
 		    coordinatorAddresses, BUGGIFY ? LiteralStringRef("TestCluster:0") : LiteralStringRef("ExtraCluster:0"));
-	} else if (extraDB == 2) {
+	} else if (testConfig.extraDB == 2) {
 		// The DR database is a new database
 		g_simulator.extraDB = new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("ExtraCluster:0"));
-	} else if (extraDB == 3) {
+	} else if (testConfig.extraDB == 3) {
 		// The DR database is the same database
 		g_simulator.extraDB = new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("TestCluster:0"));
 	}
@@ -1428,11 +1453,10 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	    .detail("String", conn.toString())
 	    .detail("ConfigString", startingConfigString);
 
-	bool requiresExtraDBMachines = extraDB && g_simulator.extraDB->toString() != conn.toString();
+	bool requiresExtraDBMachines = testConfig.extraDB && g_simulator.extraDB->toString() != conn.toString();
 	int assignedMachines = 0, nonVersatileMachines = 0;
 	std::vector<ProcessClass::ClassType> processClassesSubSet = { ProcessClass::UnsetClass,
-		                                                          ProcessClass::ResolutionClass,
-		                                                          ProcessClass::MasterClass };
+		                                                          ProcessClass::StatelessClass };
 	for (int dc = 0; dc < dataCenters; dc++) {
 		// FIXME: test unset dcID
 		Optional<Standalone<StringRef>> dcUID = StringRef(format("%d", dc));
@@ -1474,12 +1498,12 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 				else if (assignedMachines == 4 && !simconfig.db.regions.size())
 					processClass = ProcessClass(
 					    processClassesSubSet[deterministicRandom()->randomInt(0, processClassesSubSet.size())],
-					    ProcessClass::CommandLineSource); // Unset or Resolution or Master
+					    ProcessClass::CommandLineSource); // Unset or Stateless
 				else
 					processClass = ProcessClass((ProcessClass::ClassType)deterministicRandom()->randomInt(0, 3),
 					                            ProcessClass::CommandLineSource); // Unset, Storage, or Transaction
 				if (processClass ==
-				    ProcessClass::ResolutionClass) // *can't* be assigned to other roles, even in an emergency
+				    ProcessClass::StatelessClass) // *can't* be assigned to other roles, even in an emergency
 					nonVersatileMachines++;
 			}
 
@@ -1603,13 +1627,8 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	    .detail("StartingConfiguration", pStartingConfiguration->toString());
 }
 
-void checkTestConf(const char* testFile,
-                   int& extraDB,
-                   int& minimumReplication,
-                   int& minimumRegions,
-                   int& configureLocked,
-                   int& logAntiQuorum,
-                   bool& startIncompatibleProcess) {
+// Populates the TestConfig fields according to what is found in the test file.
+void checkTestConf(const char* testFile, TestConfig* testConfig) {
 	std::ifstream ifs;
 	ifs.open(testFile, std::ifstream::in);
 	if (!ifs.good())
@@ -1631,26 +1650,40 @@ void checkTestConf(const char* testFile,
 		std::string value = removeWhitespace(line.substr(found + 1));
 
 		if (attrib == "extraDB") {
-			sscanf(value.c_str(), "%d", &extraDB);
+			sscanf(value.c_str(), "%d", &testConfig->extraDB);
 		}
 
 		if (attrib == "minimumReplication") {
-			sscanf(value.c_str(), "%d", &minimumReplication);
+			sscanf(value.c_str(), "%d", &testConfig->minimumReplication);
 		}
 
 		if (attrib == "minimumRegions") {
-			sscanf(value.c_str(), "%d", &minimumRegions);
+			sscanf(value.c_str(), "%d", &testConfig->minimumRegions);
 		}
 
 		if (attrib == "configureLocked") {
-			sscanf(value.c_str(), "%d", &configureLocked);
+			sscanf(value.c_str(), "%d", &testConfig->configureLocked);
 		}
 
 		if (attrib == "startIncompatibleProcess") {
-			startIncompatibleProcess = strcmp(value.c_str(), "true") == 0;
+			testConfig->startIncompatibleProcess = strcmp(value.c_str(), "true") == 0;
 		}
+
 		if (attrib == "logAntiQuorum") {
-			sscanf(value.c_str(), "%d", &logAntiQuorum);
+			sscanf(value.c_str(), "%d", &testConfig->logAntiQuorum);
+		}
+
+		if (attrib == "storageEngineExcludeTypes") {
+			std::stringstream ss(value);
+			for (int i; ss >> i;) {
+				testConfig->storageEngineExcludeTypes.push_back(i);
+				if (ss.peek() == ',') {
+					ss.ignore();
+				}
+			}
+		}
+		if (attrib == "maxTLogVersion") {
+			sscanf(value.c_str(), "%d", &testConfig->maxTLogVersion);
 		}
 	}
 
@@ -1666,24 +1699,13 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state Optional<ClusterConnectionString> connFile;
 	state Standalone<StringRef> startingConfiguration;
 	state int testerCount = 1;
-	state int extraDB = 0;
-	state int minimumReplication = 0;
-	state int minimumRegions = 0;
-	state int configureLocked = 0;
-	state int logAntiQuorum = -1;
-	state bool startIncompatibleProcess = false;
-	checkTestConf(testFile,
-	              extraDB,
-	              minimumReplication,
-	              minimumRegions,
-	              configureLocked,
-	              logAntiQuorum,
-	              startIncompatibleProcess);
-	g_simulator.hasDiffProtocolProcess = startIncompatibleProcess;
+	state TestConfig testConfig;
+	checkTestConf(testFile, &testConfig);
+	g_simulator.hasDiffProtocolProcess = testConfig.startIncompatibleProcess;
 	g_simulator.setDiffProtocol = false;
 
 	state ProtocolVersion protocolVersion = currentProtocolVersion;
-	if (startIncompatibleProcess) {
+	if (testConfig.startIncompatibleProcess) {
 		// isolates right most 1 bit of compatibleProtocolVersionMask to make this protocolVersion incompatible
 		uint64_t minAddToMakeIncompatible =
 		    ProtocolVersion::compatibleProtocolVersionMask & ~(ProtocolVersion::compatibleProtocolVersionMask - 1);
@@ -1718,7 +1740,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 			                                         &testerCount,
 			                                         &connFile,
 			                                         &startingConfiguration,
-			                                         extraDB,
+			                                         testConfig,
 			                                         whitelistBinPaths,
 			                                         protocolVersion),
 			                  100.0));
@@ -1733,12 +1755,8 @@ ACTOR void setupAndRun(std::string dataFolder,
 			                     &testerCount,
 			                     &connFile,
 			                     &startingConfiguration,
-			                     extraDB,
-			                     minimumReplication,
-			                     minimumRegions,
 			                     whitelistBinPaths,
-			                     configureLocked,
-			                     logAntiQuorum,
+			                     testConfig,
 			                     protocolVersion);
 			wait(delay(1.0)); // FIXME: WHY!!!  //wait for machines to boot
 		}

@@ -234,11 +234,11 @@ ACTOR Future<vector<UID>> addReadWriteDestinations(KeyRangeRef shard,
 	return result;
 }
 
-ACTOR Future<vector<vector<UID>>> additionalSources(Standalone<RangeResultRef> shards,
+ACTOR Future<vector<vector<UID>>> additionalSources(RangeResult shards,
                                                     Transaction* tr,
                                                     int desiredHealthy,
                                                     int maxServers) {
-	state Standalone<RangeResultRef> UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+	state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 	vector<Future<Optional<Value>>> serverListEntries;
 	std::set<UID> fetching;
@@ -380,11 +380,11 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					// Get all existing shards overlapping keys (exclude any that have been processed in a previous
 					// iteration of the outer loop)
 					state KeyRange currentKeys = KeyRangeRef(begin, keys.end);
-					state Standalone<RangeResultRef> old = wait(krmGetRanges(&tr,
-					                                                         keyServersPrefix,
-					                                                         currentKeys,
-					                                                         SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
-					                                                         SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
+					state RangeResult old = wait(krmGetRanges(&tr,
+					                                          keyServersPrefix,
+					                                          currentKeys,
+					                                          SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
+					                                          SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
 
 					// Determine the last processed key (which will be the beginning for the next iteration)
 					state Key endKey = old.end()[-1].key;
@@ -399,8 +399,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					// 	printf("'%s': '%s'\n", old[i].key.toString().c_str(), old[i].value.toString().c_str());
 
 					// Check that enough servers for each shard are in the correct state
-					state Standalone<RangeResultRef> UIDtoTagMap =
-					    wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+					state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 					vector<vector<UID>> addAsSource = wait(additionalSources(
 					    old, &tr, servers.size(), SERVER_KNOBS->MAX_ADDED_SOURCES_MULTIPLIER * servers.size()));
@@ -630,15 +629,13 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
 
 					state KeyRange currentKeys = KeyRangeRef(begin, keys.end);
-					state Standalone<RangeResultRef> UIDtoTagMap =
-					    wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+					state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-					state Standalone<RangeResultRef> keyServers =
-					    wait(krmGetRanges(&tr,
-					                      keyServersPrefix,
-					                      currentKeys,
-					                      SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
-					                      SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
+					state RangeResult keyServers = wait(krmGetRanges(&tr,
+					                                                 keyServersPrefix,
+					                                                 currentKeys,
+					                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
+					                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
 
 					// Determine the last processed key (which will be the beginning for the next iteration)
 					endKey = keyServers.end()[-1].key;
@@ -869,8 +866,7 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 	state int maxSkipTags = 1;
 	loop {
 		try {
-			state Future<Standalone<RangeResultRef>> fTagLocalities =
-			    tr.getRange(tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY);
+			state Future<RangeResult> fTagLocalities = tr.getRange(tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY);
 			state Future<Optional<Value>> fv = tr.get(serverListKeyFor(server.id()));
 
 			state Future<Optional<Value>> fExclProc = tr.get(
@@ -901,9 +897,8 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 			        ? tr.get(StringRef(encodeFailedServersKey(AddressExclusion(server.secondaryAddress().get().ip))))
 			        : Future<Optional<Value>>(Optional<Value>());
 
-			state Future<Standalone<RangeResultRef>> fTags = tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY, true);
-			state Future<Standalone<RangeResultRef>> fHistoryTags =
-			    tr.getRange(serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY, true);
+			state Future<RangeResult> fTags = tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY, true);
+			state Future<RangeResult> fHistoryTags = tr.getRange(serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY, true);
 
 			wait(success(fTagLocalities) && success(fv) && success(fTags) && success(fHistoryTags) &&
 			     success(fExclProc) && success(fExclIP) && success(fFailProc) && success(fFailIP) &&
@@ -991,7 +986,7 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 }
 // A SS can be removed only if all data (shards) on the SS have been moved away from the SS.
 ACTOR Future<bool> canRemoveStorageServer(Transaction* tr, UID serverID) {
-	Standalone<RangeResultRef> keys = wait(krmGetRanges(tr, serverKeysPrefixFor(serverID), allKeys, 2));
+	RangeResult keys = wait(krmGetRanges(tr, serverKeysPrefixFor(serverID), allKeys, 2));
 
 	ASSERT(keys.size() >= 2);
 
@@ -1034,13 +1029,10 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 			} else {
 
 				state Future<Optional<Value>> fListKey = tr.get(serverListKeyFor(serverID));
-				state Future<Standalone<RangeResultRef>> fTags = tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<Standalone<RangeResultRef>> fHistoryTags =
-				    tr.getRange(serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<Standalone<RangeResultRef>> fTagLocalities =
-				    tr.getRange(tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<Standalone<RangeResultRef>> fTLogDatacenters =
-				    tr.getRange(tLogDatacentersKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeResult> fTags = tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeResult> fHistoryTags = tr.getRange(serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeResult> fTagLocalities = tr.getRange(tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeResult> fTLogDatacenters = tr.getRange(tLogDatacentersKeys, CLIENT_KNOBS->TOO_MANY);
 
 				wait(success(fListKey) && success(fTags) && success(fHistoryTags) && success(fTagLocalities) &&
 				     success(fTLogDatacenters));
@@ -1122,14 +1114,13 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 				// Get all values of keyServers and remove serverID from every occurrence
 				// Very inefficient going over every entry in keyServers
 				// No shortcut because keyServers and serverKeys are not guaranteed same shard boundaries
-				state Standalone<RangeResultRef> UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-				state Standalone<RangeResultRef> keyServers =
-				    wait(krmGetRanges(&tr,
-				                      keyServersPrefix,
-				                      KeyRangeRef(begin, allKeys.end),
-				                      SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
-				                      SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
+				state RangeResult keyServers = wait(krmGetRanges(&tr,
+				                                                 keyServersPrefix,
+				                                                 KeyRangeRef(begin, allKeys.end),
+				                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
+				                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
 				state KeyRange currentKeys = KeyRangeRef(begin, keyServers.end()[-1].key);
 				for (int i = 0; i < keyServers.size() - 1; ++i) {
 					auto it = keyServers[i];
@@ -1212,6 +1203,8 @@ ACTOR Future<Void> moveKeys(Database cx,
 	return Void();
 }
 
+// Called by the master server to write the very first transaction to the database
+// establishing a set of shard servers and all invariants of the systemKeys.
 void seedShardServers(Arena& arena, CommitTransactionRef& tr, vector<StorageServerInterface> servers) {
 	std::map<Optional<Value>, Tag> dcId_locality;
 	std::map<UID, Tag> server_tag;
@@ -1232,23 +1225,27 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, vector<StorageServ
 	tr.read_snapshot = 0;
 	tr.read_conflict_ranges.push_back_deep(arena, allKeys);
 
-	for (int s = 0; s < servers.size(); s++) {
-		tr.set(arena, serverTagKeyFor(servers[s].id()), serverTagValue(server_tag[servers[s].id()]));
-		tr.set(arena, serverListKeyFor(servers[s].id()), serverListValue(servers[s]));
+	for (auto& s : servers) {
+		tr.set(arena, serverTagKeyFor(s.id()), serverTagValue(server_tag[s.id()]));
+		tr.set(arena, serverListKeyFor(s.id()), serverListValue(s));
 	}
 
 	std::vector<Tag> serverTags;
+	std::vector<UID> serverSrcUID;
 	serverTags.reserve(servers.size());
-	for (int i = 0; i < servers.size(); i++)
-		serverTags.push_back(server_tag[servers[i].id()]);
+	for (auto& s : servers) {
+		serverTags.push_back(server_tag[s.id()]);
+		serverSrcUID.push_back(s.id());
+	}
 
+	auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS ? keyServersValue(serverTags)
+	                                                    : keyServersValue(RangeResult(), serverSrcUID);
 	// We have to set this range in two blocks, because the master tracking of "keyServersLocations" depends on a change
 	// to a specific
 	//   key (keyServersKeyServersKey)
-	krmSetPreviouslyEmptyRange(
-	    tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), keyServersValue(serverTags), Value());
+	krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, Value());
 
-	for (int s = 0; s < servers.size(); s++)
-		krmSetPreviouslyEmptyRange(
-		    tr, arena, serverKeysPrefixFor(servers[s].id()), allKeys, serverKeysTrue, serverKeysFalse);
+	for (auto& s : servers) {
+		krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(s.id()), allKeys, serverKeysTrue, serverKeysFalse);
+	}
 }

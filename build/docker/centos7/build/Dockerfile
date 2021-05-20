@@ -10,6 +10,7 @@ RUN rpmkeys --import mono-project.com.rpmkey.pgp && \
         epel-release \
         scl-utils \
         yum-utils && \
+    yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo && \
     yum install -y \
         autoconf \
         automake \
@@ -17,8 +18,11 @@ RUN rpmkeys --import mono-project.com.rpmkey.pgp && \
         curl \
         debbuild \
         devtoolset-8 \
+        devtoolset-8-libasan-devel \
+        devtoolset-8-libtsan-devel \
         devtoolset-8-libubsan-devel \
-        devtoolset-8-valgrind-devel \
+        devtoolset-8-systemtap-sdt-devel \
+        docker-ce \
         dos2unix \
         dpkg \
         gettext-devel \
@@ -32,13 +36,22 @@ RUN rpmkeys --import mono-project.com.rpmkey.pgp && \
         lz4-devel \
         lz4-static \
         mono-devel \
-        rh-python36 \
-        rh-python36-python-devel \
-        rh-ruby26 \
+        redhat-lsb-core \
         rpm-build \
         tcl-devel \
         unzip \
         wget && \
+    if [ "$(uname -p)" == "aarch64" ]; then \
+        yum install -y \
+            rh-python38 \
+            rh-python38-python-devel \
+            rh-ruby27; \
+    else \
+        yum install -y \
+            rh-python36 \
+            rh-python36-python-devel \
+            rh-ruby26; \
+    fi && \
     yum clean all && \
     rm -rf /var/cache/yum
 
@@ -51,9 +64,10 @@ RUN source /opt/rh/devtoolset-8/enable && \
     tar --strip-components 1 --no-same-owner --directory git -xf git.tar.gz && \
     cd git && \
     make configure && \
-    ./configure \
-    && make && \
+    ./configure && \
+    make && \
     make install && \
+    cd ../ && \
     rm -rf /tmp/*
 
 # build/install ninja
@@ -69,8 +83,13 @@ RUN source /opt/rh/devtoolset-8/enable && \
     rm -rf /tmp/*
 
 # install cmake
-RUN curl -Ls https://github.com/Kitware/CMake/releases/download/v3.13.4/cmake-3.13.4-Linux-x86_64.tar.gz -o cmake.tar.gz && \
-    echo "563a39e0a7c7368f81bfa1c3aff8b590a0617cdfe51177ddc808f66cc0866c76  cmake.tar.gz" > cmake-sha.txt && \
+RUN if [ "$(uname -p)" == "aarch64" ]; then \
+        curl -Ls https://github.com/Kitware/CMake/releases/download/v3.19.6/cmake-3.19.6-Linux-aarch64.tar.gz -o cmake.tar.gz; \
+        echo "69ec045c6993907a4f4a77349d0a0668f1bd3ce8bc5f6fbab6dc7a7e2ffc4f80  cmake.tar.gz" > cmake-sha.txt; \
+    else \
+        curl -Ls https://github.com/Kitware/CMake/releases/download/v3.13.4/cmake-3.13.4-Linux-x86_64.tar.gz -o cmake.tar.gz; \
+        echo "563a39e0a7c7368f81bfa1c3aff8b590a0617cdfe51177ddc808f66cc0866c76  cmake.tar.gz" > cmake-sha.txt; \
+    fi && \
     sha256sum -c cmake-sha.txt && \
     mkdir cmake && \
     tar --strip-components 1 --no-same-owner --directory cmake -xf cmake.tar.gz && \
@@ -122,7 +141,7 @@ RUN curl -Ls https://github.com/facebook/rocksdb/archive/v6.10.1.tar.gz -o rocks
     rm -rf /tmp/*
 
 # install boost 1.67 to /opt
-RUN curl -Ls https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.tar.bz2 -o boost_1_67_0.tar.bz2 && \
+RUN curl -Ls https://boostorg.jfrog.io/artifactory/main/release/1.67.0/source/boost_1_67_0.tar.bz2 -o boost_1_67_0.tar.bz2 && \
     echo "2684c972994ee57fc5632e03bf044746f6eb45d4920c343937a465fd67a5adba  boost_1_67_0.tar.bz2" > boost-sha-67.txt && \
     sha256sum -c boost-sha-67.txt && \
     tar --no-same-owner --directory /opt -xjf boost_1_67_0.tar.bz2 && \
@@ -131,7 +150,7 @@ RUN curl -Ls https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.
 
 # install boost 1.72 to /opt
 RUN source /opt/rh/devtoolset-8/enable && \
-    curl -Ls https://dl.bintray.com/boostorg/release/1.72.0/source/boost_1_72_0.tar.bz2 -o boost_1_72_0.tar.bz2 && \
+    curl -Ls https://boostorg.jfrog.io/artifactory/main/release/1.72.0/source/boost_1_72_0.tar.bz2 -o boost_1_72_0.tar.bz2 && \
     echo "59c9b274bc451cf91a9ba1dd2c7fdcaf5d60b1b3aa83f2c9fa143417cc660722  boost_1_72_0.tar.bz2" > boost-sha-72.txt && \
     sha256sum -c boost-sha-72.txt && \
     tar --no-same-owner --directory /opt -xjf boost_1_72_0.tar.bz2 && \
@@ -183,9 +202,21 @@ RUN source /opt/rh/devtoolset-8/enable && \
     cd .. && \
     rm -rf /tmp/*
 
+# download old fdbserver binaries
+ARG FDB_VERSION="6.2.29"
+RUN mkdir -p /opt/foundationdb/old && \
+    curl -Ls https://www.foundationdb.org/downloads/misc/fdbservers-${FDB_VERSION}.tar.gz | \
+        tar --no-same-owner --directory /opt/foundationdb/old -xz && \
+    chmod +x /opt/foundationdb/old/* && \
+    ln -sf /opt/foundationdb/old/fdbserver-${FDB_VERSION} /opt/foundationdb/old/fdbserver
+
 # build/install distcc
 RUN source /opt/rh/devtoolset-8/enable && \
-    source /opt/rh/rh-python36/enable && \
+    if [ "$(uname -p)" == "aarch64" ]; then \
+        source /opt/rh/rh-python38/enable; \
+    else \
+        source /opt/rh/rh-python36/enable; \
+    fi && \
     curl -Ls https://github.com/distcc/distcc/archive/v3.3.5.tar.gz -o distcc.tar.gz && \
     echo "13a4b3ce49dfc853a3de550f6ccac583413946b3a2fa778ddf503a9edc8059b0  distcc.tar.gz" > distcc-sha256.txt && \
     sha256sum -c distcc-sha256.txt && \
@@ -193,6 +224,20 @@ RUN source /opt/rh/devtoolset-8/enable && \
     tar --strip-components 1 --no-same-owner --directory distcc -xf distcc.tar.gz && \
     cd distcc && \
     ./autogen.sh && \
+    ./configure && \
+    make && \
+    make install && \
+    cd .. && \
+    rm -rf /tmp/*
+
+# valgrind
+RUN source /opt/rh/devtoolset-8/enable && \
+    curl -Ls https://sourceware.org/pub/valgrind/valgrind-3.17.0.tar.bz2 -o valgrind-3.17.0.tar.bz2 && \
+    echo "ad3aec668e813e40f238995f60796d9590eee64a16dff88421430630e69285a2  valgrind-3.17.0.tar.bz2" > valgrind-sha.txt && \
+    sha256sum -c valgrind-sha.txt && \
+    mkdir valgrind && \
+    tar --strip-components 1 --no-same-owner --no-same-permissions --directory valgrind -xjf valgrind-3.17.0.tar.bz2 && \
+    cd valgrind && \
     ./configure && \
     make && \
     make install && \

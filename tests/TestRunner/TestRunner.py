@@ -264,6 +264,40 @@ def process_traces(basedir, testname, path, out, aggregationPolicy, symbolicateB
     parser.writeObject({'CMakeSEED': str(cmake_seed)})
     return res
 
+class RestartTestPolicy:
+    def __init__(self, name, old_binary, new_binary):
+        # Default is to use the same binary for the restart test, unless constraints are satisfied.
+        self._first_binary = new_binary
+        self._second_binary = new_binary
+        if old_binary is None:
+            _logger.info("No old binary provided")
+        old_binary_version_raw = subprocess.check_output([old_binary, '--version']).decode('utf-8')
+        match = re.match('FoundationDB.*\(v([0-9]+\.[0-9]+\.[0-9]+)\)', old_binary_version_raw)
+        assert match, old_binary_version_raw
+        old_binary_version = tuple(map(int, match.group(1).split('.')))
+        match = re.match('.*/restarting/from_([0-9]+\.[0-9]+\.[0-9]+)/', name)
+        if match: # upgrading _from_
+            lower_bound = tuple(map(int, match.group(1).split('.')))
+            if old_binary_version >= lower_bound:
+                self._first_binary = old_binary
+                _logger.info("Using old binary as first binary: {} >= {}".format(old_binary_version, lower_bound))
+            else:
+                _logger.info("Using new binary as first binary: {} < {}".format(old_binary_version, lower_bound))
+        match = re.match('.*/restarting/to_([0-9]+\.[0-9]+\.[0-9]+)/', name)
+        if match: # downgrading _to_
+            lower_bound = tuple(map(int, match.group(1).split('.')))
+            if old_binary_version >= lower_bound:
+                self._second_binary = old_binary
+                _logger.info("Using old binary as second binary: {} >= {}".format(old_binary_version, lower_bound))
+            else:
+                _logger.info("Using new binary as second binary: {} < {}".format(old_binary_version, lower_bound))
+
+    def first_binary(self):
+        return self._first_binary
+
+    def second_binary(self):
+        return self._second_binary
+
 def run_simulation_test(basedir, options):
     fdbserver = os.path.join(basedir, 'bin', 'fdbserver')
     pargs = [fdbserver,
@@ -298,14 +332,19 @@ def run_simulation_test(basedir, options):
     os.mkdir(wd)
     return_codes = {} # {command: return_code}
     first = True
+    restart_test_policy = None
+    if len(options.testfile) > 1:
+        restart_test_policy = RestartTestPolicy(options.testfile[0], options.old_binary, fdbserver)
     for testfile in options.testfile:
         tmp = list(pargs)
-        # old_binary is not under test, so don't run under valgrind
         valgrind_args = []
-        if first and options.old_binary is not None and len(options.testfile) > 1:
-            _logger.info("Run old binary at {}".format(options.old_binary))
-            tmp[0] = options.old_binary
-        elif options.use_valgrind:
+        if restart_test_policy is not None:
+            if first:
+                tmp[0] = restart_test_policy.first_binary()
+            else:
+                tmp[0] = restart_test_policy.second_binary()
+        # old_binary is not under test, so don't run under valgrind
+        if options.use_valgrind and tmp[0] == fdbserver:
             valgrind_args = ['valgrind', '--error-exitcode=99', '--']
         if not first:
             tmp.append('-R')

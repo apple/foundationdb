@@ -20,7 +20,6 @@
 
 #ifndef FDBCLIENT_ICLIENTAPI_H
 #define FDBCLIENT_ICLIENTAPI_H
-#include "fdbclient/ManagementAPI.actor.h"
 #pragma once
 
 #include "fdbclient/FDBOptions.g.h"
@@ -28,6 +27,7 @@
 
 #include "flow/ThreadHelper.actor.h"
 
+// An interface that represents a transaction created by a client
 class ITransaction {
 public:
 	virtual ~ITransaction() {}
@@ -41,24 +41,24 @@ public:
 	// until the ThreadFuture's ThreadSingleAssignmentVar has its memory released or it is destroyed.
 	virtual ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot = false) = 0;
 	virtual ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false) = 0;
-	virtual ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin,
-	                                                          const KeySelectorRef& end,
-	                                                          int limit,
-	                                                          bool snapshot = false,
-	                                                          bool reverse = false) = 0;
-	virtual ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin,
-	                                                          const KeySelectorRef& end,
-	                                                          GetRangeLimits limits,
-	                                                          bool snapshot = false,
-	                                                          bool reverse = false) = 0;
-	virtual ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys,
-	                                                          int limit,
-	                                                          bool snapshot = false,
-	                                                          bool reverse = false) = 0;
-	virtual ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys,
-	                                                          GetRangeLimits limits,
-	                                                          bool snapshot = false,
-	                                                          bool reverse = false) = 0;
+	virtual ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
+	                                           const KeySelectorRef& end,
+	                                           int limit,
+	                                           bool snapshot = false,
+	                                           bool reverse = false) = 0;
+	virtual ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
+	                                           const KeySelectorRef& end,
+	                                           GetRangeLimits limits,
+	                                           bool snapshot = false,
+	                                           bool reverse = false) = 0;
+	virtual ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
+	                                           int limit,
+	                                           bool snapshot = false,
+	                                           bool reverse = false) = 0;
+	virtual ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
+	                                           GetRangeLimits limits,
+	                                           bool snapshot = false,
+	                                           bool reverse = false) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) = 0;
 	virtual ThreadFuture<Standalone<StringRef>> getVersionstamp() = 0;
 
@@ -90,12 +90,20 @@ public:
 	virtual void delref() = 0;
 };
 
+// An interface that represents a connection to a cluster made by a client
 class IDatabase {
 public:
 	virtual ~IDatabase() {}
 
 	virtual Reference<ITransaction> createTransaction() = 0;
 	virtual void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
+	virtual double getMainThreadBusyness() = 0;
+
+	// Returns the protocol version reported by the coordinator this client is connected to
+	// If an expected version is given, the future won't return until the protocol version is different than expected
+	// Note: this will never return if the server is running a protocol from FDB 5.0 or older
+	virtual ThreadFuture<ProtocolVersion> getServerProtocol(
+	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) = 0;
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
@@ -109,13 +117,16 @@ public:
 	virtual ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) = 0;
 };
 
+// An interface that presents the top-level FDB client API as exposed through the C bindings
+//
+// This interface and its associated objects are intended to live outside the network thread, so its asynchronous
+// operations use ThreadFutures and implementations should be thread safe.
 class IClientApi {
 public:
 	virtual ~IClientApi() {}
 
 	virtual void selectApiVersion(int apiVersion) = 0;
 	virtual const char* getClientVersion() = 0;
-	virtual ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath) = 0;
 
 	virtual void setNetworkOption(FDBNetworkOptions::Option option,
 	                              Optional<StringRef> value = Optional<StringRef>()) = 0;

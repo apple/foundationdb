@@ -10,7 +10,7 @@ function(compile_boost)
   set(BOOST_COMPILER_FLAGS -fvisibility=hidden -fPIC -std=c++14 -w)
   set(BOOST_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
   if(APPLE)
-    set(BOOST_TOOLSET "darwin")
+    set(BOOST_TOOLSET "clang-darwin")
     # this is to fix a weird macOS issue -- by default
     # cmake would otherwise pass a compiler that can't
     # compile boost
@@ -38,7 +38,7 @@ function(compile_boost)
   include(ExternalProject)
   set(BOOST_INSTALL_DIR "${CMAKE_BINARY_DIR}/boost_install")
   ExternalProject_add("${MY_TARGET}Project"
-    URL "https://dl.bintray.com/boostorg/release/1.72.0/source/boost_1_72_0.tar.bz2"
+    URL "https://boostorg.jfrog.io/artifactory/main/release/1.72.0/source/boost_1_72_0.tar.bz2"
     URL_HASH SHA256=59c9b274bc451cf91a9ba1dd2c7fdcaf5d60b1b3aa83f2c9fa143417cc660722
     CONFIGURE_COMMAND ./bootstrap.sh ${BOOTSTRAP_ARGS}
     BUILD_COMMAND ${B2_COMMAND} link=static ${MY_BUILD_ARGS} --prefix=${BOOST_INSTALL_DIR} ${USER_CONFIG_FLAG} install

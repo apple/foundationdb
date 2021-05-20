@@ -21,7 +21,7 @@
 #include <jni.h>
 #include <string.h>
 
-#define FDB_API_VERSION 700
+#define FDB_API_VERSION 710
 
 #include <foundationdb/fdb_c.h>
 
@@ -578,6 +578,20 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1setOpti
 	if (err) {
 		safeThrow(jenv, getThrowable(jenv, err));
 	}
+}
+
+// Get network thread busyness (updated every 1s)
+// A value of 0 indicates that the client is more or less idle
+// A value of 1 (or more) indicates that the client is saturated
+JNIEXPORT jdouble JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1getMainThreadBusyness(JNIEnv* jenv,
+                                                                                                  jobject,
+                                                                                                  jlong dbPtr) {
+	if (!dbPtr) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBDatabase* database = (FDBDatabase*)dbPtr;
+	return (jdouble)fdb_database_get_main_thread_busyness(database);
 }
 
 JNIEXPORT jboolean JNICALL Java_com_apple_foundationdb_FDB_Error_1predicate(JNIEnv* jenv,

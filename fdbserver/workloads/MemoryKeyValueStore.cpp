@@ -78,8 +78,8 @@ Key MemoryKeyValueStore::getKey(KeySelectorRef selector) const {
 }
 
 // Gets a range of key-value pairs, returning a maximum of <limit> results
-Standalone<RangeResultRef> MemoryKeyValueStore::getRange(KeyRangeRef range, int limit, bool reverse) const {
-	Standalone<RangeResultRef> results;
+RangeResult MemoryKeyValueStore::getRange(KeyRangeRef range, int limit, bool reverse) const {
+	RangeResult results;
 	if (!reverse) {
 		std::map<Key, Value>::const_iterator mapItr = store.lower_bound(range.begin);
 

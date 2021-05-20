@@ -157,7 +157,7 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state Standalone<VectorRef<KeyRef>> results;
-		Standalone<RangeResultRef> values = wait(tr->getRange(
+		RangeResult values = wait(tr->getRange(
 		    KeyRangeRef(keyAfter(beginKey.withPrefix(keyServersPrefix)), endKey.withPrefix(keyServersPrefix)), limit));
 
 		for (auto& s : values) {
@@ -314,19 +314,18 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 					    applyMutationsKeyVersionMapRange.begin);
 					state Key rangeCountKey = task->params[BackupAgentBase::keyConfigLogUid].withPrefix(
 					    applyMutationsKeyVersionCountRange.begin);
-					state Future<Standalone<RangeResultRef>> backupVersions =
+					state Future<RangeResult> backupVersions =
 					    krmGetRanges(tr, prefix, KeyRangeRef(rangeBegin, rangeEnd), BUGGIFY ? 2 : 2000, 1e5);
 					state Future<Optional<Value>> logVersionValue = tr->get(
 					    task->params[BackupAgentBase::keyConfigLogUid].withPrefix(applyMutationsEndRange.begin), true);
 					state Future<Optional<Value>> rangeCountValue = tr->get(rangeCountKey, true);
-					state Future<Standalone<RangeResultRef>> prevRange = tr->getRange(
+					state Future<RangeResult> prevRange = tr->getRange(
 					    firstGreaterOrEqual(prefix), lastLessOrEqual(rangeBegin.withPrefix(prefix)), 1, true, true);
-					state Future<Standalone<RangeResultRef>> nextRange =
-					    tr->getRange(firstGreaterOrEqual(rangeEnd.withPrefix(prefix)),
-					                 firstGreaterOrEqual(strinc(prefix)),
-					                 1,
-					                 true,
-					                 false);
+					state Future<RangeResult> nextRange = tr->getRange(firstGreaterOrEqual(rangeEnd.withPrefix(prefix)),
+					                                                   firstGreaterOrEqual(strinc(prefix)),
+					                                                   1,
+					                                                   true,
+					                                                   false);
 					state Future<Void> verified = taskBucket->keepRunning(tr, task);
 
 					wait(checkDatabaseLock(tr,
@@ -725,7 +724,7 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 		state Subspace conf = Subspace(databaseBackupPrefixRange.begin)
 		                          .get(BackupAgentBase::keyConfig)
 		                          .get(task->params[BackupAgentBase::keyConfigLogUid]);
-		state std::vector<Standalone<RangeResultRef>> nextMutations;
+		state std::vector<RangeResult> nextMutations;
 		state bool isTimeoutOccured = false;
 		state Optional<KeyRef> lastKey;
 		state Version lastVersion;
@@ -736,9 +735,9 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 					return Optional<Version>();
 				}
 
-				state std::vector<Standalone<RangeResultRef>> mutations = std::move(nextMutations);
+				state std::vector<RangeResult> mutations = std::move(nextMutations);
 				state int64_t mutationSize = nextMutationSize;
-				nextMutations = std::vector<Standalone<RangeResultRef>>();
+				nextMutations = std::vector<RangeResult>();
 				nextMutationSize = 0;
 
 				if (!endOfStream) {
@@ -1072,7 +1071,7 @@ struct CopyLogsTaskFunc : TaskFuncBase {
 
 			wait(waitForAll(addTaskVector) && taskBucket->finish(tr, task));
 		} else {
-			if (appliedVersion <= stopVersionData) {
+			if (appliedVersion < applyVersion) {
 				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 				wait(success(CopyLogsTaskFunc::addTask(
 				    tr, taskBucket, task, prevBeginVersion, beginVersion, TaskCompletionKey::signal(onDone))));
@@ -1470,7 +1469,7 @@ struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 		                          .get(BackupAgentBase::keyConfig)
 		                          .get(task->params[BackupAgentBase::keyConfigLogUid]);
 
-		state std::vector<Standalone<RangeResultRef>> nextMutations;
+		state std::vector<RangeResult> nextMutations;
 		state int64_t nextMutationSize = 0;
 		loop {
 			try {
@@ -1478,9 +1477,9 @@ struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 					return Void();
 				}
 
-				state std::vector<Standalone<RangeResultRef>> mutations = std::move(nextMutations);
+				state std::vector<RangeResult> mutations = std::move(nextMutations);
 				state int64_t mutationSize = nextMutationSize;
-				nextMutations = std::vector<Standalone<RangeResultRef>>();
+				nextMutations = std::vector<RangeResult>();
 				nextMutationSize = 0;
 
 				if (!endOfStream) {
@@ -1819,7 +1818,7 @@ struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 				}
 
 				if (backupRanges.size() == 1) {
-					Standalone<RangeResultRef> existingDestUidValues = wait(srcTr->getRange(
+					RangeResult existingDestUidValues = wait(srcTr->getRange(
 					    KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 					bool found = false;
 					for (auto it : existingDestUidValues) {
@@ -2063,7 +2062,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 
 				// Initialize destUid
 				if (backupRanges.size() == 1) {
-					Standalone<RangeResultRef> existingDestUidValues = wait(srcTr->getRange(
+					RangeResult existingDestUidValues = wait(srcTr->getRange(
 					    KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 					bool found = false;
 					for (auto it : existingDestUidValues) {
@@ -2243,17 +2242,18 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 		return Void();
 	}
 
-	ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr,
-	                                 Reference<TaskBucket> taskBucket,
-	                                 Key logUid,
-	                                 Key backupUid,
-	                                 Key keyAddPrefix,
-	                                 Key keyRemovePrefix,
-	                                 Key keyConfigBackupRanges,
-	                                 Key tagName,
-	                                 TaskCompletionKey completionKey,
-	                                 Reference<TaskFuture> waitFor = Reference<TaskFuture>(),
-	                                 bool databasesInSync = false) {
+	ACTOR static Future<Key> addTask(
+	    Reference<ReadYourWritesTransaction> tr,
+	    Reference<TaskBucket> taskBucket,
+	    Key logUid,
+	    Key backupUid,
+	    Key keyAddPrefix,
+	    Key keyRemovePrefix,
+	    Key keyConfigBackupRanges,
+	    Key tagName,
+	    TaskCompletionKey completionKey,
+	    Reference<TaskFuture> waitFor = Reference<TaskFuture>(),
+	    DatabaseBackupAgent::PreBackupAction backupAction = DatabaseBackupAgent::PreBackupAction::VERIFY) {
 		Key doneKey = wait(completionKey.get(tr, taskBucket));
 		auto task = makeReference<Task>(StartFullBackupTaskFunc::name, StartFullBackupTaskFunc::version, doneKey);
 
@@ -2264,7 +2264,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 		task->params[BackupAgentBase::keyConfigBackupRanges] = keyConfigBackupRanges;
 		task->params[BackupAgentBase::keyTagName] = tagName;
 		task->params[DatabaseBackupAgent::keyDatabasesInSync] =
-		    databasesInSync ? LiteralStringRef("t") : LiteralStringRef("f");
+		    backupAction == DatabaseBackupAgent::PreBackupAction::NONE ? LiteralStringRef("t") : LiteralStringRef("f");
 
 		if (!waitFor) {
 			return taskBucket->addTask(tr,
@@ -2514,7 +2514,7 @@ public:
 	                                       Key addPrefix,
 	                                       Key removePrefix,
 	                                       bool lockDB,
-	                                       bool databasesInSync) {
+	                                       DatabaseBackupAgent::PreBackupAction backupAction) {
 		state UID logUid = deterministicRandom()->randomUniqueID();
 		state Key logUidValue = BinaryWriter::toValue(logUid, Unversioned());
 		state UID logUidCurrent = wait(backupAgent->getLogUid(tr, tagName));
@@ -2558,9 +2558,9 @@ public:
 			}
 		}
 
-		if (!databasesInSync) {
+		if (backupAction == DatabaseBackupAgent::PreBackupAction::VERIFY) {
 			// Make sure all of the ranges are empty before we backup into them.
-			state std::vector<Future<Standalone<RangeResultRef>>> backupIntoResults;
+			state std::vector<Future<RangeResult>> backupIntoResults;
 			for (auto& backupRange : backupRanges) {
 				backupIntoResults.push_back(
 				    tr->getRange(backupRange.removePrefix(removePrefix).withPrefix(addPrefix), 1));
@@ -2571,6 +2571,11 @@ public:
 					// One of the ranges we will be backing up into has pre-existing data.
 					throw restore_destination_not_empty();
 				}
+			}
+		} else if (backupAction == DatabaseBackupAgent::PreBackupAction::CLEAR) {
+			// Clear out all ranges before we backup into them.
+			for (auto& backupRange : backupRanges) {
+				tr->clear(backupRange.removePrefix(removePrefix).withPrefix(addPrefix));
 			}
 		}
 
@@ -2610,7 +2615,7 @@ public:
 		tr->clear(KeyRangeRef(mapPrefix, mapEnd));
 
 		state Version readVersion = invalidVersion;
-		if (databasesInSync) {
+		if (backupAction == DatabaseBackupAgent::PreBackupAction::NONE) {
 			Transaction readTransaction(backupAgent->taskBucket->src);
 			readTransaction.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Version _ = wait(readTransaction.getReadVersion());
@@ -2629,7 +2634,7 @@ public:
 		    tagName,
 		    TaskCompletionKey::noSignal(),
 		    Reference<TaskFuture>(),
-		    databasesInSync));
+		    backupAction));
 
 		if (lockDB)
 			wait(lockDatabase(tr, logUid));
@@ -2772,8 +2777,14 @@ public:
 		TraceEvent("DBA_SwitchoverVersionUpgraded");
 
 		try {
-			wait(drAgent.submitBackup(
-			    backupAgent->taskBucket->src, tagName, backupRanges, false, addPrefix, removePrefix, true, true));
+			wait(drAgent.submitBackup(backupAgent->taskBucket->src,
+			                          tagName,
+			                          backupRanges,
+			                          false,
+			                          addPrefix,
+			                          removePrefix,
+			                          true,
+			                          DatabaseBackupAgent::PreBackupAction::NONE));
 		} catch (Error& e) {
 			if (e.code() != error_code_backup_duplicate)
 				throw;
@@ -3048,13 +3059,13 @@ public:
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				state Future<Optional<Value>> fPaused = tr->get(backupAgent->taskBucket->getPauseKey());
-				state Future<Standalone<RangeResultRef>> fErrorValues =
+				state Future<RangeResult> fErrorValues =
 				    errorLimit > 0
 				        ? tr->getRange(backupAgent->errors.get(BinaryWriter::toValue(logUid, Unversioned())).range(),
 				                       errorLimit,
 				                       false,
 				                       true)
-				        : Future<Standalone<RangeResultRef>>();
+				        : Future<RangeResult>();
 				state Future<Optional<Value>> fBackupUid =
 				    tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
 				                .pack(DatabaseBackupAgent::keyFolderId));
@@ -3129,7 +3140,7 @@ public:
 
 				// Append the errors, if requested
 				if (errorLimit > 0) {
-					Standalone<RangeResultRef> values = wait(fErrorValues);
+					RangeResult values = wait(fErrorValues);
 
 					// Display the errors, if any
 					if (values.size() > 0) {
@@ -3236,9 +3247,9 @@ Future<Void> DatabaseBackupAgent::submitBackup(Reference<ReadYourWritesTransacti
                                                Key addPrefix,
                                                Key removePrefix,
                                                bool lockDatabase,
-                                               bool databasesInSync) {
+                                               PreBackupAction backupAction) {
 	return DatabaseBackupAgentImpl::submitBackup(
-	    this, tr, tagName, backupRanges, stopWhenDone, addPrefix, removePrefix, lockDatabase, databasesInSync);
+	    this, tr, tagName, backupRanges, stopWhenDone, addPrefix, removePrefix, lockDatabase, backupAction);
 }
 
 Future<Void> DatabaseBackupAgent::discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName) {

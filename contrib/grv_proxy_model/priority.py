@@ -1,11 +1,9 @@
-#! /bin/bash
-
 #
-# fdb.bash
+# priority.py
 #
 # This source file is part of the FoundationDB open source project
 #
-# Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+# Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,10 +18,23 @@
 # limitations under the License.
 #
 
-source /var/fdb/scripts/create_server_environment.bash
-create_server_environment
-source /var/fdb/.fdbenv
-echo "Starting FDB server on $PUBLIC_IP:$FDB_PORT"
-fdbserver --listen_address 0.0.0.0:$FDB_PORT --public_address $PUBLIC_IP:$FDB_PORT \
-	--datadir /var/fdb/data --logdir /var/fdb/logs \
-	--locality_zoneid=`hostname` --locality_machineid=`hostname` --class $FDB_PROCESS_CLASS
+import functools
+
+@functools.total_ordering
+class Priority:
+    def __init__(self, priority_value, label):
+        self.priority_value = priority_value
+        self.label = label
+
+    def __lt__(self, other):
+        return self.priority_value < other.priority_value
+
+    def __str__(self):
+        return self.label
+
+    def __repr__(self):
+        return repr(self.label)
+
+Priority.SYSTEM = Priority(0, "System")
+Priority.DEFAULT = Priority(1, "Default")
+Priority.BATCH = Priority(2, "Batch")

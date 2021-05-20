@@ -20,7 +20,7 @@
 
 // Unit tests for the FoundationDB C API.
 
-#define FDB_API_VERSION 700
+#define FDB_API_VERSION 710
 #include <foundationdb/fdb_c.h>
 #include <assert.h>
 #include <string.h>
@@ -35,10 +35,13 @@
 #include <tuple>
 #include <vector>
 #include <random>
+#include <chrono>
 
 #define DOCTEST_CONFIG_IMPLEMENT
 #include "doctest.h"
 #include "fdbclient/rapidjson/document.h"
+
+#include "flow/config.h"
 
 #include "fdb_api.hpp"
 
@@ -1510,10 +1513,17 @@ TEST_CASE("fdb_transaction_get_approximate_size") {
 	}
 }
 
-TEST_CASE("fdb_get_server_protocol") {
-	FDBFuture* protocolFuture = fdb_get_server_protocol(clusterFilePath.c_str());
+TEST_CASE("fdb_database_get_server_protocol") {
+	// We don't really have any expectations other than "don't crash" here
+	FDBFuture* protocolFuture = fdb_database_get_server_protocol(db, 0);
 	uint64_t out;
 
+	fdb_check(fdb_future_block_until_ready(protocolFuture));
+	fdb_check(fdb_future_get_uint64(protocolFuture, &out));
+	fdb_future_destroy(protocolFuture);
+
+	// Passing in an expected version that's different than the cluster version
+	protocolFuture = fdb_database_get_server_protocol(db, 0x0FDB00A200090000LL);
 	fdb_check(fdb_future_block_until_ready(protocolFuture));
 	fdb_check(fdb_future_get_uint64(protocolFuture, &out));
 	fdb_future_destroy(protocolFuture);
@@ -1958,6 +1968,11 @@ std::string get_valid_status_json() {
 }
 
 TEST_CASE("fdb_database_reboot_worker") {
+#ifdef USE_TSAN
+	MESSAGE(
+	    "fdb_database_reboot_worker disabled for tsan, since fdbmonitor doesn't seem to restart the killed process");
+	return;
+#endif
 	std::string status_json = get_valid_status_json();
 	rapidjson::Document statusJson;
 	statusJson.Parse(status_json.c_str());
@@ -2112,13 +2127,31 @@ TEST_CASE("block_from_callback") {
 	context.event.wait();
 }
 
+// monitors network busyness for 2 sec (40 readings)
+TEST_CASE("monitor_network_busyness") {
+	bool containsGreaterZero = false;
+	for (int i = 0; i < 40; i++) {
+		double busyness = fdb_database_get_main_thread_busyness(db);
+		// make sure the busyness is between 0 and 1
+		CHECK(busyness >= 0);
+		CHECK(busyness <= 1);
+		if (busyness > 0) {
+			containsGreaterZero = true;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+	}
+
+	// assert that at least one of the busyness readings was greater than 0
+	CHECK(containsGreaterZero);
+}
+
 int main(int argc, char** argv) {
 	if (argc != 3 && argc != 4) {
 		std::cout << "Unit tests for the FoundationDB C API.\n"
 		          << "Usage: fdb_c_unit_tests /path/to/cluster_file key_prefix [externalClient]" << std::endl;
 		return 1;
 	}
-	fdb_check(fdb_select_api_version(700));
+	fdb_check(fdb_select_api_version(710));
 	if (argc == 4) {
 		std::string externalClientLibrary = argv[3];
 		fdb_check(fdb_network_set_option(

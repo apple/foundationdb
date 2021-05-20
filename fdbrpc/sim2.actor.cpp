@@ -713,6 +713,7 @@ private:
 		return Void();
 	}
 
+	// Simulated sync does not actually do anything besides wait a random amount of time
 	ACTOR static Future<Void> sync_impl(SimpleFile* self) {
 		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)

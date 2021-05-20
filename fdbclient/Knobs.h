@@ -30,6 +30,7 @@ public:
 	int TOO_MANY; // FIXME: this should really be split up so we can control these more specifically
 
 	double SYSTEM_MONITOR_INTERVAL;
+	double NETWORK_BUSYNESS_MONITOR_INTERVAL; // The interval in which we should update the network busyness metric
 
 	double FAILURE_MAX_DELAY;
 	double FAILURE_MIN_DELAY;
@@ -41,6 +42,7 @@ public:
 	double RECOVERY_DELAY_SECONDS_PER_GENERATION;
 	double MAX_GENERATIONS;
 	double MAX_GENERATIONS_OVERRIDE;
+	double MAX_GENERATIONS_SIM;
 
 	double COORDINATOR_RECONNECTION_DELAY;
 	int CLIENT_EXAMPLE_AMOUNT;

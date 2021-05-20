@@ -29,6 +29,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/PerfMetric.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 struct CheckReply {
 	constexpr static FileIdentifier file_identifier = 11;
@@ -99,6 +100,27 @@ struct WorkloadRequest {
 	}
 };
 
+// Configuration details specified in workload test files that change the simulation
+// environment details
+struct TestConfig {
+	int extraDB = 0;
+	int minimumReplication = 0;
+	int minimumRegions = 0;
+	int configureLocked = 0;
+	bool startIncompatibleProcess = false;
+	int logAntiQuorum = -1;
+	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
+	//	0 = "ssd"
+	//	1 = "memory"
+	//	2 = "memory-radixtree-beta"
+	//	3 = "ssd-redwood-experimental"
+	// Requires a comma-separated list of numbers WITHOUT whitespaces
+	std::vector<int> storageEngineExcludeTypes;
+	// Set the maximum TLog version that can be selected for a test
+	// Refer to FDBTypes.h::TLogVersion. Defaults to the maximum supported version.
+	int maxTLogVersion = TLogVersion::MAX_SUPPORTED;
+};
+
 struct TesterInterface {
 	constexpr static FileIdentifier file_identifier = 4465210;
 	RequestStream<WorkloadRequest> recruitments;
@@ -117,7 +139,7 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
                                     LocalityData locality);
 
 enum test_location_t { TEST_HERE, TEST_ON_SERVERS, TEST_ON_TESTERS };
-enum test_type_t { TEST_TYPE_FROM_FILE, TEST_TYPE_CONSISTENCY_CHECK };
+enum test_type_t { TEST_TYPE_FROM_FILE, TEST_TYPE_CONSISTENCY_CHECK, TEST_TYPE_UNIT_TESTS };
 
 ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
                             test_type_t whatToRun,
@@ -125,7 +147,8 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
                             int minTestersExpected,
                             std::string fileName = std::string(),
                             StringRef startingConfiguration = StringRef(),
-                            LocalityData locality = LocalityData());
+                            LocalityData locality = LocalityData(),
+                            UnitTestParameters testOptions = UnitTestParameters());
 
 #include "flow/unactorcompiler.h"
 #endif

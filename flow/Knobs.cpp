@@ -135,6 +135,7 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( DISABLE_POSIX_KERNEL_AIO,                              0 );
 
 	//AsyncFileNonDurable
+	init( NON_DURABLE_MAX_WRITE_DELAY,                         2.0 ); if( randomize && BUGGIFY ) NON_DURABLE_MAX_WRITE_DELAY = 5.0;
 	init( MAX_PRIOR_MODIFICATION_DELAY,                        1.0 ); if( randomize && BUGGIFY ) MAX_PRIOR_MODIFICATION_DELAY = 10.0;
 
 	//GenericActors

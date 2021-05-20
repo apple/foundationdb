@@ -1,3 +1,5 @@
+storageEngineExcludeTypes=-1,-2
+maxTLogVersion=6
 testTitle=Clogged
     runSetup=false
     testName=Cycle

@@ -22,6 +22,8 @@ RUN sed -i -e '/enabled/d' /etc/yum.repos.d/CentOS-Base.repo && \
         curl \
         debbuild \
         devtoolset-8 \
+        devtoolset-8-libasan-devel \
+        devtoolset-8-libtsan-devel \
         devtoolset-8-libubsan-devel \
         devtoolset-8-valgrind-devel \
         dos2unix \
@@ -37,13 +39,14 @@ RUN sed -i -e '/enabled/d' /etc/yum.repos.d/CentOS-Base.repo && \
         lz4-devel \
         lz4-static \
         mono-devel \
-        rh-python36 \
-        rh-python36-python-devel \
-        rh-ruby24 \
+        redhat-lsb-core \
         rpm-build \
         tcl-devel \
         unzip \
-        wget && \
+        wget \
+        rh-python36 \
+        rh-python36-python-devel \
+        rh-ruby24 && \
     yum clean all && \
     rm -rf /var/cache/yum
 
@@ -155,7 +158,7 @@ RUN curl -Ls https://github.com/facebook/rocksdb/archive/v6.10.1.tar.gz -o rocks
     rm -rf /tmp/*
 
 # install boost 1.67 to /opt
-RUN curl -Ls https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.tar.bz2 -o boost_1_67_0.tar.bz2 && \
+RUN curl -Ls https://boostorg.jfrog.io/artifactory/main/release/1.67.0/source/boost_1_67_0.tar.bz2 -o boost_1_67_0.tar.bz2 && \
     echo "2684c972994ee57fc5632e03bf044746f6eb45d4920c343937a465fd67a5adba  boost_1_67_0.tar.bz2" > boost-sha-67.txt && \
     sha256sum -c boost-sha-67.txt && \
     tar --no-same-owner --directory /opt -xjf boost_1_67_0.tar.bz2 && \
@@ -164,7 +167,7 @@ RUN curl -Ls https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.
 
 # install boost 1.72 to /opt
 RUN source /opt/rh/devtoolset-8/enable && \
-    curl -Ls https://dl.bintray.com/boostorg/release/1.72.0/source/boost_1_72_0.tar.bz2 -o boost_1_72_0.tar.bz2 && \
+    curl -Ls https://boostorg.jfrog.io/artifactory/main/release/1.72.0/source/boost_1_72_0.tar.bz2 -o boost_1_72_0.tar.bz2 && \
     echo "59c9b274bc451cf91a9ba1dd2c7fdcaf5d60b1b3aa83f2c9fa143417cc660722  boost_1_72_0.tar.bz2" > boost-sha-72.txt && \
     sha256sum -c boost-sha-72.txt && \
     tar --no-same-owner --directory /opt -xjf boost_1_72_0.tar.bz2 && \
@@ -215,6 +218,14 @@ RUN source /opt/rh/devtoolset-8/enable && \
     cmake --build . --target install && \
     cd .. && \
     rm -rf /tmp/*
+
+# download old fdbserver binaries
+ARG FDB_VERSION="6.2.29"
+RUN mkdir -p /opt/foundationdb/old && \
+    curl -Ls https://www.foundationdb.org/downloads/misc/fdbservers-${FDB_VERSION}.tar.gz | \
+        tar --no-same-owner --directory /opt/foundationdb/old -xz && \
+    chmod +x /opt/foundationdb/old/* && \
+    ln -sf /opt/foundationdb/old/fdbserver-${FDB_VERSION} /opt/foundationdb/old/fdbserver
 
 # build/install distcc
 RUN source /opt/rh/devtoolset-8/enable && \

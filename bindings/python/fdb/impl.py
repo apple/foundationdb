@@ -253,7 +253,7 @@ def transactional(*tr_args, **tr_kwargs):
             @functools.wraps(func)
             def wrapper(*args, **kwargs):
                 # We can't throw this from the decorator, as when a user runs
-                # >>> import fdb ; fdb.api_version(700)
+                # >>> import fdb ; fdb.api_version(710)
                 # the code above uses @transactional before the API version is set
                 if fdb.get_api_version() >= 630 and inspect.isgeneratorfunction(func):
                     raise ValueError("Generators can not be wrapped with fdb.transactional")
@@ -1531,9 +1531,6 @@ def init_c_api():
     _capi.fdb_transaction_get_approximate_size.argtypes = [ctypes.c_void_p]
     _capi.fdb_transaction_get_approximate_size.restype = ctypes.c_void_p
 
-    _capi.fdb_get_server_protocol.argtypes = [ctypes.c_char_p]
-    _capi.fdb_get_server_protocol.restype = ctypes.c_void_p
-
     _capi.fdb_transaction_get_versionstamp.argtypes = [ctypes.c_void_p]
     _capi.fdb_transaction_get_versionstamp.restype = ctypes.c_void_p
 
@@ -1732,13 +1729,6 @@ def init_v13(local_address, event_model=None):
 open_databases = {}
 
 cacheLock = threading.Lock()
-
-def get_server_protocol(clusterFilePath=None):
-    with _network_thread_reentrant_lock:
-        if not _network_thread:
-            init()
-
-    return FutureUInt64(_capi.fdb_get_server_protocol(optionalParamToBytes(clusterFilePath)[0]))
 
 def open(cluster_file=None, event_model=None):
     """Opens the given database (or the default database of the cluster indicated
