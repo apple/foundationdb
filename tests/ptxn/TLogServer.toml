@@ -26,8 +26,8 @@ startDelay = 0
     testsMatching = '/fdbserver/ptxn/test/run_tlog_server'
 
     numProxies = 3
-    numTLogs = 2
+    numTLogs = 1
     numStorageTeams = 10
     numTLogGroups = 4
     skipCommitValidation = 1
-    numCommits = 50
+    numCommits = 10
