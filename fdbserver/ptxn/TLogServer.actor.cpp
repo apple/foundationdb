@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <tuple>
+
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
@@ -472,7 +474,7 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 
 		StorageTeamID storageTeamId;
 		std::vector<Tag> tags;
-		std::deque<std::pair<Version, LengthPrefixedStringRef>> versionMessages;
+		std::deque<std::tuple<Version, LengthPrefixedStringRef, Arena>> versionMessages;
 
 		StorageTeamData(StorageTeamID storageTeam, std::vector<Tag> tags) : storageTeamId(storageTeam), tags(tags) {}
 
@@ -725,16 +727,16 @@ void commitMessages(Reference<TLogGroupData> self,
 		storageTeamData = logData->createStorageTeamData(storageTeamId, logData->storageTeams[storageTeamId]);
 	}
 
-	storageTeamData->versionMessages.emplace_back(version,
-	                                              LengthPrefixedStringRef((uint32_t*)(block.end() - messages.size())));
-	if (storageTeamData->versionMessages.back().second.expectedSize() > SERVER_KNOBS->MAX_MESSAGE_SIZE) {
-		TraceEvent(SevWarnAlways, "LargeMessage")
-		    .detail("Size", storageTeamData->versionMessages.back().second.expectedSize());
+	storageTeamData->versionMessages.emplace_back(
+	    version, LengthPrefixedStringRef((uint32_t*)(block.end() - messages.size())), block.arena());
+	auto& savedStr = std::get<LengthPrefixedStringRef>(storageTeamData->versionMessages.back());
+	if (savedStr.expectedSize() > SERVER_KNOBS->MAX_MESSAGE_SIZE) {
+		TraceEvent(SevWarnAlways, "LargeMessage").detail("Size", savedStr.expectedSize());
 	}
 	if (storageTeamId != txsTeam) {
-		expectedBytes += storageTeamData->versionMessages.back().second.expectedSize();
+		expectedBytes += savedStr.expectedSize();
 	} else {
-		txsBytes += storageTeamData->versionMessages.back().second.expectedSize();
+		txsBytes += savedStr.expectedSize();
 	}
 
 	// The factor of VERSION_MESSAGES_OVERHEAD is intended to be an overestimate of the actual memory used
@@ -955,8 +957,6 @@ ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
 ACTOR Future<Void> tLogPeekMessages(Reference<TLogGroupData> self,
                                     TLogPeekRequest req,
                                     Reference<LogGenerationData> logData) {
-	std::cout << __FUNCTION__ << "\n";
-
 	TLogPeekReply reply;
 	reply.end = invalidVersion;
 	reply.maxKnownVersion = logData->version.get();
@@ -967,9 +967,39 @@ ACTOR Future<Void> tLogPeekMessages(Reference<TLogGroupData> self,
 	// reply.onlySpilled = false;
 
 	Reference<LogGenerationData::StorageTeamData> storageTeamData = logData->getStorageTeamData(req.storageTeamID);
+	TLogStorageServerMessageSerializer serializer(req.storageTeamID);
 	if (storageTeamData) {
-		// reply.data = storageTeamData->
+		for (const auto& tuple : storageTeamData->versionMessages) {
+			const Version& version = std::get<Version>(tuple);
+			if (version < req.beginVersion) {
+				continue;
+			}
+			if (req.endVersion.present() && version > req.endVersion.get()) {
+				break;
+			}
+			serializer.startVersionWriting(version);
+			const StringRef& messages = std::get<LengthPrefixedStringRef>(tuple).toStringRef();
+			const Arena& arena = std::get<Arena>(tuple);
+
+			// TODO: instead of deserializing, just sends it out
+			ProxyTLogMessageHeader header;
+			std::vector<SubsequenceMutationItem> items;
+			bool b = proxyTLogPushMessageDeserializer(arena, messages, header, items);
+			if (!b) {
+				std::cout << "Error deserializing for version " << version << " \n";
+				continue;
+			}
+			for (const auto& item : items) {
+				serializer.writeSubsequenceMutationRef(item);
+			}
+			serializer.completeVersionWriting();
+		}
 	}
+	serializer.completeMessageWriting();
+	Standalone<StringRef> buffer = serializer.getSerialized();
+
+	reply.arena = buffer.arena();
+	reply.data = buffer;
 
 	req.reply.send(reply);
 	return Void();
@@ -1169,9 +1199,7 @@ ACTOR Future<Void> tLogCore(
 		return Void();
 	}
 
-	TraceEvent("TLogGroupCore", self->dbgid)
-	    .detail("GroupID", self->tlogGroupID)
-	    .detail("RecoveryCount", logData->recoveryCount);
+	TraceEvent("TLogGroupCore", self->dbgid).detail("WorkerID", self->workerID);
 	self->addActors.send(self->removed);
 
 	// FIXME: update tlogMetrics to include new information, or possibly only have one copy for the shared instance
