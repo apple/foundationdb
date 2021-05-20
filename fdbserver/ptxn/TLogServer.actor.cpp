@@ -955,8 +955,7 @@ ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
 	return Void();
 }
 
-ACTOR Future<Void> tLogPeekMessages(Reference<TLogGroupData> self,
-                                    TLogPeekRequest req,
+ACTOR Future<Void> tLogPeekMessages(TLogPeekRequest req,
                                     Reference<LogGenerationData> logData) {
 	state TLogPeekReply reply;
 	state TLogStorageServerMessageSerializer serializer(req.storageTeamID);
@@ -1000,7 +999,7 @@ ACTOR Future<Void> tLogPeekMessages(Reference<TLogGroupData> self,
 			serializer.completeVersionWriting();
 		}
 	} else {
-		// TODO: block here or return error?
+		req.reply.sendError(teamid_not_found());
 	}
 	serializer.completeMessageWriting();
 	Standalone<StringRef> buffer = serializer.getSerialized();
@@ -1164,7 +1163,7 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 				continue;
 			}
 			Reference<LogGenerationData> logData = tlogGroup->second;
-			logData->addActor.send(tLogPeekMessages(logData->tlogGroupData, req, logData));
+			logData->addActor.send(tLogPeekMessages(req, logData));
 		}
 	}
 }
@@ -1669,7 +1668,7 @@ TEST_CASE("/fdbserver/ptxn/test/peek_tlog_server") {
 		std::cout << "\n";
 	}
 
-	state std::string folder = "simdb/unittests";
+	state std::string folder = "simdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
 	// start a real TLog server
 	wait(startTLogServers(&actors, context, folder));
