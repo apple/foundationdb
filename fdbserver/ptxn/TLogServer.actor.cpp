@@ -474,7 +474,7 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 
 		StorageTeamID storageTeamId;
 		std::vector<Tag> tags;
-		std::deque<std::tuple<Version, LengthPrefixedStringRef, Arena>> versionMessages;
+		std::deque<std::tuple<Version, StringRef, Arena>> versionMessages;
 
 		StorageTeamData(StorageTeamID storageTeam, std::vector<Tag> tags) : storageTeamId(storageTeam), tags(tags) {}
 
@@ -728,8 +728,8 @@ void commitMessages(Reference<TLogGroupData> self,
 	}
 
 	storageTeamData->versionMessages.emplace_back(
-	    version, LengthPrefixedStringRef((uint32_t*)(block.end() - messages.size())), block.arena());
-	auto& savedStr = std::get<LengthPrefixedStringRef>(storageTeamData->versionMessages.back());
+	    version, StringRef(block.end() - messages.size(), messages.size()), block.arena());
+	auto& savedStr = std::get<StringRef>(storageTeamData->versionMessages.back());
 	if (savedStr.expectedSize() > SERVER_KNOBS->MAX_MESSAGE_SIZE) {
 		TraceEvent(SevWarnAlways, "LargeMessage").detail("Size", savedStr.expectedSize());
 	}
@@ -958,17 +958,18 @@ ACTOR Future<Void> tLogPeekMessages(Reference<TLogGroupData> self,
                                     TLogPeekRequest req,
                                     Reference<LogGenerationData> logData) {
 	TLogPeekReply reply;
-	reply.end = invalidVersion;
 	reply.maxKnownVersion = logData->version.get();
 	reply.minKnownCommittedVersion = logData->minKnownCommittedVersion;
-	// reply.arena = 
-	// reply.data = messages.toValue();
-	// reply.begin =
 	// reply.onlySpilled = false;
 
 	Reference<LogGenerationData::StorageTeamData> storageTeamData = logData->getStorageTeamData(req.storageTeamID);
 	TLogStorageServerMessageSerializer serializer(req.storageTeamID);
 	if (storageTeamData) {
+		if (storageTeamData->versionMessages.empty() ||
+		    storageTeamData->versionMessages.back().first < req.beginVersion) {
+			wait(logData->version.whenAtLeast(req.beginVersion));
+		}
+
 		for (const auto& tuple : storageTeamData->versionMessages) {
 			const Version& version = std::get<Version>(tuple);
 			if (version < req.beginVersion) {
@@ -977,13 +978,19 @@ ACTOR Future<Void> tLogPeekMessages(Reference<TLogGroupData> self,
 			if (req.endVersion.present() && version > req.endVersion.get()) {
 				break;
 			}
+			if (!reply.begin.present()) {
+				reply.begin = version;
+			}
+			reply.end = version;
+
 			serializer.startVersionWriting(version);
-			const StringRef& messages = std::get<LengthPrefixedStringRef>(tuple).toStringRef();
+			const StringRef& messages = std::get<StringRef>(tuple);
 			const Arena& arena = std::get<Arena>(tuple);
 
 			// TODO: instead of deserializing, just sends it out
 			ProxyTLogMessageHeader header;
 			std::vector<SubsequenceMutationItem> items;
+			// TODO: deserialization can throw incompatible_protocol_version() error.
 			bool b = proxyTLogPushMessageDeserializer(arena, messages, header, items);
 			if (!b) {
 				std::cout << "Error deserializing for version " << version << " \n";
@@ -994,6 +1001,8 @@ ACTOR Future<Void> tLogPeekMessages(Reference<TLogGroupData> self,
 			}
 			serializer.completeVersionWriting();
 		}
+	} else {
+		// TODO: block here or return error?
 	}
 	serializer.completeMessageWriting();
 	Standalone<StringRef> buffer = serializer.getSerialized();
@@ -1612,10 +1621,17 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<test::TestDriverContext> p
 
 	// Verify
 	TLogStorageServerMessageDeserializer deserializer(reply.arena, reply.data);
-	for (auto iter = deserializer.begin(); iter != deserializer.end(); ++iter) {
-		// const VersionSubsequenceMutation& m = *iter;
-		std::cout << *iter << "\n";
+	ASSERT_EQ(beginVersion, deserializer.getFirstVersion());
+	ASSERT_EQ(beginVersion, deserializer.getLastVersion());
+	int i = 0;
+	for (auto iter = deserializer.begin(); iter != deserializer.end(); ++iter, ++i) {
+		const VersionSubsequenceMutation& m = *iter;
+		// std::cout << *iter << "\n";
+		ASSERT_EQ(beginVersion, m.version);
+		ASSERT_EQ(i + 1, m.subsequence); // subsequence starts from 1
+		ASSERT(mutations[i] == m.mutation);
 	}
+	ASSERT_EQ(i, mutations.size());
 
 	return Void();
 }

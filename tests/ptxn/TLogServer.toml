@@ -33,7 +33,8 @@ startDelay = 0
     numCommits = 100
 
 [[test]]
-testTitle = 'Team Partitioned TLog Server Test 3'
+testTitle = 'Team Partitioned TLog Server Test 3: Commit and Peek'
+>>>>>>> 853211fa7 (Fix broken promise error)
 useDB = false
 startDelay = 0
 
