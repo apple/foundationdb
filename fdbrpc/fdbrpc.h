@@ -691,7 +691,7 @@ public:
 	ReplyPromiseStream<REPLYSTREAM_TYPE(X)> getReplyStream(const X& value) const {
 		if (queue->isRemoteEndpoint()) {
 			Future<Void> disc =
-			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(getEndpoint().getPrimaryAddress());
+			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
 			auto& p = getReplyPromiseStream(value);
 			Reference<Peer> peer =
 			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
