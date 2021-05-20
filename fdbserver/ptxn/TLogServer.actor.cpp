@@ -576,30 +576,6 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 		specialCounter(cc, "SharedOverheadBytesInput", [tlogGroupData]() { return tlogGroupData->overheadBytesInput; });
 		specialCounter(
 		    cc, "SharedOverheadBytesDurable", [tlogGroupData]() { return tlogGroupData->overheadBytesDurable; });
-		specialCounter(cc, "KvstoreBytesUsed", [tlogGroupData]() {
-			return tlogGroupData->persistentData->getStorageBytes().used;
-		});
-		specialCounter(cc, "KvstoreBytesFree", [tlogGroupData]() {
-			return tlogGroupData->persistentData->getStorageBytes().free;
-		});
-		specialCounter(cc, "KvstoreBytesAvailable", [tlogGroupData]() {
-			return tlogGroupData->persistentData->getStorageBytes().available;
-		});
-		specialCounter(cc, "KvstoreBytesTotal", [tlogGroupData]() {
-			return tlogGroupData->persistentData->getStorageBytes().total;
-		});
-		specialCounter(cc, "QueueDiskBytesUsed", [tlogGroupData]() {
-			return tlogGroupData->rawPersistentQueue->getStorageBytes().used;
-		});
-		specialCounter(cc, "QueueDiskBytesFree", [tlogGroupData]() {
-			return tlogGroupData->rawPersistentQueue->getStorageBytes().free;
-		});
-		specialCounter(cc, "QueueDiskBytesAvailable", [tlogGroupData]() {
-			return tlogGroupData->rawPersistentQueue->getStorageBytes().available;
-		});
-		specialCounter(cc, "QueueDiskBytesTotal", [tlogGroupData]() {
-			return tlogGroupData->rawPersistentQueue->getStorageBytes().total;
-		});
 		specialCounter(
 		    cc, "PeekMemoryReserved", [tlogGroupData]() { return tlogGroupData->peekMemoryLimiter.activePermits(); });
 		specialCounter(
