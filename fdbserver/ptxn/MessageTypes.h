@@ -127,14 +127,10 @@ struct SubsequenceMutationItem {
 	}
 
 	// Specialize for ArenaReader.
-	void serialize(ArenaReader& ar) {
-		loadFromArena(ar);
-	}
+	void serialize(ArenaReader& ar) { loadFromArena(ar); }
 
 	// Specialize for BinaryWriter.
-	void serialize(BinaryWriter& ar) {
-		serializeImpl(ar);
-	}
+	void serialize(BinaryWriter& ar) { serializeImpl(ar); }
 };
 
 // Stores the

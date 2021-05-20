@@ -417,6 +417,7 @@ struct TLogServerData : NonCopyable, public ReferenceCounted<TLogServerData> {
 	FlowLock peekMemoryLimiter;
 
 	PromiseStream<Future<Void>> sharedActors;
+	PromiseStream<Future<Void>> addActors;
 	Promise<Void> terminated;
 	FlowLock concurrentLogRouterReads;
 	FlowLock persistentDataCommitLock;
@@ -517,8 +518,8 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	Counter bytesInput;
 	Counter bytesDurable;
 
-	// Log interface id for this generation. // Different TLogGroups in the same generation in the same tlog server
-	// share the same log ID.
+	// Log interface id for this generation.
+	// Different TLogGroups in the same generation in the same tlog server share the same log ID.
 	UID logId;
 	ProtocolVersion protocolVersion;
 
@@ -558,15 +559,8 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	    logSystem(new AsyncVar<Reference<ILogSystem>>()), durableKnownCommittedVersion(0), minKnownCommittedVersion(0),
 	    terminated(tlogGroupData->terminated.getFuture()),
 	    // These are initialized differently on init() or recovery
-	    stopped(false), initialized(false), queueCommittingVersion(0), locality(locality), recoveryCount(epoch) {
-		startRole(Role::TRANSACTION_LOG,
-		          interf.id(),
-		          tlogGroupData->workerID,
-		          { { "SharedTLog", tlogGroupData->dbgid.shortString() } },
-		          context);
-
-		// TODO: remove this so that a log generation is only tracked once
-		addActor.send(traceRole(Role::TRANSACTION_LOG, interf.id()));
+	    stopped(false), initialized(false), version(0), queueCommittingVersion(0), locality(locality),
+	    recoveryCount(epoch) {
 
 		version.initMetric(LiteralStringRef("TLog.Version"), cc.id);
 		queueCommittedVersion.initMetric(LiteralStringRef("TLog.QueueCommittedVersion"), cc.id);
@@ -582,30 +576,6 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 		specialCounter(cc, "SharedOverheadBytesInput", [tlogGroupData]() { return tlogGroupData->overheadBytesInput; });
 		specialCounter(
 		    cc, "SharedOverheadBytesDurable", [tlogGroupData]() { return tlogGroupData->overheadBytesDurable; });
-		specialCounter(cc, "KvstoreBytesUsed", [tlogGroupData]() {
-			return tlogGroupData->persistentData->getStorageBytes().used;
-		});
-		specialCounter(cc, "KvstoreBytesFree", [tlogGroupData]() {
-			return tlogGroupData->persistentData->getStorageBytes().free;
-		});
-		specialCounter(cc, "KvstoreBytesAvailable", [tlogGroupData]() {
-			return tlogGroupData->persistentData->getStorageBytes().available;
-		});
-		specialCounter(cc, "KvstoreBytesTotal", [tlogGroupData]() {
-			return tlogGroupData->persistentData->getStorageBytes().total;
-		});
-		specialCounter(cc, "QueueDiskBytesUsed", [tlogGroupData]() {
-			return tlogGroupData->rawPersistentQueue->getStorageBytes().used;
-		});
-		specialCounter(cc, "QueueDiskBytesFree", [tlogGroupData]() {
-			return tlogGroupData->rawPersistentQueue->getStorageBytes().free;
-		});
-		specialCounter(cc, "QueueDiskBytesAvailable", [tlogGroupData]() {
-			return tlogGroupData->rawPersistentQueue->getStorageBytes().available;
-		});
-		specialCounter(cc, "QueueDiskBytesTotal", [tlogGroupData]() {
-			return tlogGroupData->rawPersistentQueue->getStorageBytes().total;
-		});
 		specialCounter(
 		    cc, "PeekMemoryReserved", [tlogGroupData]() { return tlogGroupData->peekMemoryLimiter.activePermits(); });
 		specialCounter(
@@ -800,7 +770,9 @@ ACTOR Future<Void> doQueueCommit(Reference<TLogGroupData> self,
 	logData->queueCommittingVersion = ver;
 
 	g_network->setCurrentTask(TaskPriority::TLogCommitReply);
-	Future<Void> c = self->persistentQueue->commit();
+	// Currently only store commit messages in memory and not using persistent queue
+	// Future<Void> c = self->persistentQueue->commit();
+	Future<Void> c = Future<Void>(Void());
 	self->diskQueueCommitBytes = 0;
 	self->largeDiskQueueCommitBytes.set(false);
 
@@ -857,7 +829,7 @@ ACTOR Future<Void> commitQueue(Reference<TLogGroupData> self) {
 			wait(self->newLogData.onTrigger());
 			continue;
 		}
-
+		ASSERT(logData->tlogGroupData->tlogGroupID == self->tlogGroupID);
 		TraceEvent("CommitQueueNewLog", self->dbgid)
 		    .detail("LogId", logData->logId)
 		    .detail("Version", logData->version.get())
@@ -882,7 +854,9 @@ ACTOR Future<Void> commitQueue(Reference<TLogGroupData> self) {
 						wait(self->queueCommitEnd.whenAtLeast(self->queueCommitBegin) ||
 						     self->largeDiskQueueCommitBytes.onChange());
 					}
-					self->sharedActors.send(doQueueCommit(self, logData, missingFinalCommit));
+					if (logData->version.get() > logData->queueCommittedVersion.get()) {
+						self->sharedActors.send(doQueueCommit(self, logData, missingFinalCommit));
+					}
 					missingFinalCommit.clear();
 				}
 				when(wait(self->newLogData.onTrigger())) {}
@@ -944,7 +918,8 @@ ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
 		qe.messages = req.messages;
 		qe.id = logData->logId;
 		qe.storageTeamId = req.storageTeamID;
-		self->persistentQueue->push(qe, logData);
+		// Currently only store commit messages in memory and not using persistent queue
+		// self->persistentQueue->push(qe, logData);
 
 		self->diskQueueCommitBytes += qe.expectedSize();
 		if (self->diskQueueCommitBytes > SERVER_KNOBS->MAX_QUEUE_COMMIT_BYTES) {
@@ -1101,8 +1076,7 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 				}
 			}
 		}
-		when(state TLogCommitRequest req = waitNext(tli.commit.getFuture())) {
-			//TraceEvent("TLogCommitReq", logData->logId).detail("Ver", req.version).detail("PrevVer", req.prevVersion).detail("LogVer", logData->version.get());
+		when(TLogCommitRequest req = waitNext(tli.commit.getFuture())) {
 			auto tlogGroup = activeGeneration.find(req.storageTeamID);
 			TEST(tlogGroup == activeGeneration.end()); // TLog group not found
 			if (tlogGroup == activeGeneration.end()) {
@@ -1114,14 +1088,14 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 			if (logData->stopped) {
 				req.reply.sendError(tlog_stopped());
 			} else {
-				logData->addActor.send(tLogCommit(logData->tlogGroupData, req, logData));
+				self->addActors.send(tLogCommit(logData->tlogGroupData, req, logData));
 			}
 		}
 	}
 }
 
-void removeLog(Reference<TLogGroupData> self, Reference<LogGenerationData> logData) {
-
+void removeLog(Reference<LogGenerationData> logData) {
+	Reference<TLogGroupData> self = logData->tlogGroupData;
 	Reference<TLogServerData> tlogServerData = self->tLogServerData;
 	TraceEvent("TLogRemoved", self->dbgid)
 	    .detail("LogId", logData->logId)
@@ -1142,33 +1116,39 @@ void removeLog(Reference<TLogGroupData> self, Reference<LogGenerationData> logDa
 	}
 }
 
-ACTOR Future<Void> tlogGroupCore(Reference<TLogGroupData> self,
-                                 Reference<LogGenerationData> logData,
-                                 TLogInterface_PassivelyPull tli,
-                                 bool pulledRecoveryVersions) {
-	if (logData->removed.isReady()) {
+ACTOR Future<Void> tLogCore(Reference<TLogServerData> self,
+                            std::unordered_map<StorageTeamID, Reference<LogGenerationData>> activeGeneration,
+                            TLogInterface_PassivelyPull tli) {
+	if (self->removed.isReady()) {
 		wait(delay(0)); // to avoid iterator invalidation in restorePersistentState when removed is already ready
-		ASSERT(logData->removed.isError());
+		ASSERT(self->removed.isError());
 
-		if (logData->removed.getError().code() != error_code_worker_removed) {
-			throw logData->removed.getError();
+		if (self->removed.getError().code() != error_code_worker_removed) {
+			throw self->removed.getError();
 		}
 
-		removeLog(self, logData);
+		for (auto& logGroup : activeGeneration) {
+			removeLog(logGroup.second);
+		}
 		return Void();
 	}
 
-	state Future<Void> warningCollector = timeoutWarningCollector(
-	    logData->warningCollectorInput.getFuture(), 1.0, "TLogQueueCommitSlow", self->tlogGroupID);
-	state Future<Void> error = actorCollection(logData->addActor.getFuture());
-
-	logData->addActor.send(logData->removed);
+	self->addActors.send(self->removed);
 	// FIXME: update tlogMetrics to include new information, or possibly only have one copy for the shared instance
-	logData->addActor.send(traceCounters("TLogMetrics",
-	                                     logData->logId,
-	                                     SERVER_KNOBS->STORAGE_LOGGING_DELAY,
-	                                     &logData->cc,
-	                                     logData->logId.toString() + "/TLogMetrics"));
+	for (auto& logGroup : activeGeneration) {
+		self->sharedActors.send(traceCounters("TLogMetrics",
+		                                      logGroup.second->logId,
+		                                      SERVER_KNOBS->STORAGE_LOGGING_DELAY,
+		                                      &logGroup.second->cc,
+		                                      logGroup.second->logId.toString() + "/TLogMetrics"));
+	}
+	startRole(Role::TRANSACTION_LOG, tli.id(), self->workerID, { { "SharedTLog", self->dbgid.shortString() } });
+
+	// TODO: remove this so that a log generation is only tracked once
+	self->addActors.send(traceRole(Role::TRANSACTION_LOG, tli.id()));
+	self->addActors.send(serveTLogInterface_PassivelyPull(self, tli, activeGeneration));
+	self->addActors.send(waitFailureServer(tli.waitFailure.getFuture()));
+	state Future<Void> error = actorCollection(self->addActors.getFuture());
 
 	try {
 		wait(error);
@@ -1176,7 +1156,9 @@ ACTOR Future<Void> tlogGroupCore(Reference<TLogGroupData> self,
 	} catch (Error& e) {
 		if (e.code() != error_code_worker_removed)
 			throw;
-		removeLog(self, logData);
+		for (auto& logGroup : activeGeneration) {
+			removeLog(logGroup.second);
+		}
 		return Void();
 	}
 }
@@ -1312,8 +1294,7 @@ ACTOR Future<Void> tlogGroupStart(Reference<TLogGroupData> self, Reference<LogGe
 
 		wait(delay(0.0)); // if multiple recruitment requests were already in the promise stream make sure they are all
 		// started before any are removed
-
-		removeLog(self, logData);
+		removeLog(logData);
 	}
 	return Void();
 }
@@ -1346,6 +1327,7 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializeTLogReque
 	for (auto& group : req.tlogGroups) {
 		ASSERT(self->tlogGroups.count(group.logGroupId));
 		Reference<TLogGroupData> tlogGroupData = self->tlogGroups[group.logGroupId];
+		ASSERT(group.logGroupId == tlogGroupData->tlogGroupID);
 		Reference<LogGenerationData> newGenerationData = makeReference<LogGenerationData>(tlogGroupData,
 		                                                                                  recruited,
 		                                                                                  req.recruitmentID,
@@ -1356,7 +1338,7 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializeTLogReque
 		                                                                                  req.epoch,
 		                                                                                  "Recruited");
 
-		tlogGroupData->id_data[req.recruitmentID] = newGenerationData;
+		tlogGroupData->id_data[recruited.id()] = newGenerationData;
 		newGenerationData->removed = self->removed;
 		for (auto& storageTeam : newGenerationData->storageTeams) {
 			activeGeneration[storageTeam.first] = newGenerationData;
@@ -1367,17 +1349,8 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializeTLogReque
 	wait(waitForAll(tlogGroupStarts));
 	req.ptxnReply.send(recruited);
 
-	// should start tlog inerface and wait server here
-	self->sharedActors.send(serveTLogInterface_PassivelyPull(self, recruited, activeGeneration));
-	self->sharedActors.send(waitFailureServer(recruited.waitFailure.getFuture()));
 	TraceEvent("TLogStart", recruited.id());
-
-	state std::vector<Future<Void>> tlogGroupCores;
-	for (auto& group : self->tlogGroups) {
-		tlogGroupCores.push_back(
-		    tlogGroupCore(group.second, group.second->id_data[req.recruitmentID], recruited, false));
-	}
-	wait(waitForAll(tlogGroupCores));
+	wait(tLogCore(self, activeGeneration, recruited));
 	return Void();
 }
 
@@ -1486,7 +1459,7 @@ ACTOR Future<Void> tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> per
 }
 
 namespace {
-ACTOR Future<Void> startTLogServers(std::vector<Future<Void>> actors,
+ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
                                     std::shared_ptr<test::TestDriverContext> context,
                                     std::string folder) {
 	state std::vector<InitializeTLogRequest> tLogInitializations;
@@ -1497,18 +1470,18 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>> actors,
 		tLogInitializations.emplace_back();
 		tLogInitializations.back().isPrimary = true;
 		tLogInitializations.back().tlogGroups = context->tLogGroups;
-		actors.push_back(ptxn::tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>>(),
-		                            makeReference<AsyncVar<ServerDBInfo>>(),
-		                            LocalityData(),
-		                            initializeTLog,
-		                            UID(0, 1),
-		                            UID(0, 2),
-		                            false,
-		                            Promise<Void>(),
-		                            Promise<Void>(),
-		                            folder,
-		                            makeReference<AsyncVar<bool>>(false),
-		                            makeReference<AsyncVar<UID>>(UID(0, 1))));
+		actors->push_back(ptxn::tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>>(),
+		                             makeReference<AsyncVar<ServerDBInfo>>(),
+		                             LocalityData(),
+		                             initializeTLog,
+		                             UID(0, 1),
+		                             UID(0, 2),
+		                             false,
+		                             Promise<Void>(),
+		                             Promise<Void>(),
+		                             folder,
+		                             makeReference<AsyncVar<bool>>(false),
+		                             makeReference<AsyncVar<UID>>(UID(0, 1))));
 		initializeTLog.send(tLogInitializations.back());
 	}
 
@@ -1527,14 +1500,18 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>> actors,
 
 TEST_CASE("/fdbserver/ptxn/test/run_tlog_server") {
 	test::TestDriverOptions options(params);
+	// Commit validation in real TLog is not supported for now
+	options.skipCommitValidation = true;
 	state std::vector<Future<Void>> actors;
 	state std::shared_ptr<test::TestDriverContext> context = test::initTestDriverContext(options);
 
-	state std::string folder = "simdb/unittests";
+	state std::string folder = "simdb" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
 	// start a real TLog server
-	wait(startTLogServers(actors, context, folder));
+	wait(startTLogServers(&actors, context, folder));
 	// TODO: start fake proxy to talk to real TLog servers.
+	startFakeProxy(actors, context);
+	wait(quorum(actors, 1));
 	platform::eraseDirectoryRecursive(folder);
 	return Void();
 }

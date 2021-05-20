@@ -65,3 +65,11 @@ Optional<double> UnitTestParameters::getDouble(const std::string& name) const {
 	}
 	return {};
 }
+
+Optional<bool> UnitTestParameters::getBool(const std::string& name) const {
+	auto opt = get(name);
+	if (opt.present()) {
+		return static_cast<bool>(std::stoll(opt.get()));
+	}
+	return {};
+}

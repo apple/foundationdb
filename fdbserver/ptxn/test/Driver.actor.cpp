@@ -46,7 +46,9 @@
 
 namespace ptxn::test {
 
-CommitRecord::CommitRecord(const Version& version_, const StorageTeamID& storageTeamID_, std::vector<MutationRef>&& mutations_)
+CommitRecord::CommitRecord(const Version& version_,
+                           const StorageTeamID& storageTeamID_,
+                           std::vector<MutationRef>&& mutations_)
   : version(version_), storageTeamID(storageTeamID_), mutations(std::move(mutations_)) {}
 
 bool CommitValidationRecord::validated() const {
@@ -58,9 +60,10 @@ TestDriverOptions::TestDriverOptions(const UnitTestParameters& params)
     numStorageTeams(params.getInt("numStorageTeams").orDefault(DEFAULT_NUM_TEAMS)),
     numProxies(params.getInt("numProxies").orDefault(DEFAULT_NUM_PROXIES)),
     numTLogs(params.getInt("numTLogs").orDefault(DEFAULT_NUM_TLOGS)),
-	numTLogGroups(params.getInt("numTLogGroups").orDefault(DEFAULT_NUM_TLOG_GROUPS)),
+    numTLogGroups(params.getInt("numTLogGroups").orDefault(DEFAULT_NUM_TLOG_GROUPS)),
     numStorageServers(params.getInt("numStorageServers").orDefault(DEFAULT_NUM_STORAGE_SERVERS)),
     numResolvers(params.getInt("numResolvers").orDefault(DEFAULT_NUM_RESOLVERS)),
+    skipCommitValidation(params.getBool("skipCommitValidation").orDefault(DEFAULT_SKIP_COMMIT_VALIDATION)),
     transferModel(static_cast<MessageTransferModel>(
         params.getInt("messageTransferModel").orDefault(static_cast<int>(DEFAULT_MESSAGE_TRANSFER_MODEL)))) {}
 
@@ -78,6 +81,8 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 		context->storageTeamIDs.push_back(getNewStorageTeamID());
 	}
 
+	context->commitVersionGap = 10000;
+	context->skipCommitValidation = options.skipCommitValidation;
 	// Prepare Proxies
 	context->numProxies = options.numProxies;
 
@@ -86,7 +91,6 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 
 	// Prepare TLogInterfaces
 	// For now, each tlog group spans all the TLogs, i.e., number of group numbers == num of TLogs
-
 	context->numTLogs = options.numTLogs;
 	for (int i = 0; i < context->numTLogs; ++i) {
 		context->tLogInterfaces.push_back(getNewTLogInterface(context->messageTransferModel,
@@ -127,7 +131,7 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 	for (int i = 0, index = 0; i < context->numStorageTeamIDs; ++i) {
 		const StorageTeamID& storageTeamID = context->storageTeamIDs[i];
 		TLogGroup& tLogGroup = context->tLogGroups[index];
-		context->storageTeamIDTLogInterfaceMapper[storageTeamID] = context->tLogGroupLeaders[tLogGroup.logGroupId];
+		context->storageTeamIDTLogGroupIDMapper[storageTeamID] = tLogGroup.logGroupId;
 		// Ignore tags for now.
 		tLogGroup.storageTeams[storageTeamID] = {};
 		++index;
@@ -137,17 +141,25 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 }
 
 std::shared_ptr<TLogInterfaceBase> TestDriverContext::getTLogInterface(const StorageTeamID& storageTeamID) {
-	return storageTeamIDTLogInterfaceMapper.at(storageTeamID);
+	return tLogGroupLeaders.at(storageTeamIDTLogGroupIDMapper.at(storageTeamID));
 }
 
 std::shared_ptr<StorageServerInterfaceBase> TestDriverContext::getStorageServerInterface(const StorageTeamID& storageTeamID) {
 	return storageTeamIDStorageServerInterfaceMapper.at(storageTeamID);
 }
 
+std::pair<Version, Version> TestDriverContext::getCommitVersionPair(const StorageTeamID& storageTeamId) {
+	ASSERT(storageTeamIDTLogGroupIDMapper.count(storageTeamId));
+	Version prevVersion = tLogGroupVersion[storageTeamIDTLogGroupIDMapper.at(storageTeamId)];
+	Version commitVersion = prevVersion + commitVersionGap;
+	tLogGroupVersion[storageTeamIDTLogGroupIDMapper.at(storageTeamId)] = commitVersion;
+	return { prevVersion, commitVersion };
+}
+
 void startFakeProxy(std::vector<Future<Void>>& actors, std::shared_ptr<TestDriverContext> pTestDriverContext) {
 	for (int i = 0; i < pTestDriverContext->numProxies; ++i) {
 		std::shared_ptr<FakeProxyContext> pFakeProxyContext(
-		    new FakeProxyContext{ pTestDriverContext->numCommits, pTestDriverContext });
+		    new FakeProxyContext{ i, pTestDriverContext->numCommits, pTestDriverContext });
 		actors.emplace_back(fakeProxy(pFakeProxyContext));
 	}
 }

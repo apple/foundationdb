@@ -122,6 +122,10 @@ void print(const TestDriverOptions& option) {
 	          << formatKVPair("numStorageTeams", option.numStorageTeams) << std::endl
 	          << formatKVPair("numProxies", option.numProxies) << std::endl
 	          << formatKVPair("numTLogs", option.numTLogs) << std::endl
+	          << formatKVPair("numTLogGroups", option.numTLogGroups) << std::endl
+	          << formatKVPair("numStorageServers", option.numStorageServers) << std::endl
+	          << formatKVPair("numResolvers", option.numResolvers) << std::endl
+	          << formatKVPair("skipCommitValidation", option.skipCommitValidation) << std::endl
 	          << formatKVPair("Message Transfer Model", option.transferModel) << std::endl;
 }
 

@@ -62,6 +62,7 @@ struct TestDriverOptions {
 	static const int DEFAULT_NUM_TLOG_GROUPS = 4;
 	static const int DEFAULT_NUM_STORAGE_SERVERS = 3;
 	static const int DEFAULT_NUM_RESOLVERS = 2;
+	static const int DEFAULT_SKIP_COMMIT_VALIDATION = false;
 	static const MessageTransferModel DEFAULT_MESSAGE_TRANSFER_MODEL = MessageTransferModel::TLogActivelyPush;
 
 	int numCommits;
@@ -71,6 +72,7 @@ struct TestDriverOptions {
 	int numTLogGroups;
 	int numStorageServers;
 	int numResolvers;
+	bool skipCommitValidation;
 	MessageTransferModel transferModel;
 
 	explicit TestDriverOptions(const UnitTestParameters&);
@@ -80,11 +82,17 @@ struct TestDriverContext {
 	// Num commits to be created
 	int numCommits;
 
+	// commit version gap
+	int commitVersionGap;
+
 	// Teams
 	int numStorageTeamIDs;
 	std::vector<StorageTeamID> storageTeamIDs;
 
 	MessageTransferModel messageTransferModel;
+
+	// whether to skip persistence validation
+	bool skipCommitValidation;
 
 	// Proxies
 	bool useFakeProxy;
@@ -100,9 +108,12 @@ struct TestDriverContext {
 	int numTLogGroups;
 	std::vector<TLogGroup> tLogGroups;
 	std::unordered_map<TLogGroupID, std::shared_ptr<TLogInterfaceBase>> tLogGroupLeaders;
+	std::unordered_map<TLogGroupID, Version> tLogGroupVersion;
 	std::vector<std::shared_ptr<TLogInterfaceBase>> tLogInterfaces;
-	std::unordered_map<StorageTeamID, std::shared_ptr<TLogInterfaceBase>> storageTeamIDTLogInterfaceMapper;
+	std::unordered_map<StorageTeamID, TLogGroupID> storageTeamIDTLogGroupIDMapper;
 	std::shared_ptr<TLogInterfaceBase> getTLogInterface(const StorageTeamID&);
+	// Returns a pair of commit version and previous commit version for this storage team
+	std::pair<Version, Version> getCommitVersionPair(const StorageTeamID& storageTeamId);
 
 	// Storage Server
 	bool useFakeStorageServer;
