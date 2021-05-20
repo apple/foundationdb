@@ -1,5 +1,5 @@
 [[test]]
-testTitle = 'TLog Server Test'
+testTitle = 'Team Partitioned TLog Server Test 1'
 useDB = false
 startDelay = 0
 
@@ -7,3 +7,27 @@ startDelay = 0
     testName = 'UnitTests'
     maxTestCases = 1
     testsMatching = '/fdbserver/ptxn/test/run_tlog_server'
+
+    numProxies = 3
+    numTLogs = 4
+    numStorageTeams = 55
+    numTLogGroups = 8
+    skipCommitValidation = 1
+    numCommits = 20
+
+[[test]]
+testTitle = 'Team Partitioned TLog Server Test 2'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/run_tlog_server'
+
+    numProxies = 3
+    numTLogs = 2
+    numStorageTeams = 10
+    numTLogGroups = 4
+    skipCommitValidation = 1
+    numCommits = 50

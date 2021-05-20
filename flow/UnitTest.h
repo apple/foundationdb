@@ -68,6 +68,9 @@ struct UnitTestParameters {
 
 	// Get a parameter's value parsed as a double, will return !present() if parameter was not set
 	Optional<double> getDouble(const std::string& name) const;
+
+	// Get a parameter's value parsed as a bool, will return !present() if parameter was not set
+	Optional<bool> getBool(const std::string& name) const;
 };
 
 // Unit test definition structured as a linked list item

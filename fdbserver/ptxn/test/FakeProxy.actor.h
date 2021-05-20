@@ -40,6 +40,7 @@
 namespace ptxn::test {
 
 struct FakeProxyContext {
+	int proxyID;
 	int numCommits;
 
 	std::shared_ptr<TestDriverContext> pTestDriverContext;
