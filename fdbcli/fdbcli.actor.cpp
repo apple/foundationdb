@@ -658,7 +658,6 @@ void initHelp() {
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
-	hiddenCommands.insert("snapshot");
 }
 
 void printVersion() {
@@ -3454,14 +3453,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "snapshot")) {
-					if (tokens.size() < 2) {
-						printUsage(tokens[0]);
+					bool _result = wait(snapshotCommandActor(db2, tokens));
+					if (!_result)
 						is_error = true;
-					} else {
-						bool err = wait(createSnapshot(db, tokens));
-						if (err)
-							is_error = true;
-					}
 					continue;
 				}
 
@@ -3755,20 +3749,23 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "force_recovery_with_data_loss")) {
 					bool _result = wait(makeInterruptable(forceRecoveryWithDataLossCommandActor(db2, tokens)));
-					if (!_result) is_error = true;
+					if (!_result)
+						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "maintenance")) {
 					bool _result = wait(makeInterruptable(maintenanceCommandActor(db2, tokens)));
-					if (!_result) is_error = true;
+					if (!_result)
+						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "consistencycheck")) {
 					getTransaction(db, tr, tr2, options, intrans);
 					bool _result = wait(consistencyCheckCommandActor(tr2, tokens));
-					if (!_result) is_error = true;
+					if (!_result)
+						is_error = true;
 					continue;
 				}
 
