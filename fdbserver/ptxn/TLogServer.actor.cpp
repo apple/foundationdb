@@ -1549,9 +1549,10 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<test::TestDriverContext> p
 	state StorageTeamID storageTeamID = group.storageTeams.begin()->first;
 
 	state std::shared_ptr<TLogInterfaceBase> tli = pContext->getTLogInterface(storageTeamID);
-	state Version prevVersion = 100;
+	state Version prevVersion = 0; // starts from 0 for first epoch
 	state Version beginVersion = 150;
 	state Version endVersion(beginVersion + deterministicRandom()->randomInt(5, 20));
+	state Optional<UID> debugID(test::randomUID());
 
 	// Commit
 	ProxyTLogPushMessageSerializer serializer;
@@ -1568,12 +1569,13 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<test::TestDriverContext> p
 	serializer.completeMessageWriting(storageTeamID);
 	Standalone<StringRef> message = serializer.getSerialized(storageTeamID);
 	TLogCommitRequest commitRequest(
-	    test::randomUID(), storageTeamID, message.arena(), message, prevVersion, beginVersion, 0, 0, Optional<UID>());
-	TLogCommitReply reply = wait(tli->commit.getReply(commitRequest));
-	test::print::print(reply);
+	    test::randomUID(), storageTeamID, message.arena(), message, prevVersion, beginVersion, 0, 0, debugID);
+	test::print::print(commitRequest);
+
+	TLogCommitReply commitReply = wait(tli->commit.getReply(commitRequest));
+	test::print::print(commitReply);
 
 	// Peek
-	Optional<UID> debugID(test::randomUID());
 	TLogPeekRequest request(debugID, beginVersion, endVersion, storageTeamID);
 	test::print::print(request);
 
@@ -1626,7 +1628,7 @@ TEST_CASE("/fdbserver/ptxn/test/peek_tlog_server") {
 	state std::string folder = "simdb/unittests";
 	platform::createDirectory(folder);
 	// start a real TLog server
-	wait(startTLogServers(actors, context, folder));
+	wait(startTLogServers(&actors, context, folder));
 
 	wait(commitPeekAndCheck(context));
 
