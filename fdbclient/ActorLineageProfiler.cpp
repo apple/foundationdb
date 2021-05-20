@@ -63,6 +63,8 @@ class Packer : public msgpack::packer<msgpack::sbuffer> {
 			                     std::string,
 			                     std::string_view,
 			                     std::vector<std::any>,
+			                     std::vector<std::string>,
+			                     std::vector<std::string_view>,
 			                     std::map<std::string, std::any>,
 			                     std::map<std::string_view, std::any>,
 			                     std::vector<std::map<std::string_view, std::any>>>::populate(visitorMap);
@@ -196,6 +198,10 @@ std::shared_ptr<Sample> SampleCollectorT::collect() {
 
 void SampleCollection_t::refresh() {
 	auto sample = _collector->collect();
+	// TODO: Should only call ingest when deleting from memory
+	if (sample.get() != 0) {
+		config->ingest(sample);
+	}
 	auto min = std::min(sample->time - windowSize, sample->time);
 	{
 		Lock _{ mutex };
@@ -212,7 +218,6 @@ void SampleCollection_t::refresh() {
 			oldest = data.front()->time;
 		}
 	}
-	//config->ingest(sample);
 }
 
 std::vector<std::shared_ptr<Sample>> SampleCollection_t::get(double from /*= 0.0*/,
@@ -268,11 +273,11 @@ struct ProfilerImpl {
 };
 
 ActorLineageProfilerT::ActorLineageProfilerT() : impl(new ProfilerImpl()) {
-	collection->collector()->addGetter(WaitState::Network,
-	                                   std::bind(&ActorLineageSet::copy, std::ref(g_network->getActorLineageSet())));
-	collection->collector()->addGetter(
-	    WaitState::Disk,
-	    std::bind(&ActorLineageSet::copy, std::ref(IAsyncFileSystem::filesystem()->getActorLineageSet())));
+	// collection->collector()->addGetter(WaitState::Network,
+	//                                    std::bind(&ActorLineageSet::copy, std::ref(g_network->getActorLineageSet())));
+	// collection->collector()->addGetter(
+	//     WaitState::Disk,
+	//     std::bind(&ActorLineageSet::copy, std::ref(IAsyncFileSystem::filesystem()->getActorLineageSet())));
 	collection->collector()->addGetter(WaitState::Running, []() {
 		auto res = currentLineageThreadSafe.get();
 		if (res.isValid()) {
@@ -316,7 +321,7 @@ void ProfilerConfigT::reset(std::map<std::string, std::string> const& config) {
 			err.description = format("Unexpected option %s", kv.first.c_str());
 			throw err;
 		}
-		if (kv.first == "collector") {
+		if (kv.first == "ingestor") {
 			std::string val = kv.second;
 			std::for_each(val.begin(), val.end(), [](auto c) { return std::tolower(c); });
 			if (val == "none") {
@@ -324,12 +329,12 @@ void ProfilerConfigT::reset(std::map<std::string, std::string> const& config) {
 			} else if (val == "fluentd") {
 				useFluentD = true;
 			} else {
-				err.description = format("Unsupported collector: %s", val.c_str());
+				err.description = format("Unsupported ingestor: %s", val.c_str());
 				throw err;
 			}
-		} else if (kv.first == "collector_endpoint") {
+		} else if (kv.first == "ingestor_endpoint") {
 			endpoint = kv.second;
-		} else if (kv.first == "collector_protocol") {
+		} else if (kv.first == "ingestor_protocol") {
 			auto val = kv.second;
 			std::for_each(val.begin(), val.end(), [](auto c) { return std::tolower(c); });
 			if (val == "tcp") {
@@ -358,7 +363,7 @@ void ProfilerConfigT::reset(std::map<std::string, std::string> const& config) {
 			throw err;
 		}
 		setBackend(std::make_shared<FluentDIngestor>(
-		    useTCP ? FluentDIngestor::Protocol::TCP : FluentDIngestor::Protocol::TCP, address));
+		    useTCP ? FluentDIngestor::Protocol::TCP : FluentDIngestor::Protocol::UDP, address));
 	}
 }
 

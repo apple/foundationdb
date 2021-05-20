@@ -76,6 +76,8 @@ set(FDBCLIENT_SRCS
   StorageServerInterface.h
   Subspace.cpp
   Subspace.h
+  StackLineage.h
+  StackLineage.cpp
   SystemData.cpp
   SystemData.h
   TagThrottle.actor.cpp

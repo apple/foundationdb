@@ -1,4 +1,5 @@
 #include "flow/flow.h"
+#include "fdbclient/StackLineage.h"
 #include <csignal>
 #include <iostream>
 #include <string_view>

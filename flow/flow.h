@@ -448,7 +448,7 @@ struct LineageProperties : LineagePropertiesBase {
 	}
 };
 
-struct ActorLineage : ThreadSafeReferenceCounted<ActorLineage>, public FastAllocated<ActorLineage> {
+struct ActorLineage : ThreadSafeReferenceCounted<ActorLineage> {
 	friend class LocalLineage;
 
 private:
@@ -516,6 +516,11 @@ public:
 extern thread_local Reference<ActorLineage> currentLineage;
 extern WriteOnlyVariable<ActorLineage, unsigned> currentLineageThreadSafe;
 
+struct StackLineage : LineageProperties<StackLineage> {
+	static const std::string_view name;
+	StringRef actorName;
+};
+
 // This class can be used in order to modify all lineage properties
 // of actors created within a (non-actor) scope
 struct LocalLineage {
@@ -540,13 +545,6 @@ struct restore_lineage {
 		currentLineageThreadSafe.replace(prev);
 	}
 };
-
-struct StackLineage : LineageProperties<StackLineage> {
-	static const std::string_view name;
-	StringRef actorName;
-};
-
-extern std::vector<StringRef> getActorStackTrace();
 
 // SAV is short for Single Assignment Variable: It can be assigned for only once!
 template <class T>

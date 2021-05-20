@@ -1941,11 +1941,11 @@ void parse(StringRef& val, double& d) {
 }
 
 void parse(StringRef& val, WaitState& w) {
-	if (val == LiteralStringRef("disk")) {
+	if (val == LiteralStringRef("disk") || val == LiteralStringRef("Disk")) {
 		w = WaitState::Disk;
-	} else if (val == LiteralStringRef("network")) {
+	} else if (val == LiteralStringRef("network") || val == LiteralStringRef("Network")) {
 		w = WaitState::Network;
-	} else if (val == LiteralStringRef("running")) {
+	} else if (val == LiteralStringRef("running") || val == LiteralStringRef("Running")) {
 		w = WaitState::Running;
 	} else {
 		throw std::range_error("failed to parse run state");
@@ -2088,19 +2088,19 @@ ACTOR static Future<RangeResult> actorLineageGetRangeActor(ReadYourWritesTransac
 	time_t dt = 0;
 	int seq = -1;
 	for (const auto& sample : reply.samples) {
-		for (const auto& [waitState, data] : sample.data) {
-			time_t datetime = (time_t)sample.time;
-			seq = dt == datetime ? seq + 1 : 0;
-			dt = datetime;
+		time_t datetime = (time_t)sample.time;
+		char buf[50];
+		struct tm* tm;
+		tm = localtime(&datetime);
+		size_t size = strftime(buf, 50, "%FT%T%z", tm);
+		std::string date(buf, size);
 
+		seq = dt == datetime ? seq + 1 : 0;
+		dt = datetime;
+
+		for (const auto& [waitState, data] : sample.data) {
 			if (seq < seqStart) { continue; }
 			else if (seq >= seqEnd) { break; }
-
-			char buf[50];
-			struct tm* tm;
-			tm = localtime(&datetime);
-			size_t size = strftime(buf, 50, "%FT%T%z", tm);
-			std::string date(buf, size);
 
 			std::ostringstream streamKey;
 			if (SpecialKeySpace::getActorLineageApiCommandRange("state").contains(kr)) {
@@ -2109,7 +2109,6 @@ ACTOR static Future<RangeResult> actorLineageGetRangeActor(ReadYourWritesTransac
 			} else if (SpecialKeySpace::getActorLineageApiCommandRange("time").contains(kr)) {
 				streamKey << SpecialKeySpace::getActorLineageApiCommandPrefix("time").toString() << host.toString()
 				          << "/" << date << "/" << to_string(waitState);
-				;
 			} else {
 				ASSERT(false);
 			}
@@ -2122,6 +2121,21 @@ ACTOR static Future<RangeResult> actorLineageGetRangeActor(ReadYourWritesTransac
 			stream << deserialized;
 
 			result.push_back_deep(result.arena(), KeyValueRef(streamKey.str(), stream.str()));
+		}
+
+		if (sample.data.size() == 0) {
+			std::ostringstream streamKey;
+			if (SpecialKeySpace::getActorLineageApiCommandRange("state").contains(kr)) {
+				streamKey << SpecialKeySpace::getActorLineageApiCommandPrefix("state").toString() << host.toString()
+				          << "/Running/" << date;
+			} else if (SpecialKeySpace::getActorLineageApiCommandRange("time").contains(kr)) {
+				streamKey << SpecialKeySpace::getActorLineageApiCommandPrefix("time").toString() << host.toString()
+				          << "/" << date << "/Running";
+			} else {
+				ASSERT(false);
+			}
+			streamKey << "/" << seq;
+			result.push_back_deep(result.arena(), KeyValueRef(streamKey.str(), "{}"_sr));
 		}
 	}
 
@@ -2150,7 +2164,7 @@ Future<RangeResult> ActorProfilerConf::getRange(ReadYourWritesTransaction* ryw, 
 			break;
 		} else if (p.first > begin) {
 			KeyValueRef kv;
-			kv.key = StringRef(res.arena(), p.first);
+			kv.key = StringRef(res.arena(), p.first).withPrefix(kr.begin, res.arena());
 			kv.value = StringRef(res.arena(), p.second);
 			res.push_back(res.arena(), kv);
 		}
@@ -2160,6 +2174,7 @@ Future<RangeResult> ActorProfilerConf::getRange(ReadYourWritesTransaction* ryw, 
 
 void ActorProfilerConf::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
 	config[key.removePrefix(range.begin).toString()] = value.toString();
+	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(value)));
 	didWrite = true;
 }
 

@@ -108,6 +108,7 @@ private: // construction
 	void setBackend(std::shared_ptr<SampleIngestor> ingestor) { this->ingestor = ingestor; }
 
 public:
+	void ingest(std::shared_ptr<Sample> sample) { ingestor->ingest(sample); }
 	void reset(std::map<std::string, std::string> const& config);
 	std::map<std::string, std::string> getConfig() const;
 };

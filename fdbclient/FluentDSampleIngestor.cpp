@@ -52,6 +52,7 @@ class SampleSender : public std::enable_shared_from_this<SampleSender<Protocol, 
 	Socket& socket;
 	Callback callback;
 	Iter iter, end;
+	std::shared_ptr<Sample> sample_; // to keep from being deallocated
 
 	struct Buf {
 		const char* data;
@@ -72,20 +73,25 @@ class SampleSender : public std::enable_shared_from_this<SampleSender<Protocol, 
 	}
 
 	void send(boost::asio::ip::tcp::socket& socket, std::shared_ptr<Buf> const& buf) {
+		// auto self = this->shared_from_this();
 		boost::asio::async_write(
 		    socket,
 		    boost::asio::const_buffer(buf->data, buf->size),
-		    [buf, self = this->shared_from_this()](auto const& ec, size_t) { self->sendCompletionHandler(ec); });
+		    [buf, this](auto const& ec, size_t) {
+				this->sendCompletionHandler(ec);
+			});
 	}
 	void send(boost::asio::ip::udp::socket& socket, std::shared_ptr<Buf> const& buf) {
 		socket.async_send(
 		    boost::asio::const_buffer(buf->data, buf->size),
-		    [buf, self = this->shared_from_this()](auto const& ec, size_t) { self->sendCompletionHandler(ec); });
+		    // [buf, self = this->shared_from_this()](auto const& ec, size_t) { self->sendCompletionHandler(ec); });
+		    [buf, this](auto const& ec, size_t) { this->sendCompletionHandler(ec); });
 	}
 
 	void sendNext() {
 		if (iter == end) {
 			callback(boost::system::error_code());
+			return;
 		}
 		// 1. calculate size of buffer
 		unsigned size = 1; // 1 for fixmap identifier byte
@@ -118,7 +124,11 @@ class SampleSender : public std::enable_shared_from_this<SampleSender<Protocol, 
 
 public:
 	SampleSender(Socket& socket, Callback const& callback, std::shared_ptr<Sample> const& sample)
-	  : socket(socket), callback(callback), iter(sample->data.begin()), end(sample->data.end()) {
+	  : socket(socket),
+		callback(callback),
+		sample_(sample),
+		iter(sample->data.begin()),
+		end(sample->data.end()) {
 			sendNext();
 		}
 };
@@ -197,7 +207,7 @@ struct FluentDIngestorImpl {
 	Protocol protocol;
 	NetworkAddress endpoint;
 	boost::asio::io_context& io_context;
-	std::unique_ptr<FluentDSocket> socket;
+	std::shared_ptr<FluentDSocket> socket;
 	boost::asio::steady_timer retryTimer;
 	FluentDIngestorImpl(Protocol protocol, NetworkAddress const& endpoint)
 	  : protocol(protocol), endpoint(endpoint), io_context(ActorLineageProfiler::instance().context()),
