@@ -2604,10 +2604,9 @@ std::string toString(BTreePageIDRef id) {
 struct RedwoodRecordRef {
 	typedef uint8_t byte;
 
-	RedwoodRecordRef(KeyRef key = KeyRef(), Version ver = 0, Optional<ValueRef> value = {})
-	  : key(key), version(ver), value(value) {}
+	RedwoodRecordRef(KeyRef key = KeyRef(), Optional<ValueRef> value = {}) : key(key), value(value) {}
 
-	RedwoodRecordRef(Arena& arena, const RedwoodRecordRef& toCopy) : key(arena, toCopy.key), version(toCopy.version) {
+	RedwoodRecordRef(Arena& arena, const RedwoodRecordRef& toCopy) : key(arena, toCopy.key) {
 		if (toCopy.value.present()) {
 			value = ValueRef(arena, toCopy.value.get());
 		}
@@ -2636,20 +2635,19 @@ struct RedwoodRecordRef {
 	}
 
 	inline RedwoodRecordRef withPageID(BTreePageIDRef id) const {
-		return RedwoodRecordRef(key, version, ValueRef((const uint8_t*)id.begin(), id.size() * sizeof(LogicalPageID)));
+		return RedwoodRecordRef(key, ValueRef((const uint8_t*)id.begin(), id.size() * sizeof(LogicalPageID)));
 	}
 
-	inline RedwoodRecordRef withoutValue() const { return RedwoodRecordRef(key, version); }
+	inline RedwoodRecordRef withoutValue() const { return RedwoodRecordRef(key); }
 
 	inline RedwoodRecordRef withMaxPageID() const {
-		return RedwoodRecordRef(key, version, StringRef((uint8_t*)&maxPageID, sizeof(maxPageID)));
+		return RedwoodRecordRef(key, StringRef((uint8_t*)&maxPageID, sizeof(maxPageID)));
 	}
 
 	// Truncate (key, version, part) tuple to len bytes.
 	void truncate(int len) {
 		ASSERT(len <= key.size());
 		key = key.substr(0, len);
-		version = 0;
 	}
 
 	// Find the common key prefix between two records, assuming that the first skipLen bytes are the same
@@ -2664,10 +2662,7 @@ struct RedwoodRecordRef {
 		int cmp = key.compareSuffix(rhs.key, keySkip);
 
 		if (cmp == 0) {
-			cmp = version - rhs.version;
-			if (cmp == 0) {
-				cmp = value.compare(rhs.value);
-			}
+			cmp = value.compare(rhs.value);
 		}
 		return cmp;
 	}
@@ -2678,14 +2673,11 @@ struct RedwoodRecordRef {
 		return (key.size() == k.size()) && (key.substr(skipLen) == k.substr(skipLen));
 	}
 
-	bool sameExceptValue(const RedwoodRecordRef& rhs, int skipLen = 0) const {
-		return sameUserKey(rhs.key, skipLen) && version == rhs.version;
-	}
+	bool sameExceptValue(const RedwoodRecordRef& rhs, int skipLen = 0) const { return sameUserKey(rhs.key, skipLen); }
 
 	// TODO: Use SplitStringRef (unless it ends up being slower)
 	KeyRef key;
 	Optional<ValueRef> value;
-	Version version;
 
 	int expectedSize() const { return key.expectedSize() + value.expectedSize(); }
 	int kvBytes() const { return expectedSize(); }
@@ -2769,8 +2761,7 @@ struct RedwoodRecordRef {
 			PREFIX_SOURCE_PREV = 0x80,
 			IS_DELETED = 0x40,
 			HAS_VALUE = 0x20,
-			HAS_VERSION = 0x10,
-			VERSION_DELTA_SIZE = 0xC,
+			// 3 unused bits
 			LENGTHS_FORMAT = 0x03
 		};
 
@@ -2848,61 +2839,6 @@ struct RedwoodRecordRef {
 
 		StringRef getValue() const { return StringRef(data() + getKeySuffixLength(), getValueLength()); }
 
-		bool hasVersion() const { return flags & HAS_VERSION; }
-
-		int getVersionDeltaSizeBytes() const {
-			int code = (flags & VERSION_DELTA_SIZE) >> 2;
-			return VersionDeltaSizes[code];
-		}
-
-		static int getVersionDeltaSizeBytes(Version d) {
-			if (d == 0) {
-				return 0;
-			} else if (d == (int32_t)d) {
-				return sizeof(int32_t);
-			} else if (d == (d & int48_t::MASK)) {
-				return sizeof(int48_t);
-			}
-			return sizeof(int64_t);
-		}
-
-		int getVersionDelta(const uint8_t* r) const {
-			int code = (flags & VERSION_DELTA_SIZE) >> 2;
-			switch (code) {
-			case 0:
-				return 0;
-			case 1:
-				return *(int32_t*)r;
-			case 2:
-				return ((int64_t) static_cast<uint32_t>(reinterpret_cast<const int48_t*>(r)->high) << 16) |
-				       (((int48_t*)r)->low & 0xFFFF);
-			case 3:
-			default:
-				return *(int64_t*)r;
-			}
-		}
-
-		// Version delta size should be 0 before calling
-		int setVersionDelta(Version d, uint8_t* w) {
-			flags |= HAS_VERSION;
-			if (d == 0) {
-				return 0;
-			} else if (d == (int32_t)d) {
-				flags |= 1 << 2;
-				*(uint32_t*)w = d;
-				return sizeof(uint32_t);
-			} else if (d == (d & int48_t::MASK)) {
-				flags |= 2 << 2;
-				((int48_t*)w)->high = d >> 16;
-				((int48_t*)w)->low = d;
-				return sizeof(int48_t);
-			} else {
-				flags |= 3 << 2;
-				*(int64_t*)w = d;
-				return sizeof(int64_t);
-			}
-		}
-
 		bool hasValue() const { return flags & HAS_VALUE; }
 
 		void setPrefixSource(bool val) {
@@ -2926,7 +2862,7 @@ struct RedwoodRecordRef {
 		bool getDeleted() const { return flags & IS_DELETED; }
 
 		RedwoodRecordRef apply(const Partial& cache) {
-			return RedwoodRecordRef(cache, 0, hasValue() ? Optional<ValueRef>(getValue()) : Optional<ValueRef>());
+			return RedwoodRecordRef(cache, hasValue() ? Optional<ValueRef>(getValue()) : Optional<ValueRef>());
 		}
 
 		RedwoodRecordRef apply(const RedwoodRecordRef& base, Arena& arena) const {
@@ -2953,12 +2889,7 @@ struct RedwoodRecordRef {
 				value = r.readString(valueLen);
 			}
 
-			Version v = 0;
-			if (hasVersion()) {
-				v = base.version + getVersionDelta(r.rptr);
-			}
-
-			return RedwoodRecordRef(k, v, value);
+			return RedwoodRecordRef(k, value);
 		}
 
 		RedwoodRecordRef apply(Arena& arena, const RedwoodRecordRef& base, Optional<Partial>& cache) {
@@ -2969,7 +2900,7 @@ struct RedwoodRecordRef {
 		}
 
 		int size() const {
-			int size = 1 + getVersionDeltaSizeBytes();
+			int size = 1;
 			switch (flags & LENGTHS_FORMAT) {
 			case 0:
 				return size + sizeof(LengthFormat0) + LengthFormat0.suffixLength + LengthFormat0.valueLength;
@@ -2994,9 +2925,6 @@ struct RedwoodRecordRef {
 			if (hasValue()) {
 				flagString += "HasValue|";
 			}
-			if (hasVersion()) {
-				flagString += "HasVersion|";
-			}
 			int lengthFormat = flags & LENGTHS_FORMAT;
 
 			Reader r(data());
@@ -3005,13 +2933,12 @@ struct RedwoodRecordRef {
 			int valueLen = getValueLength();
 
 			return format("lengthFormat: %d  totalDeltaSize: %d  flags: %s  prefixLen: %d  keySuffixLen: %d  "
-			              "versionDeltaSizeBytes: %d  valueLen %d  raw: %s",
+			              "valueLen %d  raw: %s",
 			              lengthFormat,
 			              size(),
 			              flagString.c_str(),
 			              prefixLen,
 			              keySuffixLen,
-			              getVersionDeltaSizeBytes(),
 			              valueLen,
 			              StringRef((const uint8_t*)this, size()).toHexString().c_str());
 		}
@@ -3021,16 +2948,16 @@ struct RedwoodRecordRef {
 	// its values, so the Reader does not require the original prev/next ancestors.
 	struct DeltaValueOnly : Delta {
 		RedwoodRecordRef apply(const RedwoodRecordRef& base, Arena& arena) const {
-			return RedwoodRecordRef(KeyRef(), 0, hasValue() ? Optional<ValueRef>(getValue()) : Optional<ValueRef>());
+			return RedwoodRecordRef(KeyRef(), hasValue() ? Optional<ValueRef>(getValue()) : Optional<ValueRef>());
 		}
 
 		RedwoodRecordRef apply(const Partial& cache) {
-			return RedwoodRecordRef(KeyRef(), 0, hasValue() ? Optional<ValueRef>(getValue()) : Optional<ValueRef>());
+			return RedwoodRecordRef(KeyRef(), hasValue() ? Optional<ValueRef>(getValue()) : Optional<ValueRef>());
 		}
 
 		RedwoodRecordRef apply(Arena& arena, const RedwoodRecordRef& base, Optional<Partial>& cache) {
 			cache = KeyRef();
-			return RedwoodRecordRef(KeyRef(), 0, hasValue() ? Optional<ValueRef>(getValue()) : Optional<ValueRef>());
+			return RedwoodRecordRef(KeyRef(), hasValue() ? Optional<ValueRef>(getValue()) : Optional<ValueRef>());
 		}
 	};
 #pragma pack(pop)
@@ -3055,16 +2982,13 @@ struct RedwoodRecordRef {
 		int valueLen = value.present() ? value.get().size() : 0;
 
 		int formatType;
-		int versionBytes;
 		if (worstCaseOverhead) {
 			formatType = Delta::determineLengthFormat(key.size(), key.size(), valueLen);
-			versionBytes = version == 0 ? 0 : Delta::getVersionDeltaSizeBytes(version << 1);
 		} else {
 			formatType = Delta::determineLengthFormat(prefixLen, keySuffixLen, valueLen);
-			versionBytes = version == 0 ? 0 : Delta::getVersionDeltaSizeBytes(version - base.version);
 		}
 
-		return 1 + Delta::LengthFormatSizes[formatType] + keySuffixLen + valueLen + versionBytes;
+		return 1 + Delta::LengthFormatSizes[formatType] + keySuffixLen + valueLen;
 	}
 
 	// commonPrefix between *this and base can be passed if known
@@ -3114,10 +3038,6 @@ struct RedwoodRecordRef {
 			wptr = value.get().copyTo(wptr);
 		}
 
-		if (version != 0) {
-			wptr += d.setVersionDelta(version - base.version, wptr);
-		}
-
 		return wptr - (uint8_t*)&d;
 	}
 
@@ -3136,7 +3056,7 @@ struct RedwoodRecordRef {
 
 	std::string toString(bool leaf = true) const {
 		std::string r;
-		r += format("'%s'@%" PRId64 " => ", key.printable().c_str(), version);
+		r += format("'%s' => ", key.printable().c_str());
 		if (value.present()) {
 			if (leaf) {
 				r += format("'%s'", kvformat(value.get()).c_str());
@@ -3352,7 +3272,7 @@ public:
 
 #pragma pack(push, 1)
 	struct MetaKey {
-		static constexpr int FORMAT_VERSION = 8;
+		static constexpr int FORMAT_VERSION = 9;
 		// This serves as the format version for the entire tree, individual pages will not be versioned
 		uint16_t formatVersion;
 		uint8_t height;
@@ -3682,14 +3602,14 @@ private:
 
 		inline bool equalToSet(ValueRef val) { return isSet() && value == val; }
 
-		inline RedwoodRecordRef toRecord(KeyRef userKey, Version version) const {
+		inline RedwoodRecordRef toRecord(KeyRef userKey) const {
 			// No point in serializing an atomic op, it needs to be coalesced to a real value.
 			ASSERT(!isAtomicOp());
 
 			if (isClear())
-				return RedwoodRecordRef(userKey, version);
+				return RedwoodRecordRef(userKey);
 
-			return RedwoodRecordRef(userKey, version, value);
+			return RedwoodRecordRef(userKey, value);
 		}
 
 		std::string toString() const { return format("op=%d val='%s'", op, printable(value).c_str()); }
@@ -4901,7 +4821,7 @@ private:
 				// Clears of this key will have been processed above by not being erased from the updated page or
 				// excluded from the merge output
 				if (applyBoundaryChange && mBegin.mutation().boundarySet()) {
-					RedwoodRecordRef rec(mBegin.key(), 0, mBegin.mutation().boundaryValue.get());
+					RedwoodRecordRef rec(mBegin.key(), mBegin.mutation().boundaryValue.get());
 					changesMade = true;
 
 					// If updating, add to the page, else add to the output set
@@ -6327,7 +6247,7 @@ ACTOR Future<int> seekAllBTreeCursor(VersionedBTree* btree,
 			state Optional<std::string> val = i->second;
 			debug_printf("Verifying @%" PRId64 " '%s'\n", ver, key.c_str());
 			state Arena arena;
-			wait(cur.seekGTE(RedwoodRecordRef(KeyRef(arena, key), 0), 0));
+			wait(cur.seekGTE(RedwoodRecordRef(KeyRef(arena, key)), 0));
 			bool foundKey = cur.isValid() && cur.get().key == key;
 			bool hasValue = foundKey && cur.get().value.present();
 
@@ -6587,13 +6507,6 @@ RedwoodRecordRef randomRedwoodRecordRef(const std::string& keyBuffer, const std:
 		rec.value = StringRef((uint8_t*)valueBuffer.data(), deterministicRandom()->randomInt(0, valueBuffer.size()));
 	}
 
-	int versionIntSize = deterministicRandom()->randomInt(0, 8) * 8;
-	if (versionIntSize > 0) {
-		--versionIntSize;
-		int64_t max = ((int64_t)1 << versionIntSize) - 1;
-		rec.version = deterministicRandom()->randomInt64(0, max);
-	}
-
 	return rec;
 }
 
@@ -6624,35 +6537,35 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 		ASSERT(r2.getChildPage().begin() != id.begin());
 	}
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), 0, LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), 0, LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
+	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"), 0, LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef("abc"), 0, LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"), LiteralStringRef("")),
+	          RedwoodRecordRef(LiteralStringRef("abc"), LiteralStringRef("")));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"), 0, LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef("abcd"), 0, LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"), LiteralStringRef("")),
+	          RedwoodRecordRef(LiteralStringRef("abcd"), LiteralStringRef("")));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef("abcd"), 2, LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef("abc"), 2, LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(LiteralStringRef("abcd"), LiteralStringRef("")),
+	          RedwoodRecordRef(LiteralStringRef("abc"), LiteralStringRef("")));
 
-	deltaTest(RedwoodRecordRef(std::string(300, 'k'), 2, std::string(1e6, 'v')),
-	          RedwoodRecordRef(std::string(300, 'k'), 2, LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(std::string(300, 'k'), std::string(1e6, 'v')),
+	          RedwoodRecordRef(std::string(300, 'k'), LiteralStringRef("")));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), 2, LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), 1, LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
+	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), 0xffff, LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), 1, LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
+	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), 1, LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), 0xffff, LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
+	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), 0xffffff, LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), 1, LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
+	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), 1, LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), 0xffffff, LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
+	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
 
 	Arena mem;
 	double start;
@@ -6691,9 +6604,6 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 
 	rec1.key = LiteralStringRef("alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf1");
 	rec2.key = LiteralStringRef("alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf234");
-
-	rec1.version = deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max());
-	rec2.version = deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max());
 
 	start = timer();
 	total = 0;
@@ -6770,9 +6680,6 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 		std::string v = deterministicRandom()->randomAlphaNumeric(30);
 		RedwoodRecordRef rec;
 		rec.key = StringRef(arena, k);
-		rec.version = deterministicRandom()->coinflip()
-		                  ? deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max())
-		                  : invalidVersion;
 		if (deterministicRandom()->coinflip()) {
 			rec.value = StringRef(arena, v);
 		}
@@ -6950,9 +6857,6 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 		std::string v = deterministicRandom()->randomAlphaNumeric(30);
 		RedwoodRecordRef rec;
 		rec.key = StringRef(arena, k);
-		rec.version = 0; // deterministicRandom()->coinflip()
-		                 // ? deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max())
-		                 // : invalidVersion;
 		if (deterministicRandom()->coinflip()) {
 			rec.value = StringRef(arena, v);
 		}
