@@ -26,8 +26,25 @@ startDelay = 0
     testsMatching = '/fdbserver/ptxn/test/run_tlog_server'
 
     numProxies = 3
-    numTLogs = 1
-    numStorageTeams = 10
-    numTLogGroups = 4
+    numTLogs = 2
+    numStorageTeams = 40
+    numTLogGroups = 7
     skipCommitValidation = 1
-    numCommits = 10
+    numCommits = 100
+
+[[test]]
+testTitle = 'Team Partitioned TLog Server Test 3'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/run_tlog_server'
+
+    numProxies = 5
+    numTLogs = 2
+    numStorageTeams = 40
+    numTLogGroups = 7
+    skipCommitValidation = 1
+    numCommits = 50
