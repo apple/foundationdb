@@ -100,27 +100,6 @@ struct WorkloadRequest {
 	}
 };
 
-// Configuration details specified in workload test files that change the simulation
-// environment details
-struct TestConfig {
-	int extraDB = 0;
-	int minimumReplication = 0;
-	int minimumRegions = 0;
-	int configureLocked = 0;
-	bool startIncompatibleProcess = false;
-	int logAntiQuorum = -1;
-	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
-	//	0 = "ssd"
-	//	1 = "memory"
-	//	2 = "memory-radixtree-beta"
-	//	3 = "ssd-redwood-experimental"
-	// Requires a comma-separated list of numbers WITHOUT whitespaces
-	std::vector<int> storageEngineExcludeTypes;
-	// Set the maximum TLog version that can be selected for a test
-	// Refer to FDBTypes.h::TLogVersion. Defaults to the maximum supported version.
-	int maxTLogVersion = TLogVersion::MAX_SUPPORTED;
-};
-
 struct TesterInterface {
 	constexpr static FileIdentifier file_identifier = 4465210;
 	RequestStream<WorkloadRequest> recruitments;

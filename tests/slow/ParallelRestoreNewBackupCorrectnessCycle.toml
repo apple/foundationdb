@@ -1,4 +1,5 @@
 # Disable buggify for parallel restore
+#[configuration]
 #buggify=off
 
 [[test]]
