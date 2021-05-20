@@ -2655,7 +2655,7 @@ ACTOR Future<Void> tLogCore(TLogData* self,
 	                                     SERVER_KNOBS->STORAGE_LOGGING_DELAY,
 	                                     &logData->cc,
 	                                     logData->logId.toString() + "/TLogMetrics",
-	                                     [self=self](TraceEvent& te) {
+	                                     [self = self](TraceEvent& te) {
 		                                     StorageBytes sbTlog = self->persistentData->getStorageBytes();
 		                                     te.detail("KvstoreBytesUsed", sbTlog.used);
 		                                     te.detail("KvstoreBytesFree", sbTlog.free);

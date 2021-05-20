@@ -4153,7 +4153,7 @@ ACTOR Future<Void> storageServerTracker(
 					TraceEvent(SevWarn, "FailedServerRemoveKeys", self->distributorId)
 					    .detail("Server", server->id)
 					    .detail("Excluded", worstAddr.toString());
-					wait(delay(0.0)); //Do not throw an error while still inside trackExcludedServers
+					wait(delay(0.0)); // Do not throw an error while still inside trackExcludedServers
 					while (!ddEnabledState->isDDEnabled()) {
 						wait(delay(1.0));
 					}
