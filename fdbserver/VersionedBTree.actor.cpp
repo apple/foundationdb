@@ -6608,6 +6608,8 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 	ASSERT(RedwoodRecordRef::Delta::VersionDeltaSizes[2] == 6);
 	ASSERT(RedwoodRecordRef::Delta::VersionDeltaSizes[3] == 8);
 
+	printf("sizeof(RedwoodRecordRef) = %d\n", sizeof(RedwoodRecordRef));
+
 	// Test pageID stuff.
 	{
 		LogicalPageID ids[] = { 1, 5 };
