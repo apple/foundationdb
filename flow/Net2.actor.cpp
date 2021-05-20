@@ -1299,10 +1299,6 @@ void Net2::run() {
 		while (!ready.empty()) {
 			++countTasks;
 			currentTaskID = ready.top().taskID;
-			if (currentTaskID < minTaskID) {
-				trackAtPriority(currentTaskID, taskBegin);
-				minTaskID = currentTaskID;
-			}
 			priorityMetric = static_cast<int64_t>(currentTaskID);
 			Task* task = ready.top().task;
 			ready.pop();
@@ -1313,6 +1309,11 @@ void Net2::run() {
 				TraceEvent(SevError, "TaskError").error(e);
 			} catch (...) {
 				TraceEvent(SevError, "TaskError").error(unknown_error());
+			}
+
+			if (currentTaskID < minTaskID) {
+				trackAtPriority(currentTaskID, taskBegin);
+				minTaskID = currentTaskID;
 			}
 
 			double tscNow = timestampCounter();

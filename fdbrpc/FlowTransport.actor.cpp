@@ -147,8 +147,13 @@ NetworkMessageReceiver* EndpointMap::get(Endpoint::Token const& token) {
 TaskPriority EndpointMap::getPriority(Endpoint::Token const& token) {
 	uint32_t index = token.second();
 	if (index < data.size() && data[index].token().first() == token.first() &&
-	    ((data[index].token().second() & 0xffffffff00000000LL) | index) == token.second())
-		return static_cast<TaskPriority>(data[index].token().second());
+	    ((data[index].token().second() & 0xffffffff00000000LL) | index) == token.second()) {
+		auto res = static_cast<TaskPriority>(data[index].token().second());
+		// we don't allow this priority to be "misused" for other stuff as we won't even
+		// attempt to find an endpoint if UnknownEndpoint is returned here
+		ASSERT(res != TaskPriority::UnknownEndpoint);
+		return res;
+	}
 	return TaskPriority::UnknownEndpoint;
 }
 
@@ -870,8 +875,18 @@ TransportData::~TransportData() {
 	}
 }
 
-ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader reader, bool inReadSocket) {
-	TaskPriority priority = self->endpoints.getPriority(destination.token);
+// This actor looks up the task associated with an endpoint
+// and sends the message to it. The actual deserialization will
+// be done by that task (see NetworkMessageReceiver).
+ACTOR static void deliver(TransportData* self,
+                          Endpoint destination,
+                          TaskPriority priority,
+                          ArenaReader reader,
+                          bool inReadSocket) {
+	// We want to run the task at the right priority. If the priority
+	// is higher than the current priority (which is ReadSocket) we
+	// can just upgrade. Otherwise we'll context switch so that we
+	// don't block other tasks that might run with a higher priority.
 	if (priority < TaskPriority::ReadSocket || !inReadSocket) {
 		wait(delay(0, priority));
 	} else {
@@ -915,9 +930,6 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 			}
 		}
 	}
-
-	if (inReadSocket)
-		g_network->setCurrentTask(TaskPriority::ReadSocket);
 }
 
 static void scanPackets(TransportData* transport,
@@ -1027,7 +1039,16 @@ static void scanPackets(TransportData* transport,
 		}
 
 		ASSERT(!reader.empty());
-		deliver(transport, Endpoint({ peerAddress }, token), std::move(reader), true);
+		TaskPriority priority = transport->endpoints.getPriority(token);
+		// we ignore packets to unknown endpoints if they're not going to a stream anyways, so we can just
+		// return here. The main place where this seems to happen is if a ReplyPromise is not waited on
+		// long enough.
+		// It would be slightly more elegant/readable to put this if-block into the deliver actor, but if
+		// we have many messages to UnknownEndpoint we want to optimize earlier. As deliver is an actor it
+		// will allocate some state on the heap and this prevents it from doing that.
+		if (priority != TaskPriority::UnknownEndpoint || (token.first() & TOKEN_STREAM_FLAG) != 0) {
+			deliver(transport, Endpoint({ peerAddress }, token), priority, std::move(reader), true);
+		}
 
 		unprocessed_begin = p = p + packetLen;
 	}
@@ -1476,7 +1497,11 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 #endif
 
 	ASSERT(copy.size() > 0);
-	deliver(self, destination, ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)), false);
+	TaskPriority priority = self->endpoints.getPriority(destination.token);
+	if (priority != TaskPriority::UnknownEndpoint || (destination.token.first() & TOKEN_STREAM_FLAG) != 0) {
+		deliver(
+		    self, destination, priority, ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)), false);
+	}
 }
 
 static ReliablePacket* sendPacket(TransportData* self,
