@@ -811,10 +811,10 @@ ACTOR Future<Void> doQueueCommit(Reference<TLogGroupData> self,
 
 ACTOR Future<Void> commitQueue(Reference<TLogGroupData> self) {
 	state Reference<LogGenerationData> logData;
+	state std::vector<Reference<LogGenerationData>> missingFinalCommit;
 
 	loop {
 		int foundCount = 0;
-		state std::vector<Reference<LogGenerationData>> missingFinalCommit;
 		for (auto it : self->id_data) {
 			if (!it.second->stopped) {
 				logData = it.second;
