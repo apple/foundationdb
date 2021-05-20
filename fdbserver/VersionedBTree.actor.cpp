@@ -4388,6 +4388,18 @@ private:
 		state BTreePageIDRef newID;
 		newID.resize(*arena, oldID.size());
 
+		if (REDWOOD_DEBUG) {
+			BTreePage* btPage = (BTreePage*)page->begin();
+			BTreePage::BinaryTree::DecodeCache* cache = (BTreePage::BinaryTree::DecodeCache*)page->userData;
+			debug_printf(
+			    "updateBTreePage(%s, %s) %s\n",
+			    ::toString(oldID).c_str(),
+			    ::toString(writeVersion).c_str(),
+			    cache == nullptr
+			        ? "<noDecodeCache>"
+			        : btPage->toString(true, oldID, writeVersion, cache->lowerBound, cache->upperBound).c_str());
+		}
+
 		if (oldID.size() == 1) {
 			LogicalPageID id = wait(self->m_pager->atomicUpdatePage(oldID.front(), page, writeVersion));
 			newID.front() = id;
@@ -4417,7 +4429,7 @@ private:
 	}
 
 	// Copy page to a new page which shares the same DecodeCache with the old page
-	Reference<ArenaPage> cloneForUpdate(Reference<const ArenaPage> page) {
+	static Reference<ArenaPage> clonePageForUpdate(Reference<const ArenaPage> page) {
 		Reference<ArenaPage> newPage = page->cloneContents();
 
 		BTreePage::BinaryTree::DecodeCache* cache = (BTreePage::BinaryTree::DecodeCache*)page->userData;
@@ -4425,6 +4437,7 @@ private:
 		newPage->userData = cache;
 		newPage->userDataDestructor = [](void* cache) { ((BTreePage::BinaryTree::DecodeCache*)cache)->delref(); };
 
+		debug_printf("cloneForUpdate(%p -> %p  size=%d\n", page->begin(), newPage->begin(), page->size());
 		return newPage;
 	}
 
@@ -4563,21 +4576,41 @@ private:
 
 	struct InternalPageModifier {
 		InternalPageModifier() {}
-		InternalPageModifier(BTreePage* p, BTreePage::BinaryTree::Cursor& c, bool updating, ParentInfo* parentInfo)
-		  : btPage(p), c(c), updating(updating), changesMade(false), parentInfo(parentInfo) {}
+		InternalPageModifier(Reference<const ArenaPage> p,
+		                     BTreePage::BinaryTree::Cursor& c,
+		                     bool updating,
+		                     ParentInfo* parentInfo)
+		  : page(p), clonedPage(false), cursor(c), updating(updating), changesMade(false), parentInfo(parentInfo) {}
 
+		// Whether updating the existing page is allowed
 		bool updating;
-		BTreePage* btPage;
-		BTreePage::BinaryTree::Cursor c;
+		Reference<const ArenaPage> page;
+
+		// Whether or not page has been cloned for update
+		bool clonedPage;
+
+		BTreePage::BinaryTree::Cursor cursor;
 		Standalone<VectorRef<RedwoodRecordRef>> rebuild;
+
+		// Whether there are any changes to the page, either made in place or staged in rebuild
 		bool changesMade;
 		ParentInfo* parentInfo;
 
+		BTreePage* btPage() { return (BTreePage*)page->begin(); }
+
 		bool empty() const {
 			if (updating) {
-				return c.tree->numItems == 0;
+				return cursor.tree->numItems == 0;
 			} else {
 				return rebuild.empty();
+			}
+		}
+
+		void cloneForUpdate() {
+			if (!clonedPage) {
+				page = clonePageForUpdate(page);
+				cursor.switchTree(&btPage()->tree());
+				clonedPage = true;
 			}
 		}
 
@@ -4586,14 +4619,19 @@ private:
 		void insert(BTreePage::BinaryTree::Cursor end, const VectorRef<RedwoodRecordRef>& recs) {
 			int i = 0;
 			if (updating) {
+				// Update must be done in the new tree, not the original tree where the end cursor will be from
+				end.tree = cursor.tree;
+				end.switchTree(cursor.tree);
+
 				// TODO: insert recs in a random order to avoid new subtree being entirely right child links
 				while (i != recs.size()) {
 					const RedwoodRecordRef& rec = recs[i];
 					debug_printf("internal page (updating) insert: %s\n", rec.toString(false).c_str());
 
-					if (!c.insert(rec)) {
+					if (!cursor.insert(rec)) {
 						debug_printf("internal page: failed to insert %s, switching to rebuild\n",
 						             rec.toString(false).c_str());
+
 						// Update failed, so populate rebuild vector with everything up to but not including end, which
 						// may include items from recs that were already added.
 						auto c = end;
@@ -4608,7 +4646,7 @@ private:
 						updating = false;
 						break;
 					}
-					btPage->kvBytes += rec.kvBytes();
+					btPage()->kvBytes += rec.kvBytes();
 					++i;
 				}
 			}
@@ -4651,11 +4689,20 @@ private:
 			if (u.childrenChanged) {
 				if (updating) {
 					auto c = u.cBegin;
+
+					if (c != u.cEnd) {
+						cloneForUpdate();
+						// must point c to the tree to erase from
+						c.tree = cursor.tree;
+						c.switchTree(cursor.tree);
+					}
+
 					while (c != u.cEnd) {
 						debug_printf("internal page (updating) erasing: %s\n", c.get().toString(false).c_str());
-						btPage->kvBytes -= c.get().kvBytes();
+						btPage()->kvBytes -= c.get().kvBytes();
 						c.erase();
 					}
+
 					// [cBegin, cEnd) is now erased, and cBegin is invalid, so cEnd represents the end
 					// of the range that comes before any part of newLinks that can't be added if there
 					// is not enough space.
@@ -4670,6 +4717,9 @@ private:
 				changesMade = true;
 			} else {
 
+				// If this was an in-place update, where the child page IDs do not change, notify the
+				// parentInfo that those pages have been updated so it can possibly eliminate their
+				// second writes later.
 				if (u.inPlaceUpdate) {
 					for (auto id : u.decodeLowerBound.getChildPage()) {
 						parentInfo->pageUpdated(id);
@@ -4686,6 +4736,8 @@ private:
 				                                !nextBoundary->sameExceptValue(u.expectedUpperBound.get()))) {
 					RedwoodRecordRef rec = u.expectedUpperBound.get().withoutValue();
 					debug_printf("applyUpdate adding dummy record %s\n", rec.toString(false).c_str());
+
+					cloneForUpdate();
 					insert(u.cEnd, { &rec, 1 });
 					changesMade = true;
 				}
@@ -4729,10 +4781,14 @@ private:
 		state Reference<FlowLock> commitReadLock = self->m_commitReadLock;
 		wait(commitReadLock->take());
 		state FlowLock::Releaser readLock(*commitReadLock);
-		state bool fromCache = false;
-		state Reference<const ArenaPage> page = wait(
-		    readPage(snapshot, rootID, update->decodeLowerBound, update->decodeUpperBound, false, false, &fromCache));
+		state Reference<const ArenaPage> page =
+		    wait(readPage(snapshot, rootID, update->decodeLowerBound, update->decodeUpperBound, false, true));
 		readLock.release();
+
+		// If in-place modification to the page is done, a copy of the page will be made in pageCopy
+		// and the cursor will be pointed to it.  The original page variable must stay in scope because
+		// there could be RedwoodRecordRefs referencing its arenas.
+		state Reference<const ArenaPage> pageCopy;
 
 		state BTreePage* btPage = (BTreePage*)page->begin();
 		ASSERT(isLeaf == btPage->isLeaf());
@@ -4741,15 +4797,8 @@ private:
 		// TODO:  Decide if it is okay to update if the subtree boundaries are expanded.  It can result in
 		// records in a DeltaTree being outside its decode boundary range, which isn't actually invalid
 		// though it is awkward to reason about.
+		// TryToUpdate indicates insert and erase operations should be tried on the existing page first
 		state bool tryToUpdate = btPage->tree().numItems > 0 && update->boundariesNormal();
-
-		// If trying to update the page and the page reference points into the cache,
-		// we need to clone it so we don't modify the original version of the page.
-		if (tryToUpdate && fromCache) {
-			page = self->cloneForUpdate(page);
-			btPage = (BTreePage*)page->begin();
-			fromCache = false;
-		}
 
 		debug_printf(
 		    "%s commitSubtree(): %s\n",
@@ -4834,6 +4883,15 @@ private:
 							debug_printf("%s Erasing %s [existing, boundary start]\n",
 							             context.c_str(),
 							             cursor.get().toString().c_str());
+
+							// Copy page for modification if not already copied
+							if (!pageCopy.isValid()) {
+								pageCopy = clonePageForUpdate(page);
+								btPage = (BTreePage*)pageCopy->begin();
+								cursor.tree = &btPage->tree();
+								cursor.switchTree(&btPage->tree());
+							}
+
 							btPage->kvBytes -= cursor.get().kvBytes();
 							cursor.erase();
 						} else {
@@ -4856,6 +4914,14 @@ private:
 
 					// If updating, add to the page, else add to the output set
 					if (updating) {
+						// Copy page for modification if not already copied
+						if (!pageCopy.isValid()) {
+							pageCopy = clonePageForUpdate(page);
+							btPage = (BTreePage*)pageCopy->begin();
+							cursor.tree = &btPage->tree();
+							cursor.switchTree(&btPage->tree());
+						}
+
 						if (cursor.insert(rec, update->skipLen, maxHeightAllowed)) {
 							btPage->kvBytes += rec.kvBytes();
 							debug_printf(
@@ -4911,6 +4977,15 @@ private:
 							debug_printf("%s Erasing %s [existing, boundary start]\n",
 							             context.c_str(),
 							             cursor.get().toString().c_str());
+
+							// Copy page for modification if not already copied
+							if (!pageCopy.isValid()) {
+								pageCopy = clonePageForUpdate(page);
+								btPage = (BTreePage*)pageCopy->begin();
+								cursor.tree = &btPage->tree();
+								cursor.switchTree(&btPage->tree());
+							}
+
 							btPage->kvBytes -= cursor.get().kvBytes();
 							cursor.erase();
 							changesMade = true;
@@ -4947,6 +5022,15 @@ private:
 							    "%s Erasing %s and beyond [existing, matches changed upper mutation boundary]\n",
 							    context.c_str(),
 							    cursor.get().toString().c_str());
+
+							// Copy page for modification if not already copied
+							if (!pageCopy.isValid()) {
+								pageCopy = clonePageForUpdate(page);
+								btPage = (BTreePage*)pageCopy->begin();
+								cursor.tree = &btPage->tree();
+								cursor.switchTree(&btPage->tree());
+							}
+
 							btPage->kvBytes -= cursor.get().kvBytes();
 							cursor.erase();
 						} else {
@@ -4988,7 +5072,7 @@ private:
 				} else {
 					// Otherwise update it.
 					BTreePageIDRef newID = wait(self->updateBTreePage(
-					    self, rootID, &update->newLinks.arena(), page.castTo<ArenaPage>(), writeVersion));
+					    self, rootID, &update->newLinks.arena(), pageCopy.castTo<ArenaPage>(), writeVersion));
 
 					update->updatedInPlace(newID, btPage, newID.size() * self->m_blockSize);
 					debug_printf(
@@ -5206,13 +5290,13 @@ private:
 			// Note:  parentInfo could be invalid after a wait and must be re-initialized.
 			// All uses below occur before waits so no reinitialization is done.
 			state ParentInfo* parentInfo = &self->childUpdateTracker[rootID.front()];
-			state InternalPageModifier m(btPage, cursor, tryToUpdate, parentInfo);
+			state InternalPageModifier modifier(page, cursor, tryToUpdate, parentInfo);
 
 			// Apply the possible changes for each subtree range recursed to, except the last one.
 			// For each range, the expected next record, if any, is checked against the first boundary
 			// of the next range, if any.
 			for (int i = 0, iEnd = slices.size() - 1; i < iEnd; ++i) {
-				m.applyUpdate(*slices[i], slices[i + 1]->getFirstBoundary());
+				modifier.applyUpdate(*slices[i], slices[i + 1]->getFirstBoundary());
 			}
 
 			// The expected next record for the final range is checked against one of the upper boundaries passed to
@@ -5222,39 +5306,41 @@ private:
 			// sole purpose of adding a dummy upper bound record.
 			debug_printf("%s Applying final child range update. changesMade=%d  Parent update is: %s\n",
 			             context.c_str(),
-			             m.changesMade,
+			             modifier.changesMade,
 			             update->toString().c_str());
-			m.applyUpdate(*slices.back(), m.changesMade ? &update->subtreeUpperBound : &update->decodeUpperBound);
+			modifier.applyUpdate(*slices.back(),
+			                     modifier.changesMade ? &update->subtreeUpperBound : &update->decodeUpperBound);
 
 			state bool detachChildren = (parentInfo->count > 2);
 			state bool forceUpdate = false;
 
 			// If no changes were made, but we should rewrite it to point directly to remapped child pages
-			if (!m.changesMade && detachChildren) {
+			if (!modifier.changesMade && detachChildren) {
 				debug_printf(
 				    "%s Internal page forced rewrite because at least %d children have been updated in-place.\n",
 				    context.c_str(),
 				    parentInfo->count);
-				forceUpdate = true;
-				if (!m.updating) {
-					m.updating = true;
 
-					// Copy the page before modification if the page references the cache
-					if (fromCache) {
-						page = self->cloneForUpdate(page);
-						btPage = (BTreePage*)page->begin();
-						m.btPage = btPage;
-						cursor.tree = &btPage->tree();
-						m.c.tree = cursor.tree;
-						fromCache = false;
-					}
-				}
+				forceUpdate = true;
+				modifier.updating = true;
+
+				// Make sure the modifier cloned the page so we can update the child links in-place below.
+				modifier.cloneForUpdate();
+
 				++g_redwoodMetrics.level(btPage->height).forceUpdate;
 			}
 
+			// If the modifier cloned the page for updating, then update our local pageCopy, btPage, and cursor
+			if (modifier.clonedPage) {
+				pageCopy = modifier.page;
+				btPage = modifier.btPage();
+				cursor.tree = modifier.cursor.tree;
+				cursor.switchTree(modifier.cursor.tree);
+			}
+
 			// If page contents have changed
-			if (m.changesMade || forceUpdate) {
-				if (m.empty()) {
+			if (modifier.changesMade || forceUpdate) {
+				if (modifier.empty()) {
 					update->cleared();
 					debug_printf("%s All internal page children were deleted so deleting this page too, returning %s\n",
 					             context.c_str(),
@@ -5262,7 +5348,7 @@ private:
 					self->freeBTreePage(rootID, writeVersion);
 					self->childUpdateTracker.erase(rootID.front());
 				} else {
-					if (m.updating) {
+					if (modifier.updating) {
 						// Page was updated in place (or being forced to be updated in place to update child page ids)
 						debug_printf(
 						    "%s Internal page modified in-place tryToUpdate=%d forceUpdate=%d detachChildren=%d\n",
@@ -5301,7 +5387,7 @@ private:
 						}
 
 						BTreePageIDRef newID = wait(self->updateBTreePage(
-						    self, rootID, &update->newLinks.arena(), page.castTo<ArenaPage>(), writeVersion));
+						    self, rootID, &update->newLinks.arena(), pageCopy.castTo<ArenaPage>(), writeVersion));
 						debug_printf(
 						    "%s commitSubtree(): Internal page updated in-place at version %s, new contents: %s\n",
 						    context.c_str(),
@@ -5325,7 +5411,7 @@ private:
 
 						if (detachChildren) {
 							auto& stats = g_redwoodMetrics.level(btPage->height);
-							for (auto& rec : m.rebuild) {
+							for (auto& rec : modifier.rebuild) {
 								if (rec.value.present()) {
 									BTreePageIDRef oldPages = rec.getChildPage();
 									BTreePageIDRef newPages;
@@ -5336,7 +5422,7 @@ private:
 											if (newID != invalidLogicalPageID) {
 												// Rebuild record values reference original page memory so make a copy
 												if (newPages.empty()) {
-													newPages = BTreePageIDRef(m.rebuild.arena(), oldPages);
+													newPages = BTreePageIDRef(modifier.rebuild.arena(), oldPages);
 													rec.setChildPage(newPages);
 												}
 												debug_printf("%s Detach updated %u -> %u\n", context.c_str(), p, newID);
@@ -5354,7 +5440,7 @@ private:
 						    wait(writePages(self,
 						                    &update->subtreeLowerBound,
 						                    &update->subtreeUpperBound,
-						                    m.rebuild,
+						                    modifier.rebuild,
 						                    btPage->height,
 						                    writeVersion,
 						                    rootID));

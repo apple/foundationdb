@@ -1046,6 +1046,10 @@ public:
 
 		Cursor(DecodeCache* cache, DeltaTree2* tree) : cache(cache), tree(tree), nodeIndex(-1) {}
 
+		Cursor(DecodeCache* cache, DeltaTree2* tree, int nodeIndex) : cache(cache), tree(tree), nodeIndex(nodeIndex) {
+			updateItem();
+		}
+
 		int rootIndex() {
 			if (!cache->empty()) {
 				return 0;
@@ -1108,6 +1112,13 @@ public:
 		// If the cursor is moved, the reference object returned will be modified to
 		// the cursor's new current item.
 		const T& get() const { return item; }
+
+		void switchTree(DeltaTree2* newTree) {
+			tree = newTree;
+			if (nodeIndex != -1) {
+				updateItem();
+			}
+		}
 
 		// If the cursor is valid, return a reference to the cursor's internal T.
 		// Otherwise, returns a reference to the cache's upper boundary.
@@ -1351,6 +1362,7 @@ public:
 		// Returns true if successful, false if k does not fit in the space available
 		// or if k is already in the tree (and was not already deleted).
 		// Insertion on an empty tree returns false as well.
+		// Insert does NOT change the cursor position.
 		bool insert(const T& k, int skipLen = 0, int maxHeightAllowed = std::numeric_limits<int>::max()) {
 			deltatree_printf("insert %s\n", k.toString().c_str());
 
