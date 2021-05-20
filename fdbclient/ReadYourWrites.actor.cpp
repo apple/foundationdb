@@ -84,6 +84,9 @@ public:
 	static Future<Optional<Value>> read(ReadYourWritesTransaction* ryw, GetValueReq read, Iter* it) {
 		// This overload is required to provide postcondition: it->extractWriteMapIterator().segmentContains(read.key)
 
+		if (ryw->options.bypassUnreadable) {
+			it->bypassUnreadableProtection();
+		}
 		it->skip(read.key);
 		state bool dependent = it->is_dependent();
 		if (it->is_kv()) {
@@ -2185,6 +2188,11 @@ void ReadYourWritesTransaction::setOptionImpl(FDBTransactionOptions::Option opti
 	case FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED:
 		validateOptionValue(value, false);
 		options.specialKeySpaceRelaxed = true;
+		break;
+	case FDBTransactionOptions::BYPASS_UNREADABLE:
+		validateOptionValue(value, false);
+		options.bypassUnreadable = true;
+		break;
 	default:
 		break;
 	}

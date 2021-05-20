@@ -42,7 +42,7 @@ const RYWIterator::SEGMENT_TYPE RYWIterator::typeMap[12] = {
 };
 
 RYWIterator::SEGMENT_TYPE RYWIterator::type() {
-	if (is_unreadable())
+	if (is_unreadable() && !bypassUnreadable)
 		throw accessed_unreadable();
 
 	return typeMap[writes.type() * 3 + cache.type()];
@@ -72,7 +72,7 @@ ExtStringRef RYWIterator::endKey() {
 }
 
 const KeyValueRef* RYWIterator::kv(Arena& arena) {
-	if (is_unreadable())
+	if (is_unreadable() && !bypassUnreadable)
 		throw accessed_unreadable();
 
 	if (writes.is_unmodified_range()) {

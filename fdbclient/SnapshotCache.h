@@ -203,6 +203,7 @@ public:
 		bool is_empty_range() { return type() == EMPTY_RANGE; }
 		bool is_dependent() { return false; }
 		bool is_unreadable() { return false; }
+		void bypassUnreadableProtection() {}
 
 		ExtStringRef beginKey() {
 			if (offset == 0) {

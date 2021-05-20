@@ -28,7 +28,7 @@
 class RYWIterator {
 public:
 	RYWIterator(SnapshotCache* snapshotCache, WriteMap* writeMap)
-	  : cache(snapshotCache), writes(writeMap), begin_key_cmp(0), end_key_cmp(0) {}
+	  : cache(snapshotCache), writes(writeMap), begin_key_cmp(0), end_key_cmp(0), bypassUnreadable(false) {}
 
 	enum SEGMENT_TYPE { UNKNOWN_RANGE, EMPTY_RANGE, KV };
 	static const SEGMENT_TYPE typeMap[12];
@@ -58,6 +58,8 @@ public:
 
 	void skipContiguousBack(KeyRef key);
 
+	void bypassUnreadableProtection() { bypassUnreadable = true; }
+
 	WriteMap::iterator& extractWriteMapIterator();
 	// Really this should return an iterator by value, but for performance it's convenient to actually grab the internal
 	// one.  Consider copying the return value if performance isn't critical. If you modify the returned iterator, it
@@ -71,6 +73,8 @@ private:
 	SnapshotCache::iterator cache;
 	WriteMap::iterator writes;
 	KeyValueRef temp;
+	bool bypassUnreadable; // When set, allows read from sections of keyspace that have become unreadable because of
+	                       // versionstamp operations
 
 	void updateCmp();
 };
