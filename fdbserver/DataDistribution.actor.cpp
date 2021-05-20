@@ -615,6 +615,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	std::map<UID, Reference<TCServerInfo>> server_info;
 	std::map<UID, Reference<TCServerInfo>> tss_info_by_pair;
 	std::map<UID, Reference<TCServerInfo>> server_and_tss_info; // TODO could replace this with an efficient way to do a read-only concatenation of 2 data structures? 
+	std::map<Key, std::vector<Reference<TCServerInfo>>> pid2server_info; // some process may serve as multiple storage servers
 	std::map<Key, int> lagging_zones; // zone to number of storage servers lagging
 	AsyncVar<bool> disableFailingLaggingServers;
 
@@ -2458,7 +2459,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    processClass,
 		    includedDCs.empty() ||
 		        std::find(includedDCs.begin(), includedDCs.end(), newServer.locality.dcId()) != includedDCs.end(),
-		    storageServerSet);
+		    storageServerSet,
+		    addedVersion);
+		ASSERT(r->lastKnownInterface.locality.processId().present());
+		StringRef pid = r->lastKnownInterface.locality.processId().get();
+		pid2server_info[pid].push_back(r);
 
 		if (newServer.isTss()) {
 			tss_info_by_pair[newServer.tssPairID.get()] = r;
@@ -2668,6 +2673,19 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		// ASSERT( !shardsAffectedByTeamFailure->getServersForTeam( t ) for all t in teams that contain removedServer )
 		Reference<TCServerInfo> removedServerInfo = server_info[removedServer];
+		// Step: Remove TCServerInfo from pid2server_info
+		ASSERT(removedServerInfo->lastKnownInterface.locality.processId().present());
+		StringRef pid = removedServerInfo->lastKnownInterface.locality.processId().get();
+		auto& info_vec = pid2server_info[pid];
+		for (size_t i = 0; i < info_vec.size(); ++i) {
+			if (info_vec[i] == removedServerInfo) {
+				info_vec[i--] = info_vec.back();
+				info_vec.pop_back();
+			}
+		}
+		if (info_vec.size() == 0) {
+			pid2server_info.erase(pid);
+		}
 
 		// Step: Remove server team that relate to removedServer
 		// Find all servers with which the removedServer shares teams
@@ -3796,6 +3814,152 @@ ACTOR Future<vector<std::pair<StorageServerInterface, ProcessClass>>> getServerL
 	return results;
 }
 
+// Iterator over each storage process to do storage wiggle
+ACTOR Future<Void> perpetualStorageWiggleIterator(FutureStream<Void> stopSignal,
+                                                  FutureStream<Void> finishStorageWiggleSignal,
+                                                  DDTeamCollection* teamCollection) {
+	state ReadYourWritesTransaction tr(teamCollection->cx);
+
+	loop choose {
+		when(waitNext(stopSignal)) { break; }
+		when(waitNext(finishStorageWiggleSignal)) {
+			// set the next SS UID
+			tr.reset();
+			loop {
+				try {
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					Optional<Value> value = wait(tr.get(wigglingStorageServerKey));
+					if (value.present()) {
+						auto nextIt = teamCollection->pid2server_info.upper_bound(value.get());
+						if (nextIt == teamCollection->pid2server_info.end()) {
+							tr.set(wigglingStorageServerKey, teamCollection->pid2server_info.begin()->first);
+						} else {
+							tr.set(wigglingStorageServerKey, nextIt->first);
+						}
+					} else {
+						// initialize the value of to the smallest SS ID
+						tr.set(wigglingStorageServerKey, teamCollection->pid2server_info.begin()->first);
+					}
+					wait(tr.commit());
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+		}
+	}
+
+	return Void();
+}
+
+ACTOR Future<Future<Void>> watchPerpetualStoragePIDChange(Database cx, Promise<Value> pid) {
+	state ReadYourWritesTransaction tr(cx);
+	state Future<Void> watchFuture;
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Optional<Standalone<StringRef>> value = wait(tr.get(wigglingStorageServerKey));
+			if (value.present()) {
+				pid.send(value.get());
+			}
+			watchFuture = tr.watch(wigglingStorageServerKey);
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return watchFuture;
+}
+// Watch the value of current wiggling storage process and do wiggling works
+ACTOR Future<Void> perpetualStorageWiggler(FutureStream<Void> stopSignal,
+                                           PromiseStream<Void> finishStorageWiggleSignal,
+                                           DDTeamCollection* self,
+                                           const DDEnabledState* ddEnabledState) {
+	state Promise<Value> pidPromise;
+	state Future<Void> watchFuture;
+	wait(store(watchFuture, watchPerpetualStoragePIDChange(self->cx, pidPromise)));
+
+	loop choose {
+		when(waitNext(stopSignal)) { break; }
+		when(wait(watchFuture)) { wait(store(watchFuture, watchPerpetualStoragePIDChange(self->cx, pidPromise))); }
+		when(state Value pid = wait(pidPromise.getFuture())) {
+			pidPromise.reset();
+			if (self->pid2server_info.count(pid) != 0) {
+				std::vector<Future<Void>> moveFutures;
+				for (auto& info : self->pid2server_info[pid]) {
+					AddressExclusion addr(info->lastKnownInterface.address().ip);
+					if (self->excludedServers.count(addr) &&
+					    self->excludedServers.get(addr) != DDTeamCollection::Status::NONE) {
+						continue; // don't override the value set by actor trackExcludedServer
+					}
+					self->excludedServers.set(addr, DDTeamCollection::Status::WIGGLING);
+					moveFutures.push_back(
+					    waitForAllDataRemoved(self->cx, info->lastKnownInterface.id(), info->addedVersion, self));
+				}
+				// wait for all data is moved from this process
+				if (!moveFutures.empty()) {
+					self->restartRecruiting.trigger();
+					wait(waitForAllReady(moveFutures));
+				}
+
+				// re-include wiggling storage servers
+				for (auto& info : self->pid2server_info[pid]) {
+					AddressExclusion addr(info->lastKnownInterface.address().ip);
+					if (!self->excludedServers.count(addr) ||
+					    self->excludedServers.get(addr) != DDTeamCollection::Status::WIGGLING) {
+						continue;
+					}
+					self->excludedServers.set(addr, DDTeamCollection::Status::NONE);
+				}
+			}
+
+			// finish Wiggle this process
+			finishStorageWiggleSignal.send(Void());
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollection,
+                                                 const DDEnabledState* ddEnabledState) {
+	state int speed = 0;
+	state PromiseStream<Void> stopWiggleSignal;
+	state PromiseStream<Void> finishStorageWiggleSignal;
+	state SignalableActorCollection collection;
+
+	loop {
+		state ReadYourWritesTransaction tr(teamCollection->cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				Optional<Standalone<StringRef>> value = wait(tr.get(perpetualStorageWiggleKey));
+
+				if (value.present()) {
+					speed = std::stoi(value.get().toString());
+				}
+				state Future<Void> watchFuture = tr.watch(perpetualStorageWiggleKey);
+				wait(tr.commit());
+
+				ASSERT(speed == 1 || speed == 0);
+				if (speed == 1) {
+					collection.add(perpetualStorageWiggleIterator(
+					    stopWiggleSignal.getFuture(), finishStorageWiggleSignal.getFuture(), teamCollection));
+					finishStorageWiggleSignal.send(Void());
+					TraceEvent("PerpetualStorageWiggleOpen", teamCollection->distributorId);
+				} else {
+					stopWiggleSignal.send(Void());
+					wait(collection.signalAndReset());
+					TraceEvent("PerpetualStorageWiggleClose", teamCollection->distributorId);
+				}
+				wait(watchFuture);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+}
 // The serverList system keyspace keeps the StorageServerInterface for each serverID. Storage server's storeType
 // and serverID are decided by the server's filename. By parsing storage server file's filename on each disk, process on
 // each machine creates the TCServer with the correct serverID and StorageServerInterface.
@@ -5130,6 +5294,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(Reference<DDTeamCollection> te
 		self->addActor.send(trackExcludedServers(self));
 		self->addActor.send(monitorHealthyTeams(self));
 		self->addActor.send(waitHealthyZoneChange(self));
+		self->addActor.send(monitorPerpetualStorageWiggle(self, ddEnabledState));
 
 		// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
 
