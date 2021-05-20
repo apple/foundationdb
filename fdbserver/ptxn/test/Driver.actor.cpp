@@ -132,7 +132,7 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 		const StorageTeamID& storageTeamID = context->storageTeamIDs[i];
 		TLogGroup& tLogGroup = context->tLogGroups[index];
 		context->storageTeamIDTLogGroupIDMapper[storageTeamID] = tLogGroup.logGroupId;
-		// Ignore tags for now.
+		// TODO: support tags when implementing pop
 		tLogGroup.storageTeams[storageTeamID] = {};
 		++index;
 		index %= context->tLogGroups.size();

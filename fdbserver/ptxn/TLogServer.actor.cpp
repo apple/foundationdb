@@ -561,10 +561,6 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	    // These are initialized differently on init() or recovery
 	    stopped(false), initialized(false), version(0), queueCommittingVersion(0), locality(locality),
 	    recoveryCount(epoch) {
-
-		version.initMetric(LiteralStringRef("TLog.Version"), cc.id);
-		queueCommittedVersion.initMetric(LiteralStringRef("TLog.QueueCommittedVersion"), cc.id);
-
 		specialCounter(cc, "Version", [this]() { return this->version.get(); });
 		specialCounter(cc, "QueueCommittedVersion", [this]() { return this->queueCommittedVersion.get(); });
 		specialCounter(cc, "KnownCommittedVersion", [this]() { return this->knownCommittedVersion; });
@@ -1049,10 +1045,10 @@ ACTOR Future<Void> rejoinMasters(Reference<TLogServerData> self,
 ACTOR Future<Void> serveTLogInterface_PassivelyPull(
     Reference<TLogServerData> self,
     TLogInterface_PassivelyPull tli,
-    std::unordered_map<StorageTeamID, Reference<LogGenerationData>> activeGeneration) {
-	ASSERT(activeGeneration.size());
+    std::shared_ptr<std::unordered_map<StorageTeamID, Reference<LogGenerationData>>> activeGeneration) {
+	ASSERT(activeGeneration->size());
 
-	state UID recruitmentID = activeGeneration.begin()->second->recruitmentID;
+	state UID recruitmentID = activeGeneration->begin()->second->recruitmentID;
 	state Future<Void> dbInfoChange = Void();
 	loop choose {
 		when(wait(dbInfoChange)) {
@@ -1067,19 +1063,19 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 				}
 			}
 			if (found && self->dbInfo->get().logSystemConfig.recruitmentID == recruitmentID) {
-				for (auto& logData : activeGeneration) {
+				for (auto& logData : *activeGeneration) {
 					logData.second->logSystem->set(ILogSystem::fromServerDBInfo(self->dbgid, self->dbInfo->get()));
 				}
 			} else {
-				for (auto& logData : activeGeneration) {
+				for (auto& logData : *activeGeneration) {
 					logData.second->logSystem->set(Reference<ILogSystem>());
 				}
 			}
 		}
 		when(TLogCommitRequest req = waitNext(tli.commit.getFuture())) {
-			auto tlogGroup = activeGeneration.find(req.storageTeamID);
-			TEST(tlogGroup == activeGeneration.end()); // TLog group not found
-			if (tlogGroup == activeGeneration.end()) {
+			auto tlogGroup = activeGeneration->find(req.storageTeamID);
+			TEST(tlogGroup == activeGeneration->end()); // TLog group not found
+			if (tlogGroup == activeGeneration->end()) {
 				req.reply.sendError(tlog_group_not_found());
 				continue;
 			}
@@ -1116,9 +1112,10 @@ void removeLog(Reference<LogGenerationData> logData) {
 	}
 }
 
-ACTOR Future<Void> tLogCore(Reference<TLogServerData> self,
-                            std::unordered_map<StorageTeamID, Reference<LogGenerationData>> activeGeneration,
-                            TLogInterface_PassivelyPull tli) {
+ACTOR Future<Void> tLogCore(
+    Reference<TLogServerData> self,
+    std::shared_ptr<std::unordered_map<StorageTeamID, Reference<LogGenerationData>>> activeGeneration,
+    TLogInterface_PassivelyPull tli) {
 	if (self->removed.isReady()) {
 		wait(delay(0)); // to avoid iterator invalidation in restorePersistentState when removed is already ready
 		ASSERT(self->removed.isError());
@@ -1127,7 +1124,7 @@ ACTOR Future<Void> tLogCore(Reference<TLogServerData> self,
 			throw self->removed.getError();
 		}
 
-		for (auto& logGroup : activeGeneration) {
+		for (auto& logGroup : *activeGeneration) {
 			removeLog(logGroup.second);
 		}
 		return Void();
@@ -1135,7 +1132,7 @@ ACTOR Future<Void> tLogCore(Reference<TLogServerData> self,
 
 	self->addActors.send(self->removed);
 	// FIXME: update tlogMetrics to include new information, or possibly only have one copy for the shared instance
-	for (auto& logGroup : activeGeneration) {
+	for (auto& logGroup : *activeGeneration) {
 		self->sharedActors.send(traceCounters("TLogMetrics",
 		                                      logGroup.second->logId,
 		                                      SERVER_KNOBS->STORAGE_LOGGING_DELAY,
@@ -1156,7 +1153,7 @@ ACTOR Future<Void> tLogCore(Reference<TLogServerData> self,
 	} catch (Error& e) {
 		if (e.code() != error_code_worker_removed)
 			throw;
-		for (auto& logGroup : activeGeneration) {
+		for (auto& logGroup : *activeGeneration) {
 			removeLog(logGroup.second);
 		}
 		return Void();
@@ -1323,7 +1320,8 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializeTLogReque
 	self->removed = rejoinMasters(self, recruited, req.epoch, Future<Void>(Void()), req.isPrimary);
 
 	state std::vector<Future<Void>> tlogGroupStarts;
-	state std::unordered_map<StorageTeamID, Reference<LogGenerationData>> activeGeneration;
+	state std::shared_ptr<std::unordered_map<StorageTeamID, Reference<LogGenerationData>>> activeGeneration =
+	    std::make_shared<std::unordered_map<StorageTeamID, Reference<LogGenerationData>>>();
 	for (auto& group : req.tlogGroups) {
 		ASSERT(self->tlogGroups.count(group.logGroupId));
 		Reference<TLogGroupData> tlogGroupData = self->tlogGroups[group.logGroupId];
@@ -1340,8 +1338,8 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializeTLogReque
 
 		tlogGroupData->id_data[recruited.id()] = newGenerationData;
 		newGenerationData->removed = self->removed;
-		for (auto& storageTeam : newGenerationData->storageTeams) {
-			activeGeneration[storageTeam.first] = newGenerationData;
+		for (auto& storageTeam : group.storageTeams) {
+			activeGeneration->emplace(storageTeam.first, newGenerationData);
 		}
 		tlogGroupStarts.push_back(tlogGroupStart(tlogGroupData, newGenerationData));
 	}
