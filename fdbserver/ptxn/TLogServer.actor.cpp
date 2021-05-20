@@ -474,6 +474,7 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 
 		StorageTeamID storageTeamId;
 		std::vector<Tag> tags;
+		// TODO: change to std::map so that they are sorted by version
 		std::deque<std::tuple<Version, StringRef, Arena>> versionMessages;
 
 		StorageTeamData(StorageTeamID storageTeam, std::vector<Tag> tags) : storageTeamId(storageTeam), tags(tags) {}
@@ -957,16 +958,13 @@ ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
 ACTOR Future<Void> tLogPeekMessages(Reference<TLogGroupData> self,
                                     TLogPeekRequest req,
                                     Reference<LogGenerationData> logData) {
-	TLogPeekReply reply;
-	reply.maxKnownVersion = logData->version.get();
-	reply.minKnownCommittedVersion = logData->minKnownCommittedVersion;
-	// reply.onlySpilled = false;
+	state TLogPeekReply reply;
+	state TLogStorageServerMessageSerializer serializer(req.storageTeamID);
+	state Reference<LogGenerationData::StorageTeamData> storageTeamData = logData->getStorageTeamData(req.storageTeamID);
 
-	Reference<LogGenerationData::StorageTeamData> storageTeamData = logData->getStorageTeamData(req.storageTeamID);
-	TLogStorageServerMessageSerializer serializer(req.storageTeamID);
 	if (storageTeamData) {
 		if (storageTeamData->versionMessages.empty() ||
-		    storageTeamData->versionMessages.back().first < req.beginVersion) {
+		    std::get<Version>(storageTeamData->versionMessages.back()) < req.beginVersion) {
 			wait(logData->version.whenAtLeast(req.beginVersion));
 		}
 
@@ -1009,6 +1007,9 @@ ACTOR Future<Void> tLogPeekMessages(Reference<TLogGroupData> self,
 
 	reply.arena = buffer.arena();
 	reply.data = buffer;
+	reply.maxKnownVersion = logData->version.get();
+	reply.minKnownCommittedVersion = logData->minKnownCommittedVersion;
+	// reply.onlySpilled = false;
 
 	req.reply.send(reply);
 	return Void();
