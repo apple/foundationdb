@@ -1153,10 +1153,10 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 			}
 		}
 		when(TLogPeekRequest req = waitNext(tli.peek.getFuture())) {
-			TraceEvent("TLogPeekReq")
-			    .detail("BeginVersion", req.beginVersion)
-			    .detail("StorageTeam", req.storageTeamID)
-			    .detail("Tag", req.tag.toString());
+			// TraceEvent("TLogPeekReq")
+			//    .detail("BeginVersion", req.beginVersion)
+			//    .detail("StorageTeam", req.storageTeamID)
+			//    .detail("Tag", req.tag.toString());
 			auto tlogGroup = activeGeneration.find(req.storageTeamID);
 			TEST(tlogGroup == activeGeneration.end()); // TLog peek: group not found
 			if (tlogGroup == activeGeneration.end()) {
@@ -1209,7 +1209,7 @@ ACTOR Future<Void> tLogCore(
 		return Void();
 	}
 
-	TraceEvent("TLogGroupCore", self->dbgid).detail("WorkerID", self->workerID);
+	TraceEvent("TLogCore", self->dbgid).detail("WorkerID", self->workerID);
 	self->addActors.send(self->removed);
 
 	// FIXME: update tlogMetrics to include new information, or possibly only have one copy for the shared instance
@@ -1627,7 +1627,6 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<test::TestDriverContext> p
 	int i = 0;
 	for (auto iter = deserializer.begin(); iter != deserializer.end(); ++iter, ++i) {
 		const VersionSubsequenceMutation& m = *iter;
-		// std::cout << *iter << "\n";
 		ASSERT_EQ(beginVersion, m.version);
 		ASSERT_EQ(i + 1, m.subsequence); // subsequence starts from 1
 		ASSERT(mutations[i] == m.mutation);
