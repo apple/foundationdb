@@ -61,6 +61,7 @@ namespace ptxn {
 using TLogGroupID = UID;
 using StorageTeamID = UID;
 
+// Transaction subsystem state (txnState) team.
 const StorageTeamID txsTeam = UID(1, 1);
 
 }	// namespace ptxn

@@ -19,10 +19,11 @@
  */
 
 #include <algorithm>
+#include <iterator>
 #include <tuple>
 
-#include <fdbclient/DatabaseContext.h>
 #include "fdbclient/Atomic.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/CommitProxyInterface.h"
@@ -44,6 +45,7 @@
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/ptxn/ProxyTLogPushMessageSerializer.h"
 #include "flow/ActorCollection.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
@@ -306,6 +308,7 @@ bool isWhitelisted(const vector<Standalone<StringRef>>& binPathVec, StringRef bi
 ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
                                       const std::map<Key, MutationListRef>* logRangeMutations,
                                       LogPushData* toCommit,
+                                      ptxn::ProxyTLogPushMessageSerializer* teamMessageBuilder,
                                       Version commitVersion,
                                       double* computeDuration,
                                       double* computeStart) {
@@ -315,6 +318,10 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 	state BinaryWriter valueWriter(Unversioned());
 
 	toCommit->addTransactionInfo(SpanID());
+	teamMessageBuilder->addTransactionInfo(SpanID());
+
+	// TODO: write mutations in teamMessageBuilder for each team
+	// Note: a clear range mutation may appear multiple times in different teams.
 
 	// Serialize the log range mutations within the map
 	for (; logRangeMutation != logRangeMutations->cend(); ++logRangeMutation) {
@@ -416,6 +423,9 @@ struct CommitBatchContext {
 
 	int64_t localBatchNumber;
 	LogPushData toCommit;
+
+	// Serializer for buffering teams' mutation messages to TLog Groups
+	ptxn::ProxyTLogPushMessageSerializer teamMessageBuilder;
 
 	int batchOperations = 0;
 
@@ -829,6 +839,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
 			self->commitCount++;
+			// TODO: pass self->teamMessageBuilder in as well?
 			applyMetadataMutations(trs[t].spanContext,
 			                       *pProxyCommitData,
 			                       self->arena,
@@ -891,6 +902,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 		state VectorRef<MutationRef>* pMutations = &trs[self->transactionNum].transaction.mutations;
 
 		self->toCommit.addTransactionInfo(trs[self->transactionNum].spanContext);
+		self->teamMessageBuilder.addTransactionInfo(trs[self->transactionNum].spanContext);
 
 		for (; mutationNum < pMutations->size(); mutationNum++) {
 			if (self->yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
@@ -950,11 +962,15 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					self->toCommit.addTag(cacheTag);
 				}
 				self->toCommit.writeTypedMessage(m);
+
+				auto& teams = pProxyCommitData->keyInfo[m.param1].teams;
+				self->teamMessageBuilder.writeMessage(m, teams);
 			} else if (m.type == MutationRef::ClearRange) {
 				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
 				auto ranges = pProxyCommitData->keyInfo.intersectingRanges(clearRange);
 				auto firstRange = ranges.begin();
 				++firstRange;
+				std::set<ptxn::StorageTeamID> storageTeams; // write m to these teams
 				if (firstRange == ranges.end()) {
 					// Fast path
 					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m)
@@ -964,6 +980,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 
 					ranges.begin().value().populateTags();
 					self->toCommit.addTags(ranges.begin().value().tags);
+					auto& dstTeams = ranges.begin().value().teams;
+					storageTeams.insert(dstTeams.begin(), dstTeams.end());
 
 					// check whether clear is sampled
 					if (checkSample && !trCost->get().clearIdxCosts.empty() &&
@@ -981,6 +999,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					for (auto r : ranges) {
 						r.value().populateTags();
 						allSources.insert(r.value().tags.begin(), r.value().tags.end());
+						auto& dstTeams = r.value().teams;
+						storageTeams.insert(dstTeams.begin(), dstTeams.end());
 
 						// check whether clear is sampled
 						if (checkSample && !trCost->get().clearIdxCosts.empty() &&
@@ -1007,6 +1027,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					self->toCommit.addTag(cacheTag);
 				}
 				self->toCommit.writeTypedMessage(m);
+				self->teamMessageBuilder.writeMessage(m, storageTeams);
 			} else {
 				UNREACHABLE();
 			}
@@ -1101,6 +1122,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		wait(addBackupMutations(pProxyCommitData,
 		                        &self->logRangeMutations,
 		                        &self->toCommit,
+		                        &self->teamMessageBuilder,
 		                        self->commitVersion,
 		                        &self->computeDuration,
 		                        &self->computeStart));
@@ -1163,6 +1185,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			self->toCommit.addTxsTag();
 		}
 		self->toCommit.writeMessage(StringRef(m.begin(), m.size()), !firstMessage);
+		self->teamMessageBuilder.writeMessage(StringRef(m.begin(), m.size()), ptxn::txsTeam);
 		firstMessage = false;
 	}
 

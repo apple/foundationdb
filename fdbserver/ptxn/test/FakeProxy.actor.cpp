@@ -60,33 +60,36 @@ ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext
 			fakeMutations[storageTeamID].push_back(mutation);
 		}
 
-		state std::vector<Future<TLogCommitReply>> requests;
-		for (auto iter = fakeMutations.begin(); iter != fakeMutations.end(); ++iter) {
-			const StorageTeamID storageTeamID = iter->first;
-			auto& mutations = iter->second;
-			auto commitVersionPair = pTestDriverContext->getCommitVersionPair(storageTeamID);
+		state std::vector<Future<TLogCommitReply>> replies;
 
-			// Here we use move semantic in order to keep the mutations in arena
-			// 	pTestDriverContext->mutationsArena
-			commitRecord.emplace_back(commitVersionPair.second, storageTeamID, std::move(mutations));
-
-			serializer.completeMessageWriting(storageTeamID);
-			Standalone<StringRef> encoded = serializer.getSerialized(storageTeamID);
+		std::unordered_map<StorageTeamID, Standalone<StringRef>> messages = serializer.getAllSerialized();
+		std::unordered_map<StorageTeamID, Version> commitVersionPerStorageTeam;
+		for (const auto& [team, message] : messages) {
+			auto commitVersionPair = pTestDriverContext->getCommitVersionPair(team);
+			commitVersionPerStorageTeam[team] = commitVersionPair.second;
 			TLogCommitRequest request(deterministicRandom()->randomUniqueID(),
-			                          storageTeamID,
-			                          encoded.arena(),
-			                          encoded,
+			                          team,
+			                          message.arena(),
+			                          message,
 			                          commitVersionPair.first,
 			                          commitVersionPair.second,
 			                          0,
 			                          0,
 			                          Optional<UID>(deterministicRandom()->randomUniqueID()));
-			requests.push_back(pTestDriverContext->getTLogInterface(storageTeamID)->commit.getReply(request));
+			replies.push_back(pTestDriverContext->getTLogInterface(team)->commit.getReply(request));
+		}
+
+		for (auto iter = fakeMutations.begin(); iter != fakeMutations.end(); ++iter) {
+			const StorageTeamID storageTeamID = iter->first;
+			auto& mutations = iter->second;
+			// Here we use move semantic in order to keep the mutations in arena
+			// 	pTestDriverContext->mutationsArena
+			commitRecord.emplace_back(commitVersionPerStorageTeam[storageTeamID], storageTeamID, std::move(mutations));
 		}
 
 		print::printCommitRecord(pTestDriverContext->commitRecord);
 
-		wait(waitForAll(requests));
+		wait(waitForAll(replies));
 
 		if (++i == pFakeProxyContext->numCommits) {
 			break;

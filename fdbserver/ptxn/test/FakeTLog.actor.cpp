@@ -118,7 +118,7 @@ void processTLogCommitRequest(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
 	std::transform(seqMutations.begin(),
 	               seqMutations.end(),
 	               std::back_inserter(mutations),
-	               [](const SubsequenceMutationItem& item) { return item.mutation; });
+	               [](const SubsequenceMutationItem& item) { return item.mutation(); });
 	verifyMutationsInRecord(pFakeTLogContext->pTestDriverContext->commitRecord,
 	                        commitRequest.version,
 	                        commitRequest.storageTeamID,
@@ -128,7 +128,7 @@ void processTLogCommitRequest(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
 	// "Persist" the data into memory
 	for (auto& seqMutation : seqMutations) {
 		const auto& subsequence = seqMutation.subsequence;
-		const auto& mutation = seqMutation.mutation;
+		const auto& mutation = seqMutation.mutation();
 		pFakeTLogContext->mutations[commitRequest.storageTeamID].push_back(
 		    pFakeTLogContext->persistenceArena,
 		    { commitRequest.version,
@@ -234,7 +234,7 @@ ACTOR Future<Void> fakeTLog_ActivelyPush(std::shared_ptr<FakeTLogContext> pFakeT
 			request.storageTeamID = commitRequest.storageTeamID;
 			request.arena = Arena();
 			for (auto iter = std::begin(seqMutations); iter != std::end(seqMutations); ++iter) {
-				const auto& mutation = iter->mutation;
+				const auto& mutation = iter->mutation();
 				request.mutations.emplace_back(request.arena,
 				                               MutationRef(request.arena,
 				                                           static_cast<MutationRef::Type>(mutation.type),

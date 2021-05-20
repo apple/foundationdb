@@ -162,6 +162,7 @@ struct ServerCacheInfo {
 	std::vector<Tag> tags; // all tags in both primary and remote DC for the key-range
 	std::vector<Reference<StorageInfo>> src_info;
 	std::vector<Reference<StorageInfo>> dest_info;
+	std::set<ptxn::StorageTeamID> teams; // primary and remote DC teams for the key range
 
 	void populateTags() {
 		if (tags.size())

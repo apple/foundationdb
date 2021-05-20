@@ -22,12 +22,18 @@
 #include <sys/time.h>
 #include <vector>
 
+#include "fdbclient/CommitTransaction.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/ptxn/MessageTypes.h"
 #include "fdbserver/ptxn/Serializer.h"
 #include "fdbserver/ptxn/ProxyTLogPushMessageSerializer.h"
 #include "fdbserver/ptxn/TLogStorageServerPeekMessageSerializer.h"
+#include "fdbserver/ptxn/test/Utils.h"
 #include "flow/Error.h"
+#include "flow/IRandom.h"
 #include "flow/UnitTest.h"
+#include "flow/serialize.h"
 
 namespace {
 
@@ -60,6 +66,120 @@ struct TestSerializerItem {
 		serializer(ar, item1);
 	}
 };
+
+bool testSubsequenceMutationItem() {
+	ptxn::ProxyTLogPushMessageSerializer serializer;
+
+	const ptxn::StorageTeamID team1{ ptxn::test::getNewStorageTeamID() };
+	const ptxn::StorageTeamID team2{ ptxn::test::getNewStorageTeamID() };
+
+	MutationRef mutation(MutationRef::SetValue, "KeyXX"_sr, "ValueYY"_sr);
+	serializer.writeMessage(mutation, team1);
+	serializer.completeMessageWriting(team1);
+	auto serializedTeam1 = serializer.getSerialized(team1);
+
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withPartitionTransaction()));
+	wr << mutation;
+	Standalone<StringRef> value = wr.toValue();
+	StringRef m = value.substr(sizeof(uint64_t)); // skip protocol version
+
+	// Have to use a different serializer to make sure subsequence is the same.
+	ptxn::ProxyTLogPushMessageSerializer serializer2;
+	serializer2.writeMessage(m, team2);
+	serializer2.completeMessageWriting(team2);
+	auto serializedTeam2 = serializer2.getSerialized(team2);
+
+	ASSERT(serializedTeam1 == serializedTeam2);
+
+	std::cout << __FUNCTION__ << " passed.\n";
+	return true;
+}
+
+// Verify transaction info (span IDs) are properly added to serialized data and
+// later can be deserialized.
+bool testTransactionInfo() {
+	ptxn::ProxyTLogPushMessageSerializer serializer;
+
+	const ptxn::StorageTeamID team1{ ptxn::test::getNewStorageTeamID() };
+	const ptxn::StorageTeamID team2{ ptxn::test::getNewStorageTeamID() };
+	const ptxn::StorageTeamID team3{ ptxn::test::getNewStorageTeamID() };
+	std::vector<ptxn::StorageTeamID> teams = { team1, team2, team3 };
+
+	// Mutations for each team before serialization, i.e., ground truth
+	Arena arena;
+	std::vector<VectorRef<MutationRef>> mutations(3);
+
+	SpanID spanId;
+	std::vector<SpanID> written(3, spanId); // last written SpanID
+	MutationRef transactionInfo;
+	transactionInfo.type = MutationRef::Reserved_For_SpanContextMessage;
+
+	const int totalMutations = 1000;
+	for (int i = 0; i < totalMutations; i++) {
+		if (deterministicRandom()->random01() < 0.1) {
+			// Add transaction info
+			spanId = deterministicRandom()->randomUniqueID();
+			serializer.addTransactionInfo(spanId);
+			transactionInfo.param1 = StringRef(arena, BinaryWriter::toValue(spanId, Unversioned()));
+		} else {
+			// Add a real mutation
+			StringRef key = StringRef(arena, deterministicRandom()->randomAlphaNumeric(10));
+			StringRef value = StringRef(arena, deterministicRandom()->randomAlphaNumeric(32));
+			MutationRef m(MutationRef::SetValue, key, value);
+
+			// Randomly add this mutation to teams
+			for (int team = 0; team < 3; team++) {
+				if (deterministicRandom()->random01() < 0.5) {
+					if (written[team] != spanId && FLOW_KNOBS->WRITE_TRACING_ENABLED) {
+						// Add Transaction Info for this team in ground truth
+						mutations[team].push_back(arena, transactionInfo);
+						written[team] = spanId;
+					}
+					serializer.writeMessage(m, teams[team]);
+					mutations[team].push_back(arena, m);
+				}
+			}
+		}
+	}
+
+	auto results = serializer.getAllSerialized();
+	int spanCount = 0;
+	for (const auto& [team, messages] : results) {
+		VectorRef<MutationRef> teamMutations;
+		if (team == team1) {
+			teamMutations = mutations[0];
+		} else if (team == team2) {
+			teamMutations = mutations[1];
+		} else if (team == team3) {
+			teamMutations = mutations[2];
+		} else {
+			ASSERT(false);
+		}
+
+		// deserialize message
+		ptxn::ProxyTLogMessageHeader header;
+		std::vector<ptxn::SubsequenceMutationItem> seqMutations;
+		proxyTLogPushMessageDeserializer(arena, messages, header, seqMutations);
+		ASSERT_EQ(teamMutations.size(), seqMutations.size());
+		for (int i = 0; i < teamMutations.size(); i++) {
+			const MutationRef& a = teamMutations[i];
+			if (seqMutations[i].isMutation()) {
+				const MutationRef& b = seqMutations[i].mutation();
+				ASSERT(a == b);
+			} else {
+				ASSERT(a.type == MutationRef::Reserved_For_SpanContextMessage);
+				const SpanContextMessage& span = seqMutations[i].span();
+				StringRef str(arena, BinaryWriter::toValue(span.spanContext, Unversioned()));
+				ASSERT(a.param1 == str);
+				spanCount++;
+			}
+		}
+	}
+	ASSERT(spanCount > 0 || !FLOW_KNOBS->WRITE_TRACING_ENABLED);
+
+	std::cout << __FUNCTION__ << " passed (" << spanCount << " SpanIDs).\n";
+	return true;
+}
 
 } // anonymous namespace
 
@@ -229,13 +349,15 @@ TEST_CASE("/fdbserver/ptxn/test/ProxyTLogPushMessageSerializer") {
 		ASSERT_EQ(header.length,
 		          serializedTeam1.size() - getSerializedBytes<ProxyTLogMessageHeader>() - SerializerVersionOptionBytes);
 
-		ASSERT_EQ(items[0].mutation.type, MutationRef::SetValue);
-		ASSERT(items[0].mutation.param1 == LiteralStringRef("Key1"));
-		ASSERT(items[0].mutation.param2 == LiteralStringRef("Value1"));
+		MutationRef m = items[0].mutation();
+		ASSERT_EQ(m.type, MutationRef::SetValue);
+		ASSERT(m.param1 == "Key1"_sr);
+		ASSERT(m.param2 == "Value1"_sr);
 
-		ASSERT_EQ(items[1].mutation.type, MutationRef::ClearRange);
-		ASSERT(items[1].mutation.param1 == LiteralStringRef("Begin"));
-		ASSERT(items[1].mutation.param2 == LiteralStringRef("End"));
+		m = items[1].mutation();
+		ASSERT_EQ(m.type, MutationRef::ClearRange);
+		ASSERT(m.param1 == "Begin"_sr);
+		ASSERT(m.param2 == "End"_sr);
 	}
 
 	{
@@ -246,10 +368,14 @@ TEST_CASE("/fdbserver/ptxn/test/ProxyTLogPushMessageSerializer") {
 		ASSERT(header.protocolVersion == ProxyTLogMessageProtocolVersion);
 		ASSERT_EQ(header.numItems, 1);
 
-		ASSERT_EQ(items[0].mutation.type, MutationRef::SetValue);
-		ASSERT(items[0].mutation.param1 == LiteralStringRef("Key2"));
-		ASSERT(items[0].mutation.param2 == LiteralStringRef("Value2"));
+		MutationRef m = items[0].mutation();
+		ASSERT_EQ(m.type, MutationRef::SetValue);
+		ASSERT(m.param1 == "Key2"_sr);
+		ASSERT(m.param2 == "Value2"_sr);
 	}
+
+	ASSERT(testSubsequenceMutationItem());
+	ASSERT(testTransactionInfo());
 
 	return Void();
 }
