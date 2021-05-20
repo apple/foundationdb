@@ -717,7 +717,7 @@ namespace SummarizeTest
 
         delegate IEnumerable<Magnesium.Event> parseDelegate(System.IO.Stream stream, string file,
             bool keepOriginalElement = false, double startTime = -1, double endTime = Double.MaxValue,
-            double samplingFactor = 1.0);
+            double samplingFactor = 1.0, Action<string> nonFatalErrorMessage = null);
 
         static int Summarize(string[] traceFiles, string summaryFileName,
             string errorFileName, bool? killed, List<string> outputErrors, int? exitCode, long? peakMemory,
@@ -750,12 +750,14 @@ namespace SummarizeTest
                 {
                     try
                     {
+                        // Use Action to set this because IEnumerables with yield can't have an out variable
+                        string nonFatalParseError = null;
                         parseDelegate parse;
                         if (traceFileName.EndsWith(".json"))
                             parse = Magnesium.JsonParser.Parse;
                         else
                             parse = Magnesium.XmlParser.Parse;
-                        foreach (var ev in parse(traceFile, traceFileName))
+                        foreach (var ev in parse(traceFile, traceFileName, nonFatalErrorMessage: (x) => { nonFatalParseError = x; }))
                         {
                             Magnesium.Severity newSeverity;
                             if (severityMap.TryGetValue(new KeyValuePair<string, Magnesium.Severity>(ev.Type, ev.Severity), out newSeverity))
@@ -875,6 +877,11 @@ namespace SummarizeTest
                                 severityMap[new KeyValuePair<string, Magnesium.Severity>(ev.Details.TargetEvent, (Magnesium.Severity)int.Parse(ev.Details.OriginalSeverity))] = (Magnesium.Severity)int.Parse(ev.Details.NewSeverity);
                             if (ev.Type == "StderrSeverity")
                                 stderrSeverity = int.Parse(ev.Details.NewSeverity);
+                        }
+                        if (nonFatalParseError != null) {
+                            xout.Add(new XElement("NonFatalParseError",
+                                new XAttribute("Severity", (int)Magnesium.Severity.SevWarnAlways),
+                                new XAttribute("ErrorMessage", nonFatalParseError)));
                         }
 
                     }

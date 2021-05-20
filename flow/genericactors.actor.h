@@ -1334,6 +1334,14 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 	int64_t activePermits() const { return active; }
 	int waiters() const { return takers.size(); }
 
+	// Try to send error to all current and future waiters
+	// Only works if broken_on_destruct.canBeSet()
+	void kill(Error e = broken_promise()) {
+		if (broken_on_destruct.canBeSet()) {
+			broken_on_destruct.sendError(e);
+		}
+	}
+
 private:
 	std::list<std::pair<Promise<Void>, int64_t>> takers;
 	const int64_t permits;
