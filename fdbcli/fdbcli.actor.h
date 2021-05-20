@@ -61,6 +61,9 @@ struct CommandFactory {
 extern const KeyRef advanceVersionSpecialKey;
 // consistencycheck
 extern const KeyRef consistencyCheckSpecialKey;
+// maintenance
+extern const KeyRangeRef maintenanceSpecialKeyRange;
+extern const KeyRef ignoreSSFailureSpecialKey;
 
 // help functions (Copied from fdbcli.actor.cpp)
 
@@ -74,6 +77,8 @@ void printUsage(StringRef command);
 ACTOR Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // consistency command
 ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens);
+// maintenance command
+ACTOR Future<bool> maintenanceCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 
 } // namespace fdb_cli
 

@@ -640,14 +640,6 @@ void initHelp() {
 	                "command will change the region configuration to have a positive priority for the chosen DCID, and "
 	                "a negative priority for all other DCIDs. This command will set usable_regions to 1. If the "
 	                "database has already recovered, this command does nothing.\n");
-	helpMap["maintenance"] = CommandHelp(
-	    "maintenance [on|off] [ZONEID] [SECONDS]",
-	    "mark a zone for maintenance",
-	    "Calling this command with `on' prevents data distribution from moving data away from the processes with the "
-	    "specified ZONEID. Data distribution will automatically be turned back on for ZONEID after the specified "
-	    "SECONDS have elapsed, or after a storage server with a different ZONEID fails. Only one ZONEID can be marked "
-	    "for maintenance. Calling this command with no arguments will display any ongoing maintenance. Calling this "
-	    "command with `off' will disable maintenance.\n");
 	helpMap["throttle"] =
 	    CommandHelp("throttle <on|off|enable auto|disable auto|list> [ARGS]",
 	                "view and control throttled tags",
@@ -3780,26 +3772,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "maintenance")) {
-					if (tokens.size() == 1) {
-						wait(makeInterruptable(printHealthyZone(db)));
-					} else if (tokens.size() == 2 && tokencmp(tokens[1], "off")) {
-						bool clearResult = wait(makeInterruptable(clearHealthyZone(db, true)));
-						is_error = !clearResult;
-					} else if (tokens.size() == 4 && tokencmp(tokens[1], "on")) {
-						double seconds;
-						int n = 0;
-						auto secondsStr = tokens[3].toString();
-						if (sscanf(secondsStr.c_str(), "%lf%n", &seconds, &n) != 1 || n != secondsStr.size()) {
-							printUsage(tokens[0]);
-							is_error = true;
-						} else {
-							bool setResult = wait(makeInterruptable(setHealthyZone(db, tokens[2], seconds, true)));
-							is_error = !setResult;
-						}
-					} else {
-						printUsage(tokens[0]);
-						is_error = true;
-					}
+					bool _result = wait(makeInterruptable(maintenanceCommandActor(db2, tokens)));
+					is_error = !_result;
 					continue;
 				}
 
