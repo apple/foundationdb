@@ -284,13 +284,13 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 	ArenaBlock* b;
 	if (dataSize <= SMALL - TINY_HEADER && !next) {
 		if (dataSize <= 16 - TINY_HEADER) {
-			b = (ArenaBlock*)allocateFast(16);
+			b = (ArenaBlock*)alignedAllocateFast(16, 16);
 			b->tinySize = 16;
 		} else if (dataSize <= 32 - TINY_HEADER) {
-			b = (ArenaBlock*)allocateFast(32);
+			b = (ArenaBlock*)alignedAllocateFast(32, 32);
 			b->tinySize = 32;
 		} else {
-			b = (ArenaBlock*)allocateFast(64);
+			b = (ArenaBlock*)alignedAllocateFast(64, 64);
 			b->tinySize = 64;
 		}
 		b->tinyUsed = TINY_HEADER;
@@ -310,31 +310,31 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 
 		if (reqSize < LARGE) {
 			if (reqSize <= 128) {
-				b = (ArenaBlock*)allocateFast(128);
+				b = (ArenaBlock*)alignedAllocateFast(64, 128);
 				b->bigSize = 128;
 			} else if (reqSize <= 256) {
-				b = (ArenaBlock*)allocateFast(256);
+				b = (ArenaBlock*)alignedAllocateFast(64, 256);
 				b->bigSize = 256;
 			} else if (reqSize <= 512) {
-				b = (ArenaBlock*)allocateFast(512);
+				b = (ArenaBlock*)alignedAllocateFast(64, 512);
 				b->bigSize = 512;
 			} else if (reqSize <= 1024) {
-				b = (ArenaBlock*)allocateFast(1024);
+				b = (ArenaBlock*)alignedAllocateFast(64, 1024);
 				b->bigSize = 1024;
 			} else if (reqSize <= 2048) {
-				b = (ArenaBlock*)allocateFast(2048);
+				b = (ArenaBlock*)alignedAllocateFast(64, 2048);
 				b->bigSize = 2048;
 			} else if (reqSize <= 4096) {
-				b = (ArenaBlock*)allocateFast(4096);
+				b = (ArenaBlock*)alignedAllocateFast(64, 4096);
 				b->bigSize = 4096;
 			} else {
-				b = (ArenaBlock*)allocateFast(8192);
+				b = (ArenaBlock*)alignedAllocateFast(64, 8192);
 				b->bigSize = 8192;
 			}
 			b->tinySize = b->tinyUsed = NOT_TINY;
 			b->bigUsed = sizeof(ArenaBlock);
 		} else {
-			b = (ArenaBlock*)allocateFast(reqSize);
+			b = (ArenaBlock*)alignedAllocateFast(64, reqSize);
 			b->tinySize = b->tinyUsed = NOT_TINY;
 			b->bigSize = reqSize;
 			b->bigUsed = sizeof(ArenaBlock);
@@ -395,7 +395,7 @@ void ArenaBlock::destroy() {
 }
 
 void ArenaBlock::destroyLeaf() {
-	freeFast(this, size());
+	alignedFreeFast(this);
 }
 
 namespace {
