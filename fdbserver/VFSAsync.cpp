@@ -734,6 +734,7 @@ static int asyncSleep(sqlite3_vfs* pVfs, int microseconds) {
 			simCancel = success(g_simulator.getCurrentProcess()->shutdownSignal.getFuture());
 		if (simCancel.isReady()) {
 			waitFor(delay(FLOW_KNOBS->MAX_BUGGIFIED_DELAY + FLOW_KNOBS->MAX_RUNLOOP_TIME_BATCHING));
+			waitFor(delay(FLOW_KNOBS->MAX_BUGGIFIED_DELAY + FLOW_KNOBS->MAX_RUNLOOP_TIME_BATCHING / 2));
 			return 0;
 		}
 		waitFor(g_network->delay(microseconds * 1e-6, TaskPriority::DefaultDelay) || simCancel);
