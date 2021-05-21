@@ -59,8 +59,9 @@ public:
 	ConfigKnobOverrides() = default;
 	explicit ConfigKnobOverrides(std::string const& paramString) {
 		configClassToKnobToValue[{}] = {};
-		if (std::all_of(
-		        paramString.begin(), paramString.end(), [](char c) { return isalpha(c) || c == '/' || c == '-'; })) {
+		if (std::all_of(paramString.begin(), paramString.end(), [](char c) {
+			    return isalpha(c) || isdigit(c) || c == '/' || c == '-';
+		    })) {
 			StringRef s = stringToKeyRef(paramString);
 			while (s.size()) {
 				configPath.push_back_deep(configPath.arena(), s.eat("/"_sr));
