@@ -491,8 +491,13 @@ struct RolesInfo {
 			obj["mutation_bytes"] = StatusCounter(storageMetrics.getValue("MutationBytes")).getStatus();
 			obj["mutations"] = StatusCounter(storageMetrics.getValue("Mutations")).getStatus();
 			obj.setKeyRawNumber("local_rate", storageMetrics.getValue("LocalRate"));
-			obj["fetched_versions"] = StatusCounter(storageMetrics.getValue("FetchedVersions")).getStatus();
-			obj["fetches_from_logs"] = StatusCounter(storageMetrics.getValue("FetchesFromLogs")).getStatus();
+			try {
+				obj["fetched_versions"] = StatusCounter(storageMetrics.getValue("FetchedVersions")).getStatus();
+				obj["fetches_from_logs"] = StatusCounter(storageMetrics.getValue("FetchesFromLogs")).getStatus();
+			} catch (Error& e) {
+				if (e.code() != error_code_attribute_not_found)
+					throw e;
+			}
 
 			Version version = storageMetrics.getInt64("Version");
 			Version durableVersion = storageMetrics.getInt64("DurableVersion");
