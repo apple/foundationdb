@@ -81,15 +81,18 @@ public:
 
 	template <class... KS>
 	void update(KS&... knobCollections) const {
+		// Apply global overrides
+		const auto& knobToValue = configClassToKnobToValue.at({});
+		for (const auto& [knobName, knobValue] : knobToValue) {
+			updateSingleKnob(knobName, knobValue, knobCollections...);
+		}
+
+		// Apply specific overrides
 		for (const auto& configClass : configPath) {
 			const auto& knobToValue = configClassToKnobToValue.at(configClass);
 			for (const auto& [knobName, knobValue] : knobToValue) {
 				updateSingleKnob(knobName, knobValue, knobCollections...);
 			}
-		}
-		const auto& knobToValue = configClassToKnobToValue.at({});
-		for (const auto& [knobName, knobValue] : knobToValue) {
-			updateSingleKnob(knobName, knobValue, knobCollections...);
 		}
 	}
 

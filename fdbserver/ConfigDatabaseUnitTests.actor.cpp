@@ -372,8 +372,9 @@ ACTOR template <class Env>
 Future<Void> testGlobalSet() {
 	state Env env("class-A");
 	wait(env.setup());
-	wait(set(env, "class-A"_sr, 1));
-	wait(set(env, Optional<KeyRef>{}, 10));
+	wait(set(env, Optional<KeyRef>{}, 1));
+	env.check(1);
+	wait(set(env, "class-A"_sr, 10));
 	env.check(10);
 	return Void();
 }
