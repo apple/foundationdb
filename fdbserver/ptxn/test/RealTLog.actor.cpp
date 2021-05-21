@@ -161,7 +161,10 @@ ACTOR Future<Void> TLogDriverContext::sendCommitMessages_impl(TLogDriverContext*
 		LogPushData toCommit(pTLogDriverContext->ls);
 		UID spanID = deterministicRandom()->randomUniqueID();
 		toCommit.addTransactionInfo(spanID);
-		vector<Tag> tags;
+		std::vector<Tag> tags;
+
+		// Currently every commit will use all tags, which is not representative of real-world scenarios.
+		// TODO randomize tags to mimic real workloads
 		for (uint32_t tagID = 0; tagID < pTLogDriverContext->numTagsPerServer; tagID++) {
 			Tag tag(pTLogDriverContext->tagLocality, tagID);
 			tags.push_back(tag);
@@ -363,7 +366,7 @@ ACTOR Future<Void> getProxyActor(std::shared_ptr<TLogDriverContext> pTLogDriverC
 	pTLogDriverContext->ls =
 	    ILogSystem::fromServerDBInfo(pTLogDriverContext->logID, pTLogDriverContext->dbInfo, false, promises);
 
-	state std::vector<Future<Void>> actors;
+	std::vector<Future<Void>> actors;
 
 	// start push actor
 	actors.emplace_back(pTLogDriverContext->sendPushMessages());
