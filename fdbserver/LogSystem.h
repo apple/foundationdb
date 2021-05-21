@@ -407,6 +407,8 @@ struct ILogSystem {
 
 		virtual Optional<UID> getPrimaryPeekLocation() = 0;
 
+		virtual Optional<UID> getCurrentPeekLocation() = 0;
+
 		virtual void addref() = 0;
 
 		virtual void delref() = 0;
@@ -470,6 +472,7 @@ struct ILogSystem {
 		virtual Version popped();
 		virtual Version getMinKnownCommittedVersion();
 		virtual Optional<UID> getPrimaryPeekLocation();
+		virtual Optional<UID> getCurrentPeekLocation();
 
 		virtual void addref() { ReferenceCounted<ServerPeekCursor>::addref(); }
 
@@ -531,6 +534,7 @@ struct ILogSystem {
 		virtual Version popped();
 		virtual Version getMinKnownCommittedVersion();
 		virtual Optional<UID> getPrimaryPeekLocation();
+		virtual Optional<UID> getCurrentPeekLocation();
 
 		virtual void addref() { ReferenceCounted<MergedPeekCursor>::addref(); }
 
@@ -586,6 +590,7 @@ struct ILogSystem {
 		virtual Version popped();
 		virtual Version getMinKnownCommittedVersion();
 		virtual Optional<UID> getPrimaryPeekLocation();
+		virtual Optional<UID> getCurrentPeekLocation();
 
 		virtual void addref() { ReferenceCounted<SetPeekCursor>::addref(); }
 
@@ -617,6 +622,7 @@ struct ILogSystem {
 		virtual Version popped();
 		virtual Version getMinKnownCommittedVersion();
 		virtual Optional<UID> getPrimaryPeekLocation();
+		virtual Optional<UID> getCurrentPeekLocation();
 
 		virtual void addref() { ReferenceCounted<MultiCursor>::addref(); }
 
@@ -695,6 +701,7 @@ struct ILogSystem {
 		virtual Version popped();
 		virtual Version getMinKnownCommittedVersion();
 		virtual Optional<UID> getPrimaryPeekLocation();
+		virtual Optional<UID> getCurrentPeekLocation();
 
 		virtual void addref() { ReferenceCounted<BufferedCursor>::addref(); }
 
