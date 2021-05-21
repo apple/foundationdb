@@ -4363,7 +4363,7 @@ private:
 
 	// Each call to commitSubtree() will pass most of its arguments via a this structure because the caller
 	// will need access to these parameters after commitSubtree() is done.
-	struct InternalPageSliceUpdate {
+	struct InternalPageSliceUpdate : public FastAllocated<InternalPageSliceUpdate> {
 		// The logical range for the subtree's contents.  Due to subtree clears, these boundaries may not match
 		// the lower/upper bounds needed to decode the page.
 		// Subtree clears can cause the boundaries for decoding the page to be more restrictive than the subtree's
@@ -5017,16 +5017,15 @@ private:
 		} else {
 			// Internal Page
 			std::vector<Future<Void>> recursions;
-			state std::vector<InternalPageSliceUpdate*> slices;
-			state Arena arena;
+			state std::vector<std::unique_ptr<InternalPageSliceUpdate>> slices;
 
 			cursor.moveFirst();
 
 			bool first = true;
 
 			while (cursor.valid()) {
-				InternalPageSliceUpdate& u = *new (arena) InternalPageSliceUpdate();
-				slices.push_back(&u);
+				slices.emplace_back(new InternalPageSliceUpdate());
+				InternalPageSliceUpdate& u = *slices.back();
 
 				// At this point we should never be at a null child page entry because the first entry of a page
 				// can't be null and this loop will skip over null entries that come after non-null entries.
