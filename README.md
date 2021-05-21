@@ -157,11 +157,11 @@ The build under MacOS will work the same way as on Linux. To get boost and ninja
 cmake -G Ninja <PATH_TO_FOUNDATIONDB_SOURCE>
 ```
 
-To generate a installable package, you can use cpack:
+To generate a installable package,
 
 ```sh
 ninja
-cpack -G productbuild
+$SRCDIR/packaging/osx/buildpkg.sh . $SRCDIR
 ```
 
 ### Windows

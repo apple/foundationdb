@@ -1,7 +1,7 @@
 include(FDBInstall)
 
-fdb_install_packages(TGZ DEB EL7 PM VERSIONED)
-fdb_install_dirs(BIN SBIN LIB FDBMONITOR INCLUDE ETC LOG DATA)
+fdb_install_packages(TGZ DEB EL7 VERSIONED)
+fdb_install_dirs(BIN SBIN LIB FDBMONITOR INCLUDE ETC LOG DATA BACKUPAGENT)
 message(STATUS "FDB_INSTALL_DIRS -> ${FDB_INSTALL_DIRS}")
 
 install_destinations(TGZ
@@ -9,6 +9,7 @@ install_destinations(TGZ
   SBIN sbin
   LIB lib
   FDBMONITOR sbin
+  BACKUPAGENT usr/lib/foundationdb
   INCLUDE include
   ETC etc/foundationdb
   LOG log/foundationdb
@@ -19,19 +20,13 @@ install_destinations(DEB
   SBIN usr/sbin
   LIB usr/lib
   FDBMONITOR usr/lib/foundationdb
+  BACKUPAGENT usr/lib/foundationdb
   INCLUDE usr/include
   ETC etc/foundationdb
   LOG var/log/foundationdb
   DATA var/lib/foundationdb/data)
 copy_install_destinations(DEB EL7)
 install_destinations(EL7 LIB usr/lib64)
-install_destinations(PM
-  BIN usr/local/bin
-  SBIN usr/local/sbin
-  LIB lib
-  FDBMONITOR usr/local/libexec
-  INCLUDE usr/local/include
-  ETC usr/local/etc/foundationdb)
 
 # This can be used for debugging in case above is behaving funky
 #print_install_destinations()
@@ -39,7 +34,7 @@ install_destinations(PM
 set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
 if(APPLE)
-  set(CPACK_GENERATOR TGZ productbuild)
+  set(CPACK_GENERATOR TGZ)
 else()
   set(CPACK_GENERATOR RPM DEB TGZ)
 endif()
@@ -109,19 +104,16 @@ set(CPACK_PACKAGE_CONTACT "The FoundationDB Community")
 set(CPACK_COMPONENT_SERVER-EL7_DEPENDS clients-el7)
 set(CPACK_COMPONENT_SERVER-DEB_DEPENDS clients-deb)
 set(CPACK_COMPONENT_SERVER-TGZ_DEPENDS clients-tgz)
-set(CPACK_COMPONENT_SERVER-PM_DEPENDS clients-pm)
 set(CPACK_COMPONENT_SERVER-VERSIONED_DEPENDS clients-versioned)
 
 set(CPACK_COMPONENT_SERVER-EL7_DISPLAY_NAME "foundationdb-server")
 set(CPACK_COMPONENT_SERVER-DEB_DISPLAY_NAME "foundationdb-server")
 set(CPACK_COMPONENT_SERVER-TGZ_DISPLAY_NAME "foundationdb-server")
-set(CPACK_COMPONENT_SERVER-PM_DISPLAY_NAME "foundationdb-server")
 set(CPACK_COMPONENT_SERVER-VERSIONED_DISPLAY_NAME "foundationdb-server-${PROJECT_VERSION}")
 
 set(CPACK_COMPONENT_CLIENTS-EL7_DISPLAY_NAME "foundationdb-clients")
 set(CPACK_COMPONENT_CLIENTS-DEB_DISPLAY_NAME "foundationdb-clients")
 set(CPACK_COMPONENT_CLIENTS-TGZ_DISPLAY_NAME "foundationdb-clients")
-set(CPACK_COMPONENT_CLIENTS-PM_DISPLAY_NAME "foundationdb-clients")
 set(CPACK_COMPONENT_CLIENTS-VERSIONED_DISPLAY_NAME "foundationdb-clients-${PROJECT_VERSION}")
 
 
@@ -273,19 +265,6 @@ set(CPACK_DEBIAN_SERVER-VERSIONED_PACKAGE_CONTROL_EXTRA
   ${CMAKE_BINARY_DIR}/packaging/multiversion/server/prerm)
 
 ################################################################################
-# MacOS configuration
-################################################################################
-
-if(APPLE)
-  install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/osx/uninstall-FoundationDB.sh
-    DESTINATION "usr/local/foundationdb"
-    COMPONENT clients-pm)
-  install(FILES ${CMAKE_SOURCE_DIR}/packaging/osx/com.foundationdb.fdbmonitor.plist
-    DESTINATION "Library/LaunchDaemons"
-    COMPONENT server-pm)
-endif()
-
-################################################################################
 # Configuration for DEB
 ################################################################################
 
@@ -303,9 +282,6 @@ set(CLUSTER_DESCRIPTION1 ${description1} CACHE STRING "Cluster description")
 set(CLUSTER_DESCRIPTION2 ${description2} CACHE STRING "Cluster description")
 
 if(NOT WIN32)
-  install(FILES ${CMAKE_SOURCE_DIR}/packaging/osx/foundationdb.conf.new
-    DESTINATION "usr/local/etc"
-    COMPONENT server-pm)
   fdb_install(FILES ${CMAKE_SOURCE_DIR}/packaging/foundationdb.conf
     DESTINATION etc
     COMPONENT server)
