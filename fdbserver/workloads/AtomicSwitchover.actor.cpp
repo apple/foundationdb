@@ -92,9 +92,8 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 				state Transaction tr2(dest);
 				try {
 					loop {
-						state Future<Standalone<RangeResultRef>> srcFuture =
-						    tr.getRange(KeyRangeRef(begin, range.end), 1000);
-						state Future<Standalone<RangeResultRef>> bkpFuture =
+						state Future<RangeResult> srcFuture = tr.getRange(KeyRangeRef(begin, range.end), 1000);
+						state Future<RangeResult> bkpFuture =
 						    tr2.getRange(KeyRangeRef(begin, range.end).withPrefix(backupPrefix), 1000);
 						wait(success(srcFuture) && success(bkpFuture));
 

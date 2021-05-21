@@ -386,7 +386,7 @@ ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t 
 			                            ? (txInfoSize - clientTxInfoSizeLimit)
 			                            : CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 			GetRangeLimits limit(GetRangeLimits::ROW_LIMIT_UNLIMITED, getRangeByteLimit);
-			Standalone<RangeResultRef> txEntries =
+			RangeResult txEntries =
 			    wait(tr->getRange(KeyRangeRef(clientLatencyName, strinc(clientLatencyName)), limit));
 			state int64_t numBytesToDel = 0;
 			KeyRef endKey;
@@ -596,7 +596,7 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			try {
-				Standalone<RangeResultRef> range = wait(tr.getRange(storageCacheKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeResult range = wait(tr.getRange(storageCacheKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!range.more);
 				std::vector<Reference<ReferencedInterface<StorageServerInterface>>> cacheInterfaces;
 				cacheInterfaces.reserve(cacheServers->size());
@@ -673,8 +673,7 @@ ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
 			// the cyclic reference to self.
 			wait(refreshTransaction(self, &tr));
 			try {
-				Standalone<RangeResultRef> cacheList =
-				    wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeResult cacheList = wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!cacheList.more);
 				bool hasChanges = false;
 				std::map<UID, StorageServerInterface> allCacheServers;
@@ -757,16 +756,16 @@ void DatabaseContext::registerSpecialKeySpaceModule(SpecialKeySpace::MODULE modu
 	specialKeySpaceModules.push_back(std::move(impl));
 }
 
-ACTOR Future<Standalone<RangeResultRef>> getWorkerInterfaces(Reference<ClusterConnectionFile> clusterFile);
+ACTOR Future<RangeResult> getWorkerInterfaces(Reference<ClusterConnectionFile> clusterFile);
 ACTOR Future<Optional<Value>> getJSON(Database db);
 
 struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeReadImpl {
-	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override {
+	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override {
 		if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
 			Key prefix = Key(getKeyRange().begin);
 			return map(getWorkerInterfaces(ryw->getDatabase()->getConnectionFile()),
-			           [prefix = prefix, kr = KeyRange(kr)](const Standalone<RangeResultRef>& in) {
-				           Standalone<RangeResultRef> result;
+			           [prefix = prefix, kr = KeyRange(kr)](const RangeResult& in) {
+				           RangeResult result;
 				           for (const auto& [k_, v] : in) {
 					           auto k = k_.withPrefix(prefix);
 					           if (kr.contains(k))
@@ -777,7 +776,7 @@ struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeReadImpl {
 				           return result;
 			           });
 		} else {
-			return Standalone<RangeResultRef>();
+			return RangeResult();
 		}
 	}
 
@@ -785,10 +784,10 @@ struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeReadImpl {
 };
 
 struct SingleSpecialKeyImpl : SpecialKeyRangeReadImpl {
-	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override {
+	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override {
 		ASSERT(kr.contains(k));
 		return map(f(ryw), [k = k](Optional<Value> v) {
-			Standalone<RangeResultRef> result;
+			RangeResult result;
 			if (v.present()) {
 				result.push_back_deep(result.arena(), KeyValueRef(k, v.get()));
 			}
@@ -807,11 +806,11 @@ private:
 class HealthMetricsRangeImpl : public SpecialKeyRangeAsyncImpl {
 public:
 	explicit HealthMetricsRangeImpl(KeyRangeRef kr);
-	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 };
 
-static Standalone<RangeResultRef> healthMetricsToKVPairs(const HealthMetrics& metrics, KeyRangeRef kr) {
-	Standalone<RangeResultRef> result;
+static RangeResult healthMetricsToKVPairs(const HealthMetrics& metrics, KeyRangeRef kr) {
+	RangeResult result;
 	if (CLIENT_BUGGIFY)
 		return result;
 	if (kr.contains(LiteralStringRef("\xff\xff/metrics/health/aggregate")) && metrics.worstStorageDurabilityLag != 0) {
@@ -881,8 +880,7 @@ static Standalone<RangeResultRef> healthMetricsToKVPairs(const HealthMetrics& me
 	return result;
 }
 
-ACTOR static Future<Standalone<RangeResultRef>> healthMetricsGetRangeActor(ReadYourWritesTransaction* ryw,
-                                                                           KeyRangeRef kr) {
+ACTOR static Future<RangeResult> healthMetricsGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	HealthMetrics metrics = wait(ryw->getDatabase()->getHealthMetrics(
 	    /*detailed ("per process")*/ kr.intersects(KeyRangeRef(LiteralStringRef("\xff\xff/metrics/health/storage/"),
 	                                                           LiteralStringRef("\xff\xff/metrics/health/storage0"))) ||
@@ -893,8 +891,7 @@ ACTOR static Future<Standalone<RangeResultRef>> healthMetricsGetRangeActor(ReadY
 
 HealthMetricsRangeImpl::HealthMetricsRangeImpl(KeyRangeRef kr) : SpecialKeyRangeAsyncImpl(kr) {}
 
-Future<Standalone<RangeResultRef>> HealthMetricsRangeImpl::getRange(ReadYourWritesTransaction* ryw,
-                                                                    KeyRangeRef kr) const {
+Future<RangeResult> HealthMetricsRangeImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
 	return healthMetricsGetRangeActor(ryw, kr);
 }
 
@@ -1967,14 +1964,14 @@ AddressExclusion AddressExclusion::parse(StringRef const& key) {
 	}
 }
 
-Future<Standalone<RangeResultRef>> getRange(Database const& cx,
-                                            Future<Version> const& fVersion,
-                                            KeySelector const& begin,
-                                            KeySelector const& end,
-                                            GetRangeLimits const& limits,
-                                            bool const& reverse,
-                                            TransactionInfo const& info,
-                                            TagSet const& tags);
+Future<RangeResult> getRange(Database const& cx,
+                             Future<Version> const& fVersion,
+                             KeySelector const& begin,
+                             KeySelector const& end,
+                             GetRangeLimits const& limits,
+                             bool const& reverse,
+                             TransactionInfo const& info,
+                             TagSet const& tags);
 
 ACTOR Future<Optional<Value>> getValue(Future<Version> version,
                                        Key key,
@@ -2698,14 +2695,14 @@ void transformRangeLimits(GetRangeLimits limits, bool reverse, GetKeyValuesReque
 	}
 }
 
-ACTOR Future<Standalone<RangeResultRef>> getExactRange(Database cx,
-                                                       Version version,
-                                                       KeyRange keys,
-                                                       GetRangeLimits limits,
-                                                       bool reverse,
-                                                       TransactionInfo info,
-                                                       TagSet tags) {
-	state Standalone<RangeResultRef> output;
+ACTOR Future<RangeResult> getExactRange(Database cx,
+                                        Version version,
+                                        KeyRange keys,
+                                        GetRangeLimits limits,
+                                        bool reverse,
+                                        TransactionInfo info,
+                                        TagSet tags) {
+	state RangeResult output;
 	state Span span("NAPI:getExactRange"_loc, info.spanID);
 
 	// printf("getExactRange( '%s', '%s' )\n", keys.begin.toString().c_str(), keys.end.toString().c_str());
@@ -2877,14 +2874,14 @@ Future<Key> resolveKey(Database const& cx,
 	return getKey(cx, key, version, info, tags);
 }
 
-ACTOR Future<Standalone<RangeResultRef>> getRangeFallback(Database cx,
-                                                          Version version,
-                                                          KeySelector begin,
-                                                          KeySelector end,
-                                                          GetRangeLimits limits,
-                                                          bool reverse,
-                                                          TransactionInfo info,
-                                                          TagSet tags) {
+ACTOR Future<RangeResult> getRangeFallback(Database cx,
+                                           Version version,
+                                           KeySelector begin,
+                                           KeySelector end,
+                                           GetRangeLimits limits,
+                                           bool reverse,
+                                           TransactionInfo info,
+                                           TagSet tags) {
 	if (version == latestVersion) {
 		state Transaction transaction(cx);
 		transaction.setOption(FDBTransactionOptions::CAUSAL_READ_RISKY);
@@ -2900,15 +2897,15 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeFallback(Database cx,
 	state Key b = wait(fb);
 	state Key e = wait(fe);
 	if (b >= e) {
-		return Standalone<RangeResultRef>();
+		return RangeResult();
 	}
 
 	// if e is allKeys.end, we have read through the end of the database
 	// if b is allKeys.begin, we have either read through the beginning of the database,
 	// or allKeys.begin exists in the database and will be part of the conflict range anyways
 
-	Standalone<RangeResultRef> _r = wait(getExactRange(cx, version, KeyRangeRef(b, e), limits, reverse, info, tags));
-	Standalone<RangeResultRef> r = _r;
+	RangeResult _r = wait(getExactRange(cx, version, KeyRangeRef(b, e), limits, reverse, info, tags));
+	RangeResult r = _r;
 
 	if (b == allKeys.begin && ((reverse && !r.more) || !reverse))
 		r.readToBegin = true;
@@ -2940,7 +2937,7 @@ void getRangeFinished(Database cx,
                       bool snapshot,
                       Promise<std::pair<Key, Key>> conflictRange,
                       bool reverse,
-                      Standalone<RangeResultRef> result) {
+                      RangeResult result) {
 	int64_t bytes = 0;
 	for (const KeyValueRef& kv : result) {
 		bytes += kv.key.size() + kv.value.size();
@@ -2986,21 +2983,21 @@ void getRangeFinished(Database cx,
 	}
 }
 
-ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx,
-                                                  Reference<TransactionLogInfo> trLogInfo,
-                                                  Future<Version> fVersion,
-                                                  KeySelector begin,
-                                                  KeySelector end,
-                                                  GetRangeLimits limits,
-                                                  Promise<std::pair<Key, Key>> conflictRange,
-                                                  bool snapshot,
-                                                  bool reverse,
-                                                  TransactionInfo info,
-                                                  TagSet tags) {
+ACTOR Future<RangeResult> getRange(Database cx,
+                                   Reference<TransactionLogInfo> trLogInfo,
+                                   Future<Version> fVersion,
+                                   KeySelector begin,
+                                   KeySelector end,
+                                   GetRangeLimits limits,
+                                   Promise<std::pair<Key, Key>> conflictRange,
+                                   bool snapshot,
+                                   bool reverse,
+                                   TransactionInfo info,
+                                   TagSet tags) {
 	state GetRangeLimits originalLimits(limits);
 	state KeySelector originalBegin = begin;
 	state KeySelector originalEnd = end;
-	state Standalone<RangeResultRef> output;
+	state RangeResult output;
 	state Span span("NAPI:getRange"_loc, info.spanID);
 
 	try {
@@ -3132,8 +3129,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx,
 					bool readToBegin = output.readToBegin;
 					bool readThroughEnd = output.readThroughEnd;
 
-					output = Standalone<RangeResultRef>(
-					    RangeResultRef(rep.data, modifiedSelectors || limits.isReached() || rep.more), rep.arena);
+					output = RangeResult(RangeResultRef(rep.data, modifiedSelectors || limits.isReached() || rep.more),
+					                     rep.arena);
 					output.readToBegin = readToBegin;
 					output.readThroughEnd = readThroughEnd;
 
@@ -3186,7 +3183,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx,
 					TEST(true); // !GetKeyValuesReply.more and modifiedSelectors in getRange
 
 					if (!rep.data.size()) {
-						Standalone<RangeResultRef> result = wait(getRangeFallback(
+						RangeResult result = wait(getRangeFallback(
 						    cx, version, originalBegin, originalEnd, originalLimits, reverse, info, tags));
 						getRangeFinished(cx,
 						                 trLogInfo,
@@ -3223,7 +3220,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx,
 					                    reverse ? (end - 1).isBackward() : begin.isBackward());
 
 					if (e.code() == error_code_wrong_shard_server) {
-						Standalone<RangeResultRef> result = wait(getRangeFallback(
+						RangeResult result = wait(getRangeFallback(
 						    cx, version, originalBegin, originalEnd, originalLimits, reverse, info, tags));
 						getRangeFinished(cx,
 						                 trLogInfo,
@@ -3259,14 +3256,14 @@ ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx,
 	}
 }
 
-Future<Standalone<RangeResultRef>> getRange(Database const& cx,
-                                            Future<Version> const& fVersion,
-                                            KeySelector const& begin,
-                                            KeySelector const& end,
-                                            GetRangeLimits const& limits,
-                                            bool const& reverse,
-                                            TransactionInfo const& info,
-                                            TagSet const& tags) {
+Future<RangeResult> getRange(Database const& cx,
+                             Future<Version> const& fVersion,
+                             KeySelector const& begin,
+                             KeySelector const& end,
+                             GetRangeLimits const& limits,
+                             bool const& reverse,
+                             TransactionInfo const& info,
+                             TagSet const& tags) {
 	return getRange(cx,
 	                Reference<TransactionLogInfo>(),
 	                fVersion,
@@ -3488,18 +3485,18 @@ ACTOR Future<Standalone<VectorRef<const char*>>> getAddressesForKeyActor(Key key
 	// serverInterfaces vector being empty, which will cause us to return an empty addresses list.
 
 	state Key ksKey = keyServersKey(key);
-	state Standalone<RangeResultRef> serverTagResult = wait(getRange(cx,
-	                                                                 ver,
-	                                                                 lastLessOrEqual(serverTagKeys.begin),
-	                                                                 firstGreaterThan(serverTagKeys.end),
-	                                                                 GetRangeLimits(CLIENT_KNOBS->TOO_MANY),
-	                                                                 false,
-	                                                                 info,
-	                                                                 options.readTags));
+	state RangeResult serverTagResult = wait(getRange(cx,
+	                                                  ver,
+	                                                  lastLessOrEqual(serverTagKeys.begin),
+	                                                  firstGreaterThan(serverTagKeys.end),
+	                                                  GetRangeLimits(CLIENT_KNOBS->TOO_MANY),
+	                                                  false,
+	                                                  info,
+	                                                  options.readTags));
 	ASSERT(!serverTagResult.more && serverTagResult.size() < CLIENT_KNOBS->TOO_MANY);
-	Future<Standalone<RangeResultRef>> futureServerUids = getRange(
+	Future<RangeResult> futureServerUids = getRange(
 	    cx, ver, lastLessOrEqual(ksKey), firstGreaterThan(ksKey), GetRangeLimits(1), false, info, options.readTags);
-	Standalone<RangeResultRef> serverUids = wait(futureServerUids);
+	RangeResult serverUids = wait(futureServerUids);
 
 	ASSERT(serverUids.size()); // every shard needs to have a team
 
@@ -3579,16 +3576,16 @@ Future<Key> Transaction::getKey(const KeySelector& key, bool snapshot) {
 	return getKeyAndConflictRange(cx, key, getReadVersion(), conflictRange, info, options.readTags);
 }
 
-Future<Standalone<RangeResultRef>> Transaction::getRange(const KeySelector& begin,
-                                                         const KeySelector& end,
-                                                         GetRangeLimits limits,
-                                                         bool snapshot,
-                                                         bool reverse) {
+Future<RangeResult> Transaction::getRange(const KeySelector& begin,
+                                          const KeySelector& end,
+                                          GetRangeLimits limits,
+                                          bool snapshot,
+                                          bool reverse) {
 	++cx->transactionLogicalReads;
 	++cx->transactionGetRangeRequests;
 
 	if (limits.isReached())
-		return Standalone<RangeResultRef>();
+		return RangeResult();
 
 	if (!limits.isValid())
 		return range_limits_invalid();
@@ -3609,7 +3606,7 @@ Future<Standalone<RangeResultRef>> Transaction::getRange(const KeySelector& begi
 
 	if (b.offset >= e.offset && b.getKey() >= e.getKey()) {
 		TEST(true); // Native range inverted
-		return Standalone<RangeResultRef>();
+		return RangeResult();
 	}
 
 	Promise<std::pair<Key, Key>> conflictRange;
@@ -3621,11 +3618,11 @@ Future<Standalone<RangeResultRef>> Transaction::getRange(const KeySelector& begi
 	    cx, trLogInfo, getReadVersion(), b, e, limits, conflictRange, snapshot, reverse, info, options.readTags);
 }
 
-Future<Standalone<RangeResultRef>> Transaction::getRange(const KeySelector& begin,
-                                                         const KeySelector& end,
-                                                         int limit,
-                                                         bool snapshot,
-                                                         bool reverse) {
+Future<RangeResult> Transaction::getRange(const KeySelector& begin,
+                                          const KeySelector& end,
+                                          int limit,
+                                          bool snapshot,
+                                          bool reverse) {
 	return getRange(begin, end, GetRangeLimits(limit), snapshot, reverse);
 }
 
@@ -3981,7 +3978,7 @@ ACTOR void checkWrites(Database cx,
 			if (m.mutated) {
 				checkedRanges++;
 				if (m.cleared) {
-					Standalone<RangeResultRef> shouldBeEmpty = wait(tr.getRange(it->range(), 1));
+					RangeResult shouldBeEmpty = wait(tr.getRange(it->range(), 1));
 					if (shouldBeEmpty.size()) {
 						TraceEvent(SevError, "CheckWritesFailed")
 						    .detail("Class", "Clear")
@@ -5640,7 +5637,7 @@ ACTOR static Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef add
 	state std::map<Key, std::pair<Value, ClientLeaderRegInterface>> address_interface;
 	if (!cx->getConnectionFile())
 		return 0;
-	Standalone<RangeResultRef> kvs = wait(getWorkerInterfaces(cx->getConnectionFile()));
+	RangeResult kvs = wait(getWorkerInterfaces(cx->getConnectionFile()));
 	ASSERT(!kvs.more);
 	// Note: reuse this knob from fdbcli, change it if necessary
 	Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));

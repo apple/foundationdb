@@ -184,10 +184,10 @@ struct VersionStampWorkload : TestWorkload {
 			tr.setVersion(readVersion);
 		}
 
-		state Standalone<RangeResultRef> result;
+		state RangeResult result;
 		loop {
 			try {
-				Standalone<RangeResultRef> result_ = wait(tr.getRange(
+				RangeResult result_ = wait(tr.getRange(
 				    KeyRangeRef(self->vsValuePrefix, endOfRange(self->vsValuePrefix)), self->nodeCount + 1));
 				result = result_;
 				if ((self->apiVersion >= 610 || self->apiVersion == Database::API_VERSION_LATEST) &&
@@ -249,7 +249,7 @@ struct VersionStampWorkload : TestWorkload {
 					}
 				}
 
-				Standalone<RangeResultRef> result__ = wait(
+				RangeResult result__ = wait(
 				    tr.getRange(KeyRangeRef(self->vsKeyPrefix, endOfRange(self->vsKeyPrefix)), self->nodeCount + 1));
 				result = result__;
 				ASSERT(result.size() <= self->nodeCount);

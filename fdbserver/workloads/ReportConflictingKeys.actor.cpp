@@ -192,13 +192,12 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 					                LiteralStringRef("\xff\xff").withPrefix(conflictingKeysRange.begin));
 					// The getRange here using the special key prefix "\xff\xff/transaction/conflicting_keys/" happens
 					// locally Thus, the error handling is not needed here
-					Future<Standalone<RangeResultRef>> conflictingKeyRangesFuture =
-					    tr2->getRange(ckr, CLIENT_KNOBS->TOO_MANY);
+					Future<RangeResult> conflictingKeyRangesFuture = tr2->getRange(ckr, CLIENT_KNOBS->TOO_MANY);
 					ASSERT(conflictingKeyRangesFuture.isReady());
 
 					tr2 = makeReference<ReadYourWritesTransaction>(cx);
 
-					const Standalone<RangeResultRef> conflictingKeyRanges = conflictingKeyRangesFuture.get();
+					const RangeResult conflictingKeyRanges = conflictingKeyRangesFuture.get();
 					ASSERT(conflictingKeyRanges.size() &&
 					       (conflictingKeyRanges.size() <= readConflictRanges.size() * 2));
 					ASSERT(conflictingKeyRanges.size() % 2 == 0);

@@ -152,6 +152,12 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx) {
 	    nullptr);
 }
 
+// This constructor is only used while refactoring fdbcli and only called from the main thread
+ThreadSafeTransaction::ThreadSafeTransaction(ReadYourWritesTransaction* ryw) : tr(ryw) {
+	if (tr)
+		tr->addref();
+}
+
 ThreadSafeTransaction::~ThreadSafeTransaction() {
 	ReadYourWritesTransaction* tr = this->tr;
 	if (tr)
@@ -217,31 +223,31 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> ThreadSafeTransaction::getRangeSplit
 	});
 }
 
-ThreadFuture<Standalone<RangeResultRef>> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
-                                                                         const KeySelectorRef& end,
-                                                                         int limit,
-                                                                         bool snapshot,
-                                                                         bool reverse) {
+ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
+                                                          const KeySelectorRef& end,
+                                                          int limit,
+                                                          bool snapshot,
+                                                          bool reverse) {
 	KeySelector b = begin;
 	KeySelector e = end;
 
 	ReadYourWritesTransaction* tr = this->tr;
-	return onMainThread([tr, b, e, limit, snapshot, reverse]() -> Future<Standalone<RangeResultRef>> {
+	return onMainThread([tr, b, e, limit, snapshot, reverse]() -> Future<RangeResult> {
 		tr->checkDeferredError();
 		return tr->getRange(b, e, limit, snapshot, reverse);
 	});
 }
 
-ThreadFuture<Standalone<RangeResultRef>> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
-                                                                         const KeySelectorRef& end,
-                                                                         GetRangeLimits limits,
-                                                                         bool snapshot,
-                                                                         bool reverse) {
+ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
+                                                          const KeySelectorRef& end,
+                                                          GetRangeLimits limits,
+                                                          bool snapshot,
+                                                          bool reverse) {
 	KeySelector b = begin;
 	KeySelector e = end;
 
 	ReadYourWritesTransaction* tr = this->tr;
-	return onMainThread([tr, b, e, limits, snapshot, reverse]() -> Future<Standalone<RangeResultRef>> {
+	return onMainThread([tr, b, e, limits, snapshot, reverse]() -> Future<RangeResult> {
 		tr->checkDeferredError();
 		return tr->getRange(b, e, limits, snapshot, reverse);
 	});

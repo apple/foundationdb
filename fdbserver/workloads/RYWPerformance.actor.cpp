@@ -118,13 +118,13 @@ struct RYWPerformanceWorkload : TestWorkload {
 				tr->clear(KeyRangeRef(self->keyForIndex(i), self->keyForIndex(i + 1)));
 			}
 		} else if (type == 9) {
-			std::vector<Future<Standalone<RangeResultRef>>> gets;
+			std::vector<Future<RangeResult>> gets;
 			for (i = 0; i < self->nodes; i++) {
 				gets.push_back(tr->getRange(KeyRangeRef(self->keyForIndex(i), self->keyForIndex(i + 2)), self->nodes));
 			}
 			wait(waitForAll(gets));
 		} else if (type == 10) {
-			std::vector<Future<Standalone<RangeResultRef>>> gets;
+			std::vector<Future<RangeResult>> gets;
 			for (i = 0; i < self->nodes; i++) {
 				gets.push_back(tr->getRange(KeyRangeRef(self->keyForIndex(i), self->keyForIndex(i + 2)), self->nodes));
 			}
@@ -133,7 +133,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 				tr->set(self->keyForIndex(i), LiteralStringRef("foo"));
 			}
 		} else if (type == 11) {
-			std::vector<Future<Standalone<RangeResultRef>>> gets;
+			std::vector<Future<RangeResult>> gets;
 			for (i = 0; i < self->nodes; i++) {
 				gets.push_back(tr->getRange(KeyRangeRef(self->keyForIndex(i), self->keyForIndex(i + 2)), self->nodes));
 			}
@@ -142,7 +142,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 				tr->set(self->keyForIndex(i), LiteralStringRef("foo"));
 			}
 		} else if (type == 12) {
-			std::vector<Future<Standalone<RangeResultRef>>> gets;
+			std::vector<Future<RangeResult>> gets;
 			for (i = 0; i < self->nodes; i++) {
 				gets.push_back(tr->getRange(KeyRangeRef(self->keyForIndex(i), self->keyForIndex(i + 2)), self->nodes));
 			}
@@ -151,7 +151,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 				tr->clear(self->keyForIndex(i));
 			}
 		} else if (type == 13) {
-			std::vector<Future<Standalone<RangeResultRef>>> gets;
+			std::vector<Future<RangeResult>> gets;
 			for (i = 0; i < self->nodes; i++) {
 				gets.push_back(tr->getRange(KeyRangeRef(self->keyForIndex(i), self->keyForIndex(i + 2)), self->nodes));
 			}

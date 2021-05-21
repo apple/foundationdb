@@ -1,3 +1,4 @@
+[configuration]
 minimumReplication = 2
 
 [[test]]

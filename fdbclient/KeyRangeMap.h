@@ -126,16 +126,16 @@ private:
 // krm*(): KeyRangeMap-like abstraction stored in the database, accessed through Transactions
 class Transaction;
 class ReadYourWritesTransaction;
-Future<Standalone<RangeResultRef>> krmGetRanges(Transaction* const& tr,
-                                                Key const& mapPrefix,
-                                                KeyRange const& keys,
-                                                int const& limit = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-                                                int const& limitBytes = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
-Future<Standalone<RangeResultRef>> krmGetRanges(Reference<ReadYourWritesTransaction> const& tr,
-                                                Key const& mapPrefix,
-                                                KeyRange const& keys,
-                                                int const& limit = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-                                                int const& limitBytes = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
+Future<RangeResult> krmGetRanges(Transaction* const& tr,
+                                 Key const& mapPrefix,
+                                 KeyRange const& keys,
+                                 int const& limit = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+                                 int const& limitBytes = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
+Future<RangeResult> krmGetRanges(Reference<ReadYourWritesTransaction> const& tr,
+                                 Key const& mapPrefix,
+                                 KeyRange const& keys,
+                                 int const& limit = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+                                 int const& limitBytes = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
 void krmSetPreviouslyEmptyRange(Transaction* tr,
                                 const KeyRef& mapPrefix,
                                 const KeyRangeRef& keys,
@@ -162,7 +162,7 @@ Future<Void> krmSetRangeCoalescing(Reference<ReadYourWritesTransaction> const& t
                                    KeyRange const& range,
                                    KeyRange const& maxRange,
                                    Value const& value);
-Standalone<RangeResultRef> krmDecodeRanges(KeyRef mapPrefix, KeyRange keys, Standalone<RangeResultRef> kv);
+RangeResult krmDecodeRanges(KeyRef mapPrefix, KeyRange keys, RangeResult kv);
 
 template <class Val, class Metric, class MetricFunc>
 std::vector<KeyRangeWith<Val>> KeyRangeMap<Val, Metric, MetricFunc>::getAffectedRangesAfterInsertion(

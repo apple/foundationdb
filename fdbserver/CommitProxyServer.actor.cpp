@@ -1511,8 +1511,7 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 			GetStorageServerRejoinInfoReply rep;
 			rep.version = commitData->version;
 			rep.tag = decodeServerTagValue(commitData->txnStateStore->readValue(serverTagKeyFor(req.id)).get().get());
-			Standalone<RangeResultRef> history =
-			    commitData->txnStateStore->readRange(serverTagHistoryRangeFor(req.id)).get();
+			RangeResult history = commitData->txnStateStore->readRange(serverTagHistoryRangeFor(req.id)).get();
 			for (int i = history.size() - 1; i >= 0; i--) {
 				rep.history.push_back(
 				    std::make_pair(decodeServerTagHistoryKey(history[i].key), decodeServerTagValue(history[i].value)));
@@ -1936,18 +1935,18 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 
 				if (txnSequences.size() == maxSequence) {
 					state KeyRange txnKeys = allKeys;
-					Standalone<RangeResultRef> UIDtoTagMap = commitData.txnStateStore->readRange(serverTagKeys).get();
+					RangeResult UIDtoTagMap = commitData.txnStateStore->readRange(serverTagKeys).get();
 					state std::map<Tag, UID> tag_uid;
 					for (const KeyValueRef kv : UIDtoTagMap) {
 						tag_uid[decodeServerTagValue(kv.value)] = decodeServerTagKey(kv.key);
 					}
 					loop {
 						wait(yield());
-						Standalone<RangeResultRef> data = commitData.txnStateStore
-						                                      ->readRange(txnKeys,
-						                                                  SERVER_KNOBS->BUGGIFIED_ROW_LIMIT,
-						                                                  SERVER_KNOBS->APPLY_MUTATION_BYTES)
-						                                      .get();
+						RangeResult data = commitData.txnStateStore
+						                       ->readRange(txnKeys,
+						                                   SERVER_KNOBS->BUGGIFIED_ROW_LIMIT,
+						                                   SERVER_KNOBS->APPLY_MUTATION_BYTES)
+						                       .get();
 						if (!data.size())
 							break;
 						((KeyRangeRef&)txnKeys) = KeyRangeRef(keyAfter(data.back().key, txnKeys.arena()), txnKeys.end);

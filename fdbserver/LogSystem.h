@@ -410,6 +410,8 @@ struct ILogSystem {
 
 		virtual Optional<UID> getPrimaryPeekLocation() const = 0;
 
+		virtual Optional<UID> getCurrentPeekLocation() const = 0;
+
 		virtual void addref() = 0;
 
 		virtual void delref() = 0;
@@ -473,6 +475,7 @@ struct ILogSystem {
 		Version popped() const override;
 		Version getMinKnownCommittedVersion() const override;
 		Optional<UID> getPrimaryPeekLocation() const override;
+		Optional<UID> getCurrentPeekLocation() const override;
 
 		void addref() override { ReferenceCounted<ServerPeekCursor>::addref(); }
 
@@ -534,6 +537,7 @@ struct ILogSystem {
 		Version popped() const override;
 		Version getMinKnownCommittedVersion() const override;
 		Optional<UID> getPrimaryPeekLocation() const override;
+		Optional<UID> getCurrentPeekLocation() const override;
 
 		void addref() override { ReferenceCounted<MergedPeekCursor>::addref(); }
 
@@ -589,6 +593,7 @@ struct ILogSystem {
 		Version popped() const override;
 		Version getMinKnownCommittedVersion() const override;
 		Optional<UID> getPrimaryPeekLocation() const override;
+		Optional<UID> getCurrentPeekLocation() const override;
 
 		void addref() override { ReferenceCounted<SetPeekCursor>::addref(); }
 
@@ -620,6 +625,7 @@ struct ILogSystem {
 		Version popped() const override;
 		Version getMinKnownCommittedVersion() const override;
 		Optional<UID> getPrimaryPeekLocation() const override;
+		Optional<UID> getCurrentPeekLocation() const override;
 
 		void addref() override { ReferenceCounted<MultiCursor>::addref(); }
 
@@ -698,6 +704,7 @@ struct ILogSystem {
 		Version popped() const override;
 		Version getMinKnownCommittedVersion() const override;
 		Optional<UID> getPrimaryPeekLocation() const override;
+		Optional<UID> getCurrentPeekLocation() const override;
 
 		void addref() override { ReferenceCounted<BufferedCursor>::addref(); }
 

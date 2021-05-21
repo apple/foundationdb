@@ -144,6 +144,16 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      "counter":0,
                      "roughness":0.0
                   },
+                  "fetched_versions":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "fetches_from_logs":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
                   "grv_latency_statistics":{
                      "default":{
                         "count":0,
@@ -183,6 +193,18 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      "p99.9":0.0
                   },
                   "commit_latency_statistics":{
+                     "count":0,
+                     "min":0.0,
+                     "max":0.0,
+                     "median":0.0,
+                     "mean":0.0,
+                     "p25":0.0,
+                     "p90":0.0,
+                     "p95":0.0,
+                     "p99":0.0,
+                     "p99.9":0.0
+                  },
+                  "commit_batching_window_size":{
                      "count":0,
                      "min":0.0,
                      "max":0.0,
@@ -636,6 +658,10 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       "data_distribution_disabled_for_rebalance":true,
       "data_distribution_disabled":true,
       "active_primary_dc":"pv",
+      "bounce_impact":{
+         "can_clean_bounce":true,
+         "reason":""
+      },
       "configuration":{
          "log_anti_quorum":0,
          "log_replicas":2,

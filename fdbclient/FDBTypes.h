@@ -468,11 +468,12 @@ struct Traceable<KeyValueRef> : std::true_type {
 	}
 };
 
-typedef Standalone<KeyRef> Key;
-typedef Standalone<ValueRef> Value;
-typedef Standalone<KeyRangeRef> KeyRange;
-typedef Standalone<KeyValueRef> KeyValue;
-typedef Standalone<struct KeySelectorRef> KeySelector;
+using Key = Standalone<KeyRef>;
+using Value = Standalone<ValueRef>;
+using KeyRange = Standalone<KeyRangeRef>;
+using KeyValue = Standalone<KeyValueRef>;
+using KeySelector = Standalone<struct KeySelectorRef>;
+using RangeResult = Standalone<struct RangeResultRef>;
 
 enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
 
@@ -706,6 +707,7 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 		       " readToBegin:" + std::to_string(readToBegin) + " readThroughEnd:" + std::to_string(readThroughEnd);
 	}
 };
+using RangeResult = Standalone<RangeResultRef>;
 
 template <>
 struct Traceable<RangeResultRef> : std::true_type {
@@ -866,22 +868,36 @@ struct TLogSpillType {
 
 // Contains the amount of free and total space for a storage server, in bytes
 struct StorageBytes {
+	// Free space on the filesystem
 	int64_t free;
+	// Total space on the filesystem
 	int64_t total;
-	int64_t used; // Used by *this* store, not total-free
-	int64_t available; // Amount of disk space that can be used by data structure, including free disk space and
-	                   // internally reusable space
+	// Used by *this* store, not total - free
+	int64_t used;
+	// Amount of space available for use by the store, which includes free space on the filesystem
+	// and internal free space within the store data that is immediately reusable.
+	int64_t available;
+	// Amount of space that could eventually be available for use after garbage collection
+	int64_t temp;
 
 	StorageBytes() {}
-	StorageBytes(int64_t free, int64_t total, int64_t used, int64_t available)
-	  : free(free), total(total), used(used), available(available) {}
+	StorageBytes(int64_t free, int64_t total, int64_t used, int64_t available, int64_t temp = 0)
+	  : free(free), total(total), used(used), available(available), temp(temp) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, free, total, used, available);
 	}
-};
 
+	std::string toString() const {
+		return format("{%.2f MB total, %.2f MB free, %.2f MB available, %.2f MB used, %.2f MB temp}",
+		              total / 1e6,
+		              free / 1e6,
+		              available / 1e6,
+		              used / 1e6,
+		              temp / 1e6);
+	}
+};
 struct LogMessageVersion {
 	// Each message pushed into the log system has a unique, totally ordered LogMessageVersion
 	// See ILogSystem::push() for how these are assigned

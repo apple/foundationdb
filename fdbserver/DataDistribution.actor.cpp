@@ -435,7 +435,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 			}
 
 			state Future<vector<ProcessData>> workers = getWorkers(&tr);
-			state Future<Standalone<RangeResultRef>> serverList = tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+			state Future<RangeResult> serverList = tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
 			wait(success(workers) && success(serverList));
 			ASSERT(!serverList.get().more && serverList.get().size() < CLIENT_KNOBS->TOO_MANY);
 
@@ -469,13 +469,13 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 			try {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				wait(checkMoveKeysLockReadOnly(&tr, moveKeysLock, ddEnabledState));
-				state Standalone<RangeResultRef> UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-				Standalone<RangeResultRef> keyServers = wait(krmGetRanges(&tr,
-				                                                          keyServersPrefix,
-				                                                          KeyRangeRef(beginKey, allKeys.end),
-				                                                          SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
-				                                                          SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
+				RangeResult keyServers = wait(krmGetRanges(&tr,
+				                                           keyServersPrefix,
+				                                           KeyRangeRef(beginKey, allKeys.end),
+				                                           SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
+				                                           SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
 				succeeded = true;
 
 				vector<UID> src, dest, last;
@@ -3657,16 +3657,14 @@ ACTOR Future<Void> trackExcludedServers(DDTeamCollection* self) {
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			state Future<Standalone<RangeResultRef>> fresultsExclude =
-			    tr.getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY);
-			state Future<Standalone<RangeResultRef>> fresultsFailed =
-			    tr.getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY);
+			state Future<RangeResult> fresultsExclude = tr.getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY);
+			state Future<RangeResult> fresultsFailed = tr.getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY);
 			wait(success(fresultsExclude) && success(fresultsFailed));
 
-			Standalone<RangeResultRef> excludedResults = fresultsExclude.get();
+			RangeResult excludedResults = fresultsExclude.get();
 			ASSERT(!excludedResults.more && excludedResults.size() < CLIENT_KNOBS->TOO_MANY);
 
-			Standalone<RangeResultRef> failedResults = fresultsFailed.get();
+			RangeResult failedResults = fresultsFailed.get();
 			ASSERT(!failedResults.more && failedResults.size() < CLIENT_KNOBS->TOO_MANY);
 
 			std::set<AddressExclusion> excluded;
@@ -3720,7 +3718,7 @@ ACTOR Future<Void> trackExcludedServers(DDTeamCollection* self) {
 
 ACTOR Future<vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(Transaction* tr) {
 	state Future<vector<ProcessData>> workers = getWorkers(tr);
-	state Future<Standalone<RangeResultRef>> serverList = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+	state Future<RangeResult> serverList = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
 	wait(success(workers) && success(serverList));
 	ASSERT(!serverList.get().more && serverList.get().size() < CLIENT_KNOBS->TOO_MANY);
 
@@ -4873,13 +4871,13 @@ ACTOR Future<Void> debugCheckCoalescing(Database cx) {
 	state Transaction tr(cx);
 	loop {
 		try {
-			state Standalone<RangeResultRef> serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+			state RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 			state int i;
 			for (i = 0; i < serverList.size(); i++) {
 				state UID id = decodeServerListValue(serverList[i].value).id();
-				Standalone<RangeResultRef> ranges = wait(krmGetRanges(&tr, serverKeysPrefixFor(id), allKeys));
+				RangeResult ranges = wait(krmGetRanges(&tr, serverKeysPrefixFor(id), allKeys));
 				ASSERT(ranges.end()[-1].key == allKeys.end);
 
 				for (int j = 0; j < ranges.size() - 2; j++)
@@ -5011,8 +5009,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-						Standalone<RangeResultRef> replicaKeys =
-						    wait(tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY));
+						RangeResult replicaKeys = wait(tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY));
 
 						for (auto& kv : replicaKeys) {
 							auto dcId = decodeDatacenterReplicasKey(kv.key);
@@ -5570,7 +5567,7 @@ ACTOR Future<Void> cacheServerWatcher(Database* db) {
 	loop {
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
-			Standalone<RangeResultRef> range = wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult range = wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!range.more);
 			std::set<UID> caches;
 			for (auto& kv : range) {
