@@ -50,93 +50,9 @@ bool valgrindPrecise() {
 }
 #endif
 
-#ifndef USE_JEMALLOC
+#ifdef USE_JEMALLOC
 
-void traceHeapMetrics() {}
-[[nodiscard]] void* allocateFast(int size) noexcept {
-	return malloc(size);
-}
-void freeFast(void* ptr, int size) noexcept {
-	return free(ptr);
-}
-void freeFast(void* ptr) noexcept {
-	return free(ptr);
-}
-
-#if defined(_WIN32)
-[[nodiscard]] void* alignedAllocateFast(int align, int size) noexcept {
-	auto* result = _aligned_malloc(size, align);
-	if (!result) {
-		platform::outOfMemory();
-	}
-	return result;
-}
-void alignedFreeFast(void* ptr) noexcept {
-	return _aligned_free(ptr);
-}
-#else
-[[nodiscard]] void* alignedAllocateFast(int align, int size) noexcept {
-	// aligned_alloc isn't always available
-	void* ptr = nullptr;
-	posix_memalign(&ptr, align, size);
-	if (!ptr) {
-		platform::outOfMemory();
-	}
-	return ptr;
-}
-void alignedFreeFast(void* ptr) noexcept {
-	return free(ptr);
-}
-#endif
-
-#else
-
-#include "jemalloc/jemalloc.h"
 const char* je_malloc_conf = "prof:true";
-void traceHeapMetrics() {
-	// Force cached stats to update
-	je_mallctl("thread.tcache.flush", nullptr, nullptr, nullptr, 0);
-	size_t epoch = 0;
-	je_mallctl("epoch", nullptr, nullptr, &epoch, sizeof(epoch));
-
-	size_t sz, allocated, active, metadata, resident, mapped;
-	sz = sizeof(size_t);
-	if (je_mallctl("stats.allocated", &allocated, &sz, nullptr, 0) == 0 &&
-	    je_mallctl("stats.active", &active, &sz, nullptr, 0) == 0 &&
-	    je_mallctl("stats.metadata", &metadata, &sz, nullptr, 0) == 0 &&
-	    je_mallctl("stats.resident", &resident, &sz, nullptr, 0) == 0 &&
-	    je_mallctl("stats.mapped", &mapped, &sz, nullptr, 0) == 0) {
-		TraceEvent("HeapMetrics")
-		    .detail("Allocated", allocated)
-		    .detail("Active", active)
-		    .detail("Metadata", metadata)
-		    .detail("Resident", resident)
-		    .detail("Mapped", mapped);
-	}
-}
-[[nodiscard]] void* allocateFast(int size) noexcept {
-	auto* result = je_mallocx(size, /*flags*/ 0);
-	if (!result) {
-		platform::outOfMemory();
-	}
-	return result;
-}
-void freeFast(void* ptr, int size) noexcept {
-	return je_sdallocx(ptr, size, /*flags*/ 0);
-}
-void freeFast(void* ptr) noexcept {
-	return je_dallocx(ptr, /*flags*/ 0);
-}
-[[nodiscard]] void* alignedAllocateFast(int align, int size) noexcept {
-	auto* result = je_aligned_alloc(align, size);
-	if (!result) {
-		platform::outOfMemory();
-	}
-	return result;
-}
-void alignedFreeFast(void* ptr) noexcept {
-	return je_free(ptr);
-}
 
 TEST_CASE("/FastAlloc/4096-aligned-allocation-no-internal-fragmentation") {
 	auto* p = alignedAllocateFast(4096, 4096);
