@@ -1536,9 +1536,6 @@ private:
 };
 } // namespace
 
-// Heap profile by default and don't return memory to the OS in fdbserver
-const char* je_malloc_conf = "prof:true,dirty_decay_ms:-1";
-
 int main(int argc, char* argv[]) {
 	try {
 		platformInit();

@@ -92,6 +92,7 @@ void alignedFreeFast(void* ptr) noexcept {
 #else
 
 #include "jemalloc/jemalloc.h"
+const char* je_malloc_conf = "prof:true";
 void traceHeapMetrics() {
 	// Force cached stats to update
 	je_mallctl("thread.tcache.flush", nullptr, nullptr, nullptr, 0);
