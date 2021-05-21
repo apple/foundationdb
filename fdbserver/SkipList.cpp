@@ -26,7 +26,6 @@
 #include <string>
 #include <vector>
 
-#include "flow/FastAlloc.h"
 #include "flow/Platform.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/PerfMetric.h"
@@ -260,7 +259,7 @@ private:
 		static Node* create(const StringRef& value, int level) {
 			int nodeSize = sizeof(Node) + value.size() + (level + 1) * (sizeof(Node*) + sizeof(Version));
 
-			Node* n = reinterpret_cast<Node*>(alignedAllocateFast(64, nodeSize));
+			Node* n = reinterpret_cast<Node*>(allocateFast(nodeSize));
 			n->nPointers = level + 1;
 
 			n->valueLength = value.size();
@@ -279,7 +278,7 @@ private:
 			setMaxVersion(level, v);
 		}
 
-		void destroy() { alignedFreeFast(this); }
+		void destroy() { freeFast(this, getNodeSize()); }
 
 	private:
 		int getNodeSize() const { return sizeof(Node) + valueLength + nPointers * (sizeof(Node*) + sizeof(Version)); }
