@@ -52,8 +52,6 @@ bool valgrindPrecise() {
 
 #ifdef USE_JEMALLOC
 
-const char* je_malloc_conf = "prof:true";
-
 TEST_CASE("/FastAlloc/4096-aligned-allocation-no-internal-fragmentation") {
 	auto* p = alignedAllocateFast(4096, 4096);
 	ASSERT(je_sallocx(p, /*flags*/ 0) == 4096);
