@@ -10,6 +10,9 @@ Release Notes
 * Added ``commit_batching_window_size`` to the proxy roles section of status to record statistics about commit batching window size on each proxy. `(PR #4736) <https://github.com/apple/foundationdb/pull/4736>`_
 * The multi-version client now requires at most two client connections with version 6.2 or larger, regardless of how many external clients are configured. Clients older than 6.2 will continue to create an additional connection each. `(PR #4667) <https://github.com/apple/foundationdb/pull/4667>`_
 * Fix an accounting error that could potentially result in inaccuracies in priority busyness metrics. `(PR #4824) <https://github.com/apple/foundationdb/pull/4824>`_
+* Added ``cluster.bounce_impact`` section to status to report if there will be any extra effects when bouncing the cluster, and if so, the reason for those effects. `(PR #4770) <https://github.com/apple/foundationdb/pull/4770>`_
+* Added ``fetched_versions`` to the storage metrics section of status to report how fast a storage server is catching up in versions. `(PR #4770) <https://github.com/apple/foundationdb/pull/4770>`_
+* Added ``fetches_from_logs`` to the storage metrics section of status to report how frequently a storage server fetches updates from transaction logs. `(PR #4770) <https://github.com/apple/foundationdb/pull/4770>`_
 
 6.3.12
 ======

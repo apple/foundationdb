@@ -390,10 +390,14 @@ Version ILogSystem::ServerPeekCursor::getMinKnownCommittedVersion() {
 }
 
 Optional<UID> ILogSystem::ServerPeekCursor::getPrimaryPeekLocation() {
-	if (interf) {
+	if (interf && interf->get().present()) {
 		return interf->get().id();
 	}
 	return Optional<UID>();
+}
+
+Optional<UID> ILogSystem::ServerPeekCursor::getCurrentPeekLocation() {
+	return ILogSystem::ServerPeekCursor::getPrimaryPeekLocation();
 }
 
 Version ILogSystem::ServerPeekCursor::popped() {
@@ -666,6 +670,13 @@ Version ILogSystem::MergedPeekCursor::getMinKnownCommittedVersion() {
 Optional<UID> ILogSystem::MergedPeekCursor::getPrimaryPeekLocation() {
 	if (bestServer >= 0) {
 		return serverCursors[bestServer]->getPrimaryPeekLocation();
+	}
+	return Optional<UID>();
+}
+
+Optional<UID> ILogSystem::MergedPeekCursor::getCurrentPeekLocation() {
+	if (currentCursor >= 0) {
+		return serverCursors[currentCursor]->getPrimaryPeekLocation();
 	}
 	return Optional<UID>();
 }
@@ -1020,6 +1031,13 @@ Optional<UID> ILogSystem::SetPeekCursor::getPrimaryPeekLocation() {
 	return Optional<UID>();
 }
 
+Optional<UID> ILogSystem::SetPeekCursor::getCurrentPeekLocation() {
+	if (currentCursor >= 0 && currentSet >= 0) {
+		return serverCursors[currentSet][currentCursor]->getPrimaryPeekLocation();
+	}
+	return Optional<UID>();
+}
+
 Version ILogSystem::SetPeekCursor::popped() {
 	Version poppedVersion = 0;
 	for (auto& cursors : serverCursors) {
@@ -1118,6 +1136,10 @@ Version ILogSystem::MultiCursor::getMinKnownCommittedVersion() {
 
 Optional<UID> ILogSystem::MultiCursor::getPrimaryPeekLocation() {
 	return cursors.back()->getPrimaryPeekLocation();
+}
+
+Optional<UID> ILogSystem::MultiCursor::getCurrentPeekLocation() {
+	return cursors.back()->getCurrentPeekLocation();
 }
 
 Version ILogSystem::MultiCursor::popped() {
@@ -1397,6 +1419,10 @@ Version ILogSystem::BufferedCursor::getMinKnownCommittedVersion() {
 }
 
 Optional<UID> ILogSystem::BufferedCursor::getPrimaryPeekLocation() {
+	return Optional<UID>();
+}
+
+Optional<UID> ILogSystem::BufferedCursor::getCurrentPeekLocation() {
 	return Optional<UID>();
 }
 
