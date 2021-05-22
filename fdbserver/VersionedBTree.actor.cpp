@@ -4269,7 +4269,6 @@ private:
 			             upperBound.toString(false).c_str());
 
 			BTreePage::BinaryTree::DecodeCache* cache = new BTreePage::BinaryTree::DecodeCache(lowerBound, upperBound);
-			cache->addref();
 			page->userData = cache;
 			page->userDataDestructor = [](void* cache) { ((BTreePage::BinaryTree::DecodeCache*)cache)->delref(); };
 		}
@@ -7941,7 +7940,6 @@ ACTOR Future<Void> randomSeeks(VersionedBTree* btree, int count, char firstChar,
 	state Version readVer = btree->getLatestVersion();
 	state int c = 0;
 	state double readStart = timer();
-	printf("Executing %d random seeks\n", count);
 	state VersionedBTree::BTreeCursor cur;
 	wait(btree->initBTreeCursor(&cur, readVer));
 	while (c < count) {
@@ -7963,7 +7961,6 @@ ACTOR Future<Void> randomScans(VersionedBTree* btree,
 	state Version readVer = btree->getLatestVersion();
 	state int c = 0;
 	state double readStart = timer();
-	printf("Executing %d random scans\n", count);
 	state VersionedBTree::BTreeCursor cur;
 	wait(btree->initBTreeCursor(&cur, readVer));
 
@@ -8023,9 +8020,6 @@ TEST_CASE(":/redwood/correctness/pager/cow") {
 TEST_CASE(":/redwood/performance/set") {
 	state SignalableActorCollection actors;
 
-	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
-	g_redwoodMetrics.clear();
-
 	state std::string fileName = params.get("fileName").orDefault("unittest.redwood");
 	state int pageSize = params.getInt("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
 	state int64_t pageCacheBytes = params.getInt("pageCacheBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
@@ -8050,6 +8044,7 @@ TEST_CASE(":/redwood/performance/set") {
 	state int seeks = params.getInt("seeks").orDefault(1000000);
 	state int scans = params.getInt("scans").orDefault(20000);
 	state bool pagerMemoryOnly = params.getInt("pagerMemoryOnly").orDefault(0);
+	state bool traceMetrics = params.getInt("traceMetrics").orDefault(0);
 
 	printf("pageSize: %d\n", pageSize);
 	printf("pageCacheBytes: %" PRId64 "\n", pageCacheBytes);
@@ -8072,6 +8067,12 @@ TEST_CASE(":/redwood/performance/set") {
 	printf("fileName: %s\n", fileName.c_str());
 	printf("openExisting: %d\n", openExisting);
 	printf("insertRecords: %d\n", insertRecords);
+
+	// If using stdout for metrics, prevent trace event metrics logger from starting
+	if (!traceMetrics) {
+		g_redwoodMetricsActor = Void();
+		g_redwoodMetrics.clear();
+	}
 
 	if (!openExisting) {
 		printf("Deleting old test data\n");
@@ -8145,7 +8146,9 @@ TEST_CASE(":/redwood/performance/set") {
 				double* pIntervalStart = &intervalStart;
 
 				commit = map(btree->commit(), [=](Void result) {
-					printf("Committed:\n%s\n", g_redwoodMetrics.toString(true).c_str());
+					if (!traceMetrics) {
+						printf("%s\n", g_redwoodMetrics.toString(true).c_str());
+					}
 					double elapsed = timer() - *pIntervalStart;
 					printf("Committed %d keyValueBytes in %d records in %f seconds, %.2f MB/s\n",
 					       kvb,
@@ -8169,56 +8172,27 @@ TEST_CASE(":/redwood/performance/set") {
 		printf("StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 	}
 
-	printf("Warming cache with seeks\n");
-	for (int x = 0; x < concurrentSeeks; ++x) {
-		actors.add(randomSeeks(btree, seeks / concurrentSeeks, firstKeyChar, lastKeyChar));
+	if (scans > 0) {
+		printf("Parallel scans, count=%d, concurrency=%d, no readAhead ...\n", scans, concurrentScans);
+		for (int x = 0; x < concurrentScans; ++x) {
+			actors.add(randomScans(btree, scans / concurrentScans, 50, 0, firstKeyChar, lastKeyChar));
+		}
+		wait(actors.signalAndReset());
+		if (!traceMetrics) {
+			printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
+		}
 	}
-	wait(actors.signalAndReset());
-	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
-	printf("Serial scans with adaptive readAhead...\n");
-	actors.add(randomScans(btree, scans, 50, -1, firstKeyChar, lastKeyChar));
-	wait(actors.signalAndReset());
-	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
-
-	printf("Serial scans with readAhead 3 pages...\n");
-	actors.add(randomScans(btree, scans, 50, 12000, firstKeyChar, lastKeyChar));
-	wait(actors.signalAndReset());
-	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
-
-	printf("Serial scans with readAhead 2 pages...\n");
-	actors.add(randomScans(btree, scans, 50, 8000, firstKeyChar, lastKeyChar));
-	wait(actors.signalAndReset());
-	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
-
-	printf("Serial scans with readAhead 1 page...\n");
-	actors.add(randomScans(btree, scans, 50, 4000, firstKeyChar, lastKeyChar));
-	wait(actors.signalAndReset());
-	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
-
-	printf("Serial scans...\n");
-	actors.add(randomScans(btree, scans, 50, 0, firstKeyChar, lastKeyChar));
-	wait(actors.signalAndReset());
-	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
-
-	printf("Parallel scans, concurrency=%d, no readAhead ...\n", concurrentScans);
-	for (int x = 0; x < concurrentScans; ++x) {
-		actors.add(randomScans(btree, scans / concurrentScans, 50, 0, firstKeyChar, lastKeyChar));
+	if (seeks > 0) {
+		printf("Parallel seeks, count=%d, concurrency=%d ...\n", seeks, concurrentSeeks);
+		for (int x = 0; x < concurrentSeeks; ++x) {
+			actors.add(randomSeeks(btree, seeks / concurrentSeeks, firstKeyChar, lastKeyChar));
+		}
+		wait(actors.signalAndReset());
+		if (!traceMetrics) {
+			printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
+		}
 	}
-	wait(actors.signalAndReset());
-	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
-
-	printf("Serial seeks...\n");
-	actors.add(randomSeeks(btree, seeks, firstKeyChar, lastKeyChar));
-	wait(actors.signalAndReset());
-	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
-
-	printf("Parallel seeks, concurrency=%d ...\n", concurrentSeeks);
-	for (int x = 0; x < concurrentSeeks; ++x) {
-		actors.add(randomSeeks(btree, seeks / concurrentSeeks, firstKeyChar, lastKeyChar));
-	}
-	wait(actors.signalAndReset());
-	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	Future<Void> closedFuture = btree->onClosed();
 	btree->close();
