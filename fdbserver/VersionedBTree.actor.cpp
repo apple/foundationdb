@@ -1136,6 +1136,16 @@ public:
 		return nullptr;
 	}
 
+	// If index is in cache, move it to the front of the eviction order
+	void prioritizeEviction(const IndexType& index) {
+		auto i = cache.find(index);
+		if (i != cache.end()) {
+			auto ei = evictionOrder.iterator_to(i->second);
+			evictionOrder.erase(ei);
+			evictionOrder.push_front(i->second);
+		}
+	}
+
 	// Try to evict the item at index from cache
 	// Returns true if item is evicted or was not present in cache
 	bool tryEvict(const IndexType& index) {
@@ -1148,7 +1158,7 @@ public:
 			++g_redwoodMetrics.pagerEvictUnhit;
 		}
 		evictionOrder.erase(evictionOrder.iterator_to(toEvict));
-		cache.erase(toEvict.index);
+		cache.erase(i);
 		return true;
 	}
 
@@ -1170,6 +1180,7 @@ public:
 				evictionOrder.push_back(entry);
 			}
 		} else {
+			// Otherwise it was a cache miss
 			if (!noMiss) {
 				++g_redwoodMetrics.pagerCacheMiss;
 			}
@@ -1197,8 +1208,8 @@ public:
 				             toString(index).c_str());
 
 				if (!toEvict.item.evictable()) {
-					evictionOrder.erase(evictionOrder.iterator_to(toEvict));
-					evictionOrder.push_back(toEvict);
+					// shift the front to the back
+					evictionOrder.shift_forward(1);
 					++g_redwoodMetrics.pagerEvictFail;
 					break;
 				} else {
@@ -1216,8 +1227,7 @@ public:
 		return entry.item;
 	}
 
-	// Clears the cache, saving the entries, and then waits for eachWaits for each item to be evictable and evicts it.
-	// The cache should not be Evicts all evictable entries
+	// Clears the cache, saving the entries to second cache, then waits for each item to be evictable and evicts it.
 	ACTOR static Future<Void> clear_impl(ObjectCache* self) {
 		state ObjectCache::CacheT cache;
 		state EvictionOrderT evictionOrder;
@@ -1673,7 +1683,14 @@ public:
 			// TODO:  Possibly limit size of remap queue since it must be recovered on cold start
 			RemappedPage r{ v, pageID, newPageID };
 			remapQueue.pushBack(r);
-			remappedPages[pageID][v] = newPageID;
+			auto& versionedMap = remappedPages[pageID];
+
+			// An update page is unlikely to have its old version read again soon, so prioritize its cache eviction
+			// If the versioned map is empty for this page then the prior version of the page is at stored at the
+			// PhysicalPageID pageID, otherwise it is the last mapped value in the version-ordered map.
+			pageCache.prioritizeEviction(versionedMap.empty() ? pageID : versionedMap.rbegin()->second);
+			versionedMap[v] = newPageID;
+
 			debug_printf("DWALPager(%s) pushed %s\n", filename.c_str(), RemappedPage(r).toString().c_str());
 			return pageID;
 		});
@@ -1682,7 +1699,7 @@ public:
 		return f;
 	}
 
-	void freeUnmappedPage(LogicalPageID pageID, Version v) {
+	void freeUnmappedPage(PhysicalPageID pageID, Version v) {
 		// If v is older than the oldest version still readable then mark pageID as free as of the next commit
 		if (v < effectiveOldestVersion()) {
 			debug_printf("DWALPager(%s) op=freeNow %s @%" PRId64 " oldestVersion=%" PRId64 "\n",
@@ -1700,6 +1717,9 @@ public:
 			             pLastCommittedHeader->oldestVersion);
 			delayedFreeList.pushBack({ v, pageID });
 		}
+
+		// A freed page is unlikely to be read again soon so prioritize its cache eviction
+		pageCache.prioritizeEviction(pageID);
 	}
 
 	LogicalPageID detachRemappedPage(LogicalPageID pageID, Version v) override {
@@ -1751,6 +1771,11 @@ public:
 			             v,
 			             pLastCommittedHeader->oldestVersion);
 			remapQueue.pushBack(RemappedPage{ v, pageID, invalidLogicalPageID });
+
+			// A freed page is unlikely to be read again soon so prioritize its cache eviction
+			PhysicalPageID previousPhysicalPage = i->second.rbegin()->second;
+			pageCache.prioritizeEviction(previousPhysicalPage);
+
 			i->second[v] = invalidLogicalPageID;
 			return;
 		}
