@@ -4495,8 +4495,8 @@ private:
 
 	struct InternalPageModifier {
 		InternalPageModifier() {}
-		InternalPageModifier(Reference<const ArenaPage> p, bool updating, ParentInfo* parentInfo)
-		  : page(p), clonedPage(false), updating(updating), changesMade(false), parentInfo(parentInfo) {}
+		InternalPageModifier(Reference<const ArenaPage> p, bool alreadyCloned, bool updating, ParentInfo* parentInfo)
+		  : page(p), clonedPage(alreadyCloned), updating(updating), changesMade(false), parentInfo(parentInfo) {}
 
 		// Whether updating the existing page is allowed
 		bool updating;
@@ -4693,14 +4693,20 @@ private:
 		state Reference<FlowLock> commitReadLock = self->m_commitReadLock;
 		wait(commitReadLock->take());
 		state FlowLock::Releaser readLock(*commitReadLock);
-		state Reference<const ArenaPage> page =
-		    wait(readPage(snapshot, rootID, update->decodeLowerBound, update->decodeUpperBound, false, true));
+		state bool fromCache = false;
+		state Reference<const ArenaPage> page = wait(
+		    readPage(snapshot, rootID, update->decodeLowerBound, update->decodeUpperBound, false, false, &fromCache));
 		readLock.release();
 
-		// If in-place modification to the page is done, a copy of the page will be made in pageCopy
-		// and the cursor will be pointed to it.  The original page variable must stay in scope because
-		// there could be RedwoodRecordRefs referencing its arenas.
-		state Reference<const ArenaPage> pageCopy;
+		// If the page exists in the cache, it must be copied before modification.
+		// That copy will be referenced by pageCopy, as page must stay in scope in case anything references its
+		// memory and it gets evicted from the cache.
+		// If the page is not in the cache, then no copy is needed so we will initialize pageCopy to page
+		state Reference<const ArenaPage> pageCopy = fromCache ? Reference<const ArenaPage>() : page;
+
+		if (!fromCache) {
+			pageCopy = page;
+		}
 
 		state BTreePage* btPage = (BTreePage*)page->begin();
 		ASSERT(isLeaf == btPage->isLeaf());
@@ -5193,10 +5199,16 @@ private:
 			wait(waitForAll(recursions));
 			debug_printf("%s Recursions done, processing slice updates.\n", context.c_str());
 
-			// Note:  parentInfo could be invalid after a wait and must be re-initialized.
+			// ParentInfo could be invalid after a wait and must be re-initialized.
 			// All uses below occur before waits so no reinitialization is done.
 			state ParentInfo* parentInfo = &self->childUpdateTracker[rootID.front()];
-			state InternalPageModifier modifier(page, tryToUpdate, parentInfo);
+
+			// InternalPageModifier takes the results of the recursive commitSubtree() calls in order
+			// and makes changes to page as needed, copying as needed, and generating an array from
+			// which to build new page(s) if modification is not possible or not allowed.
+			// If pageCopy is already set it was initialized to page above so the modifier doesn't need
+			// to copy it
+			state InternalPageModifier modifier(page, pageCopy.isValid(), tryToUpdate, parentInfo);
 
 			// Apply the possible changes for each subtree range recursed to, except the last one.
 			// For each range, the expected next record, if any, is checked against the first boundary
