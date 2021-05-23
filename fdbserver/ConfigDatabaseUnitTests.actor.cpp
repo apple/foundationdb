@@ -62,6 +62,7 @@ class WriteToTransactionEnvironment {
 	UID nodeID;
 	Future<Void> ctiServer;
 	Future<Void> cfiServer;
+	Version lastWrittenVersion{ 0 };
 
 	ACTOR static Future<Void> setupNode(WriteToTransactionEnvironment* self) {
 		wait(self->node->initialize("./", self->nodeID));
@@ -75,6 +76,7 @@ class WriteToTransactionEnvironment {
 		auto configKey = encodeConfigKey(configClass, "test_long"_sr);
 		tr->set(configKey, longToValue(value));
 		wait(tr->commit());
+		self->lastWrittenVersion = tr->getCommittedVersion();
 		return Void();
 	}
 
@@ -83,6 +85,7 @@ class WriteToTransactionEnvironment {
 		auto configKey = encodeConfigKey(configClass, "test_long"_sr);
 		tr->clear(configKey);
 		wait(tr->commit());
+		self->lastWrittenVersion = tr->getCommittedVersion();
 		return Void();
 	}
 
@@ -95,6 +98,8 @@ public:
 	Future<Void> set(Optional<KeyRef> configClass, int64_t value) { return set(this, configClass, value); }
 
 	Future<Void> clear(Optional<KeyRef> configClass) { return clear(this, configClass); }
+
+	Future<Void> compact() { return cfi.compact.getReply(ConfigFollowerCompactRequest{ lastWrittenVersion }); }
 
 	Future<Void> restartNode() {
 		cfiServer.cancel();
@@ -272,6 +277,7 @@ public:
 	Future<Void> check(Optional<KeyRef> configClass, Optional<int64_t> expected) {
 		return check(this, configClass, expected);
 	}
+	Future<Void> compact() { return writeTo.compact(); }
 	Future<Void> getError() const { return writeTo.getError(); }
 };
 
@@ -309,6 +315,8 @@ public:
 		return readFrom.restartLocalConfig(newConfigPath);
 	}
 
+	Future<Void> compact() { return writeTo.compact(); }
+
 	Future<Void> set(Optional<KeyRef> configClass, int64_t value) { return writeTo.set(configClass, value); }
 	Future<Void> clear(Optional<KeyRef> configClass) { return writeTo.clear(configClass); }
 	Future<Void> check(Optional<int64_t> value) const { return readFrom.checkEventually(value); }
@@ -340,6 +348,14 @@ Future<Void> check(Env& env, Args&&... args) {
 template <class... Args>
 Future<Void> check(LocalConfigEnvironment& env, Args&&... args) {
 	env.check(std::forward<Args>(args)...);
+	return Void();
+}
+template <class Env>
+Future<Void> compact(Env& env) {
+	return waitOrError(env.compact(), env.getError());
+}
+Future<Void> compact(BroadcasterToLocalConfigEnvironment& env) {
+	env.compact();
 	return Void();
 }
 
@@ -416,8 +432,10 @@ Future<Void> testCompact() {
 	state Env env("class-A");
 	wait(env.setup());
 	wait(set(env, "class-A"_sr, 1));
-	env.compact();
+	wait(compact(env));
 	wait(check(env, 1));
+	wait(set(env, "class-A"_sr, 2));
+	wait(check(env, 2));
 	return Void();
 }
 
@@ -556,6 +574,11 @@ TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/RestartLocalConfigAndCha
 	return Void();
 }
 
+TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/CompactNode") {
+	wait(testCompact<TransactionToLocalConfigEnvironment>());
+	return Void();
+}
+
 TEST_CASE("/fdbserver/ConfigDB/Transaction/Set") {
 	wait(testSet<TransactionEnvironment>());
 	return Void();
@@ -572,5 +595,16 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/Restart") {
 	wait(set(env, "class-A"_sr, 1));
 	wait(env.restartNode());
 	wait(check(env, "class-A"_sr, 1));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactNode") {
+	state TransactionEnvironment env;
+	wait(env.setup());
+	wait(set(env, "class-A"_sr, 1));
+	wait(env.compact());
+	wait(env.check("class-A"_sr, 1));
+	wait(set(env, "class-A"_sr, 2));
+	wait(env.check("class-A"_sr, 2));
 	return Void();
 }

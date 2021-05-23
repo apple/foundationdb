@@ -24,8 +24,7 @@
 class SimpleConfigConsumerImpl {
 	ConfigFollowerInterface cfi;
 	Version lastSeenVersion{ 0 };
-	ConfigClassSet configClassSet;
-	Optional<double> pollingInterval;
+	double pollingInterval;
 	Optional<double> compactionInterval;
 
 	UID id;
@@ -63,11 +62,11 @@ class SimpleConfigConsumerImpl {
 					    .detail("KnobName", versionedMutation.mutation.getKnobName())
 					    .detail("KnobValue", versionedMutation.mutation.getValue());
 				}
-				self->lastSeenVersion = reply.mostRecentVersion;
-				broadcaster->applyChanges(reply.changes, reply.mostRecentVersion);
-				if (self->pollingInterval.present()) {
-					wait(delayJittered(self->pollingInterval.get()));
+				if (reply.mostRecentVersion > self->lastSeenVersion) {
+					self->lastSeenVersion = reply.mostRecentVersion;
+					broadcaster->applyChanges(reply.changes, reply.mostRecentVersion);
 				}
+				wait(delayJittered(self->pollingInterval));
 			} catch (Error& e) {
 				++self->failedChangeRequest;
 				if (e.code() == error_code_version_already_compacted) {

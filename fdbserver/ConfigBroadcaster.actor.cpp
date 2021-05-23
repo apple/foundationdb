@@ -185,6 +185,10 @@ class ConfigBroadcasterImpl {
 					if (req.lastSeenVersion < impl->mostRecentVersion) {
 						impl->sendChangesReply(req, impl->mutationHistory);
 					} else {
+						TraceEvent(SevDebug, "ConfigBroadcasterRegisteringChangeRequest", impl->id)
+						    .detail("Peer", req.reply.getEndpoint().getPrimaryAddress())
+						    .detail("MostRecentVersion", impl->mostRecentVersion)
+						    .detail("ReqLastSeenVersion", req.lastSeenVersion); // TODO: Trace config class as well
 						impl->pending.addRequest(req);
 					}
 				}
@@ -204,6 +208,9 @@ class ConfigBroadcasterImpl {
 
 	void notifyFollowers(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes) {
 		auto toNotify = pending.getRequestsToNotify(changes);
+		TraceEvent(SevDebug, "ConfigBroadcasterNotifyingFollowers", id)
+		    .detail("ChangesSize", changes.size())
+		    .detail("ToNotify", toNotify.size());
 		for (auto& req : toNotify) {
 			sendChangesReply(req, changes);
 			pending.removeRequest(req);
@@ -244,6 +251,10 @@ public:
 	}
 
 	void applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes, Version mostRecentVersion) {
+		TraceEvent(SevDebug, "ConfigBroadcasterApplyingChanges", id)
+		    .detail("ChangesSize", changes.size())
+		    .detail("CurrentMostRecentVersion", this->mostRecentVersion)
+		    .detail("NewMostRecentVersion", mostRecentVersion);
 		addChanges(changes, mostRecentVersion);
 		notifyFollowers(changes);
 	}
@@ -253,6 +264,12 @@ public:
 	                             Version snapshotVersion,
 	                             Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
 	                             Version changesVersion) {
+		TraceEvent(SevDebug, "ConfigBroadcasterApplyingSnapshotAndChanges", id)
+		    .detail("CurrentMostRecentVersion", this->mostRecentVersion)
+		    .detail("SnapshotSize", snapshot.size())
+		    .detail("SnapshotVersion", snapshotVersion)
+		    .detail("ChangesSize", changes.size())
+		    .detail("ChangesVersion", changesVersion);
 		setSnapshot(std::forward<Snapshot>(snapshot), snapshotVersion);
 		addChanges(changes, changesVersion);
 		notifyOutdatedRequests();
@@ -260,7 +277,7 @@ public:
 
 	ConfigBroadcasterImpl(ConfigFollowerInterface const& configSource) : ConfigBroadcasterImpl() {
 		consumer = IConfigConsumer::createSimple(configSource, 0.5, Optional<double>{});
-		TraceEvent(SevDebug, "BroadcasterStartingConsumer", id).detail("Consumer", consumer->getID());
+		TraceEvent(SevDebug, "ConfigBroadcasterStartingConsumer", id).detail("Consumer", consumer->getID());
 	}
 
 	ConfigBroadcasterImpl(ServerCoordinators const& configSource, Optional<bool> useTestConfigDB)
