@@ -23,6 +23,7 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/ConfigBroadcastFollowerInterface.h"
 #include "fdbserver/ConfigFollowerInterface.h"
 #include "flow/flow.h"
 #include <memory>
@@ -31,16 +32,24 @@ class ConfigBroadcaster {
 	std::unique_ptr<class ConfigBroadcasterImpl> impl;
 
 public:
-	explicit ConfigBroadcaster(ConfigFollowerInterface const&);
 	explicit ConfigBroadcaster(ServerCoordinators const&, Optional<bool> useTestConfigDB);
 	ConfigBroadcaster(ConfigBroadcaster&&);
 	ConfigBroadcaster& operator=(ConfigBroadcaster&&);
 	~ConfigBroadcaster();
-	Future<Void> serve(ConfigFollowerInterface const&);
-	Future<Void> addVersionedMutations(Standalone<VectorRef<VersionedConfigMutationRef>> const&,
-	                                   Version mostRecentVersion);
-	Future<Void> setSnapshot(std::map<ConfigKey, Value> const& snapshot, Version snapshotVersion);
-	Future<Void> setSnapshot(std::map<ConfigKey, Value>&& snapshot, Version snapshotVersion);
+	Future<Void> serve(ConfigBroadcastFollowerInterface const&);
+	void applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes, Version mostRecentVersion);
+	void applySnapshotAndChanges(std::map<ConfigKey, Value> const& snapshot,
+	                             Version snapshotVersion,
+	                             Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
+	                             Version changesVersion);
+	void applySnapshotAndChanges(std::map<ConfigKey, Value>&& snapshot,
+	                             Version snapshotVersion,
+	                             Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
+	                             Version changesVersion);
 	UID getID() const;
 	JsonBuilderObject getStatus() const;
+	void compact();
+
+public: // Testing
+	explicit ConfigBroadcaster(ConfigFollowerInterface const&);
 };

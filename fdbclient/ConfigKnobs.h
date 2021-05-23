@@ -64,13 +64,10 @@ class ConfigMutationRef {
 	Optional<ValueRef> value;
 	StringRef description{ ""_sr };
 	double timestamp{ 0.0 };
+public:
+	ConfigMutationRef() = default;
 
 	ConfigMutationRef(ConfigKeyRef key, Optional<ValueRef> value) : key(key), value(value) {}
-
-public:
-	static constexpr FileIdentifier file_identifier = 9198282;
-
-	ConfigMutationRef() = default;
 
 	ConfigKeyRef getKey() const { return key; }
 

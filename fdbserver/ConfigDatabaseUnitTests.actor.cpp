@@ -61,6 +61,18 @@ Future<Void> addTestClearMutation(IConfigTransaction& tr, Optional<KeyRef> confi
 	return tr.commit();
 }
 
+Future<Void> addTestClearMutation(LocalConfiguration& localConfiguration, Optional<KeyRef> configKey, Version version) {
+	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
+	appendVersionedMutation(versionedMutations, version, configKey, "test_long"_sr, {});
+	return localConfiguration.addChanges(versionedMutations, version);
+}
+
+void addTestClearMutation(ConfigBroadcaster& broadcaster, Optional<KeyRef> configClass, Version version) {
+	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
+	appendVersionedMutation(versionedMutations, version, configClass, "test_long"_sr, {});
+	broadcaster.applyChanges(versionedMutations, version);
+}
+
 Future<Void> addTestSetMutation(IConfigTransaction& tr, Optional<KeyRef> configClass, int64_t value) {
 	tr.fullReset();
 	auto configKey = encodeConfigKey(configClass, "test_long"_sr);
@@ -68,18 +80,19 @@ Future<Void> addTestSetMutation(IConfigTransaction& tr, Optional<KeyRef> configC
 	return tr.commit();
 }
 
-template <class WriteTo>
-Future<Void> addTestClearMutation(WriteTo& writeTo, Optional<KeyRef> configKey, Version version) {
-	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
-	appendVersionedMutation(versionedMutations, version, configKey, "test_long"_sr, {});
-	return writeTo.addVersionedMutations(versionedMutations, version);
-}
-
-template <class WriteTo>
-Future<Void> addTestSetMutation(WriteTo& writeTo, Optional<KeyRef> configClass, int64_t value, Version version) {
+Future<Void> addTestSetMutation(LocalConfiguration& localConfiguration,
+                                Optional<KeyRef> configClass,
+                                int64_t value,
+                                Version version) {
 	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
 	appendVersionedMutation(versionedMutations, version, configClass, "test_long"_sr, longToValue(value));
-	return writeTo.addVersionedMutations(versionedMutations, version);
+	return localConfiguration.addChanges(versionedMutations, version);
+}
+
+void addTestSetMutation(ConfigBroadcaster& broadcaster, Optional<KeyRef> configClass, int64_t value, Version version) {
+	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
+	appendVersionedMutation(versionedMutations, version, configClass, "test_long"_sr, longToValue(value));
+	broadcaster.applyChanges(versionedMutations, version);
 }
 
 ACTOR Future<Void> checkImmediate(IConfigTransaction* tr, Optional<KeyRef> configClass, Optional<int64_t> expected) {
@@ -141,7 +154,7 @@ public:
 
 class BroadcasterToLocalConfigEnvironment {
 	ConfigBroadcaster broadcaster;
-	Reference<AsyncVar<ConfigFollowerInterface>> cfi;
+	Reference<AsyncVar<ConfigBroadcastFollowerInterface>> cbfi;
 	LocalConfiguration localConfiguration;
 	Version lastWrittenVersion{ 0 };
 	Future<Void> broadcastServer;
@@ -149,7 +162,7 @@ class BroadcasterToLocalConfigEnvironment {
 	UID localConfigID;
 
 	ACTOR static Future<Void> setup(BroadcasterToLocalConfigEnvironment* self) {
-		self->broadcastServer = self->broadcaster.serve(self->cfi->get());
+		self->broadcastServer = self->broadcaster.serve(self->cbfi->get());
 		wait(setupLocalConfig(self));
 		return Void();
 	}
@@ -157,31 +170,29 @@ class BroadcasterToLocalConfigEnvironment {
 	ACTOR static Future<Void> setupLocalConfig(BroadcasterToLocalConfigEnvironment* self) {
 		wait(self->localConfiguration.initialize("./", self->localConfigID));
 		self->configConsumer =
-		    self->localConfiguration.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(self->cfi));
+		    self->localConfiguration.consume(IDependentAsyncVar<ConfigBroadcastFollowerInterface>::create(self->cbfi));
 		return Void();
 	}
 
 public:
 	BroadcasterToLocalConfigEnvironment(std::string const& configPath)
-	  : broadcaster(ConfigFollowerInterface{}), cfi(makeReference<AsyncVar<ConfigFollowerInterface>>()),
+	  : broadcaster(ConfigFollowerInterface{}), cbfi(makeReference<AsyncVar<ConfigBroadcastFollowerInterface>>()),
 	    localConfigID(deterministicRandom()->randomUniqueID()), localConfiguration(configPath, {}) {}
 
 	Future<Void> setup() { return setup(this); }
 
-	Future<Void> set(Optional<KeyRef> configClass, int64_t value) {
-		return addTestSetMutation(broadcaster, configClass, value, ++lastWrittenVersion);
+	void set(Optional<KeyRef> configClass, int64_t value) {
+		addTestSetMutation(broadcaster, configClass, value, ++lastWrittenVersion);
 	}
 
-	Future<Void> clear(Optional<KeyRef> configClass) {
-		return addTestClearMutation(broadcaster, configClass, ++lastWrittenVersion);
-	}
+	void clear(Optional<KeyRef> configClass) { addTestClearMutation(broadcaster, configClass, ++lastWrittenVersion); }
 
 	Future<Void> check(Optional<int64_t> value) const { return checkEventually(&localConfiguration, value); }
 
 	void changeBroadcaster() {
 		broadcastServer.cancel();
-		cfi->set(ConfigFollowerInterface{});
-		broadcastServer = broadcaster.serve(cfi->get());
+		cbfi->set(ConfigBroadcastFollowerInterface{});
+		broadcastServer = broadcaster.serve(cbfi->get());
 	}
 
 	Future<Void> restartLocalConfig(std::string const& configPath) {
@@ -189,7 +200,7 @@ public:
 		return setupLocalConfig(this);
 	}
 
-	Future<Void> compact() { return cfi->get().compact.getReply(ConfigFollowerCompactRequest{ lastWrittenVersion }); }
+	void compact() { broadcaster.compact(); }
 
 	Future<Void> getError() const { return configConsumer || broadcastServer; }
 };
@@ -234,7 +245,7 @@ class TransactionToLocalConfigEnvironment {
 	ConfigTransactionInterface cti;
 	ConfigFollowerInterface nodeToBroadcaster;
 	Reference<IConfigTransaction> tr;
-	Reference<AsyncVar<ConfigFollowerInterface>> broadcasterToLocalConfig;
+	Reference<AsyncVar<ConfigBroadcastFollowerInterface>> broadcasterToLocalConfig;
 	Reference<IConfigDatabaseNode> node;
 	UID nodeID;
 	UID localConfigID;
@@ -255,7 +266,7 @@ class TransactionToLocalConfigEnvironment {
 	ACTOR static Future<Void> setupLocalConfig(TransactionToLocalConfigEnvironment* self) {
 		wait(self->localConfiguration.initialize("./", self->localConfigID));
 		self->localConfigConsumer = self->localConfiguration.consume(
-		    IDependentAsyncVar<ConfigFollowerInterface>::create(self->broadcasterToLocalConfig));
+		    IDependentAsyncVar<ConfigBroadcastFollowerInterface>::create(self->broadcasterToLocalConfig));
 		return Void();
 	}
 
@@ -268,7 +279,7 @@ class TransactionToLocalConfigEnvironment {
 
 public:
 	TransactionToLocalConfigEnvironment(std::string const& configPath)
-	  : broadcasterToLocalConfig(makeReference<AsyncVar<ConfigFollowerInterface>>()),
+	  : broadcasterToLocalConfig(makeReference<AsyncVar<ConfigBroadcastFollowerInterface>>()),
 	    node(IConfigDatabaseNode::createSimple()), tr(IConfigTransaction::createSimple(cti)),
 	    nodeID(deterministicRandom()->randomUniqueID()), localConfigID(deterministicRandom()->randomUniqueID()),
 	    localConfiguration(configPath, {}), broadcaster(nodeToBroadcaster) {}
@@ -284,7 +295,7 @@ public:
 
 	void changeBroadcaster() {
 		broadcastServer.cancel();
-		broadcasterToLocalConfig->set(ConfigFollowerInterface{});
+		broadcasterToLocalConfig->set(ConfigBroadcastFollowerInterface{});
 		broadcastServer = broadcaster.serve(broadcasterToLocalConfig->get());
 	}
 
@@ -305,9 +316,19 @@ template <class Env, class... Args>
 Future<Void> set(Env& env, Args&&... args) {
 	return waitOrError(env.set(std::forward<Args>(args)...), env.getError());
 }
+template <class... Args>
+Future<Void> set(BroadcasterToLocalConfigEnvironment& env, Args&&... args) {
+	env.set(std::forward<Args>(args)...);
+	return Void();
+}
 template <class Env, class... Args>
 Future<Void> clear(Env& env, Args&&... args) {
 	return waitOrError(env.clear(std::forward<Args>(args)...), env.getError());
+}
+template <class... Args>
+Future<Void> clear(BroadcasterToLocalConfigEnvironment& env, Args&&... args) {
+	env.clear(std::forward<Args>(args)...);
+	return Void();
 }
 template <class Env, class... Args>
 Future<Void> check(Env& env, Args&&... args) {
@@ -317,10 +338,6 @@ template <class... Args>
 Future<Void> check(LocalConfigEnvironment& env, Args&&... args) {
 	env.check(std::forward<Args>(args)...);
 	return Void();
-}
-template <class Env, class... Args>
-Future<Void> compact(Env& env, Args&&... args) {
-	return waitOrError(env.compact(std::forward<Args>(args)...), env.getError());
 }
 
 ACTOR template <class Env>
@@ -396,7 +413,7 @@ Future<Void> testCompact() {
 	state Env env("class-A");
 	wait(env.setup());
 	wait(set(env, "class-A"_sr, 1));
-	wait(compact(env));
+	env.compact();
 	wait(check(env, 1));
 	return Void();
 }

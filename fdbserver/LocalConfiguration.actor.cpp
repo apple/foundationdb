@@ -19,10 +19,11 @@
  */
 
 #include "fdbclient/Knobs.h"
+#include "fdbrpc/Stats.h"
+#include "fdbserver/ConfigBroadcastFollowerInterface.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LocalConfiguration.h"
-#include "fdbserver/SimpleConfigConsumer.h"
 #include "flow/Knobs.h"
 #include "flow/UnitTest.h"
 
@@ -142,7 +143,6 @@ class LocalConfigurationImpl : public NonCopyable {
 	Version lastSeenVersion{ 0 };
 	ManualKnobOverrides manualKnobOverrides;
 	ConfigKnobOverrides configKnobOverrides;
-	ActorCollection actors{ false };
 
 	CounterCollection cc;
 	Counter broadcasterChanges;
@@ -159,7 +159,7 @@ class LocalConfigurationImpl : public NonCopyable {
 		return Void();
 	}
 
-	ACTOR static Future<Void> clearKVStore(LocalConfigurationImpl *self) {
+	ACTOR static Future<Void> clearKVStore(LocalConfigurationImpl* self) {
 		self->kvStore->clear(singleKeyRange(configPathKey));
 		self->kvStore->clear(knobOverrideKeys);
 		wait(self->kvStore->commit());
@@ -205,7 +205,7 @@ class LocalConfigurationImpl : public NonCopyable {
 			return Void();
 		}
 		Standalone<RangeResultRef> range = wait(self->kvStore->readRange(knobOverrideKeys));
-		for (const auto &kv : range) {
+		for (const auto& kv : range) {
 			auto configKey =
 			    BinaryReader::fromStringRef<ConfigKey>(kv.key.removePrefix(knobOverrideKeys.begin), IncludeVersion());
 			self->configKnobOverrides.set(configKey.configClass, configKey.knobName, kv.value);
@@ -256,16 +256,15 @@ class LocalConfigurationImpl : public NonCopyable {
 		return Void();
 	}
 
-	ACTOR static Future<Void> addVersionedMutations(
-	    LocalConfigurationImpl* self,
-	    Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,
-	    Version mostRecentVersion) {
+	ACTOR static Future<Void> addChanges(LocalConfigurationImpl* self,
+	                                     Standalone<VectorRef<VersionedConfigMutationRef>> changes,
+	                                     Version mostRecentVersion) {
 		// TODO: Concurrency control?
 		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
 		++self->changeRequestsFetched;
-		for (const auto& versionedMutation : versionedMutations) {
+		for (const auto& versionedMutation : changes) {
 			++self->mutations;
-			const auto &mutation = versionedMutation.mutation;
+			const auto& mutation = versionedMutation.mutation;
 			auto serializedKey = BinaryWriter::toValue(mutation.getKey(), IncludeVersion());
 			if (mutation.isSet()) {
 				self->kvStore->set(
@@ -283,31 +282,40 @@ class LocalConfigurationImpl : public NonCopyable {
 		return Void();
 	}
 
-	ACTOR static Future<Void> consumeLoopIteration(
-	    LocalConfiguration* self,
-	    LocalConfigurationImpl* impl,
-	    Reference<IDependentAsyncVar<ConfigFollowerInterface> const> broadcaster) {
-		state SimpleConfigConsumer consumer(broadcaster->get(),
-		                                    impl->configKnobOverrides.getConfigClassSet(),
-		                                    impl->lastSeenVersion,
-		                                    0.5,
-		                                    Optional<double>{});
-		TraceEvent(SevDebug, "LocalConfigurationStartingConsumer", impl->id)
-		    .detail("Consumer", consumer.getID())
-		    .detail("Broadcaster", broadcaster->get().id());
-		choose {
-			when(wait(broadcaster->onChange())) { ++impl->broadcasterChanges; }
-			when(wait(brokenPromiseToNever(consumer.consume(*self)))) { ASSERT(false); }
-			when(wait(impl->actors.getResult())) { ASSERT(false); }
+	ACTOR static Future<Void> consumeInternal(LocalConfigurationImpl* self,
+	                                          ConfigBroadcastFollowerInterface broadcaster) {
+		loop {
+			try {
+				state ConfigFollowerGetChangesReply changesReply =
+				    wait(broadcaster.getChanges.getReply(ConfigBroadcastFollowerGetChangesRequest{
+				        self->lastSeenVersion, self->configKnobOverrides.getConfigClassSet() }));
+				TraceEvent(SevDebug, "LocalConfigGotChanges", self->id); // TODO: Add more fields
+				wait(self->addChanges(changesReply.changes, changesReply.mostRecentVersion));
+			} catch (Error& e) {
+				if (e.code() == error_code_version_already_compacted) {
+					// TODO: Collect stats
+					state ConfigBroadcastFollowerGetSnapshotReply snapshotReply = wait(broadcaster.getSnapshot.getReply(
+					    ConfigBroadcastFollowerGetSnapshotRequest{ self->configKnobOverrides.getConfigClassSet() }));
+					ASSERT_GT(snapshotReply.version, self->lastSeenVersion);
+					wait(setSnapshot(self, std::move(snapshotReply.snapshot), snapshotReply.version));
+				} else {
+					throw e;
+				}
+			}
+			wait(yield()); // Necessary to not immediately trigger retry?
 		}
-		return Void();
 	}
 
-	ACTOR static Future<Void> consume(LocalConfiguration* self,
-	                                  LocalConfigurationImpl* impl,
-	                                  Reference<IDependentAsyncVar<ConfigFollowerInterface> const> broadcaster) {
-		ASSERT(impl->initFuture.isValid() && impl->initFuture.isReady());
-		loop { wait(consumeLoopIteration(self, impl, broadcaster)); }
+	ACTOR static Future<Void> consume(
+	    LocalConfigurationImpl* self,
+	    Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> broadcaster) {
+		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
+		loop {
+			choose {
+				when(wait(brokenPromiseToNever(consumeInternal(self, broadcaster->get())))) { ASSERT(false); }
+				when(wait(broadcaster->onChange())) { ++self->broadcasterChanges; }
+			}
+		}
 	}
 
 public:
@@ -328,13 +336,8 @@ public:
 		return initFuture;
 	}
 
-	Future<Void> setSnapshot(std::map<ConfigKey, Value> const& snapshot, Version lastCompactedVersion) {
-		return setSnapshot(this, snapshot, lastCompactedVersion);
-	}
-
-	Future<Void> addVersionedMutations(Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,
-	                                   Version mostRecentVersion) {
-		return addVersionedMutations(this, versionedMutations, mostRecentVersion);
+	Future<Void> addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> changes, Version mostRecentVersion) {
+		return addChanges(this, changes, mostRecentVersion);
 	}
 
 	FlowKnobs const& getFlowKnobs() const {
@@ -357,9 +360,8 @@ public:
 		return testKnobs;
 	}
 
-	Future<Void> consume(LocalConfiguration& self,
-	                     Reference<IDependentAsyncVar<ConfigFollowerInterface> const> const& broadcaster) {
-		return consume(&self, this, broadcaster);
+	Future<Void> consume(Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
+		return consume(this, broadcaster);
 	}
 
 	UID getID() const { return id; }
@@ -396,18 +398,13 @@ TestKnobs const& LocalConfiguration::getTestKnobs() const {
 }
 
 Future<Void> LocalConfiguration::consume(
-    Reference<IDependentAsyncVar<ConfigFollowerInterface> const> const& broadcaster) {
-	return impl->consume(*this, broadcaster);
+    Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
+	return impl->consume(broadcaster);
 }
 
-Future<Void> LocalConfiguration::setSnapshot(std::map<ConfigKey, Value> const& snapshot, Version lastCompactedVersion) {
-	return impl->setSnapshot(snapshot, lastCompactedVersion);
-}
-
-Future<Void> LocalConfiguration::addVersionedMutations(
-    Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,
-    Version mostRecentVersion) {
-	return impl->addVersionedMutations(versionedMutations, mostRecentVersion);
+Future<Void> LocalConfiguration::addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> changes,
+                                            Version mostRecentVersion) {
+	return impl->addChanges(changes, mostRecentVersion);
 }
 
 UID LocalConfiguration::getID() const {

@@ -23,21 +23,19 @@
 #include "fdbserver/SimpleConfigConsumer.h"
 
 std::unique_ptr<IConfigConsumer> IConfigConsumer::createSimple(ConfigFollowerInterface const& cfi,
-                                                               Optional<double> pollingInterval,
+                                                               double pollingInterval,
                                                                Optional<double> compactionInterval) {
-	return std::make_unique<SimpleConfigConsumer>(
-	    cfi, Optional<ConfigClassSet>{}, 0, pollingInterval, compactionInterval);
+	return std::make_unique<SimpleConfigConsumer>(cfi, pollingInterval, compactionInterval);
 }
 
 std::unique_ptr<IConfigConsumer> IConfigConsumer::createSimple(ServerCoordinators const& coordinators,
-                                                               Optional<double> pollingInterval,
+                                                               double pollingInterval,
                                                                Optional<double> compactionInterval) {
-	return std::make_unique<SimpleConfigConsumer>(
-	    coordinators, Optional<ConfigClassSet>{}, 0, pollingInterval, compactionInterval);
+	return std::make_unique<SimpleConfigConsumer>(coordinators, pollingInterval, compactionInterval);
 }
 
 std::unique_ptr<IConfigConsumer> IConfigConsumer::createPaxos(ServerCoordinators const& coordinators,
-                                                              Optional<double> pollingInterval,
+                                                              double pollingInterval,
                                                               Optional<double> compactionInterval) {
 	return std::make_unique<PaxosConfigConsumer>(coordinators, pollingInterval, compactionInterval);
 }

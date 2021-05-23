@@ -44,19 +44,3 @@ bool ConfigFollowerInterface::operator==(ConfigFollowerInterface const& rhs) con
 bool ConfigFollowerInterface::operator!=(ConfigFollowerInterface const& rhs) const {
 	return !(*this == rhs);
 }
-
-ConfigClassSet::ConfigClassSet() = default;
-
-ConfigClassSet::ConfigClassSet(VectorRef<KeyRef> configClasses) {
-	for (const auto& configClass : configClasses) {
-		classes.insert(configClass);
-	}
-}
-
-bool ConfigClassSet::contains(KeyRef configClass) const {
-	return classes.count(configClass);
-}
-
-std::set<Key> const& ConfigClassSet::getClasses() const {
-	return classes;
-}

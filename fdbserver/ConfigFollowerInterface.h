@@ -25,26 +25,6 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 
-class ConfigClassSet {
-	std::set<Key> classes;
-public:
-	static constexpr FileIdentifier file_identifier = 9854021;
-
-	bool operator==(ConfigClassSet const& rhs) const { return classes == rhs.classes; }
-	bool operator!=(ConfigClassSet const& rhs) const { return !(*this == rhs); }
-
-	ConfigClassSet();
-	ConfigClassSet(VectorRef<KeyRef> configClasses);
-
-	bool contains(KeyRef configClass) const;
-	std::set<Key> const& getClasses() const;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, classes);
-	}
-};
-
 struct VersionedConfigMutationRef {
 	Version version;
 	ConfigMutationRef mutation;
@@ -55,7 +35,7 @@ struct VersionedConfigMutationRef {
 	explicit VersionedConfigMutationRef(Arena& arena, VersionedConfigMutationRef const& rhs)
 	  : version(rhs.version), mutation(arena, rhs.mutation) {}
 
-	size_t expectedSize() const { return sizeof(Version) + mutation.expectedSize(); }
+	size_t expectedSize() const { return mutation.expectedSize(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -89,48 +69,41 @@ struct ConfigFollowerGetSnapshotAndChangesReply {
 
 struct ConfigFollowerGetSnapshotAndChangesRequest {
 	static constexpr FileIdentifier file_identifier = 294811;
-	Optional<ConfigClassSet> configClassSet;
 	ReplyPromise<ConfigFollowerGetSnapshotAndChangesReply> reply;
-
-	ConfigFollowerGetSnapshotAndChangesRequest() = default;
-	explicit ConfigFollowerGetSnapshotAndChangesRequest(Optional<ConfigClassSet> const& configClassSet)
-	  : configClassSet(configClassSet) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, configClassSet, reply);
+		serializer(ar, reply);
 	}
 };
 
 struct ConfigFollowerGetChangesReply {
 	static constexpr FileIdentifier file_identifier = 234859;
 	Version mostRecentVersion;
-	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
+	Standalone<VectorRef<VersionedConfigMutationRef>> changes;
 
 	ConfigFollowerGetChangesReply() : mostRecentVersion(0) {}
 	explicit ConfigFollowerGetChangesReply(Version mostRecentVersion,
-	                                       Standalone<VectorRef<VersionedConfigMutationRef>> const& versionedMutations)
-	  : mostRecentVersion(mostRecentVersion), versionedMutations(versionedMutations) {}
+	                                       Standalone<VectorRef<VersionedConfigMutationRef>> const& changes)
+	  : mostRecentVersion(mostRecentVersion), changes(changes) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, mostRecentVersion, versionedMutations);
+		serializer(ar, mostRecentVersion, changes);
 	}
 };
 
 struct ConfigFollowerGetChangesRequest {
 	static constexpr FileIdentifier file_identifier = 178935;
 	Version lastSeenVersion{ 0 };
-	Optional<ConfigClassSet> configClassSet;
 	ReplyPromise<ConfigFollowerGetChangesReply> reply;
 
 	ConfigFollowerGetChangesRequest() = default;
-	explicit ConfigFollowerGetChangesRequest(Version lastSeenVersion, Optional<ConfigClassSet> const& configClassSet)
-	  : lastSeenVersion(lastSeenVersion), configClassSet(configClassSet) {}
+	explicit ConfigFollowerGetChangesRequest(Version lastSeenVersion) : lastSeenVersion(lastSeenVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, lastSeenVersion, configClassSet, reply);
+		serializer(ar, lastSeenVersion, reply);
 	}
 };
 

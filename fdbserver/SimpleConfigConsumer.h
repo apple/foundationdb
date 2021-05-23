@@ -28,18 +28,15 @@ class SimpleConfigConsumer : public IConfigConsumer {
 	std::unique_ptr<class SimpleConfigConsumerImpl> impl;
 
 public:
-	SimpleConfigConsumer(ConfigFollowerInterface const& cfi,
-	                     Optional<ConfigClassSet> const& configClassSet,
-	                     Version lastSeenVersion,
-	                     Optional<double> pollingInterval,
-	                     Optional<double> compactionInterval);
 	SimpleConfigConsumer(ServerCoordinators const& coordinators,
-	                     Optional<ConfigClassSet> const& configClassSet,
-	                     Version lastSeenVersion,
-	                     Optional<double> pollingInterval,
+	                     double pollingInterval,
 	                     Optional<double> compactionInterval);
 	~SimpleConfigConsumer();
 	Future<Void> consume(ConfigBroadcaster& broadcaster) override;
-	Future<Void> consume(LocalConfiguration& localConfiguration);
 	UID getID() const override;
+
+public: // Testing
+	SimpleConfigConsumer(ConfigFollowerInterface const& cfi,
+	                     double pollingInterval,
+	                     Optional<double> compactionInterval);
 };

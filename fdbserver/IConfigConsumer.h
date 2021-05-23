@@ -34,12 +34,12 @@ public:
 	virtual UID getID() const = 0;
 
 	static std::unique_ptr<IConfigConsumer> createSimple(ConfigFollowerInterface const& cfi,
-	                                                     Optional<double> pollingInterval,
+	                                                     double pollingInterval,
 	                                                     Optional<double> compactionInterval);
 	static std::unique_ptr<IConfigConsumer> createSimple(ServerCoordinators const& coordinators,
-	                                                     Optional<double> pollingInterval,
+	                                                     double pollingInterval,
 	                                                     Optional<double> compactionInterval);
 	static std::unique_ptr<IConfigConsumer> createPaxos(ServerCoordinators const& coordinators,
-	                                                    Optional<double> pollingInterval,
+	                                                    double pollingInterval,
 	                                                    Optional<double> compactionInterval);
 };

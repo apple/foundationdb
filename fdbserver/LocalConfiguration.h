@@ -23,7 +23,7 @@
 #include <string>
 
 #include "fdbclient/ConfigKnobs.h"
-#include "fdbserver/ConfigFollowerInterface.h"
+#include "fdbserver/ConfigBroadcastFollowerInterface.h"
 #include "flow/Arena.h"
 #include "flow/Knobs.h"
 
@@ -53,9 +53,10 @@ public:
 	ClientKnobs const& getClientKnobs() const;
 	ServerKnobs const& getServerKnobs() const;
 	TestKnobs const& getTestKnobs() const;
-	Future<Void> consume(Reference<IDependentAsyncVar<ConfigFollowerInterface> const> const& broadcaster);
-	Future<Void> setSnapshot(std::map<ConfigKey, Value> const& snapshot, Version snapshotVersion);
-	Future<Void> addVersionedMutations(Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,
-	                                   Version mostRecentVersion);
+	Future<Void> consume(Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> const& broadcaster);
 	UID getID() const;
+
+public: // Testing
+	Future<Void> addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,
+	                        Version mostRecentVersion);
 };

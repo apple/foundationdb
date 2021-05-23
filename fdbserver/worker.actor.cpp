@@ -2065,9 +2065,10 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>();
 
 		if (useTestConfigDB.present()) {
-			actors.push_back(reportErrors(localConfig.consume(IDependentAsyncVar<ConfigFollowerInterface>::create(
-			                                  dbInfo, [](auto const& info) { return info.configBroadcaster; })),
-			                              "LocalConfiguration"));
+			actors.push_back(
+			    reportErrors(localConfig.consume(IDependentAsyncVar<ConfigBroadcastFollowerInterface>::create(
+			                     dbInfo, [](auto const& info) { return info.configBroadcaster; })),
+			                 "LocalConfiguration"));
 		}
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo),
 		                              "MonitorAndWriteCCPriorityInfo"));
