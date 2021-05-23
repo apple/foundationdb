@@ -168,7 +168,6 @@ public:
 	size_t getApproximateSize() const { return mutations.expectedSize(); }
 
 	void debugTransaction(UID dID) {
-		printf("HERE_ImplSetDebugTransaction\n");
 		this->dID = dID;
 	}
 

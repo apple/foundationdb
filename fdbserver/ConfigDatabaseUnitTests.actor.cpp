@@ -40,6 +40,7 @@ Key encodeConfigKey(Optional<KeyRef> configClass, KeyRef knobName) {
 	return tuple.pack();
 }
 
+// TODO: Use newly public ConfigMutationRef constructor
 void appendVersionedMutation(Standalone<VectorRef<VersionedConfigMutationRef>>& versionedMutations,
                              Version version,
                              Optional<KeyRef> configClass,
@@ -54,237 +55,46 @@ Value longToValue(int64_t v) {
 	return StringRef(reinterpret_cast<uint8_t const*>(s.c_str()), s.size());
 }
 
-Future<Void> addTestClearMutation(IConfigTransaction& tr, Optional<KeyRef> configClass) {
-	tr.fullReset();
-	auto configKey = encodeConfigKey(configClass, "test_long"_sr);
-	tr.clear(configKey);
-	return tr.commit();
-}
-
-Future<Void> addTestClearMutation(LocalConfiguration& localConfiguration, Optional<KeyRef> configKey, Version version) {
-	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
-	appendVersionedMutation(versionedMutations, version, configKey, "test_long"_sr, {});
-	return localConfiguration.addChanges(versionedMutations, version);
-}
-
-void addTestClearMutation(ConfigBroadcaster& broadcaster, Optional<KeyRef> configClass, Version version) {
-	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
-	appendVersionedMutation(versionedMutations, version, configClass, "test_long"_sr, {});
-	broadcaster.applyChanges(versionedMutations, version);
-}
-
-Future<Void> addTestSetMutation(IConfigTransaction& tr, Optional<KeyRef> configClass, int64_t value) {
-	tr.fullReset();
-	auto configKey = encodeConfigKey(configClass, "test_long"_sr);
-	tr.set(configKey, longToValue(value));
-	return tr.commit();
-}
-
-Future<Void> addTestSetMutation(LocalConfiguration& localConfiguration,
-                                Optional<KeyRef> configClass,
-                                int64_t value,
-                                Version version) {
-	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
-	appendVersionedMutation(versionedMutations, version, configClass, "test_long"_sr, longToValue(value));
-	return localConfiguration.addChanges(versionedMutations, version);
-}
-
-void addTestSetMutation(ConfigBroadcaster& broadcaster, Optional<KeyRef> configClass, int64_t value, Version version) {
-	Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
-	appendVersionedMutation(versionedMutations, version, configClass, "test_long"_sr, longToValue(value));
-	broadcaster.applyChanges(versionedMutations, version);
-}
-
-ACTOR Future<Void> checkImmediate(IConfigTransaction* tr, Optional<KeyRef> configClass, Optional<int64_t> expected) {
-	tr->fullReset();
-	state Key configKey = encodeConfigKey(configClass, "test_long"_sr);
-	state Optional<Value> value = wait(tr->get(configKey));
-	if (expected.present()) {
-		ASSERT(value.get() == longToValue(expected.get()));
-	} else {
-		ASSERT(!value.present());
-	}
-	return Void();
-}
-
-Future<Void> checkImmediate(IConfigTransaction& tr, Optional<KeyRef> configClass, Optional<int64_t> expected) {
-	return checkImmediate(&tr, configClass, expected);
-}
-
-void checkImmediate(LocalConfiguration const& localConfiguration, Optional<int64_t> expected) {
-	if (expected.present()) {
-		ASSERT_EQ(localConfiguration.getTestKnobs().TEST_LONG, expected.get());
-	} else {
-		ASSERT_EQ(localConfiguration.getTestKnobs().TEST_LONG, 0);
-	}
-}
-
-ACTOR Future<Void> checkEventually(LocalConfiguration const* localConfiguration, Optional<int64_t> expected) {
-	loop {
-		if (localConfiguration->getTestKnobs().TEST_LONG == (expected.present() ? expected.get() : 0)) {
-			return Void();
-		}
-		wait(delayJittered(0.1));
-	}
-}
-
-class LocalConfigEnvironment {
-	LocalConfiguration localConfiguration;
-	UID id;
-	Version lastWrittenVersion{ 0 };
-
-public:
-	LocalConfigEnvironment(std::string const& configPath,
-	                       std::map<std::string, std::string> const& manualKnobOverrides = {})
-	  : localConfiguration(configPath, manualKnobOverrides), id(deterministicRandom()->randomUniqueID()) {}
-	Future<Void> setup() { return localConfiguration.initialize("./", id); }
-	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
-		localConfiguration = LocalConfiguration(newConfigPath, {});
-		return setup();
-	}
-	Future<Void> getError() const { return Never(); }
-	Future<Void> clear(Optional<KeyRef> configClass) {
-		return addTestClearMutation(localConfiguration, configClass, ++lastWrittenVersion);
-	}
-	Future<Void> set(Optional<KeyRef> configClass, int64_t value) {
-		return addTestSetMutation(localConfiguration, configClass, value, ++lastWrittenVersion);
-	}
-	void check(Optional<int64_t> value) const { checkImmediate(localConfiguration, value); }
-};
-
-class BroadcasterToLocalConfigEnvironment {
-	ConfigBroadcaster broadcaster;
-	Reference<AsyncVar<ConfigBroadcastFollowerInterface>> cbfi;
-	LocalConfiguration localConfiguration;
-	Version lastWrittenVersion{ 0 };
-	Future<Void> broadcastServer;
-	Future<Void> configConsumer;
-	UID localConfigID;
-
-	ACTOR static Future<Void> setup(BroadcasterToLocalConfigEnvironment* self) {
-		self->broadcastServer = self->broadcaster.serve(self->cbfi->get());
-		wait(setupLocalConfig(self));
-		return Void();
-	}
-
-	ACTOR static Future<Void> setupLocalConfig(BroadcasterToLocalConfigEnvironment* self) {
-		wait(self->localConfiguration.initialize("./", self->localConfigID));
-		self->configConsumer =
-		    self->localConfiguration.consume(IDependentAsyncVar<ConfigBroadcastFollowerInterface>::create(self->cbfi));
-		return Void();
-	}
-
-public:
-	BroadcasterToLocalConfigEnvironment(std::string const& configPath)
-	  : broadcaster(ConfigFollowerInterface{}), cbfi(makeReference<AsyncVar<ConfigBroadcastFollowerInterface>>()),
-	    localConfigID(deterministicRandom()->randomUniqueID()), localConfiguration(configPath, {}) {}
-
-	Future<Void> setup() { return setup(this); }
-
-	void set(Optional<KeyRef> configClass, int64_t value) {
-		addTestSetMutation(broadcaster, configClass, value, ++lastWrittenVersion);
-	}
-
-	void clear(Optional<KeyRef> configClass) { addTestClearMutation(broadcaster, configClass, ++lastWrittenVersion); }
-
-	Future<Void> check(Optional<int64_t> value) const { return checkEventually(&localConfiguration, value); }
-
-	void changeBroadcaster() {
-		broadcastServer.cancel();
-		cbfi->set(ConfigBroadcastFollowerInterface{});
-		broadcastServer = broadcaster.serve(cbfi->get());
-	}
-
-	Future<Void> restartLocalConfig(std::string const& configPath) {
-		localConfiguration = LocalConfiguration(configPath, {});
-		return setupLocalConfig(this);
-	}
-
-	void compact() { broadcaster.compact(); }
-
-	Future<Void> getError() const { return configConsumer || broadcastServer; }
-};
-
-class TransactionEnvironment {
+class WriteToTransactionEnvironment {
 	ConfigTransactionInterface cti;
-	Reference<IConfigTransaction> tr;
-	Reference<IConfigDatabaseNode> node;
-	Future<Void> server;
-	UID id;
-
-	ACTOR static Future<Void> setup(TransactionEnvironment* self) {
-		wait(self->node->initialize("./", self->id));
-		self->server = self->node->serve(self->cti);
-		return Void();
-	}
-
-public:
-	TransactionEnvironment()
-	  : tr(IConfigTransaction::createSimple(cti)), node(IConfigDatabaseNode::createSimple()),
-	    id(deterministicRandom()->randomUniqueID()) {}
-
-	Future<Void> setup() { return setup(this); }
-
-	Future<Void> restartNode() {
-		server.cancel();
-		node = IConfigDatabaseNode::createSimple();
-		return setup();
-	}
-
-	Future<Void> set(Optional<KeyRef> configClass, int64_t value) {
-		return addTestSetMutation(*tr, configClass, value);
-	}
-	Future<Void> clear(Optional<KeyRef> configClass) { return addTestClearMutation(*tr, configClass); }
-	Future<Void> check(Optional<KeyRef> configClass, Optional<int64_t> expected) {
-		return checkImmediate(*tr, configClass, expected);
-	}
-	Future<Void> getError() const { return server; }
-};
-
-class TransactionToLocalConfigEnvironment {
-	ConfigTransactionInterface cti;
-	ConfigFollowerInterface nodeToBroadcaster;
-	Reference<IConfigTransaction> tr;
-	Reference<AsyncVar<ConfigBroadcastFollowerInterface>> broadcasterToLocalConfig;
+	ConfigFollowerInterface cfi;
 	Reference<IConfigDatabaseNode> node;
 	UID nodeID;
-	UID localConfigID;
 	Future<Void> ctiServer;
 	Future<Void> cfiServer;
-	LocalConfiguration localConfiguration;
-	ConfigBroadcaster broadcaster;
-	Future<Void> broadcastServer;
-	Future<Void> localConfigConsumer;
 
-	ACTOR static Future<Void> setup(TransactionToLocalConfigEnvironment* self) {
-		wait(setupNode(self));
-		wait(setupLocalConfig(self));
-		self->broadcastServer = self->broadcaster.serve(self->broadcasterToLocalConfig->get());
-		return Void();
-	}
-
-	ACTOR static Future<Void> setupLocalConfig(TransactionToLocalConfigEnvironment* self) {
-		wait(self->localConfiguration.initialize("./", self->localConfigID));
-		self->localConfigConsumer = self->localConfiguration.consume(
-		    IDependentAsyncVar<ConfigBroadcastFollowerInterface>::create(self->broadcasterToLocalConfig));
-		return Void();
-	}
-
-	ACTOR static Future<Void> setupNode(TransactionToLocalConfigEnvironment* self) {
+	ACTOR static Future<Void> setupNode(WriteToTransactionEnvironment* self) {
 		wait(self->node->initialize("./", self->nodeID));
 		self->ctiServer = self->node->serve(self->cti);
-		self->cfiServer = self->node->serve(self->nodeToBroadcaster);
+		self->cfiServer = self->node->serve(self->cfi);
+		return Void();
+	}
+
+	ACTOR static Future<Void> set(WriteToTransactionEnvironment* self, Optional<KeyRef> configClass, int64_t value) {
+		state Reference<IConfigTransaction> tr = IConfigTransaction::createSimple(self->cti);
+		auto configKey = encodeConfigKey(configClass, "test_long"_sr);
+		tr->set(configKey, longToValue(value));
+		wait(tr->commit());
+		return Void();
+	}
+
+	ACTOR static Future<Void> clear(WriteToTransactionEnvironment* self, Optional<KeyRef> configClass) {
+		state Reference<IConfigTransaction> tr = IConfigTransaction::createSimple(self->cti);
+		auto configKey = encodeConfigKey(configClass, "test_long"_sr);
+		tr->clear(configKey);
+		wait(tr->commit());
 		return Void();
 	}
 
 public:
-	TransactionToLocalConfigEnvironment(std::string const& configPath)
-	  : broadcasterToLocalConfig(makeReference<AsyncVar<ConfigBroadcastFollowerInterface>>()),
-	    node(IConfigDatabaseNode::createSimple()), tr(IConfigTransaction::createSimple(cti)),
-	    nodeID(deterministicRandom()->randomUniqueID()), localConfigID(deterministicRandom()->randomUniqueID()),
-	    localConfiguration(configPath, {}), broadcaster(nodeToBroadcaster) {}
+	WriteToTransactionEnvironment()
+	  : node(IConfigDatabaseNode::createSimple()), nodeID(deterministicRandom()->randomUniqueID()) {}
 
-	Future<Void> setup() { return setup(this); }
+	Future<Void> setup() { return setupNode(this); }
+
+	Future<Void> set(Optional<KeyRef> configClass, int64_t value) { return set(this, configClass, value); }
+
+	Future<Void> clear(Optional<KeyRef> configClass) { return clear(this, configClass); }
 
 	Future<Void> restartNode() {
 		cfiServer.cancel();
@@ -293,23 +103,216 @@ public:
 		return setupNode(this);
 	}
 
+	ConfigTransactionInterface getTransactionInterface() const { return cti; }
+
+	ConfigFollowerInterface getFollowerInterface() const { return cfi; }
+
+	Future<Void> getError() const { return cfiServer || ctiServer; }
+};
+
+class ReadFromLocalConfigEnvironment {
+	LocalConfiguration localConfiguration;
+	Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> cbfi;
+	UID id;
+	Future<Void> consumer;
+
+	ACTOR static Future<Void> checkEventually(LocalConfiguration const* localConfiguration,
+	                                          Optional<int64_t> expected) {
+		loop {
+			if (localConfiguration->getTestKnobs().TEST_LONG == (expected.present() ? expected.get() : 0)) {
+				return Void();
+			}
+			wait(delayJittered(0.1));
+		}
+	}
+
+	ACTOR static Future<Void> setup(ReadFromLocalConfigEnvironment* self) {
+		wait(self->localConfiguration.initialize("./", self->id));
+		if (self->cbfi) {
+			self->consumer = self->localConfiguration.consume(self->cbfi);
+		}
+		return Void();
+	}
+
+public:
+	ReadFromLocalConfigEnvironment(std::string const& configPath,
+	                               std::map<std::string, std::string> const& manualKnobOverrides)
+	  : localConfiguration(configPath, manualKnobOverrides), id(deterministicRandom()->randomUniqueID()),
+	    consumer(Never()) {}
+
+	Future<Void> setup() { return setup(this); }
+
+	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
+		localConfiguration = LocalConfiguration(newConfigPath, {});
+		return setup();
+	}
+
+	void connectToBroadcaster(Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> const& cbfi) {
+		ASSERT(!this->cbfi);
+		this->cbfi = cbfi;
+		consumer = localConfiguration.consume(cbfi);
+	}
+
+	void checkImmediate(Optional<int64_t> expected) const {
+		if (expected.present()) {
+			ASSERT_EQ(localConfiguration.getTestKnobs().TEST_LONG, expected.get());
+		} else {
+			ASSERT_EQ(localConfiguration.getTestKnobs().TEST_LONG, 0);
+		}
+	}
+
+	Future<Void> checkEventually(Optional<int64_t> expected) const {
+		return checkEventually(&localConfiguration, expected);
+	}
+
+	LocalConfiguration& getMutableLocalConfiguration() { return localConfiguration; }
+
+	Future<Void> getError() const { return consumer; }
+};
+
+class LocalConfigEnvironment {
+	ReadFromLocalConfigEnvironment readFrom;
+	Version lastWrittenVersion{ 0 };
+
+	Future<Void> addMutation(Optional<KeyRef> configClass, Optional<ValueRef> value) {
+		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
+		appendVersionedMutation(versionedMutations, ++lastWrittenVersion, configClass, "test_long"_sr, value);
+		return readFrom.getMutableLocalConfiguration().addChanges(versionedMutations, lastWrittenVersion);
+	}
+
+public:
+	LocalConfigEnvironment(std::string const& configPath,
+	                       std::map<std::string, std::string> const& manualKnobOverrides = {})
+	  : readFrom(configPath, manualKnobOverrides) {}
+	Future<Void> setup() { return readFrom.setup(); }
+	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
+		return readFrom.restartLocalConfig(newConfigPath);
+	}
+	Future<Void> getError() const { return Never(); }
+	Future<Void> clear(Optional<KeyRef> configClass) { return addMutation(configClass, {}); }
+	Future<Void> set(Optional<KeyRef> configClass, int64_t value) {
+		return addMutation(configClass, longToValue(value));
+	}
+	void check(Optional<int64_t> value) const { return readFrom.checkImmediate(value); }
+};
+
+class BroadcasterToLocalConfigEnvironment {
+	ReadFromLocalConfigEnvironment readFrom;
+	Reference<AsyncVar<ConfigBroadcastFollowerInterface>> cbfi;
+	ConfigBroadcaster broadcaster;
+	Version lastWrittenVersion{ 0 };
+	Future<Void> broadcastServer;
+
+	ACTOR static Future<Void> setup(BroadcasterToLocalConfigEnvironment* self) {
+		wait(self->readFrom.setup());
+		self->readFrom.connectToBroadcaster(IDependentAsyncVar<ConfigBroadcastFollowerInterface>::create(self->cbfi));
+		self->broadcastServer = self->broadcaster.serve(self->cbfi->get());
+		return Void();
+	}
+
+	void addMutation(Optional<KeyRef> configClass, Optional<ValueRef> value) {
+		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
+		appendVersionedMutation(versionedMutations, ++lastWrittenVersion, configClass, "test_long"_sr, value);
+		broadcaster.applyChanges(versionedMutations, lastWrittenVersion);
+	}
+
+public:
+	BroadcasterToLocalConfigEnvironment(std::string const& configPath)
+	  : broadcaster(ConfigFollowerInterface{}), cbfi(makeReference<AsyncVar<ConfigBroadcastFollowerInterface>>()),
+	    readFrom(configPath, {}) {}
+
+	Future<Void> setup() { return setup(this); }
+
+	void set(Optional<KeyRef> configClass, int64_t value) { addMutation(configClass, longToValue(value)); }
+
+	void clear(Optional<KeyRef> configClass) { addMutation(configClass, {}); }
+
+	Future<Void> check(Optional<int64_t> value) const { return readFrom.checkEventually(value); }
+
 	void changeBroadcaster() {
 		broadcastServer.cancel();
-		broadcasterToLocalConfig->set(ConfigBroadcastFollowerInterface{});
-		broadcastServer = broadcaster.serve(broadcasterToLocalConfig->get());
+		cbfi->set(ConfigBroadcastFollowerInterface{});
+		broadcastServer = broadcaster.serve(cbfi->get());
 	}
 
-	Future<Void> restartLocalConfig(std::string const& configPath) {
-		localConfiguration = LocalConfiguration(configPath, {});
-		return setupLocalConfig(this);
+	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
+		return readFrom.restartLocalConfig(newConfigPath);
 	}
 
-	Future<Void> set(Optional<KeyRef> configClass, int64_t value) {
-		return addTestSetMutation(*tr, configClass, value);
+	void compact() { broadcaster.compact(); }
+
+	Future<Void> getError() const { return readFrom.getError() || broadcastServer; }
+};
+
+class TransactionEnvironment {
+	WriteToTransactionEnvironment writeTo;
+
+	ACTOR static Future<Void> check(TransactionEnvironment* self,
+	                                Optional<KeyRef> configClass,
+	                                Optional<int64_t> expected) {
+		state Reference<IConfigTransaction> tr =
+		    IConfigTransaction::createSimple(self->writeTo.getTransactionInterface());
+		state Key configKey = encodeConfigKey(configClass, "test_long"_sr);
+		state Optional<Value> value = wait(tr->get(configKey));
+		if (expected.present()) {
+			ASSERT(value.get() == longToValue(expected.get()));
+		} else {
+			ASSERT(!value.present());
+		}
+		return Void();
 	}
-	Future<Void> clear(Optional<KeyRef> configClass) { return addTestClearMutation(*tr, configClass); }
-	Future<Void> check(Optional<int64_t> value) { return checkEventually(&localConfiguration, value); }
-	Future<Void> getError() const { return ctiServer || cfiServer || localConfigConsumer || broadcastServer; }
+
+public:
+	Future<Void> setup() { return writeTo.setup(); }
+
+	Future<Void> restartNode() { return writeTo.restartNode(); }
+
+	Future<Void> set(Optional<KeyRef> configClass, int64_t value) { return writeTo.set(configClass, value); }
+	Future<Void> clear(Optional<KeyRef> configClass) { return writeTo.clear(configClass); }
+	Future<Void> check(Optional<KeyRef> configClass, Optional<int64_t> expected) {
+		return check(this, configClass, expected);
+	}
+	Future<Void> getError() const { return writeTo.getError(); }
+};
+
+class TransactionToLocalConfigEnvironment {
+	WriteToTransactionEnvironment writeTo;
+	ReadFromLocalConfigEnvironment readFrom;
+	Reference<AsyncVar<ConfigBroadcastFollowerInterface>> cbfi;
+	ConfigBroadcaster broadcaster;
+	Future<Void> broadcastServer;
+
+	ACTOR static Future<Void> setup(TransactionToLocalConfigEnvironment* self) {
+		wait(self->writeTo.setup());
+		wait(self->readFrom.setup());
+		self->readFrom.connectToBroadcaster(IDependentAsyncVar<ConfigBroadcastFollowerInterface>::create(self->cbfi));
+		self->broadcastServer = self->broadcaster.serve(self->cbfi->get());
+		return Void();
+	}
+
+public:
+	TransactionToLocalConfigEnvironment(std::string const& configPath)
+	  : readFrom(configPath, {}), broadcaster(writeTo.getFollowerInterface()),
+	    cbfi(makeReference<AsyncVar<ConfigBroadcastFollowerInterface>>()) {}
+
+	Future<Void> setup() { return setup(this); }
+
+	Future<Void> restartNode() { return writeTo.restartNode(); }
+
+	void changeBroadcaster() {
+		broadcastServer.cancel();
+		cbfi->set(ConfigBroadcastFollowerInterface{});
+		broadcastServer = broadcaster.serve(cbfi->get());
+	}
+
+	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
+		return readFrom.restartLocalConfig(newConfigPath);
+	}
+
+	Future<Void> set(Optional<KeyRef> configClass, int64_t value) { return writeTo.set(configClass, value); }
+	Future<Void> clear(Optional<KeyRef> configClass) { return writeTo.clear(configClass); }
+	Future<Void> check(Optional<int64_t> value) const { return readFrom.checkEventually(value); }
+	Future<Void> getError() const { return writeTo.getError() || readFrom.getError() || broadcastServer; }
 };
 
 template <class Env, class... Args>
