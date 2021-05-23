@@ -29,30 +29,19 @@ bool matchesConfigClass(ConfigClassSet const& configClassSet, Optional<KeyRef> c
 	return !configClass.present() || configClassSet.contains(configClass.get());
 }
 
-// Helper functions for std::map, with flow-friendly error handling
-template <class K, class V>
-V const& get(std::map<K, V> const& m, K const& k) {
-	auto it = m.find(k);
-	ASSERT(it != m.end());
+// Helper functions for STL containers, with flow-friendly error handling
+template <class MapContainer, class K>
+auto get(MapContainer&& m, K const& k) -> decltype(m.at(k)) {
+	auto&& mapContainer = std::forward<MapContainer>(m);
+	auto it = mapContainer.find(k);
+	ASSERT(it != mapContainer.end());
 	return it->second;
 }
-template <class K, class V>
-V& get(std::map<K, V>& m, K const& k) {
-	auto it = m.find(k);
-	ASSERT(it != m.end());
-	return it->second;
-}
-template <class K, class V>
-void remove(std::map<K, V>& m, K const& k) {
-	auto it = m.find(k);
-	ASSERT(it != m.end());
-	m.erase(it);
-}
-template <class K>
-void remove(std::set<K>& s, K const k) {
-	auto it = s.find(k);
-	ASSERT(it != s.end());
-	s.erase(it);
+template <class Container, class K>
+void remove(Container& container, K const& k) {
+	auto it = container.find(k);
+	ASSERT(it != container.end());
+	container.erase(it);
 }
 
 class PendingRequestStore {
