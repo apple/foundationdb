@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+
 #include "fdbserver/ConfigBroadcaster.h"
 #include "fdbserver/IConfigConsumer.h"
 #include "flow/UnitTest.h"
@@ -113,7 +115,8 @@ public:
 class ConfigBroadcasterImpl {
 	PendingRequestStore pending;
 	std::map<ConfigKey, Value> snapshot;
-	std::deque<Standalone<VersionedConfigMutationRef>> mutationHistory;
+	std::deque<VersionedConfigMutation> mutationHistory;
+	std::deque<VersionedConfigCommitAnnotation> annotationHistory;
 	Version lastCompactedVersion;
 	Version mostRecentVersion;
 	std::unique_ptr<IConfigConsumer> consumer;
@@ -214,9 +217,12 @@ class ConfigBroadcasterImpl {
 		}
 	}
 
-	void addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes, Version mostRecentVersion) {
+	void addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
+	                Version mostRecentVersion,
+	                Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations) {
 		this->mostRecentVersion = mostRecentVersion;
 		mutationHistory.insert(mutationHistory.end(), changes.begin(), changes.end());
+		annotationHistory.insert(annotationHistory.end(), annotations.begin(), annotations.end());
 		for (const auto& change : changes) {
 			const auto& mutation = change.mutation;
 			if (mutation.isSet()) {
@@ -239,12 +245,15 @@ public:
 		return serve(self, this, cbfi);
 	}
 
-	void applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes, Version mostRecentVersion) {
+	void applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
+	                  Version mostRecentVersion,
+	                  Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations) {
 		TraceEvent(SevDebug, "ConfigBroadcasterApplyingChanges", id)
 		    .detail("ChangesSize", changes.size())
 		    .detail("CurrentMostRecentVersion", this->mostRecentVersion)
-		    .detail("NewMostRecentVersion", mostRecentVersion);
-		addChanges(changes, mostRecentVersion);
+		    .detail("NewMostRecentVersion", mostRecentVersion)
+		    .detail("AnnotationsSize", annotations.size());
+		addChanges(changes, mostRecentVersion, annotations);
 		notifyFollowers(changes);
 	}
 
@@ -252,15 +261,17 @@ public:
 	void applySnapshotAndChanges(Snapshot&& snapshot,
 	                             Version snapshotVersion,
 	                             Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
-	                             Version changesVersion) {
+	                             Version changesVersion,
+	                             Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations) {
 		TraceEvent(SevDebug, "ConfigBroadcasterApplyingSnapshotAndChanges", id)
 		    .detail("CurrentMostRecentVersion", this->mostRecentVersion)
 		    .detail("SnapshotSize", snapshot.size())
 		    .detail("SnapshotVersion", snapshotVersion)
 		    .detail("ChangesSize", changes.size())
-		    .detail("ChangesVersion", changesVersion);
+		    .detail("ChangesVersion", changesVersion)
+		    .detail("AnnotationsSize", annotations.size());
 		setSnapshot(std::forward<Snapshot>(snapshot), snapshotVersion);
-		addChanges(changes, changesVersion);
+		addChanges(changes, changesVersion, annotations);
 		notifyOutdatedRequests();
 	}
 
@@ -290,14 +301,21 @@ public:
 			JsonBuilderObject mutationObject;
 			mutationObject["version"] = versionedMutation.version;
 			const auto& mutation = versionedMutation.mutation;
-			mutationObject["description"] = mutation.getDescription();
 			mutationObject["config_class"] = mutation.getConfigClass().orDefault("<global>"_sr);
 			mutationObject["knob_name"] = mutation.getKnobName();
 			mutationObject["knob_value"] = mutation.getValue().orDefault("<cleared>"_sr);
-			mutationObject["timestamp"] = mutation.getTimestamp();
 			mutationsArray.push_back(std::move(mutationObject));
 		}
 		result["mutations"] = std::move(mutationsArray);
+		JsonBuilderArray commitsArray;
+		for (const auto& versionedAnnotation : annotationHistory) {
+			JsonBuilderObject commitObject;
+			commitObject["version"] = versionedAnnotation.version;
+			commitObject["description"] = versionedAnnotation.annotation.description;
+			commitObject["timestamp"] = versionedAnnotation.annotation.timestamp;
+			commitsArray.push_back(std::move(commitObject));
+		}
+		result["commits"] = std::move(commitsArray);
 		JsonBuilderObject snapshotObject;
 		std::map<Optional<Key>, std::vector<std::pair<Key, Value>>> snapshotMap;
 		for (const auto& [configKey, value] : snapshot) {
@@ -316,8 +334,19 @@ public:
 		return result;
 	}
 
-	void compact() {
-		// TODO: Implement this
+	void compact(Version compactionVersion) {
+		{
+			auto it = std::find_if(mutationHistory.begin(), mutationHistory.end(), [compactionVersion](const auto& vm) {
+				return vm.version > compactionVersion;
+			});
+			mutationHistory.erase(mutationHistory.begin(), it);
+		}
+		{
+			auto it = std::find_if(annotationHistory.begin(),
+			                       annotationHistory.end(),
+			                       [compactionVersion](const auto& va) { return va.version > compactionVersion; });
+			annotationHistory.erase(annotationHistory.begin(), it);
+		}
 	}
 
 	UID getID() const { return id; }
@@ -340,22 +369,27 @@ Future<Void> ConfigBroadcaster::serve(ConfigBroadcastFollowerInterface const& cb
 }
 
 void ConfigBroadcaster::applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
-                                     Version mostRecentVersion) {
-	impl->applyChanges(changes, mostRecentVersion);
+                                     Version mostRecentVersion,
+                                     Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations) {
+	impl->applyChanges(changes, mostRecentVersion, annotations);
 }
 
-void ConfigBroadcaster::applySnapshotAndChanges(std::map<ConfigKey, Value> const& snapshot,
-                                                Version snapshotVersion,
-                                                Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
-                                                Version changesVersion) {
-	impl->applySnapshotAndChanges(snapshot, snapshotVersion, changes, changesVersion);
+void ConfigBroadcaster::applySnapshotAndChanges(
+    std::map<ConfigKey, Value> const& snapshot,
+    Version snapshotVersion,
+    Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
+    Version changesVersion,
+    Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations) {
+	impl->applySnapshotAndChanges(snapshot, snapshotVersion, changes, changesVersion, annotations);
 }
 
-void ConfigBroadcaster::applySnapshotAndChanges(std::map<ConfigKey, Value>&& snapshot,
-                                                Version snapshotVersion,
-                                                Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
-                                                Version changesVersion) {
-	impl->applySnapshotAndChanges(std::move(snapshot), snapshotVersion, changes, changesVersion);
+void ConfigBroadcaster::applySnapshotAndChanges(
+    std::map<ConfigKey, Value>&& snapshot,
+    Version snapshotVersion,
+    Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
+    Version changesVersion,
+    Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations) {
+	impl->applySnapshotAndChanges(std::move(snapshot), snapshotVersion, changes, changesVersion, annotations);
 }
 
 UID ConfigBroadcaster::getID() const {
@@ -366,8 +400,8 @@ JsonBuilderObject ConfigBroadcaster::getStatus() const {
 	return impl->getStatus();
 }
 
-void ConfigBroadcaster::compact() {
-	impl->compact();
+void ConfigBroadcaster::compact(Version compactionVersion) {
+	impl->compact(compactionVersion);
 }
 
 namespace {

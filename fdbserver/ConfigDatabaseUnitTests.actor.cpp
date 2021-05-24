@@ -216,7 +216,7 @@ class BroadcasterToLocalConfigEnvironment {
 	void addMutation(Optional<KeyRef> configClass, Optional<ValueRef> value) {
 		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
 		appendVersionedMutation(versionedMutations, ++lastWrittenVersion, configClass, "test_long"_sr, value);
-		broadcaster.applyChanges(versionedMutations, lastWrittenVersion);
+		broadcaster.applyChanges(versionedMutations, lastWrittenVersion, {});
 	}
 
 public:
@@ -242,7 +242,7 @@ public:
 		return readFrom.restartLocalConfig(newConfigPath);
 	}
 
-	void compact() { broadcaster.compact(); }
+	void compact() { broadcaster.compact(lastWrittenVersion); }
 
 	Future<Void> getError() const { return readFrom.getError() || broadcastServer; }
 };

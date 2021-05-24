@@ -36,9 +36,20 @@ const KeyRef liveTransactionVersionKey = "liveTransactionVersion"_sr;
 const KeyRef committedVersionKey = "committedVersion"_sr;
 const KeyRangeRef kvKeys = KeyRangeRef("kv/"_sr, "kv0"_sr);
 const KeyRangeRef mutationKeys = KeyRangeRef("mutation/"_sr, "mutation0"_sr);
+const KeyRangeRef annotationKeys = KeyRangeRef("annotation/"_sr, "annotation0"_sr);
+
+Key versionedAnnotationKey(Version version) {
+	ASSERT_GE(version, 0);
+	return BinaryWriter::toValue(bigEndian64(version), IncludeVersion()).withPrefix(annotationKeys.begin);
+}
+
+Version getVersionFromVersionedAnnotationKey(KeyRef versionedAnnotationKey) {
+	return fromBigEndian64(BinaryReader::fromStringRef<uint64_t>(
+	    versionedAnnotationKey.removePrefix(annotationKeys.begin), IncludeVersion()));
+}
 
 Key versionedMutationKey(Version version, uint32_t index) {
-	ASSERT(version >= 0);
+	ASSERT_GE(version, 0);
 	BinaryWriter bw(IncludeVersion());
 	bw << bigEndian64(version);
 	bw << bigEndian32(index);
@@ -142,17 +153,32 @@ class SimpleConfigDatabaseNodeImpl {
 		return lastCompactedVersion;
 	}
 
+	ACTOR static Future<Standalone<VectorRef<VersionedConfigCommitAnnotationRef>>>
+	getAnnotations(SimpleConfigDatabaseNodeImpl* self, Version startVersion, Version endVersion) {
+		Key startKey = versionedAnnotationKey(startVersion);
+		Key endKey = versionedAnnotationKey(endVersion + 1);
+		state KeyRangeRef keys(startKey, endKey);
+		Standalone<RangeResultRef> range = wait(self->kvStore->readRange(keys));
+		Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> result;
+		for (const auto& kv : range) {
+			auto version = getVersionFromVersionedAnnotationKey(kv.key);
+			ASSERT_LE(version, endVersion);
+			auto annotation = BinaryReader::fromStringRef<ConfigCommitAnnotation>(kv.value, IncludeVersion());
+			result.emplace_back_deep(result.arena(), version, annotation);
+		}
+		return result;
+	}
+
 	ACTOR static Future<Standalone<VectorRef<VersionedConfigMutationRef>>>
 	getMutations(SimpleConfigDatabaseNodeImpl* self, Version startVersion, Version endVersion) {
-		Key startVersionKey = versionedMutationKey(startVersion, 0);
-		state KeyRangeRef keys(startVersionKey, mutationKeys.end);
+		Key startKey = versionedMutationKey(startVersion, 0);
+		Key endKey = versionedMutationKey(endVersion + 1, 0);
+		state KeyRangeRef keys(startKey, endKey);
 		Standalone<RangeResultRef> range = wait(self->kvStore->readRange(keys));
 		Standalone<VectorRef<VersionedConfigMutationRef>> result;
 		for (const auto &kv : range) {
 			auto version = getVersionFromVersionedMutationKey(kv.key);
-			if (version > endVersion) {
-				break;
-			}
+			ASSERT_LE(version, endVersion);
 			auto mutation = BinaryReader::fromStringRef<Standalone<ConfigMutationRef>>(kv.value, IncludeVersion());
 			result.emplace_back_deep(result.arena(), version, mutation);
 		}
@@ -167,14 +193,17 @@ class SimpleConfigDatabaseNodeImpl {
 			return Void();
 		}
 		state Version committedVersion = wait(getCommittedVersion(self));
-		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
+		state Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
 		    wait(getMutations(self, req.lastSeenVersion + 1, committedVersion));
+		state Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> versionedAnnotations =
+		    wait(getAnnotations(self, req.lastSeenVersion + 1, committedVersion));
 		TraceEvent(SevDebug, "ConfigDatabaseNodeSendingChanges")
 		    .detail("ReqLastSeenVersion", req.lastSeenVersion)
 		    .detail("CommittedVersion", committedVersion)
-		    .detail("NumMutations", versionedMutations.size());
+		    .detail("NumMutations", versionedMutations.size())
+		    .detail("NumCommits", versionedAnnotations.size());
 		++self->successfulChangeRequests;
-		req.reply.send(ConfigFollowerGetChangesReply{ committedVersion, versionedMutations });
+		req.reply.send(ConfigFollowerGetChangesReply{ committedVersion, versionedMutations, versionedAnnotations });
 		return Void();
 	}
 
@@ -275,6 +304,8 @@ class SimpleConfigDatabaseNodeImpl {
 			}
 			self->kvStore->set(KeyValueRef(key, value));
 		}
+		self->kvStore->set(
+		    KeyValueRef(versionedAnnotationKey(req.version), BinaryWriter::toValue(req.annotation, IncludeVersion())));
 		self->kvStore->set(KeyValueRef(committedVersionKey, BinaryWriter::toValue(req.version, IncludeVersion())));
 		wait(self->kvStore->commit());
 		++self->successfulCommits;
@@ -317,11 +348,13 @@ class SimpleConfigDatabaseNodeImpl {
 		wait(store(reply.snapshotVersion, getLastCompactedVersion(self)));
 		wait(store(reply.changesVersion, getCommittedVersion(self)));
 		wait(store(reply.changes, getMutations(self, reply.snapshotVersion + 1, reply.changesVersion)));
+		wait(store(reply.annotations, getAnnotations(self, reply.snapshotVersion + 1, reply.changesVersion)));
 		TraceEvent(SevDebug, "ConfigDatabaseNodeGettingSnapshot")
 		    .detail("SnapshotVersion", reply.snapshotVersion)
 		    .detail("ChangesVersion", reply.changesVersion)
 		    .detail("SnapshotSize", reply.snapshot.size())
-		    .detail("ChangesSize", reply.changes.size());
+		    .detail("ChangesSize", reply.changes.size())
+		    .detail("AnnotationsSize", reply.annotations.size());
 		req.reply.send(reply);
 		return Void();
 	}
@@ -339,13 +372,15 @@ class SimpleConfigDatabaseNodeImpl {
 		    wait(getMutations(self, lastCompactedVersion + 1, req.version));
 		self->kvStore->clear(
 		    KeyRangeRef(versionedMutationKey(lastCompactedVersion + 1, 0), versionedMutationKey(req.version + 1, 0)));
+		self->kvStore->clear(
+		    KeyRangeRef(versionedAnnotationKey(lastCompactedVersion + 1), versionedAnnotationKey(req.version + 1)));
 		for (const auto& versionedMutation : versionedMutations) {
 			const auto& version = versionedMutation.version;
 			const auto& mutation = versionedMutation.mutation;
 			if (version > req.version) {
 				break;
 			} else {
-				TraceEvent(SevDebug, "ConfigDatabaseNodeCompactionApplyingMutation")
+				TraceEvent(SevDebug, "ConfigDatabaseNodeCompactionApplyingMutation", self->id)
 				    .detail("IsSet", mutation.isSet())
 				    .detail("MutationVersion", version)
 				    .detail("LastCompactedVersion", lastCompactedVersion)

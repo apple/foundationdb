@@ -26,9 +26,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class SimpleConfigTransactionImpl {
-	Standalone<VectorRef<ConfigMutationRef>> mutations;
-	Future<Version> version;
-	Key description;
+	ConfigTransactionCommitRequest toCommit;
+	Future<Version> getVersionFuture;
 	ConfigTransactionInterface cti;
 	int numRetries{ 0 };
 	bool committed{ false };
@@ -49,10 +48,10 @@ class SimpleConfigTransactionImpl {
 	}
 
 	ACTOR static Future<Optional<Value>> get(SimpleConfigTransactionImpl* self, KeyRef key) {
-		if (!self->version.isValid()) {
-			self->version = getReadVersion(self);
+		if (!self->getVersionFuture.isValid()) {
+			self->getVersionFuture = getReadVersion(self);
 		}
-		Version version = wait(self->version);
+		Version version = wait(self->getVersionFuture);
 		auto configKey = ConfigKey::decodeKey(key);
 		if (self->dID.present()) {
 			TraceEvent("SimpleConfigTransactionGettingValue", self->dID.get())
@@ -83,16 +82,12 @@ class SimpleConfigTransactionImpl {
 	}
 
 	ACTOR static Future<Void> commit(SimpleConfigTransactionImpl* self) {
-		if (!self->version.isValid()) {
-			self->version = getReadVersion(self);
+		if (!self->getVersionFuture.isValid()) {
+			self->getVersionFuture = getReadVersion(self);
 		}
-		Version version = wait(self->version);
-		auto commitTime = now();
-		for (auto& mutation : self->mutations) {
-			mutation.setTimestamp(commitTime);
-			mutation.setDescription(self->description);
-		}
-		wait(self->cti.commit.getReply(ConfigTransactionCommitRequest(version, self->mutations)));
+		wait(store(self->toCommit.version, self->getVersionFuture));
+		self->toCommit.annotation.timestamp = now();
+		wait(self->cti.commit.getReply(self->toCommit));
 		self->committed = true;
 		return Void();
 	}
@@ -108,17 +103,17 @@ public:
 
 	void set(KeyRef key, ValueRef value) {
 		if (key == "\xff\xff/description"_sr) {
-			description = value;
+			toCommit.annotation.description = KeyRef(toCommit.arena, value);
 		} else {
-			mutations.push_back_deep(mutations.arena(), ConfigMutationRef::createConfigMutation(key, value));
+			toCommit.mutations.push_back_deep(toCommit.arena, ConfigMutationRef::createConfigMutation(key, value));
 		}
 	}
 
 	void clear(KeyRef key) {
 		if (key == "\xff\xff/description"_sr) {
-			description = ""_sr;
+			toCommit.annotation.description = ""_sr;
 		} else {
-			mutations.emplace_back_deep(mutations.arena(), ConfigMutationRef::createConfigMutation(key, {}));
+			toCommit.mutations.push_back_deep(toCommit.arena, ConfigMutationRef::createConfigMutation(key, {}));
 		}
 	}
 
@@ -138,24 +133,24 @@ public:
 	}
 
 	Future<Version> getReadVersion() {
-		if (!version.isValid())
-			version = getReadVersion(this);
-		return version;
+		if (!getVersionFuture.isValid())
+			getVersionFuture = getReadVersion(this);
+		return getVersionFuture;
 	}
 
-	Optional<Version> getCachedReadVersion() {
-		if (version.isValid() && version.isReady() && !version.isError()) {
-			return version.get();
+	Optional<Version> getCachedReadVersion() const {
+		if (getVersionFuture.isValid() && getVersionFuture.isReady() && !getVersionFuture.isError()) {
+			return getVersionFuture.get();
 		} else {
 			return {};
 		}
 	}
 
-	Version getCommittedVersion() const { return committed ? version.get() : ::invalidVersion; }
+	Version getCommittedVersion() const { return committed ? getVersionFuture.get() : ::invalidVersion; }
 
 	void reset() {
-		version = Future<Version>{};
-		mutations = Standalone<VectorRef<ConfigMutationRef>>{};
+		getVersionFuture = Future<Version>{};
+		toCommit = {};
 		committed = false;
 	}
 
@@ -165,7 +160,7 @@ public:
 		reset();
 	}
 
-	size_t getApproximateSize() const { return mutations.expectedSize(); }
+	size_t getApproximateSize() const { return toCommit.expectedSize(); }
 
 	void debugTransaction(UID dID) {
 		this->dID = dID;

@@ -37,18 +37,22 @@ public:
 	ConfigBroadcaster& operator=(ConfigBroadcaster&&);
 	~ConfigBroadcaster();
 	Future<Void> serve(ConfigBroadcastFollowerInterface const&);
-	void applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes, Version mostRecentVersion);
+	void applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
+	                  Version mostRecentVersion,
+	                  Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations);
 	void applySnapshotAndChanges(std::map<ConfigKey, Value> const& snapshot,
 	                             Version snapshotVersion,
 	                             Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
-	                             Version changesVersion);
+	                             Version changesVersion,
+	                             Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations);
 	void applySnapshotAndChanges(std::map<ConfigKey, Value>&& snapshot,
 	                             Version snapshotVersion,
 	                             Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
-	                             Version changesVersion);
+	                             Version changesVersion,
+	                             Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations);
 	UID getID() const;
 	JsonBuilderObject getStatus() const;
-	void compact();
+	void compact(Version compactionVersion);
 
 public: // Testing
 	explicit ConfigBroadcaster(ConfigFollowerInterface const&);

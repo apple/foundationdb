@@ -32,7 +32,6 @@ protected:
 
 public:
 	virtual ~IConfigTransaction() = default;
-	virtual void fullReset() = 0;
 
 	static Reference<IConfigTransaction> createSimple(ConfigTransactionInterface const&);
 	static Reference<IConfigTransaction> createSimple(ClusterConnectionString const&);

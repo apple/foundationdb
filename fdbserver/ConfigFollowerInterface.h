@@ -42,23 +42,47 @@ struct VersionedConfigMutationRef {
 		serializer(ar, version, mutation);
 	}
 };
+using VersionedConfigMutation = Standalone<VersionedConfigMutationRef>;
+
+struct VersionedConfigCommitAnnotationRef {
+	Version version;
+	ConfigCommitAnnotationRef annotation;
+
+	VersionedConfigCommitAnnotationRef() = default;
+	explicit VersionedConfigCommitAnnotationRef(Arena& arena, Version version, ConfigCommitAnnotationRef annotation)
+	  : version(version), annotation(arena, annotation) {}
+	explicit VersionedConfigCommitAnnotationRef(Arena& arena, VersionedConfigCommitAnnotationRef rhs)
+	  : version(rhs.version), annotation(arena, rhs.annotation) {}
+
+	size_t expectedSize() const { return annotation.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, annotation);
+	}
+};
+using VersionedConfigCommitAnnotation = Standalone<VersionedConfigCommitAnnotationRef>;
 
 struct ConfigFollowerGetSnapshotAndChangesReply {
 	static constexpr FileIdentifier file_identifier = 1734095;
 	Version snapshotVersion;
 	Version changesVersion;
 	std::map<ConfigKey, Value> snapshot;
+	// TODO: Share arena
 	Standalone<VectorRef<VersionedConfigMutationRef>> changes;
+	Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
 
 	ConfigFollowerGetSnapshotAndChangesReply() = default;
 	template <class Snapshot>
-	explicit ConfigFollowerGetSnapshotAndChangesReply(Version snapshotVersion,
-	                                                  Version changesVersion,
-	                                                  Snapshot&& snapshot,
-	                                                  Standalone<VectorRef<VersionedConfigMutationRef>> changes)
+	explicit ConfigFollowerGetSnapshotAndChangesReply(
+	    Version snapshotVersion,
+	    Version changesVersion,
+	    Snapshot&& snapshot,
+	    Standalone<VectorRef<VersionedConfigMutationRef>> changes,
+	    Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations)
 	  : snapshotVersion(snapshotVersion), changesVersion(changesVersion), snapshot(std::forward<Snapshot>(snapshot)),
-	    changes(changes) {
-		ASSERT(changesVersion >= snapshotVersion);
+	    changes(changes), annotations(annotations) {
+		ASSERT_GE(changesVersion, snapshotVersion);
 	}
 
 	template <class Ar>
@@ -80,16 +104,19 @@ struct ConfigFollowerGetSnapshotAndChangesRequest {
 struct ConfigFollowerGetChangesReply {
 	static constexpr FileIdentifier file_identifier = 234859;
 	Version mostRecentVersion;
+	// TODO: Share arena
 	Standalone<VectorRef<VersionedConfigMutationRef>> changes;
+	Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
 
 	ConfigFollowerGetChangesReply() : mostRecentVersion(0) {}
 	explicit ConfigFollowerGetChangesReply(Version mostRecentVersion,
-	                                       Standalone<VectorRef<VersionedConfigMutationRef>> const& changes)
-	  : mostRecentVersion(mostRecentVersion), changes(changes) {}
+	                                       Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
+	                                       Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations)
+	  : mostRecentVersion(mostRecentVersion), changes(changes), annotations(annotations) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, mostRecentVersion, changes);
+		serializer(ar, mostRecentVersion, changes, annotations);
 	}
 };
 

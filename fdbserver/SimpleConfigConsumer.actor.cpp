@@ -64,7 +64,7 @@ class SimpleConfigConsumerImpl {
 				}
 				if (reply.mostRecentVersion > self->lastSeenVersion) {
 					self->lastSeenVersion = reply.mostRecentVersion;
-					broadcaster->applyChanges(reply.changes, reply.mostRecentVersion);
+					broadcaster->applyChanges(reply.changes, reply.mostRecentVersion, reply.annotations);
 				}
 				wait(delayJittered(self->pollingInterval));
 			} catch (Error& e) {
@@ -88,7 +88,7 @@ class SimpleConfigConsumerImpl {
 		    .detail("ChangesVersion", reply.changesVersion)
 		    .detail("ChangesSize", reply.changes.size());
 		broadcaster->applySnapshotAndChanges(
-		    std::move(reply.snapshot), reply.snapshotVersion, reply.changes, reply.changesVersion);
+		    std::move(reply.snapshot), reply.snapshotVersion, reply.changes, reply.changesVersion, reply.annotations);
 		self->lastSeenVersion = reply.changesVersion;
 		return Void();
 	}

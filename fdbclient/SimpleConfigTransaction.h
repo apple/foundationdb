@@ -59,9 +59,10 @@ public:
 	void reset() override;
 	void debugTransaction(UID dID) override;
 	void checkDeferredError() const override;
-	void fullReset() override;
 	int64_t getApproximateSize() const override;
 	void set(KeyRef const&, ValueRef const&) override;
 	void clear(KeyRangeRef const&) override;
 	void clear(KeyRef const&) override;
+
+	void fullReset();
 };

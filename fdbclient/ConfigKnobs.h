@@ -62,8 +62,6 @@ inline bool operator<(ConfigKeyRef const& lhs, ConfigKeyRef const& rhs) {
 class ConfigMutationRef {
 	ConfigKeyRef key;
 	Optional<ValueRef> value;
-	StringRef description{ ""_sr };
-	double timestamp{ 0.0 };
 public:
 	ConfigMutationRef() = default;
 
@@ -77,13 +75,8 @@ public:
 
 	Optional<ValueRef> getValue() const { return value; }
 
-	ConfigMutationRef(Arena& arena, ConfigMutationRef const& rhs)
-	  : key(arena, rhs.key), value(arena, rhs.value), description(arena, rhs.description), timestamp(rhs.timestamp) {}
+	ConfigMutationRef(Arena& arena, ConfigMutationRef const& rhs) : key(arena, rhs.key), value(arena, rhs.value) {}
 
-	StringRef getDescription() const { return description; }
-	void setDescription(StringRef description) { this->description = description; }
-	double getTimestamp() const { return timestamp; }
-	void setTimestamp(double timestamp) { this->timestamp = timestamp; }
 	bool isSet() const { return value.present(); }
 
 	static Standalone<ConfigMutationRef> createConfigMutation(KeyRef encodedKey, Optional<ValueRef> value) {
@@ -93,11 +86,28 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, value, description, timestamp);
+		serializer(ar, key, value);
 	}
 
-	size_t expectedSize() const {
-		return key.expectedSize() + value.expectedSize() + description.expectedSize() + sizeof(decltype(timestamp));
-	}
+	size_t expectedSize() const { return key.expectedSize() + value.expectedSize(); }
 };
 using ConfigMutation = Standalone<ConfigMutationRef>;
+
+struct ConfigCommitAnnotationRef {
+	KeyRef description;
+	double timestamp{ 0.0 };
+
+	ConfigCommitAnnotationRef() = default;
+	explicit ConfigCommitAnnotationRef(KeyRef description, double timestamp)
+	  : description(description), timestamp(timestamp) {}
+	explicit ConfigCommitAnnotationRef(Arena& arena, ConfigCommitAnnotationRef& rhs)
+	  : description(arena, rhs.description), timestamp(rhs.timestamp) {}
+
+	size_t expectedSize() const { return description.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, timestamp, description);
+	}
+};
+using ConfigCommitAnnotation = Standalone<ConfigCommitAnnotationRef>;

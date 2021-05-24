@@ -79,17 +79,17 @@ struct ConfigTransactionGetRequest {
 
 struct ConfigTransactionCommitRequest {
 	static constexpr FileIdentifier file_identifier = 103841;
-	Version version;
-	Standalone<VectorRef<ConfigMutationRef>> mutations;
+	Arena arena;
+	Version version{ ::invalidVersion };
+	VectorRef<ConfigMutationRef> mutations;
+	ConfigCommitAnnotationRef annotation;
 	ReplyPromise<Void> reply;
 
-	ConfigTransactionCommitRequest() = default;
-	ConfigTransactionCommitRequest(Version version, Standalone<VectorRef<ConfigMutationRef>> mutations)
-	  : version(version), mutations(mutations) {}
+	size_t expectedSize() const { return mutations.expectedSize() + annotation.expectedSize(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, mutations, reply);
+		serializer(ar, arena, version, mutations, annotation, reply);
 	}
 };
 
