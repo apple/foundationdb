@@ -557,20 +557,24 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 			}
 		}
 
+		state bool ccInterfacePresent = ccInterface->get().present();
 		state Future<RegisterWorkerReply> registrationReply =
-		    ccInterface->get().present()
-		        ? brokenPromiseToNever(ccInterface->get().get().registerWorker.getReply(request))
-		        : Never();
+		    ccInterfacePresent ? brokenPromiseToNever(ccInterface->get().get().registerWorker.getReply(request))
+		                       : Never();
 		state double startTime = now();
 		loop choose {
 			when(RegisterWorkerReply reply = wait(registrationReply)) {
 				processClass = reply.processClass;
 				asyncPriorityInfo->set(reply.priorityInfo);
-				TraceEvent("WorkerRegisterReply").detail("CCID", ccInterface->get().get().id());
+				TraceEvent("WorkerRegisterReply")
+				    .detail("CCID", ccInterface->get().get().id())
+				    .detail("ProcessClass", reply.processClass.toString());
 				break;
 			}
-			when(wait(delay(SERVER_KNOBS->REGISTER_WORKER_REQUEST_TIMEOUT))) {
-				TraceEvent(SevWarn, "WorkerRegisterTimeout").detail("WaitTime", now() - startTime);
+			when(wait(delay(SERVER_KNOBS->UNKNOWN_CC_TIMEOUT))) {
+				if (!ccInterfacePresent) {
+					TraceEvent(SevWarn, "WorkerRegisterTimeout").detail("WaitTime", now() - startTime);
+				}
 			}
 			when(wait(ccInterface->onChange())) { break; }
 			when(wait(ddInterf->onChange())) { break; }

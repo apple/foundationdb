@@ -1,3 +1,4 @@
+[configuration]
 minimumRegions = 2
 
 [[test]]

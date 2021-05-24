@@ -1965,10 +1965,10 @@ ACTOR Future<Void> doQueueCommit(TLogData* self,
 
 ACTOR Future<Void> commitQueue(TLogData* self) {
 	state Reference<LogData> logData;
+	state std::vector<Reference<LogData>> missingFinalCommit;
 
 	loop {
 		int foundCount = 0;
-		state std::vector<Reference<LogData>> missingFinalCommit;
 		for (auto it : self->id_data) {
 			if (!it.second->stopped) {
 				logData = it.second;

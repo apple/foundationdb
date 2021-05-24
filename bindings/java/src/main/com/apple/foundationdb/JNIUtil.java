@@ -36,11 +36,7 @@ class JNIUtil {
 	private static final String TEMPFILE_PREFIX = "fdbjni";
 	private static final String TEMPFILE_SUFFIX = ".library";
 
-	private enum OS {
-		WIN32("windows", "amd64", false),
-		LINUX("linux", "amd64", true),
-		OSX("osx", "x86_64", true);
-
+	private static class OS {
 		private final String name;
 		private final String arch;
 		private final boolean canDeleteEager;
@@ -171,13 +167,19 @@ class JNIUtil {
 
 	private static OS getRunningOS() {
 		String osname = System.getProperty("os.name").toLowerCase();
-		if(osname.startsWith("windows"))
-			return OS.WIN32;
-		if(osname.startsWith("linux"))
-			return OS.LINUX;
-		if(osname.startsWith("mac") || osname.startsWith("darwin"))
-			return OS.OSX;
-		throw new IllegalStateException("Unknown or unsupported OS: " + osname);
+		String arch = System.getProperty("os.arch");
+		if (!arch.equals("amd64") && !arch.equals("x86_64") && !arch.equals("aarch64")) {
+			throw new IllegalStateException("Unknown or unsupported arch: " + arch);
+		}
+		if (osname.startsWith("windows")) {
+			return new OS("windows", arch, /* canDeleteEager */ false);
+		} else if (osname.startsWith("linux")) {
+			return new OS("linux", arch, /* canDeleteEager */ true);
+		} else if (osname.startsWith("mac") || osname.startsWith("darwin")) {
+			return new OS("osx", arch, /* canDeleteEager */ true);
+		} else {
+			throw new IllegalStateException("Unknown or unsupported OS: " + osname);
+		}
 	}
 
 	private JNIUtil() {}
