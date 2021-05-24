@@ -393,10 +393,14 @@ Version ILogSystem::ServerPeekCursor::getMinKnownCommittedVersion() const {
 }
 
 Optional<UID> ILogSystem::ServerPeekCursor::getPrimaryPeekLocation() const {
-	if (interf) {
+	if (interf && interf->get().present()) {
 		return interf->get().id();
 	}
 	return Optional<UID>();
+}
+
+Optional<UID> ILogSystem::ServerPeekCursor::getCurrentPeekLocation() const {
+	return ILogSystem::ServerPeekCursor::getPrimaryPeekLocation();
 }
 
 Version ILogSystem::ServerPeekCursor::popped() const {
@@ -669,6 +673,13 @@ Version ILogSystem::MergedPeekCursor::getMinKnownCommittedVersion() const {
 Optional<UID> ILogSystem::MergedPeekCursor::getPrimaryPeekLocation() const {
 	if (bestServer >= 0) {
 		return serverCursors[bestServer]->getPrimaryPeekLocation();
+	}
+	return Optional<UID>();
+}
+
+Optional<UID> ILogSystem::MergedPeekCursor::getCurrentPeekLocation() const {
+	if (currentCursor >= 0) {
+		return serverCursors[currentCursor]->getPrimaryPeekLocation();
 	}
 	return Optional<UID>();
 }
@@ -1023,6 +1034,13 @@ Optional<UID> ILogSystem::SetPeekCursor::getPrimaryPeekLocation() const {
 	return Optional<UID>();
 }
 
+Optional<UID> ILogSystem::SetPeekCursor::getCurrentPeekLocation() const {
+	if (currentCursor >= 0 && currentSet >= 0) {
+		return serverCursors[currentSet][currentCursor]->getPrimaryPeekLocation();
+	}
+	return Optional<UID>();
+}
+
 Version ILogSystem::SetPeekCursor::popped() const {
 	Version poppedVersion = 0;
 	for (auto& cursors : serverCursors) {
@@ -1121,6 +1139,10 @@ Version ILogSystem::MultiCursor::getMinKnownCommittedVersion() const {
 
 Optional<UID> ILogSystem::MultiCursor::getPrimaryPeekLocation() const {
 	return cursors.back()->getPrimaryPeekLocation();
+}
+
+Optional<UID> ILogSystem::MultiCursor::getCurrentPeekLocation() const {
+	return cursors.back()->getCurrentPeekLocation();
 }
 
 Version ILogSystem::MultiCursor::popped() const {
@@ -1400,6 +1422,10 @@ Version ILogSystem::BufferedCursor::getMinKnownCommittedVersion() const {
 }
 
 Optional<UID> ILogSystem::BufferedCursor::getPrimaryPeekLocation() const {
+	return Optional<UID>();
+}
+
+Optional<UID> ILogSystem::BufferedCursor::getCurrentPeekLocation() const {
 	return Optional<UID>();
 }
 

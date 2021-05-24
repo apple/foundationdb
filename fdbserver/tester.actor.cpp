@@ -1249,20 +1249,6 @@ std::vector<TestSpec> readTOMLTests_(std::string fileName) {
 
 	const toml::value& conf = toml::parse(fileName);
 
-	// Handle all global settings
-	for (const auto& [k, v] : conf.as_table()) {
-		if (k == "test") {
-			continue;
-		}
-		if (testSpecGlobalKeys.find(k) != testSpecGlobalKeys.end()) {
-			testSpecGlobalKeys[k](toml_to_string(v));
-		} else {
-			TraceEvent(SevError, "TestSpecUnrecognizedGlobalParam")
-			    .detail("Attrib", k)
-			    .detail("Value", toml_to_string(v));
-		}
-	}
-
 	// Then parse each test
 	const toml::array& tests = toml::find(conf, "test").as_array();
 	for (const toml::value& test : tests) {

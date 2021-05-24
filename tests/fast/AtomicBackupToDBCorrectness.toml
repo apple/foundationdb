@@ -1,3 +1,4 @@
+[configuration]
 extraDB = 1
 
 [[test]]
