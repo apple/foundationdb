@@ -11,6 +11,7 @@ Release Notes
 * Added ``fetched_versions`` to the storage metrics section of status to report how fast a storage server is catching up in versions. `(PR #4770) <https://github.com/apple/foundationdb/pull/4770>`_
 * Added ``fetches_from_logs`` to the storage metrics section of status to report how frequently a storage server fetches updates from transaction logs. `(PR #4770) <https://github.com/apple/foundationdb/pull/4770>`_
 * Added the ``bypass_unreadable`` transaction option which allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. `(PR #4774) <https://github.com/apple/foundationdb/pull/4774>`_
+* Fix several packaging issues. The osx package should now install successfully, and the structure of the RPM and DEB packages should match that of 6.2. `(PR #4810) <https://github.com/apple/foundationdb/pull/4810>`_
 
 6.3.13
 ======
