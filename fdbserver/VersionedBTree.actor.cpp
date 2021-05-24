@@ -3227,7 +3227,8 @@ struct InPlaceArray {
 		memcpy(begin(), v.begin(), sizeof(T) * v.size());
 	}
 
-	int extraSize() const { return count * sizeof(T); }
+	int size() const { return count; }
+	int sizeBytes() const { return count * sizeof(T); }
 };
 #pragma pack(pop)
 
@@ -3297,14 +3298,14 @@ public:
 
 #pragma pack(push, 1)
 	struct MetaKey {
-		static constexpr int FORMAT_VERSION = 9;
+		static constexpr int FORMAT_VERSION = 10;
 		// This serves as the format version for the entire tree, individual pages will not be versioned
 		uint16_t formatVersion;
 		uint8_t height;
 		LazyClearQueueT::QueueState lazyDeleteQueue;
 		InPlaceArray<LogicalPageID> root;
 
-		KeyRef asKeyRef() const { return KeyRef((uint8_t*)this, sizeof(MetaKey) + root.extraSize()); }
+		KeyRef asKeyRef() const { return KeyRef((uint8_t*)this, sizeof(MetaKey) + root.sizeBytes()); }
 
 		void fromKeyRef(KeyRef k) {
 			memcpy(this, k.begin(), k.size());
@@ -3312,9 +3313,9 @@ public:
 		}
 
 		std::string toString() {
-			return format("{height=%d  formatVersion=%d  root=%s  lazyDeleteQueue=%s}",
-			              (int)height,
+			return format("{formatVersion=%d  height=%d  root=%s  lazyDeleteQueue=%s}",
 			              (int)formatVersion,
+			              (int)height,
 			              ::toString(root.get()).c_str(),
 			              lazyDeleteQueue.toString().c_str());
 		}
@@ -3388,7 +3389,8 @@ public:
 
 	VersionedBTree(IPager2* pager, std::string name)
 	  : m_pager(pager), m_writeVersion(invalidVersion), m_lastCommittedVersion(invalidVersion), m_pBuffer(nullptr),
-	    m_commitReadLock(new FlowLock(SERVER_KNOBS->REDWOOD_COMMIT_CONCURRENT_READS)), m_name(name) {
+	    m_commitReadLock(new FlowLock(SERVER_KNOBS->REDWOOD_COMMIT_CONCURRENT_READS)), m_name(name), m_pHeader(nullptr),
+	    m_headerSpace(0) {
 
 		m_lazyClearActor = 0;
 		m_init = init_impl(this);
@@ -3491,6 +3493,10 @@ public:
 	ACTOR static Future<Void> init_impl(VersionedBTree* self) {
 		wait(self->m_pager->init());
 
+		// TODO: Get actual max MetaKey size limit from Pager
+		self->m_headerSpace = self->m_pager->getUsablePageSize();
+		self->m_pHeader = (MetaKey*)new uint8_t[self->m_headerSpace];
+
 		self->m_blockSize = self->m_pager->getUsablePageSize();
 		state Version latest = self->m_pager->getLatestVersion();
 		self->m_newOldestVersion = self->m_pager->getOldestVersion();
@@ -3500,12 +3506,12 @@ public:
 
 		state Key meta = self->m_pager->getMetaKey();
 		if (meta.size() == 0) {
-			self->m_header.formatVersion = MetaKey::FORMAT_VERSION;
+			self->m_pHeader->formatVersion = MetaKey::FORMAT_VERSION;
 			LogicalPageID id = wait(self->m_pager->newPageID());
 			BTreePageIDRef newRoot((LogicalPageID*)&id, 1);
 			debug_printf("new root %s\n", toString(newRoot).c_str());
-			self->m_header.root.set(newRoot, sizeof(headerSpace) - sizeof(m_header));
-			self->m_header.height = 1;
+			self->m_pHeader->root.set(newRoot, self->m_headerSpace - sizeof(MetaKey));
+			self->m_pHeader->height = 1;
 			++latest;
 			Reference<ArenaPage> page = self->m_pager->newPageBuffer();
 			makeEmptyRoot(page);
@@ -3514,16 +3520,16 @@ public:
 
 			LogicalPageID newQueuePage = wait(self->m_pager->newPageID());
 			self->m_lazyClearQueue.create(self->m_pager, newQueuePage, "LazyClearQueue");
-			self->m_header.lazyDeleteQueue = self->m_lazyClearQueue.getState();
-			self->m_pager->setMetaKey(self->m_header.asKeyRef());
+			self->m_pHeader->lazyDeleteQueue = self->m_lazyClearQueue.getState();
+			self->m_pager->setMetaKey(self->m_pHeader->asKeyRef());
 			wait(self->m_pager->commit());
 			debug_printf("Committed initial commit.\n");
 		} else {
-			self->m_header.fromKeyRef(meta);
-			self->m_lazyClearQueue.recover(self->m_pager, self->m_header.lazyDeleteQueue, "LazyClearQueueRecovered");
+			self->m_pHeader->fromKeyRef(meta);
+			self->m_lazyClearQueue.recover(self->m_pager, self->m_pHeader->lazyDeleteQueue, "LazyClearQueueRecovered");
 		}
 
-		debug_printf("Recovered btree at version %" PRId64 ": %s\n", latest, self->m_header.toString().c_str());
+		debug_printf("Recovered btree at version %" PRId64 ": %s\n", latest, self->m_pHeader->toString().c_str());
 
 		self->m_lastCommittedVersion = latest;
 		self->m_lazyClearActor = incrementalLazyClear(self);
@@ -3538,6 +3544,10 @@ public:
 		// uncommitted writes so it should not be committed.
 		m_init.cancel();
 		m_latestCommit.cancel();
+
+		if (m_pHeader != nullptr) {
+			delete[](uint8_t*) m_pHeader;
+		}
 	}
 
 	// Must be nondecreasing
@@ -3595,8 +3605,8 @@ public:
 		ASSERT(s.numPages == 1);
 
 		// The btree should now be a single non-oversized root page.
-		ASSERT(self->m_header.height == 1);
-		ASSERT(self->m_header.root.count == 1);
+		ASSERT(self->m_pHeader->height == 1);
+		ASSERT(self->m_pHeader->root.count == 1);
 
 		// From the pager's perspective the only pages that should be in use are the btree root and
 		// the previously mentioned lazy delete queue page.
@@ -3833,12 +3843,9 @@ private:
 	std::unordered_map<LogicalPageID, ParentInfo> parents;
 	ParentInfoMapT childUpdateTracker;
 
-	// MetaKey changes size so allocate space for it to expand into. FIXME: Steve is fixing this to be dynamically
-	// sized.
-	union {
-		uint8_t headerSpace[sizeof(MetaKey) + sizeof(LogicalPageID) * 200];
-		MetaKey m_header;
-	};
+	// MetaKey has a variable size, it can be as large as m_headerSpace
+	MetaKey* m_pHeader;
+	int m_headerSpace;
 
 	LazyClearQueueT m_lazyClearQueue;
 	Future<int> m_lazyClearActor;
@@ -4215,7 +4222,7 @@ private:
 
 		// While there are multiple child pages for this version we must write new tree levels.
 		while (records.size() > 1) {
-			self->m_header.height = ++height;
+			self->m_pHeader->height = ++height;
 			Standalone<VectorRef<RedwoodRecordRef>> newRecords =
 			    wait(writePages(self, &dbBegin, &dbEnd, records, height, version, BTreePageIDRef()));
 			debug_printf("Wrote a new root level at version %" PRId64 " height %d size %lu pages\n",
@@ -4335,7 +4342,7 @@ private:
 		if (REDWOOD_DEBUG) {
 			BTreePage* btPage = (BTreePage*)page->begin();
 			BTreePage::BinaryTree::DecodeCache* cache = (BTreePage::BinaryTree::DecodeCache*)page->userData;
-			debug_printf(
+			debug_printf_always(
 			    "updateBTreePage(%s, %s) %s\n",
 			    ::toString(oldID).c_str(),
 			    ::toString(writeVersion).c_str(),
@@ -5428,7 +5435,7 @@ private:
 		state Version latestVersion = self->m_pager->getLatestVersion();
 		debug_printf("%s: pager latestVersion %" PRId64 "\n", self->m_name.c_str(), latestVersion);
 
-		state Standalone<BTreePageIDRef> rootPageID = self->m_header.root.get();
+		state Standalone<BTreePageIDRef> rootPageID = self->m_pHeader->root.get();
 		state InternalPageSliceUpdate all;
 		state RedwoodRecordRef rootLink = dbBegin.withPageID(rootPageID);
 		all.subtreeLowerBound = rootLink;
@@ -5445,7 +5452,7 @@ private:
 		                   self->m_pager->getReadSnapshot(latestVersion),
 		                   mutations,
 		                   rootPageID,
-		                   self->m_header.height == 1,
+		                   self->m_pHeader->height == 1,
 		                   mBegin,
 		                   mEnd,
 		                   &all));
@@ -5457,7 +5464,7 @@ private:
 				LogicalPageID newRootID = wait(self->m_pager->newPageID());
 				Reference<ArenaPage> page = self->m_pager->newPageBuffer();
 				makeEmptyRoot(page);
-				self->m_header.height = 1;
+				self->m_pHeader->height = 1;
 				self->m_pager->updatePage(newRootID, page);
 				rootPageID = BTreePageIDRef((LogicalPageID*)&newRootID, 1);
 			} else {
@@ -5467,13 +5474,14 @@ private:
 				} else {
 					// If the new root level's size is not 1 then build new root level(s)
 					Standalone<VectorRef<RedwoodRecordRef>> newRootPage =
-					    wait(buildNewRoot(self, latestVersion, newRootLevel, self->m_header.height));
+					    wait(buildNewRoot(self, latestVersion, newRootLevel, self->m_pHeader->height));
 					rootPageID = newRootPage.front().getChildPage();
 				}
 			}
 		}
 
-		self->m_header.root.set(rootPageID, sizeof(headerSpace) - sizeof(m_header));
+		debug_printf("new root %s\n", toString(rootPageID).c_str());
+		self->m_pHeader->root.set(rootPageID, self->m_headerSpace - sizeof(MetaKey));
 
 		self->m_lazyClearStop = true;
 		wait(success(self->m_lazyClearActor));
@@ -5482,10 +5490,10 @@ private:
 		self->m_pager->setCommitVersion(writeVersion);
 
 		wait(self->m_lazyClearQueue.flush());
-		self->m_header.lazyDeleteQueue = self->m_lazyClearQueue.getState();
+		self->m_pHeader->lazyDeleteQueue = self->m_lazyClearQueue.getState();
 
 		debug_printf("Setting metakey\n");
-		self->m_pager->setMetaKey(self->m_header.asKeyRef());
+		self->m_pager->setMetaKey(self->m_pHeader->asKeyRef());
 
 		debug_printf("%s: Committing pager %" PRId64 "\n", self->m_name.c_str(), writeVersion);
 		wait(self->m_pager->commit());
