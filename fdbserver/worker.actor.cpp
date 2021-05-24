@@ -2023,11 +2023,11 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
                         Optional<bool> useTestConfigDB) {
 	state vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
-	state LocalConfiguration localConfig(configPath, manualKnobOverrides);
+	state LocalConfiguration localConfig(dataFolder, configPath, manualKnobOverrides);
 
 	if (useTestConfigDB.present()) {
 		// TODO: Shouldn't block here
-		wait(localConfig.initialize(dataFolder, UID{}));
+		wait(localConfig.initialize());
 	}
 
 	actors.push_back(serveProtocolInfo());

@@ -26,7 +26,7 @@ class PaxosConfigDatabaseNode : public IConfigDatabaseNode {
 	std::unique_ptr<class PaxosConfigDatabaseNodeImpl> impl;
 
 public:
-	PaxosConfigDatabaseNode(std::string const& folder);
+	PaxosConfigDatabaseNode(std::string const& folder, Optional<UID> testID = {});
 	~PaxosConfigDatabaseNode();
 	Future<Void> serve(ConfigTransactionInterface const&) override;
 	Future<Void> serve(ConfigFollowerInterface const&) override;

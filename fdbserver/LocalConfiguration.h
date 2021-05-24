@@ -44,11 +44,14 @@ class LocalConfiguration {
 	std::unique_ptr<class LocalConfigurationImpl> impl;
 
 public:
-	LocalConfiguration(std::string const& configPath, std::map<std::string, std::string> const& manualKnobOverrides);
+	LocalConfiguration(std::string const& dataFolder,
+	                   std::string const& configPath,
+	                   std::map<std::string, std::string> const& manualKnobOverrides,
+	                   Optional<UID> testID = {});
 	LocalConfiguration(LocalConfiguration&&);
 	LocalConfiguration& operator=(LocalConfiguration&&);
 	~LocalConfiguration();
-	Future<Void> initialize(std::string const& dataFolder, UID id);
+	Future<Void> initialize();
 	FlowKnobs const& getFlowKnobs() const;
 	ClientKnobs const& getClientKnobs() const;
 	ServerKnobs const& getServerKnobs() const;

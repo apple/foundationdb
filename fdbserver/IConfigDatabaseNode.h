@@ -32,6 +32,6 @@ public:
 	virtual Future<Void> serve(ConfigTransactionInterface const&) = 0;
 	virtual Future<Void> serve(ConfigFollowerInterface const&) = 0;
 
-	static Reference<IConfigDatabaseNode> createSimple(std::string const& folder);
-	static Reference<IConfigDatabaseNode> createPaxos(std::string const& folder);
+	static Reference<IConfigDatabaseNode> createSimple(std::string const& folder, Optional<UID> testID = {});
+	static Reference<IConfigDatabaseNode> createPaxos(std::string const& folder, Optional<UID> testID = {});
 };

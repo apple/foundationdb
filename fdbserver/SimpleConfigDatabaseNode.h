@@ -26,7 +26,7 @@ class SimpleConfigDatabaseNode : public IConfigDatabaseNode {
 	std::unique_ptr<class SimpleConfigDatabaseNodeImpl> impl;
 
 public:
-	SimpleConfigDatabaseNode(std::string const& folder);
+	SimpleConfigDatabaseNode(std::string const& folder, Optional<UID> testID = {});
 	~SimpleConfigDatabaseNode();
 	Future<Void> serve(ConfigTransactionInterface const&) override;
 	Future<Void> serve(ConfigFollowerInterface const&) override;

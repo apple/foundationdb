@@ -24,6 +24,7 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LocalConfiguration.h"
+#include "fdbserver/OnDemandStore.h"
 #include "flow/Knobs.h"
 #include "flow/UnitTest.h"
 
@@ -126,15 +127,12 @@ public:
 	}
 };
 
-ACTOR template <class F>
-Future<Void> forever(F f) {
-	loop { wait(f()); }
-}
-
 } // namespace
 
-class LocalConfigurationImpl : public NonCopyable {
-	IKeyValueStore* kvStore{ nullptr };
+class LocalConfigurationImpl {
+	UID id;
+	// TODO: Listen for errors
+	OnDemandStore kvStore;
 	Future<Void> initFuture;
 	FlowKnobs flowKnobs;
 	ClientKnobs clientKnobs;
@@ -150,7 +148,6 @@ class LocalConfigurationImpl : public NonCopyable {
 	Counter changeRequestsFetched;
 	Counter mutations;
 	Future<Void> logger;
-	UID id;
 
 	ACTOR static Future<Void> saveConfigPath(LocalConfigurationImpl* self) {
 		self->kvStore->set(
@@ -178,16 +175,7 @@ class LocalConfigurationImpl : public NonCopyable {
 		return result;
 	}
 
-	ACTOR static Future<Void> initialize(LocalConfigurationImpl* self, std::string dataFolder, UID id) {
-		platform::createDirectory(dataFolder);
-		self->id = id;
-		self->kvStore = keyValueStoreMemory(joinPath(dataFolder, "localconf-" + id.toString()), id, 500e6);
-		self->logger = traceCounters("LocalConfigurationMetrics",
-		                             id,
-		                             SERVER_KNOBS->WORKER_LOGGING_INTERVAL,
-		                             &self->cc,
-		                             "LocalConfigurationMetrics");
-		wait(self->kvStore->init());
+	ACTOR static Future<Void> initialize(LocalConfigurationImpl* self) {
 		state Version lastSeenVersion = wait(getLastSeenVersion(self));
 		state Optional<Value> storedConfigPathValue = wait(self->kvStore->readValue(configPathKey));
 		if (!storedConfigPathValue.present()) {
@@ -319,20 +307,22 @@ class LocalConfigurationImpl : public NonCopyable {
 	}
 
 public:
-	LocalConfigurationImpl(std::string const& configPath, std::map<std::string, std::string> const& manualKnobOverrides)
-	  : cc("LocalConfiguration"), broadcasterChanges("BroadcasterChanges", cc), snapshots("Snapshots", cc),
+	LocalConfigurationImpl(std::string const& dataFolder,
+	                       std::string const& configPath,
+	                       std::map<std::string, std::string> const& manualKnobOverrides,
+	                       Optional<UID> testID)
+	  : id(testID.present() ? testID.get() : deterministicRandom()->randomUniqueID()),
+	    kvStore(dataFolder, id, "localconf-" + (testID.present() ? id.toString() : "")), cc("LocalConfiguration"),
+	    broadcasterChanges("BroadcasterChanges", cc), snapshots("Snapshots", cc),
 	    changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc), configKnobOverrides(configPath),
-	    manualKnobOverrides(manualKnobOverrides) {}
-
-	~LocalConfigurationImpl() {
-		if (kvStore) {
-			kvStore->close();
-		}
+	    manualKnobOverrides(manualKnobOverrides) {
+		logger = traceCounters(
+		    "LocalConfigurationMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LocalConfigurationMetrics");
 	}
 
-	Future<Void> initialize(std::string const& dataFolder, UID id) {
+	Future<Void> initialize() {
 		ASSERT(!initFuture.isValid());
-		initFuture = initialize(this, dataFolder, id);
+		initFuture = initialize(this);
 		return initFuture;
 	}
 
@@ -367,9 +357,11 @@ public:
 	UID getID() const { return id; }
 };
 
-LocalConfiguration::LocalConfiguration(std::string const& configPath,
-                                       std::map<std::string, std::string> const& manualKnobOverrides)
-  : impl(std::make_unique<LocalConfigurationImpl>(configPath, manualKnobOverrides)) {}
+LocalConfiguration::LocalConfiguration(std::string const& dataFolder,
+                                       std::string const& configPath,
+                                       std::map<std::string, std::string> const& manualKnobOverrides,
+                                       Optional<UID> testID)
+  : impl(std::make_unique<LocalConfigurationImpl>(dataFolder, configPath, manualKnobOverrides, testID)) {}
 
 LocalConfiguration::LocalConfiguration(LocalConfiguration&&) = default;
 
@@ -377,8 +369,8 @@ LocalConfiguration& LocalConfiguration::operator=(LocalConfiguration&&) = defaul
 
 LocalConfiguration::~LocalConfiguration() = default;
 
-Future<Void> LocalConfiguration::initialize(std::string const& dataFolder, UID id) {
-	return impl->initialize(dataFolder, id);
+Future<Void> LocalConfiguration::initialize() {
+	return impl->initialize();
 }
 
 FlowKnobs const& LocalConfiguration::getFlowKnobs() const {

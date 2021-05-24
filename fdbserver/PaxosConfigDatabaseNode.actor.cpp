@@ -22,7 +22,7 @@
 
 class PaxosConfigDatabaseNodeImpl {};
 
-PaxosConfigDatabaseNode::PaxosConfigDatabaseNode(std::string const& folder) {
+PaxosConfigDatabaseNode::PaxosConfigDatabaseNode(std::string const& folder, Optional<UID> testID) {
 	// TODO: Implement
 	ASSERT(false);
 }

@@ -386,8 +386,9 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 public:
-	SimpleConfigDatabaseNodeImpl(std::string const& folder)
-	  : id(deterministicRandom()->randomUniqueID()), kvStore(folder, id, "global-conf"), cc("ConfigDatabaseNode"),
+	SimpleConfigDatabaseNodeImpl(std::string const& folder, Optional<UID> testID)
+	  : id(testID.present() ? testID.get() : deterministicRandom()->randomUniqueID()),
+	    kvStore(folder, id, "globalconf-" + (testID.present() ? id.toString() : "")), cc("ConfigDatabaseNode"),
 	    compactRequests("CompactRequests", cc), successfulChangeRequests("SuccessfulChangeRequests", cc),
 	    failedChangeRequests("FailedChangeRequests", cc), snapshotRequests("SnapshotRequests", cc),
 	    successfulCommits("SuccessfulCommits", cc), failedCommits("FailedCommits", cc),
@@ -402,8 +403,8 @@ public:
 	Future<Void> serve(ConfigFollowerInterface const& cfi) { return serve(this, &cfi); }
 };
 
-SimpleConfigDatabaseNode::SimpleConfigDatabaseNode(std::string const& folder)
-  : impl(std::make_unique<SimpleConfigDatabaseNodeImpl>(folder)) {}
+SimpleConfigDatabaseNode::SimpleConfigDatabaseNode(std::string const& folder, Optional<UID> testID)
+  : impl(std::make_unique<SimpleConfigDatabaseNodeImpl>(folder, testID)) {}
 
 SimpleConfigDatabaseNode::~SimpleConfigDatabaseNode() = default;
 
