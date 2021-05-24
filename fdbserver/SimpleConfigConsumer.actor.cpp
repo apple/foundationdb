@@ -35,21 +35,22 @@ class SimpleConfigConsumerImpl {
 	Counter snapshotRequest;
 	Future<Void> logger;
 
-	ACTOR static Future<Void> compactor(SimpleConfigConsumerImpl* self) {
+	ACTOR static Future<Void> compactor(SimpleConfigConsumerImpl* self, ConfigBroadcaster* broadcaster) {
 		if (!self->compactionInterval.present()) {
 			wait(Never());
 			return Void();
 		}
 		loop {
+			state Version compactionVersion = self->lastSeenVersion;
 			wait(delayJittered(self->compactionInterval.get()));
-			// TODO: Enable compaction once bugs are fixed
-			// wait(self->cfi.compact.getReply(ConfigFollowerCompactRequest{ self->lastSeenVersion }));
-			//++self->compactRequest;
+			wait(self->cfi.compact.getReply(ConfigFollowerCompactRequest{ compactionVersion }));
+			++self->compactRequest;
+			broadcaster->compact(compactionVersion);
 		}
 	}
 
 	ACTOR static Future<Void> fetchChanges(SimpleConfigConsumerImpl* self, ConfigBroadcaster* broadcaster) {
-		wait(getSnapshot(self, broadcaster));
+		wait(getSnapshotAndChanges(self, broadcaster));
 		loop {
 			try {
 				ConfigFollowerGetChangesReply reply =
@@ -70,8 +71,7 @@ class SimpleConfigConsumerImpl {
 			} catch (Error& e) {
 				++self->failedChangeRequest;
 				if (e.code() == error_code_version_already_compacted) {
-					++self->snapshotRequest;
-					wait(getSnapshot(self, broadcaster));
+					wait(getSnapshotAndChanges(self, broadcaster));
 				} else {
 					throw e;
 				}
@@ -79,14 +79,16 @@ class SimpleConfigConsumerImpl {
 		}
 	}
 
-	ACTOR static Future<Void> getSnapshot(SimpleConfigConsumerImpl* self, ConfigBroadcaster* broadcaster) {
+	ACTOR static Future<Void> getSnapshotAndChanges(SimpleConfigConsumerImpl* self, ConfigBroadcaster* broadcaster) {
 		ConfigFollowerGetSnapshotAndChangesReply reply =
 		    wait(self->cfi.getSnapshotAndChanges.getReply(ConfigFollowerGetSnapshotAndChangesRequest{}));
-		TraceEvent(SevDebug, "BroadcasterGotSnapshot", self->id)
+		++self->snapshotRequest;
+		TraceEvent(SevDebug, "ConfigConsumerGotSnapshotAndChanges", self->id)
 		    .detail("SnapshotVersion", reply.snapshotVersion)
 		    .detail("SnapshotSize", reply.snapshot.size())
 		    .detail("ChangesVersion", reply.changesVersion)
-		    .detail("ChangesSize", reply.changes.size());
+		    .detail("ChangesSize", reply.changes.size())
+		    .detail("AnnotationsSize", reply.annotations.size());
 		broadcaster->applySnapshotAndChanges(
 		    std::move(reply.snapshot), reply.snapshotVersion, reply.changes, reply.changesVersion, reply.annotations);
 		self->lastSeenVersion = reply.changesVersion;
@@ -119,7 +121,9 @@ public:
 		    "ConfigConsumerMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigConsumerMetrics");
 	}
 
-	Future<Void> consume(ConfigBroadcaster& broadcaster) { return fetchChanges(this, &broadcaster) || compactor(this); }
+	Future<Void> consume(ConfigBroadcaster& broadcaster) {
+		return fetchChanges(this, &broadcaster) || compactor(this, &broadcaster);
+	}
 
 	UID getID() const { return id; }
 };
