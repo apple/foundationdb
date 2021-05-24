@@ -761,8 +761,8 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything(Referen
 	    .detail("OldLogRouters", recruits.oldLogRouters.size())
 	    .detail("StorageServers", recruits.storageServers.size())
 	    .detail("BackupWorkers", self->backupWorkers.size())
-	    .detail("PrimaryDCIds", primaryDcIds)
-	    .detail("RemoteDCIds", remoteDcIds)
+	    .detail("PrimaryDcIds", primaryDcIds)
+	    .detail("RemoteDcIds", remoteDcIds)
 	    .trackLatest("MasterRecoveryState");
 
 	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand
