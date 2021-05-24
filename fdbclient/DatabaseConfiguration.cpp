@@ -43,6 +43,7 @@ void DatabaseConfiguration::resetInternal() {
 	remoteDesiredTLogCount = -1;
 	remoteTLogReplicationFactor = repopulateRegionAntiQuorum = 0;
 	backupWorkerEnabled = false;
+	perpetualStorageWiggleSpeed = 0;
 }
 
 void parse(int* i, ValueRef const& v) {
@@ -194,9 +195,9 @@ bool DatabaseConfiguration::isValid() const {
 	      getDesiredRemoteLogs() >= 1 && remoteTLogReplicationFactor >= 0 && repopulateRegionAntiQuorum >= 0 &&
 	      repopulateRegionAntiQuorum <= 1 && usableRegions >= 1 && usableRegions <= 2 && regions.size() <= 2 &&
 	      (usableRegions == 1 || regions.size() == 2) && (regions.size() == 0 || regions[0].priority >= 0) &&
-	      (regions.size() == 0 ||
-	       tLogPolicy->info() !=
-	           "dcid^2 x zoneid^2 x 1"))) { // We cannot specify regions with three_datacenter replication
+	      (regions.size() == 0 || tLogPolicy->info() != "dcid^2 x zoneid^2 x 1") &&
+	      // We cannot specify regions with three_datacenter replication
+	      (perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1))) {
 		return false;
 	}
 	std::set<Key> dcIds;
@@ -352,7 +353,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	}
 
 	result["backup_worker_enabled"] = (int32_t)backupWorkerEnabled;
-
+	result["perpetual_storage_wiggle"] = perpetualStorageWiggleSpeed;
 	return result;
 }
 
@@ -499,6 +500,8 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		parse(&repopulateRegionAntiQuorum, value);
 	} else if (ck == LiteralStringRef("regions")) {
 		parse(&regions, value);
+	} else if (ck == LiteralStringRef("perpetual_storage_wiggle")) {
+		parse(&perpetualStorageWiggleSpeed, value);
 	} else {
 		return false;
 	}
