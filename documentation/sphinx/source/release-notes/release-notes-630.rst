@@ -26,7 +26,7 @@ Release Notes
 * As an optimization, partial restore using target key ranges now filters backup log data prior to loading it into the database.  `(PR #4554) <https://github.com/apple/foundationdb/pull/4554>`_
 * Fix fault tolerance calculation when there are no tLogs in LogSet.  `(PR #4454) <https://github.com/apple/foundationdb/pull/4454>`_
 * Change client's ``iteration_progression`` size defaults from 256 to 4096 bytes for better performance. `(PR #4416) <https://github.com/apple/foundationdb/pull/4416>`_
-* Add the ability to instrument java driver actions, such as FDBTransaction and RangeQuery. `(PR #4385) <https://github.com/apple/foundationdb/pull/4385>`_
+* Add the ability to instrument java driver actions, such as ``FDBTransaction`` and ``RangeQuery``. `(PR #4385) <https://github.com/apple/foundationdb/pull/4385>`_
 
 6.3.11
 ======
