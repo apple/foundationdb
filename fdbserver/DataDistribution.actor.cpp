@@ -606,6 +606,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	std::map<Key, std::vector<Reference<TCServerInfo>>> pid2server_info; // some process may serve as multiple storage servers
 	std::map<Key, int> lagging_zones; // zone to number of storage servers lagging
 	AsyncVar<bool> disableFailingLaggingServers;
+	AsyncTrigger canStartStorageWiggling;
 
 	// machine_info has all machines info; key must be unique across processes on the same machine
 	std::map<Standalone<StringRef>, Reference<TCMachineInfo>> machine_info;
@@ -2440,12 +2441,13 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    this,
 		    processClass,
 		    includedDCs.empty() ||
-		        std::find(includedDCs.begin(), includedDCs.end(), newServer.locality.dcId()) != includedDCs.end(),
+			std::find(includedDCs.begin(), includedDCs.end(), newServer.locality.dcId()) != includedDCs.end(),
 		    storageServerSet,
 		    addedVersion);
 		ASSERT(r->lastKnownInterface.locality.processId().present());
 		StringRef pid = r->lastKnownInterface.locality.processId().get();
 		pid2server_info[pid].push_back(r);
+		canStartStorageWiggling.trigger();
 
 		// Establish the relation between server and machine
 		checkAndCreateMachine(r);
@@ -3806,39 +3808,50 @@ ACTOR Future<vector<std::pair<StorageServerInterface, ProcessClass>>> getServerL
 	return results;
 }
 
+ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection, bool* success) {
+	state ReadYourWritesTransaction tr(teamCollection->cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Optional<Value> value = wait(tr.get(wigglingStorageServerKey));
+			if (teamCollection->pid2server_info.empty()) {
+				tr.set(wigglingStorageServerKey, LiteralStringRef("0"));
+				*success = false;
+			} else {
+				ValueRef pid = teamCollection->pid2server_info.begin()->first;
+				if (value.present()) {
+					auto nextIt = teamCollection->pid2server_info.upper_bound(value.get());
+					if (nextIt == teamCollection->pid2server_info.end()) {
+						tr.set(wigglingStorageServerKey, pid);
+					} else {
+						tr.set(wigglingStorageServerKey, nextIt->first);
+					}
+				} else {
+					tr.set(wigglingStorageServerKey, pid);
+				}
+				*success = true;
+			}
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
 // Iterator over each storage process to do storage wiggle
 ACTOR Future<Void> perpetualStorageWiggleIterator(FutureStream<Void> stopSignal,
-                                                  FutureStream<Void> finishStorageWiggleSignal,
-                                                  DDTeamCollection* teamCollection) {
-	state ReadYourWritesTransaction tr(teamCollection->cx);
-
+						  FutureStream<Void> finishStorageWiggleSignal,
+						  DDTeamCollection* teamCollection) {
+	state bool isWiggling = false;
 	loop choose {
 		when(waitNext(stopSignal)) { break; }
-		when(waitNext(finishStorageWiggleSignal)) {
-			// set the next SS UID
-			tr.reset();
-			loop {
-				try {
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					Optional<Value> value = wait(tr.get(wigglingStorageServerKey));
-					if (value.present()) {
-						auto nextIt = teamCollection->pid2server_info.upper_bound(value.get());
-						if (nextIt == teamCollection->pid2server_info.end()) {
-							tr.set(wigglingStorageServerKey, teamCollection->pid2server_info.begin()->first);
-						} else {
-							tr.set(wigglingStorageServerKey, nextIt->first);
-						}
-					} else {
-						// initialize the value of to the smallest SS ID
-						tr.set(wigglingStorageServerKey, teamCollection->pid2server_info.begin()->first);
-					}
-					wait(tr.commit());
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
-				}
+		when(wait(teamCollection->canStartStorageWiggling.onTrigger())) {
+			if (!isWiggling) {
+				wait(updateNextWigglingStoragePID(teamCollection, &isWiggling));
 			}
 		}
+		when(waitNext(finishStorageWiggleSignal)) { wait(updateNextWigglingStoragePID(teamCollection, &isWiggling)); }
 	}
 
 	return Void();
@@ -3959,8 +3972,8 @@ ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollectio
 				if (speed == 1) {
 					collection.add(perpetualStorageWiggleIterator(
 					    stopWiggleSignal.getFuture(), finishStorageWiggleSignal.getFuture(), teamCollection));
-					collection.add(perpetualStorageWiggler(
-					    stopWiggleSignal.getFuture(), finishStorageWiggleSignal, teamCollection, ddEnabledState));
+//					collection.add(perpetualStorageWiggler(
+//					    stopWiggleSignal.getFuture(), finishStorageWiggleSignal, teamCollection, ddEnabledState));
 					finishStorageWiggleSignal.send(Void());
 					TraceEvent("PerpetualStorageWiggleOpen", teamCollection->distributorId);
 				} else {
