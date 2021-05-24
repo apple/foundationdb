@@ -1,5 +1,5 @@
 /*
- * SimpleConfigDatabaseNode.h
+ * OnDemandStore.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,14 +20,25 @@
 
 #pragma once
 
-#include "fdbserver/IConfigDatabaseNode.h"
+#include "flow/Arena.h"
+#include "flow/IRandom.h"
+#include "flow/Platform.h"
+#include "fdbserver/IKeyValueStore.h"
 
-class SimpleConfigDatabaseNode : public IConfigDatabaseNode {
-	std::unique_ptr<class SimpleConfigDatabaseNodeImpl> impl;
+// Create a key value store if and only if it is actually used
+class OnDemandStore : NonCopyable {
+	std::string folder;
+	UID myID;
+	IKeyValueStore* store;
+	Promise<Future<Void>> err;
+	std::string prefix;
+	void open();
 
 public:
-	SimpleConfigDatabaseNode(std::string const& folder);
-	~SimpleConfigDatabaseNode();
-	Future<Void> serve(ConfigTransactionInterface const&) override;
-	Future<Void> serve(ConfigFollowerInterface const&) override;
+	OnDemandStore(std::string const& folder, UID myID, std::string const& prefix);
+	~OnDemandStore();
+	IKeyValueStore* get();
+	bool exists() const;
+	IKeyValueStore* operator->();
+	Future<Void> getError() const;
 };

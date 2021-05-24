@@ -22,7 +22,10 @@
 
 class PaxosConfigDatabaseNodeImpl {};
 
-PaxosConfigDatabaseNode::PaxosConfigDatabaseNode() : impl(std::make_unique<PaxosConfigDatabaseNodeImpl>()) {}
+PaxosConfigDatabaseNode::PaxosConfigDatabaseNode(std::string const& folder) {
+	// TODO: Implement
+	ASSERT(false);
+}
 
 PaxosConfigDatabaseNode::~PaxosConfigDatabaseNode() = default;
 
@@ -33,12 +36,6 @@ Future<Void> PaxosConfigDatabaseNode::serve(ConfigTransactionInterface const& ct
 }
 
 Future<Void> PaxosConfigDatabaseNode::serve(ConfigFollowerInterface const& cfi) {
-	// TODO: Implement
-	ASSERT(false);
-	return Void();
-}
-
-Future<Void> PaxosConfigDatabaseNode::initialize(std::string const& dataFolder, UID id) {
 	// TODO: Implement
 	ASSERT(false);
 	return Void();

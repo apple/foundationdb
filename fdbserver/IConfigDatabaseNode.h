@@ -31,8 +31,7 @@ class IConfigDatabaseNode : public ReferenceCounted<IConfigDatabaseNode> {
 public:
 	virtual Future<Void> serve(ConfigTransactionInterface const&) = 0;
 	virtual Future<Void> serve(ConfigFollowerInterface const&) = 0;
-	virtual Future<Void> initialize(std::string const& dataFolder, UID id) = 0;
 
-	static Reference<IConfigDatabaseNode> createSimple();
-	static Reference<IConfigDatabaseNode> createPaxos();
+	static Reference<IConfigDatabaseNode> createSimple(std::string const& folder);
+	static Reference<IConfigDatabaseNode> createPaxos(std::string const& folder);
 };

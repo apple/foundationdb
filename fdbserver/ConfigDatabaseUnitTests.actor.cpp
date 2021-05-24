@@ -59,17 +59,9 @@ class WriteToTransactionEnvironment {
 	ConfigTransactionInterface cti;
 	ConfigFollowerInterface cfi;
 	Reference<IConfigDatabaseNode> node;
-	UID nodeID;
 	Future<Void> ctiServer;
 	Future<Void> cfiServer;
 	Version lastWrittenVersion{ 0 };
-
-	ACTOR static Future<Void> setupNode(WriteToTransactionEnvironment* self) {
-		wait(self->node->initialize("./", self->nodeID));
-		self->ctiServer = self->node->serve(self->cti);
-		self->cfiServer = self->node->serve(self->cfi);
-		return Void();
-	}
 
 	ACTOR static Future<Void> set(WriteToTransactionEnvironment* self, Optional<KeyRef> configClass, int64_t value) {
 		state Reference<IConfigTransaction> tr = IConfigTransaction::createSimple(self->cti);
@@ -89,11 +81,13 @@ class WriteToTransactionEnvironment {
 		return Void();
 	}
 
-public:
-	WriteToTransactionEnvironment()
-	  : node(IConfigDatabaseNode::createSimple()), nodeID(deterministicRandom()->randomUniqueID()) {}
+	void setup() {
+		ctiServer = node->serve(cti);
+		cfiServer = node->serve(cfi);
+	}
 
-	Future<Void> setup() { return setupNode(this); }
+public:
+	WriteToTransactionEnvironment() : node(IConfigDatabaseNode::createSimple("./")) { setup(); }
 
 	Future<Void> set(Optional<KeyRef> configClass, int64_t value) { return set(this, configClass, value); }
 
@@ -101,11 +95,11 @@ public:
 
 	Future<Void> compact() { return cfi.compact.getReply(ConfigFollowerCompactRequest{ lastWrittenVersion }); }
 
-	Future<Void> restartNode() {
+	void restartNode() {
 		cfiServer.cancel();
 		ctiServer.cancel();
-		node = IConfigDatabaseNode::createSimple();
-		return setupNode(this);
+		node = IConfigDatabaseNode::createSimple("./");
+		setup();
 	}
 
 	ConfigTransactionInterface getTransactionInterface() const { return cti; }
@@ -268,10 +262,10 @@ class TransactionEnvironment {
 	}
 
 public:
-	Future<Void> setup() { return writeTo.setup(); }
+	// TODO: Remove this?
+	Future<Void> setup() { return Void(); }
 
-	Future<Void> restartNode() { return writeTo.restartNode(); }
-
+	void restartNode() { writeTo.restartNode(); }
 	Future<Void> set(Optional<KeyRef> configClass, int64_t value) { return writeTo.set(configClass, value); }
 	Future<Void> clear(Optional<KeyRef> configClass) { return writeTo.clear(configClass); }
 	Future<Void> check(Optional<KeyRef> configClass, Optional<int64_t> expected) {
@@ -289,7 +283,6 @@ class TransactionToLocalConfigEnvironment {
 	Future<Void> broadcastServer;
 
 	ACTOR static Future<Void> setup(TransactionToLocalConfigEnvironment* self) {
-		wait(self->writeTo.setup());
 		wait(self->readFrom.setup());
 		self->readFrom.connectToBroadcaster(IDependentAsyncVar<ConfigBroadcastFollowerInterface>::create(self->cbfi));
 		self->broadcastServer = self->broadcaster.serve(self->cbfi->get());
@@ -303,7 +296,7 @@ public:
 
 	Future<Void> setup() { return setup(this); }
 
-	Future<Void> restartNode() { return writeTo.restartNode(); }
+	void restartNode() { writeTo.restartNode(); }
 
 	void changeBroadcaster() {
 		broadcastServer.cancel();
@@ -554,7 +547,7 @@ TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/RestartNode") {
 	state TransactionToLocalConfigEnvironment env("class-A");
 	wait(env.setup());
 	wait(set(env, "class-A"_sr, 1));
-	wait(env.restartNode());
+	env.restartNode();
 	wait(check(env, 1));
 	return Void();
 }
@@ -593,7 +586,7 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/Restart") {
 	state TransactionEnvironment env;
 	wait(env.setup());
 	wait(set(env, "class-A"_sr, 1));
-	wait(env.restartNode());
+	env.restartNode();
 	wait(check(env, "class-A"_sr, 1));
 	return Void();
 }

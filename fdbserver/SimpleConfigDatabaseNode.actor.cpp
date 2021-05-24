@@ -22,6 +22,7 @@
 
 #include "fdbserver/SimpleConfigDatabaseNode.h"
 #include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/OnDemandStore.h"
 #include "flow/Arena.h"
 #include "flow/genericactors.actor.h"
 #include "flow/UnitTest.h"
@@ -82,11 +83,11 @@ TEST_CASE("/fdbserver/ConfigDB/SimpleConfigDatabaseNode/Internal/versionedMutati
 }
 
 class SimpleConfigDatabaseNodeImpl {
-	IKeyValueStore* kvStore; // FIXME: Prevent leak
-	std::map<std::string, std::string> config;
-	Future<Void> initFuture;
-
 	UID id;
+	// TODO: Listen for errors
+	OnDemandStore kvStore;
+	std::map<std::string, std::string> config;
+
 	CounterCollection cc;
 
 	// Follower counters
@@ -282,7 +283,6 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionInterface const* cti) {
-		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
 		loop {
 			//wait(traceQueuedMutations(self));
 			choose {
@@ -367,7 +367,6 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigFollowerInterface const* cfi) {
-		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
 		loop {
 			choose {
 				when(ConfigFollowerGetSnapshotAndChangesRequest req =
@@ -387,35 +386,24 @@ class SimpleConfigDatabaseNodeImpl {
 	}
 
 public:
-	SimpleConfigDatabaseNodeImpl()
-	  : cc("ConfigDatabaseNode"), compactRequests("CompactRequests", cc),
-	    successfulChangeRequests("SuccessfulChangeRequests", cc), failedChangeRequests("FailedChangeRequests", cc),
-	    snapshotRequests("SnapshotRequests", cc), successfulCommits("SuccessfulCommits", cc),
-	    failedCommits("FailedCommits", cc), setMutations("SetMutations", cc), clearMutations("ClearMutations", cc),
-	    getValueRequests("GetValueRequests", cc), newVersionRequests("NewVersionRequests", cc) {}
-
-	~SimpleConfigDatabaseNodeImpl() {
-		if (kvStore) {
-			kvStore->close();
-		}
+	SimpleConfigDatabaseNodeImpl(std::string const& folder)
+	  : id(deterministicRandom()->randomUniqueID()), kvStore(folder, id, "global-conf"), cc("ConfigDatabaseNode"),
+	    compactRequests("CompactRequests", cc), successfulChangeRequests("SuccessfulChangeRequests", cc),
+	    failedChangeRequests("FailedChangeRequests", cc), snapshotRequests("SnapshotRequests", cc),
+	    successfulCommits("SuccessfulCommits", cc), failedCommits("FailedCommits", cc),
+	    setMutations("SetMutations", cc), clearMutations("ClearMutations", cc),
+	    getValueRequests("GetValueRequests", cc), newVersionRequests("NewVersionRequests", cc) {
+		logger = traceCounters(
+		    "ConfigDatabaseNodeMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigDatabaseNode");
 	}
 
 	Future<Void> serve(ConfigTransactionInterface const& cti) { return serve(this, &cti); }
 
 	Future<Void> serve(ConfigFollowerInterface const& cfi) { return serve(this, &cfi); }
-
-	Future<Void> initialize(std::string const& dataFolder, UID id) {
-		platform::createDirectory(dataFolder);
-		this->id = id;
-		kvStore = keyValueStoreMemory(joinPath(dataFolder, "globalconf-" + id.toString()), id, 500e6);
-		logger = traceCounters(
-		    "ConfigDatabaseNodeMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigDatabaseNode");
-		initFuture = kvStore->init();
-		return initFuture;
-	}
 };
 
-SimpleConfigDatabaseNode::SimpleConfigDatabaseNode() : impl(std::make_unique<SimpleConfigDatabaseNodeImpl>()) {}
+SimpleConfigDatabaseNode::SimpleConfigDatabaseNode(std::string const& folder)
+  : impl(std::make_unique<SimpleConfigDatabaseNodeImpl>(folder)) {}
 
 SimpleConfigDatabaseNode::~SimpleConfigDatabaseNode() = default;
 
@@ -425,8 +413,4 @@ Future<Void> SimpleConfigDatabaseNode::serve(ConfigTransactionInterface const& c
 
 Future<Void> SimpleConfigDatabaseNode::serve(ConfigFollowerInterface const& cfi) {
 	return impl->serve(cfi);
-}
-
-Future<Void> SimpleConfigDatabaseNode::initialize(std::string const& dataFolder, UID id) {
-	return impl->initialize(dataFolder, id);
 }

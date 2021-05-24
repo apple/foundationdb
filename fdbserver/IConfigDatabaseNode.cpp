@@ -22,10 +22,10 @@
 #include "fdbserver/PaxosConfigDatabaseNode.h"
 #include "fdbserver/SimpleConfigDatabaseNode.h"
 
-Reference<IConfigDatabaseNode> IConfigDatabaseNode::createSimple() {
-	return makeReference<SimpleConfigDatabaseNode>();
+Reference<IConfigDatabaseNode> IConfigDatabaseNode::createSimple(std::string const& folder) {
+	return makeReference<SimpleConfigDatabaseNode>(folder);
 }
 
-Reference<IConfigDatabaseNode> IConfigDatabaseNode::createPaxos() {
-	return makeReference<PaxosConfigDatabaseNode>();
+Reference<IConfigDatabaseNode> IConfigDatabaseNode::createPaxos(std::string const& folder) {
+	return makeReference<PaxosConfigDatabaseNode>(folder);
 }
