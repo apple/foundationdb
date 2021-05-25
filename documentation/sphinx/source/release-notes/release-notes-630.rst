@@ -2,6 +2,9 @@
 Release Notes
 #############
 
+6.3.14
+======
+* Fixed fdbbackup start command that automatically configures database with backup workers to only do so when using partitioned logs. `(PR #4863) <https://github.com/apple/foundationdb/pull/4863>`_
 
 6.3.14
 ======
