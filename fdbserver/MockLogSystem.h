@@ -28,6 +28,7 @@ struct MockLogSystem : ILogSystem, ReferenceCounted<MockLogSystem> {
 	Reference<ILogSystem::IPeekCursor> cursor;
 
 	MockLogSystem();
+	MockLogSystem(MockLogSystem& that);
 
 	void addref() final;
 	void delref() final;

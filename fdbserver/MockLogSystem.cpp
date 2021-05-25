@@ -34,6 +34,10 @@ MockLogSystem::MockLogSystem() {
 	logMethodName(__func__);
 }
 
+MockLogSystem::MockLogSystem(MockLogSystem& that) : cursor(that.cursor) {
+	logMethodName(__func__);
+}
+
 void MockLogSystem::addref() {
 	logMethodName(__func__);
 	ReferenceCounted<MockLogSystem>::addref();

@@ -4550,7 +4550,7 @@ ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 
 ACTOR Future<Void> storageServerCore(StorageServer* self,
                                      StorageServerInterface ssi,
-                                     MockLogSystem* mockLogSystem = nullptr) {
+                                     std::shared_ptr<MockLogSystem> mockLogSystem = std::shared_ptr<MockLogSystem>()) {
 	state Future<Void> doUpdate = Void();
 	state bool updateReceived =
 	    false; // true iff the current update() actor assigned to doUpdate has already received an update from the tlog
@@ -4604,7 +4604,11 @@ ACTOR Future<Void> storageServerCore(StorageServer* self,
 				dbInfoChange = self->db->onChange();
 				if (self->db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
 					if (mockLogSystem) {
-						self->logSystem = Reference<MockLogSystem>(mockLogSystem).castTo<ILogSystem>();
+						// It would be better to pass in Reference<MockLogSystem> to avoid additional construction. But
+						// we cannot do it because MockLogSystem can only be forward declared in
+						// WorkerInterface.actor.h, so storageServer actor cannot take a Reference or unique_ptr but
+						// only shared_ptr of MockLogSystem.
+						self->logSystem = makeReference<MockLogSystem>(*mockLogSystem).castTo<ILogSystem>();
 					} else {
 						self->logSystem = ILogSystem::fromServerDBInfo(self->thisServerID, self->db->get());
 					}
@@ -4730,16 +4734,14 @@ ACTOR Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<ClusterCo
 	}
 }
 
-ACTOR Future<Void> storageServer(
-    IKeyValueStore* persistentData,
-    StorageServerInterface ssi,
-    Tag seedTag,
-    ReplyPromise<InitializeStorageReply> recruitReply,
-    Reference<AsyncVar<ServerDBInfo>> db,
-    std::string folder,
-    // Only applicable when logSystemType is mock. This is actually a pointer to MockLogSystem but we cannot specify it
-    // because ILogSystem already depends on WorkerInterface.
-    void* mockLogSystem) {
+ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
+                                 StorageServerInterface ssi,
+                                 Tag seedTag,
+                                 ReplyPromise<InitializeStorageReply> recruitReply,
+                                 Reference<AsyncVar<ServerDBInfo>> db,
+                                 std::string folder,
+                                 // Only applicable when logSystemType is mock.
+                                 std::shared_ptr<MockLogSystem> mockLogSystem) {
 
 	state StorageServer self(persistentData, db, ssi, mockLogSystem != nullptr);
 
@@ -4770,7 +4772,7 @@ ACTOR Future<Void> storageServer(
 		rep.addedVersion = self.version.get();
 		recruitReply.send(rep);
 		self.byteSampleRecovery = Void();
-		wait(storageServerCore(&self, ssi, static_cast<MockLogSystem*>(mockLogSystem)));
+		wait(storageServerCore(&self, ssi, mockLogSystem));
 
 		throw internal_error();
 	} catch (Error& e) {

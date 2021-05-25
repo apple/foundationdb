@@ -68,10 +68,6 @@ struct ServerTestDriver {
 };
 
 struct StorageServerTestDriver : ServerTestDriver {
-	// TODO: delete mockLogSystem eventually. We cannot manage it with smart pointers because it will be passed as a
-	// void pointer to storage server (to avoid circular dependency). There is some delicate work need to be done to
-	// make sure it is destructed correctly, which may not be interesting to a unit test.
-	MockLogSystem* mockLogSystem = new MockLogSystem();
 	Reference<MockPeekCursor> mockPeekCursor;
 
 	// Default tag.
@@ -109,11 +105,11 @@ struct StorageServerTestDriver : ServerTestDriver {
 		dbInfoBuilder.recoveryState = RecoveryState::ACCEPTING_COMMITS;
 		state Reference<AsyncVar<ServerDBInfo>> dbInfo = makeReference<AsyncVar<ServerDBInfo>>(dbInfoBuilder);
 
-		self->mockLogSystem->cursor = self->mockPeekCursor.castTo<ILogSystem::IPeekCursor>();
+		std::shared_ptr<MockLogSystem> mockLogSystem = std::make_shared<MockLogSystem>();
+		mockLogSystem->cursor = self->mockPeekCursor.castTo<ILogSystem::IPeekCursor>();
 
 		std::cout << "Starting Storage Server." << std::endl;
-		state Future<Void> ss =
-		    storageServer(data, ssi, self->tag, storageReady, dbInfo, folder, static_cast<void*>(self->mockLogSystem));
+		state Future<Void> ss = storageServer(data, ssi, self->tag, storageReady, dbInfo, folder, mockLogSystem);
 		std::cout << "Storage Server started." << std::endl;
 
 		self->actors.add(ss);
