@@ -941,16 +941,21 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 		// 1 or 2 tss
 		tssCount = deterministicRandom()->randomInt(1, 3);
 	}
-
-	//	if (deterministicRandom()->random01() < 0.5) {
-	//		set_config("ssd");
-	//	} else {
-	//		set_config("memory");
-	//	}
-	//	set_config("memory");
-	//  set_config("memory-radixtree-beta");
-
-	set_config("perpetual_storage_wiggle=1");
+	
+//	if (deterministicRandom()->random01() < 0.5) {
+//		set_config("ssd");
+//	} else {
+//		set_config("memory");
+//	}
+//	set_config("memory");
+//	set_config("memory-radixtree-beta");
+	
+	if (deterministicRandom()->random01() < 0.5) {
+        	set_config("perpetual_storage_wiggle=0");
+	} else {
+        	set_config("perpetual_storage_wiggle=1");
+	}
+// 	set_config("perpetual_storage_wiggle=1");
 
 	if (simple) {
 		db.desiredTLogCount = 1;
