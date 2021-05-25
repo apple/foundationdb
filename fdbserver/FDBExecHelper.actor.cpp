@@ -207,7 +207,7 @@ ACTOR Future<int> spawnProcess(std::string path,
 					    .detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
 					return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 				}
-				TraceEvent event("SpawnProcess_CommandStatus");
+				TraceEvent event("SpawnProcessCommandStatus");
 				setupTraceWithOutput(event, bytesRead, outputBuffer);
 				event.detail("Cmd", path)
 				    .detail("Args", allArgs)
