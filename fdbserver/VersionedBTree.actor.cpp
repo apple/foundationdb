@@ -7565,11 +7565,11 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 		    { deterministicRandom()->randomInt(prev.k, next.k), deterministicRandom()->randomInt(prev.v, next.v) });
 	};
 
-	// Build a set of N unique items
+	// Build a set of N unique items, where no consecutive items are in the set, a requirement of the seek behavior tests.
 	std::set<IntIntPair> uniqueItems;
 	while (uniqueItems.size() < N) {
 		IntIntPair p = randomPair();
-		auto nextP = p; // also check if next highest/lowest key is not in set for testLTE/testGTE
+		auto nextP = p; // also check if next highest/lowest key is not in set
 		nextP.v++;
 		auto prevP = p;
 		prevP.v--;
@@ -7591,7 +7591,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	std::vector<IntIntPair> toDelete;
 	while (1) {
 		IntIntPair p = randomPair();
-		auto nextP = p; // also check if next highest/lowest key is not in set for testLTE/testGTE
+		auto nextP = p; // also check if next highest/lowest key is not in the set
 		nextP.v++;
 		auto prevP = p;
 		prevP.v--;
@@ -7745,6 +7745,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	}
 
 	// SeekLTE to the next possible int pair value after each element to make sure the base element is found
+	// Assumes no consecutive items are present in the set
 	for (int i = 0; i < items.size(); ++i) {
 		IntIntPair p = items[i];
 		IntIntPair q = p;
@@ -7761,6 +7762,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	}
 
 	// SeekGTE to the previous possible int pair value after each element to make sure the base element is found
+	// Assumes no consecutive items are present in the set
 	for (int i = 0; i < items.size(); ++i) {
 		IntIntPair p = items[i];
 		IntIntPair q = p;
@@ -7796,6 +7798,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
 	}
 
 	// SeekLTE to each element's next possible value, using each element as a hint
+	// Assumes no consecutive items are present in the set
 	for (int i = 0; i < items.size(); ++i) {
 		IntIntPair p = items[i];
 		IntIntPair q = p;
