@@ -73,6 +73,7 @@ struct MockPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<MockPeek
 	Version popped() const override;
 	Version getMinKnownCommittedVersion() const override;
 	Optional<UID> getPrimaryPeekLocation() const override;
+	Optional<UID> getCurrentPeekLocation() const override;
 	void addref() override;
 	void delref() override;
 };

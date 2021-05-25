@@ -169,6 +169,11 @@ Optional<UID> MockPeekCursor::getPrimaryPeekLocation() const {
 	return Optional<UID>();
 }
 
+Optional<UID> MockPeekCursor::getCurrentPeekLocation() const {
+	logMethodName(__func__);
+	return Optional<UID>();
+}
+
 void MockPeekCursor::addref() {
 	logMethodName(__func__);
 	ReferenceCounted<MockPeekCursor>::addref();
