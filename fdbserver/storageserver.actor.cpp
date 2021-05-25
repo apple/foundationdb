@@ -57,6 +57,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WaitFailure.h"
+#include "fdbserver/MockLogSystem.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/Smoother.h"
@@ -733,7 +734,8 @@ public:
 
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo>> const& db,
-	              StorageServerInterface const& ssi)
+	              StorageServerInterface const& ssi,
+	              bool mocked = false)
 	  : fetchKeysHistograms(), instanceID(deterministicRandom()->randomUniqueID().first()), storage(this, storage),
 	    db(db), actors(false), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
 	    rebootAfterDurableVersion(std::numeric_limits<Version>::max()), durableInProgress(Void()), versionLag(0),
@@ -751,7 +753,7 @@ public:
 
 		// TODO: Unit tests may need to have a better way to feed these information. And there should be tests
 		// that actually changes server key by update or restore.
-		if (db->get().logSystemConfig.logSystemType == LogSystemType::mock) {
+		if (mocked) {
 			newestAvailableVersion.insert(allKeys, latestVersion);
 			newestDirtyVersion.insert(allKeys, latestVersion);
 			addShard(ShardInfo::newReadWrite(allKeys, this));
@@ -4546,7 +4548,9 @@ ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 	}
 }
 
-ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface ssi) {
+ACTOR Future<Void> storageServerCore(StorageServer* self,
+                                     StorageServerInterface ssi,
+                                     MockLogSystem* mockLogSystem = nullptr) {
 	state Future<Void> doUpdate = Void();
 	state bool updateReceived =
 	    false; // true iff the current update() actor assigned to doUpdate has already received an update from the tlog
@@ -4599,7 +4603,11 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				TEST(self->logSystem); // shardServer dbInfo changed
 				dbInfoChange = self->db->onChange();
 				if (self->db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
-					self->logSystem = ILogSystem::fromServerDBInfo(self->thisServerID, self->db->get());
+					if (mockLogSystem) {
+						self->logSystem = Reference<MockLogSystem>(mockLogSystem).castTo<ILogSystem>();
+					} else {
+						self->logSystem = ILogSystem::fromServerDBInfo(self->thisServerID, self->db->get());
+					}
 					if (self->logSystem) {
 						if (self->db->get().logSystemConfig.recoveredAt.present()) {
 							self->poppedAllAfter = self->db->get().logSystemConfig.recoveredAt.get();
@@ -4722,13 +4730,18 @@ ACTOR Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<ClusterCo
 	}
 }
 
-ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
-                                 StorageServerInterface ssi,
-                                 Tag seedTag,
-                                 ReplyPromise<InitializeStorageReply> recruitReply,
-                                 Reference<AsyncVar<ServerDBInfo>> db,
-                                 std::string folder) {
-	state StorageServer self(persistentData, db, ssi);
+ACTOR Future<Void> storageServer(
+    IKeyValueStore* persistentData,
+    StorageServerInterface ssi,
+    Tag seedTag,
+    ReplyPromise<InitializeStorageReply> recruitReply,
+    Reference<AsyncVar<ServerDBInfo>> db,
+    std::string folder,
+    // Only applicable when logSystemType is mock. This is actually a pointer to MockLogSystem but we cannot specify it
+    // because ILogSystem already depends on WorkerInterface.
+    void* mockLogSystem) {
+
+	state StorageServer self(persistentData, db, ssi, mockLogSystem != nullptr);
 
 	self.sk = serverKeysPrefixFor(self.thisServerID).withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
 	self.folder = folder;
@@ -4757,7 +4770,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		rep.addedVersion = self.version.get();
 		recruitReply.send(rep);
 		self.byteSampleRecovery = Void();
-		wait(storageServerCore(&self, ssi));
+		wait(storageServerCore(&self, ssi, static_cast<MockLogSystem*>(mockLogSystem)));
 
 		throw internal_error();
 	} catch (Error& e) {

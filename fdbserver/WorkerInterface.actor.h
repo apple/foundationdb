@@ -865,12 +865,16 @@ ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> ccf,
 class IKeyValueStore;
 class ServerCoordinators;
 class IDiskQueue;
-ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
-                                 StorageServerInterface ssi,
-                                 Tag seedTag,
-                                 ReplyPromise<InitializeStorageReply> recruitReply,
-                                 Reference<AsyncVar<ServerDBInfo>> db,
-                                 std::string folder);
+ACTOR Future<Void> storageServer(
+    IKeyValueStore* persistentData,
+    StorageServerInterface ssi,
+    Tag seedTag,
+    ReplyPromise<InitializeStorageReply> recruitReply,
+    Reference<AsyncVar<ServerDBInfo>> db,
+    std::string folder,
+    // Only applicable when logSystemType is mock. This is actually a pointer to MockLogSystem but we cannot specify it
+    // because ILogSystem already depends on WorkerInterface.
+    void* mockLogSystem = nullptr);
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
     StorageServerInterface ssi,

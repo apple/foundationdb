@@ -1523,7 +1523,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					filesClosed.add(kvClosed);
 					ReplyPromise<InitializeStorageReply> storageReady = req.reply;
 					storageCache.set(req.reqId, storageReady.getFuture());
-					Future<Void> s = storageServer(data, recruited, req.seedTag, storageReady, dbInfo, folder);
+					Future<Void> s = storageServer(data, recruited, req.seedTag, storageReady, dbInfo, folder, nullptr);
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady(req.reqId, s);
 					s = storageServerRollbackRebooter(s,

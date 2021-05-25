@@ -34,17 +34,17 @@ struct MockPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<MockPeek
 	typedef std::pair<Version, std::vector<MessageAndTags>> OneVersionMessages;
 
 	// Input: The messages that need to be feed into the mock cursor.
-	const std::vector<OneVersionMessages>& allVersionMessages;
+	const std::vector<OneVersionMessages> allVersionMessages;
 
 	// Iteration statuses of the cursor
 	std::size_t pVersion = 0;
 	std::size_t pMessage = 0;
 
 	// _version could be derived from pVersion. We have an additional field so version() can return a reference.
-	LogMessageVersion _version;
+	LogMessageVersion cursorVersion;
 	// _reader could be derived too. We have an additional field so reader() can return a reference.
-	ArenaReader _reader;
-	Arena _arena;
+	ArenaReader cursorReader;
+	Arena cursorArena;
 
 	MockPeekCursor(const std::vector<OneVersionMessages>& allVersionMessages, const Arena& arena);
 	MockPeekCursor(const std::vector<OneVersionMessages>& allVersionMessages,

@@ -68,6 +68,10 @@ struct ServerTestDriver {
 };
 
 struct StorageServerTestDriver : ServerTestDriver {
+	// TODO: delete mockLogSystem eventually. We cannot manage it with smart pointers because it will be passed as a
+	// void pointer to storage server (to avoid circular dependency). There is some delicate work need to be done to
+	// make sure it is destructed correctly, which may not be interesting to a unit test.
+	MockLogSystem* mockLogSystem = new MockLogSystem();
 	Reference<MockPeekCursor> mockPeekCursor;
 
 	// Default tag.
@@ -90,6 +94,8 @@ struct StorageServerTestDriver : ServerTestDriver {
 
 		StorageServerInterface& ssi = self->ssi;
 
+		// TODO: Make this parameterizable. We'll eventually want to test this against more than the one storage server
+		// implementation.
 		KeyValueStoreType storeType = KeyValueStoreType::SSD_BTREE_V2;
 		state std::string folder = ".";
 		std::string fileName = joinPath(folder, "storage-" + ssi.id().toString() + "." + storeType.toString());
@@ -99,25 +105,15 @@ struct StorageServerTestDriver : ServerTestDriver {
 
 		state ReplyPromise<InitializeStorageReply> storageReady;
 
-		// Initialize dbInfo with mocked cursor and mocked loy system.
-
-		// TODO: Use Reference API?
-		// TODO: delete mockLogSystem eventually.
-		state MockLogSystem* mockLogSystem = new MockLogSystem();
-		mockLogSystem->cursor = self->mockPeekCursor.castTo<ILogSystem::IPeekCursor>();
-
-		LogSystemConfig logSystemConfig;
-		logSystemConfig.logSystemType = LogSystemType::mock;
-		logSystemConfig.mockLogSystem = mockLogSystem;
-
 		ServerDBInfo dbInfoBuilder;
 		dbInfoBuilder.recoveryState = RecoveryState::ACCEPTING_COMMITS;
-		dbInfoBuilder.logSystemConfig = logSystemConfig;
 		state Reference<AsyncVar<ServerDBInfo>> dbInfo = makeReference<AsyncVar<ServerDBInfo>>(dbInfoBuilder);
-		// Initialize dbInfo done.
+
+		self->mockLogSystem->cursor = self->mockPeekCursor.castTo<ILogSystem::IPeekCursor>();
 
 		std::cout << "Starting Storage Server." << std::endl;
-		state Future<Void> ss = storageServer(data, ssi, self->tag, storageReady, dbInfo, folder);
+		state Future<Void> ss =
+		    storageServer(data, ssi, self->tag, storageReady, dbInfo, folder, static_cast<void*>(self->mockLogSystem));
 		std::cout << "Storage Server started." << std::endl;
 
 		self->actors.add(ss);
@@ -151,11 +147,10 @@ struct StorageServerTestDriver : ServerTestDriver {
 } // namespace ptxn
 
 TEST_CASE("fdbserver/ptxn/test/storageserver") {
-	using namespace ptxn;
 
 	state ptxn::StorageServerTestDriver driver;
 
-	// Set the mock cursor with some input
+	// Set the mock cursor with some input.
 	Arena arena;
 	MutationRef mutation(arena, MutationRef::SetValue, "Hello"_sr, "World"_sr);
 	std::string message = BinaryWriter::toValue(mutation, AssumeVersion(currentProtocolVersion)).toString();
@@ -165,10 +160,9 @@ TEST_CASE("fdbserver/ptxn/test/storageserver") {
 		{ MockPeekCursor::MessageAndTags(message, tags) }) };
 	driver.mockPeekCursor = makeReference<MockPeekCursor>(allVersionMessages, arena);
 
-	loop choose{
-		when(wait(ptxn::StorageServerTestDriver::runStorageServer(&driver))){
-		    std::cout << "Storage serves exists unexpectedly" << std::endl;
-	        ASSERT(false);
+	loop choose{ when(wait(ptxn::StorageServerTestDriver::runStorageServer(&driver))){
+		std::cout << "Storage serves exited unexpectedly" << std::endl;
+	ASSERT(false);
         }
         when(wait(ptxn::StorageServerTestDriver::verifyGetValue(&driver, "Hello"_sr, 8, "World"_sr))) {
 	        break;

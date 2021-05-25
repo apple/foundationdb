@@ -21,6 +21,7 @@
 #include "MockPeekCursor.h"
 
 const static bool LOG_METHOD_CALLS = false;
+const static bool LOG_MESSAGES = true;
 
 static void logMethodName(std::string methodName) {
 	if (LOG_METHOD_CALLS) {
@@ -30,8 +31,9 @@ static void logMethodName(std::string methodName) {
 
 // Assume allVersionMessages is not empty.
 MockPeekCursor::MockPeekCursor(const std::vector<OneVersionMessages>& allVersionMessages, const Arena& arena)
-  : allVersionMessages(allVersionMessages), _version(allVersionMessages[0].first),
-    _reader(arena, allVersionMessages[0].second[0].message, AssumeVersion(currentProtocolVersion)), _arena(arena) {
+  : allVersionMessages(allVersionMessages), cursorVersion(allVersionMessages[0].first),
+    cursorReader(arena, allVersionMessages[0].second[0].message, AssumeVersion(currentProtocolVersion)),
+    cursorArena(arena) {
 	logMethodName(__func__);
 }
 
@@ -40,15 +42,16 @@ MockPeekCursor::MockPeekCursor(const std::vector<OneVersionMessages>& allVersion
                                size_t pMessage,
                                const LogMessageVersion& version,
                                const Arena& arena)
-  : allVersionMessages(allVersionMessages), pVersion(pVersion), pMessage(pMessage), _version(version),
-    _reader(arena, allVersionMessages[0].second[0].message, AssumeVersion(currentProtocolVersion)), _arena(arena) {
+  : allVersionMessages(allVersionMessages), pVersion(pVersion), pMessage(pMessage), cursorVersion(version),
+    cursorReader(arena, allVersionMessages[0].second[0].message, AssumeVersion(currentProtocolVersion)),
+    cursorArena(arena) {
 	logMethodName(__func__);
 }
 
 Reference<ILogSystem::IPeekCursor> MockPeekCursor::cloneNoMore() {
 	logMethodName(__func__);
 	// Simply clone, ignore "no more"
-	return makeReference<MockPeekCursor>(allVersionMessages, pVersion, pMessage, _version, _arena);
+	return makeReference<MockPeekCursor>(allVersionMessages, pVersion, pMessage, cursorVersion, cursorArena);
 }
 
 // Ignore setProtocolVersion. Always use IncludeVersion(). TODO: It hits segfault when copy construct if I use
@@ -75,14 +78,16 @@ Arena& MockPeekCursor::arena() {
 
 ArenaReader* MockPeekCursor::reader() {
 	logMethodName(__func__);
-	_reader = ArenaReader(_arena, getMessage(), AssumeVersion(currentProtocolVersion));
-	return &_reader;
+	cursorReader = ArenaReader(cursorArena, getMessage(), AssumeVersion(currentProtocolVersion));
+	return &cursorReader;
 }
 
 StringRef MockPeekCursor::getMessage() {
 	logMethodName(__func__);
 	std::string message = allVersionMessages[pVersion].second[pMessage].message;
-	std::cout << "MockPeekCursor gets message: " << StringRef(message).toHexString() << std::endl;
+	if (LOG_MESSAGES) {
+		std::cout << "MockPeekCursor gets message: " << StringRef(message).toHexString() << std::endl;
+	}
 	return message;
 }
 
@@ -101,17 +106,19 @@ void MockPeekCursor::nextMessage() {
 			pVersion++;
 			pMessage = 0;
 			if (pVersion < allVersionMessages.size()) {
-				_version.reset(allVersionMessages[pVersion].first);
+				cursorVersion.reset(allVersionMessages[pVersion].first);
 			} else {
 				ASSERT(pVersion == allVersionMessages.size());
 				// ~If there is no next message, just use the last version, because it is the "smallest possible message
 				// version which a subsequent message might have".~
 				// If there is no next message, use the last version + 1.
-				_version.reset(allVersionMessages[pVersion - 1].first + 1);
+				cursorVersion.reset(allVersionMessages[pVersion - 1].first + 1);
 			}
 		}
 	}
-	std::cout << "Next message pVersion: " << pVersion << ", pMessage: " << pMessage << std::endl;
+	if (LOG_MESSAGES) {
+		std::cout << "Next message pVersion: " << pVersion << ", pMessage: " << pMessage << std::endl;
+	}
 }
 
 void MockPeekCursor::advanceTo(LogMessageVersion n) {
@@ -144,7 +151,7 @@ bool MockPeekCursor::isExhausted() const {
 
 const LogMessageVersion& MockPeekCursor::version() const {
 	logMethodName(__func__);
-	return _version;
+	return cursorVersion;
 }
 
 Version MockPeekCursor::popped() const {
@@ -189,6 +196,6 @@ void MockPeekCursor::describe() {
 	}
 	std::cout << "pVersion: " << pVersion << std::endl;
 	std::cout << "pMessage: " << pMessage << std::endl;
-	std::cout << "LogMessageVersion: " << _version.toString() << std::endl;
-	std::cout << "_arena: " << (void*)&_arena << std::endl;
+	std::cout << "LogMessageVersion: " << cursorVersion.toString() << std::endl;
+	std::cout << "_arena: " << (void*)&cursorArena << std::endl;
 }
