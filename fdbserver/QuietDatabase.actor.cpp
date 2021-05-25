@@ -568,25 +568,6 @@ ACTOR Future<Void> reconfigureAfter(Database cx,
 	return Void();
 }
 
-// The quiet database check (which runs at the end of every test) will always time out due to active data movement.
-// To get around this, quiet Database will disable the perpetual wiggle in the setup phase and then enable it again
-// after it’s done.
-ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, Value value) {
-    state ReadYourWritesTransaction tr(cx);
-    loop {
-        try {
-            tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-            tr.set(perpetualStorageWiggleKey, value);
-            wait(tr.commit());
-            break;
-        }
-        catch (Error& e) {
-            wait(tr.onError(e));
-        }
-    }
-    return Void();
-}
-
 ACTOR Future<Void> waitForQuietDatabase(Database cx,
                                         Reference<AsyncVar<ServerDBInfo>> dbInfo,
                                         std::string phase,

@@ -5659,3 +5659,19 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 	}
 	return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
 }
+
+ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, Value value) {
+    state ReadYourWritesTransaction tr(cx);
+    loop {
+        try {
+            tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+            tr.set(perpetualStorageWiggleKey, value);
+            wait(tr.commit());
+            break;
+        }
+        catch (Error& e) {
+            wait(tr.onError(e));
+        }
+    }
+    return Void();
+}
