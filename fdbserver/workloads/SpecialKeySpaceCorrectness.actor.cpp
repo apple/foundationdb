@@ -378,12 +378,13 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			    wait(tx->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
 			                                  LiteralStringRef("\xff\xff/worker_interfaces0")),
 			                      CLIENT_KNOBS->TOO_MANY));
-			// We should have at least 1 process in the cluster
-			ASSERT(result.size());
-			state KeyValueRef entry = deterministicRandom()->randomChoice(result);
-			Optional<Value> singleRes = wait(tx->get(entry.key));
-			ASSERT(singleRes.present() && singleRes.get() == entry.value);
-			tx->reset();
+			// Note: there's possibility we get zero workers
+			if (result.size()) {
+				state KeyValueRef entry = deterministicRandom()->randomChoice(result);
+				Optional<Value> singleRes = wait(tx->get(entry.key));
+				if (singleRes.present())
+					ASSERT(singleRes.get() == entry.value);
+			}
 		} catch (Error& e) {
 			wait(tx->onError(e));
 		}
