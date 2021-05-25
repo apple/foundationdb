@@ -121,7 +121,10 @@ ACTOR Future<int> spawnProcess(std::string path,
 
 	state pid_t pid = fork_child(path, paramList);
 	if (pid == -1) {
-		TraceEvent(SevWarnAlways, "SpawnProcess: Command failed to spawn").detail("Cmd", path).detail("Args", allArgs);
+		TraceEvent(SevWarnAlways, "SpawnProcessFailure")
+		    .detail("Reason", "Command failed to spawn")
+		    .detail("Cmd", path)
+		    .detail("Args", allArgs);
 		return -1;
 	} else if (pid > 0) {
 		state int status = -1;
@@ -129,14 +132,16 @@ ACTOR Future<int> spawnProcess(std::string path,
 		while (true) {
 			if (runTime > maxWaitTime) {
 				// timing out
-				TraceEvent(SevWarnAlways, "SpawnProcess : Command failed, timeout")
+				TraceEvent(SevWarnAlways, "SpawnProcessFailure")
+				    .detail("Reason", "Command failed, timeout")
 				    .detail("Cmd", path)
 				    .detail("Args", allArgs);
 				return -1;
 			}
 			int err = waitpid(pid, &status, WNOHANG);
 			if (err < 0) {
-				TraceEvent(SevWarnAlways, "SpawnProcess : Command failed")
+				TraceEvent(SevWarnAlways, "SpawnProcess")
+				    .detail("Reason", "Command failed")
 				    .detail("Cmd", path)
 				    .detail("Args", allArgs)
 				    .detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
@@ -154,13 +159,14 @@ ACTOR Future<int> spawnProcess(std::string path,
 			} else {
 				// child process completed
 				if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-					TraceEvent(SevWarnAlways, "SpawnProcess : Command failed")
+					TraceEvent(SevWarnAlways, "SpawnProcess")
+					    .detail("Reason", "Command failed")
 					    .detail("Cmd", path)
 					    .detail("Args", allArgs)
 					    .detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
 					return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 				}
-				TraceEvent("SpawnProcess : Command status")
+				TraceEvent("SpawnProcessCommandStatus")
 				    .detail("Cmd", path)
 				    .detail("Args", allArgs)
 				    .detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : 0);
