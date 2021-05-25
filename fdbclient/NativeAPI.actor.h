@@ -407,5 +407,10 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 inline uint64_t getWriteOperationCost(uint64_t bytes) {
 	return bytes / std::max(1, CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR) + 1;
 }
+
+// The quiet database check (which runs at the end of every test) will always time out due to active data movement.
+// To get around this, quiet Database will disable the perpetual wiggle in the setup phase.
+ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, Value value);
+
 #include "flow/unactorcompiler.h"
 #endif
