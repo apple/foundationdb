@@ -1046,9 +1046,10 @@ public:
 
 		Cursor(DecodeCache* cache, DeltaTree2* tree) : cache(cache), tree(tree), nodeIndex(-1) {}
 
-		Cursor(DecodeCache* cache, DeltaTree2* tree, int nodeIndex) : cache(cache), tree(tree), nodeIndex(nodeIndex) {
-			updateItem();
-		}
+		Cursor(DecodeCache* cache, DeltaTree2* tree, int nodeIndex) : cache(cache), tree(tree), nodeIndex(nodeIndex) {}
+
+		// Copy constructor does not copy item because normally a copied cursor will be immediately moved.
+		Cursor(const Cursor& c) : cache(c.cache), tree(c.tree), nodeIndex(c.nodeIndex) {}
 
 		int rootIndex() {
 			if (!cache->empty()) {
@@ -1062,7 +1063,7 @@ public:
 		DeltaTree2* tree;
 		DecodeCache* cache;
 		int nodeIndex;
-		T item;
+		mutable Optional<T> item;
 
 		Node* node() const { return tree->nodeAt(cache->get(nodeIndex).nodeOffset); }
 
@@ -1071,7 +1072,7 @@ public:
 				return format("Cursor{nodeIndex=-1}");
 			}
 			return format("Cursor{item=%s indexItem=%s nodeIndex=%d decodedNode=%s node=%s ",
-			              item.toString().c_str(),
+			              item.present() ? item.get().toString().c_str() : "<absent>",
 			              get(cache->get(nodeIndex)).toString().c_str(),
 			              nodeIndex,
 			              cache->get(nodeIndex).toString().c_str(),
@@ -1103,22 +1104,19 @@ public:
 			return delta.apply(cache->arena, base, decoded.partial);
 		}
 
-	private:
-		inline void updateItem() { item = get(cache->get(nodeIndex)); }
-
 	public:
 		// Get the item at the cursor
 		// Behavior is undefined if the cursor is not valid.
 		// If the cursor is moved, the reference object returned will be modified to
 		// the cursor's new current item.
-		const T& get() const { return item; }
-
-		void switchTree(DeltaTree2* newTree) {
-			tree = newTree;
-			if (nodeIndex != -1) {
-				updateItem();
+		const T& get() const {
+			if (!item.present()) {
+				item = get(cache->get(nodeIndex));
 			}
+			return item.get();
 		}
+
+		void switchTree(DeltaTree2* newTree) { tree = newTree; }
 
 		// If the cursor is valid, return a reference to the cursor's internal T.
 		// Otherwise, returns a reference to the cache's upper boundary.
@@ -1224,13 +1222,14 @@ public:
 		// Does not skip/avoid deleted nodes.
 		int seek(const T& s, int skipLen = 0) {
 			nodeIndex = -1;
+			item.reset();
 			deltatree_printf("seek(%s) start %s\n", s.toString().c_str(), toString().c_str());
 			int nIndex = rootIndex();
 			int cmp = 0;
 
 			while (nIndex != -1) {
 				nodeIndex = nIndex;
-				updateItem();
+				item.reset();
 				cmp = s.compare(get(), skipLen);
 				deltatree_printf("seek(%s) loop cmp=%d %s\n", s.toString().c_str(), cmp, toString().c_str());
 				if (cmp == 0) {
@@ -1249,11 +1248,11 @@ public:
 
 		bool moveFirst() {
 			nodeIndex = -1;
+			item.reset();
 			int nIndex = rootIndex();
 			deltatree_printf("moveFirst start %s\n", toString().c_str());
 			while (nIndex != -1) {
 				nodeIndex = nIndex;
-				updateItem();
 				deltatree_printf("moveFirst moved %s\n", toString().c_str());
 				nIndex = getLeftChildIndex(nIndex);
 			}
@@ -1262,11 +1261,11 @@ public:
 
 		bool moveLast() {
 			nodeIndex = -1;
+			item.reset();
 			int nIndex = rootIndex();
 			deltatree_printf("moveLast start %s\n", toString().c_str());
 			while (nIndex != -1) {
 				nodeIndex = nIndex;
-				updateItem();
 				deltatree_printf("moveLast moved %s\n", toString().c_str());
 				nIndex = getRightChildIndex(nIndex);
 			}
@@ -1276,21 +1275,18 @@ public:
 		// Try to move to next node, sees deleted nodes.
 		void _moveNext() {
 			deltatree_printf("_moveNext start %s\n", toString().c_str());
+			item.reset();
 			// Try to go right
 			int nIndex = getRightChildIndex(nodeIndex);
 
 			// If we couldn't go right, then the answer is our next ancestor
 			if (nIndex == -1) {
 				nodeIndex = cache->get(nodeIndex).rightParentIndex;
-				if (nodeIndex != -1) {
-					updateItem();
-				}
 				deltatree_printf("_moveNext move1 %s\n", toString().c_str());
 			} else {
 				// Go left as far as possible
 				do {
 					nodeIndex = nIndex;
-					updateItem();
 					deltatree_printf("_moveNext move2 %s\n", toString().c_str());
 					nIndex = getLeftChildIndex(nodeIndex);
 				} while (nIndex != -1);
@@ -1300,20 +1296,17 @@ public:
 		// Try to move to previous node, sees deleted nodes.
 		void _movePrev() {
 			deltatree_printf("_movePrev start %s\n", toString().c_str());
+			item.reset();
 			// Try to go left
 			int nIndex = getLeftChildIndex(nodeIndex);
 			// If we couldn't go left, then the answer is our prev ancestor
 			if (nIndex == -1) {
 				nodeIndex = cache->get(nodeIndex).leftParentIndex;
-				if (nodeIndex != -1) {
-					updateItem();
-				}
 				deltatree_printf("_movePrev move1 %s\n", toString().c_str());
 			} else {
 				// Go right as far as possible
 				do {
 					nodeIndex = nIndex;
-					updateItem();
 					deltatree_printf("_movePrev move2 %s\n", toString().c_str());
 					nIndex = getRightChildIndex(nodeIndex);
 				} while (nIndex != -1);
