@@ -3902,7 +3902,7 @@ ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection
 }
 // Iterator over each storage process to do storage wiggle
 ACTOR Future<Void> perpetualStorageWiggleIterator(AsyncTrigger* stopSignal,
-                                                  AsyncTrigger* finishStorageWiggleSignal,
+                                                  FutureStream<Void> finishStorageWiggleSignal,
                                                   DDTeamCollection* teamCollection) {
 	state bool isWiggling = false;
 	loop choose {
@@ -3913,7 +3913,7 @@ ACTOR Future<Void> perpetualStorageWiggleIterator(AsyncTrigger* stopSignal,
 				wait(updateNextWigglingStoragePID(teamCollection, &isWiggling));
 			}
 		}
-		when(wait(finishStorageWiggleSignal->onTrigger())) {
+		when(waitNext(finishStorageWiggleSignal)) {
 			isWiggling = true;
 			wait(updateNextWigglingStoragePID(teamCollection, &isWiggling));
 		}
@@ -3922,15 +3922,16 @@ ACTOR Future<Void> perpetualStorageWiggleIterator(AsyncTrigger* stopSignal,
 	return Void();
 }
 
-ACTOR Future<Future<Void>> watchPerpetualStoragePIDChange(Database cx, Promise<Value> pid) {
+ACTOR Future<std::pair<Future<Void>, Value>>  watchPerpetualStoragePIDChange(Database cx) {
 	state ReadYourWritesTransaction tr(cx);
 	state Future<Void> watchFuture;
+	state Value ret;
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Optional<Standalone<StringRef>> value = wait(tr.get(wigglingStorageServerKey));
+			Optional<Value> value = wait(tr.get(wigglingStorageServerKey));
 			if (value.present()) {
-				pid.send(value.get());
+				ret = value.get();
 			}
 			watchFuture = tr.watch(wigglingStorageServerKey);
 			wait(tr.commit());
@@ -3939,28 +3940,27 @@ ACTOR Future<Future<Void>> watchPerpetualStoragePIDChange(Database cx, Promise<V
 			wait(tr.onError(e));
 		}
 	}
-	return watchFuture;
+	return std::make_pair(watchFuture, ret);
 }
 // Watch the value of current wiggling storage process and do wiggling works
 ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
-                                           AsyncTrigger* finishStorageWiggleSignal,
+                                           PromiseStream<Void> finishStorageWiggleSignal,
                                            DDTeamCollection* self,
                                            const DDEnabledState* ddEnabledState) {
-	state Promise<Value> pidPromise;
+	state Value pid;
 	state Future<Void> watchFuture;
 	state Future<Void> moveFinishFuture = Never();
 	state Debouncer pauseWiggle(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY);
 	state AsyncTrigger restart;
 	state Future<Void> ddQueueCheck = delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistributionLow);
 
-	state Value pid;
-	wait(store(watchFuture, watchPerpetualStoragePIDChange(self->cx, pidPromise)));
+    state std::pair<Future<Void>, Value> res = wait(watchPerpetualStoragePIDChange(self->cx));
+    watchFuture = res.first;
+    pid = std::move(res.second);
 
 	loop choose {
 		when(wait(stopSignal->onTrigger())) { break; }
-		when(wait(watchFuture)) { wait(store(watchFuture, watchPerpetualStoragePIDChange(self->cx, pidPromise))); }
-		when(wait(store(pid, pidPromise.getFuture()))) {
-			pidPromise.reset();
+		when(wait(watchFuture)) {
 			if (self->healthyTeamCount <= 1) { // pre-check health status
 				pauseWiggle.trigger();
 			} else {
@@ -3970,7 +3970,11 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 				    .detail("ProcessId", pid)
 				    .detail("StorageCount", fv.size());
 			}
-		}
+
+            wait(store(res, watchPerpetualStoragePIDChange(self->cx)));
+            watchFuture = res.first;
+            pid = std::move(res.second);
+        }
 		when(wait(restart.onTrigger())) {
 			auto fv = self->excludeStorageWigglingServers(pid);
 			moveFinishFuture = waitForAll(fv);
@@ -3981,7 +3985,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
 		when(wait(moveFinishFuture)) {
 			moveFinishFuture = Never();
 			self->includeStorageWigglingServers(pid);
-			finishStorageWiggleSignal->trigger();
+			finishStorageWiggleSignal.send(Void());
 			TraceEvent("PerpetualStorageWiggleFinish", self->distributorId).detail("ProcessId", pid);
 			pid = Value();
 		}
@@ -4017,7 +4021,7 @@ ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollectio
                                                  const DDEnabledState* ddEnabledState) {
 	state int speed = 0;
 	state AsyncTrigger stopWiggleSignal;
-	state AsyncTrigger finishStorageWiggleSignal;
+	state PromiseStream<Void> finishStorageWiggleSignal;
 	state SignalableActorCollection collection;
 
 	loop {
@@ -4036,10 +4040,10 @@ ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollectio
 				ASSERT(speed == 1 || speed == 0);
 				if (speed == 1) {
 					collection.add(
-					    perpetualStorageWiggleIterator(&stopWiggleSignal, &finishStorageWiggleSignal, teamCollection));
+					    perpetualStorageWiggleIterator(&stopWiggleSignal, finishStorageWiggleSignal.getFuture(), teamCollection));
 					collection.add(perpetualStorageWiggler(
-					    &stopWiggleSignal, &finishStorageWiggleSignal, teamCollection, ddEnabledState));
-					finishStorageWiggleSignal.trigger();
+					    &stopWiggleSignal, finishStorageWiggleSignal, teamCollection, ddEnabledState));
+					finishStorageWiggleSignal.send(Void());
 					TraceEvent("PerpetualStorageWiggleOpen", teamCollection->distributorId);
 				} else {
 					stopWiggleSignal.trigger();
