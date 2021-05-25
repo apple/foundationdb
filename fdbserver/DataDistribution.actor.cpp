@@ -2468,7 +2468,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    this,
 		    processClass,
 		    includedDCs.empty() ||
-			std::find(includedDCs.begin(), includedDCs.end(), newServer.locality.dcId()) != includedDCs.end(),
+		        std::find(includedDCs.begin(), includedDCs.end(), newServer.locality.dcId()) != includedDCs.end(),
 		    storageServerSet,
 		    addedVersion);
 		ASSERT(r->lastKnownInterface.locality.processId().present());
@@ -3880,7 +3880,7 @@ ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection
 				tr.set(wigglingStorageServerKey, LiteralStringRef("0"));
 				*success = false;
 			} else {
-				ValueRef pid = teamCollection->pid2server_info.begin()->first;
+				Value pid = teamCollection->pid2server_info.begin()->first;
 				if (value.present()) {
 					auto nextIt = teamCollection->pid2server_info.upper_bound(value.get());
 					if (nextIt == teamCollection->pid2server_info.end()) {
@@ -3891,7 +3891,6 @@ ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection
 				} else {
 					tr.set(wigglingStorageServerKey, pid);
 				}
-				*success = true;
 			}
 			wait(tr.commit());
 			break;
@@ -3902,18 +3901,22 @@ ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection
 	return Void();
 }
 // Iterator over each storage process to do storage wiggle
-ACTOR Future<Void> perpetualStorageWiggleIterator(FutureStream<Void> stopSignal,
-						  FutureStream<Void> finishStorageWiggleSignal,
-						  DDTeamCollection* teamCollection) {
+ACTOR Future<Void> perpetualStorageWiggleIterator(AsyncTrigger* stopSignal,
+                                                  AsyncTrigger* finishStorageWiggleSignal,
+                                                  DDTeamCollection* teamCollection) {
 	state bool isWiggling = false;
 	loop choose {
-		when(waitNext(stopSignal)) { break; }
+		when(wait(stopSignal->onTrigger())) { break; }
 		when(wait(teamCollection->canStartStorageWiggling.onTrigger())) {
 			if (!isWiggling) {
+				isWiggling = true;
 				wait(updateNextWigglingStoragePID(teamCollection, &isWiggling));
 			}
 		}
-		when(waitNext(finishStorageWiggleSignal)) { wait(updateNextWigglingStoragePID(teamCollection, &isWiggling)); }
+		when(wait(finishStorageWiggleSignal->onTrigger())) {
+			isWiggling = true;
+			wait(updateNextWigglingStoragePID(teamCollection, &isWiggling));
+		}
 	}
 
 	return Void();
@@ -3939,8 +3942,8 @@ ACTOR Future<Future<Void>> watchPerpetualStoragePIDChange(Database cx, Promise<V
 	return watchFuture;
 }
 // Watch the value of current wiggling storage process and do wiggling works
-ACTOR Future<Void> perpetualStorageWiggler(FutureStream<Void> stopSignal,
-                                           PromiseStream<Void> finishStorageWiggleSignal,
+ACTOR Future<Void> perpetualStorageWiggler(AsyncTrigger* stopSignal,
+                                           AsyncTrigger* finishStorageWiggleSignal,
                                            DDTeamCollection* self,
                                            const DDEnabledState* ddEnabledState) {
 	state Promise<Value> pidPromise;
@@ -3954,7 +3957,7 @@ ACTOR Future<Void> perpetualStorageWiggler(FutureStream<Void> stopSignal,
 	wait(store(watchFuture, watchPerpetualStoragePIDChange(self->cx, pidPromise)));
 
 	loop choose {
-		when(waitNext(stopSignal)) { break; }
+		when(wait(stopSignal->onTrigger())) { break; }
 		when(wait(watchFuture)) { wait(store(watchFuture, watchPerpetualStoragePIDChange(self->cx, pidPromise))); }
 		when(wait(store(pid, pidPromise.getFuture()))) {
 			pidPromise.reset();
@@ -3978,7 +3981,7 @@ ACTOR Future<Void> perpetualStorageWiggler(FutureStream<Void> stopSignal,
 		when(wait(moveFinishFuture)) {
 			moveFinishFuture = Never();
 			self->includeStorageWigglingServers(pid);
-			finishStorageWiggleSignal.send(Void());
+			finishStorageWiggleSignal->trigger();
 			TraceEvent("PerpetualStorageWiggleFinish", self->distributorId).detail("ProcessId", pid);
 			pid = Value();
 		}
@@ -4013,8 +4016,8 @@ ACTOR Future<Void> perpetualStorageWiggler(FutureStream<Void> stopSignal,
 ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollection,
                                                  const DDEnabledState* ddEnabledState) {
 	state int speed = 0;
-	state PromiseStream<Void> stopWiggleSignal;
-	state PromiseStream<Void> finishStorageWiggleSignal;
+	state AsyncTrigger stopWiggleSignal;
+	state AsyncTrigger finishStorageWiggleSignal;
 	state SignalableActorCollection collection;
 
 	loop {
@@ -4032,14 +4035,14 @@ ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollectio
 
 				ASSERT(speed == 1 || speed == 0);
 				if (speed == 1) {
-					collection.add(perpetualStorageWiggleIterator(
-					    stopWiggleSignal.getFuture(), finishStorageWiggleSignal.getFuture(), teamCollection));
-//					collection.add(perpetualStorageWiggler(
-//					    stopWiggleSignal.getFuture(), finishStorageWiggleSignal, teamCollection, ddEnabledState));
-					finishStorageWiggleSignal.send(Void());
+					collection.add(
+					    perpetualStorageWiggleIterator(&stopWiggleSignal, &finishStorageWiggleSignal, teamCollection));
+					collection.add(perpetualStorageWiggler(
+					    &stopWiggleSignal, &finishStorageWiggleSignal, teamCollection, ddEnabledState));
+					finishStorageWiggleSignal.trigger();
 					TraceEvent("PerpetualStorageWiggleOpen", teamCollection->distributorId);
 				} else {
-					stopWiggleSignal.send(Void());
+					stopWiggleSignal.trigger();
 					wait(collection.signalAndReset());
 					TraceEvent("PerpetualStorageWiggleClose", teamCollection->distributorId);
 				}
