@@ -2151,7 +2151,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 
 const Role Role::WORKER("Worker", "WK", false);
 const Role Role::STORAGE_SERVER("StorageServer", "SS");
-const Role Role::TESTING_STORAGE_SERVER("TestingStorageServer", "TS");
+const Role Role::TESTING_STORAGE_SERVER("TestingStorageServer", "ST");
 const Role Role::TRANSACTION_LOG("TLog", "TL");
 const Role Role::SHARED_TRANSACTION_LOG("SharedTLog", "SL", false);
 const Role Role::COMMIT_PROXY("CommitProxyServer", "CP");
@@ -2159,7 +2159,7 @@ const Role Role::GRV_PROXY("GrvProxyServer", "GP");
 const Role Role::MASTER("MasterServer", "MS");
 const Role Role::RESOLVER("Resolver", "RV");
 const Role Role::CLUSTER_CONTROLLER("ClusterController", "CC");
-const Role Role::TESTER("TestClient", "TC");
+const Role Role::TESTER("Tester", "TS");
 const Role Role::LOG_ROUTER("LogRouter", "LR");
 const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
 const Role Role::RATEKEEPER("Ratekeeper", "RK");

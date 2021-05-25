@@ -97,7 +97,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	ConsistencyCheckWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		performQuiescentChecks = getOption(options, LiteralStringRef("performQuiescentChecks"), false);
 		performCacheCheck = getOption(options, LiteralStringRef("performCacheCheck"), false);
-		performTSSCheck = getOption(options, LiteralStringRef("performTSSCheck"), false);
+		performTSSCheck = getOption(options, LiteralStringRef("performTSSCheck"), true);
 		quiescentWaitTimeout = getOption(options, LiteralStringRef("quiescentWaitTimeout"), 600.0);
 		distributed = getOption(options, LiteralStringRef("distributed"), true);
 		shardSampleFactor = std::max(getOption(options, LiteralStringRef("shardSampleFactor"), 1), 1);
