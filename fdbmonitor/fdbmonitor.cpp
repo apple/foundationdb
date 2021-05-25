@@ -504,6 +504,8 @@ public:
 
 		const char* id_s = ssection.c_str() + strlen(section.c_str()) + 1;
 
+		const std::string pid_s = std::to_string(getpid());
+
 		for (auto i : keys) {
 			if (!strcmp(i.pItem, "command") || !strcmp(i.pItem, "restart_delay") ||
 			    !strcmp(i.pItem, "initial_restart_delay") || !strcmp(i.pItem, "restart_backoff") ||
@@ -515,9 +517,12 @@ public:
 			std::string opt = get_value_multi(ini, i.pItem, ssection.c_str(), section.c_str(), "general", nullptr);
 
 			std::size_t pos = 0;
-
 			while ((pos = opt.find("$ID", pos)) != opt.npos)
 				opt.replace(pos, 3, id_s, strlen(id_s));
+
+			pos = 0;
+			while ((pos = opt.find("$PID", pos)) != opt.npos)
+				opt.replace(pos, 4, pid_s);
 
 			const char* flagName = i.pItem + 5;
 			if (strncmp("flag_", i.pItem, 5) == 0 && strlen(flagName) > 0) {
