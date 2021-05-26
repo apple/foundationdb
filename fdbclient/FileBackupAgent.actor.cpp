@@ -4591,8 +4591,9 @@ public:
 				restoreRanges.push_back(KeyRange(KeyRangeRef(restoreRange.range().begin, restoreRange.range().end)));
 			}
 		}
-		for (auto& restoreRange : restoreRanges)
-			ASSERT(restoreRange.contains(removePrefix) || removePrefix.size() == 0);
+		for (auto& restoreRange : restoreRanges) {
+			ASSERT(restoreRange.begin.startsWith(removePrefix) && restoreRange.end.startsWith(removePrefix));
+		}
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -5233,6 +5234,11 @@ public:
 	                                     bool lockDB,
 	                                     bool inconsistentSnapshotOnly,
 	                                     UID randomUid) {
+		// The restore command line tool won't allow ranges to be empty, but correctness workloads somehow might.
+		if (ranges.empty()) {
+			throw restore_error();
+		}
+
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
 
 		state BackupDescription desc = wait(bc->describeBackup());

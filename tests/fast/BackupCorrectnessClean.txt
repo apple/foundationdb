@@ -47,7 +47,7 @@ testTitle=BackupAndRestore
     clearAfterTest=false
     simBackupAgents=BackupToFile
     allowPauses=false
-    prefixesMandatory=a,A,m
+    restorePrefixesToInclude=a,A,m
 
     testName=BackupAndRestoreCorrectness
 	backupTag=backup3
