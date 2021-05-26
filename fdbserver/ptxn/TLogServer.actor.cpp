@@ -969,6 +969,8 @@ ACTOR Future<Void> tLogPeekMessages(TLogPeekRequest req,
 
 		for (const auto& tuple : storageTeamData->versionMessages) {
 			const Version& version = std::get<Version>(tuple);
+			const StringRef& messages = std::get<StringRef>(tuple);
+			const Arena& arena = std::get<Arena>(tuple);
 			if (version < req.beginVersion) {
 				continue;
 			}
@@ -981,8 +983,11 @@ ACTOR Future<Void> tLogPeekMessages(TLogPeekRequest req,
 			reply.end = version;
 
 			serializer.startVersionWriting(version);
-			const StringRef& messages = std::get<StringRef>(tuple);
-			const Arena& arena = std::get<Arena>(tuple);
+			if (messages.size() == 0) {
+				// Empty commit messages
+				serializer.completeVersionWriting();
+				continue;
+			}
 
 			// TODO: instead of deserializing, just sends it out
 			ProxyTLogMessageHeader header;
