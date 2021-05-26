@@ -274,20 +274,27 @@ public:
 					filesBeingDeleted[filename] = deleteFuture;
 			}
 
-			auto& openFiles = g_simulator.getCurrentProcess()->machine->openFiles;
-			auto iter = openFiles.find(filename);
-			if (iter == openFiles.end()) {
-				iter = openFiles.find(initialFilename);
+			removeOpenFile(filename, this);
+			if (initialFilename != filename) {
+				removeOpenFile(initialFilename, this);
 			}
+		}
+	}
 
-			// Various actions (e.g. simulated delete) can remove a file from openFiles prematurely, so it may already
-			// be gone
-			if (iter != openFiles.end()) {
-				// even if the filename exists, it doesn't mean that it references the same file. It could be that the
-				// file was renamed and later a file with the same name was opened.
-				if (iter->second.getPtrIfReady().orDefault(nullptr) == this) {
-					openFiles.erase(iter);
-				}
+	// Removes a file from the openFiles map
+	static void removeOpenFile(std::string filename, AsyncFileNonDurable* file) {
+		auto& openFiles = g_simulator.getCurrentProcess()->machine->openFiles;
+
+		auto iter = openFiles.find(filename);
+
+		// Various actions (e.g. simulated delete) can remove a file from openFiles prematurely, so it may already
+		// be gone. Renamed files (from atomic write and create) will also be present under only one of the two
+		// names.
+		if (iter != openFiles.end()) {
+			// even if the filename exists, it doesn't mean that it references the same file. It could be that the
+			// file was renamed and later a file with the same name was opened.
+			if (iter->second.getPtrIfReady().orDefault(nullptr) == file) {
+				openFiles.erase(iter);
 			}
 		}
 	}
