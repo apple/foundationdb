@@ -1,0 +1,42 @@
+[configuration]
+extraDB = 1
+
+[[test]]
+testTitle = 'BackupAndRestore'
+clearAfterTest = false
+simBackupAgents = 'BackupToDB'
+
+    [[test.workload]]
+    testName = 'AtomicOps'
+    nodeCount = 30000
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'BackupToDBCorrectness'
+    backupAfter = 10.0
+    restoreAfter = 60.0
+    backupRangesCount = -1
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 90.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 90.0
+    testDuration = 90.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 90.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 90.0

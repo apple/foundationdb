@@ -44,22 +44,25 @@ struct ReadHotDetectionWorkload : TestWorkload {
 		readKey = StringRef(format("testkey%08x", deterministicRandom()->randomInt(0, keyCount)));
 	}
 
-	virtual std::string description() { return "ReadHotDetection"; }
+	std::string description() const override { return "ReadHotDetection"; }
 
-	virtual Future<Void> setup(Database const& cx) { return _setup(cx, this); }
+	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		for (int c = 0; c < actorCount; c++) {
-			clients.push_back(timeout(keyReader(cx->clone(), this, actorCount / transactionsPerSecond,
-			                                    deterministicRandom()->random01() > 0.4),
-			                          testDuration, Void()));
+			clients.push_back(timeout(
+			    keyReader(
+			        cx->clone(), this, actorCount / transactionsPerSecond, deterministicRandom()->random01() > 0.4),
+			    testDuration,
+			    Void()));
 		}
 		readHotCheck = clientId == 0 ? _check(cx->clone(), this) : Void();
 		return delay(testDuration);
 	}
 
-	virtual Future<bool> check(Database const& cx) {
-		if (clientId != 0) return true;
+	Future<bool> check(Database const& cx) override {
+		if (clientId != 0)
+			return true;
 		return passed;
 	}
 
@@ -99,16 +102,17 @@ struct ReadHotDetectionWorkload : TestWorkload {
 				// TraceEvent("RHDCheckPhaseLog")
 				//     .detail("KeyRangeSize", sm.bytes)
 				//     .detail("KeyRangeReadBandwith", sm.bytesReadPerKSecond);
-				Standalone<VectorRef<KeyRangeRef>> keyRanges = wait(tr.getReadHotRanges(self->wholeRange));
+				Standalone<VectorRef<ReadHotRangeWithMetrics>> keyRanges = wait(tr.getReadHotRanges(self->wholeRange));
 				// TraceEvent("RHDCheckPhaseLog")
 				//     .detail("KeyRangesSize", keyRanges.size())
 				//     .detail("ReadKey", self->readKey.printable().c_str())
 				//     .detail("KeyRangesBackBeginKey", keyRanges.back().begin)
 				//     .detail("KeyRangesBackEndKey", keyRanges.back().end);
 				// Loose check.
-				for (auto kr : keyRanges) {
-					if (kr.contains(self->readKey)) {
+				for (const auto& kr : keyRanges) {
+					if (kr.keys.contains(self->readKey)) {
 						self->passed = true;
+						return Void();
 					}
 				}
 				// The key ranges deemed read hot does not contain the readKey, which is impossible here.
@@ -128,7 +132,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 		}
 	}
 
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR Future<Void> keyReader(Database cx, ReadHotDetectionWorkload* self, double delay, bool useReadKey) {
 		state double lastTime = now();

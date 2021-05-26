@@ -1,0 +1,13 @@
+[[test]]
+testTitle='ThrottlingTest'
+    [[test.workload]]
+    testName='Throttling'
+    testDuration = 60.0
+    actorsPerClient=10
+    readsPerTransaction=10
+    writesPerTransaction=10
+    throttlingMultiplier=0.5
+    maxBurst=10000
+
+    [[test.workload]]
+    testName='HealthMetricsApi'

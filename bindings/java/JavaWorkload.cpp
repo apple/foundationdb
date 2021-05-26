@@ -19,7 +19,7 @@
  */
 
 #include <foundationdb/ClientWorkload.h>
-#define FDB_API_VERSION 700
+#define FDB_API_VERSION 710
 #include <foundationdb/fdb_c.h>
 
 #include <jni.h>
@@ -75,6 +75,9 @@ void printTrace(JNIEnv* env, jclass, jlong logger, jint severity, jstring messag
 		sev = FDBSeverity::Warn;
 	} else if (severity < 40) {
 		sev = FDBSeverity::WarnAlways;
+	} else {
+		assert(false);
+		std::abort();
 	}
 	log->trace(sev, msg, detailsMap);
 	if (isCopy) {
@@ -277,7 +280,8 @@ struct JVM {
 			w.name = name;
 			w.signature = sig;
 			w.fnPtr = std::get<2>(t);
-			log->trace(info, "PreparedNativeMethod",
+			log->trace(info,
+			           "PreparedNativeMethod",
 			           { { "Name", w.name },
 			             { "Signature", w.signature },
 			             { "Ptr", std::to_string(reinterpret_cast<uintptr_t>(w.fnPtr)) } });
@@ -359,7 +363,8 @@ struct JVM {
 		                   { "getOption", "(JLjava/lang/String;Z)Z", reinterpret_cast<void*>(&getOptionBool) },
 		                   { "getOption", "(JLjava/lang/String;J)J", reinterpret_cast<void*>(&getOptionLong) },
 		                   { "getOption", "(JLjava/lang/String;D)D", reinterpret_cast<void*>(&getOptionDouble) },
-		                   { "getOption", "(JLjava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+		                   { "getOption",
+		                     "(JLjava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
 		                     reinterpret_cast<void*>(&getOptionString) },
 		                   { "getClientID", "(J)I", reinterpret_cast<void*>(&getClientID) },
 		                   { "getClientCount", "(J)I", reinterpret_cast<void*>(&getClientCount) },
@@ -370,7 +375,7 @@ struct JVM {
 		jmethodID selectMethod =
 		    env->GetStaticMethodID(fdbClass, "selectAPIVersion", "(I)Lcom/apple/foundationdb/FDB;");
 		checkException();
-		auto fdbInstance = env->CallStaticObjectMethod(fdbClass, selectMethod, jint(700));
+		auto fdbInstance = env->CallStaticObjectMethod(fdbClass, selectMethod, jint(710));
 		checkException();
 		env->CallObjectMethod(fdbInstance, getMethod(fdbClass, "disableShutdownHook", "()V"));
 		checkException();
@@ -388,7 +393,8 @@ struct JVM {
 		auto impl = env->GetLongField(res, field);
 		checkException();
 		if (impl != jContext) {
-			log->trace(error, "ContextNotCorrect",
+			log->trace(error,
+			           "ContextNotCorrect",
 			           { { "Expected", std::to_string(jContext) }, { "Impl", std::to_string(impl) } });
 			std::terminate();
 		}
@@ -468,14 +474,16 @@ struct JVM {
 	}
 
 	jobject createDatabase(jobject workload, FDBDatabase* db) {
-		auto executor =
-		    env->CallObjectMethod(workload, getMethod(getClass("com/apple/foundationdb/testing/AbstractWorkload"),
-		                                              "getExecutor", "()Ljava/util/concurrent/Executor;"));
+		auto executor = env->CallObjectMethod(workload,
+		                                      getMethod(getClass("com/apple/foundationdb/testing/AbstractWorkload"),
+		                                                "getExecutor",
+		                                                "()Ljava/util/concurrent/Executor;"));
 		auto databaseClass = getClass("com/apple/foundationdb/FDBDatabase");
 		jlong databasePtr = reinterpret_cast<jlong>(db);
-		jobject javaDatabase =
-		    env->NewObject(databaseClass, getMethod(databaseClass, "<init>", "(JLjava/util/concurrent/Executor;)V"),
-		                   databasePtr, executor);
+		jobject javaDatabase = env->NewObject(databaseClass,
+		                                      getMethod(databaseClass, "<init>", "(JLjava/util/concurrent/Executor;)V"),
+		                                      databasePtr,
+		                                      executor);
 		env->DeleteLocalRef(executor);
 		return javaDatabase;
 	}
@@ -488,9 +496,10 @@ struct JVM {
 			jPromise = createPromise(std::move(promise));
 			env->CallVoidMethod(
 			    workload,
-			    getMethod(clazz, method,
-			              "(Lcom/apple/foundationdb/Database;Lcom/apple/foundationdb/testing/Promise;)V"),
-			    jdb, jPromise);
+			    getMethod(
+			        clazz, method, "(Lcom/apple/foundationdb/Database;Lcom/apple/foundationdb/testing/Promise;)V"),
+			    jdb,
+			    jPromise);
 			env->DeleteLocalRef(jdb);
 			env->DeleteLocalRef(jPromise);
 			jPromise = nullptr;
@@ -512,7 +521,7 @@ struct JavaWorkload : FDBWorkload {
 	bool failed = false;
 	jobject workload = nullptr;
 	JavaWorkload(const std::shared_ptr<JVM>& jvm, FDBLogger& log, const std::string& name)
-		: jvm(jvm), log(log), name(name) {
+	  : jvm(jvm), log(log), name(name) {
 		boost::replace_all(this->name, ".", "/");
 	}
 	~JavaWorkload() {
@@ -585,9 +594,7 @@ struct JavaWorkload : FDBWorkload {
 			log.trace(error, "CheckFailedWithJNIError", { { "Error", e.toString() }, { "Location", e.location() } });
 		}
 	}
-	void getMetrics(std::vector<FDBPerfMetric>& out) const override {
-		jvm->getMetrics(workload, name, out);
-	}
+	void getMetrics(std::vector<FDBPerfMetric>& out) const override { jvm->getMetrics(workload, name, out); }
 };
 
 struct JavaWorkloadFactory : FDBWorkloadFactory {

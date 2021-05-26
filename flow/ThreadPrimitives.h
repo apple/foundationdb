@@ -23,6 +23,7 @@
 #pragma once
 
 #include <atomic>
+#include <array>
 
 #include "flow/Error.h"
 #include "flow/Trace.h"
@@ -44,9 +45,13 @@
 #include <drd.h>
 #endif
 
-class ThreadSpinLock {
+// TODO: We should make this dependent on the CPU. Maybe cmake
+// can set this variable properly?
+constexpr size_t MAX_CACHE_LINE_SIZE = 64;
+
+class alignas(MAX_CACHE_LINE_SIZE) ThreadSpinLock {
 public:
-// #ifdef _WIN32
+	// #ifdef _WIN32
 	ThreadSpinLock() {
 #if VALGRIND
 		ANNOTATE_RWLOCK_CREATE(this);
@@ -59,10 +64,10 @@ public:
 	}
 	void enter() {
 		while (isLocked.test_and_set(std::memory_order_acquire))
-#ifndef __aarch64__
-			_mm_pause();
+#ifdef __aarch64__
+			__asm__ volatile("isb");
 #else
-			; /* spin */
+			_mm_pause();
 #endif
 #if VALGRIND
 		ANNOTATE_RWLOCK_ACQUIRED(this, true);
@@ -83,17 +88,29 @@ private:
 	ThreadSpinLock(const ThreadSpinLock&);
 	void operator=(const ThreadSpinLock&);
 	std::atomic_flag isLocked = ATOMIC_FLAG_INIT;
+	// We want a spin lock to occupy a cache line in order to
+	// prevent false sharing.
+	std::array<uint8_t, MAX_CACHE_LINE_SIZE - sizeof(isLocked)> padding;
 };
 
 class ThreadSpinLockHolder {
 	ThreadSpinLock& lock;
+
 public:
-	ThreadSpinLockHolder( ThreadSpinLock& lock ) : lock(lock) { lock.enter(); }
+	ThreadSpinLockHolder(ThreadSpinLock& lock) : lock(lock) { lock.enter(); }
 	~ThreadSpinLockHolder() { lock.leave(); }
 };
 
-class ThreadUnsafeSpinLock { public: void enter(){}; void leave(){}; void assertNotEntered(){}; };
-class ThreadUnsafeSpinLockHolder { public: ThreadUnsafeSpinLockHolder(ThreadUnsafeSpinLock&){}; };
+class ThreadUnsafeSpinLock {
+public:
+	void enter(){};
+	void leave(){};
+	void assertNotEntered(){};
+};
+class ThreadUnsafeSpinLockHolder {
+public:
+	ThreadUnsafeSpinLockHolder(ThreadUnsafeSpinLock&){};
+};
 
 #if FLOW_THREAD_SAFE
 
@@ -124,11 +141,10 @@ private:
 	semaphore_t sem;
 #else
 #error Port me!
-#endif	
+#endif
 };
 
-class Mutex
-{
+class Mutex {
 	// A re-entrant process-local blocking lock (e.g. CRITICAL_SECTION on Windows)
 	// Thread safe even if !FLOW_THREAD_SAFE
 public:
@@ -136,14 +152,16 @@ public:
 	~Mutex();
 	void enter();
 	void leave();
+
 private:
 	void* impl;
 };
 
 class MutexHolder {
 	Mutex& lock;
+
 public:
-	MutexHolder( Mutex& lock ) : lock(lock) { lock.enter(); }
+	MutexHolder(Mutex& lock) : lock(lock) { lock.enter(); }
 	~MutexHolder() { lock.leave(); }
 };
 

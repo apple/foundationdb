@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-
 #ifndef FLOW_XML_TRACE_LOG_FORMATTER_H
 #define FLOW_XML_TRACE_LOG_FORMATTER_H
 #pragma once
@@ -29,15 +28,15 @@
 #include "flow/Trace.h"
 
 struct XmlTraceLogFormatter : public ITraceLogFormatter, ReferenceCounted<XmlTraceLogFormatter> {
-	void addref();
-	void delref();
+	void addref() override;
+	void delref() override;
 
-	const char* getExtension();
-	const char* getHeader();
-	const char* getFooter();
+	const char* getExtension() override;
+	const char* getHeader() override;
+	const char* getFooter() override;
 
-	void escape(std::stringstream &ss, std::string source);
-	std::string formatEvent(const TraceEventFields &fields);
+	void escape(std::stringstream& ss, std::string source);
+	std::string formatEvent(const TraceEventFields& fields) override;
 };
 
 #endif

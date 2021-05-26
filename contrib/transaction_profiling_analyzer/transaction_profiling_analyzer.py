@@ -98,6 +98,9 @@ class ByteBuffer(object):
     def get_double(self):
         return struct.unpack("<d", self.get_bytes(8))[0]
 
+    def get_bool(self):
+        return struct.unpack("<?", self.get_bytes(1))[0]
+
     def get_bytes_with_length(self):
         length = self.get_int()
         return self.get_bytes(length)
@@ -223,6 +226,8 @@ class CommitInfo(BaseInfo):
             self.mutations = mutations
 
         self.read_snapshot_version = bb.get_long()
+        if protocol_version >= PROTOCOL_VERSION_6_3:
+            self.report_conflicting_keys = bb.get_bool()
 
 
 class ErrorGetInfo(BaseInfo):
@@ -255,7 +260,8 @@ class ErrorCommitInfo(BaseInfo):
             self.mutations = mutations
 
         self.read_snapshot_version = bb.get_long()
-
+        if protocol_version >= PROTOCOL_VERSION_6_3:
+            self.report_conflicting_keys = bb.get_bool()
 
 class UnsupportedProtocolVersionError(Exception):
     def __init__(self, protocol_version):
@@ -546,7 +552,7 @@ class ReadCounter(object):
 
     def get_total_reads(self):
         return sum([v for v in self.read_counts.values()])
-    
+
     def matches_filter(addresses, required_addresses):
         for addr in required_addresses:
             if addr not in addresses:
@@ -577,6 +583,9 @@ class ReadCounter(object):
         total = sum([start_count for (start_count, end_count) in self.reads.values()])
         range_size = total // num_buckets
         output_range_counts = []
+
+        if total == 0:
+            return output_range_counts
 
         def add_boundary(start, end, started_count, total_count):
             if shard_finder:

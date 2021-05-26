@@ -1,3 +1,0 @@
-testTitle=VersionStamp
-testName=VersionStamp
-soleOwnerOfMetadataVersionKey=true

@@ -40,7 +40,7 @@ FoundationDB may return the following error codes from API functions. If you nee
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | external_client_already_loaded                | 1040| External client has already been loaded                                        |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
-| proxy_memory_limit_exceeded                   | 1042| Proxy commit memory limit exceeded                                             |
+| proxy_memory_limit_exceeded                   | 1042| CommitProxy commit memory limit exceeded                                       |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | batch_transaction_throttled                   | 1051| Batch GRV request rate limit exceeded                                          |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
@@ -114,7 +114,11 @@ FoundationDB may return the following error codes from API functions. If you nee
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | transaction_read_only                         | 2023| Attempted to commit a transaction specified as read-only                       |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| invalid_cache_eviction_policy                 | 2024| Invalid cache eviction policy, only random and lru are supported               |
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | network_cannot_be_restarted                   | 2025| Network can only be started once                                               |
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| blocked_from_network_thread                   | 2026| Detected a deadlock in a callback called from the network thread               |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | incompatible_protocol_version                 | 2100| Incompatible protocol version                                                  |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
@@ -145,6 +149,16 @@ FoundationDB may return the following error codes from API functions. If you nee
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | special_keys_no_module_found                  | 2113| Special key space range read does not intersect a module.                      |
 |                                               |     | Refer to the ``SPECIAL_KEY_SPACE_RELAXED`` transaction option for more details.|
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| special_keys_write_disabled                   | 2114| Special key space is not allowed to write by default. Refer                    |
+|                                               |     | to the ``SPECIAL_KEY_SPACE_ENABLE_WRITES`` transaction option for more details.|
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| special_keys_no_write_module_found            | 2115| Special key space key or keyrange in set or clear does not intersect a module. |
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| special_keys_cross_module_write               | 2116| Special key space clear crosses modules                                        |
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| special_keys_api_failure                      | 2117| Api call through special keys failed. For more information, read the           |
+|                                               |     | ``0xff0xff/error_message`` key                                                 |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | api_version_unset                             | 2200| API version is not set                                                         |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+

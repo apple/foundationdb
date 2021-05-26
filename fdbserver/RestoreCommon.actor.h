@@ -39,14 +39,12 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 // RestoreConfig copied from FileBackupAgent.actor.cpp
-// We copy RestoreConfig instead of using (and potentially changing) it in place 
+// We copy RestoreConfig instead of using (and potentially changing) it in place
 // to avoid conflict with the existing code.
 // We also made minor changes to allow RestoreConfig to be ReferenceCounted
 // TODO: Merge this RestoreConfig with the original RestoreConfig in FileBackupAgent.actor.cpp
 // For convenience
 typedef FileBackupAgent::ERestoreState ERestoreState;
-template<> inline Tuple Codec<ERestoreState>::pack(ERestoreState const &val) { return Tuple().append(val); }
-template<> inline ERestoreState Codec<ERestoreState>::unpack(Tuple const &val) { return (ERestoreState)val.getInt(0); }
 
 struct RestoreFileFR;
 
@@ -170,7 +168,7 @@ public:
 	std::string toString(); // Added by Meng
 };
 
-//typedef RestoreConfigFR::RestoreFile RestoreFile;
+// typedef RestoreConfigFR::RestoreFile RestoreFile;
 
 // Describes a file to load blocks from during restore.  Ordered by version and then fileName to enable
 // incrementally advancing through the map, saving the version and path of the next starting point.
@@ -238,17 +236,16 @@ struct RestoreFileFR {
 
 	std::string toString() const {
 		std::stringstream ss;
-		ss << "version:" << version << " fileName:" << fileName
-		   << " isRange:" << isRange << " blockSize:" << blockSize
-		   << " fileSize:" << fileSize << " endVersion:" << endVersion
-		   << " beginVersion:" << beginVersion << " cursor:" << cursor
-		   << " fileIndex:" << fileIndex << " partitionId:" << partitionId;
+		ss << "version:" << version << " fileName:" << fileName << " isRange:" << isRange << " blockSize:" << blockSize
+		   << " fileSize:" << fileSize << " endVersion:" << endVersion << " beginVersion:" << beginVersion
+		   << " cursor:" << cursor << " fileIndex:" << fileIndex << " partitionId:" << partitionId;
 		return ss.str();
 	}
 };
 
 namespace parallelFileRestore {
-ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file, int64_t offset,
+ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file,
+                                                                    int64_t offset,
                                                                     int len);
 } // namespace parallelFileRestore
 
@@ -256,9 +253,12 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IA
 // Save replies to replies if replies != nullptr
 // The UID in a request is the UID of the interface to handle the request
 ACTOR template <class Interface, class Request>
-Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::map<UID, Interface> interfaces,
-                             std::vector<std::pair<UID, Request>> requests, std::vector<REPLY_TYPE(Request)>* replies,
-                             TaskPriority taskID = TaskPriority::Low, bool trackRequestLatency = true) {
+Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel,
+                             std::map<UID, Interface> interfaces,
+                             std::vector<std::pair<UID, Request>> requests,
+                             std::vector<REPLY_TYPE(Request)>* replies,
+                             TaskPriority taskID = TaskPriority::Low,
+                             bool trackRequestLatency = true) {
 	if (requests.empty()) {
 		return Void();
 	}
@@ -301,14 +301,21 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 				if (ongoingReplies.empty()) {
 					break;
 				} else {
-					wait(quorum(ongoingReplies, std::min((int)SERVER_KNOBS->FASTRESTORE_REQBATCH_PARALLEL,
-					                                     (int)ongoingReplies.size())));
+					wait(
+					    quorum(ongoingReplies,
+					           std::min((int)SERVER_KNOBS->FASTRESTORE_REQBATCH_PARALLEL, (int)ongoingReplies.size())));
 				}
 				// At least one reply is received; Calculate the reply duration
 				for (int j = 0; j < ongoingReplies.size(); ++j) {
 					if (ongoingReplies[j].isReady()) {
 						std::get<2>(replyDurations[ongoingRepliesIndex[j]]) = now();
 						--oustandingReplies;
+					} else if (ongoingReplies[j].isError()) {
+						// When this happens,
+						// the above assertion ASSERT(ongoingReplies.size() == oustandingReplies) will fail
+						TraceEvent(SevError, "FastRestoreGetBatchRepliesReplyError")
+						    .detail("OngoingReplyIndex", j)
+						    .detail("FutureError", ongoingReplies[j].getError().what());
 					}
 				}
 			}
@@ -320,9 +327,9 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 				for (int i = 0; i < replyDurations.size(); ++i) {
 					double endTime = std::get<2>(replyDurations[i]);
 					TraceEvent(SevInfo, "ProfileSendRequestBatchLatency", bathcID)
-						.detail("Node", std::get<0>(replyDurations[i]))
-						.detail("Request", std::get<1>(replyDurations[i]).toString())
-						.detail("Duration", endTime - start);
+					    .detail("Node", std::get<0>(replyDurations[i]))
+					    .detail("Request", std::get<1>(replyDurations[i]).toString())
+					    .detail("Duration", endTime - start);
 					auto item = maxEndTime.emplace(std::get<0>(replyDurations[i]), endTime);
 					item.first->second = std::max(item.first->second, endTime);
 				}
@@ -343,21 +350,22 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 				}
 				if (latest - earliest > SERVER_KNOBS->FASTRESTORE_STRAGGLER_THRESHOLD_SECONDS) {
 					TraceEvent(SevWarn, "ProfileSendRequestBatchLatencyFoundStraggler", bathcID)
-						.detail("SlowestNode", latestNode)
-						.detail("FatestNode", earliestNode)
-						.detail("EarliestEndtime", earliest)
-						.detail("LagTime", latest - earliest);
+					    .detail("SlowestNode", latestNode)
+					    .detail("FatestNode", earliestNode)
+					    .detail("EarliestEndtime", earliest)
+					    .detail("LagTime", latest - earliest);
 				}
 			}
 			// Update replies
 			if (replies != nullptr) {
-				for(int i = 0; i < cmdReplies.size(); ++i) {
+				for (int i = 0; i < cmdReplies.size(); ++i) {
 					replies->emplace_back(cmdReplies[i].get());
 				}
 			}
 			break;
 		} catch (Error& e) {
-			if (e.code() == error_code_operation_cancelled) break;
+			if (e.code() == error_code_operation_cancelled)
+				break;
 			// fprintf(stdout, "sendBatchRequests Error code:%d, error message:%s\n", e.code(), e.what());
 			TraceEvent(SevWarn, "FastRestoreSendBatchRequests").error(e);
 			for (auto& request : requests) {
@@ -375,8 +383,10 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 
 // Similar to getBatchReplies except that the caller does not expect to process the reply info.
 ACTOR template <class Interface, class Request>
-Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel, std::map<UID, Interface> interfaces,
-                               std::vector<std::pair<UID, Request>> requests, TaskPriority taskID = TaskPriority::Low,
+Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel,
+                               std::map<UID, Interface> interfaces,
+                               std::vector<std::pair<UID, Request>> requests,
+                               TaskPriority taskID = TaskPriority::Low,
                                bool trackRequestLatency = true) {
 	wait(getBatchReplies(channel, interfaces, requests, nullptr, taskID, trackRequestLatency));
 

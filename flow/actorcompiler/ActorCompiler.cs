@@ -615,7 +615,7 @@ namespace actorcompiler
                 {
                     LineNumber(cx.target, stmt.FirstSourceLine);
                     if (stmt.decl.initializerConstructorSyntax || stmt.decl.initializer=="")
-                        cx.target.WriteLine("{0} = std::move( {1}({2}) );", stmt.decl.name, stmt.decl.type, stmt.decl.initializer);
+                        cx.target.WriteLine("{0} = {1}({2});", stmt.decl.name, stmt.decl.type, stmt.decl.initializer);
                     else
                         cx.target.WriteLine("{0} = {1};", stmt.decl.name, stmt.decl.initializer);
                 }
@@ -713,7 +713,7 @@ namespace actorcompiler
                 }
 
                 var iter = getIteratorName(cx);
-                state.Add(new StateVar { SourceLine = stmt.FirstSourceLine, name = iter, type = "decltype(std::begin(fake<" + container.type + ">()))", initializer = null });
+                state.Add(new StateVar { SourceLine = stmt.FirstSourceLine, name = iter, type = "decltype(std::begin(std::declval<" + container.type + ">()))", initializer = null });
                 var equivalent = new ForStatement {
                     initExpression = iter + " = std::begin(" + stmt.rangeExpression + ")",
                     condExpression = iter + " != std::end(" + stmt.rangeExpression + ")",

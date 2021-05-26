@@ -1,12 +1,13 @@
 testTitle=AsyncFileWriteTest
-testName=AsyncFileWrite
-testDuration=10.0
 runSetup=true
 clearAfterTest=false
-numParallelWrites=200
-writeSize=16384
-;fileName=/home/ajb/testfile
-fileSize=10002432
-unbufferedIO=true
-sequential=false
 useDB=false
+
+    testName=AsyncFileWrite
+    testDuration=10.0
+    numParallelWrites=200
+    writeSize=16384
+    ;fileName=/home/ajb/testfile
+    fileSize=10002432
+    unbufferedIO=true
+    sequential=false

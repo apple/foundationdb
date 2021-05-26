@@ -20,6 +20,7 @@
 
 #pragma once
 #include <cstdint>
+#include "flow/Trace.h"
 
 #define PROTOCOL_VERSION_FEATURE(v, x)                                                                                 \
 	struct x {                                                                                                         \
@@ -29,7 +30,7 @@
 	static constexpr ProtocolVersion with##x() { return ProtocolVersion(x ::protocolVersion); }
 
 // ProtocolVersion wraps a uint64_t to make it type safe. It will know about the current versions.
-// The default constuctor will initialize the version to 0 (which is an invalid
+// The default constructor will initialize the version to 0 (which is an invalid
 // version). ProtocolVersion objects should never be compared to version numbers
 // directly. Instead one should always use the type-safe version types from which
 // this class inherits all.
@@ -39,7 +40,7 @@ class ProtocolVersion {
 public: // constants
 	static constexpr uint64_t versionFlagMask = 0x0FFFFFFFFFFFFFFFLL;
 	static constexpr uint64_t objectSerializerFlag = 0x1000000000000000LL;
-	static constexpr uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
+	static constexpr uint64_t compatibleProtocolVersionMask = 0xFFFFFFFFFFFF0000LL;
 	static constexpr uint64_t minValidProtocolVersion = 0x0FDB00A200060001LL;
 
 public:
@@ -48,6 +49,11 @@ public:
 
 	constexpr bool isCompatible(ProtocolVersion other) const {
 		return (other.version() & compatibleProtocolVersionMask) == (version() & compatibleProtocolVersionMask);
+	}
+
+	// Returns a normalized protocol version that will be the same for all compatible versions
+	constexpr ProtocolVersion normalizedVersion() const {
+		return ProtocolVersion(_version & compatibleProtocolVersionMask);
 	}
 	constexpr bool isValid() const { return version() >= minValidProtocolVersion; }
 
@@ -85,7 +91,7 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00A446020000LL, Locality);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00A460010000LL, MultiGenerationTLog);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00A460010000LL, SharedMutations);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00A551000000LL, MultiVersionClient);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00A551000000LL, InexpensiveMultiVersionClient);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00A560010000LL, TagLocality);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B060000000LL, Fearless);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B061020000LL, EndpointAddrList);
@@ -112,6 +118,7 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, BackupMutations);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, ClusterControllerPriorityInfo);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, ProcessIDFile);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, CloseUnusedConnection);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, DBCoreState);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, TagThrottleValue);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, ServerListValue);
@@ -128,6 +135,16 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, ReportConflictingKeys);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, SmallEndpoints);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, CacheRole);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010000LL, StableInterfaces);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, TagThrottleValueReason);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, SpanContext);
+};
+
+template <>
+struct Traceable<ProtocolVersion> : std::true_type {
+	static std::string toString(const ProtocolVersion& protocolVersion) {
+		return format("0x%016lX", protocolVersion.version());
+	}
 };
 
 // These impact both communications and the deserialization of certain database and IKeyValueStore keys.
@@ -141,3 +158,6 @@ constexpr ProtocolVersion currentProtocolVersion(0x0FDB00B070010001LL);
 // This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to
 // change when we reach version 10.
 static_assert(currentProtocolVersion.version() < 0x0FDB00B100000000LL, "Unexpected protocol version");
+
+// Downgrades are only supported for one minor version
+constexpr ProtocolVersion minInvalidProtocolVersion(0x0FDB00B072000000LL);

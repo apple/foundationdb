@@ -16,7 +16,7 @@ As an essential component of a database system, backup and restore is commonly u
 
 ## Background
 
-FDB backup system continuously scan the database’s key-value space, save key-value pairs and mutations at versions into range files and log files in blob storage. Specifically, mutation logs are generated at Proxy, and are written to transaction logs along with regular mutations. In production clusters like CK clusters, backup system is always on, which means each mutation is written twice to transaction logs, consuming about half of write bandwidth and about 40% of Proxy CPU time.
+FDB backup system continuously scan the database’s key-value space, save key-value pairs and mutations at versions into range files and log files in blob storage. Specifically, mutation logs are generated at CommitProxy, and are written to transaction logs along with regular mutations. In production clusters like CK clusters, backup system is always on, which means each mutation is written twice to transaction logs, consuming about half of write bandwidth and about 40% of CommitProxy CPU time.
 
 The design of old backup system is [here](https://github.com/apple/foundationdb/blob/master/design/backup.md), and the data format of range files and mutations files is [here](https://github.com/apple/foundationdb/blob/master/design/backup-dataFormat.md). The technical overview of FDB is [here](https://github.com/apple/foundationdb/wiki/Technical-Overview-of-the-Database). The FDB recovery is described in this [doc](https://github.com/apple/foundationdb/blob/master/design/recovery-internals.md).
 
@@ -37,7 +37,7 @@ The design of old backup system is [here](https://github.com/apple/foundationdb/
 
 Feature priorities: Feature 1, 2, 3, 4, 5 are must-have; Feature 6 is better to have.
 
-1. **Write bandwidth reduction by half**: removes the requirement to generate backup mutations at the Proxy, thus reduce TLog write bandwidth usage by half and significantly improve Proxy CPU usage;
+1. **Write bandwidth reduction by half**: removes the requirement to generate backup mutations at the CommitProxy, thus reduce TLog write bandwidth usage by half and significantly improve CommitProxy CPU usage;
 2. **Correctness**: The restored database must be consistent: each *restored* state (i.e., key-value pair) at a version `v` must match the original state at version `v`.
 3. **Performance**: The backup system should be performant, mostly measured as a small CPU overhead on transaction logs and backup workers. The version lag on backup workers is an indicator of performance.
 4. **Fault-tolerant**: The backup system should be fault-tolerant to node failures in the FDB cluster.
@@ -153,10 +153,11 @@ The requirement of the new backup system raises several design challenges:
 
 **Master**: The master is responsible for coordinating the transition of the FDB transaction sub-system from one generation to the next. In particular, the master recruits backup workers during the recovery.
 
-**Transaction Logs (TLogs)**: The transaction logs make mutations durable to disk for fast commit latencies. The logs receive commits from the proxy in version order, and only respond to the proxy once the data has been written and fsync'ed to an append only mutation log on disk. Storage servers retrieve mutations from TLogs. Once the storage servers have persisted mutations, storage servers then pop the mutations from the TLogs.
+**Transaction Logs (TLogs)**: The transaction logs make mutations durable to disk for fast commit latencies. The logs receive commits from the commit proxy in version order, and only respond to the commit proxy once the data has been written and fsync'ed to an append only mutation log on disk. Storage servers retrieve mutations from TLogs. Once the storage servers have persisted mutations, storage servers then pop the mutations from the TLogs.
 
-**Proxy**: The proxies are responsible for providing read versions, committing transactions, and tracking the storage servers responsible for each range of keys. In the old backup system, Proxies are responsible to group mutations into backup mutations and write them to the database.
+**CommitProxy**: The commit proxies are responsible for committing transactions, and tracking the storage servers responsible for each range of keys. In the old backup system, commit proxies are responsible to group mutations into backup mutations and write them to the database.
 
+**GrvProxy**: The GRV proxies are responsible for providing read versions.
 ## System overview
 
 From an end-to-end perspective, the new backup system works in the following steps:
@@ -228,7 +229,7 @@ The operator’s backup request can indicate if an old backup or a new backup is
 2. All backup workers monitor the key `\xff\x02/backupStarted`, see the change, and start logging mutations.
 3. After all backup workers have started, the `fdbbackup` tool initiates the backup of all or specified key ranges by issuing a transaction `Ts`.
 
-Compared to the old backup system, the above step 1 and 2 are new and is only triggered if client requests for a new type of backup. The purpose is to allow backup workers to function as no-op if there are no ongoing backups. However, the backup workers should still continuously pop their corresponding tags, otherwise mutations will be kept in the TLog. In order to know the version to pop, backup workers can obtain the read version from any proxy. Because the read version must be a committed version, so popping to this version is safe.
+Compared to the old backup system, the above step 1 and 2 are new and is only triggered if client requests for a new type of backup. The purpose is to allow backup workers to function as no-op if there are no ongoing backups. However, the backup workers should still continuously pop their corresponding tags, otherwise mutations will be kept in the TLog. In order to know the version to pop, backup workers can obtain the read version from any GRV proxy. Because the read version must be a committed version, so popping to this version is safe.
 
 **Backup Submission Protocol**
 Protocol for `submitBackup()` to ensure that all backup workers of the current epoch have started logging mutations:

@@ -136,7 +136,8 @@
     Transforms ``param`` using a versionstamp for the transaction. This parameter must be at least 14 bytes long. The final 4 bytes will be interpreted as a 32-bit little-endian integer denoting an index into the parameter at which to perform the transformation, and then trimmed off the key. The 10 bytes in the parameter beginning at the index will be overwritten with the versionstamp. If the index plus 10 bytes points past the end of the parameter, the result will be an error. Sets ``key`` in the database to the transformed parameter.
 
 .. |atomic-versionstamps-1| replace::
-    A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions.
+    A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-endian order). The last 2 bytes are monotonic in the serialization order for transactions (serialized in big-endian order).
+
 
 .. |atomic-versionstamps-2| replace::
     A transaction is not permitted to read any transformed key or value previously set within that transaction, and an attempt to do so will result in an ``accessed_unreadable`` error.  The range of keys marked unreadable when setting a versionstamped key begins at the transactions's read version if it is known, otherwise a versionstamp of all ``0x00`` bytes is conservatively assumed.  The upper bound of the unreadable range is a versionstamp of all ``0xFF`` bytes.
@@ -147,7 +148,7 @@
 .. |atomic-versionstamps-tuple-warning-value| replace::
     At this time, versionstamped values are not compatible with the Tuple layer except in Java, Python, and Go. Note that this implies versionstamped values may not be used with the Subspace and Directory layers except in those languages.
 
-.. |api-version| replace:: 700
+.. |api-version| replace:: 710
 
 .. |streaming-mode-blurb1| replace::
     When using |get-range-func| and similar interfaces, API clients can request large ranges of the database to iterate over.  Making such a request doesn't necessarily mean that the client will consume all of the data in the range - sometimes the client doesn't know how far it intends to iterate in advance.  FoundationDB tries to balance latency and bandwidth by requesting data for iteration in batches.

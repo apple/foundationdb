@@ -1,0 +1,11 @@
+[configuration]
+configureLocked = true
+
+[[test]]
+testTitle = 'ConfigureLocked'
+runConsistencyCheck = false
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'LockDatabase'
+    onlyCheckLocked = true

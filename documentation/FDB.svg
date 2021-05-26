@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="201px" height="98px" viewBox="0 0 201 98" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <!-- Generator: Sketch 55.1 (78136) - https://sketchapp.com -->
+    <title>Artboard</title>
+    <desc>Created with Sketch.</desc>
+    <defs>
+        <polygon id="path-1" points="0.0278974895 27.28142 0.0278974895 21.9743876 42.1452024 21.9743876 42.1452024 0.409628138 83.9914367 4.60308577 83.9914367 21.9743876 126.435607 21.9743876 126.435607 0.409628138 200.861925 8.19721234 200.861925 27.28142"></polygon>
+        <polygon id="path-3" points="0.0278974895 28.0890523 42.1452024 21.9158028 42.1452024 0.35104341 83.9914367 10.7214702 83.9914367 28.0932369 126.435607 21.9158028 126.435607 0.35104341 200.861925 19.1079205 200.861925 38.2767505 126.435607 27.9058588 83.9914367 33.4844268 42.1452024 27.9058588 0.0278974895 33.4807071"></polygon>
+        <polygon id="path-5" points="0.298968096 34.5115194 42.7431386 21.6321783 42.7431386 0.0674189331 117.169456 30.6174948 117.169456 49.1874587 42.7431386 28.2215654 0.298968096 39.9027092"></polygon>
+    </defs>
+    <g id="Artboard" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="fdb-Logo">
+            <g id="Group" transform="translate(0.000000, 69.743724)">
+                <g id="Clipped">
+                    <mask id="mask-2" fill="white">
+                        <use xlink:href="#path-1"></use>
+                    </mask>
+                    <g id="c"></g>
+                    <polygon id="Path" fill="#0073E0" fill-rule="nonzero" mask="url(#mask-2)" points="0.0278974895 27.3209414 200.889822 27.3209414 200.889822 0.371966527 0.0278974895 0.371966527"></polygon>
+                </g>
+            </g>
+            <g id="Group" transform="translate(0.000000, 34.871862)">
+                <g id="Clipped">
+                    <mask id="mask-4" fill="white">
+                        <use xlink:href="#path-3"></use>
+                    </mask>
+                    <g id="e"></g>
+                    <polygon id="Path" fill="#289DFC" fill-rule="nonzero" mask="url(#mask-4)" points="0.0278974895 38.3125523 200.889822 38.3125523 200.889822 0.316171548 0.0278974895 0.316171548"></polygon>
+                </g>
+            </g>
+            <g id="Group" transform="translate(83.692469, 0.000000)">
+                <g id="Clipped">
+                    <mask id="mask-6" fill="white">
+                        <use xlink:href="#path-5"></use>
+                    </mask>
+                    <g id="g"></g>
+                    <polygon id="Path" fill="#9ACEFE" fill-rule="nonzero" mask="url(#mask-6)" points="0.251077406 49.1925732 117.197354 49.1925732 117.197354 0.0371966527 0.251077406 0.0371966527"></polygon>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

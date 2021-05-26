@@ -788,7 +788,7 @@ class TupleUtil {
 				return hasIncompleteVersionstamp(((Tuple) item).stream());
 			}
 			else if(item instanceof Collection<?>) {
-				return hasIncompleteVersionstamp(((Collection) item).stream());
+				return hasIncompleteVersionstamp(((Collection<?>) item).stream());
 			}
 			else {
 				return false;

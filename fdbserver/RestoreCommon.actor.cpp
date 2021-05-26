@@ -36,6 +36,7 @@
 
 // Split RestoreConfigFR defined in FileBackupAgent.actor.cpp to declaration in Restore.actor.h and implementation in
 // RestoreCommon.actor.cpp
+
 KeyBackedProperty<ERestoreState> RestoreConfigFR::stateEnum() {
 	return configSpace.pack(LiteralStringRef(__FUNCTION__));
 }
@@ -96,7 +97,8 @@ Future<std::vector<KeyRange>> RestoreConfigFR::getRestoreRangesOrDefault(Referen
 }
 
 ACTOR Future<std::vector<KeyRange>> RestoreConfigFR::getRestoreRangesOrDefault_impl(
-    RestoreConfigFR* self, Reference<ReadYourWritesTransaction> tr) {
+    RestoreConfigFR* self,
+    Reference<ReadYourWritesTransaction> tr) {
 	state std::vector<KeyRange> ranges = wait(self->restoreRanges().getD(tr));
 	if (ranges.empty()) {
 		state KeyRange range = wait(self->restoreRange().getD(tr));
@@ -123,7 +125,8 @@ Future<Void> RestoreConfigFR::logError(Database cx, Error e, std::string const& 
 	TraceEvent t(SevWarn, "FileRestoreError");
 	t.error(e).detail("RestoreUID", uid).detail("Description", details).detail("TaskInstance", (uint64_t)taskInstance);
 	// key_not_found could happen
-	if (e.code() == error_code_key_not_found) t.backtrace();
+	if (e.code() == error_code_key_not_found)
+		t.backtrace();
 
 	return updateErrorInfo(cx, e, details);
 }
@@ -142,7 +145,8 @@ ACTOR Future<int64_t> RestoreConfigFR::getApplyVersionLag_impl(Reference<ReadYou
 	state Future<Optional<Value>> endVal = tr->get(uidPrefixKey(applyMutationsEndRange.begin, uid), true);
 	wait(success(beginVal) && success(endVal));
 
-	if (!beginVal.get().present() || !endVal.get().present()) return 0;
+	if (!beginVal.get().present() || !endVal.get().present())
+		return 0;
 
 	Version beginVersion = BinaryReader::fromStringRef<Version>(beginVal.get().get(), Unversioned());
 	Version endVersion = BinaryReader::fromStringRef<Version>(endVal.get().get(), Unversioned());
@@ -204,9 +208,10 @@ Future<Version> RestoreConfigFR::getApplyEndVersion(Reference<ReadYourWritesTran
 	});
 }
 
-// Meng: Change RestoreConfigFR to Reference<RestoreConfigFR> because FastRestore pass the Reference<RestoreConfigFR> around
+// Meng: Change RestoreConfigFR to Reference<RestoreConfigFR> because FastRestore pass the Reference<RestoreConfigFR>
+// around
 ACTOR Future<std::string> RestoreConfigFR::getProgress_impl(Reference<RestoreConfigFR> restore,
-                                                          Reference<ReadYourWritesTransaction> tr) {
+                                                            Reference<ReadYourWritesTransaction> tr) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -228,7 +233,8 @@ ACTOR Future<std::string> RestoreConfigFR::getProgress_impl(Reference<RestoreCon
 
 	std::string errstr = "None";
 	if (lastError.get().second != 0)
-		errstr = format("'%s' %llds ago.\n", lastError.get().first.c_str(),
+		errstr = format("'%s' %llds ago.\n",
+		                lastError.get().first.c_str(),
 		                (tr->getReadVersion().get() - lastError.get().second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 
 	TraceEvent("FileRestoreProgress")
@@ -246,9 +252,16 @@ ACTOR Future<std::string> RestoreConfigFR::getProgress_impl(Reference<RestoreCon
 
 	return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  Files: %lld  BytesWritten: "
 	              "%lld  ApplyVersionLag: %lld  LastError: %s",
-	              tag.get().c_str(), uid.toString().c_str(), status.get().toString().c_str(), fileBlocksFinished.get(),
-	              fileBlockCount.get(), fileBlocksDispatched.get() - fileBlocksFinished.get(), fileCount.get(),
-	              bytesWritten.get(), lag.get(), errstr.c_str());
+	              tag.get().c_str(),
+	              uid.toString().c_str(),
+	              status.get().toString().c_str(),
+	              fileBlocksFinished.get(),
+	              fileBlockCount.get(),
+	              fileBlocksDispatched.get() - fileBlocksFinished.get(),
+	              fileCount.get(),
+	              bytesWritten.get(),
+	              lag.get(),
+	              errstr.c_str());
 }
 Future<std::string> RestoreConfigFR::getProgress(Reference<ReadYourWritesTransaction> tr) {
 	Reference<RestoreConfigFR> restore = Reference<RestoreConfigFR>(this);
@@ -257,7 +270,7 @@ Future<std::string> RestoreConfigFR::getProgress(Reference<ReadYourWritesTransac
 
 // Meng: Change RestoreConfigFR to Reference<RestoreConfigFR>
 ACTOR Future<std::string> RestoreConfigFR::getFullStatus_impl(Reference<RestoreConfigFR> restore,
-                                                            Reference<ReadYourWritesTransaction> tr) {
+                                                              Reference<ReadYourWritesTransaction> tr) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -269,16 +282,18 @@ ACTOR Future<std::string> RestoreConfigFR::getFullStatus_impl(Reference<RestoreC
 	state Future<std::string> progress = restore->getProgress(tr);
 
 	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
-	wait(success(ranges) && success(addPrefix) && success(removePrefix) &&
-		 success(url) && success(restoreVersion) && success(progress));
+	wait(success(ranges) && success(addPrefix) && success(removePrefix) && success(url) && success(restoreVersion) &&
+	     success(progress));
 
 	std::string returnStr;
 	returnStr = format("%s  URL: %s", progress.get().c_str(), url.get().toString().c_str());
 	for (auto& range : ranges.get()) {
 		returnStr += format("  Range: '%s'-'%s'", printable(range.begin).c_str(), printable(range.end).c_str());
 	}
-	returnStr += format("  AddPrefix: '%s'  RemovePrefix: '%s'  Version: %lld", printable(addPrefix.get()).c_str(),
-	                    printable(removePrefix.get()).c_str(), restoreVersion.get());
+	returnStr += format("  AddPrefix: '%s'  RemovePrefix: '%s'  Version: %lld",
+	                    printable(addPrefix.get()).c_str(),
+	                    printable(removePrefix.get()).c_str(),
+	                    restoreVersion.get());
 	return returnStr;
 }
 Future<std::string> RestoreConfigFR::getFullStatus(Reference<ReadYourWritesTransaction> tr) {
@@ -297,23 +312,29 @@ std::string RestoreConfigFR::toString() {
 // parallelFileRestore is copied from FileBackupAgent.actor.cpp for the same reason as RestoreConfigFR is copied
 namespace parallelFileRestore {
 
-ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file, int64_t offset,
+ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file,
+                                                                    int64_t offset,
                                                                     int len) {
 	state Standalone<StringRef> buf = makeString(len);
 	int rLen = wait(file->read(mutateString(buf), len, offset));
-	if (rLen != len) throw restore_bad_read();
+	if (rLen != len)
+		throw restore_bad_read();
+
+	simulateBlobFailure();
 
 	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
 	state StringRefReader reader(buf, restore_corrupted_data());
 
 	try {
 		// Read header, currently only decoding version BACKUP_AGENT_MLOG_VERSION
-		if (reader.consume<int32_t>() != BACKUP_AGENT_MLOG_VERSION) throw restore_unsupported_file_version();
+		if (reader.consume<int32_t>() != BACKUP_AGENT_MLOG_VERSION)
+			throw restore_unsupported_file_version();
 
 		// Read k/v pairs.  Block ends either at end of last value exactly or with 0xFF as first key len byte.
 		while (1) {
 			// If eof reached or first key len bytes is 0xFF then end of block was reached.
-			if (reader.eof() || *reader.rptr == 0xFF) break;
+			if (reader.eof() || *reader.rptr == 0xFF)
+				break;
 
 			// Read key and value.  If anything throws then there is a problem.
 			uint32_t kLen = reader.consumeNetworkUInt32();
@@ -326,7 +347,8 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IA
 
 		// Make sure any remaining bytes in the block are 0xFF
 		for (auto b : reader.remainder())
-			if (b != 0xFF) throw restore_corrupted_data_padding();
+			if (b != 0xFF)
+				throw restore_corrupted_data_padding();
 
 		return results;
 

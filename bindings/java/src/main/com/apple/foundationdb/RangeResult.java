@@ -27,6 +27,12 @@ class RangeResult {
 	final List<KeyValue> values;
 	final boolean more;
 
+	//mostly present for testing purposes
+	RangeResult(List<KeyValue> values, boolean more) {
+		this.values = values;
+		this.more = more;
+	}
+
 	RangeResult(byte[] keyValues, int[] lengths, boolean more) {
 		if(lengths.length % 2 != 0) {
 			throw new IllegalArgumentException("There needs to be an even number of lenghts!");
@@ -50,5 +56,23 @@ class RangeResult {
 			values.add(new KeyValue(k, v));
 		}
 		this.more = more;
+	}
+
+	RangeResult(DirectBufferIterator iterator) {
+		iterator.readResultsSummary();
+		more = iterator.hasMore();
+
+		int count = iterator.count();
+		values = new ArrayList<KeyValue>(count);
+
+		for (int i = 0; i < count; ++i) {
+			values.add(iterator.next());
+		}
+	}
+
+	public RangeResultSummary getSummary() {
+		final int keyCount = values.size();
+		final byte[] lastKey = keyCount > 0 ? values.get(keyCount -1).getKey() : null;
+		return new RangeResultSummary(lastKey, keyCount, more);
 	}
 }

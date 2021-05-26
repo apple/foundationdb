@@ -30,86 +30,93 @@
 // This store is used in testing to let us simulate having much bigger disks than we actually
 //   have, in order to test really big databases.
 
-struct KeyValueStoreCompressTestData : IKeyValueStore {
+struct KeyValueStoreCompressTestData final : IKeyValueStore {
 	IKeyValueStore* store;
 
 	KeyValueStoreCompressTestData(IKeyValueStore* store) : store(store) {}
 
-	virtual Future<Void> getError() override { return store->getError(); }
-	virtual Future<Void> onClosed() override { return store->onClosed(); }
-	virtual void dispose() override {
+	Future<Void> getError() override { return store->getError(); }
+	Future<Void> onClosed() override { return store->onClosed(); }
+	void dispose() override {
+
 		store->dispose();
 		delete this;
 	}
-	virtual void close() override {
+	void close() override {
 		store->close();
 		delete this;
 	}
 
-	virtual KeyValueStoreType getType() const override { return store->getType(); }
-	virtual StorageBytes getStorageBytes() const override { return store->getStorageBytes(); }
+	KeyValueStoreType getType() const override { return store->getType(); }
+	StorageBytes getStorageBytes() const override { return store->getStorageBytes(); }
 
-	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) override {
-		store->set( KeyValueRef( keyValue.key, pack(keyValue.value) ), arena );
+	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override {
+		store->set(KeyValueRef(keyValue.key, pack(keyValue.value)), arena);
 	}
-	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) override { store->clear(range, arena); }
-	virtual Future<Void> commit(bool sequential = false) { return store->commit(sequential); }
+	void clear(KeyRangeRef range, const Arena* arena = nullptr) override { store->clear(range, arena); }
+	Future<Void> commit(bool sequential = false) override { return store->commit(sequential); }
 
-	virtual Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) override {
+	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) override {
 		return doReadValue(store, key, debugID);
 	}
 
-	// Note that readValuePrefix doesn't do anything in this implementation of IKeyValueStore, so the "atomic bomb" problem is still
-	// present if you are using this storage interface, but this storage interface is not used by customers ever. However, if you want
-	// to try to test malicious atomic op workloads with compressed values for some reason, you will need to fix this.
-	virtual Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength,
-	                                                Optional<UID> debugID = Optional<UID>()) override {
-		return doReadValuePrefix( store, key, maxLength, debugID );
+	// Note that readValuePrefix doesn't do anything in this implementation of IKeyValueStore, so the "atomic bomb"
+	// problem is still present if you are using this storage interface, but this storage interface is not used by
+	// customers ever. However, if you want to try to test malicious atomic op workloads with compressed values for some
+	// reason, you will need to fix this.
+	Future<Optional<Value>> readValuePrefix(KeyRef key,
+	                                        int maxLength,
+	                                        Optional<UID> debugID = Optional<UID>()) override {
+		return doReadValuePrefix(store, key, maxLength, debugID);
 	}
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
-	virtual Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit = 1 << 30,
-	                                                     int byteLimit = 1 << 30) override {
+	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) override {
 		return doReadRange(store, keys, rowLimit, byteLimit);
 	}
 
 private:
 	ACTOR static Future<Optional<Value>> doReadValue(IKeyValueStore* store, Key key, Optional<UID> debugID) {
 		Optional<Value> v = wait(store->readValue(key, debugID));
-		if (!v.present()) return v;
+		if (!v.present())
+			return v;
 		return unpack(v.get());
 	}
 
-	ACTOR static Future<Optional<Value>> doReadValuePrefix( IKeyValueStore* store, Key key, int maxLength, Optional<UID> debugID ) {
-		Optional<Value> v = wait( doReadValue(store, key, debugID) );
-		if (!v.present()) return v;
+	ACTOR static Future<Optional<Value>> doReadValuePrefix(IKeyValueStore* store,
+	                                                       Key key,
+	                                                       int maxLength,
+	                                                       Optional<UID> debugID) {
+		Optional<Value> v = wait(doReadValue(store, key, debugID));
+		if (!v.present())
+			return v;
 		if (maxLength < v.get().size()) {
 			return v.get().substr(0, maxLength);
-		}
-		else {
+		} else {
 			return v;
 		}
 	}
-	ACTOR Future<Standalone<RangeResultRef>> doReadRange( IKeyValueStore* store, KeyRangeRef keys, int rowLimit, int byteLimit ) {
-		Standalone<RangeResultRef> _vs = wait( store->readRange(keys, rowLimit, byteLimit) );
-		Standalone<RangeResultRef> vs = _vs; // Get rid of implicit const& from wait statement
+	ACTOR Future<RangeResult> doReadRange(IKeyValueStore* store, KeyRangeRef keys, int rowLimit, int byteLimit) {
+		RangeResult _vs = wait(store->readRange(keys, rowLimit, byteLimit));
+		RangeResult vs = _vs; // Get rid of implicit const& from wait statement
 		Arena& a = vs.arena();
-		for(int i=0; i<vs.size(); i++)
-			vs[i].value = ValueRef( a, (ValueRef const&)unpack(vs[i].value) );
+		for (int i = 0; i < vs.size(); i++)
+			vs[i].value = ValueRef(a, (ValueRef const&)unpack(vs[i].value));
 		return vs;
 	}
 
 	// These implement the actual "compression" scheme
-	static Value pack( Value val ) {
-		if (!val.size()) return val;
+	static Value pack(Value val) {
+		if (!val.size())
+			return val;
 		uint8_t c = val[0];
 
-		//If the value starts with a 0-byte, then we don't compress it
-		if(c == 0)
+		// If the value starts with a 0-byte, then we don't compress it
+		if (c == 0)
 			return val.withPrefix(LiteralStringRef("\x00"));
 
-		for(int i=1; i<val.size(); i++) {
+		for (int i = 1; i < val.size(); i++) {
 			if (val[i] != c) {
 				// The value is something other than a single repeated character, so not compressible :-)
 				return val.withPrefix(LiteralStringRef("\x00"));
@@ -118,23 +125,24 @@ private:
 
 		int n = val.size();
 		val = makeString(5);
-		uint8_t *p = mutateString(val);
+		uint8_t* p = mutateString(val);
 		p[0] = c;
-		*(int*)(p+1) = n;
+		*(int*)(p + 1) = n;
 		return val;
 	}
-	static Value unpack( Value val ) {
-		if (!val.size()) return val;
-		if (val[0]==0) return val.substr(1);  // Uncompressed value
-		ASSERT( val.size() == 5 );
+	static Value unpack(Value val) {
+		if (!val.size())
+			return val;
+		if (val[0] == 0)
+			return val.substr(1); // Uncompressed value
+		ASSERT(val.size() == 5);
 		uint8_t c = val[0];
-		int n = *(int*)(val.begin()+1);
+		int n = *(int*)(val.begin() + 1);
 		val = makeString(n);
-		uint8_t *p = mutateString(val);
+		uint8_t* p = mutateString(val);
 		memset(p, c, n);
 		return val;
 	}
-
 };
 
 IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store) {

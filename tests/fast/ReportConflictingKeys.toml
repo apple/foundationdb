@@ -1,0 +1,15 @@
+[configuration]
+buggify = false
+
+[[test]]
+testTitle = 'ReportConflictingKeysTest'
+connectionFailuresDisableDuration = 100000
+
+    [[test.workload]]
+    testName = 'ReportConflictingKeys'
+    testDuration = 20.0
+    nodeCount = 10000
+    keyPrefix = 'RCK'
+    keyBytes = 64
+    readConflictRangeCountPerTx = 10
+    writeConflictRangeCountPerTx = 10

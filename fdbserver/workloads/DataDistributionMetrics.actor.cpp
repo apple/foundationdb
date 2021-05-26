@@ -20,7 +20,9 @@
 
 #include <boost/lexical_cast.hpp>
 
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/Schemas.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last include
 
@@ -69,8 +71,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 	}
 
 	ACTOR Future<Void> resultConsistencyCheckClient(Database cx, DataDistributionMetricsWorkload* self) {
-		state Reference<ReadYourWritesTransaction> tr =
-		    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
 			try {
 				wait(delay(self->delayPerLoop));
@@ -78,16 +79,16 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 				int endIndex = deterministicRandom()->randomInt(startIndex + 1, self->nodeCount);
 				state Key startKey = self->keyForIndex(startIndex);
 				state Key endKey = self->keyForIndex(endIndex);
-				// Find the last key <= startKey and use as the begin of the range. Since "Key()" is always the starting point, this key selector will never do cross_module_range_read.
-				// In addition, the first key in the result will be the last one <= startKey (Condition #1)
+				// Find the last key <= startKey and use as the begin of the range. Since "Key()" is always the starting
+				// point, this key selector will never do cross_module_range_read. In addition, the first key in the
+				// result will be the last one <= startKey (Condition #1)
 				state KeySelector begin =
 				    KeySelectorRef(startKey.withPrefix(ddStatsRange.begin, startKey.arena()), true, 0);
 				// Find the last key less than endKey, move forward 2 keys, and use this key as the (exclusive) end of
 				// the range. If we didn't read through the end of the range, then the second last key
 				// in the result will be the last key less than endKey. (Condition #2)
 				state KeySelector end = KeySelectorRef(endKey.withPrefix(ddStatsRange.begin, endKey.arena()), false, 2);
-				Standalone<RangeResultRef> result =
-				    wait(tr->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->SHARD_COUNT_LIMIT)));
+				RangeResult result = wait(tr->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->SHARD_COUNT_LIMIT)));
 				// Condition #1 and #2 can be broken if multiple rpc calls happened in one getRange
 				if (result.size() > 1) {
 					if (result[0].key > begin.getKey() || result[1].key <= begin.getKey()) {
@@ -122,7 +123,8 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 				}
 			} catch (Error& e) {
 				// Ignore timed_out error and cross_module_read, the end key selector may read through the end
-				if (e.code() == error_code_timed_out || e.code() == error_code_special_keys_cross_module_read) continue;
+				if (e.code() == error_code_timed_out || e.code() == error_code_special_keys_cross_module_read)
+					continue;
 				TraceEvent(SevDebug, "FailedToRetrieveDDMetrics").error(e);
 				wait(tr->onError(e));
 			}
@@ -136,23 +138,33 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 		}
 		// TODO : find why this not work
 		// wait(quietDatabase(cx, self->dbInfo, "PopulateTPCC"));
-		state Reference<ReadYourWritesTransaction> tr =
-		    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		try {
-			state Standalone<RangeResultRef> result = wait(tr->getRange(ddStatsRange, CLIENT_KNOBS->SHARD_COUNT_LIMIT));
+			state RangeResult result = wait(tr->getRange(ddStatsRange, CLIENT_KNOBS->SHARD_COUNT_LIMIT));
 			ASSERT(!result.more);
 			self->numShards = result.size();
-			if (self->numShards < 1) return false;
+			if (self->numShards < 1)
+				return false;
 			state int64_t totalBytes = 0;
+			auto schema = readJSONStrictly(JSONSchemas::dataDistributionStatsSchema.toString()).get_obj();
 			for (int i = 0; i < result.size(); ++i) {
 				ASSERT(result[i].key.startsWith(ddStatsRange.begin));
-				totalBytes += readJSONStrictly(result[i].value.toString()).get_obj()["ShardBytes"].get_int64();
+				std::string errorStr;
+				auto valueObj = readJSONStrictly(result[i].value.toString()).get_obj();
+				TEST(true); // data_distribution_stats schema validation
+				if (!schemaMatch(schema, valueObj, errorStr, SevError, true)) {
+					TraceEvent(SevError, "DataDistributionStatsSchemaValidationFailed")
+					    .detail("ErrorStr", errorStr.c_str())
+					    .detail("JSON", json_spirit::write_string(json_spirit::mValue(result[i].value.toString())));
+					return false;
+				}
+				totalBytes += valueObj["shard_bytes"].get_int64();
 			}
 			self->avgBytes = totalBytes / self->numShards;
 			// fetch data-distribution stats for a smaller range
 			ASSERT(result.size());
 			state int idx = deterministicRandom()->randomInt(0, result.size());
-			Standalone<RangeResultRef> res = wait(tr->getRange(
+			RangeResult res = wait(tr->getRange(
 			    KeyRangeRef(result[idx].key, idx + 1 < result.size() ? result[idx + 1].key : ddStatsRange.end), 100));
 			ASSERT_WE_THINK(res.size() == 1 && res[0] == result[idx]); // It works good now. However, not sure in any
 			                                                           // case of data-distribution, the number changes
@@ -166,18 +178,19 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 	ACTOR Future<Void> _start(Database cx, DataDistributionMetricsWorkload* self) {
 		std::vector<Future<Void>> clients;
 		clients.push_back(self->resultConsistencyCheckClient(cx, self));
-		for (int i = 0; i < self->actorCount; ++i) clients.push_back(self->ddRWClient(cx, self));
+		for (int i = 0; i < self->actorCount; ++i)
+			clients.push_back(self->ddRWClient(cx, self));
 		wait(timeout(waitForAll(clients), self->testDuration, Void()));
 		wait(delay(5.0));
 		return Void();
 	}
 
-	virtual std::string description() { return "DataDistributionMetrics"; }
-	virtual Future<Void> setup(Database const& cx) { return Void(); }
-	virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
-	virtual Future<bool> check(Database const& cx) { return _check(cx, this); }
+	std::string description() const override { return "DataDistributionMetrics"; }
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back(PerfMetric("NumShards", numShards, true));
 		m.push_back(PerfMetric("AvgBytes", avgBytes, true));
 		m.push_back(commits.getMetric());

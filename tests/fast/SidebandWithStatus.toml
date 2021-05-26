@@ -1,0 +1,35 @@
+[[test]]
+testTitle = 'CloggedCausalConsistencyTest'
+
+    [[test.workload]]
+    testName = 'Sideband'
+    testDuration = 30.0
+    operationsPerSecond = 500
+
+    [[test.workload]]
+    testName = 'Status'
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 30.0
+    scale = 0.1
+    clogginess = 2.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 30.0

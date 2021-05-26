@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#define FDB_API_VERSION 700
+#define FDB_API_VERSION 710
 #include "foundationdb/fdb_c.h"
 #undef DLLEXPORT
 #include "workloads.h"
@@ -104,7 +104,10 @@ struct SimpleWorkload : FDBWorkload {
 		unsigned long from, to, lastTx = 0;
 		std::unordered_map<State, ActorCallback> callbacks;
 
-		PopulateActor(const Callback& promise, SimpleWorkload& self, FDBDatabase* db, unsigned long from,
+		PopulateActor(const Callback& promise,
+		              SimpleWorkload& self,
+		              FDBDatabase* db,
+		              unsigned long from,
 		              unsigned long to)
 		  : ActorBase(promise, self, db), from(from), to(to) {
 			error = fdb_database_create_transaction(db, &tx);
@@ -130,8 +133,11 @@ struct SimpleWorkload : FDBWorkload {
 			for (; from < to && ops < self.insertsPerTx; ++ops, ++from) {
 				std::string value = std::to_string(from);
 				std::string key = KEY_PREFIX + value;
-				fdb_transaction_set(tx, reinterpret_cast<const uint8_t*>(key.c_str()), key.size(),
-				                    reinterpret_cast<const uint8_t*>(value.c_str()), value.size());
+				fdb_transaction_set(tx,
+				                    reinterpret_cast<const uint8_t*>(key.c_str()),
+				                    key.size(),
+				                    reinterpret_cast<const uint8_t*>(value.c_str()),
+				                    value.size());
 			}
 			lastTx = ops;
 			auto commit_future = fdb_transaction_commit(tx);
@@ -154,7 +160,8 @@ struct SimpleWorkload : FDBWorkload {
 				                           run();
 				                       },
 				                        [this](fdb_error_t error) {
-				                            self.context->trace(FDBSeverity::Error, "AssertionFailure",
+				                            self.context->trace(FDBSeverity::Error,
+				                                                "AssertionFailure",
 				                                                { { "Reason", "tx.onError failed" },
 				                                                  { "Error", std::string(fdb_get_error(error)) } });
 				                            self.success = false;
@@ -230,7 +237,8 @@ struct SimpleWorkload : FDBWorkload {
 				                           get();
 				                       },
 				                        [this](fdb_error_t) {
-				                            self.context->trace(FDBSeverity::Error, "AssertionFailure",
+				                            self.context->trace(FDBSeverity::Error,
+				                                                "AssertionFailure",
 				                                                { { "Reason", "tx.onError failed" },
 				                                                  { "Error", std::string(fdb_get_error(error)) } });
 				                            self.success = false;
@@ -258,10 +266,10 @@ struct SimpleWorkload : FDBWorkload {
 		insertsPerTx = context->getOption("insertsPerTx", 100ul);
 		opsPerTx = context->getOption("opsPerTx", 100ul);
 		runFor = context->getOption("runFor", 10.0);
-		auto err = fdb_select_api_version(700);
+		auto err = fdb_select_api_version(710);
 		if (err) {
-			context->trace(FDBSeverity::Info, "SelectAPIVersionFailed",
-			               { { "Error", std::string(fdb_get_error(err)) } });
+			context->trace(
+			    FDBSeverity::Info, "SelectAPIVersionFailed", { { "Error", std::string(fdb_get_error(err)) } });
 		}
 		return true;
 	}

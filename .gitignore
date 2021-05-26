@@ -7,7 +7,7 @@ bindings/java/foundationdb-client*.jar
 bindings/java/foundationdb-tests*.jar
 bindings/java/fdb-java-*-sources.jar
 packaging/msi/FDBInstaller.msi
-
+builds/
 # Generated source, build, and packaging files
 *.g.cpp
 *.g.h
@@ -70,6 +70,8 @@ trace.*.xml
 *.user
 .idea/
 .project
+.projectile
+.dir-locals.el
 .pydevproject
 .vscode
 .vs/
@@ -85,6 +87,7 @@ flow/coveragetool/obj
 /compile_commands.json
 /.ccls-cache
 /.clangd
+/.cache
 
 # Temporary and user configuration files
 *~
@@ -95,3 +98,6 @@ flow/coveragetool/obj
 .DS_Store
 temp/
 /versions.target
+/compile_commands.json
+/.ccls-cache
+.clangd/

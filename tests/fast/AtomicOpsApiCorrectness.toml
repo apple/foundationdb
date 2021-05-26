@@ -1,0 +1,5 @@
+[[test]]
+testTitle = 'AtomicOpsCorrectnessTest'
+
+    [[test.workload]]
+    testName = 'AtomicOpsApiCorrectness'

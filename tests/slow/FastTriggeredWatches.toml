@@ -1,0 +1,7 @@
+[[test]]
+testTitle = 'FastTriggeredWatchesTest'
+connectionFailuresDisableDuration = 100000
+timeout = 700
+
+    [[test.workload]]
+    testName = 'FastTriggeredWatches'

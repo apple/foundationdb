@@ -1,0 +1,24 @@
+[configuration]
+extraDB = 2
+
+[[test]]
+testTitle = 'VersionStampCorrectnessTest'
+clearAfterTest = false
+simBackupAgents = 'BackupToDB'
+
+    [[test.workload]]
+    testName = 'VersionStamp'
+    testDuration = 60.0
+
+    [[test.workload]]
+    testName = 'AtomicSwitchover'
+    switch1delay = 20.0
+    switch2delay = 20.0
+    stopDelay = 20.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 60.0

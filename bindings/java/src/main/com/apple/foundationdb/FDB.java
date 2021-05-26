@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   This call is required before using any other part of the API. The call allows
  *   an error to be thrown at this point to prevent client code from accessing a later library
  *   with incorrect assumptions from the current version. The API version documented here is version
- *   {@code 700}.<br><br>
+ *   {@code 710}.<br><br>
  *  FoundationDB encapsulates multiple versions of its interface by requiring
  *   the client to explicitly specify the version of the API it uses. The purpose
  *   of this design is to allow you to upgrade the server, client libraries, or
@@ -85,6 +85,8 @@ public class FDB {
 	private volatile boolean netStarted = false;
 	private volatile boolean netStopped = false;
 	volatile boolean warnOnUnclosed = true;
+	private boolean enableDirectBufferQueries = false;
+
 	private boolean useShutdownHook = true;
 	private Thread shutdownHook;
 	private final Semaphore netRunning = new Semaphore(1);
@@ -181,8 +183,8 @@ public class FDB {
 		}
 		if(version < 510)
 			throw new IllegalArgumentException("API version not supported (minimum 510)");
-		if(version > 700)
-			throw new IllegalArgumentException("API version not supported (maximum 700)");
+		if(version > 710)
+			throw new IllegalArgumentException("API version not supported (maximum 710)");
 
 		Select_API_version(version);
 		singleton = new FDB(version);
@@ -227,6 +229,35 @@ public class FDB {
 	 */
 	public int getAPIVersion() {
 		return apiVersion;
+	}
+
+	/**
+	 * Enables or disables use of DirectByteBuffers for getRange() queries.
+	 *
+	 *	@param enabled Whether DirectByteBuffer should be used for getRange() queries.
+	 */
+	public void enableDirectBufferQuery(boolean enabled) {
+		enableDirectBufferQueries = enabled;
+	}
+
+	/**
+	 * Determines whether {@code getRange()} queries can use {@code DirectByteBuffer} from
+	 * {@link DirectBufferPool} to copy results.
+	 *
+	 * @return {@code true} if direct buffer queries have been enabled and {@code false} otherwise
+	 */
+	public boolean isDirectBufferQueriesEnabled() {
+		return enableDirectBufferQueries;
+	}
+
+	/**
+	 * Resizes the DirectBufferPool with given parameters, which is used by getRange() requests.
+	 *
+	 * @param poolSize Number of buffers in pool
+	 * @param bufferSize Size of each buffer in bytes
+	 */
+	public void resizeDirectBufferPool(int poolSize, int bufferSize) {
+		DirectBufferPool.getInstance().resize(poolSize, bufferSize);
 	}
 
 	/**
@@ -347,18 +378,64 @@ public class FDB {
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
 	 *  <a href="/foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
+	 * @param eventKeeper the EventKeeper to use for instrumentation calls, or {@code null} if no instrumentation is desired.
+	 *
+	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
+	 */
+	public Database open(String clusterFilePath, EventKeeper eventKeeper) throws FDBException {
+		return open(clusterFilePath, DEFAULT_EXECUTOR, eventKeeper);
+	}
+
+	/**
+	 * Initializes networking if required and connects to the cluster specified by {@code clusterFilePath}.<br>
+	 *  <br>
+	 *  A single client can use this function multiple times to connect to different
+	 *  clusters simultaneously, with each invocation requiring its own cluster file.
+	 *  To connect to multiple clusters running at different, incompatible versions,
+	 *  the <a href="/foundationdb/api-general.html#multi-version-client-api" target="_blank">multi-version client API</a>
+	 *  must be used.
+	 *
+	 * @param clusterFilePath the
+	 *  <a href="/foundationdb/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  defining the FoundationDB cluster. This can be {@code null} if the
+	 *  <a href="/foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  is to be used.
 	 * @param e the {@link Executor} to use to execute asynchronous callbacks
 	 *
 	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
 	 */
 	public Database open(String clusterFilePath, Executor e) throws FDBException {
+		return open(clusterFilePath, e, null);
+	}
+
+	/**
+	 * Initializes networking if required and connects to the cluster specified by {@code clusterFilePath}.<br>
+	 *  <br>
+	 *  A single client can use this function multiple times to connect to different
+	 *  clusters simultaneously, with each invocation requiring its own cluster file.
+	 *  To connect to multiple clusters running at different, incompatible versions,
+	 *  the <a href="/foundationdb/api-general.html#multi-version-client-api" target="_blank">multi-version client API</a>
+	 *  must be used.
+	 *
+	 * @param clusterFilePath the
+	 *  <a href="/foundationdb/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  defining the FoundationDB cluster. This can be {@code null} if the
+	 *  <a href="/foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  is to be used.
+	 * @param e the {@link Executor} to use to execute asynchronous callbacks
+	 * @param eventKeeper the {@link EventKeeper} to use to record instrumentation metrics, or {@code null} if no 
+	 *  instrumentation is desired.
+	 *
+	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
+	 */
+	public Database open(String clusterFilePath, Executor e, EventKeeper eventKeeper) throws FDBException {
 		synchronized(this) {
 			if(!isConnected()) {
 				startNetwork();
 			}
 		}
 
-		return new FDBDatabase(Database_create(clusterFilePath), e);
+		return new FDBDatabase(Database_create(clusterFilePath), e, eventKeeper);
 	}
 
 	/**

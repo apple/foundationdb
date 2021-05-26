@@ -22,6 +22,7 @@ struct VersionedMapHarness {
 		const K& operator->() const { return it.key(); }
 
 		bool operator==(result const& k) const { return it == k.it; }
+		bool operator!=(result const& k) const { return !(*this == k); }
 	};
 
 	map s;
@@ -37,7 +38,7 @@ struct VersionedMapHarness {
 };
 
 TEST_CASE("performance/map/int/VersionedMap") {
-    VersionedMapHarness<int> tree;
+	VersionedMapHarness<int> tree;
 
 	treeBenchmark(tree, *randomInt);
 
@@ -46,8 +47,8 @@ TEST_CASE("performance/map/int/VersionedMap") {
 
 TEST_CASE("performance/map/StringRef/VersionedMap") {
 	Arena arena;
-    VersionedMapHarness<StringRef> tree;
-    
+	VersionedMapHarness<StringRef> tree;
+
 	treeBenchmark(tree, [&arena]() { return randomStr(arena); });
 
 	return Void();

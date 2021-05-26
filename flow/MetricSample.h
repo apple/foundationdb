@@ -28,7 +28,7 @@ template <class T>
 struct MetricSample {
 	IndexedSet<T, int64_t> sample;
 	int64_t metricUnitsPerSample = 0;
-	
+
 	explicit MetricSample(int64_t metricUnitsPerSample) : metricUnitsPerSample(metricUnitsPerSample) {}
 
 	int64_t getMetric(const T& Key) const {
@@ -42,9 +42,9 @@ struct MetricSample {
 
 template <class T>
 struct TransientMetricSample : MetricSample<T> {
-	Deque< std::tuple<double, T, int64_t> > queue;
+	Deque<std::tuple<double, T, int64_t>> queue;
 
-	explicit TransientMetricSample(int64_t metricUnitsPerSample) : MetricSample<T>(metricUnitsPerSample) { }
+	explicit TransientMetricSample(int64_t metricUnitsPerSample) : MetricSample<T>(metricUnitsPerSample) {}
 
 	// Returns the sampled metric value (possibly 0, possibly increased by the sampling factor)
 	int64_t addAndExpire(const T& key, int64_t metric, double expiration) {
@@ -56,9 +56,7 @@ struct TransientMetricSample : MetricSample<T> {
 
 	void poll() {
 		double now = ::now();
-		while (queue.size() &&
-			std::get<0>(queue.front()) <= now)
-		{
+		while (queue.size() && std::get<0>(queue.front()) <= now) {
 			const T& key = std::get<1>(queue.front());
 			int64_t delta = std::get<2>(queue.front());
 			ASSERT(delta != 0);
@@ -77,14 +75,15 @@ private:
 	}
 
 	int64_t add(const T& key, int64_t metric) {
-		if (!metric) return 0;
+		if (!metric)
+			return 0;
 		int64_t mag = std::abs(metric);
 
 		if (mag < this->metricUnitsPerSample) {
 			if (!roll(mag))
 				return 0;
 
-			metric = metric<0 ? -this->metricUnitsPerSample : this->metricUnitsPerSample;
+			metric = metric < 0 ? -this->metricUnitsPerSample : this->metricUnitsPerSample;
 		}
 
 		if (this->sample.addMetric(T(key), metric) == 0)
@@ -96,11 +95,12 @@ private:
 
 template <class T>
 struct TransientThresholdMetricSample : MetricSample<T> {
-	Deque< std::tuple<double, T, int64_t> > queue;
+	Deque<std::tuple<double, T, int64_t>> queue;
 	IndexedSet<T, int64_t> thresholdCrossedSet;
 	int64_t thresholdLimit;
 
-	TransientThresholdMetricSample(int64_t metricUnitsPerSample, int64_t threshold) : MetricSample<T>(metricUnitsPerSample), thresholdLimit(threshold) { }
+	TransientThresholdMetricSample(int64_t metricUnitsPerSample, int64_t threshold)
+	  : MetricSample<T>(metricUnitsPerSample), thresholdLimit(threshold) {}
 
 	template <class U>
 	bool isAboveThreshold(const U& key) const {
@@ -122,9 +122,7 @@ struct TransientThresholdMetricSample : MetricSample<T> {
 
 	void poll() {
 		double now = ::now();
-		while (queue.size() &&
-			std::get<0>(queue.front()) <= now)
-		{
+		while (queue.size() && std::get<0>(queue.front()) <= now) {
 			const T& key = std::get<1>(queue.front());
 			int64_t delta = std::get<2>(queue.front());
 			ASSERT(delta != 0);
@@ -132,7 +130,7 @@ struct TransientThresholdMetricSample : MetricSample<T> {
 			int64_t val = this->sample.addMetric(T(key), delta);
 			if (val < thresholdLimit && (val + std::abs(delta)) >= thresholdLimit) {
 				auto iter = thresholdCrossedSet.find(key);
-				ASSERT(iter != thresholdCrossedSet.end())
+				ASSERT(iter != thresholdCrossedSet.end());
 				thresholdCrossedSet.erase(iter);
 			}
 			if (val == 0)
@@ -150,19 +148,21 @@ private:
 
 	template <class T_>
 	int64_t add(T_&& key, int64_t metric) {
-		if (!metric) return 0;
+		if (!metric)
+			return 0;
 		int64_t mag = std::abs(metric);
 
 		if (mag < this->metricUnitsPerSample) {
 			if (!roll(mag))
 				return 0;
 
-			metric = metric<0 ? -this->metricUnitsPerSample : this->metricUnitsPerSample;
+			metric = metric < 0 ? -this->metricUnitsPerSample : this->metricUnitsPerSample;
 		}
 
 		int64_t val = this->sample.addMetric(T(key), metric);
 		if (val >= thresholdLimit) {
-			ASSERT((val - metric) < thresholdLimit ? thresholdCrossedSet.find(key) == thresholdCrossedSet.end() : thresholdCrossedSet.find(key) != thresholdCrossedSet.end());
+			ASSERT((val - metric) < thresholdLimit ? thresholdCrossedSet.find(key) == thresholdCrossedSet.end()
+			                                       : thresholdCrossedSet.find(key) != thresholdCrossedSet.end());
 			thresholdCrossedSet.insert(key, val);
 		}
 

@@ -1,0 +1,38 @@
+[[test]]
+testTitle = 'Clogged'
+
+    [[test.workload]]
+    testName = 'AtomicOps'
+    transactionsPerSecond = 2500.0
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 10.0
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 10.0
+
+[[test]]
+testTitle = 'Unclogged'
+
+    [[test.workload]]
+    testName = 'AtomicOps'
+    transactionsPerSecond = 250.0
+    testDuration = 10.0

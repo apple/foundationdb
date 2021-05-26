@@ -1,8 +1,0 @@
-testTitle=LocalRateKeeper
-testName=LocalRatekeeper
-startAfter=60.0
-blockWritesFor=80.0
-
-testName=Cycle
-transactionsPerSecond=25
-testDuration=200

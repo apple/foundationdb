@@ -1,0 +1,82 @@
+# Disable buggify for parallel restore
+#[configuration]
+#buggify=off
+
+[[test]]
+testTitle = 'BackupAndRestore'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+#timeout is in seconds
+timeout = 360000
+
+    [[test.workload]]
+    testName = 'Cycle'
+    #    nodeCount=30000
+    nodeCount = 1000
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+    expectedRate = 0
+    keyPrefix = '!'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 1000
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+    expectedRate = 0
+    keyPrefix = 'z'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 1000
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+    expectedRate = 0
+    keyPrefix = 'A'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 1000
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+    expectedRate = 0
+    keyPrefix = 'Z'
+    # Each testName=RunRestoreWorkerWorkload creates a restore worker
+    # We need at least 3 restore workers: master, loader, and applier
+
+    [[test.workload]]
+    testName = 'RunRestoreWorkerWorkload'
+    # Test case for parallel restore
+
+    [[test.workload]]
+    testName = 'BackupAndParallelRestoreCorrectness'
+    backupAfter = 10.0
+    restoreAfter = 60.0
+    # backupRangesCount<0 means backup the entire normal keyspace
+    backupRangesCount = -1
+    usePartitionedLogs = false
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 90.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 90.0
+    testDuration = 90.0
+    # Do NOT kill restore worker process yet
+    # Kill other process to ensure restore works when FDB cluster has faults
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 90.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 90.0

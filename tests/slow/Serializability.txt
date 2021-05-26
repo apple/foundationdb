@@ -1,2 +1,0 @@
-testTitle=Serializability
-    testName=Serializability

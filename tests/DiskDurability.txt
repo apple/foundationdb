@@ -1,9 +1,10 @@
 testTitle=DiskDurability
-testName=DiskDurability
 useDB=false
-pagesPerWrite=1
-writers=64
-fileName=deleteme
-filePages=1000000
-testDuration=360000
 timeout=360000
+
+    testName=DiskDurability
+    pagesPerWrite=1
+    writers=64
+    fileName=deleteme
+    filePages=1000000
+    testDuration=360000

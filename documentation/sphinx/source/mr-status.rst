@@ -132,3 +132,13 @@ log_server_min_free_space           Log server running out of space (approaching
 log_server_min_free_space_ratio     Log server running out of space (approaching 5% limit).
 storage_server_durability_lag       Storage server durable version falling behind.
 =================================== ====================================================
+
+The JSON path ``cluster.qos.throttled_tags``, when it exists, is an Object containing ``"auto"`` , ``"manual"`` and ``"recommended"``.  The possible fields for those object are in the following table:
+
+=================================== ====================================================
+Name                                Description
+=================================== ====================================================
+count                               How many tags are throttled
+busy_read                           How many tags are throttled because of busy read
+busy_write                          How many tags are throttled because of busy write
+=================================== ====================================================

@@ -335,7 +335,7 @@ you are holding the corresponding future.
     - Unions
     ```
     // Flow type
-    using T = boost::variant<A, B, C>;
+    using T = std::variant<A, B, C>;
 
     // IDL equivalent
     union T { A, B, C}
@@ -363,7 +363,7 @@ you are holding the corresponding future.
     - `scalar_traits` corresponds to a flatbuffers struct. See `UID` for an example.
     - `vector_like_traits` corresponds to a flatbuffers vector. See `VectorRef` for an example.
     - `dynamic_size_traits` corresponds to a flatbuffers vector of uint8_t. See `StringRef` for an example.
-    - `union_like_traits` corresponds to a flatbuffers union. See `boost::variant` for an example.
+    - `union_like_traits` corresponds to a flatbuffers union. See `std::variant` for an example.
 
 1. Potential Gotchas
     - Flatbuffers 'vtables' are collected from default-constructed instances of
@@ -488,7 +488,7 @@ To create a reference counted instance of a class `T`, you instantiate a `Refere
 stack with a pointer to your `T` object:
 
 ```c++
-Reference<T> refCountedInstance(new T());
+auto refCountedInstance = makeReference<T>();
 ```
 The `Reference<T>` class automatically calls addref on your `T` instance every time it is copied
 (such as by argument passing or assignment), but not when the object is initially created

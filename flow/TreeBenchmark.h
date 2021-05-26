@@ -63,6 +63,7 @@ struct MapHarness {
 		const K& operator->() const { return it->first; }
 
 		bool operator==(result const& k) const { return it == k.it; }
+		bool operator!=(result const& k) const { return it != k.it; }
 	};
 
 	map s;
@@ -92,15 +93,14 @@ void treeBenchmark(T& tree, F generateKey) {
 
 	timedRun("insert", keys, [&tree](key const& k) { tree.insert(k); });
 	timedRun("find", keys, [&tree](key const& k) { ASSERT(tree.find(k) != tree.not_found()); });
-	timedRun("lower_bound", keys, [&tree](key const & k) { ASSERT(tree.lower_bound(k) != tree.not_found()); });
-	timedRun("upper_bound", keys, [&tree](key const & k) { tree.upper_bound(k); });
-
+	timedRun("lower_bound", keys, [&tree](key const& k) { ASSERT(tree.lower_bound(k) != tree.not_found()); });
+	timedRun("upper_bound", keys, [&tree](key const& k) { tree.upper_bound(k); });
 
 	std::sort(keys.begin(), keys.end());
 	keys.resize(std::unique(keys.begin(), keys.end()) - keys.begin());
 
 	auto iter = tree.lower_bound(*keys.begin());
-	timedRun("scan", keys, [&tree, &iter](key const& k) {
+	timedRun("scan", keys, [&iter](key const& k) {
 		ASSERT(k == *iter);
 		++iter;
 	});

@@ -28,12 +28,12 @@
 #define FDBSERVER_RESTORE_APPLIER_H
 
 #include <sstream>
-#include "flow/Stats.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbrpc/Stats.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbserver/MutationTracking.h"
@@ -55,7 +55,7 @@ struct StagingKey {
 	LogMessageVersion version; // largest version of set or clear for the key
 	std::map<LogMessageVersion, Standalone<MutationRef>> pendingMutations; // mutations not set or clear type
 
-	explicit StagingKey() : version(0), type(MutationRef::MAX_ATOMIC_OP) {}
+	explicit StagingKey(Key key) : key(key), version(0), type(MutationRef::MAX_ATOMIC_OP) {}
 
 	// Add mutation m at newVersion to stagingKey
 	// Assume: SetVersionstampedKey and SetVersionstampedValue have been converted to set
@@ -84,12 +84,12 @@ struct StagingKey {
 			}
 			if (version < newVersion) {
 				DEBUG_MUTATION("StagingKeyAdd", newVersion.version, m)
-					    .detail("Version", version.toString())
-					    .detail("NewVersion", newVersion.toString())
-					    .detail("MType", getTypeString(type))
-					    .detail("Key", key)
-					    .detail("Val", val)
-					    .detail("NewMutation", m.toString());
+				    .detail("Version", version.toString())
+				    .detail("NewVersion", newVersion.toString())
+				    .detail("MType", getTypeString(type))
+				    .detail("Key", key)
+				    .detail("Val", val)
+				    .detail("NewMutation", m.toString());
 				key = m.param1;
 				val = m.param2;
 				type = (MutationRef::Type)m.type;
@@ -115,7 +115,7 @@ struct StagingKey {
 	// Precompute the final value of the key.
 	// TODO: Look at the last LogMessageVersion, if it set or clear, we can ignore the rest of versions.
 	void precomputeResult(const char* context, UID applierID, int batchIndex) {
-		TraceEvent(SevDebug, "FastRestoreApplierPrecomputeResult", applierID)
+		TraceEvent(SevFRMutationInfo, "FastRestoreApplierPrecomputeResult", applierID)
 		    .detail("BatchIndex", batchIndex)
 		    .detail("Context", context)
 		    .detail("Version", version.toString())
@@ -148,7 +148,7 @@ struct StagingKey {
 		}
 		for (; lb != pendingMutations.end(); lb++) {
 			MutationRef mutation = lb->second;
-			if (type == MutationRef::CompareAndClear) { // Special atomicOp
+			if (mutation.type == MutationRef::CompareAndClear) { // Special atomicOp
 				Arena arena;
 				Optional<StringRef> inputVal;
 				if (hasBaseValue()) {
@@ -167,14 +167,14 @@ struct StagingKey {
 				val = applyAtomicOp(inputVal, mutation.param2, (MutationRef::Type)mutation.type);
 				type = MutationRef::SetValue; // Precomputed result should be set to DB.
 			} else if (mutation.type == MutationRef::SetValue || mutation.type == MutationRef::ClearRange) {
-				type = MutationRef::SetValue; // Precomputed result should be set to DB.
+				type = MutationRef::SetValue;
 				TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnexpectedSet", applierID)
 				    .detail("BatchIndex", batchIndex)
 				    .detail("Context", context)
 				    .detail("MutationType", getTypeString(mutation.type))
 				    .detail("Version", lb->first.toString());
 			} else {
-				TraceEvent(SevWarnAlways, "FastRestoreApplierPrecomputeResultSkipUnexpectedBackupMutation", applierID)
+				TraceEvent(SevError, "FastRestoreApplierPrecomputeResultSkipUnexpectedBackupMutation", applierID)
 				    .detail("BatchIndex", batchIndex)
 				    .detail("Context", context)
 				    .detail("MutationType", getTypeString(mutation.type))
@@ -199,7 +199,7 @@ struct StagingKey {
 		return pendingMutations.empty() || version >= pendingMutations.rbegin()->first;
 	}
 
-	int expectedMutationSize() { return key.size() + val.size(); }
+	int totalSize() { return MutationRef::OVERHEAD_BYTES + key.size() + val.size(); }
 };
 
 // The range mutation received on applier.
@@ -226,15 +226,13 @@ public:
 	static const int DONE = 4;
 	static const int INVALID = 5;
 
-	explicit ApplierVersionBatchState(int newState) {
-		vbState = newState;
-	}
+	explicit ApplierVersionBatchState(int newState) { vbState = newState; }
 
-	virtual ~ApplierVersionBatchState() = default;
+	~ApplierVersionBatchState() override = default;
 
-	virtual void operator=(int newState) { vbState = newState; }
+	void operator=(int newState) override { vbState = newState; }
 
-	virtual int get() { return vbState; }
+	int get() override { return vbState; }
 };
 
 struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
@@ -244,44 +242,64 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	VersionedMutationsMap kvOps; // Mutations at each version
 	std::map<Key, StagingKey> stagingKeys;
 	std::set<StagingKeyRange> stagingKeyRanges;
-	FlowLock applyStagingKeysBatchLock;
 
 	Future<Void> pollMetrics;
 
 	RoleVersionBatchState vbState;
 
+	long receiveMutationReqs;
+
+	// Stats
+	double receivedBytes; // received mutation size
+	double appliedBytes; // after coalesce, how many bytes to write to DB
+	double targetWriteRateMB; // target amount of data outstanding for DB;
+	double totalBytesToWrite; // total amount of data in bytes to write
+	double applyingDataBytes; // amount of data in flight of committing
+	AsyncTrigger releaseTxnTrigger; // trigger to release more txns
+	Future<Void> rateTracer; // trace transaction rate control info
+
 	// Status counters
 	struct Counters {
 		CounterCollection cc;
 		Counter receivedBytes, receivedWeightedBytes, receivedMutations, receivedAtomicOps;
-		Counter appliedWeightedBytes, appliedMutations, appliedAtomicOps;
-		Counter appliedTxns;
-		Counter fetchKeys; // number of keys to fetch from dest. FDB cluster.
+		Counter appliedBytes, appliedWeightedBytes, appliedMutations, appliedAtomicOps;
+		Counter appliedTxns, appliedTxnRetries;
+		Counter fetchKeys, fetchTxns, fetchTxnRetries; // number of keys to fetch from dest. FDB cluster.
+		Counter clearOps, clearTxns;
 
 		Counters(ApplierBatchData* self, UID applierInterfID, int batchIndex)
 		  : cc("ApplierBatch", applierInterfID.toString() + ":" + std::to_string(batchIndex)),
 		    receivedBytes("ReceivedBytes", cc), receivedMutations("ReceivedMutations", cc),
 		    receivedAtomicOps("ReceivedAtomicOps", cc), receivedWeightedBytes("ReceivedWeightedMutations", cc),
-		    appliedWeightedBytes("AppliedWeightedBytes", cc), appliedMutations("AppliedMutations", cc),
-		    appliedAtomicOps("AppliedAtomicOps", cc), appliedTxns("AppliedTxns", cc), fetchKeys("FetchKeys", cc) {}
+		    appliedBytes("AppliedBytes", cc), appliedWeightedBytes("AppliedWeightedBytes", cc),
+		    appliedMutations("AppliedMutations", cc), appliedAtomicOps("AppliedAtomicOps", cc),
+		    appliedTxns("AppliedTxns", cc), appliedTxnRetries("AppliedTxnRetries", cc), fetchKeys("FetchKeys", cc),
+		    fetchTxns("FetchTxns", cc), fetchTxnRetries("FetchTxnRetries", cc), clearOps("ClearOps", cc),
+		    clearTxns("ClearTxns", cc) {}
 	} counters;
 
 	void addref() { return ReferenceCounted<ApplierBatchData>::addref(); }
 	void delref() { return ReferenceCounted<ApplierBatchData>::delref(); }
 
 	explicit ApplierBatchData(UID nodeID, int batchIndex)
-	  : counters(this, nodeID, batchIndex), applyStagingKeysBatchLock(SERVER_KNOBS->FASTRESTORE_APPLYING_PARALLELISM),
-	    vbState(ApplierVersionBatchState::NOT_INIT) {
-		pollMetrics = traceCounters(format("FastRestoreApplierMetrics%d", batchIndex), nodeID,
-		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY, &counters.cc,
+	  : counters(this, nodeID, batchIndex),
+	    targetWriteRateMB(SERVER_KNOBS->FASTRESTORE_WRITE_BW_MB / SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS),
+	    totalBytesToWrite(-1), applyingDataBytes(0), vbState(ApplierVersionBatchState::NOT_INIT),
+	    receiveMutationReqs(0), receivedBytes(0), appliedBytes(0) {
+		pollMetrics = traceCounters(format("FastRestoreApplierMetrics%d", batchIndex),
+		                            nodeID,
+		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
+		                            &counters.cc,
 		                            nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));
 		TraceEvent("FastRestoreApplierMetricsCreated").detail("Node", nodeID);
 	}
-	~ApplierBatchData() = default;
+	~ApplierBatchData() {
+		rateTracer = Void(); // cancel actor
+	}
 
 	void addMutation(MutationRef m, LogMessageVersion ver) {
 		if (!isRangeMutation(m)) {
-			auto item = stagingKeys.emplace(m.param1, StagingKey());
+			auto item = stagingKeys.emplace(m.param1, StagingKey(m.param1));
 			item.first->second.add(m, ver);
 		} else {
 			stagingKeyRanges.insert(StagingKeyRange(m, ver));
@@ -309,7 +327,8 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	}
 
 	void sanityCheckMutationOps() {
-		if (kvOps.empty()) return;
+		if (kvOps.empty())
+			return;
 
 		ASSERT_WE_THINK(isKVOpsSorted());
 		ASSERT_WE_THINK(allOpsAreKnown());
@@ -359,13 +378,13 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 		role = RestoreRole::Applier;
 	}
 
-	~RestoreApplierData() = default;
+	~RestoreApplierData() override = default;
 
 	// getVersionBatchState may be called periodically to dump version batch state,
 	// even when no version batch has been started.
 	int getVersionBatchState(int batchIndex) final {
 		std::map<int, Reference<ApplierBatchData>>::iterator item = batch.find(batchIndex);
-		if (item == batch.end()) { // Simply caller's effort in when it can call this func.
+		if (item == batch.end()) { // Batch has not been initialized when we blindly profile the state
 			return ApplierVersionBatchState::INVALID;
 		} else {
 			return item->second->vbState.get();
@@ -377,17 +396,17 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 		item->second->vbState = vbState;
 	}
 
-	void initVersionBatch(int batchIndex) {
+	void initVersionBatch(int batchIndex) override {
 		TraceEvent("FastRestoreApplierInitVersionBatch", id()).detail("BatchIndex", batchIndex);
 		batch[batchIndex] = Reference<ApplierBatchData>(new ApplierBatchData(nodeID, batchIndex));
 	}
 
-	void resetPerRestoreRequest() {
+	void resetPerRestoreRequest() override {
 		batch.clear();
 		finishedBatch = NotifiedVersion(0);
 	}
 
-	std::string describeNode() {
+	std::string describeNode() override {
 		std::stringstream ss;
 		ss << "NodeID:" << nodeID.toString() << " nodeIndex:" << nodeIndex;
 		return ss.str();

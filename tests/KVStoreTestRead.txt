@@ -1,14 +1,15 @@
 testTitle=RandomReadSaturation
-testName=KVStoreTest
-testDuration=60.0
-saturation=true
-commitFraction=0
-setFraction=0
-nodeCount=20000000
-keyBytes=16
-valueBytes=96
-filename=bttest
-setup=false
-clear=false
-count=false
 useDB=false
+
+    testName=KVStoreTest
+    testDuration=60.0
+    saturation=true
+    commitFraction=0
+    setFraction=0
+    nodeCount=20000000
+    keyBytes=16
+    valueBytes=96
+    filename=bttest
+    setup=false
+    clear=false
+    count=false

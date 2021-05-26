@@ -1,0 +1,7 @@
+[[test]]
+testTitle = 'RandomReadWriteTest'
+
+    [[test.workload]]
+    testName = 'ReadWrite'
+    testDuration = 30.0
+    transactionsPerSecond = 1000.0

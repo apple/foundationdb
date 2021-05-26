@@ -2,6 +2,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/SystemData.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbmonitor/SimpleIni.h"
 #include "fdbserver/Status.h"
@@ -34,7 +35,10 @@ void getTagAndDurableVersion(TraceEventFields md, Version version, Tag& tag, Ver
 	durableVersion = boost::lexical_cast<int64_t>(md.getValue("DurableVersion"));
 }
 
-void getMinAndMaxTLogVersions(TraceEventFields md, Version version, Tag tag, Version& minTLogVersion,
+void getMinAndMaxTLogVersions(TraceEventFields md,
+                              Version version,
+                              Tag tag,
+                              Version& minTLogVersion,
                               Version& maxTLogVersion) {
 	Version verifyVersion;
 	Tag verifyTag;
@@ -55,12 +59,12 @@ void getMinAndMaxTLogVersions(TraceEventFields md, Version version, Tag tag, Ver
 }
 
 void filterEmptyMessages(std::vector<Future<TraceEventFields>>& messages) {
-	messages.erase(std::remove_if(messages.begin(), messages.end(),
-								  [](Future<TraceEventFields>const & msgFuture)
-								  {
-									  return !msgFuture.isReady() || msgFuture.get().size() == 0;
-								  }
-					   ), messages.end());
+	messages.erase(std::remove_if(messages.begin(),
+	                              messages.end(),
+	                              [](Future<TraceEventFields> const& msgFuture) {
+		                              return !msgFuture.isReady() || msgFuture.get().size() == 0;
+	                              }),
+	               messages.end());
 	return;
 }
 
@@ -81,11 +85,12 @@ public: // variables
 	std::string restartInfoLocation; // file location to store the snap restore info
 	int maxRetryCntToRetrieveMessage; // number of retires to do trackLatest
 	bool skipCheck; // disable check if the exec fails
+	int retryLimit; // -1 if no limit
 
 public: // ctor & dtor
 	SnapTestWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), numSnaps(0), maxSnapDelay(0.0), testID(0), snapUID() {
-		TraceEvent("SnapTestWorkload Constructor");
+		TraceEvent("SnapTestWorkloadConstructor");
 		std::string workloadName = "SnapTest";
 		maxRetryCntToRetrieveMessage = 10;
 
@@ -96,10 +101,11 @@ public: // ctor & dtor
 		    getOption(options, LiteralStringRef("restartInfoLocation"), LiteralStringRef("simfdb/restartInfo.ini"))
 		        .toString();
 		skipCheck = false;
+		retryLimit = getOption(options, LiteralStringRef("retryLimit"), 5);
 	}
 
 public: // workload functions
-	std::string description() override { return "SnapTest"; }
+	std::string description() const override { return "SnapTest"; }
 	Future<Void> setup(Database const& cx) override {
 		TraceEvent("SnapTestWorkloadSetup");
 		return Void();
@@ -121,7 +127,8 @@ public: // workload functions
 		// read the key SnapFailedTLog.$UID
 		loop {
 			try {
-				Standalone<StringRef> keyStr = LiteralStringRef("\xff/SnapTestFailStatus/").withSuffix(StringRef(self->snapUID.toString()));
+				Standalone<StringRef> keyStr =
+				    LiteralStringRef("\xff/SnapTestFailStatus/").withSuffix(StringRef(self->snapUID.toString()));
 				TraceEvent("TestKeyStr").detail("Value", keyStr);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				Optional<Value> val = wait(tr.get(keyStr));
@@ -130,7 +137,7 @@ public: // workload functions
 				}
 				// wait for the key to be written out by TLogs
 				wait(delay(0.1));
-			} catch (Error &e) {
+			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
 		}
@@ -154,6 +161,7 @@ public: // workload functions
 		state Transaction tr(cx);
 		state vector<int64_t> keys;
 
+		keys.reserve(1000);
 		for (int i = 0; i < 1000; i++) {
 			keys.push_back(deterministicRandom()->randomInt64(0, INT64_MAX - 2));
 		}
@@ -213,12 +221,14 @@ public: // workload functions
 						snapFailed = true;
 						break;
 					}
+					TraceEvent("SnapCreateError").error(e);
 					++retry;
 					// snap v2 can fail for many reasons, so retry for 5 times and then fail it
-					if (retry > 5) {
+					if (self->retryLimit != -1 && retry > self->retryLimit) {
 						snapFailed = true;
 						break;
 					}
+					wait(delay(5.0));
 				}
 			}
 			CSimpleIni ini;
@@ -253,7 +263,7 @@ public: // workload functions
 			tr.reset();
 			loop {
 				try {
-					Standalone<RangeResultRef> kvRange = wait(tr.getRange(begin, end, 1000));
+					RangeResult kvRange = wait(tr.getRange(begin, end, 1000));
 					if (!kvRange.more && kvRange.size() == 0) {
 						TraceEvent("SnapTestNoMoreEntries");
 						break;
@@ -297,7 +307,7 @@ public: // workload functions
 					break;
 				} catch (Error& e) {
 					if (e.code() == error_code_snap_not_fully_recovered_unsupported ||
-						e.code() == error_code_snap_log_anti_quorum_unsupported) {
+					    e.code() == error_code_snap_log_anti_quorum_unsupported) {
 						snapFailed = true;
 						break;
 					}

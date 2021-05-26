@@ -1,4 +1,4 @@
-﻿/*
+/*
  * JsonParser.cs
  *
  * This source file is part of the FoundationDB open source project
@@ -34,9 +34,10 @@ namespace Magnesium
 	{
 		static Random r = new Random();
 
+		// dummy parameter nonFatalParseError to match xml
 		public static IEnumerable<Event> Parse(System.IO.Stream stream, string file,
 			bool keepOriginalElement = false, double startTime = -1, double endTime = Double.MaxValue,
-			double samplingFactor = 1.0)
+			double samplingFactor = 1.0, Action<string> nonFatalErrorMessage = null)
 		{
 			using (var reader = new System.IO.StreamReader(stream))
 			{
@@ -51,7 +52,7 @@ namespace Magnesium
 					}
 					catch (Exception e)
 					{
-						throw new Exception(string.Format("Failed to parse {0}", root), e);
+						throw new Exception(string.Format("Failed to parse JSON {0}", root), e);
 					}
 					if (ev != null) yield return ev;
 				}
@@ -81,7 +82,7 @@ namespace Magnesium
 				DDetails = xEvent.Elements()
 					.Where(a=>a.Name != "Type" && a.Name != "Time" && a.Name != "Machine" && a.Name != "ID" && a.Name != "Severity" && (!rolledEvent || a.Name != "OriginalTime"))
 					.ToDictionary(a=>string.Intern(a.Name.LocalName), a=>(object)a.Value),
-				original = keepOriginalElement ? xEvent : null,
+				original = keepOriginalElement ? xEvent : null
 			};
 		}
 

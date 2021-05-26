@@ -32,7 +32,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/ConflictSet.h"
 
 using std::max;
 using std::min;
@@ -46,23 +46,20 @@ static inline int skfastrand() {
 	return g_seed;
 }
 
-void setAffinity(int proc);
-
-PerfDoubleCounter g_buildTest("Build", skc), g_add("Add", skc), g_add_sort("A.Sort", skc),
-    g_detectConflicts("Detect", skc), g_sort("D.Sort", skc), g_combine("D.Combine", skc),
-    g_checkRead("D.CheckRead", skc), g_checkBatch("D.CheckIntraBatch", skc), g_merge("D.MergeWrite", skc),
-    g_merge_launch("D.Merge.Launch", skc), g_merge_fork("D.Merge.Fork", skc),
-    g_merge_start_var("D.Merge.StartVariance", skc), g_merge_end_var("D.Merge.EndVariance", skc),
-    g_merge_run_var("D.Merge.RunVariance", skc), g_merge_run_shortest("D.Merge.ShortestRun", skc),
-    g_merge_run_longest("D.Merge.LongestRun", skc), g_merge_run_total("D.Merge.TotalRun", skc),
-    g_merge_join("D.Merge.Join", skc), g_removeBefore("D.RemoveBefore", skc);
+PerfDoubleCounter g_buildTest("Build", skc), g_add("Add", skc), g_detectConflicts("Detect", skc), g_sort("D.Sort", skc),
+    g_combine("D.Combine", skc), g_checkRead("D.CheckRead", skc), g_checkBatch("D.CheckIntraBatch", skc),
+    g_merge("D.MergeWrite", skc), g_removeBefore("D.RemoveBefore", skc);
 
 static force_inline int compare(const StringRef& a, const StringRef& b) {
 	int c = memcmp(a.begin(), b.begin(), min(a.size(), b.size()));
-	if (c < 0) return -1;
-	if (c > 0) return +1;
-	if (a.size() < b.size()) return -1;
-	if (a.size() == b.size()) return 0;
+	if (c < 0)
+		return -1;
+	if (c > 0)
+		return +1;
+	if (a.size() < b.size())
+		return -1;
+	if (a.size() == b.size())
+		return 0;
 	return +1;
 }
 
@@ -74,8 +71,13 @@ struct ReadConflictRange {
 	VectorRef<int>* conflictingKeyRange;
 	Arena* cKRArena;
 
-	ReadConflictRange(StringRef begin, StringRef end, Version version, int transaction, int indexInTx,
-	                  VectorRef<int>* cKR = nullptr, Arena* cKRArena = nullptr)
+	ReadConflictRange(StringRef begin,
+	                  StringRef end,
+	                  Version version,
+	                  int transaction,
+	                  int indexInTx,
+	                  VectorRef<int>* cKR = nullptr,
+	                  Arena* cKRArena = nullptr)
 	  : begin(begin), end(end), version(version), transaction(transaction), indexInTx(indexInTx),
 	    conflictingKeyRange(cKR), cKRArena(cKRArena) {}
 	bool operator<(const ReadConflictRange& rhs) const { return compare(begin, rhs.begin) < 0; }
@@ -88,7 +90,7 @@ struct KeyInfo {
 	bool write;
 	int transaction;
 
-	KeyInfo(){};
+	KeyInfo() = default;
 	KeyInfo(StringRef key, bool begin, bool write, int transaction, int* pIndex)
 	  : key(key), begin(begin), write(write), transaction(transaction), pIndex(pIndex) {}
 };
@@ -124,7 +126,8 @@ force_inline bool getCharacter(const KeyInfo& ki, int character, int& outputChar
 bool operator<(const KeyInfo& lhs, const KeyInfo& rhs) {
 	int i = min(lhs.key.size(), rhs.key.size());
 	int c = memcmp(lhs.key.begin(), rhs.key.begin(), i);
-	if (c != 0) return c < 0;
+	if (c != 0)
+		return c < 0;
 
 	// Always sort shorter keys before longer keys.
 	if (lhs.key.size() < rhs.key.size()) {
@@ -153,9 +156,11 @@ void swapSort(std::vector<KeyInfo>& points, int a, int b) {
 
 void smallSort(std::vector<KeyInfo>& points, int start, int N) {
 	for (int i = 1; i < N; i++)
-		for (int j = i; j > 0; j -= 2) swapSort(points, start + j - 1, start + j);
+		for (int j = i; j > 0; j -= 2)
+			swapSort(points, start + j - 1, start + j);
 	for (int i = N - 2; i > 0; i--)
-		for (int j = i; j > 0; j -= 2) swapSort(points, start + j - 1, start + j);
+		for (int j = i; j > 0; j -= 2)
+			swapSort(points, start + j - 1, start + j);
 }
 
 struct SortTask {
@@ -192,13 +197,15 @@ void sortPoints(std::vector<KeyInfo>& points) {
 			allDone &= getCharacter(points[i], st.character, c);
 			counts[c]++;
 		}
-		if (allDone) continue;
+		if (allDone)
+			continue;
 
 		// calculate offsets from counts and build next level of tasks
 		int total = 0;
 		for (int i = 0; i < counts.size(); i++) {
 			int temp = counts[i];
-			if (temp > 1) tasks.emplace_back(st.begin + total, temp, st.character + 1);
+			if (temp > 1)
+				tasks.emplace_back(st.begin + total, temp, st.character + 1);
 			counts[i] = total;
 			total += temp;
 		}
@@ -210,15 +217,16 @@ void sortPoints(std::vector<KeyInfo>& points) {
 		}
 
 		// copy back into original points array
-		for (int i = 0; i < st.size; i++) points[st.begin + i] = newPoints[i];
+		for (int i = 0; i < st.size; i++)
+			points[st.begin + i] = newPoints[i];
 	}
 }
 
 class SkipList : NonCopyable {
 private:
-	static const int MaxLevels = 26;
+	static constexpr int MaxLevels = 26;
 
-	int randomLevel() {
+	int randomLevel() const {
 		uint32_t i = uint32_t(skfastrand()) >> (32 - (MaxLevels - 1));
 		int level = 0;
 		while (i & 1) {
@@ -229,17 +237,25 @@ private:
 		return level;
 	}
 
+	// Represent a node in the SkipList. The node has multiple (i.e., level) pointers to
+	// other nodes, and keeps a record of the max versions for each level.
 	struct Node {
-		int level() { return nPointers - 1; }
+		int level() const { return nPointers - 1; }
 		uint8_t* value() { return end() + nPointers * (sizeof(Node*) + sizeof(Version)); }
-		int length() { return valueLength; }
-		Node* getNext(int i) { return *((Node**)end() + i); }
-		void setNext(int i, Node* n) { *((Node**)end() + i) = n; }
+		int length() const { return valueLength; }
 
-		Version getMaxVersion(int i) { return ((Version*)(end() + nPointers * sizeof(Node*)))[i]; }
+		// Returns the next node pointer at the given level.
+		Node* getNext(int level) { return *((Node**)end() + level); }
+		// Sets the next node pointer at the given level.
+		void setNext(int level, Node* n) { *((Node**)end() + level) = n; }
+
+		// Returns the max version at the given level.
+		Version getMaxVersion(int i) const { return ((Version*)(end() + nPointers * sizeof(Node*)))[i]; }
+		// Sets the max version at the given level.
 		void setMaxVersion(int i, Version v) { ((Version*)(end() + nPointers * sizeof(Node*)))[i] = v; }
 
 		// Return a node with initialized value but uninitialized pointers
+		// Memory layout: *this, (level+1) Node*, (level+1) Version, value
 		static Node* create(const StringRef& value, int level) {
 			int nodeSize = sizeof(Node) + value.size() + (level + 1) * (sizeof(Node*) + sizeof(Version));
 
@@ -288,15 +304,19 @@ private:
 		}
 
 	private:
-		int getNodeSize() { return sizeof(Node) + valueLength + nPointers * (sizeof(Node*) + sizeof(Version)); }
+		int getNodeSize() const { return sizeof(Node) + valueLength + nPointers * (sizeof(Node*) + sizeof(Version)); }
+		// Returns the first Node* pointer
 		uint8_t* end() { return (uint8_t*)(this + 1); }
+		uint8_t const* end() const { return (uint8_t const*)(this + 1); }
 		int nPointers, valueLength;
 	};
 
 	static force_inline bool less(const uint8_t* a, int aLen, const uint8_t* b, int bLen) {
 		int c = memcmp(a, b, min(aLen, bLen));
-		if (c < 0) return true;
-		if (c > 0) return false;
+		if (c < 0)
+			return true;
+		if (c > 0)
+			return false;
 		return aLen < bLen;
 	}
 
@@ -311,21 +331,24 @@ private:
 	}
 
 public:
+	// Points the location (i.e., Node*) that value would appear in the SkipList.
+	// If the "value" is in the list, then finger[0] points to that exact node;
+	// otherwise, the finger points to Nodes that the value should be inserted before.
+	// Note the SkipList organizes all nodes at level 0, higher levels contain jump pointers.
 	struct Finger {
 		Node* finger[MaxLevels]; // valid for levels >= level
-		int level;
-		Node* x;
-		Node* alreadyChecked;
+		int level = MaxLevels;
+		Node* x = nullptr;
+		Node* alreadyChecked = nullptr;
 		StringRef value;
 
-		Finger() : level(MaxLevels), x(NULL), alreadyChecked(NULL) {}
-
-		Finger(Node* header, const StringRef& ptr) : value(ptr), level(MaxLevels), alreadyChecked(NULL), x(header) {}
+		Finger() = default;
+		Finger(Node* header, const StringRef& ptr) : value(ptr), x(header) {}
 
 		void init(const StringRef& value, Node* header) {
 			this->value = value;
 			x = header;
-			alreadyChecked = NULL;
+			alreadyChecked = nullptr;
 			level = MaxLevels;
 		}
 
@@ -337,6 +360,8 @@ public:
 		}
 
 		// pre: !finished()
+		// Advances the pointer at the current level to a Node that's >= finger's value
+		// if possible; or move to the next level (i.e., level--).
 		// Returns true if we have advanced to the next level
 		force_inline bool advance() {
 			Node* next = x->getNext(level - 1);
@@ -358,15 +383,16 @@ public:
 				;
 		}
 
-		force_inline bool finished() { return level == 0; }
+		force_inline bool finished() const { return level == 0; }
 
+		// Returns if the finger value is found in the SkipList.
 		force_inline Node* found() const {
 			// valid after finished returns true
 			Node* n = finger[0]->getNext(0); // or alreadyChecked, but that is more easily invalidated
 			if (n && n->length() == value.size() && !memcmp(n->value(), value.begin(), value.size()))
 				return n;
 			else
-				return NULL;
+				return nullptr;
 		}
 
 		StringRef getValue() const {
@@ -375,7 +401,8 @@ public:
 		}
 	};
 
-	int count() {
+	// Returns the total number of nodes in the list.
+	int count() const {
 		int count = 0;
 		Node* x = header->getNext(0);
 		while (x) {
@@ -388,16 +415,16 @@ public:
 	explicit SkipList(Version version = 0) {
 		header = Node::create(StringRef(), MaxLevels - 1);
 		for (int l = 0; l < MaxLevels; l++) {
-			header->setNext(l, NULL);
+			header->setNext(l, nullptr);
 			header->setMaxVersion(l, version);
 		}
 	}
 	~SkipList() { destroy(); }
-	SkipList(SkipList&& other) noexcept : header(other.header) { other.header = NULL; }
+	SkipList(SkipList&& other) noexcept : header(other.header) { other.header = nullptr; }
 	void operator=(SkipList&& other) noexcept {
 		destroy();
 		header = other.header;
-		other.header = NULL;
+		other.header = nullptr;
 	}
 	void swap(SkipList& other) { std::swap(header, other.header); }
 
@@ -406,7 +433,8 @@ public:
 			const Finger& startF = fingers[r * 2];
 			const Finger& endF = fingers[r * 2 + 1];
 
-			if (endF.found() == NULL) insert(endF, endF.finger[0]->getMaxVersion(0));
+			if (endF.found() == nullptr)
+				insert(endF, endF.finger[0]->getMaxVersion(0));
 
 			remove(startF, endF);
 			insert(startF, version);
@@ -417,12 +445,17 @@ public:
 		const int M = 16;
 		int nextJob[M];
 		CheckMax inProgress[M];
-		if (!count) return;
+		if (!count)
+			return;
 
 		int started = min(M, count);
 		for (int i = 0; i < started; i++) {
-			inProgress[i].init(ranges[i], header, transactionConflictStatus, ranges[i].indexInTx,
-			                   ranges[i].conflictingKeyRange, ranges[i].cKRArena);
+			inProgress[i].init(ranges[i],
+			                   header,
+			                   transactionConflictStatus,
+			                   ranges[i].indexInTx,
+			                   ranges[i].conflictingKeyRange,
+			                   ranges[i].cKRArena);
 			nextJob[i] = i + 1;
 		}
 		nextJob[started - 1] = 0;
@@ -433,13 +466,18 @@ public:
 		while (true) {
 			if (inProgress[job].advance()) {
 				if (started == count) {
-					if (prevJob == job) break;
+					if (prevJob == job)
+						break;
 					nextJob[prevJob] = nextJob[job];
 					job = prevJob;
 				} else {
 					int temp = started++;
-					inProgress[job].init(ranges[temp], header, transactionConflictStatus, ranges[temp].indexInTx,
-					                     ranges[temp].conflictingKeyRange, ranges[temp].cKRArena);
+					inProgress[job].init(ranges[temp],
+					                     header,
+					                     transactionConflictStatus,
+					                     ranges[temp].indexInTx,
+					                     ranges[temp].conflictingKeyRange,
+					                     ranges[temp].cKRArena);
 				}
 			}
 			prevJob = job;
@@ -453,24 +491,30 @@ public:
 	//   partitions.  In between, operations on each partition must not touch any keys outside
 	//   the partition.  Specifically, the partition to the left of 'key' must not have a range
 	//	 [...,key) inserted, since that would insert an entry at 'key'.
+	// Note this function is not used.
 	void partition(StringRef* begin, int splitCount, SkipList* output) {
 		for (int i = splitCount - 1; i >= 0; i--) {
 			Finger f(header, begin[i]);
-			while (!f.finished()) f.nextLevel();
+			while (!f.finished())
+				f.nextLevel();
 			split(f, output[i + 1]);
 		}
 		swap(output[0]);
 	}
 
+	// Concatenates multiple SkipList objects into one and stores in input[0].
+	// Note this function is not used.
 	void concatenate(SkipList* input, int count) {
 		std::vector<Finger> ends(count - 1);
-		for (int i = 0; i < ends.size(); i++) input[i].getEnd(ends[i]);
+		for (int i = 0; i < ends.size(); i++)
+			input[i].getEnd(ends[i]);
 
 		for (int l = 0; l < MaxLevels; l++) {
 			for (int i = ends.size() - 1; i >= 0; i--) {
 				ends[i].finger[l]->setNext(l, input[i + 1].header->getNext(l));
-				if (l && (!i || ends[i].finger[l] != input[i].header)) ends[i].finger[l]->calcVersionForLevel(l);
-				input[i + 1].header->setNext(l, NULL);
+				if (l && (!i || ends[i].finger[l] != input[i].header))
+					ends[i].finger[l]->calcVersionForLevel(l);
+				input[i + 1].header->setNext(l, nullptr);
 			}
 		}
 		swap(input[0]);
@@ -486,7 +530,8 @@ public:
 		while (results[0].level > 1) {
 			results[0].nextLevel();
 			Node* ac = results[0].alreadyChecked;
-			if (ac && less(ac->value(), ac->length(), endValue.begin(), endValue.size())) break;
+			if (ac && less(ac->value(), ac->length(), endValue.begin(), endValue.size()))
+				break;
 		}
 
 		// Init all the other fingers to start descending where we stopped
@@ -499,13 +544,15 @@ public:
 		for (int i = 1; i < count; i++) {
 			results[i].level = startLevel;
 			results[i].x = x;
-			results[i].alreadyChecked = NULL;
+			results[i].alreadyChecked = nullptr;
 			results[i].value = values[i];
-			for (int j = startLevel; j < MaxLevels; j++) results[i].finger[j] = results[0].finger[j];
+			for (int j = startLevel; j < MaxLevels; j++)
+				results[i].finger[j] = results[0].finger[j];
 		}
 
 		int* nextJob = temp;
-		for (int i = 0; i < count - 1; i++) nextJob[i] = i + 1;
+		for (int i = 0; i < count - 1; i++)
+			nextJob[i] = i + 1;
 		nextJob[count - 1] = 0;
 
 		int prevJob = count - 1;
@@ -516,7 +563,8 @@ public:
 			Finger* f = &results[job];
 			f->advance();
 			if (f->finished()) {
-				if (prevJob == job) break;
+				if (prevJob == job)
+					break;
 				nextJob[prevJob] = nextJob[job];
 			} else {
 				f->prefetch();
@@ -533,7 +581,8 @@ public:
 		bool wasAbove = true;
 		while (nodeCount--) {
 			Node* x = f.finger[0]->getNext(0);
-			if (!x) break;
+			if (!x)
+				break;
 
 			// double prefetch gives +25% speed (single threaded)
 			Node* next = x->getNext(0);
@@ -543,10 +592,12 @@ public:
 
 			bool isAbove = x->getMaxVersion(0) >= v;
 			if (isAbove || wasAbove) { // f.nextItem
-				for (int l = 0; l <= x->level(); l++) f.finger[l] = x;
+				for (int l = 0; l <= x->level(); l++)
+					f.finger[l] = x;
 			} else { // f.eraseItem
 				removedCount++;
-				for (int l = 0; l <= x->level(); l++) f.finger[l]->setNext(l, x->getNext(l));
+				for (int l = 0; l <= x->level(); l++)
+					f.finger[l]->setNext(l, x->getNext(l));
 				for (int i = 1; i <= x->level(); i++)
 					f.finger[i]->setMaxVersion(i, max(f.finger[i]->getMaxVersion(i), x->getMaxVersion(i)));
 				x->destroy();
@@ -559,18 +610,21 @@ public:
 
 private:
 	void remove(const Finger& start, const Finger& end) {
-		if (start.finger[0] == end.finger[0]) return;
+		if (start.finger[0] == end.finger[0])
+			return;
 
 		Node* x = start.finger[0]->getNext(0);
 
 		// vtune says: this loop is the expensive parts (6 parts)
 		for (int i = 0; i < MaxLevels; i++)
-			if (start.finger[i] != end.finger[i]) start.finger[i]->setNext(i, end.finger[i]->getNext(i));
+			if (start.finger[i] != end.finger[i])
+				start.finger[i]->setNext(i, end.finger[i]->getNext(i));
 
 		while (true) {
 			Node* next = x->getNext(0);
 			x->destroy();
-			if (x == end.finger[0]) break;
+			if (x == end.finger[0])
+				break;
 			x = next;
 		}
 	}
@@ -591,14 +645,16 @@ private:
 		}
 		for (int i = level + 1; i < MaxLevels; i++) {
 			Version v = f.finger[i]->getMaxVersion(i);
-			if (v >= version) break;
+			if (v >= version)
+				break;
 			f.finger[i]->setMaxVersion(i, version);
 		}
 	}
 
 	void insert(const StringRef& value, Version version) {
 		Finger f(header, value);
-		while (!f.finished()) f.nextLevel();
+		while (!f.finished())
+			f.nextLevel();
 		// SOMEDAY: equality?
 		insert(f, version);
 	}
@@ -612,7 +668,11 @@ private:
 		VectorRef<int>* conflictingKeyRange; // nullptr if report_conflicting_keys is not enabled.
 		Arena* cKRArena; // nullptr if report_conflicting_keys is not enabled.
 
-		void init(const ReadConflictRange& r, Node* header, bool* tCS, int indexInTx, VectorRef<int>* cKR,
+		void init(const ReadConflictRange& r,
+		          Node* header,
+		          bool* tCS,
+		          int indexInTx,
+		          VectorRef<int>* cKR,
 		          Arena* cKRArena) {
 			this->start.init(r.begin, header);
 			this->end.init(r.end, header);
@@ -624,10 +684,11 @@ private:
 			this->state = 0;
 		}
 
-		bool noConflict() { return true; }
+		bool noConflict() const { return true; }
 		bool conflict() {
 			*result = true;
-			if (conflictingKeyRange != nullptr) conflictingKeyRange->push_back(*cKRArena, indexInTx);
+			if (conflictingKeyRange != nullptr)
+				conflictingKeyRange->push_back(*cKRArena, indexInTx);
 			return true;
 		}
 
@@ -646,21 +707,26 @@ private:
 						;
 
 					int l = start.level;
-					if (start.finger[l] != end.finger[l]) break;
+					if (start.finger[l] != end.finger[l])
+						break;
 					// accept if the range spans the check range, but does not have a greater version
-					if (start.finger[l]->getMaxVersion(l) <= version) return noConflict();
-					if (l == 0) return conflict();
+					if (start.finger[l]->getMaxVersion(l) <= version)
+						return noConflict();
+					if (l == 0)
+						return conflict();
 				}
 				state = 1;
 			case 1: {
 				// check the end side of the pyramid
 				Node* e = end.finger[end.level];
 				while (e->getMaxVersion(end.level) > version) {
-					if (end.finished()) return conflict();
+					if (end.finished())
+						return conflict();
 					end.nextLevel();
 					Node* f = end.finger[end.level];
 					while (e != f) {
-						if (e->getMaxVersion(end.level) > version) return conflict();
+						if (e->getMaxVersion(end.level) > version)
+							return conflict();
 						e = e->getNext(end.level);
 					}
 				}
@@ -671,10 +737,12 @@ private:
 					Node* nextS = start.finger[start.level]->getNext(start.level);
 					Node* p = nextS;
 					while (p != s) {
-						if (p->getMaxVersion(start.level) > version) return conflict();
+						if (p->getMaxVersion(start.level) > version)
+							return conflict();
 						p = p->getNext(start.level);
 					}
-					if (start.finger[start.level]->getMaxVersion(start.level) <= version) return noConflict();
+					if (start.finger[start.level]->getMaxVersion(start.level) <= version)
+						return noConflict();
 					s = nextS;
 					if (start.finished()) {
 						if (nextS->length() == start.value.size() &&
@@ -692,40 +760,28 @@ private:
 		}
 	};
 
+	// Splits the SkipLists so that those after finger is moved to "right".
 	void split(const Finger& f, SkipList& right) {
 		ASSERT(!right.header->getNext(0)); // right must be empty
 		right.header->setMaxVersion(0, f.finger[0]->getMaxVersion(0));
 		for (int l = 0; l < MaxLevels; l++) {
 			right.header->setNext(l, f.finger[l]->getNext(l));
-			f.finger[l]->setNext(l, NULL);
+			f.finger[l]->setNext(l, nullptr);
 		}
 	}
 
+	// Sets end's finger to the last nodes at all levels.
 	void getEnd(Finger& end) {
 		Node* node = header;
 		for (int l = MaxLevels - 1; l >= 0; l--) {
 			Node* next;
-			while ((next = node->getNext(l)) != NULL) node = next;
+			while ((next = node->getNext(l)) != nullptr)
+				node = next;
 			end.finger[l] = node;
 		}
 		end.level = 0;
 	}
 };
-
-StringRef setK(Arena& arena, int i) {
-	char t[sizeof(i)];
-	*(int*)t = i;
-
-	const int keySize = 16;
-
-	char* ss = new (arena) char[keySize];
-	for (int c = 0; c < keySize - sizeof(i); c++) ss[c] = '.';
-	for (int c = 0; c < sizeof(i); c++) ss[c + keySize - sizeof(i)] = t[sizeof(i) - 1 - c];
-
-	return StringRef((const uint8_t*)ss, keySize);
-}
-
-#include "fdbserver/ConflictSet.h"
 
 struct ConflictSet {
 	ConflictSet() : oldestVersion(0), removalKey(makeString(0)) {}
@@ -746,7 +802,8 @@ void destroyConflictSet(ConflictSet* cs) {
 	delete cs;
 }
 
-ConflictBatch::ConflictBatch(ConflictSet* cs, std::map<int, VectorRef<int>>* conflictingKeyRangeMap,
+ConflictBatch::ConflictBatch(ConflictSet* cs,
+                             std::map<int, VectorRef<int>>* conflictingKeyRangeMap,
                              Arena* resolveBatchReplyArena)
   : cs(cs), transactionCount(0), conflictingKeyRangeMap(conflictingKeyRangeMap),
     resolveBatchReplyArena(resolveBatchReplyArena) {}
@@ -761,7 +818,7 @@ struct TransactionInfo {
 };
 
 void ConflictBatch::addTransaction(const CommitTransactionRef& tr) {
-	int t = transactionCount++;
+	const int t = transactionCount++;
 
 	Arena& arena = transactionInfo.arena();
 	TransactionInfo* info = new (arena) TransactionInfo;
@@ -774,12 +831,15 @@ void ConflictBatch::addTransaction(const CommitTransactionRef& tr) {
 		info->readRanges.resize(arena, tr.read_conflict_ranges.size());
 		info->writeRanges.resize(arena, tr.write_conflict_ranges.size());
 
-		std::vector<KeyInfo>& points = this->points;
 		for (int r = 0; r < tr.read_conflict_ranges.size(); r++) {
 			const KeyRangeRef& range = tr.read_conflict_ranges[r];
 			points.emplace_back(range.begin, true, false, t, &info->readRanges[r].first);
 			points.emplace_back(range.end, false, false, t, &info->readRanges[r].second);
-			combinedReadConflictRanges.emplace_back(range.begin, range.end, tr.read_snapshot, t, r,
+			combinedReadConflictRanges.emplace_back(range.begin,
+			                                        range.end,
+			                                        tr.read_snapshot,
+			                                        t,
+			                                        r,
 			                                        tr.report_conflicting_keys ? &(*conflictingKeyRangeMap)[t]
 			                                                                   : nullptr,
 			                                        tr.report_conflicting_keys ? resolveBatchReplyArena : nullptr);
@@ -791,7 +851,7 @@ void ConflictBatch::addTransaction(const CommitTransactionRef& tr) {
 		}
 	}
 
-	this->transactionInfo.push_back(arena, info);
+	transactionInfo.push_back(arena, info);
 }
 
 // SOMEDAY: This should probably be replaced with a roaring bitmap.
@@ -801,23 +861,27 @@ class MiniConflictSet : NonCopyable {
 public:
 	explicit MiniConflictSet(int size) { values.assign(size, false); }
 	void set(int begin, int end) {
-		for (int i = begin; i < end; i++) values[i] = true;
+		for (int i = begin; i < end; i++)
+			values[i] = true;
 	}
 	bool any(int begin, int end) {
 		for (int i = begin; i < end; i++)
-			if (values[i]) return true;
+			if (values[i])
+				return true;
 		return false;
 	}
 };
 
 void ConflictBatch::checkIntraBatchConflicts() {
 	int index = 0;
-	for (int p = 0; p < points.size(); p++) *points[p].pIndex = index++;
+	for (int p = 0; p < points.size(); p++)
+		*points[p].pIndex = index++;
 
 	MiniConflictSet mcs(index);
 	for (int t = 0; t < transactionInfo.size(); t++) {
 		const TransactionInfo& tr = *transactionInfo[t];
-		if (transactionConflictStatus[t]) continue;
+		if (transactionConflictStatus[t])
+			continue;
 		bool conflict = tr.tooOld;
 		for (int i = 0; i < tr.readRanges.size(); i++) {
 			if (mcs.any(tr.readRanges[i].first, tr.readRanges[i].second)) {
@@ -830,7 +894,8 @@ void ConflictBatch::checkIntraBatchConflicts() {
 		}
 		transactionConflictStatus[t] = conflict;
 		if (!conflict)
-			for (int i = 0; i < tr.writeRanges.size(); i++) mcs.set(tr.writeRanges[i].first, tr.writeRanges[i].second);
+			for (int i = 0; i < tr.writeRanges.size(); i++)
+				mcs.set(tr.writeRanges[i].first, tr.writeRanges[i].second);
 	}
 }
 
@@ -842,7 +907,9 @@ void ConflictBatch::GetTooOldTransactions(std::vector<int>& tooOldTransactions) 
 	}
 }
 
-void ConflictBatch::detectConflicts(Version now, Version newOldestVersion, std::vector<int>& nonConflicting,
+void ConflictBatch::detectConflicts(Version now,
+                                    Version newOldestVersion,
+                                    std::vector<int>& nonConflicting,
                                     std::vector<int>* tooOldTransactions) {
 	double t = timer();
 	sortPoints(points);
@@ -866,13 +933,12 @@ void ConflictBatch::detectConflicts(Version now, Version newOldestVersion, std::
 	t = timer();
 	mergeWriteConflictRanges(now);
 	g_merge += timer() - t;
-	
+
 	for (int i = 0; i < transactionCount; i++) {
 		if (tooOldTransactions && transactionInfo[i]->tooOld) {
 			tooOldTransactions->push_back(i);
-		}
-		else if (!transactionConflictStatus[i]) {
-			nonConflicting.push_back( i );
+		} else if (!transactionConflictStatus[i]) {
+			nonConflicting.push_back(i);
 		}
 	}
 
@@ -891,53 +957,74 @@ void ConflictBatch::detectConflicts(Version now, Version newOldestVersion, std::
 }
 
 void ConflictBatch::checkReadConflictRanges() {
-	if (!combinedReadConflictRanges.size()) return;
+	if (combinedReadConflictRanges.empty())
+		return;
 
-	cs->versionHistory.detectConflicts(&combinedReadConflictRanges[0], combinedReadConflictRanges.size(),
-	                                   transactionConflictStatus);
+	cs->versionHistory.detectConflicts(
+	    &combinedReadConflictRanges[0], combinedReadConflictRanges.size(), transactionConflictStatus);
 }
 
-void ConflictBatch::addConflictRanges(Version now, std::vector<std::pair<StringRef, StringRef>>::iterator begin,
-                                      std::vector<std::pair<StringRef, StringRef>>::iterator end, SkipList* part) {
-	int count = end - begin;
-	static_assert(sizeof(begin[0]) == sizeof(StringRef) * 2,
+void ConflictBatch::addConflictRanges(Version now,
+                                      std::vector<std::pair<StringRef, StringRef>>::iterator begin,
+                                      std::vector<std::pair<StringRef, StringRef>>::iterator end,
+                                      SkipList* part) {
+	const int count = end - begin;
+	static_assert(sizeof(*begin) == sizeof(StringRef) * 2,
 	              "Write Conflict Range type not convertible to two StringPtrs");
 	const StringRef* strings = reinterpret_cast<const StringRef*>(&*begin);
-	int stringCount = count * 2;
+	const int stringCount = count * 2;
 
-	static const int stripeSize = 16;
+	const int stripeSize = 16;
 	SkipList::Finger fingers[stripeSize];
 	int temp[stripeSize];
 	int stripes = (stringCount + stripeSize - 1) / stripeSize;
 
 	int ss = stringCount - (stripes - 1) * stripeSize;
 	for (int s = stripes - 1; s >= 0; s--) {
-		part->find(&strings[s * stripeSize], &fingers[0], temp, ss);
-		part->addConflictRanges(&fingers[0], ss / 2, now);
+		part->find(&strings[s * stripeSize], fingers, temp, ss);
+		part->addConflictRanges(fingers, ss / 2, now);
 		ss = stripeSize;
 	}
 }
 
 void ConflictBatch::mergeWriteConflictRanges(Version now) {
-	if (!combinedWriteConflictRanges.size()) return;
+	if (combinedWriteConflictRanges.empty())
+		return;
 
 	addConflictRanges(now, combinedWriteConflictRanges.begin(), combinedWriteConflictRanges.end(), &cs->versionHistory);
 }
 
 void ConflictBatch::combineWriteConflictRanges() {
 	int activeWriteCount = 0;
-	for (int i = 0; i < points.size(); i++) {
-		KeyInfo& point = points[i];
+	for (const KeyInfo& point : points) {
 		if (point.write && !transactionConflictStatus[point.transaction]) {
 			if (point.begin) {
 				activeWriteCount++;
-				if (activeWriteCount == 1) combinedWriteConflictRanges.emplace_back(point.key, KeyRef());
+				if (activeWriteCount == 1)
+					combinedWriteConflictRanges.emplace_back(point.key, KeyRef());
 			} else /*if (point.end)*/ {
 				activeWriteCount--;
-				if (activeWriteCount == 0) combinedWriteConflictRanges.back().second = point.key;
+				if (activeWriteCount == 0)
+					combinedWriteConflictRanges.back().second = point.key;
 			}
 		}
 	}
+}
+
+namespace {
+StringRef setK(Arena& arena, int i) {
+	char t[sizeof(i)];
+	*(int*)t = i;
+
+	const int keySize = 16;
+
+	char* ss = new (arena) char[keySize];
+	for (int c = 0; c < keySize - sizeof(i); c++)
+		ss[c] = '.';
+	for (int c = 0; c < sizeof(i); c++)
+		ss[c + keySize - sizeof(i)] = t[sizeof(i) - 1 - c];
+
+	return StringRef((const uint8_t*)ss, keySize);
 }
 
 void miniConflictSetTest() {
@@ -991,6 +1078,7 @@ void operatorLessThanTest() {
 		ASSERT(!(a == b));
 	}
 }
+} // namespace
 
 void skipListTest() {
 	printf("Skip list test\n");
@@ -1007,21 +1095,22 @@ void skipListTest() {
 
 	Arena testDataArena;
 	VectorRef<VectorRef<KeyRangeRef>> testData;
-	testData.resize(testDataArena, 500);
-	std::vector<std::vector<uint8_t>> success(testData.size());
-	std::vector<std::vector<uint8_t>> success2(testData.size());
-	for (int i = 0; i < testData.size(); i++) {
-		testData[i].resize(testDataArena, 5000);
-		success[i].assign(testData[i].size(), false);
-		success2[i].assign(testData[i].size(), false);
-		for (int j = 0; j < testData[i].size(); j++) {
+	const int batches = 500; // deterministicRandom()->randomInt(500, 5000);
+	const int data_per_batch = 5000;
+	testData.resize(testDataArena, batches);
+	std::vector<std::vector<uint8_t>> success(batches);
+	std::vector<std::vector<uint8_t>> success2(batches);
+	for (int i = 0; i < batches; i++) {
+		testData[i].resize(testDataArena, data_per_batch);
+		success[i].assign(data_per_batch, false);
+		success2[i].assign(data_per_batch, false);
+		for (int j = 0; j < data_per_batch; j++) {
 			int key = deterministicRandom()->randomInt(0, 20000000);
 			int key2 = key + 1 + deterministicRandom()->randomInt(0, 10);
 			testData[i][j] = KeyRangeRef(setK(testDataArena, key), setK(testDataArena, key2));
 		}
 	}
-	printf("Test data generated (%d)\n", deterministicRandom()->randomInt(0, 100000));
-	printf("  %d batches, %d/batch\n", testData.size(), testData[0].size());
+	printf("Test data generated: %d batches, %d/batch\n", batches, data_per_batch);
 
 	printf("Running\n");
 
@@ -1029,23 +1118,24 @@ void skipListTest() {
 	int cranges = 0, tcount = 0;
 
 	start = timer();
-	std::vector<std::vector<int>> nonConflict(testData.size());
-	for (int i = 0; i < testData.size(); i++) {
+	std::vector<std::vector<int>> nonConflict(batches);
+	Version version = 0;
+	for (const auto& data : testData) {
 		Arena buf;
 		std::vector<CommitTransactionRef> trs;
 		double t = timer();
-		for (int j = 0; j + readCount + writeCount <= testData[i].size(); j += readCount + writeCount) {
+		for (int j = 0; j + readCount + writeCount <= data.size(); j += readCount + writeCount) {
 			CommitTransactionRef tr;
 			for (int k = 0; k < readCount; k++) {
-				KeyRangeRef r(buf, testData[i][j + k]);
+				KeyRangeRef r(buf, data[j + k]);
 				tr.read_conflict_ranges.push_back(buf, r);
 			}
 			for (int k = 0; k < writeCount; k++) {
-				KeyRangeRef r(buf, testData[i][j + readCount + k]);
+				KeyRangeRef r(buf, data[j + readCount + k]);
 				tr.write_conflict_ranges.push_back(buf, r);
 			}
 			cranges += tr.read_conflict_ranges.size() + tr.write_conflict_ranges.size();
-			tr.read_snapshot = i;
+			tr.read_snapshot = version;
 			trs.push_back(tr);
 		}
 		tcount += trs.size();
@@ -1053,12 +1143,16 @@ void skipListTest() {
 
 		t = timer();
 		ConflictBatch batch(cs);
-		for (int j = 0; j < trs.size(); j++) batch.addTransaction(trs[j]);
+		for (const auto& tr : trs) {
+			batch.addTransaction(tr);
+		}
 		g_add += timer() - t;
 
 		t = timer();
-		batch.detectConflicts(i + 50, i, nonConflict[i]);
+		batch.detectConflicts(version + 50, version, nonConflict[version]);
 		g_detectConflicts += timer() - t;
+
+		version++;
 	}
 	double elapsed = timer() - start;
 	printf("New conflict set: %0.3f sec\n", elapsed);
@@ -1076,8 +1170,8 @@ void skipListTest() {
 	printf("                  %0.3f Mkeys/sec\n", cranges * 2 / elapsed / 1e6);
 
 	printf("Performance counters:\n");
-	for (int c = 0; c < skc.size(); c++) {
-		printf("%20s: %s\n", skc[c]->getMetric().name().c_str(), skc[c]->getMetric().formatted().c_str());
+	for (const auto& counter : skc) {
+		printf("%20s: %s\n", counter->getMetric().name().c_str(), counter->getMetric().formatted().c_str());
 	}
 
 	printf("%d entries in version history\n", cs->versionHistory.count());

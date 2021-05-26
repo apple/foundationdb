@@ -1,0 +1,18 @@
+[[test]]
+testTitle = 'RandomReadWriteTest'
+simCheckRelocationDuration = true
+connectionFailuresDisableDuration = 100000
+
+    [[test.workload]]
+    testName = 'ReadWrite'
+    testDuration = 30.0
+    transactionsPerSecond = 750
+    writesPerTransactionA = 0
+    readsPerTransactionA = 10
+    writesPerTransactionB = 10
+    readsPerTransactionB = 1
+    alpha = 0.5
+    nodeCount = 150000
+    valueBytes = 128
+    discardEdgeMeasurements = false
+    warmingDelay = 10.0

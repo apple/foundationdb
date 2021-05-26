@@ -19,7 +19,7 @@
  */
 
 // This file delcares common struct and functions shared by restore roles, i.e.,
-// RestoreMaster, RestoreLoader, RestoreApplier
+// RestoreController, RestoreLoader, RestoreApplier
 
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RestoreRoleCommon_G_H)
@@ -29,13 +29,13 @@
 #define FDBSERVER_RestoreRoleCommon_H
 
 #include <sstream>
-#include "flow/Stats.h"
 #include "flow/SystemMonitor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/Notified.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbrpc/Stats.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbserver/RestoreUtil.h"
@@ -47,7 +47,7 @@ struct RestoreLoaderInterface;
 struct RestoreApplierInterface;
 
 struct RestoreRoleData;
-struct RestoreMasterData;
+struct RestoreControllerData;
 
 struct RestoreSimpleRequest;
 
@@ -69,13 +69,9 @@ class RoleVersionBatchState {
 public:
 	static const int INVALID = -1;
 
-	virtual int get() {
-		return vbState;
-	}
+	virtual int get() { return vbState; }
 
-	virtual void operator = (int newState) {
-		vbState = newState;
-	}
+	virtual void operator=(int newState) { vbState = newState; }
 
 	explicit RoleVersionBatchState() : vbState(INVALID) {}
 	explicit RoleVersionBatchState(int newState) : vbState(newState) {}
@@ -100,6 +96,7 @@ public:
 
 	std::map<UID, RestoreLoaderInterface> loadersInterf; // UID: loaderInterf's id
 	std::map<UID, RestoreApplierInterface> appliersInterf; // UID: applierInterf's id
+	Promise<Void> recruitedRoles; // sent when loaders and appliers are recruited
 
 	NotifiedVersion versionBatchId; // The index of the version batch that has been initialized and put into pipeline
 	NotifiedVersion finishedBatch; // The highest batch index all appliers have applied mutations
@@ -124,6 +121,7 @@ public:
 };
 
 void updateProcessStats(Reference<RestoreRoleData> self);
+ACTOR Future<Void> updateProcessMetrics(Reference<RestoreRoleData> self);
 ACTOR Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::string role);
 ACTOR Future<Void> traceRoleVersionBatchProgress(Reference<RestoreRoleData> self, std::string role);
 

@@ -20,13 +20,14 @@
 
 // Unit tests for the flow language and libraries
 
+#include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IThreadPool.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/TLSConfig.actor.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 void forceLinkFlowTests() {}
 
@@ -75,13 +76,25 @@ TEST_CASE("/flow/buggifiedDelay") {
 }
 
 template <class T, class Func, class ErrFunc, class CallbackType>
-class LambdaCallback : public CallbackType, public FastAllocated<LambdaCallback<T,Func,ErrFunc,CallbackType>> {
+class LambdaCallback final : public CallbackType, public FastAllocated<LambdaCallback<T, Func, ErrFunc, CallbackType>> {
 	Func func;
 	ErrFunc errFunc;
 
-	virtual void fire(T const& t) { CallbackType::remove(); func(t); delete this; }
-	virtual void fire(T && t) { CallbackType::remove(); func(std::move(t)); delete this; }
-	virtual void error(Error e) { CallbackType::remove(); errFunc(e); delete this; }
+	void fire(T const& t) override {
+		CallbackType::remove();
+		func(t);
+		delete this;
+	}
+	void fire(T&& t) override {
+		CallbackType::remove();
+		func(std::move(t));
+		delete this;
+	}
+	void error(Error e) override {
+		CallbackType::remove();
+		errFunc(e);
+		delete this;
+	}
 
 public:
 	LambdaCallback(Func&& f, ErrFunc&& e) : func(std::move(f)), errFunc(std::move(e)) {}
@@ -94,8 +107,7 @@ void onReady(Future<T>&& f, Func&& func, ErrFunc&& errFunc) {
 			errFunc(f.getError());
 		else
 			func(f.get());
-	}
-	else
+	} else
 		f.addCallbackAndClear(new LambdaCallback<T, Func, ErrFunc, Callback<T>>(std::move(func), std::move(errFunc)));
 }
 
@@ -106,13 +118,12 @@ void onReady(FutureStream<T>&& f, Func&& func, ErrFunc&& errFunc) {
 			errFunc(f.getError());
 		else
 			func(f.pop());
-	}
-	else
-		f.addCallbackAndClear(new LambdaCallback<T, Func, ErrFunc, SingleCallback<T>>(std::move(func), std::move(errFunc)));
+	} else
+		f.addCallbackAndClear(
+		    new LambdaCallback<T, Func, ErrFunc, SingleCallback<T>>(std::move(func), std::move(errFunc)));
 }
 
-ACTOR static void emptyVoidActor() {
-}
+ACTOR static void emptyVoidActor() {}
 
 ACTOR [[flow_allow_discard]] static Future<Void> emptyActor() {
 	return Void();
@@ -152,7 +163,7 @@ ACTOR static Future<int> addOneActor(Future<int> in) {
 }
 
 ACTOR static Future<Void> chooseTwoActor(Future<Void> f, Future<Void> g) {
-	choose{
+	choose {
 		when(wait(f)) {}
 		when(wait(g)) {}
 	}
@@ -167,47 +178,52 @@ ACTOR static Future<int> consumeOneActor(FutureStream<int> in) {
 ACTOR static Future<int> sumActor(FutureStream<int> in) {
 	state int total = 0;
 	try {
-		loop{
+		loop {
 			int i = waitNext(in);
 			total += i;
 		}
-	}
-	catch (Error& e) {
+	} catch (Error& e) {
 		if (e.code() != error_code_end_of_stream)
 			throw;
 	}
 	return total;
 }
 
-ACTOR template <class T> static Future<T> templateActor(T t) {
+ACTOR template <class T>
+static Future<T> templateActor(T t) {
 	return t;
 }
 
-static int destroy() { return 666; }
+static int destroy() {
+	return 666;
+}
 ACTOR static Future<Void> testHygeine() {
-	ASSERT(destroy() == 666);  // Should fail to compile if SAV<Void>::destroy() is visible
+	ASSERT(destroy() == 666); // Should fail to compile if SAV<Void>::destroy() is visible
 	return Void();
 }
 
-//bool expectActorCount(int x) { return actorCount == x; }
-bool expectActorCount(int) { return true; }
+// bool expectActorCount(int x) { return actorCount == x; }
+bool expectActorCount(int) {
+	return true;
+}
 
-struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
+struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 	int ticks;
 	Promise<Void> nextTick;
 	int nextYield;
 	INetwork* baseNetwork;
 
-	virtual flowGlobalType global(int id) { return baseNetwork->global(id); }
-	virtual void setGlobal(size_t id, flowGlobalType v) { baseNetwork->setGlobal(id, v); return; }
+	flowGlobalType global(int id) const override { return baseNetwork->global(id); }
+	void setGlobal(size_t id, flowGlobalType v) override {
+		baseNetwork->setGlobal(id, v);
+		return;
+	}
 
 	YieldMockNetwork() : ticks(0), nextYield(0) {
 		baseNetwork = g_network;
 		g_network = this;
 	}
-	~YieldMockNetwork() {
-		g_network = baseNetwork;
-	}
+	~YieldMockNetwork() { g_network = baseNetwork; }
 
 	void tick() {
 		ticks++;
@@ -216,42 +232,58 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 		t.send(Void());
 	}
 
-	virtual Future<class Void> delay(double seconds, TaskPriority taskID) {
-		return nextTick.getFuture();
-	}
+	Future<class Void> delay(double seconds, TaskPriority taskID) override { return nextTick.getFuture(); }
 
-	virtual Future<class Void> yield(TaskPriority taskID) {
+	Future<class Void> yield(TaskPriority taskID) override {
 		if (check_yield(taskID))
-			return delay(0,taskID);
+			return delay(0, taskID);
 		return Void();
 	}
 
-	virtual bool check_yield(TaskPriority taskID) {
-		if (nextYield > 0) --nextYield;
+	bool check_yield(TaskPriority taskID) override {
+		if (nextYield > 0)
+			--nextYield;
 		return nextYield == 0;
 	}
 
 	// Delegate everything else.  TODO: Make a base class NetworkWrapper for delegating everything in INetwork
-	virtual TaskPriority getCurrentTask() { return baseNetwork->getCurrentTask(); }
-	virtual void setCurrentTask(TaskPriority taskID) { baseNetwork->setCurrentTask(taskID); }
-	virtual double now() { return baseNetwork->now(); }
-	virtual double timer() { return baseNetwork->timer(); }
-	virtual void stop() { return baseNetwork->stop(); }
-	virtual void addStopCallback( std::function<void()> fn ) { ASSERT(false); return; }
-	virtual bool isSimulated() const { return baseNetwork->isSimulated(); }
-	virtual void onMainThread(Promise<Void>&& signal, TaskPriority taskID) { return baseNetwork->onMainThread(std::move(signal), taskID); }
+	TaskPriority getCurrentTask() const override { return baseNetwork->getCurrentTask(); }
+	void setCurrentTask(TaskPriority taskID) override { baseNetwork->setCurrentTask(taskID); }
+	double now() const override { return baseNetwork->now(); }
+	double timer() override { return baseNetwork->timer(); }
+	double timer_monotonic() override { return baseNetwork->timer_monotonic(); }
+	void stop() override { return baseNetwork->stop(); }
+	void addStopCallback(std::function<void()> fn) override {
+		ASSERT(false);
+		return;
+	}
+	bool isSimulated() const override { return baseNetwork->isSimulated(); }
+	void onMainThread(Promise<Void>&& signal, TaskPriority taskID) override {
+		return baseNetwork->onMainThread(std::move(signal), taskID);
+	}
 	bool isOnMainThread() const override { return baseNetwork->isOnMainThread(); }
-	virtual THREAD_HANDLE startThread(THREAD_FUNC_RETURN(*func) (void *), void *arg) { return baseNetwork->startThread(func,arg); }
-	virtual Future< Reference<class IAsyncFile> > open(std::string filename, int64_t flags, int64_t mode) { return IAsyncFileSystem::filesystem()->open(filename,flags,mode); }
-	virtual Future< Void > deleteFile(std::string filename, bool mustBeDurable) { return IAsyncFileSystem::filesystem()->deleteFile(filename,mustBeDurable); }
-	virtual void run() { return baseNetwork->run(); }
-	virtual bool checkRunnable() { return baseNetwork->checkRunnable(); }
-	virtual void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total)  { return baseNetwork->getDiskBytes(directory,free,total); }
-	virtual bool isAddressOnThisHost(NetworkAddress const& addr) { return baseNetwork->isAddressOnThisHost(addr); }
-	virtual const TLSConfig& getTLSConfig() {
+	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg) override {
+		return baseNetwork->startThread(func, arg);
+	}
+	Future<Reference<class IAsyncFile>> open(std::string filename, int64_t flags, int64_t mode) {
+		return IAsyncFileSystem::filesystem()->open(filename, flags, mode);
+	}
+	Future<Void> deleteFile(std::string filename, bool mustBeDurable) {
+		return IAsyncFileSystem::filesystem()->deleteFile(filename, mustBeDurable);
+	}
+	void run() override { return baseNetwork->run(); }
+	bool checkRunnable() override { return baseNetwork->checkRunnable(); }
+	void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) override {
+		return baseNetwork->getDiskBytes(directory, free, total);
+	}
+	bool isAddressOnThisHost(NetworkAddress const& addr) const override {
+		return baseNetwork->isAddressOnThisHost(addr);
+	}
+	const TLSConfig& getTLSConfig() const override {
 		static TLSConfig emptyConfig;
 		return emptyConfig;
 	}
+	ProtocolVersion protocolVersion() override { return baseNetwork->protocolVersion(); }
 };
 
 struct NonserializableThing {};
@@ -259,14 +291,14 @@ ACTOR static Future<NonserializableThing> testNonserializableThing() {
 	return NonserializableThing();
 }
 
-ACTOR Future<Void> testCancelled(bool *exits, Future<Void> f) {
+ACTOR Future<Void> testCancelled(bool* exits, Future<Void> f) {
 	try {
 		wait(Future<Void>(Never()));
-	} catch( Error &e ) {
+	} catch (Error& e) {
 		state Error err = e;
 		try {
 			wait(Future<Void>(Never()));
-		} catch( Error &e ) {
+		} catch (Error& e) {
 			*exits = true;
 			throw;
 		}
@@ -275,17 +307,16 @@ ACTOR Future<Void> testCancelled(bool *exits, Future<Void> f) {
 	return Void();
 }
 
-TEST_CASE("/flow/flow/cancel1")
-{
+TEST_CASE("/flow/flow/cancel1") {
 	bool exits = false;
 	Promise<Void> p;
 	Future<Void> test = testCancelled(&exits, p.getFuture());
 	ASSERT(p.getPromiseReferenceCount() == 1 && p.getFutureReferenceCount() == 1);
 	test.cancel();
 	ASSERT(exits);
-	ASSERT(test.getPromiseReferenceCount() == 0 && test.getFutureReferenceCount() == 1 && test.isReady() && test.isError() && test.getError().code() == error_code_actor_cancelled);
+	ASSERT(test.getPromiseReferenceCount() == 0 && test.getFutureReferenceCount() == 1 && test.isReady() &&
+	       test.isError() && test.getError().code() == error_code_actor_cancelled);
 	ASSERT(p.getPromiseReferenceCount() == 1 && p.getFutureReferenceCount() == 0);
-
 
 	return Void();
 }
@@ -295,16 +326,14 @@ ACTOR static Future<Void> noteCancel(int* cancelled) {
 	try {
 		wait(Future<Void>(Never()));
 		throw internal_error();
-	}
-	catch (...) {
+	} catch (...) {
 		printf("Cancelled!\n");
 		*cancelled = 1;
 		throw;
 	}
 }
 
-TEST_CASE("/flow/flow/cancel2")
-{
+TEST_CASE("/flow/flow/cancel2") {
 	int c1 = 0, c2 = 0, c3 = 0;
 
 	Future<Void> cf = noteCancel(&c1);
@@ -333,8 +362,7 @@ struct Int {
 };
 } // namespace
 
-TEST_CASE("/flow/flow/nonserializable futures")
-{
+TEST_CASE("/flow/flow/nonserializable futures") {
 	// Types no longer need to be statically serializable to make futures, promises, actors
 	{
 		Future<NonserializableThing> f = testNonserializableThing();
@@ -344,7 +372,7 @@ TEST_CASE("/flow/flow/nonserializable futures")
 	}
 
 	// But this won't compile
-	//ReplyPromise<NonserializableThing> rp;
+	// ReplyPromise<NonserializableThing> rp;
 
 	// ReplyPromise can be used like a normal promise
 	{
@@ -367,15 +395,15 @@ TEST_CASE("/flow/flow/nonserializable futures")
 	return Void();
 }
 
-TEST_CASE("/flow/flow/networked futures")
-{
+TEST_CASE("/flow/flow/networked futures") {
 	// RequestStream can be serialized
 	{
 		RequestStream<Int> locInt;
 		BinaryWriter wr(IncludeVersion());
 		wr << locInt;
 
-		ASSERT(locInt.getEndpoint().isValid() && locInt.getEndpoint().isLocal() && locInt.getEndpoint().getPrimaryAddress() == FlowTransport::transport().getLocalAddress());
+		ASSERT(locInt.getEndpoint().isValid() && locInt.getEndpoint().isLocal() &&
+		       locInt.getEndpoint().getPrimaryAddress() == FlowTransport::transport().getLocalAddress());
 
 		BinaryReader rd(wr.toValue(), IncludeVersion());
 		RequestStream<Int> remoteInt;
@@ -383,7 +411,6 @@ TEST_CASE("/flow/flow/networked futures")
 
 		ASSERT(remoteInt.getEndpoint() == locInt.getEndpoint());
 	}
-
 
 	// ReplyPromise can be serialized
 	// TODO: This needs to fiddle with g_currentDeliveryPeerAddress
@@ -404,15 +431,15 @@ TEST_CASE("/flow/flow/networked futures")
 	return Void();
 }
 
-TEST_CASE("/flow/flow/quorum")
-{
+TEST_CASE("/flow/flow/quorum") {
 	vector<Promise<int>> ps(5);
 	vector<Future<int>> fs;
 	vector<Future<Void>> qs;
-	for (auto& p : ps) fs.push_back(p.getFuture());
+	for (auto& p : ps)
+		fs.push_back(p.getFuture());
 
 	for (int i = 0; i <= ps.size(); i++)
-		qs.push_back( quorum(fs, i) );
+		qs.push_back(quorum(fs, i));
 
 	for (int i = 0; i < ps.size(); i++) {
 		ASSERT(qs[i].isReady());
@@ -423,8 +450,7 @@ TEST_CASE("/flow/flow/quorum")
 	return Void();
 }
 
-TEST_CASE("/flow/flow/trivial futures")
-{
+TEST_CASE("/flow/flow/trivial futures") {
 	Future<int> invalid;
 	ASSERT(!invalid.isValid());
 
@@ -438,8 +464,7 @@ TEST_CASE("/flow/flow/trivial futures")
 	return Void();
 }
 
-TEST_CASE("/flow/flow/trivial promises")
-{
+TEST_CASE("/flow/flow/trivial promises") {
 	Future<int> f;
 
 	Promise<int> p;
@@ -471,8 +496,7 @@ TEST_CASE("/flow/flow/trivial promises")
 	return Void();
 }
 
-TEST_CASE("/flow/flow/trivial promisestreams")
-{
+TEST_CASE("/flow/flow/trivial promisestreams") {
 	FutureStream<int> f;
 
 	PromiseStream<int> p;
@@ -506,17 +530,18 @@ TEST_CASE("/flow/flow/trivial promisestreams")
 	return Void();
 }
 
-TEST_CASE("/flow/flow/callbacks")
-{
+TEST_CASE("/flow/flow/callbacks") {
 	Promise<int> p;
 	Future<int> f = p.getFuture();
 	int result = 0;
 	bool happened = false;
 
-	onReady(std::move(f), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
-	onReady(p.getFuture(), [&happened](int) { happened = true; }, [&happened](Error){ happened = true; });
+	onReady(
+	    std::move(f), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
+	onReady(
+	    p.getFuture(), [&happened](int) { happened = true; }, [&happened](Error) { happened = true; });
 	ASSERT(!f.isValid());
-	ASSERT(p.isValid() && !p.isSet() && p.getFutureReferenceCount()==1);
+	ASSERT(p.isValid() && !p.isSet() && p.getFutureReferenceCount() == 1);
 	ASSERT(result == 0 && !happened);
 
 	p.send(123);
@@ -524,14 +549,16 @@ TEST_CASE("/flow/flow/callbacks")
 	ASSERT(p.isValid() && p.isSet() && p.getFutureReferenceCount() == 0 && p.getFuture().get() == 123);
 
 	result = 0;
-	onReady(p.getFuture(), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
+	onReady(
+	    p.getFuture(), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
 	ASSERT(result == 123);
 	ASSERT(p.isValid() && p.isSet() && p.getFutureReferenceCount() == 0 && p.getFuture().get() == 123);
 
 	p = Promise<int>();
 	f = p.getFuture();
 	result = 0;
-	onReady(std::move(f), [&result](int x) { result = x; }, [&result](Error e) { result = -e.code(); });
+	onReady(
+	    std::move(f), [&result](int x) { result = x; }, [&result](Error e) { result = -e.code(); });
 	ASSERT(!f.isValid());
 	ASSERT(p.isValid() && !p.isSet() && p.getFutureReferenceCount() == 1);
 	ASSERT(result == 0);
@@ -541,13 +568,13 @@ TEST_CASE("/flow/flow/callbacks")
 	return Void();
 }
 
-TEST_CASE("/flow/flow/promisestream callbacks")
-{
+TEST_CASE("/flow/flow/promisestream callbacks") {
 	PromiseStream<int> p;
 
 	int result = 0;
 
-	onReady(p.getFuture(), [&result](int x) { result = x; }, [&result](Error e){ result = -1; });
+	onReady(
+	    p.getFuture(), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
 
 	ASSERT(result == 0);
 
@@ -557,12 +584,14 @@ TEST_CASE("/flow/flow/promisestream callbacks")
 	ASSERT(result == 123);
 	result = 0;
 
-	onReady(p.getFuture(), [&result](int x) { result = x; }, [&result](Error e){ result = -1; });
+	onReady(
+	    p.getFuture(), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
 
 	ASSERT(result == 456);
 	result = 0;
 
-	onReady(p.getFuture(), [&result](int x) { result = x; }, [&result](Error e){ result = -1; });
+	onReady(
+	    p.getFuture(), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
 
 	ASSERT(result == 0);
 
@@ -572,30 +601,29 @@ TEST_CASE("/flow/flow/promisestream callbacks")
 	return Void();
 }
 
-//Incompatible with --crash, so we are commenting it out for now
+// Incompatible with --crash, so we are commenting it out for now
 /*
 TEST_CASE("/flow/flow/promisestream multiple wait error")
 {
-	state int result = 0;
-	state PromiseStream<int> p;
-	try {
-		onReady(p.getFuture(), [&result](int x) { result = x; }, [&result](Error e){ result = -1; });
-		result = 100;
-		onReady(p.getFuture(), [&result](int x) { result = x; }, [&result](Error e){ result = -1; });
-		ASSERT(false);
-	}
-	catch (Error& e) {
-		ASSERT(e.code() == error_code_internal_error);
-	}
-	ASSERT(result == 100);
-	p = PromiseStream<int>();
-	ASSERT(result == -1);
-	return Void();
+    state int result = 0;
+    state PromiseStream<int> p;
+    try {
+        onReady(p.getFuture(), [&result](int x) { result = x; }, [&result](Error e){ result = -1; });
+        result = 100;
+        onReady(p.getFuture(), [&result](int x) { result = x; }, [&result](Error e){ result = -1; });
+        ASSERT(false);
+    }
+    catch (Error& e) {
+        ASSERT(e.code() == error_code_internal_error);
+    }
+    ASSERT(result == 100);
+    p = PromiseStream<int>();
+    ASSERT(result == -1);
+    return Void();
 }
 */
 
-TEST_CASE("/flow/flow/trivial actors")
-{
+TEST_CASE("/flow/flow/trivial actors") {
 	ASSERT(expectActorCount(0));
 
 	int result = 0;
@@ -604,13 +632,15 @@ TEST_CASE("/flow/flow/trivial actors")
 	ASSERT(expectActorCount(0));
 
 	Future<int> f = return42Actor();
-	ASSERT(f.isReady() && !f.isError() && f.get() == 42 && f.getFutureReferenceCount()==1 && f.getPromiseReferenceCount() == 0);
+	ASSERT(f.isReady() && !f.isError() && f.get() == 42 && f.getFutureReferenceCount() == 1 &&
+	       f.getPromiseReferenceCount() == 0);
 	ASSERT(expectActorCount(1));
 	f = Future<int>();
 	ASSERT(expectActorCount(0));
 
 	f = templateActor(24);
-	ASSERT(f.isReady() && !f.isError() && f.get() == 24 && f.getFutureReferenceCount() == 1 && f.getPromiseReferenceCount() == 0);
+	ASSERT(f.isReady() && !f.isError() && f.get() == 24 && f.getFutureReferenceCount() == 1 &&
+	       f.getPromiseReferenceCount() == 0);
 	ASSERT(expectActorCount(1));
 	f = Future<int>();
 	ASSERT(expectActorCount(0));
@@ -645,16 +675,15 @@ TEST_CASE("/flow/flow/trivial actors")
 	ps.sendError(end_of_stream());
 	ASSERT(f.get() == 111);
 
-	ASSERT( testHygeine().isReady() );
+	ASSERT(testHygeine().isReady());
 	return Void();
 }
 
-TEST_CASE("/flow/flow/yieldedFuture/progress")
-{
+TEST_CASE("/flow/flow/yieldedFuture/progress") {
 	// Check that if check_yield always returns true, the yieldedFuture will do nothing immediately but will
 	// get one thing done per "tick" (per delay(0) returning).
 
-	Reference<YieldMockNetwork> yn( new YieldMockNetwork );
+	auto yn = makeReference<YieldMockNetwork>();
 
 	yn->nextYield = 0;
 
@@ -663,41 +692,38 @@ TEST_CASE("/flow/flow/yieldedFuture/progress")
 	Future<Void> i = success(u);
 
 	std::vector<Future<Void>> v;
-	for(int i=0; i<5; i++)
+	for (int i = 0; i < 5; i++)
 		v.push_back(yieldedFuture(u));
-	auto numReady = [&v]() {
-		return std::count_if(v.begin(), v.end(), [](Future<Void> v) { return v.isReady(); });
-	};
+	auto numReady = [&v]() { return std::count_if(v.begin(), v.end(), [](Future<Void> v) { return v.isReady(); }); };
 
-	ASSERT( numReady()==0 );
+	ASSERT(numReady() == 0);
 	p.send(Void());
-	ASSERT( u.isReady() && i.isReady() && numReady()==0 );
+	ASSERT(u.isReady() && i.isReady() && numReady() == 0);
 
-	for(int i=0; i<5; i++) {
+	for (int i = 0; i < 5; i++) {
 		yn->tick();
-		ASSERT( numReady() == i+1 );
+		ASSERT(numReady() == i + 1);
 	}
 
-	for(int i=0; i<5; i++) {
-		ASSERT( v[i].getPromiseReferenceCount() == 0 && v[i].getFutureReferenceCount() == 1 );
+	for (int i = 0; i < 5; i++) {
+		ASSERT(v[i].getPromiseReferenceCount() == 0 && v[i].getFutureReferenceCount() == 1);
 	}
 
 	return Void();
 }
 
-TEST_CASE("/flow/flow/yieldedFuture/random")
-{
+TEST_CASE("/flow/flow/yieldedFuture/random") {
 	// Check expectations about exactly how yieldedFuture responds to check_yield results
 
-	Reference<YieldMockNetwork> yn( new YieldMockNetwork );
+	auto yn = makeReference<YieldMockNetwork>();
 
-	for(int r=0; r<100; r++) {
+	for (int r = 0; r < 100; r++) {
 		Promise<Void> p;
 		Future<Void> u = p.getFuture();
 		Future<Void> i = success(u);
 
 		std::vector<Future<Void>> v;
-		for(int i=0; i<25; i++)
+		for (int i = 0; i < 25; i++)
 			v.push_back(yieldedFuture(u));
 		auto numReady = [&v]() {
 			return std::count_if(v.begin(), v.end(), [](Future<Void> v) { return v.isReady(); });
@@ -705,41 +731,40 @@ TEST_CASE("/flow/flow/yieldedFuture/random")
 
 		Future<Void> j = success(u);
 
-		ASSERT( numReady()==0 );
+		ASSERT(numReady() == 0);
 
 		int expectYield = deterministicRandom()->randomInt(0, 4);
 		int expectReady = expectYield;
 		yn->nextYield = 1 + expectYield;
 
 		p.send(Void());
-		ASSERT( u.isReady() && i.isReady() && j.isReady() && numReady()==expectReady );
+		ASSERT(u.isReady() && i.isReady() && j.isReady() && numReady() == expectReady);
 
 		while (numReady() != v.size()) {
 			expectYield = deterministicRandom()->randomInt(0, 4);
 			yn->nextYield = 1 + expectYield;
 			expectReady += 1 + expectYield;
 			yn->tick();
-			//printf("Yielding %d times, expect %d/%d ready, got %d\n", expectYield, expectReady, v.size(), numReady() );
-			ASSERT( numReady() == std::min<int>(expectReady, v.size()) );
+			// printf("Yielding %d times, expect %d/%d ready, got %d\n", expectYield, expectReady, v.size(), numReady()
+			// );
+			ASSERT(numReady() == std::min<int>(expectReady, v.size()));
 		}
 
-		for(int i=0; i<v.size(); i++) {
-			ASSERT( v[i].getPromiseReferenceCount() == 0 && v[i].getFutureReferenceCount() == 1 );
+		for (int i = 0; i < v.size(); i++) {
+			ASSERT(v[i].getPromiseReferenceCount() == 0 && v[i].getFutureReferenceCount() == 1);
 		}
 	}
 
 	return Void();
 }
 
-
-TEST_CASE("/flow/perf/yieldedFuture")
-{
+TEST_CASE("/flow/perf/yieldedFuture") {
 	double start;
 	int N = 1000000;
 
-	Reference<YieldMockNetwork> yn( new YieldMockNetwork );
+	auto yn = makeReference<YieldMockNetwork>();
 
-	yn->nextYield = 2*N + 100;
+	yn->nextYield = 2 * N + 100;
 
 	Promise<Void> p;
 	Future<Void> f = p.getFuture();
@@ -766,22 +791,21 @@ TEST_CASE("/flow/perf/yieldedFuture")
 	return Void();
 }
 
-TEST_CASE("/flow/flow/chooseTwoActor")
-{
+TEST_CASE("/flow/flow/chooseTwoActor") {
 	ASSERT(expectActorCount(0));
 
 	Promise<Void> a, b;
 	Future<Void> c = chooseTwoActor(a.getFuture(), b.getFuture());
-	ASSERT(a.getFutureReferenceCount()==2 && b.getFutureReferenceCount()==2 && !c.isReady());
+	ASSERT(a.getFutureReferenceCount() == 2 && b.getFutureReferenceCount() == 2 && !c.isReady());
 	b.send(Void());
-	ASSERT(a.getFutureReferenceCount() == 0 && b.getFutureReferenceCount() == 0 && c.isReady() && !c.isError() && expectActorCount(1));
+	ASSERT(a.getFutureReferenceCount() == 0 && b.getFutureReferenceCount() == 0 && c.isReady() && !c.isError() &&
+	       expectActorCount(1));
 	c = Future<Void>();
 	ASSERT(a.getFutureReferenceCount() == 0 && b.getFutureReferenceCount() == 0 && expectActorCount(0));
 	return Void();
 }
 
-TEST_CASE("/flow/flow/perf/actor patterns")
-{
+TEST_CASE("/flow/flow/perf/actor patterns") {
 	double start;
 	int N = 1000000;
 
@@ -815,7 +839,7 @@ TEST_CASE("/flow/flow/perf/actor patterns")
 
 	/*start = timer();
 	for (int i = 0; i < N; i++)
-		oneWaitVoidActor(never);
+	    oneWaitVoidActor(never);
 	printf("oneWaitVoidActor(never): %0.1f M/sec\n", N / 1e6 / (timer() - start));*/
 
 	{
@@ -909,7 +933,7 @@ TEST_CASE("/flow/flow/perf/actor patterns")
 			Future<Void> f = chooseTwoActor(never, never);
 			ASSERT(!f.isReady());
 		}
-		//ASSERT(expectActorCount(0));
+		// ASSERT(expectActorCount(0));
 		printf("(cancelled) chooseTwoActor(never, never): %0.1f M/sec\n", N / 1e6 / (timer() - start));
 	}
 
@@ -1081,7 +1105,8 @@ TEST_CASE("/flow/flow/perf/actor patterns")
 				fs[j] = ps[j].getFuture();
 
 			Future<Void> q = quorum(fs, 2);
-			for (auto& p : ps) p.send(Void());
+			for (auto& p : ps)
+				p.send(Void());
 		}
 		printf("quorum(2/3): %0.2f M/sec\n", N / 1e6 / (timer() - start));
 	}
@@ -1099,15 +1124,16 @@ struct YAMRandom {
 
 	void randomOp() {
 		if (deterministicRandom()->random01() < 0.01)
-			while (!check_yield());
+			while (!check_yield())
+				;
 
 		int k = deterministicRandom()->randomInt(0, kmax);
 		int op = deterministicRandom()->randomInt(0, 7);
-		//printf("%d",op);
+		// printf("%d",op);
 		if (op == 0) {
 			onchanges.push_back(yam.onChange(k));
 		} else if (op == 1) {
-			onchanges.push_back( trigger([this](){ this->randomOp(); }, yam.onChange(k)) );
+			onchanges.push_back(trigger([this]() { this->randomOp(); }, yam.onChange(k)));
 		} else if (op == 2) {
 			if (onchanges.size()) {
 				int i = deterministicRandom()->randomInt(0, onchanges.size());
@@ -1124,13 +1150,12 @@ struct YAMRandom {
 		} else if (op == 6) {
 			int a = deterministicRandom()->randomInt(0, kmax);
 			int b = deterministicRandom()->randomInt(0, kmax);
-			yam.triggerRange(std::min(a,b), std::max(a,b)+1);
+			yam.triggerRange(std::min(a, b), std::max(a, b) + 1);
 		}
 	}
 };
 
-TEST_CASE("/flow/flow/YieldedAsyncMap/randomized")
-{
+TEST_CASE("/flow/flow/YieldedAsyncMap/randomized") {
 	state YAMRandom<YieldedAsyncMap<int, int>> yamr;
 	state int it;
 	for (it = 0; it < 100000; it++) {
@@ -1140,8 +1165,7 @@ TEST_CASE("/flow/flow/YieldedAsyncMap/randomized")
 	return Void();
 }
 
-TEST_CASE("/flow/flow/AsyncMap/randomized")
-{
+TEST_CASE("/flow/flow/AsyncMap/randomized") {
 	state YAMRandom<AsyncMap<int, int>> yamr;
 	state int it;
 	for (it = 0; it < 100000; it++) {
@@ -1151,8 +1175,7 @@ TEST_CASE("/flow/flow/AsyncMap/randomized")
 	return Void();
 }
 
-TEST_CASE("/flow/flow/YieldedAsyncMap/basic")
-{
+TEST_CASE("/flow/flow/YieldedAsyncMap/basic") {
 	state YieldedAsyncMap<int, int> yam;
 	state Future<Void> y0 = yam.onChange(1);
 	yam.setUnconditional(1, 0);
@@ -1160,8 +1183,8 @@ TEST_CASE("/flow/flow/YieldedAsyncMap/basic")
 	state Future<Void> y1a = yam.onChange(1);
 	state Future<Void> y1b = yam.onChange(1);
 	yam.set(1, 1);
-	//while (!check_yield()) {}
-	//yam.triggerRange(0, 4);
+	// while (!check_yield()) {}
+	// yam.triggerRange(0, 4);
 
 	state Future<Void> y2 = yam.onChange(1);
 	wait(reportErrors(y0, "Y0"));
@@ -1173,13 +1196,12 @@ TEST_CASE("/flow/flow/YieldedAsyncMap/basic")
 	return Void();
 }
 
-TEST_CASE("/flow/flow/YieldedAsyncMap/cancel")
-{
+TEST_CASE("/flow/flow/YieldedAsyncMap/cancel") {
 	state YieldedAsyncMap<int, int> yam;
-	//ASSERT(yam.count(1) == 0);
-	//state Future<Void> y0 = yam.onChange(1);
-	//ASSERT(yam.count(1) == 1);
-	//yam.setUnconditional(1, 0);
+	// ASSERT(yam.count(1) == 0);
+	// state Future<Void> y0 = yam.onChange(1);
+	// ASSERT(yam.count(1) == 1);
+	// yam.setUnconditional(1, 0);
 
 	ASSERT(yam.count(1) == 0);
 	state Future<Void> y1 = yam.onChange(1);
@@ -1198,8 +1220,7 @@ TEST_CASE("/flow/flow/YieldedAsyncMap/cancel")
 	return Void();
 }
 
-TEST_CASE("/flow/flow/YieldedAsyncMap/cancel2")
-{
+TEST_CASE("/flow/flow/YieldedAsyncMap/cancel2") {
 	state YieldedAsyncMap<int, int> yam;
 
 	state Future<Void> y1 = yam.onChange(1);
@@ -1207,11 +1228,11 @@ TEST_CASE("/flow/flow/YieldedAsyncMap/cancel2")
 
 	auto* pyam = &yam;
 	uncancellable(trigger(
-		[pyam](){
-			printf("Triggered\n");
-			pyam->triggerAll();
-		},
-		delay(1)));
+	    [pyam]() {
+		    printf("Triggered\n");
+		    pyam->triggerAll();
+	    },
+	    delay(1)));
 
 	wait(y1);
 	printf("Got y1\n");
@@ -1220,8 +1241,7 @@ TEST_CASE("/flow/flow/YieldedAsyncMap/cancel2")
 	return Void();
 }
 
-TEST_CASE("/flow/flow/AsyncVar/basic")
-{
+TEST_CASE("/flow/flow/AsyncVar/basic") {
 	AsyncVar<int> av;
 	Future<Void> ch = av.onChange();
 	ASSERT(!ch.isReady());
@@ -1238,24 +1258,23 @@ TEST_CASE("/flow/flow/AsyncVar/basic")
 	return Void();
 }
 
-ACTOR static Future<Void> waitAfterCancel( int* output ) {
+ACTOR static Future<Void> waitAfterCancel(int* output) {
 	*output = 0;
 	try {
-		wait( Never() );
+		wait(Never());
 	} catch (...) {
-		wait( (*output=1, Future<Void>(Void())) );
+		wait((*output = 1, Future<Void>(Void())));
 	}
 	ASSERT(false);
 	return Void();
 }
 
-TEST_CASE("/fdbrpc/flow/wait_expression_after_cancel")
-{
+TEST_CASE("/fdbrpc/flow/wait_expression_after_cancel") {
 	int a = -1;
 	Future<Void> f = waitAfterCancel(&a);
-	ASSERT( a == 0 );
+	ASSERT(a == 0);
 	f.cancel();
-	ASSERT( a == 1 );
+	ASSERT(a == 1);
 	return Void();
 }
 
@@ -1284,7 +1303,7 @@ class [[nodiscard]] Foo2 {
 public:
 	explicit Foo2(int x) : x(x) {}
 	Future<int> foo() { return fooActor(this); }
-	ACTOR static Future<int> fooActor(Foo2 * self);
+	ACTOR static Future<int> fooActor(Foo2* self);
 
 private:
 	int x;

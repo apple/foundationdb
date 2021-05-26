@@ -18,7 +18,7 @@
 # limitations under the License.
 cmake_minimum_required(VERSION 3.13)
 project(foundationdb
-  VERSION 7.0.0
+  VERSION 7.1.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
   LANGUAGES C CXX ASM)
@@ -72,7 +72,8 @@ add_custom_target(branch_file ALL DEPENDS ${CURR_BRANCH_FILE})
 execute_process(
   COMMAND git rev-parse HEAD
   WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-  OUTPUT_VARIABLE CURRENT_GIT_VERSION_WNL)
+  OUTPUT_VARIABLE CURRENT_GIT_VERSION_WNL
+  OUTPUT_STRIP_TRAILING_WHITESPACE)
 string(STRIP "${CURRENT_GIT_VERSION_WNL}" CURRENT_GIT_VERSION)
 message(STATUS "Current git version ${CURRENT_GIT_VERSION}")
 
@@ -164,6 +165,7 @@ endif()
 add_subdirectory(fdbbackup)
 add_subdirectory(contrib)
 add_subdirectory(tests)
+add_subdirectory(flowbench EXCLUDE_FROM_ALL)
 if(WITH_PYTHON)
   add_subdirectory(bindings)
 endif()
@@ -180,6 +182,12 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
   add_link_options(-lexecinfo)
 endif()
+
+################################################################################
+# Build information
+################################################################################
+
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/BuildFlags.h.in ${CMAKE_CURRENT_BINARY_DIR}/fdbclient/BuildFlags.h)
 
 ################################################################################
 # process compile commands for IDE

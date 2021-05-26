@@ -24,18 +24,22 @@
 ACTOR Future<Void> waitForStateEqual(IFailureMonitor* monitor, Endpoint endpoint, FailureStatus status) {
 	loop {
 		Future<Void> change = monitor->onStateChanged(endpoint);
-		if (monitor->getState(endpoint) == status) return Void();
+		if (monitor->getState(endpoint) == status)
+			return Void();
 		wait(change);
 	}
 }
 
-ACTOR Future<Void> waitForContinuousFailure(IFailureMonitor* monitor, Endpoint endpoint,
-                                            double sustainedFailureDuration, double slope) {
+ACTOR Future<Void> waitForContinuousFailure(IFailureMonitor* monitor,
+                                            Endpoint endpoint,
+                                            double sustainedFailureDuration,
+                                            double slope) {
 	state double startT = now();
 
 	loop {
 		wait(monitor->onFailed(endpoint));
-		if (monitor->permanentlyFailed(endpoint)) return Void();
+		if (monitor->permanentlyFailed(endpoint))
+			return Void();
 
 		// X == sustainedFailureDuration + slope * (now()-startT+X)
 		double waitDelay = (sustainedFailureDuration + slope * (now() - startT)) / (1 - slope);
@@ -55,7 +59,8 @@ ACTOR Future<Void> waitForContinuousFailure(IFailureMonitor* monitor, Endpoint e
 }
 
 Future<Void> IFailureMonitor::onStateEqual(Endpoint const& endpoint, FailureStatus status) {
-	if (status == getState(endpoint)) return Void();
+	if (status == getState(endpoint))
+		return Void();
 	return waitForStateEqual(this, endpoint, status);
 }
 
@@ -87,8 +92,8 @@ void SimpleFailureMonitor::setStatus(NetworkAddress const& address, FailureStatu
 	if (it == addressStatus.end()) {
 		if (status != FailureStatus()) {
 			TraceEvent("NotifyAddressHealthy").suppressFor(1.0).detail("Address", address);
-			addressStatus[address]=status;
-			endpointKnownFailed.triggerRange( Endpoint({address}, UID()), Endpoint({address}, UID(-1,-1)) );
+			addressStatus[address] = status;
+			endpointKnownFailed.triggerRange(Endpoint({ address }, UID()), Endpoint({ address }, UID(-1, -1)));
 		}
 	} else {
 		bool triggerEndpoint = status != it->second;
@@ -96,13 +101,13 @@ void SimpleFailureMonitor::setStatus(NetworkAddress const& address, FailureStatu
 			it->second = status;
 		else
 			addressStatus.erase(it);
-		if(triggerEndpoint) {
-			if(status.failed) {
+		if (triggerEndpoint) {
+			if (status.failed) {
 				TraceEvent("NotifyAddressFailed").suppressFor(1.0).detail("Address", address);
 			} else {
 				TraceEvent("NotifyAddressHealthyPresent").suppressFor(1.0).detail("Address", address);
 			}
-			endpointKnownFailed.triggerRange( Endpoint({address}, UID()), Endpoint({address}, UID(-1,-1)) );
+			endpointKnownFailed.triggerRange(Endpoint({ address }, UID()), Endpoint({ address }, UID(-1, -1)));
 		}
 	}
 }
@@ -156,7 +161,7 @@ Future<Void> SimpleFailureMonitor::onStateChanged(Endpoint const& endpoint) {
 		return endpointKnownFailed.onChange(endpoint);
 }
 
-FailureStatus SimpleFailureMonitor::getState(Endpoint const& endpoint) {
+FailureStatus SimpleFailureMonitor::getState(Endpoint const& endpoint) const {
 	if (failedEndpoints.count(endpoint))
 		return FailureStatus(true);
 	else {
@@ -170,7 +175,7 @@ FailureStatus SimpleFailureMonitor::getState(Endpoint const& endpoint) {
 	}
 }
 
-FailureStatus SimpleFailureMonitor::getState(NetworkAddress const& address) {
+FailureStatus SimpleFailureMonitor::getState(NetworkAddress const& address) const {
 	auto a = addressStatus.find(address);
 	if (a == addressStatus.end())
 		return FailureStatus();
@@ -178,8 +183,9 @@ FailureStatus SimpleFailureMonitor::getState(NetworkAddress const& address) {
 		return a->second;
 }
 
-bool SimpleFailureMonitor::onlyEndpointFailed(Endpoint const& endpoint) {
-	if (!failedEndpoints.count(endpoint)) return false;
+bool SimpleFailureMonitor::onlyEndpointFailed(Endpoint const& endpoint) const {
+	if (!failedEndpoints.count(endpoint))
+		return false;
 	auto a = addressStatus.find(endpoint.getPrimaryAddress());
 	if (a == addressStatus.end())
 		return true;
@@ -187,7 +193,7 @@ bool SimpleFailureMonitor::onlyEndpointFailed(Endpoint const& endpoint) {
 		return !a->second.failed;
 }
 
-bool SimpleFailureMonitor::permanentlyFailed(Endpoint const& endpoint) {
+bool SimpleFailureMonitor::permanentlyFailed(Endpoint const& endpoint) const {
 	return failedEndpoints.count(endpoint);
 }
 

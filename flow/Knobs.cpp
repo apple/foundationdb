@@ -23,9 +23,10 @@
 #include <cmath>
 #include <cinttypes>
 
-FlowKnobs const* FLOW_KNOBS = new FlowKnobs();
+std::unique_ptr<FlowKnobs> globalFlowKnobs = std::make_unique<FlowKnobs>();
+FlowKnobs const* FLOW_KNOBS = globalFlowKnobs.get();
 
-#define init( knob, value ) initKnob( knob, value, #knob )
+#define init(knob, value) initKnob(knob, value, #knob)
 
 FlowKnobs::FlowKnobs() {
 	initialize();
@@ -61,6 +62,9 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( HUGE_ARENA_LOGGING_BYTES,                          100e6 );
 	init( HUGE_ARENA_LOGGING_INTERVAL,                         5.0 );
 
+	init( WRITE_TRACING_ENABLED,                              true ); if( randomize && BUGGIFY ) WRITE_TRACING_ENABLED = false;
+	init( TRACING_UDP_LISTENER_PORT,                          8889 ); // Only applicable if TracerType is set to a network option.
+
 	//connectionMonitor
 	init( CONNECTION_MONITOR_LOOP_TIME,   isSimulated ? 0.75 : 1.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_LOOP_TIME = 6.0;
 	init( CONNECTION_MONITOR_TIMEOUT,     isSimulated ? 1.50 : 2.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_TIMEOUT = 6.0;
@@ -76,17 +80,26 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( MAX_RECONNECTION_TIME,                               0.5 );
 	init( RECONNECTION_TIME_GROWTH_RATE,                       1.2 );
 	init( RECONNECTION_RESET_TIME,                             5.0 );
+	init( ALWAYS_ACCEPT_DELAY,                                15.0 );
 	init( ACCEPT_BATCH_SIZE,                                    10 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY,             5.0 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT,                20.0 );
 	init( PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT,           3600.0 );
 	init( INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING,              5.0 );
+	init( PING_LOGGING_INTERVAL,                               3.0 );
+	init( PING_SAMPLE_AMOUNT,                                  100 );
+	init( NETWORK_CONNECT_SAMPLE_AMOUNT,                       100 );
 
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
 	init( TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT,              9.0 );
 	init( TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT,             11.0 );
 	init( TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS,               1 );
-	init( TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS,               0 );
+	init( TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS,               1 );
+	init( TLS_CLIENT_HANDSHAKE_THREADS,                          0 );
+	init( TLS_SERVER_HANDSHAKE_THREADS,                         64 );
+	init( TLS_HANDSHAKE_THREAD_STACKSIZE,                64 * 1024 );
+	init( TLS_MALLOC_ARENA_MAX,                                  6 );
+	init( TLS_HANDSHAKE_LIMIT,                                1000 );
 
 	init( NETWORK_TEST_CLIENT_COUNT,                            30 );
 	init( NETWORK_TEST_REPLY_SIZE,                           600e3 );
@@ -104,6 +117,11 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( MAX_EVICT_ATTEMPTS,                                  100 ); if( randomize && BUGGIFY ) MAX_EVICT_ATTEMPTS = 2;
 	init( CACHE_EVICTION_POLICY,                          "random" );
 	init( PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION,                 0.1 ); if( randomize && BUGGIFY ) PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION = 0.0; else if( randomize && BUGGIFY ) PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION = 1.0;
+	init( FLOW_CACHEDFILE_WRITE_IO_SIZE,                         0 );
+	if ( randomize && BUGGIFY) {
+		// Choose 16KB to 64KB as I/O size
+		FLOW_CACHEDFILE_WRITE_IO_SIZE = deterministicRandom()->randomInt(16384, 65537);
+	}
 
 	//AsyncFileEIO
 	init( EIO_MAX_PARALLELISM,                                  4  );
@@ -117,11 +135,13 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( DISABLE_POSIX_KERNEL_AIO,                              0 );
 
 	//AsyncFileNonDurable
+	init( NON_DURABLE_MAX_WRITE_DELAY,                         2.0 ); if( randomize && BUGGIFY ) NON_DURABLE_MAX_WRITE_DELAY = 5.0;
 	init( MAX_PRIOR_MODIFICATION_DELAY,                        1.0 ); if( randomize && BUGGIFY ) MAX_PRIOR_MODIFICATION_DELAY = 10.0;
 
 	//GenericActors
 	init( BUGGIFY_FLOW_LOCK_RELEASE_DELAY,                     1.0 );
 	init( LOW_PRIORITY_DELAY_COUNT,                              5 );
+	init( LOW_PRIORITY_MAX_DELAY,                              5.0 );
 
 	//IAsyncFile
 	init( INCREMENTAL_DELETE_TRUNCATE_AMOUNT,                  5e8 ); //500MB
@@ -135,18 +155,17 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( TSC_YIELD_TIME,                                  1000000 );
 	init( MIN_LOGGED_PRIORITY_BUSY_FRACTION,                  0.05 );
 	init( CERT_FILE_MAX_SIZE,                      5 * 1024 * 1024 );
+	init( READY_QUEUE_RESERVED_SIZE,                          8192 );
 
 	//Network
 	init( PACKET_LIMIT,                                  100LL<<20 );
 	init( PACKET_WARNING,                                  2LL<<20 );  // 2MB packet warning quietly allows for 1MB system messages
 	init( TIME_OFFSET_LOGGING_INTERVAL,                       60.0 );
-	init( MAX_PACKET_SEND_BYTES,                        256 * 1024 );
+	init( MAX_PACKET_SEND_BYTES,                        128 * 1024 );
 	init( MIN_PACKET_BUFFER_BYTES,                        4 * 1024 );
 	init( MIN_PACKET_BUFFER_FREE_BYTES,                        256 );
 	init( FLOW_TCP_NODELAY,                                      1 );
 	init( FLOW_TCP_QUICKACK,                                     0 );
-	init( UNRESTRICTED_HANDSHAKE_LIMIT,                         15 );
-	init( BOUNDED_HANDSHAKE_LIMIT,                             400 );
 
 	//Sim2
 	init( MIN_OPEN_TIME,                                    0.0002 );
@@ -166,6 +185,7 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( TRACE_RETRY_OPEN_INTERVAL,						  1.00 );
 	init( MIN_TRACE_SEVERITY,                 isSimulated ? 1 : 10 ); // Related to the trace severity in Trace.h
 	init( MAX_TRACE_SUPPRESSIONS,                              1e4 );
+	init( TRACE_DATETIME_ENABLED,                             true ); // trace time in human readable format (always real time)
 	init( TRACE_SYNC_ENABLED,                                    0 );
 	init( TRACE_EVENT_METRIC_UNITS_PER_SAMPLE,                 500 );
 	init( TRACE_EVENT_THROTTLER_SAMPLE_EXPIRY,              1800.0 ); // 30 mins
@@ -207,10 +227,13 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( FUTURE_VERSION_BACKOFF_GROWTH,                       2.0 );
 	init( LOAD_BALANCE_MAX_BAD_OPTIONS,                          1 ); //should be the same as MAX_MACHINES_FALLING_BEHIND
 	init( LOAD_BALANCE_PENALTY_IS_BAD,                        true );
-	init( BASIC_LOAD_BALANCE_UPDATE_RATE,                      2.0 );
-	init( BASIC_LOAD_BALANCE_MAX_CHANGE,                      0.05 );
+	init( BASIC_LOAD_BALANCE_UPDATE_RATE,                     10.0 ); //should be longer than the rate we log network metrics
+	init( BASIC_LOAD_BALANCE_MAX_CHANGE,                      0.10 );
 	init( BASIC_LOAD_BALANCE_MAX_PROB,                         2.0 );
-	init( BASIC_LOAD_BALANCE_BUCKETS,                           40 );
+	init( BASIC_LOAD_BALANCE_MIN_REQUESTS,                      20 ); //do not adjust LB probabilities if the proxies are less than releasing less than 20 transactions per second
+	init( BASIC_LOAD_BALANCE_MIN_CPU,                         0.05 ); //do not adjust LB probabilities if the proxies are less than 5% utilized
+	init( BASIC_LOAD_BALANCE_BUCKETS,                           40 ); //proxies bin recent GRV requests into 40 time bins
+	init( BASIC_LOAD_BALANCE_COMPUTE_PRECISION,              10000 ); //determines how much of the LB usage is holding the CPU usage of the proxy
 
 	// Health Monitor
 	init( FAILURE_DETECTION_DELAY,                             4.0 ); if( randomize && BUGGIFY ) FAILURE_DETECTION_DELAY = 1.0;
@@ -220,9 +243,9 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 }
 // clang-format on
 
-static std::string toLower( std::string const& name ) {
+static std::string toLower(std::string const& name) {
 	std::string lower_name;
-	for(auto c = name.begin(); c != name.end(); ++c)
+	for (auto c = name.begin(); c != name.end(); ++c)
 		if (*c >= 'A' && *c <= 'Z')
 			lower_name += *c - 'A' + 'a';
 		else
@@ -230,24 +253,24 @@ static std::string toLower( std::string const& name ) {
 	return lower_name;
 }
 
-bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
+bool Knobs::setKnob(std::string const& knob, std::string const& value) {
 	explicitlySetKnobs.insert(toLower(knob));
 	if (double_knobs.count(knob)) {
 		double v;
-		int n=0;
+		int n = 0;
 		if (sscanf(value.c_str(), "%lf%n", &v, &n) != 1 || n != value.size())
 			throw invalid_option_value();
 		*double_knobs[knob] = v;
 		return true;
 	}
 	if (bool_knobs.count(knob)) {
-		if(toLower(value) == "true") {
+		if (toLower(value) == "true") {
 			*bool_knobs[knob] = true;
-		} else if(toLower(value) == "false") {
+		} else if (toLower(value) == "false") {
 			*bool_knobs[knob] = false;
 		} else {
 			int64_t v;
-			int n=0;
+			int n = 0;
 			if (StringRef(value).startsWith(LiteralStringRef("0x"))) {
 				if (sscanf(value.c_str(), "0x%" SCNx64 "%n", &v, &n) != 1 || n != value.size())
 					throw invalid_option_value();
@@ -261,7 +284,7 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 	}
 	if (int64_knobs.count(knob) || int_knobs.count(knob)) {
 		int64_t v;
-		int n=0;
+		int n = 0;
 		if (StringRef(value).startsWith(LiteralStringRef("0x"))) {
 			if (sscanf(value.c_str(), "0x%" SCNx64 "%n", &v, &n) != 1 || n != value.size())
 				throw invalid_option_value();
@@ -272,7 +295,7 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 		if (int64_knobs.count(knob))
 			*int64_knobs[knob] = v;
 		else {
-			if ( v < std::numeric_limits<int>::min() || v > std::numeric_limits<int>::max() )
+			if (v < std::numeric_limits<int>::min() || v > std::numeric_limits<int>::max())
 				throw invalid_option_value();
 			*int_knobs[knob] = v;
 		}
@@ -286,50 +309,50 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 	return false;
 }
 
-void Knobs::initKnob( double& knob, double value, std::string const& name ) {
+void Knobs::initKnob(double& knob, double value, std::string const& name) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
 		double_knobs[toLower(name)] = &knob;
 	}
 }
 
-void Knobs::initKnob( int64_t& knob, int64_t value, std::string const& name ) {
+void Knobs::initKnob(int64_t& knob, int64_t value, std::string const& name) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
 		int64_knobs[toLower(name)] = &knob;
 	}
 }
 
-void Knobs::initKnob( int& knob, int value, std::string const& name ) {
+void Knobs::initKnob(int& knob, int value, std::string const& name) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
 		int_knobs[toLower(name)] = &knob;
 	}
 }
 
-void Knobs::initKnob( std::string& knob, const std::string& value, const std::string& name ) {
+void Knobs::initKnob(std::string& knob, const std::string& value, const std::string& name) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
 		string_knobs[toLower(name)] = &knob;
 	}
 }
 
-void Knobs::initKnob( bool& knob, bool value, std::string const& name ) {
+void Knobs::initKnob(bool& knob, bool value, std::string const& name) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
 		bool_knobs[toLower(name)] = &knob;
 	}
 }
 
-void Knobs::trace() {
-	for(auto &k : double_knobs)
+void Knobs::trace() const {
+	for (auto& k : double_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
-	for(auto &k : int_knobs)
+	for (auto& k : int_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
-	for(auto &k : int64_knobs)
+	for (auto& k : int64_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
-	for(auto &k : string_knobs)
+	for (auto& k : string_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
-	for(auto &k : bool_knobs)
+	for (auto& k : bool_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
 }

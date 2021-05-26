@@ -1,7 +1,7 @@
 testTitle=FileSystemSimTest
-testName=FileSystem
-discardEdgeMeasurements=false
-fileCount=100000
-;operationName=deletionQuery
-;performingWrites=true
-;writeActorCount=1
+    testName=FileSystem
+    discardEdgeMeasurements=false
+    fileCount=100000
+    ;operationName=deletionQuery
+    ;performingWrites=true
+    ;writeActorCount=1

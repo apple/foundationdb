@@ -29,9 +29,8 @@
 
 class CoroThreadPool {
 public:
-
 	static void init();
-	static void waitFor( Future<Void> what );
+	static void waitFor(Future<Void> what);
 
 	static Reference<IThreadPool> createThreadPool();
 
@@ -40,18 +39,17 @@ protected:
 	~CoroThreadPool() {}
 };
 
-
 template <class T>
-inline T waitForAndGet( Future<T> f ) {
-	if( !f.isReady() )
-		CoroThreadPool::waitFor( success(f) );
+inline T waitForAndGet(Future<T> f) {
+	if (!f.isReady())
+		CoroThreadPool::waitFor(success(f));
 	return f.get();
 }
 
-inline void waitFor( Future<Void> f ) { 
-	CoroThreadPool::waitFor(f); 
-	if (f.isError()) throw f.getError();
+inline void waitFor(Future<Void> f) {
+	CoroThreadPool::waitFor(f);
+	if (f.isError())
+		throw f.getError();
 }
-
 
 #endif

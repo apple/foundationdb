@@ -1,0 +1,45 @@
+[[test]]
+testTitle = 'PreLoad'
+
+    [[test.workload]]
+    testName = 'BulkLoad'
+    testDuration = 3000.0
+    valueBytes = 100
+    targetBytes = 1000000
+    keyPrefix = '\xff/TESTONLYtxnStateStore/notcycle/'
+
+[[test]]
+testTitle = 'Clogged'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 2500.0
+    testDuration = 10.0
+    expectedRate = 0
+    keyPrefix = '\xff/TESTONLYtxnStateStore/'
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 10.0
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'LockDatabaseFrequently'

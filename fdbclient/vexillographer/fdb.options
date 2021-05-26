@@ -108,7 +108,10 @@ description is not currently required but encouraged.
             paramType="String" paramDescription="path to directory containing client libraries"
             description="Searches the specified path for dynamic libraries and adds them to the list of client libraries for use by the multi-version client API. Must be set before setting up the network." />
     <Option name="disable_local_client" code="64"
-            description="Prevents connections through the local client, allowing only connections through externally loaded client libraries. Intended primarily for testing." />
+            description="Prevents connections through the local client, allowing only connections through externally loaded client libraries." />
+    <Option name="client_threads_per_version" code="65"
+            paramType="Int" paramDescription="Number of client threads to be spawned.  Each cluster will be serviced by a single client thread."
+            description="Spawns multiple worker threads for each version of the client that is loaded.  Setting this to a number greater than one implies disable_local_client." />
     <Option name="disable_client_statistics_logging" code="70"
             description="Disables logging of client statistics, such as sampled transaction activity." />
     <Option name="enable_slow_task_profiling" code="71"
@@ -125,6 +128,9 @@ description is not currently required but encouraged.
     <Option name="client_buggify_section_fired_probability" code="83"
             paramType="Int" paramDescription="probability expressed as a percentage between 0 and 100"
             description="Set the probability of an active CLIENT_BUGGIFY section being fired. A section will only fire if it was activated" />
+    <Option name="distributed_client_tracer" code="90"
+            paramType="String" paramDescription="Distributed tracer type. Choose from none, log_file, network_async, or network_lossy"
+            description="Set a tracer to run on the client. Should be set to the same value as the tracer set on the server." />
     <Option name="supported_client_versions" code="1000"
             paramType="String" paramDescription="[release version],[source version],[protocol version];..."
             description="This option is set automatically to communicate the list of supported clients to the active client."
@@ -182,6 +188,13 @@ description is not currently required but encouraged.
     <Option name="transaction_include_port_in_address" code="505"
             description="Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect."
             defaultFor="23"/>
+    <Option name="distributed_transaction_trace_enable" code="600"
+            description="Enable tracing for all transactions. This is the default." />
+    <Option name="distributed_transaction_trace_disable" code="601"
+            description="Disable tracing for all transactions." />
+    <Option name="transaction_bypass_unreadable" code="700"
+            description="Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. This sets the ``bypass_unreadable`` option of each transaction created by this database. See the transaction option description for more information."
+            defaultFor="1100"/>
   </Scope>
   
   <Scope name="TransactionOption">
@@ -195,12 +208,12 @@ description is not currently required but encouraged.
     <Option name="next_write_no_write_conflict_range" code="30"
             description="The next write performed on this transaction will not generate a write conflict range. As a result, other transactions which read the key(s) being modified by the next write will not conflict with this transaction. Care needs to be taken when using this option on a transaction that is shared between multiple threads. When setting this option, write conflict ranges will be disabled on the next write operation, regardless of what thread it is on." />
     <Option name="commit_on_first_proxy" code="40"
-            description="Committing this transaction will bypass the normal load balancing across proxies and go directly to the specifically nominated 'first proxy'."
+            description="Committing this transaction will bypass the normal load balancing across commit proxies and go directly to the specifically nominated 'first commit proxy'."
             hidden="true" />
     <Option name="check_writes_enable" code="50"
             hidden="true" />
     <Option name="read_your_writes_disable" code="51"
-            description="Reads performed by a transaction will not see any prior mutations that occured in that transaction, instead seeing the value which was in the database at the transaction's read version. This option may provide a small performance benefit for the client, but also disables a number of client-side optimizations which are beneficial for transactions which tend to read and write the same keys within a single transaction."/>
+            description="Reads performed by a transaction will not see any prior mutations that occured in that transaction, instead seeing the value which was in the database at the transaction's read version. This option may provide a small performance benefit for the client, but also disables a number of client-side optimizations which are beneficial for transactions which tend to read and write the same keys within a single transaction. It is an error to set this option after performing any reads or writes on the transaction."/>
     <Option name="read_ahead_disable" code="52"
             description="Deprecated" />
     <Option name="durability_datacenter" code="110" />
@@ -264,10 +277,18 @@ description is not currently required but encouraged.
             description="The transaction can retrieve keys that are conflicting with other transactions." />
     <Option name="special_key_space_relaxed" code="713"
             description="By default, the special key space will only allow users to read from exactly one module (a subspace in the special key space). Use this option to allow reading from zero or more modules. Users who set this option should be prepared for new modules, which may have different behaviors than the modules they're currently reading. For example, a new module might block or return an error." />
+    <Option name="special_key_space_enable_writes" code="714"
+            description="By default, users are not allowed to write to special keys. Enable this option will implicitly enable all options required to achieve the configuration change." />        
     <Option name="tag" code="800" paramType="String" paramDescription="String identifier used to associated this transaction with a throttling group. Must not exceed 16 characters."
             description="Adds a tag to the transaction that can be used to apply manual targeted throttling. At most 5 tags can be set on a transaction." />
     <Option name="auto_throttle_tag" code="801" paramType="String" paramDescription="String identifier used to associated this transaction with a throttling group. Must not exceed 16 characters."
             description="Adds a tag to the transaction that can be used to apply manual or automatic targeted throttling. At most 5 tags can be set on a transaction." />
+    <Option name="span_parent" code="900" paramType="Bytes" paramDescription="A byte string of length 16 used to associate the span of this transaction with a parent"
+            description="Adds a parent to the Span of this transaction. Used for transaction tracing. A span can be identified with any 16 bytes"/>
+    <Option name="expensive_clear_cost_estimation_enable" code="1000"
+                description="Asks storage servers for how many bytes a clear key range contains. Otherwise uses the location cache to roughly estimate this." />
+    <Option name="bypass_unreadable" code="1100"
+                description="Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. These reads will view versionstamp operations as if they were set operations that did not fill in the versionstamp." />            
   </Scope>
 
   <!-- The enumeration values matter - do not change them without

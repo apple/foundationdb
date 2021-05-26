@@ -1,0 +1,50 @@
+[[test]]
+testTitle = 'DDBalance_Test'
+
+    [[test.workload]]
+    testName = 'DDBalance'
+    testDuration = 120.0
+    transactionsPerSecond = 250.0
+    binCount = 1000
+    writesPerTransaction = 5
+    keySpaceDriftFactor = 10
+    moversPerClient = 10
+    actorsPerClient = 100
+    nodes = 100000
+
+    [[test.workload]]
+    testName = 'BackgroundSelector'
+    testDuration = 120.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 120.0
+    swizzle = 1
+
+    [[test.workload]]
+    testName = 'Rollback'
+    testDuration = 120.0
+    meanDelay = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    testDuration = 120.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 120.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 120.0
+
+    [[test.workload]]
+    testName = 'ChangeConfig'
+    maxDelayBeforeChange = 120.0
+    coordinators = 'auto'

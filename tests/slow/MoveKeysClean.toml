@@ -1,0 +1,27 @@
+[[test]]
+testTitle = 'MoveKeysNew'
+
+    [[test.workload]]
+    testName = 'Sideband'
+    testDuration = 300.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 300.0
+    scale = 0.5
+    clogginess = 0.1
+
+    [[test.workload]]
+    testName = 'Rollback'
+    testDuration = 300.0
+    meanDelay = 150.0
+
+    [[test.workload]]
+    testName = 'RandomMoveKeys'
+    testDuration = 300.0
+    meanDelay = 2
+
+    [[test.workload]]
+    testName = 'ChangeConfig'
+    maxDelayBeforeChange = 300.0
+    coordinators = 'auto'

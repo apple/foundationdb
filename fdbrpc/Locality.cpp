@@ -27,10 +27,10 @@ const StringRef LocalityData::keyDcId = LiteralStringRef("dcid");
 const StringRef LocalityData::keyMachineId = LiteralStringRef("machineid");
 const StringRef LocalityData::keyDataHallId = LiteralStringRef("data_hall");
 
-ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) const {
-	switch( role ) {
+ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const {
+	switch (role) {
 	case ProcessClass::Storage:
-		switch( _class ) {
+		switch (_class) {
 		case ProcessClass::StorageClass:
 			return ProcessClass::BestFit;
 		case ProcessClass::UnsetClass:
@@ -47,7 +47,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::NeverAssign;
 		}
 	case ProcessClass::TLog:
-		switch( _class ) {
+		switch (_class) {
 		case ProcessClass::LogClass:
 			return ProcessClass::BestFit;
 		case ProcessClass::TransactionClass:
@@ -63,16 +63,14 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		default:
 			return ProcessClass::NeverAssign;
 		}
-	case ProcessClass::Proxy:
-		switch( _class ) {
-		case ProcessClass::ProxyClass:
+	case ProcessClass::CommitProxy: // Resolver, Master, CommitProxy, and GrvProxy need to be the same besides best fit
+		switch (_class) {
+		case ProcessClass::CommitProxyClass:
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
-		case ProcessClass::ResolutionClass:
-			return ProcessClass::OkayFit;
 		case ProcessClass::TransactionClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::CoordinatorClass:
@@ -82,15 +80,15 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		default:
 			return ProcessClass::WorstFit;
 		}
-	case ProcessClass::Master:
-		switch( _class ) {
-		case ProcessClass::MasterClass:
+	case ProcessClass::GrvProxy: // Resolver, Master, CommitProxy, and GrvProxy need to be the same besides best fit
+		switch (_class) {
+		case ProcessClass::GrvProxyClass:
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
-		case ProcessClass::ResolutionClass:
+		case ProcessClass::TransactionClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
@@ -99,8 +97,25 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		default:
 			return ProcessClass::WorstFit;
 		}
-	case ProcessClass::Resolver:
-		switch( _class ) {
+	case ProcessClass::Master: // Resolver, Master, CommitProxy, and GrvProxy need to be the same besides best fit
+		switch (_class) {
+		case ProcessClass::MasterClass:
+			return ProcessClass::BestFit;
+		case ProcessClass::StatelessClass:
+			return ProcessClass::GoodFit;
+		case ProcessClass::UnsetClass:
+			return ProcessClass::UnsetFit;
+		case ProcessClass::TransactionClass:
+			return ProcessClass::OkayFit;
+		case ProcessClass::CoordinatorClass:
+		case ProcessClass::TesterClass:
+		case ProcessClass::StorageCacheClass:
+			return ProcessClass::NeverAssign;
+		default:
+			return ProcessClass::WorstFit;
+		}
+	case ProcessClass::Resolver: // Resolver, Master, CommitProxy, and GrvProxy need to be the same besides best fit
+		switch (_class) {
 		case ProcessClass::ResolutionClass:
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
@@ -117,15 +132,13 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::WorstFit;
 		}
 	case ProcessClass::LogRouter:
-		switch( _class ) {
+		switch (_class) {
 		case ProcessClass::LogRouterClass:
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
-		case ProcessClass::ResolutionClass:
-			return ProcessClass::OkayFit;
 		case ProcessClass::TransactionClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::CoordinatorClass:
@@ -136,7 +149,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::WorstFit;
 		}
 	case ProcessClass::Backup:
-		switch( _class ) {
+		switch (_class) {
 		case ProcessClass::BackupClass:
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
@@ -144,8 +157,6 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::GoodFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
-		case ProcessClass::ResolutionClass:
-			return ProcessClass::OkayFit;
 		case ProcessClass::TransactionClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::CoordinatorClass:
@@ -156,7 +167,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::WorstFit;
 		}
 	case ProcessClass::ClusterController:
-		switch( _class ) {
+		switch (_class) {
 		case ProcessClass::ClusterControllerClass:
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
@@ -169,7 +180,9 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::OkayFit;
 		case ProcessClass::TransactionClass:
 			return ProcessClass::OkayFit;
-		case ProcessClass::ProxyClass:
+		case ProcessClass::CommitProxyClass:
+			return ProcessClass::OkayFit;
+		case ProcessClass::GrvProxyClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::LogRouterClass:
 			return ProcessClass::OkayFit;
@@ -181,7 +194,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::WorstFit;
 		}
 	case ProcessClass::DataDistributor:
-		switch( _class ) {
+		switch (_class) {
 		case ProcessClass::DataDistributorClass:
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
@@ -198,7 +211,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::WorstFit;
 		}
 	case ProcessClass::Ratekeeper:
-		switch( _class ) {
+		switch (_class) {
 		case ProcessClass::RatekeeperClass:
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
@@ -215,7 +228,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::WorstFit;
 		}
 	case ProcessClass::StorageCache:
-		switch( _class ) {
+		switch (_class) {
 		case ProcessClass::StorageCacheClass:
 			return ProcessClass::BestFit;
 		default:
@@ -226,14 +239,15 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 	}
 }
 
-LBDistance::Type loadBalanceDistance( LocalityData const& loc1, LocalityData const& loc2, NetworkAddress const& addr2 ) {
-	if ( FLOW_KNOBS->LOAD_BALANCE_ZONE_ID_LOCALITY_ENABLED && loc1.zoneId().present() && loc1.zoneId() == loc2.zoneId() ) {
+LBDistance::Type loadBalanceDistance(LocalityData const& loc1, LocalityData const& loc2, NetworkAddress const& addr2) {
+	if (FLOW_KNOBS->LOAD_BALANCE_ZONE_ID_LOCALITY_ENABLED && loc1.zoneId().present() &&
+	    loc1.zoneId() == loc2.zoneId()) {
 		return LBDistance::SAME_MACHINE;
 	}
-	//FIXME: add this back in when load balancing works with local requests
-	//if ( g_network->isAddressOnThisHost( addr2 ) )
+	// FIXME: add this back in when load balancing works with local requests
+	// if ( g_network->isAddressOnThisHost( addr2 ) )
 	//	return LBDistance::SAME_MACHINE;
-	if ( FLOW_KNOBS->LOAD_BALANCE_DC_ID_LOCALITY_ENABLED && loc1.dcId().present() && loc1.dcId() == loc2.dcId() ) {
+	if (FLOW_KNOBS->LOAD_BALANCE_DC_ID_LOCALITY_ENABLED && loc1.dcId().present() && loc1.dcId() == loc2.dcId()) {
 		return LBDistance::SAME_DC;
 	}
 	return LBDistance::DISTANT;

@@ -1,0 +1,32 @@
+[configuration]
+extraDB = 1
+
+[[test]]
+testTitle = 'BackupAndRestore'
+clearAfterTest = false
+simBackupAgents = 'BackupToFileAndDB'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    transactionsPerSecond = 500.0
+    testDuration = 30.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'BackupAndRestoreCorrectness'
+    backupTag = 'backup1'
+    backupAfter = 10.0
+    restoreAfter = 60.0
+    shareLogRange = true
+    performRestore = true
+    allowPauses = false
+
+    [[test.workload]]
+    testName = 'BackupToDBCorrectness'
+    backupTag = 'backup2'
+    backupPrefix = 'b1'
+    backupAfter = 15.0
+    restoreAfter = 60.0
+    performRestore = false
+    shareLogRange = true

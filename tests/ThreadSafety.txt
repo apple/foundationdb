@@ -1,4 +1,5 @@
 testTitle=ThreadSafetyTest
+runSetup=true
+clearAfterTest=true
+
 	testName=ThreadSafety
-	runSetup=true
-	clearAfterTest=true

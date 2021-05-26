@@ -26,7 +26,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		    .detail("DelayBetweenRecoveries", delayBetweenRecoveries);
 	}
 
-	virtual std::string description() { return "TriggerRecoveryLoop"; }
+	std::string description() const override { return "TriggerRecoveryLoop"; }
 
 	ACTOR Future<Void> setOriginalNumOfResolvers(Database cx, TriggerRecoveryLoopWorkload* self) {
 		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
@@ -34,7 +34,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<Void> setup(Database const& cx) {
+	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
 			return setOriginalNumOfResolvers(cx, this);
 		}
@@ -59,9 +59,11 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> changeResolverConfig(Database cx, TriggerRecoveryLoopWorkload* self, bool setToOriginal=false) {
+	ACTOR Future<Void> changeResolverConfig(Database cx,
+	                                        TriggerRecoveryLoopWorkload* self,
+	                                        bool setToOriginal = false) {
 		state int32_t numResolversToSet;
-		if(setToOriginal) {
+		if (setToOriginal) {
 			numResolversToSet = self->originalNumOfResolvers.get();
 		} else {
 			numResolversToSet = self->currentNumOfResolvers.get() == self->originalNumOfResolvers.get()
@@ -71,10 +73,11 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		state StringRef configStr(format("resolvers=%d", numResolversToSet));
 		loop {
 			Optional<ConfigureAutoResult> conf;
-			ConfigurationResult::Type r = wait(changeConfig(cx, { configStr }, conf, true));
+			ConfigurationResult r = wait(changeConfig(cx, { configStr }, conf, true));
 			if (r == ConfigurationResult::SUCCESS) {
 				self->currentNumOfResolvers = numResolversToSet;
-				TraceEvent(SevInfo, "TriggerRecoveryLoop_ChangeResolverConfigSuccess").detail("NumOfResolvers", self->currentNumOfResolvers.get());
+				TraceEvent(SevInfo, "TriggerRecoveryLoop_ChangeResolverConfigSuccess")
+				    .detail("NumOfResolvers", self->currentNumOfResolvers.get());
 				break;
 			}
 			TraceEvent(SevWarn, "TriggerRecoveryLoop_ChangeResolverConfigFailed").detail("Result", r);
@@ -89,10 +92,9 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Standalone<RangeResultRef> kvs =
-				    wait(tr.getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
-				                                 LiteralStringRef("\xff\xff/worker_interfaces0")),
-				                     CLIENT_KNOBS->TOO_MANY));
+				RangeResult kvs = wait(tr.getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+				                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
+				                                   CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!kvs.more);
 				std::map<Key, Value> address_interface;
 				for (auto it : kvs) {
@@ -103,7 +105,11 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 					address_interface[ip_port] = it.value;
 				}
 				for (auto it : address_interface) {
-					tr.set(LiteralStringRef("\xff\xff/reboot_worker"), it.second);
+					if (cx->apiVersionAtLeast(700))
+						BinaryReader::fromStringRef<ClientWorkerInterface>(it.second, IncludeVersion())
+						    .reboot.send(RebootRequest());
+					else
+						tr.set(LiteralStringRef("\xff\xff/reboot_worker"), it.second);
 				}
 				TraceEvent(SevInfo, "TriggerRecoveryLoop_AttempedKillAll");
 				return Void();
@@ -131,21 +137,22 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 				wait(delay(self->delayBetweenRecoveries));
 				wait(self->returnIfClusterRecovered(cx));
 			}
-		} catch(Error &e) {
+		} catch (Error& e) {
 			// Dummy catch here to give a chance to reset number of resolvers to its original value
 		}
 		wait(self->changeResolverConfig(cx, self, true));
 		return Void();
 	}
 
-	virtual Future<Void> start(Database const& cx) {
-		if (clientId != 0) return Void();
+	Future<Void> start(Database const& cx) override {
+		if (clientId != 0)
+			return Void();
 		return _start(cx, this);
 	}
 
-	virtual Future<bool> check(Database const& cx) { return true; }
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<TriggerRecoveryLoopWorkload> TriggerRecoveryLoopWorkloadFactory("TriggerRecoveryLoop");

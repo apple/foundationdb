@@ -1,0 +1,22 @@
+[[test]]
+testTitle = 'InventoryTestSomeWrites'
+
+    [[test.workload]]
+    testName = 'InventoryTest'
+    transactionsPerSecond = 10000.0
+    testDuration = 10.0
+    fractionWriteTransactions = 0.1
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 10.0

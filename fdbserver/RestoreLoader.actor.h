@@ -28,10 +28,10 @@
 #define FDBSERVER_RESTORE_LOADER_H
 
 #include <sstream>
-#include "flow/Stats.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/Stats.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/RestoreWorkerInterface.actor.h"
@@ -50,32 +50,32 @@ public:
 	static const int SEND_MUTATIONS = 3;
 	static const int INVALID = 4;
 
-	explicit LoaderVersionBatchState(int newState) {
-		vbState = newState;
-	}
+	explicit LoaderVersionBatchState(int newState) { vbState = newState; }
 
-	virtual ~LoaderVersionBatchState() = default;
+	~LoaderVersionBatchState() override = default;
 
-	virtual void operator=(int newState) { vbState = newState; }
+	void operator=(int newState) override { vbState = newState; }
 
-	virtual int get() { return vbState; }
+	int get() override { return vbState; }
 };
 
 struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 	std::map<LoadingParam, Future<Void>> processedFileParams;
 	std::map<LoadingParam, VersionedMutationsMap> kvOpsPerLP; // Buffered kvOps for each loading param
 
-	// rangeToApplier is in master and loader. Loader uses this to determine which applier a mutation should be sent
+	// rangeToApplier is in controller and loader. Loader uses this to determine which applier a mutation should be sent
 	//   Key is the inclusive lower bound of the key range the applier (UID) is responsible for
 	std::map<Key, UID> rangeToApplier;
 
-	// Sampled mutations to be sent back to restore master
-	std::map<LoadingParam, MutationsVec> sampleMutations;
+	// Sampled mutations to be sent back to restore controller
+	std::map<LoadingParam, SampledMutationsVec> sampleMutations;
 	int numSampledMutations; // The total number of mutations received from sampled data.
 
 	Future<Void> pollMetrics;
 
 	LoaderVersionBatchState vbState;
+
+	long loadFileReqs;
 
 	// Status counters
 	struct Counters {
@@ -91,9 +91,12 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 		    oldLogMutations("OldLogMutations", cc) {}
 	} counters;
 
-	explicit LoaderBatchData(UID nodeID, int batchIndex) : counters(this, nodeID, batchIndex), vbState(LoaderVersionBatchState::NOT_INIT) {
-		pollMetrics = traceCounters(format("FastRestoreLoaderMetrics%d", batchIndex), nodeID,
-		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY, &counters.cc,
+	explicit LoaderBatchData(UID nodeID, int batchIndex)
+	  : counters(this, nodeID, batchIndex), vbState(LoaderVersionBatchState::NOT_INIT), loadFileReqs(0) {
+		pollMetrics = traceCounters(format("FastRestoreLoaderMetrics%d", batchIndex),
+		                            nodeID,
+		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
+		                            &counters.cc,
 		                            nodeID.toString() + "/RestoreLoaderMetrics/" + std::to_string(batchIndex));
 		TraceEvent("FastRestoreLoaderMetricsCreated").detail("Node", nodeID);
 	}
@@ -116,7 +119,7 @@ struct LoaderBatchStatus : public ReferenceCounted<LoaderBatchStatus> {
 	void addref() { return ReferenceCounted<LoaderBatchStatus>::addref(); }
 	void delref() { return ReferenceCounted<LoaderBatchStatus>::delref(); }
 
-	std::string toString() {
+	std::string toString() const {
 		std::stringstream ss;
 		ss << "sendAllRanges: "
 		   << (!sendAllRanges.present() ? "invalid" : (sendAllRanges.get().isReady() ? "ready" : "notReady"))
@@ -126,28 +129,71 @@ struct LoaderBatchStatus : public ReferenceCounted<LoaderBatchStatus> {
 	}
 };
 
+// Each request for each loadingParam, so that scheduler can control which requests in which version batch to send first
+struct RestoreLoaderSchedSendLoadParamRequest {
+	int batchIndex;
+	Promise<Void> toSched;
+	double start;
+
+	explicit RestoreLoaderSchedSendLoadParamRequest(int batchIndex, Promise<Void> toSched, double start)
+	  : batchIndex(batchIndex), toSched(toSched), start(start){};
+	RestoreLoaderSchedSendLoadParamRequest() = default;
+
+	bool operator<(RestoreLoaderSchedSendLoadParamRequest const& rhs) const {
+		return batchIndex > rhs.batchIndex || (batchIndex == rhs.batchIndex && start > rhs.start);
+	}
+
+	std::string toString() const {
+		std::stringstream ss;
+		ss << "RestoreLoaderSchedSendLoadParamRequest: "
+		   << " batchIndex:" << batchIndex << " toSchedFutureIsReady:" << toSched.getFuture().isReady()
+		   << " start:" << start;
+		return ss.str();
+	}
+};
+
 struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoaderData> {
 	// buffered data per version batch
 	std::map<int, Reference<LoaderBatchData>> batch;
 	std::map<int, Reference<LoaderBatchStatus>> status;
+	RestoreControllerInterface ci;
 
 	KeyRangeMap<Version> rangeVersions;
 
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
 	Key bcUrl; // The url used to get the bc
 
+	// Request scheduler
+	std::priority_queue<RestoreLoadFileRequest> loadingQueue; // request queue of loading files
+	std::priority_queue<RestoreSendMutationsToAppliersRequest>
+	    sendingQueue; // request queue of sending mutations to appliers
+	std::priority_queue<RestoreLoaderSchedSendLoadParamRequest> sendLoadParamQueue;
+	int finishedLoadingVB; // the max version batch index that finished loading file phase
+	int finishedSendingVB; // the max version batch index that finished sending mutations phase
+	int inflightSendingReqs; // number of sendingMutations requests released
+	int inflightLoadingReqs; // number of load backup file requests released
+	std::map<int, int> inflightSendLoadParamReqs; // key: batchIndex, value: inflightSendLoadParamReqs
+
+	Reference<AsyncVar<bool>> hasPendingRequests; // are there pending requests for loader
+
+	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
+	// addActor is used to create the actorCollection when the RestoreController is created
+	PromiseStream<Future<Void>> addActor;
+
 	void addref() { return ReferenceCounted<RestoreLoaderData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreLoaderData>::delref(); }
 
-	explicit RestoreLoaderData(UID loaderInterfID, int assignedIndex) {
+	explicit RestoreLoaderData(UID loaderInterfID, int assignedIndex, RestoreControllerInterface ci)
+	  : ci(ci), finishedLoadingVB(0), finishedSendingVB(0), inflightSendingReqs(0), inflightLoadingReqs(0) {
 		nodeID = loaderInterfID;
 		nodeIndex = assignedIndex;
 		role = RestoreRole::Loader;
+		hasPendingRequests = makeReference<AsyncVar<bool>>(false);
 	}
 
-	~RestoreLoaderData() = default;
+	~RestoreLoaderData() override = default;
 
-	std::string describeNode() {
+	std::string describeNode() override {
 		std::stringstream ss;
 		ss << "[Role: Loader] [NodeID:" << nodeID.toString().c_str() << "] [NodeIndex:" << std::to_string(nodeIndex)
 		   << "]";
@@ -156,7 +202,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 
 	int getVersionBatchState(int batchIndex) final {
 		std::map<int, Reference<LoaderBatchData>>::iterator item = batch.find(batchIndex);
-		if (item != batch.end()) { // Simply caller's effort in when it can call this func.
+		if (item == batch.end()) { // Batch has not been initialized when we blindly profile the state
 			return LoaderVersionBatchState::INVALID;
 		} else {
 			return item->second->vbState.get();
@@ -168,13 +214,13 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		item->second->vbState = vbState;
 	}
 
-	void initVersionBatch(int batchIndex) {
+	void initVersionBatch(int batchIndex) override {
 		TraceEvent("FastRestoreLoaderInitVersionBatch", nodeID).detail("BatchIndex", batchIndex);
-		batch[batchIndex] = Reference<LoaderBatchData>(new LoaderBatchData(nodeID, batchIndex));
-		status[batchIndex] = Reference<LoaderBatchStatus>(new LoaderBatchStatus());
+		batch[batchIndex] = makeReference<LoaderBatchData>(nodeID, batchIndex);
+		status[batchIndex] = makeReference<LoaderBatchStatus>();
 	}
 
-	void resetPerRestoreRequest() {
+	void resetPerRestoreRequest() override {
 		batch.clear();
 		status.clear();
 		finishedBatch = NotifiedVersion(0);
@@ -189,7 +235,10 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	}
 };
 
-ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int nodeIndex, Database cx);
+ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf,
+                                     int nodeIndex,
+                                     Database cx,
+                                     RestoreControllerInterface ci);
 
 #include "flow/unactorcompiler.h"
 #endif

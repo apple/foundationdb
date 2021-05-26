@@ -22,12 +22,15 @@
 #include <iostream>
 #include <vector>
 
+#include "fdbbackup/BackupTLSConfig.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbbackup/FileConverter.h"
 #include "fdbclient/MutationList.h"
+#include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
+#include "fdbclient/BuildFlags.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 #define SevDecodeInfo SevVerbose
@@ -37,26 +40,52 @@ extern bool g_crashOnError;
 namespace file_converter {
 
 void printDecodeUsage() {
-	std::cout << "\n"
-	             "  -r, --container   Container URL.\n"
-	             "  -i, --input FILE  Log file to be decoded.\n"
-	             "  --crash           Crash on serious error.\n"
-	             "\n";
+	std::cout
+	    << "Decoder for FoundationDB backup mutation logs.\n"
+	       "Usage: fdbdecode  [OPTIONS]\n"
+	       "  -r, --container URL\n"
+	       "                 Backup container URL, e.g., file:///some/path/.\n"
+	       "  -i, --input    FILE\n"
+	       "                 Log file filter, only matched files are decoded.\n"
+	       "  --log          Enables trace file logging for the CLI session.\n"
+	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
+	       "                 unspecified, defaults to the current directory. Has\n"
+	       "                 no effect unless --log is specified.\n"
+	       "  --loggroup     LOG_GROUP\n"
+	       "                 Sets the LogGroup field with the specified value for all\n"
+	       "                 events in the trace output (defaults to `default').\n"
+	       "  --trace_format FORMAT\n"
+	       "                 Select the format of the trace files, xml (the default) or json.\n"
+	       "                 Has no effect unless --log is specified.\n"
+	       "  --crash        Crash on serious error.\n"
+	       "  --blob_credentials FILE\n"
+	       "                 File containing blob credentials in JSON format.\n"
+	       "                 The same credential format/file fdbbackup uses.\n"
+#ifndef TLS_DISABLED
+	    TLS_HELP
+#endif
+	       "  --build_flags  Print build information and exit.\n"
+	       "\n";
 	return;
+}
+
+void printBuildInformation() {
+	std::cout << jsonBuildInformation() << "\n";
 }
 
 struct DecodeParams {
 	std::string container_url;
-	std::string file;
+	std::string fileFilter; // only files match the filter will be decoded
 	bool log_enabled = false;
 	std::string log_dir, trace_format, trace_log_group;
+	BackupTLSConfig tlsConfig;
 
 	std::string toString() {
 		std::string s;
 		s.append("ContainerURL: ");
 		s.append(container_url);
-		s.append(", File: ");
-		s.append(file);
+		s.append(", FileFilter: ");
+		s.append(fileFilter);
 		if (log_enabled) {
 			if (!log_dir.empty()) {
 				s.append(" LogDir:").append(log_dir);
@@ -70,6 +99,8 @@ struct DecodeParams {
 		}
 		return s;
 	}
+
+
 };
 
 int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
@@ -87,7 +118,6 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 		int optId = args->OptionId();
 		switch (optId) {
 		case OPT_HELP:
-			printDecodeUsage();
 			return FDB_EXIT_ERROR;
 
 		case OPT_CONTAINER:
@@ -99,7 +129,7 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 			break;
 
 		case OPT_INPUT_FILE:
-			param->file = args->OptionArg();
+			param->fileFilter = args->OptionArg();
 			break;
 
 		case OPT_TRACE:
@@ -121,6 +151,41 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 		case OPT_TRACE_LOG_GROUP:
 			param->trace_log_group = args->OptionArg();
 			break;
+
+		case OPT_BLOB_CREDENTIALS:
+			param->tlsConfig.blobCredentials.push_back(args->OptionArg());
+			break;
+
+#ifndef TLS_DISABLED
+		case TLSConfig::OPT_TLS_PLUGIN:
+			args->OptionArg();
+			break;
+
+		case TLSConfig::OPT_TLS_CERTIFICATES:
+			param->tlsConfig.tlsCertPath = args->OptionArg();
+			break;
+
+		case TLSConfig::OPT_TLS_PASSWORD:
+			param->tlsConfig.tlsPassword = args->OptionArg();
+			break;
+
+		case TLSConfig::OPT_TLS_CA_FILE:
+			param->tlsConfig.tlsCAPath = args->OptionArg();
+			break;
+
+		case TLSConfig::OPT_TLS_KEY:
+			param->tlsConfig.tlsKeyPath = args->OptionArg();
+			break;
+
+		case TLSConfig::OPT_TLS_VERIFY_PEERS:
+			param->tlsConfig.tlsVerifyPeers = args->OptionArg();
+			break;
+#endif
+
+		case OPT_BUILD_FLAGS:
+			printBuildInformation();
+			return FDB_EXIT_ERROR;
+			break;
 		}
 	}
 	return FDB_EXIT_SUCCESS;
@@ -137,7 +202,7 @@ void printLogFiles(std::string msg, const std::vector<LogFile>& files) {
 std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, const DecodeParams& params) {
 	std::vector<LogFile> filtered;
 	for (const auto& file : files) {
-		if (file.fileName.find(params.file) != std::string::npos) {
+		if (file.fileName.find(params.fileFilter) != std::string::npos) {
 			filtered.push_back(file);
 		}
 	}
@@ -179,7 +244,8 @@ std::vector<MutationRef> decode_value(const StringRef& value) {
 
 	std::vector<MutationRef> mutations;
 	while (1) {
-		if (reader.eof()) break;
+		if (reader.eof())
+			break;
 
 		// Deserialization of a MutationRef, which was packed by MutationListRef::push_back_deep()
 		uint32_t type, p1len, p2len;
@@ -201,6 +267,15 @@ struct VersionedMutations {
 	Arena arena; // The arena that contains the mutations.
 };
 
+struct VersionedKVPart {
+	Arena arena;
+	Version version;
+	int32_t part;
+	StringRef kv;
+	VersionedKVPart(Arena arena, Version version, int32_t part, StringRef kv)
+	  : arena(arena), version(version), part(part), kv(kv) {}
+};
+
 /*
  * Model a decoding progress for a mutation file. Usage is:
  *
@@ -217,19 +292,21 @@ struct VersionedMutations {
  * pairs, the decoding of mutation batch needs to look ahead one more pair. So
  * at any time this object might have two blocks of data in memory.
  */
-struct DecodeProgress {
+class DecodeProgress {
+	std::vector<VersionedKVPart> keyValues;
+
+public:
 	DecodeProgress() = default;
 	template <class U>
-	DecodeProgress(const LogFile& file, U &&values)
-	  : file(file), keyValues(std::forward<U>(values)) {}
+	DecodeProgress(const LogFile& file, U&& values) : file(file), keyValues(std::forward<U>(values)) {}
 
 	// If there are no more mutations to pull from the file.
 	// However, we could have unfinished version in the buffer when EOF is true,
 	// which means we should look for data in the next file. The caller
 	// should call getUnfinishedBuffer() to get these left data.
-	bool finished() { return (eof && keyValues.empty()) || (leftover && !keyValues.empty()); }
+	bool finished() const { return (eof && keyValues.empty()) || (leftover && !keyValues.empty()); }
 
-	std::vector<std::tuple<Arena, Version, int32_t, StringRef>>&& getUnfinishedBuffer() && { return std::move(keyValues); }
+	std::vector<VersionedKVPart>&& getUnfinishedBuffer() && { return std::move(keyValues); }
 
 	// Returns all mutations of the next version in a batch.
 	Future<VersionedMutations> getNextBatch() { return getNextBatchImpl(this); }
@@ -239,7 +316,7 @@ struct DecodeProgress {
 	// The following are private APIs:
 
 	// Returns true if value contains complete data.
-	bool isValueComplete(StringRef value) {
+	static bool isValueComplete(StringRef value) {
 		StringRefReader reader(value, restore_corrupted_data());
 
 		reader.consume<uint64_t>(); // Consume the includeVersion
@@ -260,41 +337,42 @@ struct DecodeProgress {
 				wait(readAndDecodeFile(self));
 			}
 
-			auto& tuple = self->keyValues[0];
-			ASSERT(std::get<2>(tuple) == 0); // first part number must be 0.
+			const auto& kv = self->keyValues[0];
+			ASSERT(kv.part == 0);
 
 			// decode next versions, check if they are continuous parts
 			int idx = 1; // next kv pair in "keyValues"
-			int bufSize = std::get<3>(tuple).size();
+			int bufSize = kv.kv.size();
 			for (int lastPart = 0; idx < self->keyValues.size(); idx++, lastPart++) {
-				if (idx == self->keyValues.size()) break;
+				if (idx == self->keyValues.size())
+					break;
 
-				auto next_tuple = self->keyValues[idx];
-				if (std::get<1>(tuple) != std::get<1>(next_tuple)) {
+				const auto& nextKV = self->keyValues[idx];
+				if (kv.version != nextKV.version) {
 					break;
 				}
 
-				if (lastPart + 1 != std::get<2>(next_tuple)) {
-					TraceEvent("DecodeError").detail("Part1", lastPart).detail("Part2", std::get<2>(next_tuple));
+				if (lastPart + 1 != nextKV.part) {
+					TraceEvent("DecodeError").detail("Part1", lastPart).detail("Part2", nextKV.part);
 					throw restore_corrupted_data();
 				}
-				bufSize += std::get<3>(next_tuple).size();
+				bufSize += nextKV.kv.size();
 			}
 
 			VersionedMutations m;
-			m.version = std::get<1>(tuple);
+			m.version = kv.version;
 			TraceEvent("Decode").detail("Version", m.version).detail("Idx", idx).detail("Q", self->keyValues.size());
-			StringRef value = std::get<3>(tuple);
+			StringRef value = kv.kv;
 			if (idx > 1) {
 				// Stitch parts into one and then decode one by one
 				Standalone<StringRef> buf = self->combineValues(idx, bufSize);
 				value = buf;
 				m.arena = buf.arena();
 			}
-			if (self->isValueComplete(value)) {
+			if (isValueComplete(value)) {
 				m.mutations = decode_value(value);
 				if (m.arena.getSize() == 0) {
-					m.arena = std::get<0>(tuple);
+					m.arena = kv.arena;
 				}
 				self->keyValues.erase(self->keyValues.begin(), self->keyValues.begin() + idx);
 				return m;
@@ -317,7 +395,7 @@ struct DecodeProgress {
 		Standalone<StringRef> buf = makeString(len);
 		int n = 0;
 		for (int i = 0; i < idx; i++) {
-			const auto& value = std::get<3>(keyValues[i]);
+			const auto& value = keyValues[i].kv;
 			memcpy(mutateString(buf) + n, value.begin(), value.size());
 			n += value.size();
 		}
@@ -333,12 +411,14 @@ struct DecodeProgress {
 
 		try {
 			// Read header, currently only decoding version BACKUP_AGENT_MLOG_VERSION
-			if (reader.consume<int32_t>() != BACKUP_AGENT_MLOG_VERSION) throw restore_unsupported_file_version();
+			if (reader.consume<int32_t>() != BACKUP_AGENT_MLOG_VERSION)
+				throw restore_unsupported_file_version();
 
 			// Read k/v pairs. Block ends either at end of last value exactly or with 0xFF as first key len byte.
 			while (1) {
 				// If eof reached or first key len bytes is 0xFF then end of block was reached.
-				if (reader.eof() || *reader.rptr == 0xFF) break;
+				if (reader.eof() || *reader.rptr == 0xFF)
+					break;
 
 				// Read key and value.  If anything throws then there is a problem.
 				uint32_t kLen = reader.consumeNetworkUInt32();
@@ -357,18 +437,16 @@ struct DecodeProgress {
 
 			// Make sure any remaining bytes in the block are 0xFF
 			for (auto b : reader.remainder()) {
-				if (b != 0xFF) throw restore_corrupted_data_padding();
+				if (b != 0xFF)
+					throw restore_corrupted_data_padding();
 			}
 
 			// The (version, part) in a block can be out of order, i.e., (3, 0)
 			// can be followed by (4, 0), and then (3, 1). So we need to sort them
 			// first by version, and then by part number.
-			std::sort(keyValues.begin(), keyValues.end(),
-			          [](const std::tuple<Arena, Version, int32_t, StringRef>& a,
-			             const std::tuple<Arena, Version, int32_t, StringRef>& b) {
-				          return std::get<1>(a) == std::get<1>(b) ? std::get<2>(a) < std::get<2>(b)
-				                                                  : std::get<1>(a) < std::get<1>(b);
-			          });
+			std::sort(keyValues.begin(), keyValues.end(), [](const VersionedKVPart& a, const VersionedKVPart& b) {
+				return a.version == b.version ? a.part < b.part : a.version < b.version;
+			});
 			return;
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "CorruptBlock").error(e).detail("Offset", reader.rptr - buf.begin());
@@ -419,8 +497,6 @@ struct DecodeProgress {
 	int64_t offset = 0;
 	bool eof = false;
 	bool leftover = false; // Done but has unfinished version batch data left
-	// A (version, part_number)'s mutations and memory arena.
-	std::vector<std::tuple<Arena, Version, int32_t, StringRef>> keyValues;
 };
 
 ACTOR Future<Void> decode_logs(DecodeParams params) {
@@ -428,7 +504,8 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 
 	state BackupFileList listing = wait(container->dumpFileList());
 	// remove partitioned logs
-	listing.logs.erase(std::remove_if(listing.logs.begin(), listing.logs.end(),
+	listing.logs.erase(std::remove_if(listing.logs.begin(),
+	                                  listing.logs.end(),
 	                                  [](const LogFile& file) {
 		                                  std::string prefix("plogs/");
 		                                  return file.fileName.substr(0, prefix.size()) == prefix;
@@ -445,9 +522,10 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 
 	state int i = 0;
 	// Previous file's unfinished version data
-	state std::vector<std::tuple<Arena, Version, int32_t, StringRef>> left;
+	state std::vector<VersionedKVPart> left;
 	for (; i < logs.size(); i++) {
-		if (logs[i].fileSize == 0) continue;
+		if (logs[i].fileSize == 0)
+			continue;
 
 		state DecodeProgress progress(logs[i], std::move(left));
 		wait(progress.openFile(container));
@@ -492,6 +570,11 @@ int main(int argc, char** argv) {
 			}
 		}
 
+		if (!param.tlsConfig.setupTLS()) {
+			TraceEvent(SevError, "TLSError");
+			throw tls_error();
+		}
+
 		platformInit();
 		Error::init();
 
@@ -500,13 +583,14 @@ int main(int argc, char** argv) {
 
 		TraceEvent::setNetworkThread();
 		openTraceFile(NetworkAddress(), 10 << 20, 10 << 20, param.log_dir, "decode", param.trace_log_group);
+		param.tlsConfig.setupBlobCredentials();
 
 		auto f = stopAfter(decode_logs(param));
 
 		runNetwork();
 		return status;
 	} catch (Error& e) {
-		fprintf(stderr, "ERROR: %s\n", e.what());
+		std::cerr << "ERROR: " << e.what() << "\n";
 		return FDB_EXIT_ERROR;
 	} catch (std::exception& e) {
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());

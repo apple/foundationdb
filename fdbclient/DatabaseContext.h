@@ -25,11 +25,12 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/genericactors.actor.h"
 #include <vector>
+#include <unordered_map>
 #pragma once
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
@@ -40,35 +41,35 @@
 
 class StorageServerInfo : public ReferencedInterface<StorageServerInterface> {
 public:
-	static Reference<StorageServerInfo> getInterface( DatabaseContext *cx, StorageServerInterface const& interf, LocalityData const& locality );
+	static Reference<StorageServerInfo> getInterface(DatabaseContext* cx,
+	                                                 StorageServerInterface const& interf,
+	                                                 LocalityData const& locality);
 	void notifyContextDestroyed();
 
-	virtual ~StorageServerInfo();
+	~StorageServerInfo() override;
+
 private:
-	DatabaseContext *cx;
-	StorageServerInfo( DatabaseContext *cx, StorageServerInterface const& interf, LocalityData const& locality ) : cx(cx), ReferencedInterface<StorageServerInterface>(interf, locality) {}
+	DatabaseContext* cx;
+	StorageServerInfo(DatabaseContext* cx, StorageServerInterface const& interf, LocalityData const& locality)
+	  : cx(cx), ReferencedInterface<StorageServerInterface>(interf, locality) {}
 };
 
 struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>>, FastAllocated<LocationInfo> {
 	using Locations = MultiInterface<ReferencedInterface<StorageServerInterface>>;
 	explicit LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v)
-		: Locations(v)
-	{}
+	  : Locations(v) {}
 	LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v, bool hasCaches)
-		: Locations(v)
-		, hasCaches(hasCaches)
-	{}
+	  : Locations(v), hasCaches(hasCaches) {}
 	LocationInfo(const LocationInfo&) = delete;
 	LocationInfo(LocationInfo&&) = delete;
 	LocationInfo& operator=(const LocationInfo&) = delete;
 	LocationInfo& operator=(LocationInfo&&) = delete;
 	bool hasCaches = false;
-	Reference<Locations> locations() {
-		return Reference<Locations>::addRef(this);
-	}
+	Reference<Locations> locations() { return Reference<Locations>::addRef(this); }
 };
 
-typedef ModelInterface<MasterProxyInterface> ProxyInfo;
+using CommitProxyInfo = ModelInterface<CommitProxyInterface>;
+using GrvProxyInfo = ModelInterface<GrvProxyInterface>;
 
 class ClientTagThrottleData : NonCopyable {
 private:
@@ -82,9 +83,9 @@ private:
 
 public:
 	ClientTagThrottleData(ClientTagThrottleLimits const& limits)
-	  : tpsRate(limits.tpsRate), expiration(limits.expiration), lastCheck(now()), smoothRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW), 
-	    smoothReleased(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW) 
-	{
+	  : tpsRate(limits.tpsRate), expiration(limits.expiration), lastCheck(now()),
+	    smoothRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW),
+	    smoothReleased(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW) {
 		ASSERT(tpsRate >= 0);
 		smoothRate.reset(tpsRate);
 	}
@@ -93,49 +94,56 @@ public:
 		ASSERT(limits.tpsRate >= 0);
 		this->tpsRate = limits.tpsRate;
 
-		if(!rateSet || expired()) {
+		if (!rateSet || expired()) {
 			rateSet = true;
 			smoothRate.reset(limits.tpsRate);
-		}
-		else {
+		} else {
 			smoothRate.setTotal(limits.tpsRate);
 		}
 
 		expiration = limits.expiration;
 	}
 
-	void addReleased(int released) {
-		smoothReleased.addDelta(released);
-	}
+	void addReleased(int released) { smoothReleased.addDelta(released); }
 
-	bool expired() {
-		return expiration <= now();
-	}
+	bool expired() { return expiration <= now(); }
 
-	void updateChecked() {
-		lastCheck = now();
-	}
+	void updateChecked() { lastCheck = now(); }
 
-	bool canRecheck() {
-		return lastCheck < now() - CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL;
-	}
+	bool canRecheck() { return lastCheck < now() - CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL; }
 
 	double throttleDuration() {
-		if(expiration <= now()) {
+		if (expiration <= now()) {
 			return 0.0;
 		}
 
-		double capacity = (smoothRate.smoothTotal() - smoothReleased.smoothRate()) * CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW;
-		if(capacity >= 1) {
+		double capacity =
+		    (smoothRate.smoothTotal() - smoothReleased.smoothRate()) * CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW;
+		if (capacity >= 1) {
 			return 0.0;
 		}
 
-		if(tpsRate == 0) {
+		if (tpsRate == 0) {
 			return std::max(0.0, expiration - now());
 		}
 
 		return std::min(expiration - now(), capacity / tpsRate);
 	}
+};
+
+class WatchMetadata : public ReferenceCounted<WatchMetadata> {
+public:
+	Key key;
+	Optional<Value> value;
+	Version version;
+	Promise<Version> watchPromise;
+	Future<Version> watchFuture;
+	Future<Void> watchFutureSS;
+
+	TransactionInfo info;
+	TagSet tags;
+
+	WatchMetadata(Key key, Optional<Value> value, Version version, TransactionInfo info, TagSet tags);
 };
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
@@ -144,51 +152,85 @@ public:
 		return (DatabaseContext*)DatabaseContext::operator new(sizeof(DatabaseContext));
 	}
 
+	// Static constructor used by server processes to create a DatabaseContext
 	// For internal (fdbserver) use only
-	static Database create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor,
-	                       LocalityData clientLocality, bool enableLocalityLoadBalance,
-	                       TaskPriority taskID = TaskPriority::DefaultEndpoint, bool lockAware = false,
-	                       int apiVersion = Database::API_VERSION_LATEST, bool switchable = false);
+	static Database create(Reference<AsyncVar<ClientDBInfo>> clientInfo,
+	                       Future<Void> clientInfoMonitor,
+	                       LocalityData clientLocality,
+	                       bool enableLocalityLoadBalance,
+	                       TaskPriority taskID = TaskPriority::DefaultEndpoint,
+	                       bool lockAware = false,
+	                       int apiVersion = Database::API_VERSION_LATEST,
+	                       bool switchable = false);
 
 	~DatabaseContext();
 
-	Database clone() const { return Database(new DatabaseContext( connectionFile, clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, internal, apiVersion, switchable )); }
+	// Constructs a new copy of this DatabaseContext from the parameters of this DatabaseContext
+	Database clone() const {
+		return Database(new DatabaseContext(connectionFile,
+		                                    clientInfo,
+		                                    coordinator,
+		                                    clientInfoMonitor,
+		                                    taskID,
+		                                    clientLocality,
+		                                    enableLocalityLoadBalance,
+		                                    lockAware,
+		                                    internal,
+		                                    apiVersion,
+		                                    switchable));
+	}
 
-	std::pair<KeyRange, Reference<LocationInfo>> getCachedLocation( const KeyRef&, bool isBackward = false );
-	bool getCachedLocations( const KeyRangeRef&, vector<std::pair<KeyRange,Reference<LocationInfo>>>&, int limit, bool reverse );
-	Reference<LocationInfo> setCachedLocation( const KeyRangeRef&, const vector<struct StorageServerInterface>& );
-	void invalidateCache( const KeyRef&, bool isBackward = false );
-	void invalidateCache( const KeyRangeRef& );
+	std::pair<KeyRange, Reference<LocationInfo>> getCachedLocation(const KeyRef&, bool isBackward = false);
+	bool getCachedLocations(const KeyRangeRef&,
+	                        vector<std::pair<KeyRange, Reference<LocationInfo>>>&,
+	                        int limit,
+	                        bool reverse);
+	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const vector<struct StorageServerInterface>&);
+	void invalidateCache(const KeyRef&, bool isBackward = false);
+	void invalidateCache(const KeyRangeRef&);
 
-	bool sampleReadTags();
+	bool sampleReadTags() const;
+	bool sampleOnCost(uint64_t cost) const;
 
-	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies);
-	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);
-	Future<Void> onMasterProxiesChanged();
+	void updateProxies();
+	Reference<CommitProxyInfo> getCommitProxies(bool useProvisionalProxies);
+	Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(bool useProvisionalProxies);
+	Reference<GrvProxyInfo> getGrvProxies(bool useProvisionalProxies);
+	Future<Void> onProxiesChanged();
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
+
+	// Returns the protocol version reported by the coordinator this client is connected to
+	// If an expected version is given, the future won't return until the protocol version is different than expected
+	// Note: this will never return if the server is running a protocol from FDB 5.0 or older
+	Future<ProtocolVersion> getClusterProtocol(Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>());
 
 	// Update the watch counter for the database
 	void addWatch();
 	void removeWatch();
-	
-	void setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value );
+
+	// watch map operations
+	Reference<WatchMetadata> getWatchMetadata(KeyRef key) const;
+	KeyRef setWatchMetadata(Reference<WatchMetadata> metadata);
+	void deleteWatchMetadata(KeyRef key);
+	void clearWatchMetadata();
+
+	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value);
 
 	Error deferredError;
 	bool lockAware;
 
-	bool isError() {
-		return deferredError.code() != invalid_error_code;	
-	}
+	bool isError() { return deferredError.code() != invalid_error_code; }
 
 	void checkDeferredError() {
-		if(isError()) {
+		if (isError()) {
 			throw deferredError;
 		}
 	}
 
 	int apiVersionAtLeast(int minVersion) { return apiVersion < 0 || apiVersion >= minVersion; }
 
-	Future<Void> onConnected(); // Returns after a majority of coordination servers are available and have reported a leader. The cluster file therefore is valid, but the database might be unavailable.
+	Future<Void> onConnected(); // Returns after a majority of coordination servers are available and have reported a
+	                            // leader. The cluster file therefore is valid, but the database might be unavailable.
 	Reference<ClusterConnectionFile> getConnectionFile();
 
 	// Switch the database to use the new connection file, and recreate all pending watches for committed transactions.
@@ -202,32 +244,51 @@ public:
 	Future<Void> connectionFileChanged();
 	bool switchable = false;
 
-//private: 
-	explicit DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
-		Future<Void> clientInfoMonitor, TaskPriority taskID, LocalityData const& clientLocality, 
-		bool enableLocalityLoadBalance, bool lockAware, bool internal = true, int apiVersion = Database::API_VERSION_LATEST, bool switchable = false );
+	// Management API, Attempt to kill or suspend a process, return 1 for request sent out, 0 for failure
+	Future<int64_t> rebootWorker(StringRef address, bool check = false, int duration = 0);
+	// Management API, force the database to recover into DCID, causing the database to lose the most recently committed
+	// mutations
+	Future<Void> forceRecoveryWithDataLoss(StringRef dcId);
+	// Management API, create snapshot
+	Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
 
-	explicit DatabaseContext( const Error &err );
+	// private:
+	explicit DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
+	                         Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
+	                         Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
+	                         Future<Void> clientInfoMonitor,
+	                         TaskPriority taskID,
+	                         LocalityData const& clientLocality,
+	                         bool enableLocalityLoadBalance,
+	                         bool lockAware,
+	                         bool internal = true,
+	                         int apiVersion = Database::API_VERSION_LATEST,
+	                         bool switchable = false);
+
+	explicit DatabaseContext(const Error& err);
 
 	void expireThrottles();
 
 	// Key DB-specific information
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
-	AsyncTrigger masterProxiesChangeTrigger;
-	Future<Void> monitorMasterProxiesInfoChange;
-	Reference<ProxyInfo> masterProxies;
-	bool provisional;
-	UID masterProxiesLastChange;
+	AsyncTrigger proxiesChangeTrigger;
+	Future<Void> monitorProxiesInfoChange;
+	Reference<CommitProxyInfo> commitProxies;
+	Reference<GrvProxyInfo> grvProxies;
+	bool proxyProvisional; // Provisional commit proxy and grv proxy are used at the same time.
+	UID proxiesLastChange;
 	LocalityData clientLocality;
 	QueueModel queueModel;
 	bool enableLocalityLoadBalance;
 
 	struct VersionRequest {
+		SpanID spanContext;
 		Promise<GetReadVersionReply> reply;
 		TagSet tags;
 		Optional<UID> debugID;
 
-		VersionRequest(TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>()) : tags(tags), debugID(debugID) {}
+		VersionRequest(SpanID spanContext, TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>())
+		  : spanContext(spanContext), tags(tags), debugID(debugID) {}
 	};
 
 	// Transaction start request batching
@@ -247,8 +308,8 @@ public:
 
 	// Client status updater
 	struct ClientStatusUpdater {
-		std::vector< std::pair<std::string, BinaryWriter> > inStatusQ;
-		std::vector< std::pair<std::string, BinaryWriter> > outStatusQ;
+		std::vector<std::pair<std::string, BinaryWriter>> inStatusQ;
+		std::vector<std::pair<std::string, BinaryWriter>> outStatusQ;
 		Future<Void> actor;
 	};
 	ClientStatusUpdater clientStatusUpdater;
@@ -257,7 +318,7 @@ public:
 	int locationCacheSize;
 	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
 
-	std::map< UID, StorageServerInfo* > server_interf;
+	std::map<UID, StorageServerInfo*> server_interf;
 
 	UID dbId;
 	bool internal; // Only contexts created through the C client and fdbcli are non-internal
@@ -296,6 +357,7 @@ public:
 	Counter transactionsCommitCompleted;
 	Counter transactionKeyServerLocationRequests;
 	Counter transactionKeyServerLocationRequestsCompleted;
+	Counter transactionStatusRequests;
 	Counter transactionsTooOld;
 	Counter transactionsFutureVersions;
 	Counter transactionsNotCommitted;
@@ -303,13 +365,17 @@ public:
 	Counter transactionsResourceConstrained;
 	Counter transactionsProcessBehind;
 	Counter transactionsThrottled;
+	Counter transactionsExpensiveClearCostEstCount;
 
-	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit, bytesPerCommit;
+	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
+	    bytesPerCommit;
 
 	int outstandingWatches;
 	int maxOutstandingWatches;
 
 	int snapshotRywEnabled;
+
+	int transactionTracingEnabled;
 
 	Future<Void> logger;
 	Future<Void> throttleExpirer;
@@ -323,6 +389,9 @@ public:
 	Future<Void> clientInfoMonitor;
 	Future<Void> connected;
 
+	// An AsyncVar that reports the coordinator this DatabaseContext is interacting with
+	Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator;
+
 	Reference<AsyncVar<Optional<ClusterInterface>>> statusClusterInterface;
 	Future<Void> statusLeaderMon;
 	double lastStatusFetch;
@@ -335,16 +404,21 @@ public:
 	HealthMetrics healthMetrics;
 	double healthMetricsLastUpdated;
 	double detailedHealthMetricsLastUpdated;
+	Smoother smoothMidShardSize;
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
+
 	Future<Void> cacheListMonitor;
 	AsyncTrigger updateCache;
-	std::vector<std::unique_ptr<SpecialKeyRangeBaseImpl>> specialKeySpaceModules;
+	std::vector<std::unique_ptr<SpecialKeyRangeReadImpl>> specialKeySpaceModules;
 	std::unique_ptr<SpecialKeySpace> specialKeySpace;
-	void registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module, std::unique_ptr<SpecialKeyRangeBaseImpl> impl);
+	void registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module,
+	                                   SpecialKeySpace::IMPLTYPE type,
+	                                   std::unique_ptr<SpecialKeyRangeReadImpl>&& impl);
 
 	static bool debugUseTags;
-	static const std::vector<std::string> debugTransactionTagChoices; 
+	static const std::vector<std::string> debugTransactionTagChoices;
+	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;
 };
 
 #endif

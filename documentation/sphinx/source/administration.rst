@@ -28,8 +28,6 @@ Starting and stopping
 
 After installation, FoundationDB is set to start automatically. You can manually start and stop the database with the commands shown below.
 
-These commands start and stop the master ``fdbmonitor`` process, which in turn starts ``fdbserver`` and ``backup-agent`` processes.  See :ref:`administration_fdbmonitor` for details.
-
 Linux
 -----
 
@@ -57,6 +55,15 @@ On macOS, FoundationDB is started and stopped using ``launchctl`` as follows::
 It can be stopped and prevented from starting at boot as follows::
 
     host:~ user$ sudo launchctl unload -w /Library/LaunchDaemons/com.foundationdb.fdbmonitor.plist
+
+Start, stop and restart behavior
+=================================
+
+These commands above start and stop the master ``fdbmonitor`` process, which in turn starts ``fdbserver`` and ``backup-agent`` processes.  See :ref:`administration_fdbmonitor` for details.
+
+After any child process has terminated by any reason, ``fdbmonitor`` tries to restart it. See :ref:`restarting parameters <configuration-restarting>`.
+
+When ``fdbmonitor`` itself is killed unexpectedly (for example, by the ``out-of-memory killer``), all the child processes are also terminated. Then the operating system is responsible for restarting it. See :ref:`Configuring autorestart of fdbmonitor <configuration-restart-fdbmonitor>`.
 
 .. _foundationdb-cluster-file:
 
@@ -228,6 +235,8 @@ If you interrupt the exclude command with Ctrl-C after seeing the "waiting for s
 
 7) If you ever want to add a removed machine back to the cluster, you will have to take it off the excluded servers list to which it was added in step 3. This can be done using the ``include`` command of ``fdbcli``. If attempting to re-include a failed server, this can be done using the ``include failed`` command of ``fdbcli``. Typing ``exclude`` with no parameters will tell you the current list of excluded and failed machines.
 
+As of api version 700, excluding servers can be done with the :ref:`special key space management module <special-key-space-management-module>` as well.
+
 Moving a cluster
 ================
 
@@ -257,7 +266,8 @@ Use the ``status`` command of ``fdbcli`` to determine if the cluster is up and r
       Redundancy mode        - triple
       Storage engine         - ssd-2
       Coordinators           - 5
-      Desired Proxies        - 5
+      Desired GRV Proxies    - 1
+      Desired Commit Proxies - 4
       Desired Logs           - 8
 
     Cluster:
@@ -297,7 +307,8 @@ The summary fields are interpreted as follows:
 Redundancy mode         The currently configured redundancy mode (see the section :ref:`configuration-choosing-redundancy-mode`)
 Storage engine          The currently configured storage engine (see the section :ref:`configuration-configuring-storage-subsystem`)
 Coordinators            The number of FoundationDB coordination servers
-Desired Proxies         Number of proxies desired. If replication mode is 3 then default number of proxies is 3
+Desired GRV Proxies     Number of GRV proxies desired. (default 1)
+Desired Commit Proxies  Number of commit proxies desired. If replication mode is 3 then default number of commit proxies is 3
 Desired Logs            Number of logs desired. If replication mode is 3 then default number of logs is 3
 FoundationDB processes  Number of FoundationDB processes participating in the cluster
 Machines                Number of physical machines running at least one FoundationDB process that is participating in the cluster
@@ -563,7 +574,7 @@ When configured, the ``status json`` output will include additional fields to re
     filtered: 1
   }
 
-The ``grv_latency_bands`` and ``commit_latency_bands`` objects will only be logged for ``proxy`` roles, and ``read_latency_bands`` will only be logged for storage roles. Each threshold is represented as a key in the map, and its associated value will be the total number of requests in the lifetime of the process with a latency smaller than the threshold but larger than the next smaller threshold. 
+The ``grv_latency_bands`` objects will only be logged for ``grv_proxy`` roles, ``commit_latency_bands`` objects will only be logged for ``commit_proxy`` roles, and ``read_latency_bands`` will only be logged for storage roles. Each threshold is represented as a key in the map, and its associated value will be the total number of requests in the lifetime of the process with a latency smaller than the threshold but larger than the next smaller threshold. 
 
 For example, ``0.1: 1`` in ``read_latency_bands`` indicates that there has been 1 read request with a latency in the range ``[0.01, 0.1)``. For the smallest specified threshold, the lower bound is 0 (e.g. ``[0, 0.01)`` in the example above). Requests that took longer than any defined latency band will be reported in the ``inf`` (infinity) band. Requests that were filtered by the configuration (e.g. using ``max_read_bytes``) are reported in the ``filtered`` category.
 
@@ -788,3 +799,18 @@ Upgrading from Older Versions
 -----------------------------
 
 Upgrades from versions older than 5.0.0 are no longer supported.
+
+Version-specific notes on downgrading
+=====================================
+
+In general, downgrades between non-patch releases (i.e. 6.2.x - 6.1.x) are not supported.
+
+.. _downgrade-specific-version:
+
+Downgrading from 6.3.13 - 6.2.33
+--------------------------------
+After upgrading from 6.2 to 6.3, the option of rolling back and downgrading to 6.2 is still possible, given that the following conditions are met:
+
+* The 6.3 cluster cannot have ``TLogVersion`` greater than V4 (6.2).
+* The 6.3 cluster cannot use storage engine types that are not ``ssd-1``, ``ssd-2``, or ``memory``.
+* The 6.3 cluster must not have any key servers serialized with tag encoding. This condition can only be guaranteed if the ``TAG_ENCODE_KEY_SERVERS`` knob has never been changed to ``true`` on this cluster.

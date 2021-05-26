@@ -1,0 +1,61 @@
+[[test]]
+testTitle = 'BackupAndRestore'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 500.0
+    testDuration = 20.0
+    expectedRate = 0
+    keyPrefix = 'a'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 500.0
+    testDuration = 30.0
+    expectedRate = 0
+    keyPrefix = 'A'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 500.0
+    testDuration = 40.0
+    expectedRate = 0
+    keyPrefix = 'm'
+
+    [[test.workload]]
+    testName = 'ReadWrite'
+    testDuration = 30.0
+    transactionsPerSecond = 10
+    writesPerTransactionA = 10
+    readsPerTransactionA = 0
+    writesPerTransactionB = 10
+    readsPerTransactionB = 0
+    alpha = 1.0
+    setup = false
+
+    [[test.workload]]
+    testName = 'BackupAndRestoreCorrectness'
+    backupTag = 'backup1'
+    backupAfter = 10.0
+    restoreAfter = 60.0
+    performRestore = false
+    allowPauses = false
+
+    [[test.workload]]
+    testName = 'BackupAndRestoreCorrectness'
+    backupTag = 'backup2'
+    backupAfter = 15.0
+    restoreAfter = 60.0
+    performRestore = true
+    allowPauses = false
+    restorePrefixesToInclude = 'a,A,m'
+
+    [[test.workload]]
+    testName = 'BackupAndRestoreCorrectness'
+    backupTag = 'backup3'
+    backupAfter = 20.0
+    restoreAfter = 60.0
+    performRestore = false
+    allowPauses = false

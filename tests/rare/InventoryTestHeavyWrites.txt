@@ -1,5 +1,0 @@
-testTitle=InventoryTestHeavyWrites
-testName=InventoryTest
-transactionsPerSecond=10000.0
-testDuration=10.0
-fractionWriteTransactions=.8

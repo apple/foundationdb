@@ -10,6 +10,7 @@ if (RocksDB_FOUND)
     DOWNLOAD_COMMAND ""
     CMAKE_ARGS -DUSE_RTTI=1 -DPORTABLE=${PORTABLE_ROCKSDB}
                -DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}
+               -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                -DWITH_GFLAGS=OFF
                -DWITH_TESTS=OFF
@@ -17,7 +18,7 @@ if (RocksDB_FOUND)
                -DWITH_CORE_TOOLS=OFF
                -DWITH_BENCHMARK_TOOLS=OFF
                -DWITH_BZ2=OFF
-               -DWITH_LZ4=OFF
+               -DWITH_LZ4=ON
                -DWITH_SNAPPY=OFF
                -DWITH_ZLIB=OFF
                -DWITH_ZSTD=OFF
@@ -36,6 +37,7 @@ else()
     URL_HASH   SHA256=d573d2f15cdda883714f7e0bc87b814a8d4a53a82edde558f08f940e905541ee
     CMAKE_ARGS -DUSE_RTTI=1 -DPORTABLE=${PORTABLE_ROCKSDB}
                -DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}
+               -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                -DWITH_GFLAGS=OFF
                -DWITH_TESTS=OFF
@@ -43,7 +45,7 @@ else()
                -DWITH_CORE_TOOLS=OFF
                -DWITH_BENCHMARK_TOOLS=OFF
                -DWITH_BZ2=OFF
-               -DWITH_LZ4=OFF
+               -DWITH_LZ4=ON
                -DWITH_SNAPPY=OFF
                -DWITH_ZLIB=OFF
                -DWITH_ZSTD=OFF
@@ -57,11 +59,14 @@ else()
   set(ROCKSDB_LIBRARIES
       ${BINARY_DIR}/librocksdb.a)
 
+  ExternalProject_Get_Property(rocksdb SOURCE_DIR)
+  set (ROCKSDB_INCLUDE_DIR "${SOURCE_DIR}/include")
+
   set(ROCKSDB_FOUND TRUE)
 endif()
 
 message(STATUS "Found RocksDB library: ${ROCKSDB_LIBRARIES}")
-message(STATUS "Found RocksDB includes: ${ROCKSDB_INCLUDE_DIRS}")
+message(STATUS "Found RocksDB includes: ${ROCKSDB_INCLUDE_DIR}")
 
 mark_as_advanced(
     ROCKSDB_LIBRARIES

@@ -24,77 +24,96 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct LowLatencyWorkload : TestWorkload {
 	double testDuration;
-	double maxLatency;
+	double maxGRVLatency;
+	double maxCommitLatency;
 	double checkDelay;
 	PerfIntCounter operations, retries;
+	bool testWrites;
+	Key testKey;
 	bool ok;
 
 	LowLatencyWorkload(WorkloadContext const& wcx)
-		: TestWorkload(wcx), operations("Operations"), retries("Retries") , ok(true)
-	{
-		testDuration = getOption( options, LiteralStringRef("testDuration"), 600.0 );
-		maxLatency = getOption( options, LiteralStringRef("maxLatency"), 20.0 );
-		checkDelay = getOption( options, LiteralStringRef("checkDelay"), 1.0 );
+	  : TestWorkload(wcx), operations("Operations"), retries("Retries"), ok(true) {
+		testDuration = getOption(options, LiteralStringRef("testDuration"), 600.0);
+		maxGRVLatency = getOption(options, LiteralStringRef("maxGRVLatency"), 20.0);
+		maxCommitLatency = getOption(options, LiteralStringRef("maxCommitLatency"), 30.0);
+		checkDelay = getOption(options, LiteralStringRef("checkDelay"), 1.0);
+		testWrites = getOption(options, LiteralStringRef("testWrites"), true);
+		testKey = getOption(options, LiteralStringRef("testKey"), LiteralStringRef("testKey"));
 	}
 
-	virtual std::string description() { return "LowLatency"; }
+	std::string description() const override { return "LowLatency"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
+	Future<Void> setup(Database const& cx) override {
+		if (g_network->isSimulated()) {
+			ASSERT(const_cast<ServerKnobs*>(SERVER_KNOBS)->setKnob("min_delay_cc_worst_fit_candidacy_seconds", "5"));
+			ASSERT(const_cast<ServerKnobs*>(SERVER_KNOBS)->setKnob("max_delay_cc_worst_fit_candidacy_seconds", "10"));
+		}
 		return Void();
 	}
 
-	virtual Future<Void> start( Database const& cx ) {
-		if( clientId == 0 )
-			return _start( cx, this );
+	Future<Void> start(Database const& cx) override {
+		if (clientId == 0)
+			return _start(cx, this);
 		return Void();
 	}
 
-	ACTOR static Future<Void> _start( Database cx, LowLatencyWorkload* self ) {
+	ACTOR static Future<Void> _start(Database cx, LowLatencyWorkload* self) {
 		state double testStart = now();
 		try {
 			loop {
-				wait( delay( self->checkDelay ) );
-				state Transaction tr( cx );
+				wait(delay(self->checkDelay));
+				state Transaction tr(cx);
 				state double operationStart = now();
+				state bool doCommit = self->testWrites && deterministicRandom()->coinflip();
+				state double maxLatency = doCommit ? self->maxCommitLatency : self->maxGRVLatency;
 				++self->operations;
 				loop {
 					try {
+						TraceEvent("StartLowLatencyTransaction");
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-						wait(success(tr.getReadVersion()));
+						if (doCommit) {
+							tr.set(self->testKey, LiteralStringRef(""));
+							wait(tr.commit());
+						} else {
+							wait(success(tr.getReadVersion()));
+						}
 						break;
-					} catch( Error &e ) {
-						wait( tr.onError(e) );
+					} catch (Error& e) {
+						TraceEvent("LowLatencyTransactionFailed").error(e, true);
+						wait(tr.onError(e));
 						++self->retries;
 					}
 				}
-				if(now() - operationStart > self->maxLatency) {
-					TraceEvent(SevError, "LatencyTooLarge").detail("MaxLatency", self->maxLatency).detail("ObservedLatency", now() - operationStart);
+				if (now() - operationStart > maxLatency) {
+					TraceEvent(SevError, "LatencyTooLarge")
+					    .detail("MaxLatency", maxLatency)
+					    .detail("ObservedLatency", now() - operationStart)
+					    .detail("IsCommit", doCommit);
 					self->ok = false;
 				}
-				if( now() - testStart > self->testDuration )
+				if (now() - testStart > self->testDuration)
 					break;
 			}
 			return Void();
-		} catch( Error &e ) {
-			TraceEvent(SevError, "LowLatencyError").error(e,true);
+		} catch (Error& e) {
+			TraceEvent(SevError, "LowLatencyError").error(e, true);
 			throw;
 		}
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
-		return ok;
-	}
+	Future<bool> check(Database const& cx) override { return ok; }
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		double duration = testDuration;
-		m.push_back( PerfMetric( "Operations/sec", operations.getValue() / duration, false ) );
-		m.push_back( operations.getMetric() );
-		m.push_back( retries.getMetric() );
+		m.push_back(PerfMetric("Operations/sec", operations.getValue() / duration, false));
+		m.push_back(operations.getMetric());
+		m.push_back(retries.getMetric());
 	}
 };
 

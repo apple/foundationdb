@@ -1,0 +1,24 @@
+[[test]]
+testTitle = 'CloggedStorefrontTest'
+
+    [[test.workload]]
+    testName = 'Storefront'
+    actorsPerClient = 50
+    itemCount = 100000
+    maxOrderSize = 6
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 30.0
+    scale = 0.1
+    clogginess = 2.0
+
+    [[test.workload]]
+    testName = 'ChangeConfig'
+    maxDelayBeforeChange = 30.0
+    coordinators = 'auto'

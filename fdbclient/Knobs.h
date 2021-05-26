@@ -27,12 +27,10 @@
 
 class ClientKnobs : public Knobs {
 public:
-	int BYTE_LIMIT_UNLIMITED;
-	int ROW_LIMIT_UNLIMITED;
-
 	int TOO_MANY; // FIXME: this should really be split up so we can control these more specifically
 
 	double SYSTEM_MONITOR_INTERVAL;
+	double NETWORK_BUSYNESS_MONITOR_INTERVAL; // The interval in which we should update the network busyness metric
 
 	double FAILURE_MAX_DELAY;
 	double FAILURE_MIN_DELAY;
@@ -44,15 +42,18 @@ public:
 	double RECOVERY_DELAY_SECONDS_PER_GENERATION;
 	double MAX_GENERATIONS;
 	double MAX_GENERATIONS_OVERRIDE;
+	double MAX_GENERATIONS_SIM;
 
 	double COORDINATOR_RECONNECTION_DELAY;
 	int CLIENT_EXAMPLE_AMOUNT;
 	double MAX_CLIENT_STATUS_AGE;
-	int MAX_PROXY_CONNECTIONS;
+	int MAX_COMMIT_PROXY_CONNECTIONS;
+	int MAX_GRV_PROXY_CONNECTIONS;
 	double STATUS_IDLE_TIMEOUT;
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
-	double WRONG_SHARD_SERVER_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
+	double WRONG_SHARD_SERVER_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is
+	                                 // mostly wrong (e.g. dumping the database after a test)
 	double FUTURE_VERSION_RETRY_DELAY;
 	int REPLY_BYTE_LIMIT;
 	double DEFAULT_BACKOFF;
@@ -60,6 +61,8 @@ public:
 	double BACKOFF_GROWTH_RATE;
 	double RESOURCE_CONSTRAINED_MAX_BACKOFF;
 	int PROXY_COMMIT_OVERHEAD_BYTES;
+	double SHARD_STAT_SMOOTH_AMOUNT;
+	int INIT_MID_SHARD_BYTES;
 
 	int TRANSACTION_SIZE_LIMIT;
 	int64_t KEY_SIZE_LIMIT;
@@ -85,14 +88,16 @@ public:
 	double STORAGE_METRICS_TOO_MANY_SHARDS_DELAY;
 	double AGGREGATE_HEALTH_METRICS_MAX_STALENESS;
 	double DETAILED_HEALTH_METRICS_MAX_STALENESS;
+	double MID_SHARD_SIZE_MAX_STALENESS;
 	bool TAG_ENCODE_KEY_SERVERS;
 
-	//KeyRangeMap
+	// KeyRangeMap
 	int KRM_GET_RANGE_LIMIT;
-	int KRM_GET_RANGE_LIMIT_BYTES; //This must be sufficiently larger than KEY_SIZE_LIMIT to ensure that at least two entries will be returned from an attempt to read a key range map
+	int KRM_GET_RANGE_LIMIT_BYTES; // This must be sufficiently larger than KEY_SIZE_LIMIT to ensure that at least two
+	                               // entries will be returned from an attempt to read a key range map
 
 	int DEFAULT_MAX_OUTSTANDING_WATCHES;
-	int ABSOLUTE_MAX_WATCHES; //The client cannot set the max outstanding watches higher than this
+	int ABSOLUTE_MAX_WATCHES; // The client cannot set the max outstanding watches higher than this
 	double WATCH_POLLING_TIME;
 	double NO_RECENT_UPDATES_DURATION;
 	double FAST_WATCH_TIMEOUT;
@@ -100,9 +105,8 @@ public:
 
 	double IS_ACCEPTABLE_DELAY;
 
-
 	// Core
-	int64_t CORE_VERSIONSPERSECOND;  // This is defined within the server but used for knobs based on server value
+	int64_t CORE_VERSIONSPERSECOND; // This is defined within the server but used for knobs based on server value
 	int LOG_RANGE_BLOCK_SIZE;
 	int MUTATION_BLOCK_SIZE;
 
@@ -118,6 +122,7 @@ public:
 	int TASKBUCKET_MAX_TASK_KEYS;
 
 	// Backup
+	int BACKUP_LOCAL_FILE_WRITE_BLOCK;
 	int BACKUP_CONCURRENT_DELETES;
 	int BACKUP_SIMULATED_LIMIT_BYTES;
 	int BACKUP_GET_RANGE_LIMIT_BYTES;
@@ -139,6 +144,11 @@ public:
 	int BACKUP_MAP_KEY_UPPER_LIMIT;
 	int BACKUP_COPY_TASKS;
 	int BACKUP_BLOCK_SIZE;
+	int COPY_LOG_BLOCK_SIZE;
+	int COPY_LOG_BLOCKS_PER_TASK;
+	int COPY_LOG_PREFETCH_BLOCKS;
+	int COPY_LOG_READ_AHEAD_BYTES;
+	double COPY_LOG_TASK_DURATION_NANOS;
 	int BACKUP_TASKS_PER_AGENT;
 	int BACKUP_POLL_PROGRESS_SECONDS;
 	int64_t VERSIONS_PER_SECOND; // Copy of SERVER_KNOBS, as we can't link with it
@@ -160,7 +170,10 @@ public:
 	double MIN_CLEANUP_SECONDS;
 
 	// Configuration
-	int32_t DEFAULT_AUTO_PROXIES;
+	int32_t DEFAULT_AUTO_COMMIT_PROXIES;
+	int32_t DEFAULT_AUTO_GRV_PROXIES;
+	int32_t DEFAULT_COMMIT_GRV_PROXIES_RATIO;
+	int32_t DEFAULT_MAX_GRV_PROXIES;
 	int32_t DEFAULT_AUTO_RESOLVERS;
 	int32_t DEFAULT_AUTO_LOGS;
 
@@ -177,7 +190,7 @@ public:
 	int BLOBSTORE_CONNECT_TIMEOUT;
 	int BLOBSTORE_MAX_CONNECTION_LIFE;
 	int BLOBSTORE_REQUEST_TRIES;
-	int BLOBSTORE_REQUEST_TIMEOUT;
+	int BLOBSTORE_REQUEST_TIMEOUT_MIN;
 	int BLOBSTORE_REQUESTS_PER_SECOND;
 	int BLOBSTORE_LIST_REQUESTS_PER_SECOND;
 	int BLOBSTORE_WRITE_REQUESTS_PER_SECOND;
@@ -209,6 +222,9 @@ public:
 	// transaction tags
 	int MAX_TRANSACTION_TAG_LENGTH;
 	int MAX_TAGS_PER_TRANSACTION;
+	int COMMIT_SAMPLE_COST; // The expectation of sampling is every COMMIT_SAMPLE_COST sample once
+	int WRITE_COST_BYTE_FACTOR;
+	int INCOMPLETE_SHARD_PLUS; // The size of (possible) incomplete shard when estimate clear range
 	double READ_TAG_SAMPLE_RATE; // Communicated to clients from cluster
 	double TAG_THROTTLE_SMOOTHING_WINDOW;
 	double TAG_THROTTLE_RECHECK_INTERVAL;
@@ -218,6 +234,7 @@ public:
 	void initialize(bool randomize = false);
 };
 
+extern std::unique_ptr<ClientKnobs> globalClientKnobs;
 extern ClientKnobs const* CLIENT_KNOBS;
 
 #endif

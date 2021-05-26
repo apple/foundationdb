@@ -19,43 +19,37 @@
  */
 
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 // The workload that do nothing. It can be used for waiting for quiescence
 struct DummyWorkload : TestWorkload {
 	bool displayWorkers;
 	double displayDelay;
 
-	DummyWorkload(WorkloadContext const& wcx)
-	: TestWorkload(wcx) {
+	DummyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		displayWorkers = getOption(options, LiteralStringRef("displayWorkers"), true);
 		displayDelay = getOption(options, LiteralStringRef("displayDelay"), 0.0);
 	}
 
-	virtual std::string description() {
-		return "DummyWorkload";
-	}
+	std::string description() const override { return "DummyWorkload"; }
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		if ((clientId == 0) && (displayWorkers)) {
 			return _start(this, cx);
 		}
 		return Void();
 	}
 
-	ACTOR static Future<Void> _start( DummyWorkload* self, Database cx) {
+	ACTOR static Future<Void> _start(DummyWorkload* self, Database cx) {
 		if (self->displayDelay > 0.0)
 			wait(delay(self->displayDelay));
 		g_simulator.displayWorkers();
 		return Void();
 	}
 
-	virtual Future<bool> check(Database const& cx) {
-		return true;
-	}
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
-	}
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<DummyWorkload> DummyWorkloadFactory("DummyWorkload");

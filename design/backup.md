@@ -47,7 +47,7 @@ take the same example
 
 Restoring to version vk (v10 < vk <= vn), needs KV ranges to be restored first and then replaying mutation logs. For
 each KV range (k1-k2, vx) that is restored we need to replay mutation log [(k1-k2, vx+1), .., (k1-k2, vk)]. But, this
-needs scanning complete muation log to get mutaions for k1-k2, that is sub-optimal, for any decent sized database
+needs scanning complete mutation log to get mutations for k1-k2, that is sub-optimal, for any decent sized database
 this will take forever.
 
 Instead looking at restore on key space, we can replay events on version space, that way we need to scan

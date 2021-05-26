@@ -1,7 +1,9 @@
 testTitle=ClientTransactionProfilingCorrectness
-    clearAfterTest=false
+clearAfterTest=false
+runSetup=true
+timeout=2100
+
     testName=ApiCorrectness
-    runSetup=true
     numKeys=5000
     onlyLowerCase=true
     shortKeysRatio=0.5
@@ -19,8 +21,6 @@ testTitle=ClientTransactionProfilingCorrectness
     numClearRanges=10
     maxTransactionBytes=500000
     randomTestDuration=30
-    timeout=2100
-
 
     testName=ClientTransactionProfileCorrectness
 

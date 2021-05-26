@@ -3,12 +3,13 @@
 #pragma once
 
 #ifndef FDB_API_VERSION
-#define FDB_API_VERSION 700
+#define FDB_API_VERSION 710
 #endif
 
 #include <foundationdb/fdb_c.h>
 #include <pthread.h>
 #include <sys/types.h>
+#include <stdbool.h>
 #if defined(__linux__)
 #include <linux/limits.h>
 #elif defined(__APPLE__)
@@ -32,6 +33,8 @@
 #define FDB_ERROR_ABORT -2
 #define FDB_ERROR_CONFLICT -3
 
+#define LAT_BLOCK_SIZE 511 /* size of each block to get detailed latency for each operation */
+
 /* transaction specification */
 enum Operations {
 	OP_GETREADVERSION,
@@ -47,6 +50,7 @@ enum Operations {
 	OP_CLEARRANGE,
 	OP_SETCLEARRANGE,
 	OP_COMMIT,
+	OP_TRANSACTION, /* pseudo-operation - cumulative time for the operation + commit */
 	MAX_OP /* must be the last item */
 };
 
@@ -64,6 +68,7 @@ enum Arguments {
 	ARG_VERSION,
 	ARG_KNOBS,
 	ARG_FLATBUFFERS,
+	ARG_LOGGROUP,
 	ARG_TRACE,
 	ARG_TRACEPATH,
 	ARG_TRACEFORMAT,
@@ -71,13 +76,18 @@ enum Arguments {
 	ARG_TPSMIN,
 	ARG_TPSINTERVAL,
 	ARG_TPSCHANGE,
-	ARG_TXNTRACE
+	ARG_TXNTRACE,
+	ARG_TXNTAGGING,
+	ARG_TXNTAGGINGPREFIX,
+	ARG_STREAMING_MODE
 };
 
 enum TPSChangeTypes { TPS_SIN, TPS_SQUARE, TPS_PULSE };
 
 #define KEYPREFIX "mako"
 #define KEYPREFIXLEN 4
+
+#define TEMP_DATA_STORE "/tmp/makoTemp"
 
 /* we set mako_txnspec_t and mako_args_t only once in the master process,
  * and won't be touched by child processes.
@@ -88,7 +98,9 @@ typedef struct {
 	int ops[MAX_OP][3];
 } mako_txnspec_t;
 
+#define LOGGROUP_MAX 256
 #define KNOB_MAX 256
+#define TAGPREFIXLENGTH_MAX 8
 
 /* benchmark parameters */
 typedef struct {
@@ -112,12 +124,16 @@ typedef struct {
 	int verbose;
 	mako_txnspec_t txnspec;
 	char cluster_file[PATH_MAX];
+	char log_group[LOGGROUP_MAX];
 	int trace;
 	char tracepath[PATH_MAX];
 	int traceformat; /* 0 - XML, 1 - JSON */
 	char knobs[KNOB_MAX];
 	uint8_t flatbuffers;
 	int txntrace;
+	int txntagging;
+	char txntagging_prefix[TAGPREFIXLENGTH_MAX];
+	FDBStreamingMode streaming_mode;
 } mako_args_t;
 
 /* shared memory */
@@ -129,7 +145,14 @@ typedef struct {
 	int signal;
 	int readycount;
 	double throttle_factor;
+	int stopcount;
 } mako_shmhdr_t;
+
+/* memory block allocated to each operation when collecting detailed latency */
+typedef struct {
+	uint64_t data[LAT_BLOCK_SIZE];
+	void* next_block;
+} lat_block_t;
 
 typedef struct {
 	uint64_t xacts;
@@ -145,6 +168,7 @@ typedef struct {
 /* per-process information */
 typedef struct {
 	int worker_id;
+	pid_t parent_id;
 	FDBDatabase* database;
 	mako_args_t* args;
 	mako_shmhdr_t* shm;
@@ -153,6 +177,10 @@ typedef struct {
 /* args for threads */
 typedef struct {
 	int thread_id;
+	int elem_size[MAX_OP]; /* stores the multiple of LAT_BLOCK_SIZE to check the memory allocation of each operation */
+	bool is_memory_allocated[MAX_OP]; /* flag specified for each operation, whether the memory was allocated to that
+	                                     specific operation */
+	lat_block_t* block[MAX_OP];
 	process_info_t* process;
 } thread_args_t;
 

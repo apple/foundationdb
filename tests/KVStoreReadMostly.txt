@@ -1,14 +1,15 @@
 testTitle=KVStore Read-mostly
-testName=KVStoreTest
-testDuration=30.0
-operationsPerSecond=10000
-commitFraction=0.001
-setFraction=0.001
-nodeCount=20000000
-keyBytes=16
-valueBytes=96
-filename=bttest
-setup=false
-clear=false
-count=false
 useDB=false
+
+    testName=KVStoreTest
+    testDuration=30.0
+    operationsPerSecond=10000
+    commitFraction=0.001
+    setFraction=0.001
+    nodeCount=20000000
+    keyBytes=16
+    valueBytes=96
+    filename=bttest
+    setup=false
+    clear=false
+    count=false

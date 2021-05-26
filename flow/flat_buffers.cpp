@@ -50,7 +50,8 @@ VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAlig
 			indexed.emplace_back(i, sizesAlignments[i]);
 		}
 	}
-	std::stable_sort(indexed.begin(), indexed.end(),
+	std::stable_sort(indexed.begin(),
+	                 indexed.end(),
 	                 [](const std::pair<unsigned, unsigned>& lhs, const std::pair<unsigned, unsigned>& rhs) {
 		                 return lhs.second > rhs.second;
 	                 });
@@ -170,7 +171,7 @@ struct Root {
 struct TestContextArena {
 	Arena& _arena;
 	Arena& arena() { return _arena; }
-	ProtocolVersion protocolVersion() const { return currentProtocolVersion; }
+	ProtocolVersion protocolVersion() const { return g_network->protocolVersion(); }
 	uint8_t* allocate(size_t size) { return new (_arena) uint8_t[size]; }
 };
 
@@ -228,7 +229,7 @@ struct Arena {
 struct TestContext {
 	Arena& _arena;
 	Arena& arena() { return _arena; }
-	ProtocolVersion protocolVersion() const { return currentProtocolVersion; }
+	ProtocolVersion protocolVersion() const { return g_network->protocolVersion(); }
 	uint8_t* allocate(size_t size) { return _arena(size); }
 	TestContext& context() { return *this; }
 };
@@ -271,7 +272,7 @@ TEST_CASE("flow/FlatBuffers/serializeDeserializeMembers") {
 		       { 3, "hello", { 6, { "abc", "def" }, 8 }, { 10, 11, 12 } } };
 	Root root2 = root;
 	Arena arena;
-	TestContext context{arena};
+	TestContext context{ arena };
 	const auto* out = save_members(context, FileIdentifier{}, root.a, root.b, root.c);
 
 	ASSERT(root.a == root2.a);
@@ -302,32 +303,32 @@ TEST_CASE("flow/FlatBuffers/serializeDeserializeMembers") {
 namespace unit_tests {
 
 TEST_CASE("flow/FlatBuffers/variant") {
-	using V = boost::variant<int, double, Nested2>;
+	using V = std::variant<int, double, Nested2>;
 	V v1;
 	V v2;
 	Arena arena;
-	TestContext context{arena};
+	TestContext context{ arena };
 	const uint8_t* out;
 
 	v1 = 1;
 	out = save_members(context, FileIdentifier{}, v1);
 	// print_buffer(out, arena.get_size(out));
 	load_members(out, context, v2);
-	ASSERT(boost::get<int>(v1) == boost::get<int>(v2));
+	ASSERT(std::get<int>(v1) == std::get<int>(v2));
 
 	v1 = 1.0;
 	out = save_members(context, FileIdentifier{}, v1);
 	// print_buffer(out, arena.get_size(out));
 	load_members(out, context, v2);
-	ASSERT(boost::get<double>(v1) == boost::get<double>(v2));
+	ASSERT(std::get<double>(v1) == std::get<double>(v2));
 
 	v1 = Nested2{ 1, { "abc", "def" }, 2 };
 	out = save_members(context, FileIdentifier{}, v1);
 	// print_buffer(out, arena.get_size(out));
 	load_members(out, context, v2);
-	ASSERT(boost::get<Nested2>(v1).a == boost::get<Nested2>(v2).a);
-	ASSERT(boost::get<Nested2>(v1).b == boost::get<Nested2>(v2).b);
-	ASSERT(boost::get<Nested2>(v1).c == boost::get<Nested2>(v2).c);
+	ASSERT(std::get<Nested2>(v1).a == std::get<Nested2>(v2).a);
+	ASSERT(std::get<Nested2>(v1).b == std::get<Nested2>(v2).b);
+	ASSERT(std::get<Nested2>(v1).c == std::get<Nested2>(v2).c);
 	return Void();
 }
 
@@ -335,7 +336,7 @@ TEST_CASE("flow/FlatBuffers/vectorBool") {
 	std::vector<bool> x1 = { true, false, true, false, true };
 	std::vector<bool> x2;
 	Arena arena;
-	TestContext context{arena};
+	TestContext context{ arena };
 	const uint8_t* out;
 
 	out = save_members(context, FileIdentifier{}, x1);
@@ -370,7 +371,7 @@ struct Y1 {
 
 struct Y2 {
 	int a;
-	boost::variant<int> b;
+	std::variant<int> b;
 
 	template <class Archiver>
 	void serialize(Archiver& ar) {
@@ -394,7 +395,7 @@ TEST_CASE("/flow/FlatBuffers/nestedCompat") {
 	X<Y1> x1 = { 1, { 2 }, 3 };
 	X<Y2> x2;
 	Arena arena;
-	TestContext context{arena};
+	TestContext context{ arena };
 	const uint8_t* out;
 
 	out = save_members(context, FileIdentifier{}, x1);
@@ -418,7 +419,7 @@ TEST_CASE("/flow/FlatBuffers/struct") {
 	std::vector<std::tuple<int16_t, bool, int64_t>> x1 = { { 1, true, 2 }, { 3, false, 4 } };
 	decltype(x1) x2;
 	Arena arena;
-	TestContext context{arena };
+	TestContext context{ arena };
 	const uint8_t* out;
 
 	out = save_members(context, FileIdentifier{}, x1);
@@ -430,7 +431,7 @@ TEST_CASE("/flow/FlatBuffers/struct") {
 
 TEST_CASE("/flow/FlatBuffers/file_identifier") {
 	Arena arena;
-	TestContext context{arena};
+	TestContext context{ arena };
 	const uint8_t* out;
 	constexpr FileIdentifier file_identifier{ 1234 };
 	Y1 y1;
@@ -480,15 +481,15 @@ TEST_CASE("/flow/FlatBuffers/VectorRef") {
 }
 
 TEST_CASE("/flow/FlatBuffers/Standalone") {
-	Standalone<VectorRef<StringRef>> vecIn;
+	std::vector<Standalone<StringRef>> vecIn;
 	auto numElements = deterministicRandom()->randomInt(1, 20);
 	for (int i = 0; i < numElements; ++i) {
 		auto str = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, 30));
-		vecIn.push_back(vecIn.arena(), StringRef(vecIn.arena(), str));
+		vecIn.push_back(Standalone<StringRef>(str));
 	}
 	Standalone<StringRef> value = ObjectWriter::toValue(vecIn, Unversioned());
 	ArenaObjectReader reader(value.arena(), value, Unversioned());
-	VectorRef<Standalone<StringRef>> vecOut;
+	std::vector<Standalone<StringRef>> vecOut;
 	reader.deserialize(vecOut);
 	ASSERT(vecOut.size() == vecIn.size());
 	for (int i = 0; i < vecOut.size(); ++i) {
