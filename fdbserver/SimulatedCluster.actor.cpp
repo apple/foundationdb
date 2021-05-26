@@ -480,8 +480,8 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				// Copy the file pointers to a vector because the map may be modified while we are killing files
 				std::vector<AsyncFileNonDurable*> files;
 				for (auto fileItr = machineCache.begin(); fileItr != machineCache.end(); ++fileItr) {
-					ASSERT(fileItr->second.isReady());
-					files.push_back((AsyncFileNonDurable*)fileItr->second.get().getPtr());
+					ASSERT(fileItr->second.get().isReady());
+					files.push_back((AsyncFileNonDurable*)fileItr->second.get().get().getPtr());
 				}
 
 				std::vector<Future<Void>> killFutures;
@@ -497,7 +497,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 			for (auto it : machineCache) {
 				filenames.insert(it.first);
 				closingStr += it.first + ", ";
-				ASSERT(it.second.isReady() && !it.second.isError());
+				ASSERT(it.second.get().canGet());
 			}
 
 			for (auto it : g_simulator.getMachineById(localities.machineId())->deletingFiles) {

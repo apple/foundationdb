@@ -132,6 +132,9 @@ public:
 	UID id;
 	std::string filename;
 
+	// For files that use atomic write and create, they are initially created with an extra suffix
+	std::string initialFilename;
+
 	// An approximation of the size of the file; .size() should be used instead of this variable in most cases
 	int64_t approximateSize;
 
@@ -175,11 +178,13 @@ private:
 	    reponses; // cannot call getResult on this actor collection, since the actors will be on different processes
 
 	AsyncFileNonDurable(const std::string& filename,
+	                    const std::string& initialFilename,
 	                    Reference<IAsyncFile> file,
 	                    Reference<DiskParameters> diskParameters,
 	                    NetworkAddress openedAddress,
 	                    bool aio)
-	  : openedAddress(openedAddress), pendingModifications(uint64_t(-1)), approximateSize(0), reponses(false),
+	  : filename(filename), initialFilename(initialFilename), file(file), diskParameters(diskParameters),
+	    openedAddress(openedAddress), pendingModifications(uint64_t(-1)), approximateSize(0), reponses(false),
 	    aio(aio) {
 
 		// This is only designed to work in simulation
@@ -187,9 +192,6 @@ private:
 		this->id = deterministicRandom()->randomUniqueID();
 
 		//TraceEvent("AsyncFileNonDurable_Create", id).detail("Filename", filename);
-		this->file = file;
-		this->filename = filename;
-		this->diskParameters = diskParameters;
 		maxWriteDelay = FLOW_KNOBS->NON_DURABLE_MAX_WRITE_DELAY;
 		hasBeenSynced = false;
 
@@ -232,7 +234,7 @@ public:
 			}
 
 			state Reference<AsyncFileNonDurable> nonDurableFile(
-			    new AsyncFileNonDurable(filename, file, diskParameters, currentProcess->address, aio));
+			    new AsyncFileNonDurable(filename, actualFilename, file, diskParameters, currentProcess->address, aio));
 
 			// Causes the approximateSize member to be set
 			state Future<int64_t> sizeFuture = nonDurableFile->size();
@@ -262,25 +264,29 @@ public:
 	}
 
 	void addref() override { ReferenceCounted<AsyncFileNonDurable>::addref(); }
+
 	void delref() override {
 		if (delref_no_destroy()) {
-			ASSERT(filesBeingDeleted.count(filename) == 0);
-			//TraceEvent("AsyncFileNonDurable_StartDelete", id).detail("Filename", filename);
-			Future<Void> deleteFuture = deleteFile(this);
-			if (!deleteFuture.isReady())
-				filesBeingDeleted[filename] = deleteFuture;
-		} else if (isSoleOwner()) {
-			// isSoleOwner is a bit confusing here. What we mean is that the openFiles map is the sole owner. If we
-			// remove the file from the map to make sure it gets closed.
+			if (filesBeingDeleted.count(filename) == 0) {
+				//TraceEvent("AsyncFileNonDurable_StartDelete", id).detail("Filename", filename);
+				Future<Void> deleteFuture = deleteFile(this);
+				if (!deleteFuture.isReady())
+					filesBeingDeleted[filename] = deleteFuture;
+			}
+
 			auto& openFiles = g_simulator.getCurrentProcess()->machine->openFiles;
 			auto iter = openFiles.find(filename);
-			// the file could've been renamed (DiskQueue does that for example). In that case the file won't be in the
-			// map anymore.
+			if (iter == openFiles.end()) {
+				iter = openFiles.find(initialFilename);
+			}
+
+			// Various actions (e.g. simulated delete) can remove a file from openFiles prematurely, so it may already
+			// be gone
 			if (iter != openFiles.end()) {
 				// even if the filename exists, it doesn't mean that it references the same file. It could be that the
 				// file was renamed and later a file with the same name was opened.
-				if (iter->second.canGet() && iter->second.get().getPtr() == this) {
-					openFiles.erase(filename);
+				if (iter->second.getPtrIfReady().orDefault(nullptr) == this) {
+					openFiles.erase(iter);
 				}
 			}
 		}
