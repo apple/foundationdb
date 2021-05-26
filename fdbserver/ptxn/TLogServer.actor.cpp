@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#include <tuple>
+
+#include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -41,17 +44,18 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/ptxn/ProxyTLogPushMessageSerializer.h"
+#include "fdbserver/ptxn/TLogInterface.h"
+#include "fdbserver/ptxn/TLogStorageServerPeekMessageSerializer.h"
 #include "fdbserver/ptxn/test/Driver.h"
+#include "fdbserver/ptxn/test/Utils.h"
 #include "flow/ActorCollection.h"
 #include "flow/Hash3.h"
 #include "flow/Histogram.h"
+#include "flow/IRandom.h"
+#include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-using std::make_pair;
-using std::max;
-using std::min;
-using std::pair;
 
 namespace ptxn {
 
@@ -470,7 +474,8 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 
 		StorageTeamID storageTeamId;
 		std::vector<Tag> tags;
-		std::deque<std::pair<Version, LengthPrefixedStringRef>> versionMessages;
+		// TODO: change to std::map so that they are sorted by version
+		std::deque<std::tuple<Version, StringRef, Arena>> versionMessages;
 
 		StorageTeamData(StorageTeamID storageTeam, std::vector<Tag> tags) : storageTeamId(storageTeam), tags(tags) {}
 
@@ -723,16 +728,16 @@ void commitMessages(Reference<TLogGroupData> self,
 		storageTeamData = logData->createStorageTeamData(storageTeamId, logData->storageTeams[storageTeamId]);
 	}
 
-	storageTeamData->versionMessages.emplace_back(version,
-	                                              LengthPrefixedStringRef((uint32_t*)(block.end() - messages.size())));
-	if (storageTeamData->versionMessages.back().second.expectedSize() > SERVER_KNOBS->MAX_MESSAGE_SIZE) {
-		TraceEvent(SevWarnAlways, "LargeMessage")
-		    .detail("Size", storageTeamData->versionMessages.back().second.expectedSize());
+	storageTeamData->versionMessages.emplace_back(
+	    version, StringRef(block.end() - messages.size(), messages.size()), block.arena());
+	auto& savedStr = std::get<StringRef>(storageTeamData->versionMessages.back());
+	if (savedStr.expectedSize() > SERVER_KNOBS->MAX_MESSAGE_SIZE) {
+		TraceEvent(SevWarnAlways, "LargeMessage").detail("Size", savedStr.expectedSize());
 	}
 	if (storageTeamId != txsTeam) {
-		expectedBytes += storageTeamData->versionMessages.back().second.expectedSize();
+		expectedBytes += savedStr.expectedSize();
 	} else {
-		txsBytes += storageTeamData->versionMessages.back().second.expectedSize();
+		txsBytes += savedStr.expectedSize();
 	}
 
 	// The factor of VERSION_MESSAGES_OVERHEAD is intended to be an overestimate of the actual memory used
@@ -806,10 +811,10 @@ ACTOR Future<Void> doQueueCommit(Reference<TLogGroupData> self,
 
 ACTOR Future<Void> commitQueue(Reference<TLogGroupData> self) {
 	state Reference<LogGenerationData> logData;
+	state std::vector<Reference<LogGenerationData>> missingFinalCommit;
 
 	loop {
 		int foundCount = 0;
-		state std::vector<Reference<LogGenerationData>> missingFinalCommit;
 		for (auto it : self->id_data) {
 			if (!it.second->stopped) {
 				logData = it.second;
@@ -950,6 +955,70 @@ ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
 	return Void();
 }
 
+ACTOR Future<Void> tLogPeekMessages(TLogPeekRequest req,
+                                    Reference<LogGenerationData> logData) {
+	state TLogPeekReply reply;
+	state TLogStorageServerMessageSerializer serializer(req.storageTeamID);
+	state Reference<LogGenerationData::StorageTeamData> storageTeamData = logData->getStorageTeamData(req.storageTeamID);
+
+	if (storageTeamData) {
+		if (storageTeamData->versionMessages.empty() ||
+		    std::get<Version>(storageTeamData->versionMessages.back()) < req.beginVersion) {
+			wait(logData->version.whenAtLeast(req.beginVersion));
+		}
+
+		for (const auto& tuple : storageTeamData->versionMessages) {
+			const Version& version = std::get<Version>(tuple);
+			const StringRef& messages = std::get<StringRef>(tuple);
+			const Arena& arena = std::get<Arena>(tuple);
+			if (version < req.beginVersion) {
+				continue;
+			}
+			if (req.endVersion.present() && version > req.endVersion.get()) {
+				break;
+			}
+			if (!reply.begin.present()) {
+				reply.begin = version;
+			}
+			reply.end = version;
+
+			serializer.startVersionWriting(version);
+			if (messages.size() == 0) {
+				// Empty commit messages
+				serializer.completeVersionWriting();
+				continue;
+			}
+
+			// TODO: instead of deserializing, just sends it out
+			ProxyTLogMessageHeader header;
+			std::vector<SubsequenceMutationItem> items;
+			// TODO: deserialization can throw incompatible_protocol_version() error.
+			bool b = proxyTLogPushMessageDeserializer(arena, messages, header, items);
+			if (!b) {
+				std::cout << "Error deserializing for version " << version << " \n";
+				continue;
+			}
+			for (const auto& item : items) {
+				serializer.writeSubsequenceMutationRef(item);
+			}
+			serializer.completeVersionWriting();
+		}
+	} else {
+		req.reply.sendError(teamid_not_found());
+	}
+	serializer.completeMessageWriting();
+	Standalone<StringRef> buffer = serializer.getSerialized();
+
+	reply.arena = buffer.arena();
+	reply.data = buffer;
+	reply.maxKnownVersion = logData->version.get();
+	reply.minKnownCommittedVersion = logData->minKnownCommittedVersion;
+	// reply.onlySpilled = false;
+
+	req.reply.send(reply);
+	return Void();
+}
+
 ACTOR Future<Void> initPersistentState(Reference<TLogGroupData> self, Reference<LogGenerationData> logData) {
 	wait(self->persistentDataCommitLock.take());
 	state FlowLock::Releaser commitLockReleaser(self->persistentDataCommitLock);
@@ -1087,6 +1156,20 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 				self->addActors.send(tLogCommit(logData->tlogGroupData, req, logData));
 			}
 		}
+		when(TLogPeekRequest req = waitNext(tli.peek.getFuture())) {
+			// TraceEvent("TLogPeekReq")
+			//    .detail("BeginVersion", req.beginVersion)
+			//    .detail("StorageTeam", req.storageTeamID)
+			//    .detail("Tag", req.tag.toString());
+			auto tlogGroup = activeGeneration->find(req.storageTeamID);
+			TEST(tlogGroup == activeGeneration->end()); // TLog peek: group not found
+			if (tlogGroup == activeGeneration->end()) {
+				req.reply.sendError(tlog_group_not_found());
+				continue;
+			}
+			Reference<LogGenerationData> logData = tlogGroup->second;
+			logData->addActor.send(tLogPeekMessages(req, logData));
+		}
 	}
 }
 
@@ -1130,7 +1213,9 @@ ACTOR Future<Void> tLogCore(
 		return Void();
 	}
 
+	TraceEvent("TLogCore", self->dbgid).detail("WorkerID", self->workerID);
 	self->addActors.send(self->removed);
+
 	// FIXME: update tlogMetrics to include new information, or possibly only have one copy for the shared instance
 	for (auto& logGroup : *activeGeneration) {
 		self->sharedActors.send(traceCounters("TLogMetrics",
@@ -1468,19 +1553,23 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 		tLogInitializations.emplace_back();
 		tLogInitializations.back().isPrimary = true;
 		tLogInitializations.back().tlogGroups = context->tLogGroups;
+		UID tlogId = test::randomUID();
+		UID workerId = test::randomUID();
 		actors->push_back(ptxn::tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>>(),
 		                             makeReference<AsyncVar<ServerDBInfo>>(),
 		                             LocalityData(),
 		                             initializeTLog,
-		                             UID(0, 1),
-		                             UID(0, 2),
+		                             tlogId,
+		                             workerId,
 		                             false,
 		                             Promise<Void>(),
 		                             Promise<Void>(),
 		                             folder,
 		                             makeReference<AsyncVar<bool>>(false),
-		                             makeReference<AsyncVar<UID>>(UID(0, 1))));
+		                             makeReference<AsyncVar<UID>>(tlogId)));
 		initializeTLog.send(tLogInitializations.back());
+		std::cout << "Recruit tlog " << i << " : " << tlogId.shortString() << ", workerID: " << workerId.shortString()
+		          << "\n";
 	}
 
 	// replace fake TLogInterface with recruited interface
@@ -1494,6 +1583,63 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 	}
 	return Void();
 }
+
+// Randomly commit to a tlog, then peek data, and verify if the data is consistent.
+ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<test::TestDriverContext> pContext) {
+	const TLogGroup& group = pContext->tLogGroups[0];
+	ASSERT(!group.storageTeams.empty());
+	state StorageTeamID storageTeamID = group.storageTeams.begin()->first;
+
+	state std::shared_ptr<TLogInterfaceBase> tli = pContext->getTLogInterface(storageTeamID);
+	state Version prevVersion = 0; // starts from 0 for first epoch
+	state Version beginVersion = 150;
+	state Version endVersion(beginVersion + deterministicRandom()->randomInt(5, 20));
+	state Optional<UID> debugID(test::randomUID());
+
+	// Commit
+	ProxyTLogPushMessageSerializer serializer;
+	state std::vector<MutationRef> mutations;
+	const int numMutations = 10;
+	for (int i = 0; i < numMutations; i++) {
+		MutationRef m(pContext->mutationsArena,
+		              MutationRef::SetValue,
+		              deterministicRandom()->randomAlphaNumeric(10),
+		              deterministicRandom()->randomAlphaNumeric(16));
+		serializer.writeMessage(m, storageTeamID);
+		mutations.push_back(m);
+	}
+	serializer.completeMessageWriting(storageTeamID);
+	Standalone<StringRef> message = serializer.getSerialized(storageTeamID);
+	TLogCommitRequest commitRequest(
+	    test::randomUID(), storageTeamID, message.arena(), message, prevVersion, beginVersion, 0, 0, debugID);
+	test::print::print(commitRequest);
+
+	TLogCommitReply commitReply = wait(tli->commit.getReply(commitRequest));
+	test::print::print(commitReply);
+
+	// Peek
+	TLogPeekRequest request(debugID, beginVersion, endVersion, storageTeamID);
+	test::print::print(request);
+
+	state TLogPeekReply reply = wait(tli->peek.getReply(request));
+	test::print::print(reply);
+
+	// Verify
+	TLogStorageServerMessageDeserializer deserializer(reply.arena, reply.data);
+	ASSERT_EQ(beginVersion, deserializer.getFirstVersion());
+	ASSERT_EQ(beginVersion, deserializer.getLastVersion());
+	int i = 0;
+	for (auto iter = deserializer.begin(); iter != deserializer.end(); ++iter, ++i) {
+		const VersionSubsequenceMutation& m = *iter;
+		ASSERT_EQ(beginVersion, m.version);
+		ASSERT_EQ(i + 1, m.subsequence); // subsequence starts from 1
+		ASSERT(mutations[i] == m.mutation);
+	}
+	ASSERT_EQ(i, mutations.size());
+
+	return Void();
+}
+
 } // namespace
 
 TEST_CASE("/fdbserver/ptxn/test/run_tlog_server") {
@@ -1510,6 +1656,30 @@ TEST_CASE("/fdbserver/ptxn/test/run_tlog_server") {
 	// TODO: start fake proxy to talk to real TLog servers.
 	startFakeProxy(actors, context);
 	wait(quorum(actors, 1));
+	platform::eraseDirectoryRecursive(folder);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ptxn/test/peek_tlog_server") {
+	state test::TestDriverOptions options(params);
+	state std::vector<Future<Void>> actors;
+	state std::shared_ptr<test::TestDriverContext> context = test::initTestDriverContext(options);
+
+	for (const auto& group : context->tLogGroups) {
+		std::cout << "TLog Group " << group.logGroupId;
+		for (const auto& [storageTeamId, tags] : group.storageTeams) {
+			std::cout << ", SS team " << storageTeamId;
+		}
+		std::cout << "\n";
+	}
+
+	state std::string folder = "simdb/" + deterministicRandom()->randomAlphaNumeric(10);
+	platform::createDirectory(folder);
+	// start a real TLog server
+	wait(startTLogServers(&actors, context, folder));
+
+	wait(commitPeekAndCheck(context));
+
 	platform::eraseDirectoryRecursive(folder);
 	return Void();
 }

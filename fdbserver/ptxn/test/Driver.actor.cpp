@@ -102,7 +102,7 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 
 	context->numTLogGroups = options.numTLogGroups;
 	for (int i = 0; i < context->numTLogGroups; ++i) {
-		context->tLogGroups.push_back(TLogGroup(deterministicRandom()->randomUniqueID()));
+		context->tLogGroups.push_back(TLogGroup(randomUID()));
 		context->tLogGroupLeaders[context->tLogGroups.back().logGroupId] =
 		    context->tLogInterfaces[deterministicRandom()->randomInt(0, context->numTLogs)];
 	}
@@ -114,7 +114,7 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 		context->storageServerInterfaces.back()->initEndpoints();
 	}
 
-	// Assign teams to interfaces
+	// Assign storage teams to storage interfaces
 	auto assignTeamToInterface = [&](auto& mapper, auto interface) {
 		int numInterfaces = interface.size();
 		int index = 0;
@@ -128,12 +128,14 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 	};
 	assignTeamToInterface(context->storageTeamIDStorageServerInterfaceMapper, context->storageServerInterfaces);
 
+	// Assign storage teams to tlog groups
 	for (int i = 0, index = 0; i < context->numStorageTeamIDs; ++i) {
 		const StorageTeamID& storageTeamID = context->storageTeamIDs[i];
 		TLogGroup& tLogGroup = context->tLogGroups[index];
 		context->storageTeamIDTLogGroupIDMapper[storageTeamID] = tLogGroup.logGroupId;
 		// TODO: support tags when implementing pop
 		tLogGroup.storageTeams[storageTeamID] = {};
+
 		++index;
 		index %= context->tLogGroups.size();
 	}

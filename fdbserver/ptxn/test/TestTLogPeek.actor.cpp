@@ -43,6 +43,7 @@ Future<Void> initializeTLogForPeekTest(MessageTransferModel transferModel, std::
 
 	return getFakeTLogActor(transferModel, pContext);
 }
+
 // Randomly peek data from FakeTLog and verify if the data is consistent
 ACTOR Future<Void> peekAndCheck(std::shared_ptr<FakeTLogContext> pContext) {
 	state std::vector<StorageTeamID>& storageTeamIDs = pContext->storageTeamIDs;
