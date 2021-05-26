@@ -2752,35 +2752,25 @@ struct RedwoodRecordRef {
 			} LengthFormat3;
 		};
 
-		struct int48_t {
-			static constexpr int64_t MASK = 0xFFFFFFFFFFFFLL;
-			int32_t high;
-			int16_t low;
-		};
-
 		static constexpr int LengthFormatSizes[] = { sizeof(LengthFormat0),
 			                                         sizeof(LengthFormat1),
 			                                         sizeof(LengthFormat2),
 			                                         sizeof(LengthFormat3) };
-		static constexpr int VersionDeltaSizes[] = { 0, sizeof(int32_t), sizeof(int48_t), sizeof(int64_t) };
 
 		// Serialized Format
 		//
 		// Flags - 1 byte
 		//    1 bit - borrow source is prev ancestor (otherwise next ancestor)
 		//    1 bit - item is deleted
-		//    1 bit - has value (different from zero-length value, if 0 value len will be 0)
-		//    1 bits - has nonzero version
-		//    2 bits - version delta integer size code, maps to 0, 4, 6, 8
+		//    1 bit - has value (different from a zero-length value, which is still a value)
+		//    3 unused bits
 		//    2 bits - length fields format
 		//
 		// Length fields using 3 to 8 bytes total depending on length fields format
 		//
 		// Byte strings
-		//    Key suffix bytes
 		//    Value bytes
-		//    Version delta bytes
-		//
+		//    Key suffix bytes
 
 		enum EFlags {
 			PREFIX_SOURCE_PREV = 0x80,
@@ -2790,6 +2780,7 @@ struct RedwoodRecordRef {
 			LENGTHS_FORMAT = 0x03
 		};
 
+		// Figure out which length format must be used for the given lengths
 		static inline int determineLengthFormat(int prefixLength, int suffixLength, int valueLength) {
 			// Large prefix or suffix length, which should be rare, is format 3
 			if (prefixLength > 0xFF || suffixLength > 0xFF) {
@@ -6558,11 +6549,6 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 	ASSERT(RedwoodRecordRef::Delta::LengthFormatSizes[1] == 4);
 	ASSERT(RedwoodRecordRef::Delta::LengthFormatSizes[2] == 6);
 	ASSERT(RedwoodRecordRef::Delta::LengthFormatSizes[3] == 8);
-
-	ASSERT(RedwoodRecordRef::Delta::VersionDeltaSizes[0] == 0);
-	ASSERT(RedwoodRecordRef::Delta::VersionDeltaSizes[1] == 4);
-	ASSERT(RedwoodRecordRef::Delta::VersionDeltaSizes[2] == 6);
-	ASSERT(RedwoodRecordRef::Delta::VersionDeltaSizes[3] == 8);
 
 	printf("sizeof(RedwoodRecordRef) = %d\n", sizeof(RedwoodRecordRef));
 
