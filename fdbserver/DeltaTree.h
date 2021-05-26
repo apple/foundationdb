@@ -1099,9 +1099,16 @@ public:
 				return delta.apply(cache->arena, basePrev ? cache->lowerBound : cache->upperBound, decoded.partial);
 			}
 
-			// Otherwise, get the base T and apply the delta to it
-			T base = get(cache->get(baseIndex));
-			return delta.apply(cache->arena, base, decoded.partial);
+			// Otherwise, get the base's decoded node
+			DecodedNode& baseDecoded = cache->get(baseIndex);
+
+			// If the base's partial is present, apply delta to it to get result
+			if (baseDecoded.partial.present()) {
+				return delta.apply(cache->arena, baseDecoded.partial.get(), decoded.partial);
+			}
+
+			// Otherwise apply delta to base T
+			return delta.apply(cache->arena, get(baseDecoded), decoded.partial);
 		}
 
 	public:

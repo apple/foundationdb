@@ -2707,19 +2707,6 @@ struct RedwoodRecordRef {
 	int expectedSize() const { return key.expectedSize() + value.expectedSize(); }
 	int kvBytes() const { return expectedSize(); }
 
-	class Reader {
-	public:
-		Reader(const void* ptr) : rptr((const byte*)ptr) {}
-
-		const byte* rptr;
-
-		StringRef readString(int len) {
-			StringRef s(rptr, len);
-			rptr += len;
-			return s;
-		}
-	};
-
 #pragma pack(push, 1)
 	struct Delta {
 
@@ -2851,9 +2838,9 @@ struct RedwoodRecordRef {
 			}
 		}
 
-		StringRef getKeySuffix() const { return StringRef(data(), getKeySuffixLength()); }
+		StringRef getKeySuffix() const { return StringRef(data() + getValueLength(), getKeySuffixLength()); }
 
-		StringRef getValue() const { return StringRef(data() + getKeySuffixLength(), getValueLength()); }
+		StringRef getValue() const { return StringRef(data(), getValueLength()); }
 
 		bool hasValue() const { return flags & HAS_VALUE; }
 
@@ -2877,42 +2864,55 @@ struct RedwoodRecordRef {
 
 		bool getDeleted() const { return flags & IS_DELETED; }
 
-		RedwoodRecordRef apply(const Partial& cache) {
-			return RedwoodRecordRef(cache, hasValue() ? Optional<ValueRef>(getValue()) : Optional<ValueRef>());
-		}
-
+		// DeltaTree interface
 		RedwoodRecordRef apply(const RedwoodRecordRef& base, Arena& arena) const {
 			int keyPrefixLen = getKeyPrefixLength();
 			int keySuffixLen = getKeySuffixLength();
 			int valueLen = hasValue() ? getValueLength() : 0;
+			byte* pData = data();
 
 			StringRef k;
-
-			Reader r(data());
 			// If there is a key suffix, reconstitute the complete key into a contiguous string
 			if (keySuffixLen > 0) {
-				StringRef keySuffix = r.readString(keySuffixLen);
 				k = makeString(keyPrefixLen + keySuffixLen, arena);
 				memcpy(mutateString(k), base.key.begin(), keyPrefixLen);
-				memcpy(mutateString(k) + keyPrefixLen, keySuffix.begin(), keySuffixLen);
+				memcpy(mutateString(k) + keyPrefixLen, pData + valueLen, keySuffixLen);
 			} else {
 				// Otherwise just reference the base key's memory
 				k = base.key.substr(0, keyPrefixLen);
 			}
 
-			Optional<ValueRef> value;
-			if (hasValue()) {
-				value = r.readString(valueLen);
-			}
+			return RedwoodRecordRef(k, hasValue() ? ValueRef(pData, valueLen) : Optional<ValueRef>());
+		}
 
-			return RedwoodRecordRef(k, value);
+		// DeltaTree interface
+		RedwoodRecordRef apply(const Partial& cache) {
+			return RedwoodRecordRef(cache, hasValue() ? Optional<ValueRef>(getValue()) : Optional<ValueRef>());
+		}
+
+		RedwoodRecordRef apply(Arena& arena, const Partial& baseKey, Optional<Partial>& cache) {
+			int keyPrefixLen = getKeyPrefixLength();
+			int keySuffixLen = getKeySuffixLength();
+			int valueLen = hasValue() ? getValueLength() : 0;
+			byte* pData = data();
+
+			StringRef k;
+			// If there is a key suffix, reconstitute the complete key into a contiguous string
+			if (keySuffixLen > 0) {
+				k = makeString(keyPrefixLen + keySuffixLen, arena);
+				memcpy(mutateString(k), baseKey.begin(), keyPrefixLen);
+				memcpy(mutateString(k) + keyPrefixLen, pData + valueLen, keySuffixLen);
+			} else {
+				// Otherwise just reference the base key's memory
+				k = baseKey.substr(0, keyPrefixLen);
+			}
+			cache = k;
+
+			return RedwoodRecordRef(k, hasValue() ? ValueRef(pData, valueLen) : Optional<ValueRef>());
 		}
 
 		RedwoodRecordRef apply(Arena& arena, const RedwoodRecordRef& base, Optional<Partial>& cache) {
-			RedwoodRecordRef rec = apply(base, arena);
-			cache = rec.key;
-
-			return rec;
+			return apply(arena, base.key, cache);
 		}
 
 		int size() const {
@@ -2943,7 +2943,6 @@ struct RedwoodRecordRef {
 			}
 			int lengthFormat = flags & LENGTHS_FORMAT;
 
-			Reader r(data());
 			int prefixLen = getKeyPrefixLength();
 			int keySuffixLen = getKeySuffixLength();
 			int valueLen = getValueLength();
@@ -3046,13 +3045,14 @@ struct RedwoodRecordRef {
 		}
 
 		uint8_t* wptr = d.data();
-		// Write key suffix string
-		wptr = keySuffix.copyTo(wptr);
 
 		// Write value bytes
-		if (value.present()) {
+		if (valueLen > 0) {
 			wptr = value.get().copyTo(wptr);
 		}
+
+		// Write key suffix string
+		wptr = keySuffix.copyTo(wptr);
 
 		return wptr - (uint8_t*)&d;
 	}
