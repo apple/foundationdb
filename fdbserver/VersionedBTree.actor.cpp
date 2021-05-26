@@ -590,6 +590,14 @@ public:
 			state bool needNewPage =
 			    self->pageID == invalidLogicalPageID || self->offset + bytesNeeded > self->queue->dataBytesPerPage;
 
+			if (BUGGIFY) {
+				// Sometimes (1% probability) decide a new page is needed as long as at least 1 item has been
+				// written (indicated by non-zero offset) to the current page.
+				if ((self->offset > 0) && deterministicRandom()->random01() < 0.01) {
+					needNewPage = true;
+				}
+			}
+
 			debug_printf_pager("FIFOQueue::Cursor(%s) write(%s) mustWait=%d needNewPage=%d\n",
 			                   self->toString().c_str(),
 			                   ::toString(item).c_str(),
@@ -606,6 +614,13 @@ public:
 				if (mustWait) {
 					needNewPage = self->pageID == invalidLogicalPageID ||
 					              self->offset + bytesNeeded > self->queue->dataBytesPerPage;
+					if (BUGGIFY) {
+						// Sometimes (1% probability) decide a new page is needed as long as at least 1 item has been
+						// written (indicated by non-zero offset) to the current page.
+						if ((self->offset > 0) && deterministicRandom()->random01() < 0.01) {
+							needNewPage = true;
+						}
+					}
 				}
 			}
 
@@ -871,17 +886,21 @@ public:
 	}
 
 	// Fast path extent peekAll (this zooms through the queue reading extents at a time)
-	ACTOR static Future<Standalone<VectorRef<T>>> peekAll_ext(FIFOQueue* self) {
+	//ACTOR static Future<Standalone<VectorRef<T>>> peekAll_ext(FIFOQueue* self,
+	ACTOR static Future<Void> peekAll_ext(FIFOQueue* self, PromiseStream <Standalone<VectorRef<T>>> res) {
 		state Cursor c;
 		c.initReadOnly(self->headReader, true);
 
-		state Standalone<VectorRef<T>> results;
-		results.reserve(results.arena(), self->numEntries);
+		//state Standalone<VectorRef<T>> results;
+		//results.reserve(results.arena(), self->pagesPerExtent * self->pager->getPhysicalPageSize()/sizeof(T));
+		//results.reserve(results.arena(), self->numEntries);
 
 		debug_printf_pager("FIFOQueue::Cursor(%s) peekAllExt begin\n", c.toString().c_str());
 		if (c.pageID == invalidLogicalPageID || c.pageID == c.endPageID) {
 			debug_printf_pager("FIFOQueue::Cursor(%s) peekAllExt returning nothing\n", c.toString().c_str());
-			return results;
+			res.send(results);
+			return Void();
+			//return results;
 		}
 
 		loop {
@@ -894,6 +913,8 @@ public:
 				wait(yield());
 			}
 
+			state Standalone<VectorRef<T>> results;
+			results.reserve(results.arena(), self->pagesPerExtent * self->pager->getPhysicalPageSize()/sizeof(T));
 			// Loop over all the pages in this extent
 			int pageIdx = 0;
 			loop {
@@ -922,17 +943,17 @@ public:
 				loop {
 					ASSERT(c.offset < p->endOffset);
 					T result = Codec::readFromBytes(p->begin() + c.offset, bytesRead);
+					debug_printf_pager(
+					    "FIFOQueue::Cursor(%s) after read of %s\n", c.toString().c_str(), ::toString(result).c_str());
 					results.push_back(results.arena(), result);
 
 					c.offset += bytesRead;
-					debug_printf_pager(
-					    "FIFOQueue::Cursor(%s) after read of %s\n", c.toString().c_str(), ::toString(result).c_str());
 					ASSERT(c.offset <= p->endOffset);
 
 					if (c.offset == p->endOffset) {
 						c.pageID = p->nextPageID;
 						c.offset = p->nextOffset;
-						debug_printf_pager("FIFOQueue::Cursor(%s) readAllExt page exhausted, moved to new page\n",
+						debug_printf_pager("FIFOQueue::Cursor(%s) peekAllExt page exhausted, moved to new page\n",
 						                   c.toString().c_str());
 						debug_printf_pager("FIFOQueue:: nextPageID=%s, extentCurPageID=%s, extentEndPageID=%s\n",
 						                   ::toString(p->nextPageID).c_str(),
@@ -943,18 +964,30 @@ public:
 				} // End of Page
 
 				// Check if we have reached the end of the queue
-				if (c.pageID == invalidLogicalPageID || c.pageID == c.endPageID)
-					return results;
+				if (c.pageID == invalidLogicalPageID || c.pageID == c.endPageID) {
+					debug_printf_pager("FIFOQueue::Cursor(%s) peekAllExt Queue exhausted\n",
+										c.toString().c_str());
+					res.send(results);
+					//return results;
+					return Void();
+				}
 
 				// Check if we have reached the end of current extent
 				if (p->extentCurPageID == p->extentEndPageID) {
 					c.page.clear();
-					debug_printf_pager("FIFOQueue::Cursor(%s) readAllExt extent exhausted, moved to new extent\n",
+					debug_printf_pager("FIFOQueue::Cursor(%s) peekAllExt extent exhausted, moved to new extent\n",
 					                   c.toString().c_str());
+					res.send(results);
+					self->pager->releaseExtentReadLock();
 					break;
 				}
 			} // End of Extent
 		} // End of Queue
+	}
+
+	//Future<Standalone<VectorRef<T>>> peekAllExt(PromiseStream <Standalone<VectorRef<T>>> resStream) {
+	Future<Void> peekAllExt(PromiseStream <Standalone<VectorRef<T>>> resStream) {
+		return peekAll_ext(this, resStream);
 	}
 
 	ACTOR static Future<Standalone<VectorRef<T>>> peekAll_impl(FIFOQueue* self) {
@@ -982,8 +1015,8 @@ public:
 	}
 
 	Future<Standalone<VectorRef<T>>> peekAll(bool forceSlowPath = false) {
-		if (!forceSlowPath && this->usesExtents)
-			return peekAll_ext(this);
+		//if (!forceSlowPath && this->usesExtents)
+		//	return peekAll_ext(this);
 		return peekAll_impl(this);
 	}
 
@@ -1690,7 +1723,8 @@ public:
 	          Version remapCleanupWindow,
 	          bool memoryOnly = false)
 	  : desiredPageSize(desiredPageSize), pagesPerExtent(pagesPerExtent), filename(filename), pHeader(nullptr),
-	    pageCacheBytes(pageCacheSizeBytes), memoryOnly(memoryOnly), remapCleanupWindow(remapCleanupWindow) {
+	    pageCacheBytes(pageCacheSizeBytes), memoryOnly(memoryOnly), remapCleanupWindow(remapCleanupWindow),
+	    concurrentExtentReads(new FlowLock(2 /*knob*/)) {
 
 		if (!g_redwoodMetricsActor.isValid()) {
 			g_redwoodMetricsActor = redwoodMetricsLogger();
@@ -1814,6 +1848,7 @@ public:
 			self->remapQueue.recover(self, self->pHeader->remapQueue, "RemapQueueRecovered");
 
 			debug_printf_pager("DWALPager(%s) Queue recovery complete.\n", self->filename.c_str());
+			// TODO: NEELAM: remove
 			self->extentUsedList.getState();
 			self->remapQueue.getState();
 
@@ -1829,11 +1864,31 @@ public:
 					}
 				}
 			}
-			Standalone<VectorRef<RemappedPage>> remaps = wait(self->remapQueue.peekAll());
 
-			for (auto& r : remaps) {
-				self->remappedPages[r.originalPageID][r.version] = r.newPageID;
+
+			//Standalone<VectorRef<RemappedPage>> remaps = wait(self->remapQueue.peekAll());
+			//for (auto& r : remaps) {
+			//	self->remappedPages[r.originalPageID][r.version] = r.newPageID;
+			//}
+
+			state PromiseStream<Standalone<VectorRef<RemappedPage>>> remapStream;
+			state Future<Void> remapRecoverActor;
+			remapRecoverActor = self->remapQueue.peekAllExt(remapStream);
+			state int remapEntriesRead = 0;
+			loop choose {
+				when(Standalone<VectorRef<RemappedPage>> remaps = waitNext(remapStream.getFuture())) {
+					debug_printf_pager("DWALPager(%s) recovery. remaps size: %d, remapEntriesRead: %d, queueEntries: %d\n",
+										self->filename.c_str(),
+										remaps.size(), remapEntriesRead, self->remapQueue.numEntries);
+					for (auto& r : remaps) {
+						self->remappedPages[r.originalPageID][r.version] = r.newPageID;
+					}
+					remapEntriesRead += remaps.size();
+					if (remapEntriesRead == self->remapQueue.numEntries)
+						break;
+				}
 			}
+
 			debug_printf_pager("DWALPager(%s) recovery complete. RemappedPagesMap: %s\n",
 			                   self->filename.c_str(),
 			                   toString(self->remappedPages).c_str());
@@ -1849,7 +1904,6 @@ public:
 
 				// Wait for all outstanding writes to complete
 				wait(self->operations.signalAndCollapse());
-
 				// Sync header
 				wait(self->pageFile->sync());
 				debug_printf_pager("DWALPager(%s) Header recovery complete.\n", self->filename.c_str());
@@ -2389,11 +2443,19 @@ public:
 		return readPage(physicalID, cacheable, noHit, fromCache);
 	}
 
+	void releaseExtentReadLock() override {
+		concurrentExtentReads->release();
+	}
+
 	// Read the physical extent at given pageID
 	// NOTE that we use the same interface (<ArenaPage>) for the extent as the page
 	ACTOR static Future<Reference<ArenaPage>> readPhysicalExtent(DWALPager* self,
 	                                                             PhysicalPageID pageID,
 	                                                             int readSize = 0) {
+		//state Reference<FlowLock> extentReadLock = concurrentExtentReads;
+		//wait(extentReadLock->take());
+		wait(self->concurrentExtentReads->take());
+
 		ASSERT(!self->memoryOnly);
 		++g_redwoodMetrics.pagerDiskRead;
 
@@ -2431,6 +2493,7 @@ public:
 			debug_printf_pager("DWALPager(%s) Cache Entry exists for %s\n", filename.c_str(), toString(pageID).c_str());
 			return pCacheEntry->readFuture;
 		}
+	
 		LogicalPageID headPageID = pHeader->remapQueue.headPageID;
 		LogicalPageID tailPageID = pHeader->remapQueue.tailPageID;
 		int readSize = physicalExtentSize;
@@ -2918,7 +2981,7 @@ private:
 #pragma pack(push, 1)
 	// Header is the format of page 0 of the database
 	struct Header {
-		static constexpr int FORMAT_VERSION = 2;
+		static constexpr int FORMAT_VERSION = 3;
 		uint16_t formatVersion;
 		uint32_t queueCount;
 		uint32_t pageSize;
@@ -3018,8 +3081,8 @@ private:
 	RemapQueueT remapQueue;
 	LogicalPageQueueT extentFreeList;
 	ExtentUsedListQueueT extentUsedList;
-	// LogicalPageQueueT extentUsedList;
 	Version remapCleanupWindow;
+	Reference<FlowLock> concurrentExtentReads;
 	std::unordered_set<PhysicalPageID> remapDestinationsSimOnly;
 
 	struct SnapshotEntry {
@@ -8577,7 +8640,11 @@ TEST_CASE("/redwood/correctness/btree") {
 
 	state int pageSize =
 	    shortTest ? 200 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(200, 400));
-	state int pagesPerExtent = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_PAGES;
+	// TODO: NEELAM: Can the random value be skewed towards 1 here?
+	state int pagesPerExtent =  params.getInt("pagesPerExtent").
+		orDefault(deterministicRandom()->coinflip() ?
+				  SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_PAGES :
+				  deterministicRandom()->randomInt(1, 10));
 
 	state int64_t targetPageOps = params.getInt("targetPageOps").orDefault(shortTest ? 50000 : 1000000);
 	state bool pagerMemoryOnly =
@@ -9005,6 +9072,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	// Choose a large remapCleanupWindow to avoid popping the queue
 	state Version remapCleanupWindow = params.getInt("remapCleanupWindow").orDefault(1e16);
 	state int numEntries = params.getInt("numEntries").orDefault(10e6);
+	state int diskReadSize = params.getInt("diskReadSize").orDefault(33554432);
 	state int targetCommitSize = deterministicRandom()->randomInt(2e6, 30e6);
 	state int currentCommitSize = 0;
 	state int64_t cumulativeCommitSize = 0;
@@ -9070,8 +9138,6 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	wait(success(pager->init()));
 
 	printf("Starting ExtentQueue FastPath Recovery from Disk.\n");
-	state double intervalStart = timer();
-	state double start = intervalStart;
 
 	// reopen the pager from disk
 	state Key meta = pager->getMetaKey();
@@ -9079,13 +9145,28 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	extentQueueState.fromKeyRef(meta);
 	printf("Recovered ExtentQueue getState(): %s\n", extentQueueState.toString().c_str());
 	m_extentQueue.recover(pager, extentQueueState, "ExtentQueueRecovered");
+
+	state int extentsPerParallelRead = diskReadSize / (pagesPerExtent * pageSize);
+	printf("DWALPager extentsPerParallelRead : %u\n", extentsPerParallelRead);
+
+	state double intervalStart = timer();
+	state double start = intervalStart;
 	state Standalone<VectorRef<LogicalPageID>> extentIDs = wait(pager->getUsedExtents(m_extentQueue.queueID));
 
-	printf("DWALPager numExtents: %u\n", extentIDs.size());
+	//printf("DWALPager numExtents: %u\n", extentIDs.size());
 	// fire read requests for all used extents
-	for (int i = 1; i < extentIDs.size() - 1; i++) {
+	state int i;
+	for (i = 1; i < extentIDs.size() - 1; i++) {
 		LogicalPageID extID = extentIDs[i];
 		pager->readExtent(extID);
+		// After issuing enough parallel reads, wait for their futures to be ready
+		if (i % extentsPerParallelRead == 0) {
+			state int beg = i - extentsPerParallelRead;
+			state int end = beg + extentsPerParallelRead;
+			state int j;
+			for  (j = beg; j < end;  j++)
+				Reference<ArenaPage> p = wait(pager->readExtent(extentIDs[j]));
+		}
 	}
 
 	Standalone<VectorRef<ExtentQueueEntry<16>>> entries = wait(m_extentQueue.peekAll());

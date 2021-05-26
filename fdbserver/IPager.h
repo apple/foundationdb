@@ -199,6 +199,7 @@ public:
 	                                              bool noHit = false,
 	                                              bool* fromCache = nullptr) = 0;
 	virtual Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) = 0;
+	virtual void releaseExtentReadLock() = 0;
 
 	// Temporary methods for testing
 	virtual Future<Standalone<VectorRef<LogicalPageID>>> getUsedExtents(QueueID queueID) = 0;
