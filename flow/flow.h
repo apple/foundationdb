@@ -451,11 +451,35 @@ struct LineageProperties : LineagePropertiesBase {
 struct ActorLineage : ThreadSafeReferenceCounted<ActorLineage> {
 	friend class LocalLineage;
 
+	struct Property {
+		std::string_view name;
+		LineagePropertiesBase* properties;
+	};
+
 private:
-	std::unordered_map<std::string_view, LineagePropertiesBase*> properties;
+	std::vector<Property> properties;
 	Reference<ActorLineage> parent;
 	mutable std::mutex mutex;
 	using Lock = std::unique_lock<std::mutex>;
+	using Iterator = std::vector<Property>::const_iterator;
+
+	Iterator find(const std::string_view& name) const {
+		for (auto it = properties.cbegin(); it != properties.cend(); ++it) {
+			if (it->name == name) {
+				return it;
+			}
+		}
+		return properties.end();
+	}
+	Property& findOrInsert(const std::string_view& name) {
+		for (auto& property : properties) {
+			if (property.name == name) {
+				return property;
+			}
+		}
+		properties.emplace_back(Property{ name, nullptr });
+		return properties.back();
+	}
 
 public:
 	ActorLineage();
@@ -471,7 +495,7 @@ public:
 	template <class T, class V>
 	V& modify(V T::*member) {
 		Lock _{ mutex };
-		auto& res = properties[T::name];
+		auto& res = findOrInsert(T::name).properties;
 		if (!res) {
 			res = new T{};
 		}
@@ -483,9 +507,9 @@ public:
 		Lock _{ mutex };
 		auto current = this;
 		while (current != nullptr) {
-			auto iter = current->properties.find(T::name);
+			auto iter = current->find(T::name);
 			if (iter != current->properties.end()) {
-				T const& map = static_cast<T const&>(*iter->second);
+				T const& map = static_cast<T const&>(*iter->properties);
 				if (map.isSet(member)) {
 					return map.*member;
 				}
@@ -500,9 +524,9 @@ public:
 		auto current = this;
 		std::vector<V> res;
 		while (current != nullptr) {
-			auto iter = current->properties.find(T::name);
+			auto iter = current->find(T::name);
 			if (iter != current->properties.end()) {
-				T const& map = static_cast<T const&>(*iter->second);
+				T const& map = static_cast<T const&>(*iter->properties);
 				if (map.isSet(member)) {
 					res.push_back(map.*member);
 				}
@@ -511,15 +535,21 @@ public:
 		}
 		return res;
 	}
+	Reference<ActorLineage> getParent() {
+		return parent;
+	}
 };
 
+extern std::atomic<bool> startSampling;
 extern thread_local Reference<ActorLineage> currentLineage;
-extern WriteOnlyVariable<ActorLineage, unsigned> currentLineageThreadSafe;
 
 struct StackLineage : LineageProperties<StackLineage> {
 	static const std::string_view name;
 	StringRef actorName;
 };
+
+Reference<ActorLineage> getCurrentLineage();
+void replaceLineage(Reference<ActorLineage> lineage);
 
 // This class can be used in order to modify all lineage properties
 // of actors created within a (non-actor) scope
@@ -528,12 +558,10 @@ struct LocalLineage {
 	Reference<ActorLineage> oldLineage;
 	LocalLineage() {
 		oldLineage = currentLineage;
-		currentLineage = lineage;
-		currentLineageThreadSafe.replace(lineage);
+		replaceLineage(lineage);
 	}
 	~LocalLineage() {
-		currentLineage = oldLineage;
-		currentLineageThreadSafe.replace(oldLineage);
+		replaceLineage(oldLineage);
 	}
 };
 
@@ -541,8 +569,7 @@ struct restore_lineage {
 	Reference<ActorLineage> prev;
 	restore_lineage() : prev(currentLineage) {}
 	~restore_lineage() {
-		currentLineage = prev;
-		currentLineageThreadSafe.replace(prev);
+		replaceLineage(prev);
 	}
 };
 
@@ -1123,21 +1150,19 @@ static inline void destruct(T& t) {
 
 template <class ReturnValue>
 struct Actor : SAV<ReturnValue> {
-	Reference<ActorLineage> lineage = Reference<ActorLineage>{ new ActorLineage() };
+	Reference<ActorLineage> lineage = currentLineage;
 	int8_t actor_wait_state; // -1 means actor is cancelled; 0 means actor is not waiting; 1-N mean waiting in callback
 	                         // group #
 
 	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(0) {
 		/*++actorCount;*/
-		currentLineage = lineage;
-		currentLineageThreadSafe.replace(lineage);
+		replaceLineage(lineage);
 	}
 	//~Actor() { --actorCount; }
 
 	Reference<ActorLineage> setLineage() {
 		auto res = currentLineage;
-		currentLineage = lineage;
-		currentLineageThreadSafe.replace(lineage);
+		replaceLineage(lineage);
 		return res;
 	}
 };
@@ -1146,20 +1171,18 @@ template <>
 struct Actor<void> {
 	// This specialization is for a void actor (one not returning a future, hence also uncancellable)
 
-	Reference<ActorLineage> lineage = Reference<ActorLineage>{ new ActorLineage() };
+	Reference<ActorLineage> lineage = currentLineage;
 	int8_t actor_wait_state; // 0 means actor is not waiting; 1-N mean waiting in callback group #
 
 	Actor() : actor_wait_state(0) {
 		/*++actorCount;*/
-		currentLineage = lineage;
-		currentLineageThreadSafe.replace(lineage);
+		replaceLineage(lineage);
 	}
 	//~Actor() { --actorCount; }
 
 	Reference<ActorLineage> setLineage() {
 		auto res = currentLineage;
-		currentLineage = lineage;
-		currentLineageThreadSafe.replace(lineage);
+		replaceLineage(lineage);
 		return res;
 	}
 };

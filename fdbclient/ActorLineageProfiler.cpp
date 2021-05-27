@@ -234,6 +234,12 @@ std::vector<std::shared_ptr<Sample>> SampleCollection_t::get(double from /*= 0.0
 	return res;
 }
 
+void sample(Reference<ActorLineage>& lineage) {
+	boost::asio::post(ActorLineageProfiler::instance().context(), [lineage]() {
+		// collector->collect(lineage);
+	});
+}
+
 struct ProfilerImpl {
 	boost::asio::io_context context;
 	boost::asio::executor_work_guard<decltype(context.get_executor())> workGuard;
@@ -256,7 +262,8 @@ struct ProfilerImpl {
 		if (ec) {
 			return;
 		}
-		collection->refresh();
+		// collection->refresh();
+		startSampling = true;
 		timer = boost::asio::steady_timer(context, std::chrono::microseconds(1000000 / frequency));
 		timer.async_wait([this](auto const& ec) { profileHandler(ec); });
 	}
@@ -272,19 +279,20 @@ struct ProfilerImpl {
 	}
 };
 
+// TODO: Remove
 ActorLineageProfilerT::ActorLineageProfilerT() : impl(new ProfilerImpl()) {
 	// collection->collector()->addGetter(WaitState::Network,
 	//                                    std::bind(&ActorLineageSet::copy, std::ref(g_network->getActorLineageSet())));
 	// collection->collector()->addGetter(
 	//     WaitState::Disk,
 	//     std::bind(&ActorLineageSet::copy, std::ref(IAsyncFileSystem::filesystem()->getActorLineageSet())));
-	collection->collector()->addGetter(WaitState::Running, []() {
-		auto res = currentLineageThreadSafe.get();
-		if (res.isValid()) {
-			return std::vector<Reference<ActorLineage>>({ res });
-		}
-		return std::vector<Reference<ActorLineage>>();
-	});
+	// collection->collector()->addGetter(WaitState::Running, []() {
+	// 	auto res = currentLineageThreadSafe.get();
+	// 	if (res.isValid()) {
+	// 		return std::vector<Reference<ActorLineage>>({ res });
+	// 	}
+	// 	return std::vector<Reference<ActorLineage>>();
+	// });
 }
 
 ActorLineageProfilerT::~ActorLineageProfilerT() {

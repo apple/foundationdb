@@ -1397,7 +1397,7 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 	// WARNING: this code is run at a high priority (until the first delay(0)), so it needs to do as little work as
 	// possible
 	state CommitBatch::CommitBatchContext context(self, trs, currentBatchMemBytesCount);
-	currentLineage->modify(&TransactionLineage::operation) = TransactionLineage::Operation::Commit;
+	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::Commit;
 
 	// Active load balancing runs at a very high priority (to obtain accurate estimate of memory used by commit batches)
 	// so we need to downgrade here
@@ -1434,8 +1434,8 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 
 ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsRequest req, ProxyCommitData* commitData) {
 	// We can't respond to these requests until we have valid txnStateStore
-	currentLineage->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyServersLocations;
-	currentLineage->modify(&TransactionLineage::txID) = req.spanContext.first();
+	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyServersLocations;
+	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 	wait(commitData->validState.getFuture());
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 

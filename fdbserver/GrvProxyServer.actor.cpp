@@ -356,11 +356,11 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo>>
                                                GrvProxyStats* stats,
                                                GrvTransactionRateInfo* batchRateInfo,
                                                TransactionTagMap<uint64_t>* transactionTagCounter) {
-	currentLineage->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetConsistentReadVersion;
+	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetConsistentReadVersion;
 	loop choose {
 		when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
 			auto lineage = make_scoped_lineage(&TransactionLineage::txID, req.spanContext.first());
-			// currentLineage->modify(&TransactionLineage::txID) =
+			// getCurrentLineage()->modify(&TransactionLineage::txID) =
 			// WARNING: this code is run at a high priority, so it needs to do as little work as possible
 			if (stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() >
 			    SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE) {
@@ -654,7 +654,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	state Span span;
 
 	state int64_t midShardSize = SERVER_KNOBS->MIN_SHARD_BYTES;
-	currentLineage->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetConsistentReadVersion;
+	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetConsistentReadVersion;
 	addActor.send(monitorDDMetricsChanges(&midShardSize, db));
 
 	addActor.send(getRate(proxy.id(),

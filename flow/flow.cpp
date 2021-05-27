@@ -26,16 +26,35 @@
 #include <stdarg.h>
 #include <cinttypes>
 
+std::atomic<bool> startSampling = false;
 thread_local Reference<ActorLineage> currentLineage;
-WriteOnlyVariable<ActorLineage, unsigned> currentLineageThreadSafe;
 
 LineagePropertiesBase::~LineagePropertiesBase() {}
 
 ActorLineage::ActorLineage() : properties(), parent(currentLineage) {}
 
 ActorLineage::~ActorLineage() {
-	for (auto ptr : properties) {
-		delete ptr.second;
+	for (auto property : properties) {
+		delete property.properties;
+	}
+}
+
+Reference<ActorLineage> getCurrentLineage() {
+	if (!currentLineage.isValid() || currentLineage == currentLineage->getParent()) {
+		replaceLineage(Reference<ActorLineage>{ new ActorLineage() });
+	}
+	return currentLineage;
+}
+
+void sample(Reference<ActorLineage>& lineage);
+
+void replaceLineage(Reference<ActorLineage> lineage) {
+	if (!startSampling) {
+		currentLineage = lineage;
+	} else {
+		startSampling = false;
+		sample(currentLineage);
+		currentLineage = lineage;
 	}
 }
 
