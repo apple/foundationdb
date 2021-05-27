@@ -93,21 +93,21 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_CONNFILE, "--cluster_file", SO_REQ_SEP },
 	                                  { OPT_DATABASE, "-d", SO_REQ_SEP },
 	                                  { OPT_TRACE, "--log", SO_NONE },
-	                                  { OPT_TRACE_DIR, "--log-dir", SO_REQ_SEP },
+	                                  { OPT_TRACE_DIR, "--log_dir", SO_REQ_SEP },
 	                                  { OPT_TIMEOUT, "--timeout", SO_REQ_SEP },
 	                                  { OPT_EXEC, "--exec", SO_REQ_SEP },
-	                                  { OPT_NO_STATUS, "--no-status", SO_NONE },
+	                                  { OPT_NO_STATUS, "--no_status", SO_NONE },
 	                                  { OPT_NO_HINTS, "--no-hints", SO_NONE },
 	                                  { OPT_HELP, "-?", SO_NONE },
 	                                  { OPT_HELP, "-h", SO_NONE },
 	                                  { OPT_HELP, "--help", SO_NONE },
-	                                  { OPT_STATUS_FROM_JSON, "--status-from-json", SO_REQ_SEP },
+	                                  { OPT_STATUS_FROM_JSON, "--status_from_json", SO_REQ_SEP },
 	                                  { OPT_VERSION, "--version", SO_NONE },
 	                                  { OPT_VERSION, "-v", SO_NONE },
 	                                  { OPT_BUILD_FLAGS, "--build_flags", SO_NONE },
 	                                  { OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
 	                                  { OPT_KNOB, "--knob_", SO_REQ_SEP },
-	                                  { OPT_DEBUG_TLS, "--debug-tls", SO_NONE },
+	                                  { OPT_DEBUG_TLS, "--debug_tls", SO_NONE },
 
 #ifndef TLS_DISABLED
 	                                  TLS_OPTION_FLAGS
@@ -445,7 +445,7 @@ static void printProgramUsage(const char* name) {
 	       "  --log-dir PATH Specifes the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n"
-	       "  --trace_format FORMAT\n"
+	       "  --trace-format FORMAT\n"
 	       "                 Select the format of the log files. xml (the default) and json\n"
 	       "                 are supported. Has no effect unless --log is specified.\n"
 	       "  --exec CMDS    Immediately executes the semicolon separated CLI commands\n"
@@ -459,7 +459,7 @@ static void printProgramUsage(const char* name) {
 	       "                 Changes a knob option. KNOBNAME should be lowercase.\n"
 	       "  --debug-tls    Prints the TLS configuration and certificate chain, then exits.\n"
 	       "                 Useful in reporting and diagnosing TLS issues.\n"
-	       "  --build_flags  Print build information and exit.\n"
+	       "  --build-flags  Print build information and exit.\n"
 	       "  -v, --version  Print FoundationDB CLI version information and exit.\n"
 	       "  -h, --help     Display this help and exit.\n");
 }
@@ -2946,6 +2946,19 @@ void LogCommand(std::string line, UID randomID, std::string errMsg) {
 	TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", line).detail("Error", errMsg);
 }
 
+void replaceInputHyphen(int argc, char* argv[]) {
+	char* param = *argv;
+	int j;
+	for (int i = 0; i < argc; param = ++i == argc ? nullptr : argv[i]) {
+		j = 0;
+		while(param[j] != '\0' && param[j] == '-') ++j;
+		while(param[j] != '\0') {
+			param[j] = param[j] == '-' ? '_' : param[j];
+			++j;
+		}
+	}
+}
+
 struct CLIOptions {
 	std::string program_name;
 	int exit_code = -1;
@@ -2977,6 +2990,7 @@ struct CLIOptions {
 			commandLine += argv[a];
 		}
 
+		replaceInputHyphen(argc, argv);
 		CSimpleOpt args(argc, argv, g_rgOptions);
 
 		while (args.Next()) {
