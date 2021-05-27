@@ -3832,7 +3832,6 @@ private:
 	Future<Void> m_init;
 	std::string m_name;
 	int m_blockSize;
-	std::unordered_map<LogicalPageID, ParentInfo> parents;
 	ParentInfoMapT childUpdateTracker;
 
 	// MetaKey has a variable size, it can be as large as m_headerSpace
