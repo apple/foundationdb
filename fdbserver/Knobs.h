@@ -384,6 +384,10 @@ public:
 	double REPLACE_INTERFACE_CHECK_DELAY;
 	double COORDINATOR_REGISTER_INTERVAL;
 	double CLIENT_REGISTER_INTERVAL;
+	double CC_PEER_HEALTH_CHECKING_INTERVAL;
+	double PEER_DEGRADATION_INTERVAL;
+	int MAX_PEER_DEGRADATION_TO_EXCLUDE;
+	double DEGRADED_PEER_EXPIRATION_INTERVAL;
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)
@@ -549,6 +553,11 @@ public:
 	                                                 // become the leader.
 	double MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS;
 	double DBINFO_FAILED_DELAY;
+
+	bool ENABLE_PEER_HEALTH_MONITOR;
+	double PEER_HEALTH_MONITOR_INTERVAL;
+	double PEER_LATENCY_DEGRADATION_THRESHOLD;
+	double PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD;
 
 	// Test harness
 	double WORKER_POLL_DELAY;

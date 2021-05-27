@@ -332,7 +332,9 @@ public:
 
 		for (auto& it : id_worker) {
 			auto fitness = it.second.details.processClass.machineClassFitness(ProcessClass::Storage);
-			if (workerAvailable(it.second, false) && !conf.isExcludedServer(it.second.details.interf.addresses()) &&
+			if (workerAvailable(it.second, false) &&
+			    !(conf.isExcludedServer(it.second.details.interf.addresses()) ||
+			      isDegradedServers(it.second.details.interf.addresses())) &&
 			    fitness != ProcessClass::NeverAssign &&
 			    (!dcId.present() || it.second.details.interf.locality.dcId() == dcId.get())) {
 				fitness_workers[fitness].push_back(it.second.details);
@@ -438,6 +440,11 @@ public:
 
 			if (conf.isExcludedServer(worker_details.interf.addresses())) {
 				logWorkerUnavailable("Worker server is excluded from the cluster", worker_details, fitness);
+				continue;
+			}
+
+			if (isDegradedServers(worker_details.interf.addresses())) {
+				logWorkerUnavailable("Worker server is degraded", worker_details, fitness);
 				continue;
 			}
 
@@ -696,7 +703,8 @@ public:
 
 		for (auto& it : id_worker) {
 			auto fitness = it.second.details.processClass.machineClassFitness(role);
-			if (conf.isExcludedServer(it.second.details.interf.addresses())) {
+			if (conf.isExcludedServer(it.second.details.interf.addresses()) ||
+			    isDegradedServers(it.second.details.interf.addresses())) {
 				fitness = std::max(fitness, ProcessClass::ExcludeFit);
 			}
 			if (workerAvailable(it.second, checkStable) && fitness < unacceptableFitness &&
@@ -744,7 +752,8 @@ public:
 		for (auto& it : id_worker) {
 			auto fitness = it.second.details.processClass.machineClassFitness(role);
 			if (workerAvailable(it.second, checkStable) &&
-			    !conf.isExcludedServer(it.second.details.interf.addresses()) &&
+			    !(conf.isExcludedServer(it.second.details.interf.addresses()) ||
+			      isDegradedServers(it.second.details.interf.addresses())) &&
 			    it.second.details.interf.locality.dcId() == dcId &&
 			    (!minWorker.present() ||
 			     (it.second.details.interf.id() != minWorker.get().worker.interf.id() &&
@@ -1691,6 +1700,258 @@ public:
 		return idUsed;
 	}
 
+	std::unordered_set<NetworkAddress> getServersWithLinkProblem() {
+		TraceEvent("InitgetServersWithLinkProblem")
+		    .detail("Enabled", SERVER_KNOBS->ENABLE_PEER_HEALTH_MONITOR)
+		    .detail("DetradedPeerCount", degradedPeers.size());
+		if (!SERVER_KNOBS->ENABLE_PEER_HEALTH_MONITOR) {
+			return {};
+		}
+
+		std::unordered_map<NetworkAddress, std::unordered_set<NetworkAddress>> degradationCounts;
+		for (const auto& [server, degradedRemotePeers] : degradedPeers) {
+			for (const auto& [degradedServer, times] : degradedRemotePeers) {
+				TraceEvent("GetServersWithLinkProblem")
+				    .detail("Address", server)
+				    .detail("Peer", degradedServer)
+				    .detail("StartTime", times.startTime)
+				    .detail("LastRefreshTime", times.lastRefreshTime);
+				if (now() - times.startTime < SERVER_KNOBS->PEER_DEGRADATION_INTERVAL) {
+					continue;
+				}
+				if (degradationCounts.find(server) != degradationCounts.end() &&
+				    degradationCounts[server].find(degradedServer) != degradationCounts[server].end()) {
+					// Pair of bad link has been counted before.
+					continue;
+				}
+				degradationCounts[degradedServer].insert(server);
+			}
+		}
+
+		std::unordered_set<NetworkAddress> excludeServers;
+		for (const auto& [server, degradationCount] : degradationCounts) {
+			if (degradationCount.size() <= SERVER_KNOBS->MAX_PEER_DEGRADATION_TO_EXCLUDE) {
+				excludeServers.insert(server);
+				continue;
+			}
+		}
+		return excludeServers;
+	}
+
+	void refreshPeerHealth() {
+		TraceEvent("StartRefreshPeerHealth");
+		double currentTime = now();
+		for (auto& [self, peers] : degradedPeers) {
+			for (auto it = peers.begin(); it != peers.end();) {
+				if (currentTime - it->second.lastRefreshTime > SERVER_KNOBS->DEGRADED_PEER_EXPIRATION_INTERVAL) {
+					TraceEvent("refreshPeerHealthRemoving").detail("self", self).detail("peer", it->first);
+					peers.erase(it++);
+				} else {
+					++it;
+				}
+			}
+		}
+
+		for (auto it = degradedPeers.begin(); it != degradedPeers.end();) {
+			if (it->second.empty()) {
+				TraceEvent("refreshPeerHealthRemovingSelfOnly").detail("self", it->first);
+				degradedPeers.erase(it++);
+			} else {
+				++it;
+			}
+		}
+	}
+
+	void updatePeerHealth(const UpdatePeerHealthRequest& req) {
+		std::string degradedString;
+		for (const auto& d : req.degradedPeers) {
+			degradedString += d.toString() + " ";
+		}
+		TraceEvent("NewDegradedPeers").detail("Address", req.selfAddress).detail("Peers", degradedString);
+		double currentTime = now();
+		if (req.degradedPeers.empty()) {
+			return;
+		}
+
+		auto it = degradedPeers.find(req.selfAddress);
+		if (it == degradedPeers.end()) {
+			TraceEvent("CreatingNewDegradedPeers").detail("Adding", degradedString);
+			degradedPeers[req.selfAddress] = {};
+			for (const auto& peerAddress : req.degradedPeers) {
+				degradedPeers[req.selfAddress][peerAddress] = { currentTime, currentTime };
+			}
+		} else {
+			std::unordered_set<NetworkAddress> recoveredPeers;
+			for (const auto& [peer, times] : degradedPeers[req.selfAddress]) {
+				recoveredPeers.insert(peer);
+			}
+			for (const auto& peer : req.degradedPeers) {
+				if (recoveredPeers.find(peer) != recoveredPeers.end()) {
+					recoveredPeers.erase(peer);
+				}
+			}
+			// Now recoveredPeers stores recovered peers;
+			for (const auto& peer : recoveredPeers) {
+				TraceEvent("RemoveDegradedPeer").detail("self", req.selfAddress).detail("peer", peer);
+				degradedPeers[req.selfAddress].erase(peer);
+			}
+
+			for (const auto& peer : req.degradedPeers) {
+				if (degradedPeers[req.selfAddress].find(peer) == degradedPeers[req.selfAddress].end()) {
+					TraceEvent("AddingDegradedPeer").detail("self", req.selfAddress).detail("peer", peer);
+					degradedPeers[req.selfAddress][peer] = { currentTime, currentTime };
+				} else {
+					degradedPeers[req.selfAddress][peer].lastRefreshTime = currentTime;
+				}
+			}
+		}
+	}
+
+	bool TriggerRecoveryCausedByDegradedServers(const std::unordered_set<NetworkAddress>& excludedServer) {
+		const ServerDBInfo dbi = db.serverInfo->get();
+
+		if (dbi.recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			return false;
+		}
+
+		// Do not trigger better master exists if the cluster controller is excluded, since the master will change
+		// anyways once the cluster controller is moved
+		if (id_worker[clusterControllerProcessId].priorityInfo.isExcluded) {
+			return false;
+		}
+
+		if (db.config.regions.size() > 1 && db.config.regions[0].priority > db.config.regions[1].priority &&
+		    db.config.regions[0].dcId != clusterControllerDcId.get() && versionDifferenceUpdated &&
+		    datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
+			checkRegions(db.config.regions);
+		}
+
+		// Get master process
+		auto masterWorker = id_worker.find(dbi.master.locality.processId());
+		if (masterWorker == id_worker.end()) {
+			return false;
+		}
+
+		// Get tlog processes
+		std::vector<WorkerDetails> tlogs;
+		std::vector<WorkerDetails> remote_tlogs;
+		std::vector<WorkerDetails> satellite_tlogs;
+		std::vector<WorkerDetails> log_routers;
+		std::set<NetworkAddress> logRouterAddresses;
+		std::vector<WorkerDetails> backup_workers;
+		std::set<NetworkAddress> backup_addresses;
+
+		for (auto& logSet : dbi.logSystemConfig.tLogs) {
+			for (auto& it : logSet.tLogs) {
+				auto tlogWorker = id_worker.find(it.interf().filteredLocality.processId());
+				if (tlogWorker == id_worker.end() || tlogWorker->second.priorityInfo.isExcluded) {
+					continue;
+				}
+
+				if (logSet.isLocal && logSet.locality == tagLocalitySatellite) {
+					satellite_tlogs.push_back(tlogWorker->second.details);
+				} else if (logSet.isLocal) {
+					tlogs.push_back(tlogWorker->second.details);
+				} else {
+					remote_tlogs.push_back(tlogWorker->second.details);
+				}
+			}
+
+			for (auto& it : logSet.logRouters) {
+				auto tlogWorker = id_worker.find(it.interf().filteredLocality.processId());
+				if (tlogWorker == id_worker.end() || tlogWorker->second.priorityInfo.isExcluded) {
+					continue;
+				}
+				if (!logRouterAddresses.count(tlogWorker->second.details.interf.address())) {
+					logRouterAddresses.insert(tlogWorker->second.details.interf.address());
+					log_routers.push_back(tlogWorker->second.details);
+				}
+			}
+
+			for (const auto& worker : logSet.backupWorkers) {
+				auto workerIt = id_worker.find(worker.interf().locality.processId());
+				if (workerIt == id_worker.end() || workerIt->second.priorityInfo.isExcluded) {
+					continue;
+				}
+				if (backup_addresses.count(workerIt->second.details.interf.address()) == 0) {
+					backup_addresses.insert(workerIt->second.details.interf.address());
+					backup_workers.push_back(workerIt->second.details);
+				}
+			}
+		}
+
+		// Get proxy classes
+		std::vector<WorkerDetails> proxyClasses;
+		for (auto& it : dbi.client.proxies) {
+			auto proxyWorker = id_worker.find(it.processId);
+			if (proxyWorker == id_worker.end() || proxyWorker->second.priorityInfo.isExcluded) {
+				continue;
+			}
+			proxyClasses.push_back(proxyWorker->second.details);
+		}
+
+		// Get resolver classes
+		std::vector<WorkerDetails> resolverClasses;
+		for (auto& it : dbi.resolvers) {
+			auto resolverWorker = id_worker.find(it.locality.processId());
+			if (resolverWorker == id_worker.end() || resolverWorker->second.priorityInfo.isExcluded) {
+				continue;
+			}
+			resolverClasses.push_back(resolverWorker->second.details);
+		}
+
+		if (degradedServers.find(masterWorker->second.details.interf.address()) != degradedServers.end()) {
+			TraceEvent("TriggerRecoveryCausedByDegradedServers")
+			    .detail("Reason", "Master is degraded")
+			    .detail("Master", masterWorker->second.details.interf.address());
+			return true;
+		}
+
+		for (const auto& worker : tlogs) {
+			if (degradedServers.find(worker.interf.address()) != degradedServers.end()) {
+				TraceEvent("TriggerRecoveryCausedByDegradedServers")
+				    .detail("Reason", "tlog is degraded")
+				    .detail("tlog", worker.interf.address());
+				return true;
+			}
+		}
+		for (const auto& worker : proxyClasses) {
+			if (degradedServers.find(worker.interf.address()) != degradedServers.end()) {
+				TraceEvent("TriggerRecoveryCausedByDegradedServers")
+				    .detail("Reason", "proxy is degraded")
+				    .detail("proxy", worker.interf.address());
+				return true;
+			}
+		}
+		for (const auto& worker : resolverClasses) {
+			if (degradedServers.find(worker.interf.address()) != degradedServers.end()) {
+				TraceEvent("TriggerRecoveryCausedByDegradedServers")
+				    .detail("Reason", "resolver is degraded")
+				    .detail("resolver", worker.interf.address());
+				return true;
+			}
+		}
+		std::string degradedString;
+		for (const auto& s : degradedServers) {
+			degradedString += s.toString() + " ";
+		}
+		TraceEvent("TriggerRecoveryCausedByDegradedServers")
+		    .detail("Reason", "all healthy")
+		    .detail("DegradataionSet", degradedServers.size())
+		    .detail("DegradedServers", degradedString);
+
+		return false;
+	}
+
+	bool isDegradedServers(const NetworkAddressList& a) {
+		for (const auto& server : degradedServers) {
+			if (a.address == server || (a.secondaryAddress.present() && a.secondaryAddress.get() == server)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	std::map<Optional<Standalone<StringRef>>, WorkerInfo> id_worker;
 	std::map<Optional<Standalone<StringRef>>, ProcessClass>
 	    id_class; // contains the mapping from process id to process class from the database
@@ -1728,6 +1989,13 @@ public:
 	bool recruitingDistributor;
 	Optional<UID> recruitingRatekeeperID;
 	AsyncVar<bool> recruitRatekeeper;
+
+	struct DegradedTimes {
+		double startTime = 0;
+		double lastRefreshTime = 0;
+	};
+	std::unordered_map<NetworkAddress, std::unordered_map<NetworkAddress, DegradedTimes>> degradedPeers;
+	std::unordered_set<NetworkAddress> degradedServers;
 
 	CounterCollection clusterControllerMetrics;
 
@@ -3481,6 +3749,64 @@ ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
 	}
 }
 
+ACTOR Future<Void> peerLinkHealthChecker(ClusterControllerData* self) {
+	try {
+		loop {
+			/*
+			int i = 0;
+			while (!self->goodRecruitmentTime.isReady()) {
+			    TraceEvent("peerLinkHealthCheckerNotGoodTime");
+			    wait(self->goodRecruitmentTime);
+			    ++i;
+			    if (i == 5) break;
+			}*/
+			self->refreshPeerHealth();
+			auto problematicServers = self->getServersWithLinkProblem();
+			std::unordered_set<NetworkAddress> recoveredServers;
+			for (const auto& server : self->degradedServers) {
+				if (problematicServers.find(server) == problematicServers.end()) {
+					recoveredServers.insert(server);
+				}
+			}
+			for (const auto& server : recoveredServers) {
+				TraceEvent("RemovingDegradedServer").detail("Address", server);
+				self->degradedServers.erase(server);
+			}
+			std::unordered_set<NetworkAddress> newDegradedServers;
+			std::string problematicString;
+			for (const auto& server : problematicServers) {
+				problematicString += server.toString()+" ";
+				if (self->degradedServers.find(server) == self->degradedServers.end()) {
+					newDegradedServers.insert(server);
+				}
+				TraceEvent("AddingNewDegradedServer").detail("Address", server);
+				self->degradedServers.insert(server);
+			}
+
+			std::string recoveredString;
+			for (const auto& s : recoveredServers) {
+				recoveredString += s.toString()+ " ";
+			}
+
+			TraceEvent("PeerLinkHealthCheck")
+			    .detail("ProblematicServers", problematicString)
+			    .detail("RecoveredServers", recoveredString);
+
+			if (!newDegradedServers.empty()) {
+				if (self->TriggerRecoveryCausedByDegradedServers(problematicServers)) {
+					TraceEvent("ForceMasterToDieDueToHealthCheck");
+					self->db.forceMasterFailure.trigger();
+				}
+			}
+			wait(delay(SERVER_KNOBS->CC_PEER_HEALTH_CHECKING_INTERVAL));
+		}
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "PeerLinkHealthCheckerError").error(e);
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          Future<Void> leaderFail,
                                          ServerCoordinators coordinators,
@@ -3511,6 +3837,9 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	                                 &self.clusterControllerMetrics,
 	                                 self.id.toString() + "/ClusterControllerMetrics"));
 	self.addActor.send(traceRole(Role::CLUSTER_CONTROLLER, interf.id()));
+	if (SERVER_KNOBS->ENABLE_PEER_HEALTH_MONITOR) {
+		self.addActor.send(peerLinkHealthChecker(&self));
+	}
 	// printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
 
 	loop choose {
@@ -3585,6 +3914,12 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		}
 		when(GetServerDBInfoRequest req = waitNext(interf.getServerDBInfo.getFuture())) {
 			self.addActor.send(clusterGetServerInfo(&self.db, req.knownServerInfoID, req.reply));
+		}
+		when(UpdatePeerHealthRequest req = waitNext(interf.updatePeerHealth.getFuture())) {
+			TraceEvent("CCReceiveUpdatePeerHealthRequest").detail("Enabled", SERVER_KNOBS->ENABLE_PEER_HEALTH_MONITOR);
+			if (SERVER_KNOBS->ENABLE_PEER_HEALTH_MONITOR) {
+				self.updatePeerHealth(req);
+			}
 		}
 		when(wait(leaderFail)) {
 			// We are no longer the leader if this has changed.
