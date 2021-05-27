@@ -2058,9 +2058,20 @@ Future<Optional<std::string>> DataDistributionImpl::commit(ReadYourWritesTransac
 				try {
 					int mode = boost::lexical_cast<int>(iter->value().second.get().toString());
 					Value modeVal = BinaryWriter::toValue(mode, Unversioned());
-					if (mode == 0 || mode == 1)
+					if (mode == 0 || mode == 1) {
+						// Whenever configuration changes or DD related system keyspace is changed,
+						// actor must grab the moveKeysLockOwnerKey and update moveKeysLockWriteKey.
+						// This prevents concurrent write to the same system keyspace.
+						// When the owner of the DD related system keyspace changes, DD will reboot
+						BinaryWriter wrMyOwner(Unversioned());
+						wrMyOwner << dataDistributionModeLock;
+						ryw->getTransaction().set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+						BinaryWriter wrLastWrite(Unversioned());
+						wrLastWrite << deterministicRandom()->randomUniqueID();
+						ryw->getTransaction().set(moveKeysLockWriteKey, wrLastWrite.toValue());
+						// set mode
 						ryw->getTransaction().set(dataDistributionModeKey, modeVal);
-					else
+					} else
 						msg = ManagementAPIError::toJsonString(false,
 						                                       "datadistribution",
 						                                       "Please set the value of the data_distribution/mode to "
