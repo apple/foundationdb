@@ -2947,9 +2947,9 @@ void LogCommand(std::string line, UID randomID, std::string errMsg) {
 }
 
 void replaceInputHyphen(int argc, char* argv[]) {
-	char* param = *argv;
+	char* param = *(argv + 1);
 	int j;
-	for (int i = 0; i < argc; param = ++i == argc ? nullptr : argv[i]) {
+	for (int i = 1; i < argc; param = ++i == argc ? nullptr : argv[i]) {
 		j = 0;
 		while(param[j] != '\0' && param[j] == '-') ++j;
 		while(param[j] != '\0') {
