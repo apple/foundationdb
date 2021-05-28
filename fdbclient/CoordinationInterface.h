@@ -254,13 +254,12 @@ struct CheckDescriptorMutableReply {
 // Allows client to check if allowed to change the cluster descriptor.
 struct CheckDescriptorMutableRequest {
 	constexpr static FileIdentifier file_identifier = 214729;
-	Key key;
 	ReplyPromise<CheckDescriptorMutableReply> reply;
 	CheckDescriptorMutableRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, reply);
+		serializer(ar, reply);
 	}
 };
 
