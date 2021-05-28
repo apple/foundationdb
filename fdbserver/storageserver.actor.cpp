@@ -4550,7 +4550,7 @@ ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 
 ACTOR Future<Void> storageServerCore(StorageServer* self,
                                      StorageServerInterface ssi,
-                                     std::shared_ptr<MockLogSystem> mockLogSystem = std::shared_ptr<MockLogSystem>()) {
+                                     std::shared_ptr<MockLogSystem> mockLogSystem = nullptr) {
 	state Future<Void> doUpdate = Void();
 	state bool updateReceived =
 	    false; // true iff the current update() actor assigned to doUpdate has already received an update from the tlog

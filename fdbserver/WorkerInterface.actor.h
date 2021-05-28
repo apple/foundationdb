@@ -875,7 +875,7 @@ ACTOR Future<Void> storageServer(
     std::string folder,
     // Only applicable when logSystemType is mock.
     // This has to be a shared_ptr rather than unique_ptr or Reference because MockLogSystem is only forward declared.
-    std::shared_ptr<MockLogSystem> mockLogSystem = std::shared_ptr<MockLogSystem>());
+    std::shared_ptr<MockLogSystem> mockLogSystem = nullptr);
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
     StorageServerInterface ssi,

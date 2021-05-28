@@ -34,7 +34,7 @@ MockLogSystem::MockLogSystem() {
 	logMethodName(__func__);
 }
 
-MockLogSystem::MockLogSystem(MockLogSystem& that) : cursor(that.cursor) {
+MockLogSystem::MockLogSystem(const MockLogSystem& that) : cursor(that.cursor) {
 	logMethodName(__func__);
 }
 
