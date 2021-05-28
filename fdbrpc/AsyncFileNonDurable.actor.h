@@ -238,6 +238,7 @@ public:
 				//TraceEvent("AsyncFileNonDurableOpenWaitOnDelete2").detail("Filename", filename);
 				if (shutdown.isReady())
 					throw io_error().asInjectedFault();
+				wait(g_simulator.onProcess(currentProcess, currentTaskID));
 			}
 
 			state Reference<AsyncFileNonDurable> nonDurableFile(
@@ -859,11 +860,9 @@ private:
 			//TraceEvent("AsyncFileNonDurable_FinishDelete", self->id).detail("Filename", self->filename);
 
 			delete self;
-			wait(g_simulator.onProcess(currentProcess, currentTaskID));
 			return Void();
 		} catch (Error& e) {
 			state Error err = e;
-			wait(g_simulator.onProcess(currentProcess, currentTaskID));
 			throw err;
 		}
 	}
