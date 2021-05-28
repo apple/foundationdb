@@ -1605,6 +1605,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	TEST(!useIPv6); // Use IPv4
 
 	vector<NetworkAddress> coordinatorAddresses;
+	vector<NetworkAddress> extraCoordinatorAddresses; // Used by extra DB if the DR db is a new one
 	if (testConfig.minimumRegions > 1) {
 		// do not put coordinators in the primary region so that we can kill that region safely
 		int nonPrimaryDcs = dataCenters / 2;
@@ -1614,6 +1615,9 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 				auto ip = makeIPAddressForSim(useIPv6, { 2, dc, 1, m });
 				coordinatorAddresses.push_back(
 				    NetworkAddress(ip, sslEnabled && !sslOnly ? 2 : 1, true, sslEnabled && sslOnly));
+				auto extraIp = makeIPAddressForSim(useIPv6, { 4, dc, 1, m });
+				extraCoordinatorAddresses.push_back(
+				    NetworkAddress(extraIp, sslEnabled && !sslOnly ? 2 : 1, true, sslEnabled && sslOnly));
 				TraceEvent("SelectedCoordinator").detail("Address", coordinatorAddresses.back());
 			}
 		}
@@ -1642,6 +1646,9 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 					auto ip = makeIPAddressForSim(useIPv6, { 2, dc, 1, m });
 					coordinatorAddresses.push_back(
 					    NetworkAddress(ip, sslEnabled && !sslOnly ? 2 : 1, true, sslEnabled && sslOnly));
+					auto extraIp = makeIPAddressForSim(useIPv6, { 4, dc, 1, m });
+					extraCoordinatorAddresses.push_back(
+					    NetworkAddress(extraIp, sslEnabled && !sslOnly ? 2 : 1, true, sslEnabled && sslOnly));
 					TraceEvent("SelectedCoordinator")
 					    .detail("Address", coordinatorAddresses.back())
 					    .detail("M", m)
@@ -1678,11 +1685,13 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	// If extraDB==0, leave g_simulator.extraDB as null because the test does not use DR.
 	if (testConfig.extraDB == 1) {
 		// The DR database can be either a new database or itself
-		g_simulator.extraDB = new ClusterConnectionString(
-		    coordinatorAddresses, BUGGIFY ? LiteralStringRef("TestCluster:0") : LiteralStringRef("ExtraCluster:0"));
+		g_simulator.extraDB =
+		    BUGGIFY ? new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("TestCluster:0"))
+		            : new ClusterConnectionString(extraCoordinatorAddresses, LiteralStringRef("ExtraCluster:0"));
 	} else if (testConfig.extraDB == 2) {
 		// The DR database is a new database
-		g_simulator.extraDB = new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("ExtraCluster:0"));
+		g_simulator.extraDB =
+		    new ClusterConnectionString(extraCoordinatorAddresses, LiteralStringRef("ExtraCluster:0"));
 	} else if (testConfig.extraDB == 3) {
 		// The DR database is the same database
 		g_simulator.extraDB = new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("TestCluster:0"));

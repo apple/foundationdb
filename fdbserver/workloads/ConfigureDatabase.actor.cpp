@@ -270,6 +270,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				return Void();
 			}
 			state int randomChoice = deterministicRandom()->randomInt(0, 8);
+
 			if (randomChoice == 0) {
 				wait(success(
 				    runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
@@ -316,8 +317,14 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			} else if (randomChoice == 4) {
 				//TraceEvent("ConfigureTestQuorumBegin").detail("NewQuorum", s);
 				auto ch = autoQuorumChange();
+				std::string desiredClusterName = "NewName%d";
+				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT) {
+					// if configuration does not allow changing the descriptor, pass empty string (keep old descriptor)
+					desiredClusterName = "";
+				}
 				if (deterministicRandom()->randomInt(0, 2))
-					ch = nameQuorumChange(format("NewName%d", deterministicRandom()->randomInt(0, 100)), ch);
+					ch = nameQuorumChange(format(desiredClusterName.c_str(), deterministicRandom()->randomInt(0, 100)),
+					                      ch);
 				wait(success(changeQuorum(cx, ch)));
 				//TraceEvent("ConfigureTestConfigureEnd").detail("NewQuorum", s);
 			} else if (randomChoice == 5) {
