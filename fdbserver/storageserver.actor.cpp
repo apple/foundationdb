@@ -57,12 +57,14 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WaitFailure.h"
+#include "fdbserver/MockLogSystem.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/genericactors.actor.h"
+#include "fdbserver/MockPeekCursor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -732,7 +734,8 @@ public:
 
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo>> const& db,
-	              StorageServerInterface const& ssi)
+	              StorageServerInterface const& ssi,
+	              bool mocked = false)
 	  : fetchKeysHistograms(), instanceID(deterministicRandom()->randomUniqueID().first()), storage(this, storage),
 	    db(db), actors(false), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
 	    rebootAfterDurableVersion(std::numeric_limits<Version>::max()), durableInProgress(Void()), versionLag(0),
@@ -748,9 +751,17 @@ public:
 		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
 		desiredOldestVersion.initMetric(LiteralStringRef("StorageServer.DesiredOldestVersion"), counters.cc.id);
 
-		newestAvailableVersion.insert(allKeys, invalidVersion);
-		newestDirtyVersion.insert(allKeys, invalidVersion);
-		addShard(ShardInfo::newNotAssigned(allKeys));
+		// TODO: Unit tests may need to have a better way to feed these information. And there should be tests
+		// that actually changes server key by update or restore.
+		if (mocked) {
+			newestAvailableVersion.insert(allKeys, latestVersion);
+			newestDirtyVersion.insert(allKeys, latestVersion);
+			addShard(ShardInfo::newReadWrite(allKeys, this));
+		} else {
+			newestAvailableVersion.insert(allKeys, invalidVersion);
+			newestDirtyVersion.insert(allKeys, invalidVersion);
+			addShard(ShardInfo::newNotAssigned(allKeys));
+		}
 
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
 	}
@@ -3389,6 +3400,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			eager = UpdateEagerReadInfo();
 		}
 
+		// TODO: Why is is named SSSlowTakeLock2?
 		if (now() - start > 0.1)
 			TraceEvent("SSSlowTakeLock2", data->thisServerID)
 			    .detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken)
@@ -3396,6 +3408,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			    .detail("Version", data->version.get());
 
 		data->updateEagerReads = &eager;
+
+		// Start updating storage (in memory).
+
 		data->debug_inApplyUpdate = true;
 
 		state StorageUpdater updater(data->lastVersionWithData, data->restoredVersion);
@@ -3404,8 +3419,11 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			data->data().atLatest().validate();
 		validate(data);
 
+		// Apply the mutations from FetchInjectionInfo.
+
 		state bool injectedChanges = false;
 		state int changeNum = 0;
+		// Number of bytes updated since last time we yield the thread.
 		state int mutationBytes = 0;
 		for (; changeNum < fii.changes.size(); changeNum++) {
 			state int mutationNum = 0;
@@ -3420,6 +3438,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				}
 			}
 		}
+
+		// Apply the mutations from the cursor.
 
 		state Version ver = invalidVersion;
 		cloneCursor2->setProtocolVersion(data->logProtocol);
@@ -3504,6 +3524,12 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		if (ver != invalidVersion) {
 			data->lastVersionWithData = ver;
 		}
+
+		// TODO: Question: why minus 1?
+		// version() is the smallest possible version the subsequent message might have. We are guaranteed to already
+		// have all data at version ver (i.e. version() - 1) and before. But it is possible the next message will have
+		// same version as the last updated one, so `ver` here may be smaller than the (partially) updated version by 1.
+		// This doesn't sound right.
 		ver = cloneCursor2->version().version - 1;
 
 		if (injectedChanges)
@@ -3516,6 +3542,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			ver = updater.currentVersion;
 		}
 
+		// The fully supported version (all data at or before this version have arrived) is increased. Update the
+		// version and possibly change the desired oldest version
 		if (ver != invalidVersion && ver > data->version.get()) {
 			// TODO(alexmiller): Update to version tracking.
 			DEBUG_KEY_RANGE("SSUpdate", ver, KeyRangeRef());
@@ -3571,6 +3599,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				data->recoveryVersionSkips.pop_front();
 			}
 			data->desiredOldestVersion.set(proposedOldestVersion);
+			// It triggers updateStorage if the new desiredOldestVersion is greater than storageVersion() (i.e.
+			// oldestVersion)
 		}
 
 		validate(data);
@@ -4518,7 +4548,9 @@ ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 	}
 }
 
-ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface ssi) {
+ACTOR Future<Void> storageServerCore(StorageServer* self,
+                                     StorageServerInterface ssi,
+                                     std::shared_ptr<MockLogSystem> mockLogSystem = nullptr) {
 	state Future<Void> doUpdate = Void();
 	state bool updateReceived =
 	    false; // true iff the current update() actor assigned to doUpdate has already received an update from the tlog
@@ -4571,7 +4603,15 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				TEST(self->logSystem); // shardServer dbInfo changed
 				dbInfoChange = self->db->onChange();
 				if (self->db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
-					self->logSystem = ILogSystem::fromServerDBInfo(self->thisServerID, self->db->get());
+					if (mockLogSystem) {
+						// It would be better to pass in Reference<MockLogSystem> to avoid additional construction. But
+						// we cannot do it because MockLogSystem can only be forward declared in
+						// WorkerInterface.actor.h, so storageServer actor cannot take a Reference or unique_ptr but
+						// only shared_ptr of MockLogSystem.
+						self->logSystem = makeReference<MockLogSystem>(*mockLogSystem).castTo<ILogSystem>();
+					} else {
+						self->logSystem = ILogSystem::fromServerDBInfo(self->thisServerID, self->db->get());
+					}
 					if (self->logSystem) {
 						if (self->db->get().logSystemConfig.recoveredAt.present()) {
 							self->poppedAllAfter = self->db->get().logSystemConfig.recoveredAt.get();
@@ -4699,8 +4739,11 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Tag seedTag,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo>> db,
-                                 std::string folder) {
-	state StorageServer self(persistentData, db, ssi);
+                                 std::string folder,
+                                 // Only applicable when logSystemType is mock.
+                                 std::shared_ptr<MockLogSystem> mockLogSystem) {
+
+	state StorageServer self(persistentData, db, ssi, mockLogSystem != nullptr);
 
 	self.sk = serverKeysPrefixFor(self.thisServerID).withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
 	self.folder = folder;
@@ -4729,7 +4772,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		rep.addedVersion = self.version.get();
 		recruitReply.send(rep);
 		self.byteSampleRecovery = Void();
-		wait(storageServerCore(&self, ssi));
+		wait(storageServerCore(&self, ssi, mockLogSystem));
 
 		throw internal_error();
 	} catch (Error& e) {

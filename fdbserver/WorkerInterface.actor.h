@@ -865,12 +865,17 @@ ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> ccf,
 class IKeyValueStore;
 class ServerCoordinators;
 class IDiskQueue;
-ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
-                                 StorageServerInterface ssi,
-                                 Tag seedTag,
-                                 ReplyPromise<InitializeStorageReply> recruitReply,
-                                 Reference<AsyncVar<ServerDBInfo>> db,
-                                 std::string folder);
+struct MockLogSystem;
+ACTOR Future<Void> storageServer(
+    IKeyValueStore* persistentData,
+    StorageServerInterface ssi,
+    Tag seedTag,
+    ReplyPromise<InitializeStorageReply> recruitReply,
+    Reference<AsyncVar<ServerDBInfo>> db,
+    std::string folder,
+    // Only applicable when logSystemType is mock.
+    // This has to be a shared_ptr rather than unique_ptr or Reference because MockLogSystem is only forward declared.
+    std::shared_ptr<MockLogSystem> mockLogSystem = nullptr);
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
     StorageServerInterface ssi,
