@@ -146,7 +146,7 @@ public:
 			if (f.isReady() && f.isError())
 				return f;
 			if (!f.isReady())
-				openFiles[filename] = WeakFutureReference<IAsyncFile>(f);
+				openFiles[filename] = UnsafeWeakFutureReference<IAsyncFile>(f);
 			else
 				return f.get();
 		}
@@ -250,7 +250,7 @@ public:
 
 private:
 	// A map of filename to the file handle for all opened cached files
-	static std::map<std::string, WeakFutureReference<IAsyncFile>> openFiles;
+	static std::map<std::string, UnsafeWeakFutureReference<IAsyncFile>> openFiles;
 
 	std::string filename;
 	Reference<IAsyncFile> uncached;

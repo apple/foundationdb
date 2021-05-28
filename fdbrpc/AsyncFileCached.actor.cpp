@@ -47,7 +47,7 @@ EvictablePage::~EvictablePage() {
 }
 
 // A map of filename to the file handle for all opened cached files
-std::map<std::string, WeakFutureReference<IAsyncFile>> AsyncFileCached::openFiles;
+std::map<std::string, UnsafeWeakFutureReference<IAsyncFile>> AsyncFileCached::openFiles;
 
 void AsyncFileCached::remove_page(AFCPage* page) {
 	pages.erase(page->pageOffset);
