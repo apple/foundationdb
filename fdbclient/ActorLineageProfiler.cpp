@@ -231,9 +231,9 @@ std::vector<std::shared_ptr<Sample>> SampleCollection_t::get(double from /*= 0.0
 	return res;
 }
 
-void ActorLineageProfilerT::sample(Reference<ActorLineage>& lineage) {
+void ActorLineageProfilerT::sample(const Reference<ActorLineage>& lineage) {
 	boost::asio::post(context(), [this, lineage]() {
-		collection.collect(lineage);
+		collection->collect(lineage);
 	});
 }
 
