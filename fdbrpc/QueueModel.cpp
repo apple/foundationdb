@@ -60,7 +60,7 @@ double QueueModel::addRequest(uint64_t id) {
 	return d.penalty;
 }
 
-void QueueModel::updateTssEndpoint(uint64_t endpointId, TSSEndpointData tssData) {
+void QueueModel::updateTssEndpoint(uint64_t endpointId, const TSSEndpointData& tssData) {
 	auto& d = data[endpointId];
 	if (!d.tssData.present()) {
 		tssCount++;
