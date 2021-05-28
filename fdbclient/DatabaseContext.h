@@ -323,7 +323,10 @@ public:
 
 	std::map<UID, StorageServerInfo*> server_interf;
 
-	std::map<UID, Reference<TSSMetrics>> tssMetrics;
+	// map from ssid -> tss interface
+	std::unordered_map<UID, StorageServerInterface> tssMapping;
+	// map from tssid -> metrics for that tss pair
+	std::unordered_map<UID, Reference<TSSMetrics>> tssMetrics;
 
 	UID dbId;
 	bool internal; // Only contexts created through the C client and fdbcli are non-internal
@@ -425,8 +428,8 @@ public:
 	static const std::vector<std::string> debugTransactionTagChoices;
 	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;
 
-	void maybeAddTssMapping(StorageServerInterface const& ssi);
 	void addTssMapping(StorageServerInterface const& ssi, StorageServerInterface const& tssi);
+	void removeTssMapping(StorageServerInterface const& ssi);
 };
 
 #endif

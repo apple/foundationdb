@@ -1275,7 +1275,8 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	// self->committedVersion by reporting commit version first before updating self->committedVersion. Otherwise, a
 	// client may get a commit version that the master is not aware of, and next GRV request may get a version less than
 	// self->committedVersion.
-	TEST(pProxyCommitData->committedVersion.get() > self->commitVersion); // A later version was reported committed first
+	TEST(pProxyCommitData->committedVersion.get() >
+	     self->commitVersion); // A later version was reported committed first
 	if (self->commitVersion >= pProxyCommitData->committedVersion.get()) {
 		wait(pProxyCommitData->master.reportLiveCommittedVersion.getReply(
 		    ReportRawCommittedVersionRequest(self->commitVersion,
@@ -1430,11 +1431,25 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 	return Void();
 }
 
+void maybeAddTssMapping(GetKeyServerLocationsReply& reply,
+                        ProxyCommitData* commitData,
+                        std::unordered_set<UID>& included,
+                        UID ssId) {
+	if (!included.count(ssId)) {
+		auto mappingItr = commitData->tssMapping.find(ssId);
+		if (mappingItr != commitData->tssMapping.end()) {
+			included.insert(ssId);
+			reply.resultsTssMapping.push_back(*mappingItr);
+		}
+	}
+}
+
 ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsRequest req, ProxyCommitData* commitData) {
 	// We can't respond to these requests until we have valid txnStateStore
 	wait(commitData->validState.getFuture());
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
+	std::unordered_set<UID> tssMappingsIncluded;
 	GetKeyServerLocationsReply rep;
 	if (!req.end.present()) {
 		auto r = req.reverse ? commitData->keyInfo.rangeContainingKeyBefore(req.begin)
@@ -1443,6 +1458,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 		ssis.reserve(r.value().src_info.size());
 		for (auto& it : r.value().src_info) {
 			ssis.push_back(it->interf);
+			maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 		}
 		rep.results.push_back(std::make_pair(r.range(), ssis));
 	} else if (!req.reverse) {
@@ -1454,6 +1470,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 			ssis.reserve(r.value().src_info.size());
 			for (auto& it : r.value().src_info) {
 				ssis.push_back(it->interf);
+				maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 			}
 			rep.results.push_back(std::make_pair(r.range(), ssis));
 			count++;
@@ -1466,6 +1483,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 			ssis.reserve(r.value().src_info.size());
 			for (auto& it : r.value().src_info) {
 				ssis.push_back(it->interf);
+				maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 			}
 			rep.results.push_back(std::make_pair(r.range(), ssis));
 			if (r == commitData->keyInfo.ranges().begin()) {
