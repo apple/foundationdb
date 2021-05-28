@@ -2262,7 +2262,7 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(std::string filename, i
 			                              diskParameters,
 			                              (flags & IAsyncFile::OPEN_NO_AIO) == 0);
 
-			machineCache[actualFilename] = WeakFutureReference<IAsyncFile>(f);
+			machineCache[actualFilename] = UnsafeWeakFutureReference<IAsyncFile>(f);
 		} else {
 			f = itr->second.get();
 		}
