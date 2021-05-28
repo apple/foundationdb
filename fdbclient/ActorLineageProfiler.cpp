@@ -163,7 +163,13 @@ IALPCollectorBase::IALPCollectorBase() {
 	SampleCollector::instance().addCollector(this);
 }
 
-std::map<std::string_view, std::any> SampleCollectorT::collect(ActorLineage* lineage) {
+std::shared_ptr<Sample> SampleCollectorT::collect(ActorLineage* lineage) {
+	ASSERT(lineage != nullptr);
+	auto sample = std::make_shared<Sample>();
+	double time = g_network->now();
+	sample->time = time;
+
+	Packer packer;
 	std::map<std::string_view, std::any> out;
 	for (auto& collector : collectors) {
 		auto val = collector->collect(lineage);
@@ -171,42 +177,18 @@ std::map<std::string_view, std::any> SampleCollectorT::collect(ActorLineage* lin
 			out[collector->name()] = val.value();
 		}
 	}
-	return out;
-}
-
-std::shared_ptr<Sample> SampleCollectorT::collect() {
-	auto sample = std::make_shared<Sample>();
-	double time = g_network->now();
-	sample->time = time;
-	for (auto& p : getSamples) {
-		Packer packer;
-		std::vector<std::map<std::string_view, std::any>> samples;
-		auto sampleVec = p.second();
-		for (auto& val : sampleVec) {
-			auto m = collect(val.getPtr());
-			if (!m.empty()) {
-				samples.emplace_back(std::move(m));
-			}
-		}
-		if (!samples.empty()) {
-			packer.pack(samples);
-			sample->data[p.first] = packer.getbuf();
-		}
+	if (!out.empty()) {
+		packer.pack(out);
+		sample->data[WaitState::Running] = packer.getbuf();
 	}
 	return sample;
 }
 
 void SampleCollection_t::refresh() {
-	auto sample = _collector->collect();
-	// TODO: Should only call ingest when deleting from memory
-	if (sample.get() != 0) {
-		config->ingest(sample);
+	if (data.empty()) {
+		return;
 	}
-	auto min = std::min(sample->time - windowSize, sample->time);
-	{
-		Lock _{ mutex };
-		data.emplace_back(std::move(sample));
-	}
+	auto min = std::min(data.back()->time - windowSize, data.back()->time);
 	double oldest = data.front()->time;
 	// we don't need to check for data.empty() in this loop (or the inner loop) as we know that we will end
 	// up with at least one entry which is the most recent sample
@@ -217,6 +199,19 @@ void SampleCollection_t::refresh() {
 			data.pop_front();
 			oldest = data.front()->time;
 		}
+	}
+}
+
+void SampleCollection_t::collect(const Reference<ActorLineage>& lineage) {
+	if (!lineage.isValid()) {
+		return;
+	}
+	Lock _{ mutex };
+	auto sample = _collector->collect(lineage.getPtr());
+	data.emplace_back(sample);
+	// TODO: Should only call ingest when deleting from memory
+	if (sample.get() != 0) {
+		config->ingest(sample);
 	}
 }
 
@@ -236,7 +231,7 @@ std::vector<std::shared_ptr<Sample>> SampleCollection_t::get(double from /*= 0.0
 
 void sample(Reference<ActorLineage>& lineage) {
 	boost::asio::post(ActorLineageProfiler::instance().context(), [lineage]() {
-		// collector->collect(lineage);
+		SampleCollection::instance().collect(lineage);
 	});
 }
 
@@ -262,7 +257,7 @@ struct ProfilerImpl {
 		if (ec) {
 			return;
 		}
-		// collection->refresh();
+		collection->refresh();
 		startSampling = true;
 		timer = boost::asio::steady_timer(context, std::chrono::microseconds(1000000 / frequency));
 		timer.async_wait([this](auto const& ec) { profileHandler(ec); });

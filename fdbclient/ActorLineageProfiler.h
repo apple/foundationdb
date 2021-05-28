@@ -124,11 +124,10 @@ private:
 	std::vector<IALPCollectorBase*> collectors;
 	std::map<WaitState, Getter> getSamples;
 	SampleCollectorT() {}
-	std::map<std::string_view, std::any> collect(ActorLineage* lineage);
 
 public:
 	void addCollector(IALPCollectorBase* collector) { collectors.push_back(collector); }
-	std::shared_ptr<Sample> collect();
+	std::shared_ptr<Sample> collect(ActorLineage* lineage);
 	void addGetter(WaitState waitState, Getter const& getter) { getSamples[waitState] = getter; };
 };
 
@@ -163,6 +162,7 @@ public:
 	 * Collects all new samples from the sample collector and stores them in the collection.
 	 */
 	void refresh();
+	void collect(const Reference<ActorLineage>& lineage);
 	const SampleCollector& collector() const { return _collector; }
 	SampleCollector& collector() { return _collector; }
 };
