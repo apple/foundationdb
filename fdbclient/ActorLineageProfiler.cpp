@@ -206,9 +206,11 @@ void SampleCollection_t::collect(const Reference<ActorLineage>& lineage) {
 	if (!lineage.isValid()) {
 		return;
 	}
-	Lock _{ mutex };
 	auto sample = _collector->collect(lineage.getPtr());
-	data.emplace_back(sample);
+	{
+		Lock _{ mutex };
+		data.emplace_back(sample);
+	}
 	// TODO: Should only call ingest when deleting from memory
 	if (sample.get() != 0) {
 		config->ingest(sample);
