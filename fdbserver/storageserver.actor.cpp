@@ -4071,7 +4071,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		wait(yield());
 	}
 
-	// TODO why is this seemingly random delay here?
+	// TODO: why is this seemingly random delay here?
 	wait(delay(0.0001));
 
 	{

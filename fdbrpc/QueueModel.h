@@ -110,7 +110,7 @@ public:
 	int laggingRequestCount;
 	int laggingTSSCompareCount;
 
-	void updateTssEndpoint(uint64_t endpointId, TSSEndpointData endpointData);
+	void updateTssEndpoint(uint64_t endpointId, const TSSEndpointData& endpointData);
 	void removeOldTssData(UID currentGeneration);
 	Optional<TSSEndpointData> getTssData(uint64_t endpointId);
 
