@@ -548,7 +548,6 @@ struct StackLineage : LineageProperties<StackLineage> {
 	StringRef actorName;
 };
 
-void sample(Reference<ActorLineage>& lineage);
 Reference<ActorLineage> getCurrentLineage();
 void replaceLineage(Reference<ActorLineage> lineage);
 

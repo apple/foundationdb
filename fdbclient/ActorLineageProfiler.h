@@ -186,6 +186,7 @@ class ActorLineageProfilerT {
 
 public:
 	~ActorLineageProfilerT();
+	void sample(Reference<ActorLineage>& lineage);
 	void setFrequency(unsigned frequency);
 	boost::asio::io_context& context();
 };

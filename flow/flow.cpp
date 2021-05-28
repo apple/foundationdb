@@ -25,6 +25,7 @@
 #include "flow/folly_memcpy.h"
 #include <stdarg.h>
 #include <cinttypes>
+#include "fdbclient/ActorLineageProfiler.h" // TODO: Fix
 
 std::atomic<bool> startSampling = false;
 thread_local Reference<ActorLineage> currentLineage;
@@ -51,7 +52,8 @@ void replaceLineage(Reference<ActorLineage> lineage) {
 		currentLineage = lineage;
 	} else {
 		startSampling = false;
-		sample(currentLineage);
+		// sample(currentLineage);
+		SampleCollection::instance().collect(lineage);
 		currentLineage = lineage;
 	}
 }
