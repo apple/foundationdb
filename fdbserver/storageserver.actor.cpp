@@ -719,9 +719,9 @@ public:
 		    fetchExecutingMS("FetchExecutingMS", cc), fetchExecutingCount("FetchExecutingCount", cc),
 		    readsRejected("ReadsRejected", cc), fetchedVersions("FetchedVersions", cc),
 		    fetchesFromLogs("FetchesFromLogs", cc), readLatencySample("ReadLatencyMetrics",
-                                                                      self->thisServerID,
-                                                                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-                                                                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		                                                              self->thisServerID,
+		                                                              SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                                              SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
@@ -3254,6 +3254,10 @@ private:
 			    (m.type == MutationRef::ClearRange && (matchesThisServer || (data->isTss() && matchesTssPair)))) {
 				throw worker_removed();
 			}
+			if (!data->isTss() && m.type == MutationRef::ClearRange && data->ssPairID.present() &&
+			    serverTagKey == data->ssPairID.get()) {
+				data->clearSSWithTssPair();
+			}
 		} else if (m.type == MutationRef::SetValue && m.param1 == rebootWhenDurablePrivateKey) {
 			data->rebootAfterDurableVersion = currentVersion;
 			TraceEvent("RebootWhenDurableSet", data->thisServerID)
@@ -3263,6 +3267,13 @@ private:
 			data->primaryLocality = BinaryReader::fromStringRef<int8_t>(m.param2, Unversioned());
 			auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 			data->addMutationToMutationLog(mLV, MutationRef(MutationRef::SetValue, persistPrimaryLocality, m.param2));
+		} else if (m.type == MutationRef::SetValue && m.param1.substr(1).startsWith(tssMappingKeys.begin)) {
+			if (!data->isTss()) {
+				UID ssId = Codec<UID>::unpack(Tuple::unpack(m.param1.substr(1).removePrefix(tssMappingKeys.begin)));
+				UID tssId = Codec<UID>::unpack(Tuple::unpack(m.param2));
+				ASSERT(ssId == data->thisServerID);
+				data->setSSWithTssPair(tssId);
+			}
 		} else {
 			ASSERT(false); // Unknown private mutation
 		}
@@ -3588,8 +3599,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				data->sourceTLogID = curSourceTLogID;
 
 				TraceEvent("StorageServerSourceTLogID", data->thisServerID)
-					.detail("SourceTLogID", data->sourceTLogID.present() ? data->sourceTLogID.get().toString() : "unknown")
-					.trackLatest(data->thisServerID.toString() + "/StorageServerSourceTLogID");
+				    .detail("SourceTLogID",
+				            data->sourceTLogID.present() ? data->sourceTLogID.get().toString() : "unknown")
+				    .trackLatest(data->thisServerID.toString() + "/StorageServerSourceTLogID");
 			}
 
 			data->noRecentUpdates.set(false);
@@ -4678,18 +4690,6 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 						}
 					}
 				}
-				// SS monitors tss mapping here to see if it has a tss pair.
-				// This information is only used for ss/tss pair metrics reporting so it's ok to be eventually
-				// consistent.
-				if (!self->isTss()) {
-					ClientDBInfo clientInfo = self->db->get().client;
-					Optional<StorageServerInterface> myTssPair = clientInfo.getTssPair(self->thisServerID);
-					if (myTssPair.present()) {
-						self->setSSWithTssPair(myTssPair.get().id());
-					} else {
-						self->clearSSWithTssPair();
-					}
-				}
 			}
 			when(GetShardStateRequest req = waitNext(ssi.getShardState.getFuture())) {
 				if (req.mode == GetShardStateRequest::NO_WAIT) {
@@ -4831,6 +4831,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		rep.addedVersion = self.version.get();
 		recruitReply.send(rep);
 		self.byteSampleRecovery = Void();
+
 		wait(storageServerCore(&self, ssi));
 
 		throw internal_error();
@@ -4964,9 +4965,7 @@ ACTOR Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterfa
 			tr->set(serverListKeyFor(ssi.id()), serverListValue(ssi));
 
 			// add itself back to tss mapping
-			// tr->set(tssMappingKeyFor(self->tssPairID.get()), tssMappingValueFor(ssi.id()));
 			tssMapDB.set(tr, self->tssPairID.get(), ssi.id());
-			tr->set(tssMappingChangeKey, deterministicRandom()->randomUniqueID().toString());
 
 			wait(tr->commit());
 			self->tag = myTag;

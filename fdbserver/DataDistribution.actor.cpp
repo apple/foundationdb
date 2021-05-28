@@ -628,7 +628,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	PromiseStream<UID> removedServers;
 	PromiseStream<UID> removedTSS;
-	std::set<UID> recruitingIds; // The IDs of the SS which are being recruited
+	std::set<UID> recruitingIds; // The IDs of the SS/TSS which are being recruited
 	std::set<NetworkAddress> recruitingLocalities;
 	Future<Void> initialFailureReactionDelay;
 	Future<Void> initializationDoneActor;
@@ -4545,6 +4545,7 @@ struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
 	Promise<Optional<std::pair<UID, Version>>>
 	    ssPairInfo; // if set, for ss to pass its id to tss pair once it is successfully recruited
 	Promise<bool> tssPairDone; // if set, for tss to pass ss that it was successfully recruited
+	Promise<Void> complete;
 
 	Optional<Key> dcId; // dc
 	Optional<Key> dataHallId; // data hall
@@ -4568,6 +4569,9 @@ struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
 			// callback of ssPairInfo could have cancelled tssPairDone already, so double check before cancelling
 			if (tssPairDone.canBeSet()) {
 				tssPairDone.send(false);
+			}
+			if (complete.canBeSet()) {
+				complete.send(Void());
 			}
 		}
 	}
@@ -4604,9 +4608,19 @@ struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
 		return false;
 	}
 
+	bool markComplete() {
+		if (active && complete.canBeSet()) {
+			complete.send(Void());
+			return true;
+		}
+		return false;
+	}
+
 	Future<Optional<std::pair<UID, Version>>> waitOnSS() { return ssPairInfo.getFuture(); }
 
 	Future<bool> waitOnTSS() { return tssPairDone.getFuture(); }
+
+	Future<Void> waitComplete() { return complete.getFuture(); }
 };
 
 ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
@@ -4742,6 +4756,8 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
 					                self->serverTrackerErrorOut,
 					                newServer.get().addedVersion,
 					                ddEnabledState);
+					// signal all done after adding tss to tracking info
+					tssState->markComplete();
 				}
 			} else {
 				TraceEvent(SevWarn, "DDRecruitmentError")
@@ -4756,6 +4772,7 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
 
 	// SS and/or TSS recruitment failed at this point, update tssState
 	if (recruitTss && tssState->tssRecruitFailed()) {
+		tssState->markComplete();
 		TEST(true); // TSS recruitment failed for some reason
 	}
 	if (!recruitTss && tssState->ssRecruitFailed()) {
@@ -4777,15 +4794,42 @@ ACTOR Future<Void> storageRecruiter(DDTeamCollection* self,
 	state std::map<AddressExclusion, int> numSSPerAddr;
 
 	// tss-specific recruitment state
-	state int32_t tssToRecruit = self->configuration.desiredTSSCount - db->get().client.tssMapping.size();
+	state int32_t targetTSSInDC = 0;
+	state int32_t tssToRecruit = 0;
+	state int inProgressTSSCount = 0;
+	state PromiseStream<Future<Void>> addTSSInProgress;
+	state Future<Void> inProgressTSS =
+	    actorCollection(addTSSInProgress.getFuture(), &inProgressTSSCount, nullptr, nullptr, nullptr);
 	state Reference<TSSPairState> tssState = makeReference<TSSPairState>();
-	state Future<Void> checkKillTss = self->initialFailureReactionDelay;
-	state bool sleepingAfterKillTss = false;
+	state Future<Void> checkTss = self->initialFailureReactionDelay;
+	state bool pendingTSSCheck = false;
 
 	TraceEvent(SevDebug, "TSS_RecruitUpdated", self->distributorId).detail("Count", tssToRecruit);
 
 	loop {
 		try {
+			// Divide TSS evenly in each DC if there are multiple
+			// TODO would it be better to put all of them in primary DC?
+			targetTSSInDC = self->configuration.desiredTSSCount;
+			if (self->configuration.usableRegions > 1) {
+				targetTSSInDC /= self->configuration.usableRegions;
+				if (self->primary) {
+					// put extras in primary DC if it's uneven
+					targetTSSInDC += (self->configuration.desiredTSSCount % self->configuration.usableRegions);
+				}
+			}
+			int newTssToRecruit = targetTSSInDC - self->tss_info_by_pair.size() - inProgressTSSCount;
+			if (newTssToRecruit != tssToRecruit) {
+				TraceEvent("TSS_RecruitUpdated", self->distributorId).detail("Count", newTssToRecruit);
+				tssToRecruit = newTssToRecruit;
+
+				// if we need to get rid of some TSS processes, signal to either cancel recruitment or kill existing TSS
+				// processes
+				if (!pendingTSSCheck && (tssToRecruit < 0 || self->zeroHealthyTeams->get()) &&
+				    (self->isTssRecruiting || (self->zeroHealthyTeams->get() && self->tss_info_by_pair.size() > 0))) {
+					checkTss = self->initialFailureReactionDelay;
+				}
+			}
 			numSSPerAddr.clear();
 			hasHealthyTeam = (self->healthyTeamCount != 0);
 			RecruitStorageRequest rsr;
@@ -4870,7 +4914,9 @@ ACTOR Future<Void> storageRecruiter(DDTeamCollection* self,
 						self->isTssRecruiting = true;
 						tssState = makeReference<TSSPairState>(candidateWorker.worker.locality);
 
+						addTSSInProgress.send(tssState->waitComplete());
 						self->addActor.send(initializeStorage(self, candidateWorker, ddEnabledState, true, tssState));
+						checkTss = self->initialFailureReactionDelay;
 					} else {
 						if (tssState->active && tssState->inDataZone(candidateWorker.worker.locality)) {
 							TEST(true); // TSS recruits pair in same dc/datahall
@@ -4883,7 +4929,6 @@ ACTOR Future<Void> storageRecruiter(DDTeamCollection* self,
 							    initializeStorage(self, candidateWorker, ddEnabledState, false, tssState));
 							// successfully started recruitment of pair, reset tss recruitment state
 							tssState = makeReference<TSSPairState>();
-							tssToRecruit--;
 						} else {
 							TEST(tssState->active); // TSS recruitment skipped potential pair because it's in a
 							                        // different dc/datahall
@@ -4892,72 +4937,64 @@ ACTOR Future<Void> storageRecruiter(DDTeamCollection* self,
 						}
 					}
 				}
-				when(wait(db->onChange())) { // SOMEDAY: only if clusterInterface or tss changes?
+				when(wait(db->onChange())) { // SOMEDAY: only if clusterInterface changes?
 					fCandidateWorker = Future<RecruitStorageReply>();
-					int newTssToRecruit = self->configuration.desiredTSSCount - db->get().client.tssMapping.size();
-
-					if (newTssToRecruit != tssToRecruit) {
-						TraceEvent("TSS_RecruitUpdated", self->distributorId).detail("Count", newTssToRecruit);
-						tssToRecruit = newTssToRecruit;
-					}
-
-					if (self->isTssRecruiting && (tssToRecruit <= 0 || self->zeroHealthyTeams->get())) {
-						TEST(tssToRecruit <= 0); // tss recruitment cancelled due to too many TSS
-						TEST(self->zeroHealthyTeams->get()); // tss recruitment cancelled due zero healthy teams
-						TraceEvent(SevWarn, "TSS_RecruitCancelled", self->distributorId)
-						    .detail("Reason", tssToRecruit <= 0 ? "ConfigChange" : "ZeroHealthyTeams");
-						tssState->cancel();
-						tssState = makeReference<TSSPairState>();
-						self->isTssRecruiting = false;
-					} else if (!self->isTssRecruiting &&
-					           (tssToRecruit < 0 ||
-					            (self->zeroHealthyTeams->get() && db->get().client.tssMapping.size() > 0))) {
-						if (!sleepingAfterKillTss) {
-							checkKillTss = self->initialFailureReactionDelay;
-						}
-					}
 				}
 				when(wait(self->zeroHealthyTeams->onChange())) {
-					if (self->isTssRecruiting && self->zeroHealthyTeams->get()) {
-						TEST(self->zeroHealthyTeams->get()); // tss recruitment cancelled due zero healthy teams 2
+					if (!pendingTSSCheck && self->zeroHealthyTeams->get() &&
+					    (self->isTssRecruiting || self->tss_info_by_pair.size() > 0)) {
+						checkTss = self->initialFailureReactionDelay;
+					}
+				}
+				when(wait(checkTss)) {
+					bool cancelTss = self->isTssRecruiting && (tssToRecruit < 0 || self->zeroHealthyTeams->get());
+					// Can't kill more tss' than we have. Kill 1 if zero healthy teams, otherwise kill enough to get
+					// back to the desired amount
+					int tssToKill = std::min((int)self->tss_info_by_pair.size(),
+					                         std::max(-tssToRecruit, self->zeroHealthyTeams->get() ? 1 : 0));
+					if (cancelTss) {
+						TEST(tssToRecruit < 0); // tss recruitment cancelled due to too many TSS
+						TEST(self->zeroHealthyTeams->get()); // tss recruitment cancelled due zero healthy teams
+
 						TraceEvent(SevWarn, "TSS_RecruitCancelled", self->distributorId)
-						    .detail("Reason", "ZeroHealthyTeams");
+						    .detail("Reason", tssToRecruit <= 0 ? "TooMany" : "ZeroHealthyTeams");
 						tssState->cancel();
 						tssState = makeReference<TSSPairState>();
 						self->isTssRecruiting = false;
-					} else if (!self->isTssRecruiting && self->zeroHealthyTeams->get() &&
-					           db->get().client.tssMapping.size() > 0) {
-						if (!sleepingAfterKillTss) {
-							checkKillTss = self->initialFailureReactionDelay;
-						}
-					}
-				}
-				when(wait(checkKillTss)) {
-					int tssToKill = std::min((int)db->get().client.tssMapping.size(),
-					                         std::max(-tssToRecruit, self->zeroHealthyTeams->get() ? 1 : 0));
-					if (tssToKill > 0) {
-						for (int i = 0; i < tssToKill; i++) {
-							StorageServerInterface tssi = db->get().client.tssMapping[i].second;
 
-							if (self->shouldHandleServer(tssi) && self->server_and_tss_info.count(tssi.id())) {
-								TraceEvent(SevWarn, "TSS_DDKill", self->distributorId)
-								    .detail("TSSID", tssi.id())
-								    .detail("Reason",
-								            self->zeroHealthyTeams->get() ? "ZeroHealthyTeams" : "ConfigChange");
+						pendingTSSCheck = true;
+						checkTss = delay(SERVER_KNOBS->TSS_DD_CHECK_INTERVAL);
+					} else if (tssToKill > 0) {
+						auto itr = self->tss_info_by_pair.begin();
+						for (int i = 0; i < tssToKill; i++, itr++) {
+							UID tssId = itr->second->id;
+							StorageServerInterface tssi = itr->second->lastKnownInterface;
 
-								Promise<Void> killPromise = self->server_and_tss_info[tssi.id()]->killTss;
+							if (self->shouldHandleServer(tssi) && self->server_and_tss_info.count(tssId)) {
+								Promise<Void> killPromise = itr->second->killTss;
 								if (killPromise.canBeSet()) {
+									TEST(tssToRecruit < 0); // Killing TSS due to too many TSS
+									TEST(self->zeroHealthyTeams->get()); // Killing TSS due zero healthy teams
+									TraceEvent(SevWarn, "TSS_DDKill", self->distributorId)
+									    .detail("TSSID", tssId)
+									    .detail("Reason",
+									            self->zeroHealthyTeams->get() ? "ZeroHealthyTeams" : "TooMany");
 									killPromise.send(Void());
 								}
 							}
 						}
 						// If we're killing a TSS because of zero healthy teams, wait a bit to give the replacing SS a
 						// change to join teams and stuff before killing another TSS
-						sleepingAfterKillTss = true;
-						checkKillTss = delay(SERVER_KNOBS->TSS_DD_KILL_INTERVAL);
+						pendingTSSCheck = true;
+						checkTss = delay(SERVER_KNOBS->TSS_DD_CHECK_INTERVAL);
+					} else if (self->isTssRecruiting) {
+						// check again later in case we need to cancel recruitment
+						pendingTSSCheck = true;
+						checkTss = delay(SERVER_KNOBS->TSS_DD_CHECK_INTERVAL);
+						// FIXME: better way to do this than timer?
 					} else {
-						sleepingAfterKillTss = false;
-						checkKillTss = Never();
+						pendingTSSCheck = false;
+						checkTss = Never();
 					}
 				}
 				when(wait(self->restartRecruiting.onTrigger())) {}
@@ -5622,6 +5659,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				if (err.code() != error_code_movekeys_conflict) {
 					throw err;
 				}
+
 				bool ddEnabled = wait(isDataDistributionEnabled(cx, ddEnabledState));
 				TraceEvent("DataDistributionMoveKeysConflict").detail("DataDistributionEnabled", ddEnabled).error(err);
 				if (ddEnabled) {

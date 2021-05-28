@@ -33,10 +33,9 @@ struct TSSEndpointData {
 	UID tssId;
 	Endpoint endpoint;
 	Reference<TSSMetrics> metrics;
-	UID generation;
 
-	TSSEndpointData(UID tssId, Endpoint endpoint, Reference<TSSMetrics> metrics, UID generation)
-	  : tssId(tssId), endpoint(endpoint), metrics(metrics), generation(generation) {}
+	TSSEndpointData(UID tssId, Endpoint endpoint, Reference<TSSMetrics> metrics)
+	  : tssId(tssId), endpoint(endpoint), metrics(metrics) {}
 };
 
 // The data structure used for the client-side load balancing algorithm to
@@ -111,10 +110,10 @@ public:
 	int laggingTSSCompareCount;
 
 	void updateTssEndpoint(uint64_t endpointId, const TSSEndpointData& endpointData);
-	void removeOldTssData(UID currentGeneration);
+	void removeTssEndpoint(uint64_t endpointId);
 	Optional<TSSEndpointData> getTssData(uint64_t endpointId);
 
-	QueueModel() : secondMultiplier(1.0), secondBudget(0), laggingRequestCount(0), tssCount(0) {
+	QueueModel() : secondMultiplier(1.0), secondBudget(0), laggingRequestCount(0) {
 		laggingRequests = actorCollection(addActor.getFuture(), &laggingRequestCount);
 		tssComparisons = actorCollection(addTSSActor.getFuture(), &laggingTSSCompareCount);
 	}
@@ -126,7 +125,6 @@ public:
 
 private:
 	std::unordered_map<uint64_t, QueueData> data;
-	uint32_t tssCount;
 };
 
 /* old queue model

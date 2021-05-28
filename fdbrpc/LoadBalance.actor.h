@@ -144,6 +144,7 @@ Future<Void> tssComparison(Req req,
 			        : SevError;
 
 			if (!TSS_doCompare(req, src.get(), tss.get().get(), traceSeverity, tssData.tssId)) {
+				TEST(true); // TSS Mismatch
 				++tssData.metrics->mismatches;
 			}
 		} else if (tssLB.present() && tssLB.get().error.present()) {
@@ -192,6 +193,7 @@ struct RequestData : NonCopyable {
 			Optional<TSSEndpointData> tssData = model->getTssData(stream->getEndpoint().token.first());
 
 			if (tssData.present()) {
+				TEST(true); // duplicating request to TSS
 				resetReply(request);
 				// FIXME: optimize to avoid creating new netNotifiedQueue for each message
 				RequestStream<Request> tssRequestStream(tssData.get().endpoint);
