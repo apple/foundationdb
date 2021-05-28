@@ -194,7 +194,7 @@ public:
 		std::vector<ProcessInfo*> processes;
 
 		// A map from filename to file handle for all open files on a machine
-		std::map<std::string, WeakFutureReference<IAsyncFile>> openFiles;
+		std::map<std::string, UnsafeWeakFutureReference<IAsyncFile>> openFiles;
 
 		std::set<std::string> deletingFiles;
 		std::set<std::string> closingFiles;
