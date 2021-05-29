@@ -40,13 +40,13 @@ Key encodeConfigKey(Optional<KeyRef> configClass, KeyRef knobName) {
 	return tuple.pack();
 }
 
-// TODO: Use newly public ConfigMutationRef constructor
 void appendVersionedMutation(Standalone<VectorRef<VersionedConfigMutationRef>>& versionedMutations,
                              Version version,
                              Optional<KeyRef> configClass,
                              KeyRef knobName,
                              Optional<ValueRef> knobValue) {
-	auto mutation = ConfigMutationRef::createConfigMutation(encodeConfigKey(configClass, knobName), knobValue);
+	auto configKey = ConfigKeyRef(configClass, knobName);
+	auto mutation = ConfigMutationRef(configKey, knobValue);
 	versionedMutations.emplace_back_deep(versionedMutations.arena(), version, mutation);
 }
 
@@ -275,8 +275,8 @@ class TransactionEnvironment {
 	ACTOR static Future<Standalone<VectorRef<KeyRef>>> getConfigClasses(TransactionEnvironment* self) {
 		state Reference<IConfigTransaction> tr =
 		    IConfigTransaction::createSimple(self->writeTo.getTransactionInterface());
-		state KeySelector begin = firstGreaterOrEqual("\xff\xff/configClasses/"_sr);
-		state KeySelector end = firstGreaterOrEqual("\xff\xff/configClasses0"_sr);
+		state KeySelector begin = firstGreaterOrEqual(configClassKeys.begin);
+		state KeySelector end = firstGreaterOrEqual(configClassKeys.end);
 		Standalone<RangeResultRef> range = wait(tr->getRange(begin, end, 1000));
 		Standalone<VectorRef<KeyRef>> result;
 		for (const auto& kv : range) {
@@ -290,9 +290,9 @@ class TransactionEnvironment {
 	                                                                Optional<KeyRef> configClass) {
 		state Reference<IConfigTransaction> tr =
 		    IConfigTransaction::createSimple(self->writeTo.getTransactionInterface());
-		state KeyRange keys = singleKeyRange("\xff\xff/globalKnobs"_sr);
+		state KeyRange keys = globalConfigKnobKeys;
 		if (configClass.present()) {
-			keys = singleKeyRange(configClass.get().withPrefix("\xff\xff/knobs/"_sr));
+			keys = singleKeyRange(configClass.get().withPrefix(configKnobKeys.begin));
 		}
 		KeySelector begin = firstGreaterOrEqual(keys.begin);
 		KeySelector end = firstGreaterOrEqual(keys.end);
@@ -315,7 +315,6 @@ class TransactionEnvironment {
 	}
 
 public:
-	// TODO: Remove this?
 	Future<Void> setup() { return Void(); }
 
 	void restartNode() { writeTo.restartNode(); }
@@ -534,7 +533,7 @@ ACTOR Future<Void> testGetKnobs(bool global, bool doCompact) {
 	}
 	wait(set(env, configClass.castTo<KeyRef>(), 1, "test_long"_sr));
 	wait(set(env, configClass.castTo<KeyRef>(), 1, "test_int"_sr));
-	wait(set(env, "class-B"_sr, 1.0, "test_double"_sr)); // ignored
+	wait(set(env, "class-B"_sr, 1, "test_double"_sr)); // ignored
 	if (doCompact) {
 		wait(compact(env));
 	}

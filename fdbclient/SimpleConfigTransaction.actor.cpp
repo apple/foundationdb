@@ -116,7 +116,7 @@ public:
 	SimpleConfigTransactionImpl(ConfigTransactionInterface const& cti) : cti(cti) {}
 
 	void set(KeyRef key, ValueRef value) {
-		if (key == "\xff\xff/description"_sr) {
+		if (key == configTransactionDescriptionKey) {
 			toCommit.annotation.description = KeyRef(toCommit.arena, value);
 		} else {
 			toCommit.mutations.push_back_deep(toCommit.arena, ConfigMutationRef::createConfigMutation(key, value));
@@ -124,7 +124,7 @@ public:
 	}
 
 	void clear(KeyRef key) {
-		if (key == "\xff\xff/description"_sr) {
+		if (key == configTransactionDescriptionKey) {
 			toCommit.annotation.description = ""_sr;
 		} else {
 			toCommit.mutations.push_back_deep(toCommit.arena, ConfigMutationRef::createConfigMutation(key, {}));
@@ -134,14 +134,12 @@ public:
 	Future<Optional<Value>> get(KeyRef key) { return get(this, key); }
 
 	Future<Standalone<RangeResultRef>> getRange(KeyRangeRef keys) {
-		const auto configClassKeys = KeyRangeRef("\xff\xff/configClasses/"_sr, "\xff\xff/configClasses0"_sr);
-		const auto knobKeys = KeyRangeRef("\xff\xff/knobs/"_sr, "\xff\xff/knobs0"_sr);
 		if (keys == configClassKeys) {
 			return getConfigClasses(this);
-		} else if (keys == singleKeyRange("\xff\xff/globalKnobs"_sr)) {
+		} else if (keys == globalConfigKnobKeys) {
 			return getKnobs(this, {});
-		} else if (knobKeys.contains(keys) && keys.singleKeyRange()) {
-			const auto configClass = keys.begin.removePrefix(knobKeys.begin);
+		} else if (configKnobKeys.contains(keys) && keys.singleKeyRange()) {
+			const auto configClass = keys.begin.removePrefix(configKnobKeys.begin);
 			return getKnobs(this, configClass);
 		} else {
 			throw invalid_config_db_range_read();
