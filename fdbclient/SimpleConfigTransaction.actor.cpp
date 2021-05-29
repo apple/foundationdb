@@ -138,6 +138,8 @@ public:
 		const auto knobKeys = KeyRangeRef("\xff\xff/knobs/"_sr, "\xff\xff/knobs0"_sr);
 		if (keys == configClassKeys) {
 			return getConfigClasses(this);
+		} else if (keys == singleKeyRange("\xff\xff/globalKnobs"_sr)) {
+			return getKnobs(this, {});
 		} else if (knobKeys.contains(keys) && keys.singleKeyRange()) {
 			const auto configClass = keys.begin.removePrefix(knobKeys.begin);
 			return getKnobs(this, configClass);

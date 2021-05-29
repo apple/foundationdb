@@ -286,10 +286,14 @@ class TransactionEnvironment {
 		return result;
 	}
 
-	ACTOR static Future<Standalone<VectorRef<KeyRef>>> getKnobNames(TransactionEnvironment* self, KeyRef configClass) {
+	ACTOR static Future<Standalone<VectorRef<KeyRef>>> getKnobNames(TransactionEnvironment* self,
+	                                                                Optional<KeyRef> configClass) {
 		state Reference<IConfigTransaction> tr =
 		    IConfigTransaction::createSimple(self->writeTo.getTransactionInterface());
-		state KeyRange keys = singleKeyRange(configClass.withPrefix("\xff\xff/knobs/"_sr));
+		state KeyRange keys = singleKeyRange("\xff\xff/globalKnobs"_sr);
+		if (configClass.present()) {
+			keys = singleKeyRange(configClass.get().withPrefix("\xff\xff/knobs/"_sr));
+		}
 		KeySelector begin = firstGreaterOrEqual(keys.begin);
 		KeySelector end = firstGreaterOrEqual(keys.end);
 		Standalone<RangeResultRef> range = wait(tr->getRange(begin, end, 1000));
@@ -325,7 +329,9 @@ public:
 	Future<Void> badRangeRead() { return badRangeRead(this); }
 
 	Future<Standalone<VectorRef<KeyRef>>> getConfigClasses() { return getConfigClasses(this); }
-	Future<Standalone<VectorRef<KeyRef>>> getKnobNames(KeyRef configClass) { return getKnobNames(this, configClass); }
+	Future<Standalone<VectorRef<KeyRef>>> getKnobNames(Optional<KeyRef> configClass) {
+		return getKnobNames(this, configClass);
+	}
 
 	Future<Void> compact() { return writeTo.compact(); }
 	Future<Void> getError() const { return writeTo.getError(); }
@@ -520,15 +526,19 @@ ACTOR Future<Void> testGetConfigClasses(bool doCompact) {
 	return Void();
 }
 
-ACTOR Future<Void> testGetKnobs(bool doCompact) {
+ACTOR Future<Void> testGetKnobs(bool global, bool doCompact) {
 	state TransactionEnvironment env;
-	wait(set(env, "class-A"_sr, 1, "test_long"_sr));
-	wait(set(env, "class-A"_sr, 1, "test_int"_sr));
-	wait(set(env, "class-B"_sr, 1.0, "test_double"_sr));
+	state Optional<Key> configClass;
+	if (!global) {
+		configClass = "class-A"_sr;
+	}
+	wait(set(env, configClass.castTo<KeyRef>(), 1, "test_long"_sr));
+	wait(set(env, configClass.castTo<KeyRef>(), 1, "test_int"_sr));
+	wait(set(env, "class-B"_sr, 1.0, "test_double"_sr)); // ignored
 	if (doCompact) {
 		wait(compact(env));
 	}
-	Standalone<VectorRef<KeyRef>> knobNames = wait(env.getKnobNames("class-A"_sr));
+	Standalone<VectorRef<KeyRef>> knobNames = wait(env.getKnobNames(configClass.castTo<KeyRef>()));
 	ASSERT(matches(knobNames, { "test_long"_sr, "test_int"_sr }));
 	return Void();
 }
@@ -695,12 +705,22 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactThenGetConfigClasses") {
 }
 
 TEST_CASE("/fdbserver/ConfigDB/Transaction/GetKnobs") {
-	wait(testGetKnobs(false));
+	wait(testGetKnobs(false, false));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactThenGetKnobs") {
-	wait(testGetKnobs(true));
+	wait(testGetKnobs(false, true));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/GetGlobalKnobs") {
+	wait(testGetKnobs(true, false));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactThenGetGlobalKnobs") {
+	wait(testGetKnobs(true, true));
 	return Void();
 }
 
