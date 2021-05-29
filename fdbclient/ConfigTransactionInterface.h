@@ -106,24 +106,60 @@ struct ConfigTransactionGetRangeReply {
 	}
 };
 
-struct ConfigTransactionGetRangeRequest {
-	static constexpr FileIdentifier file_identifier = 987410;
-	Arena arena;
-	Version version;
-	KeyRef configClass;
-	KeyRangeRef knobNameRange;
-	ReplyPromise<ConfigTransactionGetRangeReply> reply;
+struct ConfigTransactionGetConfigClassesReply {
+	static constexpr FileIdentifier file_identifier = 5309618;
+	Standalone<VectorRef<KeyRef>> configClasses;
 
-	ConfigTransactionGetRangeRequest() = default;
-	explicit ConfigTransactionGetRangeRequest(Arena& arena,
-	                                          Version version,
-	                                          KeyRef configClass,
-	                                          KeyRangeRef knobNameRange)
-	  : arena(arena), version(version), configClass(arena, configClass), knobNameRange(arena, knobNameRange) {}
+	ConfigTransactionGetConfigClassesReply() = default;
+	explicit ConfigTransactionGetConfigClassesReply(Standalone<VectorRef<KeyRef>> const& configClasses)
+	  : configClasses(configClasses) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, version, configClass, knobNameRange, reply);
+		serializer(ar, configClasses);
+	}
+};
+
+struct ConfigTransactionGetConfigClassesRequest {
+	static constexpr FileIdentifier file_identifier = 7163400;
+	Version version;
+	ReplyPromise<ConfigTransactionGetConfigClassesReply> reply;
+
+	ConfigTransactionGetConfigClassesRequest() = default;
+	explicit ConfigTransactionGetConfigClassesRequest(Version version) : version(version) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version);
+	}
+};
+
+struct ConfigTransactionGetKnobsReply {
+	static constexpr FileIdentifier file_identifier = 4109852;
+	Standalone<VectorRef<KeyRef>> knobNames;
+
+	ConfigTransactionGetKnobsReply() = default;
+	explicit ConfigTransactionGetKnobsReply(Standalone<VectorRef<KeyRef>> const& knobNames) : knobNames(knobNames) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, knobNames);
+	}
+};
+
+struct ConfigTransactionGetKnobsRequest {
+	static constexpr FileIdentifier file_identifier = 987410;
+	Version version;
+	Optional<Key> configClass;
+	ReplyPromise<ConfigTransactionGetKnobsReply> reply;
+
+	ConfigTransactionGetKnobsRequest() = default;
+	explicit ConfigTransactionGetKnobsRequest(Version version, Optional<Key> configClass)
+	  : version(version), configClass(configClass) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, configClass, reply);
 	}
 };
 
@@ -134,7 +170,8 @@ public:
 	static constexpr FileIdentifier file_identifier = 982485;
 	struct RequestStream<ConfigTransactionGetVersionRequest> getVersion;
 	struct RequestStream<ConfigTransactionGetRequest> get;
-	struct RequestStream<ConfigTransactionGetRangeRequest> getRange;
+	struct RequestStream<ConfigTransactionGetConfigClassesRequest> getClasses;
+	struct RequestStream<ConfigTransactionGetKnobsRequest> getKnobs;
 	struct RequestStream<ConfigTransactionCommitRequest> commit;
 
 	ConfigTransactionInterface();
@@ -147,6 +184,6 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, getVersion, get, getRange, commit);
+		serializer(ar, getVersion, get, getClasses, getKnobs, commit);
 	}
 };

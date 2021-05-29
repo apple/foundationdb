@@ -27,13 +27,15 @@ ConfigTransactionInterface::ConfigTransactionInterface() : _id(deterministicRand
 void ConfigTransactionInterface::setupWellKnownEndpoints() {
 	getVersion.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_GETVERSION, TaskPriority::Coordination);
 	get.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_GET, TaskPriority::Coordination);
-	getRange.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_GETRANGE, TaskPriority::Coordination);
+	getClasses.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_GETCLASSES, TaskPriority::Coordination);
+	getKnobs.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_GETKNOBS, TaskPriority::Coordination);
 	commit.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_COMMIT, TaskPriority::Coordination);
 }
 
 ConfigTransactionInterface::ConfigTransactionInterface(NetworkAddress const& remote)
   : getVersion(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GETVERSION)), get(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GET)),
-    getRange(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GETRANGE)), commit(Endpoint({ remote }, WLTOKEN_CONFIGTXN_COMMIT)) {
+    getClasses(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GETCLASSES)),
+    getKnobs(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GETKNOBS)), commit(Endpoint({ remote }, WLTOKEN_CONFIGTXN_COMMIT)) {
 }
 
 bool ConfigTransactionInterface::operator==(ConfigTransactionInterface const& rhs) const {

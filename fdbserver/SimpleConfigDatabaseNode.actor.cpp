@@ -234,57 +234,70 @@ class SimpleConfigDatabaseNodeImpl {
 		return Void();
 	}
 
-	/*
-	ACTOR static Future<Void> getRange(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionGetRangeRequest req) {
-	    wait(self->globalLock.take());
-	    state FlowLock::Releaser releaser(self->globalLock);
-	    Version currentVersion = wait(getLiveTransactionVersion(self));
-	    if (req.version != currentVersion) {
-	        req.reply.sendError(transaction_too_old());
-	        return Void();
-	    }
-	    state Standalone<RangeResultRef> range = wait(self->kvStore->readRange(req.keys.withPrefix(kvKeys.begin)));
-	    // FIXME: Inefficient
-	    for (auto& kv : range) {
-	        ASSERT(kv.key.startsWith(kvKeys.begin));
-	        kv.key = kv.key.removePrefix(kvKeys.begin);
-	    }
-	    Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations = wait(getMutations(self, 0, req.version));
-	    for (const auto& versionedMutation : versionedMutations) {
-	        const auto& mutation = versionedMutation.mutation;
-	        if (mutation.isSet()) {
-	            // FIXME: This is very inefficient
-	            Standalone<RangeResultRef> newRange;
-	            bool added = false;
-	            for (auto& kv : range) {
-	                if (kv.key > mutation.param1 && !added) {
-	                    newRange.push_back_deep(newRange.arena(), KeyValueRef(mutation.param1, mutation.param2));
-	                    added = true;
-	                } else if (kv.key == mutation.param1) {
-	                    kv.value = mutation.param2;
-	                    added = true;
-	                }
-	                newRange.push_back_deep(newRange.arena(), kv);
-	            }
-	            if (!added) {
-	                newRange.push_back_deep(newRange.arena(), KeyValueRef(mutation.param1, mutation.param2));
-	            }
-	            range = std::move(newRange);
-	        } else {
-	            // FIXME: This is very inefficient
-	            Standalone<RangeResultRef> newRange;
-	            for (const auto& kv : range) {
-	                if (kv.key == mutation.getKey()) {
-	                    newRange.push_back_deep(newRange.arena(), kv);
-	                }
-	            }
-	            range = std::move(newRange);
-	        }
-	    }
-	    req.reply.send(ConfigTransactionGetRangeReply(range));
-	    return Void();
+	ACTOR static Future<Void> getConfigClasses(SimpleConfigDatabaseNodeImpl* self,
+	                                           ConfigTransactionGetConfigClassesRequest req) {
+		Version currentVersion = wait(getLiveTransactionVersion(self));
+		if (req.version != currentVersion) {
+			req.reply.sendError(transaction_too_old());
+			return Void();
+		}
+		state Standalone<RangeResultRef> snapshot = wait(self->kvStore->readRange(kvKeys));
+		state std::set<Key> configClassesSet;
+		for (const auto& kv : snapshot) {
+			auto configKey =
+			    BinaryReader::fromStringRef<ConfigKey>(kv.key.removePrefix(kvKeys.begin), IncludeVersion());
+			if (configKey.configClass.present()) {
+				configClassesSet.insert(configKey.configClass.get());
+			}
+		}
+		state Version lastCompactedVersion = wait(getLastCompactedVersion(self));
+		state Standalone<VectorRef<VersionedConfigMutationRef>> mutations =
+		    wait(getMutations(self, lastCompactedVersion + 1, req.version));
+		for (const auto& versionedMutation : mutations) {
+			auto configClass = versionedMutation.mutation.getConfigClass();
+			if (configClass.present()) {
+				configClassesSet.insert(configClass.get());
+			}
+		}
+		Standalone<VectorRef<KeyRef>> configClasses;
+		for (const auto& configClass : configClassesSet) {
+			configClasses.push_back_deep(configClasses.arena(), configClass);
+		}
+		req.reply.send(ConfigTransactionGetConfigClassesReply{ configClasses });
+		return Void();
 	}
-	*/
+
+	ACTOR static Future<Void> getKnobs(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionGetKnobsRequest req) {
+		Version currentVersion = wait(getLiveTransactionVersion(self));
+		if (req.version != currentVersion) {
+			req.reply.sendError(transaction_too_old());
+			return Void();
+		}
+		// FIXME: Filtering after reading from disk is very inefficient
+		state Standalone<RangeResultRef> snapshot = wait(self->kvStore->readRange(kvKeys));
+		state std::set<Key> knobSet;
+		for (const auto& kv : snapshot) {
+			auto configKey =
+			    BinaryReader::fromStringRef<ConfigKey>(kv.key.removePrefix(kvKeys.begin), IncludeVersion());
+			if (configKey.configClass.castTo<Key>() == req.configClass) {
+				knobSet.insert(configKey.knobName);
+			}
+		}
+		state Version lastCompactedVersion = wait(getLastCompactedVersion(self));
+		state Standalone<VectorRef<VersionedConfigMutationRef>> mutations =
+		    wait(getMutations(self, lastCompactedVersion + 1, req.version));
+		for (const auto& versionedMutation : mutations) {
+			if (versionedMutation.mutation.getConfigClass().castTo<Key>() == req.configClass) {
+				knobSet.insert(versionedMutation.mutation.getKnobName());
+			}
+		}
+		Standalone<VectorRef<KeyRef>> knobNames;
+		for (const auto& knobName : knobSet) {
+			knobNames.push_back_deep(knobNames.arena(), knobName);
+		}
+		req.reply.send(ConfigTransactionGetKnobsReply{ knobNames });
+		return Void();
+	}
 
 	ACTOR static Future<Void> commit(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionCommitRequest req) {
 		Version currentVersion = wait(getLiveTransactionVersion(self));
@@ -328,9 +341,11 @@ class SimpleConfigDatabaseNodeImpl {
 				when(ConfigTransactionCommitRequest req = waitNext(cti->commit.getFuture())) {
 					wait(commit(self, req));
 				}
-				when(ConfigTransactionGetRangeRequest req = waitNext(cti->getRange.getFuture())) {
-					// FIXME: Fix and reenable
-					// wait(getRange(self, req));
+				when(ConfigTransactionGetConfigClassesRequest req = waitNext(cti->getClasses.getFuture())) {
+					wait(getConfigClasses(self, req));
+				}
+				when(ConfigTransactionGetKnobsRequest req = waitNext(cti->getKnobs.getFuture())) {
+					wait(getKnobs(self, req));
 				}
 			}
 		}

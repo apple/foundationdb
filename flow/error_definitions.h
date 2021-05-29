@@ -149,6 +149,7 @@ ERROR( transaction_read_only, 2023, "Attempted to commit a transaction specified
 ERROR( invalid_cache_eviction_policy, 2024, "Invalid cache eviction policy, only random and lru are supported" )
 ERROR( network_cannot_be_restarted, 2025, "Network can only be started once" )
 ERROR( blocked_from_network_thread, 2026, "Detected a deadlock in a callback called from the network thread" )
+ERROR( invalid_config_db_range_read, 2027, "Invalid configuration database range read" )
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )

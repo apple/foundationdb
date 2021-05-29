@@ -64,9 +64,13 @@ class WriteToTransactionEnvironment {
 	Future<Void> cfiServer;
 	Version lastWrittenVersion{ 0 };
 
-	ACTOR static Future<Void> set(WriteToTransactionEnvironment* self, Optional<KeyRef> configClass, int64_t value) {
+	ACTOR template <class T>
+	static Future<Void> set(WriteToTransactionEnvironment* self,
+	                        Optional<KeyRef> configClass,
+	                        T value,
+	                        KeyRef knobName) {
 		state Reference<IConfigTransaction> tr = IConfigTransaction::createSimple(self->cti);
-		auto configKey = encodeConfigKey(configClass, "test_long"_sr);
+		auto configKey = encodeConfigKey(configClass, knobName);
 		tr->set(configKey, longToValue(value));
 		wait(tr->commit());
 		self->lastWrittenVersion = tr->getCommittedVersion();
@@ -93,7 +97,10 @@ public:
 		setup();
 	}
 
-	Future<Void> set(Optional<KeyRef> configClass, int64_t value) { return set(this, configClass, value); }
+	template <class T>
+	Future<Void> set(Optional<KeyRef> configClass, T value, KeyRef knobName = "test_long"_sr) {
+		return set(this, configClass, value, knobName);
+	}
 
 	Future<Void> clear(Optional<KeyRef> configClass) { return clear(this, configClass); }
 
@@ -265,16 +272,61 @@ class TransactionEnvironment {
 		return Void();
 	}
 
+	ACTOR static Future<Standalone<VectorRef<KeyRef>>> getConfigClasses(TransactionEnvironment* self) {
+		state Reference<IConfigTransaction> tr =
+		    IConfigTransaction::createSimple(self->writeTo.getTransactionInterface());
+		state KeySelector begin = firstGreaterOrEqual("\xff\xff/configClasses/"_sr);
+		state KeySelector end = firstGreaterOrEqual("\xff\xff/configClasses0"_sr);
+		Standalone<RangeResultRef> range = wait(tr->getRange(begin, end, 1000));
+		Standalone<VectorRef<KeyRef>> result;
+		for (const auto& kv : range) {
+			result.push_back_deep(result.arena(), kv.key);
+			ASSERT(kv.value == ""_sr);
+		}
+		return result;
+	}
+
+	ACTOR static Future<Standalone<VectorRef<KeyRef>>> getKnobNames(TransactionEnvironment* self, KeyRef configClass) {
+		state Reference<IConfigTransaction> tr =
+		    IConfigTransaction::createSimple(self->writeTo.getTransactionInterface());
+		state KeyRange keys = singleKeyRange(configClass.withPrefix("\xff\xff/knobs/"_sr));
+		KeySelector begin = firstGreaterOrEqual(keys.begin);
+		KeySelector end = firstGreaterOrEqual(keys.end);
+		Standalone<RangeResultRef> range = wait(tr->getRange(begin, end, 1000));
+		Standalone<VectorRef<KeyRef>> result;
+		for (const auto& kv : range) {
+			result.push_back_deep(result.arena(), kv.key);
+			ASSERT(kv.value == ""_sr);
+		}
+		return result;
+	}
+
+	ACTOR static Future<Void> badRangeRead(TransactionEnvironment* self) {
+		state Reference<IConfigTransaction> tr =
+		    IConfigTransaction::createSimple(self->writeTo.getTransactionInterface());
+		KeySelector begin = firstGreaterOrEqual(normalKeys.begin);
+		KeySelector end = firstGreaterOrEqual(normalKeys.end);
+		wait(success(tr->getRange(begin, end, 1000)));
+		return Void();
+	}
+
 public:
 	// TODO: Remove this?
 	Future<Void> setup() { return Void(); }
 
 	void restartNode() { writeTo.restartNode(); }
-	Future<Void> set(Optional<KeyRef> configClass, int64_t value) { return writeTo.set(configClass, value); }
+	Future<Void> set(Optional<KeyRef> configClass, int64_t value, KeyRef knobName = "test_long"_sr) {
+		return writeTo.set(configClass, value, knobName);
+	}
 	Future<Void> clear(Optional<KeyRef> configClass) { return writeTo.clear(configClass); }
 	Future<Void> check(Optional<KeyRef> configClass, Optional<int64_t> expected) {
 		return check(this, configClass, expected);
 	}
+	Future<Void> badRangeRead() { return badRangeRead(this); }
+
+	Future<Standalone<VectorRef<KeyRef>>> getConfigClasses() { return getConfigClasses(this); }
+	Future<Standalone<VectorRef<KeyRef>>> getKnobNames(KeyRef configClass) { return getKnobNames(this, configClass); }
+
 	Future<Void> compact() { return writeTo.compact(); }
 	Future<Void> getError() const { return writeTo.getError(); }
 };
@@ -448,6 +500,39 @@ Future<Void> testChangeBroadcaster() {
 	return Void();
 }
 
+bool matches(Standalone<VectorRef<KeyRef>> const& vec, std::set<Key> const& compareTo) {
+	std::set<Key> s;
+	for (const auto& value : vec) {
+		s.insert(value);
+	}
+	return (s == compareTo);
+}
+
+ACTOR Future<Void> testGetConfigClasses(bool doCompact) {
+	state TransactionEnvironment env;
+	wait(set(env, "class-A"_sr, 1));
+	wait(set(env, "class-B"_sr, 1));
+	if (doCompact) {
+		wait(compact(env));
+	}
+	Standalone<VectorRef<KeyRef>> configClasses = wait(env.getConfigClasses());
+	ASSERT(matches(configClasses, { "class-A"_sr, "class-B"_sr }));
+	return Void();
+}
+
+ACTOR Future<Void> testGetKnobs(bool doCompact) {
+	state TransactionEnvironment env;
+	wait(set(env, "class-A"_sr, 1, "test_long"_sr));
+	wait(set(env, "class-A"_sr, 1, "test_int"_sr));
+	wait(set(env, "class-B"_sr, 1.0, "test_double"_sr));
+	if (doCompact) {
+		wait(compact(env));
+	}
+	Standalone<VectorRef<KeyRef>> knobNames = wait(env.getKnobNames("class-A"_sr));
+	ASSERT(matches(knobNames, { "test_long"_sr, "test_int"_sr }));
+	return Void();
+}
+
 } // namespace
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Set") {
@@ -561,11 +646,6 @@ TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/ChangeBroadcaster") {
 	return Void();
 }
 
-// TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/RestartLocalConfig") {
-//	wait(testRestartLocalConfig<TransactionToLocalConfigEnvironment>());
-//	return Void();
-//}
-
 TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/RestartLocalConfigAndChangeClass") {
 	wait(testRestartLocalConfigAndChangeClass<TransactionToLocalConfigEnvironment>());
 	return Void();
@@ -588,7 +668,6 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/Clear") {
 
 TEST_CASE("/fdbserver/ConfigDB/Transaction/Restart") {
 	state TransactionEnvironment env;
-	wait(env.setup());
 	wait(set(env, "class-A"_sr, 1));
 	env.restartNode();
 	wait(check(env, "class-A"_sr, 1));
@@ -597,11 +676,41 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/Restart") {
 
 TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactNode") {
 	state TransactionEnvironment env;
-	wait(env.setup());
 	wait(set(env, "class-A"_sr, 1));
 	wait(env.compact());
 	wait(env.check("class-A"_sr, 1));
 	wait(set(env, "class-A"_sr, 2));
 	wait(env.check("class-A"_sr, 2));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/GetConfigClasses") {
+	wait(testGetConfigClasses(false));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactThenGetConfigClasses") {
+	wait(testGetConfigClasses(true));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/GetKnobs") {
+	wait(testGetKnobs(false));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactThenGetKnobs") {
+	wait(testGetKnobs(true));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/BadRangeRead") {
+	state TransactionEnvironment env;
+	try {
+		wait(env.badRangeRead() || env.getError());
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_invalid_config_db_range_read);
+	}
 	return Void();
 }

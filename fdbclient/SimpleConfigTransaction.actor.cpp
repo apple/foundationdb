@@ -66,19 +66,33 @@ class SimpleConfigTransactionImpl {
 		return result.value;
 	}
 
-	ACTOR static Future<Standalone<RangeResultRef>> getRange(SimpleConfigTransactionImpl* self, KeyRangeRef keys) {
-		// TODO: Implement
-		wait(delay(0));
-		return Standalone<RangeResultRef>{};
-		/*
-		if (!self->version.isValid()) {
-		    self->version = getReadVersion(self);
+	ACTOR static Future<Standalone<RangeResultRef>> getConfigClasses(SimpleConfigTransactionImpl* self) {
+		if (!self->getVersionFuture.isValid()) {
+			self->getVersionFuture = getReadVersion(self);
 		}
-		Version version = wait(self->version);
-		ConfigTransactionGetRangeReply result =
-		    wait(self->cti.getRange.getReply(ConfigTransactionGetRangeRequest(version, keys)));
-		return result.range;
-		*/
+		Version version = wait(self->getVersionFuture);
+		ConfigTransactionGetConfigClassesReply reply =
+		    wait(self->cti.getClasses.getReply(ConfigTransactionGetConfigClassesRequest{ version }));
+		Standalone<RangeResultRef> result;
+		for (const auto& configClass : reply.configClasses) {
+			result.push_back_deep(result.arena(), KeyValueRef(configClass, ""_sr));
+		}
+		return result;
+	}
+
+	ACTOR static Future<Standalone<RangeResultRef>> getKnobs(SimpleConfigTransactionImpl* self,
+	                                                         Optional<Key> configClass) {
+		if (!self->getVersionFuture.isValid()) {
+			self->getVersionFuture = getReadVersion(self);
+		}
+		Version version = wait(self->getVersionFuture);
+		ConfigTransactionGetKnobsReply reply =
+		    wait(self->cti.getKnobs.getReply(ConfigTransactionGetKnobsRequest{ version, configClass }));
+		Standalone<RangeResultRef> result;
+		for (const auto& knobName : reply.knobNames) {
+			result.push_back_deep(result.arena(), KeyValueRef(knobName, ""_sr));
+		}
+		return result;
 	}
 
 	ACTOR static Future<Void> commit(SimpleConfigTransactionImpl* self) {
@@ -119,7 +133,18 @@ public:
 
 	Future<Optional<Value>> get(KeyRef key) { return get(this, key); }
 
-	Future<Standalone<RangeResultRef>> getRange(KeyRangeRef keys) { return getRange(this, keys); }
+	Future<Standalone<RangeResultRef>> getRange(KeyRangeRef keys) {
+		const auto configClassKeys = KeyRangeRef("\xff\xff/configClasses/"_sr, "\xff\xff/configClasses0"_sr);
+		const auto knobKeys = KeyRangeRef("\xff\xff/knobs/"_sr, "\xff\xff/knobs0"_sr);
+		if (keys == configClassKeys) {
+			return getConfigClasses(this);
+		} else if (knobKeys.contains(keys) && keys.singleKeyRange()) {
+			const auto configClass = keys.begin.removePrefix(knobKeys.begin);
+			return getKnobs(this, configClass);
+		} else {
+			throw invalid_config_db_range_read();
+		}
+	}
 
 	Future<Void> commit() { return commit(this); }
 
