@@ -607,20 +607,20 @@ TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/GlobalSet") {
 	return Void();
 }
 
-// TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/ChangeBroadcaster") {
-//	wait(testChangeBroadcaster<BroadcasterToLocalConfigEnvironment>());
-//	return Void();
-//}
+TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/ChangeBroadcaster") {
+	wait(testChangeBroadcaster<BroadcasterToLocalConfigEnvironment>());
+	return Void();
+}
 
 TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/RestartLocalConfig") {
 	wait(testRestartLocalConfig<BroadcasterToLocalConfigEnvironment>());
 	return Void();
 }
 
-// TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/RestartLocalConfigAndChangeClass") {
-//	wait(testRestartLocalConfigAndChangeClass<BroadcasterToLocalConfigEnvironment>());
-//	return Void();
-//}
+TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/RestartLocalConfigAndChangeClass") {
+	wait(testRestartLocalConfigAndChangeClass<BroadcasterToLocalConfigEnvironment>());
+	return Void();
+}
 
 TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/Compact") {
 	wait(testCompact<BroadcasterToLocalConfigEnvironment>());
