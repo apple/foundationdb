@@ -21,6 +21,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/Knobs.h"
 #include "fdbclient/MonitorLeader.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
