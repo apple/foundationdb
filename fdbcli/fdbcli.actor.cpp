@@ -32,6 +32,7 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/TagThrottle.h"
+#include "fdbclient/Tuple.h"
 
 #include "flow/DeterministicRandom.h"
 #include "flow/Platform.h"

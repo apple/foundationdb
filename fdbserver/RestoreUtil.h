@@ -28,6 +28,7 @@
 
 #include "fdbclient/Tuple.h"
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/RestoreInterface.h"
 #include "flow/flow.h"
 #include "fdbrpc/TimedRequest.h"
 #include "fdbrpc/fdbrpc.h"
@@ -87,26 +88,6 @@ extern int numRoles;
 std::string getHexString(StringRef input);
 
 bool debugFRMutation(const char* context, Version version, MutationRef const& mutation);
-
-struct RestoreCommonReply {
-	constexpr static FileIdentifier file_identifier = 5808787;
-	UID id; // unique ID of the server who sends the reply
-	bool isDuplicated;
-
-	RestoreCommonReply() = default;
-	explicit RestoreCommonReply(UID id, bool isDuplicated = false) : id(id), isDuplicated(isDuplicated) {}
-
-	std::string toString() const {
-		std::stringstream ss;
-		ss << "ServerNodeID:" << id.toString() << " isDuplicated:" << isDuplicated;
-		return ss.str();
-	}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, id, isDuplicated);
-	}
-};
 
 struct RestoreSimpleRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 16448937;

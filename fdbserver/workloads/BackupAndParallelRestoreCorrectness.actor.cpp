@@ -22,7 +22,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RestoreWorkerInterface.actor.h"
+#include "fdbserver/RestoreWorkerInterface.actor.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"

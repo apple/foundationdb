@@ -31,6 +31,7 @@
 #include "flow/UnitTest.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/RecoveryState.h"
+#include "fdbserver/Knobs.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
