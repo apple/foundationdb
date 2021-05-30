@@ -23,7 +23,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/Knobs.h"
+#include "fdbclient/Knobs.h"
 
 // The versioned message has wire format : -1, version, messages
 static const int32_t VERSION_HEADER = -1;
@@ -95,7 +95,7 @@ struct MutationRef {
 		// Amplify atomicOp size to consider such extra workload.
 		// A good value for FASTRESTORE_ATOMICOP_WEIGHT needs experimental evaluations.
 		if (isAtomicOp()) {
-			return totalSize() * SERVER_KNOBS->FASTRESTORE_ATOMICOP_WEIGHT;
+			return totalSize() * CLIENT_KNOBS->FASTRESTORE_ATOMICOP_WEIGHT;
 		} else {
 			return totalSize();
 		}
