@@ -328,7 +328,6 @@ class SimpleConfigDatabaseNodeImpl {
 
 	ACTOR static Future<Void> serve(SimpleConfigDatabaseNodeImpl* self, ConfigTransactionInterface const* cti) {
 		loop {
-			//wait(traceQueuedMutations(self));
 			choose {
 				when(ConfigTransactionGetVersionRequest req = waitNext(cti->getVersion.getFuture())) {
 					++self->newVersionRequests;
@@ -347,6 +346,7 @@ class SimpleConfigDatabaseNodeImpl {
 				when(ConfigTransactionGetKnobsRequest req = waitNext(cti->getKnobs.getFuture())) {
 					wait(getKnobs(self, req));
 				}
+				when(wait(self->kvStore->getError())) { ASSERT(false); }
 			}
 		}
 	}
@@ -431,6 +431,7 @@ class SimpleConfigDatabaseNodeImpl {
 					++self->compactRequests;
 					wait(compact(self, req));
 				}
+				when(wait(self->kvStore->getError())) { ASSERT(false); }
 			}
 		}
 	}

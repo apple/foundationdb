@@ -302,6 +302,7 @@ class LocalConfigurationImpl {
 			choose {
 				when(wait(brokenPromiseToNever(consumeInternal(self, broadcaster->get())))) { ASSERT(false); }
 				when(wait(broadcaster->onChange())) { ++self->broadcasterChanges; }
+				when(wait(self->kvStore->getError())) { ASSERT(false); }
 			}
 		}
 	}
