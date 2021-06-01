@@ -2235,7 +2235,7 @@ ACTOR Future<Optional<Value>> getValue(Future<Version> version,
 
 			state GetValueReply reply;
 			try {
-				if (CLIENT_BUGGIFY) {
+				if (CLIENT_BUGGIFY_WITH_PROB(.01)) {
 					throw deterministicRandom()->randomChoice(
 					    std::vector<Error>{ transaction_too_old(), future_version() });
 				}
@@ -3078,7 +3078,7 @@ ACTOR Future<RangeResult> getRange(Database cx,
 				++cx->transactionPhysicalReads;
 				state GetKeyValuesReply rep;
 				try {
-					if (CLIENT_BUGGIFY) {
+					if (CLIENT_BUGGIFY_WITH_PROB(.01)) {
 						throw deterministicRandom()->randomChoice(
 						    std::vector<Error>{ transaction_too_old(), future_version() });
 					}
