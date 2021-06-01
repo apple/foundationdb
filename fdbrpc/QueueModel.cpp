@@ -60,6 +60,32 @@ double QueueModel::addRequest(uint64_t id) {
 	return d.penalty;
 }
 
+void QueueModel::updateTssEndpoint(uint64_t endpointId, const TSSEndpointData& tssData) {
+	auto& d = data[endpointId];
+	if (!d.tssData.present()) {
+		tssCount++;
+		d.tssData = Optional<TSSEndpointData>(tssData);
+	} else {
+		d.tssData.get().generation = tssData.generation;
+	}
+}
+
+void QueueModel::removeOldTssData(UID currentGeneration) {
+	if (tssCount > 0) {
+		// expire old tss mappings that aren't present in new mapping
+		for (auto& it : data) {
+			if (it.second.tssData.present() && it.second.tssData.get().generation != currentGeneration) {
+				it.second.tssData = Optional<TSSEndpointData>();
+				tssCount--;
+			}
+		}
+	}
+}
+
+Optional<TSSEndpointData> QueueModel::getTssData(uint64_t id) {
+	return data[id].tssData;
+}
+
 Optional<LoadBalancedReply> getLoadBalancedReply(const LoadBalancedReply* reply) {
 	return *reply;
 }

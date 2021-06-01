@@ -168,6 +168,9 @@ public:
 	double SERVER_LIST_DELAY;
 	double RECRUITMENT_IDLE_DELAY;
 	double STORAGE_RECRUITMENT_DELAY;
+	bool TSS_HACK_IDENTITY_MAPPING;
+	double TSS_RECRUITMENT_TIMEOUT;
+	double TSS_DD_KILL_INTERVAL;
 	double DATA_DISTRIBUTION_LOGGING_INTERVAL;
 	double DD_ENABLED_CHECK_DELAY;
 	double DD_STALL_CHECK_DELAY;
@@ -561,6 +564,8 @@ public:
 
 	// Coordination
 	double COORDINATED_STATE_ONCONFLICT_POLL_INTERVAL;
+	bool ENABLE_CROSS_CLUSTER_SUPPORT; // Allow a coordinator to serve requests whose connection string does not match
+	                                   // the local descriptor
 
 	// Buggification
 	double BUGGIFIED_EVENTUAL_CONSISTENCY;

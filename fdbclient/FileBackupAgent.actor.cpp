@@ -2705,13 +2705,17 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		wait(checkTaskVersion(cx, task, StartFullBackupTaskFunc::name, StartFullBackupTaskFunc::version));
 
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		state BackupConfig config(task);
+		state Future<Optional<bool>> partitionedLog;
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				Version startVersion = wait(tr->getReadVersion());
+				partitionedLog = config.partitionedLogEnabled().get(tr);
+				state Future<Version> startVersionFuture = tr->getReadVersion();
+				wait(success(partitionedLog) && success(startVersionFuture));
 
-				Params.beginVersion().set(task, startVersion);
+				Params.beginVersion().set(task, startVersionFuture.get());
 				break;
 			} catch (Error& e) {
 				wait(tr->onError(e));
@@ -2721,14 +2725,15 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		// Check if backup worker is enabled
 		DatabaseConfiguration dbConfig = wait(getDatabaseConfiguration(cx));
 		state bool backupWorkerEnabled = dbConfig.backupWorkerEnabled;
-		if (!backupWorkerEnabled) {
+		if (!backupWorkerEnabled && partitionedLog.get().present() && partitionedLog.get().get()) {
+			// Change configuration only when we set to use partitioned logs and
+			// the flag was not set before.
 			wait(success(changeConfig(cx, "backup_worker_enabled:=1", true)));
 			backupWorkerEnabled = true;
 		}
 
 		// Set the "backupStartedKey" and wait for all backup worker started
 		tr->reset();
-		state BackupConfig config(task);
 		loop {
 			state Future<Void> watchFuture;
 			try {
@@ -2738,7 +2743,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 
 				state Future<Optional<Value>> started = tr->get(backupStartedKey);
 				state Future<Optional<Value>> taskStarted = tr->get(config.allWorkerStarted().key);
-				state Future<Optional<bool>> partitionedLog = config.partitionedLogEnabled().get(tr);
+				partitionedLog = config.partitionedLogEnabled().get(tr);
 				wait(success(started) && success(taskStarted) && success(partitionedLog));
 
 				if (!partitionedLog.get().present() || !partitionedLog.get().get()) {

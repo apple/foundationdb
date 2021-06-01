@@ -38,6 +38,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/JsonBuilder.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -121,6 +122,40 @@ NetworkOptions::NetworkOptions()
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
 
+void DatabaseContext::maybeAddTssMapping(StorageServerInterface const& ssi) {
+	// add tss mapping if server is new
+
+	Optional<StorageServerInterface> tssPair = clientInfo->get().getTssPair(ssi.id());
+	if (tssPair.present()) {
+		addTssMapping(ssi, tssPair.get());
+	}
+}
+
+// calling getInterface potentially recursively is weird, but since this function is only called when an entry is
+// created/changed, the recursive call should never recurse itself.
+void DatabaseContext::addTssMapping(StorageServerInterface const& ssi, StorageServerInterface const& tssi) {
+	Reference<StorageServerInfo> tssInfo = StorageServerInfo::getInterface(this, tssi, clientLocality);
+	Reference<StorageServerInfo> ssInfo = StorageServerInfo::getInterface(this, ssi, clientLocality);
+
+	Reference<TSSMetrics> metrics = makeReference<TSSMetrics>();
+	tssMetrics[tssi.id()] = metrics;
+
+	// Add each read data request we want to duplicate to TSS to endpoint mapping (getValue, getKey, getKeyValues,
+	// watchValue)
+	queueModel.updateTssEndpoint(
+	    ssInfo->interf.getValue.getEndpoint().token.first(),
+	    TSSEndpointData(tssi.id(), tssInfo->interf.getValue.getEndpoint(), metrics, clientInfo->get().id));
+	queueModel.updateTssEndpoint(
+	    ssInfo->interf.getKey.getEndpoint().token.first(),
+	    TSSEndpointData(tssi.id(), tssInfo->interf.getKey.getEndpoint(), metrics, clientInfo->get().id));
+	queueModel.updateTssEndpoint(
+	    ssInfo->interf.getKeyValues.getEndpoint().token.first(),
+	    TSSEndpointData(tssi.id(), tssInfo->interf.getKeyValues.getEndpoint(), metrics, clientInfo->get().id));
+	queueModel.updateTssEndpoint(
+	    ssInfo->interf.watchValue.getEndpoint().token.first(),
+	    TSSEndpointData(tssi.id(), tssInfo->interf.watchValue.getEndpoint(), metrics, clientInfo->get().id));
+}
+
 Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx,
                                                              StorageServerInterface const& ssi,
                                                              LocalityData const& locality) {
@@ -133,11 +168,14 @@ Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx
 				//       pointing to. This is technically correct, but is very unnatural. We may want to refactor load
 				//       balance to take an AsyncVar<Reference<Interface>> so that it is notified when the interface
 				//       changes.
+
 				it->second->interf = ssi;
+				cx->maybeAddTssMapping(ssi);
 			} else {
 				it->second->notifyContextDestroyed();
 				Reference<StorageServerInfo> loc(new StorageServerInfo(cx, ssi, locality));
 				cx->server_interf[ssi.id()] = loc.getPtr();
+				cx->maybeAddTssMapping(ssi);
 				return loc;
 			}
 		}
@@ -147,6 +185,7 @@ Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx
 
 	Reference<StorageServerInfo> loc(new StorageServerInfo(cx, ssi, locality));
 	cx->server_interf[ssi.id()] = loc.getPtr();
+	cx->maybeAddTssMapping(ssi);
 	return loc;
 }
 
@@ -285,6 +324,13 @@ void delref(DatabaseContext* ptr) {
 	ptr->delref();
 }
 
+void traceTSSErrors(const char* name, UID tssId, const std::unordered_map<int, uint64_t>& errorsByCode) {
+	TraceEvent ev(name, tssId);
+	for (auto& it : errorsByCode) {
+		ev.detail("E" + std::to_string(it.first), it.second);
+	}
+}
+
 ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 	state double lastLogged = 0;
 	loop {
@@ -326,6 +372,62 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 		cx->commitLatencies.clear();
 		cx->mutationsPerCommit.clear();
 		cx->bytesPerCommit.clear();
+
+		for (const auto& it : cx->tssMetrics) {
+			// TODO could skip this tss if request counter is zero? would potentially complicate elapsed calculation
+			// though
+			if (it.second->mismatches.getIntervalDelta()) {
+				cx->tssMismatchStream.send(it.first);
+			}
+
+			// do error histograms as separate event
+			if (it.second->ssErrorsByCode.size()) {
+				traceTSSErrors("TSS_SSErrors", it.first, it.second->ssErrorsByCode);
+			}
+
+			if (it.second->tssErrorsByCode.size()) {
+				traceTSSErrors("TSS_TSSErrors", it.first, it.second->tssErrorsByCode);
+			}
+
+			TraceEvent tssEv("TSSClientMetrics", cx->dbId);
+			tssEv.detail("TSSID", it.first)
+			    .detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
+			    .detail("Internal", cx->internal);
+
+			it.second->cc.logToTraceEvent(tssEv);
+
+			tssEv.detail("MeanSSGetValueLatency", it.second->SSgetValueLatency.mean())
+			    .detail("MedianSSGetValueLatency", it.second->SSgetValueLatency.median())
+			    .detail("SSGetValueLatency90", it.second->SSgetValueLatency.percentile(0.90))
+			    .detail("SSGetValueLatency99", it.second->SSgetValueLatency.percentile(0.99));
+
+			tssEv.detail("MeanTSSGetValueLatency", it.second->TSSgetValueLatency.mean())
+			    .detail("MedianTSSGetValueLatency", it.second->TSSgetValueLatency.median())
+			    .detail("TSSGetValueLatency90", it.second->TSSgetValueLatency.percentile(0.90))
+			    .detail("TSSGetValueLatency99", it.second->TSSgetValueLatency.percentile(0.99));
+
+			tssEv.detail("MeanSSGetKeyLatency", it.second->SSgetKeyLatency.mean())
+			    .detail("MedianSSGetKeyLatency", it.second->SSgetKeyLatency.median())
+			    .detail("SSGetKeyLatency90", it.second->SSgetKeyLatency.percentile(0.90))
+			    .detail("SSGetKeyLatency99", it.second->SSgetKeyLatency.percentile(0.99));
+
+			tssEv.detail("MeanTSSGetKeyLatency", it.second->TSSgetKeyLatency.mean())
+			    .detail("MedianTSSGetKeyLatency", it.second->TSSgetKeyLatency.median())
+			    .detail("TSSGetKeyLatency90", it.second->TSSgetKeyLatency.percentile(0.90))
+			    .detail("TSSGetKeyLatency99", it.second->TSSgetKeyLatency.percentile(0.99));
+
+			tssEv.detail("MeanSSGetKeyValuesLatency", it.second->SSgetKeyLatency.mean())
+			    .detail("MedianSSGetKeyValuesLatency", it.second->SSgetKeyLatency.median())
+			    .detail("SSGetKeyValuesLatency90", it.second->SSgetKeyLatency.percentile(0.90))
+			    .detail("SSGetKeyValuesLatency99", it.second->SSgetKeyLatency.percentile(0.99));
+
+			tssEv.detail("MeanTSSGetKeyValuesLatency", it.second->TSSgetKeyValuesLatency.mean())
+			    .detail("MedianTSSGetKeyValuesLatency", it.second->TSSgetKeyValuesLatency.median())
+			    .detail("TSSGetKeyValuesLatency90", it.second->TSSgetKeyValuesLatency.percentile(0.90))
+			    .detail("TSSGetKeyValuesLatency99", it.second->TSSgetKeyValuesLatency.percentile(0.99));
+
+			it.second->clear();
+		}
 
 		lastLogged = now();
 	}
@@ -711,6 +813,99 @@ ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
 	}
 }
 
+// updates tss mapping when set of tss servers changes
+ACTOR static Future<Void> monitorTssChange(DatabaseContext* cx) {
+	state vector<std::pair<UID, StorageServerInterface>> curTssMapping;
+	curTssMapping = cx->clientInfo->get().tssMapping;
+
+	loop {
+		wait(cx->clientInfo->onChange());
+		if (cx->clientInfo->get().tssMapping != curTssMapping) {
+			// To optimize size of the ClientDBInfo payload, we could eventually change CC to just send a tss change
+			// id/generation, and have client reread the mapping here if it changed. It's a very minor optimization
+			// though, and would cause extra read load.
+			ClientDBInfo clientInfo = cx->clientInfo->get();
+			curTssMapping = clientInfo.tssMapping;
+
+			std::unordered_set<UID> seenTssIds;
+
+			if (curTssMapping.size()) {
+				for (const auto& it : curTssMapping) {
+					seenTssIds.insert(it.second.id());
+
+					if (cx->server_interf.count(it.first)) {
+						cx->addTssMapping(cx->server_interf[it.first]->interf, it.second);
+					}
+				}
+			}
+
+			for (auto it = cx->tssMetrics.begin(); it != cx->tssMetrics.end();) {
+				if (seenTssIds.count(it->first)) {
+					it++;
+				} else {
+					it = cx->tssMetrics.erase(it);
+				}
+			}
+
+			cx->queueModel.removeOldTssData(clientInfo.id);
+		}
+	}
+}
+
+ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
+	state Reference<ReadYourWritesTransaction> tr;
+	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
+	loop {
+		state UID tssID = waitNext(cx->tssMismatchStream.getFuture());
+		// find ss pair id so we can remove it from the mapping
+		state UID tssPairID;
+		bool found = false;
+		for (const auto& it : cx->clientInfo->get().tssMapping) {
+			if (it.second.id() == tssID) {
+				tssPairID = it.first;
+				found = true;
+				break;
+			}
+		}
+		if (found) {
+			TraceEvent(SevWarnAlways, "TSS_KillMismatch").detail("TSSID", tssID.toString());
+			TEST(true); // killing TSS because it got mismatch
+			
+			// TODO we could write something to the system keyspace and then have DD listen to that keyspace and then DD
+			// do exactly this, so why not just cut out the middle man (or the middle system keys, as it were)
+			tr = makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(cx)));
+			state int tries = 0;
+			loop {
+				try {
+					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+					tr->clear(serverTagKeyFor(tssID));
+					tssMapDB.erase(tr, tssPairID);
+
+					tr->set(tssMappingChangeKey, deterministicRandom()->randomUniqueID().toString());
+					wait(tr->commit());
+
+					break;
+				} catch (Error& e) {
+					wait(tr->onError(e));
+				}
+				tries++;
+				if (tries > 10) {
+					// Give up on trying to kill the tss, it'll get another mismatch or a human will investigate
+					// eventually
+					TraceEvent("TSS_KillMismatchGaveUp").detail("TSSID", tssID.toString());
+					break;
+				}
+			}
+			// clear out txn so that the extra DatabaseContext ref gets decref'd and we can free cx
+			tr = makeReference<ReadYourWritesTransaction>();
+		} else {
+			TEST(true); // Not killing TSS with mismatch because it's already gone
+		}
+	}
+}
+
 ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext* cx, bool detailed) {
 	if (now() - cx->healthMetricsLastUpdated < CLIENT_KNOBS->AGGREGATE_HEALTH_METRICS_MAX_STALENESS) {
 		if (detailed) {
@@ -960,6 +1155,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	GlobalConfig::create(this, clientInfo);
 
 	monitorProxiesInfoChange = monitorProxiesChange(clientInfo, &proxiesChangeTrigger);
+	monitorTssInfoChange = monitorTssChange(this);
+	tssMismatchHandler = handleTssMismatches(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
 
@@ -1051,14 +1248,16 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<ClientProfilingImpl>(
 		        KeyRangeRef(LiteralStringRef("profiling/"), LiteralStringRef("profiling0"))
-				.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
+		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeySpaceModule(
-		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    SpecialKeySpace::MODULE::MANAGEMENT,
+		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<MaintenanceImpl>(
 		        KeyRangeRef(LiteralStringRef("maintenance/"), LiteralStringRef("maintenance0"))
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeySpaceModule(
-		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    SpecialKeySpace::MODULE::MANAGEMENT,
+		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<DataDistributionImpl>(
 		        KeyRangeRef(LiteralStringRef("data_distribution/"), LiteralStringRef("data_distribution0"))
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
@@ -1199,6 +1398,8 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo,
 DatabaseContext::~DatabaseContext() {
 	cacheListMonitor.cancel();
 	monitorProxiesInfoChange.cancel();
+	monitorTssInfoChange.cancel();
+	tssMismatchHandler.cancel();
 	for (auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
 	ASSERT_ABORT(server_interf.empty());
@@ -2235,7 +2436,7 @@ ACTOR Future<Optional<Value>> getValue(Future<Version> version,
 
 			state GetValueReply reply;
 			try {
-				if (CLIENT_BUGGIFY) {
+				if (CLIENT_BUGGIFY_WITH_PROB(.01)) {
 					throw deterministicRandom()->randomChoice(
 					    std::vector<Error>{ transaction_too_old(), future_version() });
 				}
@@ -2345,6 +2546,11 @@ ACTOR Future<Key> getKey(Database cx, KeySelector k, Future<Version> version, Tr
 				    "NativeAPI.getKey.Before"); //.detail("StartKey",
 				                                // k.getKey()).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
 			++cx->transactionPhysicalReads;
+
+			GetKeyRequest req(
+			    span.context, k, version.get(), cx->sampleReadTags() ? tags : Optional<TagSet>(), getKeyID);
+			req.arena.dependsOn(k.arena());
+
 			state GetKeyReply reply;
 			try {
 				choose {
@@ -2353,11 +2559,7 @@ ACTOR Future<Key> getKey(Database cx, KeySelector k, Future<Version> version, Tr
 					         wait(loadBalance(cx.getPtr(),
 					                          ssi.second,
 					                          &StorageServerInterface::getKey,
-					                          GetKeyRequest(span.context,
-					                                        k,
-					                                        version.get(),
-					                                        cx->sampleReadTags() ? tags : Optional<TagSet>(),
-					                                        getKeyID),
+					                          req,
 					                          TaskPriority::DefaultPromiseEndpoint,
 					                          false,
 					                          cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
@@ -2718,6 +2920,9 @@ ACTOR Future<RangeResult> getExactRange(Database cx,
 			req.end = firstGreaterOrEqual(range.end);
 			req.spanContext = span.context;
 
+			// keep shard's arena around in case of async tss comparison
+			req.arena.dependsOn(locations[shard].first.arena());
+
 			transformRangeLimits(limits, reverse, req);
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
 
@@ -3034,6 +3239,9 @@ ACTOR Future<RangeResult> getRange(Database cx,
 			req.isFetchKeys = (info.taskID == TaskPriority::FetchKeys);
 			req.version = readVersion;
 
+			// In case of async tss comparison, also make req arena depend on begin, end, and/or shard's arena depending
+			// on which  is used
+			bool dependOnShard = false;
 			if (reverse && (begin - 1).isDefinitelyLess(shard.begin) &&
 			    (!begin.isFirstGreaterOrEqual() ||
 			     begin.getKey() != shard.begin)) { // In this case we would be setting modifiedSelectors to true, but
@@ -3041,14 +3249,23 @@ ACTOR Future<RangeResult> getRange(Database cx,
 
 				req.begin = firstGreaterOrEqual(shard.begin);
 				modifiedSelectors = true;
-			} else
+				req.arena.dependsOn(shard.arena());
+				dependOnShard = true;
+			} else {
 				req.begin = begin;
+				req.arena.dependsOn(begin.arena());
+			}
 
 			if (!reverse && end.isDefinitelyGreater(shard.end)) {
 				req.end = firstGreaterOrEqual(shard.end);
 				modifiedSelectors = true;
-			} else
+				if (!dependOnShard) {
+					req.arena.dependsOn(shard.arena());
+				}
+			} else {
 				req.end = end;
+				req.arena.dependsOn(end.arena());
+			}
 
 			transformRangeLimits(limits, reverse, req);
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
@@ -3078,7 +3295,7 @@ ACTOR Future<RangeResult> getRange(Database cx,
 				++cx->transactionPhysicalReads;
 				state GetKeyValuesReply rep;
 				try {
-					if (CLIENT_BUGGIFY) {
+					if (CLIENT_BUGGIFY_WITH_PROB(.01)) {
 						throw deterministicRandom()->randomChoice(
 						    std::vector<Error>{ transaction_too_old(), future_version() });
 					}
@@ -3133,10 +3350,17 @@ ACTOR Future<RangeResult> getRange(Database cx,
 					output.readThroughEnd = readThroughEnd;
 
 					if (BUGGIFY && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows)) {
+						// Copy instead of resizing because TSS maybe be using output's arena for comparison. This only
+						// happens in simulation so it's fine
+						RangeResult copy;
+						int newSize =
+						    deterministicRandom()->randomInt(std::max(1, originalLimits.minRows), output.size());
+						for (int i = 0; i < newSize; i++) {
+							copy.push_back_deep(copy.arena(), output[i]);
+						}
+						output = copy;
 						output.more = true;
-						output.resize(
-						    output.arena(),
-						    deterministicRandom()->randomInt(std::max(1, originalLimits.minRows), output.size()));
+
 						getRangeFinished(cx,
 						                 trLogInfo,
 						                 startTime,
